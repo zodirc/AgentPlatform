@@ -1,0 +1,28 @@
+id: writing.02_propose_patch_accept
+scenario_id: writing
+phase: 1
+description: Stub model proposes patch; user accepts after turn completes
+
+input:
+  message: "把第二节改得更简洁"
+  client_request_id: "00000000-0000-4000-8000-000000000002"
+
+model_mode: stub
+
+commands:
+  - type: patch.accept
+    patch_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - patch.proposed
+      - turn.completed
+      - patch.applied
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+
+tags: [writing, patch, p1]

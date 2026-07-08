@@ -1,0 +1,23 @@
+id: shared.12_recorded_mode
+scenario_id: writing
+phase: 1
+description: Recorded model replay path (MODEL_MODE=recorded)
+
+input:
+  message: "[recording:shared.12] recorded golden smoke"
+  client_request_id: "00000000-0000-4000-8000-000000000212"
+
+model_mode: recorded
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - tool.started
+      - turn.completed
+  turn:
+    status: completed
+  latency:
+    ttfb_ms_max: 5000
+
+tags: [shared, recorded, p1]

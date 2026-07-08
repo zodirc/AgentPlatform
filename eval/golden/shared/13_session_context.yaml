@@ -1,0 +1,21 @@
+id: shared.13_session_context
+scenario_id: writing
+phase: 1
+description: Session view reflects turn count and context after completion
+
+input:
+  message: "L0 golden stub shared.13"
+  client_request_id: "00000000-0000-4000-8000-000000000213"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+  turn:
+    status: completed
+  session:
+    min_turn_count: 1
+
+tags: [shared, session, p1]

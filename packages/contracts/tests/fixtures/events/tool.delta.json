@@ -1,0 +1,8 @@
+{
+  "type": "tool.delta",
+  "payload": {
+    "tool_call_id": "call_1",
+    "tool_name": "run_command",
+    "delta": "simulated output"
+  }
+}

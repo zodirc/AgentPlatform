@@ -1,0 +1,23 @@
+id: live.02_help_short_circuit
+scenario_id: writing
+phase: live
+description: Live stack still short-circuits /help without model call
+
+input:
+  message: "/help"
+  client_request_id: "00000000-0000-4000-8000-00000000a002"
+
+model_mode: live
+flaky: true
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+    sequence_not_contains:
+      - step.started
+      - turn.failed
+  turn:
+    status: completed
+
+tags: [live, intake]

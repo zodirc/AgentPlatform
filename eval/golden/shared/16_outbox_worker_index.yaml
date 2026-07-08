@@ -1,0 +1,44 @@
+id: shared.16_outbox_worker_index
+scenario_id: writing
+phase: 2
+description: Outbox worker syncs vector index before deferred search_sources recall
+
+fixtures:
+  workspace:
+    - path: sources/ref-a.md
+      content: |
+        # Reference A
+        Existing indexed content only.
+
+commands:
+  - type: add-fixture
+    workspace:
+      - path: sources/new-chunk.md
+        content: |
+          New material with phase2-unique-term for vector recall.
+  - type: warmup-turn
+    message: "shared.16 outbox index warmup"
+    scenario_id: writing
+  - type: wait-index
+    contains: phase2-unique-term
+
+input:
+  message: "writing.07 search_sources phase2-unique-term"
+  client_request_id: "00000000-0000-4000-8000-000000000116"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - retrieval.completed
+      - turn.completed
+  turn:
+    status: completed
+  tool:
+    name: search_sources
+    result_matches: "phase2-unique-term"
+    retrieval: vector
+
+tags: [shared, queue, outbox_worker, p2]

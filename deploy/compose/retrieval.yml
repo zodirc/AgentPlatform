@@ -1,0 +1,18 @@
+# Retrieval profile: local embedding model baked in image, synced to /data/models on start.
+# Usage: docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml --profile retrieval up -d --build
+# Combine with queue: add -f deploy/compose/queue.yml --profile queue
+
+services:
+  runtime:
+    profiles: [retrieval]
+    build:
+      context: ..
+      dockerfile: services/runtime/Dockerfile.retrieval
+      args:
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    environment:
+      RETRIEVAL_MODE: hybrid
+      INDEX_VIA_WORKER: "true"
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      EMBEDDING_MODEL_DIR: /data/models

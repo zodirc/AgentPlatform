@@ -1,0 +1,28 @@
+id: agent.01_read_and_propose_patch
+scenario_id: agent
+phase: 1
+description: Read file then propose patch
+
+fixtures:
+  workspace:
+    - path: README.md
+      content: "旧正文 for agent.01"
+
+input:
+  message: "读取 README.md 并 propose patch agent.01"
+  client_request_id: "00000000-0000-4000-8000-000000000101"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - patch.proposed
+      - turn.completed
+  turn:
+    status: completed
+  latency:
+    ttfb_ms_max: 300
+
+tags: [agent, patch, p1]

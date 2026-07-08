@@ -1,0 +1,33 @@
+scenario_id: agent
+display_name: Agent 模式
+system_prompt_template: scenarios/agent/system.md
+tool_names:
+  - read_file
+  - list_dir
+  - glob
+  - grep
+  - propose_patch
+  - write_file
+  - edit_file
+  - search_codebase
+  - update_plan
+  - run_command
+  - run_tests
+  - read_lints
+  - delegate
+  - slow_tool
+subagent_types:
+  - explore
+  - retrieve
+  - verify
+  - edit
+  - planner
+  - shell
+max_steps: 50
+approval_overrides:
+  run_command: never
+  run_tests: never
+  write_file: always
+  edit_file: always
+workspace_layout: repository
+web_layout: agent-workbench

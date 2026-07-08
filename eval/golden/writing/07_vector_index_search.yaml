@@ -1,0 +1,43 @@
+id: writing.07_vector_index_search
+scenario_id: writing
+phase: 2
+description: Incremental vector index finds newly added source chunk
+
+fixtures:
+  workspace:
+    - path: sources/ref-a.md
+      content: |
+        # Reference A
+        Existing indexed content only.
+
+commands:
+  - type: add-fixture
+    workspace:
+      - path: sources/new-chunk.md
+        content: |
+          New material with phase2-unique-term for vector recall.
+
+input:
+  message: "writing.07 search_sources phase2-unique-term"
+  client_request_id: "00000000-0000-4000-8000-000000000007"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - retrieval.completed
+      - tool.completed
+      - step.completed
+      - turn.completed
+  turn:
+    status: completed
+  tool:
+    name: search_sources
+    result_matches: "phase2-unique-term"
+    retrieval: vector
+  output:
+    matches: "phase2-unique-term"
+
+tags: [writing, vector, p2]

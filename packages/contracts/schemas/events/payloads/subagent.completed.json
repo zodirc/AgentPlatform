@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/subagent.completed.json",
+  "title": "SubagentCompletedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subagent_id", "agent_type", "summary"],
+  "properties": {
+    "subagent_id": { "type": "string", "minLength": 1 },
+    "agent_type": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "maxLength": 4096 }
+  }
+}

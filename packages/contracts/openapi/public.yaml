@@ -1,0 +1,709 @@
+openapi: 3.1.0
+info:
+  title: Agent Platform API
+  version: 0.1.0
+  description: Public API. See docs/contracts.md.
+servers:
+  - url: /api/v1
+paths:
+  /sessions:
+    post:
+      operationId: createSession
+      summary: Create a session
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSessionRequest'
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+  /sessions/{session_id}:
+    get:
+      operationId: getSession
+      summary: Get session resource
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+  /sessions/{session_id}/view:
+    get:
+      operationId: getSessionView
+      summary: Get session projection view
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: SessionView projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionView'
+  /sessions/{session_id}/turns:
+    post:
+      operationId: createTurn
+      summary: Start a turn in a session
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTurnRequest'
+      responses:
+        '202':
+          description: Turn accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnResponse'
+  /turns/{turn_id}:
+    get:
+      operationId: getTurn
+      summary: Get turn resource
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Turn resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnResponse'
+  /turns/{turn_id}/view:
+    get:
+      operationId: getTurnView
+      summary: Get turn projection view
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: TurnView projection
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TurnView'
+  /turns/{turn_id}/stream:
+    get:
+      operationId: streamTurn
+      summary: SSE stream of turn events
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: since_sequence
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '200':
+          description: Server-sent events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+  /turns/{turn_id}/ws:
+    get:
+      operationId: websocketTurn
+      summary: WebSocket turn event stream (bidirectional approval)
+      description: |
+        Upgrades to WebSocket. Server pushes turn events as JSON (same shape as SSE data).
+        Client may send approve_tool_call or deny_tool_call actions while status is waiting_approval.
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: since_sequence
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 0
+      responses:
+        '101':
+          description: Switching Protocols (WebSocket upgrade)
+  /turns/{turn_id}/cancel:
+    post:
+      operationId: cancelTurn
+      summary: Request turn cancellation
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTurnRequest'
+      responses:
+        '202':
+          description: Cancel accepted
+  /runs/{run_id}:
+    get:
+      operationId: getRun
+      summary: Get run resource
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Run resource
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunResponse'
+  /turns/{turn_id}/approve-tool-call:
+    post:
+      operationId: approveToolCall
+      summary: Approve a tool call awaiting user consent
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCallDecisionRequest'
+      responses:
+        '202':
+          description: Approval accepted
+  /turns/{turn_id}/deny-tool-call:
+    post:
+      operationId: denyToolCall
+      summary: Deny a tool call awaiting user consent
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ToolCallDecisionRequest'
+      responses:
+        '202':
+          description: Denial accepted
+  /turns/{turn_id}/patch/accept:
+    post:
+      operationId: acceptPatch
+      summary: Accept a proposed patch
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchDecisionRequest'
+      responses:
+        '202':
+          description: Patch accept accepted
+  /turns/{turn_id}/patch/reject:
+    post:
+      operationId: rejectPatch
+      summary: Reject a proposed patch
+      parameters:
+        - name: turn_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchDecisionRequest'
+      responses:
+        '202':
+          description: Patch reject accepted
+  /admin/model-providers:
+    get:
+      operationId: listModelProviders
+      summary: List model provider profiles (admin)
+      security:
+        - adminBasicAuth: []
+      responses:
+        '200':
+          description: Provider profiles
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ModelProviderProfile'
+    post:
+      operationId: createModelProvider
+      summary: Create a model provider profile (admin)
+      security:
+        - adminBasicAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateModelProviderRequest'
+      responses:
+        '201':
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProviderProfile'
+  /admin/model-providers/{profile_id}:
+    put:
+      operationId: updateModelProvider
+      summary: Update a model provider profile (admin)
+      security:
+        - adminBasicAuth: []
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateModelProviderRequest'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProviderProfile'
+    delete:
+      operationId: deleteModelProvider
+      summary: Delete a model provider profile (admin)
+      security:
+        - adminBasicAuth: []
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Profile deleted
+  /admin/model-providers/{profile_id}/activate:
+    put:
+      operationId: activateModelProvider
+      summary: Activate a model provider profile (admin)
+      security:
+        - adminBasicAuth: []
+      parameters:
+        - name: profile_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Profile activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProviderProfile'
+components:
+  securitySchemes:
+    adminBasicAuth:
+      type: http
+      scheme: basic
+  schemas:
+    CreateSessionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        default_scenario_id:
+          type: string
+          enum: [writing, agent, interview]
+          default: writing
+    SessionResponse:
+      type: object
+      required: [id, default_scenario_id, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        default_scenario_id:
+          type: string
+          enum: [writing, agent, interview]
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    CreateTurnRequest:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          minLength: 1
+        scenario_id:
+          type: string
+          enum: [writing, agent, interview]
+        client_request_id:
+          type: string
+          format: uuid
+    TurnResponse:
+      type: object
+      required: [id, session_id, scenario_id, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        scenario_id:
+          type: string
+          enum: [writing, agent, interview]
+        status:
+          type: string
+        user_input:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    TurnView:
+      type: object
+      required:
+        - turn_id
+        - session_id
+        - scenario_id
+        - status
+        - user_input
+        - tool_timeline
+        - artifacts
+        - last_event_sequence
+        - updated_at
+        - cancellable
+      properties:
+        turn_id:
+          type: string
+          format: uuid
+        session_id:
+          type: string
+          format: uuid
+        scenario_id:
+          type: string
+          enum: [writing, agent, interview]
+        status:
+          type: string
+        user_input:
+          type: string
+        latest_output:
+          type: string
+          nullable: true
+        tool_timeline:
+          type: array
+          items:
+            type: object
+        artifacts:
+          type: array
+          items:
+            type: object
+        last_event_sequence:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+        cancellable:
+          type: boolean
+        cancel_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        interrupt:
+          type: object
+          nullable: true
+        runner_id:
+          type: string
+          nullable: true
+          description: Runtime replica that owns the active run (Phase 3)
+        context_usage:
+          type: object
+          nullable: true
+          description: Latest context window occupancy from ContextEngine
+          properties:
+            tokens_before:
+              type: integer
+              minimum: 0
+            tokens_after:
+              type: integer
+              minimum: 0
+            token_budget:
+              type: integer
+              minimum: 0
+            strategies:
+              type: array
+              items:
+                type: string
+            step_index:
+              type: integer
+              minimum: 0
+            system_tokens:
+              type: integer
+              minimum: 0
+            tools_tokens:
+              type: integer
+              minimum: 0
+            messages_tokens:
+              type: integer
+              minimum: 0
+            source:
+              type: string
+              enum: [estimated, provider]
+        token_usage:
+          type: object
+          nullable: true
+          description: Cumulative model API tokens for this turn
+          properties:
+            input_tokens:
+              type: integer
+              minimum: 0
+            output_tokens:
+              type: integer
+              minimum: 0
+            source:
+              type: string
+              enum: [provider, estimated, mixed]
+    SessionView:
+      type: object
+      required:
+        - session_id
+        - default_scenario_id
+        - status
+        - turn_count
+        - updated_at
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        default_scenario_id:
+          type: string
+          enum: [writing, agent, interview]
+        status:
+          type: string
+        turn_count:
+          type: integer
+          minimum: 0
+        last_turn_id:
+          type: string
+          format: uuid
+          nullable: true
+        last_turn_status:
+          type: string
+          nullable: true
+        context_summary:
+          type: object
+          nullable: true
+          additionalProperties: true
+        updated_at:
+          type: string
+          format: date-time
+    RunResponse:
+      type: object
+      required: [id, turn_id, status, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        turn_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        termination_reason:
+          type: string
+          nullable: true
+        runner_id:
+          type: string
+          nullable: true
+        cancel_requested_at:
+          type: string
+          format: date-time
+          nullable: true
+        cancel_force:
+          type: boolean
+          default: false
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CancelTurnRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason:
+          type: string
+          default: user_requested
+        force:
+          type: boolean
+          default: false
+    ToolCallDecisionRequest:
+      type: object
+      required: [tool_call_id]
+      additionalProperties: false
+      properties:
+        tool_call_id:
+          type: string
+        client_request_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+    PatchDecisionRequest:
+      type: object
+      required: [patch_id]
+      additionalProperties: false
+      properties:
+        patch_id:
+          type: string
+        client_request_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+    CreateModelProviderRequest:
+      type: object
+      required: [label, provider, model_name, api_key]
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+        provider:
+          type: string
+        model_name:
+          type: string
+        api_key:
+          type: string
+        base_url:
+          type: string
+        activate:
+          type: boolean
+          default: true
+    UpdateModelProviderRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        label:
+          type: string
+        provider:
+          type: string
+        model_name:
+          type: string
+        api_key:
+          type: string
+        base_url:
+          type: string
+    ModelProviderProfile:
+      type: object
+      required:
+        - id
+        - label
+        - provider
+        - model_name
+        - is_active
+        - api_key_hint
+        - config_version
+        - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        label:
+          type: string
+        provider:
+          type: string
+        model_name:
+          type: string
+        base_url:
+          type: string
+          nullable: true
+        is_active:
+          type: boolean
+        api_key_hint:
+          type: string
+        config_version:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time

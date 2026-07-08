@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/tool.started.json",
+  "title": "ToolStartedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool_call_id", "tool_name"],
+  "properties": {
+    "tool_call_id": { "type": "string", "minLength": 1 },
+    "tool_name": { "type": "string", "minLength": 1 },
+    "arguments": { "type": "object" }
+  }
+}

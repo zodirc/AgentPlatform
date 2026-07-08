@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/types.json",
+  "title": "TurnEventTypes",
+  "description": "Event type enum. Sync with docs/adr/004-sse-turn-streaming.md and docs/contracts.md §3.",
+  "$defs": {
+    "eventTypePhase0": {
+      "type": "string",
+      "enum": [
+        "turn.accepted",
+        "step.started",
+        "tool.started",
+        "tool.completed",
+        "turn.completed",
+        "turn.failed"
+      ]
+    },
+    "eventTypePhase1": {
+      "type": "string",
+      "enum": [
+        "step.completed",
+        "turn.thinking",
+        "turn.token",
+        "tool.delta",
+        "approval.requested",
+        "approval.resolved",
+        "turn.cancelling",
+        "turn.cancelled",
+        "patch.proposed",
+        "patch.applied",
+        "patch.rejected",
+        "outline.updated",
+        "section.draft.delta"
+      ]
+    },
+    "eventTypePhase2": {
+      "type": "string",
+      "enum": [
+        "turn.plan",
+        "subagent.started",
+        "subagent.completed",
+        "retrieval.completed",
+        "context.reported",
+        "usage.reported"
+      ]
+    },
+    "eventType": {
+      "anyOf": [
+        { "$ref": "#/$defs/eventTypePhase0" },
+        { "$ref": "#/$defs/eventTypePhase1" },
+        { "$ref": "#/$defs/eventTypePhase2" }
+      ]
+    }
+  }
+}

@@ -1,0 +1,27 @@
+id: agent.04_search_codebase
+scenario_id: agent
+phase: 1b
+description: search_codebase hits and continues
+
+fixtures:
+  workspace:
+    - path: app/engine.py
+      content: |
+        class AgentEngine:
+            pass
+
+input:
+  message: "search_codebase AgentEngine agent.04"
+  client_request_id: "00000000-0000-4000-8000-000000000104"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [agent, rag, p1b]

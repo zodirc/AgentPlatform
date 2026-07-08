@@ -1,0 +1,31 @@
+id: agent.08_glob_stub
+scenario_id: agent
+phase: 1b
+description: glob lists markdown files in workspace
+
+fixtures:
+  workspace:
+    - path: README.md
+      content: "# Agent"
+    - path: notes.md
+      content: "notes"
+
+input:
+  message: "agent.08 glob *.md"
+  client_request_id: "00000000-0000-4000-8000-000000000108"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - tool.completed
+      - turn.completed
+  turn:
+    status: completed
+  tool:
+    name: glob
+    result_matches: "glob"
+
+tags: [agent, glob, p1b]

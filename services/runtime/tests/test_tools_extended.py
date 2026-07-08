@@ -1,0 +1,166 @@
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from app.settings import settings
+from app.tools.core import tools as core
+
+
+@pytest.mark.asyncio
+async def test_read_file_and_list_dir(workspace: Path) -> None:
+    (workspace / "a.txt").write_text("content", encoding="utf-8")
+    (workspace / "sub").mkdir()
+
+    missing = await core.read_file("missing.txt")
+    assert missing["error"]
+
+    read = await core.read_file("a.txt")
+    assert read["content"] == "content"
+
+    listed = await core.list_dir(".")
+    assert "a.txt" in listed["entries"]
+    assert "sub/" in listed["entries"]
+
+
+@pytest.mark.asyncio
+async def test_read_file_truncates_large_content(workspace: Path) -> None:
+    (workspace / "big.txt").write_text("x" * 40_000, encoding="utf-8")
+    result = await core.read_file("big.txt")
+    assert "truncated" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_resolve_path_rejects_escape(workspace: Path) -> None:
+    with pytest.raises(PermissionError):
+        await core.read_file("/etc/passwd")
+
+
+@pytest.mark.asyncio
+async def test_propose_and_apply_patch(workspace: Path) -> None:
+    proposed = await core.propose_patch("f.md", "old", "new", summary="s")
+    assert proposed["status"] == "pending"
+    assert proposed["patch_id"].startswith("patch-")
+
+    applied = await core.apply_patch("f.md", "hello")
+    assert applied["status"] == "applied"
+    assert (workspace / "f.md").read_text(encoding="utf-8") == "hello"
+
+
+@pytest.mark.asyncio
+async def test_update_plan_and_outline(workspace: Path) -> None:
+    plan = await core.update_plan([{"title": "task"}], summary="plan")
+    assert plan["items"][0]["title"] == "task"
+
+    outline = await core.update_outline("# Doc")
+    assert (workspace / "outline.md").read_text(encoding="utf-8") == "# Doc"
+    assert outline["outline_path"] == "outline.md"
+
+
+@pytest.mark.asyncio
+async def test_grep_and_search_codebase(workspace: Path) -> None:
+    (workspace / "code.py").write_text("def hello():\n    pass\n", encoding="utf-8")
+
+    grep_result = await core.grep("hello", path=".")
+    assert grep_result["match_count"] == 1
+
+    search = await core.search_codebase("hello")
+    assert search["hits"]
+
+
+@pytest.mark.asyncio
+async def test_write_file_and_edit_errors(workspace: Path) -> None:
+    written = await core.write_file("out.txt", "data")
+    assert written["status"] == "written"
+
+    missing = await core.edit_file("nope.txt", "a", "b")
+    assert missing["error"]
+
+    bad = await core.edit_file("out.txt", "missing", "b")
+    assert bad["error"] == "old_text not found"
+
+
+@pytest.mark.asyncio
+async def test_check_citation_and_stub_echo(workspace: Path) -> None:
+    (workspace / "src.md").write_text("cite:abc content", encoding="utf-8")
+
+    valid = await core.check_citation("cite:abc", "src.md")
+    assert valid["valid"] is True
+
+    invalid = await core.check_citation("cite:zzz", "src.md")
+    assert invalid["valid"] is False
+
+    echo = await core.stub_echo("ping")
+    assert "ping" in echo["echo"]
+
+
+@pytest.mark.asyncio
+async def test_search_sources_keyword_mode(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = workspace / "sources"
+    sources.mkdir()
+    (sources / "note.md").write_text("alpha beta gamma", encoding="utf-8")
+    monkeypatch.setattr(settings, "retrieval_mode", "keyword")
+
+    result = await core.search_sources("alpha beta")
+    assert result["retrieval"] == "keyword"
+    assert len(result["hits"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_sources_no_sources_dir(workspace: Path) -> None:
+    result = await core.search_sources("query")
+    assert result["hits"] == []
+
+
+@pytest.mark.asyncio
+async def test_sync_sources_index_empty(workspace: Path) -> None:
+    result = await core.sync_sources_index()
+    assert result["indexed_files"] == 0
+
+
+@pytest.mark.asyncio
+async def test_run_tests_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "run_command_mode", "simulate")
+    result = await core.run_tests()
+    assert result["status"] == "passed"
+
+
+@pytest.mark.asyncio
+async def test_read_lints_fallback_scan(workspace: Path) -> None:
+    (workspace / "mod.py").write_text("x=1\n", encoding="utf-8")
+    with patch(
+        "app.tools.core.shell.run_shell_command",
+        AsyncMock(return_value={"status": "failed", "stdout": "", "stderr": ""}),
+    ):
+        result = await core.read_lints(".")
+    assert result["issue_count"] == 0
+    assert result["issues"]
+
+
+@pytest.mark.asyncio
+async def test_read_lints_reports_issues(workspace: Path) -> None:
+    with patch(
+        "app.tools.core.shell.run_shell_command",
+        AsyncMock(return_value={"status": "failed", "stdout": "mod.py:1:1: E001 error", "stderr": ""}),
+    ):
+        result = await core.read_lints(".")
+    assert result["issue_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_run_command_shell_mode(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "run_command_mode", "shell")
+    with patch(
+        "app.tools.core.shell.run_shell_command",
+        AsyncMock(return_value={"status": "executed", "stdout": "ok", "exit_code": 0, "summary": "done"}),
+    ):
+        result = await core.run_command("echo ok")
+    assert result["stdout"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_glob_missing_path(workspace: Path) -> None:
+    result = await core.glob("*.md", path="missing")
+    assert result["matches"] == []

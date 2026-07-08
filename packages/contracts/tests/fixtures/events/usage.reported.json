@@ -1,0 +1,11 @@
+{
+  "type": "usage.reported",
+  "payload": {
+    "step_index": 0,
+    "input_tokens": 812,
+    "output_tokens": 146,
+    "step_input_tokens": 812,
+    "step_output_tokens": 146,
+    "source": "provider"
+  }
+}

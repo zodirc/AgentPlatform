@@ -1,0 +1,34 @@
+id: writing.09_export_document
+scenario_id: writing
+phase: 2
+description: export_document merges outline and sections
+
+fixtures:
+  workspace:
+    - path: outline.md
+      content: |
+        # Export Test
+        - Section A
+    - path: sections/a.md
+      content: |
+        Section A body for export.
+
+input:
+  message: "writing.09 export_document 导出文档"
+  client_request_id: "00000000-0000-4000-8000-000000000109"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - tool.completed
+      - turn.completed
+  turn:
+    status: completed
+  workspace:
+    - path: exports/document.md
+      matches: "Section A body"
+
+tags: [writing, export, p2]

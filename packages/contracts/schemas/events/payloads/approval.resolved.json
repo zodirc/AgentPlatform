@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/approval.resolved.json",
+  "title": "ApprovalResolvedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool_call_id", "decision"],
+  "properties": {
+    "tool_call_id": { "type": "string", "minLength": 1 },
+    "decision": { "type": "string", "enum": ["approved", "denied"] },
+    "reason": { "type": ["string", "null"], "maxLength": 1024 }
+  }
+}

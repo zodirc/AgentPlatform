@@ -1,0 +1,7 @@
+{
+  "type": "turn.thinking",
+  "payload": {
+    "step_index": 0,
+    "label": "step-0"
+  }
+}

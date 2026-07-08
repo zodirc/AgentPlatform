@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/commands/deny_tool_call.json",
+  "title": "DenyToolCallCommand",
+  "description": "api → runtime. POST /internal/commands/deny-tool-call",
+  "type": "object",
+  "required": ["turn_id", "run_id", "tool_call_id", "trace_id"],
+  "additionalProperties": false,
+  "properties": {
+    "turn_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "tool_call_id": { "type": "string", "minLength": 1 },
+    "trace_id": { "type": "string", "format": "uuid" },
+    "reason": { "type": "string" }
+  }
+}

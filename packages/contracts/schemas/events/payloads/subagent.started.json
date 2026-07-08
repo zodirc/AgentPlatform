@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/subagent.started.json",
+  "title": "SubagentStartedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["subagent_id", "agent_type", "task"],
+  "properties": {
+    "subagent_id": { "type": "string", "minLength": 1 },
+    "agent_type": { "type": "string", "minLength": 1 },
+    "task": { "type": "string", "maxLength": 500 }
+  }
+}

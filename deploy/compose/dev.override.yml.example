@@ -1,0 +1,12 @@
+# Local dev: mount source for hot reload (copy to dev.override.yml; not used in CI).
+services:
+  api:
+    volumes:
+      - ../../services/api/app:/app/app:ro
+    environment:
+      APP_ENV: development
+  runtime:
+    volumes:
+      - ../../services/runtime/app:/app/app:ro
+    environment:
+      APP_ENV: development

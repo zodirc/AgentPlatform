@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/_index.json",
+  "title": "EventPayloadIndex",
+  "description": "Maps turn_events.type to payload JSON Schema. See ADR-017.",
+  "type": "object",
+  "additionalProperties": {
+    "type": "string",
+    "description": "Relative path under payloads/"
+  },
+  "properties": {
+    "turn.accepted": { "const": "turn.accepted.json" },
+    "turn.cancelling": { "const": "turn.cancelling.json" },
+    "turn.cancelled": { "const": "turn.cancelled.json" },
+    "turn.completed": { "const": "turn.completed.json" },
+    "turn.failed": { "const": "turn.failed.json" },
+    "turn.token": { "const": "turn.token.json" },
+    "turn.thinking": { "const": "turn.thinking.json" },
+    "step.started": { "const": "step.started.json" },
+    "step.completed": { "const": "step.completed.json" },
+    "tool.started": { "const": "tool.started.json" },
+    "tool.delta": { "const": "tool.delta.json" },
+    "tool.completed": { "const": "tool.completed.json" },
+    "approval.requested": { "const": "approval.requested.json" },
+    "approval.resolved": { "const": "approval.resolved.json" },
+    "patch.proposed": { "const": "patch.proposed.json" },
+    "patch.applied": { "const": "patch.applied.json" },
+    "patch.rejected": { "const": "patch.rejected.json" },
+    "outline.updated": { "const": "outline.updated.json" },
+    "turn.plan": { "const": "turn.plan.json" },
+    "section.draft.delta": { "const": "section.draft.delta.json" },
+    "subagent.started": { "const": "subagent.started.json" },
+    "subagent.completed": { "const": "subagent.completed.json" },
+    "retrieval.completed": { "const": "retrieval.completed.json" },
+    "context.reported": { "const": "context.reported.json" },
+    "usage.reported": { "const": "usage.reported.json" }
+  }
+}

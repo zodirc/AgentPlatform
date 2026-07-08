@@ -1,0 +1,18 @@
+{
+  "steps": [
+    {
+      "tool_calls": [
+        {
+          "name": "draft_section",
+          "input": {
+            "section_id": "02",
+            "content": "Recorded section draft for writing.04."
+          }
+        }
+      ]
+    },
+    {
+      "text": "writing.04 recorded stream complete"
+    }
+  ]
+}

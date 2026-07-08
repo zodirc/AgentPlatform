@@ -1,0 +1,125 @@
+# Phase 0 — single compose entry (docs/03 §4.1)
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: agent-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agent}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent}
+      POSTGRES_DB: ${POSTGRES_DB:-agent}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  runtime:
+    build:
+      context: ..
+      dockerfile: services/runtime/Dockerfile
+    container_name: agent-runtime
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
+      MODEL_MODE: ${MODEL_MODE:-stub}
+      MODEL_API_KEY: ${MODEL_API_KEY:-stub}
+      MODEL_NAME: ${MODEL_NAME:-}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
+      ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DATA_DIR: /data
+      WORKSPACE_ROOT: /workspace
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-3}
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
+      INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-false}
+      STALL_THRESHOLD_SECONDS: ${STALL_THRESHOLD_SECONDS:-120}
+      STALL_POLL_INTERVAL_SECONDS: ${STALL_POLL_INTERVAL_SECONDS:-30}
+      STALL_AUTO_FAIL: ${STALL_AUTO_FAIL:-false}
+      TURN_TOKEN_BUDGET: ${TURN_TOKEN_BUDGET:-0}
+      CONTEXT_WINDOW_TOKENS: ${CONTEXT_WINDOW_TOKENS:-128000}
+      RUNTIME_RUNNER_ID: ${RUNTIME_RUNNER_ID:-}
+    volumes:
+      - agent_data:/data
+      - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/ready"]
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 5
+
+  api:
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+    container_name: agent-api
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      RUNTIME_URL: http://runtime:8001
+      RUNTIME_URL_MAP: ${RUNTIME_URL_MAP:-}
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      APP_ENV: ${APP_ENV:-production}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WORKER_MODE: ${WORKER_MODE:-inline}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      start_period: 45s
+      retries: 5
+
+  web:
+    build:
+      context: ..
+      dockerfile: services/web/Dockerfile
+    container_name: agent-web
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  gateway:
+    image: caddy:2-alpine
+    container_name: agent-gateway
+    ports:
+      - "${HOST_PORT:-443}:443"
+      - "${HTTP_PORT:-80}:80"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN:-localhost}
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  pg_data:
+  agent_data:
+  caddy_data:

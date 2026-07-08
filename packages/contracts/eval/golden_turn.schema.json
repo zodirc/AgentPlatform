@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/eval/golden_turn.schema.json",
+  "title": "GoldenTurn",
+  "description": "Eval case definition. See docs/12-eval-and-golden-turns.md",
+  "type": "object",
+  "required": ["id", "scenario_id", "phase", "input", "assertions"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z]+\\.[0-9]+" },
+    "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
+    "phase": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string" }] },
+    "description": { "type": "string" },
+    "fixtures": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "content"],
+            "properties": {
+              "path": { "type": "string" },
+              "content": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "input": {
+      "type": "object",
+      "required": ["message"],
+      "properties": {
+        "message": { "type": "string" },
+        "client_request_id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "model_mode": {
+      "type": "string",
+      "enum": ["stub", "recorded", "live"],
+      "default": "stub"
+    },
+    "assertions": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "object",
+          "properties": {
+            "sequence_contains": { "type": "array", "items": { "type": "string" } },
+            "sequence_equals": { "type": "array", "items": { "type": "string" } },
+            "sequence_not_contains": { "type": "array", "items": { "type": "string" } },
+            "payload_validates": {
+              "type": "boolean",
+              "description": "Validate each event payload against payloads/_index.json (ADR-017)"
+            }
+          }
+        },
+        "turn": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": ["completed", "failed", "cancelled"]
+            },
+            "termination_reason": { "type": "string" }
+          }
+        },
+        "workspace": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path"],
+            "properties": {
+              "path": { "type": "string" },
+              "content": { "type": "string" },
+              "matches": { "type": "string" }
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "max_steps": { "type": "integer", "minimum": 1 },
+            "max_total_tokens": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "latency": {
+          "type": "object",
+          "properties": {
+            "ttfb_ms_max": { "type": "integer", "minimum": 1 },
+            "model_timeout_triggers_fail": { "type": "boolean" }
+          }
+        },
+        "tool": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string" },
+            "result_matches": { "type": "string" }
+          }
+        },
+        "session": {
+          "type": "object",
+          "properties": {
+            "min_turn_count": { "type": "integer", "minimum": 1 },
+            "require_context_summary": { "type": "boolean" }
+          }
+        },
+        "output": {
+          "type": "object",
+          "properties": {
+            "matches": { "type": "string" }
+          }
+        },
+        "runners": {
+          "type": "object",
+          "properties": {
+            "min_distinct": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "logs": {
+          "type": "object",
+          "properties": {
+            "contains": { "type": "string" }
+          }
+        },
+        "event_payload": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "flaky": { "type": "boolean" },
+    "commands": { "type": "array", "items": { "type": "object" } },
+    "setup": { "type": "object", "additionalProperties": true }
+  }
+}

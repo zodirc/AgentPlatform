@@ -1,0 +1,35 @@
+# secrets / local env
+.env
+.env.*
+!.env.example
+
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg
+
+# node / web
+services/web/node_modules/
+services/web/dist/
+*.tsbuildinfo
+
+# editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# runtime / local artifacts
+debug.log
+.coverage
+*.log
+
+# nested empty clone placeholder (if recreated)
+AgentPlatform/

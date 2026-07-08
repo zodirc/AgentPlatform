@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.cancelled.json",
+  "title": "TurnCancelledPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reason"],
+  "properties": {
+    "reason": {
+      "type": "string",
+      "enum": ["user_requested", "timeout", "system"]
+    },
+    "force": { "type": "boolean", "default": false },
+    "cancelled_at_phase": {
+      "type": "string",
+      "enum": ["model_stream", "tool_exec", "assemble", "step_boundary"]
+    }
+  }
+}

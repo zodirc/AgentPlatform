@@ -1,0 +1,25 @@
+id: writing.03_reject_patch
+scenario_id: writing
+phase: 1
+description: User rejects proposed patch; workspace unchanged
+
+input:
+  message: "把第二节改得更简洁 writing.03"
+  client_request_id: "00000000-0000-4000-8000-000000000003"
+
+model_mode: stub
+
+commands:
+  - type: patch.reject
+    patch_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - patch.proposed
+      - turn.completed
+      - patch.rejected
+  turn:
+    status: completed
+
+tags: [writing, patch, p1]

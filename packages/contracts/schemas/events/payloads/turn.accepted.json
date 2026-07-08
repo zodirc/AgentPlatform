@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.accepted.json",
+  "title": "TurnAcceptedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
+    "user_input_preview": { "type": "string", "maxLength": 256 },
+    "model_provider": { "type": "string", "maxLength": 32 },
+    "model_name": { "type": "string", "maxLength": 128 }
+  }
+}

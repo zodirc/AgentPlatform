@@ -1,0 +1,30 @@
+id: shared.05_cancel_mid_token_stream
+scenario_id: writing
+phase: 1
+description: CancelTurn during turn.token stream
+
+input:
+  message: "shared.05 slow stream 流式取消"
+  client_request_id: "00000000-0000-4000-8000-000000000205"
+
+model_mode: stub
+
+commands:
+  - type: cancel
+    after: turn.token
+    delay_ms: 200
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.token
+      - turn.cancelling
+      - turn.cancelled
+    sequence_not_contains:
+      - turn.completed
+  turn:
+    status: cancelled
+  latency:
+    cancel_latency_ms_max: 500
+
+tags: [shared, cancel, p1]

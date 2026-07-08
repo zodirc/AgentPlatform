@@ -1,0 +1,7 @@
+{
+  "type": "turn.accepted",
+  "payload": {
+    "scenario_id": "writing",
+    "user_input_preview": "hello"
+  }
+}

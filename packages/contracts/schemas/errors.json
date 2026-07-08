@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/errors.json",
+  "title": "ApiErrorResponse",
+  "description": "Standard API error envelope. See docs/contracts.md §6.",
+  "type": "object",
+  "required": ["data", "error", "meta"],
+  "additionalProperties": false,
+  "properties": {
+    "data": { "type": "null" },
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "examples": ["TURN_NOT_FOUND"] },
+        "message": { "type": "string" },
+        "details": { "type": "object" }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["request_id"],
+      "additionalProperties": false,
+      "properties": {
+        "request_id": { "type": "string", "format": "uuid" }
+      }
+    }
+  }
+}

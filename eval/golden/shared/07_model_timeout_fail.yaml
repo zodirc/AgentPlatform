@@ -1,0 +1,22 @@
+id: shared.07_model_timeout_fail
+scenario_id: writing
+phase: 1
+description: Model provider exceeds model_timeout triggers turn.failed
+
+input:
+  message: "shared.07 model_timeout 超时测试"
+  client_request_id: "00000000-0000-4000-8000-000000000207"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.failed
+    sequence_not_contains:
+      - turn.completed
+  turn:
+    status: failed
+
+tags: [shared, timeout, p1]

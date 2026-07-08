@@ -1,0 +1,12 @@
+[project]
+name = "agent-contracts-tests"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.21",
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

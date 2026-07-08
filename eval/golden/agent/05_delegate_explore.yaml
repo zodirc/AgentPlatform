@@ -1,0 +1,25 @@
+id: agent.05_delegate_explore
+scenario_id: agent
+phase: 1b
+description: delegate explore sub-agent
+
+input:
+  message: "delegate explore 代码库 agent.05"
+  client_request_id: "00000000-0000-4000-8000-000000000105"
+
+model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - subagent.started
+      - subagent.completed
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [agent, delegate, p1b]

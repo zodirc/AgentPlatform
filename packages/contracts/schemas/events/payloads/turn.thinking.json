@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.thinking.json",
+  "title": "TurnThinkingPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "step_index": { "type": "integer", "minimum": 0 },
+    "label": { "type": "string", "maxLength": 128 }
+  }
+}

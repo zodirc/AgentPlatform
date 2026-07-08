@@ -1,0 +1,36 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  live-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare env
+        run: cp .env.example .env
+      - name: Start stack
+        run: docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+      - name: Wait for health
+        run: sleep 30
+      - name: L2 live eval
+        run: make eval-live
+        env:
+          MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
+          EVAL_LIVE_STRICT: "1"
+
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare env
+        run: cp .env.example .env
+      - name: Start stack
+        run: docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+      - name: Wait for health
+        run: sleep 30
+      - name: L3 load test
+        run: python3 scripts/load_test.py http://localhost

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/step.completed.json",
+  "title": "StepCompletedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step_index", "outcome"],
+  "properties": {
+    "step_index": { "type": "integer", "minimum": 0 },
+    "label": { "type": "string", "maxLength": 128 },
+    "outcome": {
+      "type": "string",
+      "enum": ["completed", "cancelled", "waiting_approval", "failed"]
+    },
+    "duration_ms": { "type": "integer", "minimum": 0 }
+  }
+}

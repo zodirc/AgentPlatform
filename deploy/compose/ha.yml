@@ -1,0 +1,67 @@
+# Optional HA profile: dual runtime replicas + runner_id routing (docs/03 §8.5)
+# Usage:
+#   make up-ha
+# or:
+#   docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml up -d --scale runtime=0
+
+x-runtime-env: &runtime-env
+  DATABASE_URL: ${DATABASE_URL}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+  MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
+  MODEL_MODE: ${MODEL_MODE:-stub}
+  MODEL_API_KEY: ${MODEL_API_KEY:-stub}
+  MODEL_NAME: ${MODEL_NAME:-}
+  APP_SECRET_KEY: ${APP_SECRET_KEY}
+  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  DATA_DIR: /data
+  WORKSPACE_ROOT: /workspace
+  APP_ENV: ${APP_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-3}
+  RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
+  INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-false}
+
+x-runtime-svc: &runtime-svc
+  build:
+    context: ..
+    dockerfile: services/runtime/Dockerfile
+  volumes:
+    - agent_data:/data
+    - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+  depends_on:
+    postgres:
+      condition: service_healthy
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/live"]
+    interval: 30s
+    timeout: 5s
+    start_period: 60s
+    retries: 3
+
+services:
+  runtime-a:
+    <<: *runtime-svc
+    container_name: agent-runtime-a
+    environment:
+      <<: *runtime-env
+      RUNTIME_RUNNER_ID: runtime-a
+
+  runtime-b:
+    <<: *runtime-svc
+    container_name: agent-runtime-b
+    environment:
+      <<: *runtime-env
+      RUNTIME_RUNNER_ID: runtime-b
+
+  api:
+    environment:
+      RUNTIME_URL: http://runtime-a:8001
+      RUNTIME_URL_MAP: '{"runtime-a":"http://runtime-a:8001","runtime-b":"http://runtime-b:8001"}'
+    depends_on:
+      runtime:
+        required: false
+      runtime-a:
+        condition: service_healthy
+      runtime-b:
+        condition: service_healthy

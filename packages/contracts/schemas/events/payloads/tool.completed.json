@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/tool.completed.json",
+  "title": "ToolCompletedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool_call_id", "tool_name", "status"],
+  "properties": {
+    "tool_call_id": { "type": "string", "minLength": 1 },
+    "tool_name": { "type": "string", "minLength": 1 },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "error", "denied", "timeout"]
+    },
+    "summary": { "type": "string", "maxLength": 4096 },
+    "is_truncated": { "type": "boolean" },
+    "bytes_written": { "type": "integer", "minimum": 0 }
+  }
+}

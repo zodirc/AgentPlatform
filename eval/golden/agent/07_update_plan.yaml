@@ -1,0 +1,22 @@
+id: agent.07_update_plan
+scenario_id: agent
+phase: 2
+description: update_plan tool emits turn.plan event
+
+input:
+  message: "agent.07 update_plan 制定计划"
+  client_request_id: "00000000-0000-4000-8000-000000000107"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.plan
+      - tool.completed
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [agent, plan, p2]

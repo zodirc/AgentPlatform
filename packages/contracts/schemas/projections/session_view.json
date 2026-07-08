@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/projections/session_view.json",
+  "title": "SessionView",
+  "type": "object",
+  "required": [
+    "session_id",
+    "default_scenario_id",
+    "status",
+    "turn_count",
+    "updated_at"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "session_id": { "type": "string", "format": "uuid" },
+    "default_scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
+    "status": { "type": "string" },
+    "turn_count": { "type": "integer", "minimum": 0 },
+    "last_turn_id": { "type": ["string", "null"], "format": "uuid" },
+    "last_turn_status": { "type": ["string", "null"] },
+    "context_summary": { "type": ["object", "null"] },
+    "updated_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,25 @@
+id: shared.09_stall_watchdog_fail
+scenario_id: writing
+phase: 2
+description: Stall watchdog auto-fails hung model stream (requires STALL_AUTO_FAIL=true)
+
+input:
+  message: "shared.09 stall_watchdog 卡住检测"
+  client_request_id: "00000000-0000-4000-8000-000000000209"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - step.started
+      - turn.failed
+    sequence_not_contains:
+      - turn.completed
+  turn:
+    status: failed
+  logs:
+    contains: stall_detected
+
+tags: [shared, stall, p2]

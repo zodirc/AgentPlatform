@@ -1,0 +1,28 @@
+id: agent.09_deny_tool_call
+scenario_id: agent
+phase: 2
+description: run_command approval denied then turn completes
+
+input:
+  message: "agent.09 deny run_command 批准测试"
+  client_request_id: "00000000-0000-4000-8000-000000000109"
+
+model_mode: stub
+
+commands:
+  - type: deny-tool-call
+    tool_call_id: auto
+    reason: user_denied
+
+assertions:
+  events:
+    sequence_contains:
+      - approval.requested
+      - approval.resolved
+      - turn.completed
+  turn:
+    status: completed
+  output:
+    matches: "拒绝"
+
+tags: [agent, approval, deny, p2]

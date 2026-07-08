@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: pip-audit (api + runtime)
+        run: bash scripts/security_audit.sh
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  runtime-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Contracts python models
+        run: |
+          pip install -q pytest pydantic
+          pip install -q packages/contracts/python
+          pytest packages/contracts/python/tests -q
+      - name: Runtime unit tests
+        run: |
+          pip install -q packages/contracts/python
+          cd services/runtime
+          pip install -q -e ".[dev]"
+          pytest tests -q \
+            --cov=app --cov-report=term-missing --cov-fail-under=80
+      - name: API unit and integration tests
+        run: |
+          pip install -q packages/contracts/python
+          cd services/api
+          pip install -q -e ".[dev]"
+          pytest tests -q \
+            --cov=app --cov-report=term-missing --cov-fail-under=80
+      - name: Ruff (runtime + api)
+        run: |
+          pip install -q ruff
+          ruff check services/runtime/app services/api/app
+
+  l0-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare env
+        run: cp .env.example .env
+
+      - name: Contract payload schemas
+        run: |
+          pip install -q jsonschema pytest websockets
+          pytest packages/contracts/tests -q
+
+      - name: L0 smoke (compose + golden)
+        run: bash scripts/smoke_test.sh
+
+      - name: L1 eval (phase 1 + 1b)
+        run: |
+          python3 scripts/eval_run.py --phase 1
+          python3 scripts/eval_run.py --phase 1b
+
+      - name: L2 eval (phase 2)
+        run: python3 scripts/eval_run.py --phase 2
+
+      - name: L3 eval (phase 3 + full stub)
+        run: |
+          python3 scripts/eval_run.py --phase 3
+          python3 scripts/eval_run.py
+
+      - name: Retrieval profile eval (writing.07)
+        run: make eval-retrieval
+
+      - name: Queue worker profile eval (shared.16)
+        run: make eval-queue
+
+      - name: Stall watchdog eval (shared.09)
+        run: make eval-stall
+
+      - name: HA runner routing eval (shared.11)
+        run: make eval-ha
+
+      - name: Recorded eval (shared.12)
+        run: make eval-recorded
+
+      - name: OpenAPI codegen drift check
+        run: |
+          bash scripts/codegen.sh
+          git diff --exit-code packages/contracts/openapi services/web/src/shared/api/schema.d.ts
+
+      - name: Typecheck API
+        run: |
+          pip install -q pyright
+          pyright services/api/app --pythonversion 3.11
+
+      - name: Typecheck runtime
+        run: |
+          pip install -q pyright
+          pyright services/runtime/app --pythonversion 3.11
+
+      - name: Web lint, typecheck, test, build
+        run: |
+          cd services/web
+          corepack enable || true
+          npx pnpm@9.15.9 install
+          npx pnpm@9.15.9 run lint
+          npx pnpm@9.15.9 run format:check
+          npx pnpm@9.15.9 run typecheck
+          npx pnpm@9.15.9 run test
+          npx pnpm@9.15.9 run build
+
+      - name: L3 load smoke
+        run: python3 scripts/load_test.py http://localhost

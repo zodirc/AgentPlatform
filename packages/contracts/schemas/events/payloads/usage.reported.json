@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/usage.reported.json",
+  "title": "UsageReportedPayload",
+  "description": "Model API token usage after a step (provider reported when available)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step_index", "input_tokens", "output_tokens"],
+  "properties": {
+    "step_index": { "type": "integer", "minimum": 0 },
+    "input_tokens": { "type": "integer", "minimum": 0 },
+    "output_tokens": { "type": "integer", "minimum": 0 },
+    "step_input_tokens": { "type": "integer", "minimum": 0 },
+    "step_output_tokens": { "type": "integer", "minimum": 0 },
+    "source": { "type": "string", "enum": ["provider", "estimated", "mixed"] }
+  }
+}

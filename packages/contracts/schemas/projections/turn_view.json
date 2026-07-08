@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/projections/turn_view.json",
+  "title": "TurnView",
+  "description": "API projection for GET /api/v1/turns/{id}/view. See docs/contracts.md.",
+  "type": "object",
+  "required": [
+    "turn_id",
+    "session_id",
+    "scenario_id",
+    "status",
+    "user_input",
+    "tool_timeline",
+    "artifacts",
+    "last_event_sequence",
+    "updated_at",
+    "cancellable"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "turn_id": { "type": "string", "format": "uuid" },
+    "session_id": { "type": "string", "format": "uuid" },
+    "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "waiting_approval",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "user_input": { "type": "string" },
+    "latest_output": { "type": ["string", "null"] },
+    "tool_timeline": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "type": "object" }
+    },
+    "last_event_sequence": { "type": "integer", "minimum": 0 },
+    "updated_at": { "type": "string", "format": "date-time" },
+    "cancellable": {
+      "type": "boolean",
+      "description": "true when status is pending or running"
+    },
+    "cancel_requested_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Set when CancelTurn accepted but not yet cancelled"
+    },
+    "interrupt": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "type": "string", "enum": ["approval"] },
+        "tool_call_id": { "type": "string" }
+      },
+      "required": ["kind", "tool_call_id"]
+    },
+    "runner_id": {
+      "type": ["string", "null"],
+      "description": "Runtime replica that owns the active run (Phase 3)"
+    },
+    "context_usage": {
+      "type": ["object", "null"],
+      "description": "Latest context window occupancy from ContextEngine",
+      "additionalProperties": false,
+      "properties": {
+        "tokens_before": { "type": "integer", "minimum": 0 },
+        "tokens_after": { "type": "integer", "minimum": 0 },
+        "token_budget": { "type": "integer", "minimum": 0 },
+        "strategies": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "step_index": { "type": "integer", "minimum": 0 },
+        "system_tokens": { "type": "integer", "minimum": 0 },
+        "tools_tokens": { "type": "integer", "minimum": 0 },
+        "messages_tokens": { "type": "integer", "minimum": 0 },
+        "source": { "type": "string", "enum": ["estimated", "provider"] }
+      }
+    },
+    "token_usage": {
+      "type": ["object", "null"],
+      "description": "Cumulative model API tokens for this turn",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "source": { "type": "string", "enum": ["provider", "estimated", "mixed"] }
+      }
+    }
+  }
+}

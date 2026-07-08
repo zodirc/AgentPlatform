@@ -1,0 +1,25 @@
+id: shared.02_sse_reconnect
+scenario_id: writing
+phase: 1
+description: SSE reconnect preserves sequence continuity
+
+input:
+  message: "writing.01 大纲 outline"
+  client_request_id: "00000000-0000-4000-8000-000000000201"
+
+model_mode: stub
+
+commands:
+  - type: sse.reconnect
+    after: step.started
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - step.started
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [shared, sse, p1]

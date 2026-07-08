@@ -1,0 +1,33 @@
+id: writing.05_search_sources
+scenario_id: writing
+phase: 1b
+description: search_sources then draft with citation pointer
+
+fixtures:
+  workspace:
+    - path: sources/ref-a.md
+      content: |
+        # Reference A
+        Agent Platform supports writing with citations.
+
+input:
+  message: "引用资料写作 writing.05"
+  client_request_id: "00000000-0000-4000-8000-000000000005"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  output:
+    matches: "cite:"
+  latency:
+    first_token_ms_max: 800
+
+tags: [writing, rag, p1b]

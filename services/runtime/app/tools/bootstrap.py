@@ -1,0 +1,341 @@
+from __future__ import annotations
+
+from dataclasses import replace
+
+from app.scenarios.registry import ScenarioProfile
+from app.settings import settings
+from app.tools.core import tools as core
+from app.tools.registry import ON_WRITE_TOOLS, ToolRegistry, ToolSpec
+
+
+def build_registry() -> ToolRegistry:
+    registry = ToolRegistry()
+    registry.register(
+        ToolSpec(
+            name="read_file",
+            description="Read a file from the workspace",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+            handler=core.read_file,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="list_dir",
+            description="List directory entries in the workspace",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "default": "."}},
+            },
+            handler=core.list_dir,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="propose_patch",
+            description="Propose a patch for user review (does not write file)",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                    "summary": {"type": "string"},
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+            handler=core.propose_patch,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="apply_patch",
+            description="Apply an accepted patch to the workspace",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "new_text": {"type": "string"}},
+                "required": ["path", "new_text"],
+            },
+            handler=core.apply_patch,
+            requires_approval=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="draft_section",
+            description="Draft or update a document section",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "section_id": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["section_id", "content"],
+            },
+            handler=core.draft_section,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="update_plan",
+            description="Update the turn plan / todo list",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "status": {
+                                    "type": "string",
+                                    "enum": ["pending", "in_progress", "done"],
+                                },
+                            },
+                        },
+                    },
+                    "summary": {"type": "string"},
+                },
+                "required": ["items"],
+            },
+            handler=core.update_plan,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="update_outline",
+            description="Create or update document outline (outline.md)",
+            parameters={
+                "type": "object",
+                "properties": {"content": {"type": "string"}},
+                "required": ["content"],
+            },
+            handler=core.update_outline,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="search_sources",
+            description="Search reference sources in workspace sources/",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": "integer", "default": 10},
+                },
+                "required": ["query"],
+            },
+            handler=core.search_sources,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="check_citation",
+            description="Verify a citation against a source file",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "citation_id": {"type": "string"},
+                    "source_path": {"type": "string"},
+                },
+                "required": ["citation_id", "source_path"],
+            },
+            handler=core.check_citation,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="grep",
+            description="Search file contents in the workspace",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "path": {"type": "string", "default": "."},
+                    "limit": {"type": "integer", "default": 50},
+                },
+                "required": ["pattern"],
+            },
+            handler=core.grep,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="glob",
+            description="Find files matching a glob pattern under a path",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string"},
+                    "path": {"type": "string", "default": "."},
+                    "limit": {"type": "integer", "default": 100},
+                },
+                "required": ["pattern"],
+            },
+            handler=core.glob,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="write_file",
+            description="Create or overwrite a workspace file",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "content": {"type": "string"},
+                },
+                "required": ["path", "content"],
+            },
+            handler=core.write_file,
+            requires_approval=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="edit_file",
+            description="Replace a unique text span in an existing file",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "new_text": {"type": "string"},
+                },
+                "required": ["path", "old_text", "new_text"],
+            },
+            handler=core.edit_file,
+            requires_approval=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="run_tests",
+            description="Run project tests (simulated in Phase 1)",
+            parameters={
+                "type": "object",
+                "properties": {"command": {"type": "string", "default": "pytest -q"}},
+            },
+            handler=core.run_tests,
+            requires_approval=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="read_lints",
+            description="Read lint/diagnostic results for workspace paths",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string", "default": "."}},
+            },
+            handler=core.read_lints,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="export_document",
+            description="Export outline and sections into a single markdown file",
+            parameters={
+                "type": "object",
+                "properties": {"output_path": {"type": "string", "default": "exports/document.md"}},
+            },
+            handler=core.export_document,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="search_codebase",
+            description="Search the codebase for a query string",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "path": {"type": "string", "default": "."},
+                    "limit": {"type": "integer", "default": 20},
+                },
+                "required": ["query"],
+            },
+            handler=core.search_codebase,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="delegate",
+            description="Delegate a sub-task to a specialized sub-agent",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task": {"type": "string"},
+                    "agent_type": {"type": "string", "default": "explore"},
+                    "context": {"type": "string", "default": ""},
+                },
+                "required": ["task"],
+            },
+            handler=core.delegate,
+            requires_approval=True,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="slow_tool",
+            description="Simulated long-running tool for cancel tests",
+            parameters={
+                "type": "object",
+                "properties": {"duration_ms": {"type": "integer", "default": 5000}},
+            },
+            handler=core.slow_tool,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="stub_echo",
+            description="Phase 0 compatibility stub tool",
+            parameters={
+                "type": "object",
+                "properties": {"message": {"type": "string"}},
+                "required": ["message"],
+            },
+            handler=core.stub_echo,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="run_command",
+            description="Execute a shell command (requires approval)",
+            parameters={
+                "type": "object",
+                "properties": {"command": {"type": "string"}},
+                "required": ["command"],
+            },
+            handler=core.run_command,
+            requires_approval=True,
+            timeout_s=settings.tool_default_timeout_seconds,
+        )
+    )
+    return registry
+
+
+def tool_scope(profile: ScenarioProfile, registry: ToolRegistry) -> list[ToolSpec]:
+    names = list(profile.tool_names)
+    if "stub_echo" not in names:
+        names.append("stub_echo")
+    specs: list[ToolSpec] = []
+    for name in names:
+        base = registry.get(name)
+        if base is None:
+            continue
+        requires = base.requires_approval
+        override = profile.approval_overrides.get(name)
+        if override == "always":
+            requires = True
+        elif override == "never":
+            requires = False
+        elif override == "on_write":
+            requires = name in ON_WRITE_TOOLS
+        specs.append(replace(base, requires_approval=requires))
+    return specs

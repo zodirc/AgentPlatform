@@ -1,0 +1,30 @@
+id: writing.06_delegate_researcher
+scenario_id: writing
+phase: 1b
+description: delegate researcher sub-agent completes
+
+fixtures:
+  workspace:
+    - path: sources/ref-a.md
+      content: "Research note about citations."
+
+input:
+  message: "delegate researcher 调研资料 writing.06"
+  client_request_id: "00000000-0000-4000-8000-000000000006"
+
+model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - subagent.started
+      - subagent.completed
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [writing, delegate, p1b]

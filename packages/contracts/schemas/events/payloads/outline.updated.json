@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/outline.updated.json",
+  "title": "OutlineUpdatedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path"],
+  "properties": {
+    "path": { "type": "string", "minLength": 1 },
+    "content": { "type": "string", "maxLength": 65536 },
+    "summary": { "type": "string", "maxLength": 4096 },
+    "outline_path": { "type": "string" }
+  }
+}

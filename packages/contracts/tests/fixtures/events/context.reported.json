@@ -1,0 +1,14 @@
+{
+  "type": "context.reported",
+  "payload": {
+    "step_index": 0,
+    "tokens_before": 2400,
+    "tokens_after": 1800,
+    "token_budget": 12000,
+    "strategies": ["budget", "microcompact"],
+    "system_tokens": 220,
+    "tools_tokens": 1800,
+    "messages_tokens": 12,
+    "source": "estimated"
+  }
+}

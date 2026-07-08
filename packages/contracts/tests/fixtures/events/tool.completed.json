@@ -1,0 +1,9 @@
+{
+  "type": "tool.completed",
+  "payload": {
+    "tool_call_id": "call_1",
+    "tool_name": "stub_echo",
+    "status": "ok",
+    "summary": "done"
+  }
+}

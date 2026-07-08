@@ -1,0 +1,9 @@
+{
+  "type": "step.completed",
+  "payload": {
+    "step_index": 0,
+    "label": "step-0",
+    "outcome": "completed",
+    "duration_ms": 42
+  }
+}

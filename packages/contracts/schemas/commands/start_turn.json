@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/commands/start_turn.json",
+  "title": "StartTurnCommand",
+  "description": "api → runtime. POST /internal/commands/start-turn",
+  "type": "object",
+  "required": [
+    "turn_id",
+    "run_id",
+    "session_id",
+    "scenario_id",
+    "message",
+    "trace_id"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "turn_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "session_id": { "type": "string", "format": "uuid" },
+    "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
+    "message": { "type": "string", "minLength": 1 },
+    "client_request_id": { "type": "string", "format": "uuid" },
+    "trace_id": { "type": "string", "format": "uuid" }
+  }
+}

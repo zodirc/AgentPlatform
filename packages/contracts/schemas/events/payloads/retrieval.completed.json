@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/retrieval.completed.json",
+  "title": "RetrievalCompletedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["query", "mode", "hit_count"],
+  "properties": {
+    "query": { "type": "string", "maxLength": 4096 },
+    "mode": {
+      "type": "string",
+      "enum": ["vector", "keyword", "none"]
+    },
+    "hit_count": { "type": "integer", "minimum": 0 },
+    "index": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  }
+}

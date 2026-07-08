@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/context.reported.json",
+  "title": "ContextReportedPayload",
+  "description": "Per-step context window occupancy after ContextEngine.assemble",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["step_index", "tokens_after", "token_budget"],
+  "properties": {
+    "step_index": { "type": "integer", "minimum": 0 },
+    "tokens_before": { "type": "integer", "minimum": 0 },
+    "tokens_after": { "type": "integer", "minimum": 0 },
+    "token_budget": { "type": "integer", "minimum": 0 },
+    "system_tokens": { "type": "integer", "minimum": 0 },
+    "tools_tokens": { "type": "integer", "minimum": 0 },
+    "messages_tokens": { "type": "integer", "minimum": 0 },
+    "source": { "type": "string", "enum": ["estimated", "provider"] },
+    "strategies": {
+      "type": "array",
+      "items": { "type": "string" },
+      "maxItems": 16
+    }
+  }
+}

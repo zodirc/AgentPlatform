@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# Retrieval runtime: CPU torch + sentence-transformers + baked local embedding model.
+
+ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+
+FROM python:3.11-slim AS model-baker
+ARG EMBEDDING_MODEL
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir "sentence-transformers>=3.0"
+RUN python -c "\
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"
+
+FROM python:3.11-slim AS runtime
+ARG EMBEDDING_MODEL
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd --create-home --uid 1000 app
+RUN mkdir -p /data/vectorstore /data/models /app/models-baked \
+    && chown -R app:app /data /app/models-baked
+WORKDIR /app
+
+COPY packages/contracts/python /contracts/python
+COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
+COPY services/runtime/app /tmp/runtime/app
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir /contracts/python \
+    && pip install --no-cache-dir "/tmp/runtime[retrieval]" \
+    && rm -rf /tmp/runtime
+
+COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
+COPY services/runtime/app /app/app
+COPY services/runtime/app/scenarios /app/app/scenarios
+COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
+COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
+COPY eval/recordings /app/eval/recordings
+COPY services/runtime/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+USER app
+ENV EMBEDDING_MODEL=${EMBEDDING_MODEL}
+EXPOSE 8001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=120s --retries=3 \
+    CMD curl -f http://127.0.0.1:8001/health/live || exit 1
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]

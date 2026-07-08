@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/patch.applied.json",
+  "title": "PatchAppliedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["patch_id", "path", "status"],
+  "properties": {
+    "patch_id": { "type": "string", "minLength": 1 },
+    "path": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "enum": ["applied"] },
+    "bytes_written": { "type": "integer", "minimum": 0 }
+  }
+}

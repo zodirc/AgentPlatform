@@ -1,0 +1,12 @@
+{
+  "steps": [
+    {
+      "tool_calls": [
+        {
+          "name": "stub_echo",
+          "input": { "message": "recorded smoke" }
+        }
+      ]
+    }
+  ]
+}

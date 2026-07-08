@@ -1,0 +1,29 @@
+id: writing.01_outline_and_section
+scenario_id: writing
+phase: 1
+description: Create outline via update_outline
+
+fixtures:
+  workspace: []
+
+input:
+  message: "请创建文档大纲 writing.01"
+  client_request_id: "00000000-0000-4000-8000-000000000010"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - outline.updated
+      - turn.completed
+  turn:
+    status: completed
+  latency:
+    ttfb_ms_max: 300
+  workspace:
+    - path: outline.md
+      matches: "Section"
+
+tags: [writing, outline, p1]

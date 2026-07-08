@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/commands/approve_tool_call.json",
+  "title": "ApproveToolCallCommand",
+  "description": "api → runtime. POST /internal/commands/approve-tool-call",
+  "type": "object",
+  "required": ["turn_id", "run_id", "tool_call_id", "trace_id"],
+  "additionalProperties": false,
+  "properties": {
+    "turn_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "tool_call_id": { "type": "string", "minLength": 1 },
+    "trace_id": { "type": "string", "format": "uuid" }
+  }
+}

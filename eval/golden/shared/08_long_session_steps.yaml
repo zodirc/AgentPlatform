@@ -1,0 +1,27 @@
+id: shared.08_long_session_steps
+scenario_id: writing
+phase: 2
+description: 50-turn session without linear step-count degradation
+
+input:
+  message: "L0 golden stub"
+  client_request_id: "00000000-0000-4000-8000-000000000208"
+
+model_mode: stub
+
+commands:
+  - type: session-turns
+    count: 50
+    message: "L0 golden stub shared.08"
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+  turn:
+    status: completed
+  metrics:
+    max_p95_step_ratio: 2.5
+    max_steps_per_turn: 12
+
+tags: [shared, session, p2]

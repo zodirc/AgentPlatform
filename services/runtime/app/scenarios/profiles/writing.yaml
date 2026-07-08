@@ -1,0 +1,24 @@
+scenario_id: writing
+display_name: 写作模式
+system_prompt_template: scenarios/writing/system.md
+tool_names:
+  - read_file
+  - list_dir
+  - propose_patch
+  - draft_section
+  - update_outline
+  - update_plan
+  - search_sources
+  - check_citation
+  - export_document
+  - delegate
+subagent_types:
+  - researcher
+  - drafter
+  - editor
+  - fact_checker
+  - stylist
+max_steps: 40
+approval_overrides: {}
+workspace_layout: document
+web_layout: writing-workbench

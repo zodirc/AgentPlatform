@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.completed.json",
+  "title": "TurnCompletedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": { "type": "string", "maxLength": 4096 },
+    "termination_reason": {
+      "type": "string",
+      "enum": ["final", "max_steps", "budget_exceeded", "local_response"]
+    },
+    "step_count": { "type": "integer", "minimum": 0 },
+    "token_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": { "type": "integer", "minimum": 0 },
+        "output_tokens": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

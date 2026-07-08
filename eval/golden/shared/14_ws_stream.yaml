@@ -1,0 +1,23 @@
+id: shared.14_ws_stream
+scenario_id: writing
+phase: 3
+description: WebSocket stream delivers same terminal chain as SSE
+
+input:
+  message: "L0 golden stub"
+  client_request_id: "00000000-0000-4000-8000-000000000314"
+
+model_mode: stub
+
+commands:
+  - type: ws.stream
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [shared, ws, p3]

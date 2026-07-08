@@ -1,0 +1,25 @@
+id: writing.04_section_draft_stream
+scenario_id: writing
+phase: 1
+description: draft_section emits section.draft.delta streaming chunks
+
+input:
+  message: "writing.04 流式 draft_section 第二节"
+  client_request_id: "00000000-0000-4000-8000-000000000004"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - section.draft.delta
+      - tool.completed
+      - turn.completed
+  turn:
+    status: completed
+  workspace:
+    - path: .agent/revisions/02.md
+      matches: "第一节草稿"
+
+tags: [writing, draft, p1]

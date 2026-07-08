@@ -1,0 +1,30 @@
+id: agent.02_cancel_mid_tool
+scenario_id: agent
+phase: 1
+description: CancelTurn during slow_tool execution
+
+input:
+  message: "agent.02 slow_tool 慢工具取消测试"
+  client_request_id: "00000000-0000-4000-8000-000000000102"
+
+model_mode: stub
+
+commands:
+  - type: cancel
+    after: tool.started
+    delay_ms: 300
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.cancelling
+      - turn.cancelled
+    sequence_not_contains:
+      - turn.completed
+  turn:
+    status: cancelled
+  latency:
+    cancel_latency_ms_max: 3000
+
+tags: [agent, cancel, p1]

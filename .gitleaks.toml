@@ -1,0 +1,16 @@
+title = "Agent Platform gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Example env placeholders"
+paths = ['''\.env\.example$''']
+
+[[allowlists]]
+description = "Golden eval fixtures"
+paths = ['''eval/golden/''']
+
+[[allowlists]]
+description = "Documentation examples"
+paths = ['''docs/''']

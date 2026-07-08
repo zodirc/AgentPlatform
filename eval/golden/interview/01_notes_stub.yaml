@@ -1,0 +1,21 @@
+id: interview.01_notes_stub
+scenario_id: interview
+phase: 3
+description: Interview scenario drafts section notes
+
+input:
+  message: "interview.01 记录访谈要点"
+  client_request_id: "00000000-0000-4000-8000-000000000301"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - section.draft.delta
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [interview, p3]

@@ -1,0 +1,31 @@
+id: writing.08_check_citation
+scenario_id: writing
+phase: 1b
+description: check_citation validates source reference
+
+fixtures:
+  workspace:
+    - path: sources/ref-a.md
+      content: |
+        # Reference A
+        cite:ref-a appears in this document.
+
+input:
+  message: "writing.08 check_citation cite:ref-a sources/ref-a.md"
+  client_request_id: "00000000-0000-4000-8000-000000000108"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - tool.completed
+      - turn.completed
+  turn:
+    status: completed
+  tool:
+    name: check_citation
+    result_matches: "citation valid"
+
+tags: [writing, citation, p1b]

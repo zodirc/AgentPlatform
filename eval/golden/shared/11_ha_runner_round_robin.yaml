@@ -1,0 +1,24 @@
+id: shared.11_ha_runner_round_robin
+scenario_id: writing
+phase: 2
+description: HA profile — round-robin assigns distinct runner_id across turns
+
+input:
+  message: "L0 golden stub"
+  client_request_id: "00000000-0000-4000-8000-000000000211"
+
+model_mode: stub
+
+commands:
+  - type: session-turns
+    count: 6
+    message: "L0 golden stub shared.11"
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+  runners:
+    min_distinct: 2
+
+tags: [shared, ha, p2]

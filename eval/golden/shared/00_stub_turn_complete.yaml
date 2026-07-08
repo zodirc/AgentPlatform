@@ -1,0 +1,27 @@
+id: shared.00_stub_turn_complete
+scenario_id: writing
+phase: 0
+description: Phase 0 L0 — stub turn completes with minimal event chain
+
+input:
+  message: "L0 golden stub"
+  client_request_id: "00000000-0000-4000-8000-000000000099"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_equals:
+      - turn.accepted
+      - step.started
+      - turn.thinking
+      - tool.started
+      - tool.completed
+      - step.completed
+      - turn.completed
+  turn:
+    status: completed
+  latency:
+    ttfb_ms_max: 300
+
+tags: [shared, stub, p0]

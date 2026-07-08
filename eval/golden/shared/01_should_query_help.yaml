@@ -1,0 +1,24 @@
+id: shared.01_should_query_help
+scenario_id: writing
+phase: 1
+description: /help returns local response without model query
+
+input:
+  message: "/help"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.completed
+    sequence_not_contains:
+      - step.started
+      - tool.started
+  turn:
+    status: completed
+  latency:
+    ttfb_ms_max: 300
+
+tags: [shared, should_query, p1]

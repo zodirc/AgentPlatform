@@ -1,0 +1,29 @@
+id: shared.04_context_compact
+scenario_id: agent
+phase: 1b
+description: Large read triggers context budget/compaction logging
+
+fixtures:
+  workspace:
+    - path: large_file.md
+      content: |
+        LINE
+        BIGCONTENT
+
+input:
+  message: "读取 large_file.md 继续 shared.04 compact"
+  client_request_id: "00000000-0000-4000-8000-000000000004"
+
+model_mode: stub
+
+setup:
+  large_file_chars: 20000
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+  logs:
+    contains: context compaction
+
+tags: [shared, context, p1b]

@@ -1,0 +1,25 @@
+id: live.01_smoke_complete
+scenario_id: writing
+phase: live
+description: Live model smoke — turn completes without hard failure
+
+input:
+  message: "Reply with exactly: live-ok"
+  client_request_id: "00000000-0000-4000-8000-00000000a001"
+
+model_mode: live
+flaky: true
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  metrics:
+    max_steps_per_turn: 20
+
+tags: [live, smoke]

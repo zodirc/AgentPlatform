@@ -1,0 +1,22 @@
+id: shared.03_idempotent_client_request
+scenario_id: writing
+phase: 1
+description: Duplicate client_request_id returns same turn
+
+input:
+  message: "L0 golden stub idempotency"
+  client_request_id: "00000000-0000-4000-8000-000000000203"
+
+model_mode: stub
+
+commands:
+  - type: duplicate-turn
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [shared, idempotency, p1]

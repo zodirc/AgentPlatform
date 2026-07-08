@@ -1,0 +1,9 @@
+{
+  "type": "retrieval.completed",
+  "payload": {
+    "query": "phase2-unique-term",
+    "mode": "vector",
+    "hit_count": 1,
+    "index": { "added": 1, "chunks": 3 }
+  }
+}

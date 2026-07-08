@@ -1,0 +1,41 @@
+{
+	auto_https disable_redirects
+}
+
+:80 {
+	handle /health {
+		respond "ok" 200
+	}
+
+	handle /health/* {
+		reverse_proxy api:8000
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}
+
+:443 {
+	tls internal
+
+	handle /health {
+		respond "ok" 200
+	}
+
+	handle /health/* {
+		reverse_proxy api:8000
+	}
+
+	handle /api/* {
+		reverse_proxy api:8000
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

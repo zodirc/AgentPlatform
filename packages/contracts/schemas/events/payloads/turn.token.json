@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.token.json",
+  "title": "TurnTokenPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["delta"],
+  "properties": {
+    "delta": { "type": "string", "maxLength": 8192 }
+  }
+}

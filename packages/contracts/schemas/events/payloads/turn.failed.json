@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.failed.json",
+  "title": "TurnFailedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["termination_reason"],
+  "properties": {
+    "termination_reason": {
+      "type": "string",
+      "enum": [
+        "fatal_error",
+        "model_timeout",
+        "step_timeout",
+        "schema_validation_error"
+      ]
+    },
+    "message": { "type": "string", "maxLength": 1024 }
+  }
+}

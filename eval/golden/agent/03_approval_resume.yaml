@@ -1,0 +1,25 @@
+id: agent.03_approval_resume
+scenario_id: agent
+phase: 1
+description: run_command approval then resume same run
+
+input:
+  message: "批准测试 run_command agent.03"
+  client_request_id: "00000000-0000-4000-8000-000000000103"
+
+model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - approval.requested
+      - approval.resolved
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [agent, approval, p1]

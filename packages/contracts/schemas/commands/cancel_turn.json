@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/commands/cancel_turn.json",
+  "title": "CancelTurnCommand",
+  "description": "api → runtime. POST /internal/commands/cancel-turn. See ADR-015.",
+  "type": "object",
+  "required": ["turn_id", "run_id", "trace_id"],
+  "additionalProperties": false,
+  "properties": {
+    "turn_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "trace_id": { "type": "string", "format": "uuid" },
+    "reason": {
+      "type": "string",
+      "enum": ["user_requested", "timeout", "system"],
+      "default": "user_requested"
+    },
+    "force": {
+      "type": "boolean",
+      "default": false,
+      "description": "false: graceful abort at next checkpoint; true: immediate kill"
+    }
+  }
+}

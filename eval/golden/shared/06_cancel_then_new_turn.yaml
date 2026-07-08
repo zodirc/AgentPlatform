@@ -1,0 +1,28 @@
+id: shared.06_cancel_then_new_turn
+scenario_id: writing
+phase: 1
+description: After cancel, same session can start a new turn
+
+input:
+  message: "shared.05 slow stream 流式取消"
+  client_request_id: "00000000-0000-4000-8000-000000000206"
+
+model_mode: stub
+
+commands:
+  - type: cancel
+    after: turn.token
+    delay_ms: 200
+  - type: new-turn
+    message: "L0 golden stub after cancel"
+    client_request_id: "00000000-0000-4000-8000-000000000260"
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.cancelled
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [shared, cancel, p1]

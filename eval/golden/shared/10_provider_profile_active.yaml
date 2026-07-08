@@ -1,0 +1,32 @@
+id: shared.10_provider_profile_active
+scenario_id: writing
+phase: 1
+description: DB model provider profile appears on turn.accepted without runtime restart (ADR-019)
+
+commands:
+  - type: admin.create-provider
+    label: eval-openai
+    provider: openai
+    model_name: gpt-4o-mini
+    api_key: sk-eval-test-key-0001
+    activate: true
+
+input:
+  message: "shared.10 provider profile check"
+  client_request_id: "00000000-0000-4000-8000-000000000210"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.completed
+  turn:
+    status: completed
+  event_payload:
+    turn.accepted:
+      model_provider: openai
+      model_name: gpt-4o-mini
+
+tags: [shared, provider, p1]

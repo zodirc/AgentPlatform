@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/envelope.json",
+  "title": "TurnEventEnvelope",
+  "description": "Canonical envelope for turn_events rows and SSE payloads. Payload per-type schemas: payloads/_index.json. See docs/contracts.md §3.1, ADR-017.",
+  "type": "object",
+  "required": [
+    "event_id",
+    "stream_id",
+    "sequence",
+    "type",
+    "turn_id",
+    "run_id",
+    "ts",
+    "payload"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": { "type": "string", "format": "uuid" },
+    "stream_id": { "type": "string", "format": "uuid", "description": "Usually equals turn_id" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "type": { "$ref": "types.json#/$defs/eventType" },
+    "turn_id": { "type": "string", "format": "uuid" },
+    "run_id": { "type": "string", "format": "uuid" },
+    "step_index": { "type": "integer", "minimum": 0 },
+    "trace_id": { "type": "string", "format": "uuid" },
+    "causation_id": { "type": ["string", "null"], "format": "uuid" },
+    "ts": { "type": "string", "format": "date-time" },
+    "payload": { "type": "object" }
+  }
+}

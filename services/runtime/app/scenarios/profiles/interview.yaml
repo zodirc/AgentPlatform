@@ -1,0 +1,13 @@
+scenario_id: interview
+display_name: 访谈纪要
+system_prompt_template: scenarios/interview/system.md
+tool_names:
+  - read_file
+  - list_dir
+  - draft_section
+  - update_outline
+  - update_plan
+  - stub_echo
+max_steps: 30
+workspace_layout: repository
+web_layout: interview-workbench

@@ -1,0 +1,31 @@
+id: agent.06_delegate_chain
+scenario_id: agent
+phase: 2
+description: Chained delegate explore then verify
+
+input:
+  message: "agent.06 explore verify 串联 delegate"
+  client_request_id: "00000000-0000-4000-8000-000000000106"
+
+model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
+  - type: approve-tool-call
+    tool_call_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - subagent.started
+      - subagent.completed
+      - subagent.started
+      - subagent.completed
+      - turn.completed
+  turn:
+    status: completed
+  output:
+    matches: "agent.06"
+
+tags: [agent, delegate, p2]
