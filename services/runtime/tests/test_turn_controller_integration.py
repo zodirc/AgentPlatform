@@ -46,6 +46,9 @@ def _pool_conn() -> tuple[object, list[tuple[str, tuple]]]:
         def acquire(self):
             return _Acquire()
 
+        async def fetchval(self, query: str, *args) -> str | None:
+            return "completed"
+
     return _Pool(), executed
 
 
@@ -191,6 +194,8 @@ async def test_deny_tool_call_resumes_via_langgraph(monkeypatch: pytest.MonkeyPa
     run_lg = AsyncMock(return_value="completed")
 
     monkeypatch.setattr(tc, "_wait_turn_inactive", AsyncMock(return_value=True))
+    monkeypatch.setattr(tc, "load_checkpoint", AsyncMock(return_value=None))
+    monkeypatch.setattr(tc, "delete_checkpoint", AsyncMock())
     monkeypatch.setattr(tc, "get_pool", AsyncMock(return_value=pool))
     monkeypatch.setattr(tc, "append_event", fake_append_event)
     monkeypatch.setattr(tc, "_make_write_event", fake_make_write_event)
