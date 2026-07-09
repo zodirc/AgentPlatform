@@ -123,6 +123,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/turns/{turn_id}/ws": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * WebSocket turn event stream (bidirectional approval)
+         * @description Upgrades to WebSocket. Server pushes turn events as JSON (same shape as SSE data).
+         *     Client may send approve_tool_call or deny_tool_call actions while status is waiting_approval.
+         */
+        get: operations["websocketTurn"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/turns/{turn_id}/cancel": {
         parameters: {
             query?: never;
@@ -348,12 +369,14 @@ export interface components {
                 system_tokens?: number;
                 tools_tokens?: number;
                 messages_tokens?: number;
+                /** @enum {string} */
                 source?: "estimated" | "provider";
             } | null;
             /** @description Cumulative model API tokens for this turn */
             token_usage?: {
                 input_tokens?: number;
                 output_tokens?: number;
+                /** @enum {string} */
                 source?: "provider" | "estimated" | "mixed";
             } | null;
         };
@@ -605,6 +628,28 @@ export interface operations {
                 content: {
                     "text/event-stream": string;
                 };
+            };
+        };
+    };
+    websocketTurn: {
+        parameters: {
+            query?: {
+                since_sequence?: number;
+            };
+            header?: never;
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Switching Protocols (WebSocket upgrade) */
+            101: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
