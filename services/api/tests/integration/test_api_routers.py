@@ -339,3 +339,64 @@ def test_get_run_success(client: TestClient) -> None:
         response = client.get(f"/api/v1/runs/{RUN_ID}")
     assert response.status_code == 200
     assert response.json()["runner_id"] == "runtime-a"
+
+
+def test_websocket_turn_accepts_basic_auth(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import base64
+
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=True, admin_password="secret"))
+    token = base64.b64encode(b"admin:secret").decode()
+    headers = {"Authorization": f"Basic {token}"}
+    turn = {
+        "id": TURN_ID,
+        "session_id": SESSION_ID,
+        "scenario_id": "writing",
+        "status": "running",
+        "user_input": "hello",
+        "created_at": NOW,
+    }
+    events = [
+        {
+            "event_id": "00000000-0000-0000-0000-000000000010",
+            "stream_id": str(TURN_ID),
+            "sequence": 1,
+            "type": "turn.accepted",
+            "turn_id": str(TURN_ID),
+            "run_id": str(RUN_ID),
+            "step_index": 0,
+            "trace_id": "00000000-0000-0000-0000-000000000011",
+            "causation_id": None,
+            "ts": NOW.isoformat(),
+            "payload": {},
+        },
+        {
+            "event_id": "00000000-0000-0000-0000-000000000012",
+            "stream_id": str(TURN_ID),
+            "sequence": 2,
+            "type": "turn.completed",
+            "turn_id": str(TURN_ID),
+            "run_id": str(RUN_ID),
+            "step_index": 1,
+            "trace_id": "00000000-0000-0000-0000-000000000013",
+            "causation_id": None,
+            "ts": NOW.isoformat(),
+            "payload": {},
+        },
+    ]
+
+    async def fake_fetch(_turn_id: UUID, since: int) -> list[dict]:
+        return [event for event in events if event["sequence"] > since]
+
+    with (
+        patch("app.routers.turns.turn_svc.get_turn", new_callable=AsyncMock, return_value=turn),
+        patch("app.services.realtime.events.fetch_turn_events", side_effect=fake_fetch),
+        patch("app.services.realtime.events.project_turn", new_callable=AsyncMock),
+    ):
+        with client.websocket_connect(f"/api/v1/turns/{TURN_ID}/ws", headers=headers) as ws:
+            first = ws.receive_json()
+            second = ws.receive_json()
+    assert first["type"] == "turn.accepted"
+    assert second["type"] == "turn.completed"

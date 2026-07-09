@@ -16,8 +16,9 @@ from app.services.realtime.ws import handle_turn_websocket
 from app.services.resource import turns as turn_svc
 
 PATCH_ALLOWED_STATUSES = frozenset({"completed", "running", "waiting_approval"})
+_HTTP_AUTH = [Depends(require_api_access)]
 
-router = APIRouter(tags=["turns"], dependencies=[Depends(require_api_access)])
+router = APIRouter(tags=["turns"])
 
 
 class CancelTurnRequest(BaseModel):
@@ -37,7 +38,7 @@ class PatchDecisionRequest(BaseModel):
     reason: str | None = None
 
 
-@router.get("/turns/{turn_id}", response_model=TurnResponse)
+@router.get("/turns/{turn_id}", response_model=TurnResponse, dependencies=_HTTP_AUTH)
 async def get_turn(turn_id: UUID):
     turn = await turn_svc.get_turn(turn_id)
     if turn is None:
@@ -52,7 +53,7 @@ async def get_turn(turn_id: UUID):
     )
 
 
-@router.get("/turns/{turn_id}/view", response_model=TurnView)
+@router.get("/turns/{turn_id}/view", response_model=TurnView, dependencies=_HTTP_AUTH)
 async def get_turn_view(turn_id: UUID):
     view = await build_turn_view(turn_id)
     if view is None:
@@ -60,7 +61,7 @@ async def get_turn_view(turn_id: UUID):
     return view
 
 
-@router.get("/turns/{turn_id}/stream")
+@router.get("/turns/{turn_id}/stream", dependencies=_HTTP_AUTH)
 async def stream_turn(turn_id: UUID, request: Request, since_sequence: int = 0):
     turn = await turn_svc.get_turn(turn_id)
     if turn is None:
@@ -98,7 +99,7 @@ async def websocket_turn(websocket: WebSocket, turn_id: UUID, since_sequence: in
     await handle_turn_websocket(websocket, turn_id, since_sequence, listener)
 
 
-@router.post("/turns/{turn_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/turns/{turn_id}/cancel", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
 async def cancel_turn(turn_id: UUID, body: CancelTurnRequest | None = None):
     req = body or CancelTurnRequest()
     run = await turn_svc.get_run_for_turn(turn_id)
@@ -134,7 +135,7 @@ async def cancel_turn(turn_id: UUID, body: CancelTurnRequest | None = None):
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
-@router.post("/turns/{turn_id}/approve-tool-call", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/turns/{turn_id}/approve-tool-call", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
 async def approve_tool_call(turn_id: UUID, body: ToolCallDecisionRequest):
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
@@ -156,7 +157,7 @@ async def approve_tool_call(turn_id: UUID, body: ToolCallDecisionRequest):
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
-@router.post("/turns/{turn_id}/deny-tool-call", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/turns/{turn_id}/deny-tool-call", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
 async def deny_tool_call(turn_id: UUID, body: ToolCallDecisionRequest):
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
@@ -187,7 +188,7 @@ def _ensure_patch_allowed(turn: dict) -> None:
         )
 
 
-@router.post("/turns/{turn_id}/patch/accept", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/turns/{turn_id}/patch/accept", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
 async def accept_patch(turn_id: UUID, body: PatchDecisionRequest):
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
@@ -208,7 +209,7 @@ async def accept_patch(turn_id: UUID, body: PatchDecisionRequest):
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
-@router.post("/turns/{turn_id}/patch/reject", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/turns/{turn_id}/patch/reject", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
 async def reject_patch(turn_id: UUID, body: PatchDecisionRequest):
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
