@@ -12,11 +12,12 @@ const SCENARIO_ROUTES: { path: string; id: ScenarioId }[] = [
 
 function Nav() {
   const { pathname } = useLocation();
+
   const link = (to: string, label: string) => (
     <Link
       to={to}
       className={`rounded-lg px-3 py-1.5 text-sm ${
-        pathname === to
+        pathname === to || pathname.startsWith(`${to}/`)
           ? "bg-slate-800 text-white"
           : "text-slate-400 hover:text-white"
       }`}
@@ -47,9 +48,13 @@ export function App() {
           <Route
             key={id}
             path={path}
-            element={<ScenarioWorkbench key={id} scenarioId={id} />}
+            element={<ScenarioWorkbench scenarioId={id} />}
           />
         ))}
+        <Route
+          path="/writing/*"
+          element={<Navigate to="/writing" replace />}
+        />
         <Route path="/settings/model" element={<SettingsPage />} />
       </Routes>
     </div>

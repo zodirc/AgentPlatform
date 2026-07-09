@@ -3,7 +3,7 @@ import { Button } from "../../components/ui/button";
 import { useAdminAuth } from "../../shared/auth/useAdminAuth";
 import { ErrorBanner } from "./ErrorBanner";
 import { scenarioMeta } from "./scenarioMeta";
-import type { ScenarioId, TimelineItem } from "./types";
+import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
 import { useWorkbench } from "./useWorkbench";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";
 import { AgentChatPanel } from "../../scenarios/agent/AgentChatPanel";
@@ -14,6 +14,8 @@ import {
 import { AgentTimelinePanel } from "../../scenarios/agent/AgentTimelinePanel";
 import { WorkspaceFileViewer } from "../../scenarios/agent/WorkspaceFileViewer";
 import { ScenarioSidebarExtras } from "../../scenarios/ScenarioSidebarExtras";
+import { RagDebugModal } from "../../scenarios/writing/RagDebugModal";
+import { SourcesLibraryModal } from "../../scenarios/writing/SourcesLibraryModal";
 
 function artifactBadgeCount(
   timelineItems: { tool_name?: string; stream_output?: string }[],
@@ -39,18 +41,24 @@ function artifactBadgeCount(
   return previewableTools + fileWrites + patches;
 }
 
-type Props = {
+type ViewProps = {
   scenarioId: ScenarioId;
+  wb: WorkbenchState;
+  fillParent?: boolean;
 };
 
-export function ScenarioWorkbench({ scenarioId }: Props) {
-  const meta = scenarioMeta(scenarioId);
-  const wb = useWorkbench({ scenarioId, title: meta.title });
+export function ScenarioWorkbenchView({
+  scenarioId,
+  wb,
+  fillParent = false,
+}: ViewProps) {
   const [selection, setSelection] = useState<SidebarSelection | null>(null);
   const [artifactsOpen, setArtifactsOpen] = useState(scenarioId !== "agent");
   const [workspaceViewerPath, setWorkspaceViewerPath] = useState<string | null>(
     null,
   );
+  const [sourcesLibraryOpen, setSourcesLibraryOpen] = useState(false);
+  const [ragDebugOpen, setRagDebugOpen] = useState(false);
   const { needsUnlock, checking, unlockError, unlock } = useAdminAuth();
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const artifactCount = artifactBadgeCount(
@@ -69,8 +77,12 @@ export function ScenarioWorkbench({ scenarioId }: Props) {
     if (next) setArtifactsOpen(true);
   };
 
+  const rootClass = fillParent
+    ? "flex h-full min-h-0 flex-col"
+    : "flex h-[calc(100vh-49px)] flex-col";
+
   return (
-    <div className="flex h-[calc(100vh-49px)] flex-col">
+    <div className={rootClass}>
       <div className="shrink-0 space-y-2 border-b border-slate-800 px-4 py-2">
         <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
         {needsUnlock && !checking ? (
@@ -112,7 +124,26 @@ export function ScenarioWorkbench({ scenarioId }: Props) {
           <AgentSidebar
             wb={wb}
             selection={selection}
-            scenarioExtras={<ScenarioSidebarExtras wb={wb} />}
+            scenarioExtras={
+              <ScenarioSidebarExtras
+                wb={wb}
+                onOpenSources={
+                  scenarioId === "writing"
+                    ? () => setSourcesLibraryOpen(true)
+                    : undefined
+                }
+                onOpenRagDebug={
+                  scenarioId === "writing"
+                    ? () => setRagDebugOpen(true)
+                    : undefined
+                }
+              />
+            }
+            onOpenSourcesLibrary={
+              scenarioId === "writing"
+                ? () => setSourcesLibraryOpen(true)
+                : undefined
+            }
             onSelect={(sel) => {
               setSelection(sel);
               if (sel?.kind === "workspace") setArtifactsOpen(true);
@@ -170,6 +201,33 @@ export function ScenarioWorkbench({ scenarioId }: Props) {
         path={workspaceViewerPath}
         onClose={() => setWorkspaceViewerPath(null)}
       />
+      {scenarioId === "writing" ? (
+        <>
+          <SourcesLibraryModal
+            open={sourcesLibraryOpen}
+            onClose={() => setSourcesLibraryOpen(false)}
+            onOpenFile={(path) => {
+              setWorkspaceViewerPath(path);
+              setSourcesLibraryOpen(false);
+            }}
+          />
+          <RagDebugModal
+            open={ragDebugOpen}
+            wb={wb}
+            onClose={() => setRagDebugOpen(false)}
+          />
+        </>
+      ) : null}
     </div>
   );
+}
+
+type Props = {
+  scenarioId: ScenarioId;
+};
+
+export function ScenarioWorkbench({ scenarioId }: Props) {
+  const meta = scenarioMeta(scenarioId);
+  const wb = useWorkbench({ scenarioId, title: meta.title });
+  return <ScenarioWorkbenchView scenarioId={scenarioId} wb={wb} />;
 }

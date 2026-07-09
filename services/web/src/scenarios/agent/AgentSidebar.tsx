@@ -26,6 +26,7 @@ type Props = {
   scenarioExtras?: ReactNode;
   onSelect: (sel: SidebarSelection | null) => void;
   onOpenWorkspaceFile: (path: string) => void;
+  onOpenSourcesLibrary?: () => void;
   onClose?: () => void;
 };
 
@@ -83,6 +84,7 @@ export function AgentSidebar({
   scenarioExtras,
   onSelect,
   onOpenWorkspaceFile,
+  onOpenSourcesLibrary,
   onClose,
 }: Props) {
   const view = wb.view;
@@ -185,6 +187,7 @@ export function AgentSidebar({
               onSelect({ kind: "workspace", path });
             }}
             onOpenFile={onOpenWorkspaceFile}
+            onOpenSourcesLibrary={onOpenSourcesLibrary}
           />
           <p className="mt-2 text-[10px] text-slate-600">
             单击选中 · 双击在新窗口查看完整内容

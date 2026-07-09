@@ -45,6 +45,7 @@ type TreeNodeProps = {
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onOpenSourcesLibrary?: () => void;
 };
 
 function TreeNode({
@@ -55,6 +56,7 @@ function TreeNode({
   selectedPath,
   onSelectFile,
   onOpenFile,
+  onOpenSourcesLibrary,
 }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(depth === 0);
   const { data, isLoading, isError } = useQuery({
@@ -100,6 +102,16 @@ function TreeNode({
         className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs text-slate-300 hover:bg-slate-900"
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
         onClick={() => setExpanded((v) => !v)}
+        onDoubleClick={() => {
+          if (path === "sources" && onOpenSourcesLibrary) {
+            onOpenSourcesLibrary();
+          }
+        }}
+        title={
+          path === "sources" && onOpenSourcesLibrary
+            ? "双击打开资料库"
+            : undefined
+        }
       >
         <span className="shrink-0 w-3 text-[10px] text-slate-500">
           {expanded ? "▾" : "▸"}
@@ -135,6 +147,7 @@ function TreeNode({
               selectedPath={selectedPath}
               onSelectFile={onSelectFile}
               onOpenFile={onOpenFile}
+              onOpenSourcesLibrary={onOpenSourcesLibrary}
             />
           ))}
         </div>
@@ -147,12 +160,14 @@ type Props = {
   selectedPath: string | null;
   onSelectFile: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onOpenSourcesLibrary?: () => void;
 };
 
 export function WorkspaceTree({
   selectedPath,
   onSelectFile,
   onOpenFile,
+  onOpenSourcesLibrary,
 }: Props) {
   const handleOpen = useCallback(
     (path: string) => onOpenFile(path),
@@ -173,6 +188,7 @@ export function WorkspaceTree({
         selectedPath={selectedPath}
         onSelectFile={handleSelect}
         onOpenFile={handleOpen}
+        onOpenSourcesLibrary={onOpenSourcesLibrary}
       />
     </div>
   );

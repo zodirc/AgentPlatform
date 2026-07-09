@@ -3,11 +3,12 @@ import { Card, CardTitle } from "../components/ui/card";
 import type { WorkbenchState } from "../shared/workbench/types";
 import { CitationView } from "./writing/CitationView";
 import { DocumentOutlineView } from "./writing/DocumentOutlineView";
-import { SourcesPanel } from "./writing/SourcesPanel";
-import { WritingRagEffectView } from "./writing/WritingRagEffectView";
+import { WritingSidebarTools } from "./writing/WritingSidebarTools";
 
 type Props = {
   wb: WorkbenchState;
+  onOpenSources?: () => void;
+  onOpenRagDebug?: () => void;
 };
 
 function InterviewPlan({ wb }: Props) {
@@ -43,14 +44,22 @@ function DocumentOutline({ wb }: Props) {
 }
 
 /** Scenario-specific panels injected into the shared sidebar. */
-export function ScenarioSidebarExtras({ wb }: Props): ReactNode {
+export function ScenarioSidebarExtras({
+  wb,
+  onOpenSources,
+  onOpenRagDebug,
+}: Props): ReactNode {
   const id = wb.scenarioId;
 
   if (id === "writing") {
     return (
       <div className="space-y-3">
-        <SourcesPanel />
-        <WritingRagEffectView wb={wb} />
+        {onOpenSources && onOpenRagDebug ? (
+          <WritingSidebarTools
+            onOpenSources={onOpenSources}
+            onOpenRagDebug={onOpenRagDebug}
+          />
+        ) : null}
         <CitationView items={wb.view?.tool_timeline ?? []} />
         <DocumentOutline wb={wb} />
       </div>
