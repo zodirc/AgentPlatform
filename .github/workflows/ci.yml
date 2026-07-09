@@ -102,13 +102,19 @@ jobs:
 
       - name: Typecheck API
         run: |
+          pip install -q packages/contracts/python
+          cd services/api
+          pip install -q -e ".[dev]"
           pip install -q pyright
-          pyright services/api/app --pythonversion 3.11
+          pyright app --pythonversion 3.11
 
       - name: Typecheck runtime
         run: |
+          pip install -q packages/contracts/python
+          cd services/runtime
+          pip install -q -e ".[dev]"
           pip install -q pyright
-          pyright services/runtime/app --pythonversion 3.11
+          pyright app --pythonversion 3.11
 
       - name: Web lint, typecheck, test, build
         run: |
