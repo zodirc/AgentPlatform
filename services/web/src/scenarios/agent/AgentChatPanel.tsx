@@ -1,7 +1,10 @@
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
-import { approvalCopy, lastApprovalEvent } from "../../shared/workbench/toolApproval";
+import {
+  approvalCopy,
+  lastApprovalEvent,
+} from "../../shared/workbench/toolApproval";
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
 import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
 import type { WorkbenchState } from "../../shared/workbench/types";
@@ -13,11 +16,9 @@ type Props = {
 export function AgentChatPanel({ wb }: Props) {
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const approval = approvalCopy(wb.pendingToolName);
-  const output =
-    wb.streamText || wb.view?.latest_output || "";
+  const output = wb.streamText || wb.view?.latest_output || "";
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950">
@@ -60,11 +61,16 @@ export function AgentChatPanel({ wb }: Props) {
 
       {wb.awaitingApproval ? (
         <div className="shrink-0 border-t border-violet-900/50 bg-violet-950/30 p-4">
-          <p className="text-sm font-medium text-violet-200">{approval.title}</p>
+          <p className="text-sm font-medium text-violet-200">
+            {approval.title}
+          </p>
           <p className="mb-2 text-xs text-slate-400">{approval.description}</p>
           {wb.pendingWriteFile ? (
             <div className="mb-2">
-              <WriteFileDiffPanel preview={wb.pendingWriteFile} mode="approval" />
+              <WriteFileDiffPanel
+                preview={wb.pendingWriteFile}
+                mode="approval"
+              />
             </div>
           ) : null}
           {wb.pendingToolName === "run_command" && pendingArgs?.command ? (
@@ -100,7 +106,11 @@ export function AgentChatPanel({ wb }: Props) {
           onChange={(e) => wb.setMessage(e.target.value)}
           placeholder={placeholderForScenario(wb.scenarioId)}
           onKeyDown={(e) =>
-            onChatEnterSend(e, () => void wb.handleSend(), !wb.busy && Boolean(wb.message.trim()))
+            onChatEnterSend(
+              e,
+              () => void wb.handleSend(),
+              !wb.busy && Boolean(wb.message.trim()),
+            )
           }
         />
         <div className="mt-2 flex gap-2">

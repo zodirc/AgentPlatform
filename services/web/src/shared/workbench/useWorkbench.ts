@@ -42,23 +42,32 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
   const [events, setEvents] = useState<TurnEvent[]>([]);
   const [streamText, setStreamText] = useState("");
   const [sectionDraft, setSectionDraft] = useState("");
-  const [toolLiveStreams, setToolLiveStreams] = useState<Record<string, string>>({});
+  const [toolLiveStreams, setToolLiveStreams] = useState<
+    Record<string, string>
+  >({});
   const [stopping, setStopping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState(false);
-  const [pendingToolCallId, setPendingToolCallId] = useState<string | null>(null);
+  const [pendingToolCallId, setPendingToolCallId] = useState<string | null>(
+    null,
+  );
   const [pendingToolName, setPendingToolName] = useState<string | null>(null);
-  const [pendingWriteFile, setPendingWriteFile] = useState<WriteFilePreview | null>(null);
+  const [pendingWriteFile, setPendingWriteFile] =
+    useState<WriteFilePreview | null>(null);
   const [liveToolTimeline, setLiveToolTimeline] = useState<TimelineItem[]>([]);
-  const [liveContextUsage, setLiveContextUsage] = useState<ContextUsage | null>(null);
+  const [liveContextUsage, setLiveContextUsage] = useState<ContextUsage | null>(
+    null,
+  );
   const [liveTokenUsage, setLiveTokenUsage] = useState<TokenUsage | null>(null);
   const streamRef = useRef<StreamClient | null>(null);
   const lastSequenceRef = useRef(0);
   const resumingAfterApprovalRef = useRef(false);
 
-  function extractWriteFilePreview(payload: Record<string, unknown>): WriteFilePreview | null {
+  function extractWriteFilePreview(
+    payload: Record<string, unknown>,
+  ): WriteFilePreview | null {
     if (String(payload.tool_name ?? "") !== "write_file") return null;
     const args = (payload.arguments ?? {}) as Record<string, unknown>;
     const path = String(payload.path ?? args.path ?? "");
@@ -91,7 +100,9 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     }
     const fileArtifact = [...(v.artifacts ?? [])]
       .reverse()
-      .find((a) => a.type === "file_write" && (a.status === "pending" || !a.status));
+      .find(
+        (a) => a.type === "file_write" && (a.status === "pending" || !a.status),
+      );
     if (waiting && fileArtifact) {
       setPendingWriteFile({
         path: String(fileArtifact.path ?? ""),
@@ -99,9 +110,14 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
         new_text: String(fileArtifact.new_text ?? ""),
         status: String(fileArtifact.status ?? "pending"),
         truncated: Boolean(fileArtifact.truncated),
-        new_size: typeof fileArtifact.new_size === "number" ? fileArtifact.new_size : undefined,
+        new_size:
+          typeof fileArtifact.new_size === "number"
+            ? fileArtifact.new_size
+            : undefined,
         bytes_written:
-          typeof fileArtifact.bytes_written === "number" ? fileArtifact.bytes_written : undefined,
+          typeof fileArtifact.bytes_written === "number"
+            ? fileArtifact.bytes_written
+            : undefined,
       });
     }
   }
@@ -144,136 +160,164 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
       ? new TurnWebSocketClient()
       : new TurnStreamClient();
     streamRef.current = client;
-    client.connect(id, {
-      onEvent: (ev) => {
-        if (ev.sequence > lastSequenceRef.current) {
-          lastSequenceRef.current = ev.sequence;
-        }
-        setEvents((prev) => [...prev, ev]);
-        if (ev.type === "turn.token") {
-          const delta = String(ev.payload.delta ?? "");
-          setStreamText((t) => t + delta);
-        }
-        if (ev.type === "section.draft.delta") {
-          const delta = String(ev.payload.delta ?? "");
-          setSectionDraft((t) => t + delta);
-        }
-        if (ev.type === "tool.delta") {
-          const toolCallId = String(ev.payload.tool_call_id ?? "");
-          const delta = String(ev.payload.delta ?? "");
-          if (toolCallId) {
-            setToolLiveStreams((prev) => ({
-              ...prev,
-              [toolCallId]: (prev[toolCallId] ?? "") + delta,
-            }));
+    client.connect(
+      id,
+      {
+        onEvent: (ev) => {
+          if (ev.sequence > lastSequenceRef.current) {
+            lastSequenceRef.current = ev.sequence;
           }
-        }
-        if (ev.type === "tool.started") {
-          const toolCallId = String(ev.payload.tool_call_id ?? "");
-          const toolName = String(ev.payload.tool_name ?? "tool");
-          if (toolCallId) {
-            setLiveToolTimeline((prev) => {
-              if (prev.some((t) => t.tool_call_id === toolCallId)) return prev;
-              return [...prev, { tool_call_id: toolCallId, tool_name: toolName, status: "running" }];
-            });
+          setEvents((prev) => [...prev, ev]);
+          if (ev.type === "turn.token") {
+            const delta = String(ev.payload.delta ?? "");
+            setStreamText((t) => t + delta);
           }
-        }
-        if (ev.type === "tool.completed") {
-          const toolCallId = String(ev.payload.tool_call_id ?? "");
-          const toolName = String(ev.payload.tool_name ?? "tool");
-          const status = String(ev.payload.status ?? "ok");
-          const summary =
-            typeof ev.payload.summary === "string" ? ev.payload.summary : undefined;
-          if (toolCallId) {
-            setLiveToolTimeline((prev) => {
-              const idx = prev.findIndex((t) => t.tool_call_id === toolCallId);
-              if (idx < 0) {
+          if (ev.type === "section.draft.delta") {
+            const delta = String(ev.payload.delta ?? "");
+            setSectionDraft((t) => t + delta);
+          }
+          if (ev.type === "tool.delta") {
+            const toolCallId = String(ev.payload.tool_call_id ?? "");
+            const delta = String(ev.payload.delta ?? "");
+            if (toolCallId) {
+              setToolLiveStreams((prev) => ({
+                ...prev,
+                [toolCallId]: (prev[toolCallId] ?? "") + delta,
+              }));
+            }
+          }
+          if (ev.type === "tool.started") {
+            const toolCallId = String(ev.payload.tool_call_id ?? "");
+            const toolName = String(ev.payload.tool_name ?? "tool");
+            if (toolCallId) {
+              setLiveToolTimeline((prev) => {
+                if (prev.some((t) => t.tool_call_id === toolCallId))
+                  return prev;
                 return [
                   ...prev,
-                  { tool_call_id: toolCallId, tool_name: toolName, status, summary },
+                  {
+                    tool_call_id: toolCallId,
+                    tool_name: toolName,
+                    status: "running",
+                  },
                 ];
-              }
-              const next = [...prev];
-              next[idx] = { ...next[idx], tool_name: toolName, status, summary };
-              return next;
+              });
+            }
+          }
+          if (ev.type === "tool.completed") {
+            const toolCallId = String(ev.payload.tool_call_id ?? "");
+            const toolName = String(ev.payload.tool_name ?? "tool");
+            const status = String(ev.payload.status ?? "ok");
+            const summary =
+              typeof ev.payload.summary === "string"
+                ? ev.payload.summary
+                : undefined;
+            if (toolCallId) {
+              setLiveToolTimeline((prev) => {
+                const idx = prev.findIndex(
+                  (t) => t.tool_call_id === toolCallId,
+                );
+                if (idx < 0) {
+                  return [
+                    ...prev,
+                    {
+                      tool_call_id: toolCallId,
+                      tool_name: toolName,
+                      status,
+                      summary,
+                    },
+                  ];
+                }
+                const next = [...prev];
+                next[idx] = {
+                  ...next[idx],
+                  tool_name: toolName,
+                  status,
+                  summary,
+                };
+                return next;
+              });
+            }
+          }
+          if (ev.type === "context.reported") {
+            setLiveContextUsage({
+              tokens_before: Number(ev.payload.tokens_before ?? 0),
+              tokens_after: Number(ev.payload.tokens_after ?? 0),
+              token_budget: Number(ev.payload.token_budget ?? 0),
+              strategies: Array.isArray(ev.payload.strategies)
+                ? (ev.payload.strategies as string[])
+                : [],
+              step_index: Number(ev.payload.step_index ?? 0),
+              system_tokens: Number(ev.payload.system_tokens ?? 0),
+              tools_tokens: Number(ev.payload.tools_tokens ?? 0),
+              messages_tokens: Number(ev.payload.messages_tokens ?? 0),
+              source:
+                (ev.payload.source as ContextUsage["source"]) ?? "estimated",
             });
           }
-        }
-        if (ev.type === "context.reported") {
-          setLiveContextUsage({
-            tokens_before: Number(ev.payload.tokens_before ?? 0),
-            tokens_after: Number(ev.payload.tokens_after ?? 0),
-            token_budget: Number(ev.payload.token_budget ?? 0),
-            strategies: Array.isArray(ev.payload.strategies)
-              ? (ev.payload.strategies as string[])
-              : [],
-            step_index: Number(ev.payload.step_index ?? 0),
-            system_tokens: Number(ev.payload.system_tokens ?? 0),
-            tools_tokens: Number(ev.payload.tools_tokens ?? 0),
-            messages_tokens: Number(ev.payload.messages_tokens ?? 0),
-            source: (ev.payload.source as ContextUsage["source"]) ?? "estimated",
-          });
-        }
-        if (ev.type === "usage.reported" || ev.type === "turn.completed") {
-          const usage = (
-            ev.type === "usage.reported" ? ev.payload : ev.payload.token_usage
-          ) as TokenUsage | undefined;
-          if (usage && typeof usage === "object") {
-            setLiveTokenUsage({
-              input_tokens: Number(usage.input_tokens ?? 0),
-              output_tokens: Number(usage.output_tokens ?? 0),
-              source: usage.source,
-            });
+          if (ev.type === "usage.reported" || ev.type === "turn.completed") {
+            const usage = (
+              ev.type === "usage.reported" ? ev.payload : ev.payload.token_usage
+            ) as TokenUsage | undefined;
+            if (usage && typeof usage === "object") {
+              setLiveTokenUsage({
+                input_tokens: Number(usage.input_tokens ?? 0),
+                output_tokens: Number(usage.output_tokens ?? 0),
+                source: usage.source,
+              });
+            }
           }
-        }
-        if (ev.type === "turn.failed") {
+          if (ev.type === "turn.failed") {
+            setBusy(false);
+            const msg = String(
+              ev.payload.message ?? ev.payload.termination_reason ?? "未知错误",
+            );
+            reportError("任务失败", msg);
+          }
+          if (ev.type === "approval.requested") {
+            if (resumingAfterApprovalRef.current) return;
+            setBusy(false);
+            setPendingApproval(true);
+            setPendingToolCallId(String(ev.payload.tool_call_id ?? ""));
+            setPendingToolName(String(ev.payload.tool_name ?? "tool"));
+            const preview = extractWriteFilePreview(ev.payload);
+            if (preview) setPendingWriteFile(preview);
+            void fetchTurnView(id)
+              .then((v) => {
+                setView(v);
+                syncApprovalFromView(v);
+              })
+              .catch((err) => reportError("刷新审批状态失败", err));
+          }
+          if (ev.type === "approval.resolved") {
+            setPendingApproval(false);
+            setPendingToolCallId(null);
+            setPendingToolName(null);
+            resumingAfterApprovalRef.current = false;
+          }
+        },
+        onClose: async () => {
+          const v = await fetchTurnView(id);
+          setView(v);
+          syncApprovalFromView(v);
+          if (v.context_usage)
+            setLiveContextUsage(v.context_usage as ContextUsage);
+          if (v.token_usage) setLiveTokenUsage(v.token_usage as TokenUsage);
+          setLiveToolTimeline([]);
           setBusy(false);
-          const msg = String(
-            ev.payload.message ?? ev.payload.termination_reason ?? "未知错误",
-          );
-          reportError("任务失败", msg);
-        }
-        if (ev.type === "approval.requested") {
-          if (resumingAfterApprovalRef.current) return;
-          setBusy(false);
-          setPendingApproval(true);
-          setPendingToolCallId(String(ev.payload.tool_call_id ?? ""));
-          setPendingToolName(String(ev.payload.tool_name ?? "tool"));
-          const preview = extractWriteFilePreview(ev.payload);
-          if (preview) setPendingWriteFile(preview);
-          void fetchTurnView(id)
-            .then((v) => {
-              setView(v);
-              syncApprovalFromView(v);
-            })
-            .catch((err) => reportError("刷新审批状态失败", err));
-        }
-        if (ev.type === "approval.resolved") {
-          setPendingApproval(false);
-          setPendingToolCallId(null);
-          setPendingToolName(null);
+          setStopping(false);
+          setActionBusy(false);
           resumingAfterApprovalRef.current = false;
-        }
+        },
+        onError: (err?: unknown) => {
+          setBusy(false);
+          setStopping(false);
+          setActionBusy(false);
+          reportError("事件流连接中断", err ?? "stream error");
+        },
       },
-      onClose: async () => {
-        const v = await fetchTurnView(id);
-        setView(v);
-        syncApprovalFromView(v);
-        if (v.context_usage) setLiveContextUsage(v.context_usage as ContextUsage);
-        if (v.token_usage) setLiveTokenUsage(v.token_usage as TokenUsage);
-        setLiveToolTimeline([]);
-        setBusy(false);
-        setStopping(false);
-        setActionBusy(false);
-        resumingAfterApprovalRef.current = false;
-      },
-      onError: (err?: unknown) => {
-        setBusy(false);
-        setStopping(false);
-        setActionBusy(false);
-        reportError("事件流连接中断", err ?? "stream error");
-      },
-    }, sinceSequence);
+      sinceSequence,
+    );
   }
 
   const startTurnMut = useMutation({
@@ -419,16 +463,19 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     }
   }
 
-  const projectedTimeline: TimelineItem[] = (view?.tool_timeline ?? []).map((item) => {
-    const row = item as TimelineItem;
-    const id = String(row.tool_call_id ?? "");
-    const live = id ? toolLiveStreams[id] : undefined;
-    return live ? { ...row, stream_output: live } : row;
-  });
+  const projectedTimeline: TimelineItem[] = (view?.tool_timeline ?? []).map(
+    (item) => {
+      const row = item as TimelineItem;
+      const id = String(row.tool_call_id ?? "");
+      const live = id ? toolLiveStreams[id] : undefined;
+      return live ? { ...row, stream_output: live } : row;
+    },
+  );
   const timelineItems: TimelineItem[] =
     liveToolTimeline.length > 0 ? liveToolTimeline : projectedTimeline;
   for (const [toolCallId, stream] of Object.entries(toolLiveStreams)) {
-    if (timelineItems.some((t) => String(t.tool_call_id) === toolCallId)) continue;
+    if (timelineItems.some((t) => String(t.tool_call_id) === toolCallId))
+      continue;
     timelineItems.push({
       tool_call_id: toolCallId,
       tool_name: "…",
@@ -437,16 +484,21 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     });
   }
 
-  const displayStatus = pendingApproval || view?.status === "waiting_approval"
-    ? "waiting_approval"
-    : busy
-      ? "running"
-      : view?.status ?? "idle";
+  const displayStatus =
+    pendingApproval || view?.status === "waiting_approval"
+      ? "waiting_approval"
+      : busy
+        ? "running"
+        : (view?.status ?? "idle");
 
   const contextUsage =
-    liveContextUsage ?? (view?.context_usage as ContextUsage | null | undefined) ?? null;
+    liveContextUsage ??
+    (view?.context_usage as ContextUsage | null | undefined) ??
+    null;
   const tokenUsage =
-    liveTokenUsage ?? (view?.token_usage as TokenUsage | null | undefined) ?? null;
+    liveTokenUsage ??
+    (view?.token_usage as TokenUsage | null | undefined) ??
+    null;
 
   return {
     scenarioId,
@@ -470,8 +522,10 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     displayStatus,
     pendingToolCallId: view?.interrupt?.tool_call_id ?? pendingToolCallId,
     pendingToolName:
-      String((view?.interrupt as Record<string, string> | undefined)?.tool_name ?? "") ||
-      pendingToolName,
+      String(
+        (view?.interrupt as Record<string, string> | undefined)?.tool_name ??
+          "",
+      ) || pendingToolName,
     pendingWriteFile,
     useWebSocket,
     awaitingApproval:

@@ -1,6 +1,9 @@
 import type { TurnEvent } from "../../shared/api/client";
 import type { WorkbenchState } from "../../shared/workbench/types";
-import { approvalCopy, lastApprovalEvent } from "../../shared/workbench/toolApproval";
+import {
+  approvalCopy,
+  lastApprovalEvent,
+} from "../../shared/workbench/toolApproval";
 import { UsageMeter } from "./UsageMeter";
 
 export type AgentPhase =
@@ -18,7 +21,10 @@ export type AgentActivity = {
   detail?: string;
 };
 
-function formatToolDetail(toolName: string, args: Record<string, unknown> | undefined): string {
+function formatToolDetail(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): string {
   if (!args) return "";
   if (typeof args.path === "string") return args.path;
   if (typeof args.pattern === "string") return args.pattern;
@@ -29,7 +35,10 @@ function formatToolDetail(toolName: string, args: Record<string, unknown> | unde
 
 export function deriveAgentActivity(
   events: TurnEvent[],
-  wb: Pick<WorkbenchState, "busy" | "awaitingApproval" | "displayStatus" | "view" | "pendingToolName">,
+  wb: Pick<
+    WorkbenchState,
+    "busy" | "awaitingApproval" | "displayStatus" | "view" | "pendingToolName"
+  >,
 ): AgentActivity {
   const last = events[events.length - 1];
   const runningTool = [...events].reverse().find((e) => {
@@ -45,7 +54,9 @@ export function deriveAgentActivity(
   });
 
   if (wb.displayStatus === "failed" || last?.type === "turn.failed") {
-    const msg = String(last?.payload.message ?? wb.view?.latest_output ?? "任务失败");
+    const msg = String(
+      last?.payload.message ?? wb.view?.latest_output ?? "任务失败",
+    );
     return { phase: "failed", label: "任务失败", detail: msg };
   }
   if (wb.awaitingApproval || last?.type === "approval.requested") {
@@ -53,7 +64,8 @@ export function deriveAgentActivity(
     const tool = String(
       approvalEv?.payload.tool_name ?? wb.pendingToolName ?? "tool",
     );
-    const args = approvalEv?.payload.arguments as Record<string, unknown> | undefined;
+    const args = approvalEv?.payload.arguments as
+      Record<string, unknown> | undefined;
     const copy = approvalCopy(tool);
     const path = String(
       (approvalEv?.payload.path as string | undefined) ?? args?.path ?? "",
@@ -76,7 +88,8 @@ export function deriveAgentActivity(
   }
   if (runningTool) {
     const toolName = String(runningTool.payload.tool_name ?? "tool");
-    const args = runningTool.payload.arguments as Record<string, unknown> | undefined;
+    const args = runningTool.payload.arguments as
+      Record<string, unknown> | undefined;
     const detail = formatToolDetail(toolName, args);
     return {
       phase: "tool",
@@ -84,7 +97,9 @@ export function deriveAgentActivity(
       detail: detail || undefined,
     };
   }
-  const lastThinking = [...events].reverse().find((e) => e.type === "turn.thinking");
+  const lastThinking = [...events]
+    .reverse()
+    .find((e) => e.type === "turn.thinking");
   if (wb.busy && lastThinking) {
     const step = lastThinking.payload.step_index;
     return {
@@ -123,11 +138,17 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs uppercase tracking-wide opacity-70">当前状态</p>
-          <p className={compact ? "text-base font-medium" : "text-lg font-medium"}>
+          <p
+            className={
+              compact ? "text-base font-medium" : "text-lg font-medium"
+            }
+          >
             {activity.label}
           </p>
           {activity.detail ? (
-            <p className="mt-0.5 truncate text-sm opacity-80">{activity.detail}</p>
+            <p className="mt-0.5 truncate text-sm opacity-80">
+              {activity.detail}
+            </p>
           ) : null}
         </div>
         <div className="text-right text-xs opacity-60">

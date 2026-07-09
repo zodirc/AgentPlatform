@@ -26,7 +26,9 @@ export function CitationView({ items }: Props) {
               <Badge variant={valid ? "success" : "warning"}>
                 {valid ? "valid" : "invalid"}
               </Badge>
-              <span className="ml-2 text-slate-300">{String(item.summary ?? "")}</span>
+              <span className="ml-2 text-slate-300">
+                {String(item.summary ?? "")}
+              </span>
             </li>
           );
         })}

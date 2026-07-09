@@ -13,7 +13,11 @@ export function SettingsPage() {
   const qc = useQueryClient();
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const [authRequired, setAuthRequired] = useState(false);
-  const { data: providers = [], isLoading, error } = useQuery({
+  const {
+    data: providers = [],
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["model-providers"],
     queryFn: listModelProviders,
     retry: false,
@@ -74,7 +78,9 @@ export function SettingsPage() {
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h1 className="text-2xl font-semibold">模型供应商</h1>
-      <p className="mt-1 text-sm text-slate-400">保存后下一 Turn 起生效，无需重启容器。</p>
+      <p className="mt-1 text-sm text-slate-400">
+        保存后下一 Turn 起生效，无需重启容器。
+      </p>
 
       {authRequired && (
         <form
@@ -95,13 +101,19 @@ export function SettingsPage() {
             value={adminPasswordInput}
             onChange={(e) => setAdminPasswordInput(e.target.value)}
           />
-          <button type="submit" className="rounded-lg bg-amber-700 px-4 py-2 text-sm">
+          <button
+            type="submit"
+            className="rounded-lg bg-amber-700 px-4 py-2 text-sm"
+          >
             解锁
           </button>
         </form>
       )}
 
-      <form onSubmit={onSubmit} className="mt-6 space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+      <form
+        onSubmit={onSubmit}
+        className="mt-6 space-y-3 rounded-xl border border-slate-800 bg-slate-900/60 p-4"
+      >
         <input
           className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
           placeholder="标签"
@@ -153,7 +165,10 @@ export function SettingsPage() {
             >
               <div>
                 <div className="font-medium">
-                  {p.label} {p.is_active && <span className="text-sky-400">(active)</span>}
+                  {p.label}{" "}
+                  {p.is_active && (
+                    <span className="text-sky-400">(active)</span>
+                  )}
                 </div>
                 <div className="text-xs text-slate-500">
                   {p.provider} / {p.model_name} · {p.api_key_hint}
@@ -164,7 +179,10 @@ export function SettingsPage() {
                     onSubmit={(e) => {
                       e.preventDefault();
                       if (!editModelName.trim()) return;
-                      updateMut.mutate({ id: p.id, body: { model_name: editModelName.trim() } });
+                      updateMut.mutate({
+                        id: p.id,
+                        body: { model_name: editModelName.trim() },
+                      });
                     }}
                   >
                     <input
@@ -173,7 +191,11 @@ export function SettingsPage() {
                       onChange={(e) => setEditModelName(e.target.value)}
                       placeholder="新 model_name"
                     />
-                    <button type="submit" className="text-xs text-sky-400" disabled={updateMut.isPending}>
+                    <button
+                      type="submit"
+                      className="text-xs text-sky-400"
+                      disabled={updateMut.isPending}
+                    >
                       保存
                     </button>
                     <button
@@ -219,7 +241,9 @@ export function SettingsPage() {
             </li>
           ))}
           {!providers.length && !isLoading && (
-            <li className="text-sm text-slate-500">暂无配置（runtime 使用 .env fallback）</li>
+            <li className="text-sm text-slate-500">
+              暂无配置（runtime 使用 .env fallback）
+            </li>
           )}
         </ul>
       </section>

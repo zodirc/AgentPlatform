@@ -12,7 +12,9 @@ type Props = {
 };
 
 export function RetrievalView({ artifacts }: Props) {
-  const items = artifacts.filter((a) => a.type === "retrieval") as RetrievalArtifact[];
+  const items = artifacts.filter(
+    (a) => a.type === "retrieval",
+  ) as RetrievalArtifact[];
   if (!items.length) return null;
 
   return (
@@ -21,13 +23,18 @@ export function RetrievalView({ artifacts }: Props) {
       <ul className="mt-2 space-y-2 text-xs">
         {items.map((item, idx) => (
           <li key={idx} className="rounded bg-slate-950 px-3 py-2">
-            <div className="text-slate-300">{String(item.summary ?? item.query ?? "retrieval")}</div>
+            <div className="text-slate-300">
+              {String(item.summary ?? item.query ?? "retrieval")}
+            </div>
             {Array.isArray(item.hits) && item.hits.length > 0 ? (
               <ul className="mt-1 text-slate-500">
                 {item.hits.slice(0, 5).map((hit, i) => (
                   <li key={i}>
                     {String((hit as { path?: string }).path ?? "hit")} —{" "}
-                    {String((hit as { excerpt?: string }).excerpt ?? "").slice(0, 80)}
+                    {String((hit as { excerpt?: string }).excerpt ?? "").slice(
+                      0,
+                      80,
+                    )}
                   </li>
                 ))}
               </ul>

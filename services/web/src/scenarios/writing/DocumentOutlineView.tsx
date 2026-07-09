@@ -11,7 +11,5 @@ type Props = {
 
 export function DocumentOutlineView({ artifact }: Props) {
   if (!artifact?.content) return null;
-  return (
-    <SectionEditor title="outline" value={String(artifact.content)} />
-  );
+  return <SectionEditor title="outline" value={String(artifact.content)} />;
 }

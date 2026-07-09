@@ -15,10 +15,13 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
   const ctxAfter = contextUsage?.tokens_after;
   const ctxBudget = contextUsage?.token_budget;
   const hasContext =
-    contextUsage != null && typeof ctxAfter === "number" && typeof ctxBudget === "number";
+    contextUsage != null &&
+    typeof ctxAfter === "number" &&
+    typeof ctxBudget === "number";
   const hasToken =
     tokenUsage != null &&
-    (Number(tokenUsage.input_tokens ?? 0) > 0 || Number(tokenUsage.output_tokens ?? 0) > 0);
+    (Number(tokenUsage.input_tokens ?? 0) > 0 ||
+      Number(tokenUsage.output_tokens ?? 0) > 0);
 
   if (!hasContext && !hasToken) return null;
 
@@ -43,13 +46,18 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
           <div className="mb-1 flex items-center justify-between gap-2">
             <span>上下文窗口</span>
             <span>
-              {formatTokens(ctxAfter)} / {formatTokens(ctxBudget)} ({pct}%) · {sourceLabel}
+              {formatTokens(ctxAfter)} / {formatTokens(ctxBudget)} ({pct}%) ·{" "}
+              {sourceLabel}
             </span>
           </div>
           <div className="h-1.5 overflow-hidden rounded bg-black/30">
             <div
               className={`h-full rounded ${
-                pct >= 90 ? "bg-rose-400" : pct >= 70 ? "bg-amber-400" : "bg-sky-400"
+                pct >= 90
+                  ? "bg-rose-400"
+                  : pct >= 70
+                    ? "bg-amber-400"
+                    : "bg-sky-400"
               }`}
               style={{ width: `${Math.max(pct, 1)}%` }}
             />

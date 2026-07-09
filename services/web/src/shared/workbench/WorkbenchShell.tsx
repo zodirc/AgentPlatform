@@ -41,8 +41,7 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const approval = approvalCopy(wb.pendingToolName);
 
   return (
@@ -75,7 +74,9 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
           <span className="text-sm text-amber-200">
             需要 Admin 密码才能查看工具结果和批准敏感操作
           </span>
-          {unlockError ? <span className="text-sm text-rose-300">{unlockError}</span> : null}
+          {unlockError ? (
+            <span className="text-sm text-rose-300">{unlockError}</span>
+          ) : null}
           <input
             className="rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm"
             type="password"
@@ -89,7 +90,11 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         </form>
       )}
 
-      <div className={layout === "agent" ? "max-w-3xl" : "grid gap-4 lg:grid-cols-2"}>
+      <div
+        className={
+          layout === "agent" ? "max-w-3xl" : "grid gap-4 lg:grid-cols-2"
+        }
+      >
         <Card className={layout === "agent" ? "" : undefined}>
           <label className="mb-2 block text-sm text-slate-300">消息</label>
           <Textarea
@@ -97,7 +102,11 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
             onChange={(e) => wb.setMessage(e.target.value)}
             placeholder={placeholderForScenario(wb.scenarioId)}
             onKeyDown={(e) =>
-              onChatEnterSend(e, () => void wb.handleSend(), !wb.busy && Boolean(wb.message.trim()))
+              onChatEnterSend(
+                e,
+                () => void wb.handleSend(),
+                !wb.busy && Boolean(wb.message.trim()),
+              )
             }
           />
           <div className="mt-3 flex gap-2">
@@ -119,23 +128,23 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         </Card>
 
         {layout === "default" ? (
-        <Card>
-          <CardTitle>输出</CardTitle>
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs">
-            {wb.streamText ||
-              wb.sectionDraft ||
-              wb.view?.latest_output ||
-              "（等待 Turn）"}
-          </pre>
-          {(wb.view || wb.busy || wb.awaitingApproval) && (
-            <p className="mt-2 text-xs text-slate-500">
-              status={wb.displayStatus}
-              {wb.view ? ` · seq=${wb.view.last_event_sequence}` : ""}
-              {wb.view?.runner_id ? ` · runner=${wb.view.runner_id}` : ""}
-              {wb.turnId ? ` · turn=${wb.turnId.slice(0, 8)}` : ""}
-            </p>
-          )}
-        </Card>
+          <Card>
+            <CardTitle>输出</CardTitle>
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs">
+              {wb.streamText ||
+                wb.sectionDraft ||
+                wb.view?.latest_output ||
+                "（等待 Turn）"}
+            </pre>
+            {(wb.view || wb.busy || wb.awaitingApproval) && (
+              <p className="mt-2 text-xs text-slate-500">
+                status={wb.displayStatus}
+                {wb.view ? ` · seq=${wb.view.last_event_sequence}` : ""}
+                {wb.view?.runner_id ? ` · runner=${wb.view.runner_id}` : ""}
+                {wb.turnId ? ` · turn=${wb.turnId.slice(0, 8)}` : ""}
+              </p>
+            )}
+          </Card>
         ) : null}
       </div>
 
@@ -145,7 +154,10 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
           <p className="mb-1 text-sm text-slate-300">{approval.description}</p>
           {wb.pendingWriteFile ? (
             <div className="mb-3">
-              <WriteFileDiffPanel preview={wb.pendingWriteFile} mode="approval" />
+              <WriteFileDiffPanel
+                preview={wb.pendingWriteFile}
+                mode="approval"
+              />
             </div>
           ) : null}
           {wb.pendingToolName === "run_command" && pendingArgs?.command ? (
@@ -155,7 +167,8 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
           ) : null}
           {wb.pendingToolCallId ? (
             <p className="mb-3 text-xs text-slate-400">
-              工具：{wb.pendingToolName ?? "unknown"} · id={wb.pendingToolCallId}
+              工具：{wb.pendingToolName ?? "unknown"} · id=
+              {wb.pendingToolCallId}
             </p>
           ) : (
             <p className="mb-3 text-xs text-amber-400">
@@ -217,7 +230,9 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         <h2 className="mb-2 text-sm font-medium text-slate-400">
           {layout === "agent" ? "调试事件流" : "事件流"}
         </h2>
-        <pre className={`overflow-auto text-xs text-slate-500 ${layout === "agent" ? "max-h-24" : "max-h-40"}`}>
+        <pre
+          className={`overflow-auto text-xs text-slate-500 ${layout === "agent" ? "max-h-24" : "max-h-40"}`}
+        >
           {wb.events.map((e) => `${e.sequence}:${e.type}`).join(" → ") || "—"}
         </pre>
       </section>

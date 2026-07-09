@@ -10,9 +10,14 @@ describe("TurnStreamClient", () => {
 
   it("clears reconnect timer on close", () => {
     const client = new TurnStreamClient();
-    (client as unknown as { reconnectTimer: ReturnType<typeof setTimeout> | null }).reconnectTimer =
-      setTimeout(() => undefined, 10_000);
+    (
+      client as unknown as {
+        reconnectTimer: ReturnType<typeof setTimeout> | null;
+      }
+    ).reconnectTimer = setTimeout(() => undefined, 10_000);
     client.close();
-    expect((client as unknown as { reconnectTimer: unknown }).reconnectTimer).toBeNull();
+    expect(
+      (client as unknown as { reconnectTimer: unknown }).reconnectTimer,
+    ).toBeNull();
   });
 });

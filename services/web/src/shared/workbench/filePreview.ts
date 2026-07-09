@@ -6,7 +6,12 @@ const PREVIEW_LINE_LIMIT = 120;
 export function previewText(
   text: string,
   opts?: { charLimit?: number; lineLimit?: number },
-): { text: string; truncated: boolean; totalChars: number; totalLines: number } {
+): {
+  text: string;
+  truncated: boolean;
+  totalChars: number;
+  totalLines: number;
+} {
   const charLimit = opts?.charLimit ?? PREVIEW_CHAR_LIMIT;
   const lineLimit = opts?.lineLimit ?? PREVIEW_LINE_LIMIT;
   const totalChars = text.length;
@@ -31,7 +36,9 @@ export function previewText(
   return { text: out, truncated, totalChars, totalLines };
 }
 
-export function artifactToWritePreview(item: Record<string, unknown>): WriteFilePreview {
+export function artifactToWritePreview(
+  item: Record<string, unknown>,
+): WriteFilePreview {
   return {
     path: String(item.path ?? ""),
     old_text: String(item.old_text ?? ""),
@@ -39,6 +46,7 @@ export function artifactToWritePreview(item: Record<string, unknown>): WriteFile
     status: String(item.status ?? "applied"),
     truncated: Boolean(item.truncated),
     new_size: typeof item.new_size === "number" ? item.new_size : undefined,
-    bytes_written: typeof item.bytes_written === "number" ? item.bytes_written : undefined,
+    bytes_written:
+      typeof item.bytes_written === "number" ? item.bytes_written : undefined,
   };
 }

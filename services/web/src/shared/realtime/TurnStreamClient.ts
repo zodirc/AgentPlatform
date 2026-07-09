@@ -69,7 +69,9 @@ export class TurnStreamClient {
         buffer = frames.pop() ?? "";
         for (const frame of frames) {
           if (this.stopped) break;
-          const dataLine = frame.split("\n").find((line) => line.startsWith("data:"));
+          const dataLine = frame
+            .split("\n")
+            .find((line) => line.startsWith("data:"));
           if (!dataLine) continue;
           const data = JSON.parse(dataLine.slice(5).trim()) as TurnEvent;
           if (data.sequence > this.lastSequence) {
@@ -87,12 +89,17 @@ export class TurnStreamClient {
         this.handlers?.onClose?.();
       }
     } catch (err) {
-      if (this.stopped || (err instanceof DOMException && err.name === "AbortError")) {
+      if (
+        this.stopped ||
+        (err instanceof DOMException && err.name === "AbortError")
+      ) {
         return;
       }
       if (!this.turnId || !this.handlers) return;
       if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        this.handlers.onError?.(err instanceof Error ? err : new Error("SSE connection error"));
+        this.handlers.onError?.(
+          err instanceof Error ? err : new Error("SSE connection error"),
+        );
         return;
       }
       const delay = BASE_RECONNECT_MS * 2 ** this.reconnectAttempts;

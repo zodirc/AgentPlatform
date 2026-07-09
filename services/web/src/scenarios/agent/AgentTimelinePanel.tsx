@@ -17,7 +17,8 @@ function toolLabel(item: TimelineItem, events: TurnEvent[] = []): string {
         e.type === "tool.started" &&
         String(e.payload.tool_call_id ?? "") === toolCallId,
     );
-    const args = started?.payload.arguments as Record<string, unknown> | undefined;
+    const args = started?.payload.arguments as
+      Record<string, unknown> | undefined;
     if (typeof args?.path === "string") return `${name}(${args.path})`;
     if (typeof args?.pattern === "string") return `${name}(${args.pattern})`;
     if (typeof args?.command === "string") {

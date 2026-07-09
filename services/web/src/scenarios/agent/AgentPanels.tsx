@@ -10,9 +10,9 @@ type Props = {
 
 export function AgentPanels({ wb }: Props) {
   const view = wb.view;
-  const errorArtifact = (view?.artifacts ?? []).find((a) => a.type === "error") as
-    | { message?: string; termination_reason?: string }
-    | undefined;
+  const errorArtifact = (view?.artifacts ?? []).find(
+    (a) => a.type === "error",
+  ) as { message?: string; termination_reason?: string } | undefined;
   const fileWrites = (view?.artifacts ?? [])
     .filter((a) => a.type === "file_write" && typeof a.path === "string")
     .filter((a) => String(a.status ?? "") === "applied");
@@ -22,7 +22,9 @@ export function AgentPanels({ wb }: Props) {
       {errorArtifact?.message ? (
         <section className="rounded-xl border border-rose-800/60 bg-rose-950/30 p-4">
           <h2 className="mb-1 text-sm font-medium text-rose-200">失败原因</h2>
-          <p className="text-sm text-rose-100">{String(errorArtifact.message)}</p>
+          <p className="text-sm text-rose-100">
+            {String(errorArtifact.message)}
+          </p>
           {errorArtifact.termination_reason ? (
             <p className="mt-1 text-xs text-rose-300/80">
               reason={String(errorArtifact.termination_reason)}
@@ -59,7 +61,8 @@ export function AgentPanels({ wb }: Props) {
               )?.items ?? []
             ).map((item) => (
               <li key={item.id} className="rounded bg-slate-950 px-3 py-2">
-                <span className="text-slate-400">{item.status}</span> — {item.title}
+                <span className="text-slate-400">{item.status}</span> —{" "}
+                {item.title}
               </li>
             ))}
           </ul>

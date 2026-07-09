@@ -18,7 +18,12 @@ export function ArtifactView({ artifacts }: Props) {
           <li key={idx} className="rounded bg-slate-950 px-3 py-2">
             <span className="text-slate-400">{String(item.type)}</span>
             {" — "}
-            {String(item.summary ?? item.event ?? item.title ?? JSON.stringify(item).slice(0, 120))}
+            {String(
+              item.summary ??
+                item.event ??
+                item.title ??
+                JSON.stringify(item).slice(0, 120),
+            )}
           </li>
         ))}
       </ul>

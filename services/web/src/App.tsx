@@ -10,7 +10,9 @@ function Nav() {
     <Link
       to={to}
       className={`rounded-lg px-3 py-1.5 text-sm ${
-        pathname === to ? "bg-slate-800 text-white" : "text-slate-400 hover:text-white"
+        pathname === to
+          ? "bg-slate-800 text-white"
+          : "text-slate-400 hover:text-white"
       }`}
     >
       {label}

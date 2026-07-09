@@ -6,7 +6,10 @@ import {
 } from "../../components/PatchDiffPanel";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import { artifactToWritePreview } from "../../shared/workbench/filePreview";
-import type { TimelineItem, WorkbenchState } from "../../shared/workbench/types";
+import type {
+  TimelineItem,
+  WorkbenchState,
+} from "../../shared/workbench/types";
 import { ArtifactView } from "./ArtifactView";
 import { RetrievalView } from "./RetrievalView";
 
@@ -42,7 +45,8 @@ function timelinePath(item: TimelineItem, events: TurnEvent[]): string | null {
         e.type === "tool.started" &&
         String(e.payload.tool_call_id ?? "") === toolCallId,
     );
-    const args = started?.payload.arguments as Record<string, unknown> | undefined;
+    const args = started?.payload.arguments as
+      Record<string, unknown> | undefined;
     if (typeof args?.path === "string") return args.path;
     if (typeof args?.pattern === "string") return args.pattern;
     if (typeof args?.command === "string") return args.command.slice(0, 40);
@@ -71,7 +75,9 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
   const view = wb.view;
   const artifacts = view?.artifacts ?? [];
 
-  const patches = artifacts.filter(isPatchArtifact) as unknown as PatchArtifact[];
+  const patches = artifacts.filter(
+    isPatchArtifact,
+  ) as unknown as PatchArtifact[];
   const fileWrites = artifacts
     .filter((a) => a.type === "file_write" && typeof a.path === "string")
     .filter((a) => String(a.status ?? "") === "applied");
@@ -156,7 +162,9 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
                       }`}
                       onClick={() =>
                         onSelect(
-                          active ? null : { kind: "timeline", item, index: idx },
+                          active
+                            ? null
+                            : { kind: "timeline", item, index: idx },
                         )
                       }
                     >
@@ -190,9 +198,7 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
                           : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
                       }`}
                       onClick={() =>
-                        onSelect(
-                          active ? null : { kind: "file_write", path },
-                        )
+                        onSelect(active ? null : { kind: "file_write", path })
                       }
                     >
                       {path}
@@ -245,7 +251,9 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
           <ArtifactView artifacts={artifacts} />
           {artifacts.some((a) => a.type === "plan") ? (
             <section className="rounded-lg border border-violet-900/50 bg-violet-950/20 p-3">
-              <h3 className="mb-2 text-xs font-medium text-violet-200">任务计划</h3>
+              <h3 className="mb-2 text-xs font-medium text-violet-200">
+                任务计划
+              </h3>
               <ul className="space-y-1 text-xs">
                 {(
                   (
@@ -258,8 +266,12 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
                     }
                   )?.items ?? []
                 ).map((item) => (
-                  <li key={item.id} className="rounded bg-slate-950 px-2 py-1.5">
-                    <span className="text-slate-500">{item.status}</span> — {item.title}
+                  <li
+                    key={item.id}
+                    className="rounded bg-slate-950 px-2 py-1.5"
+                  >
+                    <span className="text-slate-500">{item.status}</span> —{" "}
+                    {item.title}
                   </li>
                 ))}
               </ul>
@@ -274,8 +286,11 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
             <p className="truncate text-sm font-medium text-slate-200">
               {selectedPreview.title}
             </p>
-            <p className="mb-2 text-xs text-slate-500">{selectedPreview.subtitle}</p>
-            {"writePreview" in selectedPreview && selectedPreview.writePreview ? (
+            <p className="mb-2 text-xs text-slate-500">
+              {selectedPreview.subtitle}
+            </p>
+            {"writePreview" in selectedPreview &&
+            selectedPreview.writePreview ? (
               <WriteFileDiffPanel preview={selectedPreview.writePreview} />
             ) : "patch" in selectedPreview && selectedPreview.patch ? (
               <PatchDiffPanel

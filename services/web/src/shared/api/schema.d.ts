@@ -4,907 +4,907 @@
  */
 
 export interface paths {
-    "/sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Create a session */
-        post: operations["createSession"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+  "/sessions": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/sessions/{session_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get session resource */
-        get: operations["getSession"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Create a session */
+    post: operations["createSession"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/sessions/{session_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/sessions/{session_id}/view": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get session projection view */
-        get: operations["getSessionView"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Get session resource */
+    get: operations["getSession"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/sessions/{session_id}/view": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/sessions/{session_id}/turns": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Start a turn in a session */
-        post: operations["createTurn"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Get session projection view */
+    get: operations["getSessionView"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/sessions/{session_id}/turns": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get turn resource */
-        get: operations["getTurn"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Start a turn in a session */
+    post: operations["createTurn"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/view": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get turn projection view */
-        get: operations["getTurnView"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Get turn resource */
+    get: operations["getTurn"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/view": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/stream": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** SSE stream of turn events */
-        get: operations["streamTurn"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Get turn projection view */
+    get: operations["getTurnView"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/stream": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/ws": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * WebSocket turn event stream (bidirectional approval)
-         * @description Upgrades to WebSocket. Server pushes turn events as JSON (same shape as SSE data).
-         *     Client may send approve_tool_call or deny_tool_call actions while status is waiting_approval.
-         */
-        get: operations["websocketTurn"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** SSE stream of turn events */
+    get: operations["streamTurn"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/ws": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Request turn cancellation */
-        post: operations["cancelTurn"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /**
+     * WebSocket turn event stream (bidirectional approval)
+     * @description Upgrades to WebSocket. Server pushes turn events as JSON (same shape as SSE data).
+     *     Client may send approve_tool_call or deny_tool_call actions while status is waiting_approval.
+     */
+    get: operations["websocketTurn"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/cancel": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/runs/{run_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get run resource */
-        get: operations["getRun"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Request turn cancellation */
+    post: operations["cancelTurn"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/runs/{run_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/approve-tool-call": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Approve a tool call awaiting user consent */
-        post: operations["approveToolCall"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** Get run resource */
+    get: operations["getRun"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/approve-tool-call": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/deny-tool-call": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Deny a tool call awaiting user consent */
-        post: operations["denyToolCall"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Approve a tool call awaiting user consent */
+    post: operations["approveToolCall"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/deny-tool-call": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/patch/accept": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Accept a proposed patch */
-        post: operations["acceptPatch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Deny a tool call awaiting user consent */
+    post: operations["denyToolCall"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/patch/accept": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/turns/{turn_id}/patch/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reject a proposed patch */
-        post: operations["rejectPatch"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Accept a proposed patch */
+    post: operations["acceptPatch"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/turns/{turn_id}/patch/reject": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/admin/model-providers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List model provider profiles (admin) */
-        get: operations["listModelProviders"];
-        put?: never;
-        /** Create a model provider profile (admin) */
-        post: operations["createModelProvider"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    put?: never;
+    /** Reject a proposed patch */
+    post: operations["rejectPatch"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/admin/model-providers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/admin/model-providers/{profile_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Update a model provider profile (admin) */
-        put: operations["updateModelProvider"];
-        post?: never;
-        /** Delete a model provider profile (admin) */
-        delete: operations["deleteModelProvider"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    /** List model provider profiles (admin) */
+    get: operations["listModelProviders"];
+    put?: never;
+    /** Create a model provider profile (admin) */
+    post: operations["createModelProvider"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/admin/model-providers/{profile_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    "/admin/model-providers/{profile_id}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Activate a model provider profile (admin) */
-        put: operations["activateModelProvider"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
+    get?: never;
+    /** Update a model provider profile (admin) */
+    put: operations["updateModelProvider"];
+    post?: never;
+    /** Delete a model provider profile (admin) */
+    delete: operations["deleteModelProvider"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/admin/model-providers/{profile_id}/activate": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
+    get?: never;
+    /** Activate a model provider profile (admin) */
+    put: operations["activateModelProvider"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
-    schemas: {
-        CreateSessionRequest: {
-            /**
-             * @default writing
-             * @enum {string}
-             */
-            default_scenario_id: "writing" | "agent" | "interview";
-        };
-        SessionResponse: {
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            default_scenario_id: "writing" | "agent" | "interview";
-            status: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        CreateTurnRequest: {
-            message: string;
-            /** @enum {string} */
-            scenario_id?: "writing" | "agent" | "interview";
-            /** Format: uuid */
-            client_request_id?: string;
-        };
-        TurnResponse: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            session_id: string;
-            /** @enum {string} */
-            scenario_id: "writing" | "agent" | "interview";
-            status: string;
-            user_input?: string;
-            /** Format: date-time */
-            created_at: string;
-        };
-        TurnView: {
-            /** Format: uuid */
-            turn_id: string;
-            /** Format: uuid */
-            session_id: string;
-            /** @enum {string} */
-            scenario_id: "writing" | "agent" | "interview";
-            status: string;
-            user_input: string;
-            latest_output?: string | null;
-            tool_timeline: Record<string, never>[];
-            artifacts: Record<string, never>[];
-            last_event_sequence: number;
-            /** Format: date-time */
-            updated_at: string;
-            cancellable: boolean;
-            /** Format: date-time */
-            cancel_requested_at?: string | null;
-            interrupt?: Record<string, never> | null;
-            /** @description Runtime replica that owns the active run (Phase 3) */
-            runner_id?: string | null;
-            /** @description Latest context window occupancy from ContextEngine */
-            context_usage?: {
-                tokens_before?: number;
-                tokens_after?: number;
-                token_budget?: number;
-                strategies?: string[];
-                step_index?: number;
-                system_tokens?: number;
-                tools_tokens?: number;
-                messages_tokens?: number;
-                /** @enum {string} */
-                source?: "estimated" | "provider";
-            } | null;
-            /** @description Cumulative model API tokens for this turn */
-            token_usage?: {
-                input_tokens?: number;
-                output_tokens?: number;
-                /** @enum {string} */
-                source?: "provider" | "estimated" | "mixed";
-            } | null;
-        };
-        SessionView: {
-            /** Format: uuid */
-            session_id: string;
-            /** @enum {string} */
-            default_scenario_id: "writing" | "agent" | "interview";
-            status: string;
-            turn_count: number;
-            /** Format: uuid */
-            last_turn_id?: string | null;
-            last_turn_status?: string | null;
-            context_summary?: {
-                [key: string]: unknown;
-            } | null;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        RunResponse: {
-            /** Format: uuid */
-            id: string;
-            /** Format: uuid */
-            turn_id: string;
-            status: string;
-            termination_reason?: string | null;
-            runner_id?: string | null;
-            /** Format: date-time */
-            cancel_requested_at?: string | null;
-            /** @default false */
-            cancel_force: boolean;
-            /** Format: date-time */
-            created_at: string;
-            /** Format: date-time */
-            updated_at: string;
-        };
-        CancelTurnRequest: {
-            /** @default user_requested */
-            reason: string;
-            /** @default false */
-            force: boolean;
-        };
-        ToolCallDecisionRequest: {
-            tool_call_id: string;
-            /** Format: uuid */
-            client_request_id?: string;
-            reason?: string;
-        };
-        PatchDecisionRequest: {
-            patch_id: string;
-            /** Format: uuid */
-            client_request_id?: string;
-            reason?: string;
-        };
-        CreateModelProviderRequest: {
-            label: string;
-            provider: string;
-            model_name: string;
-            api_key: string;
-            base_url?: string;
-            /** @default true */
-            activate: boolean;
-        };
-        UpdateModelProviderRequest: {
-            label?: string;
-            provider?: string;
-            model_name?: string;
-            api_key?: string;
-            base_url?: string;
-        };
-        ModelProviderProfile: {
-            /** Format: uuid */
-            id: string;
-            label: string;
-            provider: string;
-            model_name: string;
-            base_url?: string | null;
-            is_active: boolean;
-            api_key_hint: string;
-            config_version: number;
-            /** Format: date-time */
-            updated_at: string;
-        };
+  schemas: {
+    CreateSessionRequest: {
+      /**
+       * @default writing
+       * @enum {string}
+       */
+      default_scenario_id: "writing" | "agent" | "interview";
     };
-    responses: never;
-    parameters: never;
-    requestBodies: never;
-    headers: never;
-    pathItems: never;
+    SessionResponse: {
+      /** Format: uuid */
+      id: string;
+      /** @enum {string} */
+      default_scenario_id: "writing" | "agent" | "interview";
+      status: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    CreateTurnRequest: {
+      message: string;
+      /** @enum {string} */
+      scenario_id?: "writing" | "agent" | "interview";
+      /** Format: uuid */
+      client_request_id?: string;
+    };
+    TurnResponse: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      session_id: string;
+      /** @enum {string} */
+      scenario_id: "writing" | "agent" | "interview";
+      status: string;
+      user_input?: string;
+      /** Format: date-time */
+      created_at: string;
+    };
+    TurnView: {
+      /** Format: uuid */
+      turn_id: string;
+      /** Format: uuid */
+      session_id: string;
+      /** @enum {string} */
+      scenario_id: "writing" | "agent" | "interview";
+      status: string;
+      user_input: string;
+      latest_output?: string | null;
+      tool_timeline: Record<string, never>[];
+      artifacts: Record<string, never>[];
+      last_event_sequence: number;
+      /** Format: date-time */
+      updated_at: string;
+      cancellable: boolean;
+      /** Format: date-time */
+      cancel_requested_at?: string | null;
+      interrupt?: Record<string, never> | null;
+      /** @description Runtime replica that owns the active run (Phase 3) */
+      runner_id?: string | null;
+      /** @description Latest context window occupancy from ContextEngine */
+      context_usage?: {
+        tokens_before?: number;
+        tokens_after?: number;
+        token_budget?: number;
+        strategies?: string[];
+        step_index?: number;
+        system_tokens?: number;
+        tools_tokens?: number;
+        messages_tokens?: number;
+        /** @enum {string} */
+        source?: "estimated" | "provider";
+      } | null;
+      /** @description Cumulative model API tokens for this turn */
+      token_usage?: {
+        input_tokens?: number;
+        output_tokens?: number;
+        /** @enum {string} */
+        source?: "provider" | "estimated" | "mixed";
+      } | null;
+    };
+    SessionView: {
+      /** Format: uuid */
+      session_id: string;
+      /** @enum {string} */
+      default_scenario_id: "writing" | "agent" | "interview";
+      status: string;
+      turn_count: number;
+      /** Format: uuid */
+      last_turn_id?: string | null;
+      last_turn_status?: string | null;
+      context_summary?: {
+        [key: string]: unknown;
+      } | null;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    RunResponse: {
+      /** Format: uuid */
+      id: string;
+      /** Format: uuid */
+      turn_id: string;
+      status: string;
+      termination_reason?: string | null;
+      runner_id?: string | null;
+      /** Format: date-time */
+      cancel_requested_at?: string | null;
+      /** @default false */
+      cancel_force: boolean;
+      /** Format: date-time */
+      created_at: string;
+      /** Format: date-time */
+      updated_at: string;
+    };
+    CancelTurnRequest: {
+      /** @default user_requested */
+      reason: string;
+      /** @default false */
+      force: boolean;
+    };
+    ToolCallDecisionRequest: {
+      tool_call_id: string;
+      /** Format: uuid */
+      client_request_id?: string;
+      reason?: string;
+    };
+    PatchDecisionRequest: {
+      patch_id: string;
+      /** Format: uuid */
+      client_request_id?: string;
+      reason?: string;
+    };
+    CreateModelProviderRequest: {
+      label: string;
+      provider: string;
+      model_name: string;
+      api_key: string;
+      base_url?: string;
+      /** @default true */
+      activate: boolean;
+    };
+    UpdateModelProviderRequest: {
+      label?: string;
+      provider?: string;
+      model_name?: string;
+      api_key?: string;
+      base_url?: string;
+    };
+    ModelProviderProfile: {
+      /** Format: uuid */
+      id: string;
+      label: string;
+      provider: string;
+      model_name: string;
+      base_url?: string | null;
+      is_active: boolean;
+      api_key_hint: string;
+      config_version: number;
+      /** Format: date-time */
+      updated_at: string;
+    };
+  };
+  responses: never;
+  parameters: never;
+  requestBodies: never;
+  headers: never;
+  pathItems: never;
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    createSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["CreateSessionRequest"];
-            };
-        };
-        responses: {
-            /** @description Session created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionResponse"];
-                };
-            };
-        };
+  createSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
     };
-    getSession: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Session resource */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionResponse"];
-                };
-            };
-        };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["CreateSessionRequest"];
+      };
     };
-    getSessionView: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Session created */
+      201: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description SessionView projection */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SessionView"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
         };
+      };
     };
-    createTurn: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                session_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateTurnRequest"];
-            };
-        };
-        responses: {
-            /** @description Turn accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TurnResponse"];
-                };
-            };
-        };
+  };
+  getSession: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
     };
-    getTurn: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Session resource */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Turn resource */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TurnResponse"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["SessionResponse"];
         };
+      };
     };
-    getTurnView: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description TurnView projection */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TurnView"];
-                };
-            };
-        };
+  };
+  getSessionView: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
     };
-    streamTurn: {
-        parameters: {
-            query?: {
-                since_sequence?: number;
-            };
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description SessionView projection */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Server-sent events */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/event-stream": string;
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["SessionView"];
         };
+      };
     };
-    websocketTurn: {
-        parameters: {
-            query?: {
-                since_sequence?: number;
-            };
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Switching Protocols (WebSocket upgrade) */
-            101: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+  };
+  createTurn: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
     };
-    cancelTurn: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["CancelTurnRequest"];
-            };
-        };
-        responses: {
-            /** @description Cancel accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateTurnRequest"];
+      };
     };
-    getRun: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
+    responses: {
+      /** @description Turn accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Run resource */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RunResponse"];
-                };
-            };
+        content: {
+          "application/json": components["schemas"]["TurnResponse"];
         };
+      };
     };
-    approveToolCall: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ToolCallDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description Approval accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+  };
+  getTurn: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
     };
-    denyToolCall: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Turn resource */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ToolCallDecisionRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["TurnResponse"];
         };
-        responses: {
-            /** @description Denial accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+      };
     };
-    acceptPatch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PatchDecisionRequest"];
-            };
-        };
-        responses: {
-            /** @description Patch accept accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+  };
+  getTurnView: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
     };
-    rejectPatch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                turn_id: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description TurnView projection */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["PatchDecisionRequest"];
-            };
+        content: {
+          "application/json": components["schemas"]["TurnView"];
         };
-        responses: {
-            /** @description Patch reject accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+      };
     };
-    listModelProviders: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Provider profiles */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelProviderProfile"][];
-                };
-            };
-        };
+  };
+  streamTurn: {
+    parameters: {
+      query?: {
+        since_sequence?: number;
+      };
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
     };
-    createModelProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Server-sent events */
+      200: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateModelProviderRequest"];
-            };
+        content: {
+          "text/event-stream": string;
         };
-        responses: {
-            /** @description Profile created */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelProviderProfile"];
-                };
-            };
-        };
+      };
     };
-    updateModelProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profile_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateModelProviderRequest"];
-            };
-        };
-        responses: {
-            /** @description Profile updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelProviderProfile"];
-                };
-            };
-        };
+  };
+  websocketTurn: {
+    parameters: {
+      query?: {
+        since_sequence?: number;
+      };
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
     };
-    deleteModelProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profile_id: string;
-            };
-            cookie?: never;
+    requestBody?: never;
+    responses: {
+      /** @description Switching Protocols (WebSocket upgrade) */
+      101: {
+        headers: {
+          [name: string]: unknown;
         };
-        requestBody?: never;
-        responses: {
-            /** @description Profile deleted */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
+        content?: never;
+      };
     };
-    activateModelProvider: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                profile_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Profile activated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelProviderProfile"];
-                };
-            };
-        };
+  };
+  cancelTurn: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
     };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["CancelTurnRequest"];
+      };
+    };
+    responses: {
+      /** @description Cancel accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  getRun: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Run resource */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RunResponse"];
+        };
+      };
+    };
+  };
+  approveToolCall: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToolCallDecisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Approval accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  denyToolCall: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToolCallDecisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Denial accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  acceptPatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchDecisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Patch accept accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  rejectPatch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        turn_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PatchDecisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Patch reject accepted */
+      202: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  listModelProviders: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Provider profiles */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelProviderProfile"][];
+        };
+      };
+    };
+  };
+  createModelProvider: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateModelProviderRequest"];
+      };
+    };
+    responses: {
+      /** @description Profile created */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelProviderProfile"];
+        };
+      };
+    };
+  };
+  updateModelProvider: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        profile_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdateModelProviderRequest"];
+      };
+    };
+    responses: {
+      /** @description Profile updated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelProviderProfile"];
+        };
+      };
+    };
+  };
+  deleteModelProvider: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        profile_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Profile deleted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  activateModelProvider: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        profile_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Profile activated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelProviderProfile"];
+        };
+      };
+    };
+  };
 }

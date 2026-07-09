@@ -1,6 +1,9 @@
-export type ApprovalToolKind = "write_file" | "run_command" | "edit_file" | "run_tests" | "generic";
+export type ApprovalToolKind =
+  "write_file" | "run_command" | "edit_file" | "run_tests" | "generic";
 
-export function approvalToolKind(toolName: string | null | undefined): ApprovalToolKind {
+export function approvalToolKind(
+  toolName: string | null | undefined,
+): ApprovalToolKind {
   const name = toolName ?? "";
   if (name === "write_file") return "write_file";
   if (name === "run_command") return "run_command";
@@ -25,7 +28,8 @@ export function approvalCopy(toolName: string | null | undefined): {
   if (kind === "run_command") {
     return {
       title: "待审批：执行命令",
-      description: "Agent 要在工作区运行 Shell 命令（不是写文件）。批准后命令会立即执行。",
+      description:
+        "Agent 要在工作区运行 Shell 命令（不是写文件）。批准后命令会立即执行。",
       approveLabel: "批准执行命令",
     };
   }

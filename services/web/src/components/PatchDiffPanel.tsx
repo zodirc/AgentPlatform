@@ -28,16 +28,24 @@ export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
           <p className="text-sm font-medium text-amber-100">{patch.path}</p>
-          <p className="text-xs text-slate-400">{patch.summary ?? patch.patch_id}</p>
+          <p className="text-xs text-slate-400">
+            {patch.summary ?? patch.patch_id}
+          </p>
         </div>
-        <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">{status}</span>
+        <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
+          {status}
+        </span>
       </div>
 
       <Suspense
         fallback={
           <div className="grid gap-2 md:grid-cols-2">
-            <pre className="max-h-56 overflow-auto rounded bg-slate-900 p-2 text-xs">{patch.old_text}</pre>
-            <pre className="max-h-56 overflow-auto rounded bg-slate-900 p-2 text-xs">{patch.new_text}</pre>
+            <pre className="max-h-56 overflow-auto rounded bg-slate-900 p-2 text-xs">
+              {patch.old_text}
+            </pre>
+            <pre className="max-h-56 overflow-auto rounded bg-slate-900 p-2 text-xs">
+              {patch.new_text}
+            </pre>
           </div>
         }
       >

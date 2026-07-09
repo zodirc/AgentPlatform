@@ -26,7 +26,9 @@ export function InterviewPanels({ wb }: Props) {
       )}
       {view?.artifacts?.some((a) => a.type === "plan") && (
         <section className="rounded-xl border border-emerald-900/50 bg-emerald-950/20 p-4">
-          <h2 className="mb-2 text-sm font-medium text-emerald-200">访谈待办</h2>
+          <h2 className="mb-2 text-sm font-medium text-emerald-200">
+            访谈待办
+          </h2>
           <ul className="space-y-1 text-xs">
             {(
               (
@@ -40,7 +42,8 @@ export function InterviewPanels({ wb }: Props) {
               )?.items ?? []
             ).map((item) => (
               <li key={item.id} className="rounded bg-slate-950 px-3 py-2">
-                <span className="text-slate-400">{item.status}</span> — {item.title}
+                <span className="text-slate-400">{item.status}</span> —{" "}
+                {item.title}
               </li>
             ))}
           </ul>

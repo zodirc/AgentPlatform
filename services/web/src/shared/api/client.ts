@@ -88,7 +88,9 @@ export type TurnEvent = {
   payload: Record<string, unknown>;
 };
 
-export async function createSession(scenario: "writing" | "agent" | "interview" = "writing") {
+export async function createSession(
+  scenario: "writing" | "agent" | "interview" = "writing",
+) {
   const res = await fetch(`${API_BASE}/sessions`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
@@ -98,7 +100,11 @@ export async function createSession(scenario: "writing" | "agent" | "interview" 
   return res.json() as Promise<{ id: string }>;
 }
 
-export async function startTurn(sessionId: string, message: string, scenarioId: string) {
+export async function startTurn(
+  sessionId: string,
+  message: string,
+  scenarioId: string,
+) {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/turns`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
@@ -136,7 +142,11 @@ export async function approveToolCall(turnId: string, toolCallId: string) {
   return res.json();
 }
 
-export async function denyToolCall(turnId: string, toolCallId: string, reason = "user_denied") {
+export async function denyToolCall(
+  turnId: string,
+  toolCallId: string,
+  reason = "user_denied",
+) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/deny-tool-call`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
@@ -156,7 +166,11 @@ export async function acceptPatch(turnId: string, patchId: string) {
   return res.json();
 }
 
-export async function rejectPatch(turnId: string, patchId: string, reason = "user_rejected") {
+export async function rejectPatch(
+  turnId: string,
+  patchId: string,
+  reason = "user_rejected",
+) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/patch/reject`, {
     method: "POST",
     headers: authHeaders({ "Content-Type": "application/json" }),
