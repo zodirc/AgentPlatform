@@ -69,7 +69,11 @@ def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[To
     if specs:
         return specs
     registry = build_registry()
-    return [registry.get(name) for name in SUBAGENT_TOOL_NAMES.get(agent_type, []) if registry.get(name)]
+    return [
+        spec
+        for name in SUBAGENT_TOOL_NAMES.get(agent_type, [])
+        if (spec := registry.get(name)) is not None
+    ]
 
 
 async def run_delegate(

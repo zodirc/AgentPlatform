@@ -106,7 +106,7 @@ jobs:
           cd services/api
           pip install -q -e ".[dev]"
           pip install -q pyright
-          pyright app --pythonversion 3.11
+          pyright
 
       - name: Typecheck runtime
         run: |
@@ -114,7 +114,7 @@ jobs:
           cd services/runtime
           pip install -q -e ".[dev]"
           pip install -q pyright
-          pyright app --pythonversion 3.11
+          pyright
 
       - name: Web lint, typecheck, test, build
         run: |

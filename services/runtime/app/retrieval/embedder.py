@@ -37,7 +37,7 @@ class SentenceTransformerEmbedder:
     """Optional neural embeddings when sentence-transformers is installed."""
 
     def __init__(self, model_name: str, *, model_dir: str | None = None) -> None:
-        from sentence_transformers import SentenceTransformer
+        from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
         cache = model_dir or None
         self._model = SentenceTransformer(model_name, cache_folder=cache)

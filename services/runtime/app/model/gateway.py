@@ -22,7 +22,7 @@ class ModelResponse:
 
 
 class ModelProvider(Protocol):
-    async def stream(
+    def stream(
         self,
         *,
         messages: list[dict],

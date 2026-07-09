@@ -15,15 +15,15 @@ class _LoopState(TypedDict):
     result: str | None
 
 
-async def run_via_langgraph(engine: AgentEngine, state: TurnState) -> str | None:
-    async def _execute_turn(loop_state: _LoopState) -> _LoopState:
-        if loop_state.get("status") == "done":
-            return loop_state
-        result = await engine.run(state)
+async def run_via_langgraph(engine: AgentEngine, turn_state: TurnState) -> str | None:
+    async def _execute_turn(state: _LoopState) -> _LoopState:
+        if state.get("status") == "done":
+            return state
+        result = await engine.run(turn_state)
         return {"status": "done", "result": result}
 
     workflow = StateGraph(_LoopState)
-    workflow.add_node("agent_loop", _execute_turn)
+    workflow.add_node("agent_loop", _execute_turn)  # type: ignore[arg-type]
     workflow.set_entry_point("agent_loop")
     workflow.add_edge("agent_loop", END)
     app = workflow.compile()

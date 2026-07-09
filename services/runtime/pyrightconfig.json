@@ -1,0 +1,5 @@
+{
+  "include": ["app"],
+  "pythonVersion": "3.11",
+  "extraPaths": ["../../packages/contracts"]
+}

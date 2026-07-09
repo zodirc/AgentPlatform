@@ -81,7 +81,7 @@ async def cancel_turn_command(
     body: CancelTurnBody,
     _: None = Depends(verify_internal_token),
 ):
-    request_cancel(body.turn_id, force=body.force)
+    await request_cancel(body.turn_id, force=body.force)
     return {"accepted": True, "turn_id": str(body.turn_id)}
 
 

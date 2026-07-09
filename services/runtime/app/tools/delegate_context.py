@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 from uuid import UUID
@@ -42,9 +42,9 @@ def current_delegate_depth() -> int:
     return _delegate_depth.get()
 
 
-def bump_delegate_depth() -> object:
+def bump_delegate_depth() -> Token[int]:
     return _delegate_depth.set(_delegate_depth.get() + 1)
 
 
-def reset_delegate_depth(token: object) -> None:
+def reset_delegate_depth(token: Token[int]) -> None:
     _delegate_depth.reset(token)
