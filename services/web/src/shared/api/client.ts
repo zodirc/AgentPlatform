@@ -242,3 +242,33 @@ export async function deleteModelProvider(id: string) {
   });
   if (!res.ok) throw new Error(`deleteModelProvider failed: ${res.status}`);
 }
+
+export type WorkspaceEntries = {
+  path: string;
+  entries: string[];
+};
+
+export type WorkspaceFile = {
+  path: string;
+  content: string;
+};
+
+export async function fetchWorkspaceEntries(
+  path = ".",
+): Promise<WorkspaceEntries> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/admin/workspace/entries?${params}`, {
+    headers: adminAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchWorkspaceEntries failed: ${res.status}`);
+  return res.json();
+}
+
+export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/admin/workspace/file?${params}`, {
+    headers: adminAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchWorkspaceFile failed: ${res.status}`);
+  return res.json();
+}

@@ -35,5 +35,8 @@ debug.log
 workspace/*
 !workspace/.gitkeep
 
+# local compose overlay (from dev.override.yml.example)
+deploy/compose/dev.override.yml
+
 # nested empty clone placeholder (if recreated)
 AgentPlatform/

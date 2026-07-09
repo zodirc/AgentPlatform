@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { TurnEvent } from "../../shared/api/client";
 import {
   PatchDiffPanel,
@@ -12,16 +12,19 @@ import type {
 } from "../../shared/workbench/types";
 import { ArtifactView } from "./ArtifactView";
 import { RetrievalView } from "./RetrievalView";
+import { WorkspaceTree } from "./WorkspaceTree";
 
 export type SidebarSelection =
   | { kind: "timeline"; item: TimelineItem; index: number }
   | { kind: "file_write"; path: string }
-  | { kind: "patch"; patchId: string };
+  | { kind: "patch"; patchId: string }
+  | { kind: "workspace"; path: string };
 
 type Props = {
   wb: WorkbenchState;
   selection: SidebarSelection | null;
   onSelect: (sel: SidebarSelection | null) => void;
+  onOpenWorkspaceFile: (path: string) => void;
   onClose?: () => void;
 };
 
@@ -47,7 +50,8 @@ function timelinePath(item: TimelineItem, events: TurnEvent[]): string | null {
         String(e.payload.tool_call_id ?? "") === toolCallId,
     );
     const args = started?.payload.arguments as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
     if (typeof args?.path === "string") return args.path;
     if (typeof args?.pattern === "string") return args.pattern;
     if (typeof args?.command === "string") return args.command.slice(0, 40);
@@ -72,7 +76,13 @@ function previewFromTimeline(item: TimelineItem): string {
   return summary;
 }
 
-export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
+export function AgentSidebar({
+  wb,
+  selection,
+  onSelect,
+  onOpenWorkspaceFile,
+  onClose,
+}: Props) {
   const view = wb.view;
   const artifacts = view?.artifacts ?? [];
 
@@ -97,8 +107,18 @@ export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
     [wb.timelineItems],
   );
 
+  const workspacePath =
+    selection?.kind === "workspace" ? selection.path : null;
+  const [workspaceSelectPath, setWorkspaceSelectPath] = useState<string | null>(
+    null,
+  );
+  const treeSelectedPath = workspacePath ?? workspaceSelectPath;
+
   const selectedPreview = useMemo(() => {
     if (!selection) return null;
+    if (selection.kind === "workspace") {
+      return null;
+    }
     if (selection.kind === "timeline") {
       const item = selection.item;
       return {
@@ -132,11 +152,11 @@ export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
   }, [selection, fileWrites, patches, wb.events]);
 
   return (
-    <aside className="flex h-full w-[min(320px,35vw)] shrink-0 flex-col border-r border-slate-800 bg-slate-950">
+    <aside className="flex h-full w-[min(360px,40vw)] shrink-0 flex-col border-r border-slate-800 bg-slate-950">
       <header className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-800 px-4 py-3">
         <div className="min-w-0">
           <h2 className="text-sm font-semibold text-slate-200">产物</h2>
-          <p className="text-xs text-slate-500">文件预览与变更</p>
+          <p className="text-xs text-slate-500">工作区文件 · 工具输出</p>
         </div>
         {onClose ? (
           <button
@@ -151,6 +171,23 @@ export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        <section className="border-b border-slate-800 p-3">
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+            工作区
+          </h3>
+          <WorkspaceTree
+            selectedPath={treeSelectedPath}
+            onSelectFile={(path) => {
+              setWorkspaceSelectPath(path);
+              onSelect({ kind: "workspace", path });
+            }}
+            onOpenFile={onOpenWorkspaceFile}
+          />
+          <p className="mt-2 text-[10px] text-slate-600">
+            单击选中 · 双击在新窗口查看完整内容
+          </p>
+        </section>
+
         <section className="border-b border-slate-800 p-3">
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
             工具产物
@@ -262,34 +299,6 @@ export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
         <div className="space-y-3 p-3">
           <RetrievalView artifacts={artifacts} />
           <ArtifactView artifacts={artifacts} />
-          {artifacts.some((a) => a.type === "plan") ? (
-            <section className="rounded-lg border border-violet-900/50 bg-violet-950/20 p-3">
-              <h3 className="mb-2 text-xs font-medium text-violet-200">
-                任务计划
-              </h3>
-              <ul className="space-y-1 text-xs">
-                {(
-                  (
-                    artifacts.find((a) => a.type === "plan") as {
-                      items?: Array<{
-                        id: string;
-                        title: string;
-                        status: string;
-                      }>;
-                    }
-                  )?.items ?? []
-                ).map((item) => (
-                  <li
-                    key={item.id}
-                    className="rounded bg-slate-950 px-2 py-1.5"
-                  >
-                    <span className="text-slate-500">{item.status}</span> —{" "}
-                    {item.title}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ) : null}
         </div>
       </div>
 
@@ -302,8 +311,14 @@ export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
             <p className="mb-2 text-xs text-slate-500">
               {selectedPreview.subtitle}
             </p>
-            {"writePreview" in selectedPreview &&
-            selectedPreview.writePreview ? (
+            {"loading" in selectedPreview && selectedPreview.loading ? (
+              <p className="text-xs text-slate-500">加载文件…</p>
+            ) : "error" in selectedPreview && selectedPreview.error ? (
+              <p className="text-xs text-rose-400">
+                无法读取文件（请确认已 Admin 解锁）
+              </p>
+            ) : "writePreview" in selectedPreview &&
+              selectedPreview.writePreview ? (
               <WriteFileDiffPanel preview={selectedPreview.writePreview} />
             ) : "patch" in selectedPreview && selectedPreview.patch ? (
               <PatchDiffPanel
@@ -319,7 +334,9 @@ export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
             )}
           </div>
         ) : (
-          <p className="p-4 text-xs text-slate-600">点击列表项预览内容</p>
+          <p className="p-4 text-xs text-slate-600">
+            双击工作区文件在新窗口查看，或点击工具产物预览
+          </p>
         )}
       </div>
     </aside>

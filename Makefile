@@ -1,22 +1,74 @@
 COMPOSE := docker compose -f deploy/docker-compose.yml --env-file .env
+COMPOSE_DEV := docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml --env-file .env
 COMPOSE_QUEUE := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml --env-file .env
 COMPOSE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml --env-file .env
 COMPOSE_QUEUE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml --env-file .env
 COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml --env-file .env
+DEV_OVERRIDE := deploy/compose/dev.override.yml
 
-.PHONY: up down ps logs smoke build migrate up-queue up-retrieval eval-live eval-queue contracts-test up-ha eval-stall eval-ha eval-recorded eval-retrieval codegen load-test runtime-test security-audit
+.DEFAULT_GOAL := help
 
-up:
+.PHONY: help start up down ps logs smoke build migrate \
+	up-web up-api up-runtime restart-web restart-api restart-runtime \
+	dev dev-init web-dev \
+	up-queue up-retrieval up-ha \
+	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
+	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
+	load-test codegen alembic-upgrade
+
+help: ## 显示常用命令
+	@echo "日常开发（推荐）"
+	@echo "  make start        启动栈，不重建镜像（改代码后配合下面单服务命令）"
+	@echo "  make up-web       只重建并重启 web"
+	@echo "  make up-api       只重建并重启 api"
+	@echo "  make up-runtime   只重建并重启 runtime"
+	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
+	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
+	@echo ""
+	@echo "完整部署"
+	@echo "  make up           重建并启动全部服务（首次 / Dockerfile 变更）"
+	@echo "  make build        只构建镜像，不启动"
+	@echo "  make down         停止"
+	@echo "  make ps / logs    状态 / 日志"
+	@echo ""
+	@echo "其他"
+	@echo "  make migrate      数据库迁移"
+	@echo "  make smoke        冒烟测试"
+	@echo "  make runtime-test 运行时测试"
+
+start: ## 启动栈（不 rebuild，最快）
+	$(COMPOSE) up -d
+
+up: ## 重建并启动全部服务
 	$(COMPOSE) up -d --build
 
-up-queue:
-	WORKER_MODE=outbox $(COMPOSE_QUEUE) --profile queue up -d --build
+up-web: ## 只重建 web
+	$(COMPOSE) up -d --build web
 
-up-retrieval:
-	INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid $(COMPOSE_RETRIEVAL) --profile retrieval up -d --build
+up-api: ## 只重建 api
+	$(COMPOSE) up -d --build api
 
-up-ha:
-	$(COMPOSE_HA) up -d --build --scale runtime=0
+up-runtime: ## 只重建 runtime
+	$(COMPOSE) up -d --build runtime
+
+restart-web: ## 重启 web（不 rebuild）
+	$(COMPOSE) restart web
+
+restart-api: ## 重启 api（不 rebuild）
+	$(COMPOSE) restart api
+
+restart-runtime: ## 重启 runtime（不 rebuild）
+	$(COMPOSE) restart runtime
+
+dev-init: ## 生成本地 dev.override.yml（首次一次）
+	@test -f $(DEV_OVERRIDE) || cp deploy/compose/dev.override.yml.example $(DEV_OVERRIDE)
+	@echo "Created $(DEV_OVERRIDE)"
+
+dev: dev-init ## 开发模式：Python 热重载（需先 make start 或 make up）
+	$(COMPOSE_DEV) up -d api runtime
+
+web-dev: ## 前端开发服务器（代理 /api → localhost:8000）
+	cd services/web && corepack enable && pnpm dev
 
 down:
 	$(COMPOSE) down
@@ -69,6 +121,15 @@ contracts-test:
 	pip install -q packages/contracts/python && pytest packages/contracts/python/tests -q
 	$(MAKE) api-test
 	$(MAKE) runtime-test
+
+up-queue:
+	WORKER_MODE=outbox $(COMPOSE_QUEUE) --profile queue up -d --build
+
+up-retrieval:
+	INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid $(COMPOSE_RETRIEVAL) --profile retrieval up -d --build
+
+up-ha:
+	$(COMPOSE_HA) up -d --build --scale runtime=0
 
 eval-stall:
 	STALL_THRESHOLD_SECONDS=8 STALL_POLL_INTERVAL_SECONDS=2 STALL_AUTO_FAIL=true MODEL_TIMEOUT_SECONDS=120 \

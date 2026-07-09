@@ -8,6 +8,7 @@ import { AgentActivityPanel } from "./AgentActivityPanel";
 import { AgentChatPanel } from "./AgentChatPanel";
 import { AgentSidebar, type SidebarSelection } from "./AgentSidebar";
 import { AgentTimelinePanel } from "./AgentTimelinePanel";
+import { WorkspaceFileViewer } from "./WorkspaceFileViewer";
 
 function artifactBadgeCount(
   timelineItems: { tool_name?: string; stream_output?: string }[],
@@ -35,6 +36,9 @@ export function AgentWorkbench() {
   const wb = useWorkbench({ scenarioId: "agent", title: "Agent 工作台" });
   const [selection, setSelection] = useState<SidebarSelection | null>(null);
   const [artifactsOpen, setArtifactsOpen] = useState(false);
+  const [workspaceViewerPath, setWorkspaceViewerPath] = useState<string | null>(
+    null,
+  );
   const { needsUnlock, checking, unlockError, unlock } = useAdminAuth();
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const artifactCount = artifactBadgeCount(
@@ -96,7 +100,15 @@ export function AgentWorkbench() {
           <AgentSidebar
             wb={wb}
             selection={selection}
-            onSelect={setSelection}
+            onSelect={(sel) => {
+              setSelection(sel);
+              if (sel?.kind === "workspace") setArtifactsOpen(true);
+            }}
+            onOpenWorkspaceFile={(path) => {
+              setWorkspaceViewerPath(path);
+              setArtifactsOpen(true);
+              setSelection({ kind: "workspace", path });
+            }}
             onClose={() => setArtifactsOpen(false)}
           />
         ) : (
@@ -140,6 +152,11 @@ export function AgentWorkbench() {
           <AgentChatPanel wb={wb} />
         </div>
       </div>
+
+      <WorkspaceFileViewer
+        path={workspaceViewerPath}
+        onClose={() => setWorkspaceViewerPath(null)}
+      />
     </div>
   );
 }

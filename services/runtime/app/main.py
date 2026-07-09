@@ -159,6 +159,37 @@ async def sync_sources_index_command(_: None = Depends(verify_internal_token)):
     return {"accepted": True, **result}
 
 
+workspace_router = APIRouter(prefix="/internal/workspace", tags=["workspace"])
+
+
+@workspace_router.get("/entries")
+async def workspace_entries(
+    path: str = ".",
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import list_workspace_entries
+
+    result = await list_workspace_entries(path)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=str(result["error"]))
+    return result
+
+
+@workspace_router.get("/file")
+async def workspace_file(
+    path: str,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import read_workspace_file
+
+    if not path or path == ".":
+        raise HTTPException(status_code=400, detail="path is required")
+    result = await read_workspace_file(path)
+    if result.get("error"):
+        raise HTTPException(status_code=404, detail=str(result["error"]))
+    return result
+
+
 @asynccontextmanager
 async def lifespan(app):
     import asyncio
@@ -193,6 +224,7 @@ def create_app():
     setup_tracing(service_name=settings.otel_service_name, enabled=settings.otel_enabled)
     instrument_fastapi(app, enabled=settings.otel_enabled)
     app.include_router(router)
+    app.include_router(workspace_router)
 
     @app.get("/health/live")
     async def health_live():
