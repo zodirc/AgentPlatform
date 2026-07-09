@@ -5,6 +5,10 @@ on:
     branches: [main, master]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   security:
     runs-on: ubuntu-latest
@@ -20,7 +24,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  runtime-test:
+  python-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,55 +55,13 @@ jobs:
           pip install -q ruff
           ruff check services/runtime/app services/api/app
 
-  l0-smoke:
+  typecheck:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Prepare env
-        run: cp .env.example .env
-
-      - name: Contract payload schemas
-        run: |
-          pip install -q jsonschema pytest websockets
-          pytest packages/contracts/tests -q
-
-      - name: L0 smoke (compose + golden)
-        run: bash scripts/smoke_test.sh
-
-      - name: L1 eval (phase 1 + 1b)
-        run: |
-          python3 scripts/eval_run.py --phase 1
-          python3 scripts/eval_run.py --phase 1b
-
-      - name: L2 eval (phase 2)
-        run: python3 scripts/eval_run.py --phase 2
-
-      - name: L3 eval (phase 3 + full stub)
-        run: |
-          python3 scripts/eval_run.py --phase 3
-          python3 scripts/eval_run.py
-
-      - name: Retrieval profile eval (writing.07)
-        run: make eval-retrieval
-
-      - name: Queue worker profile eval (shared.16)
-        run: make eval-queue
-
-      - name: Stall watchdog eval (shared.09)
-        run: make eval-stall
-
-      - name: HA runner routing eval (shared.11)
-        run: make eval-ha
-
-      - name: Recorded eval (shared.12)
-        run: make eval-recorded
-
-      - name: OpenAPI codegen drift check
-        run: |
-          bash scripts/codegen.sh
-          git diff --exit-code packages/contracts/openapi services/web/src/shared/api/schema.d.ts
-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Typecheck API
         run: |
           pip install -q packages/contracts/python
@@ -107,7 +69,6 @@ jobs:
           pip install -q -e ".[dev]"
           pip install -q pyright
           pyright
-
       - name: Typecheck runtime
         run: |
           pip install -q packages/contracts/python
@@ -116,6 +77,31 @@ jobs:
           pip install -q pyright
           pyright
 
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Contract payload schemas
+        run: |
+          pip install -q jsonschema pytest
+          pytest packages/contracts/tests -q
+
+  codegen:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: OpenAPI codegen drift check
+        run: |
+          bash scripts/codegen.sh
+          git diff --exit-code packages/contracts/openapi services/web/src/shared/api/schema.d.ts
+
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - name: Web lint, typecheck, test, build
         run: |
           cd services/web
@@ -127,5 +113,17 @@ jobs:
           npx pnpm@9.15.9 run test
           npx pnpm@9.15.9 run build
 
-      - name: L3 load smoke
-        run: python3 scripts/load_test.py http://localhost
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare env
+        run: cp .env.example .env
+      - name: L0 smoke (compose + golden)
+        run: bash scripts/smoke_test.sh
+      - name: L1 eval (phase 1 + 1b core path)
+        run: |
+          pip install -q pyyaml websockets
+          python3 scripts/eval_run.py --phase 1
+          python3 scripts/eval_run.py --phase 1b

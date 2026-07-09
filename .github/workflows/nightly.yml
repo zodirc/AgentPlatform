@@ -5,9 +5,50 @@ on:
     - cron: "0 2 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: nightly-${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
+  full-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Prepare env
+        run: cp .env.example .env
+      - name: Install eval dependencies
+        run: pip install -q pyyaml websockets
+      - name: Start stack
+        run: docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+      - name: Wait for health
+        run: sleep 30
+      - name: L2 eval (phase 2)
+        run: python3 scripts/eval_run.py --phase 2
+      - name: L3 eval (phase 3 + full stub)
+        run: |
+          python3 scripts/eval_run.py --phase 3
+          python3 scripts/eval_run.py
+      - name: Retrieval profile eval (writing.07)
+        run: make eval-retrieval
+      - name: Queue worker profile eval (shared.16)
+        run: make eval-queue
+      - name: Stall watchdog eval (shared.09)
+        run: make eval-stall
+      - name: HA runner routing eval (shared.11)
+        run: make eval-ha
+      - name: Recorded eval (shared.12)
+        run: make eval-recorded
+      - name: L3 load smoke
+        run: python3 scripts/load_test.py http://localhost
+
   live-eval:
     runs-on: ubuntu-latest
+    if: ${{ secrets.MODEL_API_KEY != '' }}
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
       - name: Prepare env
@@ -21,16 +62,3 @@ jobs:
         env:
           MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
           EVAL_LIVE_STRICT: "1"
-
-  load-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Prepare env
-        run: cp .env.example .env
-      - name: Start stack
-        run: docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
-      - name: Wait for health
-        run: sleep 30
-      - name: L3 load test
-        run: python3 scripts/load_test.py http://localhost
