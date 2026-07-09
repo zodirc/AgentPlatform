@@ -2,9 +2,7 @@ import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import { useAdminAuth } from "../../shared/auth/useAdminAuth";
 import { ErrorBanner } from "./ErrorBanner";
-import { scenarioMeta } from "./scenarioMeta";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
-import { useWorkbench } from "./useWorkbench";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";
 import { AgentChatPanel } from "../../scenarios/agent/AgentChatPanel";
 import {
@@ -220,14 +218,4 @@ export function ScenarioWorkbenchView({
       ) : null}
     </div>
   );
-}
-
-type Props = {
-  scenarioId: ScenarioId;
-};
-
-export function ScenarioWorkbench({ scenarioId }: Props) {
-  const meta = scenarioMeta(scenarioId);
-  const wb = useWorkbench({ scenarioId, title: meta.title });
-  return <ScenarioWorkbenchView scenarioId={scenarioId} wb={wb} />;
 }

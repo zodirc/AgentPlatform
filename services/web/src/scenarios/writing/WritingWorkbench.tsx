@@ -1,5 +1,1 @@
-import { ScenarioWorkbench } from "../../shared/workbench/ScenarioWorkbench";
-
-export function WritingWorkbench() {
-  return <ScenarioWorkbench scenarioId="writing" />;
-}
+export { UnifiedWorkbench as WritingWorkbench } from "../../shared/workbench/UnifiedWorkbench";

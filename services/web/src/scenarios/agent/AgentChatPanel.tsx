@@ -20,6 +20,7 @@ export function AgentChatPanel({ wb }: Props) {
     Record<string, unknown> | undefined;
   const approval = approvalCopy(wb.pendingToolName);
   const meta = scenarioMeta(wb.scenarioId);
+  const turnScenario = wb.view?.scenario_id;
   const output =
     wb.streamText || wb.sectionDraft || wb.view?.latest_output || "";
 
@@ -31,7 +32,11 @@ export function AgentChatPanel({ wb }: Props) {
         </p>
         <h1 className="text-sm font-semibold text-slate-100">{wb.title}</h1>
         <p className="text-xs text-slate-500">
-          scenario_id={wb.scenarioId}
+          下一条 scenario_id={wb.scenarioId}
+          {turnScenario && turnScenario !== wb.scenarioId
+            ? ` · 当前轮=${turnScenario}`
+            : ""}
+          {wb.sessionId ? ` · session=${wb.sessionId.slice(0, 8)}` : ""}
           {wb.useWebSocket ? " · ws" : ""}
         </p>
       </header>

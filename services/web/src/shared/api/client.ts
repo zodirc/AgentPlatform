@@ -100,6 +100,25 @@ export async function createSession(
   return res.json() as Promise<{ id: string }>;
 }
 
+export type SessionView = {
+  session_id: string;
+  default_scenario_id: string;
+  status: string;
+  turn_count: number;
+  last_turn_id: string | null;
+  last_turn_status: string | null;
+  context_summary?: Record<string, unknown> | null;
+  updated_at: string;
+};
+
+export async function fetchSessionView(sessionId: string): Promise<SessionView> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/view`, {
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchSessionView failed: ${res.status}`);
+  return res.json();
+}
+
 export async function startTurn(
   sessionId: string,
   message: string,

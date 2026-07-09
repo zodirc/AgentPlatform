@@ -54,6 +54,8 @@ export type TokenUsage = {
 export type WorkbenchState = {
   scenarioId: ScenarioId;
   title: string;
+  sessionId: string | null;
+  setActiveScenario: (id: ScenarioId) => void;
   message: string;
   setMessage: (value: string) => void;
   submittedMessage: string | null;

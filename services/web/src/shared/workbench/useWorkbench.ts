@@ -5,8 +5,8 @@ import {
   acceptPatch,
   approveToolCall,
   cancelTurn,
-  createSession,
   denyToolCall,
+  fetchSessionView,
   fetchTurnView,
   rejectPatch,
   startTurn,
@@ -24,17 +24,16 @@ import type {
   WriteFilePreview,
 } from "./types";
 import { previewText } from "./filePreview";
+import { scenarioMeta } from "./scenarioMeta";
+import { useWorkbenchSession } from "./workbenchSession";
 
 type StreamClient = TurnStreamClient | TurnWebSocketClient;
 
-type Options = {
-  scenarioId: ScenarioId;
-  title: string;
-};
-
-export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
+export function useWorkbenchImpl(): WorkbenchState {
   const [searchParams] = useSearchParams();
   const useWebSocket = searchParams.get("transport") === "ws";
+  const [activeScenarioId, setActiveScenarioId] =
+    useState<ScenarioId>("writing");
   const [message, setMessage] = useState("");
   const [submittedMessage, setSubmittedMessage] = useState<string | null>(null);
   const [turnId, setTurnId] = useState<string | null>(null);
@@ -64,6 +63,9 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
   const streamRef = useRef<StreamClient | null>(null);
   const lastSequenceRef = useRef(0);
   const resumingAfterApprovalRef = useRef(false);
+  const sessionRestoredRef = useRef(false);
+  const turnIdRef = useRef<string | null>(null);
+  turnIdRef.current = turnId;
 
   function extractWriteFilePreview(
     payload: Record<string, unknown>,
@@ -127,11 +129,7 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     setError(`${context}：${detail}`);
   }
 
-  const { data: session } = useQuery({
-    queryKey: ["session", scenarioId],
-    queryFn: () => createSession(scenarioId),
-  });
-  const sessionId = session?.id ?? null;
+  const { sessionId } = useWorkbenchSession();
 
   const turnViewQuery = useQuery({
     queryKey: ["turn-view", turnId],
@@ -326,9 +324,57 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     );
   }
 
+  useEffect(() => {
+    if (!sessionId || sessionRestoredRef.current) return;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const sessionView = await fetchSessionView(sessionId);
+        if (cancelled || !sessionView.last_turn_id || turnIdRef.current) return;
+
+        const lastTurnId = sessionView.last_turn_id;
+        const v = await fetchTurnView(lastTurnId);
+        if (cancelled) return;
+
+        sessionRestoredRef.current = true;
+        setTurnId(lastTurnId);
+        setView(v);
+        setSubmittedMessage(v.user_input ?? null);
+        syncApprovalFromView(v);
+        if (v.context_usage) {
+          setLiveContextUsage(v.context_usage as ContextUsage);
+        }
+        if (v.token_usage) {
+          setLiveTokenUsage(v.token_usage as TokenUsage);
+        }
+        lastSequenceRef.current = v.last_event_sequence ?? 0;
+
+        const status = sessionView.last_turn_status ?? v.status;
+        if (
+          status === "running" ||
+          status === "waiting_approval" ||
+          v.status === "waiting_approval"
+        ) {
+          setBusy(true);
+          connectStream(lastTurnId, lastSequenceRef.current);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          reportError("恢复会话失败", err);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once per session
+  }, [sessionId]);
+
   const startTurnMut = useMutation({
     mutationFn: ({ sid, msg }: { sid: string; msg: string }) =>
-      startTurn(sid, msg, scenarioId),
+      startTurn(sid, msg, activeScenarioId),
   });
 
   async function handleSend() {
@@ -506,9 +552,13 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
     (view?.token_usage as TokenUsage | null | undefined) ??
     null;
 
+  const meta = scenarioMeta(activeScenarioId);
+
   return {
-    scenarioId,
-    title,
+    scenarioId: activeScenarioId,
+    title: meta.title,
+    sessionId,
+    setActiveScenario: setActiveScenarioId,
     message,
     setMessage,
     submittedMessage,
