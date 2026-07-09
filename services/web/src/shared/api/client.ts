@@ -285,7 +285,9 @@ export type SourceUploadResult = {
   };
 };
 
-export async function uploadSourceFile(file: File): Promise<SourceUploadResult> {
+export async function uploadSourceFile(
+  file: File,
+): Promise<SourceUploadResult> {
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${API_BASE}/admin/workspace/sources/upload`, {

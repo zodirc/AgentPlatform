@@ -254,8 +254,7 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
               tools_tokens: Number(ev.payload.tools_tokens ?? 0),
               messages_tokens: Number(ev.payload.messages_tokens ?? 0),
               breakdown:
-                ev.payload.breakdown &&
-                typeof ev.payload.breakdown === "object"
+                ev.payload.breakdown && typeof ev.payload.breakdown === "object"
                   ? (ev.payload.breakdown as ContextUsage["breakdown"])
                   : undefined,
               source:

@@ -86,7 +86,7 @@ jobs:
           python-version: "3.11"
       - name: Contract payload schemas
         run: |
-          pip install -q jsonschema pytest
+          pip install -q jsonschema pytest pyyaml
           pytest packages/contracts/tests -q
 
   codegen:

@@ -52,8 +52,6 @@ async def handle_session_summary(payload: dict) -> None:
     )
     prior_summary = existing["context_summary"] if existing else None
     if isinstance(prior_summary, str):
-        import json
-
         try:
             prior_summary = json.loads(prior_summary)
         except json.JSONDecodeError:

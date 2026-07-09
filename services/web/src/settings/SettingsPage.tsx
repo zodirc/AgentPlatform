@@ -171,10 +171,7 @@ function ModelConfigForm({
         />
       </Field>
 
-      <Field
-        label="上下文窗口（tokens）"
-        hint="留空则使用模型或环境变量默认"
-      >
+      <Field label="上下文窗口（tokens）" hint="留空则使用模型或环境变量默认">
         <input
           className={inputClass}
           inputMode="numeric"
@@ -475,7 +472,8 @@ export function SettingsPage() {
             ) : (
               <ul className="space-y-1">
                 {sortedProviders.map((p) => {
-                  const selected = selectedId === p.id && panelMode !== "create";
+                  const selected =
+                    selectedId === p.id && panelMode !== "create";
                   return (
                     <li key={p.id}>
                       <button
@@ -580,7 +578,9 @@ export function SettingsPage() {
                 <dl className="mt-4 space-y-2 text-sm">
                   <div className="flex gap-2">
                     <dt className="w-24 shrink-0 text-slate-500">供应商</dt>
-                    <dd className="text-slate-300">{selectedProvider.provider}</dd>
+                    <dd className="text-slate-300">
+                      {selectedProvider.provider}
+                    </dd>
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-24 shrink-0 text-slate-500">模型</dt>

@@ -1,4 +1,8 @@
-import type { ContextUsage, ContextWindowBreakdown, TokenUsage } from "../../shared/workbench/types";
+import type {
+  ContextUsage,
+  ContextWindowBreakdown,
+  TokenUsage,
+} from "../../shared/workbench/types";
 
 function formatTokens(n: number | undefined): string {
   const value = Number(n ?? 0);
@@ -75,8 +79,8 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
           <div className="mb-1 flex items-center justify-between gap-2">
             <span>上下文窗口</span>
             <span>
-              {formatTokens(ctxAfter)} / {formatTokens(ctxBudget)} ({fillPct}%) ·{" "}
-              {sourceLabel}
+              {formatTokens(ctxAfter)} / {formatTokens(ctxBudget)} ({fillPct}%)
+              · {sourceLabel}
             </span>
           </div>
           <div className="h-1.5 overflow-hidden rounded bg-black/30">
@@ -98,10 +102,7 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
                 {BREAKDOWN_SEGMENTS.map((seg) => {
                   const value = Number(breakdown[seg.key] ?? 0);
                   if (value <= 0) return null;
-                  const width = Math.max(
-                    0.5,
-                    (value / barDenominator) * 100,
-                  );
+                  const width = Math.max(0.5, (value / barDenominator) * 100);
                   return (
                     <div
                       key={seg.key}

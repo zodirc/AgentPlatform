@@ -10,7 +10,10 @@ _SAFE_SOURCE_NAME = re.compile(r"^[a-zA-Z0-9_\-\.\u4e00-\u9fff]+$")
 
 
 def safe_source_filename(name: str) -> str:
-    base = Path(name or "").name.strip()
+    raw = (name or "").strip()
+    if not raw or "/" in raw or "\\" in raw or raw in {".", ".."}:
+        raise ValueError("invalid filename")
+    base = Path(raw).name.strip()
     if not base or base in {".", ".."}:
         raise ValueError("invalid filename")
     if not _SAFE_SOURCE_NAME.match(base):

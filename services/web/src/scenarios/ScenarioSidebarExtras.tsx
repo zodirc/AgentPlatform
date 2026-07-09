@@ -32,8 +32,7 @@ function InterviewPlan({ wb }: Props) {
 
 function DocumentOutline({ wb }: Props) {
   const outline = wb.view?.artifacts?.find((a) => a.type === "outline") as
-    | { content?: string }
-    | undefined;
+    { content?: string } | undefined;
   if (!outline) return null;
   return (
     <Card className="border-sky-900/50 bg-sky-950/20">

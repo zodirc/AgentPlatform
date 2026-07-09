@@ -203,6 +203,7 @@ async def test_deny_tool_call_resumes_via_langgraph(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tc, "run_via_langgraph", run_lg)
     monkeypatch.setattr(tc, "_finalize_turn", finalize)
     monkeypatch.setattr(tc, "_cleanup_pending_after_command", AsyncMock())
+    monkeypatch.setattr(tc, "resolve_model_config", AsyncMock(return_value=None))
     monkeypatch.setattr(tc.settings, "runtime_runner_id", "runtime-test")
 
     await tc.deny_tool_call(

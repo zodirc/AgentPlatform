@@ -23,7 +23,9 @@ const CITE_RE = /\[cite:[\w-]+\]/g;
 const SOURCE_INTENT_RE =
   /引用|参考|出处|资料|sources?|cite|根据.{0,8}资料|based on/i;
 
-export function userNeedsSources(userMessage: string | null | undefined): boolean {
+export function userNeedsSources(
+  userMessage: string | null | undefined,
+): boolean {
   if (!userMessage?.trim()) return false;
   return SOURCE_INTENT_RE.test(userMessage);
 }
@@ -58,7 +60,9 @@ export function assessWritingRagEffect(options: {
 }): RagEffectAssessment {
   const { view, streamText, sectionDraft, userMessage, turnBusy } = options;
   const needsSources = userNeedsSources(userMessage);
-  const retrievals = (view?.artifacts ?? []).filter((a) => a.type === "retrieval");
+  const retrievals = (view?.artifacts ?? []).filter(
+    (a) => a.type === "retrieval",
+  );
   const searched =
     retrievals.length > 0 ||
     (view?.tool_timeline ?? []).some((t) => t.tool_name === "search_sources");
@@ -73,9 +77,7 @@ export function assessWritingRagEffect(options: {
     return {
       status: "running",
       title: "处理中",
-      detail: needsSources
-        ? "等待模型检索 sources/ 资料…"
-        : "本轮进行中",
+      detail: needsSources ? "等待模型检索 sources/ 资料…" : "本轮进行中",
       searched: false,
       hitCount: 0,
       cites: [],
@@ -98,7 +100,8 @@ export function assessWritingRagEffect(options: {
     return {
       status: "not_needed",
       title: "本轮未用资料检索",
-      detail: "改稿/自由写作通常不需要 search_sources；若要引用 sources/ 请明确说明。",
+      detail:
+        "改稿/自由写作通常不需要 search_sources；若要引用 sources/ 请明确说明。",
       searched: false,
       hitCount: 0,
       cites: [],

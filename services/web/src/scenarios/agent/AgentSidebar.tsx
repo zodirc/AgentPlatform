@@ -51,8 +51,7 @@ function timelinePath(item: TimelineItem, events: TurnEvent[]): string | null {
         String(e.payload.tool_call_id ?? "") === toolCallId,
     );
     const args = started?.payload.arguments as
-      | Record<string, unknown>
-      | undefined;
+      Record<string, unknown> | undefined;
     if (typeof args?.path === "string") return args.path;
     if (typeof args?.pattern === "string") return args.pattern;
     if (typeof args?.query === "string") return args.query.slice(0, 48);
@@ -112,8 +111,7 @@ export function AgentSidebar({
     [wb.timelineItems],
   );
 
-  const workspacePath =
-    selection?.kind === "workspace" ? selection.path : null;
+  const workspacePath = selection?.kind === "workspace" ? selection.path : null;
   const [workspaceSelectPath, setWorkspaceSelectPath] = useState<string | null>(
     null,
   );
