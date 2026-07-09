@@ -25,6 +25,10 @@ function toolLabel(item: TimelineItem, events: TurnEvent[] = []): string {
       const cmd = args.command.slice(0, 40);
       return `${name}(${cmd}${args.command.length > 40 ? "…" : ""})`;
     }
+    if (typeof args?.query === "string") {
+      const q = args.query.slice(0, 48);
+      return `${name}(${q}${args.query.length > 48 ? "…" : ""})`;
+    }
   }
   const summary = item.summary ?? "";
   const pathMatch = summary.match(/"path":\s*"([^"]+)"/);

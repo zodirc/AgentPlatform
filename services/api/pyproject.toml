@@ -5,6 +5,7 @@ description = "Agent Platform HTTP API"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.110",
+    "python-multipart>=0.0.9",
     "uvicorn[standard]>=0.27",
     "asyncpg>=0.29",
     "httpx>=0.27",

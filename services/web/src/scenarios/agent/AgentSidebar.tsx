@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import type { TurnEvent } from "../../shared/api/client";
 import {
   PatchDiffPanel,
@@ -23,6 +23,7 @@ export type SidebarSelection =
 type Props = {
   wb: WorkbenchState;
   selection: SidebarSelection | null;
+  scenarioExtras?: ReactNode;
   onSelect: (sel: SidebarSelection | null) => void;
   onOpenWorkspaceFile: (path: string) => void;
   onClose?: () => void;
@@ -54,6 +55,7 @@ function timelinePath(item: TimelineItem, events: TurnEvent[]): string | null {
       | undefined;
     if (typeof args?.path === "string") return args.path;
     if (typeof args?.pattern === "string") return args.pattern;
+    if (typeof args?.query === "string") return args.query.slice(0, 48);
     if (typeof args?.command === "string") return args.command.slice(0, 40);
   }
   const summary = item.summary ?? "";
@@ -79,6 +81,7 @@ function previewFromTimeline(item: TimelineItem): string {
 export function AgentSidebar({
   wb,
   selection,
+  scenarioExtras,
   onSelect,
   onOpenWorkspaceFile,
   onClose,
@@ -102,6 +105,8 @@ export function AgentSidebar({
           item.tool_name === "list_dir" ||
           item.tool_name === "glob" ||
           item.tool_name === "run_command" ||
+          item.tool_name === "search_sources" ||
+          item.tool_name === "search_codebase" ||
           Boolean(item.stream_output),
       ),
     [wb.timelineItems],
@@ -297,6 +302,7 @@ export function AgentSidebar({
         ) : null}
 
         <div className="space-y-3 p-3">
+          {scenarioExtras}
           <RetrievalView artifacts={artifacts} />
           <ArtifactView artifacts={artifacts} />
         </div>

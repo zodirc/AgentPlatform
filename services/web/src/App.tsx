@@ -1,8 +1,14 @@
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
-import { InterviewWorkbench } from "./scenarios/interview/InterviewWorkbench";
-import { AgentWorkbench } from "./scenarios/agent/AgentWorkbench";
-import { WritingWorkbench } from "./scenarios/writing/WritingWorkbench";
+import { ScenarioWorkbench } from "./shared/workbench/ScenarioWorkbench";
+import { SCENARIO_META } from "./shared/workbench/scenarioMeta";
+import type { ScenarioId } from "./shared/workbench/types";
 import { SettingsPage } from "./settings/SettingsPage";
+
+const SCENARIO_ROUTES: { path: string; id: ScenarioId }[] = [
+  { path: "/writing", id: "writing" },
+  { path: "/agent", id: "agent" },
+  { path: "/interview", id: "interview" },
+];
 
 function Nav() {
   const { pathname } = useLocation();
@@ -21,10 +27,11 @@ function Nav() {
 
   return (
     <nav className="flex items-center gap-2 border-b border-slate-800 bg-slate-950/80 px-6 py-3">
-      <span className="mr-4 font-semibold">Agent Platform</span>
-      {link("/writing", "写作")}
-      {link("/agent", "Agent")}
-      {link("/interview", "访谈")}
+      <span className="mr-2 font-semibold">Agent Platform</span>
+      <span className="mr-2 text-xs text-slate-600">模式</span>
+      {SCENARIO_ROUTES.map(({ path, id }) =>
+        link(path, SCENARIO_META[id].navLabel),
+      )}
       {link("/settings/model", "模型设置")}
     </nav>
   );
@@ -36,9 +43,13 @@ export function App() {
       <Nav />
       <Routes>
         <Route path="/" element={<Navigate to="/writing" replace />} />
-        <Route path="/writing" element={<WritingWorkbench />} />
-        <Route path="/agent" element={<AgentWorkbench />} />
-        <Route path="/interview" element={<InterviewWorkbench />} />
+        {SCENARIO_ROUTES.map(({ path, id }) => (
+          <Route
+            key={id}
+            path={path}
+            element={<ScenarioWorkbench key={id} scenarioId={id} />}
+          />
+        ))}
         <Route path="/settings/model" element={<SettingsPage />} />
       </Routes>
     </div>

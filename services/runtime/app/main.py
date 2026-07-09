@@ -190,6 +190,45 @@ async def workspace_file(
     return result
 
 
+class WorkspaceWriteBody(BaseModel):
+    path: str = Field(min_length=1)
+    content: str = ""
+
+
+class SourceUploadBody(BaseModel):
+    filename: str = Field(min_length=1)
+    content: str = ""
+
+
+@workspace_router.put("/file")
+async def workspace_write_file(
+    body: WorkspaceWriteBody,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import write_workspace_file
+
+    try:
+        result = await write_workspace_file(path=body.path, content=body.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=str(result["error"]))
+    return result
+
+
+@workspace_router.post("/sources/upload")
+async def workspace_upload_source(
+    body: SourceUploadBody,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import upload_source_file
+
+    try:
+        return await upload_source_file(filename=body.filename, content=body.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @asynccontextmanager
 async def lifespan(app):
     import asyncio

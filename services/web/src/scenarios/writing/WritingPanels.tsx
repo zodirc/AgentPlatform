@@ -1,5 +1,8 @@
+import { RetrievalView } from "../agent/RetrievalView";
 import { CitationView } from "./CitationView";
 import { DocumentOutlineView } from "./DocumentOutlineView";
+import { SourcesPanel } from "./SourcesPanel";
+import { WritingRagEffectView } from "./WritingRagEffectView";
 import { Card, CardTitle } from "../../components/ui/card";
 import type { WorkbenchState } from "../../shared/workbench/types";
 
@@ -11,6 +14,9 @@ export function WritingPanels({ wb }: Props) {
   const view = wb.view;
   return (
     <>
+      <SourcesPanel />
+      <WritingRagEffectView wb={wb} />
+      <RetrievalView artifacts={view?.artifacts ?? []} />
       <CitationView items={view?.tool_timeline ?? []} />
       {view?.artifacts?.some((a) => a.type === "outline") && (
         <Card className="border-sky-900/50 bg-sky-950/20">

@@ -272,3 +272,30 @@ export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
   if (!res.ok) throw new Error(`fetchWorkspaceFile failed: ${res.status}`);
   return res.json();
 }
+
+export type SourceUploadResult = {
+  path: string;
+  bytes_written: number;
+  summary: string;
+  index?: {
+    indexed_files?: number;
+    chunks?: number;
+    added?: number;
+    updated?: number;
+  };
+};
+
+export async function uploadSourceFile(file: File): Promise<SourceUploadResult> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/admin/workspace/sources/upload`, {
+    method: "POST",
+    headers: adminAuthHeaders(),
+    body: form,
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(detail || `uploadSourceFile failed: ${res.status}`);
+  }
+  return res.json();
+}

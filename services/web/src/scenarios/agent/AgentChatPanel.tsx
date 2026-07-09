@@ -7,6 +7,7 @@ import {
 } from "../../shared/workbench/toolApproval";
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
 import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
+import { scenarioMeta } from "../../shared/workbench/scenarioMeta";
 import type { WorkbenchState } from "../../shared/workbench/types";
 
 type Props = {
@@ -18,12 +19,16 @@ export function AgentChatPanel({ wb }: Props) {
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
     Record<string, unknown> | undefined;
   const approval = approvalCopy(wb.pendingToolName);
-  const output = wb.streamText || wb.view?.latest_output || "";
+  const meta = scenarioMeta(wb.scenarioId);
+  const output =
+    wb.streamText || wb.sectionDraft || wb.view?.latest_output || "";
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-slate-800 bg-slate-950">
       <header className="shrink-0 border-b border-slate-800 px-4 py-3">
-        <p className="text-xs uppercase tracking-wide text-sky-400">Agent</p>
+        <p className="text-xs uppercase tracking-wide text-sky-400">
+          {meta.chatEyebrow}
+        </p>
         <h1 className="text-sm font-semibold text-slate-100">{wb.title}</h1>
         <p className="text-xs text-slate-500">
           scenario_id={wb.scenarioId}

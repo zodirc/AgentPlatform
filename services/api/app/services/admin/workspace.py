@@ -36,3 +36,16 @@ async def read_file(*, path: str) -> dict:
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
+
+
+async def upload_source(*, filename: str, content: str) -> dict:
+    base = settings.runtime_url.rstrip("/")
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{base}/internal/workspace/sources/upload",
+            json={"filename": filename, "content": content},
+            headers={"X-Internal-Token": settings.internal_service_token},
+        )
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
