@@ -31,5 +31,9 @@ debug.log
 .coverage
 *.log
 
+# agent runtime sandbox (bind-mounted; user-local)
+workspace/*
+!workspace/.gitkeep
+
 # nested empty clone placeholder (if recreated)
 AgentPlatform/
