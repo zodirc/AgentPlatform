@@ -14,7 +14,9 @@ assertions:
     sequence_equals:
       - turn.accepted
       - step.started
+      - context.reported
       - turn.thinking
+      - usage.reported
       - tool.started
       - tool.completed
       - step.completed
