@@ -1,4 +1,3 @@
-import { TimelineView } from "./TimelineView";
 import { RetrievalView } from "./RetrievalView";
 import { ArtifactView } from "./ArtifactView";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
