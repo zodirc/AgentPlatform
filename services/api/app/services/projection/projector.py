@@ -241,11 +241,14 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 "tokens_before": int(payload.get("tokens_before") or 0),
                 "tokens_after": int(payload.get("tokens_after") or 0),
                 "token_budget": int(payload.get("token_budget") or 0),
+                "reserve_tokens": int(payload.get("reserve_tokens") or 0),
+                "fill_ratio": float(payload.get("fill_ratio") or 0.0),
                 "strategies": list(payload.get("strategies") or []),
                 "step_index": int(payload.get("step_index") or 0),
                 "system_tokens": int(payload.get("system_tokens") or 0),
                 "tools_tokens": int(payload.get("tools_tokens") or 0),
                 "messages_tokens": int(payload.get("messages_tokens") or 0),
+                "breakdown": payload.get("breakdown"),
                 "source": str(payload.get("source") or "estimated"),
             }
         elif event_type == "usage.reported":
@@ -413,11 +416,14 @@ async def build_turn_view(turn_id: UUID) -> TurnView | None:
                 "tokens_before": int(art.get("tokens_before") or 0),
                 "tokens_after": int(art.get("tokens_after") or 0),
                 "token_budget": int(art.get("token_budget") or 0),
+                "reserve_tokens": int(art.get("reserve_tokens") or 0),
+                "fill_ratio": float(art.get("fill_ratio") or 0.0),
                 "strategies": list(art.get("strategies") or []),
                 "step_index": int(art.get("step_index") or 0),
                 "system_tokens": int(art.get("system_tokens") or 0),
                 "tools_tokens": int(art.get("tools_tokens") or 0),
                 "messages_tokens": int(art.get("messages_tokens") or 0),
+                "breakdown": art.get("breakdown"),
                 "source": str(art.get("source") or "estimated"),
             }
         elif art_type == "token_usage":

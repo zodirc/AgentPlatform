@@ -36,7 +36,7 @@ async def handle_session_summary(payload: dict) -> None:
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT t.session_id, tv.latest_output, tv.status
+        SELECT t.session_id, tv.latest_output, tv.status, t.user_input
         FROM turns t
         JOIN turn_views tv ON tv.turn_id = t.id
         WHERE t.id = $1
@@ -45,11 +45,43 @@ async def handle_session_summary(payload: dict) -> None:
     )
     if row is None:
         return
+
+    existing = await pool.fetchrow(
+        "SELECT context_summary FROM sessions WHERE id = $1",
+        row["session_id"],
+    )
+    prior_summary = existing["context_summary"] if existing else None
+    if isinstance(prior_summary, str):
+        import json
+
+        try:
+            prior_summary = json.loads(prior_summary)
+        except json.JSONDecodeError:
+            prior_summary = None
+    if isinstance(prior_summary, dict):
+        if prior_summary.get("source") == "manual_compact" and prior_summary.get("last_turn_id") == str(
+            turn_id
+        ):
+            await project_session(row["session_id"])
+            return
+
+    latest_output = row["latest_output"] or ""
+    user_input = row["user_input"] or ""
+    files: list[str] = []
+    for text in (user_input, latest_output):
+        for token in text.split():
+            if "." in token and "/" in token:
+                files.append(token.strip(".,;:\"'`"))
     summary = {
         "last_turn_id": str(turn_id),
         "last_status": row["status"],
-        "last_output_preview": (row["latest_output"] or "")[:500],
+        "last_output_preview": latest_output[:500],
         "turn_count": await _session_turn_count(pool, row["session_id"]),
+        "task": user_input[:300],
+        "files_touched": files[:20],
+        "decisions": [latest_output[:240]] if latest_output else [],
+        "open_items": [],
+        "source": "turn_complete",
     }
     await pool.execute(
         """

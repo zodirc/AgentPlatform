@@ -40,10 +40,10 @@ def test_input_compiler_expands_path_refs() -> None:
     assert "sections/01.md" in compiled.messages[0]["content"][0]["text"]
 
 
-def test_should_query_compact_short_circuits() -> None:
+def test_should_query_compact_requests_session_compact() -> None:
     result = should_query("/compact", has_model_key=True)
     assert result.should_query is False
-    assert result.local_response
+    assert result.slash_command == "compact"
 
 
 def test_tool_scope_applies_agent_approval_overrides() -> None:

@@ -244,6 +244,8 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
               tokens_before: Number(ev.payload.tokens_before ?? 0),
               tokens_after: Number(ev.payload.tokens_after ?? 0),
               token_budget: Number(ev.payload.token_budget ?? 0),
+              reserve_tokens: Number(ev.payload.reserve_tokens ?? 0),
+              fill_ratio: Number(ev.payload.fill_ratio ?? 0),
               strategies: Array.isArray(ev.payload.strategies)
                 ? (ev.payload.strategies as string[])
                 : [],
@@ -251,6 +253,11 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
               system_tokens: Number(ev.payload.system_tokens ?? 0),
               tools_tokens: Number(ev.payload.tools_tokens ?? 0),
               messages_tokens: Number(ev.payload.messages_tokens ?? 0),
+              breakdown:
+                ev.payload.breakdown &&
+                typeof ev.payload.breakdown === "object"
+                  ? (ev.payload.breakdown as ContextUsage["breakdown"])
+                  : undefined,
               source:
                 (ev.payload.source as ContextUsage["source"]) ?? "estimated",
             });

@@ -15,6 +15,7 @@ class CreateModelProviderRequest(BaseModel):
     model_name: str = Field(min_length=1, max_length=128)
     api_key: str = Field(min_length=1)
     base_url: str | None = None
+    context_window_tokens: int | None = Field(default=None, ge=4096, le=2_000_000)
     activate: bool = True
 
 
@@ -24,6 +25,7 @@ class UpdateModelProviderRequest(BaseModel):
     model_name: str | None = None
     api_key: str | None = None
     base_url: str | None = None
+    context_window_tokens: int | None = Field(default=None, ge=4096, le=2_000_000)
 
 
 class ModelProviderProfile(BaseModel):
@@ -32,6 +34,7 @@ class ModelProviderProfile(BaseModel):
     provider: str
     model_name: str
     base_url: str | None
+    context_window_tokens: int | None = None
     is_active: bool
     api_key_hint: str
     config_version: int
@@ -45,6 +48,7 @@ def _row_to_profile(row, *, hint: str) -> ModelProviderProfile:
         provider=row["provider"],
         model_name=row["model_name"],
         base_url=row["base_url"],
+        context_window_tokens=row.get("context_window_tokens"),
         is_active=row["is_active"],
         api_key_hint=hint,
         config_version=row["config_version"],
@@ -56,7 +60,7 @@ async def list_profiles() -> list[ModelProviderProfile]:
     pool = await get_pool()
     rows = await pool.fetch(
         """
-        SELECT id, label, provider, model_name, base_url, is_active,
+        SELECT id, label, provider, model_name, base_url, context_window_tokens, is_active,
                config_version, updated_at, api_key_ciphertext
         FROM model_provider_profiles
         ORDER BY updated_at DESC
@@ -87,17 +91,19 @@ async def create_profile(body: CreateModelProviderRequest) -> ModelProviderProfi
             row = await conn.fetchrow(
                 """
                 INSERT INTO model_provider_profiles (
-                    label, provider, model_name, api_key_ciphertext, base_url, is_active
+                    label, provider, model_name, api_key_ciphertext, base_url,
+                    context_window_tokens, is_active
                 )
-                VALUES ($1, $2, $3, $4, $5, $6)
-                RETURNING id, label, provider, model_name, base_url, is_active,
-                          config_version, updated_at
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, label, provider, model_name, base_url, context_window_tokens,
+                          is_active, config_version, updated_at
                 """,
                 body.label,
                 body.provider,
                 body.model_name,
                 ciphertext,
                 body.base_url,
+                body.context_window_tokens,
                 body.activate,
             )
             if row is not None:
@@ -133,6 +139,9 @@ async def update_profile(
     if body.base_url is not None:
         fields.append(f"base_url = ${len(values) + 1}")
         values.append(body.base_url)
+    if body.context_window_tokens is not None:
+        fields.append(f"context_window_tokens = ${len(values) + 1}")
+        values.append(body.context_window_tokens)
     if body.api_key is not None:
         fields.append(f"api_key_ciphertext = ${len(values) + 1}")
         values.append(encrypt_api_key(body.api_key))
@@ -164,7 +173,7 @@ async def update_profile(
         UPDATE model_provider_profiles
         SET {", ".join(fields)}
         WHERE id = ${len(values)}
-        RETURNING id, label, provider, model_name, base_url, is_active,
+        RETURNING id, label, provider, model_name, base_url, context_window_tokens, is_active,
                   config_version, updated_at, api_key_ciphertext
     """
     async with pool.acquire() as conn:
@@ -196,8 +205,8 @@ async def activate_profile(profile_id: UUID) -> ModelProviderProfile | None:
                 UPDATE model_provider_profiles
                 SET is_active = true, config_version = config_version + 1, updated_at = now()
                 WHERE id = $1
-                RETURNING id, label, provider, model_name, base_url, is_active,
-                          config_version, updated_at, api_key_ciphertext
+                RETURNING id, label, provider, model_name, base_url, context_window_tokens,
+                          is_active, config_version, updated_at, api_key_ciphertext
                 """,
                 profile_id,
             )

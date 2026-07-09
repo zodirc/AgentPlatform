@@ -21,7 +21,7 @@ export function AgentChatPanel({ wb }: Props) {
   const output = wb.streamText || wb.view?.latest_output || "";
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-r border-slate-800 bg-slate-950">
+    <aside className="flex h-full min-h-0 flex-col border-l border-slate-800 bg-slate-950">
       <header className="shrink-0 border-b border-slate-800 px-4 py-3">
         <p className="text-xs uppercase tracking-wide text-sky-400">Agent</p>
         <h1 className="text-sm font-semibold text-slate-100">{wb.title}</h1>

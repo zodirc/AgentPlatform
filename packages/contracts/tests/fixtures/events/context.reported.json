@@ -4,11 +4,22 @@
     "step_index": 0,
     "tokens_before": 2400,
     "tokens_after": 1800,
-    "token_budget": 12000,
+    "token_budget": 128000,
+    "reserve_tokens": 18200,
+    "fill_ratio": 0.0156,
     "strategies": ["budget", "microcompact"],
     "system_tokens": 220,
     "tools_tokens": 1800,
     "messages_tokens": 12,
+    "breakdown": {
+      "system": 220,
+      "tools": 1800,
+      "session": 0,
+      "user": 8,
+      "assistant": 4,
+      "tool_results": 0,
+      "compaction": 0
+    },
     "source": "estimated"
   }
 }

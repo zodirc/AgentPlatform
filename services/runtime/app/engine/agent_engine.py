@@ -6,6 +6,7 @@ import time
 from typing import Any, Awaitable, Callable
 
 from app.context.engine import ContextEngine, ToolExecutor
+from app.context.policy import CompactionPolicy
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message
 from app.model.gateway import ModelGateway, ModelProviderTimeout, ModelResponse
 from app.observability.metrics import record_step_duration, record_tool_call
@@ -40,6 +41,7 @@ class AgentEngine:
         write_event: EventWriter,
         check_cancel: CancelChecker,
         on_step_checkpoint: Callable[[TurnState, int], Awaitable[None]] | None = None,
+        context_window_tokens: int | None = None,
     ) -> None:
         self._gateway = gateway
         self._executor = ToolExecutor(tools)
@@ -47,7 +49,10 @@ class AgentEngine:
         self._write_event = write_event
         self._check_cancel = check_cancel
         self._on_step_checkpoint = on_step_checkpoint
-        self._context = ContextEngine()
+        policy = CompactionPolicy.from_settings()
+        if context_window_tokens is not None:
+            policy = policy.with_window(context_window_tokens)
+        self._context = ContextEngine(policy=policy)
         self.pending_approval: dict[str, Any] | None = None
         self._tool_result_cache: dict[str, dict[str, Any]] = {}
         self._tool_repeat_counts: dict[str, int] = {}
@@ -106,29 +111,34 @@ class AgentEngine:
                     system_prompt=self._system_prompt,
                     state=state,
                     gateway=self._gateway,
+                    tools=self._openai_tools,
                 )
-                from app.context.engine import estimate_assembled_window
+
+                from app.context.engine import estimate_window_breakdown
 
                 report = self._context.last_budget_report
-                window = estimate_assembled_window(messages=messages, tools=self._openai_tools)
+                breakdown = estimate_window_breakdown(
+                    messages=messages,
+                    tools=self._openai_tools,
+                )
                 strategies = [
                     str(t.get("strategy", ""))
                     for t in self._context.last_compaction_trace
                     if t.get("strategy")
                 ]
-                display_budget = max(int(settings.context_window_tokens), int(window["tokens_after"]))
                 await self._write_event(
                     event_type="context.reported",
                     payload={
                         "step_index": step_index,
-                        "tokens_before": int(report.get("tokens_before", 0))
-                        + int(window.get("system_tokens", 0))
-                        + int(window.get("tools_tokens", 0)),
-                        "tokens_after": int(window.get("tokens_after", 0)),
-                        "token_budget": display_budget,
-                        "system_tokens": int(window.get("system_tokens", 0)),
-                        "tools_tokens": int(window.get("tools_tokens", 0)),
-                        "messages_tokens": int(window.get("messages_tokens", 0)),
+                        "tokens_before": int(report.get("tokens_before", 0)),
+                        "tokens_after": int(report.get("tokens_after", 0)),
+                        "token_budget": int(report.get("token_budget", settings.context_window_tokens)),
+                        "system_tokens": int(report.get("system_tokens", 0)),
+                        "tools_tokens": int(report.get("tools_tokens", 0)),
+                        "messages_tokens": int(report.get("messages_tokens", 0)),
+                        "reserve_tokens": int(report.get("reserve_tokens", 0)),
+                        "fill_ratio": float(report.get("fill_ratio", 0.0)),
+                        "breakdown": breakdown,
                         "source": "estimated",
                         "strategies": strategies,
                     },
@@ -199,13 +209,13 @@ class AgentEngine:
 
                 if step_input_tokens == 0 and step_output_tokens == 0:
                     # Fallback estimate when provider did not report usage.
-                    step_input_tokens = int(window.get("tokens_after", 0))
+                    step_input_tokens = int(report.get("tokens_after", 0))
                     step_output_tokens = max(1, len(response_text) // 4) if response_text else 0
                     state.usage.input_tokens += step_input_tokens
                     state.usage.output_tokens += step_output_tokens
                     usage_source = "estimated"
                 elif step_input_tokens == 0:
-                    step_input_tokens = int(window.get("tokens_after", 0))
+                    step_input_tokens = int(report.get("tokens_after", 0))
                     state.usage.input_tokens += step_input_tokens
                     usage_source = "mixed" if usage_source == "provider" else "estimated"
 

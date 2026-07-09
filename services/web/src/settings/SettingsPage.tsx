@@ -9,6 +9,20 @@ import {
   updateModelProvider,
 } from "../shared/api/client";
 
+function formatContextWindow(tokens: number | null | undefined): string {
+  if (tokens == null || tokens <= 0) return "默认";
+  if (tokens >= 1000) return `${Math.round(tokens / 1000)}k`;
+  return String(tokens);
+}
+
+function parseContextWindowInput(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed.replace(/_/g, ""));
+  if (!Number.isFinite(parsed) || parsed < 4096) return undefined;
+  return Math.floor(parsed);
+}
+
 export function SettingsPage() {
   const qc = useQueryClient();
   const [adminPasswordInput, setAdminPasswordInput] = useState("");
@@ -34,8 +48,10 @@ export function SettingsPage() {
   const [modelName, setModelName] = useState("claude-sonnet-4-20250514");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
+  const [contextWindowTokens, setContextWindowTokens] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editModelName, setEditModelName] = useState("");
+  const [editContextWindowTokens, setEditContextWindowTokens] = useState("");
 
   const createMut = useMutation({
     mutationFn: createModelProvider,
@@ -48,8 +64,13 @@ export function SettingsPage() {
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, body }: { id: string; body: { model_name: string } }) =>
-      updateModelProvider(id, body),
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: { model_name: string; context_window_tokens?: number };
+    }) => updateModelProvider(id, body),
     onSuccess: () => {
       setEditingId(null);
       void qc.invalidateQueries({ queryKey: ["model-providers"] });
@@ -64,12 +85,14 @@ export function SettingsPage() {
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     if (!apiKey.trim()) return;
+    const windowTokens = parseContextWindowInput(contextWindowTokens);
     createMut.mutate({
       label,
       provider,
       model_name: modelName,
       api_key: apiKey,
       base_url: baseUrl.trim() || undefined,
+      context_window_tokens: windowTokens,
       activate: true,
     });
     setApiKey("");
@@ -134,6 +157,17 @@ export function SettingsPage() {
         />
         <input
           className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+          placeholder="上下文窗口 tokens（可选，如 128000；留空用模型/环境默认）"
+          inputMode="numeric"
+          value={contextWindowTokens}
+          onChange={(e) => setContextWindowTokens(e.target.value)}
+        />
+        <p className="text-xs text-slate-500">
+          用于上下文压缩与占用显示。常见：GPT-4o / mini 128000，Claude Sonnet
+          200000；本地小模型可填 32000。
+        </p>
+        <input
+          className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
           placeholder="base_url（可选，OpenAI 兼容/中转填写，如 https://api.deepseek.com）"
           value={baseUrl}
           onChange={(e) => setBaseUrl(e.target.value)}
@@ -171,40 +205,59 @@ export function SettingsPage() {
                   )}
                 </div>
                 <div className="text-xs text-slate-500">
-                  {p.provider} / {p.model_name} · {p.api_key_hint}
+                  {p.provider} / {p.model_name} · {p.api_key_hint} · 窗口{" "}
+                  {formatContextWindow(p.context_window_tokens)}
                 </div>
                 {editingId === p.id ? (
                   <form
-                    className="mt-2 flex gap-2"
+                    className="mt-2 space-y-2"
                     onSubmit={(e) => {
                       e.preventDefault();
                       if (!editModelName.trim()) return;
+                      const windowTokens =
+                        parseContextWindowInput(editContextWindowTokens);
                       updateMut.mutate({
                         id: p.id,
-                        body: { model_name: editModelName.trim() },
+                        body: {
+                          model_name: editModelName.trim(),
+                          ...(windowTokens !== undefined
+                            ? { context_window_tokens: windowTokens }
+                            : {}),
+                        },
                       });
                     }}
                   >
                     <input
-                      className="flex-1 rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                      className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
                       value={editModelName}
                       onChange={(e) => setEditModelName(e.target.value)}
-                      placeholder="新 model_name"
+                      placeholder="model_name"
                     />
-                    <button
-                      type="submit"
-                      className="text-xs text-sky-400"
-                      disabled={updateMut.isPending}
-                    >
-                      保存
-                    </button>
-                    <button
-                      type="button"
-                      className="text-xs text-slate-500"
-                      onClick={() => setEditingId(null)}
-                    >
-                      取消
-                    </button>
+                    <input
+                      className="w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-xs"
+                      value={editContextWindowTokens}
+                      onChange={(e) =>
+                        setEditContextWindowTokens(e.target.value)
+                      }
+                      placeholder="上下文窗口 tokens（可选）"
+                      inputMode="numeric"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="submit"
+                        className="text-xs text-sky-400"
+                        disabled={updateMut.isPending}
+                      >
+                        保存
+                      </button>
+                      <button
+                        type="button"
+                        className="text-xs text-slate-500"
+                        onClick={() => setEditingId(null)}
+                      >
+                        取消
+                      </button>
+                    </div>
                   </form>
                 ) : null}
               </div>
@@ -215,9 +268,14 @@ export function SettingsPage() {
                   onClick={() => {
                     setEditingId(p.id);
                     setEditModelName(p.model_name);
+                    setEditContextWindowTokens(
+                      p.context_window_tokens
+                        ? String(p.context_window_tokens)
+                        : "",
+                    );
                   }}
                 >
-                  编辑模型
+                  编辑
                 </button>
                 {!p.is_active && (
                   <button

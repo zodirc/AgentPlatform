@@ -194,6 +194,7 @@ export async function createModelProvider(body: {
   model_name: string;
   api_key: string;
   base_url?: string;
+  context_window_tokens?: number;
   activate?: boolean;
 }) {
   const res = await fetch(`${API_BASE}/admin/model-providers`, {
@@ -222,6 +223,7 @@ export async function updateModelProvider(
     model_name?: string;
     api_key?: string;
     base_url?: string;
+    context_window_tokens?: number;
   },
 ) {
   const res = await fetch(`${API_BASE}/admin/model-providers/${id}`, {

@@ -6,12 +6,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from app.context.policy import CompactionPolicy
+from app.context.summary import structured_summary_from_messages
 from app.engine.state import TurnState
 from app.tools.registry import ToolSpec
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TOKEN_BUDGET = 12_000
 TOOL_RESULT_CHAR_BUDGET = 4_000
 SHORT_TOOL_RESULT_MAX_CHARS = 800
 
@@ -62,27 +63,39 @@ class ContextEnvelope:
 
 
 class ContextEngine:
-    def __init__(self, *, token_budget: int = DEFAULT_TOKEN_BUDGET) -> None:
-        self._token_budget = token_budget
+    def __init__(
+        self,
+        *,
+        policy: CompactionPolicy | None = None,
+        token_budget: int | None = None,
+    ) -> None:
+        if policy is not None:
+            self._policy = policy
+        elif token_budget is not None:
+            self._policy = CompactionPolicy.legacy_messages_budget(token_budget)
+        else:
+            self._policy = CompactionPolicy.from_settings()
         self.last_compaction_trace: list[dict[str, str]] = []
         self.last_budget_report: dict[str, Any] = {
             "tokens_before": 0,
             "tokens_after": 0,
-            "token_budget": token_budget,
+            "token_budget": self._policy.model_window_tokens,
+            "fill_ratio": 0.0,
         }
 
-    def assemble(self, *, system_prompt: str, state: TurnState) -> list[dict]:
-        envelope = self._build_envelope(state=state)
-        self.last_compaction_trace = envelope.compaction_trace
-        self.last_budget_report = dict(envelope.budget_report)
-        if envelope.compaction_trace:
-            logger.info(
-                "context compaction turn_id=%s strategies=%s before=%s after=%s",
-                state.turn_id,
-                [t.get("strategy") for t in envelope.compaction_trace],
-                envelope.budget_report.get("tokens_before"),
-                envelope.budget_report.get("tokens_after"),
-            )
+    def assemble(
+        self,
+        *,
+        system_prompt: str,
+        state: TurnState,
+        tools: list[dict[str, Any]] | None = None,
+    ) -> list[dict]:
+        envelope = self._build_envelope(
+            state=state,
+            system_prompt=system_prompt,
+            tools=tools,
+        )
+        self._finalize_envelope(envelope, state.turn_id)
         system = {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
         return [system, *envelope.messages]
 
@@ -92,11 +105,17 @@ class ContextEngine:
         system_prompt: str,
         state: TurnState,
         gateway: Any | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> list[dict]:
         from app.context.compact_summarizer import summarize_messages_with_gateway
 
         defer = gateway is not None
-        envelope = self._build_envelope(state=state, defer_autocompact=defer)
+        envelope = self._build_envelope(
+            state=state,
+            system_prompt=system_prompt,
+            tools=tools,
+            defer_autocompact=defer,
+        )
         trace = list(envelope.compaction_trace)
         messages = list(envelope.messages)
 
@@ -104,29 +123,57 @@ class ContextEngine:
             messages = [await summarize_messages_with_gateway(gateway, state.messages)]
             trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
             trace.append({"strategy": "compact", "detail": "autocompact_llm"})
-            tokens_after = _estimate_tokens(messages)
+            fill_ratio, window = _window_fill(
+                messages=messages,
+                system_prompt=system_prompt,
+                tools=tools,
+                policy=self._policy,
+            )
             envelope.budget_report = {
                 **envelope.budget_report,
-                "tokens_after": tokens_after,
+                "tokens_after": window["tokens_after"],
+                "messages_tokens": window["messages_tokens"],
+                "fill_ratio": round(fill_ratio, 4),
             }
+            envelope.messages = messages
+            envelope.compaction_trace = trace
 
-        self.last_compaction_trace = trace
+        self._finalize_envelope(envelope, state.turn_id)
+        system = {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+        return [system, *envelope.messages]
+
+    def _finalize_envelope(self, envelope: ContextEnvelope, turn_id: Any) -> None:
+        self.last_compaction_trace = envelope.compaction_trace
         self.last_budget_report = dict(envelope.budget_report)
-        if trace:
+        if envelope.compaction_trace:
             logger.info(
-                "context compaction turn_id=%s strategies=%s before=%s after=%s",
-                state.turn_id,
-                [t.get("strategy") for t in trace],
+                "context compaction turn_id=%s strategies=%s before=%s after=%s fill=%s",
+                turn_id,
+                [t.get("strategy") for t in envelope.compaction_trace],
                 envelope.budget_report.get("tokens_before"),
                 envelope.budget_report.get("tokens_after"),
+                envelope.budget_report.get("fill_ratio"),
             )
-        system = {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
-        return [system, *messages]
 
-    def _build_envelope(self, *, state: TurnState, defer_autocompact: bool = False) -> ContextEnvelope:
+    def _build_envelope(
+        self,
+        *,
+        state: TurnState,
+        system_prompt: str,
+        tools: list[dict[str, Any]] | None,
+        defer_autocompact: bool = False,
+    ) -> ContextEnvelope:
+        policy = self._policy
         messages = [dict(m) for m in state.messages]
         trace: list[dict[str, str]] = []
-        tokens_before = _estimate_tokens(messages)
+
+        _, window_before = _window_fill(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            policy=policy,
+        )
+        tokens_before = window_before["tokens_after"]
 
         messages, budgeted = _apply_tool_result_budget(
             messages, TOOL_RESULT_CHAR_BUDGET, preserve_short=True
@@ -138,32 +185,92 @@ class ContextEngine:
         if micro:
             trace.append({"strategy": "microcompact", "detail": f"folded_{micro}_tool_results"})
 
-        while _estimate_tokens(messages) > self._token_budget and len(messages) > 1:
+        fill_ratio, _ = _window_fill(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            policy=policy,
+        )
+        if fill_ratio >= policy.fill_collapse and len(messages) > 4:
+            messages = _collapse_tool_history(
+                messages,
+                trace,
+                system_prompt=system_prompt,
+                tools=tools,
+                policy=policy,
+            )
+
+        while len(messages) > 1:
+            fill_ratio, _ = _window_fill(
+                messages=messages,
+                system_prompt=system_prompt,
+                tools=tools,
+                policy=policy,
+            )
+            if fill_ratio < policy.fill_snip:
+                break
             if not _pop_oldest_message_group(messages):
                 break
             trace.append({"strategy": "snip", "detail": "dropped_oldest_message"})
 
-        if len(messages) > 6:
-            messages = _collapse_tool_history(messages, trace)
-
-        tokens_after = _estimate_tokens(messages)
-        if tokens_after > self._token_budget and messages:
+        fill_ratio, _ = _window_fill(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            policy=policy,
+        )
+        if fill_ratio >= policy.fill_autocompact and messages:
             if defer_autocompact:
                 trace.append({"strategy": "compact", "detail": "autocompact_pending"})
             else:
                 messages = [_summarize_messages(messages)]
                 trace.append({"strategy": "compact", "detail": "autocompact_summary"})
 
-        tokens_after = _estimate_tokens(messages)
+        fill_ratio, window_after = _window_fill(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            policy=policy,
+        )
+        reserve_tokens = (
+            policy.output_reserve_tokens
+            + window_after["system_tokens"]
+            + window_after["tools_tokens"]
+        )
         return ContextEnvelope(
             messages=messages,
             budget_report={
                 "tokens_before": tokens_before,
-                "tokens_after": tokens_after,
-                "token_budget": self._token_budget,
+                "tokens_after": window_after["tokens_after"],
+                "messages_tokens": window_after["messages_tokens"],
+                "system_tokens": window_after["system_tokens"],
+                "tools_tokens": window_after["tools_tokens"],
+                "token_budget": policy.model_window_tokens,
+                "reserve_tokens": reserve_tokens,
+                "fill_ratio": round(fill_ratio, 4),
             },
             compaction_trace=trace,
         )
+
+
+def _system_message(system_prompt: str) -> dict[str, Any]:
+    return {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+
+
+def _window_fill(
+    *,
+    messages: list[dict[str, Any]],
+    system_prompt: str,
+    tools: list[dict[str, Any]] | None,
+    policy: CompactionPolicy,
+) -> tuple[float, dict[str, int]]:
+    window = estimate_assembled_window(
+        messages=[_system_message(system_prompt), *messages],
+        tools=tools,
+    )
+    usable = max(1, policy.model_window_tokens - policy.output_reserve_tokens)
+    fill_ratio = window["tokens_after"] / usable
+    return fill_ratio, window
 
 
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
@@ -206,6 +313,54 @@ def estimate_assembled_window(
         "messages_tokens": message_tokens,
         "tokens_after": system_tokens + tools_tokens + message_tokens,
     }
+
+
+def _message_text(msg: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for block in msg.get("content", []):
+        if block.get("type") == "text":
+            parts.append(str(block.get("text", "")))
+    return " ".join(parts).strip()
+
+
+def estimate_window_breakdown(
+    *,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, int]:
+    """Classify assembled-window tokens into Cursor-like categories."""
+    window = estimate_assembled_window(messages=messages, tools=tools)
+    breakdown = {
+        "system": 0,
+        "tools": window["tools_tokens"],
+        "session": 0,
+        "user": 0,
+        "assistant": 0,
+        "tool_results": 0,
+        "compaction": 0,
+    }
+    for msg in messages:
+        role = msg.get("role")
+        toks = estimate_payload_tokens(msg)
+        if role == "system":
+            breakdown["system"] += toks
+            continue
+        text = _message_text(msg)
+        lower = text.lower()
+        if role == "tool":
+            breakdown["tool_results"] += toks
+        elif "session context" in lower:
+            breakdown["session"] += toks
+        elif text.startswith("[") and any(
+            marker in lower
+            for marker in ("microcompact", "collapsed", "autocompact", "pinned tool")
+        ):
+            breakdown["compaction"] += toks
+        elif role == "user":
+            breakdown["user"] += toks
+        elif role == "assistant":
+            breakdown["assistant"] += toks
+    return breakdown
 
 
 def _tool_result_text(msg: dict[str, Any]) -> str:
@@ -326,7 +481,10 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> tuple[list[dic
                         "content": [
                             {
                                 "type": "text",
-                                "text": f"[microcompact: folded {len(run)} tool results; re-read with tools if needed]",
+                                "text": (
+                                    f"[microcompact: folded {len(run)} tool results; "
+                                    "re-read with tools if needed]"
+                                ),
                             }
                         ],
                     }
@@ -373,16 +531,46 @@ def _align_tail_start(messages: list[dict[str, Any]], tail_start: int) -> int:
     return max(1, tail_start)
 
 
-def _collapse_tool_history(messages: list[dict[str, Any]], trace: list[dict[str, str]]) -> list[dict[str, Any]]:
+def _tail_start_for_token_budget(messages: list[dict[str, Any]], hot_budget: int) -> int:
+    total = 0
+    index = len(messages)
+    while index > 0 and total < hot_budget:
+        index -= 1
+        total += _estimate_tokens([messages[index]])
+    return _align_tail_start(messages, index)
+
+
+def _collapse_tool_history(
+    messages: list[dict[str, Any]],
+    trace: list[dict[str, str]],
+    *,
+    system_prompt: str,
+    tools: list[dict[str, Any]] | None,
+    policy: CompactionPolicy,
+) -> list[dict[str, Any]]:
     """Fold older messages into a pointer block without breaking assistant/tool pairs."""
-    if len(messages) <= 10:
+    fill_ratio, window = _window_fill(
+        messages=messages,
+        system_prompt=system_prompt,
+        tools=tools,
+        policy=policy,
+    )
+    if fill_ratio < policy.fill_collapse or len(messages) <= 4:
         return messages
-    keep = 6
-    tail_start = _align_tail_start(messages, max(1, len(messages) - keep))
+
+    working = max(
+        1,
+        policy.model_window_tokens
+        - policy.output_reserve_tokens
+        - window["system_tokens"]
+        - window["tools_tokens"],
+    )
+    hot_budget = max(1, int(working * policy.hot_zone_ratio))
+    tail_start = _tail_start_for_token_budget(messages, hot_budget)
     head = messages[:1] if messages and messages[0].get("role") == "user" else []
     middle = messages[len(head) : tail_start]
     tail = messages[tail_start:]
-    if len(head) + len(tail) >= len(messages):
+    if len(head) + len(tail) >= len(messages) or not middle:
         return messages
     collapsed = len(messages) - len(head) - len(tail)
     trace.append({"strategy": "collapse", "detail": f"collapsed_{collapsed}_messages"})
@@ -392,51 +580,17 @@ def _collapse_tool_history(messages: list[dict[str, Any]], trace: list[dict[str,
         pointer_text = f"{pointer_text} {pinned}"
     pointer = {
         "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": pointer_text,
-            }
-        ],
+        "content": [{"type": "text", "text": pointer_text}],
     }
     return [*head, pointer, *tail]
 
 
 def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    """Deterministic autocompact: preserve recent user/assistant snippets and tool names."""
-    user_bits: list[str] = []
-    assistant_bits: list[str] = []
-    tool_names: list[str] = []
-
-    for msg in messages:
-        role = msg.get("role")
-        for block in msg.get("content", []):
-            if block.get("type") == "text":
-                text = str(block.get("text", "")).strip()
-                if not text or text.startswith("["):
-                    continue
-                if role == "user" and len(user_bits) < 2:
-                    user_bits.append(text[:120])
-                elif role == "assistant" and len(assistant_bits) < 2:
-                    assistant_bits.append(text[:120])
-            elif block.get("type") == "tool_use":
-                name = str(block.get("name", ""))
-                if name:
-                    tool_names.append(name)
-            elif block.get("type") == "tool_result":
-                content = str(block.get("content", ""))[:80]
-                if content:
-                    tool_names.append(f"result:{content[:40]}")
-
-    parts = [f"{len(messages)} earlier messages compacted"]
-    if user_bits:
-        parts.append(f"user={user_bits[-1]!r}")
-    if assistant_bits:
-        parts.append(f"assistant={assistant_bits[-1]!r}")
-    if tool_names:
-        parts.append(f"tools={','.join(tool_names[-4:])}")
-
+    """Deterministic autocompact with structured fields."""
+    summary = structured_summary_from_messages(messages)
+    if not summary.narrative:
+        summary.narrative = f"{len(messages)} earlier messages compacted"
     return {
         "role": "user",
-        "content": [{"type": "text", "text": f"[autocompact: {'; '.join(parts)}]"}],
+        "content": [{"type": "text", "text": summary.to_autocompact_text()}],
     }

@@ -364,11 +364,22 @@ export interface components {
                 tokens_before?: number;
                 tokens_after?: number;
                 token_budget?: number;
+                reserve_tokens?: number;
+                fill_ratio?: number;
                 strategies?: string[];
                 step_index?: number;
                 system_tokens?: number;
                 tools_tokens?: number;
                 messages_tokens?: number;
+                breakdown?: {
+                    system?: number;
+                    tools?: number;
+                    session?: number;
+                    user?: number;
+                    assistant?: number;
+                    tool_results?: number;
+                    compaction?: number;
+                };
                 /** @enum {string} */
                 source?: "estimated" | "provider";
             } | null;
@@ -437,6 +448,7 @@ export interface components {
             model_name: string;
             api_key: string;
             base_url?: string;
+            context_window_tokens?: number;
             /** @default true */
             activate: boolean;
         };
@@ -446,6 +458,7 @@ export interface components {
             model_name?: string;
             api_key?: string;
             base_url?: string;
+            context_window_tokens?: number;
         };
         ModelProviderProfile: {
             /** Format: uuid */
@@ -454,6 +467,7 @@ export interface components {
             provider: string;
             model_name: string;
             base_url?: string | null;
+            context_window_tokens?: number | null;
             is_active: boolean;
             api_key_hint: string;
             config_version: number;

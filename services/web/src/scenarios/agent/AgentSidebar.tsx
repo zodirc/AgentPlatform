@@ -22,6 +22,7 @@ type Props = {
   wb: WorkbenchState;
   selection: SidebarSelection | null;
   onSelect: (sel: SidebarSelection | null) => void;
+  onClose?: () => void;
 };
 
 function isPatchArtifact(a: Record<string, unknown>): a is PatchArtifact {
@@ -71,7 +72,7 @@ function previewFromTimeline(item: TimelineItem): string {
   return summary;
 }
 
-export function AgentSidebar({ wb, selection, onSelect }: Props) {
+export function AgentSidebar({ wb, selection, onSelect, onClose }: Props) {
   const view = wb.view;
   const artifacts = view?.artifacts ?? [];
 
@@ -131,10 +132,22 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
   }, [selection, fileWrites, patches, wb.events]);
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-l border-slate-800 bg-slate-950">
-      <header className="shrink-0 border-b border-slate-800 px-4 py-3">
-        <h2 className="text-sm font-semibold text-slate-200">产物</h2>
-        <p className="text-xs text-slate-500">文件预览与变更</p>
+    <aside className="flex h-full w-[min(320px,35vw)] shrink-0 flex-col border-r border-slate-800 bg-slate-950">
+      <header className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-800 px-4 py-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-slate-200">产物</h2>
+          <p className="text-xs text-slate-500">文件预览与变更</p>
+        </div>
+        {onClose ? (
+          <button
+            type="button"
+            className="shrink-0 rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-900 hover:text-slate-200"
+            title="收起产物栏"
+            onClick={onClose}
+          >
+            ‹
+          </button>
+        ) : null}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
@@ -306,7 +319,7 @@ export function AgentSidebar({ wb, selection, onSelect }: Props) {
             )}
           </div>
         ) : (
-          <p className="p-4 text-xs text-slate-600">点击左侧列表项预览内容</p>
+          <p className="p-4 text-xs text-slate-600">点击列表项预览内容</p>
         )}
       </div>
     </aside>

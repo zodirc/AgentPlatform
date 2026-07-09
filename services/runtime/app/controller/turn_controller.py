@@ -13,6 +13,7 @@ import structlog
 from app.contracts.event_validation import EventPayloadValidationError
 from app.controller.events import append_event, run_exists
 from app.controller.input_compiler import InputCompiler, should_query
+from app.controller.session_compact import compact_session_context
 from app.controller.runtime_context import set_event_writer
 from app.controller.checkpoint_store import delete_checkpoint, load_checkpoint, save_checkpoint
 from app.controller.pending_store import PendingTurn, get, pop, save
@@ -23,7 +24,7 @@ from app.tools.delegate_context import DelegateRuntime, set_delegate_runtime
 from app.graph.runner import run_via_langgraph
 from app.engine.agent_engine import AgentEngine, StepTimeoutError
 from app.engine.state import TurnState, tool_result_message
-from app.model.config import resolve_active_profile_metadata, resolve_model_config
+from app.model.config import resolve_active_profile_metadata, resolve_context_window_tokens, resolve_model_config
 from app.model.factory import create_gateway
 from app.model.gateway import ModelProviderTimeout
 from app.observability.metrics import record_turn_finished
@@ -530,6 +531,36 @@ async def _run_turn(
         from app.observability.metrics import metrics
 
         metrics.inc("should_query_short_circuit_total")
+        if gate.slash_command == "compact":
+            gateway = create_gateway(model_config, messages=[])
+            _, confirmation = await compact_session_context(
+                session_id=session_id,
+                turn_id=turn_id,
+                gateway=gateway,
+            )
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await append_event(
+                        conn,
+                        turn_id=turn_id,
+                        run_id=run_id,
+                        event_type="turn.completed",
+                        trace_id=trace_id,
+                        payload={"summary": confirmation, "session_compacted": True},
+                    )
+                    await conn.execute(
+                        "UPDATE turns SET status = 'completed', updated_at = now() WHERE id = $1",
+                        turn_id,
+                    )
+                    await conn.execute(
+                        """
+                        UPDATE runs
+                        SET status = 'succeeded', termination_reason = 'session_compact', updated_at = now()
+                        WHERE id = $1
+                        """,
+                        run_id,
+                    )
+            return
         if gate.local_response:
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -578,6 +609,7 @@ async def _run_turn(
     registry = build_registry()
     tools = tool_scope(profile, registry)
     gateway = create_gateway(model_config, messages=compiled.messages)
+    context_window_tokens = await resolve_context_window_tokens(model_config)
 
     async def check_cancel() -> tuple[bool, bool]:
         return await _check_cancel_flag(turn_id)
@@ -597,6 +629,7 @@ async def _run_turn(
         write_event=write_event,
         check_cancel=check_cancel,
         on_step_checkpoint=on_step_checkpoint,
+        context_window_tokens=context_window_tokens,
     )
 
     set_event_writer(write_event)
@@ -748,12 +781,15 @@ async def _resume_after_approval(
             )
 
     state = pending.state
+    model_config = await resolve_model_config()
+    context_window_tokens = await resolve_context_window_tokens(model_config)
     engine = AgentEngine(
         gateway=pending.gateway,
         tools=pending.tools,
         system_prompt=pending.system_prompt,
         write_event=write_event,
         check_cancel=lambda: _check_cancel_flag(turn_id),
+        context_window_tokens=context_window_tokens,
     )
 
     set_delegate_runtime(

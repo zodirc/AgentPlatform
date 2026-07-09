@@ -510,6 +510,12 @@ components:
             token_budget:
               type: integer
               minimum: 0
+            reserve_tokens:
+              type: integer
+              minimum: 0
+            fill_ratio:
+              type: number
+              minimum: 0
             strategies:
               type: array
               items:
@@ -526,6 +532,30 @@ components:
             messages_tokens:
               type: integer
               minimum: 0
+            breakdown:
+              type: object
+              properties:
+                system:
+                  type: integer
+                  minimum: 0
+                tools:
+                  type: integer
+                  minimum: 0
+                session:
+                  type: integer
+                  minimum: 0
+                user:
+                  type: integer
+                  minimum: 0
+                assistant:
+                  type: integer
+                  minimum: 0
+                tool_results:
+                  type: integer
+                  minimum: 0
+                compaction:
+                  type: integer
+                  minimum: 0
             source:
               type: string
               enum: [estimated, provider]
@@ -657,6 +687,9 @@ components:
           type: string
         base_url:
           type: string
+        context_window_tokens:
+          type: integer
+          minimum: 4096
         activate:
           type: boolean
           default: true
@@ -674,6 +707,9 @@ components:
           type: string
         base_url:
           type: string
+        context_window_tokens:
+          type: integer
+          minimum: 4096
     ModelProviderProfile:
       type: object
       required:
@@ -697,6 +733,9 @@ components:
           type: string
         base_url:
           type: string
+          nullable: true
+        context_window_tokens:
+          type: integer
           nullable: true
         is_active:
           type: boolean

@@ -74,6 +74,8 @@
         "tokens_before": { "type": "integer", "minimum": 0 },
         "tokens_after": { "type": "integer", "minimum": 0 },
         "token_budget": { "type": "integer", "minimum": 0 },
+        "reserve_tokens": { "type": "integer", "minimum": 0 },
+        "fill_ratio": { "type": "number", "minimum": 0 },
         "strategies": {
           "type": "array",
           "items": { "type": "string" }
@@ -82,6 +84,19 @@
         "system_tokens": { "type": "integer", "minimum": 0 },
         "tools_tokens": { "type": "integer", "minimum": 0 },
         "messages_tokens": { "type": "integer", "minimum": 0 },
+        "breakdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "system": { "type": "integer", "minimum": 0 },
+            "tools": { "type": "integer", "minimum": 0 },
+            "session": { "type": "integer", "minimum": 0 },
+            "user": { "type": "integer", "minimum": 0 },
+            "assistant": { "type": "integer", "minimum": 0 },
+            "tool_results": { "type": "integer", "minimum": 0 },
+            "compaction": { "type": "integer", "minimum": 0 }
+          }
+        },
         "source": { "type": "string", "enum": ["estimated", "provider"] }
       }
     },

@@ -37,10 +37,11 @@ async def test_llm_autocompact_uses_gateway_summary() -> None:
         system_prompt="sys",
         state=state,
         gateway=gateway,
+        tools=[],
     )
     summary = assembled[-1]["content"][0]["text"]
     assert "autocompact" in summary
-    assert "outline" in summary.lower() or "User asked" in summary
+    assert "outline" in summary.lower() or "section two" in summary.lower()
     assert any(t.get("detail") == "autocompact_llm" for t in engine.last_compaction_trace)
 
 

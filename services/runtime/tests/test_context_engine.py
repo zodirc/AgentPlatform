@@ -4,6 +4,7 @@ import json
 from uuid import uuid4
 
 from app.context.engine import ContextEngine, _summarize_messages
+from app.context.policy import CompactionPolicy
 from app.engine.state import TurnState, Usage, assistant_text, user_message
 
 
@@ -228,3 +229,71 @@ def test_estimate_assembled_window_includes_system_and_tools() -> None:
     )
     # Saying hi alone must NOT dominate — tools+system should be most of the window.
     assert window["messages_tokens"] < window["tokens_after"] // 2
+
+
+def test_context_engine_collapse_triggered_by_fill_ratio() -> None:
+    from app.engine.state import assistant_tool_uses, tool_result_message
+
+    policy = CompactionPolicy(
+        model_window_tokens=800,
+        output_reserve_tokens=64,
+        fill_collapse=0.5,
+        fill_snip=0.95,
+        fill_autocompact=0.99,
+        hot_zone_ratio=0.3,
+    )
+    engine = ContextEngine(policy=policy)
+    long_tool = "y" * 3000
+    messages = [user_message("start")]
+    for index in range(6):
+        tool_id = f"t{index}"
+        messages.append(
+            assistant_tool_uses(
+                [{"id": tool_id, "name": "read_file", "input": {"path": f"f{index}.md"}}],
+                text=f"step {index}",
+            )
+        )
+        messages.append(tool_result_message(tool_id, long_tool))
+
+    state = TurnState(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="agent",
+        messages=messages,
+        usage=Usage(),
+    )
+    engine.assemble(system_prompt="sys", state=state, tools=[])
+    strategies = [entry.get("strategy") for entry in engine.last_compaction_trace]
+    assert "collapse" in strategies
+
+
+def test_estimate_window_breakdown_splits_categories() -> None:
+    from app.context.engine import estimate_window_breakdown
+    from app.engine.state import assistant_text, assistant_tool_uses, tool_result_message
+
+    messages = [
+        {"role": "system", "content": [{"type": "text", "text": "system rules"}]},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "[Session context] Previous turn ended with status=completed.",
+                }
+            ],
+        },
+        user_message("read file"),
+        assistant_tool_uses([{"id": "t1", "name": "read_file", "input": {"path": "a.md"}}]),
+        tool_result_message("t1", '{"content": "hello"}'),
+        assistant_text("done"),
+    ]
+    tools = [{"name": "read_file", "description": "read", "input_schema": {}}]
+    breakdown = estimate_window_breakdown(messages=messages, tools=tools)
+    assert breakdown["system"] > 0
+    assert breakdown["tools"] > 0
+    assert breakdown["session"] > 0
+    assert breakdown["user"] > 0
+    assert breakdown["tool_results"] > 0
+    assert breakdown["assistant"] > 0

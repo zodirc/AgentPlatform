@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     monthly_token_limit: int = 0
     monthly_token_alert_pct: float = 0.8
     context_window_tokens: int = 128_000
+    # Reserved for model output; subtracted from window when computing fill ratio.
+    context_output_reserve_tokens: int = 16_384
+    # Assembled-window fill thresholds (0–1) for pressure-driven compaction.
+    context_fill_collapse: float = 0.75
+    context_fill_snip: float = 0.85
+    context_fill_autocompact: float = 0.95
+    # Fraction of working message budget kept verbatim in collapse tail.
+    context_hot_zone_ratio: float = 0.35
     otel_enabled: bool = False
     otel_service_name: str = "agent-runtime"
 

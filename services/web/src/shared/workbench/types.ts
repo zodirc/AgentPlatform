@@ -20,15 +20,28 @@ export type WriteFilePreview = {
   bytes_written?: number;
 };
 
+export type ContextWindowBreakdown = {
+  system?: number;
+  tools?: number;
+  session?: number;
+  user?: number;
+  assistant?: number;
+  tool_results?: number;
+  compaction?: number;
+};
+
 export type ContextUsage = {
   tokens_before?: number;
   tokens_after?: number;
   token_budget?: number;
+  reserve_tokens?: number;
+  fill_ratio?: number;
   strategies?: string[];
   step_index?: number;
   system_tokens?: number;
   tools_tokens?: number;
   messages_tokens?: number;
+  breakdown?: ContextWindowBreakdown;
   source?: "estimated" | "provider";
 };
 

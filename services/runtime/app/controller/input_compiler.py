@@ -37,6 +37,7 @@ class ShouldQueryResult:
     should_query: bool
     local_response: str | None = None
     failure_reason: str | None = None
+    slash_command: str | None = None
 
 
 def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
@@ -50,16 +51,14 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
                 "Agent Platform — commands:\n"
                 "  /help — this message\n"
                 "  /version — platform version\n"
+                "  /compact — compact session context into summary\n"
                 "Send any other message to start a turn."
             ),
         )
     if _SLASH_VERSION.match(text):
         return ShouldQueryResult(False, local_response="Agent Platform v0.1.0 (Phase 1)")
     if _SLASH_COMPACT.match(text):
-        return ShouldQueryResult(
-            False,
-            local_response="Context compaction is applied automatically when the turn exceeds budget.",
-        )
+        return ShouldQueryResult(False, slash_command="compact")
     if not has_model_key:
         # Stub mode still runs engine with deterministic stub provider
         return ShouldQueryResult(True)
