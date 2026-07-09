@@ -100,6 +100,14 @@ export async function createSession(
   return res.json() as Promise<{ id: string }>;
 }
 
+export async function getSession(sessionId: string): Promise<{ id: string }> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`getSession failed: ${res.status}`);
+  return res.json();
+}
+
 export type SessionView = {
   session_id: string;
   default_scenario_id: string;
@@ -116,6 +124,26 @@ export async function fetchSessionView(sessionId: string): Promise<SessionView> 
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchSessionView failed: ${res.status}`);
+  return res.json();
+}
+
+export type TurnSummary = {
+  id: string;
+  session_id: string;
+  scenario_id: string;
+  status: string;
+  user_input: string | null;
+  latest_output: string | null;
+  created_at: string;
+};
+
+export async function fetchSessionTurns(
+  sessionId: string,
+): Promise<TurnSummary[]> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}/turns`, {
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchSessionTurns failed: ${res.status}`);
   return res.json();
 }
 

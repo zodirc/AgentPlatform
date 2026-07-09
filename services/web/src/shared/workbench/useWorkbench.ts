@@ -6,11 +6,12 @@ import {
   approveToolCall,
   cancelTurn,
   denyToolCall,
-  fetchSessionView,
+  fetchSessionTurns,
   fetchTurnView,
   rejectPatch,
   startTurn,
   type TurnEvent,
+  type TurnSummary,
   type TurnView,
 } from "../api/client";
 import { TurnStreamClient } from "../realtime/TurnStreamClient";
@@ -20,6 +21,7 @@ import type {
   ScenarioId,
   TimelineItem,
   TokenUsage,
+  TurnHistoryItem,
   WorkbenchState,
   WriteFilePreview,
 } from "./types";
@@ -29,11 +31,52 @@ import { useWorkbenchSession } from "./workbenchSession";
 
 type StreamClient = TurnStreamClient | TurnWebSocketClient;
 
+const ACTIVE_TURN_STATUSES = new Set([
+  "pending",
+  "running",
+  "waiting_approval",
+]);
+
+function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
+  return {
+    id: turn.id,
+    scenario_id: turn.scenario_id as ScenarioId,
+    status: turn.status,
+    user_input: turn.user_input ?? "",
+    latest_output: turn.latest_output,
+    created_at: turn.created_at,
+  };
+}
+
+function upsertHistoryItem(
+  items: TurnHistoryItem[],
+  item: TurnHistoryItem,
+): TurnHistoryItem[] {
+  const idx = items.findIndex((row) => row.id === item.id);
+  if (idx < 0) return [...items, item];
+  const next = [...items];
+  next[idx] = { ...next[idx], ...item };
+  return next;
+}
+
+function historyItemFromView(v: TurnView): TurnHistoryItem {
+  return {
+    id: v.turn_id,
+    scenario_id: v.scenario_id as ScenarioId,
+    status: v.status,
+    user_input: v.user_input,
+    latest_output: v.latest_output ?? null,
+    created_at: v.updated_at,
+  };
+}
+
 export function useWorkbenchImpl(): WorkbenchState {
   const [searchParams] = useSearchParams();
   const useWebSocket = searchParams.get("transport") === "ws";
   const [activeScenarioId, setActiveScenarioId] =
     useState<ScenarioId>("writing");
+  const [turnHistory, setTurnHistory] = useState<TurnHistoryItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [submittedMessage, setSubmittedMessage] = useState<string | null>(null);
   const [turnId, setTurnId] = useState<string | null>(null);
@@ -65,7 +108,17 @@ export function useWorkbenchImpl(): WorkbenchState {
   const resumingAfterApprovalRef = useRef(false);
   const sessionRestoredRef = useRef(false);
   const turnIdRef = useRef<string | null>(null);
+  const streamTextRef = useRef("");
+  const sectionDraftRef = useRef("");
   turnIdRef.current = turnId;
+  streamTextRef.current = streamText;
+  sectionDraftRef.current = sectionDraft;
+
+  function syncHistoryFromView(v: TurnView) {
+    setTurnHistory((prev) =>
+      upsertHistoryItem(prev, historyItemFromView(v)),
+    );
+  }
 
   function extractWriteFilePreview(
     payload: Record<string, unknown>,
@@ -141,6 +194,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     if (turnViewQuery.data) {
       setView(turnViewQuery.data);
       syncApprovalFromView(turnViewQuery.data);
+      syncHistoryFromView(turnViewQuery.data);
       if (turnViewQuery.data.context_usage) {
         setLiveContextUsage(turnViewQuery.data.context_usage as ContextUsage);
       }
@@ -304,6 +358,15 @@ export function useWorkbenchImpl(): WorkbenchState {
           const v = await fetchTurnView(id);
           setView(v);
           syncApprovalFromView(v);
+          const merged: TurnHistoryItem = {
+            ...historyItemFromView(v),
+            latest_output:
+              streamTextRef.current ||
+              sectionDraftRef.current ||
+              v.latest_output ||
+              null,
+          };
+          setTurnHistory((prev) => upsertHistoryItem(prev, merged));
           if (v.context_usage)
             setLiveContextUsage(v.context_usage as ContextUsage);
           if (v.token_usage) setLiveTokenUsage(v.token_usage as TokenUsage);
@@ -327,18 +390,26 @@ export function useWorkbenchImpl(): WorkbenchState {
   useEffect(() => {
     if (!sessionId || sessionRestoredRef.current) return;
     let cancelled = false;
+    setHistoryLoading(true);
 
     void (async () => {
       try {
-        const sessionView = await fetchSessionView(sessionId);
-        if (cancelled || !sessionView.last_turn_id || turnIdRef.current) return;
-
-        const lastTurnId = sessionView.last_turn_id;
-        const v = await fetchTurnView(lastTurnId);
+        const turns = await fetchSessionTurns(sessionId);
         if (cancelled) return;
 
+        const history = turns.map(toHistoryItem);
+        setTurnHistory(history);
+        setHistoryLoading(false);
         sessionRestoredRef.current = true;
-        setTurnId(lastTurnId);
+
+        const last = history[history.length - 1];
+        if (!last || turnIdRef.current) return;
+        if (!ACTIVE_TURN_STATUSES.has(last.status)) return;
+
+        const v = await fetchTurnView(last.id);
+        if (cancelled) return;
+
+        setTurnId(last.id);
         setView(v);
         setSubmittedMessage(v.user_input ?? null);
         syncApprovalFromView(v);
@@ -349,19 +420,12 @@ export function useWorkbenchImpl(): WorkbenchState {
           setLiveTokenUsage(v.token_usage as TokenUsage);
         }
         lastSequenceRef.current = v.last_event_sequence ?? 0;
-
-        const status = sessionView.last_turn_status ?? v.status;
-        if (
-          status === "running" ||
-          status === "waiting_approval" ||
-          v.status === "waiting_approval"
-        ) {
-          setBusy(true);
-          connectStream(lastTurnId, lastSequenceRef.current);
-        }
+        setBusy(true);
+        connectStream(last.id, lastSequenceRef.current);
       } catch (err) {
         if (!cancelled) {
-          reportError("恢复会话失败", err);
+          setHistoryLoading(false);
+          reportError("加载会话历史失败", err);
         }
       }
     })();
@@ -369,7 +433,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore once per session
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per session mount
   }, [sessionId]);
 
   const startTurnMut = useMutation({
@@ -407,6 +471,16 @@ export function useWorkbenchImpl(): WorkbenchState {
         msg: text,
       });
       setTurnId(turn.id);
+      setTurnHistory((prev) =>
+        upsertHistoryItem(prev, {
+          id: turn.id,
+          scenario_id: activeScenarioId,
+          status: turn.status,
+          user_input: text,
+          latest_output: null,
+          created_at: turn.created_at,
+        }),
+      );
       connectStream(turn.id);
     } catch (err) {
       setBusy(false);
@@ -432,6 +506,7 @@ export function useWorkbenchImpl(): WorkbenchState {
       const v = await fetchTurnView(turnId);
       setView(v);
       syncApprovalFromView(v);
+      syncHistoryFromView(v);
     } catch (err) {
       reportError("刷新视图失败", err);
     }
@@ -559,6 +634,8 @@ export function useWorkbenchImpl(): WorkbenchState {
     title: meta.title,
     sessionId,
     setActiveScenario: setActiveScenarioId,
+    turnHistory,
+    historyLoading,
     message,
     setMessage,
     submittedMessage,

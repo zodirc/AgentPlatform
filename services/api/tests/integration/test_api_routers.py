@@ -61,6 +61,40 @@ def test_get_session_success(client: TestClient) -> None:
     assert response.json()["id"] == str(SESSION_ID)
 
 
+def test_list_session_turns_success(client: TestClient) -> None:
+    session_row = {
+        "id": SESSION_ID,
+        "default_scenario_id": "writing",
+        "status": "active",
+        "created_at": NOW,
+    }
+    turn_rows = [
+        {
+            "id": TURN_ID,
+            "session_id": SESSION_ID,
+            "scenario_id": "writing",
+            "status": "completed",
+            "user_input": "hello",
+            "latest_output": "hi there",
+            "created_at": NOW,
+        }
+    ]
+    with (
+        patch("app.services.resource.sessions.get_session", new_callable=AsyncMock, return_value=session_row),
+        patch(
+            "app.routers.sessions.turn_svc.list_turns_for_session",
+            new_callable=AsyncMock,
+            return_value=turn_rows,
+        ),
+    ):
+        response = client.get(f"/api/v1/sessions/{SESSION_ID}/turns")
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["user_input"] == "hello"
+    assert body[0]["latest_output"] == "hi there"
+
+
 def test_create_turn_success(client: TestClient) -> None:
     session_row = {"id": SESSION_ID, "default_scenario_id": "writing"}
     turn_row = {

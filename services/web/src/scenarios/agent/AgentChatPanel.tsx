@@ -8,21 +8,33 @@ import {
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
 import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
 import { scenarioMeta } from "../../shared/workbench/scenarioMeta";
-import type { WorkbenchState } from "../../shared/workbench/types";
+import type { TurnHistoryItem, WorkbenchState } from "../../shared/workbench/types";
 
 type Props = {
   wb: WorkbenchState;
 };
 
+function assistantText(wb: WorkbenchState, turn: TurnHistoryItem): string {
+  if (turn.id === wb.turnId) {
+    return (
+      wb.streamText ||
+      wb.sectionDraft ||
+      wb.view?.latest_output ||
+      turn.latest_output ||
+      ""
+    );
+  }
+  return turn.latest_output ?? "";
+}
+
 export function AgentChatPanel({ wb }: Props) {
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
-    Record<string, unknown> | undefined;
+    | Record<string, unknown>
+    | undefined;
   const approval = approvalCopy(wb.pendingToolName);
   const meta = scenarioMeta(wb.scenarioId);
   const turnScenario = wb.view?.scenario_id;
-  const output =
-    wb.streamText || wb.sectionDraft || wb.view?.latest_output || "";
 
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-slate-800 bg-slate-950">
@@ -42,31 +54,45 @@ export function AgentChatPanel({ wb }: Props) {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-4">
-        {wb.submittedMessage && (wb.busy || wb.view) ? (
-          <div className="mb-4">
-            <p className="mb-1 text-xs font-medium text-slate-500">你</p>
-            <p className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200">
-              {wb.submittedMessage}
-            </p>
-          </div>
+        {wb.historyLoading ? (
+          <p className="text-xs text-slate-600">正在加载会话历史…</p>
         ) : null}
-        {output ? (
-          <div>
-            <p className="mb-1 text-xs font-medium text-slate-500">助手</p>
-            <pre className="whitespace-pre-wrap rounded-lg bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
-              {output}
-            </pre>
-          </div>
-        ) : (
+        {wb.turnHistory.map((turn) => {
+          const output = assistantText(wb, turn);
+          return (
+            <div key={turn.id} className="mb-4 space-y-2">
+              <div>
+                <p className="mb-1 text-xs font-medium text-slate-500">
+                  你
+                  <span className="ml-2 text-slate-600">{turn.scenario_id}</span>
+                </p>
+                <p className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-slate-200">
+                  {turn.user_input}
+                </p>
+              </div>
+              {output ? (
+                <div>
+                  <p className="mb-1 text-xs font-medium text-slate-500">助手</p>
+                  <pre className="whitespace-pre-wrap rounded-lg bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
+                    {output}
+                  </pre>
+                </div>
+              ) : turn.id === wb.turnId && wb.busy ? (
+                <p className="text-xs text-slate-500">思考中…</p>
+              ) : null}
+            </div>
+          );
+        })}
+        {!wb.historyLoading && wb.turnHistory.length === 0 ? (
           <p className="text-xs text-slate-600">发送消息开始任务…</p>
-        )}
-        {(wb.view || wb.busy) && (
+        ) : null}
+        {(wb.view || wb.busy) && wb.turnId ? (
           <p className="mt-3 text-xs text-slate-600">
             status={wb.displayStatus}
             {wb.view ? ` · seq=${wb.view.last_event_sequence}` : ""}
-            {wb.turnId ? ` · turn=${wb.turnId.slice(0, 8)}` : ""}
+            {` · turn=${wb.turnId.slice(0, 8)}`}
           </p>
-        )}
+        ) : null}
       </div>
 
       {wb.awaitingApproval ? (

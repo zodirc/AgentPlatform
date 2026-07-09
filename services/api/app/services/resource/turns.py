@@ -120,6 +120,22 @@ async def get_turn(turn_id: UUID) -> dict | None:
     return dict(row) if row else None
 
 
+async def list_turns_for_session(session_id: UUID) -> list[dict]:
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT t.id, t.session_id, t.scenario_id, t.status, t.user_input, t.created_at,
+               tv.latest_output
+        FROM turns t
+        LEFT JOIN turn_views tv ON tv.turn_id = t.id
+        WHERE t.session_id = $1
+        ORDER BY t.created_at ASC
+        """,
+        session_id,
+    )
+    return [dict(row) for row in rows]
+
+
 async def get_run_for_turn(turn_id: UUID) -> dict | None:
     pool = await get_pool()
     row = await pool.fetchrow(

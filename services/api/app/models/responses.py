@@ -40,6 +40,16 @@ class TurnResponse(BaseModel):
     created_at: datetime
 
 
+class TurnSummary(BaseModel):
+    id: UUID
+    session_id: UUID
+    scenario_id: str
+    status: str
+    user_input: str | None = None
+    latest_output: str | None = None
+    created_at: datetime
+
+
 class TurnView(BaseModel):
     turn_id: UUID
     session_id: UUID

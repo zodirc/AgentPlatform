@@ -51,11 +51,22 @@ export type TokenUsage = {
   source?: "provider" | "estimated" | "mixed";
 };
 
+export type TurnHistoryItem = {
+  id: string;
+  scenario_id: ScenarioId;
+  status: string;
+  user_input: string;
+  latest_output: string | null;
+  created_at: string;
+};
+
 export type WorkbenchState = {
   scenarioId: ScenarioId;
   title: string;
   sessionId: string | null;
   setActiveScenario: (id: ScenarioId) => void;
+  turnHistory: TurnHistoryItem[];
+  historyLoading: boolean;
   message: string;
   setMessage: (value: string) => void;
   submittedMessage: string | null;

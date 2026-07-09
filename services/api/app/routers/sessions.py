@@ -6,7 +6,14 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
-from app.models.responses import CreateSessionRequest, CreateTurnRequest, SessionResponse, SessionView, TurnResponse
+from app.models.responses import (
+    CreateSessionRequest,
+    CreateTurnRequest,
+    SessionResponse,
+    SessionView,
+    TurnResponse,
+    TurnSummary,
+)
 from app.services.admin.auth import require_api_access
 from app.services.projection.session_projector import build_session_view
 from app.services.command.runtime_factory import (
@@ -40,6 +47,15 @@ async def get_session_view(session_id: UUID):
     if view is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return view
+
+
+@router.get("/sessions/{session_id}/turns", response_model=list[TurnSummary])
+async def list_session_turns(session_id: UUID):
+    session = await session_svc.get_session(session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    rows = await turn_svc.list_turns_for_session(session_id)
+    return [TurnSummary(**row) for row in rows]
 
 
 @router.post(
