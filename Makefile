@@ -14,7 +14,7 @@ DEV_OVERRIDE := deploy/compose/dev.override.yml
 	up-queue up-retrieval up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
-	load-test codegen alembic-upgrade
+	load-test codegen alembic-upgrade test-rag
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -34,6 +34,7 @@ help: ## 显示常用命令
 	@echo "其他"
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
+	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
 	@echo "  make runtime-test 运行时测试"
 
 start: ## 启动栈（不 rebuild，最快）
@@ -84,6 +85,9 @@ build:
 
 smoke:
 	bash scripts/smoke_test.sh
+
+test-rag: ## RAG 检索效果：配置 + 查询对比 + tool_result 预览
+	bash scripts/test_rag.sh
 
 eval:
 	python3 scripts/eval_run.py --phase 1

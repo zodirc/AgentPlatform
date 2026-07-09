@@ -551,7 +551,8 @@ export function useWorkbench({ scenarioId, title }: Options): WorkbenchState {
 }
 
 export function placeholderForScenario(scenarioId: ScenarioId): string {
-  if (scenarioId === "writing") return "请改第二节，更简洁…";
+  if (scenarioId === "writing")
+    return "根据 sources 资料写一段并标注引用，或：请改第二节更简洁…";
   if (scenarioId === "interview") return "记录本次访谈要点…";
   return "读取 README.md 并总结…";
 }

@@ -469,10 +469,29 @@ class AgentEngine:
         if tool_name == "search_sources":
             mode = str(result.get("retrieval", "none"))
             if mode in {"vector", "keyword"}:
+                raw_hits = result.get("hits", [])
+                hits_preview: list[dict[str, Any]] = []
+                if isinstance(raw_hits, list):
+                    for hit in raw_hits[:5]:
+                        if not isinstance(hit, dict):
+                            continue
+                        preview: dict[str, Any] = {
+                            "path": str(hit.get("path", "")),
+                            "excerpt": str(hit.get("excerpt", ""))[:200],
+                        }
+                        if hit.get("citation_id"):
+                            preview["citation_id"] = str(hit["citation_id"])
+                        if hit.get("chunk_id"):
+                            preview["chunk_id"] = str(hit["chunk_id"])
+                        if hit.get("score") is not None:
+                            preview["score"] = hit["score"]
+                        hits_preview.append(preview)
                 retrieval_payload: dict[str, Any] = {
                     "query": str(result.get("query", "")),
                     "mode": mode,
-                    "hit_count": len(result.get("hits", [])),
+                    "hit_count": len(raw_hits) if isinstance(raw_hits, list) else 0,
+                    "summary": str(result.get("summary", ""))[:512],
+                    "hits": hits_preview,
                 }
                 index_info = result.get("index")
                 if isinstance(index_info, dict):

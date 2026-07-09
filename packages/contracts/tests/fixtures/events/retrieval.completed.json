@@ -4,6 +4,15 @@
     "query": "phase2-unique-term",
     "mode": "vector",
     "hit_count": 1,
+    "summary": "search_sources(vector): 1 hit(s)",
+    "hits": [
+      {
+        "path": "sources/new-chunk.md",
+        "excerpt": "New material with phase2-unique-term for vector recall.",
+        "citation_id": "cite:new-chunk",
+        "score": 0.58
+      }
+    ],
     "index": { "added": 1, "chunks": 3 }
   }
 }

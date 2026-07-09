@@ -81,6 +81,9 @@ def test_scenario_registry_loads_profiles() -> None:
     assert interview.scenario_id == "interview"
     assert writing.system_prompt
     assert agent.system_prompt
+    assert "search_sources" in writing.system_prompt
+    assert "[cite:xxx]" in writing.system_prompt
+    assert "Do not call" in writing.system_prompt or "Do **not** call" in writing.system_prompt
     assert "Never guess file paths" in agent.system_prompt
     assert "Do not repeat the same tool call" in agent.system_prompt
 

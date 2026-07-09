@@ -15,6 +15,22 @@
     "index": {
       "type": "object",
       "additionalProperties": true
+    },
+    "summary": { "type": "string", "maxLength": 512 },
+    "hits": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": { "type": "string" },
+          "chunk_id": { "type": "string" },
+          "excerpt": { "type": "string", "maxLength": 512 },
+          "citation_id": { "type": "string" },
+          "score": { "type": "number" }
+        }
+      }
     }
   }
 }
