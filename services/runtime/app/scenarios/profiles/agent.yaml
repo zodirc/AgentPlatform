@@ -25,7 +25,6 @@ subagent_types:
   - shell
 max_steps: 50
 approval_overrides:
-  run_command: never
   run_tests: never
   write_file: always
   edit_file: always

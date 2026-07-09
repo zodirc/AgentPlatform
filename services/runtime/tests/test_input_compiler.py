@@ -51,7 +51,7 @@ def test_tool_scope_applies_agent_approval_overrides() -> None:
     profile = ScenarioRegistry.get("agent")
     registry = build_registry()
     specs = {s.name: s for s in tool_scope(profile, registry)}
-    assert specs["run_command"].requires_approval is False
+    assert specs["run_command"].requires_approval is True
     assert specs["read_file"].requires_approval is False
     assert specs["delegate"].requires_approval is True
 
