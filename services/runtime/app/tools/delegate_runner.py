@@ -64,7 +64,6 @@ def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> froze
 
 
 def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[ToolSpec]:
-    names = set(SUBAGENT_TOOL_NAMES.get(agent_type, ["read_file", "grep"]))
     by_name = {spec.name: spec for spec in parent_tools}
     specs = [by_name[name] for name in SUBAGENT_TOOL_NAMES.get(agent_type, []) if name in by_name]
     if specs:

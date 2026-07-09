@@ -51,6 +51,7 @@ def http_json(
 ) -> dict:
     data = None
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers.update(admin_headers())
     if extra_headers:
         headers.update(extra_headers)
     if body is not None:
@@ -58,6 +59,12 @@ def http_json(
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=60) as resp:
         return json.loads(resp.read().decode())
+
+
+def stream_headers() -> dict[str, str]:
+    headers = {"Accept": "text/event-stream"}
+    headers.update(admin_headers())
+    return headers
 
 
 def _env_value(name: str, default: str = "") -> str:
@@ -92,7 +99,6 @@ def admin_create_provider(base: str, cmd: dict) -> None:
         "POST",
         f"{base}/api/v1/admin/model-providers",
         body,
-        extra_headers=admin_headers(),
     )
 
 
@@ -146,7 +152,7 @@ def _collect_sse_event_records_once(
     started_at: float | None = None,
 ) -> tuple[list[dict], float | None, float | None]:
     url = f"{base}/api/v1/turns/{turn_id}/stream?since_sequence={since}"
-    req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+    req = urllib.request.Request(url, headers=stream_headers())
     events: list[dict] = []
     ttfb_ms: float | None = None
     first_token_ms: float | None = None
@@ -178,7 +184,7 @@ def collect_sse_after_cancel(
     cancel_at = time.perf_counter()
     http_json("POST", f"{base}/api/v1/turns/{turn_id}/cancel", {"force": False})
     url = f"{base}/api/v1/turns/{turn_id}/stream?since_sequence={since}"
-    req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+    req = urllib.request.Request(url, headers=stream_headers())
     events: list[dict] = []
     cancel_latency_ms: float | None = None
     with urllib.request.urlopen(req, timeout=120) as resp:
@@ -214,7 +220,7 @@ def collect_ws_event_records(
         events: list[dict] = []
         ttfb_ms: float | None = None
         first_token_ms: float | None = None
-        async with websockets.connect(uri) as ws:
+        async with websockets.connect(uri, additional_headers=admin_headers()) as ws:
             while True:
                 raw = await asyncio.wait_for(ws.recv(), timeout=120)
                 if started_at is not None and ttfb_ms is None:
@@ -243,7 +249,7 @@ def stream_until_event(
 
     def worker() -> None:
         url = f"{base}/api/v1/turns/{turn_id}/stream"
-        req = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
+        req = urllib.request.Request(url, headers=stream_headers())
         try:
             with urllib.request.urlopen(req, timeout=120) as resp:
                 for raw in resp:

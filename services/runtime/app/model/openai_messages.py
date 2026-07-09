@@ -3,8 +3,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.model.gateway import ModelResponse
-
 
 def _to_openai_messages(messages: list[dict]) -> list[dict]:
     out: list[dict] = []

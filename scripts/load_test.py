@@ -3,18 +3,45 @@
 
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import json
+import os
 import sys
 import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _env_value(name: str, default: str = "") -> str:
+    if name in os.environ:
+        return os.environ[name]
+    env_path = ROOT / ".env"
+    if not env_path.is_file():
+        return default
+    for line in env_path.read_text().splitlines():
+        if line.startswith(f"{name}="):
+            return line.split("=", 1)[1].strip()
+    return default
+
+
+def admin_headers() -> dict[str, str]:
+    if _env_value("AUTH_ENABLED", "false").lower() != "true":
+        return {}
+    password = _env_value("ADMIN_PASSWORD", "admin")
+    token = base64.b64encode(f"admin:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
 
 
 def http_json(method: str, url: str, body: dict | None = None) -> dict:
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    headers.update(admin_headers())
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         url,
         data=data,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers=headers,
         method=method,
     )
     with urllib.request.urlopen(req, timeout=120) as resp:
@@ -23,6 +50,7 @@ def http_json(method: str, url: str, body: dict | None = None) -> dict:
 
 def consume_sse_until_terminal(url: str, *, since_sequence: int | None = None) -> int:
     headers = {"Accept": "text/event-stream"}
+    headers.update(admin_headers())
     if since_sequence is not None:
         url = f"{url}?since_sequence={since_sequence}"
     req = urllib.request.Request(url, headers=headers)
@@ -74,6 +102,7 @@ def run_sse_reconnect(base: str) -> None:
     turn_id = turn["id"]
     url = f"{base}/api/v1/turns/{turn_id}/stream"
     headers = {"Accept": "text/event-stream"}
+    headers.update(admin_headers())
     req = urllib.request.Request(url, headers=headers)
     seen_types: list[str] = []
     last_sequence = 0
