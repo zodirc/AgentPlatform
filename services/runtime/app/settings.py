@@ -20,6 +20,15 @@ class Settings(BaseSettings):
     workspace_root: str = "/workspace"
     data_dir: str = "/data"
     retrieval_mode: str = "hybrid"  # keyword | vector | hybrid
+    retrieval_rrf_k: int = 60
+    retrieval_rerank_enabled: bool = True
+    retrieval_rerank_cross_encoder: bool = False
+    retrieval_rerank_model: str = "BAAI/bge-reranker-base"
+    retrieval_rerank_pool: int = 20
+    retrieval_rerank_timeout_seconds: float = 0.15
+    search_sources_max_per_turn: int = 3
+    search_sources_excerpt_chars: int = 200
+    search_sources_low_score_hint: float = 0.15
     index_via_worker: bool = False
     embedding_backend: str = "hash"  # hash | sentence_transformers
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

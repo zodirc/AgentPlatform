@@ -15,10 +15,17 @@ from app.tools.registry import ToolSpec
 
 
 class FakeGateway:
-    def __init__(self, chunks: list[Any]) -> None:
+    def __init__(self, chunks: list[Any], *, one_per_stream: bool = False) -> None:
         self._chunks = chunks
+        self._one_per_stream = one_per_stream
+        self._cursor = 0
 
     async def stream(self, *, messages: list[dict], tools: list[dict]) -> AsyncIterator[str | ModelResponse]:
+        if self._one_per_stream:
+            if self._cursor < len(self._chunks):
+                yield self._chunks[self._cursor]
+                self._cursor += 1
+            return
         for chunk in self._chunks:
             yield chunk
 
@@ -335,3 +342,58 @@ async def test_agent_engine_caches_repeat_list_dir(workspace) -> None:
     assert payload.get("_cached") is True
     assert payload.get("_repeat_count", 0) >= 2
     assert "_note" in payload
+
+
+def _search_sources_tool() -> ToolSpec:
+    return ToolSpec(
+        name="search_sources",
+        description="search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        handler=core.search_sources,
+    )
+
+
+@pytest.mark.asyncio
+async def test_agent_engine_search_sources_turn_budget(
+    workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("app.engine.agent_engine.settings.search_sources_max_per_turn", 2)
+    monkeypatch.setattr("app.engine.agent_engine.settings.data_dir", str(workspace))
+    (workspace / "sources").mkdir()
+    (workspace / "sources" / "note.md").write_text("alpha beta", encoding="utf-8")
+
+    calls = [
+        {"id": "s1", "name": "search_sources", "input": {"query": "alpha"}},
+        {"id": "s2", "name": "search_sources", "input": {"query": "beta"}},
+        {"id": "s3", "name": "search_sources", "input": {"query": "gamma"}},
+    ]
+    statuses: list[str] = []
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        if event_type == "tool.completed" and payload.get("tool_name") == "search_sources":
+            statuses.append(str(payload.get("status", "")))
+
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [
+                ModelResponse(tool_calls=[calls[0]]),
+                ModelResponse(tool_calls=[calls[1]]),
+                ModelResponse(tool_calls=[calls[2]]),
+                ModelResponse(text="done"),
+            ],
+            one_per_stream=True,
+        ),
+        tools=[_search_sources_tool()],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    state.max_steps = 6
+    await engine.run(state)
+    assert statuses == ["ok", "ok", "error"]
+

@@ -109,6 +109,23 @@ async def test_search_sources_keyword_mode(workspace: Path, monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_search_sources_hybrid_mode(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = workspace / "sources"
+    sources.mkdir()
+    (sources / "note.md").write_text(
+        "### 张白鹿\n张白鹿 张白鹿段落。\n\n## 李云龙\n李云龙段落。\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "data_dir", str(workspace))
+
+    result = await core.search_sources("张白鹿", limit=3)
+    assert result["retrieval"] == "hybrid"
+    assert result["hits"]
+    assert any("张白鹿" in hit.get("excerpt", "") for hit in result["hits"])
+
+
+@pytest.mark.asyncio
 async def test_search_sources_no_sources_dir(workspace: Path) -> None:
     result = await core.search_sources("query")
     assert result["hits"] == []

@@ -28,7 +28,7 @@ _TOOL_EVENTS: dict[str, str] = {
     "update_plan": "turn.plan",
 }
 
-_CACHEABLE_TOOLS = frozenset({"list_dir", "glob", "grep", "read_file"})
+_CACHEABLE_TOOLS = frozenset({"list_dir", "glob", "grep", "read_file", "search_sources"})
 
 
 class AgentEngine:
@@ -56,6 +56,7 @@ class AgentEngine:
         self.pending_approval: dict[str, Any] | None = None
         self._tool_result_cache: dict[str, dict[str, Any]] = {}
         self._tool_repeat_counts: dict[str, int] = {}
+        self._search_sources_calls = 0
         self._openai_tools = [
             {
                 "name": t.name,
@@ -67,6 +68,7 @@ class AgentEngine:
 
     async def run(self, state: TurnState) -> str | None:
         final_summary: str | None = None
+        self._search_sources_calls = 0
 
         while state.step_count < state.max_steps:
             if self._budget_exceeded(state):
@@ -358,6 +360,40 @@ class AgentEngine:
             step_index=step_index,
         )
 
+        if tool_name == "search_sources":
+            budget = settings.search_sources_max_per_turn
+            if budget > 0:
+                self._search_sources_calls += 1
+                if self._search_sources_calls > budget:
+                    result = {
+                        "error": "search_sources budget exceeded for this turn",
+                        "summary": (
+                            f"search_sources limit ({budget}) reached; use read_file on a known "
+                            "sources/ path or draft with prior hits."
+                        ),
+                        "hits": [],
+                        "retrieval": "none",
+                    }
+                    state.messages.append(
+                        tool_result_message(
+                            tool_call_id,
+                            json.dumps(result, ensure_ascii=False),
+                            is_error=True,
+                        )
+                    )
+                    await self._write_event(
+                        event_type="tool.completed",
+                        payload={
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "status": "error",
+                            "summary": result["summary"],
+                        },
+                        step_index=step_index,
+                    )
+                    record_tool_call(tool_name=tool_name, status="error")
+                    return result["summary"]
+
         if tool_name == "draft_section":
             content = str(arguments.get("content", ""))
             section_id = str(arguments.get("section_id", "01"))
@@ -468,7 +504,7 @@ class AgentEngine:
 
         if tool_name == "search_sources":
             mode = str(result.get("retrieval", "none"))
-            if mode in {"vector", "keyword"}:
+            if mode in {"vector", "keyword", "hybrid"}:
                 raw_hits = result.get("hits", [])
                 hits_preview: list[dict[str, Any]] = []
                 if isinstance(raw_hits, list):

@@ -20,7 +20,19 @@ _embedder_key: tuple[str, str, str, int] | None = None
 
 
 def tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-zA-Z0-9_\u4e00-\u9fff]+", text.lower())
+    tokens: list[str] = []
+    for piece in re.findall(r"[a-zA-Z0-9_\u4e00-\u9fff]+", text.lower()):
+        tokens.append(piece)
+        cjk = re.fullmatch(r"[\u4e00-\u9fff]{2,}", piece)
+        if cjk:
+            for width in (2, 3):
+                if len(piece) < width:
+                    continue
+                for start in range(len(piece) - width + 1):
+                    grams = piece[start : start + width]
+                    if grams not in tokens:
+                        tokens.append(grams)
+    return tokens
 
 
 class HashEmbedder:

@@ -239,7 +239,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 
 - Phase 0–1：最小依赖，**默认不含** torch / sentence-transformers
 - Phase 1b：关键词检索、`grep`、小型本地索引（[`search_sources`](06-tools-and-context.md) / [`search_codebase`](06-tools-and-context.md)）
-- Phase 2+（`--profile retrieval`）：**`Dockerfile.retrieval`** 构建期烘焙 `EMBEDDING_MODEL` 至 `/app/models-baked`；entrypoint 首次启动同步至 `/data/models`；默认 `EMBEDDING_BACKEND=sentence_transformers`；向量索引 `INDEX_VERSION=2`
+- Phase 2+（`--profile retrieval`）：**`Dockerfile.retrieval`** 构建期烘焙 `EMBEDDING_MODEL` 至 `/app/models-baked`；entrypoint 首次启动同步至 `/data/models`；默认 `EMBEDDING_BACKEND=sentence_transformers`；向量索引 `INDEX_VERSION=3`（结构切块 + BM25/RRF hybrid）
 - 默认 `Dockerfile`（无 retrieval profile）不含 torch，可用 `EMBEDDING_BACKEND=hash` 做轻量降级
 - `EXPOSE 8001`
 - 内部命令接口、事件写入、健康检查为 Phase 0 必需；正式 embedding 检索为 Phase 2 可选，Phase 1b 最小检索能力定义见 [`06-tools-and-context.md`](06-tools-and-context.md) §11.2

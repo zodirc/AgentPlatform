@@ -182,6 +182,14 @@ class StubModelProvider:
             yield ModelResponse(text="计划已更新", output_tokens=8)
             return
 
+        if "search_sources" in tool_names and _wants_hybrid_character_recall(user_text) and not has_tool_result:
+            yield _tool_call("search_sources", {"query": "张白鹿"})
+            return
+
+        if has_tool_result and last_tool == "search_sources" and _wants_hybrid_character_recall(user_text):
+            yield ModelResponse(text="writing.11 命中张白鹿专节", output_tokens=10)
+            return
+
         if "search_sources" in tool_names and _wants_vector_index(user_text) and not has_tool_result:
             yield _tool_call("search_sources", {"query": "phase2-unique-term"})
             return
@@ -423,6 +431,10 @@ def _wants_double_delegate(text: str) -> bool:
 def _wants_vector_index(text: str) -> bool:
     keywords = ("writing.07", "phase2-unique-term")
     return any(k in text.lower() for k in keywords)
+
+
+def _wants_hybrid_character_recall(text: str) -> bool:
+    return "writing.11" in text.lower()
 
 
 def _assistant_requested_verify_delegate(messages: list[dict]) -> bool:

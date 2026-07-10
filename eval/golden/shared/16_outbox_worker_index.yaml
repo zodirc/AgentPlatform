@@ -39,6 +39,6 @@ assertions:
   tool:
     name: search_sources
     result_matches: "phase2-unique-term"
-    retrieval: vector
+    retrieval: hybrid
 
 tags: [shared, queue, outbox_worker, p2]

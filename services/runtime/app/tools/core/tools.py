@@ -239,21 +239,75 @@ async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -
 async def sync_sources_index() -> dict[str, Any]:
     from pathlib import Path
 
-    from app.retrieval.vector_index import SourceVectorIndex
+    from app.retrieval.store import get_sources_store
 
     sources = _resolve_path("sources")
     workspace_root = Path(settings.workspace_root).resolve()
     if not sources.exists():
         return {"indexed_files": 0, "chunks": 0, "added": 0, "updated": 0}
-    index_path = Path(settings.data_dir) / "vectorstore" / "sources.json"
-    index = SourceVectorIndex(index_path)
-    return index.sync(sources, workspace_root=workspace_root)
+    store = get_sources_store()
+    return store.sync(sources, workspace_root=workspace_root)
+
+
+def _format_source_hits(hits: list[Any], *, excerpt_chars: int) -> list[dict[str, Any]]:
+    formatted: list[dict[str, Any]] = []
+    for hit in hits:
+        excerpt = str(getattr(hit, "excerpt", "")).strip()
+        if len(excerpt) > excerpt_chars:
+            excerpt = excerpt[:excerpt_chars] + "…"
+        item: dict[str, Any] = {
+            "path": str(getattr(hit, "path", "")),
+            "chunk_id": str(getattr(hit, "chunk_id", "")),
+            "excerpt": excerpt,
+            "citation_id": str(getattr(hit, "citation_id", "")),
+            "score": round(float(getattr(hit, "score", 0.0)), 4),
+        }
+        section_title = str(getattr(hit, "section_title", "")).strip()
+        if section_title:
+            item["section_title"] = section_title
+        line_start = getattr(hit, "line_start", None)
+        line_end = getattr(hit, "line_end", None)
+        if line_start is not None:
+            item["line_start"] = line_start
+        if line_end is not None:
+            item["line_end"] = line_end
+        formatted.append(item)
+    return formatted
+
+
+def _search_sources_keyword(
+    sources: Path,
+    *,
+    workspace_root: Path,
+    query: str,
+    limit: int,
+) -> list[dict[str, Any]]:
+    from app.retrieval.chunking import should_index_source
+
+    terms = [t for t in re.split(r"\s+", query.strip()) if t]
+    hits: list[dict[str, Any]] = []
+    excerpt_chars = settings.search_sources_excerpt_chars
+    for fp in sorted(sources.rglob("*")):
+        if not fp.is_file() or not should_index_source(fp):
+            continue
+        text = fp.read_text(encoding="utf-8", errors="replace")
+        lowered = text.lower()
+        if terms and not all(t.lower() in lowered for t in terms):
+            continue
+        rel = str(fp.relative_to(workspace_root))
+        excerpt = text[:excerpt_chars].strip()
+        if len(text) > excerpt_chars:
+            excerpt += "…"
+        hits.append({"path": rel, "excerpt": excerpt, "citation_id": f"cite:{fp.stem}"})
+        if len(hits) >= limit:
+            break
+    return hits
 
 
 async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[str, Any]:
     from pathlib import Path
 
-    from app.retrieval.vector_index import SourceVectorIndex
+    from app.retrieval.store import get_sources_store
 
     sources = _resolve_path("sources")
     if not sources.exists():
@@ -261,62 +315,60 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
 
     mode = settings.retrieval_mode.lower()
     workspace_root = Path(settings.workspace_root).resolve()
+    excerpt_chars = settings.search_sources_excerpt_chars
 
-    if mode in {"vector", "hybrid"}:
-        index_path = Path(settings.data_dir) / "vectorstore" / "sources.json"
-        index = SourceVectorIndex(index_path)
-        sync_stats: dict[str, Any] = {"skipped": True}
-        try:
-            if not settings.index_via_worker:
-                sync_stats = index.sync(sources, workspace_root=workspace_root)
-                vector_hits = index.search(query, limit=limit)
-            else:
-                index.load()
-                vector_hits = index.search(query, limit=limit)
-                if not vector_hits:
-                    sync_stats = index.sync(sources, workspace_root=workspace_root)
-                    vector_hits = index.search(query, limit=limit)
-        except OSError:
-            sync_stats = {"error": "vector_index_unavailable"}
-            vector_hits = []
-        if vector_hits or mode == "vector":
-            hits = [
-                {
-                    "path": hit.path,
-                    "chunk_id": hit.chunk_id,
-                    "excerpt": hit.excerpt,
-                    "citation_id": hit.citation_id,
-                    "score": round(hit.score, 4),
-                }
-                for hit in vector_hits
-            ]
-            return {
-                "query": query,
-                "hits": hits,
-                "summary": f"search_sources(vector): {len(hits)} hit(s)",
-                "retrieval": "vector",
-                "index": sync_stats,
-            }
+    if mode == "keyword":
+        hits = _search_sources_keyword(
+            sources, workspace_root=workspace_root, query=query, limit=limit
+        )
+        return {
+            "query": query,
+            "hits": hits,
+            "summary": f"search_sources(keyword): {len(hits)} hit(s)",
+            "retrieval": "keyword",
+        }
 
-    terms = [t for t in re.split(r"\s+", query.strip()) if t]
-    hits: list[dict[str, Any]] = []
-    for fp in sorted(sources.rglob("*")):
-        if not fp.is_file():
-            continue
-        text = fp.read_text(encoding="utf-8", errors="replace")
-        lowered = text.lower()
-        if terms and not all(t.lower() in lowered for t in terms):
-            continue
-        rel = str(fp.relative_to(workspace_root))
-        excerpt = text[:400].strip()
-        hits.append({"path": rel, "excerpt": excerpt, "citation_id": f"cite:{fp.stem}"})
-        if len(hits) >= limit:
-            break
+    store = get_sources_store()
+    sync_stats: dict[str, Any] = {"skipped": True}
+    try:
+        if not settings.index_via_worker:
+            sync_stats = store.sync(sources, workspace_root=workspace_root)
+        else:
+            store.load()
+        raw_hits = store.search(query, limit=limit, mode=mode)
+        retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
+        if settings.index_via_worker and not raw_hits:
+            sync_stats = store.sync(sources, workspace_root=workspace_root)
+            raw_hits = store.search(query, limit=limit, mode=mode)
+    except OSError:
+        sync_stats = {"error": "vector_index_unavailable"}
+        raw_hits = []
+        retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
+
+    if raw_hits or mode in {"vector", "hybrid"}:
+        hits = _format_source_hits(raw_hits, excerpt_chars=excerpt_chars)
+        payload: dict[str, Any] = {
+            "query": query,
+            "hits": hits,
+            "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
+            "retrieval": retrieval,
+            "index": sync_stats,
+        }
+        if hits and hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
+            top_path = hits[0].get("path", "")
+            payload["hint"] = (
+                "Low relevance scores; prefer read_file on the top path "
+                f"({top_path}) instead of repeating search_sources."
+            )
+        return payload
+
+    hits = _search_sources_keyword(sources, workspace_root=workspace_root, query=query, limit=limit)
     return {
         "query": query,
         "hits": hits,
-        "summary": f"search_sources(keyword): {len(hits)} hit(s)",
+        "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
         "retrieval": "keyword",
+        "index": sync_stats,
     }
 
 

@@ -162,3 +162,29 @@ async def test_stub_writing_05_explicit_citation_still_searches() -> None:
         for call in (chunk.tool_calls or [])
     ]
     assert [call["name"] for call in tool_calls] == ["search_sources"]
+
+
+@pytest.mark.asyncio
+async def test_stub_writing_11_hybrid_character_search() -> None:
+    provider = StubModelProvider()
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            messages=[
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "writing.11 引用资料写张白鹿人物小节"}],
+                }
+            ],
+            tools=[{"name": "search_sources"}],
+        )
+    ]
+    tool_calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert tool_calls
+    assert tool_calls[0]["name"] == "search_sources"
+    assert tool_calls[0]["input"]["query"] == "张白鹿"

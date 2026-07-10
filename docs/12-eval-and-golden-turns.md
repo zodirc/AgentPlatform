@@ -243,7 +243,8 @@ POST /turns [trace_id]
 
 | ID | 验证点 |
 |----|--------|
-| `writing.07` | 向量索引增量更新后 `search_sources` 召回新 chunk（`make eval-retrieval`；`tool.retrieval: vector`） |
+| `writing.07` | 向量索引增量更新后 `search_sources` 召回新 chunk（`make eval-retrieval`；`tool.retrieval: hybrid`） |
+| `writing.11` | 长资料中按专名召回人物专节（BM25+向量 RRF + lexical rerank；`tool.retrieval: hybrid`） |
 | `agent.06` | 多角色串联：explore → verify（两次 delegate） |
 | `shared.08` | 50 Turn Session；单 Turn token P95 无线性恶化（对照 `11` §1） |
 | `shared.16` | outbox worker 异步索引：`WORKER_MODE=outbox` + `wait-index`（`make eval-queue`） |

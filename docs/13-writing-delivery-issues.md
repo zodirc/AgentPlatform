@@ -211,3 +211,24 @@ workspace/
 - Phase 2 Golden：`7 passed`，包含：
   - `writing.09_export_document`：正式稿显式范围，排除同目录历史文件
   - `writing.10_export_current_turn_draft`：本轮草稿导出，排除旧 revisions 与无关 sections
+
+---
+
+## 10. RAG 检索优化（2026-07-10）
+
+针对「专名在长资料中难召回、模型反复 search_sources」等问题，runtime 检索栈升级如下。
+
+| 能力 | 说明 |
+|------|------|
+| 结构切块 | 按 `#`/`##`/`###` 切分，保留 `section_title`、行号；跳过 `paste-debug.md` |
+| 真 hybrid | BM25 + 向量双路召回，RRF 融合（不再「向量有结果就忽略关键词」） |
+| lexical rerank | 默认开启，提升专名/标题命中排序 |
+| 检索预算 | 每 Turn `search_sources` 默认 ≤3 次；重复 query 缓存并提示 |
+| 结果瘦身 | excerpt 默认 200 字；低分时 hint 引导 `read_file` |
+| 存储抽象 | `SourceRetrievalStore` / `JsonSourceRetrievalStore`，便于后续接 Chroma |
+
+回归：
+
+- `writing.11_hybrid_character_recall`：长资料中召回「张白鹿」专节
+- `tests/test_retrieval_hybrid.py`：BM25、RRF、结构切块、rerank
+- runtime 全量测试通过后可 `docker compose ... up -d --build runtime` 生效

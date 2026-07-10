@@ -162,7 +162,7 @@ fi
 
 echo
 echo "── 对比说明 ──"
-echo "  本项目 Phase 1b: keyword + 可选 hash/miniLM 向量，无 BM25，无 rerank"
-echo "  完整栈: make up-retrieval  (sentence-transformers / MiniLM)"
+echo "  本项目: hybrid（BM25 + 向量 RRF + lexical rerank），结构感知切块 INDEX v3"
+echo "  完整栈: make up-retrieval  (sentence-transformers / MiniLM；可选 cross-encoder rerank)"
 echo "  端到端: RAG_TEST_E2E=1 ./scripts/test_rag.sh"
 echo "══════════════════════════════════════════════════════════════"

@@ -121,7 +121,11 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="search_sources",
-            description="Search reference sources in workspace sources/",
+            description=(
+                "Hybrid search over workspace sources/ (BM25 + vector). "
+                "Prefer read_file when the source path is known. "
+                "Avoid repeating the same query; use at most a few searches per topic."
+            ),
             parameters={
                 "type": "object",
                 "properties": {

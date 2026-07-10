@@ -9,7 +9,7 @@
     "query": { "type": "string", "maxLength": 4096 },
     "mode": {
       "type": "string",
-      "enum": ["vector", "keyword", "none"]
+      "enum": ["vector", "keyword", "hybrid", "none"]
     },
     "hit_count": { "type": "integer", "minimum": 0 },
     "index": {
