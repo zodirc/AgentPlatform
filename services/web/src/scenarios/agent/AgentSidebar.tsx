@@ -176,7 +176,7 @@ export function AgentSidebar({
         ) : null}
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <section className="border-b border-slate-800 p-3">
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
             工作区
@@ -313,7 +313,7 @@ export function AgentSidebar({
 
       <div className="shrink-0 border-t border-slate-800">
         {selectedPreview ? (
-          <div className="max-h-[45vh] overflow-y-auto p-4">
+          <div className="scrollbar-thin max-h-[45vh] overflow-y-auto p-4">
             <p className="truncate text-sm font-medium text-slate-200">
               {selectedPreview.title}
             </p>

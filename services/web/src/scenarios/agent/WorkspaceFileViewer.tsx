@@ -63,7 +63,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-auto bg-slate-900/50 p-4">
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-auto bg-slate-900/50 p-4">
           {isLoading ? (
             <p className="text-sm text-slate-500">加载中…</p>
           ) : isError ? (

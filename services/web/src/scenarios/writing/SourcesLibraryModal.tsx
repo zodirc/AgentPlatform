@@ -162,7 +162,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
           </button>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
           {needsUnlock ? (
             <p className="text-sm text-amber-400">
               请先在页面顶部输入 Admin 密码解锁，才能浏览和上传资料。

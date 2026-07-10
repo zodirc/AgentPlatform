@@ -53,7 +53,7 @@ export function AgentTimelinePanel({
           </span>
         ) : null}
       </h2>
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
         {items.length === 0 ? (
           <p className="text-xs text-slate-500">暂无工具调用</p>
         ) : (

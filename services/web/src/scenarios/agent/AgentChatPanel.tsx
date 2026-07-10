@@ -92,7 +92,7 @@ export function AgentChatPanel({ wb }: Props) {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="min-h-0 flex-1 overflow-y-auto p-4"
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4"
       >
         {wb.historyLoading ? (
           <p className="text-xs text-slate-600">正在加载会话历史…</p>
