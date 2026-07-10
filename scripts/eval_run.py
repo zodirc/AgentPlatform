@@ -9,6 +9,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -26,6 +27,8 @@ except ImportError:
 ROOT = Path(__file__).resolve().parents[1]
 GOLDEN_DIR = ROOT / "eval" / "golden"
 CONTRACTS_DIR = ROOT / "packages" / "contracts"
+DEFAULT_EVAL_WORKSPACE = ROOT / ".eval-workspace"
+DAILY_WORKSPACE = ROOT / "workspace"
 if str(CONTRACTS_DIR) not in sys.path:
     sys.path.insert(0, str(CONTRACTS_DIR))
 
@@ -77,6 +80,55 @@ def _env_value(name: str, default: str = "") -> str:
         if line.startswith(f"{name}="):
             return line.split("=", 1)[1].strip()
     return default
+
+
+def compose_workspace_path(raw_path: str) -> Path:
+    """Resolve a Compose bind source relative to the base compose file."""
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        path = ROOT / "deploy" / path
+    return path.resolve()
+
+
+def validate_workspace(workspace: Path, *, allow_shared_workspace: bool) -> Path:
+    resolved = workspace.expanduser().resolve()
+    daily = DAILY_WORKSPACE.resolve()
+    if resolved in {ROOT.resolve(), daily} and not allow_shared_workspace:
+        raise ValueError(
+            f"refusing shared repository workspace {resolved}; "
+            "use the dedicated .eval-workspace or pass --allow-shared-workspace "
+            "for legacy behavior"
+        )
+
+    runtime_workspace = compose_workspace_path(
+        _env_value("WORKSPACE_HOST_PATH", "../workspace")
+    )
+    if runtime_workspace != resolved:
+        raise ValueError(
+            "eval workspace does not match the runtime bind mount: "
+            f"runner={resolved}, WORKSPACE_HOST_PATH={runtime_workspace}. "
+            "Start eval through a make eval-* target or set both paths explicitly."
+        )
+    return resolved
+
+
+def reset_workspace(workspace: Path) -> None:
+    """Clear one eval case's files without replacing the bind-mounted root inode."""
+    workspace.mkdir(parents=True, exist_ok=True)
+    for child in workspace.iterdir():
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        elif child.is_dir():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+
+    for directory in (workspace, workspace / "sections", workspace / "sources"):
+        directory.mkdir(parents=True, exist_ok=True)
+        try:
+            directory.chmod(0o777)
+        except OSError:
+            pass
 
 
 def admin_headers() -> dict[str, str]:
@@ -870,6 +922,10 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
             raise AssertionError(f"{case_id}: missing workspace file {ws['path']}")
         if "matches" in ws and not re.search(ws["matches"], content, re.S):
             raise AssertionError(f"{case_id}: workspace {ws['path']} does not match {ws['matches']}")
+        if "not_matches" in ws and re.search(ws["not_matches"], content, re.S):
+            raise AssertionError(
+                f"{case_id}: workspace {ws['path']} unexpectedly matches {ws['not_matches']}"
+            )
 
     log_assert = assertions.get("logs", {})
     if "contains" in log_assert:
@@ -963,7 +1019,12 @@ def live_model_configured() -> bool:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run golden turn eval cases")
     parser.add_argument("--base-url", default="http://localhost")
-    parser.add_argument("--workspace", default=str(ROOT / "workspace"))
+    parser.add_argument("--workspace", default=str(DEFAULT_EVAL_WORKSPACE))
+    parser.add_argument(
+        "--allow-shared-workspace",
+        action="store_true",
+        help="Allow the legacy repository workspace (it will be cleared between cases)",
+    )
     parser.add_argument("--filter", default="", help="Substring filter for case id/path")
     parser.add_argument("--phase", default="", help="Filter by phase tag in yaml (e.g. 1, 1b)")
     parser.add_argument(
@@ -994,16 +1055,13 @@ def main() -> int:
     parser.add_argument("cases", nargs="*", help="Specific golden yaml paths")
     args = parser.parse_args()
 
-    workspace = Path(args.workspace)
-    workspace.mkdir(parents=True, exist_ok=True)
-    (workspace / "sections").mkdir(parents=True, exist_ok=True)
-    (workspace / "sources").mkdir(parents=True, exist_ok=True)
     try:
-        workspace.chmod(0o777)
-        (workspace / "sections").chmod(0o777)
-        (workspace / "sources").chmod(0o777)
-    except OSError:
-        pass
+        workspace = validate_workspace(
+            Path(args.workspace),
+            allow_shared_workspace=args.allow_shared_workspace,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     paths: list[Path]
     if args.cases:
@@ -1094,6 +1152,7 @@ def main() -> int:
     for path in paths:
         case = yaml.safe_load(path.read_text())
         try:
+            reset_workspace(workspace)
             run_case(path, args.base_url.rstrip("/"), workspace)
         except (AssertionError, urllib.error.URLError, TimeoutError) as exc:
             if case.get("flaky") and args.mode == "live":

@@ -34,6 +34,7 @@ debug.log
 # agent runtime sandbox (bind-mounted; user-local)
 workspace/*
 !workspace/.gitkeep
+.eval-workspace/
 
 # local compose overlay (from dev.override.yml.example)
 deploy/compose/dev.override.yml

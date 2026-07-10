@@ -88,6 +88,8 @@ jobs:
         run: |
           pip install -q jsonschema pytest pyyaml
           pytest packages/contracts/tests -q
+      - name: Eval runner isolation
+        run: pytest scripts/tests -q
 
   codegen:
     runs-on: ubuntu-latest
@@ -125,5 +127,4 @@ jobs:
       - name: L1 eval (phase 1 + 1b core path)
         run: |
           pip install -q pyyaml websockets
-          python3 scripts/eval_run.py --phase 1
-          python3 scripts/eval_run.py --phase 1b
+          make eval

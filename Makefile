@@ -5,6 +5,15 @@ COMPOSE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compo
 COMPOSE_QUEUE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml --env-file .env
 COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml --env-file .env
 DEV_OVERRIDE := deploy/compose/dev.override.yml
+EVAL_WORKSPACE := .eval-workspace
+EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
+EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml
+EVAL_COMPOSE_PROFILES ?=
+EVAL_UP_ARGS ?=
+EVAL_UP_SERVICES ?= runtime
+EVAL_RUNTIME_ENV ?=
+EVAL_RESTORE_SERVICES ?= runtime
+EVAL_BUILD ?=
 
 .DEFAULT_GOAL := help
 
@@ -14,7 +23,7 @@ DEV_OVERRIDE := deploy/compose/dev.override.yml
 	up-queue up-retrieval up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
-	load-test codegen alembic-upgrade test-rag
+	eval-run-isolated load-test codegen alembic-upgrade test-rag
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -90,17 +99,55 @@ test-rag: ## RAG 检索效果：配置 + 查询对比 + tool_result 预览
 	bash scripts/test_rag.sh
 
 eval:
-	python3 scripts/eval_run.py --phase 1
-	python3 scripts/eval_run.py --phase 1b
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 1"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 1b"
 
 eval-p2:
-	python3 scripts/eval_run.py --phase 2
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 2"
+
+eval-p3:
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 3"
 
 eval-all:
-	python3 scripts/eval_run.py
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub"
 
 eval-live:
-	python3 scripts/eval_run.py --mode live
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=live" EVAL_ARGS="--mode live"
+
+eval-run-isolated:
+	@mkdir -p $(EVAL_WORKSPACE)
+	@chmod 777 $(EVAL_WORKSPACE)
+	@set -eu; \
+	restore_runtime() { \
+	  rc=$$?; \
+	  trap - EXIT; \
+	  echo "Restoring ordinary runtime workspace..."; \
+	  restore_once() { \
+	    env -u WORKSPACE_HOST_PATH $(COMPOSE) \
+	      up -d --wait --wait-timeout 180 --force-recreate --remove-orphans \
+	      $(EVAL_RESTORE_SERVICES); \
+	  }; \
+	  if ! restore_once; then \
+	    echo "Retrying ordinary runtime restore..."; \
+	    sleep 3; \
+	    restore_once || echo "WARNING: automatic runtime restore failed; run 'make start'"; \
+	  fi; \
+	  exit $$rc; \
+	}; \
+	trap restore_runtime EXIT; \
+	if ! env $(EVAL_RUNTIME_ENV) WORKSPACE_HOST_PATH=$(EVAL_WORKSPACE_HOST_PATH) \
+	  docker compose $(EVAL_COMPOSE_FILES) --env-file .env $(EVAL_COMPOSE_PROFILES) \
+	  up -d $(EVAL_BUILD) --wait --wait-timeout 180 --force-recreate \
+	  $(EVAL_UP_ARGS) $(EVAL_UP_SERVICES); then \
+	  echo "Eval runtime recreate raced with Docker; retrying once..."; \
+	  sleep 2; \
+	  env $(EVAL_RUNTIME_ENV) WORKSPACE_HOST_PATH=$(EVAL_WORKSPACE_HOST_PATH) \
+	    docker compose $(EVAL_COMPOSE_FILES) --env-file .env $(EVAL_COMPOSE_PROFILES) \
+	    up -d --wait --wait-timeout 180 --force-recreate \
+	    $(EVAL_UP_ARGS) $(EVAL_UP_SERVICES); \
+	fi; \
+	env $(EVAL_RUNTIME_ENV) WORKSPACE_HOST_PATH=$(EVAL_WORKSPACE_HOST_PATH) \
+	  python3 scripts/eval_run.py --workspace $(EVAL_WORKSPACE) $(EVAL_ARGS)
 
 api-test:
 	cd services/api && pip install -q -e ".[dev]" 2>/dev/null || pip install -q pytest pydantic-settings httpx
@@ -136,40 +183,41 @@ up-ha:
 	$(COMPOSE_HA) up -d --build --scale runtime=0
 
 eval-stall:
-	STALL_THRESHOLD_SECONDS=8 STALL_POLL_INTERVAL_SECONDS=2 STALL_AUTO_FAIL=true MODEL_TIMEOUT_SECONDS=120 \
-	  $(COMPOSE) up -d --build --force-recreate runtime
-	@sleep 5
-	python3 scripts/eval_run.py --filter stall_watchdog --include-stall
-	STALL_THRESHOLD_SECONDS=120 STALL_POLL_INTERVAL_SECONDS=30 STALL_AUTO_FAIL=false MODEL_TIMEOUT_SECONDS=3 \
-	  $(COMPOSE) up -d --build --force-recreate runtime
+	$(MAKE) eval-run-isolated \
+	  EVAL_BUILD=--build \
+	  EVAL_RUNTIME_ENV="MODEL_MODE=stub STALL_THRESHOLD_SECONDS=8 STALL_POLL_INTERVAL_SECONDS=2 STALL_AUTO_FAIL=true MODEL_TIMEOUT_SECONDS=120" \
+	  EVAL_ARGS="--filter stall_watchdog --include-stall"
 
 eval-ha:
-	$(COMPOSE_HA) up -d --build --scale runtime=0
-	@sleep 10
-	@python3 scripts/eval_run.py --filter ha_runner --include-ha; \
-	rc=$$?; \
-	$(COMPOSE) up -d --build --remove-orphans; \
-	exit $$rc
+	$(MAKE) eval-run-isolated \
+	  EVAL_BUILD=--build \
+	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/ha.yml" \
+	  EVAL_UP_ARGS="--scale runtime=0" EVAL_UP_SERVICES= \
+	  EVAL_RESTORE_SERVICES="api runtime" \
+	  EVAL_RUNTIME_ENV="MODEL_MODE=stub" \
+	  EVAL_ARGS="--filter ha_runner --include-ha"
 
 eval-recorded:
-	MODEL_MODE=recorded $(COMPOSE) up -d --build --force-recreate runtime
-	@sleep 8
-	python3 scripts/eval_run.py --filter recorded --include-recorded --mode recorded
-	MODEL_MODE=stub $(COMPOSE) up -d --build --force-recreate runtime
+	$(MAKE) eval-run-isolated EVAL_BUILD=--build EVAL_RUNTIME_ENV="MODEL_MODE=recorded" \
+	  EVAL_ARGS="--filter recorded --include-recorded --mode recorded"
 
 eval-retrieval:
-	$(COMPOSE_RETRIEVAL) --profile retrieval up -d --build
-	@sleep 30
 	pip install -q websockets 2>/dev/null || true
-	python3 scripts/eval_run.py --filter writing.07
-	$(COMPOSE) up -d --build --remove-orphans
+	$(MAKE) eval-run-isolated \
+	  EVAL_BUILD=--build \
+	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/retrieval.yml" \
+	  EVAL_COMPOSE_PROFILES="--profile retrieval" \
+	  EVAL_RUNTIME_ENV="MODEL_MODE=stub INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid" \
+	  EVAL_ARGS="--filter writing.07"
 
 eval-queue:
-	WORKER_MODE=outbox INDEX_VIA_WORKER=true \
-	  $(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval up -d --build
-	@sleep 30
-	python3 scripts/eval_run.py --filter outbox_worker --include-queue
-	$(COMPOSE) up -d --build --remove-orphans
+	$(MAKE) eval-run-isolated \
+	  EVAL_BUILD=--build \
+	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml" \
+	  EVAL_COMPOSE_PROFILES="--profile queue --profile retrieval" EVAL_UP_SERVICES= \
+	  EVAL_RESTORE_SERVICES="api runtime" \
+	  EVAL_RUNTIME_ENV="MODEL_MODE=stub WORKER_MODE=outbox INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid" \
+	  EVAL_ARGS="--filter outbox_worker --include-queue"
 
 load-test:
 	python3 scripts/load_test.py

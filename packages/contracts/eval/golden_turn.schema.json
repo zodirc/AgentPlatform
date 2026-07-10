@@ -73,7 +73,8 @@
             "properties": {
               "path": { "type": "string" },
               "content": { "type": "string" },
-              "matches": { "type": "string" }
+              "matches": { "type": "string" },
+              "not_matches": { "type": "string" }
             }
           }
         },
