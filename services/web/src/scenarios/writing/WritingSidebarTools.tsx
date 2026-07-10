@@ -31,7 +31,7 @@ export function WritingSidebarTools({ onOpenSources, onOpenRagDebug }: Props) {
         </Button>
       </div>
       <p className="mt-2 text-[10px] text-slate-600">
-        资料库内双击文件可查看；工作区 sources/ 目录亦可同样操作。
+        资料库支持粘贴输入或上传文件；双击可查看。工作区 sources/ 同理。
       </p>
     </Card>
   );

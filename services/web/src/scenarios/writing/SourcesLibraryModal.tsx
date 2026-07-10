@@ -1,11 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, X } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  fetchSourcesIndexStatus,
   fetchWorkspaceEntries,
   uploadSourceFile,
+  uploadSourceText,
+  type SourcesIndexStatus,
+  type SourceUploadResult,
 } from "../../shared/api/client";
 import { useAdminAuth } from "../../shared/auth/useAdminAuth";
+import { Button } from "../../components/ui/button";
 import { workspaceEntryIcon } from "../agent/workspaceFileIcon";
 
 function fileEntries(entries: string[]): string[] {
@@ -18,10 +23,49 @@ type Props = {
   onOpenFile: (path: string) => void;
 };
 
+function indexStatusLabel(
+  savedPath: string | null,
+  status: SourcesIndexStatus | undefined,
+  polling: boolean,
+): { text: string; tone: "pending" | "ok" | "err" } | null {
+  if (!savedPath) return null;
+  if (!status && polling) {
+    return { text: `已保存 ${savedPath} · 正在确认索引…`, tone: "pending" };
+  }
+  if (!status) return { text: `已保存 ${savedPath}`, tone: "ok" };
+
+  if (status.status === "building" || (polling && !status.path_current)) {
+    return {
+      text: `已保存 ${savedPath} · 索引重建中…`,
+      tone: "pending",
+    };
+  }
+  if (status.status === "error") {
+    return {
+      text: `已保存 ${savedPath} · 索引失败：${status.error || "未知错误"}`,
+      tone: "err",
+    };
+  }
+  if (status.path_current || status.status === "ready") {
+    const chunks = status.last_result?.chunks ?? status.chunks;
+    return {
+      text:
+        chunks != null
+          ? `已保存 ${savedPath} · 索引完成，可检索（${chunks} 块）`
+          : `已保存 ${savedPath} · 索引完成，可检索`,
+      tone: "ok",
+    };
+  }
+  return { text: `已保存 ${savedPath}`, tone: "ok" };
+}
+
 export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const { needsUnlock } = useAdminAuth();
   const queryClient = useQueryClient();
+  const [pasteTitle, setPasteTitle] = useState("");
+  const [pasteBody, setPasteBody] = useState("");
+  const [watchPath, setWatchPath] = useState<string | null>(null);
 
   const sourcesQuery = useQuery({
     queryKey: ["workspace-sources"],
@@ -32,12 +76,57 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     enabled: open && !needsUnlock,
   });
 
+  const indexQuery = useQuery({
+    queryKey: ["sources-index-status", watchPath],
+    queryFn: () => fetchSourcesIndexStatus(watchPath ?? undefined),
+    enabled: open && !needsUnlock && Boolean(watchPath),
+    refetchInterval: (query) => {
+      const data = query.state.data as SourcesIndexStatus | undefined;
+      if (!data) return 1000;
+      if (data.status === "building") return 1000;
+      if (watchPath && !data.path_current && data.status !== "error") return 1000;
+      return false;
+    },
+  });
+
+  useEffect(() => {
+    if (!watchPath) return;
+    const data = indexQuery.data;
+    if (!data) return;
+    if (data.status === "error") return;
+    if (data.path_current || (data.status === "ready" && data.path_indexed)) {
+      void queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
+    }
+  }, [watchPath, indexQuery.data, queryClient]);
+
+  const invalidateSources = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
+    await queryClient.invalidateQueries({ queryKey: ["workspace-entries"] });
+  };
+
+  const onUploadSuccess = async (result: SourceUploadResult) => {
+    await invalidateSources();
+    setWatchPath(result.path);
+    await queryClient.invalidateQueries({
+      queryKey: ["sources-index-status", result.path],
+    });
+  };
+
   const uploadMutation = useMutation({
     mutationFn: uploadSourceFile,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
-      await queryClient.invalidateQueries({ queryKey: ["workspace-entries"] });
+    onSuccess: async (result) => {
+      await onUploadSuccess(result);
       if (inputRef.current) inputRef.current.value = "";
+    },
+  });
+
+  const pasteMutation = useMutation({
+    mutationFn: ({ title, content }: { title: string; content: string }) =>
+      uploadSourceText(title, content),
+    onSuccess: async (result) => {
+      await onUploadSuccess(result);
+      setPasteTitle("");
+      setPasteBody("");
     },
   });
 
@@ -53,6 +142,26 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   if (!open) return null;
 
   const files = sourcesQuery.data ?? [];
+  const busy = uploadMutation.isPending || pasteMutation.isPending;
+  const lastErr =
+    pasteMutation.error?.message ||
+    uploadMutation.error?.message ||
+    null;
+  const polling =
+    Boolean(watchPath) &&
+    (indexQuery.isFetching ||
+      indexQuery.data?.status === "building" ||
+      (indexQuery.data != null &&
+        !indexQuery.data.path_current &&
+        indexQuery.data.status !== "error" &&
+        indexQuery.data.status !== "ready"));
+  const statusLine = indexStatusLabel(watchPath, indexQuery.data, polling);
+
+  const submitPaste = () => {
+    const content = pasteBody.trim();
+    if (!content || busy) return;
+    pasteMutation.mutate({ title: pasteTitle, content });
+  };
 
   return (
     <div
@@ -63,7 +172,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
       onClick={onClose}
     >
       <div
-        className="flex h-[min(85vh,720px)] w-[min(92vw,640px)] flex-col overflow-hidden rounded-xl border border-violet-900/50 bg-slate-950 shadow-2xl"
+        className="flex h-[min(90vh,800px)] w-[min(92vw,640px)] flex-col overflow-hidden rounded-xl border border-violet-900/50 bg-slate-950 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-slate-800 px-4 py-3">
@@ -71,7 +180,8 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-100">写作资料库</p>
             <p className="text-xs text-slate-500">
-              workspace/sources/ · 双击文件查看 · 供 search_sources 检索
+              workspace/sources/ · 粘贴或上传 · 双击查看 · 供 search_sources
+              检索
             </p>
           </div>
           <button
@@ -91,32 +201,79 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
             </p>
           ) : (
             <>
-              <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-                <input
-                  ref={inputRef}
-                  type="file"
-                  accept=".md,.txt,.markdown,.json,text/plain,text/markdown"
-                  className="max-w-full text-xs text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-800 file:px-2 file:py-1 file:text-slate-200"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) uploadMutation.mutate(file);
-                  }}
-                />
-                {uploadMutation.isPending ? (
-                  <span className="text-xs text-slate-500">上传并重建索引…</span>
+              <div className="mb-4 space-y-3 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+                <div>
+                  <p className="mb-2 text-xs font-medium text-slate-300">
+                    在线输入 / 粘贴
+                  </p>
+                  <input
+                    type="text"
+                    value={pasteTitle}
+                    onChange={(e) => setPasteTitle(e.target.value)}
+                    placeholder="标题（可选，默认 paste-note.md）"
+                    className="mb-2 w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm text-slate-200 placeholder:text-slate-600 focus:border-violet-700 focus:outline-none"
+                    disabled={busy}
+                  />
+                  <textarea
+                    value={pasteBody}
+                    onChange={(e) => setPasteBody(e.target.value)}
+                    placeholder="粘贴或输入资料正文（Markdown / 纯文本）…"
+                    rows={6}
+                    className="w-full resize-y rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-200 placeholder:text-slate-600 focus:border-violet-700 focus:outline-none"
+                    disabled={busy}
+                  />
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-violet-800 text-violet-200"
+                      disabled={busy || !pasteBody.trim()}
+                      onClick={submitPaste}
+                    >
+                      {pasteMutation.isPending ? "保存中…" : "保存到资料库"}
+                    </Button>
+                    <span className="text-[10px] text-slate-600">
+                      保存后自动重建索引，完成后会提示「可检索」
+                    </span>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-800 pt-3">
+                  <p className="mb-2 text-xs font-medium text-slate-300">
+                    上传本地文件
+                  </p>
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    accept=".md,.txt,.markdown,.json,text/plain,text/markdown"
+                    className="max-w-full text-xs text-slate-400 file:mr-2 file:rounded file:border-0 file:bg-slate-800 file:px-2 file:py-1 file:text-slate-200"
+                    disabled={busy}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) uploadMutation.mutate(file);
+                    }}
+                  />
+                </div>
+
+                {busy ? (
+                  <span className="text-xs text-slate-500">正在保存文件…</span>
                 ) : null}
-                {uploadMutation.isSuccess ? (
-                  <span className="text-xs text-emerald-400">
-                    已保存 {uploadMutation.data.path}
-                    {uploadMutation.data.index?.chunks != null
-                      ? ` · ${uploadMutation.data.index.chunks} 块`
-                      : ""}
+                {statusLine && !busy ? (
+                  <span
+                    className={
+                      statusLine.tone === "err"
+                        ? "block text-xs text-rose-400"
+                        : statusLine.tone === "pending"
+                          ? "block text-xs text-amber-300"
+                          : "block text-xs text-emerald-400"
+                    }
+                  >
+                    {statusLine.text}
                   </span>
                 ) : null}
-                {uploadMutation.isError ? (
-                  <span className="text-xs text-rose-400">
-                    {uploadMutation.error.message || "上传失败"}
-                  </span>
+                {lastErr && !busy ? (
+                  <span className="block text-xs text-rose-400">{lastErr}</span>
                 ) : null}
               </div>
 

@@ -438,13 +438,15 @@ async def export_document(output_path: str = "exports/document.md", **_kwargs: A
     outline = root / "outline.md"
     if outline.is_file():
         parts.append(outline.read_text(encoding="utf-8", errors="replace"))
-    sections_dir = root / "sections"
-    if sections_dir.is_dir():
-        for fp in sorted(sections_dir.glob("*.md")):
-            parts.append(f"\n## {fp.stem}\n\n{fp.read_text(encoding='utf-8', errors='replace')}")
     revisions = root / ".agent" / "revisions"
-    if revisions.is_dir() and not sections_dir.is_dir():
-        for fp in sorted(revisions.glob("*.md")):
+    revision_files = sorted(revisions.glob("*.md")) if revisions.is_dir() else []
+    sections_dir = root / "sections"
+    # draft_section writes to .agent/revisions/; prefer that over stale sections/*.md.
+    if revision_files:
+        for fp in revision_files:
+            parts.append(f"\n## {fp.stem}\n\n{fp.read_text(encoding='utf-8', errors='replace')}")
+    elif sections_dir.is_dir():
+        for fp in sorted(sections_dir.glob("*.md")):
             parts.append(f"\n## {fp.stem}\n\n{fp.read_text(encoding='utf-8', errors='replace')}")
     body = "\n".join(parts).strip() or "# Empty document\n"
     target = _resolve_path(output_path)

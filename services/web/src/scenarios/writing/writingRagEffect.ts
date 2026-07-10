@@ -20,14 +20,20 @@ export type RagEffectAssessment = {
 
 const CITE_RE = /\[cite:[\w-]+\]/g;
 
-const SOURCE_INTENT_RE =
-  /引用|参考|出处|资料|sources?|cite|根据.{0,8}资料|based on/i;
+/** Evidence-backed drafting — not bare mentions of「资料」/ library meta-questions. */
+const SOURCE_DRAFT_INTENT_RE =
+  /根据.{0,16}(资料|sources)|(?:写|起草|成稿|扩写).{0,12}(引用|出处)|标注引用|引用资料|参考资料写|用\s*sources|from sources|based on (the )?sources?|\bcite\b/i;
+
+/** Questions about the library itself — browsing is fine; do not demand search_sources. */
+const LIBRARY_META_RE =
+  /资料库.{0,12}(理解|有什么|是什么|介绍|看看|内容)|对.{0,8}资料库|(?:sources\/?|资料库).{0,8}(目录|列表|有哪些)|有哪些资料/i;
 
 export function userNeedsSources(
   userMessage: string | null | undefined,
 ): boolean {
   if (!userMessage?.trim()) return false;
-  return SOURCE_INTENT_RE.test(userMessage);
+  if (LIBRARY_META_RE.test(userMessage)) return false;
+  return SOURCE_DRAFT_INTENT_RE.test(userMessage);
 }
 
 function collectOutputText(
@@ -77,7 +83,7 @@ export function assessWritingRagEffect(options: {
     return {
       status: "running",
       title: "处理中",
-      detail: needsSources ? "等待模型检索 sources/ 资料…" : "本轮进行中",
+      detail: needsSources ? "等待模型检索 sources/…" : "本轮进行中",
       searched: false,
       hitCount: 0,
       cites: [],
@@ -89,7 +95,7 @@ export function assessWritingRagEffect(options: {
       status: "idle",
       title: "资料引用",
       detail:
-        "需要引用资料时，说明「根据 sources 写一段并标注引用」；自由改稿无需检索。",
+        "search_sources 始终可用；成稿需要证据时模型应自行检索并标注 [cite:…]。本面板只观察本轮是否走了检索→引用链路。",
       searched: false,
       hitCount: 0,
       cites: [],
@@ -99,9 +105,9 @@ export function assessWritingRagEffect(options: {
   if (!needsSources && !searched && cites.length === 0) {
     return {
       status: "not_needed",
-      title: "本轮未用资料检索",
+      title: "本轮未走检索引用",
       detail:
-        "改稿/自由写作通常不需要 search_sources；若要引用 sources/ 请明确说明。",
+        "未判定为「依资料成稿」意图（例如只是了解资料库、改稿、自由写）。浏览 sources/ 可用 list_dir/read_file，不必强求 search_sources。",
       searched: false,
       hitCount: 0,
       cites: [],
@@ -111,9 +117,9 @@ export function assessWritingRagEffect(options: {
   if (needsSources && !searched) {
     return {
       status: "no_search",
-      title: "未检索资料",
+      title: "成稿意图未检索",
       detail:
-        "你已要求引用/资料，但模型未调用 search_sources。可重试并写明「先 search_sources 再写」。",
+        "本轮像是要依 sources 成稿/引用，但未调用 search_sources。可重试；无需背诵固定口令，说清要写什么、依据哪类资料即可。",
       searched: false,
       hitCount: 0,
       cites: [],
@@ -135,7 +141,7 @@ export function assessWritingRagEffect(options: {
     return {
       status: "no_cite",
       title: "检索命中，成稿未引用",
-      detail: `已找到 ${hitCount} 条资料，但输出中尚无 [cite:xxx]。RAG 对本轮成稿尚未生效。`,
+      detail: `已找到 ${hitCount} 条资料，但输出中尚无 [cite:xxx]。RAG 对本轮成稿尚未闭环。`,
       searched: true,
       hitCount,
       cites: [],
@@ -166,8 +172,8 @@ export function assessWritingRagEffect(options: {
 
   return {
     status: "not_needed",
-    title: "本轮未用资料检索",
-    detail: "未检测到资料引用需求或检索活动。",
+    title: "本轮未走检索引用",
+    detail: "未检测到依资料成稿意图，也未发生 search_sources。",
     searched,
     hitCount,
     cites,

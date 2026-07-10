@@ -40,12 +40,37 @@ async def read_file(*, path: str) -> dict:
 
 async def upload_source(*, filename: str, content: str) -> dict:
     base = settings.runtime_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{base}/internal/workspace/sources/upload",
-            json={"filename": filename, "content": content},
-            headers={"X-Internal-Token": settings.internal_service_token},
-        )
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/sources/upload",
+                json={"filename": filename, "content": content},
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.TimeoutException as exc:
+        raise WorkspaceProxyError(
+            504,
+            "runtime timed out while saving source (index may still be rebuilding)",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def sources_index_status(*, path: str | None = None) -> dict:
+    base = settings.runtime_url.rstrip("/")
+    params = {"path": path} if path else None
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{base}/internal/workspace/sources/index-status",
+                params=params,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()

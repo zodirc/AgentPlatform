@@ -68,6 +68,23 @@ async def test_export_document_from_revisions(workspace: Path) -> None:
     assert "Section body" in exported
 
 
+@pytest.mark.asyncio
+async def test_export_document_prefers_revisions_over_sections(workspace: Path) -> None:
+    rev = workspace / ".agent" / "revisions"
+    rev.mkdir(parents=True)
+    (rev / "ch1.md").write_text("Chapter one draft", encoding="utf-8")
+    sections = workspace / "sections"
+    sections.mkdir()
+    (sections / "stale.md").write_text("old junk", encoding="utf-8")
+    (workspace / "outline.md").write_text("# Outline", encoding="utf-8")
+
+    await core.export_document("exports/out.md")
+
+    exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
+    assert "Chapter one draft" in exported
+    assert "old junk" not in exported
+
+
 def test_scenario_registry_loads_profiles() -> None:
     ScenarioRegistry.load()
     writing = ScenarioRegistry.get("writing")

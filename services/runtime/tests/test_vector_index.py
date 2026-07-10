@@ -2,8 +2,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.retrieval.embedder import HashEmbedder, cosine_similarity, get_embedder
+import pytest
+
+from app.retrieval.embedder import (
+    HashEmbedder,
+    cosine_similarity,
+    get_embedder,
+    reset_embedder_cache,
+    warmup_embedder,
+)
 from app.retrieval.vector_index import SourceVectorIndex
+
+
+@pytest.fixture(autouse=True)
+def _clear_embedder_cache() -> None:
+    reset_embedder_cache()
+    yield
+    reset_embedder_cache()
 
 
 def test_hash_embedder_produces_unit_vector() -> None:
@@ -47,9 +62,38 @@ def test_get_embedder_defaults_to_hash(monkeypatch) -> None:
     assert isinstance(embedder, HashEmbedder)
 
 
-def test_get_embedder_sentence_transformers_requires_extra(monkeypatch) -> None:
-    import pytest
+def test_get_embedder_is_process_singleton(monkeypatch) -> None:
+    from app.settings import settings
 
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    first = get_embedder()
+    second = get_embedder()
+    assert first is second
+
+
+def test_get_embedder_rebuilds_when_settings_change(monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    first = get_embedder()
+    monkeypatch.setattr(settings, "embedding_dimensions", 128)
+    second = get_embedder()
+    assert first is not second
+    assert isinstance(second, HashEmbedder)
+    assert second.dimensions == 128
+
+
+def test_warmup_embedder_loads_hash(monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    label = warmup_embedder()
+    assert label.startswith("hash:")
+    assert get_embedder() is get_embedder()
+
+
+def test_get_embedder_sentence_transformers_requires_extra(monkeypatch) -> None:
     from app.settings import settings
 
     monkeypatch.setattr(settings, "embedding_backend", "sentence_transformers")

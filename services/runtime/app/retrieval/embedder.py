@@ -1,15 +1,22 @@
 from __future__ import annotations
 
+import logging
 import math
 import re
 from typing import Protocol
 
 from app.settings import settings
 
+logger = logging.getLogger(__name__)
+
 
 class Embedder(Protocol):
     def embed(self, text: str) -> list[float]:
         ...
+
+
+_embedder: Embedder | None = None
+_embedder_key: tuple[str, str, str, int] | None = None
 
 
 def tokenize(text: str) -> list[str]:
@@ -58,7 +65,16 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
-def get_embedder() -> Embedder:
+def _cache_key() -> tuple[str, str, str, int]:
+    return (
+        settings.embedding_backend.lower(),
+        settings.embedding_model,
+        settings.embedding_model_dir or "",
+        settings.embedding_dimensions,
+    )
+
+
+def _build_embedder() -> Embedder:
     backend = settings.embedding_backend.lower()
     if backend in {"sentence_transformers", "minilm", "neural"}:
         try:
@@ -72,3 +88,49 @@ def get_embedder() -> Embedder:
                 "(pip install '.[retrieval]' or use Dockerfile.retrieval)"
             ) from exc
     return HashEmbedder(dimensions=settings.embedding_dimensions)
+
+
+def reset_embedder_cache() -> None:
+    """Drop the process-wide embedder (tests / config reload)."""
+    global _embedder, _embedder_key
+    _embedder = None
+    _embedder_key = None
+
+
+def get_embedder() -> Embedder:
+    """Return the process-wide embedder singleton for the current settings."""
+    global _embedder, _embedder_key
+    key = _cache_key()
+    if _embedder is not None and _embedder_key == key:
+        return _embedder
+    _embedder = _build_embedder()
+    _embedder_key = key
+    return _embedder
+
+
+def warmup_embedder() -> str:
+    """Load the configured embedder at startup so first index/search is cheap.
+
+    Returns a short backend label for logs. Missing retrieval extras are logged
+    as warnings so the default hash path can still start; other failures raise.
+    """
+    backend = settings.embedding_backend.lower()
+    try:
+        embedder = get_embedder()
+        # Force encode path for neural backends (constructor may already load weights).
+        embedder.embed("warmup")
+    except RuntimeError:
+        logger.warning(
+            "embedder warmup skipped: backend=%s unavailable; retrieval will fail until fixed",
+            backend,
+            exc_info=True,
+        )
+        reset_embedder_cache()
+        return f"{backend}:unavailable"
+    except Exception:
+        logger.exception("embedder warmup failed: backend=%s", backend)
+        reset_embedder_cache()
+        raise
+    label = type(embedder).__name__
+    logger.info("embedder ready: backend=%s impl=%s", backend, label)
+    return f"{backend}:{label}"

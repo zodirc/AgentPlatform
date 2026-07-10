@@ -6,9 +6,17 @@ import {
 } from "./writingRagEffect";
 
 describe("userNeedsSources", () => {
-  it("detects citation intent", () => {
+  it("detects evidence-backed drafting intent", () => {
     expect(userNeedsSources("根据 sources 写一段")).toBe(true);
+    expect(userNeedsSources("根据资料写开场并标注引用")).toBe(true);
+    expect(userNeedsSources("引用资料写一节")).toBe(true);
     expect(userNeedsSources("请改第二节更简洁")).toBe(false);
+  });
+
+  it("does not treat library meta-questions as citation intent", () => {
+    expect(userNeedsSources("你对我们的资料库有什么理解？")).toBe(false);
+    expect(userNeedsSources("资料库里有什么")).toBe(false);
+    expect(userNeedsSources("介绍一下 sources 目录")).toBe(false);
   });
 });
 
@@ -40,7 +48,18 @@ describe("assessWritingRagEffect", () => {
     expect(result.cites).toContain("[cite:ref-a]");
   });
 
-  it("reports no_search when user asked but model did not search", () => {
+  it("treats library understanding as not_needed without search", () => {
+    const result = assessWritingRagEffect({
+      view: { status: "completed", artifacts: [], tool_timeline: [] } as never,
+      streamText: "资料库有亮剑素材",
+      sectionDraft: "",
+      userMessage: "你对我们的资料库有什么理解？",
+      turnBusy: false,
+    });
+    expect(result.status).toBe("not_needed");
+  });
+
+  it("reports no_search when drafting intent but model did not search", () => {
     const result = assessWritingRagEffect({
       view: { status: "completed", artifacts: [], tool_timeline: [] } as never,
       streamText: "",
@@ -62,7 +81,7 @@ describe("assessWritingRagEffect", () => {
       } as never,
       streamText: "",
       sectionDraft: "",
-      userMessage: "引用资料",
+      userMessage: "引用资料写一节",
       turnBusy: false,
     });
     expect(result.status).toBe("no_cite");

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
@@ -13,6 +14,9 @@ import type { TurnHistoryItem, WorkbenchState } from "../../shared/workbench/typ
 type Props = {
   wb: WorkbenchState;
 };
+
+/** Stay pinned to bottom unless the user scrolled up more than this (px). */
+const STICK_THRESHOLD_PX = 80;
 
 function assistantText(wb: WorkbenchState, turn: TurnHistoryItem): string {
   if (turn.id === wb.turnId) {
@@ -36,6 +40,38 @@ export function AgentChatPanel({ wb }: Props) {
   const meta = scenarioMeta(wb.scenarioId);
   const turnScenario = wb.view?.scenario_id;
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
+  const endRef = useRef<HTMLDivElement>(null);
+
+  const onScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stickToBottomRef.current = distance <= STICK_THRESHOLD_PX;
+  };
+
+  useEffect(() => {
+    if (!stickToBottomRef.current) return;
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [
+    wb.turnHistory.length,
+    wb.streamText,
+    wb.sectionDraft,
+    wb.view?.latest_output,
+    wb.busy,
+    wb.displayStatus,
+    wb.awaitingApproval,
+    wb.historyLoading,
+  ]);
+
+  // New user send: always jump to bottom so the reply is visible.
+  useEffect(() => {
+    if (!wb.busy) return;
+    stickToBottomRef.current = true;
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [wb.turnId, wb.busy]);
+
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-slate-800 bg-slate-950">
       <header className="shrink-0 border-b border-slate-800 px-4 py-3">
@@ -53,7 +89,11 @@ export function AgentChatPanel({ wb }: Props) {
         </p>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="min-h-0 flex-1 overflow-y-auto p-4"
+      >
         {wb.historyLoading ? (
           <p className="text-xs text-slate-600">正在加载会话历史…</p>
         ) : null}
@@ -93,6 +133,7 @@ export function AgentChatPanel({ wb }: Props) {
             {` · turn=${wb.turnId.slice(0, 8)}`}
           </p>
         ) : null}
+        <div ref={endRef} aria-hidden className="h-px w-full" />
       </div>
 
       {wb.awaitingApproval ? (

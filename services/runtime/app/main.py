@@ -216,17 +216,35 @@ async def workspace_write_file(
     return result
 
 
+@workspace_router.get("/sources/index-status")
+async def workspace_sources_index_status(
+    path: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import sources_index_status
+
+    return sources_index_status(path=path)
+
+
 @workspace_router.post("/sources/upload")
 async def workspace_upload_source(
     body: SourceUploadBody,
+    background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
-    from app.services.workspace_browser import upload_source_file
+    from app.services.workspace_browser import (
+        sync_sources_index_safe,
+        upload_source_file,
+    )
 
     try:
-        return await upload_source_file(filename=body.filename, content=body.content)
+        result = await upload_source_file(filename=body.filename, content=body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Defer embedding/index rebuild so the write path stays under api proxy timeout.
+    rel = str(result.get("path") or "")
+    background_tasks.add_task(sync_sources_index_safe, path=rel or None)
+    return result
 
 
 @asynccontextmanager
@@ -234,20 +252,26 @@ async def lifespan(app):
     import asyncio
 
     from app.observability.logging import configure_logging
+    from app.retrieval.embedder import reset_embedder_cache, warmup_embedder
 
     configure_logging(service="agent-runtime", level=settings.log_level)
     await init_pool()
     ScenarioRegistry.load()
+    # Load embedder once at startup so sources index/search do not pay first-use cost.
+    await asyncio.to_thread(warmup_embedder)
     from app.controller.stall_watchdog import stall_watchdog_loop
 
     watchdog = asyncio.create_task(stall_watchdog_loop())
-    yield
-    watchdog.cancel()
     try:
-        await watchdog
-    except asyncio.CancelledError:
-        pass
-    await close_pool()
+        yield
+    finally:
+        watchdog.cancel()
+        try:
+            await watchdog
+        except asyncio.CancelledError:
+            pass
+        reset_embedder_cache()
+        await close_pool()
 
 
 def create_app():

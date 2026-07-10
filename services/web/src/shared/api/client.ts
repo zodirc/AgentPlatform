@@ -325,12 +325,48 @@ export type SourceUploadResult = {
   bytes_written: number;
   summary: string;
   index?: {
+    status?: string;
+    path?: string;
     indexed_files?: number;
     chunks?: number;
     added?: number;
     updated?: number;
   };
 };
+
+export type SourcesIndexStatus = {
+  status: "idle" | "building" | "ready" | "error" | string;
+  path?: string | null;
+  error?: string | null;
+  indexed_files?: number;
+  chunks?: number;
+  updated_at?: string | null;
+  embedding_backend?: string;
+  path_indexed?: boolean;
+  path_current?: boolean;
+  last_result?: {
+    indexed_files?: number;
+    chunks?: number;
+    added?: number;
+    updated?: number;
+  } | null;
+};
+
+export async function fetchSourcesIndexStatus(
+  path?: string,
+): Promise<SourcesIndexStatus> {
+  const params = new URLSearchParams();
+  if (path) params.set("path", path);
+  const qs = params.toString();
+  const res = await fetch(
+    `${API_BASE}/admin/workspace/sources/index-status${qs ? `?${qs}` : ""}`,
+    { headers: adminAuthHeaders() },
+  );
+  if (!res.ok) {
+    throw new Error(`fetchSourcesIndexStatus failed: ${res.status}`);
+  }
+  return res.json();
+}
 
 export async function uploadSourceFile(
   file: File,
@@ -344,7 +380,40 @@ export async function uploadSourceFile(
   });
   if (!res.ok) {
     const detail = await res.text();
-    throw new Error(detail || `uploadSourceFile failed: ${res.status}`);
+    let message = detail || `uploadSourceFile failed: ${res.status}`;
+    try {
+      const parsed = JSON.parse(detail) as {
+        error?: { message?: string };
+        detail?: string;
+      };
+      message = parsed.error?.message || parsed.detail || message;
+    } catch {
+      // keep raw text
+    }
+    throw new Error(message);
   }
   return res.json();
+}
+
+/** Sanitize a user-facing title into a sources/ filename accepted by the API. */
+export function sourceFilenameFromTitle(title: string): string {
+  const raw = title.trim() || "paste-note";
+  const withoutExt = raw.replace(/\.(md|markdown|txt|json)$/i, "");
+  const safe = withoutExt
+    .replace(/[^\w\u4e00-\u9fff\-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return `${safe || "paste-note"}.md`;
+}
+
+/** Paste / type content into sources/ without picking a local file. */
+export async function uploadSourceText(
+  title: string,
+  content: string,
+): Promise<SourceUploadResult> {
+  const filename = sourceFilenameFromTitle(title);
+  const file = new File([content], filename, {
+    type: "text/markdown;charset=utf-8",
+  });
+  return uploadSourceFile(file);
 }

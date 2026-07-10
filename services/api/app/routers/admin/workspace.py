@@ -31,6 +31,14 @@ async def read_workspace_file(path: str = Query(min_length=1)):
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/sources/index-status")
+async def sources_index_status(path: str | None = Query(default=None)):
+    try:
+        return await workspace_svc.sources_index_status(path=path)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/sources/upload")
 async def upload_source_file(file: UploadFile = File(...)):
     raw = await file.read()
@@ -41,4 +49,8 @@ async def upload_source_file(file: UploadFile = File(...)):
     try:
         return await workspace_svc.upload_source(filename=filename, content=content)
     except WorkspaceProxyError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        # Upstream may return a raw body; keep status, surface a short message.
+        detail = exc.detail
+        if isinstance(detail, str) and len(detail) > 500:
+            detail = detail[:500]
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
