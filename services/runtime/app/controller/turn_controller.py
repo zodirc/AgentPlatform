@@ -624,10 +624,16 @@ async def _run_turn(
             step_index=step_index,
         )
 
+    system_prompt = profile.system_prompt
+    if scenario_id == "writing":
+        from app.writing.cards import build_writing_system_prompt
+
+        system_prompt = build_writing_system_prompt(profile.system_prompt, message)
+
     engine = AgentEngine(
         gateway=gateway,
         tools=tools,
-        system_prompt=profile.system_prompt,
+        system_prompt=system_prompt,
         write_event=write_event,
         check_cancel=check_cancel,
         on_step_checkpoint=on_step_checkpoint,
@@ -723,7 +729,7 @@ async def _run_turn(
                 gateway=gateway,
                 trace_id=trace_id,
                 pending_tool_call=interrupt,
-                system_prompt=profile.system_prompt,
+                system_prompt=system_prompt,
             ),
         )
 

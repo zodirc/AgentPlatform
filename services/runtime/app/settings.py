@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     search_sources_max_per_turn: int = 3
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15
+    # Writing material cards (Agent-outside artifacts; pinned into writing turns).
+    writing_cards_dir: str = "sources/cards"
+    writing_cards_max_chars: int = 2000
+    writing_cards_per_card_chars: int = 800
     index_via_worker: bool = False
     embedding_backend: str = "hash"  # hash | sentence_transformers
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

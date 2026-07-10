@@ -26,6 +26,10 @@ def should_index_source(path: Path) -> bool:
         return False
     if name.startswith("."):
         return False
+    # Material cards are pinned into writing turns; keep them out of RAG noise.
+    parts = {part.lower() for part in path.parts}
+    if "cards" in parts:
+        return False
     return True
 
 

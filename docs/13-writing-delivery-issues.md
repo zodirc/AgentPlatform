@@ -232,3 +232,25 @@ workspace/
 - `writing.11_hybrid_character_recall`：长资料中召回「张白鹿」专节
 - `tests/test_retrieval_hybrid.py`：BM25、RRF、结构切块、rerank
 - runtime 全量测试通过后可 `docker compose ... up -d --build runtime` 生效
+
+### 10.1 写作素材卡（2026-07-10）
+
+兼顾准确与交互性能的局部方案：
+
+| 阶段 | 做什么 | 性能 |
+|------|--------|------|
+| 导入 / 人工维护（Agent 外） | 在 `sources/cards/` 放置人物卡、情节摘要卡、风格卡 | 不占 Turn |
+| 写作 Turn | 按用户消息选中相关短卡，**pin 进 system prompt**（默认合计 ≤2k 字） | 无额外工具轮次 |
+| RAG | 只检索原文场面/细节；`sources/cards/` **不进**向量索引 | 少噪声、少重试 |
+
+目录约定：
+
+```text
+sources/cards/
+  characters/张白鹿.md
+  plots/第一章摘要.md
+  style/写作风格.md
+```
+
+卡片可用 YAML frontmatter：`kind: character|plot|style`。  
+优先级：**pinned 卡 > 用户当轮要求 > search_sources 素材**。不在 Turn 内做重审流水线。
