@@ -5,8 +5,8 @@
 
 ## 0. 原则
 
-1. **Golden Turn 是契约**：输入 + 期望事件序列/终态；CI 回归，不靠人工点测。
-2. **Eval 不阻塞主路径**：采样与全量回归异步或 CI 内运行（ADR-010）。
+1. **Golden Turn 是契约**：输入 + 期望事件序列/终态；本地 `make eval*` 回归，不靠人工点测。
+2. **Eval 不阻塞主路径**：采样与全量回归异步或本地脚本运行（ADR-010）。
 3. **观测与事件同源**：`turn_events` + 结构化日志；metrics 从二者聚合。
 4. **先覆盖主路径**：管道（patch/SSE）→ **能力融合**（context/RAG/delegate）→ 长尾。
 
@@ -176,7 +176,9 @@ POST /turns [trace_id]
 | `live` | 进程存活 |
 | `ready` | DB 连接、runtime 可达、可选 model ping |
 
-## 4. CI 分层
+## 4. 本地回归分层
+
+> 本仓库以本地 `make` 目标做回归；已移除 GitHub Actions CI / nightly。
 
 | 层级 | 内容 | 触发 |
 |------|------|------|

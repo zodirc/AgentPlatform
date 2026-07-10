@@ -626,9 +626,15 @@ async def _run_turn(
 
     system_prompt = profile.system_prompt
     if scenario_id == "writing":
-        from app.writing.cards import build_writing_system_prompt
+        from app.writing.cards import prepare_writing_system_prompt
 
-        system_prompt = build_writing_system_prompt(profile.system_prompt, message)
+        pin = prepare_writing_system_prompt(profile.system_prompt, message)
+        system_prompt = pin.prompt
+        await write_event(
+            event_type="cards.pinned",
+            payload=pin.event_payload(),
+            step_index=0,
+        )
 
     engine = AgentEngine(
         gateway=gateway,

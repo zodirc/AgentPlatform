@@ -32,6 +32,7 @@
     "subagent.started": { "const": "subagent.started.json" },
     "subagent.completed": { "const": "subagent.completed.json" },
     "retrieval.completed": { "const": "retrieval.completed.json" },
+    "cards.pinned": { "const": "cards.pinned.json" },
     "context.reported": { "const": "context.reported.json" },
     "usage.reported": { "const": "usage.reported.json" }
   }

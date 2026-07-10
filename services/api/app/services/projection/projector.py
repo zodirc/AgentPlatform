@@ -234,6 +234,9 @@ async def _project_turn_impl(turn_id: UUID) -> None:
             artifacts.append({"type": "plan", **payload})
         elif event_type == "retrieval.completed":
             artifacts.append({"type": "retrieval", **payload})
+        elif event_type == "cards.pinned":
+            artifacts = [a for a in artifacts if a.get("type") != "writing_cards"]
+            artifacts.append({"type": "writing_cards", **payload})
         elif event_type in {"subagent.started", "subagent.completed"}:
             artifacts.append({"type": "subagent", "event": event_type, **payload})
         elif event_type == "context.reported":

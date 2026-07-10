@@ -465,7 +465,7 @@ services:
 
 ## 10. Phase 0 实施检查清单
 
-实施代码时逐项勾选（**当前均已验收**，见 `.github/workflows/ci.yml`）：
+实施代码时逐项勾选（**当前均已验收**，本地用 `make smoke` / `make eval*` / `make runtime-test`）：
 
 - [x] `deploy/docker-compose.yml` 可独立运行
 - [x] `.env.example` 覆盖全部变量
@@ -478,4 +478,4 @@ services:
 - [x] `gateway` Caddyfile 路由正确
 - [x] projection 刷新失败不影响 Turn 主闭环
 - [x] `make up` 与 `make down` 为薄封装
-- [x] CI：compose up + `curl health` + 最小 turn stream + **L0 golden**（`12` §4）
+- [x] 本地：compose up + `curl health` + 最小 turn stream + **L0 golden**（`12` §4）

@@ -6,18 +6,19 @@
 
 | 阶段 / 规范 | 状态 |
 |-------------|------|
-| Phase 0–4 产品能力 + golden + CI profiles | ✅ |
+| Phase 0–4 产品能力 + golden（本地 `make eval*`） | ✅ |
 | contracts §10 工具 + `agent-contracts` Python 包 | ✅ |
 | shadcn/ui（Radix + CVA + components.json） | ✅ |
 | structlog JSON 日志 + `request_id` / `turn_id` 上下文 | ✅ |
 | Alembic 唯一迁移入口（0001–0005 revisions） | ✅ |
 | OTel OTLP 导出（`OTEL_EXPORTER_OTLP_ENDPOINT`） | ✅ |
-| 单测覆盖率 ≥80%（runtime 核心 + api 观测/迁移/路由） | ✅ |
+| 单测：`make runtime-test` / `make api-test`（本地） | ✅ |
 | SLO：`latency.ttfb_ms_max` + `first_token_ms_max` + `cancel_latency_ms_max` golden 门禁 | ✅（stub 路径） |
-| ESLint + Prettier + codegen drift CI | ✅ |
-| Live eval nightly（`.github/workflows/nightly.yml`） | ✅ |
+| Web：`pnpm lint` / `typecheck` / `test` / `build`（本地） | ✅ |
+| Live / retrieval / queue eval（`make eval-live` 等，本地） | ✅ |
 | Queue worker profile（`make eval-queue` / shared.16） | ✅ |
 | Embedding 检索（retrieval 镜像内置本地模型 + hash 降级） | ✅ |
+| 写作素材卡 pin + UI「本轮写定」可观测 | ✅ |
 
 ## 设计稿对照（文档 → 代码）
 

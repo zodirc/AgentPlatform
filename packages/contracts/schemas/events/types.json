@@ -40,6 +40,7 @@
         "subagent.started",
         "subagent.completed",
         "retrieval.completed",
+        "cards.pinned",
         "context.reported",
         "usage.reported"
       ]

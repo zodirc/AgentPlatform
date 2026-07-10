@@ -12,6 +12,7 @@ import type {
 } from "../../shared/workbench/types";
 import { ArtifactView } from "./ArtifactView";
 import { RetrievalView } from "./RetrievalView";
+import { WritingCardsView } from "../writing/WritingCardsView";
 import { WorkspaceTree } from "./WorkspaceTree";
 
 export type SidebarSelection =
@@ -304,6 +305,7 @@ export function AgentSidebar({
 
         <div className="space-y-3 p-3">
           {scenarioExtras}
+          <WritingCardsView artifacts={artifacts} />
           <RetrievalView artifacts={artifacts} />
           <ArtifactView artifacts={artifacts} />
         </div>

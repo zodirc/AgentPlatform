@@ -1,0 +1,15 @@
+{
+  "type": "cards.pinned",
+  "payload": {
+    "cards": [
+      {
+        "path": "sources/cards/characters/demo.md",
+        "kind": "character",
+        "title": "Demo"
+      }
+    ],
+    "chars": 120,
+    "available_count": 1,
+    "summary": "pinned 1 writing card(s)"
+  }
+}

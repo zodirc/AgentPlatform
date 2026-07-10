@@ -149,6 +149,19 @@ type Props = {
 export function AgentActivityPanel({ wb, compact = false }: Props) {
   const activity = deriveAgentActivity(wb.events, wb);
   const style = PHASE_STYLES[activity.phase];
+  const pinnedCards = [...(wb.view?.artifacts ?? [])]
+    .reverse()
+    .find((a) => a.type === "writing_cards") as
+    | {
+        cards?: Array<{ title?: string; kind?: string }>;
+      }
+    | undefined;
+  const cardTitles = Array.isArray(pinnedCards?.cards)
+    ? pinnedCards.cards
+        .map((c) => String(c.title ?? "").trim())
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
 
   return (
     <section className={`shrink-0 rounded-lg border px-4 py-3 ${style}`}>
@@ -165,6 +178,11 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
           {activity.detail ? (
             <p className="mt-0.5 truncate text-sm opacity-80">
               {activity.detail}
+            </p>
+          ) : null}
+          {cardTitles.length > 0 ? (
+            <p className="mt-1 truncate text-xs text-teal-300/90">
+              本轮写定：{cardTitles.join(" · ")}
             </p>
           ) : null}
         </div>

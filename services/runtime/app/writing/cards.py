@@ -210,23 +210,71 @@ def format_cards_block(cards: list[WritingCard]) -> str:
     return "\n".join(parts).strip()
 
 
+@dataclass(frozen=True)
+class WritingCardsPinResult:
+    prompt: str
+    cards: list[WritingCard]
+    available_count: int
+
+    def event_payload(self) -> dict[str, object]:
+        cards_meta = [
+            {"path": card.path, "kind": card.kind, "title": card.title}
+            for card in self.cards
+        ]
+        chars = sum(len(card.title) + len(card.body) for card in self.cards)
+        if self.cards:
+            summary = f"pinned {len(self.cards)} writing card(s)"
+        elif self.available_count:
+            summary = f"no card auto-selected ({self.available_count} available)"
+        else:
+            summary = "no writing cards"
+        return {
+            "cards": cards_meta,
+            "chars": chars,
+            "available_count": self.available_count,
+            "summary": summary,
+        }
+
+
+def prepare_writing_system_prompt(
+    base_prompt: str,
+    message: str,
+    *,
+    workspace_root: Path | None = None,
+) -> WritingCardsPinResult:
+    cards = load_writing_cards(workspace_root=workspace_root)
+    selected = select_writing_cards(message, cards)
+    block = format_cards_block(selected)
+    if block:
+        prompt = f"{base_prompt.rstrip()}\n\n{block}\n"
+        return WritingCardsPinResult(prompt=prompt, cards=selected, available_count=len(cards))
+    if cards:
+        names = ", ".join(f"{c.title}({c.kind})" for c in cards[:12])
+        hint = (
+            "\n\n## Writing cards\n"
+            f"资料库中有素材卡但未自动选中：{names}。\n"
+            "若任务依赖人物/风格写定，先 `read_file` 对应 `sources/cards/` 路径。\n"
+        )
+        return WritingCardsPinResult(
+            prompt=f"{base_prompt.rstrip()}\n{hint}",
+            cards=[],
+            available_count=len(cards),
+        )
+    return WritingCardsPinResult(
+        prompt=base_prompt,
+        cards=[],
+        available_count=0,
+    )
+
+
 def build_writing_system_prompt(
     base_prompt: str,
     message: str,
     *,
     workspace_root: Path | None = None,
 ) -> str:
-    cards = load_writing_cards(workspace_root=workspace_root)
-    selected = select_writing_cards(message, cards)
-    block = format_cards_block(selected)
-    if not block:
-        if cards:
-            names = ", ".join(f"{c.title}({c.kind})" for c in cards[:12])
-            hint = (
-                "\n\n## Writing cards\n"
-                f"资料库中有素材卡但未自动选中：{names}。\n"
-                "若任务依赖人物/风格写定，先 `read_file` 对应 `sources/cards/` 路径。\n"
-            )
-            return f"{base_prompt.rstrip()}\n{hint}"
-        return base_prompt
-    return f"{base_prompt.rstrip()}\n\n{block}\n"
+    return prepare_writing_system_prompt(
+        base_prompt,
+        message,
+        workspace_root=workspace_root,
+    ).prompt

@@ -47,17 +47,20 @@ def test_cards_excluded_from_rag_index(tmp_path: Path) -> None:
     assert should_index_source(tmp_path / "sources" / "亮剑.md") is True
 
 
-def test_build_writing_system_prompt_pins_cards(tmp_path: Path) -> None:
+def test_prepare_writing_system_prompt_event_payload(tmp_path: Path) -> None:
     _seed_cards(tmp_path)
-    prompt = build_writing_system_prompt(
+    from app.writing.cards import prepare_writing_system_prompt
+
+    pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
         "按设定写张白鹿",
         workspace_root=tmp_path,
     )
-    assert "Writing cards（必须遵守）" in prompt
-    assert "张白鹿" in prompt
-    assert "禁止写成花瓶" in prompt
-    assert "多写战场间隙" in prompt
+    payload = pin.event_payload()
+    assert payload["available_count"] == 3
+    assert any(card["title"] == "张白鹿" for card in payload["cards"])
+    assert "Writing cards（必须遵守）" in pin.prompt
+
 
 
 def test_card_budget_truncates(tmp_path: Path) -> None:

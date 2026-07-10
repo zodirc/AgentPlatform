@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/cards.pinned.json",
+  "title": "CardsPinnedPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["cards", "chars"],
+  "properties": {
+    "cards": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "title"],
+        "properties": {
+          "path": { "type": "string", "maxLength": 512 },
+          "kind": {
+            "type": "string",
+            "enum": ["character", "plot", "style", "general"]
+          },
+          "title": { "type": "string", "maxLength": 256 }
+        }
+      }
+    },
+    "chars": { "type": "integer", "minimum": 0 },
+    "available_count": { "type": "integer", "minimum": 0 },
+    "summary": { "type": "string", "maxLength": 512 }
+  }
+}

@@ -254,3 +254,12 @@ sources/cards/
 
 卡片可用 YAML frontmatter：`kind: character|plot|style`。  
 优先级：**pinned 卡 > 用户当轮要求 > search_sources 素材**。不在 Turn 内做重审流水线。
+
+#### 如何在 UI 观测
+
+写作 Turn 开始时 runtime 发出 `cards.pinned`，projection 写入 artifact `type=writing_cards`：
+
+1. **活动条**：显示「本轮写定：张白鹿 · 写作风格」
+2. **右侧产物栏**：卡片「本轮写定（素材卡）」列出 kind / 标题 / 路径
+
+无卡或未命中时，产物栏会提示库中是否有卡、是否未自动选中。
