@@ -18,6 +18,11 @@ describe("userNeedsSources", () => {
     expect(userNeedsSources("资料库里有什么")).toBe(false);
     expect(userNeedsSources("介绍一下 sources 目录")).toBe(false);
   });
+
+  it("keeps writing.05-style explicit citation requests as source intent", () => {
+    expect(userNeedsSources("writing.05：引用资料写一节")).toBe(true);
+    expect(userNeedsSources("根据 sources 成稿并标注引用")).toBe(true);
+  });
 });
 
 describe("extractCites", () => {

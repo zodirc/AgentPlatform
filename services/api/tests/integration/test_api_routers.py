@@ -434,3 +434,46 @@ def test_websocket_turn_accepts_basic_auth(client: TestClient, monkeypatch: pyte
             second = ws.receive_json()
     assert first["type"] == "turn.accepted"
     assert second["type"] == "turn.completed"
+
+
+def test_workspace_sources_index_status_proxies_runtime(client: TestClient) -> None:
+    status = {
+        "status": "building",
+        "path": "sources/ref-a.md",
+        "path_indexed": False,
+        "path_current": False,
+    }
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.sources_index_status",
+        new_callable=AsyncMock,
+        return_value=status,
+    ) as proxy:
+        response = client.get(
+            "/api/v1/admin/workspace/sources/index-status",
+            params={"path": "sources/ref-a.md"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == status
+    proxy.assert_awaited_once_with(path="sources/ref-a.md")
+
+
+def test_workspace_source_upload_returns_pending_index(client: TestClient) -> None:
+    result = {
+        "path": "sources/ref-a.md",
+        "bytes": 12,
+        "index": {"status": "pending", "path": "sources/ref-a.md"},
+    }
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.upload_source",
+        new_callable=AsyncMock,
+        return_value=result,
+    ) as proxy:
+        response = client.post(
+            "/api/v1/admin/workspace/sources/upload",
+            files={"file": ("ref-a.md", b"# Reference\n", "text/markdown")},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["index"]["status"] == "pending"
+    proxy.assert_awaited_once_with(filename="ref-a.md", content="# Reference\n")

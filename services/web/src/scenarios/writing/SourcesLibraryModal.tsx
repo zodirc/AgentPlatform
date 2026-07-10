@@ -12,6 +12,7 @@ import {
 import { useAdminAuth } from "../../shared/auth/useAdminAuth";
 import { Button } from "../../components/ui/button";
 import { workspaceEntryIcon } from "../agent/workspaceFileIcon";
+import { sourcesIndexStatusLabel } from "./sourcesIndexStatus";
 
 function fileEntries(entries: string[]): string[] {
   return entries.filter((e) => !e.endsWith("/"));
@@ -22,42 +23,6 @@ type Props = {
   onClose: () => void;
   onOpenFile: (path: string) => void;
 };
-
-function indexStatusLabel(
-  savedPath: string | null,
-  status: SourcesIndexStatus | undefined,
-  polling: boolean,
-): { text: string; tone: "pending" | "ok" | "err" } | null {
-  if (!savedPath) return null;
-  if (!status && polling) {
-    return { text: `已保存 ${savedPath} · 正在确认索引…`, tone: "pending" };
-  }
-  if (!status) return { text: `已保存 ${savedPath}`, tone: "ok" };
-
-  if (status.status === "building" || (polling && !status.path_current)) {
-    return {
-      text: `已保存 ${savedPath} · 索引重建中…`,
-      tone: "pending",
-    };
-  }
-  if (status.status === "error") {
-    return {
-      text: `已保存 ${savedPath} · 索引失败：${status.error || "未知错误"}`,
-      tone: "err",
-    };
-  }
-  if (status.path_current || status.status === "ready") {
-    const chunks = status.last_result?.chunks ?? status.chunks;
-    return {
-      text:
-        chunks != null
-          ? `已保存 ${savedPath} · 索引完成，可检索（${chunks} 块）`
-          : `已保存 ${savedPath} · 索引完成，可检索`,
-      tone: "ok",
-    };
-  }
-  return { text: `已保存 ${savedPath}`, tone: "ok" };
-}
 
 export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -84,7 +49,8 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
       const data = query.state.data as SourcesIndexStatus | undefined;
       if (!data) return 1000;
       if (data.status === "building") return 1000;
-      if (watchPath && !data.path_current && data.status !== "error") return 1000;
+      if (watchPath && !data.path_current && data.status !== "error")
+        return 1000;
       return false;
     },
   });
@@ -144,9 +110,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   const files = sourcesQuery.data ?? [];
   const busy = uploadMutation.isPending || pasteMutation.isPending;
   const lastErr =
-    pasteMutation.error?.message ||
-    uploadMutation.error?.message ||
-    null;
+    pasteMutation.error?.message || uploadMutation.error?.message || null;
   const polling =
     Boolean(watchPath) &&
     (indexQuery.isFetching ||
@@ -155,7 +119,11 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
         !indexQuery.data.path_current &&
         indexQuery.data.status !== "error" &&
         indexQuery.data.status !== "ready"));
-  const statusLine = indexStatusLabel(watchPath, indexQuery.data, polling);
+  const statusLine = sourcesIndexStatusLabel(
+    watchPath,
+    indexQuery.data,
+    polling,
+  );
 
   const submitPaste = () => {
     const content = pasteBody.trim();

@@ -400,7 +400,7 @@ export function sourceFilenameFromTitle(title: string): string {
   const raw = title.trim() || "paste-note";
   const withoutExt = raw.replace(/\.(md|markdown|txt|json)$/i, "");
   const safe = withoutExt
-    .replace(/[^\w\u4e00-\u9fff\-]+/g, "-")
+    .replace(/[^\w\u4e00-\u9fff-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
   return `${safe || "paste-note"}.md`;

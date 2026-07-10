@@ -244,6 +244,24 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - `EXPOSE 8001`
 - 内部命令接口、事件写入、健康检查为 Phase 0 必需；正式 embedding 检索为 Phase 2 可选，Phase 1b 最小检索能力定义见 [`06-tools-and-context.md`](06-tools-and-context.md) §11.2
 
+#### 资料库索引状态排障
+
+资料上传采用异步索引：`POST /api/v1/admin/workspace/sources/upload` 在文件写入成功后返回
+`index.status=pending`，runtime 后台任务再把状态推进为 `building`，最终进入 `ready` 或
+`error`。因此上传成功不等于索引已经可检索，API 也不得等待 embedding 构建完成。
+
+运维侧可轮询
+`GET /api/v1/admin/workspace/sources/index-status?path=sources/<文件名>`：
+
+- `pending` / `building`：文件已保存，继续等待后台任务；
+- `ready` 且 `path_current=true`：磁盘文件 mtime 与索引一致，可以检索；
+- `error`：查看 runtime 日志中的 `sources index sync after upload failed`；原文件仍保留，
+  修复 embedding 配置或模型可用性后重新触发索引。
+
+使用 sentence-transformers 时必须通过 retrieval profile 启动，并确认容器内实际收到
+`EMBEDDING_BACKEND`、`EMBEDDING_MODEL`、`EMBEDDING_DEVICE`。仅修改宿主机 `.env` 而未加载
+`deploy/compose/retrieval.yml`，runtime 仍可能使用轻量 `hash` 后端。
+
 ### 5.3 api 镜像
 
 - 不含 torch 或 sentence-transformers

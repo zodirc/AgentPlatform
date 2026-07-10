@@ -433,7 +433,6 @@ export function useWorkbenchImpl(): WorkbenchState {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per session mount
   }, [sessionId]);
 
   const startTurnMut = useMutation({

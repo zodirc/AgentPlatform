@@ -65,3 +65,24 @@ async def test_sync_sources_index_safe_marks_ready(workspace, monkeypatch) -> No
     assert status["path_current"] is True
     assert status["chunks"] >= 1
 
+
+@pytest.mark.asyncio
+async def test_sync_sources_index_safe_marks_error(workspace, monkeypatch) -> None:
+    from app.settings import settings
+    from app.tools.core import tools
+
+    async def fail_sync() -> dict:
+        raise RuntimeError("embedding unavailable")
+
+    monkeypatch.setattr(settings, "data_dir", str(workspace / "data"))
+    monkeypatch.setattr(tools, "sync_sources_index", fail_sync)
+    await upload_source_file(filename="failed.md", content="cannot index yet\n")
+
+    result = await sync_sources_index_safe(path="sources/failed.md")
+
+    assert result == {"status": "error", "error": "embedding unavailable"}
+    status = sources_index_status(path="sources/failed.md")
+    assert status["status"] == "error"
+    assert status["error"] == "embedding unavailable"
+    assert status["path_current"] is False
+
