@@ -32,3 +32,15 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 
 - Use `propose_patch` for edits; never silently overwrite files.
 - Use `update_outline` for structure, `check_citation` for verification.
+
+## Delivery workflow
+
+- `draft_section` stores each draft in the current Turn's isolated revision set.
+- When the user asks to create or export a file in the same Turn, finish with
+  `export_document` using `source="current_draft"` and an explicit, ordered
+  `section_ids` list containing exactly the sections drafted for that delivery.
+- Use `source="confirmed"` only when the user asks to export accepted/formal
+  content from `sections/`.
+- Never omit `section_ids` and never infer an export by scanning a directory.
+- If export reports missing sections or `delivery_status="failed"`, explain the
+  incomplete delivery instead of claiming success.

@@ -12,6 +12,7 @@ export type AgentPhase =
   | "tool"
   | "approval"
   | "running"
+  | "warning"
   | "completed"
   | "failed";
 
@@ -84,6 +85,21 @@ export function deriveAgentActivity(
     };
   }
   if (wb.displayStatus === "completed" || last?.type === "turn.completed") {
+    const completed = [...events]
+      .reverse()
+      .find((event) => event.type === "turn.completed");
+    const deliveryStatus = String(completed?.payload.delivery_status ?? "");
+    if (deliveryStatus === "failed" || deliveryStatus === "warning") {
+      const issues = completed?.payload.delivery_issues;
+      const detail = Array.isArray(issues)
+        ? issues.map(String).join("；")
+        : undefined;
+      return {
+        phase: deliveryStatus === "failed" ? "failed" : "warning",
+        label: "执行完成，交付异常",
+        detail,
+      };
+    }
     return { phase: "completed", label: "任务已完成" };
   }
   if (runningTool) {
@@ -120,6 +136,7 @@ const PHASE_STYLES: Record<AgentPhase, string> = {
   tool: "border-emerald-800/60 bg-emerald-950/30 text-emerald-200",
   approval: "border-violet-800/60 bg-violet-950/30 text-violet-200",
   running: "border-amber-800/60 bg-amber-950/30 text-amber-200",
+  warning: "border-amber-800/60 bg-amber-950/30 text-amber-200",
   completed: "border-emerald-800/60 bg-emerald-950/20 text-emerald-200",
   failed: "border-rose-800/60 bg-rose-950/30 text-rose-200",
 };

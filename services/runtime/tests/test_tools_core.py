@@ -35,11 +35,14 @@ async def test_glob_lists_workspace_files(workspace: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_draft_section_writes_revisions_path(workspace: Path) -> None:
-    result = await core.draft_section("intro", "# Intro\n")
+    turn_id = uuid4()
+    result = await core.draft_section("intro", "# Intro\n", turn_id=turn_id)
 
     assert result["status"] == "drafted"
-    assert result["path"] == ".agent/revisions/intro.md"
-    assert (workspace / ".agent" / "revisions" / "intro.md").read_text(encoding="utf-8") == "# Intro\n"
+    assert result["path"] == f".agent/revisions/{turn_id}/intro.md"
+    assert (workspace / result["path"]).read_text(encoding="utf-8") == "# Intro\n"
+    manifest = workspace / ".agent" / "turns" / str(turn_id) / "manifest.json"
+    assert '"intro"' in manifest.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio
@@ -55,14 +58,20 @@ async def test_edit_file_replaces_once(workspace: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_export_document_from_revisions(workspace: Path) -> None:
-    rev = workspace / ".agent" / "revisions"
-    rev.mkdir(parents=True)
-    (rev / "body.md").write_text("Section body", encoding="utf-8")
+    turn_id = uuid4()
+    await core.draft_section("body", "Section body", turn_id=turn_id)
     (workspace / "outline.md").write_text("# Title", encoding="utf-8")
 
-    result = await core.export_document("exports/out.md")
+    result = await core.export_document(
+        section_ids=["body"],
+        source="current_draft",
+        output_path="exports/out.md",
+        turn_id=turn_id,
+    )
 
     assert result["output_path"] == "exports/out.md"
+    assert result["delivery_status"] == "ok"
+    assert result["included_sections"] == ["body"]
     exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
     assert "# Title" in exported
     assert "Section body" in exported
@@ -70,19 +79,68 @@ async def test_export_document_from_revisions(workspace: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_export_document_prefers_revisions_over_sections(workspace: Path) -> None:
-    rev = workspace / ".agent" / "revisions"
-    rev.mkdir(parents=True)
-    (rev / "ch1.md").write_text("Chapter one draft", encoding="utf-8")
+    turn_id = uuid4()
+    await core.draft_section("ch1", "Chapter one draft", turn_id=turn_id)
     sections = workspace / "sections"
     sections.mkdir()
     (sections / "stale.md").write_text("old junk", encoding="utf-8")
     (workspace / "outline.md").write_text("# Outline", encoding="utf-8")
 
-    await core.export_document("exports/out.md")
+    await core.export_document(
+        section_ids=["ch1"],
+        source="current_draft",
+        output_path="exports/out.md",
+        turn_id=turn_id,
+    )
 
     exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
     assert "Chapter one draft" in exported
     assert "old junk" not in exported
+
+
+@pytest.mark.asyncio
+async def test_export_document_reads_only_explicit_confirmed_sections(workspace: Path) -> None:
+    sections = workspace / "sections"
+    sections.mkdir()
+    (sections / "one.md").write_text("First", encoding="utf-8")
+    (sections / "two.md").write_text("Second", encoding="utf-8")
+    (sections / "junk.md").write_text("Historical junk", encoding="utf-8")
+
+    result = await core.export_document(
+        section_ids=["two", "one"],
+        source="confirmed",
+        output_path="exports/out.md",
+    )
+
+    assert result["delivery_status"] == "ok"
+    exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
+    assert exported.index("Second") < exported.index("First")
+    assert "Historical junk" not in exported
+
+
+@pytest.mark.asyncio
+async def test_export_document_does_not_write_partial_output(workspace: Path) -> None:
+    sections = workspace / "sections"
+    sections.mkdir()
+    (sections / "one.md").write_text("First", encoding="utf-8")
+
+    result = await core.export_document(
+        section_ids=["one", "missing"],
+        source="confirmed",
+        output_path="exports/out.md",
+    )
+
+    assert result["delivery_status"] == "failed"
+    assert result["missing_sections"] == ["missing"]
+    assert not (workspace / "exports" / "out.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_export_document_requires_explicit_scope(workspace: Path) -> None:
+    result = await core.export_document(output_path="exports/out.md")
+
+    assert result["delivery_status"] == "failed"
+    assert not (workspace / "exports" / "out.md").exists()
 
 
 def test_scenario_registry_loads_profiles() -> None:
@@ -100,7 +158,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert agent.system_prompt
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
-    assert "Do not call" in writing.system_prompt or "Do **not** call" in writing.system_prompt
+    assert "Never omit `section_ids`" in writing.system_prompt
     assert "Never guess file paths" in agent.system_prompt
     assert "Do not repeat the same tool call" in agent.system_prompt
 

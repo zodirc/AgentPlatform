@@ -106,3 +106,59 @@ async def test_stub_run_command_after_deny_completes() -> None:
     chunks = [chunk async for chunk in provider.stream(messages=messages, tools=[{"name": "run_command"}])]
     text = "".join(c if isinstance(c, str) else c.text for c in chunks)
     assert "拒绝" in text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "message",
+    [
+        "你对我们的资料库有什么理解？",
+        "资料库里有什么",
+        "介绍一下 sources 目录",
+    ],
+)
+async def test_stub_source_library_meta_question_does_not_search(message: str) -> None:
+    provider = StubModelProvider()
+    messages = [{"role": "user", "content": [{"type": "text", "text": message}]}]
+
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            messages=messages,
+            tools=[{"name": "search_sources"}, {"name": "read_file"}],
+        )
+    ]
+
+    assert not any(
+        call["name"] == "search_sources"
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    )
+
+
+@pytest.mark.asyncio
+async def test_stub_writing_05_explicit_citation_still_searches() -> None:
+    provider = StubModelProvider()
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "writing.05：引用资料库内容写一节"}],
+        }
+    ]
+
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            messages=messages,
+            tools=[{"name": "search_sources"}],
+        )
+    ]
+
+    tool_calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert [call["name"] for call in tool_calls] == ["search_sources"]

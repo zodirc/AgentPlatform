@@ -26,6 +26,7 @@ class TurnState:
     cancel_force: bool = False
     termination_reason: str = "final"
     budget_exceeded: bool = False
+    delivery: dict[str, Any] | None = None
 
 
 ContentBlock = dict[str, Any]

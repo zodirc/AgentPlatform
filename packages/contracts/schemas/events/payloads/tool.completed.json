@@ -14,6 +14,15 @@
     },
     "summary": { "type": "string", "maxLength": 4096 },
     "is_truncated": { "type": "boolean" },
-    "bytes_written": { "type": "integer", "minimum": 0 }
+    "bytes_written": { "type": "integer", "minimum": 0 },
+    "delivery_status": {
+      "type": "string",
+      "enum": ["ok", "warning", "failed"]
+    },
+    "delivery_issues": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 1024 }
+    },
+    "output_path": { "type": "string", "maxLength": 4096 }
   }
 }

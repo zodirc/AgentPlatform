@@ -8,7 +8,6 @@ from app.context.summary import (
     StructuredSummary,
     parse_structured_summary_text,
     structured_summary_from_messages,
-    structured_summary_from_turn_rows,
 )
 from app.engine.state import user_message
 from app.model.gateway import ModelGateway, ModelResponse

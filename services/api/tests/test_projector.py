@@ -31,7 +31,13 @@ async def test_project_turn_maps_completed_run_to_succeeded() -> None:
             {
                 "sequence": 2,
                 "type": "turn.completed",
-                "payload": {"summary": "ok", "termination_reason": "final"},
+                "payload": {
+                    "summary": "ok",
+                    "termination_reason": "final",
+                    "delivery_status": "failed",
+                    "delivery_issues": ["missing chapter"],
+                    "export_path": "exports/book.md",
+                },
                 "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
             }
         ]
@@ -55,3 +61,8 @@ async def test_project_turn_maps_completed_run_to_succeeded() -> None:
     )
     assert run_update.args[2] == "succeeded"
     assert run_update.args[3] == "final"
+    view_insert = next(
+        call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
+    )
+    assert '"type": "delivery"' in view_insert.args[8]
+    assert '"status": "failed"' in view_insert.args[8]

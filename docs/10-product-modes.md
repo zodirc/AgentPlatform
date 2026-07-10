@@ -223,7 +223,7 @@ Content-Type: application/json
 |------|--------|------|
 | `search_sources` | network | 资料检索 |
 | `update_outline` | write | 大纲结构修改，直接作用于 `outline.md` |
-| `draft_section` | write | 生成章节草稿，默认写入 `.agent/revisions/` 或受管草稿区，不直接覆盖正式文稿 |
+| `draft_section` | write | 生成章节草稿，写入 `.agent/revisions/{turn_id}/`，不直接覆盖正式文稿 |
 | `check_citation` | read | 引用核对 |
 | `export_document` | write | 导出 |
 
@@ -236,11 +236,12 @@ Content-Type: application/json
 1. **结构修改**：`update_outline` 修改 `outline.md`
 2. **内容生成**：`draft_section` 只产出草稿或修订候选，不直接覆盖正式 `sections/*.md`
 3. **正式落稿**：对正式文稿的变更统一走 `propose_patch` → 用户确认 → `apply_patch`
-4. **导出交付**：`export_document` 只读取已确认内容与产物引用，不绕过 patch 审批直接改正文稿
+4. **导出交付**：`export_document` 必须接收显式章节集合；`source=confirmed` 读取已确认正文，`source=current_draft` 只读取本轮 manifest 指向的草稿，用于用户明确要求的即时草稿交付
 
 约束：
 
 - `draft_section` 产生的内容若要进入正式文稿，必须转成 `propose_patch` 结果
+- 草稿导出不等于正式落稿；`current_draft` 不得扫描其他 Turn 的 revisions
 - UI 中“接受修改”统一绑定 `apply_patch`，不直接绑定 `draft_section`
 - 写作场景禁止把 `write_file` / `edit_file` 作为默认文稿主路径暴露给模型
 

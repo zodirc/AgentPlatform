@@ -260,6 +260,16 @@ async def _project_turn_impl(turn_id: UUID) -> None:
 
         if event_type == "turn.completed":
             latest_output = payload.get("summary", latest_output)
+            if payload.get("delivery_status"):
+                artifacts = [a for a in artifacts if a.get("type") != "delivery"]
+                artifacts.append(
+                    {
+                        "type": "delivery",
+                        "status": payload.get("delivery_status"),
+                        "issues": list(payload.get("delivery_issues") or []),
+                        "export_path": payload.get("export_path"),
+                    }
+                )
             usage = payload.get("token_usage")
             if isinstance(usage, dict):
                 token_usage = {

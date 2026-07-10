@@ -435,6 +435,8 @@ async def _finalize_turn(
                 "token_usage": asdict(state.usage),
                 "termination_reason": state.termination_reason,
             }
+            if state.delivery is not None:
+                completed_payload.update(state.delivery)
             await append_event(
                 conn,
                 turn_id=turn_id,

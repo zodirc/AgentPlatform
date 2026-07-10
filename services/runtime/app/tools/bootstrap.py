@@ -239,10 +239,29 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="export_document",
-            description="Export outline and sections into a single markdown file",
+            description=(
+                "Export an explicit ordered set of sections into one markdown file. "
+                "Use current_draft for this turn's drafts or confirmed for accepted sections."
+            ),
             parameters={
                 "type": "object",
-                "properties": {"output_path": {"type": "string", "default": "exports/document.md"}},
+                "properties": {
+                    "section_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["confirmed", "current_draft"],
+                        "default": "current_draft",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "default": "exports/document.md",
+                    },
+                },
+                "required": ["section_ids"],
             },
             handler=core.export_document,
         )

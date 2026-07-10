@@ -1,0 +1,35 @@
+id: writing.10_export_current_turn_draft
+scenario_id: writing
+phase: 2
+description: export_document only exports revisions from the current turn manifest
+
+fixtures:
+  workspace:
+    - path: sections/junk.md
+      content: |
+        Historical section content must not be exported.
+    - path: .agent/revisions/legacy.md
+      content: |
+        Legacy revision content must not be exported.
+
+input:
+  message: "writing.10 draft then export current turn"
+  client_request_id: "00000000-0000-4000-8000-000000000110"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - section.draft.delta
+      - tool.completed
+      - turn.completed
+    payload_validates: true
+  turn:
+    status: completed
+  workspace:
+    - path: exports/document.md
+      matches: "Current turn draft for export"
+      not_matches: "Historical section|Legacy revision"
+
+tags: [writing, export, isolation, p2]

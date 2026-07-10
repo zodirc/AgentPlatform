@@ -90,6 +90,27 @@ class StubModelProvider:
             yield ModelResponse(text="命令已执行", output_tokens=6)
             return
 
+        if "export_document" in tool_names and _wants_draft_export(user_text):
+            if not has_tool_result:
+                yield _tool_call(
+                    "draft_section",
+                    {"section_id": "a", "content": "Current turn draft for export."},
+                )
+                return
+            if last_tool == "draft_section":
+                yield _tool_call(
+                    "export_document",
+                    {
+                        "section_ids": ["a"],
+                        "source": "current_draft",
+                        "output_path": "exports/document.md",
+                    },
+                )
+                return
+            if last_tool == "export_document":
+                yield ModelResponse(text="本轮草稿已导出", output_tokens=7)
+                return
+
         if "check_citation" in tool_names and _wants_check_citation(user_text) and not has_tool_result:
             yield _tool_call(
                 "check_citation",
@@ -102,7 +123,14 @@ class StubModelProvider:
             return
 
         if "export_document" in tool_names and _wants_export(user_text) and not has_tool_result:
-            yield _tool_call("export_document", {"output_path": "exports/document.md"})
+            yield _tool_call(
+                "export_document",
+                {
+                    "section_ids": ["a"],
+                    "source": "confirmed",
+                    "output_path": "exports/document.md",
+                },
+            )
             return
 
         if has_tool_result and last_tool == "export_document":
@@ -344,6 +372,10 @@ def _wants_export(text: str) -> bool:
     return any(k in text.lower() for k in keywords)
 
 
+def _wants_draft_export(text: str) -> bool:
+    return "writing.10" in text.lower()
+
+
 def _wants_glob(text: str) -> bool:
     keywords = ("agent.08", "glob", "*.md")
     return any(k in text.lower() for k in keywords)
@@ -352,8 +384,28 @@ def _wants_glob(text: str) -> bool:
 def _wants_search(text: str, *, tool_names: set[str] | None = None) -> bool:
     if tool_names and "delegate" in tool_names and _wants_delegate(text):
         return False
-    keywords = ("引用", "search_sources", "writing.05", "writing.06", "调研")
-    return any(k in text.lower() for k in keywords) or "资料" in text
+    lowered = text.lower()
+    # Golden cases and explicit tool requests always exercise retrieval, even
+    # when their surrounding wording also happens to describe the library.
+    if any(k in lowered for k in ("search_sources", "writing.05", "writing.06")):
+        return True
+    if _is_sources_meta_question(lowered):
+        return False
+    return any(k in lowered for k in ("引用", "调研", "资料"))
+
+
+def _is_sources_meta_question(lowered: str) -> bool:
+    """Return whether the user is asking to browse/describe the source library."""
+    if "资料库" in lowered and any(
+        marker in lowered
+        for marker in ("理解", "有什么", "是什么", "介绍", "看看", "内容", "目录", "列表", "有哪些")
+    ):
+        return True
+    if "对" in lowered and "资料库" in lowered:
+        return True
+    if "sources" in lowered and any(marker in lowered for marker in ("目录", "列表", "有哪些", "介绍")):
+        return True
+    return "有哪些资料" in lowered
 
 
 def _wants_delegate(text: str) -> bool:

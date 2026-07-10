@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -63,12 +64,70 @@ async def apply_patch(path: str, new_text: str, **_kwargs: Any) -> dict[str, Any
     return {"path": path, "status": "applied", "bytes_written": len(new_text.encode())}
 
 
-async def draft_section(section_id: str, content: str, **_kwargs: Any) -> dict[str, Any]:
-    path = f".agent/revisions/{section_id}.md"
+def _section_filename(section_id: str) -> str:
+    normalized = section_id.strip()
+    if not normalized or normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
+        raise ValueError(f"Invalid section_id: {section_id!r}")
+    return f"{normalized}.md"
+
+
+def _turn_scope(turn_id: object | None) -> str:
+    return str(turn_id) if turn_id is not None else "standalone"
+
+
+def _manifest_path(turn_id: object | None) -> str:
+    return f".agent/turns/{_turn_scope(turn_id)}/manifest.json"
+
+
+def _read_manifest(turn_id: object | None) -> dict[str, Any] | None:
+    target = _resolve_path(_manifest_path(turn_id))
+    if not target.is_file():
+        return None
+    try:
+        data = json.loads(target.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _write_manifest(turn_id: object | None, manifest: dict[str, Any]) -> str:
+    path = _manifest_path(turn_id)
+    target = _resolve_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(".tmp")
+    temporary.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(target)
+    return path
+
+
+async def draft_section(
+    section_id: str,
+    content: str,
+    turn_id: object | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    filename = _section_filename(section_id)
+    path = f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
-    return {"section_id": section_id, "path": path, "status": "drafted"}
+    manifest = _read_manifest(turn_id) or {
+        "turn_id": _turn_scope(turn_id),
+        "sections": [],
+        "revisions": {},
+    }
+    sections = manifest.setdefault("sections", [])
+    revisions = manifest.setdefault("revisions", {})
+    if section_id not in sections:
+        sections.append(section_id)
+    revisions[section_id] = path
+    manifest_path = _write_manifest(turn_id, manifest)
+    return {
+        "section_id": section_id,
+        "path": path,
+        "manifest_path": manifest_path,
+        "status": "drafted",
+    }
 
 
 async def stub_echo(message: str, **_kwargs: Any) -> dict[str, Any]:
@@ -432,30 +491,120 @@ async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
     }
 
 
-async def export_document(output_path: str = "exports/document.md", **_kwargs: Any) -> dict[str, Any]:
+async def export_document(
+    section_ids: list[str] | None = None,
+    source: str = "current_draft",
+    output_path: str = "exports/document.md",
+    turn_id: object | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
     root = Path(settings.workspace_root).resolve()
+    requested = [str(section_id).strip() for section_id in (section_ids or []) if str(section_id).strip()]
+    if not requested:
+        return {
+            "output_path": output_path,
+            "source": source,
+            "delivery_status": "failed",
+            "delivery_issues": ["section_ids is required and must not be empty"],
+            "included_sections": [],
+            "missing_sections": [],
+            "source_paths": [],
+            "summary": "Export failed: no sections were specified",
+        }
+    if len(set(requested)) != len(requested):
+        return {
+            "output_path": output_path,
+            "source": source,
+            "delivery_status": "failed",
+            "delivery_issues": ["section_ids contains duplicates"],
+            "included_sections": [],
+            "missing_sections": [],
+            "source_paths": [],
+            "summary": "Export failed: duplicate sections were specified",
+        }
+    if source not in {"confirmed", "current_draft"}:
+        return {
+            "output_path": output_path,
+            "source": source,
+            "delivery_status": "failed",
+            "delivery_issues": [f"unsupported source: {source}"],
+            "included_sections": [],
+            "missing_sections": requested,
+            "source_paths": [],
+            "summary": f"Export failed: unsupported source {source!r}",
+        }
+
+    manifest = _read_manifest(turn_id) if source == "current_draft" else None
+    manifest_revisions = manifest.get("revisions", {}) if isinstance(manifest, dict) else {}
+    sources: list[tuple[str, str, Path]] = []
+    missing: list[str] = []
+    used_legacy_layout = False
+    for section_id in requested:
+        filename = _section_filename(section_id)
+        candidates: list[tuple[str, Path]] = []
+        if source == "confirmed":
+            rel_path = f"sections/{filename}"
+            candidates.append((rel_path, _resolve_path(rel_path)))
+        else:
+            manifest_path = manifest_revisions.get(section_id)
+            if isinstance(manifest_path, str):
+                candidates.append((manifest_path, _resolve_path(manifest_path)))
+            scoped_path = f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
+            if all(rel != scoped_path for rel, _ in candidates):
+                candidates.append((scoped_path, _resolve_path(scoped_path)))
+            # Read compatibility for drafts created before revisions became turn-scoped.
+            legacy_path = f".agent/revisions/{filename}"
+            candidates.append((legacy_path, _resolve_path(legacy_path)))
+
+        selected = next(((rel, path) for rel, path in candidates if path.is_file()), None)
+        if selected is None:
+            missing.append(section_id)
+            continue
+        rel_path, path = selected
+        if rel_path == f".agent/revisions/{filename}":
+            used_legacy_layout = True
+        content = path.read_text(encoding="utf-8", errors="replace")
+        if not content.strip():
+            missing.append(section_id)
+            continue
+        sources.append((section_id, rel_path, path))
+
+    if missing:
+        return {
+            "output_path": output_path,
+            "source": source,
+            "delivery_status": "failed",
+            "delivery_issues": [f"missing or empty sections: {', '.join(missing)}"],
+            "included_sections": [section_id for section_id, _, _ in sources],
+            "missing_sections": missing,
+            "source_paths": [rel_path for _, rel_path, _ in sources],
+            "summary": f"Export failed: {len(missing)} section(s) missing",
+        }
+
     parts: list[str] = []
     outline = root / "outline.md"
     if outline.is_file():
         parts.append(outline.read_text(encoding="utf-8", errors="replace"))
-    revisions = root / ".agent" / "revisions"
-    revision_files = sorted(revisions.glob("*.md")) if revisions.is_dir() else []
-    sections_dir = root / "sections"
-    # draft_section writes to .agent/revisions/; prefer that over stale sections/*.md.
-    if revision_files:
-        for fp in revision_files:
-            parts.append(f"\n## {fp.stem}\n\n{fp.read_text(encoding='utf-8', errors='replace')}")
-    elif sections_dir.is_dir():
-        for fp in sorted(sections_dir.glob("*.md")):
-            parts.append(f"\n## {fp.stem}\n\n{fp.read_text(encoding='utf-8', errors='replace')}")
-    body = "\n".join(parts).strip() or "# Empty document\n"
+    for section_id, _, path in sources:
+        parts.append(
+            f"\n## {section_id}\n\n{path.read_text(encoding='utf-8', errors='replace').strip()}"
+        )
+    body = "\n".join(parts).strip()
     target = _resolve_path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body, encoding="utf-8")
+    delivery_issues = ["used legacy unscoped revision layout"] if used_legacy_layout else []
+    delivery_status = "warning" if delivery_issues else "ok"
     return {
         "output_path": output_path,
+        "source": source,
         "bytes_written": len(body.encode()),
-        "summary": f"Exported document to {output_path}",
+        "delivery_status": delivery_status,
+        "delivery_issues": delivery_issues,
+        "included_sections": requested,
+        "missing_sections": [],
+        "source_paths": [rel_path for _, rel_path, _ in sources],
+        "summary": f"Exported {len(requested)} section(s) to {output_path}",
     }
 
 

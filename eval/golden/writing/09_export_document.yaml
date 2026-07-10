@@ -1,7 +1,7 @@
 id: writing.09_export_document
 scenario_id: writing
 phase: 2
-description: export_document merges outline and sections
+description: export_document exports an explicit confirmed section set
 
 fixtures:
   workspace:
@@ -12,6 +12,9 @@ fixtures:
     - path: sections/a.md
       content: |
         Section A body for export.
+    - path: sections/junk.md
+      content: |
+        Historical junk must not be exported.
 
 input:
   message: "writing.09 export_document 导出文档"
@@ -25,10 +28,12 @@ assertions:
       - tool.started
       - tool.completed
       - turn.completed
+    payload_validates: true
   turn:
     status: completed
   workspace:
     - path: exports/document.md
       matches: "Section A body"
+      not_matches: "Historical junk"
 
 tags: [writing, export, p2]

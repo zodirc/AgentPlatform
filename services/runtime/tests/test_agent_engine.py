@@ -213,6 +213,58 @@ async def test_agent_engine_draft_section_streams_deltas(workspace) -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_engine_records_export_delivery(workspace) -> None:
+    sections = workspace / "sections"
+    sections.mkdir()
+    (sections / "intro.md").write_text("Ready", encoding="utf-8")
+    export = ToolSpec(
+        name="export_document",
+        description="export",
+        parameters={
+            "type": "object",
+            "properties": {
+                "section_ids": {"type": "array", "items": {"type": "string"}},
+                "source": {"type": "string"},
+                "output_path": {"type": "string"},
+            },
+            "required": ["section_ids"],
+        },
+        handler=core.export_document,
+    )
+    call = {
+        "id": "tc-export",
+        "name": "export_document",
+        "input": {
+            "section_ids": ["intro"],
+            "source": "confirmed",
+            "output_path": "exports/out.md",
+        },
+    }
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        events.append((event_type, payload))
+
+    engine = AgentEngine(
+        gateway=FakeGateway([ModelResponse(tool_calls=[call])]),
+        tools=[export],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    await engine.run(state)
+
+    assert state.delivery == {
+        "delivery_status": "ok",
+        "delivery_issues": [],
+        "export_path": "exports/out.md",
+    }
+    completed = [payload for event, payload in events if event == "tool.completed"]
+    assert completed[0]["delivery_status"] == "ok"
+
+
+@pytest.mark.asyncio
 async def test_agent_engine_step_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.engine.agent_engine.settings.step_timeout_seconds", 0.001)
 

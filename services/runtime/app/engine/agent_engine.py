@@ -509,6 +509,13 @@ class AgentEngine:
                 step_index=step_index,
             )
 
+        if tool_name == "export_document":
+            state.delivery = {
+                "delivery_status": str(result.get("delivery_status", "failed")),
+                "delivery_issues": list(result.get("delivery_issues") or []),
+                "export_path": str(result.get("output_path", "")),
+            }
+
         summary = result.get("summary") or result.get("content", "")[:200] or json.dumps(result)[:200]
         if tool_name == "search_sources" and result.get("hits"):
             hit = result["hits"][0]
@@ -516,14 +523,25 @@ class AgentEngine:
             if excerpt:
                 summary = f"{summary}; {excerpt}"
         tool_status = "error" if result.get("error") else "ok"
+        completed_payload: dict[str, Any] = {
+            "tool_call_id": tool_call_id,
+            "tool_name": tool_name,
+            "status": tool_status,
+            "summary": summary,
+        }
+        if tool_name == "export_document":
+            completed_payload.update(
+                {
+                    "delivery_status": str(result.get("delivery_status", "failed")),
+                    "delivery_issues": list(result.get("delivery_issues") or []),
+                    "output_path": str(result.get("output_path", "")),
+                }
+            )
+            if result.get("bytes_written") is not None:
+                completed_payload["bytes_written"] = int(result["bytes_written"])
         await self._write_event(
             event_type="tool.completed",
-            payload={
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-                "status": tool_status,
-                "summary": summary,
-            },
+            payload=completed_payload,
             step_index=step_index,
         )
         record_tool_call(tool_name=tool_name, status=tool_status)
