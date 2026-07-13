@@ -9,8 +9,8 @@ class CompactionPolicy:
 
     model_window_tokens: int = 128_000
     output_reserve_tokens: int = 16_384
-    fill_collapse: float = 0.75
-    fill_snip: float = 0.85
+    fill_collapse: float = 0.80
+    fill_snip: float = 0.90
     fill_autocompact: float = 0.95
     hot_zone_ratio: float = 0.35
 

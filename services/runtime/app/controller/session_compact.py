@@ -10,6 +10,7 @@ from app.context.summary import (
     structured_summary_from_turn_rows,
 )
 from app.context.compact_summarizer import summarize_turn_history_with_gateway
+from app.controller.session_transcript import replace_session_transcript_with_summary
 from app.db.pool import get_pool
 from app.model.gateway import ModelGateway
 
@@ -77,6 +78,7 @@ async def compact_session_context(
         source="manual_compact",
     )
     await save_session_context_summary(session_id, record)
+    await replace_session_transcript_with_summary(session_id, summary)
 
     confirmation = (
         f"Session context compacted ({turn_count} turns). "

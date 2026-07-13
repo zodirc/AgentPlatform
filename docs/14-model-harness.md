@@ -70,7 +70,7 @@ AgentEngine while 语义冻结（ADR-005）
 | 面 | 已有 | 缺口 | 分期 |
 |----|------|------|------|
 | **Model** | Provider + factory；ADR-019；**AH1** 重试/策略；**AH2** `cache_control` + usage cache 字段 | 多 provider failover（延后） | AH1–AH2 ✅ |
-| **Context** | compact；**AH3a** project/runtime + `assemble_ms` + 复用指纹 | 更细 session 指针产品化 | AH3a ✅ |
+| **Context** | compact；**AH3a** project/runtime + `assemble_ms`；**session transcript** 滚动历史（≥80/90/95% 才 collapse/snip/autocompact） | 更细 session 指针产品化 | AH3a ✅ |
 | **Intake** | InputCompiler；**AH3b** `@path` 预算预读 | — | AH3b ✅ |
 | **Tools** | 审批、超时；**AH3c** 只读并行 | description 持续 hygiene | AH3c ✅ |
 | **Guard** | ADR-015/016；AH1 Cancel 打断 backoff；预读/assemble 可中止钩子 | — | 持续 |

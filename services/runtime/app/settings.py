@@ -78,8 +78,9 @@ class Settings(BaseSettings):
     # Reserved for model output; subtracted from window when computing fill ratio.
     context_output_reserve_tokens: int = 16_384
     # Assembled-window fill thresholds (0–1) for pressure-driven compaction.
-    context_fill_collapse: float = 0.75
-    context_fill_snip: float = 0.85
+    # Below collapse: keep rolling history verbatim (mainstream-like).
+    context_fill_collapse: float = 0.80
+    context_fill_snip: float = 0.90
     context_fill_autocompact: float = 0.95
     # Fraction of working message budget kept verbatim in collapse tail.
     context_hot_zone_ratio: float = 0.35

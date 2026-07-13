@@ -61,13 +61,15 @@
 
 ```text
 Turn 结束 → runtime append 终态事件
-         → api 异步消费事件 → 更新 sessions.context_summary（摘要 + 指针，非全量 messages）
-新 Turn  → runtime 只读 context_summary → [session_context] + [本条用户消息] 进入 TurnState
-细节回溯 → read_file / search_* 按需，不无限堆历史
+         → runtime UPSERT session_transcripts（滚动 messages）
+         → api 异步更新 sessions.context_summary（薄摘要，UI/兜底）
+新 Turn  → runtime 加载 transcript + 本条用户消息（无 transcript 时回退 context_summary）
+满窗     → ContextEngine 按 fill 阈值 collapse/snip/autocompact（默认 80%/90%/95%）
+强制压缩 → /compact 写摘要并重置 transcript
 ```
 
 写主权与触发机制见 [`07-domain-model.md`](07-domain-model.md) §5、§7 与 [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md) §6.0。  
-**禁止** Session 行无限膨胀；**禁止** 单 Session 拖垮 assemble 延迟。
+**禁止** 未达阈值就自动整窗摘要；落库 trim 必须确定性、无 LLM。**禁止** 单 Session 拖垮 assemble 延迟。
 
 ### 4.2 工作区与数据持久化
 

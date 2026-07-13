@@ -243,7 +243,8 @@ Schema：`packages/contracts/schemas/projections/turn_view.json`
 | `turn_events` | **runtime** | api SSE、projection |
 | `turns` / `runs` | api 创建；runtime 更新执行态 | api |
 | `turn_views` | api projection | web |
-| `sessions.context_summary` | api（终态事件触发） | api, runtime（只读） |
+| `sessions.context_summary` | api（终态事件触发） | api, runtime（只读，transcript 空时兜底） |
+| `session_transcripts` | **runtime** | runtime（跨 Turn 滚动 messages） |
 
 全文：[`09-event-projection-pipeline.md`](09-event-projection-pipeline.md)
 
@@ -277,7 +278,7 @@ Schema：`packages/contracts/schemas/errors.json`
 - `UNIQUE (turn_id, sequence)` on `turn_events`
 - `runs.turn_id` 唯一 → Run : Turn = 1:1
 
-`checkpoints`（LangGraph）、`artifacts` 元数据表 Phase 1+ 追加；字段主权见 [`07-domain-model.md`](07-domain-model.md) §7。
+`checkpoints`（LangGraph）、`artifacts` 元数据表、`session_transcripts`（跨 Turn 滚动 messages）Phase 1+ 追加；字段主权见 [`07-domain-model.md`](07-domain-model.md) §7。 DDL：`phase1c_session_transcripts.sql`。
 
 ### 7.1 Phase 1：`model_provider_profiles`（ADR-019）
 

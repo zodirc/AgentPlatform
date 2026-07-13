@@ -15,6 +15,7 @@ from app.contracts.event_validation import EventPayloadValidationError
 from app.controller.events import append_event, run_exists
 from app.controller.input_compiler import InputCompiler, should_query
 from app.controller.session_compact import compact_session_context
+from app.controller.session_transcript import load_session_transcript, save_session_transcript
 from app.controller.runtime_context import set_event_writer
 from app.controller.checkpoint_store import delete_checkpoint, load_checkpoint, save_checkpoint
 from app.controller.pending_store import PendingTurn, get, pop, save
@@ -516,6 +517,7 @@ async def _finalize_turn(
             output_tokens=state.usage.output_tokens,
         )
         await check_monthly_token_alert()
+        await save_session_transcript(state.session_id, state.messages)
         await delete_checkpoint(run_id)
         return
 
@@ -572,6 +574,7 @@ async def _finalize_turn(
         output_tokens=state.usage.output_tokens,
     )
     await check_monthly_token_alert()
+    await save_session_transcript(state.session_id, state.messages)
     await delete_checkpoint(run_id)
 
 
@@ -588,15 +591,20 @@ async def _run_turn(
     compiler = InputCompiler()
     compiled = compiler.compile(message)
     compiled = await compiler.enrich_with_preread(compiled)
-    session_ctx = await load_session_context(session_id)
-    if session_ctx:
-        # Merge this turn's prereread hot files into session pointers for next turns.
-        hot = list(compiled.metadata.get("hot_files") or [])
-        if hot:
-            existing = [str(v) for v in session_ctx.get("hot_files") or []]
-            merged = list(dict.fromkeys([*hot, *existing]))[:12]
-            session_ctx = {**session_ctx, "hot_files": merged}
-        compiled.messages.insert(0, session_context_message(session_ctx))
+    prior = await load_session_transcript(session_id)
+    if prior:
+        # Rolling session history: continue prior messages; skip thin summary to avoid dup.
+        compiled.messages = [*prior, *compiled.messages]
+    else:
+        session_ctx = await load_session_context(session_id)
+        if session_ctx:
+            # Compat fallback for sessions without a transcript yet.
+            hot = list(compiled.metadata.get("hot_files") or [])
+            if hot:
+                existing = [str(v) for v in session_ctx.get("hot_files") or []]
+                merged = list(dict.fromkeys([*hot, *existing]))[:12]
+                session_ctx = {**session_ctx, "hot_files": merged}
+            compiled.messages.insert(0, session_context_message(session_ctx))
     model_config = await resolve_model_config()
     has_model_key = model_config is not None
     gate = should_query(message, has_model_key=has_model_key)

@@ -332,7 +332,7 @@ loop 最大的风险是停不下来、烧钱、反复失败。终止条件必须
 
 事件序列：`turn.cancelling`（可选）→ `turn.cancelled`（payload 含 `force`、`cancelled_at_phase`）。
 
-**Cancel 后继续对话**：用户在同 Session 发 **新 Turn**；execution 上下文由 `context_summary` + 新用户消息衔接，**不是**恢复已 `cancelled` 的 Run。
+**Cancel 后继续对话**：用户在同 Session 发 **新 Turn**；execution 上下文由 `session_transcripts` 滚动 messages（无 transcript 时回退 `context_summary`）+ 新用户消息衔接，**不是**恢复已 `cancelled` 的 Run。
 
 **审批 interrupt 后继续**：仅 `ApproveToolCall` 从 checkpoint 恢复 **同一** `run_id`（`waiting_approval` → `running`）。
 

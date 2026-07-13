@@ -86,7 +86,7 @@ runtime 在**同一事务或紧邻步骤**内同步更新 `runs` 与 `turns`；`
 
 1. `shouldQuery` 短路（`/help` 等）：Run 直接 `succeeded` + `termination_reason: local_response` → Turn `completed`。
 2. 审批恢复：`ApproveToolCall` 后 Run 回到 `running`，Turn 回到 `running`（自 `waiting_approval`）。**无** `ResumeTurn` 命令（ADR-009、ADR-015）。
-3. **Cancel 非 Resume**：`CancelTurn` 后 Run/Turn 终态 `cancelled`；用户继续对话须 **新建 Turn + Run**。跨 Turn 记忆靠 `sessions.context_summary`，不靠恢复已取消的 checkpoint。
+3. **Cancel 非 Resume**：`CancelTurn` 后 Run/Turn 终态 `cancelled`；用户继续对话须 **新建 Turn + Run**。跨 Turn 记忆优先靠 `session_transcripts`（滚动 messages），无 transcript 时回退 `context_summary`；不靠恢复已取消的 checkpoint。
 4. 投影与 API 读到的 `TurnView.status` 须与 `turns.status` 一致；若与事件终态不一致，以 **事件序列** 重建（见 `09` §5）。
 
 ### 2.5 Cancel 传播（domain 标志）
@@ -99,15 +99,15 @@ api 受理 `CancelTurn` 时，除转发 `cancel-turn` 命令外，须 **写入**
 1. POST /api/v1/sessions/{session_id}/turns  { message, client_request_id? }
 2. api: 鉴权 → INSERT turn (pending) → INSERT run (accepted) → 转发 StartTurn
 3. runtime TurnController:
-     a. 加载 session_context（压缩摘要，非全量历史 messages）
-     b. 编译输入 → 初始化 TurnState.messages
+     a. 加载 session_transcripts（优先）或 session_context 薄摘要（兜底）
+     b. 编译输入 → 初始化 TurnState.messages = prior + 本条用户消息
      c. AgentEngine.run → 每 Step 写 checkpoint + append turn_events
-4. runtime: 更新 turn/run 终态 → 写 artifact 引用 → append 终态事件（`turn.completed` 等）
+4. runtime: 更新 turn/run 终态 → UPSERT session_transcripts → 写 artifact 引用 → append 终态事件（`turn.completed` 等）
 5. api: 经 `LISTEN/NOTIFY` 或轮询感知新事件 → projection 刷新 `turn_views`；终态 Turn 触发异步更新 `sessions.context_summary`（见 §5、§7）
 6. 客户端: SSE 收事件；终态后 GET /turns/{id}/view 与事件一致
 ```
 
-第二条用户消息：重复 1–6，**新建** `turn_id` 与 `run_id`，Session 仅注入更新后的 `session_context`。
+下一用户消息：重复 1–6，**新建** `turn_id` 与 `run_id`，Session 注入滚动 transcript（或兜底 session_context）。
 
 ## 4. Execution / Domain / Projection 三层对照
 
@@ -122,23 +122,25 @@ api 受理 `CancelTurn` 时，除转发 `cancel-turn` 命令外，须 **写入**
 
 ## 5. messages 与上下文：如何统一理解
 
-**原则**：循环内演进状态以 `TurnState.messages` 为主；**不等于**把所有上下文都历史化进 messages。
+**原则**：循环内演进状态以 `TurnState.messages` 为主；跨 Turn 默认滚动保留 messages，满窗再 compact。
 
 | 内容 | 存放 | 何时注入 |
 |------|------|----------|
-| 当前 Turn 用户输入、assistant/tool 往返 | `TurnState.messages` | Turn 内每 Step 追加 |
-| 跨 Turn 会话摘要 | `sessions.context_summary` 或 `session_views` | TurnController 启动时注入**首条 system 或 user 前缀** |
+| 当前 Turn 用户输入、assistant/tool 往返 | `TurnState.messages` | Turn 内每 Step 追加；终态写入 `session_transcripts` |
+| 跨 Turn 滚动历史 | `session_transcripts.messages`（runtime） | 新 Turn 启动时加载为前缀，再追加本条用户消息 |
+| 跨 Turn 薄摘要（兜底 / UI） | `sessions.context_summary` 或 `session_views` | **仅当 transcript 为空**时注入首条 user 前缀；`/compact` 后以摘要重置 transcript |
 | system prompt 模板 | 配置 / 模板文件 | 每 Step 由 ContextEngine 组装，不逐条写入 messages 历史 |
 | project / runtime context | 运行时采集 | 每 Step assemble 时合并，见 [`06-tools-and-context.md`](06-tools-and-context.md) §12 |
 | 治理后的最终窗口 | `ContextEnvelope`（内存） | 仅本轮调模型用，可选 trace 采样 |
 
 **跨 Turn 策略**：
 
-1. Turn 结束后，runtime **仅** append 终态事件（如 `turn.completed`）；**不**写 `sessions` 表。
-2. api 异步模块（`services/projection/` 或 Phase 1+ `memory/` worker）消费终态事件，生成摘要并 **UPSERT** `sessions.context_summary`（摘要 + 指针）。写主权归属 api，与 §7 一致。
-3. 新 Turn 启动时，runtime **只读** `sessions.context_summary`，注入 `TurnState.messages` 首块。
-4. 新 Turn 的 `TurnState.messages` **初始仅含**：`[session_context 块] + [本 Turn 用户消息]`。
-5. 需要回溯的细节通过 `read_file` / `search_codebase` 等工具按需取回，而非无限堆历史。
+1. Turn 终态（`completed` / `cancelled`）后，runtime **UPSERT** `session_transcripts`（滚动 messages）；**不**经此路径写 `sessions.context_summary`。
+2. api 异步模块仍消费终态事件，生成薄摘要并 **UPSERT** `sessions.context_summary`（UI / 兼容兜底）。写主权归属 api，与 §7 一致。
+3. 新 Turn 启动时，runtime **优先**加载 `session_transcripts`；为空时才读 `context_summary` 薄摘要。
+4. 新 Turn 的 `TurnState.messages` **初始为**：`[prior transcript…] + [本 Turn 用户消息]`（或兜底 `[session_context] + [本 Turn 用户消息]`）。
+5. **自动 compact**：仅当 assemble 窗口 fill ≥ 阈值（collapse 80% / snip 90% / autocompact 95%）才结构性压缩；未达阈值保留滚动历史。`/compact` 显式强制摘要并重置 transcript。
+6. 细节仍可通过 `read_file` / `search_codebase` 按需取回；落库侧只做确定性 trim（无 LLM），避免热路径成本。
 
 ## 6. Checkpoint 归属
 
@@ -157,6 +159,7 @@ api 受理 `CancelTurn` 时，除转发 `cancel-turn` 命令外，须 **写入**
 | 表 | 主写方 | 主读方 | 说明 |
 |----|--------|--------|------|
 | `sessions` | api | api, runtime（只读） | 会话元数据、context_summary |
+| `session_transcripts` | **runtime** | runtime | 跨 Turn 滚动 messages；满窗确定性 trim |
 | `turns` | api 创建 pending；runtime 更新执行态 | api | 业务终态 |
 | `runs` | api 创建；api 写 cancel 标志；runtime 更新执行态 | api, runtime | 执行实例、termination_reason、`cancel_requested_at` |
 | `turn_events` | **runtime** | api（SSE/replay）、projection | 事实日志，append-only |
