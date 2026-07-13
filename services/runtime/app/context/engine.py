@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.context.policy import CompactionPolicy
+from app.context.project import build_runtime_context, load_project_context
 from app.context.summary import structured_summary_from_messages
 from app.engine.state import TurnState
 from app.tools.registry import ToolSpec
@@ -60,6 +62,11 @@ class ContextEnvelope:
     messages: list[dict[str, Any]]
     budget_report: dict[str, Any] = field(default_factory=dict)
     compaction_trace: list[dict[str, str]] = field(default_factory=list)
+    project_context: str = ""
+    runtime_context: str = ""
+    included_tools: list[str] = field(default_factory=list)
+    assemble_ms: float = 0.0
+    system_prompt: str = ""
 
 
 class ContextEngine:
@@ -82,6 +89,9 @@ class ContextEngine:
             "token_budget": self._policy.model_window_tokens,
             "fill_ratio": 0.0,
         }
+        self.last_assemble_ms: float = 0.0
+        self._reuse_fingerprint: str | None = None
+        self._reuse_messages: list[dict[str, Any]] | None = None
 
     def assemble(
         self,
@@ -89,15 +99,18 @@ class ContextEngine:
         system_prompt: str,
         state: TurnState,
         tools: list[dict[str, Any]] | None = None,
+        model_name: str | None = None,
     ) -> list[dict]:
+        started = time.monotonic()
         envelope = self._build_envelope(
             state=state,
             system_prompt=system_prompt,
             tools=tools,
+            model_name=model_name,
         )
+        envelope.assemble_ms = (time.monotonic() - started) * 1000
         self._finalize_envelope(envelope, state.turn_id)
-        system = {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
-        return [system, *envelope.messages]
+        return self._materialize_messages(envelope)
 
     async def assemble_async(
         self,
@@ -106,8 +119,28 @@ class ContextEngine:
         state: TurnState,
         gateway: Any | None = None,
         tools: list[dict[str, Any]] | None = None,
+        model_name: str | None = None,
+        abort: Any | None = None,
     ) -> list[dict]:
         from app.context.compact_summarizer import summarize_messages_with_gateway
+
+        started = time.monotonic()
+        fingerprint = _assemble_fingerprint(system_prompt, state, tools)
+        if (
+            self._reuse_fingerprint == fingerprint
+            and self._reuse_messages is not None
+            and not any(
+                t.get("detail") == "autocompact_pending"
+                for t in (self.last_compaction_trace or [])
+            )
+        ):
+            # Reuse only when fingerprint matches and no pending LLM compact needed.
+            self.last_assemble_ms = 0.0
+            self.last_budget_report = {
+                **self.last_budget_report,
+                "assemble_ms": 0.0,
+            }
+            return [dict(m) for m in self._reuse_messages]
 
         defer = gateway is not None
         envelope = self._build_envelope(
@@ -115,9 +148,15 @@ class ContextEngine:
             system_prompt=system_prompt,
             tools=tools,
             defer_autocompact=defer,
+            model_name=model_name,
         )
         trace = list(envelope.compaction_trace)
         messages = list(envelope.messages)
+
+        if abort is not None and getattr(abort, "is_set", lambda: False)():
+            envelope.assemble_ms = (time.monotonic() - started) * 1000
+            self._finalize_envelope(envelope, state.turn_id)
+            return self._materialize_messages(envelope)
 
         if gateway is not None and any(t.get("detail") == "autocompact_pending" for t in trace):
             messages = [await summarize_messages_with_gateway(gateway, state.messages)]
@@ -128,6 +167,8 @@ class ContextEngine:
                 system_prompt=system_prompt,
                 tools=tools,
                 policy=self._policy,
+                project_context=envelope.project_context,
+                runtime_context=envelope.runtime_context,
             )
             envelope.budget_report = {
                 **envelope.budget_report,
@@ -138,13 +179,40 @@ class ContextEngine:
             envelope.messages = messages
             envelope.compaction_trace = trace
 
+        envelope.assemble_ms = (time.monotonic() - started) * 1000
         self._finalize_envelope(envelope, state.turn_id)
-        system = {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
-        return [system, *envelope.messages]
+        result = self._materialize_messages(envelope)
+        self._reuse_fingerprint = fingerprint
+        self._reuse_messages = [dict(m) for m in result]
+        return result
+
+    def _materialize_messages(self, envelope: ContextEnvelope) -> list[dict[str, Any]]:
+        system_text = envelope.system_prompt
+        if envelope.project_context:
+            system_text = f"{system_text}\n\n[project_context]\n{envelope.project_context}"
+        system = {"role": "system", "content": [{"type": "text", "text": system_text}]}
+        out: list[dict[str, Any]] = [system]
+        if envelope.runtime_context:
+            out.append(
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": envelope.runtime_context}],
+                }
+            )
+        out.extend(envelope.messages)
+        return out
 
     def _finalize_envelope(self, envelope: ContextEnvelope, turn_id: Any) -> None:
         self.last_compaction_trace = envelope.compaction_trace
         self.last_budget_report = dict(envelope.budget_report)
+        self.last_budget_report["assemble_ms"] = envelope.assemble_ms
+        self.last_budget_report["project_tokens"] = estimate_payload_tokens(
+            envelope.project_context
+        )
+        self.last_budget_report["runtime_tokens"] = estimate_payload_tokens(
+            envelope.runtime_context
+        )
+        self.last_assemble_ms = envelope.assemble_ms
         if envelope.compaction_trace:
             logger.info(
                 "context compaction turn_id=%s strategies=%s before=%s after=%s fill=%s",
@@ -162,16 +230,27 @@ class ContextEngine:
         system_prompt: str,
         tools: list[dict[str, Any]] | None,
         defer_autocompact: bool = False,
+        model_name: str | None = None,
     ) -> ContextEnvelope:
         policy = self._policy
         messages = [dict(m) for m in state.messages]
         trace: list[dict[str, str]] = []
+        project_context = load_project_context(session_id=state.session_id)
+        runtime_context = build_runtime_context(
+            scenario_id=state.scenario_id,
+            step_count=state.step_count,
+            max_steps=state.max_steps,
+            model_name=model_name,
+        )
+        included_tools = [str(t.get("name", "")) for t in (tools or []) if t.get("name")]
 
         _, window_before = _window_fill(
             messages=messages,
             system_prompt=system_prompt,
             tools=tools,
             policy=policy,
+            project_context=project_context,
+            runtime_context=runtime_context,
         )
         tokens_before = window_before["tokens_after"]
 
@@ -190,6 +269,8 @@ class ContextEngine:
             system_prompt=system_prompt,
             tools=tools,
             policy=policy,
+            project_context=project_context,
+            runtime_context=runtime_context,
         )
         if fill_ratio >= policy.fill_collapse and len(messages) > 4:
             messages = _collapse_tool_history(
@@ -206,6 +287,8 @@ class ContextEngine:
                 system_prompt=system_prompt,
                 tools=tools,
                 policy=policy,
+                project_context=project_context,
+                runtime_context=runtime_context,
             )
             if fill_ratio < policy.fill_snip:
                 break
@@ -218,6 +301,8 @@ class ContextEngine:
             system_prompt=system_prompt,
             tools=tools,
             policy=policy,
+            project_context=project_context,
+            runtime_context=runtime_context,
         )
         if fill_ratio >= policy.fill_autocompact and messages:
             if defer_autocompact:
@@ -231,6 +316,8 @@ class ContextEngine:
             system_prompt=system_prompt,
             tools=tools,
             policy=policy,
+            project_context=project_context,
+            runtime_context=runtime_context,
         )
         reserve_tokens = (
             policy.output_reserve_tokens
@@ -245,16 +332,36 @@ class ContextEngine:
                 "messages_tokens": window_after["messages_tokens"],
                 "system_tokens": window_after["system_tokens"],
                 "tools_tokens": window_after["tools_tokens"],
+                "project_tokens": window_after.get("project_tokens", 0),
+                "runtime_tokens": window_after.get("runtime_tokens", 0),
                 "token_budget": policy.model_window_tokens,
                 "reserve_tokens": reserve_tokens,
                 "fill_ratio": round(fill_ratio, 4),
             },
             compaction_trace=trace,
+            project_context=project_context,
+            runtime_context=runtime_context,
+            included_tools=included_tools,
+            system_prompt=system_prompt,
         )
+
+
 
 
 def _system_message(system_prompt: str) -> dict[str, Any]:
     return {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+
+
+def _assemble_fingerprint(
+    system_prompt: str,
+    state: TurnState,
+    tools: list[dict[str, Any]] | None,
+) -> str:
+    tool_names = ",".join(str(t.get("name", "")) for t in (tools or []))
+    return (
+        f"{hash(system_prompt)}|{state.step_count}|{len(state.messages)}|"
+        f"{state.scenario_id}|{tool_names}|{state.max_steps}"
+    )
 
 
 def _window_fill(
@@ -263,29 +370,56 @@ def _window_fill(
     system_prompt: str,
     tools: list[dict[str, Any]] | None,
     policy: CompactionPolicy,
+    project_context: str = "",
+    runtime_context: str = "",
 ) -> tuple[float, dict[str, int]]:
-    window = estimate_assembled_window(
-        messages=[_system_message(system_prompt), *messages],
-        tools=tools,
-    )
+    system_text = system_prompt
+    if project_context:
+        system_text = f"{system_text}\n\n[project_context]\n{project_context}"
+    assembled = [_system_message(system_text)]
+    if runtime_context:
+        assembled.append(
+            {"role": "user", "content": [{"type": "text", "text": runtime_context}]}
+        )
+    assembled.extend(messages)
+    window = estimate_assembled_window(messages=assembled, tools=tools)
+    project_tokens = estimate_payload_tokens(project_context)
+    runtime_tokens = estimate_payload_tokens(runtime_context)
+    window = {
+        **window,
+        "project_tokens": project_tokens,
+        "runtime_tokens": runtime_tokens,
+    }
     usable = max(1, policy.model_window_tokens - policy.output_reserve_tokens)
     fill_ratio = window["tokens_after"] / usable
     return fill_ratio, window
 
 
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
-    return max(1, len(json.dumps(messages, ensure_ascii=False)) // 4)
+    return max(1, estimate_payload_tokens(messages))
 
 
 def estimate_payload_tokens(payload: Any) -> int:
-    """Rough token estimate for any JSON-serializable payload (chars/4)."""
+    """Cheap token estimate that prefers overestimate (AH4).
+
+    CJK characters ~1 token; ASCII ~1/4. Avoids optimistic chars/4 overflow.
+    """
     if payload is None:
         return 0
     if isinstance(payload, str):
         text = payload
     else:
         text = json.dumps(payload, ensure_ascii=False)
-    return max(0, (len(text) + 3) // 4)
+    if not text:
+        return 0
+    cjk = 0
+    other = 0
+    for ch in text:
+        if ord(ch) > 0x2E80:
+            cjk += 1
+        else:
+            other += 1
+    return max(1, cjk + (other + 2) // 3)
 
 
 def estimate_assembled_window(
@@ -338,17 +472,30 @@ def estimate_window_breakdown(
         "assistant": 0,
         "tool_results": 0,
         "compaction": 0,
+        "project": 0,
+        "runtime": 0,
     }
     for msg in messages:
         role = msg.get("role")
         toks = estimate_payload_tokens(msg)
         if role == "system":
-            breakdown["system"] += toks
+            text = _message_text(msg)
+            if "[project_context]" in text:
+                # Approximate split: project section after marker.
+                idx = text.find("[project_context]")
+                sys_part = text[:idx]
+                proj_part = text[idx:]
+                breakdown["system"] += estimate_payload_tokens(sys_part)
+                breakdown["project"] += estimate_payload_tokens(proj_part)
+            else:
+                breakdown["system"] += toks
             continue
         text = _message_text(msg)
         lower = text.lower()
         if role == "tool":
             breakdown["tool_results"] += toks
+        elif text.startswith("[runtime_context]"):
+            breakdown["runtime"] += toks
         elif "session context" in lower:
             breakdown["session"] += toks
         elif text.startswith("[") and any(

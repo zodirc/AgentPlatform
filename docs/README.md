@@ -19,6 +19,7 @@
 | Queue worker profile（`make eval-queue` / shared.16） | ✅ |
 | Embedding 检索（retrieval 镜像内置本地模型 + hash 降级） | ✅ |
 | 写作素材卡 pin + UI「本轮写定」可观测 | ✅ |
+| Agent Harness（[`14`](14-model-harness.md)） | 🔧 部分落地（AH1–AH4 核心路径） |
 
 ## 设计稿对照（文档 → 代码）
 
@@ -39,12 +40,13 @@
 
 1. **[02-architecture.md](02-architecture.md)** — 架构地图（先读）
 2. **[05-agent-runtime.md](05-agent-runtime.md)** + **[06-tools-and-context.md](06-tools-and-context.md)** — 内核
-3. **[10-product-modes.md](10-product-modes.md)** — 场景（writing / agent）与扩展宪法
-4. **[11-product-experience.md](11-product-experience.md)** — **好用**、长期运行、体验 SLO
-5. **[12-eval-and-golden-turns.md](12-eval-and-golden-turns.md)** — **成熟可证明**：golden、metrics、CI
-6. **[contracts.md](contracts.md)** — 契约接缝（API、事件、DDL、内部命令）
-7. **[07-domain-model.md](07-domain-model.md)** + **[09-event-projection-pipeline.md](09-event-projection-pipeline.md)** — 领域与事件流水线
-8. **[03-docker-runtime.md](03-docker-runtime.md)** — 部署、环境变量、工作区与沙箱（§8）
+3. **[14-model-harness.md](14-model-harness.md)** — **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地）
+4. **[10-product-modes.md](10-product-modes.md)** — 场景（writing / agent）与扩展宪法
+5. **[11-product-experience.md](11-product-experience.md)** — **好用**、长期运行、体验 SLO
+6. **[12-eval-and-golden-turns.md](12-eval-and-golden-turns.md)** — **成熟可证明**：golden、metrics、CI
+7. **[contracts.md](contracts.md)** — 契约接缝（API、事件、DDL、内部命令）
+8. **[07-domain-model.md](07-domain-model.md)** + **[09-event-projection-pipeline.md](09-event-projection-pipeline.md)** — 领域与事件流水线
+9. **[03-docker-runtime.md](03-docker-runtime.md)** — 部署、环境变量、工作区与沙箱（§8）
 
 ## 完整目录
 
@@ -62,6 +64,8 @@
 | [10-product-modes.md](10-product-modes.md) | ScenarioProfile、writing / agent |
 | [11-product-experience.md](11-product-experience.md) | 产品体验 SLO、自用验收 |
 | [12-eval-and-golden-turns.md](12-eval-and-golden-turns.md) | Golden Turn、可观测、CI 分层 |
+| [13-writing-delivery-issues.md](13-writing-delivery-issues.md) | 写作交付问题与修复记录 |
+| [14-model-harness.md](14-model-harness.md) | **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地） |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 

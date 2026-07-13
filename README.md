@@ -29,6 +29,7 @@
 | 4 | [开发规范](docs/04-development-standards.md) | 仓库结构、代码风格、测试、配置、发布 |
 | 5 | [Agent 运行时](docs/05-agent-runtime.md) | **核心循环**：控制器+引擎、messages 状态、终止、子 agent |
 | 6 | [工具与上下文工程](docs/06-tools-and-context.md) | 工具协议、副作用/审批、budget·compact·collapse |
+| 6b | [模型 Harness](docs/14-model-harness.md) | 调用可靠性、可见上下文、缓存（设计稿） |
 | 7 | [场景与扩展](docs/10-product-modes.md) | writing / agent、ScenarioProfile、扩展宪法 |
 | 8 | [契约索引](docs/contracts.md) | API、事件、DDL、内部命令 |
 | 9 | [领域模型](docs/07-domain-model.md) | Session/Run/Turn/Step、checkpoint、幂等 |

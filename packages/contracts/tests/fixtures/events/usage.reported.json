@@ -6,6 +6,10 @@
     "output_tokens": 146,
     "step_input_tokens": 812,
     "step_output_tokens": 146,
-    "source": "provider"
+    "source": "provider",
+    "retry_count": 0,
+    "cache_read_input_tokens": 400,
+    "cache_creation_input_tokens": 0,
+    "cache_hit": true
   }
 }

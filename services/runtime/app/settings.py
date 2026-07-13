@@ -1,4 +1,5 @@
 import socket
+from typing import Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -41,6 +42,27 @@ class Settings(BaseSettings):
     app_env: str = "production"
     log_level: str = "INFO"
     model_timeout_seconds: float = 120.0
+    # H1 harness: fast-fail first byte / connect so retries start early.
+    model_first_byte_timeout_seconds: float = 15.0
+    model_connect_timeout_seconds: float = 10.0
+    model_max_retries: int = 2
+    model_retry_base_delay_seconds: float = 0.5
+    model_retry_max_delay_seconds: float = 8.0
+    # Generation strategy (aligned with CompactionPolicy.output_reserve_tokens).
+    model_max_output_tokens: int = 0  # 0 → use context_output_reserve_tokens
+    model_temperature_writing: float = 0.3
+    model_temperature_agent: Optional[float] = None
+    model_top_p: Optional[float] = None
+    model_tool_choice: str = "auto"  # auto | required | none
+    model_thinking_enabled: bool = False
+    # AH4: autocompact summarizer budget (independent of main turn).
+    compact_timeout_seconds: float = 20.0
+    compact_max_output_tokens: int = 1024
+    # AH3: project context + @path prereread budgets.
+    project_context_max_chars: int = 2_000
+    path_preread_max_chars: int = 1_200
+    path_preread_timeout_seconds: float = 0.4
+    path_preread_max_files: int = 3
     tool_default_timeout_seconds: float = 60.0
     step_timeout_seconds: float = 300.0
     stall_threshold_seconds: float = 120.0

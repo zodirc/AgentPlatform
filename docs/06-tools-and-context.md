@@ -280,6 +280,8 @@ class ContextEnvelope(TypedDict):
 - `budget_report` 至少包含压缩前后 token 估计、触发的策略名、被截断块计数
 - `compaction_trace` 只记录策略摘要与引用，不复制大段原文
 
+`project_context` / `runtime_context` 与 envelope 分区的**补齐优先级**见 Agent Harness 总纲 [`14-model-harness.md`](14-model-harness.md)（AH3a）；实现前以本文类型契约为准，状态以 `14` 文首为准。
+
 ## 7. 上下文工程的多层防线
 
 ### 7.1 budget

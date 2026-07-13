@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol
@@ -8,8 +9,37 @@ from uuid import uuid4
 
 from app.settings import settings
 
+logger = logging.getLogger(__name__)
 
-class ModelProviderTimeout(Exception):
+
+class ModelError(Exception):
+    """Base for model harness failures (distinct from tool/step errors)."""
+
+
+class ModelTransientError(ModelError):
+    """Retryable before any stream output (429/5xx/connect/first-byte timeout)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.retry_after = retry_after
+
+
+class ModelFatalError(ModelError):
+    """Non-retryable model failure, or failure after streaming already started."""
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class ModelProviderTimeout(ModelError):
     """Raised when model streaming exceeds configured timeout."""
 
 
@@ -19,6 +49,12 @@ class ModelResponse:
     tool_calls: list[dict[str, Any]] | None = None
     input_tokens: int = 0
     output_tokens: int = 0
+    cache_read_input_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+
+
+class AbortSignal(Protocol):
+    def is_set(self) -> bool: ...
 
 
 class ModelProvider(Protocol):
@@ -27,9 +63,19 @@ class ModelProvider(Protocol):
         *,
         messages: list[dict],
         tools: list[dict],
-        abort: asyncio.Event | None = None,
+        abort: AbortSignal | None = None,
     ) -> AsyncIterator[str | ModelResponse]:
         ...
+
+
+class _OrAbort:
+    """Duck-typed abort: set when either cancel or attempt-abort fires."""
+
+    def __init__(self, *events: asyncio.Event) -> None:
+        self._events = events
+
+    def is_set(self) -> bool:
+        return any(event.is_set() for event in self._events)
 
 
 class StubModelProvider:
@@ -529,26 +575,241 @@ def _extract_path(text: str) -> str | None:
 
 
 class ModelGateway:
+    """Thin harness around a provider: overall timeout, fast first-byte fail, retry."""
+
     def __init__(self, provider: ModelProvider) -> None:
         self._provider = provider
-        self._abort_event = asyncio.Event()
+        self._cancel_event = asyncio.Event()
+        self.retry_count = 0
 
     def abort_stream(self) -> None:
-        self._abort_event.set()
+        self._cancel_event.set()
 
     async def stream(self, *, messages: list[dict], tools: list[dict]) -> AsyncIterator[str | ModelResponse]:
-        self._abort_event.clear()
-        deadline = time.monotonic() + settings.model_timeout_seconds
+        self._cancel_event.clear()
+        self.retry_count = 0
+        overall_deadline = time.monotonic() + settings.model_timeout_seconds
+        max_attempts = max(1, settings.model_max_retries + 1)
+        attempt = 0
+        last_error: BaseException | None = None
+
         try:
-            async for item in self._provider.stream(
-                messages=messages,
-                tools=tools,
-                abort=self._abort_event,
-            ):
-                if self._abort_event.is_set():
+            while attempt < max_attempts:
+                if self._cancel_event.is_set():
                     return
-                if time.monotonic() > deadline:
+                remaining = overall_deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ModelProviderTimeout("model stream exceeded timeout")
+
+                attempt += 1
+                attempt_abort = asyncio.Event()
+                emitted = False
+                try:
+                    async for item in self._stream_attempt(
+                        messages=messages,
+                        tools=tools,
+                        overall_deadline=overall_deadline,
+                        attempt_abort=attempt_abort,
+                    ):
+                        emitted = True
+                        yield item
+                    return
+                except ModelTransientError as exc:
+                    last_error = exc
+                    if emitted:
+                        raise ModelFatalError(
+                            f"model failed after streaming started: {exc}"
+                        ) from exc
+                    if attempt >= max_attempts:
+                        break
+                    if self._cancel_event.is_set():
+                        return
+                    delay = _backoff_seconds(attempt, exc)
+                    logger.info(
+                        "model retry attempt=%s/%s delay=%.2fs error=%s",
+                        attempt,
+                        max_attempts,
+                        delay,
+                        exc,
+                    )
+                    self.retry_count = attempt
+                    attempt_abort.set()
+                    if not await self._interruptible_sleep(delay, overall_deadline):
+                        if self._cancel_event.is_set():
+                            return
+                        raise ModelProviderTimeout(
+                            "model retry budget exhausted during backoff"
+                        ) from exc
+                except ModelProviderTimeout:
+                    raise
+                except ModelFatalError:
+                    raise
+                except Exception as exc:
+                    classified = classify_provider_exception(exc)
+                    if isinstance(classified, ModelTransientError) and not emitted:
+                        last_error = classified
+                        if attempt >= max_attempts:
+                            break
+                        if self._cancel_event.is_set():
+                            return
+                        delay = _backoff_seconds(attempt, classified)
+                        logger.info(
+                            "model retry attempt=%s/%s delay=%.2fs error=%s",
+                            attempt,
+                            max_attempts,
+                            delay,
+                            classified,
+                        )
+                        self.retry_count = attempt
+                        attempt_abort.set()
+                        if not await self._interruptible_sleep(delay, overall_deadline):
+                            if self._cancel_event.is_set():
+                                return
+                            raise ModelProviderTimeout(
+                                "model retry budget exhausted during backoff"
+                            ) from classified
+                        continue
+                    if isinstance(classified, ModelError):
+                        raise classified from exc
+                    raise
+
+            raise ModelFatalError(
+                f"model retries exhausted after {attempt} attempts: {last_error}"
+            )
+        finally:
+            self._cancel_event.clear()
+
+    async def _stream_attempt(
+        self,
+        *,
+        messages: list[dict],
+        tools: list[dict],
+        overall_deadline: float,
+        attempt_abort: asyncio.Event,
+    ) -> AsyncIterator[str | ModelResponse]:
+        abort = _OrAbort(self._cancel_event, attempt_abort)
+        agen = self._provider.stream(messages=messages, tools=tools, abort=abort)
+        first_byte_budget = min(
+            settings.model_first_byte_timeout_seconds,
+            max(0.01, overall_deadline - time.monotonic()),
+        )
+        try:
+            first = await asyncio.wait_for(agen.__anext__(), timeout=first_byte_budget)
+        except StopAsyncIteration:
+            return
+        except asyncio.TimeoutError as exc:
+            attempt_abort.set()
+            if time.monotonic() >= overall_deadline:
+                raise ModelProviderTimeout("model stream exceeded timeout") from exc
+            raise ModelTransientError(
+                f"first byte timeout after {first_byte_budget:.1f}s"
+            ) from exc
+        except ModelError:
+            raise
+        except Exception as exc:
+            raise classify_provider_exception(exc) from exc
+
+        if self._cancel_event.is_set():
+            return
+        if time.monotonic() > overall_deadline:
+            raise ModelProviderTimeout("model stream exceeded timeout")
+        yield first
+
+        try:
+            async for item in agen:
+                if self._cancel_event.is_set() or attempt_abort.is_set():
+                    return
+                if time.monotonic() > overall_deadline:
                     raise ModelProviderTimeout("model stream exceeded timeout")
                 yield item
-        finally:
-            self._abort_event.clear()
+        except ModelError:
+            raise
+        except Exception as exc:
+            raise classify_provider_exception(exc) from exc
+
+    async def _interruptible_sleep(self, delay: float, deadline: float) -> bool:
+        """Sleep up to delay; return False if cancel or overall deadline wins."""
+        end = min(time.monotonic() + max(0.0, delay), deadline)
+        while time.monotonic() < end:
+            if self._cancel_event.is_set():
+                return False
+            await asyncio.sleep(min(0.05, end - time.monotonic()))
+        return not self._cancel_event.is_set() and time.monotonic() <= deadline
+
+
+def _backoff_seconds(attempt: int, exc: ModelTransientError) -> float:
+    if exc.retry_after is not None and exc.retry_after >= 0:
+        return min(float(exc.retry_after), settings.model_retry_max_delay_seconds)
+    base = settings.model_retry_base_delay_seconds
+    return min(base * (2 ** (attempt - 1)), settings.model_retry_max_delay_seconds)
+
+
+def classify_provider_exception(exc: BaseException) -> ModelError | BaseException:
+    """Map transport/HTTP failures into harness error types."""
+    if isinstance(exc, ModelError):
+        return exc
+
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover
+        httpx = None  # type: ignore[assignment]
+
+    if httpx is not None:
+        if isinstance(exc, httpx.HTTPStatusError):
+            return classify_http_status(
+                exc.response.status_code,
+                body=str(exc),
+                headers=exc.response.headers,
+            )
+        if isinstance(
+            exc,
+            (
+                httpx.ConnectError,
+                httpx.ConnectTimeout,
+                httpx.ReadTimeout,
+                httpx.WriteTimeout,
+                httpx.PoolTimeout,
+                httpx.RemoteProtocolError,
+            ),
+        ):
+            return ModelTransientError(f"transport error: {exc}")
+        if isinstance(exc, httpx.TimeoutException):
+            return ModelTransientError(f"http timeout: {exc}")
+
+    name = type(exc).__name__
+    if name in {"ConnectError", "TimeoutException", "ReadTimeout", "RemoteProtocolError"}:
+        return ModelTransientError(str(exc))
+    return exc
+
+
+def classify_http_status(
+    status_code: int,
+    *,
+    body: str = "",
+    headers: Any | None = None,
+) -> ModelError:
+    retry_after = _parse_retry_after(headers)
+    snippet = (body or "")[:400]
+    if status_code == 429 or status_code >= 500:
+        return ModelTransientError(
+            f"model API {status_code}: {snippet}",
+            status_code=status_code,
+            retry_after=retry_after,
+        )
+    return ModelFatalError(f"model API {status_code}: {snippet}", status_code=status_code)
+
+
+def _parse_retry_after(headers: Any | None) -> float | None:
+    if headers is None:
+        return None
+    raw = None
+    try:
+        raw = headers.get("retry-after") or headers.get("Retry-After")
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None

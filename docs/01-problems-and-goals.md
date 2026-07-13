@@ -54,6 +54,7 @@
 | P11 | **边界可校验** — 命令/事件/tool 在边界 Pydantic + JSON Schema；防止字段漂移（ADR-017） |
 | P12 | **执行有上界** — model/tool/step 超时 + Stall Watchdog；防止无界 hang（ADR-016） |
 | P13 | **运营配置热生效** — 模型供应商 / API key 经 Web → DB 注入；Turn 边界生效，无需重启（ADR-019） |
+| P14 | **Agent Harness 厚度** — 成熟度差在 Intake/Context/Tools/Model/Guard/Proof，不靠加 pipeline 节点；见 [`14`](14-model-harness.md) |
 
 ## 3. 非目标（当前）
 

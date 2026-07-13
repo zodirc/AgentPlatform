@@ -22,9 +22,13 @@ async def load_session_context(session_id: UUID) -> dict | None:
 
 
 def session_context_message(summary: dict) -> dict:
+    files = [str(v) for v in summary.get("files_touched") or []]
+    hot_files = [str(v) for v in summary.get("hot_files") or []]
+    # Prefer explicit hot_files; fall back to files_touched from compact summary.
+    pointer_files = hot_files or files
     structured = StructuredSummary(
         task=str(summary.get("task", "")),
-        files_touched=[str(v) for v in summary.get("files_touched") or []],
+        files_touched=files,
         decisions=[str(v) for v in summary.get("decisions") or []],
         open_items=[str(v) for v in summary.get("open_items") or []],
         narrative=str(summary.get("last_output_preview", ""))[:500],
@@ -36,7 +40,11 @@ def session_context_message(summary: dict) -> dict:
             f"Previous turn {turn_id} ended with status={status}. "
             f"{summary.get('last_output_preview', '')[:300]}"
         )
+    text = structured.to_message_text()
+    if pointer_files:
+        pointers = "\n".join(f"- {p}" for p in pointer_files[:12])
+        text = f"{text}\n\n[hot_files]\n{pointers}"
     return {
         "role": "user",
-        "content": [{"type": "text", "text": structured.to_message_text()}],
+        "content": [{"type": "text", "text": text}],
     }

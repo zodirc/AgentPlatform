@@ -490,3 +490,4 @@ services/runtime/app/
 - ADR-015：Interrupt / Cancel / Resume 语义
 - ADR-016：执行超时与 Stall Watchdog
 - ADR-019：模型供应商 Web 管理 + DB 热生效
+- Agent Harness 成熟度总纲（AH1 已落地；Model/Context/Tools 子轨）：[`14-model-harness.md`](14-model-harness.md)

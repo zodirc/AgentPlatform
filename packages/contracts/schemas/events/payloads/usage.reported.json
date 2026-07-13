@@ -12,6 +12,10 @@
     "output_tokens": { "type": "integer", "minimum": 0 },
     "step_input_tokens": { "type": "integer", "minimum": 0 },
     "step_output_tokens": { "type": "integer", "minimum": 0 },
-    "source": { "type": "string", "enum": ["provider", "estimated", "mixed"] }
+    "source": { "type": "string", "enum": ["provider", "estimated", "mixed"] },
+    "retry_count": { "type": "integer", "minimum": 0 },
+    "cache_read_input_tokens": { "type": "integer", "minimum": 0 },
+    "cache_creation_input_tokens": { "type": "integer", "minimum": 0 },
+    "cache_hit": { "type": "boolean" }
   }
 }

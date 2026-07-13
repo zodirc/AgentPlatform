@@ -493,6 +493,32 @@ export function useWorkbenchImpl(): WorkbenchState {
     setStopping(true);
     try {
       await cancelTurn(turnId, false);
+      // Soft cancel may wait for the worker; if the worker already died, force
+      // finalize so we do not stick on「停止中」forever.
+      window.setTimeout(() => {
+        void (async () => {
+          if (!turnIdRef.current) return;
+          try {
+            const v = await fetchTurnView(turnIdRef.current);
+            if (
+              v.status === "running" ||
+              v.status === "pending" ||
+              v.status === "waiting_approval"
+            ) {
+              await cancelTurn(turnIdRef.current, true);
+            }
+          } catch {
+            /* ignore — terminal stream handler still owns cleanup */
+          }
+        })();
+      }, 2500);
+      window.setTimeout(() => {
+        setStopping((prev) => {
+          if (!prev) return prev;
+          return false;
+        });
+        setBusy(false);
+      }, 6000);
     } catch (err) {
       setStopping(false);
       reportError("停止失败", err);

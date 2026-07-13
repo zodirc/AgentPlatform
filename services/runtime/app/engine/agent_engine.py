@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -8,7 +9,7 @@ from typing import Any, Awaitable, Callable
 from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message
-from app.model.gateway import ModelGateway, ModelProviderTimeout, ModelResponse
+from app.model.gateway import ModelError, ModelGateway, ModelResponse
 from app.observability.metrics import record_step_duration, record_tool_call
 from app.settings import settings
 from app.tools.registry import ToolSpec
@@ -138,8 +139,11 @@ class AgentEngine:
                         "system_tokens": int(report.get("system_tokens", 0)),
                         "tools_tokens": int(report.get("tools_tokens", 0)),
                         "messages_tokens": int(report.get("messages_tokens", 0)),
+                        "project_tokens": int(report.get("project_tokens", 0)),
+                        "runtime_tokens": int(report.get("runtime_tokens", 0)),
                         "reserve_tokens": int(report.get("reserve_tokens", 0)),
                         "fill_ratio": float(report.get("fill_ratio", 0.0)),
+                        "assemble_ms": float(report.get("assemble_ms", self._context.last_assemble_ms)),
                         "breakdown": breakdown,
                         "source": "estimated",
                         "strategies": strategies,
@@ -157,6 +161,8 @@ class AgentEngine:
                 tool_calls: list[dict[str, Any]] = []
                 step_input_tokens = 0
                 step_output_tokens = 0
+                step_cache_read = 0
+                step_cache_creation = 0
                 usage_source = "estimated"
 
                 try:
@@ -200,9 +206,13 @@ class AgentEngine:
                                 step_output_tokens = chunk.output_tokens
                                 if usage_source != "provider":
                                     usage_source = "mixed"
+                            if chunk.cache_read_input_tokens:
+                                step_cache_read = chunk.cache_read_input_tokens
+                            if chunk.cache_creation_input_tokens:
+                                step_cache_creation = chunk.cache_creation_input_tokens
                             state.usage.input_tokens += chunk.input_tokens
                             state.usage.output_tokens += chunk.output_tokens
-                except ModelProviderTimeout:
+                except ModelError:
                     step_outcome = "failed"
                     raise
 
@@ -221,16 +231,23 @@ class AgentEngine:
                     state.usage.input_tokens += step_input_tokens
                     usage_source = "mixed" if usage_source == "provider" else "estimated"
 
+                retry_count = int(getattr(self._gateway, "retry_count", 0) or 0)
+                usage_payload: dict[str, Any] = {
+                    "step_index": step_index,
+                    "input_tokens": state.usage.input_tokens,
+                    "output_tokens": state.usage.output_tokens,
+                    "step_input_tokens": step_input_tokens,
+                    "step_output_tokens": step_output_tokens,
+                    "source": usage_source,
+                    "retry_count": retry_count,
+                }
+                if step_cache_read or step_cache_creation:
+                    usage_payload["cache_read_input_tokens"] = step_cache_read
+                    usage_payload["cache_creation_input_tokens"] = step_cache_creation
+                    usage_payload["cache_hit"] = step_cache_read > 0
                 await self._write_event(
                     event_type="usage.reported",
-                    payload={
-                        "step_index": step_index,
-                        "input_tokens": state.usage.input_tokens,
-                        "output_tokens": state.usage.output_tokens,
-                        "step_input_tokens": step_input_tokens,
-                        "step_output_tokens": step_output_tokens,
-                        "source": usage_source,
-                    },
+                    payload=usage_payload,
                     step_index=step_index,
                 )
 
@@ -243,22 +260,25 @@ class AgentEngine:
 
                 if tool_calls:
                     state.messages.append(assistant_tool_uses(tool_calls, text=response_text))
-                    for call in tool_calls:
-                        await _ensure_step_within_budget()
-                        summary = await self._run_tool(call, state, step_index, _ensure_step_within_budget)
-                        if summary == "CANCELLED":
-                            step_outcome = "cancelled"
-                            break
-                        if summary == "TERMINATE":
-                            final_summary = json.loads(
-                                state.messages[-1]["content"][0]["content"]
-                            ).get("summary", "stub completed")
-                            return final_summary
-                        if summary == "waiting_approval":
-                            step_outcome = "waiting_approval"
-                            return "waiting_approval"
-                        if summary:
-                            final_summary = summary
+                    tool_outcome = await self._run_tool_batch(
+                        tool_calls,
+                        state,
+                        step_index,
+                        _ensure_step_within_budget,
+                    )
+                    if tool_outcome == "CANCELLED":
+                        step_outcome = "cancelled"
+                        break
+                    if tool_outcome == "waiting_approval":
+                        step_outcome = "waiting_approval"
+                        return "waiting_approval"
+                    if tool_outcome == "TERMINATE":
+                        final_summary = json.loads(
+                            state.messages[-1]["content"][0]["content"]
+                        ).get("summary", "stub completed")
+                        return final_summary
+                    if tool_outcome:
+                        final_summary = tool_outcome
                     if state.cancelled:
                         step_outcome = "cancelled"
                         break
@@ -342,6 +362,64 @@ class AgentEngine:
             },
             step_index=step_index,
         )
+
+    async def _run_tool_batch(
+        self,
+        tool_calls: list[dict[str, Any]],
+        state: TurnState,
+        step_index: int,
+        ensure_step_budget: Callable[[], Awaitable[None]] | None = None,
+    ) -> str | None:
+        """Run tool_calls: consecutive readonly tools in parallel; mutating serial."""
+        index = 0
+        last_summary: str | None = None
+        while index < len(tool_calls):
+            if ensure_step_budget is not None:
+                await ensure_step_budget()
+            call = tool_calls[index]
+            name = str(call.get("name") or "")
+            if name in _CACHEABLE_TOOLS:
+                batch: list[dict[str, Any]] = []
+                while index < len(tool_calls) and str(tool_calls[index].get("name") or "") in _CACHEABLE_TOOLS:
+                    batch.append(tool_calls[index])
+                    index += 1
+                if len(batch) == 1:
+                    summaries = [
+                        await self._run_tool(batch[0], state, step_index, ensure_step_budget)
+                    ]
+                else:
+                    summaries = await asyncio.gather(
+                        *[
+                            self._run_tool(item, state, step_index, ensure_step_budget)
+                            for item in batch
+                        ]
+                    )
+                for summary in summaries:
+                    if summary == "CANCELLED":
+                        return "CANCELLED"
+                    if summary == "waiting_approval":
+                        return "waiting_approval"
+                    if summary == "TERMINATE":
+                        return "TERMINATE"
+                    if summary:
+                        last_summary = summary
+                if state.cancelled:
+                    return "CANCELLED"
+                continue
+
+            summary = await self._run_tool(call, state, step_index, ensure_step_budget)
+            index += 1
+            if summary == "CANCELLED":
+                return "CANCELLED"
+            if summary == "waiting_approval":
+                return "waiting_approval"
+            if summary == "TERMINATE":
+                return "TERMINATE"
+            if summary:
+                last_summary = summary
+            if state.cancelled:
+                return "CANCELLED"
+        return last_summary
 
     async def _run_tool(
         self,

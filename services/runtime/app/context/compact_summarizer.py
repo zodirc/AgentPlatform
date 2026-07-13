@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from typing import Any
@@ -110,13 +111,25 @@ async def _collect_gateway_summary(
     gateway: ModelGateway,
     prompt: str,
 ) -> StructuredSummary | None:
+    from app.settings import settings
+
     stream_messages = [user_message(prompt)]
     collected = ""
-    async for chunk in gateway.stream(messages=stream_messages, tools=[]):
-        if isinstance(chunk, str):
-            collected += chunk
-        elif isinstance(chunk, ModelResponse) and chunk.text:
-            collected += chunk.text
+
+    async def _consume() -> None:
+        nonlocal collected
+        async for chunk in gateway.stream(messages=stream_messages, tools=[]):
+            if isinstance(chunk, str):
+                collected += chunk
+            elif isinstance(chunk, ModelResponse) and chunk.text:
+                collected += chunk.text
+
+    try:
+        await asyncio.wait_for(_consume(), timeout=settings.compact_timeout_seconds)
+    except asyncio.TimeoutError:
+        return None
+    except Exception:
+        return None
 
     text = collected.strip()
     if not text:

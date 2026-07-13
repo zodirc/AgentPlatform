@@ -51,6 +51,7 @@ AgentEngine     while: assemble → model → tools → checkpoint
 - 状态：`TurnState.messages` + 少量控制字段（**非**大 `AgentState`）
 - 编排：模型在循环内选工具；平台管护栏（审批、budget、终止）
 - 禁止：13 节点 pipeline、引擎内 `if scenario` 分支
+- **成熟度**：Agent Harness 六面厚度见 [`14-model-harness.md`](14-model-harness.md)；**loop 语义仍以本文 / `05` 为准**（冻结 while）
 
 **全文**：[`05-agent-runtime.md`](05-agent-runtime.md) + [`06-tools-and-context.md`](06-tools-and-context.md)
 

@@ -13,7 +13,10 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="read_file",
-            description="Read a file from the workspace",
+            description=(
+                "Read a file from the workspace. Use when the path is known "
+                "(including @path refs or hot_files). Prefer this over search_sources for known paths."
+            ),
             parameters={
                 "type": "object",
                 "properties": {"path": {"type": "string"}},

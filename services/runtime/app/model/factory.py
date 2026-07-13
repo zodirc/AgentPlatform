@@ -3,12 +3,19 @@ from __future__ import annotations
 from app.model.anthropic_provider import AnthropicProvider
 from app.model.config import ModelConfig
 from app.model.gateway import ModelGateway, StubModelProvider
+from app.model.generation import GenerationParams
 from app.model.openai_provider import OpenAIProvider
 from app.model.recorded_provider import create_recorded_gateway
 from app.settings import settings
 
 
-def create_gateway(config: ModelConfig | None, *, messages: list | None = None) -> ModelGateway:
+def create_gateway(
+    config: ModelConfig | None,
+    *,
+    messages: list | None = None,
+    scenario_id: str | None = None,
+) -> ModelGateway:
+    generation = GenerationParams.from_settings(scenario_id=scenario_id)
     if messages is not None:
         recorded = create_recorded_gateway(messages)
         if recorded is not None:
@@ -22,6 +29,7 @@ def create_gateway(config: ModelConfig | None, *, messages: list | None = None) 
                 api_key=config.api_key,
                 model_name=config.model_name,
                 base_url=config.base_url,
+                generation=generation,
             )
         )
     if provider_name in {"openai", "gpt"}:
@@ -30,6 +38,7 @@ def create_gateway(config: ModelConfig | None, *, messages: list | None = None) 
                 api_key=config.api_key,
                 model_name=config.model_name,
                 base_url=config.base_url,
+                generation=generation,
             )
         )
     if provider_name == "deepseek":
@@ -38,6 +47,7 @@ def create_gateway(config: ModelConfig | None, *, messages: list | None = None) 
                 api_key=config.api_key,
                 model_name=config.model_name,
                 base_url=config.base_url or "https://api.deepseek.com",
+                generation=generation,
             )
         )
     return ModelGateway(StubModelProvider())

@@ -5,8 +5,9 @@ import json
 import logging
 import time
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
 
@@ -26,7 +27,7 @@ from app.engine.agent_engine import AgentEngine, StepTimeoutError
 from app.engine.state import TurnState, tool_result_message
 from app.model.config import resolve_active_profile_metadata, resolve_context_window_tokens, resolve_model_config
 from app.model.factory import create_gateway
-from app.model.gateway import ModelProviderTimeout
+from app.model.gateway import ModelFatalError, ModelProviderTimeout, ModelTransientError
 from app.observability.metrics import record_turn_finished
 from app.observability.token_budget import check_monthly_token_alert
 from app.scenarios.registry import ScenarioRegistry
@@ -54,6 +55,105 @@ class TurnAbortedError(Exception):
 
 async def request_cancel(turn_id: UUID, *, force: bool = False) -> None:
     await persist_cancel_request(turn_id=turn_id, force=force)
+    # If the worker already died (e.g. event sequence race), nothing will poll the
+    # cancel flag — finalize orphaned running turns so the UI leaves「停止中」.
+    try:
+        await maybe_finalize_orphan_cancel(turn_id, force=force)
+    except Exception:
+        logger.exception("orphan cancel finalize failed turn_id=%s", turn_id)
+
+
+async def maybe_finalize_orphan_cancel(turn_id: UUID, *, force: bool = False) -> bool:
+    """Cancel a running turn that has gone silent (no live worker checking the flag)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT
+            r.id AS run_id,
+            r.status AS run_status,
+            t.status AS turn_status,
+            t.scenario_id,
+            (
+                SELECT te.ts
+                FROM turn_events te
+                WHERE te.turn_id = r.turn_id
+                ORDER BY te.sequence DESC
+                LIMIT 1
+            ) AS last_event_ts,
+            (
+                SELECT te.trace_id
+                FROM turn_events te
+                WHERE te.turn_id = r.turn_id
+                ORDER BY te.sequence ASC
+                LIMIT 1
+            ) AS trace_id
+        FROM runs r
+        JOIN turns t ON t.id = r.turn_id
+        WHERE r.turn_id = $1
+        """,
+        turn_id,
+    )
+    if row is None:
+        return False
+    # Worker owns the run row; if it is already terminal, nothing to orphan-finalize.
+    if row["run_status"] not in {"running", "interrupted"}:
+        return False
+
+    last_ts = row["last_event_ts"]
+    now = datetime.now(timezone.utc)
+    silent_seconds = 2.0 if force else 3.0
+    if last_ts is not None:
+        if last_ts.tzinfo is None:
+            last_ts = last_ts.replace(tzinfo=timezone.utc)
+        age = (now - last_ts).total_seconds()
+        if age < silent_seconds and not force:
+            return False
+
+    trace_id = row["trace_id"] or uuid4()
+    run_id = row["run_id"]
+    scenario_id = row["scenario_id"] or ""
+    logger.warning(
+        "orphan cancel finalize turn_id=%s run_id=%s force=%s",
+        turn_id,
+        run_id,
+        force,
+    )
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await append_event(
+                conn,
+                turn_id=turn_id,
+                run_id=run_id,
+                event_type="turn.cancelling",
+                trace_id=trace_id,
+                payload={"force": force},
+            )
+            await append_event(
+                conn,
+                turn_id=turn_id,
+                run_id=run_id,
+                event_type="turn.cancelled",
+                trace_id=trace_id,
+                payload={"reason": "user_requested"},
+            )
+            await conn.execute(
+                "UPDATE turns SET status = 'cancelled', updated_at = now() WHERE id = $1",
+                turn_id,
+            )
+            await conn.execute(
+                "UPDATE runs SET status = 'cancelled', updated_at = now() WHERE id = $1",
+                run_id,
+            )
+    record_turn_finished(
+        scenario_id=scenario_id,
+        status="cancelled",
+        steps=0,
+        duration_seconds=0.0,
+        input_tokens=0,
+        output_tokens=0,
+    )
+    await delete_checkpoint(run_id)
+    return True
 
 
 async def _check_cancel_flag(turn_id: UUID) -> tuple[bool, bool]:
@@ -103,7 +203,11 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     profile = ScenarioRegistry.get(state.scenario_id)
     registry = build_registry()
     tools = tool_scope(profile, registry)
-    gateway = create_gateway(await resolve_model_config(), messages=state.messages)
+    gateway = create_gateway(
+        await resolve_model_config(),
+        messages=state.messages,
+        scenario_id=state.scenario_id,
+    )
     return PendingTurn(
         state=state,
         profile=profile,
@@ -483,8 +587,15 @@ async def _run_turn(
     profile = ScenarioRegistry.get(scenario_id)
     compiler = InputCompiler()
     compiled = compiler.compile(message)
+    compiled = await compiler.enrich_with_preread(compiled)
     session_ctx = await load_session_context(session_id)
     if session_ctx:
+        # Merge this turn's prereread hot files into session pointers for next turns.
+        hot = list(compiled.metadata.get("hot_files") or [])
+        if hot:
+            existing = [str(v) for v in session_ctx.get("hot_files") or []]
+            merged = list(dict.fromkeys([*hot, *existing]))[:12]
+            session_ctx = {**session_ctx, "hot_files": merged}
         compiled.messages.insert(0, session_context_message(session_ctx))
     model_config = await resolve_model_config()
     has_model_key = model_config is not None
@@ -534,7 +645,7 @@ async def _run_turn(
 
         metrics.inc("should_query_short_circuit_total")
         if gate.slash_command == "compact":
-            gateway = create_gateway(model_config, messages=[])
+            gateway = create_gateway(model_config, messages=[], scenario_id=scenario_id)
             _, confirmation = await compact_session_context(
                 session_id=session_id,
                 turn_id=turn_id,
@@ -610,7 +721,11 @@ async def _run_turn(
 
     registry = build_registry()
     tools = tool_scope(profile, registry)
-    gateway = create_gateway(model_config, messages=compiled.messages)
+    gateway = create_gateway(
+        model_config,
+        messages=compiled.messages,
+        scenario_id=scenario_id,
+    )
     context_window_tokens = await resolve_context_window_tokens(model_config)
 
     async def check_cancel() -> tuple[bool, bool]:
@@ -693,6 +808,21 @@ async def _run_turn(
             trace_id=trace_id,
             termination_reason="model_timeout",
             message=str(exc),
+            scenario_id=scenario_id,
+            steps=state.step_count,
+            duration_seconds=time.monotonic() - started_at,
+        )
+        return
+    except (ModelFatalError, ModelTransientError) as exc:
+        logger.warning("model error turn_id=%s err=%s", turn_id, exc)
+        set_event_writer(None)
+        set_delegate_runtime(None)
+        await _fail_turn(
+            turn_id=turn_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            termination_reason="fatal_error",
+            message=f"model_error: {exc}",
             scenario_id=scenario_id,
             steps=state.step_count,
             duration_seconds=time.monotonic() - started_at,
@@ -893,6 +1023,21 @@ async def _resume_after_approval(
             trace_id=trace_id,
             termination_reason="model_timeout",
             message=str(exc),
+            scenario_id=state.scenario_id,
+            steps=state.step_count,
+            duration_seconds=time.monotonic() - resume_started_at,
+        )
+        return
+    except (ModelFatalError, ModelTransientError) as exc:
+        logger.warning("model error on resume turn_id=%s err=%s", turn_id, exc)
+        set_event_writer(None)
+        set_delegate_runtime(None)
+        await _fail_turn(
+            turn_id=turn_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            termination_reason="fatal_error",
+            message=f"model_error: {exc}",
             scenario_id=state.scenario_id,
             steps=state.step_count,
             duration_seconds=time.monotonic() - resume_started_at,

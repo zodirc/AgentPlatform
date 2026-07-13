@@ -36,6 +36,7 @@ async def scan_stalled_runs() -> None:
         SELECT
             r.id AS run_id,
             r.turn_id,
+            r.cancel_requested_at,
             t.scenario_id,
             (
                 SELECT te.trace_id
@@ -59,13 +60,31 @@ async def scan_stalled_runs() -> None:
         FROM runs r
         JOIN turns t ON t.id = r.turn_id
         WHERE r.status IN ('running', 'interrupted')
-          AND r.cancel_requested_at IS NULL
         """
     )
     for row in rows:
         last_ts = row["last_event_ts"]
         last_sequence = int(row["last_sequence"] or 0)
+        # Orphan cancel: flag set but worker dead — finalize so UI leaves「停止中」.
+        if row["cancel_requested_at"] is not None:
+            from app.controller.turn_controller import maybe_finalize_orphan_cancel
+
+            try:
+                finalized = await maybe_finalize_orphan_cancel(
+                    UUID(str(row["turn_id"])), force=True
+                )
+            except Exception:
+                logger.exception(
+                    "orphan cancel from stall watchdog failed turn_id=%s",
+                    row["turn_id"],
+                )
+                finalized = False
+            if finalized:
+                continue
         if last_ts is None or last_ts >= cutoff:
+            continue
+        if row["cancel_requested_at"] is not None:
+            # Already attempted orphan finalize; avoid double-alerting as stall.
             continue
         turn_id = row["turn_id"]
         run_id = row["run_id"]
