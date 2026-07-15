@@ -13,6 +13,7 @@ tool_names:
   - update_plan
   - remember
   - recall
+  - search_records
   - run_command
   - run_tests
   - read_lints

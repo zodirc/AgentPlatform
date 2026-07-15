@@ -404,6 +404,27 @@ def build_registry() -> ToolRegistry:
             handler=memory_tools.recall,
         )
     )
+    from app.tools.core import records as record_tools
+
+    registry.register(
+        ToolSpec(
+            name="search_records",
+            description=(
+                "Search business/record tables (stub until backends are wired). "
+                "Rule-routed channels with per-channel timeouts; not for sources RAG."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "channel": {"type": "string", "default": "auto"},
+                    "limit": {"type": "integer", "default": 10},
+                },
+                "required": ["query"],
+            },
+            handler=record_tools.search_records,
+        )
+    )
     return registry
 
 
