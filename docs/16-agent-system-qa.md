@@ -4,7 +4,7 @@
 > **读法**：先看 [总览](#总览) 和 [速率红线](#速率红线所有改进方案的前置约束)；单题按 **结论 → 现状 → 缺口 → 方案** 扫读；只想抄结论看 [附录 C](#附录-c--一句话答案卡)。  
 > **口径**：2026-07。  
 > **执行排期（由本文附录 A 导出）**：[17-execution-plan.md](17-execution-plan.md) — S0～S3 冲刺、票粒度与否决项。  
-> **落地后的现状重答**：[19-agent-system-qa-current.md](19-agent-system-qa-current.md) — 同一套 Q0–Q20，按 2026-07 已实现能力重写。  
+> **原理向现状问答**：[19-agent-system-qa-current.md](19-agent-system-qa-current.md) — 同一套 Q0–Q20，按落地代码重写（偏工程原理，少冲刺代号）。  
 > **关联专文**：[05 运行时](05-agent-runtime.md) · [06 工具与上下文](06-tools-and-context.md) · [11 体验 SLO](11-product-experience.md) · [12 评估](12-eval-and-golden-turns.md) · [14 Harness](14-model-harness.md) · [15 全景](15-highlights-vs-legacy.md)
 
 ---
