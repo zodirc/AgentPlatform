@@ -7,6 +7,7 @@ from app.observability.metrics import (
     record_stall_detected,
     record_step_duration,
     record_tool_call,
+    record_tool_misuse,
     record_turn_finished,
 )
 from app.observability.tracing import instrument_fastapi, setup_tracing
@@ -36,9 +37,13 @@ def test_record_helpers() -> None:
         output_tokens=5,
     )
     record_tool_call(tool_name="grep", status="ok")
+    record_tool_misuse(kind="invalid_arguments", tool_name="read_file")
+    record_tool_misuse(kind="cached_repeat", tool_name="list_dir")
     record_step_duration(scenario_id="writing", duration_seconds=0.2)
     record_stall_detected(scenario_id="writing")
-    assert metrics.render_prometheus()
+    body = metrics.render_prometheus()
+    assert "tool_misuse_total" in body
+    assert 'kind="invalid_arguments"' in body
 
 
 def test_tracing_console_exporter() -> None:

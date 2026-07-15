@@ -397,3 +397,107 @@ async def test_agent_engine_search_sources_turn_budget(
     await engine.run(state)
     assert statuses == ["ok", "ok", "error"]
 
+
+@pytest.mark.asyncio
+async def test_agent_engine_marks_unverified_citations(workspace) -> None:
+    draft = ToolSpec(
+        name="draft_section",
+        description="draft",
+        parameters={
+            "type": "object",
+            "properties": {"section_id": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["section_id", "content"],
+        },
+        handler=core.draft_section,
+    )
+    call = {
+        "id": "tc-cite",
+        "name": "draft_section",
+        "input": {
+            "section_id": "01",
+            "content": "A scene with [cite:ghost] invents a source.",
+        },
+    }
+
+    engine = AgentEngine(
+        gateway=FakeGateway([ModelResponse(tool_calls=[call]), ModelResponse(text="done")]),
+        tools=[draft],
+        system_prompt="sys",
+        write_event=AsyncMock(),
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    await engine.run(state)
+    tool_msgs = [m for m in state.messages if m.get("role") == "tool"]
+    assert tool_msgs
+    payload = json.loads(tool_msgs[-1]["content"][0]["content"])
+    assert payload.get("citation_check") == "unverified"
+    assert "cite:ghost" in payload.get("unverified_citations", [])
+
+
+@pytest.mark.asyncio
+async def test_agent_engine_accepts_evidence_backed_citations(workspace) -> None:
+    (workspace / "sources").mkdir()
+    (workspace / "sources" / "ref-a.md").write_text("hero appears", encoding="utf-8")
+
+    async def fake_search(query: str, limit: int = 10, **_kwargs):
+        return {
+            "query": query,
+            "hits": [{"path": "sources/ref-a.md", "excerpt": "hero", "citation_id": "cite:ref-a"}],
+            "summary": "1 hit",
+            "retrieval": "keyword",
+        }
+
+    search = ToolSpec(
+        name="search_sources",
+        description="search",
+        parameters={
+            "type": "object",
+            "properties": {"query": {"type": "string"}},
+            "required": ["query"],
+        },
+        handler=fake_search,
+    )
+    draft = ToolSpec(
+        name="draft_section",
+        description="draft",
+        parameters={
+            "type": "object",
+            "properties": {"section_id": {"type": "string"}, "content": {"type": "string"}},
+            "required": ["section_id", "content"],
+        },
+        handler=core.draft_section,
+    )
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [
+                ModelResponse(tool_calls=[{"id": "s1", "name": "search_sources", "input": {"query": "hero"}}]),
+                ModelResponse(
+                    tool_calls=[
+                        {
+                            "id": "d1",
+                            "name": "draft_section",
+                            "input": {
+                                "section_id": "01",
+                                "content": "Hero returns [cite:ref-a].",
+                            },
+                        }
+                    ]
+                ),
+                ModelResponse(text="done"),
+            ],
+            one_per_stream=True,
+        ),
+        tools=[search, draft],
+        system_prompt="sys",
+        write_event=AsyncMock(),
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    state.max_steps = 6
+    await engine.run(state)
+    tool_msgs = [m for m in state.messages if m.get("role") == "tool"]
+    draft_payload = json.loads(tool_msgs[-1]["content"][0]["content"])
+    assert draft_payload.get("citation_check") == "ok"
+    assert draft_payload.get("unverified_citations") == []
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.model.anthropic_provider import AnthropicProvider
 from app.model.config import ModelConfig
+from app.model.egress import ensure_model_egress_allowed
 from app.model.gateway import ModelGateway, StubModelProvider
 from app.model.generation import GenerationParams
 from app.model.openai_provider import OpenAIProvider
@@ -24,29 +25,35 @@ def create_gateway(
         return ModelGateway(StubModelProvider())
     provider_name = config.provider.lower()
     if provider_name in {"anthropic", "claude"}:
+        base_url = ensure_model_egress_allowed(provider_name, config.base_url)
         return ModelGateway(
             AnthropicProvider(
                 api_key=config.api_key,
                 model_name=config.model_name,
-                base_url=config.base_url,
+                base_url=base_url,
                 generation=generation,
             )
         )
     if provider_name in {"openai", "gpt"}:
+        base_url = ensure_model_egress_allowed(provider_name, config.base_url)
         return ModelGateway(
             OpenAIProvider(
                 api_key=config.api_key,
                 model_name=config.model_name,
-                base_url=config.base_url,
+                base_url=base_url,
                 generation=generation,
             )
         )
     if provider_name == "deepseek":
+        base_url = ensure_model_egress_allowed(
+            provider_name,
+            config.base_url or "https://api.deepseek.com",
+        )
         return ModelGateway(
             OpenAIProvider(
                 api_key=config.api_key,
                 model_name=config.model_name,
-                base_url=config.base_url or "https://api.deepseek.com",
+                base_url=base_url,
                 generation=generation,
             )
         )

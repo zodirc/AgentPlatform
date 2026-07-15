@@ -41,6 +41,22 @@ class ToolExecutor:
                 "tool_call_id": tool_call_id,
                 "tool_name": tool_name,
             }
+
+        from app.settings import settings
+        from app.tools.validate import validate_tool_arguments
+
+        if settings.tool_schema_validate:
+            invalid = validate_tool_arguments(
+                tool_name=tool_name,
+                arguments=arguments,
+                parameters=spec.parameters,
+            )
+            if invalid is not None:
+                from app.observability.metrics import record_tool_misuse
+
+                record_tool_misuse(kind="invalid_arguments", tool_name=tool_name)
+                return invalid
+
         timeout_s = spec.timeout_s
         try:
             result = await asyncio.wait_for(
@@ -52,6 +68,15 @@ class ToolExecutor:
             return {
                 "status": "timeout",
                 "summary": f"tool {tool_name} timed out after {timeout_s:.0f}s",
+            }
+        except TypeError as exc:
+            # Defensive: unexpected kwargs / missing positional after schema gate.
+            return {
+                "error": "invalid_arguments",
+                "tool_name": tool_name,
+                "summary": f"Tool {tool_name} rejected arguments: {exc}",
+                "details": [str(exc)],
+                "missing": [],
             }
         except Exception as exc:
             return {"error": str(exc)}

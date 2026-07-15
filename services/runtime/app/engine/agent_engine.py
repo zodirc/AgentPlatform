@@ -10,9 +10,10 @@ from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message
 from app.model.gateway import ModelError, ModelGateway, ModelResponse
-from app.observability.metrics import record_step_duration, record_tool_call
+from app.observability.metrics import record_step_duration, record_tool_call, record_tool_misuse
 from app.settings import settings
 from app.tools.registry import ToolSpec
+from app.tools.validate import extract_citation_ids
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +59,7 @@ class AgentEngine:
         self._tool_result_cache: dict[str, dict[str, Any]] = {}
         self._tool_repeat_counts: dict[str, int] = {}
         self._search_sources_calls = 0
+        self._evidence_citation_ids: set[str] = set()
         self._openai_tools = [
             {
                 "name": t.name,
@@ -70,6 +72,7 @@ class AgentEngine:
     async def run(self, state: TurnState) -> str | None:
         final_summary: str | None = None
         self._search_sources_calls = 0
+        self._evidence_citation_ids = set()
 
         while state.step_count < state.max_steps:
             if self._budget_exceeded(state):
@@ -333,6 +336,7 @@ class AgentEngine:
                 "Do NOT call this tool again with the same arguments. "
                 "Use prior results, try a different path, or produce the deliverable."
             )
+            record_tool_misuse(kind="cached_repeat", tool_name=tool_name)
         return result
 
     def _store_tool_cache(
@@ -452,6 +456,7 @@ class AgentEngine:
                         "hits": [],
                         "retrieval": "none",
                     }
+                    record_tool_misuse(kind="search_budget", tool_name="search_sources")
                     state.messages.append(
                         tool_result_message(
                             tool_call_id,
@@ -498,6 +503,10 @@ class AgentEngine:
                 state=state,
             )
             self._store_tool_cache(tool_name, arguments, result)
+
+        self._ingest_evidence(tool_name, result)
+        if settings.citation_verify_enabled:
+            self._annotate_unverified_citations(tool_name, arguments, result)
 
         if tool_name == "run_command" and result.get("stdout"):
             stdout = str(result["stdout"])
@@ -659,10 +668,76 @@ class AgentEngine:
             step_index=step_index,
         )
         record_tool_call(tool_name=tool_name, status=tool_status)
-        state.messages.append(tool_result_message(tool_call_id, json.dumps(result)))
+        is_error = bool(result.get("error")) or tool_status == "error"
+        state.messages.append(
+            tool_result_message(tool_call_id, json.dumps(result, ensure_ascii=False), is_error=is_error)
+        )
         if tool_name == "stub_echo":
             return "TERMINATE"
         return str(summary)
+
+    def _ingest_evidence(self, tool_name: str, result: dict[str, Any]) -> None:
+        if tool_name == "search_sources":
+            hits = result.get("hits")
+            if isinstance(hits, list):
+                for hit in hits:
+                    if not isinstance(hit, dict):
+                        continue
+                    cid = hit.get("citation_id")
+                    if cid:
+                        self._evidence_citation_ids.add(str(cid))
+        if tool_name == "check_citation" and result.get("valid") is True:
+            cid = result.get("citation_id")
+            if cid:
+                self._evidence_citation_ids.add(str(cid))
+
+    def _annotate_unverified_citations(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        result: dict[str, Any],
+    ) -> None:
+        if result.get("error") or result.get("status") in {"approval_required", "timeout", "cancelled"}:
+            return
+        texts: list[str] = []
+        if tool_name == "draft_section":
+            texts.append(str(arguments.get("content", "")))
+        elif tool_name == "propose_patch":
+            texts.append(str(arguments.get("new_text", "")))
+        elif tool_name == "export_document":
+            # Prefer exported content path already written; fall back to args only.
+            texts.append(str(result.get("summary", "")))
+            # Scan revised section bodies from return payload if present.
+            for key in ("preview", "content"):
+                if result.get(key):
+                    texts.append(str(result[key]))
+        elif tool_name == "write_file":
+            texts.append(str(arguments.get("content", "")))
+        else:
+            return
+
+        cited: list[str] = []
+        for text in texts:
+            for cid in extract_citation_ids(text):
+                if cid not in cited:
+                    cited.append(cid)
+        if not cited:
+            return
+
+        unverified = [cid for cid in cited if cid not in self._evidence_citation_ids]
+        result["citations_found"] = cited
+        result["unverified_citations"] = unverified
+        if unverified:
+            note = (
+                "Unverified citations (not in this Turn's retrieval/check_citation evidence): "
+                + ", ".join(unverified)
+            )
+            prev = str(result.get("summary") or "")
+            result["summary"] = f"{prev}; {note}" if prev else note
+            result["citation_check"] = "unverified"
+            record_tool_misuse(kind="unverified_citation", tool_name=tool_name)
+        else:
+            result["citation_check"] = "ok"
 
 
 def _chunk_text(text: str, size: int = 16) -> list[str]:

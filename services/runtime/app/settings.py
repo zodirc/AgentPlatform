@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     search_sources_max_per_turn: int = 3
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15
+    # S0 harness guards (docs/17-execution-plan.md).
+    tool_schema_validate: bool = True
+    citation_verify_enabled: bool = True
+    model_egress_enforce: bool = True
+    # Comma-separated extra base URLs or hosts allowed for live model calls.
+    model_egress_allowlist: str = ""
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
     writing_cards_dir: str = "sources/cards"
     writing_cards_max_chars: int = 2000

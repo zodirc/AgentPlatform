@@ -103,6 +103,14 @@ def record_tool_call(*, tool_name: str, status: str) -> None:
     metrics.inc("tool_calls_total", tool_name=tool_name, status=status)
 
 
+def record_tool_misuse(*, kind: str, tool_name: str = "") -> None:
+    """Offline-friendly misuse counters (invalid_arguments / cached_repeat / search_budget)."""
+    labels: dict[str, str] = {"kind": kind}
+    if tool_name:
+        labels["tool_name"] = tool_name
+    metrics.inc("tool_misuse_total", **labels)
+
+
 def record_step_duration(*, scenario_id: str, duration_seconds: float) -> None:
     metrics.observe("turn_step_duration_seconds", duration_seconds, scenario_id=scenario_id)
 
