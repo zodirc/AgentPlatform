@@ -1,4 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import {
   PatchDiffPanel,
@@ -88,8 +90,23 @@ export function AgentSidebar({
   onOpenSourcesLibrary,
   onClose,
 }: Props) {
+  const queryClient = useQueryClient();
+  const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
   const view = wb.view;
   const artifacts = view?.artifacts ?? [];
+
+  const refreshWorkspace = async () => {
+    setWorkspaceRefreshing(true);
+    try {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["workspace-entries"] }),
+        queryClient.invalidateQueries({ queryKey: ["workspace-file-viewer"] }),
+        queryClient.invalidateQueries({ queryKey: ["workspace-sources"] }),
+      ]);
+    } finally {
+      setWorkspaceRefreshing(false);
+    }
+  };
 
   const patches = artifacts.filter(
     isPatchArtifact,
@@ -164,16 +181,31 @@ export function AgentSidebar({
           <h2 className="text-sm font-semibold text-slate-200">产物</h2>
           <p className="text-xs text-slate-500">工作区文件 · 工具输出</p>
         </div>
-        {onClose ? (
+        <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className="shrink-0 rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-900 hover:text-slate-200"
-            title="收起产物栏"
-            onClick={onClose}
+            className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-900 hover:text-slate-100 disabled:opacity-50"
+            title="刷新工作区文件树"
+            disabled={workspaceRefreshing}
+            onClick={() => void refreshWorkspace()}
           >
-            ‹
+            <RefreshCw
+              className={`size-3.5 ${workspaceRefreshing ? "animate-spin" : ""}`}
+              aria-hidden
+            />
+            刷新
           </button>
-        ) : null}
+          {onClose ? (
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-900 hover:text-slate-200"
+              title="收起产物栏"
+              onClick={onClose}
+            >
+              ‹
+            </button>
+          ) : null}
+        </div>
       </header>
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
