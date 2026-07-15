@@ -14,8 +14,9 @@ import structlog
 from app.contracts.event_validation import EventPayloadValidationError
 from app.controller.events import append_event, run_exists
 from app.controller.input_compiler import InputCompiler, should_query
-from app.controller.session_compact import compact_session_context
+from app.controller.session_compact import compact_session_context, save_session_context_summary, session_turn_count
 from app.controller.session_transcript import load_session_transcript, save_session_transcript
+from app.controller.plan_backfill import extract_open_plan_items
 from app.controller.runtime_context import set_event_writer
 from app.controller.checkpoint_store import delete_checkpoint, load_checkpoint, save_checkpoint
 from app.controller.pending_store import PendingTurn, get, pop, save
@@ -575,7 +576,32 @@ async def _finalize_turn(
     )
     await check_monthly_token_alert()
     await save_session_transcript(state.session_id, state.messages)
+    await _backfill_plan_open_items(state)
     await delete_checkpoint(run_id)
+
+
+async def _backfill_plan_open_items(state: TurnState) -> None:
+    """Turn-tail async: merge pending plan titles into sessions.context_summary (non-blocking path)."""
+    open_items = extract_open_plan_items(state.messages)
+    if not open_items:
+        return
+    try:
+        existing = await load_session_context(state.session_id) or {}
+        turn_count = await session_turn_count(state.session_id)
+        record = {
+            **existing,
+            "last_turn_id": str(state.turn_id),
+            "last_status": "completed",
+            "turn_count": turn_count,
+            "open_items": open_items[:10],
+            "source": "plan_backfill",
+        }
+        if not record.get("task"):
+            # Keep a thin task pointer from first open item if none.
+            record["task"] = open_items[0][:300]
+        await save_session_context_summary(state.session_id, record)
+    except Exception:
+        logger.exception("plan open_items backfill failed session_id=%s", state.session_id)
 
 
 async def _run_turn(
