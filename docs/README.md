@@ -38,15 +38,18 @@
 
 ## 推荐阅读路径
 
-1. **[02-architecture.md](02-architecture.md)** — 架构地图（先读）
-2. **[05-agent-runtime.md](05-agent-runtime.md)** + **[06-tools-and-context.md](06-tools-and-context.md)** — 内核
-3. **[14-model-harness.md](14-model-harness.md)** — **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地）
-4. **[10-product-modes.md](10-product-modes.md)** — 场景（writing / agent）与扩展宪法
-5. **[11-product-experience.md](11-product-experience.md)** — **好用**、长期运行、体验 SLO
-6. **[12-eval-and-golden-turns.md](12-eval-and-golden-turns.md)** — **成熟可证明**：golden、metrics、CI
-7. **[contracts.md](contracts.md)** — 契约接缝（API、事件、DDL、内部命令）
-8. **[07-domain-model.md](07-domain-model.md)** + **[09-event-projection-pipeline.md](09-event-projection-pipeline.md)** — 领域与事件流水线
-9. **[03-docker-runtime.md](03-docker-runtime.md)** — 部署、环境变量、工作区与沙箱（§8）
+1. **[15-highlights-vs-legacy.md](15-highlights-vs-legacy.md)** — **相对旧项目全景说明**（§1–25 叙事 + §26–42 机制级深潜；可独立仓库 / AI 分析）
+2. **[02-architecture.md](02-architecture.md)** — 架构地图
+3. **[05-agent-runtime.md](05-agent-runtime.md)** + **[06-tools-and-context.md](06-tools-and-context.md)** — 内核
+4. **[14-model-harness.md](14-model-harness.md)** — **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地）
+5. **[10-product-modes.md](10-product-modes.md)** — 场景（writing / agent）与扩展宪法
+6. **[11-product-experience.md](11-product-experience.md)** — **好用**、长期运行、体验 SLO
+7. **[12-eval-and-golden-turns.md](12-eval-and-golden-turns.md)** — **成熟可证明**：golden、metrics、CI
+8. **[contracts.md](contracts.md)** — 契约接缝（API、事件、DDL、内部命令）
+9. **[07-domain-model.md](07-domain-model.md)** + **[09-event-projection-pipeline.md](09-event-projection-pipeline.md)** — 领域与事件流水线
+10. **[03-docker-runtime.md](03-docker-runtime.md)** — 部署、环境变量、工作区与沙箱（§8）
+11. **[16-agent-system-qa.md](16-agent-system-qa.md)** — 面试/设计向问答（含落地场景与方案速率评估）
+12. **[17-execution-plan.md](17-execution-plan.md)** — 由 16 导出的执行方案（S0–S3，速率红线内）
 
 ## 完整目录
 
@@ -66,6 +69,9 @@
 | [12-eval-and-golden-turns.md](12-eval-and-golden-turns.md) | Golden Turn、可观测、CI 分层 |
 | [13-writing-delivery-issues.md](13-writing-delivery-issues.md) | 写作交付问题与修复记录 |
 | [14-model-harness.md](14-model-harness.md) | **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地） |
+| [15-highlights-vs-legacy.md](15-highlights-vs-legacy.md) | **相对旧项目全景说明**（自洽长文 + §26 机制级深潜；可独立分发 / AI 分析） |
+| [16-agent-system-qa.md](16-agent-system-qa.md) | **Agent 系统问答（0–20）**：落地场景、机制对照、改进方案与**交互速率影响** |
+| [17-execution-plan.md](17-execution-plan.md) | **执行方案**：由 16 附录 A 导出的 S0–S3 冲刺、票粒度、否决项与验收闸 |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 
