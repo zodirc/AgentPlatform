@@ -170,6 +170,30 @@ async def verify_pass_command(
     return {"accepted": True, **run_verify_pass(session_id=session_id)}
 
 
+@router.post("/warmup-retrieval", status_code=status.HTTP_202_ACCEPTED)
+async def warmup_retrieval_command(
+    prefix: str = "",
+    _: None = Depends(verify_internal_token),
+):
+    """Typing-time / idle warm-up — fire-and-forget (docs/17 S3 A18)."""
+    import asyncio
+
+    text = (prefix or "warmup").strip()[:200] or "warmup"
+
+    async def _warm() -> None:
+        try:
+            from app.retrieval.embedder import get_embedder
+            from app.retrieval.store import get_sources_store
+
+            await asyncio.to_thread(get_embedder().embed, text)
+            await asyncio.to_thread(get_sources_store().load)
+        except Exception:
+            logger.exception("warmup-retrieval failed")
+
+    asyncio.create_task(_warm())
+    return {"accepted": True, "status": "warming"}
+
+
 workspace_router = APIRouter(prefix="/internal/workspace", tags=["workspace"])
 
 

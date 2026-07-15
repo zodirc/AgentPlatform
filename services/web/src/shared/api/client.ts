@@ -417,3 +417,18 @@ export async function uploadSourceText(
   });
   return uploadSourceFile(file);
 }
+
+/** Debounced typing warm-up for embedder/index (docs/17 S3 A18). Best-effort. */
+export async function warmupRetrieval(prefix = ""): Promise<void> {
+  const params = new URLSearchParams();
+  if (prefix.trim()) params.set("prefix", prefix.slice(0, 200));
+  const qs = params.toString();
+  const url = qs
+    ? `${API_BASE}/retrieval/warmup?${qs}`
+    : `${API_BASE}/retrieval/warmup`;
+  try {
+    await fetch(url, { method: "POST", headers: adminAuthHeaders() });
+  } catch {
+    // Ignore warm-up failures.
+  }
+}

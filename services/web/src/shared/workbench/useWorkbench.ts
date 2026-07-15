@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   acceptPatch,
@@ -10,6 +10,7 @@ import {
   fetchTurnView,
   rejectPatch,
   startTurn,
+  warmupRetrieval,
   type TurnEvent,
   type TurnSummary,
   type TurnView,
@@ -77,7 +78,16 @@ export function useWorkbenchImpl(): WorkbenchState {
     useState<ScenarioId>("writing");
   const [turnHistory, setTurnHistory] = useState<TurnHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessageState] = useState("");
+  const warmupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const setMessage = useCallback((value: string) => {
+    setMessageState(value);
+    if (warmupTimerRef.current) clearTimeout(warmupTimerRef.current);
+    if (!value.trim()) return;
+    warmupTimerRef.current = setTimeout(() => {
+      void warmupRetrieval(value);
+    }, 300);
+  }, []);
   const [submittedMessage, setSubmittedMessage] = useState<string | null>(null);
   const [turnId, setTurnId] = useState<string | null>(null);
   const [view, setView] = useState<TurnView | null>(null);

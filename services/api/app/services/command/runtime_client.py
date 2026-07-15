@@ -186,3 +186,14 @@ class RuntimeClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def warmup_retrieval(self, *, prefix: str = "") -> dict:
+        params = {"prefix": prefix} if prefix else None
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/internal/commands/warmup-retrieval",
+                params=params,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()

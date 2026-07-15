@@ -119,3 +119,15 @@ async def create_turn(
         user_input=turn["user_input"],
         created_at=turn["created_at"],
     )
+
+
+@router.post("/retrieval/warmup", status_code=status.HTTP_202_ACCEPTED)
+async def warmup_retrieval(prefix: str = ""):
+    """Typing-time retrieve warm-up; never blocks a turn (docs/17 S3 A18)."""
+    from app.services.command.runtime_client import RuntimeClient
+
+    try:
+        await RuntimeClient().warmup_retrieval(prefix=prefix[:200])
+    except Exception:
+        logger.exception("warmup_retrieval failed")
+    return {"accepted": True}
