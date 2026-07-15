@@ -148,8 +148,16 @@ S0（A1 先于 A2/A3）
 
 ### S1 冲刺出口
 
-- [ ] A6–A8 落地；无新增默认同步 LLM
-- [ ] `make eval-all` 绿
+- [x] A6–A8 落地（2026-07；各自独立 commit）
+- [ ] `make eval-all` 绿（合入前跑）
+
+**S1 落地路径**
+
+| ID | Commit 主题 |
+|----|-------------|
+| A6 | Suggest update_plan for multi-goal turns via Intake hints |
+| A7 | Backfill pending plan items into session context after turns |
+| A8 | Pass path pointers and hot files into delegate sub-agents |
 
 ---
 
