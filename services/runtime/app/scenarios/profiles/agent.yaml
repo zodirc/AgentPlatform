@@ -11,6 +11,8 @@ tool_names:
   - edit_file
   - search_codebase
   - update_plan
+  - remember
+  - recall
   - run_command
   - run_tests
   - read_lints

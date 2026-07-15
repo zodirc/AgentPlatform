@@ -360,6 +360,50 @@ def build_registry() -> ToolRegistry:
             timeout_s=settings.tool_default_timeout_seconds,
         )
     )
+    from app.tools.core import memory as memory_tools
+
+    registry.register(
+        ToolSpec(
+            name="remember",
+            description=(
+                "Store a preference or durable note in a separate memory namespace "
+                "(not the sources RAG index). Call only when the user asks to remember."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "namespace": {
+                        "type": "string",
+                        "default": "prefs",
+                        "description": "Logical bucket such as prefs|style|project",
+                    },
+                    "importance": {"type": "number", "default": 0.5},
+                },
+                "required": ["text"],
+            },
+            handler=memory_tools.remember,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="recall",
+            description=(
+                "On-demand recall from memory namespaces. Do not call every turn — "
+                "only when preferences/past notes are relevant."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "namespace": {"type": "string", "default": "prefs"},
+                    "limit": {"type": "integer", "default": 5},
+                },
+                "required": ["query"],
+            },
+            handler=memory_tools.recall,
+        )
+    )
     return registry
 
 

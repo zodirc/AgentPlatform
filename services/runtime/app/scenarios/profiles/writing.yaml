@@ -11,6 +11,8 @@ tool_names:
   - search_sources
   - check_citation
   - export_document
+  - remember
+  - recall
   - delegate
 subagent_types:
   - researcher
