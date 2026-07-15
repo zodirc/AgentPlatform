@@ -48,8 +48,9 @@
 8. **[contracts.md](contracts.md)** — 契约接缝（API、事件、DDL、内部命令）
 9. **[07-domain-model.md](07-domain-model.md)** + **[09-event-projection-pipeline.md](09-event-projection-pipeline.md)** — 领域与事件流水线
 10. **[03-docker-runtime.md](03-docker-runtime.md)** — 部署、环境变量、工作区与沙箱（§8）
-11. **[16-agent-system-qa.md](16-agent-system-qa.md)** — 面试/设计向问答（含落地场景与方案速率评估）
-12. **[17-execution-plan.md](17-execution-plan.md)** — 由 16 导出的执行方案（S0–S3，速率红线内）
+11. **[16-agent-system-qa.md](16-agent-system-qa.md)** — 面试/设计向问答（方案设计过程与速率安全化）
+12. **[19-agent-system-qa-current.md](19-agent-system-qa-current.md)** — **同上问题集的现状重答**（S0–S3 落地后）
+13. **[17-execution-plan.md](17-execution-plan.md)** — 由 16 导出的执行方案（S0–S3，速率红线内）
 
 ## 完整目录
 
