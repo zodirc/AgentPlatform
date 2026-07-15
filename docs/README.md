@@ -74,6 +74,7 @@
 | [16-agent-system-qa.md](16-agent-system-qa.md) | **Agent 系统问答（0–20）**：落地场景、机制对照、改进方案与**交互速率影响** |
 | [17-execution-plan.md](17-execution-plan.md) | **执行方案**：由 16 附录 A 导出的 S0–S3 冲刺、票粒度、否决项与验收闸（**S0–S3 代码已落地**） |
 | [18-a20-multitable-recall.md](18-a20-multitable-recall.md) | **A20 多表召回蓝图** + `search_records` stub |
+| [19-agent-system-qa-current.md](19-agent-system-qa-current.md) | **Agent 系统问答现状重答（0–20）**：S0–S3 落地后的事实对照 |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 
