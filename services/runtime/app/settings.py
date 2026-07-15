@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     model_egress_enforce: bool = True
     # Comma-separated extra base URLs or hosts allowed for live model calls.
     model_egress_allowlist: str = ""
+    # Content privacy (docs/17 S2 A15/A16) — regex only; never LLM desensitization.
+    pii_redact_enabled: bool = True
+    secret_scan_enabled: bool = True
+    secret_scan_timeout_ms: float = 50.0
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
     writing_cards_dir: str = "sources/cards"
     writing_cards_max_chars: int = 2000

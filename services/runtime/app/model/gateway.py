@@ -592,6 +592,11 @@ class ModelGateway:
         max_attempts = max(1, settings.model_max_retries + 1)
         attempt = 0
         last_error: BaseException | None = None
+        outbound = messages
+        if settings.pii_redact_enabled:
+            from app.privacy.redact import redact_messages
+
+            outbound = redact_messages(messages)
 
         try:
             while attempt < max_attempts:
@@ -606,7 +611,7 @@ class ModelGateway:
                 emitted = False
                 try:
                     async for item in self._stream_attempt(
-                        messages=messages,
+                        messages=outbound,
                         tools=tools,
                         overall_deadline=overall_deadline,
                         attempt_abort=attempt_abort,
