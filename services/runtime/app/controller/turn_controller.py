@@ -722,7 +722,10 @@ async def _run_turn(
                         run_id=run_id,
                         event_type="turn.completed",
                         trace_id=trace_id,
-                        payload={"summary": confirmation, "session_compacted": True},
+                        payload={
+                            "summary": confirmation,
+                            "termination_reason": "local_response",
+                        },
                     )
                     await conn.execute(
                         "UPDATE turns SET status = 'completed', updated_at = now() WHERE id = $1",
@@ -741,6 +744,8 @@ async def _run_turn(
             from app.controller.verify_pass import run_verify_pass
 
             report = run_verify_pass(session_id=str(session_id))
+            # turn.completed schema is closed; keep details inside summary only.
+            summary = str(report.get("summary") or "Verify complete")[:4096]
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     await append_event(
@@ -750,9 +755,8 @@ async def _run_turn(
                         event_type="turn.completed",
                         trace_id=trace_id,
                         payload={
-                            "summary": report["summary"],
-                            "verify": report,
-                            "mutated_draft": False,
+                            "summary": summary,
+                            "termination_reason": "local_response",
                         },
                     )
                     await conn.execute(
