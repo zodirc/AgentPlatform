@@ -11,6 +11,7 @@ from app.settings import settings
 _SLASH_HELP = re.compile(r"^\s*/help\b", re.I)
 _SLASH_VERSION = re.compile(r"^\s*/version\b", re.I)
 _SLASH_COMPACT = re.compile(r"^\s*/compact\b", re.I)
+_SLASH_VERIFY = re.compile(r"^\s*/verify\b", re.I)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
 _NUMBERED_GOAL = re.compile(r"(?m)^\s*(?:\d+[\.\)、]|[-*•]\s+\S)")
 _GOAL_JOIN = re.compile(
@@ -159,6 +160,7 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
                 "  /help — this message\n"
                 "  /version — platform version\n"
                 "  /compact — compact session context into summary\n"
+                "  /verify — fact-check drafts/exports (does not mutate drafts)\n"
                 "Send any other message to start a turn."
             ),
         )
@@ -166,6 +168,8 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
         return ShouldQueryResult(False, local_response="Agent Platform v0.1.0 (Phase 1)")
     if _SLASH_COMPACT.match(text):
         return ShouldQueryResult(False, slash_command="compact")
+    if _SLASH_VERIFY.match(text):
+        return ShouldQueryResult(False, slash_command="verify")
     if not has_model_key:
         # Stub mode still runs engine with deterministic stub provider
         return ShouldQueryResult(True)

@@ -93,10 +93,47 @@ async def handle_session_summary(payload: dict) -> None:
     await project_session(row["session_id"])
 
 
+async def handle_verify_sample(payload: dict) -> None:
+    """Night/offline sample ≤5% of recent completed sessions (docs/17 S3 A4)."""
+    import random
+
+    sample_rate = float(payload.get("sample_rate", 0.05))
+    sample_rate = min(max(sample_rate, 0.0), 0.05)
+    limit = int(payload.get("limit", 40))
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT id::text AS session_id
+        FROM sessions
+        ORDER BY updated_at DESC NULLS LAST
+        LIMIT $1
+        """,
+        limit,
+    )
+    selected = [r["session_id"] for r in rows if random.random() < sample_rate]
+    if not selected and rows:
+        # Always exercise at least one when cron fires with tiny N.
+        selected = [rows[0]["session_id"]]
+    client = RuntimeClient()
+    reports: list[dict] = []
+    for session_id in selected[:5]:
+        try:
+            reports.append(await client.verify_pass(session_id=session_id))
+        except Exception:
+            logger.exception("verify sample failed session=%s", session_id)
+    logger.info(
+        "verify.sample done rate=%.3f selected=%s reports=%s",
+        sample_rate,
+        len(selected),
+        len(reports),
+    )
+
+
 HANDLERS = {
     "projection.refresh": handle_projection_refresh,
     "sources.index_sync": handle_sources_index_sync,
     "session.summary": handle_session_summary,
+    "verify.sample": handle_verify_sample,
 }
 
 

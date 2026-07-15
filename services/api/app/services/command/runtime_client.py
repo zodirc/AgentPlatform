@@ -175,3 +175,14 @@ class RuntimeClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def verify_pass(self, *, session_id: str | None = None) -> dict:
+        params = {"session_id": session_id} if session_id else None
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{self.base_url}/internal/commands/verify-pass",
+                params=params,
+                headers=self._headers(),
+            )
+            resp.raise_for_status()
+            return resp.json()

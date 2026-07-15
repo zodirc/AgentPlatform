@@ -735,6 +735,37 @@ async def _run_turn(
                         run_id,
                     )
             return
+        if gate.slash_command == "verify":
+            from app.controller.verify_pass import run_verify_pass
+
+            report = run_verify_pass(session_id=str(session_id))
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    await append_event(
+                        conn,
+                        turn_id=turn_id,
+                        run_id=run_id,
+                        event_type="turn.completed",
+                        trace_id=trace_id,
+                        payload={
+                            "summary": report["summary"],
+                            "verify": report,
+                            "mutated_draft": False,
+                        },
+                    )
+                    await conn.execute(
+                        "UPDATE turns SET status = 'completed', updated_at = now() WHERE id = $1",
+                        turn_id,
+                    )
+                    await conn.execute(
+                        """
+                        UPDATE runs
+                        SET status = 'succeeded', termination_reason = 'user_verify', updated_at = now()
+                        WHERE id = $1
+                        """,
+                        run_id,
+                    )
+            return
         if gate.local_response:
             async with pool.acquire() as conn:
                 async with conn.transaction():

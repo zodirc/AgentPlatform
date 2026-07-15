@@ -159,6 +159,17 @@ async def sync_sources_index_command(_: None = Depends(verify_internal_token)):
     return {"accepted": True, **result}
 
 
+@router.post("/verify-pass", status_code=status.HTTP_200_OK)
+async def verify_pass_command(
+    session_id: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """User/offline fact-check; never mutates drafts (docs/17 S3 A4)."""
+    from app.controller.verify_pass import run_verify_pass
+
+    return {"accepted": True, **run_verify_pass(session_id=session_id)}
+
+
 workspace_router = APIRouter(prefix="/internal/workspace", tags=["workspace"])
 
 
