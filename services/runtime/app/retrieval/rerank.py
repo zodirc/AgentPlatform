@@ -1,3 +1,11 @@
+"""Optional post-fusion rerank for hybrid retrieval.
+
+Default posture (docs/16 Q8/Q13, docs/17 S2 A12):
+- Lexical rerank: ON when ``retrieval_rerank_enabled`` (default True) — cheap CPU.
+- Cross-encoder: OFF by default. If enabled experimentally, only score a pool of
+  at most 20 hits, honor ``retrieval_rerank_timeout_seconds`` (default 50ms), and
+  fall back to lexical order on timeout or load failure.
+"""
 from __future__ import annotations
 
 import logging
@@ -15,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 _cross_encoder: object | None = None
 _cross_encoder_key: str | None = None
+
+# Hard cap when experimental cross-encoder is enabled (docs/17 A12).
+_CROSS_ENCODER_POOL_CAP = 20
 
 
 def lexical_rerank_score(query: str, hit: ChunkHit) -> float:
@@ -85,7 +96,10 @@ def cross_encoder_rerank(query: str, hits: list[ChunkHit], *, limit: int) -> lis
 def rerank_hits(query: str, hits: list[ChunkHit], *, limit: int) -> list[ChunkHit]:
     if not hits:
         return []
-    pool = hits[: max(limit, settings.retrieval_rerank_pool)]
+    pool_n = max(limit, settings.retrieval_rerank_pool)
+    if settings.retrieval_rerank_cross_encoder:
+        pool_n = min(pool_n, _CROSS_ENCODER_POOL_CAP)
+    pool = hits[:pool_n]
     if settings.retrieval_rerank_cross_encoder:
         try:
             return cross_encoder_rerank(query, pool, limit=limit)

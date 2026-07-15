@@ -35,8 +35,8 @@ make eval-retrieval
 | 冲刺 | 主题 | 覆盖附录项 | 预期体感 | 建议工期（单人） |
 |------|------|------------|----------|------------------|
 | **S0** | 主路径纠错与可观测（净提速） | A1 A2 A3 A14 | 少空转、假参数更快失败、引用可追踪 | **代码已落地（2026-07）**；合入后跑本表出口清单 |
-| **S1** | 写作/Agent 引导与委派卫生 | A6 A7 A8 | 规划更清楚、委派更省 token；**不增加默认轮次** | 2–3 天 |
-| **S2** | 检索热路径去同步 + 隐私硬化 | A9 A15 A16（A12 仅确认默认） | 搜索不卡索引；出站更可控 | 3–5 天 |
+| **S1** | 写作/Agent 引导与委派卫生 | A6 A7 A8 | 规划更清楚、委派更省 token；**不增加默认轮次** | **代码已落地（2026-07）** |
+| **S2** | 检索热路径去同步 + 隐私硬化 | A9 A15 A16（A12 仅确认默认） | 搜索不卡索引；出站更可控 | **代码已落地（2026-07）**；合入前跑 retrieval/eval |
 | **S3** | 扩库与深化（按需启动） | A10 A11；按需 A4 A5 A13 A17–A21 | 千～万档资料；质量分离线 | 视目标 1–3 周 |
 
 依赖关系：
@@ -205,8 +205,18 @@ S0（A1 先于 A2/A3）
 
 ### S2 冲刺出口
 
-- [ ] A9 为默认行为；A15/A16 可开关上线
-- [ ] `make eval-retrieval`（及 queue 若动 worker）绿
+- [x] A9 为默认行为；A15/A16 可开关上线（2026-07；各自独立 commit）
+- [x] A12 rerank 默认姿态确认（lexical 开 / CE 关 / 池≤20 / 50ms）
+- [ ] `make eval-retrieval`（及 queue 若动 worker）绿（合入前跑）
+
+**S2 落地路径**
+
+| ID | Commit 主题 |
+|----|-------------|
+| A9 | Keep source search off the index rebuild hot path |
+| A15 | Redact PII and secrets on model egress and structured logs |
+| A16 | Block write-path secrets within a fixed 50ms scan budget |
+| A12 | Confirm lexical-default / CE-off rerank posture |
 
 ---
 
@@ -244,10 +254,10 @@ S1
   [ ] T-A8  delegate context_refs + hot_files inject
 
 S2
-  [ ] T-A9  search_sources never sync-rebuild; worker default
-  [ ] T-A15 Outbound + log regex redaction
-  [ ] T-A16 Write-path secret scan with 50ms budget
-  [ ] T-A12 Confirm rerank defaults in settings + .env.example
+  [x] T-A9  search_sources never sync-rebuild; worker default
+  [x] T-A15 Outbound + log regex redaction
+  [x] T-A16 Write-path secret scan with 50ms budget
+  [x] T-A12 Confirm rerank defaults in settings + .env.example
 
 S3（门铃）
   [ ] Epic-RAG-scale   A10/A11 after A9

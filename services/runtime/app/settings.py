@@ -22,11 +22,13 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
     retrieval_mode: str = "hybrid"  # keyword | vector | hybrid
     retrieval_rrf_k: int = 60
+    # Lexical rerank may stay on (cheap). Cross-encoder stays OFF by default
+    # (docs/16 Q8/Q13, docs/17 S2 A12). Experimental CE: pool≤20 + ≤50ms + timeout→lexical.
     retrieval_rerank_enabled: bool = True
     retrieval_rerank_cross_encoder: bool = False
     retrieval_rerank_model: str = "BAAI/bge-reranker-base"
     retrieval_rerank_pool: int = 20
-    retrieval_rerank_timeout_seconds: float = 0.15
+    retrieval_rerank_timeout_seconds: float = 0.05
     search_sources_max_per_turn: int = 3
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15
