@@ -111,6 +111,9 @@ eval-p3:
 eval-all:
 	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub"
 
+eval-rubric:
+	python3 scripts/eval_rubric.py --sample-rate 0.05
+
 eval-live:
 	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=live" EVAL_ARGS="--mode live"
 
