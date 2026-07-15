@@ -677,9 +677,18 @@ async def delegate(
     task: str,
     agent_type: str = "explore",
     context: str = "",
+    context_refs: list[str] | None = None,
+    paths: list[str] | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
     from app.tools.delegate_runner import run_delegate
 
-    return await run_delegate(task=task, agent_type=agent_type, context=context, **_kwargs)
+    return await run_delegate(
+        task=task,
+        agent_type=agent_type,
+        context=context,
+        context_refs=context_refs,
+        paths=paths,
+        **_kwargs,
+    )
 

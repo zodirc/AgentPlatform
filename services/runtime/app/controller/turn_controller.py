@@ -604,6 +604,33 @@ async def _backfill_plan_open_items(state: TurnState) -> None:
         logger.exception("plan open_items backfill failed session_id=%s", state.session_id)
 
 
+async def _resolve_delegate_hot_files(
+    session_id: UUID,
+    *,
+    path_refs: list[str] | None = None,
+    prerread_hot: list[str] | None = None,
+) -> tuple[str, ...]:
+    files: list[str] = []
+    for group in (path_refs or [], prerread_hot or []):
+        for item in group:
+            path = str(item).strip()
+            if path and path not in files:
+                files.append(path)
+    try:
+        session_ctx = await load_session_context(session_id)
+    except Exception:
+        session_ctx = None
+    if session_ctx:
+        for key in ("hot_files", "files_touched"):
+            for item in session_ctx.get(key) or []:
+                path = str(item).strip()
+                if path and path not in files:
+                    files.append(path)
+                if len(files) >= 12:
+                    break
+    return tuple(files[:12])
+
+
 async def _run_turn(
     *,
     turn_id: UUID,
@@ -797,6 +824,11 @@ async def _run_turn(
     )
 
     set_event_writer(write_event)
+    hot_files = await _resolve_delegate_hot_files(
+        session_id,
+        path_refs=list(compiled.metadata.get("path_refs") or []),
+        prerread_hot=list(compiled.metadata.get("hot_files") or []),
+    )
     set_delegate_runtime(
         DelegateRuntime(
             gateway=gateway,
@@ -809,6 +841,7 @@ async def _run_turn(
             run_id=run_id,
             trace_id=trace_id,
             scenario_id=scenario_id,
+            hot_files=hot_files,
         )
     )
     started_at = time.monotonic()
@@ -983,6 +1016,7 @@ async def _resume_after_approval(
             run_id=run_id,
             trace_id=trace_id,
             scenario_id=state.scenario_id,
+            hot_files=await _resolve_delegate_hot_files(state.session_id),
         )
     )
 

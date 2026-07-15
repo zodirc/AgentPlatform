@@ -81,6 +81,8 @@ async def run_delegate(
     task: str,
     agent_type: str = "explore",
     context: str = "",
+    context_refs: list[str] | None = None,
+    paths: list[str] | None = None,
     turn_id: UUID | None = None,
     run_id: UUID | None = None,
     **_kwargs: Any,
@@ -118,14 +120,20 @@ async def run_delegate(
     if not sub_tools:
         return {"status": "failed", "error": f"no tools available for sub-agent type {agent_type}"}
 
-    prompt_parts = [part for part in (task.strip(), context.strip()) if part]
+    prompt = _build_delegate_prompt(
+        task=task,
+        context=context,
+        context_refs=context_refs,
+        paths=paths,
+        hot_files=list(ctx.hot_files),
+    )
     sub_state = TurnState(
         turn_id=turn_id,
         session_id=ctx.session_id,
         run_id=run_id,
         trace_id=ctx.trace_id,
         scenario_id=ctx.scenario_id,
-        messages=[user_message("\n".join(prompt_parts))],
+        messages=[user_message(prompt)],
         max_steps=DEFAULT_SUBAGENT_MAX_STEPS,
     )
 
@@ -146,7 +154,9 @@ async def run_delegate(
             tools=sub_tools,
             system_prompt=(
                 f"You are a focused {agent_type} sub-agent. "
-                "Complete the delegated task using tools; return a concise factual summary."
+                "Complete the delegated task using tools; return a concise factual summary. "
+                "Prefer read_file on [context_refs] / [hot_files] paths instead of inventing paths "
+                "or pasting large file bodies yourself."
             ),
             write_event=sub_write_event,
             check_cancel=ctx.check_cancel,
@@ -177,3 +187,39 @@ async def run_delegate(
         "summary": summary,
         "status": status,
     }
+
+
+def _normalize_refs(*groups: list[str] | None) -> list[str]:
+    out: list[str] = []
+    for group in groups:
+        if not group:
+            continue
+        for item in group:
+            path = str(item).strip()
+            if path and path not in out:
+                out.append(path)
+            if len(out) >= 12:
+                return out
+    return out
+
+
+def _build_delegate_prompt(
+    *,
+    task: str,
+    context: str,
+    context_refs: list[str] | None,
+    paths: list[str] | None,
+    hot_files: list[str],
+) -> str:
+    parts = [task.strip()]
+    note = context.strip()
+    if note:
+        # Keep pasted context short; prefer path pointers for large material.
+        parts.append(note[:2_000])
+    refs = _normalize_refs(context_refs, paths)
+    if refs:
+        parts.append("[context_refs]\n" + "\n".join(f"- {path}" for path in refs))
+    hot = _normalize_refs(hot_files)
+    if hot:
+        parts.append("[hot_files]\n" + "\n".join(f"- {path}" for path in hot))
+    return "\n\n".join(part for part in parts if part)

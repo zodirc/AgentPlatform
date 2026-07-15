@@ -28,6 +28,7 @@ class DelegateRuntime:
     run_id: UUID
     trace_id: UUID
     scenario_id: str
+    hot_files: tuple[str, ...] = ()
 
 
 def set_delegate_runtime(runtime: DelegateRuntime | None) -> None:

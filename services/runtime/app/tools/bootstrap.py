@@ -292,13 +292,30 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="delegate",
-            description="Delegate a sub-task to a specialized sub-agent",
+            description=(
+                "Delegate a sub-task to a specialized sub-agent. "
+                "Prefer context_refs/paths (workspace relative paths) over pasting large text into context."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "task": {"type": "string"},
                     "agent_type": {"type": "string", "default": "explore"},
-                    "context": {"type": "string", "default": ""},
+                    "context": {
+                        "type": "string",
+                        "default": "",
+                        "description": "Short optional notes; keep brief. Prefer context_refs for files.",
+                    },
+                    "context_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Workspace-relative file paths the sub-agent should read",
+                    },
+                    "paths": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Alias of context_refs",
+                    },
                 },
                 "required": ["task"],
             },
