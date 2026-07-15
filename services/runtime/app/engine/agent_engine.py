@@ -60,7 +60,12 @@ class AgentEngine:
         self._tool_repeat_counts: dict[str, int] = {}
         self._search_sources_calls = 0
         self._evidence_citation_ids: set[str] = set()
-        self._openai_tools = [
+        self._tool_specs = list(tools)
+        self._openai_tools = self._tools_payload(tools)
+
+    @staticmethod
+    def _tools_payload(tools: list[ToolSpec]) -> list[dict[str, Any]]:
+        return [
             {
                 "name": t.name,
                 "description": t.description,
@@ -69,6 +74,16 @@ class AgentEngine:
             for t in tools
         ]
 
+    def _scoped_openai_tools(self, state: TurnState) -> list[dict[str, Any]]:
+        from app.tools.bootstrap import stage_tool_scope
+
+        scoped = stage_tool_scope(
+            self._tool_specs,
+            step_count=state.step_count,
+            max_steps=state.max_steps,
+            delivery=state.delivery,
+        )
+        return self._tools_payload(scoped)
     async def run(self, state: TurnState) -> str | None:
         final_summary: str | None = None
         self._search_sources_calls = 0
@@ -113,11 +128,12 @@ class AgentEngine:
                     state.cancel_force = force
                     break
 
+                step_tools = self._scoped_openai_tools(state)
                 messages = await self._context.assemble_async(
                     system_prompt=self._system_prompt,
                     state=state,
                     gateway=self._gateway,
-                    tools=self._openai_tools,
+                    tools=step_tools,
                 )
 
                 from app.context.engine import estimate_window_breakdown
@@ -125,7 +141,7 @@ class AgentEngine:
                 report = self._context.last_budget_report
                 breakdown = estimate_window_breakdown(
                     messages=messages,
-                    tools=self._openai_tools,
+                    tools=step_tools,
                 )
                 strategies = [
                     str(t.get("strategy", ""))
@@ -174,7 +190,7 @@ class AgentEngine:
                         payload={"step_index": step_index, "label": f"step-{step_index}"},
                         step_index=step_index,
                     )
-                    stream = self._gateway.stream(messages=messages, tools=self._openai_tools)
+                    stream = self._gateway.stream(messages=messages, tools=step_tools)
                     async for chunk in stream:
                         await _ensure_step_within_budget()
                         cancelled, force = await self._check_cancel()

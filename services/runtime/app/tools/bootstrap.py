@@ -426,3 +426,20 @@ def tool_scope(profile: ScenarioProfile, registry: ToolRegistry) -> list[ToolSpe
             requires = name in ON_WRITE_TOOLS
         specs.append(replace(base, requires_approval=requires))
     return specs
+
+
+# Dropped late in a turn / after successful export (docs/17 S3 A19). Pure rules.
+_LATE_STAGE_DROP = frozenset({"search_sources", "delegate", "remember", "recall"})
+
+
+def stage_tool_scope(specs: list[ToolSpec], *, step_count: int, max_steps: int, delivery: dict | None) -> list[ToolSpec]:
+    """Shrink tools JSON in late steps; no LLM routing."""
+    delivery_ok = isinstance(delivery, dict) and str(delivery.get("delivery_status", "")) in {
+        "ok",
+        "warning",
+    }
+    remaining = max_steps - step_count
+    late = step_count >= 8 and remaining <= 6
+    if not delivery_ok and not late:
+        return specs
+    return [spec for spec in specs if spec.name not in _LATE_STAGE_DROP]
