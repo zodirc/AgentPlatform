@@ -319,45 +319,77 @@ class PgvectorSourceRetrievalStore:
         top_k = max(limit * 4, 20)
         if rerank:
             top_k = max(top_k, settings.retrieval_rerank_pool)
-        vector_hits = self.search_vector(query, limit=top_k)
-        bm25_hits = self.search_bm25(query, limit=top_k)
-        if not vector_hits and not bm25_hits:
-            return []
-        if not vector_hits:
-            hits = bm25_hits
-        elif not bm25_hits:
-            hits = vector_hits
-        else:
-            fusion_limit = top_k if rerank else limit
-            fused = reciprocal_rank_fusion(
-                [
-                    [(hit.chunk_id, hit.score) for hit in vector_hits],
-                    [(hit.chunk_id, hit.score) for hit in bm25_hits],
-                ],
-                limit=fusion_limit,
-                k=settings.retrieval_rrf_k,
-            )
-            by_id = {hit.chunk_id: hit for hit in vector_hits + bm25_hits}
-            hits = []
-            for chunk_id, score in fused:
-                hit = by_id.get(chunk_id)
-                if hit is None:
-                    continue
-                hits.append(
-                    ChunkHit(
-                        path=hit.path,
-                        chunk_id=hit.chunk_id,
-                        excerpt=hit.excerpt,
-                        citation_id=hit.citation_id,
-                        score=score,
-                        section_title=hit.section_title,
-                        line_start=hit.line_start,
-                        line_end=hit.line_end,
-                    )
+
+        def _chunk_lane() -> list[ChunkHit]:
+            vector_hits = self.search_vector(query, limit=top_k)
+            bm25_hits = self.search_bm25(query, limit=top_k)
+            if not vector_hits and not bm25_hits:
+                return []
+            if not vector_hits:
+                hits = bm25_hits
+            elif not bm25_hits:
+                hits = vector_hits
+            else:
+                fusion_limit = top_k if rerank else limit
+                fused = reciprocal_rank_fusion(
+                    [
+                        [(hit.chunk_id, hit.score) for hit in vector_hits],
+                        [(hit.chunk_id, hit.score) for hit in bm25_hits],
+                    ],
+                    limit=fusion_limit,
+                    k=settings.retrieval_rrf_k,
                 )
-        if rerank and hits:
-            return rerank_hits(query, hits, limit=limit)
-        return hits[:limit]
+                by_id = {hit.chunk_id: hit for hit in vector_hits + bm25_hits}
+                hits = []
+                for chunk_id, score in fused:
+                    hit = by_id.get(chunk_id)
+                    if hit is None:
+                        continue
+                    hits.append(
+                        ChunkHit(
+                            path=hit.path,
+                            chunk_id=hit.chunk_id,
+                            excerpt=hit.excerpt,
+                            citation_id=hit.citation_id,
+                            score=score,
+                            section_title=hit.section_title,
+                            line_start=hit.line_start,
+                            line_end=hit.line_end,
+                        )
+                    )
+            if rerank and hits:
+                return rerank_hits(query, hits, limit=max(limit, top_k))
+            return hits
+
+        def _doc_lane() -> list[str]:
+            # Approximate doc lane from distinct paths in a wider ANN pull.
+            wide = self.search_vector(query, limit=max(top_k, 40))
+            seen: list[str] = []
+            for hit in wide:
+                if hit.path not in seen:
+                    seen.append(hit.path)
+                if len(seen) >= settings.retrieval_two_level_doc_limit:
+                    break
+            return seen
+
+        if not settings.retrieval_two_level_enabled:
+            hits = _chunk_lane()
+            return hits[:limit]
+
+        from app.retrieval.two_level import merge_doc_and_chunk_hits, parallel_two_level
+
+        doc_paths, chunk_hits, timed_out = parallel_two_level(
+            doc_fn=_doc_lane,
+            chunk_fn=_chunk_lane,
+            timeout_seconds=float(settings.retrieval_two_level_timeout_seconds),
+        )
+        if timed_out and not chunk_hits:
+            chunk_hits = _chunk_lane()
+        return merge_doc_and_chunk_hits(
+            doc_paths=doc_paths,
+            chunk_hits=chunk_hits,
+            limit=limit,
+        )
 
     def search(self, query: str, *, limit: int = 10, mode: str | None = None) -> list[ChunkHit]:
         resolved = (mode or settings.retrieval_mode).lower()

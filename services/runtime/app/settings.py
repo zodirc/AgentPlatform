@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     retrieval_rrf_k: int = 60
     # Backend: json (default, no deps) | pgvector (ANN via HNSW; needs pgvector image).
     retrieval_backend: str = "json"
+    # Two-level doc→chunk recall (docs/17 S3 A11): parallel lanes; timeout → chunk-only.
+    retrieval_two_level_enabled: bool = True
+    retrieval_two_level_timeout_seconds: float = 0.3
+    retrieval_two_level_doc_limit: int = 8
     # Lexical rerank may stay on (cheap). Cross-encoder stays OFF by default
     # (docs/16 Q8/Q13, docs/17 S2 A12). Experimental CE: pool≤20 + ≤50ms + timeout→lexical.
     retrieval_rerank_enabled: bool = True

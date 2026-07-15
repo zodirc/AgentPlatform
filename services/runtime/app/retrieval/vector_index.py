@@ -13,7 +13,7 @@ from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
 from app.settings import settings
 
-INDEX_VERSION = 3
+INDEX_VERSION = 4
 
 
 @dataclass
@@ -111,7 +111,22 @@ class SourceVectorIndex:
             new_chunks = chunk_source_text(fp, rel, text, embedder=embedder)
             chunks = [c for c in chunks if c.get("path") != rel]
             chunks.extend(new_chunks)
-            files_meta[rel] = {"mtime": mtime, "chunk_count": len(new_chunks)}
+            titles = sorted(
+                {
+                    str(c.get("section_title", "")).strip()
+                    for c in new_chunks
+                    if str(c.get("section_title", "")).strip()
+                }
+            )
+            summary = " ".join(titles) if titles else text[:500]
+            if len(summary) > 800:
+                summary = summary[:800]
+            files_meta[rel] = {
+                "mtime": mtime,
+                "chunk_count": len(new_chunks),
+                "summary": summary,
+                "doc_vector": embedder.embed(summary),
+            }
             if prev:
                 updated += 1
             else:
@@ -172,8 +187,29 @@ class SourceVectorIndex:
             hits.append(_chunk_to_hit(chunk, score))
         return hits
 
-    def search_hybrid(self, query: str, *, limit: int = 10, recall_k: int | None = None) -> list[ChunkHit]:
+    def search_docs(self, query: str, *, limit: int = 8) -> list[str]:
+        """Doc-lane recall: rank files by summary embedding similarity."""
         self.load()
+        query_vec = get_embedder().embed(query)
+        if not query_vec:
+            return []
+        scored: list[tuple[float, str]] = []
+        files = self._data.get("files", {})
+        if not isinstance(files, dict):
+            return []
+        for path, meta in files.items():
+            if not isinstance(meta, dict):
+                continue
+            raw = meta.get("doc_vector")
+            if not isinstance(raw, list):
+                continue
+            score = cosine_similarity(query_vec, [float(x) for x in raw])
+            if score > 0.0:
+                scored.append((score, str(path)))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [path for _, path in scored[:limit]]
+
+    def _search_hybrid_chunks(self, query: str, *, limit: int, recall_k: int | None = None) -> list[ChunkHit]:
         rerank = settings.retrieval_rerank_enabled
         top_k = recall_k if recall_k is not None else max(limit * 4, 20)
         if rerank:
@@ -203,8 +239,33 @@ class SourceVectorIndex:
                     continue
                 hits.append(_chunk_to_hit(chunk, score))
         if rerank and hits:
-            return rerank_hits(query, hits, limit=limit)
-        return hits[:limit]
+            return rerank_hits(query, hits, limit=max(limit, top_k))
+        return hits
+
+    def search_hybrid(self, query: str, *, limit: int = 10, recall_k: int | None = None) -> list[ChunkHit]:
+        self.load()
+        if not settings.retrieval_two_level_enabled:
+            hits = self._search_hybrid_chunks(query, limit=limit, recall_k=recall_k)
+            return hits[:limit]
+
+        from app.retrieval.two_level import merge_doc_and_chunk_hits, parallel_two_level
+
+        doc_limit = max(1, int(settings.retrieval_two_level_doc_limit))
+        doc_paths, chunk_hits, timed_out = parallel_two_level(
+            doc_fn=lambda: self.search_docs(query, limit=doc_limit),
+            chunk_fn=lambda: self._search_hybrid_chunks(
+                query, limit=limit, recall_k=recall_k
+            ),
+            timeout_seconds=float(settings.retrieval_two_level_timeout_seconds),
+        )
+        if timed_out and not chunk_hits:
+            # Absolute degrade: try sync chunk-only once.
+            chunk_hits = self._search_hybrid_chunks(query, limit=limit, recall_k=recall_k)
+        return merge_doc_and_chunk_hits(
+            doc_paths=doc_paths,
+            chunk_hits=chunk_hits,
+            limit=limit,
+        )
 
     def search(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
         """Backward-compatible entry: hybrid when configured, else vector-only."""
