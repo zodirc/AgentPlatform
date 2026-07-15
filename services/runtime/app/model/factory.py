@@ -10,12 +10,32 @@ from app.model.recorded_provider import create_recorded_gateway
 from app.settings import settings
 
 
+def apply_compact_model(config: ModelConfig | None) -> ModelConfig | None:
+    """Overlay optional compact summarizer model (docs/17 S3 A17)."""
+    if config is None:
+        return None
+    name = (settings.compact_model_name or "").strip()
+    if not name:
+        return config
+    provider = (settings.compact_model_provider or config.provider).strip() or config.provider
+    return ModelConfig(
+        provider=provider,
+        model_name=name,
+        api_key=config.api_key,
+        base_url=config.base_url,
+        context_window_tokens=config.context_window_tokens,
+    )
+
+
 def create_gateway(
     config: ModelConfig | None,
     *,
     messages: list | None = None,
     scenario_id: str | None = None,
+    for_compact: bool = False,
 ) -> ModelGateway:
+    if for_compact:
+        config = apply_compact_model(config)
     generation = GenerationParams.from_settings(scenario_id=scenario_id)
     if messages is not None:
         recorded = create_recorded_gateway(messages)

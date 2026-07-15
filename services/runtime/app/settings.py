@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     # AH4: autocompact summarizer budget (independent of main turn).
     compact_timeout_seconds: float = 20.0
     compact_max_output_tokens: int = 1024
+    # Optional smaller / cheaper model for compact only (docs/17 S3 A17).
+    # Empty → reuse the main turn model; failures still fall back to deterministic summary.
+    compact_model_name: str = ""
+    compact_model_provider: str = ""
     # AH3: project context + @path prereread budgets.
     project_context_max_chars: int = 2_000
     path_preread_max_chars: int = 1_200

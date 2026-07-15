@@ -706,7 +706,9 @@ async def _run_turn(
 
         metrics.inc("should_query_short_circuit_total")
         if gate.slash_command == "compact":
-            gateway = create_gateway(model_config, messages=[], scenario_id=scenario_id)
+            gateway = create_gateway(
+                model_config, messages=[], scenario_id=scenario_id, for_compact=True
+            )
             _, confirmation = await compact_session_context(
                 session_id=session_id,
                 turn_id=turn_id,

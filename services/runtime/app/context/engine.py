@@ -184,7 +184,19 @@ class ContextEngine:
             return self._materialize_messages(envelope)
 
         if gateway is not None and any(t.get("detail") == "autocompact_pending" for t in trace):
-            messages = [await summarize_messages_with_gateway(gateway, state.messages)]
+            compact_gateway = gateway
+            if settings.compact_model_name.strip():
+                from app.model.config import resolve_model_config
+                from app.model.factory import create_gateway
+
+                cfg = await resolve_model_config()
+                compact_gateway = create_gateway(
+                    cfg,
+                    messages=[],
+                    scenario_id=state.scenario_id,
+                    for_compact=True,
+                )
+            messages = [await summarize_messages_with_gateway(compact_gateway, state.messages)]
             trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
             trace.append({"strategy": "compact", "detail": "autocompact_llm"})
             fill_ratio, window = _window_fill(
