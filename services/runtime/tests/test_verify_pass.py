@@ -23,3 +23,17 @@ def test_run_verify_pass_writes_report(tmp_path: Path, monkeypatch) -> None:
     assert result["invalid"] >= 1
     report = tmp_path / result["report_path"]
     assert report.is_file()
+
+
+def test_run_verify_pass_accepts_cjk_cite(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("app.controller.verify_pass.settings.workspace_root", str(tmp_path))
+    (tmp_path / ".agent" / "revisions").mkdir(parents=True)
+    (tmp_path / ".agent" / "revisions" / "intro.md").write_text(
+        "她有自己的路。[cite:亮剑]\n", encoding="utf-8"
+    )
+    (tmp_path / "sources").mkdir()
+    (tmp_path / "sources" / "亮剑.md").write_text("张白鹿性格独立。\n", encoding="utf-8")
+    result = run_verify_pass(session_id="s2")
+    assert result["checked"] >= 1
+    assert result["invalid"] == 0
+    assert any(f.get("citation_id") == "cite:亮剑" for f in result["findings"])

@@ -52,6 +52,10 @@ def test_extract_citation_ids() -> None:
     assert extract_citation_ids(text) == ["cite:ref-a", "cite:Book.X"]
 
 
+def test_extract_citation_ids_cjk() -> None:
+    assert extract_citation_ids("——她有自己的路。[cite:亮剑]") == ["cite:亮剑"]
+
+
 @pytest.mark.asyncio
 async def test_tool_executor_schema_gate_blocks_handler(monkeypatch: pytest.MonkeyPatch) -> None:
     called = {"n": 0}

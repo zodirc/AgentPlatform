@@ -1,14 +1,25 @@
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from app.settings import settings
+from app.tools.validate import extract_citation_ids
 
-_CITE_RE = re.compile(r"\bcite:([A-Za-z0-9_./\-]+)\b")
-_REF_PATH_RE = re.compile(r"(?:sources|sections)/[A-Za-z0-9_./\-]+\.(?:md|txt|markdown)\b")
+_REF_PATH_RE_IMPORT = None
+
+
+def _ref_path_re():
+    import re
+
+    global _REF_PATH_RE_IMPORT
+    if _REF_PATH_RE_IMPORT is None:
+        # Paths may include CJK filenames.
+        _REF_PATH_RE_IMPORT = re.compile(
+            r"(?:sources|sections)/[^\s\]\[<>\"'`，。；;]+\.(?:md|txt|markdown)\b"
+        )
+    return _REF_PATH_RE_IMPORT
 
 
 def _workspace() -> Path:
@@ -21,8 +32,10 @@ def _iter_draft_texts(root: Path) -> list[tuple[str, str]]:
         base = root / rel
         if base.is_dir():
             candidates.extend(p for p in base.rglob("*.md") if p.is_file())
+    # Prefer recently modified drafts so verify hits the latest writing turn.
+    candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True)
     texts: list[tuple[str, str]] = []
-    for path in sorted(candidates)[:80]:
+    for path in candidates[:120]:
         try:
             texts.append(
                 (
@@ -38,7 +51,7 @@ def _iter_draft_texts(root: Path) -> list[tuple[str, str]]:
 def _source_exists(root: Path, citation_id: str) -> bool:
     stem = citation_id.replace("cite:", "").strip()
     sources = root / "sources"
-    if not sources.is_dir():
+    if not sources.is_dir() or not stem:
         return False
     for fp in sources.rglob("*"):
         if not fp.is_file():
@@ -46,8 +59,11 @@ def _source_exists(root: Path, citation_id: str) -> bool:
         name = fp.name
         if stem in name or stem in str(fp.relative_to(root)):
             return True
+        # Also accept stem without extension match (亮剑 ↔ 亮剑.md).
+        if fp.stem == stem:
+            return True
         try:
-            if stem and stem in fp.read_text(encoding="utf-8", errors="replace"):
+            if stem in fp.read_text(encoding="utf-8", errors="replace"):
                 return True
         except OSError:
             continue
@@ -59,16 +75,17 @@ def run_verify_pass(*, session_id: str | None = None) -> dict[str, Any]:
     root = _workspace()
     findings: list[dict[str, Any]] = []
     checked = 0
+    path_re = _ref_path_re()
     for rel, text in _iter_draft_texts(root):
-        cites = sorted(set(_CITE_RE.findall(text)))
-        paths = sorted(set(_REF_PATH_RE.findall(text)))
+        cites = extract_citation_ids(text)
+        paths = sorted(set(path_re.findall(text)))
         for cite in cites:
             checked += 1
             ok = _source_exists(root, cite)
             findings.append(
                 {
                     "file": rel,
-                    "citation_id": f"cite:{cite}" if not cite.startswith("cite:") else cite,
+                    "citation_id": cite if cite.startswith("cite:") else f"cite:{cite}",
                     "valid": ok,
                 }
             )
@@ -79,13 +96,13 @@ def run_verify_pass(*, session_id: str | None = None) -> dict[str, Any]:
 
     invalid = [f for f in findings if not f.get("valid")]
     lines = [
-        f"# Verify report",
-        f"",
+        "# Verify report",
+        "",
         f"- generated_at: {datetime.now(UTC).isoformat()}",
         f"- session_id: {session_id or '-'}",
         f"- checked: {checked}",
         f"- invalid: {len(invalid)}",
-        f"",
+        "",
     ]
     if invalid:
         lines.append("## Issues")

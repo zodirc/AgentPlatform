@@ -86,14 +86,26 @@ def _expected_summary(schema: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def extract_citation_ids(text: str) -> list[str]:
-    """Find ``[cite:…]`` / bare ``cite:…`` markers in drafted or patched text."""
+    """Find ``[cite:…]`` / bare ``cite:…`` markers in drafted or patched text.
+
+    IDs may include CJK (e.g. ``[cite:亮剑]``).
+    """
     import re
 
     if not text:
         return []
     found: list[str] = []
-    for match in re.finditer(r"\[?(cite:[A-Za-z0-9_.:/-]+)\]?", text):
-        cid = match.group(1).rstrip("].),;，。；")
-        if cid not in found:
-            found.append(cid)
+    # Prefer bracketed form; allow unicode letters/numbers in the id body.
+    patterns = (
+        r"\[cite:([^\]]+)\]",
+        r"(?<!\[)cite:([\w./\-]+)",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, text, flags=re.UNICODE):
+            body = match.group(1).strip().rstrip("].),;，。；")
+            if not body:
+                continue
+            cid = body if body.startswith("cite:") else f"cite:{body}"
+            if cid not in found:
+                found.append(cid)
     return found
