@@ -99,8 +99,8 @@ S0（A1 先于 A2/A3）
 ### S0 冲刺出口
 
 - [x] A1–A3、A14 代码落地（2026-07；见下表路径）
+- [x] 文档：在 [16 附录 A](16-agent-system-qa.md#附录-a--改进方案速率总表安全化后) 对应行标注「已落地」日期（2026-07）
 - [ ] `make runtime-test && make eval-all` 全绿（合入前跑）
-- [ ] 文档：在 [16 附录 A](16-agent-system-qa.md#附录-a--改进方案速率总表安全化后) 对应行标注「已落地」日期（可选，随 PR）
 
 **S0 落地路径（实现备注）**
 
@@ -309,3 +309,80 @@ S3
 | [11-product-experience.md](11-product-experience.md) | SLO 数值权威 |
 | [12-eval-and-golden-turns.md](12-eval-and-golden-turns.md) | 验收与 golden 写法 |
 | [06-tools-and-context.md](06-tools-and-context.md) | 工具 / Context 契约 |
+
+---
+
+## 10. 启用与完整重启（2026-07 落地后）
+
+> 本地改代码要进镜像必须 `--build`。Postgres 已切到 `pgvector/pgvector:pg16`；**旧 alpine 数据卷**需手动 `CREATE EXTENSION`，或接受 wipe 重建。
+
+### 10.1 建议写入 `.env`（相对默认「开」的项可省略；下列为显式启用清单）
+
+```bash
+# S0/S2 默认已 true；写出便于审计
+TOOL_SCHEMA_VALIDATE=true
+CITATION_VERIFY_ENABLED=true
+MODEL_EGRESS_ENFORCE=true
+PII_REDACT_ENABLED=true
+SECRET_SCAN_ENABLED=true
+SECRET_SCAN_TIMEOUT_MS=50
+INDEX_VIA_WORKER=true
+
+# S3 A10/A11 — 要 ANN 时再开 pgvector；日常可用 json
+RETRIEVAL_BACKEND=pgvector
+RETRIEVAL_MODE=hybrid
+RETRIEVAL_TWO_LEVEL_ENABLED=true
+RETRIEVAL_RERANK_ENABLED=true
+RETRIEVAL_RERANK_CROSS_ENCODER=false
+
+# S3 A17 — 可选 compact 小模型（空则用主模型）
+# COMPACT_MODEL_NAME=gpt-4o-mini
+# COMPACT_MODEL_PROVIDER=openai
+```
+
+### 10.2 完整重启（推荐）
+
+```bash
+cd /path/to/agent
+
+# 1) 对齐 env（从 example 合并新增键；勿盲覆盖已有密钥）
+#    对照 .env.example 手工补上 10.1 中的键
+
+# 2) 重建并启动全部服务（runtime/api/web + 新 postgres 镜像）
+make up
+
+# 3) 若启用 pgvector 且沿用旧数据卷：装扩展（幂等）
+docker compose -f deploy/docker-compose.yml --env-file .env \
+  exec -T postgres psql -U "${POSTGRES_USER:-agent}" -d "${POSTGRES_DB:-agent}" \
+  -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+
+# 4) 健康检查
+docker compose -f deploy/docker-compose.yml --env-file .env ps
+curl -fsS http://127.0.0.1:8001/health/ready || true   # 若未映射 host 端口，用下面一行
+docker compose -f deploy/docker-compose.yml --env-file .env \
+  exec -T runtime curl -fsS http://127.0.0.1:8001/health/ready
+
+# 5)（可选）RETRIEVAL_BACKEND=pgvector 时重建 sources 索引
+docker compose -f deploy/docker-compose.yml --env-file .env \
+  exec -T runtime python -c 'import asyncio; from app.tools.core.tools import sync_sources_index; print(asyncio.run(sync_sources_index()))'
+```
+
+**只要代码进镜像、不改 Postgres 数据卷**，可简化为：
+
+```bash
+make up-runtime && make up-api && make up-web
+# 或一次性：
+make up
+```
+
+### 10.3 可选 profile
+
+```bash
+# 异步索引 worker（配合 INDEX_VIA_WORKER）
+docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml --env-file .env \
+  --profile queue up -d --build
+
+# sentence-transformers 检索镜像
+docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml --env-file .env \
+  --profile retrieval up -d --build
+```

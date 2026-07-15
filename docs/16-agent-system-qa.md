@@ -736,31 +736,32 @@ stub / recorded 模式可回放固定 `tool_calls` 序列，支撑 golden 回归
 ## 附录 A — 改进方案速率总表（安全化后）
 
 > 原则重申：**🔴 原始形态一律不采纳**；下表列出的都是改写后的推荐形态。  
-> **如何落地排期**：见 [17-execution-plan.md](17-execution-plan.md)（S0 立即项 → S2 检索去同步 → S3 按需）。
+> **如何落地排期**：见 [17-execution-plan.md](17-execution-plan.md)（S0 → S2 → S3）。  
+> **落地状态（2026-07）**：A1–A21 最小可合并切片均已提交；细节与开关见 17。部分项默认关或为 stub（A10 默认 json、A20 stub、A5 启发式），合入前仍需跑 `make runtime-test` / `eval-*`。
 
-| ID | 方案（安全版） | 速率 | 安全化手法 | 建议 |
-|----|----------------|------|------------|------|
-| A1 | 工具参数 JSON Schema 校验门 | 🟢 净提速 | 确定性 CPU 校验 | **立即做**（Q1/Q6） |
-| A2 | 引用 ∈ evidence 集合比对 + unverified 标记 | 🟢 | 转确定性；不阻断输出 | 立即做（Q1/Q13） |
-| A3 | 工具误用 telemetry | 🟢 | 转离线聚合 | 立即做 |
-| A4 | 事实核查：`/verify` 用户触发 + 夜间抽样 | 🟢 | 转用户触发 / 转离线（原「Turn 末强制 verify」🔴 已否决） | 按需 |
-| A5 | Rubric judge 质量分 | 🟢 | 转离线（CI/夜间，抽样 ≤5%） | 按需 |
-| A6 | plan 引导：提示词 + Intake 一行 hint | 🟢 | 转提示词（原「强制 plan gate」🔴 已否决） | 可做 |
-| A7 | plan-execute 一致性回填 open_items | 🟢 | Turn 尾异步 | 可做 |
-| A8 | delegate 传 path 指针 / hot_files | 🟢 | 减 token | 可做 |
-| A9 | 索引出热路径（worker 化，search 只查不建） | 🟢 | 转异步 | **扩库前必做**（Q8 第 0 步） |
-| A10 | pgvector/Qdrant + ANN | 查询🟡 | 写入异步；ANN 常快于线性扫 | 扩库时做 |
-| A11 | 两级 doc→chunk 召回 | 🟡 | 并行 + 单跳超时降级 | 扩库时做 |
-| A12 | rerank：lexical 默认；cross-encoder 仅离线或 top-20+50ms 预算 | 🟢～🟡 | 转离线 / 硬预算（原「默认 cross-encoder」🔴 已否决） | 按需 |
-| A13 | `remember`/`recall` 按需工具 | 🟡 | 转按需（原「每轮自动召回」🔴 已否决） | 按需 |
-| A14 | egress allowlist | 🟢 | 集合查找 | 立即做 |
-| A15 | 预编译正则 PII 脱敏（禁 LLM 脱敏） | 🟢 | 转确定性 | 可做 |
-| A16 | secret 扫描：50ms 预算 + 异步补扫 | 🟢～🟡 | 硬预算 + 转异步 | 可做 |
-| A17 | 小模型分流 compact | 🟡 | 独立超时；Turn 尾/后台；降级确定性摘要 | 可做 |
-| A18 | 打字期预热 embed / 索引 | 🟢 | 转异步 | 可做 |
-| A19 | 阶段化 ToolScope 缩 tools JSON | 🟡 | 规则切换，无 LLM 判断 | 可做 |
-| A20 | 多表召回：规则路由 + 通道并行超时 + ACL 谓词 | 🟡 | 转确定性路由（原「LLM 每问路由」🔴 已否决） | 蓝图 |
-| A21 | critique：提示词建议 + 用户按钮 + 夜间批量 | 🟢 | 三重转移（原「默认 critique 链」🔴 已否决） | 按需 |
+| ID | 方案（安全版） | 速率 | 安全化手法 | 建议 | 状态 |
+|----|----------------|------|------------|------|------|
+| A1 | 工具参数 JSON Schema 校验门 | 🟢 净提速 | 确定性 CPU 校验 | 立即做（Q1/Q6） | **已落地（2026-07）** |
+| A2 | 引用 ∈ evidence 集合比对 + unverified 标记 | 🟢 | 转确定性；不阻断输出 | 立即做（Q1/Q13） | **已落地（2026-07）** |
+| A3 | 工具误用 telemetry | 🟢 | 转离线聚合 | 立即做 | **已落地（2026-07）** |
+| A4 | 事实核查：`/verify` 用户触发 + 夜间抽样 | 🟢 | 转用户触发 / 转离线（原「Turn 末强制 verify」🔴 已否决） | 按需 | **已落地（2026-07）** |
+| A5 | Rubric judge 质量分 | 🟢 | 转离线（CI/夜间，抽样 ≤5%） | 按需 | **已落地（2026-07）**（启发式 `make eval-rubric`；非 Turn 尾） |
+| A6 | plan 引导：提示词 + Intake 一行 hint | 🟢 | 转提示词（原「强制 plan gate」🔴 已否决） | 可做 | **已落地（2026-07）** |
+| A7 | plan-execute 一致性回填 open_items | 🟢 | Turn 尾异步 | 可做 | **已落地（2026-07）** |
+| A8 | delegate 传 path 指针 / hot_files | 🟢 | 减 token | 可做 | **已落地（2026-07）** |
+| A9 | 索引出热路径（worker 化，search 只查不建） | 🟢 | 转异步 | 扩库前必做（Q8 第 0 步） | **已落地（2026-07）** |
+| A10 | pgvector/Qdrant + ANN | 查询🟡 | 写入异步；ANN 常快于线性扫 | 扩库时做 | **已落地（2026-07）**（默认 `json`；`RETRIEVAL_BACKEND=pgvector` 启用） |
+| A11 | 两级 doc→chunk 召回 | 🟡 | 并行 + 单跳超时降级 | 扩库时做 | **已落地（2026-07）** |
+| A12 | rerank：lexical 默认；cross-encoder 仅离线或 top-20+50ms 预算 | 🟢～🟡 | 转离线 / 硬预算（原「默认 cross-encoder」🔴 已否决） | 按需 | **已落地（2026-07）**（姿态确认） |
+| A13 | `remember`/`recall` 按需工具 | 🟡 | 转按需（原「每轮自动召回」🔴 已否决） | 按需 | **已落地（2026-07）** |
+| A14 | egress allowlist | 🟢 | 集合查找 | 立即做 | **已落地（2026-07）** |
+| A15 | 预编译正则 PII 脱敏（禁 LLM 脱敏） | 🟢 | 转确定性 | 可做 | **已落地（2026-07）** |
+| A16 | secret 扫描：50ms 预算 + 异步补扫 | 🟢～🟡 | 硬预算 + 转异步 | 可做 | **已落地（2026-07）** |
+| A17 | 小模型分流 compact | 🟡 | 独立超时；Turn 尾/后台；降级确定性摘要 | 可做 | **已落地（2026-07）** |
+| A18 | 打字期预热 embed / 索引 | 🟢 | 转异步 | 可做 | **已落地（2026-07）** |
+| A19 | 阶段化 ToolScope 缩 tools JSON | 🟡 | 规则切换，无 LLM 判断 | 可做 | **已落地（2026-07）** |
+| A20 | 多表召回：规则路由 + 通道并行超时 + ACL 谓词 | 🟡 | 转确定性路由（原「LLM 每问路由」🔴 已否决） | 蓝图 | **已落地（2026-07）**（`docs/18` + `search_records` stub） |
+| A21 | critique：提示词建议 + 用户按钮 + 夜间批量 | 🟢 | 三重转移（原「默认 critique 链」🔴 已否决） | 按需 | **已落地（2026-07）** |
 
 **被彻底否决（无安全版可言）**：恢复固定 pipeline；子 Agent 整包 messages 共享；peer 多 Agent 总线；每轮预注入向量包 / 多表 join；未达阈值整窗 LLM 摘要。
 
@@ -774,7 +775,12 @@ stub / recorded 模式可回放固定 `tool_calls` 序列，支撑 golden 回归
 | Context 引擎 / 压缩策略 | `services/runtime/app/context/engine.py` · `policy.py` |
 | 工具注册 / 实现 | `services/runtime/app/tools/bootstrap.py` · `tools/core/tools.py` |
 | 委派 | `services/runtime/app/tools/delegate_runner.py` · `delegate_context.py` |
-| RAG（切分/BM25/向量/融合/重排） | `services/runtime/app/retrieval/` |
+| RAG（切分/BM25/向量/融合/重排/两级召回） | `services/runtime/app/retrieval/`（含 `pgvector_store.py` · `two_level.py`） |
+| 隐私 / secret 扫描 | `services/runtime/app/privacy/` |
+| `/verify` / 事实核查 | `controller/verify_pass.py` · slash `/verify` · web「事实核查」 |
+| 记忆工具 | `tools/core/memory.py`（`remember`/`recall`） |
+| 多表召回 stub | `tools/core/records.py` · [18](18-a20-multitable-recall.md) |
+| 离线 rubric | `app/offline/rubric.py` · `scripts/eval_rubric.py` · `make eval-rubric` |
 | 会话记忆 | `controller/session_transcript.py` · `session_context.py` · `session_compact.py` |
 | 素材卡 pin | `services/runtime/app/writing/cards.py` |
 | 模型网关 / FC | `services/runtime/app/model/gateway.py` · `openai_provider.py` · `anthropic_provider.py` |
