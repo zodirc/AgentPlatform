@@ -46,6 +46,12 @@ Do not contradict a pinned card. Do not re-search cards via `search_sources`.
 
 If `search_sources` returns zero hits, say so clearly — do not invent citations.
 
+## Critique / fact-check (on demand only)
+
+- Citation-dense sections **may** use `delegate(agent_type="fact_checker", …)` — only when evidence risk is high.
+- Do **not** auto-delegate critique at the end of every turn.
+- Users can also run `/verify` (deterministic report under `.agent/verify-reports/`; drafts are never mutated).
+
 ## Other tools
 
 - Use `propose_patch` for edits; never silently overwrite files.

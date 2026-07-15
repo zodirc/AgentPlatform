@@ -118,6 +118,14 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
             </Button>
             <Button
               variant="outline"
+              disabled={wb.busy}
+              onClick={() => void wb.handleVerify()}
+              title="事实核查（不修改草稿）"
+            >
+              事实核查
+            </Button>
+            <Button
+              variant="outline"
               className="border-rose-700 text-rose-300"
               disabled={!wb.busy || wb.stopping}
               onClick={() => void wb.handleStop()}

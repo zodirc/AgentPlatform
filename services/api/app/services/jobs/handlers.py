@@ -134,6 +134,8 @@ HANDLERS = {
     "sources.index_sync": handle_sources_index_sync,
     "session.summary": handle_session_summary,
     "verify.sample": handle_verify_sample,
+    # A21 night batch: same offline pass as verify.sample (exports/drafts → report).
+    "critique.batch": handle_verify_sample,
 }
 
 

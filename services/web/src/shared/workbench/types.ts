@@ -90,6 +90,7 @@ export type WorkbenchState = {
   useWebSocket: boolean;
   awaitingApproval: boolean;
   handleSend: () => Promise<void>;
+  handleVerify: () => Promise<void>;
   handleStop: () => Promise<void>;
   handleAcceptPatch: (patchId: string) => Promise<void>;
   handleRejectPatch: (patchId: string) => Promise<void>;

@@ -450,8 +450,9 @@ export function useWorkbenchImpl(): WorkbenchState {
       startTurn(sid, msg, activeScenarioId),
   });
 
-  async function handleSend() {
-    if (!sessionId || !message.trim() || busy) return;
+  async function handleSendText(textRaw: string) {
+    const text = textRaw.trim();
+    if (!sessionId || !text || busy) return;
     setBusy(true);
     setError(null);
     setEvents([]);
@@ -472,7 +473,6 @@ export function useWorkbenchImpl(): WorkbenchState {
     streamRef.current?.close();
 
     try {
-      const text = message.trim();
       setSubmittedMessage(text);
       setMessage("");
       const turn = await startTurnMut.mutateAsync({
@@ -497,6 +497,13 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  async function handleSend() {
+    await handleSendText(message);
+  }
+
+  async function handleVerify() {
+    await handleSendText("/verify");
+  }
   async function handleStop() {
     if (!turnId) return;
     streamRef.current?.stopRendering();
@@ -702,6 +709,7 @@ export function useWorkbenchImpl(): WorkbenchState {
       view?.status !== "failed" &&
       view?.status !== "cancelled",
     handleSend,
+    handleVerify,
     handleStop,
     handleAcceptPatch,
     handleRejectPatch,
