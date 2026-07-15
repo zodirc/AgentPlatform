@@ -7,8 +7,10 @@ import httpx
 
 from app.model.gateway import (
     AbortSignal,
+    ModelFatalError,
     ModelResponse,
     ModelTransientError,
+    StreamActivity,
     classify_http_status,
 )
 from app.model.generation import GenerationParams, apply_tool_choice
@@ -172,11 +174,12 @@ class OpenAIProvider:
         abort: AbortSignal | None,
         text_parts: list[str],
         tool_calls: dict[int, dict[str, Any]],
-    ) -> AsyncIterator[str | tuple[int, int, int, int]]:
+    ) -> AsyncIterator[str | tuple[int, int, int, int] | StreamActivity]:
         input_tokens = 0
         output_tokens = 0
         cache_read = 0
         cache_creation = 0
+        signaled = False
         async for line in resp.aiter_lines():
             if abort and abort.is_set():
                 return
@@ -199,6 +202,15 @@ class OpenAIProvider:
                 cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
             choice = (event.get("choices") or [{}])[0]
             delta = choice.get("delta") or {}
+            # Unblock first-byte timeout on any assistant SSE activity.
+            if not signaled and (
+                delta.get("role")
+                or delta.get("content")
+                or delta.get("tool_calls")
+                or delta.get("reasoning_content") is not None
+            ):
+                signaled = True
+                yield StreamActivity(kind="sse")
             if delta.get("content"):
                 chunk = delta["content"]
                 text_parts.append(chunk)

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.model.anthropic_provider import AnthropicProvider
-from app.model.gateway import ModelResponse
+from app.model.gateway import ModelResponse, StreamActivity
 from app.model.openai_provider import OpenAIProvider
 
 
@@ -119,6 +119,99 @@ async def test_openai_provider_streams_text() -> None:
     text, tool_calls, _ = _collect(chunks)
     assert text == "Hi"
     assert tool_calls == []
+    assert any(isinstance(c, StreamActivity) for c in chunks)
+
+
+@pytest.mark.asyncio
+async def test_openai_provider_signals_activity_on_reasoning_before_content() -> None:
+    """DeepSeek-style: long reasoning with content=null must still unblock first-byte."""
+    lines = [
+        "data: "
+        + json.dumps(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "role": "assistant",
+                            "content": None,
+                            "reasoning_content": "",
+                        }
+                    }
+                ]
+            }
+        ),
+        "data: "
+        + json.dumps(
+            {"choices": [{"delta": {"content": None, "reasoning_content": "用户"}}]}
+        ),
+        "data: "
+        + json.dumps(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "c1",
+                                    "function": {"name": "read_file", "arguments": "{"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ),
+        "data: "
+        + json.dumps(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "function": {"arguments": '"path":"a.md"}'},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ),
+        "data: [DONE]",
+    ]
+    provider = OpenAIProvider(api_key="k", model_name="deepseek-v4-flash")
+    tools = [
+        {
+            "name": "read_file",
+            "description": "read",
+            "input_schema": {"type": "object", "properties": {}},
+        }
+    ]
+
+    with patch(
+        "app.model.openai_provider.httpx.AsyncClient",
+        return_value=_FakeAsyncClient(_FakeStreamResponse(lines)),
+    ):
+        chunks = [
+            c
+            async for c in provider.stream(
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "read"}],
+                    }
+                ],
+                tools=tools,
+            )
+        ]
+
+    assert isinstance(chunks[0], StreamActivity)
+    assert sum(1 for c in chunks if isinstance(c, StreamActivity)) == 1
+    _text, tool_calls, _ = _collect(chunks)
+    assert tool_calls[0]["name"] == "read_file"
+    assert tool_calls[0]["input"] == {"path": "a.md"}
 
 
 @pytest.mark.asyncio

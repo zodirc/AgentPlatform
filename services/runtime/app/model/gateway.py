@@ -53,6 +53,19 @@ class ModelResponse:
     cache_creation_input_tokens: int = 0
 
 
+@dataclass(frozen=True)
+class StreamActivity:
+    """Provider liveness signal before text / final ModelResponse.
+
+    OpenAI-compatible models (e.g. DeepSeek) may stream ``reasoning_content`` or
+    ``tool_calls`` for a long time with ``content: null``. Gateway first-byte
+    timeout waits on the first yielded item — without this signal the harness
+    falsely times out while SSE bytes are still arriving.
+    """
+
+    kind: str = "sse"
+
+
 class AbortSignal(Protocol):
     def is_set(self) -> bool: ...
 
@@ -64,9 +77,8 @@ class ModelProvider(Protocol):
         messages: list[dict],
         tools: list[dict],
         abort: AbortSignal | None = None,
-    ) -> AsyncIterator[str | ModelResponse]:
+    ) -> AsyncIterator[str | ModelResponse | StreamActivity]:
         ...
-
 
 class _OrAbort:
     """Duck-typed abort: set when either cancel or attempt-abort fires."""

@@ -9,7 +9,7 @@ from typing import Any, Awaitable, Callable
 from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message
-from app.model.gateway import ModelError, ModelGateway, ModelResponse
+from app.model.gateway import ModelError, ModelGateway, ModelResponse, StreamActivity
 from app.observability.metrics import record_step_duration, record_tool_call, record_tool_misuse
 from app.settings import settings
 from app.tools.registry import ToolSpec
@@ -203,6 +203,9 @@ class AgentEngine:
                                 abort()
                             break
 
+                        if isinstance(chunk, StreamActivity):
+                            # Liveness only — do not append to assistant text / UI tokens.
+                            continue
                         if isinstance(chunk, str):
                             response_text += chunk
                             await self._write_event(
