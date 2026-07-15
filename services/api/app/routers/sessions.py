@@ -1,48 +1,89 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app.models.responses import (
     CreateSessionRequest,
     CreateTurnRequest,
+    SessionListItem,
     SessionResponse,
     SessionView,
     TurnResponse,
     TurnSummary,
 )
-from app.services.admin.auth import require_api_access
-from app.services.projection.session_projector import build_session_view
 from app.services.command.runtime_factory import (
     runtime_client_for_new_turn,
 )
+from app.services.end_user.auth import assert_session_owner, require_session_actor
+from app.services.end_user.users import EndUser
+from app.services.projection.session_projector import build_session_view
 from app.services.resource import sessions as session_svc
 from app.services.resource import turns as turn_svc
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["sessions"], dependencies=[Depends(require_api_access)])
+router = APIRouter(tags=["sessions"])
+
+
+def _session_response(session: dict) -> SessionResponse:
+    return SessionResponse(
+        id=session["id"],
+        default_scenario_id=session["default_scenario_id"],
+        status=session["status"],
+        created_at=session["created_at"],
+        owner_user_id=session.get("owner_user_id"),
+    )
 
 
 @router.post("/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED)
-async def create_session(body: CreateSessionRequest | None = None):
+async def create_session(
+    body: CreateSessionRequest | None = None,
+    actor: EndUser = Depends(require_session_actor),
+):
     req = body or CreateSessionRequest()
-    return await session_svc.create_session(req.default_scenario_id)
+    row = await session_svc.create_session(
+        req.default_scenario_id,
+        owner_user_id=actor.id,
+    )
+    return _session_response(row)
+
+
+@router.get("/sessions", response_model=list[SessionListItem])
+async def list_sessions(
+    actor: EndUser = Depends(require_session_actor),
+    limit: int = Query(default=20, ge=1, le=50),
+    cursor_updated_at: datetime | None = None,
+    cursor_id: UUID | None = None,
+):
+    rows = await session_svc.list_sessions_for_owner(
+        actor.id,
+        limit=limit,
+        cursor_updated_at=cursor_updated_at,
+        cursor_id=cursor_id,
+    )
+    return [SessionListItem(**row) for row in rows]
 
 
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
-async def get_session(session_id: UUID):
-    session = await session_svc.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return SessionResponse(**session)
+async def get_session(
+    session_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    session = await assert_session_owner(session_id, actor)
+    return _session_response(session)
 
 
 @router.get("/sessions/{session_id}/view", response_model=SessionView)
-async def get_session_view(session_id: UUID):
+async def get_session_view(
+    session_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    await assert_session_owner(session_id, actor)
     view = await build_session_view(session_id)
     if view is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -50,10 +91,11 @@ async def get_session_view(session_id: UUID):
 
 
 @router.get("/sessions/{session_id}/turns", response_model=list[TurnSummary])
-async def list_session_turns(session_id: UUID):
-    session = await session_svc.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+async def list_session_turns(
+    session_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    await assert_session_owner(session_id, actor)
     rows = await turn_svc.list_turns_for_session(session_id)
     return [TurnSummary(**row) for row in rows]
 
@@ -68,10 +110,9 @@ async def create_turn(
     body: CreateTurnRequest,
     request: Request,
     response: Response,
+    actor: EndUser = Depends(require_session_actor),
 ):
-    session = await session_svc.get_session(session_id)
-    if session is None:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session = await assert_session_owner(session_id, actor)
 
     scenario_id = body.scenario_id or session["default_scenario_id"]
     trace_id = uuid4()
@@ -82,6 +123,7 @@ async def create_turn(
         message=body.message,
         client_request_id=body.client_request_id,
     )
+    await session_svc.touch_session(session_id)
 
     if created:
         try:
@@ -122,7 +164,10 @@ async def create_turn(
 
 
 @router.post("/retrieval/warmup", status_code=status.HTTP_202_ACCEPTED)
-async def warmup_retrieval(prefix: str = ""):
+async def warmup_retrieval(
+    prefix: str = "",
+    _actor: EndUser = Depends(require_session_actor),
+):
     """Typing-time retrieve warm-up; never blocks a turn (docs/17 S3 A18)."""
     from app.services.command.runtime_client import RuntimeClient
 

@@ -16,6 +16,19 @@ class SessionResponse(BaseModel):
     default_scenario_id: str
     status: str
     created_at: datetime
+    owner_user_id: UUID | None = None
+
+
+class SessionListItem(BaseModel):
+    id: UUID
+    default_scenario_id: str
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    turn_count: int = 0
+    title: str | None = None
+    last_user_preview: str | None = None
+    last_turn_status: str | None = None
 
 
 class CreateTurnRequest(BaseModel):

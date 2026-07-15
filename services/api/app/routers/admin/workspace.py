@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 
-from app.services.admin.auth import require_admin
+from app.services.admin.auth import require_admin_or_end_user
 from app.services.admin import workspace as workspace_svc
 from app.services.admin.workspace import WorkspaceProxyError
 
 router = APIRouter(
     prefix="/admin/workspace",
     tags=["admin", "workspace"],
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_or_end_user)],
 )
 
 MAX_UPLOAD_BYTES = 1_048_576

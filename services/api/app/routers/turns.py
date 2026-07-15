@@ -6,17 +6,21 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, statu
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.db.pool import get_pool
 from app.models.responses import TurnResponse, TurnView
 from app.services.command.runtime_factory import runtime_client_for_turn
-from app.db.pool import get_pool
-from app.services.admin.auth import require_api_access, websocket_authorized
+from app.services.end_user.auth import (
+    assert_session_owner,
+    require_session_actor,
+    websocket_end_user_authorized,
+)
+from app.services.end_user.users import EndUser
 from app.services.projection.projector import build_turn_view
 from app.services.realtime.sse import stream_turn_events
 from app.services.realtime.ws import handle_turn_websocket
 from app.services.resource import turns as turn_svc
 
 PATCH_ALLOWED_STATUSES = frozenset({"completed", "running", "waiting_approval"})
-_HTTP_AUTH = [Depends(require_api_access)]
 
 router = APIRouter(tags=["turns"])
 
@@ -38,11 +42,20 @@ class PatchDecisionRequest(BaseModel):
     reason: str | None = None
 
 
-@router.get("/turns/{turn_id}", response_model=TurnResponse, dependencies=_HTTP_AUTH)
-async def get_turn(turn_id: UUID):
+async def _require_turn_access(turn_id: UUID, actor: EndUser) -> dict:
     turn = await turn_svc.get_turn(turn_id)
     if turn is None:
         raise HTTPException(status_code=404, detail="Turn not found")
+    await assert_session_owner(turn["session_id"], actor)
+    return turn
+
+
+@router.get("/turns/{turn_id}", response_model=TurnResponse)
+async def get_turn(
+    turn_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    turn = await _require_turn_access(turn_id, actor)
     return TurnResponse(
         id=turn["id"],
         session_id=turn["session_id"],
@@ -53,19 +66,26 @@ async def get_turn(turn_id: UUID):
     )
 
 
-@router.get("/turns/{turn_id}/view", response_model=TurnView, dependencies=_HTTP_AUTH)
-async def get_turn_view(turn_id: UUID):
+@router.get("/turns/{turn_id}/view", response_model=TurnView)
+async def get_turn_view(
+    turn_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    await _require_turn_access(turn_id, actor)
     view = await build_turn_view(turn_id)
     if view is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     return view
 
 
-@router.get("/turns/{turn_id}/stream", dependencies=_HTTP_AUTH)
-async def stream_turn(turn_id: UUID, request: Request, since_sequence: int = 0):
-    turn = await turn_svc.get_turn(turn_id)
-    if turn is None:
-        raise HTTPException(status_code=404, detail="Turn not found")
+@router.get("/turns/{turn_id}/stream")
+async def stream_turn(
+    turn_id: UUID,
+    request: Request,
+    since_sequence: int = 0,
+    actor: EndUser = Depends(require_session_actor),
+):
+    await _require_turn_access(turn_id, actor)
 
     last_event_id = request.headers.get("Last-Event-ID")
     if last_event_id:
@@ -88,26 +108,56 @@ async def stream_turn(turn_id: UUID, request: Request, since_sequence: int = 0):
 
 @router.websocket("/turns/{turn_id}/ws")
 async def websocket_turn(websocket: WebSocket, turn_id: UUID, since_sequence: int = 0):
-    if not websocket_authorized(websocket):
+    if not websocket_end_user_authorized(websocket):
         await websocket.close(code=4401)
         return
     turn = await turn_svc.get_turn(turn_id)
     if turn is None:
         await websocket.close(code=4404)
         return
+    from app.services.end_user import users as user_svc
+    from app.services.end_user.tokens import COOKIE_NAME, verify_token
+    from app.settings import settings
+
+    token = websocket.cookies.get(COOKIE_NAME)
+    if not token:
+        auth = websocket.headers.get("authorization", "")
+        scheme, _, value = auth.partition(" ")
+        if scheme.lower() == "bearer" and value.strip():
+            token = value.strip()
+    actor = None
+    if token:
+        payload = verify_token(token)
+        if payload:
+            try:
+                actor = await user_svc.get_user(UUID(payload["sub"]))
+            except (ValueError, KeyError, TypeError):
+                actor = None
+    if actor is None and (settings.admin_session_bypass or not settings.end_user_auth_enabled):
+        actor = await user_svc.system_user()
+    if actor is None:
+        await websocket.close(code=4401)
+        return
+    try:
+        await assert_session_owner(turn["session_id"], actor)
+    except HTTPException:
+        await websocket.close(code=4403)
+        return
+
     listener = websocket.app.state.event_listener
     await handle_turn_websocket(websocket, turn_id, since_sequence, listener)
 
 
-@router.post("/turns/{turn_id}/cancel", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
-async def cancel_turn(turn_id: UUID, body: CancelTurnRequest | None = None):
+@router.post("/turns/{turn_id}/cancel", status_code=status.HTTP_202_ACCEPTED)
+async def cancel_turn(
+    turn_id: UUID,
+    body: CancelTurnRequest | None = None,
+    actor: EndUser = Depends(require_session_actor),
+):
     req = body or CancelTurnRequest()
+    turn = await _require_turn_access(turn_id, actor)
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="Turn not found")
-
-    turn = await turn_svc.get_turn(turn_id)
-    if turn is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     if turn["status"] not in {"pending", "running", "waiting_approval"}:
         raise HTTPException(status_code=409, detail=f"Turn not cancellable: {turn['status']}")
@@ -135,8 +185,13 @@ async def cancel_turn(turn_id: UUID, body: CancelTurnRequest | None = None):
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
-@router.post("/turns/{turn_id}/approve-tool-call", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
-async def approve_tool_call(turn_id: UUID, body: ToolCallDecisionRequest):
+@router.post("/turns/{turn_id}/approve-tool-call", status_code=status.HTTP_202_ACCEPTED)
+async def approve_tool_call(
+    turn_id: UUID,
+    body: ToolCallDecisionRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    await _require_turn_access(turn_id, actor)
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -157,8 +212,13 @@ async def approve_tool_call(turn_id: UUID, body: ToolCallDecisionRequest):
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
-@router.post("/turns/{turn_id}/deny-tool-call", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
-async def deny_tool_call(turn_id: UUID, body: ToolCallDecisionRequest):
+@router.post("/turns/{turn_id}/deny-tool-call", status_code=status.HTTP_202_ACCEPTED)
+async def deny_tool_call(
+    turn_id: UUID,
+    body: ToolCallDecisionRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    await _require_turn_access(turn_id, actor)
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -188,13 +248,15 @@ def _ensure_patch_allowed(turn: dict) -> None:
         )
 
 
-@router.post("/turns/{turn_id}/patch/accept", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
-async def accept_patch(turn_id: UUID, body: PatchDecisionRequest):
+@router.post("/turns/{turn_id}/patch/accept", status_code=status.HTTP_202_ACCEPTED)
+async def accept_patch(
+    turn_id: UUID,
+    body: PatchDecisionRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    turn = await _require_turn_access(turn_id, actor)
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="Turn not found")
-    turn = await turn_svc.get_turn(turn_id)
-    if turn is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     _ensure_patch_allowed(turn)
 
@@ -209,13 +271,15 @@ async def accept_patch(turn_id: UUID, body: PatchDecisionRequest):
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
-@router.post("/turns/{turn_id}/patch/reject", status_code=status.HTTP_202_ACCEPTED, dependencies=_HTTP_AUTH)
-async def reject_patch(turn_id: UUID, body: PatchDecisionRequest):
+@router.post("/turns/{turn_id}/patch/reject", status_code=status.HTTP_202_ACCEPTED)
+async def reject_patch(
+    turn_id: UUID,
+    body: PatchDecisionRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    turn = await _require_turn_access(turn_id, actor)
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
-        raise HTTPException(status_code=404, detail="Turn not found")
-    turn = await turn_svc.get_turn(turn_id)
-    if turn is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     _ensure_patch_allowed(turn)
 

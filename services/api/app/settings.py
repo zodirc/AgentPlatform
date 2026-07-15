@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me"
     auth_enabled: bool = False
     admin_password: str = "admin"
+    # End-user login for session ownership (docs/20). Default on.
+    end_user_auth_enabled: bool = True
+    # Allow admin Basic to act as system owner (eval / scripts).
+    admin_session_bypass: bool = True
+    # Set true behind HTTPS only; false for local HTTP gateway.
+    end_user_cookie_secure: bool = False
     app_env: str = "production"
     log_level: str = "INFO"
     worker_mode: str = "inline"  # inline | outbox

@@ -15,7 +15,7 @@ from app.db.migrate import apply_migrations
 from app.db.pool import close_pool, get_pool, init_pool
 from app.middleware.request_context import RequestContextMiddleware
 from app.models.responses import ErrorBody, ErrorResponse, MetaBody
-from app.routers import health, runs, sessions, turns
+from app.routers import auth, health, runs, sessions, turns
 from app.routers.admin import model_providers as admin_model_providers
 from app.routers.admin import workspace as admin_workspace
 from app.services.projection.session_projector import reconcile_lagging_projections, reconcile_stale_turns
@@ -90,6 +90,7 @@ app.add_middleware(RequestContextMiddleware)
 setup_tracing(service_name=settings.otel_service_name, enabled=settings.otel_enabled)
 instrument_fastapi(app, enabled=settings.otel_enabled)
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(turns.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")

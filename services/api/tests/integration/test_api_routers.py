@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 SESSION_ID = UUID("00000000-0000-0000-0000-000000000001")
 TURN_ID = UUID("00000000-0000-0000-0000-000000000002")
 RUN_ID = UUID("00000000-0000-0000-0000-000000000003")
+OWNER_ID = UUID("00000000-0000-4000-8000-000000000099")
 NOW = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
@@ -19,13 +20,38 @@ def client() -> TestClient:
     import sys
     from unittest.mock import AsyncMock, MagicMock, patch
 
+    from app.services.end_user.auth import require_session_actor
+    from app.services.end_user.users import EndUser
+
     sys.modules.setdefault("asyncpg", MagicMock())
+
+    async def _default_get_session(session_id: UUID):
+        return {
+            "id": session_id,
+            "default_scenario_id": "writing",
+            "status": "active",
+            "created_at": NOW,
+            "owner_user_id": OWNER_ID,
+            "updated_at": NOW,
+        }
+
     with (
         patch("app.main.init_pool", new_callable=AsyncMock),
         patch("app.main.apply_migrations", new_callable=AsyncMock),
         patch("app.main.reconcile_stale_turns", new_callable=AsyncMock, return_value=0),
         patch("app.main.reconcile_lagging_projections", new_callable=AsyncMock, return_value=0),
         patch("app.main.TurnEventListener") as listener_cls,
+        patch(
+            "app.services.resource.sessions.get_session",
+            new_callable=AsyncMock,
+            side_effect=_default_get_session,
+        ),
+        patch("app.services.resource.sessions.touch_session", new_callable=AsyncMock),
+        patch(
+            "app.services.end_user.users.system_user",
+            new_callable=AsyncMock,
+            return_value=EndUser(id=OWNER_ID, username="__system", status="disabled"),
+        ),
     ):
         listener = AsyncMock()
         listener.start = AsyncMock()
@@ -34,8 +60,13 @@ def client() -> TestClient:
         listener_cls.return_value = listener
         from app.main import app
 
+        async def _actor() -> EndUser:
+            return EndUser(id=OWNER_ID, username="test", status="active")
+
+        app.dependency_overrides[require_session_actor] = _actor
         with TestClient(app) as test_client:
             yield test_client
+        app.dependency_overrides.clear()
 
 
 def test_health_live(client: TestClient) -> None:
@@ -54,6 +85,7 @@ def test_get_session_success(client: TestClient) -> None:
         "default_scenario_id": "writing",
         "status": "active",
         "created_at": NOW,
+        "owner_user_id": OWNER_ID,
     }
     with patch("app.services.resource.sessions.get_session", new_callable=AsyncMock, return_value=session_row):
         response = client.get(f"/api/v1/sessions/{SESSION_ID}")
@@ -67,6 +99,7 @@ def test_list_session_turns_success(client: TestClient) -> None:
         "default_scenario_id": "writing",
         "status": "active",
         "created_at": NOW,
+        "owner_user_id": OWNER_ID,
     }
     turn_rows = [
         {
@@ -96,7 +129,11 @@ def test_list_session_turns_success(client: TestClient) -> None:
 
 
 def test_create_turn_success(client: TestClient) -> None:
-    session_row = {"id": SESSION_ID, "default_scenario_id": "writing"}
+    session_row = {
+        "id": SESSION_ID,
+        "default_scenario_id": "writing",
+        "owner_user_id": OWNER_ID,
+    }
     turn_row = {
         "id": TURN_ID,
         "session_id": SESSION_ID,
@@ -115,6 +152,7 @@ def test_create_turn_success(client: TestClient) -> None:
             new_callable=AsyncMock,
             return_value=(turn_row, run_row, True),
         ),
+        patch("app.routers.sessions.session_svc.touch_session", new_callable=AsyncMock),
         patch("app.routers.sessions.runtime_client_for_new_turn", return_value=runtime),
     ):
         response = client.post(
@@ -139,10 +177,12 @@ def test_error_envelope_shape_on_404(client: TestClient) -> None:
 
 def test_error_envelope_shape_on_409(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "running"}
+    turn = {"status": "running", "session_id": SESSION_ID}
+    session_row = {"id": SESSION_ID, "owner_user_id": OWNER_ID}
     with (
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
+        patch("app.services.resource.sessions.get_session", new_callable=AsyncMock, return_value=session_row),
     ):
         response = client.post(
             f"/api/v1/turns/{TURN_ID}/approve-tool-call",
@@ -161,14 +201,18 @@ def test_get_turn_success(client: TestClient) -> None:
         "user_input": "hello",
         "created_at": NOW,
     }
-    with patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn_row):
+    session_row = {"id": SESSION_ID, "owner_user_id": OWNER_ID}
+    with (
+        patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn_row),
+        patch("app.services.resource.sessions.get_session", new_callable=AsyncMock, return_value=session_row),
+    ):
         response = client.get(f"/api/v1/turns/{TURN_ID}")
     assert response.status_code == 200
     assert response.json()["status"] == "completed"
 
 
 def test_deny_tool_call_not_found(client: TestClient) -> None:
-    with patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=None):
+    with patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=None):
         response = client.post(
             f"/api/v1/turns/{TURN_ID}/deny-tool-call",
             json={"tool_call_id": "call-1"},
@@ -215,14 +259,14 @@ def test_get_turn_404(client: TestClient) -> None:
 
 
 def test_cancel_turn_not_found(client: TestClient) -> None:
-    with patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=None):
+    with patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=None):
         response = client.post(f"/api/v1/turns/{TURN_ID}/cancel", json={})
     assert response.status_code == 404
 
 
 def test_approve_tool_call_conflict(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "running"}
+    turn = {"status": "running", "session_id": SESSION_ID}
     with (
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
@@ -236,7 +280,7 @@ def test_approve_tool_call_conflict(client: TestClient) -> None:
 
 def test_deny_tool_call_conflict(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "completed"}
+    turn = {"status": "completed", "session_id": SESSION_ID}
     with (
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
@@ -250,7 +294,7 @@ def test_deny_tool_call_conflict(client: TestClient) -> None:
 
 def test_approve_tool_call_success(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "waiting_approval"}
+    turn = {"status": "waiting_approval", "session_id": SESSION_ID}
     runtime = AsyncMock()
     with (
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
@@ -267,7 +311,7 @@ def test_approve_tool_call_success(client: TestClient) -> None:
 
 def test_cancel_turn_success(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "running"}
+    turn = {"status": "running", "session_id": SESSION_ID}
     runtime = AsyncMock()
     pool = AsyncMock()
     pool.execute = AsyncMock()
@@ -283,7 +327,11 @@ def test_cancel_turn_success(client: TestClient) -> None:
 
 
 def test_get_turn_view_404(client: TestClient) -> None:
-    with patch("app.routers.turns.build_turn_view", new_callable=AsyncMock, return_value=None):
+    turn = {"id": TURN_ID, "session_id": SESSION_ID, "status": "completed"}
+    with (
+        patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
+        patch("app.routers.turns.build_turn_view", new_callable=AsyncMock, return_value=None),
+    ):
         response = client.get(f"/api/v1/turns/{TURN_ID}/view")
     assert response.status_code == 404
 
@@ -296,7 +344,7 @@ def test_get_run_404(client: TestClient) -> None:
 
 def test_deny_tool_call_success(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "waiting_approval"}
+    turn = {"status": "waiting_approval", "session_id": SESSION_ID}
     runtime = AsyncMock()
     with (
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
@@ -312,6 +360,14 @@ def test_deny_tool_call_success(client: TestClient) -> None:
 
 
 def test_get_turn_view_success(client: TestClient) -> None:
+    turn = {
+        "id": TURN_ID,
+        "session_id": SESSION_ID,
+        "scenario_id": "writing",
+        "status": "completed",
+        "user_input": "hello",
+        "created_at": NOW,
+    }
     view = {
         "turn_id": TURN_ID,
         "session_id": SESSION_ID,
@@ -328,7 +384,10 @@ def test_get_turn_view_success(client: TestClient) -> None:
         "interrupt": None,
         "runner_id": "runtime-a",
     }
-    with patch("app.routers.turns.build_turn_view", new_callable=AsyncMock, return_value=view):
+    with (
+        patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
+        patch("app.routers.turns.build_turn_view", new_callable=AsyncMock, return_value=view),
+    ):
         response = client.get(f"/api/v1/turns/{TURN_ID}/view")
     assert response.status_code == 200
     assert response.json()["latest_output"] == "done"
@@ -342,7 +401,7 @@ def test_stream_turn_not_found(client: TestClient) -> None:
 
 def test_accept_patch_allows_running_turn(client: TestClient) -> None:
     run = {"id": RUN_ID}
-    turn = {"status": "running"}
+    turn = {"status": "running", "session_id": SESSION_ID}
     runtime = AsyncMock()
     with (
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
@@ -369,7 +428,18 @@ def test_get_run_success(client: TestClient) -> None:
         "created_at": NOW,
         "updated_at": NOW,
     }
-    with patch("app.services.resource.turns.get_run", new_callable=AsyncMock, return_value=run):
+    turn = {
+        "id": TURN_ID,
+        "session_id": SESSION_ID,
+        "scenario_id": "writing",
+        "status": "completed",
+        "user_input": "hello",
+        "created_at": NOW,
+    }
+    with (
+        patch("app.services.resource.turns.get_run", new_callable=AsyncMock, return_value=run),
+        patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
+    ):
         response = client.get(f"/api/v1/runs/{RUN_ID}")
     assert response.status_code == 200
     assert response.json()["runner_id"] == "runtime-a"
@@ -436,7 +506,13 @@ def test_websocket_turn_accepts_basic_auth(client: TestClient, monkeypatch: pyte
     assert second["type"] == "turn.completed"
 
 
-def test_workspace_sources_index_status_proxies_runtime(client: TestClient) -> None:
+def test_workspace_sources_index_status_proxies_runtime(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
     status = {
         "status": "building",
         "path": "sources/ref-a.md",
@@ -458,7 +534,13 @@ def test_workspace_sources_index_status_proxies_runtime(client: TestClient) -> N
     proxy.assert_awaited_once_with(path="sources/ref-a.md")
 
 
-def test_workspace_source_upload_returns_pending_index(client: TestClient) -> None:
+def test_workspace_source_upload_returns_pending_index(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
     result = {
         "path": "sources/ref-a.md",
         "bytes": 12,

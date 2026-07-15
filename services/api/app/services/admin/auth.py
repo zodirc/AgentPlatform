@@ -4,7 +4,7 @@ import base64
 import binascii
 import secrets
 
-from fastapi import Depends, HTTPException, WebSocket, status
+from fastapi import Depends, HTTPException, Request, WebSocket, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from app.settings import settings
@@ -46,6 +46,24 @@ async def require_api_access(
             detail="Invalid credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
+
+
+async def require_admin_or_end_user(
+    request: Request,
+    credentials: HTTPBasicCredentials | None = Depends(_security),
+) -> None:
+    """Workspace / shared tooling: end-user cookie or admin Basic.
+
+    After docs/20 login, workbench users should not need a second admin password
+    to browse the workspace. Model-provider admin routes stay admin-only.
+    """
+    from app.services.end_user.auth import resolve_end_user
+
+    if await resolve_end_user(request) is not None:
+        return
+    if not settings.auth_enabled:
+        return
+    await require_api_access(credentials)
 
 
 def websocket_authorized(websocket: WebSocket) -> bool:
