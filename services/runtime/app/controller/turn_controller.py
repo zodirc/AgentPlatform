@@ -725,6 +725,7 @@ async def _run_turn(
         scenario_id=scenario_id,
         messages=compiled.messages,
         max_steps=profile.max_steps,
+        plan_hint=compiled.metadata.get("plan_hint"),
     )
 
     registry = build_registry()

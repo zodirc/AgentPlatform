@@ -27,6 +27,8 @@ class TurnState:
     termination_reason: str = "final"
     budget_exceeded: bool = False
     delivery: dict[str, Any] | None = None
+    # Optional Intake hint (e.g. multi-goal → suggest update_plan). Never forces tools.
+    plan_hint: str | None = None
 
 
 ContentBlock = dict[str, Any]

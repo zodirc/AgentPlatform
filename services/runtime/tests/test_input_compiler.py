@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from app.controller.input_compiler import InputCompiler, should_query
+from app.controller.input_compiler import InputCompiler, detect_plan_hint, should_query
+from app.context.project import build_runtime_context
 from app.tools.bootstrap import build_registry, tool_scope
 from app.scenarios.registry import ScenarioRegistry
 
@@ -38,6 +39,28 @@ def test_input_compiler_expands_path_refs() -> None:
     compiled = InputCompiler().compile("please update @sections/01.md")
     assert compiled.metadata.get("path_refs") == ["sections/01.md"]
     assert "sections/01.md" in compiled.messages[0]["content"][0]["text"]
+
+
+def test_detect_plan_hint_numbered_goals() -> None:
+    msg = "Please do these:\n1. fix lint\n2. add tests\n3. update docs\nThanks"
+    assert detect_plan_hint(msg) is not None
+    assert "plan_hint" in InputCompiler().compile(msg).metadata
+
+
+def test_detect_plan_hint_skips_short_single_goal() -> None:
+    assert detect_plan_hint("fix the typo in README") is None
+    assert "plan_hint" not in InputCompiler().compile("fix the typo in README").metadata
+
+
+def test_runtime_context_includes_plan_hint() -> None:
+    text = build_runtime_context(
+        scenario_id="agent",
+        step_count=1,
+        max_steps=40,
+        plan_hint="consider update_plan",
+    )
+    assert "[plan_hint]" in text
+    assert "update_plan" in text
 
 
 def test_should_query_compact_requests_session_compact() -> None:

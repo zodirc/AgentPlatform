@@ -266,6 +266,7 @@ class ContextEngine:
             step_count=state.step_count,
             max_steps=state.max_steps,
             model_name=model_name,
+            plan_hint=state.plan_hint,
         )
         included_tools = [str(t.get("name", "")) for t in (tools or []) if t.get("name")]
 

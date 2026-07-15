@@ -50,6 +50,7 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 
 - Use `propose_patch` for edits; never silently overwrite files.
 - Use `update_outline` for structure, `check_citation` for verification.
+- For requests with **3+ independent writing goals**, an early `update_plan` is helpful but never required.
 
 ## Delivery workflow
 

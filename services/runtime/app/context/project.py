@@ -54,6 +54,7 @@ def build_runtime_context(
     step_count: int,
     max_steps: int,
     model_name: str | None = None,
+    plan_hint: str | None = None,
 ) -> str:
     parts = [
         f"scenario_id={scenario_id}",
@@ -62,4 +63,7 @@ def build_runtime_context(
     ]
     if model_name:
         parts.append(f"model={model_name}")
-    return "[runtime_context] " + " ".join(parts)
+    text = "[runtime_context] " + " ".join(parts)
+    if plan_hint:
+        text = f"{text}\n[plan_hint] {plan_hint}"
+    return text
