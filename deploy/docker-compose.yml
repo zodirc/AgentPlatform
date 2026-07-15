@@ -1,7 +1,9 @@
 # Phase 0 — single compose entry (docs/03 §4.1)
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector image keeps JSON path working; enables RETRIEVAL_BACKEND=pgvector (docs/17 S3 A10).
+    # Existing volumes without the extension: recreate or CREATE EXTENSION vector manually.
+    image: pgvector/pgvector:pg16
     container_name: agent-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-agent}
@@ -9,6 +11,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agent}
     volumes:
       - pg_data:/var/lib/postgresql/data
+      - ./init/pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent}"]
       interval: 5s
@@ -37,6 +40,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-3}
       RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
+      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-json}
       INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-true}
       STALL_THRESHOLD_SECONDS: ${STALL_THRESHOLD_SECONDS:-120}
       STALL_POLL_INTERVAL_SECONDS: ${STALL_POLL_INTERVAL_SECONDS:-30}

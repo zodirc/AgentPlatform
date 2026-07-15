@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Protocol
 
 from app.retrieval.vector_index import ChunkHit, SourceVectorIndex
 from app.settings import settings
 
+logger = logging.getLogger(__name__)
+
 
 class SourceRetrievalStore(Protocol):
-    """Pluggable source index backend (JSON today; Chroma/Qdrant later)."""
+    """Pluggable source index backend (JSON default; pgvector ANN optional)."""
 
     def load(self) -> None: ...
 
@@ -47,4 +50,21 @@ def sources_store_path(*, data_dir: str | None = None) -> Path:
 
 
 def get_sources_store(*, data_dir: str | None = None) -> SourceRetrievalStore:
+    backend = (settings.retrieval_backend or "json").lower().strip()
+    if backend in {"pgvector", "postgres", "ann"}:
+        try:
+            from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+            store = PgvectorSourceRetrievalStore(
+                settings.database_url,
+                dimensions=settings.embedding_dimensions,
+            )
+            # Probe extension early so misconfig fails loud at first use.
+            store.ensure_schema()
+            return store
+        except Exception:
+            logger.warning(
+                "pgvector backend unavailable; falling back to JSON store",
+                exc_info=True,
+            )
     return JsonSourceRetrievalStore(sources_store_path(data_dir=data_dir))

@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
     retrieval_mode: str = "hybrid"  # keyword | vector | hybrid
     retrieval_rrf_k: int = 60
+    # Backend: json (default, no deps) | pgvector (ANN via HNSW; needs pgvector image).
+    retrieval_backend: str = "json"
     # Lexical rerank may stay on (cheap). Cross-encoder stays OFF by default
     # (docs/16 Q8/Q13, docs/17 S2 A12). Experimental CE: pool≤20 + ≤50ms + timeout→lexical.
     retrieval_rerank_enabled: bool = True
