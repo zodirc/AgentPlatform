@@ -71,7 +71,8 @@
 | [14-model-harness.md](14-model-harness.md) | **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地） |
 | [15-highlights-vs-legacy.md](15-highlights-vs-legacy.md) | **相对旧项目全景说明**（自洽长文 + §26 机制级深潜；可独立分发 / AI 分析） |
 | [16-agent-system-qa.md](16-agent-system-qa.md) | **Agent 系统问答（0–20）**：落地场景、机制对照、改进方案与**交互速率影响** |
-| [17-execution-plan.md](17-execution-plan.md) | **执行方案**：由 16 附录 A 导出的 S0–S3 冲刺、票粒度、否决项与验收闸 |
+| [17-execution-plan.md](17-execution-plan.md) | **执行方案**：由 16 附录 A 导出的 S0–S3 冲刺、票粒度、否决项与验收闸（**S0–S3 代码已落地**） |
+| [18-a20-multitable-recall.md](18-a20-multitable-recall.md) | **A20 多表召回蓝图** + `search_records` stub |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 
