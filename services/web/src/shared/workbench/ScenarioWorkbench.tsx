@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Button } from "../../components/ui/button";
-import { useAdminAuth } from "../../shared/auth/useAdminAuth";
 import { ErrorBanner } from "./ErrorBanner";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";
@@ -57,8 +56,6 @@ export function ScenarioWorkbenchView({
   );
   const [sourcesLibraryOpen, setSourcesLibraryOpen] = useState(false);
   const [ragDebugOpen, setRagDebugOpen] = useState(false);
-  const { needsUnlock, checking, unlockError, unlock } = useAdminAuth();
-  const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const artifactCount = artifactBadgeCount(
     wb.timelineItems,
     wb.view?.artifacts ?? [],
@@ -83,38 +80,6 @@ export function ScenarioWorkbenchView({
     <div className={rootClass}>
       <div className="shrink-0 space-y-2 border-b border-slate-800 px-4 py-2">
         <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
-        {needsUnlock && !checking ? (
-          <form
-            className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-900/50 bg-amber-950/20 px-3 py-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!adminPasswordInput.trim()) return;
-              void (async () => {
-                const ok = await unlock(adminPasswordInput.trim());
-                if (!ok) return;
-                setAdminPasswordInput("");
-                await wb.refreshView();
-              })();
-            }}
-          >
-            <span className="text-xs text-amber-200">
-              需要 Admin 密码查看工具结果和批准敏感操作
-            </span>
-            {unlockError ? (
-              <span className="text-xs text-rose-300">{unlockError}</span>
-            ) : null}
-            <input
-              className="rounded border border-slate-700 bg-slate-950 px-2 py-1 text-xs"
-              type="password"
-              placeholder="admin 密码"
-              value={adminPasswordInput}
-              onChange={(e) => setAdminPasswordInput(e.target.value)}
-            />
-            <Button type="submit" size="sm" className="bg-amber-700">
-              解锁
-            </Button>
-          </form>
-        ) : null}
       </div>
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">

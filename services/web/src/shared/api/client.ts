@@ -60,7 +60,7 @@ export async function verifyAdminAuth(): Promise<boolean> {
   return res.ok;
 }
 
-function authHeaders(extra: HeadersInit = {}): HeadersInit {
+function adminAuthHeaders(extra: HeadersInit = {}): HeadersInit {
   let token: string | null = null;
   try {
     token = localStorage.getItem(ADMIN_AUTH_KEY);
@@ -71,14 +71,12 @@ function authHeaders(extra: HeadersInit = {}): HeadersInit {
   return { ...extra, Authorization: `Basic ${token}` };
 }
 
-/** Auth headers for turn/stream API calls (SSE fetch, view refresh, etc.). */
+/** End-user session routes: cookie credentials only (no admin Basic). */
 export function apiAuthHeaders(extra: HeadersInit = {}): HeadersInit {
-  return authHeaders(extra);
+  return extra;
 }
 
-function adminAuthHeaders(): HeadersInit {
-  return authHeaders();
-}
+const sessionFetchInit = { credentials: "include" as RequestCredentials };
 
 export type TurnEvent = {
   event_id: string;
@@ -88,12 +86,79 @@ export type TurnEvent = {
   payload: Record<string, unknown>;
 };
 
+export type EndUser = { id: string; username: string };
+
+export type SessionListItem = {
+  id: string;
+  default_scenario_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  turn_count: number;
+  title: string | null;
+  last_user_preview: string | null;
+  last_turn_status: string | null;
+};
+
+export async function fetchMe(): Promise<EndUser | null> {
+  const res = await fetch(`${API_BASE}/auth/me`, sessionFetchInit);
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`fetchMe failed: ${res.status}`);
+  return res.json() as Promise<EndUser>;
+}
+
+export async function loginUser(
+  username: string,
+  password: string,
+): Promise<EndUser> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) throw new Error(`login failed: ${res.status}`);
+  return res.json() as Promise<EndUser>;
+}
+
+export async function registerUser(
+  username: string,
+  password: string,
+): Promise<EndUser> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (!res.ok) throw new Error(`register failed: ${res.status}`);
+  return res.json() as Promise<EndUser>;
+}
+
+export async function logoutUser(): Promise<void> {
+  await fetch(`${API_BASE}/auth/logout`, {
+    ...sessionFetchInit,
+    method: "POST",
+  });
+}
+
+export async function listSessions(limit = 20): Promise<SessionListItem[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  const res = await fetch(`${API_BASE}/sessions?${params}`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`listSessions failed: ${res.status}`);
+  return res.json() as Promise<SessionListItem[]>;
+}
+
 export async function createSession(
   scenario: "writing" | "agent" | "interview" = "writing",
 ) {
   const res = await fetch(`${API_BASE}/sessions`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ default_scenario_id: scenario }),
   });
   if (!res.ok) throw new Error(`createSession failed: ${res.status}`);
@@ -102,6 +167,7 @@ export async function createSession(
 
 export async function getSession(sessionId: string): Promise<{ id: string }> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    ...sessionFetchInit,
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`getSession failed: ${res.status}`);
@@ -121,6 +187,7 @@ export type SessionView = {
 
 export async function fetchSessionView(sessionId: string): Promise<SessionView> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/view`, {
+    ...sessionFetchInit,
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchSessionView failed: ${res.status}`);
@@ -141,6 +208,7 @@ export async function fetchSessionTurns(
   sessionId: string,
 ): Promise<TurnSummary[]> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/turns`, {
+    ...sessionFetchInit,
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchSessionTurns failed: ${res.status}`);
@@ -153,8 +221,9 @@ export async function startTurn(
   scenarioId: string,
 ) {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/turns`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ message, scenario_id: scenarioId }),
   });
   if (!res.ok) throw new Error(`startTurn failed: ${res.status}`);
@@ -163,6 +232,7 @@ export async function startTurn(
 
 export async function fetchTurnView(turnId: string): Promise<TurnView> {
   const res = await fetch(`${API_BASE}/turns/${turnId}/view`, {
+    ...sessionFetchInit,
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchTurnView failed: ${res.status}`);
@@ -171,8 +241,9 @@ export async function fetchTurnView(turnId: string): Promise<TurnView> {
 
 export async function cancelTurn(turnId: string, force = false) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/cancel`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ reason: "user_requested", force }),
   });
   if (!res.ok) throw new Error(`cancelTurn failed: ${res.status}`);
@@ -181,8 +252,9 @@ export async function cancelTurn(turnId: string, force = false) {
 
 export async function approveToolCall(turnId: string, toolCallId: string) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/approve-tool-call`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ tool_call_id: toolCallId }),
   });
   if (!res.ok) throw new Error(`approveToolCall failed: ${res.status}`);
@@ -195,8 +267,9 @@ export async function denyToolCall(
   reason = "user_denied",
 ) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/deny-tool-call`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ tool_call_id: toolCallId, reason }),
   });
   if (!res.ok) throw new Error(`denyToolCall failed: ${res.status}`);
@@ -205,8 +278,9 @@ export async function denyToolCall(
 
 export async function acceptPatch(turnId: string, patchId: string) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/patch/accept`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ patch_id: patchId }),
   });
   if (!res.ok) throw new Error(`acceptPatch failed: ${res.status}`);
@@ -219,8 +293,9 @@ export async function rejectPatch(
   reason = "user_rejected",
 ) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/patch/reject`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: authHeaders({ "Content-Type": "application/json" }),
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ patch_id: patchId, reason }),
   });
   if (!res.ok) throw new Error(`rejectPatch failed: ${res.status}`);
@@ -305,7 +380,8 @@ export async function fetchWorkspaceEntries(
 ): Promise<WorkspaceEntries> {
   const params = new URLSearchParams({ path });
   const res = await fetch(`${API_BASE}/admin/workspace/entries?${params}`, {
-    headers: adminAuthHeaders(),
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchWorkspaceEntries failed: ${res.status}`);
   return res.json();
@@ -314,7 +390,8 @@ export async function fetchWorkspaceEntries(
 export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
   const params = new URLSearchParams({ path });
   const res = await fetch(`${API_BASE}/admin/workspace/file?${params}`, {
-    headers: adminAuthHeaders(),
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchWorkspaceFile failed: ${res.status}`);
   return res.json();
@@ -360,7 +437,7 @@ export async function fetchSourcesIndexStatus(
   const qs = params.toString();
   const res = await fetch(
     `${API_BASE}/admin/workspace/sources/index-status${qs ? `?${qs}` : ""}`,
-    { headers: adminAuthHeaders() },
+    { ...sessionFetchInit, headers: apiAuthHeaders() },
   );
   if (!res.ok) {
     throw new Error(`fetchSourcesIndexStatus failed: ${res.status}`);
@@ -374,8 +451,9 @@ export async function uploadSourceFile(
   const form = new FormData();
   form.append("file", file);
   const res = await fetch(`${API_BASE}/admin/workspace/sources/upload`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: adminAuthHeaders(),
+    headers: apiAuthHeaders(),
     body: form,
   });
   if (!res.ok) {
@@ -427,7 +505,11 @@ export async function warmupRetrieval(prefix = ""): Promise<void> {
     ? `${API_BASE}/retrieval/warmup?${qs}`
     : `${API_BASE}/retrieval/warmup`;
   try {
-    await fetch(url, { method: "POST", headers: adminAuthHeaders() });
+    await fetch(url, {
+      ...sessionFetchInit,
+      method: "POST",
+      headers: apiAuthHeaders(),
+    });
   } catch {
     // Ignore warm-up failures.
   }

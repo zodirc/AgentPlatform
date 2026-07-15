@@ -8,6 +8,7 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { createSession, getSession } from "../api/client";
+import { useEndUserAuth } from "../auth/EndUserAuth";
 import {
   pathWithSession,
   readStoredSessionId,
@@ -21,6 +22,7 @@ type WorkbenchSessionContextValue = {
   isLoading: boolean;
   error: Error | null;
   startNewSession: () => Promise<string>;
+  openSession: (sessionId: string) => Promise<void>;
 };
 
 const WorkbenchSessionContext = createContext<WorkbenchSessionContextValue>({
@@ -28,6 +30,7 @@ const WorkbenchSessionContext = createContext<WorkbenchSessionContextValue>({
   isLoading: true,
   error: null,
   startNewSession: async () => "",
+  openSession: async () => undefined,
 });
 
 async function resolveSessionId(): Promise<string> {
@@ -43,7 +46,7 @@ async function resolveSessionId(): Promise<string> {
       writeStoredSessionId(session.id);
       return session.id;
     } catch {
-      // stale id — create a fresh session below
+      // stale or foreign session — create below
     }
   }
 
@@ -57,10 +60,12 @@ export function WorkbenchSessionProvider({ children }: { children: ReactNode }) 
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { user } = useEndUserAuth();
 
   const query = useQuery({
-    queryKey: ["session", "shared"],
+    queryKey: ["session", "shared", user?.id ?? "anon"],
     queryFn: resolveSessionId,
+    enabled: Boolean(user),
     staleTime: Number.POSITIVE_INFINITY,
     retry: 2,
   });
@@ -81,18 +86,31 @@ export function WorkbenchSessionProvider({ children }: { children: ReactNode }) 
   const startNewSession = useCallback(async () => {
     const session = await createSession("writing");
     writeStoredSessionId(session.id);
-    queryClient.setQueryData(["session", "shared"], session.id);
+    queryClient.setQueryData(["session", "shared", user?.id ?? "anon"], session.id);
     navigate(pathWithSession(pathname, session.id), { replace: true });
     return session.id;
-  }, [navigate, pathname, queryClient]);
+  }, [navigate, pathname, queryClient, user?.id]);
+
+  const openSession = useCallback(
+    async (nextId: string) => {
+      const session = await getSession(nextId);
+      writeStoredSessionId(session.id);
+      queryClient.setQueryData(["session", "shared", user?.id ?? "anon"], session.id);
+      navigate(pathWithSession(pathname === "/settings/model" ? "/writing" : pathname, session.id), {
+        replace: true,
+      });
+    },
+    [navigate, pathname, queryClient, user?.id],
+  );
 
   return (
     <WorkbenchSessionContext.Provider
       value={{
         sessionId,
-        isLoading: query.isLoading,
+        isLoading: Boolean(user) && query.isLoading,
         error: query.error as Error | null,
         startNewSession,
+        openSession,
       }}
     >
       {children}

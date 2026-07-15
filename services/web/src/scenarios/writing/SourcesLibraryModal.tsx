@@ -9,7 +9,6 @@ import {
   type SourcesIndexStatus,
   type SourceUploadResult,
 } from "../../shared/api/client";
-import { useAdminAuth } from "../../shared/auth/useAdminAuth";
 import { Button } from "../../components/ui/button";
 import { workspaceEntryIcon } from "../agent/workspaceFileIcon";
 import { sourcesIndexStatusLabel } from "./sourcesIndexStatus";
@@ -26,7 +25,6 @@ type Props = {
 
 export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const { needsUnlock } = useAdminAuth();
   const queryClient = useQueryClient();
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteBody, setPasteBody] = useState("");
@@ -38,13 +36,13 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
       const data = await fetchWorkspaceEntries("sources");
       return fileEntries(data.entries ?? []);
     },
-    enabled: open && !needsUnlock,
+    enabled: open,
   });
 
   const indexQuery = useQuery({
     queryKey: ["sources-index-status", watchPath],
     queryFn: () => fetchSourcesIndexStatus(watchPath ?? undefined),
-    enabled: open && !needsUnlock && Boolean(watchPath),
+    enabled: open && Boolean(watchPath),
     refetchInterval: (query) => {
       const data = query.state.data as SourcesIndexStatus | undefined;
       if (!data) return 1000;
@@ -163,12 +161,6 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
         </header>
 
         <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
-          {needsUnlock ? (
-            <p className="text-sm text-amber-400">
-              请先在页面顶部输入 Admin 密码解锁，才能浏览和上传资料。
-            </p>
-          ) : (
-            <>
               <div className="mb-4 space-y-3 rounded-lg border border-slate-800 bg-slate-900/40 p-3">
                 <div>
                   <p className="mb-2 text-xs font-medium text-slate-300">
@@ -279,8 +271,6 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                   })}
                 </ul>
               )}
-            </>
-          )}
         </div>
       </div>
     </div>

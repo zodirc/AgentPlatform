@@ -47,6 +47,7 @@ export class TurnStreamClient {
 
     try {
       const res = await fetch(this.streamUrl(sinceSequence), {
+        credentials: "include",
         headers: apiAuthHeaders({ Accept: "text/event-stream" }),
         signal: this.abort.signal,
       });

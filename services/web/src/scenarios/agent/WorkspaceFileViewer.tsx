@@ -70,7 +70,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
             <p className="text-sm text-rose-400">
               无法读取文件
               {error instanceof Error ? `：${error.message}` : ""}
-              （请确认已 Admin 解锁）
+              （请确认已登录）
             </p>
           ) : (
             <>

@@ -356,7 +356,7 @@ export function AgentSidebar({
               <p className="text-xs text-slate-500">加载文件…</p>
             ) : "error" in selectedPreview && selectedPreview.error ? (
               <p className="text-xs text-rose-400">
-                无法读取文件（请确认已 Admin 解锁）
+                无法读取文件
               </p>
             ) : "writePreview" in selectedPreview &&
               selectedPreview.writePreview ? (

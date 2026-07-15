@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
 import {
   PatchDiffPanel,
   type PatchArtifact,
@@ -8,7 +7,6 @@ import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import { Button } from "../../components/ui/button";
 import { Card, CardTitle } from "../../components/ui/card";
 import { Textarea } from "../../components/ui/textarea";
-import { useAdminAuth } from "../auth/useAdminAuth";
 import { artifactToWritePreview } from "./filePreview";
 import { approvalCopy, lastApprovalEvent } from "./toolApproval";
 import { ErrorBanner } from "./ErrorBanner";
@@ -37,8 +35,6 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
   const fileWrites = (wb.view?.artifacts ?? [])
     .filter(isFileWriteArtifact)
     .filter((a) => String(a.status ?? "") === "applied");
-  const { needsUnlock, checking, unlockError, unlock } = useAdminAuth();
-  const [adminPasswordInput, setAdminPasswordInput] = useState("");
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
     Record<string, unknown> | undefined;
@@ -56,39 +52,6 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
       </header>
 
       <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
-
-      {needsUnlock && !checking && (
-        <form
-          className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!adminPasswordInput.trim()) return;
-            void (async () => {
-              const ok = await unlock(adminPasswordInput.trim());
-              if (!ok) return;
-              setAdminPasswordInput("");
-              await wb.refreshView();
-            })();
-          }}
-        >
-          <span className="text-sm text-amber-200">
-            需要 Admin 密码才能查看工具结果和批准敏感操作
-          </span>
-          {unlockError ? (
-            <span className="text-sm text-rose-300">{unlockError}</span>
-          ) : null}
-          <input
-            className="rounded border border-slate-700 bg-slate-950 px-3 py-1.5 text-sm"
-            type="password"
-            placeholder="admin 密码（默认 admin）"
-            value={adminPasswordInput}
-            onChange={(e) => setAdminPasswordInput(e.target.value)}
-          />
-          <Button type="submit" className="bg-amber-700">
-            解锁
-          </Button>
-        </form>
-      )}
 
       <div
         className={
@@ -180,7 +143,7 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
             </p>
           ) : (
             <p className="mb-3 text-xs text-amber-400">
-              若未显示按钮，请先到顶部输入 Admin 密码解锁，然后刷新页面。
+              等待审批控件就绪，可稍后刷新当前轮次。
             </p>
           )}
           <div className="flex gap-2">
