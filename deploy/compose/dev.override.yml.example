@@ -1,8 +1,10 @@
 # Local dev: mount source + uvicorn --reload (copy to dev.override.yml; not used in CI).
+# Paths are relative to the Compose project directory (= parent of the first -f file,
+# i.e. deploy/), so use ../services/... not ../../services/...
 services:
   api:
     volumes:
-      - ../../services/api/app:/app/app:ro
+      - ../services/api/app:/app/app:ro
     environment:
       APP_ENV: development
     command:
@@ -17,7 +19,7 @@ services:
       ]
   runtime:
     volumes:
-      - ../../services/runtime/app:/app/app:ro
+      - ../services/runtime/app:/app/app:ro
     environment:
       APP_ENV: development
     command:
