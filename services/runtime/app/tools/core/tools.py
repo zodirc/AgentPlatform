@@ -328,31 +328,29 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
             "retrieval": "keyword",
         }
 
+    # Hot path: load + search only. Never store.sync() here (A9 / docs/17 S2).
     store = get_sources_store()
-    sync_stats: dict[str, Any] = {"skipped": True}
+    index_meta: dict[str, Any] = {
+        "synced_on_query": False,
+        "index_via_worker": settings.index_via_worker,
+    }
     try:
-        if not settings.index_via_worker:
-            sync_stats = store.sync(sources, workspace_root=workspace_root)
-        else:
-            store.load()
+        store.load()
         raw_hits = store.search(query, limit=limit, mode=mode)
         retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
-        if settings.index_via_worker and not raw_hits:
-            sync_stats = store.sync(sources, workspace_root=workspace_root)
-            raw_hits = store.search(query, limit=limit, mode=mode)
     except OSError:
-        sync_stats = {"error": "vector_index_unavailable"}
+        index_meta["error"] = "vector_index_unavailable"
         raw_hits = []
         retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
 
-    if raw_hits or mode in {"vector", "hybrid"}:
+    if raw_hits:
         hits = _format_source_hits(raw_hits, excerpt_chars=excerpt_chars)
         payload: dict[str, Any] = {
             "query": query,
             "hits": hits,
             "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
             "retrieval": retrieval,
-            "index": sync_stats,
+            "index": index_meta,
         }
         if hits and hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
             top_path = hits[0].get("path", "")
@@ -362,13 +360,20 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
             )
         return payload
 
+    # Empty/stale index: keyword filesystem scan (no rebuild), plus lag hint.
+    index_meta["index_lag"] = True
+    index_meta["hint"] = (
+        "Vector index empty or lagging; search used keyword fallback. "
+        "Rebuild via sync_sources_index / worker upload path — not on query."
+    )
     hits = _search_sources_keyword(sources, workspace_root=workspace_root, query=query, limit=limit)
     return {
         "query": query,
         "hits": hits,
         "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
         "retrieval": "keyword",
-        "index": sync_stats,
+        "index": index_meta,
+        "hint": index_meta["hint"],
     }
 
 

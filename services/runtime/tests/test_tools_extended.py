@@ -119,10 +119,45 @@ async def test_search_sources_hybrid_mode(workspace: Path, monkeypatch: pytest.M
     monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
     monkeypatch.setattr(settings, "data_dir", str(workspace))
 
+    # Index is built off the query path (A9).
+    await core.sync_sources_index()
     result = await core.search_sources("张白鹿", limit=3)
     assert result["retrieval"] == "hybrid"
     assert result["hits"]
+    assert result.get("index", {}).get("synced_on_query") is False
     assert any("张白鹿" in hit.get("excerpt", "") for hit in result["hits"])
+
+
+@pytest.mark.asyncio
+async def test_search_sources_never_syncs_inline(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sources = workspace / "sources"
+    sources.mkdir()
+    (sources / "note.md").write_text("unique-term-xyz appears here", encoding="utf-8")
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "data_dir", str(workspace))
+    monkeypatch.setattr(settings, "index_via_worker", True)
+
+    called = {"sync": 0}
+
+    class FakeStore:
+        def load(self) -> None:
+            return None
+
+        def sync(self, *_args, **_kwargs):
+            called["sync"] += 1
+            return {"indexed_files": 1}
+
+        def search(self, *_args, **_kwargs):
+            return []
+
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda **_kwargs: FakeStore())
+    result = await core.search_sources("unique-term-xyz")
+    assert called["sync"] == 0
+    assert result.get("index", {}).get("synced_on_query") is False
+    assert result.get("index", {}).get("index_lag") is True
+    # Keyword fallback still finds the file without rebuilding the vector index.
+    assert result["retrieval"] == "keyword"
+    assert result["hits"]
 
 
 @pytest.mark.asyncio
