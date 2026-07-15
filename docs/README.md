@@ -51,6 +51,7 @@
 11. **[16-agent-system-qa.md](16-agent-system-qa.md)** — 面试/设计向问答（方案设计过程与速率安全化）
 12. **[19-agent-system-qa-current.md](19-agent-system-qa-current.md)** — **原理向现状问答**（少内部代号；RAG / Harness / Context engineering）
 13. **[17-execution-plan.md](17-execution-plan.md)** — 由 16 导出的执行方案（S0–S3，速率红线内）
+14. **[20-user-session-history-plan.md](20-user-session-history-plan.md)** — **登录用户历史会话 / 跨设备续聊**执行方案（归属、列表、速率与风险）
 
 ## 完整目录
 
@@ -75,6 +76,7 @@
 | [17-execution-plan.md](17-execution-plan.md) | **执行方案**：由 16 附录 A 导出的 S0–S3 冲刺、票粒度、否决项与验收闸（**S0–S3 代码已落地**） |
 | [18-a20-multitable-recall.md](18-a20-multitable-recall.md) | **A20 多表召回蓝图** + `search_records` stub |
 | [19-agent-system-qa-current.md](19-agent-system-qa-current.md) | **Agent 系统原理问答（0–20）**：落地事实 + 工程原理（少冲刺代号） |
+| [20-user-session-history-plan.md](20-user-session-history-plan.md) | **登录用户会话历史执行方案**（U0–U2 已落地）：端用户归属、历史列表、跨设备续聊、旧数据清空 |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 
