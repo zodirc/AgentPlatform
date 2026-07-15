@@ -423,6 +423,11 @@ async def glob(pattern: str, path: str = ".", limit: int = 100, **_kwargs: Any) 
 
 
 async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
+    from app.privacy.secret_scan import gate_write_content
+
+    blocked = gate_write_content(content, path=path)
+    if blocked is not None:
+        return blocked
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
@@ -647,6 +652,23 @@ async def export_document(
             f"\n## {section_id}\n\n{path.read_text(encoding='utf-8', errors='replace').strip()}"
         )
     body = "\n".join(parts).strip()
+    from app.privacy.secret_scan import gate_write_content
+
+    blocked = gate_write_content(body, path=output_path)
+    if blocked is not None:
+        return {
+            "output_path": output_path,
+            "source": source,
+            "delivery_status": "failed",
+            "delivery_issues": [blocked.get("summary", "secret_scan_blocked")],
+            "secret_findings": blocked.get("secret_findings", []),
+            "included_sections": requested,
+            "missing_sections": [],
+            "source_paths": [rel_path for _, rel_path, _ in sources],
+            "summary": blocked.get("summary", "Export blocked by secret scan"),
+            "status": "blocked",
+            "error": "secret_scan_blocked",
+        }
     target = _resolve_path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body, encoding="utf-8")
