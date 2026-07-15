@@ -21,6 +21,9 @@ Session (1) ── Turn (N) ── Run (1:1) ── Step*（仅事件）
 
 ```text
 POST   /api/v1/sessions
+GET    /api/v1/sessions                # 我的会话列表（登录用户）
+GET    /api/v1/sessions/{id}
+DELETE /api/v1/sessions/{id}           # 硬删除本人会话（turns/events/transcript；不动 workspace）
 POST   /api/v1/sessions/{id}/turns     # body: CreateTurnRequest
 GET    /api/v1/turns/{id}
 GET    /api/v1/turns/{id}/view

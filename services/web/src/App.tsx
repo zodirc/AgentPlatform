@@ -118,6 +118,10 @@ function Nav() {
           setHistoryOpen(false);
           void openSession(id);
         }}
+        onDeletedCurrent={() => {
+          setHistoryOpen(false);
+          void startNewSession();
+        }}
       />
     </>
   );

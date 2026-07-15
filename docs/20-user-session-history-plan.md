@@ -1,7 +1,7 @@
 # 20 — 登录用户会话历史与跨设备续聊（执行方案）
 
 > **性质**：可排期的实施计划。  
-> **落地状态（2026-07-15）**：U0–U2 代码已合入本仓库（端用户登录、`owner_user_id`、历史抽屉、迁移清空旧会话）；部署后跑 Alembic `0009` 并注册账号验收。  
+> **落地状态（2026-07-15）**：U0–U2 代码已合入本仓库（端用户登录、`owner_user_id`、历史抽屉、迁移清空旧会话）；历史抽屉支持 **硬删除** 本人会话（`DELETE /sessions/{id}`）。部署后跑 Alembic `0009` 并注册账号验收。  
 > **产品目标**：登录后任意设备可看到**自己的**历史会话，交互内容与现网 Chat UI 一致，并允许继续对话且继承上下文。  
 > **约束继承**：[17-execution-plan.md](17-execution-plan.md) 速率红线 R1–R5；不得拖慢 Turn 热路径。  
 > **现状基线**（2026-07）：Session / turns / `session_transcripts` 已持久化；Web 可按 `session_id` 恢复聊天；Runtime 按 transcript 续上下文。**缺**端用户身份、session 归属、历史列表与读时鉴权。  
@@ -107,7 +107,8 @@
 | `GET` | `/sessions` | **我的**会话：分页 `limit`/`cursor`；字段见下 |
 | `POST` | `/sessions` | 创建时强制 `owner_user_id = me` |
 | `GET` | `/sessions/{id}` | **403** 若非 owner（杜绝猜 UUID） |
-| `GET` | `/sessions/{id}/view` | 同上 |
+| `DELETE` | `/sessions/{id}` | **硬删除**本人会话图谱（turns/events/views/transcript）；**403** 非 owner；**不动** workspace 磁盘 |
+| `GET` | `/sessions/{id}/view` | 同上 owner 校验 |
 | `GET` | `/sessions/{id}/turns` | 同上；供历史 UI |
 | `POST` | `/sessions/{id}/turns` | 同上后再调 runtime |
 

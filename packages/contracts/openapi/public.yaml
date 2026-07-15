@@ -41,6 +41,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionResponse'
+    delete:
+      operationId: deleteSession
+      summary: Hard-delete own session and turn graph
+      description: >
+        Permanently deletes the session for the authenticated owner, including
+        turns, runs, events, views, and transcript. Workspace files are not deleted.
+      parameters:
+        - name: session_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Session deleted
+        '403':
+          description: Not the session owner
+        '404':
+          description: Session not found
   /sessions/{session_id}/view:
     get:
       operationId: getSessionView

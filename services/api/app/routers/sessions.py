@@ -78,6 +78,19 @@ async def get_session(
     return _session_response(session)
 
 
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """Hard-delete own session (turns / events / transcript). No soft-delete."""
+    await assert_session_owner(session_id, actor)
+    deleted = await session_svc.delete_session_for_owner(session_id, actor.id)
+    if not deleted:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get("/sessions/{session_id}/view", response_model=SessionView)
 async def get_session_view(
     session_id: UUID,

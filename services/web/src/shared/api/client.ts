@@ -174,6 +174,16 @@ export async function getSession(sessionId: string): Promise<{ id: string }> {
   return res.json();
 }
 
+/** Hard-delete own session (204). Does not remove workspace files. */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    ...sessionFetchInit,
+    method: "DELETE",
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
+}
+
 export type SessionView = {
   session_id: string;
   default_scenario_id: string;

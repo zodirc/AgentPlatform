@@ -93,6 +93,51 @@ def test_get_session_success(client: TestClient) -> None:
     assert response.json()["id"] == str(SESSION_ID)
 
 
+def test_delete_session_success(client: TestClient) -> None:
+    session_row = {
+        "id": SESSION_ID,
+        "default_scenario_id": "writing",
+        "status": "active",
+        "created_at": NOW,
+        "owner_user_id": OWNER_ID,
+        "updated_at": NOW,
+    }
+    with (
+        patch(
+            "app.services.resource.sessions.get_session",
+            new_callable=AsyncMock,
+            return_value=session_row,
+        ),
+        patch(
+            "app.services.resource.sessions.delete_session_for_owner",
+            new_callable=AsyncMock,
+            return_value=True,
+        ) as delete_mock,
+    ):
+        response = client.delete(f"/api/v1/sessions/{SESSION_ID}")
+    assert response.status_code == 204
+    delete_mock.assert_awaited_once_with(SESSION_ID, OWNER_ID)
+
+
+def test_delete_session_forbidden(client: TestClient) -> None:
+    other_owner = UUID("00000000-0000-4000-8000-000000000088")
+    session_row = {
+        "id": SESSION_ID,
+        "default_scenario_id": "writing",
+        "status": "active",
+        "created_at": NOW,
+        "owner_user_id": other_owner,
+        "updated_at": NOW,
+    }
+    with patch(
+        "app.services.resource.sessions.get_session",
+        new_callable=AsyncMock,
+        return_value=session_row,
+    ):
+        response = client.delete(f"/api/v1/sessions/{SESSION_ID}")
+    assert response.status_code == 403
+
+
 def test_list_session_turns_success(client: TestClient) -> None:
     session_row = {
         "id": SESSION_ID,

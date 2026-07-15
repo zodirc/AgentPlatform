@@ -130,3 +130,61 @@ async def touch_session(session_id: UUID) -> None:
         "UPDATE sessions SET updated_at = now() WHERE id = $1",
         session_id,
     )
+
+
+async def delete_session_for_owner(session_id: UUID, owner_user_id: UUID) -> bool:
+    """Hard-delete a session and its turn graph. Returns False if missing or not owned.
+
+    phase0 FKs do not CASCADE from sessions→turns; delete child rows explicitly.
+    Workspace disk files are intentionally untouched (not session-scoped).
+    """
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                SELECT id FROM sessions
+                WHERE id = $1 AND owner_user_id = $2
+                FOR UPDATE
+                """,
+                session_id,
+                owner_user_id,
+            )
+            if row is None:
+                return False
+
+            await conn.execute(
+                """
+                DELETE FROM projection_log
+                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                """,
+                session_id,
+            )
+            await conn.execute(
+                """
+                DELETE FROM turn_events
+                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                """,
+                session_id,
+            )
+            await conn.execute(
+                """
+                DELETE FROM runs
+                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                """,
+                session_id,
+            )
+            await conn.execute(
+                "DELETE FROM turn_views WHERE session_id = $1",
+                session_id,
+            )
+            await conn.execute(
+                "DELETE FROM turns WHERE session_id = $1",
+                session_id,
+            )
+            await conn.execute(
+                "DELETE FROM sessions WHERE id = $1 AND owner_user_id = $2",
+                session_id,
+                owner_user_id,
+            )
+            return True
