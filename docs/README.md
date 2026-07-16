@@ -20,6 +20,9 @@
 | Embedding 检索（retrieval 镜像内置本地模型 + hash 降级） | ✅ |
 | 写作素材卡 pin + UI「本轮写定」可观测 | ✅ |
 | Agent Harness（[`14`](14-model-harness.md)） | 🔧 部分落地（AH1–AH4 核心路径） |
+| Skills 层（[`22`](22-skills-layer.md)） | ⏸ 近期末必做；开闸条件见文 §8 |
+| 写作质量（[`23`](23-writing-quality.md)） | ✅ WQ0–WQ4 已落地：style 卡 / export lint / polish·outline / golden+rubric；禁默认 judge/强制 RAG |
+| 写作质量执行（[`24`](24-writing-quality-execution.md)） | ✅ WQ0–WQ4 全部落地 |
 
 ## 设计稿对照（文档 → 代码）
 
@@ -53,6 +56,9 @@
 13. **[17-execution-plan.md](17-execution-plan.md)** — 由 16 导出的执行方案（S0–S3，速率红线内）
 14. **[20-user-session-history-plan.md](20-user-session-history-plan.md)** — **登录用户历史会话 / 跨设备续聊**执行方案（归属、列表、速率与风险）
 15. **[21-multimodal-design.md](21-multimodal-design.md)** — **多模态设计方案（一期）**：仅图片+文本、大小硬顶、性能红线（M0–M2）
+16. **[22-skills-layer.md](22-skills-layer.md)** — **Skills 层去留与执行方案**：速率 / 场景需要 / 成熟做法；**近期末必做、默认不预注入**
+17. **[23-writing-quality.md](23-writing-quality.md)** — **写作质量与文风**：场景切片 W1–W7；style 卡 / RAG / cache；禁默认裁判链
+18. **[24-writing-quality-execution.md](24-writing-quality-execution.md)** — **写作质量执行方案**：WQ0–WQ4 票级拆分（**全部已落地**；源自 23）
 
 ## 完整目录
 
@@ -79,6 +85,9 @@
 | [19-agent-system-qa-current.md](19-agent-system-qa-current.md) | **Agent 系统原理问答（0–20）**：落地事实 + 工程原理（少冲刺代号） |
 | [20-user-session-history-plan.md](20-user-session-history-plan.md) | **登录用户会话历史执行方案**（U0–U2 已落地）：端用户归属、历史列表、跨设备续聊、旧数据清空 |
 | [21-multimodal-design.md](21-multimodal-design.md) | **多模态设计方案（一期）**：仅图片+文本；大小三级硬顶；预上传+引用；Vision 可选（M0–M2，待落地） |
+| [22-skills-layer.md](22-skills-layer.md) | **Skills 层**：去留判断 + 开闸后薄实现（目录渐进披露）；近期末必做 |
+| [23-writing-quality.md](23-writing-quality.md) | **写作质量**：规范/去AI味/排版；文风卡优先；RAG 与 prompt cache 各归其位 |
+| [24-writing-quality-execution.md](24-writing-quality-execution.md) | **写作质量执行**：WQ0–WQ4 票级拆分（**全部已落地**） |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 
@@ -104,7 +113,7 @@
 | 人类可读索引 | [`contracts.md`](contracts.md) |
 | Phase 0 DDL | `packages/contracts/schemas/ddl/phase0.sql` |
 | Golden Turn Schema | `packages/contracts/eval/golden_turn.schema.json` |
-| Golden 用例 | `eval/golden/`（37 YAML） |
+| Golden 用例 | `eval/golden/`（39 stub YAML + live） |
 | 事件 / 命令 Schema | `packages/contracts/schemas/` |
 
 ## 相关

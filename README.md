@@ -91,7 +91,7 @@ curl -fsS http://localhost/health/live
 
 ```bash
 make smoke          # L0
-make eval-all       # 31 条 stub golden
+make eval-all       # stub golden（含 writing.12/13）
 make eval-retrieval # retrieval profile（writing.07）
 make eval-queue     # queue + worker profile（shared.16）
 make runtime-test   # Python 3.11+
@@ -113,7 +113,7 @@ agent/
 │   └── web/                 # Vite + React
 ├── packages/
 │   └── contracts/           # OpenAPI、事件 schema、agent-contracts
-├── eval/golden/             # Golden Turn 用例（37 YAML）
+├── eval/golden/             # Golden Turn 用例（39 stub YAML）
 └── scripts/                 # smoke、eval、codegen
 ```
 

@@ -882,16 +882,21 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
     tool_assert = assertions.get("tool", {})
     if tool_assert and turn_id is not None:
         view = http_json("GET", f"{base}/api/v1/turns/{turn_id}/view")
+        timeline = view.get("tool_timeline", []) or []
         needle = tool_assert.get("result_matches", "")
         tool_name = tool_assert.get("name", "")
         expected_retrieval = tool_assert.get("retrieval")
         matched = False
         retrieval_matched = expected_retrieval is None
-        for item in view.get("tool_timeline", []):
+        name_seen = False
+        for item in timeline:
             if item.get("tool_name") != tool_name:
                 continue
+            name_seen = True
             summary = str(item.get("summary", ""))
             if needle and re.search(needle, summary, re.S):
+                matched = True
+            elif not needle:
                 matched = True
         if expected_retrieval:
             for artifact in view.get("artifacts", []):
@@ -900,12 +905,33 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
                 if artifact.get("mode") == expected_retrieval:
                     retrieval_matched = True
                     break
+        if tool_name and not name_seen:
+            raise AssertionError(f"{case_id}: tool {tool_name!r} missing from tool_timeline")
         if needle and not matched:
             raise AssertionError(f"{case_id}: tool {tool_name!r} missing result match {needle!r}")
         if expected_retrieval and not retrieval_matched:
             raise AssertionError(
                 f"{case_id}: tool {tool_name!r} missing retrieval mode {expected_retrieval!r}"
             )
+        forbidden = tool_assert.get("forbidden_names") or []
+        if forbidden:
+            seen = {item.get("tool_name") for item in timeline}
+            for name in forbidden:
+                if name in seen:
+                    raise AssertionError(f"{case_id}: forbidden tool {name!r} in tool_timeline")
+        max_calls = tool_assert.get("max_calls") or {}
+        if max_calls:
+            counts: dict[str, int] = {}
+            for item in timeline:
+                name = item.get("tool_name")
+                if not name:
+                    continue
+                counts[name] = counts.get(name, 0) + 1
+            for name, limit in max_calls.items():
+                if counts.get(name, 0) > int(limit):
+                    raise AssertionError(
+                        f"{case_id}: tool {name!r} called {counts.get(name, 0)} > max {limit}"
+                    )
 
     output_assert = assertions.get("output", {})
     if "matches" in output_assert:

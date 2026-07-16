@@ -399,7 +399,7 @@ def _is_smoke_message(text: str) -> bool:
 
 
 def _wants_patch(text: str) -> bool:
-    keywords = ("改", "patch", "简洁", "修订", "修改", "diff")
+    keywords = ("改", "patch", "简洁", "修订", "修改", "diff", "[polish]", "writing.12")
     return any(k in text.lower() for k in keywords)
 
 
@@ -409,7 +409,7 @@ def _wants_read(text: str) -> bool:
 
 
 def _wants_outline(text: str) -> bool:
-    keywords = ("大纲", "outline", "writing.01")
+    keywords = ("大纲", "outline", "writing.01", "[outline]", "writing.13")
     return any(k in text.lower() for k in keywords)
 
 
@@ -451,6 +451,9 @@ def _wants_search(text: str, *, tool_names: set[str] | None = None) -> bool:
     if tool_names and "delegate" in tool_names and _wants_delegate(text):
         return False
     lowered = text.lower()
+    # Style / outline passes: never auto-retrieve (docs/23 §4.2 W3/W4).
+    if "[polish]" in lowered or "[outline]" in lowered or "writing.12" in lowered or "writing.13" in lowered:
+        return False
     # Golden cases and explicit tool requests always exercise retrieval, even
     # when their surrounding wording also happens to describe the library.
     if any(k in lowered for k in ("search_sources", "writing.05", "writing.06")):

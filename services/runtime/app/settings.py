@@ -49,9 +49,16 @@ class Settings(BaseSettings):
     secret_scan_enabled: bool = True
     secret_scan_timeout_ms: float = 50.0
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
+    # Inventory-deterministic pin (docs/23 C1/C3): kind → path sort; per-kind + global caps.
     writing_cards_dir: str = "sources/cards"
     writing_cards_max_chars: int = 2000
     writing_cards_per_card_chars: int = 800
+    writing_cards_style_max_chars: int = 800
+    writing_cards_character_max_chars: int = 1000
+    writing_cards_plot_max_chars: int = 600
+    writing_cards_general_max_chars: int = 400
+    writing_export_profile: str = "novel-zh"  # novel-zh | essay | none
+
     index_via_worker: bool = True
     embedding_backend: str = "hash"  # hash | sentence_transformers
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"

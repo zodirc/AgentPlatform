@@ -267,6 +267,12 @@ def build_registry() -> ToolRegistry:
                         "type": "string",
                         "default": "exports/document.md",
                     },
+                    "profile": {
+                        "type": "string",
+                        "enum": ["novel-zh", "essay", "none"],
+                        "default": "novel-zh",
+                        "description": "Export structure lint profile (docs/23 D6)",
+                    },
                 },
                 "required": ["section_ids"],
             },

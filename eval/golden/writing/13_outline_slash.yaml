@@ -1,0 +1,31 @@
+id: writing.13_outline_slash
+scenario_id: writing
+phase: 1
+description: /outline expands to outline-only pass; update_outline without search_sources
+
+input:
+  message: "/outline writing.13 先列两节"
+  client_request_id: "00000000-0000-4000-8000-000000000013"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: update_outline
+    forbidden_names:
+      - search_sources
+    max_calls:
+      search_sources: 0
+  workspace:
+    - path: outline.md
+      matches: "Section"
+
+tags: [writing, outline, quality, p1]

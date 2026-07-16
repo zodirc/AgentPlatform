@@ -12,6 +12,8 @@ _SLASH_HELP = re.compile(r"^\s*/help\b", re.I)
 _SLASH_VERSION = re.compile(r"^\s*/version\b", re.I)
 _SLASH_COMPACT = re.compile(r"^\s*/compact\b", re.I)
 _SLASH_VERIFY = re.compile(r"^\s*/verify\b", re.I)
+_SLASH_POLISH = re.compile(r"^\s*/polish(?:\s+(.*))?$", re.I | re.S)
+_SLASH_OUTLINE = re.compile(r"^\s*/outline(?:\s+(.*))?$", re.I | re.S)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
 _NUMBERED_GOAL = re.compile(r"(?m)^\s*(?:\d+[\.\)、]|[-*•]\s+\S)")
 _GOAL_JOIN = re.compile(
@@ -22,6 +24,32 @@ _PLAN_HINT = (
     "Multi-goal request detected; consider calling update_plan once before other tools "
     "(optional — not required)."
 )
+
+# Deterministic user-side expansions (docs/23 §6.4). Do NOT mutate system prefix (C3).
+POLISH_EXPAND = (
+    "[polish] 只改文风与节奏；禁改专名、情节、[cite:*]；"
+    "禁止调用 search_sources；逐段 propose_patch。"
+)
+OUTLINE_EXPAND = (
+    "[outline] 只产出或修改 outline.md，不写正文；"
+    "禁止调用 search_sources；使用 update_outline。"
+)
+
+
+def expand_writing_slash(message: str) -> tuple[str, str | None]:
+    """Expand /polish|/outline into user-message suffixes. Returns (text, slash_name|None)."""
+    text = message.strip()
+    m = _SLASH_POLISH.match(text)
+    if m:
+        rest = (m.group(1) or "").strip()
+        expanded = f"{POLISH_EXPAND}" + (f"\n{rest}" if rest else "")
+        return expanded, "polish"
+    m = _SLASH_OUTLINE.match(text)
+    if m:
+        rest = (m.group(1) or "").strip()
+        expanded = f"{OUTLINE_EXPAND}" + (f"\n{rest}" if rest else "")
+        return expanded, "outline"
+    return message, None
 
 
 def detect_plan_hint(message: str) -> str | None:
@@ -48,6 +76,10 @@ class InputCompiler:
     def compile(self, message: str, *, selection: str | None = None) -> CompiledInput:
         text = message.strip()
         metadata: dict = {}
+        text, slash = expand_writing_slash(text)
+        if slash:
+            metadata["slash_expand"] = slash
+            text = text.strip()
         plan_hint = detect_plan_hint(text)
         if plan_hint:
             metadata["plan_hint"] = plan_hint
@@ -161,6 +193,8 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
                 "  /version — platform version\n"
                 "  /compact — compact session context into summary\n"
                 "  /verify — fact-check drafts/exports (does not mutate drafts)\n"
+                "  /polish — style-only polish pass (no search_sources; propose_patch)\n"
+                "  /outline — outline-only pass (update_outline; no prose)\n"
                 "Send any other message to start a turn."
             ),
         )

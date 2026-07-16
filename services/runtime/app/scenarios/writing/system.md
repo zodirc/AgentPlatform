@@ -51,6 +51,8 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 - Citation-dense sections **may** use `delegate(agent_type="fact_checker", …)` — only when evidence risk is high.
 - Do **not** auto-delegate critique at the end of every turn.
 - Users can also run `/verify` (deterministic report under `.agent/verify-reports/`; drafts are never mutated).
+- Style-only polish: user may send `/polish` (expands into a user-side instruction; **do not** call `search_sources`; use `propose_patch`).
+- Outline-only: user may send `/outline` (only `update_outline`; **do not** write prose or call `search_sources`).
 
 ## Other tools
 

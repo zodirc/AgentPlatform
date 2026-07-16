@@ -557,15 +557,18 @@ async def export_document(
     section_ids: list[str] | None = None,
     source: str = "current_draft",
     output_path: str = "exports/document.md",
+    profile: str | None = None,
     turn_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
     root = Path(settings.workspace_root).resolve()
+    export_profile = (profile or settings.writing_export_profile or "novel-zh").strip() or "novel-zh"
     requested = [str(section_id).strip() for section_id in (section_ids or []) if str(section_id).strip()]
     if not requested:
         return {
             "output_path": output_path,
             "source": source,
+            "profile": export_profile,
             "delivery_status": "failed",
             "delivery_issues": ["section_ids is required and must not be empty"],
             "included_sections": [],
@@ -577,6 +580,7 @@ async def export_document(
         return {
             "output_path": output_path,
             "source": source,
+            "profile": export_profile,
             "delivery_status": "failed",
             "delivery_issues": ["section_ids contains duplicates"],
             "included_sections": [],
@@ -588,6 +592,7 @@ async def export_document(
         return {
             "output_path": output_path,
             "source": source,
+            "profile": export_profile,
             "delivery_status": "failed",
             "delivery_issues": [f"unsupported source: {source}"],
             "included_sections": [],
@@ -635,6 +640,7 @@ async def export_document(
         return {
             "output_path": output_path,
             "source": source,
+            "profile": export_profile,
             "delivery_status": "failed",
             "delivery_issues": [f"missing or empty sections: {', '.join(missing)}"],
             "included_sections": [section_id for section_id, _, _ in sources],
@@ -652,6 +658,25 @@ async def export_document(
             f"\n## {section_id}\n\n{path.read_text(encoding='utf-8', errors='replace').strip()}"
         )
     body = "\n".join(parts).strip()
+
+    from app.writing.export_lint import lint_export_markdown
+
+    lint_issues = lint_export_markdown(body, profile=export_profile, section_ids=requested)
+    if lint_issues:
+        messages = [f"{issue.code}: {issue.message}" for issue in lint_issues]
+        return {
+            "output_path": output_path,
+            "source": source,
+            "profile": export_profile,
+            "delivery_status": "failed",
+            "delivery_issues": messages,
+            "lint_issues": [{"code": i.code, "message": i.message} for i in lint_issues],
+            "included_sections": requested,
+            "missing_sections": [],
+            "source_paths": [rel_path for _, rel_path, _ in sources],
+            "summary": f"Export failed structure lint ({len(lint_issues)} issue(s))",
+        }
+
     from app.privacy.secret_scan import gate_write_content
 
     blocked = gate_write_content(body, path=output_path)
@@ -659,6 +684,7 @@ async def export_document(
         return {
             "output_path": output_path,
             "source": source,
+            "profile": export_profile,
             "delivery_status": "failed",
             "delivery_issues": [blocked.get("summary", "secret_scan_blocked")],
             "secret_findings": blocked.get("secret_findings", []),
@@ -677,6 +703,7 @@ async def export_document(
     return {
         "output_path": output_path,
         "source": source,
+        "profile": export_profile,
         "bytes_written": len(body.encode()),
         "delivery_status": delivery_status,
         "delivery_issues": delivery_issues,

@@ -96,7 +96,17 @@
           "type": "object",
           "properties": {
             "name": { "type": "string" },
-            "result_matches": { "type": "string" }
+            "result_matches": { "type": "string" },
+            "forbidden_names": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Tool names that must not appear in turn tool_timeline (e.g. search_sources on polish pass)"
+            },
+            "max_calls": {
+              "type": "object",
+              "additionalProperties": { "type": "integer", "minimum": 0 },
+              "description": "Per-tool max call counts in tool_timeline (e.g. search_sources: 3)"
+            }
           }
         },
         "session": {

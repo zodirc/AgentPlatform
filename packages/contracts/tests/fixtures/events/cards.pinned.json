@@ -5,11 +5,24 @@
       {
         "path": "sources/cards/characters/demo.md",
         "kind": "character",
-        "title": "Demo"
+        "title": "Demo",
+        "truncated": false
       }
     ],
     "chars": 120,
     "available_count": 1,
-    "summary": "pinned 1 writing card(s)"
+    "summary": "pinned 1 writing card(s)",
+    "dropped": [],
+    "budget": {
+      "max_chars": 2000,
+      "per_card_chars": 800,
+      "by_kind": {
+        "style": 800,
+        "character": 1000,
+        "plot": 600,
+        "general": 400
+      }
+    },
+    "prefix_hash": "a1b2c3d4e5f67890"
   }
 }

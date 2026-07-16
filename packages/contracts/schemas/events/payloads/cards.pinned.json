@@ -19,12 +19,60 @@
             "type": "string",
             "enum": ["character", "plot", "style", "general"]
           },
-          "title": { "type": "string", "maxLength": 256 }
+          "title": { "type": "string", "maxLength": 256 },
+          "truncated": { "type": "boolean" }
         }
       }
     },
     "chars": { "type": "integer", "minimum": 0 },
     "available_count": { "type": "integer", "minimum": 0 },
-    "summary": { "type": "string", "maxLength": 512 }
+    "summary": { "type": "string", "maxLength": 512 },
+    "dropped": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "kind", "reason"],
+        "properties": {
+          "path": { "type": "string", "maxLength": 512 },
+          "kind": {
+            "type": "string",
+            "enum": ["character", "plot", "style", "general"]
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "kind_budget_exhausted",
+              "global_budget_exhausted",
+              "budget_too_small"
+            ]
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_chars": { "type": "integer", "minimum": 0 },
+        "per_card_chars": { "type": "integer", "minimum": 0 },
+        "by_kind": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "properties": {
+            "style": { "type": "integer", "minimum": 0 },
+            "character": { "type": "integer", "minimum": 0 },
+            "plot": { "type": "integer", "minimum": 0 },
+            "general": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "prefix_hash": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{8,64}$",
+      "maxLength": 64
+    }
   }
 }

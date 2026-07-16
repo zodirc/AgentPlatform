@@ -27,6 +27,9 @@ assertions:
     status: completed
   output:
     matches: "cite:"
+  tool:
+    max_calls:
+      search_sources: 3
   latency:
     first_token_ms_max: 800
 

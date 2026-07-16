@@ -1,6 +1,15 @@
 from __future__ import annotations
 
-from app.controller.input_compiler import InputCompiler, detect_plan_hint, should_query
+from pathlib import Path
+
+from app.controller.input_compiler import (
+    InputCompiler,
+    OUTLINE_EXPAND,
+    POLISH_EXPAND,
+    detect_plan_hint,
+    expand_writing_slash,
+    should_query,
+)
 from app.context.project import build_runtime_context
 from app.tools.bootstrap import build_registry, tool_scope
 from app.scenarios.registry import ScenarioRegistry
@@ -67,6 +76,46 @@ def test_should_query_compact_requests_session_compact() -> None:
     result = should_query("/compact", has_model_key=True)
     assert result.should_query is False
     assert result.slash_command == "compact"
+
+
+def test_expand_polish_and_outline_deterministic() -> None:
+    a, name_a = expand_writing_slash("/polish 去套话")
+    b, name_b = expand_writing_slash("/polish 去套话")
+    assert name_a == name_b == "polish"
+    assert a == b
+    assert a.startswith(POLISH_EXPAND)
+    assert "去套话" in a
+    assert "search_sources" in a
+
+    o, name_o = expand_writing_slash("/outline")
+    assert name_o == "outline"
+    assert o == OUTLINE_EXPAND
+    assert should_query("/polish", has_model_key=True).should_query is True
+    assert should_query("/outline", has_model_key=True).should_query is True
+
+
+def test_input_compiler_expands_polish_into_user_message() -> None:
+    compiled = InputCompiler().compile("/polish writing.12")
+    text = compiled.messages[0]["content"][0]["text"]
+    assert compiled.metadata.get("slash_expand") == "polish"
+    assert text.startswith("[polish]")
+    assert "/polish" not in text.split("\n")[0] or "[polish]" in text
+
+
+def test_polish_expand_does_not_change_system_prefix_hash(tmp_path: Path) -> None:
+    from app.writing.cards import prepare_writing_system_prompt
+
+    root = tmp_path / "sources" / "cards" / "style"
+    root.mkdir(parents=True)
+    (root / "v.md").write_text("---\nkind: style\n---\n## Voice\ncold\n", encoding="utf-8")
+    base = "You are a writing assistant."
+    pin_a = prepare_writing_system_prompt(base, "普通改稿", workspace_root=tmp_path)
+    pin_b = prepare_writing_system_prompt(
+        base,
+        expand_writing_slash("/polish")[0],
+        workspace_root=tmp_path,
+    )
+    assert pin_a.event_payload()["prefix_hash"] == pin_b.event_payload()["prefix_hash"]
 
 
 def test_tool_scope_applies_agent_approval_overrides() -> None:

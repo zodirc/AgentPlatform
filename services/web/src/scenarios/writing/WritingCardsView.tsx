@@ -42,7 +42,7 @@ export function WritingCardsView({ artifacts }: Props) {
       {cards.length === 0 ? (
         <p className="mt-2 text-xs text-slate-400">
           {available > 0
-            ? `未自动选中（库中有 ${available} 张卡）。可在对话中点名人物/风格，或 read_file sources/cards/。`
+            ? `未自动选中（库中有 ${available} 张卡）。请在 sources/cards/ 整理素材卡，或 read_file 指定路径。`
             : "未找到 sources/cards/ 素材卡。"}
         </p>
       ) : (

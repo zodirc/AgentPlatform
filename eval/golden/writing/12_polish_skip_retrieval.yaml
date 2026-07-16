@@ -1,0 +1,34 @@
+id: writing.12_polish_skip_retrieval
+scenario_id: writing
+phase: 1
+description: /polish expands to style pass; propose_patch without search_sources
+
+fixtures:
+  workspace:
+    - path: sections/01.md
+      content: |
+        旧正文里充满了不禁的感叹。在这个时代，人们总而言之。
+
+input:
+  message: "/polish writing.12 弱化套话"
+  client_request_id: "00000000-0000-4000-8000-000000000012"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.accepted
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: propose_patch
+    forbidden_names:
+      - search_sources
+    max_calls:
+      search_sources: 0
+
+tags: [writing, polish, quality, p1]
