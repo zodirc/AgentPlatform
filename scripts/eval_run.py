@@ -452,6 +452,16 @@ def _wait_for_tool_approval(
 
 
 def read_workspace_file(workspace: Path, rel: str) -> str | None:
+    if any(ch in rel for ch in "*?[]"):
+        matches = sorted(
+            workspace.glob(rel),
+            key=lambda p: p.stat().st_mtime if p.is_file() else 0.0,
+            reverse=True,
+        )
+        for target in matches:
+            if target.is_file():
+                return target.read_text(encoding="utf-8", errors="replace")
+        return None
     target = (workspace / rel).resolve()
     if not target.is_file():
         return None

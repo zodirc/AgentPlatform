@@ -34,7 +34,33 @@ async def test_glob_lists_workspace_files(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_draft_section_writes_revisions_path(workspace: Path) -> None:
+async def test_draft_section_writes_session_scoped_path(workspace: Path) -> None:
+    turn_id = uuid4()
+    session_id = uuid4()
+    result = await core.draft_section(
+        "intro", "# Intro\n", turn_id=turn_id, session_id=session_id
+    )
+
+    assert result["status"] == "drafted"
+    assert (
+        result["path"]
+        == f".agent/sessions/{session_id}/revisions/{turn_id}/intro.md"
+    )
+    assert (workspace / result["path"]).read_text(encoding="utf-8") == "# Intro\n"
+    manifest = (
+        workspace
+        / ".agent"
+        / "sessions"
+        / str(session_id)
+        / "turns"
+        / str(turn_id)
+        / "manifest.json"
+    )
+    assert '"intro"' in manifest.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_draft_section_writes_legacy_path_without_session(workspace: Path) -> None:
     turn_id = uuid4()
     result = await core.draft_section("intro", "# Intro\n", turn_id=turn_id)
 
@@ -43,6 +69,48 @@ async def test_draft_section_writes_revisions_path(workspace: Path) -> None:
     assert (workspace / result["path"]).read_text(encoding="utf-8") == "# Intro\n"
     manifest = workspace / ".agent" / "turns" / str(turn_id) / "manifest.json"
     assert '"intro"' in manifest.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_export_document_reads_session_scoped_revisions(workspace: Path) -> None:
+    turn_id = uuid4()
+    session_id = uuid4()
+    await core.draft_section("body", "Session body", turn_id=turn_id, session_id=session_id)
+    (workspace / "outline.md").write_text("# Title", encoding="utf-8")
+
+    result = await core.export_document(
+        section_ids=["body"],
+        source="current_draft",
+        output_path="exports/out.md",
+        turn_id=turn_id,
+        session_id=session_id,
+    )
+
+    assert result["delivery_status"] == "ok"
+    exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
+    assert "Session body" in exported
+
+
+@pytest.mark.asyncio
+async def test_export_document_flat_legacy_revision_fallback(workspace: Path) -> None:
+    turn_id = uuid4()
+    legacy = workspace / ".agent" / "revisions" / "body.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text("Legacy body", encoding="utf-8")
+    (workspace / "outline.md").write_text("# Title", encoding="utf-8")
+
+    result = await core.export_document(
+        section_ids=["body"],
+        source="current_draft",
+        output_path="exports/out.md",
+        turn_id=turn_id,
+        session_id=uuid4(),
+    )
+
+    assert result["delivery_status"] == "warning"
+    assert "legacy" in " ".join(result["delivery_issues"]).lower()
+    exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
+    assert "Legacy body" in exported
 
 
 @pytest.mark.asyncio

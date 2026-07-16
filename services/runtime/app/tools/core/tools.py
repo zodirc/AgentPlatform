@@ -75,23 +75,99 @@ def _turn_scope(turn_id: object | None) -> str:
     return str(turn_id) if turn_id is not None else "standalone"
 
 
-def _manifest_path(turn_id: object | None) -> str:
+def _session_scope(session_id: object | None) -> str | None:
+    if session_id is None:
+        return None
+    return str(session_id)
+
+
+def _manifest_path(session_id: object | None, turn_id: object | None) -> str:
+    """Primary manifest path (session-scoped when session_id is known)."""
+    if session_id is not None and turn_id is not None:
+        return (
+            f".agent/sessions/{_session_scope(session_id)}/turns/"
+            f"{_turn_scope(turn_id)}/manifest.json"
+        )
     return f".agent/turns/{_turn_scope(turn_id)}/manifest.json"
 
 
-def _read_manifest(turn_id: object | None) -> dict[str, Any] | None:
-    target = _resolve_path(_manifest_path(turn_id))
-    if not target.is_file():
-        return None
-    try:
-        data = json.loads(target.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
+def _manifest_candidate_paths(session_id: object | None, turn_id: object | None) -> list[str]:
+    paths: list[str] = []
+    if session_id is not None and turn_id is not None:
+        paths.append(_manifest_path(session_id, turn_id))
+    if turn_id is not None:
+        legacy = f".agent/turns/{_turn_scope(turn_id)}/manifest.json"
+        if legacy not in paths:
+            paths.append(legacy)
+    return paths
 
 
-def _write_manifest(turn_id: object | None, manifest: dict[str, Any]) -> str:
-    path = _manifest_path(turn_id)
+def _revision_file_path(
+    section_id: str,
+    *,
+    session_id: object | None = None,
+    turn_id: object | None = None,
+) -> str:
+    filename = _section_filename(section_id)
+    if session_id is not None and turn_id is not None:
+        return (
+            f".agent/sessions/{_session_scope(session_id)}/revisions/"
+            f"{_turn_scope(turn_id)}/{filename}"
+        )
+    return f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
+
+
+def _revision_candidate_paths(
+    section_id: str,
+    *,
+    session_id: object | None = None,
+    turn_id: object | None = None,
+) -> list[str]:
+    """Read order: manifest entry → session path → turn path → flat legacy."""
+    filename = _section_filename(section_id)
+    paths: list[str] = []
+    if session_id is not None and turn_id is not None:
+        paths.append(_revision_file_path(section_id, session_id=session_id, turn_id=turn_id))
+    if turn_id is not None:
+        turn_path = f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
+        if turn_path not in paths:
+            paths.append(turn_path)
+    legacy_flat = f".agent/revisions/{filename}"
+    if legacy_flat not in paths:
+        paths.append(legacy_flat)
+    return paths
+
+
+def _is_legacy_revision_rel(rel_path: str, filename: str) -> bool:
+    """True only for pre-turn-scoped flat revision files."""
+    return rel_path == f".agent/revisions/{filename}"
+
+
+def _read_manifest(
+    turn_id: object | None,
+    *,
+    session_id: object | None = None,
+) -> dict[str, Any] | None:
+    for rel in _manifest_candidate_paths(session_id, turn_id):
+        target = _resolve_path(rel)
+        if not target.is_file():
+            continue
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
+
+
+def _write_manifest(
+    turn_id: object | None,
+    manifest: dict[str, Any],
+    *,
+    session_id: object | None = None,
+) -> str:
+    path = _manifest_path(session_id, turn_id)
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_suffix(".tmp")
@@ -104,24 +180,27 @@ async def draft_section(
     section_id: str,
     content: str,
     turn_id: object | None = None,
+    session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    filename = _section_filename(section_id)
-    path = f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
+    path = _revision_file_path(section_id, session_id=session_id, turn_id=turn_id)
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
-    manifest = _read_manifest(turn_id) or {
+    manifest = _read_manifest(turn_id, session_id=session_id) or {
         "turn_id": _turn_scope(turn_id),
+        "session_id": _session_scope(session_id),
         "sections": [],
         "revisions": {},
     }
+    if session_id is not None and not manifest.get("session_id"):
+        manifest["session_id"] = _session_scope(session_id)
     sections = manifest.setdefault("sections", [])
     revisions = manifest.setdefault("revisions", {})
     if section_id not in sections:
         sections.append(section_id)
     revisions[section_id] = path
-    manifest_path = _write_manifest(turn_id, manifest)
+    manifest_path = _write_manifest(turn_id, manifest, session_id=session_id)
     return {
         "section_id": section_id,
         "path": path,
@@ -559,6 +638,7 @@ async def export_document(
     output_path: str = "exports/document.md",
     profile: str | None = None,
     turn_id: object | None = None,
+    session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
     root = Path(settings.workspace_root).resolve()
@@ -601,7 +681,9 @@ async def export_document(
             "summary": f"Export failed: unsupported source {source!r}",
         }
 
-    manifest = _read_manifest(turn_id) if source == "current_draft" else None
+    manifest = (
+        _read_manifest(turn_id, session_id=session_id) if source == "current_draft" else None
+    )
     manifest_revisions = manifest.get("revisions", {}) if isinstance(manifest, dict) else {}
     sources: list[tuple[str, str, Path]] = []
     missing: list[str] = []
@@ -616,19 +698,18 @@ async def export_document(
             manifest_path = manifest_revisions.get(section_id)
             if isinstance(manifest_path, str):
                 candidates.append((manifest_path, _resolve_path(manifest_path)))
-            scoped_path = f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
-            if all(rel != scoped_path for rel, _ in candidates):
-                candidates.append((scoped_path, _resolve_path(scoped_path)))
-            # Read compatibility for drafts created before revisions became turn-scoped.
-            legacy_path = f".agent/revisions/{filename}"
-            candidates.append((legacy_path, _resolve_path(legacy_path)))
+            for rel in _revision_candidate_paths(
+                section_id, session_id=session_id, turn_id=turn_id
+            ):
+                if all(rel != existing for existing, _ in candidates):
+                    candidates.append((rel, _resolve_path(rel)))
 
         selected = next(((rel, path) for rel, path in candidates if path.is_file()), None)
         if selected is None:
             missing.append(section_id)
             continue
         rel_path, path = selected
-        if rel_path == f".agent/revisions/{filename}":
+        if _is_legacy_revision_rel(rel_path, filename):
             used_legacy_layout = True
         content = path.read_text(encoding="utf-8", errors="replace")
         if not content.strip():

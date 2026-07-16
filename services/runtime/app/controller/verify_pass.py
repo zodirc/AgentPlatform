@@ -28,10 +28,20 @@ def _workspace() -> Path:
 
 def _iter_draft_texts(root: Path) -> list[tuple[str, str]]:
     candidates: list[Path] = []
-    for rel in ("exports", "sections", ".agent/revisions"):
+    for rel in ("exports", "sections"):
         base = root / rel
         if base.is_dir():
             candidates.extend(p for p in base.rglob("*.md") if p.is_file())
+    sessions = root / ".agent" / "sessions"
+    if sessions.is_dir():
+        candidates.extend(
+            p
+            for p in sessions.rglob("*.md")
+            if p.is_file() and "revisions" in p.relative_to(sessions).parts
+        )
+    legacy_revisions = root / ".agent" / "revisions"
+    if legacy_revisions.is_dir():
+        candidates.extend(p for p in legacy_revisions.rglob("*.md") if p.is_file())
     # Prefer recently modified drafts so verify hits the latest writing turn.
     candidates.sort(key=lambda p: p.stat().st_mtime if p.exists() else 0.0, reverse=True)
     texts: list[tuple[str, str]] = []

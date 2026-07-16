@@ -60,7 +60,12 @@ class ToolExecutor:
         timeout_s = spec.timeout_s
         try:
             result = await asyncio.wait_for(
-                spec.handler(**arguments, turn_id=state.turn_id, run_id=state.run_id),
+                spec.handler(
+                    **arguments,
+                    turn_id=state.turn_id,
+                    run_id=state.run_id,
+                    session_id=state.session_id,
+                ),
                 timeout=timeout_s,
             )
             return result
