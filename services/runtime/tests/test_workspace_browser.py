@@ -1,6 +1,7 @@
 import pytest
 
 from app.services.workspace_browser import (
+    delete_workspace_paths,
     safe_source_filename,
     source_rel_path,
     sources_index_status,
@@ -17,6 +18,39 @@ def test_safe_source_filename_rejects_traversal() -> None:
 
 def test_source_rel_path() -> None:
     assert source_rel_path("notes.md") == "sources/notes.md"
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_paths_removes_files_and_dirs(workspace) -> None:
+    nested = workspace / "exports" / "drafts"
+    nested.mkdir(parents=True)
+    (nested / "one.md").write_text("one", encoding="utf-8")
+    (workspace / "notes.md").write_text("note", encoding="utf-8")
+
+    result = await delete_workspace_paths(["exports/drafts/one.md", "notes.md"])
+
+    assert set(result["deleted"]) == {"exports/drafts/one.md", "notes.md"}
+    assert result["failed"] == []
+    assert not (nested / "one.md").exists()
+    assert not (workspace / "notes.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_paths_skips_nested_when_parent_deleted(workspace) -> None:
+    folder = workspace / "sections" / "ch1"
+    folder.mkdir(parents=True)
+    (folder / "body.md").write_text("body", encoding="utf-8")
+
+    result = await delete_workspace_paths(["sections/ch1", "sections/ch1/body.md"])
+
+    assert result["deleted"] == ["sections/ch1"]
+    assert not folder.exists()
+
+
+@pytest.mark.asyncio
+async def test_delete_workspace_paths_rejects_workspace_root(workspace) -> None:
+    with pytest.raises(ValueError, match="workspace root"):
+        await delete_workspace_paths(["."])
 
 
 @pytest.mark.asyncio

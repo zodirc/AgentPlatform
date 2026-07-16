@@ -407,6 +407,32 @@ export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
   return res.json();
 }
 
+export type WorkspaceDeleteResult = {
+  deleted: string[];
+  failed: Array<{ path: string; error: string }>;
+  summary: string;
+  error?: string;
+};
+
+export async function deleteWorkspacePaths(
+  paths: string[],
+): Promise<WorkspaceDeleteResult> {
+  const res = await fetch(`${API_BASE}/admin/workspace/entries/delete`, {
+    method: "POST",
+    ...sessionFetchInit,
+    headers: {
+      ...apiAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`deleteWorkspacePaths failed: ${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
 export type SourceUploadResult = {
   path: string;
   bytes_written: number;

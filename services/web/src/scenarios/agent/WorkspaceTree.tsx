@@ -43,8 +43,11 @@ type TreeNodeProps = {
   isDir: boolean;
   depth: number;
   selectedPath: string | null;
+  multiSelectMode: boolean;
+  checkedPaths: ReadonlySet<string>;
   onSelectFile: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onTogglePath: (path: string) => void;
   onOpenSourcesLibrary?: () => void;
 };
 
@@ -54,8 +57,11 @@ function TreeNode({
   isDir,
   depth,
   selectedPath,
+  multiSelectMode,
+  checkedPaths,
   onSelectFile,
   onOpenFile,
+  onTogglePath,
   onOpenSourcesLibrary,
 }: TreeNodeProps) {
   const [expanded, setExpanded] = useState(depth === 0);
@@ -68,57 +74,107 @@ function TreeNode({
 
   const children = data ? parseEntries(path, data.entries) : [];
   const selected = !isDir && selectedPath === path;
+  const checked = checkedPaths.has(path);
+  const deletable = path !== ".";
   const { Icon, className: iconClass } = workspaceEntryIcon(
     name === "." ? "workspace" : name,
     isDir,
     expanded,
   );
   const iconSize = workspaceEntryIconSizeClass(depth);
+  const pad = { paddingLeft: `${depth * 12 + 4}px` };
+
+  const checkbox =
+    multiSelectMode && deletable ? (
+      <input
+        type="checkbox"
+        className="size-3 shrink-0 rounded border-slate-600 bg-slate-900 accent-sky-500"
+        checked={checked}
+        onChange={() => onTogglePath(path)}
+        onClick={(event) => event.stopPropagation()}
+        aria-label={`选择 ${name}`}
+      />
+    ) : (
+      <span className="size-3 shrink-0" aria-hidden />
+    );
 
   if (!isDir) {
     return (
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs ${
-          selected
-            ? "bg-sky-900/40 text-sky-200"
-            : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
-        }`}
-        style={{ paddingLeft: `${depth * 12 + 4}px` }}
-        onClick={() => onSelectFile(path)}
-        onDoubleClick={() => onOpenFile(path)}
-        title="双击在新窗口查看"
-      >
-        <Icon className={`shrink-0 ${iconSize} ${iconClass}`} aria-hidden />
-        <span className="truncate">{name}</span>
-      </button>
+      <div className="flex items-center gap-1" style={pad}>
+        {checkbox}
+        <button
+          type="button"
+          className={`min-w-0 flex-1 rounded px-1 py-0.5 text-left text-xs ${
+            selected && !multiSelectMode
+              ? "bg-sky-900/40 text-sky-200"
+              : checked
+                ? "bg-rose-950/40 text-rose-200"
+                : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+          }`}
+          onClick={() =>
+            multiSelectMode ? onTogglePath(path) : onSelectFile(path)
+          }
+          onDoubleClick={() => {
+            if (!multiSelectMode) onOpenFile(path);
+          }}
+          title={multiSelectMode ? "点击切换选中" : "双击在新窗口查看"}
+        >
+          <span className="flex items-center gap-1.5">
+            <Icon
+              className={`shrink-0 ${iconSize} ${iconClass}`}
+              aria-hidden
+            />
+            <span className="truncate">{name}</span>
+          </span>
+        </button>
+      </div>
     );
   }
 
   return (
     <div>
-      <button
-        type="button"
-        className="flex w-full items-center gap-1.5 rounded px-1 py-0.5 text-left text-xs text-slate-300 hover:bg-slate-900"
-        style={{ paddingLeft: `${depth * 12 + 4}px` }}
-        onClick={() => setExpanded((v) => !v)}
-        onDoubleClick={() => {
-          if (path === "sources" && onOpenSourcesLibrary) {
-            onOpenSourcesLibrary();
+      <div className="flex items-center gap-1" style={pad}>
+        {checkbox}
+        <button
+          type="button"
+          className={`min-w-0 flex-1 rounded px-1 py-0.5 text-left text-xs ${
+            checked
+              ? "bg-rose-950/40 text-rose-200"
+              : "text-slate-300 hover:bg-slate-900"
+          }`}
+          onClick={() => {
+            if (multiSelectMode && deletable) {
+              onTogglePath(path);
+              return;
+            }
+            setExpanded((v) => !v);
+          }}
+          onDoubleClick={() => {
+            if (multiSelectMode) return;
+            if (path === "sources" && onOpenSourcesLibrary) {
+              onOpenSourcesLibrary();
+            }
+          }}
+          title={
+            multiSelectMode
+              ? "点击切换选中"
+              : path === "sources" && onOpenSourcesLibrary
+                ? "双击打开资料库"
+                : undefined
           }
-        }}
-        title={
-          path === "sources" && onOpenSourcesLibrary
-            ? "双击打开资料库"
-            : undefined
-        }
-      >
-        <span className="shrink-0 w-3 text-[10px] text-slate-500">
-          {expanded ? "▾" : "▸"}
-        </span>
-        <Icon className={`shrink-0 ${iconSize} ${iconClass}`} aria-hidden />
-        <span className="truncate">{name === "." ? "workspace" : name}</span>
-      </button>
+        >
+          <span className="flex items-center gap-1.5">
+            <span className="shrink-0 w-3 text-[10px] text-slate-500">
+              {expanded ? "▾" : "▸"}
+            </span>
+            <Icon
+              className={`shrink-0 ${iconSize} ${iconClass}`}
+              aria-hidden
+            />
+            <span className="truncate">{name === "." ? "workspace" : name}</span>
+          </span>
+        </button>
+      </div>
       {expanded ? (
         <div>
           {isLoading ? (
@@ -145,8 +201,11 @@ function TreeNode({
               isDir={child.isDir}
               depth={depth + 1}
               selectedPath={selectedPath}
+              multiSelectMode={multiSelectMode}
+              checkedPaths={checkedPaths}
               onSelectFile={onSelectFile}
               onOpenFile={onOpenFile}
+              onTogglePath={onTogglePath}
               onOpenSourcesLibrary={onOpenSourcesLibrary}
             />
           ))}
@@ -158,15 +217,21 @@ function TreeNode({
 
 type Props = {
   selectedPath: string | null;
+  multiSelectMode?: boolean;
+  checkedPaths?: ReadonlySet<string>;
   onSelectFile: (path: string) => void;
   onOpenFile: (path: string) => void;
+  onTogglePath?: (path: string) => void;
   onOpenSourcesLibrary?: () => void;
 };
 
 export function WorkspaceTree({
   selectedPath,
+  multiSelectMode = false,
+  checkedPaths = new Set(),
   onSelectFile,
   onOpenFile,
+  onTogglePath,
   onOpenSourcesLibrary,
 }: Props) {
   const handleOpen = useCallback(
@@ -177,6 +242,10 @@ export function WorkspaceTree({
     (path: string) => onSelectFile(path),
     [onSelectFile],
   );
+  const handleToggle = useCallback(
+    (path: string) => onTogglePath?.(path),
+    [onTogglePath],
+  );
 
   return (
     <div>
@@ -186,8 +255,11 @@ export function WorkspaceTree({
         isDir
         depth={0}
         selectedPath={selectedPath}
+        multiSelectMode={multiSelectMode}
+        checkedPaths={checkedPaths}
         onSelectFile={handleSelect}
         onOpenFile={handleOpen}
+        onTogglePath={handleToggle}
         onOpenSourcesLibrary={onOpenSourcesLibrary}
       />
     </div>

@@ -604,3 +604,30 @@ def test_workspace_source_upload_returns_pending_index(
     assert response.status_code == 200
     assert response.json()["index"]["status"] == "pending"
     proxy.assert_awaited_once_with(filename="ref-a.md", content="# Reference\n")
+
+
+def test_workspace_delete_entries_proxies_runtime(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
+    result = {
+        "deleted": ["exports/old.md"],
+        "failed": [],
+        "summary": "deleted 1 path(s)",
+    }
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.delete_paths",
+        new_callable=AsyncMock,
+        return_value=result,
+    ) as proxy:
+        response = client.post(
+            "/api/v1/admin/workspace/entries/delete",
+            json={"paths": ["exports/old.md"]},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == result
+    proxy.assert_awaited_once_with(paths=["exports/old.md"])

@@ -1,7 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { RefreshCw } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { RefreshCw, Trash2 } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
+import { deleteWorkspacePaths } from "../../shared/api/client";
 import {
   PatchDiffPanel,
   type PatchArtifact,
@@ -30,6 +31,7 @@ type Props = {
   onSelect: (sel: SidebarSelection | null) => void;
   onOpenWorkspaceFile: (path: string) => void;
   onOpenSourcesLibrary?: () => void;
+  onWorkspaceDeleted?: (deletedPaths: string[]) => void;
   onClose?: () => void;
 };
 
@@ -88,10 +90,13 @@ export function AgentSidebar({
   onSelect,
   onOpenWorkspaceFile,
   onOpenSourcesLibrary,
+  onWorkspaceDeleted,
   onClose,
 }: Props) {
   const queryClient = useQueryClient();
   const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [checkedPaths, setCheckedPaths] = useState<Set<string>>(() => new Set());
   const view = wb.view;
   const artifacts = view?.artifacts ?? [];
 
@@ -106,6 +111,50 @@ export function AgentSidebar({
     } finally {
       setWorkspaceRefreshing(false);
     }
+  };
+
+  const deleteSelected = useMutation({
+    mutationFn: (paths: string[]) => deleteWorkspacePaths(paths),
+    onSuccess: (result) => {
+      void refreshWorkspace();
+      setCheckedPaths(new Set());
+      setMultiSelectMode(false);
+      if (result.deleted.length > 0) {
+        onWorkspaceDeleted?.(result.deleted);
+      }
+      if (result.failed.length > 0) {
+        const detail = result.failed
+          .map((row) => `${row.path}: ${row.error}`)
+          .join("\n");
+        window.alert(`部分删除失败：\n${detail}`);
+      }
+    },
+    onError: (error: Error) => {
+      window.alert(`删除失败：${error.message}`);
+    },
+  });
+
+  const toggleCheckedPath = (path: string) => {
+    setCheckedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+
+  const confirmDeleteSelected = () => {
+    const paths = [...checkedPaths];
+    if (paths.length === 0) return;
+    const preview =
+      paths.length <= 5
+        ? paths.join("\n")
+        : `${paths.slice(0, 5).join("\n")}\n…等 ${paths.length} 项`;
+    const ok = window.confirm(
+      `确定删除以下 ${paths.length} 项？\n\n${preview}\n\n此操作不可恢复。`,
+    );
+    if (!ok) return;
+    deleteSelected.mutate(paths);
   };
 
   const patches = artifacts.filter(
@@ -210,11 +259,45 @@ export function AgentSidebar({
 
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <section className="border-b border-slate-800 p-3">
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
-            工作区
-          </h3>
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              工作区
+            </h3>
+            <div className="flex shrink-0 items-center gap-1">
+              <button
+                type="button"
+                className={`rounded border px-2 py-0.5 text-[10px] ${
+                  multiSelectMode
+                    ? "border-sky-700 bg-sky-950 text-sky-200"
+                    : "border-slate-700 text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                }`}
+                onClick={() => {
+                  setMultiSelectMode((value) => {
+                    if (value) setCheckedPaths(new Set());
+                    return !value;
+                  });
+                }}
+              >
+                {multiSelectMode ? "取消多选" : "多选"}
+              </button>
+              {multiSelectMode && checkedPaths.size > 0 ? (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 rounded border border-rose-800/60 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
+                  disabled={deleteSelected.isPending}
+                  onClick={confirmDeleteSelected}
+                >
+                  <Trash2 className="size-3" aria-hidden />
+                  删除 ({checkedPaths.size})
+                </button>
+              ) : null}
+            </div>
+          </div>
           <WorkspaceTree
             selectedPath={treeSelectedPath}
+            multiSelectMode={multiSelectMode}
+            checkedPaths={checkedPaths}
+            onTogglePath={toggleCheckedPath}
             onSelectFile={(path) => {
               setWorkspaceSelectPath(path);
               onSelect({ kind: "workspace", path });
@@ -223,7 +306,9 @@ export function AgentSidebar({
             onOpenSourcesLibrary={onOpenSourcesLibrary}
           />
           <p className="mt-2 text-[10px] text-slate-600">
-            单击选中 · 双击在新窗口查看完整内容
+            {multiSelectMode
+              ? "多选模式下点击条目勾选，可删除文件或目录"
+              : "单击选中 · 双击在新窗口查看完整内容"}
           </p>
         </section>
 

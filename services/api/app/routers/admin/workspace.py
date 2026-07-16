@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from pydantic import BaseModel, Field
 
 from app.services.admin.auth import require_admin_or_end_user
 from app.services.admin import workspace as workspace_svc
@@ -15,6 +16,10 @@ router = APIRouter(
 MAX_UPLOAD_BYTES = 1_048_576
 
 
+class WorkspaceDeleteBody(BaseModel):
+    paths: list[str] = Field(min_length=1)
+
+
 @router.get("/entries")
 async def list_workspace_entries(path: str = Query(default=".")):
     try:
@@ -27,6 +32,14 @@ async def list_workspace_entries(path: str = Query(default=".")):
 async def read_workspace_file(path: str = Query(min_length=1)):
     try:
         return await workspace_svc.read_file(path=path)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/entries/delete")
+async def delete_workspace_entries(body: WorkspaceDeleteBody):
+    try:
+        return await workspace_svc.delete_paths(paths=body.paths)
     except WorkspaceProxyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

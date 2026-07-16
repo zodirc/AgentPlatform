@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import re
+import shutil
 import threading
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,78 @@ async def write_workspace_file(*, path: str, content: str) -> dict:
     if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ValueError(f"content exceeds {MAX_SOURCE_BYTES} bytes")
     return await write_file(normalized, content)
+
+
+def _normalize_delete_path(path: str) -> str:
+    normalized = path.strip().lstrip("/")
+    if not normalized or normalized == ".":
+        raise ValueError("cannot delete workspace root")
+    if ".." in Path(normalized).parts:
+        raise ValueError(f"invalid path: {path}")
+    return normalized
+
+
+def _filter_nested_delete_paths(paths: list[str]) -> list[str]:
+    ordered = sorted(paths, key=lambda p: p.count("/"))
+    kept: list[str] = []
+    for rel in ordered:
+        if any(rel != parent and rel.startswith(f"{parent}/") for parent in kept):
+            continue
+        kept.append(rel)
+    return kept
+
+
+async def delete_workspace_paths(paths: list[str]) -> dict[str, Any]:
+    """Delete workspace files or directories (recursive). Web manual cleanup only."""
+    from app.tools.core.tools import _resolve_path
+
+    if not paths:
+        raise ValueError("paths must not be empty")
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for raw in paths:
+        rel = _normalize_delete_path(raw)
+        if rel not in seen:
+            seen.add(rel)
+            normalized.append(rel)
+    targets = _filter_nested_delete_paths(normalized)
+
+    deleted: list[str] = []
+    failed: list[dict[str, str]] = []
+    sources_touched = False
+
+    for rel in targets:
+        try:
+            target = _resolve_path(rel)
+        except PermissionError as exc:
+            failed.append({"path": rel, "error": str(exc)})
+            continue
+        if not target.exists():
+            failed.append({"path": rel, "error": "not found"})
+            continue
+        try:
+            if target.is_dir():
+                shutil.rmtree(target)
+            else:
+                target.unlink()
+            deleted.append(rel)
+            if rel == "sources" or rel.startswith("sources/"):
+                sources_touched = True
+        except OSError as exc:
+            failed.append({"path": rel, "error": str(exc)})
+
+    result: dict[str, Any] = {
+        "deleted": deleted,
+        "failed": failed,
+        "summary": f"deleted {len(deleted)} path(s)"
+        + (f", {len(failed)} failed" if failed else ""),
+    }
+    if failed and not deleted:
+        result["error"] = "all deletions failed"
+    if sources_touched:
+        result["sources_index"] = {"status": "pending", "reason": "sources_deleted"}
+    return result
 
 
 def _index_store_path() -> Path:

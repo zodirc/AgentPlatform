@@ -235,6 +235,32 @@ class SourceUploadBody(BaseModel):
     content: str = ""
 
 
+class WorkspaceDeleteBody(BaseModel):
+    paths: list[str] = Field(min_length=1)
+
+
+@workspace_router.post("/entries/delete")
+async def workspace_delete_entries(
+    body: WorkspaceDeleteBody,
+    background_tasks: BackgroundTasks,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import (
+        delete_workspace_paths,
+        sync_sources_index_safe,
+    )
+
+    try:
+        result = await delete_workspace_paths(body.paths)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if result.get("error") and not result.get("deleted"):
+        raise HTTPException(status_code=400, detail=str(result["error"]))
+    if result.get("sources_index", {}).get("status") == "pending":
+        background_tasks.add_task(sync_sources_index_safe, path=None)
+    return result
+
+
 @workspace_router.put("/file")
 async def workspace_write_file(
     body: WorkspaceWriteBody,

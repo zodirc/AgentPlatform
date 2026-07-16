@@ -116,6 +116,28 @@ export function ScenarioWorkbenchView({
               setArtifactsOpen(true);
               setSelection({ kind: "workspace", path });
             }}
+            onWorkspaceDeleted={(deletedPaths) => {
+              if (
+                workspaceViewerPath &&
+                deletedPaths.some(
+                  (deleted) =>
+                    workspaceViewerPath === deleted ||
+                    workspaceViewerPath.startsWith(`${deleted}/`),
+                )
+              ) {
+                setWorkspaceViewerPath(null);
+              }
+              if (
+                selection?.kind === "workspace" &&
+                deletedPaths.some(
+                  (deleted) =>
+                    selection.path === deleted ||
+                    selection.path.startsWith(`${deleted}/`),
+                )
+              ) {
+                setSelection(null);
+              }
+            }}
             onClose={() => setArtifactsOpen(false)}
           />
         ) : (

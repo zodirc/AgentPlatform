@@ -74,3 +74,19 @@ async def sources_index_status(*, path: str | None = None) -> dict:
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
+
+
+async def delete_paths(*, paths: list[str]) -> dict:
+    base = settings.runtime_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/entries/delete",
+                json={"paths": paths},
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
