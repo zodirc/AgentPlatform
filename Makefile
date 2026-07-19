@@ -20,7 +20,7 @@ EVAL_BUILD ?=
 .PHONY: help start up down ps logs smoke build migrate \
 	up-web up-api up-runtime restart-web restart-api restart-runtime \
 	dev dev-init web-dev \
-	up-queue up-retrieval up-ha \
+	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag
@@ -36,6 +36,7 @@ help: ## 显示常用命令
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（首次 / Dockerfile 变更）"
+	@echo "  make up-full      全栈：queue + retrieval（本地 embedding）"
 	@echo "  make build        只构建镜像，不启动"
 	@echo "  make down         停止"
 	@echo "  make ps / logs    状态 / 日志"
@@ -81,7 +82,7 @@ web-dev: ## 前端开发服务器（代理 /api → localhost:8000）
 	cd services/web && corepack enable && pnpm dev
 
 down:
-	$(COMPOSE) down
+	$(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval down
 
 ps:
 	$(COMPOSE) ps
@@ -181,6 +182,10 @@ up-queue:
 
 up-retrieval:
 	INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid $(COMPOSE_RETRIEVAL) --profile retrieval up -d --build
+
+up-full: ## 全栈：redis/worker + 本地 embedding retrieval
+	WORKER_MODE=outbox INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid \
+	  $(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval up -d --build
 
 up-ha:
 	$(COMPOSE_HA) up -d --build --scale runtime=0

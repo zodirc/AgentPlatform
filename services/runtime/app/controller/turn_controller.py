@@ -21,7 +21,11 @@ from app.controller.runtime_context import set_event_writer
 from app.controller.checkpoint_store import delete_checkpoint, load_checkpoint, save_checkpoint
 from app.controller.pending_store import PendingTurn, get, pop, save
 from app.controller.run_lock import ensure_run_owned_by_runner, persist_cancel_request, read_cancel_state
-from app.controller.session_context import load_session_context, session_context_message
+from app.controller.session_context import (
+    load_session_context,
+    load_session_owner_user_id,
+    session_context_message,
+)
 from app.db.pool import get_pool
 from app.tools.delegate_context import DelegateRuntime, set_delegate_runtime
 from app.graph.runner import run_via_langgraph
@@ -205,8 +209,9 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     profile = ScenarioRegistry.get(state.scenario_id)
     registry = build_registry()
     tools = tool_scope(profile, registry)
+    owner_user_id = await load_session_owner_user_id(state.session_id)
     gateway = create_gateway(
-        await resolve_model_config(),
+        await resolve_model_config(owner_user_id=owner_user_id),
         messages=state.messages,
         scenario_id=state.scenario_id,
     )
@@ -658,7 +663,8 @@ async def _run_turn(
                 merged = list(dict.fromkeys([*hot, *existing]))[:12]
                 session_ctx = {**session_ctx, "hot_files": merged}
             compiled.messages.insert(0, session_context_message(session_ctx))
-    model_config = await resolve_model_config()
+    owner_user_id = await load_session_owner_user_id(session_id)
+    model_config = await resolve_model_config(owner_user_id=owner_user_id)
     has_model_key = model_config is not None
     gate = should_query(message, has_model_key=has_model_key)
 
@@ -670,7 +676,7 @@ async def _run_turn(
         "scenario_id": scenario_id,
         "user_input_preview": preview,
     }
-    profile_meta = await resolve_active_profile_metadata()
+    profile_meta = await resolve_active_profile_metadata(owner_user_id=owner_user_id)
     if profile_meta:
         accepted_payload.update(profile_meta)
     elif model_config is not None:
@@ -1030,8 +1036,12 @@ async def _resume_after_approval(
             )
 
     state = pending.state
-    model_config = await resolve_model_config()
-    context_window_tokens = await resolve_context_window_tokens(model_config)
+    owner_user_id = await load_session_owner_user_id(state.session_id)
+    model_config = await resolve_model_config(owner_user_id=owner_user_id)
+    context_window_tokens = await resolve_context_window_tokens(
+        model_config,
+        owner_user_id=owner_user_id,
+    )
     engine = AgentEngine(
         gateway=pending.gateway,
         tools=pending.tools,

@@ -1,12 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import type { ModelProvider } from "../shared/api/client";
 import {
   activateModelProvider,
   createModelProvider,
   deleteModelProvider,
   listModelProviders,
-  setAdminPassword as storeAdminPassword,
   updateModelProvider,
 } from "../shared/api/client";
 
@@ -262,8 +262,7 @@ type PanelMode = "view" | "edit" | "create";
 
 export function SettingsPage() {
   const qc = useQueryClient();
-  const [adminPasswordInput, setAdminPasswordInput] = useState("");
-  const [authRequired, setAuthRequired] = useState(false);
+  const [loginRequired, setLoginRequired] = useState(false);
   const {
     data: providers = [],
     isLoading,
@@ -297,7 +296,7 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (error instanceof Error && error.message.includes("401")) {
-      setAuthRequired(true);
+      setLoginRequired(true);
     }
   }, [error]);
 
@@ -310,15 +309,21 @@ export function SettingsPage() {
   }, [isLoading, providers, selectedId]);
 
   useEffect(() => {
-    if (providers.length === 0 && !isLoading) {
+    if (providers.length === 0 && !isLoading && !loginRequired) {
       setPanelMode("create");
       setDraft(EMPTY_DRAFT);
       setActivateOnCreate(true);
     }
-  }, [providers.length, isLoading]);
+  }, [providers.length, isLoading, loginRequired]);
 
   const invalidate = () =>
     void qc.invalidateQueries({ queryKey: ["model-providers"] });
+
+  const onMutationError = (err: Error) => {
+    if (err.message.includes("401")) {
+      setLoginRequired(true);
+    }
+  };
 
   const createMut = useMutation({
     mutationFn: createModelProvider,
@@ -327,6 +332,7 @@ export function SettingsPage() {
       setPanelMode("view");
       invalidate();
     },
+    onError: onMutationError,
   });
 
   const updateMut = useMutation({
@@ -341,11 +347,13 @@ export function SettingsPage() {
       setPanelMode("view");
       invalidate();
     },
+    onError: onMutationError,
   });
 
   const activateMut = useMutation({
     mutationFn: activateModelProvider,
     onSuccess: () => invalidate(),
+    onError: onMutationError,
   });
 
   const deleteMut = useMutation({
@@ -355,7 +363,14 @@ export function SettingsPage() {
       setPanelMode("view");
       invalidate();
     },
+    onError: onMutationError,
   });
+
+  const actionError =
+    createMut.error ??
+    updateMut.error ??
+    activateMut.error ??
+    deleteMut.error;
 
   function startCreate() {
     setSelectedId(null);
@@ -419,40 +434,35 @@ export function SettingsPage() {
     <div className="mx-auto max-w-4xl p-6">
       <h1 className="text-2xl font-semibold">模型供应商</h1>
       <p className="mt-1 text-sm text-slate-400">
-        可保存多条配置并切换当前使用的模型；保存后下一 Turn 起生效。
+        配置归属于当前登录用户；保存后下一 Turn 起生效。
       </p>
 
-      {authRequired ? (
-        <form
-          className="mt-4 flex gap-2 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (!adminPasswordInput.trim()) return;
-            storeAdminPassword(adminPasswordInput.trim());
-            setAdminPasswordInput("");
-            setAuthRequired(false);
-            invalidate();
-          }}
-        >
-          <input
-            className="flex-1 rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
-            type="password"
-            placeholder="Admin 密码（AUTH_ENABLED）"
-            value={adminPasswordInput}
-            onChange={(e) => setAdminPasswordInput(e.target.value)}
-          />
-          <button
-            type="submit"
-            className="rounded-lg bg-amber-700 px-4 py-2 text-sm"
+      {loginRequired ? (
+        <div className="mt-4 space-y-2 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4">
+          <p className="text-sm text-amber-200/90">
+            请先使用工作台账号登录后再管理模型配置。
+          </p>
+          <Link
+            to="/writing"
+            className="inline-block rounded-lg bg-amber-700 px-4 py-2 text-sm text-white"
           >
-            解锁
-          </button>
-        </form>
+            去登录
+          </Link>
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <p className="mt-4 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-sm text-rose-300">
+          保存失败：{actionError.message}
+          {actionError.message.includes("401")
+            ? " — 请先登录工作台账号"
+            : ""}
+        </p>
       ) : null}
 
       {isLoading ? (
         <p className="mt-6 text-sm text-slate-500">加载中…</p>
-      ) : (
+      ) : loginRequired ? null : (
         <div className="mt-6 grid gap-4 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]">
           <aside className="rounded-xl border border-slate-800 bg-slate-950 p-3">
             <div className="mb-3 flex items-center justify-between gap-2">

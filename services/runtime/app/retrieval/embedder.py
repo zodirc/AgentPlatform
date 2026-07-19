@@ -59,7 +59,20 @@ class SentenceTransformerEmbedder:
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
         cache = model_dir or None
-        self._model = SentenceTransformer(model_name, cache_folder=cache)
+        # Prefer local cache so startup cannot hang on HuggingFace hub I/O.
+        try:
+            self._model = SentenceTransformer(
+                model_name,
+                cache_folder=cache,
+                local_files_only=True,
+            )
+        except Exception:
+            logger.warning(
+                "local embedder cache miss for %s; falling back to download",
+                model_name,
+                exc_info=True,
+            )
+            self._model = SentenceTransformer(model_name, cache_folder=cache)
 
     def embed(self, text: str) -> list[float]:
         vector = self._model.encode(text, normalize_embeddings=True)

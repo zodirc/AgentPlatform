@@ -2,12 +2,33 @@
 # Retrieval runtime: CPU torch + sentence-transformers + baked local embedding model.
 
 ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
+ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
+ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
+ARG HF_ENDPOINT=https://hf-mirror.com
 
 FROM python:3.11-slim AS model-baker
 ARG EMBEDDING_MODEL
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG TORCH_FIND_LINKS
+ARG HF_ENDPOINT
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_ENDPOINT=${HF_ENDPOINT} \
+    HUGGINGFACE_HUB_ENDPOINT=${HF_ENDPOINT}
+
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+      sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+
+RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir "sentence-transformers>=3.0"
 RUN python -c "\
 from sentence_transformers import SentenceTransformer; \
@@ -15,8 +36,22 @@ SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"
 
 FROM python:3.11-slim AS runtime
 ARG EMBEDDING_MODEL
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG TORCH_FIND_LINKS
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+      sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources; \
+    elif [ -f /etc/apt/sources.list ]; then \
+      sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 1000 app
 RUN mkdir -p /data/vectorstore /data/models /app/models-baked \
     && chown -R app:app /data /app/models-baked
@@ -25,7 +60,7 @@ WORKDIR /app
 COPY packages/contracts/python /contracts/python
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
 COPY services/runtime/app /tmp/runtime/app
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
+RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir /contracts/python \
     && pip install --no-cache-dir "/tmp/runtime[retrieval]" \
     && rm -rf /tmp/runtime

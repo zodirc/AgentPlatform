@@ -307,9 +307,9 @@ paths:
   /admin/model-providers:
     get:
       operationId: listModelProviders
-      summary: List model provider profiles (admin)
+      summary: List model provider profiles for the logged-in end user
       security:
-        - adminBasicAuth: []
+        - endUserCookie: []
       responses:
         '200':
           description: Provider profiles
@@ -321,9 +321,9 @@ paths:
                   $ref: '#/components/schemas/ModelProviderProfile'
     post:
       operationId: createModelProvider
-      summary: Create a model provider profile (admin)
+      summary: Create a model provider profile for the logged-in end user
       security:
-        - adminBasicAuth: []
+        - endUserCookie: []
       requestBody:
         required: true
         content:
@@ -340,9 +340,9 @@ paths:
   /admin/model-providers/{profile_id}:
     put:
       operationId: updateModelProvider
-      summary: Update a model provider profile (admin)
+      summary: Update a model provider profile owned by the logged-in end user
       security:
-        - adminBasicAuth: []
+        - endUserCookie: []
       parameters:
         - name: profile_id
           in: path
@@ -365,9 +365,9 @@ paths:
                 $ref: '#/components/schemas/ModelProviderProfile'
     delete:
       operationId: deleteModelProvider
-      summary: Delete a model provider profile (admin)
+      summary: Delete a model provider profile owned by the logged-in end user
       security:
-        - adminBasicAuth: []
+        - endUserCookie: []
       parameters:
         - name: profile_id
           in: path
@@ -381,9 +381,9 @@ paths:
   /admin/model-providers/{profile_id}/activate:
     put:
       operationId: activateModelProvider
-      summary: Activate a model provider profile (admin)
+      summary: Activate a model provider profile for the logged-in end user
       security:
-        - adminBasicAuth: []
+        - endUserCookie: []
       parameters:
         - name: profile_id
           in: path
@@ -403,6 +403,10 @@ components:
     adminBasicAuth:
       type: http
       scheme: basic
+    endUserCookie:
+      type: apiKey
+      in: cookie
+      name: agent_end_user
   schemas:
     CreateSessionRequest:
       type: object

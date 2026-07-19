@@ -185,7 +185,10 @@ async def warmup_retrieval_command(
             from app.retrieval.embedder import get_embedder
             from app.retrieval.store import get_sources_store
 
-            await asyncio.to_thread(get_embedder().embed, text)
+            def _embed_once() -> None:
+                get_embedder().embed(text)
+
+            await asyncio.to_thread(_embed_once)
             await asyncio.to_thread(get_sources_store().load)
         except Exception:
             logger.exception("warmup-retrieval failed")

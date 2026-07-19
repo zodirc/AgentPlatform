@@ -56,45 +56,58 @@ def _row_to_profile(row, *, hint: str) -> ModelProviderProfile:
     )
 
 
-async def list_profiles() -> list[ModelProviderProfile]:
+def _hint_from_ciphertext(ciphertext) -> str:
+    try:
+        from app.services.admin.crypto import decrypt_api_key
+
+        return mask_api_key(decrypt_api_key(ciphertext))
+    except Exception:
+        return "••••"
+
+
+async def list_profiles(*, owner_user_id: UUID) -> list[ModelProviderProfile]:
     pool = await get_pool()
     rows = await pool.fetch(
         """
         SELECT id, label, provider, model_name, base_url, context_window_tokens, is_active,
                config_version, updated_at, api_key_ciphertext
         FROM model_provider_profiles
+        WHERE owner_user_id = $1
         ORDER BY updated_at DESC
-        """
+        """,
+        owner_user_id,
     )
-    profiles = []
-    for row in rows:
-        hint = "••••"
-        try:
-            from app.services.admin.crypto import decrypt_api_key
-
-            hint = mask_api_key(decrypt_api_key(row["api_key_ciphertext"]))
-        except Exception:
-            pass
-        profiles.append(_row_to_profile(row, hint=hint))
-    return profiles
+    return [
+        _row_to_profile(row, hint=_hint_from_ciphertext(row["api_key_ciphertext"]))
+        for row in rows
+    ]
 
 
-async def create_profile(body: CreateModelProviderRequest) -> ModelProviderProfile:
+async def create_profile(
+    body: CreateModelProviderRequest,
+    *,
+    owner_user_id: UUID,
+) -> ModelProviderProfile:
     pool = await get_pool()
     ciphertext = encrypt_api_key(body.api_key)
     async with pool.acquire() as conn:
         async with conn.transaction():
             if body.activate:
                 await conn.execute(
-                    "UPDATE model_provider_profiles SET is_active = false WHERE is_active = true"
+                    """
+                    UPDATE model_provider_profiles
+                    SET is_active = false
+                    WHERE owner_user_id = $1 AND is_active = true
+                    """,
+                    owner_user_id,
                 )
             row = await conn.fetchrow(
                 """
                 INSERT INTO model_provider_profiles (
                     label, provider, model_name, api_key_ciphertext, base_url,
-                    context_window_tokens, is_active
+                    context_window_tokens, is_active, owner_user_id
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                 RETURNING id, label, provider, model_name, base_url, context_window_tokens,
                           is_active, config_version, updated_at
                 """,
@@ -105,6 +118,7 @@ async def create_profile(body: CreateModelProviderRequest) -> ModelProviderProfi
                 body.base_url,
                 body.context_window_tokens,
                 body.activate,
+                owner_user_id,
             )
             if row is not None:
                 await _notify_provider_config(conn, row["id"])
@@ -121,6 +135,8 @@ async def _notify_provider_config(conn, profile_id: UUID) -> None:
 async def update_profile(
     profile_id: UUID,
     body: UpdateModelProviderRequest,
+    *,
+    owner_user_id: UUID,
 ) -> ModelProviderProfile | None:
     pool = await get_pool()
     fields: list[str] = []
@@ -150,29 +166,26 @@ async def update_profile(
     if not fields:
         row = await pool.fetchrow(
             """
-            SELECT id, label, provider, model_name, base_url, is_active,
+            SELECT id, label, provider, model_name, base_url, context_window_tokens, is_active,
                    config_version, updated_at, api_key_ciphertext
-            FROM model_provider_profiles WHERE id = $1
+            FROM model_provider_profiles
+            WHERE id = $1 AND owner_user_id = $2
             """,
             profile_id,
+            owner_user_id,
         )
         if row is None:
             return None
-        try:
-            from app.services.admin.crypto import decrypt_api_key
-
-            hint = mask_api_key(decrypt_api_key(row["api_key_ciphertext"]))
-        except Exception:
-            pass
-        return _row_to_profile(row, hint=hint)
+        return _row_to_profile(row, hint=_hint_from_ciphertext(row["api_key_ciphertext"]))
 
     fields.append("config_version = config_version + 1")
     fields.append("updated_at = now()")
     values.append(profile_id)
+    values.append(owner_user_id)
     sql = f"""
         UPDATE model_provider_profiles
         SET {", ".join(fields)}
-        WHERE id = ${len(values)}
+        WHERE id = ${len(values) - 1} AND owner_user_id = ${len(values)}
         RETURNING id, label, provider, model_name, base_url, context_window_tokens, is_active,
                   config_version, updated_at, api_key_ciphertext
     """
@@ -184,57 +197,71 @@ async def update_profile(
     if row is None:
         return None
     if body.api_key is None:
-        try:
-            from app.services.admin.crypto import decrypt_api_key
-
-            hint = mask_api_key(decrypt_api_key(row["api_key_ciphertext"]))
-        except Exception:
-            pass
+        hint = _hint_from_ciphertext(row["api_key_ciphertext"])
     return _row_to_profile(row, hint=hint)
 
 
-async def activate_profile(profile_id: UUID) -> ModelProviderProfile | None:
+async def activate_profile(
+    profile_id: UUID,
+    *,
+    owner_user_id: UUID,
+) -> ModelProviderProfile | None:
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            owned = await conn.fetchval(
+                """
+                SELECT 1 FROM model_provider_profiles
+                WHERE id = $1 AND owner_user_id = $2
+                """,
+                profile_id,
+                owner_user_id,
+            )
+            if owned is None:
+                return None
             await conn.execute(
-                "UPDATE model_provider_profiles SET is_active = false WHERE is_active = true"
+                """
+                UPDATE model_provider_profiles
+                SET is_active = false
+                WHERE owner_user_id = $1 AND is_active = true
+                """,
+                owner_user_id,
             )
             row = await conn.fetchrow(
                 """
                 UPDATE model_provider_profiles
                 SET is_active = true, config_version = config_version + 1, updated_at = now()
-                WHERE id = $1
+                WHERE id = $1 AND owner_user_id = $2
                 RETURNING id, label, provider, model_name, base_url, context_window_tokens,
                           is_active, config_version, updated_at, api_key_ciphertext
                 """,
                 profile_id,
+                owner_user_id,
             )
             if row is not None:
                 await _notify_provider_config(conn, profile_id)
     if row is None:
         return None
-    try:
-        from app.services.admin.crypto import decrypt_api_key
-
-        hint = mask_api_key(decrypt_api_key(row["api_key_ciphertext"]))
-    except Exception:
-        hint = "••••"
-    return _row_to_profile(row, hint=hint)
+    return _row_to_profile(row, hint=_hint_from_ciphertext(row["api_key_ciphertext"]))
 
 
-async def delete_profile(profile_id: UUID) -> bool:
+async def delete_profile(profile_id: UUID, *, owner_user_id: UUID) -> bool:
     pool = await get_pool()
     row = await pool.fetchrow(
-        "SELECT is_active FROM model_provider_profiles WHERE id = $1",
+        """
+        SELECT is_active FROM model_provider_profiles
+        WHERE id = $1 AND owner_user_id = $2
+        """,
         profile_id,
+        owner_user_id,
     )
     if row is None:
         return False
     if row["is_active"]:
         raise ValueError("Cannot delete active profile")
     result = await pool.execute(
-        "DELETE FROM model_provider_profiles WHERE id = $1",
+        "DELETE FROM model_provider_profiles WHERE id = $1 AND owner_user_id = $2",
         profile_id,
+        owner_user_id,
     )
     return result.endswith("1")

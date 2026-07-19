@@ -7,6 +7,14 @@ from app.context.summary import StructuredSummary
 from app.db.pool import get_pool
 
 
+async def load_session_owner_user_id(session_id: UUID) -> UUID | None:
+    pool = await get_pool()
+    return await pool.fetchval(
+        "SELECT owner_user_id FROM sessions WHERE id = $1",
+        session_id,
+    )
+
+
 async def load_session_context(session_id: UUID) -> dict | None:
     pool = await get_pool()
     row = await pool.fetchrow(

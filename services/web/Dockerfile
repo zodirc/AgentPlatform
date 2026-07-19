@@ -2,6 +2,9 @@
 
 FROM node:20-alpine AS builder
 WORKDIR /app
+# China-friendly npm registry (override with build-arg if needed)
+ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
+ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 COPY services/web/package.json services/web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile

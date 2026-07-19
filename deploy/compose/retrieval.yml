@@ -16,5 +16,9 @@ services:
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
       EMBEDDING_MODEL_DIR: /data/models
+      # Avoid startup hangs when hub is slow/unreachable; models are baked/seeded locally.
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      HF_HOME: /data/models
       RETRIEVAL_RERANK_ENABLED: ${RETRIEVAL_RERANK_ENABLED:-true}
       RETRIEVAL_RERANK_CROSS_ENCODER: ${RETRIEVAL_RERANK_CROSS_ENCODER:-false}

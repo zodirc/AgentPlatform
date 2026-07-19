@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from uuid import UUID
 
 from app.db.pool import get_pool
 from app.model.crypto import decrypt_api_key
@@ -23,31 +24,33 @@ class ModelConfig:
     context_window_tokens: int | None = None
 
 
-async def resolve_model_config() -> ModelConfig | None:
+async def resolve_model_config(*, owner_user_id: UUID | None = None) -> ModelConfig | None:
     if settings.model_mode in {"stub", "recorded"}:
         return None
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        """
-        SELECT provider, model_name, api_key_ciphertext, base_url, context_window_tokens
-        FROM model_provider_profiles
-        WHERE is_active = true
-        LIMIT 1
-        """
-    )
-    if row is not None:
-        try:
-            api_key = decrypt_api_key(row["api_key_ciphertext"])
-        except Exception:
-            api_key = ""
-        if api_key:
-            return ModelConfig(
-                provider=row["provider"],
-                model_name=row["model_name"],
-                api_key=api_key,
-                base_url=row["base_url"],
-                context_window_tokens=row["context_window_tokens"],
-            )
+    if owner_user_id is not None:
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            """
+            SELECT provider, model_name, api_key_ciphertext, base_url, context_window_tokens
+            FROM model_provider_profiles
+            WHERE owner_user_id = $1 AND is_active = true
+            LIMIT 1
+            """,
+            owner_user_id,
+        )
+        if row is not None:
+            try:
+                api_key = decrypt_api_key(row["api_key_ciphertext"])
+            except Exception:
+                api_key = ""
+            if api_key:
+                return ModelConfig(
+                    provider=row["provider"],
+                    model_name=row["model_name"],
+                    api_key=api_key,
+                    base_url=row["base_url"],
+                    context_window_tokens=row["context_window_tokens"],
+                )
 
     api_key = settings.model_api_key
     if api_key and api_key != "stub":
@@ -61,15 +64,21 @@ async def resolve_model_config() -> ModelConfig | None:
     return None
 
 
-async def resolve_active_profile_metadata() -> dict[str, str] | None:
+async def resolve_active_profile_metadata(
+    *,
+    owner_user_id: UUID | None = None,
+) -> dict[str, str] | None:
+    if owner_user_id is None:
+        return None
     pool = await get_pool()
     row = await pool.fetchrow(
         """
         SELECT provider, model_name
         FROM model_provider_profiles
-        WHERE is_active = true
+        WHERE owner_user_id = $1 AND is_active = true
         LIMIT 1
-        """
+        """,
+        owner_user_id,
     )
     if row is None:
         return None
@@ -79,8 +88,12 @@ async def resolve_active_profile_metadata() -> dict[str, str] | None:
     }
 
 
-async def resolve_context_window_tokens(model_config: ModelConfig | None = None) -> int:
-    config = model_config or await resolve_model_config()
+async def resolve_context_window_tokens(
+    model_config: ModelConfig | None = None,
+    *,
+    owner_user_id: UUID | None = None,
+) -> int:
+    config = model_config or await resolve_model_config(owner_user_id=owner_user_id)
     if config is not None and config.context_window_tokens:
         return int(config.context_window_tokens)
     if config is not None:
@@ -90,10 +103,10 @@ async def resolve_context_window_tokens(model_config: ModelConfig | None = None)
     return settings.context_window_tokens
 
 
-async def model_config_ready() -> bool:
+async def model_config_ready(*, owner_user_id: UUID | None = None) -> bool:
     if settings.model_mode == "stub":
         return True
-    return await resolve_model_config() is not None
+    return await resolve_model_config(owner_user_id=owner_user_id) is not None
 
 
 def _default_model(provider: str) -> str:

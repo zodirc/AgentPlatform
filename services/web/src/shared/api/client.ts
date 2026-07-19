@@ -314,7 +314,8 @@ export async function rejectPatch(
 
 export async function listModelProviders(): Promise<ModelProvider[]> {
   const res = await fetch(`${API_BASE}/admin/model-providers`, {
-    headers: adminAuthHeaders(),
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`listModelProviders failed: ${res.status}`);
   return res.json();
@@ -330,8 +331,9 @@ export async function createModelProvider(body: {
   activate?: boolean;
 }) {
   const res = await fetch(`${API_BASE}/admin/model-providers`, {
+    ...sessionFetchInit,
     method: "POST",
-    headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify({ ...body, activate: body.activate ?? true }),
   });
   if (!res.ok) throw new Error(`createModelProvider failed: ${res.status}`);
@@ -340,8 +342,9 @@ export async function createModelProvider(body: {
 
 export async function activateModelProvider(id: string) {
   const res = await fetch(`${API_BASE}/admin/model-providers/${id}/activate`, {
+    ...sessionFetchInit,
     method: "PUT",
-    headers: adminAuthHeaders(),
+    headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`activateModelProvider failed: ${res.status}`);
   return res.json();
@@ -359,8 +362,9 @@ export async function updateModelProvider(
   },
 ) {
   const res = await fetch(`${API_BASE}/admin/model-providers/${id}`, {
+    ...sessionFetchInit,
     method: "PUT",
-    headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`updateModelProvider failed: ${res.status}`);
@@ -369,8 +373,9 @@ export async function updateModelProvider(
 
 export async function deleteModelProvider(id: string) {
   const res = await fetch(`${API_BASE}/admin/model-providers/${id}`, {
+    ...sessionFetchInit,
     method: "DELETE",
-    headers: adminAuthHeaders(),
+    headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`deleteModelProvider failed: ${res.status}`);
 }
