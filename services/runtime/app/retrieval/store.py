@@ -21,7 +21,7 @@ class SourceRetrievalStore(Protocol):
 
 
 class JsonSourceRetrievalStore:
-    """Default on-disk JSON vectorstore used by search_sources."""
+    """Default on-disk JSON vectorstore used when pgvector is unavailable or forced."""
 
     backend = "json"
 
@@ -50,7 +50,7 @@ def sources_store_path(*, data_dir: str | None = None) -> Path:
 
 
 def get_sources_store(*, data_dir: str | None = None) -> SourceRetrievalStore:
-    backend = (settings.retrieval_backend or "json").lower().strip()
+    backend = (settings.retrieval_backend or "pgvector").lower().strip()
     if backend in {"pgvector", "postgres", "ann"}:
         try:
             from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore

@@ -22,8 +22,8 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
     retrieval_mode: str = "hybrid"  # keyword | vector | hybrid
     retrieval_rrf_k: int = 60
-    # Backend: json (default, no deps) | pgvector (ANN via HNSW; needs pgvector image).
-    retrieval_backend: str = "json"
+    # Backend: pgvector (default ANN via HNSW; needs pgvector image) | json (file fallback).
+    retrieval_backend: str = "pgvector"
     # Two-level doc→chunk recall (docs/17 S3 A11): parallel lanes; timeout → chunk-only.
     retrieval_two_level_enabled: bool = True
     retrieval_two_level_timeout_seconds: float = 0.3
@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     search_sources_max_per_turn: int = 3
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15
+    # RE1: keyword fallback section alignment (docs/28); oversize / timeout → file excerpt only.
+    search_sources_keyword_max_file_bytes: int = 262_144
+    search_sources_keyword_parse_budget_ms: float = 50.0
     # S0 harness guards (docs/17-execution-plan.md).
     tool_schema_validate: bool = True
     citation_verify_enabled: bool = True

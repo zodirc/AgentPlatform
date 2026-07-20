@@ -943,6 +943,31 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
                         f"{case_id}: tool {name!r} called {counts.get(name, 0)} > max {limit}"
                     )
 
+    retrieval_assert = assertions.get("retrieval", {})
+    if retrieval_assert and turn_id is not None:
+        view = http_json("GET", f"{base}/api/v1/turns/{turn_id}/view")
+        artifacts = view.get("artifacts") or []
+        retrieval_arts = [a for a in artifacts if a.get("type") == "retrieval"]
+        if "mode" in retrieval_assert:
+            expected_mode = retrieval_assert["mode"]
+            if not any(a.get("mode") == expected_mode for a in retrieval_arts):
+                raise AssertionError(
+                    f"{case_id}: no retrieval artifact with mode {expected_mode!r}"
+                )
+        if "filters_path_prefix" in retrieval_assert:
+            want = retrieval_assert["filters_path_prefix"]
+            matched = any(
+                (a.get("filters") or {}).get("path_prefix") == want for a in retrieval_arts
+            )
+            if not matched:
+                raise AssertionError(
+                    f"{case_id}: no retrieval artifact with filters.path_prefix {want!r}"
+                )
+        if retrieval_assert.get("min_hit_count") is not None:
+            min_hits = int(retrieval_assert["min_hit_count"])
+            if not any(int(a.get("hit_count") or 0) >= min_hits for a in retrieval_arts):
+                raise AssertionError(f"{case_id}: retrieval hit_count < {min_hits}")
+
     output_assert = assertions.get("output", {})
     if "matches" in output_assert:
         if turn_id is None:

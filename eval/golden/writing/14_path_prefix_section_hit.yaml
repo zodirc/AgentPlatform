@@ -1,0 +1,53 @@
+id: writing.14_path_prefix_section_hit
+scenario_id: writing
+phase: 2
+description: >
+  search_sources with path_prefix=writing hits 张白鹿 section and ignores legal noise
+  (docs/28 RE2/RE3 effect + stub contract)
+
+fixtures:
+  workspace:
+    - path: sources/writing/liangjian.md
+      content: |
+        # 亮剑人物
+
+        ## 李云龙
+        李云龙是主角，作战勇猛，独立团团长。
+
+        ## 张白鹿
+        张白鹿性格独立，与李云龙相识，是剧中的重要配角。
+    - path: sources/legal/nda.md
+      content: |
+        # NDA
+        ## Confidential Information
+        Confidential information means non-public data. 张白鹿 must not appear here as a character note.
+
+input:
+  message: "writing.14 在 writing 目录下引用资料写张白鹿人物小节"
+  client_request_id: "00000000-0000-4000-8000-000000000014"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - retrieval.completed
+      - tool.completed
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: search_sources
+    result_matches: "张白鹿"
+  retrieval:
+    filters_path_prefix: sources/writing
+    min_hit_count: 1
+  output:
+    matches: "张白鹿"
+  latency:
+    first_token_ms_max: 800
+
+tags: [writing, rag, path_prefix, p2]

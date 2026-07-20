@@ -188,3 +188,58 @@ async def test_stub_writing_11_hybrid_character_search() -> None:
     assert tool_calls
     assert tool_calls[0]["name"] == "search_sources"
     assert tool_calls[0]["input"]["query"] == "张白鹿"
+
+
+@pytest.mark.asyncio
+async def test_stub_writing_14_path_prefix_search() -> None:
+    provider = StubModelProvider()
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "writing.14 在 writing 目录下引用资料写张白鹿人物小节",
+                }
+            ],
+        }
+    ]
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            messages=messages,
+            tools=[{"name": "search_sources"}],
+        )
+    ]
+    tool_calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert tool_calls
+    assert tool_calls[0]["name"] == "search_sources"
+    assert tool_calls[0]["input"]["path_prefix"] == "writing"
+    assert tool_calls[0]["input"]["query"] == "张白鹿"
+
+    after_tool = [
+        chunk
+        async for chunk in provider.stream(
+            messages=[
+                *messages,
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": "t1", "name": "search_sources", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "张白鹿"}],
+                },
+            ],
+            tools=[{"name": "search_sources"}],
+        )
+    ]
+    text_chunks = [c for c in after_tool if isinstance(c, str)]
+    assert text_chunks, "writing.14 final reply must stream token chunks for latency asserts"
+    finals = [c for c in after_tool if not isinstance(c, str) and c.text]
+    assert finals and "张白鹿" in finals[-1].text

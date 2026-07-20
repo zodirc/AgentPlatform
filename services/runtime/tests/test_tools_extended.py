@@ -161,6 +161,124 @@ async def test_search_sources_never_syncs_inline(workspace: Path, monkeypatch: p
 
 
 @pytest.mark.asyncio
+async def test_search_sources_path_prefix_keyword(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sources = workspace / "sources"
+    (sources / "hr").mkdir(parents=True)
+    (sources / "legal").mkdir(parents=True)
+    (sources / "hr" / "leave.md").write_text("annual leave days policy", encoding="utf-8")
+    (sources / "legal" / "nda.md").write_text("confidential information definition", encoding="utf-8")
+    monkeypatch.setattr(settings, "retrieval_mode", "keyword")
+
+    all_hits = await core.search_sources("leave")
+    assert any("hr" in h["path"] for h in all_hits["hits"])
+
+    filtered = await core.search_sources("leave", path_prefix="hr")
+    assert filtered["filters"]["applied"] is True
+    assert filtered["filters"]["path_prefix"] == "sources/hr"
+    assert filtered["hits"]
+    assert all(h["path"].startswith("sources/hr") for h in filtered["hits"])
+
+    blocked = await core.search_sources("confidential", path_prefix="sources/hr")
+    assert all(not h["path"].startswith("sources/legal") for h in blocked["hits"])
+
+    bad = await core.search_sources("leave", path_prefix="../etc")
+    assert bad["hits"] == []
+    assert bad["filters"]["applied"] is False
+    assert "hint" in bad
+
+
+@pytest.mark.asyncio
+async def test_search_sources_path_prefix_hybrid(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sources = workspace / "sources"
+    (sources / "hr").mkdir(parents=True)
+    (sources / "legal").mkdir(parents=True)
+    (sources / "hr" / "leave.md").write_text(
+        "## Leave\nannual leave days for staff.\n", encoding="utf-8"
+    )
+    (sources / "legal" / "nda.md").write_text(
+        "## Confidential Information\nconfidential information definition.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "data_dir", str(workspace))
+    await core.sync_sources_index()
+
+    result = await core.search_sources("annual leave", path_prefix="hr", limit=5)
+    assert result["retrieval"] == "hybrid"
+    assert result["filters"]["path_prefix"] == "sources/hr"
+    assert result["hits"]
+    assert all(h["path"].startswith("sources/hr") for h in result["hits"])
+    assert not any("legal" in h["path"] for h in result["hits"])
+
+
+@pytest.mark.asyncio
+async def test_search_sources_path_prefix_empty_ann_falls_back_keyword(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Stale ANN hits outside the prefix must not suppress on-disk keyword recall."""
+    sources = workspace / "sources"
+    (sources / "writing").mkdir(parents=True)
+    (sources / "legal").mkdir(parents=True)
+    (sources / "writing" / "liangjian.md").write_text(
+        "## 张白鹿\n张白鹿性格独立，与李云龙相识。\n",
+        encoding="utf-8",
+    )
+    (sources / "legal" / "nda.md").write_text(
+        "## Noise\n张白鹿 must not be the only recall path.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "data_dir", str(workspace))
+
+    class FakeStore:
+        def load(self) -> None:
+            return None
+
+        def search(self, query: str, limit: int = 10, mode: str = "hybrid"):
+            # Pretend shared index only knows the legal path.
+            return [
+                {
+                    "path": "sources/legal/nda.md",
+                    "excerpt": "张白鹿 must not be the only recall path.",
+                    "score": 0.9,
+                    "citation_id": "cite:nda",
+                }
+            ]
+
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
+    result = await core.search_sources("张白鹿", path_prefix="writing", limit=5)
+    assert result["retrieval"] == "keyword"
+    assert result["index"].get("prefix_empty_after_filter") is True
+    assert result["filters"]["path_prefix"] == "sources/writing"
+    assert result["hits"]
+    assert all(h["path"].startswith("sources/writing") for h in result["hits"])
+    assert "张白鹿" in result["hits"][0]["excerpt"]
+
+
+@pytest.mark.asyncio
+async def test_search_sources_keyword_section_fields(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sources = workspace / "sources"
+    sources.mkdir()
+    (sources / "doc.md").write_text(
+        "## First\nnoise alpha.\n\n## Target Section\nunique-keyword beta gamma.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "retrieval_mode", "keyword")
+    result = await core.search_sources("unique-keyword beta")
+    assert len(result["hits"]) == 1
+    hit = result["hits"][0]
+    assert hit.get("section_title") == "Target Section"
+    assert "unique-keyword" in hit["excerpt"]
+    assert hit.get("chunk_id")
+
+
+@pytest.mark.asyncio
 async def test_search_sources_no_sources_dir(workspace: Path) -> None:
     result = await core.search_sources("query")
     assert result["hits"] == []

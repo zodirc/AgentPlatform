@@ -360,32 +360,68 @@ def _search_sources_keyword(
     workspace_root: Path,
     query: str,
     limit: int,
-) -> list[dict[str, Any]]:
+    path_prefix: str | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     from app.retrieval.chunking import should_index_source
+    from app.retrieval.keyword_hit import keyword_hit_from_file
+    from app.retrieval.path_filter import normalize_path_prefix, path_matches_prefix
+
+    normalized, err = normalize_path_prefix(path_prefix)
+    if err:
+        return [], {
+            "filters": {"path_prefix": path_prefix, "applied": False, "error": err},
+            "hint": err,
+        }
 
     terms = [t for t in re.split(r"\s+", query.strip()) if t]
     hits: list[dict[str, Any]] = []
     excerpt_chars = settings.search_sources_excerpt_chars
+    max_bytes = settings.search_sources_keyword_max_file_bytes
+    budget_ms = settings.search_sources_keyword_parse_budget_ms
     for fp in sorted(sources.rglob("*")):
         if not fp.is_file() or not should_index_source(fp):
             continue
-        text = fp.read_text(encoding="utf-8", errors="replace")
-        lowered = text.lower()
-        if terms and not all(t.lower() in lowered for t in terms):
-            continue
         rel = str(fp.relative_to(workspace_root))
-        excerpt = text[:excerpt_chars].strip()
-        if len(text) > excerpt_chars:
-            excerpt += "…"
-        hits.append({"path": rel, "excerpt": excerpt, "citation_id": f"cite:{fp.stem}"})
+        if normalized is not None and not path_matches_prefix(rel, normalized):
+            continue
+        hit = keyword_hit_from_file(
+            fp,
+            rel_path=rel,
+            terms=terms,
+            excerpt_chars=excerpt_chars,
+            max_file_bytes=max_bytes,
+            parse_budget_ms=budget_ms,
+        )
+        if hit is None:
+            continue
+        hits.append(hit)
         if len(hits) >= limit:
             break
-    return hits
+    meta: dict[str, Any] = {}
+    if normalized is not None:
+        meta["filters"] = {"path_prefix": normalized, "applied": True}
+    return hits, meta
 
 
-async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[str, Any]:
+def _attach_filter_meta(payload: dict[str, Any], filter_meta: dict[str, Any]) -> dict[str, Any]:
+    if not filter_meta:
+        return payload
+    if "filters" in filter_meta:
+        payload["filters"] = filter_meta["filters"]
+    if filter_meta.get("hint") and not payload.get("hint"):
+        payload["hint"] = filter_meta["hint"]
+    return payload
+
+
+async def search_sources(
+    query: str,
+    limit: int = 10,
+    path_prefix: str | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
     from pathlib import Path
 
+    from app.retrieval.path_filter import filter_hits_by_path_prefix
     from app.retrieval.store import get_sources_store
 
     sources = _resolve_path("sources")
@@ -397,15 +433,20 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
     excerpt_chars = settings.search_sources_excerpt_chars
 
     if mode == "keyword":
-        hits = _search_sources_keyword(
-            sources, workspace_root=workspace_root, query=query, limit=limit
+        hits, filter_meta = _search_sources_keyword(
+            sources,
+            workspace_root=workspace_root,
+            query=query,
+            limit=limit,
+            path_prefix=path_prefix,
         )
-        return {
+        payload = {
             "query": query,
             "hits": hits,
             "summary": f"search_sources(keyword): {len(hits)} hit(s)",
             "retrieval": "keyword",
         }
+        return _attach_filter_meta(payload, filter_meta)
 
     # Hot path: load + search only. Never store.sync() here (A9 / docs/17 S2).
     store = get_sources_store()
@@ -413,9 +454,11 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
         "synced_on_query": False,
         "index_via_worker": settings.index_via_worker,
     }
+    # Over-fetch when filtering so prefix cuts do not starve top-k.
+    fetch_limit = limit * 3 if path_prefix else limit
     try:
         store.load()
-        raw_hits = store.search(query, limit=limit, mode=mode)
+        raw_hits = store.search(query, limit=fetch_limit, mode=mode)
         retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
     except OSError:
         index_meta["error"] = "vector_index_unavailable"
@@ -423,21 +466,37 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
         retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
 
     if raw_hits:
-        hits = _format_source_hits(raw_hits, excerpt_chars=excerpt_chars)
-        payload: dict[str, Any] = {
-            "query": query,
-            "hits": hits,
-            "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
-            "retrieval": retrieval,
-            "index": index_meta,
-        }
-        if hits and hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
-            top_path = hits[0].get("path", "")
-            payload["hint"] = (
-                "Low relevance scores; prefer read_file on the top path "
-                f"({top_path}) instead of repeating search_sources."
-            )
-        return payload
+        filtered, filter_meta = filter_hits_by_path_prefix(raw_hits, path_prefix=path_prefix)
+        if filter_meta.get("filters", {}).get("error"):
+            payload = {
+                "query": query,
+                "hits": [],
+                "summary": "search_sources: invalid path_prefix",
+                "retrieval": retrieval,
+                "index": index_meta,
+            }
+            return _attach_filter_meta(payload, filter_meta)
+        hits = _format_source_hits(filtered[:limit], excerpt_chars=excerpt_chars)
+        if hits:
+            payload = {
+                "query": query,
+                "hits": hits,
+                "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
+                "retrieval": retrieval,
+                "index": index_meta,
+            }
+            _attach_filter_meta(payload, filter_meta)
+            if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
+                top_path = hits[0].get("path", "")
+                payload["hint"] = (
+                    "Low relevance scores; prefer read_file on the top path "
+                    f"({top_path}) instead of repeating search_sources."
+                )
+            return payload
+        # ANN returned hits, but path_prefix removed them all (stale/shared index,
+        # or over-fetch still missed the prefix). Fall through to keyword under the
+        # same filter so eval / remounted workspaces still resolve on-disk sources.
+        index_meta["prefix_empty_after_filter"] = True
 
     # Empty/stale index: keyword filesystem scan (no rebuild), plus lag hint.
     index_meta["index_lag"] = True
@@ -445,8 +504,14 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
         "Vector index empty or lagging; search used keyword fallback. "
         "Rebuild via sync_sources_index / worker upload path — not on query."
     )
-    hits = _search_sources_keyword(sources, workspace_root=workspace_root, query=query, limit=limit)
-    return {
+    hits, filter_meta = _search_sources_keyword(
+        sources,
+        workspace_root=workspace_root,
+        query=query,
+        limit=limit,
+        path_prefix=path_prefix,
+    )
+    payload = {
         "query": query,
         "hits": hits,
         "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
@@ -454,6 +519,7 @@ async def search_sources(query: str, limit: int = 10, **_kwargs: Any) -> dict[st
         "index": index_meta,
         "hint": index_meta["hint"],
     }
+    return _attach_filter_meta(payload, filter_meta)
 
 
 async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwargs: Any) -> dict[str, Any]:

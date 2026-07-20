@@ -97,6 +97,10 @@
           "properties": {
             "name": { "type": "string" },
             "result_matches": { "type": "string" },
+            "retrieval": {
+              "type": "string",
+              "enum": ["vector", "keyword", "hybrid", "none"]
+            },
             "forbidden_names": {
               "type": "array",
               "items": { "type": "string" },
@@ -107,6 +111,17 @@
               "additionalProperties": { "type": "integer", "minimum": 0 },
               "description": "Per-tool max call counts in tool_timeline (e.g. search_sources: 3)"
             }
+          }
+        },
+        "retrieval": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["vector", "keyword", "hybrid", "none"]
+            },
+            "filters_path_prefix": { "type": "string" },
+            "min_hit_count": { "type": "integer", "minimum": 0 }
           }
         },
         "session": {

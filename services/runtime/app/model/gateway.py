@@ -240,12 +240,29 @@ class StubModelProvider:
             yield ModelResponse(text="计划已更新", output_tokens=8)
             return
 
+        if "search_sources" in tool_names and _wants_path_prefix_section(user_text) and not has_tool_result:
+            yield _tool_call(
+                "search_sources",
+                {"query": "张白鹿", "path_prefix": "writing"},
+            )
+            return
+
+        if has_tool_result and last_tool == "search_sources" and _wants_path_prefix_section(user_text):
+            reply = "writing.14 在 sources/writing 下命中张白鹿专节 [cite:liangjian]"
+            for chunk in _chunk_text(reply):
+                yield chunk
+            yield ModelResponse(text=reply, output_tokens=14)
+            return
+
         if "search_sources" in tool_names and _wants_hybrid_character_recall(user_text) and not has_tool_result:
             yield _tool_call("search_sources", {"query": "张白鹿"})
             return
 
         if has_tool_result and last_tool == "search_sources" and _wants_hybrid_character_recall(user_text):
-            yield ModelResponse(text="writing.11 命中张白鹿专节", output_tokens=10)
+            reply = "writing.11 命中张白鹿专节"
+            for chunk in _chunk_text(reply):
+                yield chunk
+            yield ModelResponse(text=reply, output_tokens=10)
             return
 
         if "search_sources" in tool_names and _wants_vector_index(user_text) and not has_tool_result:
@@ -254,6 +271,8 @@ class StubModelProvider:
 
         if has_tool_result and last_tool == "search_sources" and _wants_vector_index(user_text):
             reply = "writing.07 召回 phase2-unique-term 自 sources/new-chunk.md"
+            for chunk in _chunk_text(reply):
+                yield chunk
             yield ModelResponse(text=reply, output_tokens=16)
             return
 
@@ -496,6 +515,10 @@ def _wants_vector_index(text: str) -> bool:
 
 def _wants_hybrid_character_recall(text: str) -> bool:
     return "writing.11" in text.lower()
+
+
+def _wants_path_prefix_section(text: str) -> bool:
+    return "writing.14" in text.lower()
 
 
 def _assistant_requested_verify_delegate(messages: list[dict]) -> bool:

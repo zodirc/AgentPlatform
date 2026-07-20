@@ -23,6 +23,8 @@
 | Skills 层（[`22`](22-skills-layer.md)） | ⏸ 近期末必做；开闸条件见文 §8 |
 | 写作质量（[`23`](23-writing-quality.md)） | ✅ WQ0–WQ4 已落地：style 卡 / export lint / polish·outline / golden+rubric；禁默认 judge/强制 RAG |
 | 写作质量执行（[`24`](24-writing-quality-execution.md)） | ✅ WQ0–WQ4 全部落地 |
+| 证据 RAG / 文档检索（[`27`](27-rag-evidence-and-doc-search.md)） | 📋 设计稿：线 A 取证 + 线 B filter/ACL；**契约闸 ≠ 效果闸**（§8.1） |
+| 证据 RAG 执行（[`28`](28-rag-evidence-execution.md)） | 🔧 RE0–RE3+RE1 已落地；`make turn-effect-bench` / `make retrieval-bench` |
 
 ## 设计稿对照（文档 → 代码）
 
@@ -59,6 +61,10 @@
 16. **[22-skills-layer.md](22-skills-layer.md)** — **Skills 层去留与执行方案**：速率 / 场景需要 / 成熟做法；**近期末必做、默认不预注入**
 17. **[23-writing-quality.md](23-writing-quality.md)** — **写作质量与文风**：场景切片 W1–W7；style 卡 / RAG / cache；禁默认裁判链
 18. **[24-writing-quality-execution.md](24-writing-quality-execution.md)** — **写作质量执行方案**：WQ0–WQ4 票级拆分（**全部已落地**；源自 23）
+19. **[25-context-compaction-walkthrough.md](25-context-compaction-walkthrough.md)** — **上下文压缩完整过程模拟**：budget → microcompact → collapse → snip → autocompact
+20. **[26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md)** — **从个人 Agent 到对口经历**：学什么、怎么讲、经历从哪来（投递拟合）
+21. **[27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md)** — **证据 RAG 与文档检索**：写作取证 vs 企业文档搜索；**§8.1 效果验证三层**
+22. **[28-rag-evidence-execution.md](28-rag-evidence-execution.md)** — **证据 RAG 执行**：RE0→RE3→RE2→条件 RE1；效果向票须过 A/B
 
 ## 完整目录
 
@@ -88,6 +94,10 @@
 | [22-skills-layer.md](22-skills-layer.md) | **Skills 层**：去留判断 + 开闸后薄实现（目录渐进披露）；近期末必做 |
 | [23-writing-quality.md](23-writing-quality.md) | **写作质量**：规范/去AI味/排版；文风卡优先；RAG 与 prompt cache 各归其位 |
 | [24-writing-quality-execution.md](24-writing-quality-execution.md) | **写作质量执行**：WQ0–WQ4 票级拆分（**全部已落地**） |
+| [25-context-compaction-walkthrough.md](25-context-compaction-walkthrough.md) | **上下文压缩完整过程模拟**（教学演练） |
+| [26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md) | **从个人 Agent 到对口经历**（投递拟合） |
+| [27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md) | **证据 RAG 与文档检索**：线 A/B；**效果验证三层**（§8.1） |
+| [28-rag-evidence-execution.md](28-rag-evidence-execution.md) | **证据 RAG 执行**：RE0/RE3 已落地；RE2 stub+清单；条件 RE1 |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 

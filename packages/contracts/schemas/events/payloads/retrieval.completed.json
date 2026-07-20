@@ -17,6 +17,15 @@
       "additionalProperties": true
     },
     "summary": { "type": "string", "maxLength": 512 },
+    "filters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "path_prefix": { "type": "string" },
+        "applied": { "type": "boolean" },
+        "error": { "type": "string" }
+      }
+    },
     "hits": {
       "type": "array",
       "maxItems": 10,

@@ -346,6 +346,10 @@ def apply_tool_result_budget(result: ToolResult, budget: int) -> ToolResult:
 → 调模型
 ```
 
+> **实现顺序以代码为准**：`ContextEngine._build_envelope` 当前为  
+> `budget → microcompact → collapse → snip → autocompact`。  
+> 逐步教学模拟见 [`25-context-compaction-walkthrough.md`](25-context-compaction-walkthrough.md)。
+
 原则：
 
 - 先处理最危险的大块内容

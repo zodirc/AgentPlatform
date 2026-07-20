@@ -10,23 +10,28 @@ Schema：`packages/contracts/eval/golden_turn.schema.json`
 |------|------|------|
 | `golden/shared/` | 15 | 管道、取消、幂等、HA、stall、outbox worker |
 | `golden/agent/` | 9 | agent 场景（含 approval / deny / delegate） |
-| `golden/writing/` | 9 | writing 场景 |
+| `golden/writing/` | 14 | writing 场景（含 `writing.14` path_prefix） |
 | `golden/interview/` | 1 | interview stub |
 | `golden/live/` | 2 | 需 `MODEL_API_KEY`（nightly CI） |
+| `retrieval/` | — | 离线 A/B 题集 + corpus（docs/28 RE0/RE3） |
 
-**默认 stub 集：31 条**（排除 live / recorded / stall / ha / queue 标签）  
-**YAML 合计：37 条**
+**默认 stub 集：随 writing.14 增加**（排除 live / recorded / stall / ha / queue 标签）
 
 ## 运行
 
 ```bash
 make smoke              # L0
-make eval-all           # 31 条 stub golden
+make eval-all           # stub golden
 make eval-retrieval     # retrieval profile（writing.07）
+make retrieval-bench    # 离线检索 A/B（效果闸层 1）
+make turn-effect-bench  # 层 1 + writing.14/12/13（本地栈需 MODEL_MODE=stub）
+make eval-path-prefix   # isolated writing.14 golden
 make eval-queue         # queue + worker（shared.16）
 make eval-live          # live golden（需 MODEL_API_KEY）
 python3 scripts/eval_run.py --phase 2
 ```
+
+效果闸手工清单：[`retrieval/EFFECT_CHECKLIST.md`](retrieval/EFFECT_CHECKLIST.md)。
 
 ## CI 分层
 

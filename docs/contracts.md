@@ -398,6 +398,7 @@ Phase 1 最小集：`12` §5.1（管道）。
 - `update_plan` 归类为低风险元操作：可更新受管计划投影或 TODO 展示，但不直接修改工作区文件、执行命令或访问外网；在当前协议中仍归入 `read` 类处理
 - Phase 1b 时 `search_codebase` 允许以 `grep` + 小索引退化实现，但对外工具名不变
 - Phase 1b 时 `search_sources` 允许以 workspace 文档库关键词检索或轻量索引退化实现，但对外工具名不变
+- `search_sources` 可选参数 `path_prefix`（RE0 冻结）：相对路径，可省略 `sources/` 前缀；禁止 `..` / 绝对路径；非法时返回空 hits + `hint`；合法时命中限制在该前缀下（见 `docs/27` / `docs/28`）
 
 ## 11. 文件布局
 

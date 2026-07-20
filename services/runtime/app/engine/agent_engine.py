@@ -638,6 +638,9 @@ class AgentEngine:
                 index_info = result.get("index")
                 if isinstance(index_info, dict):
                     retrieval_payload["index"] = index_info
+                filters_info = result.get("filters")
+                if isinstance(filters_info, dict):
+                    retrieval_payload["filters"] = filters_info
                 await self._write_event(
                     event_type="retrieval.completed",
                     payload=retrieval_payload,

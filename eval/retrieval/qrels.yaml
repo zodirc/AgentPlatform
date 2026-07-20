@@ -1,0 +1,176 @@
+# Offline retrieval qrels (docs/28 RE0 / RAG hit gate)
+#
+# Each case:
+#   id: stable id
+#   query: search string
+#   expect_paths: at least one must appear in top-k (workspace-relative under sources/)
+#   expect_section: optional substring of section_title
+#   path_prefix: optional B-side filter (RE3)
+#   noise_paths: paths that should disappear under path_prefix (B)
+#   expect_empty: true → B must return no hits (illegal prefix etc.)
+
+cases:
+  # --- HR ---
+  - id: hr_leave_policy
+    query: "annual leave days"
+    expect_paths:
+      - sources/hr/leave-policy.md
+    expect_section: "Leave entitlement"
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/writing/liangjian-notes.md
+      - sources/writing/yuefei-notes.md
+
+  - id: hr_expense_reimbursable
+    query: "reimbursable items receipts"
+    expect_paths:
+      - sources/hr/expense-policy.md
+    expect_section: "Reimbursable items"
+    path_prefix: hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/writing/zengguofan-notes.md
+      - sources/writing/liangjian-notes.md
+
+  - id: hr_remote_work_days
+    query: "two remote work days"
+    expect_paths:
+      - sources/hr/remote-work.md
+    expect_section: "Eligibility"
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/writing/scene-chuanyun.md
+
+  - id: hr_onboarding_probation
+    query: "probation review day 90"
+    expect_paths:
+      - sources/hr/onboarding.md
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/employment-ip.md
+
+  - id: hr_prefix_blocks_legal
+    query: "confidential"
+    expect_paths:
+      - sources/hr/leave-policy.md
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/legal/employment-ip.md
+
+  # --- Legal ---
+  - id: legal_nda_confidential
+    query: "customer lists"
+    expect_paths:
+      - sources/legal/nda.md
+    expect_section: "Confidential Information"
+    path_prefix: legal
+    noise_paths:
+      - sources/hr/leave-policy.md
+      - sources/hr/remote-work.md
+      - sources/writing/liangjian-notes.md
+
+  - id: legal_employment_ip_source_code
+    query: "source code assigned to the Company"
+    expect_paths:
+      - sources/legal/employment-ip.md
+    expect_section: "Work product"
+    path_prefix: sources/legal
+    noise_paths:
+      - sources/hr/expense-policy.md
+      - sources/writing/zengguofan-notes.md
+
+  - id: legal_prefix_blocks_hr_remote
+    query: "customer lists"
+    expect_paths:
+      - sources/legal/nda.md
+    path_prefix: sources/legal
+    noise_paths:
+      - sources/hr/remote-work.md
+
+  # --- Writing ---
+  - id: writing_zhang_bailu
+    query: "张白鹿"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+      - sources/writing/scene-chuanyun.md
+    expect_section: "张白鹿"
+    path_prefix: sources/writing
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/hr/leave-policy.md
+
+  - id: writing_detail_scene
+    query: "喜欢正面硬刚，也重视情报"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+    path_prefix: writing
+    noise_paths:
+      - sources/hr/leave-policy.md
+      - sources/legal/nda.md
+
+  - id: writing_yuefei_jingzhong
+    query: "精忠报国"
+    expect_paths:
+      - sources/writing/yuefei-notes.md
+    expect_section: "精忠报国"
+    path_prefix: sources/writing
+    noise_paths:
+      - sources/hr/onboarding.md
+      - sources/legal/nda.md
+
+  - id: writing_zeng_xiangjun
+    query: "扎硬寨、打死仗"
+    expect_paths:
+      - sources/writing/zengguofan-notes.md
+    path_prefix: writing
+    noise_paths:
+      - sources/hr/expense-policy.md
+      - sources/legal/nda.md
+
+  - id: writing_chuanyun_night_raid
+    query: "穿云山夜袭"
+    expect_paths:
+      - sources/writing/scene-chuanyun.md
+    expect_section: "穿云山夜袭"
+    path_prefix: sources/writing
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/hr/remote-work.md
+
+  - id: writing_prefix_blocks_legal_zhang_noise
+    query: "张白鹿"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+    path_prefix: sources/writing
+    noise_paths:
+      - sources/legal/nda.md
+
+  - id: writing_liyunlong_section
+    query: "李云龙是主角"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+    expect_section: "李云龙"
+    path_prefix: writing
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/hr/onboarding.md
+
+  # --- Contract / baseline ---
+  - id: illegal_prefix_empty
+    query: "annual leave"
+    expect_paths: []
+    path_prefix: "../etc"
+    expect_empty: true
+
+  - id: cross_corpus_no_filter
+    query: "annual leave"
+    expect_paths:
+      - sources/hr/leave-policy.md
+
+  - id: baseline_yuefei_no_filter
+    query: "郾城大捷"
+    expect_paths:
+      - sources/writing/yuefei-notes.md

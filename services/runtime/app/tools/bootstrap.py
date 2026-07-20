@@ -127,6 +127,8 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Hybrid search over workspace sources/ (BM25 + vector). "
                 "Prefer read_file when the source path is known. "
+                "Optional path_prefix narrows to a subdirectory under sources/ "
+                "(e.g. 'hr' or 'sources/hr'); rejects '..' / absolute paths. "
                 "Avoid repeating the same query; use at most a few searches per topic."
             ),
             parameters={
@@ -134,6 +136,13 @@ def build_registry() -> ToolRegistry:
                 "properties": {
                     "query": {"type": "string"},
                     "limit": {"type": "integer", "default": 10},
+                    "path_prefix": {
+                        "type": "string",
+                        "description": (
+                            "Optional directory under sources/ to restrict search. "
+                            "Relative path; 'hr' means sources/hr. No '..' or absolute paths."
+                        ),
+                    },
                 },
                 "required": ["query"],
             },
