@@ -318,8 +318,18 @@ def extract_cards_block(prompt: str) -> str:
         # Hint-only / empty pin: hash the trailing Writing cards hint if present.
         hint = "\n\n## Writing cards\n"
         hidx = prompt.find(hint)
-        return prompt[hidx:] if hidx >= 0 else ""
-    return prompt[idx:]
+        if hidx < 0:
+            return ""
+        start = hidx + 2  # skip leading newlines for consistency
+        block = prompt[start:]
+    else:
+        block = prompt[idx:]
+    # Stop before work-index / work-surface / other post-card appendices (docs/24).
+    for stop in ("\n## Work index\n", "\n## Work surface\n"):
+        sidx = block.find(stop)
+        if sidx >= 0:
+            block = block[:sidx]
+    return block.rstrip()
 
 
 def parse_style_card_sections(body: str) -> dict[str, str]:
@@ -533,6 +543,12 @@ def prepare_writing_system_prompt(
         )
     if work_index:
         extras.append(work_index)
+    if getattr(settings, "writing_token_economy_enabled", True):
+        from app.writing.focus import build_work_surface_block
+
+        surface = build_work_surface_block(message, workspace_root=workspace_root)
+        if surface:
+            extras.append(surface)
 
     if extras:
         prompt = f"{base_prompt.rstrip()}\n\n" + "\n\n".join(extras) + "\n"

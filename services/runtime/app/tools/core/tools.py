@@ -35,12 +35,80 @@ def _assert_not_seed_corpus(rel_path: str) -> None:
 
 
 async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
+    """Read a workspace file.
+
+    For writing monofile manuscripts (docs/24): default returns one chapter block
+    when ``section_id`` is set; without it returns a section index unless
+    ``full=true`` / full-book intent.
+    """
     target = _resolve_path(path)
     if not target.exists():
         return {"error": f"File not found: {path}"}
     if not target.is_file():
         return {"error": f"Not a file: {path}"}
     content = target.read_text(encoding="utf-8", errors="replace")
+
+    from app.writing.focus import wants_full_manuscript_read
+    from app.writing.manuscript import (
+        clip_text,
+        extract_section,
+        is_manuscript_rel,
+        list_section_ids,
+    )
+
+    section_id = str(_kwargs.get("section_id") or "").strip()
+    full_flag = str(_kwargs.get("full", "")).lower() in {"1", "true", "yes"}
+    economy = bool(getattr(settings, "writing_token_economy_enabled", True))
+
+    if economy and is_manuscript_rel(path) and "<!-- section:" in content:
+        sections = list_section_ids(content)
+        if wants_full_manuscript_read(full_flag=full_flag):
+            clipped, was = clip_text(content, 48_000)
+            return {
+                "path": path,
+                "content": clipped,
+                "full_manuscript": True,
+                "clipped": was,
+                "sections": sections,
+                "writing_section_extract": False,
+            }
+        if section_id:
+            body = extract_section(content, section_id)
+            if body is None:
+                return {
+                    "path": path,
+                    "error": f"section not found: {section_id}",
+                    "sections": sections,
+                    "hint": "Use a section_id from `sections`, or omit it to list chapters",
+                }
+            max_chars = int(getattr(settings, "writing_focus_max_chars", 12_000) or 12_000)
+            clipped, was = clip_text(body, max_chars)
+            return {
+                "path": path,
+                "section_id": section_id,
+                "content": clipped,
+                "clipped": was,
+                "sections": sections,
+                "writing_section_extract": True,
+                "summary": f"Chapter `{section_id}` from {path}"
+                + (" (clipped with visible omission)" if was else ""),
+            }
+        # Index-only default — avoid dumping the whole book into context.
+        listing = ", ".join(sections[:40]) if sections else "(no section markers)"
+        return {
+            "path": path,
+            "content": (
+                f"Manuscript index for `{path}` (not full text).\n"
+                f"Sections: {listing}\n"
+                "Re-call read_file with section_id=\"chN\" to load one chapter. "
+                "Set full=true only for whole-book review."
+            ),
+            "sections": sections,
+            "truncated_to_index": True,
+            "writing_section_extract": True,
+            "hint": "Pass section_id to read one chapter; full=true for entire file",
+        }
+
     if len(content) > 32_000:
         content = content[:32_000] + "\n...[truncated]"
     return {"path": path, "content": content}

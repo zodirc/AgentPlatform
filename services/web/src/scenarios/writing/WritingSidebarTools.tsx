@@ -31,8 +31,8 @@ export function WritingSidebarTools({ onOpenSources, onOpenRagDebug }: Props) {
         </Button>
       </div>
       <p className="mt-2 text-[10px] text-slate-600">
-        资料库支持粘贴输入或上传。书稿默认追加到 manuscript.md（草稿在
-        .agent/work/drafts/manuscript.md）；也可选用一章一文件。
+        书稿默认追加到 manuscript.md。长会话可用 /compact
+        压缩对话（不丢书）；写下一章不必整本重读。大纲一轮、分章推进更省用量。
       </p>
     </Card>
   );

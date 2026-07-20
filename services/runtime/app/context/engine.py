@@ -639,12 +639,23 @@ def _apply_tool_result_budget(
             if preserve_short and _is_pinned_short_tool_result(text):
                 new_blocks.append(block)
                 continue
+            if _preserve_writing_section_extract(text):
+                # docs/24: chapter extracts stay intact; do not budget-truncate mid-chapter.
+                new_blocks.append(block)
+                continue
             if len(text) > char_budget:
                 text = text[:char_budget] + "\n...[budget_truncated]"
                 truncated += 1
             new_blocks.append({**block, "content": text})
         out.append({**msg, "content": new_blocks})
     return out, truncated
+
+
+def _preserve_writing_section_extract(text: str) -> bool:
+    return (
+        '"writing_section_extract": true' in text
+        or '"writing_section_extract":true' in text
+    )
 
 
 def _message_has_tool_use(msg: dict[str, Any]) -> bool:

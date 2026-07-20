@@ -192,12 +192,9 @@ drafts: .agent/work/drafts/ch3.md
 
 ## 7. 与 Token 优化的关系（配套，非本方案本体）
 
-本方案是 **前置条件**，不是 token 方案本身。推荐配套（可另开票）：
+[`23`](23-writing-work-model.md) 已解决「换会话拆书」；**token 输入窗策略见 [`24-writing-token-economy`](24-writing-token-economy.md)**（按章作业面、带书签 `/compact`；不伤速率与成稿效果）。
 
-1. **Writing bootstrap**：§3.3 作品索引（已含）
-2. **按章工作提示**：system 写明「续写只 `read_file` 当前章 + 必要时上一章尾，禁止无必要通读全书」
-3. **同会话 `/compact`**：保留书签（当前章 id + outline TOC），替换 transcript
-4. **阶段拆分**：大纲优化 / 分章写作分会话或分 compact 点——在作品树稳定后才安全
+本方案是 **前置条件**，不是 token 方案本身。配套票：WT1–WT4（见 24 §7）。
 
 ---
 

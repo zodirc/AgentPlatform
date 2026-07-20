@@ -87,3 +87,46 @@ def extract_section(doc: str, section_id: str) -> str | None:
 
 def list_section_ids(doc: str) -> list[str]:
     return [m.group("id") for m in _SECTION_RE.finditer(doc)]
+
+
+def clip_text(text: str, max_chars: int) -> tuple[str, bool]:
+    """Return (text, clipped). Visible omission marker when clipped."""
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text, False
+    if max_chars < 120:
+        return text[:max_chars] + "…[clipped]", True
+    head = max(40, (max_chars - 80) // 2)
+    tail = max(40, max_chars - head - 80)
+    omitted = len(text) - head - tail
+    return (
+        f"{text[:head]}\n\n…[omitted {omitted} chars; edit in segments]…\n\n{text[-tail:]}",
+        True,
+    )
+
+
+def is_manuscript_rel(path: str) -> bool:
+    rel = path.strip().lstrip("/").replace("\\", "/")
+    name = Path(rel).name
+    confirmed = Path(confirmed_manuscript_rel()).name
+    return name == confirmed or rel in {confirmed_manuscript_rel(), draft_manuscript_rel()}
+
+
+def previous_section_id(section_ids: list[str], focus: str) -> str | None:
+    if focus not in section_ids:
+        # focus may be new chapter — prev is last existing
+        return section_ids[-1] if section_ids else None
+    idx = section_ids.index(focus)
+    return section_ids[idx - 1] if idx > 0 else None
+
+
+def load_manuscript_doc(workspace_root: Path | None = None) -> tuple[str, str]:
+    """Prefer draft manuscript, then confirmed. Returns (text, rel_path)."""
+    root = Path(workspace_root or settings.workspace_root).resolve()
+    for rel in (draft_manuscript_rel(), confirmed_manuscript_rel()):
+        path = root / rel
+        if path.is_file():
+            try:
+                return path.read_text(encoding="utf-8", errors="replace"), rel
+            except OSError:
+                continue
+    return "", draft_manuscript_rel()

@@ -352,3 +352,27 @@ def test_estimate_window_breakdown_splits_categories() -> None:
     assert breakdown["user"] > 0
     assert breakdown["tool_results"] > 0
     assert breakdown["assistant"] > 0
+
+
+def test_tool_result_budget_preserves_writing_section_extract() -> None:
+    from app.context.engine import _apply_tool_result_budget
+
+    payload = json.dumps(
+        {
+            "writing_section_extract": True,
+            "content": "X" * 9000,
+            "path": "manuscript.md",
+            "section_id": "ch1",
+        },
+        ensure_ascii=False,
+    )
+    messages = [
+        {
+            "role": "tool",
+            "content": [{"type": "tool_result", "tool_use_id": "t1", "content": payload}],
+        }
+    ]
+    out, truncated = _apply_tool_result_budget(messages, 4000)
+    assert truncated == 0
+    assert "X" * 100 in out[0]["content"][0]["content"]
+    assert "budget_truncated" not in out[0]["content"][0]["content"]

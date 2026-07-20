@@ -103,3 +103,8 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
   (or extract the chapter you need) — do not hunt under `.agent/sessions/`.
 - Prefer reading only the current chapter (and previous chapter tail if needed);
   do not reload the entire manuscript into context without cause.
+- Token economy (docs/24): work surface auto-loads focus + prev tail. For manuscripts,
+  `read_file` lists chapters by default — pass `section_id` for one chapter; `full=true`
+  only for whole-book review. Long chapters → multiple actions / segmented patches.
+- `/compact` keeps a writing bookmark (focus chapter + manuscript paths); new session
+  or compact both keep the book on disk.

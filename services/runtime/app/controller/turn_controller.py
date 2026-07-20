@@ -722,6 +722,8 @@ async def _run_turn(
                 session_id=session_id,
                 turn_id=turn_id,
                 gateway=gateway,
+                scenario_id=scenario_id,
+                last_user_message=message,
             )
             async with pool.acquire() as conn:
                 async with conn.transaction():

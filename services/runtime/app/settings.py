@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # monofile (default): chapters append into manuscript.md; sections = one file per chapter.
     writing_manuscript_mode: str = "monofile"
     writing_manuscript_path: str = "manuscript.md"
+    # docs/24 token economy: work surface + read_file chapter extract (no LLM).
+    writing_work_surface_max_chars: int = 6000
+    writing_focus_max_chars: int = 12000
+    writing_prev_tail_chars: int = 2000
+    writing_token_economy_enabled: bool = True
 
     index_via_worker: bool = True
     # IX0: Turn-external incremental projection of workspace/sources (docs/15).

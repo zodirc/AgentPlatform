@@ -14,12 +14,23 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="read_file",
             description=(
-                "Read a file from the workspace. Use when the path is known "
-                "(including @path refs or hot_files). Prefer this over search_sources for known paths."
+                "Read a file from the workspace. For manuscript.md / draft manuscript, "
+                "pass section_id to load one chapter (default lists chapters only); "
+                "set full=true only for whole-book review."
             ),
             parameters={
                 "type": "object",
-                "properties": {"path": {"type": "string"}},
+                "properties": {
+                    "path": {"type": "string"},
+                    "section_id": {
+                        "type": "string",
+                        "description": "Chapter id inside monofile manuscript (e.g. ch3)",
+                    },
+                    "full": {
+                        "type": "boolean",
+                        "description": "Read entire manuscript (review only)",
+                    },
+                },
                 "required": ["path"],
             },
             handler=core.read_file,

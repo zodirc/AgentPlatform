@@ -52,6 +52,11 @@ def session_context_message(summary: dict) -> dict:
     if pointer_files:
         pointers = "\n".join(f"- {p}" for p in pointer_files[:12])
         text = f"{text}\n\n[hot_files]\n{pointers}"
+    bookmark = summary.get("writing_bookmark")
+    if isinstance(bookmark, dict) and bookmark:
+        from app.writing.focus import format_writing_bookmark
+
+        text = f"{text}\n\n{format_writing_bookmark(bookmark)}"
     return {
         "role": "user",
         "content": [{"type": "text", "text": text}],

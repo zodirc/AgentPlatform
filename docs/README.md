@@ -1,12 +1,12 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–23 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块**；变更只改对应正文。
 
 验证：`make smoke` · `make eval-all` · `make eval-retrieval` · `make retrieval-bench-prod` · `make runtime-test`
 
 ---
 
-## 模块目录（01–23）
+## 模块目录（01–24）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -33,6 +33,7 @@ Agent Platform 架构与实施规范。**01–23 连续编号，一文一模块*
 | 21 | [agent-system-qa](21-agent-system-qa.md) | 原理问答 Q0–Q20 |
 | 22 | [highlights-vs-legacy](22-highlights-vs-legacy.md) | 相对旧项目全景 |
 | 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
+| 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -44,7 +45,7 @@ Agent Platform 架构与实施规范。**01–23 连续编号，一文一模块*
 |------|----|
 | 部署 / 默认栈 | [03](03-docker-runtime.md) |
 | 速率约束 | [13](13-rate-redlines.md) |
-| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品模型） |
+| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） |
 | RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md) |
 | 会话归属 | [16](16-user-session-history.md) |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md) |
@@ -63,6 +64,7 @@ Agent Platform 架构与实施规范。**01–23 连续编号，一文一模块*
 | 会话 U0–U2 | ✅ | 16 |
 | Harness 核心 | 🔧 | 12 |
 | 写作作品模型 WW0–WW4 | ✅ | 23 · ADR-020 |
+| 写作 Token 经济 WT0–WT4 | ✅ | 24 |
 | Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 |
 
 ---

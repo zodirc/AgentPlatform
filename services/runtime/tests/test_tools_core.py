@@ -34,6 +34,28 @@ async def test_glob_lists_workspace_files(workspace: Path) -> None:
     assert result["matches"] == ["notes.md"]
 
 
+
+@pytest.mark.asyncio
+async def test_read_file_manuscript_index_and_section(workspace: Path) -> None:
+    await core.draft_section("ch1", "chapter-one-body", turn_id=uuid4())
+    await core.draft_section("ch2", "chapter-two-body", turn_id=uuid4())
+    path = ".agent/work/drafts/manuscript.md"
+
+    index = await core.read_file(path)
+    assert index.get("truncated_to_index") is True
+    assert "ch1" in index.get("sections", [])
+    assert "chapter-one-body" not in index.get("content", "")
+
+    ch2 = await core.read_file(path, section_id="ch2")
+    assert ch2.get("writing_section_extract") is True
+    assert "chapter-two-body" in ch2["content"]
+    assert ch2.get("section_id") == "ch2"
+
+    full = await core.read_file(path, full=True)
+    assert full.get("full_manuscript") is True
+    assert "chapter-one-body" in full["content"]
+
+
 @pytest.mark.asyncio
 async def test_draft_section_writes_monofile_manuscript(workspace: Path) -> None:
     turn_id = uuid4()
