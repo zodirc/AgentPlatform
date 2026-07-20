@@ -247,6 +247,10 @@ async def sync_sources_index_safe(*, path: str | None = None) -> dict:
         _mark_index_building(path)
     try:
         result = await sync_sources_index()
+        if str(result.get("status") or "") == "error":
+            err = str(result.get("error") or "sources index sync failed")
+            _mark_index_error(err, path=path)
+            return {"status": "error", "error": err, **result}
         _mark_index_ready(result, path=path)
         return {**result, "status": "ready"}
     except Exception as exc:

@@ -1,153 +1,243 @@
-# 29 — 资料库索引与交互速率（思路）
+# 29 — 资料库索引：速率、RAG 质量与成熟 Agent 对齐
 
-> **性质**：产品/工程思路对齐，指导后续实现；**本文不强制立刻改代码**。  
-> **问题**：写作模块测 RAG 时，是否必须上传？本地 `workspace/sources` 何时进向量库？如何在**不影响 Agent 交互速率**的前提下，对齐成熟 Agent 的知识库习惯？  
-> **约束继承**：[17](17-execution-plan.md) R1–R5（尤其「查询路径不建库」）；[06](06-tools-and-context.md) §0.1 / RAG=工具；[11](11-product-experience.md) TTFB；[27](27-rag-evidence-and-doc-search.md) / [28](28-rag-evidence-execution.md) 效果闸。  
-> **现状刺点**（2026-07）：手改/拷贝进 `workspace/sources` **不会**自动进 pgvector；上传会触发异步 sync；`search_sources` 在 ANN 空/过期时 **keyword-fallback**（可答但不是 hybrid）。
-
----
-
-## 0. 先分清三件事
-
-| 概念 | 是什么 | 不是什么 |
-|------|--------|----------|
-| **语料目录** | `workspace/sources/**`（写作知识库约定根） | 不等于「已可向量召回」 |
-| **索引** | pgvector（首选）或 JSON 文件库中的切块+向量+倒排 | 不是聊天记录；不是每次 Turn 的副产品 |
-| **上传** | 把文件**写入**语料目录的一种 UI/API | 不是测 RAG 效果的唯一合法入口 |
-
-成熟 Agent 的心智模型：
-
-> **知识库 = 约定目录的持续内容；索引 = 对该目录的后台投影；对话 = 只读投影（失败再降级）。**
+> **性质**：产品 + 后端思路对齐；指导实现优先级；**本文不强制立刻改代码**。  
+> **三条硬标尺**（一切方案必须同时满足）：  
+> 1. **不影响 Agent 交互速率与交互逻辑**  
+> 2. **优化 RAG 质量**（召回准、噪声低、可核对）  
+> 3. **成熟 Agent 做法**：交互面与后端面一起想，参考业界常见形态  
+> **生产真相档（实际使用）**：`MODEL_MODE=live` + `RETRIEVAL_BACKEND=pgvector` + `EMBEDDING_BACKEND=sentence_transformers`（本地烘焙模型）。**效果验证必须以该档为裁判**；stub / hash / lite 只做契约与隔离，不能代替真效果。  
+> **约束继承**：[17](17-execution-plan.md) R1–R5 / A9；[06](06-tools-and-context.md) §0.1；[11](11-product-experience.md)；[23](23-writing-quality.md)；[27](27-rag-evidence-and-doc-search.md) / [28](28-rag-evidence-execution.md)；[03](03-docker-runtime.md)。  
+> **票级落地**：[30-sources-index-execution.md](30-sources-index-execution.md)（IX0–IX5）。  
+> **现状刺点**（2026-07）：手改 `workspace/sources` 不进 pgvector；对话常 `keyword-fallback`；本机 `make retrieval-bench` 强制 **json+hash**，**不能**代表生产 ST+pgvector 效果。
 
 ---
 
-## 1. 成熟产品通常怎么做
+## 0. 三标尺怎么用
 
-### 1.1 会不会「本地文档全都建一次索引」？
-
-**会，但有边界：**
-
-1. **范围**：当前 Project / Workspace / 勾选文件夹（对应我们的 `sources/`），外加 ignore（超大文件、二进制、密钥）。  
-2. **时机**：打开工程或首次启用知识库时做**初始全量**；之后只做**增量**（mtime / content hash）。  
-3. **查询路径**：搜索**不重建**索引——与本仓库 A9 / docs/17 一致。
-
-### 1.2 两种常见产品形态
-
-| 形态 | 典型产品 | 用户感知 |
+| 标尺 | 过关定义 | 一票否决 |
 |------|----------|----------|
-| **本地/挂载工作区 Agent** | IDE Agent、自托管写作台 | 「目录里有文件就能用」；后台自己索引 |
-| **云端知识库** | ChatGPT Projects、企业 RAG | 「上传/连接器导入」；上传=导入语料，不是检索仪式 |
+| **① 速率 + 交互逻辑** | Turn 热路径无建库；TTFB 不因索引抖动；模型仍自主决定是否搜；polish 0 搜不变 | 查询内 sync；强制每轮检索；等 embedding 堵 SSE |
+| **② RAG 质量** | 在**生产真相档**下索引 current、hybrid 可核对；prod-bench 或工作台记录 | 用 stub/hash 绿宣称生产 RAG 已优化；长期 keyword-fallback 冒充向量 RAG |
+| **③ 成熟形态** | 目录=真相；索引=后台投影；上传=写入之一；**迈向按租户/owner 的私有库**（见 §6.1） | 「测 RAG 必须上传」；无 ignore 整盘索引；把「永远全局共享一份 sources」当成终局 |
 
-本项目写作栈更接近前者：**Docker 挂载的 `workspace` 就是知识库**；上传是导入的一种方式。
-
-### 1.3 验证分层（不要混）
-
-| 层 | 验什么 | 怎么验 |
-|----|--------|--------|
-| **契约** | 工具协议、filter、兜底 | golden / 单测 / `make eval-path-prefix` |
-| **检索效果** | Recall、噪声、prefix | `make retrieval-bench` + 固定 `eval/retrieval/corpus` |
-| **交互体感** | 自然问句下会不会取证、cite 能否核对 | Writing 工作台；**索引须 current** |
-| **上传冒烟** | 写入→pending→ready→可搜 | 1～2 条产品路径用例即可 |
-
-**测 RAG 算法/召回 ≠ 必须点上传。**  
-上传用例验的是「导入管道」，不是「自然交互下 hybrid 是否健康」。
+冲突裁决：**① → ② → ③**。宁可短期 keyword 保对话，也不为质量阻塞交互；质量用后台投影补。
 
 ---
 
-## 2. 速率红线（推荐方案的硬约束）
-
-从「尽量不影响 Agent 交互速率」出发：
-
-| 允许 | 禁止 |
-|------|------|
-| 启动后**异步**扫 `sources/`，脏文件入队 | 用户每发一条消息前全量 rebuild |
-| 上传/保存后 outbox worker 增量 sync | 在 `search_sources` 热路径里 `store.sync()` |
-| 索引未就绪时 **keyword-fallback**（已有） | 为等 embedding 阻塞 SSE / 首 token |
-| 可选：慢轮询 mtime（30–60s）或显式「同步资料库」 | 查询时发现 empty 就同步（尾延迟炸弹） |
-| 交叉编码器默认关；池与超时有预算 | Turn 内无界重排 / 多路强制检索 |
-
-**一句话：投影永远在对话外；对话永远可降级回答。**
-
----
-
-## 3. 推荐目标架构（P0 → P1）
+## 1. 交互面 vs 后端面
 
 ```text
-workspace/sources/**  ──(变更)──►  Index planner（脏路径）
-                                      │
-                                      ▼
-                              outbox / 后台任务
-                                      │
-                          ┌───────────┴───────────┐
-                          ▼                       ▼
-                     pgvector 切块+向量      （失败）JSON 文件库
-                          │
-用户自然语言 Turn ──► search_sources 只读 ──► 命中则 hybrid
-                          │
-                          └─ ANN 空/过期 ──► keyword-fallback（不阻塞）
+┌── 交互面（不得为索引改逻辑）──────────────────────────────────────┐
+│ 自然语言 → 工具策略 → 模型自主 search_sources（只读/可降级）       │
+│ 成稿可搜 / polish 0 搜 / R1–R5 搜次数                              │
+└────────────────────────────────────────────────────────────────────┘
+                              ▲ 只读
+┌── 后端 Index plane（Turn 外）──────────────────────────────────────┐
+│ sources/** → dirty → worker → 切块+本地 ST → pgvector（失败→JSON） │
+│ 状态 pending/building/ready + path_current                         │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
-### P0（最小、保速率）
+---
 
-1. **保持** `search_sources` 只查不建。  
-2. **启动后异步增量 sync**（或 `make sync-sources` / 内部命令）：对比磁盘 vs 索引 mtime，只处理脏文件。  
-3. **保留 keyword-fallback**，并在 `retrieval.completed` / UI 可观测 `index_lag`（已有字段可复用）。  
-4. 手测清单：语料在 `workspace/sources` → 触发一次 sync → 自然提问 → 期望 `hybrid` 而非长期 fallback。
+## 2. 标尺 ①：速率与交互逻辑
 
-### P1（体验对齐 IDE Agent）
+| 已定逻辑 | 含义 |
+|----------|------|
+| RAG=工具，非预注入 | 「讲讲岳飞」由模型决定搜不搜 |
+| polish/outline 0 搜 | 索引再好也不能让改稿开始搜 |
+| search 永不请求内 sync（A9） | IX* 必须守住 |
+| R1–R5 | 质量≠多搜 |
 
-1. 对 `sources/` 轻量 watch / 定时 mtime（低频）。  
-2. Web「同步资料库」按钮（同一 worker，给手改 md 用）。  
-3. 工作台展示「索引中 / 已同步 N 文件」（信息性，不挡发送）。
-
-### 明确不做
-
-- 把「每次测 RAG 必须上传」写成产品规范。  
-- 查询路径同步。  
-- 无 ignore 的整盘索引。
+| 允许（后端） | 禁止（热路径） |
+|--------------|----------------|
+| 启动异步增量投影 | 每条消息前 rebuild |
+| 上传/保存入队 | search 内 sync |
+| 低频 watch / 一键同步 | empty 就同步 |
+| keyword-fallback + 标 lag | 堵 SSE 等向量 |
 
 ---
 
-## 4. 手测写作 RAG 的合理做法
+## 3. 标尺 ②：RAG 质量（在 ① 内）
 
-1. 固定小语料放在 `workspace/sources/{writing,hr,legal}/`（可与 `eval/retrieval/corpus` 同源思想，不必同一路径）。  
-2. **测前**确保索引 current（P0 异步 sync 或一键同步——**不是**每次上传）。  
-3. 用自然话提问（不提工具名、不提 path_prefix）。  
-4. 看：是否检索、是否 hybrid、细节能否对上 md、polish 是否 0 搜。  
-5. 另开 1 条上传冒烟（可选），与效果闸分开记录。
+**后端杠杆（优先）：** 索引与磁盘一致、增量 hash、section 切块、path_prefix、two-level、lexical rerank、ignore。  
+**交互杠杆（已有）：** 搜次数上限、低分改 read、cite 纪律。  
 
-离线：`make retrieval-bench`（层 1）不依赖工作台，也不依赖上传。
+**禁止：** 模型编得像 = RAG 过关；hash-bench 绿 = 生产召回过关。
 
 ---
 
-## 5. 与现有文档的关系
+## 4. 标尺 ③：成熟前后端
+
+| 维度 | 常见做法 | 我们 |
+|------|----------|------|
+| 语料 | 工作区目录 | `workspace/sources/**` |
+| 首次/之后 | 后台全量再增量 | 启动扫 + 上传事件 + 可选 watch |
+| 聊天 | 只读；未就绪可降级 | hybrid / keyword-fallback |
+| 上传 | = ingest | 已有；非唯一入口 |
+| 评测 | CI 快测 + 夜间/发版真测 | 契约轨 + 效果轨（§5） |
+| **租户** | 每用户/每组织私有知识库 + 检索带身份 | 今日共享 workspace；**终局按 owner/tenant 隔离**（§6.1） |
+
+---
+
+## 5. 生产真相档与验证矩阵（效果重要 ∧ 不拖交互）
+
+日常使用 = **live + pgvector + 本地 ST**。验证必须**分轨**。
+
+### 5.1 契约轨 vs 效果轨
+
+```text
+契约轨（快、可砸）                      效果轨（真、Turn 外）
+MODEL_MODE=stub                         日常：live
+runtime-lite / keyword 可接受             ST + pgvector + hybrid
+isolated → restore 回真相档               sync / prod-bench 后台
+证明：协议没写坏                          证明：生产召回与体感真好
+```
+
+| 轨 | 代表 | 碰日常 live？ | 证明 |
+|----|------|---------------|------|
+| 契约 | `eval-path-prefix` / `eval-all` isolated | 临时换，**必须 restore** | 工具/走廊 |
+| 离线近似 | 当前 `retrieval-bench`（json+hash） | 否 | 题集/filter 逻辑；**≠ ST 质量** |
+| **离线生产** | 规划 `retrieval-bench-prod`（容器内 ST+pgvector 跑同一 qrels） | 不改 MODEL_MODE；不占 Turn | **真** hybrid |
+| **体感生产** | Writing 自然问句（index ready 后） | 就是日常栈 | live + hybrid 可核对 |
+| 同题 | turn-effect / 手工 | 效果结论须含 **live+current** 至少一轮 | 体感 |
+
+### 5.2 效果重要且不拖速率
+
+| 做法 | 速率 | 效果 |
+|------|------|------|
+| isolated 契约 + restore | 结束后仍 live+ST | 不替代效果 |
+| sync / prod-bench 在 Turn 外 | 零 TTFB 税 | 真 ST+pgvector |
+| 自然问句仅在 index ready 后下效果结论 | 不边聊边全量 embed | 真 live RAG |
+| embed 限流、CE 默认关 | 对话优先 | 质量渐进 |
+| fallback + 标 lag | 不堵 SSE | 标明非 hybrid |
+
+对标：IDE 后台 indexer；CI 快测；发版/夜间语义评测——**从不在击键路径全库 embedding**。
+
+### 5.3 每日推荐操作序
+
+1. 栈保持真相档：live + pgvector + ST。  
+2. 资料进盘 → **后台 sync**（IX0/一键；上传也可，但非必须）。  
+3. **效果**：自然问 → 时间线 **hybrid** → 细节对 md。  
+4. **契约**（改协议时）跑 isolated；确认 restore 后仍 live。  
+5. **合并检索质量 PR**：契约绿 **且**（prod-bench 绿 **或** 工作台 hybrid 核对）——缺一不可。
+
+### 5.4 缺口
+
+| 缺口 | 补法 |
+|------|------|
+| 手改 sources 无投影 | IX0/IX1 |
+| bench 仅 hash | IX4 `retrieval-bench-prod` |
+| eval 盖日常镜像 | default/lite 分 tag + restore |
+| live 无可用 key | Web 供应商；ready 认 DB profile |
+
+---
+
+## 6. 目标方案
+
+```text
+sources/** 变更 ──► dirty → worker ──► pgvector + 本地 ST     （Turn 外）
+用户话 → Agent 逻辑不变 → search_sources 只读 ─┬─ hybrid
+                                              └─ keyword-fallback + 可观测
+```
+
+**P0：** 守 A9；启动异步增量 + `make sync-sources`；lag 可观测；手测 sync 后须 hybrid。  
+**P1：** Web 同步按钮；可选 watch；状态徽章不挡发；**IX4 prod-bench**。  
+**P2（成熟必做，可排期）：** 多租户私有库 Index plane（§6.1）+ 与 [28](28-rag-evidence-execution.md) **RE4 ACL** 对齐。
+
+**索引范围（分层，勿混淆）：**
+
+| 阶段 | 范围 | 说明 |
+|------|------|------|
+| **今 / IX0** | **workspace / 部署级** | 挂载的 `sources/**` 一份投影；同机会话共享。**不是** session，也还不是 per-user |
+| **成熟终局** | **按 `owner_user_id` / tenant（私有库）** | 业界主流：每人/每组织自己的资料与索引；检索必须带身份。**仍不是** per-session |
+| **明确不做** | per-session 索引 | 知识库生命周期 ≫ 聊天；按会话建库是反模式 |
+
+**不做：** 查询 sync；强制每轮搜；测 RAG 必须上传；用 hash-bench 代替生产效果；把「全局共享一份库」写成产品终局。
+
+---
+
+### 6.1 多租户私有库：趋势、必做性、与速率/质量
+
+**判断：** 多租户（或至少 **按登录用户隔离的私有知识库**）是成熟 Agent / 内部知识助手的主流形态，也是本项目线 B（企业文档搜索）对齐岗位叙事的硬门槛——与 [27](27-rag-evidence-and-doc-search.md) G4、[28](28-rag-evidence-execution.md) RE4 同一方向。  
+**自用单机可以先共享 workspace，但不能把共享当成架构终点。**
+
+#### 成熟产品常见切法
+
+```text
+用户身份 (owner / tenant)
+    │
+    ├─ 语料根：sources/{owner}/…  或  DB 对象带 owner_id
+    ├─ 索引：source_chunks 带 owner_id（或分 schema / 分 collection）
+    ├─ 写入：上传/同步只进自己的语料 → 只投影自己的 dirty
+    └─ 读取：search_sources 隐式注入 owner（或 ACL 谓词）→ 不可越权命中
+              Turn 仍：模型自主决定是否搜；search 仍不 sync
+```
+
+| 做法 | 要 | 不要 |
+|------|----|------|
+| 隔离键 | `owner_user_id` / `tenant_id` | `session_id` |
+| 默认策略 | 私有默认 deny 他人；共享库显式标记 | 默认可搜全站 |
+| 交互 | 用户无感（登录即自己的库） | 让用户选「索引会话 id」 |
+| 速率 | 过滤在索引侧/命中后谓词，毫秒级 | 为 ACL 再调一轮模型 |
+| 演进 | IX0 的 path+mtime 逻辑保留，**加 owner 维度** | IX0 写死「全局一张表无 owner 列」无法迁移 |
+
+#### 与三标尺
+
+| 标尺 | 多租户时怎么守 |
+|------|----------------|
+| **①** | 身份从 session→owner 解析一次；search 热路径只多一个 `WHERE owner_id=?`（或等价）；**不**改工具走廊、不建库 |
+| **②** | 每人索引 current；互不污染召回；效果闸加「用户 A 不可命中 B 的 path」 |
+| **③** | 对齐 ChatGPT Projects / 企业 KB：私有默认 + 可选共享；上传=写入自己的库 |
+
+#### 排期关系（避免大爆炸）
+
+```text
+IX0/IX1 投影闭环（可先全局 workspace）
+    │  设计时预留 owner 列 / 路径约定（向前兼容）
+    ▼
+IX5 / RE4：owner 隔离写入 + 检索谓词（默认开关：单租户=allow-all 兼容今日）
+    ▼
+可选：共享资料夹、组织 tenant、审计
+```
+
+**开闸条件（与 RE4 对齐）：** 真实多用户不可互看资料；默认单租户行为与今日 CI 兼容；deny golden；热路径无 LLM-ACL。
+
+---
+
+## 7. 实现票
+
+| 票 | 内容 | ① | ② 真相档 |
+|----|------|---|----------|
+| **IX0** | 启动异步增量 + `make sync-sources` | 后台 | current → hybrid |
+| **IX1** | Web 同步 + 状态 | 无 Turn 税 | 手改可 freshen |
+| **IX2** | 可选低频 watch | 可关 | 少忘同步 |
+| **IX3** | 上传冒烟 ≠ 效果闸 | — | 管道≠召回 |
+| **IX4** | `retrieval-bench-prod`（容器 ST+pgvector） | Turn 外 | 真 Recall 门禁 |
+| **IX5** | 多租户私有库：chunks/语料带 `owner_id`；search 默认按 owner 过滤；单租户 allow-all 兼容 | 热路径仅谓词 | 隔离=质量与安全；接 RE4 |
+
+**合并门禁：** 无 Turn 内 sync；契约绿；效果须 prod-bench 或工作台 hybrid 核对；polish 0 搜；restore 后仍 live+ST。  
+**IX5 额外：** deny 越权 golden 绿；默认关/单租户时与今日行为一致。
+
+---
+
+## 8. 文档关系
 
 | 文档 | 关系 |
 |------|------|
-| [27](27-rag-evidence-and-doc-search.md) | 取证 vs 文档搜索；效果三层 |
-| [28](28-rag-evidence-execution.md) | RE0–RE5 票；path_prefix 已落地 |
-| [03](03-docker-runtime.md) | 默认 live + pgvector + ST 镜像 |
-| [17](17-execution-plan.md) A9 | 查询不建库——本文强化为产品原则 |
-| 本文 | **索引生命周期与速率**：目录投影、增量、降级、手测口径 |
+| [30](30-sources-index-execution.md) | **票级执行**：IX0–IX5、两闸、冲刺、风险 |
+| [27](27-rag-evidence-and-doc-search.md) / [28](28-rag-evidence-execution.md) | 效果三层；RE4 ACL ↔ IX5 私有库 |
+| [17](17-execution-plan.md) A9 | 查询不建库 |
+| [03](03-docker-runtime.md) | 默认 = 生产真相档 |
+| [06](06-tools-and-context.md) / [23](23-writing-quality.md) | 交互逻辑边界 |
+| [20](20-user-session-history-plan.md) | 已有 `owner_user_id` 会话归属——私有库身份应复用，勿另造 session 键 |
 
 ---
 
-## 6. 开闸后的实现票（草案，未排期）
+## 9. 结论口径
 
-| 票 | 内容 | 速率影响 |
-|----|------|----------|
-| **IX0** | 启动异步增量 sync + `make sync-sources` | 后台 only |
-| **IX1** | Web「同步资料库」+ 索引状态展示 | 无 Turn 税 |
-| **IX2** | sources mtime 低频 watch | 可关；默认保守间隔 |
-| **IX3** | 上传冒烟 golden（与效果闸分离） | CI 短路径 |
-
-合并标准：Turn 路径无新增同步；`eval-all` / `retrieval-bench` 绿；手测同学句在 sync 后走 hybrid。
-
----
-
-## 7. 结论口径
-
-- **成熟做法**：对约定知识库目录做持续索引投影；对话只读；上传只是写入手段之一。  
-- **我们缺的**：手改 workspace 时的投影闭环——不是缺「强制上传」。  
-- **保速率推荐**：查询零建库 + 启动/变更异步增量 + keyword 降级 + 可选一键同步。  
-- **验 RAG**：固定语料 + 索引 current + 自然交互；上传另测产品管道。
+1. **使用档 = 效果裁判档**：live + pgvector + 本地 ST。  
+2. **验证分轨**：契约可 stub/lite；**效果必须**在真相档（prod-bench 或工作台 hybrid）。  
+3. **速率**：建库与真评测都在 Turn 外；对话可降级、须标 lag。  
+4. **范围演进**：今 = workspace 级投影（IX0）；**成熟必做 = 按 owner/tenant 私有库（IX5 / RE4）**；永不按 session 建索引。  
+5. **当下缺口**：投影闭环（IX0/IX1）+ 生产离线闸（IX4）；IX0 实现须**预留 owner 维度**，避免把全局共享焊死。

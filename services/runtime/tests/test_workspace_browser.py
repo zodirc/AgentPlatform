@@ -71,9 +71,14 @@ async def test_upload_source_file_writes_pending_index(workspace, monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_upload_source_file_can_sync_inline(workspace, monkeypatch) -> None:
+    from app.retrieval.embedder import reset_embedder_cache
     from app.settings import settings
 
     monkeypatch.setattr(settings, "data_dir", str(workspace / "data"))
+    monkeypatch.setattr(settings, "retrieval_backend", "json")
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    reset_embedder_cache()
     result = await upload_source_file(
         filename="my-ref-sync.md",
         content="# Title\nSome reference content.\n",
@@ -89,9 +94,14 @@ async def test_upload_source_file_can_sync_inline(workspace, monkeypatch) -> Non
 
 @pytest.mark.asyncio
 async def test_sync_sources_index_safe_marks_ready(workspace, monkeypatch) -> None:
+    from app.retrieval.embedder import reset_embedder_cache
     from app.settings import settings
 
     monkeypatch.setattr(settings, "data_dir", str(workspace / "data"))
+    monkeypatch.setattr(settings, "retrieval_backend", "json")
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    reset_embedder_cache()
     await upload_source_file(filename="bg.md", content="background index\n")
     result = await sync_sources_index_safe(path="sources/bg.md")
     assert result["status"] == "ready"

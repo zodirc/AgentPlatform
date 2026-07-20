@@ -63,9 +63,15 @@ class Settings(BaseSettings):
     writing_export_profile: str = "novel-zh"  # novel-zh | essay | none
 
     index_via_worker: bool = True
+    # IX0: Turn-external incremental projection of workspace/sources (docs/29–30).
+    sources_startup_sync_enabled: bool = True
+    sources_startup_sync_delay_seconds: float = 3.0
+    # Optional default owner for future multi-tenant rows (empty → NULL / shared).
+    sources_index_owner_user_id: str = ""
     embedding_backend: str = "hash"  # hash | sentence_transformers
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_model_dir: str = "/data/models"
+    # Hash default 256; all-MiniLM-L6-v2 is 384 — compose sets 384 with ST.
     embedding_dimensions: int = 256
     app_env: str = "production"
     log_level: str = "INFO"

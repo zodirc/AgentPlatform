@@ -316,16 +316,10 @@ async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -
 
 
 async def sync_sources_index() -> dict[str, Any]:
-    from pathlib import Path
+    """Incremental sources projection (mtime dirty-set). Prefer scheduler for single-flight."""
+    from app.retrieval.index_scheduler import run_sources_index_sync
 
-    from app.retrieval.store import get_sources_store
-
-    sources = _resolve_path("sources")
-    workspace_root = Path(settings.workspace_root).resolve()
-    if not sources.exists():
-        return {"indexed_files": 0, "chunks": 0, "added": 0, "updated": 0}
-    store = get_sources_store()
-    return store.sync(sources, workspace_root=workspace_root)
+    return await run_sources_index_sync(reason="api")
 
 
 def _format_source_hits(hits: list[Any], *, excerpt_chars: int) -> list[dict[str, Any]]:

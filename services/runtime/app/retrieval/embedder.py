@@ -90,12 +90,30 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+def effective_embedding_dimensions() -> int:
+    """Resolve vector width for stores.
+
+    Hash default is 256. ``all-MiniLM-L6-v2`` outputs 384 — if compose/env left the
+    hash default while using sentence_transformers, coerce so pgvector matches ST.
+    """
+    dims = int(settings.embedding_dimensions)
+    backend = (settings.embedding_backend or "").lower()
+    model = (settings.embedding_model or "").lower()
+    if backend in {"sentence_transformers", "minilm", "neural"}:
+        if dims == 256 and ("minilm-l6" in model or "all-minilm-l6-v2" in model):
+            logger.info(
+                "embedding dimensions coerced 256→384 for sentence_transformers MiniLM"
+            )
+            return 384
+    return dims
+
+
 def _cache_key() -> tuple[str, str, str, int]:
     return (
         settings.embedding_backend.lower(),
         settings.embedding_model,
         settings.embedding_model_dir or "",
-        settings.embedding_dimensions,
+        effective_embedding_dimensions(),
     )
 
 
@@ -112,7 +130,7 @@ def _build_embedder() -> Embedder:
                 "EMBEDDING_BACKEND=sentence_transformers requires the retrieval extra "
                 "(pip install '.[retrieval]' or use Dockerfile.retrieval)"
             ) from exc
-    return HashEmbedder(dimensions=settings.embedding_dimensions)
+    return HashEmbedder(dimensions=effective_embedding_dimensions())
 
 
 def reset_embedder_cache() -> None:

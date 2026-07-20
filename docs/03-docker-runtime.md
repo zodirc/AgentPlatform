@@ -252,6 +252,13 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 `index.status=pending`，runtime 后台任务再把状态推进为 `building`，最终进入 `ready` 或
 `error`。因此上传成功不等于索引已经可检索，API 也不得等待 embedding 构建完成。
 
+**Turn 外投影（docs/30 IX0）：** runtime 启动后默认延迟数秒异步增量同步 `workspace/sources`
+（`SOURCES_STARTUP_SYNC_ENABLED`，不挡 `/health/live`）。手改 md 后也可：
+
+```bash
+make sync-sources
+```
+
 运维侧可轮询
 `GET /api/v1/admin/workspace/sources/index-status?path=sources/<文件名>`：
 
@@ -260,7 +267,10 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - `error`：查看 runtime 日志中的 `sources index sync after upload failed`；原文件仍保留，
   修复 embedding 配置或模型可用性后重新触发索引。
 
-默认 compose 已注入 `EMBEDDING_BACKEND=sentence_transformers` 等。仅改宿主机 `.env` 而未重建/重启 runtime 时，容器内仍可能是旧值。轻量降级显式设 `EMBEDDING_BACKEND=hash` 并改用 `runtime-lite.yml` 或 `Dockerfile`。
+默认 compose 已注入 `EMBEDDING_BACKEND=sentence_transformers`、`EMBEDDING_DIMENSIONS=384` 等。
+仅改宿主机 `.env` 而未重建/重启 runtime 时，容器内仍可能是旧值。轻量降级显式设
+`EMBEDDING_BACKEND=hash` 并改用 `runtime-lite.yml` 或 `Dockerfile`。若从 hash(256) 切到 ST(384)，
+需 drop `source_chunks`/`source_files`（或整库重建）后再 `make sync-sources`。
 
 ### 5.3 api 镜像
 

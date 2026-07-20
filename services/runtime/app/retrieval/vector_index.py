@@ -88,15 +88,24 @@ class SourceVectorIndex:
     def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]:
         self.load()
         if not sources_dir.exists():
-            return {"indexed_files": 0, "chunks": 0, "added": 0, "updated": 0}
+            return {
+                "indexed_files": 0,
+                "chunks": 0,
+                "added": 0,
+                "updated": 0,
+                "skipped": 0,
+                "removed": 0,
+            }
 
         force_reindex = self._needs_full_reindex()
         embedder = get_embedder()
+        owner_raw = (settings.sources_index_owner_user_id or "").strip() or None
         files_meta: dict[str, Any] = dict(self._data.get("files", {}))
         chunks: list[dict[str, Any]] = list(self._data.get("chunks", []))
         seen_paths: set[str] = set()
         added = 0
         updated = 0
+        skipped = 0
 
         for fp in sorted(sources_dir.rglob("*")):
             if not fp.is_file() or not should_index_source(fp):
@@ -106,9 +115,13 @@ class SourceVectorIndex:
             mtime = fp.stat().st_mtime
             prev = files_meta.get(rel)
             if not force_reindex and prev and prev.get("mtime") == mtime:
+                skipped += 1
                 continue
             text = fp.read_text(encoding="utf-8", errors="replace")
             new_chunks = chunk_source_text(fp, rel, text, embedder=embedder)
+            if owner_raw:
+                for chunk in new_chunks:
+                    chunk["owner_user_id"] = owner_raw
             chunks = [c for c in chunks if c.get("path") != rel]
             chunks.extend(new_chunks)
             titles = sorted(
@@ -126,6 +139,7 @@ class SourceVectorIndex:
                 "chunk_count": len(new_chunks),
                 "summary": summary,
                 "doc_vector": embedder.embed(summary),
+                "owner_user_id": owner_raw,
             }
             if prev:
                 updated += 1
@@ -151,6 +165,7 @@ class SourceVectorIndex:
             "chunks": len(chunks),
             "added": added,
             "updated": updated,
+            "skipped": skipped,
             "removed": len(removed),
             "reindexed": force_reindex,
         }

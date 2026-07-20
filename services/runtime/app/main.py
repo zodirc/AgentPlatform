@@ -324,11 +324,18 @@ async def lifespan(app):
     # Load embedder once at startup so sources index/search do not pay first-use cost.
     await asyncio.to_thread(warmup_embedder)
     from app.controller.stall_watchdog import stall_watchdog_loop
+    from app.retrieval.index_scheduler import (
+        cancel_startup_sources_sync,
+        schedule_startup_sources_sync,
+    )
 
     watchdog = asyncio.create_task(stall_watchdog_loop())
+    # IX0: Turn-external incremental projection; must not block /health/live.
+    schedule_startup_sources_sync()
     try:
         yield
     finally:
+        await cancel_startup_sources_sync()
         watchdog.cancel()
         try:
             await watchdog

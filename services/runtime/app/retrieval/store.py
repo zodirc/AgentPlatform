@@ -53,11 +53,12 @@ def get_sources_store(*, data_dir: str | None = None) -> SourceRetrievalStore:
     backend = (settings.retrieval_backend or "pgvector").lower().strip()
     if backend in {"pgvector", "postgres", "ann"}:
         try:
+            from app.retrieval.embedder import effective_embedding_dimensions
             from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
 
             store = PgvectorSourceRetrievalStore(
                 settings.database_url,
-                dimensions=settings.embedding_dimensions,
+                dimensions=effective_embedding_dimensions(),
             )
             # Probe extension early so misconfig fails loud at first use.
             store.ensure_schema()

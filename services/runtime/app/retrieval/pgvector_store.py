@@ -31,7 +31,12 @@ class PgvectorSourceRetrievalStore:
 
     def __init__(self, database_url: str, *, dimensions: int | None = None) -> None:
         self._database_url = database_url
-        self._dimensions = int(dimensions or settings.embedding_dimensions)
+        if dimensions is not None:
+            self._dimensions = int(dimensions)
+        else:
+            from app.retrieval.embedder import effective_embedding_dimensions
+
+            self._dimensions = effective_embedding_dimensions()
         self._ready = False
         self._chunk_cache: list[dict[str, Any]] = []
         self._chunk_by_id: dict[str, dict[str, Any]] = {}
@@ -52,13 +57,42 @@ class PgvectorSourceRetrievalStore:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+                # If an older table was created at a different width (e.g. hash 256 → ST 384),
+                # embeddings are incompatible — drop and recreate (IX0 / docs/03).
+                cur.execute(
+                    """
+                    SELECT format_type(a.atttypid, a.atttypmod)
+                    FROM pg_attribute a
+                    JOIN pg_class c ON a.attrelid = c.oid
+                    JOIN pg_namespace n ON c.relnamespace = n.oid
+                    WHERE n.nspname = 'public'
+                      AND c.relname = 'source_chunks'
+                      AND a.attname = 'embedding'
+                      AND NOT a.attisdropped
+                    """
+                )
+                row = cur.fetchone()
+                if row and isinstance(row[0], str) and row[0].startswith("vector("):
+                    try:
+                        existing = int(row[0].removeprefix("vector(").rstrip(")"))
+                    except ValueError:
+                        existing = -1
+                    if existing != dim:
+                        logger.warning(
+                            "source_chunks embedding dim %s != configured %s; recreating index tables",
+                            existing,
+                            dim,
+                        )
+                        cur.execute("DROP TABLE IF EXISTS source_chunks CASCADE")
+                        cur.execute("DROP TABLE IF EXISTS source_files CASCADE")
                 cur.execute(
                     """
                     CREATE TABLE IF NOT EXISTS source_files (
                         path TEXT PRIMARY KEY,
                         mtime DOUBLE PRECISION NOT NULL,
                         chunk_count INT NOT NULL DEFAULT 0,
-                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        owner_user_id UUID NULL
                     )
                     """
                 )
@@ -72,8 +106,22 @@ class PgvectorSourceRetrievalStore:
                         citation_id TEXT NOT NULL,
                         line_start INT,
                         line_end INT,
-                        embedding vector({dim}) NOT NULL
+                        embedding vector({dim}) NOT NULL,
+                        owner_user_id UUID NULL
                     )
+                    """
+                )
+                # IX0: nullable owner prep for IX5 ACL (existing DBs created before this column).
+                cur.execute(
+                    """
+                    ALTER TABLE source_files
+                    ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE source_chunks
+                    ADD COLUMN IF NOT EXISTS owner_user_id UUID NULL
                     """
                 )
                 cur.execute(
@@ -91,6 +139,12 @@ class PgvectorSourceRetrievalStore:
                 )
                 cur.execute(
                     """
+                    CREATE INDEX IF NOT EXISTS source_chunks_owner_idx
+                    ON source_chunks (owner_user_id)
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS source_index_meta (
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
@@ -99,6 +153,10 @@ class PgvectorSourceRetrievalStore:
                 )
             conn.commit()
         self._ready = True
+
+    def _default_owner_user_id(self) -> str | None:
+        raw = (settings.sources_index_owner_user_id or "").strip()
+        return raw or None
 
     def load(self) -> None:
         """Warm schema + optional lightweight chunk cache for BM25 fusion."""
@@ -137,12 +195,16 @@ class PgvectorSourceRetrievalStore:
                 "chunks": 0,
                 "added": 0,
                 "updated": 0,
+                "skipped": 0,
+                "removed": 0,
                 "backend": self.backend,
             }
 
         embedder = get_embedder()
+        owner_id = self._default_owner_user_id()
         added = 0
         updated = 0
+        skipped = 0
         seen_paths: set[str] = set()
         total_chunks = 0
 
@@ -164,6 +226,7 @@ class PgvectorSourceRetrievalStore:
                         )
                         row = cur.fetchone()
                         total_chunks += int(row[0]) if row else 0
+                        skipped += 1
                         continue
 
                     text = fp.read_text(encoding="utf-8", errors="replace")
@@ -171,14 +234,17 @@ class PgvectorSourceRetrievalStore:
                     cur.execute("DELETE FROM source_chunks WHERE path = %s", (rel,))
                     cur.execute(
                         """
-                        INSERT INTO source_files (path, mtime, chunk_count, updated_at)
-                        VALUES (%s, %s, %s, NOW())
+                        INSERT INTO source_files (
+                            path, mtime, chunk_count, updated_at, owner_user_id
+                        )
+                        VALUES (%s, %s, %s, NOW(), %s)
                         ON CONFLICT (path) DO UPDATE SET
                             mtime = EXCLUDED.mtime,
                             chunk_count = EXCLUDED.chunk_count,
-                            updated_at = NOW()
+                            updated_at = NOW(),
+                            owner_user_id = EXCLUDED.owner_user_id
                         """,
-                        (rel, mtime, len(new_chunks)),
+                        (rel, mtime, len(new_chunks), owner_id),
                     )
                     for chunk in new_chunks:
                         vec = chunk.get("vector")
@@ -192,9 +258,9 @@ class PgvectorSourceRetrievalStore:
                             """
                             INSERT INTO source_chunks (
                                 chunk_id, path, section_title, text, citation_id,
-                                line_start, line_end, embedding
+                                line_start, line_end, embedding, owner_user_id
                             ) VALUES (
-                                %s, %s, %s, %s, %s, %s, %s, %s::vector
+                                %s, %s, %s, %s, %s, %s, %s, %s::vector, %s
                             )
                             ON CONFLICT (chunk_id) DO UPDATE SET
                                 path = EXCLUDED.path,
@@ -203,7 +269,8 @@ class PgvectorSourceRetrievalStore:
                                 citation_id = EXCLUDED.citation_id,
                                 line_start = EXCLUDED.line_start,
                                 line_end = EXCLUDED.line_end,
-                                embedding = EXCLUDED.embedding
+                                embedding = EXCLUDED.embedding,
+                                owner_user_id = EXCLUDED.owner_user_id
                             """,
                             (
                                 str(chunk.get("chunk_id", "")),
@@ -214,6 +281,7 @@ class PgvectorSourceRetrievalStore:
                                 chunk.get("line_start"),
                                 chunk.get("line_end"),
                                 _vector_literal([float(x) for x in vec]),
+                                owner_id,
                             ),
                         )
                     total_chunks += len(new_chunks)
@@ -255,6 +323,7 @@ class PgvectorSourceRetrievalStore:
             "chunks": total_chunks,
             "added": added,
             "updated": updated,
+            "skipped": skipped,
             "removed": len(removed),
             "backend": self.backend,
             "ann": "hnsw",
