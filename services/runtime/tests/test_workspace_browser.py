@@ -10,6 +10,23 @@ from app.services.workspace_browser import (
 )
 
 
+
+@pytest.mark.asyncio
+async def test_read_workspace_file_returns_full_manuscript(workspace) -> None:
+    """Web preview must not get agent read_file index stub (docs/24)."""
+    from app.services.workspace_browser import read_workspace_file
+    from app.tools.core import tools as core
+
+    await core.draft_section("ch1", "full-chapter-body-for-ui", turn_id="t-ui")
+    path = ".agent/work/drafts/manuscript.md"
+    agent_view = await core.read_file(path)
+    assert agent_view.get("truncated_to_index") is True
+
+    ui_view = await read_workspace_file(path)
+    assert "full-chapter-body-for-ui" in ui_view["content"]
+    assert ui_view.get("truncated_to_index") is not True
+
+
 def test_safe_source_filename_rejects_traversal() -> None:
     with pytest.raises(ValueError):
         safe_source_filename("../evil.md")

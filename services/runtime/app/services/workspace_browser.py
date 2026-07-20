@@ -45,7 +45,8 @@ async def list_workspace_entries(path: str = ".") -> dict:
 
 
 async def read_workspace_file(path: str) -> dict:
-    return await read_file(path)
+    """Human/UI file preview — always full text, never agent token-economy index mode."""
+    return await read_file(path, full=True)
 
 
 async def write_workspace_file(*, path: str, content: str) -> dict:
