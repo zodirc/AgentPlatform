@@ -19,7 +19,7 @@
 1. **禁止**在容器内通过 `CONFIG_PATH` 指向巨型 YAML 作为主配置源。
 2. 每个服务（`api`、`runtime`）维护独立的 `app/settings.py`，基于 **Pydantic v2 `BaseSettings`** 读取环境变量，启动时校验。
 3. 配置入口唯一：**`.env` → docker compose `environment` → 各服务 Settings**。
-4. `.env.example` 必须列出全部变量及注释；`.env` 不入库；敏感项（key、password）禁止在代码库中设生产默认值。
+4. `.env.example` 只列 **Bootstrap 起栈变量**；高级旋钮以代码默认值为准，文档见 [`03` 附录 A](../03-docker-runtime.md)。`.env` 不入库；敏感项禁止在代码库中设生产默认值。
 5. Feature flag 命名：`FEATURE_<NAME>_ENABLED`，必须关联 ADR 或 issue，新能力默认 `false` 且不影响 Phase 0 启动。
 6. `api` 与 `runtime` 可共享连接类变量（如 `DATABASE_URL`），但**禁止**共享 Python 配置对象或跨服务 import Settings。
 7. **运营配置**（模型供应商、API key 等高频变更项）存 PostgreSQL，经 Web 管理面热生效，**不**扩写 `.env` 为多份密钥堆叠；见 [ADR-019](019-model-provider-runtime-config.md)。`.env` 中 `MODEL_*` 仅作 Bootstrap **fallback**。

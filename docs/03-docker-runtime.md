@@ -127,13 +127,7 @@ AUTH_ENABLED=true
 ADMIN_PASSWORD=admin
 INTERNAL_SERVICE_TOKEN=change-me-internal
 
-# --- 模型 runtime 消费（Bootstrap fallback，见 ADR-019）---
-MODEL_PROVIDER=anthropic
-MODEL_API_KEY=
-ANTHROPIC_API_KEY=
-OPENAI_API_KEY=
-
-# --- 工作区（runtime 沙箱根，见 docs/03-docker-runtime.md §8）---
+# --- 工作区 ---
 WORKSPACE_ROOT=/workspace
 WORKSPACE_HOST_PATH=./workspace
 
@@ -141,6 +135,8 @@ WORKSPACE_HOST_PATH=./workspace
 LOG_LEVEL=INFO
 APP_ENV=production
 ```
+
+模型 API key / base URL：**主路径是 Web「设置 → 模型」**（ADR-019）。仅当 DB 无激活 profile 时，才可选填 env `MODEL_API_KEY` 作 fallback（见仓库 `.env.example` 注释段）。
 
 ### 3.2 按服务注入
 
@@ -177,7 +173,7 @@ Phase 0 可仅配置 env `MODEL_*`；Phase 1 起 Web 管理面为主路径，env
 - 每个 Python 服务在容器内与本地开发环境都必须使用独立 `venv` 管理依赖，这是**必须要求**
 - Docker 镜像构建应基于服务自己的 `venv` 或等价隔离依赖产物，禁止依赖宿主机 Python 包环境
 - 本地调试允许直接激活 `venv` 运行 `api` 或 `runtime`，但该路径只是开发加速手段，不能替代 Docker 验收路径
-- `.env.example` 必须包含全部变量及注释，`.env` 不入库
+- `.env.example` 只列 **Bootstrap 起栈变量**；高级旋钮见本文 **附录 A**（代码已有默认值）。`.env` 不入库
 - `api` 与 `runtime` 共享连接信息，但不共享 Python 内部配置对象
 
 ## 4. Compose 文件策略
@@ -215,16 +211,15 @@ docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml u
 | `web` | `agent-web` | 内部 `:80` | Vite 静态产物（nginx） |
 | `gateway` | `agent-gateway` | `${HTTP_PORT}` / `${HOST_PORT}` | Caddy 反代 `/api` + `/` |
 
-**陌生机默认（主 compose）**：`MODEL_MODE=live`、`RETRIEVAL_BACKEND=pgvector`、`RETRIEVAL_MODE=hybrid`、`EMBEDDING_BACKEND=sentence_transformers`、镜像 `Dockerfile.retrieval`。须在 `.env` 填 `MODEL_API_KEY`，或启动后在 Web 配置供应商。Compose 健康检查用 `/health/live`（允许无 key 先起栈）；`/health/ready` 表示「env key **或** DB 中任一条激活的 Web profile 可解密」。
+**陌生机默认（主 compose）**：`MODEL_MODE=live`、`RETRIEVAL_BACKEND=pgvector`、`RETRIEVAL_MODE=hybrid`、`EMBEDDING_BACKEND=sentence_transformers`、镜像 `Dockerfile.retrieval`。模型配置优先 Web「设置 → 模型」；也可用 env `MODEL_API_KEY` 作无 profile 时的 fallback。Compose 健康检查用 `/health/live`（允许无 key 先起栈）；`/health/ready` 表示「env key **或** DB 中任一条激活的 Web profile 可解密」。
 
-**runtime 关键环境变量**（完整列表见 `.env.example`）：`MODEL_MODE`、`RETRIEVAL_*`、`EMBEDDING_*`、`INDEX_VIA_WORKER`、`STALL_*`、`RUNTIME_RUNNER_ID`（HA）。
-
-**api 关键环境变量**：`WORKER_MODE`（`queue.yml` profile 下设为 `outbox`）、`RUNTIME_URL_MAP`（HA）。
+**runtime / api 环境变量**：起栈见仓库根 `.env.example`；调参 / HA / 检索细项见 **附录 A**。
 
 启动：
 
 ```bash
-cp .env.example .env   # 填 MODEL_API_KEY
+cp .env.example .env
+# 推荐：make up 后在 Web 配置模型；或可选填 MODEL_API_KEY 作 fallback
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 ```
 
@@ -345,7 +340,7 @@ Phase 0 设计上至少需要为以下对象预留位置（详见 [`07-domain-mo
 ```bash
 # 首次
 cp .env.example .env
-# 编辑 .env 填入 MODEL_API_KEY
+# 推荐：make up 后在 Web 配置模型
 
 # 启动
 docker compose -f deploy/docker-compose.yml up -d --build
@@ -486,7 +481,7 @@ services:
 实施代码时逐项勾选（**当前均已验收**，本地用 `make smoke` / `make eval*` / `make runtime-test`）：
 
 - [x] `deploy/docker-compose.yml` 可独立运行
-- [x] `.env.example` 覆盖全部变量
+- [x] `.env.example` 覆盖 Bootstrap 起栈变量（高级见附录 A）
 - [x] 每个服务有 `Dockerfile` 与 `README.md`
 - [x] PostgreSQL migration 应用 `packages/contracts/schemas/ddl/phase0.sql`
 - [x] `api` stub：`POST /api/v1/sessions` 返回 `201`
@@ -497,3 +492,64 @@ services:
 - [x] projection 刷新失败不影响 Turn 主闭环
 - [x] `make up` 与 `make down` 为薄封装
 - [x] 本地：compose up + `curl health` + 最小 turn stream + **L0 golden**（`12` §4）
+
+---
+
+## 附录 A — 高级环境变量（非起栈必需）
+
+> **默认已够用。** 下列变量在 `services/*/app/settings.py` 与 compose 中有默认值；仅排障 / CI / HA 时再覆盖。  
+> **不要**把它们重新堆回 `.env.example`（避免老项目式参数膨胀）。权威起栈模板：仓库根 `.env.example`。
+
+### A.1 模型（fallback / CI）
+
+| 变量 | 默认意图 | 何时改 |
+|------|----------|--------|
+| `MODEL_MODE` | `live` | CI / golden：`stub` |
+| `MODEL_API_KEY` / `MODEL_PROVIDER` / `MODEL_NAME` | 空或 compose 默认 | **仅** DB 无 Web profile 时 |
+| `ANTHROPIC_BASE_URL` / `OPENAI_BASE_URL` | 官方 | 自建代理（另见 egress allowlist） |
+| `MODEL_EGRESS_ENFORCE` / `MODEL_EGRESS_ALLOWLIST` | 出站白名单 | 代理域名 |
+| `CONFIG_ENCRYPTION_KEY` | 由 `APP_SECRET_KEY` 派生 | 独立轮换加密密钥 |
+
+日常换模型：**Web → 设置 → 模型**，不要改 `.env`。
+
+### A.2 检索 / embedding
+
+产品默认：`pgvector` + `hybrid` + `sentence_transformers`（`Dockerfile.retrieval`）。
+
+| 变量 | 说明 |
+|------|------|
+| `RETRIEVAL_BACKEND` / `RETRIEVAL_MODE` | 默认即可；轻量 CI 用 `runtime-lite` + `hash` |
+| `EMBEDDING_*` | 模型名 / 维度 / 目录 |
+| `SOURCES_STARTUP_SYNC_*` / `SOURCES_WATCH_*` | 启动同步与目录监视 |
+| `SEED_SOURCES_*` | 常驻种子库挂载 |
+| `RETRIEVAL_TWO_LEVEL_*` / `RETRIEVAL_RERANK_*` | 召回 / rerank 细调 |
+| `SEARCH_SOURCES_*` | 每 turn 检索预算 |
+
+### A.3 上下文压缩与配额
+
+| 变量 | 说明 |
+|------|------|
+| `CONTEXT_WINDOW_TOKENS` / `CONTEXT_OUTPUT_RESERVE_TOKENS` | 窗与输出预留 |
+| `CONTEXT_FILL_*` / `CONTEXT_HOT_ZONE_RATIO` | collapse / snip / autocompact |
+| `TURN_TOKEN_BUDGET` / `MONTHLY_TOKEN_*` | 配额与告警 |
+
+### A.4 写作（docs/23 · 24）
+
+| 变量 | 说明 |
+|------|------|
+| `WRITING_PATCH_AUTO_APPLY` | 默认跟手落盘 |
+| `WRITING_MANUSCRIPT_MODE` / `WRITING_MANUSCRIPT_PATH` | 默认 monofile + `manuscript.md` |
+| `WRITING_TOKEN_ECONOMY_*` / `WRITING_FOCUS_*` / `WRITING_PREV_TAIL_*` | 按章作业面 |
+| `WRITING_CARDS_*` / `WRITING_EXPORT_PROFILE` | 素材卡与导出 |
+| `WRITING_DRAFT_HISTORY_KEEP` | 草稿历史份数 |
+
+### A.5 工具 / 隐私 / 可观测 / HA
+
+| 变量 | 说明 |
+|------|------|
+| `RUN_COMMAND_MODE` | `shell` / `simulate` |
+| `TOOL_SCHEMA_VALIDATE` / `CITATION_VERIFY_ENABLED` | harness 校验 |
+| `PII_REDACT_*` / `SECRET_SCAN_*` | 脱敏与密钥扫描 |
+| `OTEL_*` | 默认关 |
+| `WORKER_MODE` | `queue.yml` profile |
+| `RUNTIME_URL` / `RUNTIME_URL_MAP` / `RUNTIME_RUNNER_ID` | `ha.yml` |

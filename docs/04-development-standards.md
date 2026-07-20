@@ -393,7 +393,7 @@ scope：`api` | `runtime` | `web` | `deploy` | `contracts`
 PR 合并前自检：
 
 - [ ] 是否只改了一个服务的边界内代码？
-- [ ] 新增环境变量是否已写入 `.env.example`？
+- [ ] 新增 **Bootstrap** 环境变量是否已写入 `.env.example`？高级旋钮是否只改 Settings 默认值并记入 `docs/03` 附录 A？
 - [ ] 是否有 `/health/live` 且不在 live 探针做重操作？
 - [ ] 是否有对应测试？
 - [ ] 是否引入跨服务 Python import？（应拒绝）
