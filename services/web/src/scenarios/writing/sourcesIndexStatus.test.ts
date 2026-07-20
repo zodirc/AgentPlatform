@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { sourcesIndexStatusLabel } from "./sourcesIndexStatus";
+import {
+  libraryIndexStatusLabel,
+  sourcesIndexStatusLabel,
+} from "./sourcesIndexStatus";
 
 const path = "sources/ref-a.md";
 
@@ -43,6 +46,34 @@ describe("sourcesIndexStatusLabel", () => {
       ),
     ).toEqual({
       text: `已保存 ${path} · 索引完成，可检索（3 块）`,
+      tone: "ok",
+    });
+  });
+});
+
+describe("libraryIndexStatusLabel", () => {
+  it("describes library sync in progress", () => {
+    expect(
+      libraryIndexStatusLabel({ status: "building" }, true),
+    ).toEqual({
+      text: "资料库索引同步中（不挡对话）…",
+      tone: "pending",
+    });
+  });
+
+  it("reports ready library index", () => {
+    expect(
+      libraryIndexStatusLabel(
+        {
+          status: "ready",
+          indexed_files: 5,
+          chunks: 17,
+          embedding_backend: "sentence_transformers",
+        },
+        false,
+      ),
+    ).toEqual({
+      text: "资料库索引就绪 · 5 文件 · 17 块 · sentence_transformers",
       tone: "ok",
     });
   });

@@ -143,6 +143,11 @@ def _mark_index_building(path: str | None = None) -> None:
         _index_job["result"] = None
 
 
+def mark_sources_index_building(*, path: str | None = None) -> None:
+    """Public alias for HTTP routes that queue a background sync."""
+    _mark_index_building(path)
+
+
 def _mark_index_ready(result: dict[str, Any], *, path: str | None = None) -> None:
     with _index_lock:
         _index_job["status"] = "ready"
@@ -197,6 +202,14 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
             pass
 
+    # Prefer last sync stats (covers pgvector when JSON store is empty).
+    last = job.get("result") if isinstance(job.get("result"), dict) else None
+    if last:
+        if last.get("indexed_files") is not None:
+            indexed_files = int(last.get("indexed_files") or indexed_files)
+        if last.get("chunks") is not None:
+            chunks = int(last.get("chunks") or chunks)
+
     status = str(job.get("status") or "idle")
     # Disk store is source of truth for a specific path once mtime matches.
     if path and path_indexed and path_mtime_matched:
@@ -212,7 +225,7 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
         "embedding_backend": embedding_backend or settings.embedding_backend,
         "path_indexed": path_indexed,
         "path_current": bool(path and path_indexed and path_mtime_matched),
-        "last_result": job.get("result"),
+        "last_result": last,
     }
 
 
@@ -243,8 +256,7 @@ async def sync_sources_index_safe(*, path: str | None = None) -> dict:
     """Best-effort vector index rebuild after an upload (for BackgroundTasks)."""
     from app.tools.core.tools import sync_sources_index
 
-    if path:
-        _mark_index_building(path)
+    _mark_index_building(path)
     try:
         result = await sync_sources_index()
         if str(result.get("status") or "") == "error":

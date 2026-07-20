@@ -579,6 +579,26 @@ def test_workspace_sources_index_status_proxies_runtime(
     proxy.assert_awaited_once_with(path="sources/ref-a.md")
 
 
+def test_workspace_sources_sync_queues_runtime(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
+    result = {"accepted": True, "index": {"status": "pending"}}
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.sync_sources",
+        new_callable=AsyncMock,
+        return_value=result,
+    ) as proxy:
+        response = client.post("/api/v1/admin/workspace/sources/sync")
+
+    assert response.status_code == 202
+    assert response.json()["index"]["status"] == "pending"
+    proxy.assert_awaited_once()
+
+
 def test_workspace_source_upload_returns_pending_index(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

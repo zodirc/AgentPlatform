@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { FolderOpen, X } from "lucide-react";
+import { FolderOpen, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   fetchSourcesIndexStatus,
   fetchWorkspaceEntries,
+  syncSourcesIndex,
   uploadSourceFile,
   uploadSourceText,
   type SourcesIndexStatus,
@@ -11,7 +12,10 @@ import {
 } from "../../shared/api/client";
 import { Button } from "../../components/ui/button";
 import { workspaceEntryIcon } from "../agent/workspaceFileIcon";
-import { sourcesIndexStatusLabel } from "./sourcesIndexStatus";
+import {
+  libraryIndexStatusLabel,
+  sourcesIndexStatusLabel,
+} from "./sourcesIndexStatus";
 
 function fileEntries(entries: string[]): string[] {
   return entries.filter((e) => !e.endsWith("/"));
@@ -29,6 +33,8 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   const [pasteTitle, setPasteTitle] = useState("");
   const [pasteBody, setPasteBody] = useState("");
   const [watchPath, setWatchPath] = useState<string | null>(null);
+  /** When true, poll library-wide index status (IX1 sync button). */
+  const [watchLibrary, setWatchLibrary] = useState(false);
 
   const sourcesQuery = useQuery({
     queryKey: ["workspace-sources"],
@@ -40,13 +46,14 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   });
 
   const indexQuery = useQuery({
-    queryKey: ["sources-index-status", watchPath],
-    queryFn: () => fetchSourcesIndexStatus(watchPath ?? undefined),
-    enabled: open && Boolean(watchPath),
+    queryKey: ["sources-index-status", watchPath ?? (watchLibrary ? "__library__" : null)],
+    queryFn: () =>
+      fetchSourcesIndexStatus(watchPath ?? undefined),
+    enabled: open && (Boolean(watchPath) || watchLibrary),
     refetchInterval: (query) => {
       const data = query.state.data as SourcesIndexStatus | undefined;
       if (!data) return 1000;
-      if (data.status === "building") return 1000;
+      if (data.status === "building" || data.status === "pending") return 1000;
       if (watchPath && !data.path_current && data.status !== "error")
         return 1000;
       return false;
@@ -54,14 +61,21 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   });
 
   useEffect(() => {
-    if (!watchPath) return;
+    if (!watchPath && !watchLibrary) return;
     const data = indexQuery.data;
     if (!data) return;
     if (data.status === "error") return;
-    if (data.path_current || (data.status === "ready" && data.path_indexed)) {
+    if (data.status === "ready" || data.status === "idle") {
+      setWatchLibrary(false);
       void queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
     }
-  }, [watchPath, indexQuery.data, queryClient]);
+    if (
+      watchPath &&
+      (data.path_current || (data.status === "ready" && data.path_indexed))
+    ) {
+      void queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
+    }
+  }, [watchPath, watchLibrary, indexQuery.data, queryClient]);
 
   const invalidateSources = async () => {
     await queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
@@ -70,6 +84,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
 
   const onUploadSuccess = async (result: SourceUploadResult) => {
     await invalidateSources();
+    setWatchLibrary(false);
     setWatchPath(result.path);
     await queryClient.invalidateQueries({
       queryKey: ["sources-index-status", result.path],
@@ -94,6 +109,17 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     },
   });
 
+  const syncMutation = useMutation({
+    mutationFn: syncSourcesIndex,
+    onSuccess: async () => {
+      setWatchPath(null);
+      setWatchLibrary(true);
+      await queryClient.invalidateQueries({
+        queryKey: ["sources-index-status", "__library__"],
+      });
+    },
+  });
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -106,22 +132,40 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   if (!open) return null;
 
   const files = sourcesQuery.data ?? [];
-  const busy = uploadMutation.isPending || pasteMutation.isPending;
+  const busy =
+    uploadMutation.isPending ||
+    pasteMutation.isPending ||
+    syncMutation.isPending;
   const lastErr =
-    pasteMutation.error?.message || uploadMutation.error?.message || null;
-  const polling =
+    pasteMutation.error?.message ||
+    uploadMutation.error?.message ||
+    syncMutation.error?.message ||
+    null;
+  const pathPolling =
     Boolean(watchPath) &&
     (indexQuery.isFetching ||
       indexQuery.data?.status === "building" ||
+      indexQuery.data?.status === "pending" ||
       (indexQuery.data != null &&
         !indexQuery.data.path_current &&
         indexQuery.data.status !== "error" &&
         indexQuery.data.status !== "ready"));
-  const statusLine = sourcesIndexStatusLabel(
+  const libraryPolling =
+    watchLibrary &&
+    (syncMutation.isPending ||
+      indexQuery.isFetching ||
+      indexQuery.data?.status === "building" ||
+      indexQuery.data?.status === "pending");
+  const pathStatusLine = sourcesIndexStatusLabel(
     watchPath,
     indexQuery.data,
-    polling,
+    pathPolling,
   );
+  const libraryStatusLine =
+    watchLibrary || libraryPolling
+      ? libraryIndexStatusLabel(indexQuery.data, libraryPolling)
+      : null;
+  const statusLine = pathStatusLine ?? libraryStatusLine;
 
   const submitPaste = () => {
     const content = pasteBody.trim();
@@ -146,10 +190,26 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-100">写作资料库</p>
             <p className="text-xs text-slate-500">
-              workspace/sources/ · 粘贴或上传 · 双击查看 · 供 search_sources
+              workspace/sources/ · 粘贴或上传 · 同步不挡对话 · 供 search_sources
               检索
             </p>
           </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="shrink-0 border-slate-700 text-slate-200"
+            disabled={busy || libraryPolling}
+            onClick={() => syncMutation.mutate()}
+            title="增量投影到索引（后台，不挡发送）"
+          >
+            <RefreshCw
+              className={`mr-1.5 h-3.5 w-3.5 ${libraryPolling ? "animate-spin" : ""}`}
+            />
+            {libraryPolling || syncMutation.isPending
+              ? "同步中…"
+              : "同步资料库"}
+          </Button>
           <button
             type="button"
             className="rounded-lg p-2 text-slate-400 hover:bg-slate-900 hover:text-slate-100"
@@ -194,7 +254,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                       {pasteMutation.isPending ? "保存中…" : "保存到资料库"}
                     </Button>
                     <span className="text-[10px] text-slate-600">
-                      保存后自动重建索引，完成后会提示「可检索」
+                      保存后自动重建索引；也可点「同步资料库」刷新手改文件
                     </span>
                   </div>
                 </div>
@@ -216,10 +276,10 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                   />
                 </div>
 
-                {busy ? (
+                {busy && !libraryPolling ? (
                   <span className="text-xs text-slate-500">正在保存文件…</span>
                 ) : null}
-                {statusLine && !busy ? (
+                {statusLine && !(busy && !libraryPolling) ? (
                   <span
                     className={
                       statusLine.tone === "err"

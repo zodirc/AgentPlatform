@@ -1,0 +1,183 @@
+# Hard offline qrels for IX4 prod-bench (docs/29 §3.1 · docs/30 IX4).
+#
+# Prefer corpus-unique phrases over common-knowledge queries.
+# Same schema as qrels.yaml; prod gate defaults to this file.
+
+cases:
+  # --- Unique detail (writing) ---
+  - id: hard_zeng_diary_discipline
+    query: "日课反省 戒欺 戒怒"
+    expect_paths:
+      - sources/writing/zengguofan-notes.md
+    expect_section: "修身日记"
+    noise_paths:
+      - sources/writing/yuefei-notes.md
+      - sources/hr/leave-policy.md
+      - sources/legal/nda.md
+
+  - id: hard_chuanyun_morale_line
+    query: "打出气势，再谈伤亡"
+    expect_paths:
+      - sources/writing/scene-chuanyun.md
+    expect_section: "穿云山夜袭"
+    noise_paths:
+      - sources/writing/liangjian-notes.md
+      - sources/legal/nda.md
+      - sources/hr/remote-work.md
+
+  - id: hard_chuanyun_intel_before_fire
+    query: "情报先于火力 避免无准备的硬攻"
+    expect_paths:
+      - sources/writing/scene-chuanyun.md
+    expect_section: "战后总结"
+    noise_paths:
+      - sources/hr/expense-policy.md
+      - sources/legal/employment-ip.md
+
+  - id: hard_liyunlong_front_and_intel
+    query: "喜欢正面硬刚，也重视情报"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+    path_prefix: sources/writing
+    noise_paths:
+      - sources/hr/leave-policy.md
+      - sources/legal/nda.md
+
+  - id: hard_chuyunfei_collaboration
+    query: "楚云飞 晋绥军 协作边界"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+    expect_section: "楚云飞"
+    noise_paths:
+      - sources/writing/zengguofan-notes.md
+      - sources/legal/nda.md
+
+  - id: hard_zeng_huaijun
+    query: "李鸿章 淮军体系"
+    expect_paths:
+      - sources/writing/zengguofan-notes.md
+    expect_section: "与李鸿章"
+    noise_paths:
+      - sources/writing/yuefei-notes.md
+      - sources/hr/onboarding.md
+
+  # --- Unique detail (HR / legal) ---
+  - id: hard_leave_rollover_five
+    query: "roll over by at most five days"
+    expect_paths:
+      - sources/hr/leave-policy.md
+    expect_section: "Leave entitlement"
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/writing/liangjian-notes.md
+
+  - id: hard_expense_furniture_non
+    query: "home office furniture are not reimbursable"
+    expect_paths:
+      - sources/hr/expense-policy.md
+    expect_section: "Non-reimbursable"
+    path_prefix: hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/writing/liangjian-notes.md
+
+  - id: hard_onboarding_day90
+    query: "probation review at day 90"
+    expect_paths:
+      - sources/hr/onboarding.md
+    expect_section: "Probation review"
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/employment-ip.md
+      - sources/writing/yuefei-notes.md
+
+  - id: hard_nda_survives_three_years
+    query: "survives for three years after disclosure"
+    expect_paths:
+      - sources/legal/nda.md
+    expect_section: "Term"
+    path_prefix: sources/legal
+    noise_paths:
+      - sources/hr/remote-work.md
+      - sources/writing/yuefei-notes.md
+
+  - id: hard_employment_ip_assigned
+    query: "source code assigned to the Company"
+    expect_paths:
+      - sources/legal/employment-ip.md
+    expect_section: "Work product"
+    path_prefix: sources/legal
+    noise_paths:
+      - sources/hr/expense-policy.md
+      - sources/writing/zengguofan-notes.md
+
+  # --- Noise / ranking (no or weak filter) ---
+  - id: hard_zhang_bailu_vs_nda_noise
+    query: "张白鹿 性格独立 重要配角"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+      - sources/writing/scene-chuanyun.md
+    noise_paths:
+      - sources/legal/nda.md
+    # A-side: target must be in top-k; NDA false-positive token should not dominate.
+    # Soft: pass if expect hit; report a_noise for ranking review.
+
+  - id: hard_customer_lists_legal_not_hr
+    query: "confidential information customer lists source code"
+    expect_paths:
+      - sources/legal/nda.md
+    path_prefix: sources/legal
+    noise_paths:
+      - sources/hr/remote-work.md
+      - sources/hr/leave-policy.md
+
+  - id: hard_vpn_remote_not_nda
+    query: "company VPN remote devices"
+    expect_paths:
+      - sources/hr/remote-work.md
+    path_prefix: sources/hr
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/writing/liangjian-notes.md
+
+  # --- path_prefix A/B stress ---
+  - id: hard_prefix_writing_blocks_nda_zhang
+    query: "张白鹿"
+    expect_paths:
+      - sources/writing/liangjian-notes.md
+      - sources/writing/scene-chuanyun.md
+    path_prefix: sources/writing
+    noise_paths:
+      - sources/legal/nda.md
+
+  - id: hard_prefix_hr_blocks_writing_detail
+    query: "扎硬寨、打死仗"
+    expect_paths: []
+    path_prefix: sources/hr
+    expect_empty: true
+
+  - id: hard_illegal_prefix_empty
+    query: "annual leave"
+    expect_paths: []
+    path_prefix: "../etc"
+    expect_empty: true
+
+  # --- Near-paraphrase / cross-section ---
+  - id: hard_yuefei_yancheng_paraphrase
+    query: "郾城以少胜多 稳定中原"
+    expect_paths:
+      - sources/writing/yuefei-notes.md
+    expect_section: "郾城之战"
+    noise_paths:
+      - sources/writing/zengguofan-notes.md
+      - sources/hr/onboarding.md
+
+  - id: hard_zhang_chuanyun_liaison
+    query: "穿云山 联络友邻 临机决断"
+    expect_paths:
+      - sources/writing/scene-chuanyun.md
+    expect_section: "张白鹿侧写"
+    noise_paths:
+      - sources/legal/nda.md
+      - sources/hr/remote-work.md

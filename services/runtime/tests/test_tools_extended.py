@@ -156,7 +156,7 @@ async def test_search_sources_never_syncs_inline(workspace: Path, monkeypatch: p
     assert result.get("index", {}).get("synced_on_query") is False
     assert result.get("index", {}).get("index_lag") is True
     # Keyword fallback still finds the file without rebuilding the vector index.
-    assert result["retrieval"] == "keyword"
+    assert result["retrieval"] == "keyword-fallback"
     assert result["hits"]
 
 
@@ -251,7 +251,7 @@ async def test_search_sources_path_prefix_empty_ann_falls_back_keyword(
 
     monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
     result = await core.search_sources("张白鹿", path_prefix="writing", limit=5)
-    assert result["retrieval"] == "keyword"
+    assert result["retrieval"] == "keyword-fallback"
     assert result["index"].get("prefix_empty_after_filter") is True
     assert result["filters"]["path_prefix"] == "sources/writing"
     assert result["hits"]

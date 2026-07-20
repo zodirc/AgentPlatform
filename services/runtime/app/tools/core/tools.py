@@ -509,7 +509,7 @@ async def search_sources(
         "query": query,
         "hits": hits,
         "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
-        "retrieval": "keyword",
+        "retrieval": "keyword-fallback",
         "index": index_meta,
         "hint": index_meta["hint"],
     }

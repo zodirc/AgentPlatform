@@ -76,6 +76,28 @@ async def sources_index_status(*, path: str | None = None) -> dict:
     return resp.json()
 
 
+async def sync_sources(*, force: bool = False) -> dict:
+    """Queue Turn-external incremental sync (IX1). Does not wait for embedding."""
+    del force  # reserved; runtime always incremental
+    base = settings.runtime_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/sources/sync",
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.TimeoutException as exc:
+        raise WorkspaceProxyError(
+            504,
+            "runtime timed out while queueing sources sync",
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
 async def delete_paths(*, paths: list[str]) -> dict:
     base = settings.runtime_url.rstrip("/")
     try:

@@ -25,8 +25,8 @@
 | 写作质量执行（[`24`](24-writing-quality-execution.md)） | ✅ WQ0–WQ4 全部落地 |
 | 证据 RAG / 文档检索（[`27`](27-rag-evidence-and-doc-search.md)） | 📋 设计稿：线 A 取证 + 线 B filter/ACL；**契约闸 ≠ 效果闸**（§8.1） |
 | 证据 RAG 执行（[`28`](28-rag-evidence-execution.md)） | 🔧 RE0–RE3+RE1 已落地；`make turn-effect-bench` / `make retrieval-bench` |
-| 资料索引与速率（[`29`](29-sources-index-and-interaction-rate.md)） | 📋 真相档验证分轨；IX0 workspace → **IX5 多租户私有库**（成熟必做） |
-| 资料索引执行（[`30`](30-sources-index-execution.md)） | 🔧 IX0–IX5 票级：投影闭环、prod-bench、私有库；两闸+速率自检 |
+| 资料索引与速率（[`29`](29-sources-index-and-interaction-rate.md)） | 📋 真相档分轨；难检索/排序杠；禁止 slash 测 RAG；IX0→**IX4 质量主线**→IX5 |
+| 资料索引执行（[`30`](30-sources-index-execution.md)） | 🔧 IX0 ✅；IX4 prod ✅；**IX1 同步按钮 ✅**；RQ1/IX5 待办 |
 
 ## 设计稿对照（文档 → 代码）
 
@@ -67,8 +67,8 @@
 20. **[26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md)** — **从个人 Agent 到对口经历**：学什么、怎么讲、经历从哪来（投递拟合）
 21. **[27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md)** — **证据 RAG 与文档检索**：写作取证 vs 企业文档搜索；**§8.1 效果验证三层**
 22. **[28-rag-evidence-execution.md](28-rag-evidence-execution.md)** — **证据 RAG 执行**：RE0→RE3→RE2→条件 RE1；效果向票须过 A/B
-23. **[29-sources-index-and-interaction-rate.md](29-sources-index-and-interaction-rate.md)** — **资料索引与速率**：真相档、验证分轨、多租户终局
-24. **[30-sources-index-execution.md](30-sources-index-execution.md)** — **资料索引执行**：IX0–IX5 票级、两闸、冲刺叙事
+23. **[29-sources-index-and-interaction-rate.md](29-sources-index-and-interaction-rate.md)** — **资料索引与速率**：真相档、难检索杠、禁止 slash 验收、多租户终局
+24. **[30-sources-index-execution.md](30-sources-index-execution.md)** — **资料索引执行**：IX0–IX5 + RQ1；IX4 质量主闸；两闸+冲刺
 
 ## 完整目录
 

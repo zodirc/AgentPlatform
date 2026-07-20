@@ -15,6 +15,11 @@ type RetrievalArtifact = {
   hit_count?: number;
   hits?: RetrievalHit[];
   summary?: string;
+  index?: {
+    index_lag?: boolean;
+    synced_on_query?: boolean;
+    hint?: string;
+  };
 };
 
 type Props = {
@@ -22,10 +27,29 @@ type Props = {
 };
 
 const MODE_LABEL: Record<string, string> = {
+  hybrid: "hybrid",
   vector: "向量",
   keyword: "关键词",
+  "keyword-fallback": "关键词降级",
   none: "无",
 };
+
+function resolveModeLabel(item: RetrievalArtifact): {
+  label: string;
+  lag: boolean;
+} {
+  const summary = String(item.summary ?? "");
+  const indexLag = Boolean(item.index?.index_lag);
+  const mode = String(item.mode ?? "none");
+  const fallback =
+    mode === "keyword-fallback" ||
+    summary.includes("keyword-fallback") ||
+    indexLag;
+  if (fallback) {
+    return { label: MODE_LABEL["keyword-fallback"], lag: true };
+  }
+  return { label: MODE_LABEL[mode] ?? mode, lag: false };
+}
 
 export function RetrievalView({ artifacts }: Props) {
   const items = artifacts.filter(
@@ -41,16 +65,22 @@ export function RetrievalView({ artifacts }: Props) {
           const hits = Array.isArray(item.hits) ? item.hits : [];
           const hitCount =
             typeof item.hit_count === "number" ? item.hit_count : hits.length;
-          const mode = String(item.mode ?? "none");
+          const { label, lag } = resolveModeLabel(item);
           return (
             <li key={idx} className="rounded-lg bg-slate-950 px-3 py-2">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium text-slate-200">
                   {item.query ? `「${item.query}」` : "检索"}
                 </span>
-                <Badge variant="default">{MODE_LABEL[mode] ?? mode}</Badge>
+                <Badge variant="default">{label}</Badge>
+                {lag ? (
+                  <Badge variant="default">index_lag</Badge>
+                ) : null}
                 <span className="text-slate-500">{hitCount} 条命中</span>
               </div>
+              {lag && item.index?.hint ? (
+                <p className="mt-1 text-amber-400/90">{item.index.hint}</p>
+              ) : null}
               {item.summary ? (
                 <p className="mt-1 text-slate-400">{String(item.summary)}</p>
               ) : null}

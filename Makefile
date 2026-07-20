@@ -26,7 +26,7 @@ EVAL_BUILD ?=
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources
+	sync-sources retrieval-bench-prod
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -48,7 +48,8 @@ help: ## 显示常用命令
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
-	@echo "  make retrieval-bench 离线检索 A/B（docs/28 效果闸层 1）"
+	@echo "  make retrieval-bench 离线检索 A/B（docs/28 效果闸层 1；hash 近似）"
+	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/30 IX4）"
 	@echo "  make sync-sources    增量投影 workspace/sources → 索引（docs/30 IX0）"
 	@echo "  make runtime-test 运行时测试"
 
@@ -237,11 +238,23 @@ eval-path-prefix: ## writing.14 path_prefix golden（isolated stub + runtime-lit
 	  EVAL_RUNTIME_ENV="MODEL_MODE=stub RETRIEVAL_MODE=keyword INDEX_VIA_WORKER=false" \
 	  EVAL_ARGS="--filter writing.14"
 
-retrieval-bench: ## 离线检索 A/B（docs/28 RE0/RE3 效果闸层 1）
+retrieval-bench: ## 离线检索 A/B（docs/28 RE0/RE3；json+hash 近似）
 	@cd services/runtime && \
 	  if test -x .venv/bin/python; then PY=.venv/bin/python; else PY=python3; fi && \
 	  $$PY ../../scripts/retrieval_bench.py --mode hybrid && \
 	  $$PY ../../scripts/retrieval_bench.py --mode keyword
+
+retrieval-bench-prod: ## IX4 真相档难 qrels（容器内 ST+pgvector；隔离 schema retrieval_bench）
+	@test -f .env || (echo "missing .env"; exit 1)
+	$(COMPOSE) exec -T -u root runtime mkdir -p /tmp/ix4-bench
+	docker cp scripts/retrieval_bench.py agent-runtime:/tmp/ix4-bench/retrieval_bench.py
+	docker cp eval/retrieval/. agent-runtime:/tmp/ix4-bench/retrieval/
+	$(COMPOSE) exec -T runtime bash -c '\
+	  pip install -q pyyaml 2>/dev/null; \
+	  PYTHONPATH=/app python /tmp/ix4-bench/retrieval_bench.py --prod \
+	    --qrels /tmp/ix4-bench/retrieval/qrels_hard.yaml \
+	    --corpus /tmp/ix4-bench/retrieval/corpus \
+	    --mode hybrid'
 
 turn-effect-bench: ## RE2 效果闸（先 MODEL_MODE=stub make up-runtime && migrate）
 	python3 scripts/turn_effect_bench.py

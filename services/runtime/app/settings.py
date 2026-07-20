@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     retrieval_rrf_k: int = 60
     # Backend: pgvector (default ANN via HNSW; needs pgvector image) | json (file fallback).
     retrieval_backend: str = "pgvector"
+    # Postgres schema for source_* tables (IX4 prod-bench uses retrieval_bench to avoid
+    # wiping the user index when syncing an isolated temp workspace).
+    retrieval_pg_schema: str = "public"
     # Two-level doc→chunk recall (docs/17 S3 A11): parallel lanes; timeout → chunk-only.
     retrieval_two_level_enabled: bool = True
     retrieval_two_level_timeout_seconds: float = 0.3

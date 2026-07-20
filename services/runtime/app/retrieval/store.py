@@ -59,6 +59,7 @@ def get_sources_store(*, data_dir: str | None = None) -> SourceRetrievalStore:
             store = PgvectorSourceRetrievalStore(
                 settings.database_url,
                 dimensions=effective_embedding_dimensions(),
+                schema=settings.retrieval_pg_schema,
             )
             # Probe extension early so misconfig fails loud at first use.
             store.ensure_schema()

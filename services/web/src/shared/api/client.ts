@@ -486,6 +486,33 @@ export async function fetchSourcesIndexStatus(
   return res.json();
 }
 
+/** IX1: queue Turn-external incremental sync (does not block chat). */
+export async function syncSourcesIndex(): Promise<{
+  accepted?: boolean;
+  index?: { status?: string };
+}> {
+  const res = await fetch(`${API_BASE}/admin/workspace/sources/sync`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    let message = detail || `syncSourcesIndex failed: ${res.status}`;
+    try {
+      const parsed = JSON.parse(detail) as {
+        error?: { message?: string };
+        detail?: string;
+      };
+      message = parsed.error?.message || parsed.detail || message;
+    } catch {
+      // keep raw text
+    }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
 export async function uploadSourceFile(
   file: File,
 ): Promise<SourceUploadResult> {

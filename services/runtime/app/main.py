@@ -290,6 +290,22 @@ async def workspace_sources_index_status(
     return sources_index_status(path=path)
 
 
+@workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)
+async def workspace_sync_sources(
+    background_tasks: BackgroundTasks,
+    _: None = Depends(verify_internal_token),
+):
+    """IX1: queue incremental sources projection (Turn-external; non-blocking)."""
+    from app.services.workspace_browser import (
+        mark_sources_index_building,
+        sync_sources_index_safe,
+    )
+
+    mark_sources_index_building(path=None)
+    background_tasks.add_task(sync_sources_index_safe, path=None)
+    return {"accepted": True, "index": {"status": "pending"}}
+
+
 @workspace_router.post("/sources/upload")
 async def workspace_upload_source(
     body: SourceUploadBody,

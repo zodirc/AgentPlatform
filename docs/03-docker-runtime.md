@@ -253,7 +253,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 `error`。因此上传成功不等于索引已经可检索，API 也不得等待 embedding 构建完成。
 
 **Turn 外投影（docs/30 IX0）：** runtime 启动后默认延迟数秒异步增量同步 `workspace/sources`
-（`SOURCES_STARTUP_SYNC_ENABLED`，不挡 `/health/live`）。手改 md 后也可：
+（`SOURCES_STARTUP_SYNC_ENABLED`，不挡 `/health/live`）。手改 md 后也可：工作台「资料库 → 同步资料库」（IX1，不挡对话），或运维：
 
 ```bash
 make sync-sources

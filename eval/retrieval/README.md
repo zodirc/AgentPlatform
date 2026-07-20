@@ -1,4 +1,4 @@
-# Offline retrieval bench (docs/27 §8.1 layer 1 · docs/28 RE0/RE3)
+# Offline retrieval bench (docs/27 §8.1 · docs/28 RE0/RE3 · docs/30 IX4)
 
 Layer-1 A/B harness for `search_sources` quality — **no agent loop**.
 
@@ -8,19 +8,26 @@ Layer-1 A/B harness for `search_sources` quality — **no agent loop**.
 eval/retrieval/
 ├── README.md
 ├── EFFECT_CHECKLIST.md
+├── HARD_WORKBENCH.md   # IX4 难自然问句（工作台复制；禁止 slash）
 ├── corpus/             # fixed sources tree → copied to tmp/sources/
-│   ├── hr/             # leave, onboarding, expense, remote-work
-│   ├── legal/          # nda (+ 张白鹿 noise), employment-ip
-│   └── writing/        # liangjian, yuefei, zengguofan, scene-chuanyun
-├── qrels.yaml          # query → expect path/section + path_prefix A/B
+│   ├── hr/
+│   ├── legal/
+│   └── writing/
+├── qrels.yaml          # 近似闸（hash-bench）；filter / 题集回归
+├── qrels_hard.yaml     # IX4 难 qrels（prod-bench 默认）
 └── (runner: scripts/retrieval_bench.py)
 ```
 
-Run after expanding corpus/qrels:
+## Two tracks
 
-```bash
-make retrieval-bench
-```
+| 命令 | 后端 | 题集 | 证明什么 |
+|------|------|------|----------|
+| `make retrieval-bench` | json + **hash** | `qrels.yaml` | 契约/filter 逻辑；**≠** 生产召回 |
+| `make retrieval-bench-prod` | 容器内 **ST + pgvector**（schema `retrieval_bench`） | `qrels_hard.yaml` | **真相档**难检索 / 噪声 |
+
+Prod 使用独立 Postgres schema，避免 sync 隔离临时语料时删掉用户 `public` 索引。
+
+人工体感：见 [`HARD_WORKBENCH.md`](HARD_WORKBENCH.md)（自然语言，禁止 slash）。
 
 ## Hit field baseline (RE0)
 
@@ -28,7 +35,7 @@ make retrieval-bench
 |-------|---------------------|----------------------------------|-------|
 | `path` | yes | yes | workspace-relative |
 | `chunk_id` | yes | no (file-level) | RE1 may add when section-parsed |
-| `citation_id` | yes | yes (`cite:{stem}`) | required for cite loop |
+| `citation_id` | yes (`cite:{stem}`) | yes | required for cite loop |
 | `excerpt` | yes | yes | truncated |
 | `score` | yes | often absent | keyword may omit |
 | `section_title` | yes | no (until RE1) | intentional gap |
@@ -38,16 +45,17 @@ make retrieval-bench
 
 ## Run
 
-From repo root (uses runtime venv / PYTHONPATH):
-
 ```bash
-cd services/runtime && python3 ../../scripts/retrieval_bench.py
-# or:
+# 近似（本机 / CI 快）
 make retrieval-bench
+
+# 真相档难闸（需 agent-runtime healthy + ST 镜像）
+make retrieval-bench-prod
 ```
 
-Compares **A** (no filter) vs **B** (`path_prefix` from qrels when set) on Recall@k / noise hits.
+报告含 pass 数、avg Recall@1 / @k、噪声计数。合并检索质量 PR：**prod 绿**（或书面豁免）+ 难工作台记录。
 
 ## Effect gate
 
-RE3 merge requires this bench to show: target-path recall not worse; noise paths down when `path_prefix` applied.
+- RE3：hash-bench 上 path_prefix A/B 仍可用。  
+- **IX4**：`retrieval-bench-prod` 难 qrels 必过；浅常识题不算充分。

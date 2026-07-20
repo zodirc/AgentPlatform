@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -15,9 +16,18 @@ from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
+_SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{x:.8f}" for x in values) + "]"
+
+
+def _safe_schema(name: str) -> str:
+    raw = (name or "public").strip() or "public"
+    if not _SCHEMA_RE.match(raw):
+        raise ValueError(f"invalid retrieval_pg_schema: {name!r}")
+    return raw
 
 
 class PgvectorSourceRetrievalStore:
@@ -29,8 +39,17 @@ class PgvectorSourceRetrievalStore:
 
     backend = "pgvector"
 
-    def __init__(self, database_url: str, *, dimensions: int | None = None) -> None:
+    def __init__(
+        self,
+        database_url: str,
+        *,
+        dimensions: int | None = None,
+        schema: str | None = None,
+    ) -> None:
         self._database_url = database_url
+        self._schema = _safe_schema(
+            schema if schema is not None else settings.retrieval_pg_schema
+        )
         if dimensions is not None:
             self._dimensions = int(dimensions)
         else:
@@ -48,7 +67,14 @@ class PgvectorSourceRetrievalStore:
             raise RuntimeError(
                 "RETRIEVAL_BACKEND=pgvector requires psycopg (pip install psycopg[binary])"
             ) from exc
-        return psycopg.connect(self._database_url, autocommit=False)
+        conn = psycopg.connect(self._database_url, autocommit=False)
+        with conn.cursor() as cur:
+            if self._schema != "public":
+                cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
+            # vector extension lives in public; keep it on the path.
+            cur.execute(f"SET search_path TO {self._schema}, public")
+        conn.commit()
+        return conn
 
     def ensure_schema(self) -> None:
         if self._ready:
@@ -65,11 +91,12 @@ class PgvectorSourceRetrievalStore:
                     FROM pg_attribute a
                     JOIN pg_class c ON a.attrelid = c.oid
                     JOIN pg_namespace n ON c.relnamespace = n.oid
-                    WHERE n.nspname = 'public'
+                    WHERE n.nspname = %s
                       AND c.relname = 'source_chunks'
                       AND a.attname = 'embedding'
                       AND NOT a.attisdropped
-                    """
+                    """,
+                    (self._schema,),
                 )
                 row = cur.fetchone()
                 if row and isinstance(row[0], str) and row[0].startswith("vector("):
@@ -79,9 +106,11 @@ class PgvectorSourceRetrievalStore:
                         existing = -1
                     if existing != dim:
                         logger.warning(
-                            "source_chunks embedding dim %s != configured %s; recreating index tables",
+                            "source_chunks embedding dim %s != configured %s "
+                            "(schema=%s); recreating index tables",
                             existing,
                             dim,
+                            self._schema,
                         )
                         cur.execute("DROP TABLE IF EXISTS source_chunks CASCADE")
                         cur.execute("DROP TABLE IF EXISTS source_files CASCADE")

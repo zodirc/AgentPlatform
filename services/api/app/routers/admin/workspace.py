@@ -52,6 +52,18 @@ async def sources_index_status(path: str | None = Query(default=None)):
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.post("/sources/sync", status_code=202)
+async def sync_sources_library():
+    """IX1: queue background incremental projection of workspace/sources."""
+    try:
+        return await workspace_svc.sync_sources()
+    except WorkspaceProxyError as exc:
+        detail = exc.detail
+        if isinstance(detail, str) and len(detail) > 500:
+            detail = detail[:500]
+        raise HTTPException(status_code=exc.status_code, detail=detail) from exc
+
+
 @router.post("/sources/upload")
 async def upload_source_file(file: UploadFile = File(...)):
     raw = await file.read()
