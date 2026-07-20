@@ -30,6 +30,9 @@ search_sources → 事实 / 可引用片段（按需工具）
 search_records → 结构化业务行（可选；非写作主路径）
 ```
 
+**常设既定事实种子（写作）：** 填充路径与格式见 [`seed/sources/FORMAT.md`](../seed/sources/FORMAT.md)；文件放在 `seed/sources/writing/{persons,periods,dramas,novels}/`。  
+运行时：**只读挂载**到 `/workspace/sources/seed/writing`（不拷贝进用户沙箱）；索引路径 `sources/seed/writing/...`。与 `eval/retrieval/corpus/`（效果闸）分离。手动重建索引：`make seed-sources`。
+
 ---
 
 ## 1. 三标尺与两平面
@@ -45,14 +48,14 @@ search_records → 结构化业务行（可选；非写作主路径）
 ```text
 交互面（不改）          Index plane（Turn 外）
 自然语言 → 自主 search   sources/** → dirty → ST+pgvector
-成稿可搜 / polish 0 搜   启动扫 + 上传 + Web 同步
+成稿可搜 / polish 0 搜   启动扫 + 目录监视 + 上传 + Web 同步
 ```
 
 **A9：** `search_sources` 永不在查询路径 `sync()` / 重嵌。
 
 | 阶段 | 索引范围 |
 |------|----------|
-| 今 | workspace `sources/**`（非 session） |
+| 今 | workspace `sources/**`（含 RO 挂载的 `sources/seed/writing/**`） |
 | 终局 | `owner_user_id` / tenant 私有库（IX5） |
 | 不做 | per-session 索引 |
 
@@ -70,6 +73,8 @@ search_records → 结构化业务行（可选；非写作主路径）
 | `make eval-path-prefix` | RE3；跑完 **restore live** |
 | `make turn-effect-bench` | RE2 同题 Turn（stub） |
 | Web「同步资料库」 | IX1；不替代 IX4 |
+| 目录监视自动投影 | IX2（`SOURCES_WATCH_*`） |
+| `index-status.plane=ingestion` | IX3；`effect_ready` 恒 false |
 
 **每日序：** 真相档 → 后台 sync → 自然问句看 `hybrid` → 改协议时 isolated+restore → 质量 PR 须 prod-bench 绿。
 
@@ -120,17 +125,18 @@ search_records → 结构化业务行（可选；非写作主路径）
 | RE0 / RE3 / RE2 / RE1 | 题集、path_prefix、Turn A/B、keyword 字段 | ✅ |
 | RE4 / IX5 | ACL + owner 私有库 | ⏳ 产品开闸 |
 | RE5 | `search_records` 真表 | ⏳ 见 [17](17-search-records.md) |
-| IX0 / IX4 / IX1 | 启动 sync、prod-bench、Web 同步 | ✅ |
+| IX0 / IX1 / IX2 / IX3 / IX4 | 启动 sync、Web 同步、目录 watch、上传≠效果闸、prod-bench | ✅ |
 | RQ1 | 切块/lexical/two-level（不开 CE） | ⏳ 仅 IX4 暴露缺口 |
-| IX2 / IX3 | watch；上传≠效果闸 | ⏳ |
 
 ```text
 IX0 ✅ → IX4 ✅ → RQ1（条件）
       → IX1 ✅
+      → IX2 ✅（目录监视 → debounce 投影）
+      → IX3 ✅（摄取面 ≠ 效果闸）
       → IX5 / RE4（多租户）
 ```
 
-**主线：** 质量闸已过；RQ1 仅回归失败时；IX5 等多用户。
+**主线：** 质量闸已过；Index plane 自动跟上目录；RQ1 仅回归失败时；IX5 等多用户。
 
 ---
 
@@ -176,9 +182,11 @@ owner / tenant
 | 里程碑 | 条件 |
 |--------|------|
 | 投影可用 | IX0 ✅ |
+| 目录自动跟上 | IX2 ✅ |
+| 摄取≠效果口径 | IX3 ✅ |
 | **生产质量已验收** | IX4 ✅ prod-bench |
 | 成熟多租户 | IX5/RE4 |
-| 全程 | 交互未改；search 不建库；不以 hash/浅常识冒充 |
+| 全程 | 交互未改；search 不建库；不以 hash/浅常识/上传成功冒充效果 |
 
 ---
 
@@ -189,5 +197,7 @@ owner / tenant
 | path_prefix | `services/runtime/app/retrieval/path_filter.py` |
 | keyword section | `…/keyword_hit.py` |
 | 索引调度 | `…/index_scheduler.py` |
+| 目录监视（IX2） | `…/sources_watch.py` |
+| 摄取状态（IX3） | `services/runtime/app/services/workspace_browser.py` → `sources_index_status` |
 | 层 1 runner | `scripts/retrieval_bench.py` |
 | 题集 | `eval/retrieval/qrels*.yaml` |

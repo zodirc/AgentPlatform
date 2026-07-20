@@ -17,6 +17,23 @@ def _resolve_path(rel_path: str) -> Path:
     return target
 
 
+def _normalized_workspace_rel(rel_path: str) -> str:
+    return rel_path.strip().lstrip("/").replace("\\", "/")
+
+
+def is_seed_corpus_path(rel_path: str) -> bool:
+    """True for standing seed corpus under sources/seed/ (RO mount; docs/15)."""
+    normalized = _normalized_workspace_rel(rel_path)
+    return normalized == "sources/seed" or normalized.startswith("sources/seed/")
+
+
+def _assert_not_seed_corpus(rel_path: str) -> None:
+    if is_seed_corpus_path(rel_path):
+        raise PermissionError(
+            "seed corpus is read-only; edit files under seed/sources/writing in the repo"
+        )
+
+
 async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     target = _resolve_path(path)
     if not target.exists():
@@ -46,6 +63,7 @@ async def propose_patch(
     summary: str = "",
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    _assert_not_seed_corpus(path)
     patch_id = f"patch-{uuid4().hex[:12]}"
     return {
         "patch_id": patch_id,
@@ -57,11 +75,62 @@ async def propose_patch(
     }
 
 
-async def apply_patch(path: str, new_text: str, **_kwargs: Any) -> dict[str, Any]:
+async def apply_patch(
+    path: str,
+    new_text: str,
+    old_text: str = "",
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """Apply a patch surgically when ``old_text`` is set; otherwise full-file write.
+
+    ``propose_patch`` emits ``old_text``/``new_text`` *spans*. Writing the span alone
+    as the whole file destroys long documents after auto-apply.
+    """
+    _assert_not_seed_corpus(path)
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(new_text, encoding="utf-8")
-    return {"path": path, "status": "applied", "bytes_written": len(new_text.encode())}
+    existing = target.read_text(encoding="utf-8") if target.exists() else ""
+    old = old_text or ""
+    force = str(_kwargs.get("force_full_replace", "")).lower() in {"1", "true", "yes"}
+
+    if old:
+        count = existing.count(old)
+        if count == 0:
+            return {
+                "path": path,
+                "status": "error",
+                "error": "old_text not found in current file; re-read and repropose",
+            }
+        if count > 1:
+            return {
+                "path": path,
+                "status": "error",
+                "error": f"old_text matches {count} times; use a longer unique span",
+            }
+        final = existing.replace(old, new_text, 1)
+    else:
+        if (
+            not force
+            and len(existing) >= 500
+            and len(new_text) < max(200, int(len(existing) * 0.4))
+        ):
+            return {
+                "path": path,
+                "status": "error",
+                "error": (
+                    f"refusing full replace that shrinks {len(existing)}→{len(new_text)} chars; "
+                    "pass old_text for a surgical edit, or force_full_replace=true for intentional rewrite"
+                ),
+            }
+        final = new_text
+
+    target.write_text(final, encoding="utf-8")
+    return {
+        "path": path,
+        "status": "applied",
+        "bytes_written": len(final.encode("utf-8")),
+        "mode": "surgical" if old else "full",
+    }
 
 
 def _section_filename(section_id: str) -> str:
@@ -81,20 +150,35 @@ def _session_scope(session_id: object | None) -> str | None:
     return str(session_id)
 
 
+_WORK_DRAFTS = ".agent/work/drafts"
+_WORK_HISTORY = ".agent/work/history"
+_WORK_TURNS = ".agent/work/turns"
+
+
+def _draft_file_path(section_id: str) -> str:
+    """Canonical in-progress draft path (work-scoped, not session-scoped)."""
+    return f"{_WORK_DRAFTS}/{_section_filename(section_id)}"
+
+
+def _history_file_path(section_id: str, turn_id: object | None) -> str:
+    return f"{_WORK_HISTORY}/{section_id.strip()}/{_turn_scope(turn_id)}.md"
+
+
 def _manifest_path(session_id: object | None, turn_id: object | None) -> str:
-    """Primary manifest path (session-scoped when session_id is known)."""
-    if session_id is not None and turn_id is not None:
-        return (
-            f".agent/sessions/{_session_scope(session_id)}/turns/"
-            f"{_turn_scope(turn_id)}/manifest.json"
-        )
-    return f".agent/turns/{_turn_scope(turn_id)}/manifest.json"
+    """Primary turn touch-list (work-scoped). ``session_id`` kept for API compat."""
+    del session_id  # work-scoped; session no longer owns manifests
+    return f"{_WORK_TURNS}/{_turn_scope(turn_id)}.json"
 
 
 def _manifest_candidate_paths(session_id: object | None, turn_id: object | None) -> list[str]:
-    paths: list[str] = []
+    """Read order: work turn → session legacy → flat turn legacy."""
+    paths: list[str] = [f"{_WORK_TURNS}/{_turn_scope(turn_id)}.json"]
     if session_id is not None and turn_id is not None:
-        paths.append(_manifest_path(session_id, turn_id))
+        legacy_session = (
+            f".agent/sessions/{_session_scope(session_id)}/turns/"
+            f"{_turn_scope(turn_id)}/manifest.json"
+        )
+        paths.append(legacy_session)
     if turn_id is not None:
         legacy = f".agent/turns/{_turn_scope(turn_id)}/manifest.json"
         if legacy not in paths:
@@ -108,13 +192,9 @@ def _revision_file_path(
     session_id: object | None = None,
     turn_id: object | None = None,
 ) -> str:
-    filename = _section_filename(section_id)
-    if session_id is not None and turn_id is not None:
-        return (
-            f".agent/sessions/{_session_scope(session_id)}/revisions/"
-            f"{_turn_scope(turn_id)}/{filename}"
-        )
-    return f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
+    """Write target for ``draft_section`` — always work drafts."""
+    del session_id, turn_id
+    return _draft_file_path(section_id)
 
 
 def _revision_candidate_paths(
@@ -123,11 +203,16 @@ def _revision_candidate_paths(
     session_id: object | None = None,
     turn_id: object | None = None,
 ) -> list[str]:
-    """Read order: manifest entry → session path → turn path → flat legacy."""
+    """Read order: work draft → session/turn legacy → flat legacy."""
     filename = _section_filename(section_id)
-    paths: list[str] = []
+    paths: list[str] = [_draft_file_path(section_id)]
     if session_id is not None and turn_id is not None:
-        paths.append(_revision_file_path(section_id, session_id=session_id, turn_id=turn_id))
+        session_path = (
+            f".agent/sessions/{_session_scope(session_id)}/revisions/"
+            f"{_turn_scope(turn_id)}/{filename}"
+        )
+        if session_path not in paths:
+            paths.append(session_path)
     if turn_id is not None:
         turn_path = f".agent/revisions/{_turn_scope(turn_id)}/{filename}"
         if turn_path not in paths:
@@ -139,8 +224,26 @@ def _revision_candidate_paths(
 
 
 def _is_legacy_revision_rel(rel_path: str, filename: str) -> bool:
-    """True only for pre-turn-scoped flat revision files."""
+    """True for pre-work-model flat revision files (export warning)."""
     return rel_path == f".agent/revisions/{filename}"
+
+
+def _prune_section_history(section_id: str, *, keep: int) -> None:
+    if keep <= 0:
+        return
+    root = _resolve_path(f"{_WORK_HISTORY}/{section_id.strip()}")
+    if not root.is_dir():
+        return
+    files = sorted(
+        (p for p in root.iterdir() if p.is_file() and p.suffix == ".md"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in files[keep:]:
+        try:
+            stale.unlink()
+        except OSError:
+            continue
 
 
 def _read_manifest(
@@ -183,30 +286,64 @@ async def draft_section(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    path = _revision_file_path(section_id, session_id=session_id, turn_id=turn_id)
-    target = _resolve_path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    from app.writing.manuscript import (
+        draft_manuscript_rel,
+        manuscript_mode,
+        upsert_section,
+    )
+
+    layout = str(_kwargs.get("layout") or manuscript_mode()).strip().lower()
+    if layout not in {"monofile", "sections"}:
+        layout = manuscript_mode()
+
+    if layout == "monofile":
+        path = draft_manuscript_rel()
+        target = _resolve_path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        existing = target.read_text(encoding="utf-8") if target.exists() else ""
+        final = upsert_section(existing, section_id, content)
+        target.write_text(final, encoding="utf-8")
+    else:
+        path = _draft_file_path(section_id)
+        target = _resolve_path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+    history_path: str | None = None
+    keep = int(getattr(settings, "writing_draft_history_keep", 5) or 0)
+    if keep > 0 and turn_id is not None:
+        history_path = _history_file_path(section_id, turn_id)
+        hist = _resolve_path(history_path)
+        hist.parent.mkdir(parents=True, exist_ok=True)
+        hist.write_text(content, encoding="utf-8")
+        _prune_section_history(section_id, keep=keep)
+
     manifest = _read_manifest(turn_id, session_id=session_id) or {
         "turn_id": _turn_scope(turn_id),
         "session_id": _session_scope(session_id),
         "sections": [],
         "revisions": {},
+        "layout": layout,
     }
     if session_id is not None and not manifest.get("session_id"):
         manifest["session_id"] = _session_scope(session_id)
+    manifest["layout"] = layout
     sections = manifest.setdefault("sections", [])
     revisions = manifest.setdefault("revisions", {})
     if section_id not in sections:
         sections.append(section_id)
     revisions[section_id] = path
     manifest_path = _write_manifest(turn_id, manifest, session_id=session_id)
-    return {
+    result: dict[str, Any] = {
         "section_id": section_id,
         "path": path,
         "manifest_path": manifest_path,
         "status": "drafted",
+        "layout": layout,
     }
+    if history_path:
+        result["history_path"] = history_path
+    return result
 
 
 async def stub_echo(message: str, **_kwargs: Any) -> dict[str, Any]:
@@ -272,16 +409,57 @@ async def update_plan(
     }
 
 
-async def update_outline(content: str, **_kwargs: Any) -> dict[str, Any]:
+async def update_outline(
+    content: str,
+    mode: str = "replace",
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """Replace or append ``outline.md``.
+
+    ``mode=append`` is the safe path for long outlines / batch continuation.
+    Catastrophic shrink on ``replace`` is rejected unless ``force=true``.
+    """
     path = "outline.md"
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(content, encoding="utf-8")
+    existing = target.read_text(encoding="utf-8") if target.exists() else ""
+    mode_n = (mode or "replace").strip().lower()
+    force = str(_kwargs.get("force", "")).lower() in {"1", "true", "yes"}
+
+    if mode_n == "append":
+        if existing and not existing.endswith("\n"):
+            sep = "\n\n"
+        elif existing:
+            sep = "\n" if not existing.endswith("\n\n") else ""
+        else:
+            sep = ""
+        final = f"{existing}{sep}{content.lstrip()}" if existing else content
+        summary = "Outline appended"
+    else:
+        if (
+            not force
+            and len(existing) >= 500
+            and len(content) < max(200, int(len(existing) * 0.4))
+        ):
+            return {
+                "status": "error",
+                "error": (
+                    f"refusing outline replace that shrinks {len(existing)}→{len(content)} chars; "
+                    "use mode=append for continuation, or force=true for intentional full rewrite"
+                ),
+                "outline_path": path,
+                "existing_chars": len(existing),
+            }
+        final = content
+        summary = "Outline updated"
+
+    target.write_text(final, encoding="utf-8")
     return {
         "path": path,
-        "content": content,
-        "summary": "Outline updated",
+        "content": final,
+        "summary": summary,
         "outline_path": path,
+        "mode": "append" if mode_n == "append" else "replace",
     }
 
 
@@ -564,6 +742,7 @@ async def glob(pattern: str, path: str = ".", limit: int = 100, **_kwargs: Any) 
 async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
     from app.privacy.secret_scan import gate_write_content
 
+    _assert_not_seed_corpus(path)
     blocked = gate_write_content(content, path=path)
     if blocked is not None:
         return blocked
@@ -579,6 +758,7 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
 
 
 async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> dict[str, Any]:
+    _assert_not_seed_corpus(path)
     target = _resolve_path(path)
     if not target.exists():
         return {"error": f"File not found: {path}"}
@@ -745,37 +925,77 @@ async def export_document(
         _read_manifest(turn_id, session_id=session_id) if source == "current_draft" else None
     )
     manifest_revisions = manifest.get("revisions", {}) if isinstance(manifest, dict) else {}
-    sources: list[tuple[str, str, Path]] = []
+    from app.writing.manuscript import (
+        confirmed_manuscript_rel,
+        draft_manuscript_rel,
+        extract_section,
+        manuscript_mode,
+    )
+
+    sources: list[tuple[str, str, str]] = []  # section_id, rel_path, content
     missing: list[str] = []
     used_legacy_layout = False
     for section_id in requested:
         filename = _section_filename(section_id)
-        candidates: list[tuple[str, Path]] = []
+        content: str | None = None
+        rel_path = ""
+
         if source == "confirmed":
-            rel_path = f"sections/{filename}"
-            candidates.append((rel_path, _resolve_path(rel_path)))
+            ms_rel = confirmed_manuscript_rel()
+            ms_path = _resolve_path(ms_rel)
+            if ms_path.is_file():
+                extracted = extract_section(
+                    ms_path.read_text(encoding="utf-8", errors="replace"), section_id
+                )
+                if extracted is not None and extracted.strip():
+                    content = extracted
+                    rel_path = ms_rel
+            if content is None:
+                rel_path = f"sections/{filename}"
+                path = _resolve_path(rel_path)
+                if path.is_file():
+                    content = path.read_text(encoding="utf-8", errors="replace")
         else:
+            candidates: list[str] = []
             manifest_path = manifest_revisions.get(section_id)
             if isinstance(manifest_path, str):
-                candidates.append((manifest_path, _resolve_path(manifest_path)))
+                candidates.append(manifest_path)
+            if manuscript_mode() == "monofile" or (
+                isinstance(manifest, dict) and manifest.get("layout") == "monofile"
+            ):
+                draft_ms = draft_manuscript_rel()
+                if draft_ms not in candidates:
+                    candidates.append(draft_ms)
             for rel in _revision_candidate_paths(
                 section_id, session_id=session_id, turn_id=turn_id
             ):
-                if all(rel != existing for existing, _ in candidates):
-                    candidates.append((rel, _resolve_path(rel)))
+                if rel not in candidates:
+                    candidates.append(rel)
 
-        selected = next(((rel, path) for rel, path in candidates if path.is_file()), None)
-        if selected is None:
+            draft_ms_name = Path(draft_manuscript_rel()).name
+            for rel in candidates:
+                path = _resolve_path(rel)
+                if not path.is_file():
+                    continue
+                raw = path.read_text(encoding="utf-8", errors="replace")
+                if Path(rel).name == draft_ms_name or "<!-- section:" in raw:
+                    extracted = extract_section(raw, section_id)
+                    if extracted is not None and extracted.strip():
+                        content = extracted
+                        rel_path = rel
+                        break
+                    continue
+                if raw.strip():
+                    content = raw
+                    rel_path = rel
+                    if _is_legacy_revision_rel(rel, filename):
+                        used_legacy_layout = True
+                    break
+
+        if content is None or not str(content).strip():
             missing.append(section_id)
             continue
-        rel_path, path = selected
-        if _is_legacy_revision_rel(rel_path, filename):
-            used_legacy_layout = True
-        content = path.read_text(encoding="utf-8", errors="replace")
-        if not content.strip():
-            missing.append(section_id)
-            continue
-        sources.append((section_id, rel_path, path))
+        sources.append((section_id, rel_path, content))
 
     if missing:
         return {
@@ -794,10 +1014,8 @@ async def export_document(
     outline = root / "outline.md"
     if outline.is_file():
         parts.append(outline.read_text(encoding="utf-8", errors="replace"))
-    for section_id, _, path in sources:
-        parts.append(
-            f"\n## {section_id}\n\n{path.read_text(encoding='utf-8', errors='replace').strip()}"
-        )
+    for section_id, _, section_body in sources:
+        parts.append(f"\n## {section_id}\n\n{section_body.strip()}")
     body = "\n".join(parts).strip()
 
     from app.writing.export_lint import lint_export_markdown

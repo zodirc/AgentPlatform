@@ -12,11 +12,19 @@ make eval-path-prefix                 # writing.14 隔离 stub（勿再用重 re
 
 Fill remaining rows on effect-gate PRs (~15 min in Writing Workbench).
 
+**IX3 — 禁止把摄取当效果：**
+
+- ❌ 「上传成功 / 索引 ready / 同步绿」当作召回质量验收
+- ❌ slash `/rag-test` 或必须上传才能测
+- ✅ `make retrieval-bench-prod` + 下表自然问句
+
 | # | Step | Pass? | Notes |
 |---|------|-------|-------|
 | 1 | 成稿：按资料写一节，能搜到并可核对材料细节 | ☐ | |
 | 2 | `/polish`：时间线无 `search_sources` | ☐ | covered by `writing.12` in turn-effect-bench |
 | 3 | （RE3）限定 `path_prefix` / 子目录后，不出现域外片段 | ☐ | covered by `writing.14` filters assertion |
+| 4 | （IX2）手改 `workspace/sources/*.md` 后无需点同步即可被检索（等 debounce） | ☐ | |
+| 5 | （IX3）资料库状态文案含「投影/摄取」且不宣称效果过关 | ☐ | |
 
 Same-question A/B (layer 2 manual supplement) — attach to PR if turn-effect-bench is not enough:
 

@@ -44,9 +44,36 @@ async def test_propose_and_apply_patch(workspace: Path) -> None:
     assert proposed["status"] == "pending"
     assert proposed["patch_id"].startswith("patch-")
 
-    applied = await core.apply_patch("f.md", "hello")
+    (workspace / "f.md").write_text("hello", encoding="utf-8")
+    applied = await core.apply_patch("f.md", "hello-world", force_full_replace=True)
     assert applied["status"] == "applied"
-    assert (workspace / "f.md").read_text(encoding="utf-8") == "hello"
+    assert (workspace / "f.md").read_text(encoding="utf-8") == "hello-world"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_surgical_replace(workspace: Path) -> None:
+    (workspace / "outline.md").write_text(
+        "# Vol1\nAAA\n# Vol2\nBBB\n# Vol3\nCCC\n",
+        encoding="utf-8",
+    )
+    applied = await core.apply_patch(
+        "outline.md",
+        new_text="# Vol2\nBBB-fixed\n",
+        old_text="# Vol2\nBBB\n",
+    )
+    assert applied["status"] == "applied"
+    assert applied["mode"] == "surgical"
+    text = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert text == "# Vol1\nAAA\n# Vol2\nBBB-fixed\n# Vol3\nCCC\n"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_refuses_span_as_full_file(workspace: Path) -> None:
+    (workspace / "big.md").write_text("x" * 2000, encoding="utf-8")
+    refused = await core.apply_patch("big.md", "tiny fragment")
+    assert refused["status"] == "error"
+    assert "shrinks" in refused["error"]
+    assert (workspace / "big.md").read_text(encoding="utf-8") == "x" * 2000
 
 
 @pytest.mark.asyncio
@@ -57,6 +84,23 @@ async def test_update_plan_and_outline(workspace: Path) -> None:
     outline = await core.update_outline("# Doc")
     assert (workspace / "outline.md").read_text(encoding="utf-8") == "# Doc"
     assert outline["outline_path"] == "outline.md"
+
+
+@pytest.mark.asyncio
+async def test_update_outline_append_and_shrink_guard(workspace: Path) -> None:
+    (workspace / "outline.md").write_text("# Part1\n" + ("body\n" * 200), encoding="utf-8")
+    before = (workspace / "outline.md").read_text(encoding="utf-8")
+
+    refused = await core.update_outline("oops")
+    assert refused["status"] == "error"
+    assert (workspace / "outline.md").read_text(encoding="utf-8") == before
+
+    appended = await core.update_outline("# Part2\nmore", mode="append")
+    assert appended["mode"] == "append"
+    text = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert text.startswith("# Part1\n")
+    assert text.rstrip().endswith("# Part2\nmore")
+    assert "body" in text
 
 
 @pytest.mark.asyncio

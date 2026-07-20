@@ -462,6 +462,12 @@ export type SourcesIndexStatus = {
   embedding_backend?: string;
   path_indexed?: boolean;
   path_current?: boolean;
+  /** IX3: always "ingestion" — never effect-quality. */
+  plane?: "ingestion" | string;
+  ingestion_ready?: boolean;
+  /** IX3: always false from this endpoint; effect = prod-bench / hard queries. */
+  effect_ready?: boolean;
+  hint?: string;
   last_result?: {
     indexed_files?: number;
     chunks?: number;

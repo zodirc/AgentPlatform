@@ -127,6 +127,63 @@ async def test_agent_engine_stub_echo_terminates(workspace) -> None:
 
 
 @pytest.mark.asyncio
+async def test_writing_propose_patch_auto_applies(
+    workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "app.engine.agent_engine.settings.writing_patch_auto_apply", True
+    )
+    (workspace / "doc.md").write_text("old", encoding="utf-8")
+    call = {
+        "id": "tc-patch",
+        "name": "propose_patch",
+        "input": {
+            "path": "doc.md",
+            "old_text": "old",
+            "new_text": "new-content",
+            "summary": "optimize",
+        },
+    }
+    events: list[tuple[str, dict]] = []
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        events.append((event_type, payload))
+
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [ModelResponse(tool_calls=[call]), ModelResponse(text="done")]
+        ),
+        tools=[
+            ToolSpec(
+                name="propose_patch",
+                description="propose",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "old_text": {"type": "string"},
+                        "new_text": {"type": "string"},
+                        "summary": {"type": "string"},
+                    },
+                    "required": ["path", "old_text", "new_text"],
+                },
+                handler=core.propose_patch,
+            )
+        ],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    await engine.run(_state())
+    types = [t for t, _ in events]
+    assert "patch.proposed" in types
+    assert "patch.applied" in types
+    assert (workspace / "doc.md").read_text(encoding="utf-8") == "new-content"
+    applied = next(p for t, p in events if t == "patch.applied")
+    assert applied.get("auto_applied") is True
+
+
+@pytest.mark.asyncio
 async def test_agent_engine_waiting_approval(workspace) -> None:
     call = {"id": "tc2", "name": "write_file", "input": {"path": "x.txt", "content": "y"}}
     events: list[str] = []

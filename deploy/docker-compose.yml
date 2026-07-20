@@ -54,6 +54,11 @@ services:
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
       SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
       SOURCES_STARTUP_SYNC_DELAY_SECONDS: ${SOURCES_STARTUP_SYNC_DELAY_SECONDS:-3}
+      SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
+      SOURCES_WATCH_POLL_SECONDS: ${SOURCES_WATCH_POLL_SECONDS:-2}
+      SOURCES_WATCH_DEBOUNCE_SECONDS: ${SOURCES_WATCH_DEBOUNCE_SECONDS:-1.5}
+      # Standing seed corpus (repo); nested RO mount — no copy into workspace.
+      SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
       HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
       TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
       HF_HOME: ${HF_HOME:-/data/models}
@@ -68,6 +73,9 @@ services:
     volumes:
       - agent_data:/data
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+      # Product standing corpus (git): RO mount under sources/ so search_sources
+      # indexes it without copying into the user sandbox (docs/15).
+      - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
     depends_on:
       postgres:
         condition: service_healthy

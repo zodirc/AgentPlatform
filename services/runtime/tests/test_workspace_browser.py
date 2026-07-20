@@ -67,6 +67,9 @@ async def test_upload_source_file_writes_pending_index(workspace, monkeypatch) -
     assert result.get("index", {}).get("status") == "pending"
     status = sources_index_status(path="sources/my-ref.md")
     assert status["status"] == "building"
+    assert status["plane"] == "ingestion"
+    assert status["effect_ready"] is False
+    assert "retrieval-bench-prod" in (status.get("hint") or "")
 
 
 @pytest.mark.asyncio
@@ -90,6 +93,9 @@ async def test_upload_source_file_can_sync_inline(workspace, monkeypatch) -> Non
     status = sources_index_status(path="sources/my-ref-sync.md")
     assert status["status"] == "ready"
     assert status["path_current"] is True
+    assert status["plane"] == "ingestion"
+    assert status["ingestion_ready"] is True
+    assert status["effect_ready"] is False
 
 
 @pytest.mark.asyncio

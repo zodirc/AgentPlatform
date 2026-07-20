@@ -209,13 +209,20 @@ Content-Type: application/json
 ### 5.1 工作区
 
 ```text
-/workspace/
-  project.yaml
+/workspace/                    # 当前部署下 ≡ 当前作品（见 docs/23）
   outline.md
-  sections/
+  manuscript.md                # 默认：全书正文（分章用 HTML 注释标记）
+  sections/                    # 可选：一章一文件布局
   sources/
-  .agent/revisions/
+  .agent/
+    work/
+      drafts/manuscript.md     # 在编全书草稿（跨 Session 追加）
+      history/{section_id}/    # 可选章节快照
+      turns/{turn_id}.json     # 本轮触碰清单（export current_draft）
 ```
+
+> 默认 `WRITING_MANUSCRIPT_MODE=monofile`。设为 `sections` 时仍用一章一文件。  
+> 旧路径 `.agent/sessions/{session}/revisions/` 仅兼容读取。
 
 ### 5.2 场景专属工具（实现在 `tools/core/`，此处为登记）
 
@@ -223,7 +230,7 @@ Content-Type: application/json
 |------|--------|------|
 | `search_sources` | network | 资料检索 |
 | `update_outline` | write | 大纲结构修改，直接作用于 `outline.md` |
-| `draft_section` | write | 生成章节草稿，写入 `.agent/revisions/{turn_id}/`，不直接覆盖正式文稿 |
+| `draft_section` | write | 默认写入 `.agent/work/drafts/manuscript.md` 的章节块（可 `layout=sections`） |
 | `check_citation` | read | 引用核对 |
 | `export_document` | write | 导出 |
 
@@ -233,19 +240,23 @@ Content-Type: application/json
 
 为避免“领域写工具”与通用 patch 工具并行改同一目标，写作场景统一采用以下主路径：
 
-1. **结构修改**：`update_outline` 修改 `outline.md`
+1. **结构修改**：`update_outline` 修改 `outline.md`（长大纲续写用 `mode=append`；`replace` 须整份大纲，缩水过大需 `force=true`）
 2. **内容生成**：`draft_section` 只产出草稿或修订候选，不直接覆盖正式 `sections/*.md`
-3. **正式落稿**：对正式文稿的变更统一走 `propose_patch` → 用户确认 → `apply_patch`
+3. **正式落稿**：写作模式默认 `propose_patch` **自动 apply**（跟手）；`old_text`/`new_text` 为**片段替换**，不是整文件覆盖。需要人工审阅时设 `WRITING_PATCH_AUTO_APPLY=false`，再走 Accept → `apply_patch`。
 4. **导出交付**：`export_document` 必须接收显式章节集合；`source=confirmed` 读取已确认正文，`source=current_draft` 只读取本轮 manifest 指向的草稿，用于用户明确要求的即时草稿交付
 
 约束：
 
+- `propose_patch` 的 `old_text` 必须是当前文件中唯一匹配的跨度；`apply_patch` / 自动落盘按该跨度手术替换
 - `draft_section` 产生的内容若要进入正式文稿，必须转成 `propose_patch` 结果
-- 草稿导出不等于正式落稿；`current_draft` 不得扫描其他 Turn 的 revisions
+- 草稿导出不等于正式落稿；`current_draft` 不得扫描其他 Turn 的触碰清单 / 旧 revisions
 - UI 中“接受修改”统一绑定 `apply_patch`，不直接绑定 `draft_section`
 - 写作场景禁止把 `write_file` / `edit_file` 作为默认文稿主路径暴露给模型
+- 跨 Session 续写同一作品：读 `sections/` 或 `.agent/work/drafts/`（见 [23](23-writing-work-model.md)）
 
-**Patch 审阅与 Turn 状态**（ADR-015）：`propose_patch` 产出后，若模型无后续 `tool_use`，Turn 正常 **`completed`**。用户在 Turn 结束后通过 `patch/accept` 或 `patch/reject` 决策；**不**引入 `waiting_patch_decision` 执行态。拒稿不等于 `CancelTurn`。
+**Patch 审阅与 Turn 状态**（ADR-015）：`propose_patch` 产出后，若模型无后续 `tool_use`，Turn 正常 **`completed`**。  
+**写作模式默认自动落盘**（`WRITING_PATCH_AUTO_APPLY=true`）：同 Turn 内写 `patch.proposed` 后立刻 `patch.applied`，无需再点 Accept；UI 仍展示 diff。  
+`agent` 等场景仍可走手动 `patch/accept` / `patch/reject`。拒稿不等于 `CancelTurn`。
 
 ### 5.3 子 agent（仅本场景 Profile 启用）
 

@@ -515,33 +515,34 @@ def prepare_writing_system_prompt(
     *,
     workspace_root: Path | None = None,
 ) -> WritingCardsPinResult:
+    from app.writing.work_index import format_work_index_block
+
     cards = load_writing_cards(workspace_root=workspace_root)
     selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)
+    work_index = format_work_index_block(workspace_root=workspace_root)
+    extras: list[str] = []
     if block:
-        prompt = f"{base_prompt.rstrip()}\n\n{block}\n"
+        extras.append(block)
+    elif cards:
+        names = ", ".join(f"{c.title}({c.kind})" for c in cards[:12])
+        extras.append(
+            "## Writing cards\n"
+            f"资料库中有素材卡但未自动选中：{names}。\n"
+            "若任务依赖人物/风格写定，先 `read_file` 对应 `sources/cards/` 路径。"
+        )
+    if work_index:
+        extras.append(work_index)
+
+    if extras:
+        prompt = f"{base_prompt.rstrip()}\n\n" + "\n\n".join(extras) + "\n"
         return WritingCardsPinResult(
             prompt=prompt,
-            cards=selection.cards,
+            cards=selection.cards if block else [],
             available_count=len(cards),
             dropped=selection.dropped,
             budget=selection.budget,
             cards_block=block,
-        )
-    if cards:
-        names = ", ".join(f"{c.title}({c.kind})" for c in cards[:12])
-        hint = (
-            "\n\n## Writing cards\n"
-            f"资料库中有素材卡但未自动选中：{names}。\n"
-            "若任务依赖人物/风格写定，先 `read_file` 对应 `sources/cards/` 路径。\n"
-        )
-        return WritingCardsPinResult(
-            prompt=f"{base_prompt.rstrip()}\n{hint}",
-            cards=[],
-            available_count=len(cards),
-            dropped=selection.dropped,
-            budget=selection.budget,
-            cards_block="",
         )
     return WritingCardsPinResult(
         prompt=base_prompt,

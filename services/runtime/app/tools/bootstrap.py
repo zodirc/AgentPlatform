@@ -39,7 +39,10 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="propose_patch",
-            description="Propose a patch for user review (does not write file)",
+            description=(
+                "Propose a surgical edit: old_text must be an exact unique span in the "
+                "current file; new_text replaces only that span (not the whole file)"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -56,10 +59,18 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="apply_patch",
-            description="Apply an accepted patch to the workspace",
+            description=(
+                "Apply an accepted patch. When old_text is set, replaces that unique span; "
+                "otherwise writes new_text as the full file"
+            ),
             parameters={
                 "type": "object",
-                "properties": {"path": {"type": "string"}, "new_text": {"type": "string"}},
+                "properties": {
+                    "path": {"type": "string"},
+                    "new_text": {"type": "string"},
+                    "old_text": {"type": "string"},
+                    "force_full_replace": {"type": "boolean"},
+                },
                 "required": ["path", "new_text"],
             },
             handler=core.apply_patch,
@@ -69,12 +80,21 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="draft_section",
-            description="Draft or update a document section",
+            description=(
+                "Draft or update a chapter. Default monofile: upserts a marked block in "
+                ".agent/work/drafts/manuscript.md (append new chapters / replace same section_id). "
+                "Pass layout=sections for one-file-per-chapter under .agent/work/drafts/"
+            ),
             parameters={
                 "type": "object",
                 "properties": {
                     "section_id": {"type": "string"},
                     "content": {"type": "string"},
+                    "layout": {
+                        "type": "string",
+                        "enum": ["monofile", "sections"],
+                        "description": "Override WRITING_MANUSCRIPT_MODE for this call",
+                    },
                 },
                 "required": ["section_id", "content"],
             },
@@ -112,10 +132,24 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="update_outline",
-            description="Create or update document outline (outline.md)",
+            description=(
+                "Create or update outline.md. Prefer mode=append for long outlines / "
+                "batch continuation; replace requires the full outline (or force=true)"
+            ),
             parameters={
                 "type": "object",
-                "properties": {"content": {"type": "string"}},
+                "properties": {
+                    "content": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "append"],
+                        "default": "replace",
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Allow replace that shrinks a large existing outline",
+                    },
+                },
                 "required": ["content"],
             },
             handler=core.update_outline,

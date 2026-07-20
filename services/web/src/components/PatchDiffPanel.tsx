@@ -33,10 +33,15 @@ export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
           </p>
         </div>
         <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
-          {status}
+          {status === "applied" ? "已落盘" : status}
         </span>
       </div>
 
+      {status === "applied" ? (
+        <p className="mb-2 text-[11px] text-emerald-400/90">
+          写作模式已自动写入工作区（仍可对照下方 diff）
+        </p>
+      ) : null}
       <Suspense
         fallback={
           <div className="grid gap-2 md:grid-cols-2">

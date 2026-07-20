@@ -337,7 +337,10 @@ async def accept_patch(
     result = await core_tools.apply_patch(
         path=patch_payload["path"],
         new_text=patch_payload["new_text"],
+        old_text=str(patch_payload.get("old_text") or ""),
     )
+    if result.get("status") == "error":
+        raise ValueError(str(result.get("error") or "apply_patch failed"))
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -351,7 +354,7 @@ async def accept_patch(
                     "patch_id": patch_id,
                     "path": patch_payload["path"],
                     "status": "applied",
-                    **result,
+                    "bytes_written": result.get("bytes_written"),
                 },
                 step_index=step_index,
             )

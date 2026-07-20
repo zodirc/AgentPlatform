@@ -9,6 +9,11 @@
     "path": { "type": "string", "minLength": 1 },
     "content": { "type": "string", "maxLength": 65536 },
     "summary": { "type": "string", "maxLength": 4096 },
-    "outline_path": { "type": "string" }
+    "outline_path": { "type": "string" },
+    "mode": {
+      "type": "string",
+      "enum": ["replace", "append"],
+      "description": "How outline.md was updated"
+    }
   }
 }

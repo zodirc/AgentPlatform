@@ -190,8 +190,8 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-100">写作资料库</p>
             <p className="text-xs text-slate-500">
-              workspace/sources/ · 粘贴或上传 · 同步不挡对话 · 供 search_sources
-              检索
+              workspace/sources/ · 粘贴或上传 · 目录监视自动投影 · 同步不挡对话 ·
+              投影就绪≠效果过关
             </p>
           </div>
           <Button
@@ -254,7 +254,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                       {pasteMutation.isPending ? "保存中…" : "保存到资料库"}
                     </Button>
                     <span className="text-[10px] text-slate-600">
-                      保存后自动重建索引；也可点「同步资料库」刷新手改文件
+                      保存后后台投影；手改文件由监视自动跟上，也可点「同步资料库」
                     </span>
                   </div>
                 </div>

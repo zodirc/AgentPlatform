@@ -9,6 +9,10 @@
     "patch_id": { "type": "string", "minLength": 1 },
     "path": { "type": "string", "minLength": 1 },
     "status": { "type": "string", "enum": ["applied"] },
-    "bytes_written": { "type": "integer", "minimum": 0 }
+    "bytes_written": { "type": "integer", "minimum": 0 },
+    "auto_applied": {
+      "type": "boolean",
+      "description": "True when writing mode auto-applied propose_patch without UI Accept"
+    }
   }
 }

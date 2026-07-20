@@ -52,6 +52,9 @@ async def write_workspace_file(*, path: str, content: str) -> dict:
     normalized = path.strip().lstrip("/")
     if not normalized.startswith("sources/"):
         raise ValueError("only sources/ paths are writable from web upload")
+    from app.tools.core.tools import _assert_not_seed_corpus
+
+    _assert_not_seed_corpus(normalized)
     filename = Path(normalized).name
     safe_source_filename(filename)
     if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
@@ -99,6 +102,13 @@ async def delete_workspace_paths(paths: list[str]) -> dict[str, Any]:
     sources_touched = False
 
     for rel in targets:
+        try:
+            from app.tools.core.tools import _assert_not_seed_corpus
+
+            _assert_not_seed_corpus(rel)
+        except PermissionError as exc:
+            failed.append({"path": rel, "error": str(exc)})
+            continue
         try:
             target = _resolve_path(rel)
         except PermissionError as exc:
@@ -165,7 +175,12 @@ def _mark_index_error(message: str, *, path: str | None = None) -> None:
 
 
 def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
-    """Return current index job state plus whether ``path`` is present in the store."""
+    """Return current index job state plus whether ``path`` is present in the store.
+
+    IX3: this endpoint is the **ingestion plane** only. ``ready`` / ``path_current``
+    mean the file is projected into the index — never that retrieval quality passed
+    prod-bench or workbench hard queries (docs/15).
+    """
     import json
 
     with _index_lock:
@@ -215,6 +230,11 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
     if path and path_indexed and path_mtime_matched:
         status = "ready"
 
+    path_current = bool(path and path_indexed and path_mtime_matched)
+    ingestion_ready = status in {"ready", "idle"} and (
+        not path or path_current or (status == "ready" and path_indexed)
+    )
+
     return {
         "status": status,
         "path": job.get("path"),
@@ -224,8 +244,17 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
         "updated_at": updated_at,
         "embedding_backend": embedding_backend or settings.embedding_backend,
         "path_indexed": path_indexed,
-        "path_current": bool(path and path_indexed and path_mtime_matched),
+        "path_current": path_current,
         "last_result": last,
+        # IX3: ingestion ≠ effect gate
+        "plane": "ingestion",
+        "ingestion_ready": ingestion_ready,
+        "effect_ready": False,
+        "hint": (
+            "Ingestion plane only: ready/path_current means projected into the index. "
+            "Effect gate remains make retrieval-bench-prod + workbench hard queries "
+            "(docs/15 IX3/IX4)."
+        ),
     }
 
 

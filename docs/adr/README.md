@@ -25,6 +25,7 @@
 | [017](017-contract-validation-and-event-payloads.md) | 边界契约校验与事件 Payload Schema | 已接受 | `04` §3.5、`contracts` §3.1、`07` §10 |
 | [018](018-web-frontend-stack.md) | Web 前端：Vite + React + TS + nginx 静态部署 | 已接受 | `03` §5.4、`04` §2–3.2、`10`、`11` §5 |
 | [019](019-model-provider-runtime-config.md) | 模型供应商 Web 管理 + DB 热生效 | 已接受 | `03` §3、`05` §6、`07` §7、`contracts` §2.2、`11` §6 |
+| [020](020-writing-work-over-session-drafts.md) | Writing 作品树优先于 Session 草稿目录 | 已接受 | `23-writing-work-model`、`09` §5.1 |
 
 > 历史：曾有一版「ADR-014 ScenarioProfile 扩展」已并入 ADR-013；当前 014 为 Turn Intake 决策。
 

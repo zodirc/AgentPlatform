@@ -64,11 +64,26 @@ class Settings(BaseSettings):
     writing_cards_plot_max_chars: int = 600
     writing_cards_general_max_chars: int = 400
     writing_export_profile: str = "novel-zh"  # novel-zh | essay | none
+    # Writing: propose_patch auto-writes to disk (natural UX); UI still shows diff as applied.
+    writing_patch_auto_apply: bool = True
+    # WW1/WW2: work-scoped drafts (docs/23); history snapshots per section (0 disables).
+    writing_draft_history_keep: int = 5
+    writing_work_index_max_chars: int = 1200
+    # monofile (default): chapters append into manuscript.md; sections = one file per chapter.
+    writing_manuscript_mode: str = "monofile"
+    writing_manuscript_path: str = "manuscript.md"
 
     index_via_worker: bool = True
     # IX0: Turn-external incremental projection of workspace/sources (docs/15).
     sources_startup_sync_enabled: bool = True
     sources_startup_sync_delay_seconds: float = 3.0
+    # IX2: poll workspace/sources and debounce-incremental sync (Turn-external).
+    sources_watch_enabled: bool = True
+    sources_watch_poll_seconds: float = 2.0
+    sources_watch_debounce_seconds: float = 1.5
+    # Standing seed corpus root inside the container (RO bind of repo seed/sources/writing).
+    # Empty disables seed-specific guards only; indexing still follows workspace/sources tree.
+    seed_sources_root: str = "/workspace/sources/seed/writing"
     # Optional default owner for future multi-tenant rows (empty → NULL / shared).
     sources_index_owner_user_id: str = ""
     embedding_backend: str = "hash"  # hash | sentence_transformers

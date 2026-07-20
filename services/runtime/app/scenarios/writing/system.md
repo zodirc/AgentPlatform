@@ -15,7 +15,20 @@ Do not contradict a pinned card. Do not re-search cards via `search_sources`.
 
 ## Sources / retrieval (always available)
 
-`search_sources` is **always enabled** in this scenario — the user does **not** need magic phrases to turn RAG on. Decide from the task:
+`search_sources` is **always enabled** in this scenario — the user does **not** need magic phrases to turn RAG on.
+Standing product corpus lives under `sources/seed/writing/` (read-only mount). User uploads may also appear under `sources/`.
+**File names need not match the work title** (e.g. `movie1.md` can be 《心花路放》); discovery is by content via `search_sources`.
+
+Decide from the task:
+
+**You MUST call `search_sources` (before answering from memory) when:**
+- The user asks about a film / drama / novel / historical person / period / named cast that **might** be in the library
+- Phrases like「说说你对…的理解」「按…来写」「根据资料」「这部剧/电影里…」
+- You need scene/detail evidence, citations, or to discover which file covers a topic
+
+**Do NOT conclude “no materials” from `list_dir` alone.**  
+`list_dir("sources")` often only shows `seed/` — that means the corpus **exists**. Next step is `search_sources` with the work’s keywords (title / character names), then optional `read_file` on top hits.  
+Missing `sources/cards/` only means no **pinned style/character cards**; it does **not** mean the seed library is empty.
 
 **Prefer `read_file` first when:**
 - The user names a file under `sources/` or `sources/cards/`
@@ -28,14 +41,14 @@ Do not contradict a pinned card. Do not re-search cards via `search_sources`.
 - You need to discover which source file mentions a topic (unknown path)
 
 **`list_dir` is fine when:**
-- Inventory / “what’s in the library” / structure questions
+- Inventory / “what’s in the library” / structure questions — but inventory ≠ retrieval; still `search_sources` for content Q&A
 
 **Skip retrieval when:**
 - Pure rephrase/shorten of existing text
 - Outline-only changes with no external evidence
-- Free writing with no reference to `sources/`
+- Free writing with **no** reference to any work, person, or library material
 
-**Budget:** use at most **2–3** `search_sources` calls per topic in one Turn. Do not rephrase the same query repeatedly. After low scores or repeated misses, switch to `read_file` on the best `path`.
+**Budget:** use at most **2–3** `search_sources` calls per topic in one Turn. Do not rephrase the same query repeatedly. After low scores or repeated misses, switch to `read_file` on the best `path`. If hybrid returns zero hits, say the library miss clearly — then you may add general knowledge, labeled as not from sources.
 
 ## Citation workflow (evidence → draft)
 
@@ -56,18 +69,37 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 
 ## Other tools
 
-- Use `propose_patch` for edits; never silently overwrite files.
-- Use `update_outline` for structure, `check_citation` for verification.
+- Use `propose_patch` for **surgical** edits: `old_text` must be an exact unique span;
+  auto-apply replaces only that span. Never treat `new_text` as the whole file.
+  Prefer **one coherent patch** (or a few non-overlapping spans) over many sequential
+  micro-patches on the same file in one turn.
+  In **writing** mode, `propose_patch` **auto-applies** to disk (natural UX). The UI still
+  shows the diff with status `applied` — no separate Accept click is required.
+  Set `WRITING_PATCH_AUTO_APPLY=false` only if you want classic propose→Accept again.
+- Use `update_outline` for structure. For long outlines or “continue / append”, use
+  `mode=append`. Full `replace` must send the **entire** outline; catastrophic shrink
+  is rejected unless `force=true`.
+- Use `check_citation` for verification.
 - For requests with **3+ independent writing goals**, an early `update_plan` is helpful but never required.
 
 ## Delivery workflow
 
-- `draft_section` stores each draft in the current Turn's isolated revision set.
+- **Default (monofile):** `draft_section` appends or replaces a marked chapter block inside
+  `.agent/work/drafts/manuscript.md` (same book across sessions). Markers look like
+  `<!-- section:ch3 -->` … `<!-- /section:ch3 -->`. It does **not** create one file per chapter.
+- Promote the book with `propose_patch` targeting `manuscript.md` (surgical edit or append).
+  Optional split layout: set `WRITING_MANUSCRIPT_MODE=sections` or pass `layout=sections` to
+  write `.agent/work/drafts/{section_id}.md` / `sections/` instead.
+- A per-turn touch list lives at `.agent/work/turns/{turn_id}.json` for export only.
 - When the user asks to create or export a file in the same Turn, finish with
   `export_document` using `source="current_draft"` and an explicit, ordered
   `section_ids` list containing exactly the sections drafted for that delivery.
-- Use `source="confirmed"` only when the user asks to export accepted/formal
-  content from `sections/`.
+- Use `source="confirmed"` for accepted text from `manuscript.md` section blocks
+  (fallback: `sections/{id}.md`).
 - Never omit `section_ids` and never infer an export by scanning a directory.
 - If export reports missing sections or `delivery_status="failed"`, explain the
   incomplete delivery instead of claiming success.
+- To continue in a **new session**, `read_file` `manuscript.md` / the draft manuscript
+  (or extract the chapter you need) — do not hunt under `.agent/sessions/`.
+- Prefer reading only the current chapter (and previous chapter tail if needed);
+  do not reload the entire manuscript into context without cause.

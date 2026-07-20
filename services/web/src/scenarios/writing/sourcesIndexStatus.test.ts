@@ -10,7 +10,7 @@ const path = "sources/ref-a.md";
 describe("sourcesIndexStatusLabel", () => {
   it("describes pending async index work", () => {
     expect(sourcesIndexStatusLabel(path, { status: "pending" }, true)).toEqual({
-      text: `已保存 ${path} · 等待后台索引…`,
+      text: `已保存 ${path} · 等待后台投影…`,
       tone: "pending",
     });
   });
@@ -18,7 +18,7 @@ describe("sourcesIndexStatusLabel", () => {
   it("describes an index build in progress", () => {
     expect(sourcesIndexStatusLabel(path, { status: "building" }, true)).toEqual(
       {
-        text: `已保存 ${path} · 索引重建中…`,
+        text: `已保存 ${path} · 索引投影中…`,
         tone: "pending",
       },
     );
@@ -32,12 +32,12 @@ describe("sourcesIndexStatusLabel", () => {
         false,
       ),
     ).toEqual({
-      text: `已保存 ${path} · 索引失败：embedding unavailable`,
+      text: `已保存 ${path} · 投影失败：embedding unavailable`,
       tone: "err",
     });
   });
 
-  it("reports a current index as searchable", () => {
+  it("reports projection ready without claiming effect gate", () => {
     expect(
       sourcesIndexStatusLabel(
         path,
@@ -45,7 +45,7 @@ describe("sourcesIndexStatusLabel", () => {
         false,
       ),
     ).toEqual({
-      text: `已保存 ${path} · 索引完成，可检索（3 块）`,
+      text: `已保存 ${path} · 投影就绪（3 块，可被检索） · 效果闸仍看 prod-bench / 难句`,
       tone: "ok",
     });
   });
@@ -53,15 +53,13 @@ describe("sourcesIndexStatusLabel", () => {
 
 describe("libraryIndexStatusLabel", () => {
   it("describes library sync in progress", () => {
-    expect(
-      libraryIndexStatusLabel({ status: "building" }, true),
-    ).toEqual({
-      text: "资料库索引同步中（不挡对话）…",
+    expect(libraryIndexStatusLabel({ status: "building" }, true)).toEqual({
+      text: "资料库索引投影中（不挡对话）…",
       tone: "pending",
     });
   });
 
-  it("reports ready library index", () => {
+  it("reports ready library index as ingestion-only", () => {
     expect(
       libraryIndexStatusLabel(
         {
@@ -73,7 +71,7 @@ describe("libraryIndexStatusLabel", () => {
         false,
       ),
     ).toEqual({
-      text: "资料库索引就绪 · 5 文件 · 17 块 · sentence_transformers",
+      text: "资料库投影就绪（摄取面） · 5 文件 · 17 块 · sentence_transformers · 效果闸仍看 prod-bench / 难句",
       tone: "ok",
     });
   });

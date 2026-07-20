@@ -252,12 +252,20 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 `index.status=pending`，runtime 后台任务再把状态推进为 `building`，最终进入 `ready` 或
 `error`。因此上传成功不等于索引已经可检索，API 也不得等待 embedding 构建完成。
 
-**Turn 外投影（docs/15 IX0）：** runtime 启动后默认延迟数秒异步增量同步 `workspace/sources`
-（`SOURCES_STARTUP_SYNC_ENABLED`，不挡 `/health/live`）。手改 md 后也可：工作台「资料库 → 同步资料库」（IX1，不挡对话），或运维：
+**Turn 外投影（docs/15 IX0–IX2）：** runtime 启动后默认延迟数秒异步增量同步 `workspace/sources`
+（`SOURCES_STARTUP_SYNC_ENABLED`，不挡 `/health/live`）。默认另启目录监视（`SOURCES_WATCH_ENABLED`，
+轮询 + debounce）。也可：工作台「资料库 → 同步资料库」（IX1），或运维：
 
 ```bash
-make sync-sources
+make sync-sources   # 或 make seed-sources（同义）
 ```
+
+**常驻种子库（只读挂载，不拷贝）：** 宿主机 `seed/sources/writing` → 容器
+`/workspace/sources/seed/writing:ro`（`SEED_SOURCES_HOST_PATH`）。索引逻辑路径为
+`sources/seed/writing/...`；改仓库内 seed 后重建索引即可，勿往沙箱里复制。
+
+**IX3：** `GET …/sources/index-status` 仅报告**摄取面**（`plane=ingestion`，`effect_ready=false`）。
+`ready` / `path_current` 表示已投影可被检索，**不等于**效果闸（`make retrieval-bench-prod` + 难句工作台）。
 
 运维侧可轮询
 `GET /api/v1/admin/workspace/sources/index-status?path=sources/<文件名>`：

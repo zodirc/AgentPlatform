@@ -344,13 +344,20 @@ async def lifespan(app):
         cancel_startup_sources_sync,
         schedule_startup_sources_sync,
     )
+    from app.retrieval.sources_watch import (
+        cancel_sources_watch,
+        schedule_sources_watch,
+    )
 
     watchdog = asyncio.create_task(stall_watchdog_loop())
     # IX0: Turn-external incremental projection; must not block /health/live.
     schedule_startup_sources_sync()
+    # IX2: poll sources/ for host edits; debounced sync (still Turn-external).
+    schedule_sources_watch()
     try:
         yield
     finally:
+        await cancel_sources_watch()
         await cancel_startup_sources_sync()
         watchdog.cancel()
         try:
