@@ -26,7 +26,7 @@ EVAL_BUILD ?=
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources seed-sources retrieval-bench-prod
+	sync-sources seed-sources retrieval-bench-prod loc
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -53,6 +53,7 @@ help: ## 显示常用命令
 	@echo "  make sync-sources    Turn 外索引 workspace/sources（含挂载 seed）"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make runtime-test 运行时测试"
+	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
 
 start: ## 启动栈（不 rebuild，最快）
 	$(COMPOSE) up -d
@@ -187,6 +188,9 @@ seed-sources: ## 同 sync-sources：对挂载的常驻 seed 重新建索引（�
 
 security-audit:
 	bash scripts/security_audit.sh
+
+loc: ## 统计源码行数（不含依赖/文档/workspace）
+	python3 scripts/loc.py
 
 contracts-test:
 	pip install -q jsonschema pytest pyyaml && pytest packages/contracts/tests -q
