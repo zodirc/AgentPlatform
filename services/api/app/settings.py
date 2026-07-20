@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     app_secret_key: str = "change-me"
     auth_enabled: bool = False
     admin_password: str = "admin"
-    # End-user login for session ownership (docs/20). Default on.
+    # End-user login for session ownership (docs/16). Default on.
     end_user_auth_enabled: bool = True
     # Allow admin Basic to act as system owner (eval / scripts).
     admin_session_bypass: bool = True

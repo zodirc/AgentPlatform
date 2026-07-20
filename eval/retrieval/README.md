@@ -1,4 +1,4 @@
-# Offline retrieval bench (docs/27 §8.1 · docs/28 RE0/RE3 · docs/30 IX4)
+# Offline retrieval bench（docs/15）
 
 Layer-1 A/B harness for `search_sources` quality — **no agent loop**.
 

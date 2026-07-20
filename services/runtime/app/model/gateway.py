@@ -470,7 +470,7 @@ def _wants_search(text: str, *, tool_names: set[str] | None = None) -> bool:
     if tool_names and "delegate" in tool_names and _wants_delegate(text):
         return False
     lowered = text.lower()
-    # Style / outline passes: never auto-retrieve (docs/23 §4.2 W3/W4).
+    # Style / outline passes: never auto-retrieve (docs/14 §4.2 W3/W4).
     if "[polish]" in lowered or "[outline]" in lowered or "writing.12" in lowered or "writing.13" in lowered:
         return False
     # Golden cases and explicit tool requests always exercise retrieval, even

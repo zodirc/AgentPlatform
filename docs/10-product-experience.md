@@ -1,4 +1,4 @@
-# 11 — 产品体验与长期运行
+# 10 — 产品体验与长期运行
 
 > 本文定义 **「好用」** 与 **「可长期自用」** 的可验收标准。  
 > 架构服务于每日使用，而非仅服务于简历；二者通过对齐同一套 SLO 同时成立。
@@ -68,7 +68,7 @@ Turn 结束 → runtime append 终态事件
 强制压缩 → /compact 写摘要并重置 transcript
 ```
 
-写主权与触发机制见 [`07-domain-model.md`](07-domain-model.md) §5、§7 与 [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md) §6.0。  
+写主权与触发机制见 [`07-domain-model.md`](07-domain-model.md) §5、§7 与 [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md) §6.0。  
 **禁止** 未达阈值就自动整窗摘要；落库 trim 必须确定性、无 LLM。**禁止** 单 Session 拖垮 assemble 延迟。
 
 ### 4.2 工作区与数据持久化
@@ -175,7 +175,7 @@ Web 设置页（`/settings/model`）须支持：
 ## 8. 相关文档
 
 - [`05-agent-runtime.md`](05-agent-runtime.md) §3.1 Turn Intake
-- [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md) — SSE / 重连
-- [`10-product-modes.md`](10-product-modes.md) — 场景能力
-- [`12-eval-and-golden-turns.md`](12-eval-and-golden-turns.md) — 质量回归
+- [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md) — SSE / 重连
+- [`09-product-modes.md`](09-product-modes.md) — 场景能力
+- [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md) — 质量回归
 - [ADR-014](adr/014-turn-intake-over-intent-pipeline.md)

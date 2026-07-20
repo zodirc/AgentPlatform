@@ -54,7 +54,7 @@ async def require_admin_or_end_user(
 ) -> None:
     """Workspace / shared tooling: end-user cookie or admin Basic.
 
-    After docs/20 login, workbench users should not need a second admin password
+    After docs/16 login, workbench users should not need a second admin password
     to browse the workspace. Model-provider admin routes stay admin-only.
     """
     from app.services.end_user.auth import resolve_end_user

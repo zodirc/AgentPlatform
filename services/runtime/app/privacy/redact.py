@@ -4,7 +4,7 @@ import copy
 import re
 from typing import Any
 
-# Precompiled patterns — keep deterministic and millisecond-scale (docs/17 S2 A15).
+# Precompiled patterns — keep deterministic and millisecond-scale (docs/13 S2 A15).
 _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"), "[REDACTED_PHONE]"),
     (re.compile(r"(?<!\d)\d{17}[\dXx](?!\d)"), "[REDACTED_ID]"),

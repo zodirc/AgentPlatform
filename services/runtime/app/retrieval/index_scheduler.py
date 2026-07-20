@@ -1,4 +1,4 @@
-"""Turn-external sources index scheduling (docs/29–30 IX0).
+"""Turn-external sources index scheduling (docs/15 IX0).
 
 Startup / admin sync must never run on the search_sources hot path.
 """

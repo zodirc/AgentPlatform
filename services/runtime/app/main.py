@@ -164,7 +164,7 @@ async def verify_pass_command(
     session_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
-    """User/offline fact-check; never mutates drafts (docs/17 S3 A4)."""
+    """User/offline fact-check; never mutates drafts (docs/13 S3 A4)."""
     from app.controller.verify_pass import run_verify_pass
 
     return {"accepted": True, **run_verify_pass(session_id=session_id)}
@@ -175,7 +175,7 @@ async def warmup_retrieval_command(
     prefix: str = "",
     _: None = Depends(verify_internal_token),
 ):
-    """Typing-time / idle warm-up — fire-and-forget (docs/17 S3 A18)."""
+    """Typing-time / idle warm-up — fire-and-forget (docs/13 S3 A18)."""
     import asyncio
 
     text = (prefix or "warmup").strip()[:200] or "warmup"

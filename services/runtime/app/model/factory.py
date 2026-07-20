@@ -11,7 +11,7 @@ from app.settings import settings
 
 
 def apply_compact_model(config: ModelConfig | None) -> ModelConfig | None:
-    """Overlay optional compact summarizer model (docs/17 S3 A17)."""
+    """Overlay optional compact summarizer model (docs/13 S3 A17)."""
     if config is None:
         return None
     name = (settings.compact_model_name or "").strip()

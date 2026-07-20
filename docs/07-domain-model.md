@@ -1,7 +1,7 @@
 # 07 — 领域模型与状态机
 
 > 本文闭合 **Session / Run / Turn / Step** 的语义、生命周期与持久化归属。  
-> 与 [`05-agent-runtime.md`](05-agent-runtime.md)（循环内核）、[`09-event-projection-pipeline.md`](09-event-projection-pipeline.md)（事件与投影）配套阅读。
+> 与 [`05-agent-runtime.md`](05-agent-runtime.md)（循环内核）、[`08-event-projection-pipeline.md`](08-event-projection-pipeline.md)（事件与投影）配套阅读。
 
 ## 1. 对象关系（权威定义）
 

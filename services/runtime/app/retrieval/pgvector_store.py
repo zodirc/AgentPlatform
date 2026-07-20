@@ -31,7 +31,7 @@ def _safe_schema(name: str) -> str:
 
 
 class PgvectorSourceRetrievalStore:
-    """Postgres + pgvector ANN backend (docs/16 Q8 · docs/17 S3 A10).
+    """Postgres + pgvector ANN backend (docs/21 Q8 · docs/13 S3 A10).
 
     Writes happen only via ``sync`` (worker / admin rebuild). Query path is
     load-schema + ANN / FTS — never rebuilds the index.

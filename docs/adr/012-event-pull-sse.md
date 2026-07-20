@@ -16,7 +16,7 @@
 4. projection 由 **api** 侧模块异步消费 `turn_events` 更新 `turn_views`；失败不阻断 Turn 执行。
 5. Phase 0–2 默认 **单 runtime 副本**；多副本路由见 `docs/03-docker-runtime.md` §8.5。
 
-详见 `docs/09-event-projection-pipeline.md`。
+详见 `docs/08-event-projection-pipeline.md`。
 
 ## 理由
 

@@ -1,1 +1,1 @@
-"""End-user identity for session ownership (docs/20)."""
+"""End-user identity for session ownership (docs/16)."""

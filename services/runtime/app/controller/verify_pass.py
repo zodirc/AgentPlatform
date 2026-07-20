@@ -81,7 +81,7 @@ def _source_exists(root: Path, citation_id: str) -> bool:
 
 
 def run_verify_pass(*, session_id: str | None = None) -> dict[str, Any]:
-    """Deterministic citation verify (docs/17 S3 A4) — user/offline only, no draft mutation."""
+    """Deterministic citation verify (docs/13 S3 A4) — user/offline only, no draft mutation."""
     root = _workspace()
     findings: list[dict[str, Any]] = []
     checked = 0

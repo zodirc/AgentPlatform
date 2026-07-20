@@ -3,7 +3,7 @@ scenario_id: writing
 phase: 2
 description: >
   search_sources with path_prefix=writing hits 张白鹿 section and ignores legal noise
-  (docs/28 RE2/RE3 effect + stub contract)
+  (docs/15 RE2/RE3 effect + stub contract)
 
 fixtures:
   workspace:

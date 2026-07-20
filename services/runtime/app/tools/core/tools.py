@@ -442,7 +442,7 @@ async def search_sources(
         }
         return _attach_filter_meta(payload, filter_meta)
 
-    # Hot path: load + search only. Never store.sync() here (A9 / docs/17 S2).
+    # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
     store = get_sources_store()
     index_meta: dict[str, Any] = {
         "synced_on_query": False,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline rubric judge (docs/16 Q2 · docs/17 S3 A5).
+"""Offline rubric judge (docs/21 Q2 · docs/13 S3 A5).
 
 Never runs inside a Turn. Samples ≤5% of fixtures / input JSONL and writes a
 JSON report. Default scorer is deterministic heuristics.
@@ -120,7 +120,7 @@ def main() -> int:
             else None
         ),
         "results": results,
-        "notes": "Offline only — never attach to Turn completion (docs/17 A5).",
+        "notes": "Offline only — never attach to Turn completion (docs/13 A5).",
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")

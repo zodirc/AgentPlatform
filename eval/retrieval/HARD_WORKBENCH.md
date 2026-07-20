@@ -1,4 +1,4 @@
-# 难自然问句清单（IX4 P-workbench · docs/29 §5.5）
+# 难自然问句清单（IX4 P-workbench · docs/15）
 
 > **用法：** 复制到 Writing 工作台**输入框**（自然语言）。  
 > **禁止：** `/rag-test` 等 slash；不要用本清单代替 `make retrieval-bench-prod`。  

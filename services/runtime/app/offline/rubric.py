@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 
 
-# Common AI-taste / filler phrases (offline only; docs/23 WQ4).
+# Common AI-taste / filler phrases (offline only; docs/14 WQ4).
 _AI_BAN_PHRASES = (
     "在这个时代",
     "不禁",
@@ -18,7 +18,7 @@ _AI_BAN_PHRASES = (
 
 
 def score_rubric(text: str) -> dict:
-    """Heuristic fidelity / structure / style scores in [0, 1] (docs/17 S3 A5; docs/23 WQ4).
+    """Heuristic fidelity / structure / style scores in [0, 1] (docs/13 S3 A5; docs/14 WQ4).
 
     Offline / sample only — never invoke on the turn hot path.
     """

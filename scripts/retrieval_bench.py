@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline retrieval A/B bench (docs/27 §8.1 · docs/28 RE0/RE3 · docs/30 IX4).
+"""Offline retrieval A/B bench (docs/15).
 
 Default: json + hash (fast contract / filter regression).
 ``--prod``: sentence_transformers + pgvector in schema ``retrieval_bench``
@@ -233,7 +233,7 @@ def main() -> None:
     parser.add_argument(
         "--prod",
         action="store_true",
-        help="ST + pgvector in isolated schema (docs/30 IX4)",
+        help="ST + pgvector in isolated schema (docs/15 IX4)",
     )
     parser.add_argument(
         "--schema",

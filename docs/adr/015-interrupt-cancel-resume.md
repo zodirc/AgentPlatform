@@ -92,7 +92,7 @@
 - [`05-agent-runtime.md`](../05-agent-runtime.md) §8
 - [`06-tools-and-context.md`](../06-tools-and-context.md) §5.4
 - [`07-domain-model.md`](../07-domain-model.md) §2.5、§7
-- [`11-product-experience.md`](../11-product-experience.md) §1、§5.1
-- [`12-eval-and-golden-turns.md`](../12-eval-and-golden-turns.md) §5.1
+- [`10-product-experience.md`](../10-product-experience.md) §1、§5.1
+- [`11-eval-and-golden-turns.md`](../11-eval-and-golden-turns.md) §5.1
 - [`contracts.md`](../contracts.md) §2.1、§3、§3.1、§4
 - [ADR-016](016-execution-timeouts-and-stall-watchdog.md)

@@ -181,7 +181,7 @@ async def warmup_retrieval(
     prefix: str = "",
     _actor: EndUser = Depends(require_session_actor),
 ):
-    """Typing-time retrieve warm-up; never blocks a turn (docs/17 S3 A18)."""
+    """Typing-time retrieve warm-up; never blocks a turn (docs/13 S3 A18)."""
     from app.services.command.runtime_client import RuntimeClient
 
     try:

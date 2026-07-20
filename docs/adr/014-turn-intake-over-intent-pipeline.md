@@ -22,7 +22,7 @@
    - **确定性门控**：`shouldQuery`（meta/本地命令 → 不进 `AgentEngine`）
    - **产品入口**：`scenario_id` 由用户/API 指定，**不由 LLM 猜测** writing/agent
 3. **任务级意图理解**交给 `AgentEngine` **首轮**：无 `tool_use` 则直接回答，有则进入工具链；复杂规划用 `update_plan` / `delegate` 工具，非常驻阶段。
-4. **快速首包**：受理后立即写 `turn.accepted`；Phase 1 起目标 TTFB ≤ 300ms（见 [`11-product-experience.md`](../11-product-experience.md)）。
+4. **快速首包**：受理后立即写 `turn.accepted`；Phase 1 起目标 TTFB ≤ 300ms（见 [`10-product-experience.md`](../10-product-experience.md)）。
 5. **Phase 2+ 可选**：廉价小模型产出 **intent_tags** 仅用于日志/eval，**不参与路由**。
 
 详见 [`05-agent-runtime.md`](../05-agent-runtime.md) §3.1。

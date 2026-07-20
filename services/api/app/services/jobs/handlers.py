@@ -94,7 +94,7 @@ async def handle_session_summary(payload: dict) -> None:
 
 
 async def handle_verify_sample(payload: dict) -> None:
-    """Night/offline sample ≤5% of recent completed sessions (docs/17 S3 A4)."""
+    """Night/offline sample ≤5% of recent completed sessions (docs/13 S3 A4)."""
     import random
 
     sample_rate = float(payload.get("sample_rate", 0.05))

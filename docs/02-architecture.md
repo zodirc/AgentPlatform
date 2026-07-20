@@ -51,7 +51,7 @@ AgentEngine     while: assemble → model → tools → checkpoint
 - 状态：`TurnState.messages` + 少量控制字段（**非**大 `AgentState`）
 - 编排：模型在循环内选工具；平台管护栏（审批、budget、终止）
 - 禁止：13 节点 pipeline、引擎内 `if scenario` 分支
-- **成熟度**：Agent Harness 六面厚度见 [`14-model-harness.md`](14-model-harness.md)；**loop 语义仍以本文 / `05` 为准**（冻结 while）
+- **成熟度**：Agent Harness 六面厚度见 [`12-model-harness.md`](12-model-harness.md)；**loop 语义仍以本文 / `05` 为准**（冻结 while）
 
 **全文**：[`05-agent-runtime.md`](05-agent-runtime.md) + [`06-tools-and-context.md`](06-tools-and-context.md)
 
@@ -62,7 +62,7 @@ AgentEngine     while: assemble → model → tools → checkpoint
 | `writing` | 写作模式 | 文稿、diff、`propose_patch`、大纲 |
 | `agent` | Agent 模式 | 全工具面、时间线、exec |
 
-扩展宪法：**[`10-product-modes.md`](10-product-modes.md)** · [ADR-013](adr/013-dual-product-modes.md)
+扩展宪法：**[`09-product-modes.md`](09-product-modes.md)** · [ADR-013](adr/013-dual-product-modes.md)
 
 ## 6. 契约与数据流（摘要）
 
@@ -75,7 +75,7 @@ projection 异步刷新 turn_views
 - 领域对象：Session → Turn → Run (1:1) → Step（事件粒度）
 - 协议：Resource / Command / Event / Projection 四层
 
-**全文**：[`contracts.md`](contracts.md)（契约索引）· [`07-domain-model.md`](07-domain-model.md) · [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md)
+**全文**：[`contracts.md`](contracts.md)（契约索引）· [`07-domain-model.md`](07-domain-model.md) · [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md)
 
 ## 7. 与 agent-langraph 的差异
 
@@ -98,11 +98,16 @@ projection 异步刷新 turn_views
 | Loop 内核 | [`05-agent-runtime.md`](05-agent-runtime.md) |
 | 工具与上下文 | [`06-tools-and-context.md`](06-tools-and-context.md) |
 | 领域模型 | [`07-domain-model.md`](07-domain-model.md) |
-| 事件/SSE/投影 | [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md) |
-| 场景与扩展 | [`10-product-modes.md`](10-product-modes.md) |
-| 产品体验 / 长期运行 | [`11-product-experience.md`](11-product-experience.md) |
-| 评估与可观测 | [`12-eval-and-golden-turns.md`](12-eval-and-golden-turns.md) |
+| 事件/SSE/投影 | [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md) |
+| 场景与扩展 | [`09-product-modes.md`](09-product-modes.md) |
+| 产品体验 / 长期运行 | [`10-product-experience.md`](10-product-experience.md) |
+| 评估与可观测 | [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md) |
+| Harness | [`12-model-harness.md`](12-model-harness.md) |
+| 速率红线 | [`13-rate-redlines.md`](13-rate-redlines.md) |
+| 写作 | [`14-writing-quality.md`](14-writing-quality.md) |
+| RAG / 资料库 | [`15-rag-and-sources.md`](15-rag-and-sources.md) |
 | 契约索引 | [`contracts.md`](contracts.md) |
+| 完整目录 | [`README.md`](README.md) |
 | ADR | [`adr/README.md`](adr/README.md) |
 
 ## 9. 架构决策（索引）

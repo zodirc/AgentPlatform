@@ -1,4 +1,4 @@
-# 10 — 场景（Scenario）：写作与通用 Agent
+# 09 — 场景（Scenario）：写作与通用 Agent
 
 > 对外产品入口为 **写作模式** 与 **Agent 模式**；架构上二者是同一 Runtime 上的 **ScenarioProfile**（场景配置），不是两套系统。  
 > 交互标准（对齐 Cursor）：**流式、可打断、过程可见、变更可审（diff）**。
@@ -77,7 +77,7 @@
 | `read_file`、`list_dir`、`delegate` | 核心工具在 `tools/core/` |
 | 流式 + 打断 | `turn.token`、`tool.delta`、`CancelTurn` |
 | 上下文治理 | `ContextEngine` 全场景相同 |
-| 事件 / SSE / 投影 | [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md) |
+| 事件 / SSE / 投影 | [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md) |
 | Run / Turn 1:1 | [`07-domain-model.md`](07-domain-model.md) |
 
 ---
@@ -295,7 +295,7 @@ explore、retrieve、verify、edit、planner。
 
 ## 7. 共用能力与体验指标
 
-体验 SLO **权威来源**：[`11-product-experience.md`](11-product-experience.md) §1（勿在本表重复定义冲突值）。
+体验 SLO **权威来源**：[`10-product-experience.md`](10-product-experience.md) §1（勿在本表重复定义冲突值）。
 
 | 能力 | 规格 |
 |------|------|

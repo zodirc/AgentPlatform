@@ -1,6 +1,6 @@
 # Agent Platform（新项目）
 
-> 基于 `agent-langraph` 的经验，从零设计的 **Agent Runtime**：**一个内核，多个场景**。默认 **写作** `writing`；**Agent** `agent` 为通用全工具面。详见 [场景与扩展](docs/10-product-modes.md)。  
+> 基于 `agent-langraph` 的经验，从零设计的 **Agent Runtime**：**一个内核，多个场景**。默认 **写作** `writing`；**Agent** `agent` 为通用全工具面。详见 [场景与扩展](docs/09-product-modes.md)。  
 > **第一阶段目标**：仅用 Docker 即可完整启动最小可用栈。
 
 ## 为什么要重写
@@ -19,27 +19,22 @@
 
 ## 文档索引
 
-按顺序阅读：
+完整连续目录见 **[docs/README.md](docs/README.md)**（01–22）。常用入口：
 
-| 序号 | 文档 | 内容 |
-|------|------|------|
-| 1 | [问题与目标](docs/01-problems-and-goals.md) | 现状诊断、设计原则、分阶段交付 |
-| 2 | [目标架构](docs/02-architecture.md) | 服务划分、Agentic Loop 内核、数据流 |
-| 3 | [Docker 运行时](docs/03-docker-runtime.md) | 容器拓扑、启动顺序、健康检查、环境变量契约 |
-| 4 | [开发规范](docs/04-development-standards.md) | 仓库结构、代码风格、测试、配置、发布 |
-| 5 | [Agent 运行时](docs/05-agent-runtime.md) | **核心循环**：控制器+引擎、messages 状态、终止、子 agent |
-| 6 | [工具与上下文工程](docs/06-tools-and-context.md) | 工具协议、副作用/审批、budget·compact·collapse |
-| 6b | [模型 Harness](docs/14-model-harness.md) | 调用可靠性、可见上下文、缓存（设计稿） |
-| 7 | [场景与扩展](docs/10-product-modes.md) | writing / agent、ScenarioProfile、扩展宪法 |
-| 8 | [契约索引](docs/contracts.md) | API、事件、DDL、内部命令 |
-| 9 | [领域模型](docs/07-domain-model.md) | Session/Run/Turn/Step、checkpoint、幂等 |
-| 10 | [事件与投影流水线](docs/09-event-projection-pipeline.md) | SSE、turn_events、UI 数据源 |
-| 11 | [产品体验与长期运行](docs/11-product-experience.md) | SLO、自用门槛、可靠性 |
-| 12 | [评估与 Golden Turn](docs/12-eval-and-golden-turns.md) | 回归、metrics、CI |
+| 文档 | 内容 |
+|------|------|
+| [01 问题与目标](docs/01-problems-and-goals.md) | 设计原则 |
+| [02 架构](docs/02-architecture.md) | 服务划分、数据流 |
+| [03 Docker 运行时](docs/03-docker-runtime.md) | 拓扑、env、工作区/沙箱 |
+| [05–06 Runtime / 工具](docs/05-agent-runtime.md) | 内核与工具协议 |
+| [09 场景](docs/09-product-modes.md) | writing / agent |
+| [12 Harness](docs/12-model-harness.md) | 调用与 cache |
+| [13 速率红线](docs/13-rate-redlines.md) | R1–R5 |
+| [14 写作](docs/14-writing-quality.md) | WQ0–WQ4 |
+| [15 RAG / 资料库](docs/15-rag-and-sources.md) | 索引、验收、票状态 |
+| [contracts](docs/contracts.md) | API / 事件 / DDL |
 
-工作区与沙箱见 [Docker 运行时 §8](docs/03-docker-runtime.md#8-工作区沙箱与拓扑)。
-
-完整索引见 [docs/README.md](docs/README.md)。
+工作区与沙箱：[Docker 运行时 §8](docs/03-docker-runtime.md#8-工作区沙箱与拓扑)。
 
 ## 架构决策（ADR）
 

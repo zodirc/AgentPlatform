@@ -14,11 +14,11 @@ agent/
 │   ├── 05-agent-runtime.md
 │   ├── 06-tools-and-context.md
 │   ├── 07-domain-model.md
-│   ├── 08-workspace-and-deployment.md   # 重定向 stub → 03 §8
-│   ├── 09-event-projection-pipeline.md
-│   ├── 10-product-modes.md
-│   ├── 11-product-experience.md
-│   ├── 12-eval-and-golden-turns.md
+│   ├── 03-docker-runtime.md   # 重定向 stub → 03 §8
+│   ├── 08-event-projection-pipeline.md
+│   ├── 09-product-modes.md
+│   ├── 10-product-experience.md
+│   ├── 11-eval-and-golden-turns.md
 │   ├── contracts.md
 │   ├── appendix-migration.md
 │   └── adr/
@@ -375,11 +375,11 @@ scope：`api` | `runtime` | `web` | `deploy` | `contracts`
 | 架构 | `docs/02-architecture.md` | 服务边界变化 |
 | Agent 内核 | `docs/05-agent-runtime.md` | 循环/终止/子 agent 机制变化 |
 | 工具与上下文 | `docs/06-tools-and-context.md` | 工具协议/审批/上下文策略变化 |
-| 产品模式 | `docs/10-product-modes.md` | 场景、ScenarioProfile、扩展宪法 |
+| 产品模式 | `docs/09-product-modes.md` | 场景、ScenarioProfile、扩展宪法 |
 | 领域模型 | `docs/07-domain-model.md` | Session/Run/Turn 变化 |
-| 事件与投影 | `docs/09-event-projection-pipeline.md` | SSE/投影流水线变化 |
-| 产品体验 / SLO | `docs/11-product-experience.md` | 体验门槛、长期运行策略 |
-| 评估与 golden | `docs/12-eval-and-golden-turns.md` | 用例、metrics、CI |
+| 事件与投影 | `docs/08-event-projection-pipeline.md` | SSE/投影流水线变化 |
+| 产品体验 / SLO | `docs/10-product-experience.md` | 体验门槛、长期运行策略 |
+| 评估与 golden | `docs/11-eval-and-golden-turns.md` | 用例、metrics、CI |
 | 部署与工作区 | `docs/03-docker-runtime.md`（§8 工作区/沙箱） | compose/env/卷/扩缩变化 |
 | 契约索引 | `docs/contracts.md` | API/事件/投影 schema 变更 |
 | ADR | `docs/adr/` | 重大技术选型 |

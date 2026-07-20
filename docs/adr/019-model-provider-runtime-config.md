@@ -145,7 +145,7 @@ web 设置页（脱敏展示）
 - [`05-agent-runtime.md`](../05-agent-runtime.md) §6（TurnController 加载配置）
 - [`07-domain-model.md`](../07-domain-model.md) §7
 - [`contracts.md`](../contracts.md) §2.2、§7.1
-- [`11-product-experience.md`](../11-product-experience.md) §6
+- [`10-product-experience.md`](../10-product-experience.md) §6
 - [ADR-003](003-env-pydantic-settings.md) — Bootstrap 环境变量
 - [ADR-009](009-protocol-four-layers.md) — 管理面 Resource/Command
 - [ADR-018](018-web-frontend-stack.md) — Web 设置页

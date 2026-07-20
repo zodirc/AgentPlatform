@@ -123,9 +123,9 @@ services/web/
 
 - [`03-docker-runtime.md`](../03-docker-runtime.md) §5.4、§7.2
 - [`04-development-standards.md`](../04-development-standards.md) §1、§2、§3.2
-- [`09-event-projection-pipeline.md`](../09-event-projection-pipeline.md) §5
-- [`10-product-modes.md`](../10-product-modes.md) §0、`web/scenarios/*`
-- [`11-product-experience.md`](../11-product-experience.md) §5
+- [`08-event-projection-pipeline.md`](../08-event-projection-pipeline.md) §5
+- [`09-product-modes.md`](../09-product-modes.md) §0、`web/scenarios/*`
+- [`10-product-experience.md`](../10-product-experience.md) §5
 - [ADR-001](001-three-service-split.md) — web 独立服务
 - [ADR-004](004-sse-turn-streaming.md) — SSE 协议
 - [ADR-009](009-protocol-four-layers.md) — Projection 消费、TS codegen

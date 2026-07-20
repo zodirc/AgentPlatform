@@ -1,10 +1,10 @@
-# 14 — Agent Harness（成熟度总纲）
+# 12 — Agent Harness（成熟度总纲）
 
 > **状态**：部分落地（2026-07-13）— **AH1 ✅**；**AH2–AH4 / AH-obs 已落地核心路径**（prompt cache 打标、envelope project/runtime、@path 预读、只读并行、compact 独立超时、usage/context 可观测字段）。细调与 golden 加固可继续。  
 > **范围**：**广义 Agent Harness**——包住 frontier model、决定「好不好用」的整层工程：Intake · Context · Tools 执行纪律 · Model · Cancel/超时/watchdog · Eval/SLO 与可观测。  
 > **不在范围**：改写 `AgentEngine` while 语义；恢复固定 pipeline；K8s / MCP / 多租户模型市场。
 
-关联：[`05-agent-runtime.md`](05-agent-runtime.md)（loop 细则）· [`06-tools-and-context.md`](06-tools-and-context.md)（工具与 Context 契约）· [ADR-014](adr/014-turn-intake-deterministic.md)（Intake）· [ADR-015](adr/015-interrupt-cancel-resume.md)（Cancel）· [ADR-016](adr/016-execution-timeouts-and-stall-watchdog.md)（超时/watchdog）· [ADR-019](adr/019-model-provider-runtime-config.md)（供应商配置）· [`11-product-experience.md`](11-product-experience.md)（体验 SLO）· [`12-eval-and-golden-turns.md`](12-eval-and-golden-turns.md)（延迟门禁）。
+关联：[`05-agent-runtime.md`](05-agent-runtime.md)（loop 细则）· [`06-tools-and-context.md`](06-tools-and-context.md)（工具与 Context 契约）· [ADR-014](adr/014-turn-intake-deterministic.md)（Intake）· [ADR-015](adr/015-interrupt-cancel-resume.md)（Cancel）· [ADR-016](adr/016-execution-timeouts-and-stall-watchdog.md)（超时/watchdog）· [ADR-019](adr/019-model-provider-runtime-config.md)（供应商配置）· [`10-product-experience.md`](10-product-experience.md)（体验 SLO）· [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md)（延迟门禁）。
 
 > **命名说明**：早期文稿称「Model Harness」，仅覆盖模型调用外围。本文升格为 **Agent Harness 总纲**；原 Model 面仍是子轨之一（AH1–AH2、AH4 部分）。细则不合并进本文——`05`/`06`/`11`/`12` 仍是各面权威。
 
@@ -17,7 +17,7 @@
 ## 0. 一句话
 
 > **Loop 形状已经对；成熟度差在 Agent Harness 厚度**（看见什么、调得稳不快拖、工具跟手、可打断、可证明）。  
-> 「厚」不能牺牲「快」：每一项能力增强都要通过热路径成本审视，不得回归 [`11` §1](11-product-experience.md) 的 TTFB / 首 token / Cancel SLO。
+> 「厚」不能牺牲「快」：每一项能力增强都要通过热路径成本审视，不得回归 [`11` §1](10-product-experience.md) 的 TTFB / 首 token / Cancel SLO。
 
 **两条主线并重**：
 
@@ -100,7 +100,7 @@ AgentEngine while 语义冻结（ADR-005）
 
 > 任何 AH 期改动**先过这里**，否则不合并。
 
-### 4.1 继承 SLO（权威定义见 [`11` §1](11-product-experience.md)）
+### 4.1 继承 SLO（权威定义见 [`11` §1](10-product-experience.md)）
 
 | 指标 | 目标（P95） | 本文相关杠杆 |
 |------|-------------|--------------|
@@ -125,7 +125,7 @@ AgentEngine while 语义冻结（ADR-005）
 2. **快失败**：首次尝试较短 connect/首字节超时。
 3. **可打断压倒可靠**：Cancel 打断 backoff、assemble、预读（ADR-015）。
 4. **加厚必先能抵消**：显著增大输入 → 命中 cache，或硬上限 + 降级。
-5. **可测才算数**：性能改动挂 [`12`](12-eval-and-golden-turns.md) 延迟门禁。
+5. **可测才算数**：性能改动挂 [`12`](11-eval-and-golden-turns.md) 延迟门禁。
 6. **策略不进引擎分叉**：不在 `AgentEngine` / `ToolExecutor` 写 `if scenario`。
 
 ---
@@ -257,4 +257,4 @@ UI 面板可后置；**事件契约先落地**。
 
 8. `retry_count` / cache / `assemble_ms` 可在事件中核对（AH-obs）
 
-北极星服从 [`11`](11-product-experience.md)：愿意连续自用数周，不因模型层不可预期或不跟手而弃用。
+北极星服从 [`11`](10-product-experience.md)：愿意连续自用数周，不因模型层不可预期或不跟手而弃用。

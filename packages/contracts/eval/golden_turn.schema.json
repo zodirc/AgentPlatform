@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-platform.local/eval/golden_turn.schema.json",
   "title": "GoldenTurn",
-  "description": "Eval case definition. See docs/12-eval-and-golden-turns.md",
+  "description": "Eval case definition. See docs/11-eval-and-golden-turns.md",
   "type": "object",
   "required": ["id", "scenario_id", "phase", "input", "assertions"],
   "additionalProperties": false,

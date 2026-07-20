@@ -16,7 +16,7 @@ KIND_FROM_DIR = {
     "style": "style",
     "styles": "style",
 }
-# Inventory pin order (docs/23 C1/C3): style first, then character / plot / general.
+# Inventory pin order (docs/14 C1/C3): style first, then character / plot / general.
 KIND_PRIORITY = {
     "style": 0,
     "character": 1,
@@ -173,7 +173,7 @@ def select_writing_cards(
     plot_max: int | None = None,
     general_max: int | None = None,
 ) -> list[WritingCard]:
-    """Inventory-deterministic pin (docs/23 C1/C3).
+    """Inventory-deterministic pin (docs/14 C1/C3).
 
     ``message`` is retained for API compatibility but does **not** affect selection.
     Pin set depends only on cards inventory + budgets + sort key (kind → path).
@@ -306,7 +306,7 @@ def format_cards_block(cards: list[WritingCard]) -> str:
 
 
 def stable_cards_prefix_hash(text: str) -> str:
-    """SHA-256 hex digest (truncated) for prefix stability assertions (docs/23 C3)."""
+    """SHA-256 hex digest (truncated) for prefix stability assertions (docs/14 C3)."""
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return digest[:16]
 

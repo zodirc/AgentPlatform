@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""RE2 effect gate helper: run writing RAG goldens + layer-1 bench (docs/28)."""
+"""RE2 effect gate helper: run writing RAG goldens + layer-1 bench (docs/15)."""
 
 from __future__ import annotations
 

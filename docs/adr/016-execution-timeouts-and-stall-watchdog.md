@@ -93,5 +93,5 @@ runtime 内周期任务（默认每 30s）扫描活跃 Run：
 - [ADR-015](015-interrupt-cancel-resume.md)
 - [`05-agent-runtime.md`](../05-agent-runtime.md) §8.3
 - [`06-tools-and-context.md`](../06-tools-and-context.md) §5.1
-- [`09-event-projection-pipeline.md`](../09-event-projection-pipeline.md) §9
-- [`12-eval-and-golden-turns.md`](../12-eval-and-golden-turns.md) §5.1、`§3.3`
+- [`08-event-projection-pipeline.md`](../08-event-projection-pipeline.md) §9
+- [`11-eval-and-golden-turns.md`](../11-eval-and-golden-turns.md) §5.1、`§3.3`

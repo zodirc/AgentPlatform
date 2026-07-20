@@ -5,7 +5,7 @@
 
 ## 0. 一句话总纲
 
-> **agent 在受控循环内由模型编排工具**；平台护栏见 [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md) §8。
+> **agent 在受控循环内由模型编排工具**；平台护栏见 [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md) §8。
 
 `agent-langraph` 用一张 13 节点固定图把流程写死在代码里。我们放弃这种 workflow 形态，改用成熟编码 agent 共通采用的 **agentic loop**。这里的成熟参考对象是 Cursor、Claude Code、Copilot Agent 一类经过真实编码场景验证的系统，而不是继续延伸旧项目的大而全运行时。
 
@@ -113,7 +113,7 @@
 
 #### 快速首包
 
-`StartTurn` 受理后 **立即** append `turn.accepted`（目标 TTFB ≤ 300ms，见 [`11-product-experience.md`](11-product-experience.md)）。  
+`StartTurn` 受理后 **立即** append `turn.accepted`（目标 TTFB ≤ 300ms，见 [`10-product-experience.md`](10-product-experience.md)）。  
 旧 `acknowledge_node` 的职责在此，**不是**独立图节点。
 
 #### 与「意图揣测」的分工
@@ -124,7 +124,7 @@
 | 是否值得调用模型？ | `shouldQuery` |
 | 用户想改哪、要不要调工具？ | **首轮** `AgentEngine`（`tool_use` 或文本澄清） |
 | 复杂多步规划？ | `update_plan`、`delegate` 工具（按需） |
-验收：**[`12-eval-and-golden-turns.md`](12-eval-and-golden-turns.md) §5.2** 为能力融合阻断项（`06` §0.1）。
+验收：**[`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md) §5.2** 为能力融合阻断项（`06` §0.1）。
 
 ## 4. 核心状态：messages 即状态
 
@@ -387,7 +387,7 @@ runs.status IN (running, interrupted)
 
 ## 10. 子 Agent 委派
 
-> **场景相关**：`agent_type` 白名单由 Turn 的 `scenario_id` 对应 Profile 限定，见 [`10-product-modes.md`](10-product-modes.md)。`delegate` 不得调用 Profile 外的角色。
+> **场景相关**：`agent_type` 白名单由 Turn 的 `scenario_id` 对应 Profile 限定，见 [`09-product-modes.md`](09-product-modes.md)。`delegate` 不得调用 Profile 外的角色。
 
 复杂任务里，主 loop 可以派生隔离上下文的子 agent 处理子任务。
 
@@ -490,4 +490,4 @@ services/runtime/app/
 - ADR-015：Interrupt / Cancel / Resume 语义
 - ADR-016：执行超时与 Stall Watchdog
 - ADR-019：模型供应商 Web 管理 + DB 热生效
-- Agent Harness 成熟度总纲（AH1 已落地；Model/Context/Tools 子轨）：[`14-model-harness.md`](14-model-harness.md)
+- Agent Harness 成熟度总纲（AH1 已落地；Model/Context/Tools 子轨）：[`12-model-harness.md`](12-model-harness.md)

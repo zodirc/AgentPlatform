@@ -28,4 +28,4 @@ eval/
 3. 管理面 API（模型供应商等）：同时改 `openapi/public.yaml`、`docs/contracts.md` §2.2、ADR-019。
 4. 内部命令：同时改 `schemas/commands/*`、`docs/contracts.md` §8。
 5. 对外 API：同时改 `openapi/public.yaml`、`docs/contracts.md` §2（Phase 0）与 §2.1（Phase 1 命令）；并运行 `scripts/codegen.sh` 同步 `services/web` TS 类型（ADR-018）。
-6. Golden Turn：同时改 `eval/golden/`、`packages/contracts/eval/golden_turn.schema.json`、`docs/12-eval-and-golden-turns.md`。
+6. Golden Turn：同时改 `eval/golden/`、`packages/contracts/eval/golden_turn.schema.json`、`docs/11-eval-and-golden-turns.md`。

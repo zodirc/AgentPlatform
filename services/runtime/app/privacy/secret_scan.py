@@ -8,7 +8,7 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# High-confidence secret patterns only (docs/17 S2 A16). Keep the set small so
+# High-confidence secret patterns only (docs/13 S2 A16). Keep the set small so
 # normal prose stays under the sync budget.
 _SECRET_PATTERNS: tuple[tuple[str, str], ...] = (
     ("aws_access_key", r"\bAKIA[0-9A-Z]{16}\b"),

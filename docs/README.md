@@ -1,136 +1,93 @@
 # 文档索引
 
-本目录为 Agent Platform 的架构与实施规范。**Phase 0–4 核心能力已与代码对齐**。
+Agent Platform 架构与实施规范。**01–22 连续编号，一文一模块**；变更只改对应正文。
 
-## 实施状态（摘要）
+验证：`make smoke` · `make eval-all` · `make eval-retrieval` · `make retrieval-bench-prod` · `make runtime-test`
 
-| 阶段 / 规范 | 状态 |
-|-------------|------|
-| Phase 0–4 产品能力 + golden（本地 `make eval*`） | ✅ |
-| contracts §10 工具 + `agent-contracts` Python 包 | ✅ |
-| shadcn/ui（Radix + CVA + components.json） | ✅ |
-| structlog JSON 日志 + `request_id` / `turn_id` 上下文 | ✅ |
-| Alembic 唯一迁移入口（0001–0005 revisions） | ✅ |
-| OTel OTLP 导出（`OTEL_EXPORTER_OTLP_ENDPOINT`） | ✅ |
-| 单测：`make runtime-test` / `make api-test`（本地） | ✅ |
-| SLO：`latency.ttfb_ms_max` + `first_token_ms_max` + `cancel_latency_ms_max` golden 门禁 | ✅（stub 路径） |
-| Web：`pnpm lint` / `typecheck` / `test` / `build`（本地） | ✅ |
-| Live / retrieval / queue eval（`make eval-live` 等，本地） | ✅ |
-| Queue worker profile（`make eval-queue` / shared.16） | ✅ |
-| Embedding 检索（retrieval 镜像内置本地模型 + hash 降级） | ✅ |
-| 写作素材卡 pin + UI「本轮写定」可观测 | ✅ |
-| Agent Harness（[`14`](14-model-harness.md)） | 🔧 部分落地（AH1–AH4 核心路径） |
-| Skills 层（[`22`](22-skills-layer.md)） | ⏸ 近期末必做；开闸条件见文 §8 |
-| 写作质量（[`23`](23-writing-quality.md)） | ✅ WQ0–WQ4 已落地：style 卡 / export lint / polish·outline / golden+rubric；禁默认 judge/强制 RAG |
-| 写作质量执行（[`24`](24-writing-quality-execution.md)） | ✅ WQ0–WQ4 全部落地 |
-| 证据 RAG / 文档检索（[`27`](27-rag-evidence-and-doc-search.md)） | 📋 设计稿：线 A 取证 + 线 B filter/ACL；**契约闸 ≠ 效果闸**（§8.1） |
-| 证据 RAG 执行（[`28`](28-rag-evidence-execution.md)） | 🔧 RE0–RE3+RE1 已落地；`make turn-effect-bench` / `make retrieval-bench` |
-| 资料索引与速率（[`29`](29-sources-index-and-interaction-rate.md)） | 📋 真相档分轨；难检索/排序杠；禁止 slash 测 RAG；IX0→**IX4 质量主线**→IX5 |
-| 资料索引执行（[`30`](30-sources-index-execution.md)） | 🔧 IX0 ✅；IX4 prod ✅；**IX1 同步按钮 ✅**；RQ1/IX5 待办 |
+---
 
-## 设计稿对照（文档 → 代码）
+## 模块目录（01–22）
 
-| 文档原「设计稿 / 待实施」 | 落地位置 | 状态 |
-|---------------------------|----------|------|
-| `deploy/docker-compose.yml` 骨架 | `deploy/docker-compose.yml` | ✅ |
-| `runtime/engine/state.py` TurnState | `services/runtime/app/engine/state.py` | ✅ |
-| ScenarioProfile + `profiles/*.yaml` | `services/runtime/app/scenarios/` | ✅ |
-| `openapi/public.yaml` | `packages/contracts/openapi/public.yaml` | ✅ |
-| Web Vite + React Workbench | `services/web/src/scenarios/` | ✅ |
-| `dev.override.yml` 热更新模板 | `deploy/compose/dev.override.yml.example` | ✅ |
-| embedding 模型预烘焙 `/app/models-baked` | `services/runtime/Dockerfile.retrieval` | ✅ |
-| `sentence-transformers` 本地模型 | retrieval profile 默认 `EMBEDDING_BACKEND=sentence_transformers` | ✅ |
+| # | 文档 | 内容 |
+|---|------|------|
+| 01 | [problems-and-goals](01-problems-and-goals.md) | 目标三角 |
+| 02 | [architecture](02-architecture.md) | 架构地图 |
+| 03 | [docker-runtime](03-docker-runtime.md) | 部署、env、工作区/沙箱 |
+| 04 | [development-standards](04-development-standards.md) | 仓库与工程规范 |
+| 05 | [agent-runtime](05-agent-runtime.md) | Loop / Intake / Engine |
+| 06 | [tools-and-context](06-tools-and-context.md) | 工具协议、上下文治理 |
+| 07 | [domain-model](07-domain-model.md) | Session / Run / Turn |
+| 08 | [event-projection-pipeline](08-event-projection-pipeline.md) | 事件、SSE、投影 |
+| 09 | [product-modes](09-product-modes.md) | ScenarioProfile、writing / agent |
+| 10 | [product-experience](10-product-experience.md) | 体验 SLO |
+| 11 | [eval-and-golden-turns](11-eval-and-golden-turns.md) | Golden、CI |
+| 12 | [model-harness](12-model-harness.md) | Harness（AH1–AH4） |
+| 13 | [rate-redlines](13-rate-redlines.md) | **速率红线 R1–R5** |
+| 14 | [writing-quality](14-writing-quality.md) | **写作模块**（WQ0–WQ4 ✅） |
+| 15 | [rag-and-sources](15-rag-and-sources.md) | **RAG / 资料库**（IX0/1/4 ✅） |
+| 16 | [user-session-history](16-user-session-history.md) | 会话历史（U0–U2 ✅） |
+| 17 | [search-records](17-search-records.md) | `search_records` 蓝图 |
+| 18 | [multimodal-design](18-multimodal-design.md) | 多模态设计（待落地） |
+| 19 | [skills-layer](19-skills-layer.md) | Skills（近期末） |
+| 20 | [context-compaction-walkthrough](20-context-compaction-walkthrough.md) | 压缩演练 |
+| 21 | [agent-system-qa](21-agent-system-qa.md) | 原理问答 Q0–Q20 |
+| 22 | [highlights-vs-legacy](22-highlights-vs-legacy.md) | 相对旧项目全景 |
 
-验证：`make smoke` · `make eval-all` · `make eval-retrieval` · `make eval-queue` · `make runtime-test`
+未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
-## 推荐阅读路径
+---
 
-1. **[15-highlights-vs-legacy.md](15-highlights-vs-legacy.md)** — **相对旧项目全景说明**（§1–25 叙事 + §26–42 机制级深潜；可独立仓库 / AI 分析）
-2. **[02-architecture.md](02-architecture.md)** — 架构地图
-3. **[05-agent-runtime.md](05-agent-runtime.md)** + **[06-tools-and-context.md](06-tools-and-context.md)** — 内核
-4. **[14-model-harness.md](14-model-harness.md)** — **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地）
-5. **[10-product-modes.md](10-product-modes.md)** — 场景（writing / agent）与扩展宪法
-6. **[11-product-experience.md](11-product-experience.md)** — **好用**、长期运行、体验 SLO
-7. **[12-eval-and-golden-turns.md](12-eval-and-golden-turns.md)** — **成熟可证明**：golden、metrics、CI
-8. **[contracts.md](contracts.md)** — 契约接缝（API、事件、DDL、内部命令）
-9. **[07-domain-model.md](07-domain-model.md)** + **[09-event-projection-pipeline.md](09-event-projection-pipeline.md)** — 领域与事件流水线
-10. **[03-docker-runtime.md](03-docker-runtime.md)** — 部署、环境变量、工作区与沙箱（§8）
-11. **[16-agent-system-qa.md](16-agent-system-qa.md)** — 面试/设计向问答（方案设计过程与速率安全化）
-12. **[19-agent-system-qa-current.md](19-agent-system-qa-current.md)** — **原理向现状问答**（少内部代号；RAG / Harness / Context engineering）
-13. **[17-execution-plan.md](17-execution-plan.md)** — 由 16 导出的执行方案（S0–S3，速率红线内）
-14. **[20-user-session-history-plan.md](20-user-session-history-plan.md)** — **登录用户历史会话 / 跨设备续聊**执行方案（归属、列表、速率与风险）
-15. **[21-multimodal-design.md](21-multimodal-design.md)** — **多模态设计方案（一期）**：仅图片+文本、大小硬顶、性能红线（M0–M2）
-16. **[22-skills-layer.md](22-skills-layer.md)** — **Skills 层去留与执行方案**：速率 / 场景需要 / 成熟做法；**近期末必做、默认不预注入**
-17. **[23-writing-quality.md](23-writing-quality.md)** — **写作质量与文风**：场景切片 W1–W7；style 卡 / RAG / cache；禁默认裁判链
-18. **[24-writing-quality-execution.md](24-writing-quality-execution.md)** — **写作质量执行方案**：WQ0–WQ4 票级拆分（**全部已落地**；源自 23）
-19. **[25-context-compaction-walkthrough.md](25-context-compaction-walkthrough.md)** — **上下文压缩完整过程模拟**：budget → microcompact → collapse → snip → autocompact
-20. **[26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md)** — **从个人 Agent 到对口经历**：学什么、怎么讲、经历从哪来（投递拟合）
-21. **[27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md)** — **证据 RAG 与文档检索**：写作取证 vs 企业文档搜索；**§8.1 效果验证三层**
-22. **[28-rag-evidence-execution.md](28-rag-evidence-execution.md)** — **证据 RAG 执行**：RE0→RE3→RE2→条件 RE1；效果向票须过 A/B
-23. **[29-sources-index-and-interaction-rate.md](29-sources-index-and-interaction-rate.md)** — **资料索引与速率**：真相档、难检索杠、禁止 slash 验收、多租户终局
-24. **[30-sources-index-execution.md](30-sources-index-execution.md)** — **资料索引执行**：IX0–IX5 + RQ1；IX4 质量主闸；两闸+冲刺
+## 日常入口（产品主线）
 
-## 完整目录
+| 场景 | 读 |
+|------|----|
+| 部署 / 默认栈 | [03](03-docker-runtime.md) |
+| 速率约束 | [13](13-rate-redlines.md) |
+| 写作 | [14](14-writing-quality.md) |
+| RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md) |
+| 会话归属 | [16](16-user-session-history.md) |
+| 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md) |
 
-| 文档 | 内容 |
-|------|------|
-| [01-problems-and-goals.md](01-problems-and-goals.md) | 目标三角：长期运行 × 好用 × 可证明 |
-| [02-architecture.md](02-architecture.md) | **总览地图**（细节在专文） |
-| [03-docker-runtime.md](03-docker-runtime.md) | compose、env、健康检查、**工作区/沙箱** |
-| [04-development-standards.md](04-development-standards.md) | 仓库结构、代码与测试规范 |
-| [05-agent-runtime.md](05-agent-runtime.md) | Loop、**Turn Intake**、AgentEngine |
-| [06-tools-and-context.md](06-tools-and-context.md) | 工具协议、审批、上下文治理 |
-| [07-domain-model.md](07-domain-model.md) | Session / Run / Turn、checkpoint、幂等 |
-| [08-workspace-and-deployment.md](08-workspace-and-deployment.md) | **已合并** → 见 `03` §8 |
-| [09-event-projection-pipeline.md](09-event-projection-pipeline.md) | 事件、SSE、投影、UI 数据源 |
-| [10-product-modes.md](10-product-modes.md) | ScenarioProfile、writing / agent |
-| [11-product-experience.md](11-product-experience.md) | 产品体验 SLO、自用验收 |
-| [12-eval-and-golden-turns.md](12-eval-and-golden-turns.md) | Golden Turn、可观测、CI 分层 |
-| [13-writing-delivery-issues.md](13-writing-delivery-issues.md) | 写作交付问题与修复记录 |
-| [14-model-harness.md](14-model-harness.md) | **Agent Harness 成熟度总纲**（AH1–AH4 核心已落地） |
-| [15-highlights-vs-legacy.md](15-highlights-vs-legacy.md) | **相对旧项目全景说明**（自洽长文 + §26 机制级深潜；可独立分发 / AI 分析） |
-| [16-agent-system-qa.md](16-agent-system-qa.md) | **Agent 系统问答（0–20）**：落地场景、机制对照、改进方案与**交互速率影响** |
-| [17-execution-plan.md](17-execution-plan.md) | **执行方案**：由 16 附录 A 导出的 S0–S3 冲刺、票粒度、否决项与验收闸（**S0–S3 代码已落地**） |
-| [18-a20-multitable-recall.md](18-a20-multitable-recall.md) | **A20 多表召回蓝图** + `search_records` stub |
-| [19-agent-system-qa-current.md](19-agent-system-qa-current.md) | **Agent 系统原理问答（0–20）**：落地事实 + 工程原理（少冲刺代号） |
-| [20-user-session-history-plan.md](20-user-session-history-plan.md) | **登录用户会话历史执行方案**（U0–U2 已落地）：端用户归属、历史列表、跨设备续聊、旧数据清空 |
-| [21-multimodal-design.md](21-multimodal-design.md) | **多模态设计方案（一期）**：仅图片+文本；大小三级硬顶；预上传+引用；Vision 可选（M0–M2，待落地） |
-| [22-skills-layer.md](22-skills-layer.md) | **Skills 层**：去留判断 + 开闸后薄实现（目录渐进披露）；近期末必做 |
-| [23-writing-quality.md](23-writing-quality.md) | **写作质量**：规范/去AI味/排版；文风卡优先；RAG 与 prompt cache 各归其位 |
-| [24-writing-quality-execution.md](24-writing-quality-execution.md) | **写作质量执行**：WQ0–WQ4 票级拆分（**全部已落地**） |
-| [25-context-compaction-walkthrough.md](25-context-compaction-walkthrough.md) | **上下文压缩完整过程模拟**（教学演练） |
-| [26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md) | **从个人 Agent 到对口经历**（投递拟合） |
-| [27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md) | **证据 RAG 与文档检索**：线 A/B；**效果验证三层**（§8.1） |
-| [28-rag-evidence-execution.md](28-rag-evidence-execution.md) | **证据 RAG 执行**：RE0/RE3 已落地；RE2 stub+清单；条件 RE1 |
-| [29-sources-index-and-interaction-rate.md](29-sources-index-and-interaction-rate.md) | **资料索引思路**：真相档、分轨验证、IX5 私有库 |
-| [30-sources-index-execution.md](30-sources-index-execution.md) | **资料索引执行**：IX0–IX5 票级清单与合并门禁 |
-| [contracts.md](contracts.md) | **契约索引** |
-| [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
+**维护纪律：** 禁止再开 `*-execution` 平行文；过时内容进 git，不留 stub 空号。
 
-## 架构决策（ADR）
+---
 
-见 [adr/README.md](adr/README.md)。共 **19** 条已接受决策（001–004、005–010、011–019）。
+## 实施状态
 
-## 文档与阶段对应
+| 项 | 状态 | 文档 |
+|----|------|------|
+| Phase 0–4 + golden / contracts | ✅ | 11 · contracts |
+| 写作 WQ0–WQ4 | ✅ | 14 |
+| RAG RE0–RE3+RE1；IX0/IX1/IX4 | ✅ | 15 |
+| 会话 U0–U2 | ✅ | 16 |
+| Harness 核心 | 🔧 | 12 |
+| Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 |
 
-| 阶段 | 主要文档 |
-|------|----------|
-| Phase 0 容器骨架 | `03`、`07`、`contracts`、`09`、`12` §4 L0 |
-| Phase 1 Turn 闭环 | `05`、`07`、`09`、`10`、`11`、`12` §5.1 |
-| Phase 1b 能力融合 | `06` §0.1、`12` §5.2（**阻断进 Phase 2**） |
-| Phase 2 能力面 | `06` §10–12、`03` §8 retrieval profile、`12` §5.3 |
-| Phase 3+ 垂直与运营 | `02` §3、`03` §8.5、日常自用（`11` §7） |
-| Phase 4 CI profiles | `03` queue/retrieval compose、`12` §4 L1c、`eval/README.md` |
+---
 
-## 契约与 eval 落地位置
+## 编号变迁（查旧链）
 
-| 类型 | 路径 |
-|------|------|
-| 人类可读索引 | [`contracts.md`](contracts.md) |
-| Phase 0 DDL | `packages/contracts/schemas/ddl/phase0.sql` |
-| Golden Turn Schema | `packages/contracts/eval/golden_turn.schema.json` |
-| Golden 用例 | `eval/golden/`（39 stub YAML + live） |
-| 事件 / 命令 Schema | `packages/contracts/schemas/` |
+| 旧 | 新 |
+|----|----|
+| 08 工作区 | → 03 |
+| 09 事件 | → **08** |
+| 10/11 场景/体验 | → **09/10** |
+| 12 Eval | → **11** |
+| 13 交付事故 | 删除（见 git / 14） |
+| 14 Harness | → **12** |
+| 15 全景 | → **22** |
+| 16 QA 过程稿 | → **21** |
+| 17 执行方案 | → **13**（仅 R1–R5） |
+| 18 多表 | → **17** |
+| 19 QA 现状 | → **21** |
+| 20 会话 | → **16** |
+| 21 多模态 | → **18** |
+| 22 Skills | → **19** |
+| 23/24 写作 | → **14** |
+| 25 压缩 | → **20** |
+| 27–31 RAG | → **15** |
+
+---
 
 ## 相关
 

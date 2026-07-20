@@ -564,7 +564,7 @@ export async function uploadSourceText(
   return uploadSourceFile(file);
 }
 
-/** Debounced typing warm-up for embedder/index (docs/17 S3 A18). Best-effort. */
+/** Debounced typing warm-up for embedder/index (docs/13 S3 A18). Best-effort. */
 export async function warmupRetrieval(prefix = ""): Promise<void> {
   const params = new URLSearchParams();
   if (prefix.trim()) params.set("prefix", prefix.slice(0, 200));

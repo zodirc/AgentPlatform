@@ -20,7 +20,7 @@ def lint_export_markdown(
     profile: str = "novel-zh",
     section_ids: list[str] | None = None,
 ) -> list[ExportLintIssue]:
-    """Deterministic markdown structure checks before export write (docs/23 D6)."""
+    """Deterministic markdown structure checks before export write (docs/14 D6)."""
     issues: list[ExportLintIssue] = []
     text = body.strip()
     if not text:

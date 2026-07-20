@@ -27,12 +27,12 @@ class Settings(BaseSettings):
     # Postgres schema for source_* tables (IX4 prod-bench uses retrieval_bench to avoid
     # wiping the user index when syncing an isolated temp workspace).
     retrieval_pg_schema: str = "public"
-    # Two-level doc→chunk recall (docs/17 S3 A11): parallel lanes; timeout → chunk-only.
+    # Two-level doc→chunk recall (docs/13 S3 A11): parallel lanes; timeout → chunk-only.
     retrieval_two_level_enabled: bool = True
     retrieval_two_level_timeout_seconds: float = 0.3
     retrieval_two_level_doc_limit: int = 8
     # Lexical rerank may stay on (cheap). Cross-encoder stays OFF by default
-    # (docs/16 Q8/Q13, docs/17 S2 A12). Experimental CE: pool≤20 + ≤50ms + timeout→lexical.
+    # (docs/21 Q8/Q13, docs/13 S2 A12). Experimental CE: pool≤20 + ≤50ms + timeout→lexical.
     retrieval_rerank_enabled: bool = True
     retrieval_rerank_cross_encoder: bool = False
     retrieval_rerank_model: str = "BAAI/bge-reranker-base"
@@ -41,21 +41,21 @@ class Settings(BaseSettings):
     search_sources_max_per_turn: int = 3
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15
-    # RE1: keyword fallback section alignment (docs/28); oversize / timeout → file excerpt only.
+    # RE1: keyword fallback section alignment (docs/15); oversize / timeout → file excerpt only.
     search_sources_keyword_max_file_bytes: int = 262_144
     search_sources_keyword_parse_budget_ms: float = 50.0
-    # S0 harness guards (docs/17-execution-plan.md).
+    # S0 harness guards (docs/13-rate-redlines.md).
     tool_schema_validate: bool = True
     citation_verify_enabled: bool = True
     model_egress_enforce: bool = True
     # Comma-separated extra base URLs or hosts allowed for live model calls.
     model_egress_allowlist: str = ""
-    # Content privacy (docs/17 S2 A15/A16) — regex only; never LLM desensitization.
+    # Content privacy (docs/13 S2 A15/A16) — regex only; never LLM desensitization.
     pii_redact_enabled: bool = True
     secret_scan_enabled: bool = True
     secret_scan_timeout_ms: float = 50.0
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
-    # Inventory-deterministic pin (docs/23 C1/C3): kind → path sort; per-kind + global caps.
+    # Inventory-deterministic pin (docs/14 C1/C3): kind → path sort; per-kind + global caps.
     writing_cards_dir: str = "sources/cards"
     writing_cards_max_chars: int = 2000
     writing_cards_per_card_chars: int = 800
@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     writing_export_profile: str = "novel-zh"  # novel-zh | essay | none
 
     index_via_worker: bool = True
-    # IX0: Turn-external incremental projection of workspace/sources (docs/29–30).
+    # IX0: Turn-external incremental projection of workspace/sources (docs/15).
     sources_startup_sync_enabled: bool = True
     sources_startup_sync_delay_seconds: float = 3.0
     # Optional default owner for future multi-tenant rows (empty → NULL / shared).
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     # AH4: autocompact summarizer budget (independent of main turn).
     compact_timeout_seconds: float = 20.0
     compact_max_output_tokens: int = 1024
-    # Optional smaller / cheaper model for compact only (docs/17 S3 A17).
+    # Optional smaller / cheaper model for compact only (docs/13 S3 A17).
     # Empty → reuse the main turn model; failures still fall back to deterministic summary.
     compact_model_name: str = ""
     compact_model_provider: str = ""

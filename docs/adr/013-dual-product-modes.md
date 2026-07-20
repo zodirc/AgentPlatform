@@ -29,7 +29,7 @@
 7. 新场景 = 新 `profiles/*.yaml` +（可选）新 core 工具 + web 布局 + projection；**禁止**新 pipeline / 新 runtime。
 8. 内核变更（`AgentEngine`、事件管道、`07`/`contracts` 领域模型）须新 ADR。
 
-详见 `docs/10-product-modes.md`。
+详见 `docs/09-product-modes.md`。
 
 ## 理由
 

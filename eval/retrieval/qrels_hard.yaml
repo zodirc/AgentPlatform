@@ -1,4 +1,4 @@
-# Hard offline qrels for IX4 prod-bench (docs/29 §3.1 · docs/30 IX4).
+# Hard offline qrels for IX4 prod-bench (docs/15 §3.1 · docs/15 IX4).
 #
 # Prefer corpus-unique phrases over common-knowledge queries.
 # Same schema as qrels.yaml; prod gate defaults to this file.

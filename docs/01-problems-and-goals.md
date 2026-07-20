@@ -2,13 +2,13 @@
 
 ## 0. 产品定位
 
-**Agent Runtime**：一个内核，多个 **Scenario**。默认 `writing`（写作）；`agent`（通用 Agent，Cursor 式）。差异仅在 **ScenarioProfile**，见 [`10-product-modes.md`](10-product-modes.md)。
+**Agent Runtime**：一个内核，多个 **Scenario**。默认 `writing`（写作）；`agent`（通用 Agent，Cursor 式）。差异仅在 **ScenarioProfile**，见 [`09-product-modes.md`](09-product-modes.md)。
 
 **三重目标**（同时成立）：
 
-1. **可长期运行** — 架构可维护、可扩展，数周数月持续使用（[`11-product-experience.md`](11-product-experience.md) §4）
+1. **可长期运行** — 架构可维护、可扩展，数周数月持续使用（[`10-product-experience.md`](10-product-experience.md) §4）
 2. **自用好用** — 流式、可打断、diff 审阅、长会话不劣化（`11` §1–3）
-3. **对外成熟** — Golden Turn 回归、可观测、可 demo 的技术亮点（[`12-eval-and-golden-turns.md`](12-eval-and-golden-turns.md)）
+3. **对外成熟** — Golden Turn 回归、可观测、可 demo 的技术亮点（[`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md)）
 
 交互标准：**流式、可打断、过程可见、diff 改稿**。
 
@@ -54,7 +54,7 @@
 | P11 | **边界可校验** — 命令/事件/tool 在边界 Pydantic + JSON Schema；防止字段漂移（ADR-017） |
 | P12 | **执行有上界** — model/tool/step 超时 + Stall Watchdog；防止无界 hang（ADR-016） |
 | P13 | **运营配置热生效** — 模型供应商 / API key 经 Web → DB 注入；Turn 边界生效，无需重启（ADR-019） |
-| P14 | **Agent Harness 厚度** — 成熟度差在 Intake/Context/Tools/Model/Guard/Proof，不靠加 pipeline 节点；见 [`14`](14-model-harness.md) |
+| P14 | **Agent Harness 厚度** — 成熟度差在 Intake/Context/Tools/Model/Guard/Proof，不靠加 pipeline 节点；见 [`14`](12-model-harness.md) |
 
 ## 3. 非目标（当前）
 
@@ -85,8 +85,8 @@ K8s/Helm、多区域 HA、完整 port 旧 API、MCP/A2A/Marketplace。
 
 ### Phase 1+（自用 + 成熟）
 
-4. 满足 [`11-product-experience.md`](11-product-experience.md) 体验 SLO 与场景门槛。
-5. [`12-eval-and-golden-turns.md`](12-eval-and-golden-turns.md) 中 **§5.1 + §5.2** golden 全绿（管道 + 能力融合）。
+4. 满足 [`10-product-experience.md`](10-product-experience.md) 体验 SLO 与场景门槛。
+5. [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md) 中 **§5.1 + §5.2** golden 全绿（管道 + 能力融合）。
 6. 能向他人 demo：写作 diff + 资料引用（`search_sources`）+ agent 检索/委派 trace + SSE 重连。
 
 旧模块迁移：[`appendix-migration.md`](appendix-migration.md)。

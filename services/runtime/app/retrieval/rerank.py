@@ -1,6 +1,6 @@
 """Optional post-fusion rerank for hybrid retrieval.
 
-Default posture (docs/16 Q8/Q13, docs/17 S2 A12):
+Default posture (docs/21 Q8/Q13, docs/13 S2 A12):
 - Lexical rerank: ON when ``retrieval_rerank_enabled`` (default True) — cheap CPU.
 - Cross-encoder: OFF by default. If enabled experimentally, only score a pool of
   at most 20 hits, honor ``retrieval_rerank_timeout_seconds`` (default 50ms), and
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 _cross_encoder: object | None = None
 _cross_encoder_key: str | None = None
 
-# Hard cap when experimental cross-encoder is enabled (docs/17 A12).
+# Hard cap when experimental cross-encoder is enabled (docs/13 A12).
 _CROSS_ENCODER_POOL_CAP = 20
 
 

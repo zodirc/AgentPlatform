@@ -1,4 +1,4 @@
-# 09 — 事件、投影与 SSE 流水线
+# 08 — 事件、投影与 SSE 流水线
 
 > 事件类型与 envelope 见 **[`contracts.md`](contracts.md)**。行为细节见本文。
 

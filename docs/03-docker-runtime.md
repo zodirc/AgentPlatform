@@ -252,7 +252,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 `index.status=pending`，runtime 后台任务再把状态推进为 `building`，最终进入 `ready` 或
 `error`。因此上传成功不等于索引已经可检索，API 也不得等待 embedding 构建完成。
 
-**Turn 外投影（docs/30 IX0）：** runtime 启动后默认延迟数秒异步增量同步 `workspace/sources`
+**Turn 外投影（docs/15 IX0）：** runtime 启动后默认延迟数秒异步增量同步 `workspace/sources`
 （`SOURCES_STARTUP_SYNC_ENABLED`，不挡 `/health/live`）。手改 md 后也可：工作台「资料库 → 同步资料库」（IX1，不挡对话），或运维：
 
 ```bash
@@ -316,7 +316,7 @@ Phase 0 设计上至少需要为以下对象预留位置（详见 [`07-domain-mo
 
 ### 6.2 事件与投影持久化要求
 
-- SSE 事件写入 `turn_events`（runtime 写、api 读），见 [`09-event-projection-pipeline.md`](09-event-projection-pipeline.md)
+- SSE 事件写入 `turn_events`（runtime 写、api 读），见 [`08-event-projection-pipeline.md`](08-event-projection-pipeline.md)
 - projection 可以延迟刷新，但必须可重建
 - projection 刷新失败不得导致 turn 主状态丢失
 - 事件表与 projection 表属于可观测与重连基座，不可视为可选装饰
@@ -412,7 +412,7 @@ services:
 
 ## 8. 工作区、沙箱与拓扑
 
-> 原独立文档 `08-workspace-and-deployment.md` 已并入本章。
+> 原独立文档 `03-docker-runtime.md` 已并入本章。
 
 ### 8.1 部署阶段
 
@@ -426,7 +426,7 @@ services:
 
 ```text
 /workspace/     # bind mount；WORKSPACE_ROOT；工具沙箱根
-  # writing: outline.md, sections/, sources/（见 10-product-modes）
+  # writing: outline.md, sections/, sources/（见 09-product-modes）
   # agent: 任务文件 / 仓库
 /data/            # agent_data 卷
   artifacts/{turn_id}/

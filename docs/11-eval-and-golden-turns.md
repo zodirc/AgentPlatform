@@ -1,4 +1,4 @@
-# 12 — 评估、Golden Turn 与可观测性
+# 11 — 评估、Golden Turn 与可观测性
 
 > 成熟 agent 的判据不仅是「能跑」，而是 **行为可预期、退化可发现、故障可定位**。  
 > 本文闭合 eval 体系与生产级观测，支撑长期自用与对外技术叙事。
@@ -277,7 +277,7 @@ packages/contracts/eval/
 
 - [ADR-010](adr/010-async-projection-layer.md) — eval 不阻塞主路径
 - [ADR-014](adr/014-turn-intake-over-intent-pipeline.md) — Intake 可测性
-- [`11-product-experience.md`](11-product-experience.md) — SLO
+- [`10-product-experience.md`](10-product-experience.md) — SLO
 - [`06-tools-and-context.md`](06-tools-and-context.md) §0.1 — 能力主路径
 - [`05-agent-runtime.md`](05-agent-runtime.md) §8.1 — abort 检查点
 - [ADR-015](adr/015-interrupt-cancel-resume.md) — Cancel / interrupt / resume

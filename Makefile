@@ -48,9 +48,9 @@ help: ## 显示常用命令
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
-	@echo "  make retrieval-bench 离线检索 A/B（docs/28 效果闸层 1；hash 近似）"
-	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/30 IX4）"
-	@echo "  make sync-sources    增量投影 workspace/sources → 索引（docs/30 IX0）"
+	@echo "  make retrieval-bench 离线检索 A/B（docs/15 契约近似；hash）"
+	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
+	@echo "  make sync-sources    增量投影 workspace/sources → 索引（docs/15 IX0）"
 	@echo "  make runtime-test 运行时测试"
 
 start: ## 启动栈（不 rebuild，最快）
@@ -178,7 +178,7 @@ runtime-test:
 	    'pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
 	fi
 
-sync-sources: ## 增量投影 workspace/sources → pgvector/json 索引（Turn 外；docs/30 IX0）
+sync-sources: ## 增量投影 workspace/sources → pgvector/json 索引（Turn 外；docs/15 IX0）
 	$(COMPOSE) exec -T runtime python -c 'import asyncio; from app.retrieval.index_scheduler import run_sources_index_sync; print(asyncio.run(run_sources_index_sync(reason="make")))'
 
 security-audit:
@@ -238,7 +238,7 @@ eval-path-prefix: ## writing.14 path_prefix golden（isolated stub + runtime-lit
 	  EVAL_RUNTIME_ENV="MODEL_MODE=stub RETRIEVAL_MODE=keyword INDEX_VIA_WORKER=false" \
 	  EVAL_ARGS="--filter writing.14"
 
-retrieval-bench: ## 离线检索 A/B（docs/28 RE0/RE3；json+hash 近似）
+retrieval-bench: ## 离线检索 A/B（docs/15 契约近似；json+hash）
 	@cd services/runtime && \
 	  if test -x .venv/bin/python; then PY=.venv/bin/python; else PY=python3; fi && \
 	  $$PY ../../scripts/retrieval_bench.py --mode hybrid && \

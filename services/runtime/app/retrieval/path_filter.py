@@ -1,4 +1,4 @@
-"""Normalize and apply search_sources path_prefix filters (docs/27–28 RE0/RE3)."""
+"""Normalize and apply search_sources path_prefix filters (docs/15)."""
 
 from __future__ import annotations
 

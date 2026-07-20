@@ -280,7 +280,7 @@ def build_registry() -> ToolRegistry:
                         "type": "string",
                         "enum": ["novel-zh", "essay", "none"],
                         "default": "novel-zh",
-                        "description": "Export structure lint profile (docs/23 D6)",
+                        "description": "Export structure lint profile (docs/14 D6)",
                     },
                 },
                 "required": ["section_ids"],
@@ -464,7 +464,7 @@ def tool_scope(profile: ScenarioProfile, registry: ToolRegistry) -> list[ToolSpe
     return specs
 
 
-# Dropped late in a turn / after successful export (docs/17 S3 A19). Pure rules.
+# Dropped late in a turn / after successful export (docs/13 S3 A19). Pure rules.
 _LATE_STAGE_DROP = frozenset({"search_sources", "delegate", "remember", "recall"})
 
 

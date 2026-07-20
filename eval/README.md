@@ -1,6 +1,6 @@
 # eval/
 
-Golden Turn 与回归用例。规范见 **[`docs/12-eval-and-golden-turns.md`](../docs/12-eval-and-golden-turns.md)**。
+Golden Turn 与回归用例。规范见 **[`docs/11-eval-and-golden-turns.md`](../docs/11-eval-and-golden-turns.md)**。
 
 Schema：`packages/contracts/eval/golden_turn.schema.json`
 
@@ -13,7 +13,7 @@ Schema：`packages/contracts/eval/golden_turn.schema.json`
 | `golden/writing/` | 14 | writing 场景（含 `writing.14` path_prefix） |
 | `golden/interview/` | 1 | interview stub |
 | `golden/live/` | 2 | 需 `MODEL_API_KEY`（nightly CI） |
-| `retrieval/` | — | 离线 A/B 题集 + corpus（docs/28 RE0/RE3） |
+| `retrieval/` | — | 离线 A/B 题集 + corpus（[docs/15](../docs/15-rag-and-sources.md)） |
 
 **默认 stub 集：随 writing.14 增加**（排除 live / recorded / stall / ha / queue 标签）
 

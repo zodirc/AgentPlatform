@@ -10,7 +10,7 @@ async def search_records(
     limit: int = 10,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Multi-table recall stub (docs/17 S3 A20 / docs/18).
+    """Multi-table recall stub (docs/13 S3 A20 / docs/17).
 
     Deterministic rule router placeholder: no LLM routing, no graph node.
     Real channels will race with ≤300ms timeouts and ACL filters later.
@@ -46,6 +46,6 @@ async def search_records(
         "hits": [],
         "channels": results,
         "status": "unimplemented",
-        "hint": "No business record backends configured; see docs/18-a20-multitable-recall.md",
+        "hint": "No business record backends configured; see docs/17-search-records.md",
         "summary": "search_records: stub (0 hits)",
     }

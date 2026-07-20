@@ -102,4 +102,4 @@ Phase 1 起 **管道类** golden 默认 `payload_validates: true`。
 - [`04-development-standards.md`](../04-development-standards.md) §3.5
 - [`contracts.md`](../contracts.md) §3.1
 - [`07-domain-model.md`](../07-domain-model.md) §10
-- [`12-eval-and-golden-turns.md`](../12-eval-and-golden-turns.md) §1.2
+- [`11-eval-and-golden-turns.md`](../11-eval-and-golden-turns.md) §1.2

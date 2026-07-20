@@ -1,4 +1,4 @@
-"""Keyword-mode search hit builder with optional section alignment (docs/28 RE1)."""
+"""Keyword-mode search hit builder with optional section alignment (docs/15 RE1)."""
 
 from __future__ import annotations
 

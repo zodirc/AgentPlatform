@@ -25,7 +25,7 @@ _PLAN_HINT = (
     "(optional — not required)."
 )
 
-# Deterministic user-side expansions (docs/23 §6.4). Do NOT mutate system prefix (C3).
+# Deterministic user-side expansions (docs/14 §6.4). Do NOT mutate system prefix (C3).
 POLISH_EXPAND = (
     "[polish] 只改文风与节奏；禁改专名、情节、[cite:*]；"
     "禁止调用 search_sources；逐段 propose_patch。"

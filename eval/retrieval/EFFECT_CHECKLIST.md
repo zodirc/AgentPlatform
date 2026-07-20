@@ -1,4 +1,4 @@
-# Workbench interaction checklist (docs/27 §8.1 layer 3 · docs/28 RE2/RE3)
+# Workbench interaction checklist (docs/15)
 
 **Automated (run first):**
 
