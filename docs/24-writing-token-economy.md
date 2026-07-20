@@ -1,9 +1,9 @@
 # 24 — 写作 Token 经济（自然交互优先）
 
-> **状态：已落地 WT1–WT4（2026-07-20）** · 实现随 writing monofile / work index  
+> **状态：WT1–WT4 已落地（2026-07-20）；WT5（prompt cache 布局）设计已定、实现延后** · 实现随 writing monofile / work index  
 > 前置：[`23-writing-work-model`](23-writing-work-model.md)（作品树 / monofile 已落地）  
 > 对照：[`13-rate-redlines`](13-rate-redlines.md) · [`20-context-compaction-walkthrough`](20-context-compaction-walkthrough.md) · [`14-writing-quality`](14-writing-quality.md) · [`10-product-experience`](10-product-experience.md)  
-> 约束：**不伤交互、不伤速率、不为省钱牺牲成稿效果**
+> 约束：**不伤交互、不伤速率、不为省钱牺牲成稿效果**；**不为 cache 命中率拆墙**
 
 ---
 
@@ -195,6 +195,42 @@ notes: <既有摘要 / 用户目标一句>
 | 按 token 计费打断生成 | 伤交互与成稿 |
 | 向量化全书再检索当上下文 | 重、延迟、写作连贯性差；RAG 留给资料库 |
 | 多作品 Work 表 | 与 token 无关；见 23§11 |
+| 为刷 prompt-cache 命中率牺牲上下文 | 见 §10；得不偿失 |
+
+### 4.6 WT5 — Prompt cache 布局（待落地 · 不拆墙）
+
+**观察（2026-07）：** 仪表盘上写作会话常见 **~10–15% prompt cache hit**。主因往往不是「系统坏了」，而是计费输入里大半是 **逐步增长的 messages / tool_results**——本来就不会进稳定前缀 cache。把命中率刷高却多灌上下文，是拆东墙补西墙。
+
+**原则（三条）：**
+
+1. **先降绝对未命中输入**（WT1–WT4 同向）：少整本读、工具结果硬顶、按章作业面 → miss 分母变小，账单直接降；命中率可能几乎不动，仍算成功。  
+2. **再理顺稳定前缀**（同内容重组，不删护栏）：见下表。  
+3. **禁止用质量 / 跟手 / 交互换命中率数字。**
+
+**现状组装（问题）：** `prepare_writing_system_prompt` 把 cards + work index + focus/prev **焊进整段 system**，再整块打 cache。换用户话 / 换章 → **整段 system 一起 miss**，连稳定的 `system.md` 正文也陪葬。
+
+**推荐布局（内容不减，只改位置）：**
+
+| 层 | 放什么 | cache |
+|----|--------|--------|
+| **稳定** | `system.md` 正文 + tools | 打标；跨 Turn 尽量命中 |
+| **易变** | cards / focus / prev / work index | 放 runtime 或靠后 user；**照样送给模型** |
+
+**行为上少制造「肥 Turn」（零引擎也能做）：** 改名走 `rename_file`、少无谓 `delegate`、少为格式校验整本拆读。少步数 = 少次全量重送。
+
+**明确不要做（拆墙清单）：**
+
+| 做法 | 为什么否决 |
+|------|------------|
+| 为 cache 丢掉 focus / prev / cards | 质量换命中 |
+| 每步自动 LLM 摘要再写 | 伤 R2，还可能多一轮费 |
+| 强逼短输出 / 少写章 | 省输出毁产品 |
+| 死磕命中率仪表盘 | 可刷高命中、总费用不降甚至升 |
+| 更勤的 collapse 专为 cache | 易丢细节，且改历史会再 miss |
+
+**验收：** 同任务「写一章」的 **计费 input / cache miss 绝对量**下降；质量与首 token 不回归。**不**以「命中率 %」为唯一 KPI。
+
+**状态：** 设计已定，实现延后（与 WT1–WT4 解耦；先确认按章装载在实战里生效，再动组装）。
 
 ---
 
@@ -212,7 +248,8 @@ notes: <既有摘要 / 用户目标一句>
 ### 5.2 成本信号
 
 - `context.reported`：同任务「写一章」的 `tokens_before` 中位下降  
-- 不要求输出 token 下降（正文长度由用户决定）
+- 不要求输出 token 下降（正文长度由用户决定）  
+- Prompt cache（WT5）：看 **cache miss / 总 input 绝对量**；命中率仅作辅证，不作唯一目标
 
 ### 5.3 速率信号
 
@@ -257,7 +294,8 @@ notes: <既有摘要 / 用户目标一句>
 2. 成熟形态 = **磁盘全书 + 按章作业面 + 带书签的会话压缩**。  
 3. 一切热路径无同步 LLM；遵守 R1–R5。  
 4. 效果护栏：focus 全文（或显式分段）、prev 尾、cards、用户 `@` / 全文意图。  
-5. 拒绝自动摘要开写、砍质量能力、无书签 compact。
+5. 拒绝自动摘要开写、砍质量能力、无书签 compact。  
+6. Prompt cache：**先砍绝对 miss，再拆稳定/易变前缀**；不为命中率拆墙（§10 / WT5）。
 
 ---
 
@@ -266,4 +304,16 @@ notes: <既有摘要 / 用户目标一句>
 1. focus 识别：仅规则 vs 极轻量分类（仍避免同步 LLM；规则优先）。  
 2. prev 尾默认字符：1500 vs 2500（用衔接盲测定）。  
 3. `read_file(manuscript.md)`：硬拒绝整文件 vs 自动抽 focus——建议 **自动抽 + 说明**，全文意图白名单放行。  
-4. 是否在 Usage 旁显示「本轮约带了 chN」——增强信任，非必须。
+4. 是否在 Usage 旁显示「本轮约带了 chN」——增强信任，非必须。  
+5. WT5：易变块挂 `runtime_context` 还是独立 user message；与现有 `cache_control` / fingerprint 如何对齐（实现时再定）。
+
+---
+
+## 10. Prompt cache（决策备忘 · 2026-07）
+
+> 与 §4.6 WT5 同文；此处便于检索「命中率该不该优化」。
+
+**合理路径 = 少送废话（绝对输入）+ 稳定段别被本轮作业面污染（同内容重组）。**  
+前者降账单，后者抬一点真命中；两者都不牺牲写作效果和交互。
+
+落地顺序建议：先确认 WT1–WT4 在实战会话里真的在跑 → 再开 WT5 组装票。
