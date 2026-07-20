@@ -231,6 +231,9 @@ async def _project_turn_impl(turn_id: UUID) -> None:
         elif event_type == "outline.updated":
             artifacts.append({"type": "outline", **payload})
         elif event_type == "turn.plan":
+            # Latest plan wins — progress UI must not stick on an older snapshot
+            # (docs/25 P0b).
+            artifacts = [a for a in artifacts if a.get("type") != "plan"]
             artifacts.append({"type": "plan", **payload})
         elif event_type == "retrieval.completed":
             artifacts.append({"type": "retrieval", **payload})

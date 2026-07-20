@@ -2,6 +2,7 @@ import { RetrievalView } from "./RetrievalView";
 import { ArtifactView } from "./ArtifactView";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import { artifactToWritePreview } from "../../shared/workbench/filePreview";
+import { PlanPanel } from "../../shared/workbench/PlanPanel";
 import type { WorkbenchState } from "../../shared/workbench/types";
 
 type Props = {
@@ -43,31 +44,14 @@ export function AgentPanels({ wb }: Props) {
           ))}
         </section>
       ) : null}
+      <PlanPanel
+        plan={wb.plan}
+        showExecute={!wb.busy && !wb.awaitingApproval}
+        executeDisabled={wb.busy || wb.actionBusy}
+        onExecute={() => void wb.handleExecutePlan()}
+      />
       <RetrievalView artifacts={view?.artifacts ?? []} />
       <ArtifactView artifacts={view?.artifacts ?? []} />
-      {view?.artifacts?.some((a) => a.type === "plan") && (
-        <section className="rounded-xl border border-violet-900/50 bg-violet-950/20 p-4">
-          <h2 className="mb-2 text-sm font-medium text-violet-200">任务计划</h2>
-          <ul className="space-y-1 text-xs">
-            {(
-              (
-                view.artifacts.find((a) => a.type === "plan") as {
-                  items?: Array<{
-                    id: string;
-                    title: string;
-                    status: string;
-                  }>;
-                }
-              )?.items ?? []
-            ).map((item) => (
-              <li key={item.id} className="rounded bg-slate-950 px-3 py-2">
-                <span className="text-slate-400">{item.status}</span> —{" "}
-                {item.title}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
     </>
   );
 }

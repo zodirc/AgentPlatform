@@ -6,7 +6,7 @@ type Props = {
 
 export function ArtifactView({ artifacts }: Props) {
   const items = artifacts.filter(
-    (a) => a.type === "subagent" || a.type === "plan" || a.type === "retrieval",
+    (a) => a.type === "subagent" || a.type === "retrieval",
   );
   if (!items.length) return null;
 

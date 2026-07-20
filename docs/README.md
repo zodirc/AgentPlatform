@@ -6,7 +6,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 
 ---
 
-## 模块目录（01–24）
+## 模块目录（01–25）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -34,6 +34,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 | 22 | [highlights-vs-legacy](22-highlights-vs-legacy.md) | 相对旧项目全景 |
 | 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
 | 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
+| 25 | [writing-runway](25-writing-runway.md) | **Plan 模式（平台）**：步骤可见 / 同意执行 |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -45,7 +46,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 |------|----|
 | 部署 / 默认栈 | [03](03-docker-runtime.md) |
 | 速率约束 | [13](13-rate-redlines.md) |
-| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） |
+| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） · [25](25-writing-runway.md)（Plan / 步骤可见） |
 | RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md) |
 | 会话归属 | [16](16-user-session-history.md) |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md) |
@@ -65,6 +66,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 | Harness 核心 | 🔧 | 12 |
 | 写作作品模型 WW0–WW4 | ✅ | 23 · ADR-020 |
 | 写作 Token 经济 WT0–WT4 | ✅ | 24 |
+| Plan 模式（平台 · 步骤可见） | 🔧 P0 落地 | 25 |
 | Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 |
 
 ---

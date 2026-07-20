@@ -463,11 +463,20 @@ async def update_plan(
     plan_id = f"plan-{uuid4().hex[:8]}"
     normalized: list[dict[str, str]] = []
     for i, item in enumerate(items):
+        status = str(item.get("status", "pending")).strip().lower()
+        if status in {"done", "complete", "completed"}:
+            status = "done"
+        elif status in {"in-progress", "running", "in_progress"}:
+            status = "in_progress"
+        elif status in {"cancelled", "canceled", "skipped"}:
+            status = "cancelled"
+        else:
+            status = "pending" if status in {"", "todo", "open", "pending"} else status
         normalized.append(
             {
                 "id": str(item.get("id", i + 1)),
                 "title": str(item.get("title", item.get("text", "item"))),
-                "status": str(item.get("status", "pending")),
+                "status": status,
             }
         )
     return {

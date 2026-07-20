@@ -1,4 +1,5 @@
 import type { TurnEvent, TurnView } from "../api/client";
+import type { PlanArtifact } from "./plan";
 
 export type ScenarioId = "writing" | "agent" | "interview";
 
@@ -78,6 +79,15 @@ export type WorkbenchState = {
   timelineItems: TimelineItem[];
   contextUsage: ContextUsage | null;
   tokenUsage: TokenUsage | null;
+  /** Latest plan artifact (live event or turn view). */
+  plan: PlanArtifact | null;
+  /** Explicit Plan mode (docs/25) — user toggled; wraps next send. */
+  planMode: boolean;
+  setPlanMode: (value: boolean) => void;
+  /** Multi-goal suggest bar visible. */
+  showPlanSuggest: boolean;
+  dismissPlanSuggest: () => void;
+  handleExecutePlan: () => Promise<void>;
   busy: boolean;
   stopping: boolean;
   actionBusy: boolean;

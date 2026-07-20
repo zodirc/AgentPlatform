@@ -9,6 +9,8 @@ import {
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
 import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
 import { scenarioMeta } from "../../shared/workbench/scenarioMeta";
+import { PlanPanel } from "../../shared/workbench/PlanPanel";
+import { currentPlanStep } from "../../shared/workbench/plan";
 import type { TurnHistoryItem, WorkbenchState } from "../../shared/workbench/types";
 
 type Props = {
@@ -39,6 +41,7 @@ export function AgentChatPanel({ wb }: Props) {
   const approval = approvalCopy(wb.pendingToolName);
   const meta = scenarioMeta(wb.scenarioId);
   const turnScenario = wb.view?.scenario_id;
+  const currentStep = currentPlanStep(wb.plan);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -63,9 +66,9 @@ export function AgentChatPanel({ wb }: Props) {
     wb.displayStatus,
     wb.awaitingApproval,
     wb.historyLoading,
+    wb.plan?.items?.length,
   ]);
 
-  // New user send: always jump to bottom so the reply is visible.
   useEffect(() => {
     if (!wb.busy) return;
     stickToBottomRef.current = true;
@@ -86,6 +89,7 @@ export function AgentChatPanel({ wb }: Props) {
             : ""}
           {wb.sessionId ? ` · session=${wb.sessionId.slice(0, 8)}` : ""}
           {wb.useWebSocket ? " · ws" : ""}
+          {wb.planMode ? " · Plan" : ""}
         </p>
       </header>
 
@@ -131,6 +135,7 @@ export function AgentChatPanel({ wb }: Props) {
             status={wb.displayStatus}
             {wb.view ? ` · seq=${wb.view.last_event_sequence}` : ""}
             {` · turn=${wb.turnId.slice(0, 8)}`}
+            {currentStep ? ` · 计划：${currentStep.title}` : ""}
           </p>
         ) : null}
         <div ref={endRef} aria-hidden className="h-px w-full" />
@@ -176,7 +181,42 @@ export function AgentChatPanel({ wb }: Props) {
         </div>
       ) : null}
 
-      <div className="shrink-0 border-t border-slate-800 p-4">
+      <div className="shrink-0 space-y-2 border-t border-slate-800 p-4">
+        {wb.plan?.items?.length ? (
+          <PlanPanel
+            plan={wb.plan}
+            showExecute={!wb.busy && !wb.awaitingApproval}
+            executeDisabled={wb.busy || wb.actionBusy}
+            onExecute={() => void wb.handleExecutePlan()}
+            compact
+          />
+        ) : null}
+        {wb.showPlanSuggest ? (
+          <div className="flex items-start justify-between gap-2 rounded-md border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-100/90">
+            <p>多目标请求：建议先切到 Plan，列出步骤再执行（可忽略）。</p>
+            <div className="flex shrink-0 gap-1">
+              <button
+                type="button"
+                className="rounded bg-amber-800/80 px-2 py-0.5 text-amber-50 hover:bg-amber-700"
+                onClick={() => wb.setPlanMode(true)}
+              >
+                切换 Plan
+              </button>
+              <button
+                type="button"
+                className="rounded px-2 py-0.5 text-amber-200/70 hover:text-amber-100"
+                onClick={() => wb.dismissPlanSuggest()}
+              >
+                忽略
+              </button>
+            </div>
+          </div>
+        ) : null}
+        {wb.planMode ? (
+          <p className="text-[11px] text-violet-300/90">
+            Plan 已开：发送将先要求列出计划，不直接改稿。可用「按此执行」开跑。
+          </p>
+        ) : null}
         <Textarea
           className="min-h-[80px] resize-none text-sm"
           value={wb.message}
@@ -190,7 +230,21 @@ export function AgentChatPanel({ wb }: Props) {
             )
           }
         />
-        <div className="mt-2 flex gap-2">
+        <div className="mt-2 flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant={wb.planMode ? "default" : "outline"}
+            className={
+              wb.planMode
+                ? "bg-violet-700 hover:bg-violet-600"
+                : "border-violet-800 text-violet-200"
+            }
+            disabled={wb.busy}
+            onClick={() => wb.setPlanMode(!wb.planMode)}
+            title="Plan 模式：先规划，确认后再执行"
+          >
+            {wb.planMode ? "Plan · 开" : "Plan"}
+          </Button>
           <Button
             size="sm"
             disabled={wb.busy || !wb.message.trim()}

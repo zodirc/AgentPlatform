@@ -27,6 +27,14 @@ import type {
   WriteFilePreview,
 } from "./types";
 import { previewText } from "./filePreview";
+import {
+  executePlanMessage,
+  latestPlanFromArtifacts,
+  planFromEventPayload,
+  shouldSuggestPlanMode,
+  wrapMessageForPlanMode,
+  type PlanArtifact,
+} from "./plan";
 import { scenarioMeta } from "./scenarioMeta";
 import { tokenUsageFromEvents } from "./tokenUsage";
 import { useWorkbenchSession } from "./workbenchSession";
@@ -114,6 +122,9 @@ export function useWorkbenchImpl(): WorkbenchState {
     null,
   );
   const [liveTokenUsage, setLiveTokenUsage] = useState<TokenUsage | null>(null);
+  const [livePlan, setLivePlan] = useState<PlanArtifact | null>(null);
+  const [planMode, setPlanMode] = useState(false);
+  const [planSuggestDismissed, setPlanSuggestDismissed] = useState(false);
   const streamRef = useRef<StreamClient | null>(null);
   const lastSequenceRef = useRef(0);
   const resumingAfterApprovalRef = useRef(false);
@@ -212,6 +223,10 @@ export function useWorkbenchImpl(): WorkbenchState {
       if (turnViewQuery.data.token_usage) {
         setLiveTokenUsage(turnViewQuery.data.token_usage as TokenUsage);
       }
+      const viewPlan = latestPlanFromArtifacts(
+        turnViewQuery.data.artifacts as Record<string, unknown>[] | undefined,
+      );
+      if (viewPlan) setLivePlan(viewPlan);
     }
   }, [turnViewQuery.data]);
 
@@ -324,6 +339,9 @@ export function useWorkbenchImpl(): WorkbenchState {
                 (ev.payload.source as ContextUsage["source"]) ?? "estimated",
             });
           }
+          if (ev.type === "turn.plan") {
+            setLivePlan(planFromEventPayload(ev.payload as Record<string, unknown>));
+          }
           if (ev.type === "usage.reported" || ev.type === "turn.completed") {
             // Backend payload.input/output_tokens are turn cumulatives;
             // step_* fields are per-step deltas (used only when rebuilding from events).
@@ -383,6 +401,10 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (v.context_usage)
             setLiveContextUsage(v.context_usage as ContextUsage);
           if (v.token_usage) setLiveTokenUsage(v.token_usage as TokenUsage);
+          const closedPlan = latestPlanFromArtifacts(
+            v.artifacts as Record<string, unknown>[] | undefined,
+          );
+          if (closedPlan) setLivePlan(closedPlan);
           setLiveToolTimeline([]);
           setBusy(false);
           setStopping(false);
@@ -417,24 +439,37 @@ export function useWorkbenchImpl(): WorkbenchState {
 
         const last = history[history.length - 1];
         if (!last || turnIdRef.current) return;
-        if (!ACTIVE_TURN_STATUSES.has(last.status)) return;
 
         const v = await fetchTurnView(last.id);
         if (cancelled) return;
 
-        setTurnId(last.id);
+        if (ACTIVE_TURN_STATUSES.has(last.status)) {
+          setTurnId(last.id);
+          setView(v);
+          setSubmittedMessage(v.user_input ?? null);
+          syncApprovalFromView(v);
+          if (v.context_usage) {
+            setLiveContextUsage(v.context_usage as ContextUsage);
+          }
+          if (v.token_usage) {
+            setLiveTokenUsage(v.token_usage as TokenUsage);
+          }
+          const activePlan = latestPlanFromArtifacts(
+            v.artifacts as Record<string, unknown>[] | undefined,
+          );
+          if (activePlan) setLivePlan(activePlan);
+          lastSequenceRef.current = v.last_event_sequence ?? 0;
+          setBusy(true);
+          connectStream(last.id, lastSequenceRef.current);
+          return;
+        }
+
+        // Idle: still surface the last turn's plan checklist if present.
         setView(v);
-        setSubmittedMessage(v.user_input ?? null);
-        syncApprovalFromView(v);
-        if (v.context_usage) {
-          setLiveContextUsage(v.context_usage as ContextUsage);
-        }
-        if (v.token_usage) {
-          setLiveTokenUsage(v.token_usage as TokenUsage);
-        }
-        lastSequenceRef.current = v.last_event_sequence ?? 0;
-        setBusy(true);
-        connectStream(last.id, lastSequenceRef.current);
+        const idlePlan = latestPlanFromArtifacts(
+          v.artifacts as Record<string, unknown>[] | undefined,
+        );
+        if (idlePlan) setLivePlan(idlePlan);
       } catch (err) {
         if (!cancelled) {
           setHistoryLoading(false);
@@ -453,9 +488,13 @@ export function useWorkbenchImpl(): WorkbenchState {
       startTurn(sid, msg, activeScenarioId),
   });
 
-  async function handleSendText(textRaw: string) {
-    const text = textRaw.trim();
+  async function handleSendText(textRaw: string, opts?: { planWrap?: boolean }) {
+    let text = textRaw.trim();
     if (!sessionId || !text || busy) return;
+    const shouldWrap = opts?.planWrap ?? planMode;
+    if (shouldWrap) {
+      text = wrapMessageForPlanMode(text);
+    }
     setBusy(true);
     setError(null);
     setEvents([]);
@@ -465,6 +504,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setLiveToolTimeline([]);
     setLiveContextUsage(null);
     setLiveTokenUsage(null);
+    setLivePlan(null);
     setView(null);
     setStopping(false);
     setPendingApproval(false);
@@ -504,8 +544,21 @@ export function useWorkbenchImpl(): WorkbenchState {
     await handleSendText(message);
   }
 
+  async function handleExecutePlan() {
+    await handleSendText(executePlanMessage(), { planWrap: false });
+  }
+
+  function dismissPlanSuggest() {
+    setPlanSuggestDismissed(true);
+  }
+
+  function setPlanModeAndClearSuggest(value: boolean) {
+    setPlanMode(value);
+    if (value) setPlanSuggestDismissed(true);
+  }
+
   async function handleVerify() {
-    await handleSendText("/verify");
+    await handleSendText("/verify", { planWrap: false });
   }
   async function handleStop() {
     if (!turnId) return;
@@ -672,6 +725,17 @@ export function useWorkbenchImpl(): WorkbenchState {
     tokenUsageFromEvents(events) ??
     (view?.token_usage as TokenUsage | null | undefined) ??
     null;
+  const plan =
+    livePlan ??
+    latestPlanFromArtifacts(
+      view?.artifacts as Record<string, unknown>[] | undefined,
+    );
+
+  const showPlanSuggest =
+    !planMode &&
+    !planSuggestDismissed &&
+    !busy &&
+    shouldSuggestPlanMode(message);
 
   const meta = scenarioMeta(activeScenarioId);
 
@@ -683,7 +747,10 @@ export function useWorkbenchImpl(): WorkbenchState {
     turnHistory,
     historyLoading,
     message,
-    setMessage,
+    setMessage: (value: string) => {
+      setMessage(value);
+      if (!shouldSuggestPlanMode(value)) setPlanSuggestDismissed(false);
+    },
     submittedMessage,
     turnId,
     view,
@@ -693,6 +760,12 @@ export function useWorkbenchImpl(): WorkbenchState {
     timelineItems,
     contextUsage,
     tokenUsage,
+    plan,
+    planMode,
+    setPlanMode: setPlanModeAndClearSuggest,
+    showPlanSuggest,
+    dismissPlanSuggest,
+    handleExecutePlan,
     busy,
     stopping,
     actionBusy,

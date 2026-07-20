@@ -123,3 +123,69 @@ async def test_project_turn_maps_cards_pinned_artifact() -> None:
     )
     assert '"type": "writing_cards"' in view_insert.args[8]
     assert "张白鹿" in view_insert.args[8]
+
+
+@pytest.mark.asyncio
+async def test_project_turn_replaces_plan_artifact_with_latest() -> None:
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=transaction)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction.return_value = transaction
+
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=False)
+
+    pool = MagicMock()
+    pool.acquire.return_value = acquire_cm
+    pool.fetch = AsyncMock(
+        return_value=[
+            {
+                "sequence": 1,
+                "type": "turn.plan",
+                "payload": {
+                    "plan_id": "plan-old",
+                    "summary": "first",
+                    "items": [{"id": "1", "title": "A", "status": "pending"}],
+                },
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            {
+                "sequence": 2,
+                "type": "turn.plan",
+                "payload": {
+                    "plan_id": "plan-new",
+                    "summary": "second",
+                    "items": [
+                        {"id": "1", "title": "A", "status": "completed"},
+                        {"id": "2", "title": "B", "status": "in_progress"},
+                    ],
+                },
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+        ]
+    )
+
+    turn = {
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "agent",
+        "status": "running",
+        "user_input": "multi step",
+    }
+
+    with (
+        patch("app.services.projection.projector.get_pool", new_callable=AsyncMock, return_value=pool),
+        patch("app.services.projection.projector.turn_svc.get_turn", new_callable=AsyncMock, return_value=turn),
+    ):
+        await project_turn(TURN_ID)
+
+    view_insert = next(
+        call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
+    )
+    payload = view_insert.args[8]
+    assert payload.count('"type": "plan"') == 1
+    assert "plan-new" in payload
+    assert "in_progress" in payload
+    assert "plan-old" not in payload

@@ -115,7 +115,12 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="update_plan",
-            description="Update the turn plan / todo list",
+            description=(
+                "Update the visible turn plan / todo checklist. "
+                "Call when starting a multi-step task and again whenever a step "
+                "begins (status=in_progress) or finishes (status=done). "
+                "Replace the full items list each time so the UI stays accurate."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
