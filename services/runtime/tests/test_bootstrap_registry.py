@@ -59,7 +59,7 @@ def test_tool_scope_never_override() -> None:
     assert specs["run_command"].requires_approval is False
 
 
-def test_writing_profile_lists_five_subagents() -> None:
+def test_writing_profile_lists_writing_subagents() -> None:
     ScenarioRegistry.load()
     profile = ScenarioRegistry.get("writing")
     assert set(profile.subagent_types) == {
@@ -68,7 +68,12 @@ def test_writing_profile_lists_five_subagents() -> None:
         "editor",
         "fact_checker",
         "stylist",
+        "explore",
+        "retrieve",
+        "planner",
     }
+    assert "grep" in profile.tool_names
+    assert "glob" in profile.tool_names
 
 
 def test_agent_profile_lists_six_subagents() -> None:

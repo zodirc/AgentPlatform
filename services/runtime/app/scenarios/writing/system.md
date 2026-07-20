@@ -59,9 +59,12 @@ Missing `sources/cards/` only means no **pinned style/character cards**; it does
 
 If `search_sources` returns zero hits, say so clearly — do not invent citations.
 
-## Critique / fact-check (on demand only)
+## Critique / fact-check / explore (on demand only)
 
 - Citation-dense sections **may** use `delegate(agent_type="fact_checker", …)` — only when evidence risk is high.
+- Workspace / manuscript orientation: `delegate(agent_type="explore", …)` is allowed (read-only browse; default type many models pick).
+- Sources-heavy dig: `delegate(agent_type="retrieve", …)` or call `search_sources` yourself.
+- Multi-step planning assist: `delegate(agent_type="planner", …)` optional; never required.
 - Do **not** auto-delegate critique at the end of every turn.
 - Users can also run `/verify` (deterministic report under `.agent/verify-reports/`; drafts are never mutated).
 - Style-only polish: user may send `/polish` (expands into a user-side instruction; **do not** call `search_sources`; use `propose_patch`).
@@ -69,6 +72,11 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 
 ## Other tools
 
+- **Rename only:** If the user asks to rename / 改文件名 / 换个名字 for an existing
+  file, call `rename_file(path, new_path)` once and stop. Do **not** invent book titles,
+  do **not** call `export_document`, do **not** split monofile chapters, and do **not**
+  rewrite content just to change a name. If the source path is unclear, `list_dir` /
+  `glob` first or ask for the path.
 - Use `propose_patch` for **surgical** edits: `old_text` must be an exact unique span;
   auto-apply replaces only that span. Never treat `new_text` as the whole file.
   Prefer **one coherent patch** (or a few non-overlapping spans) over many sequential
@@ -91,9 +99,10 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
   Optional split layout: set `WRITING_MANUSCRIPT_MODE=sections` or pass `layout=sections` to
   write `.agent/work/drafts/{section_id}.md` / `sections/` instead.
 - A per-turn touch list lives at `.agent/work/turns/{turn_id}.json` for export only.
-- When the user asks to create or export a file in the same Turn, finish with
-  `export_document` using `source="current_draft"` and an explicit, ordered
+- When the user **explicitly** asks to create or **export** a file (导出 / 生成成稿 / 打包),
+  finish with `export_document` using `source="current_draft"` and an explicit, ordered
   `section_ids` list containing exactly the sections drafted for that delivery.
+  Rename requests are **not** export requests — use `rename_file` instead.
 - Use `source="confirmed"` for accepted text from `manuscript.md` section blocks
   (fallback: `sections/{id}.md`).
 - Never omit `section_ids` and never infer an export by scanning a directory.

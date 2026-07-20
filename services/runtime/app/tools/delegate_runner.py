@@ -21,19 +21,30 @@ DEFAULT_SUBAGENT_MAX_STEPS = 8
 SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
     "researcher": ["read_file", "list_dir", "search_sources", "grep"],
     "drafter": ["read_file", "draft_section", "update_outline", "propose_patch"],
-    "editor": ["read_file", "propose_patch", "edit_file", "write_file"],
+    "editor": ["read_file", "propose_patch", "edit_file", "write_file", "rename_file"],
     "fact_checker": ["read_file", "check_citation", "search_sources"],
     "stylist": ["read_file", "draft_section", "propose_patch"],
-    "explore": ["read_file", "list_dir", "grep", "glob", "search_codebase"],
+    "explore": ["read_file", "list_dir", "grep", "glob", "search_codebase", "search_sources"],
     "retrieve": ["read_file", "search_sources", "search_codebase", "list_dir"],
     "verify": ["read_file", "check_citation", "read_lints", "run_tests"],
-    "edit": ["read_file", "propose_patch", "write_file", "edit_file"],
+    "edit": ["read_file", "propose_patch", "write_file", "edit_file", "rename_file"],
     "planner": ["read_file", "list_dir", "update_plan", "grep"],
     "shell": ["read_file", "grep", "run_command"],
 }
 
+# Writing keeps role specialists and also allows explore/retrieve/planner:
+# models often default to explore; workspace + sources exploration is legitimate.
 WRITING_DEFAULT_SUBAGENTS = frozenset(
-    {"researcher", "drafter", "editor", "fact_checker", "stylist"}
+    {
+        "researcher",
+        "drafter",
+        "editor",
+        "fact_checker",
+        "stylist",
+        "explore",
+        "retrieve",
+        "planner",
+    }
 )
 AGENT_DEFAULT_SUBAGENTS = frozenset({"explore", "retrieve", "verify", "edit", "planner", "shell"})
 

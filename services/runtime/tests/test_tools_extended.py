@@ -127,6 +127,35 @@ async def test_write_file_and_edit_errors(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_rename_file_moves_and_guards(workspace: Path) -> None:
+    await core.write_file("exports/old.md", "body")
+    ok = await core.rename_file("exports/old.md", "exports/新书名.md")
+    assert ok["status"] == "renamed"
+    assert (workspace / "exports" / "新书名.md").read_text(encoding="utf-8") == "body"
+    assert not (workspace / "exports" / "old.md").exists()
+
+    clash = await core.rename_file("exports/新书名.md", "exports/新书名.md")
+    assert clash["status"] == "ok"
+
+    await core.write_file("exports/other.md", "x")
+    blocked = await core.rename_file("exports/other.md", "exports/新书名.md")
+    assert blocked["status"] == "error"
+    assert "exists" in blocked["error"]
+
+    over = await core.rename_file(
+        "exports/other.md", "exports/新书名.md", overwrite=True
+    )
+    assert over["status"] == "renamed"
+    assert (workspace / "exports" / "新书名.md").read_text(encoding="utf-8") == "x"
+
+    seed = workspace / "sources" / "seed"
+    seed.mkdir(parents=True)
+    (seed / "ro.md").write_text("seed", encoding="utf-8")
+    denied = await core.rename_file("sources/seed/ro.md", "exports/stolen.md")
+    assert denied["status"] == "error"
+
+
+@pytest.mark.asyncio
 async def test_check_citation_and_stub_echo(workspace: Path) -> None:
     (workspace / "src.md").write_text("cite:abc content", encoding="utf-8")
 

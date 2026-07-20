@@ -9,6 +9,7 @@ tool_names:
   - propose_patch
   - write_file
   - edit_file
+  - rename_file
   - search_codebase
   - update_plan
   - remember

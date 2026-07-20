@@ -4,6 +4,9 @@ system_prompt_template: scenarios/writing/system.md
 tool_names:
   - read_file
   - list_dir
+  - grep
+  - glob
+  - rename_file
   - propose_patch
   - draft_section
   - update_outline
@@ -20,6 +23,9 @@ subagent_types:
   - editor
   - fact_checker
   - stylist
+  - explore
+  - retrieve
+  - planner
 max_steps: 40
 approval_overrides: {}
 workspace_layout: document

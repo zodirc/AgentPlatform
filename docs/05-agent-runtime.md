@@ -411,7 +411,7 @@ class DelegateSubagentTool:
 ### 10.1 多 agent 协作
 
 - 主 agent 可 `delegate(task, agent_type, context)`；`agent_type` 由 **ScenarioProfile** 限定
-- **`writing`**：researcher、drafter、editor、fact_checker、stylist
+- **`writing`**：researcher、drafter、editor、fact_checker、stylist、explore、retrieve、planner
 - **`agent`**：explore、retrieve、verify、edit、planner
 - 协作规则不变：只交换结论与引用；主编/主 loop 保留决策权；默认委派深度 ≤ 2
 

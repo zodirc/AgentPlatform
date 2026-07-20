@@ -264,6 +264,36 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
+            name="rename_file",
+            description=(
+                "Rename or move an existing workspace file (path → new_path). "
+                "Use for rename-only requests; do NOT export, rewrite, or invent titles. "
+                "Fails if destination exists unless overwrite=true. Seed corpus is read-only."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Current relative path",
+                    },
+                    "new_path": {
+                        "type": "string",
+                        "description": "Destination relative path (new name and/or folder)",
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Replace destination if it already exists",
+                        "default": False,
+                    },
+                },
+                "required": ["path", "new_path"],
+            },
+            handler=core.rename_file,
+        )
+    )
+    registry.register(
+        ToolSpec(
             name="edit_file",
             description="Replace a unique text span in an existing file",
             parameters={

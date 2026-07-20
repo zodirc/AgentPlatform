@@ -102,7 +102,7 @@
 | 定位 | 长文、报告、方案、交付 | 调研、工程、多步任务 |
 | 工作区 | `outline.md`、`sections/`、`sources/` | 任务目录 / 仓库 / 产物 |
 | 核心 UI | 对话 + **文稿 diff** + 大纲/证据 | 对话 + **工具时间线** + 产物 |
-| 子 agent | researcher、drafter、editor、fact_checker、stylist | explore、retrieve、verify、edit、planner |
+| 子 agent | researcher、drafter、editor、fact_checker、stylist、explore、retrieve、planner | explore、retrieve、verify、edit、planner、shell |
 | 审批倾向 | 写文稿 **on_write** | `exec` **always** |
 
 **术语**：
@@ -260,7 +260,7 @@ Content-Type: application/json
 
 ### 5.3 子 agent（仅本场景 Profile 启用）
 
-researcher、drafter、editor、fact_checker、stylist — 见 §2 表。
+researcher、drafter、editor、fact_checker、stylist、explore、retrieve、planner — 见 §2 表。
 
 ### 5.4 UI 与事件
 

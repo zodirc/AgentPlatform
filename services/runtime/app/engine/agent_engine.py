@@ -710,7 +710,12 @@ class AgentEngine:
             excerpt = str(hit.get("excerpt", ""))[:160]
             if excerpt:
                 summary = f"{summary}; {excerpt}"
-        tool_status = "error" if result.get("error") else "ok"
+        # Prefer concrete error text in the timeline (e.g. auto-apply old_text miss).
+        if result.get("error"):
+            err_text = str(result.get("error"))[:240]
+            if err_text and err_text not in summary:
+                summary = err_text
+        tool_status = "error" if result.get("error") or str(result.get("status") or "") == "error" else "ok"
         completed_payload: dict[str, Any] = {
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,

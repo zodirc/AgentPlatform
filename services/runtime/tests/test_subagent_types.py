@@ -7,11 +7,27 @@ from app.tools import delegate_runner
 
 @pytest.mark.parametrize(
     "agent_type",
-    ["researcher", "drafter", "editor", "fact_checker", "stylist"],
+    [
+        "researcher",
+        "drafter",
+        "editor",
+        "fact_checker",
+        "stylist",
+        "explore",
+        "retrieve",
+        "planner",
+    ],
 )
 def test_writing_subagent_types_have_tool_mappings(agent_type: str) -> None:
     assert agent_type in delegate_runner.SUBAGENT_TOOL_NAMES
     assert delegate_runner.SUBAGENT_TOOL_NAMES[agent_type]
+
+
+def test_writing_allows_explore_by_default() -> None:
+    allowed = delegate_runner._allowed_subagent_types("writing", [])
+    assert "explore" in allowed
+    assert "retrieve" in allowed
+    assert "planner" in allowed
 
 
 @pytest.mark.parametrize(
