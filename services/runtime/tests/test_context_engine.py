@@ -269,6 +269,61 @@ def test_context_engine_collapse_triggered_by_fill_ratio() -> None:
     assert "collapse" in strategies
 
 
+def test_collapse_pointer_includes_dropped_tools() -> None:
+    from app.context.engine import _collapse_tool_history
+    from app.engine.state import assistant_tool_uses, tool_result_message
+
+    policy = CompactionPolicy(
+        model_window_tokens=2_000,
+        output_reserve_tokens=64,
+        fill_collapse=0.01,
+        fill_snip=0.99,
+        fill_autocompact=0.995,
+        hot_zone_ratio=0.2,
+    )
+    list_body = json.dumps({"path": "exports", "entries": ["a.md", "b.cpp", "c.log"]})
+    pad = "z" * 800
+    messages = [user_message("explore")]
+    for index in range(4):
+        list_id = f"list-{index}"
+        read_id = f"read-{index}"
+        messages.append(
+            assistant_tool_uses(
+                [
+                    {"id": list_id, "name": "list_dir", "input": {"path": "exports"}},
+                    {"id": read_id, "name": "read_file", "input": {"path": f"f{index}.md"}},
+                ],
+                text=f"step {index}",
+            )
+        )
+        messages.append(tool_result_message(list_id, list_body))
+        messages.append(tool_result_message(read_id, pad))
+    messages.append(user_message("continue"))
+    messages.append(assistant_text("done"))
+
+    out = _collapse_tool_history(
+        messages,
+        [],
+        system_prompt="sys",
+        tools=None,
+        policy=policy,
+    )
+    pointer = next(
+        (
+            block.get("text", "")
+            for msg in out
+            for block in msg.get("content", [])
+            if isinstance(block, dict) and "collapsed" in str(block.get("text", ""))
+        ),
+        "",
+    )
+    assert "dropped tools:" in pointer
+    assert "list_dir×" in pointer
+    assert "read_file×" in pointer
+    assert "a.md" in pointer
+    assert "pinned tool results preserved:" in pointer
+
+
 def test_estimate_window_breakdown_splits_categories() -> None:
     from app.context.engine import estimate_window_breakdown
     from app.engine.state import assistant_text, assistant_tool_uses, tool_result_message

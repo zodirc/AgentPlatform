@@ -597,6 +597,26 @@ def _pinned_tool_digest(messages: list[dict[str, Any]]) -> str:
     return f"[pinned tool results preserved: {joined}]"
 
 
+def _dropped_tools_summary(messages: list[dict[str, Any]]) -> str:
+    """Count tool_use names in collapsed middle (deterministic, no importance ranking)."""
+    counts: dict[str, int] = {}
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "tool_use":
+                continue
+            name = str(block.get("name") or "unknown")
+            counts[name] = counts.get(name, 0) + 1
+    if not counts:
+        return ""
+    parts = [
+        f"{name}×{count}"
+        for name, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    return "dropped tools: " + ", ".join(parts)
+
+
 def _apply_tool_result_budget(
     messages: list[dict[str, Any]],
     char_budget: int,
@@ -766,8 +786,13 @@ def _collapse_tool_history(
         return messages
     collapsed = len(messages) - len(head) - len(tail)
     trace.append({"strategy": "collapse", "detail": f"collapsed_{collapsed}_messages"})
+    dropped = _dropped_tools_summary(middle)
     pinned = _pinned_tool_digest(middle)
-    pointer_text = f"[collapsed {collapsed} earlier messages; recent context preserved]"
+    parts = [f"[collapsed {collapsed} earlier messages"]
+    if dropped:
+        parts.append(f"; {dropped}")
+    parts.append("; recent context preserved]")
+    pointer_text = "".join(parts)
     if pinned:
         pointer_text = f"{pointer_text} {pinned}"
     pointer = {
