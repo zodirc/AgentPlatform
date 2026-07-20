@@ -25,6 +25,7 @@
 | 写作质量执行（[`24`](24-writing-quality-execution.md)） | ✅ WQ0–WQ4 全部落地 |
 | 证据 RAG / 文档检索（[`27`](27-rag-evidence-and-doc-search.md)） | 📋 设计稿：线 A 取证 + 线 B filter/ACL；**契约闸 ≠ 效果闸**（§8.1） |
 | 证据 RAG 执行（[`28`](28-rag-evidence-execution.md)） | 🔧 RE0–RE3+RE1 已落地；`make turn-effect-bench` / `make retrieval-bench` |
+| 资料索引与速率（[`29`](29-sources-index-and-interaction-rate.md)） | 📋 思路：目录投影 + 异步增量；查询不建库；手测≠必须上传 |
 
 ## 设计稿对照（文档 → 代码）
 
@@ -65,6 +66,7 @@
 20. **[26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md)** — **从个人 Agent 到对口经历**：学什么、怎么讲、经历从哪来（投递拟合）
 21. **[27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md)** — **证据 RAG 与文档检索**：写作取证 vs 企业文档搜索；**§8.1 效果验证三层**
 22. **[28-rag-evidence-execution.md](28-rag-evidence-execution.md)** — **证据 RAG 执行**：RE0→RE3→RE2→条件 RE1；效果向票须过 A/B
+23. **[29-sources-index-and-interaction-rate.md](29-sources-index-and-interaction-rate.md)** — **资料索引与速率**：workspace 投影、异步增量、手测口径
 
 ## 完整目录
 
@@ -98,6 +100,7 @@
 | [26-career-fit-from-personal-agent.md](26-career-fit-from-personal-agent.md) | **从个人 Agent 到对口经历**（投递拟合） |
 | [27-rag-evidence-and-doc-search.md](27-rag-evidence-and-doc-search.md) | **证据 RAG 与文档检索**：线 A/B；**效果验证三层**（§8.1） |
 | [28-rag-evidence-execution.md](28-rag-evidence-execution.md) | **证据 RAG 执行**：RE0/RE3 已落地；RE2 stub+清单；条件 RE1 |
+| [29-sources-index-and-interaction-rate.md](29-sources-index-and-interaction-rate.md) | **资料索引与速率**：目录投影、异步增量、手测≠上传 |
 | [contracts.md](contracts.md) | **契约索引** |
 | [appendix-migration.md](appendix-migration.md) | 从 agent-langraph 迁移（单一表格） |
 
