@@ -5,7 +5,7 @@ import {
   lastApprovalEvent,
 } from "../../shared/workbench/toolApproval";
 import { UsageMeter } from "./UsageMeter";
-import { currentPlanStep } from "../../shared/workbench/plan";
+import { livePlanStep } from "../../shared/workbench/plan";
 
 export type AgentPhase =
   | "idle"
@@ -154,7 +154,7 @@ type Props = {
 export function AgentActivityPanel({ wb, compact = false }: Props) {
   const activity = deriveAgentActivity(wb.events, wb);
   const style = PHASE_STYLES[activity.phase];
-  const planStep = currentPlanStep(wb.plan);
+  const planStep = livePlanStep(wb.plan, wb.displayStatus);
   const pinnedCards = [...(wb.view?.artifacts ?? [])]
     .reverse()
     .find((a) => a.type === "writing_cards") as

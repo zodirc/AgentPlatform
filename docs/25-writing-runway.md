@@ -5,7 +5,7 @@
 > **范围：全场景 workbench（writing / agent / interview），不是写作专属。**  
 > 本文回答：多步任务如何像 Cursor Plan 一样——规划、同意、执行中看见每一步是否完成——且不毁默认短交互。
 
-**已落地（P0）：** `turn.plan` 投影以最新为准；共享 `PlanPanel`；聊天区 Plan 按钮 + 多目标建议条 +「按此执行」；live `turn.plan` 刷新。  
+**已落地（P0）：** `turn.plan` 投影以最新为准；共享 `PlanPanel`；聊天区 Plan 按钮 + 多目标建议条；「按此执行」**仅**在 Plan 模式回合产出「全 pending」清单后出现；任一步变为进行中/完成后隐藏，避免重复执行。  
 **未做（P1+）：** 硬禁止规划期写正文、同 Run 同意 interrupt、自动续 Turn。
 
 ---

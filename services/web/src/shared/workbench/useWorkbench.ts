@@ -31,6 +31,7 @@ import {
   executePlanMessage,
   latestPlanFromArtifacts,
   planFromEventPayload,
+  planIsProposedOnly,
   shouldSuggestPlanMode,
   wrapMessageForPlanMode,
   type PlanArtifact,
@@ -125,6 +126,9 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [livePlan, setLivePlan] = useState<PlanArtifact | null>(null);
   const [planMode, setPlanMode] = useState(false);
   const [planSuggestDismissed, setPlanSuggestDismissed] = useState(false);
+  /** Only true after a Plan-mode turn posted an all-pending checklist. */
+  const [planAwaitingConfirm, setPlanAwaitingConfirm] = useState(false);
+  const planWrapSentRef = useRef(false);
   const streamRef = useRef<StreamClient | null>(null);
   const lastSequenceRef = useRef(0);
   const resumingAfterApprovalRef = useRef(false);
@@ -340,7 +344,17 @@ export function useWorkbenchImpl(): WorkbenchState {
             });
           }
           if (ev.type === "turn.plan") {
-            setLivePlan(planFromEventPayload(ev.payload as Record<string, unknown>));
+            const nextPlan = planFromEventPayload(
+              ev.payload as Record<string, unknown>,
+            );
+            setLivePlan(nextPlan);
+            if (planIsProposedOnly(nextPlan) && planWrapSentRef.current) {
+              setPlanAwaitingConfirm(true);
+            } else if (!planIsProposedOnly(nextPlan)) {
+              // Already executing / partially done — never offer 「按此执行」.
+              setPlanAwaitingConfirm(false);
+              planWrapSentRef.current = false;
+            }
           }
           if (ev.type === "usage.reported" || ev.type === "turn.completed") {
             // Backend payload.input/output_tokens are turn cumulatives;
@@ -458,6 +472,8 @@ export function useWorkbenchImpl(): WorkbenchState {
             v.artifacts as Record<string, unknown>[] | undefined,
           );
           if (activePlan) setLivePlan(activePlan);
+          setPlanAwaitingConfirm(false);
+          planWrapSentRef.current = false;
           lastSequenceRef.current = v.last_event_sequence ?? 0;
           setBusy(true);
           connectStream(last.id, lastSequenceRef.current);
@@ -470,6 +486,9 @@ export function useWorkbenchImpl(): WorkbenchState {
           v.artifacts as Record<string, unknown>[] | undefined,
         );
         if (idlePlan) setLivePlan(idlePlan);
+        // Never resurrect 「按此执行」 from a historical mid-flight plan.
+        setPlanAwaitingConfirm(false);
+        planWrapSentRef.current = false;
       } catch (err) {
         if (!cancelled) {
           setHistoryLoading(false);
@@ -494,6 +513,11 @@ export function useWorkbenchImpl(): WorkbenchState {
     const shouldWrap = opts?.planWrap ?? planMode;
     if (shouldWrap) {
       text = wrapMessageForPlanMode(text);
+      planWrapSentRef.current = true;
+      setPlanAwaitingConfirm(false);
+    } else if (opts?.planWrap === false) {
+      planWrapSentRef.current = false;
+      setPlanAwaitingConfirm(false);
     }
     setBusy(true);
     setError(null);
@@ -545,6 +569,17 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   async function handleExecutePlan() {
+    const snapshot =
+      livePlan ??
+      latestPlanFromArtifacts(
+        view?.artifacts as Record<string, unknown>[] | undefined,
+      );
+    // Only allow the CTA path for proposed-only checklists from Plan mode.
+    if (!planAwaitingConfirm || !planIsProposedOnly(snapshot)) {
+      return;
+    }
+    planWrapSentRef.current = false;
+    setPlanAwaitingConfirm(false);
     await handleSendText(executePlanMessage(), { planWrap: false });
   }
 
@@ -731,6 +766,13 @@ export function useWorkbenchImpl(): WorkbenchState {
       view?.artifacts as Record<string, unknown>[] | undefined,
     );
 
+  const canExecutePlan =
+    planAwaitingConfirm &&
+    planIsProposedOnly(plan) &&
+    !busy &&
+    !pendingApproval &&
+    view?.status !== "waiting_approval";
+
   const showPlanSuggest =
     !planMode &&
     !planSuggestDismissed &&
@@ -765,6 +807,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setPlanMode: setPlanModeAndClearSuggest,
     showPlanSuggest,
     dismissPlanSuggest,
+    canExecutePlan,
     handleExecutePlan,
     busy,
     stopping,

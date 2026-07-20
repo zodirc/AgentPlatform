@@ -113,6 +113,44 @@ export function planHasOpenItems(plan: PlanArtifact | null): boolean {
   });
 }
 
+/** in_progress is only "live" while the turn is still running. */
+export function isActiveTurnStatus(status: string | null | undefined): boolean {
+  const s = String(status ?? "");
+  return s === "running" || s === "pending" || s === "waiting_approval";
+}
+
+/**
+ * Current step for live UI. After turn completes, leftover in_progress is stale
+ * (model often forgets to mark done) — do not present as still executing.
+ */
+export function livePlanStep(
+  plan: PlanArtifact | null,
+  turnStatus: string | null | undefined,
+): PlanItem | null {
+  if (!isActiveTurnStatus(turnStatus)) return null;
+  return currentPlanStep(plan);
+}
+
+export function planHasStaleInProgress(
+  plan: PlanArtifact | null,
+  turnStatus: string | null | undefined,
+): boolean {
+  if (isActiveTurnStatus(turnStatus)) return false;
+  return currentPlanStep(plan) != null;
+}
+
+/**
+ * True only when every step is still pending — i.e. proposed, not started.
+ * Once any step is in_progress/completed/cancelled, "按此执行" must not show
+ * (re-clicking would double-run an already advancing plan).
+ */
+export function planIsProposedOnly(plan: PlanArtifact | null): boolean {
+  if (!plan?.items?.length) return false;
+  return plan.items.every(
+    (i) => normalizePlanStatus(i.status) === "pending",
+  );
+}
+
 /** Mirror runtime detect_plan_hint — suggest switch, never auto-enter. */
 export function shouldSuggestPlanMode(message: string): boolean {
   const text = message.trim();

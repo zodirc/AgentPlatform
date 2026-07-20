@@ -27,7 +27,8 @@ export function InterviewPanels({ wb }: Props) {
       )}
       <PlanPanel
         plan={wb.plan}
-        showExecute={!wb.busy && !wb.awaitingApproval}
+        turnStatus={wb.displayStatus}
+        showExecute={wb.canExecutePlan}
         executeDisabled={wb.busy || wb.actionBusy}
         onExecute={() => void wb.handleExecutePlan()}
       />

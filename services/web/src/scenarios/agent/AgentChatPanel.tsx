@@ -10,7 +10,7 @@ import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
 import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
 import { scenarioMeta } from "../../shared/workbench/scenarioMeta";
 import { PlanPanel } from "../../shared/workbench/PlanPanel";
-import { currentPlanStep } from "../../shared/workbench/plan";
+import { livePlanStep } from "../../shared/workbench/plan";
 import type { TurnHistoryItem, WorkbenchState } from "../../shared/workbench/types";
 
 type Props = {
@@ -41,7 +41,7 @@ export function AgentChatPanel({ wb }: Props) {
   const approval = approvalCopy(wb.pendingToolName);
   const meta = scenarioMeta(wb.scenarioId);
   const turnScenario = wb.view?.scenario_id;
-  const currentStep = currentPlanStep(wb.plan);
+  const currentStep = livePlanStep(wb.plan, wb.displayStatus);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
@@ -185,7 +185,8 @@ export function AgentChatPanel({ wb }: Props) {
         {wb.plan?.items?.length ? (
           <PlanPanel
             plan={wb.plan}
-            showExecute={!wb.busy && !wb.awaitingApproval}
+            turnStatus={wb.displayStatus}
+            showExecute={wb.canExecutePlan}
             executeDisabled={wb.busy || wb.actionBusy}
             onExecute={() => void wb.handleExecutePlan()}
             compact

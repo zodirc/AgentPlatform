@@ -1,13 +1,16 @@
-import type { PlanArtifact, PlanItem } from "../../shared/workbench/plan";
+import type { PlanArtifact, PlanItem } from "./plan";
 import {
-  currentPlanStep,
+  isActiveTurnStatus,
+  livePlanStep,
   normalizePlanStatus,
-  planHasOpenItems,
-} from "../../shared/workbench/plan";
+  planHasStaleInProgress,
+} from "./plan";
 
 type Props = {
   plan: PlanArtifact | null;
-  /** Show execute CTA when plan has open items and turn is idle. */
+  /** Turn display status — drives whether in_progress is live or stale. */
+  turnStatus?: string | null;
+  /** Caller already decided CTA is appropriate (proposed-only + awaiting confirm). */
   showExecute?: boolean;
   executeDisabled?: boolean;
   onExecute?: () => void;
@@ -36,8 +39,24 @@ function StatusMark({ status }: { status: string }) {
   return <span aria-hidden>○</span>;
 }
 
-function PlanItemRow({ item, active }: { item: PlanItem; active: boolean }) {
+function PlanItemRow({
+  item,
+  active,
+  staleInProgress,
+}: {
+  item: PlanItem;
+  active: boolean;
+  staleInProgress: boolean;
+}) {
   const s = normalizePlanStatus(item.status);
+  const label =
+    s === "in_progress" && staleInProgress
+      ? "未勾完（回合已结束）"
+      : (STATUS_LABEL[s] ?? s);
+  const color =
+    s === "in_progress" && staleInProgress
+      ? "text-slate-500"
+      : (STATUS_CLASS[s] ?? "text-slate-400");
   return (
     <li
       className={`rounded px-3 py-2 ${
@@ -45,14 +64,12 @@ function PlanItemRow({ item, active }: { item: PlanItem; active: boolean }) {
       }`}
     >
       <div className="flex items-start gap-2 text-xs">
-        <span className={`mt-0.5 shrink-0 ${STATUS_CLASS[s] ?? "text-slate-400"}`}>
+        <span className={`mt-0.5 shrink-0 ${color}`}>
           <StatusMark status={s} />
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-slate-200">{item.title}</p>
-          <p className={`mt-0.5 text-[10px] ${STATUS_CLASS[s] ?? "text-slate-500"}`}>
-            {STATUS_LABEL[s] ?? s}
-          </p>
+          <p className={`mt-0.5 text-[10px] ${color}`}>{label}</p>
         </div>
       </div>
     </li>
@@ -61,6 +78,7 @@ function PlanItemRow({ item, active }: { item: PlanItem; active: boolean }) {
 
 export function PlanPanel({
   plan,
+  turnStatus = null,
   showExecute = false,
   executeDisabled = false,
   onExecute,
@@ -68,9 +86,10 @@ export function PlanPanel({
 }: Props) {
   if (!plan?.items?.length) return null;
 
-  const current = currentPlanStep(plan);
-  const canExecute =
-    showExecute && Boolean(onExecute) && planHasOpenItems(plan);
+  const live = livePlanStep(plan, turnStatus);
+  const stale = planHasStaleInProgress(plan, turnStatus);
+  const turnLive = isActiveTurnStatus(turnStatus);
+  const canExecute = showExecute && Boolean(onExecute);
 
   return (
     <section
@@ -85,6 +104,19 @@ export function PlanPanel({
             <p className="mt-0.5 truncate text-[11px] text-slate-400">
               {plan.summary}
             </p>
+          ) : null}
+          {live ? (
+            <p className="mt-0.5 text-[11px] text-amber-200/90">
+              执行中 · 勿重复点「按此执行」
+            </p>
+          ) : null}
+          {stale ? (
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              回合已结束；清单步骤未全部勾完（属正常，模型常漏更新 status）
+            </p>
+          ) : null}
+          {!turnLive && !stale && !showExecute ? (
+            <p className="mt-0.5 text-[11px] text-slate-500">历史计划快照</p>
           ) : null}
         </div>
         {canExecute ? (
@@ -103,7 +135,8 @@ export function PlanPanel({
           <PlanItemRow
             key={item.id}
             item={item}
-            active={current?.id === item.id}
+            active={live?.id === item.id}
+            staleInProgress={stale}
           />
         ))}
       </ul>

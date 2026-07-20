@@ -87,6 +87,8 @@ export type WorkbenchState = {
   /** Multi-goal suggest bar visible. */
   showPlanSuggest: boolean;
   dismissPlanSuggest: () => void;
+  /** True only for Plan-mode proposed checklists awaiting user confirm. */
+  canExecutePlan: boolean;
   handleExecutePlan: () => Promise<void>;
   busy: boolean;
   stopping: boolean;
