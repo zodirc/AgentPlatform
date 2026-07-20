@@ -73,7 +73,8 @@
 
 ```bash
 cp .env.example .env
-make up    # 或 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
+# 编辑 .env：填入 MODEL_API_KEY（或启动后在 Web「设置 → 模型」配置）
+make up    # 默认：live + pgvector + sentence-transformers（Dockerfile.retrieval）
 make smoke
 curl -fsS http://localhost/health/live
 ```
@@ -83,16 +84,17 @@ curl -fsS http://localhost/health/live
 - [x] 仅依赖 Docker / Docker Compose，无需本机 Python 环境（CI / eval 可选本机 Python）
 - [x] 所有服务通过 healthcheck 串联启动
 - [x] 配置入口唯一：`.env` → 各服务环境变量
+- [x] 默认栈：`MODEL_MODE=live`、`RETRIEVAL_BACKEND=pgvector`、本地 embedding 全开
 - [x] `docker compose ps` 显示核心服务 `healthy`
 - [x] 访问 `http://localhost/` 可打开 Web 壳层
-- [x] `POST /api/v1/sessions` 可创建会话；stub golden 全绿
+- [x] `POST /api/v1/sessions` 可创建会话；stub golden 全绿（`make eval-*` 仍隔离为 stub）
 
 ## 快速验证
 
 ```bash
 make smoke          # L0
-make eval-all       # stub golden（含 writing.12/13）
-make eval-retrieval # retrieval profile（writing.07）
+make eval-all       # stub golden（isolated + runtime-lite，不改日常 live）
+make eval-retrieval # writing.07（默认 ST 镜像）
 make eval-queue     # queue + worker profile（shared.16）
 make runtime-test   # Python 3.11+
 ```
@@ -105,7 +107,7 @@ agent/
 ├── docs/                    # 架构与规范
 ├── deploy/
 │   ├── docker-compose.yml   # 唯一 compose 入口
-│   └── compose/             # 可选 profile：queue、retrieval、ha
+│   └── compose/             # 可选：queue、retrieval、ha、runtime-lite
 ├── services/
 │   ├── gateway/             # Caddy 边缘
 │   ├── api/                 # HTTP API、outbox worker

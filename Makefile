@@ -7,7 +7,9 @@ COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.y
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
-EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml
+# Isolated stub golden uses runtime-lite (hash, thin Dockerfile) so evals do not
+# rebuild the default sentence-transformers image. Restore uses main COMPOSE (live + ST).
+EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml
 EVAL_COMPOSE_PROFILES ?=
 EVAL_UP_ARGS ?=
 EVAL_UP_SERVICES ?= runtime
@@ -23,7 +25,7 @@ EVAL_BUILD ?=
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
-	eval-run-isolated load-test codegen alembic-upgrade test-rag
+	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -35,8 +37,8 @@ help: ## 显示常用命令
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
 	@echo ""
 	@echo "完整部署"
-	@echo "  make up           重建并启动全部服务（首次 / Dockerfile 变更）"
-	@echo "  make up-full      全栈：queue + retrieval（本地 embedding）"
+	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
+	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动"
 	@echo "  make down         停止"
 	@echo "  make ps / logs    状态 / 日志"
@@ -45,6 +47,7 @@ help: ## 显示常用命令
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
+	@echo "  make retrieval-bench 离线检索 A/B（docs/28 效果闸层 1）"
 	@echo "  make runtime-test 运行时测试"
 
 start: ## 启动栈（不 rebuild，最快）
@@ -128,8 +131,12 @@ eval-run-isolated:
 	  echo "Restoring ordinary runtime workspace..."; \
 	  restore_once() { \
 	    env -u WORKSPACE_HOST_PATH $(COMPOSE) \
-	      up -d --wait --wait-timeout 180 --force-recreate --remove-orphans \
+	      up -d --force-recreate --remove-orphans \
 	      $(EVAL_RESTORE_SERVICES); \
+	    env -u WORKSPACE_HOST_PATH $(COMPOSE) \
+	      up -d --wait --wait-timeout 180 \
+	      $(EVAL_RESTORE_SERVICES) \
+	      || echo "WARNING: restore containers up but not healthy yet; run: docker compose ps"; \
 	  }; \
 	  if ! restore_once; then \
 	    echo "Retrying ordinary runtime restore..."; \
@@ -172,18 +179,19 @@ security-audit:
 	bash scripts/security_audit.sh
 
 contracts-test:
-	pip install -q jsonschema pytest && pytest packages/contracts/tests -q
+	pip install -q jsonschema pytest pyyaml && pytest packages/contracts/tests -q
 	pip install -q packages/contracts/python && pytest packages/contracts/python/tests -q
+	$(MAKE) retrieval-bench
 	$(MAKE) api-test
 	$(MAKE) runtime-test
 
 up-queue:
 	WORKER_MODE=outbox $(COMPOSE_QUEUE) --profile queue up -d --build
 
-up-retrieval:
+up-retrieval: ## 兼容入口（主 compose 已默认 Dockerfile.retrieval + embedding）
 	INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid $(COMPOSE_RETRIEVAL) --profile retrieval up -d --build
 
-up-full: ## 全栈：redis/worker + 本地 embedding retrieval
+up-full: ## 全栈：redis/worker（embedding 已在默认 up 中）
 	WORKER_MODE=outbox INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid \
 	  $(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval up -d --build
 
@@ -213,10 +221,28 @@ eval-retrieval:
 	pip install -q websockets 2>/dev/null || true
 	$(MAKE) eval-run-isolated \
 	  EVAL_BUILD=--build \
-	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/retrieval.yml" \
-	  EVAL_COMPOSE_PROFILES="--profile retrieval" \
-	  EVAL_RUNTIME_ENV="MODEL_MODE=stub INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid" \
+	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml" \
+	  EVAL_RUNTIME_ENV="MODEL_MODE=stub INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid EMBEDDING_BACKEND=sentence_transformers" \
 	  EVAL_ARGS="--filter writing.07"
+
+eval-path-prefix: ## writing.14 path_prefix golden（isolated stub + runtime-lite）
+	pip install -q websockets 2>/dev/null || true
+	$(MAKE) eval-run-isolated \
+	  EVAL_BUILD=--build \
+	  EVAL_RUNTIME_ENV="MODEL_MODE=stub RETRIEVAL_MODE=keyword INDEX_VIA_WORKER=false" \
+	  EVAL_ARGS="--filter writing.14"
+
+retrieval-bench: ## 离线检索 A/B（docs/28 RE0/RE3 效果闸层 1）
+	@cd services/runtime && \
+	  if test -x .venv/bin/python; then PY=.venv/bin/python; else PY=python3; fi && \
+	  $$PY ../../scripts/retrieval_bench.py --mode hybrid && \
+	  $$PY ../../scripts/retrieval_bench.py --mode keyword
+
+turn-effect-bench: ## RE2 效果闸（先 MODEL_MODE=stub make up-runtime && migrate）
+	python3 scripts/turn_effect_bench.py
+
+eval-writing-rag: ## writing RAG golden 子集（需栈在跑）
+	python3 scripts/eval_run.py --filter writing. --base-url http://localhost --workspace workspace
 
 eval-queue:
 	$(MAKE) eval-run-isolated \

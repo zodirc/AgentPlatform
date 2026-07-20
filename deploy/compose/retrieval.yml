@@ -1,24 +1,26 @@
-# Retrieval profile: local embedding model baked in image, synced to /data/models on start.
-# Usage: docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml --profile retrieval up -d --build
-# Combine with queue: add -f deploy/compose/queue.yml --profile queue
+# Optional override: keep for backward-compatible `make up-retrieval`.
+# Default deploy already uses Dockerfile.retrieval + sentence_transformers + pgvector
+# (see deploy/docker-compose.yml). This file is only needed if you want an explicit
+# --profile retrieval stack alongside queue/ha overlays.
 
 services:
   runtime:
     profiles: [retrieval]
+    image: agent-platform-runtime:default
     build:
       context: ..
       dockerfile: services/runtime/Dockerfile.retrieval
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
     environment:
-      RETRIEVAL_MODE: hybrid
-      INDEX_VIA_WORKER: "true"
+      RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
+      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}
+      INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-true}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
-      EMBEDDING_MODEL_DIR: /data/models
-      # Avoid startup hangs when hub is slow/unreachable; models are baked/seeded locally.
-      HF_HUB_OFFLINE: "1"
-      TRANSFORMERS_OFFLINE: "1"
-      HF_HOME: /data/models
+      EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+      HF_HOME: ${HF_HOME:-/data/models}
       RETRIEVAL_RERANK_ENABLED: ${RETRIEVAL_RERANK_ENABLED:-true}
       RETRIEVAL_RERANK_CROSS_ENCODER: ${RETRIEVAL_RERANK_CROSS_ENCODER:-false}

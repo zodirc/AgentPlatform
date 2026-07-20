@@ -1,8 +1,8 @@
 # Phase 0 — single compose entry (docs/03 §4.1)
 services:
   postgres:
-    # pgvector image keeps JSON path working; enables RETRIEVAL_BACKEND=pgvector (docs/17 S3 A10).
-    # Existing volumes without the extension: recreate or CREATE EXTENSION vector manually.
+    # pgvector image is the default retrieval backend (RETRIEVAL_BACKEND=pgvector).
+    # JSON file index remains a fallback when the extension/probe fails.
     image: pgvector/pgvector:pg16
     container_name: agent-postgres
     environment:
@@ -19,16 +19,21 @@ services:
       retries: 10
 
   runtime:
+    image: agent-platform-runtime:default
     build:
       context: ..
-      dockerfile: services/runtime/Dockerfile
+      # Default deploy image includes baked sentence-transformers (docs/03).
+      # Lightweight hash-only image: services/runtime/Dockerfile (CI / make eval-*).
+      dockerfile: services/runtime/Dockerfile.retrieval
+      args:
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
     container_name: agent-runtime
     environment:
       DATABASE_URL: ${DATABASE_URL}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
-      MODEL_MODE: ${MODEL_MODE:-stub}
-      MODEL_API_KEY: ${MODEL_API_KEY:-stub}
+      MODEL_MODE: ${MODEL_MODE:-live}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
       MODEL_NAME: ${MODEL_NAME:-}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
@@ -38,10 +43,18 @@ services:
       WORKSPACE_ROOT: /workspace
       APP_ENV: ${APP_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-3}
+      MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-120}
       RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
-      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-json}
+      RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}
       INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-true}
+      EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+      HF_HOME: ${HF_HOME:-/data/models}
+      RETRIEVAL_RERANK_ENABLED: ${RETRIEVAL_RERANK_ENABLED:-true}
+      RETRIEVAL_RERANK_CROSS_ENCODER: ${RETRIEVAL_RERANK_CROSS_ENCODER:-false}
       STALL_THRESHOLD_SECONDS: ${STALL_THRESHOLD_SECONDS:-120}
       STALL_POLL_INTERVAL_SECONDS: ${STALL_POLL_INTERVAL_SECONDS:-30}
       STALL_AUTO_FAIL: ${STALL_AUTO_FAIL:-false}
@@ -55,10 +68,12 @@ services:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/ready"]
+      # Use /health/live so first-boot can finish before MODEL_API_KEY / Web provider is set.
+      # /health/ready still means "model configured" for ops probes.
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/live"]
       interval: 10s
       timeout: 5s
-      start_period: 60s
+      start_period: 120s
       retries: 5
 
   api:

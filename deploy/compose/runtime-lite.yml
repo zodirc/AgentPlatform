@@ -1,0 +1,14 @@
+# Lightweight runtime for CI / isolated golden eval (hash embedding, no torch).
+# Uses a separate image tag so eval builds do not overwrite the daily ST image
+# (agent-platform-runtime:default from docker-compose.yml).
+services:
+  runtime:
+    image: agent-platform-runtime:lite
+    build:
+      context: ..
+      dockerfile: services/runtime/Dockerfile
+    environment:
+      EMBEDDING_BACKEND: ${EVAL_EMBEDDING_BACKEND:-hash}
+      EMBEDDING_DIMENSIONS: ${EVAL_EMBEDDING_DIMENSIONS:-256}
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"

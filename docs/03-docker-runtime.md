@@ -84,8 +84,8 @@ gateway healthcheck wget gateway /health
 
 | 端点 | 含义 | 用于 |
 |------|------|------|
-| `/health/live` | 进程存活，不查依赖 | Docker healthcheck、K8s liveness |
-| `/health/ready` | 依赖可用，例如 DB、下游服务、关键配置 | compose depends_on、K8s readiness |
+| `/health/live` | 进程存活，不查依赖 | **runtime compose healthcheck**（允许无 `MODEL_API_KEY` 先起栈）、K8s liveness |
+| `/health/ready` | 依赖可用，例如 DB、下游服务、关键配置 | api compose healthcheck、ops / K8s readiness；runtime ready = 模型已配置 |
 
 **禁止**在 `/health/live` 中做向量库全量扫描、知识库重建、projection 全量补算等重负载操作。
 
@@ -187,7 +187,8 @@ Phase 0 可仅配置 env `MODEL_*`；Phase 1 起 Web 管理面为主路径，env
 ```text
 deploy/docker-compose.yml      # 主文件，Phase 0 全部服务
 deploy/compose/queue.yml       # profile queue（redis + api WORKER_MODE=outbox）
-deploy/compose/retrieval.yml   # profile retrieval（embedding 检索）
+deploy/compose/retrieval.yml   # 可选 overlay（主 compose 已默认 embedding）
+deploy/compose/runtime-lite.yml # CI/eval：轻量 Dockerfile + hash embedding
 deploy/compose/ha.yml          # profile ha（多 runtime 副本）
 ```
 
@@ -208,19 +209,22 @@ docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml u
 
 | 服务 | 容器名 | 暴露 | 职责 |
 |------|--------|------|------|
-| `postgres` | `agent-postgres` | 内部 | 关系型存储 + 健康串联 |
-| `runtime` | `agent-runtime` | 内部 `:8001` | Agent 执行、工具、检索索引 |
+| `postgres` | `agent-postgres` | 内部 | 关系型存储 + pgvector 扩展 + 健康串联 |
+| `runtime` | `agent-runtime` | 内部 `:8001` | Agent 执行、工具、检索索引（默认 ST embedding） |
 | `api` | `agent-api` | 内部 `:8000` | REST、SSE 代理、投影、outbox worker |
 | `web` | `agent-web` | 内部 `:80` | Vite 静态产物（nginx） |
 | `gateway` | `agent-gateway` | `${HTTP_PORT}` / `${HOST_PORT}` | Caddy 反代 `/api` + `/` |
 
-**runtime 关键环境变量**（完整列表见 `.env.example`）：`MODEL_MODE`、`RETRIEVAL_MODE`、`INDEX_VIA_WORKER`、`EMBEDDING_*`（retrieval profile）、`STALL_*`、`RUNTIME_RUNNER_ID`（HA）。
+**陌生机默认（主 compose）**：`MODEL_MODE=live`、`RETRIEVAL_BACKEND=pgvector`、`RETRIEVAL_MODE=hybrid`、`EMBEDDING_BACKEND=sentence_transformers`、镜像 `Dockerfile.retrieval`。须在 `.env` 填 `MODEL_API_KEY`，或启动后在 Web 配置供应商。Compose 健康检查用 `/health/live`（允许无 key 先起栈）；`/health/ready` 表示「env key **或** DB 中任一条激活的 Web profile 可解密」。
+
+**runtime 关键环境变量**（完整列表见 `.env.example`）：`MODEL_MODE`、`RETRIEVAL_*`、`EMBEDDING_*`、`INDEX_VIA_WORKER`、`STALL_*`、`RUNTIME_RUNNER_ID`（HA）。
 
 **api 关键环境变量**：`WORKER_MODE`（`queue.yml` profile 下设为 `outbox`）、`RUNTIME_URL_MAP`（HA）。
 
 启动：
 
 ```bash
+cp .env.example .env   # 填 MODEL_API_KEY
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 ```
 
@@ -237,12 +241,10 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 
 ### 5.2 runtime 镜像特殊要求
 
-- Phase 0–1：最小依赖，**默认不含** torch / sentence-transformers
-- Phase 1b：关键词检索、`grep`、小型本地索引（[`search_sources`](06-tools-and-context.md) / [`search_codebase`](06-tools-and-context.md)）
-- Phase 2+（`--profile retrieval`）：**`Dockerfile.retrieval`** 构建期烘焙 `EMBEDDING_MODEL` 至 `/app/models-baked`；entrypoint 首次启动同步至 `/data/models`；默认 `EMBEDDING_BACKEND=sentence_transformers`；向量索引 `INDEX_VERSION=3`（结构切块 + BM25/RRF hybrid）
-- 默认 `Dockerfile`（无 retrieval profile）不含 torch，可用 `EMBEDDING_BACKEND=hash` 做轻量降级
+- **默认镜像**：`Dockerfile.retrieval` — 构建期烘焙 `EMBEDDING_MODEL` 至 `/app/models-baked`；entrypoint 首次启动同步至 `/data/models`；默认 `EMBEDDING_BACKEND=sentence_transformers`；`RETRIEVAL_BACKEND=pgvector`；向量索引 `INDEX_VERSION=3`（结构切块 + BM25/RRF hybrid）
+- **轻量镜像**：`Dockerfile`（无 torch）— CI / `deploy/compose/runtime-lite.yml` / isolated stub golden；`EMBEDDING_BACKEND=hash`
 - `EXPOSE 8001`
-- 内部命令接口、事件写入、健康检查为 Phase 0 必需；正式 embedding 检索为 Phase 2 可选，Phase 1b 最小检索能力定义见 [`06-tools-and-context.md`](06-tools-and-context.md) §11.2
+- 内部命令接口、事件写入、健康检查与检索为默认路径必需能力
 
 #### 资料库索引状态排障
 
@@ -258,9 +260,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - `error`：查看 runtime 日志中的 `sources index sync after upload failed`；原文件仍保留，
   修复 embedding 配置或模型可用性后重新触发索引。
 
-使用 sentence-transformers 时必须通过 retrieval profile 启动，并确认容器内实际收到
-`EMBEDDING_BACKEND`、`EMBEDDING_MODEL`、`EMBEDDING_DEVICE`。仅修改宿主机 `.env` 而未加载
-`deploy/compose/retrieval.yml`，runtime 仍可能使用轻量 `hash` 后端。
+默认 compose 已注入 `EMBEDDING_BACKEND=sentence_transformers` 等。仅改宿主机 `.env` 而未重建/重启 runtime 时，容器内仍可能是旧值。轻量降级显式设 `EMBEDDING_BACKEND=hash` 并改用 `runtime-lite.yml` 或 `Dockerfile`。
 
 ### 5.3 api 镜像
 

@@ -103,10 +103,38 @@ async def resolve_context_window_tokens(
     return settings.context_window_tokens
 
 
+async def _any_active_profile_ready() -> bool:
+    """True if any owner has an active Web profile with a decryptable API key.
+
+    Used by process-level /health/ready when no owner_user_id is in scope
+    (env MODEL_API_KEY empty but operators configured providers in Web).
+    """
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT api_key_ciphertext
+        FROM model_provider_profiles
+        WHERE is_active = true
+        """
+    )
+    for row in rows:
+        try:
+            if decrypt_api_key(row["api_key_ciphertext"]):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 async def model_config_ready(*, owner_user_id: UUID | None = None) -> bool:
-    if settings.model_mode == "stub":
+    if settings.model_mode in {"stub", "recorded"}:
         return True
-    return await resolve_model_config(owner_user_id=owner_user_id) is not None
+    if await resolve_model_config(owner_user_id=owner_user_id) is not None:
+        return True
+    # Health probes have no session owner; accept any active Web profile.
+    if owner_user_id is None:
+        return await _any_active_profile_ready()
+    return False
 
 
 def _default_model(provider: str) -> str:
