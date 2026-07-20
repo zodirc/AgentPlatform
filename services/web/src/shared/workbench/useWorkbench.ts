@@ -28,6 +28,7 @@ import type {
 } from "./types";
 import { previewText } from "./filePreview";
 import { scenarioMeta } from "./scenarioMeta";
+import { tokenUsageFromEvents } from "./tokenUsage";
 import { useWorkbenchSession } from "./workbenchSession";
 
 type StreamClient = TurnStreamClient | TurnWebSocketClient;
@@ -324,6 +325,8 @@ export function useWorkbenchImpl(): WorkbenchState {
             });
           }
           if (ev.type === "usage.reported" || ev.type === "turn.completed") {
+            // Backend payload.input/output_tokens are turn cumulatives;
+            // step_* fields are per-step deltas (used only when rebuilding from events).
             const usage = (
               ev.type === "usage.reported" ? ev.payload : ev.payload.token_usage
             ) as TokenUsage | undefined;
@@ -666,6 +669,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     null;
   const tokenUsage =
     liveTokenUsage ??
+    tokenUsageFromEvents(events) ??
     (view?.token_usage as TokenUsage | null | undefined) ??
     null;
 

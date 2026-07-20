@@ -151,12 +151,12 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
       ) : null}
       {hasToken ? (
         <p>
-          模型用量 in={formatTokens(tokenUsage?.input_tokens)} · out=
+          本回合累计 in={formatTokens(tokenUsage?.input_tokens)} · out=
           {formatTokens(tokenUsage?.output_tokens)}
           {tokenUsage?.source ? ` · ${tokenUsage.source}` : ""}
         </p>
       ) : (
-        <p className="opacity-60">模型用量：本步结束后更新</p>
+        <p className="opacity-60">本回合累计：首轮模型返回后更新</p>
       )}
     </div>
   );

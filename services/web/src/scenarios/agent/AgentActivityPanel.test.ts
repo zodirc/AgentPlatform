@@ -46,3 +46,30 @@ describe("deriveAgentActivity delivery status", () => {
     expect(activity).toEqual({ phase: "completed", label: "任务已完成" });
   });
 });
+
+describe("deriveAgentActivity thinking rounds", () => {
+  it("shows 1-based rounds instead of engine step_index 0", () => {
+    const activity = deriveAgentActivity(
+      [
+        {
+          sequence: 1,
+          type: "turn.thinking",
+          payload: { step_index: 0 },
+        },
+      ] as never,
+      {
+        busy: true,
+        awaitingApproval: false,
+        displayStatus: "running",
+        view: null,
+        pendingToolName: null,
+      } as never,
+    );
+
+    expect(activity).toEqual({
+      phase: "thinking",
+      label: "模型思考中",
+      detail: "第 1 轮",
+    });
+  });
+});

@@ -118,10 +118,14 @@ export function deriveAgentActivity(
     .find((e) => e.type === "turn.thinking");
   if (wb.busy && lastThinking) {
     const step = lastThinking.payload.step_index;
+    // Engine is 0-based; show 1-based rounds for humans.
     return {
       phase: "thinking",
       label: "模型思考中",
-      detail: typeof step === "number" ? `步骤 ${step}` : undefined,
+      detail:
+        typeof step === "number" && Number.isFinite(step)
+          ? `第 ${Number(step) + 1} 轮`
+          : undefined,
     };
   }
   if (wb.busy) {
