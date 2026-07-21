@@ -25,6 +25,7 @@ EVAL_BUILD ?=
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
+	eval-plan-suggest eval-plan-suggest-tune \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources retrieval-bench-prod loc
 
@@ -36,6 +37,8 @@ help: ## 显示常用命令
 	@echo "  make up-runtime   只重建并重启 runtime"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
+	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
+	@echo "  make eval-plan-suggest-tune 搜索权重提案（只写 reports）"
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
@@ -122,6 +125,12 @@ eval-all:
 
 eval-rubric:
 	python3 scripts/eval_rubric.py --sample-rate 0.05
+
+eval-plan-suggest: ## Plan 建议金标基线（docs/26 PS4；不改权重）
+	PYTHONPATH=services/runtime python3 scripts/plan_suggest_eval.py
+
+eval-plan-suggest-tune: ## Plan 建议权重网格搜索（只写 reports 提案）
+	PYTHONPATH=services/runtime python3 scripts/plan_suggest_eval.py --tune
 
 eval-live:
 	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=live" EVAL_ARGS="--mode live"

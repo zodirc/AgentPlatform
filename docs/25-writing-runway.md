@@ -239,7 +239,7 @@ pending → in_progress → completed
 | **P1** | Plan 按钮真正进轨：规划期硬 ToolScope（不落正文） | ✅ |
 | **P1b** | `plan_phase` 一等字段 + UI 相位条 | ✅ |
 | **P2** | 同意门（先两 Turn「按此执行」） | ✅ 两 Turn；同 Run interrupt 不做 |
-| **P3** | 窄条件「建议切换到 Plan」提示条（可忽略、有冷却） | 辅路径已有；冷却精修待做 |
+| **P3** | 窄条件「建议切换到 Plan」提示条（可忽略、有冷却） | ✅ 见 [`26`](26-plan-suggest-complexity.md) PS1–PS3 |
 | **P4** | 执行中更新 plan status；活动条与当前步标题可选联动 | status 纪律 ✅；活动条强联动待做 |
 
 ### 阶段 2 — 不做

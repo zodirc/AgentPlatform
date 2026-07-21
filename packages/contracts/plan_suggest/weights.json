@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "description": "Plan suggest scoring (docs/26). Single source for Web + Runtime. Edit here, then rebuild web/runtime.",
+  "cooldown_ms": 1800000,
+  "abs_min_len": 8,
+  "soft_min_len": 24,
+  "scores": {
+    "multi_numbered": 4,
+    "multi_join": 2,
+    "explicit_plan": 4,
+    "multi_path": 2,
+    "high_risk_per_hit": 2,
+    "high_risk_cap": 4,
+    "continue_refine": -3,
+    "single_micro": -2
+  },
+  "threshold": {
+    "writing": 4,
+    "agent": 4,
+    "interview": 3,
+    "default": 4
+  },
+  "high_risk_tokens": [
+    "重构",
+    "重写全书",
+    "迁移",
+    "批量改",
+    "批量更新",
+    "批量替换",
+    "refactor",
+    "migrate",
+    "rewrite the entire",
+    "rewrite the whole",
+    "rewrite entire",
+    "rewrite whole"
+  ],
+  "reasons": {
+    "multi_numbered": "检测到多个独立目标",
+    "multi_join": "请求包含多个连贯目标",
+    "explicit_plan": "你提到先规划再动手",
+    "multi_path": "请求涉及多处文稿或文件",
+    "high_risk_verb": "改动面较大，建议先拆步"
+  }
+}

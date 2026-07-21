@@ -15,6 +15,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    fs: {
+      allow: [
+        path.resolve(__dirname),
+        path.resolve(__dirname, "../../packages/contracts/plan_suggest"),
+      ],
+    },
     proxy: {
       "/api": {
         target: process.env.VITE_API_PROXY_TARGET || "http://localhost:8000",

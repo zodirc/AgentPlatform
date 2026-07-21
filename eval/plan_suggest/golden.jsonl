@@ -1,0 +1,53 @@
+{"id": "micro_tone", "message": "改一下语气", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "continue", "message": "继续", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "typo_micro", "message": "把这段错字改了", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "polish_short", "message": "再顺一下这段节奏", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "ask_short", "message": "第三章现在写到哪了", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "write_ch3_alone", "message": "写第三章", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "follow_hand"]}
+{"id": "continue_write", "message": "继续写", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "fix_punct", "message": "标点统一成中文就行", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "what_name", "message": "女主叫什么来着", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "one_sentence_patch", "message": "把这句改短一点", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "numbered_three", "message": "1. 先改大纲\n2. 再写第三章\n3. 最后检查引用是否齐全", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "numbered_cn_dot", "message": "1、核对人物卡\n2、改第四章冲突\n3、补资料引用\n4、导出一版", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "bullet_three", "message": "- 更新大纲卷结构\n- 重写第三章开头\n- 用资料库核对专名", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "explicit_plan", "message": "先给个方案再动手改目录和第三章", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "plan_first_en", "message": "Make a plan first, then update the outline and chapter three with citations", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "multi_chapter_plan", "message": "先规划：同时整理大纲，并且重写第三章与第五章衔接，另外核对全部引用", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit", "chapters"]}
+{"id": "join_chain", "message": "先规划一下：先把人物卡补全，然后更新大纲，并且把第二章里矛盾的伏笔改掉，另外再扫一遍称谓", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "join", "explicit"]}
+{"id": "two_at_files_plan", "message": "先列步骤：对照 @outline.md 和 @manuscript.md 把第三章补全并统一称谓", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
+{"id": "three_at_files", "message": "请一起看 @outline.md @cards/hero.md @manuscript.md，分步把人设和正文对齐", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
+{"id": "rewrite_book", "message": "重写全书开篇三章并迁移旧大纲条目到新目录", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "batch_and_migrate", "message": "批量替换全书旧称谓并迁移引用表后做一次核对", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "explicit_steps_cn", "message": "先列步骤，分步完成：资料检索、事实核对、再改第三章", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "ambiguous_medium", "message": "帮我把这一章写完整一点，结构和节奏都照顾到", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "expand_one_para", "message": "这一段再展开两句就够了", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "plan_prefix", "message": "【Plan 模式】请拆分步骤完成大纲和两章", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "prefix"]}
+{"id": "execute_prefix", "message": "【执行计划】按此执行", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "prefix"]}
+{"id": "cooldown_blocks", "message": "1. 先改大纲\n2. 再写第三章\n3. 最后检查引用是否齐全", "scenario_id": "writing", "should_suggest": false, "cooldown_active": true, "tags": ["negative", "cooldown"]}
+{"id": "high_risk_migrate", "message": "重构资料库索引并迁移旧会话字段", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "refactor_multi", "message": "Refactor the retrieval indexer and migrate legacy session fields without downtime", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "english_typo_short", "message": "fix the typo in README", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "english_numbered", "message": "Please do these:\n1. fix lint\n2. add tests\n3. update docs\nThanks", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "what_does_fn", "message": "这个函数是干什么的", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "single_file_rename", "message": "把 README 标题改短一点就行", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "explain_error", "message": "这个报错是什么意思", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "add_one_log", "message": "在这个函数里加一行日志", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "agent_multi_file_plan", "message": "先做计划：改 api 路由、runtime 校验，并且补 web 类型定义", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "agent_numbered_refactor", "message": "1. 拆分 projector\n2. 补单测\n3. 更新 OpenAPI\n4. 跑 smoke", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "agent_batch_update", "message": "批量更新旧环境变量名并迁移 .env.example 注释", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "agent_two_paths", "message": "先规划后改 @services/api/app/main.py 和 @services/runtime/app/main.py 的健康检查文案", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
+{"id": "hard_fn_candidate", "message": "把检索链路和会话存储两块一起理顺，保证旧数据还能读", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "hard"], "note": "平淡措辞大任务；当前易漏报"}
+{"id": "hard_fn_product", "message": "把工作台发送链路和历史列表体验打通，别再各管各的状态", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "hard"], "note": "无关键词大任务；当前易漏报"}
+{"id": "interview_agenda", "message": "1. 开场破冰\n2. 深挖上一段经历\n3. 收尾确认下一步", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "interview_one_q", "message": "下一个问题怎么问更自然", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "interview_plan", "message": "先给个方案：访谈提纲要覆盖动机、冲突、收尾再开始提问", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "interview_continue", "message": "继续追问刚才那点", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "interview_bullets", "message": "- 确认时间线\n- 挖决策原因\n- 收一个可验证承诺", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "false_friend_plan_word", "message": "这句里的「计划」改成「打算」就行", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"], "note": "含计划字样但属微改"}
+{"id": "false_friend_and", "message": "语气并且标点都稍微顺一下", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"], "note": "有并且但应压分"}
+{"id": "slash_polish", "message": "/polish 去套话", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "slash"]}
+{"id": "slash_outline", "message": "/outline 只改目录层级", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "slash"]}
+{"id": "also_finally_chain", "message": "Update the outline, also rewrite chapter two transitions, finally verify all citations against sources", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "borderline"], "note": "仅衔接词 +2，稀缺阈值下不够 4；不算该弹"}
+{"id": "also_finally_with_plan", "message": "Make a plan first: update the outline, also rewrite chapter two transitions, finally verify citations", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit", "join"]}
+{"id": "before_implement", "message": "Before we implement anything, make a plan for the auth migration and session cleanup", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit"]}

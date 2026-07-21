@@ -202,7 +202,12 @@ export function AgentChatPanel({ wb }: Props) {
         ) : null}
         {wb.showPlanSuggest ? (
           <div className="flex items-start justify-between gap-2 rounded-md border border-amber-900/40 bg-amber-950/20 px-3 py-2 text-[11px] text-amber-100/90">
-            <p>多目标请求：建议先切到 Plan，列出步骤再执行（可忽略）。</p>
+            <div className="min-w-0 space-y-0.5">
+              <p>建议先切到 Plan，列出步骤再执行（可忽略）。</p>
+              {wb.planSuggestReason ? (
+                <p className="text-amber-200/70">{wb.planSuggestReason}</p>
+              ) : null}
+            </div>
             <div className="flex shrink-0 gap-1">
               <button
                 type="button"

@@ -88,6 +88,8 @@ export type WorkbenchState = {
   planPhase: "off" | "planning" | "ready" | "executing";
   /** Multi-goal suggest bar visible. */
   showPlanSuggest: boolean;
+  /** Optional one-line reason under the suggest banner (docs/26). */
+  planSuggestReason: string | null;
   dismissPlanSuggest: () => void;
   /** True only for Plan-mode proposed checklists awaiting user confirm. */
   canExecutePlan: boolean;

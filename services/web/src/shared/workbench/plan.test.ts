@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
+import cases from "../../../../../eval/plan_suggest/cases.json";
 import {
   currentPlanStep,
+  evaluatePlanSuggest,
   executePlanMessage,
+  isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
   livePlanStep,
   normalizePlanStatus,
   planHasOpenItems,
   planHasStaleInProgress,
   planIsProposedOnly,
+  PLAN_SUGGEST_COOLDOWN_MS,
   shouldSuggestPlanMode,
 } from "./plan";
 
@@ -68,17 +72,39 @@ describe("plan helpers", () => {
     expect(livePlanStep(plan, "running")?.title).toBe("A");
   });
 
-  it("suggests plan only for multi-goal text", () => {
-    expect(shouldSuggestPlanMode("改一下语气")).toBe(false);
-    expect(
-      shouldSuggestPlanMode(
-        "1. 先改大纲\n2. 再写第三章\n3. 最后检查引用是否齐全",
-      ),
-    ).toBe(true);
-  });
-
   it("execute CTA uses a short user-facing message", () => {
     expect(executePlanMessage()).toBe("按此执行");
     expect(executePlanMessage("先做第一步")).toBe("先做第一步");
+  });
+});
+
+describe("plan suggest scoring (docs/26)", () => {
+  for (const c of cases) {
+    it(`case ${c.id}`, () => {
+      const decision = evaluatePlanSuggest(c.message, {
+        scenarioId: c.scenario_id,
+        cooldownActive: Boolean(c.cooldown_active),
+      });
+      expect(decision.suggest).toBe(c.suggest);
+      expect(shouldSuggestPlanMode(c.message, {
+        scenarioId: c.scenario_id,
+        cooldownActive: Boolean(c.cooldown_active),
+      })).toBe(c.suggest);
+      if (c.expect_signal) {
+        expect(decision.signals).toContain(c.expect_signal);
+      }
+      if (c.suggest) {
+        expect(decision.reasons.length).toBeGreaterThan(0);
+        expect(decision.reasons.length).toBeLessThanOrEqual(2);
+      }
+    });
+  }
+
+  it("cooldown window is 30 minutes", () => {
+    const now = 1_000_000;
+    expect(isPlanSuggestCooldownActive(now - 1000, now)).toBe(true);
+    expect(
+      isPlanSuggestCooldownActive(now - PLAN_SUGGEST_COOLDOWN_MS - 1, now),
+    ).toBe(false);
   });
 });

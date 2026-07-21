@@ -29,10 +29,14 @@ import type {
 import { previewText } from "./filePreview";
 import {
   executePlanMessage,
+  isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
   planFromEventPayload,
   planIsProposedOnly,
+  planSuggestPrimaryReason,
+  readPlanSuggestDismissedAt,
   shouldSuggestPlanMode,
+  writePlanSuggestDismissedAt,
   type PlanArtifact,
   type PlanPhase,
   type PlanPhaseWire,
@@ -126,7 +130,10 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [liveTokenUsage, setLiveTokenUsage] = useState<TokenUsage | null>(null);
   const [livePlan, setLivePlan] = useState<PlanArtifact | null>(null);
   const [planMode, setPlanMode] = useState(false);
-  const [planSuggestDismissed, setPlanSuggestDismissed] = useState(false);
+  /** Epoch ms when user dismissed suggest; drives cooldown (docs/26 PS3). */
+  const [planSuggestDismissedAt, setPlanSuggestDismissedAt] = useState<
+    number | null
+  >(null);
   /** Only true after a Plan-mode turn posted an all-pending checklist. */
   const [planAwaitingConfirm, setPlanAwaitingConfirm] = useState(false);
   /** Last StartTurn plan_phase sent (drives live planning/executing UI). */
@@ -214,6 +221,13 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   const { sessionId } = useWorkbenchSession();
+
+  useEffect(() => {
+    const stored = readPlanSuggestDismissedAt(sessionId);
+    setPlanSuggestDismissedAt(
+      isPlanSuggestCooldownActive(stored) ? stored : null,
+    );
+  }, [sessionId]);
 
   const turnViewQuery = useQuery({
     queryKey: ["turn-view", turnId],
@@ -620,12 +634,18 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   function dismissPlanSuggest() {
-    setPlanSuggestDismissed(true);
+    const at = Date.now();
+    setPlanSuggestDismissedAt(at);
+    writePlanSuggestDismissedAt(sessionId, at);
   }
 
   function setPlanModeAndClearSuggest(value: boolean) {
     setPlanMode(value);
-    if (value) setPlanSuggestDismissed(true);
+    if (value) {
+      const at = Date.now();
+      setPlanSuggestDismissedAt(at);
+      writePlanSuggestDismissedAt(sessionId, at);
+    }
   }
 
   async function handleVerify() {
@@ -834,11 +854,17 @@ export function useWorkbenchImpl(): WorkbenchState {
     return "off";
   })();
 
+  const suggestOpts = {
+    scenarioId: activeScenarioId,
+    cooldownActive: isPlanSuggestCooldownActive(planSuggestDismissedAt),
+  };
+  const planSuggestDecision = shouldSuggestPlanMode(message, suggestOpts);
+  const planSuggestReason = planSuggestDecision
+    ? planSuggestPrimaryReason(message, suggestOpts)
+    : null;
+
   const showPlanSuggest =
-    !planMode &&
-    !planSuggestDismissed &&
-    !busy &&
-    shouldSuggestPlanMode(message);
+    !planMode && !busy && planSuggestDecision;
 
   const meta = scenarioMeta(activeScenarioId);
 
@@ -852,7 +878,6 @@ export function useWorkbenchImpl(): WorkbenchState {
     message,
     setMessage: (value: string) => {
       setMessage(value);
-      if (!shouldSuggestPlanMode(value)) setPlanSuggestDismissed(false);
     },
     submittedMessage,
     turnId,
@@ -868,6 +893,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setPlanMode: setPlanModeAndClearSuggest,
     planPhase,
     showPlanSuggest,
+    planSuggestReason,
     dismissPlanSuggest,
     canExecutePlan,
     handleExecutePlan,

@@ -36,6 +36,7 @@ workspace/*
 !workspace/.gitkeep
 .eval-workspace/
 eval/reports/
+eval/plan_suggest/reports/
 
 # local compose overlay (from dev.override.yml.example)
 deploy/compose/dev.override.yml

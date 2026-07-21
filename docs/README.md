@@ -35,7 +35,7 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
 | 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
 | 25 | [writing-runway](25-writing-runway.md) | **Plan 模式（平台）**：步骤可见 / 同意执行 |
-| 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分 / 冷却；不改交互） |
+| 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分已落地；判断力 PS4+） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -69,7 +69,7 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | 写作 Token 经济 WT0–WT4 | ✅ | 24 |
 | Prompt cache 布局 WT5 | ⏸ 设计已定 | 24 §4.6 / §10 |
 | Plan 模式（平台 · 步骤可见） | ✅ P1 相位契约 | 25 |
-| Plan 建议复杂度（打分 / 冷却） | 📝 设计稿 | 26 |
+| Plan 建议复杂度 | ✅ PS1–PS3；PS4 金标/tune；**PS4d 单配置 weights.json** | 26 |
 | Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 |
 
 ---

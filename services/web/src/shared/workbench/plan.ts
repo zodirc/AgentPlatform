@@ -20,9 +20,6 @@ export type PlanArtifact = {
   items?: PlanItem[];
 };
 
-const PLAN_PREFIX = "【Plan 模式】";
-const EXECUTE_PREFIX = "【执行计划】";
-
 /** Server-bound Plan phase on StartTurn (docs/25). `ready` is UI-only. */
 export type PlanPhaseWire = "planning" | "executing";
 
@@ -36,9 +33,17 @@ export const PLAN_PHASE_LABEL: Record<PlanPhase, string> = {
   executing: "",
 };
 
-const NUMBERED_GOAL = /^\s*(?:\d+[\.\)、]|[-*•]\s+\S)/gm;
-const GOAL_JOIN =
-  /(?:然后|接着|并且|同时|另外|还要|此外|and then|also|finally)\s*/gi;
+export {
+  clearPlanSuggestDismissedAt,
+  evaluatePlanSuggest,
+  isPlanSuggestCooldownActive,
+  planSuggestPrimaryReason,
+  PLAN_SUGGEST_COOLDOWN_MS,
+  readPlanSuggestDismissedAt,
+  shouldSuggestPlanMode,
+  writePlanSuggestDismissedAt,
+} from "./planSuggest";
+export type { PlanSuggestDecision, PlanSuggestOptions } from "./planSuggest";
 
 export function normalizePlanStatus(raw: string | undefined): PlanItemStatus {
   const s = String(raw ?? "pending").trim().toLowerCase();
@@ -152,19 +157,6 @@ export function planIsProposedOnly(plan: PlanArtifact | null): boolean {
   return plan.items.every(
     (i) => normalizePlanStatus(i.status) === "pending",
   );
-}
-
-/** Mirror runtime detect_plan_hint — suggest switch, never auto-enter. */
-export function shouldSuggestPlanMode(message: string): boolean {
-  const text = message.trim();
-  if (text.length < 24) return false;
-  if (text.startsWith(PLAN_PREFIX) || text.startsWith(EXECUTE_PREFIX)) {
-    return false;
-  }
-  const numbered = text.match(NUMBERED_GOAL)?.length ?? 0;
-  if (numbered >= 3) return true;
-  const joins = text.match(GOAL_JOIN)?.length ?? 0;
-  return joins >= 2 && text.length >= 40;
 }
 
 /**

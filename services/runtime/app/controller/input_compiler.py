@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.engine.state import user_message
 from app.settings import settings
+from app.controller.plan_suggest import detect_plan_hint
 
 _SLASH_HELP = re.compile(r"^\s*/help\b", re.I)
 _SLASH_VERSION = re.compile(r"^\s*/version\b", re.I)
@@ -15,15 +16,6 @@ _SLASH_VERIFY = re.compile(r"^\s*/verify\b", re.I)
 _SLASH_POLISH = re.compile(r"^\s*/polish(?:\s+(.*))?$", re.I | re.S)
 _SLASH_OUTLINE = re.compile(r"^\s*/outline(?:\s+(.*))?$", re.I | re.S)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
-_NUMBERED_GOAL = re.compile(r"(?m)^\s*(?:\d+[\.\)、]|[-*•]\s+\S)")
-_GOAL_JOIN = re.compile(
-    r"(?:然后|接着|并且|同时|另外|还要|此外|and then|also|finally)\s*",
-    re.I,
-)
-_PLAN_HINT = (
-    "Multi-goal request detected; consider calling update_plan once before other tools "
-    "(optional — not required)."
-)
 
 # Deterministic user-side expansions (docs/14 §6.4). Do NOT mutate system prefix (C3).
 POLISH_EXPAND = (
@@ -52,20 +44,6 @@ def expand_writing_slash(message: str) -> tuple[str, str | None]:
     return message, None
 
 
-def detect_plan_hint(message: str) -> str | None:
-    """Deterministic multi-goal heuristic. Returns a short hint or None (never forces plan)."""
-    text = message.strip()
-    if len(text) < 24:
-        return None
-    numbered = len(_NUMBERED_GOAL.findall(text))
-    if numbered >= 3:
-        return _PLAN_HINT
-    joins = len(_GOAL_JOIN.findall(text))
-    if joins >= 2 and len(text) >= 40:
-        return _PLAN_HINT
-    return None
-
-
 @dataclass
 class CompiledInput:
     messages: list[dict]
@@ -73,14 +51,20 @@ class CompiledInput:
 
 
 class InputCompiler:
-    def compile(self, message: str, *, selection: str | None = None) -> CompiledInput:
+    def compile(
+        self,
+        message: str,
+        *,
+        selection: str | None = None,
+        scenario_id: str | None = None,
+    ) -> CompiledInput:
         text = message.strip()
         metadata: dict = {}
         text, slash = expand_writing_slash(text)
         if slash:
             metadata["slash_expand"] = slash
             text = text.strip()
-        plan_hint = detect_plan_hint(text)
+        plan_hint = detect_plan_hint(text, scenario_id=scenario_id)
         if plan_hint:
             metadata["plan_hint"] = plan_hint
         if selection:

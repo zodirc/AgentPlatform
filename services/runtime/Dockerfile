@@ -30,6 +30,7 @@ COPY services/runtime/app /app/app
 COPY services/runtime/app/scenarios /app/app/scenarios
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
+COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest
 COPY eval/recordings /app/eval/recordings
 USER app
 EXPOSE 8001

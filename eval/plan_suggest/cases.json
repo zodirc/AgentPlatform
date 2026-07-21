@@ -1,0 +1,67 @@
+[
+  {
+    "id": "micro_tone",
+    "message": "改一下语气",
+    "scenario_id": "writing",
+    "suggest": false
+  },
+  {
+    "id": "continue",
+    "message": "继续",
+    "scenario_id": "writing",
+    "suggest": false
+  },
+  {
+    "id": "typo_micro",
+    "message": "把这段错字改了",
+    "scenario_id": "writing",
+    "suggest": false
+  },
+  {
+    "id": "numbered_three",
+    "message": "1. 先改大纲\n2. 再写第三章\n3. 最后检查引用是否齐全",
+    "scenario_id": "writing",
+    "suggest": true,
+    "expect_signal": "multi_numbered"
+  },
+  {
+    "id": "explicit_plan",
+    "message": "先给个方案再动手改目录和第三章",
+    "scenario_id": "writing",
+    "suggest": true,
+    "expect_signal": "explicit_plan"
+  },
+  {
+    "id": "high_risk_migrate",
+    "message": "重构资料库索引并迁移旧会话字段",
+    "scenario_id": "agent",
+    "suggest": true,
+    "expect_signal": "high_risk_verb"
+  },
+  {
+    "id": "english_typo_short",
+    "message": "fix the typo in README",
+    "scenario_id": "agent",
+    "suggest": false
+  },
+  {
+    "id": "english_numbered",
+    "message": "Please do these:\n1. fix lint\n2. add tests\n3. update docs\nThanks",
+    "scenario_id": "agent",
+    "suggest": true,
+    "expect_signal": "multi_numbered"
+  },
+  {
+    "id": "plan_prefix",
+    "message": "【Plan 模式】请拆分步骤完成大纲和两章",
+    "scenario_id": "writing",
+    "suggest": false
+  },
+  {
+    "id": "cooldown_blocks",
+    "message": "1. 先改大纲\n2. 再写第三章\n3. 最后检查引用是否齐全",
+    "scenario_id": "writing",
+    "cooldown_active": true,
+    "suggest": false
+  }
+]

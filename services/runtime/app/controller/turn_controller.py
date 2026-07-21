@@ -668,7 +668,7 @@ async def _run_turn(
     profile = ScenarioRegistry.get(scenario_id)
     phase = normalize_plan_phase(plan_phase)
     compiler = InputCompiler()
-    compiled = compiler.compile(message)
+    compiled = compiler.compile(message, scenario_id=scenario_id)
     compiled = await compiler.enrich_with_preread(compiled)
     prior = await load_session_transcript(session_id)
     if prior:
