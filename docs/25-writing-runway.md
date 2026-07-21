@@ -278,3 +278,4 @@ pending → in_progress → completed
 | ADR-014 | 不靠 LLM 分类猜「该不该 Plan」 |
 | ADR-015 | 执行阶段 Cancel |
 | 13 | Plan UI 与投影不得挡 TTFB |
+| [`26`](26-plan-suggest-complexity.md) | **建议触发**升级（打分 / 负向闸 / 冷却）；不改本文交互与同意门 |

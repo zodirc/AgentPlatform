@@ -1,12 +1,12 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块**；变更只改对应正文。
 
 验证：`make smoke` · `make eval-all` · `make eval-retrieval` · `make retrieval-bench-prod` · `make runtime-test`
 
 ---
 
-## 模块目录（01–25）
+## 模块目录（01–26）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -35,6 +35,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 | 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
 | 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
 | 25 | [writing-runway](25-writing-runway.md) | **Plan 模式（平台）**：步骤可见 / 同意执行 |
+| 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分 / 冷却；不改交互） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -46,7 +47,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 |------|----|
 | 部署 / 默认栈 | [03](03-docker-runtime.md) |
 | 速率约束 | [13](13-rate-redlines.md) |
-| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） · [25](25-writing-runway.md)（Plan / 步骤可见） |
+| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） · [25](25-writing-runway.md)（Plan / 步骤可见） · [26](26-plan-suggest-complexity.md)（建议触发） |
 | RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md) |
 | 会话归属 | [16](16-user-session-history.md) |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md) |
@@ -68,6 +69,7 @@ Agent Platform 架构与实施规范。**01–24 连续编号，一文一模块*
 | 写作 Token 经济 WT0–WT4 | ✅ | 24 |
 | Prompt cache 布局 WT5 | ⏸ 设计已定 | 24 §4.6 / §10 |
 | Plan 模式（平台 · 步骤可见） | ✅ P1 相位契约 | 25 |
+| Plan 建议复杂度（打分 / 冷却） | 📝 设计稿 | 26 |
 | Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 |
 
 ---
