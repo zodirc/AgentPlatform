@@ -28,6 +28,7 @@ export function InterviewPanels({ wb }: Props) {
       <PlanPanel
         plan={wb.plan}
         turnStatus={wb.displayStatus}
+        planPhase={wb.planPhase}
         showExecute={wb.canExecutePlan}
         executeDisabled={wb.busy || wb.actionBusy}
         onExecute={() => void wb.handleExecutePlan()}

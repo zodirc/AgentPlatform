@@ -9,7 +9,6 @@ import {
   planHasStaleInProgress,
   planIsProposedOnly,
   shouldSuggestPlanMode,
-  wrapMessageForPlanMode,
 } from "./plan";
 
 describe("plan helpers", () => {
@@ -78,9 +77,8 @@ describe("plan helpers", () => {
     ).toBe(true);
   });
 
-  it("wraps plan / execute messages with visible prefixes", () => {
-    expect(wrapMessageForPlanMode("写后面几章")).toContain("【Plan 模式】");
-    expect(wrapMessageForPlanMode("写后面几章")).toContain("写后面几章");
-    expect(executePlanMessage()).toContain("【执行计划】");
+  it("execute CTA uses a short user-facing message", () => {
+    expect(executePlanMessage()).toBe("按此执行");
+    expect(executePlanMessage("先做第一步")).toBe("先做第一步");
   });
 });

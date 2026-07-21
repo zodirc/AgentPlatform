@@ -326,6 +326,11 @@ export interface components {
             scenario_id?: "writing" | "agent" | "interview";
             /** Format: uuid */
             client_request_id?: string;
+            /**
+             * Optional Plan-mode phase (docs/25).
+             * @enum {string}
+             */
+            plan_phase?: "planning" | "executing";
         };
         TurnResponse: {
             /** Format: uuid */

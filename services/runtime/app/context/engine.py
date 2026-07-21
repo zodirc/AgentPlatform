@@ -65,6 +65,7 @@ class ToolExecutor:
                     turn_id=state.turn_id,
                     run_id=state.run_id,
                     session_id=state.session_id,
+                    plan_phase=state.plan_phase,
                 ),
                 timeout=timeout_s,
             )

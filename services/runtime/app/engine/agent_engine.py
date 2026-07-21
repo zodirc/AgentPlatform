@@ -744,6 +744,15 @@ class AgentEngine:
         )
         if tool_name == "stub_echo":
             return "TERMINATE"
+        # Planning phase: after a proposed checklist, stop — wait for「按此执行」(docs/25).
+        if (
+            tool_name == "update_plan"
+            and state.plan_phase == "planning"
+            and not is_error
+            and result.get("awaiting_consent")
+        ):
+            state.termination_reason = "plan_awaiting_consent"
+            return "TERMINATE"
         return str(summary)
 
     def _ingest_evidence(self, tool_name: str, result: dict[str, Any]) -> None:

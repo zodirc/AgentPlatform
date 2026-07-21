@@ -1,15 +1,18 @@
-import type { PlanArtifact, PlanItem } from "./plan";
+import type { PlanArtifact, PlanItem, PlanPhase } from "./plan";
 import {
   isActiveTurnStatus,
   livePlanStep,
   normalizePlanStatus,
   planHasStaleInProgress,
+  PLAN_PHASE_LABEL,
 } from "./plan";
 
 type Props = {
   plan: PlanArtifact | null;
   /** Turn display status — drives whether in_progress is live or stale. */
   turnStatus?: string | null;
+  /** Platform Plan phase (docs/25). */
+  planPhase?: PlanPhase;
   /** Caller already decided CTA is appropriate (proposed-only + awaiting confirm). */
   showExecute?: boolean;
   executeDisabled?: boolean;
@@ -79,6 +82,7 @@ function PlanItemRow({
 export function PlanPanel({
   plan,
   turnStatus = null,
+  planPhase = "off",
   showExecute = false,
   executeDisabled = false,
   onExecute,
@@ -90,6 +94,7 @@ export function PlanPanel({
   const stale = planHasStaleInProgress(plan, turnStatus);
   const turnLive = isActiveTurnStatus(turnStatus);
   const canExecute = showExecute && Boolean(onExecute);
+  const phaseLabel = PLAN_PHASE_LABEL[planPhase];
 
   return (
     <section
@@ -100,6 +105,9 @@ export function PlanPanel({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-xs font-medium text-violet-200">任务计划</p>
+          {phaseLabel ? (
+            <p className="mt-0.5 text-[11px] text-violet-300/90">{phaseLabel}</p>
+          ) : null}
           {plan.summary ? (
             <p className="mt-0.5 truncate text-[11px] text-slate-400">
               {plan.summary}
@@ -107,15 +115,15 @@ export function PlanPanel({
           ) : null}
           {live ? (
             <p className="mt-0.5 text-[11px] text-amber-200/90">
-              执行中 · 勿重复点「按此执行」
+              当前步 · {live.title}
             </p>
           ) : null}
           {stale ? (
             <p className="mt-0.5 text-[11px] text-slate-400">
-              回合已结束；清单步骤未全部勾完（属正常，模型常漏更新 status）
+              回合已结束；清单步骤未全部勾完
             </p>
           ) : null}
-          {!turnLive && !stale && !showExecute ? (
+          {!turnLive && !stale && !showExecute && planPhase === "off" ? (
             <p className="mt-0.5 text-[11px] text-slate-500">历史计划快照</p>
           ) : null}
         </div>

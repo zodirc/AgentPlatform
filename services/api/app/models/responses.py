@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, model_validator
+
+
+PlanPhase = Literal["planning", "executing"]
 
 
 class CreateSessionRequest(BaseModel):
@@ -36,6 +39,8 @@ class CreateTurnRequest(BaseModel):
     scenario_id: str | None = None
     mode: str | None = None
     client_request_id: UUID | None = None
+    # docs/25 — omit for normal Agent; planning | executing for Plan track.
+    plan_phase: PlanPhase | None = None
 
     @model_validator(mode="after")
     def _resolve_scenario_alias(self) -> "CreateTurnRequest":

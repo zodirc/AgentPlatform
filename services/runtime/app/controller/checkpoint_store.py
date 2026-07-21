@@ -25,6 +25,8 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "termination_reason": state.termination_reason,
         "budget_exceeded": state.budget_exceeded,
         "delivery": state.delivery,
+        "plan_hint": state.plan_hint,
+        "plan_phase": state.plan_phase,
     }
 
 
@@ -50,6 +52,8 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         termination_reason=str(data.get("termination_reason", "final")),
         budget_exceeded=bool(data.get("budget_exceeded", False)),
         delivery=data.get("delivery") if isinstance(data.get("delivery"), dict) else None,
+        plan_hint=str(data["plan_hint"]) if data.get("plan_hint") else None,
+        plan_phase=str(data["plan_phase"]) if data.get("plan_phase") else None,
     )
 
 

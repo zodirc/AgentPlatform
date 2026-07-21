@@ -20,6 +20,11 @@
     "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
     "message": { "type": "string", "minLength": 1 },
     "client_request_id": { "type": "string", "format": "uuid" },
-    "trace_id": { "type": "string", "format": "uuid" }
+    "trace_id": { "type": "string", "format": "uuid" },
+    "plan_phase": {
+      "type": "string",
+      "enum": ["planning", "executing"],
+      "description": "Optional Plan-mode phase. planning = hard read-only ToolScope; executing = full tools + status discipline. Omit for normal Agent turns."
+    }
   }
 }

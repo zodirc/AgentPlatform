@@ -8,7 +8,13 @@
     "summary": { "type": "string", "maxLength": 4096 },
     "termination_reason": {
       "type": "string",
-      "enum": ["final", "max_steps", "budget_exceeded", "local_response"]
+      "enum": [
+        "final",
+        "max_steps",
+        "budget_exceeded",
+        "local_response",
+        "plan_awaiting_consent"
+      ]
     },
     "step_count": { "type": "integer", "minimum": 0 },
     "delivery_status": {

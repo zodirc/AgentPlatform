@@ -8,6 +8,11 @@
     "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
     "user_input_preview": { "type": "string", "maxLength": 256 },
     "model_provider": { "type": "string", "maxLength": 32 },
-    "model_name": { "type": "string", "maxLength": 128 }
+    "model_name": { "type": "string", "maxLength": 128 },
+    "plan_phase": {
+      "type": "string",
+      "enum": ["planning", "executing"],
+      "description": "Optional Plan-mode phase (docs/25)."
+    }
   }
 }

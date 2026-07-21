@@ -36,6 +36,34 @@ def test_build_registry_has_core_tools() -> None:
     assert registry.get("delegate") is not None
 
 
+def test_tool_scope_planning_phase_excludes_writes() -> None:
+    ScenarioRegistry.load()
+    profile = ScenarioRegistry.get("agent")
+    registry = build_registry()
+    specs = {s.name: s for s in tool_scope(profile, registry, plan_phase="planning")}
+    assert "update_plan" in specs
+    assert "read_file" not in specs
+    assert "search_sources" not in specs
+    assert "propose_patch" not in specs
+    assert "write_file" not in specs
+    assert "run_command" not in specs
+    assert "draft_section" not in specs
+    assert "delegate" not in specs
+
+
+def test_tool_scope_executing_phase_keeps_full_profile() -> None:
+    ScenarioRegistry.load()
+    profile = ScenarioRegistry.get("agent")
+    registry = build_registry()
+    planning = {s.name for s in tool_scope(profile, registry, plan_phase="planning")}
+    executing = {s.name for s in tool_scope(profile, registry, plan_phase="executing")}
+    normal = {s.name for s in tool_scope(profile, registry)}
+    assert executing == normal
+    assert planning < normal
+    assert "run_command" in executing
+    assert "run_command" not in planning
+
+
 def test_tool_scope_on_write_override() -> None:
     ScenarioRegistry.load()
     profile = replace(

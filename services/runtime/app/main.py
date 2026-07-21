@@ -72,6 +72,7 @@ async def start_turn_command(
         scenario_id=body.scenario_id,
         message=body.message,
         trace_id=body.trace_id,
+        plan_phase=body.plan_phase,
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 

@@ -1,12 +1,12 @@
 # 25 — Plan 模式（平台层：先规划、同意、可见执行）
 
-> **状态：P0 落地中** · 2026-07-20 · 平台层 Plan（writing / agent / interview）  
+> **状态：P1 相位契约落地** · 2026-07-21 · 平台层 Plan（writing / agent / interview）  
 > 关联：[`09`](09-product-modes.md) · [`10`](10-product-experience.md) · [`06`](06-tools-and-context.md) · [`08`](08-event-projection-pipeline.md) · [`14`](14-writing-quality.md) · [`23`](23-writing-work-model.md) · [`24`](24-writing-token-economy.md) · [ADR-015](adr/015-interrupt-cancel-resume.md) · [ADR-014](adr/014-turn-intake-over-intent-pipeline.md) · [R1–R5](13-rate-redlines.md)  
 > **范围：全场景 workbench（writing / agent / interview），不是写作专属。**  
 > 本文回答：多步任务如何像 Cursor Plan 一样——规划、同意、执行中看见每一步是否完成——且不毁默认短交互。
 
-**已落地（P0）：** `turn.plan` 投影以最新为准；共享 `PlanPanel`；聊天区 Plan 按钮 + 多目标建议条；「按此执行」**仅**在 Plan 模式回合产出「全 pending」清单后出现；任一步变为进行中/完成后隐藏，避免重复执行。  
-**未做（P1+）：** 硬禁止规划期写正文、同 Run 同意 interrupt、自动续 Turn。
+**已落地（P0 + P1 相位契约）：** `turn.plan` 投影以最新为准；共享 `PlanPanel`；Plan 按钮 + 建议条；「按此执行」仅全 pending 后出现；**`plan_phase=planning|executing` 一等字段**；规划期 **硬 ToolScope 闸**；执行期 system/`update_plan` status 纪律；UI 相位（规划 / 待同意 / 执行）。同意仍为两 Turn（不做同 Run interrupt）。  
+**未做（P2+）：** 同 Run 同意 interrupt、建议条冷却精修、活动条与当前步强联动、自动续 Turn。
 
 ---
 
@@ -163,17 +163,19 @@ pending → in_progress → completed
 
 ---
 
-## 4. 现状缺口（代码事实）
+## 4. 现状（代码事实 · 2026-07-21）
 
-| 已有 | 缺口 |
+| 能力 | 状态 |
 |------|------|
-| `update_plan(items[{id,title,status}])` | 模型不保证执行中刷新 status |
-| `turn.plan` → artifact `type=plan` | projector **append** 多份；UI 常 `.find` 第一份 → **进度易脏** |
-| agent / interview 有简陋计划列表 | **writing 侧栏无计划**；无「当前步」强调 |
-| 多目标 intake 弱提示可 `update_plan` | **无同意门**；无「仅规划/执行中」模式条 |
-| `open_items` 回填会话摘要 | 不等于 Turn 内实时清单 |
+| `update_plan` → `turn.plan` → artifact | ✅ 投影替换最新 |
+| 共享 `PlanPanel` + 相位条 | ✅ writing / agent / interview |
+| `plan_phase` on CreateTurn / StartTurn | ✅ `planning` \| `executing` |
+| 规划期硬 ToolScope | ✅ 写工具不可用（非 prompt-only） |
+| 两 Turn 同意门 | ✅ 「按此执行」→ `executing` |
+| 执行期 status 纪律 | ✅ system + tool 描述；模型合规靠 golden 观测量 |
+| 同 Run interrupt 同意 | ❌ 不做（阶段 2） |
 
-因此：不是「从零发明 Plan」，而是 **把半成品做成平台级过程可见**。
+因此：Plan 已是 **平台相位契约**，不是软 prompt 半成品。
 
 ---
 
@@ -230,14 +232,15 @@ pending → in_progress → completed
 | **P0d** | Cancel / 多工具回归 | 既有；未新增专用剧本 |
 | **P0e** | workbench「Plan」按钮 + 建议条 +「按此执行」 | ✅ |
 
-### 阶段 1 — Cursor 对齐（另立项）
+### 阶段 1 — Cursor 对齐
 
-| 票 | 内容 |
-|----|------|
-| **P1** | Plan 按钮真正进轨：规划期不落正文 |
-| **P2** | 同意门（先两 Turn） |
-| **P3** | 窄条件「建议切换到 Plan」提示条（可忽略、有冷却） |
-| **P4** | 执行中更新 plan status；活动条与当前步标题可选联动 |
+| 票 | 内容 | 状态 |
+|----|------|------|
+| **P1** | Plan 按钮真正进轨：规划期硬 ToolScope（不落正文） | ✅ |
+| **P1b** | `plan_phase` 一等字段 + UI 相位条 | ✅ |
+| **P2** | 同意门（先两 Turn「按此执行」） | ✅ 两 Turn；同 Run interrupt 不做 |
+| **P3** | 窄条件「建议切换到 Plan」提示条（可忽略、有冷却） | 辅路径已有；冷却精修待做 |
+| **P4** | 执行中更新 plan status；活动条与当前步标题可选联动 | status 纪律 ✅；活动条强联动待做 |
 
 ### 阶段 2 — 不做
 

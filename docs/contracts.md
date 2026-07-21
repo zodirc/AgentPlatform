@@ -38,12 +38,14 @@ GET    /health/live
 {
   "message": "string",
   "scenario_id": "writing",
-  "client_request_id": "uuid"
+  "client_request_id": "uuid",
+  "plan_phase": "planning"
 }
 ```
 
 - `scenario_id` 省略 → Session.`default_scenario_id`
 - `mode` 可作为 `scenario_id` 兼容别名
+- `plan_phase` 可选：`planning`（硬只读 ToolScope）| `executing`（全工具 + status 纪律）；省略 = 普通 Agent（docs/25）
 - 幂等：提供 `client_request_id` 时 `(session_id, client_request_id)` 唯一；省略则每次新建 Turn。见 [`07-domain-model.md`](07-domain-model.md) §9
 
 OpenAPI：`packages/contracts/openapi/public.yaml`

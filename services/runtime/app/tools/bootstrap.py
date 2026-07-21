@@ -118,8 +118,9 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Update the visible turn plan / todo checklist. "
                 "Call when starting a multi-step task and again whenever a step "
-                "begins (status=in_progress) or finishes (status=done). "
-                "Replace the full items list each time so the UI stays accurate."
+                "begins (status=in_progress) or finishes (status=done|completed). "
+                "Replace the full items list each time so the UI stays accurate. "
+                "During Plan executing phase, skipping status updates is a failure."
             ),
             parameters={
                 "type": "object",
@@ -133,7 +134,13 @@ def build_registry() -> ToolRegistry:
                                 "title": {"type": "string"},
                                 "status": {
                                     "type": "string",
-                                    "enum": ["pending", "in_progress", "done"],
+                                    "enum": [
+                                        "pending",
+                                        "in_progress",
+                                        "done",
+                                        "completed",
+                                        "cancelled",
+                                    ],
                                 },
                             },
                         },
@@ -523,10 +530,34 @@ def build_registry() -> ToolRegistry:
     return registry
 
 
-def tool_scope(profile: ScenarioProfile, registry: ToolRegistry) -> list[ToolSpec]:
+# Dropped late in a turn / after successful export (docs/13 S3 A19). Pure rules.
+_LATE_STAGE_DROP = frozenset({"search_sources", "delegate", "remember", "recall"})
+
+# Plan planning phase: checklist only — no retrieve/write/exec (docs/25 consent gate).
+PLANNING_TOOL_ALLOWLIST = frozenset(
+    {
+        "update_plan",
+        "stub_echo",
+    }
+)
+
+
+def tool_scope(
+    profile: ScenarioProfile,
+    registry: ToolRegistry,
+    *,
+    plan_phase: str | None = None,
+) -> list[ToolSpec]:
+    """Filter tools by scenario profile; optionally harden for Plan planning phase."""
     names = list(profile.tool_names)
     if "stub_echo" not in names:
         names.append("stub_echo")
+    phase = (plan_phase or "").strip().lower() or None
+    if phase == "planning":
+        names = [n for n in names if n in PLANNING_TOOL_ALLOWLIST]
+        # Ensure plan tool is always present when planning.
+        if "update_plan" not in names and registry.get("update_plan") is not None:
+            names.append("update_plan")
     specs: list[ToolSpec] = []
     for name in names:
         base = registry.get(name)
@@ -542,10 +573,6 @@ def tool_scope(profile: ScenarioProfile, registry: ToolRegistry) -> list[ToolSpe
             requires = name in ON_WRITE_TOOLS
         specs.append(replace(base, requires_approval=requires))
     return specs
-
-
-# Dropped late in a turn / after successful export (docs/13 S3 A19). Pure rules.
-_LATE_STAGE_DROP = frozenset({"search_sources", "delegate", "remember", "recall"})
 
 
 def stage_tool_scope(specs: list[ToolSpec], *, step_count: int, max_steps: int, delivery: dict | None) -> list[ToolSpec]:

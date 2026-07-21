@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+PlanPhase = Literal["planning", "executing"]
 
 
 class StartTurnCommand(BaseModel):
@@ -15,6 +18,8 @@ class StartTurnCommand(BaseModel):
     message: str = Field(min_length=1)
     client_request_id: UUID | None = None
     trace_id: UUID
+    # Omit / null = normal Agent (default path). See docs/25.
+    plan_phase: PlanPhase | None = None
 
 
 class CancelTurnCommand(BaseModel):

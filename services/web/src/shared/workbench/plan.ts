@@ -23,15 +23,18 @@ export type PlanArtifact = {
 const PLAN_PREFIX = "【Plan 模式】";
 const EXECUTE_PREFIX = "【执行计划】";
 
-export const PLAN_MODE_INSTRUCTION =
-  `${PLAN_PREFIX}请先调用 update_plan 列出清晰步骤（每项 status=pending）。` +
-  `本回合不要写正文、不要改工作区文件、不要跑会改系统的命令。` +
-  `列出计划后用简短说明等待确认；我会再发「按此执行」。`;
+/** Server-bound Plan phase on StartTurn (docs/25). `ready` is UI-only. */
+export type PlanPhaseWire = "planning" | "executing";
 
-export const EXECUTE_PLAN_INSTRUCTION =
-  `${EXECUTE_PREFIX}请按当前计划逐步执行。` +
-  `开始某步时将该项标为 in_progress，完成标为 completed，并再次调用 update_plan 更新整份清单。` +
-  `不要跳过状态更新。`;
+/** Workbench-visible Plan phase (includes armed / awaiting consent). */
+export type PlanPhase = "off" | "planning" | "ready" | "executing";
+
+export const PLAN_PHASE_LABEL: Record<PlanPhase, string> = {
+  off: "",
+  planning: "",
+  ready: "",
+  executing: "",
+};
 
 const NUMBERED_GOAL = /^\s*(?:\d+[\.\)、]|[-*•]\s+\S)/gm;
 const GOAL_JOIN =
@@ -164,17 +167,11 @@ export function shouldSuggestPlanMode(message: string): boolean {
   return joins >= 2 && text.length >= 40;
 }
 
-export function wrapMessageForPlanMode(userText: string): string {
-  const body = userText.trim();
-  if (body.startsWith(PLAN_PREFIX) || body.startsWith(EXECUTE_PREFIX)) {
-    return body;
-  }
-  return `${PLAN_MODE_INSTRUCTION}\n\n用户请求：\n${body}`;
-}
-
+/**
+ * Message for the「按此执行」button. Keep short — never inject long instructions
+ * into the chat; executing discipline is plan_phase + runtime system prompt.
+ */
 export function executePlanMessage(extra?: string): string {
   const note = (extra ?? "").trim();
-  return note
-    ? `${EXECUTE_PLAN_INSTRUCTION}\n\n${note}`
-    : EXECUTE_PLAN_INSTRUCTION;
+  return note || "按此执行";
 }

@@ -90,6 +90,13 @@ export function AgentChatPanel({ wb }: Props) {
           {wb.sessionId ? ` · session=${wb.sessionId.slice(0, 8)}` : ""}
           {wb.useWebSocket ? " · ws" : ""}
           {wb.planMode ? " · Plan" : ""}
+          {wb.planPhase === "ready"
+            ? " · 待同意"
+            : wb.planPhase === "executing"
+              ? " · 执行中"
+              : wb.planPhase === "planning" && wb.busy
+                ? " · 规划中"
+                : ""}
         </p>
       </header>
 
@@ -186,6 +193,7 @@ export function AgentChatPanel({ wb }: Props) {
           <PlanPanel
             plan={wb.plan}
             turnStatus={wb.displayStatus}
+            planPhase={wb.planPhase}
             showExecute={wb.canExecutePlan}
             executeDisabled={wb.busy || wb.actionBusy}
             onExecute={() => void wb.handleExecutePlan()}
@@ -212,11 +220,6 @@ export function AgentChatPanel({ wb }: Props) {
               </button>
             </div>
           </div>
-        ) : null}
-        {wb.planMode ? (
-          <p className="text-[11px] text-violet-300/90">
-            Plan 已开：发送将先要求列出计划，不直接改稿。可用「按此执行」开跑。
-          </p>
         ) : null}
         <Textarea
           className="min-h-[80px] resize-none text-sm"

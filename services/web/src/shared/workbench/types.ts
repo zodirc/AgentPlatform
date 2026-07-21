@@ -84,6 +84,8 @@ export type WorkbenchState = {
   /** Explicit Plan mode (docs/25) — user toggled; wraps next send. */
   planMode: boolean;
   setPlanMode: (value: boolean) => void;
+  /** Derived Plan phase for UI (off | planning | ready | executing). */
+  planPhase: "off" | "planning" | "ready" | "executing";
   /** Multi-goal suggest bar visible. */
   showPlanSuggest: boolean;
   dismissPlanSuggest: () => void;

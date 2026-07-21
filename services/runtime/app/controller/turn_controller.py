@@ -40,6 +40,7 @@ from app.scenarios.registry import ScenarioRegistry
 from app.settings import settings
 from app.tools.bootstrap import build_registry, tool_scope
 from app.tools.core import tools as core_tools
+from app.controller.plan_phase import normalize_plan_phase, system_prompt_for_phase
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,7 @@ async def start_turn(
     scenario_id: str,
     message: str,
     trace_id: UUID,
+    plan_phase: str | None = None,
 ) -> None:
     if turn_id in _active_turns:
         return
@@ -194,7 +196,21 @@ async def start_turn(
             scenario_id=scenario_id,
             message=message,
             trace_id=trace_id,
+            plan_phase=plan_phase,
         )
+    except Exception as exc:
+        logger.exception("start_turn failed turn_id=%s", turn_id)
+        try:
+            await _fail_turn(
+                turn_id=turn_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                termination_reason="fatal_error",
+                message=str(exc),
+                scenario_id=scenario_id,
+            )
+        except Exception:
+            logger.exception("start_turn fail_turn also failed turn_id=%s", turn_id)
     finally:
         _active_turns.discard(turn_id)
 
@@ -647,8 +663,10 @@ async def _run_turn(
     scenario_id: str,
     message: str,
     trace_id: UUID,
+    plan_phase: str | None = None,
 ) -> None:
     profile = ScenarioRegistry.get(scenario_id)
+    phase = normalize_plan_phase(plan_phase)
     compiler = InputCompiler()
     compiled = compiler.compile(message)
     compiled = await compiler.enrich_with_preread(compiled)
@@ -679,6 +697,8 @@ async def _run_turn(
         "scenario_id": scenario_id,
         "user_input_preview": preview,
     }
+    if phase is not None:
+        accepted_payload["plan_phase"] = phase
     profile_meta = await resolve_active_profile_metadata(owner_user_id=owner_user_id)
     if profile_meta:
         accepted_payload.update(profile_meta)
@@ -827,10 +847,11 @@ async def _run_turn(
         messages=compiled.messages,
         max_steps=profile.max_steps,
         plan_hint=compiled.metadata.get("plan_hint"),
+        plan_phase=phase,
     )
 
     registry = build_registry()
-    tools = tool_scope(profile, registry)
+    tools = tool_scope(profile, registry, plan_phase=phase)
     gateway = create_gateway(
         model_config,
         messages=compiled.messages,
@@ -860,6 +881,7 @@ async def _run_turn(
             payload=pin.event_payload(),
             step_index=0,
         )
+    system_prompt = system_prompt_for_phase(system_prompt, phase)
 
     engine = AgentEngine(
         gateway=gateway,

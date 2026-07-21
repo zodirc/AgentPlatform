@@ -33,8 +33,9 @@ import {
   planFromEventPayload,
   planIsProposedOnly,
   shouldSuggestPlanMode,
-  wrapMessageForPlanMode,
   type PlanArtifact,
+  type PlanPhase,
+  type PlanPhaseWire,
 } from "./plan";
 import { scenarioMeta } from "./scenarioMeta";
 import { tokenUsageFromEvents } from "./tokenUsage";
@@ -128,6 +129,10 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [planSuggestDismissed, setPlanSuggestDismissed] = useState(false);
   /** Only true after a Plan-mode turn posted an all-pending checklist. */
   const [planAwaitingConfirm, setPlanAwaitingConfirm] = useState(false);
+  /** Last StartTurn plan_phase sent (drives live planning/executing UI). */
+  const [activePlanPhase, setActivePlanPhase] = useState<PlanPhaseWire | null>(
+    null,
+  );
   const planWrapSentRef = useRef(false);
   const streamRef = useRef<StreamClient | null>(null);
   const lastSequenceRef = useRef(0);
@@ -372,6 +377,7 @@ export function useWorkbenchImpl(): WorkbenchState {
           }
           if (ev.type === "turn.failed") {
             setBusy(false);
+            setActivePlanPhase(null);
             const msg = String(
               ev.payload.message ?? ev.payload.termination_reason ?? "未知错误",
             );
@@ -396,6 +402,13 @@ export function useWorkbenchImpl(): WorkbenchState {
             setPendingApproval(false);
             setPendingToolCallId(null);
             setPendingToolName(null);
+            setPendingWriteFile(null);
+            setActionBusy(false);
+            setView((prev) =>
+              prev && prev.status === "waiting_approval"
+                ? { ...prev, status: "running", interrupt: null }
+                : prev,
+            );
             resumingAfterApprovalRef.current = false;
           }
         },
@@ -421,12 +434,14 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (closedPlan) setLivePlan(closedPlan);
           setLiveToolTimeline([]);
           setBusy(false);
+          setActivePlanPhase(null);
           setStopping(false);
           setActionBusy(false);
           resumingAfterApprovalRef.current = false;
         },
         onError: (err?: unknown) => {
           setBusy(false);
+          setActivePlanPhase(null);
           setStopping(false);
           setActionBusy(false);
           reportError("事件流连接中断", err ?? "stream error");
@@ -503,22 +518,38 @@ export function useWorkbenchImpl(): WorkbenchState {
   }, [sessionId]);
 
   const startTurnMut = useMutation({
-    mutationFn: ({ sid, msg }: { sid: string; msg: string }) =>
-      startTurn(sid, msg, activeScenarioId),
+    mutationFn: ({
+      sid,
+      msg,
+      planPhase,
+    }: {
+      sid: string;
+      msg: string;
+      planPhase?: PlanPhaseWire | null;
+    }) => startTurn(sid, msg, activeScenarioId, { plan_phase: planPhase }),
   });
 
-  async function handleSendText(textRaw: string, opts?: { planWrap?: boolean }) {
-    let text = textRaw.trim();
+  async function handleSendText(
+    textRaw: string,
+    opts?: { planModeSend?: boolean; planPhase?: PlanPhaseWire | null },
+  ) {
+    const text = textRaw.trim();
     if (!sessionId || !text || busy) return;
-    const shouldWrap = opts?.planWrap ?? planMode;
-    if (shouldWrap) {
-      text = wrapMessageForPlanMode(text);
+    // Never rewrite the user's message. Plan discipline is plan_phase + runtime system prompt.
+    const usePlan =
+      opts?.planModeSend ?? (planMode && opts?.planPhase !== "executing");
+    let wirePhase: PlanPhaseWire | null = opts?.planPhase ?? null;
+    if (usePlan && wirePhase == null) {
+      wirePhase = "planning";
+    }
+    if (wirePhase === "planning") {
       planWrapSentRef.current = true;
       setPlanAwaitingConfirm(false);
-    } else if (opts?.planWrap === false) {
+    } else if (wirePhase === "executing" || opts?.planModeSend === false) {
       planWrapSentRef.current = false;
       setPlanAwaitingConfirm(false);
     }
+    setActivePlanPhase(wirePhase);
     setBusy(true);
     setError(null);
     setEvents([]);
@@ -545,6 +576,7 @@ export function useWorkbenchImpl(): WorkbenchState {
       const turn = await startTurnMut.mutateAsync({
         sid: sessionId,
         msg: text,
+        planPhase: wirePhase,
       });
       setTurnId(turn.id);
       setTurnHistory((prev) =>
@@ -560,6 +592,7 @@ export function useWorkbenchImpl(): WorkbenchState {
       connectStream(turn.id);
     } catch (err) {
       setBusy(false);
+      setActivePlanPhase(null);
       reportError("发送失败", err);
     }
   }
@@ -580,7 +613,10 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
     planWrapSentRef.current = false;
     setPlanAwaitingConfirm(false);
-    await handleSendText(executePlanMessage(), { planWrap: false });
+    await handleSendText(executePlanMessage(), {
+      planModeSend: false,
+      planPhase: "executing",
+    });
   }
 
   function dismissPlanSuggest() {
@@ -593,7 +629,7 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   async function handleVerify() {
-    await handleSendText("/verify", { planWrap: false });
+    await handleSendText("/verify", { planModeSend: false });
   }
   async function handleStop() {
     if (!turnId) return;
@@ -679,9 +715,17 @@ export function useWorkbenchImpl(): WorkbenchState {
     const toolCallId = view?.interrupt?.tool_call_id ?? pendingToolCallId;
     if (!turnId || !toolCallId) return;
     setActionBusy(true);
+    // Optimistic dismiss — do not wait for projection/SSE or the banner sticks
+    // with grayed buttons while view.status is still waiting_approval.
     setPendingApproval(false);
     setPendingToolCallId(null);
     setPendingToolName(null);
+    setPendingWriteFile(null);
+    setView((prev) =>
+      prev && prev.status === "waiting_approval"
+        ? { ...prev, status: "running", interrupt: null }
+        : prev,
+    );
     resumingAfterApprovalRef.current = true;
     try {
       if (useWebSocket && streamRef.current instanceof TurnWebSocketClient) {
@@ -690,6 +734,7 @@ export function useWorkbenchImpl(): WorkbenchState {
         await approveToolCall(turnId, toolCallId);
       }
       setBusy(true);
+      setActionBusy(false);
       connectStream(turnId, lastSequenceRef.current);
     } catch (err) {
       resumingAfterApprovalRef.current = false;
@@ -706,6 +751,12 @@ export function useWorkbenchImpl(): WorkbenchState {
     setPendingApproval(false);
     setPendingToolCallId(null);
     setPendingToolName(null);
+    setPendingWriteFile(null);
+    setView((prev) =>
+      prev && prev.status === "waiting_approval"
+        ? { ...prev, status: "running", interrupt: null }
+        : prev,
+    );
     resumingAfterApprovalRef.current = true;
     try {
       if (useWebSocket && streamRef.current instanceof TurnWebSocketClient) {
@@ -714,6 +765,7 @@ export function useWorkbenchImpl(): WorkbenchState {
         await denyToolCall(turnId, toolCallId);
       }
       setBusy(true);
+      setActionBusy(false);
       connectStream(turnId, lastSequenceRef.current);
     } catch (err) {
       resumingAfterApprovalRef.current = false;
@@ -745,7 +797,8 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   const displayStatus =
-    pendingApproval || view?.status === "waiting_approval"
+    pendingApproval ||
+    (view?.status === "waiting_approval" && Boolean(view?.interrupt?.tool_call_id))
       ? "waiting_approval"
       : busy
         ? "running"
@@ -772,6 +825,14 @@ export function useWorkbenchImpl(): WorkbenchState {
     !busy &&
     !pendingApproval &&
     view?.status !== "waiting_approval";
+
+  const planPhase: PlanPhase = (() => {
+    if (busy && activePlanPhase === "executing") return "executing";
+    if (busy && activePlanPhase === "planning") return "planning";
+    if (canExecutePlan || planAwaitingConfirm) return "ready";
+    if (planMode) return "planning";
+    return "off";
+  })();
 
   const showPlanSuggest =
     !planMode &&
@@ -805,6 +866,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     plan,
     planMode,
     setPlanMode: setPlanModeAndClearSuggest,
+    planPhase,
     showPlanSuggest,
     dismissPlanSuggest,
     canExecutePlan,
@@ -824,7 +886,9 @@ export function useWorkbenchImpl(): WorkbenchState {
     pendingWriteFile,
     useWebSocket,
     awaitingApproval:
-      (view?.status === "waiting_approval" || pendingApproval) &&
+      (pendingApproval ||
+        (view?.status === "waiting_approval" &&
+          Boolean(view?.interrupt?.tool_call_id))) &&
       view?.status !== "completed" &&
       view?.status !== "failed" &&
       view?.status !== "cancelled",

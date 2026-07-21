@@ -229,12 +229,21 @@ export async function startTurn(
   sessionId: string,
   message: string,
   scenarioId: string,
+  opts?: { plan_phase?: "planning" | "executing" | null },
 ) {
+  const body: {
+    message: string;
+    scenario_id: string;
+    plan_phase?: "planning" | "executing";
+  } = { message, scenario_id: scenarioId };
+  if (opts?.plan_phase === "planning" || opts?.plan_phase === "executing") {
+    body.plan_phase = opts.plan_phase;
+  }
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/turns`, {
     ...sessionFetchInit,
     method: "POST",
     headers: apiAuthHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ message, scenario_id: scenarioId }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`startTurn failed: ${res.status}`);
   return res.json() as Promise<TurnResponse>;

@@ -462,12 +462,19 @@ async def update_plan(
 ) -> dict[str, Any]:
     plan_id = f"plan-{uuid4().hex[:8]}"
     normalized: list[dict[str, str]] = []
+    in_progress_count = 0
+    # Planning phase: force all pending so the consent CTA can appear (docs/25).
+    force_pending = str(_kwargs.get("plan_phase") or "").strip().lower() == "planning"
     for i, item in enumerate(items):
         status = str(item.get("status", "pending")).strip().lower()
-        if status in {"done", "complete", "completed"}:
+        if force_pending:
+            status = "pending"
+        elif status in {"done", "complete", "completed"}:
+            # Wire value stays `done` for event schema / projector compatibility.
             status = "done"
         elif status in {"in-progress", "running", "in_progress"}:
             status = "in_progress"
+            in_progress_count += 1
         elif status in {"cancelled", "canceled", "skipped"}:
             status = "cancelled"
         else:
@@ -479,11 +486,30 @@ async def update_plan(
                 "status": status,
             }
         )
-    return {
+    # Soft discipline: at most one in_progress (keep first; demote extras to pending).
+    if in_progress_count > 1 and not force_pending:
+        seen = False
+        for row in normalized:
+            if row["status"] != "in_progress":
+                continue
+            if not seen:
+                seen = True
+                continue
+            row["status"] = "pending"
+    result: dict[str, Any] = {
         "plan_id": plan_id,
         "items": normalized,
         "summary": summary or f"Plan with {len(normalized)} item(s)",
     }
+    if force_pending:
+        result["plan_phase"] = "planning"
+        result["awaiting_consent"] = True
+        if not summary:
+            result["summary"] = (
+                f"Plan with {len(normalized)} item(s) — awaiting confirmation "
+                "（请用户点「按此执行」后再开始）"
+            )
+    return result
 
 
 async def update_outline(

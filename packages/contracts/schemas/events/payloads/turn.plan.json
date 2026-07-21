@@ -20,10 +20,19 @@
           "title": { "type": "string", "minLength": 1, "maxLength": 512 },
           "status": {
             "type": "string",
-            "enum": ["pending", "in_progress", "done"]
+            "enum": ["pending", "in_progress", "done", "completed", "cancelled"]
           }
         }
       }
+    },
+    "plan_phase": {
+      "type": "string",
+      "enum": ["planning", "executing"],
+      "description": "Optional Plan-mode phase when checklist is proposed (docs/25)."
+    },
+    "awaiting_consent": {
+      "type": "boolean",
+      "description": "True when planning phase proposed an all-pending checklist awaiting「按此执行」."
     }
   }
 }

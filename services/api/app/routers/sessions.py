@@ -149,6 +149,7 @@ async def create_turn(
                 message=body.message,
                 client_request_id=body.client_request_id,
                 trace_id=trace_id,
+                plan_phase=body.plan_phase,
             )
             listener = request.app.state.event_listener
             await listener.notify(turn["id"])

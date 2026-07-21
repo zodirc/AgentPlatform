@@ -29,6 +29,8 @@ class TurnState:
     delivery: dict[str, Any] | None = None
     # Optional Intake hint (e.g. multi-goal → suggest update_plan). Never forces tools.
     plan_hint: str | None = None
+    # docs/25 — planning | executing | None (normal Agent).
+    plan_phase: str | None = None
 
 
 ContentBlock = dict[str, Any]

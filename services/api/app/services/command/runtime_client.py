@@ -31,6 +31,7 @@ class RuntimeClient:
         message: str,
         client_request_id: UUID | None,
         trace_id: UUID,
+        plan_phase: str | None = None,
     ) -> None:
         payload = {
             "turn_id": str(turn_id),
@@ -42,6 +43,8 @@ class RuntimeClient:
         }
         if client_request_id is not None:
             payload["client_request_id"] = str(client_request_id)
+        if plan_phase is not None:
+            payload["plan_phase"] = plan_phase
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(

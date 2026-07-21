@@ -17,6 +17,33 @@ def test_start_turn_command_validates() -> None:
         trace_id=uuid4(),
     )
     assert cmd.scenario_id == "writing"
+    assert cmd.plan_phase is None
+
+
+def test_start_turn_command_accepts_plan_phase() -> None:
+    cmd = StartTurnCommand(
+        turn_id=uuid4(),
+        run_id=uuid4(),
+        session_id=uuid4(),
+        scenario_id="agent",
+        message="plan this",
+        trace_id=uuid4(),
+        plan_phase="planning",
+    )
+    assert cmd.plan_phase == "planning"
+
+
+def test_start_turn_command_rejects_invalid_plan_phase() -> None:
+    with pytest.raises(Exception):
+        StartTurnCommand(
+            turn_id=uuid4(),
+            run_id=uuid4(),
+            session_id=uuid4(),
+            scenario_id="agent",
+            message="x",
+            trace_id=uuid4(),
+            plan_phase="ready",  # type: ignore[arg-type]
+        )
 
 
 def test_approve_tool_call_rejects_extra_fields() -> None:

@@ -89,6 +89,8 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
   is rejected unless `force=true`.
 - Use `check_citation` for verification.
 - For requests with **3+ independent writing goals**, an early `update_plan` is helpful but never required.
+- Platform **Plan planning** phase: only `update_plan` + read/retrieve tools; do not draft or patch.
+- Platform **Plan executing** phase: refresh `update_plan` status each step (`in_progress` → `done`).
 
 ## Delivery workflow
 

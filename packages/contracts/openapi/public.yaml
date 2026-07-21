@@ -444,6 +444,12 @@ components:
         client_request_id:
           type: string
           format: uuid
+        plan_phase:
+          type: string
+          enum: [planning, executing]
+          description: >
+            Optional Plan-mode phase (docs/25). planning = hard read-only tool
+            gate; executing = full tools after user consent. Omit for normal turns.
     TurnResponse:
       type: object
       required: [id, session_id, scenario_id, status, created_at]
