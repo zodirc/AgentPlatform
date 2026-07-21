@@ -1,10 +1,10 @@
 # 12 — Agent Harness（成熟度总纲）
 
-> **状态**：部分落地（2026-07-13）— **AH1 ✅**；**AH2–AH4 / AH-obs 已落地核心路径**（prompt cache 打标、envelope project/runtime、@path 预读、只读并行、compact 独立超时、usage/context 可观测字段）。细调与 golden 加固可继续。  
+> **状态**：部分落地（2026-07-13）— **AH1 ✅**；**AH2–AH4 / AH-obs 已落地核心路径**。**下一刀口径（2026-07-21）见 §5.1**：① cache 布局（WT5）② 变短≈压缩 ③ Proof 延迟盯梢——设计/纪律已定，实现按排期。  
 > **范围**：**广义 Agent Harness**——包住 frontier model、决定「好不好用」的整层工程：Intake · Context · Tools 执行纪律 · Model · Cancel/超时/watchdog · Eval/SLO 与可观测。  
-> **不在范围**：改写 `AgentEngine` while 语义；恢复固定 pipeline；K8s / MCP / 多租户模型市场。
+> **不在范围**：改写 `AgentEngine` while 语义；恢复固定 pipeline；K8s / MCP / 多租户模型市场；**写作去 AI 腔**（走 writing `system.md`，见 [`14`](14-writing-quality.md)，不塞进 Harness 引擎）。
 
-关联：[`05-agent-runtime.md`](05-agent-runtime.md)（loop 细则）· [`06-tools-and-context.md`](06-tools-and-context.md)（工具与 Context 契约）· [ADR-014](adr/014-turn-intake-deterministic.md)（Intake）· [ADR-015](adr/015-interrupt-cancel-resume.md)（Cancel）· [ADR-016](adr/016-execution-timeouts-and-stall-watchdog.md)（超时/watchdog）· [ADR-019](adr/019-model-provider-runtime-config.md)（供应商配置）· [`10-product-experience.md`](10-product-experience.md)（体验 SLO）· [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md)（延迟门禁）。
+关联：[`05-agent-runtime.md`](05-agent-runtime.md)（loop 细则）· [`06-tools-and-context.md`](06-tools-and-context.md)（工具与 Context 契约）· [`20`](20-context-compaction-walkthrough.md)（压缩演练）· [`24` §4.6](24-writing-token-economy.md)（WT5）· [ADR-014](adr/014-turn-intake-deterministic.md)（Intake）· [ADR-015](adr/015-interrupt-cancel-resume.md)（Cancel）· [ADR-016](adr/016-execution-timeouts-and-stall-watchdog.md)（超时/watchdog）· [ADR-019](adr/019-model-provider-runtime-config.md)（供应商配置）· [`10-product-experience.md`](10-product-experience.md)（体验 SLO）· [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md)（延迟门禁）。
 
 > **命名说明**：早期文稿称「Model Harness」，仅覆盖模型调用外围。本文升格为 **Agent Harness 总纲**；原 Model 面仍是子轨之一（AH1–AH2、AH4 部分）。细则不合并进本文——`05`/`06`/`11`/`12` 仍是各面权威。
 
@@ -69,14 +69,14 @@ AgentEngine while 语义冻结（ADR-005）
 
 | 面 | 已有 | 缺口 | 分期 |
 |----|------|------|------|
-| **Model** | Provider + factory；ADR-019；**AH1** 重试/策略；**AH2** `cache_control` + usage cache 字段 | 多 provider failover（延后） | AH1–AH2 ✅ |
-| **Context** | compact；**AH3a** project/runtime + `assemble_ms`；**session transcript** 滚动历史（≥80/90/95% 才 collapse/snip/autocompact） | 更细 session 指针产品化 | AH3a ✅ |
+| **Model** | Provider + factory；ADR-019；**AH1** 重试/策略；**AH2** `cache_control` + usage cache 字段 | **WT5 稳定/易变分家**（写作组装仍易整段 miss）；多 provider failover（延后） | AH1–AH2 ✅；WT5 ⏸ |
+| **Context** | compact；**AH3a** project/runtime + `assemble_ms`；**session transcript**（≥80/90/95% 才 collapse/snip/autocompact） | 压缩**质量**（到点折干净）；对齐「变短≈压缩」体感 | AH3a ✅；§5.1.2 |
 | **Intake** | InputCompiler；**AH3b** `@path` 预算预读 | — | AH3b ✅ |
 | **Tools** | 审批、超时；**AH3c** 只读并行 | description 持续 hygiene | AH3c ✅ |
 | **Guard** | ADR-015/016；AH1 Cancel 打断 backoff；预读/assemble 可中止钩子 | — | 持续 |
-| **Proof** | Golden + SLO；**AH-obs** `retry_count` / cache / `assemble_ms` 进事件契约 | UI 面板后置 | AH-obs ✅ |
+| **Proof** | Golden + SLO；**AH-obs** `retry_count` / cache / `assemble_ms` 进事件契约 | 默认盯 assemble/TTFB/usage；UI 可后置 | AH-obs ✅；§5.1.3 |
 
-结论：**不要用加节点/加 router 补洞**。用 harness 各面策略层补；**先 cache（AH2）再加厚上下文（AH3）**，避免性能倒退窗口。
+结论：**不要用加节点/加 router 补洞**。用 harness 各面策略层补；**先 cache 布局（WT5）→ 压缩到点质量 → Proof 延迟盯梢**（§5.1），避免性能倒退与「无压缩暗削窗」。
 
 ---
 
@@ -152,6 +152,68 @@ AgentEngine while 语义冻结（ADR-005）
 
 与 [`06` §6.1](06-tools-and-context.md) 对齐：`ContextEnvelope` 为 assemble 权威输出；`system_blocks` **不**回写 `TurnState.messages`。
 
+### 5.1 下一刀优化思路（2026-07-21）
+
+> 三条线**分开推进**，都服从 [`13`](13-rate-redlines.md) R1–R5；**不改** `AgentEngine` while / 发送路径 / Plan 同意门。  
+> **不混入**：写作去 AI 腔 → writing [`system.md` Prose defaults](../services/runtime/app/scenarios/writing/system.md) / [`14`](14-writing-quality.md)；资料库 RAG → [`15`](15-rag-and-sources.md)。
+
+排期建议：`① cache 布局 WT5` → `② 变短≈压缩` → `③ Proof 延迟盯梢`。
+
+#### 5.1.1 Cache 布局（WT5 · Model × writing 组装）
+
+**问题：** 写作常把 `system.md` + cards + work index + focus/prev **焊成一整段 system** 再打 `cache_control`。换章/换话 → **整段 miss**，稳定正文陪葬。仪表盘命中率 ~10–15% 多半正常（messages / tool_results 本就不会进稳定前缀）。细则权威：[`24` §4.6](24-writing-token-economy.md)。
+
+**思路：只改位置，不删内容。**
+
+| 层 | 放什么 | cache |
+|----|--------|--------|
+| **稳定前缀** | `system.md`（含 Prose defaults）+ tools 定义 | 打标；跨 Turn 尽量命中 |
+| **易变后置** | cards / work index / focus+prev | **照样送给模型**；挂 runtime 或靠后 user，不焊进稳定块 |
+
+| 做 | 不做 |
+|----|------|
+| KPI = **cache miss / 总 input 绝对量** | 以命中率 % 为唯一目标 |
+| 先靠 WT1–WT4 缩小 miss 分母 | 为刷命中丢掉 focus / cards |
+| 同内容重组 + provider 打标 | 更勤 collapse 专为 cache；每步同步 LLM 摘要 |
+
+**落地：** `prepare_writing_system_prompt` / assemble 分块；稳定段末 `cache_control`。验收：同任务「写一章」miss/总 input 下降；TTFB/首 token/质量不回归。状态：**设计 ✅ · 实现 ⏸**。
+
+#### 5.1.2 变短 ≈ 压缩（Context）
+
+**产品体感（对齐 Cursor / Claude Code 自用观察）：** 平时上下文**一路涨或持平**；**明显变短**应对得上自动压缩链或用户 `/compact`。单条进窗 `budget` 截断是「这条没那么肥」，不是整段对话暗中变短。机制教学见 [`20`](20-context-compaction-walkthrough.md)。
+
+**思路：加厚到点压缩质量，不日常暗削。**
+
+| 做 | 不做 |
+|----|------|
+| 满闸 collapse / snip / autocompact 时，旧大块 tool 折干净（path + 可重读） | **无压缩事件**却整窗 40K→30K（曾议「提前 pointerize」——**否决为默认**） |
+| `/compact` 写作书签保住「写到哪」（WT2） | 每轮同步 LLM 摘要（R2） |
+| Usage / `compaction_trace` 可读 | 调阈值刷分区 % 好看 |
+
+**读表：** 压缩前 `tool_results` / `assistant` 偏高多为正常作业面。成功 = **压缩触发后**仍能续写，且 input 绝对量下来。
+
+**落地优先级：** ① 现链 + 观测可读 → ② 仅当已有 compact 轨迹时强化冷 tool 折叠 → ③ 写作按章装载（少灌窗 ≠ 暗收窗）。
+
+#### 5.1.3 Proof · 延迟盯梢
+
+**已有：** SLO（[`10` §1](10-product-experience.md)）TTFB≤300ms / 首 token / Cancel≤500ms；事件 `context.reported`（`assemble_ms`）、`usage.reported`（retry/cache）；golden `latency.*`（[`11`](11-eval-and-golden-turns.md)）。
+
+**思路：把「能测」变成「默认盯着」，不加裁判模型。**
+
+| 层 | 做什么 |
+|----|--------|
+| **契约** | 事件继续带齐 assemble / usage / cache；UI 面板可后置 |
+| **Golden** | stub 路径保住 TTFB / cancel 断言；勿用 live 抖动当 PR 硬闸 |
+| **对照** | WT5 / 压缩改动前后：同剧本 `assemble_ms`、首 token、input 绝对量 |
+| **语义** | 分清受理慢（TTFB）vs 模型慢（首 token）vs 组窗贵（assemble） |
+
+| 做 | 不做 |
+|----|------|
+| 改动挂延迟相关断言或抽样对照（R5） | 每轮同步 LLM「证明延迟」 |
+| `make runtime-test` + 相关 golden | 指望 `make eval-all` 单独覆盖全部延迟/RAG/Plan 建议（见 eval 分层） |
+
+**说明：** `eval-all` = stub Golden Turn 行为回归；Harness 单测 → `runtime-test`；RAG 真效果 → `eval-retrieval` / `retrieval-bench*`；Plan 建议 → `eval-plan-suggest`。Proof 加厚 = 盯对命令与字段，不是一条 makefile 万能。
+
 ---
 
 ## 6. 分期（AH1 → AH4 + AH-obs）
@@ -164,12 +226,12 @@ AgentEngine while 语义冻结（ADR-005）
 
 ### AH2 — Model：Prompt Cache
 
-1. 稳定前缀（system + 工具定义 + pinned 卡）打 Anthropic `cache_control` / 兼容 OpenAI-compat  
-2. assemble 保证可缓存前缀跨 Step/Turn **字节稳定**（易变内容后置）  
+1. 稳定前缀（system + 工具定义）打 Anthropic `cache_control` / 兼容 OpenAI-compat  
+2. assemble 保证可缓存前缀跨 Step/Turn **字节稳定**（易变内容后置）— **写作侧完整分家 = WT5（§5.1.1 / `24` §4.6），实现⏸**  
 3. **AH-obs**：`usage.reported` 含 cache 读写 token / hit 指示  
 
-**主改**：providers、`context/engine.py`。  
-**验收**：cache 字段可观测；长会话首 token 门禁不回归。
+**主改**：providers、`context/engine.py`；WT5 另动 writing 组装。  
+**验收**：cache 字段可观测；长会话首 token 门禁不回归；WT5 以 miss/总 input 绝对量为准。
 
 ### AH3 — Context × Intake × Tools
 
@@ -208,7 +270,9 @@ UI 面板可后置；**事件契约先落地**。
 4. 每 scenario 复制 gateway  
 5. 业务编排塞回 LangGraph  
 6. 为省延迟牺牲正确性（流后重放、跳过审批、静默截断未标记）  
-7. 未落地前宣称「已完全对齐」
+7. 未落地前宣称「已完全对齐」  
+8. 无压缩事件时悄悄整窗变短（「压缩外收窗」）— 见 §5.1.2  
+9. 以 prompt cache 命中率 % 或 Usage 单分区 % 为唯一优化目标 — 见 §5.1.1 / §5.1.2
 
 ---
 
@@ -232,9 +296,10 @@ UI 面板可后置；**事件契约先落地**。
 | AH1 ✅ | Gateway 重试 + 生成策略 | `model/*` | Model |
 | AH2 | Prompt cache + usage cache/retry 字段 | providers, context | Model + Proof |
 | AH3a–c | Envelope / 预读 / 只读并行 | context, input_compiler, agent_engine | Context/Intake/Tools |
+| **下一刀** | **§5.1** WT5 → 变短≈压缩 → Proof 延迟 | writing 组装 / context / golden·观测 | Model+Context+Proof |
 | AH4 | summarizer + token 估计 | compact_summarizer, context | 成本 |
 
-验证：`make runtime-test` · 相关 `make eval-*` · `context.reported` / `usage.reported` · `12` 延迟门禁。
+验证：`make runtime-test` · 相关 `make eval-*`（勿把 `eval-all` 当全能闸）· `context.reported` / `usage.reported` · [`10`](10-product-experience.md) / [`11`](11-eval-and-golden-turns.md) 延迟门禁。
 
 ---
 
@@ -255,6 +320,8 @@ UI 面板可后置；**事件契约先落地**。
 
 **可证明**
 
-8. `retry_count` / cache / `assemble_ms` 可在事件中核对（AH-obs）
+8. `retry_count` / cache / `assemble_ms` 可在事件中核对（AH-obs）  
+9. 窗变短可归因于压缩（或单条 budget）；无「无压缩暗削」（§5.1.2）  
+10. WT5 后同任务 miss/总 input 绝对量可降，不以命中率 % 冒充成功（§5.1.1）
 
 北极星服从 [`11`](10-product-experience.md)：愿意连续自用数周，不因模型层不可预期或不跟手而弃用。

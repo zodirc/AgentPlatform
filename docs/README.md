@@ -50,7 +50,7 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） · [25](25-writing-runway.md)（Plan / 步骤可见） · [26](26-plan-suggest-complexity.md)（建议触发） |
 | RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md) |
 | 会话归属 | [16](16-user-session-history.md) |
-| 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md) |
+| 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） |
 
 **维护纪律：** 禁止再开 `*-execution` 平行文；过时内容进 git，不留 stub 空号。
 
@@ -64,10 +64,10 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | 写作 WQ0–WQ4 | ✅ | 14 |
 | RAG RE0–RE3+RE1；IX0–IX4 | ✅ | 15 |
 | 会话 U0–U2 | ✅ | 16 |
-| Harness 核心 | 🔧 | 12 |
+| Harness 核心 | 🔧 下一刀口径 ✅：WT5 / 变短≈压缩 / Proof 延迟（§5.1） | 12 |
 | 写作作品模型 WW0–WW4 | ✅ | 23 · ADR-020 |
 | 写作 Token 经济 WT0–WT4 | ✅ | 24 |
-| Prompt cache 布局 WT5 | ⏸ 设计已定 | 24 §4.6 / §10 |
+| Prompt cache 布局 WT5 | ⏸ 设计已定（Harness §5.1.1） | 24 §4.6 · **12 §5.1** |
 | Plan 模式（平台 · 步骤可见） | ✅ P1 相位契约 | 25 |
 | Plan 建议复杂度 | ✅ PS1–PS3；PS4 金标/tune；**PS4d 单配置 weights.json** | 26 |
 | Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 |
