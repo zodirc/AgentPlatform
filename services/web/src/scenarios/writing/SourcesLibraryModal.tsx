@@ -3,7 +3,6 @@ import { FolderOpen, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
   fetchSourcesIndexStatus,
-  fetchWorkspaceEntries,
   syncSourcesIndex,
   uploadSourceFile,
   uploadSourceText,
@@ -12,14 +11,11 @@ import {
 } from "../../shared/api/client";
 import { Button } from "../../components/ui/button";
 import { workspaceEntryIcon } from "../agent/workspaceFileIcon";
+import { listSourcesLibraryFiles } from "./listSourcesLibraryFiles";
 import {
   libraryIndexStatusLabel,
   sourcesIndexStatusLabel,
 } from "./sourcesIndexStatus";
-
-function fileEntries(entries: string[]): string[] {
-  return entries.filter((e) => !e.endsWith("/"));
-}
 
 type Props = {
   open: boolean;
@@ -38,10 +34,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
 
   const sourcesQuery = useQuery({
     queryKey: ["workspace-sources"],
-    queryFn: async () => {
-      const data = await fetchWorkspaceEntries("sources");
-      return fileEntries(data.entries ?? []);
-    },
+    queryFn: () => listSourcesLibraryFiles(),
     enabled: open,
   });
 
@@ -190,7 +183,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-100">写作资料库</p>
             <p className="text-xs text-slate-500">
-              workspace/sources/ · 粘贴或上传 · 目录监视自动投影 · 同步不挡对话 ·
+              workspace/sources/ · 含子目录与 seed 挂载 · 粘贴或上传 · 同步不挡对话 ·
               投影就绪≠效果过关
             </p>
           </div>
@@ -300,17 +293,20 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
               {sourcesQuery.isLoading ? (
                 <p className="text-sm text-slate-500">加载中…</p>
               ) : files.length === 0 ? (
-                <p className="text-sm text-slate-500">暂无资料文件</p>
+                <p className="text-sm text-slate-500">
+                  暂无资料文件（含子目录）。可粘贴上传，或把 .md 放到宿主机
+                  workspace/sources/。
+                </p>
               ) : (
                 <ul className="space-y-1">
-                  {files.map((name) => {
-                    const path = `sources/${name}`;
+                  {files.map((rel) => {
+                    const path = `sources/${rel}`;
                     const { Icon, className: iconClass } = workspaceEntryIcon(
-                      name,
+                      rel.split("/").pop() ?? rel,
                       false,
                     );
                     return (
-                      <li key={name}>
+                      <li key={rel}>
                         <button
                           type="button"
                           className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-300 hover:bg-slate-900"
@@ -321,7 +317,9 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                             className={`h-4 w-4 shrink-0 ${iconClass}`}
                             aria-hidden
                           />
-                          <span className="truncate">{name}</span>
+                          <span className="truncate font-mono text-[12px]">
+                            {rel}
+                          </span>
                           <span className="ml-auto text-[10px] text-slate-600">
                             双击查看
                           </span>
