@@ -51,3 +51,50 @@
 {"id": "also_finally_chain", "message": "Update the outline, also rewrite chapter two transitions, finally verify all citations against sources", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "borderline"], "note": "仅衔接词 +2，稀缺阈值下不够 4；不算该弹"}
 {"id": "also_finally_with_plan", "message": "Make a plan first: update the outline, also rewrite chapter two transitions, finally verify citations", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit", "join"]}
 {"id": "before_implement", "message": "Before we implement anything, make a plan for the auth migration and session cleanup", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "w_ask_who", "message": "反派动机说清楚了吗", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "w_ask_where", "message": "上一章结尾在哪个文件", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "w_micro_name", "message": "把这个名字统一成林深", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "w_micro_space", "message": "删掉多余空行即可", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "w_continue_next", "message": "接着写下一段对话", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "w_follow_ch4", "message": "写第四章", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "follow_hand"]}
+{"id": "w_follow_ending", "message": "把这章收个尾", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "follow_hand"]}
+{"id": "w_border_soft", "message": "这段对话再自然一点就好", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "w_border_tone2", "message": "整体语气再冷一点，别大改情节", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "w_slash_verify", "message": "/verify", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "slash"]}
+{"id": "w_slash_help", "message": "/help", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "slash"]}
+{"id": "w_false_plan2", "message": "计划赶不上变化这句话删掉", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "w_num_abc", "message": "1) 整理卷纲\n2) 补第二章漏洞\n3) 核对全部 cite", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "w_num_five", "message": "1. 定主题\n2. 改人物卡\n3. 写大纲\n4. 起草第三章\n5. 引用验收", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "w_bullet_star", "message": "* 同步大纲\n* 重写冲突段\n* 跑引用检查", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "w_explicit_fenbu", "message": "分步做：先资料库检索，再事实核对，最后改第三章", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "w_explicit_xianlie", "message": "先列步骤再动手，把第六七章衔接和专名统一做完", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "w_risk_refactor_style", "message": "重构全书视角并批量替换旧叙述口吻", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "w_risk_migrate_outline", "message": "迁移旧分卷目录到新 outline，并批量更新章标题", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "w_paths_two_more", "message": "先规划：对照 @sections/03.md 和 @sources/notes.md 补证据链", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
+{"id": "w_chapters_two", "message": "先给个方案，把第二章和第四章的时间线对齐", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit", "chapters"]}
+{"id": "w_en_plan_steps", "message": "Plan first before writing: outline, chapter draft, then citation pass", "scenario_id": "writing", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "a_ask_where", "message": "这个配置项在哪定义的", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "a_ask_why", "message": "为啥这里要用 UUID", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "a_micro_comment", "message": "加一句注释说明参数含义", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "a_micro_rename_var", "message": "变量名改成 session_id", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "a_micro_format", "message": "把这段格式化一下", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "a_continue", "message": "继续刚才那个修复", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "a_border_small", "message": "这个告警文案再短一点", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "a_border_test_one", "message": "给这个函数补一个单测就行", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "a_false_migrate_word", "message": "注释里的 migrate 拼写修一下", "scenario_id": "agent", "should_suggest": false, "tags": ["negative", "micro"], "note": "含 migrate 但属微改拼写"}
+{"id": "a_num_deploy", "message": "1. 改 compose\n2. 更新 healthcheck\n3. 跑 smoke\n4. 记文档", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "a_num_three_fix", "message": "Please:\n1. reproduce the bug\n2. patch the handler\n3. add a regression test", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "a_explicit_plan_cn", "message": "先规划再改：鉴权中间件、会话归属、以及对应单测", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "a_explicit_before", "message": "Before you start, make a plan for the projector and SSE reconnect fixes", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "a_risk_refactor_api", "message": "重构 api 路由层并迁移旧响应模型字段", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "a_risk_batch_rename", "message": "批量替换过时的 feature flag 名并迁移文档里的旧开关说明", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "risk"]}
+{"id": "a_paths_plan", "message": "先列步骤改 @services/web/src/App.tsx 和 @services/api/app/routers/sessions.py", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
+{"id": "a_join_plan", "message": "先做计划：修 projector，然后补 golden，并且更新 contracts", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit", "join"]}
+{"id": "a_hard_plain", "message": "把登录态和历史会话列表的状态同步问题一次性收拾干净", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "hard"], "note": "平淡大任务；可能漏报"}
+{"id": "i_ask_next", "message": "这一题要不要换个问法", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "i_micro_word", "message": "把「您」改成「你」", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "i_continue", "message": "继续", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "i_border", "message": "这个问题再柔和一点", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "i_num_four", "message": "1. 自我介绍\n2. 项目深挖\n3. 冲突处理\n4. 收尾要约", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "i_plan_steps", "message": "先列步骤设计整场访谈：开场、深挖、压力面、收尾", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "i_plan_first", "message": "先给个方案再开始问，覆盖职业动机与团队协作", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "explicit"]}

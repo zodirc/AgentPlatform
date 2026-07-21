@@ -4,7 +4,7 @@
 |------|------|
 | [`../../packages/contracts/plan_suggest/weights.json`](../../packages/contracts/plan_suggest/weights.json) | **唯一线上权重配置**（改这一份） |
 | `cases.json` | CI 快测子集 |
-| `golden.jsonl` | 金标大盘 |
+| `golden.jsonl` | 金标大盘（目标 **100** 条；应建议 / 不应建议） |
 | `reports/` | eval / tune 输出（gitignore） |
 
 ## 两种用法

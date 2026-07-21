@@ -188,22 +188,60 @@ def tune(
     return best_w, best_m
 
 
+def _shorten(text: str, limit: int = 72) -> str:
+    one = " ".join(str(text).split())
+    if len(one) <= limit:
+        return one
+    return one[: limit - 1] + "…"
+
+
+def _kind_label(kind: str) -> str:
+    if kind == "fn":
+        return "漏报（金标要建议，系统没弹）"
+    if kind == "fp":
+        return "误伤（金标不要建议，系统却弹了）"
+    return kind
+
+
 def print_report(title: str, metrics: Metrics, mistakes: list[dict]) -> None:
-    print(title)
+    n = metrics.tp + metrics.fp + metrics.tn + metrics.fn
+    print()
+    print(f"== {title} ==")
+    print(f"样本总数: {n}")
+    print()
+    print("结果概览")
     print(
-        f"  n={metrics.tp + metrics.fp + metrics.tn + metrics.fn}  "
-        f"P={metrics.precision:.3f}  R={metrics.recall:.3f}  F1={metrics.f1:.3f}  "
-        f"tp={metrics.tp} fp={metrics.fp} tn={metrics.tn} fn={metrics.fn}"
+        f"  · 精确率 {metrics.precision * 100:.1f}%  "
+        f"— 弹出来的里，有多少是该弹的（越高越不骚扰）"
     )
-    if mistakes:
-        print("  mistakes:")
-        for m in mistakes[:20]:
-            print(
-                f"    [{m['kind']}] {m['id']} score={m['score']} "
-                f"signals={m['signals']}"
-            )
-        if len(mistakes) > 20:
-            print(f"    … {len(mistakes) - 20} more")
+    print(
+        f"  · 召回率 {metrics.recall * 100:.1f}%  "
+        f"— 该弹的里，有多少真的弹了（越高越少漏）"
+    )
+    print(f"  · 综合 F1  {metrics.f1 * 100:.1f}%")
+    print()
+    print("明细计数")
+    print(f"  · 该弹且弹了     {metrics.tp}")
+    print(f"  · 不该弹且没弹   {metrics.tn}")
+    print(f"  · 误伤（不该弹却弹了） {metrics.fp}")
+    print(f"  · 漏报（该弹却没弹）   {metrics.fn}")
+
+    if not mistakes:
+        print()
+        print("误判: 无")
+        return
+
+    print()
+    print(f"误判列表 ({len(mistakes)})")
+    for i, m in enumerate(mistakes[:20], 1):
+        print(f"  {i}. [{_kind_label(m['kind'])}] id={m['id']}  scenario={m.get('scenario_id')}")
+        print(f"     得分 {m['score']}  命中信号 {m['signals'] or '[]'}")
+        print(f"     原文 {_shorten(m.get('message') or '')}")
+        note = m.get("note")
+        if note:
+            print(f"     备注 {note}")
+    if len(mistakes) > 20:
+        print(f"  … 另有 {len(mistakes) - 20} 条未展开")
 
 
 def main() -> int:
@@ -245,10 +283,18 @@ def main() -> int:
     cfg_path = resolve_plan_suggest_weights_path()
     reload_plan_suggest_config()
     baseline_weights = get_default_weights()
-    print(f"weights: {cfg_path or '(embedded fallback)'}")
+    print("Plan 建议 · 金标体检")
+    print(f"配置文件: {cfg_path or '(内置兜底，未找到 weights.json)'}")
+    print(f"金标文件: {args.golden}")
 
     base_metrics, base_mistakes = evaluate_rows(rows, baseline_weights)
-    print_report("baseline (production defaults)", base_metrics, base_mistakes)
+    # Attach notes from golden for display
+    by_id = {r.get("id"): r for r in rows}
+    for m in base_mistakes:
+        src = by_id.get(m.get("id")) or {}
+        if src.get("note"):
+            m["note"] = src["note"]
+    print_report("当前线上权重", base_metrics, base_mistakes)
 
     # Keep CI subset honest: cases.json labels should match golden where ids overlap.
     if CASES_PATH.is_file():
@@ -264,7 +310,8 @@ def main() -> int:
             if bool(c.get("cooldown_active")) != bool(g.get("cooldown_active")):
                 drift.append(f"{c['id']}:cooldown")
         if drift:
-            print(f"WARNING: cases.json vs golden label drift: {drift}")
+            print()
+            print(f"警告: cases.json 与 golden 标签不一致 → {drift}")
 
     report: dict = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -283,10 +330,16 @@ def main() -> int:
     }
 
     if args.tune:
+        print()
+        print("正在搜索权重提案（不改线上文件）…")
         tuned_w, tuned_m = tune(rows, min_precision=args.min_precision)
         _, tuned_mistakes = evaluate_rows(rows, tuned_w)
+        for m in tuned_mistakes:
+            src = by_id.get(m.get("id")) or {}
+            if src.get("note"):
+                m["note"] = src["note"]
         print_report(
-            f"tuned (min_precision={args.min_precision})",
+            f"参谋提案（精确率门槛 ≥ {args.min_precision:.0%}）",
             tuned_m,
             tuned_mistakes,
         )
@@ -296,19 +349,18 @@ def main() -> int:
         report["proposed_mistakes"] = tuned_mistakes
         changed = tuned_w.to_dict() != baseline_weights.to_dict()
         report["differs_from_baseline"] = changed
+        print()
         if changed:
-            print("  → proposal differs from baseline (see report JSON)")
-            print(
-                "  → apply: write proposed_config → "
-                "packages/contracts/plan_suggest/weights.json"
-            )
+            print("结论: 找到与当前不同的提案，见报告 JSON 里的 proposed_config")
+            print("上线: 人工确认后覆盖 packages/contracts/plan_suggest/weights.json，再重建 web+runtime")
         else:
-            print("  → proposal == baseline (no better candidate under constraints)")
+            print("结论: 在当前金标与门槛下，没有比现网更好的组合（提案=当前配置）")
 
     REPORT_DIR.mkdir(parents=True, exist_ok=True)
     out = REPORT_DIR / ("latest_tune.json" if args.tune else "latest_eval.json")
     out.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"wrote {out.relative_to(ROOT)}")
+    print()
+    print(f"报告已写入: {out.relative_to(ROOT)}")
 
     if args.fail_under_precision is not None:
         if base_metrics.precision + 1e-9 < args.fail_under_precision:
