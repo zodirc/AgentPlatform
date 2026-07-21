@@ -61,7 +61,7 @@ export function deriveAgentActivity(
     );
     return { phase: "failed", label: "任务失败", detail: msg };
   }
-  if (wb.awaitingApproval || last?.type === "approval.requested") {
+  if (wb.awaitingApproval) {
     const approvalEv = lastApprovalEvent(events);
     const tool = String(
       approvalEv?.payload.tool_name ?? wb.pendingToolName ?? "tool",
