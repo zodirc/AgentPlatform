@@ -59,6 +59,9 @@ async def login(body: AuthCredentials, response: Response):
     user = await user_svc.authenticate(body.username, body.password)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    from app.services.resource.works import ensure_default_work
+
+    await ensure_default_work(user.id)
     token = issue_token(user_id=user.id, username=user.username)
     _set_auth_cookie(response, token)
     return _public(user)

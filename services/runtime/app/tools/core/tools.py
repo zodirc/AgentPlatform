@@ -9,14 +9,6 @@ from uuid import uuid4
 from app.settings import settings
 
 
-def _resolve_path(rel_path: str) -> Path:
-    root = Path(settings.workspace_root).resolve()
-    target = (root / rel_path).resolve()
-    if not str(target).startswith(str(root)):
-        raise PermissionError(f"Path outside workspace: {rel_path}")
-    return target
-
-
 def _normalized_workspace_rel(rel_path: str) -> str:
     return rel_path.strip().lstrip("/").replace("\\", "/")
 
@@ -25,6 +17,27 @@ def is_seed_corpus_path(rel_path: str) -> bool:
     """True for standing seed corpus under sources/seed/ (RO mount; docs/15)."""
     normalized = _normalized_workspace_rel(rel_path)
     return normalized == "sources/seed" or normalized.startswith("sources/seed/")
+
+
+def _resolve_path(rel_path: str) -> Path:
+    from app.tenant_context import current_work_root_path
+
+    root = current_work_root_path()
+    # Seed corpus is a standing RO mount under the deploy workspace (docs/15 / docs/27).
+    if is_seed_corpus_path(rel_path):
+        root = Path(settings.workspace_root).resolve()
+    target = (root / rel_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise PermissionError(f"Path outside workspace: {rel_path}") from exc
+    return target
+
+
+def _workspace_root() -> Path:
+    from app.tenant_context import current_work_root_path
+
+    return current_work_root_path()
 
 
 def _assert_not_seed_corpus(rel_path: str) -> None:
@@ -446,7 +459,7 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
-    root = Path(settings.workspace_root).resolve()
+    root = _workspace_root()
     return await run_shell_command(
         command=command,
         cwd=root,
@@ -580,7 +593,7 @@ async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -
             text = fp.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        rel = str(fp.relative_to(Path(settings.workspace_root).resolve()))
+        rel = str(fp.relative_to(_workspace_root()))
         for i, line in enumerate(text.splitlines(), start=1):
             if rx.search(line):
                 matches.append({"path": rel, "line": i, "text": line[:240]})
@@ -704,7 +717,7 @@ async def search_sources(
         return {"query": query, "hits": [], "summary": "No sources directory", "retrieval": "none"}
 
     mode = settings.retrieval_mode.lower()
-    workspace_root = Path(settings.workspace_root).resolve()
+    workspace_root = _workspace_root()
     excerpt_chars = settings.search_sources_excerpt_chars
 
     if mode == "keyword":
@@ -724,16 +737,19 @@ async def search_sources(
         return _attach_filter_meta(payload, filter_meta)
 
     # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
+    from app.retrieval.tenant_visibility import filter_hits_for_tenant
+
     store = get_sources_store()
     index_meta: dict[str, Any] = {
         "synced_on_query": False,
         "index_via_worker": settings.index_via_worker,
     }
-    # Over-fetch when filtering so prefix cuts do not starve top-k.
-    fetch_limit = limit * 3 if path_prefix else limit
+    # Over-fetch when filtering so prefix/tenant cuts do not starve top-k.
+    fetch_limit = limit * 3 if path_prefix else limit * 2
     try:
         store.load()
         raw_hits = store.search(query, limit=fetch_limit, mode=mode)
+        raw_hits = filter_hits_for_tenant(raw_hits)
         retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
     except OSError:
         index_meta["error"] = "vector_index_unavailable"
@@ -829,7 +845,7 @@ async def glob(pattern: str, path: str = ".", limit: int = 100, **_kwargs: Any) 
     for fp in sorted(base.glob(pattern)):
         if not fp.is_file():
             continue
-        rel = str(fp.relative_to(Path(settings.workspace_root).resolve()))
+        rel = str(fp.relative_to(_workspace_root()))
         matches.append(rel)
         if len(matches) >= limit:
             break
@@ -946,7 +962,7 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
-    root = Path(settings.workspace_root).resolve()
+    root = _workspace_root()
     result = await run_shell_command(
         command=command,
         cwd=root,

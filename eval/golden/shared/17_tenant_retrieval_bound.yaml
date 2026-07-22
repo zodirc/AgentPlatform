@@ -1,0 +1,38 @@
+id: shared.17_tenant_retrieval_bound
+scenario_id: writing
+phase: 2
+description: >
+  Default Tenant/Work path — search_sources finds own private sources and does
+  not surface a forged cross-tenant secret string in tool summaries (MT5c).
+  Cross-Work SQL deny is covered by runtime unit tests (test_tenant_acl_deny).
+
+fixtures:
+  workspace:
+    - path: sources/tenant-own.md
+      content: |
+        # Own Work Marker
+        TENANT_OWN_MARKER_WAVE_A unique recall token for bound Work.
+
+input:
+  message: "search_sources TENANT_OWN_MARKER_WAVE_A"
+  client_request_id: "00000000-0000-4000-8000-000000000217"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: search_sources
+    result_matches: "TENANT_OWN_MARKER_WAVE_A"
+    result_not_matches: "TENANT_DENY_SECRET_OTHER_WORK"
+  output:
+    matches: "TENANT_OWN_MARKER_WAVE_A"
+
+tags: [shared, tenant, writing, rag, p2]

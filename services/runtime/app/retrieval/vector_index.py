@@ -17,6 +17,7 @@ INDEX_VERSION = 7  # RQ1c sparse path/meta tags in embed; RQ1b leaf budget; RQ1a
 
 
 @dataclass
+@dataclass
 class ChunkHit:
     path: str
     chunk_id: str
@@ -26,6 +27,8 @@ class ChunkHit:
     section_title: str = ""
     line_start: int | None = None
     line_end: int | None = None
+    work_id: str | None = None
+    visibility: str = ""
 
 
 def _vector_from_chunk(chunk: dict[str, Any]) -> list[float]:
@@ -53,6 +56,8 @@ def _chunk_to_hit(chunk: dict[str, Any], score: float) -> ChunkHit:
         section_title=str(chunk.get("section_title", "")),
         line_start=int(line_start) if line_start is not None else None,
         line_end=int(line_end) if line_end is not None else None,
+        work_id=str(chunk["work_id"]) if chunk.get("work_id") is not None else None,
+        visibility=str(chunk.get("visibility") or ""),
     )
 
 

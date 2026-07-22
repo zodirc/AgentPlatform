@@ -21,7 +21,7 @@
 | `path_prefix` + 离线 A/B | **是（已落地）** | RE3 |
 | 成稿取证 + cite 纪律 | **是（已落地）** | RE2 |
 | keyword 字段对齐 | **条件（已落地）** | RE1 |
-| ACL / 私有库 | **产品开闸** | RE4 / IX5 |
+| ACL / 私有库 | **✅ 个人默认（MT5c）**；无 Org/share | RE4 / IX5 · [27](27-multi-tenancy.md) |
 | `search_records` 真表 | **产品开闸** | RE5 / [17](17-search-records.md) |
 | RQ1 检索质量（切块/embed/混合） | **RQ1a–e ✅** | §9 |
 
@@ -124,7 +124,7 @@ search_records → 结构化业务行（可选；非写作主路径）
 | 票 | 主题 | 状态 |
 |----|------|------|
 | RE0 / RE3 / RE2 / RE1 | 题集、path_prefix、Turn A/B、keyword 字段 | ✅ |
-| RE4 / IX5 | ACL + owner 私有库 | ⏳ 产品开闸 |
+| RE4 / IX5 | ACL + owner 私有库 | ✅ 个人默认 Work（docs/27 MT5c）；**否决** Org/share（原 MT6） |
 | RE5 | `search_records` 真表 | ⏳ 见 [17](17-search-records.md) |
 | IX0 / IX1 / IX2 / IX3 / IX4 | 启动 sync、Web 同步、目录 watch、上传≠效果闸、prod-bench | ✅ |
 | RQ1 | 检索质量下一刀（切块 / embed 文本 / 分层混合；**不开 CE**） | ✅ **RQ1a–e 已落地**（§9）；大库可切 `vector_heavy` profile |
@@ -134,10 +134,10 @@ IX0 ✅ → IX4 ✅ → RQ1（§9：设计已定；实现条件触发）
       → IX1 ✅
       → IX2 ✅（目录监视 → debounce 投影）
       → IX3 ✅（摄取面 ≠ 效果闸）
-      → IX5 / RE4（多租户）
+      → IX5 / RE4 ✅（个人默认；无 Org）
 ```
 
-**主线：** 质量闸已过；Index plane 自动跟上目录；**RQ1a–e 已落地**（§9）；IX5 等多用户。
+**主线：** 质量闸已过；Index plane 自动跟上目录；**RQ1a–e 已落地**（§9）；**IX5/RE4 个人多租户已开闸**（docs/27 MT5c）。
 
 ---
 
@@ -176,7 +176,7 @@ owner / tenant / work
 | 单默认 Work 自用与今日路径语义兼容 | IX0 焊死无 owner/work 列 |
 | 谓词始终服务端注入 | 靠关掉 ACL 过日子 |
 
-开闸：真实多用户不可互看；deny golden；**单人默认 Work** 交互与今日同型。身份复用 [16](16-user-session-history.md) 的 `owner_user_id`；作品根见 [23](23-writing-work-model.md) / [27](27-multi-tenancy.md)。
+开闸（已落地 MT5c）：SQL `visibility=seed OR work_id=$current`；跨 Work deny 单测 + `shared.17` / `--filter tenant`；**单人默认 Work** 交互与今日同型。**不做** Org/显式 share。身份复用 [16](16-user-session-history.md) 的 `owner_user_id`；作品根见 [23](23-writing-work-model.md) / [27](27-multi-tenancy.md)。
 
 ---
 
@@ -188,7 +188,7 @@ owner / tenant / work
 | 目录自动跟上 | IX2 ✅ |
 | 摄取≠效果口径 | IX3 ✅ |
 | **生产质量已验收** | IX4 ✅ prod-bench |
-| 成熟多租户 | IX5/RE4 |
+| 成熟多租户（个人） | IX5/RE4 ✅ MT5c（无 Org） |
 | **RQ1 设计** | §9 口径已定 |
 | **RQ1a–e** | ✅ 库况 · path/tag embed · 叶预算/宽表 · profile · 稀疏 tag（`INDEX_VERSION=7`） |
 | 全程 | 交互未改；search 不建库；不以 hash/浅常识/上传成功冒充效果 |

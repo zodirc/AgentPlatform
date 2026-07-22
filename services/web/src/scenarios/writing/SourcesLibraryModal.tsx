@@ -183,7 +183,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-slate-100">写作资料库</p>
             <p className="text-xs text-slate-500">
-              workspace/sources/ · 含子目录与 seed 挂载 · 粘贴或上传 · 同步不挡对话 ·
+              当前作品 sources/ · 含子目录与 seed 挂载 · 粘贴或上传 · 同步不挡对话 ·
               投影就绪≠效果过关
             </p>
           </div>
@@ -294,8 +294,8 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                 <p className="text-sm text-slate-500">加载中…</p>
               ) : files.length === 0 ? (
                 <p className="text-sm text-slate-500">
-                  暂无资料文件（含子目录）。可粘贴上传，或把 .md 放到宿主机
-                  workspace/sources/。
+                  暂无资料文件（含子目录）。可粘贴上传，或把 .md 放到当前作品
+                  sources/。
                 </p>
               ) : (
                 <ul className="space-y-1">

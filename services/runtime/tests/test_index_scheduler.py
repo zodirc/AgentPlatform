@@ -75,9 +75,9 @@ def test_json_sync_removes_deleted_file(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_run_sources_index_sync_serializes(tmp_path: Path) -> None:
-    sources = tmp_path / "sources"
-    sources.mkdir()
-    (sources / "b.md").write_text("# B\n\ncontent\n", encoding="utf-8")
+    seed = tmp_path / "sources" / "seed"
+    seed.mkdir(parents=True)
+    (seed / "b.md").write_text("# B\n\ncontent\n", encoding="utf-8")
 
     results = await asyncio.gather(
         run_sources_index_sync(reason="t1"),
@@ -97,9 +97,9 @@ async def test_schedule_startup_disabled(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_schedule_startup_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(settings, "sources_startup_sync_enabled", True)
     monkeypatch.setattr(settings, "sources_startup_sync_delay_seconds", 0.01)
-    sources = tmp_path / "sources"
-    sources.mkdir()
-    (sources / "c.md").write_text("# C\n\nx\n", encoding="utf-8")
+    seed = tmp_path / "sources" / "seed"
+    seed.mkdir(parents=True)
+    (seed / "c.md").write_text("# C\n\nx\n", encoding="utf-8")
 
     task = schedule_startup_sources_sync()
     assert task is not None

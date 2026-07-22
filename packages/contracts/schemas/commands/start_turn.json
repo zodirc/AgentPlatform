@@ -25,6 +25,22 @@
       "type": "string",
       "enum": ["planning", "executing"],
       "description": "Optional Plan-mode phase. planning = hard read-only ToolScope; executing = full tools + status discipline. Omit for normal Agent turns."
+    },
+    "work_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "docs/27 frozen Work id for this Turn"
+    },
+    "work_root": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "Absolute sandbox root for tools (TenantContext.work_root)"
+    },
+    "owner_user_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Principal that owns the session/work"
     }
   }
 }

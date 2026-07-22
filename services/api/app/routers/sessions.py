@@ -37,6 +37,7 @@ def _session_response(session: dict) -> SessionResponse:
         status=session["status"],
         created_at=session["created_at"],
         owner_user_id=session.get("owner_user_id"),
+        work_id=session.get("work_id"),
     )
 
 
@@ -46,10 +47,16 @@ async def create_session(
     actor: EndUser = Depends(require_session_actor),
 ):
     req = body or CreateSessionRequest()
-    row = await session_svc.create_session(
-        req.default_scenario_id,
-        owner_user_id=actor.id,
-    )
+    try:
+        row = await session_svc.create_session(
+            req.default_scenario_id,
+            owner_user_id=actor.id,
+            work_id=req.work_id,
+        )
+    except ValueError as exc:
+        if str(exc) == "work_not_found":
+            raise HTTPException(status_code=400, detail="work_not_found") from exc
+        raise
     return _session_response(row)
 
 
@@ -140,6 +147,9 @@ async def create_turn(
 
     if created:
         try:
+            from app.services.resource.works import resolve_session_tenant
+
+            work = await resolve_session_tenant(session_id, owner_user_id=actor.id)
             client = runtime_client_for_new_turn()
             await client.start_turn(
                 turn_id=turn["id"],
@@ -150,6 +160,9 @@ async def create_turn(
                 client_request_id=body.client_request_id,
                 trace_id=trace_id,
                 plan_phase=body.plan_phase,
+                work_id=work.id,
+                work_root=work.work_root,
+                owner_user_id=actor.id,
             )
             listener = request.app.state.event_listener
             await listener.notify(turn["id"])

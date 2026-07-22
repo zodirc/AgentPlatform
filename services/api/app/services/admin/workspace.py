@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-import httpx
+from uuid import UUID
 
+import httpx
+from fastapi import HTTPException, Request
+
+from app.services.end_user.auth import resolve_end_user
+from app.services.resource.works import ensure_default_work, get_work
 from app.settings import settings
 
 
@@ -12,12 +17,43 @@ class WorkspaceProxyError(Exception):
         super().__init__(detail)
 
 
-async def list_entries(*, path: str = ".") -> dict:
+async def resolve_workspace_tenant(
+    request: Request,
+    *,
+    work_id: UUID | None = None,
+) -> dict[str, str]:
+    """Map the calling end-user to Work scope for Sources / workspace browser."""
+    user = await resolve_end_user(request)
+    if user is None:
+        return {}
+    if work_id is not None:
+        work = await get_work(work_id)
+        if work is None or work.owner_user_id != user.id:
+            raise HTTPException(status_code=404, detail="work not found")
+    else:
+        work = await ensure_default_work(user.id)
+    return {
+        "work_id": str(work.id),
+        "work_root": work.work_root,
+        "owner_user_id": str(user.id),
+    }
+
+
+def _tenant_params(tenant: dict[str, str]) -> dict[str, str]:
+    return {k: v for k, v in tenant.items() if v}
+
+
+async def list_entries(
+    *,
+    path: str = ".",
+    tenant: dict[str, str] | None = None,
+) -> dict:
     base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base}/internal/workspace/entries",
-            params={"path": path},
+            params=params,
             headers={"X-Internal-Token": settings.internal_service_token},
         )
     if resp.status_code >= 400:
@@ -25,12 +61,13 @@ async def list_entries(*, path: str = ".") -> dict:
     return resp.json()
 
 
-async def read_file(*, path: str) -> dict:
+async def read_file(*, path: str, tenant: dict[str, str] | None = None) -> dict:
     base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
             f"{base}/internal/workspace/file",
-            params={"path": path},
+            params=params,
             headers={"X-Internal-Token": settings.internal_service_token},
         )
     if resp.status_code >= 400:
@@ -38,12 +75,18 @@ async def read_file(*, path: str) -> dict:
     return resp.json()
 
 
-async def upload_source(*, filename: str, content: str) -> dict:
+async def upload_source(
+    *,
+    filename: str,
+    content: str,
+    tenant: dict[str, str] | None = None,
+) -> dict:
     base = settings.runtime_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{base}/internal/workspace/sources/upload",
+                params=_tenant_params(tenant or {}),
                 json={"filename": filename, "content": content},
                 headers={"X-Internal-Token": settings.internal_service_token},
             )
@@ -59,14 +102,20 @@ async def upload_source(*, filename: str, content: str) -> dict:
     return resp.json()
 
 
-async def sources_index_status(*, path: str | None = None) -> dict:
+async def sources_index_status(
+    *,
+    path: str | None = None,
+    tenant: dict[str, str] | None = None,
+) -> dict:
     base = settings.runtime_url.rstrip("/")
-    params = {"path": path} if path else None
+    params: dict[str, str] = {**_tenant_params(tenant or {})}
+    if path:
+        params["path"] = path
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(
                 f"{base}/internal/workspace/sources/index-status",
-                params=params,
+                params=params or None,
                 headers={"X-Internal-Token": settings.internal_service_token},
             )
     except httpx.HTTPError as exc:
@@ -76,7 +125,11 @@ async def sources_index_status(*, path: str | None = None) -> dict:
     return resp.json()
 
 
-async def sync_sources(*, force: bool = False) -> dict:
+async def sync_sources(
+    *,
+    force: bool = False,
+    tenant: dict[str, str] | None = None,
+) -> dict:
     """Queue Turn-external incremental sync (IX1). Does not wait for embedding."""
     del force  # reserved; runtime always incremental
     base = settings.runtime_url.rstrip("/")
@@ -84,6 +137,7 @@ async def sync_sources(*, force: bool = False) -> dict:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{base}/internal/workspace/sources/sync",
+                params=_tenant_params(tenant or {}),
                 headers={"X-Internal-Token": settings.internal_service_token},
             )
     except httpx.TimeoutException as exc:
@@ -98,12 +152,17 @@ async def sync_sources(*, force: bool = False) -> dict:
     return resp.json()
 
 
-async def delete_paths(*, paths: list[str]) -> dict:
+async def delete_paths(
+    *,
+    paths: list[str],
+    tenant: dict[str, str] | None = None,
+) -> dict:
     base = settings.runtime_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 f"{base}/internal/workspace/entries/delete",
+                params=_tenant_params(tenant or {}),
                 json={"paths": paths},
                 headers={"X-Internal-Token": settings.internal_service_token},
             )

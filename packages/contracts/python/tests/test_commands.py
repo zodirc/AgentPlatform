@@ -20,17 +20,19 @@ def test_start_turn_command_validates() -> None:
     assert cmd.plan_phase is None
 
 
-def test_start_turn_command_accepts_plan_phase() -> None:
+def test_start_turn_command_accepts_tenant_scope() -> None:
     cmd = StartTurnCommand(
         turn_id=uuid4(),
         run_id=uuid4(),
         session_id=uuid4(),
-        scenario_id="agent",
-        message="plan this",
+        scenario_id="writing",
+        message="hello",
         trace_id=uuid4(),
-        plan_phase="planning",
+        work_id=uuid4(),
+        work_root="/data/works/x",
+        owner_user_id=uuid4(),
     )
-    assert cmd.plan_phase == "planning"
+    assert cmd.work_root == "/data/works/x"
 
 
 def test_start_turn_command_rejects_invalid_plan_phase() -> None:

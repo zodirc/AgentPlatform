@@ -141,6 +141,8 @@ class Settings(BaseSettings):
     stall_poll_interval_seconds: float = 30.0
     stall_auto_fail: bool = False
     runtime_runner_id: str = socket.gethostname()
+    # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).
+    runtime_max_inflight_turns: int = 16
     event_payload_validation: bool = True
     run_command_mode: str = "shell"  # shell | simulate
     turn_token_budget: int = 0

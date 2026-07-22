@@ -73,6 +73,9 @@ async def start_turn_command(
         message=body.message,
         trace_id=body.trace_id,
         plan_phase=body.plan_phase,
+        work_id=body.work_id,
+        work_root=body.work_root,
+        owner_user_id=body.owner_user_id,
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 
@@ -201,14 +204,31 @@ async def warmup_retrieval_command(
 workspace_router = APIRouter(prefix="/internal/workspace", tags=["workspace"])
 
 
+def _tenant_query(
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+) -> dict[str, str | None]:
+    return {
+        "work_id": work_id,
+        "work_root": work_root,
+        "owner_user_id": owner_user_id,
+    }
+
+
 @workspace_router.get("/entries")
 async def workspace_entries(
     path: str = ".",
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import list_workspace_entries
+    from app.services.workspace_scope import workspace_tenant_scope
 
-    result = await list_workspace_entries(path)
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        result = await list_workspace_entries(path)
     if result.get("error"):
         raise HTTPException(status_code=404, detail=str(result["error"]))
     return result
@@ -217,13 +237,18 @@ async def workspace_entries(
 @workspace_router.get("/file")
 async def workspace_file(
     path: str,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import read_workspace_file
+    from app.services.workspace_scope import workspace_tenant_scope
 
     if not path or path == ".":
         raise HTTPException(status_code=400, detail="path is required")
-    result = await read_workspace_file(path)
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        result = await read_workspace_file(path)
     if result.get("error"):
         raise HTTPException(status_code=404, detail=str(result["error"]))
     return result
@@ -247,15 +272,20 @@ class WorkspaceDeleteBody(BaseModel):
 async def workspace_delete_entries(
     body: WorkspaceDeleteBody,
     background_tasks: BackgroundTasks,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import (
         delete_workspace_paths,
         sync_sources_index_safe,
     )
+    from app.services.workspace_scope import workspace_tenant_scope
 
     try:
-        result = await delete_workspace_paths(body.paths)
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+            result = await delete_workspace_paths(body.paths)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result.get("error") and not result.get("deleted"):
@@ -268,12 +298,17 @@ async def workspace_delete_entries(
 @workspace_router.put("/file")
 async def workspace_write_file(
     body: WorkspaceWriteBody,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import write_workspace_file
+    from app.services.workspace_scope import workspace_tenant_scope
 
     try:
-        result = await write_workspace_file(path=body.path, content=body.content)
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+            result = await write_workspace_file(path=body.path, content=body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result.get("error"):
@@ -284,16 +319,24 @@ async def workspace_write_file(
 @workspace_router.get("/sources/index-status")
 async def workspace_sources_index_status(
     path: str | None = None,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import sources_index_status
+    from app.services.workspace_scope import workspace_tenant_scope
 
-    return sources_index_status(path=path)
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        return sources_index_status(path=path)
 
 
 @workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)
 async def workspace_sync_sources(
     background_tasks: BackgroundTasks,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     """IX1: queue incremental sources projection (Turn-external; non-blocking)."""
@@ -301,25 +344,34 @@ async def workspace_sync_sources(
         mark_sources_index_building,
         sync_sources_index_safe,
     )
+    from app.services.workspace_scope import workspace_tenant_scope
 
-    mark_sources_index_building(path=None)
-    background_tasks.add_task(sync_sources_index_safe, path=None)
-    return {"accepted": True, "index": {"status": "pending"}}
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        mark_sources_index_building(path=None)
+        background_tasks.add_task(sync_sources_index_safe, path=None)
+        return {"accepted": True, "index": {"status": "pending"}}
 
 
 @workspace_router.post("/sources/upload")
 async def workspace_upload_source(
     body: SourceUploadBody,
     background_tasks: BackgroundTasks,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import (
         sync_sources_index_safe,
         upload_source_file,
     )
+    from app.services.workspace_scope import workspace_tenant_scope
 
     try:
-        result = await upload_source_file(filename=body.filename, content=body.content)
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+            result = await upload_source_file(
+                filename=body.filename, content=body.content
+            )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Defer embedding/index rebuild so the write path stays under api proxy timeout.

@@ -12,6 +12,7 @@ PlanPhase = Literal["planning", "executing"]
 
 class CreateSessionRequest(BaseModel):
     default_scenario_id: str = "writing"
+    work_id: UUID | None = None
 
 
 class SessionResponse(BaseModel):
@@ -20,6 +21,7 @@ class SessionResponse(BaseModel):
     status: str
     created_at: datetime
     owner_user_id: UUID | None = None
+    work_id: UUID | None = None
 
 
 class SessionListItem(BaseModel):

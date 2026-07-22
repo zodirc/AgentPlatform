@@ -15,7 +15,15 @@ class SourceRetrievalStore(Protocol):
 
     def load(self) -> None: ...
 
-    def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]: ...
+    def sync(
+        self,
+        sources_dir: Path,
+        *,
+        workspace_root: Path,
+        work_id: str | None = None,
+        visibility: str = "private",
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]: ...
 
     def search(self, query: str, *, limit: int = 10, mode: str | None = None) -> list[ChunkHit]: ...
 
@@ -31,7 +39,17 @@ class JsonSourceRetrievalStore:
     def load(self) -> None:
         self._index.load()
 
-    def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]:
+    def sync(
+        self,
+        sources_dir: Path,
+        *,
+        workspace_root: Path,
+        work_id: str | None = None,
+        visibility: str = "private",
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
+        # JSON backend: path isolation via work_root at search time; stamp ignored.
+        _ = (work_id, visibility, owner_user_id)
         stats = self._index.sync(sources_dir, workspace_root=workspace_root)
         return {**stats, "backend": self.backend}
 

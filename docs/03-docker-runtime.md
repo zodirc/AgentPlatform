@@ -456,9 +456,29 @@ services:
 
 `CancelTurn` 双通道：api 写 `runs.cancel_requested_at` / `cancel_force` **并** 转发 `cancel-turn`；runtime 在 stream / tool / Step 全过程轮询（ADR-015）。`ModelGateway.stream` 须在检查点断开 provider 连接。
 
-### 8.5 多副本（Phase 3+ 预案）
+### 8.5 多副本（MT7 · 与多租户配套的扩容面）
 
-须满足：`runs.runner_id`、命令路由、共享 `/data`、workspace 写冲突策略。否则 `runtime.replicas: 1`。
+**多租户 ≠ 空架子：** 划分面（Work）保证不串味（MT5c SQL deny）；**多副本保证多人同时跑 Turn 时跟得上**。两者一起才像「多人 Web 平台」。
+
+| 默认 `make up` | 多人并发推荐 `make up-ha` |
+|----------------|---------------------------|
+| 单 `runtime` | `runtime-a` + `runtime-b`（`--scale runtime=0`） |
+| 适合自用 / 开发 | 适合多用户同时发消息 |
+
+已具备：
+
+1. **Claim**：`runs.runner_id` + `ensure_run_owned_by_runner`（一 Run 一副本）  
+2. **新 Turn 负载**：`RUNTIME_URL_MAP` 上 round-robin（`RuntimeRouter.url_for_new_turn`）  
+3. **续命令亲和**：Cancel / Approve / patch → `runtime_client_for_turn` 按 `runner_id` 打回持有者  
+4. **共享存储**：两副本挂同一 `agent_data` + `workspace`（`/data/works/{id}` 可见）  
+5. **单副本软闸**：`RUNTIME_MAX_INFLIGHT_TURNS`（默认 16）；HA 下总容量 ≈ 副本数 × 该值  
+
+```bash
+make up-ha          # 双 runtime + 路由表
+make eval-ha        # ha_runner golden（stub）
+```
+
+仍须注意：同 Work 多写者默认乐观后写覆盖；跨区域多活不在范围。
 
 ### 8.6 api ↔ runtime 网络
 

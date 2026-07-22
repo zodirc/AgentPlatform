@@ -576,7 +576,7 @@ def test_workspace_sources_index_status_proxies_runtime(
 
     assert response.status_code == 200
     assert response.json() == status
-    proxy.assert_awaited_once_with(path="sources/ref-a.md")
+    proxy.assert_awaited_once_with(path="sources/ref-a.md", tenant={})
 
 
 def test_workspace_sources_sync_queues_runtime(
@@ -596,7 +596,7 @@ def test_workspace_sources_sync_queues_runtime(
 
     assert response.status_code == 202
     assert response.json()["index"]["status"] == "pending"
-    proxy.assert_awaited_once()
+    proxy.assert_awaited_once_with(tenant={})
 
 
 def test_workspace_source_upload_returns_pending_index(
@@ -623,7 +623,9 @@ def test_workspace_source_upload_returns_pending_index(
 
     assert response.status_code == 200
     assert response.json()["index"]["status"] == "pending"
-    proxy.assert_awaited_once_with(filename="ref-a.md", content="# Reference\n")
+    proxy.assert_awaited_once_with(
+        filename="ref-a.md", content="# Reference\n", tenant={}
+    )
 
 
 def test_workspace_delete_entries_proxies_runtime(
@@ -650,4 +652,4 @@ def test_workspace_delete_entries_proxies_runtime(
 
     assert response.status_code == 200
     assert response.json() == result
-    proxy.assert_awaited_once_with(paths=["exports/old.md"])
+    proxy.assert_awaited_once_with(paths=["exports/old.md"], tenant={})

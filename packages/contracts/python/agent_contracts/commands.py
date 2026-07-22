@@ -20,6 +20,10 @@ class StartTurnCommand(BaseModel):
     trace_id: UUID
     # Omit / null = normal Agent (default path). See docs/25.
     plan_phase: PlanPhase | None = None
+    # docs/27 — TenantContext snapshot (optional for back-compat callers; api always sends).
+    work_id: UUID | None = None
+    work_root: str | None = Field(default=None, min_length=1, max_length=1024)
+    owner_user_id: UUID | None = None
 
 
 class CancelTurnCommand(BaseModel):

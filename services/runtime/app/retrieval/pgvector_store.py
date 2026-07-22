@@ -155,6 +155,30 @@ class PgvectorSourceRetrievalStore:
                 )
                 cur.execute(
                     """
+                    ALTER TABLE source_files
+                    ADD COLUMN IF NOT EXISTS work_id UUID NULL
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE source_chunks
+                    ADD COLUMN IF NOT EXISTS work_id UUID NULL
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE source_files
+                    ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE source_chunks
+                    ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS source_chunks_embedding_hnsw
                     ON source_chunks
                     USING hnsw (embedding vector_cosine_ops)
@@ -170,6 +194,12 @@ class PgvectorSourceRetrievalStore:
                     """
                     CREATE INDEX IF NOT EXISTS source_chunks_owner_idx
                     ON source_chunks (owner_user_id)
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS source_chunks_work_idx
+                    ON source_chunks (work_id)
                     """
                 )
                 cur.execute(
@@ -190,12 +220,14 @@ class PgvectorSourceRetrievalStore:
     def load(self) -> None:
         """Warm schema + optional lightweight chunk cache for BM25 fusion."""
         self.ensure_schema()
+        from app.retrieval.tenant_visibility import display_path_from_index
+
         with self._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     SELECT chunk_id, path, section_title, text, citation_id,
-                           line_start, line_end
+                           line_start, line_end, work_id, visibility
                     FROM source_chunks
                     """
                 )
@@ -203,12 +235,15 @@ class PgvectorSourceRetrievalStore:
         self._chunk_cache = [
             {
                 "chunk_id": r[0],
-                "path": r[1],
+                "path": display_path_from_index(str(r[1] or "")),
+                "index_path": str(r[1] or ""),
                 "section_title": r[2] or "",
                 "text": r[3] or "",
                 "citation_id": r[4] or "",
                 "line_start": r[5],
                 "line_end": r[6],
+                "work_id": str(r[7]) if r[7] is not None else None,
+                "visibility": str(r[8] or "private"),
             }
             for r in rows
         ]
@@ -216,7 +251,37 @@ class PgvectorSourceRetrievalStore:
             str(c["chunk_id"]): c for c in self._chunk_cache if c.get("chunk_id")
         }
 
-    def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]:
+    def delete_orphan_private_rows(self) -> dict[str, int]:
+        """Remove private rows with NULL work_id (pre-MT5c leakage surface)."""
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    DELETE FROM source_chunks
+                    WHERE visibility = 'private' AND work_id IS NULL
+                    """
+                )
+                chunks = cur.rowcount or 0
+                cur.execute(
+                    """
+                    DELETE FROM source_files
+                    WHERE visibility = 'private' AND work_id IS NULL
+                    """
+                )
+                files = cur.rowcount or 0
+            conn.commit()
+        return {"orphan_chunks_deleted": int(chunks), "orphan_files_deleted": int(files)}
+
+    def sync(
+        self,
+        sources_dir: Path,
+        *,
+        workspace_root: Path,
+        work_id: str | None = None,
+        visibility: str = "private",
+        owner_user_id: str | None = None,
+    ) -> dict[str, Any]:
         self.ensure_schema()
         if not sources_dir.exists():
             return {
@@ -229,8 +294,14 @@ class PgvectorSourceRetrievalStore:
                 "backend": self.backend,
             }
 
+        from app.retrieval.tenant_visibility import index_storage_path
+
         embedder = get_embedder()
-        owner_id = self._default_owner_user_id()
+        owner_id = owner_user_id if owner_user_id is not None else self._default_owner_user_id()
+        vis = (visibility or "private").strip() or "private"
+        wid = work_id
+        if vis == "private" and not wid:
+            raise ValueError("private source sync requires work_id (docs/27 MT5c)")
         added = 0
         updated = 0
         skipped = 0
@@ -248,19 +319,39 @@ class PgvectorSourceRetrievalStore:
                     meta_row is None or str(meta_row[0]) != str(INDEX_VERSION)
                 )
 
-                cur.execute("SELECT path, mtime FROM source_files")
+                # Scope previous set to this work (or seed) so we do not delete other works' rows.
+                if wid:
+                    cur.execute(
+                        "SELECT path, mtime FROM source_files WHERE work_id = %s::uuid",
+                        (wid,),
+                    )
+                elif vis == "seed":
+                    cur.execute(
+                        "SELECT path, mtime FROM source_files WHERE visibility = 'seed'"
+                    )
+                else:
+                    cur.execute("SELECT path, mtime FROM source_files WHERE false")
                 prev_files = {row[0]: float(row[1]) for row in cur.fetchall()}
 
                 for fp in sorted(sources_dir.rglob("*")):
                     if not fp.is_file() or not should_index_source(fp):
                         continue
-                    rel = str(fp.relative_to(workspace_root.resolve()))
-                    seen_paths.add(rel)
+                    rel = str(fp.relative_to(workspace_root.resolve())).replace(
+                        "\\", "/"
+                    )
+                    if vis != "seed" and (
+                        rel == "sources/seed" or rel.startswith("sources/seed/")
+                    ):
+                        continue
+                    storage_path = index_storage_path(
+                        rel, work_id=wid, visibility=vis
+                    )
+                    seen_paths.add(storage_path)
                     mtime = fp.stat().st_mtime
-                    if not force_reindex and prev_files.get(rel) == mtime:
+                    if not force_reindex and prev_files.get(storage_path) == mtime:
                         cur.execute(
                             "SELECT chunk_count FROM source_files WHERE path = %s",
-                            (rel,),
+                            (storage_path,),
                         )
                         row = cur.fetchone()
                         total_chunks += int(row[0]) if row else 0
@@ -268,28 +359,35 @@ class PgvectorSourceRetrievalStore:
                         continue
 
                     text = fp.read_text(encoding="utf-8", errors="replace")
-                    new_chunks = chunk_source_text(fp, rel, text, embedder=embedder)
-                    cur.execute("DELETE FROM source_chunks WHERE path = %s", (rel,))
+                    new_chunks = chunk_source_text(
+                        fp, storage_path, text, embedder=embedder
+                    )
+                    cur.execute(
+                        "DELETE FROM source_chunks WHERE path = %s", (storage_path,)
+                    )
                     cur.execute(
                         """
                         INSERT INTO source_files (
-                            path, mtime, chunk_count, updated_at, owner_user_id
+                            path, mtime, chunk_count, updated_at, owner_user_id,
+                            work_id, visibility
                         )
-                        VALUES (%s, %s, %s, NOW(), %s)
+                        VALUES (%s, %s, %s, NOW(), %s, %s, %s)
                         ON CONFLICT (path) DO UPDATE SET
                             mtime = EXCLUDED.mtime,
                             chunk_count = EXCLUDED.chunk_count,
                             updated_at = NOW(),
-                            owner_user_id = EXCLUDED.owner_user_id
+                            owner_user_id = EXCLUDED.owner_user_id,
+                            work_id = EXCLUDED.work_id,
+                            visibility = EXCLUDED.visibility
                         """,
-                        (rel, mtime, len(new_chunks), owner_id),
+                        (storage_path, mtime, len(new_chunks), owner_id, wid, vis),
                     )
                     for chunk in new_chunks:
                         vec = chunk.get("vector")
                         if not isinstance(vec, list):
                             vec = embedder.embed(
                                 build_embed_text(
-                                    rel,
+                                    storage_path,
                                     str(chunk.get("text", "")),
                                     tags=chunk.get("tags"),
                                 )
@@ -302,9 +400,11 @@ class PgvectorSourceRetrievalStore:
                             """
                             INSERT INTO source_chunks (
                                 chunk_id, path, section_title, text, citation_id,
-                                line_start, line_end, embedding, owner_user_id
+                                line_start, line_end, embedding, owner_user_id,
+                                work_id, visibility
                             ) VALUES (
-                                %s, %s, %s, %s, %s, %s, %s, %s::vector, %s
+                                %s, %s, %s, %s, %s, %s, %s, %s::vector, %s,
+                                %s, %s
                             )
                             ON CONFLICT (chunk_id) DO UPDATE SET
                                 path = EXCLUDED.path,
@@ -314,22 +414,26 @@ class PgvectorSourceRetrievalStore:
                                 line_start = EXCLUDED.line_start,
                                 line_end = EXCLUDED.line_end,
                                 embedding = EXCLUDED.embedding,
-                                owner_user_id = EXCLUDED.owner_user_id
+                                owner_user_id = EXCLUDED.owner_user_id,
+                                work_id = EXCLUDED.work_id,
+                                visibility = EXCLUDED.visibility
                             """,
                             (
-                                str(chunk.get("chunk_id", "")),
-                                rel,
-                                str(chunk.get("section_title", "")),
-                                str(chunk.get("text", "")),
-                                str(chunk.get("citation_id", "")),
+                                chunk["chunk_id"],
+                                storage_path,
+                                chunk.get("section_title", ""),
+                                chunk.get("text", ""),
+                                chunk.get("citation_id", ""),
                                 chunk.get("line_start"),
                                 chunk.get("line_end"),
-                                _vector_literal([float(x) for x in vec]),
+                                _vector_literal(vec),
                                 owner_id,
+                                wid,
+                                vis,
                             ),
                         )
                     total_chunks += len(new_chunks)
-                    if rel in prev_files:
+                    if storage_path in prev_files:
                         updated += 1
                     else:
                         added += 1
@@ -337,7 +441,6 @@ class PgvectorSourceRetrievalStore:
                 removed = [path for path in prev_files if path not in seen_paths]
                 for path in removed:
                     cur.execute("DELETE FROM source_files WHERE path = %s", (path,))
-
                 cur.execute(
                     """
                     INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
@@ -380,28 +483,65 @@ class PgvectorSourceRetrievalStore:
         if not query_vec or len(query_vec) != self._dimensions:
             return []
         literal = _vector_literal(query_vec)
+        from app.retrieval.tenant_visibility import display_path_from_index
+        from app.tenant_context import current_visibility_seed, current_work_id
+
+        work_id = current_work_id()
+        seed_ok = current_visibility_seed()
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT chunk_id, path, section_title, text, citation_id,
-                           line_start, line_end,
-                           1 - (embedding <=> %s::vector) AS score
-                    FROM source_chunks
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT %s
-                    """,
-                    (literal, literal, limit),
-                )
+                if work_id is not None and seed_ok:
+                    cur.execute(
+                        """
+                        SELECT chunk_id, path, section_title, text, citation_id,
+                               line_start, line_end, work_id, visibility,
+                               1 - (embedding <=> %s::vector) AS score
+                        FROM source_chunks
+                        WHERE visibility = 'seed'
+                           OR work_id = %s::uuid
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (literal, str(work_id), literal, limit),
+                    )
+                elif work_id is not None:
+                    cur.execute(
+                        """
+                        SELECT chunk_id, path, section_title, text, citation_id,
+                               line_start, line_end, work_id, visibility,
+                               1 - (embedding <=> %s::vector) AS score
+                        FROM source_chunks
+                        WHERE work_id = %s::uuid
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (literal, str(work_id), literal, limit),
+                    )
+                elif seed_ok:
+                    # No Work bound: seed only — never dump the full private table.
+                    cur.execute(
+                        """
+                        SELECT chunk_id, path, section_title, text, citation_id,
+                               line_start, line_end, work_id, visibility,
+                               1 - (embedding <=> %s::vector) AS score
+                        FROM source_chunks
+                        WHERE visibility = 'seed'
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (literal, literal, limit),
+                    )
+                else:
+                    return []
                 rows = cur.fetchall()
         hits: list[ChunkHit] = []
         for row in rows:
-            score = float(row[7] or 0.0)
+            score = float(row[9] or 0.0)
             if score <= 0.0:
                 continue
             hits.append(
                 ChunkHit(
-                    path=str(row[1]),
+                    path=display_path_from_index(str(row[1])),
                     chunk_id=str(row[0]),
                     excerpt=str(row[3] or "").strip(),
                     citation_id=str(row[4] or ""),
@@ -409,20 +549,41 @@ class PgvectorSourceRetrievalStore:
                     section_title=str(row[2] or ""),
                     line_start=int(row[5]) if row[5] is not None else None,
                     line_end=int(row[6]) if row[6] is not None else None,
+                    work_id=str(row[7]) if row[7] is not None else None,
+                    visibility=str(row[8] or ""),
                 )
             )
         return hits
 
+    def _bm25_visible_chunks(self) -> list[dict[str, Any]]:
+        from app.tenant_context import current_visibility_seed, current_work_id
+
+        work_id = current_work_id()
+        seed_ok = current_visibility_seed()
+        wid = str(work_id) if work_id is not None else None
+        kept: list[dict[str, Any]] = []
+        for chunk in self._chunk_cache:
+            vis = str(chunk.get("visibility") or "private")
+            cw = chunk.get("work_id")
+            if vis == "seed":
+                if seed_ok:
+                    kept.append(chunk)
+                continue
+            if wid is not None and cw == wid:
+                kept.append(chunk)
+        return kept
+
     def search_bm25(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
         if not self._chunk_cache:
             self.load()
-        chunks = self._chunk_cache
+        chunks = self._bm25_visible_chunks()
         if not chunks:
             return []
+        by_id = {str(c["chunk_id"]): c for c in chunks if c.get("chunk_id")}
         ranked = BM25Scorer(chunks).search(query, limit=limit)
         hits: list[ChunkHit] = []
         for chunk_id, score in ranked:
-            chunk = self._chunk_by_id.get(chunk_id)
+            chunk = by_id.get(chunk_id)
             if chunk is None:
                 continue
             hits.append(_chunk_to_hit(chunk, score))

@@ -42,6 +42,7 @@ help: ## 显示常用命令
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
+	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动"
 	@echo "  make down         停止"

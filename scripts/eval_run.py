@@ -919,6 +919,21 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
             raise AssertionError(f"{case_id}: tool {tool_name!r} missing from tool_timeline")
         if needle and not matched:
             raise AssertionError(f"{case_id}: tool {tool_name!r} missing result match {needle!r}")
+        forbidden_result = tool_assert.get("result_not_matches", "")
+        if forbidden_result:
+            leaked = False
+            for item in timeline:
+                if tool_name and item.get("tool_name") != tool_name:
+                    continue
+                summary = str(item.get("summary", ""))
+                if re.search(forbidden_result, summary, re.S):
+                    leaked = True
+                    break
+            if leaked:
+                raise AssertionError(
+                    f"{case_id}: tool {tool_name!r} unexpectedly matched "
+                    f"{forbidden_result!r}"
+                )
         if expected_retrieval and not retrieval_matched:
             raise AssertionError(
                 f"{case_id}: tool {tool_name!r} missing retrieval mode {expected_retrieval!r}"

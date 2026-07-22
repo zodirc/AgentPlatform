@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.db.pool import get_pool
+from app.services.resource.works import ensure_default_work
 
 _TITLE_MAX = 80
 
@@ -11,16 +12,28 @@ async def create_session(
     default_scenario_id: str = "writing",
     *,
     owner_user_id: UUID,
+    work_id: UUID | None = None,
 ) -> dict:
+    work = None
+    if work_id is not None:
+        from app.services.resource.works import get_work
+
+        work = await get_work(work_id)
+        if work is None or work.owner_user_id != owner_user_id:
+            raise ValueError("work_not_found")
+    else:
+        work = await ensure_default_work(owner_user_id)
+
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO sessions (default_scenario_id, owner_user_id)
-        VALUES ($1, $2)
-        RETURNING id, default_scenario_id, status, created_at, owner_user_id
+        INSERT INTO sessions (default_scenario_id, owner_user_id, work_id)
+        VALUES ($1, $2, $3)
+        RETURNING id, default_scenario_id, status, created_at, owner_user_id, work_id
         """,
         default_scenario_id,
         owner_user_id,
+        work.id,
     )
     return dict(row)
 
@@ -29,7 +42,7 @@ async def get_session(session_id: UUID) -> dict | None:
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT id, default_scenario_id, status, created_at, owner_user_id, updated_at
+        SELECT id, default_scenario_id, status, created_at, owner_user_id, work_id, updated_at
         FROM sessions
         WHERE id = $1
         """,

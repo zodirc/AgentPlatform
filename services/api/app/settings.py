@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     worker_batch_size: int = 10
     otel_enabled: bool = False
     otel_service_name: str = "agent-api"
+    # docs/27 — Work roots (path strings stored in DB; runtime mounts/creates dirs)
+    workspace_root: str = "/workspace"
+    works_root: str = "/data/works"
+    # First default Work may claim legacy single-workspace path once.
+    works_claim_legacy_workspace: bool = True
 
 
 settings = Settings()

@@ -24,6 +24,7 @@ from app.controller.run_lock import ensure_run_owned_by_runner, persist_cancel_r
 from app.controller.session_context import (
     load_session_context,
     load_session_owner_user_id,
+    load_session_work,
     session_context_message,
 )
 from app.db.pool import get_pool
@@ -176,8 +177,31 @@ async def start_turn(
     message: str,
     trace_id: UUID,
     plan_phase: str | None = None,
+    work_id: UUID | None = None,
+    work_root: str | None = None,
+    owner_user_id: UUID | None = None,
 ) -> None:
     if turn_id in _active_turns:
+        return
+    max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)
+    if max_inflight > 0 and len(_active_turns) >= max_inflight:
+        logger.warning(
+            "start_turn rejected: inflight=%s max=%s turn=%s",
+            len(_active_turns),
+            max_inflight,
+            turn_id,
+        )
+        try:
+            await _fail_turn(
+                turn_id=turn_id,
+                run_id=run_id,
+                trace_id=trace_id,
+                termination_reason="budget_exceeded",
+                message=f"runtime_max_inflight_turns={max_inflight}",
+                scenario_id=scenario_id,
+            )
+        except Exception:
+            logger.exception("start_turn inflight fail_turn failed turn_id=%s", turn_id)
         return
     if not await run_exists(turn_id, run_id):
         logger.warning("start_turn: run not found turn=%s run=%s", turn_id, run_id)
@@ -187,8 +211,16 @@ async def start_turn(
         return
 
     structlog.contextvars.bind_contextvars(turn_id=str(turn_id))
+    from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
+
+    tokens = bind_tenant_context(
+        work_root=work_root,
+        work_id=work_id,
+        owner_user_id=owner_user_id,
+    )
     _active_turns.add(turn_id)
     try:
+        ensure_work_root_exists()
         await _run_turn(
             turn_id=turn_id,
             run_id=run_id,
@@ -213,6 +245,7 @@ async def start_turn(
             logger.exception("start_turn fail_turn also failed turn_id=%s", turn_id)
     finally:
         _active_turns.discard(turn_id)
+        reset_tenant_context(tokens)
 
 
 async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
@@ -249,6 +282,23 @@ async def _resolve_pending(turn_id: UUID, run_id: UUID) -> PendingTurn | None:
     return get(turn_id)
 
 
+async def _with_session_tenant(session_id: UUID, coro):
+    """Rebind TenantContext for approve/deny/patch resumes (same Work as StartTurn)."""
+    from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
+
+    work_id, work_root, owner_user_id = await load_session_work(session_id)
+    tokens = bind_tenant_context(
+        work_root=work_root,
+        work_id=work_id,
+        owner_user_id=owner_user_id,
+    )
+    try:
+        ensure_work_root_exists()
+        return await coro
+    finally:
+        reset_tenant_context(tokens)
+
+
 async def _cleanup_pending_after_command(turn_id: UUID, run_id: UUID) -> None:
     pool = await get_pool()
     status = await pool.fetchval("SELECT status FROM turns WHERE id = $1", turn_id)
@@ -273,19 +323,22 @@ async def approve_tool_call(
         logger.warning("approve_tool_call: no pending turn %s", turn_id)
         return
 
-    _active_turns.add(turn_id)
-    try:
-        await _resume_after_approval(
-            turn_id=turn_id,
-            run_id=run_id,
-            tool_call_id=tool_call_id,
-            trace_id=trace_id,
-            approved=True,
-            pending=pending,
-        )
-    finally:
-        _active_turns.discard(turn_id)
-        await _cleanup_pending_after_command(turn_id, run_id)
+    async def _run() -> None:
+        _active_turns.add(turn_id)
+        try:
+            await _resume_after_approval(
+                turn_id=turn_id,
+                run_id=run_id,
+                tool_call_id=tool_call_id,
+                trace_id=trace_id,
+                approved=True,
+                pending=pending,
+            )
+        finally:
+            _active_turns.discard(turn_id)
+            await _cleanup_pending_after_command(turn_id, run_id)
+
+    await _with_session_tenant(pending.state.session_id, _run())
 
 
 async def deny_tool_call(
@@ -304,20 +357,23 @@ async def deny_tool_call(
         logger.warning("deny_tool_call: no pending turn %s", turn_id)
         return
 
-    _active_turns.add(turn_id)
-    try:
-        await _resume_after_approval(
-            turn_id=turn_id,
-            run_id=run_id,
-            tool_call_id=tool_call_id,
-            trace_id=trace_id,
-            approved=False,
-            pending=pending,
-            deny_reason=reason,
-        )
-    finally:
-        _active_turns.discard(turn_id)
-        await _cleanup_pending_after_command(turn_id, run_id)
+    async def _run() -> None:
+        _active_turns.add(turn_id)
+        try:
+            await _resume_after_approval(
+                turn_id=turn_id,
+                run_id=run_id,
+                tool_call_id=tool_call_id,
+                trace_id=trace_id,
+                approved=False,
+                pending=pending,
+                deny_reason=reason,
+            )
+        finally:
+            _active_turns.discard(turn_id)
+            await _cleanup_pending_after_command(turn_id, run_id)
+
+    await _with_session_tenant(pending.state.session_id, _run())
 
 
 async def accept_patch(

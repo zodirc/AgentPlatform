@@ -58,7 +58,11 @@ async def create_user(username: str, password: str) -> EndUser:
             raise UserError("username_taken", "Username already taken") from exc
         raise
     assert row is not None
-    return EndUser(id=row["id"], username=row["username"], status=row["status"])
+    user = EndUser(id=row["id"], username=row["username"], status=row["status"])
+    from app.services.resource.works import ensure_default_work
+
+    await ensure_default_work(user.id)
+    return user
 
 
 async def authenticate(username: str, password: str) -> EndUser | None:

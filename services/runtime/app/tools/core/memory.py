@@ -11,7 +11,13 @@ from app.settings import settings
 
 
 def _memory_path() -> Path:
-    return Path(settings.data_dir) / "memory" / "memories.json"
+    from app.tenant_context import current_work_id
+
+    work_id = current_work_id()
+    base = Path(settings.data_dir) / "memory"
+    if work_id is not None:
+        return base / str(work_id) / "memories.json"
+    return base / "memories.json"
 
 
 def _load() -> list[dict[str, Any]]:

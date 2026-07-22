@@ -32,6 +32,9 @@ class RuntimeClient:
         client_request_id: UUID | None,
         trace_id: UUID,
         plan_phase: str | None = None,
+        work_id: UUID | None = None,
+        work_root: str | None = None,
+        owner_user_id: UUID | None = None,
     ) -> None:
         payload = {
             "turn_id": str(turn_id),
@@ -45,6 +48,12 @@ class RuntimeClient:
             payload["client_request_id"] = str(client_request_id)
         if plan_phase is not None:
             payload["plan_phase"] = plan_phase
+        if work_id is not None:
+            payload["work_id"] = str(work_id)
+        if work_root is not None:
+            payload["work_root"] = work_root
+        if owner_user_id is not None:
+            payload["owner_user_id"] = str(owner_user_id)
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(

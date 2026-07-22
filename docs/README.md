@@ -36,7 +36,7 @@ Agent Platform 架构与实施规范。**01–27 连续编号，一文一模块*
 | 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
 | 25 | [writing-runway](25-writing-runway.md) | **Plan 模式（平台）**：步骤可见 / 同意执行 |
 | 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分已落地；判断力 PS4+） |
-| 27 | [multi-tenancy](27-multi-tenancy.md) | **多租户 / Work 作用域**（设计已定；MT0+ 未开闸） |
+| 27 | [multi-tenancy](27-multi-tenancy.md) | **多租户 / Work 作用域**（默认开启；MT0–MT5c + MT7；**否决 MT6 Org**） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -74,7 +74,7 @@ Agent Platform 架构与实施规范。**01–27 连续编号，一文一模块*
 | Plan 模式（平台 · 步骤可见） | ✅ P1 相位契约 | 25 |
 | Plan 建议复杂度 | ✅ PS1–PS3；PS4 金标/tune；**PS4d 单配置 weights.json** | 26 |
 | Skills / 多模态 / IX5·RE4·RE5 | ⏸/⏳ | 19 · 18 · 15 · **[27](27-multi-tenancy.md)**（IX5 结构前置） |
-| 多租户 Tenant/Work 绑定 | 📋 设计已定（ADR-021 · **默认开启**） | **[27](27-multi-tenancy.md)** · adr/021 |
+| 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
 
 ---
 

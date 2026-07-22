@@ -1,43 +1,69 @@
-# Optional HA profile: dual runtime replicas + runner_id routing (docs/03 §8.5)
-# Usage:
+# Optional HA profile: dual runtime + runner_id affinity (docs/03 §8.5 · docs/27 MT7)
+#
+# Multi-tenancy (Work isolation) + multi-replica (concurrent Turns) are both
+# required for a real multi-user web platform. Default `make up` stays single
+# runtime for self-use; use this profile when concurrent Turns matter:
+#
 #   make up-ha
-# or:
-#   docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml up -d --scale runtime=0
+#
+# `--scale runtime=0` disables the single `runtime` service from the base file.
 
 x-runtime-env: &runtime-env
   DATABASE_URL: ${DATABASE_URL}
   INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
   MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
-  MODEL_MODE: ${MODEL_MODE:-stub}
-  MODEL_API_KEY: ${MODEL_API_KEY:-stub}
+  MODEL_MODE: ${MODEL_MODE:-live}
+  MODEL_API_KEY: ${MODEL_API_KEY:-}
   MODEL_NAME: ${MODEL_NAME:-}
   APP_SECRET_KEY: ${APP_SECRET_KEY}
+  CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
   ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
   DATA_DIR: /data
   WORKSPACE_ROOT: /workspace
   APP_ENV: ${APP_ENV:-production}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-3}
+  MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-120}
   RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
-  INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-false}
+  RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}
+  INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-true}
+  EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+  EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+  SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
+  SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
+  SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
+  HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+  TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+  HF_HOME: ${HF_HOME:-/data/models}
+  STALL_THRESHOLD_SECONDS: ${STALL_THRESHOLD_SECONDS:-120}
+  STALL_POLL_INTERVAL_SECONDS: ${STALL_POLL_INTERVAL_SECONDS:-30}
+  STALL_AUTO_FAIL: ${STALL_AUTO_FAIL:-false}
+  # Per-replica soft cap (docs/27 MT5b); total ≈ replicas × this.
+  RUNTIME_MAX_INFLIGHT_TURNS: ${RUNTIME_MAX_INFLIGHT_TURNS:-16}
 
 x-runtime-svc: &runtime-svc
+  image: agent-platform-runtime:default
   build:
     context: ..
-    dockerfile: services/runtime/Dockerfile
+    dockerfile: services/runtime/Dockerfile.retrieval
+    args:
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
   volumes:
+    # Shared across replicas — required for Work roots under /data/works/{id}
     - agent_data:/data
     - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+    - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
   depends_on:
     postgres:
       condition: service_healthy
   healthcheck:
     test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/live"]
-    interval: 30s
+    interval: 10s
     timeout: 5s
-    start_period: 60s
-    retries: 3
+    start_period: 120s
+    retries: 5
 
 services:
   runtime-a:

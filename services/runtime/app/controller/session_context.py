@@ -15,6 +15,23 @@ async def load_session_owner_user_id(session_id: UUID) -> UUID | None:
     )
 
 
+async def load_session_work(session_id: UUID) -> tuple[UUID | None, str | None, UUID | None]:
+    """Return (work_id, work_root, owner_user_id) for TenantContext rebind (docs/27)."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT s.owner_user_id, s.work_id, w.work_root
+        FROM sessions s
+        LEFT JOIN works w ON w.id = s.work_id
+        WHERE s.id = $1
+        """,
+        session_id,
+    )
+    if row is None:
+        return None, None, None
+    return row["work_id"], row["work_root"], row["owner_user_id"]
+
+
 async def load_session_context(session_id: UUID) -> dict | None:
     pool = await get_pool()
     row = await pool.fetchrow(
