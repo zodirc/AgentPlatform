@@ -1,14 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import type { ModelProvider } from "../shared/api/client";
 import {
   activateModelProvider,
+  changePassword,
   createModelProvider,
   deleteModelProvider,
+  fetchDefaultWork,
   listModelProviders,
   updateModelProvider,
 } from "../shared/api/client";
+import { useEndUserAuth } from "../shared/auth/EndUserAuth";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import type { ThemeId } from "../shared/theme/theme";
 
@@ -100,13 +103,164 @@ function Field({
 const inputClass =
   "w-full rounded border border-input bg-background px-3 py-2 text-sm text-foreground";
 
+type SettingsTab = "account" | "appearance" | "model";
+
+function tabFromPath(pathname: string): SettingsTab {
+  if (pathname.endsWith("/model")) return "model";
+  if (pathname.endsWith("/appearance")) return "appearance";
+  return "account";
+}
+
+function AccountSection() {
+  const { user } = useEndUserAuth();
+  const work = useQuery({
+    queryKey: ["works", "default"],
+    queryFn: fetchDefaultWork,
+    staleTime: 60_000,
+  });
+
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formOk, setFormOk] = useState<string | null>(null);
+
+  const passwordMut = useMutation({
+    mutationFn: () => changePassword(currentPassword, newPassword),
+    onSuccess: () => {
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setFormError(null);
+      setFormOk("密码已更新");
+    },
+    onError: (err: Error) => {
+      setFormOk(null);
+      setFormError(err.message || "修改失败");
+    },
+  });
+
+  const onChangePassword = (e: FormEvent) => {
+    e.preventDefault();
+    setFormOk(null);
+    if (newPassword.length < 6) {
+      setFormError("新密码至少 6 位");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setFormError("两次输入的新密码不一致");
+      return;
+    }
+    passwordMut.mutate();
+  };
+
+  return (
+    <div className="space-y-6">
+      <section className="rounded-xl border border-border bg-card/60 p-4">
+        <h2 className="text-sm font-medium text-foreground">账户</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          当前登录身份与默认 Work（只读）。多租户隔离在服务端完成，此处不提供切换 Work。
+        </p>
+        <dl className="mt-4 space-y-2 text-sm">
+          <div className="flex gap-2">
+            <dt className="w-24 shrink-0 text-muted-foreground">用户名</dt>
+            <dd className="text-foreground">{user?.username ?? "—"}</dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="w-24 shrink-0 text-muted-foreground">用户 ID</dt>
+            <dd className="break-all font-mono text-xs text-foreground/90">
+              {user?.id ?? "—"}
+            </dd>
+          </div>
+          <div className="flex gap-2">
+            <dt className="w-24 shrink-0 text-muted-foreground">默认 Work</dt>
+            <dd className="min-w-0 text-foreground/90">
+              {work.isLoading
+                ? "加载中…"
+                : work.isError
+                  ? "无法加载"
+                  : work.data
+                    ? `${work.data.name} · ${work.data.id.slice(0, 8)}…`
+                    : "—"}
+            </dd>
+          </div>
+          {work.data?.work_root ? (
+            <div className="flex gap-2">
+              <dt className="w-24 shrink-0 text-muted-foreground">Work 根</dt>
+              <dd className="break-all font-mono text-[11px] text-muted-foreground">
+                {work.data.work_root}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card/60 p-4">
+        <h2 className="text-sm font-medium text-foreground">修改密码</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          修改后当前登录仍然有效；下次登录请使用新密码。
+        </p>
+        <form className="mt-4 max-w-sm space-y-3" onSubmit={onChangePassword}>
+          <Field label="当前密码">
+            <input
+              type="password"
+              className={inputClass}
+              value={currentPassword}
+              onChange={(e) => setCurrentPassword(e.target.value)}
+              autoComplete="current-password"
+              required
+            />
+          </Field>
+          <Field label="新密码" hint="至少 6 位">
+            <input
+              type="password"
+              className={inputClass}
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+              minLength={6}
+            />
+          </Field>
+          <Field label="确认新密码">
+            <input
+              type="password"
+              className={inputClass}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+              minLength={6}
+            />
+          </Field>
+          {formError ? (
+            <p className="text-sm text-destructive">{formError}</p>
+          ) : null}
+          {formOk ? <p className="text-sm text-success">{formOk}</p> : null}
+          <button
+            type="submit"
+            className="rounded-lg bg-primary px-4 py-2 text-sm text-primary-foreground disabled:opacity-50"
+            disabled={
+              passwordMut.isPending ||
+              !currentPassword ||
+              newPassword.length < 6
+            }
+          >
+            {passwordMut.isPending ? "保存中…" : "更新密码"}
+          </button>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function AppearanceSection() {
   const { theme, setTheme, themes, meta } = useTheme();
   return (
-    <section className="mb-8 rounded-xl border border-border bg-card/60 p-4">
+    <section className="rounded-xl border border-border bg-card/60 p-4">
       <h2 className="text-sm font-medium text-foreground">外观</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        仅影响 Web 显示主题，不改变 Agent 交互与速率。偏好保存在本机浏览器。
+        仅影响 Web 显示主题，不改变 Agent 交互与速率。偏好按账号保存在本机浏览器。
       </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         {themes.map((id: ThemeId) => {
@@ -300,6 +454,8 @@ type PanelMode = "view" | "edit" | "create";
 
 export function SettingsPage() {
   const qc = useQueryClient();
+  const { pathname } = useLocation();
+  const tab = tabFromPath(pathname);
   const [loginRequired, setLoginRequired] = useState(false);
   const {
     data: providers = [],
@@ -309,6 +465,7 @@ export function SettingsPage() {
     queryKey: ["model-providers"],
     queryFn: listModelProviders,
     retry: false,
+    enabled: tab === "model",
   });
 
   const sortedProviders = useMemo(
@@ -472,231 +629,281 @@ export function SettingsPage() {
     <div className="mx-auto max-w-4xl p-6">
       <h1 className="text-2xl font-semibold">设置</h1>
       <p className="mt-1 text-sm text-muted-foreground">
-        外观与模型供应商。主题只作用于本机 UI。
+        个人账户、外观与模型供应商。主题与本机会话偏好按账号隔离。
       </p>
 
-      <div className="mt-6">
-        <AppearanceSection />
-      </div>
-
-      <h2 className="text-lg font-semibold">模型供应商</h2>
-      <p className="mt-1 text-sm text-muted-foreground">
-        配置归属于当前登录用户；保存后下一 Turn 起生效。
-      </p>
-
-      {loginRequired ? (
-        <div className="mt-4 space-y-2 rounded-xl border border-warning/40 bg-warning-muted p-4">
-          <p className="text-sm text-warning">
-            请先使用工作台账号登录后再管理模型配置。
-          </p>
+      <nav className="mt-6 flex flex-wrap gap-2 border-b border-border pb-3">
+        {(
+          [
+            { id: "account" as const, to: "/settings", label: "账户" },
+            {
+              id: "appearance" as const,
+              to: "/settings/appearance",
+              label: "外观",
+            },
+            { id: "model" as const, to: "/settings/model", label: "模型" },
+          ] as const
+        ).map((item) => (
           <Link
-            to="/writing"
-            className="inline-block rounded-lg bg-warning px-4 py-2 text-sm text-warning-foreground"
+            key={item.id}
+            to={item.to}
+            className={`rounded-lg px-3 py-1.5 text-sm ${
+              tab === item.id
+                ? "bg-muted text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
           >
-            去登录
+            {item.label}
           </Link>
+        ))}
+      </nav>
+
+      {tab === "account" ? (
+        <div className="mt-6">
+          <AccountSection />
         </div>
       ) : null}
 
-      {actionError ? (
-        <p className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          保存失败：{actionError.message}
-          {actionError.message.includes("401")
-            ? " — 请先登录工作台账号"
-            : ""}
-        </p>
+      {tab === "appearance" ? (
+        <div className="mt-6">
+          <AppearanceSection />
+        </div>
       ) : null}
 
-      {isLoading ? (
-        <p className="mt-6 text-sm text-muted-foreground">加载中…</p>
-      ) : loginRequired ? null : (
-        <div className="mt-6 grid gap-4 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]">
-          <aside className="rounded-xl border border-border bg-background p-3">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                已保存配置
-              </h2>
-              <button
-                type="button"
-                className="rounded-md bg-primary/20 px-2 py-1 text-xs text-primary hover:bg-primary/30"
-                onClick={startCreate}
-              >
-                + 添加
-              </button>
-            </div>
-            {sortedProviders.length === 0 ? (
-              <p className="text-xs text-muted-foreground/80">暂无，请添加第一条配置</p>
-            ) : (
-              <ul className="space-y-1">
-                {sortedProviders.map((p) => {
-                  const selected =
-                    selectedId === p.id && panelMode !== "create";
-                  return (
-                    <li key={p.id}>
-                      <button
-                        type="button"
-                        className={`w-full rounded-lg px-2 py-2 text-left text-sm transition-colors ${
-                          selected
-                            ? "bg-primary/15 ring-1 ring-primary/40"
-                            : "hover:bg-muted"
-                        }`}
-                        onClick={() => {
-                          setSelectedId(p.id);
-                          setPanelMode("view");
-                        }}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="truncate font-medium text-foreground">
-                            {p.label}
-                          </span>
-                          {p.is_active ? (
-                            <span className="shrink-0 rounded bg-primary/25 px-1.5 py-0.5 text-[10px] text-primary">
-                              当前
-                            </span>
-                          ) : null}
-                        </div>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {profileSummary(p)}
-                        </p>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </aside>
+      {tab === "model" ? (
+        <>
+          <h2 className="mt-6 text-lg font-semibold">模型供应商</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            配置归属于当前登录用户；保存后下一 Turn 起生效。
+          </p>
 
-          <section className="rounded-xl border border-border bg-card/60 p-4">
-            {panelMode === "create" ? (
-              <>
-                <h2 className="mb-4 text-sm font-medium text-foreground/90">
-                  添加模型配置
-                </h2>
-                <ModelConfigForm
-                  draft={draft}
-                  onChange={setDraft}
-                  onSubmit={onSubmit}
-                  onCancel={providers.length > 0 ? cancelPanel : undefined}
-                  mode="create"
-                  pending={pending}
-                  submitLabel="保存配置"
-                  showActivateOnCreate={providers.length > 0}
-                  activateOnCreate={activateOnCreate}
-                  onActivateOnCreateChange={setActivateOnCreate}
-                />
-              </>
-            ) : selectedProvider && panelMode === "view" ? (
-              <>
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs text-muted-foreground">配置详情</p>
-                    <h2 className="mt-1 text-lg font-medium text-foreground">
-                      {selectedProvider.label}
-                    </h2>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {!selectedProvider.is_active ? (
-                      <button
-                        type="button"
-                        className="rounded-lg bg-primary px-3 py-1.5 text-xs disabled:opacity-50"
-                        disabled={pending}
-                        onClick={() => activateMut.mutate(selectedProvider.id)}
-                      >
-                        设为当前
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      className="rounded-lg border border-input px-3 py-1.5 text-xs text-foreground/90"
-                      onClick={startEdit}
-                    >
-                      编辑
-                    </button>
-                    {!selectedProvider.is_active ? (
-                      <button
-                        type="button"
-                        className="rounded-lg border border-destructive/40 px-3 py-1.5 text-xs text-destructive disabled:opacity-50"
-                        disabled={pending}
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `确定删除「${selectedProvider.label}」？`,
-                            )
-                          ) {
-                            deleteMut.mutate(selectedProvider.id);
-                          }
-                        }}
-                      >
-                        删除
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <dl className="mt-4 space-y-2 text-sm">
-                  <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-muted-foreground">供应商</dt>
-                    <dd className="text-foreground/90">
-                      {selectedProvider.provider}
-                    </dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-muted-foreground">模型</dt>
-                    <dd className="text-foreground/90">
-                      {selectedProvider.model_name}
-                    </dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-muted-foreground">API Key</dt>
-                    <dd className="text-foreground/90">
-                      已保存 {selectedProvider.api_key_hint}
-                    </dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-muted-foreground">上下文窗口</dt>
-                    <dd className="text-foreground/90">
-                      {formatContextWindow(
-                        selectedProvider.context_window_tokens,
-                      )}
-                    </dd>
-                  </div>
-                  {selectedProvider.base_url ? (
-                    <div className="flex gap-2">
-                      <dt className="w-24 shrink-0 text-muted-foreground">API 地址</dt>
-                      <dd className="break-all text-foreground/90">
-                        {selectedProvider.base_url}
-                      </dd>
-                    </div>
-                  ) : null}
-                </dl>
-              </>
-            ) : selectedProvider && panelMode === "edit" ? (
-              <>
-                <h2 className="mb-4 text-sm font-medium text-foreground/90">
-                  编辑「{selectedProvider.label}」
-                </h2>
-                <ModelConfigForm
-                  draft={draft}
-                  onChange={setDraft}
-                  onSubmit={onSubmit}
-                  onCancel={cancelPanel}
-                  mode="update"
-                  apiKeyHint={selectedProvider.api_key_hint}
-                  pending={pending}
-                />
-              </>
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                从左侧选择配置，或添加新配置。
+          {loginRequired ? (
+            <div className="mt-4 space-y-2 rounded-xl border border-warning/40 bg-warning-muted p-4">
+              <p className="text-sm text-warning">
+                请先使用工作台账号登录后再管理模型配置。
               </p>
-            )}
-          </section>
-        </div>
-      )}
+              <Link
+                to="/writing"
+                className="inline-block rounded-lg bg-warning px-4 py-2 text-sm text-warning-foreground"
+              >
+                去登录
+              </Link>
+            </div>
+          ) : null}
 
-      {!isLoading && providers.length === 0 ? (
-        <p className="mt-4 text-xs text-muted-foreground/80">
-          未配置时 runtime 使用 .env 中的 MODEL_* fallback。
-        </p>
+          {actionError ? (
+            <p className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              保存失败：{actionError.message}
+              {actionError.message.includes("401")
+                ? " — 请先登录工作台账号"
+                : ""}
+            </p>
+          ) : null}
+
+          {isLoading ? (
+            <p className="mt-6 text-sm text-muted-foreground">加载中…</p>
+          ) : loginRequired ? null : (
+            <div className="mt-6 grid gap-4 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]">
+              <aside className="rounded-xl border border-border bg-background p-3">
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    已保存配置
+                  </h2>
+                  <button
+                    type="button"
+                    className="rounded-md bg-primary/20 px-2 py-1 text-xs text-primary hover:bg-primary/30"
+                    onClick={startCreate}
+                  >
+                    + 添加
+                  </button>
+                </div>
+                {sortedProviders.length === 0 ? (
+                  <p className="text-xs text-muted-foreground/80">
+                    暂无，请添加第一条配置
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {sortedProviders.map((p) => {
+                      const selected =
+                        selectedId === p.id && panelMode !== "create";
+                      return (
+                        <li key={p.id}>
+                          <button
+                            type="button"
+                            className={`w-full rounded-lg px-2 py-2 text-left text-sm transition-colors ${
+                              selected
+                                ? "bg-primary/15 ring-1 ring-primary/40"
+                                : "hover:bg-muted"
+                            }`}
+                            onClick={() => {
+                              setSelectedId(p.id);
+                              setPanelMode("view");
+                            }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="truncate font-medium text-foreground">
+                                {p.label}
+                              </span>
+                              {p.is_active ? (
+                                <span className="shrink-0 rounded bg-primary/25 px-1.5 py-0.5 text-[10px] text-primary">
+                                  当前
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {profileSummary(p)}
+                            </p>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </aside>
+
+              <section className="rounded-xl border border-border bg-card/60 p-4">
+                {panelMode === "create" ? (
+                  <>
+                    <h2 className="mb-4 text-sm font-medium text-foreground/90">
+                      添加模型配置
+                    </h2>
+                    <ModelConfigForm
+                      draft={draft}
+                      onChange={setDraft}
+                      onSubmit={onSubmit}
+                      onCancel={providers.length > 0 ? cancelPanel : undefined}
+                      mode="create"
+                      pending={pending}
+                      submitLabel="保存配置"
+                      showActivateOnCreate={providers.length > 0}
+                      activateOnCreate={activateOnCreate}
+                      onActivateOnCreateChange={setActivateOnCreate}
+                    />
+                  </>
+                ) : selectedProvider && panelMode === "view" ? (
+                  <>
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs text-muted-foreground">配置详情</p>
+                        <h2 className="mt-1 text-lg font-medium text-foreground">
+                          {selectedProvider.label}
+                        </h2>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {!selectedProvider.is_active ? (
+                          <button
+                            type="button"
+                            className="rounded-lg bg-primary px-3 py-1.5 text-xs disabled:opacity-50"
+                            disabled={pending}
+                            onClick={() =>
+                              activateMut.mutate(selectedProvider.id)
+                            }
+                          >
+                            设为当前
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="rounded-lg border border-input px-3 py-1.5 text-xs text-foreground/90"
+                          onClick={startEdit}
+                        >
+                          编辑
+                        </button>
+                        {!selectedProvider.is_active ? (
+                          <button
+                            type="button"
+                            className="rounded-lg border border-destructive/40 px-3 py-1.5 text-xs text-destructive disabled:opacity-50"
+                            disabled={pending}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  `确定删除「${selectedProvider.label}」？`,
+                                )
+                              ) {
+                                deleteMut.mutate(selectedProvider.id);
+                              }
+                            }}
+                          >
+                            删除
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <dl className="mt-4 space-y-2 text-sm">
+                      <div className="flex gap-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">
+                          供应商
+                        </dt>
+                        <dd className="text-foreground/90">
+                          {selectedProvider.provider}
+                        </dd>
+                      </div>
+                      <div className="flex gap-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">模型</dt>
+                        <dd className="text-foreground/90">
+                          {selectedProvider.model_name}
+                        </dd>
+                      </div>
+                      <div className="flex gap-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">
+                          API Key
+                        </dt>
+                        <dd className="text-foreground/90">
+                          已保存 {selectedProvider.api_key_hint}
+                        </dd>
+                      </div>
+                      <div className="flex gap-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">
+                          上下文窗口
+                        </dt>
+                        <dd className="text-foreground/90">
+                          {formatContextWindow(
+                            selectedProvider.context_window_tokens,
+                          )}
+                        </dd>
+                      </div>
+                      {selectedProvider.base_url ? (
+                        <div className="flex gap-2">
+                          <dt className="w-24 shrink-0 text-muted-foreground">
+                            API 地址
+                          </dt>
+                          <dd className="break-all text-foreground/90">
+                            {selectedProvider.base_url}
+                          </dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </>
+                ) : selectedProvider && panelMode === "edit" ? (
+                  <>
+                    <h2 className="mb-4 text-sm font-medium text-foreground/90">
+                      编辑「{selectedProvider.label}」
+                    </h2>
+                    <ModelConfigForm
+                      draft={draft}
+                      onChange={setDraft}
+                      onSubmit={onSubmit}
+                      onCancel={cancelPanel}
+                      mode="update"
+                      apiKeyHint={selectedProvider.api_key_hint}
+                      pending={pending}
+                    />
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    从左侧选择配置，或添加新配置。
+                  </p>
+                )}
+              </section>
+            </div>
+          )}
+
+          {!isLoading && providers.length === 0 ? (
+            <p className="mt-4 text-xs text-muted-foreground/80">
+              未配置时 runtime 使用 .env 中的 MODEL_* fallback。
+            </p>
+          ) : null}
+        </>
       ) : null}
     </div>
   );

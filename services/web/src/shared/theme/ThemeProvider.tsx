@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useEndUserAuth } from "../auth/EndUserAuth";
 import {
   applyTheme,
   readStoredTheme,
@@ -25,16 +26,24 @@ type ThemeContextValue = {
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeId>(() => readStoredTheme());
+  const { user } = useEndUserAuth();
+  const userId = user?.id ?? null;
+  const [theme, setThemeState] = useState<ThemeId>(() => readStoredTheme(null));
 
   useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
-
-  const setTheme = useCallback((next: ThemeId) => {
+    if (!userId) return;
+    const next = readStoredTheme(userId);
     setThemeState(next);
-    applyTheme(next);
-  }, []);
+    applyTheme(next, userId);
+  }, [userId]);
+
+  const setTheme = useCallback(
+    (next: ThemeId) => {
+      setThemeState(next);
+      applyTheme(next, userId);
+    },
+    [userId],
+  );
 
   const value = useMemo(
     () => ({ theme, setTheme, themes: THEME_IDS, meta: THEME_META }),

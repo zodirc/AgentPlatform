@@ -653,3 +653,60 @@ def test_workspace_delete_entries_proxies_runtime(
     assert response.status_code == 200
     assert response.json() == result
     proxy.assert_awaited_once_with(paths=["exports/old.md"], tenant={})
+
+
+def test_change_password_success(client: TestClient) -> None:
+    from app.main import app
+    from app.services.end_user.auth import require_end_user
+    from app.services.end_user.users import EndUser
+
+    async def _user() -> EndUser:
+        return EndUser(id=OWNER_ID, username="test", status="active")
+
+    with patch(
+        "app.routers.auth.user_svc.change_password",
+        new_callable=AsyncMock,
+    ) as change:
+        app.dependency_overrides[require_end_user] = _user
+        try:
+            response = client.post(
+                "/api/v1/auth/password",
+                json={
+                    "current_password": "old-secret",
+                    "new_password": "new-secret",
+                },
+            )
+        finally:
+            app.dependency_overrides.pop(require_end_user, None)
+
+    assert response.status_code == 204
+    change.assert_awaited_once_with(OWNER_ID, "old-secret", "new-secret")
+
+
+def test_change_password_wrong_current(client: TestClient) -> None:
+    from app.main import app
+    from app.services.end_user.auth import require_end_user
+    from app.services.end_user.users import EndUser, UserError
+
+    async def _user() -> EndUser:
+        return EndUser(id=OWNER_ID, username="test", status="active")
+
+    with patch(
+        "app.routers.auth.user_svc.change_password",
+        new_callable=AsyncMock,
+        side_effect=UserError("bad_password", "Current password is incorrect"),
+    ):
+        app.dependency_overrides[require_end_user] = _user
+        try:
+            response = client.post(
+                "/api/v1/auth/password",
+                json={
+                    "current_password": "wrong",
+                    "new_password": "new-secret",
+                },
+            )
+        finally:
+            app.dependency_overrides.pop(require_end_user, None)
+
+    assert response.status_code == 401
+    assert "incorrect" in response.json()["detail"].lower()

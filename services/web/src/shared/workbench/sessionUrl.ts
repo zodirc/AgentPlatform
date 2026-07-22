@@ -1,33 +1,61 @@
-const SESSION_STORAGE_KEY = "agent_platform_session_id";
+const SESSION_STORAGE_PREFIX = "agent_platform_session_id";
+const SESSION_STORAGE_KEY_LEGACY = "agent_platform_session_id";
 const SESSION_QUERY_PARAM = "session";
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function sessionKeyForUser(userId: string | null | undefined): string {
+  if (userId) return `${SESSION_STORAGE_PREFIX}:${userId}`;
+  return SESSION_STORAGE_KEY_LEGACY;
+}
+
 export function isSessionId(value: string | null | undefined): value is string {
   return Boolean(value && UUID_RE.test(value));
 }
 
-export function readStoredSessionId(): string | null {
+export function readStoredSessionId(userId?: string | null): string | null {
   try {
-    const value = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (userId) {
+      const perUser = localStorage.getItem(sessionKeyForUser(userId));
+      if (isSessionId(perUser)) return perUser;
+      // Migrate legacy global key once into this user.
+      const legacy = localStorage.getItem(SESSION_STORAGE_KEY_LEGACY);
+      if (isSessionId(legacy)) {
+        localStorage.setItem(sessionKeyForUser(userId), legacy);
+        return legacy;
+      }
+      return null;
+    }
+    const value = localStorage.getItem(SESSION_STORAGE_KEY_LEGACY);
     return isSessionId(value) ? value : null;
   } catch {
     return null;
   }
 }
 
-export function writeStoredSessionId(sessionId: string) {
+export function writeStoredSessionId(
+  sessionId: string,
+  userId?: string | null,
+) {
   try {
-    localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+    localStorage.setItem(sessionKeyForUser(userId), sessionId);
+    if (userId) {
+      localStorage.setItem(SESSION_STORAGE_KEY_LEGACY, sessionId);
+    }
   } catch {
     // ignore quota / private mode
   }
 }
 
-export function clearStoredSessionId() {
+/** Clear only the active/legacy pointer — keep per-user history keys. */
+export function clearStoredSessionId(userId?: string | null) {
   try {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+    localStorage.removeItem(SESSION_STORAGE_KEY_LEGACY);
+    if (userId) {
+      // Keep per-user key so the same user can resume after re-login.
+      // Intentionally do not remove sessionKeyForUser(userId).
+    }
   } catch {
     // ignore
   }

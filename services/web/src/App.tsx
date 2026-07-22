@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { Button } from "./components/ui/button";
 import { SettingsPage } from "./settings/SettingsPage";
-import { EndUserAuthProvider, useEndUserAuth } from "./shared/auth/EndUserAuth";
+import { useEndUserAuth } from "./shared/auth/EndUserAuth";
 import { LoginPage } from "./shared/auth/LoginPage";
 import { SCENARIO_META } from "./shared/workbench/scenarioMeta";
 import type { ScenarioId } from "./shared/workbench/types";
@@ -17,10 +17,85 @@ import { WorkbenchProvider } from "./shared/workbench/workbenchProvider";
 
 const SCENARIO_PATHS = ["/writing", "/agent", "/interview"] as const;
 
+function AccountMenu() {
+  const { user, logout, switchAccount } = useEndUserAuth();
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  if (!user) return null;
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        type="button"
+        className="rounded-lg border border-input px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted"
+        title={user.id}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {user.username}
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-lg border border-border bg-popover py-1 shadow-lg"
+        >
+          <Link
+            to="/settings"
+            role="menuitem"
+            className="block px-3 py-1.5 text-xs text-foreground hover:bg-muted"
+            onClick={() => setOpen(false)}
+          >
+            账户设置
+          </Link>
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full px-3 py-1.5 text-left text-xs text-foreground hover:bg-muted"
+            onClick={() => {
+              setOpen(false);
+              void switchAccount();
+            }}
+          >
+            切换账号
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="block w-full px-3 py-1.5 text-left text-xs text-destructive hover:bg-muted"
+            onClick={() => {
+              setOpen(false);
+              void logout();
+            }}
+          >
+            退出
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Nav() {
   const { pathname } = useLocation();
   const { sessionId, startNewSession, openSession } = useWorkbenchSession();
-  const { user, logout } = useEndUserAuth();
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const link = (to: string, label: string) => (
@@ -46,6 +121,9 @@ function Nav() {
     }
   };
 
+  const settingsActive =
+    pathname === "/settings" || pathname.startsWith("/settings/");
+
   return (
     <>
       <nav className="flex flex-wrap items-center gap-2 border-b border-border bg-background/80 px-6 py-3">
@@ -55,13 +133,18 @@ function Nav() {
           const id = path.slice(1) as ScenarioId;
           return link(pathWithSession(path, sessionId), SCENARIO_META[id].navLabel);
         })}
-        {link("/settings/model", "设置")}
+        <Link
+          to="/settings"
+          className={`rounded-lg px-3 py-1.5 text-sm ${
+            settingsActive
+              ? "bg-muted text-foreground"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          设置
+        </Link>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {user ? (
-            <span className="text-[11px] text-muted-foreground" title={user.id}>
-              {user.username}
-            </span>
-          ) : null}
+          <AccountMenu />
           {sessionId ? (
             <>
               <span
@@ -99,15 +182,6 @@ function Nav() {
               </Button>
             </>
           ) : null}
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            className="h-7 border-input px-2 text-xs text-foreground/90"
-            onClick={() => void logout()}
-          >
-            退出
-          </Button>
         </div>
       </nav>
       <SessionHistoryDrawer
@@ -135,7 +209,7 @@ function MainContent() {
     return <Navigate to={`/writing?session=${sessionId}${search}`} replace />;
   }
 
-  if (pathname === "/settings/model") {
+  if (pathname === "/settings" || pathname.startsWith("/settings/")) {
     return <SettingsPage />;
   }
 
@@ -191,9 +265,5 @@ function AuthenticatedApp() {
 }
 
 export function App() {
-  return (
-    <EndUserAuthProvider>
-      <AuthenticatedApp />
-    </EndUserAuthProvider>
-  );
+  return <AuthenticatedApp />;
 }

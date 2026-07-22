@@ -33,17 +33,17 @@ const WorkbenchSessionContext = createContext<WorkbenchSessionContextValue>({
   openSession: async () => undefined,
 });
 
-async function resolveSessionId(): Promise<string> {
+async function resolveSessionId(userId: string): Promise<string> {
   const fromUrl =
     sessionIdFromSearch(window.location.search) ??
     sessionIdFromPathname(window.location.pathname);
-  const fromStorage = readStoredSessionId();
+  const fromStorage = readStoredSessionId(userId);
   const candidate = fromUrl ?? fromStorage;
 
   if (candidate) {
     try {
       const session = await getSession(candidate);
-      writeStoredSessionId(session.id);
+      writeStoredSessionId(session.id, userId);
       return session.id;
     } catch {
       // stale or foreign session — create below
@@ -51,7 +51,7 @@ async function resolveSessionId(): Promise<string> {
   }
 
   const session = await createSession("writing");
-  writeStoredSessionId(session.id);
+  writeStoredSessionId(session.id, userId);
   return session.id;
 }
 
@@ -64,7 +64,7 @@ export function WorkbenchSessionProvider({ children }: { children: ReactNode }) 
 
   const query = useQuery({
     queryKey: ["session", "shared", user?.id ?? "anon"],
-    queryFn: resolveSessionId,
+    queryFn: () => resolveSessionId(user!.id),
     enabled: Boolean(user),
     staleTime: Number.POSITIVE_INFINITY,
     retry: 2,
@@ -84,23 +84,28 @@ export function WorkbenchSessionProvider({ children }: { children: ReactNode }) 
   }, [sessionId, pathname, search, navigate]);
 
   const startNewSession = useCallback(async () => {
+    if (!user) return "";
     const session = await createSession("writing");
-    writeStoredSessionId(session.id);
-    queryClient.setQueryData(["session", "shared", user?.id ?? "anon"], session.id);
+    writeStoredSessionId(session.id, user.id);
+    queryClient.setQueryData(["session", "shared", user.id], session.id);
     navigate(pathWithSession(pathname, session.id), { replace: true });
     return session.id;
-  }, [navigate, pathname, queryClient, user?.id]);
+  }, [navigate, pathname, queryClient, user]);
 
   const openSession = useCallback(
     async (nextId: string) => {
+      if (!user) return;
       const session = await getSession(nextId);
-      writeStoredSessionId(session.id);
-      queryClient.setQueryData(["session", "shared", user?.id ?? "anon"], session.id);
-      navigate(pathWithSession(pathname === "/settings/model" ? "/writing" : pathname, session.id), {
-        replace: true,
-      });
+      writeStoredSessionId(session.id, user.id);
+      queryClient.setQueryData(["session", "shared", user.id], session.id);
+      const settingsPath =
+        pathname === "/settings" || pathname.startsWith("/settings/");
+      navigate(
+        pathWithSession(settingsPath ? "/writing" : pathname, session.id),
+        { replace: true },
+      );
     },
-    [navigate, pathname, queryClient, user?.id],
+    [navigate, pathname, queryClient, user],
   );
 
   return (

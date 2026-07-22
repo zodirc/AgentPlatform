@@ -99,6 +99,37 @@ async def get_user(user_id: UUID) -> EndUser | None:
     return EndUser(id=row["id"], username=row["username"], status=row["status"])
 
 
+async def change_password(
+    user_id: UUID,
+    current_password: str,
+    new_password: str,
+) -> None:
+    if len(new_password) < 6:
+        raise UserError("weak_password", "Password must be at least 6 characters")
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT password_hash, status
+        FROM end_users
+        WHERE id = $1
+        """,
+        user_id,
+    )
+    if row is None or row["status"] != "active":
+        raise UserError("user_not_found", "User not found")
+    if not verify_password(current_password, row["password_hash"]):
+        raise UserError("bad_password", "Current password is incorrect")
+    await pool.execute(
+        """
+        UPDATE end_users
+        SET password_hash = $2, updated_at = now()
+        WHERE id = $1
+        """,
+        user_id,
+        hash_password(new_password),
+    )
+
+
 async def system_user() -> EndUser:
     user = await get_user(SYSTEM_USER_ID)
     if user is None:

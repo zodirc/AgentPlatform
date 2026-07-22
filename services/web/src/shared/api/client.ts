@@ -142,6 +142,48 @@ export async function logoutUser(): Promise<void> {
   });
 }
 
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/password`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+  if (!res.ok) {
+    let detail = `changePassword failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
+}
+
+export type WorkSummary = {
+  id: string;
+  name: string;
+  work_root: string;
+  is_default: boolean;
+  created_at?: string | null;
+};
+
+export async function fetchDefaultWork(): Promise<WorkSummary> {
+  const res = await fetch(`${API_BASE}/works/default`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchDefaultWork failed: ${res.status}`);
+  return res.json() as Promise<WorkSummary>;
+}
+
 export async function listSessions(limit = 20): Promise<SessionListItem[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   const res = await fetch(`${API_BASE}/sessions?${params}`, {

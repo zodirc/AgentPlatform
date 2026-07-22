@@ -75,3 +75,28 @@ async def logout(response: Response) -> None:
 @router.get("/me", response_model=UserPublic)
 async def me(user: EndUser = Depends(require_end_user)):
     return _public(user)
+
+
+class ChangePasswordBody(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+    new_password: str = Field(min_length=6, max_length=256)
+
+
+@router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    body: ChangePasswordBody,
+    user: EndUser = Depends(require_end_user),
+) -> None:
+    try:
+        await user_svc.change_password(
+            user.id,
+            body.current_password,
+            body.new_password,
+        )
+    except UserError as exc:
+        code = (
+            status.HTTP_401_UNAUTHORIZED
+            if exc.code == "bad_password"
+            else status.HTTP_400_BAD_REQUEST
+        )
+        raise HTTPException(status_code=code, detail=exc.message) from exc
