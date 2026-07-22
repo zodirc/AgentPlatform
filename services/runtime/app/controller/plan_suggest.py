@@ -76,13 +76,23 @@ _FALLBACK_CONFIG: dict[str, Any] = {
 
 
 def plan_suggest_weights_candidates() -> list[Path]:
+    """Candidate weight files (container + repo checkout + local fallback).
+
+    Do not assume a fixed ``parents[N]`` depth: in the image ``__file__`` is
+    ``/app/app/controller/...`` (shallow), while a git checkout is deeper.
+    """
     here = Path(__file__).resolve()
-    repo_root = here.parents[4]  # .../agent
-    return [
-        Path("/app/packages/contracts/plan_suggest/weights.json"),
-        repo_root / "packages" / "contracts" / "plan_suggest" / "weights.json",
-        Path(__file__).resolve().parent / "plan_suggest_weights.json",
-    ]
+    seen: list[Path] = []
+
+    def _add(path: Path) -> None:
+        if path not in seen:
+            seen.append(path)
+
+    _add(Path("/app/packages/contracts/plan_suggest/weights.json"))
+    for parent in here.parents:
+        _add(parent / "packages" / "contracts" / "plan_suggest" / "weights.json")
+    _add(here.parent / "plan_suggest_weights.json")
+    return seen
 
 
 def resolve_plan_suggest_weights_path() -> Path | None:
