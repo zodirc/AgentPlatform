@@ -15,7 +15,9 @@
 | 续聊带上下文 | 切 `sessionId` → Runtime `load_session_transcript`；**不改 loop** |
 | 可删 | `DELETE /sessions/{id}`（本人） |
 
-**非目标（仍成立）：** 公网 SSO 全家桶；工作区按用户物理隔离（对话归属 ≠ 磁盘隔离）；历史列表内嵌全文；认领上线前无主会话。
+**非目标（会话模块本身仍成立）：** 公网 SSO 全家桶；历史列表内嵌全文；认领上线前无主会话。  
+
+**磁盘 / 作品隔离：** 不在本文扩写。对话归属（`owner_user_id`）≠ 作品根隔离；后者见 [`27-multi-tenancy`](27-multi-tenancy.md)（`work_id` / `work_root`，**划分默认开启** · 个人自动单默认 Work）。
 
 ---
 
@@ -29,4 +31,4 @@
 
 ## 3. 以后若改会话归属
 
-改代码后只更新 **本文**；不要再开平行 `*-plan` 长文。若动资料隔离，同步 [15](15-rag-and-sources.md) IX5。详细设计草稿见 git 旧版。
+改代码后只更新 **本文**；不要再开平行 `*-plan` 长文。若动资料 / 作品隔离，同步 [15](15-rag-and-sources.md) IX5 与 [27](27-multi-tenancy.md)。详细设计草稿见 git 旧版。

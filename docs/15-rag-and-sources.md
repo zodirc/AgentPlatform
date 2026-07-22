@@ -158,23 +158,25 @@ PR 自检：热路径无 sync · polish 0 搜 · 无默认同步 LLM/CE · resto
 
 ## 6. 多租户私有库（IX5 / RE4）
 
-自用可先共享 workspace，**不能把共享当终局**。
+自用可先共享 workspace，**不能把共享当终局**。  
+**结构正文（Tenant / Work / 速率宪法 / 分期）：** [`27-multi-tenancy`](27-multi-tenancy.md) · [ADR-021](adr/021-multi-tenancy-work-scope.md)。本节只保留检索面要点。
 
 ```text
-owner / tenant
-  ├─ 语料：sources/u/{owner}/… 或行带 owner_id
-  ├─ 索引：chunks 带 owner_id
+owner / tenant / work
+  ├─ 语料：work_root/sources/… 或行带 owner_id + work_id
+  ├─ 索引：chunks 带 owner_id / work_id / visibility
   └─ search：工具层注入谓词（模型无感）；仍不 sync
 ```
 
 | 要 | 不要 |
 |----|------|
-| 隔离键 = `owner_user_id` | `session_id` |
+| 隔离键 = `work_id`（执行）+ `owner_id`（归属） | `session_id` |
 | 默认 deny 他人；共享显式 | 默认可搜全站 |
 | 热路径仅 SQL 谓词 | 为 ACL 再调模型 |
-| 单租户 mode=off 兼容今日 CI | IX0 焊死无 owner 列 |
+| 单默认 Work 自用与今日路径语义兼容 | IX0 焊死无 owner/work 列 |
+| 谓词始终服务端注入 | 靠关掉 ACL 过日子 |
 
-开闸：真实多用户不可互看；deny golden；mode=off 行为不变。身份复用 [16](16-user-session-history.md) 的 `owner_user_id`。
+开闸：真实多用户不可互看；deny golden；**单人默认 Work** 交互与今日同型。身份复用 [16](16-user-session-history.md) 的 `owner_user_id`；作品根见 [23](23-writing-work-model.md) / [27](27-multi-tenancy.md)。
 
 ---
 

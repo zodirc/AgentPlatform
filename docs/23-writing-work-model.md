@@ -239,3 +239,5 @@ User/Org → Work(work_id) → storage root → outline/sections/.agent/work
 ```
 
 路径变为 `{work_root}/.agent/work/drafts/...`；**概念不变**。鉴权挂在 Work ACL，runtime 只解析当前 Work 根。Session 永远不当作品容器。
+
+**完整多租户设计（速率宪法、TenantContext、分期 MT\*、ADR-021）：** 见 [`27-multi-tenancy`](27-multi-tenancy.md)。
