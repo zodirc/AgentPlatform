@@ -24,7 +24,7 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | 12 | [model-harness](12-model-harness.md) | Harness（AH1–AH4） |
 | 13 | [rate-redlines](13-rate-redlines.md) | **速率红线 R1–R5** |
 | 14 | [writing-quality](14-writing-quality.md) | **写作模块**（WQ0–WQ4 ✅） |
-| 15 | [rag-and-sources](15-rag-and-sources.md) | **RAG / 资料库**（IX0–IX4 ✅） |
+| 15 | [rag-and-sources](15-rag-and-sources.md) | **RAG / 资料库**（IX0–IX4 ✅；**RQ1a–e ✅**） |
 | 16 | [user-session-history](16-user-session-history.md) | 会话历史（U0–U2 ✅） |
 | 17 | [search-records](17-search-records.md) | `search_records` 蓝图 |
 | 18 | [multimodal-design](18-multimodal-design.md) | 多模态设计（待落地） |
@@ -48,7 +48,7 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | 部署 / 默认栈 | [03](03-docker-runtime.md) |
 | 速率约束 | [13](13-rate-redlines.md) |
 | 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） · [25](25-writing-runway.md)（Plan / 步骤可见） · [26](26-plan-suggest-complexity.md)（建议触发） |
-| RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md) |
+| RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md)（**RQ1 下一刀 → §9**） |
 | 会话归属 | [16](16-user-session-history.md) |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） |
 
@@ -63,6 +63,7 @@ Agent Platform 架构与实施规范。**01–26 连续编号，一文一模块*
 | Phase 0–4 + golden / contracts | ✅ | 11 · contracts |
 | 写作 WQ0–WQ4 | ✅ | 14 |
 | RAG RE0–RE3+RE1；IX0–IX4 | ✅ | 15 |
+| RAG RQ1（切块/embed 拼装/分层混合） | ✅ RQ1a–e | 15 §9 |
 | 会话 U0–U2 | ✅ | 16 |
 | Harness 核心 | 🔧 下一刀口径 ✅：WT5 / 变短≈压缩 / Proof 延迟（§5.1） | 12 |
 | 写作作品模型 WW0–WW4 | ✅ | 23 · ADR-020 |

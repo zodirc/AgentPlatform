@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     data_dir: str = "/data"
     retrieval_mode: str = "hybrid"  # keyword | vector | hybrid
     retrieval_rrf_k: int = 60
+    # RQ1e: hybrid lane weights / doc boost (profile may override; see retrieval/profile.py).
+    retrieval_profile: str = "default"  # default | vector_heavy
+    retrieval_rrf_vector_weight: float = 1.0
+    retrieval_rrf_bm25_weight: float = 1.0
+    retrieval_doc_boost: float = 0.35
     # Backend: pgvector (default ANN via HNSW; needs pgvector image) | json (file fallback).
     retrieval_backend: str = "pgvector"
     # Postgres schema for source_* tables (IX4 prod-bench uses retrieval_bench to avoid
@@ -38,6 +43,12 @@ class Settings(BaseSettings):
     retrieval_rerank_model: str = "BAAI/bge-reranker-base"
     retrieval_rerank_pool: int = 20
     retrieval_rerank_timeout_seconds: float = 0.05
+    # RQ1b: title-tree leaf soft budget (~2000 token char approx) then sliding window.
+    retrieval_chunk_max_chars: int = 4000
+    retrieval_chunk_overlap_chars: int = 400
+    # Wide markdown tables → pointer in indexed body (full table stays on disk for read_file).
+    retrieval_table_detach_min_rows: int = 6
+    retrieval_table_detach_min_chars: int = 800
     search_sources_max_per_turn: int = 3
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
-from app.retrieval.chunking import chunk_source_text, should_index_source
+from app.retrieval.chunking import build_embed_text, chunk_source_text, should_index_source
 from app.retrieval.embedder import get_embedder
 from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
@@ -239,6 +239,15 @@ class PgvectorSourceRetrievalStore:
 
         with self._connect() as conn:
             with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT value FROM source_index_meta WHERE key = %s",
+                    ("version",),
+                )
+                meta_row = cur.fetchone()
+                force_reindex = (
+                    meta_row is None or str(meta_row[0]) != str(INDEX_VERSION)
+                )
+
                 cur.execute("SELECT path, mtime FROM source_files")
                 prev_files = {row[0]: float(row[1]) for row in cur.fetchall()}
 
@@ -248,7 +257,7 @@ class PgvectorSourceRetrievalStore:
                     rel = str(fp.relative_to(workspace_root.resolve()))
                     seen_paths.add(rel)
                     mtime = fp.stat().st_mtime
-                    if prev_files.get(rel) == mtime:
+                    if not force_reindex and prev_files.get(rel) == mtime:
                         cur.execute(
                             "SELECT chunk_count FROM source_files WHERE path = %s",
                             (rel,),
@@ -278,7 +287,13 @@ class PgvectorSourceRetrievalStore:
                     for chunk in new_chunks:
                         vec = chunk.get("vector")
                         if not isinstance(vec, list):
-                            vec = embedder.embed(str(chunk.get("text", "")))
+                            vec = embedder.embed(
+                                build_embed_text(
+                                    rel,
+                                    str(chunk.get("text", "")),
+                                    tags=chunk.get("tags"),
+                                )
+                            )
                         if len(vec) != self._dimensions:
                             raise RuntimeError(
                                 f"embedding dim {len(vec)} != configured {self._dimensions}"
@@ -354,6 +369,7 @@ class PgvectorSourceRetrievalStore:
             "updated": updated,
             "skipped": skipped,
             "removed": len(removed),
+            "reindexed": force_reindex,
             "backend": self.backend,
             "ann": "hnsw",
         }
@@ -413,6 +429,9 @@ class PgvectorSourceRetrievalStore:
         return hits
 
     def search_hybrid(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
+        from app.retrieval.profile import active_retrieval_profile
+
+        profile = active_retrieval_profile()
         rerank = settings.retrieval_rerank_enabled
         top_k = max(limit * 4, 20)
         if rerank:
@@ -435,7 +454,8 @@ class PgvectorSourceRetrievalStore:
                         [(hit.chunk_id, hit.score) for hit in bm25_hits],
                     ],
                     limit=fusion_limit,
-                    k=settings.retrieval_rrf_k,
+                    k=profile.rrf_k,
+                    weights=[profile.vector_weight, profile.bm25_weight],
                 )
                 by_id = {hit.chunk_id: hit for hit in vector_hits + bm25_hits}
                 hits = []
@@ -466,11 +486,11 @@ class PgvectorSourceRetrievalStore:
             for hit in wide:
                 if hit.path not in seen:
                     seen.append(hit.path)
-                if len(seen) >= settings.retrieval_two_level_doc_limit:
+                if len(seen) >= profile.two_level_doc_limit:
                     break
             return seen
 
-        if not settings.retrieval_two_level_enabled:
+        if not profile.two_level_enabled:
             hits = _chunk_lane()
             return hits[:limit]
 
@@ -479,7 +499,7 @@ class PgvectorSourceRetrievalStore:
         doc_paths, chunk_hits, timed_out = parallel_two_level(
             doc_fn=_doc_lane,
             chunk_fn=_chunk_lane,
-            timeout_seconds=float(settings.retrieval_two_level_timeout_seconds),
+            timeout_seconds=profile.two_level_timeout_seconds,
         )
         if timed_out and not chunk_hits:
             chunk_hits = _chunk_lane()
@@ -487,6 +507,7 @@ class PgvectorSourceRetrievalStore:
             doc_paths=doc_paths,
             chunk_hits=chunk_hits,
             limit=limit,
+            doc_boost=profile.doc_boost,
         )
 
     def search(self, query: str, *, limit: int = 10, mode: str | None = None) -> list[ChunkHit]:

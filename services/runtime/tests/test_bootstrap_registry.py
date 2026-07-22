@@ -36,6 +36,21 @@ def test_build_registry_has_core_tools() -> None:
     assert registry.get("delegate") is not None
 
 
+def test_search_sources_description_includes_library_map() -> None:
+    """RQ1d: tool description carries corpus layout + path_prefix guidance."""
+    registry = build_registry()
+    spec = registry.get("search_sources")
+    assert spec is not None
+    desc = spec.description
+    assert "persons" in desc
+    assert "dramas" in desc
+    assert "path_prefix" in desc
+    assert "cards" in desc
+    props = spec.parameters.get("properties", {})
+    prefix = props.get("path_prefix", {})
+    assert "seed/writing" in str(prefix.get("description", "")) or "persons" in desc
+
+
 def test_tool_scope_planning_phase_excludes_writes() -> None:
     ScenarioRegistry.load()
     profile = ScenarioRegistry.get("agent")

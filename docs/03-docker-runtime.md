@@ -236,7 +236,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 
 ### 5.2 runtime 镜像特殊要求
 
-- **默认镜像**：`Dockerfile.retrieval` — 构建期烘焙 `EMBEDDING_MODEL` 至 `/app/models-baked`；entrypoint 首次启动同步至 `/data/models`；默认 `EMBEDDING_BACKEND=sentence_transformers`；`RETRIEVAL_BACKEND=pgvector`；向量索引 `INDEX_VERSION=3`（结构切块 + BM25/RRF hybrid）
+- **默认镜像**：`Dockerfile.retrieval` — 构建期烘焙 `EMBEDDING_MODEL` 至 `/app/models-baked`；entrypoint 首次启动同步至 `/data/models`；默认 `EMBEDDING_BACKEND=sentence_transformers`；`RETRIEVAL_BACKEND=pgvector`；向量索引 `INDEX_VERSION=7`（叶预算 + path/tag embed + BM25/RRF profile；见 [`15` §9](15-rag-and-sources.md)）
 - **轻量镜像**：`Dockerfile`（无 torch）— CI / `deploy/compose/runtime-lite.yml` / isolated stub golden；`EMBEDDING_BACKEND=hash`
 - `EXPOSE 8001`
 - 内部命令接口、事件写入、健康检查与检索为默认路径必需能力

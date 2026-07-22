@@ -183,9 +183,14 @@ def build_registry() -> ToolRegistry:
             name="search_sources",
             description=(
                 "Hybrid search over workspace sources/ (BM25 + vector). "
+                "Library layout (narrow with path_prefix when the type is known): "
+                "sources/seed/writing/{persons,periods,dramas,novels,movie}/ for standing "
+                "fact corpus; sources/cards/ is pinned style/character material — do not "
+                "search cards here; user uploads may appear under other sources/ trees "
+                "(e.g. hr/, legal/, writing/). "
                 "Prefer read_file when the source path is known. "
                 "Optional path_prefix narrows to a subdirectory under sources/ "
-                "(e.g. 'hr' or 'sources/hr'); rejects '..' / absolute paths. "
+                "(e.g. 'seed/writing/dramas', 'hr', or 'sources/hr'); rejects '..' / absolute paths. "
                 "Avoid repeating the same query; use at most a few searches per topic."
             ),
             parameters={
@@ -197,7 +202,8 @@ def build_registry() -> ToolRegistry:
                         "type": "string",
                         "description": (
                             "Optional directory under sources/ to restrict search. "
-                            "Relative path; 'hr' means sources/hr. No '..' or absolute paths."
+                            "Relative path; 'seed/writing/persons' or 'hr' means that tree. "
+                            "No '..' or absolute paths."
                         ),
                     },
                 },

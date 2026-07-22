@@ -34,6 +34,17 @@ No cards → still write; rely on **Prose defaults** above.
 Standing product corpus lives under `sources/seed/writing/` (read-only mount). User uploads may also appear under `sources/`.
 **File names need not match the work title** (e.g. `movie1.md` can be 《心花路放》); discovery is by content via `search_sources`.
 
+**Library map (use `path_prefix` when the type is clear):**
+- `sources/seed/writing/persons/` — historical / fictional people
+- `sources/seed/writing/periods/` — eras / periods
+- `sources/seed/writing/dramas/` — TV dramas
+- `sources/seed/writing/novels/` — novels
+- `sources/seed/writing/movie/` — films
+- `sources/cards/` — pinned cards only (not via `search_sources`)
+- Other trees under `sources/` (uploads) — inventory with `list_dir` if needed, then search
+
+When the user names a drama / person / film, prefer `path_prefix` like `seed/writing/dramas` or `seed/writing/persons` before a broad search.
+
 Decide from the task:
 
 **You MUST call `search_sources` (before answering from memory) when:**

@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
-from app.retrieval.chunking import chunk_source_text, should_index_source
+from app.retrieval.chunking import build_embed_text, chunk_source_text, should_index_source
 from app.retrieval.embedder import cosine_similarity, get_embedder
 from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
 from app.settings import settings
 
-INDEX_VERSION = 4
+INDEX_VERSION = 7  # RQ1c sparse path/meta tags in embed; RQ1b leaf budget; RQ1a path clue
 
 
 @dataclass
@@ -138,7 +138,7 @@ class SourceVectorIndex:
                 "mtime": mtime,
                 "chunk_count": len(new_chunks),
                 "summary": summary,
-                "doc_vector": embedder.embed(summary),
+                "doc_vector": embedder.embed(build_embed_text(rel, summary)),
                 "owner_user_id": owner_raw,
             }
             if prev:
@@ -225,6 +225,9 @@ class SourceVectorIndex:
         return [path for _, path in scored[:limit]]
 
     def _search_hybrid_chunks(self, query: str, *, limit: int, recall_k: int | None = None) -> list[ChunkHit]:
+        from app.retrieval.profile import active_retrieval_profile
+
+        profile = active_retrieval_profile()
         rerank = settings.retrieval_rerank_enabled
         top_k = recall_k if recall_k is not None else max(limit * 4, 20)
         if rerank:
@@ -245,7 +248,8 @@ class SourceVectorIndex:
                     [(hit.chunk_id, hit.score) for hit in bm25_hits],
                 ],
                 limit=fusion_limit,
-                k=settings.retrieval_rrf_k,
+                k=profile.rrf_k,
+                weights=[profile.vector_weight, profile.bm25_weight],
             )
             hits = []
             for chunk_id, score in fused:
@@ -258,20 +262,23 @@ class SourceVectorIndex:
         return hits
 
     def search_hybrid(self, query: str, *, limit: int = 10, recall_k: int | None = None) -> list[ChunkHit]:
+        from app.retrieval.profile import active_retrieval_profile
+
         self.load()
-        if not settings.retrieval_two_level_enabled:
+        profile = active_retrieval_profile()
+        if not profile.two_level_enabled:
             hits = self._search_hybrid_chunks(query, limit=limit, recall_k=recall_k)
             return hits[:limit]
 
         from app.retrieval.two_level import merge_doc_and_chunk_hits, parallel_two_level
 
-        doc_limit = max(1, int(settings.retrieval_two_level_doc_limit))
+        doc_limit = profile.two_level_doc_limit
         doc_paths, chunk_hits, timed_out = parallel_two_level(
             doc_fn=lambda: self.search_docs(query, limit=doc_limit),
             chunk_fn=lambda: self._search_hybrid_chunks(
                 query, limit=limit, recall_k=recall_k
             ),
-            timeout_seconds=float(settings.retrieval_two_level_timeout_seconds),
+            timeout_seconds=profile.two_level_timeout_seconds,
         )
         if timed_out and not chunk_hits:
             # Absolute degrade: try sync chunk-only once.
@@ -280,6 +287,7 @@ class SourceVectorIndex:
             doc_paths=doc_paths,
             chunk_hits=chunk_hits,
             limit=limit,
+            doc_boost=profile.doc_boost,
         )
 
     def search(self, query: str, *, limit: int = 10) -> list[ChunkHit]:

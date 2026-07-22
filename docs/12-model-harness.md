@@ -155,7 +155,7 @@ AgentEngine while 语义冻结（ADR-005）
 ### 5.1 下一刀优化思路（2026-07-21）
 
 > 三条线**分开推进**，都服从 [`13`](13-rate-redlines.md) R1–R5；**不改** `AgentEngine` while / 发送路径 / Plan 同意门。  
-> **不混入**：写作去 AI 腔 → writing [`system.md` Prose defaults](../services/runtime/app/scenarios/writing/system.md) / [`14`](14-writing-quality.md)；资料库 RAG → [`15`](15-rag-and-sources.md)。
+> **不混入**：写作去 AI 腔 → writing [`system.md` Prose defaults](../services/runtime/app/scenarios/writing/system.md) / [`14`](14-writing-quality.md)；资料库 RAG → [`15`](15-rag-and-sources.md)（下一刀 RQ1 见 [`15` §9](15-rag-and-sources.md)）。
 
 排期建议：`① cache 布局 WT5` → `② 变短≈压缩` → `③ Proof 延迟盯梢`。
 

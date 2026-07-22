@@ -1,7 +1,8 @@
 # 写作既定事实库 — 文档格式规范
 
 > **权威格式文档**。给联网 AI 生成内容时，优先复制 [`PROMPT_FOR_RESEARCH_AI.md`](PROMPT_FOR_RESEARCH_AI.md)。  
-> 放置说明见 [`README.md`](README.md)。
+> 放置说明见 [`README.md`](README.md)。  
+> 检索切块 / embed / 表格外挂口径见 [`docs/15-rag-and-sources.md` §9](../docs/15-rag-and-sources.md)（RQ1b 已落地：叶软顶约 4000 字 ≈ 2000 token 当量）。
 
 ---
 
@@ -19,10 +20,34 @@
 ## 1. 系统如何索引（决定标题怎么写）
 
 1. 按 `#` / `##` / `###` 分节（`####` 不参与分节）；
-2. 单节过长再按约 **400 字**硬切。
+2. 单节优先整节保留；超过约 **4000 字**（≈2000 token 当量，可配置）再滑窗切分；
+3. **宽表**在索引时改为短指针（磁盘原文不动）；大表请外挂（见 §1.1）。
 
 因此：**长文可以很长；必须用密而带专名的 `##`/`###`。**
 
+### 1.1 表格外挂
+
+| 情况 | 做法 |
+|------|------|
+| 小表（约 ≤5 行数据、短列） | 可留在正文 |
+| 宽表 / 长表（时间线、对照、多列表） | **外挂**到同主题旁路文件，正文只留一行说明 + 路径 |
+
+推荐布局：
+
+```text
+seed/sources/writing/dramas/<slug>.md          # 主文：叙事与可引用细节
+seed/sources/writing/dramas/tables/<slug>-*.md # 外挂表（仍可被 search / read_file）
+```
+
+主文示例：
+
+```markdown
+## 时间线要点
+
+完整对照表见 `tables/<slug>-timeline.md`（勿把整表粘进本节）。
+```
+
+索引器会对文内过宽的 GFM `|…|` 表写入 `[table detached: …]` 指针，避免整表污染 embedding；需要全表时用 `read_file`。
 ---
 
 ## 2. 放置路径（默认单文件）
@@ -50,6 +75,7 @@ seed/sources/writing/movie/<slug>.md      # 电影（可与 dramas 并列）
 > 类型: person | period | drama | novel
 > 体裁: note | volume
 > 别名: <异名1>, <异名2>
+> tags: <可选，少量高差标签，逗号分隔>   ← RQ1c；宁少勿滥
 > 时期: <可选>
 > 主题slug: <与文件名一致>
 > 分册: 单篇
