@@ -330,28 +330,58 @@ function ModelConfigForm({
 
       <Field
         label="供应商"
-        hint="可从列表选择常见供应商，也可直接输入自定义标识（小写英文）"
+        hint="从列表选择常见供应商；选「自定义」可填任意标识（小写英文）"
       >
-        <input
+        <select
           className={inputClass}
-          list="provider-suggestions"
-          value={draft.provider}
+          value={
+            PROVIDER_SUGGESTIONS.includes(draft.provider)
+              ? draft.provider
+              : "__custom__"
+          }
           onChange={(e) => {
             const next = e.target.value;
+            if (next === "__custom__") {
+              onChange({
+                ...draft,
+                provider: PROVIDER_SUGGESTIONS.includes(draft.provider)
+                  ? ""
+                  : draft.provider,
+              });
+              return;
+            }
             const preset = MODEL_PRESETS[next];
             onChange({
               ...draft,
               provider: next,
-              ...(preset && mode === "create" ? { modelName: preset } : {}),
+              ...(preset ? { modelName: preset } : {}),
             });
           }}
-          placeholder="openai"
-        />
-        <datalist id="provider-suggestions">
+        >
           {PROVIDER_SUGGESTIONS.map((p) => (
-            <option key={p} value={p} />
+            <option key={p} value={p}>
+              {p}
+            </option>
           ))}
-        </datalist>
+          <option value="__custom__">自定义…</option>
+        </select>
+        {!PROVIDER_SUGGESTIONS.includes(draft.provider) ? (
+          <input
+            className={`${inputClass} mt-2`}
+            value={draft.provider}
+            onChange={(e) => {
+              const next = e.target.value.trim().toLowerCase();
+              const preset = MODEL_PRESETS[next];
+              onChange({
+                ...draft,
+                provider: e.target.value,
+                ...(preset && mode === "create" ? { modelName: preset } : {}),
+              });
+            }}
+            placeholder="例如 my-provider"
+            autoComplete="off"
+          />
+        ) : null}
       </Field>
 
       <Field label="模型" hint="填写该供应商下的 model id">
