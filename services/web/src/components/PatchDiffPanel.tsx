@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState } from "react";
+import { DiffViewerModal } from "./DiffViewerModal";
 import { UnifiedDiffView } from "./UnifiedDiffView";
 
 export type PatchArtifact = {
@@ -23,6 +24,7 @@ type Props = {
 export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
   const status = patch.status ?? "pending";
   const isPending = status === "pending";
+  const [modalOpen, setModalOpen] = useState(false);
 
   return (
     <div className="rounded-lg border border-warning/40 bg-background/80 p-3">
@@ -45,6 +47,14 @@ export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
       ) : null}
 
       <UnifiedDiffView oldText={patch.old_text} newText={patch.new_text} />
+
+      <button
+        type="button"
+        className="mt-2 text-xs text-primary hover:underline"
+        onClick={() => setModalOpen(true)}
+      >
+        在完整视图中打开（滚动 / 查找）
+      </button>
 
       <details className="mt-2">
         <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
@@ -105,6 +115,15 @@ export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
           </button>
         </div>
       )}
+
+      <DiffViewerModal
+        open={modalOpen}
+        path={patch.path}
+        oldText={patch.old_text}
+        newText={patch.new_text}
+        subtitle={patch.summary ?? patch.path}
+        onClose={() => setModalOpen(false)}
+      />
     </div>
   );
 }
