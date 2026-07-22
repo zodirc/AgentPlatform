@@ -20,22 +20,22 @@ export function TimelineView({ items }: Props) {
         {items.map((t) => (
           <li
             key={String(t.tool_call_id)}
-            className="rounded bg-slate-950 px-3 py-2"
+            className="rounded bg-background px-3 py-2"
           >
             <div>
               {String(t.tool_name)} — {String(t.status)}
             </div>
             {t.stream_output ? (
-              <pre className="mt-1 whitespace-pre-wrap text-slate-400">
+              <pre className="mt-1 whitespace-pre-wrap text-muted-foreground">
                 {String(t.stream_output)}
               </pre>
             ) : null}
             {t.summary ? (
-              <p className="mt-1 text-slate-500">{String(t.summary)}</p>
+              <p className="mt-1 text-muted-foreground">{String(t.summary)}</p>
             ) : null}
           </li>
         ))}
-        {!items.length && <li className="text-slate-500">暂无工具调用</li>}
+        {!items.length && <li className="text-muted-foreground">暂无工具调用</li>}
       </ul>
     </Card>
   );

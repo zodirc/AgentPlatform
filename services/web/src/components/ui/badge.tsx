@@ -9,9 +9,9 @@ export function Badge({ className, variant = "default", ...props }: Props) {
     <span
       className={cn(
         "inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
-        variant === "default" && "bg-slate-800 text-slate-300",
-        variant === "success" && "bg-emerald-900/50 text-emerald-300",
-        variant === "warning" && "bg-amber-900/50 text-amber-300",
+        variant === "default" && "bg-muted text-foreground/90",
+        variant === "success" && "bg-success-muted text-success",
+        variant === "warning" && "bg-warning-muted text-warning",
         className,
       )}
       {...props}

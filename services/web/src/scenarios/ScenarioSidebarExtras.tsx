@@ -18,8 +18,8 @@ function DocumentOutline({ wb }: Props) {
     | undefined;
   if (!outline) return null;
   return (
-    <Card className="border-sky-900/50 bg-sky-950/20">
-      <CardTitle className="text-sky-200">文档大纲</CardTitle>
+    <Card className="border-primary/30 bg-primary/10">
+      <CardTitle className="text-primary">文档大纲</CardTitle>
       <DocumentOutlineView artifact={outline} />
     </Card>
   );

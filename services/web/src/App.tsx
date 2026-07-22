@@ -28,8 +28,8 @@ function Nav() {
       to={to}
       className={`rounded-lg px-3 py-1.5 text-sm ${
         pathname === to.split("?")[0]
-          ? "bg-slate-800 text-white"
-          : "text-slate-400 hover:text-white"
+          ? "bg-muted text-foreground"
+          : "text-muted-foreground hover:text-foreground"
       }`}
     >
       {label}
@@ -48,24 +48,24 @@ function Nav() {
 
   return (
     <>
-      <nav className="flex flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950/80 px-6 py-3">
+      <nav className="flex flex-wrap items-center gap-2 border-b border-border bg-background/80 px-6 py-3">
         <span className="mr-2 font-semibold">Agent Platform</span>
-        <span className="mr-2 text-xs text-slate-600">模式</span>
+        <span className="mr-2 text-xs text-muted-foreground/80">模式</span>
         {SCENARIO_PATHS.map((path) => {
           const id = path.slice(1) as ScenarioId;
           return link(pathWithSession(path, sessionId), SCENARIO_META[id].navLabel);
         })}
-        {link("/settings/model", "模型设置")}
+        {link("/settings/model", "设置")}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {user ? (
-            <span className="text-[11px] text-slate-500" title={user.id}>
+            <span className="text-[11px] text-muted-foreground" title={user.id}>
               {user.username}
             </span>
           ) : null}
           {sessionId ? (
             <>
               <span
-                className="text-[10px] text-slate-600"
+                className="text-[10px] text-muted-foreground/80"
                 title={sessionId}
               >
                 session {sessionId.slice(0, 8)}
@@ -74,7 +74,7 @@ function Nav() {
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 border-slate-700 px-2 text-xs text-slate-300"
+                className="h-7 border-input px-2 text-xs text-foreground/90"
                 onClick={() => setHistoryOpen(true)}
               >
                 历史
@@ -83,7 +83,7 @@ function Nav() {
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 border-slate-700 px-2 text-xs text-slate-300"
+                className="h-7 border-input px-2 text-xs text-foreground/90"
                 onClick={() => void copySessionLink()}
               >
                 复制链接
@@ -92,7 +92,7 @@ function Nav() {
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 border-slate-700 px-2 text-xs text-slate-300"
+                className="h-7 border-input px-2 text-xs text-foreground/90"
                 onClick={() => void startNewSession()}
               >
                 新建会话
@@ -103,7 +103,7 @@ function Nav() {
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 border-slate-700 px-2 text-xs text-slate-300"
+            className="h-7 border-input px-2 text-xs text-foreground/90"
             onClick={() => void logout()}
           >
             退出
@@ -174,7 +174,7 @@ function AuthenticatedApp() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-950 text-sm text-slate-400">
+      <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
         正在检查登录状态…
       </div>
     );

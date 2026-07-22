@@ -5,8 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agent Platform</title>
   </head>
-  <body class="bg-slate-950 text-slate-100">
+  <body class="bg-background text-foreground">
     <div id="root"></div>
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("agent.ui.theme");
+          if (t === "ink" || t === "paper" || t === "contrast") {
+            document.documentElement.setAttribute("data-theme", t);
+          } else {
+            document.documentElement.setAttribute("data-theme", "ink");
+          }
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "ink");
+        }
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

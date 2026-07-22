@@ -23,21 +23,21 @@ export function RagDebugModal({ open, wb, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="资料引用诊断"
       onClick={onClose}
     >
       <div
-        className="flex h-[min(90vh,900px)] w-[min(96vw,720px)] flex-col overflow-hidden rounded-xl border border-slate-700 bg-slate-950 shadow-2xl"
+        className="flex h-[min(90vh,900px)] w-[min(96vw,720px)] flex-col overflow-hidden rounded-xl border border-input bg-background shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex shrink-0 items-center justify-between border-b border-slate-800 px-4 py-3">
-          <p className="text-sm font-medium text-slate-100">资料引用诊断</p>
+        <header className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+          <p className="text-sm font-medium text-foreground">资料引用诊断</p>
           <button
             type="button"
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-900 hover:text-slate-100"
+            className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={onClose}
             title="关闭 (Esc)"
           >

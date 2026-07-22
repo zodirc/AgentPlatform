@@ -136,14 +136,14 @@ export function deriveAgentActivity(
 }
 
 const PHASE_STYLES: Record<AgentPhase, string> = {
-  idle: "border-slate-700 bg-slate-900/50 text-slate-300",
-  thinking: "border-sky-800/60 bg-sky-950/30 text-sky-200",
-  tool: "border-emerald-800/60 bg-emerald-950/30 text-emerald-200",
-  approval: "border-violet-800/60 bg-violet-950/30 text-violet-200",
-  running: "border-amber-800/60 bg-amber-950/30 text-amber-200",
-  warning: "border-amber-800/60 bg-amber-950/30 text-amber-200",
-  completed: "border-emerald-800/60 bg-emerald-950/20 text-emerald-200",
-  failed: "border-rose-800/60 bg-rose-950/30 text-rose-200",
+  idle: "border-input bg-card/50 text-foreground/90",
+  thinking: "border-primary/40 bg-primary/10 text-primary",
+  tool: "border-success/40 bg-success-muted text-success",
+  approval: "border-primary/40 bg-primary/10 text-primary",
+  running: "border-warning/40 bg-warning-muted text-warning",
+  warning: "border-warning/40 bg-warning-muted text-warning",
+  completed: "border-success/40 bg-success-muted text-success",
+  failed: "border-destructive/40 bg-destructive/10 text-destructive",
 };
 
 type Props = {
@@ -187,12 +187,12 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
             </p>
           ) : null}
           {planStep ? (
-            <p className="mt-0.5 truncate text-sm text-violet-200/90">
+            <p className="mt-0.5 truncate text-sm text-primary/90">
               计划进行中：{planStep.title}
             </p>
           ) : null}
           {cardTitles.length > 0 ? (
-            <p className="mt-1 truncate text-xs text-teal-300/90">
+            <p className="mt-1 truncate text-xs text-primary/90">
               本轮写定：{cardTitles.join(" · ")}
             </p>
           ) : null}

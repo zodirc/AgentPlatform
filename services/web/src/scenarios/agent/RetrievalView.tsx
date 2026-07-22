@@ -58,51 +58,66 @@ export function RetrievalView({ artifacts }: Props) {
   if (!items.length) return null;
 
   return (
-    <Card className="border-indigo-900/50 bg-indigo-950/20">
-      <CardTitle className="text-indigo-200">资料检索</CardTitle>
-      <ul className="mt-2 space-y-3 text-xs">
+    <Card className="min-w-0 overflow-hidden border-primary/30 bg-primary/10">
+      <CardTitle className="text-primary">资料检索</CardTitle>
+      <ul className="mt-2 min-w-0 space-y-3 text-xs">
         {items.map((item, idx) => {
           const hits = Array.isArray(item.hits) ? item.hits : [];
           const hitCount =
             typeof item.hit_count === "number" ? item.hit_count : hits.length;
           const { label, lag } = resolveModeLabel(item);
           return (
-            <li key={idx} className="rounded-lg bg-slate-950 px-3 py-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="font-medium text-slate-200">
+            <li
+              key={idx}
+              className="min-w-0 overflow-hidden rounded-lg bg-background px-3 py-2"
+            >
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <span className="min-w-0 max-w-full break-words font-medium text-foreground">
                   {item.query ? `「${item.query}」` : "检索"}
                 </span>
                 <Badge variant="default">{label}</Badge>
-                {lag ? (
-                  <Badge variant="default">index_lag</Badge>
-                ) : null}
-                <span className="text-slate-500">{hitCount} 条命中</span>
+                {lag ? <Badge variant="default">index_lag</Badge> : null}
+                <span className="shrink-0 text-muted-foreground">
+                  {hitCount} 条命中
+                </span>
               </div>
               {lag && item.index?.hint ? (
-                <p className="mt-1 text-amber-400/90">{item.index.hint}</p>
+                <p className="mt-1 break-words text-warning">
+                  {item.index.hint}
+                </p>
               ) : null}
               {item.summary ? (
-                <p className="mt-1 text-slate-400">{String(item.summary)}</p>
+                <p className="mt-1 break-words text-muted-foreground">
+                  {String(item.summary)}
+                </p>
               ) : null}
               {hits.length > 0 ? (
-                <ul className="mt-2 space-y-1.5 border-t border-slate-800 pt-2">
+                <ul className="mt-2 min-w-0 space-y-1.5 border-t border-border pt-2">
                   {hits.slice(0, 5).map((hit, i) => (
-                    <li key={i} className="text-slate-400">
-                      <span className="text-sky-300">
-                        {hit.path ?? "source"}
-                      </span>
-                      {hit.citation_id ? (
-                        <span className="ml-1 text-violet-300">
-                          [{hit.citation_id}]
+                    <li key={i} className="min-w-0 overflow-hidden text-muted-foreground">
+                      <div className="flex min-w-0 items-baseline gap-1.5">
+                        <span
+                          className="min-w-0 flex-1 truncate font-mono text-[11px] text-primary"
+                          title={hit.path ?? "source"}
+                        >
+                          {hit.path ?? "source"}
                         </span>
-                      ) : null}
-                      {typeof hit.score === "number" ? (
-                        <span className="ml-1 text-slate-600">
-                          {hit.score.toFixed(3)}
-                        </span>
-                      ) : null}
+                        {hit.citation_id ? (
+                          <span
+                            className="shrink-0 text-primary"
+                            title={hit.citation_id}
+                          >
+                            [{hit.citation_id}]
+                          </span>
+                        ) : null}
+                        {typeof hit.score === "number" ? (
+                          <span className="shrink-0 text-muted-foreground/80">
+                            {hit.score.toFixed(3)}
+                          </span>
+                        ) : null}
+                      </div>
                       {hit.excerpt ? (
-                        <p className="mt-0.5 line-clamp-2 text-slate-500">
+                        <p className="mt-0.5 line-clamp-2 break-words text-muted-foreground">
                           {hit.excerpt}
                         </p>
                       ) : null}
@@ -110,7 +125,7 @@ export function RetrievalView({ artifacts }: Props) {
                   ))}
                 </ul>
               ) : hitCount === 0 ? (
-                <p className="mt-2 text-amber-400/90">
+                <p className="mt-2 break-words text-warning">
                   未找到匹配资料 — 模型无法引用 sources/ 中的证据
                 </p>
               ) : null}

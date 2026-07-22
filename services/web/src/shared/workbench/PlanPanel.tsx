@@ -28,10 +28,10 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const STATUS_CLASS: Record<string, string> = {
-  pending: "text-slate-400",
-  in_progress: "text-amber-300",
-  completed: "text-emerald-300",
-  cancelled: "text-slate-500 line-through",
+  pending: "text-muted-foreground",
+  in_progress: "text-warning",
+  completed: "text-success",
+  cancelled: "text-muted-foreground line-through",
 };
 
 function StatusMark({ status }: { status: string }) {
@@ -58,12 +58,12 @@ function PlanItemRow({
       : (STATUS_LABEL[s] ?? s);
   const color =
     s === "in_progress" && staleInProgress
-      ? "text-slate-500"
-      : (STATUS_CLASS[s] ?? "text-slate-400");
+      ? "text-muted-foreground"
+      : (STATUS_CLASS[s] ?? "text-muted-foreground");
   return (
     <li
       className={`rounded px-3 py-2 ${
-        active ? "bg-amber-950/40 ring-1 ring-amber-800/50" : "bg-slate-950"
+        active ? "bg-warning-muted ring-1 ring-warning/40" : "bg-background"
       }`}
     >
       <div className="flex items-start gap-2 text-xs">
@@ -71,7 +71,7 @@ function PlanItemRow({
           <StatusMark status={s} />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-slate-200">{item.title}</p>
+          <p className="text-foreground">{item.title}</p>
           <p className={`mt-0.5 text-[10px] ${color}`}>{label}</p>
         </div>
       </div>
@@ -98,39 +98,39 @@ export function PlanPanel({
 
   return (
     <section
-      className={`rounded-lg border border-violet-900/50 bg-violet-950/20 ${
+      className={`rounded-lg border border-primary/30 bg-primary/10 ${
         compact ? "px-3 py-2" : "px-4 py-3"
       }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-xs font-medium text-violet-200">任务计划</p>
+          <p className="text-xs font-medium text-primary">任务计划</p>
           {phaseLabel ? (
-            <p className="mt-0.5 text-[11px] text-violet-300/90">{phaseLabel}</p>
+            <p className="mt-0.5 text-[11px] text-primary/90">{phaseLabel}</p>
           ) : null}
           {plan.summary ? (
-            <p className="mt-0.5 truncate text-[11px] text-slate-400">
+            <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
               {plan.summary}
             </p>
           ) : null}
           {live ? (
-            <p className="mt-0.5 text-[11px] text-amber-200/90">
+            <p className="mt-0.5 text-[11px] text-warning">
               当前步 · {live.title}
             </p>
           ) : null}
           {stale ? (
-            <p className="mt-0.5 text-[11px] text-slate-400">
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
               回合已结束；清单步骤未全部勾完
             </p>
           ) : null}
           {!turnLive && !stale && !showExecute && planPhase === "off" ? (
-            <p className="mt-0.5 text-[11px] text-slate-500">历史计划快照</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">历史计划快照</p>
           ) : null}
         </div>
         {canExecute ? (
           <button
             type="button"
-            className="shrink-0 rounded-md bg-violet-700 px-2.5 py-1 text-[11px] font-medium text-violet-50 hover:bg-violet-600 disabled:opacity-40"
+            className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-40"
             disabled={executeDisabled}
             onClick={onExecute}
           >

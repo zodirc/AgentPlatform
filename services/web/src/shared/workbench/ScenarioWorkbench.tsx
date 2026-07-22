@@ -78,7 +78,7 @@ export function ScenarioWorkbenchView({
 
   return (
     <div className={rootClass}>
-      <div className="shrink-0 space-y-2 border-b border-slate-800 px-4 py-2">
+      <div className="shrink-0 space-y-2 border-b border-border px-4 py-2">
         <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
       </div>
 
@@ -141,21 +141,21 @@ export function ScenarioWorkbenchView({
             onClose={() => setArtifactsOpen(false)}
           />
         ) : (
-          <div className="flex w-11 shrink-0 flex-col items-center border-r border-slate-800 bg-slate-950 py-3">
+          <div className="flex w-11 shrink-0 flex-col items-center border-r border-border bg-background py-3">
             <button
               type="button"
-              className="group flex flex-col items-center gap-2 rounded-md px-1 py-2 text-slate-500 transition-colors hover:bg-slate-900 hover:text-slate-200"
+              className="group flex flex-col items-center gap-2 rounded-md px-1 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               title="展开产物"
               onClick={openArtifacts}
             >
-              <span className="text-[10px] font-medium tracking-wide text-slate-400 group-hover:text-slate-200">
+              <span className="text-[10px] font-medium tracking-wide text-muted-foreground group-hover:text-foreground">
                 产物
               </span>
-              <span className="text-xs leading-none text-slate-500 group-hover:text-slate-300">
+              <span className="text-xs leading-none text-muted-foreground group-hover:text-foreground/90">
                 ›
               </span>
               {artifactCount > 0 ? (
-                <span className="min-w-[1.125rem] rounded-full bg-sky-900/60 px-1 text-center text-[10px] font-medium text-sky-200">
+                <span className="min-w-[1.125rem] rounded-full bg-primary/25 px-1 text-center text-[10px] font-medium text-primary">
                   {artifactCount > 99 ? "99+" : artifactCount}
                 </span>
               ) : null}
@@ -164,7 +164,7 @@ export function ScenarioWorkbenchView({
         )}
 
         <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,380px)] overflow-x-auto">
-          <main className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r border-slate-800 p-4">
+          <main className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r border-border p-4">
             <AgentActivityPanel wb={wb} compact />
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentTimelinePanel

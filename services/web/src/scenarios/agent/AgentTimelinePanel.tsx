@@ -44,18 +44,18 @@ export function AgentTimelinePanel({
   onSelectItem,
 }: Props) {
   return (
-    <section className="flex h-full flex-col rounded-lg border border-slate-800 bg-slate-900/40">
-      <h2 className="shrink-0 border-b border-slate-800 px-4 py-3 text-sm font-medium text-slate-300">
+    <section className="flex h-full flex-col rounded-lg border border-border bg-card/40">
+      <h2 className="shrink-0 border-b border-border px-4 py-3 text-sm font-medium text-foreground/90">
         工具时间线
         {items.length > 0 ? (
-          <span className="ml-2 text-xs font-normal text-slate-500">
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
             {items.length} 步
           </span>
         ) : null}
       </h2>
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
         {items.length === 0 ? (
-          <p className="text-xs text-slate-500">暂无工具调用</p>
+          <p className="text-xs text-muted-foreground">暂无工具调用</p>
         ) : (
           <ol className="space-y-2">
             {items.map((item, idx) => {
@@ -70,28 +70,28 @@ export function AgentTimelinePanel({
                     disabled={!clickable}
                     className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
                       isSelected
-                        ? "border-sky-700/60 bg-sky-950/30"
+                        ? "border-primary/40 bg-primary/10"
                         : isRunning
-                          ? "border-amber-700/50 bg-amber-950/20"
+                          ? "border-warning/40 bg-warning-muted"
                           : status === "error" || status === "denied"
-                            ? "border-rose-800/50 bg-rose-950/20"
-                            : "border-slate-800 bg-slate-950"
-                    } ${clickable ? "cursor-pointer hover:border-slate-600" : "cursor-default"}`}
+                            ? "border-destructive/40 bg-destructive/10"
+                            : "border-border bg-background"
+                    } ${clickable ? "cursor-pointer hover:border-input" : "cursor-default"}`}
                     onClick={() => onSelectItem?.(item, idx)}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium text-slate-200">
+                      <span className="font-medium text-foreground">
                         {toolLabel(item, events)}
                       </span>
-                      <span className="text-slate-500">{status}</span>
+                      <span className="text-muted-foreground">{status}</span>
                     </div>
                     {item.stream_output ? (
-                      <pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap text-slate-400">
+                      <pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap text-muted-foreground">
                         {item.stream_output}
                       </pre>
                     ) : null}
                     {item.summary && !item.stream_output ? (
-                      <p className="mt-1 line-clamp-2 text-slate-500">
+                      <p className="mt-1 line-clamp-2 text-muted-foreground">
                         {String(item.summary)}
                       </p>
                     ) : null}

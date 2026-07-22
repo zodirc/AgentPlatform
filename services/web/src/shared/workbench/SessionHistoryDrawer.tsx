@@ -69,18 +69,18 @@ export function SessionHistoryDrawer({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/50" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex justify-end bg-overlay" onClick={onClose}>
       <aside
-        className="flex h-full w-full max-w-md flex-col border-l border-slate-800 bg-slate-950 shadow-2xl"
+        className="flex h-full w-full max-w-md flex-col border-l border-border bg-background shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between border-b border-slate-800 px-4 py-3">
-          <h2 className="text-sm font-semibold text-white">历史会话</h2>
+        <div className="flex items-center justify-between border-b border-border px-4 py-3">
+          <h2 className="text-sm font-semibold text-foreground">历史会话</h2>
           <Button
             type="button"
             size="sm"
             variant="outline"
-            className="h-7 border-slate-700 px-2 text-xs"
+            className="h-7 border-input px-2 text-xs"
             onClick={onClose}
           >
             关闭
@@ -88,16 +88,16 @@ export function SessionHistoryDrawer({
         </div>
         <div className="flex-1 overflow-y-auto p-3">
           {q.isLoading ? (
-            <p className="text-sm text-slate-500">加载中…</p>
+            <p className="text-sm text-muted-foreground">加载中…</p>
           ) : null}
           {q.isError ? (
-            <p className="text-sm text-rose-300">加载失败，请稍后重试</p>
+            <p className="text-sm text-destructive">加载失败，请稍后重试</p>
           ) : null}
           {remove.isError ? (
-            <p className="mb-2 text-sm text-rose-300">删除失败，请稍后重试</p>
+            <p className="mb-2 text-sm text-destructive">删除失败，请稍后重试</p>
           ) : null}
           {!q.isLoading && (q.data?.length ?? 0) === 0 ? (
-            <p className="text-sm text-slate-500">暂无历史会话</p>
+            <p className="text-sm text-muted-foreground">暂无历史会话</p>
           ) : null}
           <ul className="flex flex-col gap-2">
             {(q.data ?? []).map((item) => {
@@ -108,8 +108,8 @@ export function SessionHistoryDrawer({
                   <div
                     className={`flex items-stretch gap-1 rounded-lg border transition ${
                       active
-                        ? "border-sky-700 bg-sky-950/40"
-                        : "border-slate-800 bg-slate-900/50 hover:border-slate-600"
+                        ? "border-primary/50 bg-primary/15"
+                        : "border-border bg-card/50 hover:border-input"
                     }`}
                   >
                     <button
@@ -118,8 +118,8 @@ export function SessionHistoryDrawer({
                       onClick={() => onSelect(item.id)}
                       disabled={deleting}
                     >
-                      <div className="text-sm text-slate-100">{titleOf(item)}</div>
-                      <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-500">
+                      <div className="text-sm text-foreground">{titleOf(item)}</div>
+                      <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
                         <span>{formatTime(item.updated_at)}</span>
                         <span>{item.turn_count} 轮</span>
                         <span>{item.default_scenario_id}</span>
@@ -127,7 +127,7 @@ export function SessionHistoryDrawer({
                     </button>
                     <button
                       type="button"
-                      className="shrink-0 self-center px-2 py-2 text-[11px] text-slate-500 hover:text-rose-300 disabled:opacity-40"
+                      className="shrink-0 self-center px-2 py-2 text-[11px] text-muted-foreground hover:text-destructive disabled:opacity-40"
                       title="删除会话"
                       aria-label={`删除会话 ${titleOf(item)}`}
                       disabled={deleting || remove.isPending}

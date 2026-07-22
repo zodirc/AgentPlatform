@@ -19,7 +19,7 @@ export function UnifiedWorkbench() {
 
   if (isLoading && !sessionId) {
     return (
-      <div className="flex h-[calc(100vh-49px)] items-center justify-center text-sm text-slate-500">
+      <div className="flex h-[calc(100vh-49px)] items-center justify-center text-sm text-muted-foreground">
         正在连接会话…
       </div>
     );
@@ -28,7 +28,7 @@ export function UnifiedWorkbench() {
   if (error && !sessionId) {
     const message = error instanceof Error ? error.message : String(error);
     return (
-      <div className="flex h-[calc(100vh-49px)] items-center justify-center text-sm text-rose-400">
+      <div className="flex h-[calc(100vh-49px)] items-center justify-center text-sm text-destructive">
         无法创建会话：{message}
       </div>
     );

@@ -15,13 +15,13 @@ const BREAKDOWN_SEGMENTS: Array<{
   label: string;
   color: string;
 }> = [
-  { key: "system", label: "System", color: "bg-violet-400" },
-  { key: "tools", label: "Tools", color: "bg-indigo-400" },
-  { key: "session", label: "Session", color: "bg-emerald-400" },
-  { key: "user", label: "User", color: "bg-sky-400" },
-  { key: "assistant", label: "Assistant", color: "bg-cyan-400" },
-  { key: "tool_results", label: "Tool results", color: "bg-amber-400" },
-  { key: "compaction", label: "Compact", color: "bg-slate-400" },
+  { key: "system", label: "System", color: "bg-muted-foreground" },
+  { key: "tools", label: "Tools", color: "bg-primary/70" },
+  { key: "session", label: "Session", color: "bg-success" },
+  { key: "user", label: "User", color: "bg-primary" },
+  { key: "assistant", label: "Assistant", color: "bg-primary/40" },
+  { key: "tool_results", label: "Tool results", color: "bg-warning" },
+  { key: "compaction", label: "Compact", color: "bg-muted-foreground/50" },
 ];
 
 type Props = {
@@ -73,7 +73,7 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
     ctxBudget && ctxBudget > 0 ? ctxBudget : breakdownTotal || ctxAfter || 1;
 
   return (
-    <div className="mt-2 space-y-1 border-t border-white/10 pt-2 text-[11px] opacity-80">
+    <div className="mt-2 space-y-1 border-t border-border pt-2 text-[11px] opacity-80">
       {hasContext ? (
         <div>
           <div className="mb-1 flex items-center justify-between gap-2">
@@ -83,14 +83,14 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
               · {sourceLabel}
             </span>
           </div>
-          <div className="h-1.5 overflow-hidden rounded bg-black/30">
+          <div className="h-1.5 overflow-hidden rounded bg-muted">
             <div
               className={`h-full rounded ${
                 fillPct >= 90
-                  ? "bg-rose-400"
+                  ? "bg-destructive"
                   : fillPct >= 70
-                    ? "bg-amber-400"
-                    : "bg-sky-400"
+                    ? "bg-warning"
+                    : "bg-primary"
               }`}
               style={{ width: `${Math.max(fillPct, 1)}%` }}
             />
@@ -98,7 +98,7 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
 
           {breakdown && breakdownTotal > 0 ? (
             <div className="mt-2 space-y-1">
-              <div className="flex h-2 overflow-hidden rounded bg-black/30">
+              <div className="flex h-2 overflow-hidden rounded bg-muted">
                 {BREAKDOWN_SEGMENTS.map((seg) => {
                   const value = Number(breakdown[seg.key] ?? 0);
                   if (value <= 0) return null;

@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { fetchWorkspaceEntries } from "../../shared/api/client";
+import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
 import {
   workspaceEntryIcon,
   workspaceEntryIconSizeClass,
@@ -75,7 +76,7 @@ function TreeNode({
   const children = data ? parseEntries(path, data.entries) : [];
   const selected = !isDir && selectedPath === path;
   const checked = checkedPaths.has(path);
-  const deletable = path !== ".";
+  const deletable = path !== "." && !isSeedCorpusPath(path);
   const { Icon, className: iconClass } = workspaceEntryIcon(
     name === "." ? "workspace" : name,
     isDir,
@@ -88,7 +89,7 @@ function TreeNode({
     multiSelectMode && deletable ? (
       <input
         type="checkbox"
-        className="size-3 shrink-0 rounded border-slate-600 bg-slate-900 accent-sky-500"
+        className="size-3 shrink-0 rounded border-input bg-card accent-primary"
         checked={checked}
         onChange={() => onTogglePath(path)}
         onClick={(event) => event.stopPropagation()}
@@ -99,6 +100,7 @@ function TreeNode({
     );
 
   if (!isDir) {
+    const seedLocked = isSeedCorpusPath(path);
     return (
       <div className="flex items-center gap-1" style={pad}>
         {checkbox}
@@ -106,18 +108,30 @@ function TreeNode({
           type="button"
           className={`min-w-0 flex-1 rounded px-1 py-0.5 text-left text-xs ${
             selected && !multiSelectMode
-              ? "bg-sky-900/40 text-sky-200"
+              ? "bg-primary/15 text-primary"
               : checked
-                ? "bg-rose-950/40 text-rose-200"
-                : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                ? "bg-destructive/10 text-destructive"
+                : seedLocked
+                  ? "text-muted-foreground/90 hover:bg-muted"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
           }`}
           onClick={() =>
-            multiSelectMode ? onTogglePath(path) : onSelectFile(path)
+            multiSelectMode
+              ? deletable
+                ? onTogglePath(path)
+                : undefined
+              : onSelectFile(path)
           }
           onDoubleClick={() => {
             if (!multiSelectMode) onOpenFile(path);
           }}
-          title={multiSelectMode ? "点击切换选中" : "双击在新窗口查看"}
+          title={
+            seedLocked
+              ? "系统资料 · 只读"
+              : multiSelectMode
+                ? "点击切换选中"
+                : "双击在新窗口查看"
+          }
         >
           <span className="flex items-center gap-1.5">
             <Icon
@@ -125,6 +139,11 @@ function TreeNode({
               aria-hidden
             />
             <span className="truncate">{name}</span>
+            {seedLocked ? (
+              <span className="ml-auto shrink-0 text-[9px] text-muted-foreground/80">
+                只读
+              </span>
+            ) : null}
           </span>
         </button>
       </div>
@@ -139,8 +158,8 @@ function TreeNode({
           type="button"
           className={`min-w-0 flex-1 rounded px-1 py-0.5 text-left text-xs ${
             checked
-              ? "bg-rose-950/40 text-rose-200"
-              : "text-slate-300 hover:bg-slate-900"
+              ? "bg-destructive/10 text-destructive"
+              : "text-foreground/90 hover:bg-muted"
           }`}
           onClick={() => {
             if (multiSelectMode && deletable) {
@@ -164,7 +183,7 @@ function TreeNode({
           }
         >
           <span className="flex items-center gap-1.5">
-            <span className="shrink-0 w-3 text-[10px] text-slate-500">
+            <span className="shrink-0 w-3 text-[10px] text-muted-foreground">
               {expanded ? "▾" : "▸"}
             </span>
             <Icon
@@ -179,7 +198,7 @@ function TreeNode({
         <div>
           {isLoading ? (
             <p
-              className="py-1 text-[10px] text-slate-600"
+              className="py-1 text-[10px] text-muted-foreground/80"
               style={{ paddingLeft: `${(depth + 1) * 12 + 20}px` }}
             >
               加载中…
@@ -187,7 +206,7 @@ function TreeNode({
           ) : null}
           {isError ? (
             <p
-              className="py-1 text-[10px] text-rose-400"
+              className="py-1 text-[10px] text-destructive"
               style={{ paddingLeft: `${(depth + 1) * 12 + 20}px` }}
             >
               无法读取目录

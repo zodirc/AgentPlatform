@@ -11,14 +11,14 @@ type Props = {
 
 export function SectionEditor({ value, title, readOnly = true }: Props) {
   return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950">
+    <div className="rounded-lg border border-border bg-background">
       {title ? (
-        <p className="border-b border-slate-800 px-3 py-2 text-xs text-slate-400">
+        <p className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
           {title}
         </p>
       ) : null}
       <Suspense
-        fallback={<pre className="p-3 text-xs text-slate-500">加载编辑器…</pre>}
+        fallback={<pre className="p-3 text-xs text-muted-foreground">加载编辑器…</pre>}
       >
         <CodeMirror
           value={value}

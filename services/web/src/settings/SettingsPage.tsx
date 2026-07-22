@@ -9,6 +9,8 @@ import {
   listModelProviders,
   updateModelProvider,
 } from "../shared/api/client";
+import { useTheme } from "../shared/theme/ThemeProvider";
+import type { ThemeId } from "../shared/theme/theme";
 
 function formatContextWindow(tokens: number | null | undefined): string {
   if (tokens == null || tokens <= 0) return "默认";
@@ -86,17 +88,53 @@ function Field({
 }) {
   return (
     <label className="block space-y-1">
-      <span className="text-xs font-medium text-slate-400">{label}</span>
+      <span className="text-xs font-medium text-muted-foreground">{label}</span>
       {children}
       {hint ? (
-        <span className="block text-xs text-slate-600">{hint}</span>
+        <span className="block text-xs text-muted-foreground/80">{hint}</span>
       ) : null}
     </label>
   );
 }
 
 const inputClass =
-  "w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100";
+  "w-full rounded border border-input bg-background px-3 py-2 text-sm text-foreground";
+
+function AppearanceSection() {
+  const { theme, setTheme, themes, meta } = useTheme();
+  return (
+    <section className="mb-8 rounded-xl border border-border bg-card/60 p-4">
+      <h2 className="text-sm font-medium text-foreground">外观</h2>
+      <p className="mt-1 text-xs text-muted-foreground">
+        仅影响 Web 显示主题，不改变 Agent 交互与速率。偏好保存在本机浏览器。
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {themes.map((id: ThemeId) => {
+          const selected = theme === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTheme(id)}
+              className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
+                selected
+                  ? "border-primary/50 bg-primary/10 ring-1 ring-primary/40"
+                  : "border-border bg-background hover:bg-muted"
+              }`}
+            >
+              <span className="block text-sm font-medium text-foreground">
+                {meta[id].label}
+              </span>
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                {meta[id].description}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
 
 function ModelConfigForm({
   draft,
@@ -212,7 +250,7 @@ function ModelConfigForm({
       ) : (
         <button
           type="button"
-          className="text-xs text-sky-400 hover:text-sky-300"
+          className="text-xs text-primary hover:text-primary"
           onClick={() => setShowKeyField(true)}
         >
           需要更换 API Key？
@@ -220,7 +258,7 @@ function ModelConfigForm({
       )}
 
       {showActivateOnCreate ? (
-        <label className="flex items-center gap-2 text-sm text-slate-400">
+        <label className="flex items-center gap-2 text-sm text-muted-foreground">
           <input
             type="checkbox"
             checked={activateOnCreate}
@@ -233,7 +271,7 @@ function ModelConfigForm({
       <div className="flex flex-wrap gap-2 pt-1">
         <button
           type="submit"
-          className="rounded-lg bg-sky-600 px-4 py-2 text-sm disabled:opacity-50"
+          className="rounded-lg bg-primary px-4 py-2 text-sm disabled:opacity-50"
           disabled={
             pending ||
             !draft.label.trim() ||
@@ -247,7 +285,7 @@ function ModelConfigForm({
         {onCancel ? (
           <button
             type="button"
-            className="rounded-lg border border-slate-700 px-4 py-2 text-sm text-slate-400"
+            className="rounded-lg border border-input px-4 py-2 text-sm text-muted-foreground"
             onClick={onCancel}
           >
             取消
@@ -432,19 +470,28 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl p-6">
-      <h1 className="text-2xl font-semibold">模型供应商</h1>
-      <p className="mt-1 text-sm text-slate-400">
+      <h1 className="text-2xl font-semibold">设置</h1>
+      <p className="mt-1 text-sm text-muted-foreground">
+        外观与模型供应商。主题只作用于本机 UI。
+      </p>
+
+      <div className="mt-6">
+        <AppearanceSection />
+      </div>
+
+      <h2 className="text-lg font-semibold">模型供应商</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
         配置归属于当前登录用户；保存后下一 Turn 起生效。
       </p>
 
       {loginRequired ? (
-        <div className="mt-4 space-y-2 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4">
-          <p className="text-sm text-amber-200/90">
+        <div className="mt-4 space-y-2 rounded-xl border border-warning/40 bg-warning-muted p-4">
+          <p className="text-sm text-warning">
             请先使用工作台账号登录后再管理模型配置。
           </p>
           <Link
             to="/writing"
-            className="inline-block rounded-lg bg-amber-700 px-4 py-2 text-sm text-white"
+            className="inline-block rounded-lg bg-warning px-4 py-2 text-sm text-warning-foreground"
           >
             去登录
           </Link>
@@ -452,7 +499,7 @@ export function SettingsPage() {
       ) : null}
 
       {actionError ? (
-        <p className="mt-4 rounded-lg border border-rose-900/50 bg-rose-950/30 px-3 py-2 text-sm text-rose-300">
+        <p className="mt-4 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           保存失败：{actionError.message}
           {actionError.message.includes("401")
             ? " — 请先登录工作台账号"
@@ -461,24 +508,24 @@ export function SettingsPage() {
       ) : null}
 
       {isLoading ? (
-        <p className="mt-6 text-sm text-slate-500">加载中…</p>
+        <p className="mt-6 text-sm text-muted-foreground">加载中…</p>
       ) : loginRequired ? null : (
         <div className="mt-6 grid gap-4 md:grid-cols-[minmax(220px,260px)_minmax(0,1fr)]">
-          <aside className="rounded-xl border border-slate-800 bg-slate-950 p-3">
+          <aside className="rounded-xl border border-border bg-background p-3">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                 已保存配置
               </h2>
               <button
                 type="button"
-                className="rounded-md bg-sky-900/50 px-2 py-1 text-xs text-sky-200 hover:bg-sky-900"
+                className="rounded-md bg-primary/20 px-2 py-1 text-xs text-primary hover:bg-primary/30"
                 onClick={startCreate}
               >
                 + 添加
               </button>
             </div>
             {sortedProviders.length === 0 ? (
-              <p className="text-xs text-slate-600">暂无，请添加第一条配置</p>
+              <p className="text-xs text-muted-foreground/80">暂无，请添加第一条配置</p>
             ) : (
               <ul className="space-y-1">
                 {sortedProviders.map((p) => {
@@ -490,8 +537,8 @@ export function SettingsPage() {
                         type="button"
                         className={`w-full rounded-lg px-2 py-2 text-left text-sm transition-colors ${
                           selected
-                            ? "bg-sky-950/50 ring-1 ring-sky-800/60"
-                            : "hover:bg-slate-900"
+                            ? "bg-primary/15 ring-1 ring-primary/40"
+                            : "hover:bg-muted"
                         }`}
                         onClick={() => {
                           setSelectedId(p.id);
@@ -499,16 +546,16 @@ export function SettingsPage() {
                         }}
                       >
                         <div className="flex items-center gap-2">
-                          <span className="truncate font-medium text-slate-200">
+                          <span className="truncate font-medium text-foreground">
                             {p.label}
                           </span>
                           {p.is_active ? (
-                            <span className="shrink-0 rounded bg-sky-900/60 px-1.5 py-0.5 text-[10px] text-sky-300">
+                            <span className="shrink-0 rounded bg-primary/25 px-1.5 py-0.5 text-[10px] text-primary">
                               当前
                             </span>
                           ) : null}
                         </div>
-                        <p className="mt-0.5 truncate text-xs text-slate-500">
+                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
                           {profileSummary(p)}
                         </p>
                       </button>
@@ -519,10 +566,10 @@ export function SettingsPage() {
             )}
           </aside>
 
-          <section className="rounded-xl border border-slate-800 bg-slate-900/60 p-4">
+          <section className="rounded-xl border border-border bg-card/60 p-4">
             {panelMode === "create" ? (
               <>
-                <h2 className="mb-4 text-sm font-medium text-slate-300">
+                <h2 className="mb-4 text-sm font-medium text-foreground/90">
                   添加模型配置
                 </h2>
                 <ModelConfigForm
@@ -542,8 +589,8 @@ export function SettingsPage() {
               <>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="text-xs text-slate-500">配置详情</p>
-                    <h2 className="mt-1 text-lg font-medium text-slate-100">
+                    <p className="text-xs text-muted-foreground">配置详情</p>
+                    <h2 className="mt-1 text-lg font-medium text-foreground">
                       {selectedProvider.label}
                     </h2>
                   </div>
@@ -551,7 +598,7 @@ export function SettingsPage() {
                     {!selectedProvider.is_active ? (
                       <button
                         type="button"
-                        className="rounded-lg bg-sky-600 px-3 py-1.5 text-xs disabled:opacity-50"
+                        className="rounded-lg bg-primary px-3 py-1.5 text-xs disabled:opacity-50"
                         disabled={pending}
                         onClick={() => activateMut.mutate(selectedProvider.id)}
                       >
@@ -560,7 +607,7 @@ export function SettingsPage() {
                     ) : null}
                     <button
                       type="button"
-                      className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300"
+                      className="rounded-lg border border-input px-3 py-1.5 text-xs text-foreground/90"
                       onClick={startEdit}
                     >
                       编辑
@@ -568,7 +615,7 @@ export function SettingsPage() {
                     {!selectedProvider.is_active ? (
                       <button
                         type="button"
-                        className="rounded-lg border border-rose-900/60 px-3 py-1.5 text-xs text-rose-400 disabled:opacity-50"
+                        className="rounded-lg border border-destructive/40 px-3 py-1.5 text-xs text-destructive disabled:opacity-50"
                         disabled={pending}
                         onClick={() => {
                           if (
@@ -587,26 +634,26 @@ export function SettingsPage() {
                 </div>
                 <dl className="mt-4 space-y-2 text-sm">
                   <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-slate-500">供应商</dt>
-                    <dd className="text-slate-300">
+                    <dt className="w-24 shrink-0 text-muted-foreground">供应商</dt>
+                    <dd className="text-foreground/90">
                       {selectedProvider.provider}
                     </dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-slate-500">模型</dt>
-                    <dd className="text-slate-300">
+                    <dt className="w-24 shrink-0 text-muted-foreground">模型</dt>
+                    <dd className="text-foreground/90">
                       {selectedProvider.model_name}
                     </dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-slate-500">API Key</dt>
-                    <dd className="text-slate-300">
+                    <dt className="w-24 shrink-0 text-muted-foreground">API Key</dt>
+                    <dd className="text-foreground/90">
                       已保存 {selectedProvider.api_key_hint}
                     </dd>
                   </div>
                   <div className="flex gap-2">
-                    <dt className="w-24 shrink-0 text-slate-500">上下文窗口</dt>
-                    <dd className="text-slate-300">
+                    <dt className="w-24 shrink-0 text-muted-foreground">上下文窗口</dt>
+                    <dd className="text-foreground/90">
                       {formatContextWindow(
                         selectedProvider.context_window_tokens,
                       )}
@@ -614,8 +661,8 @@ export function SettingsPage() {
                   </div>
                   {selectedProvider.base_url ? (
                     <div className="flex gap-2">
-                      <dt className="w-24 shrink-0 text-slate-500">API 地址</dt>
-                      <dd className="break-all text-slate-300">
+                      <dt className="w-24 shrink-0 text-muted-foreground">API 地址</dt>
+                      <dd className="break-all text-foreground/90">
                         {selectedProvider.base_url}
                       </dd>
                     </div>
@@ -624,7 +671,7 @@ export function SettingsPage() {
               </>
             ) : selectedProvider && panelMode === "edit" ? (
               <>
-                <h2 className="mb-4 text-sm font-medium text-slate-300">
+                <h2 className="mb-4 text-sm font-medium text-foreground/90">
                   编辑「{selectedProvider.label}」
                 </h2>
                 <ModelConfigForm
@@ -638,7 +685,7 @@ export function SettingsPage() {
                 />
               </>
             ) : (
-              <p className="text-sm text-slate-500">
+              <p className="text-sm text-muted-foreground">
                 从左侧选择配置，或添加新配置。
               </p>
             )}
@@ -647,7 +694,7 @@ export function SettingsPage() {
       )}
 
       {!isLoading && providers.length === 0 ? (
-        <p className="mt-4 text-xs text-slate-600">
+        <p className="mt-4 text-xs text-muted-foreground/80">
           未配置时 runtime 使用 .env 中的 MODEL_* fallback。
         </p>
       ) : null}

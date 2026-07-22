@@ -43,9 +43,9 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 p-6">
       <header>
-        <p className="text-xs uppercase tracking-wide text-sky-400">Phase 1</p>
+        <p className="text-xs uppercase tracking-wide text-primary">Phase 1</p>
         <h1 className="text-2xl font-semibold">{wb.title}</h1>
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-muted-foreground">
           scenario_id={wb.scenarioId}
           {wb.useWebSocket ? " · transport=ws" : ""}
         </p>
@@ -59,7 +59,7 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         }
       >
         <Card className={layout === "agent" ? "" : undefined}>
-          <label className="mb-2 block text-sm text-slate-300">消息</label>
+          <label className="mb-2 block text-sm text-foreground/90">消息</label>
           <Textarea
             value={wb.message}
             onChange={(e) => wb.setMessage(e.target.value)}
@@ -89,7 +89,7 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
             </Button>
             <Button
               variant="outline"
-              className="border-rose-700 text-rose-300"
+              className="border-destructive/50 text-destructive"
               disabled={!wb.busy || wb.stopping}
               onClick={() => void wb.handleStop()}
             >
@@ -101,14 +101,14 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         {layout === "default" ? (
           <Card>
             <CardTitle>输出</CardTitle>
-            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-950 p-3 text-xs">
+            <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-background p-3 text-xs">
               {wb.streamText ||
                 wb.sectionDraft ||
                 wb.view?.latest_output ||
                 "（等待 Turn）"}
             </pre>
             {(wb.view || wb.busy || wb.awaitingApproval) && (
-              <p className="mt-2 text-xs text-slate-500">
+              <p className="mt-2 text-xs text-muted-foreground">
                 status={wb.displayStatus}
                 {wb.view ? ` · seq=${wb.view.last_event_sequence}` : ""}
                 {wb.view?.runner_id ? ` · runner=${wb.view.runner_id}` : ""}
@@ -120,9 +120,9 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
       </div>
 
       {wb.awaitingApproval && (
-        <Card className="border-violet-800/60 bg-violet-950/30">
-          <CardTitle className="text-violet-200">{approval.title}</CardTitle>
-          <p className="mb-1 text-sm text-slate-300">{approval.description}</p>
+        <Card className="border-primary/40 bg-primary/10">
+          <CardTitle className="text-primary">{approval.title}</CardTitle>
+          <p className="mb-1 text-sm text-foreground/90">{approval.description}</p>
           {wb.pendingWriteFile ? (
             <div className="mb-3">
               <WriteFileDiffPanel
@@ -132,23 +132,23 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
             </div>
           ) : null}
           {wb.pendingToolName === "run_command" && pendingArgs?.command ? (
-            <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-amber-100">
+            <pre className="mb-3 max-h-40 overflow-auto rounded-lg bg-background p-3 text-xs text-warning">
               $ {String(pendingArgs.command)}
             </pre>
           ) : null}
           {wb.pendingToolCallId ? (
-            <p className="mb-3 text-xs text-slate-400">
+            <p className="mb-3 text-xs text-muted-foreground">
               工具：{wb.pendingToolName ?? "unknown"} · id=
               {wb.pendingToolCallId}
             </p>
           ) : (
-            <p className="mb-3 text-xs text-amber-400">
+            <p className="mb-3 text-xs text-warning">
               等待审批控件就绪，可稍后刷新当前轮次。
             </p>
           )}
           <div className="flex gap-2">
             <Button
-              className="bg-emerald-700"
+              className="bg-success text-success-foreground hover:bg-success/90"
               disabled={wb.actionBusy || !wb.pendingToolCallId}
               onClick={() => void wb.handleApprove()}
             >
@@ -168,8 +168,8 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
       {children}
 
       {layout !== "agent" && fileWrites.length > 0 && (
-        <section className="space-y-3 rounded-xl border border-violet-900/50 bg-violet-950/20 p-4">
-          <h2 className="text-sm font-medium text-violet-200">文件变更</h2>
+        <section className="space-y-3 rounded-xl border border-primary/30 bg-primary/10 p-4">
+          <h2 className="text-sm font-medium text-primary">文件变更</h2>
           {fileWrites.map((item, idx) => (
             <WriteFileDiffPanel
               key={String(item.tool_call_id ?? item.path ?? idx)}
@@ -181,10 +181,10 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
 
       {patches.length > 0 && (
         <section
-          className="space-y-3 rounded-xl border border-amber-900/50 bg-amber-950/20 p-4"
+          className="space-y-3 rounded-xl border border-warning/40 bg-warning-muted p-4"
           data-testid="patch-review"
         >
-          <h2 className="text-sm font-medium text-amber-200">Patch 审阅</h2>
+          <h2 className="text-sm font-medium text-warning">Patch 审阅</h2>
           {patches.map((patch) => (
             <PatchDiffPanel
               key={patch.patch_id}
@@ -197,12 +197,12 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         </section>
       )}
 
-      <section className="rounded-xl border border-slate-800 bg-slate-900/40 p-4">
-        <h2 className="mb-2 text-sm font-medium text-slate-400">
+      <section className="rounded-xl border border-border bg-card/40 p-4">
+        <h2 className="mb-2 text-sm font-medium text-muted-foreground">
           {layout === "agent" ? "调试事件流" : "事件流"}
         </h2>
         <pre
-          className={`overflow-auto text-xs text-slate-500 ${layout === "agent" ? "max-h-24" : "max-h-40"}`}
+          className={`overflow-auto text-xs text-muted-foreground ${layout === "agent" ? "max-h-24" : "max-h-40"}`}
         >
           {wb.events.map((e) => `${e.sequence}:${e.type}`).join(" → ") || "—"}
         </pre>

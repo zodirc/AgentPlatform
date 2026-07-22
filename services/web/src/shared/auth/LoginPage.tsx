@@ -28,10 +28,10 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-950 px-4">
-      <div className="w-full max-w-sm rounded-xl border border-slate-800 bg-slate-900/80 p-6 shadow-xl">
-        <h1 className="text-xl font-semibold text-white">Agent Platform</h1>
-        <p className="mt-1 text-sm text-slate-400">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <div className="w-full max-w-sm rounded-xl border border-border bg-card/80 p-6 shadow-xl">
+        <h1 className="text-xl font-semibold text-foreground">Agent Platform</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
           登录后可跨设备查看并继续自己的会话历史
         </p>
         <form
@@ -46,7 +46,7 @@ export function LoginPage() {
             onChange={(e) => setUsername(e.target.value)}
             placeholder="用户名"
             autoComplete="username"
-            className="border-slate-700 bg-slate-950"
+            className="border-input bg-background"
           />
           <Input
             type="password"
@@ -54,16 +54,16 @@ export function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="密码（至少 6 位）"
             autoComplete={mode === "login" ? "current-password" : "new-password"}
-            className="border-slate-700 bg-slate-950"
+            className="border-input bg-background"
           />
-          {error ? <p className="text-sm text-rose-300">{error}</p> : null}
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
           <Button type="submit" disabled={busy || !username.trim() || password.length < 6}>
             {busy ? "请稍候…" : mode === "login" ? "登录" : "注册并登录"}
           </Button>
         </form>
         <button
           type="button"
-          className="mt-4 text-sm text-sky-400 hover:underline"
+          className="mt-4 text-sm text-primary hover:underline"
           onClick={() => {
             setMode(mode === "login" ? "register" : "login");
             setError(null);

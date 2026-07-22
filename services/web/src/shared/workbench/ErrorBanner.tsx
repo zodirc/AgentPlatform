@@ -9,12 +9,12 @@ export function ErrorBanner({ error, onDismiss }: Props) {
     <div
       role="alert"
       data-testid="workbench-error"
-      className="flex items-start justify-between gap-3 rounded-lg border border-rose-800/60 bg-rose-950/40 px-4 py-3 text-sm text-rose-200"
+      className="flex items-start justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive"
     >
       <span>{error}</span>
       <button
         type="button"
-        className="text-rose-400 hover:text-rose-200"
+        className="text-destructive hover:text-destructive"
         onClick={onDismiss}
         aria-label="关闭错误提示"
       >

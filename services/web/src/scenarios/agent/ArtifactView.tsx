@@ -15,8 +15,8 @@ export function ArtifactView({ artifacts }: Props) {
       <CardTitle>Artifacts</CardTitle>
       <ul className="mt-2 space-y-2 text-xs">
         {items.map((item, idx) => (
-          <li key={idx} className="rounded bg-slate-950 px-3 py-2">
-            <span className="text-slate-400">{String(item.type)}</span>
+          <li key={idx} className="rounded bg-background px-3 py-2">
+            <span className="text-muted-foreground">{String(item.type)}</span>
             {" — "}
             {String(
               item.summary ??

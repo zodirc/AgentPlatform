@@ -39,13 +39,13 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
     isPending || mode === "approval" ? "待写入内容" : "写入内容";
 
   return (
-    <div className="rounded-lg border border-violet-800/60 bg-slate-950/80 p-3">
+    <div className="rounded-lg border border-primary/40 bg-background/80 p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-medium text-violet-100">
+          <p className="text-sm font-medium text-primary">
             {preview.path || "（无路径）"}
           </p>
-          <p className="text-xs text-slate-500">
+          <p className="text-xs text-muted-foreground">
             {isNewFile ? "新建文件" : "覆盖文件"}
             {preview.bytes_written != null
               ? ` · ${preview.bytes_written} 字节`
@@ -53,21 +53,21 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
             {preview.new_size != null ? ` · 共 ${preview.new_size} 字符` : ""}
           </p>
         </div>
-        <span className="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-300">
+        <span className="rounded bg-muted px-2 py-0.5 text-xs text-foreground/90">
           {statusLabel}
         </span>
       </div>
 
       <div className="grid gap-2 md:grid-cols-2">
         <div>
-          <p className="mb-1 text-xs text-slate-500">{leftTitle}</p>
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-slate-900 p-2 text-xs text-slate-300">
+          <p className="mb-1 text-xs text-muted-foreground">{leftTitle}</p>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-card p-2 text-xs text-foreground/90">
             {isNewFile ? "（无）" : oldPreview.text || "（空文件）"}
           </pre>
         </div>
         <div>
-          <p className="mb-1 text-xs text-slate-500">{rightTitle}</p>
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-slate-900 p-2 text-xs text-slate-200">
+          <p className="mb-1 text-xs text-muted-foreground">{rightTitle}</p>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-card p-2 text-xs text-foreground">
             {newPreview.text || "（无内容）"}
           </pre>
         </div>
@@ -76,7 +76,7 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
       {showExpand ? (
         <button
           type="button"
-          className="mt-2 text-xs text-violet-300 hover:text-violet-200"
+          className="mt-2 text-xs text-primary hover:text-primary"
           onClick={() => setExpanded((v) => !v)}
         >
           {expanded ? "收起预览" : "展开完整预览"}

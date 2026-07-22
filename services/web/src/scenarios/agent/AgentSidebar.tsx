@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2 } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import { deleteWorkspacePaths } from "../../shared/api/client";
+import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
 import {
   PatchDiffPanel,
   type PatchArtifact,
@@ -144,8 +145,11 @@ export function AgentSidebar({
   };
 
   const confirmDeleteSelected = () => {
-    const paths = [...checkedPaths];
-    if (paths.length === 0) return;
+    const paths = [...checkedPaths].filter((p) => !isSeedCorpusPath(p));
+    if (paths.length === 0) {
+      window.alert("系统资料（seed）不可删除。请只选择个人文件。");
+      return;
+    }
     const preview =
       paths.length <= 5
         ? paths.join("\n")
@@ -224,16 +228,16 @@ export function AgentSidebar({
   }, [selection, fileWrites, patches, wb.events]);
 
   return (
-    <aside className="flex h-full w-[min(360px,40vw)] shrink-0 flex-col border-r border-slate-800 bg-slate-950">
-      <header className="flex shrink-0 items-start justify-between gap-2 border-b border-slate-800 px-4 py-3">
+    <aside className="flex h-full w-[min(360px,40vw)] min-w-0 shrink-0 flex-col overflow-hidden border-r border-border bg-background">
+      <header className="flex shrink-0 items-start justify-between gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-slate-200">产物</h2>
-          <p className="text-xs text-slate-500">工作区文件 · 工具输出</p>
+          <h2 className="text-sm font-semibold text-foreground">产物</h2>
+          <p className="text-xs text-muted-foreground">工作区文件 · 工具输出</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
-            className="inline-flex items-center gap-1 rounded border border-slate-700 px-2 py-1 text-[11px] text-slate-300 hover:bg-slate-900 hover:text-slate-100 disabled:opacity-50"
+            className="inline-flex items-center gap-1 rounded border border-input px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted hover:text-foreground disabled:opacity-50"
             title="刷新工作区文件树"
             disabled={workspaceRefreshing}
             onClick={() => void refreshWorkspace()}
@@ -247,7 +251,7 @@ export function AgentSidebar({
           {onClose ? (
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 text-xs text-slate-500 hover:bg-slate-900 hover:text-slate-200"
+              className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
               title="收起产物栏"
               onClick={onClose}
             >
@@ -257,10 +261,10 @@ export function AgentSidebar({
         </div>
       </header>
 
-      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
-        <section className="border-b border-slate-800 p-3">
+      <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        <section className="border-b border-border p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
-            <h3 className="text-xs font-medium uppercase tracking-wide text-slate-500">
+            <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
               工作区
             </h3>
             <div className="flex shrink-0 items-center gap-1">
@@ -268,8 +272,8 @@ export function AgentSidebar({
                 type="button"
                 className={`rounded border px-2 py-0.5 text-[10px] ${
                   multiSelectMode
-                    ? "border-sky-700 bg-sky-950 text-sky-200"
-                    : "border-slate-700 text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                    ? "border-primary/50 bg-primary/15 text-primary"
+                    : "border-input text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
                 onClick={() => {
                   setMultiSelectMode((value) => {
@@ -283,7 +287,7 @@ export function AgentSidebar({
               {multiSelectMode && checkedPaths.size > 0 ? (
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 rounded border border-rose-800/60 px-2 py-0.5 text-[10px] text-rose-300 hover:bg-rose-950/40 disabled:opacity-50"
+                  className="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-50"
                   disabled={deleteSelected.isPending}
                   onClick={confirmDeleteSelected}
                 >
@@ -305,19 +309,19 @@ export function AgentSidebar({
             onOpenFile={onOpenWorkspaceFile}
             onOpenSourcesLibrary={onOpenSourcesLibrary}
           />
-          <p className="mt-2 text-[10px] text-slate-600">
+          <p className="mt-2 text-[10px] text-muted-foreground/80">
             {multiSelectMode
               ? "多选模式下点击条目勾选，可删除文件或目录"
               : "单击选中 · 双击在新窗口查看完整内容"}
           </p>
         </section>
 
-        <section className="border-b border-slate-800 p-3">
-          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+        <section className="border-b border-border p-3">
+          <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
             工具产物
           </h3>
           {previewableTimeline.length === 0 ? (
-            <p className="text-xs text-slate-600">暂无</p>
+            <p className="text-xs text-muted-foreground/80">暂无</p>
           ) : (
             <ul className="space-y-1">
               {previewableTimeline.map((item, idx) => {
@@ -331,8 +335,8 @@ export function AgentSidebar({
                       type="button"
                       className={`w-full rounded px-2 py-1.5 text-left text-xs ${
                         active
-                          ? "bg-sky-900/40 text-sky-200"
-                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                          ? "bg-primary/15 text-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       }`}
                       onClick={() =>
                         onSelect(
@@ -342,7 +346,7 @@ export function AgentSidebar({
                         )
                       }
                     >
-                      <span className="text-slate-500">{item.tool_name}</span>
+                      <span className="text-muted-foreground">{item.tool_name}</span>
                       <span className="ml-1 truncate">{label}</span>
                     </button>
                   </li>
@@ -353,8 +357,8 @@ export function AgentSidebar({
         </section>
 
         {fileWrites.length > 0 ? (
-          <section className="border-b border-slate-800 p-3">
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+          <section className="border-b border-border p-3">
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               文件变更
             </h3>
             <ul className="space-y-1">
@@ -368,8 +372,8 @@ export function AgentSidebar({
                       type="button"
                       className={`w-full truncate rounded px-2 py-1.5 text-left text-xs ${
                         active
-                          ? "bg-violet-900/40 text-violet-200"
-                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                          ? "bg-primary/20 text-primary"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       }`}
                       onClick={() =>
                         onSelect(active ? null : { kind: "file_write", path })
@@ -385,8 +389,8 @@ export function AgentSidebar({
         ) : null}
 
         {patches.length > 0 ? (
-          <section className="border-b border-slate-800 p-3">
-            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-500">
+          <section className="border-b border-border p-3">
+            <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
               Patch
             </h3>
             <ul className="space-y-1">
@@ -400,8 +404,8 @@ export function AgentSidebar({
                       type="button"
                       className={`w-full truncate rounded px-2 py-1.5 text-left text-xs ${
                         active
-                          ? "bg-amber-900/40 text-amber-200"
-                          : "text-slate-400 hover:bg-slate-900 hover:text-slate-200"
+                          ? "bg-warning-muted text-warning"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       }`}
                       onClick={() =>
                         onSelect(
@@ -420,7 +424,7 @@ export function AgentSidebar({
           </section>
         ) : null}
 
-        <div className="space-y-3 p-3">
+        <div className="min-w-0 space-y-3 overflow-hidden p-3">
           {scenarioExtras}
           <WritingCardsView artifacts={artifacts} />
           <RetrievalView artifacts={artifacts} />
@@ -428,19 +432,19 @@ export function AgentSidebar({
         </div>
       </div>
 
-      <div className="shrink-0 border-t border-slate-800">
+      <div className="shrink-0 border-t border-border">
         {selectedPreview ? (
           <div className="scrollbar-thin max-h-[45vh] overflow-y-auto p-4">
-            <p className="truncate text-sm font-medium text-slate-200">
+            <p className="truncate text-sm font-medium text-foreground">
               {selectedPreview.title}
             </p>
-            <p className="mb-2 text-xs text-slate-500">
+            <p className="mb-2 text-xs text-muted-foreground">
               {selectedPreview.subtitle}
             </p>
             {"loading" in selectedPreview && selectedPreview.loading ? (
-              <p className="text-xs text-slate-500">加载文件…</p>
+              <p className="text-xs text-muted-foreground">加载文件…</p>
             ) : "error" in selectedPreview && selectedPreview.error ? (
-              <p className="text-xs text-rose-400">
+              <p className="text-xs text-destructive">
                 无法读取文件
               </p>
             ) : "writePreview" in selectedPreview &&
@@ -454,13 +458,13 @@ export function AgentSidebar({
                 onReject={(id) => void wb.handleRejectPatch(id)}
               />
             ) : (
-              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-slate-900 p-3 text-xs text-slate-300">
+              <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-card p-3 text-xs text-foreground/90">
                 {selectedPreview.body || "（无内容）"}
               </pre>
             )}
           </div>
         ) : (
-          <p className="p-4 text-xs text-slate-600">
+          <p className="p-4 text-xs text-muted-foreground/80">
             双击工作区文件在新窗口查看，或点击工具产物预览
           </p>
         )}
