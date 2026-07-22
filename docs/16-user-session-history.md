@@ -14,10 +14,11 @@
 | UI 与现网一致 | 点选后走现有 turns + `AgentChatPanel` |
 | 续聊带上下文 | 切 `sessionId` → Runtime `load_session_transcript`；**不改 loop** |
 | 可删 | `DELETE /sessions/{id}`（本人） |
+| 会话绑世界 | `sessions.work_id` NOT NULL；建会话时绑定默认 Work（或显式 work_id） |
 
 **非目标（会话模块本身仍成立）：** 公网 SSO 全家桶；历史列表内嵌全文；认领上线前无主会话。  
 
-**磁盘 / 作品隔离：** 不在本文扩写。对话归属（`owner_user_id`）≠ 作品根隔离；后者见 [`27-multi-tenancy`](27-multi-tenancy.md)（`work_id` / `work_root`，**划分默认开启** · 个人自动单默认 Work）。
+**磁盘 / 作品隔离：** 不在本文扩写。对话归属（`owner_user_id`）≠ 作品根隔离；后者见 [`27-multi-tenancy`](27-multi-tenancy.md)（`work_id` / `work_root` **已落地**、划分默认开启 · 个人自动单默认 Work）。
 
 ---
 

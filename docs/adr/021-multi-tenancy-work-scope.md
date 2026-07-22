@@ -2,12 +2,12 @@
 
 ## 状态
 
-提案（2026-07-22）— 设计见 [`docs/27-multi-tenancy.md`](../27-multi-tenancy.md)。  
+已接受（2026-07-22）— 设计与落地见 [`docs/27-multi-tenancy.md`](../27-multi-tenancy.md)。  
 **落地：** MT0–MT5c + MT7（`make up-ha`）已合入。**否决 MT6**（Org / 作品显式 share）。MT5c = 检索硬 ACL、deny 证明、Admin/Sources 绑 Work、TenantContext 全字段。
 
 ## 背景
 
-平台已具备：`sessions.owner_user_id`（对话归属）、Work-over-Session（书稿不随会话拆）、RAG「热路径不建索引 / 否决 LLM-ACL」草图。部署仍是 **单 `WORKSPACE_ROOT` ≡ 全世界**，多用户同栈时资料与书稿无法证明隔离。
+平台已具备：`sessions.owner_user_id`（对话归属）、Work-over-Session（书稿不随会话拆）、RAG「热路径不建索引 / 否决 LLM-ACL」。此前部署仍是 **单 `WORKSPACE_ROOT` ≡ 全世界**，多用户同栈时资料与书稿无法证明隔离。
 
 若把多租户做成可关特性、loop 内策略、或按 `session_id` 建索引，会同时破坏：成熟 Agent「一个打开的世界」心智、R1–R5、以及「落地即进阶」的产品方向。
 

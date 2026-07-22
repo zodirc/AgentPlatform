@@ -36,11 +36,11 @@ Session **不应**拥有章节所有权。
 3. **与现有主路径兼容**：`draft_section` →（可选审阅）→ `propose_patch` → `sections/`；不引入第二套「静默覆盖正式稿」。
 4. **遵守 R1–R5**：不挡 TTFB；启动不额外同步调模型；热路径只做毫秒级路径解析与可选短 TOC 注入。
 
-### 非目标（本方案不做）
+### 非目标（本方案当初不做；部分已由多租户承接）
 
-- 多作品 / 多租户作品库（`Work` 表、作品切换器）——单 workspace 部署下 **workspace ≡ 当前作品**
+- ~~多作品 / 多租户作品库~~ → **个人默认 Work 已落地**（见 [`27`](27-multi-tenancy.md)）；**仍不做**作品切换器 UI、Org/显式分享  
 - 自动把历史 session 草稿全量迁移为正式稿（可提供一次性脚本，不进热路径）
-- 用 DB 存正文替代文件（仍以 workspace 文件为真源）
+- 用 DB 存正文替代文件（仍以世界根下文件为真源）
 - 为省 token 强制新会话（token 策略另见 §7，本方案只提供「换会话仍能续写」的前置条件）
 
 ---
@@ -225,19 +225,19 @@ drafts: .agent/work/drafts/ch3.md
 
 1. history 默认保留最近 `WRITING_DRAFT_HISTORY_KEEP`（默认 5）份；可调 0 关闭。
 2. 「确认进书」一键 UI（draft → `propose_patch`）仍可选增强。
-3. 多作品 / 多租户：见 §11；出现并行多书需求再引入 `work_id`。
+3. 多作品切换 UI：产品否决（一人一默认世界）；更多 Work 仅 API/运维面，见 [`27`](27-multi-tenancy.md)。
 
 ---
 
-## 11. 多用户演进（不阻塞本方案）
+## 11. 多用户：作品根已是 `work_root`（已落地）
 
-当前部署：`workspace ≡ 当前作品`。多用户 Web 平台时升级为：
+**当前：** 登录账号自动绑定默认 Work；书稿 / `.agent/work` / 私有 sources 落在 `work_root` 下；Session 带 `work_id`，只当对话线程。
 
 ```text
-User/Org → Work(work_id) → storage root → outline/sections/.agent/work
-                └── Session*（对话线程，可多人）
+Principal → 默认 Work(work_id) → work_root → outline / manuscript / .agent/work / sources
+                └── Session*（对话；可换；不拥有章节）
 ```
 
-路径变为 `{work_root}/.agent/work/drafts/...`；**概念不变**。鉴权挂在 Work ACL，runtime 只解析当前 Work 根。Session 永远不当作品容器。
+相对路径语义不变；鉴权与检索谓词挂在 Work；runtime 只看见当前世界根。Session 永远不当作品容器。
 
-**完整多租户设计（速率宪法、TenantContext、分期 MT\*、ADR-021）：** 见 [`27-multi-tenancy`](27-multi-tenancy.md)。
+**完整多租户（速率宪法、TenantContext、MT\*、ADR-021、否决 Org）：** 见 [`27-multi-tenancy`](27-multi-tenancy.md)。

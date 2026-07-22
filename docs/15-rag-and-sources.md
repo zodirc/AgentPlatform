@@ -57,7 +57,7 @@ search_records → 结构化业务行（可选；非写作主路径）
 | 阶段 | 索引范围 |
 |------|----------|
 | 今 | workspace `sources/**`（含 RO 挂载的 `sources/seed/writing/**`） |
-| 终局 | `owner_user_id` / tenant 私有库（IX5） |
+| 终局 | 个人默认 Work 私有库（IX5 ✅）+ 可选公共 seed；**无** Org 共享盘 |
 | 不做 | per-session 索引 |
 
 ---
