@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { WriteFilePreview } from "../shared/workbench/types";
 import { previewText } from "../shared/workbench/filePreview";
+import { UnifiedDiffView } from "./UnifiedDiffView";
 
 type Props = {
   preview: WriteFilePreview;
@@ -16,7 +17,6 @@ const STATUS_LABEL: Record<string, string> = {
 export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
   const [expanded, setExpanded] = useState(false);
   const isNewFile = !preview.old_text.trim();
-  const isPending = preview.status === "pending";
   const statusLabel =
     STATUS_LABEL[preview.status ?? ""] ?? preview.status ?? "unknown";
 
@@ -34,9 +34,9 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
     newPreview.truncated ||
     (preview.new_size ?? 0) > 8000;
 
-  const leftTitle = isNewFile ? "原文件（不存在）" : "原内容";
-  const rightTitle =
-    isPending || mode === "approval" ? "待写入内容" : "写入内容";
+  // Diff against truncated previews to keep browser work bounded.
+  const oldForDiff = isNewFile ? "" : oldPreview.text;
+  const newForDiff = newPreview.text;
 
   return (
     <div className="rounded-lg border border-primary/40 bg-background/80 p-3">
@@ -47,6 +47,7 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
           </p>
           <p className="text-xs text-muted-foreground">
             {isNewFile ? "新建文件" : "覆盖文件"}
+            {mode === "approval" ? " · 待批准" : ""}
             {preview.bytes_written != null
               ? ` · ${preview.bytes_written} 字节`
               : ""}
@@ -58,20 +59,7 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
         </span>
       </div>
 
-      <div className="grid gap-2 md:grid-cols-2">
-        <div>
-          <p className="mb-1 text-xs text-muted-foreground">{leftTitle}</p>
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-card p-2 text-xs text-foreground/90">
-            {isNewFile ? "（无）" : oldPreview.text || "（空文件）"}
-          </pre>
-        </div>
-        <div>
-          <p className="mb-1 text-xs text-muted-foreground">{rightTitle}</p>
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded bg-card p-2 text-xs text-foreground">
-            {newPreview.text || "（无内容）"}
-          </pre>
-        </div>
-      </div>
+      <UnifiedDiffView oldText={oldForDiff} newText={newForDiff} />
 
       {showExpand ? (
         <button
@@ -79,7 +67,7 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
           className="mt-2 text-xs text-primary hover:text-primary"
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? "收起预览" : "展开完整预览"}
+          {expanded ? "收起预览" : "展开完整预览后重算 diff"}
         </button>
       ) : null}
     </div>

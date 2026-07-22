@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import { UnifiedDiffView } from "./UnifiedDiffView";
 
 export type PatchArtifact = {
   type?: string;
@@ -42,39 +43,47 @@ export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
           写作模式已自动写入工作区（仍可对照下方 diff）
         </p>
       ) : null}
-      <Suspense
-        fallback={
-          <div className="grid gap-2 md:grid-cols-2">
-            <pre className="max-h-56 overflow-auto rounded bg-card p-2 text-xs">
-              {patch.old_text}
-            </pre>
-            <pre className="max-h-56 overflow-auto rounded bg-card p-2 text-xs">
-              {patch.new_text}
-            </pre>
+
+      <UnifiedDiffView oldText={patch.old_text} newText={patch.new_text} />
+
+      <details className="mt-2">
+        <summary className="cursor-pointer text-[11px] text-muted-foreground hover:text-foreground">
+          并排全文（可选）
+        </summary>
+        <Suspense
+          fallback={
+            <div className="mt-2 grid gap-2 md:grid-cols-2">
+              <pre className="max-h-56 overflow-auto rounded bg-card p-2 text-xs">
+                {patch.old_text}
+              </pre>
+              <pre className="max-h-56 overflow-auto rounded bg-card p-2 text-xs">
+                {patch.new_text}
+              </pre>
+            </div>
+          }
+        >
+          <div className="mt-2 grid gap-2 md:grid-cols-2">
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">旧文本</p>
+              <CodeMirror
+                value={patch.old_text}
+                height="180px"
+                readOnly
+                basicSetup={{ lineNumbers: true, foldGutter: false }}
+              />
+            </div>
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">新文本</p>
+              <CodeMirror
+                value={patch.new_text}
+                height="180px"
+                readOnly
+                basicSetup={{ lineNumbers: true, foldGutter: false }}
+              />
+            </div>
           </div>
-        }
-      >
-        <div className="grid gap-2 md:grid-cols-2">
-          <div>
-            <p className="mb-1 text-xs text-muted-foreground">旧文本</p>
-            <CodeMirror
-              value={patch.old_text}
-              height="220px"
-              readOnly
-              basicSetup={{ lineNumbers: true, foldGutter: false }}
-            />
-          </div>
-          <div>
-            <p className="mb-1 text-xs text-muted-foreground">新文本</p>
-            <CodeMirror
-              value={patch.new_text}
-              height="220px"
-              readOnly
-              basicSetup={{ lineNumbers: true, foldGutter: false }}
-            />
-          </div>
-        </div>
-      </Suspense>
+        </Suspense>
+      </details>
 
       {isPending && (
         <div className="mt-3 flex gap-2">
