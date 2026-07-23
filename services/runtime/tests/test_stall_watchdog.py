@@ -17,6 +17,7 @@ async def test_scan_stalled_runs_alerts_once_per_sequence() -> None:
         "trace_id": "00000000-0000-0000-0000-000000000003",
         "last_sequence": 4,
         "last_event_ts": stall_watchdog.datetime(2020, 1, 1, tzinfo=stall_watchdog.timezone.utc),
+        "cancel_requested_at": None,
     }
     pool = AsyncMock()
     pool.fetch = AsyncMock(return_value=[row])

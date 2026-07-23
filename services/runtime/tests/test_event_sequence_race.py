@@ -17,7 +17,13 @@ async def test_concurrent_append_event_sequences_unique() -> None:
     trace_id = uuid4()
     session_id = uuid4()
 
-    pool = await get_pool()
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            await conn.fetchval("SELECT 1")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"PostgreSQL not available for event-sequence race: {exc}")
+
     try:
         async with pool.acquire() as conn:
             await conn.execute(

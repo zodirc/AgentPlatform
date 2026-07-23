@@ -154,6 +154,7 @@ class ContextEngine:
         abort: Any | None = None,
     ) -> list[dict]:
         from app.context.compact_summarizer import summarize_messages_with_gateway
+        from app.settings import settings
 
         started = time.monotonic()
         fingerprint = _assemble_fingerprint(system_prompt, state, tools)

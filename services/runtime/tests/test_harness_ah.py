@@ -102,7 +102,7 @@ async def test_readonly_tools_run_in_parallel(monkeypatch: pytest.MonkeyPatch) -
     started: list[float] = []
     lock = asyncio.Lock()
 
-    async def slow_read(*, path: str = "", turn_id=None, run_id=None) -> dict:
+    async def slow_read(*, path: str = "", turn_id=None, run_id=None, **_kwargs) -> dict:
         async with lock:
             started.append(asyncio.get_event_loop().time())
         await asyncio.sleep(0.15)

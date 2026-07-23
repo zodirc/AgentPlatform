@@ -102,7 +102,7 @@ class StubModelProvider:
     ) -> AsyncIterator[str | ModelResponse]:
         user_text = _user_text(messages)
         tool_names = {t["name"] for t in tools}
-        has_tool_result = any(m.get("role") == "tool" for m in messages)
+        has_tool_result = _has_tool_result(messages)
         last_tool = _last_tool_name(messages)
 
         if _wants_stall(user_text) and not has_tool_result:
@@ -398,6 +398,19 @@ def _user_text(messages: list[dict]) -> str:
             if block.get("type") == "text":
                 parts.append(str(block.get("text", "")))
     return " ".join(parts)
+
+
+def _has_tool_result(messages: list[dict]) -> bool:
+    """True if transcript already includes a tool result (role=tool or tool_result block)."""
+    for msg in messages:
+        if msg.get("role") == "tool":
+            return True
+        content = msg.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    return True
+    return False
 
 
 def _last_user_text(messages: list[dict]) -> str:
