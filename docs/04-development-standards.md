@@ -85,10 +85,13 @@ agent/
 │           └── settings/            # 模型供应商等（ADR-019；调用 admin API）
 ├── scripts/
 │   ├── smoke_test.sh                # compose 冒烟
+│   ├── ux_signals.py                # 体验信号聚合（docs/28 PX1；环外）
 │   └── codegen.sh                   # 从 openapi 生成类型
 ├── .env.example
-├── Makefile                         # 薄封装，调用 compose
-└── .github/workflows/ci.yml
+├── Makefile                         # 薄封装，调用 compose；`make gate` = Proof 门禁
+└── .github/workflows/
+    ├── ci.yml                       # PR 阻断：L0 smoke + L1 eval-all + unit
+    └── nightly.yml                  # L2 live 样本（告警不阻断）
 ```
 
 ### 目录规则

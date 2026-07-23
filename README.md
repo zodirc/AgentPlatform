@@ -88,6 +88,9 @@ curl -fsS http://localhost/health/live
 
 ```bash
 make smoke          # L0
+# 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/29）
+make gate           # CI/无头 Proof 门禁（docs/28）：smoke → eval-all → runtime-test
+make ux-signals     # 体验信号自检（docs/28 PX1；环外）
 make eval-all       # stub golden（isolated + runtime-lite，不改日常 live）
 make eval-retrieval # writing.07（默认 ST 镜像）
 make eval-queue     # queue + worker profile（shared.16）

@@ -1,12 +1,12 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–27 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块**；变更只改对应正文。
 
-验证：`make smoke` · `make eval-all` · `make eval-retrieval` · `make retrieval-bench-prod` · `make runtime-test`
+验证：日常 Web 评测台（[29](29-ops-eval-console.md)）· `make smoke` · `make gate` · `make eval-all` · `make runtime-test`
 
 ---
 
-## 模块目录（01–27）
+## 模块目录（01–29）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -37,6 +37,8 @@ Agent Platform 架构与实施规范。**01–27 连续编号，一文一模块*
 | 25 | [writing-runway](25-writing-runway.md) | **Plan 模式（平台）**：步骤可见 / 同意执行 |
 | 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分已落地；判断力 PS4+） |
 | 27 | [multi-tenancy](27-multi-tenancy.md) | **多租户 / Work 作用域**（默认开启；MT0–MT5c + MT7；**否决 MT6 Org**） |
+| 28 | [proof-gate-and-ux-signals](28-proof-gate-and-ux-signals.md) | **Proof 门禁 + 体验信号**（环外；PX0–PX2 ✅） |
+| 29 | [ops-eval-console](29-ops-eval-console.md) | **Web 评测台**（日常自测；按 Turn stub/live；`OPS_TEST_SECRET`） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -52,6 +54,7 @@ Agent Platform 架构与实施规范。**01–27 连续编号，一文一模块*
 | RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md)（**RQ1 下一刀 → §9**） |
 | 会话归属 | [16](16-user-session-history.md) |
 | 多租户 / 作品根 | [27](27-multi-tenancy.md)（**已落地** · 默认开启 · 个人默认 Work · 否决 Org） |
+| Proof 门禁 / 体验信号 | [28](28-proof-gate-and-ux-signals.md)（**已落地** · `make gate` / `make ux-signals` · 不碰 loop） |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） |
 
 **维护纪律：** 禁止再开 `*-execution` 平行文；过时内容进 git，不留 stub 空号。
@@ -76,6 +79,7 @@ Agent Platform 架构与实施规范。**01–27 连续编号，一文一模块*
 | Skills / 多模态 / RE5 | ⏸/⏳ | 19 · 18 · 15 · 17 |
 | IX5 / RE4 个人私有库 | ✅ MT5c（无 Org/share） | 15 §6 · **[27](27-multi-tenancy.md)** |
 | 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
+| Proof 门禁 + 体验信号 | ✅ PX0–PX2（环外） | **[28](28-proof-gate-and-ux-signals.md)** · `make gate` · `make ux-signals` · `/settings/signals` |
 
 ---
 

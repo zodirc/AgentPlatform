@@ -176,20 +176,28 @@ POST /turns [trace_id]
 | `live` | 进程存活 |
 | `ready` | DB 连接、runtime 可达、可选 model ping |
 
-## 4. 本地回归分层
+## 4. 回归分层（CI + 本地）
 
-> 本仓库以本地 `make` 目标做回归；已移除 GitHub Actions CI / nightly。
+> **权威门禁**：[docs/28](28-proof-gate-and-ux-signals.md) PX0。  
+> 本地一键：**日常**用 Web 评测台（[29](29-ops-eval-console.md)）；**CI/无头**用 `make gate`（= `smoke` + `eval-all` + `runtime-test`）。  
+> Web 台对部分环境耦合命令会 **skipped**（不是失败），见 [29 §2.1](29-ops-eval-console.md)。  
+> 详见 [28](28-proof-gate-and-ux-signals.md)。
+> PR：`.github/workflows/ci.yml`（L0 + L1 + unit **阻断合并**）。  
+> Nightly：`.github/workflows/nightly.yml`（L2 live 样本，**告警不阻断**）。
 
 | 层级 | 内容 | 触发 |
 |------|------|------|
-| **L0 smoke** | compose up + health + 1 stub golden | 每 PR |
-| **L1 recorded** | §5.1 全量 stub/recorded（默认 31 条） | 每 PR |
-| **L1b recorded** | §5.2 能力融合 | 每 PR（**Phase 1b 起阻断**） |
-| **L1c profiles** | `make eval-retrieval`（writing.07）、`make eval-queue`（shared.16） | 每 PR（Phase 4） |
-| **L2 live sample** | `eval/golden/live/`（2 条） | nightly（`EVAL_LIVE_STRICT=1`） |
-| **L3 load** | 并发 5 Turn、SSE 重连压测 | nightly |
+| **L0 smoke** | compose up + health + 1 stub golden | 每 PR（`make smoke` / CI） |
+| **L1 stub** | 全量 stub Golden（`make eval-all`） | 每 PR |
+| **L1 unit** | `runtime-test` + contracts + ux-signals | 每 PR |
+| **L1b** | 能力融合用例（含于 eval-all / phase 1b） | 每 PR |
+| **L1c profiles** | `make eval-retrieval`、`make eval-queue` | 改 retrieval/queue 时本地加跑（见 CI 注释 PX0d） |
+| **L2 live sample** | `eval/golden/live/`（需 `MODEL_API_KEY`） | nightly（`EVAL_LIVE_STRICT=1`，不阻断） |
+| **L3 load** | 并发 5 Turn、SSE 重连压测 | nightly / 按需 |
 
 失败策略：L0/L1 阻断合并；L2 告警不阻断（记录漂移）。
+
+体验信号（环外）：`make ux-signals` · [docs/28](28-proof-gate-and-ux-signals.md) PX1。
 
 ## 5. Golden 清单
 
