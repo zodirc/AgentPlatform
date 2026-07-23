@@ -107,6 +107,9 @@ export type WorkbenchState = {
   pendingWriteFile: WriteFilePreview | null;
   useWebSocket: boolean;
   awaitingApproval: boolean;
+  /** Composer messages waiting for the live turn to finish (merged on flush). */
+  outboundQueue: string[];
+  clearOutboundQueue: () => void;
   handleSend: () => Promise<void>;
   handleVerify: () => Promise<void>;
   handleStop: () => Promise<void>;

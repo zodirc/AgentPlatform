@@ -43,6 +43,7 @@ import {
 } from "./plan";
 import { scenarioMeta } from "./scenarioMeta";
 import { tokenUsageFromEvents } from "./tokenUsage";
+import { mergeOutboundQueue } from "./outboundQueue";
 import { useWorkbenchSession } from "./workbenchSession";
 
 type StreamClient = TurnStreamClient | TurnWebSocketClient;
@@ -115,6 +116,7 @@ export function useWorkbenchImpl(): WorkbenchState {
   >({});
   const [stopping, setStopping] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [outboundQueue, setOutboundQueue] = useState<string[]>([]);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState(false);
@@ -149,9 +151,12 @@ export function useWorkbenchImpl(): WorkbenchState {
   const turnIdRef = useRef<string | null>(null);
   const streamTextRef = useRef("");
   const sectionDraftRef = useRef("");
+  const outboundQueueRef = useRef<string[]>([]);
+  const flushOutboundLockRef = useRef(false);
   turnIdRef.current = turnId;
   streamTextRef.current = streamText;
   sectionDraftRef.current = sectionDraft;
+  outboundQueueRef.current = outboundQueue;
 
   function syncHistoryFromView(v: TurnView) {
     setTurnHistory((prev) =>
@@ -577,9 +582,9 @@ export function useWorkbenchImpl(): WorkbenchState {
   async function handleSendText(
     textRaw: string,
     opts?: { planModeSend?: boolean; planPhase?: PlanPhaseWire | null },
-  ) {
+  ): Promise<boolean> {
     const text = textRaw.trim();
-    if (!sessionId || !text || busy) return;
+    if (!sessionId || !text || busy) return false;
     // Never rewrite the user's message. Plan discipline is plan_phase + runtime system prompt.
     const usePlan =
       opts?.planModeSend ?? (planMode && opts?.planPhase !== "executing");
@@ -636,16 +641,49 @@ export function useWorkbenchImpl(): WorkbenchState {
         }),
       );
       connectStream(turn.id);
+      return true;
     } catch (err) {
       setBusy(false);
       setActivePlanPhase(null);
       reportError("发送失败", err);
+      return false;
     }
   }
 
-  async function handleSend() {
-    await handleSendText(message);
+  function clearOutboundQueue() {
+    setOutboundQueue([]);
   }
+
+  async function handleSend() {
+    const text = message.trim();
+    if (!sessionId || !text) return;
+    // While a turn is running (or waiting on approval), queue instead of blocking.
+    // Multiple queued lines are merged into one message when the turn finishes.
+    if (busy || pendingApproval) {
+      setOutboundQueue((prev) => [...prev, text]);
+      setMessage("");
+      return;
+    }
+    await handleSendText(text);
+  }
+
+  // Flush queued composer messages after the live turn becomes idle.
+  useEffect(() => {
+    if (busy || pendingApproval || flushOutboundLockRef.current) return;
+    if (!sessionId) return;
+    const queued = outboundQueueRef.current;
+    if (queued.length === 0) return;
+    const merged = mergeOutboundQueue(queued);
+    setOutboundQueue([]);
+    if (!merged) return;
+    flushOutboundLockRef.current = true;
+    void handleSendText(merged).then((ok) => {
+      flushOutboundLockRef.current = false;
+      // Preserve any messages queued while the flush send was in flight.
+      if (!ok) setOutboundQueue((prev) => [...queued, ...prev]);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- flush on busy/approval/session only
+  }, [busy, pendingApproval, sessionId]);
 
   async function handleExecutePlan() {
     const snapshot =
@@ -931,6 +969,8 @@ export function useWorkbenchImpl(): WorkbenchState {
     canExecutePlan,
     handleExecutePlan,
     busy,
+    outboundQueue,
+    clearOutboundQueue,
     stopping,
     actionBusy,
     error,

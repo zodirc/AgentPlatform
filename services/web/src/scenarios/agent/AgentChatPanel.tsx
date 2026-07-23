@@ -246,16 +246,48 @@ export function AgentChatPanel({ wb }: Props) {
             </div>
           </div>
         ) : null}
+        {wb.outboundQueue.length > 0 ? (
+          <div className="space-y-1 rounded-md border border-border/80 bg-muted/30 px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] text-muted-foreground">
+                已排队 {wb.outboundQueue.length}{" "}
+                条，本轮结束后将合并为一条发送
+              </p>
+              <button
+                type="button"
+                className="shrink-0 text-[11px] text-muted-foreground hover:text-foreground"
+                onClick={() => wb.clearOutboundQueue()}
+              >
+                清空
+              </button>
+            </div>
+            <ul className="max-h-24 space-y-1 overflow-y-auto">
+              {wb.outboundQueue.map((item, index) => (
+                <li
+                  key={`${index}-${item.slice(0, 24)}`}
+                  className="truncate text-[11px] text-muted-foreground/90"
+                  title={item}
+                >
+                  {index + 1}. {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
         <Textarea
           className="min-h-[80px] resize-none text-sm"
           value={wb.message}
           onChange={(e) => wb.setMessage(e.target.value)}
-          placeholder={placeholderForScenario(wb.scenarioId)}
+          placeholder={
+            wb.busy || wb.awaitingApproval
+              ? "本轮进行中也可输入，发送后排队…"
+              : placeholderForScenario(wb.scenarioId)
+          }
           onKeyDown={(e) =>
             onChatEnterSend(
               e,
               () => void wb.handleSend(),
-              !wb.busy && Boolean(wb.message.trim()),
+              Boolean(wb.message.trim()),
             )
           }
         />
@@ -268,7 +300,7 @@ export function AgentChatPanel({ wb }: Props) {
                 ? "bg-primary hover:bg-primary/90"
                 : "border-primary/40 text-primary"
             }
-            disabled={wb.busy}
+            disabled={wb.busy || wb.awaitingApproval}
             onClick={() => wb.setPlanMode(!wb.planMode)}
             title="Plan 模式：先规划，确认后再执行"
           >
@@ -276,10 +308,15 @@ export function AgentChatPanel({ wb }: Props) {
           </Button>
           <Button
             size="sm"
-            disabled={wb.busy || !wb.message.trim()}
+            disabled={!wb.message.trim()}
             onClick={() => void wb.handleSend()}
+            title={
+              wb.busy || wb.awaitingApproval
+                ? "加入队列，本轮结束后合并发送"
+                : "发送"
+            }
           >
-            发送
+            {wb.busy || wb.awaitingApproval ? "排队" : "发送"}
           </Button>
           <Button
             size="sm"
