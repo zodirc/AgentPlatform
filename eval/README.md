@@ -44,6 +44,18 @@ python3 scripts/eval_run.py --phase 2
 
 | 层级 | 触发 | 内容 |
 |------|------|------|
-| L0 + L1 | PR / push `.github/workflows/ci.yml` | `make smoke`、`make eval-all`、runtime/contracts/ux-signals 单测（**阻断**） |
+| L0 + L1 | PR / push `.github/workflows/ci.yml` | `scripts/ci_proof.sh`：unit → smoke → **eval-all**（阻断） |
 | L1c 加跑 | 改 retrieval/queue 时本地 | `make eval-retrieval` / `make eval-queue`（见 ci.yml 注释） |
 | L2 live | `.github/workflows/nightly.yml` | `make eval-live`（**告警不阻断**） |
+
+### CI eval 对齐要点（docs/28）
+
+```text
+smoke (--build, runtime-lite, daily ../workspace)
+  → eval-run-isolated remounts .eval-workspace on runtime+api
+  → chown bind mount to runner uid (not silent chmod-only)
+  → pin system Work.work_root=/workspace
+  → scripts/eval_run.py
+```
+
+失败时看 Actions Step Summary / artifact `ci-proof-log`，或 `reports/eval-last-failures.txt`。

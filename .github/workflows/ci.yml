@@ -3,6 +3,12 @@
 # Same script as Ops Eval Console「完整证明」: scripts/ci_proof.sh
 # Does NOT run inside user Turns; zero impact on agent rate/logic.
 #
+# Flow (must stay aligned with scripts/ci_proof.sh + scripts/gate.sh):
+#   1. Bootstrap .env (stub + hash + Basic auth / ADMIN_SESSION_BYPASS)
+#   2. unit.* (no Docker)
+#   3. make gate → smoke (--build, runtime-lite) → eval-all
+#      eval remounts WORKSPACE_HOST_PATH=.eval-workspace on runtime+api,
+#      chowns bind mount to the runner uid, pins system work_root=/workspace
 # Path hint (PX0d): if you change retrieval/queue code or compose overlays,
 # also run locally: make eval-retrieval / make eval-queue before merge.
 # Prompt/tool sensitive paths (run make gate / Ops suite=ci):
@@ -51,5 +57,37 @@ jobs:
           grep -q '^ADMIN_SESSION_BYPASS=' .env || echo 'ADMIN_SESSION_BYPASS=true' >> .env
           sed -i 's/^END_USER_AUTH_ENABLED=.*/END_USER_AUTH_ENABLED=true/' .env || true
           grep -q '^END_USER_AUTH_ENABLED=' .env || echo 'END_USER_AUTH_ENABLED=true' >> .env
+          # Ensure no stale OPS secret disables unrelated mounts in CI images.
+          sed -i 's/^OPS_TEST_SECRET=.*/OPS_TEST_SECRET=/' .env || true
       - name: Full CI proof
-        run: CI=true GATE_SKIP_RESTORE=1 bash scripts/ci_proof.sh
+        run: |
+          set -o pipefail
+          CI=true GATE_SKIP_RESTORE=1 bash scripts/ci_proof.sh 2>&1 | tee ci-proof.log
+      - name: Summarize eval failures
+        if: failure()
+        run: |
+          {
+            echo "## CI proof failures"
+            echo ""
+            echo "Runner uid=\`$(id -u)\` gid=\`$(id -g)\` (runtime image app=1000)."
+            echo ""
+            if [[ -f reports/eval-last-failures.txt ]]; then
+              echo "### eval-last-failures.txt"
+              echo '```'
+              cat reports/eval-last-failures.txt
+              echo '```'
+            fi
+            echo "### FAIL / case lines (tail)"
+            echo '```'
+            grep -E 'FAIL:|^==> |case\(s\) failed|Error:|PermissionError|End-user' ci-proof.log | tail -80 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload proof log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-proof-log
+          path: |
+            ci-proof.log
+            reports/eval-last-failures.txt
+          if-no-files-found: ignore

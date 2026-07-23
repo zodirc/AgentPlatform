@@ -30,6 +30,8 @@ services/web/dist/
 debug.log
 .coverage
 *.log
+ci-proof.log
+reports/eval-last-failures.txt
 
 # agent runtime sandbox (bind-mounted; user-local)
 workspace/*

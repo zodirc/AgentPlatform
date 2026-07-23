@@ -78,6 +78,24 @@ def test_reset_workspace_clears_case_files_but_keeps_root(tmp_path: Path) -> Non
     assert outside.read_text() == "keep"
 
 
+def test_ci_strict_workspace_reads_ci_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    assert eval_run._ci_strict_workspace() is False
+    monkeypatch.setenv("CI", "true")
+    assert eval_run._ci_strict_workspace() is True
+
+
+def test_write_fixture_file_overwrites_after_chmod(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    target = workspace / "sources" / "tenant-own.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("old")
+    eval_run._write_fixture_file(target, "new-marker\n", workspace=workspace)
+    assert target.read_text() == "new-marker\n"
+
+
 def test_reset_workspace_preserves_seed_tree(tmp_path: Path) -> None:
     """Compose RO-mounts seed under sources/seed; reset must not rmtree it."""
     workspace = tmp_path / "eval-workspace"

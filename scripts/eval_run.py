@@ -179,13 +179,51 @@ def _is_mount_point(path: Path) -> bool:
         return False
 
 
-def force_workspace_writable(workspace: Path) -> None:
+def _ci_strict_workspace() -> bool:
+    """GitHub Actions / CI proof: workspace reclaim failures must not be silent."""
+    return os.environ.get("CI", "").lower() in {"true", "1"} or os.environ.get(
+        "GITHUB_ACTIONS", ""
+    ).lower() in {"true", "1"}
+
+
+def _docker_compose_exec_runtime(script: str, *, timeout: int = 120) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "deploy" / "docker-compose.yml"),
+            "--env-file",
+            str(ROOT / ".env"),
+            "exec",
+            "-u",
+            "0",
+            "-T",
+            "runtime",
+            "sh",
+            "-c",
+            script,
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def force_workspace_writable(workspace: Path, *, strict: bool | None = None) -> None:
     """Make bind-mounted eval workspace writable for the host runner.
 
-    Runtime/api containers often create root-owned files under WORKSPACE_HOST_PATH.
-    On GitHub Actions the runner user then cannot overwrite fixtures (e.g.
-    ``sources/tenant-own.md``) during the next case reset.
+    GitHub Actions runners are typically uid 1001 while runtime image runs as
+    ``app`` (uid 1000). Container writes under WORKSPACE_HOST_PATH then leave
+    host-owned residue the runner cannot overwrite (shared.17 fixtures).
+
+    Reclaim via ``chown`` to the host uid/gid (not only chmod). In CI, docker
+    reclaim failure raises — never swallow the root cause.
     """
+    if strict is None:
+        strict = _ci_strict_workspace()
+
     workspace.mkdir(parents=True, exist_ok=True)
     try:
         for dirpath, _dirnames, filenames in os.walk(workspace):
@@ -201,10 +239,50 @@ def force_workspace_writable(workspace: Path) -> None:
     except OSError:
         pass
 
-    # Root chmod via the running runtime container (same bind mount as /workspace).
-    # Skip the RO seed corpus mount so chmod does not fail the whole walk.
+    # Skip RO seed corpus mount. Chown host uid so the next fixture write works.
+    uid = os.getuid()
+    gid = os.getgid()
+    script = (
+        "set -e; "
+        "find /workspace "
+        r"\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \) -prune -o "
+        r"\( ! -type l -print0 \) | "
+        f"xargs -0 -r chown {uid}:{gid}; "
+        "find /workspace "
+        r"\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \) -prune -o "
+        r"\( -type d -exec chmod 0777 {} + \) -o \( -type f -exec chmod 0666 {} + \) "
+        "|| true"
+    )
     try:
-        subprocess.run(
+        proc = _docker_compose_exec_runtime(script)
+    except (OSError, subprocess.SubprocessError) as exc:
+        if strict:
+            raise RuntimeError(
+                f"eval workspace reclaim failed (docker exec): {exc}"
+            ) from exc
+        return
+
+    if proc.returncode != 0 and strict:
+        detail = (proc.stderr or proc.stdout or "").strip()[:800]
+        raise RuntimeError(
+            "eval workspace reclaim failed via docker (uid mismatch?). "
+            f"exit={proc.returncode} detail={detail!r}"
+        )
+
+
+def ensure_system_work_root_aligned() -> None:
+    """Pin system default Work to /workspace (runtime bind mount used by eval).
+
+    Migration seeds ``work_root=/workspace``; keep it pinned so host fixtures under
+    ``.eval-workspace`` stay visible to tools after smoke used the daily mount.
+    """
+    sql = (
+        "UPDATE works SET work_root = '/workspace', updated_at = now() "
+        "WHERE owner_user_id = '00000000-0000-4000-8000-000000000099'::uuid "
+        "AND is_default = true;"
+    )
+    try:
+        proc = subprocess.run(
             [
                 "docker",
                 "compose",
@@ -213,24 +291,35 @@ def force_workspace_writable(workspace: Path) -> None:
                 "--env-file",
                 str(ROOT / ".env"),
                 "exec",
-                "-u",
-                "0",
                 "-T",
-                "runtime",
-                "sh",
+                "postgres",
+                "psql",
+                "-U",
+                os.environ.get("POSTGRES_USER") or _env_value("POSTGRES_USER", "agent"),
+                "-d",
+                os.environ.get("POSTGRES_DB") or _env_value("POSTGRES_DB", "agent"),
+                "-v",
+                "ON_ERROR_STOP=1",
                 "-c",
-                "find /workspace "
-                r"\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \) -prune -o "
-                r"\( -type d -exec chmod 0777 {} + \) -o \( -type f -exec chmod 0666 {} + \) "
-                "2>/dev/null || true",
+                sql,
             ],
             check=False,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=60,
         )
-    except (OSError, subprocess.SubprocessError):
-        pass
+    except (OSError, subprocess.SubprocessError) as exc:
+        if _ci_strict_workspace():
+            raise RuntimeError(f"failed to align system work_root: {exc}") from exc
+        print(f"WARNING: could not align system work_root: {exc}", file=sys.stderr)
+        return
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()[:500]
+        msg = f"failed to align system work_root (psql exit {proc.returncode}): {detail}"
+        if _ci_strict_workspace():
+            raise RuntimeError(msg)
+        print(f"WARNING: {msg}", file=sys.stderr)
 
 
 def _rm_tree_skip_mounts(path: Path) -> None:
@@ -286,7 +375,7 @@ def reset_workspace(workspace: Path) -> None:
     That mount must not be rmtree'd — otherwise eval dies with PermissionError
     on ``writing`` (docs/15 · docs/28 gate / make eval-*).
     """
-    force_workspace_writable(workspace)
+    force_workspace_writable(workspace, strict=False)
     workspace.mkdir(parents=True, exist_ok=True)
     for child in list(workspace.iterdir()):
         if child.name == "sources" and child.is_dir() and not child.is_symlink():
@@ -304,7 +393,7 @@ def reset_workspace(workspace: Path) -> None:
             directory.chmod(0o777)
         except OSError:
             pass
-    force_workspace_writable(workspace)
+    force_workspace_writable(workspace, strict=False)
 
 
 def admin_create_provider(base: str, cmd: dict) -> None:
@@ -662,15 +751,22 @@ def _write_fixture_file(target: Path, content: str, *, workspace: Path) -> None:
         return
     except PermissionError:
         pass
-    # Root-owned leftover from a prior container turn — reclaim then rewrite.
-    force_workspace_writable(workspace)
+    # Container-owned leftover from a prior turn — chown to host then rewrite.
+    force_workspace_writable(workspace, strict=_ci_strict_workspace())
     try:
         if target.exists():
             target.chmod(0o666)
             target.unlink()
     except OSError:
         pass
-    target.write_text(content, encoding="utf-8")
+    try:
+        target.write_text(content, encoding="utf-8")
+    except PermissionError as exc:
+        rel = target.relative_to(workspace).as_posix()
+        raise PermissionError(
+            f"cannot write eval fixture {rel} (host uid={os.getuid()} vs "
+            f"runtime file owner). Reclaim/chown failed."
+        ) from exc
 
 
 def check_runtime_logs(needle: str) -> bool:
@@ -1416,23 +1512,49 @@ def main() -> int:
         print("No golden cases found", file=sys.stderr)
         return 1
 
+    # Align DB Work root + reclaim bind-mount ownership before the first case
+    # (CI: smoke mounts daily workspace, then eval remounts .eval-workspace).
+    ensure_system_work_root_aligned()
+    force_workspace_writable(workspace, strict=_ci_strict_workspace())
+
     failed = 0
     skipped_flaky = 0
+    fail_lines: list[str] = []
     for path in paths:
         case = yaml.safe_load(path.read_text())
+        case_id = str(case.get("id") or path.name)
         try:
             reset_workspace(workspace)
             run_case(path, args.base_url.rstrip("/"), workspace)
-        except (AssertionError, urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
+        except (
+            AssertionError,
+            urllib.error.URLError,
+            urllib.error.HTTPError,
+            TimeoutError,
+            PermissionError,
+            RuntimeError,
+            OSError,
+        ) as exc:
             if case.get("flaky") and args.mode == "live":
                 print(f"    FLAKY FAIL (allowed): {exc}", file=sys.stderr)
                 skipped_flaky += 1
                 continue
-            print(f"    FAIL: {exc}", file=sys.stderr)
+            line = f"{case_id}: {exc}"
+            print(f"    FAIL: {line}", file=sys.stderr)
+            fail_lines.append(line)
             failed += 1
+
+    report_dir = ROOT / "reports"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / "eval-last-failures.txt"
+    if fail_lines:
+        report_path.write_text("\n".join(fail_lines) + "\n", encoding="utf-8")
+    elif report_path.exists():
+        report_path.unlink()
 
     if failed:
         print(f"{failed} case(s) failed", file=sys.stderr)
+        print(f"Failure report: {report_path}", file=sys.stderr)
         return 1
     total = len(paths)
     if skipped_flaky:

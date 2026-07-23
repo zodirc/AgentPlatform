@@ -12,9 +12,12 @@ EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
 EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml
 EVAL_COMPOSE_PROFILES ?=
 EVAL_UP_ARGS ?=
-EVAL_UP_SERVICES ?= runtime
+# Recreate api+runtime together so both bind the same WORKSPACE_HOST_PATH
+# (.eval-workspace). Smoke leaves api on the daily ../workspace mount — if only
+# runtime is remounted, fixtures and admin paths can diverge on CI.
+EVAL_UP_SERVICES ?= runtime api
 EVAL_RUNTIME_ENV ?=
-EVAL_RESTORE_SERVICES ?= runtime
+EVAL_RESTORE_SERVICES ?= runtime api
 EVAL_BUILD ?=
 # After compose --build, prune dangling images (set DOCKER_AUTO_PRUNE=0 to skip).
 DOCKER_AUTO_PRUNE ?= 1
@@ -285,10 +288,9 @@ eval-run-isolated:
 	  docker compose -f deploy/docker-compose.yml --env-file .env logs --tail=40 runtime api; \
 	  exit 1; \
 	fi; \
-	echo "Reclaim eval workspace perms for host runner..."; \
+	echo "Reclaim eval workspace ownership for host runner (uid=$$(id -u))..."; \
 	docker compose -f deploy/docker-compose.yml --env-file .env exec -u 0 -T runtime \
-	  sh -c "find /workspace \\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \\) -prune -o \\( -type d -exec chmod 0777 {} + \\) -o \\( -type f -exec chmod 0666 {} + \\) 2>/dev/null || true" \
-	  || true; \
+	  sh -c "find /workspace \\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \\) -prune -o \\( ! -type l -print0 \\) | xargs -0 -r chown $$(id -u):$$(id -g); find /workspace \\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \\) -prune -o \\( -type d -exec chmod 0777 {} + \\) -o \\( -type f -exec chmod 0666 {} + \\); true"; \
 	chmod -R a+rwX $(EVAL_WORKSPACE) 2>/dev/null || true; \
 	env $(EVAL_RUNTIME_ENV) WORKSPACE_HOST_PATH=$(EVAL_WORKSPACE_HOST_PATH) \
 	  PYTHONUNBUFFERED=1 python3 -u scripts/eval_run.py --workspace $(EVAL_WORKSPACE) $(EVAL_ARGS)
