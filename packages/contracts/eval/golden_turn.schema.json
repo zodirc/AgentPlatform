@@ -98,8 +98,22 @@
             "name": { "type": "string" },
             "result_matches": { "type": "string" },
             "retrieval": {
-              "type": "string",
-              "enum": ["vector", "keyword", "hybrid", "keyword-fallback", "none"]
+              "description": "Expected retrieval mode, or any-of list (e.g. hybrid | keyword-fallback)",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": ["vector", "keyword", "hybrid", "keyword-fallback", "none"]
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "string",
+                    "enum": ["vector", "keyword", "hybrid", "keyword-fallback", "none"]
+                  }
+                }
+              ]
             },
             "forbidden_names": {
               "type": "array",

@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     ops_eval_compose_file: str = "/app/deploy/docker-compose.yml"
     ops_eval_compose_project_dir: str = "/app"
     ops_eval_docker_socket: str = "/var/run/docker.sock"
+    # Repo mount inside api (compose: ..:/repo) — used to discover host path for suite=ci.
+    ops_eval_repo_mount: str = "/repo"
+    ops_eval_repo_host_path: str = ""  # optional override; else docker inspect
 
 
 settings = Settings()

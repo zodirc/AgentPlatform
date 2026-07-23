@@ -1,10 +1,11 @@
-# Proof gate (docs/28 PX0 · docs/11 §4)
-# Blocks merge on L0 smoke + L1 stub golden + unit tests.
+# Proof gate (docs/28 PX0 · docs/11 §4 · docs/29 suite=ci)
+# Blocks merge on full CI proof: unit + smoke + eval-all + runtime-test.
+# Same script as Ops Eval Console「完整证明」: scripts/ci_proof.sh
 # Does NOT run inside user Turns; zero impact on agent rate/logic.
 #
 # Path hint (PX0d): if you change retrieval/queue code or compose overlays,
 # also run locally: make eval-retrieval / make eval-queue before merge.
-# Prompt/tool sensitive paths (run make gate):
+# Prompt/tool sensitive paths (run make gate / Ops suite=ci):
 #   services/runtime/app/scenarios/**/system.md
 #   services/runtime/app/tools/bootstrap.py
 #   services/runtime/app/controller/**
@@ -22,59 +23,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  unit:
-    name: unit (runtime + ux-signals + contracts)
+  proof:
+    name: CI proof (unit + gate)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: UX signals self-check (docs/28 PX1)
-        run: |
-          pip install -q packages/contracts/python
-          python3 scripts/ux_signals.py --self-check
-      - name: UX signals unit tests
-        run: |
-          pip install -q packages/contracts/python pytest
-          python3 -m pytest scripts/tests/test_ux_signals.py -q
-      - name: Runtime unit tests
-        run: |
-          cd services/runtime
-          pip install -q -e ".[dev]"
-          pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
-      - name: API UX signals route
-        run: |
-          pip install -q packages/contracts/python
-          cd services/api
-          pip install -q -e ".[dev]" 2>/dev/null || pip install -q -e .
-          PYTHONPATH=. pytest tests/test_ux_signals_api.py -q
-      - name: Contracts tests
-        run: |
-          pip install -q jsonschema pytest pyyaml
-          pytest packages/contracts/tests -q
-          pip install -q packages/contracts/python
-          pytest packages/contracts/python/tests -q
-
-  docker-gate:
-    name: docker gate (smoke + eval-all)
-    runs-on: ubuntu-latest
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
       - name: Bootstrap .env
         run: |
           if [[ ! -f .env ]]; then cp .env.example .env; fi
-          # CI always stub — never need live keys for L0/L1
           sed -i 's/^MODEL_MODE=.*/MODEL_MODE=stub/' .env || true
           grep -q '^MODEL_MODE=' .env || echo 'MODEL_MODE=stub' >> .env
-          # Prefer hash embedding for CI smoke (runtime-lite); avoid HF model bake.
           sed -i 's/^EMBEDDING_BACKEND=.*/EMBEDDING_BACKEND=hash/' .env || true
           grep -q '^EMBEDDING_BACKEND=' .env || echo 'EMBEDDING_BACKEND=hash' >> .env
           sed -i 's/^EMBEDDING_DIMENSIONS=.*/EMBEDDING_DIMENSIONS=256/' .env || true
           grep -q '^EMBEDDING_DIMENSIONS=' .env || echo 'EMBEDDING_DIMENSIONS=256' >> .env
-      - name: L0 smoke
-        run: CI=true SMOKE_RUNTIME_LITE=1 make smoke
-      - name: L1 stub golden
-        run: make eval-all
+      - name: Full CI proof
+        run: CI=true GATE_SKIP_RESTORE=1 bash scripts/ci_proof.sh

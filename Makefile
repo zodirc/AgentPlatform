@@ -16,12 +16,14 @@ EVAL_UP_SERVICES ?= runtime
 EVAL_RUNTIME_ENV ?=
 EVAL_RESTORE_SERVICES ?= runtime
 EVAL_BUILD ?=
+# After compose --build, prune dangling images (set DOCKER_AUTO_PRUNE=0 to skip).
+DOCKER_AUTO_PRUNE ?= 1
 
 .DEFAULT_GOAL := help
 
-.PHONY: help start up down ps logs smoke build migrate gate \
+.PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	up-web up-api up-runtime restart-web restart-api restart-runtime \
-	dev dev-init web-dev \
+	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
@@ -44,7 +46,8 @@ help: ## 显示常用命令
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
-	@echo "  make build        只构建镜像，不启动"
+	@echo "  make build        只构建镜像，不启动（结束后自动清理悬空镜像）"
+	@echo "  make docker-prune 额外清理：悬空镜像 + 旧 build cache"
 	@echo "  make down         停止"
 	@echo "  make ps / logs    状态 / 日志"
 	@echo ""
@@ -64,17 +67,29 @@ help: ## 显示常用命令
 start: ## 启动栈（不 rebuild，最快）
 	$(COMPOSE) up -d
 
+# Safe: only removes untagged (<none>) images left by retag-after-build.
+define docker_auto_prune
+	@if [ "$(DOCKER_AUTO_PRUNE)" = "1" ]; then \
+	  echo "==> auto-prune dangling images"; \
+	  docker image prune -f >/dev/null; \
+	fi
+endef
+
 up: ## 重建并启动全部服务
 	$(COMPOSE) up -d --build
+	$(docker_auto_prune)
 
 up-web: ## 只重建 web
 	$(COMPOSE) up -d --build web
+	$(docker_auto_prune)
 
 up-api: ## 只重建 api
 	$(COMPOSE) up -d --build api
+	$(docker_auto_prune)
 
 up-runtime: ## 只重建 runtime
 	$(COMPOSE) up -d --build runtime
+	$(docker_auto_prune)
 
 restart-web: ## 重启 web（不 rebuild）
 	$(COMPOSE) restart web
@@ -106,12 +121,24 @@ logs:
 
 build:
 	$(COMPOSE) build
+	$(docker_auto_prune)
+
+docker-prune: ## 清理悬空镜像 + 全部未用 build cache（可回收那 ~几十 GB）
+	@echo "==> dangling images"
+	docker image prune -f
+	@echo "==> unused build cache (all; ACTIVE=0 is safe)"
+	docker builder prune -af
+	@echo "==> done; docker system df:"
+	@docker system df
 
 smoke:
 	bash scripts/smoke_test.sh
 
-gate: ## Proof 一键门禁（docs/28）：smoke → eval-all → runtime-test，结束恢复日常栈
+gate: ## Docker 门禁：smoke → eval-all → runtime-test（完整 CI 请用 make ci-proof）
 	bash scripts/gate.sh
+
+ci-proof: ## 完整 CI 证明（≡ GitHub Actions / Ops suite=ci；unit 后 gate 不再重复 pytest）
+	bash scripts/ci_proof.sh
 
 ux-signals: ## 体验信号聚合+告警（docs/28 PX1；默认跑夹具自检）
 	python3 scripts/ux_signals.py --self-check
@@ -174,6 +201,10 @@ eval-run-isolated:
 	    sleep 3; \
 	    restore_once || echo "WARNING: automatic runtime restore failed; run 'make start'"; \
 	  fi; \
+	  if [ "$${DOCKER_AUTO_PRUNE:-1}" = "1" ]; then \
+	    echo "Auto-prune dangling images after eval restore..."; \
+	    docker image prune -f >/dev/null || true; \
+	  fi; \
 	  exit $$rc; \
 	}; \
 	trap restore_runtime EXIT; \
@@ -187,6 +218,10 @@ eval-run-isolated:
 	    docker compose $(EVAL_COMPOSE_FILES) --env-file .env $(EVAL_COMPOSE_PROFILES) \
 	    up -d --wait --wait-timeout 180 --force-recreate \
 	    $(EVAL_UP_ARGS) $(EVAL_UP_SERVICES); \
+	fi; \
+	if [ "$${DOCKER_AUTO_PRUNE:-1}" = "1" ] && [ -n "$(EVAL_BUILD)" ]; then \
+	  echo "Auto-prune dangling images after eval build..."; \
+	  docker image prune -f >/dev/null || true; \
 	fi; \
 	echo "Waiting for api → runtime readiness..."; \
 	i=0; \
@@ -274,16 +309,20 @@ contracts-test:
 
 up-queue:
 	WORKER_MODE=outbox $(COMPOSE_QUEUE) --profile queue up -d --build
+	$(docker_auto_prune)
 
 up-retrieval: ## 兼容入口（主 compose 已默认 Dockerfile.retrieval + embedding）
 	INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid $(COMPOSE_RETRIEVAL) --profile retrieval up -d --build
+	$(docker_auto_prune)
 
 up-full: ## 全栈：redis/worker（embedding 已在默认 up 中）
 	WORKER_MODE=outbox INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid \
 	  $(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval up -d --build
+	$(docker_auto_prune)
 
 up-ha:
 	$(COMPOSE_HA) up -d --build --scale runtime=0
+	$(docker_auto_prune)
 
 eval-stall:
 	$(MAKE) eval-run-isolated \

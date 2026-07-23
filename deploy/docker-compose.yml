@@ -89,6 +89,7 @@ services:
       retries: 5
 
   api:
+    image: agent-platform-api:latest
     build:
       context: ..
       dockerfile: services/api/Dockerfile
@@ -113,11 +114,16 @@ services:
       OPS_EVAL_GOLDEN_DIR: /app/eval/golden
       OPS_EVAL_COMPOSE_FILE: /app/deploy/docker-compose.yml
       OPS_EVAL_COMPOSE_PROJECT_DIR: /app
+      OPS_EVAL_REPO_MOUNT: /repo
+      # Optional absolute host path; else api discovers via docker inspect of /repo.
+      OPS_EVAL_REPO_HOST_PATH: ${OPS_EVAL_REPO_HOST_PATH:-}
     volumes:
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
       - ../eval/golden:/app/eval/golden:ro,z
       - ../deploy:/app/deploy:ro,z
       - ../.env:/app/.env:ro,z
+      # Full checkout for Ops suite=ci (CI-parity proof via docker.sock).
+      - ..:/repo:ro,z
       - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
@@ -132,6 +138,7 @@ services:
       retries: 5
 
   web:
+    image: agent-platform-web:latest
     build:
       context: ..
       dockerfile: services/web/Dockerfile
