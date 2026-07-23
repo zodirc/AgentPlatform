@@ -123,8 +123,6 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
-
   const files = sourcesQuery.data ?? [];
   const { mine, seed } = useMemo(() => {
     const mineList: string[] = [];
@@ -135,6 +133,9 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     }
     return { mine: mineList, seed: seedList };
   }, [files]);
+
+  if (!open) return null;
+
   const busy =
     uploadMutation.isPending ||
     pasteMutation.isPending ||
