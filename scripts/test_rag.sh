@@ -101,11 +101,20 @@ if [[ "${RAG_TEST_E2E:-}" == "1" ]]; then
   AUTH_HEADER=$(python3 - <<'PY'
 import base64
 from pathlib import Path
+
+def _env_val(raw: str) -> str:
+    v = raw.strip()
+    if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
+        return v[1:-1]
+    if "#" in v:
+        v = v.split("#", 1)[0].rstrip()
+    return v.strip()
+
 env = {}
 for line in Path(".env").read_text().splitlines():
     if line and not line.startswith("#") and "=" in line:
         k, v = line.split("=", 1)
-        env[k.strip()] = v.strip()
+        env[k.strip()] = _env_val(v)
 if env.get("AUTH_ENABLED", "false").lower() != "true":
     print("")
 else:

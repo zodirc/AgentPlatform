@@ -35,11 +35,17 @@ jobs:
       - name: Bootstrap .env
         run: |
           if [[ ! -f .env ]]; then cp .env.example .env; fi
+          # Rewrite key lines without inline comments (scripts strip them too;
+          # compose already ignores #, but keep values unambiguous for shell/python).
           sed -i 's/^MODEL_MODE=.*/MODEL_MODE=stub/' .env || true
           grep -q '^MODEL_MODE=' .env || echo 'MODEL_MODE=stub' >> .env
           sed -i 's/^EMBEDDING_BACKEND=.*/EMBEDDING_BACKEND=hash/' .env || true
           grep -q '^EMBEDDING_BACKEND=' .env || echo 'EMBEDDING_BACKEND=hash' >> .env
           sed -i 's/^EMBEDDING_DIMENSIONS=.*/EMBEDDING_DIMENSIONS=256/' .env || true
           grep -q '^EMBEDDING_DIMENSIONS=' .env || echo 'EMBEDDING_DIMENSIONS=256' >> .env
+          sed -i 's/^AUTH_ENABLED=.*/AUTH_ENABLED=true/' .env || true
+          grep -q '^AUTH_ENABLED=' .env || echo 'AUTH_ENABLED=true' >> .env
+          sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env || true
+          grep -q '^ADMIN_PASSWORD=' .env || echo 'ADMIN_PASSWORD=admin' >> .env
       - name: Full CI proof
         run: CI=true GATE_SKIP_RESTORE=1 bash scripts/ci_proof.sh

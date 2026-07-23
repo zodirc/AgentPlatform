@@ -107,6 +107,16 @@ def stream_headers() -> dict[str, str]:
     return headers
 
 
+def _strip_env_value(raw: str) -> str:
+    """Strip spaces, unquoted inline # comments, and matching quotes."""
+    v = raw.strip()
+    if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
+        return v[1:-1]
+    if "#" in v:
+        v = v.split("#", 1)[0].rstrip()
+    return v.strip()
+
+
 def _env_value(name: str, default: str = "") -> str:
     if name in os.environ:
         return os.environ[name]
@@ -115,7 +125,7 @@ def _env_value(name: str, default: str = "") -> str:
         return default
     for line in env_path.read_text().splitlines():
         if line.startswith(f"{name}="):
-            return line.split("=", 1)[1].strip()
+            return _strip_env_value(line.split("=", 1)[1])
     return default
 
 

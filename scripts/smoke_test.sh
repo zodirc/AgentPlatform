@@ -29,12 +29,21 @@ SMOKE_AUTH_HEADER=$(python3 - <<'PY'
 import base64
 from pathlib import Path
 
+def _env_val(raw: str) -> str:
+    """Strip spaces, unquoted inline # comments, and matching quotes."""
+    v = raw.strip()
+    if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
+        return v[1:-1]
+    if "#" in v:
+        v = v.split("#", 1)[0].rstrip()
+    return v.strip()
+
 env: dict[str, str] = {}
 for line in Path(".env").read_text().splitlines():
     if not line or line.startswith("#") or "=" not in line:
         continue
     key, value = line.split("=", 1)
-    env[key.strip()] = value.strip()
+    env[key.strip()] = _env_val(value)
 
 if env.get("AUTH_ENABLED", "false").lower() != "true":
     print("")
