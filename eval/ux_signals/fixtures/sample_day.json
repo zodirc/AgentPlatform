@@ -1,0 +1,71 @@
+{
+  "description": "docs/28 PX1 fixture — mixed writing signals for rate math",
+  "events": [
+    {
+      "type": "patch.applied",
+      "ts": "2026-07-20T10:00:00Z",
+      "turn_id": "t-a1",
+      "scenario_id": "writing",
+      "work_id": "work-1"
+    },
+    {
+      "type": "patch.applied",
+      "ts": "2026-07-20T10:05:00Z",
+      "turn_id": "t-a2",
+      "scenario_id": "writing",
+      "work_id": "work-1"
+    },
+    {
+      "type": "patch.rejected",
+      "ts": "2026-07-20T10:10:00Z",
+      "turn_id": "t-r1",
+      "scenario_id": "writing",
+      "work_id": "work-1"
+    },
+    {
+      "type": "turn.completed",
+      "ts": "2026-07-20T10:11:00Z",
+      "turn_id": "t-a1",
+      "scenario_id": "writing",
+      "work_id": "work-1"
+    },
+    {
+      "type": "turn.completed",
+      "ts": "2026-07-20T10:12:00Z",
+      "turn_id": "t-a2",
+      "scenario_id": "writing",
+      "work_id": "work-1"
+    },
+    {
+      "type": "turn.cancelled",
+      "ts": "2026-07-20T10:13:00Z",
+      "turn_id": "t-c1",
+      "scenario_id": "writing",
+      "work_id": "work-1"
+    },
+    {
+      "type": "tool.completed",
+      "ts": "2026-07-20T11:00:00Z",
+      "turn_id": "t-w1",
+      "scenario_id": "writing",
+      "work_id": "work-1",
+      "tool_name": "draft_section"
+    },
+    {
+      "type": "tool.completed",
+      "ts": "2026-07-20T11:10:00Z",
+      "turn_id": "t-w2",
+      "scenario_id": "writing",
+      "work_id": "work-1",
+      "tool_name": "propose_patch"
+    },
+    {
+      "type": "tool.completed",
+      "ts": "2026-07-20T12:00:00Z",
+      "turn_id": "t-w3",
+      "scenario_id": "writing",
+      "work_id": "work-1",
+      "tool_name": "draft_section"
+    }
+  ]
+}

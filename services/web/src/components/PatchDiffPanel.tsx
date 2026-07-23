@@ -1,6 +1,7 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { DiffViewerModal } from "./DiffViewerModal";
 import { UnifiedDiffView } from "./UnifiedDiffView";
+import { structureHints } from "../shared/workbench/structureHints";
 
 export type PatchArtifact = {
   type?: string;
@@ -19,12 +20,24 @@ type Props = {
   onAccept: (patchId: string) => void;
   onReject: (patchId: string) => void;
   busy?: boolean;
+  /** docs/28 PX2: show structure hints beside diff (default on; UI-only). */
+  showStructureHints?: boolean;
 };
 
-export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
+export function PatchDiffPanel({
+  patch,
+  onAccept,
+  onReject,
+  busy,
+  showStructureHints = true,
+}: Props) {
   const status = patch.status ?? "pending";
   const isPending = status === "pending";
   const [modalOpen, setModalOpen] = useState(false);
+  const hints = useMemo(
+    () => (showStructureHints ? structureHints(patch.new_text) : []),
+    [patch.new_text, showStructureHints],
+  );
 
   return (
     <div className="rounded-lg border border-warning/40 bg-background/80 p-3">
@@ -44,6 +57,15 @@ export function PatchDiffPanel({ patch, onAccept, onReject, busy }: Props) {
         <p className="mb-2 text-[11px] text-success/90">
           写作模式已自动写入工作区（仍可对照下方 diff）
         </p>
+      ) : null}
+
+      {hints.length > 0 ? (
+        <ul className="mb-2 space-y-1 rounded-md border border-border bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+          <li className="font-medium text-foreground/80">结构提醒（不阻断 · 不送模型）</li>
+          {hints.map((h) => (
+            <li key={`${h.code}:${h.message}`}>· {h.message}</li>
+          ))}
+        </ul>
       ) : null}
 
       <UnifiedDiffView oldText={patch.old_text} newText={patch.new_text} />

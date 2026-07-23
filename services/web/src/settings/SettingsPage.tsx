@@ -8,8 +8,10 @@ import {
   createModelProvider,
   deleteModelProvider,
   fetchDefaultWork,
+  fetchUxSignals,
   listModelProviders,
   updateModelProvider,
+  type UxSignalsReport,
 } from "../shared/api/client";
 import { useEndUserAuth } from "../shared/auth/EndUserAuth";
 import { useTheme } from "../shared/theme/ThemeProvider";
@@ -103,12 +105,132 @@ function Field({
 const inputClass =
   "w-full rounded border border-input bg-background px-3 py-2 text-sm text-foreground";
 
-type SettingsTab = "account" | "appearance" | "model";
+type SettingsTab = "account" | "appearance" | "model" | "signals";
 
 function tabFromPath(pathname: string): SettingsTab {
   if (pathname.endsWith("/model")) return "model";
   if (pathname.endsWith("/appearance")) return "appearance";
+  if (pathname.endsWith("/signals")) return "signals";
   return "account";
+}
+
+function formatRate(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  return `${(v * 100).toFixed(1)}%`;
+}
+
+function SignalsSection() {
+  const q = useQuery({
+    queryKey: ["ux-signals"],
+    queryFn: () => fetchUxSignals({ lookbackDays: 14 }),
+    retry: false,
+    staleTime: 60_000,
+  });
+  const report = q.data as UxSignalsReport | null | undefined;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold">体验信号</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          只读观测：拒稿率 / 短窗再改率 / 取消率（docs/28）。不进入 Agent
+          循环，失败不影响写作。
+        </p>
+      </div>
+
+      {q.isLoading ? (
+        <p className="text-sm text-muted-foreground">加载中…</p>
+      ) : null}
+
+      {q.isError || report === null ? (
+        <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+          暂无法拉取信号（可稍后重试）。工作台不受影响。
+        </p>
+      ) : null}
+
+      {report ? (
+        <>
+          <dl className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+            <div>
+              <dt>目标日</dt>
+              <dd className="font-mono text-foreground">{report.target_day}</dd>
+            </div>
+            <div>
+              <dt>事件数</dt>
+              <dd className="font-mono text-foreground">
+                {report.event_count ?? "—"}
+              </dd>
+            </div>
+            <div>
+              <dt>生成时间</dt>
+              <dd className="font-mono text-foreground">
+                {report.generated_at?.slice(0, 19) ?? "—"}
+              </dd>
+            </div>
+          </dl>
+
+          {report.alerts.length > 0 ? (
+            <div className="rounded-lg border border-warning/40 bg-warning-muted/40 p-3">
+              <p className="text-sm font-medium text-warning">告警</p>
+              <ul className="mt-2 space-y-1 text-xs text-foreground/90">
+                {report.alerts.map((a) => (
+                  <li key={`${a.day}:${a.scenario_id}:${a.metric}`}>
+                    {a.day} · {a.scenario_id} · {a.metric} ={" "}
+                    {formatRate(a.value)}（基线中位 {formatRate(a.baseline_median)}，样本{" "}
+                    {a.sample}）
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">当前无阈值告警。</p>
+          )}
+
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="min-w-full text-left text-xs">
+              <thead className="border-b border-border bg-muted/40 text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">日</th>
+                  <th className="px-3 py-2 font-medium">场景</th>
+                  <th className="px-3 py-2 font-medium">Reject</th>
+                  <th className="px-3 py-2 font-medium">Reedit</th>
+                  <th className="px-3 py-2 font-medium">Cancel</th>
+                  <th className="px-3 py-2 font-medium">样本</th>
+                </tr>
+              </thead>
+              <tbody>
+                {[...report.daily].reverse().map((row) => (
+                  <tr
+                    key={`${row.day}:${row.scenario_id}`}
+                    className="border-b border-border/60"
+                  >
+                    <td className="px-3 py-1.5 font-mono">{row.day}</td>
+                    <td className="px-3 py-1.5">{row.scenario_id}</td>
+                    <td className="px-3 py-1.5">{formatRate(row.rates.RejectRate)}</td>
+                    <td className="px-3 py-1.5">{formatRate(row.rates.ReeditRate)}</td>
+                    <td className="px-3 py-1.5">{formatRate(row.rates.CancelRate)}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground">
+                      r{row.samples.reject}/w{row.samples.reedit}
+                    </td>
+                  </tr>
+                ))}
+                {report.daily.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-3 py-4 text-center text-muted-foreground"
+                    >
+                      近两周暂无 patch / 终态事件
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 function AccountSection() {
@@ -672,6 +794,11 @@ export function SettingsPage() {
               label: "外观",
             },
             { id: "model" as const, to: "/settings/model", label: "模型" },
+            {
+              id: "signals" as const,
+              to: "/settings/signals",
+              label: "体验信号",
+            },
           ] as const
         ).map((item) => (
           <Link
@@ -697,6 +824,12 @@ export function SettingsPage() {
       {tab === "appearance" ? (
         <div className="mt-6">
           <AppearanceSection />
+        </div>
+      ) : null}
+
+      {tab === "signals" ? (
+        <div className="mt-6">
+          <SignalsSection />
         </div>
       ) : null}
 

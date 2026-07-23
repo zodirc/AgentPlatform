@@ -13,6 +13,9 @@ chmod -R a+rwx workspace 2>/dev/null || true
 
 COMPOSE="docker compose -f deploy/docker-compose.yml --env-file .env"
 BASE_URL="${SMOKE_BASE_URL:-http://localhost}"
+# L0 smoke is a contract path (docs/11 / docs/28): default stub so gate does not
+# depend on live provider keys. Override: SMOKE_MODEL_MODE=live make smoke
+SMOKE_MODEL_MODE="${SMOKE_MODEL_MODE:-stub}"
 
 # Mirror scripts/eval_run.py: when AUTH_ENABLED=true, API routes require Basic auth.
 SMOKE_AUTH_HEADER=$(python3 - <<'PY'
@@ -40,8 +43,21 @@ if [[ -n "$SMOKE_AUTH_HEADER" ]]; then
   CURL_AUTH+=(-H "$SMOKE_AUTH_HEADER")
 fi
 
-echo "==> Starting stack"
-$COMPOSE up -d --build
+restore_runtime_model_mode() {
+  # Put daily stack back to .env MODEL_MODE after stub smoke (best-effort).
+  # Must --wait so standalone `make smoke` leaves a healthy runtime.
+  echo "==> Restoring runtime MODEL_MODE from .env"
+  $COMPOSE up -d --force-recreate --remove-orphans --wait --wait-timeout 180 runtime \
+    || echo "WARNING: could not restore runtime; run: make start"
+}
+
+# When composed into `make gate`, skip mid-pipeline restore (gate owns final restore).
+if [[ "${SMOKE_SKIP_RESTORE:-0}" != "1" ]]; then
+  trap restore_runtime_model_mode EXIT
+fi
+
+echo "==> Starting stack (smoke MODEL_MODE=${SMOKE_MODEL_MODE})"
+MODEL_MODE="${SMOKE_MODEL_MODE}" $COMPOSE up -d --build
 
 echo "==> Waiting for services"
 deadline=$((SECONDS + 180))
@@ -57,6 +73,10 @@ while true; do
   fi
   sleep 3
 done
+
+# Ensure runtime picked up smoke MODEL_MODE (compose may have reused a live container).
+echo "==> Recreate runtime with MODEL_MODE=${SMOKE_MODEL_MODE}"
+MODEL_MODE="${SMOKE_MODEL_MODE}" $COMPOSE up -d --force-recreate --wait --wait-timeout 180 runtime
 
 echo "==> Health OK"
 
@@ -92,14 +112,19 @@ if auth:
     headers[key.strip()] = value.strip()
 req = urllib.request.Request(url, headers=headers)
 events = []
+failed_payload = None
 with urllib.request.urlopen(req, timeout=60) as resp:
     for raw in resp:
         line = raw.decode().strip()
         if line.startswith("data:"):
             data = json.loads(line[5:].strip())
             events.append(data["type"])
+            if data["type"] == "turn.failed":
+                failed_payload = data.get("payload") or data
             if data["type"] in ("turn.completed", "turn.failed", "turn.cancelled"):
                 break
+if failed_payload is not None:
+    print(json.dumps({"events": events, "failed": failed_payload}), file=sys.stderr)
 print(json.dumps(events))
 PY
 )
@@ -124,6 +149,12 @@ for need in required:
         idx += 1
     if idx >= len(events):
         print(f"missing {need} in {events}", file=sys.stderr)
+        if "turn.failed" in events:
+            print(
+                "hint: turn.failed usually means live model auth/network error; "
+                "L0 smoke defaults to MODEL_MODE=stub (see scripts/smoke_test.sh).",
+                file=sys.stderr,
+            )
         sys.exit(1)
     idx += 1
 print("L0 golden OK")

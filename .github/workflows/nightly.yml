@@ -1,0 +1,38 @@
+# Nightly Proof sample (docs/28 PX0c · docs/11 §4 L2)
+# Alert-only: does not block merges. Drift is recorded in job logs/artifacts.
+# Requires MODEL_API_KEY secret for live golden; otherwise job reports skip.
+
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 16 * * *" # 00:00 CST
+  workflow_dispatch:
+
+jobs:
+  live-sample:
+    name: L2 live golden (alert-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bootstrap .env
+        run: |
+          if [[ ! -f .env ]]; then cp .env.example .env; fi
+          if [[ -n "${{ secrets.MODEL_API_KEY }}" ]]; then
+            sed -i 's/^MODEL_MODE=.*/MODEL_MODE=live/' .env || true
+            grep -q '^MODEL_MODE=' .env || echo 'MODEL_MODE=live' >> .env
+            grep -q '^MODEL_API_KEY=' .env && sed -i "s|^MODEL_API_KEY=.*|MODEL_API_KEY=${{ secrets.MODEL_API_KEY }}|" .env \
+              || echo "MODEL_API_KEY=${{ secrets.MODEL_API_KEY }}" >> .env
+          else
+            echo "::warning::MODEL_API_KEY secret missing — nightly live sample skipped (not a merge blocker)"
+            exit 0
+          fi
+      - name: L2 eval-live
+        env:
+          EVAL_LIVE_STRICT: "1"
+        run: make eval-live
+        continue-on-error: true
+      - name: UX signals aggregate (fixture path; offline)
+        run: python3 scripts/ux_signals.py --self-check
+        continue-on-error: true

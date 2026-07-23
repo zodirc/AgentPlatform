@@ -19,13 +19,13 @@ EVAL_BUILD ?=
 
 .DEFAULT_GOAL := help
 
-.PHONY: help start up down ps logs smoke build migrate \
+.PHONY: help start up down ps logs smoke build migrate gate \
 	up-web up-api up-runtime restart-web restart-api restart-runtime \
 	dev dev-init web-dev \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
-	eval-plan-suggest eval-plan-suggest-tune \
+	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources retrieval-bench-prod loc
 
@@ -51,6 +51,8 @@ help: ## 显示常用命令
 	@echo "其他"
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
+	@echo "  make gate         Proof 一键门禁（smoke→eval-all→runtime-test；docs/28）"
+	@echo "  make ux-signals   体验信号日聚合/告警（docs/28 PX1；环外，不进 Turn）"
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
 	@echo "  make retrieval-bench 离线检索 A/B（docs/15 契约近似；hash）"
 	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
@@ -108,21 +110,31 @@ build:
 smoke:
 	bash scripts/smoke_test.sh
 
+gate: ## Proof 一键门禁（docs/28）：smoke → eval-all → runtime-test，结束恢复日常栈
+	bash scripts/gate.sh
+
+ux-signals: ## 体验信号聚合+告警（docs/28 PX1；默认跑夹具自检）
+	python3 scripts/ux_signals.py --self-check
+
 test-rag: ## RAG 检索效果：配置 + 查询对比 + tool_result 预览
 	bash scripts/test_rag.sh
 
+# Isolated stub golden: no live keys; skip sources watch/sync so StartTurn is not
+# racing startup index (docs/15 index plane vs Turn hot path).
+EVAL_STUB_ENV := MODEL_MODE=stub SOURCES_STARTUP_SYNC_ENABLED=false SOURCES_WATCH_ENABLED=false
+
 eval:
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 1"
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 1b"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 1"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 1b"
 
 eval-p2:
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 2"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 2"
 
 eval-p3:
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub" EVAL_ARGS="--phase 3"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 3"
 
 eval-all:
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="MODEL_MODE=stub"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)"
 
 eval-rubric:
 	python3 scripts/eval_rubric.py --sample-rate 0.05
@@ -143,6 +155,10 @@ eval-run-isolated:
 	restore_runtime() { \
 	  rc=$$?; \
 	  trap - EXIT; \
+	  if [ "$${EVAL_SKIP_RESTORE:-0}" = "1" ]; then \
+	    echo "Skipping eval restore (EVAL_SKIP_RESTORE=1; outer gate owns cleanup)"; \
+	    exit $$rc; \
+	  fi; \
 	  echo "Restoring ordinary runtime workspace..."; \
 	  restore_once() { \
 	    env -u WORKSPACE_HOST_PATH $(COMPOSE) \
@@ -172,8 +188,55 @@ eval-run-isolated:
 	    up -d --wait --wait-timeout 180 --force-recreate \
 	    $(EVAL_UP_ARGS) $(EVAL_UP_SERVICES); \
 	fi; \
+	echo "Waiting for api → runtime readiness..."; \
+	i=0; \
+	while [ $$i -lt 60 ]; do \
+	  if docker compose -f deploy/docker-compose.yml --env-file .env exec -T api \
+	    python -c 'import os,urllib.request; urllib.request.urlopen(os.environ.get("RUNTIME_URL","http://runtime:8001").rstrip("/")+"/health/live", timeout=3).read()' \
+	    >/dev/null 2>&1; then \
+	    echo "runtime health/live ok"; \
+	    break; \
+	  fi; \
+	  i=$$((i+1)); \
+	  sleep 2; \
+	done; \
+	if [ $$i -ge 60 ]; then \
+	  echo "ERROR: runtime not reachable from api after wait"; \
+	  docker compose -f deploy/docker-compose.yml --env-file .env ps; \
+	  exit 1; \
+	fi; \
+	echo "Probing runtime start-turn auth (expect 422/202)..."; \
+	j=0; \
+	while [ $$j -lt 30 ]; do \
+	  set +e; \
+	  out=$$(docker compose -f deploy/docker-compose.yml --env-file .env exec -T api \
+	    sh -c 'curl -s -o /dev/null -w "%{http_code}" \
+	      -X POST "$${RUNTIME_URL%/}/internal/commands/start-turn" \
+	      -H "Content-Type: application/json" \
+	      -H "X-Internal-Token: $$INTERNAL_SERVICE_TOKEN" \
+	      -d "{\"turn_id\":\"00000000-0000-4000-8000-0000000000aa\",\"run_id\":\"00000000-0000-4000-8000-0000000000bb\",\"session_id\":\"00000000-0000-4000-8000-0000000000cc\",\"scenario_id\":\"agent\",\"message\":\"probe\",\"trace_id\":\"00000000-0000-4000-8000-0000000000dd\"}"' \
+	    2>/dev/null | tr -d '\r' | tail -1); \
+	  rc=$$?; \
+	  set -e; \
+	  code=$${out:-0}; \
+	  if [ "$$code" = "422" ] || [ "$$code" = "400" ] || [ "$$code" = "202" ]; then \
+	    echo "runtime start-turn reachable (HTTP $$code)"; \
+	    break; \
+	  fi; \
+	  if [ "$$code" = "401" ]; then \
+	    echo "ERROR: INTERNAL_SERVICE_TOKEN mismatch between api and runtime"; \
+	    exit 1; \
+	  fi; \
+	  j=$$((j+1)); \
+	  sleep 2; \
+	done; \
+	if [ $$j -ge 30 ]; then \
+	  echo "ERROR: runtime start-turn probe failed (last HTTP $${code:-0})"; \
+	  docker compose -f deploy/docker-compose.yml --env-file .env logs --tail=40 runtime api; \
+	  exit 1; \
+	fi; \
 	env $(EVAL_RUNTIME_ENV) WORKSPACE_HOST_PATH=$(EVAL_WORKSPACE_HOST_PATH) \
-	  python3 scripts/eval_run.py --workspace $(EVAL_WORKSPACE) $(EVAL_ARGS)
+	  PYTHONUNBUFFERED=1 python3 -u scripts/eval_run.py --workspace $(EVAL_WORKSPACE) $(EVAL_ARGS)
 
 api-test:
 	cd services/api && pip install -q -e ".[dev]" 2>/dev/null || pip install -q pytest pydantic-settings httpx
