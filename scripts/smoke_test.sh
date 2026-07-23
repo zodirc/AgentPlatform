@@ -12,6 +12,13 @@ mkdir -p workspace/sections
 chmod -R a+rwx workspace 2>/dev/null || true
 
 COMPOSE="docker compose -f deploy/docker-compose.yml --env-file .env"
+# CI / Proof gate: use hash runtime-lite so smoke does not bake sentence-transformers
+# (HF download often fails on GitHub runners). Daily `make up` still uses Dockerfile.retrieval.
+if [[ "${SMOKE_RUNTIME_LITE:-}" == "1" ]] || [[ "${CI:-}" == "true" ]]; then
+  COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml --env-file .env"
+  export EMBEDDING_BACKEND="${EMBEDDING_BACKEND:-hash}"
+  export EMBEDDING_DIMENSIONS="${EMBEDDING_DIMENSIONS:-256}"
+fi
 BASE_URL="${SMOKE_BASE_URL:-http://localhost}"
 # L0 smoke is a contract path (docs/11 / docs/28): default stub so gate does not
 # depend on live provider keys. Override: SMOKE_MODEL_MODE=live make smoke

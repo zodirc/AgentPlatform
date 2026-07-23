@@ -34,7 +34,9 @@ echo "========================================"
 echo ""
 echo "==> [1/3] smoke"
 # Skip smoke's own restore — we restore once at the end (and eval also isolates).
-SMOKE_SKIP_RESTORE=1 SMOKE_MODEL_MODE="${SMOKE_MODEL_MODE:-stub}" bash scripts/smoke_test.sh
+SMOKE_SKIP_RESTORE=1 SMOKE_MODEL_MODE="${SMOKE_MODEL_MODE:-stub}" \
+  CI="${CI:-}" SMOKE_RUNTIME_LITE="${SMOKE_RUNTIME_LITE:-${CI:+1}}" \
+  bash scripts/smoke_test.sh
 
 echo ""
 echo "==> [2/3] eval-all"

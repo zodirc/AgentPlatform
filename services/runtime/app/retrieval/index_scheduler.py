@@ -81,6 +81,7 @@ def sync_sources_index_blocking() -> dict[str, Any]:
         )
 
     # Per-work private sources (docs/27 MT5c). Includes claimed /workspace Work.
+    work_roots_synced: set[Path] = set()
     try:
         import psycopg
 
@@ -99,6 +100,7 @@ def sync_sources_index_blocking() -> dict[str, Any]:
             src = root / "sources"
             if not src.is_dir():
                 continue
+            work_roots_synced.add(root)
             results.append(
                 _sync_one(
                     src,
@@ -110,6 +112,24 @@ def sync_sources_index_blocking() -> dict[str, Any]:
             )
     except Exception as exc:
         logger.warning("works-scoped index sync skipped: %s", exc)
+
+    # Always cover settings.workspace_root when it is not already a Work root
+    # (unit tests, ops per-case trees, empty works table).
+    if workspace_root.resolve() not in work_roots_synced:
+        sources_root = workspace_root / "sources"
+        if sources_root.is_dir():
+            try:
+                results.append(
+                    _sync_one(
+                        sources_root,
+                        workspace_root=workspace_root,
+                        work_id=None,
+                        visibility="private",
+                    )
+                )
+            except ValueError as exc:
+                # pgvector private sync requires work_id; json/hash backends do not.
+                logger.warning("workspace_root sources sync skipped: %s", exc)
 
     orphan = _purge_orphan_private()
 

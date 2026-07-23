@@ -721,14 +721,27 @@ def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
         "query",
         "path_prefix",
     }
-    terms = [
-        t.lower()
-        for t in re.split(r"[\s/\[\]=:]+", query.strip())
-        if len(t) >= 6 and t.lower() not in stop and not t.isdigit()
-    ]
+    _cjk = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]")
+    terms: list[str] = []
+    for t in re.split(r"[\s/\[\]=:]+", query.strip()):
+        if not t or t.isdigit():
+            continue
+        tl = t.lower()
+        if tl in stop:
+            continue
+        # Latin runtime noise needs length; CJK names (e.g. 张白鹿) are short but real.
+        if _cjk.search(t):
+            if len(t) >= 2:
+                terms.append(tl)
+        elif len(t) >= 6:
+            terms.append(tl)
     if not terms:
-        # No distinctive tokens — treat ANN as non-authoritative.
-        return False
+        q = query.strip().lower()
+        if _cjk.search(query) and len(q) >= 2 and q not in stop:
+            terms = [q]
+        else:
+            # No distinctive tokens — treat ANN as non-authoritative.
+            return False
     for hit in hits:
         blob = f"{hit.get('path', '')}\n{hit.get('excerpt', '')}".lower()
         if any(term in blob for term in terms):

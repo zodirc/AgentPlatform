@@ -191,7 +191,12 @@ async def test_search_sources_hybrid_mode(workspace: Path, monkeypatch: pytest.M
     )
     monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
     monkeypatch.setattr(settings, "data_dir", str(workspace))
+    monkeypatch.setattr(settings, "retrieval_backend", "json")
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    from app.retrieval.embedder import reset_embedder_cache
 
+    reset_embedder_cache()
     # Index is built off the query path (A9).
     await core.sync_sources_index()
     result = await core.search_sources("张白鹿", limit=3)
@@ -278,6 +283,12 @@ async def test_search_sources_path_prefix_hybrid(
     )
     monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
     monkeypatch.setattr(settings, "data_dir", str(workspace))
+    monkeypatch.setattr(settings, "retrieval_backend", "json")
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    from app.retrieval.embedder import reset_embedder_cache
+
+    reset_embedder_cache()
     await core.sync_sources_index()
 
     result = await core.search_sources("annual leave", path_prefix="hr", limit=5)

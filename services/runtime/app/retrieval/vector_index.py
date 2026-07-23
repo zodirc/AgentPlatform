@@ -111,11 +111,19 @@ class SourceVectorIndex:
         added = 0
         updated = 0
         skipped = 0
+        seed_root = (workspace_root.resolve() / "sources" / "seed").resolve()
+        syncing_seed_tree = sources_dir.resolve() == seed_root or seed_root in sources_dir.resolve().parents
 
         for fp in sorted(sources_dir.rglob("*")):
             if not fp.is_file() or not should_index_source(fp):
                 continue
             rel = str(fp.relative_to(workspace_root.resolve()))
+            # When syncing workspace/sources as a whole, leave standing seed to the
+            # dedicated seed pass (docs/15 / docs/27).
+            if not syncing_seed_tree and (
+                rel == "sources/seed" or rel.startswith("sources/seed/")
+            ):
+                continue
             seen_paths.add(rel)
             mtime = fp.stat().st_mtime
             prev = files_meta.get(rel)

@@ -121,6 +121,8 @@ async def test_run_turn_help_short_circuit(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(tc, "get_pool", AsyncMock(return_value=_Pool()))
     monkeypatch.setattr(tc, "append_event", fake_append_event)
     monkeypatch.setattr(tc, "load_session_context", AsyncMock(return_value=None))
+    monkeypatch.setattr(tc, "load_session_transcript", AsyncMock(return_value=None))
+    monkeypatch.setattr(tc, "load_session_owner_user_id", AsyncMock(return_value=None))
     monkeypatch.setattr(tc, "resolve_model_config", AsyncMock(return_value=None))
     monkeypatch.setattr(tc, "resolve_active_profile_metadata", AsyncMock(return_value=None))
     monkeypatch.setattr(tc.settings, "runtime_runner_id", "runtime-test")
@@ -204,6 +206,13 @@ async def test_deny_tool_call_resumes_via_langgraph(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tc, "_finalize_turn", finalize)
     monkeypatch.setattr(tc, "_cleanup_pending_after_command", AsyncMock())
     monkeypatch.setattr(tc, "resolve_model_config", AsyncMock(return_value=None))
+    monkeypatch.setattr(tc, "resolve_context_window_tokens", AsyncMock(return_value=128000))
+    monkeypatch.setattr(tc, "load_session_owner_user_id", AsyncMock(return_value=None))
+
+    async def _passthrough_tenant(_session_id, coro):
+        return await coro
+
+    monkeypatch.setattr(tc, "_with_session_tenant", _passthrough_tenant)
     monkeypatch.setattr(tc.settings, "runtime_runner_id", "runtime-test")
 
     await tc.deny_tool_call(
@@ -239,6 +248,11 @@ async def test_approve_tool_call_mismatch_skips_resume(monkeypatch: pytest.Monke
     monkeypatch.setattr(tc, "_resolve_pending", AsyncMock(return_value=pending))
     monkeypatch.setattr(tc, "run_via_langgraph", run_lg)
     monkeypatch.setattr(tc, "_cleanup_pending_after_command", AsyncMock())
+
+    async def _passthrough_tenant(_session_id, coro):
+        return await coro
+
+    monkeypatch.setattr(tc, "_with_session_tenant", _passthrough_tenant)
 
     await tc.approve_tool_call(
         turn_id=turn_id,

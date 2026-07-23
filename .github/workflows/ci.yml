@@ -69,7 +69,12 @@ jobs:
           # CI always stub — never need live keys for L0/L1
           sed -i 's/^MODEL_MODE=.*/MODEL_MODE=stub/' .env || true
           grep -q '^MODEL_MODE=' .env || echo 'MODEL_MODE=stub' >> .env
+          # Prefer hash embedding for CI smoke (runtime-lite); avoid HF model bake.
+          sed -i 's/^EMBEDDING_BACKEND=.*/EMBEDDING_BACKEND=hash/' .env || true
+          grep -q '^EMBEDDING_BACKEND=' .env || echo 'EMBEDDING_BACKEND=hash' >> .env
+          sed -i 's/^EMBEDDING_DIMENSIONS=.*/EMBEDDING_DIMENSIONS=256/' .env || true
+          grep -q '^EMBEDDING_DIMENSIONS=' .env || echo 'EMBEDDING_DIMENSIONS=256' >> .env
       - name: L0 smoke
-        run: make smoke
+        run: CI=true SMOKE_RUNTIME_LITE=1 make smoke
       - name: L1 stub golden
         run: make eval-all
