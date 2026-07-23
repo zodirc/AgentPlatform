@@ -33,7 +33,10 @@ assertions:
   tool:
     name: search_sources
     result_matches: "张白鹿"
-    retrieval: hybrid
+    # Standing ANN may miss ops-only fixtures → keyword-fallback; hybrid OK when indexed.
+    retrieval:
+      - hybrid
+      - keyword-fallback
   output:
     matches: "张白鹿"
 

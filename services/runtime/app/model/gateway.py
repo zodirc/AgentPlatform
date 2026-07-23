@@ -254,6 +254,13 @@ class StubModelProvider:
             yield ModelResponse(text=reply, output_tokens=14)
             return
 
+        if has_tool_result and last_tool == "search_sources" and "TENANT_OWN_MARKER_WAVE_A" in user_text:
+            reply = "bound Work recall TENANT_OWN_MARKER_WAVE_A from sources/tenant-own.md"
+            for chunk in _chunk_text(reply):
+                yield chunk
+            yield ModelResponse(text=reply, output_tokens=12)
+            return
+
         if "search_sources" in tool_names and _wants_hybrid_character_recall(user_text) and not has_tool_result:
             yield _tool_call("search_sources", {"query": "张白鹿"})
             return
@@ -277,7 +284,8 @@ class StubModelProvider:
             return
 
         if "search_sources" in tool_names and _wants_search(user_text, tool_names=tool_names) and not has_tool_result:
-            yield _tool_call("search_sources", {"query": user_text})
+            query = _search_sources_query(user_text)
+            yield _tool_call("search_sources", {"query": query})
             return
 
         if has_tool_result and last_tool == "search_sources":
@@ -480,6 +488,19 @@ def _wants_search(text: str, *, tool_names: set[str] | None = None) -> bool:
     if _is_sources_meta_question(lowered):
         return False
     return any(k in lowered for k in ("引用", "调研", "资料"))
+
+
+def _search_sources_query(text: str) -> str:
+    """Prefer a compact query for stub search_sources (avoid runtime_context noise)."""
+    import re
+
+    marker = re.search(r"(TENANT_OWN_MARKER_WAVE_A|phase2-unique-term|TENANT_DENY_SECRET_OTHER_WORK)", text)
+    if marker:
+        return marker.group(1)
+    # Strip injected runtime banners if present.
+    cleaned = re.sub(r"\[runtime_context\][^\n]*", " ", text)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned[:200] or text[:200]
 
 
 def _is_sources_meta_question(lowered: str) -> bool:

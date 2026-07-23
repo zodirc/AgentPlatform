@@ -13,6 +13,7 @@ assertions:
   events:
     sequence_equals:
       - turn.accepted
+      - cards.pinned
       - step.started
       - context.reported
       - turn.thinking

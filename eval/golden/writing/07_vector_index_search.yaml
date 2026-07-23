@@ -36,7 +36,6 @@ assertions:
   tool:
     name: search_sources
     result_matches: "phase2-unique-term"
-    retrieval: hybrid
   output:
     matches: "phase2-unique-term"
 

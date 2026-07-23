@@ -333,6 +333,56 @@ async def test_search_sources_path_prefix_empty_ann_falls_back_keyword(
 
 
 @pytest.mark.asyncio
+async def test_search_sources_ann_without_query_terms_falls_back_keyword(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Hash/ANN neighbors that omit query tokens must not suppress on-disk keyword."""
+    sources = workspace / "sources"
+    sources.mkdir()
+    (sources / "new-chunk.md").write_text(
+        "New material with phase2-unique-term for vector recall.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "data_dir", str(workspace))
+
+    class FakeStore:
+        def load(self) -> None:
+            return None
+
+        def search(self, query: str, limit: int = 10, mode: str = "hybrid"):
+            return [
+                {
+                    "path": "sources/seed/writing/noise.md",
+                    "excerpt": "unrelated seed neighbor from hash ANN",
+                    "score": 0.4,
+                    "citation_id": "cite:noise",
+                    "visibility": "seed",
+                }
+            ]
+
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
+    monkeypatch.setattr(
+        "app.retrieval.tenant_visibility.filter_hits_for_tenant",
+        lambda hits: hits,
+    )
+    result = await core.search_sources("phase2-unique-term", limit=5)
+    assert result["retrieval"] == "keyword-fallback"
+    assert result["index"].get("ann_missed_query_terms") is True
+    assert result["hits"]
+    assert "phase2-unique-term" in result["hits"][0]["excerpt"]
+
+
+def test_hits_cover_query_terms_ignores_runtime_noise() -> None:
+    from app.tools.core.tools import _hits_cover_query_terms
+
+    seed_hit = {"path": "sources/seed/writing/noise.md", "excerpt": "unrelated"}
+    assert _hits_cover_query_terms([seed_hit], "writing search_sources TENANT_OWN_MARKER_WAVE_A") is False
+    own = {"path": "sources/tenant-own.md", "excerpt": "TENANT_OWN_MARKER_WAVE_A present"}
+    assert _hits_cover_query_terms([own], "TENANT_OWN_MARKER_WAVE_A") is True
+
+
+@pytest.mark.asyncio
 async def test_search_sources_keyword_section_fields(
     workspace: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

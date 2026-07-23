@@ -559,6 +559,7 @@ async def update_outline(
         ):
             return {
                 "status": "error",
+                "path": path,
                 "error": (
                     f"refusing outline replace that shrinks {len(existing)}→{len(content)} chars; "
                     "use mode=append for continuation, or force=true for intentional full rewrite"
@@ -701,6 +702,40 @@ def _attach_filter_meta(payload: dict[str, Any], filter_meta: dict[str, Any]) ->
     return payload
 
 
+def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
+    """True if at least one distinctive query token appears in a hit path or excerpt.
+
+    Hash / weak ANN neighbors can rank unrelated seed chunks above a brand-new
+    on-disk fixture; falling through to keyword keeps goldens and remounts honest.
+    Ignores short/runtime-noise tokens so a polluted stub query cannot 'cover'
+    via ``writing`` in ``sources/seed/writing/...``.
+    """
+    stop = {
+        "writing",
+        "search_sources",
+        "scenario_id",
+        "runtime_context",
+        "steps_remaining",
+        "sources",
+        "step",
+        "query",
+        "path_prefix",
+    }
+    terms = [
+        t.lower()
+        for t in re.split(r"[\s/\[\]=:]+", query.strip())
+        if len(t) >= 6 and t.lower() not in stop and not t.isdigit()
+    ]
+    if not terms:
+        # No distinctive tokens — treat ANN as non-authoritative.
+        return False
+    for hit in hits:
+        blob = f"{hit.get('path', '')}\n{hit.get('excerpt', '')}".lower()
+        if any(term in blob for term in terms):
+            return True
+    return False
+
+
 async def search_sources(
     query: str,
     limit: int = 10,
@@ -768,7 +803,7 @@ async def search_sources(
             }
             return _attach_filter_meta(payload, filter_meta)
         hits = _format_source_hits(filtered[:limit], excerpt_chars=excerpt_chars)
-        if hits:
+        if hits and _hits_cover_query_terms(hits, query):
             payload = {
                 "query": query,
                 "hits": hits,
@@ -785,9 +820,13 @@ async def search_sources(
                 )
             return payload
         # ANN returned hits, but path_prefix removed them all (stale/shared index,
-        # or over-fetch still missed the prefix). Fall through to keyword under the
-        # same filter so eval / remounted workspaces still resolve on-disk sources.
-        index_meta["prefix_empty_after_filter"] = True
+        # or over-fetch still missed the prefix) — or ANN neighbors lack query
+        # terms (hash/noise). Fall through to keyword under the same filter so
+        # eval / remounted workspaces still resolve on-disk sources.
+        if hits:
+            index_meta["ann_missed_query_terms"] = True
+        else:
+            index_meta["prefix_empty_after_filter"] = True
 
     # Empty/stale index: keyword filesystem scan (no rebuild), plus lag hint.
     index_meta["index_lag"] = True

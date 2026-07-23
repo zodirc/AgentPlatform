@@ -70,5 +70,28 @@ def test_reset_workspace_clears_case_files_but_keeps_root(tmp_path: Path) -> Non
     eval_run.reset_workspace(workspace)
 
     assert workspace.stat().st_ino == original_inode
-    assert sorted(path.name for path in workspace.iterdir()) == ["sections", "sources"]
+    assert sorted(path.name for path in workspace.iterdir()) == [
+        "exports",
+        "sections",
+        "sources",
+    ]
     assert outside.read_text() == "keep"
+
+
+def test_reset_workspace_preserves_seed_tree(tmp_path: Path) -> None:
+    """Compose RO-mounts seed under sources/seed; reset must not rmtree it."""
+    workspace = tmp_path / "eval-workspace"
+    seed_writing = workspace / "sources" / "seed" / "writing"
+    seed_writing.mkdir(parents=True)
+    (seed_writing / "drama1.md").write_text("seed")
+    junk = workspace / "sources" / "user.md"
+    junk.parent.mkdir(parents=True, exist_ok=True)
+    junk.write_text("user")
+    (workspace / "sections" / "x.md").parent.mkdir(parents=True, exist_ok=True)
+    (workspace / "sections" / "x.md").write_text("x")
+
+    eval_run.reset_workspace(workspace)
+
+    assert (workspace / "sources" / "seed" / "writing" / "drama1.md").read_text() == "seed"
+    assert not junk.exists()
+    assert not (workspace / "sections" / "x.md").exists()

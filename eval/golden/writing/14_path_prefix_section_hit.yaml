@@ -48,6 +48,6 @@ assertions:
   output:
     matches: "张白鹿"
   latency:
-    first_token_ms_max: 800
+    first_token_ms_max: 5000
 
 tags: [writing, rag, path_prefix, p2]

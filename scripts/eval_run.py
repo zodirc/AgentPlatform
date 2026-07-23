@@ -9,7 +9,6 @@ import base64
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -51,7 +50,9 @@ def http_json(
     body: dict | None = None,
     *,
     extra_headers: dict[str, str] | None = None,
+    retries: int = 5,
 ) -> dict:
+    """JSON HTTP helper. Retries transient 502/503 (runtime recreate races)."""
     data = None
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     headers.update(admin_headers())
@@ -59,9 +60,45 @@ def http_json(
         headers.update(extra_headers)
     if body is not None:
         data = json.dumps(body).encode()
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return json.loads(resp.read().decode())
+    last_exc: Exception | None = None
+    attempts = max(1, retries)
+    for attempt in range(attempts):
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode())
+        except urllib.error.HTTPError as exc:
+            last_exc = exc
+            err_body = ""
+            try:
+                err_body = exc.read().decode("utf-8", errors="replace")[:400]
+            except Exception:
+                pass
+            if exc.code in {502, 503} and attempt + 1 < attempts:
+                print(
+                    f"    retry {method} {url} after HTTP {exc.code} "
+                    f"(attempt {attempt + 1}/{attempts})"
+                    + (f" body={err_body}" if err_body else ""),
+                    flush=True,
+                )
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            if err_body:
+                print(f"    HTTP {exc.code} body: {err_body}", flush=True)
+            raise
+        except (urllib.error.URLError, TimeoutError) as exc:
+            last_exc = exc
+            if attempt + 1 < attempts:
+                print(
+                    f"    retry {method} {url} after {type(exc).__name__}: {exc} "
+                    f"(attempt {attempt + 1}/{attempts})",
+                    flush=True,
+                )
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+    assert last_exc is not None
+    raise last_exc
 
 
 def stream_headers() -> dict[str, str]:
@@ -112,18 +149,64 @@ def validate_workspace(workspace: Path, *, allow_shared_workspace: bool) -> Path
     return resolved
 
 
-def reset_workspace(workspace: Path) -> None:
-    """Clear one eval case's files without replacing the bind-mounted root inode."""
-    workspace.mkdir(parents=True, exist_ok=True)
-    for child in workspace.iterdir():
-        if child.is_symlink() or child.is_file():
-            child.unlink()
-        elif child.is_dir():
-            shutil.rmtree(child)
-        else:
-            child.unlink()
+def _is_mount_point(path: Path) -> bool:
+    try:
+        return path.is_mount()
+    except OSError:
+        return False
 
-    for directory in (workspace, workspace / "sections", workspace / "sources"):
+
+def _rm_tree_skip_mounts(path: Path) -> None:
+    """Remove a file/dir tree but never delete bind-mount roots (e.g. seed RO)."""
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+        return
+    if not path.is_dir():
+        path.unlink(missing_ok=True)
+        return
+    if _is_mount_point(path):
+        return
+    for child in list(path.iterdir()):
+        if child.is_dir() and not child.is_symlink():
+            if _is_mount_point(child):
+                continue
+            _rm_tree_skip_mounts(child)
+        else:
+            try:
+                child.unlink()
+            except IsADirectoryError:
+                _rm_tree_skip_mounts(child)
+            except FileNotFoundError:
+                pass
+            except PermissionError:
+                # Root-owned residue from a previous container run — skip.
+                continue
+    try:
+        path.rmdir()
+    except OSError:
+        # Still contains a mount or unreadable children; leave the directory.
+        pass
+
+
+def reset_workspace(workspace: Path) -> None:
+    """Clear one eval case's files without replacing the bind-mounted root inode.
+
+    Compose mounts the standing seed corpus at ``sources/seed/writing`` (RO).
+    That mount must not be rmtree'd — otherwise eval dies with PermissionError
+    on ``writing`` (docs/15 · docs/28 gate / make eval-*).
+    """
+    workspace.mkdir(parents=True, exist_ok=True)
+    for child in list(workspace.iterdir()):
+        if child.name == "sources" and child.is_dir() and not child.is_symlink():
+            for sub in list(child.iterdir()):
+                if sub.name == "seed":
+                    # RO seed bind (or its parent dir); never delete.
+                    continue
+                _rm_tree_skip_mounts(sub)
+            continue
+        _rm_tree_skip_mounts(child)
+
+    for directory in (workspace, workspace / "sections", workspace / "sources", workspace / "exports"):
         directory.mkdir(parents=True, exist_ok=True)
         try:
             directory.chmod(0o777)
@@ -590,7 +673,7 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
     message = case["input"]["message"]
     client_request_id = case.get("input", {}).get("client_request_id")
 
-    print(f"==> {case_id} ({path.name})")
+    print(f"==> {case_id} ({path.name})", flush=True)
 
     apply_fixtures(workspace, case)
 
@@ -909,10 +992,15 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
             elif not needle:
                 matched = True
         if expected_retrieval:
+            allowed = (
+                {expected_retrieval}
+                if isinstance(expected_retrieval, str)
+                else set(expected_retrieval)
+            )
             for artifact in view.get("artifacts", []):
                 if artifact.get("type") != "retrieval":
                     continue
-                if artifact.get("mode") == expected_retrieval:
+                if artifact.get("mode") in allowed:
                     retrieval_matched = True
                     break
         if tool_name and not name_seen:
@@ -1057,7 +1145,7 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
     if session_assert and session:
         _assert_session_view(base, case_id, session["id"], session_assert)
 
-    print("    OK")
+    print("    OK", flush=True)
 
 
 def _assert_session_view(base: str, case_id: str, session_id: str, spec: dict) -> None:
@@ -1230,7 +1318,7 @@ def main() -> int:
         try:
             reset_workspace(workspace)
             run_case(path, args.base_url.rstrip("/"), workspace)
-        except (AssertionError, urllib.error.URLError, TimeoutError) as exc:
+        except (AssertionError, urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as exc:
             if case.get("flaky") and args.mode == "live":
                 print(f"    FLAKY FAIL (allowed): {exc}", file=sys.stderr)
                 skipped_flaky += 1
@@ -1243,9 +1331,9 @@ def main() -> int:
         return 1
     total = len(paths)
     if skipped_flaky:
-        print(f"All {total} case(s) passed ({skipped_flaky} flaky failure(s) tolerated)")
+        print(f"All {total} case(s) passed ({skipped_flaky} flaky failure(s) tolerated)", flush=True)
     else:
-        print(f"All {total} golden case(s) passed")
+        print(f"All {total} golden case(s) passed", flush=True)
     return 0
 
 

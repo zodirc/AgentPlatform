@@ -99,7 +99,7 @@
             "result_matches": { "type": "string" },
             "retrieval": {
               "type": "string",
-              "enum": ["vector", "keyword", "hybrid", "none"]
+              "enum": ["vector", "keyword", "hybrid", "keyword-fallback", "none"]
             },
             "forbidden_names": {
               "type": "array",
@@ -118,7 +118,7 @@
           "properties": {
             "mode": {
               "type": "string",
-              "enum": ["vector", "keyword", "hybrid", "none"]
+              "enum": ["vector", "keyword", "hybrid", "keyword-fallback", "none"]
             },
             "filters_path_prefix": { "type": "string" },
             "min_hit_count": { "type": "integer", "minimum": 0 }

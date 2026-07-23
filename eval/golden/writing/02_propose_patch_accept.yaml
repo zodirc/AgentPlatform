@@ -1,7 +1,13 @@
 id: writing.02_propose_patch_accept
 scenario_id: writing
 phase: 1
-description: Stub model proposes patch; user accepts after turn completes
+description: Stub model proposes patch; writing auto-apply writes it (docs/14 · WRITING_PATCH_AUTO_APPLY)
+
+fixtures:
+  workspace:
+    - path: sections/01.md
+      content: |
+        旧正文
 
 input:
   message: "把第二节改得更简洁"
@@ -9,20 +15,19 @@ input:
 
 model_mode: stub
 
-commands:
-  - type: patch.accept
-    patch_id: auto
-
 assertions:
   events:
     sequence_contains:
       - turn.accepted
       - patch.proposed
-      - turn.completed
       - patch.applied
+      - turn.completed
     sequence_not_contains:
       - turn.failed
   turn:
     status: completed
+  workspace:
+    - path: sections/01.md
+      matches: "简洁的新正文"
 
 tags: [writing, patch, p1]

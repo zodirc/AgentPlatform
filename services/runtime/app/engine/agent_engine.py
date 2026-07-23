@@ -601,7 +601,12 @@ class AgentEngine:
             return str(summary)
 
         event_type = _TOOL_EVENTS.get(tool_name)
-        if event_type and result.get("status") != "error":
+        # Skip domain events for error payloads (status=error or bare {"error": ...}).
+        if (
+            event_type
+            and result.get("status") != "error"
+            and not result.get("error")
+        ):
             await self._write_event(
                 event_type=event_type,
                 payload=result,
@@ -610,7 +615,8 @@ class AgentEngine:
 
         if tool_name == "search_sources":
             mode = str(result.get("retrieval", "none"))
-            if mode in {"vector", "keyword", "hybrid"}:
+            # keyword-fallback is an intentional observability mode (docs/15); still emit.
+            if mode in {"vector", "keyword", "hybrid", "keyword-fallback"}:
                 raw_hits = result.get("hits", [])
                 hits_preview: list[dict[str, Any]] = []
                 if isinstance(raw_hits, list):
@@ -690,6 +696,8 @@ class AgentEngine:
                             step_index=step_index,
                         )
                 except Exception as exc:
+                    result["status"] = "error"
+                    result["error"] = str(exc)
                     result["auto_applied"] = False
                     result["auto_apply_error"] = str(exc)
                     logger.exception(
