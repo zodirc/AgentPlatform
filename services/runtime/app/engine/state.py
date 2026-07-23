@@ -31,6 +31,8 @@ class TurnState:
     plan_hint: str | None = None
     # docs/25 — planning | executing | None (normal Agent).
     plan_phase: str | None = None
+    # docs/29 — ops_eval per-Turn model_mode survives approve/deny checkpoint resume.
+    model_mode: str | None = None
 
 
 ContentBlock = dict[str, Any]

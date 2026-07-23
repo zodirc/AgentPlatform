@@ -639,3 +639,56 @@ export async function warmupRetrieval(prefix = ""): Promise<void> {
     // Ignore warm-up failures.
   }
 }
+
+export type UxSignalsReport = {
+  generated_at: string;
+  target_day: string;
+  event_count?: number;
+  config?: {
+    min_sample: number;
+    threshold_mult: number;
+    reedit_minutes: number;
+    lookback_days: number;
+  };
+  daily: Array<{
+    day: string;
+    scenario_id: string;
+    rates: {
+      RejectRate: number | null;
+      CancelRate: number | null;
+      ReeditRate: number | null;
+    };
+    samples: { reject: number; reedit: number; cancel_denom: number };
+    counts: Record<string, number>;
+  }>;
+  alerts: Array<{
+    day: string;
+    scenario_id: string;
+    metric: string;
+    value: number;
+    baseline_median: number;
+    sample: number;
+    threshold_mult: number;
+  }>;
+};
+
+/** docs/28 PX1d — read-only; failures must not block writing. */
+export async function fetchUxSignals(opts?: {
+  lookbackDays?: number;
+  day?: string;
+}): Promise<UxSignalsReport | null> {
+  try {
+    const params = new URLSearchParams();
+    if (opts?.lookbackDays) params.set("lookback_days", String(opts.lookbackDays));
+    if (opts?.day) params.set("day", opts.day);
+    const qs = params.toString();
+    const res = await fetch(
+      `${API_BASE}/admin/ux-signals${qs ? `?${qs}` : ""}`,
+      { ...sessionFetchInit, headers: apiAuthHeaders(adminAuthHeaders()) },
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as UxSignalsReport;
+  } catch {
+    return null;
+  }
+}

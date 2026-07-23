@@ -25,7 +25,13 @@ class ModelConfig:
 
 
 async def resolve_model_config(*, owner_user_id: UUID | None = None) -> ModelConfig | None:
-    if settings.model_mode in {"stub", "recorded"}:
+    from app.model.turn_override import current_turn_model_mode, current_turn_model_override
+
+    effective_mode = current_turn_model_mode() or settings.model_mode
+    override = current_turn_model_override()
+    if override is not None and effective_mode == "live":
+        return override
+    if effective_mode in {"stub", "recorded"}:
         return None
     if owner_user_id is not None:
         pool = await get_pool()
@@ -127,7 +133,10 @@ async def _any_active_profile_ready() -> bool:
 
 
 async def model_config_ready(*, owner_user_id: UUID | None = None) -> bool:
-    if settings.model_mode in {"stub", "recorded"}:
+    from app.model.turn_override import current_turn_model_mode
+
+    effective_mode = current_turn_model_mode() or settings.model_mode
+    if effective_mode in {"stub", "recorded"}:
         return True
     if await resolve_model_config(owner_user_id=owner_user_id) is not None:
         return True

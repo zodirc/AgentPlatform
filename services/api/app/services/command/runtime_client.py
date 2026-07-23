@@ -35,6 +35,9 @@ class RuntimeClient:
         work_id: UUID | None = None,
         work_root: str | None = None,
         owner_user_id: UUID | None = None,
+        model_mode: str | None = None,
+        model_override: dict | None = None,
+        ops_eval: bool = False,
     ) -> None:
         payload = {
             "turn_id": str(turn_id),
@@ -43,6 +46,7 @@ class RuntimeClient:
             "scenario_id": scenario_id,
             "message": message,
             "trace_id": str(trace_id),
+            "ops_eval": bool(ops_eval),
         }
         if client_request_id is not None:
             payload["client_request_id"] = str(client_request_id)
@@ -54,6 +58,10 @@ class RuntimeClient:
             payload["work_root"] = work_root
         if owner_user_id is not None:
             payload["owner_user_id"] = str(owner_user_id)
+        if ops_eval and model_mode is not None:
+            payload["model_mode"] = model_mode
+        if ops_eval and model_override is not None:
+            payload["model_override"] = model_override
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(

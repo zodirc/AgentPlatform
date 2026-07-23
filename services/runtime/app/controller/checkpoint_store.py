@@ -27,6 +27,7 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "delivery": state.delivery,
         "plan_hint": state.plan_hint,
         "plan_phase": state.plan_phase,
+        "model_mode": state.model_mode,
     }
 
 
@@ -54,6 +55,7 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         delivery=data.get("delivery") if isinstance(data.get("delivery"), dict) else None,
         plan_hint=str(data["plan_hint"]) if data.get("plan_hint") else None,
         plan_phase=str(data["plan_phase"]) if data.get("plan_phase") else None,
+        model_mode=str(data["model_mode"]) if data.get("model_mode") else None,
     )
 
 

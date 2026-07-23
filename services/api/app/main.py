@@ -15,8 +15,9 @@ from app.db.migrate import apply_migrations
 from app.db.pool import close_pool, get_pool, init_pool
 from app.middleware.request_context import RequestContextMiddleware
 from app.models.responses import ErrorBody, ErrorResponse, MetaBody
-from app.routers import auth, health, runs, sessions, turns, works
+from app.routers import auth, health, ops_eval, runs, sessions, turns, works
 from app.routers.admin import model_providers as admin_model_providers
+from app.routers.admin import ux_signals as admin_ux_signals
 from app.routers.admin import workspace as admin_workspace
 from app.services.projection.session_projector import reconcile_lagging_projections, reconcile_stale_turns
 from app.services.realtime.listener import TurnEventListener
@@ -97,6 +98,9 @@ app.include_router(turns.router, prefix="/api/v1")
 app.include_router(runs.router, prefix="/api/v1")
 app.include_router(admin_model_providers.router, prefix="/api/v1")
 app.include_router(admin_workspace.router, prefix="/api/v1")
+app.include_router(admin_ux_signals.router, prefix="/api/v1")
+if (settings.ops_test_secret or "").strip():
+    app.include_router(ops_eval.router, prefix="/api/v1")
 
 
 @app.exception_handler(RequestValidationError)

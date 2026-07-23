@@ -32,7 +32,12 @@ from app.tools.delegate_context import DelegateRuntime, set_delegate_runtime
 from app.graph.runner import run_via_langgraph
 from app.engine.agent_engine import AgentEngine, StepTimeoutError
 from app.engine.state import TurnState, tool_result_message
-from app.model.config import resolve_active_profile_metadata, resolve_context_window_tokens, resolve_model_config
+from app.model.config import (
+    ModelConfig,
+    resolve_active_profile_metadata,
+    resolve_context_window_tokens,
+    resolve_model_config,
+)
 from app.model.factory import create_gateway
 from app.model.gateway import ModelFatalError, ModelProviderTimeout, ModelTransientError
 from app.observability.metrics import record_turn_finished
@@ -180,6 +185,9 @@ async def start_turn(
     work_id: UUID | None = None,
     work_root: str | None = None,
     owner_user_id: UUID | None = None,
+    model_mode: str | None = None,
+    model_override: dict | None = None,
+    ops_eval: bool = False,
 ) -> None:
     if turn_id in _active_turns:
         return
@@ -210,7 +218,25 @@ async def start_turn(
         logger.warning("start_turn: run already claimed by another runner turn=%s run=%s", turn_id, run_id)
         return
 
+    # docs/29 — only ops_eval StartTurn may set per-Turn model_mode / override.
+    effective_mode = model_mode if ops_eval else None
+    override_config = None
+    if ops_eval and model_override:
+        override_config = ModelConfig(
+            provider=str(model_override["provider"]),
+            model_name=str(model_override["model_name"]),
+            api_key=str(model_override["api_key"]),
+            base_url=model_override.get("base_url"),
+            context_window_tokens=model_override.get("context_window_tokens"),
+        )
+    elif not ops_eval and (model_mode is not None or model_override is not None):
+        logger.warning(
+            "start_turn ignored model_mode/override without ops_eval turn=%s",
+            turn_id,
+        )
+
     structlog.contextvars.bind_contextvars(turn_id=str(turn_id))
+    from app.model.turn_override import bind_turn_model, reset_turn_model
     from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
 
     tokens = bind_tenant_context(
@@ -218,6 +244,7 @@ async def start_turn(
         work_id=work_id,
         owner_user_id=owner_user_id,
     )
+    model_tokens = bind_turn_model(mode=effective_mode, override=override_config)
     _active_turns.add(turn_id)
     try:
         ensure_work_root_exists()
@@ -245,6 +272,7 @@ async def start_turn(
             logger.exception("start_turn fail_turn also failed turn_id=%s", turn_id)
     finally:
         _active_turns.discard(turn_id)
+        reset_turn_model(model_tokens)
         reset_tenant_context(tokens)
 
 
@@ -259,11 +287,20 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     registry = build_registry()
     tools = tool_scope(profile, registry)
     owner_user_id = await load_session_owner_user_id(state.session_id)
-    gateway = create_gateway(
-        await resolve_model_config(owner_user_id=owner_user_id),
-        messages=state.messages,
-        scenario_id=state.scenario_id,
-    )
+    from app.model.turn_override import bind_turn_model, reset_turn_model
+
+    # Rebind ops_eval model_mode so resume does not fall back to live settings.
+    mode = state.model_mode if state.model_mode in {"stub", "live", "recorded"} else None
+    tokens = bind_turn_model(mode=mode) if mode else None
+    try:
+        gateway = create_gateway(
+            await resolve_model_config(owner_user_id=owner_user_id),
+            messages=state.messages,
+            scenario_id=state.scenario_id,
+        )
+    finally:
+        if tokens is not None:
+            reset_turn_model(tokens)
     return PendingTurn(
         state=state,
         profile=profile,
@@ -748,6 +785,8 @@ async def _run_turn(
     pool = await get_pool()
     write_event = await _make_write_event(turn_id=turn_id, run_id=run_id, trace_id=trace_id)
 
+    from app.model.turn_override import current_turn_model_mode
+
     preview = message[:256]
     accepted_payload: dict[str, str] = {
         "scenario_id": scenario_id,
@@ -904,6 +943,7 @@ async def _run_turn(
         max_steps=profile.max_steps,
         plan_hint=compiled.metadata.get("plan_hint"),
         plan_phase=phase,
+        model_mode=current_turn_model_mode(),
     )
 
     registry = build_registry()

@@ -64,6 +64,9 @@ async def start_turn_command(
     background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
+    override_dict = None
+    if body.ops_eval and body.model_override is not None:
+        override_dict = body.model_override.model_dump()
     background_tasks.add_task(
         start_turn,
         turn_id=body.turn_id,
@@ -76,6 +79,9 @@ async def start_turn_command(
         work_id=body.work_id,
         work_root=body.work_root,
         owner_user_id=body.owner_user_id,
+        model_mode=body.model_mode if body.ops_eval else None,
+        model_override=override_dict,
+        ops_eval=bool(body.ops_eval),
     )
     return {"accepted": True, "turn_id": str(body.turn_id)}
 

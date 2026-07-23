@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     works_root: str = "/data/works"
     # First default Work may claim legacy single-workspace path once.
     works_claim_legacy_workspace: bool = True
+    # docs/29 — Ops Eval Console (empty = routes disabled)
+    ops_test_secret: str = ""
+    ops_eval_golden_dir: str = "/app/eval/golden"
+    ops_eval_compose_file: str = "/app/deploy/docker-compose.yml"
+    ops_eval_compose_project_dir: str = "/app"
+    ops_eval_docker_socket: str = "/var/run/docker.sock"
 
 
 settings = Settings()

@@ -85,7 +85,10 @@ def _chunk(text: str, size: int = 12) -> list[str]:
 
 
 def create_recorded_gateway(messages: list[dict[str, Any]]) -> ModelGateway | None:
-    if settings.model_mode != "recorded":
+    from app.model.turn_override import current_turn_model_mode
+
+    effective_mode = current_turn_model_mode() or settings.model_mode
+    if effective_mode != "recorded":
         return None
     case_id = recording_case_id(messages)
     if not case_id:

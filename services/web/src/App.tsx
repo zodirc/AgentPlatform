@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { Button } from "./components/ui/button";
+import { EvalConsolePage } from "./ops/EvalConsolePage";
+import { EvalRunReportPage } from "./ops/EvalRunReportPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
 import { LoginPage } from "./shared/auth/LoginPage";
@@ -16,6 +18,15 @@ import {
 import { WorkbenchProvider } from "./shared/workbench/workbenchProvider";
 
 const SCENARIO_PATHS = ["/writing", "/agent", "/interview"] as const;
+
+function isOpsEvalPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/test(\/runs\/[^/]+)?\/?$/.test(pathname);
+}
+
+function isOpsEvalReportPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/test\/runs\/[^/]+\/?$/.test(pathname);
+}
+
 
 function AccountMenu() {
   const { user, logout, switchAccount } = useEndUserAuth();
@@ -265,5 +276,12 @@ function AuthenticatedApp() {
 }
 
 export function App() {
+  const { pathname } = useLocation();
+  if (isOpsEvalReportPath(pathname)) {
+    return <EvalRunReportPage />;
+  }
+  if (isOpsEvalPath(pathname)) {
+    return <EvalConsolePage />;
+  }
   return <AuthenticatedApp />;
 }

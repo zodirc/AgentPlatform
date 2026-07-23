@@ -15,8 +15,11 @@ RUN set -eux; \
     elif [ -f /etc/apt/sources.list ]; then \
       sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
     fi; \
-    apt-get update && apt-get install -y --no-install-recommends curl \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates docker-cli docker-compose \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version \
+    && docker-compose version
 
 RUN useradd --create-home --uid 1000 app
 WORKDIR /app
@@ -30,7 +33,9 @@ COPY services/api/app /app/app
 COPY services/api/alembic.ini /app/alembic.ini
 COPY services/api/alembic /app/alembic
 COPY packages/contracts/schemas/ddl /app/contracts/ddl
-USER app
+COPY eval/golden /app/eval/golden
+# Need docker.sock access for Ops Eval restart; group id often 0/root or docker on host.
+USER root
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://127.0.0.1:8000/health/live || exit 1

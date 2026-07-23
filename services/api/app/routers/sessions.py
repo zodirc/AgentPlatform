@@ -173,9 +173,15 @@ async def create_turn(
                 run["id"],
                 message=str(exc),
             )
+            detail = f"Failed to start turn on runtime: {type(exc).__name__}: {exc}"
+            if isinstance(exc, httpx.HTTPStatusError):
+                detail = (
+                    f"Failed to start turn on runtime: HTTP {exc.response.status_code} "
+                    f"{exc.response.text[:300]}"
+                )
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Failed to start turn on runtime",
+                detail=detail,
             ) from exc
     else:
         response.status_code = status.HTTP_200_OK

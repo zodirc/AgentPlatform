@@ -108,6 +108,17 @@ services:
       APP_ENV: ${APP_ENV:-production}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_MODE: ${WORKER_MODE:-inline}
+      WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/workspace}
+      OPS_TEST_SECRET: ${OPS_TEST_SECRET:-}
+      OPS_EVAL_GOLDEN_DIR: /app/eval/golden
+      OPS_EVAL_COMPOSE_FILE: /app/deploy/docker-compose.yml
+      OPS_EVAL_COMPOSE_PROJECT_DIR: /app
+    volumes:
+      - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+      - ../eval/golden:/app/eval/golden:ro,z
+      - ../deploy:/app/deploy:ro,z
+      - ../.env:/app/.env:ro,z
+      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy
