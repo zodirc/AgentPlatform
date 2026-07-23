@@ -108,13 +108,13 @@ def stream_headers() -> dict[str, str]:
 
 
 def _strip_env_value(raw: str) -> str:
-    """Strip spaces, unquoted inline # comments, and matching quotes."""
-    v = raw.strip()
+    """Strip CR, spaces, unquoted inline # comments, and matching quotes."""
+    v = raw.strip().strip("\r")
     if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
         return v[1:-1]
     if "#" in v:
         v = v.split("#", 1)[0].rstrip()
-    return v.strip()
+    return v.strip().strip("\r")
 
 
 def _env_value(name: str, default: str = "") -> str:
@@ -124,9 +124,22 @@ def _env_value(name: str, default: str = "") -> str:
     if not env_path.is_file():
         return default
     for line in env_path.read_text().splitlines():
+        line = line.strip("\r")
         if line.startswith(f"{name}="):
             return _strip_env_value(line.split("=", 1)[1])
     return default
+
+
+def admin_headers() -> dict[str, str]:
+    auth_on = _env_value("AUTH_ENABLED", "false").lower() in {"true", "1", "yes"}
+    force = os.environ.get("CI", "").lower() in {"true", "1"} or os.environ.get(
+        "SMOKE_FORCE_AUTH", ""
+    ).lower() in {"true", "1"}
+    if not auth_on and not force:
+        return {}
+    password = _env_value("ADMIN_PASSWORD", "admin") or "admin"
+    token = base64.b64encode(f"admin:{password}".encode()).decode()
+    return {"Authorization": f"Basic {token}"}
 
 
 def compose_workspace_path(raw_path: str) -> Path:
@@ -222,14 +235,6 @@ def reset_workspace(workspace: Path) -> None:
             directory.chmod(0o777)
         except OSError:
             pass
-
-
-def admin_headers() -> dict[str, str]:
-    if _env_value("AUTH_ENABLED", "false").lower() != "true":
-        return {}
-    password = _env_value("ADMIN_PASSWORD", "admin")
-    token = base64.b64encode(f"admin:{password}".encode()).decode()
-    return {"Authorization": f"Basic {token}"}
 
 
 def admin_create_provider(base: str, cmd: dict) -> None:

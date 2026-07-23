@@ -35,8 +35,8 @@ jobs:
       - name: Bootstrap .env
         run: |
           if [[ ! -f .env ]]; then cp .env.example .env; fi
-          # Rewrite key lines without inline comments (scripts strip them too;
-          # compose already ignores #, but keep values unambiguous for shell/python).
+          # Normalize line endings; rewrite auth/smoke knobs without inline comments.
+          sed -i 's/\r$//' .env || true
           sed -i 's/^MODEL_MODE=.*/MODEL_MODE=stub/' .env || true
           grep -q '^MODEL_MODE=' .env || echo 'MODEL_MODE=stub' >> .env
           sed -i 's/^EMBEDDING_BACKEND=.*/EMBEDDING_BACKEND=hash/' .env || true
@@ -47,5 +47,9 @@ jobs:
           grep -q '^AUTH_ENABLED=' .env || echo 'AUTH_ENABLED=true' >> .env
           sed -i 's/^ADMIN_PASSWORD=.*/ADMIN_PASSWORD=admin/' .env || true
           grep -q '^ADMIN_PASSWORD=' .env || echo 'ADMIN_PASSWORD=admin' >> .env
+          sed -i 's/^ADMIN_SESSION_BYPASS=.*/ADMIN_SESSION_BYPASS=true/' .env || true
+          grep -q '^ADMIN_SESSION_BYPASS=' .env || echo 'ADMIN_SESSION_BYPASS=true' >> .env
+          sed -i 's/^END_USER_AUTH_ENABLED=.*/END_USER_AUTH_ENABLED=true/' .env || true
+          grep -q '^END_USER_AUTH_ENABLED=' .env || echo 'END_USER_AUTH_ENABLED=true' >> .env
       - name: Full CI proof
         run: CI=true GATE_SKIP_RESTORE=1 bash scripts/ci_proof.sh

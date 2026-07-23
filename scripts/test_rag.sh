@@ -100,25 +100,29 @@ if [[ "${RAG_TEST_E2E:-}" == "1" ]]; then
   BASE_URL="${RAG_TEST_BASE_URL:-http://localhost}"
   AUTH_HEADER=$(python3 - <<'PY'
 import base64
+import os
 from pathlib import Path
 
 def _env_val(raw: str) -> str:
-    v = raw.strip()
+    v = raw.strip().strip("\r")
     if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
         return v[1:-1]
     if "#" in v:
         v = v.split("#", 1)[0].rstrip()
-    return v.strip()
+    return v.strip().strip("\r")
 
 env = {}
 for line in Path(".env").read_text().splitlines():
+    line = line.strip("\r")
     if line and not line.startswith("#") and "=" in line:
         k, v = line.split("=", 1)
-        env[k.strip()] = _env_val(v)
-if env.get("AUTH_ENABLED", "false").lower() != "true":
+        env[k.strip().strip("\r")] = _env_val(v)
+auth_on = env.get("AUTH_ENABLED", "false").lower() in {"true", "1", "yes"}
+force = os.environ.get("CI", "").lower() in {"true", "1"}
+if not auth_on and not force:
     print("")
 else:
-    pw = env.get("ADMIN_PASSWORD", "admin")
+    pw = env.get("ADMIN_PASSWORD") or "admin"
     print("Authorization: Basic " + base64.b64encode(f"admin:{pw}".encode()).decode())
 PY
 )

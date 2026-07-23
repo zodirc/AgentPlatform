@@ -24,39 +24,63 @@ BASE_URL="${SMOKE_BASE_URL:-http://localhost}"
 # depend on live provider keys. Override: SMOKE_MODEL_MODE=live make smoke
 SMOKE_MODEL_MODE="${SMOKE_MODEL_MODE:-stub}"
 
-# Mirror scripts/eval_run.py: when AUTH_ENABLED=true, API routes require Basic auth.
-SMOKE_AUTH_HEADER=$(python3 - <<'PY'
-import base64
+# Mirror scripts/eval_run.py: when AUTH_ENABLED=true (or CI), API needs Basic admin
+# (admin_session_bypass → system user). .env.example uses inline # comments and may
+# have CRLF on some checkouts — strip both so we never silently omit Authorization.
+SMOKE_AUTH_USER=$(python3 - <<'PY'
+import os
 from pathlib import Path
 
 def _env_val(raw: str) -> str:
-    """Strip spaces, unquoted inline # comments, and matching quotes."""
-    v = raw.strip()
+    v = raw.strip().strip("\r")
     if len(v) >= 2 and v[0] in "\"'" and v[-1] == v[0]:
         return v[1:-1]
     if "#" in v:
         v = v.split("#", 1)[0].rstrip()
-    return v.strip()
+    return v.strip().strip("\r")
 
 env: dict[str, str] = {}
-for line in Path(".env").read_text().splitlines():
-    if not line or line.startswith("#") or "=" not in line:
-        continue
-    key, value = line.split("=", 1)
-    env[key.strip()] = _env_val(value)
+env_path = Path(".env")
+if env_path.is_file():
+    for line in env_path.read_text().splitlines():
+        line = line.strip("\r")
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key.strip().strip("\r")] = _env_val(value)
 
-if env.get("AUTH_ENABLED", "false").lower() != "true":
-    print("")
-else:
-    password = env.get("ADMIN_PASSWORD", "admin")
-    token = base64.b64encode(f"admin:{password}".encode()).decode()
-    print(f"Authorization: Basic {token}")
+auth_on = env.get("AUTH_ENABLED", "false").lower() in {"true", "1", "yes"}
+force = os.environ.get("CI", "").lower() in {"true", "1"} or os.environ.get(
+    "SMOKE_FORCE_AUTH", ""
+).lower() in {"true", "1"}
+if not auth_on and not force:
+    raise SystemExit(0)
+password = env.get("ADMIN_PASSWORD") or "admin"
+print(f"admin:{password}", end="")
 PY
 )
 
 CURL_AUTH=()
-if [[ -n "$SMOKE_AUTH_HEADER" ]]; then
-  CURL_AUTH+=(-H "$SMOKE_AUTH_HEADER")
+SMOKE_AUTH_HEADER=""
+if [[ -n "${SMOKE_AUTH_USER:-}" ]]; then
+  # curl -u is more reliable than hand-built Authorization headers in CI.
+  CURL_AUTH+=(-u "$SMOKE_AUTH_USER")
+  export SMOKE_AUTH_USER
+  # urllib SSE helper still wants a raw Authorization header.
+  SMOKE_AUTH_HEADER=$(python3 - <<'PY'
+import base64
+import os
+
+user = os.environ["SMOKE_AUTH_USER"]
+print("Authorization: Basic " + base64.b64encode(user.encode()).decode(), end="")
+PY
+)
+fi
+export SMOKE_AUTH_HEADER
+if [[ -z "${SMOKE_AUTH_USER:-}" ]]; then
+  echo "==> smoke auth: (none — AUTH_ENABLED off)"
+else
+  echo "==> smoke auth: Basic admin (bypass)"
 fi
 
 restore_runtime_model_mode() {
@@ -97,10 +121,18 @@ MODEL_MODE="${SMOKE_MODEL_MODE}" $COMPOSE up -d --force-recreate --wait --wait-t
 echo "==> Health OK"
 
 echo "==> Create session"
-SESSION_JSON=$(curl -fsS -X POST "${BASE_URL}/api/v1/sessions" \
+SESSION_HTTP=$(curl -sS -w "%{http_code}" -o /tmp/smoke_session.json -X POST "${BASE_URL}/api/v1/sessions" \
   -H 'Content-Type: application/json' \
   "${CURL_AUTH[@]}" \
   -d '{}')
+if [[ "$SESSION_HTTP" != "201" && "$SESSION_HTTP" != "200" ]]; then
+  echo "create session failed HTTP ${SESSION_HTTP}" >&2
+  echo "auth_user_set=$([ -n "${SMOKE_AUTH_USER:-}" ] && echo yes || echo no)" >&2
+  head -c 500 /tmp/smoke_session.json >&2 || true
+  echo >&2
+  exit 22
+fi
+SESSION_JSON=$(cat /tmp/smoke_session.json)
 SESSION_ID=$(echo "$SESSION_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['id'])")
 echo "session_id=$SESSION_ID"
 
