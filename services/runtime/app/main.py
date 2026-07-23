@@ -380,6 +380,16 @@ async def workspace_upload_source(
             )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        # Typical when Docker created sources/ as root for the RO seed mount.
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "workspace/sources is not writable by the runtime user "
+                f"({exc}). Run `make fix-workspace-sources` (or make up/start) "
+                "so sources/ is owned by uid 1000; seed/ stays read-only."
+            ),
+        ) from exc
     # Defer embedding/index rebuild so the write path stays under api proxy timeout.
     rel = str(result.get("path") or "")
     background_tasks.add_task(sync_sources_index_safe, path=rel or None)

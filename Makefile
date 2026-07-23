@@ -25,7 +25,7 @@ DOCKER_AUTO_PRUNE ?= 1
 .DEFAULT_GOAL := help
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
-	ensure-ops-secret \
+	ensure-ops-secret fix-workspace-sources \
 	up-web up-api up-runtime restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
@@ -46,6 +46,7 @@ help: ## 显示常用命令
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
 	@echo "  make eval-plan-suggest-tune 搜索权重提案（只写 reports）"
 	@echo "  make ensure-ops-secret  若空则生成 OPS_TEST_SECRET 并打印评测台 URL"
+	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
@@ -74,8 +75,13 @@ help: ## 显示常用命令
 ensure-ops-secret: ## 确保 .env 有 OPS_TEST_SECRET，并打印 /ops/<secret>/test
 	@bash scripts/ensure_ops_test_secret.sh
 
+# Seed RO mount creates sources/ as root; runtime app (uid 1000) must own it to upload.
+fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
+	@bash scripts/ensure_workspace_sources_writable.sh
+
 start: ensure-ops-secret ## 启动栈（不 rebuild，最快）
 	$(COMPOSE) up -d
+	@$(MAKE) --no-print-directory fix-workspace-sources
 
 # Safe: only removes untagged (<none>) images left by retag-after-build.
 define docker_auto_prune
@@ -87,6 +93,7 @@ endef
 
 up: ensure-ops-secret ## 重建并启动全部服务
 	$(COMPOSE) up -d --build
+	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
 
 # Secret is consumed by api only. up-web may generate it for the first time — recreate api then.

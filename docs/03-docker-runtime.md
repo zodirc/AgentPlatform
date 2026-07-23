@@ -259,6 +259,11 @@ make sync-sources   # 或 make seed-sources（同义）
 `/workspace/sources/seed/writing:ro`（`SEED_SOURCES_HOST_PATH`）。索引逻辑路径为
 `sources/seed/writing/...`；改仓库内 seed 后重建索引即可，勿往沙箱里复制。
 
+> **权限：** seed 挂载常把 `/workspace/sources` 建成 `root:root`，runtime `app`(uid 1000)
+> 无法上传个人资料 → 500/`PermissionError`。`make up` / `make start` 会跑
+> `make fix-workspace-sources`（只 chown `sources/` 与非 seed 子项，不改 RO seed）。
+> 也可手动：`make fix-workspace-sources`。
+
 **IX3：** `GET …/sources/index-status` 仅报告**摄取面**（`plane=ingestion`，`effect_ready=false`）。
 `ready` / `path_current` 表示已投影可被检索，**不等于**效果闸（`make retrieval-bench-prod` + 难句工作台）。
 
