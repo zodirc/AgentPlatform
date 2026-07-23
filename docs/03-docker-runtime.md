@@ -459,7 +459,7 @@ services:
 
 `ApproveToolCall` 必带 `run_id` → 唯一 runtime 恢复 checkpoint。interrupt 持久化在 checkpoint，非仅内存。SSE 断线时审批仍走 REST。
 
-`CancelTurn` 双通道：api 写 `runs.cancel_requested_at` / `cancel_force` **并** 转发 `cancel-turn`；runtime 在 stream / tool / Step 全过程轮询（ADR-015）。`ModelGateway.stream` 须在检查点断开 provider 连接。
+`CancelTurn` 双通道：api 写 `runs.cancel_requested_at` / `cancel_force` **并** 转发 `cancel-turn`；runtime 在 stream / tool / Step 全过程感知（ADR-015）。`ModelGateway.abort_stream` 须断开 provider 连接（`aclose`）；Cancel 断流 **不得**落成 `turn.failed` / model_error。
 
 ### 8.5 多副本（MT7 · 与多租户配套的扩容面）
 

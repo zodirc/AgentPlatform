@@ -315,26 +315,35 @@ loop 最大的风险是停不下来、烧钱、反复失败。终止条件必须
 
 ### 8.1 CancelTurn 与 abort 检查点
 
-**禁止**仅在 Step 边界检查取消。runtime 必须在以下位置轮询 `TurnState.cancelled` 或 `runs.cancel_requested_at`（见 `07` §2.5）：
+**禁止**仅在 Step 边界检查取消。runtime 必须在以下位置感知取消（`TurnState.cancelled` 或 `runs.cancel_requested_at`，见 `07` §2.5）：
 
 ```text
 1. ContextEngine.assemble 入口
-2. ModelGateway.stream — 每 100–200ms 或每 N 个 token
-3. ToolExecutor — 工具 handler 入口、流式输出循环、exec 子进程
-4. delegate 子 AgentEngine — 与父 Run 共享 abort；父 cancel 级联子任务
-5. Step 边界（兜底）
+2. ModelGateway.stream — abort Event；provider 在 abort 时 aclose 上游 HTTP（含长 thinking 间隙）
+3. AgentEngine 流式循环 — 与 chunk 消费并行的短间隔 cancel 轮询，避免「卡在等下一 token」
+4. ToolExecutor — 工具 handler 入口、流式输出循环、exec 子进程
+5. delegate 子 AgentEngine — 与父 Run 共享 abort；父 cancel 级联子任务
+6. Step 边界（兜底）
 ```
 
 | `force` | 模型流式 | 工具执行 |
 |---------|----------|----------|
-| `false`（默认） | 下一检查点断开 provider 连接 | 优雅停（默认 500ms 超时） |
+| `false`（默认） | abort 断开 provider 连接（目标 ≤500ms P95） | 优雅停（默认 500ms 超时） |
 | `true` | 立即断连 | 立即 kill（`run_command` 用 process group） |
 
 事件序列：`turn.cancelling`（可选）→ `turn.cancelled`（payload 含 `force`、`cancelled_at_phase`）。
 
-**Cancel 后继续对话**：用户在同 Session 发 **新 Turn**；execution 上下文由 `session_transcripts` 滚动 messages（无 transcript 时回退 `context_summary`）+ 新用户消息衔接，**不是**恢复已 `cancelled` 的 Run。
+**Cancel ≠ model_error：** abort/`aclose` 引发的 transport 错误，在已请求取消时必须落 `cancelled`，不得写成 `turn.failed` / `model_error: … after streaming started`。
+
+**Cancel 后继续对话**：用户在同 Session 发 **新 Turn**；execution 上下文由 `session_transcripts` 滚动 messages（无 transcript 时回退 `context_summary`）+ 新用户消息衔接，**不是**恢复已 `cancelled` 的 Run。忙时 Web 可将后续输入 **排队合并** 后再开新 Turn（见 `10` §5.1.1）。
 
 **审批 interrupt 后继续**：仅 `ApproveToolCall` 从 checkpoint 恢复 **同一** `run_id`（`waiting_approval` → `running`）。
+
+### 8.1.1 思考 / reasoning 流（与 Cancel 同路径）
+
+- Provider 将 `reasoning_content` / `thinking_delta` 等映射为 `StreamActivity(kind=reasoning)` → 事件 `turn.thinking.delta`。  
+- **不**写入 `turn_views.latest_output`；刷新可不保留。  
+- Stop 时与 `turn.token` 一并冻结本地渲染；abort 须能打断长思考间隙（见上表项 2–3）。
 
 ### 8.2 其他规则
 

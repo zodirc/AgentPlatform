@@ -51,6 +51,22 @@
 
 用户点 Stop 时 Web **立即**停止本地渲染（≤50ms），并并行 `POST .../cancel`；**禁止**仅等 `turn.cancelled` 才停 UI（`11` §5.1）。
 
+**实现约束（对齐 Cursor）：**
+
+1. 「停渲染」= 冻结 `turn.token` / `turn.thinking*` / `tool.delta` / `section.draft.delta` 的本地 append。  
+2. **必须继续消费** SSE/WS，直至 `turn.cancelled` / `turn.failed` / `turn.completed` / `approval.requested`，以便对齐 busy 与输入框。  
+3. **禁止**将「停渲染」实现为关闭连接或丢弃后续事件（否则只能靠秒级定时器松 busy）。  
+4. 思考直播块：Stop 时冻结文本与「思考中…」态；本轮快照可留，刷新不要求保留。
+
+### 5.1 Cancel 与 model_error 边界
+
+Cancel 掐断 provider HTTP 流时，传输层常抛出 transport / closed 类错误。runtime **必须**：
+
+- 在已置 `cancel_requested` / gateway abort 时，将此类错误视为 **正常停流**；  
+- 终态写 `turn.cancelled`，**禁止**升成 `turn.failed` + `model_error: … after streaming started`。
+
+未取消、已向下游吐字后的真实瞬时失败，仍按 AH1「已吐字不重试 → fatal」处理。
+
 ### 6. 写作 patch 审阅
 
 `propose_patch` 后 Turn 正常进入 `completed`（模型无后续 tool 时）；用户在 **Turn 结束后** accept/reject patch。**不**引入 `waiting_patch_decision` 执行态。
@@ -62,9 +78,10 @@
 ## 理由
 
 - 与 Cursor 一致：Stop 结束当前生成，会话靠新消息延续，而非 ResumeTurn。
-- Step 内模型流式可能持续数十秒，仅 Step 边界检查会导致「停不下来」回归。
+- Step 内模型流式（含长 thinking）可能持续数十秒，仅 Step 边界检查会导致「停不下来」回归。
 - 双通道取消避免 runtime 繁忙时只靠 HTTP 命令延迟。
-- 乐观 UI 是体感流畅的必要条件，不能全靠后端事件。
+- 乐观 UI 是体感流畅的必要条件，不能全靠后端事件；停渲染时仍须听终态。
+- Cancel 掐流产生的 transport 错误若被当成 model_error，会破坏「可控」叙事。
 
 ## 后果
 
@@ -72,11 +89,13 @@
 
 - 语义清晰，Golden 可分层断言（流式 cancel、工具 cancel、审批 resume）。
 - 旧系统 cancel/interrupt 混乱根因被显式排除。
+- Cancel 与真实模型失败在 UI/观测上可区分。
 
 ### 负面
 
-- runtime 实现复杂度上升（stream abort、子进程 kill、delegate 级联）。
+- runtime 实现复杂度上升（stream abort、`aclose`、子进程 kill、delegate 级联）。
 - `runs` 表增加取消相关列；`turn.cancelling` 可选事件需同步 schema。
+- Web realtime 须区分「暂停渲染」与「关闭流」。
 
 ## 备选方案
 

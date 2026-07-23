@@ -156,7 +156,7 @@ agent/
 - **强制类型**：公开组件 props、API 响应使用 TypeScript；类型优先从 `packages/contracts` codegen，禁止手写与 OpenAPI 漂移的重复定义。
 - **API 基址**：生产与容器内使用相对路径 `/api/v1`；本地 dev 用 Vite `server.proxy` 转发 `/api`。
 - **状态**：Turn 执行态来自 SSE + `TurnView` 投影；禁止在组件内维护 Turn 阶段状态机（见 `09` §5）。
-- **SSE**：统一经 `shared/realtime/TurnStreamClient`；须支持 `Last-Event-ID` 重连；Stop 乐观 UI 见 `11` §5.1、ADR-015。
+- **SSE**：统一经 `shared/realtime/TurnStreamClient`；须支持 `Last-Event-ID` 重连；Stop 乐观 UI = **冻结增量渲染、继续消费终态**（见 `10` §5.1、ADR-015）；忙时出站排队见 `10` §5.1.1。
 - **格式化/检查**：ESLint + Prettier（或 Biome）；`tsc --noEmit` 在 CI 必选。
 - **测试**：Vitest + Testing Library（Phase 1 起）；关键 realtime hook 须有单测。
 - **依赖**：`pnpm` + lockfile；禁止在 api/runtime 镜像中安装 Node 依赖。

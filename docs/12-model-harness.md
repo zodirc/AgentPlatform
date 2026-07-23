@@ -10,7 +10,7 @@
 
 各期合并后更新本文「状态」与 `docs/README`；若引入不可逆契约（重试语义、cache 前缀、envelope 字段），再抽 **ADR-020**，否则扩写既有 ADR / 专文。
 
-**AH1 落地摘要（Model 子轨）**：`ModelGateway` 统一重试（仅尚未吐 token）+ 首字节快超时 + Cancel 可打断 backoff；`ModelTransientError` / `ModelFatalError` / `ModelProviderTimeout`；`GenerationParams`（`max_output_tokens` 对齐 `output_reserve_tokens`、scenario temperature、`tool_choice`、thinking 默认关）。见 `model/gateway.py`、`model/generation.py`、providers、`tests/test_gateway_retry.py`。
+**AH1 落地摘要（Model 子轨）**：`ModelGateway` 统一重试（仅尚未吐 token）+ 首字节快超时 + Cancel 可打断 backoff **与** provider HTTP 流（abort → `aclose`，含长 thinking 间隙）；已请求取消时 transport 错误 **不得**升成「after streaming started」fatal；`ModelTransientError` / `ModelFatalError` / `ModelProviderTimeout`；`GenerationParams`（`max_output_tokens` 对齐 `output_reserve_tokens`、scenario temperature、`tool_choice`、thinking 默认关）；reasoning → `turn.thinking.delta`（不进投影）。见 `model/gateway.py`、`model/stream_abort.py`、providers、`tests/test_gateway_retry.py`。
 
 ---
 

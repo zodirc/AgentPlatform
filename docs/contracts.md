@@ -205,6 +205,10 @@ Phase 1 最小 payload schema：`turn.accepted`、`turn.cancelling`、`turn.canc
 
 `turn.cancelling` · `step.completed` · `turn.thinking` · `turn.thinking.delta` · `turn.token` · `tool.delta` · `approval.requested` · `approval.resolved` · `turn.cancelled` · `patch.proposed` · `patch.applied` · `patch.rejected` · `outline.updated` · `section.draft.delta`
 
+- `turn.thinking`：步骤级「开始思考」标记。  
+- `turn.thinking.delta`：推理/reasoning **文本增量**（直播 UI）。**投影忽略**，不得写入 `TurnView.latest_output`；刷新可不保留。  
+- Cancel 终态为 `turn.cancelled`；因 abort 掐流产生的 transport 错误 **不得** 落成 `turn.failed` + model_error（ADR-015 §5.1）。
+
 ### Phase 2
 
 `turn.plan` · `subagent.started` · `subagent.completed` · `retrieval.completed`

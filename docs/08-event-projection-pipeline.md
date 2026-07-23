@@ -69,7 +69,8 @@ web 消费 SSE（进行中）+ GET /view（重连/终态）
 说明：
 
 - `step.completed` 从 Phase 1 起进入细粒度事件集合，Phase 0 最小链路不强制
-- `turn.thinking`、`turn.token`、`tool.delta`、`approval.*`、`subagent.*` 同样按后续 Phase 逐步启用
+- `turn.thinking`、`turn.thinking.delta`、`turn.token`、`tool.delta`、`approval.*`、`subagent.*` 同样按后续 Phase 逐步启用
+- **`turn.thinking.delta`**：直播推理文本；**投影忽略**（不写入 `turn_views.latest_output`）；刷新可不保留。与步骤标记 `turn.thinking` 分离。
 
 ## 4. SSE 消费（api）
 
@@ -104,10 +105,10 @@ Last-Event-ID: 12          # 可选，等价 since_sequence=12
 
 | 场景 | 主数据源 | 辅助 |
 |------|----------|------|
-| 流式 token / tool 进度 | **SSE 事件** | — |
+| 流式 token / 思考增量 / tool 进度 | **SSE 事件** | 思考增量仅直播；投影不收 |
 | 审批按钮展示 | SSE `approval.requested` | `GET /turns/{id}/view` |
-| 对话列表、历史首屏 | **Projection** `TurnView` | 事件可后补 |
-| 终态确认 | `turn.completed` 事件与 `TurnView.status` 一致 | 不一致以 **事件序列** 为准重建 view |
+| 对话列表、历史首屏 | **Projection** `TurnView` | 事件可后补；**无**思考正文 |
+| 终态确认 | `turn.completed` / `turn.cancelled` 事件与 `TurnView.status` 一致 | 不一致以 **事件序列** 为准重建 view；Cancel 不得表现为 failed |
 
 前端本地状态 = `projection 缓存` + `event cursor (sequence)`，**不**维护 Turn 阶段状态机。
 

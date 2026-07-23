@@ -30,7 +30,7 @@ Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块*
 | 18 | [multimodal-design](18-multimodal-design.md) | 多模态设计（待落地） |
 | 19 | [skills-layer](19-skills-layer.md) | Skills（近期末） |
 | 20 | [context-compaction-walkthrough](20-context-compaction-walkthrough.md) | 压缩演练 |
-| 21 | [agent-system-qa](21-agent-system-qa.md) | **面试向原理问答** Q0–Q26（含多用户划分；旁路/记忆/加速已深挖） |
+| 21 | [agent-system-qa](21-agent-system-qa.md) | **面试向原理问答** Q0–Q27（取消/思考直播/忙时排队已深挖；旁路/记忆/加速/多用户） |
 | 22 | [highlights-vs-legacy](22-highlights-vs-legacy.md) | 相对旧项目全景 |
 | 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
 | 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |

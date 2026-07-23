@@ -1637,19 +1637,22 @@ API 基址用相对路径 `/api/v1`，经 gateway 反代。
 ### 37.3 Stop 交互时序
 
 ```text
-T+0ms  立即停止本地渲染（token/delta/draft.delta 不再 append）
-T+0ms  显示「正在停止…」或禁用重复发送
-T+0ms  POST cancel（默认 force=false）
-T+?    收到 turn.cancelled → 对齐终态，恢复输入框
+T+0ms  立即冻结本地渲染（token / thinking.delta / tool.delta / draft.delta 不再 append）
+T+0ms  「正在停止…」；思考块冻结为「思考过程」
+T+0ms  POST cancel（默认 force=false）；SSE **继续**消费终态
+T+?    turn.cancelled → 对齐终态（非 failed）
+T+~500ms 仍 running 时可升 force
 ```
 
 | TurnView.status | 主操作 |
 |-----------------|--------|
-| running | Stop → CancelTurn |
+| running | Stop → CancelTurn；取消 ≠ model_error |
 | waiting_approval | 批准/拒绝；非与 Stop 混用 |
-| cancelled | 可发新消息＝新 Turn |
+| cancelled | 可发新消息＝新 Turn；忙时队列可在空闲后合并发出 |
 
-**禁止**等 turn.cancelled 才停 UI。
+**禁止**等 turn.cancelled 才停 UI。  
+**禁止** stopRendering 掐死整条事件流（否则 busy 只能靠定时器）。  
+忙时 composer 可排队，空闲合并成下一 Turn（见 `10` §5.1.1）。
 
 ### 37.4 模型供应商设置
 

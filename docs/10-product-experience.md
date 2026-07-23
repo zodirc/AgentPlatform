@@ -118,19 +118,32 @@ Turn 结束 → runtime append 终态事件
 用户点 **Stop** 时 Web 必须：
 
 ```text
-T+0ms   立即停止本地渲染（turn.token / tool.delta / section.draft.delta 不再 append）
-T+0ms   显示「正在停止…」或禁用重复发送
+T+0ms   立即停止本地渲染：
+        turn.token / turn.thinking(.delta) / tool.delta / section.draft.delta 不再 append
+T+0ms   显示「正在停止…」；思考块冻结为「思考过程」（不清空本轮快照）
 T+0ms   POST /api/v1/turns/{id}/cancel（默认 force=false）
-T+?     收到 turn.cancelled → 对齐终态，恢复输入框
+        —— 事件流须保持消费，以便收到 turn.cancelled（禁止 stopRendering 掐死整条 SSE）
+T+?     收到 turn.cancelled → 对齐终态，恢复输入框（busy 清除）
+T+~500ms 若视图仍 running/pending → 可升 force=true（对齐软取消 P95）
 ```
 
 | `TurnView.status` | 主操作 | 说明 |
 |-------------------|--------|------|
-| `running` | **Stop** → CancelTurn | 打断本轮 |
+| `running` | **Stop** → CancelTurn | 打断本轮；终态须为 `cancelled`，**禁止**把取消断流报成 `failed` / model_error |
 | `waiting_approval` | **批准 / 拒绝** | 非 Stop；走 ApproveToolCall / DenyToolCall |
 | `cancelled` | 可发新消息 | 新 Turn，非 Resume |
 
-**禁止**仅等 `turn.cancelled` SSE 到达后才停止 UI 渲染。`waiting_approval` 时 Stop 按钮不得与「拒绝审批」混用（产品层二选一：隐藏 Stop 或明确为「放弃本轮」并走 CancelTurn）。
+**禁止**仅等 `turn.cancelled` SSE 到达后才停止 UI 渲染。  
+**禁止**「停渲染」实现成断开 SSE / 丢弃后续事件——否则 UI 收不到终态，只能靠数秒定时器松 busy（体感远差于 Cursor）。  
+`waiting_approval` 时 Stop 按钮不得与「拒绝审批」混用（产品层二选一：隐藏 Stop 或明确为「放弃本轮」并走 CancelTurn）。
+
+### 5.1.1 忙时出站排队
+
+本轮 `running` / `waiting_approval` 时，composer **允许继续输入并发送**：
+
+- 消息进入本地出站队列（可预览、可清空）；
+- 工作台空闲后按序合并（`\n\n`）为 **一条** 用户消息，再 `StartTurn`；
+- **不**并行抢跑同一会话多个执行实例；**不** Resume 已取消 Run。
 
 ### 5.2 模型供应商设置（ADR-019）
 
@@ -152,7 +165,9 @@ Web 设置页（`/settings/model`）须支持：
 | Loop 非 Pipeline | 删掉 13 节点，工具扩展 | ADR-005、`05` |
 | Turn Intake 非分类图 | 确定性 Intake + 首轮路由 | ADR-014、`05` §3.1 |
 | 事件溯源 UI | 断线 replay、不拼状态 | ADR-012、`09` |
-| Stop 乐观 UI | 点停即停渲染 | ADR-015、`11` §5.1 |
+| Stop 乐观 UI | 点停即停渲染；仍听终态；取消≠失败 | ADR-015、`10` §5.1、`21` Q19 |
+| 思考直播 | `turn.thinking.delta` ephemeral | ADR-004、`08`、`21` Q22 |
+| 忙时排队 | 空闲合并下一 Turn | `10` §5.1.1、`21` Q27 |
 | Diff-first 写作 | 可审改稿 | `10`、`patch.*` |
 | 上下文治理 | 长会话可压缩；golden 逼出 compact | `06` §0.1、ADR-008、`shared.04` |
 | RAG 走工具 | 检索仅 `search_*` → tool_result | `06` §10、`writing.05` / `agent.04` |
