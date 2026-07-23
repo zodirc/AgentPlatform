@@ -33,12 +33,8 @@ assertions:
   tool:
     name: search_sources
     result_matches: "张白鹿"
-    # Standing ANN may miss ops-only fixtures → keyword-fallback; hybrid OK when
-    # indexed. Plain keyword is also valid when RETRIEVAL_MODE=keyword (CI/lite).
-    retrieval:
-      - hybrid
-      - keyword-fallback
-      - keyword
+    # Do not assert retrieval mode here: CI gate uses runtime-lite + hash embedding
+    # (keyword / keyword-fallback). Hybrid mode is covered by make eval-retrieval.
   output:
     matches: "张白鹿"
 
