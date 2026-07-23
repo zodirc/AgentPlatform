@@ -23,6 +23,46 @@ def test_lint_empty_section_for_section_ids() -> None:
     assert any(i.code == "empty_section" and "ch1" in i.message for i in issues)
 
 
+def test_lint_section_ids_allows_body_starting_with_heading() -> None:
+    """export_document wraps ``## {id}``; bodies often open with their own H1/H2."""
+    body = (
+        "## shentou-outline\n\n"
+        "<!-- section:shentou-outline -->\n"
+        "# 《渗透》大纲\n\n"
+        "intro\n\n"
+        "<!-- /section:shentou-outline -->\n\n"
+        "## 渗透-大纲\n\n"
+        "# 《渗透》—— 电视剧大纲\n\n"
+        "## 基本信息\n\n"
+        "- 剧名：渗透\n"
+    )
+    issues = lint_export_markdown(
+        body, profile="novel-zh", section_ids=["shentou-outline", "渗透-大纲"]
+    )
+    assert not any(i.code == "empty_section" for i in issues)
+
+
+@pytest.mark.asyncio
+async def test_export_document_ok_when_section_opens_with_h1(workspace: Path) -> None:
+    turn_id = uuid4()
+    await core.draft_section(
+        "渗透-大纲",
+        "# 《渗透》—— 电视剧大纲\n\n## 基本信息\n\n- 剧名：渗透\n",
+        turn_id=turn_id,
+    )
+    (workspace / "outline.md").write_text("# Workspace outline\n\nnote\n", encoding="utf-8")
+
+    result = await core.export_document(
+        section_ids=["渗透-大纲"],
+        source="current_draft",
+        output_path="exports/shentou.md",
+        profile="novel-zh",
+        turn_id=turn_id,
+    )
+    assert result["delivery_status"] == "ok", result
+    assert (workspace / "exports" / "shentou.md").exists()
+
+
 @pytest.mark.asyncio
 async def test_export_document_fails_structure_lint(workspace: Path) -> None:
     sections = workspace / "sections"

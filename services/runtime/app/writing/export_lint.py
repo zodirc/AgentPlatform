@@ -14,6 +14,30 @@ class ExportLintIssue:
     message: str
 
 
+def _section_marker_spans(
+    text: str, section_ids: list[str]
+) -> list[tuple[str, int, int]]:
+    """Locate export wrappers ``## {section_id}`` and the body until the next wrapper.
+
+    ``export_document`` prepends ``## {section_id}`` around each section body. Bodies
+    often start with their own ``#`` / ``##`` titles — emptiness must be measured
+    until the *next requested section marker*, not until the next any-heading
+    (that false-positive ``empty_section`` on otherwise valid exports).
+    """
+    markers: list[tuple[str, int, int]] = []  # sid, marker_start, body_start
+    for sid in section_ids:
+        m = re.search(rf"(?m)^##\s+{re.escape(sid)}\s*$", text)
+        if not m:
+            continue
+        markers.append((sid, m.start(), m.end()))
+    markers.sort(key=lambda item: item[1])
+    spans: list[tuple[str, int, int]] = []
+    for i, (sid, _m_start, body_start) in enumerate(markers):
+        body_end = markers[i + 1][1] if i + 1 < len(markers) else len(text)
+        spans.append((sid, body_start, body_end))
+    return spans
+
+
 def lint_export_markdown(
     body: str,
     *,
@@ -42,26 +66,34 @@ def lint_export_markdown(
             )
         prev_level = level
 
-    # Empty sections: only flag ##+ headings (outline H1 may be title-only).
-    # When section_ids provided, only those ## markers must be non-empty.
-    parts = SECTION_SPLIT_RE.split(text)
-    if len(parts) >= 3:
-        for i in range(1, len(parts), 2):
-            heading = parts[i].strip()
-            body_part = parts[i + 1] if i + 1 < len(parts) else ""
-            level = len(heading) - len(heading.lstrip("#"))
-            title = heading.lstrip("#").strip()
-            if level < 2:
-                continue
-            if section_ids is not None and title not in section_ids:
-                continue
-            if not body_part.strip():
+    # Empty sections under ##+ headings.
+    # With section_ids (export path): only the ``## {id}`` wrappers from
+    # export_document; body may contain nested headings.
+    if section_ids is not None:
+        for sid, body_start, body_end in _section_marker_spans(text, section_ids):
+            if not text[body_start:body_end].strip():
                 issues.append(
                     ExportLintIssue(
                         "empty_section",
-                        f"empty section under {heading!r}",
+                        f"empty section under {'## ' + sid!r}",
                     )
                 )
+    else:
+        parts = SECTION_SPLIT_RE.split(text)
+        if len(parts) >= 3:
+            for i in range(1, len(parts), 2):
+                heading = parts[i].strip()
+                body_part = parts[i + 1] if i + 1 < len(parts) else ""
+                level = len(heading) - len(heading.lstrip("#"))
+                if level < 2:
+                    continue
+                if not body_part.strip():
+                    issues.append(
+                        ExportLintIssue(
+                            "empty_section",
+                            f"empty section under {heading!r}",
+                        )
+                    )
 
     if section_ids:
         missing_ids = [sid for sid in section_ids if sid not in text]
