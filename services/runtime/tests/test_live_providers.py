@@ -208,7 +208,10 @@ async def test_openai_provider_signals_activity_on_reasoning_before_content() ->
         ]
 
     assert isinstance(chunks[0], StreamActivity)
-    assert sum(1 for c in chunks if isinstance(c, StreamActivity)) == 1
+    reasoning = [c for c in chunks if isinstance(c, StreamActivity) and c.text]
+    assert len(reasoning) == 1
+    assert reasoning[0].text == "用户"
+    assert sum(1 for c in chunks if isinstance(c, StreamActivity)) >= 2
     _text, tool_calls, _ = _collect(chunks)
     assert tool_calls[0]["name"] == "read_file"
     assert tool_calls[0]["input"] == {"path": "a.md"}

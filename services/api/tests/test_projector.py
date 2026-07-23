@@ -189,3 +189,71 @@ async def test_project_turn_replaces_plan_artifact_with_latest() -> None:
     assert "plan-new" in payload
     assert "in_progress" in payload
     assert "plan-old" not in payload
+
+
+@pytest.mark.asyncio
+async def test_project_turn_ignores_thinking_delta_in_latest_output() -> None:
+    """Ephemeral reasoning must not become durable assistant output (refresh)."""
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=transaction)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction.return_value = transaction
+
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=False)
+
+    pool = MagicMock()
+    pool.acquire.return_value = acquire_cm
+    pool.fetch = AsyncMock(
+        return_value=[
+            {
+                "sequence": 1,
+                "type": "turn.thinking",
+                "payload": {"step_index": 0, "label": "step-0"},
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            {
+                "sequence": 2,
+                "type": "turn.thinking.delta",
+                "payload": {"delta": "我先分析用户意图……", "step_index": 0},
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            {
+                "sequence": 3,
+                "type": "turn.token",
+                "payload": {"delta": "最终答复"},
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            {
+                "sequence": 4,
+                "type": "turn.completed",
+                "payload": {"summary": "最终答复", "termination_reason": "final"},
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+        ]
+    )
+
+    turn = {
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "writing",
+        "status": "running",
+        "user_input": "写大纲",
+    }
+
+    with (
+        patch("app.services.projection.projector.get_pool", new_callable=AsyncMock, return_value=pool),
+        patch("app.services.projection.projector.turn_svc.get_turn", new_callable=AsyncMock, return_value=turn),
+    ):
+        await project_turn(TURN_ID)
+
+    view_insert = next(
+        call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
+    )
+    # latest_output is positional arg $6
+    latest_output = view_insert.args[6]
+    assert latest_output == "最终答复"
+    assert "分析用户意图" not in str(latest_output)
+    assert "分析用户意图" not in str(view_insert.args[8])

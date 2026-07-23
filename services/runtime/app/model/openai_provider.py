@@ -211,6 +211,9 @@ class OpenAIProvider:
             ):
                 signaled = True
                 yield StreamActivity(kind="sse")
+            reasoning = delta.get("reasoning_content")
+            if isinstance(reasoning, str) and reasoning:
+                yield StreamActivity(kind="reasoning", text=reasoning)
             if delta.get("content"):
                 chunk = delta["content"]
                 text_parts.append(chunk)

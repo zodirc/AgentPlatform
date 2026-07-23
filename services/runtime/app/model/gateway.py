@@ -55,15 +55,19 @@ class ModelResponse:
 
 @dataclass(frozen=True)
 class StreamActivity:
-    """Provider liveness signal before text / final ModelResponse.
+    """Provider liveness / reasoning signal before text / final ModelResponse.
 
     OpenAI-compatible models (e.g. DeepSeek) may stream ``reasoning_content`` or
     ``tool_calls`` for a long time with ``content: null``. Gateway first-byte
     timeout waits on the first yielded item — without this signal the harness
     falsely times out while SSE bytes are still arriving.
+
+    When ``text`` is non-empty, the engine forwards it as ``turn.thinking.delta``
+    for ephemeral UI only (not assistant output / not projected into history).
     """
 
     kind: str = "sse"
+    text: str = ""
 
 
 class AbortSignal(Protocol):

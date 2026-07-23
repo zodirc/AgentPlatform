@@ -10,6 +10,7 @@ from app.model.gateway import (
     ModelFatalError,
     ModelResponse,
     ModelTransientError,
+    StreamActivity,
     classify_http_status,
 )
 from app.model.generation import GenerationParams, apply_tool_choice
@@ -36,7 +37,7 @@ class AnthropicProvider:
         messages: list[dict],
         tools: list[dict],
         abort: AbortSignal | None = None,
-    ) -> AsyncIterator[str | ModelResponse]:
+    ) -> AsyncIterator[str | ModelResponse | StreamActivity]:
         system, anthropic_messages = _to_anthropic_messages(messages)
         gen = self.generation
         payload: dict[str, Any] = {
@@ -132,13 +133,22 @@ class AnthropicProvider:
                                 if chunk:
                                     text_parts.append(chunk)
                                     yield chunk
+                            elif delta.get("type") == "thinking_delta":
+                                thinking = delta.get("thinking", "")
+                                if thinking:
+                                    yield StreamActivity(
+                                        kind="reasoning", text=str(thinking)
+                                    )
                             elif delta.get("type") == "input_json_delta" and tool_calls:
                                 partial = delta.get("partial_json", "")
                                 tool_calls[-1].setdefault("_json", "")
                                 tool_calls[-1]["_json"] += partial
                         elif event_type == "content_block_start":
                             block = event.get("content_block", {})
-                            if block.get("type") == "tool_use":
+                            if block.get("type") == "thinking":
+                                # Unblock first-byte while extended thinking streams.
+                                yield StreamActivity(kind="sse")
+                            elif block.get("type") == "tool_use":
                                 tool_calls.append(
                                     {
                                         "id": block.get("id"),

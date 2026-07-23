@@ -53,6 +53,7 @@ _SUPPRESSED_SUB_EVENTS = frozenset(
         "step.started",
         "step.completed",
         "turn.thinking",
+        "turn.thinking.delta",
         "turn.token",
         "tool.started",
         "tool.completed",

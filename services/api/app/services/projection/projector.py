@@ -215,6 +215,10 @@ async def _project_turn_impl(turn_id: UUID) -> None:
             # Transient signal; terminal turn.cancelled sets the final status.
             # Recognized here so it is not silently dropped as an unknown type.
             pending_interrupt = None  # noqa: F841
+        elif event_type in {"turn.thinking", "turn.thinking.delta", "step.started"}:
+            # Phase markers / ephemeral reasoning stream — live UI only.
+            # Must not land in latest_output or session history (docs/13 R4).
+            pass
         elif event_type == "patch.proposed":
             artifacts.append({"type": "patch", **payload, "status": "pending"})
         elif event_type == "patch.applied":

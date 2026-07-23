@@ -204,7 +204,18 @@ class AgentEngine:
                             break
 
                         if isinstance(chunk, StreamActivity):
-                            # Liveness only — do not append to assistant text / UI tokens.
+                            # Liveness (+ optional reasoning text). Never append to
+                            # assistant tokens / durable latest_output.
+                            reasoning = str(chunk.text or "")
+                            if reasoning:
+                                await self._write_event(
+                                    event_type="turn.thinking.delta",
+                                    payload={
+                                        "delta": reasoning,
+                                        "step_index": step_index,
+                                    },
+                                    step_index=step_index,
+                                )
                             continue
                         if isinstance(chunk, str):
                             response_text += chunk
