@@ -22,6 +22,7 @@ DOCKER_AUTO_PRUNE ?= 1
 .DEFAULT_GOAL := help
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
+	ensure-ops-secret \
 	up-web up-api up-runtime restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
@@ -41,6 +42,7 @@ help: ## 显示常用命令
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
 	@echo "  make eval-plan-suggest-tune 搜索权重提案（只写 reports）"
+	@echo "  make ensure-ops-secret  若空则生成 OPS_TEST_SECRET 并打印评测台 URL"
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
@@ -64,7 +66,12 @@ help: ## 显示常用命令
 	@echo "  make runtime-test 运行时测试"
 	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
 
-start: ## 启动栈（不 rebuild，最快）
+# If OPS_TEST_SECRET is empty/missing in .env, generate once and print Ops URL (docs/29).
+# Never overwrites an existing secret.
+ensure-ops-secret: ## 确保 .env 有 OPS_TEST_SECRET，并打印 /ops/<secret>/test
+	@bash scripts/ensure_ops_test_secret.sh
+
+start: ensure-ops-secret ## 启动栈（不 rebuild，最快）
 	$(COMPOSE) up -d
 
 # Safe: only removes untagged (<none>) images left by retag-after-build.
@@ -75,15 +82,23 @@ define docker_auto_prune
 	fi
 endef
 
-up: ## 重建并启动全部服务
+up: ensure-ops-secret ## 重建并启动全部服务
 	$(COMPOSE) up -d --build
 	$(docker_auto_prune)
 
-up-web: ## 只重建 web
+# Secret is consumed by api only. up-web may generate it for the first time — recreate api then.
+up-web: ## 只重建 web（若刚生成 OPS 密钥则顺带 recreate api）
+	@status=$$(mktemp); \
+	OPS_SECRET_STATUS_FILE=$$status bash scripts/ensure_ops_test_secret.sh; \
+	gen=$$(grep '^generated=' $$status | cut -d= -f2); rm -f $$status; \
+	if [ "$$gen" = "1" ]; then \
+	  echo "==> new OPS_TEST_SECRET → recreating api to load env"; \
+	  $(COMPOSE) up -d --no-deps --force-recreate api; \
+	fi
 	$(COMPOSE) up -d --build web
 	$(docker_auto_prune)
 
-up-api: ## 只重建 api
+up-api: ensure-ops-secret ## 只重建 api
 	$(COMPOSE) up -d --build api
 	$(docker_auto_prune)
 
