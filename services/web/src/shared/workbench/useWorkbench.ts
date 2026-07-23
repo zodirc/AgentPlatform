@@ -108,6 +108,7 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [view, setView] = useState<TurnView | null>(null);
   const [events, setEvents] = useState<TurnEvent[]>([]);
   const [streamText, setStreamText] = useState("");
+  const [thinkingText, setThinkingText] = useState("");
   const [sectionDraft, setSectionDraft] = useState("");
   const [toolLiveStreams, setToolLiveStreams] = useState<
     Record<string, string>
@@ -272,6 +273,14 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (ev.type === "turn.token") {
             const delta = String(ev.payload.delta ?? "");
             setStreamText((t) => t + delta);
+          }
+          if (ev.type === "turn.thinking.delta") {
+            const delta = String(ev.payload.delta ?? "");
+            if (delta) setThinkingText((t) => t + delta);
+          }
+          if (ev.type === "turn.thinking") {
+            // New model step — separate rounds visually; still ephemeral.
+            setThinkingText((t) => (t.trim() ? `${t.trimEnd()}\n\n` : t));
           }
           if (ev.type === "section.draft.delta") {
             const delta = String(ev.payload.delta ?? "");
@@ -590,6 +599,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setError(null);
     setEvents([]);
     setStreamText("");
+    setThinkingText("");
     setSectionDraft("");
     setToolLiveStreams({});
     setLiveToolTimeline([]);
@@ -906,6 +916,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     view,
     events,
     streamText,
+    thinkingText,
     sectionDraft,
     timelineItems,
     contextUsage,

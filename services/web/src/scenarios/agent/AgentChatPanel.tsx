@@ -60,6 +60,7 @@ export function AgentChatPanel({ wb }: Props) {
   }, [
     wb.turnHistory.length,
     wb.streamText,
+    wb.thinkingText,
     wb.sectionDraft,
     wb.view?.latest_output,
     wb.busy,
@@ -110,6 +111,9 @@ export function AgentChatPanel({ wb }: Props) {
         ) : null}
         {wb.turnHistory.map((turn) => {
           const output = assistantText(wb, turn);
+          const isLive = turn.id === wb.turnId;
+          const thinking =
+            isLive && wb.thinkingText.trim() ? wb.thinkingText.trim() : "";
           return (
             <div key={turn.id} className="mb-4 space-y-2">
               <div>
@@ -121,6 +125,22 @@ export function AgentChatPanel({ wb }: Props) {
                   {turn.user_input}
                 </p>
               </div>
+              {thinking ? (
+                <details
+                  className="rounded-lg border border-border/80 bg-muted/30"
+                  open={Boolean(isLive && wb.busy && !output)}
+                >
+                  <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground">
+                    {isLive && wb.busy && !output ? "思考中…" : "思考过程"}
+                    <span className="ml-2 font-normal text-muted-foreground/70">
+                      （本轮直播，刷新不保留）
+                    </span>
+                  </summary>
+                  <pre className="max-h-64 overflow-auto whitespace-pre-wrap border-t border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                    {thinking}
+                  </pre>
+                </details>
+              ) : null}
               {output ? (
                 <div>
                   <p className="mb-1 text-xs font-medium text-muted-foreground">助手</p>
@@ -128,7 +148,7 @@ export function AgentChatPanel({ wb }: Props) {
                     {output}
                   </pre>
                 </div>
-              ) : turn.id === wb.turnId && wb.busy ? (
+              ) : isLive && wb.busy && !thinking ? (
                 <p className="text-xs text-muted-foreground">思考中…</p>
               ) : null}
             </div>

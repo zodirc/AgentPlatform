@@ -75,6 +75,8 @@ export type WorkbenchState = {
   view: TurnView | null;
   events: TurnEvent[];
   streamText: string;
+  /** Ephemeral reasoning stream for the live turn; not in history/views. */
+  thinkingText: string;
   sectionDraft: string;
   timelineItems: TimelineItem[];
   contextUsage: ContextUsage | null;
