@@ -178,10 +178,8 @@ POST /turns [trace_id]
 
 ## 4. 回归分层（CI + 本地）
 
-> **权威门禁**：[docs/28](28-proof-gate-and-ux-signals.md) PX0。  
-> 本地一键：**日常**用 Web 评测台（[29](29-ops-eval-console.md)）；**CI/无头**用 `make gate`（= `smoke` + `eval-all` + `runtime-test`）。  
-> Web 台对部分环境耦合命令会 **skipped**（不是失败），见 [29 §2.1](29-ops-eval-console.md)。  
-> 详见 [28](28-proof-gate-and-ux-signals.md)。
+> **权威证明**：Ops 评测台 **完整证明**（`suite=ci`）≡ `make ci-proof` ≡ GitHub Actions（`scripts/ci_proof.sh`）。  
+> Golden 切片（[29](29-ops-eval-console.md)）可点选调试；**切片绿 ≠ 合并证明**。
 > PR：`.github/workflows/ci.yml`（L0 + L1 + unit **阻断合并**）。  
 > Nightly：`.github/workflows/nightly.yml`（L2 live 样本，**告警不阻断**）。
 

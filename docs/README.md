@@ -2,7 +2,7 @@
 
 Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块**；变更只改对应正文。
 
-验证：日常 Web 评测台（[29](29-ops-eval-console.md)）· `make smoke` · `make gate` · `make eval-all` · `make runtime-test`
+验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
 ---
 
@@ -38,7 +38,7 @@ Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块*
 | 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分已落地；判断力 PS4+） |
 | 27 | [multi-tenancy](27-multi-tenancy.md) | **多租户 / Work 作用域**（默认开启；MT0–MT5c + MT7；**否决 MT6 Org**） |
 | 28 | [proof-gate-and-ux-signals](28-proof-gate-and-ux-signals.md) | **Proof 门禁 + 体验信号**（环外；PX0–PX2 ✅） |
-| 29 | [ops-eval-console](29-ops-eval-console.md) | **Web 评测台**（日常自测；按 Turn stub/live；`OPS_TEST_SECRET`） |
+| 29 | [ops-eval-console](29-ops-eval-console.md) | **Web 评测台**（可视化切片；证明仍以 `make gate` 为准；`OPS_TEST_SECRET`） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 

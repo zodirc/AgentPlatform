@@ -513,6 +513,19 @@ make eval-ha        # ha_runner golden（stub）
 - [x] `make up` 与 `make down` 为薄封装
 - [x] 本地：compose up + `curl health` + 最小 turn stream + **L0 golden**（`12` §4）
 
+### 镜像堆积（非功能 bug）
+
+每次 `docker compose … --build` / `make up` 会生成**新 image id**，旧的 `latest`/`default`/`lite` 标签被挪走后变成 `<none>:<none>`（dangling）。这是 Docker 默认行为，不是业务逻辑错误。本仓库因 `make up` / `make gate` / eval 频繁 `--build`，加上 runtime 1.7GB ST 镜像，堆积会很快。
+
+| 做法 | 说明 |
+|------|------|
+| 日常改代码 | 优先 `make start`；只改某一服务用 `make up-web` / `up-api` / `up-runtime` |
+| **自动清理** | `make up` / `up-*` / `build` / `gate` / eval restore 结束后会 `docker image prune -f`（仅悬空 `<none>`）。关：`DOCKER_AUTO_PRUNE=0` |
+| 深度清理 | `make docker-prune`：悬空镜像 + **全部**未用 Build Cache（`builder prune -af`；下次冷构建会稍慢） |
+| 更狠 | `docker system prune -a`（会删所有未在跑容器引用的镜像，慎用） |
+
+当前 `docker images` 里大量 `<none>` + `docker system df` 显示 Images Reclaimable ~90% 即此现象。
+
 ---
 
 ## 附录 A — 高级环境变量（非起栈必需）

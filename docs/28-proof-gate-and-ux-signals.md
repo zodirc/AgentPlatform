@@ -13,9 +13,9 @@
 
 | 项 | 落点 |
 |----|------|
-| `make gate` | `scripts/gate.sh`（一键：smoke→eval→单测，末尾恢复日常栈）；**CI / 无头备用** |
-| **日常自测** | [Ops Eval Console](29-ops-eval-console.md)：`/ops/<OPS_TEST_SECRET>/test`（默认不重启栈） |
-| Ops `skipped` | 含 `ws.stream` / `wait-index` / `session-turns` / `admin.create-provider` 的用例在 Web 台标 skipped（≠ fail）；全量仍靠本门禁 / `make eval-*` |
+| **Ops 完整证明 / `make ci-proof`** | 与 CI 同脚本 `scripts/ci_proof.sh`：unit → gate（smoke+eval-all；不重复 runtime pytest） |
+| Ops Golden 切片 | [29](29-ops-eval-console.md) `suite=golden`；**切片绿 ≠ 合并证明** |
+| Ops `skipped` | 仅 golden；环境耦合命令 skipped（≠ fail）；全量由 suite=ci / gate 覆盖 |
 | CI / nightly | `.github/workflows/ci.yml` · `nightly.yml` |
 | 体验信号核心 | `packages/contracts/python/agent_contracts/ux_signals.py` |
 | 体验信号 CLI | `scripts/ux_signals.py` · `make ux-signals` |
@@ -144,7 +144,7 @@ Nightly（不阻断合并）
 | 项 | 落点 |
 |----|------|
 | Workflow | `.github/workflows/ci.yml`（恢复；与 `04` 对齐） |
-| 本地一键 | **日常**：Web [Ops Eval Console](29-ops-eval-console.md)；**CI/无头**：`make gate` = smoke + eval-all + runtime-test |
+| 本地 / CI | **Ops `suite=ci` / `make ci-proof`** ≡ GitHub Actions；`make gate` 为 docker 半边 |
 | 文档 | 修订 `11` §4：删除「已移除 CI」；改为「CI + 本地 `make gate`」 |
 | Prompt 敏感 | 约定：改 `scenarios/*/system.md`、writing cards、工具 bootstrap → PR 描述勾选已跑 `make gate`；后续可加 path filter |
 
