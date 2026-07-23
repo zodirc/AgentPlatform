@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { Button } from "./components/ui/button";
 import { EvalConsolePage } from "./ops/EvalConsolePage";
+import { EvalHistoryPage } from "./ops/EvalHistoryPage";
 import { EvalRunReportPage } from "./ops/EvalRunReportPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
@@ -20,11 +21,15 @@ import { WorkbenchProvider } from "./shared/workbench/workbenchProvider";
 const SCENARIO_PATHS = ["/writing", "/agent", "/interview"] as const;
 
 function isOpsEvalPath(pathname: string): boolean {
-  return /^\/ops\/[^/]+\/test(\/runs\/[^/]+)?\/?$/.test(pathname);
+  return /^\/ops\/[^/]+\/test(\/(runs\/[^/]+|history))?\/?$/.test(pathname);
 }
 
 function isOpsEvalReportPath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/test\/runs\/[^/]+\/?$/.test(pathname);
+}
+
+function isOpsEvalHistoryPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/test\/history\/?$/.test(pathname);
 }
 
 
@@ -277,6 +282,9 @@ function AuthenticatedApp() {
 
 export function App() {
   const { pathname } = useLocation();
+  if (isOpsEvalHistoryPath(pathname)) {
+    return <EvalHistoryPage />;
+  }
   if (isOpsEvalReportPath(pathname)) {
     return <EvalRunReportPage />;
   }

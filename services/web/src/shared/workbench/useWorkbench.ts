@@ -397,6 +397,23 @@ export function useWorkbenchImpl(): WorkbenchState {
             );
             reportError("任务失败", msg);
           }
+          if (ev.type === "turn.completed" || ev.type === "turn.cancelled") {
+            // Clear busy immediately — do not wait for onClose's fetchTurnView
+            // (refresh 可恢复；否则会卡在「只能 Stop」且 activity 已显示完成).
+            setBusy(false);
+            setActivePlanPhase(null);
+            setStopping(false);
+            setActionBusy(false);
+            setView((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    status:
+                      ev.type === "turn.completed" ? "completed" : "cancelled",
+                  }
+                : prev,
+            );
+          }
           if (ev.type === "approval.requested") {
             if (resumingAfterApprovalRef.current) return;
             setBusy(false);
@@ -427,31 +444,36 @@ export function useWorkbenchImpl(): WorkbenchState {
           }
         },
         onClose: async () => {
-          const v = await fetchTurnView(id);
-          setView(v);
-          syncApprovalFromView(v);
-          const merged: TurnHistoryItem = {
-            ...historyItemFromView(v),
-            latest_output:
-              streamTextRef.current ||
-              sectionDraftRef.current ||
-              v.latest_output ||
-              null,
-          };
-          setTurnHistory((prev) => upsertHistoryItem(prev, merged));
-          if (v.context_usage)
-            setLiveContextUsage(v.context_usage as ContextUsage);
-          if (v.token_usage) setLiveTokenUsage(v.token_usage as TokenUsage);
-          const closedPlan = latestPlanFromArtifacts(
-            v.artifacts as Record<string, unknown>[] | undefined,
-          );
-          if (closedPlan) setLivePlan(closedPlan);
-          setLiveToolTimeline([]);
-          setBusy(false);
-          setActivePlanPhase(null);
-          setStopping(false);
-          setActionBusy(false);
-          resumingAfterApprovalRef.current = false;
+          try {
+            const v = await fetchTurnView(id);
+            setView(v);
+            syncApprovalFromView(v);
+            const merged: TurnHistoryItem = {
+              ...historyItemFromView(v),
+              latest_output:
+                streamTextRef.current ||
+                sectionDraftRef.current ||
+                v.latest_output ||
+                null,
+            };
+            setTurnHistory((prev) => upsertHistoryItem(prev, merged));
+            if (v.context_usage)
+              setLiveContextUsage(v.context_usage as ContextUsage);
+            if (v.token_usage) setLiveTokenUsage(v.token_usage as TokenUsage);
+            const closedPlan = latestPlanFromArtifacts(
+              v.artifacts as Record<string, unknown>[] | undefined,
+            );
+            if (closedPlan) setLivePlan(closedPlan);
+            setLiveToolTimeline([]);
+          } catch (err) {
+            reportError("刷新回合视图失败", err);
+          } finally {
+            setBusy(false);
+            setActivePlanPhase(null);
+            setStopping(false);
+            setActionBusy(false);
+            resumingAfterApprovalRef.current = false;
+          }
         },
         onError: (err?: unknown) => {
           setBusy(false);

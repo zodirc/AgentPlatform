@@ -23,10 +23,12 @@ type CaseResult = {
 type EvalRun = {
   id: string;
   status: string;
+  suite?: string;
   mode: string;
   created_at: string;
   finished_at?: string | null;
   error?: string | null;
+  cancel_requested?: boolean;
   summary?: { total: number; pass: number; fail: number; pending: number };
   cases: CaseResult[];
   logs?: Array<Record<string, unknown>>;
@@ -41,12 +43,14 @@ export function EvalRunReportPage() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [tab, setTab] = useState<"cases" | "log">("cases");
+  const [stopping, setStopping] = useState(false);
   const doneRef = useRef(false);
 
   const headers = useMemo(
     () => ({
       Authorization: `Bearer ${secret}`,
       Accept: "application/json",
+      "Content-Type": "application/json",
     }),
     [secret],
   );
@@ -77,10 +81,34 @@ export function EvalRunReportPage() {
   }, [load]);
 
   useEffect(() => {
-    if (run && (run.status === "completed" || run.status === "failed")) {
+    if (run && (run.status === "completed" || run.status === "failed" || run.status === "cancelled")) {
       doneRef.current = true;
+    } else {
+      doneRef.current = false;
     }
   }, [run]);
+
+  const stopRun = async () => {
+    if (!runId || stopping) return;
+    setStopping(true);
+    setError(null);
+    try {
+      const resp = await fetch(`/api/v1/ops/eval/runs/${runId}/stop`, {
+        method: "POST",
+        headers,
+      });
+      if (!resp.ok) {
+        const text = await resp.text();
+        throw new Error(text || `HTTP ${resp.status}`);
+      }
+      setRun((await resp.json()) as EvalRun);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setStopping(false);
+      void load();
+    }
+  };
 
   if (error && !run) {
     return (
@@ -105,19 +133,33 @@ export function EvalRunReportPage() {
     pending: run.cases.filter((c) => c.status === "pending" || c.status === "running")
       .length,
   };
+  const running =
+    run.status === "queued" || run.status === "running" || run.status === "cancelling";
 
   return (
     <OpsShell
       secret={secret}
       title="评测输出"
-      subtitle={`run ${run.id} · ${run.mode} · ${run.status}`}
+      subtitle={`run ${run.id} · ${run.suite || run.mode} · ${run.status}`}
       actions={
-        <Link
-          to={opsConsolePath(secret)}
-          className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
-        >
-          返回控制台
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {running ? (
+            <button
+              type="button"
+              disabled={stopping || run.cancel_requested}
+              onClick={() => void stopRun()}
+              className="rounded-md border border-destructive/50 bg-destructive/10 px-2 py-1 text-destructive hover:bg-destructive/15 disabled:opacity-50"
+            >
+              {run.cancel_requested || stopping ? "停止中…" : "停止"}
+            </button>
+          ) : null}
+          <Link
+            to={opsConsolePath(secret)}
+            className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+          >
+            返回控制台
+          </Link>
+        </div>
       }
     >
       <section className="mb-6 grid gap-3 sm:grid-cols-4">

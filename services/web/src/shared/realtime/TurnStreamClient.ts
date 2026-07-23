@@ -80,6 +80,7 @@ export class TurnStreamClient {
           }
           this.handlers?.onEvent(data);
           if (STREAM_END.has(data.type)) {
+            this.stopped = true;
             this.close();
             this.handlers?.onClose?.();
             return;

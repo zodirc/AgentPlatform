@@ -49,7 +49,8 @@ export class TurnWebSocketClient {
         this.lastSequence = data.sequence;
       }
       this.handlers?.onEvent(data);
-      if (TERMINAL.has(data.type)) {
+      if (TERMINAL.has(data.type) || data.type === "approval.requested") {
+        this.stopped = true;
         this.close();
         this.handlers?.onClose?.();
       }

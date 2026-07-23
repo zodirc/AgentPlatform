@@ -11,6 +11,10 @@ export function opsRunPath(secret: string, runId: string): string {
   return `/ops/${encodeURIComponent(secret)}/test/runs/${runId}`;
 }
 
+export function opsHistoryPath(secret: string): string {
+  return `/ops/${encodeURIComponent(secret)}/test/history`;
+}
+
 export function secretFromOpsPath(pathname: string): string {
   const m = pathname.match(/^\/ops\/([^/]+)\//);
   return m ? decodeURIComponent(m[1]) : "";
@@ -50,6 +54,12 @@ export function OpsShell({
               >
                 控制台
               </Link>
+              <Link
+                to={opsHistoryPath(secret)}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+              >
+                历史结果
+              </Link>
               {actions}
             </div>
           </div>
@@ -82,7 +92,8 @@ export function OpsShell({
 
 export function statusClass(status: string): string {
   if (status === "pass") return "text-success";
-  if (status === "fail") return "text-destructive";
-  if (status === "running") return "text-warning";
+  if (status === "fail" || status === "cancelled") return "text-destructive";
+  if (status === "running" || status === "queued" || status === "cancelling") return "text-warning";
+  if (status === "skipped") return "text-muted-foreground";
   return "text-muted-foreground";
 }
