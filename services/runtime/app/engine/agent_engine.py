@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import suppress
 from typing import Any, Awaitable, Callable
 
 from app.context.engine import ContextEngine, ToolExecutor
@@ -63,6 +64,23 @@ class AgentEngine:
         self._tool_specs = list(tools)
         self._openai_tools = self._tools_payload(tools)
 
+    async def _abort_gateway_when_cancelled(self, state: TurnState) -> None:
+        """Poll cancel while blocked on provider chunks (incl. long thinking gaps).
+
+        Interval matches tool cancel (~50ms). Does not run on the happy-path
+        critical path between tokens — only a background sleeper until cancel.
+        """
+        while not state.cancelled:
+            cancelled, force = await self._check_cancel()
+            if cancelled:
+                state.cancelled = True
+                state.cancel_force = force
+                abort = getattr(self._gateway, "abort_stream", None)
+                if abort is not None:
+                    abort()
+                return
+            await asyncio.sleep(0.05)
+
     @staticmethod
     def _tools_payload(tools: list[ToolSpec]) -> list[dict[str, Any]]:
         return [
@@ -84,6 +102,7 @@ class AgentEngine:
             delivery=state.delivery,
         )
         return self._tools_payload(scoped)
+
     async def run(self, state: TurnState) -> str | None:
         final_summary: str | None = None
         self._search_sources_calls = 0
@@ -191,61 +210,82 @@ class AgentEngine:
                         step_index=step_index,
                     )
                     stream = self._gateway.stream(messages=messages, tools=step_tools)
-                    async for chunk in stream:
-                        await _ensure_step_within_budget()
-                        cancelled, force = await self._check_cancel()
-                        if cancelled:
-                            state.cancelled = True
-                            state.cancel_force = force
-                            step_outcome = "cancelled"
-                            abort = getattr(self._gateway, "abort_stream", None)
-                            if abort is not None:
-                                abort()
-                            break
+                    cancel_watch = asyncio.create_task(
+                        self._abort_gateway_when_cancelled(state)
+                    )
+                    try:
+                        async for chunk in stream:
+                            if state.cancelled:
+                                step_outcome = "cancelled"
+                                break
+                            await _ensure_step_within_budget()
+                            cancelled, force = await self._check_cancel()
+                            if cancelled:
+                                state.cancelled = True
+                                state.cancel_force = force
+                                step_outcome = "cancelled"
+                                abort = getattr(self._gateway, "abort_stream", None)
+                                if abort is not None:
+                                    abort()
+                                break
 
-                        if isinstance(chunk, StreamActivity):
-                            # Liveness (+ optional reasoning text). Never append to
-                            # assistant tokens / durable latest_output.
-                            reasoning = str(chunk.text or "")
-                            if reasoning:
+                            if isinstance(chunk, StreamActivity):
+                                # Liveness (+ optional reasoning text). Never append to
+                                # assistant tokens / durable latest_output.
+                                reasoning = str(chunk.text or "")
+                                if reasoning:
+                                    await self._write_event(
+                                        event_type="turn.thinking.delta",
+                                        payload={
+                                            "delta": reasoning,
+                                            "step_index": step_index,
+                                        },
+                                        step_index=step_index,
+                                    )
+                                continue
+                            if isinstance(chunk, str):
+                                response_text += chunk
                                 await self._write_event(
-                                    event_type="turn.thinking.delta",
-                                    payload={
-                                        "delta": reasoning,
-                                        "step_index": step_index,
-                                    },
+                                    event_type="turn.token",
+                                    payload={"delta": chunk},
                                     step_index=step_index,
                                 )
-                            continue
-                        if isinstance(chunk, str):
-                            response_text += chunk
-                            await self._write_event(
-                                event_type="turn.token",
-                                payload={"delta": chunk},
-                                step_index=step_index,
-                            )
-                        elif isinstance(chunk, ModelResponse):
-                            # Streaming providers emit text as str deltas AND repeat the
-                            # full text in the terminal ModelResponse; only adopt the
-                            # terminal text when nothing was streamed (non-streaming path).
-                            if chunk.text and not response_text:
-                                response_text += chunk.text
-                            if chunk.tool_calls:
-                                tool_calls.extend(chunk.tool_calls)
-                            if chunk.input_tokens:
-                                step_input_tokens = chunk.input_tokens
-                                usage_source = "provider"
-                            if chunk.output_tokens:
-                                step_output_tokens = chunk.output_tokens
-                                if usage_source != "provider":
-                                    usage_source = "mixed"
-                            if chunk.cache_read_input_tokens:
-                                step_cache_read = chunk.cache_read_input_tokens
-                            if chunk.cache_creation_input_tokens:
-                                step_cache_creation = chunk.cache_creation_input_tokens
-                            state.usage.input_tokens += chunk.input_tokens
-                            state.usage.output_tokens += chunk.output_tokens
+                            elif isinstance(chunk, ModelResponse):
+                                # Streaming providers emit text as str deltas AND repeat the
+                                # full text in the terminal ModelResponse; only adopt the
+                                # terminal text when nothing was streamed (non-streaming path).
+                                if chunk.text and not response_text:
+                                    response_text += chunk.text
+                                if chunk.tool_calls:
+                                    tool_calls.extend(chunk.tool_calls)
+                                if chunk.input_tokens:
+                                    step_input_tokens = chunk.input_tokens
+                                    usage_source = "provider"
+                                if chunk.output_tokens:
+                                    step_output_tokens = chunk.output_tokens
+                                    if usage_source != "provider":
+                                        usage_source = "mixed"
+                                if chunk.cache_read_input_tokens:
+                                    step_cache_read = chunk.cache_read_input_tokens
+                                if chunk.cache_creation_input_tokens:
+                                    step_cache_creation = chunk.cache_creation_input_tokens
+                                state.usage.input_tokens += chunk.input_tokens
+                                state.usage.output_tokens += chunk.output_tokens
+                    finally:
+                        cancel_watch.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await cancel_watch
                 except ModelError:
+                    # Mid-stream aclose after Cancel can still raise; prefer cancelled.
+                    if state.cancelled:
+                        step_outcome = "cancelled"
+                        break
+                    cancelled, force = await self._check_cancel()
+                    if cancelled:
+                        state.cancelled = True
+                        state.cancel_force = force
+                        step_outcome = "cancelled"
+                        break
                     step_outcome = "failed"
                     raise
 

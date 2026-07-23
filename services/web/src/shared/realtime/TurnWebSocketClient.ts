@@ -7,6 +7,16 @@ export type TurnStreamHandlers = {
 };
 
 const TERMINAL = new Set(["turn.completed", "turn.failed", "turn.cancelled"]);
+
+/** Deltas frozen on Stop (ADR-015); terminal / control events still dispatch. */
+const RENDER_PAUSE_TYPES = new Set([
+  "turn.token",
+  "turn.thinking",
+  "turn.thinking.delta",
+  "tool.delta",
+  "section.draft.delta",
+]);
+
 const MAX_RECONNECT_ATTEMPTS = 8;
 const BASE_RECONNECT_MS = 300;
 
@@ -19,6 +29,7 @@ function wsUrl(turnId: string, sinceSequence: number): string {
 export class TurnWebSocketClient {
   private socket: WebSocket | null = null;
   private stopped = false;
+  private renderPaused = false;
   private lastSequence = 0;
   private turnId: string | null = null;
   private handlers: TurnStreamHandlers | null = null;
@@ -36,6 +47,7 @@ export class TurnWebSocketClient {
   private openSocket(sinceSequence: number) {
     this.close();
     this.stopped = false;
+    this.renderPaused = false;
     if (!this.turnId || !this.handlers) return;
 
     this.socket = new WebSocket(wsUrl(this.turnId, sinceSequence));
@@ -47,6 +59,9 @@ export class TurnWebSocketClient {
       const data = JSON.parse(String(ev.data)) as TurnEvent;
       if (data.sequence > this.lastSequence) {
         this.lastSequence = data.sequence;
+      }
+      if (this.renderPaused && RENDER_PAUSE_TYPES.has(data.type)) {
+        return;
       }
       this.handlers?.onEvent(data);
       if (TERMINAL.has(data.type) || data.type === "approval.requested") {
@@ -90,8 +105,9 @@ export class TurnWebSocketClient {
     );
   }
 
+  /** ADR-015: stop local render ≤50ms; keep listening for turn.cancelled. */
   stopRendering() {
-    this.stopped = true;
+    this.renderPaused = true;
   }
 
   close() {
@@ -99,7 +115,9 @@ export class TurnWebSocketClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.stopped = true;
     this.socket?.close();
     this.socket = null;
   }
 }
+

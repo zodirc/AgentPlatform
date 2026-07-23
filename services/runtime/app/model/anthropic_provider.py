@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import suppress
 from typing import Any, AsyncIterator
 
 import httpx
@@ -14,6 +16,7 @@ from app.model.gateway import (
     classify_http_status,
 )
 from app.model.generation import GenerationParams, apply_tool_choice
+from app.model.stream_abort import close_response_on_abort
 from app.settings import settings
 
 
@@ -109,96 +112,113 @@ class AnthropicProvider:
                             body=body,
                             headers=resp.headers,
                         )
-                    async for line in resp.aiter_lines():
-                        if abort and abort.is_set():
-                            return
-                        if not line.startswith("data:"):
-                            continue
-                        data = line[5:].strip()
-                        if not data or data == "[DONE]":
-                            continue
-                        event = json.loads(data)
-                        event_type = event.get("type")
-                        if event_type == "message_start":
-                            usage = (event.get("message") or {}).get("usage") or {}
-                            input_tokens = int(usage.get("input_tokens") or 0)
-                            cache_read_input_tokens = int(usage.get("cache_read_input_tokens") or 0)
-                            cache_creation_input_tokens = int(
-                                usage.get("cache_creation_input_tokens") or 0
-                            )
-                        elif event_type == "content_block_delta":
-                            delta = event.get("delta", {})
-                            if delta.get("type") == "text_delta":
-                                chunk = delta.get("text", "")
-                                if chunk:
-                                    text_parts.append(chunk)
-                                    yield chunk
-                            elif delta.get("type") == "thinking_delta":
-                                thinking = delta.get("thinking", "")
-                                if thinking:
-                                    yield StreamActivity(
-                                        kind="reasoning", text=str(thinking)
-                                    )
-                            elif delta.get("type") == "input_json_delta" and tool_calls:
-                                partial = delta.get("partial_json", "")
-                                tool_calls[-1].setdefault("_json", "")
-                                tool_calls[-1]["_json"] += partial
-                        elif event_type == "content_block_start":
-                            block = event.get("content_block", {})
-                            if block.get("type") == "thinking":
-                                # Unblock first-byte while extended thinking streams.
-                                yield StreamActivity(kind="sse")
-                            elif block.get("type") == "tool_use":
-                                tool_calls.append(
-                                    {
-                                        "id": block.get("id"),
-                                        "name": block.get("name"),
-                                        "input": {},
-                                    }
+                    closer = asyncio.create_task(close_response_on_abort(resp, abort))
+                    try:
+                        async for line in resp.aiter_lines():
+                            if abort and abort.is_set():
+                                return
+                            if not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if not data or data == "[DONE]":
+                                continue
+                            event = json.loads(data)
+                            event_type = event.get("type")
+                            if event_type == "message_start":
+                                usage = (event.get("message") or {}).get("usage") or {}
+                                input_tokens = int(usage.get("input_tokens") or 0)
+                                cache_read_input_tokens = int(
+                                    usage.get("cache_read_input_tokens") or 0
                                 )
-                        elif event_type == "message_delta":
-                            usage = event.get("usage", {})
-                            output_tokens = int(usage.get("output_tokens") or 0)
-                            input_tokens = int(usage.get("input_tokens") or input_tokens)
-                            if "cache_read_input_tokens" in usage:
-                                cache_read_input_tokens = int(usage.get("cache_read_input_tokens") or 0)
-                            if "cache_creation_input_tokens" in usage:
                                 cache_creation_input_tokens = int(
                                     usage.get("cache_creation_input_tokens") or 0
                                 )
-                            if tool_calls:
-                                for call in tool_calls:
-                                    raw = call.pop("_json", "{}")
-                                    try:
-                                        call["input"] = json.loads(raw) if raw else {}
-                                    except json.JSONDecodeError:
-                                        call["input"] = {}
+                            elif event_type == "content_block_delta":
+                                delta = event.get("delta", {})
+                                if delta.get("type") == "text_delta":
+                                    chunk = delta.get("text", "")
+                                    if chunk:
+                                        text_parts.append(chunk)
+                                        yield chunk
+                                elif delta.get("type") == "thinking_delta":
+                                    thinking = delta.get("thinking", "")
+                                    if thinking:
+                                        yield StreamActivity(
+                                            kind="reasoning", text=str(thinking)
+                                        )
+                                elif delta.get("type") == "input_json_delta" and tool_calls:
+                                    partial = delta.get("partial_json", "")
+                                    tool_calls[-1].setdefault("_json", "")
+                                    tool_calls[-1]["_json"] += partial
+                            elif event_type == "content_block_start":
+                                block = event.get("content_block", {})
+                                if block.get("type") == "thinking":
+                                    # Unblock first-byte while extended thinking streams.
+                                    yield StreamActivity(kind="sse")
+                                elif block.get("type") == "tool_use":
+                                    tool_calls.append(
+                                        {
+                                            "id": block.get("id"),
+                                            "name": block.get("name"),
+                                            "input": {},
+                                        }
+                                    )
+                            elif event_type == "message_delta":
+                                usage = event.get("usage", {})
+                                output_tokens = int(usage.get("output_tokens") or 0)
+                                input_tokens = int(
+                                    usage.get("input_tokens") or input_tokens
+                                )
+                                if "cache_read_input_tokens" in usage:
+                                    cache_read_input_tokens = int(
+                                        usage.get("cache_read_input_tokens") or 0
+                                    )
+                                if "cache_creation_input_tokens" in usage:
+                                    cache_creation_input_tokens = int(
+                                        usage.get("cache_creation_input_tokens") or 0
+                                    )
+                                if tool_calls:
+                                    for call in tool_calls:
+                                        raw = call.pop("_json", "{}")
+                                        try:
+                                            call["input"] = json.loads(raw) if raw else {}
+                                        except json.JSONDecodeError:
+                                            call["input"] = {}
+                                    yield ModelResponse(
+                                        tool_calls=tool_calls,
+                                        input_tokens=input_tokens,
+                                        output_tokens=output_tokens,
+                                        cache_read_input_tokens=cache_read_input_tokens,
+                                        cache_creation_input_tokens=cache_creation_input_tokens,
+                                    )
+                                    return
                                 yield ModelResponse(
-                                    tool_calls=tool_calls,
+                                    text="".join(text_parts),
                                     input_tokens=input_tokens,
                                     output_tokens=output_tokens,
                                     cache_read_input_tokens=cache_read_input_tokens,
                                     cache_creation_input_tokens=cache_creation_input_tokens,
                                 )
                                 return
-                            yield ModelResponse(
-                                text="".join(text_parts),
-                                input_tokens=input_tokens,
-                                output_tokens=output_tokens,
-                                cache_read_input_tokens=cache_read_input_tokens,
-                                cache_creation_input_tokens=cache_creation_input_tokens,
-                            )
-                            return
-                        elif event_type == "error":
-                            err = event.get("error") or {}
-                            raise ModelFatalError(
-                                f"anthropic stream error: {err.get('message') or err}"
-                            )
+                            elif event_type == "error":
+                                err = event.get("error") or {}
+                                raise ModelFatalError(
+                                    f"anthropic stream error: {err.get('message') or err}"
+                                )
+                    finally:
+                        closer.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await closer
         except (ModelTransientError, ModelFatalError):
             raise
         except httpx.TimeoutException as exc:
+            if abort and abort.is_set():
+                return
             raise ModelTransientError(f"anthropic http timeout: {exc}") from exc
         except httpx.TransportError as exc:
+            # Expected when CancelTurn acloses the live stream.
+            if abort and abort.is_set():
+                return
             raise ModelTransientError(f"anthropic transport error: {exc}") from exc
 
         if tool_calls:

@@ -723,12 +723,13 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
   async function handleStop() {
     if (!turnId) return;
+    // ADR-015: freeze local render immediately (tokens / thinking / tool deltas).
+    // Stream stays open so turn.cancelled can clear busy without the 2.5–6s timers.
     streamRef.current?.stopRendering();
     setStopping(true);
     try {
       await cancelTurn(turnId, false);
-      // Soft cancel may wait for the worker; if the worker already died, force
-      // finalize so we do not stick on「停止中」forever.
+      // Soft cancel target ≤500ms P95 (ADR-015); escalate to force if still live.
       window.setTimeout(() => {
         void (async () => {
           if (!turnIdRef.current) return;
@@ -745,14 +746,15 @@ export function useWorkbenchImpl(): WorkbenchState {
             /* ignore — terminal stream handler still owns cleanup */
           }
         })();
-      }, 2500);
+      }, 500);
+      // Safety net only — normal path clears via turn.cancelled on the live stream.
       window.setTimeout(() => {
         setStopping((prev) => {
           if (!prev) return prev;
           return false;
         });
         setBusy(false);
-      }, 6000);
+      }, 2500);
     } catch (err) {
       setStopping(false);
       reportError("停止失败", err);

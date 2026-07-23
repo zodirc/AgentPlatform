@@ -12,12 +12,23 @@ const STREAM_END = new Set([
   "turn.cancelled",
   "approval.requested",
 ]);
+
+/** Deltas frozen on Stop (ADR-015); terminal / control events still dispatch. */
+const RENDER_PAUSE_TYPES = new Set([
+  "turn.token",
+  "turn.thinking",
+  "turn.thinking.delta",
+  "tool.delta",
+  "section.draft.delta",
+]);
+
 const MAX_RECONNECT_ATTEMPTS = 8;
 const BASE_RECONNECT_MS = 300;
 
 export class TurnStreamClient {
   private abort: AbortController | null = null;
   private stopped = false;
+  private renderPaused = false;
   private lastSequence = 0;
   private turnId: string | null = null;
   private handlers: TurnStreamHandlers | null = null;
@@ -43,6 +54,7 @@ export class TurnStreamClient {
     this.abort?.abort();
     this.abort = new AbortController();
     this.stopped = false;
+    this.renderPaused = false;
     if (!this.turnId || !this.handlers) return;
 
     try {
@@ -78,6 +90,10 @@ export class TurnStreamClient {
           if (data.sequence > this.lastSequence) {
             this.lastSequence = data.sequence;
           }
+          // Advance cursor even when paused so reconnect does not replay tokens.
+          if (this.renderPaused && RENDER_PAUSE_TYPES.has(data.type)) {
+            continue;
+          }
           this.handlers?.onEvent(data);
           if (STREAM_END.has(data.type)) {
             this.stopped = true;
@@ -112,8 +128,9 @@ export class TurnStreamClient {
     }
   }
 
+  /** ADR-015: stop local render ≤50ms; keep listening for turn.cancelled. */
   stopRendering() {
-    this.stopped = true;
+    this.renderPaused = true;
   }
 
   close() {
@@ -121,6 +138,7 @@ export class TurnStreamClient {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.stopped = true;
     this.abort?.abort();
     this.abort = null;
   }

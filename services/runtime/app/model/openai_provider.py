@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+from contextlib import suppress
 from typing import Any, AsyncIterator
 
 import httpx
@@ -15,6 +17,7 @@ from app.model.gateway import (
 )
 from app.model.generation import GenerationParams, apply_tool_choice
 from app.model.openai_messages import _to_openai_messages
+from app.model.stream_abort import close_response_on_abort
 from app.settings import settings
 
 
@@ -154,8 +157,13 @@ class OpenAIProvider:
         except (ModelTransientError, ModelFatalError):
             raise
         except httpx.TimeoutException as exc:
+            if abort and abort.is_set():
+                return
             raise ModelTransientError(f"openai http timeout: {exc}") from exc
         except httpx.TransportError as exc:
+            # Expected when CancelTurn acloses the live stream.
+            if abort and abort.is_set():
+                return
             raise ModelTransientError(f"openai transport error: {exc}") from exc
 
         yield self._final_response(
@@ -180,56 +188,67 @@ class OpenAIProvider:
         cache_read = 0
         cache_creation = 0
         signaled = False
-        async for line in resp.aiter_lines():
-            if abort and abort.is_set():
-                return
-            if not line.startswith("data:"):
-                continue
-            data = line[5:].strip()
-            if data == "[DONE]":
-                break
-            event = json.loads(data)
-            usage = event.get("usage") or {}
-            if usage:
-                input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
-                output_tokens = int(
-                    usage.get("completion_tokens") or usage.get("output_tokens") or 0
-                )
-                details = usage.get("prompt_tokens_details") or {}
-                cache_read = int(
-                    details.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0
-                )
-                cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
-            choice = (event.get("choices") or [{}])[0]
-            delta = choice.get("delta") or {}
-            # Unblock first-byte timeout on any assistant SSE activity.
-            if not signaled and (
-                delta.get("role")
-                or delta.get("content")
-                or delta.get("tool_calls")
-                or delta.get("reasoning_content") is not None
-            ):
-                signaled = True
-                yield StreamActivity(kind="sse")
-            reasoning = delta.get("reasoning_content")
-            if isinstance(reasoning, str) and reasoning:
-                yield StreamActivity(kind="reasoning", text=reasoning)
-            if delta.get("content"):
-                chunk = delta["content"]
-                text_parts.append(chunk)
-                yield chunk
-            if delta.get("tool_calls"):
-                for tc in delta["tool_calls"]:
-                    idx = tc.get("index", 0)
-                    entry = tool_calls.setdefault(
-                        idx,
-                        {"id": tc.get("id", f"call-{idx}"), "name": "", "input": {}, "_args": ""},
+        closer = asyncio.create_task(close_response_on_abort(resp, abort))
+        try:
+            async for line in resp.aiter_lines():
+                if abort and abort.is_set():
+                    return
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                event = json.loads(data)
+                usage = event.get("usage") or {}
+                if usage:
+                    input_tokens = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+                    output_tokens = int(
+                        usage.get("completion_tokens") or usage.get("output_tokens") or 0
                     )
-                    fn = tc.get("function", {})
-                    if fn.get("name"):
-                        entry["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        entry["_args"] += fn["arguments"]
+                    details = usage.get("prompt_tokens_details") or {}
+                    cache_read = int(
+                        details.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0
+                    )
+                    cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
+                choice = (event.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
+                # Unblock first-byte timeout on any assistant SSE activity.
+                if not signaled and (
+                    delta.get("role")
+                    or delta.get("content")
+                    or delta.get("tool_calls")
+                    or delta.get("reasoning_content") is not None
+                ):
+                    signaled = True
+                    yield StreamActivity(kind="sse")
+                reasoning = delta.get("reasoning_content")
+                if isinstance(reasoning, str) and reasoning:
+                    yield StreamActivity(kind="reasoning", text=reasoning)
+                if delta.get("content"):
+                    chunk = delta["content"]
+                    text_parts.append(chunk)
+                    yield chunk
+                if delta.get("tool_calls"):
+                    for tc in delta["tool_calls"]:
+                        idx = tc.get("index", 0)
+                        entry = tool_calls.setdefault(
+                            idx,
+                            {
+                                "id": tc.get("id", f"call-{idx}"),
+                                "name": "",
+                                "input": {},
+                                "_args": "",
+                            },
+                        )
+                        fn = tc.get("function", {})
+                        if fn.get("name"):
+                            entry["name"] = fn["name"]
+                        if fn.get("arguments"):
+                            entry["_args"] += fn["arguments"]
+        finally:
+            closer.cancel()
+            with suppress(asyncio.CancelledError):
+                await closer
         if input_tokens or output_tokens or cache_read or cache_creation:
             yield (input_tokens, output_tokens, cache_read, cache_creation)
 

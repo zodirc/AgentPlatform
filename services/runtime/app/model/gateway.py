@@ -73,6 +73,8 @@ class StreamActivity:
 class AbortSignal(Protocol):
     def is_set(self) -> bool: ...
 
+    async def wait(self) -> None: ...
+
 
 class ModelProvider(Protocol):
     def stream(
@@ -92,6 +94,28 @@ class _OrAbort:
 
     def is_set(self) -> bool:
         return any(event.is_set() for event in self._events)
+
+    async def wait(self) -> None:
+        if self.is_set():
+            return
+        tasks = [asyncio.create_task(event.wait()) for event in self._events]
+        try:
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            for task in done:
+                exc = task.exception()
+                if exc is not None:
+                    raise exc
+        except asyncio.CancelledError:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
 
 class StubModelProvider:
@@ -696,6 +720,10 @@ class ModelGateway:
                         yield item
                     return
                 except ModelTransientError as exc:
+                    # Abort via aclose often surfaces as transport errors; Cancel
+                    # must end cleanly, not as "failed after streaming started".
+                    if self._cancel_event.is_set():
+                        return
                     last_error = exc
                     if emitted:
                         raise ModelFatalError(
@@ -703,8 +731,6 @@ class ModelGateway:
                         ) from exc
                     if attempt >= max_attempts:
                         break
-                    if self._cancel_event.is_set():
-                        return
                     delay = _backoff_seconds(attempt, exc)
                     logger.info(
                         "model retry attempt=%s/%s delay=%.2fs error=%s",
@@ -726,6 +752,8 @@ class ModelGateway:
                 except ModelFatalError:
                     raise
                 except Exception as exc:
+                    if self._cancel_event.is_set():
+                        return
                     classified = classify_provider_exception(exc)
                     if isinstance(classified, ModelTransientError) and not emitted:
                         last_error = classified
@@ -786,8 +814,13 @@ class ModelGateway:
                 f"first byte timeout after {first_byte_budget:.1f}s"
             ) from exc
         except ModelError:
+            if self._cancel_event.is_set() or attempt_abort.is_set():
+                return
             raise
         except Exception as exc:
+            # Cancel/timeout often surfaces as transport errors after aclose.
+            if self._cancel_event.is_set() or attempt_abort.is_set():
+                return
             raise classify_provider_exception(exc) from exc
 
         if self._cancel_event.is_set():
@@ -804,8 +837,12 @@ class ModelGateway:
                     raise ModelProviderTimeout("model stream exceeded timeout")
                 yield item
         except ModelError:
+            if self._cancel_event.is_set() or attempt_abort.is_set():
+                return
             raise
         except Exception as exc:
+            if self._cancel_event.is_set() or attempt_abort.is_set():
+                return
             raise classify_provider_exception(exc) from exc
 
     async def _interruptible_sleep(self, delay: float, deadline: float) -> bool:

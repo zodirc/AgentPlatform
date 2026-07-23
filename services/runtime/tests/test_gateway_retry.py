@@ -118,6 +118,43 @@ async def test_gateway_does_not_retry_after_streaming_started(
 
 
 @pytest.mark.asyncio
+async def test_gateway_abort_after_streaming_is_not_fatal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CancelTurn aclose looks like a transport error; must not become turn.failed."""
+    monkeypatch.setattr("app.model.gateway.settings.model_max_retries", 3)
+    monkeypatch.setattr("app.model.gateway.settings.model_first_byte_timeout_seconds", 5.0)
+
+    class AbortAsTransportProvider:
+        async def stream(self, *, messages, tools, abort=None):
+            yield "partial-"
+            if abort is not None:
+                # Simulate provider wrapping aclose as transient (openai path).
+                raise ModelTransientError("openai transport error: closed")
+
+    gateway = ModelGateway(AbortAsTransportProvider())
+
+    async def cancel_soon() -> None:
+        await asyncio.sleep(0.01)
+        gateway.abort_stream()
+
+    task = asyncio.create_task(cancel_soon())
+    # Race: abort may land before or after the transient raise; either way
+    # must not raise ModelFatalError once cancel is set.
+    chunks: list[str] = []
+    try:
+        async for item in gateway.stream(messages=[], tools=[]):
+            if isinstance(item, str):
+                chunks.append(item)
+                gateway.abort_stream()
+    except ModelFatalError:
+        await task
+        raise
+    await task
+    assert chunks == ["partial-"]
+
+
+@pytest.mark.asyncio
 async def test_gateway_cancel_interrupts_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.model.gateway.settings.model_max_retries", 5)
     monkeypatch.setattr("app.model.gateway.settings.model_retry_base_delay_seconds", 10.0)

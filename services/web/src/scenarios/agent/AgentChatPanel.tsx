@@ -128,10 +128,14 @@ export function AgentChatPanel({ wb }: Props) {
               {thinking ? (
                 <details
                   className="rounded-lg border border-border/80 bg-muted/30"
-                  open={Boolean(isLive && wb.busy && !output)}
+                  open={Boolean(
+                    isLive && wb.busy && !wb.stopping && !output,
+                  )}
                 >
                   <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground">
-                    {isLive && wb.busy && !output ? "思考中…" : "思考过程"}
+                    {isLive && wb.busy && !wb.stopping && !output
+                      ? "思考中…"
+                      : "思考过程"}
                     <span className="ml-2 font-normal text-muted-foreground/70">
                       （本轮直播，刷新不保留）
                     </span>
