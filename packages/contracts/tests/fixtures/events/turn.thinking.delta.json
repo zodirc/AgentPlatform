@@ -1,0 +1,7 @@
+{
+  "type": "turn.thinking.delta",
+  "payload": {
+    "delta": "用户想根据资料写大纲",
+    "step_index": 0
+  }
+}

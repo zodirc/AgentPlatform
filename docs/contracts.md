@@ -203,7 +203,7 @@ Phase 1 最小 payload schema：`turn.accepted`、`turn.cancelling`、`turn.canc
 
 ### Phase 1（流式、审批、写作 diff）
 
-`turn.cancelling` · `step.completed` · `turn.thinking` · `turn.token` · `tool.delta` · `approval.requested` · `approval.resolved` · `turn.cancelled` · `patch.proposed` · `patch.applied` · `patch.rejected` · `outline.updated` · `section.draft.delta`
+`turn.cancelling` · `step.completed` · `turn.thinking` · `turn.thinking.delta` · `turn.token` · `tool.delta` · `approval.requested` · `approval.resolved` · `turn.cancelled` · `patch.proposed` · `patch.applied` · `patch.rejected` · `outline.updated` · `section.draft.delta`
 
 ### Phase 2
 

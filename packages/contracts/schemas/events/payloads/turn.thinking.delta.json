@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/turn.thinking.delta.json",
+  "title": "TurnThinkingDeltaPayload",
+  "description": "Ephemeral reasoning/thinking text delta for live UI. Not projected into turn_views or session history.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["delta"],
+  "properties": {
+    "delta": { "type": "string", "maxLength": 8192 },
+    "step_index": { "type": "integer", "minimum": 0 }
+  }
+}

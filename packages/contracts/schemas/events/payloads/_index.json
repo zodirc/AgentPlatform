@@ -16,6 +16,7 @@
     "turn.failed": { "const": "turn.failed.json" },
     "turn.token": { "const": "turn.token.json" },
     "turn.thinking": { "const": "turn.thinking.json" },
+    "turn.thinking.delta": { "const": "turn.thinking.delta.json" },
     "step.started": { "const": "step.started.json" },
     "step.completed": { "const": "step.completed.json" },
     "tool.started": { "const": "tool.started.json" },
