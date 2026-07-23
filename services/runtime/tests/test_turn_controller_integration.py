@@ -151,6 +151,13 @@ async def test_start_turn_claims_run_before_run_turn(monkeypatch: pytest.MonkeyP
     monkeypatch.setattr(tc, "run_exists", AsyncMock(return_value=True))
     monkeypatch.setattr(tc, "ensure_run_owned_by_runner", claim)
     monkeypatch.setattr(tc, "_run_turn", run_turn)
+    # start_turn imports ensure_work_root_exists lazily; on GHA the default
+    # WORKSPACE_ROOT=/workspace is not writable for the runner user, which
+    # would swallow the failure in start_turn's except and skip _run_turn.
+    import app.tenant_context as tenant_context
+
+    monkeypatch.setattr(tenant_context, "ensure_work_root_exists", lambda: None)
+    monkeypatch.setattr(tc, "_fail_turn", AsyncMock())
 
     await tc.start_turn(
         turn_id=turn_id,
