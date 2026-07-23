@@ -270,6 +270,11 @@ eval-run-isolated:
 	  docker compose -f deploy/docker-compose.yml --env-file .env logs --tail=40 runtime api; \
 	  exit 1; \
 	fi; \
+	echo "Reclaim eval workspace perms for host runner..."; \
+	docker compose -f deploy/docker-compose.yml --env-file .env exec -u 0 -T runtime \
+	  sh -c "find /workspace \\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \\) -prune -o \\( -type d -exec chmod 0777 {} + \\) -o \\( -type f -exec chmod 0666 {} + \\) 2>/dev/null || true" \
+	  || true; \
+	chmod -R a+rwX $(EVAL_WORKSPACE) 2>/dev/null || true; \
 	env $(EVAL_RUNTIME_ENV) WORKSPACE_HOST_PATH=$(EVAL_WORKSPACE_HOST_PATH) \
 	  PYTHONUNBUFFERED=1 python3 -u scripts/eval_run.py --workspace $(EVAL_WORKSPACE) $(EVAL_ARGS)
 

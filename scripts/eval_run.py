@@ -179,13 +179,77 @@ def _is_mount_point(path: Path) -> bool:
         return False
 
 
+def force_workspace_writable(workspace: Path) -> None:
+    """Make bind-mounted eval workspace writable for the host runner.
+
+    Runtime/api containers often create root-owned files under WORKSPACE_HOST_PATH.
+    On GitHub Actions the runner user then cannot overwrite fixtures (e.g.
+    ``sources/tenant-own.md``) during the next case reset.
+    """
+    workspace.mkdir(parents=True, exist_ok=True)
+    try:
+        for dirpath, _dirnames, filenames in os.walk(workspace):
+            try:
+                os.chmod(dirpath, 0o777)
+            except OSError:
+                pass
+            for name in filenames:
+                try:
+                    os.chmod(os.path.join(dirpath, name), 0o666)
+                except OSError:
+                    pass
+    except OSError:
+        pass
+
+    # Root chmod via the running runtime container (same bind mount as /workspace).
+    # Skip the RO seed corpus mount so chmod does not fail the whole walk.
+    try:
+        subprocess.run(
+            [
+                "docker",
+                "compose",
+                "-f",
+                str(ROOT / "deploy" / "docker-compose.yml"),
+                "--env-file",
+                str(ROOT / ".env"),
+                "exec",
+                "-u",
+                "0",
+                "-T",
+                "runtime",
+                "sh",
+                "-c",
+                "find /workspace "
+                r"\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \) -prune -o "
+                r"\( -type d -exec chmod 0777 {} + \) -o \( -type f -exec chmod 0666 {} + \) "
+                "2>/dev/null || true",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
 def _rm_tree_skip_mounts(path: Path) -> None:
     """Remove a file/dir tree but never delete bind-mount roots (e.g. seed RO)."""
     if path.is_symlink() or path.is_file():
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except PermissionError:
+            try:
+                path.chmod(0o666)
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
         return
     if not path.is_dir():
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
         return
     if _is_mount_point(path):
         return
@@ -202,8 +266,12 @@ def _rm_tree_skip_mounts(path: Path) -> None:
             except FileNotFoundError:
                 pass
             except PermissionError:
-                # Root-owned residue from a previous container run — skip.
-                continue
+                try:
+                    child.chmod(0o666)
+                    child.unlink()
+                except OSError:
+                    # Root-owned residue — force_workspace_writable should clear next.
+                    continue
     try:
         path.rmdir()
     except OSError:
@@ -218,6 +286,7 @@ def reset_workspace(workspace: Path) -> None:
     That mount must not be rmtree'd — otherwise eval dies with PermissionError
     on ``writing`` (docs/15 · docs/28 gate / make eval-*).
     """
+    force_workspace_writable(workspace)
     workspace.mkdir(parents=True, exist_ok=True)
     for child in list(workspace.iterdir()):
         if child.name == "sources" and child.is_dir() and not child.is_symlink():
@@ -235,6 +304,7 @@ def reset_workspace(workspace: Path) -> None:
             directory.chmod(0o777)
         except OSError:
             pass
+    force_workspace_writable(workspace)
 
 
 def admin_create_provider(base: str, cmd: dict) -> None:
@@ -572,15 +642,35 @@ def apply_fixtures(workspace: Path, case: dict) -> None:
         rel = item["path"]
         content = item.get("content", "")
         target = workspace / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        _write_fixture_file(target, content, workspace=workspace)
 
     setup = case.get("setup", {})
     chars = setup.get("large_file_chars")
     if chars:
         target = workspace / "large_file.md"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("A" * int(chars) + "\n", encoding="utf-8")
+        _write_fixture_file(target, "A" * int(chars) + "\n", workspace=workspace)
+
+
+def _write_fixture_file(target: Path, content: str, *, workspace: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.parent.chmod(0o777)
+    except OSError:
+        pass
+    try:
+        target.write_text(content, encoding="utf-8")
+        return
+    except PermissionError:
+        pass
+    # Root-owned leftover from a prior container turn — reclaim then rewrite.
+    force_workspace_writable(workspace)
+    try:
+        if target.exists():
+            target.chmod(0o666)
+            target.unlink()
+    except OSError:
+        pass
+    target.write_text(content, encoding="utf-8")
 
 
 def check_runtime_logs(needle: str) -> bool:
