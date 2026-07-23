@@ -7,8 +7,9 @@
 #   1. Bootstrap .env (stub + hash + Basic auth / ADMIN_SESSION_BYPASS)
 #   2. unit.* (no Docker)
 #   3. make gate → smoke (--build, runtime-lite) → eval-all
-#      eval remounts WORKSPACE_HOST_PATH=.eval-workspace on runtime+api,
-#      chowns bind mount to the runner uid, pins system work_root=/workspace
+#      remounts WORKSPACE_HOST_PATH=.eval-workspace on runtime+api,
+#      chmod world-writable bind mount (no chown — runtime uid 1000 must write),
+#      pins system Work root to /workspace
 # Path hint (PX0d): if you change retrieval/queue code or compose overlays,
 # also run locally: make eval-retrieval / make eval-queue before merge.
 # Prompt/tool sensitive paths (run make gate / Ops suite=ci):
@@ -69,7 +70,7 @@ jobs:
           {
             echo "## CI proof failures"
             echo ""
-            echo "Runner uid=\`$(id -u)\` gid=\`$(id -g)\` (runtime image app=1000)."
+            echo "Runner uid=\`$(id -u)\` gid=\`$(id -g)\` (runtime image app=1000; eval uses chmod not chown)."
             echo ""
             if [[ -f reports/eval-last-failures.txt ]]; then
               echo "### eval-last-failures.txt"

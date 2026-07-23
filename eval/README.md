@@ -53,7 +53,7 @@ python3 scripts/eval_run.py --phase 2
 ```text
 smoke (--build, runtime-lite, daily ../workspace)
   → eval-run-isolated remounts .eval-workspace on runtime+api
-  → chown bind mount to runner uid (not silent chmod-only)
+  → chmod world-writable bind mount (no chown — runtime uid 1000 must still write)
   → pin system Work.work_root=/workspace
   → scripts/eval_run.py
 ```

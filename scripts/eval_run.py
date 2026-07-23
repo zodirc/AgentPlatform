@@ -212,14 +212,18 @@ def _docker_compose_exec_runtime(script: str, *, timeout: int = 120) -> subproce
 
 
 def force_workspace_writable(workspace: Path, *, strict: bool | None = None) -> None:
-    """Make bind-mounted eval workspace writable for the host runner.
+    """Make bind-mounted eval workspace writable for host *and* runtime.
 
     GitHub Actions runners are typically uid 1001 while runtime image runs as
-    ``app`` (uid 1000). Container writes under WORKSPACE_HOST_PATH then leave
-    host-owned residue the runner cannot overwrite (shared.17 fixtures).
+    ``app`` (uid 1000). Both sides must write the same bind mount:
 
-    Reclaim via ``chown`` to the host uid/gid (not only chmod). In CI, docker
-    reclaim failure raises — never swallow the root cause.
+    - Host: fixture reset / golden asserts
+    - Runtime: propose_patch auto-apply, draft_section, export_document
+
+    **Do not chown to the runner uid** — that makes fixtures unwritable to
+    runtime and breaks writing.02 / writing.10. Use world-writable modes
+    (dirs 0777, files 0666) so either uid can unlink/overwrite. Unlink only
+    needs wx on the parent directory.
     """
     if strict is None:
         strict = _ci_strict_workspace()
@@ -239,15 +243,9 @@ def force_workspace_writable(workspace: Path, *, strict: bool | None = None) -> 
     except OSError:
         pass
 
-    # Skip RO seed corpus mount. Chown host uid so the next fixture write works.
-    uid = os.getuid()
-    gid = os.getgid()
+    # Skip RO seed corpus mount. chmod only — never chown to host.
     script = (
         "set -e; "
-        "find /workspace "
-        r"\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \) -prune -o "
-        r"\( ! -type l -print0 \) | "
-        f"xargs -0 -r chown {uid}:{gid}; "
         "find /workspace "
         r"\( -path /workspace/sources/seed -o -path '/workspace/sources/seed/*' \) -prune -o "
         r"\( -type d -exec chmod 0777 {} + \) -o \( -type f -exec chmod 0666 {} + \) "
@@ -265,7 +263,7 @@ def force_workspace_writable(workspace: Path, *, strict: bool | None = None) -> 
     if proc.returncode != 0 and strict:
         detail = (proc.stderr or proc.stdout or "").strip()[:800]
         raise RuntimeError(
-            "eval workspace reclaim failed via docker (uid mismatch?). "
+            "eval workspace reclaim failed via docker. "
             f"exit={proc.returncode} detail={detail!r}"
         )
 
@@ -748,25 +746,29 @@ def _write_fixture_file(target: Path, content: str, *, workspace: Path) -> None:
         pass
     try:
         target.write_text(content, encoding="utf-8")
-        return
     except PermissionError:
-        pass
-    # Container-owned leftover from a prior turn — chown to host then rewrite.
-    force_workspace_writable(workspace, strict=_ci_strict_workspace())
+        # Container-owned leftover — world-writable reclaim then rewrite.
+        force_workspace_writable(workspace, strict=_ci_strict_workspace())
+        try:
+            if target.exists():
+                target.chmod(0o666)
+                target.unlink()
+        except OSError:
+            pass
+        try:
+            target.write_text(content, encoding="utf-8")
+        except PermissionError as exc:
+            rel = target.relative_to(workspace).as_posix()
+            raise PermissionError(
+                f"cannot write eval fixture {rel} (host uid={os.getuid()} vs "
+                f"runtime file owner). chmod reclaim failed."
+            ) from exc
+    # Runtime (uid 1000) must be able to patch/export these host-written files.
     try:
-        if target.exists():
-            target.chmod(0o666)
-            target.unlink()
+        target.chmod(0o666)
+        target.parent.chmod(0o777)
     except OSError:
         pass
-    try:
-        target.write_text(content, encoding="utf-8")
-    except PermissionError as exc:
-        rel = target.relative_to(workspace).as_posix()
-        raise PermissionError(
-            f"cannot write eval fixture {rel} (host uid={os.getuid()} vs "
-            f"runtime file owner). Reclaim/chown failed."
-        ) from exc
 
 
 def check_runtime_logs(needle: str) -> bool:
