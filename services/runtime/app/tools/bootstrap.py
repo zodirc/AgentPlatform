@@ -39,7 +39,11 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="list_dir",
-            description="List directory entries in the workspace",
+            description=(
+                "List one directory's entries (names only). Use to discover structure "
+                "before read/write. Prefer drilling into a subdirectory over listing '.' "
+                "again. For content search use grep/glob/search_codebase — not list_dir."
+            ),
             parameters={
                 "type": "object",
                 "properties": {"path": {"type": "string", "default": "."}},
@@ -52,7 +56,9 @@ def build_registry() -> ToolRegistry:
             name="propose_patch",
             description=(
                 "Propose a surgical edit: old_text must be an exact unique span in the "
-                "current file; new_text replaces only that span (not the whole file)"
+                "current file; new_text replaces only that span (not the whole file). "
+                "Prefer this over write_file for existing files. If apply fails, "
+                "read_file and retry with a corrected unique span — do not resend blindly."
             ),
             parameters={
                 "type": "object",
@@ -215,7 +221,10 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="check_citation",
-            description="Verify a citation against a source file",
+            description=(
+                "Verify that a citation_id appears in / is supported by the given source "
+                "file. Use after drafting with [cite:…] markers; do not invent citations."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -230,7 +239,11 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="grep",
-            description="Search file contents in the workspace",
+            description=(
+                "Regex/search file contents under a path (default '.'). Prefer for exact "
+                "symbols, strings, or error text. Use search_codebase for broader semantic "
+                "queries; use glob to find files by name pattern."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -246,7 +259,11 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="glob",
-            description="Find files matching a glob pattern under a path",
+            description=(
+                "Find files by glob pattern under a path (e.g. '**/*.py', 'src/**/test_*.ts'). "
+                "Use when you need paths by name/extension. For content matches use grep; "
+                "for semantic discovery use search_codebase."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -262,7 +279,12 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="write_file",
-            description="Create or overwrite a workspace file",
+            description=(
+                "Create a new file or intentionally overwrite an entire file with content. "
+                "Do NOT use for small edits to existing files — use propose_patch or "
+                "edit_file instead. Confirm the path with list_dir/glob first when unsure. "
+                "Requires approval in agent mode."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -308,7 +330,12 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="edit_file",
-            description="Replace a unique text span in an existing file",
+            description=(
+                "Replace a unique exact text span in an existing file (old_text → new_text). "
+                "Same surgical contract as propose_patch; requires approval. Prefer "
+                "propose_patch when the UI diff / accept flow matters; use edit_file for "
+                "direct in-place edits. If span is missing or not unique, read_file and retry."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -325,7 +352,12 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="run_tests",
-            description="Run project tests (simulated in Phase 1)",
+            description=(
+                "Run the project's test command (default pytest -q). Call before claiming "
+                "a coding task is done when tests exist, or when the user asks to verify. "
+                "Prefer this over ad-hoc run_command for the standard test suite. "
+                "Requires approval unless profile overrides."
+            ),
             parameters={
                 "type": "object",
                 "properties": {"command": {"type": "string", "default": "pytest -q"}},
@@ -337,7 +369,11 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="read_lints",
-            description="Read lint/diagnostic results for workspace paths",
+            description=(
+                "Read lint/diagnostic results for workspace paths (default '.'). "
+                "Call after write_file / edit_file / propose_patch on code; fix new issues "
+                "you introduced before claiming done. Not a substitute for run_tests."
+            ),
             parameters={
                 "type": "object",
                 "properties": {"path": {"type": "string", "default": "."}},
@@ -384,7 +420,12 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="search_codebase",
-            description="Search the codebase for a query string",
+            description=(
+                "Semantic / hybrid search over the workspace codebase for a natural-language "
+                "or keyword query. Use when the path is unknown or you need related symbols. "
+                "Prefer grep for exact string/regex matches; prefer glob for filename patterns; "
+                "prefer read_file when the path is already known."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -457,7 +498,13 @@ def build_registry() -> ToolRegistry:
     registry.register(
         ToolSpec(
             name="run_command",
-            description="Execute a shell command (requires approval)",
+            description=(
+                "Execute a shell command in the workspace (requires approval). Use for "
+                "builds, custom scripts, or non-standard checks. Prefer read_file/grep/glob "
+                "for reading files; prefer run_tests for the standard test suite; prefer "
+                "write_file/propose_patch/edit_file for file changes — do not use shell "
+                "redirection to write code."
+            ),
             parameters={
                 "type": "object",
                 "properties": {"command": {"type": "string"}},
