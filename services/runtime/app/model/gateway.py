@@ -359,6 +359,34 @@ class StubModelProvider:
             )
             return
 
+        # CQ3 agent.10: read → surgical patch → read_lints (quality loop)
+        if _wants_agent_quality_verify(user_text) and "read_file" in tool_names:
+            if not has_tool_result:
+                yield _tool_call("read_file", {"path": _extract_path(user_text) or "app.py"})
+                return
+            if last_tool == "read_file" and "propose_patch" in tool_names:
+                path = _extract_path(user_text) or "app.py"
+                yield _tool_call(
+                    "propose_patch",
+                    {
+                        "path": path,
+                        "old_text": 'return "old"',
+                        "new_text": 'return "new"',
+                        "summary": "agent.10 minimal patch",
+                    },
+                )
+                return
+            if last_tool == "propose_patch" and "read_lints" in tool_names:
+                path = _extract_path(user_text) or "app.py"
+                yield _tool_call("read_lints", {"path": path})
+                return
+            if last_tool == "read_lints":
+                yield ModelResponse(
+                    text="agent.10 patch applied; lints checked",
+                    output_tokens=10,
+                )
+                return
+
         if has_tool_result and last_tool == "read_file" and "propose_patch" in tool_names and (
             _wants_patch(user_text) or "agent.01" in user_text
         ):
@@ -469,6 +497,12 @@ def _is_smoke_message(text: str) -> bool:
 def _wants_patch(text: str) -> bool:
     keywords = ("改", "patch", "简洁", "修订", "修改", "diff", "[polish]", "writing.12")
     return any(k in text.lower() for k in keywords)
+
+
+def _wants_agent_quality_verify(text: str) -> bool:
+    """CQ3: stub path for read → propose_patch → read_lints."""
+    lowered = text.lower()
+    return "agent.10" in lowered or ("quality" in lowered and "read_lints" in lowered)
 
 
 def _wants_read(text: str) -> bool:

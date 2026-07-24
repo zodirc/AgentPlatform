@@ -1,0 +1,40 @@
+id: agent.10_patch_then_lints
+scenario_id: agent
+phase: 1
+description: CQ3 quality loop — read, surgical propose_patch, then read_lints (no write_file)
+
+fixtures:
+  workspace:
+    - path: app.py
+      content: |
+        def hello():
+            return "old"
+
+input:
+  message: "agent.10 读取 app.py，用 propose_patch 最小改动，再 read_lints 校验"
+  client_request_id: "00000000-0000-4000-8000-000000000110"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - patch.proposed
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: read_lints
+    forbidden_names:
+      - write_file
+    max_calls:
+      write_file: 0
+  metrics:
+    max_steps: 8
+  latency:
+    ttfb_ms_max: 300
+
+tags: [agent, patch, quality, cq3, p1]

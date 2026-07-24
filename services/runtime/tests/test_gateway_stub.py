@@ -243,3 +243,68 @@ async def test_stub_writing_14_path_prefix_search() -> None:
     assert text_chunks, "writing.14 final reply must stream token chunks for latency asserts"
     finals = [c for c in after_tool if not isinstance(c, str) and c.text]
     assert finals and "张白鹿" in finals[-1].text
+
+
+@pytest.mark.asyncio
+async def test_stub_agent_quality_verify_loop() -> None:
+    """CQ3: agent.10 scripts read → propose_patch → read_lints."""
+    provider = StubModelProvider()
+    tools = [
+        {"name": "read_file"},
+        {"name": "propose_patch"},
+        {"name": "read_lints"},
+        {"name": "write_file"},
+    ]
+    user = {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "agent.10 读取 app.py，用 propose_patch 最小改动，再 read_lints 校验",
+            }
+        ],
+    }
+
+    async def _first_tool(messages):
+        chunks = [c async for c in provider.stream(messages=messages, tools=tools)]
+        calls = [
+            call
+            for chunk in chunks
+            if not isinstance(chunk, str)
+            for call in (chunk.tool_calls or [])
+        ]
+        assert calls
+        return calls[0]
+
+    first = await _first_tool([user])
+    assert first["name"] == "read_file"
+    assert first["input"]["path"] == "app.py"
+
+    after_read = [
+        user,
+        assistant_tool_use("r1", "read_file", {"path": "app.py"}),
+        tool_result_message("r1", '{"content": "def hello():\\n    return \\"old\\"\\n"}'),
+    ]
+    second = await _first_tool(after_read)
+    assert second["name"] == "propose_patch"
+    assert second["input"]["path"] == "app.py"
+    assert 'return "old"' in second["input"]["old_text"]
+    assert 'return "new"' in second["input"]["new_text"]
+
+    after_patch = [
+        *after_read,
+        assistant_tool_use("p1", "propose_patch", second["input"]),
+        tool_result_message("p1", '{"status": "proposed"}'),
+    ]
+    third = await _first_tool(after_patch)
+    assert third["name"] == "read_lints"
+
+    after_lints = [
+        *after_patch,
+        assistant_tool_use("l1", "read_lints", {"path": "app.py"}),
+        tool_result_message("l1", '{"diagnostics": []}'),
+    ]
+    finals = [c async for c in provider.stream(messages=after_lints, tools=tools)]
+    text = "".join(c if isinstance(c, str) else (c.text or "") for c in finals)
+    assert "agent.10" in text
+    assert "lints" in text.lower()
