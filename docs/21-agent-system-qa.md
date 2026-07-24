@@ -170,70 +170,157 @@
 
 ### 实迹：读文件与编辑决策（2026-07-24）
 
-用户一句「优化某某 HTML，提高可玩性」——意图合法、范围开放。轨迹却长时间停在 **测绘**，少落到 **可审查的小补丁**。这不是 while 循环坏了，而是 **读文件契约不完整 + 工具选型决策树不清 + UI 信号误导**。
+用户一句「优化某某 HTML，提高可玩性」——意图合法。轨迹却长时间 **测绘文件**，少落到 **可审查的小改动**。  
+根因不是循环坏了，而是三件事叠在一起：**读文件说不清「读完没有」**、**模型用 shell 翻源码**、**编辑工具选错（以为 propose 就改了盘）**。
 
-#### 1. 发生了什么（两轮对照）
+下面按「碰到什么 → 为什么坏 → 我们怎么约束」写清楚。文中 **Ban**、**span**、**truncated / next_offset / total_lines** 都是本次要能讲清的词。
 
-| 轮次 | 读 | 写 | 其它浪费 |
-|------|----|----|----------|
-| 改前 | `read_file` 后大量 `run_command`（`head`/`tail`/`sed -n`/`wc`）分页 | 倾向整文件 `write_file` | 同 path 重复读 |
-| 补契约后 | shell 分页 ≈0；出现 `lines 1–N/N (complete)` | 多为 `propose_patch` / `edit_file` | `complete` 后仍 `limit` 分段再读；propose×十几未落盘再改用 edit |
+---
 
-第一轮：模型以为「读不全」→ 用 shell 当 pager。  
-第二轮：续读能力生效（不再 shell），但 **决策仍偏测绘**——把 `offset`/`limit` 当成摸文件的新方式；编辑主路径在 `propose_patch`（只入队 pending）与 `edit_file`（真改盘）之间摇摆，空转加倍。
+#### 1. 两轮对照（先建立画面）
 
-关键事实：**该 HTML 约十几 KB，远低于读文件字符预算**；时间线只展示 `content` 前约 200 字，人眼像「截断了」，模型也容易养成「再切一刀」的习惯。真正进模型的 tool result 往往是完整的——**展示截断 ≠ 工具截断**。
+| | 读文件怎么走 | 编辑怎么走 |
+|--|--------------|------------|
+| **改之前** | `read_file` 之后，再用 `run_command` 跑 `head` / `tail` / `sed -n` / `wc` **一段段切文件** | 容易整文件 `write_file` 盖写 |
+| **补契约之后** | 几乎不再用 shell 切文件；出现「读了第 1–N 行 / 共 N 行 **(complete)**」 | 多用补丁类工具；但又出现：已经 complete 仍用 `limit` 再切；`propose_patch` 连发十几次 **文件没变**，再改用 `edit_file` 重做 |
 
-#### 2. 读文件：问题本质与处理
+补充两个容易误导人的事实：
 
-| 问题 | 为何会发生 | 我们怎么处理 | 刻意不做 |
-|------|------------|--------------|----------|
-| 用 shell 分页读源码 | 训练先验；大文件习惯；摘要像半截 | `read_file` 增加 `offset`/`limit`；返回 `truncated` / `next_offset` / `total_lines`；summary 写明 `(complete)` 或续读提示；prompt + 工具描述禁止 shell pager | 全局硬禁 `head`/`sed`（脆，旁路成 `python -c`） |
-| 已 `complete` 仍再读 | 续读 API 被当成「精确窗口测绘」 | Ban：`truncated=false` / `(complete)` 后禁止对同 path 再 `read_file`（含换 limit）；失败重读除外 | 引擎硬拒第二次 read（逼出旁路） |
-| 只靠加长 Ban 清单 | 显著性不够、与「探索要充分」打架 | system 改成 **默认回路置顶 + Ban 带例子**（学写作侧反模式清单） | 堆到数百行平权条款 |
+1. **界面摘要 ≠ 模型拿到的内容。** 时间线往往只展示正文前一小截（约 200 字），看起来像「读残了」。模型侧 tool 结果经常是整文件——人眼截断会强化「再读一遍」的冲动。  
+2. **那次 HTML 其实不大（约十几 KB）**，远低于读文件的字符预算。问题主要是 **契约与决策**，不是文件真的读不下。
 
-成熟产品对齐点：**Read 工具自己要能续读**；读全要有一等公民信号；shell 留给构建/安装，不留给翻源码。
+---
 
-决策口诀（给面试 / 给模型同一句）：
+#### 2. 为什么「用 shell 当 pager」是坏事？
 
-```text
-已知路径 → read_file（默认不要 limit）
-  truncated=false / (complete) → 停读，去编辑
-  truncated=true → 只用 next_offset 再 read_file
-  禁止：cat/head/tail/sed/wc 当读文件
-```
-
-#### 3. 编辑决策：选错工具比写错代码更贵
-
-| 问题 | 决策误区 | 处理 |
-|------|----------|------|
-| `propose_patch` 连发但不改盘 | 以为「propose = 编辑」；agent 下多为 pending，无写作侧 auto-apply | **默认主路径 = `edit_file`**；描述写明 propose 只入队 UI diff，须 apply/接受才落盘；禁 propose 空转后再用 edit 重做 |
-| 整文件 `write_file` | 「我读过全文所以整份重写更省事」 | Ban：已有文件除非用户明确整文件替换，否则最小 span |
-| 微补丁碎成十几次 | 缺少「一次相干改动」偏好 | prompt：少次、非重叠 span；离线 rubric 盯 churn |
-| 探索当完成 | 「摸清了」就收工 | Done = 交付物写入 + 适用则验 + 短总结 |
-
-决策口诀：
+**Shell pager** = 用终端命令把源码「翻页」读出来，例如：
 
 ```text
-改已有文件 → edit_file（唯一 old_text span）
-需要 UI diff/接受流 → propose_patch（且知道它本身不改盘）
-新建文件 → write_file
-不要：propose×N 失败/未落盘 → 再 edit 同一套改动
+head -80 f.html
+sed -n '80,130p' f.html
+grep -n '.' f.html | sed -n '130,180p'
+wc -l f.html
 ```
 
-#### 4. 为何不「工程化拧死」
+我们认为这是坏路径，不是「shell 一律坏」，而是 **用错场景**：
 
-三条产品约束贯穿本次优化：
+| 坏处 | 说明 |
+|------|------|
+| **步数与 token 暴涨** | 一页一页切，同一文件可能烧十几次工具回合；输入上下文被重复碎片占满 |
+| **上下文破碎** | 每段只有局部行号切片，模型更难形成「整文件结构」；还容易漏改耦合处 |
+| **与专用读工具抢语义** | 平台已有 `read_file` / `grep`；shell 分页绕开统一截断、摘要、续读约定 |
+| **假问题驱动** | 界面摘要像截断 → 模型以为文件没读完 → 更拼命 `sed`，形成空转正反馈 |
+| **审批与风险错位** | Agent 下 `run_command` 常要人批；本该一次读文件，却变成多次「批 shell」打断 |
 
-1. **不纯粹工程化**：硬拦截 shell 读文件会伤真·shell 场景，且模型会换旁路。  
-2. **成熟 Agent 视角**：正确路径好走（工具契约）> 软 Ban（prompt/描述）> 离线评测；最后才考虑极窄硬闸。  
-3. **不改交互逻辑与速率**：不碰 while 语义、不加预分类/judge、不挡首 token；粘性审批与 Plan 执行期放行是 **同意门语义**，不是新编排节点。
+**Shell 该干什么：** 构建、安装、跑测试、看命令 stdout。  
+**Shell 不该干什么：** 代替 `read_file` 去翻正在改的源码。
 
-杠杆顺序：**补齐 `read_file` → 收紧 system/工具描述 → rubric 盯过程 →（部署）重建 runtime**。Web 只改文案、runtime 未重建时，会出现「按钮写着免批、仍一直弹」——粘性在执行面。
+---
 
-#### 5. 和「优化 / 改一处效果」怎么共存
+#### 3. `truncated` / `next_offset` / `total_lines` 是干什么的？
 
-用户真实问法往往是「优化可玩性」或「改某一处手感」——都合法。要优化的是 **路径质量**（少测绘、小补丁），不是禁止开放意图。开放意图下更要靠：一次读全信号、默认 edit、进度≠Plan 同意。
+这是给模型的 **读文件状态机字段**（人话：告诉你「读完没有、从哪续」）。不要把它们当成「请继续测绘」的邀请函。
+
+| 字段 | 含义 | 模型该怎么用 |
+|------|------|----------------|
+| **`total_lines`** | 文件一共多少行 | 用来判断范围；和 `end_line` 对比就知道是否读到尾 |
+| **`truncated`** | 这次返回 **是否还没覆盖到文件末尾**（或单行超预算被夹断） | `false` → **停读，去编辑**；`true` → 只允许按下面续读 |
+| **`next_offset`** | 若还没读完，下一次应从第几行接着读（1-based） | **只能**再调 `read_file(path, offset=next_offset)`；禁止改用 `sed` |
+| **summary 里的 `(complete)`** | 人机可读的「整文件已在本次结果里」 | 与 `truncated=false` 同义信号；看到就不要再对同 path 开读 |
+
+可选参数（给真大文件，不是给小文件找事）：
+
+| 参数 | 含义 | 默认建议 |
+|------|------|----------|
+| **`offset`** | 从第几行开始读 | 省略 = 从 1 |
+| **`limit`** | 最多读多少行 | **小文件省略**；不要用 limit 把已 complete 的文件再切碎 |
+
+**正确续读：**
+
+```text
+read_file(path)                    → truncated=true, next_offset=201, total_lines=500
+read_file(path, offset=201)        → truncated=false, (complete)
+→ 开始 edit_file / 补丁
+```
+
+**错误用法：** 已经 `(complete)` 还 `read_file(path, limit=50)` 再摸一遍——这是新版「伪 shell 分页」。
+
+---
+
+#### 4. 「Ban」是怎么 Ban 的？（软约束，不是运行时杀进程）
+
+这里的 **Ban** = 写进 **稳定 system 提示** 与 **工具 description** 的反模式清单（学写作侧「禁止元认知腔」那种：**短句 + 具体反例**）。  
+它 **不** 等于在 `run_command` 里正则拦截所有 `head`（那是硬闸，脆、易旁路）。
+
+当前 Agent 侧典型 Ban（语义，非抄代码）：
+
+| Ban 项 | 禁止什么 | 唯一例外 |
+|--------|----------|----------|
+| **Shell as a pager** | 用 `cat`/`head`/`tail`/`sed -n`/`awk`/`less`/`wc` 读正在改的源码 | 无；续读只用 `read_file` |
+| **Read-after-complete** | 同 Turn 对同一 path，在已 `truncated=false` / `(complete)` 后再 `read_file`（含换 `limit`/`offset`） | 补丁/编辑刚失败，必须重读当前文件一次 |
+| **Propose-then-redo** | 连发一串 `propose_patch`，文件未变，再用 `edit_file` 把同一套改动重做 | 无；一开始就选对主路径 |
+| **Full-file rewrite** | 已有文件直接 `write_file` 整份盖写 | 用户明确要求整文件替换 / rewrite |
+
+冲突时优先级（也写在 system 里）：**本轮用户意图 > Ban > 最小改动 > 探索完备性**。  
+所以「探索要充分」不能压过「读完就改」。
+
+---
+
+#### 5. 「span」是什么？为什么强调唯一 span？
+
+**span（片段）** = 当前文件里一段 **连续、精确匹配** 的旧文本（`old_text`），要用新文本（`new_text`）替换掉 **仅这一段**，而不是整份文件。
+
+| 概念 | 含义 |
+|------|------|
+| **唯一** | `old_text` 在文件中只出现一次；出现两次则补丁失败（避免改错副本） |
+| **精确** | 必须与磁盘上字符一致（空白、换行也算）；凭记忆瞎猜会失败 |
+| **最小** | 只圈住要改的那一块；不要把半个文件塞进 `old_text` 再「整段替换」冒充小改 |
+
+工具怎么对应：
+
+| 工具 | 与 span 的关系 |
+|------|----------------|
+| **`edit_file`** | Agent **默认主路径**：批准后按唯一 span 就地改盘 |
+| **`propose_patch`** | 同样是 span 契约，但常见结果是 **pending（只排队 UI diff）**，**本身往往不改文件**；须接受 / `apply_patch` 才落盘 |
+| **`write_file`** | **不是** span 编辑；是整文件写入。只适合新建，或用户明确要求整文件重写 |
+
+空转模式（本次实迹）：模型连发多次 `propose_patch` → 状态一直 pending → 误以为「改好了」→ 再用 `edit_file` 重做同一批 span → 步数翻倍、审批翻倍。
+
+---
+
+#### 6. 我们做了哪些优化（按杠杆排序）
+
+1. **补齐读文件契约**：返回 `truncated` / `next_offset` / `total_lines` 与可读 summary；支持 `offset`/`limit` 真续读。  
+2. **软 Ban + 默认回路置顶**：先「读一次 → 最小 span 编辑 → 按需验证」，Ban 用具体反例压 shell pager / 读后测绘 / propose 空转。  
+3. **编辑主路径收成一条**：普通编码默认 `edit_file`；工具描述写明 propose 不改盘。  
+4. **离线 rubric**：盯过量 `read_file`、propose+edit 双轨 churn（不进热路径）。  
+5. **部署纪律**：粘性审批等在 **runtime**；只更新 Web 文案会「免批按钮仍弹」。
+
+刻意不做：全局硬禁 `head`/`sed`；引擎硬拒第二次 `read_file`；为选工具再加预分类模型或每轮 judge。
+
+---
+
+#### 7. 决策口诀（面试可背、模型可守）
+
+**读：**
+
+```text
+已知路径 → read_file（小文件不要带 limit）
+  truncated=false 或 summary 含 (complete) → 停读，去改
+  truncated=true → 只允许 read_file(offset=next_offset)
+  禁止用 shell 当 pager
+```
+
+**改：**
+
+```text
+已有文件 → edit_file(唯一 old_text span → new_text)
+需要 UI 接受流 → propose_patch（并清楚：pending ≠ 已改盘）
+新建 → write_file
+禁止：propose 空转后再用 edit 重做同一套
+```
+
+用户说「优化可玩性」仍然合法；要优化的是 **路径**（少测绘、小 span），不是禁止开放意图。
 
 ---
 
@@ -1648,10 +1735,13 @@ Cursor 类产品允许「生成时继续打字」。若忙时禁用发送：
 | 检索为何不预注入？ | 占窗、拖首 token、破坏缓存；润色应能零搜索 |
 | Plan 为何不自动进？ | 敌意、误伤短任务；建议稀缺+人确认 |
 | 进度清单为何还要批文件？ | 进度≠Plan 同意；同回合批一次后粘性免批；正式 Plan 同意后写盘免批 |
-| 为何 shell 分页读源码？ | 读文件契约不完整 + 时间线像截断；现用 complete/next_offset + Ban，不硬禁一切 shell |
-| complete 后为何还再读？ | 模型把 limit 当测绘；Ban 读全后禁止再读同 path；默认省略 limit |
-| propose 后为何又 edit？ | propose 在 agent 常只入队 pending；默认主路径改 edit_file |
-| 粘性免批按钮仍弹？ | 粘性在 runtime；只更新 Web 不够，须 `make up-runtime` + 新 Turn |
+| 为何 shell 分页读源码？ | 步数/token、上下文碎、抢 read_file 语义、假截断正反馈；shell 留给构建不是翻源码（Q1§2） |
+| truncated / next_offset / total_lines？ | 读完没有、从哪续、共几行；complete 就停读，真大文件才 offset 续读（Q1§3） |
+| Ban 是硬拦吗？ | 否：system+工具描述反模式；不是 run_command 正则杀头（Q1§4） |
+| span 是什么？ | 唯一精确 old_text 片段替换；edit_file 默认；propose 常 pending 不改盘（Q1§5） |
+| complete 后为何还再读？ | 把 limit 当测绘；Ban 读全后禁止再读同 path |
+| propose 后为何又 edit？ | propose 在 agent 常只入队；默认主路径改 edit_file |
+| 粘性免批按钮仍弹？ | 粘性在 runtime；须 `make up-runtime` + 新 Turn |
 | 滑窗是什么？ | 把过长的一节当成一排字；每次取连续一段定长文字，下一段整体右移但少移一点形成重叠 |
 | 为何要重叠？ | 避免专名/句子正好卡在两块接缝被拦腰切断，导致词法与向量都变弱 |
 | 宽表外挂如何防污染？ | 过宽 GFM 表在索引文本里换成短指针（盘上原文不动）；避免表格式噪声进同一向量 |
