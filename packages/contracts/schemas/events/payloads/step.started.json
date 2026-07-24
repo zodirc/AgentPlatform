@@ -5,7 +5,18 @@
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "step_index": { "type": "integer", "minimum": 0 },
-    "label": { "type": "string", "maxLength": 128 }
+    "step_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "label": {
+      "type": "string",
+      "maxLength": 128
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

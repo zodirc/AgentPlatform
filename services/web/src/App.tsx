@@ -7,8 +7,6 @@ import { EvalRunReportPage } from "./ops/EvalRunReportPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
 import { LoginPage } from "./shared/auth/LoginPage";
-import { SCENARIO_META } from "./shared/workbench/scenarioMeta";
-import type { ScenarioId } from "./shared/workbench/types";
 import { pathWithSession } from "./shared/workbench/sessionUrl";
 import { SessionHistoryDrawer } from "./shared/workbench/SessionHistoryDrawer";
 import { UnifiedWorkbench } from "./shared/workbench/UnifiedWorkbench";
@@ -114,19 +112,6 @@ function Nav() {
   const { sessionId, startNewSession, openSession } = useWorkbenchSession();
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  const link = (to: string, label: string) => (
-    <Link
-      to={to}
-      className={`rounded-lg px-3 py-1.5 text-sm ${
-        pathname === to.split("?")[0]
-          ? "bg-muted text-foreground"
-          : "text-muted-foreground hover:text-foreground"
-      }`}
-    >
-      {label}
-    </Link>
-  );
-
   const copySessionLink = async () => {
     if (!sessionId) return;
     const url = `${window.location.origin}${pathWithSession(pathname, sessionId)}`;
@@ -144,11 +129,6 @@ function Nav() {
     <>
       <nav className="flex flex-wrap items-center gap-2 border-b border-border bg-background/80 px-6 py-3">
         <span className="mr-2 font-semibold">Agent Platform</span>
-        <span className="mr-2 text-xs text-muted-foreground/80">模式</span>
-        {SCENARIO_PATHS.map((path) => {
-          const id = path.slice(1) as ScenarioId;
-          return link(pathWithSession(path, sessionId), SCENARIO_META[id].navLabel);
-        })}
         <Link
           to="/settings"
           className={`rounded-lg px-3 py-1.5 text-sm ${

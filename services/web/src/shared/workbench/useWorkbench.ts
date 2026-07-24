@@ -7,6 +7,7 @@ import {
   cancelTurn,
   denyToolCall,
   fetchSessionTurns,
+  fetchTurnEvents,
   fetchTurnView,
   rejectPatch,
   startTurn,
@@ -17,6 +18,10 @@ import {
 } from "../api/client";
 import { TurnStreamClient } from "../realtime/TurnStreamClient";
 import { TurnWebSocketClient } from "../realtime/TurnWebSocketClient";
+import {
+  parentTimelineItems,
+  resolveSubagents,
+} from "./subagents";
 import type {
   ContextUsage,
   ScenarioId,
@@ -276,14 +281,17 @@ export function useWorkbenchImpl(): WorkbenchState {
           }
           setEvents((prev) => [...prev, ev]);
           if (ev.type === "turn.token") {
+            if (ev.payload.subagent_id) return;
             const delta = String(ev.payload.delta ?? "");
             setStreamText((t) => t + delta);
           }
           if (ev.type === "turn.thinking.delta") {
+            if (ev.payload.subagent_id) return;
             const delta = String(ev.payload.delta ?? "");
             if (delta) setThinkingText((t) => t + delta);
           }
           if (ev.type === "turn.thinking") {
+            if (ev.payload.subagent_id) return;
             // New model step — separate rounds visually; still ephemeral.
             setThinkingText((t) => (t.trim() ? `${t.trimEnd()}\n\n` : t));
           }
@@ -292,6 +300,7 @@ export function useWorkbenchImpl(): WorkbenchState {
             setSectionDraft((t) => t + delta);
           }
           if (ev.type === "tool.delta") {
+            if (ev.payload.subagent_id) return;
             const toolCallId = String(ev.payload.tool_call_id ?? "");
             const delta = String(ev.payload.delta ?? "");
             if (toolCallId) {
@@ -302,6 +311,7 @@ export function useWorkbenchImpl(): WorkbenchState {
             }
           }
           if (ev.type === "tool.started") {
+            if (ev.payload.subagent_id) return;
             const toolCallId = String(ev.payload.tool_call_id ?? "");
             const toolName = String(ev.payload.tool_name ?? "tool");
             if (toolCallId) {
@@ -320,6 +330,7 @@ export function useWorkbenchImpl(): WorkbenchState {
             }
           }
           if (ev.type === "tool.completed") {
+            if (ev.payload.subagent_id) return;
             const toolCallId = String(ev.payload.tool_call_id ?? "");
             const toolName = String(ev.payload.tool_name ?? "tool");
             const status = String(ev.payload.status ?? "ok");
@@ -522,10 +533,26 @@ export function useWorkbenchImpl(): WorkbenchState {
         const v = await fetchTurnView(last.id);
         if (cancelled) return;
 
+        // Replay persisted events so nested subagent tabs survive refresh.
+        try {
+          const snap = await fetchTurnEvents(last.id, 0);
+          if (cancelled) return;
+          setEvents(snap.events);
+          if (snap.last_sequence > 0) {
+            lastSequenceRef.current = snap.last_sequence;
+          } else if (v.last_event_sequence) {
+            lastSequenceRef.current = v.last_event_sequence;
+          }
+        } catch {
+          // Fall back to view artifacts via resolveSubagents.
+        }
+
+        // Keep turnId on the latest turn so subagent tabs bind to history row.
+        setTurnId(last.id);
+        setView(v);
+        setSubmittedMessage(v.user_input ?? null);
+
         if (ACTIVE_TURN_STATUSES.has(last.status)) {
-          setTurnId(last.id);
-          setView(v);
-          setSubmittedMessage(v.user_input ?? null);
           syncApprovalFromView(v);
           if (v.context_usage) {
             setLiveContextUsage(v.context_usage as ContextUsage);
@@ -539,14 +566,16 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (activePlan) setLivePlan(activePlan);
           setPlanAwaitingConfirm(false);
           planWrapSentRef.current = false;
-          lastSequenceRef.current = v.last_event_sequence ?? 0;
+          lastSequenceRef.current = Math.max(
+            lastSequenceRef.current,
+            v.last_event_sequence ?? 0,
+          );
           setBusy(true);
           connectStream(last.id, lastSequenceRef.current);
           return;
         }
 
         // Idle: still surface the last turn's plan checklist if present.
-        setView(v);
         const idlePlan = latestPlanFromArtifacts(
           v.artifacts as Record<string, unknown>[] | undefined,
         );
@@ -875,18 +904,26 @@ export function useWorkbenchImpl(): WorkbenchState {
       return live ? { ...row, stream_output: live } : row;
     },
   );
-  const timelineItems: TimelineItem[] =
+  const rawTimeline: TimelineItem[] =
     liveToolTimeline.length > 0 ? liveToolTimeline : projectedTimeline;
   for (const [toolCallId, stream] of Object.entries(toolLiveStreams)) {
-    if (timelineItems.some((t) => String(t.tool_call_id) === toolCallId))
+    if (rawTimeline.some((t) => String(t.tool_call_id) === toolCallId))
       continue;
-    timelineItems.push({
+    rawTimeline.push({
       tool_call_id: toolCallId,
       tool_name: "…",
       status: "running",
       stream_output: stream,
     });
   }
+  const timelineItems = parentTimelineItems(rawTimeline);
+  const subagents = resolveSubagents(
+    events,
+    view as {
+      artifacts?: Array<Record<string, unknown>> | null;
+      tool_timeline?: Array<Record<string, unknown>> | null;
+    } | null,
+  );
 
   const displayStatus =
     pendingApproval ||
@@ -957,6 +994,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     events,
     streamText,
     thinkingText,
+    subagents,
     sectionDraft,
     timelineItems,
     contextUsage,

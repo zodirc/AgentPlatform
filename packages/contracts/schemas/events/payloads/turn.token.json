@@ -4,8 +4,18 @@
   "title": "TurnTokenPayload",
   "type": "object",
   "additionalProperties": false,
-  "required": ["delta"],
+  "required": [
+    "delta"
+  ],
   "properties": {
-    "delta": { "type": "string", "maxLength": 8192 }
+    "delta": {
+      "type": "string",
+      "maxLength": 8192
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

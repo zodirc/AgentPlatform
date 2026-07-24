@@ -16,6 +16,7 @@ from app.services.end_user.auth import (
 )
 from app.services.end_user.users import EndUser
 from app.services.projection.projector import build_turn_view
+from app.services.realtime.events import fetch_turn_events
 from app.services.realtime.sse import stream_turn_events
 from app.services.realtime.ws import handle_turn_websocket
 from app.services.resource import turns as turn_svc
@@ -40,6 +41,11 @@ class PatchDecisionRequest(BaseModel):
     patch_id: str
     client_request_id: UUID | None = None
     reason: str | None = None
+
+
+class TurnEventsResponse(BaseModel):
+    events: list[dict]
+    last_sequence: int = 0
 
 
 async def _require_turn_access(turn_id: UUID, actor: EndUser) -> dict:
@@ -76,6 +82,21 @@ async def get_turn_view(
     if view is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     return view
+
+
+@router.get("/turns/{turn_id}/events", response_model=TurnEventsResponse)
+async def get_turn_events(
+    turn_id: UUID,
+    since_sequence: int = 0,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """Snapshot of persisted turn events for refresh / nested subagent replay."""
+    await _require_turn_access(turn_id, actor)
+    if since_sequence < 0:
+        since_sequence = 0
+    events = await fetch_turn_events(turn_id, since_sequence)
+    last_sequence = events[-1]["sequence"] if events else since_sequence
+    return TurnEventsResponse(events=events, last_sequence=int(last_sequence))
 
 
 @router.get("/turns/{turn_id}/stream")

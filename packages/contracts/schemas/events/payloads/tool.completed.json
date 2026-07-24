@@ -4,25 +4,63 @@
   "title": "ToolCompletedPayload",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tool_call_id", "tool_name", "status"],
+  "required": [
+    "tool_call_id",
+    "tool_name",
+    "status"
+  ],
   "properties": {
-    "tool_call_id": { "type": "string", "minLength": 1 },
-    "tool_name": { "type": "string", "minLength": 1 },
+    "tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_name": {
+      "type": "string",
+      "minLength": 1
+    },
     "status": {
       "type": "string",
-      "enum": ["ok", "error", "denied", "timeout"]
+      "enum": [
+        "ok",
+        "error",
+        "denied",
+        "timeout"
+      ]
     },
-    "summary": { "type": "string", "maxLength": 4096 },
-    "is_truncated": { "type": "boolean" },
-    "bytes_written": { "type": "integer", "minimum": 0 },
+    "summary": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "is_truncated": {
+      "type": "boolean"
+    },
+    "bytes_written": {
+      "type": "integer",
+      "minimum": 0
+    },
     "delivery_status": {
       "type": "string",
-      "enum": ["ok", "warning", "failed"]
+      "enum": [
+        "ok",
+        "warning",
+        "failed"
+      ]
     },
     "delivery_issues": {
       "type": "array",
-      "items": { "type": "string", "maxLength": 1024 }
+      "items": {
+        "type": "string",
+        "maxLength": 1024
+      }
     },
-    "output_path": { "type": "string", "maxLength": 4096 }
+    "output_path": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

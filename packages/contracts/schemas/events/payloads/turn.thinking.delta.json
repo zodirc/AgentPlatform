@@ -5,9 +5,22 @@
   "description": "Ephemeral reasoning/thinking text delta for live UI. Not projected into turn_views or session history.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["delta"],
+  "required": [
+    "delta"
+  ],
   "properties": {
-    "delta": { "type": "string", "maxLength": 8192 },
-    "step_index": { "type": "integer", "minimum": 0 }
+    "delta": {
+      "type": "string",
+      "maxLength": 8192
+    },
+    "step_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

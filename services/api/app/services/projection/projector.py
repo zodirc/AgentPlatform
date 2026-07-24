@@ -105,6 +105,96 @@ async def _project_turn_impl(turn_id: UUID) -> None:
         if isinstance(payload, str):
             payload = json.loads(payload)
 
+        # Nested delegate live stream — keep parent latest_output / meters clean.
+        # Tools still land on tool_timeline with subagent_id for nested UI.
+        subagent_id = payload.get("subagent_id")
+        if subagent_id and event_type not in {"subagent.started", "subagent.completed"}:
+            if event_type == "tool.started":
+                tool_timeline.append(
+                    {
+                        "tool_call_id": payload.get("tool_call_id", f"tool-{row['sequence']}"),
+                        "tool_name": payload.get("tool_name", "tool"),
+                        "status": "running",
+                        "subagent_id": subagent_id,
+                    }
+                )
+            elif event_type == "tool.completed":
+                tool_call_id = payload.get("tool_call_id")
+                for item in reversed(tool_timeline):
+                    if item.get("tool_call_id") == tool_call_id:
+                        item["status"] = payload.get("status", "ok")
+                        item["summary"] = payload.get("summary")
+                        item["subagent_id"] = subagent_id
+                        break
+                if payload.get("tool_name") == "write_file":
+                    for art in artifacts:
+                        if art.get("type") == "file_write" and art.get("tool_call_id") == tool_call_id:
+                            art["status"] = "applied" if payload.get("status") == "ok" else str(
+                                payload.get("status", "error")
+                            )
+                            if payload.get("bytes_written") is not None:
+                                art["bytes_written"] = payload.get("bytes_written")
+            elif event_type == "tool.delta":
+                tool_call_id = payload.get("tool_call_id")
+                for item in reversed(tool_timeline):
+                    if item.get("tool_call_id") == tool_call_id:
+                        prev = str(item.get("stream_output", ""))
+                        item["stream_output"] = prev + str(payload.get("delta", ""))
+                        break
+            elif event_type == "approval.requested":
+                status = "waiting_approval"
+                pending_interrupt = {
+                    "kind": "approval",
+                    "tool_call_id": payload.get("tool_call_id", ""),
+                    "subagent_id": subagent_id,
+                }
+                approval_state = {
+                    "tool_call_id": payload.get("tool_call_id", ""),
+                    "tool_name": payload.get("tool_name"),
+                    "status": "pending",
+                    "reason": None,
+                    "subagent_id": subagent_id,
+                }
+                if payload.get("tool_name") == "write_file":
+                    args = (
+                        payload.get("arguments")
+                        if isinstance(payload.get("arguments"), dict)
+                        else {}
+                    )
+                    new_raw = str(payload.get("new_text") or args.get("content") or "")
+                    old_raw = str(payload.get("old_text") or "")
+                    new_text, new_trunc = _preview_text(new_raw)
+                    old_text, old_trunc = _preview_text(old_raw)
+                    artifacts.append(
+                        {
+                            "type": "file_write",
+                            "tool_call_id": payload.get("tool_call_id", ""),
+                            "path": payload.get("path") or args.get("path", ""),
+                            "old_text": old_text,
+                            "new_text": new_text,
+                            "status": "pending",
+                            "truncated": new_trunc or old_trunc,
+                            "new_size": len(new_raw),
+                            "subagent_id": subagent_id,
+                        }
+                    )
+            elif event_type == "approval.resolved":
+                pending_interrupt = None
+                decision = payload.get("decision", "approved")
+                approval_state = {
+                    "tool_call_id": payload.get("tool_call_id", ""),
+                    "tool_name": approval_state.get("tool_name") if approval_state else None,
+                    "status": "approved" if decision == "approved" else "denied",
+                    "reason": payload.get("reason"),
+                    "subagent_id": subagent_id,
+                }
+                tool_call_id = payload.get("tool_call_id")
+                for art in artifacts:
+                    if art.get("type") == "file_write" and art.get("tool_call_id") == tool_call_id:
+                        art["status"] = "applied" if decision == "approved" else "denied"
+            # thinking / token / step: live UI only — ignore for durable projection
+            continue
+
         if event_type == "turn.accepted":
             status = "running"
         elif event_type == "approval.requested":
@@ -176,12 +266,20 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 }
             )
         elif event_type == "tool.completed":
-            if tool_timeline:
+            tool_call_id = payload.get("tool_call_id")
+            matched = False
+            if tool_call_id:
+                for item in reversed(tool_timeline):
+                    if item.get("tool_call_id") == tool_call_id:
+                        item["status"] = payload.get("status", "ok")
+                        item["summary"] = payload.get("summary")
+                        matched = True
+                        break
+            if not matched and tool_timeline:
                 tool_timeline[-1]["status"] = payload.get("status", "ok")
                 tool_timeline[-1]["summary"] = payload.get("summary")
             latest_output = payload.get("summary") or latest_output
             if payload.get("tool_name") == "write_file":
-                tool_call_id = payload.get("tool_call_id")
                 for art in artifacts:
                     if art.get("type") == "file_write" and art.get("tool_call_id") == tool_call_id:
                         art["status"] = "applied" if payload.get("status") == "ok" else str(
@@ -190,7 +288,16 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                         if payload.get("bytes_written") is not None:
                             art["bytes_written"] = payload.get("bytes_written")
         elif event_type == "tool.delta":
-            if tool_timeline:
+            tool_call_id = payload.get("tool_call_id")
+            matched = False
+            if tool_call_id:
+                for item in reversed(tool_timeline):
+                    if item.get("tool_call_id") == tool_call_id:
+                        prev = str(item.get("stream_output", ""))
+                        item["stream_output"] = prev + str(payload.get("delta", ""))
+                        matched = True
+                        break
+            if not matched and tool_timeline:
                 prev = str(tool_timeline[-1].get("stream_output", ""))
                 tool_timeline[-1]["stream_output"] = prev + str(payload.get("delta", ""))
         elif event_type == "turn.token":

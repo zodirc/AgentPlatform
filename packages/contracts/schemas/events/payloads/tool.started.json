@@ -4,10 +4,26 @@
   "title": "ToolStartedPayload",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tool_call_id", "tool_name"],
+  "required": [
+    "tool_call_id",
+    "tool_name"
+  ],
   "properties": {
-    "tool_call_id": { "type": "string", "minLength": 1 },
-    "tool_name": { "type": "string", "minLength": 1 },
-    "arguments": { "type": "object" }
+    "tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "arguments": {
+      "type": "object"
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

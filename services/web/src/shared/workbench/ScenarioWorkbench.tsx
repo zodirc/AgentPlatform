@@ -56,6 +56,9 @@ export function ScenarioWorkbenchView({
   );
   const [sourcesLibraryOpen, setSourcesLibraryOpen] = useState(false);
   const [ragDebugOpen, setRagDebugOpen] = useState(false);
+  const [openSubagentRequest, setOpenSubagentRequest] = useState<string | null>(
+    null,
+  );
   const artifactCount = artifactBadgeCount(
     wb.timelineItems,
     wb.view?.artifacts ?? [],
@@ -170,15 +173,21 @@ export function ScenarioWorkbenchView({
               <AgentTimelinePanel
                 items={wb.timelineItems}
                 events={wb.events}
+                subagents={wb.subagents}
                 selectedIndex={
                   selection?.kind === "timeline" ? selection.index : null
                 }
                 onSelectItem={selectTimelineItem}
+                onOpenSubagent={(id) => setOpenSubagentRequest(id)}
               />
             </div>
           </main>
 
-          <AgentChatPanel wb={wb} />
+          <AgentChatPanel
+            wb={wb}
+            openSubagentRequest={openSubagentRequest}
+            onOpenSubagentHandled={() => setOpenSubagentRequest(null)}
+          />
         </div>
       </div>
 

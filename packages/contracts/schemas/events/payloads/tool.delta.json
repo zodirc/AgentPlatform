@@ -4,10 +4,26 @@
   "title": "ToolDeltaPayload",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tool_call_id", "delta"],
+  "required": [
+    "tool_call_id",
+    "delta"
+  ],
   "properties": {
-    "tool_call_id": { "type": "string", "minLength": 1 },
-    "tool_name": { "type": "string" },
-    "delta": { "type": "string", "maxLength": 65536 }
+    "tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tool_name": {
+      "type": "string"
+    },
+    "delta": {
+      "type": "string",
+      "maxLength": 65536
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

@@ -45,10 +45,10 @@ async def test_delegate_runs_nested_engine() -> None:
     run_id = uuid4()
     session_id = uuid4()
     trace_id = uuid4()
-    events: list[str] = []
+    events: list[tuple[str, dict]] = []
 
     async def write_event(*, event_type: str, payload: dict, step_index: int | None = None) -> None:
-        events.append(event_type)
+        events.append((event_type, payload))
 
     async def check_cancel() -> tuple[bool, bool]:
         return False, False
@@ -78,8 +78,14 @@ async def test_delegate_runs_nested_engine() -> None:
         set_delegate_runtime(None)
 
     assert result["status"] == "completed"
-    assert "subagent.started" in events
-    assert "subagent.completed" in events
+    types = [t for t, _ in events]
+    assert "subagent.started" in types
+    assert "subagent.completed" in types
+    live = [(t, p) for t, p in events if t not in {"subagent.started", "subagent.completed"}]
+    assert live, "sub-agent live events should be forwarded"
+    assert all(p.get("subagent_id") for _, p in live)
+    assert result["subagent_id"]
+    assert all(p["subagent_id"] == result["subagent_id"] for _, p in live)
 
 
 class _SingleTextProvider:

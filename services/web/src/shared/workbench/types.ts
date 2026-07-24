@@ -1,5 +1,6 @@
 import type { TurnEvent, TurnView } from "../api/client";
 import type { PlanArtifact } from "./plan";
+import type { SubagentLive } from "./subagents";
 
 export type ScenarioId = "writing" | "agent" | "interview";
 
@@ -9,6 +10,8 @@ export type TimelineItem = {
   status?: string;
   stream_output?: string;
   summary?: string;
+  /** Present when the tool ran inside a nested delegate sub-agent. */
+  subagent_id?: string;
 };
 
 export type WriteFilePreview = {
@@ -80,6 +83,8 @@ export type WorkbenchState = {
   streamText: string;
   /** Ephemeral reasoning stream for the live turn; not in history/views. */
   thinkingText: string;
+  /** Nested delegate sub-agents for the live event stream (readonly mini-chats). */
+  subagents: SubagentLive[];
   sectionDraft: string;
   timelineItems: TimelineItem[];
   contextUsage: ContextUsage | null;

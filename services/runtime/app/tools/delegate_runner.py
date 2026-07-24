@@ -48,21 +48,18 @@ WRITING_DEFAULT_SUBAGENTS = frozenset(
 )
 AGENT_DEFAULT_SUBAGENTS = frozenset({"explore", "retrieve", "verify", "edit", "planner", "shell"})
 
+# Parent projection / meters must not absorb sub-agent side effects.
+# Live UI events are forwarded with subagent_id stamped (nested readonly chat).
 _SUPPRESSED_SUB_EVENTS = frozenset(
     {
-        "step.started",
-        "step.completed",
-        "turn.thinking",
-        "turn.thinking.delta",
-        "turn.token",
-        "tool.started",
-        "tool.completed",
-        "tool.delta",
         "section.draft.delta",
         "retrieval.completed",
         "patch.proposed",
         "outline.updated",
         "turn.plan",
+        "cards.pinned",
+        "context.reported",
+        "usage.reported",
     }
 )
 
@@ -157,7 +154,11 @@ async def run_delegate(
     ) -> None:
         if event_type in _SUPPRESSED_SUB_EVENTS:
             return
-        await ctx.write_event(event_type=event_type, payload=payload, step_index=step_index)
+        stamped = dict(payload)
+        stamped["subagent_id"] = subagent_id
+        await ctx.write_event(
+            event_type=event_type, payload=stamped, step_index=step_index
+        )
 
     depth_token = bump_delegate_depth()
     try:

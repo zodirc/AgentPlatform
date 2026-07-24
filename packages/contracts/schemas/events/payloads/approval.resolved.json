@@ -4,10 +4,33 @@
   "title": "ApprovalResolvedPayload",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tool_call_id", "decision"],
+  "required": [
+    "tool_call_id",
+    "decision"
+  ],
   "properties": {
-    "tool_call_id": { "type": "string", "minLength": 1 },
-    "decision": { "type": "string", "enum": ["approved", "denied"] },
-    "reason": { "type": ["string", "null"], "maxLength": 1024 }
+    "tool_call_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "approved",
+        "denied"
+      ]
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 1024
+    },
+    "subagent_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Present when the event originates from a nested delegate sub-agent."
+    }
   }
 }

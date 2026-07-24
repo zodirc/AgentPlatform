@@ -300,6 +300,28 @@ export async function fetchTurnView(turnId: string): Promise<TurnView> {
   return res.json();
 }
 
+export async function fetchTurnEvents(
+  turnId: string,
+  sinceSequence = 0,
+): Promise<{ events: TurnEvent[]; last_sequence: number }> {
+  const q = new URLSearchParams({
+    since_sequence: String(Math.max(0, sinceSequence)),
+  });
+  const res = await fetch(`${API_BASE}/turns/${turnId}/events?${q}`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchTurnEvents failed: ${res.status}`);
+  const data = (await res.json()) as {
+    events?: TurnEvent[];
+    last_sequence?: number;
+  };
+  return {
+    events: Array.isArray(data.events) ? data.events : [],
+    last_sequence: Number(data.last_sequence ?? 0),
+  };
+}
+
 export async function cancelTurn(turnId: string, force = false) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/cancel`, {
     ...sessionFetchInit,
