@@ -1,12 +1,12 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块**；变更只改对应正文。
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
 ---
 
-## 模块目录（01–29）
+## 模块目录（01–30）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -39,6 +39,7 @@ Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块*
 | 27 | [multi-tenancy](27-multi-tenancy.md) | **多租户 / Work 作用域**（默认开启；MT0–MT5c + MT7；**否决 MT6 Org**） |
 | 28 | [proof-gate-and-ux-signals](28-proof-gate-and-ux-signals.md) | **Proof 门禁 + 体验信号**（环外；PX0–PX2 ✅） |
 | 29 | [ops-eval-console](29-ops-eval-console.md) | **Web 评测台**（可视化切片；证明仍以 `make gate` 为准；`OPS_TEST_SECRET`） |
+| 30 | [quality-and-agility](30-quality-and-agility.md) | **质量与灵敏度提案**（代码 CQ1–CQ4 · 灵敏度 AQ1–AQ3 · 写作 WN1–WN3；对标 Cursor / Claude Code / Sudowrite） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -56,6 +57,7 @@ Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块*
 | 多租户 / 作品根 | [27](27-multi-tenancy.md)（**已落地** · 默认开启 · 个人默认 Work · 否决 Org） |
 | Proof 门禁 / 体验信号 | [28](28-proof-gate-and-ux-signals.md)（**已落地** · `make gate` / `make ux-signals` · 不碰 loop） |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） |
+| 质量与灵敏度提案 | [30](30-quality-and-agility.md)（代码生成 CQ · 灵敏度 AQ · 写作下一刀 WN；全部受 [13](13-rate-redlines.md) R1–R5 约束） |
 
 **维护纪律：** 禁止再开 `*-execution` 平行文；过时内容进 git，不留 stub 空号。
 
@@ -80,6 +82,7 @@ Agent Platform 架构与实施规范。**01–29 连续编号，一文一模块*
 | IX5 / RE4 个人私有库 | ✅ MT5c（无 Org/share） | 15 §6 · **[27](27-multi-tenancy.md)** |
 | 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
 | Proof 门禁 + 体验信号 | ✅ PX0–PX2（环外） | **[28](28-proof-gate-and-ux-signals.md)** · `make gate` · `make ux-signals` · `/settings/signals` |
+| 质量与灵敏度 CQ / AQ / WN | ⏳ 提案（只建口径，未开工） | **[30](30-quality-and-agility.md)** |
 
 ---
 

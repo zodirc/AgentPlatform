@@ -1,7 +1,7 @@
 # 14 — 写作质量（模块正文）
 
 > **本模块唯一维护入口**（含原执行票 WQ0–WQ4）。历史交付事故见 git。  
-> **关联**：RAG/资料库 → [15](15-rag-and-sources.md)；速率 → [13](13-rate-redlines.md) R1–R5；Harness cache → [12](12-model-harness.md)；Skills **非**质量主路径 → [19](19-skills-layer.md)。
+> **关联**：RAG/资料库 → [15](15-rag-and-sources.md)；速率 → [13](13-rate-redlines.md) R1–R5；Harness cache → [12](12-model-harness.md)；Skills **非**质量主路径 → [19](19-skills-layer.md)；**写作下一刀提案（WN1–WN3）在 [30](30-quality-and-agility.md) 维护**，落地后状态回写本文。
 
 **现状（2026-07）：WQ0–WQ4 已全部落地。** 本文维护去留、场景杠杆与验收；不再另开「执行方案」文。
 
