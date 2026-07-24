@@ -586,6 +586,16 @@ components:
                 compaction:
                   type: integer
                   minimum: 0
+                project:
+                  type: integer
+                  minimum: 0
+                runtime:
+                  type: integer
+                  minimum: 0
+                volatile:
+                  type: integer
+                  minimum: 0
+                  description: WN3/AQ1 writing_context / plan-phase user block tokens
             source:
               type: string
               enum: [estimated, provider]

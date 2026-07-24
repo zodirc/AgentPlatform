@@ -13,6 +13,7 @@
     "messages_tokens": 12,
     "project_tokens": 80,
     "runtime_tokens": 24,
+    "volatile_tokens": 120,
     "assemble_ms": 12.5,
     "breakdown": {
       "system": 220,
@@ -23,7 +24,8 @@
       "tool_results": 0,
       "compaction": 0,
       "project": 80,
-      "runtime": 24
+      "runtime": 24,
+      "volatile": 120
     },
     "source": "estimated"
   }

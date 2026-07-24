@@ -29,6 +29,9 @@ export type ContextWindowBreakdown = {
   assistant?: number;
   tool_results?: number;
   compaction?: number;
+  project?: number;
+  runtime?: number;
+  volatile?: number;
 };
 
 export type ContextUsage = {

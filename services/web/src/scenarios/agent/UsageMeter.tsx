@@ -22,6 +22,9 @@ const BREAKDOWN_SEGMENTS: Array<{
   { key: "assistant", label: "Assistant", color: "bg-primary/40" },
   { key: "tool_results", label: "Tool results", color: "bg-warning" },
   { key: "compaction", label: "Compact", color: "bg-muted-foreground/50" },
+  { key: "project", label: "Project", color: "bg-success/70" },
+  { key: "runtime", label: "Runtime", color: "bg-warning/70" },
+  { key: "volatile", label: "Writing ctx", color: "bg-primary/55" },
 ];
 
 type Props = {

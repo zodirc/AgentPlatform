@@ -18,6 +18,7 @@
     "messages_tokens": { "type": "integer", "minimum": 0 },
     "project_tokens": { "type": "integer", "minimum": 0 },
     "runtime_tokens": { "type": "integer", "minimum": 0 },
+    "volatile_tokens": { "type": "integer", "minimum": 0 },
     "assemble_ms": { "type": "number", "minimum": 0 },
     "source": { "type": "string", "enum": ["estimated", "provider"] },
     "strategies": {
@@ -37,7 +38,12 @@
         "tool_results": { "type": "integer", "minimum": 0 },
         "compaction": { "type": "integer", "minimum": 0 },
         "project": { "type": "integer", "minimum": 0 },
-        "runtime": { "type": "integer", "minimum": 0 }
+        "runtime": { "type": "integer", "minimum": 0 },
+        "volatile": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "WN3/AQ1 writing_context / plan-phase user block tokens"
+        }
       }
     }
   }

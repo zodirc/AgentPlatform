@@ -385,6 +385,9 @@ export interface components {
                     assistant?: number;
                     tool_results?: number;
                     compaction?: number;
+                    project?: number;
+                    runtime?: number;
+                    volatile?: number;
                 };
                 /** @enum {string} */
                 source?: "estimated" | "provider";

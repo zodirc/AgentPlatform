@@ -182,6 +182,7 @@ class AgentEngine:
                         "messages_tokens": int(report.get("messages_tokens", 0)),
                         "project_tokens": int(report.get("project_tokens", 0)),
                         "runtime_tokens": int(report.get("runtime_tokens", 0)),
+                        "volatile_tokens": int(report.get("volatile_tokens", 0)),
                         "reserve_tokens": int(report.get("reserve_tokens", 0)),
                         "fill_ratio": float(report.get("fill_ratio", 0.0)),
                         "assemble_ms": float(report.get("assemble_ms", self._context.last_assemble_ms)),
