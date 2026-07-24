@@ -150,6 +150,25 @@ class AgentEngine:
                     break
 
                 step_tools = self._scoped_openai_tools(state)
+                # HM2: fire-and-forget raw snapshot before assemble (never model-facing).
+                try:
+                    import asyncio
+
+                    from app.controller.session_raw import append_raw_snapshot
+
+                    asyncio.get_running_loop().create_task(
+                        append_raw_snapshot(
+                            session_id=state.session_id,
+                            turn_id=state.turn_id,
+                            step_index=step_index,
+                            messages=list(state.messages),
+                            tools=step_tools,
+                        ),
+                        name=f"raw-snap-{state.turn_id}-{step_index}",
+                    )
+                except RuntimeError:
+                    pass
+
                 messages = await self._context.assemble_async(
                     system_prompt=self._system_prompt,
                     state=state,
@@ -161,6 +180,25 @@ class AgentEngine:
                 from app.context.engine import estimate_window_breakdown
 
                 report = self._context.last_budget_report
+                # HM4: async envelope sample (hash always when enabled).
+                try:
+                    import asyncio
+
+                    from app.observability.model_envelope import maybe_persist_model_envelope
+
+                    asyncio.get_running_loop().create_task(
+                        maybe_persist_model_envelope(
+                            turn_id=state.turn_id,
+                            session_id=state.session_id,
+                            step_index=step_index,
+                            messages=messages,
+                            tools=step_tools,
+                            fill_ratio=float(report.get("fill_ratio") or 0.0),
+                        ),
+                        name=f"envelope-{state.turn_id}-{step_index}",
+                    )
+                except RuntimeError:
+                    pass
                 breakdown = estimate_window_breakdown(
                     messages=messages,
                     tools=step_tools,
@@ -702,6 +740,10 @@ class AgentEngine:
                 filters_info = result.get("filters")
                 if isinstance(filters_info, dict):
                     retrieval_payload["filters"] = filters_info
+                # HM5: three-stage audit for Ops (never required for UI hits).
+                audit_info = result.get("audit")
+                if isinstance(audit_info, dict):
+                    retrieval_payload["audit"] = audit_info
                 await self._write_event(
                     event_type="retrieval.completed",
                     payload=retrieval_payload,
@@ -802,8 +844,16 @@ class AgentEngine:
         )
         record_tool_call(tool_name=tool_name, status=tool_status)
         is_error = bool(result.get("error")) or tool_status == "error"
+        # HM5: keep audit on events only — do not inflate model tool_result tokens.
+        model_result = result
+        if isinstance(result, dict) and "audit" in result:
+            model_result = {k: v for k, v in result.items() if k != "audit"}
         state.messages.append(
-            tool_result_message(tool_call_id, json.dumps(result, ensure_ascii=False), is_error=is_error)
+            tool_result_message(
+                tool_call_id,
+                json.dumps(model_result, ensure_ascii=False),
+                is_error=is_error,
+            )
         )
         if tool_name == "stub_echo":
             return "TERMINATE"

@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import contextvars
 import logging
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from typing import Callable
+from typing import Callable, TypeVar
 
 from app.retrieval.vector_index import ChunkHit
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 def merge_doc_and_chunk_hits(
@@ -46,6 +49,17 @@ def merge_doc_and_chunk_hits(
     return merged[:limit]
 
 
+def _submit_with_context(pool: ThreadPoolExecutor, fn: Callable[[], _T]):
+    """Submit ``fn`` with a copy of the caller's ContextVar state.
+
+    HM5 audit capture uses a ContextVar; stock ThreadPoolExecutor in this
+    runtime image does not propagate it, so chunk-lane ``record_*`` would
+    otherwise no-op and Ops would synthesize identical L1/L2/L3.
+    """
+    ctx = contextvars.copy_context()
+    return pool.submit(ctx.run, fn)
+
+
 def parallel_two_level(
     *,
     doc_fn: Callable[[], list[str]],
@@ -62,8 +76,8 @@ def parallel_two_level(
     chunk_hits: list[ChunkHit] = []
     timeout = max(0.01, float(timeout_seconds))
     with ThreadPoolExecutor(max_workers=2) as pool:
-        doc_fut = pool.submit(doc_fn)
-        chunk_fut = pool.submit(chunk_fn)
+        doc_fut = _submit_with_context(pool, doc_fn)
+        chunk_fut = _submit_with_context(pool, chunk_fn)
         done, not_done = wait(
             {doc_fut, chunk_fut},
             timeout=timeout,

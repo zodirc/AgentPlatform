@@ -18,6 +18,11 @@ _SLASH_OUTLINE = re.compile(r"^\s*/outline(?:\s+(.*))?$", re.I | re.S)
 _SLASH_TEST = re.compile(r"^\s*/test(?:\s+(.*))?$", re.I | re.S)
 _SLASH_LINT = re.compile(r"^\s*/lint(?:\s+(.*))?$", re.I | re.S)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
+# HM9: light recall hint (no auto-inject).
+_RECALL_HINT = re.compile(
+    r"(记得|上次|之前说过|之前说的|recall|remember\s+when|last\s+time)",
+    re.I,
+)
 
 # Deterministic user-side expansions (docs/14 §6.4). Do NOT mutate system prefix (C3).
 POLISH_EXPAND = (
@@ -104,6 +109,8 @@ class InputCompiler:
             metadata["path_refs"] = path_refs
             refs_block = "\n".join(f"- {path}" for path in path_refs)
             text = f"{text}\n\n[file_refs]\n{refs_block}"
+        if _RECALL_HINT.search(text):
+            metadata["recall_hint"] = True
         return CompiledInput(messages=[user_message(text)], metadata=metadata)
 
     async def enrich_with_preread(

@@ -702,6 +702,33 @@ async def _finalize_turn(
     await check_monthly_token_alert()
     await save_session_transcript(state.session_id, state.messages)
     await _backfill_plan_open_items(state)
+    # HM1: soft-threshold precompact cache (R4 — do not block finalize).
+    try:
+        from app.context.precompact_cache import refresh_soft_precompact
+        from app.settings import settings as _settings
+
+        soft = float(_settings.context_fill_soft_precompact)
+        # Token-estimate fill (assemble report is gone after engine returns).
+        from app.context.engine import estimate_payload_tokens
+
+        usable = max(
+            1,
+            int(_settings.context_window_tokens)
+            - int(_settings.context_output_reserve_tokens),
+        )
+        approx_fill = min(1.0, estimate_payload_tokens(state.messages) / float(usable))
+        if soft > 0 and approx_fill >= soft:
+            asyncio.get_running_loop().create_task(
+                refresh_soft_precompact(
+                    session_id=state.session_id,
+                    turn_id=turn_id,
+                    messages=list(state.messages),
+                    fill_ratio=approx_fill,
+                ),
+                name=f"hm1-precompact-{turn_id}",
+            )
+    except RuntimeError:
+        pass
     # WN1: do not block finalize / user-facing completion (R4).
     try:
         asyncio.get_running_loop().create_task(
@@ -1075,6 +1102,16 @@ async def _run_turn(
         )
 
     # Persist for step/interrupt checkpoint resume (HA) — not welded into system.
+    if compiled.metadata.get("recall_hint"):
+        recall_line = (
+            "[memory_hint] User may refer to prior notes — use the recall tool if relevant; "
+            "do not invent memories and do not auto-inject long-term memory."
+        )
+        volatile_context = (
+            f"{volatile_context.rstrip()}\n\n{recall_line}\n"
+            if volatile_context.strip()
+            else f"{recall_line}\n"
+        )
     state.volatile_context = volatile_context
 
     engine = AgentEngine(

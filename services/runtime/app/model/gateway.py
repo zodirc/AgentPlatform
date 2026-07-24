@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -195,26 +196,37 @@ class StubModelProvider:
             yield ModelResponse(text="命令已执行", output_tokens=6)
             return
 
-        if "export_document" in tool_names and _wants_draft_export(user_text):
+        # writing.10: draft → export current_draft. Match golden id on intent *or*
+        # full user text (compaction may fold the original message into [autocompact]).
+        if "export_document" in tool_names and (
+            _wants_draft_export(user_text) or _wants_draft_export(_user_text(messages))
+        ):
             if not has_tool_result:
                 yield _tool_call(
                     "draft_section",
                     {"section_id": "a", "content": "Current turn draft for export."},
                 )
                 return
-            if last_tool == "draft_section":
-                yield _tool_call(
-                    "export_document",
-                    {
-                        "section_ids": ["a"],
-                        "source": "current_draft",
-                        "output_path": "exports/document.md",
-                    },
-                )
-                return
             if last_tool == "export_document":
+                if _export_delivery_failed(messages):
+                    yield ModelResponse(
+                        text="writing.10 export delivery failed",
+                        output_tokens=8,
+                    )
+                    return
                 yield ModelResponse(text="本轮草稿已导出", output_tokens=7)
                 return
+            # Any other prior tool (normally draft_section) → export. Do not fall
+            # through to generic stub ack or other routers mid writing.10.
+            yield _tool_call(
+                "export_document",
+                {
+                    "section_ids": ["a"],
+                    "source": "current_draft",
+                    "output_path": "exports/document.md",
+                },
+            )
+            return
 
         if "check_citation" in tool_names and _wants_check_citation(user_text) and not has_tool_result:
             yield _tool_call(
@@ -528,6 +540,27 @@ def _last_tool_name(messages: list[dict]) -> str | None:
             if block.get("type") == "tool_use":
                 return str(block.get("name"))
     return None
+
+
+def _export_delivery_failed(messages: list[dict]) -> bool:
+    """True when the latest export_document tool result reports delivery_status=failed."""
+    for msg in reversed(messages):
+        if msg.get("role") != "tool":
+            continue
+        for block in msg.get("content", []) if isinstance(msg.get("content"), list) else []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            raw = block.get("content", "")
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(data, dict):
+                continue
+            if "delivery_status" not in data and "output_path" not in data:
+                continue
+            return str(data.get("delivery_status", "")).lower() == "failed"
+    return False
 
 
 def _is_smoke_message(text: str) -> bool:

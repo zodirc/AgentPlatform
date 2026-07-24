@@ -379,3 +379,111 @@ async def test_stub_test_slash_prefers_run_tests_over_run_command() -> None:
         for call in (chunk.tool_calls or [])
     ]
     assert [c["name"] for c in tool_calls] == ["run_tests"]
+
+
+@pytest.mark.asyncio
+async def test_stub_writing10_draft_then_export_with_writing_context() -> None:
+    """writing.10 must draft → export even when work_index injects propose_patch phrasing."""
+    from app.model.gateway import _export_delivery_failed
+
+    provider = StubModelProvider()
+    tools = [
+        {"name": "draft_section"},
+        {"name": "export_document"},
+        {"name": "propose_patch"},
+        {"name": "read_file"},
+    ]
+    user = {
+        "role": "user",
+        "content": [{"type": "text", "text": "writing.10 draft then export current turn"}],
+    }
+    ctx = {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": (
+                    "[writing_context]\n"
+                    "Continue writing with `draft_section`; promote via `propose_patch`. "
+                    "Read only the chapter you need."
+                ),
+            }
+        ],
+    }
+
+    async def first_tool(messages: list) -> dict:
+        chunks = [
+            chunk
+            async for chunk in provider.stream(messages=messages, tools=tools)
+        ]
+        calls = [
+            call
+            for chunk in chunks
+            if not isinstance(chunk, str)
+            for call in (chunk.tool_calls or [])
+        ]
+        assert len(calls) == 1
+        return calls[0]
+
+    first = await first_tool([ctx, user])
+    assert first["name"] == "draft_section"
+    assert first["input"]["section_id"] == "a"
+
+    after_draft = [
+        ctx,
+        user,
+        assistant_tool_use("d1", "draft_section", first["input"]),
+        tool_result_message("d1", '{"status": "drafted", "path": ".agent/work/drafts/manuscript.md"}'),
+    ]
+    second = await first_tool(after_draft)
+    assert second["name"] == "export_document"
+    assert second["input"]["source"] == "current_draft"
+    assert second["input"]["section_ids"] == ["a"]
+
+    after_export_ok = [
+        *after_draft,
+        assistant_tool_use("e1", "export_document", second["input"]),
+        tool_result_message(
+            "e1",
+            '{"delivery_status": "ok", "output_path": "exports/document.md", "summary": "Exported 1 section(s)"}',
+        ),
+    ]
+    finals = [c async for c in provider.stream(messages=after_export_ok, tools=tools)]
+    text = "".join(c if isinstance(c, str) else (c.text or "") for c in finals)
+    assert "本轮草稿已导出" in text
+    assert _export_delivery_failed(after_export_ok) is False
+
+    after_export_fail = [
+        *after_draft,
+        assistant_tool_use("e2", "export_document", second["input"]),
+        tool_result_message(
+            "e2",
+            '{"delivery_status": "failed", "output_path": "exports/document.md", "summary": "Export failed"}',
+        ),
+    ]
+    fail_text = "".join(
+        c if isinstance(c, str) else (c.text or "")
+        for c in [chunk async for chunk in provider.stream(messages=after_export_fail, tools=tools)]
+    )
+    assert "export delivery failed" in fail_text
+    assert _export_delivery_failed(after_export_fail) is True
+
+
+@pytest.mark.asyncio
+async def test_stub_writing10_exports_after_unexpected_prior_tool() -> None:
+    """Do not fall through to stub ack when last_tool is not draft_section."""
+    provider = StubModelProvider()
+    tools = [{"name": "draft_section"}, {"name": "export_document"}, {"name": "read_file"}]
+    messages = [
+        {"role": "user", "content": [{"type": "text", "text": "writing.10 draft then export current turn"}]},
+        assistant_tool_use("r1", "read_file", {"path": "outline.md"}),
+        tool_result_message("r1", '{"content": "# Title"}'),
+    ]
+    chunks = [chunk async for chunk in provider.stream(messages=messages, tools=tools)]
+    calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert [c["name"] for c in calls] == ["export_document"]

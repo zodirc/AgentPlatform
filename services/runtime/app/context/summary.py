@@ -19,6 +19,8 @@ class StructuredSummary:
     decisions: list[str] = field(default_factory=list)
     open_items: list[str] = field(default_factory=list)
     narrative: str = ""
+    # HM8: optional nested layers (default empty = off)
+    layers: list[dict[str, Any]] = field(default_factory=list)
 
     def to_message_text(self) -> str:
         parts = [f"[session context: {self.narrative or self.task or 'prior work'}"]
@@ -33,13 +35,15 @@ class StructuredSummary:
         return " ".join(parts) + "]"
 
     def to_autocompact_text(self) -> str:
-        payload = {
+        payload: dict[str, Any] = {
             "task": self.task[:200],
             "files_touched": self.files_touched[:12],
             "decisions": self.decisions[:6],
             "open_items": self.open_items[:6],
             "narrative": self.narrative[:800],
         }
+        if self.layers:
+            payload["layers"] = self.layers[-3:]
         return f"[autocompact: {json.dumps(payload, ensure_ascii=False)}]"
 
 
@@ -129,7 +133,51 @@ def merge_structured_summary(base: StructuredSummary, overlay: StructuredSummary
         decisions=_dedupe([*base.decisions, *overlay.decisions])[:8],
         open_items=_dedupe([*base.open_items, *overlay.open_items])[:8],
         narrative=overlay.narrative or base.narrative,
+        layers=overlay.layers or base.layers,
     )
+
+
+def extract_prev_summary(messages: list[dict[str, Any]]) -> StructuredSummary | None:
+    """HM3: find the latest autocompact / session-context summary in the window."""
+    for msg in reversed(messages):
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "text":
+                continue
+            text = str(block.get("text", ""))
+            parsed = parse_structured_summary_text(text)
+            if parsed is not None:
+                return parsed
+            if text.startswith("[session context:"):
+                return StructuredSummary(narrative=text[:500], task="")
+    return None
+
+
+def messages_since_last_summary(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return only messages after the last autocompact/session-context marker (HM3 delta)."""
+    last_idx = -1
+    for i, msg in enumerate(messages):
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "text":
+                continue
+            text = str(block.get("text", ""))
+            if "[autocompact:" in text or text.startswith("[session context:"):
+                last_idx = i
+                break
+    if last_idx < 0:
+        return list(messages)
+    return list(messages[last_idx + 1 :])
+
+
+def incremental_summary_from_messages(messages: list[dict[str, Any]]) -> StructuredSummary:
+    """Default HM3 path: merge(prev, delta); full only when no prev."""
+    prev = extract_prev_summary(messages)
+    delta_msgs = messages_since_last_summary(messages) if prev is not None else messages
+    if not delta_msgs and prev is not None:
+        return prev
+    overlay = structured_summary_from_messages(delta_msgs or messages)
+    if prev is None:
+        return overlay
+    return merge_structured_summary(prev, overlay)
 
 
 def parse_structured_summary_text(text: str) -> StructuredSummary | None:
@@ -152,6 +200,7 @@ def parse_structured_summary_text(text: str) -> StructuredSummary | None:
         decisions=[str(v) for v in data.get("decisions") or []],
         open_items=[str(v) for v in data.get("open_items") or []],
         narrative=str(data.get("narrative", "")),
+        layers=list(data.get("layers") or []) if isinstance(data.get("layers"), list) else [],
     )
 
 

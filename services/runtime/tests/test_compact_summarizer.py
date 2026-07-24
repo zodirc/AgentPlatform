@@ -8,6 +8,7 @@ from app.context.compact_summarizer import summarize_messages_with_gateway
 from app.context.engine import ContextEngine
 from app.engine.state import TurnState, Usage, assistant_text, user_message
 from app.model.gateway import ModelGateway, ModelResponse
+from app.settings import settings
 
 
 class _SummaryProvider:
@@ -17,7 +18,19 @@ class _SummaryProvider:
 
 
 @pytest.mark.asyncio
-async def test_llm_autocompact_uses_gateway_summary() -> None:
+async def test_llm_autocompact_uses_gateway_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Opt-in sync compact LLM (HM1 default is deterministic / cache only).
+    monkeypatch.setattr(settings, "context_hard_autocompact_allow_llm", True)
+
+    async def _no_cache(_session_id):
+        return None
+
+    monkeypatch.setattr(
+        "app.context.precompact_cache.load_precompact_cache",
+        _no_cache,
+    )
     gateway = ModelGateway(_SummaryProvider())
     engine = ContextEngine(token_budget=8)
     state = TurnState(

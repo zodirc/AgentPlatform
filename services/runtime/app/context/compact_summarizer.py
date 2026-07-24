@@ -7,6 +7,10 @@ from typing import Any
 
 from app.context.summary import (
     StructuredSummary,
+    extract_prev_summary,
+    incremental_summary_from_messages,
+    merge_structured_summary,
+    messages_since_last_summary,
     parse_structured_summary_text,
     structured_summary_from_messages,
 )
@@ -74,17 +78,31 @@ async def summarize_messages_with_gateway(
     gateway: ModelGateway,
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Use the model gateway to produce a compact conversation summary."""
-    preview = _preview_messages(messages)
+    """Use the model gateway to produce a compact conversation summary.
+
+    HM3: prefer incremental merge — only send delta (+ prev JSON) to the model.
+    """
+    prev = extract_prev_summary(messages)
+    delta = messages_since_last_summary(messages) if prev is not None else messages
+    preview = _preview_messages(delta if delta else messages)
+    prev_blob = ""
+    if prev is not None:
+        prev_blob = (
+            "Previous structured summary (merge; do not drop prior task/files):\n"
+            f"{json.dumps({'task': prev.task, 'files_touched': prev.files_touched, 'decisions': prev.decisions, 'open_items': prev.open_items, 'narrative': prev.narrative}, ensure_ascii=False)}\n\n"
+        )
     prompt = (
         "Summarize the following agent conversation history as JSON with keys: "
         "task, files_touched (array), decisions (array), open_items (array), narrative. "
         "Preserve key facts, file paths, and open tasks. Do not invent details.\n\n"
+        f"{prev_blob}"
         f"{preview}"
     )
     summary = await _collect_gateway_summary(gateway, prompt)
     if summary is None:
-        summary = structured_summary_from_messages(messages)
+        summary = incremental_summary_from_messages(messages)
+    elif prev is not None:
+        summary = merge_structured_summary(prev, summary)
     return structured_summary_to_user_message(summary)
 
 

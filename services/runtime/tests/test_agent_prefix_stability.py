@@ -8,6 +8,12 @@ from app.tools.bootstrap import build_registry, tool_scope
 
 
 def _agent_system_path() -> Path:
+    # Prefer installed package path so docker `make runtime-test` (/tmp copy) works.
+    import app as app_pkg
+
+    packaged = Path(app_pkg.__file__).resolve().parent / "scenarios" / "agent" / "system.md"
+    if packaged.is_file():
+        return packaged
     return Path(__file__).resolve().parents[1] / "app" / "scenarios" / "agent" / "system.md"
 
 

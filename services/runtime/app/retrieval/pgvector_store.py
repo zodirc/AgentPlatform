@@ -599,14 +599,25 @@ class PgvectorSourceRetrievalStore:
             top_k = max(top_k, settings.retrieval_rerank_pool)
 
         def _chunk_lane() -> list[ChunkHit]:
+            from app.retrieval.audit import (
+                audit_capture_active,
+                record_lane_hits,
+                record_ranked,
+                record_recall_pool,
+            )
+
             vector_hits = self.search_vector(query, limit=top_k)
             bm25_hits = self.search_bm25(query, limit=top_k)
+            if audit_capture_active():
+                record_lane_hits(vector=vector_hits, bm25=bm25_hits)
             if not vector_hits and not bm25_hits:
                 return []
             if not vector_hits:
                 hits = bm25_hits
+                pool_source = "bm25"
             elif not bm25_hits:
                 hits = vector_hits
+                pool_source = "vector"
             else:
                 fusion_limit = top_k if rerank else limit
                 fused = reciprocal_rank_fusion(
@@ -636,8 +647,21 @@ class PgvectorSourceRetrievalStore:
                             line_end=hit.line_end,
                         )
                     )
+                pool_source = "fused"
+            if audit_capture_active():
+                record_recall_pool(hits, source=pool_source)
             if rerank and hits:
-                return rerank_hits(query, hits, limit=max(limit, top_k))
+                ranked = rerank_hits(query, hits, limit=max(limit, top_k))
+                if audit_capture_active():
+                    method = (
+                        "cross_encoder"
+                        if settings.retrieval_rerank_cross_encoder
+                        else "lexical"
+                    )
+                    record_ranked(ranked, method=method)
+                return ranked
+            if audit_capture_active():
+                record_ranked(hits, method="none")
             return hits
 
         def _doc_lane() -> list[str]:

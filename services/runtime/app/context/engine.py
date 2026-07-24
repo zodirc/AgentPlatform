@@ -203,23 +203,61 @@ class ContextEngine:
             return self._materialize_messages(envelope)
 
         if gateway is not None and any(t.get("detail") == "autocompact_pending" for t in trace):
-            compact_gateway = gateway
-            if settings.compact_model_name.strip():
-                from app.controller.session_context import load_session_owner_user_id
-                from app.model.config import resolve_model_config
-                from app.model.factory import create_gateway
-
-                owner_user_id = await load_session_owner_user_id(state.session_id)
-                cfg = await resolve_model_config(owner_user_id=owner_user_id)
-                compact_gateway = create_gateway(
-                    cfg,
-                    messages=[],
-                    scenario_id=state.scenario_id,
-                    for_compact=True,
+            # HM1: prefer soft-precompact cache; else deterministic summary.
+            # Sync compact LLM is opt-in (context_hard_autocompact_allow_llm).
+            used_cache = False
+            try:
+                from app.context.precompact_cache import (
+                    load_precompact_cache,
+                    summary_from_cache_record,
                 )
-            messages = [await summarize_messages_with_gateway(compact_gateway, state.messages)]
-            trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
-            trace.append({"strategy": "compact", "detail": "autocompact_llm"})
+
+                cached = await load_precompact_cache(state.session_id)
+                if cached:
+                    summary = summary_from_cache_record(cached)
+                    if summary.narrative or summary.task:
+                        messages = [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": summary.to_autocompact_text(),
+                                    }
+                                ],
+                            }
+                        ]
+                        used_cache = True
+                        trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
+                        trace.append({"strategy": "compact", "detail": "autocompact_cached"})
+            except Exception:
+                used_cache = False
+
+            if not used_cache:
+                if settings.context_hard_autocompact_allow_llm:
+                    compact_gateway = gateway
+                    if settings.compact_model_name.strip():
+                        from app.controller.session_context import load_session_owner_user_id
+                        from app.model.config import resolve_model_config
+                        from app.model.factory import create_gateway
+
+                        owner_user_id = await load_session_owner_user_id(state.session_id)
+                        cfg = await resolve_model_config(owner_user_id=owner_user_id)
+                        compact_gateway = create_gateway(
+                            cfg,
+                            messages=[],
+                            scenario_id=state.scenario_id,
+                            for_compact=True,
+                        )
+                    messages = [
+                        await summarize_messages_with_gateway(compact_gateway, state.messages)
+                    ]
+                    detail = "autocompact_llm"
+                else:
+                    messages = [_summarize_messages(list(state.messages))]
+                    detail = "autocompact_deterministic"
+                trace = [t for t in trace if t.get("detail") != "autocompact_pending"]
+                trace.append({"strategy": "compact", "detail": detail})
             fill_ratio, window = _window_fill(
                 messages=messages,
                 system_prompt=system_prompt,
@@ -867,8 +905,23 @@ def _collapse_tool_history(
 
 
 def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    """Deterministic autocompact with structured fields."""
-    summary = structured_summary_from_messages(messages)
+    """Deterministic autocompact with structured fields (HM3: incremental merge)."""
+    from app.context.summary import incremental_summary_from_messages
+    from app.settings import settings
+
+    summary = incremental_summary_from_messages(messages)
+    if settings.context_layered_summary_enabled and len(summary.narrative) > 600:
+        # HM8: fold current summary into L1 layer when narrative is long (default off).
+        layer = {
+            "level": 1,
+            "summary": {
+                "task": summary.task[:200],
+                "narrative": summary.narrative[:400],
+                "files_touched": summary.files_touched[:8],
+            },
+        }
+        summary.layers = [*summary.layers[-2:], layer]
+        summary.narrative = summary.narrative[:400]
     if not summary.narrative:
         summary.narrative = f"{len(messages)} earlier messages compacted"
     return {

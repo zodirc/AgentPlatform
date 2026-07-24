@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from app.retrieval.audit import (
+    audit_capture_active,
+    begin_audit_capture,
+    end_audit_capture,
+    record_recall_pool,
+)
 from app.retrieval.two_level import merge_doc_and_chunk_hits, parallel_two_level
 from app.retrieval.vector_index import ChunkHit
 
@@ -43,3 +49,32 @@ def test_parallel_two_level_degrades_on_slow_doc() -> None:
     assert chunks[0].chunk_id == "b1"
     # Doc may be empty when timed out; either way chunk lane wins degrade.
     assert timed_out or doc_paths == ["a.md"]
+
+
+def test_parallel_two_level_propagates_audit_contextvars() -> None:
+    """Chunk-lane audit writes must survive ThreadPoolExecutor (HM5)."""
+    token = begin_audit_capture()
+    try:
+
+        def doc_fn() -> list[str]:
+            return ["a.md"]
+
+        def chunk_fn() -> list[ChunkHit]:
+            assert audit_capture_active()
+            hits = [_hit("a.md", "a1", 0.9)]
+            record_recall_pool(hits, source="fused")
+            return hits
+
+        _, chunks, _ = parallel_two_level(
+            doc_fn=doc_fn,
+            chunk_fn=chunk_fn,
+            timeout_seconds=1.0,
+        )
+        assert chunks[0].chunk_id == "a1"
+    finally:
+        captured = end_audit_capture(token)
+
+    assert captured is not None
+    assert captured["recall_pool"]
+    assert captured["recall_pool"][0]["chunk_id"] == "a1"
+    assert captured["recall_pool"][0]["source"] == "fused"

@@ -337,7 +337,10 @@ def test_lexical_rerank_prefers_section_title_match() -> None:
     assert reranked[0].chunk_id == "b"
 
 
-def test_json_source_retrieval_store_roundtrip(tmp_path: Path) -> None:
+def test_json_source_retrieval_store_roundtrip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "retrieval_backend", "json")
     workspace = tmp_path / "workspace"
     sources = workspace / "sources"
     sources.mkdir(parents=True)

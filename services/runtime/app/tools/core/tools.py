@@ -879,6 +879,27 @@ def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
     return False
 
 
+def _with_retrieval_audit(
+    payload: dict[str, Any],
+    *,
+    captured: dict[str, Any] | None,
+    excerpt_chars: int,
+) -> dict[str, Any]:
+    from app.retrieval.audit import finalize_audit_for_result
+
+    hits = payload.get("hits")
+    if not isinstance(hits, list):
+        hits = []
+    mode = str(payload.get("retrieval") or "none")
+    payload["audit"] = finalize_audit_for_result(
+        captured,
+        hits=hits,
+        excerpt_chars=excerpt_chars,
+        mode=mode,
+    )
+    return payload
+
+
 async def search_sources(
     query: str,
     limit: int = 10,
@@ -887,6 +908,7 @@ async def search_sources(
 ) -> dict[str, Any]:
     from pathlib import Path
 
+    from app.retrieval.audit import begin_audit_capture, end_audit_capture
     from app.retrieval.path_filter import filter_hits_by_path_prefix
     from app.retrieval.store import get_sources_store
 
@@ -897,102 +919,128 @@ async def search_sources(
     mode = settings.retrieval_mode.lower()
     workspace_root = _workspace_root()
     excerpt_chars = settings.search_sources_excerpt_chars
-
-    if mode == "keyword":
-        hits, filter_meta = _search_sources_keyword(
-            sources,
-            workspace_root=workspace_root,
-            query=query,
-            limit=limit,
-            path_prefix=path_prefix,
-        )
-        payload = {
-            "query": query,
-            "hits": hits,
-            "summary": f"search_sources(keyword): {len(hits)} hit(s)",
-            "retrieval": "keyword",
-        }
-        return _attach_filter_meta(payload, filter_meta)
-
-    # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
-    from app.retrieval.tenant_visibility import filter_hits_for_tenant
-
-    store = get_sources_store()
-    index_meta: dict[str, Any] = {
-        "synced_on_query": False,
-        "index_via_worker": settings.index_via_worker,
-    }
-    # Over-fetch when filtering so prefix/tenant cuts do not starve top-k.
-    fetch_limit = limit * 3 if path_prefix else limit * 2
+    audit_token = begin_audit_capture()
+    out: dict[str, Any] | None = None
+    # When True, merge hybrid/vector ContextVar capture into audit; else rebuild from hits.
+    use_slot_capture = False
     try:
-        store.load()
-        raw_hits = store.search(query, limit=fetch_limit, mode=mode)
-        raw_hits = filter_hits_for_tenant(raw_hits)
-        retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
-    except OSError:
-        index_meta["error"] = "vector_index_unavailable"
-        raw_hits = []
-        retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
-
-    if raw_hits:
-        filtered, filter_meta = filter_hits_by_path_prefix(raw_hits, path_prefix=path_prefix)
-        if filter_meta.get("filters", {}).get("error"):
-            payload = {
-                "query": query,
-                "hits": [],
-                "summary": "search_sources: invalid path_prefix",
-                "retrieval": retrieval,
-                "index": index_meta,
-            }
-            return _attach_filter_meta(payload, filter_meta)
-        hits = _format_source_hits(filtered[:limit], excerpt_chars=excerpt_chars)
-        if hits and _hits_cover_query_terms(hits, query):
-            payload = {
-                "query": query,
-                "hits": hits,
-                "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
-                "retrieval": retrieval,
-                "index": index_meta,
-            }
-            _attach_filter_meta(payload, filter_meta)
-            if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
-                top_path = hits[0].get("path", "")
-                payload["hint"] = (
-                    "Low relevance scores; prefer read_file on the top path "
-                    f"({top_path}) instead of repeating search_sources."
-                )
-            return payload
-        # ANN returned hits, but path_prefix removed them all (stale/shared index,
-        # or over-fetch still missed the prefix) — or ANN neighbors lack query
-        # terms (hash/noise). Fall through to keyword under the same filter so
-        # eval / remounted workspaces still resolve on-disk sources.
-        if hits:
-            index_meta["ann_missed_query_terms"] = True
+        if mode == "keyword":
+            hits, filter_meta = _search_sources_keyword(
+                sources,
+                workspace_root=workspace_root,
+                query=query,
+                limit=limit,
+                path_prefix=path_prefix,
+            )
+            out = _attach_filter_meta(
+                {
+                    "query": query,
+                    "hits": hits,
+                    "summary": f"search_sources(keyword): {len(hits)} hit(s)",
+                    "retrieval": "keyword",
+                },
+                filter_meta,
+            )
+            use_slot_capture = False
         else:
-            index_meta["prefix_empty_after_filter"] = True
+            # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
+            from app.retrieval.tenant_visibility import filter_hits_for_tenant
 
-    # Empty/stale index: keyword filesystem scan (no rebuild), plus lag hint.
-    index_meta["index_lag"] = True
-    index_meta["hint"] = (
-        "Vector index empty or lagging; search used keyword fallback. "
-        "Rebuild via sync_sources_index / worker upload path — not on query."
+            store = get_sources_store()
+            index_meta: dict[str, Any] = {
+                "synced_on_query": False,
+                "index_via_worker": settings.index_via_worker,
+            }
+            # Over-fetch when filtering so prefix/tenant cuts do not starve top-k.
+            fetch_limit = limit * 3 if path_prefix else limit * 2
+            try:
+                store.load()
+                raw_hits = store.search(query, limit=fetch_limit, mode=mode)
+                raw_hits = filter_hits_for_tenant(raw_hits)
+                retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
+            except OSError:
+                index_meta["error"] = "vector_index_unavailable"
+                raw_hits = []
+                retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
+
+            resolved: dict[str, Any] | None = None
+            if raw_hits:
+                filtered, filter_meta = filter_hits_by_path_prefix(
+                    raw_hits, path_prefix=path_prefix
+                )
+                if filter_meta.get("filters", {}).get("error"):
+                    resolved = _attach_filter_meta(
+                        {
+                            "query": query,
+                            "hits": [],
+                            "summary": "search_sources: invalid path_prefix",
+                            "retrieval": retrieval,
+                            "index": index_meta,
+                        },
+                        filter_meta,
+                    )
+                    use_slot_capture = True
+                else:
+                    hits = _format_source_hits(
+                        filtered[:limit], excerpt_chars=excerpt_chars
+                    )
+                    if hits and _hits_cover_query_terms(hits, query):
+                        resolved = {
+                            "query": query,
+                            "hits": hits,
+                            "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
+                            "retrieval": retrieval,
+                            "index": index_meta,
+                        }
+                        _attach_filter_meta(resolved, filter_meta)
+                        if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
+                            top_path = hits[0].get("path", "")
+                            resolved["hint"] = (
+                                "Low relevance scores; prefer read_file on the top path "
+                                f"({top_path}) instead of repeating search_sources."
+                            )
+                        use_slot_capture = True
+                    elif hits:
+                        index_meta["ann_missed_query_terms"] = True
+                    else:
+                        index_meta["prefix_empty_after_filter"] = True
+
+            if resolved is None:
+                # Empty/stale index: keyword filesystem scan (no rebuild), plus lag hint.
+                index_meta["index_lag"] = True
+                index_meta["hint"] = (
+                    "Vector index empty or lagging; search used keyword fallback. "
+                    "Rebuild via sync_sources_index / worker upload path — not on query."
+                )
+                hits, filter_meta = _search_sources_keyword(
+                    sources,
+                    workspace_root=workspace_root,
+                    query=query,
+                    limit=limit,
+                    path_prefix=path_prefix,
+                )
+                resolved = _attach_filter_meta(
+                    {
+                        "query": query,
+                        "hits": hits,
+                        "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
+                        "retrieval": "keyword-fallback",
+                        "index": index_meta,
+                        "hint": index_meta["hint"],
+                    },
+                    filter_meta,
+                )
+                use_slot_capture = False
+            out = resolved
+    finally:
+        captured = end_audit_capture(audit_token)
+
+    assert out is not None
+    return _with_retrieval_audit(
+        out,
+        captured=captured if use_slot_capture else None,
+        excerpt_chars=excerpt_chars,
     )
-    hits, filter_meta = _search_sources_keyword(
-        sources,
-        workspace_root=workspace_root,
-        query=query,
-        limit=limit,
-        path_prefix=path_prefix,
-    )
-    payload = {
-        "query": query,
-        "hits": hits,
-        "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
-        "retrieval": "keyword-fallback",
-        "index": index_meta,
-        "hint": index_meta["hint"],
-    }
-    return _attach_filter_meta(payload, filter_meta)
 
 
 async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwargs: Any) -> dict[str, Any]:
@@ -1409,6 +1457,26 @@ async def export_document(
             "summary": f"Export failed structure lint ({len(lint_issues)} issue(s))",
         }
 
+    # HM7: deterministic citation verify at export boundary (off|warn|block).
+    verify_mode = (settings.writing_export_verify_mode or "off").strip().lower()
+    cite_issues: list[str] = []
+    if verify_mode in {"warn", "block"}:
+        from app.controller.verify_pass import scan_text_citations
+
+        cite_issues = scan_text_citations(body)
+        if cite_issues and verify_mode == "block":
+            return {
+                "output_path": output_path,
+                "source": source,
+                "profile": export_profile,
+                "delivery_status": "failed",
+                "delivery_issues": cite_issues[:20],
+                "included_sections": requested,
+                "missing_sections": [],
+                "source_paths": [rel_path for _, rel_path, _ in sources],
+                "summary": f"Export blocked by citation verify ({len(cite_issues)} issue(s))",
+            }
+
     from app.privacy.secret_scan import gate_write_content
 
     blocked = gate_write_content(body, path=output_path)
@@ -1431,6 +1499,8 @@ async def export_document(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body, encoding="utf-8")
     delivery_issues = ["used legacy unscoped revision layout"] if used_legacy_layout else []
+    if cite_issues:
+        delivery_issues.extend(cite_issues[:10])
     delivery_status = "warning" if delivery_issues else "ok"
     return {
         "output_path": output_path,

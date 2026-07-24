@@ -156,6 +156,21 @@ class Settings(BaseSettings):
     context_fill_collapse: float = 0.80
     context_fill_snip: float = 0.90
     context_fill_autocompact: float = 0.95
+    # HM1: soft fill triggers async precompact between turns (0 disables).
+    context_fill_soft_precompact: float = 0.78
+    precompact_cache_ttl_seconds: float = 3600.0
+    # HM1: hard-path sync compact LLM is opt-in; default = deterministic summary.
+    context_hard_autocompact_allow_llm: bool = False
+    # HM8: fold long narratives into layers (default off).
+    context_layered_summary_enabled: bool = False
+    # HM2 / HM4 observability (async; never blocks TTFB).
+    raw_snapshot_enabled: bool = True
+    model_envelope_enabled: bool = True
+    model_envelope_sample_rate: float = 0.05
+    model_envelope_on_high_fill: bool = True
+    model_envelope_debug: bool = False
+    # HM7: export citation verify gate — off | warn | block
+    writing_export_verify_mode: str = "warn"
     # Fraction of working message budget kept verbatim in collapse tail.
     context_hot_zone_ratio: float = 0.35
     otel_enabled: bool = False

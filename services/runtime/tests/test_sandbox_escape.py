@@ -157,5 +157,9 @@ async def test_bwrap_allows_write_inside_cwd_when_available(
         timeout_s=10.0,
     )
     assert result.get("sandbox") == "bwrap"
-    assert result["status"] == "executed"
+    if result["status"] != "executed":
+        # Nested Docker often has bwrap on PATH but userns/mount restrictions.
+        if Path("/.dockerenv").exists():
+            pytest.skip(f"bwrap cannot exec inside this container: {result}")
+        assert result["status"] == "executed", result
     assert (work / "inside.txt").read_text(encoding="utf-8").strip() == "ok"

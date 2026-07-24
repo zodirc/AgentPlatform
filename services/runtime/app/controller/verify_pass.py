@@ -80,6 +80,23 @@ def _source_exists(root: Path, citation_id: str) -> bool:
     return False
 
 
+def scan_text_citations(text: str) -> list[str]:
+    """HM7: return human-readable citation/path issues for a single markdown body."""
+    root = _workspace()
+    issues: list[str] = []
+    path_re = _ref_path_re()
+    cites = extract_citation_ids(text)
+    for cite in cites:
+        ok = _source_exists(root, cite)
+        if not ok:
+            label = cite if cite.startswith("cite:") else f"cite:{cite}"
+            issues.append(f"unverified_citation: {label}")
+    for path in sorted(set(path_re.findall(text))):
+        if not (root / path).is_file():
+            issues.append(f"missing_path: {path}")
+    return issues
+
+
 def run_verify_pass(*, session_id: str | None = None) -> dict[str, Any]:
     """Deterministic citation verify (docs/13 S3 A4) — user/offline only, no draft mutation."""
     root = _workspace()

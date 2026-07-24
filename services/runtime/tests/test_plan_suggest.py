@@ -6,7 +6,31 @@ from pathlib import Path
 from app.controller.input_compiler import InputCompiler, detect_plan_hint
 from app.controller.plan_suggest import evaluate_plan_suggest
 
-_CASES = Path(__file__).resolve().parents[3] / "eval" / "plan_suggest" / "cases.json"
+
+def _cases_path() -> Path:
+    """Resolve cases.json for repo layout and docker `make runtime-test` (/tmp copy)."""
+    here = Path(__file__).resolve()
+    candidates: list[Path] = []
+    # services/runtime/tests → repo root is parents[3]
+    if len(here.parents) > 3:
+        candidates.append(here.parents[3] / "eval" / "plan_suggest" / "cases.json")
+    candidates.extend(
+        [
+            Path("/repo/eval/plan_suggest/cases.json"),
+            Path("/tmp/eval/plan_suggest/cases.json"),
+            here.parent / "fixtures" / "plan_suggest_cases.json",
+        ]
+    )
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise FileNotFoundError(
+        "plan_suggest cases.json not found; tried: "
+        + ", ".join(str(p) for p in candidates)
+    )
+
+
+_CASES = _cases_path()
 
 
 def test_plan_suggest_cases_mirror_web() -> None:
