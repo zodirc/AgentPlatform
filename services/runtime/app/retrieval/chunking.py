@@ -270,6 +270,104 @@ def _split_oversized(text: str, *, size: int, overlap: int) -> list[str]:
     return parts
 
 
+# CQ4: light code symbol boundaries (async index path only; no tree-sitter on hot path).
+_CODE_EXTS = frozenset(
+    {
+        ".py",
+        ".pyi",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".java",
+        ".kt",
+        ".cs",
+        ".cpp",
+        ".cc",
+        ".cxx",
+        ".h",
+        ".hpp",
+        ".c",
+        ".rb",
+        ".php",
+        ".swift",
+    }
+)
+_CODE_SYMBOL_RE = re.compile(
+    r"^(?:"
+    r"def\s+\w+|async\s+def\s+\w+|class\s+\w+|"  # Python
+    r"function\s+\w+|async\s+function\s+\w+|export\s+(?:default\s+)?(?:async\s+)?function\s+\w+|"  # JS
+    r"(?:export\s+)?(?:async\s+)?function\s+\w+|export\s+(?:default\s+)?class\s+\w+|"  # TS/JS
+    r"func\s+(?:\([^)]*\)\s*)?\w+|type\s+\w+\s+struct\b|"  # Go
+    r"(?:pub\s+)?(?:async\s+)?fn\s+\w+|impl(?:\s*<[^>]+>)?\s+\w+|"  # Rust
+    r"(?:public|private|protected)?\s*(?:static\s+)?(?:class|interface|enum)\s+\w+"  # Java-ish
+    r")",
+    re.M,
+)
+
+
+def is_code_path(path: Path | str) -> bool:
+    suffix = Path(path).suffix.lower()
+    return suffix in _CODE_EXTS
+
+
+def split_code_sections(text: str) -> list[TextSection]:
+    """Split source by top-level-ish symbol headers (docs/30 CQ4).
+
+    Regex-only — safe for async indexing; not a full AST. Oversized bodies still
+    go through ``_split_oversized``.
+    """
+    if not text.strip():
+        return []
+    lines = text.splitlines()
+    matches = list(_CODE_SYMBOL_RE.finditer(text))
+    if not matches:
+        return [
+            TextSection(
+                title="",
+                body=text.strip(),
+                line_start=1,
+                line_end=text.count("\n") + 1,
+            )
+        ]
+
+    sections: list[TextSection] = []
+    # Preamble before first symbol.
+    first_start = matches[0].start()
+    if first_start > 0:
+        preamble = text[:first_start].rstrip()
+        if preamble.strip():
+            sections.append(
+                TextSection(
+                    title="",
+                    body=preamble,
+                    line_start=1,
+                    line_end=preamble.count("\n") + 1,
+                )
+            )
+
+    for index, match in enumerate(matches):
+        start = match.start()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        body = text[start:end].rstrip()
+        if not body.strip():
+            continue
+        title = match.group(0).strip()
+        line_start = text[:start].count("\n") + 1
+        line_end = line_start + body.count("\n")
+        sections.append(
+            TextSection(
+                title=title,
+                body=body,
+                line_start=line_start,
+                line_end=min(line_end, len(lines)),
+            )
+        )
+    return sections
+
+
 def chunk_source_text(
     path: Path,
     rel_path: str,
@@ -282,8 +380,13 @@ def chunk_source_text(
         return []
 
     # Index-time only: wide tables become pointers; disk file unchanged for read_file.
-    prepared = detach_wide_tables(text)
-    sections = split_markdown_sections(prepared)
+    # CQ4: code files use symbol boundaries; markdown keeps heading/table path.
+    if is_code_path(path) or is_code_path(rel_path):
+        prepared = text
+        sections = split_code_sections(prepared)
+    else:
+        prepared = detach_wide_tables(text)
+        sections = split_markdown_sections(prepared)
     if not sections:
         sections = [
             TextSection(
@@ -301,6 +404,13 @@ def chunk_source_text(
         tag_list = extract_source_tags(rel_path, text)
     else:
         tag_list = [str(t).strip() for t in tags if str(t).strip()]
+    # Code: add filename stem + language as sparse tags for retrieval.
+    if is_code_path(path) or is_code_path(rel_path):
+        stem = Path(rel_path).stem
+        lang = Path(rel_path).suffix.lstrip(".").lower()
+        for extra in (stem, lang, "code"):
+            if extra and extra not in tag_list:
+                tag_list.append(extra)
     for section in sections:
         section_text = section.body.strip()
         if not section_text and not section.title:
@@ -329,6 +439,8 @@ def chunk_source_text(
             }
             if tag_list:
                 chunk["tags"] = list(tag_list)
+            if section.title:
+                chunk["symbol"] = section.title
             chunks.append(chunk)
             chunk_idx += 1
     return chunks

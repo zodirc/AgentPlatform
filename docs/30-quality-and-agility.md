@@ -1,6 +1,6 @@
 # 30 — 质量与灵敏度(代码 × 写作)
 
-> **状态**:执行中（2026-07-24）— **CQ1 ✅ · CQ2 ✅**；其余票按排期。落地后回写本文状态；写作 WN 落地后同步 [14](14-writing-quality.md)。
+> **状态**:执行中（2026-07-24）— **CQ1–CQ4 ✅ · AQ1–AQ2 ✅ · WN1–WN3 ✅**；AQ3 为守线。落地后回写本文状态；写作 WN 落地后同步 [14](14-writing-quality.md)。
 > **本模块维护**:代码生成质量(**CQ**)· Agent 灵敏度(**AQ**)· 写作质量/灵敏度下一刀(**WN**)。
 > **关联**:速率红线 → [13](13-rate-redlines.md) R1–R5(所有票的前置约束);Harness 总纲 → [12](12-model-harness.md)(§5.1 下一刀:WT5 / 变短≈压缩 / Proof);写作正文 → [14](14-writing-quality.md) · [23](23-writing-work-model.md) · [24](24-writing-token-economy.md);RAG → [15](15-rag-and-sources.md);Eval → [11](11-eval-and-golden-turns.md)。
 
@@ -13,11 +13,11 @@
 | **CQ1** | 加厚 `agent/system.md` | ✅ |
 | **CQ2** | 工具描述 hygiene | ✅ |
 | **CQ3** | agent 质量 golden + rubric | ✅ |
-| **CQ4** | 代码感知检索 | ⏳ |
+| **CQ4** | 代码感知检索 | ✅ |
 | **AQ1** | agent cache 稳定前缀 | ✅ |
 | **AQ2** | agent slash 展开 | ✅ |
 | **AQ3** | 灵敏度否决守线 | 守线（无单独实现） |
-| **WN1** | 连续性卡片异步提炼 | ⏳ |
+| **WN1** | 连续性卡片异步提炼 | ✅ |
 | **WN2** | 离线 rubric 维度扩展 | ✅ |
 | **WN3** | WT5 写作 cache 落地 | ✅ |
 
@@ -32,7 +32,7 @@ cd services/runtime && python3 -m pytest \
 # golden: eval/golden/agent/10_patch_then_lints.yaml
 ```
 
-落地索引：`scenarios/agent/system.md` · `tools/bootstrap.py` · `writing/cards.py`（stable/volatile 分家）· `context/engine.py`（`[writing_context]` 后置）· `plan_phase.plan_phase_block` · `PendingTurn.volatile_context` · `offline/rubric.py` · `eval/golden/agent/10_patch_then_lints.yaml` · stub `agent.10`。
+落地索引：`scenarios/agent/system.md` · `tools/bootstrap.py` · `writing/cards.py`（stable/volatile 分家）· `writing/continuity.py`（WN1 pending）· `context/engine.py`（`[writing_context]` 后置）· `plan_phase.plan_phase_block` · `PendingTurn.volatile_context` · `retrieval/chunking.py`（CQ4 代码切块）· `offline/rubric.py` · `eval/golden/agent/10–12_*.yaml` · stub `agent.10–12`。
 
 ---
 

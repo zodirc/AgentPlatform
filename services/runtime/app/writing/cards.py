@@ -107,6 +107,13 @@ def load_writing_cards(*, workspace_root: Path | None = None) -> list[WritingCar
     for fp in sorted(root.rglob("*.md")):
         if not fp.is_file() or fp.name.startswith("."):
             continue
+        # WN1: pending continuity candidates must never auto-pin.
+        try:
+            rel_to_cards = fp.resolve().relative_to(root.resolve())
+        except ValueError:
+            rel_to_cards = Path()
+        if rel_to_cards.parts and rel_to_cards.parts[0].lower() == "pending":
+            continue
         try:
             text = fp.read_text(encoding="utf-8", errors="replace")
         except OSError:

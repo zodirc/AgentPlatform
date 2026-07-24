@@ -694,7 +694,61 @@ async def _finalize_turn(
     await check_monthly_token_alert()
     await save_session_transcript(state.session_id, state.messages)
     await _backfill_plan_open_items(state)
+    await _maybe_write_continuity_pending(state, turn_id=turn_id)
     await delete_checkpoint(run_id)
+
+
+async def _maybe_write_continuity_pending(state: TurnState, *, turn_id: UUID) -> None:
+    """WN1: after writing turns, extract continuity candidates into cards/pending/ (R4)."""
+    if state.scenario_id != "writing":
+        return
+    try:
+        from app.writing.continuity import (
+            extract_continuity_candidates,
+            write_pending_candidates,
+        )
+        from app.writing.focus import infer_focus_section_id
+        from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
+
+        doc, _rel = load_manuscript_doc()
+        if not doc.strip():
+            return
+        available = list_section_ids(doc)
+        # Prefer last user text for focus; fall back to last chapter on disk.
+        user_text = ""
+        for msg in reversed(state.messages):
+            if msg.get("role") != "user":
+                continue
+            content = msg.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        user_text = str(block.get("text") or "")
+                        break
+            elif isinstance(content, str):
+                user_text = content
+            if user_text:
+                break
+        focus = infer_focus_section_id(user_text, available) or (available[-1] if available else "")
+        chapter_text = extract_section(doc, focus) if focus else doc
+        if not (chapter_text or "").strip():
+            return
+        candidates = extract_continuity_candidates(
+            chapter_text,
+            section_id=focus or "",
+        )
+        written = write_pending_candidates(
+            candidates,
+            turn_id=str(turn_id),
+        )
+        if written:
+            logger.info(
+                "wn1 pending continuity cards turn_id=%s count=%s",
+                turn_id,
+                len(written),
+            )
+    except Exception:
+        logger.exception("wn1 continuity pending failed turn_id=%s", turn_id)
 
 
 async def _backfill_plan_open_items(state: TurnState) -> None:
