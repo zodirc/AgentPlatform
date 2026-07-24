@@ -1,0 +1,37 @@
+id: agent.11_test_slash
+scenario_id: agent
+phase: 1
+description: AQ2 /test expands and stub calls run_tests
+
+fixtures:
+  workspace:
+    - path: app.py
+      content: |
+        def hello():
+            return "ok"
+
+input:
+  message: "/test agent.11"
+  client_request_id: "00000000-0000-4000-8000-000000000111"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: run_tests
+    forbidden_names:
+      - write_file
+    max_calls:
+      write_file: 0
+  latency:
+    ttfb_ms_max: 300
+
+tags: [agent, slash, test, aq2, p1]

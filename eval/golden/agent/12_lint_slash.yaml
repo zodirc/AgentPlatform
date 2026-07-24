@@ -1,0 +1,37 @@
+id: agent.12_lint_slash
+scenario_id: agent
+phase: 1
+description: AQ2 /lint expands and stub calls read_lints
+
+fixtures:
+  workspace:
+    - path: app.py
+      content: |
+        def hello():
+            return "ok"
+
+input:
+  message: "/lint agent.12"
+  client_request_id: "00000000-0000-4000-8000-000000000112"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: read_lints
+    forbidden_names:
+      - write_file
+    max_calls:
+      write_file: 0
+  latency:
+    ttfb_ms_max: 300
+
+tags: [agent, slash, lint, aq2, p1]

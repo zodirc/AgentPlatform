@@ -15,7 +15,7 @@
 | **CQ3** | agent 质量 golden + rubric | ✅ |
 | **CQ4** | 代码感知检索 | ⏳ |
 | **AQ1** | agent cache 稳定前缀 | ✅ |
-| **AQ2** | agent slash 展开 | ⏳ |
+| **AQ2** | agent slash 展开 | ✅ |
 | **AQ3** | 灵敏度否决守线 | 守线（无单独实现） |
 | **WN1** | 连续性卡片异步提炼 | ⏳ |
 | **WN2** | 离线 rubric 维度扩展 | ✅ |

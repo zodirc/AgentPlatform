@@ -347,6 +347,23 @@ class StubModelProvider:
             yield _tool_call("search_codebase", {"query": "AgentEngine"})
             return
 
+        # AQ2: /test → run_tests；/lint → read_lints
+        if "run_tests" in tool_names and _wants_run_tests(user_text) and not has_tool_result:
+            yield _tool_call("run_tests", {"command": "pytest -q"})
+            return
+
+        if has_tool_result and last_tool == "run_tests":
+            yield ModelResponse(text="agent.11 tests finished", output_tokens=8)
+            return
+
+        if "read_lints" in tool_names and _wants_run_lints(user_text) and not has_tool_result:
+            yield _tool_call("read_lints", {"path": "."})
+            return
+
+        if has_tool_result and last_tool == "read_lints" and _wants_run_lints(user_text):
+            yield ModelResponse(text="agent.12 lints checked", output_tokens=8)
+            return
+
         if has_tool_result and last_tool == "search_codebase" and "propose_patch" in tool_names:
             yield _tool_call(
                 "propose_patch",
@@ -503,6 +520,18 @@ def _wants_agent_quality_verify(text: str) -> bool:
     """CQ3: stub path for read → propose_patch → read_lints."""
     lowered = text.lower()
     return "agent.10" in lowered or ("quality" in lowered and "read_lints" in lowered)
+
+
+def _wants_run_tests(text: str) -> bool:
+    lowered = text.lower()
+    return "[test]" in lowered or "agent.11" in lowered or "run_tests" in lowered
+
+
+def _wants_run_lints(text: str) -> bool:
+    lowered = text.lower()
+    if _wants_agent_quality_verify(text):
+        return False
+    return "[lint]" in lowered or "agent.12" in lowered
 
 
 def _wants_read(text: str) -> bool:

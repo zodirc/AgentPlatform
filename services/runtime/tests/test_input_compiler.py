@@ -4,9 +4,12 @@ from pathlib import Path
 
 from app.controller.input_compiler import (
     InputCompiler,
+    LINT_EXPAND,
     OUTLINE_EXPAND,
     POLISH_EXPAND,
+    TEST_EXPAND,
     detect_plan_hint,
+    expand_agent_slash,
     expand_writing_slash,
     should_query,
 )
@@ -92,6 +95,38 @@ def test_expand_polish_and_outline_deterministic() -> None:
     assert o == OUTLINE_EXPAND
     assert should_query("/polish", has_model_key=True).should_query is True
     assert should_query("/outline", has_model_key=True).should_query is True
+
+
+def test_expand_agent_test_and_lint_deterministic() -> None:
+    a, name_a = expand_agent_slash("/test agent.11")
+    b, name_b = expand_agent_slash("/test agent.11")
+    assert name_a == name_b == "test"
+    assert a == b
+    assert a.startswith(TEST_EXPAND)
+    assert "run_tests" in a
+    assert "agent.11" in a
+
+    l, name_l = expand_agent_slash("/lint app.py")
+    assert name_l == "lint"
+    assert l.startswith(LINT_EXPAND)
+    assert "read_lints" in l
+    assert "app.py" in l
+    assert should_query("/test", has_model_key=True).should_query is True
+    assert should_query("/lint", has_model_key=True).should_query is True
+
+
+def test_input_compiler_expands_test_into_user_message() -> None:
+    compiled = InputCompiler().compile("/test agent.11")
+    text = compiled.messages[0]["content"][0]["text"]
+    assert compiled.metadata.get("slash_expand") == "test"
+    assert text.startswith("[test]")
+    assert "run_tests" in text
+
+
+def test_help_lists_test_and_lint() -> None:
+    help_text = should_query("/help", has_model_key=True).local_response or ""
+    assert "/test" in help_text
+    assert "/lint" in help_text
 
 
 def test_input_compiler_expands_polish_into_user_message() -> None:

@@ -15,6 +15,8 @@ _SLASH_COMPACT = re.compile(r"^\s*/compact\b", re.I)
 _SLASH_VERIFY = re.compile(r"^\s*/verify\b", re.I)
 _SLASH_POLISH = re.compile(r"^\s*/polish(?:\s+(.*))?$", re.I | re.S)
 _SLASH_OUTLINE = re.compile(r"^\s*/outline(?:\s+(.*))?$", re.I | re.S)
+_SLASH_TEST = re.compile(r"^\s*/test(?:\s+(.*))?$", re.I | re.S)
+_SLASH_LINT = re.compile(r"^\s*/lint(?:\s+(.*))?$", re.I | re.S)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
 
 # Deterministic user-side expansions (docs/14 §6.4). Do NOT mutate system prefix (C3).
@@ -25,6 +27,15 @@ POLISH_EXPAND = (
 OUTLINE_EXPAND = (
     "[outline] 只产出或修改 outline.md，不写正文；"
     "禁止调用 search_sources；使用 update_outline。"
+)
+# Agent slash expansions (docs/30 AQ2).
+TEST_EXPAND = (
+    "[test] 运行项目测试并报告失败项；优先调用 run_tests；"
+    "仅当标准测试命令不适用时才用 run_command；不要改代码除非用户要求修失败。"
+)
+LINT_EXPAND = (
+    "[lint] 对工作区调用 read_lints；汇总诊断；"
+    "若存在你引入的问题再 propose_patch/edit_file 修复；不要无关重构。"
 )
 
 
@@ -41,6 +52,22 @@ def expand_writing_slash(message: str) -> tuple[str, str | None]:
         rest = (m.group(1) or "").strip()
         expanded = f"{OUTLINE_EXPAND}" + (f"\n{rest}" if rest else "")
         return expanded, "outline"
+    return message, None
+
+
+def expand_agent_slash(message: str) -> tuple[str, str | None]:
+    """Expand /test|/lint into unambiguous user instructions (docs/30 AQ2)."""
+    text = message.strip()
+    m = _SLASH_TEST.match(text)
+    if m:
+        rest = (m.group(1) or "").strip()
+        expanded = f"{TEST_EXPAND}" + (f"\n{rest}" if rest else "")
+        return expanded, "test"
+    m = _SLASH_LINT.match(text)
+    if m:
+        rest = (m.group(1) or "").strip()
+        expanded = f"{LINT_EXPAND}" + (f"\n{rest}" if rest else "")
+        return expanded, "lint"
     return message, None
 
 
@@ -61,6 +88,8 @@ class InputCompiler:
         text = message.strip()
         metadata: dict = {}
         text, slash = expand_writing_slash(text)
+        if not slash:
+            text, slash = expand_agent_slash(text)
         if slash:
             metadata["slash_expand"] = slash
             text = text.strip()
@@ -179,6 +208,8 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
                 "  /verify — fact-check drafts/exports (does not mutate drafts)\n"
                 "  /polish — style-only polish pass (no search_sources; propose_patch)\n"
                 "  /outline — outline-only pass (update_outline; no prose)\n"
+                "  /test — run project tests (run_tests; report failures)\n"
+                "  /lint — read_lints and fix introduced issues\n"
                 "Send any other message to start a turn."
             ),
         )
