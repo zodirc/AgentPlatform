@@ -29,6 +29,7 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "plan_phase": state.plan_phase,
         "model_mode": state.model_mode,
         "volatile_context": state.volatile_context or "",
+        "writes_preapproved": bool(state.writes_preapproved),
     }
 
 
@@ -58,6 +59,7 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         plan_phase=str(data["plan_phase"]) if data.get("plan_phase") else None,
         model_mode=str(data["model_mode"]) if data.get("model_mode") else None,
         volatile_context=str(data.get("volatile_context") or ""),
+        writes_preapproved=bool(data.get("writes_preapproved", False)),
     )
 
 

@@ -11,7 +11,7 @@ from app.context.policy import CompactionPolicy
 from app.context.project import build_runtime_context, load_project_context
 from app.context.summary import structured_summary_from_messages
 from app.engine.state import TurnState
-from app.tools.registry import ToolSpec
+from app.tools.registry import ToolSpec, WRITE_APPROVAL_STICKY_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +36,16 @@ class ToolExecutor:
         if spec is None:
             return {"error": f"Tool not available: {tool_name}"}
         if spec.requires_approval and not force_approval:
-            return {
-                "status": "approval_required",
-                "tool_call_id": tool_call_id,
-                "tool_name": tool_name,
-            }
+            # Same-Turn sticky: one write approval covers further file mutations.
+            sticky = bool(getattr(state, "writes_preapproved", False))
+            if sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
+                pass
+            else:
+                return {
+                    "status": "approval_required",
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                }
 
         from app.settings import settings
         from app.tools.validate import validate_tool_arguments

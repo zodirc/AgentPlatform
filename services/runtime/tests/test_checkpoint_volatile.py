@@ -16,12 +16,14 @@ def test_checkpoint_roundtrip_preserves_volatile_context() -> None:
         scenario_id="writing",
         volatile_context="## Writing cards（必须遵守）\nrole: 李云龙\n",
         plan_phase="executing",
+        writes_preapproved=True,
     )
     raw = _serialize_state(state)
     assert "李云龙" in raw["volatile_context"]
     restored = _deserialize_state(raw)
     assert restored.volatile_context == state.volatile_context
     assert restored.plan_phase == "executing"
+    assert restored.writes_preapproved is True
 
 
 def test_checkpoint_deserializes_legacy_without_volatile() -> None:

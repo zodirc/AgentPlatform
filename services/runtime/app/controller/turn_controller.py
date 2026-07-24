@@ -285,7 +285,8 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
         return None
     profile = ScenarioRegistry.get(state.scenario_id)
     registry = build_registry()
-    tools = tool_scope(profile, registry)
+    # Preserve Plan executing write-waiver when restoring from checkpoint.
+    tools = tool_scope(profile, registry, plan_phase=state.plan_phase)
     owner_user_id = await load_session_owner_user_id(state.session_id)
     from app.model.turn_override import bind_turn_model, reset_turn_model
 
@@ -1239,6 +1240,10 @@ async def _resume_after_approval(
             )
 
     state = pending.state
+    from app.tools.registry import WRITE_APPROVAL_STICKY_TOOLS
+
+    if approved and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
+        state.writes_preapproved = True
     owner_user_id = await load_session_owner_user_id(state.session_id)
     model_config = await resolve_model_config(owner_user_id=owner_user_id)
     context_window_tokens = await resolve_context_window_tokens(

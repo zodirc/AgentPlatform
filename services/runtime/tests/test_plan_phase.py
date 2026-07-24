@@ -70,3 +70,26 @@ def test_writing_planning_scope() -> None:
     assert "propose_patch" not in names
     assert "search_sources" not in names
     assert "read_file" not in names
+
+
+def test_agent_executing_waives_write_approvals() -> None:
+    """After「按此执行」, Plan consent covers file edits — no per-edit gate."""
+    ScenarioRegistry.load()
+    profile = ScenarioRegistry.get("agent")
+    registry = build_registry()
+
+    normal = {s.name: s for s in tool_scope(profile, registry, plan_phase=None)}
+    assert normal["edit_file"].requires_approval is True
+    assert normal["write_file"].requires_approval is True
+
+    executing = {s.name: s for s in tool_scope(profile, registry, plan_phase="executing")}
+    assert executing["edit_file"].requires_approval is False
+    assert executing["write_file"].requires_approval is False
+    assert executing["propose_patch"].requires_approval is False
+    # Shell stays gated — not implied by checklist consent.
+    assert executing["run_command"].requires_approval is True
+
+
+def test_executing_block_mentions_preauthorized_edits() -> None:
+    block = plan_phase_block("executing")
+    assert "pre-authorized" in block.lower() or "按此执行" in block

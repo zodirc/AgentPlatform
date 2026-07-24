@@ -8,6 +8,10 @@ ON_WRITE_TOOLS = frozenset(
     {"write_file", "edit_file", "apply_patch", "propose_patch", "draft_section", "update_outline"}
 )
 
+# After the user approves one write in a Turn, further tools in this set skip approval
+# for the rest of that Turn (progress-checklist / multi-edit UX). Shell stays gated.
+WRITE_APPROVAL_STICKY_TOOLS = ON_WRITE_TOOLS | frozenset({"rename_file"})
+
 
 @dataclass
 class ToolSpec:

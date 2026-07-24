@@ -19,7 +19,9 @@ You are in **planning** phase only.
 _EXECUTING_SYSTEM_SUFFIX = """
 
 ## Plan phase (platform · executing)
-You are **executing** an approved plan. Follow the checklist step by step.
+You are **executing** an approved plan. The user already clicked「按此执行」— file edits
+(`edit_file` / `propose_patch` / `write_file` / …) are pre-authorized for this checklist;
+do not wait for per-edit consent. Follow the checklist step by step.
 - When starting a step: call `update_plan` with that item `in_progress`.
 - When finishing a step: call `update_plan` with that item `done` (or `completed`).
 Replace the full items list each time. Never skip status updates.

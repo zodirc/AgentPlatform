@@ -116,6 +116,44 @@ async def test_tool_executor_requires_approval() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"ok": True, "summary": "edited"}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="edit_file",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=True,
+            )
+        ]
+    )
+    blocked = await executor.run(
+        tool_name="edit_file",
+        tool_call_id="c1",
+        arguments={},
+        state=type("S", (), {"writes_preapproved": False})(),
+    )
+    assert blocked["status"] == "approval_required"
+    assert called["n"] == 0
+
+    allowed = await executor.run(
+        tool_name="edit_file",
+        tool_call_id="c2",
+        arguments={},
+        state=type("S", (), {"writes_preapproved": True})(),
+    )
+    assert allowed.get("ok") is True
+    assert called["n"] == 1
+
+
+@pytest.mark.asyncio
 async def test_tool_executor_unknown_tool() -> None:
     executor = ToolExecutor([])
     result = await executor.run(

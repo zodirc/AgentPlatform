@@ -35,6 +35,8 @@ class TurnState:
     model_mode: str | None = None
     # docs/30 WN3/AQ1 — cards/focus/plan phase; survives checkpoint resume (not welded into system).
     volatile_context: str = ""
+    # After user approves one write-class tool this Turn, further sticky writes skip approval.
+    writes_preapproved: bool = False
 
 
 ContentBlock = dict[str, Any]
