@@ -298,8 +298,10 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
-    assert "Never guess file paths" in agent.system_prompt
-    assert "Do not repeat the same tool call" in agent.system_prompt
+    # Agent prompt: resolve path before survey; ban path-theater / read loops.
+    assert "Resolve the target path" in agent.system_prompt
+    assert "Path theater" in agent.system_prompt
+    assert "Read-after-complete" in agent.system_prompt
 
 
 @pytest.mark.asyncio

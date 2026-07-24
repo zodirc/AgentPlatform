@@ -138,7 +138,17 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
         tool_name="edit_file",
         tool_call_id="c1",
         arguments={},
-        state=type("S", (), {"writes_preapproved": False})(),
+        state=type(
+            "S",
+            (),
+            {
+                "writes_preapproved": False,
+                "turn_id": None,
+                "run_id": None,
+                "session_id": None,
+                "plan_phase": None,
+            },
+        )(),
     )
     assert blocked["status"] == "approval_required"
     assert called["n"] == 0
@@ -147,7 +157,17 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
         tool_name="edit_file",
         tool_call_id="c2",
         arguments={},
-        state=type("S", (), {"writes_preapproved": True})(),
+        state=type(
+            "S",
+            (),
+            {
+                "writes_preapproved": True,
+                "turn_id": None,
+                "run_id": None,
+                "session_id": None,
+                "plan_phase": None,
+            },
+        )(),
     )
     assert allowed.get("ok") is True
     assert called["n"] == 1

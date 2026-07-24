@@ -100,13 +100,29 @@ async def test_wait_turn_inactive_times_out() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resolve_pending_prefers_checkpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_resolve_pending_prefers_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Same-process resume must keep in-memory pending (full volatile)."""
     turn_id = uuid4()
     run_id = uuid4()
     from_ckpt = object()
     from_mem = object()
     monkeypatch.setattr(tc, "_pending_from_checkpoint", AsyncMock(return_value=from_ckpt))
     monkeypatch.setattr(tc, "get", lambda _tid: from_mem)
+
+    resolved = await tc._resolve_pending(turn_id, run_id)
+    assert resolved is from_mem
+
+
+@pytest.mark.asyncio
+async def test_resolve_pending_falls_back_to_checkpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """HA / process restart: no memory → load interrupt from checkpoint."""
+    turn_id = uuid4()
+    run_id = uuid4()
+    from_ckpt = object()
+    monkeypatch.setattr(tc, "_pending_from_checkpoint", AsyncMock(return_value=from_ckpt))
+    monkeypatch.setattr(tc, "get", lambda _tid: None)
 
     resolved = await tc._resolve_pending(turn_id, run_id)
     assert resolved is from_ckpt
