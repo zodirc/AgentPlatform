@@ -13,14 +13,23 @@ def _agent_system_path() -> Path:
 
 def test_agent_system_prompt_contains_cq1_discipline() -> None:
     text = _agent_system_path().read_text(encoding="utf-8")
-    assert "Verification discipline" in text
+    assert "## Default loop" in text
+    assert "## Ban: anti-patterns" in text
+    assert "## Verify" in text
     assert "read_lints" in text
     assert "run_tests" in text
-    assert "Edit selection (minimal diff)" in text
+    assert "edit_file" in text
     assert "propose_patch" in text
-    assert "Failure recovery" in text
-    assert "Comments and style" in text
-    assert "Done means:" in text
+    assert "minimal" in text.lower()
+    assert "head" in text and "tail" in text
+    assert "write_file" in text
+    assert "user intent this Turn" in text
+    assert "## Communicate" in text
+    assert "next_offset" in text
+    assert "Read-after-complete" in text
+    assert "Propose-then-redo" in text
+    assert "**`edit_file`**" in text or "Default tool: **`edit_file`**" in text
+    assert "按此执行" in text
 
 
 def test_agent_system_prompt_byte_stable_across_loads() -> None:
@@ -60,6 +69,19 @@ def test_agent_tool_descriptions_hygiene() -> None:
     cmd = by_name["run_command"].description
     assert "read_file" in cmd or "run_tests" in cmd
     assert "approval" in cmd.lower()
+    assert "head" in cmd.lower() or "FORBIDDEN" in cmd
+
+    read = by_name["read_file"].description
+    assert "complete" in read.lower() or "truncated=false" in read.lower()
+    params = by_name["read_file"].parameters.get("properties") or {}
+    assert "offset" in params and "limit" in params
+
+    edit = by_name["edit_file"].description
+    assert "default" in edit.lower() or "prefer this over propose_patch" in edit.lower()
+
+    propose = by_name["propose_patch"].description
+    assert "pending" in propose.lower() or "does not modify" in propose.lower()
+    assert "edit_file" in propose
 
     # Tool schemas (names + descriptions) must be deterministic for cache prefix.
     tools = registry.to_openai_tools(list(by_name))

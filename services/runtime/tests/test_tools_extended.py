@@ -29,7 +29,49 @@ async def test_read_file_and_list_dir(workspace: Path) -> None:
 async def test_read_file_truncates_large_content(workspace: Path) -> None:
     (workspace / "big.txt").write_text("x" * 40_000, encoding="utf-8")
     result = await core.read_file("big.txt")
-    assert "truncated" in result["content"]
+    assert result["truncated"] is True
+    assert result["next_offset"] is None  # single oversized line — continue-by-offset N/A
+    assert "truncated" in result["summary"]
+    assert "char" in result.get("hint", "").lower() or "grep" in result.get("hint", "").lower()
+
+
+@pytest.mark.asyncio
+async def test_read_file_line_window_char_budget(workspace: Path) -> None:
+    # Many short lines so continuation uses next_offset (not a single mega-line).
+    lines = [f"{i:04d} {'y' * 80}" for i in range(600)]
+    (workspace / "many.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    first = await core.read_file("many.txt")
+    assert first["truncated"] is True
+    assert first["next_offset"] is not None
+    assert first["end_line"] < first["total_lines"]
+    assert "offset=" in first.get("hint", "")
+    second = await core.read_file("many.txt", offset=first["next_offset"])
+    assert second["offset"] == first["next_offset"]
+    assert second["content"]
+
+
+@pytest.mark.asyncio
+async def test_read_file_offset_limit_and_complete_flag(workspace: Path) -> None:
+    body = "\n".join(f"line-{i}" for i in range(1, 21))
+    (workspace / "lines.txt").write_text(body + "\n", encoding="utf-8")
+
+    full = await core.read_file("lines.txt")
+    assert full["truncated"] is False
+    assert full["total_lines"] == 20
+    assert full["next_offset"] is None
+    assert "complete" in full["summary"]
+
+    page = await core.read_file("lines.txt", offset=5, limit=3)
+    assert page["offset"] == 5
+    assert page["end_line"] == 7
+    assert page["truncated"] is True
+    assert page["next_offset"] == 8
+    assert page["content"].startswith("line-5")
+    assert "line-8" not in page["content"]
+
+    rest = await core.read_file("lines.txt", offset=page["next_offset"])
+    assert rest["truncated"] is False
+    assert rest["content"].startswith("line-8")
 
 
 @pytest.mark.asyncio

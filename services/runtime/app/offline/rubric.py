@@ -150,6 +150,8 @@ def score_code_rubric(
     - tests_followed: write tools followed later by run_tests (soft; 1.0 if no write)
     - minimal_diff: surgical span vs whole-file rewrite
     - re_read_before_retry: if propose_patch appears twice, a read_file sits between
+    - single_edit_path: penalize propose_patch + edit_file churn in one turn
+    - read_thrift: penalize excessive read_file calls (post-complete paging proxy)
     """
     names = [str(n) for n in tool_names]
     write_tools = {"write_file", "edit_file", "propose_patch"}
@@ -196,8 +198,36 @@ def score_code_rubric(
                 break
         re_read_before_retry = 1.0 if ok else 0.0
 
+    # Prefer a single apply path: edit_file XOR propose_patch (not both).
+    has_propose = "propose_patch" in names
+    has_edit = "edit_file" in names
+    if has_propose and has_edit:
+        single_edit_path = 0.25
+    elif has_propose or has_edit or "write_file" in names:
+        single_edit_path = 1.0
+    else:
+        single_edit_path = 1.0
+
+    read_count = len(read_idxs)
+    if read_count <= 2:
+        read_thrift = 1.0
+    elif read_count <= 4:
+        read_thrift = 0.55
+    elif read_count <= 8:
+        read_thrift = 0.3
+    else:
+        read_thrift = 0.1
+
     overall = round(
-        (lint_followed + tests_followed + minimal_diff + re_read_before_retry) / 4.0,
+        (
+            lint_followed
+            + tests_followed
+            + minimal_diff
+            + re_read_before_retry
+            + single_edit_path
+            + read_thrift
+        )
+        / 6.0,
         4,
     )
     return {
@@ -205,6 +235,8 @@ def score_code_rubric(
         "tests_followed": round(tests_followed, 4),
         "minimal_diff": round(minimal_diff, 4),
         "re_read_before_retry": round(re_read_before_retry, 4),
+        "single_edit_path": round(single_edit_path, 4),
+        "read_thrift": round(read_thrift, 4),
         "overall": overall,
         "scorer": "code_heuristic",
         "tool_names": names,

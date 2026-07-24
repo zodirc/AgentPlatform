@@ -65,3 +65,27 @@ def test_score_code_rubric_requires_reread_between_patch_retries() -> None:
     )
     assert ok["re_read_before_retry"] == 1.0
     assert bad["re_read_before_retry"] == 0.0
+
+
+def test_score_code_rubric_penalizes_propose_edit_churn_and_read_spam() -> None:
+    clean = score_code_rubric(
+        tool_names=["read_file", "edit_file", "read_lints"],
+        old_text="a",
+        new_text="b",
+    )
+    churn = score_code_rubric(
+        tool_names=["propose_patch"] * 5 + ["edit_file"] * 3,
+        old_text="a",
+        new_text="b",
+    )
+    spam = score_code_rubric(
+        tool_names=["read_file"] * 11 + ["edit_file"],
+        old_text="a",
+        new_text="b",
+    )
+    assert clean["single_edit_path"] == 1.0
+    assert churn["single_edit_path"] < clean["single_edit_path"]
+    assert clean["read_thrift"] == 1.0
+    assert spam["read_thrift"] < clean["read_thrift"]
+    assert clean["overall"] > churn["overall"]
+    assert clean["overall"] > spam["overall"]

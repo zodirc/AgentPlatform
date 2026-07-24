@@ -47,12 +47,107 @@ def _assert_not_seed_corpus(rel_path: str) -> None:
         )
 
 
+_READ_FILE_MAX_CHARS = 32_000
+
+
+def _coerce_optional_positive_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _slice_file_by_lines(
+    content: str,
+    *,
+    offset: int,
+    limit: int | None,
+    max_chars: int = _READ_FILE_MAX_CHARS,
+) -> dict[str, Any]:
+    """Return a line window with explicit continuation metadata (Cursor-style Read)."""
+    lines = content.splitlines(keepends=True)
+    total_lines = len(lines)
+    if total_lines == 0:
+        return {
+            "content": "",
+            "offset": 1,
+            "end_line": 0,
+            "total_lines": 0,
+            "truncated": False,
+            "next_offset": None,
+        }
+
+    start = max(1, offset)
+    if start > total_lines:
+        return {
+            "content": "",
+            "offset": start,
+            "end_line": total_lines,
+            "total_lines": total_lines,
+            "truncated": False,
+            "next_offset": None,
+            "hint": f"offset {start} is past end of file ({total_lines} lines)",
+        }
+
+    start_idx = start - 1
+    end_cap = total_lines if limit is None else min(total_lines, start_idx + limit)
+
+    chunk: list[str] = []
+    chars = 0
+    end_line = start_idx
+    line_char_clipped = False
+    for idx in range(start_idx, end_cap):
+        line = lines[idx]
+        if chunk and chars + len(line) > max_chars:
+            break
+        if not chunk and len(line) > max_chars:
+            chunk.append(line[:max_chars] + "\n...[truncated]")
+            end_line = idx + 1
+            line_char_clipped = True
+            break
+        chunk.append(line)
+        chars += len(line)
+        end_line = idx + 1
+
+    more_lines = end_line < total_lines
+    truncated = line_char_clipped or more_lines
+    next_offset = (end_line + 1) if more_lines else None
+    payload: dict[str, Any] = {
+        "content": "".join(chunk),
+        "offset": start,
+        "end_line": end_line,
+        "total_lines": total_lines,
+        "truncated": truncated,
+        "next_offset": next_offset,
+    }
+    if more_lines and next_offset is not None:
+        payload["hint"] = (
+            f"File continues after line {end_line}/{total_lines}. "
+            f"Call read_file again with offset={next_offset}"
+            + (f" and limit={limit}" if limit is not None else "")
+            + ". Do not use run_command head/tail/sed/cat to page this file."
+        )
+    elif line_char_clipped:
+        payload["hint"] = (
+            f"Line {end_line} exceeds the {max_chars}-char read budget and was clipped. "
+            "Prefer grep for symbols in this file; do not page with shell head/tail/sed."
+        )
+    return payload
+
+
 async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     """Read a workspace file.
 
     For writing monofile manuscripts (docs/24): default returns one chapter block
     when ``section_id`` is set; without it returns a section index unless
     ``full=true`` / full-book intent.
+
+    For normal files: optional ``offset`` (1-based line) + ``limit`` (max lines).
+    Oversized windows set ``truncated`` / ``next_offset`` so the model can continue
+    with the same tool instead of shell paging.
     """
     target = _resolve_path(path)
     if not target.exists():
@@ -122,9 +217,29 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
             "hint": "Pass section_id to read one chapter; full=true for entire file",
         }
 
-    if len(content) > 32_000:
-        content = content[:32_000] + "\n...[truncated]"
-    return {"path": path, "content": content}
+    offset = _coerce_optional_positive_int(_kwargs.get("offset")) or 1
+    limit = _coerce_optional_positive_int(_kwargs.get("limit"))
+    sliced = _slice_file_by_lines(content, offset=offset, limit=limit)
+    end_line = int(sliced["end_line"])
+    total_lines = int(sliced["total_lines"])
+    truncated = bool(sliced["truncated"])
+    if truncated:
+        summary = f"Read {path} lines {offset}–{end_line}/{total_lines} (truncated; next_offset={sliced['next_offset']})"
+    elif total_lines == 0:
+        summary = f"Read {path} (empty)"
+    else:
+        summary = f"Read {path} lines {offset}–{end_line}/{total_lines} (complete)"
+    return {
+        "path": path,
+        "content": sliced["content"],
+        "offset": sliced["offset"],
+        "end_line": end_line,
+        "total_lines": total_lines,
+        "truncated": truncated,
+        "next_offset": sliced["next_offset"],
+        "summary": summary,
+        **({"hint": sliced["hint"]} if sliced.get("hint") else {}),
+    }
 
 
 async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
@@ -512,16 +627,19 @@ async def update_plan(
     result: dict[str, Any] = {
         "plan_id": plan_id,
         "items": normalized,
-        "summary": summary or f"Plan with {len(normalized)} item(s)",
+        "summary": summary
+        or (
+            f"Plan with {len(normalized)} item(s) — awaiting confirmation "
+            "（请用户点「按此执行」后再开始）"
+            if force_pending
+            else f"Progress with {len(normalized)} item(s)"
+        ),
     }
     if force_pending:
         result["plan_phase"] = "planning"
         result["awaiting_consent"] = True
-        if not summary:
-            result["summary"] = (
-                f"Plan with {len(normalized)} item(s) — awaiting confirmation "
-                "（请用户点「按此执行」后再开始）"
-            )
+        if summary:
+            result["summary"] = summary
     return result
 
 

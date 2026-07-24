@@ -14,14 +14,26 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="read_file",
             description=(
-                "Read a file from the workspace. For manuscript.md / draft manuscript, "
-                "pass section_id to load one chapter (default lists chapters only); "
-                "set full=true only for whole-book review."
+                "Read a file from the workspace (preferred over any shell paging). "
+                "Omit limit unless the file is very large. truncated=false or summary "
+                "(complete) means stop reading that path this Turn — do not re-call with "
+                "a smaller limit. If truncated=true, continue with next_offset only. "
+                "Never head/tail/sed/cat. Optional offset (1-based) / limit for large files. "
+                "For manuscript.md / draft manuscript, pass section_id to load one chapter "
+                "(default lists chapters only); set full=true only for whole-book review."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
+                    "offset": {
+                        "type": "integer",
+                        "description": "1-based start line (default 1). Use next_offset from a truncated read to continue.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max lines to return from offset. Omit to read until EOF or the char budget.",
+                    },
                     "section_id": {
                         "type": "string",
                         "description": "Chapter id inside monofile manuscript (e.g. ch3)",
@@ -55,10 +67,12 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="propose_patch",
             description=(
-                "Propose a surgical edit: old_text must be an exact unique span in the "
-                "current file; new_text replaces only that span (not the whole file). "
-                "Prefer this over write_file for existing files. If apply fails, "
-                "read_file and retry with a corrected unique span — do not resend blindly."
+                "Queue a surgical edit for UI diff / accept flow: old_text must be an exact "
+                "unique span; new_text replaces only that span. Does NOT modify the file by "
+                "itself — status stays pending until apply_patch or user accept. "
+                "In agent coding tasks prefer edit_file (applies in place after approval). "
+                "Do not fire many propose_patch calls and then redo the same edits with "
+                "edit_file. If apply fails, read_file once and retry with a corrected span."
             ),
             parameters={
                 "type": "object",
@@ -281,9 +295,9 @@ def build_registry() -> ToolRegistry:
             name="write_file",
             description=(
                 "Create a new file or intentionally overwrite an entire file with content. "
-                "Do NOT use for small edits to existing files — use propose_patch or "
-                "edit_file instead. Confirm the path with list_dir/glob first when unsure. "
-                "Requires approval in agent mode."
+                "Do NOT use for edits to an existing file (including HTML/JS games) — use "
+                "propose_patch or edit_file for unique spans. Full rewrite only when the "
+                "user explicitly asks to replace the whole file. Requires approval in agent mode."
             ),
             parameters={
                 "type": "object",
@@ -331,10 +345,11 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="edit_file",
             description=(
-                "Replace a unique exact text span in an existing file (old_text → new_text). "
-                "Same surgical contract as propose_patch; requires approval. Prefer "
-                "propose_patch when the UI diff / accept flow matters; use edit_file for "
-                "direct in-place edits. If span is missing or not unique, read_file and retry."
+                "Default surgical edit for agent mode: replace a unique exact span "
+                "(old_text → new_text) in an existing file after approval. Prefer this over "
+                "propose_patch for normal coding (propose_patch only queues a pending diff). "
+                "Prefer this over write_file for existing files. If the span is missing or "
+                "not unique, read_file once and retry — do not resend blindly."
             ),
             parameters={
                 "type": "object",
@@ -500,10 +515,11 @@ def build_registry() -> ToolRegistry:
             name="run_command",
             description=(
                 "Execute a shell command in the workspace (requires approval). Use for "
-                "builds, custom scripts, or non-standard checks. Prefer read_file/grep/glob "
-                "for reading files; prefer run_tests for the standard test suite; prefer "
-                "write_file/propose_patch/edit_file for file changes — do not use shell "
-                "redirection to write code."
+                "builds, installs, or non-standard checks whose stdout is needed. "
+                "FORBIDDEN for reading/paging source files: do not run cat, head, tail, "
+                "sed -n, awk, less, or wc on files you should open with read_file/grep. "
+                "Prefer run_tests for the standard test suite; prefer propose_patch/edit_file/"
+                "write_file for file changes — do not use shell redirection to write code."
             ),
             parameters={
                 "type": "object",
@@ -594,6 +610,10 @@ PLANNING_TOOL_ALLOWLIST = frozenset(
     }
 )
 
+# After「按此执行」, Plan consent covers file mutations — no per-edit approval (docs/25 §2.4).
+# Shell/exec stays on the normal approval path (still high-risk / not implied by a checklist).
+_PLAN_EXECUTING_WAIVE_APPROVAL = ON_WRITE_TOOLS | frozenset({"rename_file"})
+
 
 def tool_scope(
     profile: ScenarioProfile,
@@ -624,6 +644,9 @@ def tool_scope(
             requires = False
         elif override == "on_write":
             requires = name in ON_WRITE_TOOLS
+        # Plan executing: user already approved the checklist — waive file-write gates.
+        if phase == "executing" and name in _PLAN_EXECUTING_WAIVE_APPROVAL:
+            requires = False
         specs.append(replace(base, requires_approval=requires))
     return specs
 
