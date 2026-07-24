@@ -3,7 +3,8 @@
 > **完整证明（默认）≡ CI**：与 GitHub Actions 同跑 `scripts/ci_proof.sh`（unit + `make gate`）。  
 > **Golden 切片**：对已启动栈点选用例；切片绿 ≠ 合并证明。  
 > 测试核心是结果一致，不是跟手时间。不进写作热路径（见 [13](13-rate-redlines.md) R1–R5）。  
-> **边界**：Ops 是内部后端能力（密钥 URL + api）；与面向用户的 Web / `/workspace` / Work **文件系统隔离**。
+> **边界**：Ops 是内部后端能力（密钥 URL + api）；与面向用户的 Web / `/workspace` / Work **文件系统隔离**。  
+> **观测**：检索审计 → [§6](#6-检索审计观测-hm5--ro1)；模型信封 → [§7](#7-模型信封抽样-hm4) · [33](33-harness-maturity-backlog.md)。
 
 ## 1. 入口
 
@@ -115,3 +116,73 @@ OPS_TEST_SECRET=your-long-random-secret
 Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspace（仅用户侧）、`eval/golden`、**仓库 `/repo`**、Docker socket；api 镜像需含 `docker` CLI。「跑前重建 runtime」与 `suite=ci` 均依赖 socket。
 
 改完 api 后请 `make up-api`（需重建以挂上 `/data` + `/repo`）；web 改完 `make up-web`。
+
+---
+
+## 6. 检索审计观测（HM5 / RO1）
+
+> **状态**：✅ 已落地（2026-07-24）— 事件 `audit` 三层 + Ops API/页；细项持续加厚见 [33](33-harness-maturity-backlog.md) HM5。  
+> **定位**：Ops **观测**能力，与 §2 的 ci/golden **评测**并列；不是替代 `make gate`。
+
+### 6.1 要解决什么
+
+前台 Web Agent / Writing 用户发起的真实 Turn 里，`search_sources` 等检索发生后，研发/Ops 需要回答坏例三问（召回池 / 排序 / 进窗），而不能依赖用户侧栏截图。
+
+### 6.2 谁用、看谁
+
+| | |
+|--|--|
+| **使用者** | 持有 `OPS_TEST_SECRET` 的内部人员（后端观测台） |
+| **被查看对象** | 前台 Web 用户的 Session / Turn（agent 或 writing scenario） |
+| **不是** | 把三层审计默认展示给终端用户；不是改用户 workspace；不是 golden scratch 里的假用户 |
+
+### 6.3 已落地能力
+
+| 能力 | 说明 |
+|------|------|
+| 入口 | `/ops/<secret>/retrieval`（Ops 壳导航「检索审计」） |
+| 浏览 | 默认列出**最近有检索的真实用户 Turn**（query / 命中数 / 时间）；点开看三层 |
+| 精确跳转 | 可选折叠输入 `turn_id`（调试用） |
+| 展示 | L1 `recall_pool` · L2 `ranked` · L3 `entered_context`（含 truncated） |
+| 导出 | 页内「导出当前 JSON」 |
+| API | `GET /api/v1/ops/retrieval/recent` · `GET /api/v1/ops/retrieval/turns/{turn_id}`（Bearer = `OPS_TEST_SECRET`）；只读 |
+| 事件 | `retrieval.completed.payload.audit`（契约已扩）；**不**写入模型 tool_result |
+| 鉴权 / 隔离 | 与 §1 同密钥；只读 DB；禁止写 `/workspace` |
+| 读法 | L1 常宽于 L3；`rank_method` 应为 `lexical`/`none`/`cross_encoder`。若见 `rank_method=hybrid` 且三层同构，曾是 two-level 未传播 ContextVar 的捕获兜底（已修，见 [33](33-harness-maturity-backlog.md) HM5） |
+
+### 6.4 与评测台的关系
+
+```text
+/ops/<secret>/test        → ci-proof / golden（人造用例、私有 scratch）
+/ops/<secret>/retrieval   → 真实前台用户 Turn 的检索可观测（只读）
+```
+
+两者共享密钥与「内部后端」边界；数据面分离（评测 scratch ≠ 用户 Work）。
+
+### 6.5 明确不做
+
+- 在用户工作台导航挂「完整召回池」当默认产品功能  
+- Ops 代用户重跑检索并写回其语料库  
+- 无密钥的公开 debug 页  
+
+## 7. 模型信封抽样（HM4）
+
+> **状态**：✅ 已落地 — 哈希必写 · 全量按采样/高 fill/debug；详见 [33](33-harness-maturity-backlog.md) HM4。
+
+| 能力 | 说明 |
+|------|------|
+| 入口 | `/ops/<secret>/envelopes`（Ops 壳导航「模型信封」） |
+| 浏览 | 默认列出最近有信封落盘的 Turn；点开看哈希 / 全量 |
+| API | `GET /api/v1/ops/envelopes/recent` · `GET /api/v1/ops/envelopes/turns/{turn_id}` |
+| 表 | `model_request_envelopes`（Alembic `0015`） |
+| 写入 | assemble 后异步；不进 SSE / 默认投影 |
+
+与 §6 同密钥、只读；回答「那一步模型看见了什么」。
+
+## 8. Raw 快照只读（HM2）
+
+| 能力 | 说明 |
+|------|------|
+| API | `GET /api/v1/ops/raw/turns/{turn_id}` |
+| 表 | `session_raw_snapshots`（Alembic `0014`） |
+| 纪律 | **永不**把该仓内容直接当作模型窗 |

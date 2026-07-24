@@ -1,10 +1,10 @@
 # 12 — Agent Harness（成熟度总纲）
 
-> **状态**：部分落地（2026-07-13）— **AH1 ✅**；**AH2–AH4 / AH-obs 已落地核心路径**。**下一刀口径（2026-07-21）见 §5.1**：① cache 布局（WT5）② 变短≈压缩 ③ Proof 延迟盯梢——设计/纪律已定，实现按排期。  
+> **状态**：部分落地（2026-07-13）— **AH1 ✅**；**AH2–AH4 / AH-obs 已落地核心路径**。**§5.1**：① WT5/cache 布局经 AQ1/WN3/**HM6** ✅ ② 变短≈压缩经 **HM1/HM3** ✅ ③ Proof 延迟盯梢持续。详见 [33](33-harness-maturity-backlog.md)。  
 > **范围**：**广义 Agent Harness**——包住 frontier model、决定「好不好用」的整层工程：Intake · Context · Tools 执行纪律 · Model · Cancel/超时/watchdog · Eval/SLO 与可观测。  
 > **不在范围**：改写 `AgentEngine` while 语义；恢复固定 pipeline；K8s / MCP / 多租户模型市场；**写作去 AI 腔**（走 writing `system.md`，见 [`14`](14-writing-quality.md)，不塞进 Harness 引擎）。
 
-关联：[`05-agent-runtime.md`](05-agent-runtime.md)（loop 细则）· [`06-tools-and-context.md`](06-tools-and-context.md)（工具与 Context 契约）· [`20`](20-context-compaction-walkthrough.md)（压缩演练）· [`24` §4.6](24-writing-token-economy.md)（WT5）· [ADR-014](adr/014-turn-intake-deterministic.md)（Intake）· [ADR-015](adr/015-interrupt-cancel-resume.md)（Cancel）· [ADR-016](adr/016-execution-timeouts-and-stall-watchdog.md)（超时/watchdog）· [ADR-019](adr/019-model-provider-runtime-config.md)（供应商配置）· [`10-product-experience.md`](10-product-experience.md)（体验 SLO）· [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md)（延迟门禁）。
+关联：[`05-agent-runtime.md`](05-agent-runtime.md)（loop 细则）· [`06-tools-and-context.md`](06-tools-and-context.md)（工具与 Context 契约）· [`20`](20-context-compaction-walkthrough.md)（压缩演练）· [`24` §4.6](24-writing-token-economy.md)（WT5）· [`33`](33-harness-maturity-backlog.md)（**HM 工程完善票**：预压缩 / raw 审计 / 增量摘要 Proof）· [ADR-014](adr/014-turn-intake-deterministic.md)（Intake）· [ADR-015](adr/015-interrupt-cancel-resume.md)（Cancel）· [ADR-016](adr/016-execution-timeouts-and-stall-watchdog.md)（超时/watchdog）· [ADR-019](adr/019-model-provider-runtime-config.md)（供应商配置）· [`10-product-experience.md`](10-product-experience.md)（体验 SLO）· [`11-eval-and-golden-turns.md`](11-eval-and-golden-turns.md)（延迟门禁）。
 
 > **命名说明**：早期文稿称「Model Harness」，仅覆盖模型调用外围。本文升格为 **Agent Harness 总纲**；原 Model 面仍是子轨之一（AH1–AH2、AH4 部分）。细则不合并进本文——`05`/`06`/`11`/`12` 仍是各面权威。
 
@@ -69,7 +69,7 @@ AgentEngine while 语义冻结（ADR-005）
 
 | 面 | 已有 | 缺口 | 分期 |
 |----|------|------|------|
-| **Model** | Provider + factory；ADR-019；**AH1** 重试/策略；**AH2** `cache_control` + usage cache 字段 | **WT5 稳定/易变分家**（写作组装仍易整段 miss）；多 provider failover（延后） | AH1–AH2 ✅；WT5 ⏸ |
+| **Model** | Provider + factory；ADR-019；**AH1** 重试/策略；**AH2** `cache_control` + usage cache 字段 | 多 provider failover（延后） | AH1–AH2 ✅；**WT5/HM6 ✅** |
 | **Context** | compact；**AH3a** project/runtime + `assemble_ms`；**session transcript**（≥80/90/95% 才 collapse/snip/autocompact） | 压缩**质量**（到点折干净）；对齐「变短≈压缩」体感 | AH3a ✅；§5.1.2 |
 | **Intake** | InputCompiler；**AH3b** `@path` 预算预读 | — | AH3b ✅ |
 | **Tools** | 审批、超时；**AH3c** 只读并行 | description 持续 hygiene | AH3c ✅ |
@@ -227,7 +227,7 @@ AgentEngine while 语义冻结（ADR-005）
 ### AH2 — Model：Prompt Cache
 
 1. 稳定前缀（system + 工具定义）打 Anthropic `cache_control` / 兼容 OpenAI-compat  
-2. assemble 保证可缓存前缀跨 Step/Turn **字节稳定**（易变内容后置）— **写作侧完整分家 = WT5（§5.1.1 / `24` §4.6），实现⏸**  
+2. assemble 保证可缓存前缀跨 Step/Turn **字节稳定**（易变内容后置）— **写作/agent 分家 = WT5 / AQ1 / WN3 / HM6 ✅**  
 3. **AH-obs**：`usage.reported` 含 cache 读写 token / hit 指示  
 
 **主改**：providers、`context/engine.py`；WT5 另动 writing 组装。  
@@ -296,7 +296,7 @@ UI 面板可后置；**事件契约先落地**。
 | AH1 ✅ | Gateway 重试 + 生成策略 | `model/*` | Model |
 | AH2 | Prompt cache + usage cache/retry 字段 | providers, context | Model + Proof |
 | AH3a–c | Envelope / 预读 / 只读并行 | context, input_compiler, agent_engine | Context/Intake/Tools |
-| **下一刀** | **§5.1** WT5 → 变短≈压缩 → Proof 延迟 | writing 组装 / context / golden·观测 | Model+Context+Proof |
+| **下一刀** | 细项加厚（golden 剧本、failover）；§5.1 主项已由 HM/AQ/WN 落地 | writing / context / ops | Model+Context+Proof |
 | AH4 | summarizer + token 估计 | compact_summarizer, context | 成本 |
 
 验证：`make runtime-test` · 相关 `make eval-*`（勿把 `eval-all` 当全能闸）· `context.reported` / `usage.reported` · [`10`](10-product-experience.md) / [`11`](11-eval-and-golden-turns.md) 延迟门禁。

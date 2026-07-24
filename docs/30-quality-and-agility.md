@@ -90,7 +90,7 @@ cd services/runtime && python3 -m pytest \
 | 角色卡 / 风格卡约束生成 | Sudowrite Story Bible、Character cards | cards pin ✅(WQ0/WQ1) | 已对齐 |
 | 连续性资料自动维护 | Sudowrite 从章节自动提炼 Story Bible 条目 | cards 全靠 loop 外人工整理 | **缺失 → WN1** |
 | citation-first(答案必须溯源) | NotebookLM 逐句挂 citation | `[cite:]` + `check_citation` ✅ | 已对齐 |
-| 稳定前缀 + 项目知识 pin(cache 友好) | Claude Projects 固定前缀跨对话命中 cache | WT5 设计 ✅ 实现 ⏸([12](12-model-harness.md) §5.1.1 · [24](24-writing-token-economy.md) §4.6) | **缺失 → WN3 / AQ1** |
+| 稳定前缀 + 项目知识 pin(cache 友好) | Claude Projects 固定前缀跨对话命中 cache | WT5/AQ1/WN3/HM6 ✅ | **已覆盖** |
 | 质量回归可测 | 头部产品都有离线 eval 集 | `offline/rubric.py` 已有,维度偏少 | **缺失 → WN2** |
 | 自动串联 polish pipeline | 部分产品自动多 pass | [14](14-writing-quality.md) 已否决(pass 走廊由用户驱动) | **有意否决** |
 | Turn 末强制 judge | 部分产品每轮自评 | 13/14 已否决(多一轮 + 延迟) | **有意否决**(R2) |

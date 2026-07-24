@@ -29,7 +29,8 @@
 | 输出预留 | 16_384 | 给模型输出留空 |
 | `fill_collapse` | 0.80 | ≥80% 触发 **collapse** |
 | `fill_snip` | 0.90 | ≥90% 触发 **snip** |
-| `fill_autocompact` | 0.95 | ≥95% 触发 **autocompact** |
+| `fill_autocompact` | 0.95 | ≥95% 触发 **autocompact**（硬阈值） |
+| `fill_soft_precompact` | 0.78 | ≥78% 在 **Turn 间隙**异步刷新摘要缓存（HM1；0=关） |
 | 热区比例 | 0.35 | collapse 时最近热区约占可用消息预算的 35% |
 | 工具结果字符预算 | 约 4_000 字符 | **budget** 截断单条 tool 结果 |
 
@@ -46,7 +47,9 @@
 | 热区（hot zone） | collapse 保留的**最近一段**消息（tail） |
 | head | collapse 尽量保留的**第一条 user**（初始任务） |
 | middle | 被折叠掉的中间历史 |
-| **模型网关（gateway）** | 运行时用来调主模型（或专用 compact 模型）的调用通道；有它才能「再问一次模型写摘要」 |
+| **软预压缩缓存** | `sessions.context_summary`（`source=soft_precompact`）；硬阈值优先消费（HM1） |
+| **增量摘要** | `next = merge(prev, delta)`；全量仅 `/compact` 或熔断（HM3） |
+| **模型网关（gateway）** | 运行时用来调主模型的通道；硬阈值 **默认不再**同步调 compact LLM（可选开关） |
 
 ### 实现中的真实顺序
 
@@ -56,11 +59,17 @@
 → microcompact（折叠连续工具结果）
 → collapse（fill ≥ 0.80）
 → snip（fill ≥ 0.90，可循环）
-→ autocompact（fill ≥ 0.95；能调模型时先 pending 再 LLM 摘要，否则确定性摘要）
+→ autocompact（fill ≥ 0.95）
+     · pending 时：① 软预压缩缓存 ② 确定性增量摘要
+     · 同步 compact LLM 仅当 context_hard_autocompact_allow_llm=true
 → 物化窗口 → 调模型
+
+Turn 完成间隙（不挡首 token）：
+fill ≥ soft_precompact → 异步 refresh_soft_precompact → 写 context_summary
 ```
 
-> 注意：早期规范文曾把 snip 写在 microcompact 之前；**以当前运行时组装顺序为准**（上表）。
+> 注意：早期规范文曾把 snip 写在 microcompact 之前；**以当前运行时组装顺序为准**（上表）。  
+> HM 细节见 [`33`](33-harness-maturity-backlog.md)。
 
 ---
 

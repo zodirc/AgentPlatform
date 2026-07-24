@@ -1,6 +1,6 @@
 # 24 — 写作 Token 经济（自然交互优先）
 
-> **状态：WT1–WT4 已落地（2026-07-20）；WT5（prompt cache 布局）设计已定、实现延后** · 实现随 writing monofile / work index  
+> **状态：WT1–WT5 已落地（WT5 = AQ1/WN3/HM6 cache 分家）** · 实现随 writing monofile / work index  
 > 前置：[`23-writing-work-model`](23-writing-work-model.md)（作品树 / monofile 已落地）  
 > 对照：[`13-rate-redlines`](13-rate-redlines.md) · [`20-context-compaction-walkthrough`](20-context-compaction-walkthrough.md) · [`14-writing-quality`](14-writing-quality.md) · [`10-product-experience`](10-product-experience.md)  
 > 约束：**不伤交互、不伤速率、不为省钱牺牲成稿效果**；**不为 cache 命中率拆墙**
@@ -197,7 +197,7 @@ notes: <既有摘要 / 用户目标一句>
 | 多作品 Work 表 | 与 token 无关；见 23§11 |
 | 为刷 prompt-cache 命中率牺牲上下文 | 见 §10；得不偿失 |
 
-### 4.6 WT5 — Prompt cache 布局（待落地 · 不拆墙）
+### 4.6 WT5 — Prompt cache 布局（✅ 经 WN3 / AQ1 / HM6）
 
 **观察（2026-07）：** 仪表盘上写作会话常见 **~10–15% prompt cache hit**。主因往往不是「系统坏了」，而是计费输入里大半是 **逐步增长的 messages / tool_results**——本来就不会进稳定前缀 cache。把命中率刷高却多灌上下文，是拆东墙补西墙。
 
@@ -230,7 +230,7 @@ notes: <既有摘要 / 用户目标一句>
 
 **验收：** 同任务「写一章」的 **计费 input / cache miss 绝对量**下降；质量与首 token 不回归。**不**以「命中率 %」为唯一 KPI。
 
-**状态：** 设计已定，实现延后（与 WT1–WT4 解耦；先确认按章装载在实战里生效，再动组装）。
+**状态：** ✅ 已落地（写作 cards/surface → volatile user message；agent 稳定前缀见 [30](30-quality-and-agility.md) AQ1；HM6 对齐）。
 
 ---
 

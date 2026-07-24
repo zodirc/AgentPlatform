@@ -118,6 +118,22 @@ search_records → 结构化业务行（可选；非写作主路径）
 | Recall@k / hit | 期望 path 是否在 top-k |
 | keyword-fallback / index_lag | 降级与索引落后可观测信号 |
 
+### 3.3 检索可观测（HM5 / RO1 ✅）
+
+> **纪律**：可观测真源是 **事件 / 契约**；**主查看面是 Ops 内部观测台**（只读看前台用户 Turn），不是工作台侧栏。只加前台 `RetrievalView` = **假可观测**。详案：**[33](33-harness-maturity-backlog.md) HM5** · 承载面 **[29](29-ops-eval-console.md) §6**。
+
+| 层 | 状态 |
+|----|------|
+| 事件 | `retrieval.completed.payload.audit`：`recall_pool` → `ranked` → `entered_context` |
+| **Ops 观测台** | `/ops/<secret>/retrieval` 按真实用户 `turn_id` 只读查看/导出 |
+| 持久化 | `turn_events`；与用户 `/workspace` 文件系统隔离 |
+| 前台 UI | `RetrievalView` 最终 hits（保持轻量） |
+| 离线效果闸 | `retrieval-bench-prod`（与在线 Turn 审计互补） |
+
+**坏例三问（Ops 导出须能回答）**：召回池有无相关 id？排序是否挤掉？进窗是否截断/id 一致？
+
+服从 [13](13-rate-redlines.md)：轻量字段可随工具返回；重体积异步；不挡首 token；Ops **只读**。
+
 ---
 
 ## 4. 票状态（RE + IX）
@@ -129,6 +145,7 @@ search_records → 结构化业务行（可选；非写作主路径）
 | RE5 | `search_records` 真表 | ⏳ 见 [17](17-search-records.md) |
 | IX0 / IX1 / IX2 / IX3 / IX4 | 启动 sync、Web 同步、目录 watch、上传≠效果闸、prod-bench | ✅ |
 | RQ1 | 检索质量下一刀（切块 / embed 文本 / 分层混合；**不开 CE**） | ✅ **RQ1a–e 已落地**（§9）；大库可切 `vector_heavy` profile |
+| **RO1** | 检索可观测 → **Ops 观测台看前台用户 Turn**（三层审计） | ✅ **已落地**（`retrieval.completed.audit` + `GET /ops/retrieval/turns/{id}` + Ops「检索审计」页）· 详 [33](33-harness-maturity-backlog.md) HM5 · [29](29-ops-eval-console.md) §6 |
 
 ```text
 IX0 ✅ → IX4 ✅ → RQ1（§9：设计已定；实现条件触发）
@@ -138,7 +155,7 @@ IX0 ✅ → IX4 ✅ → RQ1（§9：设计已定；实现条件触发）
       → IX5 / RE4 ✅（个人默认；无 Org）
 ```
 
-**主线：** 质量闸已过；Index plane 自动跟上目录；**RQ1a–e 已落地**（§9）；**IX5/RE4 个人多租户已开闸**（docs/27 MT5c）。
+**主线：** 质量闸已过；Index plane 自动跟上目录；**RQ1a–e 已落地**（§9）；**IX5/RE4 个人多租户已开闸**（docs/27 MT5c）；**RO1/HM5 检索三层审计 → Ops 已落地**（§3.3）。
 
 ---
 

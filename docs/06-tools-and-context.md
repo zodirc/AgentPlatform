@@ -323,7 +323,13 @@ def apply_tool_result_budget(result: ToolResult, budget: int) -> ToolResult:
 
 ### 7.5 autocompact
 
-整体摘要重写，作为窗口将满时的最后兜底。
+窗口将满时的最后兜底（`fill ≥ fill_autocompact`）。默认路径（HM1/HM3）：
+
+1. **优先**消费 Turn 间隙软预压缩写入的 `context_summary` 缓存；  
+2. 缓存未就绪则走 **确定性增量摘要** `merge(prev, delta)`（`incremental_summary_from_messages`）；  
+3. 同步 compact LLM **默认关闭**（`context_hard_autocompact_allow_llm`）；全量重算留给用户 `/compact`。  
+
+原始 messages 另有 append-only `session_raw_snapshots`（HM2），**永不**直接当模型窗。详见 [`20`](20-context-compaction-walkthrough.md) · [`33`](33-harness-maturity-backlog.md)。
 
 ## 8. 上下文工程的性能约束
 
