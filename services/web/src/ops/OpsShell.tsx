@@ -7,6 +7,14 @@ export function opsConsolePath(secret: string): string {
   return `/ops/${encodeURIComponent(secret)}/test`;
 }
 
+export function opsRetrievalPath(secret: string): string {
+  return `/ops/${encodeURIComponent(secret)}/retrieval`;
+}
+
+export function opsEnvelopePath(secret: string): string {
+  return `/ops/${encodeURIComponent(secret)}/envelopes`;
+}
+
 export function opsRunPath(secret: string, runId: string): string {
   return `/ops/${encodeURIComponent(secret)}/test/runs/${runId}`;
 }
@@ -59,6 +67,18 @@ export function OpsShell({
                 className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
               >
                 历史结果
+              </Link>
+              <Link
+                to={opsRetrievalPath(secret)}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+              >
+                检索审计
+              </Link>
+              <Link
+                to={opsEnvelopePath(secret)}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+              >
+                模型信封
               </Link>
               {actions}
             </div>

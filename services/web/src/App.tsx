@@ -5,6 +5,8 @@ import { Button } from "./components/ui/button";
 import { EvalConsolePage } from "./ops/EvalConsolePage";
 import { EvalHistoryPage } from "./ops/EvalHistoryPage";
 import { EvalRunReportPage } from "./ops/EvalRunReportPage";
+import { EnvelopeAuditPage } from "./ops/EnvelopeAuditPage";
+import { RetrievalAuditPage } from "./ops/RetrievalAuditPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
 import { LoginPage } from "./shared/auth/LoginPage";
@@ -33,6 +35,14 @@ function isOpsEvalReportPath(pathname: string): boolean {
 
 function isOpsEvalHistoryPath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/test\/history\/?$/.test(pathname);
+}
+
+function isOpsRetrievalPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/retrieval\/?$/.test(pathname);
+}
+
+function isOpsEnvelopePath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/envelopes\/?$/.test(pathname);
 }
 
 
@@ -304,6 +314,12 @@ export function App() {
   }
   if (isOpsEvalPath(pathname)) {
     return <EvalConsolePage />;
+  }
+  if (isOpsRetrievalPath(pathname)) {
+    return <RetrievalAuditPage />;
+  }
+  if (isOpsEnvelopePath(pathname)) {
+    return <EnvelopeAuditPage />;
   }
   return <AuthenticatedApp />;
 }
