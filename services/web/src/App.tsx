@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
+import { BotMessageSquare, History, Plus } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { EvalConsolePage } from "./ops/EvalConsolePage";
 import { EvalHistoryPage } from "./ops/EvalHistoryPage";
@@ -15,6 +16,10 @@ import {
   WorkbenchSessionProvider,
 } from "./shared/workbench/workbenchSession";
 import { WorkbenchProvider } from "./shared/workbench/workbenchProvider";
+import {
+  AgentPanelProvider,
+  useAgentPanel,
+} from "./shared/workbench/agentPanel";
 
 const SCENARIO_PATHS = ["/writing", "/agent", "/interview"] as const;
 
@@ -110,6 +115,8 @@ function AccountMenu() {
 function Nav() {
   const { pathname } = useLocation();
   const { sessionId, startNewSession, openSession } = useWorkbenchSession();
+  const { open: agentOpen, openPanel, togglePanel, createAgent } =
+    useAgentPanel();
   const [historyOpen, setHistoryOpen] = useState(false);
 
   const copySessionLink = async () => {
@@ -152,11 +159,43 @@ function Nav() {
               <Button
                 type="button"
                 size="sm"
-                variant="outline"
-                className="h-7 border-input px-2 text-xs text-foreground/90"
-                onClick={() => setHistoryOpen(true)}
+                variant="ghost"
+                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                title="历史会话"
+                aria-label="历史会话"
+                onClick={() => {
+                  setHistoryOpen(true);
+                  openPanel();
+                }}
               >
-                历史
+                <History className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className={`h-8 w-8 p-0 hover:text-foreground ${
+                  agentOpen
+                    ? "bg-muted text-foreground"
+                    : "text-muted-foreground"
+                }`}
+                title={agentOpen ? "折叠 Agent 面板" : "打开 Agent 面板"}
+                aria-label={agentOpen ? "折叠 Agent 面板" : "打开 Agent 面板"}
+                aria-pressed={agentOpen}
+                onClick={() => togglePanel()}
+              >
+                <BotMessageSquare className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                title="新建 Agent"
+                aria-label="新建 Agent"
+                onClick={() => void createAgent()}
+              >
+                <Plus className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
@@ -166,15 +205,6 @@ function Nav() {
                 onClick={() => void copySessionLink()}
               >
                 复制链接
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 border-input px-2 text-xs text-foreground/90"
-                onClick={() => void startNewSession()}
-              >
-                新建会话
               </Button>
             </>
           ) : null}
@@ -186,10 +216,12 @@ function Nav() {
         onClose={() => setHistoryOpen(false)}
         onSelect={(id) => {
           setHistoryOpen(false);
+          openPanel();
           void openSession(id);
         }}
         onDeletedCurrent={() => {
           setHistoryOpen(false);
+          openPanel();
           void startNewSession();
         }}
       />
@@ -231,10 +263,12 @@ function AppBody() {
 
   return (
     <WorkbenchProvider key={sessionId ?? "pending"}>
-      <div className="min-h-screen">
-        <Nav />
-        <MainContent />
-      </div>
+      <AgentPanelProvider>
+        <div className="min-h-screen">
+          <Nav />
+          <MainContent />
+        </div>
+      </AgentPanelProvider>
     </WorkbenchProvider>
   );
 }

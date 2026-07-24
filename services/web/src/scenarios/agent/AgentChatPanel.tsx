@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { Plus, X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
@@ -8,6 +9,7 @@ import {
   lastApprovalEvent,
 } from "../../shared/workbench/toolApproval";
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
+import { useChatInputHistory } from "../../shared/workbench/useChatInputHistory";
 import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
 import { SCENARIO_META } from "../../shared/workbench/scenarioMeta";
 import { PlanPanel } from "../../shared/workbench/PlanPanel";
@@ -15,6 +17,7 @@ import { livePlanStep } from "../../shared/workbench/plan";
 import { pathWithSession } from "../../shared/workbench/sessionUrl";
 import { statusLabel } from "../../shared/workbench/subagents";
 import type { SubagentLive } from "../../shared/workbench/subagents";
+import { useAgentPanel } from "../../shared/workbench/agentPanel";
 import type {
   ScenarioId,
   TurnHistoryItem,
@@ -183,29 +186,71 @@ function ScenarioModeSwitch({
   );
 }
 
+function chatTabTitle(wb: WorkbenchState): string {
+  const latest = wb.turnHistory[wb.turnHistory.length - 1];
+  const text = (wb.submittedMessage || latest?.user_input || "").trim();
+  if (!text) return "新对话";
+  const oneLine = text.replace(/\s+/g, " ");
+  return oneLine.length > 20 ? `${oneLine.slice(0, 20)}…` : oneLine;
+}
+
 function ChatTabBar({
   active,
   onSelect,
   subagents,
   onCloseSub,
+  onCloseChat,
+  onNewSession,
+  chatTitle,
 }: {
   active: ChatTab;
   onSelect: (tab: ChatTab) => void;
   subagents: SubagentLive[];
   onCloseSub: (id: string) => void;
+  onCloseChat: () => void;
+  onNewSession: () => void;
+  chatTitle: string;
 }) {
   return (
     <div className="flex min-h-9 shrink-0 items-stretch gap-0 overflow-x-auto border-b border-border bg-muted/20">
-      <button
-        type="button"
-        className={`shrink-0 border-r border-border px-3 py-2 text-xs ${
+      <div
+        className={`group flex max-w-[200px] shrink-0 items-stretch border-r border-border ${
           active === "main"
-            ? "bg-background font-medium text-foreground"
+            ? "bg-background text-foreground"
             : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
         }`}
-        onClick={() => onSelect("main")}
       >
-        主会话
+        <button
+          type="button"
+          className={`truncate px-3 py-2 text-xs ${
+            active === "main" ? "font-medium" : ""
+          }`}
+          title={chatTitle}
+          onClick={() => onSelect("main")}
+        >
+          {chatTitle}
+        </button>
+        <button
+          type="button"
+          className="px-1.5 text-muted-foreground/70 opacity-0 hover:text-foreground group-hover:opacity-100"
+          title="折叠 Agent"
+          aria-label="折叠 Agent"
+          onClick={(e) => {
+            e.stopPropagation();
+            onCloseChat();
+          }}
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <button
+        type="button"
+        className="flex shrink-0 items-center border-r border-border px-2 text-muted-foreground hover:bg-background/60 hover:text-foreground"
+        title="新建会话"
+        aria-label="新建会话"
+        onClick={() => onNewSession()}
+      >
+        <Plus className="h-4 w-4" />
       </button>
       {subagents.map((sub) => {
         const selected = active === sub.subagent_id;
@@ -246,7 +291,7 @@ function ChatTabBar({
                   onCloseSub(sub.subagent_id);
                 }}
               >
-                ×
+                <X className="h-3.5 w-3.5" />
               </button>
             ) : null}
           </div>
@@ -314,6 +359,11 @@ export function AgentChatPanel({
   openSubagentRequest = null,
   onOpenSubagentHandled,
 }: Props) {
+  const { closePanel, createAgent } = useAgentPanel();
+  const inputHistory = useChatInputHistory({
+    sessionKey: wb.sessionId,
+    seedInputs: wb.turnHistory.map((t) => t.user_input),
+  });
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
     | Record<string, unknown>
@@ -367,7 +417,7 @@ export function AgentChatPanel({
     onOpenSubagentHandled?.();
   }, [openSubagentRequest, onOpenSubagentHandled]);
 
-  // If active sub tab disappeared, fall back to main.
+  // If active sub tab disappeared, fall back to the chat tab.
   useEffect(() => {
     if (activeTab === "main") return;
     if (!visibleSubs.some((s) => s.subagent_id === activeTab)) {
@@ -417,6 +467,15 @@ export function AgentChatPanel({
     if (activeTab === id) setActiveTab("main");
   };
 
+  const handleCloseChat = () => {
+    // IDE fold — keep session; reopen via Agent toggle in the nav.
+    closePanel();
+  };
+
+  const handleNewSession = () => {
+    void createAgent();
+  };
+
   return (
     <aside className="flex h-full min-h-0 flex-col border-l border-border bg-background">
       <ChatTabBar
@@ -424,6 +483,9 @@ export function AgentChatPanel({
         onSelect={setActiveTab}
         subagents={visibleSubs}
         onCloseSub={closeSubTab}
+        onCloseChat={handleCloseChat}
+        onNewSession={handleNewSession}
+        chatTitle={chatTabTitle(wb)}
       />
 
       <div
@@ -598,19 +660,27 @@ export function AgentChatPanel({
           <Textarea
             className="min-h-[80px] resize-none text-sm"
             value={wb.message}
-            onChange={(e) => wb.setMessage(e.target.value)}
+            onChange={(e) => {
+              inputHistory.onEdit(e.target.value);
+              wb.setMessage(e.target.value);
+            }}
             placeholder={
               wb.busy || wb.awaitingApproval
                 ? "本轮进行中也可输入，发送后排队…"
                 : placeholderForScenario(wb.scenarioId)
             }
-            onKeyDown={(e) =>
+            title="↑↓ 浏览历史输入"
+            onKeyDown={(e) => {
+              inputHistory.onKeyDown(e, wb.message, wb.setMessage);
               onChatEnterSend(
                 e,
-                () => void wb.handleSend(),
+                () => {
+                  inputHistory.remember(wb.message);
+                  void wb.handleSend();
+                },
                 Boolean(wb.message.trim()),
-              )
-            }
+              );
+            }}
           />
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <Button
@@ -630,7 +700,10 @@ export function AgentChatPanel({
             <Button
               size="sm"
               disabled={!wb.message.trim()}
-              onClick={() => void wb.handleSend()}
+              onClick={() => {
+                inputHistory.remember(wb.message);
+                void wb.handleSend();
+              }}
               title={
                 wb.busy || wb.awaitingApproval
                   ? "加入队列，本轮结束后合并发送"

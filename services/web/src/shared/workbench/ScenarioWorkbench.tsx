@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { BotMessageSquare } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { ErrorBanner } from "./ErrorBanner";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
@@ -13,6 +14,7 @@ import { WorkspaceFileViewer } from "../../scenarios/agent/WorkspaceFileViewer";
 import { ScenarioSidebarExtras } from "../../scenarios/ScenarioSidebarExtras";
 import { RagDebugModal } from "../../scenarios/writing/RagDebugModal";
 import { SourcesLibraryModal } from "../../scenarios/writing/SourcesLibraryModal";
+import { useAgentPanel } from "./agentPanel";
 
 function artifactBadgeCount(
   timelineItems: { tool_name?: string; stream_output?: string }[],
@@ -49,6 +51,7 @@ export function ScenarioWorkbenchView({
   wb,
   fillParent = false,
 }: ViewProps) {
+  const { open: agentOpen, openPanel } = useAgentPanel();
   const [selection, setSelection] = useState<SidebarSelection | null>(null);
   const [artifactsOpen, setArtifactsOpen] = useState(scenarioId !== "agent");
   const [workspaceViewerPath, setWorkspaceViewerPath] = useState<string | null>(
@@ -78,6 +81,10 @@ export function ScenarioWorkbenchView({
   const rootClass = fillParent
     ? "flex h-full min-h-0 flex-col"
     : "flex h-[calc(100vh-49px)] flex-col";
+
+  const mainGridClass = agentOpen
+    ? "grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,380px)] overflow-x-auto"
+    : "flex min-h-0 min-w-0 flex-1 overflow-x-auto";
 
   return (
     <div className={rootClass}>
@@ -166,8 +173,8 @@ export function ScenarioWorkbenchView({
           </div>
         )}
 
-        <div className="grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,380px)] overflow-x-auto">
-          <main className="flex min-h-0 min-w-0 flex-col gap-3 overflow-hidden border-r border-border p-4">
+        <div className={mainGridClass}>
+          <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden border-r border-border p-4">
             <AgentActivityPanel wb={wb} compact />
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentTimelinePanel
@@ -178,16 +185,37 @@ export function ScenarioWorkbenchView({
                   selection?.kind === "timeline" ? selection.index : null
                 }
                 onSelectItem={selectTimelineItem}
-                onOpenSubagent={(id) => setOpenSubagentRequest(id)}
+                onOpenSubagent={(id) => {
+                  openPanel();
+                  setOpenSubagentRequest(id);
+                }}
               />
             </div>
           </main>
 
-          <AgentChatPanel
-            wb={wb}
-            openSubagentRequest={openSubagentRequest}
-            onOpenSubagentHandled={() => setOpenSubagentRequest(null)}
-          />
+          {agentOpen ? (
+            <AgentChatPanel
+              wb={wb}
+              openSubagentRequest={openSubagentRequest}
+              onOpenSubagentHandled={() => setOpenSubagentRequest(null)}
+            />
+          ) : (
+            <div className="flex w-11 shrink-0 flex-col items-center border-l border-border bg-background py-3">
+              <button
+                type="button"
+                className="group flex flex-col items-center gap-2 rounded-md px-1 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                title="展开 Agent"
+                aria-label="展开 Agent"
+                onClick={() => openPanel()}
+              >
+                <BotMessageSquare className="h-4 w-4" />
+                <span className="text-[10px] font-medium tracking-wide">
+                  Agent
+                </span>
+                <span className="text-xs leading-none">‹</span>
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
