@@ -2,7 +2,8 @@
 
 > **完整证明（默认）≡ CI**：与 GitHub Actions 同跑 `scripts/ci_proof.sh`（unit + `make gate`）。  
 > **Golden 切片**：对已启动栈点选用例；切片绿 ≠ 合并证明。  
-> 测试核心是结果一致，不是跟手时间。不进写作热路径（见 [13](13-rate-redlines.md) R1–R5）。
+> 测试核心是结果一致，不是跟手时间。不进写作热路径（见 [13](13-rate-redlines.md) R1–R5）。  
+> **边界**：Ops 是内部后端能力（密钥 URL + api）；与面向用户的 Web / `/workspace` / Work **文件系统隔离**。
 
 ## 1. 入口
 
@@ -31,7 +32,7 @@
 - **live 模型**：页面内评测专用 provider / base_url / model / api_key；**不**写入用户「设置 → 模型」。
 - **用例**：扫描 `eval/golden/**/*.yaml`；可按 scenario / tag 过滤；每条 `pending → running → pass | fail | skipped`。
 - **重启**：默认**不**重建容器。高级选项「跑前重建 runtime」在挂载 Docker socket + api 含 docker CLI 时可用。
-- **工作区**：每次 run 使用 `/workspace/.ops-eval/<run_id>/<case_id>/` 临时子目录。
+- **工作区**：后端私有 scratch（默认 `/data/ops-eval/<run_id>/<case_id>/`，与用户 `/workspace` / Work 无关）；run 结束删除。
 - **输出页** / **历史**：同完整证明。
 
 ### 2.2 结果态：`skipped` ≠ 失败（仅 golden）
@@ -102,6 +103,7 @@ Runtime 用 ContextVar（`turn_override`）绑定本 Turn 的 mode/override。�
 OPS_TEST_SECRET=your-long-random-secret
 # optional absolute host checkout path if inspect fails
 # OPS_EVAL_REPO_HOST_PATH=/absolute/path/to/agent
+# OPS_EVAL_WORKSPACE_ROOT=/data/ops-eval   # golden 私有 scratch（agent_data）；勿放用户 workspace
 ```
 
 | 行为 | 说明 |
@@ -110,6 +112,6 @@ OPS_TEST_SECRET=your-long-random-secret
 | 不覆盖 | 已有非空值保持不变，URL 稳定 |
 | 关闭评测台 | 设 `OPS_TEST_SECRET=`（空字符串，键仍在）并 `make up-api`；ensure **不会**再回填 |
 
-Compose 为 api 挂载 workspace、`eval/golden`、**仓库 `/repo`**、Docker socket；api 镜像需含 `docker` CLI。「跑前重建 runtime」与 `suite=ci` 均依赖 socket。
+Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspace（仅用户侧）、`eval/golden`、**仓库 `/repo`**、Docker socket；api 镜像需含 `docker` CLI。「跑前重建 runtime」与 `suite=ci` 均依赖 socket。
 
-改完 api 后请 `make up-api`（需重建以挂上 `/repo`）；web 改完 `make up-web`。
+改完 api 后请 `make up-api`（需重建以挂上 `/data` + `/repo`）；web 改完 `make up-web`。

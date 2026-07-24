@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import shutil
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -622,6 +623,20 @@ async def _execute_ci_run(run: EvalRun) -> None:
         run.error = "one_or_more_ci_steps_failed"
 
 
+def _ops_run_workspace(run_id: str) -> Path:
+    """Private backend scratch — not under user WORKSPACE_ROOT (docs/29)."""
+    return Path(settings.ops_eval_workspace_root) / run_id
+
+
+def _cleanup_ops_run_workspace(workspace_root: Path | None) -> None:
+    if workspace_root is None or not workspace_root.exists():
+        return
+    try:
+        shutil.rmtree(workspace_root, ignore_errors=False)
+    except OSError:
+        logger.warning("ops eval workspace cleanup failed path=%s", workspace_root, exc_info=True)
+
+
 async def _execute_run(run_id: str) -> None:
     run = _RUNS.get(run_id)
     if run is None:
@@ -630,6 +645,7 @@ async def _execute_run(run_id: str) -> None:
     await _publish(run, {"kind": "run_started", "run_id": run.id, "suite": run.suite})
     await persist_run(run)
 
+    workspace_root: Path | None = None
     try:
         if run.suite == "ci":
             await _execute_ci_run(run)
@@ -642,7 +658,7 @@ async def _execute_run(run_id: str) -> None:
             await asyncio.to_thread(recreate_runtime)
             await _publish(run, {"kind": "log", "message": "runtime recreated"})
 
-        workspace_root = Path(settings.workspace_root) / ".ops-eval" / run.id
+        workspace_root = _ops_run_workspace(run.id)
         workspace_root.mkdir(parents=True, exist_ok=True)
         from app.services.ops.eval_assert import _ensure_runtime_writable
 
@@ -789,6 +805,7 @@ async def _execute_run(run_id: str) -> None:
         run.status = "failed"
         run.error = str(exc)
     finally:
+        _cleanup_ops_run_workspace(workspace_root)
         run.finished_at = datetime.now(timezone.utc).isoformat()
         run.model = None
         await _publish(

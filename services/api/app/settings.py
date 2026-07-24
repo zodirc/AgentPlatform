@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     works_claim_legacy_workspace: bool = True
     # docs/29 — Ops Eval Console (empty = routes disabled)
     ops_test_secret: str = ""
+    # Backend-private scratch for golden cases (not under user WORKSPACE_ROOT).
+    ops_eval_workspace_root: str = "/data/ops-eval"
     ops_eval_golden_dir: str = "/app/eval/golden"
     ops_eval_compose_file: str = "/app/deploy/docker-compose.yml"
     ops_eval_compose_project_dir: str = "/app"

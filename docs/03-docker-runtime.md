@@ -305,8 +305,8 @@ Dockerfile 见 **`services/web/Dockerfile`**（多阶段 build → nginx）。
 | 卷名 | 挂载点 | 内容 |
 |------|--------|------|
 | `pg_data` | postgres | 资源表、事件日志、projection、outbox |
-| `agent_data` | runtime `/data` | 向量库、产物、模型缓存、日志 |
-| 宿主机路径 `WORKSPACE_HOST_PATH` | runtime `/workspace` | **用户代码库**（工具沙箱） |
+| `agent_data` | runtime + api `/data` | 向量库、产物、模型缓存、日志；ops golden scratch（`/data/ops-eval`） |
+| 宿主机路径 `WORKSPACE_HOST_PATH` | runtime `/workspace` | **用户代码库**（工具沙箱；不含 ops） |
 | `caddy_data` | gateway | TLS 自动证书存储 |
 
 **备份策略** 文档约定：`pg_data` 与 `agent_data` 定期快照。
@@ -436,8 +436,10 @@ services:
 /workspace/     # bind mount；WORKSPACE_ROOT；工具沙箱根
   # writing: outline.md, sections/, sources/（见 09-product-modes）
   # agent: 任务文件 / 仓库
-/data/            # agent_data 卷
+/data/            # agent_data 卷（runtime + api）
   artifacts/{turn_id}/
+  works/{work_id}/  # 用户 Work 隔离根（docs/27）
+  ops-eval/         # Ops golden 私有 scratch（docs/29；run 结束删除）
   vectorstore/    # Phase 2+ profile
   models/         # Phase 2+ profile
   logs/
