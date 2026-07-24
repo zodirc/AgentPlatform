@@ -23,6 +23,16 @@
 
 **核验补丁（2026-07-24）**：stub `run_tests` 收尾加意图门闩；WN1 改 `create_task` 不挡 finalize；checkpoint 持久化/恢复 `volatile_context`，内存 pending 优先于 checkpoint。
 
+**实迹跟进（2026-07-24 · 单文件优化轨迹）**：
+
+| 问题 | 优化 | 约束 |
+|------|------|------|
+| shell `head`/`sed` 当读文件 | `read_file`：`offset`/`limit`、`truncated`/`next_offset`、`(complete)` summary | 不改 loop；不硬禁 shell |
+| complete 后仍分段读；propose 空转再 edit | `agent/system.md` 回路+Ban；默认 `edit_file`；rubric 增 `read_thrift`/`single_edit_path` | 纯 prompt/离线 |
+| 「计划自动跑」却逐步批编辑 | 进度 vs Plan 文案分家；`executing` 放行写盘；同回合写盘粘性 | 不静默变轨；Shell 仍批 |
+| 进度面板占位大 | PlanPanel 可折叠 | Web only |
+| 文案已更新仍一直弹批 | 须 `make up-runtime`（粘性在 runtime） | 部署纪律 |
+
 ```bash
 cd services/runtime && python3 -m pytest \
   tests/test_agent_prefix_stability.py \
@@ -30,11 +40,14 @@ cd services/runtime && python3 -m pytest \
   tests/test_eval_rubric.py \
   tests/test_gateway_stub.py \
   tests/test_writing_prefix_stability.py \
-  tests/test_plan_phase.py -q
+  tests/test_plan_phase.py \
+  tests/test_tools_extended.py \
+  tests/test_tool_executor.py \
+  tests/test_checkpoint_volatile.py -q
 # golden: eval/golden/agent/10_patch_then_lints.yaml
 ```
 
-落地索引：`scenarios/agent/system.md` · `tools/bootstrap.py` · `writing/cards.py`（stable/volatile 分家）· `writing/continuity.py`（WN1 pending）· `context/engine.py`（`[writing_context]` 后置）· `plan_phase.plan_phase_block` · `PendingTurn.volatile_context` · `retrieval/chunking.py`（CQ4 代码切块）· `offline/rubric.py` · `eval/golden/agent/10–12_*.yaml` · stub `agent.10–12`。
+落地索引：`scenarios/agent/system.md` · `tools/bootstrap.py` · `tools/core/tools.py`（read 续读）· `tools/registry.py`（`WRITE_APPROVAL_STICKY_TOOLS`）· `writing/cards.py`（stable/volatile 分家）· `writing/continuity.py`（WN1 pending）· `context/engine.py`（`[writing_context]` 后置 + 写盘粘性）· `plan_phase.plan_phase_block` · `PendingTurn.volatile_context` · `retrieval/chunking.py`（CQ4 代码切块）· `offline/rubric.py` · `eval/golden/agent/10–12_*.yaml` · stub `agent.10–12` · Web `PlanPanel` / `plan.ts` / `toolApproval.ts`。
 
 ---
 
