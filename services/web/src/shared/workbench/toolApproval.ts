@@ -21,8 +21,9 @@ export function approvalCopy(toolName: string | null | undefined): {
   if (kind === "write_file") {
     return {
       title: "待审批：写文件",
-      description: "Agent 要把内容写入磁盘，需要你批准才会执行。",
-      approveLabel: "批准写文件",
+      description:
+        "Agent 要把内容写入磁盘。批准后，本回合内后续写盘/编辑将不再询问（Shell 命令仍单独审批）。",
+      approveLabel: "批准写文件（本回合后续免批）",
     };
   }
   if (kind === "run_command") {
@@ -36,8 +37,9 @@ export function approvalCopy(toolName: string | null | undefined): {
   if (kind === "edit_file") {
     return {
       title: "待审批：编辑文件",
-      description: "Agent 要修改已有文件内容，需要你批准才会执行。",
-      approveLabel: "批准编辑",
+      description:
+        "Agent 要修改已有文件。批准后，本回合内后续写盘/编辑将不再询问（Shell 命令仍单独审批）。",
+      approveLabel: "批准编辑（本回合后续免批）",
     };
   }
   if (kind === "run_tests") {

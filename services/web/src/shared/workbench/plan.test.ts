@@ -4,6 +4,7 @@ import {
   currentPlanStep,
   evaluatePlanSuggest,
   executePlanMessage,
+  isFormalPlanPhase,
   isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
   livePlanStep,
@@ -11,6 +12,8 @@ import {
   planHasOpenItems,
   planHasStaleInProgress,
   planIsProposedOnly,
+  planPanelSummaryDisplay,
+  planPanelTitle,
   PLAN_SUGGEST_COOLDOWN_MS,
   shouldSuggestPlanMode,
 } from "./plan";
@@ -75,6 +78,19 @@ describe("plan helpers", () => {
   it("execute CTA uses a short user-facing message", () => {
     expect(executePlanMessage()).toBe("按此执行");
     expect(executePlanMessage("先做第一步")).toBe("先做第一步");
+  });
+
+  it("labels ordinary checklist as progress, formal phase as plan", () => {
+    expect(isFormalPlanPhase("off")).toBe(false);
+    expect(isFormalPlanPhase("executing")).toBe(true);
+    expect(planPanelTitle("off")).toBe("任务进度");
+    expect(planPanelTitle("ready")).toBe("任务计划");
+    expect(planPanelSummaryDisplay("Plan with 5 item(s)", "off")).toBe(
+      "进度 · 5 项",
+    );
+    expect(planPanelSummaryDisplay("Plan with 5 item(s)", "executing")).toBe(
+      "Plan with 5 item(s)",
+    );
   });
 });
 

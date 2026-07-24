@@ -28,10 +28,39 @@ export type PlanPhase = "off" | "planning" | "ready" | "executing";
 
 export const PLAN_PHASE_LABEL: Record<PlanPhase, string> = {
   off: "",
-  planning: "",
-  ready: "",
-  executing: "",
+  planning: "规划中 · 仅列步骤，不改文件",
+  ready: "待确认 · 同意后按清单执行",
+  executing: "执行中 · 清单内写盘已授权",
 };
+
+/** Formal Plan mode vs ordinary Agent progress checklist (Cursor Todo vs Plan). */
+export function isFormalPlanPhase(planPhase: PlanPhase | undefined | null): boolean {
+  return planPhase === "planning" || planPhase === "ready" || planPhase === "executing";
+}
+
+export function planPanelTitle(planPhase: PlanPhase | undefined | null): string {
+  return isFormalPlanPhase(planPhase) ? "任务计划" : "任务进度";
+}
+
+/** Soften backend plan/progress summary for ordinary Agent checklists. */
+export function planPanelSummaryDisplay(
+  summary: string | undefined,
+  planPhase: PlanPhase | undefined | null,
+): string {
+  const raw = String(summary ?? "").trim();
+  if (!raw) return "";
+  if (isFormalPlanPhase(planPhase)) return raw;
+  const progress = /^(?:Plan|Progress) with (\d+) item\(s\)(.*)$/i.exec(raw);
+  if (progress) {
+    const n = progress[1];
+    const rest = (progress[2] || "").trim();
+    return rest ? `进度 · ${n} 项 ${rest}` : `进度 · ${n} 项`;
+  }
+  if (/^Plan with /i.test(raw)) {
+    return raw.replace(/^Plan with /i, "进度 · ");
+  }
+  return raw;
+}
 
 export {
   clearPlanSuggestDismissedAt,
