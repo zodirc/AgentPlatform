@@ -1,6 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
+import { Download } from "lucide-react";
 import { useCallback, useState } from "react";
-import { fetchWorkspaceEntries } from "../../shared/api/client";
+import {
+  downloadWorkspaceFile,
+  fetchWorkspaceEntries,
+} from "../../shared/api/client";
 import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
 import {
   workspaceEntryIcon,
@@ -146,6 +150,20 @@ function TreeNode({
             ) : null}
           </span>
         </button>
+        {!multiSelectMode ? (
+          <button
+            type="button"
+            className="shrink-0 rounded p-0.5 text-muted-foreground/70 hover:bg-muted hover:text-foreground"
+            title="下载"
+            aria-label={`下载 ${name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              void downloadWorkspaceFile(path);
+            }}
+          >
+            <Download className="h-3 w-3" />
+          </button>
+        ) : null}
       </div>
     );
   }

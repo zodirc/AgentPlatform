@@ -76,6 +76,30 @@ async def read_file(*, path: str, tenant: dict[str, str] | None = None) -> dict:
     return resp.json()
 
 
+async def download_file_stream(
+    *,
+    path: str,
+    tenant: dict[str, str] | None = None,
+):
+    """Stream raw bytes from runtime download (caller owns response lifecycle)."""
+    base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
+    client = httpx.AsyncClient(timeout=120.0)
+    req = client.build_request(
+        "GET",
+        f"{base}/internal/workspace/download",
+        params=params,
+        headers={"X-Internal-Token": settings.internal_service_token},
+    )
+    resp = await client.send(req, stream=True)
+    if resp.status_code >= 400:
+        body = (await resp.aread()).decode("utf-8", errors="replace")
+        await resp.aclose()
+        await client.aclose()
+        raise WorkspaceProxyError(resp.status_code, body)
+    return client, resp
+
+
 async def upload_source(
     *,
     filename: str,

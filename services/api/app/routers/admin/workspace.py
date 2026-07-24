@@ -48,6 +48,40 @@ async def read_workspace_file(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/download")
+async def download_workspace_file(
+    request: Request,
+    path: str = Query(min_length=1),
+    work_id: UUID | None = Query(default=None),
+):
+    """Download a workspace file (manuscript, exports, sources/seed, …) as attachment."""
+    from fastapi.responses import StreamingResponse
+
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        client, upstream = await workspace_svc.download_file_stream(
+            path=path, tenant=tenant
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+    media_type = upstream.headers.get("content-type") or "application/octet-stream"
+    disposition = upstream.headers.get("content-disposition")
+    headers: dict[str, str] = {}
+    if disposition:
+        headers["Content-Disposition"] = disposition
+
+    async def body():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(body(), media_type=media_type, headers=headers)
+
+
 @router.post("/entries/delete")
 async def delete_workspace_entries(
     request: Request,

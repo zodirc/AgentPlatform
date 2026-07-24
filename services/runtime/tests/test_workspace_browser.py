@@ -27,6 +27,26 @@ async def test_read_workspace_file_returns_full_manuscript(workspace) -> None:
     assert ui_view.get("truncated_to_index") is not True
 
 
+def test_resolve_download_target_returns_file(workspace) -> None:
+    from app.services.workspace_download import resolve_download_target
+
+    target = workspace / "exports" / "out.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("takeaway", encoding="utf-8")
+
+    resolved = resolve_download_target("exports/out.md")
+    assert resolved == target.resolve()
+    assert resolved.read_text(encoding="utf-8") == "takeaway"
+
+
+def test_resolve_download_target_rejects_directory(workspace) -> None:
+    from app.services.workspace_download import resolve_download_target
+
+    (workspace / "exports").mkdir()
+    with pytest.raises(ValueError, match="only files"):
+        resolve_download_target("exports")
+
+
 def test_safe_source_filename_rejects_traversal() -> None:
     with pytest.raises(ValueError):
         safe_source_filename("../evil.md")

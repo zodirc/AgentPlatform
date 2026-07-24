@@ -2,7 +2,7 @@
 
 > **状态**：执行中（2026-07-24）— **E1–E4 + PR2（shell 出站）✅**；PR1/SW1/SB4/SB5/PR3 待续。  
 > **本模块维护**：威胁枚举（SE）· 隔离加固（SB）· 密钥/出站脱敏加固（PR）· 敏感词钩子（SW，配置暂空）· **执行方案（§10）**。  
-> **关联**：[03](03-docker-runtime.md) §8（工作区/沙箱）· [06](06-tools-and-context.md) · [13](13-rate-redlines.md) R1–R5 · [27](27-multi-tenancy.md) · [21](21-agent-system-qa.md) Q11 · 现有 `privacy/redact.py` · `privacy/secret_scan.py` · `tools/core/shell.py`。  
+> **关联**：[03](03-docker-runtime.md) §8（工作区/沙箱）· [06](06-tools-and-context.md) · [13](13-rate-redlines.md) R1–R5 · [27](27-multi-tenancy.md) · [21](21-agent-system-qa.md) Q11 · [32](32-execution-plane-and-local-runner.md)（可选本地执行面 · 待决）· 现有 `privacy/redact.py` · `privacy/secret_scan.py` · `tools/core/shell.py`。  
 > **纪律**：不另开 `*-execution` 平行文；排期与 DoD 只维护在本文 §10。
 
 ---

@@ -509,6 +509,56 @@ export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
   return res.json();
 }
 
+function basenameFromPath(path: string): string {
+  const parts = path.replace(/\\/g, "/").split("/");
+  return parts[parts.length - 1] || "download";
+}
+
+function filenameFromContentDisposition(header: string | null): string | null {
+  if (!header) return null;
+  const star = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].trim());
+    } catch {
+      // fall through
+    }
+  }
+  const plain =
+    /filename\s*=\s*"([^"]+)"/i.exec(header) ||
+    /filename\s*=\s*([^;]+)/i.exec(header);
+  return plain?.[1]?.trim() ?? null;
+}
+
+/** Download a Work file (manuscript, exports, sources/seed, …) via browser save dialog. */
+export async function downloadWorkspaceFile(path: string): Promise<void> {
+  const params = new URLSearchParams({ path });
+  const res = await fetch(`${API_BASE}/admin/workspace/download?${params}`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`downloadWorkspaceFile failed: ${res.status} ${detail}`);
+  }
+  const blob = await res.blob();
+  const name =
+    filenameFromContentDisposition(res.headers.get("Content-Disposition")) ||
+    basenameFromPath(path);
+  const url = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 export type WorkspaceDeleteResult = {
   deleted: string[];
   failed: Array<{ path: string; error: string }>;

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
+  Download,
   Search,
   X,
 } from "lucide-react";
@@ -14,7 +15,10 @@ import {
   type ReactNode,
 } from "react";
 import { Input } from "../../components/ui/input";
-import { fetchWorkspaceFile } from "../../shared/api/client";
+import {
+  downloadWorkspaceFile,
+  fetchWorkspaceFile,
+} from "../../shared/api/client";
 import { workspaceEntryIcon } from "./workspaceFileIcon";
 
 type Props = {
@@ -85,6 +89,8 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["workspace-file-viewer", path],
@@ -160,6 +166,19 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [path, onClose, searchOpen, openSearch, goNext, goPrev]);
 
+  const onDownload = useCallback(async () => {
+    if (!path || downloading) return;
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      await downloadWorkspaceFile(path);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDownloading(false);
+    }
+  }, [path, downloading]);
+
   if (!path) return null;
 
   const truncated = Boolean(data?.content?.includes("\n...[truncated]"));
@@ -191,7 +210,20 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
               {fileName}
             </p>
             <p className="truncate text-xs text-muted-foreground">{path}</p>
+            {downloadError ? (
+              <p className="truncate text-xs text-destructive">{downloadError}</p>
+            ) : null}
           </div>
+          <button
+            type="button"
+            className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+            onClick={() => void onDownload()}
+            disabled={downloading}
+            title="下载到本地"
+            aria-label="下载文件"
+          >
+            <Download className="h-4 w-4" />
+          </button>
           <button
             type="button"
             className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"

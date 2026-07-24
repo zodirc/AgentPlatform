@@ -265,6 +265,53 @@ async def workspace_file(
     return result
 
 
+@workspace_router.get("/download")
+async def workspace_download(
+    path: str,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """Raw file bytes for Web takeaway (docs/32). Respects Work root + visibility_seed."""
+    import mimetypes
+    from urllib.parse import quote
+
+    from fastapi.responses import FileResponse
+
+    from app.services.workspace_download import resolve_download_target
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    if not path or path == ".":
+        raise HTTPException(status_code=400, detail="path is required")
+    try:
+        with workspace_tenant_scope(
+            **_tenant_query(work_id, work_root, owner_user_id, visibility_seed)
+        ):
+            target = resolve_download_target(path)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    media_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    filename = target.name
+    # RFC 5987 for non-ASCII names (Chinese manuscript titles, etc.).
+    disposition = (
+        f"attachment; filename=\"{filename.encode('ascii', 'replace').decode('ascii')}\"; "
+        f"filename*=UTF-8''{quote(filename)}"
+    )
+    return FileResponse(
+        path=target,
+        media_type=media_type,
+        filename=filename,
+        headers={"Content-Disposition": disposition},
+    )
+
+
 class WorkspaceWriteBody(BaseModel):
     path: str = Field(min_length=1)
     content: str = ""
