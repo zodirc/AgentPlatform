@@ -13,7 +13,7 @@ Priority when rules conflict: **user intent this Turn > Ban list > minimal diff 
 
 ## Ban: anti-patterns（同 Turn 内禁止）
 
-- **Shell as a pager:** `run_command` with `cat`, `head`, `tail`, `sed -n`, `awk`, `less`, or `wc` on a source file. Use `read_file` / `grep` instead. Continuation = `read_file(offset=next_offset)`, never shell.
+- **Shell as a pager:** Do not use `run_command` with `cat`/`head`/`tail`/`sed -n`/`awk`/`less`/`wc` **to page a source file you should open with `read_file`**. Those commands remain fine for builds, installs, scripts, and non-pager pipelines. For symbol/string search prefer the **`grep` tool** (not shell-grep-as-pager). Continuation of a large file = `read_file(offset=next_offset)`, never shell slices.
 - **Read-after-complete:** any further `read_file` on the same path after `truncated=false` / `(complete)`, including with a new `limit` or `offset` — unless a patch/edit just failed and you must re-read that path once.
 - **Limit paging a complete file:** do not call `read_file` with `limit` after you already received a complete read of that path.
 - **Propose-then-redo:** a streak of `propose_patch` followed by re-doing the same edits via `edit_file`. Pick **one** path: default `edit_file`.

@@ -191,59 +191,77 @@
 
 ---
 
-#### 2. 为什么「用 shell 当 pager」是坏事？
+#### 2. 为什么「用 shell 当 pager」是坏事？（不是废止这些命令）
 
-**Shell pager** = 用终端命令把源码「翻页」读出来，例如：
+**没有废止** `sed` / `cat` / `wc` / `grep`。废止的是一种 **用法**：**用 shell 把源码当书一页页翻**（shell as a pager），去代替平台的 `read_file`。
+
+| | 允许 / 推荐 | 禁止（本次 Ban） |
+|--|-------------|------------------|
+| **读已知源码文件的正文** | 工具 **`read_file`**（大文件用续读，见下节） | `run_command` 里 `cat`/`head`/`tail`/`sed -n …p` 切同一源码文件 |
+| **按符号/字符串查找** | 工具 **`grep`**（或 `search_codebase`） | 为了「把整文件读进上下文」而 `grep -n '.' file \| sed …` 假分页 |
+| **行数/体积只是好奇** | 一般不需要；真要统计可用工具结果里的 `total_lines` | 为了决定「还要不要再读」而反复 `wc` |
+| **构建 / 安装 / 测试 / 管道处理非「翻源码」** | `run_command` 正常用（含脚本里合理的 `sed`/`grep`） | — |
+
+**Shell pager** = 典型坏用法示例：
 
 ```text
 head -80 f.html
 sed -n '80,130p' f.html
-grep -n '.' f.html | sed -n '130,180p'
-wc -l f.html
+grep -n '.' f.html | sed -n '130,180p'   # 假装翻页读全文
+wc -l f.html                               # 只为了再决定切下一段
 ```
 
-我们认为这是坏路径，不是「shell 一律坏」，而是 **用错场景**：
+为什么这种用法坏（命令本身可以很好）：
 
 | 坏处 | 说明 |
 |------|------|
-| **步数与 token 暴涨** | 一页一页切，同一文件可能烧十几次工具回合；输入上下文被重复碎片占满 |
-| **上下文破碎** | 每段只有局部行号切片，模型更难形成「整文件结构」；还容易漏改耦合处 |
-| **与专用读工具抢语义** | 平台已有 `read_file` / `grep`；shell 分页绕开统一截断、摘要、续读约定 |
-| **假问题驱动** | 界面摘要像截断 → 模型以为文件没读完 → 更拼命 `sed`，形成空转正反馈 |
-| **审批与风险错位** | Agent 下 `run_command` 常要人批；本该一次读文件，却变成多次「批 shell」打断 |
+| **步数与 token 暴涨** | 一页一页切，同一文件可能烧十几次工具回合；上下文被碎片占满 |
+| **上下文破碎** | 每段只有局部切片，难形成整文件结构，易漏改耦合处 |
+| **绕开统一读契约** | 平台 `read_file` 有 `truncated`/`next_offset`/`(complete)`；shell 切片没有这套状态机 |
+| **假问题驱动** | 界面摘要像截断 → 以为没读完 → 更拼命 `sed` |
+| **审批错位** | Agent 下 `run_command` 常要人批；本该一次读文件，变成多次批 shell |
 
-**Shell 该干什么：** 构建、安装、跑测试、看命令 stdout。  
-**Shell 不该干什么：** 代替 `read_file` 去翻正在改的源码。
+**一句话：** 命令还在；**禁止的是「用它们代替 read_file 翻正在改的源码」**。  
+`grep` 作为 **平台工具** 仍然是一等公民（找符号/字符串）；shell 里的 `grep`/`sed` 留给构建脚本、日志、数据管道等，而不是读 `2048.html` 正文。
 
 ---
 
-#### 3. `truncated` / `next_offset` / `total_lines` 是干什么的？
+#### 3. `truncated` / `next_offset` / `total_lines` 是干什么的？大文件怎么办？
 
-这是给模型的 **读文件状态机字段**（人话：告诉你「读完没有、从哪续」）。不要把它们当成「请继续测绘」的邀请函。
+这是给模型的 **读文件状态机字段**（告诉你「读完没有、从哪续」）。不要把它们当成「请继续用 shell 测绘」的邀请函。
 
 | 字段 | 含义 | 模型该怎么用 |
 |------|------|----------------|
-| **`total_lines`** | 文件一共多少行 | 用来判断范围；和 `end_line` 对比就知道是否读到尾 |
-| **`truncated`** | 这次返回 **是否还没覆盖到文件末尾**（或单行超预算被夹断） | `false` → **停读，去编辑**；`true` → 只允许按下面续读 |
-| **`next_offset`** | 若还没读完，下一次应从第几行接着读（1-based） | **只能**再调 `read_file(path, offset=next_offset)`；禁止改用 `sed` |
-| **summary 里的 `(complete)`** | 人机可读的「整文件已在本次结果里」 | 与 `truncated=false` 同义信号；看到就不要再对同 path 开读 |
+| **`total_lines`** | 文件一共多少行 | 判断范围；和本次 `end_line` 对比就知道是否读到尾 |
+| **`truncated`** | 这次返回是否还没覆盖到文件末尾（或单行超预算被夹断） | `false` → **停读，去编辑**；`true` → 只允许按下面续读 |
+| **`next_offset`** | 若还没读完，下一次应从第几行接着读（1-based） | **再调** `read_file(path, offset=next_offset)`；**不要**改用 `sed` |
+| **summary 里的 `(complete)`** | 人机可读的「整文件已在本次结果里」 | 与 `truncated=false` 同义；看到就不要再对同 path 开读 |
 
-可选参数（给真大文件，不是给小文件找事）：
+可选参数：
 
 | 参数 | 含义 | 默认建议 |
 |------|------|----------|
 | **`offset`** | 从第几行开始读 | 省略 = 从 1 |
-| **`limit`** | 最多读多少行 | **小文件省略**；不要用 limit 把已 complete 的文件再切碎 |
+| **`limit`** | 最多读多少行 | **小文件省略**；真大文件可按需带，或跟着 `next_offset` 窗口走 |
 
-**正确续读：**
+**大文件（这才是 `offset`/`limit` 的正当场景）：**
 
 ```text
-read_file(path)                    → truncated=true, next_offset=201, total_lines=500
-read_file(path, offset=201)        → truncated=false, (complete)
-→ 开始 edit_file / 补丁
+read_file(path)                         → 若超字符预算：truncated=true, next_offset=K, total_lines=N
+read_file(path, offset=K)               → 继续；直到 truncated=false / (complete)
+→ 对已看到的相关段做 edit_file（唯一 span）
 ```
 
-**错误用法：** 已经 `(complete)` 还 `read_file(path, limit=50)` 再摸一遍——这是新版「伪 shell 分页」。
+仍 **不要** 对大文件改用 `sed` 分页：续读必须走同一工具，才能保持「读到哪了」的状态一致。  
+若只需要找某个符号、不想读全文：用平台 **`grep`**，而不是把大文件切成 shell 碎片。
+
+**正确续读 vs 错误测绘：**
+
+```text
+✓ read_file → truncated=true, next_offset=201 → read_file(offset=201) → complete → edit
+✗ read_file → (complete) 后还 limit=50 再摸
+✗ read_file 后改 sed -n / head / wc 翻同一源码
+```
 
 ---
 
@@ -256,7 +274,7 @@ read_file(path, offset=201)        → truncated=false, (complete)
 
 | Ban 项 | 禁止什么 | 唯一例外 |
 |--------|----------|----------|
-| **Shell as a pager** | 用 `cat`/`head`/`tail`/`sed -n`/`awk`/`less`/`wc` 读正在改的源码 | 无；续读只用 `read_file` |
+| **Shell as a pager** | 用 `cat`/`head`/`tail`/`sed -n`/… **代替 `read_file` 翻源码** | 构建/脚本/管道里合理使用这些命令；找符号用平台 **`grep` 工具**；大文件续读用 `next_offset` |
 | **Read-after-complete** | 同 Turn 对同一 path，在已 `truncated=false` / `(complete)` 后再 `read_file`（含换 `limit`/`offset`） | 补丁/编辑刚失败，必须重读当前文件一次 |
 | **Propose-then-redo** | 连发一串 `propose_patch`，文件未变，再用 `edit_file` 把同一套改动重做 | 无；一开始就选对主路径 |
 | **Full-file rewrite** | 已有文件直接 `write_file` 整份盖写 | 用户明确要求整文件替换 / rewrite |

@@ -516,8 +516,10 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Execute a shell command in the workspace (requires approval). Use for "
                 "builds, installs, or non-standard checks whose stdout is needed. "
-                "FORBIDDEN for reading/paging source files: do not run cat, head, tail, "
-                "sed -n, awk, less, or wc on files you should open with read_file/grep. "
+                "FORBIDDEN for paging source files as a substitute for read_file: do not run "
+                "cat, head, tail, sed -n, awk, less, or wc just to flip through code you should "
+                "open with read_file (or the grep tool for symbol search). Those shell commands "
+                "remain OK for builds, installs, scripts, and real pipelines. "
                 "Prefer run_tests for the standard test suite; prefer propose_patch/edit_file/"
                 "write_file for file changes — do not use shell redirection to write code."
             ),
