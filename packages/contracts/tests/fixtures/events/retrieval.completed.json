@@ -13,6 +13,38 @@
         "score": 0.58
       }
     ],
-    "index": { "added": 1, "chunks": 3 }
+    "index": { "added": 1, "chunks": 3 },
+    "audit": {
+      "mode": "vector",
+      "rank_method": "none",
+      "recall_pool": [
+        {
+          "chunk_id": "sources/new-chunk.md#chunk-0",
+          "path": "sources/new-chunk.md",
+          "score": 0.58,
+          "excerpt": "New material with phase2-unique-term for vector recall.",
+          "source": "vector"
+        }
+      ],
+      "ranked": [
+        {
+          "chunk_id": "sources/new-chunk.md#chunk-0",
+          "path": "sources/new-chunk.md",
+          "score": 0.58,
+          "excerpt": "New material with phase2-unique-term for vector recall."
+        }
+      ],
+      "entered_context": [
+        {
+          "chunk_id": "sources/new-chunk.md#chunk-0",
+          "path": "sources/new-chunk.md",
+          "excerpt": "New material with phase2-unique-term for vector recall.",
+          "citation_id": "cite:new-chunk",
+          "score": 0.58,
+          "char_len": 54,
+          "truncated": false
+        }
+      ]
+    }
   }
 }

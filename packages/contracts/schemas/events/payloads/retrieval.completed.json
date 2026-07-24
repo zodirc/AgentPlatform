@@ -40,6 +40,59 @@
           "score": { "type": "number" }
         }
       }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "HM5 three-stage retrieval audit for Ops (docs/33 HM5, docs/15 §3.3)",
+      "properties": {
+        "mode": { "type": "string" },
+        "rank_method": {
+          "type": ["string", "null"],
+          "description": "lexical | cross_encoder | none | keyword | …"
+        },
+        "recall_pool": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/auditHit" }
+        },
+        "ranked": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/auditHit" }
+        },
+        "entered_context": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "chunk_id": { "type": "string" },
+              "path": { "type": "string" },
+              "excerpt": { "type": "string", "maxLength": 512 },
+              "citation_id": { "type": "string" },
+              "score": { "type": "number" },
+              "char_len": { "type": "integer", "minimum": 0 },
+              "truncated": { "type": "boolean" }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "auditHit": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "chunk_id": { "type": "string" },
+        "path": { "type": "string" },
+        "excerpt": { "type": "string", "maxLength": 512 },
+        "citation_id": { "type": "string" },
+        "score": { "type": "number" },
+        "source": { "type": "string" }
+      }
     }
   }
 }
