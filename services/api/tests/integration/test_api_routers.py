@@ -709,4 +709,6 @@ def test_change_password_wrong_current(client: TestClient) -> None:
             app.dependency_overrides.pop(require_end_user, None)
 
     assert response.status_code == 401
-    assert "incorrect" in response.json()["detail"].lower()
+    body = response.json()
+    message = body.get("error", {}).get("message") or body.get("detail") or ""
+    assert "incorrect" in str(message).lower()

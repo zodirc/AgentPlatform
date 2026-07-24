@@ -45,11 +45,27 @@ def test_request_id_generated_when_missing(client: TestClient) -> None:
 
 
 def test_validation_error_uses_request_id(client: TestClient) -> None:
+    from uuid import uuid4
+
+    from app.main import app
+    from app.services.end_user.auth import require_session_actor
+    from app.services.end_user.users import EndUser
+
     request_id = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
-    response = client.post(
-        "/api/v1/sessions/00000000-0000-0000-0000-000000000099/turns",
-        json={},
-        headers={"X-Request-ID": request_id},
-    )
+
+    async def _actor() -> EndUser:
+        return EndUser(id=uuid4(), username="test", status="active")
+
+    # Pass auth so we hit body validation (422), not 401.
+    app.dependency_overrides[require_session_actor] = _actor
+    try:
+        response = client.post(
+            "/api/v1/sessions/00000000-0000-0000-0000-000000000099/turns",
+            json={},
+            headers={"X-Request-ID": request_id},
+        )
+    finally:
+        app.dependency_overrides.pop(require_session_actor, None)
+
     assert response.status_code == 422
     assert response.json()["meta"]["request_id"] == request_id

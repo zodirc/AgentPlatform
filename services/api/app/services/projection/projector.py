@@ -268,16 +268,28 @@ async def _project_turn_impl(turn_id: UUID) -> None:
         elif event_type == "tool.completed":
             tool_call_id = payload.get("tool_call_id")
             matched = False
+            target: dict | None = None
             if tool_call_id:
                 for item in reversed(tool_timeline):
                     if item.get("tool_call_id") == tool_call_id:
-                        item["status"] = payload.get("status", "ok")
-                        item["summary"] = payload.get("summary")
+                        target = item
                         matched = True
                         break
             if not matched and tool_timeline:
-                tool_timeline[-1]["status"] = payload.get("status", "ok")
-                tool_timeline[-1]["summary"] = payload.get("summary")
+                target = tool_timeline[-1]
+            if target is not None:
+                target["status"] = payload.get("status", "ok")
+                target["summary"] = payload.get("summary")
+                if payload.get("tool_name"):
+                    target["tool_name"] = payload.get("tool_name")
+                if payload.get("delivery_status") is not None:
+                    target["delivery_status"] = payload.get("delivery_status")
+                if payload.get("delivery_issues") is not None:
+                    target["delivery_issues"] = list(payload.get("delivery_issues") or [])
+                if payload.get("output_path") is not None:
+                    target["output_path"] = payload.get("output_path")
+                if payload.get("bytes_written") is not None:
+                    target["bytes_written"] = payload.get("bytes_written")
             latest_output = payload.get("summary") or latest_output
             if payload.get("tool_name") == "write_file":
                 for art in artifacts:
@@ -451,8 +463,8 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 status,
                 turn["user_input"],
                 latest_output,
-                json.dumps(tool_timeline),
-                json.dumps(artifacts),
+                json.dumps(tool_timeline, ensure_ascii=False),
+                json.dumps(artifacts, ensure_ascii=False),
                 last_sequence,
             )
             if approval_state is not None:

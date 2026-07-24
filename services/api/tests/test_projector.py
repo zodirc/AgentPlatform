@@ -122,8 +122,15 @@ async def test_project_turn_maps_cards_pinned_artifact() -> None:
     view_insert = next(
         call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
     )
-    assert '"type": "writing_cards"' in view_insert.args[8]
-    assert "张白鹿" in view_insert.args[8]
+    artifacts_raw = view_insert.args[8]
+    assert '"type": "writing_cards"' in artifacts_raw
+    # Decode JSON so assertion is independent of ensure_ascii escaping.
+    artifacts = json.loads(artifacts_raw)
+    assert artifacts[0]["type"] == "writing_cards"
+    assert any(
+        "张白鹿" in str(card.get("title") or "") or "张白鹿" in str(card.get("path") or "")
+        for card in artifacts[0].get("cards") or []
+    )
 
 
 @pytest.mark.asyncio
@@ -365,3 +372,77 @@ async def test_project_turn_ignores_subagent_tokens_in_latest_output() -> None:
     assert any(
         isinstance(row, dict) and row.get("subagent_id") == "sub-1" for row in tool_timeline
     )
+
+@pytest.mark.asyncio
+async def test_project_turn_copies_export_delivery_onto_tool_timeline() -> None:
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=transaction)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction.return_value = transaction
+
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=False)
+
+    pool = MagicMock()
+    pool.acquire.return_value = acquire_cm
+    pool.fetch = AsyncMock(
+        return_value=[
+            {
+                "sequence": 1,
+                "type": "tool.started",
+                "payload": {
+                    "tool_call_id": "e1",
+                    "tool_name": "export_document",
+                },
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            {
+                "sequence": 2,
+                "type": "tool.completed",
+                "payload": {
+                    "tool_call_id": "e1",
+                    "tool_name": "export_document",
+                    "status": "ok",
+                    "summary": "Exported 1 section(s) to exports/document.md",
+                    "delivery_status": "ok",
+                    "delivery_issues": [],
+                    "output_path": "exports/document.md",
+                    "bytes_written": 42,
+                },
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+            {
+                "sequence": 3,
+                "type": "turn.completed",
+                "payload": {"summary": "done", "termination_reason": "final"},
+                "ts": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            },
+        ]
+    )
+
+    turn = {
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "writing",
+        "status": "running",
+        "user_input": "writing.10",
+    }
+
+    with (
+        patch("app.services.projection.projector.get_pool", new_callable=AsyncMock, return_value=pool),
+        patch("app.services.projection.projector.turn_svc.get_turn", new_callable=AsyncMock, return_value=turn),
+    ):
+        await project_turn(TURN_ID)
+
+    view_insert = next(
+        call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
+    )
+    tool_timeline = json.loads(view_insert.args[7])
+    assert len(tool_timeline) == 1
+    row = tool_timeline[0]
+    assert row["tool_name"] == "export_document"
+    assert row["delivery_status"] == "ok"
+    assert row["output_path"] == "exports/document.md"
+    assert row["bytes_written"] == 42
