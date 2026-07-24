@@ -128,7 +128,9 @@ class StubModelProvider:
         tools: list[dict],
         abort: asyncio.Event | None = None,
     ) -> AsyncIterator[str | ModelResponse]:
-        user_text = _user_text(messages)
+        # Route on intent only — exclude [writing_context]/[runtime_context] so
+        # work_index phrases like `draft_section` / `propose_patch` cannot steal goldens.
+        user_text = _intent_user_text(messages) or _user_text(messages)
         tool_names = {t["name"] for t in tools}
         has_tool_result = _has_tool_result(messages)
         last_tool = _last_tool_name(messages)
@@ -163,6 +165,23 @@ class StubModelProvider:
 
         if "slow_tool" in tool_names and _wants_slow_tool(user_text) and not has_tool_result:
             yield _tool_call("slow_tool", {"duration_ms": 8000})
+            return
+
+        # AQ2: /test → run_tests before approval (TEST_EXPAND mentions run_command).
+        if "run_tests" in tool_names and _wants_run_tests(user_text) and not has_tool_result:
+            yield _tool_call("run_tests", {"command": "pytest -q"})
+            return
+
+        if has_tool_result and last_tool == "run_tests" and _wants_run_tests(user_text):
+            yield ModelResponse(text="agent.11 tests finished", output_tokens=8)
+            return
+
+        if "read_lints" in tool_names and _wants_run_lints(user_text) and not has_tool_result:
+            yield _tool_call("read_lints", {"path": "."})
+            return
+
+        if has_tool_result and last_tool == "read_lints" and _wants_run_lints(user_text):
+            yield ModelResponse(text="agent.12 lints checked", output_tokens=8)
             return
 
         if "run_command" in tool_names and _wants_approval(user_text) and not has_tool_result:
@@ -347,23 +366,6 @@ class StubModelProvider:
             yield _tool_call("search_codebase", {"query": "AgentEngine"})
             return
 
-        # AQ2: /test → run_tests；/lint → read_lints
-        if "run_tests" in tool_names and _wants_run_tests(user_text) and not has_tool_result:
-            yield _tool_call("run_tests", {"command": "pytest -q"})
-            return
-
-        if has_tool_result and last_tool == "run_tests" and _wants_run_tests(user_text):
-            yield ModelResponse(text="agent.11 tests finished", output_tokens=8)
-            return
-
-        if "read_lints" in tool_names and _wants_run_lints(user_text) and not has_tool_result:
-            yield _tool_call("read_lints", {"path": "."})
-            return
-
-        if has_tool_result and last_tool == "read_lints" and _wants_run_lints(user_text):
-            yield ModelResponse(text="agent.12 lints checked", output_tokens=8)
-            return
-
         if has_tool_result and last_tool == "search_codebase" and "propose_patch" in tool_names:
             yield _tool_call(
                 "propose_patch",
@@ -473,6 +475,28 @@ def _user_text(messages: list[dict]) -> str:
     return " ".join(parts)
 
 
+def _intent_user_text(messages: list[dict]) -> str:
+    """User text for stub routing — skip platform-injected context banners.
+
+    Writing work_index / cards live under ``[writing_context]``; runtime banners under
+    ``[runtime_context]``. Matching those would make every writing turn look like
+    ``draft_section`` / ``propose_patch`` / ``read``.
+    """
+    parts: list[str] = []
+    for msg in messages:
+        if msg.get("role") != "user":
+            continue
+        for block in msg.get("content", []):
+            if block.get("type") != "text":
+                continue
+            text = str(block.get("text", ""))
+            stripped = text.lstrip()
+            if stripped.startswith("[writing_context]") or stripped.startswith("[runtime_context]"):
+                continue
+            parts.append(text)
+    return " ".join(parts)
+
+
 def _has_tool_result(messages: list[dict]) -> bool:
     """True if transcript already includes a tool result (role=tool or tool_result block)."""
     for msg in messages:
@@ -551,7 +575,9 @@ def _wants_plan(text: str) -> bool:
 
 
 def _wants_draft(text: str) -> bool:
-    keywords = ("draft_section", "流式", "writing.04")
+    # Prefer golden id / 流式. Bare "draft_section" is injected by work_index and must
+    # not route every writing turn (see _intent_user_text).
+    keywords = ("流式", "writing.04")
     return any(k in text.lower() for k in keywords)
 
 
@@ -707,6 +733,9 @@ def _wants_codebase_search(text: str) -> bool:
 
 
 def _wants_approval(text: str) -> bool:
+    # Prefer run_tests when /test or agent.11 (TEST_EXPAND mentions run_command).
+    if _wants_run_tests(text):
+        return False
     keywords = ("approval", "run_command", "agent.03", "批准测试")
     return any(k in text.lower() for k in keywords)
 

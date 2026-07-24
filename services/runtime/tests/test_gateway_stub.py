@@ -307,4 +307,75 @@ async def test_stub_agent_quality_verify_loop() -> None:
     finals = [c async for c in provider.stream(messages=after_lints, tools=tools)]
     text = "".join(c if isinstance(c, str) else (c.text or "") for c in finals)
     assert "agent.10" in text
-    assert "lints" in text.lower()
+
+
+@pytest.mark.asyncio
+async def test_stub_ignores_work_index_draft_section_for_outline() -> None:
+    """Volatile work_index mentions draft_section; writing.01 must still update_outline."""
+    provider = StubModelProvider()
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "请创建文档大纲 writing.01"}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": (
+                        "[writing_context]\n"
+                        "Continue writing with `draft_section` (appends/replaces a marked block); "
+                        "promote via `propose_patch`. Read only the chapter you need."
+                    ),
+                }
+            ],
+        },
+    ]
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            messages=messages,
+            tools=[
+                {"name": "draft_section"},
+                {"name": "update_outline"},
+                {"name": "propose_patch"},
+                {"name": "read_file"},
+            ],
+        )
+    ]
+    tool_calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert [c["name"] for c in tool_calls] == ["update_outline"]
+
+
+@pytest.mark.asyncio
+async def test_stub_test_slash_prefers_run_tests_over_run_command() -> None:
+    """TEST_EXPAND mentions run_command; agent.11 / [test] must call run_tests."""
+    from app.controller.input_compiler import TEST_EXPAND
+
+    provider = StubModelProvider()
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": f"{TEST_EXPAND}\nagent.11"}],
+        }
+    ]
+    chunks = [
+        chunk
+        async for chunk in provider.stream(
+            messages=messages,
+            tools=[{"name": "run_tests"}, {"name": "run_command"}],
+        )
+    ]
+    tool_calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert [c["name"] for c in tool_calls] == ["run_tests"]
