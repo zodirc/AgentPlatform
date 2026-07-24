@@ -113,3 +113,18 @@ def test_reset_workspace_preserves_seed_tree(tmp_path: Path) -> None:
     assert (workspace / "sources" / "seed" / "writing" / "drama1.md").read_text() == "seed"
     assert not junk.exists()
     assert not (workspace / "sections" / "x.md").exists()
+
+
+def test_format_tool_timeline_includes_delivery() -> None:
+    text = eval_run._format_tool_timeline(
+        [
+            {
+                "tool_name": "export_document",
+                "status": "ok",
+                "delivery_status": "failed",
+                "summary": "Export failed: missing sections",
+            }
+        ]
+    )
+    assert "export_document:ok/delivery=failed" in text
+    assert "Export failed" in text

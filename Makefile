@@ -306,18 +306,29 @@ eval-run-isolated:
 	  PYTHONUNBUFFERED=1 python3 -u scripts/eval_run.py --workspace $(EVAL_WORKSPACE) $(EVAL_ARGS)
 
 api-test:
-	cd services/api && pip install -q -e ".[dev]" 2>/dev/null || pip install -q pytest pydantic-settings httpx
-	PYTHONPATH=services/api pytest services/api/tests -q
+	@if python3 -c 'import sys; exit(0 if sys.version_info>=(3,11) else 1)' 2>/dev/null; then \
+		  cd services/api && python3 -m pip install -q -e ".[dev]" && \
+		  PYTHONPATH=. python3 -m pytest tests -q; \
+	else \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root api rm -rf /tmp/api-tests && \
+	  docker cp services/api/tests/. agent-api:/tmp/api-tests/ && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T api bash -c \
+	    'python -m pip install -q pytest pytest-asyncio httpx 2>/dev/null; \
+	     if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi; \
+	     python -m pytest /tmp/api-tests -q --asyncio-mode=auto'; \
+	fi
 
 runtime-test:
 	@if python3 -c 'import sys; exit(0 if sys.version_info>=(3,11) else 1)' 2>/dev/null; then \
-		  cd services/runtime && pip install -q -e ".[dev]" && pytest tests -q \
-		    --cov=app --cov-report=term-missing --cov-fail-under=80; \
+		  cd services/runtime && python3 -m pip install -q -e ".[dev]" && \
+		  python3 -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80; \
 	else \
-	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime rm -rf /tmp/runtime-tests && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest && \
 	  docker cp services/runtime/tests/. agent-runtime:/tmp/runtime-tests/ && \
+	  docker cp eval/plan_suggest/cases.json agent-runtime:/tmp/eval/plan_suggest/cases.json && \
 	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T runtime bash -c \
-	    'pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
+	    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
 	fi
 
 # Local CI unit.* mirror (no Docker). Prefer this before every push.

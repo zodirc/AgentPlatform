@@ -723,6 +723,45 @@ def read_workspace_file(workspace: Path, rel: str) -> str | None:
     return target.read_text(encoding="utf-8", errors="replace")
 
 
+def _format_tool_timeline(timeline: list[dict]) -> str:
+    parts: list[str] = []
+    for item in timeline[-8:]:
+        name = item.get("tool_name") or "?"
+        status = item.get("status") or ""
+        delivery = item.get("delivery_status")
+        summary = str(item.get("summary") or "")[:120]
+        bit = f"{name}:{status}"
+        if delivery is not None:
+            bit += f"/delivery={delivery}"
+        if summary:
+            bit += f"({summary})"
+        parts.append(bit)
+    return "[" + "; ".join(parts) + "]" if parts else "[]"
+
+
+def _workspace_missing_detail(
+    case_id: str,
+    *,
+    base: str,
+    turn_id: str | None,
+    rel: str,
+) -> str:
+    detail = f"{case_id}: missing workspace file {rel}"
+    if not turn_id:
+        return detail
+    try:
+        view = http_json("GET", f"{base}/api/v1/turns/{turn_id}/view")
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, json.JSONDecodeError):
+        return detail
+    timeline = view.get("tool_timeline") or []
+    detail += f"; tools={_format_tool_timeline(timeline)}"
+    for art in view.get("artifacts") or []:
+        if art.get("type") == "delivery":
+            detail += f"; turn_delivery={art.get('status')!r} issues={art.get('issues')!r}"
+            break
+    return detail
+
+
 def apply_fixtures(workspace: Path, case: dict) -> None:
     fixtures = case.get("fixtures", {})
     for item in fixtures.get("workspace", []):
@@ -1182,9 +1221,12 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
         needle = tool_assert.get("result_matches", "")
         tool_name = tool_assert.get("name", "")
         expected_retrieval = tool_assert.get("retrieval")
+        expected_delivery = tool_assert.get("delivery_status")
         matched = False
         retrieval_matched = expected_retrieval is None
+        delivery_matched = expected_delivery is None
         name_seen = False
+        last_delivery: str | None = None
         for item in timeline:
             if item.get("tool_name") != tool_name:
                 continue
@@ -1194,6 +1236,15 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
                 matched = True
             elif not needle:
                 matched = True
+            if item.get("delivery_status") is not None:
+                last_delivery = str(item.get("delivery_status"))
+        if expected_delivery is not None:
+            allowed_delivery = (
+                {expected_delivery}
+                if isinstance(expected_delivery, str)
+                else set(expected_delivery)
+            )
+            delivery_matched = last_delivery in allowed_delivery
         if expected_retrieval:
             allowed = (
                 {expected_retrieval}
@@ -1210,6 +1261,12 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
             raise AssertionError(f"{case_id}: tool {tool_name!r} missing from tool_timeline")
         if needle and not matched:
             raise AssertionError(f"{case_id}: tool {tool_name!r} missing result match {needle!r}")
+        if expected_delivery is not None and not delivery_matched:
+            raise AssertionError(
+                f"{case_id}: tool {tool_name!r} delivery_status {last_delivery!r} "
+                f"not in {sorted(allowed_delivery)!r}; "
+                f"timeline={_format_tool_timeline(timeline)}"
+            )
         forbidden_result = tool_assert.get("result_not_matches", "")
         if forbidden_result:
             leaked = False
@@ -1286,7 +1343,14 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
     for ws in assertions.get("workspace", []):
         content = read_workspace_file(workspace, ws["path"])
         if content is None:
-            raise AssertionError(f"{case_id}: missing workspace file {ws['path']}")
+            raise AssertionError(
+                _workspace_missing_detail(
+                    case_id,
+                    base=base,
+                    turn_id=turn_id,
+                    rel=ws["path"],
+                )
+            )
         if "matches" in ws and not re.search(ws["matches"], content, re.S):
             raise AssertionError(f"{case_id}: workspace {ws['path']} does not match {ws['matches']}")
         if "not_matches" in ws and re.search(ws["not_matches"], content, re.S):
