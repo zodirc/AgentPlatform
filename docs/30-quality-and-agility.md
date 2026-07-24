@@ -12,14 +12,16 @@
 |----|------|------|
 | **CQ1** | 加厚 `agent/system.md` | ✅ |
 | **CQ2** | 工具描述 hygiene | ✅ |
-| **CQ3** | agent 质量 golden + rubric | ✅ |
-| **CQ4** | 代码感知检索 | ✅ |
+| **CQ3** | agent 质量 golden + rubric | ✅ 协议向（产物行数阈值未硬断言） |
+| **CQ4** | 代码感知检索 | ✅ 索引切块（`agent/04` 命中对照未扩） |
 | **AQ1** | agent cache 稳定前缀 | ✅ |
 | **AQ2** | agent slash 展开 | ✅ |
 | **AQ3** | 灵敏度否决守线 | 守线（无单独实现） |
-| **WN1** | 连续性卡片异步提炼 | ✅ |
+| **WN1** | 连续性卡片异步提炼 | ✅ 后台 task + pending 不 pin |
 | **WN2** | 离线 rubric 维度扩展 | ✅ |
 | **WN3** | WT5 写作 cache 落地 | ✅ |
+
+**核验补丁（2026-07-24）**：stub `run_tests` 收尾加意图门闩；WN1 改 `create_task` 不挡 finalize；checkpoint 持久化/恢复 `volatile_context`，内存 pending 优先于 checkpoint。
 
 ```bash
 cd services/runtime && python3 -m pytest \

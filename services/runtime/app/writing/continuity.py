@@ -59,6 +59,11 @@ class ContinuityCandidate:
     source_hint: str = ""
 
 
+# Hard caps so post-turn heuristics stay millisecond-scale (docs/13 R3/R4).
+_MAX_CHAPTER_CHARS = 12_000
+_FALLBACK_SCAN_CHARS = 4_000
+
+
 def extract_continuity_candidates(
     chapter_text: str,
     *,
@@ -69,6 +74,8 @@ def extract_continuity_candidates(
     text = (chapter_text or "").strip()
     if not text:
         return []
+    if len(text) > _MAX_CHAPTER_CHARS:
+        text = text[:_MAX_CHAPTER_CHARS]
 
     # Prefer 2–3 char tokens before common action verbs (non-overlapping).
     verb_bound = re.compile(
@@ -82,17 +89,16 @@ def extract_continuity_candidates(
             continue
         counts[name] = counts.get(name, 0) + 1
 
-    # Fallback: standalone quoted speakers 「…」前的称呼较少；再扫 2–3 字重复串。
+    # Fallback: bounded scan only (avoid O(n) over full manuscripts).
     if not counts:
+        scan = text[:_FALLBACK_SCAN_CHARS]
         for length in (3, 2):
             i = 0
-            while i + length <= len(text):
-                chunk = text[i : i + length]
+            while i + length <= len(scan):
+                chunk = scan[i : i + length]
                 if re.fullmatch(r"[\u4e00-\u9fff]+", chunk) and chunk not in _STOP_NAMES:
-                    # Require repetition later via counts aggregation.
                     counts[chunk] = counts.get(chunk, 0) + 1
                 i += 1
-            # Keep only repeats for fallback noise control.
             counts = {k: v for k, v in counts.items() if v >= 2}
             if counts:
                 break

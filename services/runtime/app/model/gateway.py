@@ -352,7 +352,7 @@ class StubModelProvider:
             yield _tool_call("run_tests", {"command": "pytest -q"})
             return
 
-        if has_tool_result and last_tool == "run_tests":
+        if has_tool_result and last_tool == "run_tests" and _wants_run_tests(user_text):
             yield ModelResponse(text="agent.11 tests finished", output_tokens=8)
             return
 
@@ -524,7 +524,8 @@ def _wants_agent_quality_verify(text: str) -> bool:
 
 def _wants_run_tests(text: str) -> bool:
     lowered = text.lower()
-    return "[test]" in lowered or "agent.11" in lowered or "run_tests" in lowered
+    # Prefer slash-expanded marker / golden id — avoid bare "run_tests" substring.
+    return "[test]" in lowered or "agent.11" in lowered
 
 
 def _wants_run_lints(text: str) -> bool:

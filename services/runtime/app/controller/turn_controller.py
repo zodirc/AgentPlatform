@@ -308,15 +308,19 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
         gateway=gateway,
         trace_id=state.trace_id,
         pending_tool_call=interrupt,
+        # WN3: system stays scenario base; cards/plan live in volatile_context.
         system_prompt=profile.system_prompt,
+        volatile_context=state.volatile_context or "",
     )
 
 
 async def _resolve_pending(turn_id: UUID, run_id: UUID) -> PendingTurn | None:
-    from_checkpoint = await _pending_from_checkpoint(run_id)
-    if from_checkpoint is not None:
-        return from_checkpoint
-    return get(turn_id)
+    # Prefer in-memory pending (full volatile) when this process still holds it;
+    # fall back to checkpoint for HA / process restart.
+    memory = get(turn_id)
+    if memory is not None:
+        return memory
+    return await _pending_from_checkpoint(run_id)
 
 
 async def _with_session_tenant(session_id: UUID, coro):
@@ -694,7 +698,15 @@ async def _finalize_turn(
     await check_monthly_token_alert()
     await save_session_transcript(state.session_id, state.messages)
     await _backfill_plan_open_items(state)
-    await _maybe_write_continuity_pending(state, turn_id=turn_id)
+    # WN1: do not block finalize / user-facing completion (R4).
+    try:
+        asyncio.get_running_loop().create_task(
+            _maybe_write_continuity_pending(state, turn_id=turn_id),
+            name=f"wn1-continuity-{turn_id}",
+        )
+    except RuntimeError:
+        # No running loop (rare in tests) — best-effort sync path.
+        await _maybe_write_continuity_pending(state, turn_id=turn_id)
     await delete_checkpoint(run_id)
 
 
@@ -1042,6 +1054,9 @@ async def _run_turn(
             else f"{phase_block}\n"
         )
 
+    # Persist for step/interrupt checkpoint resume (HA) — not welded into system.
+    state.volatile_context = volatile_context
+
     engine = AgentEngine(
         gateway=gateway,
         tools=tools,
@@ -1234,7 +1249,7 @@ async def _resume_after_approval(
         gateway=pending.gateway,
         tools=pending.tools,
         system_prompt=pending.system_prompt,
-        volatile_context=pending.volatile_context,
+        volatile_context=pending.volatile_context or state.volatile_context or "",
         write_event=write_event,
         check_cancel=lambda: _check_cancel_flag(turn_id),
         context_window_tokens=context_window_tokens,
