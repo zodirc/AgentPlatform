@@ -46,7 +46,7 @@ from app.scenarios.registry import ScenarioRegistry
 from app.settings import settings
 from app.tools.bootstrap import build_registry, tool_scope
 from app.tools.core import tools as core_tools
-from app.controller.plan_phase import normalize_plan_phase, system_prompt_for_phase
+from app.controller.plan_phase import normalize_plan_phase, plan_phase_block
 
 logger = logging.getLogger(__name__)
 
@@ -967,22 +967,32 @@ async def _run_turn(
         )
 
     system_prompt = profile.system_prompt
+    volatile_context = ""
     if scenario_id == "writing":
         from app.writing.cards import prepare_writing_system_prompt
 
         pin = prepare_writing_system_prompt(profile.system_prompt, message)
         system_prompt = pin.prompt
+        volatile_context = pin.volatile_block
         await write_event(
             event_type="cards.pinned",
             payload=pin.event_payload(),
             step_index=0,
         )
-    system_prompt = system_prompt_for_phase(system_prompt, phase)
+    # AQ1/WN3: Plan phase stays out of the cacheable system prefix.
+    phase_block = plan_phase_block(phase)
+    if phase_block:
+        volatile_context = (
+            f"{volatile_context.rstrip()}\n\n{phase_block}\n"
+            if volatile_context.strip()
+            else f"{phase_block}\n"
+        )
 
     engine = AgentEngine(
         gateway=gateway,
         tools=tools,
         system_prompt=system_prompt,
+        volatile_context=volatile_context,
         write_event=write_event,
         check_cancel=check_cancel,
         on_step_checkpoint=on_step_checkpoint,
@@ -1100,6 +1110,7 @@ async def _run_turn(
                 trace_id=trace_id,
                 pending_tool_call=interrupt,
                 system_prompt=system_prompt,
+                volatile_context=volatile_context,
             ),
         )
 
@@ -1169,6 +1180,7 @@ async def _resume_after_approval(
         gateway=pending.gateway,
         tools=pending.tools,
         system_prompt=pending.system_prompt,
+        volatile_context=pending.volatile_context,
         write_event=write_event,
         check_cancel=lambda: _check_cancel_flag(turn_id),
         context_window_tokens=context_window_tokens,
@@ -1320,6 +1332,7 @@ async def _resume_after_approval(
                 trace_id=trace_id,
                 pending_tool_call=engine.pending_approval,
                 system_prompt=pending.system_prompt,
+                volatile_context=pending.volatile_context,
             ),
         )
         await _finalize_turn(

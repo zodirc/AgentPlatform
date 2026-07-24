@@ -477,12 +477,25 @@ def style_card_template_path() -> Path:
 
 @dataclass(frozen=True)
 class WritingCardsPinResult:
+    """Writing pin result.
+
+    WN3 / WT5 layout:
+    - ``prompt`` is the **stable** system prefix (``system.md`` / base only) for prompt cache.
+    - ``volatile_block`` holds cards / work index / focus+prev — sent as a post-system user
+      message, not welded into system.
+    """
+
     prompt: str
     cards: list[WritingCard]
     available_count: int
     dropped: list[DroppedCard] = field(default_factory=list)
     budget: dict[str, object] = field(default_factory=dict)
     cards_block: str = ""
+    volatile_block: str = ""
+
+    @property
+    def stable_prompt(self) -> str:
+        return self.prompt
 
     def event_payload(self) -> dict[str, object]:
         cards_meta = [
@@ -513,7 +526,7 @@ class WritingCardsPinResult:
             ]
         if self.budget:
             payload["budget"] = self.budget
-        block = self.cards_block or extract_cards_block(self.prompt)
+        block = self.cards_block or extract_cards_block(self.volatile_block or self.prompt)
         if block:
             payload["prefix_hash"] = stable_cards_prefix_hash(block)
         return payload
@@ -550,23 +563,15 @@ def prepare_writing_system_prompt(
         if surface:
             extras.append(surface)
 
-    if extras:
-        prompt = f"{base_prompt.rstrip()}\n\n" + "\n\n".join(extras) + "\n"
-        return WritingCardsPinResult(
-            prompt=prompt,
-            cards=selection.cards if block else [],
-            available_count=len(cards),
-            dropped=selection.dropped,
-            budget=selection.budget,
-            cards_block=block,
-        )
+    volatile = "\n\n".join(extras) if extras else ""
     return WritingCardsPinResult(
         prompt=base_prompt,
-        cards=[],
-        available_count=0,
-        dropped=[],
+        cards=selection.cards if block else [],
+        available_count=len(cards),
+        dropped=selection.dropped,
         budget=selection.budget,
-        cards_block="",
+        cards_block=block,
+        volatile_block=volatile,
     )
 
 
@@ -576,8 +581,12 @@ def build_writing_system_prompt(
     *,
     workspace_root: Path | None = None,
 ) -> str:
-    return prepare_writing_system_prompt(
+    """Legacy welded string (stable + volatile). Prefer ``prepare_writing_system_prompt``."""
+    pin = prepare_writing_system_prompt(
         base_prompt,
         message,
         workspace_root=workspace_root,
-    ).prompt
+    )
+    if pin.volatile_block:
+        return f"{pin.prompt.rstrip()}\n\n{pin.volatile_block}\n"
+    return pin.prompt

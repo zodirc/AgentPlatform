@@ -71,7 +71,9 @@ def test_prepare_writing_system_prompt_event_payload(tmp_path: Path) -> None:
     payload = pin.event_payload()
     assert payload["available_count"] == 3
     assert any(card["title"] == "张白鹿" for card in payload["cards"])
-    assert "Writing cards（必须遵守）" in pin.prompt
+    assert "Writing cards（必须遵守）" in pin.volatile_block
+    assert "Writing cards（必须遵守）" not in pin.prompt
+    assert pin.prompt == "You are a writing assistant."
     assert "budget" in payload
     assert "prefix_hash" in payload
     assert all("truncated" in card for card in payload["cards"])

@@ -45,10 +45,12 @@ class AgentEngine:
         check_cancel: CancelChecker,
         on_step_checkpoint: Callable[[TurnState, int], Awaitable[None]] | None = None,
         context_window_tokens: int | None = None,
+        volatile_context: str = "",
     ) -> None:
         self._gateway = gateway
         self._executor = ToolExecutor(tools)
         self._system_prompt = system_prompt
+        self._volatile_context = volatile_context or ""
         self._write_event = write_event
         self._check_cancel = check_cancel
         self._on_step_checkpoint = on_step_checkpoint
@@ -153,6 +155,7 @@ class AgentEngine:
                     state=state,
                     gateway=self._gateway,
                     tools=step_tools,
+                    volatile_context=self._volatile_context,
                 )
 
                 from app.context.engine import estimate_window_breakdown

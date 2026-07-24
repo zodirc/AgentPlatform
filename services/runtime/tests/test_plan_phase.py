@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.controller.plan_phase import normalize_plan_phase, system_prompt_for_phase
+from app.controller.plan_phase import normalize_plan_phase, plan_phase_block, system_prompt_for_phase
 from app.tools.bootstrap import PLANNING_TOOL_ALLOWLIST, build_registry, tool_scope
 from app.scenarios.registry import ScenarioRegistry
 
@@ -23,6 +23,16 @@ def test_system_prompt_for_phase_appends() -> None:
     assert "executing" in executing.lower()
     assert "in_progress" in executing
     assert system_prompt_for_phase(base, None) == base
+
+
+def test_plan_phase_block_volatile_only() -> None:
+    """AQ1: phase instructions are a separate block, not required to weld into system."""
+    assert plan_phase_block(None) == ""
+    planning = plan_phase_block("planning")
+    executing = plan_phase_block("executing")
+    assert "Plan phase (platform · planning)" in planning
+    assert "Plan phase (platform · executing)" in executing
+    assert "You are an agent." not in planning
 
 
 def test_planning_allowlist_excludes_writes() -> None:

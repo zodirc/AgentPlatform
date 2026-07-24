@@ -19,6 +19,7 @@ class PendingTurn:
     trace_id: UUID
     pending_tool_call: dict[str, Any] | None = None
     system_prompt: str = ""
+    volatile_context: str = ""
 
 
 _store: dict[UUID, PendingTurn] = {}

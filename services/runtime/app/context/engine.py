@@ -95,6 +95,7 @@ class ContextEnvelope:
     compaction_trace: list[dict[str, str]] = field(default_factory=list)
     project_context: str = ""
     runtime_context: str = ""
+    volatile_context: str = ""
     included_tools: list[str] = field(default_factory=list)
     assemble_ms: float = 0.0
     system_prompt: str = ""
@@ -131,6 +132,7 @@ class ContextEngine:
         state: TurnState,
         tools: list[dict[str, Any]] | None = None,
         model_name: str | None = None,
+        volatile_context: str = "",
     ) -> list[dict]:
         started = time.monotonic()
         envelope = self._build_envelope(
@@ -138,6 +140,7 @@ class ContextEngine:
             system_prompt=system_prompt,
             tools=tools,
             model_name=model_name,
+            volatile_context=volatile_context,
         )
         envelope.assemble_ms = (time.monotonic() - started) * 1000
         self._finalize_envelope(envelope, state.turn_id)
@@ -152,12 +155,15 @@ class ContextEngine:
         tools: list[dict[str, Any]] | None = None,
         model_name: str | None = None,
         abort: Any | None = None,
+        volatile_context: str = "",
     ) -> list[dict]:
         from app.context.compact_summarizer import summarize_messages_with_gateway
         from app.settings import settings
 
         started = time.monotonic()
-        fingerprint = _assemble_fingerprint(system_prompt, state, tools)
+        fingerprint = _assemble_fingerprint(
+            system_prompt, state, tools, volatile_context=volatile_context
+        )
         if (
             self._reuse_fingerprint == fingerprint
             and self._reuse_messages is not None
@@ -181,6 +187,7 @@ class ContextEngine:
             tools=tools,
             defer_autocompact=defer,
             model_name=model_name,
+            volatile_context=volatile_context,
         )
         trace = list(envelope.compaction_trace)
         messages = list(envelope.messages)
@@ -215,6 +222,7 @@ class ContextEngine:
                 policy=self._policy,
                 project_context=envelope.project_context,
                 runtime_context=envelope.runtime_context,
+                volatile_context=envelope.volatile_context,
             )
             envelope.budget_report = {
                 **envelope.budget_report,
@@ -245,6 +253,9 @@ class ContextEngine:
                     "content": [{"type": "text", "text": envelope.runtime_context}],
                 }
             )
+        volatile_msg = _volatile_user_message(envelope.volatile_context)
+        if volatile_msg is not None:
+            out.append(volatile_msg)
         out.extend(envelope.messages)
         return out
 
@@ -257,6 +268,9 @@ class ContextEngine:
         )
         self.last_budget_report["runtime_tokens"] = estimate_payload_tokens(
             envelope.runtime_context
+        )
+        self.last_budget_report["volatile_tokens"] = estimate_payload_tokens(
+            envelope.volatile_context
         )
         self.last_assemble_ms = envelope.assemble_ms
         if envelope.compaction_trace:
@@ -277,6 +291,7 @@ class ContextEngine:
         tools: list[dict[str, Any]] | None,
         defer_autocompact: bool = False,
         model_name: str | None = None,
+        volatile_context: str = "",
     ) -> ContextEnvelope:
         policy = self._policy
         messages = [dict(m) for m in state.messages]
@@ -290,6 +305,7 @@ class ContextEngine:
             plan_hint=state.plan_hint,
         )
         included_tools = [str(t.get("name", "")) for t in (tools or []) if t.get("name")]
+        volatile = (volatile_context or "").strip()
 
         _, window_before = _window_fill(
             messages=messages,
@@ -298,6 +314,7 @@ class ContextEngine:
             policy=policy,
             project_context=project_context,
             runtime_context=runtime_context,
+            volatile_context=volatile,
         )
         tokens_before = window_before["tokens_after"]
 
@@ -318,6 +335,7 @@ class ContextEngine:
             policy=policy,
             project_context=project_context,
             runtime_context=runtime_context,
+            volatile_context=volatile,
         )
         if fill_ratio >= policy.fill_collapse and len(messages) > 4:
             messages = _collapse_tool_history(
@@ -326,6 +344,7 @@ class ContextEngine:
                 system_prompt=system_prompt,
                 tools=tools,
                 policy=policy,
+                volatile_context=volatile,
             )
 
         while len(messages) > 1:
@@ -336,6 +355,7 @@ class ContextEngine:
                 policy=policy,
                 project_context=project_context,
                 runtime_context=runtime_context,
+                volatile_context=volatile,
             )
             if fill_ratio < policy.fill_snip:
                 break
@@ -350,6 +370,7 @@ class ContextEngine:
             policy=policy,
             project_context=project_context,
             runtime_context=runtime_context,
+            volatile_context=volatile,
         )
         if fill_ratio >= policy.fill_autocompact and messages:
             if defer_autocompact:
@@ -365,6 +386,7 @@ class ContextEngine:
             policy=policy,
             project_context=project_context,
             runtime_context=runtime_context,
+            volatile_context=volatile,
         )
         reserve_tokens = (
             policy.output_reserve_tokens
@@ -381,6 +403,7 @@ class ContextEngine:
                 "tools_tokens": window_after["tools_tokens"],
                 "project_tokens": window_after.get("project_tokens", 0),
                 "runtime_tokens": window_after.get("runtime_tokens", 0),
+                "volatile_tokens": window_after.get("volatile_tokens", 0),
                 "token_budget": policy.model_window_tokens,
                 "reserve_tokens": reserve_tokens,
                 "fill_ratio": round(fill_ratio, 4),
@@ -388,6 +411,7 @@ class ContextEngine:
             compaction_trace=trace,
             project_context=project_context,
             runtime_context=runtime_context,
+            volatile_context=volatile,
             included_tools=included_tools,
             system_prompt=system_prompt,
         )
@@ -399,15 +423,26 @@ def _system_message(system_prompt: str) -> dict[str, Any]:
     return {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
 
 
+def _volatile_user_message(volatile_context: str) -> dict[str, Any] | None:
+    text = (volatile_context or "").strip()
+    if not text:
+        return None
+    if not text.startswith("[writing_context]"):
+        text = f"[writing_context]\n{text}"
+    return {"role": "user", "content": [{"type": "text", "text": text}]}
+
+
 def _assemble_fingerprint(
     system_prompt: str,
     state: TurnState,
     tools: list[dict[str, Any]] | None,
+    *,
+    volatile_context: str = "",
 ) -> str:
     tool_names = ",".join(str(t.get("name", "")) for t in (tools or []))
     return (
-        f"{hash(system_prompt)}|{state.step_count}|{len(state.messages)}|"
-        f"{state.scenario_id}|{tool_names}|{state.max_steps}"
+        f"{hash(system_prompt)}|{hash(volatile_context or '')}|{state.step_count}|"
+        f"{len(state.messages)}|{state.scenario_id}|{tool_names}|{state.max_steps}"
     )
 
 
@@ -419,6 +454,7 @@ def _window_fill(
     policy: CompactionPolicy,
     project_context: str = "",
     runtime_context: str = "",
+    volatile_context: str = "",
 ) -> tuple[float, dict[str, int]]:
     system_text = system_prompt
     if project_context:
@@ -428,14 +464,19 @@ def _window_fill(
         assembled.append(
             {"role": "user", "content": [{"type": "text", "text": runtime_context}]}
         )
+    volatile_msg = _volatile_user_message(volatile_context)
+    if volatile_msg is not None:
+        assembled.append(volatile_msg)
     assembled.extend(messages)
     window = estimate_assembled_window(messages=assembled, tools=tools)
     project_tokens = estimate_payload_tokens(project_context)
     runtime_tokens = estimate_payload_tokens(runtime_context)
+    volatile_tokens = estimate_payload_tokens(volatile_context)
     window = {
         **window,
         "project_tokens": project_tokens,
         "runtime_tokens": runtime_tokens,
+        "volatile_tokens": volatile_tokens,
     }
     usable = max(1, policy.model_window_tokens - policy.output_reserve_tokens)
     fill_ratio = window["tokens_after"] / usable
@@ -521,6 +562,7 @@ def estimate_window_breakdown(
         "compaction": 0,
         "project": 0,
         "runtime": 0,
+        "volatile": 0,
     }
     for msg in messages:
         role = msg.get("role")
@@ -543,6 +585,8 @@ def estimate_window_breakdown(
             breakdown["tool_results"] += toks
         elif text.startswith("[runtime_context]"):
             breakdown["runtime"] += toks
+        elif text.startswith("[writing_context]"):
+            breakdown["volatile"] += toks
         elif "session context" in lower:
             breakdown["session"] += toks
         elif text.startswith("[") and any(
@@ -772,6 +816,7 @@ def _collapse_tool_history(
     system_prompt: str,
     tools: list[dict[str, Any]] | None,
     policy: CompactionPolicy,
+    volatile_context: str = "",
 ) -> list[dict[str, Any]]:
     """Fold older messages into a pointer block without breaking assistant/tool pairs."""
     fill_ratio, window = _window_fill(
@@ -779,6 +824,7 @@ def _collapse_tool_history(
         system_prompt=system_prompt,
         tools=tools,
         policy=policy,
+        volatile_context=volatile_context,
     )
     if fill_ratio < policy.fill_collapse or len(messages) <= 4:
         return messages

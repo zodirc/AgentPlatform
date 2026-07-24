@@ -35,9 +35,18 @@ def normalize_plan_phase(raw: str | None) -> PlanPhase | None:
     return None
 
 
-def system_prompt_for_phase(base: str, plan_phase: PlanPhase | None) -> str:
+def plan_phase_block(plan_phase: PlanPhase | None) -> str:
+    """Return Plan-phase instructions as a volatile block (WN3/AQ1 — not welded into system)."""
     if plan_phase == "planning":
-        return f"{base.rstrip()}{_PLANNING_SYSTEM_SUFFIX}"
+        return _PLANNING_SYSTEM_SUFFIX.strip()
     if plan_phase == "executing":
-        return f"{base.rstrip()}{_EXECUTING_SYSTEM_SUFFIX}"
-    return base
+        return _EXECUTING_SYSTEM_SUFFIX.strip()
+    return ""
+
+
+def system_prompt_for_phase(base: str, plan_phase: PlanPhase | None) -> str:
+    """Legacy welded layout. Prefer ``plan_phase_block`` + volatile_context (AQ1)."""
+    block = plan_phase_block(plan_phase)
+    if not block:
+        return base
+    return f"{base.rstrip()}\n\n{block}\n"

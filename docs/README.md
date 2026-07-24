@@ -82,7 +82,7 @@ Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块*
 | IX5 / RE4 个人私有库 | ✅ MT5c（无 Org/share） | 15 §6 · **[27](27-multi-tenancy.md)** |
 | 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
 | Proof 门禁 + 体验信号 | ✅ PX0–PX2（环外） | **[28](28-proof-gate-and-ux-signals.md)** · `make gate` · `make ux-signals` · `/settings/signals` |
-| 质量与灵敏度 CQ / AQ / WN | 🔧 CQ1–CQ3 · WN2 ✅；其余 ⏳ | **[30](30-quality-and-agility.md)** |
+| 质量与灵敏度 CQ / AQ / WN | 🔧 CQ1–CQ3 · AQ1 · WN2–WN3 ✅；CQ4/AQ2/WN1 ⏳ | **[30](30-quality-and-agility.md)** |
 
 ---
 

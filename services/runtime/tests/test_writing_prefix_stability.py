@@ -53,11 +53,13 @@ def test_c3_corridor_prefix_stable_across_passes(tmp_path: Path) -> None:
     pin1 = prepare_writing_system_prompt(base, "先列大纲", workspace_root=tmp_path)
     pin2 = prepare_writing_system_prompt(base, "按资料写第3章", workspace_root=tmp_path)
     pin3 = prepare_writing_system_prompt(base, "第三段重写", workspace_root=tmp_path)
-    h1 = stable_cards_prefix_hash(extract_cards_block(pin1.prompt))
-    h2 = stable_cards_prefix_hash(extract_cards_block(pin2.prompt))
-    h3 = stable_cards_prefix_hash(extract_cards_block(pin3.prompt))
+    h1 = stable_cards_prefix_hash(extract_cards_block(pin1.volatile_block))
+    h2 = stable_cards_prefix_hash(extract_cards_block(pin2.volatile_block))
+    h3 = stable_cards_prefix_hash(extract_cards_block(pin3.volatile_block))
     assert h1 == h2 == h3
     assert pin1.event_payload()["prefix_hash"] == pin2.event_payload()["prefix_hash"]
+    # WN3: stable system bytes identical across chapter/message changes
+    assert pin1.prompt == pin2.prompt == pin3.prompt == base
 
 
 def test_c4_card_edit_changes_prefix(tmp_path: Path) -> None:
@@ -89,6 +91,53 @@ def test_c5_runtime_and_plan_not_in_cards_prefix(tmp_path: Path) -> None:
     assert "[runtime_context]" not in pin.prompt
     assert "[plan_hint]" not in pin.prompt
     # User message content must not leak into the cards block
-    block = extract_cards_block(pin.prompt)
+    block = extract_cards_block(pin.volatile_block)
     assert "写一章" not in block
     assert "step=3" not in block
+
+
+def test_wn3_stable_system_excludes_volatile_and_assemble_postposes(tmp_path: Path) -> None:
+    """WT5/WN3: system stays base-only; cards/surface go to post-system user message."""
+    from app.context.engine import ContextEngine
+    from app.engine.state import TurnState
+    from uuid import uuid4
+
+    _seed(tmp_path)
+    base = "You are a writing assistant."
+    pin = prepare_writing_system_prompt(base, "写第三章", workspace_root=tmp_path)
+    assert pin.prompt == base
+    assert "Writing cards" in pin.volatile_block
+    assert "Writing cards" not in pin.prompt
+
+    engine = ContextEngine()
+    state = TurnState(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="writing",
+        messages=[{"role": "user", "content": [{"type": "text", "text": "写第三章"}]}],
+        max_steps=10,
+    )
+    assembled = engine.assemble(
+        system_prompt=pin.prompt,
+        state=state,
+        volatile_context=pin.volatile_block,
+    )
+    system_text = assembled[0]["content"][0]["text"]
+    assert system_text == base or system_text.startswith(base)
+    assert "Writing cards" not in system_text
+    assert "Work surface" not in system_text and "## Work" not in system_text.split("\n")[0]
+    volatile_msgs = [
+        m
+        for m in assembled
+        if m.get("role") == "user"
+        and isinstance(m.get("content"), list)
+        and any(
+            isinstance(b, dict) and str(b.get("text", "")).startswith("[writing_context]")
+            for b in m["content"]
+        )
+    ]
+    assert volatile_msgs
+    vtext = volatile_msgs[0]["content"][0]["text"]
+    assert "Writing cards" in vtext

@@ -14,23 +14,25 @@
 | **CQ2** | 工具描述 hygiene | ✅ |
 | **CQ3** | agent 质量 golden + rubric | ✅ |
 | **CQ4** | 代码感知检索 | ⏳ |
-| **AQ1** | agent cache 稳定前缀 | ⏳ |
+| **AQ1** | agent cache 稳定前缀 | ✅ |
 | **AQ2** | agent slash 展开 | ⏳ |
 | **AQ3** | 灵敏度否决守线 | 守线（无单独实现） |
 | **WN1** | 连续性卡片异步提炼 | ⏳ |
 | **WN2** | 离线 rubric 维度扩展 | ✅ |
-| **WN3** | WT5 写作 cache 落地 | ⏳ |
+| **WN3** | WT5 写作 cache 落地 | ✅ |
 
 ```bash
 cd services/runtime && python3 -m pytest \
   tests/test_agent_prefix_stability.py \
   tests/test_bootstrap_registry.py \
   tests/test_eval_rubric.py \
-  tests/test_gateway_stub.py -q
+  tests/test_gateway_stub.py \
+  tests/test_writing_prefix_stability.py \
+  tests/test_plan_phase.py -q
 # golden: eval/golden/agent/10_patch_then_lints.yaml
 ```
 
-落地索引：`scenarios/agent/system.md` · `tools/bootstrap.py` · `tests/test_agent_prefix_stability.py` · `offline/rubric.py` · `eval/golden/agent/10_patch_then_lints.yaml` · stub `agent.10` 路径（`model/gateway.py`）。
+落地索引：`scenarios/agent/system.md` · `tools/bootstrap.py` · `writing/cards.py`（stable/volatile 分家）· `context/engine.py`（`[writing_context]` 后置）· `plan_phase.plan_phase_block` · `PendingTurn.volatile_context` · `offline/rubric.py` · `eval/golden/agent/10_patch_then_lints.yaml` · stub `agent.10`。
 
 ---
 
