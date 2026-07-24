@@ -3,7 +3,16 @@
 # Bypass: SKIP_PREFLIGHT=1 git push   OR   git push --no-verify
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Prefer git toplevel: BASH_SOURCE follows the .git/hooks symlink and would
+# wrongly resolve ROOT to .git/ (looking for .git/scripts/preflight_unit.sh).
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [[ -z "$ROOT" ]]; then
+  hook="${BASH_SOURCE[0]}"
+  if [[ -L "$hook" ]]; then
+    hook="$(readlink -f "$hook" 2>/dev/null || readlink "$hook")"
+  fi
+  ROOT="$(cd "$(dirname "$hook")/.." && pwd)"
+fi
 
 # Only guard pushes that update branch tips (ignore tag-only / delete).
 guard=0
