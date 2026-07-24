@@ -8,6 +8,12 @@ import pytest
 from app.tools.core.shell import run_shell_command
 
 
+@pytest.fixture(autouse=True)
+def _sandbox_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Unit tests mock subprocess_shell; force unsandboxed path.
+    monkeypatch.setenv("TOOL_SANDBOX", "off")
+
+
 @pytest.mark.asyncio
 async def test_run_shell_command_returns_stdout(tmp_path) -> None:
     proc = MagicMock()

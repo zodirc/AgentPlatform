@@ -1,12 +1,12 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–31 连续编号，一文一模块**；变更只改对应正文。
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
 ---
 
-## 模块目录（01–30）
+## 模块目录（01–31）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -30,7 +30,7 @@ Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块*
 | 18 | [multimodal-design](18-multimodal-design.md) | 多模态设计（待落地） |
 | 19 | [skills-layer](19-skills-layer.md) | Skills（近期末） |
 | 20 | [context-compaction-walkthrough](20-context-compaction-walkthrough.md) | 压缩演练 |
-| 21 | [agent-system-qa](21-agent-system-qa.md) | **面试向原理问答** Q0–Q27（取消/思考直播/忙时排队已深挖；旁路/记忆/加速/多用户） |
+| 21 | [agent-system-qa](21-agent-system-qa.md) | **面试向原理问答** Q0–Q27（取消/思考直播/忙时排队；旁路/记忆/加速/多用户；**Q11 沙箱/exec 隔离细节**） |
 | 22 | [highlights-vs-legacy](22-highlights-vs-legacy.md) | 相对旧项目全景 |
 | 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
 | 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
@@ -40,6 +40,7 @@ Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块*
 | 28 | [proof-gate-and-ux-signals](28-proof-gate-and-ux-signals.md) | **Proof 门禁 + 体验信号**（环外；PX0–PX2 ✅） |
 | 29 | [ops-eval-console](29-ops-eval-console.md) | **Web 评测台**（可视化切片；证明仍以 `make gate` 为准；`OPS_TEST_SECRET`） |
 | 30 | [quality-and-agility](30-quality-and-agility.md) | **质量与灵敏度提案**（代码 CQ1–CQ4 · 灵敏度 AQ1–AQ3 · 写作 WN1–WN3；对标 Cursor / Claude Code / Sudowrite） |
+| 31 | [sandbox-escape-and-hardening](31-sandbox-escape-and-hardening.md) | **沙箱逃逸与防护**（威胁 SE · SB0–SB3/PR2 已落地 · 敏感词钩子 SW 暂空） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -58,6 +59,7 @@ Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块*
 | Proof 门禁 / 体验信号 | [28](28-proof-gate-and-ux-signals.md)（**已落地** · `make gate` / `make ux-signals` · 不碰 loop） |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） |
 | 质量与灵敏度提案 | [30](30-quality-and-agility.md)（代码生成 CQ · 灵敏度 AQ · 写作下一刀 WN；全部受 [13](13-rate-redlines.md) R1–R5 约束） |
+| 沙箱 / exec 隔离 / 脱敏 | [31](31-sandbox-escape-and-hardening.md)（威胁枚举 · SB/PR 方案；受 [13](13-rate-redlines.md) 约束；**敏感词词表暂空**） |
 
 **维护纪律：** 禁止再开 `*-execution` 平行文；过时内容进 git，不留 stub 空号。
 
@@ -83,6 +85,7 @@ Agent Platform 架构与实施规范。**01–30 连续编号，一文一模块*
 | 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
 | Proof 门禁 + 体验信号 | ✅ PX0–PX2（环外） | **[28](28-proof-gate-and-ux-signals.md)** · `make gate` · `make ux-signals` · `/settings/signals` |
 | 质量与灵敏度 CQ / AQ / WN | ✅ CQ1–CQ4 · AQ1–AQ2 · WN1–WN3（AQ3 守线） | **[30](30-quality-and-agility.md)** |
+| 沙箱逃逸与防护 SE / SB / PR / SW | 🔧 E1–E4+PR2(shell) ✅；PR1/SW1/SB4/SB5/PR3 待续；敏感词暂空 | **[31](31-sandbox-escape-and-hardening.md)** |
 
 ---
 

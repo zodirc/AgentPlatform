@@ -14,7 +14,7 @@ RUN set -eux; \
     elif [ -f /etc/apt/sources.list ]; then \
       sed -i 's/deb.debian.org/mirrors.aliyun.com/g; s/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list; \
     fi; \
-    apt-get update && apt-get install -y --no-install-recommends curl \
+    apt-get update && apt-get install -y --no-install-recommends curl bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 RUN useradd --create-home --uid 1000 app

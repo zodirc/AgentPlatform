@@ -5,12 +5,44 @@ import contextlib
 import os
 import signal
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from app.settings import settings
+
 TERMINATE_GRACE_SECONDS = 0.5
 MAX_OUTPUT_CHARS = 32_000
+
+# Deny-by-default child env (docs/31 · SB2). Secrets stay in the parent process.
+_ENV_ALLOW_DEFAULT = frozenset(
+    {
+        "PATH",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "LC_MESSAGES",
+        "TERM",
+        "USER",
+        "LOGNAME",
+        "HOME",
+        "PWD",
+        "TMPDIR",
+        "TMP",
+        "TEMP",
+        "TZ",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "VIRTUAL_ENV",
+        "NODE_OPTIONS",
+        "npm_config_registry",
+        "CI",
+    }
+)
 
 
 async def _terminate_process(proc: asyncio.subprocess.Process, *, force: bool) -> None:
@@ -34,47 +66,59 @@ async def _terminate_process(proc: asyncio.subprocess.Process, *, force: bool) -
 
 
 def _safe_env() -> dict[str, str]:
-    blocked_prefixes = (
-        "MODEL_",
-        "ANTHROPIC_",
-        "OPENAI_",
-        "DATABASE_",
-        "APP_SECRET",
-        "CONFIG_ENCRYPTION",
-        "INTERNAL_SERVICE",
-    )
-    env = {
+    env: dict[str, str] = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-        "LANG": "C.UTF-8",
+        "LANG": os.environ.get("LANG") or "C.UTF-8",
     }
     for key, value in os.environ.items():
-        if any(key.startswith(prefix) for prefix in blocked_prefixes):
-            continue
-        if key in {"PATH", "LANG"}:
-            continue
-        env[key] = value
+        if key in _ENV_ALLOW_DEFAULT and key not in env:
+            env[key] = value
     return env
 
 
-async def run_shell_command(
+def _maybe_redact(text: str) -> str:
+    if not settings.pii_redact_enabled or not text:
+        return text
+    from app.privacy.redact import redact_text
+
+    return redact_text(text)
+
+
+async def _run_exec(
     *,
-    command: str,
+    argv: Sequence[str],
     cwd: Path,
     timeout_s: float,
+    display_command: str,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
 ) -> dict[str, Any]:
     env = _safe_env()
     env["HOME"] = str(cwd)
     env["PWD"] = str(cwd)
 
-    proc = await asyncio.create_subprocess_shell(
-        command,
+    proc = await asyncio.create_subprocess_exec(
+        *argv,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
         start_new_session=True,
     )
+    return await _finish_process(
+        proc,
+        command=display_command,
+        timeout_s=timeout_s,
+        check_cancel=check_cancel,
+    )
+
+
+async def _finish_process(
+    proc: asyncio.subprocess.Process,
+    *,
+    command: str,
+    timeout_s: float,
+    check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None,
+) -> dict[str, Any]:
     comm_task = asyncio.create_task(proc.communicate())
     started = time.monotonic()
 
@@ -112,8 +156,8 @@ async def run_shell_command(
         await asyncio.sleep(0.05)
 
     stdout_b, stderr_b = await comm_task
-    stdout = stdout_b.decode("utf-8", errors="replace")
-    stderr = stderr_b.decode("utf-8", errors="replace")
+    stdout = _maybe_redact(stdout_b.decode("utf-8", errors="replace"))
+    stderr = _maybe_redact(stderr_b.decode("utf-8", errors="replace"))
     truncated = False
     if len(stdout) > MAX_OUTPUT_CHARS:
         stdout = stdout[:MAX_OUTPUT_CHARS] + "\n...[truncated]"
@@ -130,10 +174,111 @@ async def run_shell_command(
 
     return {
         "status": status,
-        "command": command,
+        "command": _maybe_redact(command) if command else command,
         "stdout": stdout,
         "stderr": stderr,
         "exit_code": exit_code,
         "is_truncated": truncated,
         "summary": summary,
     }
+
+
+async def run_argv_command(
+    *,
+    argv: Sequence[str],
+    cwd: Path,
+    timeout_s: float,
+    display_command: str | None = None,
+    check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
+) -> dict[str, Any]:
+    """Run a pre-parsed argv list (no shell). Used by run_tests after SB0 gate."""
+    from app.tools.core.sandbox import wrap_argv_for_exec
+
+    display = display_command or " ".join(argv)
+    try:
+        wrapped, backend = wrap_argv_for_exec(argv=argv, cwd=cwd)
+    except RuntimeError as exc:
+        return {
+            "status": "failed",
+            "command": display,
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": None,
+            "summary": f"sandbox unavailable: {exc}",
+            "sandbox": "error",
+        }
+    result = await _run_exec(
+        argv=wrapped,
+        cwd=cwd,
+        timeout_s=timeout_s,
+        display_command=display,
+        check_cancel=check_cancel,
+    )
+    result["sandbox"] = backend
+    return result
+
+
+async def run_shell_command(
+    *,
+    command: str,
+    cwd: Path,
+    timeout_s: float,
+    check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
+) -> dict[str, Any]:
+    from app.tools.core.sandbox import resolve_sandbox_backend, wrap_shell_command_for_exec
+
+    try:
+        backend = resolve_sandbox_backend()
+    except RuntimeError as exc:
+        return {
+            "status": "failed",
+            "command": command,
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": None,
+            "summary": f"sandbox unavailable: {exc}",
+            "sandbox": "error",
+        }
+
+    if backend == "off":
+        env = _safe_env()
+        env["HOME"] = str(cwd)
+        env["PWD"] = str(cwd)
+        proc = await asyncio.create_subprocess_shell(
+            command,
+            cwd=cwd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            start_new_session=True,
+        )
+        result = await _finish_process(
+            proc,
+            command=command,
+            timeout_s=timeout_s,
+            check_cancel=check_cancel,
+        )
+        result["sandbox"] = "off"
+        return result
+
+    try:
+        wrapped, backend = wrap_shell_command_for_exec(command=command, cwd=cwd)
+    except RuntimeError as exc:
+        return {
+            "status": "failed",
+            "command": command,
+            "stdout": "",
+            "stderr": str(exc),
+            "exit_code": None,
+            "summary": f"sandbox unavailable: {exc}",
+            "sandbox": "error",
+        }
+    result = await _run_exec(
+        argv=wrapped,
+        cwd=cwd,
+        timeout_s=timeout_s,
+        display_command=command,
+        check_cancel=check_cancel,
+    )
+    result["sandbox"] = backend
+    return result

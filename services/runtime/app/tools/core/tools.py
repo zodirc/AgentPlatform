@@ -20,11 +20,16 @@ def is_seed_corpus_path(rel_path: str) -> bool:
 
 
 def _resolve_path(rel_path: str) -> Path:
-    from app.tenant_context import current_work_root_path
+    from app.tenant_context import current_visibility_seed, current_work_root_path
 
     root = current_work_root_path()
     # Seed corpus is a standing RO mount under the deploy workspace (docs/15 / docs/27).
     if is_seed_corpus_path(rel_path):
+        if not current_visibility_seed():
+            raise PermissionError(
+                "product seed corpus is disabled for this Work "
+                "(settings → 使用产品种子语料)"
+            )
         root = Path(settings.workspace_root).resolve()
     target = (root / rel_path).resolve()
     try:
@@ -249,6 +254,13 @@ async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
     if not target.is_dir():
         return {"error": f"Not a directory: {path}"}
     entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
+    # Hide seed mount when Work disabled product corpus (docs/27 visibility_seed).
+    from app.tenant_context import current_visibility_seed
+
+    if not current_visibility_seed():
+        normalized = _normalized_workspace_rel(path)
+        if normalized in {"", ".", "sources"}:
+            entries = [e for e in entries if e.rstrip("/") != "seed"]
     return {"path": path, "entries": entries[:200]}
 
 
@@ -1119,8 +1131,23 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
 
 
 async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) -> dict[str, Any]:
-    from app.tools.core.shell import run_shell_command
+    from app.tools.core.shell import run_argv_command
+    from app.tools.core.test_command_gate import gate_run_tests_command
 
+    # SB0: gate before simulate so malicious commands never look "passed".
+    gated = gate_run_tests_command(command)
+    if not gated.allowed:
+        return {
+            "command": command,
+            "status": "rejected",
+            "stdout": "",
+            "stderr": gated.error or "test command not allowed",
+            "exit_code": None,
+            "summary": gated.error or "test command not allowed",
+            "error": "test_command_not_allowed",
+        }
+
+    assert gated.argv is not None
     if settings.run_command_mode == "simulate":
         return {
             "command": command,
@@ -1133,10 +1160,11 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
     root = _workspace_root()
-    result = await run_shell_command(
-        command=command,
+    result = await run_argv_command(
+        argv=gated.argv,
         cwd=root,
         timeout_s=settings.tool_default_timeout_seconds,
+        display_command=command,
         check_cancel=check_cancel,
     )
     exit_code = result.get("exit_code")
@@ -1148,6 +1176,7 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
         "stderr": result.get("stderr", ""),
         "exit_code": exit_code,
         "summary": result.get("summary", f"Tests: {command}"),
+        "sandbox": result.get("sandbox"),
     }
 
 

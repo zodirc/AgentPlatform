@@ -370,7 +370,8 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Run the project's test command (default pytest -q). Call before claiming "
                 "a coding task is done when tests exist, or when the user asks to verify. "
-                "Prefer this over ad-hoc run_command for the standard test suite. "
+                "Allowed launchers only: pytest, python -m pytest, npm|pnpm|yarn test, "
+                "npx vitest|jest, go test. Other commands → use run_command (requires approval). "
                 "Requires approval unless profile overrides."
             ),
             parameters={
