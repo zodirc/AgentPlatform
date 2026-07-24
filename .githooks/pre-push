@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Blocks push when local CI unit suites fail (same class of failures as debug.log).
+# Bypass: SKIP_PREFLIGHT=1 git push   OR   git push --no-verify
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Only guard pushes that update branch tips (ignore tag-only / delete).
+guard=0
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [[ -z "${local_ref:-}" ]] && continue
+  # delete
+  if [[ "$local_sha" =~ ^0+$ ]]; then
+    continue
+  fi
+  guard=1
+done
+
+if [[ "$guard" -eq 0 ]]; then
+  exit 0
+fi
+
+echo "==> git pre-push: running scripts/preflight_unit.sh"
+exec bash "$ROOT/scripts/preflight_unit.sh"

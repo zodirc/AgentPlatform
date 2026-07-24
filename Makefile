@@ -33,7 +33,8 @@ DOCKER_AUTO_PRUNE ?= 1
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources seed-sources retrieval-bench-prod loc
+	sync-sources seed-sources retrieval-bench-prod loc \
+	preflight hooks-install
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -68,6 +69,8 @@ help: ## 显示常用命令
 	@echo "  make sync-sources    Turn 外索引 workspace/sources（含挂载 seed）"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make runtime-test 运行时测试"
+	@echo "  make preflight    推送前 unit 门禁（CI unit.* 本地镜像；无 Docker）"
+	@echo "  make hooks-install 安装 git pre-push → preflight（一次）"
 	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
 
 # If OPS_TEST_SECRET is empty/missing in .env, generate once and print Ops URL (docs/29).
@@ -316,6 +319,13 @@ runtime-test:
 	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T runtime bash -c \
 	    'pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
 	fi
+
+# Local CI unit.* mirror (no Docker). Prefer this before every push.
+preflight: ## 推送前 unit 门禁（与 CI unit 同套；按变更选择性跑）
+	@bash scripts/preflight_unit.sh
+
+hooks-install: ## 安装 .githooks/pre-push（推送自动跑 preflight）
+	@bash scripts/install-git-hooks.sh
 
 sync-sources: ## Turn 外增量索引 workspace/sources（含 RO 挂载的 seed；docs/15）
 	$(COMPOSE) exec -T runtime python -c 'import asyncio; from app.retrieval.index_scheduler import run_sources_index_sync; print(asyncio.run(run_sources_index_sync(reason="make")))'

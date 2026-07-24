@@ -87,6 +87,8 @@ curl -fsS http://localhost/health/live
 ## 快速验证
 
 ```bash
+make hooks-install  # 一次：git push 前自动跑 unit（防 CI 红）
+make preflight      # 手动：CI unit.* 本地镜像（无 Docker；按变更选择性）
 make smoke          # L0
 # 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/29）
 make gate           # CI/无头 Proof 门禁（docs/28）：smoke → eval-all → runtime-test
@@ -96,6 +98,8 @@ make eval-retrieval # writing.07（默认 ST 镜像）
 make eval-queue     # queue + worker profile（shared.16）
 make runtime-test   # Python 3.11+
 ```
+
+推送绕过（应急）：`SKIP_PREFLIGHT=1 git push` 或 `git push --no-verify`。
 
 ## 仓库结构
 

@@ -1,0 +1,26 @@
+---
+description: Keep CI unit suites in sync when changing runtime/prompt/controller code
+globs: services/runtime/**/*.{py,md},packages/contracts/**/*,scripts/ci_proof.sh,.github/workflows/*
+alwaysApply: false
+---
+
+# CI unit sync
+
+When you change code under these paths, **update or add unit tests in the same change**, then run local preflight before considering the task done:
+
+```bash
+bash scripts/preflight_unit.sh
+# or selective full mirror:
+PREFLIGHT_ALL=1 bash scripts/preflight_unit.sh
+```
+
+## High-churn failure modes (already burned CI)
+
+| Change | Update |
+|--------|--------|
+| `scenarios/**/system.md` | `tests/test_tools_core.py` (assert **stable section markers**, not ephemeral slogans) |
+| `ToolExecutor` / approval sticky / state fields | `tests/test_tool_executor.py` mocks must include attrs the executor reads (`turn_id`, `run_id`, …) |
+| `_resolve_pending` / checkpoint vs memory | `tests/test_turn_controller.py` must match intentional preference |
+| contracts / OpenAPI / event schemas | `packages/contracts/tests` |
+
+Do **not** claim “CI will catch it” — push is gated by `scripts/preflight_unit.sh` (git hook + Cursor push hook). Fix tests locally first.
