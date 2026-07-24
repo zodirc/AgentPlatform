@@ -458,7 +458,7 @@ services:
 - 允许（文件工具）：`{WORKSPACE_ROOT}/**` 或当前 Work root（写按工具审批）、约定 artifacts 路径
 - 拒绝（文件工具）：越界路径在 handler 的 `_resolve_path` 失败
 - `run_tests`（agent）：**免审保留**；启动器白名单 + argv exec（SB0）
-- `run_command` / `read_lints`：有 bwrap 时 FS 仅 work_root 可写、无网；子进程 env deny-by-default（固定允许集）
+- `run_command` / `read_lints`：有 bwrap 时 **FS 仅 work_root 可写**（护主机/护兄弟 Work）；**默认保留出网**（用户批准的 `curl https://…` 可用）；子进程 env deny-by-default（固定允许集）
 - 排障：仅紧急 `TOOL_SANDBOX=off`（不写入 `.env.example`；非日常配置）
 
 

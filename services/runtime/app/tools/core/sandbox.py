@@ -1,8 +1,12 @@
 """OS sandbox for tool exec (docs/31 · SB1 / E2).
 
 Default behavior (no env knobs): if ``bwrap`` is on PATH, wrap tool exec;
-otherwise run unsandboxed (local/dev without bubblewrap). Network is always
-unshared; child FS is RW only on the work root.
+otherwise run unsandboxed (local/dev without bubblewrap).
+
+Threat model: protect the **host / agent server** — child FS is RW only on the
+work root (no cross-Work writes, no escaping the work tree). Outbound network
+stays available so an approved ``run_command`` like ``curl https://…`` works;
+do not confuse host isolation with a product ban on curl.
 
 Optional break-glass only: ``TOOL_SANDBOX=off`` (not a normal product setting).
 """
@@ -59,13 +63,15 @@ def build_bwrap_argv(
     *,
     argv: Sequence[str],
     cwd: Path,
-    network: bool = False,
+    network: bool = True,
 ) -> list[str]:
     """Return ``bwrap … -- <argv>`` with RW only on ``cwd`` (work root).
 
     Work root is always mounted at ``/work`` (chdir there) so a private ``/tmp``
     tmpfs never hides pytest paths under host ``/tmp``. When ``cwd`` is not under
     ``/tmp``, also bind the real absolute path for tools that use abs paths.
+
+    Network defaults to **on** (host-protection sandbox, not an egress ban).
     """
     cwd = cwd.resolve()
     cmd: list[str] = ["bwrap", "--die-with-parent"]
@@ -116,7 +122,7 @@ def wrap_argv_for_exec(
     backend = resolve_sandbox_backend()
     if backend == "off":
         return list(argv), "off"
-    return build_bwrap_argv(argv=argv, cwd=cwd, network=False), "bwrap"
+    return build_bwrap_argv(argv=argv, cwd=cwd, network=True), "bwrap"
 
 
 def wrap_shell_command_for_exec(
@@ -124,7 +130,7 @@ def wrap_shell_command_for_exec(
     command: str,
     cwd: Path,
 ) -> tuple[list[str], SandboxBackend]:
-    """Run a shell string under sandbox via ``sh -c`` (still isolated FS/net)."""
+    """Run a shell string under sandbox via ``sh -c`` (FS isolated; network on)."""
     sh = shutil.which("sh") or "/bin/sh"
     return wrap_argv_for_exec(argv=[sh, "-c", command], cwd=cwd)
 

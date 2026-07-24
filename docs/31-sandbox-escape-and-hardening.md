@@ -546,13 +546,13 @@ make gate
 | E1 | SB0 | ✅ 已落地（启动器白名单 + argv exec；保留 `never`） |
 | E2 | SB1 | ✅ 已落地（有 bwrap 则默认启用；无产品 env 旋钮） |
 | E3 | SB2 | ✅ 已落地（deny-by-default 固定允许集） |
-| E4 | SB3 | ✅ 已落地（固定 `--unshare-net`） |
+| E4 | SB3 默认无网 | ⏸ **产品否决为默认**：护主机以 FS 为主；批准的 curl 外网应可用（见 Q11） |
 | E5 | PR2 | ✅ 部分：shell stdout/stderr/command 出站前 `redact_text` |
 | E5 | PR1 / SW1 / SB4 / SB5 / PR3 | 📋 待开工 |
 | — | 敏感词词表 | ⏸ 不设置 |
 
 **已落地锚点**：`tools/core/test_command_gate.py` · `tools/core/sandbox.py` · `tools/core/shell.py` · runtime Dockerfile(+retrieval) 安装 `bubblewrap` · 单测 `test_run_tests_gate.py` / `test_sandbox_escape.py`。
 
-**默认即策略**：有 bwrap → 沙箱；无网；固定 env 允许集。不向 `.env` / Settings 增加产品旋钮。仅排障可读 `TOOL_SANDBOX=off`。
+**默认即策略**：有 bwrap → **FS 沙箱**（可写仅工作根）；**出网默认开**；固定 env 允许集。不向 `.env` / Settings 增加产品旋钮。仅排障可读 `TOOL_SANDBOX=off`。
 
 **部署**：需重建 runtime 镜像后 bwrap 才进容器（`make up-runtime` / 等价 rebuild）。

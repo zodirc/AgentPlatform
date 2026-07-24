@@ -26,14 +26,21 @@ def test_safe_env_denies_secrets_by_default(monkeypatch: pytest.MonkeyPatch) -> 
 def test_build_bwrap_argv_binds_cwd_and_hides_data(tmp_path: Path) -> None:
     work = tmp_path / "work"
     work.mkdir()
-    argv = build_bwrap_argv(argv=["pytest", "-q"], cwd=work, network=False)
+    argv = build_bwrap_argv(argv=["pytest", "-q"], cwd=work, network=True)
     assert argv[0] == "bwrap"
-    assert "--unshare-net" in argv
+    assert "--unshare-net" not in argv
     assert "--bind" in argv
     assert "/work" in argv
     assert argv[argv.index("--chdir") + 1] == "/work"
     assert argv[-2:] == ["pytest", "-q"]
     assert "--" in argv
+
+
+def test_build_bwrap_argv_can_still_unshare_net_when_requested(tmp_path: Path) -> None:
+    work = tmp_path / "work"
+    work.mkdir()
+    argv = build_bwrap_argv(argv=["echo", "hi"], cwd=work, network=False)
+    assert "--unshare-net" in argv
 
 
 def test_resolve_sandbox_off_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
