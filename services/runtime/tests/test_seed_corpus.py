@@ -36,3 +36,23 @@ async def test_seed_file_readable_when_present(workspace: Path) -> None:
     result = await core.read_file("sources/seed/writing/dramas/demo.md")
     assert "error" not in result
     assert "hello seed" in result["content"]
+
+
+@pytest.mark.asyncio
+async def test_seed_hidden_when_visibility_seed_off(workspace: Path) -> None:
+    from app.tenant_context import bind_tenant_context, reset_tenant_context
+
+    seed = workspace / "sources" / "seed" / "writing" / "a.md"
+    seed.parent.mkdir(parents=True, exist_ok=True)
+    seed.write_text("secret\n", encoding="utf-8")
+    (workspace / "sources" / "mine.md").write_text("mine\n", encoding="utf-8")
+
+    tokens = bind_tenant_context(work_root=str(workspace), visibility_seed=False)
+    try:
+        with pytest.raises(PermissionError, match="disabled"):
+            await core.read_file("sources/seed/writing/a.md")
+        listed = await core.list_dir("sources")
+        assert "seed/" not in (listed.get("entries") or [])
+        assert "mine.md" in (listed.get("entries") or [])
+    finally:
+        reset_tenant_context(tokens)

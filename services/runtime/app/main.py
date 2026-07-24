@@ -79,6 +79,7 @@ async def start_turn_command(
         work_id=body.work_id,
         work_root=body.work_root,
         owner_user_id=body.owner_user_id,
+        visibility_seed=bool(body.visibility_seed),
         model_mode=body.model_mode if body.ops_eval else None,
         model_override=override_dict,
         ops_eval=bool(body.ops_eval),
@@ -214,11 +215,13 @@ def _tenant_query(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
 ) -> dict[str, str | None]:
     return {
         "work_id": work_id,
         "work_root": work_root,
         "owner_user_id": owner_user_id,
+        "visibility_seed": visibility_seed,
     }
 
 
@@ -228,12 +231,13 @@ async def workspace_entries(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import list_workspace_entries
     from app.services.workspace_scope import workspace_tenant_scope
 
-    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
         result = await list_workspace_entries(path)
     if result.get("error"):
         raise HTTPException(status_code=404, detail=str(result["error"]))
@@ -246,6 +250,7 @@ async def workspace_file(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import read_workspace_file
@@ -253,7 +258,7 @@ async def workspace_file(
 
     if not path or path == ".":
         raise HTTPException(status_code=400, detail="path is required")
-    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
         result = await read_workspace_file(path)
     if result.get("error"):
         raise HTTPException(status_code=404, detail=str(result["error"]))
@@ -281,6 +286,7 @@ async def workspace_delete_entries(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import (
@@ -290,7 +296,7 @@ async def workspace_delete_entries(
     from app.services.workspace_scope import workspace_tenant_scope
 
     try:
-        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
             result = await delete_workspace_paths(body.paths)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -307,13 +313,14 @@ async def workspace_write_file(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import write_workspace_file
     from app.services.workspace_scope import workspace_tenant_scope
 
     try:
-        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
             result = await write_workspace_file(path=body.path, content=body.content)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -328,12 +335,13 @@ async def workspace_sources_index_status(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import sources_index_status
     from app.services.workspace_scope import workspace_tenant_scope
 
-    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
         return sources_index_status(path=path)
 
 
@@ -343,6 +351,7 @@ async def workspace_sync_sources(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     """IX1: queue incremental sources projection (Turn-external; non-blocking)."""
@@ -352,7 +361,7 @@ async def workspace_sync_sources(
     )
     from app.services.workspace_scope import workspace_tenant_scope
 
-    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
         mark_sources_index_building(path=None)
         background_tasks.add_task(sync_sources_index_safe, path=None)
         return {"accepted": True, "index": {"status": "pending"}}
@@ -365,6 +374,7 @@ async def workspace_upload_source(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
     from app.services.workspace_browser import (
@@ -374,7 +384,7 @@ async def workspace_upload_source(
     from app.services.workspace_scope import workspace_tenant_scope
 
     try:
-        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id)):
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
             result = await upload_source_file(
                 filename=body.filename, content=body.content
             )

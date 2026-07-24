@@ -185,6 +185,7 @@ async def start_turn(
     work_id: UUID | None = None,
     work_root: str | None = None,
     owner_user_id: UUID | None = None,
+    visibility_seed: bool = True,
     model_mode: str | None = None,
     model_override: dict | None = None,
     ops_eval: bool = False,
@@ -243,6 +244,7 @@ async def start_turn(
         work_root=work_root,
         work_id=work_id,
         owner_user_id=owner_user_id,
+        visibility_seed=visibility_seed,
     )
     model_tokens = bind_turn_model(mode=effective_mode, override=override_config)
     _active_turns.add(turn_id)
@@ -328,11 +330,12 @@ async def _with_session_tenant(session_id: UUID, coro):
     """Rebind TenantContext for approve/deny/patch resumes (same Work as StartTurn)."""
     from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
 
-    work_id, work_root, owner_user_id = await load_session_work(session_id)
+    work_id, work_root, owner_user_id, visibility_seed = await load_session_work(session_id)
     tokens = bind_tenant_context(
         work_root=work_root,
         work_id=work_id,
         owner_user_id=owner_user_id,
+        visibility_seed=visibility_seed,
     )
     try:
         ensure_work_root_exists()
@@ -1053,6 +1056,22 @@ async def _run_turn(
             f"{volatile_context.rstrip()}\n\n{phase_block}\n"
             if volatile_context.strip()
             else f"{phase_block}\n"
+        )
+
+    # docs/27 — when Work disabled product seed, steer model away from seed paths.
+    from app.tenant_context import current_visibility_seed
+
+    if not current_visibility_seed():
+        seed_off = (
+            "## Product seed corpus (disabled for this Work)\n"
+            "Standing `sources/seed/**` is off. Do not search, cite, list, or "
+            "`path_prefix` into seed. Use only user uploads under `sources/` "
+            "(excluding seed) and writing cards."
+        )
+        volatile_context = (
+            f"{volatile_context.rstrip()}\n\n{seed_off}\n"
+            if volatile_context.strip()
+            else f"{seed_off}\n"
         )
 
     # Persist for step/interrupt checkpoint resume (HA) — not welded into system.

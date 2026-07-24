@@ -10,6 +10,7 @@ import {
   fetchDefaultWork,
   fetchUxSignals,
   listModelProviders,
+  patchWorkVisibilitySeed,
   updateModelProvider,
   type UxSignalsReport,
 } from "../shared/api/client";
@@ -235,6 +236,7 @@ function SignalsSection() {
 
 function AccountSection() {
   const { user } = useEndUserAuth();
+  const queryClient = useQueryClient();
   const work = useQuery({
     queryKey: ["works", "default"],
     queryFn: fetchDefaultWork,
@@ -246,6 +248,23 @@ function AccountSection() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [formOk, setFormOk] = useState<string | null>(null);
+  const [seedError, setSeedError] = useState<string | null>(null);
+
+  const seedMut = useMutation({
+    mutationFn: (enabled: boolean) => {
+      if (!work.data?.id) throw new Error("Work 未加载");
+      return patchWorkVisibilitySeed(work.data.id, enabled);
+    },
+    onSuccess: (updated) => {
+      setSeedError(null);
+      queryClient.setQueryData(["works", "default"], updated);
+      void queryClient.invalidateQueries({ queryKey: ["workspace-sources"] });
+      void queryClient.invalidateQueries({ queryKey: ["workspace-entries"] });
+    },
+    onError: (err: Error) => {
+      setSeedError(err.message || "更新失败");
+    },
+  });
 
   const passwordMut = useMutation({
     mutationFn: () => changePassword(currentPassword, newPassword),
@@ -275,6 +294,8 @@ function AccountSection() {
     }
     passwordMut.mutate();
   };
+
+  const seedEnabled = work.data?.visibility_seed !== false;
 
   return (
     <div className="space-y-6">
@@ -315,6 +336,33 @@ function AccountSection() {
             </div>
           ) : null}
         </dl>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card/60 p-4">
+        <h2 className="text-sm font-medium text-foreground">产品种子语料</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          部署挂载的只读事实库（sources/seed）。关闭后本 Work
+          的检索、工具与资料库不再使用系统资料；个人上传不受影响。下一轮对话立即生效。
+        </p>
+        <label className="mt-4 flex cursor-pointer items-start gap-3 text-sm text-foreground">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={seedEnabled}
+            disabled={!work.data || seedMut.isPending}
+            onChange={(e) => seedMut.mutate(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">使用产品种子语料</span>
+            <span className="mt-0.5 block text-xs text-muted-foreground">
+              {seedEnabled ? "当前：已启用" : "当前：已屏蔽"}
+              {seedMut.isPending ? " · 保存中…" : ""}
+            </span>
+          </span>
+        </label>
+        {seedError ? (
+          <p className="mt-2 text-xs text-destructive">{seedError}</p>
+        ) : null}
       </section>
 
       <section className="rounded-xl border border-border bg-card/60 p-4">

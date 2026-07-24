@@ -37,6 +37,8 @@ class StartTurnCommand(BaseModel):
     work_id: UUID | None = None
     work_root: str | None = Field(default=None, min_length=1, max_length=1024)
     owner_user_id: UUID | None = None
+    # Whether this Turn may see product seed corpus (sources/seed/**). Default True.
+    visibility_seed: bool = True
     # docs/29 — per-Turn model mode (null = process MODEL_MODE)
     model_mode: ModelMode | None = None
     model_override: ModelOverride | None = None

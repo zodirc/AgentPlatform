@@ -11,7 +11,10 @@ from pydantic import BaseModel, Field
 from app.db.pool import get_pool
 from app.services.end_user.auth import require_session_actor
 from app.services.end_user.users import EndUser
-from app.services.resource.works import ensure_default_work
+from app.services.resource.works import (
+    ensure_default_work,
+    update_work_visibility_seed,
+)
 
 router = APIRouter(tags=["works"])
 
@@ -21,11 +24,16 @@ class WorkResponse(BaseModel):
     name: str
     work_root: str
     is_default: bool
+    visibility_seed: bool = True
     created_at: datetime | None = None
 
 
 class CreateWorkRequest(BaseModel):
     name: str = Field(default="work", min_length=1, max_length=128)
+
+
+class PatchWorkRequest(BaseModel):
+    visibility_seed: bool
 
 
 @router.get("/works", response_model=list[WorkResponse])
@@ -34,7 +42,7 @@ async def list_works(actor: EndUser = Depends(require_session_actor)):
     pool = await get_pool()
     rows = await pool.fetch(
         """
-        SELECT id, name, work_root, is_default, created_at
+        SELECT id, name, work_root, is_default, visibility_seed, created_at
         FROM works
         WHERE owner_user_id = $1
         ORDER BY is_default DESC, created_at ASC
@@ -60,9 +68,9 @@ async def create_work(
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        INSERT INTO works (id, owner_user_id, name, work_root, is_default)
-        VALUES ($1, $2, $3, $4, false)
-        RETURNING id, name, work_root, is_default, created_at
+        INSERT INTO works (id, owner_user_id, name, work_root, is_default, visibility_seed)
+        VALUES ($1, $2, $3, $4, false, true)
+        RETURNING id, name, work_root, is_default, visibility_seed, created_at
         """,
         work_id,
         actor.id,
@@ -79,11 +87,37 @@ async def get_default_work(actor: EndUser = Depends(require_session_actor)):
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT id, name, work_root, is_default, created_at
+        SELECT id, name, work_root, is_default, visibility_seed, created_at
         FROM works WHERE id = $1
         """,
         work.id,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Work not found")
+    return WorkResponse(**dict(row))
+
+
+@router.patch("/works/{work_id}", response_model=WorkResponse)
+async def patch_work(
+    work_id: UUID,
+    body: PatchWorkRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """Update Work preferences (Turn 外). Currently: product seed corpus visibility."""
+    work = await update_work_visibility_seed(
+        work_id,
+        owner_user_id=actor.id,
+        visibility_seed=body.visibility_seed,
+    )
+    if work is None:
+        raise HTTPException(status_code=404, detail="Work not found")
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        """
+        SELECT id, name, work_root, is_default, visibility_seed, created_at
+        FROM works WHERE id = $1
+        """,
+        work.id,
+    )
+    assert row is not None
     return WorkResponse(**dict(row))

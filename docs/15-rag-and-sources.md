@@ -32,7 +32,8 @@ search_records → 结构化业务行（可选；非写作主路径）
 ```
 
 **常设既定事实种子（写作）：** 填充路径与格式见 [`seed/sources/FORMAT.md`](../seed/sources/FORMAT.md)；文件放在 `seed/sources/writing/{persons,periods,dramas,novels}/`。  
-运行时：**只读挂载**到 `/workspace/sources/seed/writing`（不拷贝进用户沙箱）；索引路径 `sources/seed/writing/...`。与 `eval/retrieval/corpus/`（效果闸）分离。手动重建索引：`make seed-sources`。
+运行时：**只读挂载**到 `/workspace/sources/seed/writing`（不拷贝进用户沙箱）；索引路径 `sources/seed/writing/...`。与 `eval/retrieval/corpus/`（效果闸）分离。手动重建索引：`make seed-sources`。  
+**用户开关：** 默认 Work 的 `visibility_seed`（设置 → 账户 →「使用产品种子语料」）。关闭后该 Work 的检索 / 文件工具 / 资料库 UI 不再看见 seed；挂载与索引仍保留（其他 Work 或重新开启可用）。下一轮 Turn 立即生效。
 
 ---
 

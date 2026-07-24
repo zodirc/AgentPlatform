@@ -19,6 +19,7 @@ async def test_ensure_default_work_returns_existing() -> None:
         name="default",
         work_root="/workspace",
         is_default=True,
+        visibility_seed=True,
     )
     with patch(
         "app.services.resource.works.get_default_work",
@@ -39,6 +40,7 @@ async def test_ensure_default_work_isolates_when_legacy_claimed() -> None:
         "name": "default",
         "work_root": f"/data/works/{work_id}",
         "is_default": True,
+        "visibility_seed": True,
     }
     pool = MagicMock()
     pool.fetchrow = AsyncMock(return_value=row)

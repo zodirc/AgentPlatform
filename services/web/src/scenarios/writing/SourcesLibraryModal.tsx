@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderOpen, RefreshCw, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  fetchDefaultWork,
   fetchSourcesIndexStatus,
   syncSourcesIndex,
   uploadSourceFile,
@@ -38,6 +39,14 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     queryFn: () => listSourcesLibraryFiles(),
     enabled: open,
   });
+
+  const workQuery = useQuery({
+    queryKey: ["works", "default"],
+    queryFn: fetchDefaultWork,
+    staleTime: 60_000,
+    enabled: open,
+  });
+  const seedVisible = workQuery.data?.visibility_seed !== false;
 
   const indexQuery = useQuery({
     queryKey: ["sources-index-status", watchPath ?? (watchLibrary ? "__library__" : null)],
@@ -349,6 +358,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                     )}
                   </section>
 
+                  {seedVisible ? (
                   <section>
                     <div className="mb-2 flex items-baseline justify-between gap-2">
                       <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -360,7 +370,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                     </div>
                     <p className="mb-2 text-[11px] text-muted-foreground">
                       部署挂载的常驻语料（sources/seed），可供检索与引用，不可在 Web
-                      上删除或覆盖。
+                      上删除或覆盖。可在设置 → 账户关闭。
                     </p>
                     {seed.length === 0 ? (
                       <p className="text-sm text-muted-foreground">
@@ -397,6 +407,11 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                       </ul>
                     )}
                   </section>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      系统种子语料已对本 Work 关闭（设置 → 账户 → 使用产品种子语料）。
+                    </p>
+                  )}
                 </div>
               )}
         </div>

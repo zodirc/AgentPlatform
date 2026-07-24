@@ -13,6 +13,7 @@ def workspace_tenant_scope(
     work_id: str | None = None,
     work_root: str | None = None,
     owner_user_id: str | None = None,
+    visibility_seed: str | bool | None = None,
 ) -> Iterator[None]:
     """Scope filesystem tools to a Work root when api forwards tenant fields."""
     from app.tenant_context import (
@@ -23,10 +24,17 @@ def workspace_tenant_scope(
 
     wid = UUID(work_id) if work_id else None
     oid = UUID(owner_user_id) if owner_user_id else None
+    if visibility_seed is None:
+        seed_ok = True
+    elif isinstance(visibility_seed, bool):
+        seed_ok = visibility_seed
+    else:
+        seed_ok = str(visibility_seed).strip().lower() in {"1", "true", "yes", "on"}
     tokens = bind_tenant_context(
         work_root=work_root,
         work_id=wid,
         owner_user_id=oid,
+        visibility_seed=seed_ok,
     )
     try:
         if work_root:

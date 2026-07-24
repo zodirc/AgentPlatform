@@ -9,6 +9,8 @@ from uuid import UUID, uuid4
 from app.db.pool import get_pool
 from app.settings import settings
 
+_WORK_COLS = "id, owner_user_id, name, work_root, is_default, visibility_seed"
+
 
 @dataclass(frozen=True)
 class Work:
@@ -17,6 +19,18 @@ class Work:
     name: str
     work_root: str
     is_default: bool
+    visibility_seed: bool = True
+
+
+def _work_from_row(row) -> Work:
+    return Work(
+        id=row["id"],
+        owner_user_id=row["owner_user_id"],
+        name=row["name"],
+        work_root=row["work_root"],
+        is_default=row["is_default"],
+        visibility_seed=bool(row["visibility_seed"]),
+    )
 
 
 def _isolated_root(work_id: UUID) -> str:
@@ -27,8 +41,8 @@ def _isolated_root(work_id: UUID) -> str:
 async def get_default_work(owner_user_id: UUID) -> Work | None:
     pool = await get_pool()
     row = await pool.fetchrow(
-        """
-        SELECT id, owner_user_id, name, work_root, is_default
+        f"""
+        SELECT {_WORK_COLS}
         FROM works
         WHERE owner_user_id = $1 AND is_default
         LIMIT 1
@@ -37,20 +51,14 @@ async def get_default_work(owner_user_id: UUID) -> Work | None:
     )
     if row is None:
         return None
-    return Work(
-        id=row["id"],
-        owner_user_id=row["owner_user_id"],
-        name=row["name"],
-        work_root=row["work_root"],
-        is_default=row["is_default"],
-    )
+    return _work_from_row(row)
 
 
 async def get_work(work_id: UUID) -> Work | None:
     pool = await get_pool()
     row = await pool.fetchrow(
-        """
-        SELECT id, owner_user_id, name, work_root, is_default
+        f"""
+        SELECT {_WORK_COLS}
         FROM works
         WHERE id = $1
         """,
@@ -58,13 +66,7 @@ async def get_work(work_id: UUID) -> Work | None:
     )
     if row is None:
         return None
-    return Work(
-        id=row["id"],
-        owner_user_id=row["owner_user_id"],
-        name=row["name"],
-        work_root=row["work_root"],
-        is_default=row["is_default"],
-    )
+    return _work_from_row(row)
 
 
 async def _legacy_workspace_claimed() -> bool:
@@ -97,10 +99,10 @@ async def ensure_default_work(owner_user_id: UUID) -> Work:
     pool = await get_pool()
     try:
         row = await pool.fetchrow(
-            """
-            INSERT INTO works (id, owner_user_id, name, work_root, is_default)
-            VALUES ($1, $2, 'default', $3, true)
-            RETURNING id, owner_user_id, name, work_root, is_default
+            f"""
+            INSERT INTO works (id, owner_user_id, name, work_root, is_default, visibility_seed)
+            VALUES ($1, $2, 'default', $3, true, true)
+            RETURNING {_WORK_COLS}
             """,
             work_id,
             owner_user_id,
@@ -114,13 +116,31 @@ async def ensure_default_work(owner_user_id: UUID) -> Work:
                 return again
         raise
     assert row is not None
-    return Work(
-        id=row["id"],
-        owner_user_id=row["owner_user_id"],
-        name=row["name"],
-        work_root=row["work_root"],
-        is_default=row["is_default"],
+    return _work_from_row(row)
+
+
+async def update_work_visibility_seed(
+    work_id: UUID,
+    *,
+    owner_user_id: UUID,
+    visibility_seed: bool,
+) -> Work | None:
+    """Turn-外 preference: whether this Work may see product seed corpus."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        f"""
+        UPDATE works
+        SET visibility_seed = $3, updated_at = now()
+        WHERE id = $1 AND owner_user_id = $2
+        RETURNING {_WORK_COLS}
+        """,
+        work_id,
+        owner_user_id,
+        bool(visibility_seed),
     )
+    if row is None:
+        return None
+    return _work_from_row(row)
 
 
 async def resolve_session_tenant(
@@ -132,7 +152,7 @@ async def resolve_session_tenant(
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT w.id, w.owner_user_id, w.name, w.work_root, w.is_default
+        SELECT w.id, w.owner_user_id, w.name, w.work_root, w.is_default, w.visibility_seed
         FROM sessions s
         JOIN works w ON w.id = s.work_id
         WHERE s.id = $1 AND s.owner_user_id = $2
@@ -141,13 +161,7 @@ async def resolve_session_tenant(
         owner_user_id,
     )
     if row is not None:
-        return Work(
-            id=row["id"],
-            owner_user_id=row["owner_user_id"],
-            name=row["name"],
-            work_root=row["work_root"],
-            is_default=row["is_default"],
-        )
+        return _work_from_row(row)
     work = await ensure_default_work(owner_user_id)
     await pool.execute(
         "UPDATE sessions SET work_id = $1 WHERE id = $2 AND owner_user_id = $3",

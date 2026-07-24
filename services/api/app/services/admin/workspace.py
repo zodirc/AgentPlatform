@@ -36,6 +36,7 @@ async def resolve_workspace_tenant(
         "work_id": str(work.id),
         "work_root": work.work_root,
         "owner_user_id": str(user.id),
+        "visibility_seed": "true" if work.visibility_seed else "false",
     }
 
 

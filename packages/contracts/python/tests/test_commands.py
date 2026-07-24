@@ -31,8 +31,22 @@ def test_start_turn_command_accepts_tenant_scope() -> None:
         work_id=uuid4(),
         work_root="/data/works/x",
         owner_user_id=uuid4(),
+        visibility_seed=False,
     )
     assert cmd.work_root == "/data/works/x"
+    assert cmd.visibility_seed is False
+
+
+def test_start_turn_command_defaults_visibility_seed_on() -> None:
+    cmd = StartTurnCommand(
+        turn_id=uuid4(),
+        run_id=uuid4(),
+        session_id=uuid4(),
+        scenario_id="writing",
+        message="hello",
+        trace_id=uuid4(),
+    )
+    assert cmd.visibility_seed is True
 
 
 def test_start_turn_command_rejects_invalid_plan_phase() -> None:

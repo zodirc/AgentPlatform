@@ -172,6 +172,7 @@ export type WorkSummary = {
   name: string;
   work_root: string;
   is_default: boolean;
+  visibility_seed?: boolean;
   created_at?: string | null;
 };
 
@@ -181,6 +182,29 @@ export async function fetchDefaultWork(): Promise<WorkSummary> {
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchDefaultWork failed: ${res.status}`);
+  return res.json() as Promise<WorkSummary>;
+}
+
+export async function patchWorkVisibilitySeed(
+  workId: string,
+  visibilitySeed: boolean,
+): Promise<WorkSummary> {
+  const res = await fetch(`${API_BASE}/works/${workId}`, {
+    ...sessionFetchInit,
+    method: "PATCH",
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ visibility_seed: visibilitySeed }),
+  });
+  if (!res.ok) {
+    let detail = `patchWork failed: ${res.status}`;
+    try {
+      const body = (await res.json()) as { detail?: string };
+      if (body.detail) detail = body.detail;
+    } catch {
+      // ignore
+    }
+    throw new Error(detail);
+  }
   return res.json() as Promise<WorkSummary>;
 }
 

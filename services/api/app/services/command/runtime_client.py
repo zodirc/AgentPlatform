@@ -35,6 +35,7 @@ class RuntimeClient:
         work_id: UUID | None = None,
         work_root: str | None = None,
         owner_user_id: UUID | None = None,
+        visibility_seed: bool = True,
         model_mode: str | None = None,
         model_override: dict | None = None,
         ops_eval: bool = False,
@@ -47,6 +48,7 @@ class RuntimeClient:
             "message": message,
             "trace_id": str(trace_id),
             "ops_eval": bool(ops_eval),
+            "visibility_seed": bool(visibility_seed),
         }
         if client_request_id is not None:
             payload["client_request_id"] = str(client_request_id)

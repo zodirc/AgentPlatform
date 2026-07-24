@@ -163,6 +163,7 @@ async def create_turn(
                 work_id=work.id,
                 work_root=work.work_root,
                 owner_user_id=actor.id,
+                visibility_seed=work.visibility_seed,
             )
             listener = request.app.state.event_listener
             await listener.notify(turn["id"])

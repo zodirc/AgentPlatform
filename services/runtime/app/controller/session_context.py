@@ -15,12 +15,15 @@ async def load_session_owner_user_id(session_id: UUID) -> UUID | None:
     )
 
 
-async def load_session_work(session_id: UUID) -> tuple[UUID | None, str | None, UUID | None]:
-    """Return (work_id, work_root, owner_user_id) for TenantContext rebind (docs/27)."""
+async def load_session_work(
+    session_id: UUID,
+) -> tuple[UUID | None, str | None, UUID | None, bool]:
+    """Return (work_id, work_root, owner_user_id, visibility_seed) for TenantContext rebind."""
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT s.owner_user_id, s.work_id, w.work_root
+        SELECT s.owner_user_id, s.work_id, w.work_root,
+               COALESCE(w.visibility_seed, true) AS visibility_seed
         FROM sessions s
         LEFT JOIN works w ON w.id = s.work_id
         WHERE s.id = $1
@@ -28,8 +31,13 @@ async def load_session_work(session_id: UUID) -> tuple[UUID | None, str | None, 
         session_id,
     )
     if row is None:
-        return None, None, None
-    return row["work_id"], row["work_root"], row["owner_user_id"]
+        return None, None, None, True
+    return (
+        row["work_id"],
+        row["work_root"],
+        row["owner_user_id"],
+        bool(row["visibility_seed"]),
+    )
 
 
 async def load_session_context(session_id: UUID) -> dict | None:

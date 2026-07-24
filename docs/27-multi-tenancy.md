@@ -1,6 +1,6 @@
 # 27 — 多租户（Tenant / Work 绑定）
 
-> **状态：MT0–MT5c + MT7 已落地（2026-07-22）** · 划分默认开启 · **多用户 = 个人 Tenant/Work 隔离（无 Org）**  
+> **状态：MT0–MT5d + MT7 已落地（2026-07-24）** · 划分默认开启 · **多用户 = 个人 Tenant/Work 隔离（无 Org）**  
 > **已合入：** Work 划分全链路 · **检索 SQL 硬 ACL + deny 证明** · 记忆隔离 · Works API · Admin/Sources 绑 Work · 并发软闸 · **双 runtime HA（`make up-ha`）**。  
 > **明确不做：** Org、作品显式 share、租户协作 ACL（见 §9 / §11）——产品是「多人各开各的世界」，不是团队共享盘。  
 > **另票：** `search_records` 真表见 [`17`](17-search-records.md) RE5（与已否决的 Org/share 无关）。  
@@ -309,6 +309,7 @@ TenantContext {
 ```
 
 - **无 `mode` 字段**——划分始终生效；差异只在「当前绑定哪个 Work」，不在开关、也不在 Org 成员身份  
+- `visibility_seed` 由控制面按 Work 偏好写入 StartTurn（用户可在设置关闭产品种子）；模型不可改  
 - 写入 Run 侧只读字段或 execution checkpoint 旁路；**逐步不变**  
 - 模型 **不可见** 完整 TenantContext（勿塞进 messages）；需要时只以「当前项目根」类短 runtime_context 出现（字符硬顶，对齐 work index）  
 - 切换 Work = 新 Session 或显式 rebind API；**禁止**同 Run 中途换根  
@@ -640,6 +641,7 @@ TTFB accepted     SLO ≤300ms      增量 ~1–5ms
 | **MT5** | `GET/POST /works`；建 Session 可传 `work_id`（单 Work 无需 UI） | ✅ |
 | **MT5b** | `RUNTIME_MAX_INFLIGHT_TURNS`（默认 16；超额 fail Turn） | ✅ |
 | **MT5c**（成熟证明） | 检索 SQL：`seed OR work_id=$current`（禁 NULL private）；孤儿清理；TenantContext 全字段；Admin/Sources 绑 Work；deny 单测 + `shared.17` / `--filter tenant` | ✅ |
+| **MT5d** | `works.visibility_seed` + 设置页开关；StartTurn 冻结；关则检索/工具/资料库隐藏 seed | ✅ |
 | ~~**MT6**~~ | Org、显式 share | **否决**（见 §11；不做团队共享盘） |
 | **MT7**（扩容面） | 双 runtime + `RUNTIME_URL_MAP` 亲和；`make up-ha` / `eval-ha` | ✅ |
 
