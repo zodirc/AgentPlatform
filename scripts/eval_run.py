@@ -224,6 +224,10 @@ def force_workspace_writable(workspace: Path, *, strict: bool | None = None) -> 
     runtime and breaks writing.02 / writing.10. Use world-writable modes
     (dirs 0777, files 0666) so either uid can unlink/overwrite. Unlink only
     needs wx on the parent directory.
+
+    Also: after host fixture writes under ``.agent/...``, ancestors must stay
+    0777 so runtime can create siblings (``.agent/work/drafts/``). See
+    ``_write_fixture_file`` / ``apply_fixtures``.
     """
     if strict is None:
         strict = _ci_strict_workspace()
@@ -764,25 +768,54 @@ def _workspace_missing_detail(
 
 def apply_fixtures(workspace: Path, case: dict) -> None:
     fixtures = case.get("fixtures", {})
+    wrote = False
     for item in fixtures.get("workspace", []):
         rel = item["path"]
         content = item.get("content", "")
         target = workspace / rel
         _write_fixture_file(target, content, workspace=workspace)
+        wrote = True
 
     setup = case.get("setup", {})
     chars = setup.get("large_file_chars")
     if chars:
         target = workspace / "large_file.md"
         _write_fixture_file(target, "A" * int(chars) + "\n", workspace=workspace)
+        wrote = True
+
+    # Host-created parents (e.g. `.agent/` for writing.10) default to 0755 and
+    # block runtime uid 1000 from mkdir siblings like `.agent/work/drafts/`.
+    if wrote:
+        force_workspace_writable(workspace, strict=False)
+
+
+def _chmod_ancestors_world_writable(path: Path, *, workspace: Path) -> None:
+    """Make every ancestor directory up to workspace mode 0777.
+
+    GHA runner (often uid 1001) creates fixture trees; runtime image runs as
+    ``app`` (uid 1000). Without world-writable ancestors, runtime cannot create
+    sibling dirs under a host-owned parent (writing.10: host writes
+    ``.agent/revisions/legacy.md`` → runtime cannot create ``.agent/work/``).
+    """
+    workspace = workspace.resolve()
+    current = path.resolve() if path.is_dir() else path.parent.resolve()
+    while True:
+        try:
+            current.chmod(0o777)
+        except OSError:
+            pass
+        if current == workspace or current.parent == current:
+            break
+        try:
+            current.relative_to(workspace)
+        except ValueError:
+            break
+        current = current.parent
 
 
 def _write_fixture_file(target: Path, content: str, *, workspace: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        target.parent.chmod(0o777)
-    except OSError:
-        pass
+    _chmod_ancestors_world_writable(target.parent, workspace=workspace)
     try:
         target.write_text(content, encoding="utf-8")
     except PermissionError:
@@ -802,13 +835,13 @@ def _write_fixture_file(target: Path, content: str, *, workspace: Path) -> None:
                 f"cannot write eval fixture {rel} (host uid={os.getuid()} vs "
                 f"runtime file owner). chmod reclaim failed."
             ) from exc
-    # Runtime (uid 1000) must be able to patch/export these host-written files.
+    # Runtime (uid 1000) must be able to patch/export these host-written files
+    # and create sibling directories under the same ancestors.
     try:
         target.chmod(0o666)
-        target.parent.chmod(0o777)
     except OSError:
         pass
-
+    _chmod_ancestors_world_writable(target.parent, workspace=workspace)
 
 def check_runtime_logs(needle: str) -> bool:
     try:
@@ -1258,9 +1291,15 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
                     retrieval_matched = True
                     break
         if tool_name and not name_seen:
-            raise AssertionError(f"{case_id}: tool {tool_name!r} missing from tool_timeline")
+            raise AssertionError(
+                f"{case_id}: tool {tool_name!r} missing from tool_timeline; "
+                f"timeline={_format_tool_timeline(timeline)}"
+            )
         if needle and not matched:
-            raise AssertionError(f"{case_id}: tool {tool_name!r} missing result match {needle!r}")
+            raise AssertionError(
+                f"{case_id}: tool {tool_name!r} missing result match {needle!r}; "
+                f"timeline={_format_tool_timeline(timeline)}"
+            )
         if expected_delivery is not None and not delivery_matched:
             raise AssertionError(
                 f"{case_id}: tool {tool_name!r} delivery_status {last_delivery!r} "

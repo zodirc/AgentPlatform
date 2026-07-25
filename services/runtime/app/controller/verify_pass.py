@@ -23,7 +23,12 @@ def _ref_path_re():
 
 
 def _workspace() -> Path:
-    return Path(settings.workspace_root).resolve()
+    try:
+        from app.tenant_context import current_work_root_path
+
+        return current_work_root_path()
+    except Exception:
+        return Path(settings.workspace_root).resolve()
 
 
 def _iter_draft_texts(root: Path) -> list[tuple[str, str]]:

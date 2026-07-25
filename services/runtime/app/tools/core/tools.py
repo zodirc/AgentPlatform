@@ -1302,7 +1302,8 @@ async def export_document(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    root = Path(settings.workspace_root).resolve()
+    # Prefer bound Work root so outline + drafts share the same tree as tools.
+    root = _workspace_root()
     export_profile = (profile or settings.writing_export_profile or "novel-zh").strip() or "novel-zh"
     requested = [str(section_id).strip() for section_id in (section_ids or []) if str(section_id).strip()]
     if not requested:

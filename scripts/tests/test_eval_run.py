@@ -96,6 +96,50 @@ def test_write_fixture_file_overwrites_after_chmod(tmp_path: Path) -> None:
     assert target.read_text() == "new-marker\n"
 
 
+def test_write_fixture_makes_agent_ancestors_world_writable(tmp_path: Path) -> None:
+    """writing.10: host fixture under .agent/revisions must leave .agent wx for uid 1000."""
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    # Simulate umask-created 0755 parents (GHA runner uid ≠ runtime uid 1000).
+    agent = workspace / ".agent"
+    revisions = agent / "revisions"
+    revisions.mkdir(parents=True)
+    agent.chmod(0o755)
+    revisions.chmod(0o755)
+
+    eval_run._write_fixture_file(
+        revisions / "legacy.md",
+        "Legacy revision content must not be exported.\n",
+        workspace=workspace,
+    )
+
+    assert (revisions / "legacy.md").is_file()
+    assert agent.stat().st_mode & 0o0777 == 0o777
+    assert revisions.stat().st_mode & 0o0777 == 0o777
+    # Runtime must be able to create .agent/work/drafts as a different uid would.
+    work_drafts = agent / "work" / "drafts"
+    work_drafts.mkdir(parents=True)
+    (work_drafts / "manuscript.md").write_text("ok\n", encoding="utf-8")
+    assert (work_drafts / "manuscript.md").read_text(encoding="utf-8") == "ok\n"
+
+
+def test_apply_fixtures_world_writable_after_agent_tree(tmp_path: Path) -> None:
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    case = {
+        "fixtures": {
+            "workspace": [
+                {
+                    "path": ".agent/revisions/legacy.md",
+                    "content": "Legacy\n",
+                }
+            ]
+        }
+    }
+    eval_run.apply_fixtures(workspace, case)
+    assert (workspace / ".agent").stat().st_mode & 0o0777 == 0o777
+
+
 def test_reset_workspace_preserves_seed_tree(tmp_path: Path) -> None:
     """Compose RO-mounts seed under sources/seed; reset must not rmtree it."""
     workspace = tmp_path / "eval-workspace"
