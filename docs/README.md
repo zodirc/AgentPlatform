@@ -24,7 +24,7 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 | 12 | [model-harness](12-model-harness.md) | Harness（AH1–AH4） |
 | 13 | [rate-redlines](13-rate-redlines.md) | **速率红线 R1–R5** |
 | 14 | [writing-quality](14-writing-quality.md) | **写作模块**（WQ0–WQ4 ✅） |
-| 15 | [rag-and-sources](15-rag-and-sources.md) | **RAG / 资料库**（IX0–IX4 ✅；**RQ1a–e ✅**） |
+| 15 | [rag-and-sources](15-rag-and-sources.md) | **RAG / 资料库**（IX0–IX4 ✅；**RQ1a–e ✅**；§3.4 向量相似度原理） |
 | 16 | [user-session-history](16-user-session-history.md) | 会话历史（U0–U2 ✅） |
 | 17 | [search-records](17-search-records.md) | `search_records` 蓝图 |
 | 18 | [multimodal-design](18-multimodal-design.md) | 多模态设计（待落地） |
