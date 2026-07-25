@@ -64,7 +64,7 @@
 | Q8 | 前若干轮变摘要后，原始上下文还要吗？ | **HM2**：`session_raw_snapshots` append-only；Ops `GET /ops/raw/turns/{id}`；永不进模型窗 | **已覆盖** | transcript 仍可 trim 进窗 |
 | Q9 | 长期记忆何时检索？ | `remember`/`recall` 按需；**HM9** Intake 启发式 hint（不自动注入） | **已覆盖** | 禁止每轮向量注入（§5） |
 | Q10 | 每轮是否注入长短期记忆？是否同时注入？ | 短期 = 组窗；长期 = 工具按需 | **已覆盖** | HM9 只加 hint |
-| Q11 | 如何降低工具过多带来的 Token？ | Profile / ToolScope；**HM6**=CQ2 hygiene + AQ1/WN3（WT5）cache 分家 | **已覆盖** | **有意不做**预循环 LLM 选工具 |
+| Q11 | 如何降低工具过多带来的 Token？ | Profile / Plan / late ToolScope；description hygiene；稳定前缀 cache | **已覆盖** | 面试口述见 [21](21-agent-system-qa.md) Q12 §5；**有意不做**预循环 LLM 选工具 |
 | Q12–Q16 | RAG 链路与相似度 | tool-mediated hybrid + lexical rerank；索引 Turn 外 | **已覆盖（架构更贴 Agent）** | 效果向实验；可观测 **HM5** |
 | Q17 | 多模型分工？ | 主模型 + 可选 compact + embed；无路由小模型 | **部分** | 保持规则 Scope；**有意不做**热路径 router |
 | Q18 | 如何控制幻觉？ | evidence + `unverified` + `/verify`；**HM7** 导出 warn/block | **已覆盖** | **有意不做** Turn 末 LLM judge |
