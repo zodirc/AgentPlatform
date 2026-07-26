@@ -328,7 +328,9 @@ function SubagentSessionView({
                   {String(tool.tool_name ?? "tool")}
                 </span>
                 <span className="text-muted-foreground">
-                  {String(tool.status ?? "")}
+                  {String(tool.status ?? "") === "skipped"
+                    ? "已跳过"
+                    : String(tool.status ?? "")}
                 </span>
               </div>
               {tool.stream_output ? (

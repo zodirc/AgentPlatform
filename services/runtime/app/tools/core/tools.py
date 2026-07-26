@@ -228,12 +228,28 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     end_line = int(sliced["end_line"])
     total_lines = int(sliced["total_lines"])
     truncated = bool(sliced["truncated"])
+    # Whole-file complete only when reading from line 1 through EOF (docs/34 RC2).
+    # A tail window that reaches EOF is eof_from_offset — not "file already in hand".
+    whole_file_complete = (not truncated) and offset == 1 and (
+        total_lines == 0 or end_line >= total_lines
+    )
+    eof_from_offset = (not truncated) and offset > 1 and end_line >= total_lines and total_lines > 0
     if truncated:
-        summary = f"Read {path} lines {offset}–{end_line}/{total_lines} (truncated; next_offset={sliced['next_offset']})"
+        summary = (
+            f"Read {path} lines {offset}–{end_line}/{total_lines} "
+            f"(truncated; next_offset={sliced['next_offset']})"
+        )
     elif total_lines == 0:
         summary = f"Read {path} (empty)"
-    else:
+    elif whole_file_complete:
         summary = f"Read {path} lines {offset}–{end_line}/{total_lines} (complete)"
+    elif eof_from_offset:
+        summary = (
+            f"Read {path} lines {offset}–{end_line}/{total_lines} (eof_from_offset); "
+            "not a whole-file complete — do not treat as full-file coverage"
+        )
+    else:
+        summary = f"Read {path} lines {offset}–{end_line}/{total_lines}"
     return {
         "path": path,
         "content": sliced["content"],
@@ -242,6 +258,7 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
         "total_lines": total_lines,
         "truncated": truncated,
         "next_offset": sliced["next_offset"],
+        "whole_file_complete": whole_file_complete,
         "summary": summary,
         **({"hint": sliced["hint"]} if sliced.get("hint") else {}),
     }

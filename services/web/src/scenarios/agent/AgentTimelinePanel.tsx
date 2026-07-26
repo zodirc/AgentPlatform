@@ -46,6 +46,16 @@ function toolLabel(item: TimelineItem, events: TurnEvent[] = []): string {
   return name;
 }
 
+function toolStatusLabel(status: string): string {
+  if (status === "skipped") return "已跳过";
+  if (status === "error") return "失败";
+  if (status === "denied") return "已拒绝";
+  if (status === "timeout") return "超时";
+  if (status === "ok") return "完成";
+  if (status === "running") return "进行中";
+  return status;
+}
+
 function ToolRow({
   item,
   events,
@@ -63,6 +73,7 @@ function ToolRow({
 }) {
   const status = String(item.status ?? "pending");
   const isRunning = status === "running";
+  const isSkipped = status === "skipped";
   const clickable = Boolean(onSelect) && index != null;
   return (
     <li>
@@ -78,7 +89,9 @@ function ToolRow({
               ? "border-warning/40 bg-warning-muted"
               : status === "error" || status === "denied"
                 ? "border-destructive/40 bg-destructive/10"
-                : "border-border bg-background"
+                : isSkipped
+                  ? "border-border/60 bg-muted/30"
+                  : "border-border bg-background"
         } ${clickable ? "cursor-pointer hover:border-input" : "cursor-default"}`}
         onClick={() => {
           if (index != null) onSelect?.(item, index);
@@ -88,7 +101,13 @@ function ToolRow({
           <span className="font-medium text-foreground">
             {toolLabel(item, events)}
           </span>
-          <span className="text-muted-foreground">{status}</span>
+          <span
+            className={
+              isSkipped ? "text-muted-foreground/80" : "text-muted-foreground"
+            }
+          >
+            {toolStatusLabel(status)}
+          </span>
         </div>
         {item.stream_output ? (
           <pre className="mt-2 max-h-20 overflow-auto whitespace-pre-wrap text-muted-foreground">

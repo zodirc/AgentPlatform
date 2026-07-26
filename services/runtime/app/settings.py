@@ -50,6 +50,8 @@ class Settings(BaseSettings):
     retrieval_table_detach_min_rows: int = 6
     retrieval_table_detach_min_chars: int = 800
     search_sources_max_per_turn: int = 3
+    # docs/34 RC5 — hard cap on read_file executions per Turn (0 = disabled).
+    read_file_max_per_turn: int = 16
     search_sources_excerpt_chars: int = 200
     search_sources_low_score_hint: float = 0.15
     # RE1: keyword fallback section alignment (docs/15); oversize / timeout → file excerpt only.

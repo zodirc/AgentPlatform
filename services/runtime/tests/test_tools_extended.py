@@ -57,6 +57,7 @@ async def test_read_file_offset_limit_and_complete_flag(workspace: Path) -> None
 
     full = await core.read_file("lines.txt")
     assert full["truncated"] is False
+    assert full["whole_file_complete"] is True
     assert full["total_lines"] == 20
     assert full["next_offset"] is None
     assert "complete" in full["summary"]
@@ -71,8 +72,14 @@ async def test_read_file_offset_limit_and_complete_flag(workspace: Path) -> None
 
     rest = await core.read_file("lines.txt", offset=page["next_offset"])
     assert rest["truncated"] is False
+    assert rest["whole_file_complete"] is False
+    assert "eof_from_offset" in rest["summary"]
     assert rest["content"].startswith("line-8")
 
+    full2 = await core.read_file("lines.txt", offset=1)
+    assert full2["whole_file_complete"] is True
+    assert "(complete)" in full2["summary"]
+    assert "eof_from_offset" not in full2["summary"]
 
 @pytest.mark.asyncio
 async def test_resolve_path_rejects_escape(workspace: Path) -> None:

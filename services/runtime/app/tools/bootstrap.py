@@ -15,12 +15,14 @@ def build_registry() -> ToolRegistry:
             name="read_file",
             description=(
                 "Read a file from the workspace (preferred over any shell paging). "
-                "Omit limit unless the file is very large. truncated=false or summary "
-                "(complete) means stop reading that path this Turn — do not re-call with "
-                "a smaller limit. If truncated=true, continue with next_offset only. "
-                "Never head/tail/sed/cat. Optional offset (1-based) / limit for large files. "
-                "For manuscript.md / draft manuscript, pass section_id to load one chapter "
-                "(default lists chapters only); set full=true only for whole-book review."
+                "Omit limit unless the file is very large. Summary (complete) / "
+                "whole_file_complete=true means the whole file is in hand — stop reading "
+                "that path this Turn (runtime enforces this). Tail windows that reach EOF "
+                "use (eof_from_offset), not (complete). If truncated=true, continue with "
+                "next_offset only. Never head/tail/sed/cat. Optional offset (1-based) / "
+                "limit for large files. For manuscript.md / draft manuscript, pass "
+                "section_id to load one chapter (default lists chapters only); set "
+                "full=true only for whole-book review."
             ),
             parameters={
                 "type": "object",

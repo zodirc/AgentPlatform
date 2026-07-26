@@ -367,6 +367,13 @@ class ContextEngine:
         if budgeted:
             trace.append({"strategy": "budget", "detail": f"truncated_{budgeted}_tool_results"})
 
+        # docs/34 RC4: drop stale read_file bodies before microcompact (always-on, cheap).
+        messages, folded_reads = _fold_stale_read_file_results(messages, keep_last_per_path=1)
+        if folded_reads:
+            trace.append(
+                {"strategy": "read_fold", "detail": f"folded_{folded_reads}_read_file_results"}
+            )
+
         messages, micro = _microcompact_tool_results(messages)
         if micro:
             trace.append({"strategy": "microcompact", "detail": f"folded_{micro}_tool_results"})
@@ -745,6 +752,105 @@ def _preserve_writing_section_extract(text: str) -> bool:
         '"writing_section_extract": true' in text
         or '"writing_section_extract":true' in text
     )
+
+
+def _tool_use_name_by_id(messages: list[dict[str, Any]]) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for msg in messages:
+        if msg.get("role") != "assistant":
+            continue
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "tool_use":
+                continue
+            tid = str(block.get("id") or "")
+            name = str(block.get("name") or "")
+            if tid and name:
+                mapping[tid] = name
+    return mapping
+
+
+def _fold_stale_read_file_results(
+    messages: list[dict[str, Any]],
+    *,
+    keep_last_per_path: int = 1,
+    min_content_chars: int = 400,
+) -> tuple[list[dict[str, Any]], int]:
+    """docs/34 RC4: keep only the latest read_file body per path in the assemble view."""
+    from app.engine.read_registry import normalize_read_path, omit_read_file_content_payload
+
+    name_by_id = _tool_use_name_by_id(messages)
+    # (msg_index, block_index, path)
+    candidates: list[tuple[int, int, str]] = []
+    for mi, msg in enumerate(messages):
+        if msg.get("role") != "tool":
+            continue
+        for bi, block in enumerate(msg.get("content", []) or []):
+            if block.get("type") != "tool_result":
+                continue
+            tid = str(block.get("tool_use_id") or "")
+            if name_by_id.get(tid) != "read_file":
+                continue
+            text = str(block.get("content") or "")
+            if len(text) < min_content_chars:
+                continue
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(data, dict):
+                continue
+            if data.get("error") or data.get("_folded_read") or data.get("writing_section_extract"):
+                continue
+            content = data.get("content")
+            if not isinstance(content, str) or len(content) < min_content_chars:
+                continue
+            path = normalize_read_path(str(data.get("path") or "")) or f"__anon_{tid}"
+            candidates.append((mi, bi, path))
+
+    if not candidates:
+        return messages, 0
+
+    by_path: dict[str, list[tuple[int, int]]] = {}
+    for mi, bi, path in candidates:
+        by_path.setdefault(path, []).append((mi, bi))
+
+    fold_keys: set[tuple[int, int]] = set()
+    keep = max(1, int(keep_last_per_path))
+    for items in by_path.values():
+        for mi, bi in items[:-keep]:
+            fold_keys.add((mi, bi))
+
+    if not fold_keys:
+        return messages, 0
+
+    out: list[dict[str, Any]] = []
+    folded = 0
+    for mi, msg in enumerate(messages):
+        if msg.get("role") != "tool":
+            out.append(msg)
+            continue
+        content = msg.get("content", [])
+        new_blocks: list[dict[str, Any]] = []
+        changed = False
+        for bi, block in enumerate(content or []):
+            if (mi, bi) not in fold_keys:
+                new_blocks.append(block)
+                continue
+            text = str(block.get("content") or "")
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                new_blocks.append(block)
+                continue
+            if not isinstance(data, dict):
+                new_blocks.append(block)
+                continue
+            slim = omit_read_file_content_payload(data)
+            new_blocks.append({**block, "content": json.dumps(slim, ensure_ascii=False)})
+            folded += 1
+            changed = True
+        out.append({**msg, "content": new_blocks} if changed else msg)
+    return out, folded
 
 
 def _message_has_tool_use(msg: dict[str, Any]) -> bool:

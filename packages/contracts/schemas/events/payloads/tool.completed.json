@@ -24,12 +24,19 @@
         "ok",
         "error",
         "denied",
-        "timeout"
-      ]
+        "timeout",
+        "skipped"
+      ],
+      "description": "skipped = harness policy noop (e.g. read_after_complete); not a tool failure."
     },
     "summary": {
       "type": "string",
       "maxLength": 4096
+    },
+    "policy": {
+      "type": "string",
+      "maxLength": 128,
+      "description": "Optional policy id when status=skipped (read_after_complete, read_overlap, read_budget)."
     },
     "is_truncated": {
       "type": "boolean"
@@ -37,6 +44,21 @@
     "bytes_written": {
       "type": "integer",
       "minimum": 0
+    },
+    "path": {
+      "type": "string",
+      "maxLength": 4096,
+      "description": "Workspace path for write_file / edit_file (projection / Ops)."
+    },
+    "old_text": {
+      "type": "string",
+      "maxLength": 65536,
+      "description": "Prior span or file preview for write/edit (sticky apply without approval.requested)."
+    },
+    "new_text": {
+      "type": "string",
+      "maxLength": 65536,
+      "description": "New span or file preview for write/edit."
     },
     "delivery_status": {
       "type": "string",

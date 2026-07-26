@@ -1,6 +1,6 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–34 连续编号，一文一模块**；变更只改对应正文。
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
@@ -14,11 +14,12 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 | Loop / 工具 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) |
 | 检索坏例怎么看 | [29](29-ops-eval-console.md) §6–§8（Ops **旁路**，不影响工作台速率） |
 | 沙箱现状 | [31](31-sandbox-escape-and-hardening.md) §0（bwrap 已落地） |
+| 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) |
 | 面试原理 | [21](21-agent-system-qa.md) |
 
 ---
 
-## 模块目录（01–33）
+## 模块目录（01–34）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -55,6 +56,7 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 | 31 | [sandbox-escape-and-hardening](31-sandbox-escape-and-hardening.md) | **沙箱逃逸与防护**（威胁 SE · SB0–SB3/PR2 已落地 · 敏感词钩子 SW 暂空） |
 | 32 | [execution-plane-and-local-runner](32-execution-plane-and-local-runner.md) | **执行面落点**（写作=云端 Work+下载；本地 Runner 非所需 · ⏸） |
 | 33 | [harness-maturity-backlog](33-harness-maturity-backlog.md) | **Harness 工程完善 ✅**（HM1–HM9；Q19 Ops 检索 · 预压缩 · raw · 增量摘要） |
+| 34 | [read-cache-and-token-discipline](34-read-cache-and-token-discipline.md) | **读文件降本 + 分层缓存**（RC1–RC5 + skipped UX ✅；手测见 §0.5；RC6 复测） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -71,7 +73,7 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 | 会话归属 | [16](16-user-session-history.md) |
 | 多租户 / 作品根 | [27](27-multi-tenancy.md)（**已落地** · 默认开启 · 个人默认 Work · 否决 Org） |
 | Proof 门禁 / 体验信号 | [28](28-proof-gate-and-ux-signals.md)（**已落地** · `make gate` / `make ux-signals` · 不碰 loop） |
-| 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） · [33](33-harness-maturity-backlog.md)（**HM 工程完善票**） |
+| 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） · [33](33-harness-maturity-backlog.md)（**HM 工程完善票**） · [34](34-read-cache-and-token-discipline.md)（**读降本 / L1–L2 缓存**） |
 | 质量与灵敏度提案 | [30](30-quality-and-agility.md)（代码生成 CQ · 灵敏度 AQ · 写作下一刀 WN；全部受 [13](13-rate-redlines.md) R1–R5 约束） |
 | 沙箱 / exec 隔离 / 脱敏 | [31](31-sandbox-escape-and-hardening.md)（威胁枚举 · SB/PR；受 [13](13-rate-redlines.md) 约束；**敏感词词表暂空**） |
 | 执行面 / 本地工作区 | [32](32-execution-plane-and-local-runner.md)（**写作已收敛云端+下载**；本地 Runner ⏸） |
@@ -103,6 +105,7 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 | 沙箱逃逸与防护 SE / SB / PR / SW | 🔧 E1–E3+PR2 ✅；E4 默认无网⏸；PR1/SW1/SB4/SB5/PR3 待续；敏感词暂空 | **[31](31-sandbox-escape-and-hardening.md)** |
 | 执行面落点 / 本地 Runner | ✅ 写作=云端+下载；本地 ⏸ | **[32](32-execution-plane-and-local-runner.md)** |
 | Harness 工程完善 HM1–HM9 | ✅ 核心落地（预压缩 / raw / 增量 / 检索审计 / 信封 / 导出门禁） | **[33](33-harness-maturity-backlog.md)** · Ops [29](29-ops-eval-console.md) §6–§7 |
+| 读文件降本 / 分层缓存 RC1–RC7 | ✅ RC1–RC5 + skipped UX；手测 §0.5 | **[34](34-read-cache-and-token-discipline.md)** |
 
 ---
 

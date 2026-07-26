@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 from uuid import UUID
 
+from app.engine.read_registry import PathReadState
+
 
 @dataclass
 class Usage:
@@ -37,7 +39,8 @@ class TurnState:
     volatile_context: str = ""
     # After user approves one write-class tool this Turn, further sticky writes skip approval.
     writes_preapproved: bool = False
-
+    # docs/34 RC1 — Turn-scoped read_file coverage (hard-gate read-after-complete).
+    read_registry: dict[str, PathReadState] = field(default_factory=dict)
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

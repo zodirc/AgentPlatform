@@ -314,10 +314,11 @@ read_file(path, offset=K)               → 继续；直到 truncated=false / (c
 2. **软 Ban + 默认回路置顶**：先「读一次 → 最小 span 编辑 → 按需验证」，Ban 用具体反例压 shell pager / 读后测绘 / propose 空转。  
 3. **编辑主路径收成一条**：普通编码默认 `edit_file`；工具描述写明 propose 不改盘。  
 4. **离线 rubric**：盯过量 `read_file`、propose+edit 双轨 churn（不进热路径）。  
-5. **部署纪律**：粘性审批等在 **runtime**；只更新 Web 文案会「免批按钮仍弹」。
+5. **部署纪律**：粘性审批等在 **runtime**；只更新 Web 文案会「免批按钮仍弹」。  
+6. **读状态硬闸（docs/34 RC1）**：Turn 内 `whole_file_complete` 后再 `read_file` → `status=skipped`（非红字 error）、不读盘；`edit_file`/patch 失败豁免一次；真 `next_offset` 续读仍允许。`(complete)` 仅表示从第 1 行读到 EOF（RC2）。手测：同场景从累计 **in≈1.2M** 落到约 **267k 面板 / ~84k 账单差分**，结束窗口 **~28k**（详见 [34 §0.5](34-read-cache-and-token-discipline.md)）。
 
-刻意不做：全局硬禁 `head`/`sed`；引擎硬拒第二次 `read_file`；为选工具再加预分类模型或每轮 judge。
-
+刻意不做：全局硬禁 `head`/`sed`；为选工具再加预分类模型或每轮 judge；热路径 LLM「是否该再读」。  
+（历史：曾有意不做引擎硬拒第二次 `read_file`；已由 RC1 取代。）
 ---
 
 #### 7. 决策口诀（面试可背、模型可守）
@@ -326,8 +327,9 @@ read_file(path, offset=K)               → 继续；直到 truncated=false / (c
 
 ```text
 已知路径 → read_file（小文件不要带 limit）
-  truncated=false 或 summary 含 (complete) → 停读，去改
+  whole_file_complete / summary 含 (complete) → 停读，去改（runtime 硬拒再读）
   truncated=true → 只允许 read_file(offset=next_offset)
+  eof_from_offset → 仅尾窗到 EOF，不是整文件已读完
   禁止用 shell 当 pager
 ```
 

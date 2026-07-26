@@ -6,7 +6,7 @@ Shell/tests run in an OS tool sandbox when available: **writable work root only*
 ## Default loop
 
 1. Resolve the target path (user text or one `glob`/`grep` — do not survey the tree).
-2. `read_file` when you need contents (omit `limit` unless the file is huge). If the result has `truncated=false` or summary says `(complete)`, you already have the whole file — **edit next**. If `truncated=true`, continue once with `offset=next_offset`, then edit.
+2. `read_file` when you need contents (omit `limit` unless the file is huge). If the result has `whole_file_complete=true` or summary says `(complete)`, you already have the **whole** file — **edit next** (runtime rejects further reads on that path). Tail windows ending at EOF say `(eof_from_offset)` — that is **not** whole-file coverage. If `truncated=true`, continue once with `offset=next_offset`, then edit.
 3. Apply a **minimal** in-place edit with **`edit_file`** (default). Use `write_file` only for new files. Use `propose_patch` only when you need a pending UI diff / accept flow — it does **not** change the file by itself.
 4. Verify only when it applies (see Verify). Then give a short summary of what changed / what remains.
 5. **Stop when the deliverable exists.** Exploring is not done.
@@ -16,7 +16,7 @@ Priority when rules conflict: **user intent this Turn > Ban list > minimal diff 
 ## Ban: anti-patterns（同 Turn 内禁止）
 
 - **Shell as a pager:** Do not use `run_command` with `cat`/`head`/`tail`/`sed -n`/`awk`/`less`/`wc` **to page a source file you should open with `read_file`**. Those commands remain fine for builds, installs, scripts, and non-pager pipelines. For symbol/string search prefer the **`grep` tool** (not shell-grep-as-pager). Continuation of a large file = `read_file(offset=next_offset)`, never shell slices.
-- **Read-after-complete:** any further `read_file` on the same path after `truncated=false` / `(complete)`, including with a new `limit` or `offset` — unless a patch/edit just failed and you must re-read that path once.
+- **Read-after-complete:** any further `read_file` on the same path after `whole_file_complete=true` / summary `(complete)`, including with a new `limit` or `offset` — the runtime **hard-rejects** these (short error, no disk read). Exception: one automatic re-read after an `edit_file` / patch failure on that path. Truncated continuation with `offset=next_offset` remains allowed.
 - **Limit paging a complete file:** do not call `read_file` with `limit` after you already received a complete read of that path.
 - **Propose-then-redo:** a streak of `propose_patch` followed by re-doing the same edits via `edit_file`. Pick **one** path: default `edit_file`.
 - **Full-file rewrite:** `write_file` on an existing `*.html` / `*.js` / `*.ts` / `*.py` / etc. after you already read it, unless the user explicitly asked to replace / rewrite the whole file.

@@ -14,7 +14,7 @@
 | **Demo** | 见 [docs/DEMO.md](docs/DEMO.md) |
 | **旁路观测** | `/ops/<OPS_TEST_SECRET>/…`（评测 / 检索审计 / 信封 / Raw）——**不影响工作台热路径** · [docs/29](docs/29-ops-eval-console.md) |
 
-完整连续目录见 **[docs/README.md](docs/README.md)**（01–33）。
+完整连续目录见 **[docs/README.md](docs/README.md)**（01–34）。
 
 ## 为什么要重写
 
@@ -47,6 +47,7 @@
 | [14 写作](docs/14-writing-quality.md) | WQ0–WQ4 |
 | [15 RAG / 资料库](docs/15-rag-and-sources.md) | 索引、验收、票状态 |
 | [29 Ops](docs/29-ops-eval-console.md) | 评测台 + 检索/信封/Raw 观测 |
+| [34 读降本](docs/34-read-cache-and-token-discipline.md) | Turn 内 read 硬闸 / 折叠 / skipped UX（§0.5 手测） |
 | [31 沙箱](docs/31-sandbox-escape-and-hardening.md) | exec 隔离（bwrap） |
 | [contracts](docs/contracts.md) | API / 事件 / DDL |
 
@@ -122,7 +123,7 @@ make runtime-test   # Python 3.11+
 ```
 AgentPlatform/
 ├── README.md
-├── docs/                    # 架构与规范（01–33）· DEMO.md
+├── docs/                    # 架构与规范（01–34）· DEMO.md
 ├── deploy/
 │   ├── docker-compose.yml   # 唯一 compose 入口
 │   ├── caddy/               # 边缘网关（Caddyfile）

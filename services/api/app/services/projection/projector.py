@@ -218,6 +218,8 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                     if item.get("tool_call_id") == tool_call_id:
                         item["status"] = payload.get("status", "ok")
                         item["summary"] = payload.get("summary")
+                        if payload.get("policy") is not None:
+                            item["policy"] = payload.get("policy")
                         item["subagent_id"] = subagent_id
                         break
                 _mark_file_write_applied(
@@ -339,6 +341,8 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 target["summary"] = payload.get("summary")
                 if payload.get("tool_name"):
                     target["tool_name"] = payload.get("tool_name")
+                if payload.get("policy") is not None:
+                    target["policy"] = payload.get("policy")
                 if payload.get("delivery_status") is not None:
                     target["delivery_status"] = payload.get("delivery_status")
                 if payload.get("delivery_issues") is not None:
@@ -347,7 +351,9 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                     target["output_path"] = payload.get("output_path")
                 if payload.get("bytes_written") is not None:
                     target["bytes_written"] = payload.get("bytes_written")
-            latest_output = payload.get("summary") or latest_output
+            # Policy skips are tips, not the turn's latest_output headline.
+            if payload.get("status") != "skipped":
+                latest_output = payload.get("summary") or latest_output
             _mark_file_write_applied(
                 artifacts,
                 payload=payload,

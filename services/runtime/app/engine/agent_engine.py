@@ -9,6 +9,14 @@ from typing import Any, Awaitable, Callable
 
 from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
+from app.engine.read_registry import (
+    deny_redundant_read,
+    is_mutating_file_tool_failure,
+    note_edit_failure_allows_reread,
+    path_from_tool_arguments,
+    record_successful_read,
+    user_facing_policy_summary,
+)
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message
 from app.model.gateway import ModelError, ModelGateway, ModelResponse, StreamActivity
 from app.observability.metrics import record_step_duration, record_tool_call, record_tool_misuse
@@ -62,6 +70,7 @@ class AgentEngine:
         self._tool_result_cache: dict[str, dict[str, Any]] = {}
         self._tool_repeat_counts: dict[str, int] = {}
         self._search_sources_calls = 0
+        self._read_file_calls = 0
         self._evidence_citation_ids: set[str] = set()
         self._tool_specs = list(tools)
         self._openai_tools = self._tools_payload(tools)
@@ -554,6 +563,98 @@ class AgentEngine:
             step_index=step_index,
         )
 
+        if tool_name == "read_file":
+            args = arguments if isinstance(arguments, dict) else {}
+            try:
+                read_offset = int(args.get("offset") or 1)
+            except (TypeError, ValueError):
+                read_offset = 1
+            if read_offset < 1:
+                read_offset = 1
+            read_path = path_from_tool_arguments(args)
+            deny = deny_redundant_read(
+                state.read_registry,
+                path=read_path,
+                offset=read_offset,
+            )
+            if deny:
+                kind = (
+                    "read_after_complete"
+                    if deny.startswith("read_after_complete")
+                    else "read_overlap"
+                )
+                ui_summary = user_facing_policy_summary(kind, path=read_path)
+                # Soft tip to the model (not is_error) + skipped event for Web (not red error).
+                result = {
+                    "status": "skipped",
+                    "policy": kind,
+                    "path": read_path,
+                    "summary": ui_summary,
+                    "hint": deny,
+                }
+                record_tool_misuse(kind=kind, tool_name="read_file")
+                state.messages.append(
+                    tool_result_message(
+                        tool_call_id,
+                        json.dumps(result, ensure_ascii=False),
+                        is_error=False,
+                    )
+                )
+                await self._write_event(
+                    event_type="tool.completed",
+                    payload={
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                        "status": "skipped",
+                        "policy": kind,
+                        "summary": ui_summary,
+                        **({"path": read_path} if read_path else {}),
+                    },
+                    step_index=step_index,
+                )
+                record_tool_call(tool_name=tool_name, status="skipped")
+                return ui_summary
+
+            budget = int(getattr(settings, "read_file_max_per_turn", 0) or 0)
+            if budget > 0:
+                self._read_file_calls += 1
+                if self._read_file_calls > budget:
+                    ui_summary = user_facing_policy_summary(
+                        "read_budget", path=read_path, budget=budget
+                    )
+                    result = {
+                        "status": "skipped",
+                        "policy": "read_budget",
+                        "path": read_path,
+                        "summary": ui_summary,
+                        "hint": (
+                            f"read_file limit ({budget}) reached this Turn; "
+                            "edit with content already read, or finish the deliverable."
+                        ),
+                    }
+                    record_tool_misuse(kind="read_budget", tool_name="read_file")
+                    state.messages.append(
+                        tool_result_message(
+                            tool_call_id,
+                            json.dumps(result, ensure_ascii=False),
+                            is_error=False,
+                        )
+                    )
+                    await self._write_event(
+                        event_type="tool.completed",
+                        payload={
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                            "status": "skipped",
+                            "policy": "read_budget",
+                            "summary": ui_summary,
+                            **({"path": read_path} if read_path else {}),
+                        },
+                        step_index=step_index,
+                    )
+                    record_tool_call(tool_name=tool_name, status="skipped")
+                    return ui_summary
+
         if tool_name == "search_sources":
             budget = settings.search_sources_max_per_turn
             if budget > 0:
@@ -606,7 +707,15 @@ class AgentEngine:
                     step_index=step_index,
                 )
 
-        result = self._lookup_tool_cache(tool_name, arguments)
+        result = None
+        skip_read_cache = False
+        if tool_name == "read_file":
+            key = path_from_tool_arguments(arguments if isinstance(arguments, dict) else {})
+            st = state.read_registry.get(key) if key else None
+            # After edit failure we must hit disk, not the pre-edit cached blob.
+            skip_read_cache = bool(st and st.allow_reread_once)
+        if not skip_read_cache:
+            result = self._lookup_tool_cache(tool_name, arguments)
         if result is None:
             result = await self._executor.run(
                 tool_name=tool_name,
@@ -615,6 +724,35 @@ class AgentEngine:
                 state=state,
             )
             self._store_tool_cache(tool_name, arguments, result)
+
+        if tool_name == "read_file" and isinstance(result, dict) and not result.get("error"):
+            try:
+                off = int(result.get("offset") or 1)
+            except (TypeError, ValueError):
+                off = 1
+            try:
+                end_line = int(result.get("end_line") or 0)
+            except (TypeError, ValueError):
+                end_line = 0
+            next_off = result.get("next_offset")
+            try:
+                next_off_i = int(next_off) if next_off is not None else None
+            except (TypeError, ValueError):
+                next_off_i = None
+            record_successful_read(
+                state.read_registry,
+                path=str(result.get("path") or path_from_tool_arguments(arguments)),
+                offset=off,
+                end_line=end_line,
+                truncated=bool(result.get("truncated")),
+                next_offset=next_off_i,
+                whole_file_complete=bool(result.get("whole_file_complete")),
+            )
+        elif isinstance(result, dict) and is_mutating_file_tool_failure(tool_name, result):
+            note_edit_failure_allows_reread(
+                state.read_registry,
+                path=path_from_tool_arguments(arguments if isinstance(arguments, dict) else {}),
+            )
 
         self._ingest_evidence(tool_name, result)
         if settings.citation_verify_enabled:
@@ -826,11 +964,7 @@ class AgentEngine:
             if err_text and err_text not in summary:
                 summary = err_text
         tool_status = "error" if result.get("error") or str(result.get("status") or "") == "error" else "ok"
-        if tool_status != "error" and tool_name in {"write_file", "edit_file"}:
-            # Preserve written/edited so projection marks file_write artifacts applied.
-            raw_st = str(result.get("status") or "")
-            if raw_st in {"written", "edited", "ok"}:
-                tool_status = raw_st
+        # Event contract only allows ok|error|denied|timeout (not edited/written).
         completed_payload: dict[str, Any] = {
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,
@@ -839,7 +973,9 @@ class AgentEngine:
         }
         if tool_name in {"write_file", "edit_file"}:
             args = arguments if isinstance(arguments, dict) else {}
-            completed_payload["path"] = str(result.get("path") or args.get("path") or "")
+            path_val = str(result.get("path") or args.get("path") or "")
+            if path_val:
+                completed_payload["path"] = path_val
             if tool_name == "edit_file":
                 completed_payload["old_text"] = str(
                     result.get("old_text") or args.get("old_text") or ""
