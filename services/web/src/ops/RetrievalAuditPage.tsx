@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { OpsShell, secretFromOpsPath } from "./OpsShell";
+import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
+import { OpsTurnLinks } from "./OpsTurnLinks";
+import {
+  diagnoseRetrievalAudit,
+  layerOnlyIn,
+  type AuditHitLike,
+} from "./retrievalDiagnostics";
 
-type AuditHit = {
-  chunk_id?: string;
-  path?: string;
+type AuditHit = AuditHitLike & {
   score?: number;
   excerpt?: string;
   source?: string;
   citation_id?: string;
   char_len?: number;
-  truncated?: boolean;
 };
 
 type RetrievalItem = {
@@ -55,7 +58,15 @@ type RecentItem = {
   last_hit_count?: number | null;
 };
 
-function HitList({ title, rows }: { title: string; rows: AuditHit[] }) {
+function HitList({
+  title,
+  rows,
+  highlightKeys,
+}: {
+  title: string;
+  rows: AuditHit[];
+  highlightKeys?: Set<string>;
+}) {
   if (!rows.length) {
     return (
       <div className="rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
@@ -69,20 +80,30 @@ function HitList({ title, rows }: { title: string; rows: AuditHit[] }) {
         {title}（{rows.length}）
       </p>
       <ul className="mt-2 space-y-2">
-        {rows.map((h, i) => (
-          <li key={`${h.chunk_id || h.path || i}-${i}`} className="text-xs text-muted-foreground">
-            <div className="flex flex-wrap gap-2 font-mono text-[11px] text-primary">
-              <span className="truncate">{h.path || "(no path)"}</span>
-              {h.score != null ? <span>score={h.score}</span> : null}
-              {h.source ? <span>src={h.source}</span> : null}
-              {h.truncated ? <span className="text-warning">truncated</span> : null}
-            </div>
-            {h.chunk_id ? (
-              <div className="truncate font-mono text-[10px] opacity-80">{h.chunk_id}</div>
-            ) : null}
-            {h.excerpt ? <p className="mt-0.5 break-words">{h.excerpt}</p> : null}
-          </li>
-        ))}
+        {rows.map((h, i) => {
+          const key = (h.chunk_id || h.path || "").trim();
+          const marked = key && highlightKeys?.has(key);
+          return (
+            <li
+              key={`${h.chunk_id || h.path || i}-${i}`}
+              className={`text-xs text-muted-foreground ${
+                marked ? "rounded border border-warning/40 bg-warning/10 px-1.5 py-1" : ""
+              }`}
+            >
+              <div className="flex flex-wrap gap-2 font-mono text-[11px] text-primary">
+                <span className="truncate">{h.path || "(no path)"}</span>
+                {h.score != null ? <span>score={h.score}</span> : null}
+                {h.source ? <span>src={h.source}</span> : null}
+                {h.truncated ? <span className="text-warning">truncated</span> : null}
+                {marked ? <span className="text-warning">only-here</span> : null}
+              </div>
+              {h.chunk_id ? (
+                <div className="truncate font-mono text-[10px] opacity-80">{h.chunk_id}</div>
+              ) : null}
+              {h.excerpt ? <p className="mt-0.5 break-words">{h.excerpt}</p> : null}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -93,7 +114,7 @@ function authHeaders(secret: string): HeadersInit {
 }
 
 export function RetrievalAuditPage() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const secret = secretFromOpsPath(pathname);
   const [turnId, setTurnId] = useState("");
   const [recent, setRecent] = useState<RecentItem[]>([]);
@@ -124,10 +145,6 @@ export function RetrievalAuditPage() {
     }
   }, [secret]);
 
-  useEffect(() => {
-    void loadRecent();
-  }, [loadRecent]);
-
   const loadTurn = useCallback(
     async (id: string) => {
       const trimmed = id.trim();
@@ -154,6 +171,15 @@ export function RetrievalAuditPage() {
     [secret],
   );
 
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent]);
+
+  useEffect(() => {
+    const fromQuery = turnIdFromSearch(search);
+    if (fromQuery) void loadTurn(fromQuery);
+  }, [search, loadTurn]);
+
   const download = () => {
     if (!data) return;
     const blob = new Blob([JSON.stringify(data, null, 2)], {
@@ -171,7 +197,7 @@ export function RetrievalAuditPage() {
     <OpsShell
       secret={secret}
       title="检索审计"
-      subtitle="最近有检索的真实用户 Turn · 点开看召回 / 排序 / 进窗三层（HM5）"
+      subtitle="最近有检索的真实用户 Turn · 点开看召回 / 排序 / 进窗三层（HM5）· 只读旁路"
     >
       <div className="space-y-4">
         <div className="flex flex-wrap items-center gap-2">
@@ -267,6 +293,7 @@ export function RetrievalAuditPage() {
 
         {data ? (
           <div className="space-y-4">
+            <OpsTurnLinks secret={secret} turnId={data.turn_id} current="retrieval" />
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
               <div>turn={data.turn_id}</div>
               <div>
@@ -287,6 +314,9 @@ export function RetrievalAuditPage() {
 
             {data.retrievals.map((item) => {
               const audit = item.audit;
+              const diags = diagnoseRetrievalAudit(audit, item.hits);
+              const onlyL1 = new Set(layerOnlyIn(audit?.recall_pool, audit?.ranked));
+              const onlyL2 = new Set(layerOnlyIn(audit?.ranked, audit?.entered_context));
               return (
                 <section
                   key={item.sequence}
@@ -305,14 +335,33 @@ export function RetrievalAuditPage() {
                   {item.summary ? (
                     <p className="text-xs text-muted-foreground">{item.summary}</p>
                   ) : null}
-                  {!audit ? (
-                    <p className="text-xs text-warning">
-                      无 audit 字段（旧事件）；下方仅最终 hits 预览。
-                    </p>
+                  {diags.length ? (
+                    <ul className="space-y-1">
+                      {diags.map((d) => (
+                        <li
+                          key={d.id}
+                          className={`rounded-md border px-2 py-1 text-[11px] ${
+                            d.level === "warn"
+                              ? "border-warning/40 bg-warning/10 text-foreground"
+                              : "border-border bg-muted/40 text-muted-foreground"
+                          }`}
+                        >
+                          {d.message}
+                        </li>
+                      ))}
+                    </ul>
                   ) : null}
                   <div className="grid gap-2 md:grid-cols-3">
-                    <HitList title="L1 recall_pool" rows={audit?.recall_pool ?? []} />
-                    <HitList title="L2 ranked" rows={audit?.ranked ?? []} />
+                    <HitList
+                      title="L1 recall_pool"
+                      rows={audit?.recall_pool ?? []}
+                      highlightKeys={onlyL1}
+                    />
+                    <HitList
+                      title="L2 ranked"
+                      rows={audit?.ranked ?? []}
+                      highlightKeys={onlyL2}
+                    />
                     <HitList
                       title="L3 entered_context"
                       rows={audit?.entered_context ?? item.hits ?? []}

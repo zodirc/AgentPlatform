@@ -2,31 +2,26 @@ import { Link } from "react-router-dom";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import type { ThemeId } from "../shared/theme/theme";
 import type { ReactNode } from "react";
+import {
+  opsConsolePath,
+  opsEnvelopePath,
+  opsHistoryPath,
+  opsRawPath,
+  opsRetrievalPath,
+  opsRunPath,
+  secretFromOpsPath,
+} from "./opsPaths";
 
-export function opsConsolePath(secret: string): string {
-  return `/ops/${encodeURIComponent(secret)}/test`;
-}
-
-export function opsRetrievalPath(secret: string): string {
-  return `/ops/${encodeURIComponent(secret)}/retrieval`;
-}
-
-export function opsEnvelopePath(secret: string): string {
-  return `/ops/${encodeURIComponent(secret)}/envelopes`;
-}
-
-export function opsRunPath(secret: string, runId: string): string {
-  return `/ops/${encodeURIComponent(secret)}/test/runs/${runId}`;
-}
-
-export function opsHistoryPath(secret: string): string {
-  return `/ops/${encodeURIComponent(secret)}/test/history`;
-}
-
-export function secretFromOpsPath(pathname: string): string {
-  const m = pathname.match(/^\/ops\/([^/]+)\//);
-  return m ? decodeURIComponent(m[1]) : "";
-}
+export {
+  opsConsolePath,
+  opsEnvelopePath,
+  opsHistoryPath,
+  opsRawPath,
+  opsRetrievalPath,
+  opsRunPath,
+  secretFromOpsPath,
+  turnIdFromSearch,
+} from "./opsPaths";
 
 export function OpsShell({
   secret,
@@ -49,7 +44,7 @@ export function OpsShell({
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
           <div>
             <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-              Ops · 旁路评测
+              Ops · 旁路观测 / 评测（不影响工作台热路径）
             </p>
             <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
             {subtitle ? (
@@ -79,6 +74,12 @@ export function OpsShell({
                 className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
               >
                 模型信封
+              </Link>
+              <Link
+                to={opsRawPath(secret)}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+              >
+                Raw 快照
               </Link>
               {actions}
             </div>

@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import {
   ChevronDown,
   ChevronUp,
@@ -14,17 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Input } from "../../components/ui/input";
-import {
-  downloadWorkspaceFile,
-  fetchWorkspaceFile,
-} from "../../shared/api/client";
-import { workspaceEntryIcon } from "./workspaceFileIcon";
-
-type Props = {
-  path: string | null;
-  onClose: () => void;
-};
+import { Input } from "../components/ui/input";
 
 type MatchRange = { start: number; end: number };
 
@@ -79,9 +68,25 @@ function renderHighlighted(
   return nodes;
 }
 
-export function WorkspaceFileViewer({ path, onClose }: Props) {
-  const fileName = path?.split("/").pop() ?? "";
-  const { Icon, className: iconClass } = workspaceEntryIcon(fileName, false);
+export type OpsTextViewerModalProps = {
+  open: boolean;
+  title: string;
+  subtitle?: string;
+  /** Filename hint for download, e.g. envelope-step-0.json */
+  downloadName?: string;
+  content: string;
+  onClose: () => void;
+};
+
+/** File-viewer style modal for Ops JSON / text (same UX as workspace file preview). */
+export function OpsTextViewerModal({
+  open,
+  title,
+  subtitle,
+  downloadName,
+  content,
+  onClose,
+}: OpsTextViewerModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
@@ -89,25 +94,16 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [downloading, setDownloading] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
 
-  const { data, isLoading, isError, error } = useQuery({
-    queryKey: ["workspace-file-viewer", path],
-    queryFn: () => fetchWorkspaceFile(path!),
-    enabled: Boolean(path),
-    staleTime: 30_000,
-  });
-
-  const content = data?.content ?? "";
   const matches = useMemo(() => findMatches(content, query), [content, query]);
 
   useEffect(() => {
+    if (!open) return;
     setSearchOpen(false);
     setQuery("");
     setActiveIndex(0);
     scrollRef.current?.scrollTo({ top: 0 });
-  }, [path]);
+  }, [open, title, content]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -137,7 +133,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   }, []);
 
   useEffect(() => {
-    if (!path) return;
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "f") {
@@ -151,7 +147,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           setSearchOpen(false);
           setQuery("");
         }
-        // Close only via the X button (not Esc / backdrop).
+        // Modal itself closes only via the X button (not Esc / backdrop).
         return;
       }
       if (!searchOpen) return;
@@ -163,24 +159,21 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [path, onClose, searchOpen, openSearch, goNext, goPrev]);
+  }, [open, onClose, searchOpen, openSearch, goNext, goPrev]);
 
-  const onDownload = useCallback(async () => {
-    if (!path || downloading) return;
-    setDownloading(true);
-    setDownloadError(null);
-    try {
-      await downloadWorkspaceFile(path);
-    } catch (err) {
-      setDownloadError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setDownloading(false);
-    }
-  }, [path, downloading]);
+  const onDownload = useCallback(() => {
+    const name = downloadName || `${title.replace(/\s+/g, "-")}.txt`;
+    const blob = new Blob([content], { type: "application/json;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [content, downloadName, title]);
 
-  if (!path) return null;
+  if (!open) return null;
 
-  const truncated = Boolean(data?.content?.includes("\n...[truncated]"));
   const highlighted = renderHighlighted(
     content,
     searchOpen && query.trim() ? matches : [],
@@ -195,27 +188,22 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
       className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-label={`查看文件 ${path}`}
+      aria-label={title}
     >
       <div className="flex h-[min(90vh,900px)] w-[min(96vw,1100px)] flex-col overflow-hidden rounded-xl border border-input bg-background shadow-2xl">
         <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
-          <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} aria-hidden />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground">
-              {fileName}
-            </p>
-            <p className="truncate text-xs text-muted-foreground">{path}</p>
-            {downloadError ? (
-              <p className="truncate text-xs text-destructive">{downloadError}</p>
+            <p className="truncate text-sm font-medium text-foreground">{title}</p>
+            {subtitle ? (
+              <p className="truncate font-mono text-xs text-muted-foreground">{subtitle}</p>
             ) : null}
           </div>
           <button
             type="button"
-            className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-            onClick={() => void onDownload()}
-            disabled={downloading}
+            className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+            onClick={onDownload}
             title="下载到本地"
-            aria-label="下载文件"
+            aria-label="下载"
           >
             <Download className="h-4 w-4" />
           </button>
@@ -224,7 +212,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
             className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={openSearch}
             title="查找 (Ctrl/⌘F)"
-            aria-label="文件内查找"
+            aria-label="查找"
           >
             <Search className="h-4 w-4" />
           </button>
@@ -233,6 +221,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
             className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={onClose}
             title="关闭 (Esc)"
+            aria-label="关闭"
           >
             <X className="h-4 w-4" />
           </button>
@@ -245,7 +234,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
               ref={searchInputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="在文件中查找…"
+              placeholder="在内容中查找…"
               className="h-8 flex-1 bg-background text-sm"
               aria-label="查找内容"
             />
@@ -295,28 +284,19 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           ref={scrollRef}
           className="scrollbar-panel min-h-0 flex-1 overflow-y-scroll overflow-x-auto bg-card/50 p-4"
         >
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
-          ) : isError ? (
-            <p className="text-sm text-destructive">
-              无法读取文件
-              {error instanceof Error ? `：${error.message}` : ""}
-              （请确认已登录）
-            </p>
-          ) : (
-            <>
-              {truncated ? (
-                <p className="mb-2 text-xs text-warning">
-                  内容超过 32KB，仅显示前段（与 runtime read_file 限制一致）
-                </p>
-              ) : null}
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
-                {highlighted}
-              </pre>
-            </>
-          )}
+          <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
+            {highlighted}
+          </pre>
         </div>
       </div>
     </div>
   );
+}
+
+export function formatJsonContent(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
 }

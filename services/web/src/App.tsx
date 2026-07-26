@@ -6,6 +6,7 @@ import { EvalConsolePage } from "./ops/EvalConsolePage";
 import { EvalHistoryPage } from "./ops/EvalHistoryPage";
 import { EvalRunReportPage } from "./ops/EvalRunReportPage";
 import { EnvelopeAuditPage } from "./ops/EnvelopeAuditPage";
+import { RawAuditPage } from "./ops/RawAuditPage";
 import { RetrievalAuditPage } from "./ops/RetrievalAuditPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
@@ -43,6 +44,10 @@ function isOpsRetrievalPath(pathname: string): boolean {
 
 function isOpsEnvelopePath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/envelopes\/?$/.test(pathname);
+}
+
+function isOpsRawPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/raw\/?$/.test(pathname);
 }
 
 
@@ -320,6 +325,9 @@ export function App() {
   }
   if (isOpsEnvelopePath(pathname)) {
     return <EnvelopeAuditPage />;
+  }
+  if (isOpsRawPath(pathname)) {
+    return <RawAuditPage />;
   }
   return <AuthenticatedApp />;
 }

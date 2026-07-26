@@ -4,19 +4,18 @@ import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
 import { OpsTurnLinks } from "./OpsTurnLinks";
 import { OpsPayloadViewerModal } from "./OpsPayloadViewerModal";
 
-type EnvelopeItem = {
+type SnapshotItem = {
   step_index: number;
-  content_hash: string;
-  fill_ratio?: number | null;
-  has_full_envelope: boolean;
-  envelope?: unknown;
+  tools_fingerprint?: string | null;
+  message_count: number;
+  messages: unknown[];
   created_at?: string | null;
 };
 
-type EnvelopeResponse = {
+type RawResponse = {
   turn_id: string;
   count: number;
-  envelopes: EnvelopeItem[];
+  snapshots: SnapshotItem[];
 };
 
 type RecentItem = {
@@ -26,10 +25,9 @@ type RecentItem = {
   status?: string;
   user_preview?: string | null;
   owner_user_id?: string | null;
-  envelope_count: number;
-  full_count: number;
+  snapshot_count: number;
+  max_step_index?: number | null;
   last_at?: string | null;
-  max_fill_ratio?: number | null;
 };
 
 type ViewerState = {
@@ -43,7 +41,7 @@ function authHeaders(secret: string): HeadersInit {
   return { Authorization: `Bearer ${secret}` };
 }
 
-export function EnvelopeAuditPage() {
+export function RawAuditPage() {
   const { pathname, search } = useLocation();
   const secret = secretFromOpsPath(pathname);
   const [turnId, setTurnId] = useState("");
@@ -51,7 +49,7 @@ export function EnvelopeAuditPage() {
   const [listLoading, setListLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [data, setData] = useState<EnvelopeResponse | null>(null);
+  const [data, setData] = useState<RawResponse | null>(null);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
 
   const loadRecent = useCallback(async () => {
@@ -59,7 +57,7 @@ export function EnvelopeAuditPage() {
     setListLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/ops/envelopes/recent?limit=40", {
+      const res = await fetch("/api/v1/ops/raw/recent?limit=40", {
         headers: authHeaders(secret),
       });
       if (!res.ok) {
@@ -85,14 +83,14 @@ export function EnvelopeAuditPage() {
       setLoading(true);
       setError(null);
       try {
-        const res = await fetch(`/api/v1/ops/envelopes/turns/${encodeURIComponent(trimmed)}`, {
+        const res = await fetch(`/api/v1/ops/raw/turns/${encodeURIComponent(trimmed)}`, {
           headers: authHeaders(secret),
         });
         if (!res.ok) {
           const body = await res.text();
           throw new Error(body || `HTTP ${res.status}`);
         }
-        setData((await res.json()) as EnvelopeResponse);
+        setData((await res.json()) as RawResponse);
       } catch (e) {
         setData(null);
         setError(e instanceof Error ? e.message : String(e));
@@ -112,20 +110,20 @@ export function EnvelopeAuditPage() {
     if (fromQuery) void loadTurn(fromQuery);
   }, [search, loadTurn]);
 
-  const openEnvelope = (item: EnvelopeItem, turn: string) => {
+  const openSnapshot = (item: SnapshotItem, turn: string) => {
     setViewer({
-      title: `envelope · step ${item.step_index}`,
-      subtitle: `${turn} · hash=${item.content_hash.slice(0, 16)}…`,
-      downloadName: `envelope-${turn.slice(0, 8)}-step-${item.step_index}.json`,
-      payload: item.envelope,
+      title: `raw messages · step ${item.step_index}`,
+      subtitle: `${turn} · messages=${item.message_count}`,
+      downloadName: `raw-${turn.slice(0, 8)}-step-${item.step_index}.json`,
+      payload: item.messages,
     });
   };
 
   return (
     <OpsShell
       secret={secret}
-      title="模型信封"
-      subtitle="最近有信封落盘的 Turn · 点「查看」以文件预览方式打开全文 · 只读旁路"
+      title="Raw 快照"
+      subtitle="只读原件仓（HM2）· 点「查看」以文件预览方式打开 · 旁路观测"
     >
       <div className="mb-4 flex flex-wrap gap-2">
         <button
@@ -140,11 +138,11 @@ export function EnvelopeAuditPage() {
 
       <div className="mb-4 rounded-md border border-border">
         <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-          最近信封 Turn（{recent.length}）
+          最近 Raw Turn（{recent.length}）
         </div>
         {!recent.length && !listLoading ? (
           <p className="px-3 py-4 text-sm text-muted-foreground">
-            暂无信封。跑一轮后刷新；full 行可点「查看」。
+            暂无 raw 快照。跑过 Turn 后再刷新。
           </p>
         ) : (
           <ul className="divide-y divide-border">
@@ -169,11 +167,9 @@ export function EnvelopeAuditPage() {
                     </div>
                     <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-muted-foreground">
                       <span>{item.scenario_id}</span>
-                      <span>
-                        env={item.envelope_count} full={item.full_count}
-                      </span>
-                      {item.max_fill_ratio != null ? (
-                        <span>max_fill={item.max_fill_ratio}</span>
+                      <span>snapshots={item.snapshot_count}</span>
+                      {item.max_step_index != null ? (
+                        <span>max_step={item.max_step_index}</span>
                       ) : null}
                       <span className="truncate">{item.turn_id}</span>
                     </div>
@@ -212,34 +208,36 @@ export function EnvelopeAuditPage() {
 
       {data ? (
         <div className="space-y-3">
-          <OpsTurnLinks secret={secret} turnId={data.turn_id} current="envelopes" />
+          <OpsTurnLinks secret={secret} turnId={data.turn_id} current="raw" />
           <p className="text-sm text-muted-foreground">
-            turn={data.turn_id} · envelopes={data.count}
+            turn={data.turn_id} · snapshots={data.count}
           </p>
-          {data.envelopes.map((item, i) => (
+          <p className="text-xs text-muted-foreground">
+            用途：坏例回放 / 摘要重建对照。内容不进模型请求。
+          </p>
+          {data.snapshots.map((item, i) => (
             <div
-              key={`${item.step_index}-${item.content_hash}-${i}`}
+              key={`${item.step_index}-${item.created_at || i}`}
               className="rounded-md border border-border bg-card px-3 py-2 text-xs"
             >
               <div className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
                 <span>step={item.step_index}</span>
-                <span className="truncate">hash={item.content_hash}</span>
-                {item.fill_ratio != null ? <span>fill={item.fill_ratio}</span> : null}
-                <span>{item.has_full_envelope ? "full" : "hash-only"}</span>
-                {item.has_full_envelope ? (
-                  <button
-                    type="button"
-                    className="ml-auto rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
-                    onClick={() => openEnvelope(item, data.turn_id)}
-                  >
-                    查看
-                  </button>
+                <span>messages={item.message_count}</span>
+                {item.tools_fingerprint ? (
+                  <span className="truncate">fp={item.tools_fingerprint}</span>
                 ) : null}
+                <button
+                  type="button"
+                  className="ml-auto rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
+                  onClick={() => openSnapshot(item, data.turn_id)}
+                >
+                  查看
+                </button>
               </div>
             </div>
           ))}
-          {!data.envelopes.length ? (
-            <p className="text-sm text-muted-foreground">该 Turn 无信封记录。</p>
+          {!data.snapshots.length ? (
+            <p className="text-sm text-muted-foreground">该 Turn 无 raw 快照。</p>
           ) : null}
         </div>
       ) : null}
