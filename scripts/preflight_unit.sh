@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# Local mirror of CI unit.* steps (scripts/ci_proof.sh) — no Docker / make gate.
-# Catch "implementation drifted from tests" before push.
+# Local mirror of CI unit.* steps — prefer repo/system Python+pip; else Docker
+# (same class as make runtime-test / api-test). No Docker required when a venv exists.
 #
 # Usage:
-#   bash scripts/preflight_unit.sh              # smart: suites for changed files vs upstream/main
+#   bash scripts/preflight_unit.sh
 #   PREFLIGHT_ALL=1 bash scripts/preflight_unit.sh
 #   PREFLIGHT_BASE=origin/main bash scripts/preflight_unit.sh
 #   SKIP_PREFLIGHT=1 ...                        # no-op (exit 0)
+#   PREFLIGHT_DOCKER=1 ...                      # force Docker runners
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml" --env-file "$ROOT/.env")
 
 if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
   echo "==> preflight skipped (SKIP_PREFLIGHT=1)"
@@ -46,10 +48,10 @@ classify_path() {
     scripts/ux_signals.py|scripts/tests/test_ux_signals.py|eval/ux_signals/*)
       need_ux=1
       ;;
-    scripts/*)
+    scripts/*|.githooks/*|Makefile|README.md)
       need_scripts=1
       ;;
-    .github/workflows/*|Makefile)
+    .github/workflows/*)
       mark_all
       ;;
   esac
@@ -75,7 +77,6 @@ resolve_changed() {
     mark_all
     return
   fi
-  # Also include unstaged/staged working tree (pre-commit / dirty push habits).
   local dirty
   dirty="$(git diff --name-only HEAD 2>/dev/null || true)"
   dirty+=$'\n'
@@ -104,7 +105,6 @@ else
   resolve_changed
 fi
 
-# Scripts-only changes still need a cheap smoke of ux self-check when ux scripts touched.
 if [[ "$need_scripts" -eq 1 && "$need_ux" -eq 0 && "$need_runtime" -eq 0 && "$need_api" -eq 0 && "$need_contracts" -eq 0 ]]; then
   need_ux=1
 fi
@@ -112,6 +112,8 @@ fi
 py() {
   if [[ -x "$ROOT/services/runtime/.venv/bin/python" ]]; then
     echo "$ROOT/services/runtime/.venv/bin/python"
+  elif [[ -x "$ROOT/.venv/bin/python" ]]; then
+    echo "$ROOT/.venv/bin/python"
   elif command -v python3.11 >/dev/null 2>&1; then
     echo python3.11
   else
@@ -120,19 +122,48 @@ py() {
 }
 PY="$(py)"
 
-run_ux_self_check() {
+python_has_pip() {
+  "$PY" -m pip --version >/dev/null 2>&1
+}
+
+docker_ready() {
+  command -v docker >/dev/null 2>&1 || return 1
+  "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx runtime
+}
+
+use_docker=0
+if [[ "${PREFLIGHT_DOCKER:-0}" == "1" ]]; then
+  use_docker=1
+elif ! python_has_pip; then
+  if docker_ready; then
+    use_docker=1
+    echo "==> preflight: no local pip — using Docker (runtime container)"
+  else
+    echo ""
+    echo "preflight FAILED — no usable Python pip and Docker runtime is not up."
+    echo "  Fix one of:"
+    echo "    sudo apt install python3-pip python3-venv   # then re-push"
+    echo "    cd services/runtime && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'"
+    echo "    make up                                    # then re-push (Docker fallback)"
+    echo "    SKIP_PREFLIGHT=1 git push                  # emergency bypass"
+    echo ""
+    exit 1
+  fi
+fi
+
+run_ux_self_check_local() {
   echo "==> [preflight] UX signals self-check"
   "$PY" -m pip install -q packages/contracts/python >/dev/null
   "$PY" scripts/ux_signals.py --self-check
 }
 
-run_ux_tests() {
+run_ux_tests_local() {
   echo "==> [preflight] UX signals unit tests"
   "$PY" -m pip install -q packages/contracts/python pytest >/dev/null
   "$PY" -m pytest scripts/tests/test_ux_signals.py -q
 }
 
-run_runtime() {
+run_runtime_local() {
   echo "==> [preflight] Runtime unit tests"
   cd "$ROOT/services/runtime"
   if [[ -x .venv/bin/python ]]; then
@@ -145,7 +176,7 @@ run_runtime() {
   cd "$ROOT"
 }
 
-run_api_ux() {
+run_api_ux_local() {
   echo "==> [preflight] API UX signals route"
   "$PY" -m pip install -q packages/contracts/python >/dev/null
   cd "$ROOT/services/api"
@@ -158,12 +189,93 @@ run_api_ux() {
   cd "$ROOT"
 }
 
-run_contracts() {
+run_contracts_local() {
   echo "==> [preflight] Contracts tests"
   "$PY" -m pip install -q jsonschema pytest pyyaml >/dev/null
   "$PY" -m pytest packages/contracts/tests -q
   "$PY" -m pip install -q packages/contracts/python >/dev/null
   "$PY" -m pytest packages/contracts/python/tests -q
+}
+
+run_ux_self_check_docker() {
+  echo "==> [preflight] UX signals self-check (docker/runtime)"
+  "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-ux
+  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/preflight-ux/packages /tmp/preflight-ux/scripts
+  docker cp "$ROOT/scripts/ux_signals.py" agent-runtime:/tmp/preflight-ux/scripts/ux_signals.py
+  docker cp "$ROOT/packages/contracts/python" agent-runtime:/tmp/preflight-ux/packages/contracts-python
+  "${COMPOSE[@]}" exec -T runtime bash -c \
+    'python -m pip install -q /tmp/preflight-ux/packages/contracts-python >/dev/null
+     python /tmp/preflight-ux/scripts/ux_signals.py --self-check'
+}
+
+run_ux_tests_docker() {
+  echo "==> [preflight] UX signals unit tests (docker/runtime)"
+  "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-ux
+  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p \
+    /tmp/preflight-ux/scripts/tests \
+    /tmp/preflight-ux/packages/contracts/python \
+    /tmp/preflight-ux/eval
+  docker cp "$ROOT/scripts/ux_signals.py" agent-runtime:/tmp/preflight-ux/scripts/ux_signals.py
+  docker cp "$ROOT/scripts/tests/test_ux_signals.py" agent-runtime:/tmp/preflight-ux/scripts/tests/test_ux_signals.py
+  docker cp "$ROOT/packages/contracts/python/." agent-runtime:/tmp/preflight-ux/packages/contracts/python/
+  docker cp "$ROOT/eval/ux_signals" agent-runtime:/tmp/preflight-ux/eval/ux_signals
+  "${COMPOSE[@]}" exec -T runtime bash -c \
+    'python -m pip install -q pytest >/dev/null
+     cd /tmp/preflight-ux && python -m pytest scripts/tests/test_ux_signals.py -q'
+}
+
+run_runtime_docker() {
+  echo "==> [preflight] Runtime unit tests (docker)"
+  "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval
+  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest
+  docker cp "$ROOT/services/runtime/tests/." agent-runtime:/tmp/runtime-tests/
+  if [[ -f "$ROOT/eval/plan_suggest/cases.json" ]]; then
+    docker cp "$ROOT/eval/plan_suggest/cases.json" agent-runtime:/tmp/eval/plan_suggest/cases.json
+  fi
+  "${COMPOSE[@]}" exec -T runtime bash -c \
+    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null
+     PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'
+}
+
+run_api_ux_docker() {
+  echo "==> [preflight] API UX signals route (docker)"
+  if ! "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx api; then
+    echo "api container not running — start with make up / make start"
+    return 1
+  fi
+  "${COMPOSE[@]}" exec -T -u root api rm -rf /tmp/api-tests
+  docker cp "$ROOT/services/api/tests/." agent-api:/tmp/api-tests/
+  "${COMPOSE[@]}" exec -T api bash -c \
+    'python -m pip install -q pytest pytest-asyncio httpx 2>/dev/null
+     if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi
+     python -m pytest /tmp/api-tests/test_ux_signals_api.py -q --asyncio-mode=auto'
+}
+
+run_contracts_docker() {
+  echo "==> [preflight] Contracts tests (docker/runtime)"
+  "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-contracts
+  docker cp "$ROOT/packages/contracts" agent-runtime:/tmp/preflight-contracts
+  "${COMPOSE[@]}" exec -T runtime bash -c \
+    'python -m pip install -q jsonschema pytest pyyaml >/dev/null
+     cd /tmp/preflight-contracts && PYTHONPATH=/tmp/preflight-contracts python -m pytest tests -q
+     python -m pip install -q /tmp/preflight-contracts/python >/dev/null
+     python -m pytest /tmp/preflight-contracts/python/tests -q'
+}
+
+run_ux_self_check() {
+  if [[ "$use_docker" -eq 1 ]]; then run_ux_self_check_docker; else run_ux_self_check_local; fi
+}
+run_ux_tests() {
+  if [[ "$use_docker" -eq 1 ]]; then run_ux_tests_docker; else run_ux_tests_local; fi
+}
+run_runtime() {
+  if [[ "$use_docker" -eq 1 ]]; then run_runtime_docker; else run_runtime_local; fi
+}
+run_api_ux() {
+  if [[ "$use_docker" -eq 1 ]]; then run_api_ux_docker; else run_api_ux_local; fi
+}
+run_contracts() {
+  if [[ "$use_docker" -eq 1 ]]; then run_contracts_docker; else run_contracts_local; fi
 }
 
 failed=0

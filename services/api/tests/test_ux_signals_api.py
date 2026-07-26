@@ -21,6 +21,11 @@ def client() -> TestClient:
         patch("app.main.apply_migrations", new_callable=AsyncMock),
         patch("app.main.reconcile_stale_turns", new_callable=AsyncMock, return_value=0),
         patch("app.main.reconcile_lagging_projections", new_callable=AsyncMock, return_value=0),
+        patch(
+            "app.services.ops.runs.reconcile_orphaned_runs",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
         patch("app.main.TurnEventListener") as listener_cls,
     ):
         listener = MagicMock()

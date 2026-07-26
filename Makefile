@@ -334,8 +334,8 @@ runtime-test:
 	    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
 	fi
 
-# Local CI unit.* mirror (no Docker). Prefer this before every push.
-preflight: ## 推送前 unit 门禁（与 CI unit 同套；按变更选择性跑）
+# Prefer local venv/system pip; else Docker (make up). Force: PREFLIGHT_DOCKER=1
+preflight: ## 推送前 unit 门禁（本地 pip 或 Docker 回退）
 	@bash scripts/preflight_unit.sh
 
 hooks-install: ensure-git-hooks ## 同 ensure-git-hooks（兼容旧目标名）
