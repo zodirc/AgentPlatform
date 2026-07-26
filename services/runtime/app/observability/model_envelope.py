@@ -1,4 +1,4 @@
-"""HM4: sample model request envelopes for Ops replay (hash always; full body sampled)."""
+"""HM4: persist model request envelopes for Ops replay (hash always; full body by default)."""
 
 from __future__ import annotations
 

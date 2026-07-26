@@ -166,7 +166,7 @@ class Settings(BaseSettings):
     # HM2 / HM4 observability (async; never blocks TTFB).
     raw_snapshot_enabled: bool = True
     model_envelope_enabled: bool = True
-    model_envelope_sample_rate: float = 0.05
+    model_envelope_sample_rate: float = 1.0
     model_envelope_on_high_fill: bool = True
     model_envelope_debug: bool = False
     # HM7: export citation verify gate — off | warn | block
