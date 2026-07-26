@@ -45,3 +45,4 @@ deploy/compose/dev.override.yml
 
 # nested empty clone placeholder (if recreated)
 AgentPlatform/
+interview-self-qa.md
