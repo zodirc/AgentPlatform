@@ -105,3 +105,32 @@ def test_ops_raw_returns_snapshots(ops_app: TestClient) -> None:
     body = res.json()
     assert body["count"] == 1
     assert body["snapshots"][0]["message_count"] == 1
+
+
+def test_ops_raw_recent_list(ops_app: TestClient) -> None:
+    turn_id = uuid4()
+    pool = MagicMock()
+    pool.fetch = AsyncMock(
+        return_value=[
+            {
+                "turn_id": turn_id,
+                "session_id": uuid4(),
+                "scenario_id": "writing",
+                "status": "completed",
+                "user_preview": "summarize",
+                "owner_user_id": uuid4(),
+                "snapshot_count": 3,
+                "max_step_index": 2,
+                "last_at": None,
+            }
+        ]
+    )
+    with patch("app.routers.ops_raw.get_pool", AsyncMock(return_value=pool)):
+        res = ops_app.get(
+            "/api/v1/ops/raw/recent",
+            headers={"Authorization": "Bearer test-ops-secret"},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["count"] == 1
+    assert body["items"][0]["snapshot_count"] == 3
