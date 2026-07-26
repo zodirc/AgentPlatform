@@ -1,6 +1,6 @@
 # 31 — Workspace 沙箱逃逸与防护
 
-> **状态**：执行中（2026-07-24）— **E1–E4 + PR2（shell 出站）✅**；PR1/SW1/SB4/SB5/PR3 待续。  
+> **状态**：执行中（2026-07）— **E1–E3 + PR2 ✅**；E4 默认无网 ⏸；PR1/SW1/SB4/SB5/PR3 待续。  
 > **本模块维护**：威胁枚举（SE）· 隔离加固（SB）· 密钥/出站脱敏加固（PR）· 敏感词钩子（SW，配置暂空）· **执行方案（§10）**。  
 > **关联**：[03](03-docker-runtime.md) §8（工作区/沙箱）· [06](06-tools-and-context.md) · [13](13-rate-redlines.md) R1–R5 · [27](27-multi-tenancy.md) · [21](21-agent-system-qa.md) Q11 · [32](32-execution-plane-and-local-runner.md)（可选本地执行面 · 待决）· 现有 `privacy/redact.py` · `privacy/secret_scan.py` · `tools/core/shell.py`。  
 > **纪律**：不另开 `*-execution` 平行文；排期与 DoD 只维护在本文 §10。
@@ -22,16 +22,26 @@
 | 合法用户误批 | 审批文案可能被忽略；不能只靠 UX |
 | 运维面 | api 挂 `docker.sock` 等 **不在** agent 工具默认可达路径；但仍记为 Critical 旁路 |
 
-**明确不承诺（现状）**：不可信代码在 OS 级 jail 内执行。现状是 **应用层路径校验 + 审批 UX + 部分 env 剥离**，不是 bubblewrap/gVisor。
+**明确承诺与边界（现状 · 2026-07）**：
+
+| 层 | 现状 |
+|----|------|
+| 文件工具 | `_resolve_path`：必须落在当前 Work 根内 |
+| **exec OS 沙箱** | 镜像含 **bubblewrap** 且 PATH 可见时，`run_command` / `run_tests` 等经 `sandbox.py` **默认包裹**；可写面 ≈ work_root |
+| 出网 | **默认保留**（批准后的 `curl` 可用）；护的是主机盘，不是禁业务上网 |
+| 无 bwrap | 本机/缺包时降级为未包裹（`TOOL_SANDBOX=off` 仅排障）；嵌套 Docker 可能 weaker |
+| 仍不承诺 | gVisor / 完整不可信代码多租户 OS 级隔离；PR1/SB4/SB5 等边角见 §10.8 |
+
+> §0 旧句「不是 bubblewrap」已过时——E2 已落地。细节与威胁表见下文；面试口径见 [21](21-agent-system-qa.md) Q11。
 
 **成熟方向优先序**（对齐 Claude Code / Codex 等：隔离 Bash，不改 Agent loop）：
 
 ```text
-1. 收窄免审 exec 语义（run_tests argv 门闩）  ← 零 UX / 零速率；不靠多点审批
-2. OS 级包一层 shell（Landlock 优先，bwrap 备选）← 成熟；工具 API 不变
-3. 网络与密钥隔离（tool 无网 / deny-env / 秘密离 environ）
-4. 出站与落盘脱敏加厚（正则；敏感词钩子默认空）
-5. 容器/compose 加固（drop caps、只读根、sock 不进 runtime）
+1. 收窄免审 exec 语义（run_tests argv 门闩）  ← ✅ E1
+2. OS 级包一层 shell（bwrap 已落地；Landlock 可选演进）← ✅ E2
+3. 网络与密钥隔离（默认无网 ⏸ 产品否决；env deny ✅；脱敏加厚待续）
+4. 出站与落盘脱敏加厚（PR2 ✅；PR1/PR3 待续；敏感词钩子默认空）
+5. 容器/compose 加固（SB5 待续）
 ```
 
 **交互守线（执行时反复核对）**：
@@ -52,19 +62,16 @@
 | 层 | 现状 | 结论 |
 |----|------|------|
 | 文件工具 `*_resolve_path` | `resolve()` + `relative_to(work_root)`；seed 写拒绝 | **结构化读写大致锁在 Work** |
-| `run_command` | `create_subprocess_shell`；cwd=work_root；需审批 | **cwd ≠ jail**；批准后整容器可读可写（权限内） |
-| `run_tests` | 同 shell；agent profile `approval_overrides: never` | **免审任意 command → 产品洞** |
-| `read_lints` | 固定 `ruff` 命令行 | 面窄；仍走 shell helper |
-| 子 agent | 同进程 / 同 TenantContext；verify 含 `run_tests` | **继承洞** |
-| 子进程 env | `_safe_env` 剥 `MODEL_` / `DATABASE_` 等前缀 | **窄**；`/proc/<parent>/environ` 仍可读 |
-| 出站脱敏 | `pii_redact_enabled` 正则 → 模型前 | 已有；模式集有限 |
-| 写盘密钥扫描 | `secret_scan` 短预算；超时放行 + 异步重扫 | 已有；不覆盖 shell 重定向写出 |
-| runtime 容器 | 非 root `app`；无 privileged / 无 sock | **直接宿主机破出难** |
+| `run_command` / `run_tests` | 经 `sandbox.py`；有 **bwrap** 则默认 FS 沙箱 | **可写 ≈ work_root**；出网默认开；无 bwrap 时降级 |
+| `run_tests` 门闩 | `test_command_gate` 启动器白名单；profile `never` 免审 | **不能免审任意 shell** |
+| `read_lints` | 固定 `ruff`；可走 argv 入口 | 面窄 |
+| 子 agent | 同进程 / 同 TenantContext；verify 含 `run_tests` | 继承同一沙箱入口 |
+| 子进程 env | deny-by-default 允许集 | ✅ E3 基线 |
+| 出站脱敏 | shell 出站 `redact_text`（PR2）；模式集可再扩（PR1） | 部分 ✅ |
+| 写盘密钥扫描 | `secret_scan` 短预算；超时放行 + 异步重扫 | 已有 |
+| runtime 容器 | 非 root `app`；镜像装 bubblewrap；无 privileged / 无 sock | **直接宿主机破出难** |
 | api 容器 | 常 root + `docker.sock` + `/repo` | **运维 Critical 面**（非 agent 默认路径） |
-| 网络 | 默认 compose 网；镜像含 `curl` | 可达 postgres / 可能出网 |
-| writing 场景 | 默认无 `run_command` / `run_tests` | **显著更安全**；仍非 OS 沙箱 |
-
-产品文案「只看见 `/workspace`」对 **文件工具** 近似成立，对 **exec** 不成立。docs/03 §8.3「其它路径在 ToolExecutor 入口失败」对 shell **不准确**——路径检查在 handler，且 shell 根本不走 `_resolve_path`。
+| writing 场景 | 默认无 `run_command` / `run_tests` | **显著更安全**；仍非 gVisor |
 
 ---
 
@@ -78,7 +85,7 @@
 |----|------|----------|--------|------|
 | **SE-P1** | 相对路径穿越 | `../../../etc/passwd`、混用 `\` | 高（若未校验） | 文件工具：**已挡** |
 | **SE-P2** | 绝对路径 | `/etc/shadow`、`/data/works/other` | 高 | 文件工具：**已挡** |
-| **SE-P3** | 符号链接逃出 | workspace 内链到 `/etc` 或其它 Work | 高 | 文件工具：`resolve` 后 `relative_to` **已挡**；shell **未挡** |
+| **SE-P3** | 符号链接逃出 | workspace 内链到 `/etc` 或其它 Work | 高 | 文件工具：`resolve` 后 `relative_to` **已挡**；exec 有 bwrap 时写出界 **已挡** |
 | **SE-P4** | TOCTOU / 竞态 | 校验后替换为 symlink | 中 | 文件工具窗口短；shell 无关 |
 | **SE-P5** | 编码 / 空字节 / Unicode 规范化 | `%2e%2e`、异常 Unicode 同形 | 低–中 | Python `Path` 通常安全；仍须测 |
 | **SE-P6** | seed 写穿 | 改 `sources/seed/**` | 中 | 工具断言 + RO 挂载 |

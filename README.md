@@ -1,7 +1,20 @@
 # Agent Platform（新项目）
 
-> 基于 `agent-langraph` 的经验，从零设计的 **Agent Runtime**：**一个内核，多个场景**。默认 **写作** `writing`；**Agent** `agent` 为通用全工具面。详见 [场景与扩展](docs/09-product-modes.md)。  
-> **第一阶段目标**：仅用 Docker 即可完整启动最小可用栈。
+> 基于 `agent-langraph` 的经验，从零设计的 **Agent Runtime**：**一个内核，多个场景**。默认 **写作** `writing`；**Agent** `agent` 为通用全工具面。
+
+## 30 秒看懂
+
+| | |
+|--|--|
+| **是什么** | Docker 一键起的 Agent 平台：`api`（控制面）+ `runtime`（单 loop 执行）+ `web`（工作台）+ Caddy + Postgres/pgvector |
+| **怎么扩展** | 同一 `AgentEngine`；差异在 `ScenarioProfile`（工具白名单 / 提示词 / 审批），不是再画一张流程图 |
+| **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · exec **bwrap** 沙箱 · Golden/`make gate` 可证明 |
+| **非目标** | 不宣称对齐 Cursor 全功能；Skills / 多模态 / K8s 暂缓 |
+| **起栈** | `cp .env.example .env` → `make up` → `http://localhost/` |
+| **Demo** | 见 [docs/DEMO.md](docs/DEMO.md) |
+| **旁路观测** | `/ops/<OPS_TEST_SECRET>/…`（评测 / 检索审计 / 信封 / Raw）——**不影响工作台热路径** · [docs/29](docs/29-ops-eval-console.md) |
+
+完整连续目录见 **[docs/README.md](docs/README.md)**（01–33）。
 
 ## 为什么要重写
 
@@ -19,10 +32,11 @@
 
 ## 文档索引
 
-完整连续目录见 **[docs/README.md](docs/README.md)**（01–33）。常用入口：
+常用入口：
 
 | 文档 | 内容 |
 |------|------|
+| [DEMO](docs/DEMO.md) | 5 分钟可复现路径 |
 | [01 问题与目标](docs/01-problems-and-goals.md) | 设计原则 |
 | [02 架构](docs/02-architecture.md) | 服务划分、数据流 |
 | [03 Docker 运行时](docs/03-docker-runtime.md) | 拓扑、env、工作区/沙箱 |
@@ -32,6 +46,8 @@
 | [13 速率红线](docs/13-rate-redlines.md) | R1–R5 |
 | [14 写作](docs/14-writing-quality.md) | WQ0–WQ4 |
 | [15 RAG / 资料库](docs/15-rag-and-sources.md) | 索引、验收、票状态 |
+| [29 Ops](docs/29-ops-eval-console.md) | 评测台 + 检索/信封/Raw 观测 |
+| [31 沙箱](docs/31-sandbox-escape-and-hardening.md) | exec 隔离（bwrap） |
 | [contracts](docs/contracts.md) | API / 事件 / DDL |
 
 工作区与沙箱：[Docker 运行时 §8](docs/03-docker-runtime.md#8-工作区沙箱与拓扑)。
@@ -104,21 +120,21 @@ make runtime-test   # Python 3.11+
 ## 仓库结构
 
 ```
-agent/
+AgentPlatform/
 ├── README.md
-├── docs/                    # 架构与规范
+├── docs/                    # 架构与规范（01–33）· DEMO.md
 ├── deploy/
 │   ├── docker-compose.yml   # 唯一 compose 入口
+│   ├── caddy/               # 边缘网关（Caddyfile）
 │   └── compose/             # 可选：queue、retrieval、ha、runtime-lite
 ├── services/
-│   ├── gateway/             # Caddy 边缘
-│   ├── api/                 # HTTP API、outbox worker
-│   ├── runtime/             # Agent 执行、检索索引
-│   └── web/                 # Vite + React
+│   ├── api/                 # HTTP API、SSE、投影、Ops 只读观测
+│   ├── runtime/             # Agent 执行、检索、工具沙箱
+│   └── web/                 # Vite + React 工作台 + Ops 页
 ├── packages/
 │   └── contracts/           # OpenAPI、事件 schema、agent-contracts
-├── eval/golden/             # Golden Turn 用例（39 stub YAML）
-└── scripts/                 # smoke、eval、codegen
+├── eval/golden/             # Golden Turn 用例
+└── scripts/                 # smoke、eval、codegen、ci_proof
 ```
 
 ## 与 agent-langraph 的关系

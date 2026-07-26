@@ -4,6 +4,18 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
+### 短入口（可读性优先）
+
+| 目的 | 读 |
+|------|-----|
+| 起栈 + 一句话定位 | [../README.md](../README.md)「30 秒看懂」 |
+| 5 分钟 Demo | [DEMO.md](DEMO.md) |
+| 架构地图 | [02](02-architecture.md) |
+| Loop / 工具 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) |
+| 检索坏例怎么看 | [29](29-ops-eval-console.md) §6–§8（Ops **旁路**，不影响工作台速率） |
+| 沙箱现状 | [31](31-sandbox-escape-and-hardening.md) §0（bwrap 已落地） |
+| 面试原理 | [21](21-agent-system-qa.md) |
+
 ---
 
 ## 模块目录（01–33）
@@ -88,7 +100,7 @@ Agent Platform 架构与实施规范。**01–33 连续编号，一文一模块*
 | 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
 | Proof 门禁 + 体验信号 | ✅ PX0–PX2（环外） | **[28](28-proof-gate-and-ux-signals.md)** · `make gate` · `make ux-signals` · `/settings/signals` |
 | 质量与灵敏度 CQ / AQ / WN | ✅ CQ1–CQ4 · AQ1–AQ2 · WN1–WN3（AQ3 守线） | **[30](30-quality-and-agility.md)** |
-| 沙箱逃逸与防护 SE / SB / PR / SW | 🔧 E1–E4+PR2(shell) ✅；PR1/SW1/SB4/SB5/PR3 待续；敏感词暂空 | **[31](31-sandbox-escape-and-hardening.md)** |
+| 沙箱逃逸与防护 SE / SB / PR / SW | 🔧 E1–E3+PR2 ✅；E4 默认无网⏸；PR1/SW1/SB4/SB5/PR3 待续；敏感词暂空 | **[31](31-sandbox-escape-and-hardening.md)** |
 | 执行面落点 / 本地 Runner | ✅ 写作=云端+下载；本地 ⏸ | **[32](32-execution-plane-and-local-runner.md)** |
 | Harness 工程完善 HM1–HM9 | ✅ 核心落地（预压缩 / raw / 增量 / 检索审计 / 信封 / 导出门禁） | **[33](33-harness-maturity-backlog.md)** · Ops [29](29-ops-eval-console.md) §6–§7 |
 

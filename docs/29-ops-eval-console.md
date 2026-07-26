@@ -4,7 +4,8 @@
 > **Golden 切片**：对已启动栈点选用例；切片绿 ≠ 合并证明。  
 > 测试核心是结果一致，不是跟手时间。不进写作热路径（见 [13](13-rate-redlines.md) R1–R5）。  
 > **边界**：Ops 是内部后端能力（密钥 URL + api）；与面向用户的 Web / `/workspace` / Work **文件系统隔离**。  
-> **观测**：检索审计 → [§6](#6-检索审计观测-hm5--ro1)；模型信封 → [§7](#7-模型信封抽样-hm4) · [33](33-harness-maturity-backlog.md)。
+> **观测**：检索审计 → [§6](#6-检索审计观测-hm5--ro1)；模型信封 → [§7](#7-模型信封-hm4)；Raw → [§8](#8-raw-快照只读-hm2) · [33](33-harness-maturity-backlog.md)。  
+> **速率纪律**：Ops 仅密钥 URL + 只读 API/页；**不**进入写作/Agent 工作台导航热路径，**不**改 `AgentEngine` / SSE 主路径（R1–R5）。
 
 ## 1. 入口
 
@@ -165,17 +166,18 @@ Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspa
 - Ops 代用户重跑检索并写回其语料库  
 - 无密钥的公开 debug 页  
 
-## 7. 模型信封抽样（HM4）
+## 7. 模型信封（HM4）
 
-> **状态**：✅ 已落地 — 哈希必写 · 全量按采样/高 fill/debug；详见 [33](33-harness-maturity-backlog.md) HM4。
+> **状态**：✅ 已落地 — 哈希必写 · **默认落全文**（`MODEL_ENVELOPE_SAMPLE_RATE` 默认 `1.0`）；高 fill / `MODEL_ENVELOPE_DEBUG` 仍强制全文。详见 [33](33-harness-maturity-backlog.md) HM4。
 
 | 能力 | 说明 |
 |------|------|
 | 入口 | `/ops/<secret>/envelopes`（Ops 壳导航「模型信封」） |
-| 浏览 | 默认列出最近有信封落盘的 Turn；点开看哈希 / 全量 |
+| 浏览 | 默认列出最近有信封落盘的 Turn；点开看哈希 / 全文 |
 | API | `GET /api/v1/ops/envelopes/recent` · `GET /api/v1/ops/envelopes/turns/{turn_id}` |
 | 表 | `model_request_envelopes`（Alembic `0015`） |
 | 写入 | assemble 后异步；不进 SSE / 默认投影 |
+| 降采样 | 若需省盘：设 `MODEL_ENVELOPE_SAMPLE_RATE=0.05` 等后重建 runtime |
 
 与 §6 同密钥、只读；回答「那一步模型看见了什么」。
 
@@ -183,6 +185,17 @@ Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspa
 
 | 能力 | 说明 |
 |------|------|
-| API | `GET /api/v1/ops/raw/turns/{turn_id}` |
+| 入口 | `/ops/<secret>/raw`（Ops 壳「Raw 快照」） |
+| 浏览 | 最近有 raw 的 Turn；点开看 step 快照；messages 默认折叠 |
+| API | `GET /api/v1/ops/raw/recent` · `GET /api/v1/ops/raw/turns/{turn_id}` |
 | 表 | `session_raw_snapshots`（Alembic `0014`） |
 | 纪律 | **永不**把该仓内容直接当作模型窗 |
+| 同 Turn 互链 | 检索 / 信封 / Raw 页顶「同 Turn 观测」+ `?turn=` |
+
+## 9. 观测页加厚（旁路 UX · 2026-07）
+
+| 项 | 说明 |
+|----|------|
+| 诊断条 | 检索页对「无 audit / hybrid 三层同构 / L3 全截断 / 层差」给出提示（纯前端，不调 runtime） |
+| 层差高亮 | L1∖L2、L2∖L3 的 chunk 标记 `only-here` |
+| 边界 | 仍不向用户工作台挂完整召回池；评测 scratch ≠ 用户 Work |

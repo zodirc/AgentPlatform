@@ -272,10 +272,10 @@ next_summary = merge(prev_summary, new_turns_or_window_delta)
 
 ---
 
-### HM4 — Model request envelope 抽样落盘
+### HM4 — Model request envelope 落盘
 
-**落地摘要（2026-07-24）**  
-- DDL `model_request_envelopes` + Alembic `0015`；`maybe_persist_model_envelope`（哈希必写 · 全量采样/高 fill/debug）。  
+**落地摘要（2026-07）**  
+- DDL `model_request_envelopes` + Alembic `0015`；`maybe_persist_model_envelope`（哈希必写 · **默认全文** `sample_rate=1.0`；仍可用环境变量降采样）。  
 - Ops API + 页：`/ops/<secret>/envelopes` · `GET /api/v1/ops/envelopes/turns/{turn_id}`。
 
 **关闭问题**  
@@ -285,12 +285,12 @@ Q19（生成侧归因）。
 线上坏例难回答：「那一步模型到底看见了什么？」事件流有分项，但缺少可选的完整请求信封。
 
 **目标**  
-- `assemble` 完成后异步落盘：messages + tools 的 **内容哈希** 必写；**全量信封**按采样率或仅失败 / 高 fill / 显式 debug 开关。  
+- `assemble` 完成后异步落盘：messages + tools 的 **内容哈希** 必写；**全量信封**默认写入（观测优先）；可用 `MODEL_ENVELOPE_SAMPLE_RATE` 降采样。  
 - 不进 SSE 热路径；不进默认投影体积。  
-- Ops / 评测台只读回放（可与 [29](29-ops-eval-console.md) 后续对接）。
+- Ops / 评测台只读回放（见 [29](29-ops-eval-console.md)）。
 
 **验收**  
-- 默认采样配置安全（磁盘/隐私）；secret 扫描沿用现有写出前扫描纪律。  
+- 默认可在 Ops 展开全文；secret 扫描沿用现有写出前扫描纪律。  
 - R4：异步；单测覆盖哈希稳定性。
 
 ---
