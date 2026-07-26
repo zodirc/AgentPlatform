@@ -1,29 +1,34 @@
 #!/usr/bin/env bash
-# Install versioned hooks from .githooks/ into this clone's .git/hooks/
-# (symlink; no git config required).
+# Point this clone at versioned hooks under .githooks/ (default for make up/start).
+# Bypass push preflight: SKIP_PREFLIGHT=1 git push   OR   git push --no-verify
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOKS_SRC="$ROOT/.githooks"
-HOOKS_DST="$ROOT/.git/hooks"
 
 if [[ ! -d "$ROOT/.git" ]]; then
   echo "Not a git checkout: $ROOT" >&2
   exit 1
 fi
 
-mkdir -p "$HOOKS_DST"
-for name in pre-push; do
-  src="$HOOKS_SRC/$name"
-  dst="$HOOKS_DST/$name"
-  if [[ ! -f "$src" ]]; then
-    echo "missing $src" >&2
-    exit 1
-  fi
-  chmod +x "$src" "$ROOT/scripts/preflight_unit.sh" "$ROOT/scripts/install-git-hooks.sh"
-  ln -sfn "$src" "$dst"
-  echo "installed $dst -> $src"
-done
+if [[ ! -d "$HOOKS_SRC" ]]; then
+  echo "missing $HOOKS_SRC" >&2
+  exit 1
+fi
 
-echo "OK. Push will run: bash scripts/preflight_unit.sh"
+chmod +x "$ROOT/scripts/preflight_unit.sh" "$ROOT/scripts/install-git-hooks.sh"
+# Enable every executable hook in .githooks (pre-push, commit-msg, …).
+find "$HOOKS_SRC" -maxdepth 1 -type f ! -name '*.sample' -exec chmod +x {} +
+
+# Local only — does not touch global git config. Relative path is resolved from
+# the work tree, so hooks stay versioned in-repo without copying into .git/hooks.
+git -C "$ROOT" config --local core.hooksPath .githooks
+
+# Drop legacy symlink install if present (ignored once hooksPath is set).
+if [[ -L "$ROOT/.git/hooks/pre-push" ]]; then
+  rm -f "$ROOT/.git/hooks/pre-push"
+fi
+
+current="$(git -C "$ROOT" config --local --get core.hooksPath)"
+echo "OK. core.hooksPath=$current (push → scripts/preflight_unit.sh)"
 echo "Bypass once: SKIP_PREFLIGHT=1 git push   or   git push --no-verify"

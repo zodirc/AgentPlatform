@@ -1,0 +1,9 @@
+#!/bin/sh
+# Strip Cursor co-author trailers so commits stay human-authored (repo convention).
+msg_file=$1
+tmp=$(mktemp) || exit 1
+sed -E '/^Co-authored-by:.*[Cc]ursor/d' "$msg_file" > "$tmp" || { rm -f "$tmp"; exit 1; }
+# Drop trailing blank lines left after removing trailers (keep a single final newline).
+awk 'NF { p=1 } p { buf[n++]=$0 } END { for (i=0;i<n;i++) if (buf[i] ~ /[^[:space:]]/ || i<n-1) print buf[i] }' "$tmp" > "$msg_file"
+rm -f "$tmp"
+exit 0

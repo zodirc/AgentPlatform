@@ -34,7 +34,7 @@ DOCKER_AUTO_PRUNE ?= 1
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources retrieval-bench-prod loc \
-	preflight hooks-install
+	preflight hooks-install ensure-git-hooks
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -70,7 +70,7 @@ help: ## 显示常用命令
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make runtime-test 运行时测试"
 	@echo "  make preflight    推送前 unit 门禁（CI unit.* 本地镜像；无 Docker）"
-	@echo "  make hooks-install 安装 git pre-push → preflight（一次）"
+	@echo "  make hooks-install 启用 .githooks（make up/start 也会自动装）"
 	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
 
 # If OPS_TEST_SECRET is empty/missing in .env, generate once and print Ops URL (docs/29).
@@ -78,11 +78,14 @@ help: ## 显示常用命令
 ensure-ops-secret: ## 确保 .env 有 OPS_TEST_SECRET，并打印 /ops/<secret>/test
 	@bash scripts/ensure_ops_test_secret.sh
 
+ensure-git-hooks: ## 本仓库 core.hooksPath=.githooks（make up/start 默认）
+	@bash scripts/install-git-hooks.sh
+
 # Seed RO mount creates sources/ as root; runtime app (uid 1000) must own it to upload.
 fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
 	@bash scripts/ensure_workspace_sources_writable.sh
 
-start: ensure-ops-secret ## 启动栈（不 rebuild，最快）
+start: ensure-ops-secret ensure-git-hooks ## 启动栈（不 rebuild，最快）
 	$(COMPOSE) up -d
 	@$(MAKE) --no-print-directory fix-workspace-sources
 
@@ -94,7 +97,7 @@ define docker_auto_prune
 	fi
 endef
 
-up: ensure-ops-secret ## 重建并启动全部服务
+up: ensure-ops-secret ensure-git-hooks ## 重建并启动全部服务
 	$(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
@@ -335,8 +338,7 @@ runtime-test:
 preflight: ## 推送前 unit 门禁（与 CI unit 同套；按变更选择性跑）
 	@bash scripts/preflight_unit.sh
 
-hooks-install: ## 安装 .githooks/pre-push（推送自动跑 preflight）
-	@bash scripts/install-git-hooks.sh
+hooks-install: ensure-git-hooks ## 同 ensure-git-hooks（兼容旧目标名）
 
 sync-sources: ## Turn 外增量索引 workspace/sources（含 RO 挂载的 seed；docs/15）
 	$(COMPOSE) exec -T runtime python -c 'import asyncio; from app.retrieval.index_scheduler import run_sources_index_sync; print(asyncio.run(run_sources_index_sync(reason="make")))'
