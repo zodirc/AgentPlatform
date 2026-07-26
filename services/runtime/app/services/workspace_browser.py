@@ -41,7 +41,19 @@ def source_rel_path(filename: str) -> str:
 
 
 async def list_workspace_entries(path: str = ".") -> dict:
+    """Same visibility as agent ``list_dir`` (hides ``.agent/`` + cards/pending)."""
     return await list_dir(path)
+
+
+def _assert_not_harness_internal(path: str) -> None:
+    from app.workspace_visibility import normalized_workspace_rel
+
+    rel = normalized_workspace_rel(path)
+    if rel == ".agent" or rel.startswith(".agent/"):
+        raise PermissionError(
+            "cannot delete harness path `.agent/` from the workbench "
+            "(internal drafts/manifests; user deliverables live at manuscript.md / exports/)"
+        )
 
 
 async def read_workspace_file(path: str) -> dict:
@@ -107,6 +119,7 @@ async def delete_workspace_paths(paths: list[str]) -> dict[str, Any]:
             from app.tools.core.tools import _assert_not_seed_corpus
 
             _assert_not_seed_corpus(rel)
+            _assert_not_harness_internal(rel)
         except PermissionError as exc:
             failed.append({"path": rel, "error": str(exc)})
             continue

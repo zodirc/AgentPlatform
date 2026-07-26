@@ -26,6 +26,32 @@ async def test_read_file_and_list_dir(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_dir_hides_work_surface_internal(workspace: Path) -> None:
+    (workspace / ".agent" / "work").mkdir(parents=True)
+    (workspace / "sources" / "cards" / "pending").mkdir(parents=True)
+    (workspace / "sources" / "cards" / "style.md").write_text("x", encoding="utf-8")
+    (workspace / "ok.md").write_text("y", encoding="utf-8")
+
+    root = await core.list_dir(".")
+    names = [e.rstrip("/") for e in root["entries"]]
+    assert ".agent" not in names
+    assert "ok.md" in names
+
+    cards = await core.list_dir("sources/cards")
+    card_names = [e.rstrip("/") for e in cards["entries"]]
+    assert "pending" not in card_names
+    assert "style.md" in card_names
+
+    # Known-path read still works (writing draft_section / continuity).
+    (workspace / ".agent" / "work" / "drafts").mkdir(parents=True)
+    (workspace / ".agent" / "work" / "drafts" / "manuscript.md").write_text(
+        "draft", encoding="utf-8"
+    )
+    read = await core.read_file(".agent/work/drafts/manuscript.md")
+    assert read.get("content") == "draft" or "draft" in str(read.get("content", ""))
+
+
+@pytest.mark.asyncio
 async def test_read_file_truncates_large_content(workspace: Path) -> None:
     (workspace / "big.txt").write_text("x" * 40_000, encoding="utf-8")
     result = await core.read_file("big.txt")

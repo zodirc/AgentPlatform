@@ -85,6 +85,51 @@ async def test_delete_workspace_paths_skips_nested_when_parent_deleted(workspace
 
 
 @pytest.mark.asyncio
+async def test_delete_workspace_paths_rejects_harness_agent_tree(workspace) -> None:
+    harness = workspace / ".agent" / "work" / "drafts"
+    harness.mkdir(parents=True)
+    (harness / "manuscript.md").write_text("draft", encoding="utf-8")
+
+    root = await delete_workspace_paths([".agent"])
+    assert root["deleted"] == []
+    assert len(root["failed"]) == 1
+    assert "harness" in root["failed"][0]["error"]
+
+    nested = await delete_workspace_paths([".agent/work/drafts/manuscript.md"])
+    assert nested["deleted"] == []
+    assert len(nested["failed"]) == 1
+    assert (harness / "manuscript.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_list_workspace_entries_hides_agent_harness(workspace) -> None:
+    from app.services.workspace_browser import list_workspace_entries
+
+    (workspace / ".agent" / "work").mkdir(parents=True)
+    (workspace / "manuscript.md").write_text("book", encoding="utf-8")
+
+    result = await list_workspace_entries(".")
+    names = [e.rstrip("/") for e in result["entries"]]
+    assert ".agent" not in names
+    assert "manuscript.md" in names
+
+
+@pytest.mark.asyncio
+async def test_list_workspace_entries_hides_cards_pending(workspace) -> None:
+    from app.services.workspace_browser import list_workspace_entries
+
+    pending = workspace / "sources" / "cards" / "pending"
+    pending.mkdir(parents=True)
+    (pending / "hero.md").write_text("cand", encoding="utf-8")
+    (workspace / "sources" / "cards" / "style.md").write_text("ok", encoding="utf-8")
+
+    under_cards = await list_workspace_entries("sources/cards")
+    names = [e.rstrip("/") for e in under_cards["entries"]]
+    assert "pending" not in names
+    assert "style.md" in names
+
+
+@pytest.mark.asyncio
 async def test_delete_workspace_paths_rejects_workspace_root(workspace) -> None:
     with pytest.raises(ValueError, match="workspace root"):
         await delete_workspace_paths(["."])

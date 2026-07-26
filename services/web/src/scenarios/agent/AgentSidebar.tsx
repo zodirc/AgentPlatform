@@ -4,6 +4,7 @@ import { RefreshCw, Trash2 } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import { deleteWorkspacePaths } from "../../shared/api/client";
 import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
+import { isWorkSurfaceHiddenPath } from "../../shared/workspace/harnessPath";
 import {
   PatchDiffPanel,
   type PatchArtifact,
@@ -145,7 +146,9 @@ export function AgentSidebar({
   };
 
   const confirmDeleteSelected = () => {
-    const paths = [...checkedPaths].filter((p) => !isSeedCorpusPath(p));
+    const paths = [...checkedPaths].filter(
+      (p) => !isSeedCorpusPath(p) && !isWorkSurfaceHiddenPath(p),
+    );
     if (paths.length === 0) {
       window.alert("系统资料（seed）不可删除。请只选择个人文件。");
       return;

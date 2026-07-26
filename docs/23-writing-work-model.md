@@ -53,7 +53,7 @@ Session **不应**拥有章节所有权。
 |----|------|------|------|
 | 结构 | `outline.md` | `update_outline` | 作品大纲（跨 session） |
 | 正式正文 | `manuscript.md`（默认）或 `sections/{id}.md` | `propose_patch` | 全书 / 可选分章 |
-| 在编草稿 | `.agent/work/drafts/manuscript.md`（默认追加） | `draft_section` | 同一本书里 upsert 章节块 |
+| 在编草稿 | `.agent/work/drafts/manuscript.md`（默认追加） | `draft_section` | 同一本书里 upsert 章节块；**工作台树默认不展示 `.agent/`**（仍落盘；防误删） |
 | 回合快照（可选） | `.agent/work/history/{section_id}/{turn_id}.md` | `draft_section` 旁路写 | 审计 / 回滚；可 GC |
 | 回合清单 | `.agent/work/turns/{turn_id}.json` | `draft_section` | 本轮触碰了哪些 `section_id`（导出 `current_draft` 用） |
 | 对话态 | DB `session_transcripts` + `.agent/sessions/…` 仅若仍需会话私有缓存 | runtime | **不再存章节正文** |

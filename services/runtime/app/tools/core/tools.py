@@ -278,6 +278,10 @@ async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
         normalized = _normalized_workspace_rel(path)
         if normalized in {"", ".", "sources"}:
             entries = [e for e in entries if e.rstrip("/") != "seed"]
+    # Align agent listing with Web work surface (hide .agent / cards/pending).
+    from app.workspace_visibility import filter_work_surface_list_entries
+
+    entries = filter_work_surface_list_entries(path, entries)
     return {"path": path, "entries": entries[:200]}
 
 

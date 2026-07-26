@@ -6,12 +6,18 @@ import {
   fetchWorkspaceEntries,
 } from "../../shared/api/client";
 import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
+import { isWorkSurfaceHiddenPath } from "../../shared/workspace/harnessPath";
 import {
   workspaceEntryIcon,
   workspaceEntryIconSizeClass,
 } from "./workspaceFileIcon";
 
-const HIDDEN_ENTRIES = new Set([".ruff_cache", "__pycache__", ".git"]);
+const HIDDEN_ENTRIES = new Set([
+  ".ruff_cache",
+  "__pycache__",
+  ".git",
+  ".agent", // harness drafts/manifests — not user work surface
+]);
 
 function joinPath(parent: string, name: string): string {
   if (parent === "." || parent === "") return name;
@@ -25,7 +31,9 @@ function parseEntries(
   return entries
     .filter((entry) => {
       const name = entry.endsWith("/") ? entry.slice(0, -1) : entry;
-      return !HIDDEN_ENTRIES.has(name);
+      if (HIDDEN_ENTRIES.has(name)) return false;
+      const full = joinPath(parentPath, name);
+      return !isWorkSurfaceHiddenPath(full);
     })
     .map((entry) => {
       const isDir = entry.endsWith("/");
@@ -80,7 +88,8 @@ function TreeNode({
   const children = data ? parseEntries(path, data.entries) : [];
   const selected = !isDir && selectedPath === path;
   const checked = checkedPaths.has(path);
-  const deletable = path !== "." && !isSeedCorpusPath(path);
+  const deletable =
+    path !== "." && !isSeedCorpusPath(path) && !isWorkSurfaceHiddenPath(path);
   const { Icon, className: iconClass } = workspaceEntryIcon(
     name === "." ? "workspace" : name,
     isDir,
