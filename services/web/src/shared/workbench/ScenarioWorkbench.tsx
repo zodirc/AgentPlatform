@@ -24,6 +24,7 @@ function artifactBadgeCount(
     (item) =>
       item.tool_name === "read_file" ||
       item.tool_name === "write_file" ||
+      item.tool_name === "edit_file" ||
       item.tool_name === "list_dir" ||
       item.tool_name === "glob" ||
       item.tool_name === "run_command" ||

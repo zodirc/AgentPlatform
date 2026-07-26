@@ -180,7 +180,7 @@ class AgentEngine:
                 from app.context.engine import estimate_window_breakdown
 
                 report = self._context.last_budget_report
-                # HM4: async envelope sample (hash always when enabled).
+                # HM4: async envelope persist (hash always; full body default sample_rate=1).
                 try:
                     import asyncio
 
@@ -664,6 +664,11 @@ class AgentEngine:
                 approval_payload["path"] = path
                 approval_payload["old_text"] = old_text
                 approval_payload["new_text"] = str(arguments.get("content", ""))
+            elif tool_name == "edit_file":
+                # Span replace — surface old/new for UI unified diff (not whole file).
+                approval_payload["path"] = str(arguments.get("path", ""))
+                approval_payload["old_text"] = str(arguments.get("old_text", ""))
+                approval_payload["new_text"] = str(arguments.get("new_text", ""))
             await self._write_event(
                 event_type="approval.requested",
                 payload=approval_payload,
@@ -821,12 +826,34 @@ class AgentEngine:
             if err_text and err_text not in summary:
                 summary = err_text
         tool_status = "error" if result.get("error") or str(result.get("status") or "") == "error" else "ok"
+        if tool_status != "error" and tool_name in {"write_file", "edit_file"}:
+            # Preserve written/edited so projection marks file_write artifacts applied.
+            raw_st = str(result.get("status") or "")
+            if raw_st in {"written", "edited", "ok"}:
+                tool_status = raw_st
         completed_payload: dict[str, Any] = {
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,
             "status": tool_status,
             "summary": summary,
         }
+        if tool_name in {"write_file", "edit_file"}:
+            args = arguments if isinstance(arguments, dict) else {}
+            completed_payload["path"] = str(result.get("path") or args.get("path") or "")
+            if tool_name == "edit_file":
+                completed_payload["old_text"] = str(
+                    result.get("old_text") or args.get("old_text") or ""
+                )
+                completed_payload["new_text"] = str(
+                    result.get("new_text") or args.get("new_text") or ""
+                )
+            else:
+                completed_payload["old_text"] = str(result.get("old_text") or "")
+                completed_payload["new_text"] = str(
+                    result.get("new_text") or args.get("content") or ""
+                )
+            if result.get("bytes_written") is not None:
+                completed_payload["bytes_written"] = int(result["bytes_written"])
         if tool_name == "export_document":
             completed_payload.update(
                 {

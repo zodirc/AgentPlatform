@@ -9,7 +9,7 @@ import {
   type PatchArtifact,
 } from "../../components/PatchDiffPanel";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
-import { artifactToWritePreview } from "../../shared/workbench/filePreview";
+import { artifactToWritePreview, writePreviewFromTimeline } from "../../shared/workbench/filePreview";
 import type {
   TimelineItem,
   WorkbenchState,
@@ -174,6 +174,7 @@ export function AgentSidebar({
         (item) =>
           item.tool_name === "read_file" ||
           item.tool_name === "write_file" ||
+          item.tool_name === "edit_file" ||
           item.tool_name === "list_dir" ||
           item.tool_name === "glob" ||
           item.tool_name === "run_command" ||
@@ -197,6 +198,23 @@ export function AgentSidebar({
     }
     if (selection.kind === "timeline") {
       const item = selection.item;
+      const path = timelinePath(item, wb.events);
+      const writePreview = writePreviewFromTimeline(
+        {
+          ...(item as Record<string, unknown>),
+          ...(path ? { path } : {}),
+        },
+        artifacts,
+      );
+      if (writePreview) {
+        return {
+          title: writePreview.path || toolLabel(item, wb.events),
+          subtitle:
+            writePreview.kind === "edit_file" ? "编辑片段" : "文件变更",
+          body: writePreview.new_text || writePreview.old_text,
+          writePreview,
+        };
+      }
       return {
         title: toolLabel(item, wb.events),
         subtitle: String(item.tool_name ?? "tool"),
@@ -225,7 +243,7 @@ export function AgentSidebar({
       };
     }
     return null;
-  }, [selection, fileWrites, patches, wb.events]);
+  }, [selection, fileWrites, patches, wb.events, artifacts]);
 
   return (
     <aside className="flex h-full w-[min(360px,40vw)] min-w-0 shrink-0 flex-col overflow-hidden border-r border-border bg-background">

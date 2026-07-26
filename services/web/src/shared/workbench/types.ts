@@ -22,6 +22,8 @@ export type WriteFilePreview = {
   truncated?: boolean;
   new_size?: number;
   bytes_written?: number;
+  /** write_file = full file; edit_file = span replace */
+  kind?: "write_file" | "edit_file";
 };
 
 export type ContextWindowBreakdown = {

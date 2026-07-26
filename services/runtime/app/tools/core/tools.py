@@ -1096,10 +1096,20 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
     if blocked is not None:
         return blocked
     target = _resolve_path(path)
+    old_text = ""
+    if target.is_file():
+        try:
+            old_text = target.read_text(encoding="utf-8", errors="replace")
+            if len(old_text) > 32_000:
+                old_text = old_text[:32_000] + "\n...[truncated]"
+        except OSError:
+            old_text = ""
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     return {
         "path": path,
+        "old_text": old_text,
+        "new_text": content,
         "bytes_written": len(content.encode()),
         "summary": f"Wrote {path}",
         "status": "written",
@@ -1173,6 +1183,9 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
     target.write_text(updated, encoding="utf-8")
     return {
         "path": path,
+        "old_text": old_text,
+        "new_text": new_text,
+        "bytes_written": len(updated.encode("utf-8")),
         "summary": f"Edited {path}",
         "status": "edited",
     }

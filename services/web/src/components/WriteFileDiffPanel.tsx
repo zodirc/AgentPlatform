@@ -21,7 +21,8 @@ const FULL_LINE_LIMIT = 5_000;
 
 export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
-  const isNewFile = !preview.old_text.trim();
+  const isEdit = preview.kind === "edit_file";
+  const isNewFile = !isEdit && !preview.old_text.trim();
   const statusLabel =
     STATUS_LABEL[preview.status ?? ""] ?? preview.status ?? "unknown";
 
@@ -53,7 +54,7 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
             {preview.path || "（无路径）"}
           </p>
           <p className="text-xs text-muted-foreground">
-            {isNewFile ? "新建文件" : "覆盖文件"}
+            {isEdit ? "编辑片段（old_text → new_text）" : isNewFile ? "新建文件" : "覆盖文件"}
             {mode === "approval" ? " · 待批准" : ""}
             {preview.bytes_written != null
               ? ` · ${preview.bytes_written} 字节`

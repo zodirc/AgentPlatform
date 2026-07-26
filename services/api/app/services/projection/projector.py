@@ -29,6 +29,100 @@ def _preview_text(text: str, limit: int = _FILE_PREVIEW_LIMIT) -> tuple[str, boo
     return text[:limit] + "\n...[preview truncated]", True
 
 
+def _file_write_artifact_from_tool_payload(
+    payload: dict[str, Any],
+    *,
+    status: str = "pending",
+) -> dict[str, Any] | None:
+    """file_write artifact from approval.requested or tool.completed (write/edit)."""
+    tool_name = str(payload.get("tool_name") or "")
+    if tool_name not in {"write_file", "edit_file"}:
+        return None
+    args = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
+    if tool_name == "edit_file":
+        new_raw = str(payload.get("new_text") or args.get("new_text") or "")
+        old_raw = str(payload.get("old_text") or args.get("old_text") or "")
+    else:
+        new_raw = str(payload.get("new_text") or args.get("content") or "")
+        old_raw = str(payload.get("old_text") or "")
+    path = payload.get("path") or args.get("path") or ""
+    if not path and not new_raw and not old_raw:
+        return None
+    new_text, new_trunc = _preview_text(new_raw)
+    old_text, old_trunc = _preview_text(old_raw)
+    art: dict[str, Any] = {
+        "type": "file_write",
+        "kind": tool_name,
+        "tool_name": tool_name,
+        "tool_call_id": payload.get("tool_call_id", ""),
+        "path": path,
+        "old_text": old_text,
+        "new_text": new_text,
+        "status": status,
+        "truncated": new_trunc or old_trunc,
+        "new_size": len(new_raw),
+    }
+    if payload.get("bytes_written") is not None:
+        art["bytes_written"] = payload.get("bytes_written")
+    return art
+
+
+def _file_write_artifact_from_approval(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Pending file_write artifact for write_file (full) or edit_file (span)."""
+    return _file_write_artifact_from_tool_payload(payload, status="pending")
+
+
+def _file_write_applied_status(payload_status: Any) -> str:
+    st = str(payload_status or "")
+    if st in {"ok", "edited", "written"}:
+        return "applied"
+    return st or "error"
+
+
+def _mark_file_write_applied(
+    artifacts: list[dict[str, Any]],
+    *,
+    payload: dict[str, Any],
+    status: str,
+) -> None:
+    """Mark pending artifact applied, or create one when sticky write skipped approval."""
+    tool_name = payload.get("tool_name")
+    tool_call_id = payload.get("tool_call_id")
+    if tool_name not in {"write_file", "edit_file"}:
+        return
+    bytes_written = payload.get("bytes_written")
+    for art in artifacts:
+        if art.get("type") == "file_write" and art.get("tool_call_id") == tool_call_id:
+            art["status"] = status
+            if bytes_written is not None:
+                art["bytes_written"] = bytes_written
+            # Backfill span/full text if approval event lacked enrichment.
+            if not art.get("old_text") and payload.get("old_text"):
+                old_text, old_trunc = _preview_text(str(payload.get("old_text") or ""))
+                art["old_text"] = old_text
+                art["truncated"] = bool(art.get("truncated")) or old_trunc
+            if not art.get("new_text") and (payload.get("new_text") or payload.get("arguments")):
+                args = (
+                    payload.get("arguments")
+                    if isinstance(payload.get("arguments"), dict)
+                    else {}
+                )
+                new_raw = str(
+                    payload.get("new_text")
+                    or (args.get("new_text") if tool_name == "edit_file" else args.get("content"))
+                    or ""
+                )
+                if new_raw:
+                    new_text, new_trunc = _preview_text(new_raw)
+                    art["new_text"] = new_text
+                    art["new_size"] = len(new_raw)
+                    art["truncated"] = bool(art.get("truncated")) or new_trunc
+            return
+    art = _file_write_artifact_from_tool_payload(payload, status=status)
+    if art is not None:
+        artifacts.append(art)
+
+
 async def _record_projection_failure(turn_id: UUID, exc: Exception) -> None:
     """Best-effort write of a projection failure to the audit table.
 
@@ -126,14 +220,11 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                         item["summary"] = payload.get("summary")
                         item["subagent_id"] = subagent_id
                         break
-                if payload.get("tool_name") == "write_file":
-                    for art in artifacts:
-                        if art.get("type") == "file_write" and art.get("tool_call_id") == tool_call_id:
-                            art["status"] = "applied" if payload.get("status") == "ok" else str(
-                                payload.get("status", "error")
-                            )
-                            if payload.get("bytes_written") is not None:
-                                art["bytes_written"] = payload.get("bytes_written")
+                _mark_file_write_applied(
+                    artifacts,
+                    payload=payload,
+                    status=_file_write_applied_status(payload.get("status")),
+                )
             elif event_type == "tool.delta":
                 tool_call_id = payload.get("tool_call_id")
                 for item in reversed(tool_timeline):
@@ -155,29 +246,10 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                     "reason": None,
                     "subagent_id": subagent_id,
                 }
-                if payload.get("tool_name") == "write_file":
-                    args = (
-                        payload.get("arguments")
-                        if isinstance(payload.get("arguments"), dict)
-                        else {}
-                    )
-                    new_raw = str(payload.get("new_text") or args.get("content") or "")
-                    old_raw = str(payload.get("old_text") or "")
-                    new_text, new_trunc = _preview_text(new_raw)
-                    old_text, old_trunc = _preview_text(old_raw)
-                    artifacts.append(
-                        {
-                            "type": "file_write",
-                            "tool_call_id": payload.get("tool_call_id", ""),
-                            "path": payload.get("path") or args.get("path", ""),
-                            "old_text": old_text,
-                            "new_text": new_text,
-                            "status": "pending",
-                            "truncated": new_trunc or old_trunc,
-                            "new_size": len(new_raw),
-                            "subagent_id": subagent_id,
-                        }
-                    )
+                art = _file_write_artifact_from_approval(payload)
+                if art is not None:
+                    art["subagent_id"] = subagent_id
+                    artifacts.append(art)
             elif event_type == "approval.resolved":
                 pending_interrupt = None
                 decision = payload.get("decision", "approved")
@@ -209,24 +281,9 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 "status": "pending",
                 "reason": None,
             }
-            if payload.get("tool_name") == "write_file":
-                args = payload.get("arguments") if isinstance(payload.get("arguments"), dict) else {}
-                new_raw = str(payload.get("new_text") or args.get("content") or "")
-                old_raw = str(payload.get("old_text") or "")
-                new_text, new_trunc = _preview_text(new_raw)
-                old_text, old_trunc = _preview_text(old_raw)
-                artifacts.append(
-                    {
-                        "type": "file_write",
-                        "tool_call_id": payload.get("tool_call_id", ""),
-                        "path": payload.get("path") or args.get("path", ""),
-                        "old_text": old_text,
-                        "new_text": new_text,
-                        "status": "pending",
-                        "truncated": new_trunc or old_trunc,
-                        "new_size": len(new_raw),
-                    }
-                )
+            art = _file_write_artifact_from_approval(payload)
+            if art is not None:
+                artifacts.append(art)
         elif event_type == "approval.resolved":
             pending_interrupt = None
             decision = payload.get("decision", "approved")
@@ -291,14 +348,11 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 if payload.get("bytes_written") is not None:
                     target["bytes_written"] = payload.get("bytes_written")
             latest_output = payload.get("summary") or latest_output
-            if payload.get("tool_name") == "write_file":
-                for art in artifacts:
-                    if art.get("type") == "file_write" and art.get("tool_call_id") == tool_call_id:
-                        art["status"] = "applied" if payload.get("status") == "ok" else str(
-                            payload.get("status", "error")
-                        )
-                        if payload.get("bytes_written") is not None:
-                            art["bytes_written"] = payload.get("bytes_written")
+            _mark_file_write_applied(
+                artifacts,
+                payload=payload,
+                status=_file_write_applied_status(payload.get("status")),
+            )
         elif event_type == "tool.delta":
             tool_call_id = payload.get("tool_call_id")
             matched = False

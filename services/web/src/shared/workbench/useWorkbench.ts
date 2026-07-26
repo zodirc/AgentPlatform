@@ -31,7 +31,7 @@ import type {
   WorkbenchState,
   WriteFilePreview,
 } from "./types";
-import { previewText } from "./filePreview";
+import { writePreviewFromApprovalPayload } from "./filePreview";
 import {
   executePlanMessage,
   isPlanSuggestCooldownActive,
@@ -172,22 +172,7 @@ export function useWorkbenchImpl(): WorkbenchState {
   function extractWriteFilePreview(
     payload: Record<string, unknown>,
   ): WriteFilePreview | null {
-    if (String(payload.tool_name ?? "") !== "write_file") return null;
-    const args = (payload.arguments ?? {}) as Record<string, unknown>;
-    const path = String(payload.path ?? args.path ?? "");
-    const newRaw = String(payload.new_text ?? args.content ?? "");
-    const oldRaw = String(payload.old_text ?? "");
-    if (!path && !newRaw) return null;
-    const newPreview = previewText(newRaw);
-    const oldPreview = previewText(oldRaw);
-    return {
-      path,
-      old_text: oldPreview.text,
-      new_text: newPreview.text,
-      status: "pending",
-      truncated: newPreview.truncated || oldPreview.truncated,
-      new_size: newRaw.length,
-    };
+    return writePreviewFromApprovalPayload(payload);
   }
 
   function syncApprovalFromView(v: TurnView) {
@@ -222,6 +207,11 @@ export function useWorkbenchImpl(): WorkbenchState {
           typeof fileArtifact.bytes_written === "number"
             ? fileArtifact.bytes_written
             : undefined,
+        kind:
+          fileArtifact.kind === "edit_file" ||
+          fileArtifact.tool_name === "edit_file"
+            ? "edit_file"
+            : "write_file",
       });
     }
   }
