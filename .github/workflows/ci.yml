@@ -120,8 +120,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: pnpm
-          cache-dependency-path: services/web/pnpm-lock.yaml
       - name: Install web dependencies
         working-directory: services/web
         run: pnpm install --frozen-lockfile
@@ -150,8 +148,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-          cache: pnpm
-          cache-dependency-path: services/web/pnpm-lock.yaml
       - name: Install web dependencies
         working-directory: services/web
         run: pnpm install --frozen-lockfile
