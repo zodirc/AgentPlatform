@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Any
 
 from app.context.policy import CompactionPolicy
@@ -537,6 +539,20 @@ def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
     return max(1, estimate_payload_tokens(messages))
 
 
+# Matches every char with ord > 0x2E80 (CJK and beyond) — same classification
+# as the previous per-char Python loop, but at C speed.
+_CJK_CHAR_PATTERN = re.compile(r"[^\u0000-\u2e80]")
+
+
+@lru_cache(maxsize=2048)
+def _estimate_text_tokens(text: str) -> int:
+    """Token estimate for one text; cached because _window_fill re-estimates
+    the same unchanged messages ≥5 times per step (review I6)."""
+    cjk = len(text) - len(_CJK_CHAR_PATTERN.sub("", text))
+    other = len(text) - cjk
+    return max(1, cjk + (other + 2) // 3)
+
+
 def estimate_payload_tokens(payload: Any) -> int:
     """Cheap token estimate that prefers overestimate (AH4).
 
@@ -550,14 +566,7 @@ def estimate_payload_tokens(payload: Any) -> int:
         text = json.dumps(payload, ensure_ascii=False)
     if not text:
         return 0
-    cjk = 0
-    other = 0
-    for ch in text:
-        if ord(ch) > 0x2E80:
-            cjk += 1
-        else:
-            other += 1
-    return max(1, cjk + (other + 2) // 3)
+    return _estimate_text_tokens(text)
 
 
 def estimate_assembled_window(
