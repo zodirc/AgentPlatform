@@ -38,7 +38,18 @@ def lexical_rerank_score(query: str, hit: ChunkHit) -> float:
     title_tokens = set(tokenize(hit.section_title))
     overlap = len(query_tokens & text_tokens)
     title_overlap = len(query_tokens & title_tokens)
-    phrase_bonus = 2.0 if query_norm and query_norm in hit.excerpt.lower() else 0.0
+    # Full-chunk phrase hits that fall past the UI excerpt window are weak signals;
+    # prefer early occurrences so tool.completed / timeline previews stay honest.
+    phrase_bonus = 0.0
+    if query_norm:
+        excerpt_l = hit.excerpt.lower()
+        pos = excerpt_l.find(query_norm)
+        if pos >= 0:
+            window = max(32, int(settings.search_sources_excerpt_chars))
+            if pos < window:
+                phrase_bonus = 2.0 + max(0.0, (window - pos) / float(window))
+            else:
+                phrase_bonus = 0.5
     title_bonus = 3.0 if query_norm and query_norm in hit.section_title.lower() else 0.0
     return hit.score + overlap * 0.15 + title_overlap * 0.35 + phrase_bonus + title_bonus
 

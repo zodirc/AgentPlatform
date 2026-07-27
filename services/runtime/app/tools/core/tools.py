@@ -867,11 +867,9 @@ def _attach_filter_meta(payload: dict[str, Any], filter_meta: dict[str, Any]) ->
     return payload
 
 
-def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
-    """True if at least one distinctive query token appears in a hit path or excerpt.
+def _distinctive_query_terms(query: str) -> list[str]:
+    """Tokens that must appear in a hit for ANN results to count as a cover.
 
-    Hash / weak ANN neighbors can rank unrelated seed chunks above a brand-new
-    on-disk fixture; falling through to keyword keeps goldens and remounts honest.
     Ignores short/runtime-noise tokens so a polluted stub query cannot 'cover'
     via ``writing`` in ``sources/seed/writing/...``.
     """
@@ -900,18 +898,53 @@ def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
                 terms.append(tl)
         elif len(t) >= 6:
             terms.append(tl)
-    if not terms:
-        q = query.strip().lower()
-        if _cjk.search(query) and len(q) >= 2 and q not in stop:
-            terms = [q]
-        else:
-            # No distinctive tokens — treat ANN as non-authoritative.
-            return False
+    if terms:
+        return terms
+    q = query.strip().lower()
+    if _cjk.search(query) and len(q) >= 2 and q not in stop:
+        return [q]
+    return []
+
+
+def _hit_covers_query_terms(hit: dict[str, Any], terms: list[str]) -> bool:
+    blob = f"{hit.get('path', '')}\n{hit.get('excerpt', '')}".lower()
+    return any(term in blob for term in terms)
+
+
+def _prefer_excerpt_covering_hits(
+    hits: list[dict[str, Any]], query: str
+) -> list[dict[str, Any]]:
+    """Stable-promote hits whose truncated excerpt/path shows distinctive terms.
+
+    Hybrid can rank a long chunk that mentions the query late above a chunk that
+    shows it in the UI/timeline window; tool.completed only previews hits[0].
+    """
+    terms = _distinctive_query_terms(query)
+    if not terms or len(hits) <= 1:
+        return hits
+    covered: list[dict[str, Any]] = []
+    rest: list[dict[str, Any]] = []
     for hit in hits:
-        blob = f"{hit.get('path', '')}\n{hit.get('excerpt', '')}".lower()
-        if any(term in blob for term in terms):
-            return True
-    return False
+        if _hit_covers_query_terms(hit, terms):
+            covered.append(hit)
+        else:
+            rest.append(hit)
+    if not covered:
+        return hits
+    return covered + rest
+
+
+def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
+    """True if at least one distinctive query token appears in a hit path or excerpt.
+
+    Hash / weak ANN neighbors can rank unrelated seed chunks above a brand-new
+    on-disk fixture; falling through to keyword keeps goldens and remounts honest.
+    """
+    terms = _distinctive_query_terms(query)
+    if not terms:
+        # No distinctive tokens — treat ANN as non-authoritative.
+        return False
+    return any(_hit_covers_query_terms(hit, terms) for hit in hits)
 
 
 def _with_retrieval_audit(
@@ -1020,8 +1053,11 @@ async def search_sources(
                     )
                     use_slot_capture = True
                 else:
-                    hits = _format_source_hits(
-                        filtered[:limit], excerpt_chars=excerpt_chars
+                    hits = _prefer_excerpt_covering_hits(
+                        _format_source_hits(
+                            filtered[:limit], excerpt_chars=excerpt_chars
+                        ),
+                        query,
                     )
                     if hits and _hits_cover_query_terms(hits, query):
                         resolved = {

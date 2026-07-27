@@ -468,6 +468,22 @@ def test_hits_cover_query_terms_ignores_runtime_noise() -> None:
     assert _hits_cover_query_terms([own], "TENANT_OWN_MARKER_WAVE_A") is True
 
 
+def test_prefer_excerpt_covering_hits_promotes_visible_term() -> None:
+    from app.tools.core.tools import _prefer_excerpt_covering_hits
+
+    late = {
+        "path": "sources/seed/writing/dramas/drama1.md",
+        "excerpt": "情节改编\n- 亮剑精神的出处：原著…",
+    }
+    early = {
+        "path": "sources/seed/writing/dramas/drama1.md",
+        "excerpt": "建国后至授衔\n- 情感风波：张白鹿对李云龙产生好感。",
+    }
+    ordered = _prefer_excerpt_covering_hits([late, early], "张白鹿")
+    assert ordered[0] is early
+    assert ordered[1] is late
+
+
 @pytest.mark.asyncio
 async def test_search_sources_keyword_section_fields(
     workspace: Path, monkeypatch: pytest.MonkeyPatch

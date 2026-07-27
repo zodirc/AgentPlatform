@@ -337,6 +337,32 @@ def test_lexical_rerank_prefers_section_title_match() -> None:
     assert reranked[0].chunk_id == "b"
 
 
+def test_lexical_rerank_prefers_early_phrase_in_excerpt() -> None:
+    """Late buried mentions must not beat an early visible match (timeline uses hits[0])."""
+    late = "情节改编\n" + ("噪声。" * 40) + "\n张白鹿：配角。\n"
+    early = "建国后至授衔\n- 情感风波：张白鹿对李云龙产生好感。\n"
+    hits = [
+        ChunkHit(
+            path="sources/seed/writing/dramas/drama1.md",
+            chunk_id="late",
+            excerpt=late,
+            citation_id="cite:drama1",
+            score=2.83,
+            section_title="情节改编",
+        ),
+        ChunkHit(
+            path="sources/seed/writing/dramas/drama1.md",
+            chunk_id="early",
+            excerpt=early,
+            citation_id="cite:drama1",
+            score=2.83,
+            section_title="建国后至授衔",
+        ),
+    ]
+    reranked = lexical_rerank("张白鹿", hits, limit=2)
+    assert reranked[0].chunk_id == "early"
+
+
 def test_json_source_retrieval_store_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
