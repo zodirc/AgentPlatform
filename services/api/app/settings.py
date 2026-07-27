@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
+    # B10: pool command_timeout + PG statement_timeout (seconds).
+    db_statement_timeout_seconds: float = 30.0
     runtime_url: str = "http://runtime:8001"
     runtime_url_map: str = ""
     internal_service_token: str = "change-me-internal"
@@ -70,6 +72,14 @@ class Settings(BaseSettings):
         if self.admin_session_bypass:
             raise RuntimeError(
                 "ADMIN_SESSION_BYPASS must be false when APP_ENV=production"
+            )
+        # auth_enabled=False lets require_admin_or_end_user pass anonymous
+        # requests straight through to /admin/workspace/* (read/write/delete).
+        if not self.auth_enabled:
+            raise RuntimeError("AUTH_ENABLED must be true when APP_ENV=production")
+        if not self.end_user_auth_enabled:
+            raise RuntimeError(
+                "END_USER_AUTH_ENABLED must be true when APP_ENV=production"
             )
 
 

@@ -6,10 +6,12 @@ import logging
 from app.db.migrate import apply_migrations
 from app.db.pool import close_pool, init_pool
 from app.services.jobs.handlers import dispatch_job
-from app.services.outbox import claim_jobs, mark_done, mark_failed
+from app.services.outbox import claim_jobs, mark_done, mark_failed, requeue_stale_processing
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_STALE_SWEEP_INTERVAL_SECONDS = 60.0
 
 
 async def process_batch() -> int:
@@ -35,8 +37,18 @@ async def run_worker() -> None:
     await init_pool()
     await apply_migrations()
     logger.info("worker started poll_interval=%ss", settings.worker_poll_interval_seconds)
+    import time
+
+    last_sweep = 0.0
     try:
         while True:
+            # B5: reclaim jobs stuck in 'processing' after a worker crash.
+            if time.monotonic() - last_sweep >= _STALE_SWEEP_INTERVAL_SECONDS:
+                last_sweep = time.monotonic()
+                try:
+                    await requeue_stale_processing()
+                except Exception:
+                    logger.exception("stale processing sweep failed")
             processed = await process_batch()
             if processed == 0:
                 await asyncio.sleep(settings.worker_poll_interval_seconds)

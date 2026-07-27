@@ -41,6 +41,29 @@ async def enqueue_turn_jobs(*, turn_id: UUID, scenario_id: str) -> None:
     await enqueue_job("session.summary", {"turn_id": str(turn_id)})
 
 
+# B5: jobs stuck in 'processing' after a worker crash are requeued once this
+# long has passed since their last update.
+_PROCESSING_STALE_MINUTES = 10
+
+
+async def requeue_stale_processing() -> int:
+    """Requeue 'processing' jobs whose worker died mid-flight (B5)."""
+    pool = await get_pool()
+    result = await pool.execute(
+        f"""
+        UPDATE outbox_jobs
+        SET status = 'retry', available_at = now(), updated_at = now()
+        WHERE status = 'processing'
+          AND updated_at < now() - interval '{_PROCESSING_STALE_MINUTES} minutes'
+        """
+    )
+    # asyncpg returns e.g. "UPDATE 3".
+    count = int(result.rsplit(" ", 1)[-1]) if result else 0
+    if count:
+        logger.warning("requeued %s stale processing outbox job(s)", count)
+    return count
+
+
 async def claim_jobs(*, limit: int = 10) -> list[dict[str, Any]]:
     pool = await get_pool()
     async with pool.acquire() as conn:
