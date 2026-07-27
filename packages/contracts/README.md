@@ -21,6 +21,26 @@ eval/
   golden_turn.schema.json
 ```
 
+## 版本化(F9)
+
+契约整体使用一个 SemVer 版本(`pyproject.toml` 与 `python/pyproject.toml` 保持一致),
+每次变更追加 [`CHANGELOG.md`](CHANGELOG.md) 条目:
+
+- **patch**:仅文档/注释/描述,不改结构。
+- **minor(向后兼容)**:新增事件类型、payload 新增**可选**字段、枚举新增值、
+  REST 新增端点/可选参数。消费者(api 投影、web)必须容忍未知事件类型与未知枚举值。
+- **major(破坏性)**:删除/重命名字段或事件、字段必填化、语义变化。
+  需要双端锁步发布,并在 CHANGELOG 写明迁移顺序。
+
+滚动升级约束(`deploy/compose/ha.yml` 双 runtime 副本):事件 schema 由**写侧**
+(runtime)按自身镜像内的 schema 校验,新旧副本各自自洽;因此 minor 变更先升消费者
+(api/web,容忍新字段)再升生产者(runtime)即可,无需停机。
+
+双向防漂移:
+
+- `scripts/codegen.sh`(CI)保证 web TS 类型 ⊆ `openapi/public.yaml`;
+- `services/api/tests/test_openapi_contract.py` 保证 `public.yaml` ⊆ FastAPI 实际路由。
+
 ## 变更规则
 
 1. 事件 `type`：同时改 `events/types.json`、`events/payloads/`（若已有则改对应文件 + `_index.json`）、`docs/adr/004-sse-turn-streaming.md`、`docs/contracts.md` §3。

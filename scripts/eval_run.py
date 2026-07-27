@@ -1496,7 +1496,11 @@ def main() -> int:
         help="Allow the legacy repository workspace (it will be cleared between cases)",
     )
     parser.add_argument("--filter", default="", help="Substring filter for case id/path")
-    parser.add_argument("--phase", default="", help="Filter by phase tag in yaml (e.g. 1, 1b)")
+    parser.add_argument(
+        "--phase",
+        default="",
+        help="Filter by phase tag in yaml; comma-separated exact match (e.g. 1 or 1,1b)",
+    )
     parser.add_argument(
         "--mode",
         default="",
@@ -1521,6 +1525,11 @@ def main() -> int:
         "--include-queue",
         action="store_true",
         help="Include golden cases tagged queue (require make eval-queue / worker profile)",
+    )
+    parser.add_argument(
+        "--update-baseline",
+        action="store_true",
+        help="Write this run's per-case results to eval/baseline.json (F6)",
     )
     parser.add_argument("cases", nargs="*", help="Specific golden yaml paths")
     args = parser.parse_args()
@@ -1552,11 +1561,13 @@ def main() -> int:
         paths = filtered
 
     if args.phase:
+        # F8: exact match per comma token. The old prefix match made
+        # `--phase 1` silently include 1b, so `make eval` ran 1b cases twice.
+        wanted = {token.strip() for token in args.phase.split(",") if token.strip()}
         filtered: list[Path] = []
         for p in paths:
             case = yaml.safe_load(p.read_text())
-            phase = str(case.get("phase", ""))
-            if phase == args.phase or phase.startswith(args.phase):
+            if str(case.get("phase", "")) in wanted:
                 filtered.append(p)
         paths = filtered
 
@@ -1625,12 +1636,14 @@ def main() -> int:
     failed = 0
     skipped_flaky = 0
     fail_lines: list[str] = []
+    case_results: dict[str, str] = {}
     for path in paths:
         case = yaml.safe_load(path.read_text())
         case_id = str(case.get("id") or path.name)
         try:
             reset_workspace(workspace)
             run_case(path, args.base_url.rstrip("/"), workspace)
+            case_results[case_id] = "pass"
         except (
             AssertionError,
             urllib.error.URLError,
@@ -1643,10 +1656,12 @@ def main() -> int:
             if case.get("flaky") and args.mode == "live":
                 print(f"    FLAKY FAIL (allowed): {exc}", file=sys.stderr)
                 skipped_flaky += 1
+                case_results[case_id] = "flaky_fail"
                 continue
             line = f"{case_id}: {exc}"
             print(f"    FAIL: {line}", file=sys.stderr)
             fail_lines.append(line)
+            case_results[case_id] = "fail"
             failed += 1
 
     report_dir = ROOT / "reports"
@@ -1656,6 +1671,41 @@ def main() -> int:
         report_path.write_text("\n".join(fail_lines) + "\n", encoding="utf-8")
     elif report_path.exists():
         report_path.unlink()
+
+    # F6: machine-readable summary + regression diff against committed baseline.
+    summary = {
+        "mode": args.mode,
+        "total": len(paths),
+        "failed": failed,
+        "flaky_tolerated": skipped_flaky,
+        "results": dict(sorted(case_results.items())),
+    }
+    (report_dir / "eval-summary.json").write_text(
+        json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    baseline_path = ROOT / "eval" / "baseline.json"
+    if args.update_baseline:
+        baseline_path.write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        print(f"Baseline updated: {baseline_path}", flush=True)
+    elif baseline_path.exists():
+        try:
+            baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            baseline = {}
+        baseline_results = baseline.get("results", {})
+        regressions = sorted(
+            cid
+            for cid, outcome in case_results.items()
+            if outcome == "fail" and baseline_results.get(cid) == "pass"
+        )
+        if regressions:
+            print(
+                f"REGRESSIONS vs eval/baseline.json ({len(regressions)}): "
+                + ", ".join(regressions),
+                file=sys.stderr,
+            )
 
     if failed:
         print(f"{failed} case(s) failed", file=sys.stderr)
