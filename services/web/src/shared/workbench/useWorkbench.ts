@@ -58,6 +58,13 @@ const ACTIVE_TURN_STATUSES = new Set([
   "running",
   "waiting_approval",
 ]);
+/** Live-only accumulation for subagent cards; replay from events covers refresh. */
+type SubagentDeltaBuffer = {
+  stream: string;
+  thinking: string;
+  tools: Record<string, string>;
+};
+
 const STREAM_DELTA_EVENT_TYPES = new Set([
   "turn.token",
   "turn.thinking.delta",
@@ -125,6 +132,9 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [toolLiveStreams, setToolLiveStreams] = useState<
     Record<string, string>
   >({});
+  const [subagentLive, setSubagentLive] = useState<
+    Record<string, SubagentDeltaBuffer>
+  >({});
   const [stopping, setStopping] = useState(false);
   const [busy, setBusy] = useState(false);
   const [outboundQueue, setOutboundQueue] = useState<string[]>([]);
@@ -164,17 +174,21 @@ export function useWorkbenchImpl(): WorkbenchState {
   const sectionDraftRef = useRef("");
   const outboundQueueRef = useRef<string[]>([]);
   const flushOutboundLockRef = useRef(false);
+  /** Pending stop-escalation timers; cleared when a new turn starts / unmount. */
+  const stopTimersRef = useRef<number[]>([]);
   const deltaFrameRef = useRef<number | null>(null);
   const pendingDeltasRef = useRef<{
     streamText: string;
     thinkingText: string;
     sectionDraft: string;
     toolStreams: Record<string, string>;
+    subagents: Record<string, SubagentDeltaBuffer>;
   }>({
     streamText: "",
     thinkingText: "",
     sectionDraft: "",
     toolStreams: {},
+    subagents: {},
   });
   turnIdRef.current = turnId;
   streamTextRef.current = streamText;
@@ -192,6 +206,7 @@ export function useWorkbenchImpl(): WorkbenchState {
       thinkingText: "",
       sectionDraft: "",
       toolStreams: {},
+      subagents: {},
     };
     if (pending.streamText) {
       streamTextRef.current += pending.streamText;
@@ -213,6 +228,24 @@ export function useWorkbenchImpl(): WorkbenchState {
         return next;
       });
     }
+    if (Object.keys(pending.subagents).length > 0) {
+      setSubagentLive((previous) => {
+        const next = { ...previous };
+        for (const [sid, buf] of Object.entries(pending.subagents)) {
+          const cur = next[sid] ?? { stream: "", thinking: "", tools: {} };
+          const tools = { ...cur.tools };
+          for (const [toolCallId, delta] of Object.entries(buf.tools)) {
+            tools[toolCallId] = (tools[toolCallId] ?? "") + delta;
+          }
+          next[sid] = {
+            stream: cur.stream + buf.stream,
+            thinking: cur.thinking + buf.thinking,
+            tools,
+          };
+        }
+        return next;
+      });
+    }
   }
 
   function scheduleDeltaFlush() {
@@ -230,7 +263,18 @@ export function useWorkbenchImpl(): WorkbenchState {
       thinkingText: "",
       sectionDraft: "",
       toolStreams: {},
+      subagents: {},
     };
+  }
+
+  function pendingSubagentBuffer(sid: string): SubagentDeltaBuffer {
+    const buffers = pendingDeltasRef.current.subagents;
+    let buf = buffers[sid];
+    if (!buf) {
+      buf = { stream: "", thinking: "", tools: {} };
+      buffers[sid] = buf;
+    }
+    return buf;
   }
 
   function syncHistoryFromView(v: TurnView) {
@@ -324,9 +368,15 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }, [turnViewQuery.data]);
 
+  function clearStopTimers() {
+    for (const id of stopTimersRef.current) window.clearTimeout(id);
+    stopTimersRef.current = [];
+  }
+
   useEffect(
     () => () => {
       clearPendingDeltas();
+      clearStopTimers();
       streamRef.current?.close();
     },
     [],
@@ -358,16 +408,31 @@ export function useWorkbenchImpl(): WorkbenchState {
             setEvents((prev) => [...prev, ev]);
           }
           if (ev.type === "turn.token") {
-            if (ev.payload.subagent_id) return;
             const delta = String(ev.payload.delta ?? "");
+            if (ev.payload.subagent_id) {
+              if (delta) {
+                pendingSubagentBuffer(String(ev.payload.subagent_id)).stream +=
+                  delta;
+                scheduleDeltaFlush();
+              }
+              return;
+            }
             if (delta) {
               pendingDeltasRef.current.streamText += delta;
               scheduleDeltaFlush();
             }
           }
           if (ev.type === "turn.thinking.delta") {
-            if (ev.payload.subagent_id) return;
             const delta = String(ev.payload.delta ?? "");
+            if (ev.payload.subagent_id) {
+              if (delta) {
+                pendingSubagentBuffer(
+                  String(ev.payload.subagent_id),
+                ).thinking += delta;
+                scheduleDeltaFlush();
+              }
+              return;
+            }
             if (delta) {
               pendingDeltasRef.current.thinkingText += delta;
               scheduleDeltaFlush();
@@ -386,9 +451,18 @@ export function useWorkbenchImpl(): WorkbenchState {
             }
           }
           if (ev.type === "tool.delta") {
-            if (ev.payload.subagent_id) return;
             const toolCallId = String(ev.payload.tool_call_id ?? "");
             const delta = String(ev.payload.delta ?? "");
+            if (ev.payload.subagent_id) {
+              if (toolCallId && delta) {
+                const buf = pendingSubagentBuffer(
+                  String(ev.payload.subagent_id),
+                );
+                buf.tools[toolCallId] = (buf.tools[toolCallId] ?? "") + delta;
+                scheduleDeltaFlush();
+              }
+              return;
+            }
             if (toolCallId && delta) {
               const pending = pendingDeltasRef.current.toolStreams;
               pending[toolCallId] = (pending[toolCallId] ?? "") + delta;
@@ -680,6 +754,8 @@ export function useWorkbenchImpl(): WorkbenchState {
     return () => {
       cancelled = true;
     };
+    // connectStream 有意不入依赖:仅在会话切换时重挂历史,避免流重建风暴。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
 
   const startTurnMut = useMutation({
@@ -717,12 +793,14 @@ export function useWorkbenchImpl(): WorkbenchState {
     setActivePlanPhase(wirePhase);
     setBusy(true);
     setError(null);
+    clearStopTimers();
     clearPendingDeltas();
     setEvents([]);
     setStreamText("");
     setThinkingText("");
     setSectionDraft("");
     setToolLiveStreams({});
+    setSubagentLive({});
     setLiveToolTimeline([]);
     setLiveContextUsage(null);
     setLiveTokenUsage(null);
@@ -737,6 +815,20 @@ export function useWorkbenchImpl(): WorkbenchState {
     resumingAfterApprovalRef.current = false;
     streamRef.current?.close();
 
+    // I14: optimistic user bubble — on a slow network the message area stayed
+    // empty until startTurn resolved. Swapped for the real turn on success.
+    const optimisticId = `optimistic-${Date.now()}`;
+    setTurnHistory((prev) =>
+      upsertHistoryItem(prev, {
+        id: optimisticId,
+        scenario_id: activeScenarioId,
+        status: "pending",
+        user_input: text,
+        latest_output: null,
+        created_at: new Date().toISOString(),
+      }),
+    );
+
     try {
       setSubmittedMessage(text);
       setMessage("");
@@ -747,18 +839,22 @@ export function useWorkbenchImpl(): WorkbenchState {
       });
       setTurnId(turn.id);
       setTurnHistory((prev) =>
-        upsertHistoryItem(prev, {
-          id: turn.id,
-          scenario_id: activeScenarioId,
-          status: turn.status,
-          user_input: text,
-          latest_output: null,
-          created_at: turn.created_at,
-        }),
+        upsertHistoryItem(
+          prev.filter((row) => row.id !== optimisticId),
+          {
+            id: turn.id,
+            scenario_id: activeScenarioId,
+            status: turn.status,
+            user_input: text,
+            latest_output: null,
+            created_at: turn.created_at,
+          },
+        ),
       );
       connectStream(turn.id);
       return true;
     } catch (err) {
+      setTurnHistory((prev) => prev.filter((row) => row.id !== optimisticId));
       setBusy(false);
       setActivePlanPhase(null);
       reportError("发送失败", err);
@@ -839,38 +935,47 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
   async function handleStop() {
     if (!turnId) return;
+    // Capture the turn being stopped: a fast soft-cancel can let the outbound
+    // queue start a NEW turn before these timers fire, and turnIdRef.current
+    // would then point at the new turn (force-cancelling / un-busying it).
+    const stoppedTurnId = turnId;
     // ADR-015: freeze local render immediately (tokens / thinking / tool deltas).
     // Stream stays open so turn.cancelled can clear busy without the 2.5–6s timers.
     streamRef.current?.stopRendering();
     setStopping(true);
     try {
-      await cancelTurn(turnId, false);
+      await cancelTurn(stoppedTurnId, false);
       // Soft cancel target ≤500ms P95 (ADR-015); escalate to force if still live.
-      window.setTimeout(() => {
-        void (async () => {
-          if (!turnIdRef.current) return;
-          try {
-            const v = await fetchTurnView(turnIdRef.current);
-            if (
-              v.status === "running" ||
-              v.status === "pending" ||
-              v.status === "waiting_approval"
-            ) {
-              await cancelTurn(turnIdRef.current, true);
+      stopTimersRef.current.push(
+        window.setTimeout(() => {
+          void (async () => {
+            if (turnIdRef.current !== stoppedTurnId) return;
+            try {
+              const v = await fetchTurnView(stoppedTurnId);
+              if (
+                v.status === "running" ||
+                v.status === "pending" ||
+                v.status === "waiting_approval"
+              ) {
+                await cancelTurn(stoppedTurnId, true);
+              }
+            } catch {
+              /* ignore — terminal stream handler still owns cleanup */
             }
-          } catch {
-            /* ignore — terminal stream handler still owns cleanup */
-          }
-        })();
-      }, 500);
+          })();
+        }, 500),
+      );
       // Safety net only — normal path clears via turn.cancelled on the live stream.
-      window.setTimeout(() => {
-        setStopping((prev) => {
-          if (!prev) return prev;
-          return false;
-        });
-        setBusy(false);
-      }, 2500);
+      stopTimersRef.current.push(
+        window.setTimeout(() => {
+          if (turnIdRef.current !== stoppedTurnId) return;
+          setStopping((prev) => {
+            if (!prev) return prev;
+            return false;
+          });
+          setBusy(false);
+        }, 2500),
+      );
     } catch (err) {
       setStopping(false);
       reportError("停止失败", err);
@@ -936,11 +1041,9 @@ export function useWorkbenchImpl(): WorkbenchState {
     );
     resumingAfterApprovalRef.current = true;
     try {
-      if (useWebSocket && streamRef.current instanceof TurnWebSocketClient) {
-        streamRef.current.approveToolCall(toolCallId);
-      } else {
-        await approveToolCall(turnId, toolCallId);
-      }
+      // Always approve over HTTP: the WS socket is already closed at the
+      // approval pause point, so socket.send would be a silent no-op.
+      await approveToolCall(turnId, toolCallId);
       setBusy(true);
       setActionBusy(false);
       connectStream(turnId, lastSequenceRef.current);
@@ -967,11 +1070,8 @@ export function useWorkbenchImpl(): WorkbenchState {
     );
     resumingAfterApprovalRef.current = true;
     try {
-      if (useWebSocket && streamRef.current instanceof TurnWebSocketClient) {
-        streamRef.current.denyToolCall(toolCallId);
-      } else {
-        await denyToolCall(turnId, toolCallId);
-      }
+      // Same as approve: HTTP only (WS socket is closed at the pause point).
+      await denyToolCall(turnId, toolCallId);
       setBusy(true);
       setActionBusy(false);
       connectStream(turnId, lastSequenceRef.current);
@@ -1005,13 +1105,31 @@ export function useWorkbenchImpl(): WorkbenchState {
     });
   }
   const timelineItems = parentTimelineItems(rawTimeline);
+  // Delta events are excluded from `events` (render cost), so live subagent
+  // text/tool output accumulates in subagentLive and is overlaid here. After
+  // a refresh the replayed events already contain the deltas and the live
+  // buffers are empty, so there is no double counting.
   const subagents = resolveSubagents(
     events,
     view as {
       artifacts?: Array<Record<string, unknown>> | null;
       tool_timeline?: Array<Record<string, unknown>> | null;
     } | null,
-  );
+  ).map((sub) => {
+    const live = subagentLive[sub.subagent_id];
+    if (!live) return sub;
+    return {
+      ...sub,
+      streamText: sub.streamText + live.stream,
+      thinkingText: sub.thinkingText + live.thinking,
+      tools: sub.tools.map((tool) => {
+        const extra = live.tools[String(tool.tool_call_id)];
+        return extra
+          ? { ...tool, stream_output: (tool.stream_output ?? "") + extra }
+          : tool;
+      }),
+    };
+  });
 
   const displayStatus =
     pendingApproval ||

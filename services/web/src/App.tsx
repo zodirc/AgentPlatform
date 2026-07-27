@@ -9,6 +9,7 @@ import { EnvelopeAuditPage } from "./ops/EnvelopeAuditPage";
 import { RawAuditPage } from "./ops/RawAuditPage";
 import { RetrievalAuditPage } from "./ops/RetrievalAuditPage";
 import { SettingsPage } from "./settings/SettingsPage";
+import { ErrorBoundary } from "./shared/ErrorBoundary";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
 import { LoginPage } from "./shared/auth/LoginPage";
 import { pathWithSession } from "./shared/workbench/sessionUrl";
@@ -311,23 +312,23 @@ function AuthenticatedApp() {
 
 export function App() {
   const { pathname } = useLocation();
-  if (isOpsEvalHistoryPath(pathname)) {
-    return <EvalHistoryPage />;
-  }
-  if (isOpsEvalReportPath(pathname)) {
-    return <EvalRunReportPage />;
-  }
-  if (isOpsEvalPath(pathname)) {
-    return <EvalConsolePage />;
-  }
-  if (isOpsRetrievalPath(pathname)) {
-    return <RetrievalAuditPage />;
-  }
-  if (isOpsEnvelopePath(pathname)) {
-    return <EnvelopeAuditPage />;
-  }
-  if (isOpsRawPath(pathname)) {
-    return <RawAuditPage />;
+  // I13: ops pages get their own boundary so an ops-only crash cannot take
+  // down the user-facing workbench shell (and vice versa).
+  const opsPage = isOpsEvalHistoryPath(pathname) ? (
+    <EvalHistoryPage />
+  ) : isOpsEvalReportPath(pathname) ? (
+    <EvalRunReportPage />
+  ) : isOpsEvalPath(pathname) ? (
+    <EvalConsolePage />
+  ) : isOpsRetrievalPath(pathname) ? (
+    <RetrievalAuditPage />
+  ) : isOpsEnvelopePath(pathname) ? (
+    <EnvelopeAuditPage />
+  ) : isOpsRawPath(pathname) ? (
+    <RawAuditPage />
+  ) : null;
+  if (opsPage !== null) {
+    return <ErrorBoundary label="Ops 页面">{opsPage}</ErrorBoundary>;
   }
   return <AuthenticatedApp />;
 }

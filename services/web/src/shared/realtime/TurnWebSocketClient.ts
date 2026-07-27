@@ -99,21 +99,8 @@ export class TurnWebSocketClient {
     };
   }
 
-  approveToolCall(toolCallId: string) {
-    this.socket?.send(
-      JSON.stringify({ action: "approve_tool_call", tool_call_id: toolCallId }),
-    );
-  }
-
-  denyToolCall(toolCallId: string, reason = "user_denied") {
-    this.socket?.send(
-      JSON.stringify({
-        action: "deny_tool_call",
-        tool_call_id: toolCallId,
-        reason,
-      }),
-    );
-  }
+  // Approvals go over the HTTP API: the socket closes at the approval pause
+  // point, so socket-based approve/deny would be a silent no-op.
 
   /** ADR-015: stop local render ≤50ms; keep listening for turn.cancelled. */
   stopRendering() {

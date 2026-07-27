@@ -4,6 +4,7 @@ import { Plus, X } from "lucide-react";
 import { Button } from "../../components/ui/button";
 import { Textarea } from "../../components/ui/textarea";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
+import { Markdown } from "../../shared/Markdown";
 import {
   approvalCopy,
   lastApprovalEvent,
@@ -103,9 +104,13 @@ function AssistantBubble({ text }: { text: string }) {
   return (
     <div>
       <p className="mb-1 text-xs font-medium text-muted-foreground">助手</p>
-      <pre className="whitespace-pre-wrap rounded-lg bg-card/60 px-3 py-2 text-xs text-foreground/90">
-        {text}
-      </pre>
+      {/* aria-live lets screen readers follow streaming output (I23). */}
+      <div
+        aria-live="polite"
+        className="rounded-lg bg-card/60 px-3 py-2"
+      >
+        <Markdown text={text} />
+      </div>
     </div>
   );
 }
