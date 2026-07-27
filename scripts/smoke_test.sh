@@ -8,6 +8,10 @@ if [[ ! -f .env ]]; then
   cp .env.example .env
 fi
 
+# shellcheck source=scripts/proof_compose_env.sh
+source "$ROOT/scripts/proof_compose_env.sh"
+proof_compose_env_apply
+
 mkdir -p workspace/sections
 chmod -R a+rwx workspace 2>/dev/null || true
 
@@ -116,7 +120,12 @@ done
 
 # Ensure runtime picked up smoke MODEL_MODE (compose may have reused a live container).
 echo "==> Recreate runtime with MODEL_MODE=${SMOKE_MODEL_MODE}"
-MODEL_MODE="${SMOKE_MODEL_MODE}" $COMPOSE up -d --force-recreate --wait --wait-timeout 180 runtime
+if ! MODEL_MODE="${SMOKE_MODEL_MODE}" $COMPOSE up -d --force-recreate --wait --wait-timeout 180 runtime; then
+  echo "runtime recreate failed — recent logs:" >&2
+  $COMPOSE ps >&2 || true
+  $COMPOSE logs --tail=80 runtime >&2 || true
+  exit 1
+fi
 
 echo "==> Health OK"
 

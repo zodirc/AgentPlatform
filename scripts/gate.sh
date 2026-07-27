@@ -14,6 +14,10 @@ if [[ ! -f .env ]]; then
   echo "==> Created .env from .env.example (edit MODEL_API_KEY / auth as needed)"
 fi
 
+# shellcheck source=scripts/proof_compose_env.sh
+source "$ROOT/scripts/proof_compose_env.sh"
+proof_compose_env_apply
+
 restore_daily_runtime() {
   if [[ "${GATE_SKIP_RESTORE:-}" == "1" ]]; then
     echo ""
@@ -22,7 +26,8 @@ restore_daily_runtime() {
   fi
   echo ""
   echo "==> Gate cleanup: restore daily runtime + workspace from .env"
-  env -u WORKSPACE_HOST_PATH $COMPOSE \
+  # Drop proof-only APP_ENV override so restore matches the developer's .env.
+  env -u WORKSPACE_HOST_PATH -u APP_ENV $COMPOSE \
     up -d --force-recreate --remove-orphans --wait --wait-timeout 180 runtime \
     || echo "WARNING: restore failed; run: make start"
   if [[ "${DOCKER_AUTO_PRUNE:-1}" == "1" ]]; then
