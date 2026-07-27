@@ -4,6 +4,7 @@ COMPOSE_QUEUE := docker compose -f deploy/docker-compose.yml -f deploy/compose/q
 COMPOSE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml --env-file .env
 COMPOSE_QUEUE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml --env-file .env
 COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml --env-file .env
+COMPOSE_OPS_EVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/ops-eval.yml --env-file .env
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace

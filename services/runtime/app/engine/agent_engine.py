@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import copy, deepcopy
 import json
 import logging
 import time
@@ -513,12 +514,60 @@ class AgentEngine:
                         await self._run_tool(batch[0], state, step_index, ensure_step_budget)
                     ]
                 else:
-                    summaries = await asyncio.gather(
-                        *[
-                            self._run_tool(item, state, step_index, ensure_step_budget)
-                            for item in batch
-                        ]
+                    # Read-only I/O may complete in any order, but tool results must
+                    # retain the provider's tool_use order.  Isolate the mutable
+                    # per-turn fields while each task runs, then merge them below.
+                    # This keeps the executor calls concurrent without racing
+                    # state.messages or state.read_registry.
+                    initial_read_registry = deepcopy(state.read_registry)
+                    counter_seeds: list[dict[str, int]] = []
+                    next_read_file_calls = self._read_file_calls
+                    next_search_sources_calls = self._search_sources_calls
+                    for item in batch:
+                        counters = {
+                            "read_file": next_read_file_calls,
+                            "search_sources": next_search_sources_calls,
+                        }
+                        if item.get("name") == "read_file":
+                            next_read_file_calls += 1
+                        elif item.get("name") == "search_sources":
+                            next_search_sources_calls += 1
+                        counter_seeds.append(counters)
+
+                    async def run_isolated(
+                        item: dict[str, Any], counters: dict[str, int]
+                    ) -> tuple[str | None, TurnState]:
+                        isolated = copy(state)
+                        isolated.messages = []
+                        isolated.read_registry = deepcopy(initial_read_registry)
+                        summary = await self._run_tool(
+                            item,
+                            isolated,
+                            step_index,
+                            ensure_step_budget,
+                            counters,
+                        )
+                        return summary, isolated
+
+                    isolated_runs = await asyncio.gather(
+                        *(
+                            run_isolated(item, counters)
+                            for item, counters in zip(batch, counter_seeds)
+                        )
                     )
+                    summaries = []
+                    for item, (summary, isolated) in zip(batch, isolated_runs):
+                        # gather preserves its input order, so these mutations are
+                        # deterministic even when the underlying I/O finishes out of
+                        # order.
+                        state.messages.extend(isolated.messages)
+                        self._merge_readonly_read_registry(item, isolated, state)
+                        if isolated.cancelled:
+                            state.cancelled = True
+                            state.cancel_force = state.cancel_force or isolated.cancel_force
+                        summaries.append(summary)
+                    self._read_file_calls = next_read_file_calls
+                    self._search_sources_calls = next_search_sources_calls
                 for summary in summaries:
                     if summary == "CANCELLED":
                         return "CANCELLED"
@@ -546,12 +595,67 @@ class AgentEngine:
                 return "CANCELLED"
         return last_summary
 
+    @staticmethod
+    def _merge_readonly_read_registry(
+        call: dict[str, Any], isolated: TurnState, state: TurnState
+    ) -> None:
+        """Apply a completed parallel read's registry effect in call order."""
+        if call.get("name") != "read_file":
+            return
+        tool_call_id = call.get("id")
+        for message in isolated.messages:
+            if message.get("role") != "tool":
+                continue
+            block = next(
+                (
+                    content
+                    for content in message.get("content", [])
+                    if content.get("type") == "tool_result"
+                    and content.get("tool_use_id") == tool_call_id
+                ),
+                None,
+            )
+            if block is None:
+                continue
+            try:
+                result = json.loads(str(block.get("content", "")))
+            except json.JSONDecodeError:
+                return
+            if not isinstance(result, dict) or result.get("error"):
+                return
+            try:
+                offset = int(result.get("offset") or 1)
+                end_line = int(result.get("end_line") or 0)
+                next_offset = (
+                    int(result["next_offset"])
+                    if result.get("next_offset") is not None
+                    else None
+                )
+            except (TypeError, ValueError):
+                return
+            record_successful_read(
+                state.read_registry,
+                path=str(
+                    result.get("path")
+                    or path_from_tool_arguments(
+                        call.get("input") if isinstance(call.get("input"), dict) else {}
+                    )
+                ),
+                offset=offset,
+                end_line=end_line,
+                truncated=bool(result.get("truncated")),
+                next_offset=next_offset,
+                whole_file_complete=bool(result.get("whole_file_complete")),
+            )
+            return
+
     async def _run_tool(
         self,
         call: dict[str, Any],
         state: TurnState,
         step_index: int,
         ensure_step_budget: Callable[[], Awaitable[None]] | None = None,
+        counters: dict[str, int] | None = None,
     ) -> str | None:
         tool_call_id = call["id"]
         tool_name = call["name"]
@@ -617,8 +721,13 @@ class AgentEngine:
 
             budget = int(getattr(settings, "read_file_max_per_turn", 0) or 0)
             if budget > 0:
-                self._read_file_calls += 1
-                if self._read_file_calls > budget:
+                if counters is None:
+                    self._read_file_calls += 1
+                    read_file_calls = self._read_file_calls
+                else:
+                    counters["read_file"] += 1
+                    read_file_calls = counters["read_file"]
+                if read_file_calls > budget:
                     ui_summary = user_facing_policy_summary(
                         "read_budget", path=read_path, budget=budget
                     )
@@ -658,8 +767,13 @@ class AgentEngine:
         if tool_name == "search_sources":
             budget = settings.search_sources_max_per_turn
             if budget > 0:
-                self._search_sources_calls += 1
-                if self._search_sources_calls > budget:
+                if counters is None:
+                    self._search_sources_calls += 1
+                    search_sources_calls = self._search_sources_calls
+                else:
+                    counters["search_sources"] += 1
+                    search_sources_calls = counters["search_sources"]
+                if search_sources_calls > budget:
                     result = {
                         "error": "search_sources budget exceeded for this turn",
                         "summary": (

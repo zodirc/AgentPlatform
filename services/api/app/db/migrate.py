@@ -25,14 +25,16 @@ def _database_engine_url() -> str:
 
 
 def _maybe_stamp_legacy_db(cfg: Config) -> None:
-    """Existing volumes created before Alembic need a one-time stamp to head."""
+    """Start known legacy Phase 0 volumes at their actual migration baseline."""
     engine = create_engine(_database_engine_url())
     try:
         tables = set(inspect(engine).get_table_names())
     finally:
         engine.dispose()
     if "sessions" in tables and "alembic_version" not in tables:
-        command.stamp(cfg, "head")
+        # These volumes predate Alembic but already contain Phase 0's core
+        # tables. Stamping head would silently skip every later migration.
+        command.stamp(cfg, "0001_phase0")
 
 
 def run_alembic_upgrade() -> None:

@@ -1,6 +1,6 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–34 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块**；变更只改对应正文。
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
@@ -19,7 +19,7 @@ Agent Platform 架构与实施规范。**01–34 连续编号，一文一模块*
 
 ---
 
-## 模块目录（01–34）
+## 模块目录（01–35）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -57,6 +57,7 @@ Agent Platform 架构与实施规范。**01–34 连续编号，一文一模块*
 | 32 | [execution-plane-and-local-runner](32-execution-plane-and-local-runner.md) | **执行面落点**（写作=云端 Work+下载；本地 Runner 非所需 · ⏸） |
 | 33 | [harness-maturity-backlog](33-harness-maturity-backlog.md) | **Harness 工程完善 ✅**（HM1–HM9；Q19 Ops 检索 · 预压缩 · raw · 增量摘要） |
 | 34 | [read-cache-and-token-discipline](34-read-cache-and-token-discipline.md) | **读文件降本 + 分层缓存**（RC1–RC5 + skipped UX ✅；手测见 §0.5；RC6 复测） |
+| 35 | [optimization-review](35-optimization-review.md) | **全仓优化审查**（2026-07；runtime/api/web/基建四面发现清单 + 落地顺序；未修复前有效） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 

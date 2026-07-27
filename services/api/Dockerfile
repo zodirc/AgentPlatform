@@ -34,7 +34,8 @@ COPY services/api/alembic.ini /app/alembic.ini
 COPY services/api/alembic /app/alembic
 COPY packages/contracts/schemas/ddl /app/contracts/ddl
 COPY eval/golden /app/eval/golden
-# Need docker.sock access for Ops Eval restart; group id often 0/root or docker on host.
+# Ops Eval's optional docker.sock overlay may require host root/docker group access.
+# Standard production compose does not mount the socket.
 USER root
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \

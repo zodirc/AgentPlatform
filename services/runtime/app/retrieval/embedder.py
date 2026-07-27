@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import re
@@ -44,7 +45,12 @@ class HashEmbedder:
     def embed(self, text: str) -> list[float]:
         vec = [0.0] * self.dimensions
         for token in tokenize(text):
-            bucket = hash(token) % self.dimensions
+            # ``hash()`` is salted per interpreter process, which made persisted
+            # hash embeddings incompatible after a restart.
+            bucket = int.from_bytes(
+                hashlib.blake2b(token.encode("utf-8"), digest_size=8).digest(),
+                byteorder="big",
+            ) % self.dimensions
             vec[bucket] += 1.0
         norm = math.sqrt(sum(value * value for value in vec))
         if norm == 0.0:

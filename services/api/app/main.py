@@ -31,6 +31,7 @@ from app.routers.admin import model_providers as admin_model_providers
 from app.routers.admin import ux_signals as admin_ux_signals
 from app.routers.admin import workspace as admin_workspace
 from app.services.projection.session_projector import reconcile_lagging_projections, reconcile_stale_turns
+from app.services.command.runtime_client import close_runtime_clients
 from app.services.realtime.listener import TurnEventListener
 from app.observability.tracing import instrument_fastapi, setup_tracing
 from app.settings import settings
@@ -72,6 +73,7 @@ async def _projection_reconcile_loop() -> None:
 async def lifespan(app: FastAPI):
     from app.observability.logging import configure_logging
 
+    settings.validate_production_security()
     configure_logging(service="agent-api", level=settings.log_level)
     await init_pool()
     await apply_migrations()
@@ -100,6 +102,7 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
         await listener.stop()
+        await close_runtime_clients()
         await close_pool()
 
 

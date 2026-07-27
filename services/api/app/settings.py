@@ -1,6 +1,11 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_WEAK_PRODUCTION_VALUES = frozenset(
+    {"change-me", "change-me-internal", "change-me-in-production", "admin"}
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -17,7 +22,9 @@ class Settings(BaseSettings):
     admin_session_bypass: bool = True
     # Set true behind HTTPS only; false for local HTTP gateway.
     end_user_cookie_secure: bool = False
-    app_env: str = "production"
+    # Development remains the safe default for local `make up`; production must
+    # be selected explicitly and passes the guard below during startup.
+    app_env: str = "development"
     log_level: str = "INFO"
     worker_mode: str = "inline"  # inline | outbox
     worker_poll_interval_seconds: float = 2.0
@@ -40,6 +47,30 @@ class Settings(BaseSettings):
     # Repo mount inside api (compose: ..:/repo) — used to discover host path for suite=ci.
     ops_eval_repo_mount: str = "/repo"
     ops_eval_repo_host_path: str = ""  # optional override; else docker inspect
+
+    def validate_production_security(self) -> None:
+        """Reject bootstrap credentials and privileged bypasses in production."""
+        if self.app_env.strip().lower() not in {"production", "prod"}:
+            return
+
+        weak_fields = {
+            name
+            for name, value in {
+                "APP_SECRET_KEY": self.app_secret_key,
+                "INTERNAL_SERVICE_TOKEN": self.internal_service_token,
+                "ADMIN_PASSWORD": self.admin_password,
+            }.items()
+            if not value.strip() or value.strip().lower() in _WEAK_PRODUCTION_VALUES
+        }
+        if weak_fields:
+            raise RuntimeError(
+                "production requires non-default values for "
+                + ", ".join(sorted(weak_fields))
+            )
+        if self.admin_session_bypass:
+            raise RuntimeError(
+                "ADMIN_SESSION_BYPASS must be false when APP_ENV=production"
+            )
 
 
 settings = Settings()

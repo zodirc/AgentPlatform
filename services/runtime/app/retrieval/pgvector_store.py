@@ -186,6 +186,15 @@ class PgvectorSourceRetrievalStore:
                 )
                 cur.execute(
                     """
+                    CREATE INDEX IF NOT EXISTS source_chunks_text_fts_idx
+                    ON source_chunks
+                    USING gin (
+                        to_tsvector('simple', coalesce(section_title, '') || ' ' || text)
+                    )
+                    """
+                )
+                cur.execute(
+                    """
                     CREATE INDEX IF NOT EXISTS source_chunks_path_idx
                     ON source_chunks (path)
                     """
@@ -213,43 +222,17 @@ class PgvectorSourceRetrievalStore:
             conn.commit()
         self._ready = True
 
+    @property
+    def is_ready(self) -> bool:
+        return self._ready
+
     def _default_owner_user_id(self) -> str | None:
         raw = (settings.sources_index_owner_user_id or "").strip()
         return raw or None
 
     def load(self) -> None:
-        """Warm schema + optional lightweight chunk cache for BM25 fusion."""
+        """Warm the database schema without copying source chunks into memory."""
         self.ensure_schema()
-        from app.retrieval.tenant_visibility import display_path_from_index
-
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT chunk_id, path, section_title, text, citation_id,
-                           line_start, line_end, work_id, visibility
-                    FROM source_chunks
-                    """
-                )
-                rows = cur.fetchall()
-        self._chunk_cache = [
-            {
-                "chunk_id": r[0],
-                "path": display_path_from_index(str(r[1] or "")),
-                "index_path": str(r[1] or ""),
-                "section_title": r[2] or "",
-                "text": r[3] or "",
-                "citation_id": r[4] or "",
-                "line_start": r[5],
-                "line_end": r[6],
-                "work_id": str(r[7]) if r[7] is not None else None,
-                "visibility": str(r[8] or "private"),
-            }
-            for r in rows
-        ]
-        self._chunk_by_id = {
-            str(c["chunk_id"]): c for c in self._chunk_cache if c.get("chunk_id")
-        }
 
     def delete_orphan_private_rows(self) -> dict[str, int]:
         """Remove private rows with NULL work_id (pre-MT5c leakage surface)."""
@@ -574,11 +557,18 @@ class PgvectorSourceRetrievalStore:
         return kept
 
     def search_bm25(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
-        if not self._chunk_cache:
-            self.load()
-        chunks = self._bm25_visible_chunks()
-        if not chunks:
-            return []
+        # Retain the cache path for focused unit tests and callers that explicitly
+        # provide a small cache. Normal pgvector requests query FTS directly.
+        if self._chunk_cache:
+            chunks = self._bm25_visible_chunks()
+            if not chunks:
+                return []
+            return self._search_bm25_cached(query, chunks=chunks, limit=limit)
+        return self._search_bm25_db(query, limit=limit)
+
+    def _search_bm25_cached(
+        self, query: str, *, chunks: list[dict[str, Any]], limit: int
+    ) -> list[ChunkHit]:
         by_id = {str(c["chunk_id"]): c for c in chunks if c.get("chunk_id")}
         ranked = BM25Scorer(chunks).search(query, limit=limit)
         hits: list[ChunkHit] = []
@@ -588,6 +578,67 @@ class PgvectorSourceRetrievalStore:
                 continue
             hits.append(_chunk_to_hit(chunk, score))
         return hits
+
+    def _search_bm25_db(self, query: str, *, limit: int) -> list[ChunkHit]:
+        """Use Postgres FTS so hybrid search does not require a full-table cache."""
+        self.ensure_schema()
+        from app.retrieval.tenant_visibility import display_path_from_index
+        from app.tenant_context import current_visibility_seed, current_work_id
+
+        work_id = current_work_id()
+        seed_ok = current_visibility_seed()
+        if work_id is not None and seed_ok:
+            visibility_sql = "(visibility = 'seed' OR work_id = %s::uuid)"
+            visibility_args: tuple[Any, ...] = (str(work_id),)
+        elif work_id is not None:
+            visibility_sql = "work_id = %s::uuid"
+            visibility_args = (str(work_id),)
+        elif seed_ok:
+            visibility_sql = "visibility = 'seed'"
+            visibility_args = ()
+        else:
+            return []
+
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    WITH query_terms AS (SELECT plainto_tsquery('simple', %s) AS value)
+                    SELECT chunk_id, path, section_title, text, citation_id,
+                           line_start, line_end, work_id, visibility,
+                           ts_rank_cd(
+                               to_tsvector(
+                                   'simple', coalesce(section_title, '') || ' ' || text
+                               ),
+                               query_terms.value
+                           ) AS score
+                    FROM source_chunks, query_terms
+                    WHERE {visibility_sql}
+                      AND to_tsvector(
+                          'simple', coalesce(section_title, '') || ' ' || text
+                      ) @@ query_terms.value
+                    ORDER BY score DESC
+                    LIMIT %s
+                    """,
+                    (query, *visibility_args, limit),
+                )
+                rows = cur.fetchall()
+
+        return [
+            ChunkHit(
+                path=display_path_from_index(str(row[1] or "")),
+                chunk_id=str(row[0]),
+                excerpt=str(row[3] or "").strip(),
+                citation_id=str(row[4] or ""),
+                score=float(row[9] or 0.0),
+                section_title=str(row[2] or ""),
+                line_start=int(row[5]) if row[5] is not None else None,
+                line_end=int(row[6]) if row[6] is not None else None,
+                work_id=str(row[7]) if row[7] is not None else None,
+                visibility=str(row[8] or ""),
+            )
+            for row in rows
+        ]
 
     def search_hybrid(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
         from app.retrieval.profile import active_retrieval_profile

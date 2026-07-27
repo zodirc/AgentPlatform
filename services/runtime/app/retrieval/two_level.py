@@ -10,6 +10,9 @@ from app.retrieval.vector_index import ChunkHit
 logger = logging.getLogger(__name__)
 
 _T = TypeVar("_T")
+_TWO_LEVEL_EXECUTOR = ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="two-level-retrieval"
+)
 
 
 def merge_doc_and_chunk_hits(
@@ -75,36 +78,35 @@ def parallel_two_level(
     doc_paths: list[str] = []
     chunk_hits: list[ChunkHit] = []
     timeout = max(0.01, float(timeout_seconds))
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        doc_fut = _submit_with_context(pool, doc_fn)
-        chunk_fut = _submit_with_context(pool, chunk_fn)
-        done, not_done = wait(
-            {doc_fut, chunk_fut},
-            timeout=timeout,
-            return_when=FIRST_COMPLETED,
-        )
-        # Wait for remaining within leftover budget (best-effort).
-        if not_done:
-            more_done, still = wait(not_done, timeout=timeout)
-            done = done | more_done
-            if still:
-                timed_out = True
-                for fut in still:
-                    fut.cancel()
-        if doc_fut in done and not doc_fut.cancelled():
-            try:
-                doc_paths = list(doc_fut.result())
-            except Exception:
-                logger.warning("doc-level recall failed", exc_info=True)
-                timed_out = True
-        else:
+    doc_fut = _submit_with_context(_TWO_LEVEL_EXECUTOR, doc_fn)
+    chunk_fut = _submit_with_context(_TWO_LEVEL_EXECUTOR, chunk_fn)
+    done, not_done = wait(
+        {doc_fut, chunk_fut},
+        timeout=timeout,
+        return_when=FIRST_COMPLETED,
+    )
+    # Wait for remaining within leftover budget (best-effort).
+    if not_done:
+        more_done, still = wait(not_done, timeout=timeout)
+        done = done | more_done
+        if still:
             timed_out = True
-        if chunk_fut in done and not chunk_fut.cancelled():
-            try:
-                chunk_hits = list(chunk_fut.result())
-            except Exception:
-                logger.warning("chunk-level recall failed", exc_info=True)
-                timed_out = True
-        else:
+            for fut in still:
+                fut.cancel()
+    if doc_fut in done and not doc_fut.cancelled():
+        try:
+            doc_paths = list(doc_fut.result())
+        except Exception:
+            logger.warning("doc-level recall failed", exc_info=True)
             timed_out = True
+    else:
+        timed_out = True
+    if chunk_fut in done and not chunk_fut.cancelled():
+        try:
+            chunk_hits = list(chunk_fut.result())
+        except Exception:
+            logger.warning("chunk-level recall failed", exc_info=True)
+            timed_out = True
+    else:
+        timed_out = True
     return doc_paths, chunk_hits, timed_out

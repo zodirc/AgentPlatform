@@ -11,6 +11,7 @@ from app.model.gateway import (
     ModelProviderTimeout,
     ModelResponse,
     ModelTransientError,
+    StreamActivity,
     classify_http_status,
 )
 from app.model.generation import GenerationParams
@@ -115,6 +116,35 @@ async def test_gateway_does_not_retry_after_streaming_started(
     with pytest.raises(ModelFatalError, match="after streaming started"):
         async for _ in gateway.stream(messages=[], tools=[]):
             pass
+
+
+@pytest.mark.asyncio
+async def test_gateway_retries_after_liveness_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("app.model.gateway.settings.model_max_retries", 1)
+    monkeypatch.setattr("app.model.gateway.settings.model_retry_base_delay_seconds", 0.01)
+    monkeypatch.setattr("app.model.gateway.settings.model_first_byte_timeout_seconds", 5.0)
+
+    class LivenessThenFailureProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, *, messages, tools, abort=None):
+            self.calls += 1
+            if self.calls == 1:
+                yield StreamActivity(kind="sse")
+                raise ModelTransientError("boom", status_code=503)
+            yield ModelResponse(text="recovered", output_tokens=2)
+
+    provider = LivenessThenFailureProvider()
+    gateway = ModelGateway(provider)
+
+    chunks = [chunk async for chunk in gateway.stream(messages=[], tools=[])]
+
+    assert provider.calls == 2
+    assert any(isinstance(chunk, StreamActivity) for chunk in chunks)
+    assert [chunk.text for chunk in chunks if isinstance(chunk, ModelResponse)] == ["recovered"]
 
 
 @pytest.mark.asyncio

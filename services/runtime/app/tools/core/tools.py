@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import asyncio
+import contextvars
 import json
 import re
+from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, TypeVar
 from uuid import uuid4
 
 from app.settings import settings
+
+_T = TypeVar("_T")
+
+
+async def _run_retrieval_blocking(
+    fn: Callable[..., _T], /, *args: Any, **kwargs: Any
+) -> _T:
+    """Run retrieval I/O/CPU off-loop with audit ContextVars intact."""
+    context = contextvars.copy_context()
+    call = partial(fn, *args, **kwargs)
+    return await asyncio.to_thread(context.run, call)
 
 
 def _normalized_workspace_rel(rel_path: str) -> str:
@@ -927,8 +941,6 @@ async def search_sources(
     path_prefix: str | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    from pathlib import Path
-
     from app.retrieval.audit import begin_audit_capture, end_audit_capture
     from app.retrieval.path_filter import filter_hits_by_path_prefix
     from app.retrieval.store import get_sources_store
@@ -967,7 +979,6 @@ async def search_sources(
             # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
             from app.retrieval.tenant_visibility import filter_hits_for_tenant
 
-            store = get_sources_store()
             index_meta: dict[str, Any] = {
                 "synced_on_query": False,
                 "index_via_worker": settings.index_via_worker,
@@ -975,8 +986,15 @@ async def search_sources(
             # Over-fetch when filtering so prefix/tenant cuts do not starve top-k.
             fetch_limit = limit * 3 if path_prefix else limit * 2
             try:
-                store.load()
-                raw_hits = store.search(query, limit=fetch_limit, mode=mode)
+                store = await _run_retrieval_blocking(get_sources_store)
+                # JSON needs its persisted index loaded once. Pgvector searches the
+                # database directly once its schema is ready, so it never materializes
+                # the complete source_chunks table on a request.
+                if not bool(getattr(store, "is_ready", False)):
+                    await _run_retrieval_blocking(store.load)
+                raw_hits = await _run_retrieval_blocking(
+                    store.search, query, limit=fetch_limit, mode=mode
+                )
                 raw_hits = filter_hits_for_tenant(raw_hits)
                 retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
             except OSError:

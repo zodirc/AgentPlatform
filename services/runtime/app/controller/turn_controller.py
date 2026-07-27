@@ -1306,6 +1306,15 @@ async def _resume_after_approval(
         model_config,
         owner_user_id=owner_user_id,
     )
+
+    async def on_step_checkpoint(st: TurnState, step_index: int) -> None:
+        await save_checkpoint(
+            run_id=run_id,
+            turn_id=turn_id,
+            state=st,
+            step_index=step_index,
+        )
+
     engine = AgentEngine(
         gateway=pending.gateway,
         tools=pending.tools,
@@ -1313,6 +1322,7 @@ async def _resume_after_approval(
         volatile_context=pending.volatile_context or state.volatile_context or "",
         write_event=write_event,
         check_cancel=lambda: _check_cancel_flag(turn_id),
+        on_step_checkpoint=on_step_checkpoint,
         context_window_tokens=context_window_tokens,
     )
 

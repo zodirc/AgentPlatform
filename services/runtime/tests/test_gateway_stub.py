@@ -4,11 +4,13 @@ import pytest
 
 from app.engine.state import assistant_tool_use, tool_result_message
 from app.model.gateway import (
+    ModelFatalError,
     StubModelProvider,
     _assistant_requested_verify_delegate,
     _delegate_tool_result_count,
     _tool_result_denied,
 )
+from app.settings import settings
 
 
 def test_delegate_tool_result_count_only_completed_cycles() -> None:
@@ -60,6 +62,17 @@ def test_assistant_requested_verify_delegate() -> None:
         },
     ]
     assert _assistant_requested_verify_delegate(messages) is True
+
+
+@pytest.mark.asyncio
+async def test_stub_unrouted_intent_fails_in_ci(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setattr(settings, "model_mode", "stub")
+    provider = StubModelProvider()
+    messages = [{"role": "user", "content": [{"type": "text", "text": "unrouted fixture"}]}]
+
+    with pytest.raises(ModelFatalError, match="unrouted intent"):
+        _ = [chunk async for chunk in provider.stream(messages=messages, tools=[])]
 
 
 @pytest.mark.asyncio

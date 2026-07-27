@@ -460,6 +460,7 @@ async def lifespan(app):
     from app.observability.logging import configure_logging
     from app.retrieval.embedder import reset_embedder_cache, warmup_embedder
 
+    settings.validate_production_security()
     configure_logging(service="agent-runtime", level=settings.log_level)
     await init_pool()
     ScenarioRegistry.load()

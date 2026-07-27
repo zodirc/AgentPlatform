@@ -34,11 +34,11 @@ run_unit_runtime() {
 }
 
 run_unit_api_ux() {
-  echo "==> [unit] API UX signals route"
+  echo "==> [unit] API test suite"
   pip install -q packages/contracts/python
   cd services/api
   pip install -q -e ".[dev]" 2>/dev/null || pip install -q -e .
-  PYTHONPATH=. pytest tests/test_ux_signals_api.py -q
+  PYTHONPATH=. pytest tests -q
   cd "$ROOT"
 }
 

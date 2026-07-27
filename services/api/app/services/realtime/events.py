@@ -57,13 +57,17 @@ async def iter_turn_events(
     listener: TurnEventListener,
     *,
     stop_on_pause: bool = True,
-) -> AsyncIterator[dict]:
+    idle_ping_every: int | None = None,
+) -> AsyncIterator[dict | None]:
     """Yield turn events until the turn finishes.
 
     ``stop_on_pause`` controls behaviour at approval pause points. SSE is
     unidirectional so the stream closes (the client re-fetches the view and
     approves over REST, then reconnects). WebSocket is bidirectional and keeps
     the connection open so the client can approve/deny over the same socket.
+
+    When ``idle_ping_every`` is set, yield ``None`` every N idle polls so SSE
+    can emit comment keep-alives without blocking on new events.
     """
     cursor = since_sequence
     stop_stream = False
@@ -90,5 +94,5 @@ async def iter_turn_events(
         notified = await listener.wait_for_turn(turn_id, timeout=0.3)
         if not notified:
             idle_polls += 1
-            if idle_polls % 3 == 0:
-                await project_turn(turn_id)
+            if idle_ping_every and idle_polls % idle_ping_every == 0:
+                yield None

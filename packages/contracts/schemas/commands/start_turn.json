@@ -46,6 +46,33 @@
       "type": "boolean",
       "default": true,
       "description": "docs/27 TenantContext.visibility_seed — product seed corpus visible for this Turn"
+    },
+    "model_mode": {
+      "type": "string",
+      "enum": ["stub", "live", "recorded"],
+      "description": "docs/29 per-Turn model mode. Only honored when ops_eval is true."
+    },
+    "model_override": {
+      "type": "object",
+      "description": "docs/29 per-Turn live provider override. Only accepted for ops eval.",
+      "additionalProperties": false,
+      "required": ["provider", "model_name", "api_key"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "model_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "api_key": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "base_url": { "type": ["string", "null"], "maxLength": 1024 },
+        "context_window_tokens": {
+          "type": ["integer", "null"],
+          "minimum": 4096,
+          "maximum": 2000000
+        }
+      }
+    },
+    "ops_eval": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enables model_mode and model_override for authenticated ops evaluations."
     }
   }
 }

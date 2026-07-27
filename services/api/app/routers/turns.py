@@ -75,10 +75,11 @@ async def get_turn(
 @router.get("/turns/{turn_id}/view", response_model=TurnView)
 async def get_turn_view(
     turn_id: UUID,
+    refresh: bool = False,
     actor: EndUser = Depends(require_session_actor),
 ):
     await _require_turn_access(turn_id, actor)
-    view = await build_turn_view(turn_id)
+    view = await build_turn_view(turn_id, refresh=refresh)
     if view is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     return view

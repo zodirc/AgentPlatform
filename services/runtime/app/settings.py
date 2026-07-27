@@ -5,6 +5,11 @@ from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+_WEAK_PRODUCTION_VALUES = frozenset(
+    {"change-me", "change-me-internal", "change-me-in-production", "admin"}
+)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -15,6 +20,8 @@ class Settings(BaseSettings):
     model_name: str = ""
     model_api_key: str = ""
     model_mode: str = "auto"  # auto | stub | recorded | live
+    # Fail test fixtures that silently fall through an unimplemented stub route.
+    stub_fail_on_unrouted: bool = False
     recordings_dir: str = "/app/eval/recordings"
     anthropic_base_url: str = ""
     openai_base_url: str = ""
@@ -109,7 +116,9 @@ class Settings(BaseSettings):
     embedding_model_dir: str = "/data/models"
     # Hash default 256; all-MiniLM-L6-v2 is 384 — compose sets 384 with ST.
     embedding_dimensions: int = 256
-    app_env: str = "production"
+    # Development remains the safe default for local `make up`; production must
+    # be selected explicitly and passes the guard below during startup.
+    app_env: str = "development"
     log_level: str = "INFO"
     model_timeout_seconds: float = 120.0
     # H1 harness: fast-fail first byte / connect so retries start early.
@@ -146,6 +155,9 @@ class Settings(BaseSettings):
     # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).
     runtime_max_inflight_turns: int = 16
     event_payload_validation: bool = True
+    # When False (default), high-freq streaming events use a light shape check
+    # instead of full jsonschema (R3). Set True in CI for strict delta schemas.
+    event_payload_validation_strict_deltas: bool = False
     run_command_mode: str = "shell"  # shell | simulate
     turn_token_budget: int = 0
     monthly_token_limit: int = 0
@@ -184,6 +196,25 @@ class Settings(BaseSettings):
         if value is None or value == "":
             return socket.gethostname()
         return str(value)
+
+    def validate_production_security(self) -> None:
+        """Reject bootstrap credentials when the runtime serves production."""
+        if self.app_env.strip().lower() not in {"production", "prod"}:
+            return
+
+        weak_fields = {
+            name
+            for name, value in {
+                "APP_SECRET_KEY": self.app_secret_key,
+                "INTERNAL_SERVICE_TOKEN": self.internal_service_token,
+            }.items()
+            if not value.strip() or value.strip().lower() in _WEAK_PRODUCTION_VALUES
+        }
+        if weak_fields:
+            raise RuntimeError(
+                "production requires non-default values for "
+                + ", ".join(sorted(weak_fields))
+            )
 
 
 settings = Settings()

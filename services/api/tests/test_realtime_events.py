@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from uuid import uuid4
 
 import pytest
 
 from app.services.realtime import events as ev
+from app.services.realtime.listener import TurnEventListener
 
 
 class _Listener:
@@ -14,6 +16,22 @@ class _Listener:
 
 def _event(seq: int, event_type: str) -> dict:
     return {"sequence": seq, "type": event_type}
+
+
+@pytest.mark.asyncio
+async def test_wait_for_turn_does_not_consume_projection_queue() -> None:
+    listener = TurnEventListener()
+    turn_id = uuid4()
+    other_turn_id = uuid4()
+
+    await listener.notify(other_turn_id)
+    waiter = asyncio.create_task(listener.wait_for_turn(turn_id, timeout=1))
+    await asyncio.sleep(0)
+    await listener.notify(turn_id)
+
+    assert await waiter is True
+    assert listener._queue.get_nowait() == other_turn_id
+    assert listener._queue.get_nowait() == turn_id
 
 
 @pytest.mark.asyncio
@@ -81,3 +99,35 @@ async def test_iter_turn_events_ws_does_not_stop_on_approval(monkeypatch: pytest
 
     assert "approval.requested" in seen
     assert seen[-1] == "turn.completed"
+
+
+@pytest.mark.asyncio
+async def test_iter_turn_events_yields_idle_ping(monkeypatch: pytest.MonkeyPatch) -> None:
+    turn_id = uuid4()
+    polls = {"n": 0}
+
+    async def fake_fetch(_turn_id, since):
+        if polls["n"] >= 3:
+            return [_event(1, "turn.completed")]
+        return []
+
+    async def fake_project(_tid):
+        return None
+
+    class _IdleListener:
+        async def wait_for_turn(self, _turn_id, timeout: float = 0.3) -> bool:
+            polls["n"] += 1
+            return False
+
+    monkeypatch.setattr(ev, "fetch_turn_events", fake_fetch)
+    monkeypatch.setattr(ev, "project_turn", fake_project)
+
+    seen = [
+        e
+        async for e in ev.iter_turn_events(
+            turn_id, 0, _IdleListener(), idle_ping_every=2
+        )
+    ]
+
+    assert None in seen
+    assert seen[-1]["type"] == "turn.completed"

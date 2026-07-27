@@ -9,6 +9,17 @@ from app.middleware.request_context import REQUEST_ID_HEADER
 from app.settings import settings
 
 
+_clients: dict[str, httpx.AsyncClient] = {}
+
+
+async def close_runtime_clients() -> None:
+    """Close process-wide runtime connections during API shutdown."""
+    clients = list(_clients.values())
+    _clients.clear()
+    for client in clients:
+        await client.aclose()
+
+
 class RuntimeClient:
     def __init__(self, *, base_url: str | None = None) -> None:
         self.base_url = (base_url or settings.runtime_url).rstrip("/")
@@ -20,6 +31,31 @@ class RuntimeClient:
         if request_id is not None:
             headers[REQUEST_ID_HEADER] = str(request_id)
         return headers
+
+    def _client(self) -> httpx.AsyncClient:
+        client = _clients.get(self.base_url)
+        if client is None:
+            client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
+            _clients[self.base_url] = client
+        return client
+
+    async def _post(
+        self,
+        path: str,
+        *,
+        timeout: float,
+        json: dict | None = None,
+        params: dict | None = None,
+    ) -> httpx.Response:
+        response = await self._client().post(
+            path,
+            json=json,
+            params=params,
+            headers=self._headers(),
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response
 
     async def start_turn(
         self,
@@ -65,13 +101,7 @@ class RuntimeClient:
         if ops_eval and model_override is not None:
             payload["model_override"] = model_override
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/start-turn",
-                json=payload,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
+        await self._post("/internal/commands/start-turn", timeout=30.0, json=payload)
 
     async def cancel_turn(
         self,
@@ -89,13 +119,7 @@ class RuntimeClient:
             "reason": reason,
             "force": force,
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/cancel-turn",
-                json=payload,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
+        await self._post("/internal/commands/cancel-turn", timeout=30.0, json=payload)
 
     async def approve_tool_call(
         self,
@@ -111,13 +135,7 @@ class RuntimeClient:
             "tool_call_id": tool_call_id,
             "trace_id": str(trace_id),
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/approve-tool-call",
-                json=payload,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
+        await self._post("/internal/commands/approve-tool-call", timeout=30.0, json=payload)
 
     async def deny_tool_call(
         self,
@@ -135,13 +153,7 @@ class RuntimeClient:
             "trace_id": str(trace_id),
             "reason": reason,
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/deny-tool-call",
-                json=payload,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
+        await self._post("/internal/commands/deny-tool-call", timeout=30.0, json=payload)
 
     async def accept_patch(
         self,
@@ -157,13 +169,7 @@ class RuntimeClient:
             "patch_id": patch_id,
             "trace_id": str(trace_id),
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/patch-accept",
-                json=payload,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
+        await self._post("/internal/commands/patch-accept", timeout=30.0, json=payload)
 
     async def reject_patch(
         self,
@@ -181,41 +187,22 @@ class RuntimeClient:
             "trace_id": str(trace_id),
             "reason": reason,
         }
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/patch-reject",
-                json=payload,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
+        await self._post("/internal/commands/patch-reject", timeout=30.0, json=payload)
 
     async def sync_sources_index(self) -> dict:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/sync-sources-index",
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._post("/internal/commands/sync-sources-index", timeout=60.0)
+        return resp.json()
 
     async def verify_pass(self, *, session_id: str | None = None) -> dict:
         params = {"session_id": session_id} if session_id else None
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/verify-pass",
-                params=params,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._post(
+            "/internal/commands/verify-pass", timeout=60.0, params=params
+        )
+        return resp.json()
 
     async def warmup_retrieval(self, *, prefix: str = "") -> dict:
         params = {"prefix": prefix} if prefix else None
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{self.base_url}/internal/commands/warmup-retrieval",
-                params=params,
-                headers=self._headers(),
-            )
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._post(
+            "/internal/commands/warmup-retrieval", timeout=15.0, params=params
+        )
+        return resp.json()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.retrieval.embedder import HashEmbedder
 from app.retrieval.pgvector_store import _vector_literal
 from app.retrieval.store import JsonSourceRetrievalStore, get_sources_store
 
@@ -14,6 +15,23 @@ def test_get_sources_store_defaults_to_json(tmp_path, monkeypatch) -> None:
     store = get_sources_store(data_dir=str(tmp_path))
     assert isinstance(store, JsonSourceRetrievalStore)
     assert store.backend == "json"
+
+
+def test_get_sources_store_reuses_instance_for_same_json_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr("app.retrieval.store.settings.retrieval_backend", "json")
+    monkeypatch.setattr("app.retrieval.store.settings.data_dir", str(tmp_path))
+
+    assert get_sources_store(data_dir=str(tmp_path)) is get_sources_store(data_dir=str(tmp_path))
+
+
+def test_hash_embedder_uses_stable_token_bucket() -> None:
+    embedder = HashEmbedder(dimensions=257)
+
+    first = embedder.embed("stable_token")
+    second = embedder.embed("stable_token")
+
+    assert first == second
+    assert sum(value > 0.0 for value in first) == 1
 
 
 def test_get_sources_store_falls_back_when_pgvector_probe_fails(tmp_path, monkeypatch) -> None:

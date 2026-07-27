@@ -50,6 +50,19 @@ export class TurnStreamClient {
       : `/api/v1/turns/${this.turnId}/stream`;
   }
 
+  private scheduleReconnect() {
+    if (!this.turnId || !this.handlers || this.stopped) return;
+    if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      this.handlers.onError?.(new Error("SSE connection closed unexpectedly"));
+      return;
+    }
+    const delay = BASE_RECONNECT_MS * 2 ** this.reconnectAttempts;
+    this.reconnectAttempts += 1;
+    this.reconnectTimer = setTimeout(() => {
+      void this.openStream(this.lastSequence);
+    }, delay);
+  }
+
   private async openStream(sinceSequence: number) {
     this.abort?.abort();
     this.abort = new AbortController();
@@ -86,8 +99,20 @@ export class TurnStreamClient {
             .split("\n")
             .find((line) => line.startsWith("data:"));
           if (!dataLine) continue;
-          const data = JSON.parse(dataLine.slice(5).trim()) as TurnEvent;
-          if (data.sequence > this.lastSequence) {
+          let data: TurnEvent;
+          try {
+            data = JSON.parse(dataLine.slice(5).trim()) as TurnEvent;
+          } catch {
+            continue;
+          }
+          // Skip duplicates / replays; still advance only on newer sequences.
+          if (
+            typeof data.sequence === "number" &&
+            data.sequence <= this.lastSequence
+          ) {
+            continue;
+          }
+          if (typeof data.sequence === "number") {
             this.lastSequence = data.sequence;
           }
           // Advance cursor even when paused so reconnect does not replay tokens.
@@ -103,8 +128,9 @@ export class TurnStreamClient {
           }
         }
       }
+      // Clean disconnect without a terminal/pause event — treat as drop and reconnect.
       if (!this.stopped) {
-        this.handlers?.onClose?.();
+        this.scheduleReconnect();
       }
     } catch (err) {
       if (
@@ -113,18 +139,7 @@ export class TurnStreamClient {
       ) {
         return;
       }
-      if (!this.turnId || !this.handlers) return;
-      if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-        this.handlers.onError?.(
-          err instanceof Error ? err : new Error("SSE connection error"),
-        );
-        return;
-      }
-      const delay = BASE_RECONNECT_MS * 2 ** this.reconnectAttempts;
-      this.reconnectAttempts += 1;
-      this.reconnectTimer = setTimeout(() => {
-        void this.openStream(this.lastSequence);
-      }, delay);
+      this.scheduleReconnect();
     }
   }
 

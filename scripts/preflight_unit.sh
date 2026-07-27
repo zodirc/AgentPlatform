@@ -177,14 +177,14 @@ run_runtime_local() {
 }
 
 run_api_ux_local() {
-  echo "==> [preflight] API UX signals route"
+  echo "==> [preflight] API test suite"
   "$PY" -m pip install -q packages/contracts/python >/dev/null
   cd "$ROOT/services/api"
   if [[ -x .venv/bin/pytest ]]; then
-    PYTHONPATH=. .venv/bin/pytest tests/test_ux_signals_api.py -q
+    PYTHONPATH=. .venv/bin/pytest tests -q
   else
     "$PY" -m pip install -q -e ".[dev]" 2>/dev/null || "$PY" -m pip install -q -e .
-    PYTHONPATH=. "$PY" -m pytest tests/test_ux_signals_api.py -q
+    PYTHONPATH=. "$PY" -m pytest tests -q
   fi
   cd "$ROOT"
 }
@@ -238,7 +238,7 @@ run_runtime_docker() {
 }
 
 run_api_ux_docker() {
-  echo "==> [preflight] API UX signals route (docker)"
+  echo "==> [preflight] API test suite (docker)"
   if ! "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx api; then
     echo "api container not running — start with make up / make start"
     return 1
@@ -248,7 +248,7 @@ run_api_ux_docker() {
   "${COMPOSE[@]}" exec -T api bash -c \
     'python -m pip install -q pytest pytest-asyncio httpx 2>/dev/null
      if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi
-     python -m pytest /tmp/api-tests/test_ux_signals_api.py -q --asyncio-mode=auto'
+     python -m pytest /tmp/api-tests -q --asyncio-mode=auto'
 }
 
 run_contracts_docker() {

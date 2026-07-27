@@ -71,3 +71,25 @@ def test_token_roundtrip() -> None:
 def test_token_rejects_tamper() -> None:
     token = issue_token(user_id=uuid4(), username="alice")
     assert verify_token(token + "x") is None
+
+
+@pytest.mark.asyncio
+async def test_ownerless_session_is_forbidden() -> None:
+    from fastapi import HTTPException
+    from unittest.mock import AsyncMock, patch
+
+    from app.services.end_user import auth
+    from app.services.end_user.users import EndUser
+
+    with patch(
+        "app.services.resource.sessions.get_session",
+        new_callable=AsyncMock,
+        return_value={"id": uuid4(), "owner_user_id": None},
+    ):
+        with pytest.raises(HTTPException) as exc_info:
+            await auth.assert_session_owner(
+                uuid4(),
+                EndUser(id=uuid4(), username="user", status="active"),
+            )
+
+    assert exc_info.value.status_code == 403

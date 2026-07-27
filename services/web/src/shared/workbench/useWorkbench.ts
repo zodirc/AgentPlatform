@@ -58,6 +58,12 @@ const ACTIVE_TURN_STATUSES = new Set([
   "running",
   "waiting_approval",
 ]);
+const STREAM_DELTA_EVENT_TYPES = new Set([
+  "turn.token",
+  "turn.thinking.delta",
+  "section.draft.delta",
+  "tool.delta",
+]);
 
 function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
   return {
@@ -158,10 +164,74 @@ export function useWorkbenchImpl(): WorkbenchState {
   const sectionDraftRef = useRef("");
   const outboundQueueRef = useRef<string[]>([]);
   const flushOutboundLockRef = useRef(false);
+  const deltaFrameRef = useRef<number | null>(null);
+  const pendingDeltasRef = useRef<{
+    streamText: string;
+    thinkingText: string;
+    sectionDraft: string;
+    toolStreams: Record<string, string>;
+  }>({
+    streamText: "",
+    thinkingText: "",
+    sectionDraft: "",
+    toolStreams: {},
+  });
   turnIdRef.current = turnId;
   streamTextRef.current = streamText;
   sectionDraftRef.current = sectionDraft;
   outboundQueueRef.current = outboundQueue;
+
+  function flushPendingDeltas() {
+    if (deltaFrameRef.current !== null) {
+      cancelAnimationFrame(deltaFrameRef.current);
+      deltaFrameRef.current = null;
+    }
+    const pending = pendingDeltasRef.current;
+    pendingDeltasRef.current = {
+      streamText: "",
+      thinkingText: "",
+      sectionDraft: "",
+      toolStreams: {},
+    };
+    if (pending.streamText) {
+      streamTextRef.current += pending.streamText;
+      setStreamText((text) => text + pending.streamText);
+    }
+    if (pending.thinkingText) {
+      setThinkingText((text) => text + pending.thinkingText);
+    }
+    if (pending.sectionDraft) {
+      sectionDraftRef.current += pending.sectionDraft;
+      setSectionDraft((text) => text + pending.sectionDraft);
+    }
+    if (Object.keys(pending.toolStreams).length > 0) {
+      setToolLiveStreams((previous) => {
+        const next = { ...previous };
+        for (const [toolCallId, delta] of Object.entries(pending.toolStreams)) {
+          next[toolCallId] = (next[toolCallId] ?? "") + delta;
+        }
+        return next;
+      });
+    }
+  }
+
+  function scheduleDeltaFlush() {
+    if (deltaFrameRef.current !== null) return;
+    deltaFrameRef.current = requestAnimationFrame(flushPendingDeltas);
+  }
+
+  function clearPendingDeltas() {
+    if (deltaFrameRef.current !== null) {
+      cancelAnimationFrame(deltaFrameRef.current);
+      deltaFrameRef.current = null;
+    }
+    pendingDeltasRef.current = {
+      streamText: "",
+      thinkingText: "",
+      sectionDraft: "",
+      toolStreams: {},
+    };
+  }
 
   function syncHistoryFromView(v: TurnView) {
     setTurnHistory((prev) =>
@@ -254,7 +324,13 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }, [turnViewQuery.data]);
 
-  useEffect(() => () => streamRef.current?.close(), []);
+  useEffect(
+    () => () => {
+      clearPendingDeltas();
+      streamRef.current?.close();
+    },
+    [],
+  );
 
   function connectStream(id: string, sinceSequence = lastSequenceRef.current) {
     streamRef.current?.close();
@@ -266,19 +342,36 @@ export function useWorkbenchImpl(): WorkbenchState {
       id,
       {
         onEvent: (ev) => {
-          if (ev.sequence > lastSequenceRef.current) {
+          // Defensive dedupe if transport replayed an already-applied sequence.
+          if (
+            typeof ev.sequence === "number" &&
+            ev.sequence <= lastSequenceRef.current
+          ) {
+            return;
+          }
+          if (typeof ev.sequence === "number") {
             lastSequenceRef.current = ev.sequence;
           }
-          setEvents((prev) => [...prev, ev]);
+          // Deltas render through coalesced buffers below. Keeping every token
+          // in state would otherwise still trigger one React render per event.
+          if (!STREAM_DELTA_EVENT_TYPES.has(ev.type)) {
+            setEvents((prev) => [...prev, ev]);
+          }
           if (ev.type === "turn.token") {
             if (ev.payload.subagent_id) return;
             const delta = String(ev.payload.delta ?? "");
-            setStreamText((t) => t + delta);
+            if (delta) {
+              pendingDeltasRef.current.streamText += delta;
+              scheduleDeltaFlush();
+            }
           }
           if (ev.type === "turn.thinking.delta") {
             if (ev.payload.subagent_id) return;
             const delta = String(ev.payload.delta ?? "");
-            if (delta) setThinkingText((t) => t + delta);
+            if (delta) {
+              pendingDeltasRef.current.thinkingText += delta;
+              scheduleDeltaFlush();
+            }
           }
           if (ev.type === "turn.thinking") {
             if (ev.payload.subagent_id) return;
@@ -287,17 +380,19 @@ export function useWorkbenchImpl(): WorkbenchState {
           }
           if (ev.type === "section.draft.delta") {
             const delta = String(ev.payload.delta ?? "");
-            setSectionDraft((t) => t + delta);
+            if (delta) {
+              pendingDeltasRef.current.sectionDraft += delta;
+              scheduleDeltaFlush();
+            }
           }
           if (ev.type === "tool.delta") {
             if (ev.payload.subagent_id) return;
             const toolCallId = String(ev.payload.tool_call_id ?? "");
             const delta = String(ev.payload.delta ?? "");
-            if (toolCallId) {
-              setToolLiveStreams((prev) => ({
-                ...prev,
-                [toolCallId]: (prev[toolCallId] ?? "") + delta,
-              }));
+            if (toolCallId && delta) {
+              const pending = pendingDeltasRef.current.toolStreams;
+              pending[toolCallId] = (pending[toolCallId] ?? "") + delta;
+              scheduleDeltaFlush();
             }
           }
           if (ev.type === "tool.started") {
@@ -459,6 +554,7 @@ export function useWorkbenchImpl(): WorkbenchState {
           }
         },
         onClose: async () => {
+          flushPendingDeltas();
           try {
             const v = await fetchTurnView(id);
             setView(v);
@@ -621,6 +717,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setActivePlanPhase(wirePhase);
     setBusy(true);
     setError(null);
+    clearPendingDeltas();
     setEvents([]);
     setStreamText("");
     setThinkingText("");
@@ -894,8 +991,9 @@ export function useWorkbenchImpl(): WorkbenchState {
       return live ? { ...row, stream_output: live } : row;
     },
   );
-  const rawTimeline: TimelineItem[] =
-    liveToolTimeline.length > 0 ? liveToolTimeline : projectedTimeline;
+  const rawTimeline: TimelineItem[] = [
+    ...(liveToolTimeline.length > 0 ? liveToolTimeline : projectedTimeline),
+  ];
   for (const [toolCallId, stream] of Object.entries(toolLiveStreams)) {
     if (rawTimeline.some((t) => String(t.tool_call_id) === toolCallId))
       continue;

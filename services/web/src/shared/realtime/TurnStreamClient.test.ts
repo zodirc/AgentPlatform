@@ -91,4 +91,128 @@ describe("TurnStreamClient", () => {
     client.close();
     vi.unstubAllGlobals();
   });
+
+  it("skips duplicate sequences on reconnect replay", async () => {
+    const encoder = new TextEncoder();
+    let pullCount = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pullCount += 1;
+        if (pullCount === 1) {
+          controller.enqueue(
+            encoder.encode(
+              sseFrame({
+                type: "turn.token",
+                sequence: 1,
+                payload: { delta: "a" },
+              }) +
+                sseFrame({
+                  type: "turn.token",
+                  sequence: 1,
+                  payload: { delta: "dup" },
+                }) +
+                sseFrame({
+                  type: "turn.completed",
+                  sequence: 2,
+                  payload: {},
+                }),
+            ),
+          );
+          return;
+        }
+        controller.close();
+      },
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        body: stream,
+      }),
+    );
+
+    const client = new TurnStreamClient();
+    const events: Array<{ type: string; sequence: number }> = [];
+    const closed = new Promise<void>((resolve) => {
+      client.connect("turn-dup", {
+        onEvent: (ev) => {
+          events.push({ type: ev.type, sequence: ev.sequence });
+        },
+        onClose: () => resolve(),
+      });
+    });
+
+    await closed;
+    expect(events).toEqual([
+      { type: "turn.token", sequence: 1 },
+      { type: "turn.completed", sequence: 2 },
+    ]);
+    client.close();
+    vi.unstubAllGlobals();
+  });
+
+  it("reconnects after clean disconnect without terminal event", async () => {
+    vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    let fetchCount = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async () => {
+        fetchCount += 1;
+        if (fetchCount === 1) {
+          const stream = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(
+                encoder.encode(
+                  sseFrame({
+                    type: "turn.token",
+                    sequence: 1,
+                    payload: { delta: "hi" },
+                  }),
+                ),
+              );
+              controller.close();
+            },
+          });
+          return { ok: true, body: stream };
+        }
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                sseFrame({
+                  type: "turn.completed",
+                  sequence: 2,
+                  payload: {},
+                }),
+              ),
+            );
+            controller.close();
+          },
+        });
+        return { ok: true, body: stream };
+      }),
+    );
+
+    const client = new TurnStreamClient();
+    const events: string[] = [];
+    const closed = new Promise<void>((resolve) => {
+      client.connect("turn-reconnect", {
+        onEvent: (ev) => events.push(ev.type),
+        onClose: () => resolve(),
+      });
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(300);
+    await closed;
+
+    expect(fetchCount).toBeGreaterThanOrEqual(2);
+    expect(events).toEqual(["turn.token", "turn.completed"]);
+    client.close();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });

@@ -15,6 +15,7 @@ TERMINAL_EVENTS = frozenset({"turn.completed", "turn.failed", "turn.cancelled"})
 class TurnEventListener:
     def __init__(self, *, queue_maxsize: int = 1000) -> None:
         self._queue: asyncio.Queue[UUID] = asyncio.Queue(maxsize=queue_maxsize)
+        self._turn_events: dict[UUID, asyncio.Event] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._conn = None
         self._consumer_task: asyncio.Task | None = None
@@ -43,27 +44,33 @@ class TurnEventListener:
                 pass
 
     async def notify(self, turn_id: UUID) -> None:
+        self._fan_out(turn_id)
+
+    def _fan_out(self, turn_id: UUID) -> None:
+        """Wake turn waiters and independently enqueue projection work."""
+        self._turn_events.setdefault(turn_id, asyncio.Event()).set()
         try:
             self._queue.put_nowait(turn_id)
         except asyncio.QueueFull:
             logger.warning("projection queue full; turn %s will be reconciled periodically", turn_id)
+            try:
+                from app.observability.metrics import metrics
+
+                metrics.inc("projection_queue_full_total")
+            except Exception:
+                pass
 
     async def wait_for_turn(self, turn_id: UUID, timeout: float = 0.3) -> bool:
-        deadline = asyncio.get_running_loop().time() + timeout
-        while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                return False
-            try:
-                notified = await asyncio.wait_for(self._queue.get(), timeout=remaining)
-            except asyncio.TimeoutError:
-                return False
-            if notified == turn_id:
-                return True
-            try:
-                await project_turn(notified)
-            except Exception:
-                logger.exception("projection failed for turn %s", notified)
+        event = self._turn_events.setdefault(turn_id, asyncio.Event())
+        if event.is_set():
+            event.clear()
+            return True
+        try:
+            await asyncio.wait_for(event.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
+        event.clear()
+        return True
 
     def _on_notify(self, _conn, _pid, _channel, payload: str) -> None:
         try:
@@ -71,16 +78,21 @@ class TurnEventListener:
         except ValueError:
             return
         if self._loop is not None:
-            self._loop.call_soon_threadsafe(self._queue.put_nowait, turn_id)
+
+            def _enqueue() -> None:
+                self._fan_out(turn_id)
+
+            self._loop.call_soon_threadsafe(_enqueue)
 
     async def _listen_loop(self) -> None:
-        from app.db.pool import get_pool
+        import asyncpg
 
-        pool = await get_pool()
         while True:
             conn = None
             try:
-                conn = await pool.acquire()
+                # LISTEN stays checked out indefinitely. Keep it separate from
+                # the request/query pool so realtime cannot starve API traffic.
+                conn = await asyncpg.connect(settings.database_url)
                 await conn.add_listener("turn_events_channel", self._on_notify)
                 self._conn = conn
                 while True:
@@ -96,7 +108,7 @@ class TurnEventListener:
                         await conn.remove_listener("turn_events_channel", self._on_notify)
                     except Exception:
                         pass
-                    await pool.release(conn)
+                    await conn.close()
                     self._conn = None
 
     async def _consumer_loop(self) -> None:

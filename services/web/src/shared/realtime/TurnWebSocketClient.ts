@@ -45,7 +45,7 @@ export class TurnWebSocketClient {
   }
 
   private openSocket(sinceSequence: number) {
-    this.close();
+    this.closeSocketOnly();
     this.stopped = false;
     this.renderPaused = false;
     if (!this.turnId || !this.handlers) return;
@@ -56,8 +56,19 @@ export class TurnWebSocketClient {
     };
     this.socket.onmessage = (ev) => {
       if (this.stopped) return;
-      const data = JSON.parse(String(ev.data)) as TurnEvent;
-      if (data.sequence > this.lastSequence) {
+      let data: TurnEvent;
+      try {
+        data = JSON.parse(String(ev.data)) as TurnEvent;
+      } catch {
+        return;
+      }
+      if (
+        typeof data.sequence === "number" &&
+        data.sequence <= this.lastSequence
+      ) {
+        return;
+      }
+      if (typeof data.sequence === "number") {
         this.lastSequence = data.sequence;
       }
       if (this.renderPaused && RENDER_PAUSE_TYPES.has(data.type)) {
@@ -70,13 +81,12 @@ export class TurnWebSocketClient {
         this.handlers?.onClose?.();
       }
     };
-    this.socket.onerror = () => {
-      if (this.stopped) return;
-      this.handlers?.onError?.(new Error("WebSocket connection error"));
-    };
+    // Transient errors are followed by onclose, which drives reconnect.
+    // Do not surface onError here — that falsely clears busy mid-turn.
+    this.socket.onerror = () => undefined;
     this.socket.onclose = () => {
       if (this.stopped) return;
-      if (this.lastSequence <= 0 || !this.turnId || !this.handlers) return;
+      if (!this.turnId || !this.handlers) return;
       if (this.reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
         this.handlers.onError?.(new Error("WebSocket connection lost"));
         return;
@@ -110,14 +120,27 @@ export class TurnWebSocketClient {
     this.renderPaused = true;
   }
 
+  /** Close socket without marking stopped — used when opening a replacement. */
+  private closeSocketOnly() {
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    if (this.socket) {
+      this.socket.onclose = null;
+      this.socket.onerror = null;
+      this.socket.onmessage = null;
+      this.socket.close();
+      this.socket = null;
+    }
+  }
+
   close() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
     this.stopped = true;
-    this.socket?.close();
-    this.socket = null;
+    this.closeSocketOnly();
   }
 }
-

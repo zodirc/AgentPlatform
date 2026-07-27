@@ -8,6 +8,10 @@ OUT_DIR="$ROOT/services/web/src/shared/api"
 mkdir -p "$OUT_DIR"
 
 if ! command -v npx >/dev/null 2>&1; then
+  if [[ "${CI:-}" == "true" ]]; then
+    echo "npx is required for TS codegen in CI" >&2
+    exit 1
+  fi
   echo "npx not found; skip TS codegen (Phase 0 web uses minimal TS)"
   exit 0
 fi

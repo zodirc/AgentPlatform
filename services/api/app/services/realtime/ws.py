@@ -35,7 +35,7 @@ async def handle_turn_websocket(
                 continue
             except WebSocketDisconnect:
                 break
-            await _handle_client_message(turn_id, message, listener)
+            await _handle_client_message(websocket, turn_id, message, listener)
     finally:
         stream_task.cancel()
         try:
@@ -53,12 +53,15 @@ async def _stream_events_to_socket(
     async for event in iter_turn_events(
         turn_id, since_sequence, listener, stop_on_pause=False
     ):
+        if event is None:
+            continue
         await websocket.send_json(event)
         if event["type"] in TERMINAL_EVENTS:
             break
 
 
 async def _handle_client_message(
+    websocket: WebSocket,
     turn_id: UUID,
     message: dict,
     listener: TurnEventListener,
@@ -68,33 +71,58 @@ async def _handle_client_message(
         return
     tool_call_id = str(message.get("tool_call_id", "")).strip()
     if not tool_call_id:
+        await websocket.send_json(
+            {"error": "missing_tool_call_id", "action": action}
+        )
         return
 
     turn = await turn_svc.get_turn(turn_id)
     if turn is None or turn["status"] != "waiting_approval":
+        await websocket.send_json(
+            {
+                "error": "not_waiting_approval",
+                "action": action,
+                "status": None if turn is None else turn["status"],
+            }
+        )
         return
 
     from app.services.command.runtime_factory import runtime_client_for_turn
 
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
+        await websocket.send_json(
+            {"error": "run_not_found", "action": action, "tool_call_id": tool_call_id}
+        )
         return
 
     trace_id = uuid4()
     client = await runtime_client_for_turn(turn_id)
-    if action == "approve_tool_call":
-        await client.approve_tool_call(
-            turn_id=turn_id,
-            run_id=run["id"],
-            tool_call_id=tool_call_id,
-            trace_id=trace_id,
+    try:
+        if action == "approve_tool_call":
+            await client.approve_tool_call(
+                turn_id=turn_id,
+                run_id=run["id"],
+                tool_call_id=tool_call_id,
+                trace_id=trace_id,
+            )
+        else:
+            await client.deny_tool_call(
+                turn_id=turn_id,
+                run_id=run["id"],
+                tool_call_id=tool_call_id,
+                trace_id=trace_id,
+                reason=str(message.get("reason", "user_denied")),
+            )
+    except Exception as exc:
+        logger.exception("websocket %s failed for turn %s", action, turn_id)
+        await websocket.send_json(
+            {
+                "error": "runtime_command_failed",
+                "action": action,
+                "tool_call_id": tool_call_id,
+                "detail": str(exc)[:200],
+            }
         )
-    else:
-        await client.deny_tool_call(
-            turn_id=turn_id,
-            run_id=run["id"],
-            tool_call_id=tool_call_id,
-            trace_id=trace_id,
-            reason=str(message.get("reason", "user_denied")),
-        )
+        return
     await listener.notify(turn_id)

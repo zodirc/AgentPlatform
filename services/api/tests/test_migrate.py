@@ -38,7 +38,7 @@ def test_run_alembic_upgrade(monkeypatch) -> None:
     assert called == ["head"]
 
 
-def test_maybe_stamp_legacy_db_when_sessions_exist(monkeypatch) -> None:
+def test_maybe_stamp_legacy_db_at_phase0_baseline(monkeypatch) -> None:
     class FakeInspector:
         def get_table_names(self):
             return ["sessions", "turns"]
@@ -54,7 +54,7 @@ def test_maybe_stamp_legacy_db_when_sessions_exist(monkeypatch) -> None:
     monkeypatch.setattr(migrate_mod.command, "stamp", lambda _cfg, rev: stamped.append(rev))
 
     migrate_mod._maybe_stamp_legacy_db(migrate_mod._alembic_cfg())
-    assert stamped == ["head"]
+    assert stamped == ["0001_phase0"]
 
 
 @pytest.mark.asyncio

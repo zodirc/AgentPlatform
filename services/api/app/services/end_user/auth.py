@@ -89,7 +89,9 @@ async def assert_session_owner(session_id: UUID, actor: EndUser) -> dict:
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
     owner = session.get("owner_user_id")
-    if owner is not None and UUID(str(owner)) != actor.id:
+    # Legacy ownerless sessions must be assigned explicitly; treating NULL as
+    # shared would expose their history to every authenticated user.
+    if owner is None or UUID(str(owner)) != actor.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     return session
 

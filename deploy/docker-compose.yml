@@ -5,6 +5,7 @@ services:
     # JSON file index remains a fallback when the extension/probe fails.
     image: pgvector/pgvector:pg16
     container_name: agent-postgres
+    mem_limit: 1g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-agent}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agent}
@@ -28,6 +29,7 @@ services:
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
     container_name: agent-runtime
+    mem_limit: 4g
     environment:
       DATABASE_URL: ${DATABASE_URL}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
@@ -41,7 +43,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       DATA_DIR: /data
       WORKSPACE_ROOT: /workspace
-      APP_ENV: ${APP_ENV:-production}
+      APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       MODEL_TIMEOUT_SECONDS: ${MODEL_TIMEOUT_SECONDS:-120}
       RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
@@ -94,6 +96,7 @@ services:
       context: ..
       dockerfile: services/api/Dockerfile
     container_name: agent-api
+    mem_limit: 1g
     environment:
       DATABASE_URL: ${DATABASE_URL}
       RUNTIME_URL: http://runtime:8001
@@ -106,7 +109,7 @@ services:
       END_USER_AUTH_ENABLED: ${END_USER_AUTH_ENABLED:-true}
       ADMIN_SESSION_BYPASS: ${ADMIN_SESSION_BYPASS:-true}
       END_USER_COOKIE_SECURE: ${END_USER_COOKIE_SECURE:-false}
-      APP_ENV: ${APP_ENV:-production}
+      APP_ENV: ${APP_ENV:-development}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_MODE: ${WORKER_MODE:-inline}
       WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/workspace}
@@ -126,9 +129,9 @@ services:
       - ../eval/golden:/app/eval/golden:ro,z
       - ../deploy:/app/deploy:ro,z
       - ../.env:/app/.env:ro,z
-      # Full checkout for Ops suite=ci (CI-parity proof via docker.sock).
+      # Full checkout is read-only. Docker socket access for Ops CI evaluation
+      # lives in compose/ops-eval.yml and is opt-in, never a production default.
       - ..:/repo:ro,z
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       postgres:
         condition: service_healthy

@@ -7,9 +7,49 @@ from uuid import UUID
 
 import pytest
 
+from app.services.projection import projector
 from app.services.projection.projector import project_turn
 
 TURN_ID = UUID("00000000-0000-0000-0000-000000000010")
+
+
+@pytest.mark.asyncio
+async def test_build_turn_view_skips_projection_when_view_is_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = MagicMock()
+    row = {
+        "turn_id": TURN_ID,
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "writing",
+        "status": "running",
+        "user_input": "hello",
+        "latest_output": "latest",
+        "tool_timeline": [],
+        "artifacts": [],
+        "last_event_sequence": 2,
+        "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "cancel_requested_at": None,
+        "runner_id": None,
+        "approval_tool_call_id": None,
+        "approval_tool_name": None,
+    }
+    pool.fetchrow = AsyncMock(
+        side_effect=[
+            {"last_event_sequence": 2},
+            row,
+        ]
+    )
+    pool.fetchval = AsyncMock(return_value=2)
+    project = AsyncMock()
+    monkeypatch.setattr(projector, "get_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(projector, "project_turn", project)
+
+    view = await projector.build_turn_view(TURN_ID)
+
+    assert view is not None
+    project.assert_not_awaited()
+    pool.fetchval.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -65,6 +105,7 @@ async def test_project_turn_maps_completed_run_to_succeeded() -> None:
     view_insert = next(
         call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
     )
+    assert "WHERE turn_views.last_event_sequence <= EXCLUDED.last_event_sequence" in view_insert.args[0]
     assert '"type": "delivery"' in view_insert.args[8]
     assert '"status": "failed"' in view_insert.args[8]
 

@@ -63,8 +63,36 @@ async def project_session(session_id: UUID) -> None:
     )
 
 
+async def session_view_needs_projection(session_id: UUID) -> bool:
+    pool = await get_pool()
+    view = await pool.fetchrow(
+        "SELECT updated_at FROM session_views WHERE session_id = $1",
+        session_id,
+    )
+    if view is None:
+        return True
+
+    return bool(
+        await pool.fetchval(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM sessions
+                WHERE id = $1 AND updated_at > $2
+                UNION ALL
+                SELECT 1 FROM turns
+                WHERE session_id = $1 AND updated_at > $2
+            )
+            """,
+            session_id,
+            view["updated_at"],
+        )
+    )
+
+
 async def build_session_view(session_id: UUID) -> SessionView | None:
-    await project_session(session_id)
+    if await session_view_needs_projection(session_id):
+        await project_session(session_id)
+
     pool = await get_pool()
     row = await pool.fetchrow(
         """

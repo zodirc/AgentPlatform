@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Protocol
@@ -459,6 +460,13 @@ class StubModelProvider:
             )
             return
 
+        if settings.model_mode == "stub" and (
+            os.environ.get("CI", "").lower() == "true"
+            or settings.stub_fail_on_unrouted
+        ):
+            raise ModelFatalError(
+                "stub provider received an unrouted intent; add an explicit stub route"
+            )
         reply = f"[stub] Acknowledged: {user_text[:200]}"
         for chunk in _chunk_text(reply):
             yield chunk
@@ -834,7 +842,8 @@ class ModelGateway:
 
                 attempt += 1
                 attempt_abort = asyncio.Event()
-                emitted = False
+                emitted_user_visible = False
+                emitted_liveness = False
                 try:
                     async for item in self._stream_attempt(
                         messages=outbound,
@@ -842,7 +851,13 @@ class ModelGateway:
                         overall_deadline=overall_deadline,
                         attempt_abort=attempt_abort,
                     ):
-                        emitted = True
+                        if isinstance(item, StreamActivity):
+                            emitted_liveness = True
+                        else:
+                            # Text deltas and final ModelResponse are committed
+                            # to the user-visible turn; retrying them duplicates
+                            # output. Liveness/reasoning signals are ephemeral.
+                            emitted_user_visible = True
                         yield item
                     return
                 except ModelTransientError as exc:
@@ -851,7 +866,7 @@ class ModelGateway:
                     if self._cancel_event.is_set():
                         return
                     last_error = exc
-                    if emitted:
+                    if emitted_user_visible:
                         raise ModelFatalError(
                             f"model failed after streaming started: {exc}"
                         ) from exc
@@ -859,10 +874,11 @@ class ModelGateway:
                         break
                     delay = _backoff_seconds(attempt, exc)
                     logger.info(
-                        "model retry attempt=%s/%s delay=%.2fs error=%s",
+                        "model retry attempt=%s/%s delay=%.2fs liveness=%s error=%s",
                         attempt,
                         max_attempts,
                         delay,
+                        emitted_liveness,
                         exc,
                     )
                     self.retry_count = attempt
@@ -881,7 +897,7 @@ class ModelGateway:
                     if self._cancel_event.is_set():
                         return
                     classified = classify_provider_exception(exc)
-                    if isinstance(classified, ModelTransientError) and not emitted:
+                    if isinstance(classified, ModelTransientError) and not emitted_user_visible:
                         last_error = classified
                         if attempt >= max_attempts:
                             break
@@ -889,10 +905,11 @@ class ModelGateway:
                             return
                         delay = _backoff_seconds(attempt, classified)
                         logger.info(
-                            "model retry attempt=%s/%s delay=%.2fs error=%s",
+                            "model retry attempt=%s/%s delay=%.2fs liveness=%s error=%s",
                             attempt,
                             max_attempts,
                             delay,
+                            emitted_liveness,
                             classified,
                         )
                         self.retry_count = attempt
@@ -929,47 +946,57 @@ class ModelGateway:
             max(0.01, overall_deadline - time.monotonic()),
         )
         try:
-            first = await asyncio.wait_for(agen.__anext__(), timeout=first_byte_budget)
-        except StopAsyncIteration:
-            return
-        except asyncio.TimeoutError as exc:
-            attempt_abort.set()
-            if time.monotonic() >= overall_deadline:
-                raise ModelProviderTimeout("model stream exceeded timeout") from exc
-            raise ModelTransientError(
-                f"first byte timeout after {first_byte_budget:.1f}s"
-            ) from exc
-        except ModelError:
-            if self._cancel_event.is_set() or attempt_abort.is_set():
+            try:
+                first = await asyncio.wait_for(agen.__anext__(), timeout=first_byte_budget)
+            except StopAsyncIteration:
                 return
-            raise
-        except Exception as exc:
-            # Cancel/timeout often surfaces as transport errors after aclose.
-            if self._cancel_event.is_set() or attempt_abort.is_set():
-                return
-            raise classify_provider_exception(exc) from exc
-
-        if self._cancel_event.is_set():
-            return
-        if time.monotonic() > overall_deadline:
-            raise ModelProviderTimeout("model stream exceeded timeout")
-        yield first
-
-        try:
-            async for item in agen:
+            except asyncio.TimeoutError as exc:
+                attempt_abort.set()
+                if time.monotonic() >= overall_deadline:
+                    raise ModelProviderTimeout("model stream exceeded timeout") from exc
+                raise ModelTransientError(
+                    f"first byte timeout after {first_byte_budget:.1f}s"
+                ) from exc
+            except ModelError:
                 if self._cancel_event.is_set() or attempt_abort.is_set():
                     return
-                if time.monotonic() > overall_deadline:
-                    raise ModelProviderTimeout("model stream exceeded timeout")
-                yield item
-        except ModelError:
-            if self._cancel_event.is_set() or attempt_abort.is_set():
+                raise
+            except Exception as exc:
+                # Cancel/timeout often surfaces as transport errors after aclose.
+                if self._cancel_event.is_set() or attempt_abort.is_set():
+                    return
+                raise classify_provider_exception(exc) from exc
+
+            if self._cancel_event.is_set():
                 return
-            raise
-        except Exception as exc:
-            if self._cancel_event.is_set() or attempt_abort.is_set():
-                return
-            raise classify_provider_exception(exc) from exc
+            if time.monotonic() > overall_deadline:
+                raise ModelProviderTimeout("model stream exceeded timeout")
+            yield first
+
+            try:
+                async for item in agen:
+                    if self._cancel_event.is_set() or attempt_abort.is_set():
+                        return
+                    if time.monotonic() > overall_deadline:
+                        raise ModelProviderTimeout("model stream exceeded timeout")
+                    yield item
+            except ModelError:
+                if self._cancel_event.is_set() or attempt_abort.is_set():
+                    return
+                raise
+            except Exception as exc:
+                if self._cancel_event.is_set() or attempt_abort.is_set():
+                    return
+                raise classify_provider_exception(exc) from exc
+        finally:
+            # Always close the provider async generator so httpx/SSE connections
+            # do not linger after first-byte timeout, cancel, or retry.
+            aclose = getattr(agen, "aclose", None)
+            if callable(aclose):
+                try:
+                    await aclose()
+                except Exception:
+                    logger.debug("provider stream aclose failed", exc_info=True)
 
     async def _interruptible_sleep(self, delay: float, deadline: float) -> bool:
         """Sleep up to delay; return False if cancel or overall deadline wins."""

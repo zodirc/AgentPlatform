@@ -516,6 +516,7 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                     artifacts = EXCLUDED.artifacts,
                     last_event_sequence = EXCLUDED.last_event_sequence,
                     updated_at = now()
+                WHERE turn_views.last_event_sequence <= EXCLUDED.last_event_sequence
                 """,
                 turn_id,
                 turn["session_id"],
@@ -558,8 +559,26 @@ async def _project_turn_impl(turn_id: UUID) -> None:
         metrics.set_gauge("projection_lag_seconds", lag)
 
 
-async def build_turn_view(turn_id: UUID) -> TurnView | None:
-    await project_turn(turn_id)
+async def turn_view_needs_projection(turn_id: UUID) -> bool:
+    """Return whether persisted events are newer than the materialized view."""
+    pool = await get_pool()
+    view = await pool.fetchrow(
+        "SELECT last_event_sequence FROM turn_views WHERE turn_id = $1",
+        turn_id,
+    )
+    if view is None:
+        return True
+
+    max_sequence = await pool.fetchval(
+        "SELECT MAX(sequence) FROM turn_events WHERE turn_id = $1",
+        turn_id,
+    )
+    return max_sequence is not None and max_sequence > view["last_event_sequence"]
+
+
+async def build_turn_view(turn_id: UUID, *, refresh: bool = False) -> TurnView | None:
+    if refresh or await turn_view_needs_projection(turn_id):
+        await project_turn(turn_id)
 
     pool = await get_pool()
     row = await pool.fetchrow(

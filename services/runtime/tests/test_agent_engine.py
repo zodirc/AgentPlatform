@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, AsyncIterator
 from unittest.mock import AsyncMock
@@ -364,6 +365,55 @@ def _list_dir_tool() -> ToolSpec:
         },
         handler=core.list_dir,
     )
+
+
+@pytest.mark.asyncio
+async def test_agent_engine_orders_parallel_readonly_tool_results(workspace) -> None:
+    async def delayed_read(path: str, **_kwargs: Any) -> dict[str, Any]:
+        if path == "first.txt":
+            await asyncio.sleep(0.02)
+        return {
+            "path": path,
+            "offset": 1,
+            "end_line": 1,
+            "content": path,
+            "truncated": False,
+            "whole_file_complete": True,
+            "summary": path,
+        }
+
+    read = ToolSpec(
+        name="read_file",
+        description="read",
+        parameters={
+            "type": "object",
+            "properties": {"path": {"type": "string"}},
+            "required": ["path"],
+        },
+        handler=delayed_read,
+    )
+    calls = [
+        {"id": "read-first", "name": "read_file", "input": {"path": "first.txt"}},
+        {"id": "read-second", "name": "read_file", "input": {"path": "second.txt"}},
+    ]
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [ModelResponse(tool_calls=calls), ModelResponse(text="done")],
+            one_per_stream=True,
+        ),
+        tools=[read],
+        system_prompt="sys",
+        write_event=AsyncMock(),
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    await engine.run(state)
+
+    tool_messages = [message for message in state.messages if message.get("role") == "tool"]
+    assert [
+        message["content"][0]["tool_use_id"] for message in tool_messages
+    ] == ["read-first", "read-second"]
+    assert list(state.read_registry) == ["first.txt", "second.txt"]
 
 
 @pytest.mark.asyncio
