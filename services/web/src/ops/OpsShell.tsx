@@ -8,8 +8,6 @@ import {
   opsHistoryPath,
   opsRawPath,
   opsRetrievalPath,
-  opsRunPath,
-  secretFromOpsPath,
 } from "./opsPaths";
 
 export {

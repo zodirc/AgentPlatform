@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { BotMessageSquare } from "lucide-react";
-import { Button } from "../../components/ui/button";
 import { ErrorBanner } from "./ErrorBanner";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";

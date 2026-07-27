@@ -100,7 +100,7 @@ export function AgentSidebar({
   const [multiSelectMode, setMultiSelectMode] = useState(false);
   const [checkedPaths, setCheckedPaths] = useState<Set<string>>(() => new Set());
   const view = wb.view;
-  const artifacts = view?.artifacts ?? [];
+  const artifacts = useMemo(() => view?.artifacts ?? [], [view]);
 
   const refreshWorkspace = async () => {
     setWorkspaceRefreshing(true);

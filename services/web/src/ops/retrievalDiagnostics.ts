@@ -53,7 +53,10 @@ export function layerOnlyIn(
   return out;
 }
 
-export function diagnoseRetrievalAudit(audit: AuditLike, finalHits?: AuditHitLike[]): RetrievalDiag[] {
+export function diagnoseRetrievalAudit(
+  audit: AuditLike | null | undefined,
+  finalHits?: AuditHitLike[],
+): RetrievalDiag[] {
   const diags: RetrievalDiag[] = [];
   if (!audit) {
     diags.push({

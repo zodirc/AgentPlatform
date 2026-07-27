@@ -133,8 +133,8 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const files = sourcesQuery.data ?? [];
   const { mine, seed } = useMemo(() => {
+    const files = sourcesQuery.data ?? [];
     const mineList: string[] = [];
     const seedList: string[] = [];
     for (const rel of files) {
@@ -142,7 +142,7 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
       else mineList.push(rel);
     }
     return { mine: mineList, seed: seedList };
-  }, [files]);
+  }, [sourcesQuery.data]);
 
   if (!open) return null;
 

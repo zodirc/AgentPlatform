@@ -40,7 +40,7 @@ const SOFT_MIN_LEN = cfg.soft_min_len ?? 24;
 const PLAN_PREFIX = "【Plan 模式】";
 const EXECUTE_PREFIX = "【执行计划】";
 
-const NUMBERED_GOAL = /^\s*(?:\d+[\.\)、]|[-*•]\s+\S)/gm;
+const NUMBERED_GOAL = /^\s*(?:\d+[.)、]|[-*•]\s+\S)/gm;
 const GOAL_JOIN =
   /(?:然后|接着|并且|同时|另外|还要|此外|and then|also|finally)\s*/gi;
 const PATH_AT = /@([\w./-]+\.(?:md|txt|py|ts|tsx|json|yaml|yml)|[\w./-]+)/g;

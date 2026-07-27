@@ -89,7 +89,11 @@ function parseSegments(blocks: unknown[]): ContentSegment[] {
         o.arguments ??
         asRecord(o.function)?.arguments ??
         (() => {
-          const { type: _t, name: _n, text: _x, id: _i, ...rest } = o;
+          const rest = { ...o };
+          delete rest.type;
+          delete rest.name;
+          delete rest.text;
+          delete rest.id;
           return Object.keys(rest).length ? rest : null;
         })();
       out.push({
