@@ -122,6 +122,11 @@ async def build_session_view(session_id: UUID) -> SessionView | None:
     )
 
 
+# A14: cap work per reconcile pass so a large backlog cannot pin a pooled
+# connection / the event loop; the periodic loop drains the rest next round.
+_RECONCILE_BATCH_LIMIT = 200
+
+
 async def reconcile_lagging_projections() -> int:
     """Re-project turns whose events advanced beyond turn_views."""
     pool = await get_pool()
@@ -136,7 +141,10 @@ async def reconcile_lagging_projections() -> int:
             WHERE te.turn_id = t.id
               AND te.sequence > tv.last_event_sequence
         )
-        """
+        ORDER BY t.created_at DESC
+        LIMIT $1
+        """,
+        _RECONCILE_BATCH_LIMIT,
     )
     fixed = 0
     for row in rows:
@@ -155,7 +163,9 @@ async def reconcile_stale_turns() -> int:
         JOIN turn_events te ON te.turn_id = t.id
         WHERE t.status IN ('pending', 'running', 'waiting_approval')
           AND te.type IN ('turn.completed', 'turn.failed', 'turn.cancelled')
-        """
+        LIMIT $1
+        """,
+        _RECONCILE_BATCH_LIMIT,
     )
     fixed = 0
     for row in rows:

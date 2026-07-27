@@ -187,6 +187,15 @@ async def delete_session_for_owner(session_id: UUID, owner_user_id: UUID) -> boo
                 """,
                 session_id,
             )
+            # No FK on model_request_envelopes — delete explicitly (A12).
+            await conn.execute(
+                """
+                DELETE FROM model_request_envelopes
+                WHERE session_id = $1
+                   OR turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                """,
+                session_id,
+            )
             await conn.execute(
                 "DELETE FROM turn_views WHERE session_id = $1",
                 session_id,
