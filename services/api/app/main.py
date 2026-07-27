@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -155,11 +156,25 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 
 @app.get("/metrics")
-async def metrics_endpoint():
+async def metrics_endpoint(authorization: str | None = Header(default=None)):
+    # Scrape with `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>` —
+    # metrics expose scenario/tenant labels and must not be public.
     from fastapi.responses import PlainTextResponse
 
     from app.observability.metrics import metrics
 
+    scheme, _, value = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(
+        value.strip(), settings.internal_service_token
+    ):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    # B24: sample pool occupancy at scrape time (no background task needed).
+    try:
+        pool = await get_pool()
+        metrics.set_gauge("db_pool_size", float(pool.get_size()))
+        metrics.set_gauge("db_pool_idle", float(pool.get_idle_size()))
+    except Exception:
+        pass
     return PlainTextResponse(
         metrics.render_prometheus(),
         media_type="text/plain; version=0.0.4; charset=utf-8",

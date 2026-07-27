@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -363,6 +363,33 @@ def test_approve_tool_call_success(client: TestClient) -> None:
     runtime.approve_tool_call.assert_awaited_once()
 
 
+def test_approve_tool_call_replays_duplicate_client_request(
+    client: TestClient,
+) -> None:
+    """I11: a retried (turn_id, client_request_id) must not re-dispatch."""
+    run = {"id": RUN_ID}
+    turn = {"status": "waiting_approval", "session_id": SESSION_ID}
+    runtime = AsyncMock()
+    request_id = str(uuid4())
+    with (
+        patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
+        patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
+        patch("app.routers.turns.runtime_client_for_turn", new_callable=AsyncMock, return_value=runtime),
+    ):
+        first = client.post(
+            f"/api/v1/turns/{TURN_ID}/approve-tool-call",
+            json={"tool_call_id": "call-1", "client_request_id": request_id},
+        )
+        second = client.post(
+            f"/api/v1/turns/{TURN_ID}/approve-tool-call",
+            json={"tool_call_id": "call-1", "client_request_id": request_id},
+        )
+    assert first.status_code == 202
+    assert second.status_code == 202
+    assert second.json() == first.json()
+    runtime.approve_tool_call.assert_awaited_once()
+
+
 def test_cancel_turn_success(client: TestClient) -> None:
     run = {"id": RUN_ID}
     turn = {"status": "running", "session_id": SESSION_ID}
@@ -672,10 +699,20 @@ def test_change_password_success(client: TestClient) -> None:
     async def _user() -> EndUser:
         return EndUser(id=OWNER_ID, username="test", status="active")
 
-    with patch(
-        "app.routers.auth.user_svc.change_password",
-        new_callable=AsyncMock,
-    ) as change:
+    refreshed = EndUser(
+        id=OWNER_ID, username="test", status="active", token_version="abc123def456"  # gitleaks:allow
+    )
+    with (
+        patch(
+            "app.routers.auth.user_svc.change_password",
+            new_callable=AsyncMock,
+        ) as change,
+        patch(
+            "app.routers.auth.user_svc.get_user",
+            new_callable=AsyncMock,
+            return_value=refreshed,
+        ),
+    ):
         app.dependency_overrides[require_end_user] = _user
         try:
             response = client.post(
@@ -690,6 +727,8 @@ def test_change_password_success(client: TestClient) -> None:
 
     assert response.status_code == 204
     change.assert_awaited_once_with(OWNER_ID, "old-secret", "new-secret")
+    # B16: the response reissues a cookie bound to the new password version.
+    assert "agent_end_user" in response.headers.get("set-cookie", "")
 
 
 def test_change_password_wrong_current(client: TestClient) -> None:

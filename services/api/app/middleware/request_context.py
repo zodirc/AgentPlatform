@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from uuid import UUID, uuid4
 
 import structlog
@@ -8,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.context import set_request_id
+from app.observability.metrics import metrics
 
 REQUEST_ID_HEADER = "X-Request-ID"
 
@@ -32,6 +34,19 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             request_id=str(request_id),
         )
 
+        started = time.perf_counter()
         response = await call_next(request)
         response.headers[REQUEST_ID_HEADER] = str(request_id)
+        # B24: HTTP latency by route template (bounded cardinality — never the
+        # raw path, which embeds UUIDs).
+        route = request.scope.get("route")
+        template = getattr(route, "path", None)
+        if template:
+            metrics.observe(
+                "http_request_duration_seconds",
+                time.perf_counter() - started,
+                method=request.method,
+                path=template,
+                status=str(response.status_code),
+            )
         return response
