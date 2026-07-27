@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Local mirror of GitHub Actions ``ci`` workflow (both jobs):
-#   1. scripts/ci_proof.sh  → unit.* + make gate (smoke + eval-all)
+# Local mirror of GitHub Actions ci workflow (both jobs):
+#   1. scripts/ci_proof.sh  -> unit.* + make gate (smoke + eval-all)
 #   2. web vitest + OpenAPI schema.d.ts drift check
 #
 # Prefer offline from push: make preflight-ci
@@ -24,32 +24,35 @@ CI="${CI:-true}" GATE_SKIP_RESTORE="${GATE_SKIP_RESTORE:-0}" \
   bash "$ROOT/scripts/ci_proof.sh"
 
 echo "==> preflight CI: web unit tests"
-# Prefer a real ``pnpm`` on PATH; otherwise ``corepack pnpm`` (no root needed —
-# ``corepack enable`` often fails with EACCES on /usr/bin for non-root users).
-PNPM_CMD=(pnpm)
-if ! command -v pnpm >/dev/null 2>&1; then
+# Prefer pnpm on PATH; else corepack pnpm (no root /usr/bin shim needed).
+run_pnpm() {
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm "$@"
+    return
+  fi
   if ! command -v corepack >/dev/null 2>&1; then
     echo "pnpm not found and corepack missing; install Node 22+ or: npm i -g pnpm" >&2
     exit 1
   fi
-  pm="$(
-    node -e 'const p=require("./services/web/package.json"); process.stdout.write(p.packageManager||"pnpm@9.15.9")' \
-      2>/dev/null || echo "pnpm@9.15.9"
-  )"
-  echo "==> using corepack ${pm} (no global /usr/bin shim)"
-  corepack prepare "$pm" --activate >/dev/null
-  PNPM_CMD=(corepack pnpm)
-fi
-echo "==> pnpm: $("${PNPM_CMD[@]}" -v)"
-(
-  cd "$ROOT/services/web"
-  if [[ ! -d node_modules ]]; then
-    "${PNPM_CMD[@]}" install --frozen-lockfile
+  local pm
+  pm="$(node -e 'const p=require("./services/web/package.json"); process.stdout.write(p.packageManager||"pnpm@9.15.9")' 2>/dev/null || true)"
+  if [[ -z "${pm}" ]]; then
+    pm="pnpm@9.15.9"
   fi
-  "${PNPM_CMD[@]}" test
-)
+  echo "==> using corepack ${pm} (no global /usr/bin shim)"
+  corepack prepare "${pm}" --activate >/dev/null
+  corepack pnpm "$@"
+}
 
-echo "==> preflight CI: OpenAPI → schema.d.ts drift check"
+echo "==> pnpm: $(run_pnpm -v)"
+cd "$ROOT/services/web"
+if [[ ! -d node_modules ]]; then
+  run_pnpm install --frozen-lockfile
+fi
+run_pnpm test
+cd "$ROOT"
+
+echo "==> preflight CI: OpenAPI -> schema.d.ts drift check"
 CI=true bash "$ROOT/scripts/codegen.sh"
 git diff --exit-code -- services/web/src/shared/api/schema.d.ts
 
