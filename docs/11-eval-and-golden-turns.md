@@ -197,6 +197,15 @@ POST /turns [trace_id]
 
 体验信号（环外）：`make ux-signals` · [docs/28](28-proof-gate-and-ux-signals.md) PX1。
 
+### 4.1 本地 `make eval` 与基线（docs/35 F6 / F8）
+
+- `make eval`：**一次**隔离起栈，跑 `--phase 1,1b`（phase 为逗号分隔**精确**匹配；不再因前缀把 1b 跑两遍）。
+- `make eval-all`：全量 stub golden（仍一次起栈）。
+- 跑完写 `reports/eval-summary.json`，并与入库的 [`eval/baseline.json`](../eval/baseline.json) 对比打印回归项；`--update-baseline` 刷新基线。
+- 越权/属主权：api 集成测试 `tests/integration/test_cross_user_access.py`（非 golden YAML；docs/35 F8）。
+
+CI 另含分钟级 `static-checks`：ruff 关键规则、web lint/typecheck、gitleaks（docs/35 F7）。
+
 ## 5. Golden 清单
 
 ### 5.1 Phase 1 — 管道（必做）

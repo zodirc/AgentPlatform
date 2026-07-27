@@ -104,3 +104,10 @@ Turn 执行是长流程、多 Step、多工具调用的过程。客户端需要�
 | 长轮询 | 延迟与服务器压力大 |
 | 仅 REST 轮询 projection | 无法细粒度流式体验，工具进度滞后 |
 | gRPC server stream | 浏览器与 gateway 集成成本高 |
+
+## 演进备注（2026-07，docs/35）
+
+- 空闲兜底查询由 ~0.3s 调至 ~2s；有 PG NOTIFY 时仍即时拉取。
+- delta 事件可由 runtime `BufferedEventWriter` 短窗批写（默认 40ms；`EVENT_BATCH_WINDOW_SECONDS=0` 关闭）。
+- 审批在 WS 场景亦统一走 HTTP approve/deny（socket 在 `approval.requested` 后关闭，不可再 send）。
+- `turn.failed.termination_reason` 增补审批恢复失败与 runner 重启等枚举；见 `contracts.md` §3。

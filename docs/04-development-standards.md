@@ -347,9 +347,9 @@ scope：`api` | `runtime` | `web` | `deploy` | `contracts`
 
 ### 8.3 PR 要求
 
-- CI 全绿（lint + typecheck + test）
+- CI 全绿：`static-checks`（ruff 关键规则 + web lint/typecheck + gitleaks）与 proof / web-and-codegen
 - **推送前**：`make hooks-install`（一次）后，`git push` 自动跑 `scripts/preflight_unit.sh`（CI `unit.*` 本地镜像）。全量 Actions 镜像请手动 `make preflight-ci`（久；勿挂在 pre-push，以免 SSH 空闲被掐），通过后可用 `SKIP_PREFLIGHT=1 git push`。应急绕过：`SKIP_PREFLIGHT=1` / `--no-verify`；偶尔要在 push 时全量：`PREFLIGHT_CI=1 git push`
-- 涉及 API 变更须更新 `packages/contracts/openapi` 并同步 web codegen 类型
+- 涉及 API 变更须更新 `packages/contracts/openapi` 并同步 web codegen 类型；契约 SemVer / CHANGELOG 见 `packages/contracts/README.md`
 - 涉及架构变更须新增或更新 ADR
 - 单 PR 聚焦一个服务或一个垂直能力
 
@@ -357,20 +357,21 @@ scope：`api` | `runtime` | `web` | `deploy` | `contracts`
 
 | 项 | Phase 0 | Phase 2+ |
 |----|---------|----------|
-| 结构化日志 | JSON stdout | + 集中收集 |
+| 结构化日志 | JSON stdout（stdlib 经 ProcessorFormatter 接入 structlog） | + 集中收集 |
 | request_id | 中间件注入，全链路透传 | |
-| 指标 | — | Prometheus `/metrics` |
+| 指标 | Prometheus 文本 `/metrics`（需内部 Bearer；固定桶 histogram） | + 采集端 / 告警 |
 | 追踪 | — | OpenTelemetry |
 
 日志字段最小集：`timestamp`, `level`, `service`, `request_id`, `turn_id`, `message`
 
 ## 10. 安全规范
 
-- 依赖扫描：`pip-audit` 或 `uv pip audit` 在 CI 运行
-- 密钥扫描：gitleaks 或 trufflehog
+- 依赖扫描：`pip-audit` 或 `uv pip audit`（本地 `scripts/security_audit.sh`；可挂 nightly）
+- 密钥扫描：gitleaks（CI `static-checks` job：`gitleaks dir . --config .gitleaks.toml`；本地同配置）
 - 工具执行：路径白名单 + 租户隔离
-- `runtime` 内部 API 校验 `X-Internal-Token`
-- 生产 `AUTH_ENABLED=true` 且 `APP_SECRET_KEY` 非默认值
+- `runtime` 内部 API 校验 `X-Internal-Token`（`hmac.compare_digest`）
+- 生产 `AUTH_ENABLED=true` 且 `END_USER_AUTH_ENABLED=true`，`APP_SECRET_KEY` 非默认值
+- auth 端点 IP 固定窗口限流；改密吊销旧 token（token 内嵌密码版本）；敏感写操作写 `audit_log`
 
 ## 11. 文档规范
 

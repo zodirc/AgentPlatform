@@ -208,6 +208,10 @@ Phase 1 最小 payload schema：`turn.accepted`、`turn.cancelling`、`turn.canc
 - `turn.thinking`：步骤级「开始思考」标记。  
 - `turn.thinking.delta`：推理/reasoning **文本增量**（直播 UI）。**投影忽略**，不得写入 `TurnView.latest_output`；刷新可不保留。  
 - Cancel 终态为 `turn.cancelled`；因 abort 掐流产生的 transport 错误 **不得** 落成 `turn.failed` + model_error（ADR-015 §5.1）。
+- `turn.failed.payload.termination_reason` 枚举（权威：`schemas/events/payloads/turn.failed.json`）含：
+  `fatal_error` · `model_timeout` · `step_timeout` · `schema_validation_error` ·
+  `approval_resume_timeout` · `approval_state_lost` · `budget_exceeded` · `runner_restart`。
+  消费者须容忍未知枚举值（契约 SemVer minor；见 `packages/contracts/CHANGELOG.md`）。
 
 ### Phase 2
 
@@ -298,6 +302,21 @@ Schema：`packages/contracts/schemas/errors.json`
 | `model_provider_profiles` | `provider`, `model_name`, `api_key_ciphertext`, `base_url`, `is_active`, `config_version` | **api** 加密写；**runtime** 解密读（`StartTurn`） |
 
 约束：`UNIQUE (is_active) WHERE is_active = true`（恰好一条生效配置）。
+
+### 7.2 Phase 1k / 1l（索引与审计，docs/35 A13 / B17）
+
+| DDL | 内容 |
+|-----|------|
+| `phase1k_retrieval_event_index.sql` | `turn_events` 上 `type='retrieval.completed'` 部分索引（Ops 检索审计） |
+| `phase1l_audit_log.sql` | `audit_log`：`actor_user_id` / `actor_username` / `action` / `resource_type` / `resource_id` / `detail` |
+
+敏感写路径（approve/deny/cancel/patch/删 session）经 `app.services.security.audit.record_audit` 落库。Alembic：`0016_phase1k_retrieval_index`、`0017_phase1l_audit_log`。
+
+### 7.3 契约版本化（docs/35 F9）
+
+- 版本：`packages/contracts/pyproject.toml` 与 `python/pyproject.toml`（当前 **0.2.0**）。
+- 变更日志：[`packages/contracts/CHANGELOG.md`](../packages/contracts/CHANGELOG.md)；规则见同目录 `README.md` §版本化。
+- 防漂移：`scripts/codegen.sh` 保证 web TS ⊆ `openapi/public.yaml`；`services/api/tests/test_openapi_contract.py` 保证 `public.yaml` ⊆ FastAPI 实际路由。
 
 ## 8. 内部命令（api → runtime）
 

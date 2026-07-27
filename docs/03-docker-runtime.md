@@ -309,7 +309,18 @@ Dockerfile 见 **`services/web/Dockerfile`**（多阶段 build → nginx）。
 | 宿主机路径 `WORKSPACE_HOST_PATH` | runtime `/workspace` | **用户代码库**（工具沙箱；不含 ops） |
 | `caddy_data` | gateway | TLS 自动证书存储 |
 
-**备份策略** 文档约定：`pg_data` 与 `agent_data` 定期快照。
+**备份策略**（docs/35 F4）：`make backup` → [`deploy/backup.sh`](../deploy/backup.sh)
+
+- `pg_dump -Fc` → `deploy/backups/<ts>/agent.dump`
+- `agent_data` 卷 tar → 同目录 `agent_data.tar.gz`
+- 默认保留最近 7 份；产物目录已 gitignore
+
+镜像仍多用 `:latest` / `:default`；按 git SHA 打 tag 与正式回滚流程尚未固化。
+
+### 6.0a 重启与日志轮转（docs/35 F3 / F5）
+
+主 compose 与 `ha.yml` 核心服务均为 `restart: unless-stopped`。  
+日志：`x-logging` → `json-file`，`max-size=10m` × `max-file=3`（含 HA runtime 副本）。
 
 ### 6.1 PostgreSQL 最小表面
 
@@ -339,6 +350,8 @@ Phase 0 设计上至少需要为以下对象预留位置（详见 [`07-domain-mo
 - `runtime` 必须记录 step 开始结束、模型调用、工具调用、终止原因、异常边界日志
 - projection 刷新链路必须记录 sequence 与刷新状态，便于定位“事件到了但界面没更新”的问题
 - Phase 0 不强制引入 ELK、Loki、OpenTelemetry 全家桶，但日志字段和输出格式必须为后续接入这些系统保留兼容性
+- **stdlib → structlog**：api/runtime 经 `ProcessorFormatter` 桥接，业务 `logging.getLogger` 亦输出带 `service` / `request_id` 的 JSON（docs/35 B23）
+- **指标**：`GET /metrics`（Prometheus 文本）需 `Authorization: Bearer ${INTERNAL_SERVICE_TOKEN}`；含固定桶 histogram 与 DB 池 / in-flight turns 等 gauge（docs/35 B18/B24）
 
 ## 7. 本地开发工作流
 

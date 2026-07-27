@@ -320,11 +320,13 @@ loop 最大的风险是停不下来、烧钱、反复失败。终止条件必须
 ```text
 1. ContextEngine.assemble 入口
 2. ModelGateway.stream — abort Event；provider 在 abort 时 aclose 上游 HTTP（含长 thinking 间隙）
-3. AgentEngine 流式循环 — 与 chunk 消费并行的短间隔 cancel 轮询，避免「卡在等下一 token」
+3. AgentEngine 流式循环 — 与 chunk 消费并行的短间隔 cancel **内存标志**检查（后台 ~50ms watcher；**禁止**每 token 再查 DB，docs/35 I1）
 4. ToolExecutor — 工具 handler 入口、流式输出循环、exec 子进程
 5. delegate 子 AgentEngine — 与父 Run 共享 abort；父 cancel 级联子任务
 6. Step 边界（兜底）
 ```
+
+高频 delta 可由 `BufferedEventWriter` 短窗批写（默认 40ms，首包立即；`EVENT_BATCH_WINDOW_SECONDS=0` 关闭；docs/35 I2）。进程生命周期：启动 reconcile 本机遗留 `running` → `turn.failed(runner_restart)`；认领仅 `accepted`；SIGTERM 先 drain（docs/35 B2/B4）。
 
 | `force` | 模型流式 | 工具执行 |
 |---------|----------|----------|

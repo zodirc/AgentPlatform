@@ -13,7 +13,7 @@ runtime AgentEngine / TurnController
     v
 PostgreSQL turn_events
     │ api: LISTEN turn_events_channel（主触发）
-    │      + 300ms 轮询兜底（NOTIFY 丢失 / 连接断开）
+    │      + 空闲最长约 2s 轮询兜底（NOTIFY 丢失 / 连接断开；docs/35 I3）
     v
 api GET /turns/{id}/stream  (SSE 至客户端)
     │
@@ -29,8 +29,12 @@ web 消费 SSE（进行中）+ GET /view（重连/终态）
 1. `turn_events` 表上 `AFTER INSERT` trigger → `pg_notify('turn_events_channel', turn_id::text)`。
 2. api 进程启动时 `LISTEN turn_events_channel`；收到通知后将 `turn_id` 投入 `asyncio.Queue`。
 3. SSE 长连接与 projection 消费者**共用**该 Queue（或各投一份），避免双套轮询逻辑。
-4. 每连接 SSE 在 Queue 空闲时以 **300ms** 轮询 `turn_events` 作为兜底（与 §4.2 一致）。
-5. runtime **不**调用 api HTTP 推送事件；跨服务边界仅经 PostgreSQL。
+4. 每连接 SSE 在 Queue 空闲时以 **约 2s** 轮询 `turn_events` 作为兜底（有 NOTIFY 时立即唤醒；docs/35 I3）。
+5. 流在 pause/terminal 时等待投影消费者追平 `turn_views.last_event_sequence`（约 2s 兜底才主动 `project_turn`），避免每客户端各自全量重放（docs/35 I4）。
+6. runtime **不**调用 api HTTP 推送事件；跨服务边界仅经 PostgreSQL。
+7. 服务端约 14s 发一次 SSE `: ping`；客户端 idle watchdog 在长时间无字节时主动重连（docs/35 I17）。
+
+**条件读与分页**（docs/35 I19）：`GET /view` 支持 ETag/304；`GET /events` 分页（`limit`/`has_more`）。
 
 **禁止**：
 
@@ -89,7 +93,7 @@ Last-Event-ID: 12          # 可选，等价 since_sequence=12
 2. since ← Last-Event-ID 或 query since_sequence 或 0
 3. SELECT * FROM turn_events WHERE turn_id=? AND sequence>? ORDER BY sequence
 4. 逐条写入 SSE data: {json}
-5. 循环：每 300ms 或 LISTEN 通知后重复 3–4，直至 turn 终态且已发到最新 sequence
+5. 循环：空闲最长约 2s 或 LISTEN 通知后重复 3–4，直至 turn 终态且已发到最新 sequence；终态前等待投影追平（§1）。
 6. 发送可选 keep-alive 注释；终态后关闭或保持至客户端断开
 ```
 

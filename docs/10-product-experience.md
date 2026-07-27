@@ -166,6 +166,9 @@ Web 设置页（`/settings/model`）须支持：
 | Turn Intake 非分类图 | 确定性 Intake + 首轮路由 | ADR-014、`05` §3.1 |
 | 事件溯源 UI | 断线 replay、不拼状态 | ADR-012、`09` |
 | Stop 乐观 UI | 点停即停渲染；仍听终态；取消≠失败 | ADR-015、`10` §5.1、`21` Q19 |
+| 发送乐观气泡 | 点发送即占位用户消息；失败回滚 | docs/35 I14、`useWorkbench` |
+| Markdown 助手输出 | `react-markdown` + GFM；流式区 `aria-live` | docs/35 I16/I23 |
+| SSE 断线 | 指数退避重连；耗尽后 `online` 再附着；idle watchdog | docs/35 I15/I17、ADR-004 |
 | 思考直播 | `turn.thinking.delta` ephemeral | ADR-004、`08`、`21` Q22 |
 | 忙时排队 | 空闲合并下一 Turn | `10` §5.1.1、`21` Q27 |
 | Diff-first 写作 | 可审改稿 | `10`、`patch.*` |

@@ -25,7 +25,8 @@ Schema：`packages/contracts/eval/golden_turn.schema.json`
 # 日常：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/29）
 make gate               # Proof 一键（smoke → eval-all → runtime-test；docs/28）
 make smoke              # L0（单独）
-make eval-all           # stub golden
+make eval               # phase 1+1b，一次隔离起栈（docs/35 F8）
+make eval-all           # stub golden（一次起栈）
 make ux-signals         # 体验信号自检（docs/28 PX1；环外）
 make eval-retrieval     # retrieval profile（writing.07）
 make retrieval-bench    # 离线检索 A/B（效果闸层 1）
@@ -34,6 +35,7 @@ make eval-path-prefix   # isolated writing.14 golden
 make eval-queue         # queue + worker（shared.16）
 make eval-live          # live golden（需 MODEL_API_KEY）
 python3 scripts/eval_run.py --phase 2
+# 对比入库基线 / 刷新：eval 结束后读 reports/eval-summary.json；--update-baseline
 ```
 
 效果闸手工清单：[`retrieval/EFFECT_CHECKLIST.md`](retrieval/EFFECT_CHECKLIST.md)。
@@ -44,7 +46,8 @@ python3 scripts/eval_run.py --phase 2
 
 | 层级 | 触发 | 内容 |
 |------|------|------|
-| L0 + L1 | PR / push `.github/workflows/ci.yml` | `scripts/ci_proof.sh`：unit → smoke → **eval-all**（阻断） |
+| static-checks | PR / push `ci.yml` | ruff 关键规则 + web lint/typecheck + gitleaks（docs/35 F7） |
+| L0 + L1 | PR / push `ci.yml` | `scripts/ci_proof.sh`：unit → smoke → **eval-all**（阻断） |
 | L1c 加跑 | 改 retrieval/queue 时本地 | `make eval-retrieval` / `make eval-queue`（见 ci.yml 注释） |
 | L2 live | `.github/workflows/nightly.yml` | `make eval-live`（**告警不阻断**） |
 
