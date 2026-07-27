@@ -2,10 +2,7 @@
 # Local mirror of CI unit.* steps — prefer repo/system Python+pip; else Docker
 # (same class as make runtime-test / api-test). No Docker required when a venv exists.
 #
-# Default git pre-push now runs scripts/preflight_ci.sh (full CI). Use this for
-# a fast unit-only gate:
-#   make preflight-unit
-#   PREFLIGHT_UNIT_ONLY=1 git push
+# Default git pre-push target. Full CI mirror: make preflight-ci / PREFLIGHT_CI=1.
 #
 # Usage:
 #   bash scripts/preflight_unit.sh

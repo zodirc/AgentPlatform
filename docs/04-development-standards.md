@@ -348,7 +348,7 @@ scope：`api` | `runtime` | `web` | `deploy` | `contracts`
 ### 8.3 PR 要求
 
 - CI 全绿（lint + typecheck + test）
-- **推送前**：`make hooks-install`（一次）后，`git push` 自动跑 `scripts/preflight_ci.sh`（≡ GitHub Actions：`ci_proof` unit+gate + web vitest + OpenAPI codegen 漂移检查；需 Docker，较久）。也可手动 `make preflight`。仅 unit：`PREFLIGHT_UNIT_ONLY=1` / `make preflight-unit`。应急绕过：`SKIP_PREFLIGHT=1` / `--no-verify`
+- **推送前**：`make hooks-install`（一次）后，`git push` 自动跑 `scripts/preflight_unit.sh`（CI `unit.*` 本地镜像）。全量 Actions 镜像请手动 `make preflight-ci`（久；勿挂在 pre-push，以免 SSH 空闲被掐），通过后可用 `SKIP_PREFLIGHT=1 git push`。应急绕过：`SKIP_PREFLIGHT=1` / `--no-verify`；偶尔要在 push 时全量：`PREFLIGHT_CI=1 git push`
 - 涉及 API 变更须更新 `packages/contracts/openapi` 并同步 web codegen 类型
 - 涉及架构变更须新增或更新 ADR
 - 单 PR 聚焦一个服务或一个垂直能力

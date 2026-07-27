@@ -35,7 +35,7 @@ DOCKER_AUTO_PRUNE ?= 1
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources retrieval-bench-prod loc \
-	preflight preflight-unit hooks-install ensure-git-hooks
+	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -70,8 +70,8 @@ help: ## 显示常用命令
 	@echo "  make sync-sources    Turn 外索引 workspace/sources（含挂载 seed）"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make runtime-test 运行时测试"
-	@echo "  make preflight    推送前 CI 门禁（≡ Actions：ci_proof + web/codegen；久）"
-	@echo "  make preflight-unit  仅 unit（旧 pre-push；PREFLIGHT_UNIT_ONLY=1）"
+	@echo "  make preflight       推送前 unit 门禁（pre-push 默认；无长连接风险）"
+	@echo "  make preflight-ci    全量本地 CI（ci_proof+web；久；推送前手动跑）"
 	@echo "  make hooks-install 启用 .githooks（make up/start 也会自动装）"
 	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
 
@@ -336,12 +336,14 @@ runtime-test:
 	    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
 	fi
 
-# Full local CI mirror (Docker for gate). Unit-only: make preflight-unit / PREFLIGHT_UNIT_ONLY=1
-preflight: ## 推送前 CI 门禁（≡ Actions ci + web-and-codegen）
-	@bash scripts/preflight_ci.sh
-
-preflight-unit: ## 推送前仅 unit（本地 pip 或 Docker 回退；PREFLIGHT_DOCKER=1 可强制）
+# Prefer local venv/system pip; else Docker (make up). Force: PREFLIGHT_DOCKER=1
+preflight: ## 推送前 unit 门禁（≡ pre-push 默认）
 	@bash scripts/preflight_unit.sh
+
+preflight-unit: preflight ## 同 make preflight（兼容旧目标名）
+
+preflight-ci: ## 全量本地 CI（≡ Actions；久。建议: make preflight-ci && SKIP_PREFLIGHT=1 git push）
+	@bash scripts/preflight_ci.sh
 
 hooks-install: ensure-git-hooks ## 同 ensure-git-hooks（兼容旧目标名）
 

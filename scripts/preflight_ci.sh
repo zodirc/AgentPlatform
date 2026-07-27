@@ -3,11 +3,10 @@
 #   1. scripts/ci_proof.sh  → unit.* + make gate (smoke + eval-all)
 #   2. web vitest + OpenAPI schema.d.ts drift check
 #
-# Wired from .githooks/pre-push. Bypass:
-#   SKIP_PREFLIGHT=1 git push
-#   git push --no-verify
-# Fast unit-only (old behavior):
-#   PREFLIGHT_UNIT_ONLY=1 git push
+# Prefer offline from push: make preflight-ci
+#   then: SKIP_PREFLIGHT=1 git push
+# Opt-in on push (may break SSH idle timeout): PREFLIGHT_CI=1 git push
+# Bypass: SKIP_PREFLIGHT=1
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,11 +15,6 @@ cd "$ROOT"
 if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
   echo "==> preflight skipped (SKIP_PREFLIGHT=1)"
   exit 0
-fi
-
-if [[ "${PREFLIGHT_UNIT_ONLY:-0}" == "1" ]]; then
-  echo "==> preflight: PREFLIGHT_UNIT_ONLY=1 → scripts/preflight_unit.sh"
-  exec bash "$ROOT/scripts/preflight_unit.sh"
 fi
 
 echo "==> preflight CI: scripts/ci_proof.sh (unit + gate)"
