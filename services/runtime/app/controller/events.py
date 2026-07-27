@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -9,6 +10,7 @@ import asyncpg
 
 from app.contracts.event_validation import maybe_validate_event_payload
 from app.db.pool import get_pool
+from app.observability.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ async def append_event(
     causation_id: UUID | None = None,
 ) -> dict:
     maybe_validate_event_payload(event_type, payload)
+    started = time.perf_counter()
     last_error: Exception | None = None
     for attempt in range(5):
         sequence = await next_sequence(conn, turn_id)
@@ -68,6 +71,7 @@ async def append_event(
                 now,
                 json.dumps(payload),
             )
+            metrics.observe("event_append_seconds", time.perf_counter() - started)
             return {
                 "event_id": str(event_id),
                 "stream_id": str(turn_id),

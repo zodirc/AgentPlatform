@@ -88,7 +88,10 @@ def _async_rescan(text: str, *, path: str) -> None:
         try:
             from app.observability.metrics import metrics
 
-            metrics.inc("secret_scan_async_hit", findings=",".join(result.findings))
+            # One counter per pattern name (bounded set) — joined finding
+            # combinations would explode label cardinality (B9-③).
+            for name in result.findings:
+                metrics.inc("secret_scan_async_hit", kind=name)
         except Exception:
             pass
 
@@ -130,7 +133,8 @@ def gate_write_content(content: str, *, path: str) -> dict | None:
         try:
             from app.observability.metrics import metrics
 
-            metrics.inc("secret_scan_blocked", findings=",".join(result.findings))
+            for name in result.findings:
+                metrics.inc("secret_scan_blocked", kind=name)
         except Exception:
             pass
         return {

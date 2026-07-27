@@ -13,7 +13,7 @@ def test_redact_phone_and_id() -> None:
 
 
 def test_redact_api_key_and_aws() -> None:
-    text = "key=sk-abcdefghijklmnopqrstuvwxyz012345 and AKIAIOSFODNN7EXAMPLE"
+    text = "key=sk-abcdefghijklmnopqrstuvwxyz012345 and AKIAIOSFODNN7EXAMPLE"  # gitleaks:allow
     out = redact_text(text)
     assert "sk-abcdefghijklmnopqrstuvwxyz012345" not in out
     assert "[REDACTED_API_KEY]" in out
