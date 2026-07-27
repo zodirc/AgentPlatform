@@ -32,7 +32,10 @@ export interface paths {
         get: operations["getSession"];
         put?: never;
         post?: never;
-        /** Hard-delete own session and turn graph */
+        /**
+         * Hard-delete own session and turn graph
+         * @description Permanently deletes the session for the authenticated owner, including turns, runs, events, views, and transcript. Workspace files are not deleted.
+         */
         delete: operations["deleteSession"];
         options?: never;
         head?: never;
@@ -254,10 +257,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List model provider profiles (admin) */
+        /** List model provider profiles for the logged-in end user */
         get: operations["listModelProviders"];
         put?: never;
-        /** Create a model provider profile (admin) */
+        /** Create a model provider profile for the logged-in end user */
         post: operations["createModelProvider"];
         delete?: never;
         options?: never;
@@ -273,10 +276,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Update a model provider profile (admin) */
+        /** Update a model provider profile owned by the logged-in end user */
         put: operations["updateModelProvider"];
         post?: never;
-        /** Delete a model provider profile (admin) */
+        /** Delete a model provider profile owned by the logged-in end user */
         delete: operations["deleteModelProvider"];
         options?: never;
         head?: never;
@@ -291,7 +294,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Activate a model provider profile (admin) */
+        /** Activate a model provider profile for the logged-in end user */
         put: operations["activateModelProvider"];
         post?: never;
         delete?: never;
@@ -327,7 +330,7 @@ export interface components {
             /** Format: uuid */
             client_request_id?: string;
             /**
-             * Optional Plan-mode phase (docs/25).
+             * @description Optional Plan-mode phase (docs/25). planning = hard read-only tool gate; executing = full tools after user consent. Omit for normal turns.
              * @enum {string}
              */
             plan_phase?: "planning" | "executing";
@@ -387,6 +390,7 @@ export interface components {
                     compaction?: number;
                     project?: number;
                     runtime?: number;
+                    /** @description WN3/AQ1 writing_context / plan-phase user block tokens */
                     volatile?: number;
                 };
                 /** @enum {string} */
