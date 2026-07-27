@@ -4,6 +4,8 @@ import asyncio
 import logging
 from uuid import UUID
 
+from cachetools import TTLCache
+
 from app.services.projection.projector import project_turn
 from app.settings import settings
 
@@ -11,11 +13,16 @@ logger = logging.getLogger(__name__)
 
 TERMINAL_EVENTS = frozenset({"turn.completed", "turn.failed", "turn.cancelled"})
 
+# B6: how often the LISTEN connection is probed for liveness.
+_LISTEN_PROBE_SECONDS = 30.0
+
 
 class TurnEventListener:
     def __init__(self, *, queue_maxsize: int = 1000) -> None:
         self._queue: asyncio.Queue[UUID] = asyncio.Queue(maxsize=queue_maxsize)
-        self._turn_events: dict[UUID, asyncio.Event] = {}
+        # B9: per-turn waiter Events were never removed; a TTL cache bounds the
+        # map (finished turns stop being waited on well within the TTL).
+        self._turn_events: TTLCache = TTLCache(maxsize=4096, ttl=3600)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._conn = None
         self._consumer_task: asyncio.Task | None = None
@@ -95,8 +102,12 @@ class TurnEventListener:
                 conn = await asyncpg.connect(settings.database_url)
                 await conn.add_listener("turn_events_channel", self._on_notify)
                 self._conn = conn
+                # B6: a half-open connection (PG restart, network blip) never
+                # raises by itself — probe it so the outer loop reconnects
+                # instead of silently degrading realtime to polling.
                 while True:
-                    await asyncio.sleep(3600)
+                    await asyncio.sleep(_LISTEN_PROBE_SECONDS)
+                    await conn.execute("SELECT 1")
             except asyncio.CancelledError:
                 raise
             except Exception:

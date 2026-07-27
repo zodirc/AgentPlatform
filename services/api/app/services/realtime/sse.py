@@ -6,8 +6,8 @@ from uuid import UUID
 from app.services.realtime.events import iter_turn_events
 from app.services.realtime.listener import TurnEventListener
 
-# ~15s at 0.3s idle wait per poll inside iter_turn_events.
-_SSE_PING_EVERY_IDLE_POLLS = 50
+# ~14s at IDLE_WAIT_SECONDS (2s) idle wait per poll inside iter_turn_events.
+_SSE_PING_EVERY_IDLE_POLLS = 7
 
 
 async def stream_turn_events(turn_id: UUID, since_sequence: int, listener: TurnEventListener):

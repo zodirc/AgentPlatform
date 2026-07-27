@@ -18,6 +18,25 @@ def _event(seq: int, event_type: str) -> dict:
     return {"sequence": seq, "type": event_type}
 
 
+class _FakePool:
+    """Stands in for the DB pool; reports the projected view sequence."""
+
+    def __init__(self, last_event_sequence: int) -> None:
+        self.last_event_sequence = last_event_sequence
+
+    async def fetchval(self, *_args):
+        return self.last_event_sequence
+
+
+def _patch_projection_pool(
+    monkeypatch: pytest.MonkeyPatch, last_event_sequence: int
+) -> None:
+    async def fake_get_pool():
+        return _FakePool(last_event_sequence)
+
+    monkeypatch.setattr(ev, "get_pool", fake_get_pool)
+
+
 @pytest.mark.asyncio
 async def test_wait_for_turn_does_not_consume_projection_queue() -> None:
     listener = TurnEventListener()
@@ -54,6 +73,8 @@ async def test_iter_turn_events_stops_on_approval_for_sse(monkeypatch: pytest.Mo
 
     monkeypatch.setattr(ev, "fetch_turn_events", fake_fetch)
     monkeypatch.setattr(ev, "project_turn", fake_project)
+    # Projection queue already caught up — the stream must NOT re-project.
+    _patch_projection_pool(monkeypatch, last_event_sequence=4)
 
     seen = [
         e["type"]
@@ -61,6 +82,37 @@ async def test_iter_turn_events_stops_on_approval_for_sse(monkeypatch: pytest.Mo
     ]
 
     assert seen == ["turn.accepted", "tool.started", "tool.completed", "approval.requested"]
+    assert projected == []
+
+
+@pytest.mark.asyncio
+async def test_iter_turn_events_projects_only_when_view_lags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I4: fallback projection fires only after the catch-up deadline."""
+    turn_id = uuid4()
+    batch = [_event(1, "turn.completed")]
+
+    async def fake_fetch(_turn_id, since):
+        return [e for e in batch if e["sequence"] > since]
+
+    projected: list = []
+
+    async def fake_project(tid):
+        projected.append(tid)
+
+    monkeypatch.setattr(ev, "fetch_turn_events", fake_fetch)
+    monkeypatch.setattr(ev, "project_turn", fake_project)
+    monkeypatch.setattr(ev, "_PROJECTION_CATCHUP_SECONDS", 0.1)
+    # View permanently behind → the stream projects as a fallback.
+    _patch_projection_pool(monkeypatch, last_event_sequence=0)
+
+    seen = [
+        e["type"]
+        async for e in ev.iter_turn_events(turn_id, 0, _Listener(), stop_on_pause=True)
+    ]
+
+    assert seen == ["turn.completed"]
     assert projected == [turn_id]
 
 
@@ -91,6 +143,7 @@ async def test_iter_turn_events_ws_does_not_stop_on_approval(monkeypatch: pytest
 
     monkeypatch.setattr(ev, "fetch_turn_events", fake_fetch)
     monkeypatch.setattr(ev, "project_turn", fake_project)
+    _patch_projection_pool(monkeypatch, last_event_sequence=999)
 
     seen = [
         e["type"]
@@ -121,6 +174,7 @@ async def test_iter_turn_events_yields_idle_ping(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(ev, "fetch_turn_events", fake_fetch)
     monkeypatch.setattr(ev, "project_turn", fake_project)
+    _patch_projection_pool(monkeypatch, last_event_sequence=999)
 
     seen = [
         e

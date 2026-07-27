@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from uuid import UUID
@@ -14,8 +15,21 @@ TERMINAL_EVENTS = frozenset({"turn.completed", "turn.failed", "turn.cancelled"})
 # interrupt) and renders the approval prompt instead of hanging in "busy" state.
 PAUSE_EVENTS = frozenset({"approval.requested"})
 
+# LISTEN/NOTIFY wakes waiters immediately; this timeout is only the fallback
+# poll for lost notifications. 0.3s made every idle client ~3.3 QPS of full
+# event queries — 2s keeps the safety net at a fraction of the cost.
+IDLE_WAIT_SECONDS = 2.0
 
-async def fetch_turn_events(turn_id: UUID, since_sequence: int) -> list[dict]:
+# How long the stream waits for the projection consumer to catch up at a
+# pause/terminal point before projecting itself (fallback only — N clients
+# must not trigger N duplicate full projections).
+_PROJECTION_CATCHUP_SECONDS = 2.0
+_PROJECTION_POLL_SECONDS = 0.05
+
+
+async def fetch_turn_events(
+    turn_id: UUID, since_sequence: int, *, limit: int | None = None
+) -> list[dict]:
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -24,9 +38,11 @@ async def fetch_turn_events(turn_id: UUID, since_sequence: int) -> list[dict]:
         FROM turn_events
         WHERE turn_id = $1 AND sequence > $2
         ORDER BY sequence ASC
+        LIMIT $3
         """,
         turn_id,
         since_sequence,
+        limit,
     )
     events: list[dict] = []
     for row in rows:
@@ -86,13 +102,34 @@ async def iter_turn_events(
                 stop_stream = True
 
         if stop_stream:
-            # Ensure the projected view reflects the latest events (timeline,
-            # waiting_approval status, interrupt) before the client re-fetches it.
-            await project_turn(turn_id)
+            # The projected view must reflect the latest events (timeline,
+            # waiting_approval status, interrupt) before the client re-fetches
+            # it. The projection queue owns this work; wait for it to catch up
+            # and only project here as a fallback.
+            await _ensure_view_caught_up(turn_id, cursor)
             break
 
-        notified = await listener.wait_for_turn(turn_id, timeout=0.3)
+        notified = await listener.wait_for_turn(turn_id, timeout=IDLE_WAIT_SECONDS)
         if not notified:
             idle_polls += 1
             if idle_ping_every and idle_polls % idle_ping_every == 0:
                 yield None
+
+
+async def _ensure_view_caught_up(turn_id: UUID, sequence: int) -> None:
+    """Wait for the projection consumer to reach ``sequence``; project as fallback."""
+    if sequence <= 0:
+        return
+    pool = await get_pool()
+    deadline = asyncio.get_running_loop().time() + _PROJECTION_CATCHUP_SECONDS
+    while True:
+        projected = await pool.fetchval(
+            "SELECT last_event_sequence FROM turn_views WHERE turn_id = $1",
+            turn_id,
+        )
+        if projected is not None and int(projected) >= sequence:
+            return
+        if asyncio.get_running_loop().time() >= deadline:
+            await project_turn(turn_id)
+            return
+        await asyncio.sleep(_PROJECTION_POLL_SECONDS)
