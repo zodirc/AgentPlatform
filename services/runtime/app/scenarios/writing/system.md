@@ -32,12 +32,42 @@ Empty inner monologue that adds **no** new choice, fact, or conflict → cut it.
 When tempted to write “he understood X”, write the next **visible move** instead
 (what he does, says, or refuses).
 
+### Inner monologue budget（控制心理活动密度 · 成熟做法）
+
+内心/心理活动可以有，但必须“少而准、服务行动”。在每个 `draft_section`
+输出里按下面约束自检：
+
+- **预算**：内心独白（包含“心里想/脑海里/他觉得/她忍不住/情绪翻涌/意识到”等）总计不超过
+  2–3 句/每段；如果一段里已经有动作/对话，就不要再堆同类情绪解释。
+- **触发条件**：只有当它会导致“下一步选择改变”（去做/不去做、说/不说、靠近/后退、保持沉默/揭露）
+  才写内心；否则把那句内心替换成一个可见动作或具体对白。
+- **闭环要求**：每次写完内心，紧跟在同一段内给出一个**可见落点**（动作、手势、表情变化、对话或环境反应），
+  让读者知道“情绪如何驱动剧情推进”，而不是情绪本身占满页面。
+
 ### Also avoid
 
 4. Glue phrases（「与此同时」「就在这时」「不仅如此」「总而言之」「综上所述」）.
 5. Sermon-like wrap-ups and stacked empty adjectives（「深深的」「巨大的」「无比的」堆叠）.
 6. Ending a scene by restating the theme in abstract prose — end on a concrete
    image, line, or decision.
+
+### Scene richness（默认写够戏 · 不靠你额外要求）
+
+除非用户明确说“短/简略/概述/摘要”，否则每次写入一个 `draft_section` 时：
+
+- **最低可交付**：先写成可读的“小场景单元”——至少 **3 段**，每段包含一次“可见变化”（一个动作/一句对白/一次转折/一个新信息）。
+- **长度目标**（中文）：默认 **600–1200 字符/节**；续写或同章延展（用户说“继续/往下/下一段”）目标更偏 **800–1600 字符/节**。
+- 如果你发现自己写到末尾仍不足：不要用“收束总结”结束；在结束前补足缺失的“场景细节”（具体动作、对白节奏、环境与物件、因果链），
+  让读者能在读完后复述出“发生了什么、为什么会到这一步”。
+
+### No chapter headings inside `draft_section`
+
+在 `draft_section` 的内容里，默认禁止使用章节/标题型 Markdown：
+
+- 不以 `#` / `##` / `###` 开头
+- 不写“第X章/Chapter X/本章/上一章小结”这类显式章节标题
+
+原因：章节标题由输出导出/外部模板或标注流程负责；把叙事正文写满即可。若用户**明确要求**标题，请写成“普通文本一句话”并避免再套 Markdown 标题层级。
 
 ### Same-turn fix（仍属本轮，不另开命令）
 
