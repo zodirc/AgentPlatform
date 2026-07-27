@@ -30,16 +30,29 @@ CI="${CI:-true}" GATE_SKIP_RESTORE="${GATE_SKIP_RESTORE:-0}" \
   bash "$ROOT/scripts/ci_proof.sh"
 
 echo "==> preflight CI: web unit tests"
+# Prefer a real ``pnpm`` on PATH; otherwise ``corepack pnpm`` (no root needed —
+# ``corepack enable`` often fails with EACCES on /usr/bin for non-root users).
+PNPM_CMD=(pnpm)
 if ! command -v pnpm >/dev/null 2>&1; then
-  echo "pnpm not found; enable via: corepack enable" >&2
-  exit 1
+  if ! command -v corepack >/dev/null 2>&1; then
+    echo "pnpm not found and corepack missing; install Node 22+ or: npm i -g pnpm" >&2
+    exit 1
+  fi
+  pm="$(
+    node -e 'const p=require("./services/web/package.json"); process.stdout.write(p.packageManager||"pnpm@9.15.9")' \
+      2>/dev/null || echo "pnpm@9.15.9"
+  )"
+  echo "==> using corepack ${pm} (no global /usr/bin shim)"
+  corepack prepare "$pm" --activate >/dev/null
+  PNPM_CMD=(corepack pnpm)
 fi
+echo "==> pnpm: $("${PNPM_CMD[@]}" -v)"
 (
   cd "$ROOT/services/web"
   if [[ ! -d node_modules ]]; then
-    pnpm install --frozen-lockfile
+    "${PNPM_CMD[@]}" install --frozen-lockfile
   fi
-  pnpm test
+  "${PNPM_CMD[@]}" test
 )
 
 echo "==> preflight CI: OpenAPI → schema.d.ts drift check"
