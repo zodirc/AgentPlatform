@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, WebSocket, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.db.pool import get_pool
 from app.models.responses import TurnResponse, TurnView
+from app.services.command import idempotency
+from app.services.security.audit import record_audit
 from app.services.command.runtime_factory import runtime_client_for_turn
 from app.services.end_user.auth import (
     assert_session_owner,
@@ -46,6 +48,8 @@ class PatchDecisionRequest(BaseModel):
 class TurnEventsResponse(BaseModel):
     events: list[dict]
     last_sequence: int = 0
+    # I19: true when the page was truncated; continue from last_sequence.
+    has_more: bool = False
 
 
 async def _require_turn_access(turn_id: UUID, actor: EndUser) -> dict:
@@ -72,9 +76,25 @@ async def get_turn(
     )
 
 
+def _view_etag(view: TurnView | dict) -> str:
+    # Weak validator: sequence + status capture every client-visible change.
+    # build_turn_view returns a TurnView model; tests may pass a plain dict.
+    if isinstance(view, dict):
+        turn_id = view.get("turn_id")
+        seq = view.get("last_event_sequence", 0)
+        status = view.get("status")
+    else:
+        turn_id = view.turn_id
+        seq = view.last_event_sequence
+        status = view.status
+    return f'W/"{turn_id}:{seq}:{status}"'
+
+
 @router.get("/turns/{turn_id}/view", response_model=TurnView)
 async def get_turn_view(
     turn_id: UUID,
+    request: Request,
+    response: Response,
     refresh: bool = False,
     actor: EndUser = Depends(require_session_actor),
 ):
@@ -82,22 +102,42 @@ async def get_turn_view(
     view = await build_turn_view(turn_id, refresh=refresh)
     if view is None:
         raise HTTPException(status_code=404, detail="Turn not found")
+    # I19: pollers send If-None-Match so unchanged views cost 304 + no body.
+    etag = _view_etag(view)
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers={"ETag": etag})
+    response.headers["ETag"] = etag
     return view
+
+
+# I19: hard cap per page; since_sequence=0 on a long turn must not load the
+# entire stream in one response.
+_EVENTS_PAGE_LIMIT = 2000
 
 
 @router.get("/turns/{turn_id}/events", response_model=TurnEventsResponse)
 async def get_turn_events(
     turn_id: UUID,
     since_sequence: int = 0,
+    limit: int = 1000,
     actor: EndUser = Depends(require_session_actor),
 ):
-    """Snapshot of persisted turn events for refresh / nested subagent replay."""
+    """Snapshot of persisted turn events for refresh / nested subagent replay.
+
+    Paged: when ``has_more`` is true, call again with
+    ``since_sequence=last_sequence``.
+    """
     await _require_turn_access(turn_id, actor)
     if since_sequence < 0:
         since_sequence = 0
-    events = await fetch_turn_events(turn_id, since_sequence)
+    limit = max(1, min(limit, _EVENTS_PAGE_LIMIT))
+    events = await fetch_turn_events(turn_id, since_sequence, limit=limit + 1)
+    has_more = len(events) > limit
+    events = events[:limit]
     last_sequence = events[-1]["sequence"] if events else since_sequence
-    return TurnEventsResponse(events=events, last_sequence=int(last_sequence))
+    return TurnEventsResponse(
+        events=events, last_sequence=int(last_sequence), has_more=has_more
+    )
 
 
 @router.get("/turns/{turn_id}/stream")
@@ -204,6 +244,13 @@ async def cancel_turn(
         reason=req.reason,
         force=req.force,
     )
+    await record_audit(
+        actor=actor,
+        action="turn.cancel",
+        resource_type="turn",
+        resource_id=turn_id,
+        detail={"force": req.force, "reason": req.reason},
+    )
     return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
 
 
@@ -214,6 +261,9 @@ async def approve_tool_call(
     actor: EndUser = Depends(require_session_actor),
 ):
     await _require_turn_access(turn_id, actor)
+    replayed = idempotency.replay(turn_id, body.client_request_id)
+    if replayed is not None:
+        return replayed
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -231,7 +281,16 @@ async def approve_tool_call(
         tool_call_id=body.tool_call_id,
         trace_id=trace_id,
     )
-    return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    await record_audit(
+        actor=actor,
+        action="tool_call.approve",
+        resource_type="turn",
+        resource_id=turn_id,
+        detail={"tool_call_id": body.tool_call_id},
+    )
+    response = {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    idempotency.remember(turn_id, body.client_request_id, response)
+    return response
 
 
 @router.post("/turns/{turn_id}/deny-tool-call", status_code=status.HTTP_202_ACCEPTED)
@@ -241,6 +300,9 @@ async def deny_tool_call(
     actor: EndUser = Depends(require_session_actor),
 ):
     await _require_turn_access(turn_id, actor)
+    replayed = idempotency.replay(turn_id, body.client_request_id)
+    if replayed is not None:
+        return replayed
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -259,7 +321,16 @@ async def deny_tool_call(
         trace_id=trace_id,
         reason=body.reason or "user_denied",
     )
-    return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    await record_audit(
+        actor=actor,
+        action="tool_call.deny",
+        resource_type="turn",
+        resource_id=turn_id,
+        detail={"tool_call_id": body.tool_call_id, "reason": body.reason or "user_denied"},
+    )
+    response = {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    idempotency.remember(turn_id, body.client_request_id, response)
+    return response
 
 
 def _ensure_patch_allowed(turn: dict) -> None:
@@ -277,6 +348,9 @@ async def accept_patch(
     actor: EndUser = Depends(require_session_actor),
 ):
     turn = await _require_turn_access(turn_id, actor)
+    replayed = idempotency.replay(turn_id, body.client_request_id)
+    if replayed is not None:
+        return replayed
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -290,7 +364,16 @@ async def accept_patch(
         patch_id=body.patch_id,
         trace_id=trace_id,
     )
-    return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    await record_audit(
+        actor=actor,
+        action="patch.accept",
+        resource_type="turn",
+        resource_id=turn_id,
+        detail={"patch_id": body.patch_id},
+    )
+    response = {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    idempotency.remember(turn_id, body.client_request_id, response)
+    return response
 
 
 @router.post("/turns/{turn_id}/patch/reject", status_code=status.HTTP_202_ACCEPTED)
@@ -300,6 +383,9 @@ async def reject_patch(
     actor: EndUser = Depends(require_session_actor),
 ):
     turn = await _require_turn_access(turn_id, actor)
+    replayed = idempotency.replay(turn_id, body.client_request_id)
+    if replayed is not None:
+        return replayed
     run = await turn_svc.get_run_for_turn(turn_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -314,4 +400,13 @@ async def reject_patch(
         trace_id=trace_id,
         reason=body.reason or "user_rejected",
     )
-    return {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    await record_audit(
+        actor=actor,
+        action="patch.reject",
+        resource_type="turn",
+        resource_id=turn_id,
+        detail={"patch_id": body.patch_id, "reason": body.reason or "user_rejected"},
+    )
+    response = {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
+    idempotency.remember(turn_id, body.client_request_id, response)
+    return response

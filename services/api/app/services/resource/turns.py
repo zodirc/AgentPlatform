@@ -5,6 +5,33 @@ from uuid import UUID, uuid4
 from app.db.pool import get_pool
 
 
+async def _find_existing_turn(
+    pool, session_id: UUID, client_request_id: UUID
+) -> tuple[dict, dict] | None:
+    existing = await pool.fetchrow(
+        """
+        SELECT t.id, t.session_id, t.scenario_id, t.status, t.user_input, t.created_at,
+               r.id AS run_id
+        FROM turns t
+        JOIN runs r ON r.turn_id = t.id
+        WHERE t.session_id = $1 AND t.client_request_id = $2
+        """,
+        session_id,
+        client_request_id,
+    )
+    if not existing:
+        return None
+    turn = {
+        "id": existing["id"],
+        "session_id": existing["session_id"],
+        "scenario_id": existing["scenario_id"],
+        "status": existing["status"],
+        "user_input": existing["user_input"],
+        "created_at": existing["created_at"],
+    }
+    return turn, {"id": existing["run_id"]}
+
+
 async def create_turn(
     session_id: UUID,
     scenario_id: str,
@@ -15,27 +42,9 @@ async def create_turn(
     pool = await get_pool()
 
     if client_request_id is not None:
-        existing = await pool.fetchrow(
-            """
-            SELECT t.id, t.session_id, t.scenario_id, t.status, t.user_input, t.created_at,
-                   r.id AS run_id
-            FROM turns t
-            JOIN runs r ON r.turn_id = t.id
-            WHERE t.session_id = $1 AND t.client_request_id = $2
-            """,
-            session_id,
-            client_request_id,
-        )
-        if existing:
-            turn = {
-                "id": existing["id"],
-                "session_id": existing["session_id"],
-                "scenario_id": existing["scenario_id"],
-                "status": existing["status"],
-                "user_input": existing["user_input"],
-                "created_at": existing["created_at"],
-            }
-            run = {"id": existing["run_id"]}
+        found = await _find_existing_turn(pool, session_id, client_request_id)
+        if found:
+            turn, run = found
             return turn, run, False
 
     turn_id = uuid4()
@@ -43,10 +52,13 @@ async def create_turn(
 
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # ON CONFLICT closes the SELECT-then-INSERT race: a concurrent
+            # duplicate returns no row here and we read the winner below.
             turn_row = await conn.fetchrow(
                 """
                 INSERT INTO turns (id, session_id, scenario_id, status, user_input, client_request_id)
                 VALUES ($1, $2, $3, 'pending', $4, $5)
+                ON CONFLICT (session_id, client_request_id) DO NOTHING
                 RETURNING id, session_id, scenario_id, status, user_input, created_at
                 """,
                 turn_id,
@@ -55,28 +67,43 @@ async def create_turn(
                 message,
                 client_request_id,
             )
-            run_row = await conn.fetchrow(
-                """
-                INSERT INTO runs (id, turn_id, status)
-                VALUES ($1, $2, 'accepted')
-                RETURNING id, turn_id, status
-                """,
-                run_id,
-                turn_id,
-            )
-            await conn.execute(
-                """
-                INSERT INTO turn_views (
-                    turn_id, session_id, scenario_id, status, user_input,
-                    latest_output, tool_timeline, artifacts, last_event_sequence
+            run_row = None
+            if turn_row is not None:
+                run_row = await conn.fetchrow(
+                    """
+                    INSERT INTO runs (id, turn_id, status)
+                    VALUES ($1, $2, 'accepted')
+                    RETURNING id, turn_id, status
+                    """,
+                    run_id,
+                    turn_id,
                 )
-                VALUES ($1, $2, $3, 'pending', $4, NULL, '[]'::jsonb, '[]'::jsonb, 0)
-                """,
-                turn_id,
-                session_id,
-                scenario_id,
-                message,
+                await conn.execute(
+                    """
+                    INSERT INTO turn_views (
+                        turn_id, session_id, scenario_id, status, user_input,
+                        latest_output, tool_timeline, artifacts, last_event_sequence
+                    )
+                    VALUES ($1, $2, $3, 'pending', $4, NULL, '[]'::jsonb, '[]'::jsonb, 0)
+                    """,
+                    turn_id,
+                    session_id,
+                    scenario_id,
+                    message,
+                )
+
+    if turn_row is None:
+        # Lost the ON CONFLICT race — the winner has committed by the time
+        # DO NOTHING returns, so its turn + run are visible now.
+        assert client_request_id is not None
+        found = await _find_existing_turn(pool, session_id, client_request_id)
+        if found is None:
+            raise RuntimeError(
+                f"duplicate create_turn race for session {session_id} but "
+                "winning turn not found"
             )
+        turn, run = found
+        return turn, run, False
 
     return dict(turn_row), dict(run_row), True
 

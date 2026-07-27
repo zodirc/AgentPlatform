@@ -315,19 +315,39 @@ export async function startTurn(
   return res.json() as Promise<TurnResponse>;
 }
 
+// I19: conditional view polling — unchanged views come back as 304 with no
+// body; serve the cached copy instead. Bounded to the most recent turns.
+const viewCache = new Map<string, { etag: string; view: TurnView }>();
+const VIEW_CACHE_MAX = 64;
+
 export async function fetchTurnView(turnId: string): Promise<TurnView> {
+  const cached = viewCache.get(turnId);
   const res = await fetch(`${API_BASE}/turns/${turnId}/view`, {
     ...sessionFetchInit,
-    headers: apiAuthHeaders(),
+    headers: apiAuthHeaders(
+      cached ? { "If-None-Match": cached.etag } : {},
+    ),
   });
+  if (res.status === 304 && cached) return cached.view;
   if (!res.ok) throw new Error(`fetchTurnView failed: ${res.status}`);
-  return res.json();
+  const view = (await res.json()) as TurnView;
+  const etag = res.headers.get("etag");
+  if (etag) {
+    viewCache.delete(turnId);
+    viewCache.set(turnId, { etag, view });
+    while (viewCache.size > VIEW_CACHE_MAX) {
+      const oldest = viewCache.keys().next().value;
+      if (oldest === undefined) break;
+      viewCache.delete(oldest);
+    }
+  }
+  return view;
 }
 
-export async function fetchTurnEvents(
+async function fetchTurnEventsPage(
   turnId: string,
-  sinceSequence = 0,
-): Promise<{ events: TurnEvent[]; last_sequence: number }> {
+  sinceSequence: number,
+): Promise<{ events: TurnEvent[]; last_sequence: number; has_more: boolean }> {
   const q = new URLSearchParams({
     since_sequence: String(Math.max(0, sinceSequence)),
   });
@@ -339,11 +359,31 @@ export async function fetchTurnEvents(
   const data = (await res.json()) as {
     events?: TurnEvent[];
     last_sequence?: number;
+    has_more?: boolean;
   };
   return {
     events: Array.isArray(data.events) ? data.events : [],
     last_sequence: Number(data.last_sequence ?? 0),
+    has_more: Boolean(data.has_more),
   };
+}
+
+export async function fetchTurnEvents(
+  turnId: string,
+  sinceSequence = 0,
+): Promise<{ events: TurnEvent[]; last_sequence: number }> {
+  // I19: the API pages long streams; follow has_more so callers still see the
+  // full snapshot.
+  const events: TurnEvent[] = [];
+  let cursor = sinceSequence;
+  for (;;) {
+    const page = await fetchTurnEventsPage(turnId, cursor);
+    events.push(...page.events);
+    cursor = page.last_sequence;
+    if (!page.has_more || page.events.length === 0) {
+      return { events, last_sequence: cursor };
+    }
+  }
 }
 
 export async function cancelTurn(turnId: string, force = false) {
@@ -362,7 +402,11 @@ export async function approveToolCall(turnId: string, toolCallId: string) {
     ...sessionFetchInit,
     method: "POST",
     headers: apiAuthHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ tool_call_id: toolCallId }),
+    body: JSON.stringify({
+      tool_call_id: toolCallId,
+      // Lets the API replay (not re-execute) duplicate submissions.
+      client_request_id: crypto.randomUUID(),
+    }),
   });
   if (!res.ok) throw new Error(`approveToolCall failed: ${res.status}`);
   return res.json();
@@ -377,7 +421,11 @@ export async function denyToolCall(
     ...sessionFetchInit,
     method: "POST",
     headers: apiAuthHeaders({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ tool_call_id: toolCallId, reason }),
+    body: JSON.stringify({
+      tool_call_id: toolCallId,
+      reason,
+      client_request_id: crypto.randomUUID(),
+    }),
   });
   if (!res.ok) throw new Error(`denyToolCall failed: ${res.status}`);
   return res.json();
