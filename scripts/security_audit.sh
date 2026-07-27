@@ -15,5 +15,5 @@ if command -v gitleaks >/dev/null 2>&1; then
   echo "== gitleaks =="
   gitleaks detect --source . --config .gitleaks.toml --no-banner
 else
-  echo "gitleaks not installed locally; skip (CI runs gitleaks-action)"
+  echo "gitleaks not installed locally; skip (CI static-checks runs: gitleaks dir . --config .gitleaks.toml)"
 fi

@@ -98,6 +98,47 @@ jobs:
             reports/eval-last-failures.txt
           if-no-files-found: ignore
 
+  static-checks:
+    # F7 (docs/35): lint / typecheck / secret-scan gate. Fast fail before the
+    # heavy proof job. Ruff gate = critical rules only (E9/F63/F7/F82) so the
+    # bar is real errors, not style; tighten the selection over time.
+    name: Lint, typecheck and secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - name: Ruff (critical rules)
+        run: |
+          pip install --quiet 'ruff>=0.6'
+          ruff check --select E9,F63,F7,F82 \
+            services/api/app services/runtime/app packages/contracts/python
+      - name: Enable pnpm
+        run: corepack enable
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: services/web/pnpm-lock.yaml
+      - name: Install web dependencies
+        working-directory: services/web
+        run: pnpm install --frozen-lockfile
+      - name: Web lint
+        working-directory: services/web
+        run: pnpm lint
+      - name: Web typecheck
+        working-directory: services/web
+        run: pnpm typecheck
+      - name: Secret scan (gitleaks)
+        run: |
+          GITLEAKS_VERSION=8.24.3
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz gitleaks
+          # Scan the checked-out tree (not history): gate what a merge would add.
+          ./gitleaks dir . --no-banner --redact --config .gitleaks.toml
+
   web-and-codegen:
     name: Web tests and contract codegen
     runs-on: ubuntu-latest
