@@ -6,6 +6,9 @@
 #   bash scripts/ci_proof.sh                  # all steps
 #   PROOF_STEP=unit.runtime bash scripts/ci_proof.sh
 #   GATE_SKIP_RESTORE=1 bash scripts/ci_proof.sh   # CI / no restore
+#
+# Prefers services/runtime/.venv (or python3.11+) — bare ``python3`` on
+# developer machines is often 3.9 and cannot install agent-contracts (>=3.11).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -13,41 +16,89 @@ cd "$ROOT"
 
 STEP="${PROOF_STEP:-all}"
 
+resolve_python() {
+  if [[ -n "${PROOF_PYTHON:-}" ]]; then
+    echo "$PROOF_PYTHON"
+  elif [[ -x "$ROOT/services/runtime/.venv/bin/python" ]]; then
+    echo "$ROOT/services/runtime/.venv/bin/python"
+  elif [[ -x "$ROOT/.venv/bin/python" ]]; then
+    echo "$ROOT/.venv/bin/python"
+  elif command -v python3.11 >/dev/null 2>&1; then
+    echo python3.11
+  elif command -v python3.12 >/dev/null 2>&1; then
+    echo python3.12
+  else
+    echo python3
+  fi
+}
+
+PY="$(resolve_python)"
+if ! "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)'; then
+  echo ""
+  echo "ci_proof FAILED — need Python >= 3.11 (got: $("$PY" -V 2>&1) via $PY)."
+  echo "  Fix one of:"
+  echo "    cd services/runtime && python3.11 -m venv .venv && .venv/bin/pip install -e '.[dev]'"
+  echo "    PROOF_PYTHON=/path/to/python3.11 bash scripts/ci_proof.sh"
+  echo "    # or skip units and use Docker gate only after make up:"
+  echo "    PROOF_STEP=gate bash scripts/ci_proof.sh"
+  echo ""
+  exit 1
+fi
+echo "==> ci_proof using $($PY -V) ($PY)"
+
+pip_q() {
+  "$PY" -m pip install -q "$@"
+}
+
+pytest_q() {
+  "$PY" -m pytest "$@"
+}
+
 run_unit_ux_self_check() {
   echo "==> [unit] UX signals self-check"
-  pip install -q packages/contracts/python
-  python3 scripts/ux_signals.py --self-check
+  pip_q packages/contracts/python
+  "$PY" scripts/ux_signals.py --self-check
 }
 
 run_unit_ux_tests() {
   echo "==> [unit] UX signals unit tests"
-  pip install -q packages/contracts/python pytest
-  python3 -m pytest scripts/tests/test_ux_signals.py -q
+  pip_q packages/contracts/python pytest
+  pytest_q scripts/tests/test_ux_signals.py -q
 }
 
 run_unit_runtime() {
   echo "==> [unit] Runtime unit tests"
   cd services/runtime
-  pip install -q -e ".[dev]"
-  pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
+  if [[ -x .venv/bin/python ]]; then
+    .venv/bin/python -m pip install -q -e ".[dev]"
+    .venv/bin/python -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
+  else
+    pip_q -e ".[dev]"
+    pytest_q tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
+  fi
   cd "$ROOT"
 }
 
 run_unit_api_ux() {
   echo "==> [unit] API test suite"
-  pip install -q packages/contracts/python
+  pip_q packages/contracts/python
   cd services/api
-  pip install -q -e ".[dev]" 2>/dev/null || pip install -q -e .
-  PYTHONPATH=. pytest tests -q
+  if [[ -x .venv/bin/python ]]; then
+    .venv/bin/python -m pip install -q -e ".[dev]" 2>/dev/null || .venv/bin/python -m pip install -q -e .
+    PYTHONPATH=. .venv/bin/python -m pytest tests -q
+  else
+    pip_q -e ".[dev]" 2>/dev/null || pip_q -e .
+    PYTHONPATH=. pytest_q tests -q
+  fi
   cd "$ROOT"
 }
 
 run_unit_contracts() {
   echo "==> [unit] Contracts tests"
-  pip install -q jsonschema pytest pyyaml
-  pytest packages/contracts/tests -q
-  pip install -q packages/contracts/python
-  pytest packages/contracts/python/tests -q
+  pip_q jsonschema pytest pyyaml
+  pytest_q packages/contracts/tests -q
+  pip_q packages/contracts/python
+  pytest_q packages/contracts/python/tests -q
 }
 
 run_gate() {
