@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# Blocks push when local CI unit suites fail (same class of failures as debug.log).
+# Blocks push when local CI proof fails (same class as GitHub Actions ``ci``).
+# Default: scripts/preflight_ci.sh ≡ ci_proof (unit+gate) + web/codegen.
 # Bypass: SKIP_PREFLIGHT=1 git push   OR   git push --no-verify
+# Fast unit-only: PREFLIGHT_UNIT_ONLY=1 git push
 set -euo pipefail
 
 # Prefer git toplevel: BASH_SOURCE follows the .git/hooks symlink and would
-# wrongly resolve ROOT to .git/ (looking for .git/scripts/preflight_unit.sh).
+# wrongly resolve ROOT to .git/ (looking for .git/scripts/...).
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 if [[ -z "$ROOT" ]]; then
   hook="${BASH_SOURCE[0]}"
@@ -29,5 +31,5 @@ if [[ "$guard" -eq 0 ]]; then
   exit 0
 fi
 
-echo "==> git pre-push: running scripts/preflight_unit.sh"
-exec bash "$ROOT/scripts/preflight_unit.sh"
+echo "==> git pre-push: running scripts/preflight_ci.sh"
+exec bash "$ROOT/scripts/preflight_ci.sh"
