@@ -74,6 +74,55 @@ def test_token_rejects_tamper() -> None:
 
 
 @pytest.mark.asyncio
+async def test_token_rejected_after_password_change() -> None:
+    """B16: tokens minted before a password change carry a stale pv."""
+    from unittest.mock import AsyncMock, patch
+
+    from starlette.datastructures import Headers
+    from starlette.requests import Request
+
+    from app.services.end_user import auth
+    from app.services.end_user.users import EndUser
+
+    user_id = uuid4()
+    old_token = issue_token(
+        user_id=user_id, username="alice", password_version="old-version"
+    )
+    current = EndUser(
+        id=user_id, username="alice", status="active", token_version="new-version"
+    )
+
+    scope = {
+        "type": "http",
+        "headers": Headers({"authorization": f"Bearer {old_token}"}).raw,
+    }
+    request = Request(scope)
+    with patch(
+        "app.services.end_user.auth.user_svc.get_user",
+        new_callable=AsyncMock,
+        return_value=current,
+    ):
+        assert await auth.resolve_end_user(request) is None
+
+    fresh_token = issue_token(
+        user_id=user_id, username="alice", password_version="new-version"
+    )
+    scope = {
+        "type": "http",
+        "headers": Headers({"authorization": f"Bearer {fresh_token}"}).raw,
+    }
+    request = Request(scope)
+    with patch(
+        "app.services.end_user.auth.user_svc.get_user",
+        new_callable=AsyncMock,
+        return_value=current,
+    ):
+        resolved = await auth.resolve_end_user(request)
+    assert resolved is not None
+    assert resolved.id == user_id
+
+
+@pytest.mark.asyncio
 async def test_ownerless_session_is_forbidden() -> None:
     from fastapi import HTTPException
     from unittest.mock import AsyncMock, patch

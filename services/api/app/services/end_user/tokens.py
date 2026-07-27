@@ -23,11 +23,25 @@ def _b64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + pad)
 
 
-def issue_token(*, user_id: UUID, username: str, ttl_seconds: int = TOKEN_TTL_SECONDS) -> str:
+def password_token_version(password_hash: str) -> str:
+    """Derived version embedded in tokens; changes whenever the hash does (B16)."""
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:12]
+
+
+def issue_token(
+    *,
+    user_id: UUID,
+    username: str,
+    password_version: str = "",
+    ttl_seconds: int = TOKEN_TTL_SECONDS,
+) -> str:
     payload = {
         "sub": str(user_id),
         "username": username,
         "exp": int(time.time()) + ttl_seconds,
+        # B16: tokens minted before a password change carry the old version
+        # and are rejected on verify — self-service revocation.
+        "pv": password_version,
     }
     body = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     sig = hmac.new(

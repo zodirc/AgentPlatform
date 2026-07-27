@@ -17,6 +17,9 @@ class EndUser:
     id: UUID
     username: str
     status: str
+    # B16: sha256(password_hash)[:12]; embedded in tokens so a password change
+    # invalidates previously issued tokens. Empty for the system actor paths.
+    token_version: str = ""
 
 
 class UserError(Exception):
@@ -39,9 +42,12 @@ def validate_username(username: str) -> str:
 
 
 async def create_user(username: str, password: str) -> EndUser:
+    from app.services.end_user.tokens import password_token_version
+
     if len(password) < 6:
         raise UserError("weak_password", "Password must be at least 6 characters")
     cleaned = validate_username(username)
+    password_hash = hash_password(password)
     pool = await get_pool()
     try:
         row = await pool.fetchrow(
@@ -51,14 +57,19 @@ async def create_user(username: str, password: str) -> EndUser:
             RETURNING id, username, status
             """,
             cleaned,
-            hash_password(password),
+            password_hash,
         )
     except Exception as exc:
         if type(exc).__name__ == "UniqueViolationError" or "unique" in str(exc).lower():
             raise UserError("username_taken", "Username already taken") from exc
         raise
     assert row is not None
-    user = EndUser(id=row["id"], username=row["username"], status=row["status"])
+    user = EndUser(
+        id=row["id"],
+        username=row["username"],
+        status=row["status"],
+        token_version=password_token_version(password_hash),
+    )
     from app.services.resource.works import ensure_default_work
 
     await ensure_default_work(user.id)
@@ -66,6 +77,8 @@ async def create_user(username: str, password: str) -> EndUser:
 
 
 async def authenticate(username: str, password: str) -> EndUser | None:
+    from app.services.end_user.tokens import password_token_version
+
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -81,14 +94,21 @@ async def authenticate(username: str, password: str) -> EndUser | None:
         return None
     if not verify_password(password, row["password_hash"]):
         return None
-    return EndUser(id=row["id"], username=row["username"], status=row["status"])
+    return EndUser(
+        id=row["id"],
+        username=row["username"],
+        status=row["status"],
+        token_version=password_token_version(row["password_hash"]),
+    )
 
 
 async def get_user(user_id: UUID) -> EndUser | None:
+    from app.services.end_user.tokens import password_token_version
+
     pool = await get_pool()
     row = await pool.fetchrow(
         """
-        SELECT id, username, status
+        SELECT id, username, status, password_hash
         FROM end_users
         WHERE id = $1
         """,
@@ -96,7 +116,12 @@ async def get_user(user_id: UUID) -> EndUser | None:
     )
     if row is None:
         return None
-    return EndUser(id=row["id"], username=row["username"], status=row["status"])
+    return EndUser(
+        id=row["id"],
+        username=row["username"],
+        status=row["status"],
+        token_version=password_token_version(row["password_hash"]),
+    )
 
 
 async def change_password(

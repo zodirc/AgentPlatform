@@ -36,6 +36,10 @@ async def resolve_end_user(request: Request) -> EndUser | None:
     user = await user_svc.get_user(user_id)
     if user is None or user.status != "active":
         return None
+    # B16: reject tokens minted before the last password change (or legacy
+    # tokens without a version) — logout-everywhere on password rotation.
+    if payload.get("pv") != user.token_version:
+        return None
     return user
 
 

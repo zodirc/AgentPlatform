@@ -95,6 +95,14 @@ async def delete_session(
     deleted = await session_svc.delete_session_for_owner(session_id, actor.id)
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    from app.services.security.audit import record_audit
+
+    await record_audit(
+        actor=actor,
+        action="session.delete",
+        resource_type="session",
+        resource_id=session_id,
+    )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
