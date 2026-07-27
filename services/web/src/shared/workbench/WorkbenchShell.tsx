@@ -179,6 +179,16 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         </section>
       )}
 
+      {layout !== "agent" && wb.draftDiffPreview ? (
+        <section className="space-y-3 rounded-xl border border-success/30 bg-success-muted p-4">
+          <h2 className="text-sm font-medium text-success">草稿差异（本轮）</h2>
+          <p className="text-xs text-muted-foreground">
+            对比本轮开始前与结束后的 manuscript 快照，仅在回合完成后计算。
+          </p>
+          <WriteFileDiffPanel preview={wb.draftDiffPreview} />
+        </section>
+      ) : null}
+
       {patches.length > 0 && (
         <section
           className="space-y-3 rounded-xl border border-warning/40 bg-warning-muted p-4"

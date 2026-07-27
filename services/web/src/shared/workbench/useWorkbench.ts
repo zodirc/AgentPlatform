@@ -9,6 +9,7 @@ import {
   fetchSessionTurns,
   fetchTurnEvents,
   fetchTurnView,
+  fetchWorkspaceFile,
   rejectPatch,
   startTurn,
   warmupRetrieval,
@@ -71,6 +72,7 @@ const STREAM_DELTA_EVENT_TYPES = new Set([
   "section.draft.delta",
   "tool.delta",
 ]);
+const DRAFT_MANUSCRIPT_PATH = ".agent/work/drafts/manuscript.md";
 
 function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
   return {
@@ -147,6 +149,8 @@ export function useWorkbenchImpl(): WorkbenchState {
   const [pendingToolName, setPendingToolName] = useState<string | null>(null);
   const [pendingWriteFile, setPendingWriteFile] =
     useState<WriteFilePreview | null>(null);
+  const [draftDiffPreview, setDraftDiffPreview] =
+    useState<WriteFilePreview | null>(null);
   const [liveToolTimeline, setLiveToolTimeline] = useState<TimelineItem[]>([]);
   const [liveContextUsage, setLiveContextUsage] = useState<ContextUsage | null>(
     null,
@@ -166,6 +170,8 @@ export function useWorkbenchImpl(): WorkbenchState {
   );
   const planWrapSentRef = useRef(false);
   const streamRef = useRef<StreamClient | null>(null);
+  const draftBeforeRef = useRef<string | null>(null);
+  const draftBaselineSeqRef = useRef(0);
   const lastSequenceRef = useRef(0);
   const resumingAfterApprovalRef = useRef(false);
   const sessionRestoredRef = useRef(false);
@@ -333,6 +339,47 @@ export function useWorkbenchImpl(): WorkbenchState {
   function reportError(context: string, err: unknown) {
     const detail = err instanceof Error ? err.message : String(err);
     setError(`${context}：${detail}`);
+  }
+
+  async function fetchDraftTextSafe(): Promise<string> {
+    try {
+      const file = await fetchWorkspaceFile(DRAFT_MANUSCRIPT_PATH);
+      return String(file.content ?? "");
+    } catch {
+      return "";
+    }
+  }
+
+  function prepareDraftBaselineIfNeeded() {
+    if (activeScenarioId !== "writing") {
+      draftBeforeRef.current = null;
+      return;
+    }
+    const seq = ++draftBaselineSeqRef.current;
+    void fetchDraftTextSafe().then((text) => {
+      if (draftBaselineSeqRef.current !== seq) return;
+      draftBeforeRef.current = text;
+    });
+  }
+
+  async function buildDraftDiffPreviewIfNeeded() {
+    if (activeScenarioId !== "writing") return;
+    const before = draftBeforeRef.current;
+    draftBeforeRef.current = null;
+    if (before == null) return;
+    const after = await fetchDraftTextSafe();
+    if (before === after) {
+      setDraftDiffPreview(null);
+      return;
+    }
+    setDraftDiffPreview({
+      path: DRAFT_MANUSCRIPT_PATH,
+      old_text: before,
+      new_text: after,
+      status: "applied",
+      new_size: after.length,
+      kind: "write_file",
+    });
   }
 
   const { sessionId } = useWorkbenchSession();
@@ -650,6 +697,7 @@ export function useWorkbenchImpl(): WorkbenchState {
             );
             if (closedPlan) setLivePlan(closedPlan);
             setLiveToolTimeline([]);
+            await buildDraftDiffPreviewIfNeeded();
           } catch (err) {
             reportError("刷新回合视图失败", err);
           } finally {
@@ -811,6 +859,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setPendingToolCallId(null);
     setPendingToolName(null);
     setPendingWriteFile(null);
+    setDraftDiffPreview(null);
     lastSequenceRef.current = 0;
     resumingAfterApprovalRef.current = false;
     streamRef.current?.close();
@@ -830,6 +879,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     );
 
     try {
+      prepareDraftBaselineIfNeeded();
       setSubmittedMessage(text);
       setMessage("");
       const turn = await startTurnMut.mutateAsync({
@@ -1229,6 +1279,7 @@ export function useWorkbenchImpl(): WorkbenchState {
           "",
       ) || pendingToolName,
     pendingWriteFile,
+    draftDiffPreview,
     useWebSocket,
     awaitingApproval:
       (pendingApproval ||

@@ -115,6 +115,8 @@ export type WorkbenchState = {
   pendingToolCallId: string | null;
   pendingToolName: string | null;
   pendingWriteFile: WriteFilePreview | null;
+  /** Writing-only: diff between pre-turn and post-turn manuscript snapshot. */
+  draftDiffPreview: WriteFilePreview | null;
   useWebSocket: boolean;
   awaitingApproval: boolean;
   /** Composer messages waiting for the live turn to finish (merged on flush). */
