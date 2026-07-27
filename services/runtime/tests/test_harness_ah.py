@@ -99,6 +99,12 @@ async def test_path_preread_into_user_message(
 
 @pytest.mark.asyncio
 async def test_readonly_tools_run_in_parallel(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.settings import settings
+
+    # Side-channel observability must not contend for a missing Postgres.
+    monkeypatch.setattr(settings, "raw_snapshot_enabled", False)
+    monkeypatch.setattr(settings, "model_envelope_enabled", False)
+
     started: list[float] = []
     lock = asyncio.Lock()
 
@@ -134,14 +140,21 @@ async def test_readonly_tools_run_in_parallel(monkeypatch: pytest.MonkeyPatch) -
         return False, False
 
     class Gateway:
+        def __init__(self) -> None:
+            self.calls = 0
+
         async def stream(self, *, messages, tools):
-            yield ModelResponse(
-                tool_calls=[
-                    {"id": "1", "name": "read_file", "input": {"path": "a.md"}},
-                    {"id": "2", "name": "read_file", "input": {"path": "b.md"}},
-                ],
-                output_tokens=2,
-            )
+            self.calls += 1
+            if self.calls == 1:
+                yield ModelResponse(
+                    tool_calls=[
+                        {"id": "1", "name": "read_file", "input": {"path": "a.md"}},
+                        {"id": "2", "name": "read_file", "input": {"path": "b.md"}},
+                    ],
+                    output_tokens=2,
+                )
+                return
+            yield ModelResponse(text="done", output_tokens=1)
 
     assert "read_file" in _CACHEABLE_TOOLS
     engine = AgentEngine(
@@ -154,6 +167,7 @@ async def test_readonly_tools_run_in_parallel(monkeypatch: pytest.MonkeyPatch) -
     t0 = asyncio.get_event_loop().time()
     await engine.run(state)
     elapsed = asyncio.get_event_loop().time() - t0
-    # Serial would be ~0.30s; parallel should finish closer to 0.15s (+overhead).
-    assert elapsed < 0.28
+    # Serial would be ~0.30s; start-delta proves overlap; wall clock has isolate/merge overhead.
     assert len(started) == 2
+    assert abs(started[1] - started[0]) < 0.05
+    assert elapsed < 0.45

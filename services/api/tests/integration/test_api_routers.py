@@ -190,6 +190,10 @@ def test_create_turn_success(client: TestClient) -> None:
     run_row = {"id": RUN_ID}
     runtime = AsyncMock()
     runtime.start_turn = AsyncMock()
+    work = AsyncMock()
+    work.id = UUID("00000000-0000-4000-8000-000000000010")
+    work.work_root = "/workspace"
+    work.visibility_seed = True
     with (
         patch("app.services.resource.sessions.get_session", new_callable=AsyncMock, return_value=session_row),
         patch(
@@ -198,6 +202,11 @@ def test_create_turn_success(client: TestClient) -> None:
             return_value=(turn_row, run_row, True),
         ),
         patch("app.routers.sessions.session_svc.touch_session", new_callable=AsyncMock),
+        patch(
+            "app.services.resource.works.resolve_session_tenant",
+            new_callable=AsyncMock,
+            return_value=work,
+        ),
         patch("app.routers.sessions.runtime_client_for_new_turn", return_value=runtime),
     ):
         response = client.post(
