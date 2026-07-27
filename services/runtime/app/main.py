@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 from contextlib import asynccontextmanager
 from uuid import UUID
@@ -54,7 +55,7 @@ class PatchDecisionBody(BaseModel):
 
 
 def verify_internal_token(x_internal_token: str = Header(...)) -> None:
-    if x_internal_token != settings.internal_service_token:
+    if not hmac.compare_digest(x_internal_token, settings.internal_service_token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token")
 
 
@@ -463,6 +464,16 @@ async def lifespan(app):
     settings.validate_production_security()
     configure_logging(service="agent-runtime", level=settings.log_level)
     await init_pool()
+    # B2: runs claimed by this runner and left 'running' by a crash have no
+    # worker anymore — fail them fast so turns don't sit in 'running' forever.
+    from app.controller.turn_controller import drain_active_turns, reconcile_runner_orphans
+
+    try:
+        orphaned = await reconcile_runner_orphans()
+        if orphaned:
+            logger.info("failed %s orphaned run(s) from previous process", orphaned)
+    except Exception:
+        logger.exception("startup orphan reconcile failed")
     ScenarioRegistry.load()
     # Load embedder once at startup so sources index/search do not pay first-use cost.
     await asyncio.to_thread(warmup_embedder)
@@ -484,6 +495,9 @@ async def lifespan(app):
     try:
         yield
     finally:
+        # B2: let in-flight turns finish before tearing down the pool; anything
+        # still running past the deadline is reconciled on next startup.
+        await drain_active_turns()
         await cancel_sources_watch()
         await cancel_startup_sources_sync()
         watchdog.cancel()
@@ -534,11 +548,27 @@ def create_app():
         }
 
     @app.get("/metrics")
-    async def metrics_endpoint():
+    async def metrics_endpoint(authorization: str | None = Header(default=None)):
+        # Scrape with `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>` —
+        # metrics leak tool/scenario/tenant names and must not be public.
         from fastapi.responses import PlainTextResponse
 
         from app.observability.metrics import metrics
 
+        scheme, _, value = (authorization or "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(
+            value.strip(), settings.internal_service_token
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
+            )
+        # B24: sample pool occupancy at scrape time (no background task needed).
+        try:
+            pool = await get_pool()
+            metrics.set_gauge("db_pool_size", float(pool.get_size()))
+            metrics.set_gauge("db_pool_idle", float(pool.get_idle_size()))
+        except Exception:
+            pass
         return PlainTextResponse(
             metrics.render_prometheus(),
             media_type="text/plain; version=0.0.4; charset=utf-8",

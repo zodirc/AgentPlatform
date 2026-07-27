@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -22,16 +23,37 @@ class PendingTurn:
     volatile_context: str = ""
 
 
-_store: dict[UUID, PendingTurn] = {}
+# B9-①: abandoned approvals must not pin full messages + gateway + tools in
+# memory forever. Expired entries are recoverable from the step checkpoint
+# (approve/deny fall back to _pending_from_checkpoint), so eviction is safe.
+_store: dict[UUID, tuple[PendingTurn, float]] = {}
+
+
+def _ttl_seconds() -> float:
+    from app.settings import settings
+
+    return float(getattr(settings, "pending_store_ttl_seconds", 1800.0))
+
+
+def _purge_expired() -> None:
+    now = time.monotonic()
+    expired = [turn_id for turn_id, (_, deadline) in _store.items() if deadline <= now]
+    for turn_id in expired:
+        _store.pop(turn_id, None)
 
 
 def save(turn_id: UUID, pending: PendingTurn) -> None:
-    _store[turn_id] = pending
+    _purge_expired()
+    _store[turn_id] = (pending, time.monotonic() + _ttl_seconds())
 
 
 def pop(turn_id: UUID) -> PendingTurn | None:
-    return _store.pop(turn_id, None)
+    _purge_expired()
+    entry = _store.pop(turn_id, None)
+    return entry[0] if entry is not None else None
 
 
 def get(turn_id: UUID) -> PendingTurn | None:
-    return _store.get(turn_id)
+    _purge_expired()
+    entry = _store.get(turn_id)
+    return entry[0] if entry is not None else None

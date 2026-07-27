@@ -14,6 +14,12 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
+    # B10: pool command_timeout + PG statement_timeout (seconds).
+    db_statement_timeout_seconds: float = 30.0
+    # B2: max seconds to wait for in-flight turns on SIGTERM before teardown.
+    shutdown_drain_seconds: float = 25.0
+    # B9: evict abandoned approval state after this long (checkpoint fallback).
+    pending_store_ttl_seconds: float = 1800.0
     internal_service_token: str = "change-me-internal"
     app_secret_key: str = "change-me-in-production"
     model_provider: str = "anthropic"
@@ -155,6 +161,9 @@ class Settings(BaseSettings):
     # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).
     runtime_max_inflight_turns: int = 16
     event_payload_validation: bool = True
+    # Review I2: coalesce stream delta events into one multi-row insert per
+    # window. 0 disables batching (per-event writes, instant rollback knob).
+    event_batch_window_seconds: float = 0.04
     # When False (default), high-freq streaming events use a light shape check
     # instead of full jsonschema (R3). Set True in CI for strict delta schemas.
     event_payload_validation_strict_deltas: bool = False

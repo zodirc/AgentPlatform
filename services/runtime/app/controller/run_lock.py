@@ -7,10 +7,16 @@ from app.settings import settings
 
 
 async def ensure_run_owned_by_runner(*, run_id: UUID, runner_id: str | None = None) -> bool:
-    """Claim a run for this runner, or confirm we already own it.
+    """Claim a run for this runner.
 
     Uses a single atomic UPDATE so only one runtime replica executes a new turn.
     Returns False when another runner has already claimed the run.
+
+    B4: only 'accepted' runs are claimable. A run already 'running' must never
+    be re-claimed — after a process restart the in-memory dedup is gone and a
+    replayed start-turn would re-run the whole turn, appending a duplicate
+    event stream. Crashed 'running' runs are failed by the startup reconcile
+    (B2) instead.
     """
     owner = runner_id or settings.runtime_runner_id
     pool = await get_pool()
@@ -18,11 +24,7 @@ async def ensure_run_owned_by_runner(*, run_id: UUID, runner_id: str | None = No
         """
         UPDATE runs
         SET status = 'running', runner_id = $2, updated_at = now()
-        WHERE id = $1
-          AND (
-            status = 'accepted'
-            OR (runner_id = $2 AND status IN ('accepted', 'running'))
-          )
+        WHERE id = $1 AND status = 'accepted'
         RETURNING id
         """,
         run_id,

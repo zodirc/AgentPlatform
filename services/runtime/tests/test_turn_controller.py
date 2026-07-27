@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -13,8 +13,10 @@ from app.controller import run_lock
 @pytest.fixture(autouse=True)
 def _clean_registry():
     tc._active_turns.clear()
+    tc._inflight_commands.clear()
     yield
     tc._active_turns.clear()
+    tc._inflight_commands.clear()
 
 
 @pytest.mark.asyncio
@@ -126,6 +128,193 @@ async def test_resolve_pending_falls_back_to_checkpoint(
 
     resolved = await tc._resolve_pending(turn_id, run_id)
     assert resolved is from_ckpt
+
+
+def _fake_pending():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(state=SimpleNamespace(session_id=uuid4()))
+
+
+async def _passthrough_tenant(_session_id, coro):
+    return await coro
+
+
+@pytest.mark.asyncio
+async def test_approve_tool_call_double_command_executes_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B3: concurrent approve (double-click / retry) must not resume twice."""
+    turn_id = uuid4()
+    run_id = uuid4()
+    resume_calls: list[UUID] = []
+
+    async def _slow_resume(**kwargs) -> None:
+        resume_calls.append(kwargs["turn_id"])
+        await asyncio.sleep(0.05)
+
+    monkeypatch.setattr(tc, "_resolve_pending", AsyncMock(return_value=_fake_pending()))
+    monkeypatch.setattr(tc, "_resume_after_approval", _slow_resume)
+    monkeypatch.setattr(tc, "_with_session_tenant", _passthrough_tenant)
+    monkeypatch.setattr(tc, "_cleanup_pending_after_command", AsyncMock())
+    monkeypatch.setattr(tc, "_fail_stuck_approval", AsyncMock())
+
+    await asyncio.gather(
+        tc.approve_tool_call(
+            turn_id=turn_id, run_id=run_id, tool_call_id="t1", trace_id=uuid4()
+        ),
+        tc.approve_tool_call(
+            turn_id=turn_id, run_id=run_id, tool_call_id="t1", trace_id=uuid4()
+        ),
+    )
+    assert resume_calls == [turn_id]
+    assert turn_id not in tc._inflight_commands
+
+
+@pytest.mark.asyncio
+async def test_approve_tool_call_pending_lost_fails_stuck_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """I10: unresolvable pending must surface an error instead of silence."""
+    turn_id = uuid4()
+    run_id = uuid4()
+    fail_mock = AsyncMock()
+    monkeypatch.setattr(tc, "_resolve_pending", AsyncMock(return_value=None))
+    monkeypatch.setattr(tc, "_fail_stuck_approval", fail_mock)
+
+    await tc.approve_tool_call(
+        turn_id=turn_id, run_id=run_id, tool_call_id="t1", trace_id=uuid4()
+    )
+    fail_mock.assert_awaited_once()
+    assert fail_mock.await_args.kwargs["termination_reason"] == "approval_state_lost"
+    assert turn_id not in tc._inflight_commands
+
+
+@pytest.mark.asyncio
+async def test_deny_tool_call_wait_timeout_fails_stuck_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turn_id = uuid4()
+    run_id = uuid4()
+    fail_mock = AsyncMock()
+    monkeypatch.setattr(tc, "_wait_turn_inactive", AsyncMock(return_value=False))
+    monkeypatch.setattr(tc, "_fail_stuck_approval", fail_mock)
+
+    await tc.deny_tool_call(
+        turn_id=turn_id, run_id=run_id, tool_call_id="t1", trace_id=uuid4()
+    )
+    fail_mock.assert_awaited_once()
+    assert (
+        fail_mock.await_args.kwargs["termination_reason"] == "approval_resume_timeout"
+    )
+    assert turn_id not in tc._inflight_commands
+
+
+@pytest.mark.asyncio
+async def test_fail_stuck_approval_only_fails_waiting_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A late duplicate command must not fail a turn that already resumed."""
+
+    class _Pool:
+        def __init__(self, status: str) -> None:
+            self._status = status
+
+        async def fetchval(self, *_args):
+            return self._status
+
+    fail_turn = AsyncMock()
+    monkeypatch.setattr(tc, "_fail_turn", fail_turn)
+
+    monkeypatch.setattr(tc, "get_pool", AsyncMock(return_value=_Pool("running")))
+    await tc._fail_stuck_approval(
+        uuid4(), uuid4(), uuid4(), termination_reason="approval_state_lost", message="x"
+    )
+    fail_turn.assert_not_awaited()
+
+    monkeypatch.setattr(
+        tc, "get_pool", AsyncMock(return_value=_Pool("waiting_approval"))
+    )
+    await tc._fail_stuck_approval(
+        uuid4(), uuid4(), uuid4(), termination_reason="approval_state_lost", message="x"
+    )
+    fail_turn.assert_awaited_once()
+    assert fail_turn.await_args.kwargs["termination_reason"] == "approval_state_lost"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_runner_orphans_fails_crashed_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_id = uuid4()
+    turn_id = uuid4()
+    trace_id = uuid4()
+
+    class _Pool:
+        async def fetch(self, *_args, **_kwargs):
+            return [
+                {
+                    "run_id": run_id,
+                    "turn_id": turn_id,
+                    "scenario_id": "writing",
+                    "trace_id": trace_id,
+                }
+            ]
+
+    fail_turn = AsyncMock()
+    monkeypatch.setattr(tc, "get_pool", AsyncMock(return_value=_Pool()))
+    monkeypatch.setattr(tc, "_fail_turn", fail_turn)
+
+    fixed = await tc.reconcile_runner_orphans()
+
+    assert fixed == 1
+    kwargs = fail_turn.await_args.kwargs
+    assert kwargs["turn_id"] == turn_id
+    assert kwargs["run_id"] == run_id
+    assert kwargs["trace_id"] == trace_id
+    assert kwargs["termination_reason"] == "runner_restart"
+
+
+@pytest.mark.asyncio
+async def test_reconcile_runner_orphans_skips_active_turns(monkeypatch: pytest.MonkeyPatch) -> None:
+    turn_id = uuid4()
+
+    class _Pool:
+        async def fetch(self, *_args, **_kwargs):
+            return [
+                {
+                    "run_id": uuid4(),
+                    "turn_id": turn_id,
+                    "scenario_id": "writing",
+                    "trace_id": None,
+                }
+            ]
+
+    fail_turn = AsyncMock()
+    monkeypatch.setattr(tc, "get_pool", AsyncMock(return_value=_Pool()))
+    monkeypatch.setattr(tc, "_fail_turn", fail_turn)
+    tc._active_turns.add(turn_id)
+
+    assert await tc.reconcile_runner_orphans() == 0
+    fail_turn.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_drain_active_turns_waits_until_empty() -> None:
+    turn_id = uuid4()
+    tc._active_turns.add(turn_id)
+
+    async def _finish() -> None:
+        await asyncio.sleep(0.05)
+        tc._active_turns.discard(turn_id)
+
+    task = asyncio.create_task(_finish())
+    assert await tc.drain_active_turns(timeout=2.0) is True
+    await task
+
+
+@pytest.mark.asyncio
+async def test_drain_active_turns_times_out() -> None:
+    tc._active_turns.add(uuid4())
+    assert await tc.drain_active_turns(timeout=0.1) is False
 
 
 @pytest.mark.asyncio

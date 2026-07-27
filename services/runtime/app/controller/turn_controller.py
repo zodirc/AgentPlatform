@@ -12,6 +12,12 @@ from uuid import UUID, uuid4
 import structlog
 
 from app.contracts.event_validation import EventPayloadValidationError
+from app.controller.event_writer import (
+    DELTA_EVENT_TYPES,
+    BufferedEventWriter,
+    close_event_writer,
+    register_event_writer,
+)
 from app.controller.events import append_event, run_exists
 from app.controller.input_compiler import InputCompiler, should_query
 from app.controller.session_compact import compact_session_context, save_session_context_summary, session_turn_count
@@ -40,7 +46,7 @@ from app.model.config import (
 )
 from app.model.factory import create_gateway
 from app.model.gateway import ModelFatalError, ModelProviderTimeout, ModelTransientError
-from app.observability.metrics import record_turn_finished
+from app.observability.metrics import metrics, record_turn_finished
 from app.observability.token_budget import check_monthly_token_alert
 from app.scenarios.registry import ScenarioRegistry
 from app.settings import settings
@@ -51,6 +57,60 @@ from app.controller.plan_phase import normalize_plan_phase, plan_phase_block
 logger = logging.getLogger(__name__)
 
 _active_turns: set[UUID] = set()
+
+# Approve/deny commands currently being processed. Claimed before any await so
+# two concurrent commands (double-click / HTTP retry) cannot both resolve the
+# same pending turn and execute the approved tool twice (B3). The in-memory
+# pending pop alone is not enough: both losers would fall back to the
+# checkpoint and still double-execute.
+_inflight_commands: set[UUID] = set()
+
+
+def _track_turn_started(turn_id: UUID) -> None:
+    _active_turns.add(turn_id)
+    metrics.set_gauge("runtime_inflight_turns", float(len(_active_turns)))
+
+
+def _track_turn_finished(turn_id: UUID) -> None:
+    _active_turns.discard(turn_id)
+    metrics.set_gauge("runtime_inflight_turns", float(len(_active_turns)))
+
+
+def _try_claim_command(turn_id: UUID) -> bool:
+    """Atomic on the event loop: no await between membership test and add."""
+    if turn_id in _inflight_commands:
+        return False
+    _inflight_commands.add(turn_id)
+    return True
+
+
+async def _fail_stuck_approval(
+    turn_id: UUID,
+    run_id: UUID,
+    trace_id: UUID,
+    *,
+    termination_reason: str,
+    message: str,
+) -> None:
+    """Surface approval-command failures instead of silently dropping them (I10).
+
+    Only turns still in waiting_approval are failed — a late/duplicate command
+    after a successful resume must not corrupt a running or terminal turn.
+    """
+    pool = await get_pool()
+    status = await pool.fetchval("SELECT status FROM turns WHERE id = $1", turn_id)
+    if status != "waiting_approval":
+        return
+    try:
+        await _fail_turn(
+            turn_id=turn_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            termination_reason=termination_reason,
+            message=message,
+        )
+    except Exception:
+        logger.exception("failed to finalize stuck approval turn_id=%s", turn_id)
 
 
 async def _wait_turn_inactive(turn_id: UUID, *, timeout: float = 120.0) -> bool:
@@ -64,6 +124,69 @@ async def _wait_turn_inactive(turn_id: UUID, *, timeout: float = 120.0) -> bool:
 
 class TurnAbortedError(Exception):
     """Turn already transitioned to failed after a non-recoverable runtime error."""
+
+
+async def reconcile_runner_orphans() -> int:
+    """Fail runs this runner claimed but never finished (B2 crash recovery).
+
+    After a crash/restart the in-process worker is gone, so a run left in
+    'running' will never progress: fail it fast with turn.failed instead of
+    letting the turn sit in 'running' forever. Turns paused at an approval
+    (run status 'interrupted') are excluded — they resume from checkpoint.
+    """
+    pool = await get_pool()
+    rows = await pool.fetch(
+        """
+        SELECT r.id AS run_id, r.turn_id, t.scenario_id,
+               (SELECT te.trace_id FROM turn_events te
+                WHERE te.turn_id = r.turn_id
+                ORDER BY te.sequence DESC LIMIT 1) AS trace_id
+        FROM runs r
+        JOIN turns t ON t.id = r.turn_id
+        WHERE r.runner_id = $1
+          AND r.status = 'running'
+          AND t.status IN ('pending', 'running')
+        LIMIT 100
+        """,
+        settings.runtime_runner_id,
+    )
+    fixed = 0
+    for row in rows:
+        turn_id = row["turn_id"]
+        if turn_id in _active_turns:
+            continue
+        try:
+            await _fail_turn(
+                turn_id=turn_id,
+                run_id=row["run_id"],
+                trace_id=row["trace_id"] or uuid4(),
+                termination_reason="runner_restart",
+                message="runtime restarted mid-turn; run had no live worker",
+                scenario_id=str(row["scenario_id"] or ""),
+            )
+            fixed += 1
+            logger.info("reconciled orphaned run turn_id=%s", turn_id)
+        except Exception:
+            logger.exception("failed to reconcile orphaned run turn_id=%s", turn_id)
+    return fixed
+
+
+async def drain_active_turns(timeout: float | None = None) -> bool:
+    """Wait for in-flight turns to finish before shutdown (B2 graceful stop).
+
+    Returns True when everything drained, False on timeout (remaining turns
+    will be failed by reconcile_runner_orphans on next startup).
+    """
+    limit = settings.shutdown_drain_seconds if timeout is None else timeout
+    deadline = time.monotonic() + max(0.0, limit)
+    while _active_turns and time.monotonic() < deadline:
+        await asyncio.sleep(0.2)
+    if _active_turns:
+        logger.warning(
+            "shutdown drain timed out with %s active turn(s)", len(_active_turns)
+        )
+        return False
+    return True
 
 
 async def request_cancel(turn_id: UUID, *, force: bool = False) -> None:
@@ -247,7 +370,7 @@ async def start_turn(
         visibility_seed=visibility_seed,
     )
     model_tokens = bind_turn_model(mode=effective_mode, override=override_config)
-    _active_turns.add(turn_id)
+    _track_turn_started(turn_id)
     try:
         ensure_work_root_exists()
         await _run_turn(
@@ -273,7 +396,7 @@ async def start_turn(
         except Exception:
             logger.exception("start_turn fail_turn also failed turn_id=%s", turn_id)
     finally:
-        _active_turns.discard(turn_id)
+        _track_turn_finished(turn_id)
         reset_turn_model(model_tokens)
         reset_tenant_context(tokens)
 
@@ -360,30 +483,52 @@ async def approve_tool_call(
     tool_call_id: str,
     trace_id: UUID,
 ) -> None:
-    if not await _wait_turn_inactive(turn_id):
-        logger.warning("approve_tool_call: timeout waiting for active turn %s", turn_id)
+    if not _try_claim_command(turn_id):
+        logger.warning("approve_tool_call: command already in flight turn %s", turn_id)
         return
-    pending = await _resolve_pending(turn_id, run_id)
-    if pending is None:
-        logger.warning("approve_tool_call: no pending turn %s", turn_id)
-        return
-
-    async def _run() -> None:
-        _active_turns.add(turn_id)
-        try:
-            await _resume_after_approval(
-                turn_id=turn_id,
-                run_id=run_id,
-                tool_call_id=tool_call_id,
-                trace_id=trace_id,
-                approved=True,
-                pending=pending,
+    try:
+        if not await _wait_turn_inactive(turn_id):
+            logger.warning(
+                "approve_tool_call: timeout waiting for active turn %s", turn_id
             )
-        finally:
-            _active_turns.discard(turn_id)
-            await _cleanup_pending_after_command(turn_id, run_id)
+            await _fail_stuck_approval(
+                turn_id,
+                run_id,
+                trace_id,
+                termination_reason="approval_resume_timeout",
+                message="approve command timed out waiting for the turn to become inactive",
+            )
+            return
+        pending = await _resolve_pending(turn_id, run_id)
+        if pending is None:
+            logger.warning("approve_tool_call: no pending turn %s", turn_id)
+            await _fail_stuck_approval(
+                turn_id,
+                run_id,
+                trace_id,
+                termination_reason="approval_state_lost",
+                message="no pending state or checkpoint found for the approval resume",
+            )
+            return
 
-    await _with_session_tenant(pending.state.session_id, _run())
+        async def _run() -> None:
+            _track_turn_started(turn_id)
+            try:
+                await _resume_after_approval(
+                    turn_id=turn_id,
+                    run_id=run_id,
+                    tool_call_id=tool_call_id,
+                    trace_id=trace_id,
+                    approved=True,
+                    pending=pending,
+                )
+            finally:
+                _track_turn_finished(turn_id)
+                await _cleanup_pending_after_command(turn_id, run_id)
+
+        await _with_session_tenant(pending.state.session_id, _run())
+    finally:
+        _inflight_commands.discard(turn_id)
 
 
 async def deny_tool_call(
@@ -394,31 +539,53 @@ async def deny_tool_call(
     trace_id: UUID,
     reason: str = "user_denied",
 ) -> None:
-    if not await _wait_turn_inactive(turn_id):
-        logger.warning("deny_tool_call: timeout waiting for active turn %s", turn_id)
+    if not _try_claim_command(turn_id):
+        logger.warning("deny_tool_call: command already in flight turn %s", turn_id)
         return
-    pending = await _resolve_pending(turn_id, run_id)
-    if pending is None:
-        logger.warning("deny_tool_call: no pending turn %s", turn_id)
-        return
-
-    async def _run() -> None:
-        _active_turns.add(turn_id)
-        try:
-            await _resume_after_approval(
-                turn_id=turn_id,
-                run_id=run_id,
-                tool_call_id=tool_call_id,
-                trace_id=trace_id,
-                approved=False,
-                pending=pending,
-                deny_reason=reason,
+    try:
+        if not await _wait_turn_inactive(turn_id):
+            logger.warning(
+                "deny_tool_call: timeout waiting for active turn %s", turn_id
             )
-        finally:
-            _active_turns.discard(turn_id)
-            await _cleanup_pending_after_command(turn_id, run_id)
+            await _fail_stuck_approval(
+                turn_id,
+                run_id,
+                trace_id,
+                termination_reason="approval_resume_timeout",
+                message="deny command timed out waiting for the turn to become inactive",
+            )
+            return
+        pending = await _resolve_pending(turn_id, run_id)
+        if pending is None:
+            logger.warning("deny_tool_call: no pending turn %s", turn_id)
+            await _fail_stuck_approval(
+                turn_id,
+                run_id,
+                trace_id,
+                termination_reason="approval_state_lost",
+                message="no pending state or checkpoint found for the deny resume",
+            )
+            return
 
-    await _with_session_tenant(pending.state.session_id, _run())
+        async def _run() -> None:
+            _track_turn_started(turn_id)
+            try:
+                await _resume_after_approval(
+                    turn_id=turn_id,
+                    run_id=run_id,
+                    tool_call_id=tool_call_id,
+                    trace_id=trace_id,
+                    approved=False,
+                    pending=pending,
+                    deny_reason=reason,
+                )
+            finally:
+                _track_turn_finished(turn_id)
+                await _cleanup_pending_after_command(turn_id, run_id)
+
+        await _with_session_tenant(pending.state.session_id, _run())
+    finally:
+        _inflight_commands.discard(turn_id)
 
 
 async def accept_patch(
@@ -505,6 +672,8 @@ async def _make_write_event(
     trace_id: UUID,
 ) -> Any:
     pool = await get_pool()
+    buffered = BufferedEventWriter(turn_id=turn_id, run_id=run_id, trace_id=trace_id)
+    register_event_writer(turn_id, buffered)
 
     async def write_event(
         *,
@@ -515,6 +684,9 @@ async def _make_write_event(
     ) -> None:
         try:
             if conn is not None:
+                # Caller-managed transaction: drain buffered deltas first so
+                # ordering matches the per-event write semantics exactly.
+                await buffered.flush()
                 await append_event(
                     conn,
                     turn_id=turn_id,
@@ -525,6 +697,12 @@ async def _make_write_event(
                     step_index=step_index,
                 )
                 return
+            if event_type in DELTA_EVENT_TYPES:
+                await buffered.append_delta(
+                    event_type=event_type, payload=payload, step_index=step_index
+                )
+                return
+            await buffered.flush()
             async with pool.acquire() as c:
                 async with c.transaction():
                     await append_event(
@@ -560,6 +738,8 @@ async def _fail_turn(
     steps: int = 0,
     duration_seconds: float = 0.0,
 ) -> None:
+    # Drain any buffered stream deltas so turn.failed is sequenced after them.
+    await close_event_writer(turn_id)
     payload: dict[str, str] = {"termination_reason": termination_reason}
     if message:
         payload["message"] = message[:1024]
@@ -605,6 +785,8 @@ async def _finalize_turn(
     summary: str | None,
     duration_seconds: float = 0.0,
 ) -> None:
+    # Drain any buffered stream deltas so terminal events sequence after them.
+    await close_event_writer(turn_id)
     pool = await get_pool()
 
     if state.cancelled:
