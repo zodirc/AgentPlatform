@@ -1,0 +1,190 @@
+"""Buffered per-turn writer for high-frequency stream delta events (review I2).
+
+Every ``turn.token`` used to pay a full transaction (advisory lock +
+MAX(sequence) + INSERT ≈ 4 DB round-trips). This writer coalesces the four
+delta event types into windowed multi-row inserts:
+
+- The first delta after a flush is written immediately, so first-token
+  latency is unchanged.
+- Subsequent deltas within the window (default 40ms) are flushed together;
+  the added client-visible delay is bounded by the window, below the
+  LISTEN/NOTIFY + SSE + rAF end-to-end noise floor.
+- Any non-delta event flushes the buffer first (see turn_controller), so
+  event ordering is byte-identical to per-event writes.
+- The flush transaction still allocates sequences under the per-turn
+  advisory lock + MAX, so cross-process writers (orphan finalizers, HA
+  restarts) remain safe.
+
+``EVENT_BATCH_WINDOW_SECONDS=0`` restores per-event writes (rollback knob).
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import time
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+import asyncpg
+
+from app.contracts.event_validation import maybe_validate_event_payload
+from app.controller.events import next_sequence
+from app.db.pool import get_pool
+from app.settings import settings
+
+logger = logging.getLogger(__name__)
+
+# Only high-frequency stream deltas are coalesced. Everything else keeps the
+# existing single-event transactional path.
+DELTA_EVENT_TYPES = frozenset(
+    {
+        "turn.token",
+        "turn.thinking.delta",
+        "tool.delta",
+        "section.draft.delta",
+    }
+)
+
+_INSERT_SQL = """
+INSERT INTO turn_events (
+    event_id, turn_id, stream_id, sequence, type, run_id,
+    step_index, trace_id, causation_id, ts, payload
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+"""
+
+
+class BufferedEventWriter:
+    def __init__(
+        self,
+        *,
+        turn_id: UUID,
+        run_id: UUID,
+        trace_id: UUID,
+        window_seconds: float | None = None,
+    ) -> None:
+        self._turn_id = turn_id
+        self._run_id = run_id
+        self._trace_id = trace_id
+        self._window = (
+            settings.event_batch_window_seconds
+            if window_seconds is None
+            else window_seconds
+        )
+        self._buffer: list[tuple[str, dict, int]] = []
+        self._flush_lock = asyncio.Lock()
+        self._flush_task: asyncio.Task | None = None
+        self._last_flush = 0.0
+        self._closed = False
+
+    async def append_delta(
+        self, *, event_type: str, payload: dict, step_index: int
+    ) -> None:
+        """Buffer one delta event; validation errors raise at the call site."""
+        maybe_validate_event_payload(event_type, payload)
+        if self._closed or self._window <= 0:
+            # Rollback knob / post-close stragglers: per-event write path.
+            await self._write_rows([(event_type, payload, step_index)])
+            return
+        self._buffer.append((event_type, payload, step_index))
+        if time.monotonic() - self._last_flush >= self._window:
+            await self.flush()
+        elif self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._delayed_flush())
+
+    async def flush(self) -> None:
+        """Drain the buffer in one multi-row insert transaction."""
+        async with self._flush_lock:
+            if not self._buffer:
+                return
+            pending, self._buffer = self._buffer, []
+            self._last_flush = time.monotonic()
+            await self._write_rows(pending)
+
+    async def close(self) -> None:
+        """Final flush + stop the window timer. Cleanup path: never raises."""
+        self._closed = True
+        if self._flush_task is not None and not self._flush_task.done():
+            self._flush_task.cancel()
+            try:
+                await self._flush_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        try:
+            await self.flush()
+        except Exception:
+            logger.exception(
+                "final delta flush failed turn_id=%s (deltas dropped)", self._turn_id
+            )
+
+    async def _delayed_flush(self) -> None:
+        await asyncio.sleep(self._window)
+        try:
+            await self.flush()
+        except Exception:
+            # Window flush runs outside any caller; surface via logs. The next
+            # non-delta event or close() retries nothing — deltas are lost,
+            # same blast radius as a failed per-event write.
+            logger.exception("windowed delta flush failed turn_id=%s", self._turn_id)
+
+    async def _write_rows(self, rows: list[tuple[str, dict, int]]) -> None:
+        pool = await get_pool()
+        last_error: Exception | None = None
+        for attempt in range(5):
+            try:
+                async with pool.acquire() as conn:
+                    async with conn.transaction():
+                        start = await next_sequence(conn, self._turn_id)
+                        now = datetime.now(timezone.utc)
+                        args = [
+                            (
+                                uuid4(),
+                                self._turn_id,
+                                self._turn_id,
+                                start + offset,
+                                event_type,
+                                self._run_id,
+                                step_index,
+                                self._trace_id,
+                                None,
+                                now,
+                                json.dumps(payload),
+                            )
+                            for offset, (event_type, payload, step_index) in enumerate(
+                                rows
+                            )
+                        ]
+                        await conn.executemany(_INSERT_SQL, args)
+                return
+            except asyncpg.UniqueViolationError as exc:
+                last_error = exc
+                logger.warning(
+                    "turn_events batch sequence race turn_id=%s attempt=%s size=%s",
+                    self._turn_id,
+                    attempt + 1,
+                    len(rows),
+                )
+                continue
+        raise RuntimeError(
+            f"failed to append {len(rows)} delta events for turn {self._turn_id} after retries"
+        ) from last_error
+
+
+# One writer per active turn in this process; popped (and flushed) by
+# _fail_turn / _finalize_turn so no terminal event can precede buffered deltas.
+_writers: dict[UUID, BufferedEventWriter] = {}
+
+
+def register_event_writer(turn_id: UUID, writer: BufferedEventWriter) -> None:
+    _writers[turn_id] = writer
+
+
+def get_event_writer(turn_id: UUID) -> BufferedEventWriter | None:
+    return _writers.get(turn_id)
+
+
+async def close_event_writer(turn_id: UUID) -> None:
+    writer = _writers.pop(turn_id, None)
+    if writer is not None:
+        await writer.close()

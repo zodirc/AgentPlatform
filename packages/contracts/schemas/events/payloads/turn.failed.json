@@ -12,7 +12,11 @@
         "fatal_error",
         "model_timeout",
         "step_timeout",
-        "schema_validation_error"
+        "schema_validation_error",
+        "approval_resume_timeout",
+        "approval_state_lost",
+        "budget_exceeded",
+        "runner_restart"
       ]
     },
     "message": { "type": "string", "maxLength": 1024 }

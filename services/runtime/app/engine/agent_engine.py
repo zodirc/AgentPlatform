@@ -267,19 +267,13 @@ class AgentEngine:
                     )
                     try:
                         async for chunk in stream:
+                            # Cancellation is detected by the 50ms background
+                            # watcher (sets state.cancelled + aborts the gateway
+                            # stream); a per-chunk DB round-trip here is redundant.
                             if state.cancelled:
                                 step_outcome = "cancelled"
                                 break
                             await _ensure_step_within_budget()
-                            cancelled, force = await self._check_cancel()
-                            if cancelled:
-                                state.cancelled = True
-                                state.cancel_force = force
-                                step_outcome = "cancelled"
-                                abort = getattr(self._gateway, "abort_stream", None)
-                                if abort is not None:
-                                    abort()
-                                break
 
                             if isinstance(chunk, StreamActivity):
                                 # Liveness (+ optional reasoning text). Never append to
@@ -807,13 +801,20 @@ class AgentEngine:
         if tool_name == "draft_section":
             content = str(arguments.get("content", ""))
             section_id = str(arguments.get("section_id", "01"))
+            # Content is already fully generated; replay slices without paying a
+            # cancel SELECT per 16-char slice. Throttle DB checks to ~4/s and
+            # honour the in-memory flag on every slice.
+            last_cancel_check = time.monotonic()
             for delta in _chunk_text(content, 16):
                 if ensure_step_budget is not None:
                     await ensure_step_budget()
-                cancelled, force = await self._check_cancel()
-                if cancelled:
-                    state.cancelled = True
-                    state.cancel_force = force
+                if time.monotonic() - last_cancel_check >= 0.25:
+                    last_cancel_check = time.monotonic()
+                    cancelled, force = await self._check_cancel()
+                    if cancelled:
+                        state.cancelled = True
+                        state.cancel_force = force
+                if state.cancelled:
                     return "CANCELLED"
                 await self._write_event(
                     event_type="section.draft.delta",

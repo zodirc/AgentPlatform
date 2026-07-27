@@ -1,10 +1,20 @@
 # Phase 0 — single compose entry (docs/03 §4.1)
+
+# F5: json-file logs are unbounded by default; cap at 10m × 3 per container.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   postgres:
     # pgvector image is the default retrieval backend (RETRIEVAL_BACKEND=pgvector).
     # JSON file index remains a fallback when the extension/probe fails.
     image: pgvector/pgvector:pg16
     container_name: agent-postgres
+    restart: unless-stopped
+    logging: *default-logging
     mem_limit: 1g
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-agent}
@@ -29,6 +39,8 @@ services:
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
     container_name: agent-runtime
+    restart: unless-stopped
+    logging: *default-logging
     mem_limit: 4g
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -72,6 +84,8 @@ services:
       TURN_TOKEN_BUDGET: ${TURN_TOKEN_BUDGET:-0}
       CONTEXT_WINDOW_TOKENS: ${CONTEXT_WINDOW_TOKENS:-128000}
       RUNTIME_RUNNER_ID: ${RUNTIME_RUNNER_ID:-}
+      # Review I2: stream delta batch window; 0 = per-event writes (rollback).
+      EVENT_BATCH_WINDOW_SECONDS: ${EVENT_BATCH_WINDOW_SECONDS:-0.04}
     volumes:
       - agent_data:/data
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
@@ -96,6 +110,8 @@ services:
       context: ..
       dockerfile: services/api/Dockerfile
     container_name: agent-api
+    restart: unless-stopped
+    logging: *default-logging
     mem_limit: 1g
     environment:
       DATABASE_URL: ${DATABASE_URL}
@@ -150,6 +166,8 @@ services:
       context: ..
       dockerfile: services/web/Dockerfile
     container_name: agent-web
+    restart: unless-stopped
+    logging: *default-logging
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
@@ -159,6 +177,8 @@ services:
   gateway:
     image: caddy:2-alpine
     container_name: agent-gateway
+    restart: unless-stopped
+    logging: *default-logging
     ports:
       - "${HOST_PORT:-443}:443"
       - "${HTTP_PORT:-80}:80"
