@@ -1,4 +1,46 @@
-# Exclude dev artifacts from Docker build context
-node_modules
-dist
+# Build context is the repo root for all images (deploy/docker-compose.yml).
+# Keep secrets and heavy dev artifacts out of the context: even though no
+# Dockerfile uses `COPY . .` today, a single careless COPY must not be able
+# to bake .env or workspaces into an image layer.
+
+# Secrets — never in any image layer
+.env
+.env.*
+*.pem
+*.key
+
+# VCS / editor
 .git
+.githooks
+.cursor
+.vscode
+.idea
+
+# Dependency / build artifacts (any depth)
+**/node_modules
+**/dist
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.ruff_cache
+**/.coverage
+**/coverage
+
+# Local data & workspaces
+workspace
+.eval-workspace
+deploy/workspace
+deploy/backups
+reports
+seed/corpus
+
+# Logs and local junk
+*.log
+**/*.log
+tmp
+.DS_Store
+
+# Docs and plans (not needed inside images)
+docs
+plans

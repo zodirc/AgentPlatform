@@ -35,7 +35,7 @@ DOCKER_AUTO_PRUNE ?= 1
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources retrieval-bench-prod loc \
-	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks
+	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -164,6 +164,9 @@ docker-prune: ## 清理悬空镜像 + 全部未用 build cache（可回收那 ~�
 	@echo "==> done; docker system df:"
 	@docker system df
 
+backup: ## 备份 Postgres（pg_dump）+ agent_data 卷（保留最近 7 份）
+	bash deploy/backup.sh
+
 smoke:
 	bash scripts/smoke_test.sh
 
@@ -183,9 +186,10 @@ test-rag: ## RAG 检索效果：配置 + 查询对比 + tool_result 预览
 # racing startup index (docs/15 index plane vs Turn hot path).
 EVAL_STUB_ENV := MODEL_MODE=stub SOURCES_STARTUP_SYNC_ENABLED=false SOURCES_WATCH_ENABLED=false
 
+# F8: one isolated stack for both phases — the two-pass version recreated the
+# stack twice and (via the old prefix phase match) ran every 1b case twice.
 eval:
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 1"
-	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 1b"
+	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 1,1b"
 
 eval-p2:
 	$(MAKE) eval-run-isolated EVAL_RUNTIME_ENV="$(EVAL_STUB_ENV)" EVAL_ARGS="--phase 2"

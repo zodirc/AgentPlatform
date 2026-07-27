@@ -45,6 +45,14 @@ x-runtime-env: &runtime-env
 
 x-runtime-svc: &runtime-svc
   image: agent-platform-runtime:default
+  restart: unless-stopped
+  # F5: cap json-file logs (10m × 3) like the base compose file.
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+  mem_limit: 4g
   build:
     context: ..
     dockerfile: services/runtime/Dockerfile.retrieval

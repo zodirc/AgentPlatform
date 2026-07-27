@@ -40,6 +40,9 @@ workspace/*
 eval/reports/
 eval/plan_suggest/reports/
 
+# F4: local backups (pg_dump + volume tarballs)
+deploy/backups/
+
 # local compose overlay (from dev.override.yml.example)
 deploy/compose/dev.override.yml
 
