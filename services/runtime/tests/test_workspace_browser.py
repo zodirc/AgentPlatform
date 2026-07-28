@@ -18,7 +18,7 @@ async def test_read_workspace_file_returns_full_manuscript(workspace) -> None:
     from app.tools.core import tools as core
 
     await core.draft_section("ch1", "full-chapter-body-for-ui", turn_id="t-ui")
-    path = ".agent/work/drafts/manuscript.md"
+    path = "drafts/manuscript.md"
     agent_view = await core.read_file(path)
     assert agent_view.get("truncated_to_index") is True
 
