@@ -519,6 +519,10 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Execute a shell command in the workspace (requires approval). Use for "
                 "builds, installs, or non-standard checks whose stdout is needed. "
+                "Sandbox limits writable FS to the work root; outbound network stays on. "
+                "exit_code!=0 means the command ran and failed — inspect stderr; do not "
+                "blame bwrap for 'no network'. Child env is allowlisted (no API keys "
+                "unless the platform injects them). Never put secrets in the command string. "
                 "FORBIDDEN for paging source files as a substitute for read_file: do not run "
                 "cat, head, tail, sed -n, awk, less, or wc just to flip through code you should "
                 "open with read_file (or the grep tool for symbol search). Those shell commands "
