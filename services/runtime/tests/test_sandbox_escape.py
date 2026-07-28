@@ -122,15 +122,19 @@ async def test_run_argv_uses_exec_and_sandbox_wrap(
 async def test_bwrap_blocks_write_outside_cwd_when_available(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Integration: if bwrap exists, writes outside work root must fail."""
+    """Integration: if bwrap can exec, writes outside work root must fail."""
     import shutil
 
+    from app.tools.core.sandbox import _bwrap_can_exec, resolve_sandbox_backend
     from app.tools.core.shell import run_shell_command
 
     if not shutil.which("bwrap"):
         pytest.skip("bubblewrap not installed")
-
+    # Clear probe cache so TOOL_SANDBOX / userns state matches this process.
+    _bwrap_can_exec.cache_clear()
     monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    if resolve_sandbox_backend() != "bwrap":
+        pytest.skip("bwrap present but unusable (e.g. user namespaces disabled)")
 
     work = tmp_path / "work"
     work.mkdir()
@@ -153,12 +157,15 @@ async def test_bwrap_allows_write_inside_cwd_when_available(
 ) -> None:
     import shutil
 
+    from app.tools.core.sandbox import _bwrap_can_exec, resolve_sandbox_backend
     from app.tools.core.shell import run_shell_command
 
     if not shutil.which("bwrap"):
         pytest.skip("bubblewrap not installed")
-
+    _bwrap_can_exec.cache_clear()
     monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    if resolve_sandbox_backend() != "bwrap":
+        pytest.skip("bwrap present but unusable (e.g. user namespaces disabled)")
 
     work = tmp_path / "work"
     work.mkdir()

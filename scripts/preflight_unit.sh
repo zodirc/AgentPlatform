@@ -227,21 +227,29 @@ docker_ready() {
 use_docker=0
 if [[ "${PREFLIGHT_DOCKER:-0}" == "1" ]]; then
   use_docker=1
-elif ! python_has_pip; then
-  if docker_ready; then
-    use_docker=1
-    echo "==> preflight: no local pip — using Docker (runtime container)"
-  else
-    echo ""
-    echo "preflight FAILED — no usable Python pip and Docker runtime is not up."
-    echo "  Fix one of:"
-    echo "    sudo apt install python3-pip python3-venv   # then re-push"
-    echo "    cd services/runtime && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'"
-    echo "    make up                                    # then re-push (Docker fallback)"
-    echo "    SKIP_PREFLIGHT=1 git push                  # emergency bypass"
-    echo ""
-    exit 1
-  fi
+  echo "==> preflight: PREFLIGHT_DOCKER=1 — using Docker"
+elif [[ -x "$ROOT/services/runtime/.venv/bin/python" ]] \
+  && ! runtime_local_deps_ready "$ROOT/services/runtime/.venv/bin/python" \
+  && docker_ready; then
+  # Half-installed local venvs (pytest present, asyncpg/jsonschema missing) used to
+  # skip install and fail collection; prefer the already-baked runtime container.
+  use_docker=1
+  echo "==> preflight: local runtime venv incomplete — using Docker (runtime container)"
+elif python_has_pip; then
+  use_docker=0
+elif docker_ready; then
+  use_docker=1
+  echo "==> preflight: no local pip — using Docker (runtime container)"
+else
+  echo ""
+  echo "preflight FAILED — no usable Python pip and Docker runtime is not up."
+  echo "  Fix one of:"
+  echo "    sudo apt install python3-pip python3-venv   # then re-push"
+  echo "    cd services/runtime && python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'"
+  echo "    make up                                    # then re-push (Docker fallback)"
+  echo "    SKIP_PREFLIGHT=1 git push                  # emergency bypass"
+  echo ""
+  exit 1
 fi
 
 run_ux_self_check_local() {
