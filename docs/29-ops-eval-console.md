@@ -7,6 +7,14 @@
 > **观测**：检索审计 → [§6](#6-检索审计观测-hm5--ro1)；模型信封 → [§7](#7-模型信封-hm4)；Raw → [§8](#8-raw-快照只读-hm2) · [33](33-harness-maturity-backlog.md)。  
 > **速率纪律**：Ops 仅密钥 URL + 只读 API/页；**不**进入写作/Agent 工作台导航热路径，**不**改 `AgentEngine` / SSE 主路径（R1–R5）。
 
+## 0. 流程图
+
+路径：[`docs/assets/ops/ops-console-flow.png`](assets/ops/ops-console-flow.png)
+
+![Ops Console Flow](assets/ops/ops-console-flow.png)
+
+密钥入口 → 评测（`suite=ci` ≡ CI · `suite=golden` 切片）与只读观测（检索 / 信封 / Raw）。CI 证明门禁细节见 [28](28-proof-gate-and-ux-signals.md) · [`ci-proof-flow.png`](assets/ops/ci-proof-flow.png)。
+
 ## 1. 入口
 
 | 项 | 说明 |

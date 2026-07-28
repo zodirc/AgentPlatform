@@ -13,9 +13,10 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 架构地图 | [02](02-architecture.md) |
 | Loop / 工具 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) |
 | 检索坏例怎么看 | [29](29-ops-eval-console.md) §6–§8（Ops **旁路**，不影响工作台速率） |
+| CI / Ops 流程图 | [`ci-proof-flow.png`](assets/ops/ci-proof-flow.png) · [`ops-console-flow.png`](assets/ops/ops-console-flow.png)（[28](28-proof-gate-and-ux-signals.md) · [29](29-ops-eval-console.md)） |
 | 沙箱现状 | [31](31-sandbox-escape-and-hardening.md) §0（bwrap 已落地） |
 | 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) |
-| 面试原理 | [21](21-agent-system-qa.md) |
+| 面试原理 | [21](21-agent-system-qa.md)（含[流程图对照](21-agent-system-qa.md#流程图对照只链路径)） |
 | RAG 心智模型（大白话） | [RAG-mental-model.md](RAG-mental-model.md) |
 | 上下文压缩心智模型（大白话） | [CONTEXT-mental-model.md](CONTEXT-mental-model.md) |
 | Harness 六面心智模型 | [HARNESS-mental-model.md](HARNESS-mental-model.md) |

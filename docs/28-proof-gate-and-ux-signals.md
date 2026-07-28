@@ -34,6 +34,14 @@
 
 第三条（写入前语义轻校验）**降级为可选 UX 旁路**，且 **禁止回灌模型 messages**。
 
+### 0.1 流程图
+
+路径：[`docs/assets/ops/ci-proof-flow.png`](assets/ops/ci-proof-flow.png)
+
+![CI Proof Flow](assets/ops/ci-proof-flow.png)
+
+三条入口（Actions / `make ci-proof` / Ops `suite=ci`）汇入同一脚本；侧轨 preflight 与 nightly 不替代完整证明。Ops 总览见 [29](29-ops-eval-console.md)。
+
 ---
 
 ## 1. 问题陈述（校准后）
