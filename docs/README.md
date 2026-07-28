@@ -18,6 +18,9 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 面试原理 | [21](21-agent-system-qa.md) |
 | RAG 心智模型（大白话） | [RAG-mental-model.md](RAG-mental-model.md) |
 | 上下文压缩心智模型（大白话） | [CONTEXT-mental-model.md](CONTEXT-mental-model.md) |
+| Harness 六面心智模型 | [HARNESS-mental-model.md](HARNESS-mental-model.md) |
+| Intake 心智模型 | [INTAKE-mental-model.md](INTAKE-mental-model.md) |
+| bwrap 沙箱心智模型 | [BWRAP-mental-model.md](BWRAP-mental-model.md) |
 
 ---
 
@@ -60,6 +63,7 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 33 | [harness-maturity-backlog](33-harness-maturity-backlog.md) | **Harness 工程完善 ✅**（HM1–HM9；Q19 Ops 检索 · 预压缩 · raw · 增量摘要） |
 | 34 | [read-cache-and-token-discipline](34-read-cache-and-token-discipline.md) | **读文件降本 + 分层缓存**（RC1–RC5 + skipped UX ✅；手测见 §0.5；RC6 复测） |
 | 35 | [optimization-review](35-optimization-review.md) | **全仓优化审查**第二轮（2026-07）；§6 四批已落地见 §1.4；残余与结构性还债仍跟踪 |
+| 36 | [sandbox-nested-exec-plan](36-sandbox-nested-exec-plan.md) | **嵌套 Docker Exec 沙箱优化方案**（降级 → userns 可选 → Landlock → 执行面） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
