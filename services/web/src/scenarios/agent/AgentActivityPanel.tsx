@@ -170,9 +170,11 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
     : [];
 
   return (
-    <section className={`shrink-0 rounded-lg border px-4 py-3 ${style}`}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
+    <section
+      className={`min-w-0 shrink-0 overflow-hidden rounded-lg border px-4 py-3 ${style}`}
+    >
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 flex-1 overflow-hidden">
           <p className="text-xs uppercase tracking-wide opacity-70">当前状态</p>
           <p
             className={
@@ -182,22 +184,31 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
             {activity.label}
           </p>
           {activity.detail ? (
-            <p className="mt-0.5 truncate text-sm opacity-80">
+            <p
+              className="mt-0.5 truncate text-sm opacity-80"
+              title={activity.detail}
+            >
               {activity.detail}
             </p>
           ) : null}
           {planStep ? (
-            <p className="mt-0.5 truncate text-sm text-primary/90">
+            <p
+              className="mt-0.5 truncate text-sm text-primary/90"
+              title={planStep.title}
+            >
               计划进行中：{planStep.title}
             </p>
           ) : null}
           {cardTitles.length > 0 ? (
-            <p className="mt-1 truncate text-xs text-primary/90">
+            <p
+              className="mt-1 truncate text-xs text-primary/90"
+              title={cardTitles.join(" · ")}
+            >
               本轮写定：{cardTitles.join(" · ")}
             </p>
           ) : null}
         </div>
-        <div className="text-right text-xs opacity-60">
+        <div className="shrink-0 text-right text-xs opacity-60">
           <p>status={wb.displayStatus}</p>
           {wb.view?.last_event_sequence != null ? (
             <p>seq={wb.view.last_event_sequence}</p>
