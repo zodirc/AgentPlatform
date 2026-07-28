@@ -488,7 +488,7 @@ embedding 能力必须是正式架构的一部分，而不是实现时临时补�
 |------|--------|------|
 | `search_sources` | network | 资料检索 |
 | `update_outline` | write | 大纲 |
-| `draft_section` | write | 流式起草；写入 `.agent/work/drafts/` 并更新本轮 turn 清单 |
+| `draft_section` | write | 流式起草；写入 `drafts/`（树可见）并更新本轮 turn 清单；history 仍在 `.agent/` |
 | `check_citation` | read | 引用核对 |
 | `export_document` | write | 按显式 `section_ids` 从正式稿或本轮草稿导出 |
 | `rename_file` | write* | 已有文件改名/移动；改名请求勿走 export |

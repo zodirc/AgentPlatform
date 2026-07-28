@@ -142,7 +142,7 @@
 
 ```text
 [writing bookmark]
-manuscript: manuscript.md | draft: .agent/work/drafts/manuscript.md
+manuscript: manuscript.md | draft: drafts/manuscript.md
 focus: ch3
 sections_present: ch1, ch2, ch3
 outline: <TOC 截断>

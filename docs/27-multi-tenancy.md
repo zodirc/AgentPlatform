@@ -279,7 +279,7 @@ Principal          登录主体（user_id；远期 org_member）
 
 种子/只读语料（现有 `sources/seed/**`）继续 **只读挂载进每个 work 的逻辑视图或全局可读分区**，索引行带 `visibility=seed|shared|private`，避免为种子复制 N 份实体文件。
 
-**原则：** 工具与写作路径语义（`manuscript.md`、`.agent/work/drafts/...`）**相对 work_root 不变**——多租户是根上移，不是再发明一套写作模型。
+**原则：** 工具与写作路径语义（`manuscript.md`、`drafts/...`）**相对 work_root 不变**——多租户是根上移，不是再发明一套写作模型。
 
 ### 3.3 路径布局（推荐）
 

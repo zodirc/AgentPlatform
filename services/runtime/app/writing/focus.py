@@ -207,7 +207,7 @@ def format_writing_bookmark(bookmark: dict[str, object]) -> str:
     lines = [
         "[writing bookmark]",
         f"manuscript: {bookmark.get('manuscript', 'manuscript.md')} | "
-        f"draft: {bookmark.get('draft', '.agent/work/drafts/manuscript.md')}",
+        f"draft: {bookmark.get('draft', 'drafts/manuscript.md')}",
         f"focus: {bookmark.get('focus') or '(none)'}",
         f"sections_present: {sec or '(none)'}",
     ]

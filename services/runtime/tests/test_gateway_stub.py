@@ -446,7 +446,7 @@ async def test_stub_writing10_draft_then_export_with_writing_context() -> None:
         ctx,
         user,
         assistant_tool_use("d1", "draft_section", first["input"]),
-        tool_result_message("d1", '{"status": "drafted", "path": ".agent/work/drafts/manuscript.md"}'),
+        tool_result_message("d1", '{"status": "drafted", "path": "drafts/manuscript.md"}'),
     ]
     second = await first_tool(after_draft)
     assert second["name"] == "export_document"

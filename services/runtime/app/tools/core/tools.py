@@ -393,7 +393,9 @@ def _session_scope(session_id: object | None) -> str | None:
     return str(session_id)
 
 
-_WORK_DRAFTS = ".agent/work/drafts"
+# Visible work-surface drafts (tree + double-click). History/turns stay under .agent/.
+_WORK_DRAFTS = "drafts"
+_LEGACY_WORK_DRAFTS = ".agent/work/drafts"
 _WORK_HISTORY = ".agent/work/history"
 _WORK_TURNS = ".agent/work/turns"
 
@@ -401,6 +403,10 @@ _WORK_TURNS = ".agent/work/turns"
 def _draft_file_path(section_id: str) -> str:
     """Canonical in-progress draft path (work-scoped, not session-scoped)."""
     return f"{_WORK_DRAFTS}/{_section_filename(section_id)}"
+
+
+def _legacy_draft_file_path(section_id: str) -> str:
+    return f"{_LEGACY_WORK_DRAFTS}/{_section_filename(section_id)}"
 
 
 def _history_file_path(section_id: str, turn_id: object | None) -> str:
@@ -446,9 +452,9 @@ def _revision_candidate_paths(
     session_id: object | None = None,
     turn_id: object | None = None,
 ) -> list[str]:
-    """Read order: work draft → session/turn legacy → flat legacy."""
+    """Read order: work draft → legacy harness draft → session/turn legacy → flat legacy."""
     filename = _section_filename(section_id)
-    paths: list[str] = [_draft_file_path(section_id)]
+    paths: list[str] = [_draft_file_path(section_id), _legacy_draft_file_path(section_id)]
     if session_id is not None and turn_id is not None:
         session_path = (
             f".agent/sessions/{_session_scope(session_id)}/revisions/"
@@ -531,6 +537,7 @@ async def draft_section(
 ) -> dict[str, Any]:
     from app.writing.manuscript import (
         draft_manuscript_rel,
+        legacy_draft_manuscript_rel,
         manuscript_mode,
         upsert_section,
     )
@@ -543,13 +550,21 @@ async def draft_section(
         path = draft_manuscript_rel()
         target = _resolve_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        existing = target.read_text(encoding="utf-8") if target.exists() else ""
+        if target.exists():
+            existing = target.read_text(encoding="utf-8")
+        else:
+            legacy = _resolve_path(legacy_draft_manuscript_rel())
+            existing = legacy.read_text(encoding="utf-8") if legacy.is_file() else ""
         final = upsert_section(existing, section_id, content)
         target.write_text(final, encoding="utf-8")
     else:
         path = _draft_file_path(section_id)
         target = _resolve_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            legacy = _resolve_path(_legacy_draft_file_path(section_id))
+            if legacy.is_file():
+                target.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
         target.write_text(content, encoding="utf-8")
 
     history_path: str | None = None
@@ -1439,6 +1454,7 @@ async def export_document(
         confirmed_manuscript_rel,
         draft_manuscript_rel,
         extract_section,
+        legacy_draft_manuscript_rel,
         manuscript_mode,
     )
 
@@ -1476,6 +1492,9 @@ async def export_document(
                 draft_ms = draft_manuscript_rel()
                 if draft_ms not in candidates:
                     candidates.append(draft_ms)
+                legacy_ms = legacy_draft_manuscript_rel()
+                if legacy_ms not in candidates:
+                    candidates.append(legacy_ms)
             for rel in _revision_candidate_paths(
                 section_id, session_id=session_id, turn_id=turn_id
             ):

@@ -33,6 +33,12 @@ def confirmed_manuscript_rel() -> str:
 
 
 def draft_manuscript_rel() -> str:
+    """In-progress manuscript on the visible work surface (tree + double-click)."""
+    return f"drafts/{Path(confirmed_manuscript_rel()).name}"
+
+
+def legacy_draft_manuscript_rel() -> str:
+    """Pre-visible-drafts path under harness tree (read/migrate only)."""
     return f".agent/work/drafts/{Path(confirmed_manuscript_rel()).name}"
 
 
@@ -108,7 +114,11 @@ def is_manuscript_rel(path: str) -> bool:
     rel = path.strip().lstrip("/").replace("\\", "/")
     name = Path(rel).name
     confirmed = Path(confirmed_manuscript_rel()).name
-    return name == confirmed or rel in {confirmed_manuscript_rel(), draft_manuscript_rel()}
+    return name == confirmed or rel in {
+        confirmed_manuscript_rel(),
+        draft_manuscript_rel(),
+        legacy_draft_manuscript_rel(),
+    }
 
 
 def previous_section_id(section_ids: list[str], focus: str) -> str | None:
@@ -120,9 +130,13 @@ def previous_section_id(section_ids: list[str], focus: str) -> str | None:
 
 
 def load_manuscript_doc(workspace_root: Path | None = None) -> tuple[str, str]:
-    """Prefer draft manuscript, then confirmed. Returns (text, rel_path)."""
+    """Prefer draft manuscript, then legacy draft, then confirmed. Returns (text, rel_path)."""
     root = Path(workspace_root or settings.workspace_root).resolve()
-    for rel in (draft_manuscript_rel(), confirmed_manuscript_rel()):
+    for rel in (
+        draft_manuscript_rel(),
+        legacy_draft_manuscript_rel(),
+        confirmed_manuscript_rel(),
+    ):
         path = root / rel
         if path.is_file():
             try:

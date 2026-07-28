@@ -230,7 +230,7 @@ Content-Type: application/json
 |------|--------|------|
 | `search_sources` | network | 资料检索 |
 | `update_outline` | write | 大纲结构修改，直接作用于 `outline.md` |
-| `draft_section` | write | 默认写入 `.agent/work/drafts/manuscript.md` 的章节块（可 `layout=sections`） |
+| `draft_section` | write | 默认写入 `drafts/manuscript.md` 的章节块（可 `layout=sections`） |
 | `check_citation` | read | 引用核对 |
 | `export_document` | write | 导出 |
 
@@ -252,7 +252,7 @@ Content-Type: application/json
 - 草稿导出不等于正式落稿；`current_draft` 不得扫描其他 Turn 的触碰清单 / 旧 revisions
 - UI 中“接受修改”统一绑定 `apply_patch`，不直接绑定 `draft_section`
 - 写作场景禁止把 `write_file` / `edit_file` 作为默认文稿主路径暴露给模型
-- 跨 Session 续写同一作品：读 `sections/` 或 `.agent/work/drafts/`（见 [23](23-writing-work-model.md)）
+- 跨 Session 续写同一作品：读 `sections/` 或 `drafts/`（见 [23](23-writing-work-model.md)）
 
 **Patch 审阅与 Turn 状态**（ADR-015）：`propose_patch` 产出后，若模型无后续 `tool_use`，Turn 正常 **`completed`**。  
 **写作模式默认自动落盘**（`WRITING_PATCH_AUTO_APPLY=true`）：同 Turn 内写 `patch.proposed` 后立刻 `patch.applied`，无需再点 Accept；UI 仍展示 diff。  

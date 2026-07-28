@@ -18,6 +18,7 @@ describe("isHarnessInternalPath", () => {
     expect(isHarnessInternalPath("manuscript.md")).toBe(false);
     expect(isHarnessInternalPath("exports/out.md")).toBe(false);
     expect(isHarnessInternalPath("drafts/note.md")).toBe(false);
+    expect(isHarnessInternalPath("drafts/manuscript.md")).toBe(false);
     expect(isHarnessInternalPath(".")).toBe(false);
   });
 });
@@ -38,5 +39,6 @@ describe("isWorkSurfaceHiddenPath", () => {
     expect(isWorkSurfaceHiddenPath(".agent/work")).toBe(true);
     expect(isWorkSurfaceHiddenPath("sources/cards/pending/x.md")).toBe(true);
     expect(isWorkSurfaceHiddenPath("manuscript.md")).toBe(false);
+    expect(isWorkSurfaceHiddenPath("drafts/manuscript.md")).toBe(false);
   });
 });

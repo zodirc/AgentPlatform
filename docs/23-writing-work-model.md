@@ -53,9 +53,9 @@ Session **不应**拥有章节所有权。
 |----|------|------|------|
 | 结构 | `outline.md` | `update_outline` | 作品大纲（跨 session） |
 | 正式正文 | `manuscript.md`（默认）或 `sections/{id}.md` | `propose_patch` | 全书 / 可选分章 |
-| 在编草稿 | `.agent/work/drafts/manuscript.md`（默认追加） | `draft_section` | 同一本书里 upsert 章节块；**工作台树默认不展示 `.agent/`**（仍落盘；防误删） |
-| 回合快照（可选） | `.agent/work/history/{section_id}/{turn_id}.md` | `draft_section` 旁路写 | 审计 / 回滚；可 GC |
-| 回合清单 | `.agent/work/turns/{turn_id}.json` | `draft_section` | 本轮触碰了哪些 `section_id`（导出 `current_draft` 用） |
+| 在编草稿 | `drafts/manuscript.md`（默认追加） | `draft_section` | 同一本书里 upsert 章节块；**工作台文件树可见**，可双击打开；升正式稿仍走 `propose_patch` |
+| 回合快照（可选） | `.agent/work/history/{section_id}/{turn_id}.md` | `draft_section` 旁路写 | 审计 / 回滚；可 GC；**树隐藏** |
+| 回合清单 | `.agent/work/turns/{turn_id}.json` | `draft_section` | 本轮触碰了哪些 `section_id`（导出 `current_draft` 用）；**树隐藏** |
 | 对话态 | DB `session_transcripts` + `.agent/sessions/…` 仅若仍需会话私有缓存 | runtime | **不再存章节正文** |
 
 目标树（默认 **monofile**）：
@@ -64,10 +64,11 @@ Session **不应**拥有章节所有权。
 /workspace/
   outline.md
   manuscript.md                 # 正式全书（章节用注释块标记）
+  drafts/
+    manuscript.md               # 在编全书；新章追加、同 section_id 替换（树可见）
   sections/                     # 可选：WRITING_MANUSCRIPT_MODE=sections
   .agent/work/
-    drafts/manuscript.md        # 在编全书；新章追加、同 section_id 替换
-    history/{section_id}/…
+    history/{section_id}/…      # 快照（隐藏）
     turns/{turn_id}.json
 ```
 
@@ -75,7 +76,7 @@ Session **不应**拥有章节所有权。
 
 | 工具 | 变更 |
 |------|------|
-| `draft_section` | 默认 upsert 到 `.agent/work/drafts/manuscript.md` 的 `<!-- section:id -->` 块；`layout=sections` 可改回一章一文件 |
+| `draft_section` | 默认 upsert 到 `drafts/manuscript.md` 的 `<!-- section:id -->` 块；`layout=sections` 可改回一章一文件（`drafts/{id}.md`）。旧路径 `.agent/work/drafts/` 仅作读/迁移兼容 |
 | `export_document(source=current_draft)` | 从本轮清单指向的稿中 **抽取** 对应章节块 |
 | `export_document(source=confirmed)` | 优先 `manuscript.md` 章节块，回退 `sections/{id}.md` |
 | `propose_patch` 目标 | 默认 `manuscript.md`；分章布局则 `sections/{id}.md` |
@@ -91,14 +92,14 @@ Session **不应**拥有章节所有权。
 1. 读磁盘拼一份 **短作品索引**（上限建议 ≤800–1200 chars）：
    - `outline.md` 标题行 / 卷章标题列表（已有 project_context，可收紧为 TOC-only）
    - `sections/` 已有文件名列表
-   - `.agent/work/drafts/` 未完成草稿列表
+   - `drafts/` 未完成草稿列表
 2. 注入 system 旁路或 `runtime_context`（与 writing cards 同级预算），例如：
 
 ```text
 [work index]
 outline: outline.md (… chars)
 confirmed: sections/ch1.md, sections/ch2.md
-drafts: .agent/work/drafts/ch3.md
+drafts: drafts/ch3.md
 ```
 
 模型续写第 3 章时默认 `read_file` 草稿或上一章尾，而不是在 session UUID 树里找文件。
@@ -125,7 +126,7 @@ drafts: .agent/work/drafts/ch3.md
 |----|------|--------|
 | 「章在哪」 | 绑 session/turn，易丢 | 稳定路径，易 `read_file` |
 | 多轮微补丁同一章 | 仍靠 surgical patch | 不变；草稿按章覆盖更符合「改这一章」 |
-| `current_draft` 跨 turn | 故意不可见 | **仍故意不可见**（防误导出）；跨 turn 续写读 `.agent/work/drafts/chN.md` |
+| `current_draft` 跨 turn | 故意不可见 | **仍故意不可见**（防误导出）；跨 turn 续写读 `drafts/chN.md` 或 monofile |
 | 并发两 session 写同一章 | 少见；session 隔离「碰巧」防撞 | 后写覆盖草稿；正式稿仍走 patch。可选：draft 写时带 `turn_id` 乐观锁（非 MVP） |
 
 **对 agent 逻辑的净效果：简化，不复杂化。**  
@@ -214,7 +215,7 @@ drafts: .agent/work/drafts/ch3.md
 
 ## 9. 决策摘要（供 ADR）
 
-1. Writing 文稿真源 = workspace 作品树（`outline.md` + `sections/` + `.agent/work/drafts/`）。
+1. Writing 文稿真源 = workspace 作品树（`outline.md` + `sections/` + `drafts/`）。
 2. Session / Turn 只拥有对话与「本轮导出清单」，不拥有章节目录树。
 3. 跨 Session 续写靠稳定路径 + 轻量 work index，不靠翻 session UUID。
 4. 不取消草稿层；正式进书仍走 patch 主路径。

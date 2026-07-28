@@ -115,8 +115,11 @@ def build_registry() -> ToolRegistry:
             name="draft_section",
             description=(
                 "Draft or update a chapter. Default monofile: upserts a marked block in "
-                ".agent/work/drafts/manuscript.md (append new chapters / replace same section_id). "
-                "Pass layout=sections for one-file-per-chapter under .agent/work/drafts/"
+                "drafts/manuscript.md (visible work-surface draft; append new chapters / "
+                "replace same section_id). "
+                "Pass layout=sections for one-file-per-chapter under drafts/. "
+                "Promote into manuscript.md via propose_patch. History stays under "
+                ".agent/work/history/."
             ),
             parameters={
                 "type": "object",

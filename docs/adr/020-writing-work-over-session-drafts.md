@@ -12,7 +12,7 @@ Session 应是对话与上下文压缩单位，不应拥有章节所有权。
 
 ## 决策
 
-1. **作品真源**固定在 workspace：`outline.md`、`sections/{id}.md`、`.agent/work/drafts/{id}.md`。
+1. **作品真源**固定在 workspace：`outline.md`、`sections/{id}.md`、`drafts/manuscript.md`（或 `drafts/{id}.md`）。
 2. **`draft_section`** 按 `section_id` 写入作品草稿树；Turn 仅保留「本轮触碰清单」供 `export_document(source=current_draft)`。
 3. **可选** `.agent/work/history/{id}/{turn_id}.md` 作快照；不作为跨会话寻址主路径。
 4. Writing Turn 启动可注入 **短作品索引**（纯文件元数据，无额外 LLM，有字符硬顶）。

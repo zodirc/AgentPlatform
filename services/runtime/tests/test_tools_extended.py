@@ -42,13 +42,21 @@ async def test_list_dir_hides_work_surface_internal(workspace: Path) -> None:
     assert "pending" not in card_names
     assert "style.md" in card_names
 
-    # Known-path read still works (writing draft_section / continuity).
-    (workspace / ".agent" / "work" / "drafts").mkdir(parents=True)
-    (workspace / ".agent" / "work" / "drafts" / "manuscript.md").write_text(
-        "draft", encoding="utf-8"
-    )
-    read = await core.read_file(".agent/work/drafts/manuscript.md")
+    # Visible draft manuscript (work surface) + legacy harness path still readable.
+    (workspace / "drafts").mkdir(parents=True)
+    (workspace / "drafts" / "manuscript.md").write_text("draft", encoding="utf-8")
+    read = await core.read_file("drafts/manuscript.md")
     assert read.get("content") == "draft" or "draft" in str(read.get("content", ""))
+    root_listing = await core.list_dir(".")
+    root_names = [e.rstrip("/") for e in root_listing["entries"]]
+    assert "drafts" in root_names
+    assert ".agent" not in root_names
+
+    legacy = workspace / ".agent" / "work" / "drafts"
+    legacy.mkdir(parents=True)
+    (legacy / "manuscript.md").write_text("legacy-draft", encoding="utf-8")
+    legacy_read = await core.read_file(".agent/work/drafts/manuscript.md")
+    assert "legacy-draft" in str(legacy_read.get("content", ""))
 
 
 @pytest.mark.asyncio

@@ -61,7 +61,7 @@ def build_work_index(
 
     outline = root / "outline.md"
     sections = _list_md_names(root / "sections")
-    drafts = _list_md_names(root / ".agent" / "work" / "drafts")
+    drafts = _list_md_names(root / "drafts")
 
     lines = [
         "## Work index",
@@ -69,7 +69,7 @@ def build_work_index(
             f"Default layout **{mode}**: chapters append into `{ms}` "
             f"(draft: `{draft_ms}`). Optional split files under `sections/`."
             if mode == "monofile"
-            else "Layout **sections**: one file per chapter under `sections/` and `.agent/work/drafts/`."
+            else "Layout **sections**: one file per chapter under `sections/` and `drafts/`."
         ),
         "Sessions are conversation threads over this work — not chapter owners.",
     ]
@@ -92,7 +92,7 @@ def build_work_index(
 
     other_drafts = [n for n in drafts if n != Path(draft_ms).name]
     if other_drafts:
-        joined = ", ".join(f"`.agent/work/drafts/{n}`" for n in other_drafts[:12])
+        joined = ", ".join(f"`drafts/{n}`" for n in other_drafts[:12])
         lines.append(f"- split drafts: {joined}")
 
     if mode == "monofile":

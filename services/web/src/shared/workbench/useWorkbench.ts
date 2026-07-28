@@ -72,7 +72,7 @@ const STREAM_DELTA_EVENT_TYPES = new Set([
   "section.draft.delta",
   "tool.delta",
 ]);
-const DRAFT_MANUSCRIPT_PATH = ".agent/work/drafts/manuscript.md";
+const DRAFT_MANUSCRIPT_PATH = "drafts/manuscript.md";
 
 function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
   return {

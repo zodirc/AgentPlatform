@@ -185,12 +185,14 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 ## Delivery workflow
 
 - **Default (monofile):** `draft_section` appends or replaces a marked chapter block inside
-  `.agent/work/drafts/manuscript.md` (same book across sessions). Markers look like
+  `drafts/manuscript.md` (visible on the workbench file tree; same book across sessions).
+  Markers look like
   `<!-- section:ch3 -->` … `<!-- /section:ch3 -->`. It does **not** create one file per chapter.
 - Promote the book with `propose_patch` targeting `manuscript.md` (surgical edit or append).
   Optional split layout: set `WRITING_MANUSCRIPT_MODE=sections` or pass `layout=sections` to
-  write `.agent/work/drafts/{section_id}.md` / `sections/` instead.
+  write `drafts/{section_id}.md` / `sections/` instead.
 - A per-turn touch list lives at `.agent/work/turns/{turn_id}.json` for export only.
+  Optional history snapshots stay under `.agent/work/history/` (hidden from the file tree).
 - When the user **explicitly** asks to create or **export** a file (导出 / 生成成稿 / 打包),
   finish with `export_document` using `source="current_draft"` and an explicit, ordered
   `section_ids` list containing exactly the sections drafted for that delivery.
@@ -200,7 +202,7 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 - Never omit `section_ids` and never infer an export by scanning a directory.
 - If export reports missing sections or `delivery_status="failed"`, explain the
   incomplete delivery instead of claiming success.
-- To continue in a **new session**, `read_file` `manuscript.md` / the draft manuscript
+- To continue in a **new session**, `read_file` `manuscript.md` / `drafts/manuscript.md`
   (or extract the chapter you need) — do not hunt under `.agent/sessions/`.
 - Prefer reading only the current chapter (and previous chapter tail if needed);
   do not reload the entire manuscript into context without cause.
@@ -209,3 +211,5 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
   only for whole-book review. Long chapters → multiple actions / segmented patches.
 - `/compact` keeps a writing bookmark (focus chapter + manuscript paths); new session
   or compact both keep the book on disk.
+- Prefer not pasting the full drafted chapter into chat; the user opens
+  `drafts/manuscript.md` from the workbench file tree (double-click) and reviews diffs there.

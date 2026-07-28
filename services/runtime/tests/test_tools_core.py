@@ -39,7 +39,7 @@ async def test_glob_lists_workspace_files(workspace: Path) -> None:
 async def test_read_file_manuscript_index_and_section(workspace: Path) -> None:
     await core.draft_section("ch1", "chapter-one-body", turn_id=uuid4())
     await core.draft_section("ch2", "chapter-two-body", turn_id=uuid4())
-    path = ".agent/work/drafts/manuscript.md"
+    path = "drafts/manuscript.md"
 
     index = await core.read_file(path)
     assert index.get("truncated_to_index") is True
@@ -65,7 +65,7 @@ async def test_draft_section_writes_monofile_manuscript(workspace: Path) -> None
     )
 
     assert result["status"] == "drafted"
-    assert result["path"] == ".agent/work/drafts/manuscript.md"
+    assert result["path"] == "drafts/manuscript.md"
     assert result["layout"] == "monofile"
     text = (workspace / result["path"]).read_text(encoding="utf-8")
     assert "<!-- section:intro -->" in text
@@ -81,7 +81,7 @@ async def test_draft_section_appends_chapters_same_file(workspace: Path) -> None
     await core.draft_section("ch1", "v1", turn_id=uuid4(), session_id=uuid4())
     await core.draft_section("ch2", "v2", turn_id=uuid4(), session_id=uuid4())
     await core.draft_section("ch1", "v1b", turn_id=uuid4(), session_id=uuid4())
-    path = workspace / ".agent" / "work" / "drafts" / "manuscript.md"
+    path = workspace / "drafts" / "manuscript.md"
     text = path.read_text(encoding="utf-8")
     assert text.count("<!-- section:ch1 -->") == 1
     assert "v1b" in text and "v2" in text
@@ -93,8 +93,23 @@ async def test_draft_section_sections_layout_opt_in(workspace: Path) -> None:
     result = await core.draft_section(
         "intro", "# Intro\n", turn_id=turn_id, layout="sections"
     )
-    assert result["path"] == ".agent/work/drafts/intro.md"
+    assert result["path"] == "drafts/intro.md"
     assert (workspace / result["path"]).read_text(encoding="utf-8") == "# Intro\n"
+
+
+@pytest.mark.asyncio
+async def test_draft_section_migrates_legacy_harness_draft(workspace: Path) -> None:
+    legacy = workspace / ".agent" / "work" / "drafts" / "manuscript.md"
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(
+        "<!-- section:old -->\nold-body\n<!-- /section:old -->\n",
+        encoding="utf-8",
+    )
+    result = await core.draft_section("new", "new-body", turn_id=uuid4())
+    assert result["path"] == "drafts/manuscript.md"
+    text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert "old-body" in text and "new-body" in text
+    assert "<!-- section:old -->" in text and "<!-- section:new -->" in text
 
 
 @pytest.mark.asyncio
