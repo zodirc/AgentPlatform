@@ -16,6 +16,8 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 沙箱现状 | [31](31-sandbox-escape-and-hardening.md) §0（bwrap 已落地） |
 | 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) |
 | 面试原理 | [21](21-agent-system-qa.md) |
+| RAG 心智模型（大白话） | [RAG-mental-model.md](RAG-mental-model.md) |
+| 上下文压缩心智模型（大白话） | [CONTEXT-mental-model.md](CONTEXT-mental-model.md) |
 
 ---
 
