@@ -95,9 +95,21 @@ pip_install() {
   fi
 }
 
+# True only when editable runtime + key deps import. Pytest alone is not enough
+# (a half-installed venv still has pytest from a prior partial install).
 runtime_local_deps_ready() {
   local py="$1"
-  "$py" -c 'import pytest, pytest_asyncio, pytest_cov' >/dev/null 2>&1
+  "$py" -c '
+import asyncpg
+import httpx
+import jsonschema
+import langgraph
+import pydantic
+import pytest
+import pytest_asyncio
+import pytest_cov
+import yaml
+' >/dev/null 2>&1
 }
 
 need_runtime=0
@@ -253,11 +265,15 @@ run_runtime_local() {
     py=".venv/bin/python"
     assert_venv_lock_free "$ROOT/services/runtime/.venv"
   fi
+  # Always refresh editable + deps. A pytest-only "ready" check previously skipped
+  # install on half-broken venvs (missing asyncpg/jsonschema/langgraph) and failed
+  # collection. Satisfied installs are usually a few seconds.
   if runtime_local_deps_ready "$py"; then
-    echo "==> [preflight] runtime deps already present — skip pip install  [$(elapsed)]"
+    echo "==> [preflight] runtime deps look present — refreshing editable install  [$(elapsed)]"
   else
-    pip_install "$py" -e ".[dev]"
+    echo "==> [preflight] runtime deps incomplete — installing .[dev]  [$(elapsed)]"
   fi
+  pip_install "$py" -e ".[dev]"
   echo "==> [preflight] pytest services/runtime/tests (+cov≥80)  [$(elapsed)]"
   with_heartbeat "pytest runtime" \
     "$py" -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
