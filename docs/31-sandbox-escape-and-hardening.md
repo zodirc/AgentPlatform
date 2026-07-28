@@ -560,6 +560,7 @@ make gate
 
 **已落地锚点**：`tools/core/test_command_gate.py` · `tools/core/sandbox.py` · `tools/core/shell.py` · runtime Dockerfile(+retrieval) 安装 `bubblewrap` · 单测 `test_run_tests_gate.py` / `test_sandbox_escape.py`。
 
-**默认即策略**：有 bwrap → **FS 沙箱**（可写仅工作根）；**出网默认开**；固定 env 允许集。不向 `.env` / Settings 增加产品旋钮。仅排障可读 `TOOL_SANDBOX=off`。
+**默认即策略**：有 bwrap **且 userns 可用** → **FS 沙箱**（可写仅工作根）；嵌套 Docker 建不了 namespace → **诚实降级裸跑**（探测见 `sandbox.py`）；**出网默认开**；固定 env 允许集。不向 `.env` / Settings 增加产品旋钮。仅排障可读 `TOOL_SANDBOX=off`。  
+**优化方案（降级 / userns / Landlock / 执行面）**：见 [36](36-sandbox-nested-exec-plan.md)。
 
 **部署**：需重建 runtime 镜像后 bwrap 才进容器（`make up-runtime` / 等价 rebuild）。
