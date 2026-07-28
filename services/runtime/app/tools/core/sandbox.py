@@ -1,7 +1,8 @@
 """OS sandbox for tool exec (docs/31 · SB1 / E2).
 
-Default behavior (no env knobs): if ``bwrap`` is on PATH, wrap tool exec;
-otherwise run unsandboxed (local/dev without bubblewrap).
+Default behavior (no env knobs): if ``bwrap`` is on PATH **and can create a
+user namespace**, wrap tool exec; otherwise run unsandboxed (local/dev without
+bubblewrap, or nested Docker where userns is disabled).
 
 Threat model: protect the **host / agent server** — child FS is RW only on the
 work root (no cross-Work writes, no escaping the work tree). Outbound network
@@ -16,6 +17,8 @@ from __future__ import annotations
 import logging
 import os
 import shutil
+import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Sequence
 
@@ -28,11 +31,51 @@ def _which_bwrap() -> str | None:
     return shutil.which("bwrap")
 
 
+@lru_cache(maxsize=1)
+def _bwrap_can_exec() -> bool:
+    """False only when bwrap clearly cannot start (e.g. disabled user namespaces).
+
+    A minimal probe without filesystem binds may fail for unrelated reasons
+    (``/bin/true`` not visible); those inconclusive failures keep bwrap enabled
+    so the full wrap path can still run.
+    """
+    bwrap = _which_bwrap()
+    if not bwrap:
+        return False
+    try:
+        completed = subprocess.run(
+            [bwrap, "--die-with-parent", "--", "/bin/true"],
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("bwrap probe failed (%s); tool exec will run unsandboxed", exc)
+        return False
+    if completed.returncode == 0:
+        return True
+    err = (completed.stderr or b"").decode("utf-8", errors="replace").strip()
+    lower = err.lower()
+    # Nested Docker / hardened kernels: binary exists but userns is blocked.
+    if "namespace" in lower or "operation not permitted" in lower:
+        logger.warning(
+            "bwrap present but unusable (%s); tool exec will run unsandboxed",
+            err or f"exit={completed.returncode}",
+        )
+        return False
+    logger.debug(
+        "bwrap probe inconclusive (exit=%s%s); assuming usable",
+        completed.returncode,
+        f"; {err}" if err else "",
+    )
+    return True
+
+
 def resolve_sandbox_backend() -> SandboxBackend:
     # Undocumented escape hatch for unit tests / emergency; default is always on when possible.
     if os.environ.get("TOOL_SANDBOX", "").strip().lower() in {"off", "false", "0", "none"}:
         return "off"
-    if _which_bwrap():
+    if _bwrap_can_exec():
         return "bwrap"
     return "off"
 
@@ -140,5 +183,6 @@ def sandbox_status() -> dict[str, object]:
     return {
         "backend": resolve_sandbox_backend(),
         "bwrap_path": _which_bwrap(),
+        "bwrap_usable": _bwrap_can_exec() if _which_bwrap() else False,
         "in_docker": Path("/.dockerenv").exists(),
     }

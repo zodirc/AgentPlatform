@@ -48,6 +48,17 @@ def test_resolve_sandbox_off_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_sandbox_backend() == "off"
 
 
+def test_resolve_sandbox_falls_back_when_bwrap_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.tools.core import sandbox as sandbox_mod
+
+    monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setattr(sandbox_mod, "_which_bwrap", lambda: "/usr/bin/bwrap")
+    monkeypatch.setattr(sandbox_mod, "_bwrap_can_exec", lambda: False)
+    assert resolve_sandbox_backend() == "off"
+
+
 def test_wrap_argv_off_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("TOOL_SANDBOX", "off")
     wrapped, backend = wrap_argv_for_exec(argv=["echo", "hi"], cwd=tmp_path)
