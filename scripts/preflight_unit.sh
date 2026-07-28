@@ -10,16 +10,95 @@
 #   PREFLIGHT_BASE=origin/main bash scripts/preflight_unit.sh
 #   SKIP_PREFLIGHT=1 ...                        # no-op (exit 0)
 #   PREFLIGHT_DOCKER=1 ...                      # force Docker runners
+#   PREFLIGHT_VERBOSE_PIP=0 ...                 # quieter pip (default: show progress)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml" --env-file "$ROOT/.env")
+PREFLIGHT_STARTED_AT=$(date +%s)
+VERBOSE_PIP="${PREFLIGHT_VERBOSE_PIP:-1}"
 
 if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
   echo "==> preflight skipped (SKIP_PREFLIGHT=1)"
   exit 0
 fi
+
+elapsed() {
+  echo "$(( $(date +%s) - PREFLIGHT_STARTED_AT ))s"
+}
+
+# Print a heartbeat while a long command runs (pip lock waits, installs, etc.).
+with_heartbeat() {
+  local label="$1"
+  shift
+  local hb_pid=""
+  (
+    local t=0
+    while sleep 15; do
+      t=$((t + 15))
+      echo "==> [preflight] … still: ${label} (${t}s elapsed, total $(elapsed))"
+    done
+  ) &
+  hb_pid=$!
+  # Do not let a killed heartbeat fail the suite under pipefail/set -e.
+  set +e
+  "$@"
+  local rc=$?
+  set -e
+  kill "$hb_pid" 2>/dev/null || true
+  wait "$hb_pid" 2>/dev/null || true
+  return "$rc"
+}
+
+# Fail fast if another installer holds the venv lock (looks like a hang otherwise).
+assert_venv_lock_free() {
+  local venv_dir="$1"
+  local lock="${venv_dir}/.lock"
+  [[ -e "$lock" ]] || return 0
+
+  local holders="" pid fd target
+  # Prefer /proc scan — fuser is noisy/unreliable under WSL Docker.
+  for pid in /proc/[0-9]*; do
+    [[ -d "$pid/fd" ]] || continue
+    for fd in "$pid"/fd/*; do
+      target="$(readlink "$fd" 2>/dev/null || true)"
+      if [[ "$target" == "$lock" ]]; then
+        holders+=" ${pid##*/}"
+        break
+      fi
+    done
+  done
+  if [[ -z "${holders// /}" ]] && command -v lsof >/dev/null 2>&1; then
+    holders=" $(lsof -t "$lock" 2>/dev/null | tr '\n' ' ' || true)"
+  fi
+  holders="$(echo "$holders" | tr -s ' ' | sed 's/^ //;s/ $//')"
+  [[ -n "$holders" ]] || return 0
+
+  echo ""
+  echo "==> [preflight] BLOCKED: ${venv_dir}/.lock held by PID(s): ${holders}"
+  echo "    Another uv/pip install is using this venv (previously looked like a hang)."
+  echo "    Fix: kill those PIDs, then re-push. Example: kill ${holders}"
+  ps -o pid,etime,cmd -p ${holders// /,} 2>/dev/null || true
+  echo ""
+  return 1
+}
+
+pip_install() {
+  local py="$1"
+  shift
+  echo "==> [preflight] pip install ($*)  [$(elapsed)]"
+  if [[ "$VERBOSE_PIP" == "1" ]]; then
+    with_heartbeat "pip $*" "$py" -m pip install --progress-bar on "$@"
+  else
+    with_heartbeat "pip $*" "$py" -m pip install -q "$@"
+  fi
+}
+
+runtime_local_deps_ready() {
+  local py="$1"
+  "$py" -c 'import pytest, pytest_asyncio, pytest_cov' >/dev/null 2>&1
+}
 
 need_runtime=0
 need_api=0
@@ -154,64 +233,76 @@ elif ! python_has_pip; then
 fi
 
 run_ux_self_check_local() {
-  echo "==> [preflight] UX signals self-check"
-  "$PY" -m pip install -q packages/contracts/python >/dev/null
+  echo "==> [preflight] UX signals self-check  [$(elapsed)]"
+  pip_install "$PY" packages/contracts/python
   "$PY" scripts/ux_signals.py --self-check
 }
 
 run_ux_tests_local() {
-  echo "==> [preflight] UX signals unit tests"
-  "$PY" -m pip install -q packages/contracts/python pytest >/dev/null
-  "$PY" -m pytest scripts/tests/test_ux_signals.py -q
+  echo "==> [preflight] UX signals unit tests  [$(elapsed)]"
+  pip_install "$PY" packages/contracts/python pytest
+  echo "==> [preflight] pytest scripts/tests/test_ux_signals.py  [$(elapsed)]"
+  with_heartbeat "pytest ux_signals" "$PY" -m pytest scripts/tests/test_ux_signals.py -q
 }
 
 run_runtime_local() {
-  echo "==> [preflight] Runtime unit tests"
+  echo "==> [preflight] Runtime unit tests  [$(elapsed)]"
   cd "$ROOT/services/runtime"
+  local py="$PY"
   if [[ -x .venv/bin/python ]]; then
-    .venv/bin/python -m pip install -q -e ".[dev]" >/dev/null
-    .venv/bin/python -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
-  else
-    "$PY" -m pip install -q -e ".[dev]"
-    "$PY" -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
+    py=".venv/bin/python"
+    assert_venv_lock_free "$ROOT/services/runtime/.venv"
   fi
+  if runtime_local_deps_ready "$py"; then
+    echo "==> [preflight] runtime deps already present — skip pip install  [$(elapsed)]"
+  else
+    pip_install "$py" -e ".[dev]"
+  fi
+  echo "==> [preflight] pytest services/runtime/tests (+cov≥80)  [$(elapsed)]"
+  with_heartbeat "pytest runtime" \
+    "$py" -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80
   cd "$ROOT"
 }
 
 run_api_ux_local() {
-  echo "==> [preflight] API test suite"
-  "$PY" -m pip install -q packages/contracts/python >/dev/null
+  echo "==> [preflight] API test suite  [$(elapsed)]"
+  pip_install "$PY" packages/contracts/python
   cd "$ROOT/services/api"
   if [[ -x .venv/bin/pytest ]]; then
-    PYTHONPATH=. .venv/bin/pytest tests -q
+    echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
+    with_heartbeat "pytest api" env PYTHONPATH=. .venv/bin/pytest tests -q
   else
-    "$PY" -m pip install -q -e ".[dev]" 2>/dev/null || "$PY" -m pip install -q -e .
-    PYTHONPATH=. "$PY" -m pytest tests -q
+    pip_install "$PY" -e ".[dev]" || pip_install "$PY" -e .
+    echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
+    with_heartbeat "pytest api" env PYTHONPATH=. "$PY" -m pytest tests -q
   fi
   cd "$ROOT"
 }
 
 run_contracts_local() {
-  echo "==> [preflight] Contracts tests"
-  "$PY" -m pip install -q jsonschema pytest pyyaml >/dev/null
-  "$PY" -m pytest packages/contracts/tests -q
-  "$PY" -m pip install -q packages/contracts/python >/dev/null
-  "$PY" -m pytest packages/contracts/python/tests -q
+  echo "==> [preflight] Contracts tests  [$(elapsed)]"
+  pip_install "$PY" jsonschema pytest pyyaml
+  echo "==> [preflight] pytest packages/contracts/tests  [$(elapsed)]"
+  with_heartbeat "pytest contracts" "$PY" -m pytest packages/contracts/tests -q
+  pip_install "$PY" packages/contracts/python
+  echo "==> [preflight] pytest packages/contracts/python/tests  [$(elapsed)]"
+  with_heartbeat "pytest contracts-py" "$PY" -m pytest packages/contracts/python/tests -q
 }
 
 run_ux_self_check_docker() {
-  echo "==> [preflight] UX signals self-check (docker/runtime)"
+  echo "==> [preflight] UX signals self-check (docker/runtime)  [$(elapsed)]"
   "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-ux
   "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/preflight-ux/packages /tmp/preflight-ux/scripts
   docker cp "$ROOT/scripts/ux_signals.py" agent-runtime:/tmp/preflight-ux/scripts/ux_signals.py
   docker cp "$ROOT/packages/contracts/python" agent-runtime:/tmp/preflight-ux/packages/contracts-python
-  "${COMPOSE[@]}" exec -T runtime bash -c \
-    'python -m pip install -q /tmp/preflight-ux/packages/contracts-python >/dev/null
+  with_heartbeat "docker ux self-check" "${COMPOSE[@]}" exec -T runtime bash -c \
+    'echo "==> [preflight/docker] pip install contracts…"
+     python -m pip install --progress-bar on /tmp/preflight-ux/packages/contracts-python
      python /tmp/preflight-ux/scripts/ux_signals.py --self-check'
 }
 
 run_ux_tests_docker() {
-  echo "==> [preflight] UX signals unit tests (docker/runtime)"
+  echo "==> [preflight] UX signals unit tests (docker/runtime)  [$(elapsed)]"
   "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-ux
   "${COMPOSE[@]}" exec -T -u root runtime mkdir -p \
     /tmp/preflight-ux/scripts/tests \
@@ -221,46 +312,53 @@ run_ux_tests_docker() {
   docker cp "$ROOT/scripts/tests/test_ux_signals.py" agent-runtime:/tmp/preflight-ux/scripts/tests/test_ux_signals.py
   docker cp "$ROOT/packages/contracts/python/." agent-runtime:/tmp/preflight-ux/packages/contracts/python/
   docker cp "$ROOT/eval/ux_signals" agent-runtime:/tmp/preflight-ux/eval/ux_signals
-  "${COMPOSE[@]}" exec -T runtime bash -c \
-    'python -m pip install -q pytest >/dev/null
+  with_heartbeat "docker pytest ux" "${COMPOSE[@]}" exec -T runtime bash -c \
+    'echo "==> [preflight/docker] pip install pytest…"
+     python -m pip install --progress-bar on pytest
      cd /tmp/preflight-ux && python -m pytest scripts/tests/test_ux_signals.py -q'
 }
 
 run_runtime_docker() {
-  echo "==> [preflight] Runtime unit tests (docker)"
+  echo "==> [preflight] Runtime unit tests (docker)  [$(elapsed)]"
   "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval
   "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest
   docker cp "$ROOT/services/runtime/tests/." agent-runtime:/tmp/runtime-tests/
   if [[ -f "$ROOT/eval/plan_suggest/cases.json" ]]; then
     docker cp "$ROOT/eval/plan_suggest/cases.json" agent-runtime:/tmp/eval/plan_suggest/cases.json
   fi
-  "${COMPOSE[@]}" exec -T runtime bash -c \
-    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null
+  with_heartbeat "docker pytest runtime" "${COMPOSE[@]}" exec -T runtime bash -c \
+    'echo "==> [preflight/docker] pip install pytest extras…"
+     python -m pip install --progress-bar on pytest pytest-asyncio pytest-cov
+     echo "==> [preflight/docker] pytest /tmp/runtime-tests…"
      PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'
 }
 
 run_api_ux_docker() {
-  echo "==> [preflight] API test suite (docker)"
+  echo "==> [preflight] API test suite (docker)  [$(elapsed)]"
   if ! "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx api; then
     echo "api container not running — start with make up / make start"
     return 1
   fi
   "${COMPOSE[@]}" exec -T -u root api rm -rf /tmp/api-tests
   docker cp "$ROOT/services/api/tests/." agent-api:/tmp/api-tests/
-  "${COMPOSE[@]}" exec -T api bash -c \
-    'python -m pip install -q pytest pytest-asyncio httpx 2>/dev/null
+  with_heartbeat "docker pytest api" "${COMPOSE[@]}" exec -T api bash -c \
+    'echo "==> [preflight/docker] pip install pytest extras…"
+     python -m pip install --progress-bar on pytest pytest-asyncio httpx
      if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi
+     echo "==> [preflight/docker] pytest /tmp/api-tests…"
      python -m pytest /tmp/api-tests -q --asyncio-mode=auto'
 }
 
 run_contracts_docker() {
-  echo "==> [preflight] Contracts tests (docker/runtime)"
+  echo "==> [preflight] Contracts tests (docker/runtime)  [$(elapsed)]"
   "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-contracts
   docker cp "$ROOT/packages/contracts" agent-runtime:/tmp/preflight-contracts
-  "${COMPOSE[@]}" exec -T runtime bash -c \
-    'python -m pip install -q jsonschema pytest pyyaml >/dev/null
+  with_heartbeat "docker pytest contracts" "${COMPOSE[@]}" exec -T runtime bash -c \
+    'echo "==> [preflight/docker] pip install jsonschema pytest pyyaml…"
+     python -m pip install --progress-bar on jsonschema pytest pyyaml
      cd /tmp/preflight-contracts && PYTHONPATH=/tmp/preflight-contracts python -m pytest tests -q
-     python -m pip install -q /tmp/preflight-contracts/python >/dev/null
+     echo "==> [preflight/docker] pip install contracts python package…"
+     python -m pip install --progress-bar on /tmp/preflight-contracts/python
      python -m pytest /tmp/preflight-contracts/python/tests -q'
 }
 
@@ -284,13 +382,16 @@ failed=0
 run_suite() {
   local name="$1"
   shift
+  echo "==> [preflight] ▶ start suite: $name  [$(elapsed)]"
   set +e
   "$@"
   local rc=$?
   set -e
   if [[ "$rc" -ne 0 ]]; then
-    echo "==> [preflight] FAILED: $name (exit $rc)"
+    echo "==> [preflight] FAILED: $name (exit $rc)  [$(elapsed)]"
     failed=1
+  else
+    echo "==> [preflight] ✓ suite ok: $name  [$(elapsed)]"
   fi
 }
 
@@ -310,9 +411,9 @@ fi
 
 if [[ "$failed" -ne 0 ]]; then
   echo ""
-  echo "preflight FAILED — fix tests before push (or SKIP_PREFLIGHT=1 / git push --no-verify)."
+  echo "preflight FAILED — fix tests before push (or SKIP_PREFLIGHT=1 / git push --no-verify).  [$(elapsed)]"
   echo "Full CI unit mirror: PREFLIGHT_ALL=1 bash scripts/preflight_unit.sh"
   exit 1
 fi
 
-echo "==> preflight OK"
+echo "==> preflight OK  [$(elapsed)]"
