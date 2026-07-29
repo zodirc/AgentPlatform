@@ -11,6 +11,24 @@
 
 ---
 
+## 0.1 流程图（详图）
+
+路径：[`docs/assets/tools/read-file-tokenize-flow-zh.png`](assets/tools/read-file-tokenize-flow-zh.png)
+
+![读文件降本：硬闸 · 折叠 · 已跳过](assets/tools/read-file-tokenize-flow-zh.png)
+
+**读图要点：**
+
+| | |
+|--|--|
+| **易混** | Intake `@` prereread ≠ 本图；本图是 loop 内 `read_file` 硬闸 |
+| **硬闸** | `read_after_complete` / `read_overlap` / 次数上限 → `skipped`（不读盘） |
+| **豁免** | edit 失败后允许再读 |
+| **折叠** | assemble 侧旧 read 结果指针化（RC4） |
+| **UX** | `status=skipped` → Web「已跳过」；模型侧非 error |
+
+---
+
 ## 0.5 落地结论与实测（2026-07-26）
 
 ### 做了什么

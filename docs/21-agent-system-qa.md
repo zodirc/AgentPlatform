@@ -32,18 +32,18 @@
 
 | 问答 | 图 |
 |------|-----|
-| 一句话内核 / 总览 | [`platform-architecture-overview.png`](assets/architecture/platform-architecture-overview.png) · [`domain-session-turn-run.png`](assets/architecture/domain-session-turn-run.png) · [`agent-engine-loop.png`](assets/harness/agent-engine-loop.png) · [`harness-turn-flow.png`](assets/harness/harness-turn-flow.png) |
+| 一句话内核 / 总览 | [`platform-architecture-overview.png`](assets/architecture/platform-architecture-overview.png) · [`domain-session-turn-run.png`](assets/architecture/domain-session-turn-run.png) · [`agent-engine-loop-zh.png`](assets/harness/agent-engine-loop-zh.png) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) |
 | Q2 评测 / Proof / Ops | [`ci-proof-flow.png`](assets/ops/ci-proof-flow.png) · [`ops-console-flow.png`](assets/ops/ops-console-flow.png) |
 | Q8 / Q13 RAG | [`rag-vector-full-flow.png`](assets/rag/rag-vector-full-flow.png) · [`rag-hybrid-rrf-flow.png`](assets/rag/rag-hybrid-rrf-flow.png) · [`rag-bm25-flow.png`](assets/rag/rag-bm25-flow.png) · [RAG-mental-model](RAG-mental-model.md) |
 | Q9 上下文压缩 | [`context-full-pipeline.png`](assets/context/context-full-pipeline.png) · [`context-fill-ratio.png`](assets/context/context-fill-ratio.png) · [`context-hygiene-vs-ladder.png`](assets/context/context-hygiene-vs-ladder.png) · [`context-collapse-80.png`](assets/context/context-collapse-80.png) · [`context-snip-autocompact.png`](assets/context/context-snip-autocompact.png) · [CONTEXT-mental-model](CONTEXT-mental-model.md) |
-| Q9 / Q14 Harness | [`harness-six-faces-zh.png`](assets/harness/harness-six-faces-zh.png) · [HARNESS-mental-model](HARNESS-mental-model.md) |
+| Q9 / Q14 Harness | [`harness-six-faces-zh.png`](assets/harness/harness-six-faces-zh.png) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) · [HARNESS-mental-model](HARNESS-mental-model.md) |
 | Q11 沙箱 / exec | [`landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) · [`landlock-vs-approval-flow-zh.png`](assets/sandbox/landlock-vs-approval-flow-zh.png) · [`landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [`bwrap-exec-flow.png`](assets/sandbox/bwrap-exec-flow.png) · [BWRAP-mental-model](BWRAP-mental-model.md) |
-| Intake（进门） | [`intake-flow-zh.png`](assets/intake/intake-flow-zh.png) · [INTAKE-mental-model](INTAKE-mental-model.md) |
-| Q19 取消 / 审批 | [`approval-cancel-resume-flow.png`](assets/harness/approval-cancel-resume-flow.png) |
+| Intake（进门） | [`intake-full-detail-zh.png`](assets/intake/intake-full-detail-zh.png) · [INTAKE-mental-model](INTAKE-mental-model.md) |
+| Q19 取消 / 审批 | [`approval-cancel-resume-flow-zh.png`](assets/harness/approval-cancel-resume-flow-zh.png) |
 | 事件 / SSE / 投影 | [`event-sse-projection-flow.png`](assets/events/event-sse-projection-flow.png) · [`event-sse-projection-detail-zh.png`](assets/events/event-sse-projection-detail-zh.png) |
 | Q23 写作作品 | [`writing-work-main-path.png`](assets/writing/writing-work-main-path.png) · [`writing-continuity-outline-flow.png`](assets/writing/writing-continuity-outline-flow.png) |
 | Q26 多用户 / Work | [`work-tenant-scope-flow.png`](assets/architecture/work-tenant-scope-flow.png) |
-| 读文件降本 | [`read-file-tokenize-flow.png`](assets/tools/read-file-tokenize-flow.png) |
+| 读文件降本 | [`read-file-tokenize-flow-zh.png`](assets/tools/read-file-tokenize-flow-zh.png) · [34](34-read-cache-and-token-discipline.md) |
 
 ---
 

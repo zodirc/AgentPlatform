@@ -51,12 +51,11 @@
 |---|------|------|
 | 1 | 命令如何被 bwrap 包裹 | [`docs/assets/sandbox/bwrap-exec-flow.png`](assets/sandbox/bwrap-exec-flow.png) |
 | 2 | **挂载心智（中文）** | [`docs/assets/sandbox/bwrap-mounts-zh.png`](assets/sandbox/bwrap-mounts-zh.png) |
-| 3 | 挂载示意（英文版） | [`docs/assets/sandbox/bwrap-mounts.png`](assets/sandbox/bwrap-mounts.png) |
-| 4 | 嵌套失败原因 | [`docs/assets/sandbox/nested-docker-bwrap-fail.png`](assets/sandbox/nested-docker-bwrap-fail.png) |
-| 5 | 后端选择链 / vs Landlock | [`36`](36-sandbox-nested-exec-plan.md) §1.1 · [`sandbox-backend-chain.png`](assets/sandbox/sandbox-backend-chain.png) · [`bwrap-vs-landlock.png`](assets/sandbox/bwrap-vs-landlock.png) |
-| **6** | **Landlock 原理与执行流程（中文）** | [`landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [`36`](36-sandbox-nested-exec-plan.md) §1.1 |
-| **7** | **审批门 × Landlock 分层** | [`landlock-vs-approval-flow-zh.png`](assets/sandbox/landlock-vs-approval-flow-zh.png) |
-| **8** | **为何能生效（缝/戴/拦）** | [`landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
+| 3 | 嵌套失败原因 | [`docs/assets/sandbox/nested-docker-bwrap-fail.png`](assets/sandbox/nested-docker-bwrap-fail.png) |
+| 4 | 后端选择链 / vs Landlock | [`36`](36-sandbox-nested-exec-plan.md) §1.1 · [`sandbox-backend-chain.png`](assets/sandbox/sandbox-backend-chain.png) · [`bwrap-vs-landlock.png`](assets/sandbox/bwrap-vs-landlock.png) |
+| **5** | **Landlock 原理与执行流程（中文）** | [`landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [`36`](36-sandbox-nested-exec-plan.md) §1.1 |
+| **6** | **审批门 × Landlock 分层** | [`landlock-vs-approval-flow-zh.png`](assets/sandbox/landlock-vs-approval-flow-zh.png) |
+| **7** | **为何能生效（缝/戴/拦）** | [`landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
 
 ---
 

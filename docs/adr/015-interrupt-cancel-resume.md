@@ -1,5 +1,7 @@
 # ADR-015: Interrupt / Cancel / Resume 语义（对齐 Cursor 式可控性）
 
+> 中文详图：[`approval-cancel-resume-flow-zh.png`](../assets/harness/approval-cancel-resume-flow-zh.png) · 心智总览见 [`HARNESS-mental-model.md`](../HARNESS-mental-model.md) §5.2。
+
 ## 状态
 
 已接受（2025-07-02）

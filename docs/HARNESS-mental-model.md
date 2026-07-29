@@ -49,10 +49,12 @@
 | # | 主题 | 路径 |
 |---|------|------|
 | 1 | **六面总览（中文）** | [`docs/assets/harness/harness-six-faces-zh.png`](assets/harness/harness-six-faces-zh.png) |
-| 2 | 六面总览（英文标注版） | [`docs/assets/harness/harness-six-faces.png`](assets/harness/harness-six-faces.png) |
-| 3 | 包住一轮对话 | [`docs/assets/harness/harness-turn-flow.png`](assets/harness/harness-turn-flow.png) |
+| 2 | **包住一轮 Turn（详图）** | [`docs/assets/harness/harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) |
+| 3 | **AgentEngine 单循环（详图）** | [`docs/assets/harness/agent-engine-loop-zh.png`](assets/harness/agent-engine-loop-zh.png) |
+| 4 | **审批 · 取消 · 恢复（详图）** | [`docs/assets/harness/approval-cancel-resume-flow-zh.png`](assets/harness/approval-cancel-resume-flow-zh.png) |
 
-推荐顺序：**先 #1，再 #3。**
+推荐顺序：**先 #1，再 #2；进循环细节看 #3；停/批看 #4。**  
+入口细则另见 [`intake-full-detail-zh.png`](assets/intake/intake-full-detail-zh.png)。
 
 路径：[`docs/assets/harness/harness-six-faces-zh.png`](assets/harness/harness-six-faces-zh.png)
 
@@ -118,21 +120,30 @@
 
 ## 5. 包住「一轮用户发言」（Turn）时怎么走
 
-路径：[`docs/assets/harness/harness-turn-flow.png`](assets/harness/harness-turn-flow.png)
+路径：[`docs/assets/harness/harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png)
 
-![Harness 包住一轮](assets/harness/harness-turn-flow.png)
+![Harness 包住一轮 Turn · 详图](assets/harness/harness-turn-flow-zh.png)
+
+**读图要点：**
+
+| 块 | 记住一句 |
+|----|----------|
+| Intake | `shouldQuery` 硬门 + 可选弱 hint；细则见 Intake 详图 |
+| while | assemble → model → tools → checkpoint；有 tool 再绕回 |
+| Guard | 旁挂 Cancel/超时/Watchdog，不是循环里多两个节点 |
+| Proof | 热路径写事件；Golden/`make gate` 在环外 |
 
 用中文跟一遍：
 
 ```text
 用户点发送 / API 受理一轮
   → 尽快标记「已受理」（体感：别让人干等）
-  → 【入口】编译输入；要不要调模型？
+  → 【入口】编译输入；shouldQuery 要不要调模型？
         不要 → 本地答完，本轮结束
-        要 → 进入循环：
+        要 → 可选弱 hint → 进入循环：
               【上下文】组装这一窗
               【模型】流式想 / 可能提出调工具
-              【工具】执行（可读并行、可写常审批）
+              【工具】执行（可读并行、可写常审批；read 有硬闸）
               【护栏】全程可取消、可超时、可巡检假活
               （有工具结果就回到「再组装 → 再调模型」）
   → 【证明】事件已落库；金标/门禁在环外持续证明
@@ -142,6 +153,22 @@
 
 - **护栏**不是循环里多出来的两个「步骤节点」，而是**始终挂着的刹车**。  
 - **证明**主要在环外（CI、评测），热路径只负责把可观测事件写清楚。
+
+### 5.1 AgentEngine 单循环（进门后）
+
+路径：[`docs/assets/harness/agent-engine-loop-zh.png`](assets/harness/agent-engine-loop-zh.png)
+
+![AgentEngine 单循环 · 详图](assets/harness/agent-engine-loop-zh.png)
+
+TurnController（Intake / shouldQuery / 弱 hint / 收尾）在 **while 门外**；循环内可审批挂起、流中取消、`read_file` 硬闸 skipped。
+
+### 5.2 审批 · 取消 · 恢复
+
+路径：[`docs/assets/harness/approval-cancel-resume-flow-zh.png`](assets/harness/approval-cancel-resume-flow-zh.png)
+
+![审批 · 取消 · 恢复 · 详图](assets/harness/approval-cancel-resume-flow-zh.png)
+
+要点：Cancel ≠ failed；审批续同一 `run_id`；写盘粘性免批 ≠ Plan 同意门；审批与 Landlock 正交。
 
 ---
 

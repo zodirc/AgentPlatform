@@ -70,6 +70,10 @@
 
 > `TurnController` 负责 turn 启动前准备与结束后收尾（含加载 **ScenarioProfile**）；`AgentEngine` 负责推理循环，**不**感知 scenario 名称。
 
+详图：[`agent-engine-loop-zh.png`](assets/harness/agent-engine-loop-zh.png) · Turn 外壳见 [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) · Intake 见 [`intake-full-detail-zh.png`](assets/intake/intake-full-detail-zh.png)。
+
+![AgentEngine 单循环详图](assets/harness/agent-engine-loop-zh.png)
+
 ### 3.1 Turn Intake：输入编译与门控（非意图 Pipeline）
 
 旧项目的 `event_classification_node` **不恢复**。任务理解拆为三层（[ADR-014](adr/014-turn-intake-over-intent-pipeline.md)）：
@@ -423,8 +427,10 @@ class DelegateSubagentTool:
 
 - 主 agent 可 `delegate(task, agent_type, context)`；`agent_type` 由 **ScenarioProfile** 限定
 - **`writing`**：researcher、drafter、editor、fact_checker、stylist、explore、retrieve、planner
-- **`agent`**：explore、retrieve、verify、edit、planner
+- **`agent`**：explore、retrieve、verify、edit、planner、shell
+- **`collab`（目标态 · 未实施）**：编排者姿态 + agent 工具面 + `researcher` 等；见 [`37-collab-multi-agent.md`](37-collab-multi-agent.md)
 - 协作规则不变：只交换结论与引用；主编/主 loop 保留决策权；默认委派深度 ≤ 2
+- **禁止**：为协作再开 supervisor 图、每 Turn 强制并行子 Agent、或 Engine 内 `if scenario` 业务分支
 
 ## 11. 日志与 debug 规范
 
