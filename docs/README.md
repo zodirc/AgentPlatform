@@ -1,6 +1,6 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–37 连续编号，一文一模块**；变更只改对应正文。
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
@@ -15,19 +15,20 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 检索坏例怎么看 | [29](29-ops-eval-console.md) §6–§8（Ops **旁路**，不影响工作台速率） |
 | CI / Ops 流程图 | [`ci-proof-flow.png`](assets/ops/ci-proof-flow.png) · [`ops-console-flow.png`](assets/ops/ops-console-flow.png)（[28](28-proof-gate-and-ux-signals.md) · [29](29-ops-eval-console.md)） |
 | 沙箱现状 | [31](31-sandbox-escape-and-hardening.md) §0（bwrap 已落地） |
-| 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) |
 | 面试原理 | [21](21-agent-system-qa.md)（含[流程图对照](21-agent-system-qa.md#流程图对照只链路径)） |
 | RAG 心智模型（大白话） | [RAG-mental-model.md](RAG-mental-model.md) |
 | 上下文压缩心智模型（大白话） | [CONTEXT-mental-model.md](CONTEXT-mental-model.md) |
-| Harness 六面心智模型 | [HARNESS-mental-model.md](HARNESS-mental-model.md) |
-| Intake 心智模型 | [INTAKE-mental-model.md](INTAKE-mental-model.md) |
+| Harness 六面心智模型 | [HARNESS-mental-model.md](HARNESS-mental-model.md) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) |
+| Intake 心智模型（含详图） | [INTAKE-mental-model.md](INTAKE-mental-model.md) · [`intake-full-detail-zh.png`](assets/intake/intake-full-detail-zh.png) |
 | bwrap 沙箱心智模型 | [BWRAP-mental-model.md](BWRAP-mental-model.md) |
 | Landlock 原理流程图（中文） | [`assets/sandbox/landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [36](36-sandbox-nested-exec-plan.md) §1.1 |
 | Landlock 为何能生效（缝/戴/拦） | [`assets/sandbox/landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
+| 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) · [`read-file-tokenize-flow-zh.png`](assets/tools/read-file-tokenize-flow-zh.png) |
+| 多 Agent 协作 Scenario（设计） | [37](37-collab-multi-agent.md)（取消 `interview` → `collab`；**代码未实施**） |
 
 ---
 
-## 模块目录（01–35）
+## 模块目录（01–37）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -67,6 +68,7 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 34 | [read-cache-and-token-discipline](34-read-cache-and-token-discipline.md) | **读文件降本 + 分层缓存**（RC1–RC5 + skipped UX ✅；手测见 §0.5；RC6 复测） |
 | 35 | [optimization-review](35-optimization-review.md) | **全仓优化审查**第二轮（2026-07）；§6 四批已落地见 §1.4；残余与结构性还债仍跟踪 |
 | 36 | [sandbox-nested-exec-plan](36-sandbox-nested-exec-plan.md) | **嵌套 Docker Exec 沙箱**（A+C ✅：Landlock→bwrap→off · sticky） |
+| 37 | [collab-multi-agent](37-collab-multi-agent.md) | **多 Agent 协作 Scenario**（设计定稿 · CL0 ✅；CL1–CL6 ⏳ 取消 interview → `collab`） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
@@ -84,6 +86,7 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 多租户 / 作品根 | [27](27-multi-tenancy.md)（**已落地** · 默认开启 · 个人默认 Work · 否决 Org） |
 | Proof 门禁 / 体验信号 | [28](28-proof-gate-and-ux-signals.md)（**已落地** · `make gate` / `make ux-signals` · 不碰 loop） |
 | 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） · [33](33-harness-maturity-backlog.md)（**HM 工程完善票**） · [34](34-read-cache-and-token-discipline.md)（**读降本 / L1–L2 缓存**） |
+| 多 Agent 协作（第三入口） | [37](37-collab-multi-agent.md)（替 `interview` → `collab`；设计定稿 · 未实施） · 场景宪法 [09](09-product-modes.md) |
 | 质量与灵敏度提案 | [30](30-quality-and-agility.md)（代码生成 CQ · 灵敏度 AQ · 写作下一刀 WN；全部受 [13](13-rate-redlines.md) R1–R5 约束） |
 | 沙箱 / exec 隔离 / 脱敏 | [31](31-sandbox-escape-and-hardening.md)（威胁枚举 · SB/PR；受 [13](13-rate-redlines.md) 约束；**敏感词词表暂空**） |
 | 执行面 / 本地工作区 | [32](32-execution-plane-and-local-runner.md)（**写作已收敛云端+下载**；本地 Runner ⏸） |
@@ -116,6 +119,7 @@ Agent Platform 架构与实施规范。**01–35 连续编号，一文一模块*
 | 执行面落点 / 本地 Runner | ✅ 写作=云端+下载；本地 ⏸ | **[32](32-execution-plane-and-local-runner.md)** |
 | Harness 工程完善 HM1–HM9 | ✅ 核心落地（预压缩 / raw / 增量 / 检索审计 / 信封 / 导出门禁） | **[33](33-harness-maturity-backlog.md)** · Ops [29](29-ops-eval-console.md) §6–§7 |
 | 读文件降本 / 分层缓存 RC1–RC7 | ✅ RC1–RC5 + skipped UX；手测 §0.5 | **[34](34-read-cache-and-token-discipline.md)** |
+| 多 Agent 协作 `collab`（替 `interview`） | 📋 设计定稿 · **未实施** | **[37](37-collab-multi-agent.md)** |
 
 ---
 

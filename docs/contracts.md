@@ -12,7 +12,7 @@ Session (1) ── Turn (N) ── Run (1:1) ── Step*（仅事件）
 
 | 字段 | 说明 |
 |------|------|
-| `Turn.scenario_id` | `writing` \| `agent` \| `interview`（`mode` 为兼容别名） |
+| `Turn.scenario_id` | **现状** `writing` \| `agent` \| `interview`（`mode` 为兼容别名）。**目标态**以 `collab` 替换 `interview`（设计见 [37-collab-multi-agent.md](37-collab-multi-agent.md)；契约改动属 CL1，**未实施**） |
 | `Session.default_scenario_id` | 默认 `writing` |
 
 全文：[`07-domain-model.md`](07-domain-model.md)

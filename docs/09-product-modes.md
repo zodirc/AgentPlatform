@@ -110,7 +110,8 @@
 - **Scenario**（架构）：`scenario_id` + `ScenarioProfile` 配置  
 - **模式**（产品）：用户可见的「写作模式 / Agent 模式」，对应内置 scenario  
 
-新增第三类场景（如 `interview` 访谈纪要）= 新 Profile + 工具登记 + UI 组件，**不改内核**。
+新增第三类场景 = 新 Profile + 工具登记 + UI 组件，**不改内核**。  
+**目标态第三入口**：`collab`（多 Agent 协作）——取消薄 stub `interview`；规范见 **[37-collab-multi-agent.md](37-collab-multi-agent.md)**（设计定稿 · 代码未实施）。
 
 ---
 
@@ -173,7 +174,8 @@ StartTurn(scenario_id)
 ScenarioRegistry.load()  # 自动加载 profiles/*.yaml
 ```
 
-已注册场景：`writing`、`agent`、`interview`（`services/runtime/app/scenarios/profiles/`）。
+已注册场景（**现状代码**）：`writing`、`agent`、`interview`（`services/runtime/app/scenarios/profiles/`）。  
+**目标态**：`writing`、`agent`、`collab`（见 [37](37-collab-multi-agent.md)；实施前仍以现状 enum 为准）。
 
 ---
 
@@ -321,19 +323,22 @@ explore、retrieve、verify、edit、planner。
 
 ## 8. 扩展新场景检查清单
 
-新增 scenario（如 `interview`）时 **只允许**：
+新增 / 替换 scenario（目标例：`collab` 替 `interview`，见 [37](37-collab-multi-agent.md)）时 **只允许**：
 
-- [x] 新增 `profiles/interview.yaml`
-- [x] 在 Profile 中 **登记** 已有或新增 core 工具名
-- [x] 如需新工具：仅加 `tools/core/<name>.py` + 注册
-- [x] 如需新 UI：加 Projection schema + `web/scenarios/interview/`
-- [x] 更新 `packages/contracts` 与 ADR 索引
+- [ ] 新增 `profiles/<id>.yaml`（及 system 模板）
+- [ ] 在 Profile 中 **登记** 已有或新增 core 工具名
+- [ ] 如需新工具：仅加 `tools/core/<name>.py` + 注册
+- [ ] 如需新 UI：加 Projection schema + `web/scenarios/<id>/`（只读投影，不改 SSE 契约）
+- [ ] 更新 `packages/contracts` 与文档索引；golden 正/负例
 
-**必须拒绝**（访谈场景已验证未做）：
+**必须拒绝**：
 
-- [x] 修改 `AgentEngine` 循环逻辑  
-- [x] 新增 pipeline 节点或第二张状态图  
-- [x] 复制 `tools/` 或 `realtime/` 整套实现  
+- [ ] 修改 `AgentEngine` 循环逻辑  
+- [ ] 新增 pipeline 节点或第二张状态图 / supervisor 编排图  
+- [ ] 复制 `tools/` 或 `realtime/` 整套实现  
+- [ ] 首 token 前同步 LLM「选谁上场」；每 Turn 强制 N 路并行子 Agent  
+
+历史：`interview` stub 曾按上表落地且**未**改内核；将被 `collab` 取代（CL1–CL6）。
 
 ---
 
