@@ -1,15 +1,16 @@
-"""OS sandbox for tool exec (docs/31 · SB1 / E2).
+"""OS sandbox for tool exec (docs/31 · SB1 / E2 · docs/36).
 
-Default behavior (no env knobs): if ``bwrap`` is on PATH **and can create a
-user namespace**, wrap tool exec; otherwise run unsandboxed (local/dev without
-bubblewrap, or nested Docker where userns is disabled).
+Default selection (sticky for process lifetime after first resolve):
+
+  Landlock → bwrap → off(degraded)
 
 Threat model: protect the **host / agent server** — child FS is RW only on the
 work root (no cross-Work writes, no escaping the work tree). Outbound network
 stays available so an approved ``run_command`` like ``curl https://…`` works;
 do not confuse host isolation with a product ban on curl.
 
-Optional break-glass only: ``TOOL_SANDBOX=off`` (not a normal product setting).
+Optional break-glass only: ``TOOL_SANDBOX=off|landlock|bwrap`` (not a normal
+product setting). ``off`` is checked every call; auto choice is pinned.
 """
 
 from __future__ import annotations
@@ -18,17 +19,87 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
+import tempfile
+from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Sequence
 
 logger = logging.getLogger(__name__)
 
-SandboxBackend = Literal["bwrap", "off"]
+SandboxBackend = Literal["landlock", "bwrap", "off"]
+
+# Pinned after first successful auto-resolve (docs/36: select once, keep using).
+_sticky_backend: SandboxBackend | None = None
+
+
+def clear_sandbox_backend_cache() -> None:
+    """Reset probe + sticky caches (tests / rare re-probe after ops change)."""
+    global _sticky_backend
+    _sticky_backend = None
+    _landlock_can_exec.cache_clear()
+    _bwrap_can_exec.cache_clear()
 
 
 def _which_bwrap() -> str | None:
     return shutil.which("bwrap")
+
+
+@lru_cache(maxsize=1)
+def _landlock_can_exec() -> bool:
+    """True when kernel Landlock works (ABI ≥ 1 and restrict_self in a child)."""
+    if not sys.platform.startswith("linux"):
+        return False
+    try:
+        from app.tools.core.landlock_fs import landlock_abi_version
+
+        if landlock_abi_version() < 1:
+            return False
+    except OSError as exc:
+        logger.info("landlock unavailable (%s); will try bwrap / off", exc)
+        return False
+
+    # restrict_self is irreversible on the calling thread — probe in a child.
+    runtime_root = str(Path(__file__).resolve().parents[3])
+    env = os.environ.copy()
+    prev = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = (
+        runtime_root if not prev else runtime_root + os.pathsep + prev
+    )
+    try:
+        with tempfile.TemporaryDirectory(prefix="llprobe-") as tmp:
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "-c",
+                    (
+                        "from app.tools.core.landlock_fs import apply_landlock_fs\n"
+                        "import pathlib, sys\n"
+                        "root = sys.argv[1]\n"
+                        "apply_landlock_fs(work_root=root)\n"
+                        "pathlib.Path(root, 'ok').write_text('1', encoding='utf-8')\n"
+                    ),
+                    tmp,
+                ],
+                capture_output=True,
+                timeout=5,
+                check=False,
+                cwd=tmp,
+                env=env,
+            )
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("landlock probe failed (%s); will try bwrap / off", exc)
+        return False
+    if completed.returncode == 0:
+        return True
+    err = (completed.stderr or b"").decode("utf-8", errors="replace").strip()
+    logger.info(
+        "landlock probe failed (exit=%s%s); will try bwrap / off",
+        completed.returncode,
+        f"; {err}" if err else "",
+    )
+    return False
 
 
 @lru_cache(maxsize=1)
@@ -71,13 +142,56 @@ def _bwrap_can_exec() -> bool:
     return True
 
 
-def resolve_sandbox_backend() -> SandboxBackend:
-    # Undocumented escape hatch for unit tests / emergency; default is always on when possible.
-    if os.environ.get("TOOL_SANDBOX", "").strip().lower() in {"off", "false", "0", "none"}:
-        return "off"
+def _autodetect_backend() -> SandboxBackend:
+    if _landlock_can_exec():
+        logger.info("tool exec sandbox backend=landlock (sticky)")
+        return "landlock"
     if _bwrap_can_exec():
+        logger.info("tool exec sandbox backend=bwrap (sticky)")
         return "bwrap"
+    logger.warning(
+        "tool exec sandbox backend=off (degraded: no landlock/bwrap); "
+        "outer Docker + path gates + approval still apply"
+    )
     return "off"
+
+
+def resolve_sandbox_backend() -> SandboxBackend:
+    """Resolve sandbox backend; auto choice is sticky for the process lifetime."""
+    global _sticky_backend
+
+    forced = os.environ.get("TOOL_SANDBOX", "").strip().lower()
+    if forced in {"off", "false", "0", "none"}:
+        return "off"
+    if forced == "landlock":
+        return "landlock" if _landlock_can_exec() else "off"
+    if forced == "bwrap":
+        return "bwrap" if _bwrap_can_exec() else "off"
+
+    if _sticky_backend is not None:
+        return _sticky_backend
+
+    _sticky_backend = _autodetect_backend()
+    return _sticky_backend
+
+
+def make_landlock_preexec(work_root: Path) -> Callable[[], None]:
+    """Return a ``preexec_fn`` that applies Landlock in the child before exec."""
+    from app.tools.core.landlock_fs import apply_landlock_fs
+
+    root = str(work_root.resolve())
+
+    def _preexec() -> None:
+        apply_landlock_fs(work_root=root)
+
+    return _preexec
+
+
+def sandbox_preexec_fn(cwd: Path) -> Callable[[], None] | None:
+    """preexec_fn for landlock backend; None for bwrap/off (argv wrap or bare)."""
+    if resolve_sandbox_backend() != "landlock":
+        return None
+    return make_landlock_preexec(cwd)
 
 
 def _ro_bind(cmd: list[str], path: str) -> None:
@@ -161,10 +275,15 @@ def wrap_argv_for_exec(
     argv: Sequence[str],
     cwd: Path,
 ) -> tuple[list[str], SandboxBackend]:
-    """Possibly wrap argv with bwrap. Returns (final_argv, backend_used)."""
+    """Possibly wrap argv with bwrap. Landlock keeps argv; use ``sandbox_preexec_fn``.
+
+    Returns (final_argv, backend_used).
+    """
     backend = resolve_sandbox_backend()
     if backend == "off":
         return list(argv), "off"
+    if backend == "landlock":
+        return list(argv), "landlock"
     return build_bwrap_argv(argv=argv, cwd=cwd, network=True), "bwrap"
 
 
@@ -180,9 +299,13 @@ def wrap_shell_command_for_exec(
 
 def sandbox_status() -> dict[str, object]:
     """Cheap diagnostics for health / ops."""
+    landlock_usable = _landlock_can_exec()
+    bwrap_path = _which_bwrap()
     return {
         "backend": resolve_sandbox_backend(),
-        "bwrap_path": _which_bwrap(),
-        "bwrap_usable": _bwrap_can_exec() if _which_bwrap() else False,
+        "landlock_usable": landlock_usable,
+        "bwrap_path": bwrap_path,
+        "bwrap_usable": _bwrap_can_exec() if bwrap_path else False,
         "in_docker": Path("/.dockerenv").exists(),
+        "sticky": _sticky_backend is not None,
     }

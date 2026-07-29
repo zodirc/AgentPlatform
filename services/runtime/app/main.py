@@ -531,6 +531,7 @@ def create_app():
     @app.get("/health/ready")
     async def health_ready():
         from app.model.config import model_config_ready
+        from app.tools.core.sandbox import sandbox_status
 
         pool = await get_pool()
         async with pool.acquire() as conn:
@@ -545,6 +546,7 @@ def create_app():
             "model": settings.model_provider,
             "model_mode": settings.model_mode,
             "runner_id": settings.runtime_runner_id,
+            "sandbox": sandbox_status(),
         }
 
     @app.get("/metrics")

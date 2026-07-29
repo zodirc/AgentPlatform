@@ -91,10 +91,19 @@ async def _run_exec(
     timeout_s: float,
     display_command: str,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
+    preexec_fn: Callable[[], None] | None = None,
+    private_tmpdir: bool = False,
 ) -> dict[str, Any]:
     env = _safe_env()
     env["HOME"] = str(cwd)
     env["PWD"] = str(cwd)
+    if private_tmpdir:
+        # Landlock has no private tmpfs; keep temp writes under the work root.
+        tmp = cwd / ".agent-tmp"
+        tmp.mkdir(parents=True, exist_ok=True)
+        env["TMPDIR"] = str(tmp)
+        env["TMP"] = str(tmp)
+        env["TEMP"] = str(tmp)
 
     proc = await asyncio.create_subprocess_exec(
         *argv,
@@ -103,6 +112,7 @@ async def _run_exec(
         stderr=asyncio.subprocess.PIPE,
         env=env,
         start_new_session=True,
+        preexec_fn=preexec_fn,
     )
     return await _finish_process(
         proc,
@@ -192,11 +202,12 @@ async def run_argv_command(
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
 ) -> dict[str, Any]:
     """Run a pre-parsed argv list (no shell). Used by run_tests after SB0 gate."""
-    from app.tools.core.sandbox import wrap_argv_for_exec
+    from app.tools.core.sandbox import sandbox_preexec_fn, wrap_argv_for_exec
 
     display = display_command or " ".join(argv)
     try:
         wrapped, backend = wrap_argv_for_exec(argv=argv, cwd=cwd)
+        preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
     except RuntimeError as exc:
         return {
             "status": "failed",
@@ -213,6 +224,8 @@ async def run_argv_command(
         timeout_s=timeout_s,
         display_command=display,
         check_cancel=check_cancel,
+        preexec_fn=preexec,
+        private_tmpdir=backend == "landlock",
     )
     result["sandbox"] = backend
     return result
@@ -225,7 +238,11 @@ async def run_shell_command(
     timeout_s: float,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
 ) -> dict[str, Any]:
-    from app.tools.core.sandbox import resolve_sandbox_backend, wrap_shell_command_for_exec
+    from app.tools.core.sandbox import (
+        resolve_sandbox_backend,
+        sandbox_preexec_fn,
+        wrap_shell_command_for_exec,
+    )
 
     try:
         backend = resolve_sandbox_backend()
@@ -263,6 +280,7 @@ async def run_shell_command(
 
     try:
         wrapped, backend = wrap_shell_command_for_exec(command=command, cwd=cwd)
+        preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
     except RuntimeError as exc:
         return {
             "status": "failed",
@@ -279,6 +297,8 @@ async def run_shell_command(
         timeout_s=timeout_s,
         display_command=command,
         check_cancel=check_cancel,
+        preexec_fn=preexec,
+        private_tmpdir=backend == "landlock",
     )
     result["sandbox"] = backend
     return result

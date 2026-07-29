@@ -6,7 +6,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.tools.core import shell as shell_mod
-from app.tools.core.sandbox import build_bwrap_argv, resolve_sandbox_backend, wrap_argv_for_exec
+from app.tools.core.sandbox import (
+    build_bwrap_argv,
+    clear_sandbox_backend_cache,
+    resolve_sandbox_backend,
+    wrap_argv_for_exec,
+)
+
+
+@pytest.fixture(autouse=True)
+def _reset_sandbox_cache() -> None:
+    clear_sandbox_backend_cache()
+    yield
+    clear_sandbox_backend_cache()
 
 
 def test_safe_env_denies_secrets_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -48,15 +60,55 @@ def test_resolve_sandbox_off_via_env(monkeypatch: pytest.MonkeyPatch) -> None:
     assert resolve_sandbox_backend() == "off"
 
 
-def test_resolve_sandbox_falls_back_when_bwrap_unusable(
+def test_resolve_prefers_landlock_then_bwrap(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from app.tools.core import sandbox as sandbox_mod
 
     monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setattr(sandbox_mod, "_landlock_can_exec", lambda: True)
+    monkeypatch.setattr(sandbox_mod, "_bwrap_can_exec", lambda: True)
+    assert resolve_sandbox_backend() == "landlock"
+    # Sticky: later probe changes must not flip the choice.
+    monkeypatch.setattr(sandbox_mod, "_landlock_can_exec", lambda: False)
+    assert resolve_sandbox_backend() == "landlock"
+
+
+def test_resolve_falls_back_bwrap_when_landlock_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.tools.core import sandbox as sandbox_mod
+
+    monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setattr(sandbox_mod, "_landlock_can_exec", lambda: False)
+    monkeypatch.setattr(sandbox_mod, "_which_bwrap", lambda: "/usr/bin/bwrap")
+    monkeypatch.setattr(sandbox_mod, "_bwrap_can_exec", lambda: True)
+    assert resolve_sandbox_backend() == "bwrap"
+
+
+def test_resolve_sandbox_falls_back_when_all_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.tools.core import sandbox as sandbox_mod
+
+    monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setattr(sandbox_mod, "_landlock_can_exec", lambda: False)
     monkeypatch.setattr(sandbox_mod, "_which_bwrap", lambda: "/usr/bin/bwrap")
     monkeypatch.setattr(sandbox_mod, "_bwrap_can_exec", lambda: False)
     assert resolve_sandbox_backend() == "off"
+
+
+def test_wrap_argv_landlock_passthrough(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.tools.core import sandbox as sandbox_mod
+
+    monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setattr(sandbox_mod, "_landlock_can_exec", lambda: True)
+    wrapped, backend = wrap_argv_for_exec(argv=["echo", "hi"], cwd=tmp_path)
+    assert backend == "landlock"
+    assert wrapped == ["echo", "hi"]
+    assert sandbox_mod.sandbox_preexec_fn(tmp_path) is not None
 
 
 def test_wrap_argv_off_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -119,20 +171,51 @@ async def test_run_argv_uses_exec_and_sandbox_wrap(
 
 
 @pytest.mark.asyncio
+async def test_run_argv_landlock_passes_preexec(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.tools.core import sandbox as sandbox_mod
+
+    monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setattr(sandbox_mod, "_landlock_can_exec", lambda: True)
+    monkeypatch.setattr(sandbox_mod, "_bwrap_can_exec", lambda: False)
+
+    proc = MagicMock()
+    proc.pid = 1
+    proc.returncode = 0
+    proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+    proc.wait = AsyncMock(return_value=0)
+
+    with patch(
+        "app.tools.core.shell.asyncio.create_subprocess_exec",
+        AsyncMock(return_value=proc),
+    ) as spawn:
+        result = await shell_mod.run_argv_command(
+            argv=["echo", "ok"],
+            cwd=tmp_path,
+            timeout_s=5.0,
+        )
+    assert result["sandbox"] == "landlock"
+    assert spawn.await_args.kwargs.get("preexec_fn") is not None
+    assert spawn.await_args.kwargs["env"]["TMPDIR"].endswith(".agent-tmp")
+
+
+@pytest.mark.asyncio
 async def test_bwrap_blocks_write_outside_cwd_when_available(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Integration: if bwrap can exec, writes outside work root must fail."""
     import shutil
 
-    from app.tools.core.sandbox import _bwrap_can_exec, resolve_sandbox_backend
+    from app.tools.core.sandbox import resolve_sandbox_backend
     from app.tools.core.shell import run_shell_command
 
     if not shutil.which("bwrap"):
         pytest.skip("bubblewrap not installed")
-    # Clear probe cache so TOOL_SANDBOX / userns state matches this process.
-    _bwrap_can_exec.cache_clear()
     monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    # Force bwrap path even if landlock would win on newer kernels.
+    monkeypatch.setenv("TOOL_SANDBOX", "bwrap")
+    clear_sandbox_backend_cache()
     if resolve_sandbox_backend() != "bwrap":
         pytest.skip("bwrap present but unusable (e.g. user namespaces disabled)")
 
@@ -157,13 +240,13 @@ async def test_bwrap_allows_write_inside_cwd_when_available(
 ) -> None:
     import shutil
 
-    from app.tools.core.sandbox import _bwrap_can_exec, resolve_sandbox_backend
+    from app.tools.core.sandbox import resolve_sandbox_backend
     from app.tools.core.shell import run_shell_command
 
     if not shutil.which("bwrap"):
         pytest.skip("bubblewrap not installed")
-    _bwrap_can_exec.cache_clear()
-    monkeypatch.delenv("TOOL_SANDBOX", raising=False)
+    monkeypatch.setenv("TOOL_SANDBOX", "bwrap")
+    clear_sandbox_backend_cache()
     if resolve_sandbox_backend() != "bwrap":
         pytest.skip("bwrap present but unusable (e.g. user namespaces disabled)")
 
@@ -180,4 +263,66 @@ async def test_bwrap_allows_write_inside_cwd_when_available(
         if Path("/.dockerenv").exists():
             pytest.skip(f"bwrap cannot exec inside this container: {result}")
         assert result["status"] == "executed", result
+    assert (work / "inside.txt").read_text(encoding="utf-8").strip() == "ok"
+
+
+@pytest.mark.asyncio
+async def test_landlock_blocks_write_outside_cwd_when_available(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.tools.core.landlock_fs import landlock_abi_version
+    from app.tools.core.sandbox import resolve_sandbox_backend
+    from app.tools.core.shell import run_shell_command
+
+    try:
+        if landlock_abi_version() < 1:
+            pytest.skip("Landlock ABI < 1")
+    except OSError:
+        pytest.skip("Landlock not available on this kernel")
+
+    monkeypatch.setenv("TOOL_SANDBOX", "landlock")
+    clear_sandbox_backend_cache()
+    if resolve_sandbox_backend() != "landlock":
+        pytest.skip("Landlock ABI present but restrict_self probe failed")
+
+    work = tmp_path / "work"
+    work.mkdir()
+    outside = tmp_path / "outside.txt"
+    result = await run_shell_command(
+        command=f"echo pwned > {outside}",
+        cwd=work,
+        timeout_s=10.0,
+    )
+    assert result.get("sandbox") == "landlock"
+    assert not outside.exists()
+
+
+@pytest.mark.asyncio
+async def test_landlock_allows_write_inside_cwd_when_available(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.tools.core.landlock_fs import landlock_abi_version
+    from app.tools.core.sandbox import resolve_sandbox_backend
+    from app.tools.core.shell import run_shell_command
+
+    try:
+        if landlock_abi_version() < 1:
+            pytest.skip("Landlock ABI < 1")
+    except OSError:
+        pytest.skip("Landlock not available on this kernel")
+
+    monkeypatch.setenv("TOOL_SANDBOX", "landlock")
+    clear_sandbox_backend_cache()
+    if resolve_sandbox_backend() != "landlock":
+        pytest.skip("Landlock ABI present but restrict_self probe failed")
+
+    work = tmp_path / "work"
+    work.mkdir()
+    result = await run_shell_command(
+        command="echo ok > inside.txt",
+        cwd=work,
+        timeout_s=10.0,
+    )
+    assert result.get("sandbox") == "landlock"
+    assert result["status"] == "executed", result
     assert (work / "inside.txt").read_text(encoding="utf-8").strip() == "ok"

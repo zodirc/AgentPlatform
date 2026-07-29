@@ -1,8 +1,8 @@
 # bwrap 沙箱心智模型
 
-> 本文用**中文大白话**固定：「Agent 要跑命令时，bubblewrap 把子进程箍在哪」。  
+> 本文用**中文大白话**固定：「Agent 要跑命令时，OS 沙箱把子进程箍在哪」。  
 > **核心承诺：护主机盘、护别的作品目录；默认并不禁止上网。**  
-> 权威：[`31-sandbox-escape-and-hardening.md`](31-sandbox-escape-and-hardening.md)；代码：`services/runtime/app/tools/core/sandbox.py`。  
+> 权威：[`31-sandbox-escape-and-hardening.md`](31-sandbox-escape-and-hardening.md) · [`36`](36-sandbox-nested-exec-plan.md)；代码：`sandbox.py` · `landlock_fs.py`。  
 > 图目录：`docs/assets/sandbox/`。
 
 ---
@@ -14,33 +14,34 @@
 | 层 | 管什么 | 典型手段 |
 |----|--------|----------|
 | **文件工具层** | `read_file` / `write_file` 等 | 路径解析后必须落在**当前作品根**里 |
-| **命令执行层（本文）** | `run_command` / `run_tests` 起的**子进程** | 有条件时用 **bwrap（bubblewrap）** 包一层 |
+| **命令执行层（本文）** | `run_command` / `run_tests` 起的**子进程** | 优先 **Landlock**，否则 **bwrap**，再否则诚实降级 |
 
 比喻：
 
 - 文件工具像「只能打开自己工位抽屉的钥匙」；  
-- bwrap 像「临时工进厂房时套上的隔离服」——就算手里有锤子，也很难砸到隔壁车间。
+- Landlock / bwrap 像「临时工进厂房时套上的隔离服」——就算手里有锤子，也很难砸到隔壁车间。
 
-**bwrap 不改 Agent 的思考循环**，只改「命令真正跑起来时」的操作系统可见范围。
+**沙箱不改 Agent 的思考循环**，只改「命令真正跑起来时」的操作系统可见范围。
 
 ---
 
 ## 2. 一句话定义
 
-**bwrap = 跑 shell / 测试子进程时，用 Linux 命名空间做文件系统隔离：**
+**命令沙箱 = 跑 shell / 测试子进程时，把可写面箍在当前作品根：**
 
-- 系统目录（`/usr`、`/bin`…）多半**只读**——能用命令，不能改系统；  
-- **当前作品目录**挂成可写工作区（工程上常挂到 `/work` 并切到那里）；  
-- `/tmp` 用**私有临时盘**，避免随便写到宿主机乱路径；  
+- **Landlock（优先）**：内核 LSM 限制进程路径（「手套」），**不靠再开 user namespace**，更适合嵌套 Docker；  
+- **bwrap（其次）**：新命名空间 + 重挂载（「房间」）；系统目录只读，作品可写，`/tmp` 私有 tmpfs；  
 - **网络默认仍然可用**（批准后的 `curl` 可以；护的是盘，不是「产品禁止上网」）。
 
 | 它是 | 它不是 |
 |------|--------|
 | 命令执行外围的 OS 隔离 | 完整「不可信代码多租户堡垒」（那是 gVisor 等更重方案） |
-| 有 bwrap 且能建用户命名空间时**默认开启** | 「没有 bwrap 还假装很安全」 |
-| 不可用时**降级裸跑**（要能发现） | 文件读写也走 bwrap（文件走路径锁） |
+| 按 **Landlock → bwrap → off** 探测；**进程内钉住** | 「没有笼子还假装很安全」 |
+| 不可用时**降级裸跑**（要能发现） | 文件读写也走 OS 沙箱（文件走路径锁） |
 
-口诀：**文件锁路径；命令靠 bwrap 锁可写面。**
+口诀：**文件锁路径；命令靠 Landlock/bwrap 锁可写面；选一次用到底。**
+
+后端选择链与对比图：见 [`36`](36-sandbox-nested-exec-plan.md) §1.1。
 
 ---
 
@@ -48,11 +49,14 @@
 
 | # | 主题 | 路径 |
 |---|------|------|
-| 1 | 命令如何被包裹 | [`docs/assets/sandbox/bwrap-exec-flow.png`](assets/sandbox/bwrap-exec-flow.png) |
+| 1 | 命令如何被 bwrap 包裹 | [`docs/assets/sandbox/bwrap-exec-flow.png`](assets/sandbox/bwrap-exec-flow.png) |
 | 2 | **挂载心智（中文）** | [`docs/assets/sandbox/bwrap-mounts-zh.png`](assets/sandbox/bwrap-mounts-zh.png) |
 | 3 | 挂载示意（英文版） | [`docs/assets/sandbox/bwrap-mounts.png`](assets/sandbox/bwrap-mounts.png) |
 | 4 | 嵌套失败原因 | [`docs/assets/sandbox/nested-docker-bwrap-fail.png`](assets/sandbox/nested-docker-bwrap-fail.png) |
-| 5 | 后端选择链 / vs Landlock | 见优化方案 [`36`](36-sandbox-nested-exec-plan.md) §1.1 |
+| 5 | 后端选择链 / vs Landlock | [`36`](36-sandbox-nested-exec-plan.md) §1.1 · [`sandbox-backend-chain.png`](assets/sandbox/sandbox-backend-chain.png) · [`bwrap-vs-landlock.png`](assets/sandbox/bwrap-vs-landlock.png) |
+| **6** | **Landlock 原理与执行流程（中文）** | [`landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [`36`](36-sandbox-nested-exec-plan.md) §1.1 |
+| **7** | **审批门 × Landlock 分层** | [`landlock-vs-approval-flow-zh.png`](assets/sandbox/landlock-vs-approval-flow-zh.png) |
+| **8** | **为何能生效（缝/戴/拦）** | [`landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
 
 ---
 
@@ -67,17 +71,65 @@
 ```text
 ① 模型（或测试）要执行一条命令
 ② 工具层准备好「真正要 exec 的参数」
-③ 问：现在沙箱后端是什么？
+③ 问：现在沙箱后端是什么？（进程内 sticky，只选一次）
       · 环境变量强制关掉（仅排障）→ 不包，直接跑
-      · 机器上没有 bwrap，或建不了命名空间 → 不包，直接跑（并打日志）
-      · 否则 → 拼出：bwrap [一堆挂载参数] -- 原命令
-④ 子进程在「箍好的视图」里运行
+      · 优先 Landlock（内核 LSM，不靠嵌套 userns）→ 见下节详图
+      · 否则 bwrap（能建命名空间）→ 拼出：bwrap [挂载参数] -- 原命令
+      · 皆不可用 → 不包，直接跑（并打日志 / sandbox=off）
+④ 子进程在「箍好的视图或手套规则」里运行
 ⑤ 输出仍回到工具结果，进对话窗
 ```
 
-> **有二进制却包不了？** 常见于嵌套 Docker：内核禁止用户命名空间 → 探针失败 → **诚实降级**。优化分批见 [`36-sandbox-nested-exec-plan.md`](36-sandbox-nested-exec-plan.md)。
+> **有二进制却包不了？** 常见于嵌套 Docker：内核禁止用户命名空间 → bwrap 探针失败 → **诚实降级**。优化分批见 [`36-sandbox-nested-exec-plan.md`](36-sandbox-nested-exec-plan.md)。
 
-逃生舱：`TOOL_SANDBOX=off`（文档化程度低，给测试/急救，不是产品日常开关）。
+逃生舱：`TOOL_SANDBOX=off|landlock|bwrap`（文档化程度低，给测试/急救，不是产品日常开关）。
+
+---
+
+## 4.1 Landlock 怎么箍？（原理详图）
+
+路径：[`docs/assets/sandbox/landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png)
+
+![Landlock 原理与执行流程](assets/sandbox/landlock-exec-flow-zh.png)
+
+```text
+原理一句话：不换房间（无新 mount ns），给线程戴手套（restrict_self）。
+
+① 批准后的 run_command / run_tests
+② resolve 钉住后端（Landlock → bwrap → off）
+③ 若选 landlock：
+   · 探测 ABI → create_ruleset（声明管辖哪些 FS 权限）
+   · add_rule：/ 只读+执行；work_root 可读可写
+   · prctl(NO_NEW_PRIVS) → landlock_restrict_self（不可撤销，子进程继承）
+④ fork 后 preexec_fn 施加规则，再 exec 原 argv（不改写成 bwrap …）
+   · TMPDIR = work_root/.agent-tmp
+⑤ 写作品内 → OK；写 /data 或其它 Work → 内核拒绝
+⑥ 工具结果标注 sandbox=landlock；网络默认仍可用
+```
+
+#### 和审批的关系（必读）
+
+路径：[`docs/assets/sandbox/landlock-vs-approval-flow-zh.png`](assets/sandbox/landlock-vs-approval-flow-zh.png)
+
+![审批门 × Landlock](assets/sandbox/landlock-vs-approval-flow-zh.png)
+
+一句话：**审批决定「跑不跑」；Landlock 决定「跑了能写哪」。** 不增加弹窗，不改 Agent loop。
+
+#### 为何这些 syscall「能生效」？（缝手套 ≠ 戴上 ≠ 内核拦）
+
+路径：[`docs/assets/sandbox/landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png)
+
+![为何能生效](assets/sandbox/landlock-why-it-works-zh.png)
+
+```text
+① create_ruleset / add_rule     → 只是在内核里「缝好手套」（尚未限制进程）
+② prctl + restrict_self         → 「戴上」；成功后由内核 LSM 强制执行，不可撤销
+③ 必须在子进程 preexec 里戴     → 否则父 runtime 自己被箍死
+④ fork → preexec(①②) → exec    → 命令进程继承 domain；越界写 → 内核 EACCES
+⑤ 戴不上（ENOSYS 等）           → 探针失败 → bwrap / off，禁止假装已隔离
+```
+
+口诀：**fork/preexec/exec 决定「谁戴」；restrict_self 成功才决定「内核扣没扣上」。**
 
 ---
 
@@ -144,6 +196,6 @@
 
 ## 9. 三十秒口述（可背）
 
-> 跑命令时优先用 bwrap：系统目录只读，当前作品可写，临时目录私有，网络默认开。  
+> 跑命令时优先 Landlock（不靠嵌套 userns），否则 bwrap：可写≈作品根，网络默认开。  
 > 护的是主机盘和跨作品误写，不改 Agent 循环本身。  
-> 没有 bwrap 就降级并暴露状态。细节见文档 31。
+> 选一次钉住；都没有就降级并暴露状态。细节见文档 31 / 36。
