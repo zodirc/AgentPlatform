@@ -19,7 +19,7 @@ assertions:
   turn:
     status: completed
   workspace:
-    - path: .agent/work/drafts/manuscript.md
+    - path: drafts/manuscript.md
       matches: "第一节草稿"
 
 tags: [writing, draft, p1]

@@ -36,7 +36,7 @@ assertions:
     result_matches: "Exported"
     delivery_status: ["ok", "warning"]
   workspace:
-    - path: .agent/work/drafts/manuscript.md
+    - path: drafts/manuscript.md
       matches: "Current turn draft for export"
     - path: exports/document.md
       matches: "Current turn draft for export"
