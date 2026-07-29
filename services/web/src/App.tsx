@@ -25,7 +25,7 @@ import {
   useAgentPanel,
 } from "./shared/workbench/agentPanel";
 
-const SCENARIO_PATHS = ["/writing", "/agent", "/interview"] as const;
+const SCENARIO_PATHS = ["/writing", "/agent", "/intel"] as const;
 
 function isOpsEvalPath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/test(\/(runs\/[^/]+|history))?\/?$/.test(pathname);

@@ -5,7 +5,7 @@ describe("scenarioRoutes", () => {
   it("parses scenario paths", () => {
     expect(scenarioFromPathname("/writing")).toBe("writing");
     expect(scenarioFromPathname("/agent")).toBe("agent");
-    expect(scenarioFromPathname("/interview")).toBe("interview");
+    expect(scenarioFromPathname("/intel")).toBe("intel");
     expect(scenarioFromPathname("/settings")).toBeNull();
   });
 

@@ -20,7 +20,10 @@ class GenerationParams:
         temperature: float | None
         if scenario_id == "writing":
             temperature = settings.model_temperature_writing
-        elif scenario_id in {"agent", "interview"}:
+        elif scenario_id == "intel":
+            # Intel briefs are prose/report oriented (docs/39); reuse writing temp.
+            temperature = settings.model_temperature_writing
+        elif scenario_id == "agent":
             temperature = settings.model_temperature_agent
         else:
             temperature = settings.model_temperature_agent

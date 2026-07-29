@@ -1,0 +1,11 @@
+{
+  "indicator": "aabbccddeeff00112233445566778899",
+  "normalized": "aabbccddeeff00112233445566778899",
+  "type": "hash",
+  "reputation_stub": "suspicious",
+  "tags": ["dropper-demo", "demo-fixture"],
+  "related": ["evil.example.com"],
+  "sources": ["fixture:lab-note-hash"],
+  "raw_ref": "fixtures/ioc/aabbccddeeff00112233445566778899.json",
+  "summary": "Demo MD5 stub linked to evil.example.com."
+}

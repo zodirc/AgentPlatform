@@ -4,7 +4,7 @@ import { useWorkbenchImpl } from "./useWorkbench";
 
 const WorkbenchContext = createContext<WorkbenchState | null>(null);
 
-/** Single shared workbench state across writing / agent / interview (Cursor-style). */
+/** Single shared workbench state across writing / agent / intel (Cursor-style). */
 export function WorkbenchProvider({ children }: { children: ReactNode }) {
   const wb = useWorkbenchImpl();
   return (

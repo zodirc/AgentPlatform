@@ -297,19 +297,35 @@ async def test_export_document_requires_explicit_scope(workspace: Path) -> None:
     assert not (workspace / "exports" / "out.md").exists()
 
 
+@pytest.mark.asyncio
+async def test_enrich_ioc_fixture_hit_and_miss() -> None:
+    from app.tools.core import intel_enrich
+
+    hit = await intel_enrich.enrich_ioc(indicator="203.0.113.10")
+    assert hit["status"] == "ok"
+    assert hit["reputation_stub"] == "suspicious"
+    assert "scanner" in hit["tags"]
+
+    miss = await intel_enrich.enrich_ioc(indicator="198.51.100.1")
+    assert miss["status"] == "unknown"
+    assert miss["indicator"] == "198.51.100.1"
+
+
 def test_scenario_registry_loads_profiles() -> None:
     ScenarioRegistry.load()
     writing = ScenarioRegistry.get("writing")
     agent = ScenarioRegistry.get("agent")
-    interview = ScenarioRegistry.get("interview")
+    intel = ScenarioRegistry.get("intel")
 
     assert writing.scenario_id == "writing"
     assert "draft_section" in writing.tool_names
     assert agent.scenario_id == "agent"
     assert "glob" in agent.tool_names
-    assert interview.scenario_id == "interview"
+    assert intel.scenario_id == "intel"
+    assert "enrich_ioc" in intel.tool_names
     assert writing.system_prompt
     assert agent.system_prompt
+    assert intel.system_prompt
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
@@ -317,7 +333,19 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "Resolve the target path" in agent.system_prompt
     assert "Path theater" in agent.system_prompt
     assert "Read-after-complete" in agent.system_prompt
+    # Intel: analyst markers (stable; docs/39).
+    assert "threat-intelligence analyst" in intel.system_prompt
+    assert "enrich_ioc" in intel.system_prompt
+    assert "Never claim you blocked" in intel.system_prompt
 
+
+def test_interview_scenario_retired() -> None:
+    ScenarioRegistry.load()
+    try:
+        ScenarioRegistry.get("interview")
+        raise AssertionError("interview should be retired")
+    except ValueError as exc:
+        assert "retired" in str(exc).lower()
 
 @pytest.mark.asyncio
 async def test_run_via_langgraph_delegates_to_engine() -> None:

@@ -35,7 +35,7 @@ type Props = {
 type ChatTab = "main" | string;
 
 const STICK_THRESHOLD_PX = 80;
-const MODE_OPTIONS: ScenarioId[] = ["writing", "agent", "interview"];
+const MODE_OPTIONS: ScenarioId[] = ["writing", "agent", "intel"];
 
 function assistantText(wb: WorkbenchState, turn: TurnHistoryItem): string {
   if (turn.id === wb.turnId) {

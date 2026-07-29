@@ -172,7 +172,7 @@ def tune(
             single_micro=micro,
             threshold_writing=tw,
             threshold_agent=ta,
-            threshold_interview=ti,
+            threshold_intel=ti,
             abs_min_len=base.abs_min_len,
             soft_min_len=base.soft_min_len,
         )

@@ -48,7 +48,7 @@ _FALLBACK_CONFIG: dict[str, Any] = {
     "threshold": {
         "writing": 4,
         "agent": 4,
-        "interview": 3,
+        "intel": 4,
         "default": 4,
     },
     "high_risk_tokens": [
@@ -151,7 +151,7 @@ class PlanSuggestWeights:
     single_micro: int = -2
     threshold_writing: int = 4
     threshold_agent: int = 4
-    threshold_interview: int = 3
+    threshold_intel: int = 4
     abs_min_len: int = 8
     soft_min_len: int = 24
 
@@ -159,8 +159,8 @@ class PlanSuggestWeights:
         key = (scenario_id or "writing").strip().lower()
         if key == "agent":
             return self.threshold_agent
-        if key == "interview":
-            return self.threshold_interview
+        if key == "intel":
+            return self.threshold_intel
         return self.threshold_writing
 
     def to_dict(self) -> dict[str, int]:
@@ -175,7 +175,7 @@ class PlanSuggestWeights:
             "single_micro": self.single_micro,
             "threshold_writing": self.threshold_writing,
             "threshold_agent": self.threshold_agent,
-            "threshold_interview": self.threshold_interview,
+            "threshold_intel": self.threshold_intel,
             "abs_min_len": self.abs_min_len,
             "soft_min_len": self.soft_min_len,
         }
@@ -205,7 +205,7 @@ class PlanSuggestWeights:
             "threshold": {
                 "writing": self.threshold_writing,
                 "agent": self.threshold_agent,
-                "interview": self.threshold_interview,
+                "intel": self.threshold_intel,
                 "default": self.threshold_writing,
             },
             "high_risk_tokens": list(cfg.get("high_risk_tokens") or []),
@@ -237,7 +237,7 @@ class PlanSuggestWeights:
             single_micro=int(scores.get("single_micro", -2)),
             threshold_writing=int(thr.get("writing", thr.get("default", 4))),
             threshold_agent=int(thr.get("agent", thr.get("default", 4))),
-            threshold_interview=int(thr.get("interview", 3)),
+            threshold_intel=int(thr.get("intel", thr.get("default", 4))),
             abs_min_len=int(cfg.get("abs_min_len", 8)),
             soft_min_len=int(cfg.get("soft_min_len", 24)),
         )

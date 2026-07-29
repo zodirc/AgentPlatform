@@ -8,7 +8,7 @@
   "additionalProperties": false,
   "properties": {
     "id": { "type": "string", "pattern": "^[a-z]+\\.[0-9]+" },
-    "scenario_id": { "type": "string", "enum": ["writing", "agent", "interview"] },
+    "scenario_id": { "type": "string", "enum": ["writing", "agent", "intel"] },
     "phase": { "oneOf": [{ "type": "integer", "minimum": 0 }, { "type": "string" }] },
     "description": { "type": "string" },
     "fixtures": {

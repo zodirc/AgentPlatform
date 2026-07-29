@@ -20,11 +20,11 @@ export const SCENARIO_META: Record<ScenarioId, ScenarioMeta> = {
     navLabel: "Agent",
     chatEyebrow: "Agent 模式",
   },
-  interview: {
-    id: "interview",
-    title: "访谈纪要工作台",
-    navLabel: "访谈",
-    chatEyebrow: "访谈模式",
+  intel: {
+    id: "intel",
+    title: "威胁情报工作台",
+    navLabel: "情报",
+    chatEyebrow: "威胁情报",
   },
 };
 

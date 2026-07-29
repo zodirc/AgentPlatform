@@ -232,7 +232,18 @@ class StubModelProvider:
         if "check_citation" in tool_names and _wants_check_citation(user_text) and not has_tool_result:
             yield _tool_call(
                 "check_citation",
-                {"citation_id": "cite:ref-a", "source_path": "sources/ref-a.md"},
+                {
+                    "citation_id": (
+                        "cite:lab-note-scanner"
+                        if "intel.02" in user_text.lower()
+                        else "cite:ref-a"
+                    ),
+                    "source_path": (
+                        "sources/lab-note-scanner.md"
+                        if "intel.02" in user_text.lower()
+                        else "sources/ref-a.md"
+                    ),
+                },
             )
             return
 
@@ -263,15 +274,68 @@ class StubModelProvider:
             yield ModelResponse(text="agent.08 glob 完成", output_tokens=6)
             return
 
-        if "draft_section" in tool_names and (_wants_draft(user_text) or _wants_interview(user_text)) and not has_tool_result:
-            section_id = "notes" if _wants_interview(user_text) else "02"
+        if "draft_section" in tool_names and _wants_draft(user_text) and not has_tool_result:
             yield _tool_call(
                 "draft_section",
                 {
-                    "section_id": section_id,
-                    "content": "访谈要点：背景、结论与待办。" if _wants_interview(user_text) else "第一节草稿内容。" * 8,
+                    "section_id": "02",
+                    "content": "第一节草稿内容。" * 8,
                 },
             )
+            return
+
+        if "enrich_ioc" in tool_names and _wants_enrich_ioc(user_text) and not has_tool_result:
+            indicator = _enrich_ioc_indicator(user_text)
+            yield _tool_call("enrich_ioc", {"indicator": indicator, "type": "auto"})
+            return
+
+        if has_tool_result and last_tool == "enrich_ioc" and _wants_enrich_ioc(user_text):
+            if "search_sources" in tool_names and not _intel_already_searched(messages):
+                yield _tool_call("search_sources", {"query": "203.0.113.10 scanner evil.example.com"})
+                return
+            if "draft_section" in tool_names:
+                yield _tool_call(
+                    "draft_section",
+                    {
+                        "section_id": "assessment",
+                        "content": (
+                            "研判简报：203.0.113.10 为可疑扫描源，关联 evil.example.com。"
+                            "引用 [cite:lab-note-scanner]。建议人工复核，未执行封禁。"
+                        ),
+                    },
+                )
+                return
+            reply = "enrich_ioc 完成；建议人工复核，未执行封禁。"
+            for chunk in _chunk_text(reply):
+                yield chunk
+            yield ModelResponse(text=reply, output_tokens=12)
+            return
+
+        if (
+            has_tool_result
+            and last_tool == "search_sources"
+            and _wants_enrich_ioc(user_text)
+            and "draft_section" in tool_names
+        ):
+            yield _tool_call(
+                "draft_section",
+                {
+                    "section_id": "assessment",
+                    "content": (
+                        "研判简报：基于 enrich 与资料检索，203.0.113.10 / evil.example.com "
+                        "在实验笔记中标记为可疑 [cite:lab-note-scanner]。不要自动封禁。"
+                    ),
+                },
+            )
+            return
+
+        if has_tool_result and last_tool == "draft_section" and _wants_enrich_ioc(user_text):
+            reply = (
+                "研判简报已起草 [cite:lab-note-scanner]。建议人工复核，未执行封禁。"
+            )
+            for chunk in _chunk_text(reply):
+                yield chunk
+            yield ModelResponse(text=reply, output_tokens=16)
             return
 
         if "update_outline" in tool_names and _wants_outline(user_text) and not has_tool_result:
@@ -622,13 +686,41 @@ def _wants_draft(text: str) -> bool:
     return any(k in text.lower() for k in keywords)
 
 
-def _wants_interview(text: str) -> bool:
-    keywords = ("interview.01", "访谈纪要", "访谈要点")
-    return any(k in text.lower() for k in keywords)
+def _wants_enrich_ioc(text: str) -> bool:
+    lowered = text.lower()
+    if "intel.02" in lowered or "intel.03" in lowered:
+        return False
+    keywords = (
+        "intel.01",
+        "enrich_ioc",
+        "203.0.113.10",
+        "研判简报",
+        "威胁情报",
+    )
+    return any(k in lowered for k in keywords)
+
+
+def _enrich_ioc_indicator(text: str) -> str:
+    for token in ("203.0.113.10", "evil.example.com", "aabbccddeeff00112233445566778899"):
+        if token in text:
+            return token
+    return "203.0.113.10"
+
+
+def _intel_already_searched(messages: list) -> bool:
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if message.get("role") != "tool":
+            continue
+        name = str(message.get("name") or "")
+        if name == "search_sources":
+            return True
+    return False
 
 
 def _wants_check_citation(text: str) -> bool:
-    keywords = ("writing.08", "check_citation")
+    keywords = ("writing.08", "intel.02", "check_citation")
     return any(k in text.lower() for k in keywords)
 
 

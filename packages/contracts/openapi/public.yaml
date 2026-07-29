@@ -414,7 +414,7 @@ components:
       properties:
         default_scenario_id:
           type: string
-          enum: [writing, agent, interview]
+          enum: [writing, agent, intel]
           default: writing
     SessionResponse:
       type: object
@@ -425,7 +425,7 @@ components:
           format: uuid
         default_scenario_id:
           type: string
-          enum: [writing, agent, interview]
+          enum: [writing, agent, intel]
         status:
           type: string
         created_at:
@@ -440,7 +440,7 @@ components:
           minLength: 1
         scenario_id:
           type: string
-          enum: [writing, agent, interview]
+          enum: [writing, agent, intel]
         client_request_id:
           type: string
           format: uuid
@@ -462,7 +462,7 @@ components:
           format: uuid
         scenario_id:
           type: string
-          enum: [writing, agent, interview]
+          enum: [writing, agent, intel]
         status:
           type: string
         user_input:
@@ -492,7 +492,7 @@ components:
           format: uuid
         scenario_id:
           type: string
-          enum: [writing, agent, interview]
+          enum: [writing, agent, intel]
         status:
           type: string
         user_input:
@@ -627,7 +627,7 @@ components:
           format: uuid
         default_scenario_id:
           type: string
-          enum: [writing, agent, interview]
+          enum: [writing, agent, intel]
         status:
           type: string
         turn_count:

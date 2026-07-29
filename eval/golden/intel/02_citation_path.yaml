@@ -1,0 +1,31 @@
+id: intel.02_citation_path
+scenario_id: intel
+phase: 1
+description: intel citation check against local source
+
+fixtures:
+  workspace:
+    - path: sources/lab-note-scanner.md
+      content: |
+        # Lab note scanner
+        cite:lab-note-scanner appears in this document for 203.0.113.10.
+
+input:
+  message: "intel.02 check_citation cite:lab-note-scanner sources/lab-note-scanner.md"
+  client_request_id: "00000000-0000-4000-8000-000000000402"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - tool.completed
+      - turn.completed
+  turn:
+    status: completed
+  tool:
+    name: check_citation
+    result_matches: "citation valid"
+
+tags: [intel, citation, p1]

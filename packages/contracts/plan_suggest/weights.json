@@ -17,8 +17,8 @@
   "threshold": {
     "writing": 4,
     "agent": 4,
-    "interview": 3,
-    "default": 4
+    "default": 4,
+    "intel": 4
   },
   "high_risk_tokens": [
     "重构",

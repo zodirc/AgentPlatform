@@ -36,6 +36,15 @@ class ScenarioProfile:
     subagent_types: list[str] = field(default_factory=list)
 
 
+# Retired ids stay readable in history but cannot StartTurn (docs/39 TI6).
+RETIRED_SCENARIOS: dict[str, str] = {
+    "interview": (
+        "scenario interview retired; open read-only or continue notes in writing "
+        "(docs/39-intel-scenario.md)"
+    ),
+}
+
+
 class ScenarioRegistry:
     _profiles: dict[str, ScenarioProfile] = {}
 
@@ -65,6 +74,8 @@ class ScenarioRegistry:
     def get(cls, scenario_id: str) -> ScenarioProfile:
         if not cls._profiles:
             cls.load()
+        if scenario_id in RETIRED_SCENARIOS:
+            raise ValueError(RETIRED_SCENARIOS[scenario_id])
         try:
             return cls._profiles[scenario_id]
         except KeyError as exc:

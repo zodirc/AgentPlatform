@@ -1,0 +1,28 @@
+scenario_id: intel
+display_name: 威胁情报
+system_prompt_template: scenarios/intel/system.md
+tool_names:
+  - read_file
+  - list_dir
+  - grep
+  - glob
+  - propose_patch
+  - draft_section
+  - update_outline
+  - update_plan
+  - search_sources
+  - check_citation
+  - export_document
+  - enrich_ioc
+  - remember
+  - recall
+  - delegate
+subagent_types:
+  - researcher
+  - fact_checker
+  - retrieve
+  - planner
+max_steps: 40
+approval_overrides: {}
+workspace_layout: document
+web_layout: writing-workbench

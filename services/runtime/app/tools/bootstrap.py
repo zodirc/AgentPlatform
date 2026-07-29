@@ -608,6 +608,30 @@ def build_registry() -> ToolRegistry:
             handler=record_tools.search_records,
         )
     )
+    from app.tools.core import intel_enrich as intel_tools
+
+    registry.register(
+        ToolSpec(
+            name="enrich_ioc",
+            description=(
+                "Enrich an IOC (IP, domain, hash, URL) from the local stub corpus. "
+                "Read-only; no outbound network and no containment actions."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "indicator": {"type": "string"},
+                    "type": {
+                        "type": "string",
+                        "enum": ["auto", "ip", "domain", "hash", "url"],
+                        "default": "auto",
+                    },
+                },
+                "required": ["indicator"],
+            },
+            handler=intel_tools.enrich_ioc,
+        )
+    )
     return registry
 
 

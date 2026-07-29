@@ -39,11 +39,11 @@
 {"id": "agent_two_paths", "message": "先规划后改 @services/api/app/main.py 和 @services/runtime/app/main.py 的健康检查文案", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
 {"id": "hard_fn_candidate", "message": "把检索链路和会话存储两块一起理顺，保证旧数据还能读", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "hard"], "note": "平淡措辞大任务；当前易漏报"}
 {"id": "hard_fn_product", "message": "把工作台发送链路和历史列表体验打通，别再各管各的状态", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "hard"], "note": "无关键词大任务；当前易漏报"}
-{"id": "interview_agenda", "message": "1. 开场破冰\n2. 深挖上一段经历\n3. 收尾确认下一步", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "numbered"]}
-{"id": "interview_one_q", "message": "下一个问题怎么问更自然", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "ask"]}
-{"id": "interview_plan", "message": "先给个方案：访谈提纲要覆盖动机、冲突、收尾再开始提问", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "explicit"]}
-{"id": "interview_continue", "message": "继续追问刚才那点", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "continue"]}
-{"id": "interview_bullets", "message": "- 确认时间线\n- 挖决策原因\n- 收一个可验证承诺", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "intel_agenda", "message": "1. 开场破冰\n2. 深挖上一段经历\n3. 收尾确认下一步", "scenario_id": "intel", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "intel_one_q", "message": "下一个问题怎么问更自然", "scenario_id": "intel", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "intel_plan", "message": "先给个方案：研判提纲要覆盖动机、冲突、收尾再开始追问 IOC", "scenario_id": "intel", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "intel_continue", "message": "继续追问刚才那点", "scenario_id": "intel", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "intel_bullets", "message": "- 确认时间线\n- 挖决策原因\n- 收一个可验证承诺", "scenario_id": "intel", "should_suggest": true, "tags": ["positive", "numbered"]}
 {"id": "false_friend_plan_word", "message": "这句里的「计划」改成「打算」就行", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"], "note": "含计划字样但属微改"}
 {"id": "false_friend_and", "message": "语气并且标点都稍微顺一下", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "micro"], "note": "有并且但应压分"}
 {"id": "slash_polish", "message": "/polish 去套话", "scenario_id": "writing", "should_suggest": false, "tags": ["negative", "slash"]}
@@ -91,10 +91,10 @@
 {"id": "a_paths_plan", "message": "先列步骤改 @services/web/src/App.tsx 和 @services/api/app/routers/sessions.py", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "paths", "explicit"]}
 {"id": "a_join_plan", "message": "先做计划：修 projector，然后补 golden，并且更新 contracts", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "explicit", "join"]}
 {"id": "a_hard_plain", "message": "把登录态和历史会话列表的状态同步问题一次性收拾干净", "scenario_id": "agent", "should_suggest": true, "tags": ["positive", "hard"], "note": "平淡大任务；可能漏报"}
-{"id": "i_ask_next", "message": "这一题要不要换个问法", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "ask"]}
-{"id": "i_micro_word", "message": "把「您」改成「你」", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "micro"]}
-{"id": "i_continue", "message": "继续", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "continue"]}
-{"id": "i_border", "message": "这个问题再柔和一点", "scenario_id": "interview", "should_suggest": false, "tags": ["negative", "borderline"]}
-{"id": "i_num_four", "message": "1. 自我介绍\n2. 项目深挖\n3. 冲突处理\n4. 收尾要约", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "numbered"]}
-{"id": "i_plan_steps", "message": "先列步骤设计整场访谈：开场、深挖、压力面、收尾", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "explicit"]}
-{"id": "i_plan_first", "message": "先给个方案再开始问，覆盖职业动机与团队协作", "scenario_id": "interview", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "intel_ask_next", "message": "这一题要不要换个问法", "scenario_id": "intel", "should_suggest": false, "tags": ["negative", "ask"]}
+{"id": "intel_micro_word", "message": "把「您」改成「你」", "scenario_id": "intel", "should_suggest": false, "tags": ["negative", "micro"]}
+{"id": "intel_continue", "message": "继续", "scenario_id": "intel", "should_suggest": false, "tags": ["negative", "continue"]}
+{"id": "intel_border", "message": "这个问题再柔和一点", "scenario_id": "intel", "should_suggest": false, "tags": ["negative", "borderline"]}
+{"id": "intel_num_four", "message": "1. 自我介绍\n2. 项目深挖\n3. 冲突处理\n4. 收尾要约", "scenario_id": "intel", "should_suggest": true, "tags": ["positive", "numbered"]}
+{"id": "intel_plan_steps", "message": "先列步骤设计整场研判：开场、深挖、压力面、收尾", "scenario_id": "intel", "should_suggest": true, "tags": ["positive", "explicit"]}
+{"id": "intel_plan_first", "message": "先给个方案再开始问，覆盖职业动机与团队协作", "scenario_id": "intel", "should_suggest": true, "tags": ["positive", "explicit"]}

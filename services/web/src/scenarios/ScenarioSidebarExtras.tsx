@@ -60,9 +60,15 @@ export function ScenarioSidebarExtras({
     );
   }
 
-  if (id === "interview") {
+  if (id === "intel") {
     return (
       <div className="space-y-3">
+        {onOpenSources && onOpenRagDebug ? (
+          <WritingSidebarTools
+            onOpenSources={onOpenSources}
+            onOpenRagDebug={onOpenRagDebug}
+          />
+        ) : null}
         {planBlock}
         <CitationView items={wb.view?.tool_timeline ?? []} />
         <DocumentOutline wb={wb} />

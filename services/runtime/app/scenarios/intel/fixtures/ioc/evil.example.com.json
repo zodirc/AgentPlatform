@@ -1,0 +1,11 @@
+{
+  "indicator": "evil.example.com",
+  "normalized": "evil.example.com",
+  "type": "domain",
+  "reputation_stub": "malicious",
+  "tags": ["c2-demo", "demo-fixture"],
+  "related": ["203.0.113.10"],
+  "sources": ["fixture:lab-note-c2"],
+  "raw_ref": "fixtures/ioc/evil.example.com.json",
+  "summary": "Demo domain labeled malicious in local stub corpus."
+}

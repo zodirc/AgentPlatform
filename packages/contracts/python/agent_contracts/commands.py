@@ -27,7 +27,7 @@ class StartTurnCommand(BaseModel):
     turn_id: UUID
     run_id: UUID
     session_id: UUID
-    scenario_id: str = Field(pattern=r"^(writing|agent|interview)$")
+    scenario_id: str = Field(pattern=r"^(writing|agent|intel)$")
     message: str = Field(min_length=1)
     client_request_id: UUID | None = None
     trace_id: UUID

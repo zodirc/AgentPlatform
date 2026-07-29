@@ -1,0 +1,25 @@
+id: intel.03_chitchat_no_enrich
+scenario_id: intel
+phase: 1
+description: short greeting must not force enrich_ioc
+
+input:
+  message: "intel.03 你好，今天天气怎么样"
+  client_request_id: "00000000-0000-4000-8000-000000000403"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+    sequence_not_contains:
+      - tool.started
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    max_calls:
+      enrich_ioc: 0
+
+tags: [intel, negative, p1]

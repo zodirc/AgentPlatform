@@ -456,7 +456,7 @@ export function EvalConsolePage() {
                 <option value="">全部 scenario</option>
                 <option value="writing">writing</option>
                 <option value="agent">agent</option>
-                <option value="interview">interview</option>
+                <option value="intel">intel</option>
               </select>
               <input
                 className="w-40 rounded-md border border-input bg-background px-2 py-1.5 text-sm"

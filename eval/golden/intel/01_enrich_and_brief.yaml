@@ -1,0 +1,37 @@
+id: intel.01_enrich_and_brief
+scenario_id: intel
+phase: 1
+description: enrich_ioc then search/draft threat brief
+
+fixtures:
+  workspace:
+    - path: sources/lab-note-scanner.md
+      content: |
+        # Lab note scanner
+        203.0.113.10 is a suspicious scanner paired with evil.example.com.
+
+input:
+  message: "intel.01 对 203.0.113.10 出研判简报，要引用，不要封禁"
+  client_request_id: "00000000-0000-4000-8000-000000000401"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.started
+      - tool.completed
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    max_calls:
+      enrich_ioc: 2
+  output:
+    matches: "cite:"
+  latency:
+    first_token_ms_max: 5000
+
+tags: [intel, enrich, p1]

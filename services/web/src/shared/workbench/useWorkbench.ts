@@ -1302,6 +1302,6 @@ export function useWorkbenchImpl(): WorkbenchState {
 export function placeholderForScenario(scenarioId: ScenarioId): string {
   if (scenarioId === "writing")
     return "依资料写一段并标注引用，或：请改第二节更简洁…";
-  if (scenarioId === "interview") return "记录本次访谈要点…";
+  if (scenarioId === "intel") return "粘贴 IOC 或告警，生成带引用的研判简报…";
   return "读取 README.md 并总结…";
 }
