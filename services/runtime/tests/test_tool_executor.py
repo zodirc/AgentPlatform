@@ -147,6 +147,7 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
                 "run_id": None,
                 "session_id": None,
                 "plan_phase": None,
+                "scenario_id": "writing",
             },
         )(),
     )
@@ -166,6 +167,7 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
                 "run_id": None,
                 "session_id": None,
                 "plan_phase": None,
+                "scenario_id": "writing",
             },
         )(),
     )
