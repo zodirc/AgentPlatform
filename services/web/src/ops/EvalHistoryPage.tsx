@@ -122,11 +122,13 @@ export function EvalHistoryPage() {
     return () => window.clearInterval(t);
   }, [load]);
 
+  const listOffset = list.offset;
+  const goPage = list.goPage;
   useEffect(() => {
-    if (!loading && total > 0 && list.offset >= total) {
-      list.goPage(1);
+    if (!loading && total > 0 && listOffset >= total) {
+      goPage(1);
     }
-  }, [loading, total, list.offset, list.goPage]);
+  }, [loading, total, listOffset, goPage]);
 
   return (
     <OpsShell

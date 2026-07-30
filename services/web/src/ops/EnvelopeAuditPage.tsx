@@ -123,11 +123,13 @@ export function EnvelopeAuditPage() {
     void loadRecent();
   }, [loadRecent]);
 
+  const listOffset = list.offset;
+  const goPage = list.goPage;
   useEffect(() => {
-    if (!listLoading && total > 0 && list.offset >= total) {
-      list.goPage(1);
+    if (!listLoading && total > 0 && listOffset >= total) {
+      goPage(1);
     }
-  }, [listLoading, total, list.offset, list.goPage]);
+  }, [listLoading, total, listOffset, goPage]);
 
   useEffect(() => {
     const fromQuery = turnIdFromSearch(search);

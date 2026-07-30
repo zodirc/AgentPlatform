@@ -3,6 +3,8 @@ import { useSearchParams } from "react-router-dom";
 
 export const OPS_LIST_PAGE_SIZE = 30;
 
+const DEFAULT_PRESERVE_KEYS = ["turn_id"] as const;
+
 export type OpsListFilterDef = {
   key: string;
   label: string;
@@ -62,7 +64,9 @@ export function useOpsListParams(
   options?: { pageSize?: number; preserveKeys?: string[] },
 ): OpsListParams {
   const pageSize = options?.pageSize ?? OPS_LIST_PAGE_SIZE;
-  const preserveKeys = options?.preserveKeys ?? ["turn_id"];
+  const preserveKeysSig = (options?.preserveKeys ?? DEFAULT_PRESERVE_KEYS).join(
+    "\0",
+  );
   const [searchParams, setSearchParams] = useSearchParams();
 
   const q = searchParams.get("q") ?? "";
@@ -126,12 +130,12 @@ export function useOpsListParams(
   const clearFilters = useCallback(() => {
     setQInput("");
     const params = new URLSearchParams();
-    for (const key of preserveKeys) {
+    for (const key of preserveKeysSig.split("\0").filter(Boolean)) {
       const v = searchParams.get(key);
       if (v) params.set(key, v);
     }
     setSearchParams(params, { replace: true });
-  }, [preserveKeys, searchParams, setSearchParams]);
+  }, [preserveKeysSig, searchParams, setSearchParams]);
 
   const hasFilters = Boolean(q.trim() || Object.values(filters).some(Boolean));
 
