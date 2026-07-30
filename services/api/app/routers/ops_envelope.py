@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db.pool import get_pool
 from app.services.ops.auth import require_ops_eval_auth
+from app.services.ops.list_query import append_turn_filters, normalize_page, where_sql
 
 router = APIRouter(
     prefix="/ops/envelopes",
@@ -21,12 +22,44 @@ router = APIRouter(
 @router.get("/recent")
 async def list_recent_envelope_turns(
     limit: int = Query(40, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status_filter: str | None = Query(default=None, alias="status"),
+    scenario: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200),
 ) -> dict[str, Any]:
     """Browse recent Turns that have at least one sampled model request envelope."""
+    limit, offset = normalize_page(limit=limit, offset=offset)
+    clauses: list[str] = []
+    args: list[Any] = []
+    append_turn_filters(clauses, args, status=status_filter, scenario=scenario, q=q)
+    where = where_sql(clauses)
+    group_by = """
+        GROUP BY
+            e.turn_id, t.session_id, t.scenario_id, t.status, t.user_input,
+            s.owner_user_id
+    """
     pool = await get_pool()
     try:
+        total = int(
+            await pool.fetchval(
+                f"""
+                SELECT COUNT(*) FROM (
+                    SELECT e.turn_id
+                    FROM model_request_envelopes e
+                    JOIN turns t ON t.id = e.turn_id
+                    JOIN sessions s ON s.id = t.session_id
+                    {where}
+                    {group_by}
+                ) sub
+                """,
+                *args,
+            )
+            or 0
+        )
+        args.extend([limit, offset])
+        lim_i, off_i = len(args) - 1, len(args)
         rows = await pool.fetch(
-            """
+            f"""
             SELECT
                 e.turn_id,
                 t.session_id,
@@ -41,17 +74,23 @@ async def list_recent_envelope_turns(
             FROM model_request_envelopes e
             JOIN turns t ON t.id = e.turn_id
             JOIN sessions s ON s.id = t.session_id
-            GROUP BY
-                e.turn_id, t.session_id, t.scenario_id, t.status, t.user_input,
-                s.owner_user_id
+            {where}
+            {group_by}
             ORDER BY MAX(e.created_at) DESC
-            LIMIT $1
+            LIMIT ${lim_i} OFFSET ${off_i}
             """,
-            limit,
+            *args,
         )
     except Exception:
         # Table may not exist until migration; Ops page should still open.
-        return {"count": 0, "items": [], "error": "model_request_envelopes unavailable"}
+        return {
+            "count": 0,
+            "total": 0,
+            "limit": limit,
+            "offset": offset,
+            "items": [],
+            "error": "model_request_envelopes unavailable",
+        }
 
     items: list[dict[str, Any]] = []
     for row in rows:
@@ -71,7 +110,7 @@ async def list_recent_envelope_turns(
                 else None,
             }
         )
-    return {"count": len(items), "items": items}
+    return {"count": len(items), "total": total, "limit": limit, "offset": offset, "items": items}
 
 
 @router.get("/turns/{turn_id}")

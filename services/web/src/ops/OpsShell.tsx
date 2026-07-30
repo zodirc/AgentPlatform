@@ -112,8 +112,10 @@ export function OpsShell({
 }
 
 export function statusClass(status: string): string {
-  if (status === "pass") return "text-success";
-  if (status === "fail" || status === "cancelled") return "text-destructive";
+  if (status === "pass" || status === "completed") return "text-success";
+  if (status === "fail" || status === "failed" || status === "cancelled") {
+    return "text-destructive";
+  }
   if (status === "running" || status === "queued" || status === "cancelling") return "text-warning";
   if (status === "skipped") return "text-muted-foreground";
   return "text-muted-foreground";

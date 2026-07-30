@@ -3,6 +3,12 @@ import { useLocation } from "react-router-dom";
 import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
 import { OpsTurnLinks } from "./OpsTurnLinks";
 import {
+  OPS_TURN_LIST_FILTERS,
+  OpsListFilters,
+  OpsListPagination,
+  useOpsListParams,
+} from "./OpsListFilters";
+import {
   diagnoseRetrievalAudit,
   layerOnlyIn,
   type AuditHitLike,
@@ -116,34 +122,40 @@ function authHeaders(secret: string): HeadersInit {
 export function RetrievalAuditPage() {
   const { pathname, search } = useLocation();
   const secret = secretFromOpsPath(pathname);
+  const list = useOpsListParams(["status", "scenario"]);
   const [turnId, setTurnId] = useState("");
   const [recent, setRecent] = useState<RecentItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [listLoading, setListLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<AuditResponse | null>(null);
+
+  const qs = list.queryString();
 
   const loadRecent = useCallback(async () => {
     if (!secret) return;
     setListLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/ops/retrieval/recent?limit=40", {
+      const res = await fetch(`/api/v1/ops/retrieval/recent?${qs}`, {
         headers: authHeaders(secret),
       });
       if (!res.ok) {
         const body = await res.text();
         throw new Error(`${res.status}: ${body.slice(0, 200)}`);
       }
-      const body = (await res.json()) as { items?: RecentItem[] };
+      const body = (await res.json()) as { items?: RecentItem[]; total?: number };
       setRecent(body.items || []);
+      setTotal(typeof body.total === "number" ? body.total : (body.items || []).length);
     } catch (e) {
       setRecent([]);
+      setTotal(0);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setListLoading(false);
     }
-  }, [secret]);
+  }, [secret, qs]);
 
   const loadTurn = useCallback(
     async (id: string) => {
@@ -176,6 +188,12 @@ export function RetrievalAuditPage() {
   }, [loadRecent]);
 
   useEffect(() => {
+    if (!listLoading && total > 0 && list.offset >= total) {
+      list.goPage(1);
+    }
+  }, [listLoading, total, list.offset, list.goPage]);
+
+  useEffect(() => {
     const fromQuery = turnIdFromSearch(search);
     if (fromQuery) void loadTurn(fromQuery);
   }, [search, loadTurn]);
@@ -200,32 +218,40 @@ export function RetrievalAuditPage() {
       subtitle="最近有检索的真实用户 Turn · 点开看召回 / 排序 / 进窗三层（HM5）· 只读旁路"
     >
       <div className="space-y-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void loadRecent()}
-            disabled={listLoading}
-            className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
-          >
-            {listLoading ? "刷新中…" : "刷新列表"}
-          </button>
-          <button
-            type="button"
-            disabled={!data}
-            onClick={download}
-            className="rounded-md border border-border px-3 py-2 text-sm disabled:opacity-50"
-          >
-            导出当前 JSON
-          </button>
-        </div>
+        <OpsListFilters
+          searchPlaceholder="turn / session / 用户输入 / 检索 query…"
+          qInput={list.qInput}
+          onQChange={list.setQInput}
+          filterDefs={OPS_TURN_LIST_FILTERS}
+          filters={list.filters}
+          onFilterChange={list.setFilter}
+          hasFilters={list.hasFilters}
+          onClear={list.clearFilters}
+          total={total}
+          page={list.page}
+          loading={listLoading}
+          onRefresh={() => void loadRecent()}
+          extra={
+            <button
+              type="button"
+              disabled={!data}
+              onClick={download}
+              className="rounded-md border border-border px-2.5 py-1.5 text-xs text-foreground hover:bg-muted disabled:opacity-50"
+            >
+              导出当前 JSON
+            </button>
+          }
+        />
 
         <div className="rounded-md border border-border">
           <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-            最近检索 Turn（{recent.length}）
+            最近检索 Turn
           </div>
           {!recent.length && !listLoading ? (
             <p className="px-3 py-4 text-sm text-muted-foreground">
-              暂无 retrieval.completed。先在工作台跑一轮 search_sources，再刷新。
+              {list.hasFilters
+                ? "没有匹配的 Turn，试试放宽筛选。"
+                : "暂无 retrieval.completed。先在工作台跑一轮 search_sources，再刷新。"}
             </p>
           ) : (
             <ul className="divide-y divide-border">
@@ -261,6 +287,12 @@ export function RetrievalAuditPage() {
             </ul>
           )}
         </div>
+        <OpsListPagination
+          page={list.page}
+          total={total}
+          itemCount={recent.length}
+          onPage={list.goPage}
+        />
 
         <details className="rounded-md border border-border px-3 py-2 text-sm">
           <summary className="cursor-pointer text-muted-foreground">精确跳转（可选 turn_id）</summary>

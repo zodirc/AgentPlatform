@@ -3,6 +3,12 @@ import { useLocation } from "react-router-dom";
 import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
 import { OpsTurnLinks } from "./OpsTurnLinks";
 import { OpsPayloadViewerModal } from "./OpsPayloadViewerModal";
+import {
+  OPS_TURN_LIST_FILTERS,
+  OpsListFilters,
+  OpsListPagination,
+  useOpsListParams,
+} from "./OpsListFilters";
 
 type EnvelopeItem = {
   step_index: number;
@@ -46,36 +52,46 @@ function authHeaders(secret: string): HeadersInit {
 export function EnvelopeAuditPage() {
   const { pathname, search } = useLocation();
   const secret = secretFromOpsPath(pathname);
+  const list = useOpsListParams(["status", "scenario"]);
   const [turnId, setTurnId] = useState("");
   const [recent, setRecent] = useState<RecentItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [listLoading, setListLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<EnvelopeResponse | null>(null);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
 
+  const qs = list.queryString();
+
   const loadRecent = useCallback(async () => {
     if (!secret) return;
     setListLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/ops/envelopes/recent?limit=40", {
+      const res = await fetch(`/api/v1/ops/envelopes/recent?${qs}`, {
         headers: authHeaders(secret),
       });
       if (!res.ok) {
         const body = await res.text();
         throw new Error(body || `HTTP ${res.status}`);
       }
-      const body = (await res.json()) as { items?: RecentItem[]; error?: string };
+      const body = (await res.json()) as {
+        items?: RecentItem[];
+        total?: number;
+        error?: string;
+      };
       setRecent(body.items || []);
+      setTotal(typeof body.total === "number" ? body.total : (body.items || []).length);
       if (body.error) setError(body.error);
     } catch (e) {
       setRecent([]);
+      setTotal(0);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setListLoading(false);
     }
-  }, [secret]);
+  }, [secret, qs]);
 
   const loadTurn = useCallback(
     async (id: string) => {
@@ -108,6 +124,12 @@ export function EnvelopeAuditPage() {
   }, [loadRecent]);
 
   useEffect(() => {
+    if (!listLoading && total > 0 && list.offset >= total) {
+      list.goPage(1);
+    }
+  }, [listLoading, total, list.offset, list.goPage]);
+
+  useEffect(() => {
     const fromQuery = turnIdFromSearch(search);
     if (fromQuery) void loadTurn(fromQuery);
   }, [search, loadTurn]);
@@ -127,24 +149,30 @@ export function EnvelopeAuditPage() {
       title="模型信封"
       subtitle="最近有信封落盘的 Turn · 点「查看」以文件预览方式打开全文 · 只读旁路"
     >
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
-          onClick={() => void loadRecent()}
-          disabled={listLoading}
-        >
-          {listLoading ? "刷新中…" : "刷新列表"}
-        </button>
-      </div>
+      <OpsListFilters
+        searchPlaceholder="turn / session / 用户输入…"
+        qInput={list.qInput}
+        onQChange={list.setQInput}
+        filterDefs={OPS_TURN_LIST_FILTERS}
+        filters={list.filters}
+        onFilterChange={list.setFilter}
+        hasFilters={list.hasFilters}
+        onClear={list.clearFilters}
+        total={total}
+        page={list.page}
+        loading={listLoading}
+        onRefresh={() => void loadRecent()}
+      />
 
       <div className="mb-4 rounded-md border border-border">
         <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-          最近信封 Turn（{recent.length}）
+          最近信封 Turn
         </div>
         {!recent.length && !listLoading ? (
           <p className="px-3 py-4 text-sm text-muted-foreground">
-            暂无信封。跑一轮后刷新；full 行可点「查看」。
+            {list.hasFilters
+              ? "没有匹配的 Turn，试试放宽筛选。"
+              : "暂无信封。跑一轮后刷新；full 行可点「查看」。"}
           </p>
         ) : (
           <ul className="divide-y divide-border">
@@ -184,8 +212,14 @@ export function EnvelopeAuditPage() {
           </ul>
         )}
       </div>
+      <OpsListPagination
+        page={list.page}
+        total={total}
+        itemCount={recent.length}
+        onPage={list.goPage}
+      />
 
-      <details className="mb-4 rounded-md border border-border px-3 py-2 text-sm">
+      <details className="mb-4 mt-4 rounded-md border border-border px-3 py-2 text-sm">
         <summary className="cursor-pointer text-muted-foreground">精确跳转（可选 turn_id）</summary>
         <div className="mt-2 flex flex-wrap gap-2">
           <input

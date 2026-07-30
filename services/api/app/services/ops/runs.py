@@ -165,8 +165,23 @@ async def get_run_payload(run_id: str) -> dict[str, Any] | None:
     return stored
 
 
-async def list_run_history(*, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
-    rows = await eval_store.list_runs(limit=limit, offset=offset)
+async def list_run_history(
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    mode: str | None = None,
+    suite: str | None = None,
+    q: str | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    rows, total = await eval_store.list_runs(
+        limit=limit,
+        offset=offset,
+        status=status,
+        mode=mode,
+        suite=suite,
+        q=q,
+    )
     for row in rows:
         live = _RUNS.get(row["id"])
         if live is not None:
@@ -181,7 +196,7 @@ async def list_run_history(*, limit: int = 50, offset: int = 0) -> list[dict[str
             )
         else:
             row.setdefault("suite", "golden")
-    return rows
+    return rows, total
 
 
 async def _publish(run: EvalRun, event: dict[str, Any]) -> None:
@@ -378,7 +393,7 @@ async def request_stop(run_id: str) -> EvalRun:
 
 async def reconcile_orphaned_runs() -> int:
     """Mark DB runs still active after process restart as cancelled; kill leftovers."""
-    rows = await eval_store.list_runs(limit=100, offset=0)
+    rows, _total = await eval_store.list_runs(limit=100, offset=0)
     fixed = 0
     for row in rows:
         rid = str(row.get("id") or "")

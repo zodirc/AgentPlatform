@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db.pool import get_pool
 from app.services.ops.auth import require_ops_eval_auth
+from app.services.ops.list_query import append_turn_filters, normalize_page, where_sql
 
 router = APIRouter(
     prefix="/ops/retrieval",
@@ -33,11 +34,57 @@ def _parse_payload(raw: Any) -> dict[str, Any]:
 @router.get("/recent")
 async def list_recent_retrieval_turns(
     limit: int = Query(40, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    status_filter: str | None = Query(default=None, alias="status"),
+    scenario: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200),
 ) -> dict[str, Any]:
     """Browse recent user Turns that have at least one retrieval.completed event."""
+    limit, offset = normalize_page(limit=limit, offset=offset)
+    clauses: list[str] = ["e.type = 'retrieval.completed'"]
+    args: list[Any] = []
+    # Search query text via EXISTS so we do not shrink per-turn event counts.
+    append_turn_filters(
+        clauses,
+        args,
+        status=status_filter,
+        scenario=scenario,
+        q=q,
+        extra_q_sql=(
+            "EXISTS ("
+            "SELECT 1 FROM turn_events qx "
+            "WHERE qx.turn_id = t.id AND qx.type = 'retrieval.completed' "
+            "AND COALESCE(qx.payload->>'query', '') ILIKE ?"
+            ")"
+        ),
+    )
+    where = where_sql(clauses)
+    group_by = """
+        GROUP BY
+            t.id, t.session_id, t.scenario_id, t.status, t.user_input, t.created_at,
+            s.owner_user_id, s.work_id
+    """
     pool = await get_pool()
+    total = int(
+        await pool.fetchval(
+            f"""
+            SELECT COUNT(*) FROM (
+                SELECT t.id
+                FROM turn_events e
+                JOIN turns t ON t.id = e.turn_id
+                JOIN sessions s ON s.id = t.session_id
+                {where}
+                {group_by}
+            ) sub
+            """,
+            *args,
+        )
+        or 0
+    )
+    args.extend([limit, offset])
+    lim_i, off_i = len(args) - 1, len(args)
     rows = await pool.fetch(
-        """
+        f"""
         SELECT
             t.id AS turn_id,
             t.session_id,
@@ -55,14 +102,12 @@ async def list_recent_retrieval_turns(
         FROM turn_events e
         JOIN turns t ON t.id = e.turn_id
         JOIN sessions s ON s.id = t.session_id
-        WHERE e.type = 'retrieval.completed'
-        GROUP BY
-            t.id, t.session_id, t.scenario_id, t.status, t.user_input, t.created_at,
-            s.owner_user_id, s.work_id
+        {where}
+        {group_by}
         ORDER BY MAX(e.ts) DESC
-        LIMIT $1
+        LIMIT ${lim_i} OFFSET ${off_i}
         """,
-        limit,
+        *args,
     )
     items: list[dict[str, Any]] = []
     for row in rows:
@@ -84,7 +129,7 @@ async def list_recent_retrieval_turns(
                 "last_hit_count": row["last_hit_count"],
             }
         )
-    return {"count": len(items), "items": items}
+    return {"count": len(items), "total": total, "limit": limit, "offset": offset, "items": items}
 
 
 @router.get("/turns/{turn_id}")

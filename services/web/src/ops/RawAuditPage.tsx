@@ -3,6 +3,12 @@ import { useLocation } from "react-router-dom";
 import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
 import { OpsTurnLinks } from "./OpsTurnLinks";
 import { OpsPayloadViewerModal } from "./OpsPayloadViewerModal";
+import {
+  OPS_TURN_LIST_FILTERS,
+  OpsListFilters,
+  OpsListPagination,
+  useOpsListParams,
+} from "./OpsListFilters";
 
 type SnapshotItem = {
   step_index: number;
@@ -44,36 +50,46 @@ function authHeaders(secret: string): HeadersInit {
 export function RawAuditPage() {
   const { pathname, search } = useLocation();
   const secret = secretFromOpsPath(pathname);
+  const list = useOpsListParams(["status", "scenario"]);
   const [turnId, setTurnId] = useState("");
   const [recent, setRecent] = useState<RecentItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [listLoading, setListLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<RawResponse | null>(null);
   const [viewer, setViewer] = useState<ViewerState | null>(null);
 
+  const qs = list.queryString();
+
   const loadRecent = useCallback(async () => {
     if (!secret) return;
     setListLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/v1/ops/raw/recent?limit=40", {
+      const res = await fetch(`/api/v1/ops/raw/recent?${qs}`, {
         headers: authHeaders(secret),
       });
       if (!res.ok) {
         const body = await res.text();
         throw new Error(body || `HTTP ${res.status}`);
       }
-      const body = (await res.json()) as { items?: RecentItem[]; error?: string };
+      const body = (await res.json()) as {
+        items?: RecentItem[];
+        total?: number;
+        error?: string;
+      };
       setRecent(body.items || []);
+      setTotal(typeof body.total === "number" ? body.total : (body.items || []).length);
       if (body.error) setError(body.error);
     } catch (e) {
       setRecent([]);
+      setTotal(0);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setListLoading(false);
     }
-  }, [secret]);
+  }, [secret, qs]);
 
   const loadTurn = useCallback(
     async (id: string) => {
@@ -106,6 +122,12 @@ export function RawAuditPage() {
   }, [loadRecent]);
 
   useEffect(() => {
+    if (!listLoading && total > 0 && list.offset >= total) {
+      list.goPage(1);
+    }
+  }, [listLoading, total, list.offset, list.goPage]);
+
+  useEffect(() => {
     const fromQuery = turnIdFromSearch(search);
     if (fromQuery) void loadTurn(fromQuery);
   }, [search, loadTurn]);
@@ -125,24 +147,30 @@ export function RawAuditPage() {
       title="Raw 快照"
       subtitle="只读原件仓（HM2）· 点「查看」以文件预览方式打开 · 旁路观测"
     >
-      <div className="mb-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          className="rounded-md border border-border px-3 py-2 text-sm hover:bg-muted disabled:opacity-50"
-          onClick={() => void loadRecent()}
-          disabled={listLoading}
-        >
-          {listLoading ? "刷新中…" : "刷新列表"}
-        </button>
-      </div>
+      <OpsListFilters
+        searchPlaceholder="turn / session / 用户输入…"
+        qInput={list.qInput}
+        onQChange={list.setQInput}
+        filterDefs={OPS_TURN_LIST_FILTERS}
+        filters={list.filters}
+        onFilterChange={list.setFilter}
+        hasFilters={list.hasFilters}
+        onClear={list.clearFilters}
+        total={total}
+        page={list.page}
+        loading={listLoading}
+        onRefresh={() => void loadRecent()}
+      />
 
       <div className="mb-4 rounded-md border border-border">
         <div className="border-b border-border px-3 py-2 text-xs font-medium text-muted-foreground">
-          最近 Raw Turn（{recent.length}）
+          最近 Raw Turn
         </div>
         {!recent.length && !listLoading ? (
           <p className="px-3 py-4 text-sm text-muted-foreground">
-            暂无 raw 快照。跑过 Turn 后再刷新。
+            {list.hasFilters
+              ? "没有匹配的 Turn，试试放宽筛选。"
+              : "暂无 raw 快照。跑过 Turn 后再刷新。"}
           </p>
         ) : (
           <ul className="divide-y divide-border">
@@ -180,8 +208,14 @@ export function RawAuditPage() {
           </ul>
         )}
       </div>
+      <OpsListPagination
+        page={list.page}
+        total={total}
+        itemCount={recent.length}
+        onPage={list.goPage}
+      />
 
-      <details className="mb-4 rounded-md border border-border px-3 py-2 text-sm">
+      <details className="mb-4 mt-4 rounded-md border border-border px-3 py-2 text-sm">
         <summary className="cursor-pointer text-muted-foreground">精确跳转（可选 turn_id）</summary>
         <div className="mt-2 flex flex-wrap gap-2">
           <input

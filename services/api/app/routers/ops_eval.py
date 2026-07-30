@@ -89,9 +89,20 @@ async def stop_run(run_id: str) -> dict[str, Any]:
 async def list_runs(
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    status: str | None = Query(default=None),
+    mode: str | None = Query(default=None),
+    suite: str | None = Query(default=None),
+    q: str | None = Query(default=None, max_length=200),
 ) -> dict[str, Any]:
-    rows = await runs_svc.list_run_history(limit=limit, offset=offset)
-    return {"runs": rows}
+    rows, total = await runs_svc.list_run_history(
+        limit=limit,
+        offset=offset,
+        status=status,
+        mode=mode,
+        suite=suite,
+        q=q,
+    )
+    return {"runs": rows, "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/runs/{run_id}")

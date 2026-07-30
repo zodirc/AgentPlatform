@@ -94,7 +94,7 @@ Runtime 用 ContextVar（`turn_override`）绑定本 Turn 的 mode/override。�
 |------|------|------|
 | GET | `/meta` | `restart_available`、`proof_available`、`ci_proof_cases` |
 | GET | `/cases` | Golden 用例元数据 |
-| GET | `/runs` | 历史列表（摘要，Postgres） |
+| GET | `/runs` | 历史列表（摘要，Postgres）。Query：`limit`/`offset`；可选 `q`（Run ID / error）、`status`、`mode`、`suite`。响应含 `total` |
 | POST | `/runs` | `{ suite: golden\|ci, mode?, case_ids?, model?, restart_runtime? }` |
 | GET | `/runs/{id}` | 状态与每条结果 |
 | GET | `/runs/{id}/stream` | SSE 进度 |
@@ -137,7 +137,8 @@ Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspa
 ## 6. 检索审计观测（HM5 / RO1）
 
 > **状态**：✅ 已落地（2026-07-24）— 事件 `audit` 三层 + Ops API/页；细项持续加厚见 [33](33-harness-maturity-backlog.md) HM5。  
-> **定位**：Ops **观测**能力，与 §2 的 ci/golden **评测**并列；不是替代 `make gate`。
+> **定位**：Ops **观测**能力，与 §2 的 ci/golden **评测**并列；不是替代 `make gate`。  
+> **流程图**：L1→L2→L3 读法见 [`06-ops-audit-l1-l2-l3.png`](assets/rag/06-ops-audit-l1-l2-l3.png)（详解：[RAG-mental-model](RAG-mental-model.md) 图册 #6）。
 
 ### 6.1 要解决什么
 
@@ -160,7 +161,7 @@ Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspa
 | 精确跳转 | 可选折叠输入 `turn_id`（调试用） |
 | 展示 | L1 `recall_pool` · L2 `ranked` · L3 `entered_context`（含 truncated） |
 | 导出 | 页内「导出当前 JSON」 |
-| API | `GET /api/v1/ops/retrieval/recent` · `GET /api/v1/ops/retrieval/turns/{turn_id}`（Bearer = `OPS_TEST_SECRET`）；只读 |
+| API | `GET /api/v1/ops/retrieval/recent`（`q` / `status` / `scenario` / `limit` / `offset`，响应含 `total`）· `GET /api/v1/ops/retrieval/turns/{turn_id}`（Bearer = `OPS_TEST_SECRET`）；只读 |
 | 事件 | `retrieval.completed.payload.audit`（契约已扩）；**不**写入模型 tool_result |
 | 鉴权 / 隔离 | 与 §1 同密钥；只读 DB；禁止写 `/workspace` |
 | 读法 | L1 常宽于 L3；`rank_method` 应为 `lexical`/`none`/`cross_encoder`。若见 `rank_method=hybrid` 且三层同构，曾是 two-level 未传播 ContextVar 的捕获兜底（已修，见 [33](33-harness-maturity-backlog.md) HM5） |
@@ -188,7 +189,7 @@ Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspa
 |------|------|
 | 入口 | `/ops/<secret>/envelopes`（Ops 壳导航「模型信封」） |
 | 浏览 | 默认列出最近有信封落盘的 Turn；点开看哈希 / 全文 |
-| API | `GET /api/v1/ops/envelopes/recent` · `GET /api/v1/ops/envelopes/turns/{turn_id}` |
+| API | `GET /api/v1/ops/envelopes/recent`（同检索：`q` / `status` / `scenario` / 分页）· `GET /api/v1/ops/envelopes/turns/{turn_id}` |
 | 表 | `model_request_envelopes`（Alembic `0015`） |
 | 写入 | assemble 后异步；不进 SSE / 默认投影 |
 | 降采样 | 若需省盘：设 `MODEL_ENVELOPE_SAMPLE_RATE=0.05` 等后重建 runtime |
@@ -201,7 +202,7 @@ Compose 为 api 挂载 **`agent_data`（`/data`，含 ops scratch）**、workspa
 |------|------|
 | 入口 | `/ops/<secret>/raw`（Ops 壳「Raw 快照」） |
 | 浏览 | 最近有 raw 的 Turn；点开看 step 快照；messages 默认折叠 |
-| API | `GET /api/v1/ops/raw/recent` · `GET /api/v1/ops/raw/turns/{turn_id}` |
+| API | `GET /api/v1/ops/raw/recent`（同检索：`q` / `status` / `scenario` / 分页）· `GET /api/v1/ops/raw/turns/{turn_id}` |
 | 表 | `session_raw_snapshots`（Alembic `0014`） |
 | 纪律 | **永不**把该仓内容直接当作模型窗 |
 | 同 Turn 互链 | 检索 / 信封 / Raw 页顶「同 Turn 观测」+ `?turn=` |

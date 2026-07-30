@@ -106,22 +106,62 @@ async def load_run(run_id: str) -> dict[str, Any] | None:
     return _row_to_dict(row, include_logs=True)
 
 
-async def list_runs(*, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
+async def list_runs(
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+    mode: str | None = None,
+    suite: str | None = None,
+    q: str | None = None,
+) -> tuple[list[dict[str, Any]], int]:
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
+    clauses: list[str] = []
+    args: list[Any] = []
+
+    def _add(clause: str, value: Any) -> None:
+        args.append(value)
+        clauses.append(clause.replace("?", f"${len(args)}"))
+
+    if status:
+        _add("status = ?", status.strip().lower())
+    if mode:
+        _add("mode = ?", mode.strip().lower())
+    if suite:
+        suite_norm = suite.strip().lower()
+        # suite lives in model_meta JSON; legacy rows without suite are golden
+        args.append(suite_norm)
+        n = len(args)
+        clauses.append(
+            f"(COALESCE(NULLIF(TRIM(model_meta->>'suite'), ''), 'golden') = ${n})"
+        )
+    if q:
+        needle = q.strip()
+        if needle:
+            args.append(f"%{needle}%")
+            n = len(args)
+            clauses.append(
+                f"(id::text ILIKE ${n} OR COALESCE(error, '') ILIKE ${n})"
+            )
+
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     pool = await get_pool()
+    total = int(await pool.fetchval(f"SELECT COUNT(*) FROM ops_eval_runs {where}", *args) or 0)
+    args.extend([limit, offset])
+    lim_i, off_i = len(args) - 1, len(args)
     rows = await pool.fetch(
-        """
+        f"""
         SELECT id, status, mode, restart_runtime, created_at, finished_at, error,
                model_meta, summary, cases, logs
         FROM ops_eval_runs
+        {where}
         ORDER BY created_at DESC
-        LIMIT $1 OFFSET $2
+        LIMIT ${lim_i} OFFSET ${off_i}
         """,
-        limit,
-        offset,
+        *args,
     )
-    return [_row_to_summary(row) for row in rows]
+    return [_row_to_summary(row) for row in rows], total
 
 
 def _as_obj(value: Any) -> Any:
