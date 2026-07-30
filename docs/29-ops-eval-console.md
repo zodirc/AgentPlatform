@@ -34,7 +34,13 @@
 | **`ci`（默认）** | 跑 `scripts/ci_proof.sh`：unit（ux / runtime / api / contracts）→ `make gate`（smoke + 全量 golden；**不**再跑一遍 runtime pytest） | **是** |
 | **`golden`** | 进程内对当前 api/runtime 点选 Golden Turn | 否（可 skipped） |
 
-`suite=ci` 通过 Docker socket 起 `agent-ops-proof` 镜像，把仓库以**宿主机同路径**挂进容器执行（与 compose 相对挂载兼容）。首次会构建镜像。默认 compose 不挂 socket；需要这类本地 Ops 证明时，以 `-f deploy/compose/ops-eval.yml` 显式叠加。`make gate` 会重建 runtime，结束后**恢复日常栈**（`GATE_SKIP_RESTORE=0`）。CI 无头用 `GATE_SKIP_RESTORE=1`。
+`suite=ci` 通过 Docker socket 起 `agent-ops-proof` 镜像，把仓库以**宿主机同路径**挂进容器执行（与 compose 相对挂载兼容）。首次会构建镜像。默认 compose **不**挂 socket（安全默认）；本地要开完整证明：
+
+```bash
+make up-ops-eval   # 等同叠加 deploy/compose/ops-eval.yml 重建 api
+```
+
+之后若再 `make up` / `make up-api`，sock 会被摘掉，需重跑 `make up-ops-eval`。`make gate` 会重建 runtime，结束后**恢复日常栈**（`GATE_SKIP_RESTORE=0`）。CI 无头用 `GATE_SKIP_RESTORE=1`。
 
 ### 2.1 Golden 切片行为
 

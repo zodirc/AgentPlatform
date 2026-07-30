@@ -1,6 +1,3 @@
-import { Link } from "react-router-dom";
-import { useTheme } from "../shared/theme/ThemeProvider";
-import type { ThemeId } from "../shared/theme/theme";
 import type { ReactNode } from "react";
 import {
   opsConsolePath,
@@ -9,6 +6,10 @@ import {
   opsRawPath,
   opsRetrievalPath,
 } from "./opsPaths";
+import { OpsIngestionStrip } from "./OpsIngestionStrip";
+import { useTheme } from "../shared/theme/ThemeProvider";
+import type { ThemeId } from "../shared/theme/theme";
+import { Link } from "react-router-dom";
 
 export {
   opsConsolePath,
@@ -103,6 +104,7 @@ export function OpsShell({
             })}
           </div>
         </header>
+        {secret ? <OpsIngestionStrip secret={secret} /> : null}
         {children}
       </main>
     </div>

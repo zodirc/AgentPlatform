@@ -27,14 +27,14 @@ DOCKER_AUTO_PRUNE ?= 1
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	ensure-ops-secret fix-workspace-sources \
-	up-web up-api up-runtime restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-ops-eval restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources seed-sources retrieval-bench-prod loc \
+	sync-sources seed-sources intel-corpus-fetch retrieval-bench-prod loc \
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup
 
 help: ## 显示常用命令
@@ -48,6 +48,7 @@ help: ## 显示常用命令
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
 	@echo "  make eval-plan-suggest-tune 搜索权重提案（只写 reports）"
 	@echo "  make ensure-ops-secret  若空则生成 OPS_TEST_SECRET 并打印评测台 URL"
+	@echo "  make up-ops-eval     给 api 挂 docker.sock（Ops 完整证明 ≡ CI 必需）"
 	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
 	@echo ""
 	@echo "完整部署"
@@ -67,8 +68,9 @@ help: ## 显示常用命令
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
 	@echo "  make retrieval-bench 离线检索 A/B（docs/15 契约近似；hash）"
 	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
-	@echo "  make sync-sources    Turn 外索引 workspace/sources（含挂载 seed）"
+	@echo "  make sync-sources    Turn 外索引（进度在本终端；含挂载 seed）"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
+	@echo "  make intel-corpus-fetch  拉取/转换 intel vendor 语料（gitignore；docs seed/intel）"
 	@echo "  make runtime-test 运行时测试"
 	@echo "  make preflight       推送前 unit 门禁（pre-push 默认；无长连接风险）"
 	@echo "  make preflight-ci    全量本地 CI（ci_proof+web；久；推送前手动跑）"
@@ -119,6 +121,13 @@ up-web: ## 只重建 web（若刚生成 OPS 密钥则顺带 recreate api）
 up-api: ensure-ops-secret ## 只重建 api
 	$(COMPOSE) up -d --build api
 	$(docker_auto_prune)
+
+# Opt-in: mount docker.sock so Ops「完整证明」proof_available=true (docs/29).
+# Plain make up / up-api intentionally omit the socket (security default).
+up-ops-eval: ensure-ops-secret ## api + docker.sock（启用 Ops suite=ci）
+	$(COMPOSE_OPS_EVAL) up -d --no-deps --force-recreate api
+	@echo "==> Ops 完整证明已启用；刷新 /ops/<OPS_TEST_SECRET>/test"
+	@echo "    注意：之后再 make up / up-api 会去掉 sock，需重跑本目标"
 
 up-runtime: ## 只重建 runtime
 	$(COMPOSE) up -d --build runtime
@@ -351,11 +360,35 @@ preflight-ci: ## 全量本地 CI（≡ Actions；久。建议: make preflight-ci
 
 hooks-install: ensure-git-hooks ## 同 ensure-git-hooks（兼容旧目标名）
 
-sync-sources: ## Turn 外增量索引 workspace/sources（含 RO 挂载的 seed；docs/15）
-	$(COMPOSE) exec -T runtime python -c 'import asyncio; from app.retrieval.index_scheduler import run_sources_index_sync; print(asyncio.run(run_sources_index_sync(reason="make")))'
+sync-sources: ## Turn 外增量索引（进度打到本终端 stderr；docs/15）
+	@echo "==> sync-sources: cold Python process (loads embedder first; can be silent 1–3 min)"
+	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -c "$$SYNC_SOURCES_PY"
+
+# Inline so progress works even before image rebuild copies sync_cli.py.
+define SYNC_SOURCES_PY
+import asyncio, json, logging, sys
+sys.stderr.reconfigure(line_buffering=True) if hasattr(sys.stderr, "reconfigure") else None
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stderr,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    force=True,
+)
+logging.getLogger("app.retrieval").setLevel(logging.INFO)
+from app.retrieval.index_scheduler import run_sources_index_sync
+r = asyncio.run(run_sources_index_sync(reason="make"))
+print(json.dumps(r, ensure_ascii=False, default=str), flush=True)
+raise SystemExit(0 if str(r.get("status") or "ok") == "ok" else 1)
+endef
+export SYNC_SOURCES_PY
 
 seed-sources: ## 同 sync-sources：对挂载的常驻 seed 重新建索引（不拷贝文件）
 	@$(MAKE) sync-sources
+
+# ONLY=id1,id2 optional. Requires network + git. Does not touch Turn hot path.
+intel-corpus-fetch: ## 按 SOURCES.yaml 拉取并转换 intel vendor（≤150MiB；gitignore）
+	@python3 -c 'import yaml' 2>/dev/null || pip install -q pyyaml
+	@python3 scripts/intel_corpus_fetch.py $(if $(ONLY),--only $(ONLY),)
 
 security-audit:
 	bash scripts/security_audit.sh

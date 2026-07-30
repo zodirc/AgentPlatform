@@ -21,6 +21,7 @@ from app.routers import (
     health,
     ops_envelope,
     ops_eval,
+    ops_ingestion,
     ops_raw,
     ops_retrieval,
     runs,
@@ -125,6 +126,7 @@ if (settings.ops_test_secret or "").strip():
     app.include_router(ops_retrieval.router, prefix="/api/v1")
     app.include_router(ops_envelope.router, prefix="/api/v1")
     app.include_router(ops_raw.router, prefix="/api/v1")
+    app.include_router(ops_ingestion.router, prefix="/api/v1")
 
 
 @app.exception_handler(RequestValidationError)
