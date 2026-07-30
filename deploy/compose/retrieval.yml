@@ -10,6 +10,7 @@ services:
     build:
       context: ..
       dockerfile: services/runtime/Dockerfile.retrieval
+      target: app
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}

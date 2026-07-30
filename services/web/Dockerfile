@@ -1,4 +1,5 @@
 # syntax=docker/dockerfile:1
+# BR5 (docs/38): install keyed on package.json+lock; src COPY after pnpm install.
 
 FROM node:20-alpine AS builder
 # Keep monorepo-relative imports working (planSuggest → packages/contracts/...)

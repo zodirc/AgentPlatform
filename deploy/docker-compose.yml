@@ -35,7 +35,9 @@ services:
       context: ..
       # Default deploy image includes baked sentence-transformers (docs/03).
       # Lightweight hash-only image: services/runtime/Dockerfile (CI / make eval-*).
+      # target app = thin layer (docs/38); deps stage holds pip + ST bake.
       dockerfile: services/runtime/Dockerfile.retrieval
+      target: app
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
         # China defaults in Dockerfiles; CI clears APT_MIRROR and points pip/npm
@@ -121,6 +123,7 @@ services:
     build:
       context: ..
       dockerfile: services/api/Dockerfile
+      target: app
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}

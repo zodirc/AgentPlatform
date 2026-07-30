@@ -22,6 +22,7 @@ services:
     build:
       context: ..
       dockerfile: services/api/Dockerfile
+      target: app
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}

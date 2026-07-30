@@ -22,6 +22,10 @@ EVAL_RESTORE_SERVICES ?= runtime api
 EVAL_BUILD ?=
 # After compose --build, prune dangling images (set DOCKER_AUTO_PRUNE=0 to skip).
 DOCKER_AUTO_PRUNE ?= 1
+# docs/38: set *_REBUILD_DEPS=1 to force --no-cache (rebuild pip/ST deps layers).
+API_REBUILD_DEPS ?= 0
+RUNTIME_REBUILD_DEPS ?= 0
+WEB_REBUILD_DEPS ?= 0
 
 .DEFAULT_GOAL := help
 
@@ -40,9 +44,9 @@ DOCKER_AUTO_PRUNE ?= 1
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
 	@echo "  make start        启动栈，不重建镜像（改代码后配合下面单服务命令）"
-	@echo "  make up-web       只重建并重启 web"
-	@echo "  make up-api       只重建并重启 api"
-	@echo "  make up-runtime   只重建并重启 runtime"
+	@echo "  make up-web       只重建 web（WEB_REBUILD_DEPS=1 强制 pnpm 重装）"
+	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
+	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
@@ -50,6 +54,7 @@ help: ## 显示常用命令
 	@echo "  make ensure-ops-secret  若空则生成 OPS_TEST_SECRET 并打印评测台 URL"
 	@echo "  make up-ops-eval     给 api 挂 docker.sock（Ops 完整证明 ≡ CI 必需）"
 	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
+	@echo "  # docs/38：改 app 代码不必 *_REBUILD_DEPS；改 pyproject/模型才需要"
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
@@ -107,7 +112,8 @@ up: ensure-ops-secret ensure-git-hooks ## 重建并启动全部服务
 	$(docker_auto_prune)
 
 # Secret is consumed by api only. up-web may generate it for the first time — recreate api then.
-up-web: ## 只重建 web（若刚生成 OPS 密钥则顺带 recreate api）
+# --no-deps: do not rebuild/restart depends_on (api→runtime); otherwise up-api pays runtime ST/pip.
+up-web: ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
 	@status=$$(mktemp); \
 	OPS_SECRET_STATUS_FILE=$$status bash scripts/ensure_ops_test_secret.sh; \
 	gen=$$(grep '^generated=' $$status | cut -d= -f2); rm -f $$status; \
@@ -115,11 +121,19 @@ up-web: ## 只重建 web（若刚生成 OPS 密钥则顺带 recreate api）
 	  echo "==> new OPS_TEST_SECRET → recreating api to load env"; \
 	  $(COMPOSE) up -d --no-deps --force-recreate api; \
 	fi
-	$(COMPOSE) up -d --build web
+	@if [ "$(WEB_REBUILD_DEPS)" = "1" ]; then \
+	  echo "==> WEB_REBUILD_DEPS=1 → docker compose build --no-cache web"; \
+	  $(COMPOSE) build --no-cache web; \
+	fi
+	$(COMPOSE) up -d --no-deps --build web
 	$(docker_auto_prune)
 
-up-api: ensure-ops-secret ## 只重建 api
-	$(COMPOSE) up -d --build api
+up-api: ensure-ops-secret ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache）
+	@if [ "$(API_REBUILD_DEPS)" = "1" ]; then \
+	  echo "==> API_REBUILD_DEPS=1 → docker compose build --no-cache api"; \
+	  $(COMPOSE) build --no-cache api; \
+	fi
+	$(COMPOSE) up -d --no-deps --build api
 	$(docker_auto_prune)
 
 # Opt-in: mount docker.sock so Ops「完整证明」proof_available=true (docs/29).
@@ -129,8 +143,12 @@ up-ops-eval: ensure-ops-secret ## api + docker.sock（启用 Ops suite=ci）
 	@echo "==> Ops 完整证明已启用；刷新 /ops/<OPS_TEST_SECRET>/test"
 	@echo "    注意：之后再 make up / up-api 会去掉 sock，需重跑本目标"
 
-up-runtime: ## 只重建 runtime
-	$(COMPOSE) up -d --build runtime
+up-runtime: ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
+	@if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
+	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime"; \
+	  $(COMPOSE) build --no-cache runtime; \
+	fi
+	$(COMPOSE) up -d --no-deps --build runtime
 	$(docker_auto_prune)
 
 restart-web: ## 重启 web（不 rebuild）

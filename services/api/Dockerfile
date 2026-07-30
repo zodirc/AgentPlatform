@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
+# BR1 (docs/38): deps stage installs pip from pyproject + stub package only;
+# app stage COPY real sources. Changing app/** must not re-run pip.
 
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim AS deps
 
 # China-friendly defaults; override at build time for CI (see proof_compose_env.sh).
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
@@ -26,12 +28,17 @@ RUN set -eux; \
 
 RUN useradd --create-home --uid 1000 app
 WORKDIR /app
+
 COPY packages/contracts/python /contracts/python
 COPY services/api/pyproject.toml /tmp/api/pyproject.toml
-COPY services/api/app /tmp/api/app
-RUN pip install --no-cache-dir /contracts/python \
+# Minimal stub so hatchling can build the wheel without copying real app sources
+# into the deps layer input (docs/38 §3.3).
+RUN mkdir -p /tmp/api/app && printf '%s\n' '# deps-layer stub' > /tmp/api/app/__init__.py \
+    && pip install --no-cache-dir /contracts/python \
     && pip install --no-cache-dir /tmp/api \
     && rm -rf /tmp/api
+
+FROM deps AS app
 COPY services/api/app /app/app
 COPY services/api/alembic.ini /app/alembic.ini
 COPY services/api/alembic /app/alembic

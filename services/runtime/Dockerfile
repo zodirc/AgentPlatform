@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1
+# Lightweight runtime (hash embedding). BR2 (docs/38): deps/app stages so
+# app/** changes do not re-run pip.
 
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim AS deps
 
 # Defaults favor China local builds. CI / GitHub Actions override via compose
-# build-args (see scripts/proof_compose_env.sh) — aliyun/npmmirror hang on
-# ubuntu-latest otherwise (job hits the 2h timeout).
+# build-args (see scripts/proof_compose_env.sh).
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
-# Empty APT_MIRROR → keep Debian defaults (required for GitHub-hosted runners).
 ARG APT_MIRROR=mirrors.aliyun.com
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
@@ -27,14 +27,16 @@ RUN set -eux; \
 RUN useradd --create-home --uid 1000 app
 RUN mkdir -p /data/vectorstore /data/models && chown -R app:app /data
 WORKDIR /app
+
 COPY packages/contracts/python /contracts/python
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
-COPY services/runtime/app /tmp/runtime/app
-RUN pip install --no-cache-dir /contracts/python \
+RUN mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
+    && pip install --no-cache-dir /contracts/python \
     && pip install --no-cache-dir /tmp/runtime \
     && rm -rf /tmp/runtime
+
+FROM deps AS app
 COPY services/runtime/app /app/app
-COPY services/runtime/app/scenarios /app/app/scenarios
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest

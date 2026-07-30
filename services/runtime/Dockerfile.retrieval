@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-# Retrieval runtime: CPU torch + sentence-transformers + baked local embedding model.
+# Retrieval runtime: CPU torch + sentence-transformers + baked embedding model.
+# BR3 (docs/38): model-baker + deps (pip/ST/models) then thin app stage.
+# Changing app/** / system.md must not re-download torch or re-bake MiniLM.
 
 ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
@@ -38,7 +40,7 @@ RUN python -c "\
 from sentence_transformers import SentenceTransformer; \
 SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"
 
-FROM python:3.11-slim AS runtime
+FROM python:3.11-slim AS deps
 ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
@@ -66,15 +68,17 @@ WORKDIR /app
 
 COPY packages/contracts/python /contracts/python
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
-COPY services/runtime/app /tmp/runtime/app
-RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
+RUN mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
+    && pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir /contracts/python \
     && pip install --no-cache-dir "/tmp/runtime[retrieval]" \
     && rm -rf /tmp/runtime
 
 COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
+
+FROM deps AS app
+ARG EMBEDDING_MODEL
 COPY services/runtime/app /app/app
-COPY services/runtime/app/scenarios /app/app/scenarios
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest
