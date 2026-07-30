@@ -647,6 +647,30 @@ export type SourceUploadResult = {
   };
 };
 
+export type SourcesIndexProgress = {
+  status?: string;
+  phase?: string;
+  reason?: string;
+  visibility?: string;
+  label?: string;
+  path?: string | null;
+  error?: string | null;
+  files_done?: number | null;
+  files_total?: number | null;
+  dirty_files?: number | null;
+  chunks_embedded?: number | null;
+  chunks_total?: number | null;
+  rate_chunks_per_s?: number | null;
+  elapsed_s?: number | null;
+  eta_s?: number | null;
+  embedding_backend?: string | null;
+  batch_size?: number | null;
+  updated_at?: string | null;
+  plane?: string;
+  effect_ready?: boolean;
+  last_result?: SourcesIndexStatus["last_result"];
+};
+
 export type SourcesIndexStatus = {
   status: "idle" | "building" | "ready" | "error" | string;
   path?: string | null;
@@ -663,6 +687,8 @@ export type SourcesIndexStatus = {
   /** IX3: always false from this endpoint; effect = prod-bench / hard queries. */
   effect_ready?: boolean;
   hint?: string;
+  /** Live sync progress (scan/embed/write); shared across processes via data_dir. */
+  progress?: SourcesIndexProgress | null;
   last_result?: {
     indexed_files?: number;
     chunks?: number;

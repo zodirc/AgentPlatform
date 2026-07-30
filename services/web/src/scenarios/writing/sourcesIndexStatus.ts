@@ -1,4 +1,7 @@
-import type { SourcesIndexStatus } from "../../shared/api/client";
+import type {
+  SourcesIndexProgress,
+  SourcesIndexStatus,
+} from "../../shared/api/client";
 
 export type SourcesIndexStatusLabel = {
   text: string;
@@ -7,6 +10,79 @@ export type SourcesIndexStatusLabel = {
 
 /** IX3: never imply upload/index-ready == retrieval quality. */
 const EFFECT_DISCLAIMER = "效果闸仍看 prod-bench / 难句";
+
+const PHASE_LABEL: Record<string, string> = {
+  starting: "启动",
+  loading_embedder: "加载嵌入模型",
+  scope: "选择范围",
+  scan: "扫描切块",
+  plan: "计划嵌入",
+  embed: "嵌入向量",
+  write: "写入索引",
+  finished: "完成",
+  error: "失败",
+};
+
+export function formatEta(seconds: number | null | undefined): string | null {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 60) return `约 ${Math.ceil(seconds)}s`;
+  const mins = Math.ceil(seconds / 60);
+  return `约 ${mins} min`;
+}
+
+export function progressPercent(progress: SourcesIndexProgress | null | undefined): number | null {
+  if (!progress) return null;
+  const done = progress.chunks_embedded;
+  const total = progress.chunks_total;
+  if (
+    done != null &&
+    total != null &&
+    Number.isFinite(done) &&
+    Number.isFinite(total) &&
+    total > 0
+  ) {
+    return Math.min(100, Math.max(0, (Number(done) / Number(total)) * 100));
+  }
+  const filesDone = progress.files_done;
+  const filesTotal = progress.files_total;
+  if (
+    filesDone != null &&
+    filesTotal != null &&
+    Number.isFinite(filesDone) &&
+    Number.isFinite(filesTotal) &&
+    filesTotal > 0
+  ) {
+    return Math.min(100, Math.max(0, (Number(filesDone) / Number(filesTotal)) * 100));
+  }
+  return null;
+}
+
+/** Compact progress line for library / path status (ingestion plane). */
+export function formatIngestionProgress(
+  progress: SourcesIndexProgress | null | undefined,
+): string | null {
+  if (!progress) return null;
+  const phase = progress.phase ? PHASE_LABEL[progress.phase] || progress.phase : null;
+  const parts: string[] = [];
+  if (phase) parts.push(phase);
+  if (
+    progress.chunks_embedded != null &&
+    progress.chunks_total != null &&
+    progress.chunks_total > 0
+  ) {
+    parts.push(`块 ${progress.chunks_embedded}/${progress.chunks_total}`);
+  } else if (progress.files_done != null) {
+    const total =
+      progress.files_total != null ? `/${progress.files_total}` : "";
+    parts.push(`文件 ${progress.files_done}${total}`);
+  }
+  if (progress.rate_chunks_per_s != null && progress.rate_chunks_per_s > 0) {
+    parts.push(`${progress.rate_chunks_per_s}/s`);
+  }
+  const eta = formatEta(progress.eta_s);
+  if (eta) parts.push(`剩余 ${eta}`);
+  return parts.length ? parts.join(" · ") : null;
+}
 
 /** Per-path upload/paste status (ingestion plane). */
 export function sourcesIndexStatusLabel(
@@ -31,9 +107,11 @@ export function sourcesIndexStatusLabel(
     status.status === "building" ||
     (polling && !status.path_current)
   ) {
+    const detail = formatIngestionProgress(status.progress);
     return {
-      text:
-        status.status === "pending"
+      text: detail
+        ? `已保存 ${savedPath} · ${detail}`
+        : status.status === "pending"
           ? `已保存 ${savedPath} · 等待后台投影…`
           : `已保存 ${savedPath} · 索引投影中…`,
       tone: "pending",
@@ -74,7 +152,13 @@ export function libraryIndexStatusLabel(
     status.status === "building" ||
     polling
   ) {
-    return { text: "资料库索引投影中（不挡对话）…", tone: "pending" };
+    const detail = formatIngestionProgress(status.progress);
+    return {
+      text: detail
+        ? `资料库投影中（不挡对话）· ${detail}`
+        : "资料库索引投影中（不挡对话）…",
+      tone: "pending",
+    };
   }
   if (status.status === "ready" || status.status === "idle") {
     const files = status.indexed_files ?? status.last_result?.indexed_files;

@@ -19,6 +19,7 @@ import {
   libraryIndexStatusLabel,
   sourcesIndexStatusLabel,
 } from "./sourcesIndexStatus";
+import { IngestionProgressBar } from "./IngestionProgressBar";
 
 type Props = {
   open: boolean;
@@ -49,18 +50,23 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
   });
   const seedVisible = workQuery.data?.visibility_seed !== false;
 
+  /** Always poll lightly while modal open so make sync-sources / startup show up. */
   const indexQuery = useQuery({
-    queryKey: ["sources-index-status", watchPath ?? (watchLibrary ? "__library__" : null)],
-    queryFn: () =>
-      fetchSourcesIndexStatus(watchPath ?? undefined),
-    enabled: open && (Boolean(watchPath) || watchLibrary),
+    queryKey: [
+      "sources-index-status",
+      watchPath ?? (watchLibrary ? "__library__" : "__idle__"),
+    ],
+    queryFn: () => fetchSourcesIndexStatus(watchPath ?? undefined),
+    enabled: open,
     refetchInterval: (query) => {
       const data = query.state.data as SourcesIndexStatus | undefined;
-      if (!data) return 1000;
+      if (!data) return 1500;
       if (data.status === "building" || data.status === "pending") return 1000;
+      if (data.progress?.status === "building") return 1000;
       if (watchPath && !data.path_current && data.status !== "error")
         return 1000;
-      return false;
+      if (watchLibrary) return 1500;
+      return 5000;
     },
   });
 
@@ -169,15 +175,24 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
     (syncMutation.isPending ||
       indexQuery.isFetching ||
       indexQuery.data?.status === "building" ||
-      indexQuery.data?.status === "pending");
+      indexQuery.data?.status === "pending" ||
+      indexQuery.data?.progress?.status === "building");
+  const backgroundBuilding =
+    !watchPath &&
+    !watchLibrary &&
+    (indexQuery.data?.status === "building" ||
+      indexQuery.data?.progress?.status === "building");
   const pathStatusLine = sourcesIndexStatusLabel(
     watchPath,
     indexQuery.data,
     pathPolling,
   );
   const libraryStatusLine =
-    watchLibrary || libraryPolling
-      ? libraryIndexStatusLabel(indexQuery.data, libraryPolling)
+    watchLibrary || libraryPolling || backgroundBuilding
+      ? libraryIndexStatusLabel(
+          indexQuery.data,
+          libraryPolling || backgroundBuilding,
+        )
       : null;
   const statusLine = pathStatusLine ?? libraryStatusLine;
 
@@ -304,6 +319,10 @@ export function SourcesLibraryModal({ open, onClose, onOpenFile }: Props) {
                   >
                     {statusLine.text}
                   </span>
+                ) : null}
+                {(libraryPolling || backgroundBuilding || pathPolling) &&
+                indexQuery.data ? (
+                  <IngestionProgressBar status={indexQuery.data} />
                 ) : null}
                 {lastErr && !busy ? (
                   <span className="block text-xs text-destructive">{lastErr}</span>

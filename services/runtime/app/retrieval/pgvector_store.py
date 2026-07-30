@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
-from app.retrieval.chunking import build_embed_text, chunk_source_text, should_index_source
+from app.retrieval.chunking import chunk_source_text, should_index_source
 from app.retrieval.embedder import get_embedder
 from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
@@ -265,6 +265,16 @@ class PgvectorSourceRetrievalStore:
         visibility: str = "private",
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        import logging
+        import time
+
+        from app.retrieval.index_embed import (
+            assign_deferred_vectors,
+            embedding_batch_size,
+            progress_every_files,
+        )
+
+        logger = logging.getLogger(__name__)
         self.ensure_schema()
         if not sources_dir.exists():
             return {
@@ -279,6 +289,17 @@ class PgvectorSourceRetrievalStore:
 
         from app.retrieval.tenant_visibility import index_storage_path
 
+        try:
+            from app.retrieval.sync_progress import report_sync_progress
+
+            report_sync_progress(
+                status="building",
+                phase="loading_embedder",
+                visibility=(visibility or "private").strip() or "private",
+                embedding_backend=settings.embedding_backend,
+            )
+        except Exception:
+            pass
         embedder = get_embedder()
         owner_id = owner_user_id if owner_user_id is not None else self._default_owner_user_id()
         vis = (visibility or "private").strip() or "private"
@@ -290,6 +311,7 @@ class PgvectorSourceRetrievalStore:
         skipped = 0
         seen_paths: set[str] = set()
         total_chunks = 0
+        sync_t0 = time.monotonic()
 
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -316,6 +338,31 @@ class PgvectorSourceRetrievalStore:
                     cur.execute("SELECT path, mtime FROM source_files WHERE false")
                 prev_files = {row[0]: float(row[1]) for row in cur.fetchall()}
 
+                # Collect dirty files first (defer embed) so we can batch encode.
+                pending_jobs: list[dict[str, Any]] = []
+                scanned = 0
+                scan_every = max(progress_every_files(), 50)
+                logger.info(
+                    "sources index sync scan start; visibility=%s dir=%s "
+                    "force_reindex=%s",
+                    vis,
+                    sources_dir,
+                    force_reindex,
+                )
+                try:
+                    from app.retrieval.sync_progress import report_sync_progress
+
+                    report_sync_progress(
+                        status="building",
+                        phase="scan",
+                        visibility=vis,
+                        files_done=0,
+                        files_total=None,
+                        chunks_embedded=0,
+                        elapsed_s=0.0,
+                    )
+                except Exception:
+                    pass
                 for fp in sorted(sources_dir.rglob("*")):
                     if not fp.is_file() or not should_index_source(fp):
                         continue
@@ -331,6 +378,31 @@ class PgvectorSourceRetrievalStore:
                     )
                     seen_paths.add(storage_path)
                     mtime = fp.stat().st_mtime
+                    scanned += 1
+                    if scan_every and scanned % scan_every == 0:
+                        logger.info(
+                            "sources index sync scan; visibility=%s scanned=%s "
+                            "dirty=%s skipped=%s",
+                            vis,
+                            scanned,
+                            len(pending_jobs),
+                            skipped,
+                        )
+                        try:
+                            from app.retrieval.sync_progress import report_sync_progress
+
+                            report_sync_progress(
+                                status="building",
+                                phase="scan",
+                                visibility=vis,
+                                files_done=scanned,
+                                files_total=None,
+                                dirty_files=len(pending_jobs),
+                                skipped=skipped,
+                                elapsed_s=round(time.monotonic() - sync_t0, 1),
+                            )
+                        except Exception:
+                            pass
                     if not force_reindex and prev_files.get(storage_path) == mtime:
                         cur.execute(
                             "SELECT chunk_count FROM source_files WHERE path = %s",
@@ -340,86 +412,196 @@ class PgvectorSourceRetrievalStore:
                         total_chunks += int(row[0]) if row else 0
                         skipped += 1
                         continue
-
                     text = fp.read_text(encoding="utf-8", errors="replace")
                     new_chunks = chunk_source_text(
-                        fp, storage_path, text, embedder=embedder
+                        fp, storage_path, text, embedder=embedder, embed=False
                     )
-                    cur.execute(
-                        "DELETE FROM source_chunks WHERE path = %s", (storage_path,)
+                    pending_jobs.append(
+                        {
+                            "storage_path": storage_path,
+                            "mtime": mtime,
+                            "chunks": new_chunks,
+                            "is_update": storage_path in prev_files,
+                        }
                     )
-                    cur.execute(
-                        """
-                        INSERT INTO source_files (
-                            path, mtime, chunk_count, updated_at, owner_user_id,
-                            work_id, visibility
+
+                chunks_total = sum(len(j["chunks"]) for j in pending_jobs)
+                logger.info(
+                    "sources index sync plan; visibility=%s dirty_files=%s "
+                    "dirty_chunks=%s skipped=%s batch_size=%s force_reindex=%s",
+                    vis,
+                    len(pending_jobs),
+                    chunks_total,
+                    skipped,
+                    embedding_batch_size(),
+                    force_reindex,
+                )
+                try:
+                    from app.retrieval.sync_progress import report_sync_progress
+
+                    report_sync_progress(
+                        force=True,
+                        status="building",
+                        phase="plan",
+                        visibility=vis,
+                        files_done=0,
+                        files_total=len(pending_jobs),
+                        chunks_embedded=0,
+                        chunks_total=chunks_total,
+                        skipped=skipped,
+                        elapsed_s=round(time.monotonic() - sync_t0, 1),
+                        embedding_backend=settings.embedding_backend,
+                    )
+                except Exception:
+                    pass
+
+                # Flush deferred embeds in cross-file batches, then write rows.
+                batch_cap = max(embedding_batch_size(), embedding_batch_size() * 2)
+                buffer_jobs: list[dict[str, Any]] = []
+                buffer_chunk_count = 0
+                chunks_embedded = 0
+                files_done = 0
+                every = progress_every_files()
+
+                def _flush_buffer() -> None:
+                    nonlocal chunks_embedded, files_done, added, updated, total_chunks
+                    if not buffer_jobs:
+                        return
+                    flat: list[dict[str, Any]] = []
+                    for job in buffer_jobs:
+                        flat.extend(job["chunks"])
+                    chunks_embedded += assign_deferred_vectors(
+                        flat,
+                        embedder,
+                        label=vis,
+                        chunks_done_before=chunks_embedded,
+                        chunks_total_hint=chunks_total,
+                    )
+                    for job in buffer_jobs:
+                        storage_path = job["storage_path"]
+                        new_chunks = job["chunks"]
+                        mtime = job["mtime"]
+                        cur.execute(
+                            "DELETE FROM source_chunks WHERE path = %s", (storage_path,)
                         )
-                        VALUES (%s, %s, %s, NOW(), %s, %s, %s)
-                        ON CONFLICT (path) DO UPDATE SET
-                            mtime = EXCLUDED.mtime,
-                            chunk_count = EXCLUDED.chunk_count,
-                            updated_at = NOW(),
-                            owner_user_id = EXCLUDED.owner_user_id,
-                            work_id = EXCLUDED.work_id,
-                            visibility = EXCLUDED.visibility
-                        """,
-                        (storage_path, mtime, len(new_chunks), owner_id, wid, vis),
-                    )
-                    for chunk in new_chunks:
-                        vec = chunk.get("vector")
-                        if not isinstance(vec, list):
-                            vec = embedder.embed(
-                                build_embed_text(
-                                    storage_path,
-                                    str(chunk.get("text", "")),
-                                    tags=chunk.get("tags"),
-                                )
-                            )
-                        if len(vec) != self._dimensions:
-                            raise RuntimeError(
-                                f"embedding dim {len(vec)} != configured {self._dimensions}"
-                            )
                         cur.execute(
                             """
-                            INSERT INTO source_chunks (
-                                chunk_id, path, section_title, text, citation_id,
-                                line_start, line_end, embedding, owner_user_id,
+                            INSERT INTO source_files (
+                                path, mtime, chunk_count, updated_at, owner_user_id,
                                 work_id, visibility
-                            ) VALUES (
-                                %s, %s, %s, %s, %s, %s, %s, %s::vector, %s,
-                                %s, %s
                             )
-                            ON CONFLICT (chunk_id) DO UPDATE SET
-                                path = EXCLUDED.path,
-                                section_title = EXCLUDED.section_title,
-                                text = EXCLUDED.text,
-                                citation_id = EXCLUDED.citation_id,
-                                line_start = EXCLUDED.line_start,
-                                line_end = EXCLUDED.line_end,
-                                embedding = EXCLUDED.embedding,
+                            VALUES (%s, %s, %s, NOW(), %s, %s, %s)
+                            ON CONFLICT (path) DO UPDATE SET
+                                mtime = EXCLUDED.mtime,
+                                chunk_count = EXCLUDED.chunk_count,
+                                updated_at = NOW(),
                                 owner_user_id = EXCLUDED.owner_user_id,
                                 work_id = EXCLUDED.work_id,
                                 visibility = EXCLUDED.visibility
                             """,
                             (
-                                chunk["chunk_id"],
                                 storage_path,
-                                chunk.get("section_title", ""),
-                                chunk.get("text", ""),
-                                chunk.get("citation_id", ""),
-                                chunk.get("line_start"),
-                                chunk.get("line_end"),
-                                _vector_literal(vec),
+                                mtime,
+                                len(new_chunks),
                                 owner_id,
                                 wid,
                                 vis,
                             ),
                         )
-                    total_chunks += len(new_chunks)
-                    if storage_path in prev_files:
-                        updated += 1
-                    else:
-                        added += 1
+                        for chunk in new_chunks:
+                            vec = chunk.get("vector")
+                            if not isinstance(vec, list):
+                                raise RuntimeError(
+                                    f"missing embedding for chunk {chunk.get('chunk_id')}"
+                                )
+                            if len(vec) != self._dimensions:
+                                raise RuntimeError(
+                                    f"embedding dim {len(vec)} != configured {self._dimensions}"
+                                )
+                            cur.execute(
+                                """
+                                INSERT INTO source_chunks (
+                                    chunk_id, path, section_title, text, citation_id,
+                                    line_start, line_end, embedding, owner_user_id,
+                                    work_id, visibility
+                                ) VALUES (
+                                    %s, %s, %s, %s, %s, %s, %s, %s::vector, %s,
+                                    %s, %s
+                                )
+                                ON CONFLICT (chunk_id) DO UPDATE SET
+                                    path = EXCLUDED.path,
+                                    section_title = EXCLUDED.section_title,
+                                    text = EXCLUDED.text,
+                                    citation_id = EXCLUDED.citation_id,
+                                    line_start = EXCLUDED.line_start,
+                                    line_end = EXCLUDED.line_end,
+                                    embedding = EXCLUDED.embedding,
+                                    owner_user_id = EXCLUDED.owner_user_id,
+                                    work_id = EXCLUDED.work_id,
+                                    visibility = EXCLUDED.visibility
+                                """,
+                                (
+                                    chunk["chunk_id"],
+                                    storage_path,
+                                    chunk.get("section_title", ""),
+                                    chunk.get("text", ""),
+                                    chunk.get("citation_id", ""),
+                                    chunk.get("line_start"),
+                                    chunk.get("line_end"),
+                                    _vector_literal(vec),
+                                    owner_id,
+                                    wid,
+                                    vis,
+                                ),
+                            )
+                        total_chunks += len(new_chunks)
+                        if job["is_update"]:
+                            updated += 1
+                        else:
+                            added += 1
+                        files_done += 1
+                        if every and files_done % every == 0:
+                            logger.info(
+                                "sources index sync files; visibility=%s files=%s/%s "
+                                "chunks_embedded=%s/%s elapsed_s=%.1f",
+                                vis,
+                                files_done,
+                                len(pending_jobs),
+                                chunks_embedded,
+                                chunks_total,
+                                time.monotonic() - sync_t0,
+                            )
+                            try:
+                                from app.retrieval.sync_progress import (
+                                    report_sync_progress,
+                                )
+
+                                elapsed = time.monotonic() - sync_t0
+                                rate = (
+                                    chunks_embedded / elapsed if elapsed > 0 else 0.0
+                                )
+                                report_sync_progress(
+                                    status="building",
+                                    phase="write",
+                                    visibility=vis,
+                                    files_done=files_done,
+                                    files_total=len(pending_jobs),
+                                    chunks_embedded=chunks_embedded,
+                                    chunks_total=chunks_total,
+                                    rate_chunks_per_s=round(rate, 2),
+                                    elapsed_s=round(elapsed, 1),
+                                )
+                            except Exception:
+                                pass
+                    buffer_jobs.clear()
+
+                for job in pending_jobs:
+                    buffer_jobs.append(job)
+                    buffer_chunk_count += len(job["chunks"])
+                    if buffer_chunk_count >= batch_cap:
+                        _flush_buffer()
+                        buffer_chunk_count = 0
+                _flush_buffer()
 
                 removed = [path for path in prev_files if path not in seen_paths]
                 for path in removed:
@@ -448,6 +630,19 @@ class PgvectorSourceRetrievalStore:
             conn.commit()
 
         self.load()
+        elapsed = time.monotonic() - sync_t0
+        logger.info(
+            "sources index sync scope done; visibility=%s indexed_files=%s "
+            "chunks=%s added=%s updated=%s skipped=%s removed=%s elapsed_s=%.1f",
+            vis,
+            len(seen_paths),
+            total_chunks,
+            added,
+            updated,
+            skipped,
+            len(removed),
+            elapsed,
+        )
         return {
             "indexed_files": len(seen_paths),
             "chunks": total_chunks,
@@ -458,6 +653,8 @@ class PgvectorSourceRetrievalStore:
             "reindexed": force_reindex,
             "backend": self.backend,
             "ann": "hnsw",
+            "elapsed_s": round(elapsed, 2),
+            "embed_batch_size": embedding_batch_size(),
         }
 
     def search_vector(self, query: str, *, limit: int = 10) -> list[ChunkHit]:

@@ -375,7 +375,14 @@ def chunk_source_text(
     *,
     embedder,
     tags: Sequence[str] | None = None,
+    embed: bool = True,
 ) -> list[dict[str, Any]]:
+    """Split a source file into chunks.
+
+    When ``embed`` is True (default), vectors are attached via ``embed_many``.
+    When False, each chunk gets ``embed_input`` for a later Index-plane batch encode
+    (docs/15 — never on search hot path).
+    """
     if not text.strip():
         return []
 
@@ -399,6 +406,7 @@ def chunk_source_text(
 
     chunk_size, chunk_overlap = _chunk_limits()
     chunks: list[dict[str, Any]] = []
+    embed_inputs: list[str] = []
     chunk_idx = 0
     if tags is None:
         tag_list = extract_source_tags(rel_path, text)
@@ -434,7 +442,6 @@ def chunk_source_text(
                 "line_end": line_end,
                 # Display / BM25 / excerpt — body only (no path noise in cites).
                 "text": part,
-                "vector": embedder.embed(embed_input),
                 "mtime": path.stat().st_mtime,
             }
             if tag_list:
@@ -442,5 +449,18 @@ def chunk_source_text(
             if section.title:
                 chunk["symbol"] = section.title
             chunks.append(chunk)
+            embed_inputs.append(embed_input)
             chunk_idx += 1
+
+    if not chunks:
+        return []
+    if embed:
+        from app.retrieval.embedder import embed_many
+
+        vectors = embed_many(embedder, embed_inputs)
+        for chunk, vec in zip(chunks, vectors, strict=True):
+            chunk["vector"] = vec
+    else:
+        for chunk, embed_input in zip(chunks, embed_inputs, strict=True):
+            chunk["embed_input"] = embed_input
     return chunks

@@ -21,7 +21,30 @@ _index_job: dict[str, Any] = {
     "path": None,
     "error": None,
     "result": None,
+    "progress": None,
 }
+
+
+def _progress_sink(payload: dict[str, Any]) -> None:
+    with _index_lock:
+        _index_job["progress"] = payload
+        status = str(payload.get("status") or "")
+        if status == "building":
+            _index_job["status"] = "building"
+            if payload.get("path") is not None:
+                _index_job["path"] = payload.get("path")
+        elif status == "error":
+            _index_job["status"] = "error"
+            _index_job["error"] = payload.get("error")
+
+
+def _ensure_progress_sink() -> None:
+    from app.retrieval.sync_progress import set_progress_sink
+
+    set_progress_sink(_progress_sink)
+
+
+_ensure_progress_sink()
 
 
 def safe_source_filename(name: str) -> str:
@@ -160,11 +183,14 @@ def _index_store_path() -> Path:
 
 
 def _mark_index_building(path: str | None = None) -> None:
+    from app.retrieval.sync_progress import mark_sync_started
+
     with _index_lock:
         _index_job["status"] = "building"
         _index_job["path"] = path
         _index_job["error"] = None
         _index_job["result"] = None
+    mark_sync_started(reason="api", path=path)
 
 
 def mark_sources_index_building(*, path: str | None = None) -> None:
@@ -173,19 +199,25 @@ def mark_sources_index_building(*, path: str | None = None) -> None:
 
 
 def _mark_index_ready(result: dict[str, Any], *, path: str | None = None) -> None:
+    from app.retrieval.sync_progress import mark_sync_finished
+
     with _index_lock:
         _index_job["status"] = "ready"
         _index_job["path"] = path or _index_job.get("path")
         _index_job["error"] = None
         _index_job["result"] = result
+    mark_sync_finished(result if isinstance(result, dict) else {}, reason="api")
 
 
 def _mark_index_error(message: str, *, path: str | None = None) -> None:
+    from app.retrieval.sync_progress import mark_sync_error
+
     with _index_lock:
         _index_job["status"] = "error"
         _index_job["path"] = path or _index_job.get("path")
         _index_job["error"] = message
         _index_job["result"] = None
+    mark_sync_error(message, reason="api", path=path)
 
 
 def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
@@ -197,8 +229,15 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
     """
     import json
 
+    from app.retrieval.sync_progress import read_sync_progress
+
     with _index_lock:
         job = dict(_index_job)
+
+    file_progress = read_sync_progress()
+    progress = file_progress or (
+        job.get("progress") if isinstance(job.get("progress"), dict) else None
+    )
 
     store = _index_store_path()
     indexed_files = 0
@@ -233,6 +272,10 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
 
     # Prefer last sync stats (covers pgvector when JSON store is empty).
     last = job.get("result") if isinstance(job.get("result"), dict) else None
+    if not last and isinstance(progress, dict):
+        maybe_last = progress.get("last_result")
+        if isinstance(maybe_last, dict):
+            last = maybe_last
     if last:
         if last.get("indexed_files") is not None:
             indexed_files = int(last.get("indexed_files") or indexed_files)
@@ -240,6 +283,16 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
             chunks = int(last.get("chunks") or chunks)
 
     status = str(job.get("status") or "idle")
+    # Cross-process sync (make sync-sources) may only update the progress file.
+    if isinstance(progress, dict) and progress.get("status"):
+        file_status = str(progress.get("status"))
+        if file_status == "building":
+            status = "building"
+        elif file_status == "error" and status != "building":
+            status = "error"
+        elif file_status == "ready" and status in {"idle", "ready"}:
+            status = "ready"
+
     # Disk store is source of truth for a specific path once mtime matches.
     if path and path_indexed and path_mtime_matched:
         status = "ready"
@@ -249,17 +302,30 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
         not path or path_current or (status == "ready" and path_indexed)
     )
 
+    error = job.get("error")
+    if not error and isinstance(progress, dict):
+        error = progress.get("error")
+
     return {
         "status": status,
-        "path": job.get("path"),
-        "error": job.get("error"),
+        "path": job.get("path")
+        or (progress.get("path") if isinstance(progress, dict) else None),
+        "error": error,
         "indexed_files": indexed_files,
         "chunks": chunks,
-        "updated_at": updated_at,
-        "embedding_backend": embedding_backend or settings.embedding_backend,
+        "updated_at": updated_at
+        or (progress.get("updated_at") if isinstance(progress, dict) else None),
+        "embedding_backend": embedding_backend
+        or (
+            progress.get("embedding_backend")
+            if isinstance(progress, dict)
+            else None
+        )
+        or settings.embedding_backend,
         "path_indexed": path_indexed,
         "path_current": path_current,
         "last_result": last,
+        "progress": progress,
         # IX3: ingestion ≠ effect gate
         "plane": "ingestion",
         "ingestion_ready": ingestion_ready,

@@ -41,6 +41,23 @@ def _sync_one(
             "work_id": work_id,
             "visibility": visibility,
         }
+    logger.info(
+        "sources index sync scope; visibility=%s dir=%s work_id=%s",
+        visibility,
+        sources_dir,
+        work_id or "-",
+    )
+    try:
+        from app.retrieval.sync_progress import report_sync_progress
+
+        report_sync_progress(
+            status="building",
+            phase="scope",
+            visibility=visibility,
+            path=str(sources_dir),
+        )
+    except Exception:
+        logger.debug("sync progress scope report skipped", exc_info=True)
     store = get_sources_store()
     return store.sync(
         sources_dir,
@@ -159,24 +176,41 @@ def sync_sources_index_blocking() -> dict[str, Any]:
 async def run_sources_index_sync(*, reason: str = "manual") -> dict[str, Any]:
     """Serialize syncs process-wide (single-flight via lock; waiters re-scan)."""
     async with _sync_lock:
+        from app.retrieval.sync_progress import (
+            mark_sync_error,
+            mark_sync_finished,
+            mark_sync_started,
+        )
+
         logger.info("sources index sync starting; reason=%s", reason)
+        mark_sync_started(reason=reason)
         try:
             result = await asyncio.to_thread(sync_sources_index_blocking)
         except Exception as exc:
             logger.exception("sources index sync failed; reason=%s", reason)
+            mark_sync_error(str(exc), reason=reason)
             return {"status": "error", "reason": reason, "error": str(exc)}
         payload = dict(result) if isinstance(result, dict) else {"result": result}
         payload.setdefault("status", "ok")
         payload["reason"] = reason
+        if str(payload.get("status") or "") == "error":
+            mark_sync_error(
+                str(payload.get("error") or "sources index sync failed"),
+                reason=reason,
+            )
+        else:
+            mark_sync_finished(payload, reason=reason)
         logger.info(
             "sources index sync finished; reason=%s indexed_files=%s chunks=%s "
-            "added=%s updated=%s skipped=%s",
+            "added=%s updated=%s skipped=%s elapsed_s=%s embed_batch_size=%s",
             reason,
             payload.get("indexed_files"),
             payload.get("chunks"),
             payload.get("added"),
             payload.get("updated"),
             payload.get("skipped"),
+            payload.get("elapsed_s"),
+            payload.get("embed_batch_size"),
         )
         return payload
 

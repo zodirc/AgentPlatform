@@ -4,7 +4,9 @@ import hashlib
 import logging
 import math
 import re
-from typing import Protocol
+import time
+from collections.abc import Sequence
+from typing import Any, Protocol
 
 from app.settings import settings
 
@@ -13,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 class Embedder(Protocol):
     def embed(self, text: str) -> list[float]:
+        ...
+
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
         ...
 
 
@@ -57,6 +62,9 @@ class HashEmbedder:
             return vec
         return [value / norm for value in vec]
 
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        return [self.embed(text) for text in texts]
+
 
 class SentenceTransformerEmbedder:
     """Optional neural embeddings when sentence-transformers is installed."""
@@ -81,8 +89,33 @@ class SentenceTransformerEmbedder:
             self._model = SentenceTransformer(model_name, cache_folder=cache)
 
     def embed(self, text: str) -> list[float]:
-        vector = self._model.encode(text, normalize_embeddings=True)
-        return [float(x) for x in vector]
+        vectors = self.embed_many([text])
+        return vectors[0] if vectors else []
+
+    def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        batch_size = max(1, int(getattr(settings, "embedding_batch_size", None) or 64))
+        raw = self._model.encode(
+            list(texts),
+            batch_size=min(batch_size, len(texts)),
+            normalize_embeddings=True,
+            show_progress_bar=False,
+            convert_to_numpy=True,
+        )
+        return [[float(x) for x in row] for row in raw]
+
+
+def embed_many(embedder: Any, texts: Sequence[str]) -> list[list[float]]:
+    """Call ``embed_many`` when available; else fall back to per-text ``embed``."""
+    if not texts:
+        return []
+    many = getattr(embedder, "embed_many", None)
+    if callable(many):
+        out = many(texts)
+        if isinstance(out, list) and len(out) == len(texts):
+            return out
+    return [embedder.embed(text) for text in texts]
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -152,8 +185,22 @@ def get_embedder() -> Embedder:
     key = _cache_key()
     if _embedder is not None and _embedder_key == key:
         return _embedder
+    backend, model, model_dir, dims = key
+    logger.info(
+        "loading embedder; backend=%s model=%s dims=%s (cold start can take minutes)",
+        backend,
+        model,
+        dims,
+    )
+    t0 = time.monotonic()
     _embedder = _build_embedder()
     _embedder_key = key
+    logger.info(
+        "embedder ready; backend=%s elapsed_s=%.1f model_dir=%s",
+        backend,
+        time.monotonic() - t0,
+        model_dir or "(default)",
+    )
     return _embedder
 
 

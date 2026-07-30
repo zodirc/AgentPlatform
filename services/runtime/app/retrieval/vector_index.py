@@ -91,6 +91,17 @@ class SourceVectorIndex:
         return int(self._data.get("version", 0)) != INDEX_VERSION
 
     def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]:
+        import logging
+        import time
+
+        from app.retrieval.embedder import embed_many
+        from app.retrieval.index_embed import (
+            assign_deferred_vectors,
+            embedding_batch_size,
+            progress_every_files,
+        )
+
+        logger = logging.getLogger(__name__)
         self.load()
         if not sources_dir.exists():
             return {
@@ -103,6 +114,16 @@ class SourceVectorIndex:
             }
 
         force_reindex = self._needs_full_reindex()
+        try:
+            from app.retrieval.sync_progress import report_sync_progress
+
+            report_sync_progress(
+                status="building",
+                phase="loading_embedder",
+                embedding_backend=settings.embedding_backend,
+            )
+        except Exception:
+            pass
         embedder = get_embedder()
         owner_raw = (settings.sources_index_owner_user_id or "").strip() or None
         files_meta: dict[str, Any] = dict(self._data.get("files", {}))
@@ -113,7 +134,24 @@ class SourceVectorIndex:
         skipped = 0
         seed_root = (workspace_root.resolve() / "sources" / "seed").resolve()
         syncing_seed_tree = sources_dir.resolve() == seed_root or seed_root in sources_dir.resolve().parents
+        sync_t0 = time.monotonic()
 
+        pending: list[tuple[str, float, list[dict[str, Any]], str, bool]] = []
+        # (rel, mtime, new_chunks, summary, is_update)
+
+        scanned = 0
+        scan_every = max(progress_every_files(), 50)
+        logger.info(
+            "sources index sync scan start; backend=json dir=%s force_reindex=%s",
+            sources_dir,
+            force_reindex,
+        )
+        try:
+            from app.retrieval.sync_progress import report_sync_progress
+
+            report_sync_progress(status="building", phase="scan")
+        except Exception:
+            pass
         for fp in sorted(sources_dir.rglob("*")):
             if not fp.is_file() or not should_index_source(fp):
                 continue
@@ -127,16 +165,37 @@ class SourceVectorIndex:
             seen_paths.add(rel)
             mtime = fp.stat().st_mtime
             prev = files_meta.get(rel)
+            scanned += 1
+            if scan_every and scanned % scan_every == 0:
+                logger.info(
+                    "sources index sync scan; backend=json scanned=%s dirty=%s skipped=%s",
+                    scanned,
+                    len(pending),
+                    skipped,
+                )
+                try:
+                    from app.retrieval.sync_progress import report_sync_progress
+
+                    report_sync_progress(
+                        status="building",
+                        phase="scan",
+                        files_done=scanned,
+                        dirty_files=len(pending),
+                        skipped=skipped,
+                        elapsed_s=round(time.monotonic() - sync_t0, 1),
+                    )
+                except Exception:
+                    pass
             if not force_reindex and prev and prev.get("mtime") == mtime:
                 skipped += 1
                 continue
             text = fp.read_text(encoding="utf-8", errors="replace")
-            new_chunks = chunk_source_text(fp, rel, text, embedder=embedder)
+            new_chunks = chunk_source_text(
+                fp, rel, text, embedder=embedder, embed=False
+            )
             if owner_raw:
                 for chunk in new_chunks:
                     chunk["owner_user_id"] = owner_raw
-            chunks = [c for c in chunks if c.get("path") != rel]
-            chunks.extend(new_chunks)
             titles = sorted(
                 {
                     str(c.get("section_title", "")).strip()
@@ -147,17 +206,92 @@ class SourceVectorIndex:
             summary = " ".join(titles) if titles else text[:500]
             if len(summary) > 800:
                 summary = summary[:800]
-            files_meta[rel] = {
-                "mtime": mtime,
-                "chunk_count": len(new_chunks),
-                "summary": summary,
-                "doc_vector": embedder.embed(build_embed_text(rel, summary)),
-                "owner_user_id": owner_raw,
-            }
-            if prev:
-                updated += 1
-            else:
-                added += 1
+            pending.append((rel, mtime, new_chunks, summary, bool(prev)))
+
+        chunks_total = sum(len(p[2]) for p in pending) + len(pending)  # + doc vectors
+        logger.info(
+            "sources index sync plan; backend=json dirty_files=%s dirty_chunks=%s "
+            "skipped=%s batch_size=%s",
+            len(pending),
+            sum(len(p[2]) for p in pending),
+            skipped,
+            embedding_batch_size(),
+        )
+        try:
+            from app.retrieval.sync_progress import report_sync_progress
+
+            report_sync_progress(
+                force=True,
+                status="building",
+                phase="plan",
+                files_done=0,
+                files_total=len(pending),
+                chunks_embedded=0,
+                chunks_total=sum(len(p[2]) for p in pending),
+                skipped=skipped,
+                elapsed_s=round(time.monotonic() - sync_t0, 1),
+            )
+        except Exception:
+            pass
+
+        batch_cap = max(embedding_batch_size(), embedding_batch_size() * 2)
+        buffer: list[tuple[str, float, list[dict[str, Any]], str, bool]] = []
+        buffer_chunks = 0
+        chunks_embedded = 0
+        files_done = 0
+        every = progress_every_files()
+
+        def _flush() -> None:
+            nonlocal chunks_embedded, files_done, added, updated, chunks
+            if not buffer:
+                return
+            flat: list[dict[str, Any]] = []
+            doc_inputs: list[str] = []
+            for _rel, _mtime, new_chunks, summary, _upd in buffer:
+                flat.extend(new_chunks)
+                doc_inputs.append(build_embed_text(_rel, summary))
+            chunks_embedded += assign_deferred_vectors(
+                flat,
+                embedder,
+                label="json",
+                chunks_done_before=chunks_embedded,
+                chunks_total_hint=chunks_total,
+            )
+            doc_vecs = embed_many(embedder, doc_inputs)
+            for (rel, mtime, new_chunks, summary, is_update), doc_vec in zip(
+                buffer, doc_vecs, strict=True
+            ):
+                chunks = [c for c in chunks if c.get("path") != rel]
+                chunks.extend(new_chunks)
+                files_meta[rel] = {
+                    "mtime": mtime,
+                    "chunk_count": len(new_chunks),
+                    "summary": summary,
+                    "doc_vector": doc_vec,
+                    "owner_user_id": owner_raw,
+                }
+                if is_update:
+                    updated += 1
+                else:
+                    added += 1
+                files_done += 1
+                if every and files_done % every == 0:
+                    logger.info(
+                        "sources index sync files; backend=json files=%s/%s "
+                        "elapsed_s=%.1f",
+                        files_done,
+                        len(pending),
+                        time.monotonic() - sync_t0,
+                    )
+            buffer.clear()
+
+        for item in pending:
+            buffer.append(item)
+            buffer_chunks += len(item[2])
+            if buffer_chunks >= batch_cap:
+                _flush()
+                buffer_chunks = 0
+        _flush()
 
         removed = [path for path in list(files_meta) if path not in seen_paths]
         for path in removed:
@@ -173,6 +307,17 @@ class SourceVectorIndex:
         }
         self._rebuild_chunk_lookup()
         self.save()
+        elapsed = time.monotonic() - sync_t0
+        logger.info(
+            "sources index sync scope done; backend=json indexed_files=%s chunks=%s "
+            "added=%s updated=%s skipped=%s elapsed_s=%.1f",
+            len(files_meta),
+            len(chunks),
+            added,
+            updated,
+            skipped,
+            elapsed,
+        )
         return {
             "indexed_files": len(files_meta),
             "chunks": len(chunks),
@@ -181,6 +326,8 @@ class SourceVectorIndex:
             "skipped": skipped,
             "removed": len(removed),
             "reindexed": force_reindex,
+            "elapsed_s": round(elapsed, 2),
+            "embed_batch_size": embedding_batch_size(),
         }
 
     def _chunks(self) -> list[dict[str, Any]]:

@@ -59,6 +59,27 @@ describe("libraryIndexStatusLabel", () => {
     });
   });
 
+  it("includes embed progress detail when present", () => {
+    expect(
+      libraryIndexStatusLabel(
+        {
+          status: "building",
+          progress: {
+            phase: "embed",
+            chunks_embedded: 519,
+            chunks_total: 10674,
+            rate_chunks_per_s: 8.2,
+            eta_s: 1200,
+          },
+        },
+        true,
+      ),
+    ).toEqual({
+      text: "资料库投影中（不挡对话）· 嵌入向量 · 块 519/10674 · 8.2/s · 剩余 约 20 min",
+      tone: "pending",
+    });
+  });
+
   it("reports ready library index as ingestion-only", () => {
     expect(
       libraryIndexStatusLabel(
