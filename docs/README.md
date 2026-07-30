@@ -20,6 +20,7 @@ Agent Platform 架构与实施规范。**01–37 连续编号，一文一模块*
 | 上下文压缩心智模型（大白话） | [CONTEXT-mental-model.md](CONTEXT-mental-model.md) |
 | Harness 六面心智模型 | [HARNESS-mental-model.md](HARNESS-mental-model.md) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) |
 | Intake 心智模型（含详图） | [INTAKE-mental-model.md](INTAKE-mental-model.md) · [`intake-full-detail-zh.png`](assets/intake/intake-full-detail-zh.png) |
+| 威胁情报场景交互（实现细节） | [`intel-interaction-detail-zh.png`](assets/intel/intel-interaction-detail-zh.png) · Profile `intel` · [09](09-product-modes.md) |
 | bwrap 沙箱心智模型 | [BWRAP-mental-model.md](BWRAP-mental-model.md) |
 | Landlock 原理流程图（中文） | [`assets/sandbox/landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [36](36-sandbox-nested-exec-plan.md) §1.1 |
 | Landlock 为何能生效（缝/戴/拦） | [`assets/sandbox/landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
