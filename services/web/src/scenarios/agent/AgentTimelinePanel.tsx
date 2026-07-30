@@ -75,12 +75,13 @@ function ToolRow({
   const isRunning = status === "running";
   const isSkipped = status === "skipped";
   const clickable = Boolean(onSelect) && index != null;
+  const label = toolLabel(item, events);
   return (
-    <li>
+    <li className="min-w-0">
       <button
         type="button"
         disabled={!clickable}
-        className={`w-full rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
+        className={`w-full min-w-0 overflow-hidden rounded-lg border px-3 py-2 text-left text-xs transition-colors ${
           nested ? "ml-2 border-dashed" : ""
         } ${
           selected
@@ -97,13 +98,18 @@ function ToolRow({
           if (index != null) onSelect?.(item, index);
         }}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-medium text-foreground">
-            {toolLabel(item, events)}
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <span
+            className="min-w-0 flex-1 truncate font-medium text-foreground"
+            title={label}
+          >
+            {label}
           </span>
           <span
             className={
-              isSkipped ? "text-muted-foreground/80" : "text-muted-foreground"
+              isSkipped
+                ? "shrink-0 text-muted-foreground/80"
+                : "shrink-0 text-muted-foreground"
             }
           >
             {toolStatusLabel(status)}
