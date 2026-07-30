@@ -55,6 +55,7 @@ def test_ops_envelope_returns_items(ops_app: TestClient) -> None:
 def test_ops_envelope_recent_list(ops_app: TestClient) -> None:
     turn_id = uuid4()
     pool = MagicMock()
+    pool.fetchval = AsyncMock(return_value=1)
     pool.fetch = AsyncMock(
         return_value=[
             {
@@ -79,6 +80,7 @@ def test_ops_envelope_recent_list(ops_app: TestClient) -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["count"] == 1
+    assert body["total"] == 1
     assert body["items"][0]["full_count"] == 1
 
 
@@ -110,6 +112,7 @@ def test_ops_raw_returns_snapshots(ops_app: TestClient) -> None:
 def test_ops_raw_recent_list(ops_app: TestClient) -> None:
     turn_id = uuid4()
     pool = MagicMock()
+    pool.fetchval = AsyncMock(return_value=1)
     pool.fetch = AsyncMock(
         return_value=[
             {
@@ -133,4 +136,5 @@ def test_ops_raw_recent_list(ops_app: TestClient) -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["count"] == 1
+    assert body["total"] == 1
     assert body["items"][0]["snapshot_count"] == 3

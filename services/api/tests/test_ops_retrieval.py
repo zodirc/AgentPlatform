@@ -106,6 +106,7 @@ def test_ops_retrieval_recent_list(ops_app: TestClient) -> None:
     turn_id = uuid4()
     session_id = uuid4()
     pool = MagicMock()
+    pool.fetchval = AsyncMock(return_value=1)
     pool.fetch = AsyncMock(
         return_value=[
             {
@@ -132,5 +133,6 @@ def test_ops_retrieval_recent_list(ops_app: TestClient) -> None:
     assert res.status_code == 200
     body = res.json()
     assert body["count"] == 1
+    assert body["total"] == 1
     assert body["items"][0]["last_query"] == "张白鹿"
     assert body["items"][0]["turn_id"] == str(turn_id)
