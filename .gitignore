@@ -34,8 +34,7 @@ ci-proof.log
 reports/eval-last-failures.txt
 
 # agent runtime sandbox (bind-mounted; user-local)
-workspace/*
-!workspace/.gitkeep
+workspace/
 .eval-workspace/
 eval/reports/
 eval/plan_suggest/reports/
