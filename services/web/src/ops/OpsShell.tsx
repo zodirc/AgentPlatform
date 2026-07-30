@@ -7,6 +7,9 @@ import {
   opsRetrievalPath,
 } from "./opsPaths";
 import { OpsIngestionStrip } from "./OpsIngestionStrip";
+import { SiteBrandMark } from "../shared/SiteBrandMark";
+import { SITE_OPS } from "../shared/siteBrand";
+import { useSiteBrand } from "../shared/useSiteBrand";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import type { ThemeId } from "../shared/theme/theme";
 import { Link } from "react-router-dom";
@@ -36,16 +39,23 @@ export function OpsShell({
   actions?: ReactNode;
 }) {
   const { theme, setTheme, themes, meta } = useTheme();
+  useSiteBrand(title);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
           <div>
-            <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
-              Ops · 旁路观测 / 评测（不影响工作台热路径）
-            </p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
+            <div className="flex items-center gap-2">
+              <SiteBrandMark site={SITE_OPS} className="h-7 w-7" />
+              <div>
+                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                  {SITE_OPS.name}
+                </p>
+                <p className="text-[11px] text-muted-foreground">{SITE_OPS.tagline}</p>
+              </div>
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
             {subtitle ? (
               <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
             ) : null}

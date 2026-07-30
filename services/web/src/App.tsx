@@ -24,6 +24,10 @@ import {
   AgentPanelProvider,
   useAgentPanel,
 } from "./shared/workbench/agentPanel";
+import { SiteBrandMark } from "./shared/SiteBrandMark";
+import { SITE_APP } from "./shared/siteBrand";
+import { useSiteBrand } from "./shared/useSiteBrand";
+import { scenarioMetaFromPath } from "./shared/workbench/scenarioMeta";
 
 const SCENARIO_PATHS = ["/writing", "/agent", "/intel"] as const;
 
@@ -130,6 +134,12 @@ function AccountMenu() {
 
 function Nav() {
   const { pathname } = useLocation();
+  const scenario = scenarioMetaFromPath(pathname);
+  useSiteBrand(
+    pathname.startsWith("/settings")
+      ? "设置"
+      : scenario?.title ?? null,
+  );
   const { sessionId, startNewSession, openSession } = useWorkbenchSession();
   const { open: agentOpen, openPanel, togglePanel, createAgent } =
     useAgentPanel();
@@ -151,7 +161,14 @@ function Nav() {
   return (
     <>
       <nav className="flex flex-wrap items-center gap-2 border-b border-border bg-background/80 px-6 py-3">
-        <span className="mr-2 font-semibold">Agent Platform</span>
+        <Link
+          to="/writing"
+          className="mr-2 flex items-center gap-2 font-semibold text-foreground hover:opacity-90"
+          aria-label={SITE_APP.name}
+        >
+          <SiteBrandMark site={SITE_APP} className="h-6 w-6" />
+          <span>{SITE_APP.name}</span>
+        </Link>
         <Link
           to="/settings"
           className={`rounded-lg px-3 py-1.5 text-sm ${

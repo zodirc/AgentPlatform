@@ -1,11 +1,15 @@
 import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
+import { SiteBrandMark } from "../SiteBrandMark";
+import { SITE_APP } from "../siteBrand";
+import { useSiteBrand } from "../useSiteBrand";
 import { useEndUserAuth } from "./EndUserAuth";
 import { readRecentUsernames } from "./recentAccounts";
 
 export function LoginPage() {
   const { login, register, switchingAccount } = useEndUserAuth();
+  useSiteBrand("登录");
   const [mode, setMode] = useState<"login" | "register">("login");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -36,8 +40,14 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-xl border border-border bg-card/80 p-6 shadow-xl">
-        <h1 className="text-xl font-semibold text-foreground">Agent Platform</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <div className="flex items-center gap-3">
+          <SiteBrandMark site={SITE_APP} className="h-9 w-9" />
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">{SITE_APP.name}</h1>
+            <p className="text-xs text-muted-foreground">{SITE_APP.tagline}</p>
+          </div>
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">
           {switchingAccount
             ? "切换账号：选择或输入另一用户，密码仍需验证"
             : "登录后可跨设备查看并继续自己的会话历史"}

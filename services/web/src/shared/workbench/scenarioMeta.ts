@@ -31,3 +31,11 @@ export const SCENARIO_META: Record<ScenarioId, ScenarioMeta> = {
 export function scenarioMeta(id: ScenarioId): ScenarioMeta {
   return SCENARIO_META[id];
 }
+
+export function scenarioMetaFromPath(pathname: string): ScenarioMeta | null {
+  if (pathname.startsWith("/writing")) return SCENARIO_META.writing;
+  if (pathname.startsWith("/agent")) return SCENARIO_META.agent;
+  if (pathname.startsWith("/intel")) return SCENARIO_META.intel;
+  return null;
+}
+
