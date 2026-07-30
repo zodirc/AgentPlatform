@@ -73,6 +73,7 @@ class ToolExecutor:
                     run_id=state.run_id,
                     session_id=state.session_id,
                     plan_phase=state.plan_phase,
+                    scenario_id=state.scenario_id,
                 ),
                 timeout=timeout_s,
             )

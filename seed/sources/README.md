@@ -22,10 +22,15 @@ Compose 将本目录 **只读挂载** 到容器内：
 
 ```text
 ./seed/sources/writing  →  /workspace/sources/seed/writing  (ro)
+./seed/sources/intel    →  /workspace/sources/seed/intel    (ro)
 ```
 
-- 索引路径形如：`sources/seed/writing/dramas/….md`
+- 索引路径形如：`sources/seed/writing/dramas/….md`、`sources/seed/intel/_demo/….md`
 - **不把文件复制进** 宿主机 `workspace/`（用户沙箱仍 gitignore）
 - 启动 IX0 / IX2 监视会扫到该挂载；热路径 `search_sources` **不建库**
 - 改完 seed 后若要立刻重建索引：`make seed-sources`（= `make sync-sources`，只索引不拷贝）
-- Agent **不能**写入 `sources/seed/**`（只读）；请改仓库里的 `seed/sources/writing/`
+- Agent **不能**写入 `sources/seed/**`（只读）；请改仓库里的 `seed/sources/writing/` 或 `seed/sources/intel/`
+
+## Intel 场景
+
+威胁情报语料（薄 demo + 可选 vendor fetch）见 **[`intel/README.md`](intel/README.md)** · `make intel-corpus-fetch`。

@@ -10,10 +10,11 @@ tool_names:
   - draft_section
   - update_outline
   - update_plan
+  - enrich_ioc
+  - lookup_indicator
   - search_sources
   - check_citation
   - export_document
-  - enrich_ioc
   - remember
   - recall
   - delegate
@@ -26,3 +27,7 @@ max_steps: 40
 approval_overrides: {}
 workspace_layout: document
 web_layout: writing-workbench
+# Profile-driven retrieval (tools apply; Engine does not branch). Omit path_prefix → seed/intel.
+retrieval:
+  default_path_prefix: seed/intel
+  exclude_path_prefixes: []

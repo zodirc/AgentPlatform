@@ -40,7 +40,17 @@ _TOOL_EVENTS: dict[str, str] = {
     "update_plan": "turn.plan",
 }
 
-_CACHEABLE_TOOLS = frozenset({"list_dir", "glob", "grep", "read_file", "search_sources"})
+_CACHEABLE_TOOLS = frozenset(
+    {
+        "list_dir",
+        "glob",
+        "grep",
+        "read_file",
+        "search_sources",
+        "enrich_ioc",
+        "lookup_indicator",
+    }
+)
 
 
 class AgentEngine:

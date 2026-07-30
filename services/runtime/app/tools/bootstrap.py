@@ -210,12 +210,16 @@ def build_registry() -> ToolRegistry:
                 "Hybrid search over workspace sources/ (BM25 + vector). "
                 "Library layout (narrow with path_prefix when the type is known): "
                 "sources/seed/writing/{persons,periods,dramas,novels,movie}/ for standing "
-                "fact corpus; sources/cards/ is pinned style/character material — do not "
-                "search cards here; user uploads may appear under other sources/ trees "
+                "writing fact corpus; sources/seed/intel/{_demo,vendor,ioc}/ for threat-intel "
+                "lab notes / ATT&CK / galaxy cards (vendor may be empty until "
+                "`make intel-corpus-fetch`); sources/cards/ is pinned style/character material — "
+                "do not search cards here; user uploads may appear under other sources/ trees "
                 "(e.g. hr/, legal/, writing/). "
                 "Prefer read_file when the source path is known. "
                 "Optional path_prefix narrows to a subdirectory under sources/ "
-                "(e.g. 'seed/writing/dramas', 'hr', or 'sources/hr'); rejects '..' / absolute paths. "
+                "(e.g. 'seed/writing/dramas', 'seed/intel', 'hr', or 'sources/hr'); "
+                "rejects '..' / absolute paths. "
+                "When omitted, ScenarioProfile may apply a default prefix (intel → seed/intel). "
                 "Avoid repeating the same query; use at most a few searches per topic."
             ),
             parameters={
@@ -228,6 +232,8 @@ def build_registry() -> ToolRegistry:
                         "description": (
                             "Optional directory under sources/ to restrict search. "
                             "Relative path; 'seed/writing/persons' or 'hr' means that tree. "
+                            "Omit to use ScenarioProfile default when configured "
+                            "(intel defaults to seed/intel). "
                             "No '..' or absolute paths."
                         ),
                     },
@@ -614,8 +620,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="enrich_ioc",
             description=(
-                "Enrich an IOC (IP, domain, hash, URL) from the local stub corpus. "
-                "Read-only; no outbound network and no containment actions."
+                "Enrich an IOC (IP, domain, hash, URL) from the local stub/seed IOC cards. "
+                "Read-only; no outbound network and no containment actions. "
+                "Prefer this first for structured reputation; then lookup_indicator / "
+                "search_sources for corpus evidence."
             ),
             parameters={
                 "type": "object",
@@ -630,6 +638,26 @@ def build_registry() -> ToolRegistry:
                 "required": ["indicator"],
             },
             handler=intel_tools.enrich_ioc,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="lookup_indicator",
+            description=(
+                "Exact local lookup for an IOC, ATT&CK id, actor/malware name under "
+                "sources/seed/intel (and fixture IOC cards). No embeddings, no network, "
+                "no index rebuild — use for precise keys before semantic search_sources."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "indicator": {"type": "string"},
+                    "limit": {"type": "integer", "default": 8},
+                },
+                "required": ["indicator"],
+            },
+            handler=intel_tools.lookup_indicator,
+            timeout_s=8.0,
         )
     )
     return registry

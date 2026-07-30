@@ -991,7 +991,16 @@ async def search_sources(
 ) -> dict[str, Any]:
     from app.retrieval.audit import begin_audit_capture, end_audit_capture
     from app.retrieval.path_filter import filter_hits_by_path_prefix
+    from app.retrieval.scenario_scope import filter_hits_by_excludes, resolve_search_path_prefix
     from app.retrieval.store import get_sources_store
+
+    scenario_id = _kwargs.get("scenario_id")
+    if scenario_id is not None:
+        scenario_id = str(scenario_id).strip() or None
+
+    effective_prefix, scope_meta = resolve_search_path_prefix(
+        path_prefix, scenario_id=scenario_id
+    )
 
     sources = _resolve_path("sources")
     if not sources.exists():
@@ -1010,15 +1019,18 @@ async def search_sources(
                 sources,
                 workspace_root=workspace_root,
                 query=query,
-                limit=limit,
-                path_prefix=path_prefix,
+                limit=limit * 2,
+                path_prefix=effective_prefix,
             )
+            hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
+            hits = hits[:limit]
             out = _attach_filter_meta(
                 {
                     "query": query,
                     "hits": hits,
                     "summary": f"search_sources(keyword): {len(hits)} hit(s)",
                     "retrieval": "keyword",
+                    "scope": {**scope_meta, "exclude": exclude_meta},
                 },
                 filter_meta,
             )
@@ -1032,7 +1044,7 @@ async def search_sources(
                 "index_via_worker": settings.index_via_worker,
             }
             # Over-fetch when filtering so prefix/tenant cuts do not starve top-k.
-            fetch_limit = limit * 3 if path_prefix else limit * 2
+            fetch_limit = limit * 3 if effective_prefix else limit * 2
             try:
                 store = await _run_retrieval_blocking(get_sources_store)
                 # JSON needs its persisted index loaded once. Pgvector searches the
@@ -1053,7 +1065,10 @@ async def search_sources(
             resolved: dict[str, Any] | None = None
             if raw_hits:
                 filtered, filter_meta = filter_hits_by_path_prefix(
-                    raw_hits, path_prefix=path_prefix
+                    raw_hits, path_prefix=effective_prefix
+                )
+                filtered, exclude_meta = filter_hits_by_excludes(
+                    filtered, scenario_id=scenario_id
                 )
                 if filter_meta.get("filters", {}).get("error"):
                     resolved = _attach_filter_meta(
@@ -1063,6 +1078,7 @@ async def search_sources(
                             "summary": "search_sources: invalid path_prefix",
                             "retrieval": retrieval,
                             "index": index_meta,
+                            "scope": {**scope_meta, "exclude": exclude_meta},
                         },
                         filter_meta,
                     )
@@ -1081,6 +1097,7 @@ async def search_sources(
                             "summary": f"search_sources({retrieval}): {len(hits)} hit(s)",
                             "retrieval": retrieval,
                             "index": index_meta,
+                            "scope": {**scope_meta, "exclude": exclude_meta},
                         }
                         _attach_filter_meta(resolved, filter_meta)
                         if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
@@ -1106,9 +1123,11 @@ async def search_sources(
                     sources,
                     workspace_root=workspace_root,
                     query=query,
-                    limit=limit,
-                    path_prefix=path_prefix,
+                    limit=limit * 2,
+                    path_prefix=effective_prefix,
                 )
+                hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
+                hits = hits[:limit]
                 resolved = _attach_filter_meta(
                     {
                         "query": query,
@@ -1117,6 +1136,7 @@ async def search_sources(
                         "retrieval": "keyword-fallback",
                         "index": index_meta,
                         "hint": index_meta["hint"],
+                        "scope": {**scope_meta, "exclude": exclude_meta},
                     },
                     filter_meta,
                 )

@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     # Standing seed corpus root inside the container (RO bind of repo seed/sources/writing).
     # Empty disables seed-specific guards only; indexing still follows workspace/sources tree.
     seed_sources_root: str = "/workspace/sources/seed/writing"
+    # Intel standing corpus (RO bind of repo seed/sources/intel; _demo + vendor).
+    seed_intel_root: str = "/workspace/sources/seed/intel"
     # Optional default owner for future multi-tenant rows (empty → NULL / shared).
     sources_index_owner_user_id: str = ""
     embedding_backend: str = "hash"  # hash | sentence_transformers
@@ -122,6 +124,10 @@ class Settings(BaseSettings):
     embedding_model_dir: str = "/data/models"
     # Hash default 256; all-MiniLM-L6-v2 is 384 — compose sets 384 with ST.
     embedding_dimensions: int = 256
+    # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
+    embedding_batch_size: int = 64
+    # Progress log every N files during sync (0 = only batch/flush logs).
+    embedding_progress_every_files: int = 25
     # Development remains the safe default for local `make up`; production must
     # be selected explicitly and passes the guard below during startup.
     app_env: str = "development"

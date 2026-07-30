@@ -34,6 +34,8 @@ class ScenarioProfile:
     workspace_layout: str = "document"
     web_layout: str = "default"
     subagent_types: list[str] = field(default_factory=list)
+    # Declarative retrieval scope (default/exclude prefixes). Tools apply; Engine does not branch.
+    retrieval: dict = field(default_factory=dict)
 
 
 # Retired ids stay readable in history but cannot StartTurn (docs/39 TI6).
@@ -63,6 +65,7 @@ class ScenarioRegistry:
                 workspace_layout=data.get("workspace_layout", "document"),
                 web_layout=data.get("web_layout", "default"),
                 subagent_types=list(data.get("subagent_types", [])),
+                retrieval=dict(data.get("retrieval") or {}),
             )
             cls.register(profile)
 

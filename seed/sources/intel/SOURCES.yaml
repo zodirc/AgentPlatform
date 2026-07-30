@@ -1,0 +1,122 @@
+# Intel standing corpus — fetch manifest (Turn 外；不进热路径)
+# Usage: make intel-corpus-fetch
+# Vendor output is gitignored; thin _demo/ stays in git for golden / offline.
+
+version: 1
+vendor_root: seed/sources/intel/vendor
+cache_root: .cache/intel-corpus
+# Soft cap on vendor/ after convert (bytes). Fetch aborts if exceeded.
+max_vendor_bytes: 157286400  # 150 MiB
+forbidden_globs:
+  - "*.exe"
+  - "*.dll"
+  - "*.msi"
+  - "*.cab"
+  - "*.nupkg"
+  - "*.psd"
+  - "*.zip"
+  - "*.pdf"
+  - "*.png"
+  - "*.jpg"
+  - "*.jpeg"
+
+sources:
+  - id: threat-hunter
+    enabled: true
+    license: MIT
+    repo: https://github.com/OTRF/ThreatHunter-Playbook.git
+    ref: ""
+    sparse_cone: false
+    sparse:
+      - "**/*.md"
+    include_globs:
+      - "**/*.md"
+    dest: hunt
+    convert: copy_filtered
+
+  - id: atomic-red-team
+    enabled: true
+    license: MIT
+    repo: https://github.com/redcanaryco/atomic-red-team.git
+    ref: ""
+    sparse_cone: false
+    sparse:
+      - "atomics/**/*.md"
+    include_globs:
+      - "atomics/**/*.md"
+    exclude_globs:
+      - "atomics/Indexes/**"
+      - "atomics/**/src/**"
+      - "atomics/**/bin/**"
+    dest: techniques/atomic
+    convert: copy_filtered
+
+  - id: misp-galaxy
+    enabled: true
+    license: CC0-or-BSD
+    repo: https://github.com/MISP/misp-galaxy.git
+    ref: ""
+    sparse:
+      - clusters
+      - galaxies
+    dest: actors
+    convert: galaxy_to_md
+    options:
+      prefer_clusters:
+        - threat-actor.json
+        - malware.json
+        - ransomware.json
+        - tool.json
+        - mitre-attack-pattern.json
+        - backdoor.json
+        - stealer-malware.json
+        - mobile.json
+      max_files: 800
+      max_desc_chars: 1200
+
+  - id: attack-stix
+    enabled: true
+    license: MITRE-custom
+    repo: https://github.com/mitre-attack/attack-stix-data.git
+    ref: ""
+    sparse_cone: false
+    sparse:
+      - "enterprise-attack/enterprise-attack.json"
+      - "LICENSE.txt"
+    dest: techniques/attack
+    convert: attack_to_md
+    options:
+      bundle_name: enterprise-attack.json
+      types:
+        - attack-pattern
+        - intrusion-set
+        - malware
+        - tool
+      max_files: 1200
+      max_desc_chars: 2000
+
+  - id: unit42-iocs
+    enabled: true
+    license: MIT
+    repo: https://github.com/pan-unit42/iocs.git
+    ref: ""
+    dest: ioc
+    convert: unit42_ioc_cards
+    options:
+      max_card_bytes: 200000
+      max_files: 200
+
+  # Optional IOC trail dictionary (enrich-oriented; large keyword noise for RAG).
+  - id: maltrail-trails
+    enabled: false
+    license: MIT
+    repo: https://github.com/stamparm/maltrail.git
+    ref: ""
+    sparse:
+      - trails
+    include_globs:
+      - "trails/**/*.txt"
+    dest: trails
+    convert: copy_filtered
+    options:
+      max_files: 500

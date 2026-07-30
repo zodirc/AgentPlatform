@@ -1,0 +1,11 @@
+{
+  "indicator": "aabbccddeeff00112233445566778899",
+  "normalized": "aabbccddeeff00112233445566778899",
+  "type": "hash",
+  "reputation_stub": "suspicious",
+  "tags": ["demo-fixture", "sample"],
+  "related": ["203.0.113.10", "evil.example.com"],
+  "sources": ["seed:intel/_demo/lab-notes/scanner-203"],
+  "raw_ref": "sources/seed/intel/ioc/aabbccddeeff00112233445566778899.json",
+  "summary": "Demo MD5-shaped hash from Alert 01 tabletop fixture."
+}

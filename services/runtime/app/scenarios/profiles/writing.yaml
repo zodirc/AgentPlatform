@@ -30,3 +30,7 @@ max_steps: 40
 approval_overrides: {}
 workspace_layout: document
 web_layout: writing-workbench
+# Hide intel standing corpus from writing RAG (same index plane; filter only).
+retrieval:
+  exclude_path_prefixes:
+    - seed/intel

@@ -1,0 +1,11 @@
+{
+  "indicator": "203.0.113.10",
+  "normalized": "203.0.113.10",
+  "type": "ip",
+  "reputation_stub": "suspicious",
+  "tags": ["scanner", "demo-fixture"],
+  "related": ["evil.example.com"],
+  "sources": ["seed:intel/_demo/lab-notes/scanner-203"],
+  "raw_ref": "sources/seed/intel/ioc/203.0.113.10.json",
+  "summary": "Demo IP often seen in lab scanner traffic (standing seed)."
+}
