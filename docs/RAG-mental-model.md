@@ -86,34 +86,34 @@
 
 > **读法：** 公式相关内容一律以**流程图为主**；图统一放在 `docs/assets/rag/`（与上下文压缩图 `docs/assets/context/` 分目录）。LaTeX 仅作备查，可跳过。
 
-### 图册索引（公式 → 流程图）
+### 图册索引（7 张中文原理流程图）
 
-| # | 主题（原公式在讲什么） | 流程图 | 路径 |
-|---|------------------------|--------|------|
-| 1 | 向量路全文：建库 / 查询 / 点积 | ![](assets/rag/rag-vector-full-flow.png) | [`docs/assets/rag/rag-vector-full-flow.png`](assets/rag/rag-vector-full-flow.png) |
-| 2 | L2 范数 → 倒数 → 归一化 | ![](assets/rag/rag-l2-normalize-flow.png) | [`docs/assets/rag/rag-l2-normalize-flow.png`](assets/rag/rag-l2-normalize-flow.png) |
-| 3 | 点积 = cos（不是平均） | ![](assets/rag/rag-cosine-dot-product.png) | [`docs/assets/rag/rag-cosine-dot-product.png`](assets/rag/rag-cosine-dot-product.png) |
-| 4 | 文本如何变成 384 个数 | ![](assets/rag/rag-embed-pipeline.png) | [`docs/assets/rag/rag-embed-pipeline.png`](assets/rag/rag-embed-pipeline.png) |
-| 5 | 欧氏距离 vs 余弦 | ![](assets/rag/rag-euclidean-vs-cosine.png) | [`docs/assets/rag/rag-euclidean-vs-cosine.png`](assets/rag/rag-euclidean-vs-cosine.png) |
-| 6 | `search_sources` query；chunk 拼串嵌入 | ![](assets/rag/rag-query-and-chunk-embed-input.png) | [`docs/assets/rag/rag-query-and-chunk-embed-input.png`](assets/rag/rag-query-and-chunk-embed-input.png) |
-| 7 | BM25 词法通道（无向量） | ![](assets/rag/rag-bm25-flow.png) | [`docs/assets/rag/rag-bm25-flow.png`](assets/rag/rag-bm25-flow.png) |
-| 8 | Hybrid：BM25∥向量 → RRF | ![](assets/rag/rag-hybrid-rrf-flow.png) | [`docs/assets/rag/rag-hybrid-rrf-flow.png`](assets/rag/rag-hybrid-rrf-flow.png) |
+> 重建命令：`python3 scripts/gen_rag_flowcharts.py`（会清空 `docs/assets/rag/` 并重写下列 PNG）。
 
-**推荐阅读顺序：** 1 → 2 → 3 → 4 → 8（补 5/6/7 按需）。
+| # | 主题 | 流程图 | 路径 |
+|---|------|--------|------|
+| 1 | **两平面：索引面 vs 交互面**（旁路建库 vs Turn 热路径 · 为何禁 sync） | ![](assets/rag/01-two-planes.png) | [`01-two-planes.png`](assets/rag/01-two-planes.png) |
+| 2 | **切块与嵌入输入**（树切块 · embed 文本拼装 · 批嵌入库 · 万级 chunk） | ![](assets/rag/02-chunking-embed.png) | [`02-chunking-embed.png`](assets/rag/02-chunking-embed.png) |
+| 3 | **万级 chunk 如何快速命中**（HNSW ANN ∥ BM25 → RRF · 场景/租户裁剪） | ![](assets/rag/03-fast-hit-ann.png) | [`03-fast-hit-ann.png`](assets/rag/03-fast-hit-ann.png) |
+| 4 | **`search_sources` 端到端**（模式分支 · 店内召回 · 过滤进窗 · 审计旁路） | ![](assets/rag/04-search-sources.png) | [`04-search-sources.png`](assets/rag/04-search-sources.png) |
+| 5 | **相似度：归一化 / 点积 / 欧氏 / 余弦**（长度影响 · 为何选余弦 · 本项目落点） | ![](assets/rag/05-similarity-metrics.png) | [`05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png) |
+| 6 | **Ops 检索审计 L1→L2→L3**（评测台边界 · 三层各回答什么 · 页面操作流） | ![](assets/rag/06-ops-audit-l1-l2-l3.png) | [`06-ops-audit-l1-l2-l3.png`](assets/rag/06-ops-audit-l1-l2-l3.png) |
+| 7 | **HNSW 原理与数据流转**（图状态 · 插入 A–D · SEARCH-LAYER · 查询下沉 · 参数） | ![](assets/rag/07-hnsw-principle.png) | [`07-hnsw-principle.png`](assets/rag/07-hnsw-principle.png) |
 
-**向量路必读文字背板 → [§5.0a](#50a-向量路完整流程从文本到分数)。**
+**推荐阅读顺序：** 1 → 2 → 3 → **7（HNSW 深入）** → 4 → 5 → 6。  
+细节文字背板仍见下方各小节；图以这七张为准。
 
 ---
 
 ### 5.0a 向量路完整流程（从文本到分数）
 
-把「谁算什么、何时归一化、范数是什么」按时间顺序钉死。
+把「谁算什么、何时归一化、范数是什么」按时间顺序钉死。查询热路径总览见 **图 4**（ANN 见 **图 3**）；相似度度量见 **图 5**。
 
 #### 总流程（先看图）
 
-路径：[`docs/assets/rag/rag-vector-full-flow.png`](assets/rag/rag-vector-full-flow.png)
+路径：[`docs/assets/rag/04-search-sources.png`](assets/rag/04-search-sources.png)
 
-![向量路完整流程](assets/rag/rag-vector-full-flow.png)
+![search_sources 整体流程](assets/rag/04-search-sources.png)
 
 ```text
 【建库 · 旁路 · 每个 chunk 做一次】
@@ -151,9 +151,9 @@
 
 #### 范数、倒数、归一化（先看图）
 
-路径：[`docs/assets/rag/rag-l2-normalize-flow.png`](assets/rag/rag-l2-normalize-flow.png)
+路径：[`docs/assets/rag/05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png)
 
-![L2 范数到归一化](assets/rag/rag-l2-normalize-flow.png)
+![L2 范数到归一化](assets/rag/05-similarity-metrics.png)
 
 | 名字 | 是什么 | 例子 `v_raw=(3,4)` |
 |------|--------|-------------------|
@@ -175,7 +175,7 @@
 
 #### 为何归一化后点积才在 [-1, 1]
 
-路径（点积示意）：[`docs/assets/rag/rag-cosine-dot-product.png`](assets/rag/rag-cosine-dot-product.png)
+路径（点积示意）：[`docs/assets/rag/05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png)
 
 - 裸点积 **可以 > 1**（未归一化时）。  
 - 两边都 \(\|\mathbf{q}\|=\|\mathbf{c}\|=1\) 后，\(|\mathbf{q}\cdot\mathbf{c}| \le 1\)。  
@@ -188,16 +188,16 @@
 
 #### 和 hybrid 怎么接
 
-路径：[`docs/assets/rag/rag-hybrid-rrf-flow.png`](assets/rag/rag-hybrid-rrf-flow.png)
+路径：[`docs/assets/rag/04-search-sources.png`](assets/rag/04-search-sources.png)
 
-![Hybrid 与 RRF](assets/rag/rag-hybrid-rrf-flow.png)
+![Hybrid 与 RRF](assets/rag/04-search-sources.png)
 
 ```text
 向量路 Top-N（上面的 score）  ∥  BM25 路 Top-N
         → RRF 融名次 → 重排 → 截断进窗
 ```
 
-BM25 流程图：[`docs/assets/rag/rag-bm25-flow.png`](assets/rag/rag-bm25-flow.png) —— **不走**范数/点积；只打 `text` 词袋。
+BM25 流程图：[`docs/assets/rag/04-search-sources.png`](assets/rag/04-search-sources.png) —— **不走**范数/点积；只打 `text` 词袋。
 
 #### 三十秒口述
 
@@ -445,9 +445,9 @@ v = f(text) ∈ R^384
 
 #### E. 流程图：怎么变成 384 个数
 
-路径：[`docs/assets/rag/rag-embed-pipeline.png`](assets/rag/rag-embed-pipeline.png)
+路径：[`docs/assets/rag/02-chunking-embed.png`](assets/rag/02-chunking-embed.png)
 
-![文本如何变成 384 维向量](assets/rag/rag-embed-pipeline.png)
+![文本如何变成 384 维向量](assets/rag/02-chunking-embed.png)
 
 ```text
 输入字符串
@@ -475,9 +475,9 @@ query 和 chunk **走同一条流水线**；差别只是输入字符串从哪来
 
 #### F. 为什么常用 Cosine，而不是生欧氏距离？
 
-路径：[`docs/assets/rag/rag-euclidean-vs-cosine.png`](assets/rag/rag-euclidean-vs-cosine.png)
+路径：[`docs/assets/rag/05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png)
 
-![欧氏距离 vs 余弦](assets/rag/rag-euclidean-vs-cosine.png)
+![欧氏距离 vs 余弦](assets/rag/05-similarity-metrics.png)
 
 两种距离都可以在 \(\mathbb{R}^{d}\) 里算，但文本嵌入更常比**方向**：
 
@@ -506,9 +506,9 @@ query 和 chunk **走同一条流水线**；差别只是输入字符串从哪来
 
 ### 5.1c Query 是什么？Chunk 多字段怎么嵌？
 
-路径：[`docs/assets/rag/rag-query-and-chunk-embed-input.png`](assets/rag/rag-query-and-chunk-embed-input.png)
+路径：[`docs/assets/rag/02-chunking-embed.png`](assets/rag/02-chunking-embed.png)
 
-![search_sources 的 query 与 chunk 嵌入输入](assets/rag/rag-query-and-chunk-embed-input.png)
+![search_sources 的 query 与 chunk 嵌入输入](assets/rag/02-chunking-embed.png)
 
 #### Query text = `search_sources` 的那个 `query`
 
@@ -559,13 +559,13 @@ tags: drama …
 
 ### 5.2 数学原理（流程图优先；公式备查）
 
-> 下面三块分别对应图册 **#2 / #3 / #4**。先看图，公式可折叠当备查。
+> 归一化 / 点积 / 欧氏对照见 **图 5**；嵌入与 BM25/hybrid 热路径见 **图 2–4**。先看图，公式可折叠当备查。
 
 #### （1）向量与范数 → 归一化
 
-路径：[`docs/assets/rag/rag-l2-normalize-flow.png`](assets/rag/rag-l2-normalize-flow.png)
+路径：[`docs/assets/rag/05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png)
 
-![L2 归一化流程](assets/rag/rag-l2-normalize-flow.png)
+![L2 归一化流程](assets/rag/05-similarity-metrics.png)
 
 流程板（对应公式）：
 
@@ -589,9 +589,9 @@ v_raw = (v1, v2, …, vd)
 
 #### （2）余弦 = 归一化后的点积
 
-路径：[`docs/assets/rag/rag-cosine-dot-product.png`](assets/rag/rag-cosine-dot-product.png)
+路径：[`docs/assets/rag/05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png)
 
-![点积余弦](assets/rag/rag-cosine-dot-product.png)
+![点积余弦](assets/rag/05-similarity-metrics.png)
 
 流程板：
 
@@ -624,9 +624,9 @@ v_raw = (v1, v2, …, vd)
 
 #### （3）模型内部（结构级流水线）
 
-路径：[`docs/assets/rag/rag-embed-pipeline.png`](assets/rag/rag-embed-pipeline.png)
+路径：[`docs/assets/rag/02-chunking-embed.png`](assets/rag/02-chunking-embed.png)
 
-![嵌入流水线](assets/rag/rag-embed-pipeline.png)
+![嵌入流水线](assets/rag/02-chunking-embed.png)
 
 ```text
 文本 → Tokenizer → 查表+位置 → Transformer×L → Pooling → 投影到 384 → L2 归一化 → v
@@ -637,9 +637,9 @@ v_raw = (v1, v2, …, vd)
 
 #### （4）和 BM25 对照（两套打分）
 
-路径：[`docs/assets/rag/rag-bm25-flow.png`](assets/rag/rag-bm25-flow.png) · [`docs/assets/rag/rag-hybrid-rrf-flow.png`](assets/rag/rag-hybrid-rrf-flow.png)
+路径（BM25∥向量 / RRF，图 3–4）：[`docs/assets/rag/03-fast-hit-ann.png`](assets/rag/03-fast-hit-ann.png) · [`04-search-sources.png`](assets/rag/04-search-sources.png)
 
-![BM25 流程](assets/rag/rag-bm25-flow.png)
+![BM25 与 hybrid 热路径](assets/rag/04-search-sources.png)
 
 | | BM25 | 嵌入 + 余弦 |
 |--|------|-------------|
@@ -851,9 +851,9 @@ BM25 **不是** LLM，也不会「理解」语义；**也不走** §5 的嵌入�
 
 ## 7. 为什么两路 + RRF
 
-路径：[`docs/assets/rag/rag-hybrid-rrf-flow.png`](assets/rag/rag-hybrid-rrf-flow.png) · BM25 单路：[`docs/assets/rag/rag-bm25-flow.png`](assets/rag/rag-bm25-flow.png)
+路径（hybrid / BM25 / RRF，图 4）：[`docs/assets/rag/04-search-sources.png`](assets/rag/04-search-sources.png)
 
-![Hybrid RRF](assets/rag/rag-hybrid-rrf-flow.png)
+![Hybrid RRF](assets/rag/04-search-sources.png)
 
 | 通道 | 擅长 | 失手 |
 |------|------|------|

@@ -34,7 +34,7 @@
 |------|-----|
 | 一句话内核 / 总览 | [`platform-architecture-overview.png`](assets/architecture/platform-architecture-overview.png) · [`domain-session-turn-run.png`](assets/architecture/domain-session-turn-run.png) · [`agent-engine-loop-zh.png`](assets/harness/agent-engine-loop-zh.png) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) |
 | Q2 评测 / Proof / Ops | [`ci-proof-flow.png`](assets/ops/ci-proof-flow.png) · [`ops-console-flow.png`](assets/ops/ops-console-flow.png) |
-| Q8 / Q13 RAG | [`rag-vector-full-flow.png`](assets/rag/rag-vector-full-flow.png) · [`rag-hybrid-rrf-flow.png`](assets/rag/rag-hybrid-rrf-flow.png) · [`rag-bm25-flow.png`](assets/rag/rag-bm25-flow.png) · [RAG-mental-model](RAG-mental-model.md) |
+| Q8 / Q13 RAG | [`01-two-planes.png`](assets/rag/01-two-planes.png) · [`03-fast-hit-ann.png`](assets/rag/03-fast-hit-ann.png) · [`07-hnsw-principle.png`](assets/rag/07-hnsw-principle.png) · [`04-search-sources.png`](assets/rag/04-search-sources.png) · [`05-similarity-metrics.png`](assets/rag/05-similarity-metrics.png) · [`06-ops-audit-l1-l2-l3.png`](assets/rag/06-ops-audit-l1-l2-l3.png) · [RAG-mental-model](RAG-mental-model.md) |
 | Q9 上下文压缩 | [`context-full-pipeline.png`](assets/context/context-full-pipeline.png) · [`context-fill-ratio.png`](assets/context/context-fill-ratio.png) · [`context-hygiene-vs-ladder.png`](assets/context/context-hygiene-vs-ladder.png) · [`context-collapse-80.png`](assets/context/context-collapse-80.png) · [`context-snip-autocompact.png`](assets/context/context-snip-autocompact.png) · [CONTEXT-mental-model](CONTEXT-mental-model.md) |
 | Q9 / Q14 Harness | [`harness-six-faces-zh.png`](assets/harness/harness-six-faces-zh.png) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) · [HARNESS-mental-model](HARNESS-mental-model.md) |
 | Q11 沙箱 / exec | [`landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) · [`landlock-vs-approval-flow-zh.png`](assets/sandbox/landlock-vs-approval-flow-zh.png) · [`landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [`bwrap-exec-flow.png`](assets/sandbox/bwrap-exec-flow.png) · [BWRAP-mental-model](BWRAP-mental-model.md) |
@@ -630,7 +630,7 @@ tool_call →（需批则等人）→ JSON Schema
 
 已有：混合召回（BM25∥向量 → RRF → 词法重排；CE 默认关）、存储可换、**个人作品世界的检索硬过滤**（只能看见公共种子 + 当前世界私有资料，跨用户/跨世界 deny 可证）、**检索三层可观测**挂在 **内部 Ops 观测台**（默认先浏览最近有检索的真实用户 Turn，再点开详情；也可精确跳 `turn_id`）——**不**把召回池默认塞进写作侧栏。
 
-读三层时别把「条数相同」当成坏了：
+读三层时别把「条数相同」当成坏了（流程图：[`06-ops-audit-l1-l2-l3.png`](assets/rag/06-ops-audit-l1-l2-l3.png)）：
 
 | 层 | 字段 | 常问 |
 |----|------|------|
