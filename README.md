@@ -11,10 +11,10 @@
 | **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · exec **bwrap** 沙箱 · Golden/`make gate` 可证明 |
 | **非目标** | 不宣称对齐 Cursor 全功能；Skills / 多模态 / K8s 暂缓 |
 | **起栈** | `cp .env.example .env` → `make up` → `http://localhost/` |
-| **Demo** | 见 [docs/DEMO.md](docs/DEMO.md) |
-| **旁路观测** | `/ops/<OPS_TEST_SECRET>/…`（评测 / 检索审计 / 信封 / Raw）——**不影响工作台热路径** · [docs/29](docs/29-ops-eval-console.md) |
+| **Demo** | 见 [docs/learn/DEMO.md](docs/learn/DEMO.md) |
+| **旁路观测** | `/ops/<OPS_TEST_SECRET>/…` · [Ops](docs/topics/ops-eval-console.md) |
 
-完整连续目录见 **[docs/README.md](docs/README.md)**（01–34）。
+文档已收敛为 **core / topics / learn / archive**，见 **[docs/README.md](docs/README.md)**。
 
 ## 为什么要重写
 
@@ -32,52 +32,21 @@
 
 ## 文档索引
 
-常用入口：
-
 | 文档 | 内容 |
 |------|------|
-| [DEMO](docs/DEMO.md) | 5 分钟可复现路径 |
-| [01 问题与目标](docs/01-problems-and-goals.md) | 设计原则 |
-| [02 架构](docs/02-architecture.md) | 服务划分、数据流 |
-| [03 Docker 运行时](docs/03-docker-runtime.md) | 拓扑、env、工作区/沙箱 |
-| [05–06 Runtime / 工具](docs/05-agent-runtime.md) | 内核与工具协议 |
-| [09 场景](docs/09-product-modes.md) | writing / agent |
-| [12 Harness](docs/12-model-harness.md) | 调用与 cache |
-| [13 速率红线](docs/13-rate-redlines.md) | R1–R5 |
-| [14 写作](docs/14-writing-quality.md) | WQ0–WQ4 |
-| [15 RAG / 资料库](docs/15-rag-and-sources.md) | 索引、验收、票状态 |
-| [29 Ops](docs/29-ops-eval-console.md) | 评测台 + 检索/信封/Raw 观测 |
-| [34 读降本](docs/34-read-cache-and-token-discipline.md) | Turn 内 read 硬闸 / 折叠 / skipped UX（§0.5 手测） |
-| [31 沙箱](docs/31-sandbox-escape-and-hardening.md) | exec 隔离（bwrap） |
-| [contracts](docs/contracts.md) | API / 事件 / DDL |
+| [docs/README](docs/README.md) | 总索引（core / topics / learn / archive） |
+| [DEMO](docs/learn/DEMO.md) | 5 分钟路径 |
+| [架构](docs/core/02-architecture.md) | 服务划分、数据流 |
+| [Docker](docs/core/03-docker-runtime.md) | 拓扑、env、工作区/沙箱 |
+| [Runtime / 工具](docs/core/05-agent-runtime.md) | Loop 与工具协议 |
+| [场景](docs/core/09-product-modes.md) | writing / agent / intel |
+| [写作](docs/topics/writing/) | 质量 / 作品 / Token / Plan |
+| [RAG](docs/topics/rag-and-sources.md) | 索引与资料库 |
+| [沙箱](docs/topics/sandbox.md) | exec 隔离（bwrap） |
+| [Ops](docs/topics/ops-eval-console.md) | 评测台与旁路观测 |
+| [contracts](docs/core/contracts.md) | API / 事件 / DDL |
 
-工作区与沙箱：[Docker 运行时 §8](docs/03-docker-runtime.md#8-工作区沙箱与拓扑)。
-
-## 架构决策（ADR）
-
-| ADR | 决策 |
-|-----|------|
-| [001](docs/adr/001-three-service-split.md) | api / runtime / web 三服务拆分 |
-| [002](docs/adr/002-postgresql-primary-store.md) | PostgreSQL 唯一关系型存储 |
-| [003](docs/adr/003-env-pydantic-settings.md) | 环境变量 + Pydantic Settings |
-| [004](docs/adr/004-sse-turn-streaming.md) | SSE 流式协议与事件目录 |
-| [005](docs/adr/005-agentic-loop-over-pipeline.md) | Agentic Loop 替代固定 pipeline |
-| [006](docs/adr/006-tool-centric-capabilities.md) | 能力以工具暴露 |
-| [007](docs/adr/007-subagent-delegation.md) | 子 agent 委派 |
-| [008](docs/adr/008-context-engineering-layers.md) | 上下文多层防线 |
-| [009](docs/adr/009-protocol-four-layers.md) | Resource / Command / Event / Projection |
-| [010](docs/adr/010-async-projection-layer.md) | 异步任务不阻塞主路径 |
-| [011](docs/adr/011-domain-run-turn-1-1.md) | Run 与 Turn 1:1 |
-| [012](docs/adr/012-event-pull-sse.md) | 事件 Pull + api 独占 SSE |
-| [013](docs/adr/013-dual-product-modes.md) | Scenario 双场景与 Profile 扩展 |
-| [014](docs/adr/014-turn-intake-over-intent-pipeline.md) | Turn Intake 非意图 Pipeline |
-| [015](docs/adr/015-interrupt-cancel-resume.md) | Cancel / interrupt / resume（对齐 Cursor） |
-| [016](docs/adr/016-execution-timeouts-and-stall-watchdog.md) | 执行超时与卡住检测 |
-| [017](docs/adr/017-contract-validation-and-event-payloads.md) | 边界校验与事件 payload schema |
-| [018](docs/adr/018-web-frontend-stack.md) | Web：Vite + React + TS + nginx 静态部署 |
-| [019](docs/adr/019-model-provider-runtime-config.md) | 模型供应商 Web 管理 + DB 热生效（无需重启） |
-
-> **架构宪法**：一个 Runtime，多个 Scenario。**好用**看 `11`，**可证明**看 `12`。先读 **05、06、10**。
+> **架构宪法**：一个 Runtime，多个 Scenario。先读 **05、06、09**。原 ADR 已退役，约束写在 `core/` / `topics/`。
 
 ## 第一阶段交付标准（Docker Only）
 
@@ -107,9 +76,9 @@ curl -fsS http://localhost/health/live
 make up              # 起栈；并自动启用本仓库 .githooks（pre-push → preflight）
 make preflight       # 手动：CI unit.* 本地镜像（无 Docker；按变更选择性）
 make smoke           # L0
-# 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/29）
-make gate            # CI/无头 Proof 门禁（docs/28）：smoke → eval-all → runtime-test
-make ux-signals      # 体验信号自检（docs/28 PX1；环外）
+# 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/topics/ops-eval-console）
+make gate            # CI/无头 Proof 门禁：smoke → eval-all → runtime-test
+make ux-signals      # 体验信号自检（环外）
 make eval-all        # stub golden（isolated + runtime-lite，不改日常 live）
 make eval-retrieval  # writing.07（默认 ST 镜像）
 make eval-queue      # queue + worker profile（shared.16）
@@ -124,7 +93,7 @@ make runtime-test    # Python 3.11+
 ```
 AgentPlatform/
 ├── README.md
-├── docs/                    # 架构与规范（01–34）· DEMO.md
+├── docs/                    # core / topics / learn / archive
 ├── deploy/
 │   ├── docker-compose.yml   # 唯一 compose 入口
 │   ├── caddy/               # 边缘网关（Caddyfile）
@@ -144,4 +113,4 @@ AgentPlatform/
 - **不直接迁移代码**：先建立骨架与契约，再按模块逐步 port 能力。
 - **保留已验证的概念**：`Session` / `Run` / `Turn`、证据治理、上下文 gateway、产物诚实性。
 - **废弃的形态**：巨型 `services/` 平铺、单进程全量 lifespan 初始化、多 compose overlay 组合、**13 节点固定 pipeline 图**。
-- **重做的内核**：执行编排从「固定状态图」改为「agentic loop」（ADR-005/006/007）；接缝闭环见 `contracts`、`07`、`09`。
+- **重做的内核**：执行编排从「固定状态图」改为「agentic loop」；接缝闭环见 `contracts`、`07`、`09`。

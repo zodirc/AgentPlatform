@@ -1,155 +1,82 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–38 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform：**一个 Runtime，多个 Scenario**。验证：`make gate` · `make smoke` · `make eval-all`。
 
-验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
+> 2026-07 已收敛为 **core / topics / learn / archive**。旧扁平路径已删除（请改打开新路径）。**ADR 正文已删**，对照见 [adr/README.md](adr/README.md)。
 
-### 短入口（可读性优先）
+## 起手
 
 | 目的 | 读 |
 |------|-----|
-| 起栈 + 一句话定位 | [../README.md](../README.md)「30 秒看懂」 |
-| 5 分钟 Demo | [DEMO.md](DEMO.md) |
-| 架构地图 | [02](02-architecture.md) |
-| Loop / 工具 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) |
-| 检索坏例怎么看 | [29](29-ops-eval-console.md) §6–§8（Ops **旁路**，不影响工作台速率） |
-| CI / Ops 流程图 | [`ci-proof-flow.png`](assets/ops/ci-proof-flow.png) · [`ops-console-flow.png`](assets/ops/ops-console-flow.png)（[28](28-proof-gate-and-ux-signals.md) · [29](29-ops-eval-console.md)） |
-| 沙箱现状 | [31](31-sandbox-escape-and-hardening.md) §0（bwrap 已落地） |
-| 面试原理 | [21](21-agent-system-qa.md)（含[流程图对照](21-agent-system-qa.md#流程图对照只链路径)） |
-| RAG 心智模型（大白话） | [RAG-mental-model.md](RAG-mental-model.md) |
-| 上下文压缩心智模型（大白话） | [CONTEXT-mental-model.md](CONTEXT-mental-model.md) |
-| Harness 六面心智模型 | [HARNESS-mental-model.md](HARNESS-mental-model.md) · [`harness-turn-flow-zh.png`](assets/harness/harness-turn-flow-zh.png) |
-| Intake 心智模型（含详图） | [INTAKE-mental-model.md](INTAKE-mental-model.md) · [`intake-full-detail-zh.png`](assets/intake/intake-full-detail-zh.png) |
-| 威胁情报场景交互（实现细节） | [`intel-interaction-detail-zh.png`](assets/intel/intel-interaction-detail-zh.png) · Profile `intel` · [09](09-product-modes.md) |
-| bwrap 沙箱心智模型 | [BWRAP-mental-model.md](BWRAP-mental-model.md) |
-| Landlock 原理流程图（中文） | [`assets/sandbox/landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [36](36-sandbox-nested-exec-plan.md) §1.1 |
-| Landlock 为何能生效（缝/戴/拦） | [`assets/sandbox/landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
-| 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) · [`read-file-tokenize-flow-zh.png`](assets/tools/read-file-tokenize-flow-zh.png) |
-| 镜像分层缩短重建（设计） | [38](38-image-layer-rebuild-plan.md)（deps/app；不改 Agent 交互） |
-| 多 Agent 协作 Scenario（设计） | [37](37-collab-multi-agent.md)（取消 `interview` → `collab`；**代码未实施**） |
+| 起栈 | [../README.md](../README.md) · [learn/DEMO.md](learn/DEMO.md) |
+| 架构地图 | [core/02-architecture.md](core/02-architecture.md) |
+| Loop / 工具 | [core/05](core/05-agent-runtime.md) · [core/06](core/06-tools-and-context.md) |
+| 契约 | [core/contracts.md](core/contracts.md) |
 
 ---
 
-## 模块目录（01–38）
+## `core/` — 活规范（改代码对照这里）
 
-| # | 文档 | 内容 |
-|---|------|------|
-| 01 | [problems-and-goals](01-problems-and-goals.md) | 目标三角 |
-| 02 | [architecture](02-architecture.md) | 架构地图 |
-| 03 | [docker-runtime](03-docker-runtime.md) | 部署、env、工作区/沙箱 |
-| 04 | [development-standards](04-development-standards.md) | 仓库与工程规范 |
-| 05 | [agent-runtime](05-agent-runtime.md) | Loop / Intake / Engine |
-| 06 | [tools-and-context](06-tools-and-context.md) | 工具协议、上下文治理 |
-| 07 | [domain-model](07-domain-model.md) | Session / Run / Turn |
-| 08 | [event-projection-pipeline](08-event-projection-pipeline.md) | 事件、SSE、投影 |
-| 09 | [product-modes](09-product-modes.md) | ScenarioProfile、writing / agent |
-| 10 | [product-experience](10-product-experience.md) | 体验 SLO |
-| 11 | [eval-and-golden-turns](11-eval-and-golden-turns.md) | Golden、CI |
-| 12 | [model-harness](12-model-harness.md) | Harness（AH1–AH4） |
-| 13 | [rate-redlines](13-rate-redlines.md) | **速率红线 R1–R5** |
-| 14 | [writing-quality](14-writing-quality.md) | **写作模块**（WQ0–WQ4 ✅） |
-| 15 | [rag-and-sources](15-rag-and-sources.md) | **RAG / 资料库**（IX0–IX4 ✅；**RQ1a–e ✅**；§3.4 向量相似度原理） |
-| 16 | [user-session-history](16-user-session-history.md) | 会话历史（U0–U2 ✅） |
-| 17 | [search-records](17-search-records.md) | `search_records` 蓝图 |
-| 18 | [multimodal-design](18-multimodal-design.md) | 多模态设计（待落地） |
-| 19 | [skills-layer](19-skills-layer.md) | Skills（近期末） |
-| 20 | [context-compaction-walkthrough](20-context-compaction-walkthrough.md) | 压缩演练 |
-| 21 | [agent-system-qa](21-agent-system-qa.md) | **面试向原理问答** Q0–Q27（取消/思考直播/忙时排队；旁路/记忆/加速/多用户；**Q11 沙箱/exec 隔离细节**） |
-| 22 | [highlights-vs-legacy](22-highlights-vs-legacy.md) | 相对旧项目全景 |
-| 23 | [writing-work-model](23-writing-work-model.md) | **写作作品模型**（WW0–WW4 ✅） |
-| 24 | [writing-token-economy](24-writing-token-economy.md) | **写作 Token 经济**（WT0–WT4 ✅） |
-| 25 | [writing-runway](25-writing-runway.md) | **Plan 模式（平台）**：步骤可见 / 同意执行 |
-| 26 | [plan-suggest-complexity](26-plan-suggest-complexity.md) | **Plan 建议复杂度**（打分已落地；判断力 PS4+） |
-| 27 | [multi-tenancy](27-multi-tenancy.md) | **多租户 / Work 作用域**（默认开启；MT0–MT5c + MT7；**否决 MT6 Org**） |
-| 28 | [proof-gate-and-ux-signals](28-proof-gate-and-ux-signals.md) | **Proof 门禁 + 体验信号**（环外；PX0–PX2 ✅） |
-| 29 | [ops-eval-console](29-ops-eval-console.md) | **Ops 评测台 + 检索/信封观测**（ci/golden；§6 检索审计 · §7 模型信封；`OPS_TEST_SECRET`） |
-| 30 | [quality-and-agility](30-quality-and-agility.md) | **质量与灵敏度提案**（代码 CQ1–CQ4 · 灵敏度 AQ1–AQ3 · 写作 WN1–WN3；对标 Cursor / Claude Code / Sudowrite） |
-| 31 | [sandbox-escape-and-hardening](31-sandbox-escape-and-hardening.md) | **沙箱逃逸与防护**（威胁 SE · SB0–SB3/PR2 已落地 · 敏感词钩子 SW 暂空） |
-| 32 | [execution-plane-and-local-runner](32-execution-plane-and-local-runner.md) | **执行面落点**（写作=云端 Work+下载；本地 Runner 非所需 · ⏸） |
-| 33 | [harness-maturity-backlog](33-harness-maturity-backlog.md) | **Harness 工程完善 ✅**（HM1–HM9；Q19 Ops 检索 · 预压缩 · raw · 增量摘要） |
-| 34 | [read-cache-and-token-discipline](34-read-cache-and-token-discipline.md) | **读文件降本 + 分层缓存**（RC1–RC5 + skipped UX ✅；手测见 §0.5；RC6 复测） |
-| 35 | [optimization-review](35-optimization-review.md) | **全仓优化审查**第二轮（2026-07）；§6 四批已落地见 §1.4；残余与结构性还债仍跟踪 |
-| 36 | [sandbox-nested-exec-plan](36-sandbox-nested-exec-plan.md) | **嵌套 Docker Exec 沙箱**（A+C ✅：Landlock→bwrap→off · sticky） |
-| 37 | [collab-multi-agent](37-collab-multi-agent.md) | **多 Agent 协作 Scenario**（设计定稿 · CL0 ✅；CL1–CL6 ⏳ 取消 interview → `collab`） |
-| 38 | [image-layer-rebuild-plan](38-image-layer-rebuild-plan.md) | **镜像 deps/app 分层重建**（BR1–BR5 ✅；BR6 ⏸；不改交互逻辑） |
-
-未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
+| 文档 | 内容 |
+|------|------|
+| [01](core/01-problems-and-goals.md) | 目标与原则 |
+| [02](core/02-architecture.md) | 架构地图 |
+| [03](core/03-docker-runtime.md) | 部署、env、工作区 |
+| [04](core/04-development-standards.md) | 工程规范 |
+| [05](core/05-agent-runtime.md) | Loop / Intake / Engine |
+| [06](core/06-tools-and-context.md) | 工具与上下文 |
+| [07](core/07-domain-model.md) | Session / Run / Turn |
+| [08](core/08-event-projection-pipeline.md) | 事件、SSE、投影 |
+| [09](core/09-product-modes.md) | ScenarioProfile |
+| [10](core/10-product-experience.md) | 体验 SLO |
+| [11](core/11-eval-and-golden-turns.md) | Golden / CI |
+| [12](core/12-model-harness.md) | Harness |
+| [13](core/13-rate-redlines.md) | 速率红线 R1–R5 |
+| [contracts](core/contracts.md) | API / 事件 / DDL |
 
 ---
 
-## 日常入口（产品主线）
+## `topics/` — 产品与横切专题
 
-| 场景 | 读 |
-|------|----|
-| 部署 / 默认栈 | [03](03-docker-runtime.md) |
-| 速率约束 | [13](13-rate-redlines.md) |
-| 写作 | [14](14-writing-quality.md) · [23](23-writing-work-model.md)（作品） · [24](24-writing-token-economy.md)（Token） · [25](25-writing-runway.md)（Plan / 步骤可见） · [26](26-plan-suggest-complexity.md)（建议触发） |
-| RAG / 索引 / 验收命令 | [15](15-rag-and-sources.md)（**RQ1 下一刀 → §9**） |
-| 会话归属 | [16](16-user-session-history.md) |
-| 多租户 / 作品根 | [27](27-multi-tenancy.md)（**已落地** · 默认开启 · 个人默认 Work · 否决 Org） |
-| Proof 门禁 / 体验信号 | [28](28-proof-gate-and-ux-signals.md)（**已落地** · `make gate` / `make ux-signals` · 不碰 loop） |
-| 内核参考 | [05](05-agent-runtime.md) · [06](06-tools-and-context.md) · [12](12-model-harness.md)（**§5.1 下一刀：cache / 压缩 / Proof**） · [33](33-harness-maturity-backlog.md)（**HM 工程完善票**） · [34](34-read-cache-and-token-discipline.md)（**读降本 / L1–L2 缓存**） |
-| 多 Agent 协作（第三入口） | [37](37-collab-multi-agent.md)（替 `interview` → `collab`；设计定稿 · 未实施） · 场景宪法 [09](09-product-modes.md) |
-| 质量与灵敏度提案 | [30](30-quality-and-agility.md)（代码生成 CQ · 灵敏度 AQ · 写作下一刀 WN；全部受 [13](13-rate-redlines.md) R1–R5 约束） |
-| 沙箱 / exec 隔离 / 脱敏 | [31](31-sandbox-escape-and-hardening.md)（威胁枚举 · SB/PR；受 [13](13-rate-redlines.md) 约束；**敏感词词表暂空**） |
-| 执行面 / 本地工作区 | [32](32-execution-plane-and-local-runner.md)（**写作已收敛云端+下载**；本地 Runner ⏸） |
-
-**维护纪律：** 禁止再开 `*-execution` 平行文；过时内容进 git，不留 stub 空号。
+| 专题 | 文档 |
+|------|------|
+| 写作 | [writing/](topics/writing/)（[quality](topics/writing/quality.md) · [work](topics/writing/work-model.md) · [token](topics/writing/token-economy.md) · [runway](topics/writing/runway.md) · [plan-suggest](topics/writing/plan-suggest.md)） |
+| RAG | [rag-and-sources](topics/rag-and-sources.md) |
+| 会话 | [user-session-history](topics/user-session-history.md) |
+| 多租户 | [multi-tenancy](topics/multi-tenancy.md) |
+| Proof / UX | [proof-gate-and-ux-signals](topics/proof-gate-and-ux-signals.md) |
+| Ops | [ops-eval-console](topics/ops-eval-console.md) |
+| 沙箱 | [sandbox](topics/sandbox.md) |
+| 读降本 | [read-cache](topics/read-cache.md) |
+| collab（未实施） | [collab-multi-agent](topics/collab-multi-agent.md) |
+| search_records 蓝图 | [search-records](topics/search-records.md) |
 
 ---
 
-## 实施状态
+## `learn/` — 教学 / 面试（非实施权威）
 
-| 项 | 状态 | 文档 |
-|----|------|------|
-| Phase 0–4 + golden / contracts | ✅ | 11 · contracts |
-| 写作 WQ0–WQ4 | ✅ | 14 |
-| RAG RE0–RE3+RE1；IX0–IX4 | ✅ | 15 |
-| RAG RQ1（切块/embed 拼装/分层混合） | ✅ RQ1a–e | 15 §9 |
-| 会话 U0–U2 | ✅ | 16 |
-| Harness 核心 | ✅ §5.1 主项已落地（WT5/HM6 · HM1/HM3 压缩 · Proof 持续） | 12 · **33** |
-| 写作作品模型 WW0–WW4 | ✅ | 23 · ADR-020 |
-| 写作 Token 经济 WT0–WT4 | ✅ | 24 |
-| Prompt cache 布局 WT5 | ✅ 经 AQ1/WN3/HM6 落地 | 24 §4.6 · **12 §5.1** · **30** · **33** HM6 |
-| Plan 模式（平台 · 步骤可见） | ✅ P1 相位契约 | 25 |
-| Plan 建议复杂度 | ✅ PS1–PS3；PS4 金标/tune；**PS4d 单配置 weights.json** | 26 |
-| Skills / 多模态 / RE5 | ⏸/⏳ | 19 · 18 · 15 · 17 |
-| IX5 / RE4 个人私有库 | ✅ MT5c（无 Org/share） | 15 §6 · **[27](27-multi-tenancy.md)** |
-| 多租户 Tenant/Work 绑定 | ✅ MT0–MT5c + **MT7 HA**；**否决 MT6 Org** | **[27](27-multi-tenancy.md)** · `make up-ha` · adr/021 |
-| Proof 门禁 + 体验信号 | ✅ PX0–PX2（环外） | **[28](28-proof-gate-and-ux-signals.md)** · `make gate` · `make ux-signals` · `/settings/signals` |
-| 质量与灵敏度 CQ / AQ / WN | ✅ CQ1–CQ4 · AQ1–AQ2 · WN1–WN3（AQ3 守线） | **[30](30-quality-and-agility.md)** |
-| 沙箱逃逸与防护 SE / SB / PR / SW | 🔧 E1–E3+PR2 ✅；E4 默认无网⏸；PR1/SW1/SB4/SB5/PR3 待续；敏感词暂空 | **[31](31-sandbox-escape-and-hardening.md)** |
-| 执行面落点 / 本地 Runner | ✅ 写作=云端+下载；本地 ⏸ | **[32](32-execution-plane-and-local-runner.md)** |
-| Harness 工程完善 HM1–HM9 | ✅ 核心落地（预压缩 / raw / 增量 / 检索审计 / 信封 / 导出门禁） | **[33](33-harness-maturity-backlog.md)** · Ops [29](29-ops-eval-console.md) §6–§7 |
-| 读文件降本 / 分层缓存 RC1–RC7 | ✅ RC1–RC5 + skipped UX；手测 §0.5 | **[34](34-read-cache-and-token-discipline.md)** |
-| 多 Agent 协作 `collab`（替 `interview`） | 📋 设计定稿 · **未实施** | **[37](37-collab-multi-agent.md)** |
+冲突时以 `core/` / `topics/` 为准。
+
+| 文档 | 内容 |
+|------|------|
+| [DEMO](learn/DEMO.md) | 5 分钟路径 |
+| [mental/](learn/mental/) | RAG / Context / Harness / Intake / bwrap 心智模型 |
+| [agent-system-qa](learn/agent-system-qa.md) | 面试向原理问答 |
+| [highlights-vs-legacy](learn/highlights-vs-legacy.md) | 相对旧项目 |
+| [context-compaction-walkthrough](learn/context-compaction-walkthrough.md) | 压缩演练 |
+| [INTERVIEW-MOCK-RESUME](learn/INTERVIEW-MOCK-RESUME.md) | 面试稿 |
 
 ---
 
-## 编号变迁（查旧链）
+## `archive/` — 已闭环票 / 暂停设计
 
-| 旧 | 新 |
-|----|----|
-| 08 工作区 | → 03 |
-| 09 事件 | → **08** |
-| 10/11 场景/体验 | → **09/10** |
-| 12 Eval | → **11** |
-| 13 交付事故 | 删除（见 git / 14） |
-| 14 Harness | → **12** |
-| 15 全景 | → **22** |
-| 16 QA 过程稿 | → **21** |
-| 17 执行方案 | → **13**（仅 R1–R5） |
-| 18 多表 | → **17** |
-| 19 QA 现状 | → **21** |
-| 20 会话 | → **16** |
-| 21 多模态 | → **18** |
-| 22 Skills | → **19** |
-| 23/24 写作 | → **14** |
-| 25 压缩 | → **20** |
-| 27–31 RAG | → **15** |
+不作为日常入口；需要细节时再翻。含 multimodal、skills、优化审查、镜像分层、嵌套沙箱计划、迁移附录等。
 
 ---
 
-## 相关
+## 维护纪律
 
-- 仓库总览：[../README.md](../README.md)
+1. **新能力**：改对应 `core/` 或 `topics/`；禁止再开顶层 `39-xxx-plan.md`。
+2. **设计草案**：进 `archive/` 或 `topics/`，写明状态；落地后把现行规则收进权威文。
+3. **教学文**：只进 `learn/`，文首标明非权威。
+4. **不再新增 ADR**；重大约束写进 `core/` / `topics/` 正文。
