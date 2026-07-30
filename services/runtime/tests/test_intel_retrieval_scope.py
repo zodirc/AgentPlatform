@@ -9,6 +9,8 @@ import pytest
 
 from app.retrieval.scenario_scope import (
     filter_hits_by_excludes,
+    load_retrieval_policy,
+    normalize_exclude_prefixes,
     policy_from_mapping,
     resolve_search_path_prefix,
 )
@@ -25,6 +27,16 @@ def test_policy_from_mapping_defaults() -> None:
     )
     assert p.default_path_prefix == "seed/intel"
     assert p.exclude_path_prefixes == ("seed/intel",)
+
+
+def test_load_retrieval_policy_unknown_scenario() -> None:
+    p = load_retrieval_policy("no-such-scenario-xyz")
+    assert p.default_path_prefix is None
+    assert p.exclude_path_prefixes == ()
+
+
+def test_normalize_exclude_prefixes_skips_invalid() -> None:
+    assert normalize_exclude_prefixes(["", "   ", "../escape"]) == []
 
 
 def test_resolve_search_path_prefix_applies_intel_default(monkeypatch: pytest.MonkeyPatch) -> None:

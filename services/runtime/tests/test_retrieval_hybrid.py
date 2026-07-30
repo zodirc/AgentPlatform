@@ -69,6 +69,15 @@ def test_rrf_merges_vector_and_bm25_rankings() -> None:
     assert len(ids) == 2
 
 
+def test_rrf_skips_empty_chunk_id() -> None:
+    fused = reciprocal_rank_fusion(
+        [[("", 1.0), ("chunk-a", 0.5)]],
+        limit=5,
+        k=60,
+    )
+    assert [cid for cid, _ in fused] == ["chunk-a"]
+
+
 def test_rrf_lane_weights_prefer_vector() -> None:
     """RQ1e: weighted RRF can elevate the vector lane (bm25 weight → 0)."""
     equal = reciprocal_rank_fusion(

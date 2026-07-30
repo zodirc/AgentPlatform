@@ -175,6 +175,96 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
     assert called["n"] == 1
 
 
+def _minimal_state(**extra: object) -> object:
+    base = {
+        "turn_id": None,
+        "run_id": None,
+        "session_id": None,
+        "plan_phase": None,
+        "scenario_id": "writing",
+    }
+    base.update(extra)
+    return type("S", (), base)()
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_timeout() -> None:
+    async def handler(**_kwargs):
+        import asyncio
+
+        await asyncio.sleep(60)
+        return {"ok": True}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="slow",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                timeout_s=0.01,
+            )
+        ]
+    )
+    result = await executor.run(
+        tool_name="slow",
+        tool_call_id="c1",
+        arguments={},
+        state=_minimal_state(),
+    )
+    assert result["status"] == "timeout"
+    assert "timed out" in result["summary"]
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_type_error_maps_to_invalid_arguments() -> None:
+    async def handler(*, path: str, **_kwargs):
+        return {"ok": True, "path": path}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="needs_path",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+            )
+        ]
+    )
+    result = await executor.run(
+        tool_name="needs_path",
+        tool_call_id="c1",
+        arguments={},
+        state=_minimal_state(),
+    )
+    assert result["error"] == "invalid_arguments"
+    assert result["tool_name"] == "needs_path"
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_handler_exception() -> None:
+    async def handler(**_kwargs):
+        raise RuntimeError("boom")
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="boom",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+            )
+        ]
+    )
+    result = await executor.run(
+        tool_name="boom",
+        tool_call_id="c1",
+        arguments={},
+        state=_minimal_state(),
+    )
+    assert result == {"error": "boom"}
+
+
 @pytest.mark.asyncio
 async def test_tool_executor_unknown_tool() -> None:
     executor = ToolExecutor([])
