@@ -234,6 +234,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - `HEALTHCHECK` 与 compose healthcheck 保持一致
 - 非 root 用户运行 `USER app`，uid `1000`
 - **镜像源**：Dockerfile 默认中国镜像（aliyun apt/pip、npmmirror、hf-mirror），本地 `make up` 更快。GitHub Actions / `CI=true` 的 proof 路径经 `scripts/proof_compose_env.sh` 改为官方源（`pypi.org` / `registry.npmjs.org` / 空 `APT_MIRROR`），避免海外 runner 卡在国内源直到 2h job timeout。本地若要强制官方源：导出同名 env 后再 `--build`；`PROOF_KEEP_MIRRORS=1` 可在 CI 下保留国内源。
+- **分层重建**：api / runtime（lite + retrieval）Dockerfile 为 `deps`→`app` 多阶段；compose `target: app`。改 `app/**` 应命中 pip/ST 缓存。强制重打依赖：`API_REBUILD_DEPS=1` / `RUNTIME_REBUILD_DEPS=1` / `WEB_REBUILD_DEPS=1`。详见 [38](38-image-layer-rebuild-plan.md)。
 
 ### 5.2 runtime 镜像特殊要求
 

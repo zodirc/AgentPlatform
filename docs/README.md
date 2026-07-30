@@ -1,6 +1,6 @@
 # 文档索引
 
-Agent Platform 架构与实施规范。**01–37 连续编号，一文一模块**；变更只改对应正文。
+Agent Platform 架构与实施规范。**01–38 连续编号，一文一模块**；变更只改对应正文。
 
 验证：**证明** `make gate`（≡ CI）· 可视化切片 [29](29-ops-eval-console.md) · `make smoke` · `make eval-all` · `make runtime-test`
 
@@ -25,11 +25,12 @@ Agent Platform 架构与实施规范。**01–37 连续编号，一文一模块*
 | Landlock 原理流程图（中文） | [`assets/sandbox/landlock-exec-flow-zh.png`](assets/sandbox/landlock-exec-flow-zh.png) · [36](36-sandbox-nested-exec-plan.md) §1.1 |
 | Landlock 为何能生效（缝/戴/拦） | [`assets/sandbox/landlock-why-it-works-zh.png`](assets/sandbox/landlock-why-it-works-zh.png) |
 | 读文件降本 / 缓存（速率安全） | [34](34-read-cache-and-token-discipline.md) · [`read-file-tokenize-flow-zh.png`](assets/tools/read-file-tokenize-flow-zh.png) |
+| 镜像分层缩短重建（设计） | [38](38-image-layer-rebuild-plan.md)（deps/app；不改 Agent 交互） |
 | 多 Agent 协作 Scenario（设计） | [37](37-collab-multi-agent.md)（取消 `interview` → `collab`；**代码未实施**） |
 
 ---
 
-## 模块目录（01–37）
+## 模块目录（01–38）
 
 | # | 文档 | 内容 |
 |---|------|------|
@@ -70,6 +71,7 @@ Agent Platform 架构与实施规范。**01–37 连续编号，一文一模块*
 | 35 | [optimization-review](35-optimization-review.md) | **全仓优化审查**第二轮（2026-07）；§6 四批已落地见 §1.4；残余与结构性还债仍跟踪 |
 | 36 | [sandbox-nested-exec-plan](36-sandbox-nested-exec-plan.md) | **嵌套 Docker Exec 沙箱**（A+C ✅：Landlock→bwrap→off · sticky） |
 | 37 | [collab-multi-agent](37-collab-multi-agent.md) | **多 Agent 协作 Scenario**（设计定稿 · CL0 ✅；CL1–CL6 ⏳ 取消 interview → `collab`） |
+| 38 | [image-layer-rebuild-plan](38-image-layer-rebuild-plan.md) | **镜像 deps/app 分层重建**（BR1–BR5 ✅；BR6 ⏸；不改交互逻辑） |
 
 未编号：[contracts.md](contracts.md) · [adr/](adr/README.md) · [appendix-migration.md](appendix-migration.md)
 
