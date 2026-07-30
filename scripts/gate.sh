@@ -11,7 +11,7 @@ COMPOSE="docker compose -f deploy/docker-compose.yml --env-file .env"
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  echo "==> Created .env from .env.example (edit MODEL_API_KEY / auth as needed)"
+  echo "==> Created .env from .env.example (configure model in Web settings)"
 fi
 
 # shellcheck source=scripts/proof_compose_env.sh

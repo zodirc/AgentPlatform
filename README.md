@@ -85,7 +85,7 @@
 
 ```bash
 cp .env.example .env
-# 编辑 .env：填入 MODEL_API_KEY（或启动后在 Web「设置 → 模型」配置）
+# 起栈后在 Web「设置 → 模型」配置供应商（勿堆 MODEL_* 进 .env）
 make up    # 默认：live + pgvector + sentence-transformers（Dockerfile.retrieval）
 make smoke
 curl -fsS http://localhost/health/live

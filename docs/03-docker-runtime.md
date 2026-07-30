@@ -109,34 +109,20 @@ gateway healthcheck wget gateway /health
 
 ### 3.1 全局 `.env`
 
+权威模板：仓库根 [`.env.example`](../.env.example)（仅 Bootstrap）。示例：
+
 ```bash
-# --- 网络 ---
-PUBLIC_DOMAIN=localhost
-HOST_PORT=443
-HTTP_PORT=80
-
-# --- PostgreSQL ---
-POSTGRES_USER=agent
-POSTGRES_PASSWORD=agent
-POSTGRES_DB=agent
 DATABASE_URL=postgresql://agent:agent@postgres:5432/agent
-
-# --- 安全 ---
 APP_SECRET_KEY=change-me-in-production
+INTERNAL_SERVICE_TOKEN=change-me-internal
 AUTH_ENABLED=true
 ADMIN_PASSWORD=admin
-INTERNAL_SERVICE_TOKEN=change-me-internal
-
-# --- 工作区 ---
-WORKSPACE_ROOT=/workspace
-WORKSPACE_HOST_PATH=./workspace
-
-# --- 可观测 ---
-LOG_LEVEL=INFO
-APP_ENV=production
+APP_ENV=development
 ```
 
-模型 API key / base URL：**主路径是 Web「设置 → 模型」**（ADR-019）。仅当 DB 无激活 profile 时，才可选填 env `MODEL_API_KEY` 作 fallback（见仓库 `.env.example` 注释段）。
+端口、Postgres 账号、工作区路径、检索/embedding、超时等均有 compose / Settings 默认值，**不要**写进 `.env.example`。
+
+模型 API key / base URL：**主路径是 Web「设置 → 模型」**（ADR-019）。仅当 DB 无激活 profile 时，才可选填 env `MODEL_API_KEY` 作 fallback（**附录 A.1**，不进起栈模板）。
 
 ### 3.2 按服务注入
 
@@ -219,7 +205,7 @@ docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml u
 
 ```bash
 cp .env.example .env
-# 推荐：make up 后在 Web 配置模型；或可选填 MODEL_API_KEY 作 fallback
+# 推荐：make up 后在 Web「设置 → 模型」配置；勿把 MODEL_* 堆回 .env.example
 docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 ```
 
@@ -561,6 +547,17 @@ make eval-ha        # ha_runner golden（stub）
 
 > **默认已够用。** 下列变量在 `services/*/app/settings.py` 与 compose 中有默认值；仅排障 / CI / HA 时再覆盖。  
 > **不要**把它们重新堆回 `.env.example`（避免老项目式参数膨胀）。权威起栈模板：仓库根 `.env.example`。
+
+### A.0 网络 / 库账号 / 工作区 / 鉴权细项
+
+| 变量 | 默认意图 | 何时改 |
+|------|----------|--------|
+| `PUBLIC_DOMAIN` / `HOST_PORT` / `HTTP_PORT` | `localhost` / 443 / 80 | 换域名或宿主机端口 |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | `agent` | 须与 `DATABASE_URL` 同步 |
+| `WORKSPACE_HOST_PATH` / `WORKSPACE_ROOT` | `../workspace` → `/workspace` | 换宿主机挂载 |
+| `END_USER_AUTH_ENABLED` / `ADMIN_SESSION_BYPASS` / `END_USER_COOKIE_SECURE` | 本地友好 | 生产收紧 |
+| `LOG_LEVEL` | `INFO` | 排障 |
+| `OPS_TEST_SECRET` | `make up` 自动生成 | 写成空=关闭评测台（docs/29） |
 
 ### A.1 模型（fallback / CI）
 
