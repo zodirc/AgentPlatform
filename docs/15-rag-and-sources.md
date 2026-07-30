@@ -272,7 +272,8 @@ RAG 要的是「意思像不像」≈「方向像不像」→ 默认讲余弦；
 
 - 索引写入前做长度归一；查询侧按「余弦近邻」理解（实现可等价点积）。  
 - Hybrid：BM25 与向量并行 → RRF 融名次 → 默认词法重排。  
-- 效果用 `retrieval-bench-prod` 等证明，不靠口述「用了余弦所以更好」。
+- 效果用 `retrieval-bench-prod` 等证明，不靠口述「用了余弦所以更好」。  
+- **HNSW 建边时的「更近」**：同一余弦距离（`vector_cosine_ops` / `<=>`）；距离小才进入邻居候选并连边——白话步骤见 [RAG-mental-model §5.0b](RAG-mental-model.md#50b-hnsw什么叫更近建边时怎么比)。
 
 ---
 

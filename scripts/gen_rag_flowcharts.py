@@ -886,11 +886,372 @@ def fig_hnsw() -> Path:
         y,
         W,
         [
-            "图 03=为何要用 ANN；本图=插入/层内扩展/查询时状态与边如何更新。",
+            "图 03=为何要用 ANN；图 08=抽层；图 09=查询同门不同命中；本图=插入/层内扩展/查询总览。",
             "代码落点：pgvector_store.ensure_schema / search_vector · 论文：Malkov & Yashunin, HNSW 2016",
         ],
     )
     return save(img, "07-hnsw-principle.png", y)
+
+
+def fig_hnsw_layer_sample() -> Path:
+    """Layer-id sampling formula: pipeline + probs + density sketch."""
+    W, H = 1400, 2100
+    img, draw = new_img(W, H)
+    y = title_block(
+        draw,
+        W,
+        "08 · HNSW 层号怎么抽（为何大多 L=0）",
+        "插入新点时与距离无关：掷一次 U，再套公式得到最高层号 L。"
+        "本仓默认 M=16 → mL≈0.3607。细节见 RAG-mental-model §5.0b · 2.2 A。",
+    )
+
+    # —— 公式总览 ——
+    y = banner(draw, 40, y, W - 80, "① 一次插入 = 掷骰子走这条流水线", ACCENT_SOFT)
+
+    steps = [
+        ("U", "Uniform(0,1)\n均匀随机\n与向量无关", ACCENT_SOFT, ACCENT),
+        ("−ln(U)", "翻成正数\n→ 指数分布\n多数偏小", WARN_SOFT, WARN),
+        ("× mL", "mL = 1/ln(M)\nM=16 时\nmL≈0.3607", PURPLE_SOFT, PURPLE),
+        ("floor", "向下取整\n得到整数\nL = 0,1,2…", OK_SOFT, OK),
+    ]
+    box_w, box_h, gap = 240, 118, 28
+    total = len(steps) * box_w + (len(steps) - 1) * gap
+    x0 = (W - total) // 2
+    by = y
+    for i, (title, body, fill, outline) in enumerate(steps):
+        x = x0 + i * (box_w + gap)
+        draw.rounded_rectangle(
+            (x, by, x + box_w, by + box_h), radius=10, fill=fill, outline=outline, width=2
+        )
+        draw.text((x + 14, by + 10), title, fill=outline, font=font(20, bold=True))
+        ty = by + 42
+        for line in body.split("\n"):
+            draw.text((x + 14, ty), line, fill=MUTED, font=font(13))
+            ty += 20
+        if i < len(steps) - 1:
+            h_arrow(draw, x + box_w + 2, by + box_h // 2, x + box_w + gap - 2)
+    y = by + box_h + 16
+
+    draw.rounded_rectangle(
+        (40, y, W - 40, y + 52), radius=10, fill=CARD, outline=BORDER, width=2
+    )
+    formula = "L = floor( −ln(U) · mL )     其中 mL = 1 / ln(M)"
+    fw = tw(draw, formula, font(18, bold=True))
+    draw.text(((W - fw) // 2, y + 14), formula, fill=INK, font=font(18, bold=True))
+    y += 68
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 概率：为何大多 0 ——
+    y = banner(draw, 40, y, W - 80, "② 概率不是「每层一样」——按 M^(−ℓ) 指数变稀", WARN_SOFT)
+    y = card(
+        draw,
+        40,
+        y,
+        W - 80,
+        "关键结论（M=16）",
+        "P(L ≥ ℓ) = M^(−ℓ) = 16^(−ℓ)\n"
+        "→ P(L=0)≈93.75%（只在底层）　P(L=1)≈5.86%　P(L=2)≈0.37%　更高更稀\n"
+        "「随机」= 指数衰减随机；高层必须稀，才能当远跳高速路。",
+        fill=WARN_SOFT,
+        outline=WARN,
+        title_color=WARN,
+    )
+    y += 12
+
+    # horizontal bar chart
+    bars = [
+        ("L = 0", 0.9375, "≈93.75%  只出现在层 0", OK),
+        ("L = 1", 0.0586, "≈5.86%   层 0+1", ACCENT),
+        ("L = 2", 0.0037, "≈0.37%   层 0+1+2", PURPLE),
+        ("L ≥ 3", 0.00024, "≈0.024%  极少", DANGER),
+    ]
+    label_w, bar_max, row_h = 90, 780, 44
+    bx = 40 + label_w + 20
+    max_frac = bars[0][1]
+    for label, frac, note, color in bars:
+        # L=0 拉满；更小概率保底可见一截
+        bw = max(22, int(bar_max * (frac / max_frac)))
+        draw.text((40, y + 10), label, fill=INK, font=font(15, bold=True))
+        draw.rounded_rectangle(
+            (bx, y + 6, bx + bw, y + 34), radius=6, fill=color, outline=color
+        )
+        draw.text((bx + bw + 12, y + 10), note, fill=MUTED, font=font(14))
+        y += row_h
+    y += 8
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 层密度示意 ——
+    y = banner(draw, 40, y, W - 80, "③ 图上看：底层密、上层稀（同一批点的户籍）", PURPLE_SOFT)
+    layer_y0 = y
+    layers = [
+        (2, 3, "层 2 · 极稀 · 远跳", PURPLE),
+        (1, 8, "层 1 · 较少", ACCENT),
+        (0, 28, "层 0 · 几乎全员（密图）", OK),
+    ]
+    max_n = 28
+    lane_h = 70
+    for i, (lev, n, caption, color) in enumerate(layers):
+        ly = layer_y0 + i * (lane_h + 14)
+        draw.rounded_rectangle(
+            (40, ly, W - 40, ly + lane_h),
+            radius=10,
+            fill=CARD,
+            outline=BORDER,
+            width=2,
+        )
+        draw.text((56, ly + 12), caption, fill=color, font=font(15, medium=True))
+        # dots centered
+        r = 7
+        span = min(W - 200, n * 28)
+        sx = (W - span) // 2
+        cy = ly + 44
+        for j in range(n):
+            cx = sx + int(j * span / max(n - 1, 1)) if n > 1 else W // 2
+            draw.ellipse((cx - r, cy - r, cx + r, cy + r), fill=color, outline=color)
+        # fade note for L=0
+        if lev == 0:
+            draw.text(
+                (W - 220, ly + 12),
+                f"示意 {n}/{max_n}+ …",
+                fill=MUTED,
+                font=font(12),
+            )
+    y = layer_y0 + len(layers) * (lane_h + 14) + 4
+    y = card(
+        draw,
+        40,
+        y,
+        W - 80,
+        "读图",
+        "抽到 L=k 的点会出现在层 0…k（上层点一定也在下层）。"
+        "查询从稀的高层入口下沉到密的层 0 精修。",
+        fill=PURPLE_SOFT,
+        outline=PURPLE,
+        title_color=PURPLE,
+    )
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 手算 ——
+    y = banner(draw, 40, y, W - 80, "④ 手算两例（M=16, mL≈0.3607）", OK_SOFT)
+    a = card(
+        draw,
+        40,
+        y,
+        660,
+        "例 1 · U=0.5 → L=0",
+        "−ln(0.5) ≈ 0.693\n"
+        "0.693 × 0.3607 ≈ 0.250\n"
+        "floor(0.250) = 0\n"
+        "→ 只在层 0 建边（常见）",
+        fill=OK_SOFT,
+        outline=OK,
+        title_color=OK,
+    )
+    b = card(
+        draw,
+        720,
+        y,
+        640,
+        "例 2 · U=0.02 → L=1",
+        "−ln(0.02) ≈ 3.912\n"
+        "3.912 × 0.3607 ≈ 1.411\n"
+        "floor(1.411) = 1\n"
+        "→ 在层 1 与层 0 都建边",
+        fill=ACCENT_SOFT,
+        outline=ACCENT,
+        title_color=ACCENT,
+    )
+    y = max(a, b) + 16
+
+    y = footer(
+        draw,
+        y,
+        W,
+        [
+            "与距离无关：层号不看 cosine；距离只用于同层选邻居 / 查询走路。",
+            "对照：图 07 插入步骤 A；文字公式推导：docs/RAG-mental-model.md §5.0b · 2.2 A",
+        ],
+    )
+    return save(img, "08-hnsw-layer-sample.png", y)
+
+
+def fig_hnsw_query_walk() -> Path:
+    """Query-time walk: enter_point + dist as ruler, not address."""
+    W, H = 1480, 2400
+    img, draw = new_img(W, H)
+    y = title_block(
+        draw,
+        W,
+        "09 · 查询怎么沿图走到命中 chunk",
+        "search_sources 向量路：q 不分层、不进图；每次都从同一 enter_point 进门；"
+        "dist 只用来在邻居里比谁更近——不是把某个小数映射成「某一簇」。"
+        "这正是 RAG 热路径上「不同问句命中不同块」的机制。",
+    )
+
+    # —— 0 先钉死误解 ——
+    y = banner(draw, 40, y, W - 80, "〇 先钉死三件事（常见误解）", DANGER_SOFT)
+    a = card(
+        draw,
+        40,
+        y,
+        450,
+        "① q 不抽层",
+        "随机 L 只在插入 chunk 时发生。\n"
+        "query → embed → q，只当靶子，\n"
+        "没有自己的层号，也不写入图。",
+        fill=DANGER_SOFT,
+        outline=DANGER,
+        title_color=DANGER,
+    )
+    b = card(
+        draw,
+        510,
+        y,
+        450,
+        "② 门总是同一扇",
+        "每次查询通常从全局 enter_point\n"
+        "出发（建图时维护好的大门）。\n"
+        "区分结果不靠换门，靠换 q。",
+        fill=WARN_SOFT,
+        outline=WARN,
+        title_color=WARN,
+    )
+    c = card(
+        draw,
+        980,
+        y,
+        460,
+        "③ dist 不是地址",
+        "算出 0.3 不会「对应某簇」。\n"
+        "它只在候选之间比大小：\n"
+        "谁离 q 更近，就往谁走。",
+        fill=ACCENT_SOFT,
+        outline=ACCENT,
+        title_color=ACCENT,
+    )
+    y = max(a, b, c) + 8
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 1 尺子 ——
+    y = banner(draw, 40, y, W - 80, "① 每一步在算什么（本仓余弦距离）", ACCENT_SOFT)
+    y = card(
+        draw,
+        40,
+        y,
+        W - 80,
+        "尺子：dist(q, 老点) = 1 − (q·老点)",
+        "老点 = 早已入库的 chunk 向量（图上结点），不是「以前命中过的」。\n"
+        "cos = q·老点（约 −1～1，越像越大）；走路比的是 dist（约 0～2，越小越近）。\n"
+        "边决定「旁边有谁」；dist 决定「对当前这个 q，邻居里选谁」。",
+        fill=ACCENT_SOFT,
+        outline=ACCENT,
+        title_color=ACCENT,
+    )
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 2 一步算法 ——
+    y = banner(draw, 40, y, W - 80, "② 一层里的一步：只看当前点的邻居（不扫全层）", OK_SOFT)
+    y = card(
+        draw,
+        40,
+        y,
+        W - 80,
+        "贪心挪步（伪代码心智）",
+        "P ← enter_point（或上层传下来的入口）\n"
+        "反复：\n"
+        "  取出 P 在本层的邻居 N1,N2,…（度数 ≤ M，不是该层全部点）\n"
+        "  分别算 dist(q,P), dist(q,N1), dist(q,N2), …\n"
+        "  若某个 Ni 比 P 离 q 更近 → P ← Ni，继续\n"
+        "  否则本层停（底层会用更大 ef_search 多留几个候选）\n"
+        "然后层号减一，带着 P 下沉；到层 0 取出距离最小的 k 个 → 命中的 chunk。",
+        fill=OK_SOFT,
+        outline=OK,
+        title_color=OK,
+    )
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 3 同门不同路 ——
+    y = banner(draw, 40, y, W - 80, "③ 同一扇门 + 不同 q → 不同路径 → 不同 chunk", PURPLE_SOFT)
+
+    # ASCII-ish graph cards
+    left = card(
+        draw,
+        40,
+        y,
+        680,
+        "Query A → qA",
+        "图（示意）：enter — A — B\n"
+        "                  \\— C\n"
+        "\n"
+        "算得：dist(qA,A)=0.40\n"
+        "      dist(qA,B)=0.20  ← 更近\n"
+        "      dist(qA,C)=0.50\n"
+        "从 A 走向 B → 命中靠近 B 的一批 chunk",
+        fill=PURPLE_SOFT,
+        outline=PURPLE,
+        title_color=PURPLE,
+    )
+    right = card(
+        draw,
+        760,
+        y,
+        680,
+        "Query B → qB（同一张图、同一 enter）",
+        "图（示意）：enter — A — B\n"
+        "                  \\— C\n"
+        "\n"
+        "算得：dist(qB,A)=0.40\n"
+        "      dist(qB,B)=0.60\n"
+        "      dist(qB,C)=0.15  ← 更近\n"
+        "从 A 走向 C → 命中靠近 C 的另一批 chunk",
+        fill=ACCENT_SOFT,
+        outline=ACCENT,
+        title_color=ACCENT,
+    )
+    y = max(left, right) + 10
+    y = card(
+        draw,
+        40,
+        y,
+        W - 80,
+        "为何会「命中不同 chunk」？",
+        "不是 dist 的某个取值映射到固定簇 ID；\n"
+        "而是不同 q 让「邻居远近排序」变了 → 下一步走的边变了 → 最终停在向量空间不同邻域。\n"
+        "算法无显式簇标签；「簇」只是对邻域的口语直觉。",
+        fill=CARD,
+        outline=BORDER,
+    )
+    y = v_arrow(draw, W // 2, y, gap=20)
+
+    # —— 4 RAG 对齐 ——
+    y = banner(draw, 40, y, W - 80, "④ 接到本仓 RAG 热路径", WARN_SOFT)
+    y = card(
+        draw,
+        40,
+        y,
+        W - 80,
+        "search_sources（向量支路）",
+        "用户/模型写出 query 字符串\n"
+        "  → embed → q（单位化 384 维）\n"
+        "  → pgvector HNSW：从上图「②③」走出 top-k 行（ORDER BY embedding <=> q）\n"
+        "  → 与 BM25 路 RRF 融合 → 截断摘录进窗（可选审计 L1/L2/L3）\n"
+        "索引面早已建好图；热路径只走路，不抽 L、不改边。",
+        fill=WARN_SOFT,
+        outline=WARN,
+        title_color=WARN,
+    )
+    y += 12
+
+    y = footer(
+        draw,
+        y,
+        W,
+        [
+            "对照：图 07=建图+查询总览；图 08=插入时抽 L；本图=查询时为何同门不同命中。",
+            "文字：docs/RAG-mental-model.md §5.0b · 4（查询走路详解）",
+        ],
+    )
+    return save(img, "09-hnsw-query-walk.png", y)
 
 
 def main() -> None:
@@ -908,6 +1269,8 @@ def main() -> None:
         fig_similarity(),
         fig_ops_audit(),
         fig_hnsw(),
+        fig_hnsw_layer_sample(),
+        fig_hnsw_query_walk(),
     ]
     for p in paths:
         im = Image.open(p)
