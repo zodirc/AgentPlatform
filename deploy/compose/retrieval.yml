@@ -12,6 +12,11 @@ services:
       dockerfile: services/runtime/Dockerfile.retrieval
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
     environment:
       RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
       RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}

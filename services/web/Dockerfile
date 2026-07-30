@@ -3,6 +3,8 @@
 FROM node:20-alpine AS builder
 # Keep monorepo-relative imports working (planSuggest → packages/contracts/...)
 WORKDIR /workspace
+# Default: China npm mirror. CI overrides to registry.npmjs.org (npmmirror hangs
+# on GitHub-hosted runners and can burn the full 2h job budget).
 ARG NPM_CONFIG_REGISTRY=https://registry.npmmirror.com
 ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY}
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate

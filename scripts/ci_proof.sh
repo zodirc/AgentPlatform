@@ -15,6 +15,22 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 STEP="${PROOF_STEP:-all}"
+PROOF_T0=$(date +%s)
+
+proof_elapsed() {
+  echo "$(( $(date +%s) - PROOF_T0 ))s"
+}
+
+proof_step() {
+  local name="$1"
+  shift
+  local t0
+  t0=$(date +%s)
+  echo ""
+  echo "==> [${name}] start ($(date -u +%H:%M:%S)Z, elapsed $(proof_elapsed))"
+  "$@"
+  echo "==> [${name}] ok in $(( $(date +%s) - t0 ))s (total $(proof_elapsed))"
+}
 
 resolve_python() {
   if [[ -n "${PROOF_PYTHON:-}" ]]; then
@@ -45,6 +61,10 @@ if ! "$PY" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) els
   exit 1
 fi
 echo "==> ci_proof using $($PY -V) ($PY)"
+
+# shellcheck source=scripts/proof_compose_env.sh
+source "$ROOT/scripts/proof_compose_env.sh"
+proof_compose_env_apply
 
 pip_q() {
   "$PY" -m pip install -q "$@"
@@ -115,22 +135,22 @@ run_gate() {
 }
 
 run_all() {
-  run_unit_ux_self_check
-  run_unit_ux_tests
-  run_unit_runtime
-  run_unit_api_ux
-  run_unit_contracts
-  run_gate
+  proof_step unit.ux_self_check run_unit_ux_self_check
+  proof_step unit.ux_tests run_unit_ux_tests
+  proof_step unit.runtime run_unit_runtime
+  proof_step unit.api_ux run_unit_api_ux
+  proof_step unit.contracts run_unit_contracts
+  proof_step gate run_gate
 }
 
 case "$STEP" in
   all) run_all ;;
-  unit.ux_self_check) run_unit_ux_self_check ;;
-  unit.ux_tests) run_unit_ux_tests ;;
-  unit.runtime) run_unit_runtime ;;
-  unit.api_ux) run_unit_api_ux ;;
-  unit.contracts) run_unit_contracts ;;
-  gate) run_gate ;;
+  unit.ux_self_check) proof_step unit.ux_self_check run_unit_ux_self_check ;;
+  unit.ux_tests) proof_step unit.ux_tests run_unit_ux_tests ;;
+  unit.runtime) proof_step unit.runtime run_unit_runtime ;;
+  unit.api_ux) proof_step unit.api_ux run_unit_api_ux ;;
+  unit.contracts) proof_step unit.contracts run_unit_contracts ;;
+  gate) proof_step gate run_gate ;;
   *)
     echo "Unknown PROOF_STEP=$STEP" >&2
     echo "Expected: all | unit.ux_self_check | unit.ux_tests | unit.runtime | unit.api_ux | unit.contracts | gate" >&2
@@ -138,4 +158,4 @@ case "$STEP" in
     ;;
 esac
 
-echo "==> CI proof step OK: $STEP"
+echo "==> CI proof step OK: $STEP (total $(proof_elapsed))"

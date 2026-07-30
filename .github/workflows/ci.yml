@@ -34,6 +34,17 @@ jobs:
     name: CI proof (unit + gate)
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    # Dockerfiles default to China mirrors; override for GitHub-hosted runners
+    # (aliyun/npmmirror can stall until this job's 2h timeout).
+    env:
+      PIP_INDEX_URL: https://pypi.org/simple
+      PIP_TRUSTED_HOST: pypi.org
+      NPM_CONFIG_REGISTRY: https://registry.npmjs.org
+      TORCH_FIND_LINKS: https://download.pytorch.org/whl/cpu
+      HF_ENDPOINT: https://huggingface.co
+      APT_MIRROR: ""
+      DOCKER_BUILDKIT: "1"
+      BUILDKIT_PROGRESS: plain
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6

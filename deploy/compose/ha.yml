@@ -34,6 +34,7 @@ x-runtime-env: &runtime-env
   SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
   SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
   SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
+  SEED_INTEL_ROOT: ${SEED_INTEL_ROOT:-/workspace/sources/seed/intel}
   HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
   TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
   HF_HOME: ${HF_HOME:-/data/models}
@@ -58,11 +59,17 @@ x-runtime-svc: &runtime-svc
     dockerfile: services/runtime/Dockerfile.retrieval
     args:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+      PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+      APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+      TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
   volumes:
     # Shared across replicas — required for Work roots under /data/works/{id}
     - agent_data:/data
     - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
     - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
+    - ${SEED_INTEL_HOST_PATH:-../seed/sources/intel}:/workspace/sources/seed/intel:ro,z
   depends_on:
     postgres:
       condition: service_healthy

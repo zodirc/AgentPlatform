@@ -233,6 +233,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - 构建时安装 CPU 版 torch 若需 embedding，避免 CUDA wheel
 - `HEALTHCHECK` 与 compose healthcheck 保持一致
 - 非 root 用户运行 `USER app`，uid `1000`
+- **镜像源**：Dockerfile 默认中国镜像（aliyun apt/pip、npmmirror、hf-mirror），本地 `make up` 更快。GitHub Actions / `CI=true` 的 proof 路径经 `scripts/proof_compose_env.sh` 改为官方源（`pypi.org` / `registry.npmjs.org` / 空 `APT_MIRROR`），避免海外 runner 卡在国内源直到 2h job timeout。本地若要强制官方源：导出同名 env 后再 `--build`；`PROOF_KEEP_MIRRORS=1` 可在 CI 下保留国内源。
 
 ### 5.2 runtime 镜像特殊要求
 
@@ -256,8 +257,10 @@ make sync-sources   # 或 make seed-sources（同义）
 ```
 
 **常驻种子库（只读挂载，不拷贝）：** 宿主机 `seed/sources/writing` → 容器
-`/workspace/sources/seed/writing:ro`（`SEED_SOURCES_HOST_PATH`）。索引逻辑路径为
-`sources/seed/writing/...`；改仓库内 seed 后重建索引即可，勿往沙箱里复制。
+`/workspace/sources/seed/writing:ro`（`SEED_SOURCES_HOST_PATH`）；`seed/sources/intel` →
+`/workspace/sources/seed/intel:ro`（`SEED_INTEL_HOST_PATH`，含 `_demo` 与可选 `vendor/`）。
+索引逻辑路径为 `sources/seed/writing/...`、`sources/seed/intel/...`；改仓库内 seed 后重建索引即可，勿往沙箱里复制。
+充实 intel vendor：`make intel-corpus-fetch`（Turn 外；见 `seed/sources/intel/README.md`）。
 
 > **权限：** seed 挂载常把 `/workspace/sources` 建成 `root:root`，runtime `app`(uid 1000)
 > 无法上传个人资料 → 500/`PermissionError`。`make up` / `make start` 会跑

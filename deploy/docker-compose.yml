@@ -38,6 +38,13 @@ services:
       dockerfile: services/runtime/Dockerfile.retrieval
       args:
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+        # China defaults in Dockerfiles; CI clears APT_MIRROR and points pip/npm
+        # at public registries (scripts/proof_compose_env.sh) so GHA does not hang.
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
     container_name: agent-runtime
     restart: unless-stopped
     logging: *default-logging
@@ -66,13 +73,16 @@ services:
       EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
       # all-MiniLM-L6-v2 → 384; override to 256 only with EMBEDDING_BACKEND=hash
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+      EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      EMBEDDING_PROGRESS_EVERY_FILES: ${EMBEDDING_PROGRESS_EVERY_FILES:-25}
       SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
       SOURCES_STARTUP_SYNC_DELAY_SECONDS: ${SOURCES_STARTUP_SYNC_DELAY_SECONDS:-3}
       SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
       SOURCES_WATCH_POLL_SECONDS: ${SOURCES_WATCH_POLL_SECONDS:-2}
       SOURCES_WATCH_DEBOUNCE_SECONDS: ${SOURCES_WATCH_DEBOUNCE_SECONDS:-1.5}
-      # Standing seed corpus (repo); nested RO mount — no copy into workspace.
+      # Standing seed corpus (repo); nested RO mounts — no copy into workspace.
       SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
+      SEED_INTEL_ROOT: ${SEED_INTEL_ROOT:-/workspace/sources/seed/intel}
       HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
       TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
       HF_HOME: ${HF_HOME:-/data/models}
@@ -92,6 +102,8 @@ services:
       # Product standing corpus (git): RO mount under sources/ so search_sources
       # indexes it without copying into the user sandbox (docs/15).
       - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
+      # Intel standing corpus (_demo + vendor); see seed/sources/intel/README.md.
+      - ${SEED_INTEL_HOST_PATH:-../seed/sources/intel}:/workspace/sources/seed/intel:ro,z
     depends_on:
       postgres:
         condition: service_healthy
@@ -109,6 +121,10 @@ services:
     build:
       context: ..
       dockerfile: services/api/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
     container_name: agent-api
     restart: unless-stopped
     logging: *default-logging
@@ -165,6 +181,8 @@ services:
     build:
       context: ..
       dockerfile: services/web/Dockerfile
+      args:
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     container_name: agent-web
     restart: unless-stopped
     logging: *default-logging
