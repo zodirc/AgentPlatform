@@ -15,6 +15,7 @@ WORKDIR /workspace/services/web
 RUN pnpm install --frozen-lockfile
 COPY services/web/index.html services/web/vite.config.ts services/web/tsconfig.json ./
 COPY services/web/tailwind.config.js services/web/postcss.config.js ./
+COPY services/web/public ./public
 COPY services/web/src ./src
 RUN ./node_modules/.bin/vite build
 

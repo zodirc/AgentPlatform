@@ -6,15 +6,16 @@ import {
   type SiteBrand,
 } from "./siteBrand";
 
-function ensureIconLink(): HTMLLinkElement {
-  let link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
-  if (!link) {
-    link = document.createElement("link");
-    link.rel = "icon";
-    document.head.appendChild(link);
-  }
+/** Browsers cache favicons aggressively — remount the link with a bust token. */
+function setFavicon(href: string) {
+  document
+    .querySelectorAll<HTMLLinkElement>("link[rel='icon'], link[rel='shortcut icon']")
+    .forEach((el) => el.remove());
+  const link = document.createElement("link");
+  link.rel = "icon";
   link.type = "image/svg+xml";
-  return link;
+  link.href = `${href}?v=${encodeURIComponent(href)}`;
+  document.head.appendChild(link);
 }
 
 /**
@@ -27,10 +28,7 @@ export function useSiteBrand(pageTitle?: string | null): SiteBrand {
 
   useEffect(() => {
     document.title = formatDocumentTitle(site, pageTitle);
-    const link = ensureIconLink();
-    if (link.getAttribute("href") !== site.iconHref) {
-      link.href = site.iconHref;
-    }
+    setFavicon(site.iconHref);
   }, [site, pageTitle]);
 
   return site;

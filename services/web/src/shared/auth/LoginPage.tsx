@@ -41,9 +41,11 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm rounded-xl border border-border bg-card/80 p-6 shadow-xl">
         <div className="flex items-center gap-3">
-          <SiteBrandMark site={SITE_APP} className="h-9 w-9" />
+          <SiteBrandMark site={SITE_APP} className="h-10 w-10 rounded-md" />
           <div>
-            <h1 className="text-xl font-semibold text-foreground">{SITE_APP.name}</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">
+              {SITE_APP.name}
+            </h1>
             <p className="text-xs text-muted-foreground">{SITE_APP.tagline}</p>
           </div>
         </div>

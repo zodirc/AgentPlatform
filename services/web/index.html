@@ -4,8 +4,30 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="application-name" content="Agent Platform" />
-    <link rel="icon" href="/favicon-app.svg" type="image/svg+xml" />
+    <link rel="icon" id="site-favicon" href="/favicon-app.svg" type="image/svg+xml" />
     <title>Agent Platform</title>
+    <script>
+      // Pick favicon before paint so a direct /ops/... load is not stuck on the app icon.
+      (function () {
+        try {
+          var ops =
+            location.pathname === "/ops" ||
+            location.pathname.indexOf("/ops/") === 0;
+          var link = document.getElementById("site-favicon");
+          if (link) {
+            link.setAttribute(
+              "href",
+              ops ? "/favicon-ops.svg?v=ops" : "/favicon-app.svg?v=app",
+            );
+          }
+          if (ops) {
+            document.title = "Ops 评测台";
+            var meta = document.querySelector('meta[name="application-name"]');
+            if (meta) meta.setAttribute("content", "Ops 评测台");
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body class="bg-background text-foreground">
     <div id="root"></div>

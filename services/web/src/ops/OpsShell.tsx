@@ -46,10 +46,10 @@ export function OpsShell({
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
           <div>
-            <div className="flex items-center gap-2">
-              <SiteBrandMark site={SITE_OPS} className="h-7 w-7" />
+            <div className="flex items-center gap-3">
+              <SiteBrandMark site={SITE_OPS} className="h-9 w-9 rounded-md" />
               <div>
-                <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                <p className="text-sm font-semibold tracking-tight text-foreground">
                   {SITE_OPS.name}
                 </p>
                 <p className="text-[11px] text-muted-foreground">{SITE_OPS.tagline}</p>

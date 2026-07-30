@@ -1,7 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Agent Platform">
-  <!-- Unified frame: rounded tile shared with Ops mark -->
   <rect width="32" height="32" rx="8" fill="#0f2744"/>
-  <!-- Agent node: upward chevron + core -->
   <path
     d="M8.5 20.5 L16 9.5 L23.5 20.5"
     fill="none"
