@@ -52,6 +52,17 @@ _CACHEABLE_TOOLS = frozenset(
     }
 )
 
+# Returned only by control paths in _run_tool / _run_tool_batch — never as a
+# normal tool summary string (delegate used to echo subagent "waiting_approval").
+_CONTROL_OUTCOMES = frozenset({"waiting_approval", "CANCELLED", "TERMINATE"})
+
+
+def _tool_batch_outcome(summary: str) -> str:
+    text = str(summary or "")
+    if text in _CONTROL_OUTCOMES:
+        return f"tool_summary:{text}"
+    return text
+
 
 class AgentEngine:
     def __init__(
@@ -1154,7 +1165,7 @@ class AgentEngine:
         ):
             state.termination_reason = "plan_awaiting_consent"
             return "TERMINATE"
-        return str(summary)
+        return _tool_batch_outcome(str(summary))
 
     def _ingest_evidence(self, tool_name: str, result: dict[str, Any]) -> None:
         if tool_name == "search_sources":

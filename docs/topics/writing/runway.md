@@ -139,7 +139,9 @@ pending → in_progress → completed
 
 **契约（已落地）：** 用户点「按此执行」进入 `plan_phase=executing` 后，**本清单内的写盘类工具**（`edit_file` / `write_file` / `propose_patch` / `apply_patch` / `draft_section` / `update_outline` / `rename_file`）**不再逐步审批**——Plan 同意覆盖后续编辑。`run_command` 等执行类仍走原审批（高风险，不默认含在清单同意里）。
 
-**普通 Agent 写盘粘性（已落地）：** 同一 Turn 内，用户**批准一次**写盘类工具后，本回合后续同属写盘类的调用免批（`writes_preapproved`）；`run_command` 仍每次审批。适合「进度清单」多步改文件，避免逐步打断。
+**普通 Agent 写盘粘性（已落地）：** 同一 Turn 内，用户**批准一次**写盘类工具后，本回合后续同属写盘类的调用免批（`writes_preapproved`）。适合「进度清单」多步改文件，避免逐步打断。
+
+**同 Turn Shell 粘性（已落地）：** 批准一次 `run_command` 后，本回合后续 `run_command` 免批（`exec_preapproved`）。写盘与 shell 粘性互不覆盖；新 Turn 重新开门。
 
 普通 Agent 里模型自画的 `update_plan` 进度条 **不是** Plan 同意门：未点「按此执行」则仍须至少批准一次写盘，之后本回合免批。
 

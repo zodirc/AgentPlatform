@@ -13,7 +13,11 @@ from app.context.policy import CompactionPolicy
 from app.context.project import build_runtime_context, load_project_context
 from app.context.summary import structured_summary_from_messages
 from app.engine.state import TurnState
-from app.tools.registry import ToolSpec, WRITE_APPROVAL_STICKY_TOOLS
+from app.tools.registry import (
+    EXEC_APPROVAL_STICKY_TOOLS,
+    ToolSpec,
+    WRITE_APPROVAL_STICKY_TOOLS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +42,13 @@ class ToolExecutor:
         if spec is None:
             return {"error": f"Tool not available: {tool_name}"}
         if spec.requires_approval and not force_approval:
-            # Same-Turn sticky: one write approval covers further file mutations.
-            sticky = bool(getattr(state, "writes_preapproved", False))
-            if sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
+            # Same-Turn sticky: one write approval covers further file mutations;
+            # one run_command approval covers further shell in this Turn.
+            write_sticky = bool(getattr(state, "writes_preapproved", False))
+            exec_sticky = bool(getattr(state, "exec_preapproved", False))
+            if write_sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
+                pass
+            elif exec_sticky and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
                 pass
             else:
                 return {

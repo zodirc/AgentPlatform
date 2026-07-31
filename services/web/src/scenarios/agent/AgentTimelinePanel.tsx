@@ -10,6 +10,8 @@ type Props = {
   selectedIndex?: number | null;
   onSelectItem?: (item: TimelineItem, index: number) => void;
   onOpenSubagent?: (subagentId: string) => void;
+  title?: string;
+  emptyHint?: string;
 };
 
 function toolLabel(item: TimelineItem, events: TurnEvent[] = []): string {
@@ -137,6 +139,8 @@ export function AgentTimelinePanel({
   selectedIndex = null,
   onSelectItem,
   onOpenSubagent,
+  title = "工具时间线",
+  emptyHint = "暂无工具调用",
 }: Props) {
   const stepCount =
     items.length + subagents.reduce((n, s) => n + s.tools.length, 0);
@@ -144,7 +148,7 @@ export function AgentTimelinePanel({
   return (
     <section className="flex h-full flex-col rounded-lg border border-border bg-card/40">
       <h2 className="shrink-0 border-b border-border px-4 py-3 text-sm font-medium text-foreground/90">
-        工具时间线
+        {title}
         {stepCount > 0 ? (
           <span className="ml-2 text-xs font-normal text-muted-foreground">
             {stepCount} 步
@@ -153,7 +157,7 @@ export function AgentTimelinePanel({
       </h2>
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
         {stepCount === 0 ? (
-          <p className="text-xs text-muted-foreground">暂无工具调用</p>
+          <p className="text-xs text-muted-foreground">{emptyHint}</p>
         ) : (
           <ol className="space-y-2">
             {items.map((item, idx) => (

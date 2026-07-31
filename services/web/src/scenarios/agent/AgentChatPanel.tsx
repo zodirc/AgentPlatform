@@ -35,7 +35,7 @@ type Props = {
 type ChatTab = "main" | string;
 
 const STICK_THRESHOLD_PX = 80;
-const MODE_OPTIONS: ScenarioId[] = ["writing", "agent", "intel"];
+const MODE_OPTIONS: ScenarioId[] = ["writing", "agent", "intel", "collab"];
 
 function assistantText(wb: WorkbenchState, turn: TurnHistoryItem): string {
   if (turn.id === wb.turnId) {
@@ -100,7 +100,14 @@ function UserBubble({
   );
 }
 
-function AssistantBubble({ text }: { text: string }) {
+function AssistantBubble({
+  text,
+  streaming = false,
+}: {
+  text: string;
+  /** Live turn: plain text; settled turn: GFM (avoid per-frame remark parse). */
+  streaming?: boolean;
+}) {
   return (
     <div>
       <p className="mb-1 text-xs font-medium text-muted-foreground">助手</p>
@@ -109,7 +116,7 @@ function AssistantBubble({ text }: { text: string }) {
         aria-live="polite"
         className="rounded-lg bg-card/60 px-3 py-2"
       >
-        <Markdown text={text} />
+        <Markdown text={text} streaming={streaming} />
       </div>
     </div>
   );
@@ -285,20 +292,22 @@ function ChatTabBar({
                 <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-warning align-middle" />
               ) : null}
             </button>
-            {!running ? (
-              <button
-                type="button"
-                className="px-1.5 text-muted-foreground/70 opacity-0 hover:text-foreground group-hover:opacity-100"
-                title="关闭标签"
-                aria-label="关闭子任务标签"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onCloseSub(sub.subagent_id);
-                }}
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className="px-1.5 text-muted-foreground/80 hover:bg-muted hover:text-foreground"
+              title={
+                running
+                  ? "关闭标签（后台仍继续，不取消）"
+                  : "关闭标签"
+              }
+              aria-label="关闭子任务标签"
+              onClick={(e) => {
+                e.stopPropagation();
+                onCloseSub(sub.subagent_id);
+              }}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
           </div>
         );
       })}
@@ -353,7 +362,10 @@ function SubagentSessionView({
         </ul>
       ) : null}
       {output ? (
-        <AssistantBubble text={output} />
+        <AssistantBubble
+          text={output}
+          streaming={busy && sub.status === "running"}
+        />
       ) : sub.status === "running" && !thinking ? (
         <p className="text-xs text-muted-foreground">思考中…</p>
       ) : null}
@@ -526,7 +538,10 @@ export function AgentChatPanel({
                     open={liveOpen}
                   />
                   {output ? (
-                    <AssistantBubble text={output} />
+                    <AssistantBubble
+                      text={output}
+                      streaming={Boolean(isLive && wb.busy)}
+                    />
                   ) : isLive && wb.busy && !thinking ? (
                     <p className="text-xs text-muted-foreground">思考中…</p>
                   ) : null}

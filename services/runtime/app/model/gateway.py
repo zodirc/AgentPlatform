@@ -423,6 +423,18 @@ class StubModelProvider:
             yield _tool_call("delegate", {"task": user_text, "agent_type": "explore"})
             return
 
+        # collab.03 sub-agent fixture: produce artifact_refs for handoff (no peer bus).
+        if (
+            "collab.03" in user_text.lower()
+            and "delegate" not in tool_names
+            and not has_tool_result
+        ):
+            reply = "Wrote explore notes.\nARTIFACT_REFS: artifacts/collab/findings.md"
+            for chunk in _chunk_text(reply):
+                yield chunk
+            yield ModelResponse(text=reply, output_tokens=12)
+            return
+
         if "delegate" in tool_names and _wants_delegate(user_text) and not has_tool_result:
             agent_type = "researcher" if "researcher" in user_text.lower() else "explore"
             yield _tool_call("delegate", {"task": user_text, "agent_type": agent_type})
@@ -432,7 +444,19 @@ class StubModelProvider:
             if _wants_double_delegate(user_text):
                 delegate_results = _delegate_tool_result_count(messages)
                 if delegate_results < 2 and not _assistant_requested_verify_delegate(messages):
-                    yield _tool_call("delegate", {"task": "verify explore findings", "agent_type": "verify"})
+                    verify_args: dict[str, Any] = {
+                        "task": "verify explore findings",
+                        "agent_type": "verify",
+                    }
+                    refs = _artifact_refs_from_last_delegate_result(messages)
+                    if not refs and "collab.03" in user_text.lower():
+                        refs = ["artifacts/collab/findings.md"]
+                    if refs:
+                        verify_args["context_refs"] = refs
+                    yield _tool_call("delegate", verify_args)
+                    return
+                if "collab.03" in user_text.lower():
+                    yield ModelResponse(text="collab.03 explore→verify handoff 完成", output_tokens=14)
                     return
                 yield ModelResponse(text="agent.06 explore→verify 串联完成", output_tokens=14)
                 return
@@ -784,13 +808,56 @@ def _is_sources_meta_question(lowered: str) -> bool:
 def _wants_delegate(text: str) -> bool:
     if _wants_double_delegate(text):
         return True
-    keywords = ("delegate", "researcher", "子 agent", "writing.06", "agent.05")
+    keywords = (
+        "delegate",
+        "researcher",
+        "子 agent",
+        "writing.06",
+        "agent.05",
+        "collab.01",
+    )
     return any(k in text.lower() for k in keywords)
 
 
 def _wants_double_delegate(text: str) -> bool:
-    keywords = ("agent.06", "explore→verify", "explore verify")
+    keywords = ("agent.06", "explore→verify", "explore verify", "collab.03")
     return any(k in text.lower() for k in keywords)
+
+
+def _artifact_refs_from_last_delegate_result(messages: list[dict]) -> list[str]:
+    """Pull artifact_refs from the latest delegate tool result (handoff)."""
+    for msg in reversed(messages):
+        if msg.get("role") != "tool":
+            continue
+        content = msg.get("content")
+        raw = ""
+        if isinstance(content, str):
+            raw = content
+        elif isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_result":
+                    raw = str(block.get("content") or block.get("text") or "")
+                    break
+                if "text" in block:
+                    raw = str(block.get("text") or "")
+                    break
+        if not raw or "subagent_id" not in raw:
+            continue
+        try:
+            data = json.loads(raw) if raw.lstrip().startswith("{") else {}
+        except json.JSONDecodeError:
+            data = {}
+        if isinstance(data, dict):
+            refs = data.get("artifact_refs")
+            if isinstance(refs, list):
+                return [str(r).strip() for r in refs if str(r).strip()][:12]
+            summary = str(data.get("summary") or "")
+            from app.tools.delegate_runner import _extract_artifact_refs
+
+            return _extract_artifact_refs(summary)
+    return []
 
 
 def _wants_vector_index(text: str) -> bool:

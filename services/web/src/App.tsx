@@ -1,13 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { BotMessageSquare, History, Plus } from "lucide-react";
 import { Button } from "./components/ui/button";
-import { EvalConsolePage } from "./ops/EvalConsolePage";
-import { EvalHistoryPage } from "./ops/EvalHistoryPage";
-import { EvalRunReportPage } from "./ops/EvalRunReportPage";
-import { EnvelopeAuditPage } from "./ops/EnvelopeAuditPage";
-import { RawAuditPage } from "./ops/RawAuditPage";
-import { RetrievalAuditPage } from "./ops/RetrievalAuditPage";
 import { SettingsPage } from "./settings/SettingsPage";
 import { ErrorBoundary } from "./shared/ErrorBoundary";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
@@ -29,7 +23,47 @@ import { SITE_APP } from "./shared/siteBrand";
 import { useSiteBrand } from "./shared/useSiteBrand";
 import { scenarioMetaFromPath } from "./shared/workbench/scenarioMeta";
 
-const SCENARIO_PATHS = ["/writing", "/agent", "/intel"] as const;
+/** Ops pages stay out of the workbench first paint (route-level code split). */
+const EvalConsolePage = lazy(() =>
+  import("./ops/EvalConsolePage").then((m) => ({ default: m.EvalConsolePage })),
+);
+const EvalHistoryPage = lazy(() =>
+  import("./ops/EvalHistoryPage").then((m) => ({ default: m.EvalHistoryPage })),
+);
+const EvalRunReportPage = lazy(() =>
+  import("./ops/EvalRunReportPage").then((m) => ({
+    default: m.EvalRunReportPage,
+  })),
+);
+const EnvelopeAuditPage = lazy(() =>
+  import("./ops/EnvelopeAuditPage").then((m) => ({
+    default: m.EnvelopeAuditPage,
+  })),
+);
+const RawAuditPage = lazy(() =>
+  import("./ops/RawAuditPage").then((m) => ({ default: m.RawAuditPage })),
+);
+const RetrievalAuditPage = lazy(() =>
+  import("./ops/RetrievalAuditPage").then((m) => ({
+    default: m.RetrievalAuditPage,
+  })),
+);
+
+function OpsSuspense({ children }: { children: ReactNode }) {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-background text-sm text-muted-foreground">
+          正在加载 Ops…
+        </div>
+      }
+    >
+      {children}
+    </Suspense>
+  );
+}
+
+const SCENARIO_PATHS = ["/writing", "/agent", "/intel", "/collab"] as const;
 
 function isOpsEvalPath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/test(\/(runs\/[^/]+|history))?\/?$/.test(pathname);
@@ -345,7 +379,11 @@ export function App() {
     <RawAuditPage />
   ) : null;
   if (opsPage !== null) {
-    return <ErrorBoundary label="Ops 页面">{opsPage}</ErrorBoundary>;
+    return (
+      <ErrorBoundary label="Ops 页面">
+        <OpsSuspense>{opsPage}</OpsSuspense>
+      </ErrorBoundary>
+    );
   }
   return <AuthenticatedApp />;
 }

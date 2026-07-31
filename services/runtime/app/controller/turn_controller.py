@@ -1237,7 +1237,15 @@ async def _run_turn(
     async def check_cancel() -> tuple[bool, bool]:
         return await _check_cancel_flag(turn_id)
 
+    engine_ref: list[Any] = []
+
     async def on_step_checkpoint(st: TurnState, step_index: int) -> None:
+        if scenario_id == "collab" and engine_ref:
+            from app.scenarios.collab_hints import apply_collab_gap_hint
+
+            refreshed = apply_collab_gap_hint(st.volatile_context, st.messages)
+            st.volatile_context = refreshed
+            engine_ref[0]._volatile_context = refreshed
         await save_checkpoint(
             run_id=run_id,
             turn_id=turn_id,
@@ -1258,6 +1266,11 @@ async def _run_turn(
             payload=pin.event_payload(),
             step_index=0,
         )
+    elif scenario_id == "collab":
+        # Hot reminder each Turn (not welded into cacheable system). docs/37.
+        from app.scenarios.collab_hints import collab_orchestrator_block
+
+        volatile_context = collab_orchestrator_block()
     # AQ1/WN3: Plan phase stays out of the cacheable system prefix.
     phase_block = plan_phase_block(phase)
     if phase_block:
@@ -1306,6 +1319,7 @@ async def _run_turn(
         on_step_checkpoint=on_step_checkpoint,
         context_window_tokens=context_window_tokens,
     )
+    engine_ref.append(engine)
 
     set_event_writer(write_event)
     hot_files = await _resolve_delegate_hot_files(
@@ -1421,6 +1435,22 @@ async def _run_turn(
                 volatile_context=volatile_context,
             ),
         )
+    elif summary == "waiting_approval":
+        logger.error(
+            "waiting_approval without pending_approval turn_id=%s — refusing hang",
+            turn_id,
+        )
+        await _fail_turn(
+            turn_id=turn_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            termination_reason="approval_state_lost",
+            message="waiting_approval without pending approval state (nested gate?)",
+            scenario_id=scenario_id,
+            steps=state.step_count,
+            duration_seconds=time.monotonic() - started_at,
+        )
+        return
 
     await _finalize_turn(
         turn_id=turn_id,
@@ -1478,10 +1508,12 @@ async def _resume_after_approval(
             )
 
     state = pending.state
-    from app.tools.registry import WRITE_APPROVAL_STICKY_TOOLS
+    from app.tools.registry import EXEC_APPROVAL_STICKY_TOOLS, WRITE_APPROVAL_STICKY_TOOLS
 
     if approved and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
         state.writes_preapproved = True
+    if approved and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
+        state.exec_preapproved = True
     owner_user_id = await load_session_owner_user_id(state.session_id)
     model_config = await resolve_model_config(owner_user_id=owner_user_id)
     context_window_tokens = await resolve_context_window_tokens(
@@ -1490,6 +1522,12 @@ async def _resume_after_approval(
     )
 
     async def on_step_checkpoint(st: TurnState, step_index: int) -> None:
+        if state.scenario_id == "collab" and engine_ref:
+            from app.scenarios.collab_hints import apply_collab_gap_hint
+
+            refreshed = apply_collab_gap_hint(st.volatile_context, st.messages)
+            st.volatile_context = refreshed
+            engine_ref[0]._volatile_context = refreshed
         await save_checkpoint(
             run_id=run_id,
             turn_id=turn_id,
@@ -1497,6 +1535,7 @@ async def _resume_after_approval(
             step_index=step_index,
         )
 
+    engine_ref: list[Any] = []
     engine = AgentEngine(
         gateway=pending.gateway,
         tools=pending.tools,
@@ -1507,6 +1546,7 @@ async def _resume_after_approval(
         on_step_checkpoint=on_step_checkpoint,
         context_window_tokens=context_window_tokens,
     )
+    engine_ref.append(engine)
 
     set_delegate_runtime(
         DelegateRuntime(
@@ -1663,6 +1703,23 @@ async def _resume_after_approval(
             trace_id=trace_id,
             state=state,
             summary=summary,
+            duration_seconds=time.monotonic() - resume_started_at,
+        )
+        return
+
+    if summary == "waiting_approval":
+        logger.error(
+            "resume waiting_approval without pending_approval turn_id=%s",
+            turn_id,
+        )
+        await _fail_turn(
+            turn_id=turn_id,
+            run_id=run_id,
+            trace_id=trace_id,
+            termination_reason="approval_state_lost",
+            message="waiting_approval without pending approval state (nested gate?)",
+            scenario_id=state.scenario_id,
+            steps=state.step_count,
             duration_seconds=time.monotonic() - resume_started_at,
         )
         return

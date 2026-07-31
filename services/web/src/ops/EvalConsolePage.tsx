@@ -457,6 +457,7 @@ export function EvalConsolePage() {
                 <option value="writing">writing</option>
                 <option value="agent">agent</option>
                 <option value="intel">intel</option>
+                <option value="collab">collab</option>
               </select>
               <input
                 className="w-40 rounded-md border border-input bg-background px-2 py-1.5 text-sm"

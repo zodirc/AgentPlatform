@@ -1,0 +1,31 @@
+id: collab.03_handoff_refs
+scenario_id: collab
+phase: 1
+description: dependent explore→verify handoff (context_refs / artifact_refs), not peer DM
+
+input:
+  message: "collab.03 explore verify 串联 handoff artifacts/collab"
+  client_request_id: "00000000-0000-4000-8000-000000000503"
+
+model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
+  - type: approve-tool-call
+    tool_call_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - subagent.started
+      - subagent.completed
+      - subagent.started
+      - subagent.completed
+      - turn.completed
+  turn:
+    status: completed
+  output:
+    matches: "collab.03"
+
+tags: [collab, delegate, handoff, p1]

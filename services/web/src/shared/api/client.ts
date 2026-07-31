@@ -219,7 +219,7 @@ export async function listSessions(limit = 20): Promise<SessionListItem[]> {
 }
 
 export async function createSession(
-  scenario: "writing" | "agent" | "intel" = "writing",
+  scenario: "writing" | "agent" | "intel" | "collab" = "writing",
 ) {
   const res = await fetch(`${API_BASE}/sessions`, {
     ...sessionFetchInit,

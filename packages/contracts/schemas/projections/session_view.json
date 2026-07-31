@@ -13,7 +13,7 @@
   "additionalProperties": false,
   "properties": {
     "session_id": { "type": "string", "format": "uuid" },
-    "default_scenario_id": { "type": "string", "enum": ["writing", "agent", "intel"] },
+    "default_scenario_id": { "type": "string", "enum": ["writing", "agent", "intel", "collab"] },
     "status": { "type": "string" },
     "turn_count": { "type": "integer", "minimum": 0 },
     "last_turn_id": { "type": ["string", "null"], "format": "uuid" },

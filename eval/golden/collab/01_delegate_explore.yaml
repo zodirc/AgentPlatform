@@ -1,0 +1,25 @@
+id: collab.01_delegate_explore
+scenario_id: collab
+phase: 1
+description: complex collab turn must delegate at least once
+
+input:
+  message: "collab.01 delegate explore 代码库协作拆分"
+  client_request_id: "00000000-0000-4000-8000-000000000501"
+
+model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
+
+assertions:
+  events:
+    sequence_contains:
+      - subagent.started
+      - subagent.completed
+      - turn.completed
+  turn:
+    status: completed
+
+tags: [collab, delegate, p1]

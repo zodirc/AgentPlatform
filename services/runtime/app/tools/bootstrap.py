@@ -470,7 +470,9 @@ def build_registry() -> ToolRegistry:
             name="delegate",
             description=(
                 "Delegate a sub-task to a specialized sub-agent. "
-                "Prefer context_refs/paths (workspace relative paths) over pasting large text into context."
+                "Prefer context_refs/paths over pasting large text into context. "
+                "For dependent follow-ups, pass prior artifact_refs / artifacts/collab/ paths. "
+                "Result may include artifact_refs for the next handoff."
             ),
             parameters={
                 "type": "object",
@@ -485,7 +487,10 @@ def build_registry() -> ToolRegistry:
                     "context_refs": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Workspace-relative file paths the sub-agent should read",
+                        "description": (
+                            "Workspace-relative file paths the sub-agent should read "
+                            "(handoff / shared blackboard)"
+                        ),
                     },
                     "paths": {
                         "type": "array",
@@ -497,6 +502,9 @@ def build_registry() -> ToolRegistry:
             },
             handler=core.delegate,
             requires_approval=True,
+            # Whole nested AgentEngine (model + tools). Default tool timeout 60s
+            # is too short for edit/verify workers (live: notes.py timed out).
+            timeout_s=max(300.0, float(settings.tool_default_timeout_seconds)),
         )
     )
     registry.register(

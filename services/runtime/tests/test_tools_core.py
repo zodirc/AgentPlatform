@@ -316,6 +316,7 @@ def test_scenario_registry_loads_profiles() -> None:
     writing = ScenarioRegistry.get("writing")
     agent = ScenarioRegistry.get("agent")
     intel = ScenarioRegistry.get("intel")
+    collab = ScenarioRegistry.get("collab")
 
     assert writing.scenario_id == "writing"
     assert "draft_section" in writing.tool_names
@@ -323,9 +324,15 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "glob" in agent.tool_names
     assert intel.scenario_id == "intel"
     assert "enrich_ioc" in intel.tool_names
+    assert collab.scenario_id == "collab"
+    assert "delegate" in collab.tool_names
+    assert "researcher" not in collab.subagent_types
+    assert "retrieve" not in collab.subagent_types
+    assert set(collab.subagent_types) == {"edit", "verify", "shell", "explore"}
     assert writing.system_prompt
     assert agent.system_prompt
     assert intel.system_prompt
+    assert collab.system_prompt
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
@@ -337,7 +344,22 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "threat-intelligence analyst" in intel.system_prompt
     assert "enrich_ioc" in intel.system_prompt
     assert "Never claim you blocked" in intel.system_prompt
-
+    # Collab: orchestrator markers (docs/37).
+    assert "orchestrator" in collab.system_prompt
+    assert "`delegate`" in collab.system_prompt
+    assert "Must orchestrate" in collab.system_prompt
+    assert "Path theater on greenfield" in collab.system_prompt
+    assert "First tool call" in collab.system_prompt
+    assert "Collaboration modes" in collab.system_prompt
+    assert "Role mix" in collab.system_prompt
+    assert "Edit-only team" in collab.system_prompt
+    assert "artifacts/collab/" in collab.system_prompt
+    assert "context_refs" in collab.system_prompt
+    assert "Simple questions" in collab.system_prompt
+    assert "update_plan" in collab.system_prompt
+    assert "edit, verify, shell, explore" in collab.system_prompt or (
+        "edit" in collab.system_prompt and "verify" in collab.system_prompt
+    )
 
 def test_interview_scenario_retired() -> None:
     ScenarioRegistry.load()

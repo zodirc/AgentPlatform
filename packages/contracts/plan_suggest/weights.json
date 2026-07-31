@@ -18,7 +18,8 @@
     "writing": 4,
     "agent": 4,
     "default": 4,
-    "intel": 4
+    "intel": 4,
+    "collab": 2
   },
   "high_risk_tokens": [
     "重构",

@@ -2,7 +2,7 @@ import type { TurnEvent, TurnView } from "../api/client";
 import type { PlanArtifact } from "./plan";
 import type { SubagentLive } from "./subagents";
 
-export type ScenarioId = "writing" | "agent" | "intel";
+export type ScenarioId = "writing" | "agent" | "intel" | "collab";
 
 export type TimelineItem = {
   tool_call_id?: string;

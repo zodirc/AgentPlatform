@@ -9,8 +9,12 @@ ON_WRITE_TOOLS = frozenset(
 )
 
 # After the user approves one write in a Turn, further tools in this set skip approval
-# for the rest of that Turn (progress-checklist / multi-edit UX). Shell stays gated.
+# for the rest of that Turn (progress-checklist / multi-edit UX).
 WRITE_APPROVAL_STICKY_TOOLS = ON_WRITE_TOOLS | frozenset({"rename_file"})
+
+# After one run_command approve in a Turn, further shell calls skip approval.
+# First gate still always; does not cover write_file / network / delegate.
+EXEC_APPROVAL_STICKY_TOOLS = frozenset({"run_command"})
 
 
 @dataclass

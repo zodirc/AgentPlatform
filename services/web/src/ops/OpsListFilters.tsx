@@ -24,6 +24,7 @@ const SCENARIO_OPTIONS = [
   { value: "writing", label: "writing" },
   { value: "agent", label: "agent" },
   { value: "intel", label: "intel" },
+  { value: "collab", label: "collab" },
 ];
 
 /** Common turn-list filters for retrieval / envelope / raw. */

@@ -20,7 +20,7 @@
   "properties": {
     "turn_id": { "type": "string", "format": "uuid" },
     "session_id": { "type": "string", "format": "uuid" },
-    "scenario_id": { "type": "string", "enum": ["writing", "agent", "intel"] },
+    "scenario_id": { "type": "string", "enum": ["writing", "agent", "intel", "collab"] },
     "status": {
       "type": "string",
       "enum": [

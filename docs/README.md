@@ -48,7 +48,7 @@ Agent Platform：**一个 Runtime，多个 Scenario**。验证：`make gate` · 
 | Ops | [ops-eval-console](topics/ops-eval-console.md) |
 | 沙箱 | [sandbox](topics/sandbox.md) |
 | 读降本 | [read-cache](topics/read-cache.md) |
-| collab（未实施） | [collab-multi-agent](topics/collab-multi-agent.md) |
+| collab | [collab-multi-agent](topics/collab-multi-agent.md) |
 | search_records 蓝图 | [search-records](topics/search-records.md) |
 
 ---

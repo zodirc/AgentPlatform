@@ -1,0 +1,37 @@
+scenario_id: collab
+display_name: 多 Agent 协作
+system_prompt_template: scenarios/collab/system.md
+tool_names:
+  - read_file
+  - list_dir
+  - glob
+  - grep
+  - propose_patch
+  - write_file
+  - edit_file
+  - rename_file
+  - search_codebase
+  - update_plan
+  - remember
+  - recall
+  - search_records
+  - run_command
+  - run_tests
+  - read_lints
+  - delegate
+  - slow_tool
+# Tight roster: greenfield ≈ edit+verify(/shell); explore for existing trees.
+# retrieve/researcher stay on writing/intel — listing them here was empty theater.
+subagent_types:
+  - edit
+  - verify
+  - shell
+  - explore
+max_steps: 50
+approval_overrides:
+  run_tests: never
+  delegate: never
+  write_file: always
+  edit_file: always
+workspace_layout: repository
+web_layout: collab-workbench

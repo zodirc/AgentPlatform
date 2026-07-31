@@ -2,7 +2,7 @@
 
 import weightsConfig from "../../../../../packages/contracts/plan_suggest/weights.json";
 
-export type ScenarioIdForSuggest = "writing" | "agent" | "intel";
+export type ScenarioIdForSuggest = "writing" | "agent" | "intel" | "collab";
 
 export type PlanSuggestDecision = {
   suggest: boolean;

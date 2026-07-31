@@ -74,6 +74,23 @@ const STREAM_DELTA_EVENT_TYPES = new Set([
 ]);
 const DRAFT_MANUSCRIPT_PATH = "drafts/manuscript.md";
 
+/** Merge snapshot + any SSE events that arrived while the snapshot was in flight. */
+function mergeEventsBySequence(
+  snapshot: TurnEvent[],
+  live: TurnEvent[],
+): TurnEvent[] {
+  if (live.length === 0) return snapshot;
+  if (snapshot.length === 0) return live;
+  const bySeq = new Map<number, TurnEvent>();
+  for (const ev of snapshot) {
+    if (typeof ev.sequence === "number") bySeq.set(ev.sequence, ev);
+  }
+  for (const ev of live) {
+    if (typeof ev.sequence === "number") bySeq.set(ev.sequence, ev);
+  }
+  return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
+}
+
 function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
   return {
     id: turn.id,
@@ -741,24 +758,22 @@ export function useWorkbenchImpl(): WorkbenchState {
         const v = await fetchTurnView(last.id);
         if (cancelled) return;
 
-        // Replay persisted events so nested subagent tabs survive refresh.
-        try {
-          const snap = await fetchTurnEvents(last.id, 0);
-          if (cancelled) return;
-          setEvents(snap.events);
-          if (snap.last_sequence > 0) {
-            lastSequenceRef.current = snap.last_sequence;
-          } else if (v.last_event_sequence) {
-            lastSequenceRef.current = v.last_event_sequence;
-          }
-        } catch {
-          // Fall back to view artifacts via resolveSubagents.
-        }
-
-        // Keep turnId on the latest turn so subagent tabs bind to history row.
+        // Paint TurnView immediately (plan / tool_timeline / status). Full event
+        // replay can take seconds on long turns — do not block the activity strip.
         setTurnId(last.id);
         setView(v);
         setSubmittedMessage(v.user_input ?? null);
+        lastSequenceRef.current = Math.max(
+          lastSequenceRef.current,
+          v.last_event_sequence ?? 0,
+        );
+
+        const viewPlan = latestPlanFromArtifacts(
+          v.artifacts as Record<string, unknown>[] | undefined,
+        );
+        if (viewPlan) setLivePlan(viewPlan);
+        setPlanAwaitingConfirm(false);
+        planWrapSentRef.current = false;
 
         if (ACTIVE_TURN_STATUSES.has(last.status)) {
           syncApprovalFromView(v);
@@ -768,29 +783,24 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (v.token_usage) {
             setLiveTokenUsage(v.token_usage as TokenUsage);
           }
-          const activePlan = latestPlanFromArtifacts(
-            v.artifacts as Record<string, unknown>[] | undefined,
-          );
-          if (activePlan) setLivePlan(activePlan);
-          setPlanAwaitingConfirm(false);
-          planWrapSentRef.current = false;
-          lastSequenceRef.current = Math.max(
-            lastSequenceRef.current,
-            v.last_event_sequence ?? 0,
-          );
           setBusy(true);
           connectStream(last.id, lastSequenceRef.current);
-          return;
         }
 
-        // Idle: still surface the last turn's plan checklist if present.
-        const idlePlan = latestPlanFromArtifacts(
-          v.artifacts as Record<string, unknown>[] | undefined,
-        );
-        if (idlePlan) setLivePlan(idlePlan);
-        // Never resurrect 「按此执行」 from a historical mid-flight plan.
-        setPlanAwaitingConfirm(false);
-        planWrapSentRef.current = false;
+        // Background: replay persisted events (subagent tabs / activity refine).
+        try {
+          const snap = await fetchTurnEvents(last.id, 0);
+          if (cancelled) return;
+          setEvents((prev) => mergeEventsBySequence(snap.events, prev));
+          if (snap.last_sequence > 0) {
+            lastSequenceRef.current = Math.max(
+              lastSequenceRef.current,
+              snap.last_sequence,
+            );
+          }
+        } catch {
+          // Fall back to view artifacts via resolveSubagents.
+        }
       } catch (err) {
         if (!cancelled) {
           setHistoryLoading(false);
@@ -1303,5 +1313,7 @@ export function placeholderForScenario(scenarioId: ScenarioId): string {
   if (scenarioId === "writing")
     return "依资料写一段并标注引用，或：请改第二节更简洁…";
   if (scenarioId === "intel") return "粘贴 IOC 或告警，生成带引用的研判简报…";
+  if (scenarioId === "collab")
+    return "复杂任务可拆给角色并行；简单问答直接问即可…";
   return "读取 README.md 并总结…";
 }

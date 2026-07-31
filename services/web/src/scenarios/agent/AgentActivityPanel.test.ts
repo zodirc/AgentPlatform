@@ -73,3 +73,54 @@ describe("deriveAgentActivity thinking rounds", () => {
     });
   });
 });
+
+describe("deriveAgentActivity tool_timeline fallback", () => {
+  it("shows running tool from TurnView when events are not loaded yet", () => {
+    const activity = deriveAgentActivity([] as never, {
+      busy: true,
+      awaitingApproval: false,
+      displayStatus: "running",
+      view: {
+        tool_timeline: [
+          { tool_call_id: "1", tool_name: "read_file", status: "ok" },
+          {
+            tool_call_id: "2",
+            tool_name: "delegate",
+            status: "running",
+            arguments: { task: "explore auth module carefully" },
+          },
+        ],
+      },
+      pendingToolName: null,
+    } as never);
+
+    expect(activity.phase).toBe("tool");
+    expect(activity.label).toBe("正在执行 delegate");
+    expect(activity.detail).toContain("explore auth");
+  });
+
+  it("prefers live events over stale timeline rows", () => {
+    const activity = deriveAgentActivity(
+      [
+        {
+          sequence: 1,
+          type: "tool.started",
+          payload: { tool_call_id: "a", tool_name: "grep" },
+        },
+      ] as never,
+      {
+        busy: true,
+        awaitingApproval: false,
+        displayStatus: "running",
+        view: {
+          tool_timeline: [
+            { tool_call_id: "old", tool_name: "delegate", status: "running" },
+          ],
+        },
+        pendingToolName: null,
+      } as never,
+    );
+
+    expect(activity.label).toBe("正在执行 grep");
+  });
+});

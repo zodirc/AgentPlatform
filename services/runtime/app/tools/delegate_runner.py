@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -16,7 +18,10 @@ from app.tools.delegate_context import (
 from app.tools.registry import ToolSpec
 
 MAX_DELEGATE_DEPTH = 2
-DEFAULT_SUBAGENT_MAX_STEPS = 8
+# Nested engines share the parent Turn budget; 8 was too tight for edit+smoke.
+DEFAULT_SUBAGENT_MAX_STEPS = 12
+
+_ARTIFACT_REFS_LINE = re.compile(r"(?im)^\s*ARTIFACT_REFS\s*:\s*(.+)$")
 
 SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
     "researcher": ["read_file", "list_dir", "search_sources", "grep"],
@@ -26,7 +31,7 @@ SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
     "stylist": ["read_file", "draft_section", "propose_patch"],
     "explore": ["read_file", "list_dir", "grep", "glob", "search_codebase", "search_sources"],
     "retrieve": ["read_file", "search_sources", "search_codebase", "list_dir"],
-    "verify": ["read_file", "check_citation", "read_lints", "run_tests"],
+    "verify": ["read_file", "check_citation", "read_lints", "run_tests", "run_command"],
     "edit": ["read_file", "propose_patch", "write_file", "edit_file", "rename_file"],
     "planner": ["read_file", "list_dir", "update_plan", "grep"],
     "shell": ["read_file", "grep", "run_command"],
@@ -74,15 +79,21 @@ def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> froze
 
 def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[ToolSpec]:
     by_name = {spec.name: spec for spec in parent_tools}
-    specs = [by_name[name] for name in SUBAGENT_TOOL_NAMES.get(agent_type, []) if name in by_name]
-    if specs:
-        return specs
-    registry = build_registry()
-    return [
-        spec
-        for name in SUBAGENT_TOOL_NAMES.get(agent_type, [])
-        if (spec := registry.get(name)) is not None
-    ]
+    registry = None
+    specs: list[ToolSpec] = []
+    for name in SUBAGENT_TOOL_NAMES.get(agent_type, []):
+        if name in by_name:
+            specs.append(by_name[name])
+            continue
+        if registry is None:
+            registry = build_registry()
+        found = registry.get(name)
+        if found is not None:
+            specs.append(found)
+    # Nested workers run inside an already-scheduled delegate. Approvals belong to
+    # the parent Turn; a subagent write_file gate would emit approval.requested but
+    # leave parent pending_approval empty (summary "waiting_approval" collision).
+    return [replace(spec, requires_approval=False) for spec in specs]
 
 
 async def run_delegate(
@@ -136,6 +147,14 @@ async def run_delegate(
         paths=paths,
         hot_files=list(ctx.hot_files),
     )
+    from app.scenarios.collab_hints import handoff_prompt_extra
+
+    prompt = prompt + handoff_prompt_extra(
+        agent_type=agent_type,
+        context_refs=context_refs,
+        paths=paths,
+        task=task,
+    )
     sub_state = TurnState(
         turn_id=turn_id,
         session_id=ctx.session_id,
@@ -162,6 +181,14 @@ async def run_delegate(
 
     depth_token = bump_delegate_depth()
     try:
+        collab_board = ""
+        if ctx.scenario_id == "collab":
+            collab_board = (
+                " For durable handoffs, write short findings under artifacts/collab/ "
+                "when a later worker will need them. End with one line "
+                "`ARTIFACT_REFS: path1, path2` (workspace-relative). "
+                "Do not paste large file bodies into the summary."
+            )
         engine = AgentEngine(
             gateway=ctx.gateway,
             tools=sub_tools,
@@ -169,7 +196,7 @@ async def run_delegate(
                 f"You are a focused {agent_type} sub-agent. "
                 "Complete the delegated task using tools; return a concise factual summary. "
                 "Prefer read_file on [context_refs] / [hot_files] paths instead of inventing paths "
-                "or pasting large file bodies yourself."
+                f"or pasting large file bodies yourself.{collab_board}"
             ),
             write_event=sub_write_event,
             check_cancel=ctx.check_cancel,
@@ -181,9 +208,17 @@ async def run_delegate(
     if sub_state.cancelled:
         status = "cancelled"
         summary = summary or "sub-agent cancelled"
+    elif summary == "waiting_approval":
+        # Should not happen after approval waiver; keep parent Turn from hanging.
+        status = "failed"
+        summary = (
+            "sub-agent hit an approval gate; nested writes must not require approval"
+        )
     else:
         status = "completed"
         summary = (summary or "sub-agent completed").strip()
+
+    artifact_refs = _extract_artifact_refs(summary)
 
     await writer(
         event_type="subagent.completed",
@@ -198,8 +233,24 @@ async def run_delegate(
         "subagent_id": subagent_id,
         "agent_type": agent_type,
         "summary": summary,
+        "artifact_refs": artifact_refs,
         "status": status,
     }
+
+
+def _extract_artifact_refs(text: str) -> list[str]:
+    """Parse `ARTIFACT_REFS: a, b` lines from a sub-agent summary (handoff blackboard)."""
+    refs: list[str] = []
+    for match in _ARTIFACT_REFS_LINE.finditer(text or ""):
+        for part in re.split(r"[,;\n]", match.group(1)):
+            path = part.strip().strip("`").strip()
+            if not path or path.startswith("http"):
+                continue
+            if path not in refs:
+                refs.append(path)
+            if len(refs) >= 12:
+                return refs
+    return refs
 
 
 def _normalize_refs(*groups: list[str] | None) -> list[str]:

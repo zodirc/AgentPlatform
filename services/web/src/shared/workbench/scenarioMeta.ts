@@ -26,6 +26,12 @@ export const SCENARIO_META: Record<ScenarioId, ScenarioMeta> = {
     navLabel: "情报",
     chatEyebrow: "威胁情报",
   },
+  collab: {
+    id: "collab",
+    title: "多 Agent 协作",
+    navLabel: "协作",
+    chatEyebrow: "协作编排",
+  },
 };
 
 export function scenarioMeta(id: ScenarioId): ScenarioMeta {
@@ -36,6 +42,6 @@ export function scenarioMetaFromPath(pathname: string): ScenarioMeta | null {
   if (pathname.startsWith("/writing")) return SCENARIO_META.writing;
   if (pathname.startsWith("/agent")) return SCENARIO_META.agent;
   if (pathname.startsWith("/intel")) return SCENARIO_META.intel;
+  if (pathname.startsWith("/collab")) return SCENARIO_META.collab;
   return null;
 }
-

@@ -9,6 +9,9 @@ import {
   type SidebarSelection,
 } from "../../scenarios/agent/AgentSidebar";
 import { AgentTimelinePanel } from "../../scenarios/agent/AgentTimelinePanel";
+import {
+  CollabTeamViewer,
+} from "../../scenarios/collab/CollabTeamPanel";
 import { WorkspaceFileViewer } from "../../scenarios/agent/WorkspaceFileViewer";
 import { ScenarioSidebarExtras } from "../../scenarios/ScenarioSidebarExtras";
 import { RagDebugModal } from "../../scenarios/writing/RagDebugModal";
@@ -62,6 +65,8 @@ export function ScenarioWorkbenchView({
   const [openSubagentRequest, setOpenSubagentRequest] = useState<string | null>(
     null,
   );
+  const [teamViewerOpen, setTeamViewerOpen] = useState(false);
+  const isCollab = scenarioId === "collab";
   const artifactCount = artifactBadgeCount(
     wb.timelineItems,
     wb.view?.artifacts ?? [],
@@ -76,6 +81,11 @@ export function ScenarioWorkbenchView({
         : ({ kind: "timeline", item, index } as const);
     setSelection(next);
     if (next) setArtifactsOpen(true);
+  };
+
+  const openSubagent = (id: string) => {
+    openPanel();
+    setOpenSubagentRequest(id);
   };
 
   const rootClass = fillParent
@@ -109,6 +119,9 @@ export function ScenarioWorkbenchView({
                   scenarioId === "writing"
                     ? () => setRagDebugOpen(true)
                     : undefined
+                }
+                onOpenCollabTeam={
+                  isCollab ? () => setTeamViewerOpen(true) : undefined
                 }
               />
             }
@@ -178,17 +191,20 @@ export function ScenarioWorkbenchView({
             <AgentActivityPanel wb={wb} compact />
             <div className="min-h-0 flex-1 overflow-hidden">
               <AgentTimelinePanel
+                title={isCollab ? "主编工具" : undefined}
+                emptyHint={
+                  isCollab
+                    ? "主编下场的工具会出现在这里；工人详情在左侧「团队 / 子任务」"
+                    : undefined
+                }
                 items={wb.timelineItems}
                 events={wb.events}
-                subagents={wb.subagents}
+                subagents={isCollab ? [] : wb.subagents}
                 selectedIndex={
                   selection?.kind === "timeline" ? selection.index : null
                 }
                 onSelectItem={selectTimelineItem}
-                onOpenSubagent={(id) => {
-                  openPanel();
-                  setOpenSubagentRequest(id);
-                }}
+                onOpenSubagent={isCollab ? undefined : openSubagent}
               />
             </div>
           </main>
@@ -222,6 +238,12 @@ export function ScenarioWorkbenchView({
       <WorkspaceFileViewer
         path={workspaceViewerPath}
         onClose={() => setWorkspaceViewerPath(null)}
+      />
+      <CollabTeamViewer
+        open={teamViewerOpen}
+        subagents={wb.subagents}
+        onClose={() => setTeamViewerOpen(false)}
+        onOpenSubagent={openSubagent}
       />
       {scenarioId === "writing" ? (
         <>

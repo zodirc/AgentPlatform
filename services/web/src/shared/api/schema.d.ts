@@ -312,13 +312,13 @@ export interface components {
              * @default writing
              * @enum {string}
              */
-            default_scenario_id: "writing" | "agent" | "intel";
+            default_scenario_id: "writing" | "agent" | "intel" | "collab";
         };
         SessionResponse: {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            default_scenario_id: "writing" | "agent" | "intel";
+            default_scenario_id: "writing" | "agent" | "intel" | "collab";
             status: string;
             /** Format: date-time */
             created_at: string;
@@ -326,7 +326,7 @@ export interface components {
         CreateTurnRequest: {
             message: string;
             /** @enum {string} */
-            scenario_id?: "writing" | "agent" | "intel";
+            scenario_id?: "writing" | "agent" | "intel" | "collab";
             /** Format: uuid */
             client_request_id?: string;
             /**
@@ -341,7 +341,7 @@ export interface components {
             /** Format: uuid */
             session_id: string;
             /** @enum {string} */
-            scenario_id: "writing" | "agent" | "intel";
+            scenario_id: "writing" | "agent" | "intel" | "collab";
             status: string;
             user_input?: string;
             /** Format: date-time */
@@ -353,7 +353,7 @@ export interface components {
             /** Format: uuid */
             session_id: string;
             /** @enum {string} */
-            scenario_id: "writing" | "agent" | "intel";
+            scenario_id: "writing" | "agent" | "intel" | "collab";
             status: string;
             user_input: string;
             latest_output?: string | null;
@@ -408,7 +408,7 @@ export interface components {
             /** Format: uuid */
             session_id: string;
             /** @enum {string} */
-            default_scenario_id: "writing" | "agent" | "intel";
+            default_scenario_id: "writing" | "agent" | "intel" | "collab";
             status: string;
             turn_count: number;
             /** Format: uuid */

@@ -23,7 +23,7 @@ class GenerationParams:
         elif scenario_id == "intel":
             # Intel briefs are prose/report oriented (docs/39); reuse writing temp.
             temperature = settings.model_temperature_writing
-        elif scenario_id == "agent":
+        elif scenario_id == "agent" or scenario_id == "collab":
             temperature = settings.model_temperature_agent
         else:
             temperature = settings.model_temperature_agent

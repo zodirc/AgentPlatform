@@ -31,6 +31,7 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "model_mode": state.model_mode,
         "volatile_context": state.volatile_context or "",
         "writes_preapproved": bool(state.writes_preapproved),
+        "exec_preapproved": bool(state.exec_preapproved),
         "read_registry": serialize_read_registry(state.read_registry),
     }
 
@@ -62,6 +63,7 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         model_mode=str(data["model_mode"]) if data.get("model_mode") else None,
         volatile_context=str(data.get("volatile_context") or ""),
         writes_preapproved=bool(data.get("writes_preapproved", False)),
+        exec_preapproved=bool(data.get("exec_preapproved", False)),
         read_registry=deserialize_read_registry(data.get("read_registry")),
     )
 
@@ -82,7 +84,7 @@ async def save_checkpoint(
         ON CONFLICT (run_id) DO UPDATE SET
             step_index = EXCLUDED.step_index,
             state_json = EXCLUDED.state_json,
-            interrupt_payload = EXCLUDED.interrupt_payload,
+            interrupt_payload = COALESCE(EXCLUDED.interrupt_payload, checkpoints.interrupt_payload),
             updated_at = now()
         """,
         run_id,

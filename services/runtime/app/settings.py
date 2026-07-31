@@ -132,7 +132,7 @@ class Settings(BaseSettings):
     # be selected explicitly and passes the guard below during startup.
     app_env: str = "development"
     log_level: str = "INFO"
-    model_timeout_seconds: float = 120.0
+    model_timeout_seconds: float = 240.0
     # H1 harness: fast-fail first byte / connect so retries start early.
     model_first_byte_timeout_seconds: float = 15.0
     model_connect_timeout_seconds: float = 10.0
@@ -160,9 +160,10 @@ class Settings(BaseSettings):
     path_preread_max_files: int = 3
     tool_default_timeout_seconds: float = 60.0
     step_timeout_seconds: float = 300.0
-    stall_threshold_seconds: float = 120.0
+    stall_threshold_seconds: float = 180.0
     stall_poll_interval_seconds: float = 30.0
-    stall_auto_fail: bool = False
+    # Default on: silent hangs (no new events) must not leave UI spinning forever.
+    stall_auto_fail: bool = True
     runtime_runner_id: str = socket.gethostname()
     # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).
     runtime_max_inflight_turns: int = 16

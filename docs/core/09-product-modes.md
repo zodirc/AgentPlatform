@@ -174,8 +174,8 @@ StartTurn(scenario_id)
 ScenarioRegistry.load()  # 自动加载 profiles/*.yaml
 ```
 
-已注册场景（**现状代码**）：`writing`、`agent`、`interview`（`services/runtime/app/scenarios/profiles/`）。  
-**目标态**：`writing`、`agent`、`collab`（见 [37](../topics/collab-multi-agent.md)；实施前仍以现状 enum 为准）。
+已注册场景：`writing`、`agent`、`intel`、`collab`（`services/runtime/app/scenarios/profiles/`）。  
+`interview` 已退役（`RETIRED_SCENARIOS`）。协作场景见 [37](../topics/collab-multi-agent.md)。
 
 ---
 

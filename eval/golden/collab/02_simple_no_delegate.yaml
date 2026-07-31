@@ -1,0 +1,25 @@
+id: collab.02_simple_no_delegate
+scenario_id: collab
+phase: 1
+description: simple collab chitchat must not spawn workers
+
+input:
+  message: "collab.02 你好，1+1等于几"
+  client_request_id: "00000000-0000-4000-8000-000000000502"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - turn.completed
+    sequence_not_contains:
+      - subagent.started
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    forbidden_names:
+      - delegate
+
+tags: [collab, negative, p1]

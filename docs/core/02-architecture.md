@@ -127,7 +127,7 @@ Phase 1 起：**文档定稿 + §5.1 golden + SLO** 与代码同步验收。
 ## 10. Phase 0 落地检查（摘要）
 
 - [x] compose 全绿；`03` 清单完整（`make smoke`）
-- [x] `AgentEngine` 无 scenario 分支；`ScenarioRegistry` 可加载 `writing`/`agent`/`intel`（第三场景目标态 `collab` 见 [topics/collab](../topics/collab-multi-agent.md)；**未实施**）
+- [x] `AgentEngine` 无 scenario 分支；`ScenarioRegistry` 可加载 `writing`/`agent`/`intel`/`collab`（见 [topics/collab](../topics/collab-multi-agent.md)）
 - [x] `turn_events` + SSE + WebSocket + 最小 `TurnView`（见 `contracts.md` §3–4）
 - [x] `packages/contracts/` DDL + 命令 schema 与 `contracts.md` 同步
 - [x] stub golden 在 CI 通过（`12` §4 L0 + `make eval-all`）

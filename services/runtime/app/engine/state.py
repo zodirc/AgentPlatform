@@ -39,6 +39,8 @@ class TurnState:
     volatile_context: str = ""
     # After user approves one write-class tool this Turn, further sticky writes skip approval.
     writes_preapproved: bool = False
+    # After user approves run_command this Turn, further run_command skips approval.
+    exec_preapproved: bool = False
     # docs/34 RC1 — Turn-scoped read_file coverage (hard-gate read-after-complete).
     read_registry: dict[str, PathReadState] = field(default_factory=dict)
 

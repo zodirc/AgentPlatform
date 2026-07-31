@@ -1,6 +1,6 @@
 import type { ScenarioId } from "./types";
 
-const SCENARIO_IDS: ScenarioId[] = ["writing", "agent", "intel"];
+const SCENARIO_IDS: ScenarioId[] = ["writing", "agent", "intel", "collab"];
 
 export function isScenarioId(value: string | undefined): value is ScenarioId {
   return SCENARIO_IDS.includes(value as ScenarioId);

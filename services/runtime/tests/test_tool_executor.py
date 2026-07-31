@@ -175,6 +175,44 @@ async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
     assert called["n"] == 1
 
 
+@pytest.mark.asyncio
+async def test_run_command_sticky_skips_approval_after_preapprove() -> None:
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"ok": True, "summary": "ran"}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="run_command",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=True,
+            )
+        ]
+    )
+    blocked = await executor.run(
+        tool_name="run_command",
+        tool_call_id="c1",
+        arguments={},
+        state=_minimal_state(exec_preapproved=False),
+    )
+    assert blocked["status"] == "approval_required"
+    assert called["n"] == 0
+
+    allowed = await executor.run(
+        tool_name="run_command",
+        tool_call_id="c2",
+        arguments={},
+        state=_minimal_state(exec_preapproved=True),
+    )
+    assert allowed.get("ok") is True
+    assert called["n"] == 1
+
+
 def _minimal_state(**extra: object) -> object:
     base = {
         "turn_id": None,

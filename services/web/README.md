@@ -15,6 +15,7 @@ Static frontend (Vite + React + TypeScript → nginx). See ADR-018.
 | `/writing` | `WritingWorkbench` | 大纲、章节、引用、patch diff |
 | `/agent` | `AgentWorkbench` | 时间线、检索、产物视图 |
 | `/intel` | `UnifiedWorkbench`（复用 writing 侧栏） | 威胁情报研判 |
+| `/collab` | `UnifiedWorkbench` + 团队板 | 多 Agent 协作编排 |
 | `/settings/model` | `SettingsPage` | 模型供应商 Web 管理（ADR-019） |
 
 实时：`shared/realtime/TurnStreamClient`（SSE）与 `TurnWebSocketClient`。

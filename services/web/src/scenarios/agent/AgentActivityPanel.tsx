@@ -35,6 +35,23 @@ function formatToolDetail(
   return "";
 }
 
+/** Refresh path: events may still be loading; tool_timeline already has status. */
+function runningToolFromTimeline(
+  view: WorkbenchState["view"],
+): { toolName: string; detail?: string } | null {
+  const timeline = view?.tool_timeline;
+  if (!Array.isArray(timeline) || timeline.length === 0) return null;
+  for (let i = timeline.length - 1; i >= 0; i -= 1) {
+    const row = timeline[i] as Record<string, unknown>;
+    if (String(row.status ?? "") !== "running") continue;
+    const toolName = String(row.tool_name ?? "tool");
+    const args = row.arguments as Record<string, unknown> | undefined;
+    const detail = formatToolDetail(toolName, args);
+    return { toolName, detail: detail || undefined };
+  }
+  return null;
+}
+
 export function deriveAgentActivity(
   events: TurnEvent[],
   wb: Pick<
@@ -112,6 +129,14 @@ export function deriveAgentActivity(
       phase: "tool",
       label: `正在执行 ${toolName}`,
       detail: detail || undefined,
+    };
+  }
+  const fromTimeline = runningToolFromTimeline(wb.view);
+  if (fromTimeline && (wb.busy || wb.displayStatus === "running")) {
+    return {
+      phase: "tool",
+      label: `正在执行 ${fromTimeline.toolName}`,
+      detail: fromTimeline.detail,
     };
   }
   const lastThinking = [...events]

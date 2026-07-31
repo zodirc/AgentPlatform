@@ -109,7 +109,7 @@ async def scan_stalled_runs() -> None:
                 run_id=UUID(str(run_id)),
                 trace_id=UUID(str(trace_id)),
                 termination_reason="step_timeout",
-                message="stall watchdog auto-fail",
+                message="stall watchdog auto-fail: no events for threshold",
                 scenario_id=row["scenario_id"] or "",
             )
 

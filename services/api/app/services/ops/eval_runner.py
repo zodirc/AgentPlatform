@@ -61,7 +61,7 @@ async def _wait_events(
     stop_types: set[str],
     *,
     since: int = 0,
-    # Must exceed runtime MODEL_TIMEOUT (default 120s) for shared.07 stub hang.
+    # Must exceed runtime MODEL_TIMEOUT (default 240s) for shared.07 stub hang.
     timeout: float = 180.0,
 ) -> list[dict[str, Any]]:
     deadline = time.monotonic() + timeout
