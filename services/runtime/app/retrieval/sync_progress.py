@@ -93,6 +93,7 @@ def report_sync_progress(
         payload["effect_ready"] = False
 
         # Derive ETA when we have rate + remaining chunks.
+        # If the caller cleared rate but set eta_s explicitly (e.g. finished → 0), keep it.
         chunks_done = payload.get("chunks_embedded")
         chunks_total = payload.get("chunks_total")
         rate = payload.get("rate_chunks_per_s")
@@ -105,7 +106,11 @@ def report_sync_progress(
             ):
                 remaining = max(0, int(chunks_total) - int(chunks_done))
                 payload["eta_s"] = round(remaining / float(rate), 1)
-            elif "rate_chunks_per_s" in fields and fields.get("rate_chunks_per_s") is None:
+            elif (
+                "rate_chunks_per_s" in fields
+                and fields.get("rate_chunks_per_s") is None
+                and "eta_s" not in fields
+            ):
                 payload.pop("eta_s", None)
         except (TypeError, ValueError):
             pass

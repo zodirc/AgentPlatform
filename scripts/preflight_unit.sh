@@ -11,6 +11,7 @@
 #   SKIP_PREFLIGHT=1 ...                        # no-op (exit 0)
 #   PREFLIGHT_DOCKER=1 ...                      # force Docker runners
 #   PREFLIGHT_VERBOSE_PIP=0 ...                 # quieter pip (default: show progress)
+#   PREFLIGHT_SKIP_RUNTIME_REBUILD=1 ...        # do not auto make up-runtime when image stale
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -224,6 +225,42 @@ docker_ready() {
   "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx runtime
 }
 
+# Hash of runtime app/*.py — detect when preflight copies new tests onto an old image.
+runtime_app_fingerprint_from_dir() {
+  local root="$1"
+  (cd "$root" && find app -type f -name '*.py' ! -path '*/__pycache__/*' -print0 \
+    | sort -z | xargs -0 md5sum 2>/dev/null) | md5sum | awk '{print $1}'
+}
+
+runtime_app_fingerprint_in_container() {
+  docker exec agent-runtime bash -c \
+    'cd /app && find app -type f -name "*.py" ! -path "*/__pycache__/*" -print0 \
+       | sort -z | xargs -0 md5sum' \
+    | md5sum | awk '{print $1}'
+}
+
+ensure_docker_runtime_matches_tree() {
+  if [[ "${PREFLIGHT_SKIP_RUNTIME_REBUILD:-0}" == "1" ]]; then
+    echo "==> preflight: skip runtime image freshness check (PREFLIGHT_SKIP_RUNTIME_REBUILD=1)"
+    return 0
+  fi
+  docker_ready || return 0
+  local host_fp cont_fp
+  host_fp="$(runtime_app_fingerprint_from_dir "$ROOT/services/runtime")"
+  cont_fp="$(runtime_app_fingerprint_in_container || true)"
+  if [[ -z "$cont_fp" ]]; then
+    echo "==> preflight: could not fingerprint runtime container — rebuilding  [$(elapsed)]"
+    with_heartbeat "make up-runtime" make -C "$ROOT" up-runtime
+    return 0
+  fi
+  if [[ "$host_fp" == "$cont_fp" ]]; then
+    echo "==> preflight: runtime image matches services/runtime/app (${host_fp:0:12}…)  [$(elapsed)]"
+    return 0
+  fi
+  echo "==> preflight: runtime image STALE vs tree (host=${host_fp:0:12}… image=${cont_fp:0:12}…) — make up-runtime  [$(elapsed)]"
+  with_heartbeat "make up-runtime" make -C "$ROOT" up-runtime
+}
+
 use_docker=0
 if [[ "${PREFLIGHT_DOCKER:-0}" == "1" ]]; then
   use_docker=1
@@ -344,6 +381,7 @@ run_ux_tests_docker() {
 
 run_runtime_docker() {
   echo "==> [preflight] Runtime unit tests (docker)  [$(elapsed)]"
+  ensure_docker_runtime_matches_tree
   "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval
   "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest
   docker cp "$ROOT/services/runtime/tests/." agent-runtime:/tmp/runtime-tests/
