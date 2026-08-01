@@ -8,16 +8,40 @@ contract cannot silently drift from the implementation.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import yaml
 
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_PUBLIC_YAML = _REPO_ROOT / "packages" / "contracts" / "openapi" / "public.yaml"
-
 _HTTP_METHODS = {"get", "post", "put", "patch", "delete", "head", "options"}
+
+
+def _find_public_yaml() -> Path:
+    """Resolve public.yaml for both in-tree tests and docker preflight (/tmp copy)."""
+    env = (os.environ.get("PUBLIC_OPENAPI_YAML") or "").strip()
+    if env:
+        path = Path(env)
+        if path.is_file():
+            return path
+    here = Path(__file__).resolve()
+    # Walk up from the test file (services/api/tests → repo root).
+    for parent in [here.parent, *here.parents]:
+        cand = parent / "packages" / "contracts" / "openapi" / "public.yaml"
+        if cand.is_file():
+            return cand
+    # Ops api container mounts the checkout at /repo.
+    mounted = Path("/repo/packages/contracts/openapi/public.yaml")
+    if mounted.is_file():
+        return mounted
+    raise FileNotFoundError(
+        "packages/contracts/openapi/public.yaml not found "
+        "(set PUBLIC_OPENAPI_YAML or run with repo mounted at /repo)"
+    )
+
+
+_PUBLIC_YAML = _find_public_yaml()
 
 
 def _load_app():

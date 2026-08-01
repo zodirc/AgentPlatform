@@ -367,8 +367,11 @@ run_api_ux_docker() {
   docker cp "$ROOT/services/api/tests/." agent-api:/tmp/api-tests/
   with_heartbeat "docker pytest api" "${COMPOSE[@]}" exec -T api bash -c \
     'echo "==> [preflight/docker] pip install pytest extras…"
-     python -m pip install --progress-bar on pytest pytest-asyncio httpx
+     python -m pip install --progress-bar on pytest pytest-asyncio httpx pyyaml
      if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi
+     if [ -f /repo/packages/contracts/openapi/public.yaml ]; then
+       export PUBLIC_OPENAPI_YAML=/repo/packages/contracts/openapi/public.yaml
+     fi
      echo "==> [preflight/docker] pytest /tmp/api-tests…"
      python -m pytest /tmp/api-tests -q --asyncio-mode=auto'
 }
