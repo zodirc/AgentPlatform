@@ -29,12 +29,161 @@ type Preset = {
   id: string;
   label: string;
   targets: string[];
-  context_dry: boolean;
-  coding_skip_api: boolean;
+  coding_tier?: string;
+  coding_n_instances?: number | null;
+  coding_harness?: boolean;
+  retrieval_prod?: boolean;
   hint: string;
 };
 
+type CodingTierMeta = { id: string; n_instances: number | null };
+
 type Caps = Record<string, boolean>;
+
+const SUITE_IDS = ["retrieval", "context", "coding"] as const;
+type SuiteId = (typeof SUITE_IDS)[number];
+
+type ApiStyle = "openai" | "anthropic";
+
+type ProviderPreset = {
+  id: string;
+  label: string;
+  api_style: ApiStyle;
+  model: string;
+  base_url: string;
+  context_window?: string;
+};
+
+/** Mainstream chat endpoints for Bench context/coding (not product user profiles). */
+const PROVIDER_PRESETS: ProviderPreset[] = [
+  {
+    id: "anthropic",
+    label: "Anthropic",
+    api_style: "anthropic",
+    model: "claude-sonnet-4-20250514",
+    base_url: "https://api.anthropic.com",
+    context_window: "200000",
+  },
+  {
+    id: "openai",
+    label: "OpenAI",
+    api_style: "openai",
+    model: "gpt-4o-mini",
+    base_url: "https://api.openai.com/v1",
+    context_window: "128000",
+  },
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    api_style: "openai",
+    model: "deepseek-chat",
+    base_url: "https://api.deepseek.com",
+    context_window: "65536",
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    api_style: "openai",
+    model: "openai/gpt-4o-mini",
+    base_url: "https://openrouter.ai/api/v1",
+    context_window: "128000",
+  },
+  {
+    id: "moonshot",
+    label: "Moonshot",
+    api_style: "openai",
+    model: "moonshot-v1-128k",
+    base_url: "https://api.moonshot.cn/v1",
+    context_window: "128000",
+  },
+  {
+    id: "zhipu",
+    label: "智谱",
+    api_style: "openai",
+    model: "glm-4-flash",
+    base_url: "https://open.bigmodel.cn/api/paas/v4",
+    context_window: "128000",
+  },
+  {
+    id: "groq",
+    label: "Groq",
+    api_style: "openai",
+    model: "llama-3.3-70b-versatile",
+    base_url: "https://api.groq.com/openai/v1",
+    context_window: "128000",
+  },
+  {
+    id: "together",
+    label: "Together",
+    api_style: "openai",
+    model: "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo",
+    base_url: "https://api.together.xyz/v1",
+    context_window: "128000",
+  },
+  {
+    id: "ollama",
+    label: "Ollama",
+    api_style: "openai",
+    model: "llama3.2",
+    base_url: "http://host.docker.internal:11434/v1",
+    context_window: "32768",
+  },
+];
+
+function presetById(id: string): ProviderPreset | undefined {
+  return PROVIDER_PRESETS.find((p) => p.id === id);
+}
+
+function inferApiStyle(provider: string, explicit?: string | null): ApiStyle {
+  if (explicit === "openai" || explicit === "anthropic") return explicit;
+  if (provider === "anthropic" || provider === "claude") return "anthropic";
+  return "openai";
+}
+
+/** Map Ops suite cards → bench worker targets. */
+function suitesToTargets(suites: Iterable<string>): string[] {
+  const out: string[] = [];
+  for (const s of suites) {
+    if (s === "coding") {
+      if (!out.includes("coding_infer")) out.push("coding_infer");
+    } else if (s === "retrieval" || s === "context") {
+      if (!out.includes(s)) out.push(s);
+    } else if (
+      s === "coding_infer" ||
+      s === "coding_pull" ||
+      s === "pull"
+    ) {
+      // Legacy history rows
+      if (s === "coding_pull" || s === "coding_infer") {
+        if (!out.includes("coding_infer")) out.push("coding_infer");
+      } else if (!out.includes(s)) out.push(s);
+    }
+  }
+  return out;
+}
+
+function suitesFromRun(r: {
+  targets?: string[];
+  official_suite?: string;
+  model_meta?: { official_suite?: string };
+}): SuiteId[] {
+  const raw =
+    Array.isArray(r.targets) && r.targets.length > 0
+      ? r.targets
+      : String(r.official_suite || r.model_meta?.official_suite || "")
+          .split("+")
+          .map((s) => s.trim())
+          .filter(Boolean);
+  const suites = new Set<SuiteId>();
+  for (const t of raw) {
+    if (t === "retrieval") suites.add("retrieval");
+    else if (t === "context") suites.add("context");
+    else if (t === "coding" || t === "coding_infer" || t === "coding_pull") {
+      suites.add("coding");
+    }
+  }
+  return SUITE_IDS.filter((id) => suites.has(id));
+}
 
 type OfficialRun = {
   id: string;
@@ -52,6 +201,10 @@ type OfficialRun = {
   targets?: string[];
   context_dry?: boolean;
   coding_skip_api?: boolean;
+  coding_tier?: string;
+  coding_n_instances?: number | null;
+  coding_harness?: boolean;
+  retrieval_prod?: boolean;
   cancel_requested?: boolean;
   report_html_available?: boolean;
   child_reports?: Array<{ case_id?: string; bench_run_id?: string; report_html?: string }>;
@@ -71,6 +224,11 @@ type OfficialRun = {
     official_suite?: string;
     context_dry?: boolean;
     coding_skip_api?: boolean;
+    coding_tier?: string;
+    coding_n_instances?: number | null;
+    coding_harness?: boolean;
+    retrieval_prod?: boolean;
+    reclaimed?: boolean;
     report_html_available?: boolean;
     child_reports?: Array<{ case_id?: string; bench_run_id?: string; report_html?: string }>;
   };
@@ -100,14 +258,7 @@ function isActiveStatus(status?: string): boolean {
 }
 
 function targetsFromRun(r: OfficialRun): string[] {
-  if (Array.isArray(r.targets) && r.targets.length > 0) {
-    return r.targets.filter((t) => (KNOWN_TARGETS as readonly string[]).includes(t));
-  }
-  const suite = r.official_suite || r.model_meta?.official_suite || "";
-  return suite
-    .split("+")
-    .map((s) => s.trim())
-    .filter((t) => (KNOWN_TARGETS as readonly string[]).includes(t));
+  return suitesToTargets(suitesFromRun(r));
 }
 
 function formatTime(iso?: string | null): string {
@@ -217,6 +368,22 @@ function parseProgressLine(line: string): DetailProgress | null {
   };
 }
 
+function isEffectEligible(r: OfficialRun): boolean {
+  /** Exclude dry / skip_api / reclaimed from effect aggregates. */
+  if (r.model_meta?.reclaimed) return false;
+  const err = String(r.error || "");
+  if (err.includes("reclaimed")) return false;
+  const dry = r.context_dry ?? r.model_meta?.context_dry;
+  const skip = r.coding_skip_api ?? r.model_meta?.coding_skip_api;
+  const targets = targetsFromRun(r);
+  if (targets.includes("context") && dry) return false;
+  if (targets.includes("coding_infer") && skip) return false;
+  // Hash smoke retrieval is not an effect score.
+  const prod = r.retrieval_prod ?? r.model_meta?.retrieval_prod;
+  if (targets.includes("retrieval") && prod === false && targets.length === 1) return false;
+  return true;
+}
+
 function runMetrics(r: OfficialRun | null | undefined): Record<string, number> {
   if (!r) return {};
   const m = r.metrics || r.summary?.metrics || {};
@@ -256,6 +423,7 @@ function aggregateMetrics(runs: OfficialRun[]): MetricAgg[] {
   const byKey: Record<string, number[]> = {};
   const latestByKey: Record<string, number> = {};
   for (const r of runs) {
+    if (!isEffectEligible(r)) continue;
     const m = runMetrics(r);
     if (!Object.keys(m).length) continue;
     for (const [k, v] of Object.entries(m)) {
@@ -359,11 +527,33 @@ export function OfficialBenchPage() {
   const [targetsMeta, setTargetsMeta] = useState<TargetMeta[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [caps, setCaps] = useState<Caps>({});
-  const [selectedTargets, setSelectedTargets] = useState<Set<string>>(
-    () => new Set(["retrieval", "context", "coding_pull", "coding_infer"]),
+  const [selectedSuites, setSelectedSuites] = useState<Set<SuiteId>>(
+    () => new Set(["retrieval", "context", "coding"]),
   );
-  const [contextDry, setContextDry] = useState(true);
-  const [codingSkipApi, setCodingSkipApi] = useState(true);
+  const [codingTier, setCodingTier] = useState("n25");
+  const [codingNInstances, setCodingNInstances] = useState(25);
+  const [codingHarness, setCodingHarness] = useState(false);
+  const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
+    { id: "n3", n_instances: 3 },
+    { id: "n5", n_instances: 5 },
+    { id: "n10", n_instances: 10 },
+    { id: "n25", n_instances: 25 },
+    { id: "full300", n_instances: 300 },
+    { id: "custom", n_instances: null },
+  ]);
+  const [retrievalProd, setRetrievalProd] = useState(true);
+  // Empty until user picks a preset or restores real prefs — do not invent deepseek-chat.
+  const [modelProvider, setModelProvider] = useState("");
+  const [modelApiStyle, setModelApiStyle] = useState<ApiStyle>("openai");
+  const [modelName, setModelName] = useState("");
+  const [modelBaseUrl, setModelBaseUrl] = useState("");
+  const [modelApiKey, setModelApiKey] = useState("");
+  const [modelContextWindow, setModelContextWindow] = useState("");
+  const [prefsReady, setPrefsReady] = useState(false);
+  /** Last api_key successfully written to localStorage ("" = none saved). */
+  const [storedApiKey, setStoredApiKey] = useState("");
+  const [apiKeyEditing, setApiKeyEditing] = useState(false);
+  const [apiKeySaveFlash, setApiKeySaveFlash] = useState(false);
   const [showCriteria, setShowCriteria] = useState(false);
   const [suiteFilter, setSuiteFilter] = useState<string>("");
   const [runs, setRuns] = useState<OfficialRun[]>([]);
@@ -371,6 +561,8 @@ export function OfficialBenchPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
+  const [historySelectMode, setHistorySelectMode] = useState(false);
+  const [checkedRunIds, setCheckedRunIds] = useState<Set<string>>(() => new Set());
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [phaseHint, setPhaseHint] = useState(
@@ -395,6 +587,201 @@ export function OfficialBenchPage() {
     }),
     [secret],
   );
+
+  // Restore Bench prefs (model + suites). api_key only if explicitly saved before.
+  // v1 auto-wrote form defaults (deepseek-chat) — only restore model when v>=2 or key present.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("ops.bench.prefs");
+      if (raw) {
+        const saved = JSON.parse(raw) as {
+          v?: number;
+          provider?: string;
+          api_style?: string;
+          model_name?: string;
+          base_url?: string;
+          context_window_tokens?: string;
+          remember_api_key?: boolean;
+          api_key?: string;
+          suites?: string[];
+          coding_tier?: string;
+          coding_n?: number;
+          coding_harness?: boolean;
+        };
+        const storedKey =
+          saved.remember_api_key === false ? "" : String(saved.api_key || "");
+        const hasKey = Boolean(storedKey);
+        const restoreModel = (saved.v ?? 0) >= 2 || hasKey;
+        if (restoreModel) {
+          if (saved.provider) setModelProvider(saved.provider);
+          if (saved.model_name) setModelName(saved.model_name);
+          if (saved.base_url != null) setModelBaseUrl(saved.base_url);
+          if (saved.context_window_tokens != null) {
+            setModelContextWindow(String(saved.context_window_tokens));
+          }
+          setModelApiStyle(inferApiStyle(saved.provider || "", saved.api_style));
+        }
+        if (hasKey) {
+          setModelApiKey(storedKey);
+          setStoredApiKey(storedKey);
+          setApiKeyEditing(false);
+        } else {
+          setApiKeyEditing(true);
+        }
+        if (Array.isArray(saved.suites) && saved.suites.length) {
+          setSelectedSuites(
+            new Set(saved.suites.filter((s): s is SuiteId => (SUITE_IDS as readonly string[]).includes(s))),
+          );
+        }
+        if (saved.coding_tier) setCodingTier(saved.coding_tier);
+        if (saved.coding_n != null) setCodingNInstances(saved.coding_n);
+        if (typeof saved.coding_harness === "boolean") setCodingHarness(saved.coding_harness);
+      } else {
+        const old = localStorage.getItem("ops.bench.model");
+        if (old) {
+          const key = sessionStorage.getItem("ops.bench.model.api_key");
+          if (key) {
+            const saved = JSON.parse(old) as {
+              provider?: string;
+              model_name?: string;
+              base_url?: string;
+              context_window_tokens?: string;
+            };
+            if (saved.provider) setModelProvider(saved.provider);
+            if (saved.model_name) setModelName(saved.model_name);
+            if (saved.base_url != null) setModelBaseUrl(saved.base_url);
+            if (saved.context_window_tokens != null) {
+              setModelContextWindow(String(saved.context_window_tokens));
+            }
+            setModelApiKey(key);
+            setStoredApiKey(key);
+            setApiKeyEditing(false);
+          } else {
+            setApiKeyEditing(true);
+          }
+        } else {
+          setApiKeyEditing(true);
+        }
+      }
+    } catch {
+      setApiKeyEditing(true);
+    } finally {
+      setPrefsReady(true);
+    }
+  }, []);
+
+  // Persist non-secret prefs; keep previously saved api_key unless save/clear handlers update it.
+  useEffect(() => {
+    if (!prefsReady) return;
+    try {
+      let existingKey = "";
+      try {
+        const raw = localStorage.getItem("ops.bench.prefs");
+        if (raw) {
+          const prev = JSON.parse(raw) as { api_key?: string; remember_api_key?: boolean };
+          if (prev.remember_api_key !== false) existingKey = String(prev.api_key || "");
+        }
+      } catch {
+        /* ignore */
+      }
+      localStorage.setItem(
+        "ops.bench.prefs",
+        JSON.stringify({
+          v: 2,
+          provider: modelProvider,
+          api_style: modelApiStyle,
+          model_name: modelName,
+          base_url: modelBaseUrl,
+          context_window_tokens: modelContextWindow,
+          api_key: existingKey,
+          suites: Array.from(selectedSuites),
+          coding_tier: codingTier,
+          coding_n: codingNInstances,
+          coding_harness: codingHarness,
+        }),
+      );
+    } catch {
+      /* ignore */
+    }
+  }, [
+    prefsReady,
+    modelProvider,
+    modelApiStyle,
+    modelName,
+    modelBaseUrl,
+    modelContextWindow,
+    selectedSuites,
+    codingTier,
+    codingNInstances,
+    codingHarness,
+  ]);
+
+  const persistApiKey = useCallback((key: string) => {
+    try {
+      let base: Record<string, unknown> = { v: 2 };
+      try {
+        const raw = localStorage.getItem("ops.bench.prefs");
+        if (raw) base = { ...JSON.parse(raw), v: 2 };
+      } catch {
+        /* ignore */
+      }
+      base.api_key = key;
+      delete base.remember_api_key;
+      localStorage.setItem("ops.bench.prefs", JSON.stringify(base));
+    } catch {
+      /* ignore */
+    }
+    setStoredApiKey(key);
+  }, []);
+
+  const saveApiKey = useCallback(() => {
+    const key = modelApiKey.trim();
+    if (!key) return;
+    persistApiKey(key);
+    setModelApiKey(key);
+    setApiKeyEditing(false);
+    setApiKeySaveFlash(true);
+    window.setTimeout(() => setApiKeySaveFlash(false), 1500);
+  }, [modelApiKey, persistApiKey]);
+
+  const clearApiKey = useCallback(() => {
+    persistApiKey("");
+    setModelApiKey("");
+    setApiKeyEditing(true);
+    setApiKeySaveFlash(false);
+  }, [persistApiKey]);
+
+  const apiKeyDirty = modelApiKey.trim() !== storedApiKey;
+  const apiKeyStored = Boolean(storedApiKey);
+
+  const needsLiveModel = useMemo(
+    () => selectedSuites.has("context") || selectedSuites.has("coding"),
+    [selectedSuites],
+  );
+
+  const applyProviderPreset = (provider: string) => {
+    setModelProvider(provider);
+    if (!provider) {
+      setModelName("");
+      setModelBaseUrl("");
+      setModelApiStyle("openai");
+      return;
+    }
+    if (provider === "custom") {
+      // Keep current fields; user chooses API protocol explicitly.
+      return;
+    }
+    const preset = presetById(provider);
+    if (!preset) return;
+    setModelApiStyle(preset.api_style);
+    setModelName(preset.model);
+    setModelBaseUrl(preset.base_url);
+    if (preset.context_window && !modelContextWindow) {
+      setModelContextWindow(preset.context_window);
+    } else if (preset.context_window) {
+      setModelContextWindow(preset.context_window);
+    }
+  };
 
   const applyRunSnapshot = useCallback((run: OfficialRun, opts?: { logs?: boolean }) => {
     setProgress({
@@ -435,9 +822,13 @@ export function OfficialBenchPage() {
   const targetEnabled = useCallback(
     (id: string) => {
       if (id === "retrieval") return caps.retrieval !== false && caps.script !== false;
-      if (!caps.script) return false;
-      // After image rebuild, datasets should be true; still gate honestly.
-      if (caps.datasets === false && (id === "context" || id.startsWith("coding"))) {
+      if (!caps.script && !caps.bench_worker) return false;
+      if (id === "coding") {
+        return caps.coding_infer !== false || caps.script !== false || caps.bench_worker === true;
+      }
+      if (caps.datasets === false && (id === "context" || id === "coding")) {
+        // Still ok if remote bench has datasets
+        if (caps.bench_worker) return true;
         return false;
       }
       return true;
@@ -460,15 +851,28 @@ export function OfficialBenchPage() {
       targets: TargetMeta[];
       presets?: Preset[];
       capabilities: Caps;
-      defaults?: { context_dry?: boolean; coding_skip_api?: boolean };
+      coding_tiers?: CodingTierMeta[];
+      defaults?: {
+        coding_tier?: string;
+        coding_n_instances?: number | null;
+        coding_harness?: boolean;
+        retrieval_prod?: boolean;
+      };
     };
     setCriteria(body.criteria || []);
     setTargetsMeta(body.targets || []);
     setPresets(body.presets || []);
     setCaps(body.capabilities || {});
-    if (body.defaults?.context_dry !== undefined) setContextDry(body.defaults.context_dry);
-    if (body.defaults?.coding_skip_api !== undefined) {
-      setCodingSkipApi(body.defaults.coding_skip_api);
+    if (body.coding_tiers?.length) setCodingTierMeta(body.coding_tiers);
+    if (body.defaults?.coding_tier) setCodingTier(body.defaults.coding_tier);
+    if (body.defaults?.coding_n_instances != null) {
+      setCodingNInstances(body.defaults.coding_n_instances);
+    }
+    if (body.defaults?.coding_harness !== undefined) {
+      setCodingHarness(body.defaults.coding_harness);
+    }
+    if (body.defaults?.retrieval_prod !== undefined) {
+      setRetrievalProd(body.defaults.retrieval_prod);
     }
     setError(null);
   }, [headers]);
@@ -638,14 +1042,21 @@ export function OfficialBenchPage() {
   }, [busy]);
 
   const applyPreset = (p: Preset) => {
-    setSelectedTargets(new Set(p.targets));
-    setContextDry(p.context_dry);
-    setCodingSkipApi(p.coding_skip_api);
+    const suites = new Set<SuiteId>();
+    for (const t of p.targets) {
+      if (t === "retrieval" || t === "context" || t === "coding") suites.add(t);
+      else if (t === "coding_infer" || t === "coding_pull") suites.add("coding");
+    }
+    setSelectedSuites(suites);
+    setCodingTier(p.coding_tier || "n25");
+    if (p.coding_n_instances != null) setCodingNInstances(p.coding_n_instances);
+    setCodingHarness(Boolean(p.coding_harness));
+    setRetrievalProd(p.retrieval_prod !== false);
   };
 
-  const toggleTarget = (id: string) => {
+  const toggleSuite = (id: SuiteId) => {
     if (!targetEnabled(id)) return;
-    setSelectedTargets((prev) => {
+    setSelectedSuites((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
@@ -655,19 +1066,67 @@ export function OfficialBenchPage() {
 
   const startRun = async (opts?: {
     force?: boolean;
-    targets?: string[];
-    context_dry?: boolean;
-    coding_skip_api?: boolean;
+    suites?: SuiteId[];
+    coding_tier?: string;
+    coding_n_instances?: number | null;
+    coding_harness?: boolean;
+    retrieval_prod?: boolean;
   }) => {
-    const targets = (opts?.targets ?? Array.from(selectedTargets)).filter(targetEnabled);
-    if (targets.length === 0) return;
+    const suites = (opts?.suites ?? Array.from(selectedSuites)).filter((s) =>
+      targetEnabled(s),
+    ) as SuiteId[];
+    const apiTargets = suites.map((s) => (s === "coding" ? "coding" : s));
+    if (apiTargets.length === 0) return;
     if (busy && !opts?.force) return;
-    const dry = opts?.context_dry ?? contextDry;
-    const skipApi = opts?.coding_skip_api ?? codingSkipApi;
-    if (opts?.targets) {
-      setSelectedTargets(new Set(targets));
-      setContextDry(dry);
-      setCodingSkipApi(skipApi);
+    const tier = opts?.coding_tier ?? codingTier;
+    const nInst = opts?.coding_n_instances ?? (tier === "custom" ? codingNInstances : null);
+    const harness = opts?.coding_harness ?? codingHarness;
+    const prod = opts?.retrieval_prod ?? retrievalProd;
+    if (suites.includes("coding") && tier === "custom" && (nInst == null || nInst < 3)) {
+      setError("自定义编码档位需要 N ≥ 3（且 ≤ 300）");
+      return;
+    }
+    if (suites.includes("coding") && tier === "full300") {
+      const ok = window.confirm(
+        "全量 SWE-bench Lite（300 题）耗时长、负载大。确认以 full300 启动？",
+      );
+      if (!ok) return;
+    }
+    const needModel = suites.includes("context") || suites.includes("coding");
+    const hasKey = Boolean(modelApiKey.trim() && modelName.trim() && modelProvider.trim());
+    if (needModel && !hasKey) {
+      setError("已选上下文/编码：请填写下方评测模型（供应商 / model / api_key）。");
+      return;
+    }
+    let modelPayload:
+      | {
+          provider: string;
+          api_style: ApiStyle;
+          model_name: string;
+          api_key: string;
+          base_url?: string;
+          context_window_tokens?: number;
+        }
+      | undefined;
+    if (needModel && hasKey) {
+      const cw = Number(modelContextWindow);
+      const provider = modelProvider.trim() || "custom";
+      modelPayload = {
+        provider,
+        api_style: inferApiStyle(provider, modelApiStyle),
+        model_name: modelName.trim(),
+        api_key: modelApiKey.trim(),
+        base_url: modelBaseUrl.trim() || undefined,
+        context_window_tokens:
+          Number.isFinite(cw) && cw >= 1024 ? Math.floor(cw) : undefined,
+      };
+    }
+    if (opts?.suites) {
+      setSelectedSuites(new Set(suites));
+      setCodingTier(tier);
+      if (nInst != null) setCodingNInstances(nInst);
+      setCodingHarness(harness);
+      setRetrievalProd(prod);
     }
     setBusy(true);
     setLiveLogs([]);
@@ -678,10 +1137,15 @@ export function OfficialBenchPage() {
         method: "POST",
         headers,
         body: JSON.stringify({
-          targets,
-          context_dry: dry,
-          coding_skip_api: skipApi,
+          targets: apiTargets,
+          context_dry: false,
+          coding_skip_api: false,
+          coding_tier: tier,
+          coding_n_instances: tier === "custom" ? nInst : null,
+          coding_harness: harness,
+          retrieval_prod: prod,
           force: Boolean(opts?.force),
+          model: modelPayload ?? null,
         }),
       });
       if (!resp.ok) {
@@ -719,6 +1183,8 @@ export function OfficialBenchPage() {
     const id = runId || selectedId;
     if (!id) return;
     setError(null);
+    setPhaseHint("正在停止…");
+    setDetailProgress({ kind: "idle", label: "正在停止…", pct: null });
     const resp = await fetch(`/api/v1/ops/official/runs/${id}/stop`, {
       method: "POST",
       headers,
@@ -729,52 +1195,102 @@ export function OfficialBenchPage() {
     } else {
       // Live SSE may still deliver run_finished; DB-only cancel won't.
       const body = (await resp.json().catch(() => null)) as OfficialRun | null;
+      if (body?.phase_hint) {
+        setPhaseHint(cleanPhase(body.phase_hint));
+      }
       if (body && !isActiveStatus(body.status)) {
         setBusy(false);
         setDetailProgress({ kind: "idle", label: "已取消", pct: null });
         setPhaseHint("已停止");
+      } else {
+        // Force UI out of infinite「正在停止…」even if SSE is wedged.
+        window.setTimeout(() => {
+          void (async () => {
+            const latest = await loadDetail();
+            if (!latest || !isActiveStatus(latest.status)) {
+              setBusy(false);
+              setPhaseHint("已停止");
+              setDetailProgress({ kind: "idle", label: "已取消", pct: null });
+              return;
+            }
+            setBusy(false);
+            setPhaseHint("停止超时 — 可强制重开");
+            setDetailProgress({ kind: "idle", label: "停止超时", pct: null });
+            setError("停止超过约 8s 仍未终态。可刷新或点「强制重开」。");
+            await loadList();
+          })();
+        }, 8000);
       }
     }
     await loadList();
     if (id === selectedId) await loadDetail();
   };
 
-  const clearHistory = async () => {
-    if (busy || clearingHistory) return;
-    const n = runs.length;
-    if (n === 0) return;
-    const ok = window.confirm(
-      `清空全部 Bench 历史（约 ${n} 条）？\n会删除数据库记录与报告目录，保留 BEIR/LongBench 数据缓存。`,
-    );
+  const deleteHistory = async (opts: {
+    ids?: string[];
+    before?: string;
+    force?: boolean;
+    confirmLabel: string;
+  }) => {
+    if (clearingHistory) return;
+    const ok = window.confirm(opts.confirmLabel);
     if (!ok) return;
     setClearingHistory(true);
     setError(null);
     try {
-      const resp = await fetch("/api/v1/ops/official/runs", {
-        method: "DELETE",
+      const resp = await fetch("/api/v1/ops/official/runs/delete", {
+        method: "POST",
         headers,
+        body: JSON.stringify({
+          ids: opts.ids ?? [],
+          before: opts.before ?? null,
+          include_filesystem: true,
+          force: Boolean(opts.force),
+        }),
       });
       if (!resp.ok) {
         const text = await resp.text();
         let msg = text || `HTTP ${resp.status}`;
         try {
-          const j = JSON.parse(text) as { detail?: string; error?: { message?: string } };
+          const j = JSON.parse(text) as {
+            detail?: string;
+            error?: { message?: string };
+          };
           msg = j.error?.message || j.detail || msg;
         } catch {
           /* keep */
         }
         throw new Error(msg);
       }
-      esRef.current?.close();
-      attachedRunIdRef.current = null;
-      setDetail(null);
-      setLiveLogs([]);
-      setRuns([]);
-      setProgress({ done: 0, total: 0 });
-      setDetailProgress({ kind: "idle", label: "尚未开始", pct: null });
-      if (selectedId) {
-        navigate(opsOfficialPath(secret), { replace: true });
+      const deletedIds = new Set(opts.ids || []);
+      const wipeAll = !opts.ids?.length && !opts.before;
+      if (wipeAll || (selectedId && deletedIds.has(selectedId))) {
+        esRef.current?.close();
+        attachedRunIdRef.current = null;
+        setBusy(false);
+        setDetail(null);
+        setLiveLogs([]);
+        setProgress({ done: 0, total: 0 });
+        setDetailProgress({ kind: "idle", label: "尚未开始", pct: null });
+        if (selectedId) {
+          navigate(opsOfficialPath(secret), { replace: true });
+        }
+      } else if (opts.before && selectedId) {
+        const sel = runs.find((r) => r.id === selectedId);
+        if (sel?.created_at) {
+          const cut = Date.parse(opts.before);
+          const created = Date.parse(sel.created_at);
+          if (Number.isFinite(cut) && Number.isFinite(created) && created < cut) {
+            esRef.current?.close();
+            attachedRunIdRef.current = null;
+            setBusy(false);
+            setDetail(null);
+            navigate(opsOfficialPath(secret), { replace: true });
+          }
+        }
       }
+      setCheckedRunIds(new Set());
+      if (wipeAll) setHistorySelectMode(false);
       await loadList();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -783,17 +1299,80 @@ export function OfficialBenchPage() {
     }
   };
 
+  const clearHistory = async () => {
+    if (runs.length === 0) return;
+    const hasActive = runs.some((r) => isActiveStatus(r.status));
+    await deleteHistory({
+      force: hasActive,
+      confirmLabel: hasActive
+        ? `清空全部 Bench 历史（约 ${runs.length} 条）？\n含进行中的任务会先强制停止再删。\n保留 BEIR/LongBench 数据缓存。`
+        : `清空全部 Bench 历史（约 ${runs.length} 条）？\n会删除数据库记录与报告目录，保留 BEIR/LongBench 数据缓存。`,
+    });
+  };
+
+  const deleteSelectedHistory = async () => {
+    const ids = Array.from(checkedRunIds);
+    if (ids.length === 0) return;
+    const hasActive = runs.some(
+      (r) => checkedRunIds.has(r.id) && isActiveStatus(r.status),
+    );
+    await deleteHistory({
+      ids,
+      force: hasActive,
+      confirmLabel: `删除选中的 ${ids.length} 条历史？${
+        hasActive ? "\n含进行中的会先强制停止。" : ""
+      }`,
+    });
+  };
+
+  const clearHistoryBefore = async (hoursAgo: number, label: string) => {
+    const before = new Date(Date.now() - hoursAgo * 3600 * 1000).toISOString();
+    const n = runs.filter((r) => {
+      if (!r.created_at) return false;
+      const t = Date.parse(r.created_at);
+      return Number.isFinite(t) && t < Date.parse(before);
+    }).length;
+    if (n === 0) {
+      setError(`没有早于「${label}」的历史可删`);
+      return;
+    }
+    const hasActive = runs.some((r) => {
+      if (!isActiveStatus(r.status) || !r.created_at) return false;
+      const t = Date.parse(r.created_at);
+      return Number.isFinite(t) && t < Date.parse(before);
+    });
+    await deleteHistory({
+      before,
+      force: hasActive,
+      confirmLabel: `删除「${label}」之前的约 ${n} 条历史？${
+        hasActive ? "\n含进行中的会先强制停止。" : ""
+      }`,
+    });
+  };
+
+  const toggleCheckedRun = (id: string) => {
+    setCheckedRunIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const rerunFrom = async (r: OfficialRun) => {
-    const targets = targetsFromRun(r).filter(targetEnabled);
-    if (targets.length === 0) {
+    const suites = suitesFromRun(r).filter((s) => targetEnabled(s));
+    if (suites.length === 0) {
       setError("该记录没有可重跑的目标（或当前镜像不支持）。");
       return;
     }
     await startRun({
       force: true,
-      targets,
-      context_dry: r.context_dry ?? r.model_meta?.context_dry ?? true,
-      coding_skip_api: r.coding_skip_api ?? r.model_meta?.coding_skip_api ?? true,
+      suites,
+      coding_tier: r.coding_tier ?? r.model_meta?.coding_tier ?? "n25",
+      coding_n_instances:
+        r.coding_n_instances ?? r.model_meta?.coding_n_instances ?? null,
+      coding_harness: r.coding_harness ?? r.model_meta?.coding_harness ?? false,
+      retrieval_prod: r.retrieval_prod ?? r.model_meta?.retrieval_prod ?? true,
     });
   };
 
@@ -859,6 +1438,7 @@ export function OfficialBenchPage() {
   return (
     <OpsShell
       wide
+      showIngestion={false}
       secret={secret}
       title="Bench"
       subtitle="BEIR · LongBench · SWE-bench Lite · 指标与过程"
@@ -965,16 +1545,37 @@ export function OfficialBenchPage() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          {targetsMeta.map((t) => {
-            const enabled = targetEnabled(t.id);
-            const on = selectedTargets.has(t.id);
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {(targetsMeta.length
+            ? targetsMeta
+            : [
+                {
+                  id: "retrieval",
+                  label: "检索",
+                  description: "BEIR · hybrid + BM25",
+                },
+                {
+                  id: "context",
+                  label: "上下文",
+                  description: "LongBench · 三臂",
+                },
+                {
+                  id: "coding",
+                  label: "编码",
+                  description: "SWE-bench Lite",
+                },
+              ]
+          ).map((t) => {
+            const id = t.id as SuiteId;
+            if (!(SUITE_IDS as readonly string[]).includes(id)) return null;
+            const enabled = targetEnabled(id);
+            const on = selectedSuites.has(id);
             return (
               <button
-                key={t.id}
+                key={id}
                 type="button"
                 disabled={!enabled || busy}
-                onClick={() => toggleTarget(t.id)}
+                onClick={() => toggleSuite(id)}
                 className={`rounded-lg border px-3 py-2.5 text-left text-xs transition-colors ${
                   on && enabled
                     ? "border-foreground/50 bg-foreground/[0.06]"
@@ -989,7 +1590,6 @@ export function OfficialBenchPage() {
                 </div>
                 <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
                   {t.description}
-                  {!enabled ? "（镜像缺 datasets，请 rebuild api）" : ""}
                 </p>
               </button>
             );
@@ -997,27 +1597,55 @@ export function OfficialBenchPage() {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={contextDry}
-              disabled={busy}
-              onChange={(e) => setContextDry(e.target.checked)}
-            />
-            上下文 dry（不调模型）
-          </label>
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={codingSkipApi}
-              disabled={busy}
-              onChange={(e) => setCodingSkipApi(e.target.checked)}
-            />
-            编码跳过平台 API
-          </label>
+          {selectedSuites.has("coding") ? (
+            <>
+              <label className="inline-flex items-center gap-2">
+                <span className="text-muted-foreground">SWE 档位</span>
+                <select
+                  value={codingTier}
+                  disabled={busy}
+                  onChange={(e) => setCodingTier(e.target.value)}
+                  className="rounded border border-border bg-background px-1.5 py-0.5"
+                >
+                  {codingTierMeta.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.id}
+                      {t.n_instances != null ? ` (${t.n_instances})` : " (自定义 N)"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {codingTier === "custom" ? (
+                <label className="inline-flex items-center gap-2">
+                  <span className="text-muted-foreground">N</span>
+                  <input
+                    type="number"
+                    min={3}
+                    max={300}
+                    value={codingNInstances}
+                    disabled={busy}
+                    onChange={(e) => setCodingNInstances(Number(e.target.value) || 3)}
+                    className="w-16 rounded border border-border bg-background px-1.5 py-0.5"
+                  />
+                </label>
+              ) : null}
+              <label
+                className="inline-flex items-center gap-2"
+                title="需 Docker + swebench。官方 resolve 分仅此项。"
+              >
+                <input
+                  type="checkbox"
+                  checked={codingHarness}
+                  disabled={busy}
+                  onChange={(e) => setCodingHarness(e.target.checked)}
+                />
+                harness 官方分
+              </label>
+            </>
+          ) : null}
           <button
             type="button"
-            disabled={busy || Array.from(selectedTargets).filter(targetEnabled).length === 0}
+            disabled={busy || Array.from(selectedSuites).filter(targetEnabled).length === 0}
             onClick={() => void startRun()}
             className="ml-auto rounded-md bg-foreground px-4 py-1.5 text-sm text-background disabled:opacity-40"
           >
@@ -1032,6 +1660,185 @@ export function OfficialBenchPage() {
               强制重开
             </button>
           ) : null}
+        </div>
+
+        <div
+          className={`mt-4 rounded-lg border px-3 py-3 ${
+            needsLiveModel
+              ? "border-foreground/30 bg-foreground/[0.03]"
+              : "border-border/70 bg-muted/20"
+          }`}
+        >
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-xs font-semibold">评测模型（上下文 / 编码）</h3>
+            <p className="text-[11px] text-muted-foreground">
+              {needsLiveModel
+                ? "供应商与模型自动记住；api_key 需点保存"
+                : "仅检索时可留空"}
+            </p>
+          </div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <label className="grid gap-1 text-[11px]">
+              <span className="text-muted-foreground">供应商</span>
+              <select
+                value={modelProvider}
+                disabled={busy || !needsLiveModel}
+                onChange={(e) => applyProviderPreset(e.target.value)}
+                className="rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+              >
+                <option value="">未选择</option>
+                {PROVIDER_PRESETS.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.label}
+                  </option>
+                ))}
+                <option value="custom">自定义</option>
+              </select>
+            </label>
+            {modelProvider === "custom" ? (
+              <label className="grid gap-1 text-[11px]">
+                <span className="text-muted-foreground">API 协议</span>
+                <select
+                  value={modelApiStyle}
+                  disabled={busy || !needsLiveModel}
+                  onChange={(e) =>
+                    setModelApiStyle(e.target.value as ApiStyle)
+                  }
+                  className="rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+                >
+                  <option value="openai">OpenAI 兼容</option>
+                  <option value="anthropic">Anthropic Messages</option>
+                </select>
+              </label>
+            ) : (
+              <label className="grid gap-1 text-[11px]">
+                <span className="text-muted-foreground">API 协议</span>
+                <input
+                  value={
+                    modelApiStyle === "anthropic"
+                      ? "Anthropic Messages"
+                      : "OpenAI 兼容"
+                  }
+                  disabled
+                  className="rounded border border-border bg-muted/30 px-2 py-1.5 text-xs text-muted-foreground"
+                />
+              </label>
+            )}
+            <label className="grid gap-1 text-[11px]">
+              <span className="text-muted-foreground">model_name</span>
+              <input
+                value={modelName}
+                disabled={busy || !needsLiveModel}
+                onChange={(e) => setModelName(e.target.value)}
+                className="rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+                placeholder={
+                  modelApiStyle === "anthropic"
+                    ? "claude-sonnet-4-20250514"
+                    : "gpt-4o-mini"
+                }
+              />
+            </label>
+            <label className="grid gap-1 text-[11px]">
+              <span className="text-muted-foreground">base_url</span>
+              <input
+                value={modelBaseUrl}
+                disabled={busy || !needsLiveModel}
+                onChange={(e) => setModelBaseUrl(e.target.value)}
+                className="rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+                placeholder={
+                  modelApiStyle === "anthropic"
+                    ? "https://api.anthropic.com"
+                    : "https://api.openai.com/v1"
+                }
+              />
+            </label>
+            <div className="grid gap-1 text-[11px] sm:col-span-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="text-muted-foreground">api_key</span>
+                <span className="text-[10px] text-muted-foreground">
+                  {apiKeySaveFlash
+                    ? "已保存"
+                    : apiKeyStored && !apiKeyEditing && !apiKeyDirty
+                      ? "本机已保存"
+                      : apiKeyDirty
+                        ? "未保存更改"
+                        : "未保存"}
+                </span>
+              </div>
+              {apiKeyStored && !apiKeyEditing ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="min-w-0 flex-1 rounded border border-border bg-muted/30 px-2 py-1.5 font-mono text-xs tracking-wide text-muted-foreground">
+                    {"•".repeat(Math.min(12, Math.max(8, storedApiKey.length - 4)))}
+                    {storedApiKey.slice(-4)}
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || !needsLiveModel}
+                    onClick={() => {
+                      setModelApiKey(storedApiKey);
+                      setApiKeyEditing(true);
+                    }}
+                    className="rounded border border-border px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy || !needsLiveModel}
+                    onClick={clearApiKey}
+                    className="rounded border border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted disabled:opacity-50"
+                  >
+                    清除
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="password"
+                    value={modelApiKey}
+                    disabled={busy || !needsLiveModel}
+                    onChange={(e) => setModelApiKey(e.target.value)}
+                    className="min-w-0 flex-1 rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+                    placeholder="评测专用 key（不写产品用户设置）"
+                    autoComplete="off"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !needsLiveModel || !modelApiKey.trim()}
+                    onClick={saveApiKey}
+                    className="rounded border border-border bg-foreground px-2.5 py-1.5 text-xs text-background disabled:opacity-40"
+                  >
+                    保存
+                  </button>
+                  {apiKeyStored ? (
+                    <button
+                      type="button"
+                      disabled={busy || !needsLiveModel}
+                      onClick={() => {
+                        setModelApiKey(storedApiKey);
+                        setApiKeyEditing(false);
+                      }}
+                      className="rounded border border-border px-2 py-1.5 text-xs hover:bg-muted disabled:opacity-50"
+                    >
+                      取消
+                    </button>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            <label className="grid gap-1 text-[11px]">
+              <span className="text-muted-foreground">上下文窗口 tokens（可选）</span>
+              <input
+                type="number"
+                min={1024}
+                value={modelContextWindow}
+                disabled={busy || !needsLiveModel}
+                onChange={(e) => setModelContextWindow(e.target.value)}
+                className="rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
+                placeholder="如 65536"
+              />
+            </label>
+          </div>
         </div>
 
         {(busy || liveLogs.length > 0) && (
@@ -1076,7 +1883,7 @@ export function OfficialBenchPage() {
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
                 套件完成 {progress.done}/{progress.total || "—"}
-                （四个勾选项各算 1；单套内部进度看上面「明细」）
+                （检索 / 上下文 / 编码各算 1；套件内进度看上面「明细」）
               </span>
               <span className="tabular-nums">
                 {barPct}%
@@ -1122,6 +1929,9 @@ export function OfficialBenchPage() {
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">指标汇总</h2>
+            <p className="text-[11px] text-muted-foreground">
+              已排除 dry / skip_api / reclaimed / 仅 hash 冒烟（不作效果结论）
+            </p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               对筛选范围内、已有数值的跑次：n · 最低 · 中位 · 平均 · 最高 · 最近一次。
               {scoredRunCount > 0 ? ` 当前 ${scoredRunCount} 次有分。` : ""}
@@ -1183,18 +1993,87 @@ export function OfficialBenchPage() {
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
         {/* History table */}
         <aside className="rounded-xl border border-border">
-          <div className="flex items-center justify-between border-b border-border px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2">
             <h2 className="text-sm font-semibold">历史 ({filteredRuns.length})</h2>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 className="text-[11px] text-muted-foreground underline disabled:opacity-40"
-                disabled={busy || clearingHistory || runs.length === 0}
-                title="清空 Bench 历史（数据库 + 报告目录；保留 BEIR 数据缓存）"
-                onClick={() => void clearHistory()}
+                disabled={runs.length === 0}
+                onClick={() => {
+                  setHistorySelectMode((v) => {
+                    if (v) setCheckedRunIds(new Set());
+                    return !v;
+                  });
+                }}
               >
-                {clearingHistory ? "清空中…" : "清空"}
+                {historySelectMode ? "取消多选" : "多选"}
               </button>
+              {historySelectMode ? (
+                <>
+                  <button
+                    type="button"
+                    className="text-[11px] text-muted-foreground underline disabled:opacity-40"
+                    disabled={filteredRuns.length === 0}
+                    onClick={() => {
+                      const allVisible = filteredRuns.every((r) =>
+                        checkedRunIds.has(r.id),
+                      );
+                      if (allVisible) {
+                        setCheckedRunIds(new Set());
+                      } else {
+                        setCheckedRunIds(new Set(filteredRuns.map((r) => r.id)));
+                      }
+                    }}
+                  >
+                    {filteredRuns.every((r) => checkedRunIds.has(r.id)) &&
+                    filteredRuns.length > 0
+                      ? "取消全选"
+                      : "全选"}
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[11px] text-destructive underline disabled:opacity-40"
+                    disabled={clearingHistory || checkedRunIds.size === 0}
+                    onClick={() => void deleteSelectedHistory()}
+                  >
+                    {clearingHistory ? "删除中…" : `删除选中(${checkedRunIds.size})`}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <label className="text-[11px] text-muted-foreground">
+                    按时间
+                    <select
+                      className="ml-1 rounded border border-border bg-background px-1 py-0.5 text-[11px]"
+                      defaultValue=""
+                      disabled={clearingHistory || runs.length === 0}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        e.target.value = "";
+                        if (v === "all") void clearHistory();
+                        else if (v === "1h")
+                          void clearHistoryBefore(1, "1 小时前");
+                        else if (v === "24h")
+                          void clearHistoryBefore(24, "1 天前");
+                        else if (v === "7d")
+                          void clearHistoryBefore(24 * 7, "7 天前");
+                        else if (v === "30d")
+                          void clearHistoryBefore(24 * 30, "30 天前");
+                      }}
+                    >
+                      <option value="" disabled>
+                        清除…
+                      </option>
+                      <option value="1h">早于 1 小时</option>
+                      <option value="24h">早于 1 天</option>
+                      <option value="7d">早于 7 天</option>
+                      <option value="30d">早于 30 天</option>
+                      <option value="all">全部清空</option>
+                    </select>
+                  </label>
+                </>
+              )}
               <button
                 type="button"
                 className="text-[11px] text-muted-foreground underline"
@@ -1211,6 +2090,7 @@ export function OfficialBenchPage() {
               <ul>
                 {filteredRuns.map((r) => {
                   const active = selectedId === r.id;
+                  const checked = checkedRunIds.has(r.id);
                   const m = runMetrics(r);
                   const headline =
                     m.ndcg_at_10 ??
@@ -1225,16 +2105,35 @@ export function OfficialBenchPage() {
                   return (
                     <li key={r.id} className="border-b border-border/70 last:border-0">
                       <div
-                        className={`px-3 py-2.5 text-xs ${active ? "bg-muted" : "hover:bg-muted/60"}`}
+                        className={`flex items-start gap-2 px-3 py-2.5 text-xs ${
+                          active ? "bg-muted" : "hover:bg-muted/60"
+                        }`}
                       >
+                        {historySelectMode ? (
+                          <input
+                            type="checkbox"
+                            className="mt-1"
+                            checked={checked}
+                            aria-label={`选择 ${shortId(r.id)}`}
+                            onChange={() => toggleCheckedRun(r.id)}
+                          />
+                        ) : null}
                         <button
                           type="button"
-                          className="w-full text-left"
-                          onClick={() => navigate(opsOfficialPath(secret, r.id))}
+                          className="min-w-0 flex-1 text-left"
+                          onClick={() => {
+                            if (historySelectMode) {
+                              toggleCheckedRun(r.id);
+                              return;
+                            }
+                            navigate(opsOfficialPath(secret, r.id));
+                          }}
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium">
-                              {r.official_suite || r.model_meta?.official_suite || "bench"}
+                              {r.official_suite ||
+                                r.model_meta?.official_suite ||
+                                "bench"}
                             </span>
                             <span className={statusClass(r.status)}>{r.status}</span>
                           </div>

@@ -50,6 +50,21 @@ async def eval_meta() -> dict[str, Any]:
     }
 
 
+@router.get("/overview")
+async def eval_overview(
+    stats: bool = Query(
+        default=False,
+        description="Include docker stats CPU/MEM (slow ~2s). Default: docker ps only.",
+    ),
+) -> dict[str, Any]:
+    """Control-plane snapshot: agent / bench / host / containers (no secrets)."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    from app.services.ops.overview import build_overview
+
+    return await build_overview(include_stats=stats)
+
+
 @router.get("/cases")
 async def get_cases(
     scenario: str | None = Query(default=None),

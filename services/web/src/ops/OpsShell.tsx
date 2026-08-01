@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import {
   opsConsolePath,
   opsEnvelopePath,
@@ -8,12 +8,13 @@ import {
   opsRetrievalPath,
 } from "./opsPaths";
 import { OpsIngestionStrip } from "./OpsIngestionStrip";
+import { OpsOverviewSidebar } from "./OpsOverviewSidebar";
 import { SiteBrandMark } from "../shared/SiteBrandMark";
 import { SITE_OPS } from "../shared/siteBrand";
 import { useSiteBrand } from "../shared/useSiteBrand";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import type { ThemeId } from "../shared/theme/theme";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 
 export {
   opsConsolePath,
@@ -27,109 +28,136 @@ export {
   turnIdFromSearch,
 } from "./opsPaths";
 
+function navActive(pathname: string, href: string): boolean {
+  // Match section prefix so /official/<id> still highlights Bench.
+  const base = href.replace(/\/$/, "");
+  return pathname === base || pathname.startsWith(`${base}/`);
+}
+
 export function OpsShell({
   secret,
   title,
   subtitle,
   children,
   actions,
-  wide = false,
+  wide: _wide = false,
+  showIngestion = true,
 }: {
   secret: string;
   title: string;
   subtitle?: string;
   children: ReactNode;
   actions?: ReactNode;
-  /** Observation pages (official bench) need more horizontal room. */
+  /** @deprecated All Ops pages share one width; kept for call-site compat. */
   wide?: boolean;
+  /** Product sources index strip — irrelevant to official Bench eval. */
+  showIngestion?: boolean;
 }) {
   const { theme, setTheme, themes, meta } = useTheme();
+  const { pathname } = useLocation();
+  const [overviewOpen, setOverviewOpen] = useState(false);
   useSiteBrand(title);
+  void _wide;
+
+  const links = [
+    { to: opsConsolePath(secret), label: "控制台" },
+    { to: opsHistoryPath(secret), label: "历史结果" },
+    { to: opsOfficialPath(secret), label: "Bench" },
+    { to: opsRetrievalPath(secret), label: "检索审计" },
+    { to: opsEnvelopePath(secret), label: "模型信封" },
+    { to: opsRawPath(secret), label: "Raw 快照" },
+  ];
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <main
-        className={`mx-auto px-4 py-8 sm:px-6 ${wide ? "max-w-7xl" : "max-w-5xl"}`}
-      >
-        <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
-          <div>
-            <div className="flex items-center gap-3">
-              <SiteBrandMark site={SITE_OPS} className="h-9 w-9 rounded-md" />
-              <div>
-                <p className="text-sm font-semibold tracking-tight text-foreground">
-                  {SITE_OPS.name}
-                </p>
-                <p className="text-[11px] text-muted-foreground">{SITE_OPS.tagline}</p>
+      <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
+        <header className="mb-6 border-b border-border pb-4">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-3">
+                <SiteBrandMark site={SITE_OPS} className="h-9 w-9 shrink-0 rounded-md" />
+                <div>
+                  <p className="text-sm font-semibold tracking-tight text-foreground">
+                    {SITE_OPS.name}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">{SITE_OPS.tagline}</p>
+                </div>
               </div>
+              <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">
+                {title}
+              </h1>
+              {subtitle ? (
+                <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{subtitle}</p>
+              ) : null}
             </div>
-            <h1 className="mt-3 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
-            {subtitle ? (
-              <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-            ) : null}
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <Link
-                to={opsConsolePath(secret)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="主题与概览">
+              <button
+                type="button"
+                onClick={() => setOverviewOpen(true)}
+                className="rounded-md border border-border bg-card px-2.5 py-1.5 text-xs text-foreground hover:bg-muted"
+                title="主 Agent / 评测台 / 机器 / 容器"
               >
-                控制台
-              </Link>
-              <Link
-                to={opsHistoryPath(secret)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
-              >
-                历史结果
-              </Link>
-              <Link
-                to={opsOfficialPath(secret)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
-              >
-                Bench
-              </Link>
-              <Link
-                to={opsRetrievalPath(secret)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
-              >
-                检索审计
-              </Link>
-              <Link
-                to={opsEnvelopePath(secret)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
-              >
-                模型信封
-              </Link>
-              <Link
-                to={opsRawPath(secret)}
-                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
-              >
-                Raw 快照
-              </Link>
-              {actions}
+                配置概览
+              </button>
+              {themes.map((id: ThemeId) => {
+                const selected = theme === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    title={meta[id].description}
+                    onClick={() => setTheme(id)}
+                    className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
+                      selected
+                        ? "border-primary/50 bg-primary/10 text-foreground ring-1 ring-primary/40"
+                        : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                    }`}
+                  >
+                    {meta[id].label}
+                  </button>
+                );
+              })}
             </div>
           </div>
-          <div className="flex flex-wrap gap-1.5" role="group" aria-label="主题">
-            {themes.map((id: ThemeId) => {
-              const selected = theme === id;
+
+          <nav
+            className="mt-4 flex flex-wrap gap-2 text-xs"
+            aria-label="Ops 导航"
+          >
+            {links.map((link) => {
+              const active = navActive(pathname, link.to);
               return (
-                <button
-                  key={id}
-                  type="button"
-                  title={meta[id].description}
-                  onClick={() => setTheme(id)}
-                  className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
-                    selected
-                      ? "border-primary/50 bg-primary/10 text-foreground ring-1 ring-primary/40"
-                      : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                <Link
+                  key={link.to}
+                  to={link.to}
+                  className={`rounded-md border px-2.5 py-1 transition-colors ${
+                    active
+                      ? "border-foreground/40 bg-foreground/5 font-medium text-foreground"
+                      : "border-border text-foreground hover:bg-muted"
                   }`}
                 >
-                  {meta[id].label}
-                </button>
+                  {link.label}
+                </Link>
               );
             })}
-          </div>
+          </nav>
+
+          {actions ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              {actions}
+            </div>
+          ) : null}
         </header>
-        {secret ? <OpsIngestionStrip secret={secret} /> : null}
+        {secret && showIngestion ? <OpsIngestionStrip secret={secret} /> : null}
         {children}
       </main>
+      {secret ? (
+        <OpsOverviewSidebar
+          secret={secret}
+          open={overviewOpen}
+          onClose={() => setOverviewOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
