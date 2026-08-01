@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+# UI `within` values → hours. ``all`` / empty → no time window.
+_WITHIN_HOURS: dict[str, int] = {
+    "1": 1,
+    "24": 24,
+    "168": 168,
+    "720": 720,
+}
+
 
 def normalize_page(
     *,
@@ -12,6 +20,37 @@ def normalize_page(
     max_limit: int = 100,
 ) -> tuple[int, int]:
     return max(1, min(int(limit), max_limit)), max(0, int(offset))
+
+
+def parse_within_hours(within: str | None) -> int | None:
+    """Parse Ops list ``within`` (1 / 24 / 168 / 720 / all) to hours."""
+    raw = (within or "").strip().lower()
+    if not raw or raw in {"all", "*"}:
+        return None
+    raw = raw.rstrip("h")
+    if raw in _WITHIN_HOURS:
+        return _WITHIN_HOURS[raw]
+    try:
+        hours = int(raw)
+    except ValueError:
+        return None
+    if hours <= 0:
+        return None
+    return min(hours, 24 * 90)
+
+
+def append_since_hours(
+    clauses: list[str],
+    args: list[Any],
+    *,
+    column: str,
+    hours: int | None,
+) -> None:
+    """Require ``column > now() - N hours`` (e.g. ``e.created_at``, ``e.ts``)."""
+    if hours is None or hours <= 0:
+        return
+    args.append(int(hours))
+    clauses.append(f"{column} > now() - make_interval(hours => ${len(args)})")
 
 
 def append_turn_filters(

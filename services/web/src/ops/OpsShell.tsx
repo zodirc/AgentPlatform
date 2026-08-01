@@ -7,7 +7,6 @@ import {
   opsRawPath,
   opsRetrievalPath,
 } from "./opsPaths";
-import { OpsIngestionStrip } from "./OpsIngestionStrip";
 import { OpsOverviewSidebar } from "./OpsOverviewSidebar";
 import { SiteBrandMark } from "../shared/SiteBrandMark";
 import { SITE_OPS } from "../shared/siteBrand";
@@ -41,7 +40,6 @@ export function OpsShell({
   children,
   actions,
   wide: _wide = false,
-  showIngestion = true,
 }: {
   secret: string;
   title: string;
@@ -50,7 +48,10 @@ export function OpsShell({
   actions?: ReactNode;
   /** @deprecated All Ops pages share one width; kept for call-site compat. */
   wide?: boolean;
-  /** Product sources index strip — irrelevant to official Bench eval. */
+  /**
+   * @deprecated Product sources ingestion is per-user/work; never show a global
+   * strip on Ops (multi-tenant confusion). Kept as no-op for call-site compat.
+   */
   showIngestion?: boolean;
 }) {
   const { theme, setTheme, themes, meta } = useTheme();
@@ -148,7 +149,6 @@ export function OpsShell({
             </div>
           ) : null}
         </header>
-        {secret && showIngestion ? <OpsIngestionStrip secret={secret} /> : null}
         {children}
       </main>
       {secret ? (

@@ -10,7 +10,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.db.pool import get_pool
 from app.services.ops.auth import require_ops_eval_auth
-from app.services.ops.list_query import append_turn_filters, normalize_page, where_sql
+from app.services.ops.list_query import (
+    append_since_hours,
+    append_turn_filters,
+    normalize_page,
+    parse_within_hours,
+    where_sql,
+)
 
 router = APIRouter(
     prefix="/ops/envelopes",
@@ -26,12 +32,16 @@ async def list_recent_envelope_turns(
     status_filter: str | None = Query(default=None, alias="status"),
     scenario: str | None = Query(default=None),
     q: str | None = Query(default=None, max_length=200),
+    within: str | None = Query(default=None, description="1|24|168|720|all hours window"),
 ) -> dict[str, Any]:
     """Browse recent Turns that have at least one sampled model request envelope."""
     limit, offset = normalize_page(limit=limit, offset=offset)
     clauses: list[str] = []
     args: list[Any] = []
     append_turn_filters(clauses, args, status=status_filter, scenario=scenario, q=q)
+    append_since_hours(
+        clauses, args, column="e.created_at", hours=parse_within_hours(within)
+    )
     where = where_sql(clauses)
     group_by = """
         GROUP BY

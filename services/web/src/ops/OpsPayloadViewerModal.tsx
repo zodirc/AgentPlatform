@@ -243,6 +243,12 @@ export type OpsPayloadViewerModalProps = {
   downloadName?: string;
   payload: unknown;
   onClose: () => void;
+  /** Same-turn step browse (envelope / raw). */
+  canPrevItem?: boolean;
+  canNextItem?: boolean;
+  onPrevItem?: () => void;
+  onNextItem?: () => void;
+  itemPositionLabel?: string;
 };
 
 /** Single flow (full text) + optional raw JSON — no fragmented three-tab dump. */
@@ -253,6 +259,11 @@ export function OpsPayloadViewerModal({
   downloadName,
   payload,
   onClose,
+  canPrevItem,
+  canNextItem,
+  onPrevItem,
+  onNextItem,
+  itemPositionLabel,
 }: OpsPayloadViewerModalProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -328,6 +339,29 @@ export function OpsPayloadViewerModal({
         }
         return;
       }
+      if (
+        !searchOpen &&
+        !mod &&
+        (e.key === "ArrowLeft" || e.key === "ArrowRight")
+      ) {
+        const inField =
+          e.target instanceof HTMLElement &&
+          (e.target.tagName === "INPUT" ||
+            e.target.tagName === "TEXTAREA" ||
+            e.target.isContentEditable);
+        if (!inField) {
+          if (e.key === "ArrowLeft" && canPrevItem && onPrevItem) {
+            e.preventDefault();
+            onPrevItem();
+            return;
+          }
+          if (e.key === "ArrowRight" && canNextItem && onNextItem) {
+            e.preventDefault();
+            onNextItem();
+            return;
+          }
+        }
+      }
       if (!searchOpen || mode !== "json") return;
       if (e.key === "Enter") {
         e.preventDefault();
@@ -337,7 +371,18 @@ export function OpsPayloadViewerModal({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, searchOpen, mode, openSearch, goNext, goPrev]);
+  }, [
+    open,
+    searchOpen,
+    mode,
+    openSearch,
+    goNext,
+    goPrev,
+    canPrevItem,
+    canNextItem,
+    onPrevItem,
+    onNextItem,
+  ]);
 
   const onDownload = useCallback(() => {
     const name = downloadName || `${title.replace(/\s+/g, "-")}.json`;
@@ -376,6 +421,33 @@ export function OpsPayloadViewerModal({
               <p className="truncate font-mono text-xs text-muted-foreground">{subtitle}</p>
             ) : null}
           </div>
+          {onPrevItem || onNextItem ? (
+            <div className="flex items-center gap-1 text-xs">
+              <button
+                type="button"
+                disabled={!canPrevItem}
+                onClick={onPrevItem}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
+                title="上一条 (←)"
+              >
+                ←
+              </button>
+              {itemPositionLabel ? (
+                <span className="px-1 font-mono text-[11px] text-muted-foreground">
+                  {itemPositionLabel}
+                </span>
+              ) : null}
+              <button
+                type="button"
+                disabled={!canNextItem}
+                onClick={onNextItem}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted disabled:opacity-40"
+                title="下一条 (→)"
+              >
+                →
+              </button>
+            </div>
+          ) : null}
           <div className="flex rounded-md border border-border p-0.5 text-xs">
             <button
               type="button"

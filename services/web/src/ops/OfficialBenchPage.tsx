@@ -1438,7 +1438,6 @@ export function OfficialBenchPage() {
   return (
     <OpsShell
       wide
-      showIngestion={false}
       secret={secret}
       title="Bench"
       subtitle="BEIR · LongBench · SWE-bench Lite · 指标与过程"

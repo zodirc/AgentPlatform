@@ -3,7 +3,8 @@ import { useSearchParams } from "react-router-dom";
 
 export const OPS_LIST_PAGE_SIZE = 30;
 
-const DEFAULT_PRESERVE_KEYS = ["turn_id"] as const;
+/** Matches opsPaths / turnIdFromSearch (`?turn=`). */
+const DEFAULT_PRESERVE_KEYS = ["turn"] as const;
 
 export type OpsListFilterDef = {
   key: string;
@@ -27,11 +28,43 @@ const SCENARIO_OPTIONS = [
   { value: "collab", label: "collab" },
 ];
 
+const WITHIN_OPTIONS = [
+  { value: "1", label: "1 小时" },
+  { value: "24", label: "24 小时" },
+  { value: "168", label: "7 天" },
+  { value: "720", label: "30 天" },
+  { value: "all", label: "全部" },
+];
+
 /** Common turn-list filters for retrieval / envelope / raw. */
 export const OPS_TURN_LIST_FILTERS: OpsListFilterDef[] = [
+  { key: "within", label: "时间", options: WITHIN_OPTIONS },
   { key: "status", label: "状态", options: TURN_STATUS_OPTIONS },
   { key: "scenario", label: "场景", options: SCENARIO_OPTIONS },
 ];
+
+/** Default time window when URL omits `within` (keeps long histories usable). */
+export const OPS_TURN_WITHIN_DEFAULT = "24";
+
+export function opsTurnListQueryString(
+  list: OpsListParams,
+  extra?: Record<string, string>,
+): string {
+  const within = list.filters.within || OPS_TURN_WITHIN_DEFAULT;
+  if (within === "all") {
+    return list.queryString(extra);
+  }
+  // Prefer explicit filter; otherwise inject default 24h without requiring URL.
+  if (list.filters.within) {
+    return list.queryString(extra);
+  }
+  return list.queryString({ within, ...extra });
+}
+
+/** Select value for within: empty URL → show default 24h. */
+export function opsWithinSelectValue(filters: Record<string, string>): string {
+  return filters.within || OPS_TURN_WITHIN_DEFAULT;
+}
 
 function useDebounced(value: string, ms: number): string {
   const [debounced, setDebounced] = useState(value);
@@ -58,7 +91,7 @@ export type OpsListParams = {
 
 /**
  * URL-backed list params shared by Ops history / recent browse pages.
- * Preserves unrelated search keys (e.g. turn_id).
+ * Preserves unrelated search keys (e.g. turn).
  */
 export function useOpsListParams(
   filterKeys: string[],
@@ -237,7 +270,11 @@ export function OpsListFilters({
           >
             {def.label}
             <select
-              value={filters[def.key] ?? ""}
+              value={
+                def.key === "within"
+                  ? opsWithinSelectValue(filters)
+                  : (filters[def.key] ?? "")
+              }
               onChange={(e) => onFilterChange(def.key, e.target.value)}
               className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground"
             >
@@ -273,6 +310,11 @@ export function OpsListFilters({
       <p className="text-xs text-muted-foreground">
         共 <span className="text-foreground">{total}</span> 条
         {hasFilters ? "（当前筛选）" : ""}
+        {!filters.within || filters.within === OPS_TURN_WITHIN_DEFAULT ? (
+          <span> · 默认近 24 小时</span>
+        ) : filters.within === "all" ? (
+          <span> · 不限时间</span>
+        ) : null}
         {total > 0 ? (
           <>
             {" "}
