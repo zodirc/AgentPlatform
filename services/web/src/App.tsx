@@ -48,6 +48,11 @@ const RetrievalAuditPage = lazy(() =>
     default: m.RetrievalAuditPage,
   })),
 );
+const OfficialBenchPage = lazy(() =>
+  import("./ops/OfficialBenchPage").then((m) => ({
+    default: m.OfficialBenchPage,
+  })),
+);
 
 function OpsSuspense({ children }: { children: ReactNode }) {
   return (
@@ -87,6 +92,10 @@ function isOpsEnvelopePath(pathname: string): boolean {
 
 function isOpsRawPath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/raw\/?$/.test(pathname);
+}
+
+function isOpsOfficialPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/official(\/[^/]+)?\/?$/.test(pathname);
 }
 
 
@@ -377,6 +386,8 @@ export function App() {
     <EnvelopeAuditPage />
   ) : isOpsRawPath(pathname) ? (
     <RawAuditPage />
+  ) : isOpsOfficialPath(pathname) ? (
+    <OfficialBenchPage />
   ) : null;
   if (opsPage !== null) {
     return (

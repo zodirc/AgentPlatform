@@ -36,6 +36,7 @@ COPY services/api/pyproject.toml /tmp/api/pyproject.toml
 RUN mkdir -p /tmp/api/app && printf '%s\n' '# deps-layer stub' > /tmp/api/app/__init__.py \
     && pip install --no-cache-dir /contracts/python \
     && pip install --no-cache-dir /tmp/api \
+    && pip install --no-cache-dir 'datasets>=2.14.0' 'huggingface_hub>=0.20.0' \
     && rm -rf /tmp/api
 
 FROM deps AS app

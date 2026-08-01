@@ -20,6 +20,7 @@
 | 项 | 说明 |
 |----|------|
 | URL | `https://<host>/ops/<OPS_TEST_SECRET>/test` |
+| 官方小量评测 | `/ops/<OPS_TEST_SECRET>/official`（BEIR / LongBench / SWE Lite；见 [`eval/official/README.md`](../../eval/official/README.md)） |
 | 鉴权 | 路径密钥 ≡ API `Authorization: Bearer <OPS_TEST_SECRET>` |
 | 关闭 | `.env` 中 `OPS_TEST_SECRET=` **空字符串**（键存在）→ 不挂载；**无此键**时 `make up` 等会自动生成 |
 

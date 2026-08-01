@@ -27,6 +27,11 @@ export function opsHistoryPath(secret: string): string {
   return `/ops/${encodeURIComponent(secret)}/test/history`;
 }
 
+export function opsOfficialPath(secret: string, runId?: string): string {
+  const base = `/ops/${encodeURIComponent(secret)}/official`;
+  return runId ? `${base}/${encodeURIComponent(runId)}` : base;
+}
+
 export function secretFromOpsPath(pathname: string): string {
   const m = pathname.match(/^\/ops\/([^/]+)\//);
   return m ? decodeURIComponent(m[1]) : "";

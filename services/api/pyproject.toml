@@ -32,6 +32,11 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.3",
 ]
+# Ops official LongBench / SWE pull buttons (BEIR retrieval works without this).
+official-bench = [
+    "datasets>=2.14.0",
+    "huggingface_hub>=0.20.0",
+]
 
 [build-system]
 requires = ["hatchling"]

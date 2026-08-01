@@ -63,6 +63,7 @@ const HISTORY_FILTERS: OpsListFilterDef[] = [
       { value: "", label: "全部" },
       { value: "ci", label: "ci" },
       { value: "golden", label: "golden" },
+      { value: "official", label: "bench" },
     ],
   },
 ];

@@ -39,6 +39,11 @@ workspace/
 eval/reports/
 eval/plan_suggest/reports/
 
+# Official benches: pulled corpora / SWE images live under BENCH_DATA_DIR (default
+# ~/.cache/agentplatform-bench). Never commit datasets.
+.cache/agentplatform-bench/
+eval/official/.local-data/
+
 # F4: local backups (pg_dump + volume tarballs)
 deploy/backups/
 

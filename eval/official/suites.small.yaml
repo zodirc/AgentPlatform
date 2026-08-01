@@ -1,0 +1,63 @@
+# Official small suites — data is pulled into BENCH_DATA_DIR (not committed).
+# Protocol versions are pinned; bump deliberately when changing pulls or metrics.
+
+protocol_version: "official-small-2026-08"
+
+data_dir_env: BENCH_DATA_DIR
+default_data_dir: ~/.cache/agentplatform-bench
+
+suites:
+  retrieval:
+    id: beir.small
+    official: BEIR
+    # https://github.com/beir-cellar/beir/wiki/Datasets-available
+    datasets:
+      # approx_mib = zip size (UI/plan only; not a gate)
+      - name: scifact
+        url: https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/scifact.zip
+        md5: 5f7d1de60b170fc8027bb7898e2efca1
+        approx_mib: 2.7
+      - name: nfcorpus
+        url: https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/nfcorpus.zip
+        md5: a89dba18a62ef92f7d323ec890a0d38d
+        approx_mib: 2.3
+      - name: fiqa
+        url: https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets/fiqa.zip
+        md5: 17918ed23cd04fb15047f73e6c3bd9d9
+        approx_mib: 17.1
+    split: test
+    metrics: [ndcg_at_10, recall_at_100, map_at_100]
+    # Default effect score = platform hybrid (BM25∥vector→RRF). BM25 is the floor control.
+    primary_arm: hybrid
+    arms: [hybrid, bm25]
+    retriever: hybrid
+    k_values: [1, 10, 100]
+
+  context:
+    id: longbench.small
+    official: LongBench
+    # HuggingFace: THUDM/LongBench — small task slice for harness dual-arm.
+    hf_dataset: THUDM/LongBench
+    hf_revision: main
+    tasks:
+      - multifieldqa_en
+      - hotpotqa
+      - narrativeqa
+    max_samples_per_task: 40
+    max_context_chars: 120000
+    # Arms: full context vs middle-truncation budget (proxy); platform compact optional.
+    budget_chars: 24000
+    metrics: [exact_match, retention_vs_full]
+    judge: substring_or_f1
+
+  coding:
+    id: swebench.lite
+    official: SWE-bench Lite
+    hf_dataset: princeton-nlp/SWE-bench_Lite
+    hf_revision: main
+    split: test
+    # Optional smoke slice for adapter bring-up (0 = all 300).
+    max_instances: 0
+    predictions_filename: predictions.jsonl
+    # Official scoring requires Docker + swebench.harness (see README).
+    evaluate_with: swebench.harness.run_evaluation

@@ -1,0 +1,13 @@
+# Optional deps for official small benches (install into a local venv).
+# Core pull/BEIR BM25 path uses stdlib + PyYAML only when possible.
+PyYAML>=6.0
+# BEIR download integrity / IR metrics helpers
+# (nDCG implemented in-tree; pytrec_eval optional for cross-check)
+# LongBench / SWE pulls:
+datasets>=2.14.0
+huggingface_hub>=0.20.0
+# SWE official evaluate (heavy; Docker required at eval time):
+# swebench>=2.0.0
+# Context live arm:
+httpx>=0.27.0
+openai>=1.30.0

@@ -22,6 +22,7 @@ from app.routers import (
     ops_envelope,
     ops_eval,
     ops_ingestion,
+    ops_official,
     ops_raw,
     ops_retrieval,
     runs,
@@ -123,6 +124,7 @@ app.include_router(admin_workspace.router, prefix="/api/v1")
 app.include_router(admin_ux_signals.router, prefix="/api/v1")
 if (settings.ops_test_secret or "").strip():
     app.include_router(ops_eval.router, prefix="/api/v1")
+    app.include_router(ops_official.router, prefix="/api/v1")
     app.include_router(ops_retrieval.router, prefix="/api/v1")
     app.include_router(ops_envelope.router, prefix="/api/v1")
     app.include_router(ops_raw.router, prefix="/api/v1")

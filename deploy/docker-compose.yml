@@ -157,6 +157,11 @@ services:
       OPS_EVAL_REPO_MOUNT: /repo
       # Optional absolute host path; else api discovers via docker inspect of /repo.
       OPS_EVAL_REPO_HOST_PATH: ${OPS_EVAL_REPO_HOST_PATH:-}
+      # Official benches: always the container volume path (do NOT interpolate host
+      # BENCH_DATA_DIR — a host absolute path makes Ops re-download forever).
+      BENCH_DATA_DIR: /data/ops-official/data
+      BENCH_REPORTS_DIR: /data/ops-official/reports
+      BENCH_PUBLISH: "0"
     volumes:
       # Shared with runtime so ops fixtures under /data/ops-eval are Turn-visible.
       - agent_data:/data
@@ -167,6 +172,8 @@ services:
       # Full checkout is read-only. Docker socket access for Ops CI evaluation
       # lives in compose/ops-eval.yml and is opt-in, never a production default.
       - ..:/repo:ro,z
+      # Share host official-bench cache with Ops (skip re-download when already pulled).
+      - ${HOST_BENCH_DATA_DIR:-../eval/official/.local-data}:/data/ops-official/data:rw,z
     depends_on:
       postgres:
         condition: service_healthy

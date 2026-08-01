@@ -3,6 +3,7 @@ import {
   opsConsolePath,
   opsEnvelopePath,
   opsHistoryPath,
+  opsOfficialPath,
   opsRawPath,
   opsRetrievalPath,
 } from "./opsPaths";
@@ -18,6 +19,7 @@ export {
   opsConsolePath,
   opsEnvelopePath,
   opsHistoryPath,
+  opsOfficialPath,
   opsRawPath,
   opsRetrievalPath,
   opsRunPath,
@@ -31,19 +33,24 @@ export function OpsShell({
   subtitle,
   children,
   actions,
+  wide = false,
 }: {
   secret: string;
   title: string;
   subtitle?: string;
   children: ReactNode;
   actions?: ReactNode;
+  /** Observation pages (official bench) need more horizontal room. */
+  wide?: boolean;
 }) {
   const { theme, setTheme, themes, meta } = useTheme();
   useSiteBrand(title);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6">
+      <main
+        className={`mx-auto px-4 py-8 sm:px-6 ${wide ? "max-w-7xl" : "max-w-5xl"}`}
+      >
         <header className="mb-6 flex flex-wrap items-start justify-between gap-4 border-b border-border pb-4">
           <div>
             <div className="flex items-center gap-3">
@@ -71,6 +78,12 @@ export function OpsShell({
                 className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
               >
                 历史结果
+              </Link>
+              <Link
+                to={opsOfficialPath(secret)}
+                className="rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted"
+              >
+                Bench
               </Link>
               <Link
                 to={opsRetrievalPath(secret)}

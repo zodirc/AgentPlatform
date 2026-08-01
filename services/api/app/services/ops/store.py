@@ -164,6 +164,26 @@ async def list_runs(
     return [_row_to_summary(row) for row in rows], total
 
 
+async def delete_runs(*, suite: str | None = None) -> int:
+    """Delete ops_eval_runs rows. When suite is set, only that suite (model_meta)."""
+    pool = await get_pool()
+    if suite:
+        result = await pool.execute(
+            """
+            DELETE FROM ops_eval_runs
+            WHERE COALESCE(model_meta->>'suite', 'golden') = $1
+            """,
+            suite.strip().lower(),
+        )
+    else:
+        result = await pool.execute("DELETE FROM ops_eval_runs")
+    # asyncpg returns like 'DELETE 3'
+    try:
+        return int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 def _as_obj(value: Any) -> Any:
     if isinstance(value, str):
         try:

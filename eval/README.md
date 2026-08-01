@@ -42,6 +42,8 @@ python3 scripts/eval_run.py --phase 2
 
 体验信号：[`ux_signals/README.md`](ux_signals/README.md)。
 
+官方小量跑分（BEIR / LongBench / SWE-bench Lite，数据拉取挂载）：[`official/README.md`](official/README.md) · `make official-bench-pull` / `official-bench-retrieval`。
+
 ## CI 分层
 
 | 层级 | 触发 | 内容 |

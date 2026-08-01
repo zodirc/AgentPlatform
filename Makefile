@@ -39,7 +39,10 @@ WEB_REBUILD_DEPS ?= 0
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources intel-corpus-fetch retrieval-bench-prod loc \
-	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup
+	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
+	official-bench-paths official-bench-pull official-bench-retrieval \
+	official-bench-context official-bench-coding-pull official-bench-coding-infer \
+	official-bench-coding-eval official-bench-all official-bench-publish
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -73,6 +76,7 @@ help: ## 显示常用命令
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
 	@echo "  make retrieval-bench 离线检索 A/B（docs/15 契约近似；hash）"
 	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
+	@echo "  make official-bench-pull/-retrieval/-context/-coding-*  官方小量（BEIR/LongBench/SWE Lite）"
 	@echo "  make sync-sources    Turn 外索引（进度在本终端；含挂载 seed）"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make intel-corpus-fetch  拉取/转换 intel vendor 语料（gitignore；docs seed/intel）"
@@ -471,6 +475,55 @@ eval-path-prefix: ## writing.14 path_prefix golden（isolated stub + runtime-lit
 	  EVAL_BUILD=--build \
 	  EVAL_RUNTIME_ENV="MODEL_MODE=stub RETRIEVAL_MODE=keyword INDEX_VIA_WORKER=false" \
 	  EVAL_ARGS="--filter writing.14"
+
+# Official small benches (pull-to-BENCH_DATA_DIR; eval/official/README.md)
+OFFICIAL_BENCH_PY ?= python3
+CONTEXT_DRY ?= 0
+OFFICIAL_SWE_SKIP_API ?= 0
+OFFICIAL_CONTEXT_LIMIT ?= 0
+OFFICIAL_SWE_LIMIT ?= 0
+
+official-bench-paths: ## 打印官方评测数据/报告目录
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py paths
+
+official-bench-pull: ## 拉取 BEIR + LongBench 小切片 + SWE-bench Lite（需网络）
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py pull --suite all
+
+official-bench-retrieval: ## 官方 BEIR 小量（hybrid 主分 + BM25 对照）
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval
+
+official-bench-context: ## 官方 LongBench 小量双臂（CONTEXT_DRY=1 仅流水线）
+	@if [ "$(CONTEXT_DRY)" = "1" ]; then \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py context --dry-metrics --limit $(OFFICIAL_CONTEXT_LIMIT); \
+	else \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py context --limit $(OFFICIAL_CONTEXT_LIMIT); \
+	fi
+
+official-bench-coding-pull: ## 拉取 SWE-bench Lite 题集
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase pull
+
+official-bench-coding-infer: ## 平台推理写 predictions.jsonl（OFFICIAL_SWE_SKIP_API=1 空补丁）
+	@if [ "$(OFFICIAL_SWE_SKIP_API)" = "1" ]; then \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --skip-api --limit $(OFFICIAL_SWE_LIMIT); \
+	else \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --limit $(OFFICIAL_SWE_LIMIT); \
+	fi
+
+official-bench-coding-eval: ## 官方 swebench.harness 评分（需 Docker + pip install swebench）
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase eval
+
+official-bench-all: ## pull + BEIR；可选 WITH_CONTEXT=1 / WITH_CODING_INFER=1
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py all \
+	  $(if $(filter 1,$(WITH_CONTEXT)),--with-context,) \
+	  $(if $(filter 1,$(WITH_CODING_INFER)),--with-coding-infer,) \
+	  $(if $(filter 1,$(CONTEXT_DRY)),--context-dry-metrics,) \
+	  --context-limit $(OFFICIAL_CONTEXT_LIMIT)
+
+official-bench-publish: ## 将 latest（或 RUN_ID=）run 导入 Ops（需 OPS_TEST_SECRET + 栈）
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	  test -n "$${OPS_TEST_SECRET:-}" || (echo "OPS_TEST_SECRET missing in env/.env"; exit 1); \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py publish \
+	    $(if $(RUN_ID),--run-id $(RUN_ID),) --force
 
 retrieval-bench: ## 离线检索 A/B（docs/15 契约近似；json+hash）
 	@cd services/runtime && \
