@@ -20,16 +20,54 @@ router = APIRouter(
 )
 
 
+class ModelBody(BaseModel):
+    """Bench-side chat model for context / coding (not product Turn)."""
+
+    provider: str = Field(default="openai", min_length=1, max_length=64)
+    # Wire protocol: openai-compatible chat/completions vs Anthropic Messages.
+    api_style: Literal["openai", "anthropic"] | None = Field(default=None)
+    model_name: str = Field(min_length=1, max_length=128)
+    api_key: str = Field(min_length=1, max_length=4096)
+    base_url: str | None = Field(default=None, max_length=1024)
+    context_window_tokens: int | None = Field(default=None, ge=1024, le=2_000_000)
+
+
 class StartOfficialBody(BaseModel):
     targets: list[
-        Literal["pull", "retrieval", "context", "coding_pull", "coding_infer"]
+        Literal[
+            "pull",
+            "retrieval",
+            "context",
+            "coding",
+            "coding_pull",
+            "coding_infer",
+        ]
     ] = Field(min_length=1)
-    context_dry: bool = True
-    coding_skip_api: bool = True
+    # Kept for API compat; Ops UI no longer exposes pipeline smoke.
+    context_dry: bool = False
+    coding_skip_api: bool = False
+    coding_tier: str = "n25"
+    coding_n_instances: int | None = None
+    coding_harness: bool = False
+    # Default = real ST vectors on bench worker (effect score). Hash is opt-in smoke.
+    retrieval_prod: bool = True
+    force: bool = False
+    model: ModelBody | None = None
+
+
+class DeleteOfficialRunsBody(BaseModel):
+    """Delete Bench history: by ids, older-than, or all (when both empty)."""
+
+    ids: list[str] = Field(default_factory=list)
+    before: str | None = None  # ISO timestamptz — delete created_at < before
+    include_filesystem: bool = True
+    # Stop+drop active live runs that match the delete scope.
     force: bool = False
 
 
-def _caps() -> dict[str, bool]:
+async def _caps() -> dict[str, bool]:
+    from app.services.ops import bench_client
+
     has_script = (
         official_runner._repo_root() / "scripts" / "official_bench_run.py"
     ).is_file()
@@ -39,7 +77,7 @@ def _caps() -> dict[str, bool]:
         has_datasets = True
     except ImportError:
         has_datasets = False
-    return {
+    caps: dict[str, bool] = {
         "script": has_script,
         "retrieval": has_script,
         "pull": has_script,
@@ -47,7 +85,22 @@ def _caps() -> dict[str, bool]:
         "coding_pull": has_script and has_datasets,
         "coding_infer": has_script and has_datasets,
         "datasets": has_datasets,
+        "bench_worker": False,
+        "retrieval_prod": False,
     }
+    if bench_client.bench_enabled():
+        remote = await bench_client.fetch_caps()
+        if remote and not remote.get("error"):
+            caps["bench_worker"] = True
+            caps["script"] = bool(remote.get("script", caps["script"]))
+            caps["retrieval"] = caps["script"]
+            caps["pull"] = caps["script"]
+            caps["context"] = caps["script"]
+            caps["coding_pull"] = caps["script"]
+            caps["coding_infer"] = caps["script"]
+            caps["retrieval_prod"] = bool(remote.get("retrieval_prod"))
+            caps["sentence_transformers"] = bool(remote.get("sentence_transformers"))
+    return caps
 
 
 @router.get("/meta")
@@ -62,60 +115,60 @@ async def official_meta() -> dict[str, Any]:
                 "id": "retrieval",
                 "label": "检索",
                 "group": "retrieval",
-                "description": "BEIR 小量 · 平台 hybrid（主）+ BM25 对照 · nDCG/Recall",
+                "description": "BEIR 小量 · hybrid 主分 + BM25 对照 · ST 真向量",
                 "needs_model": False,
             },
             {
                 "id": "context",
                 "label": "上下文",
                 "group": "context",
-                "description": "LongBench 小量 · full vs budget · retention",
+                "description": "LongBench · full / truncate / ContextEngine compact",
                 "needs_model": True,
             },
             {
-                "id": "coding_pull",
-                "label": "编码·拉取",
+                "id": "coding",
+                "label": "编码",
                 "group": "coding",
-                "description": "SWE-bench Lite 题集拉取",
-                "needs_model": False,
-            },
-            {
-                "id": "coding_infer",
-                "label": "编码·推理",
-                "group": "coding",
-                "description": "写 predictions（可跳过 API）",
+                "description": "SWE-bench Lite · 可调档（默认 25）· bench 直出 patch",
                 "needs_model": True,
             },
         ],
         "presets": [
             {
-                "id": "all_safe",
-                "label": "全部（安全默认）",
-                "targets": ["retrieval", "context", "coding_pull", "coding_infer"],
-                "context_dry": True,
-                "coding_skip_api": True,
-                "hint": "检索真分 + 上下文/编码打通流水线（不烧模型）",
-            },
-            {
                 "id": "retrieval_only",
                 "label": "仅检索",
                 "targets": ["retrieval"],
-                "context_dry": True,
-                "coding_skip_api": True,
-                "hint": "最快、无模型、BEIR nDCG/Recall",
+                "coding_tier": "n25",
+                "coding_harness": False,
+                "retrieval_prod": True,
+                "hint": "真向量效果分，无需聊天模型",
             },
             {
-                "id": "full_live",
-                "label": "全量 live",
-                "targets": ["retrieval", "context", "coding_pull", "coding_infer"],
-                "context_dry": False,
-                "coding_skip_api": False,
-                "hint": "需模型密钥 / 平台可推理；更贵更慢",
+                "id": "all_three",
+                "label": "三项全开",
+                "targets": ["retrieval", "context", "coding"],
+                "coding_tier": "n25",
+                "coding_harness": False,
+                "retrieval_prod": True,
+                "hint": "检索 + 上下文 + 编码；后两项需评测模型 key",
             },
         ],
-        "capabilities": _caps(),
+        "capabilities": await _caps(),
         "reports_root": str(official_store.reports_root()),
-        "defaults": {"context_dry": True, "coding_skip_api": True},
+        "defaults": {
+            "coding_tier": "n25",
+            "coding_n_instances": None,
+            "coding_harness": False,
+            "retrieval_prod": True,
+        },
+        "coding_tiers": [
+            {"id": "n3", "n_instances": 3},
+            {"id": "n5", "n_instances": 5},
+            {"id": "n10", "n_instances": 10},
+            {"id": "n25", "n_instances": 25},
+            {"id": "full300", "n_instances": 300},
+            {"id": "custom", "n_instances": None},
+        ],
     }
 
 
@@ -125,18 +178,12 @@ async def list_official_runs(
 ) -> dict[str, Any]:
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
-    fs_rows = official_store.list_fs_runs(limit=limit)
+    # History = one Ops batch = one row (DB/live). Child FS reports from
+    # scripts/official_bench are attached on the batch, not listed separately.
     db_rows, _total = await eval_store.list_runs(limit=limit, suite="official")
     by_id: dict[str, dict[str, Any]] = {}
     for row in db_rows:
         by_id[str(row["id"])] = {**row, "source": row.get("source") or "db"}
-    for row in fs_rows:
-        rid = str(row["id"])
-        if rid in by_id:
-            by_id[rid] = {**by_id[rid], **row, "source": "filesystem+db"}
-        else:
-            by_id[rid] = row
-    # Live in-memory first
     for live in list(official_runner._RUNS.values()):
         by_id[live.id] = {
             **official_runner.run_to_dict(live),
@@ -147,7 +194,11 @@ async def list_official_runs(
         key=lambda r: r.get("created_at") or "",
         reverse=True,
     )[:limit]
-    return {"runs": runs, "total": len(runs), "reports_root": str(official_store.reports_root())}
+    return {
+        "runs": runs,
+        "total": len(runs),
+        "reports_root": str(official_store.reports_root()),
+    }
 
 
 @router.get("/runs/{run_id}")
@@ -243,50 +294,155 @@ async def get_official_report_html(run_id: str) -> HTMLResponse:
     return HTMLResponse(content=html)
 
 
-@router.delete("/runs", status_code=status.HTTP_200_OK)
-async def clear_official_history(
-    include_filesystem: bool = Query(default=True),
-) -> dict[str, Any]:
-    """Clear official eval history (DB + optional FS reports). Keeps BEIR data cache."""
+@router.post("/runs/delete", status_code=status.HTTP_200_OK)
+async def delete_official_runs(body: DeleteOfficialRunsBody) -> dict[str, Any]:
+    """Delete Bench history by ids, by time, or all finished runs.
+
+    Cancelled / completed live rows are dropped from memory so they do not
+    reappear after DB wipe. Active runs block unless ``force`` (stop then drop).
+    """
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
+
+    ids = [str(i).strip() for i in body.ids if str(i).strip()]
+    before = (body.before or "").strip() or None
+    clear_all = not ids and not before
+
     active = [
         r
         for r in official_runner._RUNS.values()
-        if r.status in {"queued", "running"}
+        if r.status in {"queued", "running", "cancelling"}
     ]
-    if active:
+    if ids:
+        idset = set(ids)
+        blocking = [r for r in active if r.id in idset]
+    elif before:
+        blocking = []
+        for r in active:
+            try:
+                from datetime import datetime
+
+                created = datetime.fromisoformat(
+                    (r.created_at or "").replace("Z", "+00:00")
+                )
+                cutoff = datetime.fromisoformat(before.replace("Z", "+00:00"))
+                if created < cutoff:
+                    blocking.append(r)
+            except ValueError:
+                continue
+    else:
+        blocking = list(active)
+
+    if blocking and not body.force:
         raise HTTPException(
             status_code=400,
-            detail=f"official_run_already_active:{active[0].id} — stop it first",
+            detail=(
+                f"official_run_already_active:{blocking[0].id} — "
+                "先停止，或 force=true 强制结束并删除"
+            ),
         )
-    deleted_db = await eval_store.delete_runs(suite="official")
-    deleted_fs = official_store.clear_fs_runs() if include_filesystem else 0
+    if blocking and body.force:
+        for r in blocking:
+            try:
+                await official_runner.request_stop(r.id)
+            except ValueError:
+                pass
+            await official_runner._force_finish_cancelled(r, reason="deleted")
+        official_runner.forget_live_runs(
+            ids={r.id for r in blocking},
+            include_active=True,
+        )
+
+    fs_ids: list[str] = list(ids)
+    if ids:
+        for rid in ids:
+            meta_children: list[dict[str, Any]] = []
+            live = official_runner.get_live(rid)
+            if live is not None:
+                meta_children = list(live.child_reports or [])
+            else:
+                row = await eval_store.load_run(rid)
+                mm = (row or {}).get("model_meta") if isinstance(row, dict) else None
+                if isinstance(mm, dict):
+                    raw = mm.get("child_reports") or []
+                    if isinstance(raw, list):
+                        meta_children = [c for c in raw if isinstance(c, dict)]
+            for c in meta_children:
+                cid = str(c.get("bench_run_id") or "").strip()
+                if cid and cid not in fs_ids:
+                    fs_ids.append(cid)
+
+    # Always purge matching finished/cancelled live entries (the clear bug).
+    if ids:
+        forgotten = official_runner.forget_live_runs(ids=set(ids))
+    elif before:
+        forgotten = official_runner.forget_live_runs(before_iso=before)
+    else:
+        forgotten = official_runner.forget_live_runs()
+
+    if ids:
+        deleted_db = await eval_store.delete_runs_by_ids(ids, suite="official")
+        deleted_fs = (
+            official_store.clear_fs_runs(ids=fs_ids) if body.include_filesystem else 0
+        )
+    elif before:
+        deleted_db = await eval_store.delete_runs_before(before, suite="official")
+        deleted_fs = (
+            official_store.clear_fs_runs_before(before)
+            if body.include_filesystem
+            else 0
+        )
+    else:
+        deleted_db = await eval_store.delete_runs(suite="official")
+        deleted_fs = official_store.clear_fs_runs() if body.include_filesystem else 0
+
     return {
         "ok": True,
         "deleted_db": deleted_db,
         "deleted_fs": deleted_fs,
+        "forgotten_live": forgotten,
+        "cleared_all": clear_all,
     }
+
+
+@router.delete("/runs", status_code=status.HTTP_200_OK)
+async def clear_official_history(
+    include_filesystem: bool = Query(default=True),
+    force: bool = Query(default=False),
+) -> dict[str, Any]:
+    """Clear all Bench history (compat). Prefer POST /runs/delete."""
+    return await delete_official_runs(
+        DeleteOfficialRunsBody(include_filesystem=include_filesystem, force=force)
+    )
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
 async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
-    caps = _caps()
-    if not caps.get("script"):
+    caps = await _caps()
+    if not caps.get("script") and not caps.get("bench_worker"):
         raise HTTPException(
             status_code=400,
-            detail="official_bench_run.py not found (is /repo mounted?)",
+            detail="bench worker / official_bench_run.py unavailable",
+        )
+    if body.retrieval_prod and not caps.get("retrieval_prod"):
+        raise HTTPException(
+            status_code=400,
+            detail="真向量需要 bench 服务（sentence_transformers）。先 make up-bench。",
         )
     needs_datasets = {"context", "coding_pull", "coding_infer", "pull"}
-    missing = [t for t in body.targets if t in needs_datasets and not caps.get("datasets")]
+    missing = [
+        t
+        for t in body.targets
+        if t in needs_datasets and not caps.get("datasets") and not caps.get("bench_worker")
+    ]
     if missing:
         raise HTTPException(
             status_code=400,
             detail=(
-                f"targets {missing} need `datasets` in the api image. "
-                "Rebuild with Dockerfile deps (datasets baked in), or run host make."
+                f"targets {missing} need datasets (bench worker or api image). "
+                "Rebuild bench/api or run host make."
             ),
         )
     try:
@@ -294,7 +450,12 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             targets=list(body.targets),
             context_dry=body.context_dry,
             coding_skip_api=body.coding_skip_api,
+            coding_tier=body.coding_tier,
+            coding_n_instances=body.coding_n_instances,
+            coding_harness=body.coding_harness,
+            retrieval_prod=body.retrieval_prod,
             force=body.force,
+            model=body.model.model_dump() if body.model else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

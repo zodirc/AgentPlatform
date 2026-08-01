@@ -401,6 +401,11 @@ async def reconcile_orphaned_runs() -> int:
             continue
         if row.get("status") not in {"queued", "running", "cancelling"}:
             continue
+        # Official Bench runs keep richer model_meta; reclaim in official_runner.
+        if str(row.get("suite") or "").lower() == "official" or str(
+            row.get("mode") or ""
+        ).lower() == "official":
+            continue
         stored = await eval_store.load_run(rid)
         if stored is None:
             continue

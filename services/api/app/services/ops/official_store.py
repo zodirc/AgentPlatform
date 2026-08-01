@@ -93,35 +93,95 @@ def list_fs_runs(*, limit: int = 50) -> list[dict[str, Any]]:
     return rows
 
 
-def clear_fs_runs() -> int:
-    """Remove filesystem official run dirs under reports/runs (keeps data cache)."""
+def clear_fs_runs(*, ids: list[str] | None = None) -> int:
+    """Remove filesystem official run dirs under reports/runs (keeps data cache).
+
+    When ``ids`` is set, only those run directories (and matching child dirs) are removed;
+    latest_*.json pointers are cleared only on a full wipe.
+    """
     root = reports_root()
     if root is None:
         return 0
     runs_dir = root / "runs"
     if not runs_dir.is_dir():
         return 0
+    want: set[str] | None = None
+    if ids is not None:
+        want = {str(i).strip() for i in ids if str(i).strip()}
+        if not want:
+            return 0
     removed = 0
     for child in list(runs_dir.iterdir()):
         if not child.is_dir():
+            continue
+        if want is not None and child.name not in want:
             continue
         try:
             shutil.rmtree(child)
             removed += 1
         except OSError:
             continue
-    for name in (
-        "latest_run.json",
-        "latest_retrieval.json",
-        "latest_context.json",
-        "latest_coding.json",
-    ):
-        path = root / name
-        if path.is_file():
+    if want is None:
+        for name in (
+            "latest_run.json",
+            "latest_retrieval.json",
+            "latest_context.json",
+            "latest_coding.json",
+        ):
+            path = root / name
+            if path.is_file():
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+    return removed
+
+
+def clear_fs_runs_before(before_iso: str) -> int:
+    """Remove FS run dirs whose manifest created_at / mtime is before ``before_iso``."""
+    from datetime import datetime, timezone
+
+    root = reports_root()
+    if root is None:
+        return 0
+    runs_dir = root / "runs"
+    if not runs_dir.is_dir():
+        return 0
+    try:
+        before = datetime.fromisoformat(before_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return 0
+    if before.tzinfo is None:
+        before = before.replace(tzinfo=timezone.utc)
+    removed = 0
+    for child in list(runs_dir.iterdir()):
+        if not child.is_dir():
+            continue
+        created = None
+        man = _load_manifest(child)
+        if man and man.get("created_at"):
             try:
-                path.unlink()
+                created = datetime.fromisoformat(
+                    str(man["created_at"]).replace("Z", "+00:00")
+                )
+            except ValueError:
+                created = None
+        if created is None:
+            try:
+                created = datetime.fromtimestamp(
+                    child.stat().st_mtime, tz=timezone.utc
+                )
             except OSError:
-                pass
+                continue
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        if created >= before:
+            continue
+        try:
+            shutil.rmtree(child)
+            removed += 1
+        except OSError:
+            continue
     return removed
 
 

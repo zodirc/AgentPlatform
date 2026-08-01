@@ -21,6 +21,7 @@ TARGETS = (
     "pull",
     "retrieval",
     "context",
+    "coding",
     "coding_pull",
     "coding_infer",
 )
@@ -32,23 +33,23 @@ CRITERIA: list[dict[str, str]] = [
         "title": "检索（BEIR 小量）",
         "metrics": "nDCG@k · Recall@k · MAP@k（宏平均）",
         "pass_rule": "以 hybrid 宏平均为主分；BM25 为对照地板。看 hybrid−BM25 的 Δ 与前后跑次回归。",
-        "notes": "默认臂=平台 hybrid（BM25∥向量→RRF）。Ops 内默认 hash+json 同管线；BENCH_RETRIEVAL_PROD=1 用 ST+pgvector。",
+        "notes": "默认臂=平台 hybrid（BM25∥向量→RRF）。hash=冒烟；真向量在独立 bench 服务（ST，不进 agent runtime）。",
     },
     {
         "id": "context",
         "official": "LongBench",
         "title": "上下文（LongBench 小量）",
-        "metrics": "full_f1 · budget_f1 · retention_vs_full_f1",
-        "pass_rule": "retention = budget_f1 / full_f1（同一模型）。dry 模式只验证流水线（用例 skipped）。",
-        "notes": "双臂：全文 vs 预算截断；后续可接 ContextEngine compact 作 platform 臂。",
+        "metrics": "full_f1 · budget_f1 · compact_f1 · retention_vs_full · retention_compact_vs_full",
+        "pass_rule": "三臂同模型：full 上限、truncate 地板、ContextEngine compact。dry=无模型管道，不作效果结论。",
+        "notes": "bench 进程内 import ContextEngine；不写产品 sessions / 不经 Turn。",
     },
     {
         "id": "coding",
         "official": "SWE-bench Lite",
         "title": "编码（SWE-bench Lite）",
-        "metrics": "pull 实例数 · nonempty patch 率；pass@1 需 harness+Docker",
-        "pass_rule": "Ops 内默认 pull / infer(skip_api 可开关)。pass@1 仅 coding-eval（Docker）。",
-        "notes": "空补丁 infer 用于打通链路；真分另开。",
+        "metrics": "coding_tier · n_instances · patch_rate；resolve 仅 harness+Docker",
+        "pass_rule": "同 protocol + 同 coding_tier/n_instances/选题指纹才可比 Δ。官方效果=harness resolve；skip_api≠效果。",
+        "notes": "默认 n25；档位 3/5/10/25/full300/custom≥3。默认 bench 直出 patch，不经产品 Turn。",
     },
 ]
 
@@ -77,6 +78,11 @@ class OfficialLiveRun:
     error: str | None = None
     context_dry: bool = True
     coding_skip_api: bool = True
+    coding_tier: str = "n25"
+    coding_n_instances: int | None = None
+    coding_harness: bool = False
+    retrieval_prod: bool = False
+    model: dict[str, Any] | None = None
     logs: list[dict[str, Any]] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
     progress_done: int = 0
@@ -86,6 +92,7 @@ class OfficialLiveRun:
     cancel_requested: bool = False
     child_reports: list[dict[str, Any]] = field(default_factory=list)
     report_html_available: bool = False
+    _bench_job_id: str | None = field(default=None, repr=False)
     _proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
     _subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
 
@@ -100,6 +107,40 @@ def list_criteria() -> list[dict[str, str]]:
 
 def get_live(run_id: str) -> OfficialLiveRun | None:
     return _RUNS.get(run_id)
+
+
+def forget_live_runs(
+    *,
+    ids: set[str] | None = None,
+    before_iso: str | None = None,
+    include_active: bool = False,
+) -> int:
+    """Drop finished (and optionally active) live runs from memory so clear sticks."""
+    before_dt = None
+    if before_iso:
+        try:
+            before_dt = datetime.fromisoformat(before_iso.replace("Z", "+00:00"))
+        except ValueError:
+            before_dt = None
+    removed = 0
+    for rid, run in list(_RUNS.items()):
+        if ids is not None and rid not in ids:
+            continue
+        active = run.status in {"queued", "running", "cancelling"}
+        if active and not include_active:
+            continue
+        if before_dt is not None:
+            try:
+                created = datetime.fromisoformat(
+                    (run.created_at or "").replace("Z", "+00:00")
+                )
+            except ValueError:
+                created = None
+            if created is not None and created >= before_dt:
+                continue
+        del _RUNS[rid]
+        removed += 1
+    return removed
 
 
 def subscribe(run: OfficialLiveRun) -> asyncio.Queue:
@@ -136,6 +177,19 @@ async def _publish(run: OfficialLiveRun, event: dict[str, Any]) -> None:
             logger.debug("official mid-run persist skipped", exc_info=True)
 
 
+def _model_meta_safe(model: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not model:
+        return None
+    return {
+        "provider": model.get("provider"),
+        "api_style": model.get("api_style"),
+        "model_name": model.get("model_name"),
+        "base_url": model.get("base_url"),
+        "context_window_tokens": model.get("context_window_tokens"),
+        "api_key_present": bool(str(model.get("api_key") or "").strip()),
+    }
+
+
 async def _persist_snapshot(run: OfficialLiveRun) -> None:
     from app.services.ops import store as eval_store
 
@@ -162,8 +216,23 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "title": f"Bench · {'+'.join(run.targets)}",
             "context_dry": run.context_dry,
             "coding_skip_api": run.coding_skip_api,
+            "coding_tier": run.coding_tier,
+            "coding_n_instances": run.coding_n_instances,
+            "coding_harness": run.coding_harness,
+            "retrieval_prod": run.retrieval_prod,
+            "bench_job_id": run._bench_job_id,
+            "phase_hint": run.phase_hint,
+            "model": _model_meta_safe(run.model),
             "child_reports": run.child_reports,
             "report_html_available": run.report_html_available,
+            "reclaimed": bool(
+                run.error
+                and (
+                    "reclaimed" in str(run.error)
+                    or str(run.error)
+                    in {"orphaned_after_api_restart", "reclaimed_after_restart"}
+                )
+            ),
         },
         "summary": summary,
         "cases": run.cases,
@@ -213,7 +282,15 @@ def _attach_latest_child_report(run: OfficialLiveRun, case: dict[str, Any], repo
     run.report_html_available = path is not None and path.is_file()
 
 
-def _cmd_for_target(target: str, *, context_dry: bool, coding_skip_api: bool) -> list[str]:
+def _cmd_for_target(
+    target: str,
+    *,
+    context_dry: bool,
+    coding_skip_api: bool,
+    coding_tier: str,
+    coding_n_instances: int | None,
+    coding_harness: bool,
+) -> list[str]:
     py = sys.executable
     script = str(_repo_root() / "scripts" / "official_bench_run.py")
     if target == "pull":
@@ -228,7 +305,11 @@ def _cmd_for_target(target: str, *, context_dry: bool, coding_skip_api: bool) ->
     if target == "coding_pull":
         return [py, script, "coding", "--phase", "pull"]
     if target == "coding_infer":
-        cmd = [py, script, "coding", "--phase", "infer"]
+        cmd = [py, script, "coding", "--phase", "infer", "--tier", coding_tier]
+        if coding_tier == "custom" and coding_n_instances is not None:
+            cmd.extend(["--n-instances", str(coding_n_instances)])
+        if coding_harness:
+            cmd.append("--harness")
         if coding_skip_api:
             cmd.append("--skip-api")
         return cmd
@@ -237,8 +318,10 @@ def _cmd_for_target(target: str, *, context_dry: bool, coding_skip_api: bool) ->
 
 async def _force_finish_cancelled(run: OfficialLiveRun, *, reason: str = "cancelled") -> None:
     """Mark a live run cancelled when the subprocess is gone or stop must win immediately."""
+    if run.status in {"cancelled", "completed", "failed"}:
+        return
     run.cancel_requested = True
-    if run.status in {"queued", "running"}:
+    if run.status in {"queued", "running", "cancelling"}:
         run.status = "cancelled"
     run.finished_at = run.finished_at or _utc()
     run.error = run.error or reason
@@ -246,7 +329,7 @@ async def _force_finish_cancelled(run: OfficialLiveRun, *, reason: str = "cancel
         if case.get("status") in {"pending", "running"}:
             case["status"] = "skipped"
             case["error"] = reason
-    run.phase_hint = f"已停止 · {reason}"
+    run.phase_hint = "已停止"
     await _publish(
         run,
         {
@@ -281,14 +364,53 @@ async def _kill_proc(proc: asyncio.subprocess.Process) -> None:
             pass
 
 
+async def _ensure_stop_completes(run_id: str, *, delay_s: float = 2.5) -> None:
+    """If execute loop stays wedged after stop, force-finish so refresh isn't stuck."""
+    await asyncio.sleep(delay_s)
+    run = _RUNS.get(run_id)
+    if run is None:
+        return
+    if not run.cancel_requested:
+        return
+    if run.status not in {"queued", "running", "cancelling"}:
+        return
+    if run._bench_job_id:
+        try:
+            from app.services.ops import bench_client
+
+            await bench_client.stop_job(run._bench_job_id)
+        except Exception:  # noqa: BLE001
+            logger.debug("bench stop retry failed", exc_info=True)
+    proc = run._proc
+    if proc is not None and proc.returncode is None:
+        await _kill_proc(proc)
+    await _force_finish_cancelled(run, reason="cancelled")
+
+
 def _active_runs() -> list[OfficialLiveRun]:
-    return [r for r in _RUNS.values() if r.status in {"queued", "running"}]
+    return [
+        r
+        for r in _RUNS.values()
+        if r.status in {"queued", "running", "cancelling"}
+    ]
 
 
 async def reclaim_stale_active_runs() -> list[str]:
     """Cancel in-memory runs that requested stop or lost their subprocess."""
     reclaimed: list[str] = []
     for run in _active_runs():
+        if run._bench_job_id:
+            # Remote bench worker owns the process; only reclaim on cancel.
+            if run.cancel_requested:
+                try:
+                    from app.services.ops import bench_client
+
+                    await bench_client.stop_job(run._bench_job_id)
+                except Exception:  # noqa: BLE001
+                    logger.debug("bench stop on reclaim failed", exc_info=True)
+                await _force_finish_cancelled(run, reason="cancelled")
+                reclaimed.append(run.id)
+            continue
         proc = run._proc
         proc_dead = proc is None or proc.returncode is not None
         if run.cancel_requested or proc_dead:
@@ -302,12 +424,100 @@ async def reclaim_stale_active_runs() -> list[str]:
     return reclaimed
 
 
+async def reclaim_official_orphans_from_db() -> list[str]:
+    """After API restart: finish official DB rows still queued/running/cancelling.
+
+    Does not resume subprocesses. Stops remote bench jobs when ``bench_job_id`` is known.
+    Preserves model_meta (unlike generic ops eval reconcile).
+    """
+    from app.services.ops import store as eval_store
+
+    rows, _total = await eval_store.list_runs(limit=100, offset=0, suite="official")
+    reclaimed: list[str] = []
+    for row in rows:
+        rid = str(row.get("id") or "")
+        if not rid or rid in _RUNS:
+            continue
+        if row.get("status") not in {"queued", "running", "cancelling"}:
+            continue
+        stored = await eval_store.load_run(rid)
+        if stored is None:
+            continue
+        meta = stored.get("model_meta") if isinstance(stored.get("model_meta"), dict) else {}
+        bench_job_id = str(meta.get("bench_job_id") or "").strip() or None
+        if bench_job_id:
+            try:
+                from app.services.ops import bench_client
+
+                await bench_client.stop_job(bench_job_id)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "bench stop on official orphan reclaim failed job=%s",
+                    bench_job_id,
+                    exc_info=True,
+                )
+        now = _utc()
+        cases = list(stored.get("cases") or [])
+        for case in cases:
+            if isinstance(case, dict) and case.get("status") in {"pending", "running"}:
+                case["status"] = "skipped"
+                case["error"] = "reclaimed_after_restart"
+                case["finished_at"] = now
+        meta = dict(meta)
+        meta["reclaimed"] = True
+        meta["bench_job_id"] = None
+        meta["phase_hint"] = "已回收（API 重启）"
+        summary = stored.get("summary") if isinstance(stored.get("summary"), dict) else {}
+        summary = {
+            **summary,
+            "pass": sum(1 for c in cases if isinstance(c, dict) and c.get("status") == "pass"),
+            "fail": sum(1 for c in cases if isinstance(c, dict) and c.get("status") == "fail"),
+            "skipped": sum(
+                1 for c in cases if isinstance(c, dict) and c.get("status") == "skipped"
+            ),
+            "pending": 0,
+            "total": len(cases),
+        }
+        was_cancelling = stored.get("status") == "cancelling" or bool(
+            stored.get("cancel_requested")
+        )
+        payload = {
+            "id": rid,
+            "status": "cancelled" if was_cancelling else "failed",
+            "mode": "official",
+            "restart_runtime": False,
+            "created_at": stored.get("created_at"),
+            "finished_at": now,
+            "error": "reclaimed_after_restart",
+            "model_meta": meta,
+            "summary": summary,
+            "cases": cases,
+            "logs": list(stored.get("logs") or [])
+            + [
+                {
+                    "kind": "log",
+                    "message": "reclaimed_after_restart — official orphan closed on API startup",
+                    "at": now,
+                }
+            ],
+        }
+        await eval_store.upsert_run(payload)
+        reclaimed.append(rid)
+        logger.info("official bench reclaimed orphan run_id=%s", rid)
+    return reclaimed
+
+
 async def create_and_start(
     *,
     targets: list[str],
-    context_dry: bool = True,
-    coding_skip_api: bool = True,
+    context_dry: bool = False,
+    coding_skip_api: bool = False,
+    coding_tier: str = "n25",
+    coding_n_instances: int | None = None,
+    coding_harness: bool = False,
+    retrieval_prod: bool = True,
     force: bool = False,
+    model: dict[str, Any] | None = None,
 ) -> OfficialLiveRun:
     cleaned: list[str] = []
     for t in targets:
@@ -319,11 +529,29 @@ async def create_and_start(
     if not cleaned:
         raise ValueError("empty_targets")
 
+    # Expand UI suite id "coding" → coding_infer (pull is embedded in infer).
+    expanded: list[str] = []
+    for t in cleaned:
+        if t == "coding":
+            if "coding_infer" not in expanded:
+                expanded.append("coding_infer")
+        elif t not in expanded:
+            expanded.append(t)
+    cleaned = expanded
+
+    # Soft skip removed for Ops product path: missing model fails at worker / UI.
     # Only one live official run at a time (disk/network heavy).
     async with _LOCK:
         await reclaim_stale_active_runs()
         for r in _active_runs():
             if force:
+                if r._bench_job_id:
+                    try:
+                        from app.services.ops import bench_client
+
+                        await bench_client.stop_job(r._bench_job_id)
+                    except Exception:  # noqa: BLE001
+                        logger.debug("bench stop on force replace failed", exc_info=True)
                 if r._proc is not None:
                     await _kill_proc(r._proc)
                 await _force_finish_cancelled(r, reason="replaced_by_new_run")
@@ -335,6 +563,11 @@ async def create_and_start(
         targets=cleaned,
         context_dry=context_dry,
         coding_skip_api=coding_skip_api,
+        coding_tier=coding_tier,
+        coding_n_instances=coding_n_instances,
+        coding_harness=coding_harness,
+        retrieval_prod=retrieval_prod,
+        model=model,
         progress_total=len(cleaned),
         cases=[
             {
@@ -358,147 +591,94 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
     if run is None:
         raise ValueError("run_not_found")
     run.cancel_requested = True
+    if run.status in {"queued", "running"}:
+        run.status = "cancelling"
     run.phase_hint = "正在停止…"
     await _publish(run, {"kind": "log", "message": "stop requested…"})
     await _publish(
         run,
         {"kind": "phase", "phase": "stopping", "message": "正在停止…"},
     )
+    await _persist_snapshot(run)
+    if run._bench_job_id:
+        try:
+            from app.services.ops import bench_client
+
+            await bench_client.stop_job(run._bench_job_id)
+        except Exception as exc:  # noqa: BLE001
+            await _publish(run, {"kind": "log", "message": f"bench stop: {exc}"})
     proc = run._proc
     if proc is not None and proc.returncode is None:
         await _kill_proc(proc)
-    # If execute loop is wedged (e.g. blocked before noticing), finish now.
-    if run.status in {"queued", "running"} and (
-        run._proc is None or (run._proc.returncode is not None)
+    # Execute loop may be blocked; force terminal state shortly so refresh isn't stuck.
+    asyncio.create_task(_ensure_stop_completes(run.id))
+    # Local path with no live proc: finish immediately.
+    if (
+        run.status == "cancelling"
+        and not run._bench_job_id
+        and (run._proc is None or run._proc.returncode is not None)
     ):
         await _force_finish_cancelled(run)
     return run
 
 
-async def _execute(run_id: str) -> None:
-    run = _RUNS.get(run_id)
-    if run is None:
-        return
-    run.status = "running"
-    await _publish(run, {"kind": "run_started", "run_id": run.id, "targets": run.targets})
-    await _persist_snapshot(run)
-
-    repo = _repo_root()
-    env = os.environ.copy()
-    env["BENCH_PUBLISH"] = "0"  # we persist via Ops DB ourselves
-    # Never inherit a host absolute BENCH_DATA_DIR — that caused endless re-downloads.
-    env["BENCH_DATA_DIR"] = "/data/ops-official/data"
-    env["BENCH_REPORTS_DIR"] = os.environ.get(
-        "BENCH_REPORTS_DIR", "/data/ops-official/reports"
-    )
-    env.setdefault("BENCH_RETRIEVAL_PROD", "0")
-    env["PYTHONUNBUFFERED"] = "1"
-    env["PYTHONIOENCODING"] = "utf-8"
-    # Parallel per-query search (ThreadPool). Override with BENCH_SEARCH_WORKERS=1 to serialize.
-    if not env.get("BENCH_SEARCH_WORKERS", "").strip():
-        env["BENCH_SEARCH_WORKERS"] = str(min(4, os.cpu_count() or 4))
-    if not env.get("BENCH_SEARCH_POOL", "").strip():
-        env["BENCH_SEARCH_POOL"] = "process"
-    # Allow importing services/runtime for platform hybrid arm
-    runtime = str(repo / "services" / "runtime")
-    scripts = str(repo / "scripts")
-    env["PYTHONPATH"] = (
-        runtime
-        + os.pathsep
-        + scripts
-        + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-    )
-
-    try:
-        for idx, target in enumerate(run.targets):
-            if run.cancel_requested:
-                run.status = "cancelled"
+async def _handle_bench_line(run: OfficialLiveRun, text: str, reports: Path) -> None:
+    if text.startswith("[phase]"):
+        run.current_phase = text.removeprefix("[phase]").strip()
+        run.phase_hint = run.current_phase
+        await _publish(
+            run,
+            {"kind": "phase", "phase": run.current_phase, "message": text},
+        )
+    if text.startswith("[bench] target_start "):
+        target = text.removeprefix("[bench] target_start ").strip()
+        for case in run.cases:
+            if case.get("case_id") == f"official.{target}":
+                case["status"] = "running"
+                case["started_at"] = _utc()
+                await _publish(
+                    run,
+                    {
+                        "kind": "case_started",
+                        "case_id": case["case_id"],
+                        "target": target,
+                    },
+                )
                 break
-            case = run.cases[idx]
-            case["status"] = "running"
-            case["started_at"] = _utc()
-            await _publish(
-                run,
-                {"kind": "case_started", "case_id": case["case_id"], "target": target},
-            )
-            await _persist_snapshot(run)
-
-            cmd = _cmd_for_target(
-                target,
-                context_dry=run.context_dry,
-                coding_skip_api=run.coding_skip_api,
-            )
-            await _publish(run, {"kind": "log", "message": "$ " + " ".join(cmd)})
-            run.current_phase = f"{target}:start"
-            run.phase_hint = {
-                "retrieval": "检索：①拉取 BEIR（已缓存则跳过）→ ②平台 hybrid + BM25 对照 → ③回归",
-                "context": "上下文：①拉取 LongBench（可缓存）→ ②双臂评分（dry=不调模型）",
-                "coding_pull": "编码：拉取 SWE-bench Lite 题集（可缓存）",
-                "coding_infer": "编码：写 predictions（skip API=空补丁打通）",
-                "pull": "仅拉取数据（已有则跳过）",
-            }.get(target, target)
-            await _publish(
-                run,
-                {
-                    "kind": "phase",
-                    "phase": run.current_phase,
-                    "message": run.phase_hint,
-                },
-            )
-
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(repo),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-            )
-            run._proc = proc
-            assert proc.stdout is not None
-            while True:
-                if run.cancel_requested and proc.returncode is None:
-                    await _kill_proc(proc)
-                    break
-                try:
-                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                if not line:
-                    break
-                text = line.decode("utf-8", errors="replace").rstrip()
-                if text:
-                    if text.startswith("[phase]"):
-                        run.current_phase = text.removeprefix("[phase]").strip()
-                        run.phase_hint = run.current_phase
-                        await _publish(
-                            run,
-                            {
-                                "kind": "phase",
-                                "phase": run.current_phase,
-                                "message": text,
-                            },
-                        )
-                    await _publish(run, {"kind": "log", "message": text})
-            if proc.returncode is None:
-                if run.cancel_requested:
-                    await _kill_proc(proc)
-                else:
-                    await proc.wait()
-            rc = proc.returncode if proc.returncode is not None else -1
-            run._proc = None
+        run.current_phase = f"{target}:start"
+        run.phase_hint = {
+            "retrieval": "检索：①拉取 → ②hybrid+BM25 → ③回归（bench worker）",
+            "context": "上下文（bench worker）",
+            "coding_pull": "编码拉取（bench worker）",
+            "coding_infer": "编码推理（bench worker）",
+            "pull": "拉取（bench worker）",
+        }.get(target, target)
+        await _publish(
+            run,
+            {"kind": "phase", "phase": run.current_phase, "message": run.phase_hint},
+        )
+    if text.startswith("[bench] target_end "):
+        # [bench] target_end retrieval status=pass
+        parts = text.split()
+        target = parts[2] if len(parts) > 2 else ""
+        status_token = "fail"
+        for p in parts:
+            if p.startswith("status="):
+                status_token = p.split("=", 1)[1]
+        for idx, case in enumerate(run.cases):
+            if case.get("case_id") != f"official.{target}":
+                continue
             case["finished_at"] = _utc()
-            if run.cancel_requested:
+            if status_token == "pass":
+                case["status"] = "pass"
+                _attach_latest_child_report(run, case, reports)
+            elif status_token == "cancelled":
                 case["status"] = "skipped"
                 case["error"] = "cancelled"
-            elif rc == 0:
-                case["status"] = "pass"
-                _attach_latest_child_report(
-                    run, case, Path(env["BENCH_REPORTS_DIR"])
-                )
             else:
                 case["status"] = "fail"
-                case["error"] = f"exit {rc}"
-            run.progress_done = idx + 1
+                case["error"] = text
+            run.progress_done = max(run.progress_done, idx + 1)
             await _publish(
                 run,
                 {
@@ -509,18 +689,104 @@ async def _execute(run_id: str) -> None:
                     "progress_total": run.progress_total,
                 },
             )
-            await _persist_snapshot(run)
-            if case["status"] == "fail" and not run.cancel_requested:
-                run.error = case.get("error")
-                # continue remaining targets so user still sees partial progress
+            break
+    await _publish(run, {"kind": "log", "message": text})
 
+
+async def _execute_via_bench(run: OfficialLiveRun) -> None:
+    from app.services.ops import bench_client
+
+    reports = Path(
+        os.environ.get("BENCH_REPORTS_DIR", "/data/ops-official/reports")
+    )
+    mode = "ST真向量" if run.retrieval_prod else "hash冒烟"
+    await _publish(
+        run,
+        {
+            "kind": "log",
+            "message": f"[ops] dispatch to bench worker ({mode}) · not agent runtime",
+        },
+    )
+    started = await bench_client.start_job(
+        targets=run.targets,
+        context_dry=run.context_dry,
+        coding_skip_api=run.coding_skip_api,
+        coding_tier=run.coding_tier,
+        coding_n_instances=run.coding_n_instances,
+        coding_harness=run.coding_harness,
+        retrieval_prod=run.retrieval_prod,
+        model=run.model,
+    )
+    run._bench_job_id = str(started.get("id") or "")
+    await _persist_snapshot(run)
+    await _publish(
+        run,
+        {"kind": "log", "message": f"[ops] bench job {run._bench_job_id}"},
+    )
+    async for line in bench_client.stream_job_lines(run._bench_job_id):
         if run.cancel_requested:
-            run.status = "cancelled"
-        elif any(c.get("status") == "fail" for c in run.cases):
-            run.status = "failed"
+            try:
+                await bench_client.stop_job(run._bench_job_id)
+            except Exception:  # noqa: BLE001
+                pass
+            break
+        # Heartbeat from SSE ping (empty) — keep looping so cancel is noticed.
+        if not line:
+            continue
+        if line.startswith("[bench] stream_end"):
+            break
+        await _handle_bench_line(run, line, reports)
+        if len(run.logs) % 20 == 0:
+            await _persist_snapshot(run)
+
+    if run.cancel_requested:
+        run.status = "cancelled"
+        run.phase_hint = "已停止"
+    elif any(c.get("status") == "fail" for c in run.cases):
+        run.status = "failed"
+        run.error = run.error or next(
+            (c.get("error") for c in run.cases if c.get("status") == "fail"),
+            "bench_failed",
+        )
+    elif all(c.get("status") in {"pass", "skipped"} for c in run.cases):
+        run.status = "completed"
+    else:
+        # Mark unfinished as skipped/fail
+        for case in run.cases:
+            if case.get("status") in {"pending", "running"}:
+                case["status"] = "skipped" if run.cancel_requested else "fail"
+                case["error"] = case.get("error") or "incomplete"
+        run.status = "cancelled" if run.cancel_requested else "failed"
+
+
+async def _execute(run_id: str) -> None:
+    run = _RUNS.get(run_id)
+    if run is None:
+        return
+    run.status = "running"
+    await _publish(run, {"kind": "run_started", "run_id": run.id, "targets": run.targets})
+    await _persist_snapshot(run)
+
+    from app.services.ops import bench_client
+
+    reports_dir = os.environ.get("BENCH_REPORTS_DIR", "/data/ops-official/reports")
+    env = {"BENCH_REPORTS_DIR": reports_dir}
+
+    try:
+        if bench_client.bench_enabled():
+            await _execute_via_bench(run)
         else:
+            await _execute_local(run)
+            env = getattr(run, "_last_env", env)
+
+        if run.cancel_requested and run.status != "cancelled":
+            run.status = "cancelled"
+        elif any(c.get("status") == "fail" for c in run.cases) and run.status not in {
+            "cancelled"
+        }:
+            run.status = "failed"
+        elif run.status in {"queued", "running"}:
             run.status = "completed"
-        # Always refresh aggregate HTML (stub if nothing finished)
         try:
             path = official_store.write_ops_aggregate_report(
                 run.id,
@@ -538,7 +804,7 @@ async def _execute(run_id: str) -> None:
         await _publish(run, {"kind": "log", "message": f"error: {exc}"})
     finally:
         run.finished_at = _utc()
-        # Import latest filesystem manifest if present (richer metrics)
+        run._bench_job_id = None
         try:
             latest = Path(env["BENCH_REPORTS_DIR"]) / "latest_run.json"
             if latest.is_file():
@@ -546,7 +812,6 @@ async def _execute(run_id: str) -> None:
                 man_path = Path(meta.get("dir") or "") / "manifest.json"
                 if man_path.is_file():
                     manifest = json.loads(man_path.read_text(encoding="utf-8"))
-                    # Keep this Ops run id as primary; attach child metrics
                     for c in run.cases:
                         if c.get("status") == "pass" and not c.get("metrics"):
                             c["metrics"] = manifest.get("metrics") or {}
@@ -554,7 +819,6 @@ async def _execute(run_id: str) -> None:
             logger.debug("attach latest official manifest skipped", exc_info=True)
 
         await _persist_snapshot(run)
-        # Also ensure FS listing sees /data reports
         await _publish(
             run,
             {
@@ -569,6 +833,157 @@ async def _execute(run_id: str) -> None:
         await _persist_snapshot(run)
 
 
+async def _execute_local(run: OfficialLiveRun) -> None:
+    """Fallback when BENCH_URL is unset (host/dev). Prefer dedicated bench worker in compose."""
+    await _publish(
+        run,
+        {
+            "kind": "log",
+            "message": "[ops] BENCH_URL unset — local subprocess fallback (dev only)",
+        },
+    )
+    repo = _repo_root()
+    env = os.environ.copy()
+    env["BENCH_PUBLISH"] = "0"
+    env["BENCH_DATA_DIR"] = "/data/ops-official/data"
+    env["BENCH_REPORTS_DIR"] = os.environ.get(
+        "BENCH_REPORTS_DIR", "/data/ops-official/reports"
+    )
+    env["BENCH_RETRIEVAL_PROD"] = "1" if run.retrieval_prod else "0"
+    env.setdefault(
+        "BENCH_RETRIEVAL_BACKEND",
+        os.environ.get("BENCH_RETRIEVAL_BACKEND", "json"),
+    )
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    if run.model:
+        if run.model.get("api_key"):
+            env["BENCH_MODEL_API_KEY"] = str(run.model["api_key"])
+        if run.model.get("model_name"):
+            env["BENCH_MODEL_NAME"] = str(run.model["model_name"])
+        if run.model.get("base_url"):
+            env["BENCH_MODEL_BASE_URL"] = str(run.model["base_url"])
+        if run.model.get("provider"):
+            env["BENCH_MODEL_PROVIDER"] = str(run.model["provider"])
+        if run.model.get("api_style"):
+            env["BENCH_MODEL_API_STYLE"] = str(run.model["api_style"])
+        if run.model.get("context_window_tokens"):
+            env["BENCH_MODEL_CONTEXT_WINDOW"] = str(run.model["context_window_tokens"])
+    if not env.get("BENCH_SEARCH_WORKERS", "").strip():
+        env["BENCH_SEARCH_WORKERS"] = str(min(4, os.cpu_count() or 4))
+    if not env.get("BENCH_SEARCH_POOL", "").strip():
+        env["BENCH_SEARCH_POOL"] = "process"
+    runtime = str(repo / "services" / "runtime")
+    scripts = str(repo / "scripts")
+    env["PYTHONPATH"] = (
+        runtime
+        + os.pathsep
+        + scripts
+        + (os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    )
+    run._last_env = env  # type: ignore[attr-defined]
+
+    for idx, target in enumerate(run.targets):
+        if run.cancel_requested:
+            run.status = "cancelled"
+            break
+        case = run.cases[idx]
+        case["status"] = "running"
+        case["started_at"] = _utc()
+        await _publish(
+            run,
+            {"kind": "case_started", "case_id": case["case_id"], "target": target},
+        )
+        await _persist_snapshot(run)
+
+        cmd = _cmd_for_target(
+            target,
+            context_dry=run.context_dry,
+            coding_skip_api=run.coding_skip_api,
+            coding_tier=run.coding_tier,
+            coding_n_instances=run.coding_n_instances,
+            coding_harness=run.coding_harness,
+        )
+        await _publish(run, {"kind": "log", "message": "$ " + " ".join(cmd)})
+        run.current_phase = f"{target}:start"
+        run.phase_hint = {
+            "retrieval": "检索：①拉取 BEIR（已缓存则跳过）→ ②平台 hybrid + BM25 对照 → ③回归",
+            "context": "上下文：①拉取 LongBench（可缓存）→ ②双臂评分（dry=不调模型）",
+            "coding_pull": "编码：拉取 SWE-bench Lite 题集（可缓存）",
+            "coding_infer": "编码：写 predictions（skip API=空补丁打通）",
+            "pull": "仅拉取数据（已有则跳过）",
+        }.get(target, target)
+        await _publish(
+            run,
+            {"kind": "phase", "phase": run.current_phase, "message": run.phase_hint},
+        )
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(repo),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        run._proc = proc
+        assert proc.stdout is not None
+        while True:
+            if run.cancel_requested and proc.returncode is None:
+                await _kill_proc(proc)
+                break
+            try:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            if not line:
+                break
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                if text.startswith("[phase]"):
+                    run.current_phase = text.removeprefix("[phase]").strip()
+                    run.phase_hint = run.current_phase
+                    await _publish(
+                        run,
+                        {
+                            "kind": "phase",
+                            "phase": run.current_phase,
+                            "message": text,
+                        },
+                    )
+                await _publish(run, {"kind": "log", "message": text})
+        if proc.returncode is None:
+            if run.cancel_requested:
+                await _kill_proc(proc)
+            else:
+                await proc.wait()
+        rc = proc.returncode if proc.returncode is not None else -1
+        run._proc = None
+        case["finished_at"] = _utc()
+        if run.cancel_requested:
+            case["status"] = "skipped"
+            case["error"] = "cancelled"
+        elif rc == 0:
+            case["status"] = "pass"
+            _attach_latest_child_report(run, case, Path(env["BENCH_REPORTS_DIR"]))
+        else:
+            case["status"] = "fail"
+            case["error"] = f"exit {rc}"
+        run.progress_done = idx + 1
+        await _publish(
+            run,
+            {
+                "kind": "case_finished",
+                "case_id": case["case_id"],
+                "status": case["status"],
+                "progress_done": run.progress_done,
+                "progress_total": run.progress_total,
+            },
+        )
+        await _persist_snapshot(run)
+        if case["status"] == "fail" and not run.cancel_requested:
+            run.error = case.get("error")
+
+
 def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
     return {
         "id": run.id,
@@ -580,6 +995,11 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "targets": run.targets,
         "context_dry": run.context_dry,
         "coding_skip_api": run.coding_skip_api,
+        "coding_tier": run.coding_tier,
+        "coding_n_instances": run.coding_n_instances,
+        "coding_harness": run.coding_harness,
+        "retrieval_prod": run.retrieval_prod,
+        "model": _model_meta_safe(run.model),
         "created_at": run.created_at,
         "finished_at": run.finished_at,
         "error": run.error,
@@ -609,6 +1029,22 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
             "official_suite": "+".join(run.targets),
             "title": f"Bench · {'+'.join(run.targets)}",
             "phase_hint": run.phase_hint,
+            "retrieval_prod": run.retrieval_prod,
+            "context_dry": run.context_dry,
+            "coding_skip_api": run.coding_skip_api,
+            "coding_tier": run.coding_tier,
+            "coding_n_instances": run.coding_n_instances,
+            "coding_harness": run.coding_harness,
+            "bench_job_id": run._bench_job_id,
+            "model": _model_meta_safe(run.model),
+            "reclaimed": bool(
+                run.error
+                and (
+                    "reclaimed" in str(run.error)
+                    or str(run.error)
+                    in {"orphaned_after_api_restart", "reclaimed_after_restart"}
+                )
+            ),
         },
         "reports_root": str(official_store.reports_root()),
     }

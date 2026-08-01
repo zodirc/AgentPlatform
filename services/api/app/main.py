@@ -88,10 +88,17 @@ async def lifespan(app: FastAPI):
         logger.info("reconciled %s lagging projection(s) on startup", lagging)
     if (settings.ops_test_secret or "").strip():
         from app.services.ops.runs import reconcile_orphaned_runs
+        from app.services.ops import official_runner
 
         orphaned = await reconcile_orphaned_runs()
         if orphaned:
             logger.info("reconciled %s orphaned ops eval run(s) on startup", orphaned)
+        official_orphans = await official_runner.reclaim_official_orphans_from_db()
+        if official_orphans:
+            logger.info(
+                "reclaimed %s orphaned official bench run(s) on startup",
+                len(official_orphans),
+            )
     listener = TurnEventListener()
     await listener.start()
     app.state.event_listener = listener

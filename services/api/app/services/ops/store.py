@@ -184,6 +184,65 @@ async def delete_runs(*, suite: str | None = None) -> int:
         return 0
 
 
+async def delete_runs_by_ids(
+    ids: list[str],
+    *,
+    suite: str | None = None,
+) -> int:
+    """Delete specific run ids (optionally constrained to suite)."""
+    cleaned = [str(i).strip() for i in ids if str(i).strip()]
+    if not cleaned:
+        return 0
+    pool = await get_pool()
+    if suite:
+        result = await pool.execute(
+            """
+            DELETE FROM ops_eval_runs
+            WHERE id = ANY($1::uuid[])
+              AND COALESCE(model_meta->>'suite', 'golden') = $2
+            """,
+            cleaned,
+            suite.strip().lower(),
+        )
+    else:
+        result = await pool.execute(
+            "DELETE FROM ops_eval_runs WHERE id = ANY($1::uuid[])",
+            cleaned,
+        )
+    try:
+        return int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
+async def delete_runs_before(
+    before_iso: str,
+    *,
+    suite: str | None = None,
+) -> int:
+    """Delete runs with created_at strictly before ``before_iso`` (timestamptz)."""
+    pool = await get_pool()
+    if suite:
+        result = await pool.execute(
+            """
+            DELETE FROM ops_eval_runs
+            WHERE created_at < $1::timestamptz
+              AND COALESCE(model_meta->>'suite', 'golden') = $2
+            """,
+            before_iso,
+            suite.strip().lower(),
+        )
+    else:
+        result = await pool.execute(
+            "DELETE FROM ops_eval_runs WHERE created_at < $1::timestamptz",
+            before_iso,
+        )
+    try:
+        return int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        return 0
+
+
 def _as_obj(value: Any) -> Any:
     if isinstance(value, str):
         try:
