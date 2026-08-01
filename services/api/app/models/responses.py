@@ -68,6 +68,8 @@ class TurnSummary(BaseModel):
     user_input: str | None = None
     latest_output: str | None = None
     created_at: datetime
+    # Latest plan artifact from turn_views (for chat-stream multi-plan history).
+    plan: dict[str, Any] | None = None
 
 
 class TurnView(BaseModel):

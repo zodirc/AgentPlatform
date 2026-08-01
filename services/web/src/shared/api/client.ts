@@ -278,6 +278,8 @@ export type TurnSummary = {
   user_input: string | null;
   latest_output: string | null;
   created_at: string;
+  /** Latest plan artifact from turn_views (optional; chat multi-plan history). */
+  plan?: Record<string, unknown> | null;
 };
 
 export async function fetchSessionTurns(

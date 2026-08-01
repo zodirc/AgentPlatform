@@ -2,7 +2,6 @@ import { RetrievalView } from "./RetrievalView";
 import { ArtifactView } from "./ArtifactView";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import { artifactToWritePreview } from "../../shared/workbench/filePreview";
-import { PlanPanel } from "../../shared/workbench/PlanPanel";
 import type { WorkbenchState } from "../../shared/workbench/types";
 
 type Props = {
@@ -44,14 +43,7 @@ export function AgentPanels({ wb }: Props) {
           ))}
         </section>
       ) : null}
-      <PlanPanel
-        plan={wb.plan}
-        turnStatus={wb.displayStatus}
-        planPhase={wb.planPhase}
-        showExecute={wb.canExecutePlan}
-        executeDisabled={wb.busy || wb.actionBusy}
-        onExecute={() => void wb.handleExecutePlan()}
-      />
+      {/* Plan is rendered in AgentChatPanel scrollback (multi-plan history). */}
       <RetrievalView artifacts={view?.artifacts ?? []} />
       <ArtifactView artifacts={view?.artifacts ?? []} />
     </>

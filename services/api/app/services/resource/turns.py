@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from typing import Any
 from uuid import UUID, uuid4
 
 from app.db.pool import get_pool
@@ -147,12 +149,23 @@ async def get_turn(turn_id: UUID) -> dict | None:
     return dict(row) if row else None
 
 
+def _latest_plan_from_artifacts(artifacts: Any) -> dict | None:
+    """Return the last plan artifact (projection keeps latest; tolerate legacy append)."""
+    if not isinstance(artifacts, list):
+        return None
+    found: dict | None = None
+    for art in artifacts:
+        if isinstance(art, dict) and art.get("type") == "plan":
+            found = art
+    return found
+
+
 async def list_turns_for_session(session_id: UUID) -> list[dict]:
     pool = await get_pool()
     rows = await pool.fetch(
         """
         SELECT t.id, t.session_id, t.scenario_id, t.status, t.user_input, t.created_at,
-               tv.latest_output
+               tv.latest_output, tv.artifacts
         FROM turns t
         LEFT JOIN turn_views tv ON tv.turn_id = t.id
         WHERE t.session_id = $1
@@ -160,7 +173,19 @@ async def list_turns_for_session(session_id: UUID) -> list[dict]:
         """,
         session_id,
     )
-    return [dict(row) for row in rows]
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        artifacts = item.pop("artifacts", None)
+        # asyncpg may return JSON as str depending on codec — normalize lightly.
+        if isinstance(artifacts, str):
+            try:
+                artifacts = json.loads(artifacts)
+            except json.JSONDecodeError:
+                artifacts = None
+        item["plan"] = _latest_plan_from_artifacts(artifacts)
+        out.append(item)
+    return out
 
 
 async def get_run_for_turn(turn_id: UUID) -> dict | None:

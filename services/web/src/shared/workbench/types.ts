@@ -67,6 +67,8 @@ export type TurnHistoryItem = {
   user_input: string;
   latest_output: string | null;
   created_at: string;
+  /** Per-turn plan snapshot for chat-stream history (docs/25 UI). */
+  plan?: PlanArtifact | null;
 };
 
 export type WorkbenchState = {

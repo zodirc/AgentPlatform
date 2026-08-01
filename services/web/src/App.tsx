@@ -7,6 +7,10 @@ import { ErrorBoundary } from "./shared/ErrorBoundary";
 import { useEndUserAuth } from "./shared/auth/EndUserAuth";
 import { LoginPage } from "./shared/auth/LoginPage";
 import { pathWithSession } from "./shared/workbench/sessionUrl";
+import {
+  readSettingsReturn,
+  rememberSettingsReturn,
+} from "./shared/workbench/settingsReturn";
 import { SessionHistoryDrawer } from "./shared/workbench/SessionHistoryDrawer";
 import { UnifiedWorkbench } from "./shared/workbench/UnifiedWorkbench";
 import {
@@ -101,6 +105,7 @@ function isOpsOfficialPath(pathname: string): boolean {
 
 function AccountMenu() {
   const { user, logout, switchAccount } = useEndUserAuth();
+  const { pathname, search } = useLocation();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -143,7 +148,12 @@ function AccountMenu() {
             to="/settings"
             role="menuitem"
             className="block px-3 py-1.5 text-xs text-foreground hover:bg-muted"
-            onClick={() => setOpen(false)}
+            onClick={() => {
+              if (!pathname.startsWith("/settings")) {
+                rememberSettingsReturn(`${pathname}${search}`);
+              }
+              setOpen(false);
+            }}
           >
             账户设置
           </Link>
@@ -176,7 +186,7 @@ function AccountMenu() {
 }
 
 function Nav() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const scenario = scenarioMetaFromPath(pathname);
   useSiteBrand(
     pathname.startsWith("/settings")
@@ -200,14 +210,18 @@ function Nav() {
 
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/");
+  const workbenchHome = settingsActive
+    ? readSettingsReturn(pathWithSession("/writing", sessionId))
+    : pathWithSession("/writing", sessionId);
 
   return (
     <>
       <nav className="flex flex-wrap items-center gap-2 border-b border-border bg-background/80 px-6 py-3">
         <Link
-          to="/writing"
+          to={workbenchHome}
           className="mr-2 flex items-center gap-2.5 font-semibold tracking-tight text-foreground hover:opacity-90"
           aria-label={SITE_APP.name}
+          title={settingsActive ? "返回工作台" : SITE_APP.name}
         >
           <SiteBrandMark site={SITE_APP} className="h-7 w-7 rounded-md" />
           <span className="text-base">{SITE_APP.name}</span>
@@ -219,6 +233,11 @@ function Nav() {
               ? "bg-muted text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
+          onClick={() => {
+            if (!settingsActive) {
+              rememberSettingsReturn(`${pathname}${search}`);
+            }
+          }}
         >
           设置
         </Link>

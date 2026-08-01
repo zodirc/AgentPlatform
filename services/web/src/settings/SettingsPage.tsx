@@ -15,6 +15,7 @@ import {
   type UxSignalsReport,
 } from "../shared/api/client";
 import { useEndUserAuth } from "../shared/auth/EndUserAuth";
+import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import type { ThemeId } from "../shared/theme/theme";
 
@@ -656,6 +657,7 @@ export function SettingsPage() {
   const qc = useQueryClient();
   const { pathname } = useLocation();
   const tab = tabFromPath(pathname);
+  const returnTo = readSettingsReturn("/writing");
   const [loginRequired, setLoginRequired] = useState(false);
   const {
     data: providers = [],
@@ -827,10 +829,20 @@ export function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-4xl p-6">
-      <h1 className="text-2xl font-semibold">设置</h1>
-      <p className="mt-1 text-sm text-muted-foreground">
-        个人账户、外观与模型供应商。主题与本机会话偏好按账号隔离。
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold">设置</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            个人账户、外观与模型供应商。主题与本机会话偏好按账号隔离。
+          </p>
+        </div>
+        <Link
+          to={returnTo}
+          className="shrink-0 rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground hover:bg-muted"
+        >
+          返回工作台
+        </Link>
+      </div>
 
       <nav className="mt-6 flex flex-wrap gap-2 border-b border-border pb-3">
         {(
@@ -852,6 +864,7 @@ export function SettingsPage() {
           <Link
             key={item.id}
             to={item.to}
+            replace
             className={`rounded-lg px-3 py-1.5 text-sm ${
               tab === item.id
                 ? "bg-muted text-foreground"

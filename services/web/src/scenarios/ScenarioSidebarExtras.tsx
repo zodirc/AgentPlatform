@@ -111,5 +111,8 @@ export function ScenarioSidebarExtras({
     );
   }
 
+  // agent: Plan lives in AgentChatPanel scrollback (avoid duplicate side panel).
+  if (id === "agent") return null;
+
   return <div className="space-y-3">{planBlock}</div>;
 }

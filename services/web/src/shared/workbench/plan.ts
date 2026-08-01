@@ -134,6 +134,30 @@ export function planFromEventPayload(
   };
 }
 
+/** Normalize a plan dict from TurnSummary / TurnView artifacts. */
+export function normalizePlanArtifact(
+  raw: Record<string, unknown> | PlanArtifact | null | undefined,
+): PlanArtifact | null {
+  if (!raw || typeof raw !== "object") return null;
+  const items = normalizePlanItems(
+    (raw as PlanArtifact).items as
+      | Array<{ id?: string; title?: string; status?: string }>
+      | undefined,
+  );
+  if (!items.length && (raw as PlanArtifact).type !== "plan") return null;
+  if (!items.length) return null;
+  return {
+    type: "plan",
+    plan_id: (raw as PlanArtifact).plan_id
+      ? String((raw as PlanArtifact).plan_id)
+      : undefined,
+    summary: (raw as PlanArtifact).summary
+      ? String((raw as PlanArtifact).summary)
+      : undefined,
+    items,
+  };
+}
+
 export function currentPlanStep(plan: PlanArtifact | null): PlanItem | null {
   if (!plan?.items?.length) return null;
   return (

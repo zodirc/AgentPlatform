@@ -8,6 +8,7 @@ import {
   isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
   livePlanStep,
+  normalizePlanArtifact,
   normalizePlanStatus,
   planHasOpenItems,
   planHasStaleInProgress,
@@ -45,6 +46,19 @@ describe("plan helpers", () => {
     expect(currentPlanStep(plan)?.title).toBe("B");
     expect(planHasOpenItems(plan)).toBe(true);
     expect(planIsProposedOnly(plan)).toBe(false);
+  });
+
+  it("normalizes TurnSummary plan payloads", () => {
+    const plan = normalizePlanArtifact({
+      type: "plan",
+      plan_id: "p1",
+      summary: "do things",
+      items: [{ id: "1", title: "A", status: "todo" }],
+    });
+    expect(plan?.plan_id).toBe("p1");
+    expect(plan?.items?.[0]?.status).toBe("pending");
+    expect(normalizePlanArtifact(null)).toBeNull();
+    expect(normalizePlanArtifact({ type: "plan", items: [] })).toBeNull();
   });
 
   it("treats all-pending plans as proposed-only", () => {

@@ -469,6 +469,8 @@ export function AgentChatPanel({
     wb.awaitingApproval,
     wb.historyLoading,
     wb.plan?.items?.length,
+    wb.plan?.items?.map((i) => `${i.id}:${i.status}`).join("|"),
+    wb.canExecutePlan,
     activeTab,
     activeSub?.streamText,
     activeSub?.thinkingText,
@@ -529,21 +531,62 @@ export function AgentChatPanel({
               const liveOpen = Boolean(
                 isLive && wb.busy && !wb.stopping && !output,
               );
+              // Live turn prefers streaming plan; settled turns keep their snapshot.
+              const turnPlan = isLive ? (wb.plan ?? turn.plan) : turn.plan;
+              const turnPlanPhase = isLive ? wb.planPhase : "off";
+              const turnStatus = isLive ? wb.displayStatus : turn.status;
+              const hasAssistantBody = Boolean(
+                turnPlan?.items?.length ||
+                  thinking ||
+                  output ||
+                  (isLive && wb.busy),
+              );
               return (
                 <div key={turn.id} className="mb-4 space-y-2">
                   <UserBubble text={turn.user_input} />
-                  <ThinkingBlock
-                    text={thinking}
-                    live={liveOpen}
-                    open={liveOpen}
-                  />
-                  {output ? (
-                    <AssistantBubble
-                      text={output}
-                      streaming={Boolean(isLive && wb.busy)}
-                    />
-                  ) : isLive && wb.busy && !thinking ? (
-                    <p className="text-xs text-muted-foreground">思考中…</p>
+                  {hasAssistantBody ? (
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-muted-foreground">
+                        助手
+                      </p>
+                      <div className="space-y-2">
+                        {turnPlan?.items?.length ? (
+                          <PlanPanel
+                            plan={turnPlan}
+                            turnStatus={turnStatus}
+                            planPhase={turnPlanPhase}
+                            showExecute={Boolean(isLive && wb.canExecutePlan)}
+                            executeDisabled={wb.busy || wb.actionBusy}
+                            onExecute={
+                              isLive
+                                ? () => void wb.handleExecutePlan()
+                                : undefined
+                            }
+                            variant="chat"
+                          />
+                        ) : null}
+                        <ThinkingBlock
+                          text={thinking}
+                          live={liveOpen}
+                          open={liveOpen}
+                        />
+                        {output ? (
+                          <div
+                            aria-live="polite"
+                            className="rounded-lg bg-card/60 px-3 py-2"
+                          >
+                            <Markdown
+                              text={output}
+                              streaming={Boolean(isLive && wb.busy)}
+                            />
+                          </div>
+                        ) : isLive && wb.busy && !thinking ? (
+                          <p className="px-1 text-xs text-muted-foreground">
+                            思考中…
+                          </p>
+                        ) : null}
+                      </div>
+                    </div>
                   ) : null}
                 </div>
               );
@@ -551,11 +594,6 @@ export function AgentChatPanel({
             {!wb.historyLoading && wb.turnHistory.length === 0 ? (
               <p className="text-xs text-muted-foreground/80">
                 发送消息开始任务…
-              </p>
-            ) : null}
-            {(wb.view || wb.busy) && wb.turnId && currentStep ? (
-              <p className="mt-3 text-xs text-muted-foreground/80">
-                计划：{currentStep.title}
               </p>
             ) : null}
           </>
@@ -614,16 +652,17 @@ export function AgentChatPanel({
 
       {onMain ? (
         <div className="shrink-0 space-y-2 border-t border-border p-4">
-          {wb.plan?.items?.length ? (
-            <PlanPanel
-              plan={wb.plan}
-              turnStatus={wb.displayStatus}
-              planPhase={wb.planPhase}
-              showExecute={wb.canExecutePlan}
-              executeDisabled={wb.busy || wb.actionBusy}
-              onExecute={() => void wb.handleExecutePlan()}
-              compact
-            />
+          {/* Plan lives in the scrollback; keep only a thin consent / live-step strip. */}
+          {wb.canExecutePlan ? (
+            <p className="truncate text-[11px] font-medium text-amber-800 dark:text-amber-200">
+              计划待确认
+              {wb.plan?.items?.length ? ` · ${wb.plan.items.length} 项` : ""}
+              · 在上方清单点「按此执行」
+            </p>
+          ) : currentStep && wb.busy ? (
+            <p className="truncate text-[11px] text-sky-800/90 dark:text-sky-200/90">
+              计划进行中 · {currentStep.title}
+            </p>
           ) : null}
           {wb.showPlanSuggest ? (
             <div className="flex items-start justify-between gap-2 rounded-md border border-warning/40 bg-warning-muted px-3 py-2 text-[11px] text-warning">

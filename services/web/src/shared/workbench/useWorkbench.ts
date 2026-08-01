@@ -37,6 +37,7 @@ import {
   executePlanMessage,
   isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
+  normalizePlanArtifact,
   planFromEventPayload,
   planIsProposedOnly,
   planSuggestPrimaryReason,
@@ -99,6 +100,7 @@ function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
     user_input: turn.user_input ?? "",
     latest_output: turn.latest_output,
     created_at: turn.created_at,
+    plan: normalizePlanArtifact(turn.plan ?? null),
   };
 }
 
@@ -109,7 +111,13 @@ function upsertHistoryItem(
   const idx = items.findIndex((row) => row.id === item.id);
   if (idx < 0) return [...items, item];
   const next = [...items];
-  next[idx] = { ...next[idx], ...item };
+  const prev = next[idx];
+  next[idx] = {
+    ...prev,
+    ...item,
+    // Avoid clobbering a live plan with an older partial merge that omitted plan.
+    plan: item.plan !== undefined ? item.plan : prev.plan,
+  };
   return next;
 }
 
@@ -121,7 +129,18 @@ function historyItemFromView(v: TurnView): TurnHistoryItem {
     user_input: v.user_input,
     latest_output: v.latest_output ?? null,
     created_at: v.updated_at,
+    plan: latestPlanFromArtifacts(
+      v.artifacts as Record<string, unknown>[] | undefined,
+    ),
   };
+}
+
+function patchHistoryPlan(
+  items: TurnHistoryItem[],
+  turnId: string,
+  plan: PlanArtifact | null,
+): TurnHistoryItem[] {
+  return items.map((row) => (row.id === turnId ? { ...row, plan } : row));
 }
 
 export function useWorkbenchImpl(): WorkbenchState {
@@ -615,6 +634,7 @@ export function useWorkbenchImpl(): WorkbenchState {
               ev.payload as Record<string, unknown>,
             );
             setLivePlan(nextPlan);
+            setTurnHistory((prev) => patchHistoryPlan(prev, id, nextPlan));
             if (planIsProposedOnly(nextPlan) && planWrapSentRef.current) {
               setPlanAwaitingConfirm(true);
             } else if (!planIsProposedOnly(nextPlan)) {
@@ -712,7 +732,10 @@ export function useWorkbenchImpl(): WorkbenchState {
             const closedPlan = latestPlanFromArtifacts(
               v.artifacts as Record<string, unknown>[] | undefined,
             );
-            if (closedPlan) setLivePlan(closedPlan);
+            if (closedPlan) {
+              setLivePlan(closedPlan);
+              setTurnHistory((prev) => patchHistoryPlan(prev, id, closedPlan));
+            }
             setLiveToolTimeline([]);
             await buildDraftDiffPreviewIfNeeded();
           } catch (err) {
@@ -771,7 +794,10 @@ export function useWorkbenchImpl(): WorkbenchState {
         const viewPlan = latestPlanFromArtifacts(
           v.artifacts as Record<string, unknown>[] | undefined,
         );
-        if (viewPlan) setLivePlan(viewPlan);
+        if (viewPlan) {
+          setLivePlan(viewPlan);
+          setTurnHistory((prev) => patchHistoryPlan(prev, last.id, viewPlan));
+        }
         setPlanAwaitingConfirm(false);
         planWrapSentRef.current = false;
 
