@@ -9,7 +9,7 @@ x-logging: &default-logging
 
 services:
   postgres:
-    # pgvector image is the default retrieval backend (RETRIEVAL_BACKEND=pgvector).
+    # Product agent DB + default retrieval (RETRIEVAL_BACKEND=pgvector).
     # JSON file index remains a fallback when the extension/probe fails.
     image: pgvector/pgvector:pg16
     container_name: agent-postgres
@@ -25,6 +25,31 @@ services:
       - ./init/pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Ops Bench only — isolated pgvector so official eval never shares CPU/IO/locks
+  # with the product agent database (docs: mature control-plane vs data-plane).
+  bench-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: agent-bench-postgres
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 1g
+    environment:
+      POSTGRES_USER: ${BENCH_POSTGRES_USER:-bench}
+      POSTGRES_PASSWORD: ${BENCH_POSTGRES_PASSWORD:-bench}
+      POSTGRES_DB: ${BENCH_POSTGRES_DB:-bench}
+    volumes:
+      - bench_pg_data:/var/lib/postgresql/data
+      - ./init/pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${BENCH_POSTGRES_USER:-bench} -d ${BENCH_POSTGRES_DB:-bench}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -136,6 +161,7 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       RUNTIME_URL: http://runtime:8001
       RUNTIME_URL_MAP: ${RUNTIME_URL_MAP:-}
+      BENCH_URL: ${BENCH_URL:-http://bench:8002}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:-}
@@ -174,16 +200,68 @@ services:
       - ..:/repo:ro,z
       # Share host official-bench cache with Ops (skip re-download when already pulled).
       - ${HOST_BENCH_DATA_DIR:-../eval/official/.local-data}:/data/ops-official/data:rw,z
+      - ${HOST_BENCH_REPORTS_DIR:-../eval/reports/official}:/data/ops-official/reports:rw,z
     depends_on:
       postgres:
         condition: service_healthy
       runtime:
+        condition: service_healthy
+      bench:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/ready"]
       interval: 10s
       timeout: 5s
       start_period: 45s
+      retries: 5
+
+  # Ops Bench worker: official suites with ST + dedicated bench-postgres (pgvector).
+  # Not the agent Turn path — keeps eval decoupled from runtime product DB.
+  bench:
+    image: agent-platform-bench:latest
+    build:
+      context: ..
+      dockerfile: services/bench/Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+    container_name: agent-bench
+    restart: unless-stopped
+    logging: *default-logging
+    mem_limit: 4g
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      BENCH_DATA_DIR: /data/ops-official/data
+      BENCH_REPORTS_DIR: /data/ops-official/reports
+      # Dedicated DB — never the product agent-postgres.
+      DATABASE_URL: ${BENCH_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
+      BENCH_DATABASE_URL: ${BENCH_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
+      # Default = product-like ANN; set BENCH_RETRIEVAL_BACKEND=json for file-index smoke.
+      BENCH_RETRIEVAL_BACKEND: ${BENCH_RETRIEVAL_BACKEND:-pgvector}
+      BENCH_RETRIEVAL_PG_SCHEMA: ${BENCH_RETRIEVAL_PG_SCHEMA:-retrieval_bench}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      EMBEDDING_MODEL_DIR: /app/models-baked
+      HF_HOME: /data/models
+      # MiniLM weights come from baked models-baked; allow Hub for LongBench/SWE pulls.
+      TRANSFORMERS_OFFLINE: ${BENCH_TRANSFORMERS_OFFLINE:-1}
+      HF_HUB_OFFLINE: ${BENCH_HF_HUB_OFFLINE:-0}
+    volumes:
+      - agent_data:/data
+      - ..:/repo:ro,z
+      - ${HOST_BENCH_DATA_DIR:-../eval/official/.local-data}:/data/ops-official/data:rw,z
+      - ${HOST_BENCH_REPORTS_DIR:-../eval/reports/official}:/data/ops-official/reports:rw,z
+    depends_on:
+      bench-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8002/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
       retries: 5
 
   web:
@@ -228,5 +306,6 @@ services:
 
 volumes:
   pg_data:
+  bench_pg_data:
   agent_data:
   caddy_data:

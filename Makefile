@@ -31,7 +31,7 @@ WEB_REBUILD_DEPS ?= 0
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	ensure-ops-secret fix-workspace-sources \
-	up-web up-api up-runtime up-ops-eval restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-bench up-ops-eval restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
@@ -50,6 +50,7 @@ help: ## 显示常用命令
 	@echo "  make up-web       只重建 web（WEB_REBUILD_DEPS=1 强制 pnpm 重装）"
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
 	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
+	@echo "  make up-bench     只重建 Ops Bench worker（真向量评测，与 agent 解耦）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
@@ -153,6 +154,16 @@ up-runtime: ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 S
 	  $(COMPOSE) build --no-cache runtime; \
 	fi
 	$(COMPOSE) up -d --no-deps --build runtime
+	$(docker_auto_prune)
+
+up-bench: ensure-ops-secret ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
+	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
+	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench"; \
+	  $(COMPOSE) build --no-cache bench; \
+	fi
+	@echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"
+	$(COMPOSE) up -d bench-postgres
+	$(COMPOSE) up -d --build bench
 	$(docker_auto_prune)
 
 restart-web: ## 重启 web（不 rebuild）
@@ -481,7 +492,9 @@ OFFICIAL_BENCH_PY ?= python3
 CONTEXT_DRY ?= 0
 OFFICIAL_SWE_SKIP_API ?= 0
 OFFICIAL_CONTEXT_LIMIT ?= 0
-OFFICIAL_SWE_LIMIT ?= 0
+OFFICIAL_SWE_TIER ?= n25
+OFFICIAL_SWE_N ?=
+OFFICIAL_SWE_HARNESS ?= 0
 
 official-bench-paths: ## 打印官方评测数据/报告目录
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py paths
@@ -502,11 +515,11 @@ official-bench-context: ## 官方 LongBench 小量双臂（CONTEXT_DRY=1 仅流�
 official-bench-coding-pull: ## 拉取 SWE-bench Lite 题集
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase pull
 
-official-bench-coding-infer: ## 平台推理写 predictions.jsonl（OFFICIAL_SWE_SKIP_API=1 空补丁）
+official-bench-coding-infer: ## SWE tier 推理写 predictions（OFFICIAL_SWE_SKIP_API=1 空补丁）
 	@if [ "$(OFFICIAL_SWE_SKIP_API)" = "1" ]; then \
-	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --skip-api --limit $(OFFICIAL_SWE_LIMIT); \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --tier $(OFFICIAL_SWE_TIER) $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),) $(if $(filter 1,$(OFFICIAL_SWE_HARNESS)),--harness,) --skip-api; \
 	else \
-	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --limit $(OFFICIAL_SWE_LIMIT); \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --tier $(OFFICIAL_SWE_TIER) $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),) $(if $(filter 1,$(OFFICIAL_SWE_HARNESS)),--harness,); \
 	fi
 
 official-bench-coding-eval: ## 官方 swebench.harness 评分（需 Docker + pip install swebench）
