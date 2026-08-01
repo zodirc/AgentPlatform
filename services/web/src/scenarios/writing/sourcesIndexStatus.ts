@@ -77,10 +77,14 @@ export function formatIngestionProgress(
     parts.push(`文件 ${progress.files_done}${total}`);
   }
   if (progress.rate_chunks_per_s != null && progress.rate_chunks_per_s > 0) {
-    parts.push(`${progress.rate_chunks_per_s}/s`);
+    // Hash/smoke backends can report absurd instantaneous rates; hide junk.
+    const rate = Number(progress.rate_chunks_per_s);
+    if (Number.isFinite(rate) && rate > 0 && rate <= 200) {
+      parts.push(`${rate.toFixed(rate >= 10 ? 0 : 1)}/s`);
+    }
   }
   const eta = formatEta(progress.eta_s);
-  if (eta) parts.push(`剩余 ${eta}`);
+  if (eta && (progress.eta_s ?? 0) > 0.5) parts.push(`剩余 ${eta}`);
   return parts.length ? parts.join(" · ") : null;
 }
 

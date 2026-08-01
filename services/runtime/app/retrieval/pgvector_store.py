@@ -451,6 +451,8 @@ class PgvectorSourceRetrievalStore:
                         skipped=skipped,
                         elapsed_s=round(time.monotonic() - sync_t0, 1),
                         embedding_backend=settings.embedding_backend,
+                        rate_chunks_per_s=None,
+                        eta_s=None,
                     )
                 except Exception:
                     pass

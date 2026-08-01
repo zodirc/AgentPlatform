@@ -81,8 +81,8 @@ def test_search_vector_batched_matches_loop(tmp_path: Path, monkeypatch: pytest.
 
     query = "unique-aaa"
     batched = index.search_vector(query, limit=3)
-    # Force legacy path
-    monkeypatch.setattr("app.retrieval.vector_index.np", None)
+    # Force legacy Python loop even when numpy is installed.
+    monkeypatch.setattr("app.retrieval.vector_index.np", None, raising=False)
     index._invalidate_vector_matrix()
     looped = index.search_vector(query, limit=3)
 

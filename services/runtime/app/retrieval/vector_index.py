@@ -293,6 +293,8 @@ class SourceVectorIndex:
                 chunks_total=dirty_chunks,
                 skipped=skipped,
                 elapsed_s=round(time.monotonic() - sync_t0, 1),
+                rate_chunks_per_s=None,
+                eta_s=None,
             )
         except Exception:
             pass

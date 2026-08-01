@@ -73,7 +73,10 @@ def report_sync_progress(
     force: bool = False,
     **fields: Any,
 ) -> dict[str, Any]:
-    """Merge fields into the shared progress snapshot and optionally notify sink."""
+    """Merge fields into the shared progress snapshot and optionally notify sink.
+
+    Explicit ``None`` clears a key (needed so plan/start do not keep a stale rate).
+    """
     global _last_write_mono
     now = time.time()
     mono = time.monotonic()
@@ -81,7 +84,9 @@ def report_sync_progress(
         prev = read_sync_progress() or {}
         payload = dict(prev)
         for key, value in fields.items():
-            if value is not None:
+            if value is None:
+                payload.pop(key, None)
+            else:
                 payload[key] = value
         payload["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now))
         payload.setdefault("plane", "ingestion")
@@ -100,6 +105,8 @@ def report_sync_progress(
             ):
                 remaining = max(0, int(chunks_total) - int(chunks_done))
                 payload["eta_s"] = round(remaining / float(rate), 1)
+            elif "rate_chunks_per_s" in fields and fields.get("rate_chunks_per_s") is None:
+                payload.pop("eta_s", None)
         except (TypeError, ValueError):
             pass
 

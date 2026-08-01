@@ -29,6 +29,19 @@ def test_report_sync_progress_writes_file_and_eta(tmp_path: Path, monkeypatch) -
     assert loaded["chunks_embedded"] == 100
     assert seen and seen[-1]["phase"] == "embed"
 
+    # Plan/start must wipe absurd leftover rates from prior hash micro-batches.
+    cleared = sp.report_sync_progress(
+        force=True,
+        status="building",
+        phase="plan",
+        chunks_embedded=0,
+        chunks_total=4,
+        rate_chunks_per_s=None,
+        eta_s=None,
+    )
+    assert "rate_chunks_per_s" not in cleared
+    assert "eta_s" not in cleared
+
     sp.mark_sync_finished(
         {"indexed_files": 3, "chunks": 1000, "elapsed_s": 12.5},
         reason="test",
