@@ -71,10 +71,14 @@ async def test_assemble_injects_project_and_runtime(
     messages = engine.assemble(system_prompt="sys", state=state, tools=[])
     assert messages[0]["role"] == "system"
     system_text = messages[0]["content"][0]["text"]
-    assert "[project_context]" in system_text
-    assert "outline.md" in system_text
+    assert system_text == "sys"
+    assert "[project_context]" not in system_text
     assert messages[1]["role"] == "user"
-    assert messages[1]["content"][0]["text"].startswith("[runtime_context]")
+    project_text = messages[1]["content"][0]["text"]
+    assert project_text.startswith("[project_context]")
+    assert "outline.md" in project_text
+    assert messages[2]["role"] == "user"
+    assert messages[2]["content"][0]["text"].startswith("[runtime_context]")
     assert engine.last_assemble_ms >= 0
     assert "assemble_ms" in engine.last_budget_report
     clear_project_context_cache()

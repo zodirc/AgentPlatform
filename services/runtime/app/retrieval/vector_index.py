@@ -15,8 +15,12 @@ from app.settings import settings
 
 INDEX_VERSION = 8  # Stable HashEmbedder buckets require rebuilding persisted vectors.
 
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - hash-only images may omit numpy
+    np = None  # type: ignore[assignment]
 
-@dataclass
+
 @dataclass
 class ChunkHit:
     path: str
@@ -66,6 +70,9 @@ class SourceVectorIndex:
         self.store_path = store_path
         self._data: dict[str, Any] = {"version": INDEX_VERSION, "files": {}, "chunks": []}
         self._chunk_by_id: dict[str, dict[str, Any]] = {}
+        # Cached (n, d) float32 matrix for batched cosine search (unit vectors → matmul).
+        self._vector_matrix: Any | None = None
+        self._vector_chunks: list[dict[str, Any]] = []
 
     def load(self) -> None:
         if not self.store_path.is_file():
@@ -76,16 +83,51 @@ class SourceVectorIndex:
             self._data = {"version": INDEX_VERSION, "files": {}, "chunks": []}
         self._rebuild_chunk_lookup()
 
+    def _invalidate_vector_matrix(self) -> None:
+        self._vector_matrix = None
+        self._vector_chunks = []
+
     def _rebuild_chunk_lookup(self) -> None:
         self._chunk_by_id = {
             str(chunk.get("chunk_id", "")): chunk
             for chunk in self._data.get("chunks", [])
             if chunk.get("chunk_id")
         }
+        self._invalidate_vector_matrix()
+
+    def _ensure_vector_matrix(self) -> tuple[Any, list[dict[str, Any]]]:
+        """Build once per load/sync: rows aligned with ``_vector_chunks``."""
+        if self._vector_matrix is not None:
+            return self._vector_matrix, self._vector_chunks
+        if np is None:
+            self._vector_matrix = None
+            self._vector_chunks = []
+            return None, []
+        rows: list[list[float]] = []
+        kept: list[dict[str, Any]] = []
+        dim: int | None = None
+        for chunk in self._chunks():
+            raw = chunk.get("vector")
+            if not isinstance(raw, list) or not raw:
+                continue
+            if dim is None:
+                dim = len(raw)
+            elif len(raw) != dim:
+                continue
+            rows.append([float(x) for x in raw])
+            kept.append(chunk)
+        if not rows or dim is None:
+            self._vector_matrix = np.zeros((0, 0), dtype=np.float32)
+            self._vector_chunks = []
+            return self._vector_matrix, self._vector_chunks
+        self._vector_matrix = np.asarray(rows, dtype=np.float32)
+        self._vector_chunks = kept
+        return self._vector_matrix, self._vector_chunks
 
     def save(self) -> None:
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         self.store_path.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
+        self._invalidate_vector_matrix()
 
     def _needs_full_reindex(self) -> bool:
         return int(self._data.get("version", 0)) != INDEX_VERSION
@@ -140,6 +182,7 @@ class SourceVectorIndex:
         # (rel, mtime, new_chunks, summary, is_update)
 
         scanned = 0
+        chunks_chunked = 0
         scan_every = max(progress_every_files(), 50)
         logger.info(
             "sources index sync scan start; backend=json dir=%s force_reindex=%s",
@@ -149,9 +192,27 @@ class SourceVectorIndex:
         try:
             from app.retrieval.sync_progress import report_sync_progress
 
-            report_sync_progress(status="building", phase="scan")
+            report_sync_progress(status="building", phase="chunk")
         except Exception:
             pass
+
+        def _report_chunk_scan(*, force: bool = False) -> None:
+            try:
+                from app.retrieval.sync_progress import report_sync_progress
+
+                report_sync_progress(
+                    force=force,
+                    status="building",
+                    phase="chunk",
+                    files_done=scanned,
+                    dirty_files=len(pending),
+                    chunks_chunked=chunks_chunked,
+                    skipped=skipped,
+                    elapsed_s=round(time.monotonic() - sync_t0, 1),
+                )
+            except Exception:
+                pass
+
         for fp in sorted(sources_dir.rglob("*")):
             if not fp.is_file() or not should_index_source(fp):
                 continue
@@ -166,33 +227,24 @@ class SourceVectorIndex:
             mtime = fp.stat().st_mtime
             prev = files_meta.get(rel)
             scanned += 1
-            if scan_every and scanned % scan_every == 0:
-                logger.info(
-                    "sources index sync scan; backend=json scanned=%s dirty=%s skipped=%s",
-                    scanned,
-                    len(pending),
-                    skipped,
-                )
-                try:
-                    from app.retrieval.sync_progress import report_sync_progress
-
-                    report_sync_progress(
-                        status="building",
-                        phase="scan",
-                        files_done=scanned,
-                        dirty_files=len(pending),
-                        skipped=skipped,
-                        elapsed_s=round(time.monotonic() - sync_t0, 1),
-                    )
-                except Exception:
-                    pass
             if not force_reindex and prev and prev.get("mtime") == mtime:
                 skipped += 1
+                if scanned == 1 or (scan_every and scanned % scan_every == 0):
+                    logger.info(
+                        "sources index sync scan; backend=json scanned=%s dirty=%s "
+                        "skipped=%s chunks_chunked=%s",
+                        scanned,
+                        len(pending),
+                        skipped,
+                        chunks_chunked,
+                    )
+                    _report_chunk_scan()
                 continue
             text = fp.read_text(encoding="utf-8", errors="replace")
             new_chunks = chunk_source_text(
                 fp, rel, text, embedder=embedder, embed=False
             )
+            chunks_chunked += len(new_chunks)
             if owner_raw:
                 for chunk in new_chunks:
                     chunk["owner_user_id"] = owner_raw
@@ -207,13 +259,23 @@ class SourceVectorIndex:
             if len(summary) > 800:
                 summary = summary[:800]
             pending.append((rel, mtime, new_chunks, summary, bool(prev)))
+            if scanned == 1 or (scan_every and scanned % scan_every == 0):
+                logger.info(
+                    "sources index sync scan; backend=json scanned=%s dirty=%s "
+                    "skipped=%s chunks_chunked=%s",
+                    scanned,
+                    len(pending),
+                    skipped,
+                    chunks_chunked,
+                )
+                _report_chunk_scan()
 
-        chunks_total = sum(len(p[2]) for p in pending) + len(pending)  # + doc vectors
+        dirty_chunks = sum(len(p[2]) for p in pending)
         logger.info(
             "sources index sync plan; backend=json dirty_files=%s dirty_chunks=%s "
             "skipped=%s batch_size=%s",
             len(pending),
-            sum(len(p[2]) for p in pending),
+            dirty_chunks,
             skipped,
             embedding_batch_size(),
         )
@@ -226,8 +288,9 @@ class SourceVectorIndex:
                 phase="plan",
                 files_done=0,
                 files_total=len(pending),
+                chunks_chunked=chunks_chunked,
                 chunks_embedded=0,
-                chunks_total=sum(len(p[2]) for p in pending),
+                chunks_total=dirty_chunks,
                 skipped=skipped,
                 elapsed_s=round(time.monotonic() - sync_t0, 1),
             )
@@ -255,9 +318,14 @@ class SourceVectorIndex:
                 embedder,
                 label="json",
                 chunks_done_before=chunks_embedded,
-                chunks_total_hint=chunks_total,
+                chunks_total_hint=dirty_chunks,
             )
-            doc_vecs = embed_many(embedder, doc_inputs)
+            # Doc-lane vectors only used when two-level recall is on; skip otherwise
+            # (BEIR bench disables two-level — nearly halves encode work).
+            if settings.retrieval_two_level_enabled:
+                doc_vecs = embed_many(embedder, doc_inputs)
+            else:
+                doc_vecs = [None] * len(buffer)
             for (rel, mtime, new_chunks, summary, is_update), doc_vec in zip(
                 buffer, doc_vecs, strict=True
             ):
@@ -275,14 +343,31 @@ class SourceVectorIndex:
                 else:
                     added += 1
                 files_done += 1
-                if every and files_done % every == 0:
-                    logger.info(
-                        "sources index sync files; backend=json files=%s/%s "
-                        "elapsed_s=%.1f",
-                        files_done,
-                        len(pending),
-                        time.monotonic() - sync_t0,
-                    )
+            try:
+                from app.retrieval.sync_progress import report_sync_progress
+
+                report_sync_progress(
+                    status="building",
+                    phase="index",
+                    files_done=files_done,
+                    files_total=len(pending),
+                    chunks_chunked=chunks_chunked,
+                    chunks_embedded=chunks_embedded,
+                    chunks_total=dirty_chunks,
+                    elapsed_s=round(time.monotonic() - sync_t0, 1),
+                )
+            except Exception:
+                pass
+            if every and files_done % every == 0:
+                logger.info(
+                    "sources index sync files; backend=json files=%s/%s "
+                    "chunks_embedded=%s/%s elapsed_s=%.1f",
+                    files_done,
+                    len(pending),
+                    chunks_embedded,
+                    dirty_chunks,
+                    time.monotonic() - sync_t0,
+                )
             buffer.clear()
 
         for item in pending:
@@ -337,8 +422,32 @@ class SourceVectorIndex:
     def search_vector(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
         self.load()
         query_vec = get_embedder().embed(query)
-        if not query_vec:
+        if not query_vec or limit <= 0:
             return []
+
+        mat, chunks = self._ensure_vector_matrix()
+        if np is not None and mat is not None and getattr(mat, "size", 0) > 0:
+            q = np.asarray(query_vec, dtype=np.float32)
+            if q.ndim != 1 or q.shape[0] != mat.shape[1]:
+                return []
+            # Persisted embedders normalize; cosine ≡ dot for unit vectors.
+            scores = mat @ q
+            pos = np.flatnonzero(scores > 0.0)
+            if pos.size == 0:
+                return []
+            scores_pos = scores[pos]
+            take = min(int(limit), int(scores_pos.size))
+            if scores_pos.size <= take:
+                order = np.argsort(-scores_pos)
+            else:
+                part = np.argpartition(-scores_pos, take - 1)[:take]
+                order = part[np.argsort(-scores_pos[part])]
+            return [
+                _chunk_to_hit(chunks[int(pos[i])], float(scores_pos[i]))
+                for i in order
+            ]
+
+        # Fallback: no numpy (or empty matrix) — original per-chunk loop.
         scored: list[ChunkHit] = []
         for chunk in self._chunks():
             score = cosine_similarity(query_vec, _vector_from_chunk(chunk))
@@ -366,21 +475,48 @@ class SourceVectorIndex:
         """Doc-lane recall: rank files by summary embedding similarity."""
         self.load()
         query_vec = get_embedder().embed(query)
-        if not query_vec:
+        if not query_vec or limit <= 0:
             return []
-        scored: list[tuple[float, str]] = []
         files = self._data.get("files", {})
         if not isinstance(files, dict):
             return []
+
+        paths: list[str] = []
+        rows: list[list[float]] = []
+        dim = len(query_vec)
         for path, meta in files.items():
             if not isinstance(meta, dict):
                 continue
             raw = meta.get("doc_vector")
-            if not isinstance(raw, list):
+            if not isinstance(raw, list) or len(raw) != dim:
                 continue
-            score = cosine_similarity(query_vec, [float(x) for x in raw])
+            paths.append(str(path))
+            rows.append([float(x) for x in raw])
+
+        if not rows:
+            return []
+
+        if np is not None:
+            mat = np.asarray(rows, dtype=np.float32)
+            q = np.asarray(query_vec, dtype=np.float32)
+            scores = mat @ q
+            pos = np.flatnonzero(scores > 0.0)
+            if pos.size == 0:
+                return []
+            scores_pos = scores[pos]
+            take = min(int(limit), int(scores_pos.size))
+            if scores_pos.size <= take:
+                order = np.argsort(-scores_pos)
+            else:
+                part = np.argpartition(-scores_pos, take - 1)[:take]
+                order = part[np.argsort(-scores_pos[part])]
+            return [paths[int(pos[i])] for i in order]
+
+        scored: list[tuple[float, str]] = []
+        for path, row in zip(paths, rows, strict=True):
+            score = cosine_similarity(query_vec, row)
             if score > 0.0:
-                scored.append((score, str(path)))
+                scored.append((score, path))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [path for _, path in scored[:limit]]
 

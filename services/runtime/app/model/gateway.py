@@ -130,8 +130,8 @@ class StubModelProvider:
         tools: list[dict],
         abort: asyncio.Event | None = None,
     ) -> AsyncIterator[str | ModelResponse]:
-        # Route on intent only — exclude [writing_context]/[runtime_context] so
-        # work_index phrases like `draft_section` / `propose_patch` cannot steal goldens.
+        # Route on intent only — exclude platform banners ([writing|runtime|project]_context)
+        # so work_index phrases like `draft_section` / `propose_patch` cannot steal goldens.
         user_text = _intent_user_text(messages) or _user_text(messages)
         tool_names = {t["name"] for t in tools}
         has_tool_result = _has_tool_result(messages)
@@ -587,8 +587,8 @@ def _intent_user_text(messages: list[dict]) -> str:
     """User text for stub routing — skip platform-injected context banners.
 
     Writing work_index / cards live under ``[writing_context]``; runtime banners under
-    ``[runtime_context]``. Matching those would make every writing turn look like
-    ``draft_section`` / ``propose_patch`` / ``read``.
+    ``[runtime_context]``; workspace pins under ``[project_context]``. Matching those
+    would make every writing turn look like ``draft_section`` / ``propose_patch`` / ``read``.
     """
     parts: list[str] = []
     for msg in messages:
@@ -599,7 +599,7 @@ def _intent_user_text(messages: list[dict]) -> str:
                 continue
             text = str(block.get("text", ""))
             stripped = text.lstrip()
-            if stripped.startswith("[writing_context]") or stripped.startswith("[runtime_context]"):
+            if stripped.startswith(("[writing_context]", "[runtime_context]", "[project_context]")):
                 continue
             parts.append(text)
     return " ".join(parts)

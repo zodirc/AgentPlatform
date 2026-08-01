@@ -332,6 +332,10 @@ def test_estimate_window_breakdown_splits_categories() -> None:
         {"role": "system", "content": [{"type": "text", "text": "system rules"}]},
         {
             "role": "user",
+            "content": [{"type": "text", "text": "[project_context]\n## AGENT.md\nhi"}],
+        },
+        {
+            "role": "user",
             "content": [
                 {
                     "type": "text",
@@ -347,6 +351,7 @@ def test_estimate_window_breakdown_splits_categories() -> None:
     tools = [{"name": "read_file", "description": "read", "input_schema": {}}]
     breakdown = estimate_window_breakdown(messages=messages, tools=tools)
     assert breakdown["system"] > 0
+    assert breakdown["project"] > 0
     assert breakdown["tools"] > 0
     assert breakdown["session"] > 0
     assert breakdown["user"] > 0

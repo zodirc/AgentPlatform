@@ -295,21 +295,14 @@ class ContextEngine:
         return result
 
     def _materialize_messages(self, envelope: ContextEnvelope) -> list[dict[str, Any]]:
-        system_text = envelope.system_prompt
-        if envelope.project_context:
-            system_text = f"{system_text}\n\n[project_context]\n{envelope.project_context}"
-        system = {"role": "system", "content": [{"type": "text", "text": system_text}]}
-        out: list[dict[str, Any]] = [system]
-        if envelope.runtime_context:
-            out.append(
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": envelope.runtime_context}],
-                }
-            )
-        volatile_msg = _volatile_user_message(envelope.volatile_context)
-        if volatile_msg is not None:
-            out.append(volatile_msg)
+        # HM6 / WT5: keep system.md (scenario base) byte-stable for prompt cache.
+        # project_context is workspace-derived and may change — never weld into system.
+        out = _prefix_messages(
+            system_prompt=envelope.system_prompt,
+            project_context=envelope.project_context,
+            runtime_context=envelope.runtime_context,
+            volatile_context=envelope.volatile_context,
+        )
         out.extend(envelope.messages)
         return out
 
@@ -493,6 +486,40 @@ def _volatile_user_message(volatile_context: str) -> dict[str, Any] | None:
     return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 
+def _project_user_message(project_context: str) -> dict[str, Any] | None:
+    text = (project_context or "").strip()
+    if not text:
+        return None
+    if not text.startswith("[project_context]"):
+        text = f"[project_context]\n{text}"
+    return {"role": "user", "content": [{"type": "text", "text": text}]}
+
+
+def _prefix_messages(
+    *,
+    system_prompt: str,
+    project_context: str = "",
+    runtime_context: str = "",
+    volatile_context: str = "",
+) -> list[dict[str, Any]]:
+    """Stable system first; project / runtime / volatile as trailing user blocks."""
+    out: list[dict[str, Any]] = [_system_message(system_prompt)]
+    project_msg = _project_user_message(project_context)
+    if project_msg is not None:
+        out.append(project_msg)
+    if runtime_context:
+        out.append(
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": runtime_context}],
+            }
+        )
+    volatile_msg = _volatile_user_message(volatile_context)
+    if volatile_msg is not None:
+        out.append(volatile_msg)
+    return out
+
+
 def _assemble_fingerprint(
     system_prompt: str,
     state: TurnState,
@@ -517,17 +544,12 @@ def _window_fill(
     runtime_context: str = "",
     volatile_context: str = "",
 ) -> tuple[float, dict[str, int]]:
-    system_text = system_prompt
-    if project_context:
-        system_text = f"{system_text}\n\n[project_context]\n{project_context}"
-    assembled = [_system_message(system_text)]
-    if runtime_context:
-        assembled.append(
-            {"role": "user", "content": [{"type": "text", "text": runtime_context}]}
-        )
-    volatile_msg = _volatile_user_message(volatile_context)
-    if volatile_msg is not None:
-        assembled.append(volatile_msg)
+    assembled = _prefix_messages(
+        system_prompt=system_prompt,
+        project_context=project_context,
+        runtime_context=runtime_context,
+        volatile_context=volatile_context,
+    )
     assembled.extend(messages)
     window = estimate_assembled_window(messages=assembled, tools=tools)
     project_tokens = estimate_payload_tokens(project_context)
@@ -636,21 +658,14 @@ def estimate_window_breakdown(
         role = msg.get("role")
         toks = estimate_payload_tokens(msg)
         if role == "system":
-            text = _message_text(msg)
-            if "[project_context]" in text:
-                # Approximate split: project section after marker.
-                idx = text.find("[project_context]")
-                sys_part = text[:idx]
-                proj_part = text[idx:]
-                breakdown["system"] += estimate_payload_tokens(sys_part)
-                breakdown["project"] += estimate_payload_tokens(proj_part)
-            else:
-                breakdown["system"] += toks
+            breakdown["system"] += toks
             continue
         text = _message_text(msg)
         lower = text.lower()
         if role == "tool":
             breakdown["tool_results"] += toks
+        elif text.startswith("[project_context]"):
+            breakdown["project"] += toks
         elif text.startswith("[runtime_context]"):
             breakdown["runtime"] += toks
         elif text.startswith("[writing_context]"):

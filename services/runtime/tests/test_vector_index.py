@@ -54,6 +54,43 @@ def test_source_vector_index_sync_and_search(tmp_path: Path) -> None:
     assert hits[0].score > 0.0
 
 
+def test_search_vector_batched_matches_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Numpy matmul ranking should match the legacy Python loop on the same index."""
+    pytest.importorskip("numpy")
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    monkeypatch.setattr(settings, "retrieval_two_level_enabled", False)
+
+    workspace = tmp_path / "workspace"
+    sources = workspace / "sources"
+    sources.mkdir(parents=True)
+    for i, text in enumerate(
+        [
+            "alpha token unique-aaa appears here",
+            "beta token unique-bbb appears here",
+            "gamma filler text without markers",
+            "unique-aaa again for stronger alpha",
+        ]
+    ):
+        (sources / f"doc{i}.txt").write_text(text + "\n", encoding="utf-8")
+
+    index = SourceVectorIndex(tmp_path / "vectorstore" / "sources.json")
+    index.sync(sources, workspace_root=workspace)
+
+    query = "unique-aaa"
+    batched = index.search_vector(query, limit=3)
+    # Force legacy path
+    monkeypatch.setattr("app.retrieval.vector_index.np", None)
+    index._invalidate_vector_matrix()
+    looped = index.search_vector(query, limit=3)
+
+    assert [h.chunk_id for h in batched] == [h.chunk_id for h in looped]
+    for a, b in zip(batched, looped, strict=True):
+        assert abs(a.score - b.score) < 1e-5
+
+
 def test_get_embedder_defaults_to_hash(monkeypatch) -> None:
     from app.settings import settings
 
