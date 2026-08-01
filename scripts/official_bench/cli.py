@@ -9,7 +9,7 @@ from .context_run import run_context_small
 from .paths import data_dir, ensure_dirs, reports_dir
 from .publish import publish_run_dir
 from .pull import pull_all, pull_beir, pull_longbench, pull_swebench
-from .swe_run import run_swe_eval, run_swe_infer, run_swe_pull_only
+from .swe_run import CODING_TIERS, DEFAULT_CODING_TIER, run_swe_eval, run_swe_infer, run_swe_pull_only
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -31,7 +31,10 @@ def main(argv: list[str] | None = None) -> int:
     p_ret = sub.add_parser("retrieval", help="Run BEIR small (BM25 + nDCG/Recall)")
     p_ret.add_argument("--force-pull", action="store_true")
 
-    p_ctx = sub.add_parser("context", help="Run LongBench small dual-arm")
+    p_ctx = sub.add_parser(
+        "context",
+        help="Run LongBench small: full, middle-truncate, ContextEngine compact",
+    )
     p_ctx.add_argument("--force-pull", action="store_true")
     p_ctx.add_argument("--limit", type=int, default=0, help="Cap samples (0=all pulled)")
     p_ctx.add_argument(
@@ -47,7 +50,13 @@ def main(argv: list[str] | None = None) -> int:
         default="pull",
     )
     p_code.add_argument("--force-pull", action="store_true")
-    p_code.add_argument("--limit", type=int, default=0)
+    p_code.add_argument(
+        "--tier", choices=tuple(CODING_TIERS), default=DEFAULT_CODING_TIER
+    )
+    p_code.add_argument(
+        "--n-instances", type=int, default=None, help="Required for --tier custom (3–300)"
+    )
+    p_code.add_argument("--harness", action="store_true", help="Run Docker-backed official scorer after infer")
     p_code.add_argument(
         "--skip-api",
         action="store_true",
@@ -61,6 +70,9 @@ def main(argv: list[str] | None = None) -> int:
     p_all.add_argument("--with-coding-infer", action="store_true")
     p_all.add_argument("--context-limit", type=int, default=0)
     p_all.add_argument("--context-dry-metrics", action="store_true")
+    p_all.add_argument("--tier", choices=tuple(CODING_TIERS), default=DEFAULT_CODING_TIER)
+    p_all.add_argument("--n-instances", type=int, default=None)
+    p_all.add_argument("--harness", action="store_true")
 
     sub.add_parser("paths", help="Print data/report directories")
 
@@ -128,8 +140,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.phase == "infer":
             run_swe_infer(
                 force_pull=args.force_pull,
-                limit=args.limit,
                 skip_api=args.skip_api,
+                tier=args.tier,
+                n_instances=args.n_instances,
+                run_harness=args.harness,
             )
         elif args.phase == "eval":
             run_swe_eval(predictions=args.predictions)
@@ -137,10 +151,13 @@ def main(argv: list[str] | None = None) -> int:
             run_swe_pull_only(force_pull=args.force_pull)
             run_swe_infer(
                 force_pull=False,
-                limit=args.limit,
                 skip_api=args.skip_api,
+                tier=args.tier,
+                n_instances=args.n_instances,
+                run_harness=args.harness,
             )
-            run_swe_eval(predictions=args.predictions)
+            if not args.harness:
+                run_swe_eval(predictions=args.predictions)
         return 0
 
     if args.cmd == "all":
@@ -153,7 +170,13 @@ def main(argv: list[str] | None = None) -> int:
                 dry_metrics=args.context_dry_metrics,
             )
         if args.with_coding_infer:
-            run_swe_infer(force_pull=False, skip_api=False)
+            run_swe_infer(
+                force_pull=False,
+                skip_api=False,
+                tier=args.tier,
+                n_instances=args.n_instances,
+                run_harness=args.harness,
+            )
         return 0
 
     return 1

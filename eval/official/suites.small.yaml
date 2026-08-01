@@ -1,7 +1,7 @@
 # Official small suites — data is pulled into BENCH_DATA_DIR (not committed).
 # Protocol versions are pinned; bump deliberately when changing pulls or metrics.
 
-protocol_version: "official-small-2026-08"
+protocol_version: "official-small-2026-08-m1"
 
 data_dir_env: BENCH_DATA_DIR
 default_data_dir: ~/.cache/agentplatform-bench
@@ -36,7 +36,7 @@ suites:
   context:
     id: longbench.small
     official: LongBench
-    # HuggingFace: THUDM/LongBench — small task slice for harness dual-arm.
+    # HuggingFace: THUDM/LongBench — small task slice for three-arm harness.
     hf_dataset: THUDM/LongBench
     hf_revision: main
     tasks:
@@ -45,7 +45,7 @@ suites:
       - narrativeqa
     max_samples_per_task: 40
     max_context_chars: 120000
-    # Arms: full context vs middle-truncation budget (proxy); platform compact optional.
+    # Arms: full context vs middle-truncation vs ContextEngine compact.
     budget_chars: 24000
     metrics: [exact_match, retention_vs_full]
     judge: substring_or_f1
@@ -56,8 +56,9 @@ suites:
     hf_dataset: princeton-nlp/SWE-bench_Lite
     hf_revision: main
     split: test
-    # Optional smoke slice for adapter bring-up (0 = all 300).
+    # Legacy cap; tiered selection is controlled by --tier / --n-instances.
     max_instances: 0
     predictions_filename: predictions.jsonl
-    # Official scoring requires Docker + swebench.harness (see README).
+    # Tiers n3/n5/n10/n25 use canonical HF-test-order slices; full300 is all IDs.
+    # Official resolve scoring requires Docker + swebench.harness (see README).
     evaluate_with: swebench.harness.run_evaluation

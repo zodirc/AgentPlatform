@@ -2,14 +2,14 @@
 
 官方小量：`BEIR` · `LongBench` · `SWE-bench Lite`。  
 数据进 `BENCH_DATA_DIR`（默认 `~/.cache/agentplatform-bench`），**不进 git**。  
+协议：`protocol_version: official-small-2026-08-m1`（见 [`suites.small.yaml`](suites.small.yaml)）。
+
 每次跑分写：
 
 - 过程：`eval/reports/official/runs/<uuid>/process.jsonl`
 - 结果：`manifest.json` / `result.json`
 - 可视化：`report.html`（浏览器直接打开）
 - Ops：自动 `publish`（需 `OPS_TEST_SECRET` + 栈）→ **官方评测**页 / 历史 `suite=official`
-
-协议钉死：[`suites.small.yaml`](suites.small.yaml)。
 
 ---
 
@@ -18,8 +18,12 @@
 每个套件都是同一心智模型，日志里会打 `[phase]` / `[pull]` / `[eval]` / `[regress]`：
 
 1. **拉取 Pull** — 官方题集进 `BENCH_DATA_DIR`；**已有则跳过**（日志 `cached`）。
-2. **评测 Eval** — 出官方指标（nDCG、retention、patch 率等）。
+2. **评测 Eval** — 出官方指标（nDCG、retention、patch 率 / harness resolve 等）。
 3. **回归 Regress** — 检索会自动对比上次 `latest_retrieval.json`；其它套件在 Ops「多次结果对比」看 Δ。
+
+**同条件才可比 Δ**：相同 `protocol_version`；编码还要相同 `coding_tier` + `n_instances` + 选题指纹。
+
+**效果聚合排除**：上下文 dry、编码 skip（空补丁）、reclaimed、仅 hash 冒烟检索 — 不作效果结论。
 
 **要不要挂加速器？** 只在「第一次拉取」可能需要：BEIR 走德国 UKP，LongBench/SWE 走 Hugging Face。国内若卡住就开代理或 HF 镜像；**拉完会缓存，之后主要是 ②③，不必常开代理**。
 
@@ -34,10 +38,17 @@
 - 顶部三步说明 + **当前阶段**条 + 全过程日志
 - **评判标准**卡片：每套官方来源、指标、如何判定
 - 勾选目标 → **开始官方评测** → **进度条 + 流式日志**
-- ① 检索（BEIR）默认 **平台 hybrid + BM25 对照**；②③ 需 api 安装 `datasets`（镜像已 bake）或改用下方主机 make
-- 历史旁 **清空**：删官方评测 DB 记录与报告目录，**保留** BEIR 等数据缓存
+- ① 检索：**默认 ST 真向量**（独立 `agent-bench` + **专用 `bench-postgres`/pgvector**，不碰产品库）；仅调试管线时再改用 hash 冒烟或 `BENCH_RETRIEVAL_BACKEND=json`
+- ② 上下文：三臂 **full / truncate / ContextEngine compact**（bench 内 import，不写产品 sessions）；「无模型（管道）」= dry
+- ③ 编码：可调档 **3 / 5 / 10 / 25（默认）/ full300 / custom≥3**；默认 bench 直出 patch；官方 resolve 需勾选 harness（Docker）
+- 历史旁 **清空**：删 Bench 历史与报告目录，**保留** BEIR 等数据缓存
 
-重建以加载新 API/Web：`make up-api && make up-web`
+重建：`make up-bench && make up-api && make up-web`（`up-bench` 会拉起 `bench-postgres`）
+
+**架构**：评测跑在独立 **`agent-bench`**；Ops/api 只编排；**不进 agent runtime / Turn**（除非显式 `BENCH_CODING_VIA_PLATFORM=1`）。
+
+- 默认「仅检索」= ST MiniLM 效果分
+- 「仅检索·hash 冒烟」= 可选、只验管线
 
 ---
 
@@ -68,16 +79,17 @@ make official-bench-retrieval
 
 # ② 上下文 LongBench 小量
 make official-bench-context CONTEXT_DRY=1          # 只验证流水线/过程落盘（无模型）
-# live 双臂（需密钥）：
+# live 三臂（需密钥）：
 # export BENCH_MODEL_API_KEY=...
 # make official-bench-context
 
-# ③ 编码 SWE-bench Lite
+# ③ 编码 SWE-bench Lite（默认档 n25）
 make official-bench-coding-pull
-make official-bench-coding-infer OFFICIAL_SWE_SKIP_API=1   # 先打通 predictions 落盘
-# 真推理（需平台可登录/API）：去掉 OFFICIAL_SWE_SKIP_API
-# 官方 Docker 评分（盘大、时长长）：
+make official-bench-coding-infer OFFICIAL_SWE_SKIP_API=1 OFFICIAL_SWE_TIER=n25
+# 真推理（bench 模型密钥）：去掉 OFFICIAL_SWE_SKIP_API
+# 官方 Docker 评分：
 # pip install swebench && make official-bench-coding-eval
+# 或 infer 时 OFFICIAL_SWE_HARNESS=1
 ```
 
 ### 一次性（检索必跑；上下文/编码可选）
@@ -119,10 +131,10 @@ grep OPS_TEST_SECRET .env
 
 ## 套件说明（可信边界）
 
-| Make 目标 | 官方来源 | 指标 | 说明 |
-|-----------|----------|------|------|
-| `official-bench-retrieval` | BEIR | nDCG@k / Recall@k | **主分=平台 hybrid**；BM25 为对照地板 |
-| `official-bench-context` | LongBench | full vs budget F1 + retention | live 需模型；`CONTEXT_DRY=1` 只验证落盘 |
-| `official-bench-coding-*` | SWE-bench Lite | pull / patch 率 / harness | **官方分**仅 `coding-eval` + Docker |
+| Make 目标 | 官方来源 | 指标 | 产品对齐 | 非对齐 |
+|-----------|----------|------|----------|--------|
+| `official-bench-retrieval` | BEIR | nDCG@k / Recall@k | 平台 hybrid + ST/pgvector（bench 专用库） | hash 冒烟 |
+| `official-bench-context` | LongBench | full / truncate / compact F1 + retention | ContextEngine assemble（库导入） | dry 管道 |
+| `official-bench-coding-*` | SWE-bench Lite | patch_rate；**resolve=harness** | bench 直出 patch + 固定档位切片 | skip_api；产品 Turn（默认关） |
 
-改 harness 后：固定模型与 `protocol_version`，对比两次 `report.html` / Ops 指标 Δ。
+改 harness 后：固定模型与 `protocol_version`（及编码档指纹），对比两次 `report.html` / Ops 指标 Δ。

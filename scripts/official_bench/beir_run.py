@@ -186,11 +186,27 @@ def run_beir_small(*, force_pull: bool = False) -> dict[str, Any]:
                 )
                 continue
             corpus = _load_jsonl_map(corpus_p, text_keys=("title", "text"))
-            queries = _load_jsonl_map(queries_p, text_keys=("text",))
+            queries_all = _load_jsonl_map(queries_p, text_keys=("text",))
             qrels = _load_qrels_tsv(qrels_p)
+            # BEIR scores only over judged queries; searching the full queries.jsonl
+            # wastes ~3–10× (e.g. nfcorpus 3237 → ~323).
+            queries = {qid: queries_all[qid] for qid in qrels if qid in queries_all}
+            missing = sorted(set(qrels) - set(queries))
+            if missing:
+                print(
+                    f"[eval] {name}: {len(missing)} qrels queries missing from queries.jsonl "
+                    f"(first={missing[:3]})",
+                    flush=True,
+                )
             session.log(
                 "index",
-                f"{name}: corpus={len(corpus)} queries={len(queries)} arms={arms}",
+                f"{name}: corpus={len(corpus)} "
+                f"queries={len(queries)}/{len(queries_all)} (qrels-only) arms={arms}",
+            )
+            print(
+                f"[eval] {name}: using {len(queries)} qrels queries "
+                f"(of {len(queries_all)} in queries.jsonl)",
+                flush=True,
             )
             arm_metrics: dict[str, dict[str, float]] = {}
             for ai, arm in enumerate(arms, start=1):
@@ -267,6 +283,7 @@ def run_beir_small(*, force_pull: bool = False) -> dict[str, Any]:
             per_ds[name] = {
                 "n_corpus": len(corpus),
                 "n_queries": len(queries),
+                "n_queries_file": len(queries_all),
                 "n_qrels_queries": len(qrels),
                 "arms": arm_metrics,
             }

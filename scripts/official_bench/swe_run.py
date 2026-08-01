@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -14,19 +15,93 @@ from .publish import publish_manifest
 from .pull import pull_swebench
 from .run_session import RunSession
 
+CODING_TIERS = {
+    "n3": 3,
+    "n5": 5,
+    "n10": 10,
+    "n25": 25,
+    "full300": 300,
+    "custom": None,
+}
+DEFAULT_CODING_TIER = "n25"
+_SLICE_DIR = Path(__file__).resolve().parents[2] / "eval" / "official" / "swe_lite_slices"
+
 
 def _phase(msg: str) -> None:
     print(f"[phase] {msg}", flush=True)
 
 
-def _load_instances(path: Path, *, limit: int = 0) -> list[dict[str, Any]]:
+def _read_instance_ids(path: Path) -> list[str]:
+    if not path.is_file():
+        raise ValueError(f"missing SWE Lite selection file: {path}")
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def resolve_coding_selection(
+    *, tier: str = DEFAULT_CODING_TIER, n_instances: int | None = None
+) -> tuple[str, int, list[str], str]:
+    """Return tier, count, ordered IDs, and an SHA-256 selection fingerprint."""
+    if tier not in CODING_TIERS:
+        raise ValueError(f"unknown coding tier: {tier}; choose one of {', '.join(CODING_TIERS)}")
+    order = _read_instance_ids(_SLICE_DIR / "instance_order.txt")
+    if len(order) < 300:
+        raise ValueError(f"instance_order.txt must contain 300 IDs, found {len(order)}")
+    if tier == "custom":
+        if n_instances is None or n_instances < 3:
+            raise ValueError("custom coding tier requires --n-instances >= 3")
+        n = min(n_instances, 300)
+        ids = order[:n]
+    elif tier == "full300":
+        n = 300
+        ids = order[:n]
+    else:
+        n = CODING_TIERS[tier]
+        assert n is not None
+        ids = _read_instance_ids(_SLICE_DIR / f"swe_lite_slice_{n}.txt")
+        if len(ids) != n:
+            raise ValueError(f"tier {tier} slice must contain exactly {n} IDs, found {len(ids)}")
+    fingerprint = hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()
+    return tier, n, ids, fingerprint
+
+
+def _ensure_slice_files(instances_path: Path) -> None:
+    """Create missing canonical slices from the pulled HF test order only."""
+    required = [_SLICE_DIR / "instance_order.txt"] + [
+        _SLICE_DIR / f"swe_lite_slice_{n}.txt" for n in (3, 5, 10, 25)
+    ]
+    if all(path.is_file() for path in required):
+        return
+    order = [
+        str(json.loads(line)["instance_id"])
+        for line in instances_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    if len(order) != 300:
+        raise ValueError(
+            f"cannot create SWE Lite slices: expected 300 pulled HF test IDs, found {len(order)}"
+        )
+    _SLICE_DIR.mkdir(parents=True, exist_ok=True)
+    for path, ids in [
+        (_SLICE_DIR / "instance_order.txt", order),
+        *[(_SLICE_DIR / f"swe_lite_slice_{n}.txt", order[:n]) for n in (3, 5, 10, 25)],
+    ]:
+        if not path.is_file():
+            path.write_text("\n".join(ids) + "\n", encoding="utf-8")
+
+
+def _load_instances(
+    path: Path, *, limit: int = 0, allowed_ids: set[str] | None = None
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:
                 continue
-            rows.append(json.loads(line))
+            row = json.loads(line)
+            if allowed_ids is not None and str(row.get("instance_id")) not in allowed_ids:
+                continue
+            rows.append(row)
             if limit and len(rows) >= limit:
                 break
     return rows
@@ -86,6 +161,27 @@ def _api_infer_one(instance: dict[str, Any], *, base_url: str, token: str) -> st
         return patch
 
 
+def _bench_infer_one(
+    instance: dict[str, Any], *, model: str, base_url: str, api_key: str
+) -> str:
+    """Ask the dedicated benchmark model endpoint for a SWE-bench patch."""
+    from official_bench.llm_client import chat_complete
+
+    prompt = (
+        "Solve this SWE-bench Lite issue. Return only the minimal unified diff patch; "
+        "do not use Markdown fences or explain the solution.\n\n"
+        f"Instance: {instance.get('instance_id')} ({instance.get('repo')})\n\n"
+        f"{instance.get('problem_statement') or ''}"
+    )
+    return chat_complete(
+        prompt,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        max_tokens=int(os.environ.get("BENCH_MODEL_MAX_TOKENS", "4096")),
+    )
+
+
 def write_predictions(
     instances: list[dict[str, Any]],
     *,
@@ -120,6 +216,7 @@ def run_swe_pull_only(*, force_pull: bool = False) -> dict[str, Any]:
         _phase("1/3 PULL — SWE-bench Lite (skip if cached)")
         session.log("pull", coding["hf_dataset"])
         root = pull_swebench(cfg, force=force_pull)
+        _ensure_slice_files(root / "instances.jsonl")
         instances = _load_instances(root / "instances.jsonl")
         _phase(f"1/3 PULL — done · n_instances={len(instances)}")
         _phase("2/3 EVAL — skipped on pull-only target")
@@ -154,10 +251,17 @@ def run_swe_infer(
     force_pull: bool = False,
     limit: int = 0,
     skip_api: bool = False,
+    tier: str = DEFAULT_CODING_TIER,
+    n_instances: int | None = None,
+    run_harness: bool = False,
 ) -> dict[str, Any]:
+    if tier not in CODING_TIERS:
+        raise ValueError(f"unknown coding tier: {tier}; choose one of {', '.join(CODING_TIERS)}")
+    if tier == "custom" and (n_instances is None or n_instances < 3):
+        raise ValueError("custom coding tier requires --n-instances >= 3")
     cfg = load_suites()
     coding = cfg["suites"]["coding"]
-    session = RunSession(suite="coding", title="SWE-bench Lite · infer")
+    session = RunSession(suite="coding", title=f"SWE-bench Lite · infer · {tier}")
     session.extra = {
         "protocol_version": cfg.get("protocol_version"),
         "official": coding.get("official"),
@@ -168,22 +272,69 @@ def run_swe_infer(
         _phase("1/3 PULL — ensure SWE instances (skip if cached)")
         session.log("pull", "ensure instances")
         root = pull_swebench(cfg, force=force_pull)
-        max_cfg = int(coding.get("max_instances") or 0)
-        use_limit = limit or max_cfg
-        instances = _load_instances(root / "instances.jsonl", limit=use_limit)
-        _phase(f"1/3 PULL — done · using {len(instances)} instances")
-        model_name = os.environ.get("BENCH_MODEL_NAME") or "agentplatform-agent"
-        base_url = os.environ.get("BENCH_API_BASE") or "http://localhost"
-        token = (
-            os.environ.get("BENCH_API_TOKEN")
-            or os.environ.get("ADMIN_TOKEN")
-            or ""
-        ).strip()
+        instances_path = root / "instances.jsonl"
+        _ensure_slice_files(instances_path)
+        if limit and tier == DEFAULT_CODING_TIER and n_instances is None:
+            tier, n_instances = "custom", limit
+        selected_tier, selected_n, ids, fingerprint = resolve_coding_selection(
+            tier=tier, n_instances=n_instances
+        )
+        selected_by_id = _load_instances(instances_path, allowed_ids=set(ids))
+        by_id = {str(row["instance_id"]): row for row in selected_by_id}
+        instances = [by_id[iid] for iid in ids if iid in by_id]
+        if len(instances) != selected_n:
+            raise ValueError(
+                f"selected {selected_n} IDs but found {len(instances)} in pulled SWE Lite data"
+            )
+        infer_mode = (
+            "skip_api"
+            if skip_api
+            else "platform_turn"
+            if os.environ.get("BENCH_CODING_VIA_PLATFORM") == "1"
+            else "bench_model"
+        )
+        session.title = f"SWE-bench Lite · infer · {selected_tier} ({selected_n})"
+        session.extra.update(
+            coding_tier=selected_tier,
+            n_instances=selected_n,
+            instance_fingerprint=fingerprint,
+            infer_mode=infer_mode,
+        )
+        _phase(f"1/3 PULL — done · tier={selected_tier} · using {selected_n} instances")
+        model_name = os.environ.get("BENCH_MODEL_NAME") or (
+            "agentplatform-agent" if infer_mode == "platform_turn" else "bench-model"
+        )
+        if infer_mode == "platform_turn":
+            base_url = os.environ.get("BENCH_API_BASE") or "http://localhost"
+            api_key = (
+                os.environ.get("BENCH_API_TOKEN")
+                or os.environ.get("ADMIN_TOKEN")
+                or os.environ.get("BENCH_MODEL_API_KEY")
+                or ""
+            ).strip()
+        else:
+            base_url = (
+                os.environ.get("BENCH_MODEL_BASE_URL")
+                or os.environ.get("MODEL_BASE_URL")
+                or ""
+            ).strip()
+            api_key = (
+                os.environ.get("BENCH_MODEL_API_KEY")
+                or os.environ.get("MODEL_API_KEY")
+                or os.environ.get("OPENAI_API_KEY")
+                or ""
+            ).strip()
         session.extra["model_name_or_path"] = model_name
+        session.extra["provider"] = (os.environ.get("BENCH_MODEL_PROVIDER") or "").strip() or None
+        session.extra["api_style"] = (
+            os.environ.get("BENCH_MODEL_API_STYLE") or ""
+        ).strip() or None
+        cw = (os.environ.get("BENCH_MODEL_CONTEXT_WINDOW") or "").strip()
+        session.extra["context_window_tokens"] = int(cw) if cw.isdigit() else None
 
         _phase(
             "2/3 EVAL — write predictions "
-            + ("skip_api (empty patches)" if skip_api else f"via {base_url}")
+            + ("skip_api (empty patches)" if skip_api else f"via {infer_mode}")
         )
         patches: dict[str, str] = {}
         if skip_api:
@@ -193,7 +344,12 @@ def run_swe_infer(
                 iid = str(inst["instance_id"])
                 session.log("infer", f"{i + 1}/{len(instances)} {iid}")
                 try:
-                    patches[iid] = _api_infer_one(inst, base_url=base_url, token=token)
+                    if infer_mode == "platform_turn":
+                        patches[iid] = _api_infer_one(inst, base_url=base_url, token=api_key)
+                    else:
+                        patches[iid] = _bench_infer_one(
+                            inst, model=model_name, base_url=base_url, api_key=api_key
+                        )
                 except Exception as exc:  # noqa: BLE001
                     session.log("infer_error", f"{iid}: {exc}", level="error")
                     patches[iid] = ""
@@ -202,7 +358,10 @@ def run_swe_infer(
         write_predictions(instances, model_name=model_name, patches=patches, out_path=pred_path)
         non_empty = sum(1 for p in patches.values() if p.strip())
         metrics = {
+            "coding_tier": selected_tier,
             "n_instances": len(instances),
+            "instance_fingerprint": fingerprint,
+            "infer_mode": infer_mode,
             "n_nonempty_patches": non_empty,
             "patch_rate": (non_empty / len(instances)) if instances else 0.0,
         }
@@ -210,7 +369,19 @@ def run_swe_infer(
             f"2/3 EVAL — done · patch_rate={metrics['patch_rate']:.4f} "
             f"({non_empty}/{len(instances)})"
         )
-        _phase("3/3 REGRESS — compare patch_rate in Ops history / official harness later")
+        if run_harness or os.environ.get("BENCH_CODING_HARNESS") == "1":
+            _phase("3/3 REGRESS — running official SWE-bench harness")
+            try:
+                harness = run_swe_eval(predictions=pred_path)
+                harness_metrics = harness.get("metrics") or {}
+                metrics.update(harness_metrics)
+            except SystemExit as exc:
+                metrics["exit_code"] = exc.code if isinstance(exc.code, int) else 1
+                metrics["note"] = "resolve rate requires Docker-backed harness results"
+            if "resolve_rate" not in metrics:
+                metrics.setdefault("note", "resolve rate requires Docker-backed harness results")
+        else:
+            _phase("3/3 REGRESS — compare patch_rate in Ops history / official harness later")
         session.add_case(
             "swebench.lite.infer",
             status="skipped" if skip_api else ("pass" if non_empty else "fail"),
@@ -235,6 +406,26 @@ def run_swe_infer(
         manifest = session.finish(status="failed", error=str(exc))
         publish_manifest(manifest)
         raise
+
+
+def _resolve_rate_from_harness(root: Path, harness_run_id: str) -> float | None:
+    """Best-effort read of the official harness JSON results."""
+    for path in root.rglob(f"*{harness_run_id}*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        for key in ("resolve_rate", "resolved_rate"):
+            value = payload.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+        resolved = payload.get("resolved")
+        total = payload.get("total") or payload.get("n_instances")
+        if isinstance(resolved, (int, float)) and isinstance(total, (int, float)) and total:
+            return float(resolved) / float(total)
+    return None
 
 
 def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
@@ -274,7 +465,12 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
     proc = subprocess.run(cmd, cwd=str(root), check=False)
     _phase(f"2/3 EVAL — harness exit={proc.returncode}")
     _phase("3/3 REGRESS — compare resolve rate vs prior harness runs in Ops")
-    metrics = {"exit_code": proc.returncode, "harness_run_id": harness_run_id}
+    metrics: dict[str, Any] = {"exit_code": proc.returncode, "harness_run_id": harness_run_id}
+    resolve_rate = _resolve_rate_from_harness(root, harness_run_id)
+    if resolve_rate is not None:
+        metrics["resolve_rate"] = resolve_rate
+    else:
+        metrics["note"] = "resolve rate unavailable; Docker-backed harness results are required"
     session.add_case(
         "swebench.lite.evaluate",
         status="pass" if proc.returncode == 0 else "fail",

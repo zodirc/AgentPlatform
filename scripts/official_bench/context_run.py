@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from .config import load_suites
 from .paths import suite_data
@@ -76,6 +78,77 @@ def middle_truncate(text: str, budget: int) -> str:
     return text[:keep] + "\n\n...[truncated]...\n\n" + text[-keep:]
 
 
+def _ensure_runtime_path() -> Path:
+    """Add the product runtime package to this standalone runner's import path."""
+    runtime = Path(__file__).resolve().parents[2] / "services" / "runtime"
+    if not runtime.is_dir():
+        raise RuntimeError(f"runtime tree missing: {runtime}")
+    path = str(runtime)
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return runtime
+
+
+def _message_content_text(message: dict[str, Any]) -> str:
+    """Read text from either runtime block content or provider-style strings."""
+    content = message.get("content", "")
+    if isinstance(content, str):
+        return content.strip()
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "text":
+            parts.append(str(block.get("text") or ""))
+        elif "content" in block:
+            parts.append(str(block.get("content") or ""))
+    return "\n".join(part for part in parts if part).strip()
+
+
+def compact_with_context_engine(text: str, budget_chars: int) -> str:
+    """Compact locally with the product ContextEngine, never session persistence."""
+    try:
+        _ensure_runtime_path()
+        from app.context.engine import ContextEngine
+        from app.context.policy import CompactionPolicy
+        from app.engine.state import TurnState
+
+        state = TurnState(
+            turn_id=uuid4(),
+            session_id=uuid4(),
+            run_id=uuid4(),
+            trace_id=uuid4(),
+            scenario_id="official_longbench_compact",
+            messages=[
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": text}],
+                }
+            ],
+        )
+        engine = ContextEngine(
+            policy=CompactionPolicy.legacy_messages_budget(max(64, budget_chars // 4))
+        )
+        messages = engine.assemble(
+            system_prompt="Compact the supplied LongBench context while retaining answer-relevant facts.",
+            state=state,
+            tools=[],
+        )
+        compacted = "\n".join(
+            _message_content_text(message)
+            for message in messages
+            if message.get("role") != "system" and _message_content_text(message)
+        ).strip()
+        if not compacted:
+            raise RuntimeError("ContextEngine returned no compacted text")
+        return compacted
+    except Exception as exc:  # noqa: BLE001 - benchmark must preserve its control arm
+        print(f"[context] compact_fallback truncate: {exc}", flush=True)
+        return middle_truncate(text, budget_chars)
+
+
 def _load_rows(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as f:
@@ -104,21 +177,15 @@ def _build_prompt(row: dict[str, Any], context: str) -> str:
 
 
 def _chat_complete(prompt: str, *, model: str, base_url: str, api_key: str) -> str:
-    try:
-        from openai import OpenAI
-    except ImportError as e:
-        raise SystemExit(
-            "Context live arm needs `openai`. pip install -r eval/official/requirements.txt"
-        ) from e
+    from official_bench.llm_client import chat_complete
 
-    client = OpenAI(api_key=api_key, base_url=base_url or None)
-    resp = client.chat.completions.create(
+    return chat_complete(
+        prompt,
         model=model,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0,
+        base_url=base_url,
+        api_key=api_key,
         max_tokens=256,
     )
-    return (resp.choices[0].message.content or "").strip()
 
 
 def _phase(msg: str) -> None:
@@ -131,13 +198,16 @@ def run_context_small(
     limit: int = 0,
     dry_metrics: bool = False,
 ) -> dict[str, Any]:
-    """Run LongBench small dual-arm (full vs budget truncate).
+    """Run LongBench small three-arm (full vs truncate vs ContextEngine compact).
 
     ``dry_metrics`` skips the model and uses an empty prediction (pipeline smoke only).
     """
     cfg = load_suites()
     ctx = cfg["suites"]["context"]
-    session = RunSession(suite="context", title="LongBench small (dual-arm retention)")
+    session = RunSession(
+        suite="context",
+        title="LongBench small (full / truncate / ContextEngine compact)",
+    )
     session.extra = {
         "protocol_version": cfg.get("protocol_version"),
         "official": ctx.get("official"),
@@ -155,6 +225,10 @@ def run_context_small(
 
         budget = int(ctx.get("budget_chars") or 24000)
         max_ctx = int(ctx.get("max_context_chars") or 120000)
+        cw = (os.environ.get("BENCH_MODEL_CONTEXT_WINDOW") or "").strip()
+        if cw.isdigit():
+            # Rough chars≈tokens*4; keep suite floor for truncate/compact budgets.
+            max_ctx = min(max_ctx, max(budget, int(cw) * 4))
 
         api_key = (
             os.environ.get("BENCH_MODEL_API_KEY")
@@ -173,6 +247,15 @@ def run_context_small(
             or ""
         ).strip()
         session.extra["model"] = None if dry_metrics else model
+        session.extra["provider"] = (
+            None if dry_metrics else (os.environ.get("BENCH_MODEL_PROVIDER") or "").strip() or None
+        )
+        session.extra["api_style"] = (
+            None
+            if dry_metrics
+            else (os.environ.get("BENCH_MODEL_API_STYLE") or "").strip() or None
+        )
+        session.extra["context_window_tokens"] = int(cw) if cw.isdigit() else None
 
         if not dry_metrics and not api_key:
             raise SystemExit(
@@ -181,11 +264,12 @@ def run_context_small(
             )
 
         _phase(
-            "2/3 EVAL — dual-arm "
+            "2/3 EVAL — three arms (full / truncate / ContextEngine compact) "
             + ("dry (empty preds)" if dry_metrics else f"model={model}")
         )
         full_scores: list[dict[str, float]] = []
         budget_scores: list[dict[str, float]] = []
+        compact_scores: list[dict[str, float]] = []
         details: list[dict[str, Any]] = []
         by_task: dict[str, list[dict[str, float]]] = {}
 
@@ -198,32 +282,44 @@ def run_context_small(
             golds = _answers_list(row.get("answers"))
             prompt_full = _build_prompt(row, context)
             prompt_budget = _build_prompt(row, middle_truncate(context, budget))
+            compact_context = compact_with_context_engine(context, budget)
+            prompt_compact = _build_prompt(row, compact_context)
 
             if dry_metrics:
-                pred_full, pred_budget = "", ""
+                pred_full, pred_budget, pred_compact = "", "", ""
             else:
                 session.log("infer", f"{i + 1}/{len(rows)} {task} arm=full")
                 pred_full = _chat_complete(
                     prompt_full, model=model, base_url=base_url, api_key=api_key
                 )
-                session.log("infer", f"{i + 1}/{len(rows)} {task} arm=budget")
+                session.log("infer", f"{i + 1}/{len(rows)} {task} arm=truncate")
                 pred_budget = _chat_complete(
                     prompt_budget, model=model, base_url=base_url, api_key=api_key
+                )
+                session.log("infer", f"{i + 1}/{len(rows)} {task} arm=compact")
+                pred_compact = _chat_complete(
+                    prompt_compact, model=model, base_url=base_url, api_key=api_key
                 )
 
             s_full = score_prediction(pred_full, golds)
             s_bud = score_prediction(pred_budget, golds)
+            s_compact = score_prediction(pred_compact, golds)
             full_scores.append(s_full)
             budget_scores.append(s_bud)
-            by_task.setdefault(task, []).append({"full": s_full["f1"], "budget": s_bud["f1"]})
+            compact_scores.append(s_compact)
+            by_task.setdefault(task, []).append(
+                {"full": s_full["f1"], "budget": s_bud["f1"], "compact": s_compact["f1"]}
+            )
             details.append(
                 {
                     "task": task,
                     "idx": row.get("idx"),
                     "full": s_full,
-                    "budget": s_bud,
+                    "truncate": s_bud,
+                    "compact": s_compact,
                     "context_chars": len(context),
-                    "budget_chars": min(len(context), budget),
+                    "truncate_chars": min(len(context), budget),
+                    "compact_chars": len(compact_context),
                 }
             )
 
@@ -234,23 +330,32 @@ def run_context_small(
 
         avg_full_f1 = _avg("f1", full_scores)
         avg_bud_f1 = _avg("f1", budget_scores)
+        avg_compact_f1 = _avg("f1", compact_scores)
         retention = (avg_bud_f1 / avg_full_f1) if avg_full_f1 > 1e-9 else 0.0
+        compact_retention = (
+            (avg_compact_f1 / avg_full_f1) if avg_full_f1 > 1e-9 else 0.0
+        )
         metrics = {
             "full_em": _avg("em", full_scores),
             "full_f1": avg_full_f1,
             "budget_em": _avg("em", budget_scores),
             "budget_f1": avg_bud_f1,
             "retention_vs_full_f1": retention,
+            "compact_em": _avg("em", compact_scores),
+            "compact_f1": avg_compact_f1,
+            "retention_compact_vs_full": compact_retention,
         }
         _phase(
             f"2/3 EVAL — done · full_f1={avg_full_f1:.4f} budget_f1={avg_bud_f1:.4f} "
-            f"retention={retention:.4f}"
+            f"compact_f1={avg_compact_f1:.4f} retention={retention:.4f} "
+            f"compact_retention={compact_retention:.4f}"
         )
         _phase("3/3 REGRESS — use Ops「多次结果对比」vs prior context runs (no file baseline yet)")
 
         for task, pairs in by_task.items():
             tf = sum(p["full"] for p in pairs) / len(pairs)
             tb = sum(p["budget"] for p in pairs) / len(pairs)
+            tc = sum(p["compact"] for p in pairs) / len(pairs)
             session.add_case(
                 f"longbench.{task}",
                 status="skipped" if dry_metrics else "pass",
@@ -258,6 +363,8 @@ def run_context_small(
                     "full_f1": tf,
                     "budget_f1": tb,
                     "retention": (tb / tf) if tf > 1e-9 else 0.0,
+                    "compact_f1": tc,
+                    "retention_compact_vs_full": (tc / tf) if tf > 1e-9 else 0.0,
                     "n": len(pairs),
                 },
             )
