@@ -41,7 +41,8 @@ if [[ "$cmd" == *"--no-verify"* ]] || [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
   allow
 fi
 
-if ! bash "$ROOT/scripts/preflight_unit.sh"; then
+# Preflight logs must not mix into Cursor's JSON stdout.
+if ! bash "$ROOT/scripts/preflight_unit.sh" >&2; then
   deny "preflight unit failed — fix tests before git push (or SKIP_PREFLIGHT=1 / --no-verify)."
 fi
 
