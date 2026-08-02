@@ -19,19 +19,36 @@ def _phase(msg: str) -> None:
     print(f"[phase] {msg}", flush=True)
 
 
-def _load_baseline_metrics() -> dict[str, float] | None:
+def _load_baseline_metrics() -> tuple[dict[str, float] | None, str]:
+    """Prefer committed ``eval/official/baseline/``; fall back to local latest_retrieval."""
+    from .baseline import load_baseline, suite_metrics
+
+    committed = suite_metrics(load_baseline(), "retrieval")
+    if committed:
+        return committed, "committed eval/official/baseline"
+
     path = reports_dir() / "latest_retrieval.json"
     if not path.is_file():
-        return None
+        return None, "none"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return None
+        return None, "none"
     metrics = data.get("metrics") or (data.get("summary") or {}).get("metrics")
     if not isinstance(metrics, dict):
-        return None
-    out = {k: float(v) for k, v in metrics.items() if isinstance(v, (int, float))}
-    return out or None
+        return None, "none"
+    # Prefer hybrid.* primary macros when present.
+    out: dict[str, float] = {}
+    for k, v in metrics.items():
+        if not isinstance(v, (int, float)):
+            continue
+        if k.startswith("hybrid."):
+            out[k.removeprefix("hybrid.")] = float(v)
+        elif k.startswith("bm25.") or k.startswith("delta_"):
+            continue
+        elif k not in out:
+            out[k] = float(v)
+    return (out or None), "local latest_retrieval.json"
 
 
 def _load_jsonl_map(path: Path, *, id_key: str = "_id", text_keys: tuple[str, ...]) -> dict[str, str]:
@@ -326,10 +343,11 @@ def run_beir_small(*, force_pull: bool = False) -> dict[str, Any]:
         )
 
         _phase("3/3 REGRESS — compare primary macro vs previous baseline")
-        baseline = _load_baseline_metrics()
+        baseline, baseline_src = _load_baseline_metrics()
         delta: dict[str, float] = {}
         primary_flat = macro_arms.get(primary) or {}
         if baseline:
+            print(f"[regress] baseline source: {baseline_src}", flush=True)
             for k, v in primary_flat.items():
                 if k in baseline:
                     delta[k] = float(v) - float(baseline[k])
@@ -338,10 +356,14 @@ def run_beir_small(*, force_pull: bool = False) -> dict[str, Any]:
                         f"[regress] {k}: {baseline[k]:.4f} → {v:.4f} ({sign}{delta[k]:.4f})",
                         flush=True,
                     )
-            _phase("3/3 REGRESS — done (vs previous latest_retrieval.json)")
+            _phase(f"3/3 REGRESS — done (vs {baseline_src})")
         else:
-            print("[regress] no previous baseline — this run becomes the first baseline", flush=True)
-            _phase("3/3 REGRESS — skipped (first run; no prior baseline)")
+            print(
+                "[regress] no baseline — commit one with: "
+                "make official-bench-update-baseline",
+                flush=True,
+            )
+            _phase("3/3 REGRESS — skipped (no committed/local baseline)")
 
         result = {
             "suite": retrieval["id"],

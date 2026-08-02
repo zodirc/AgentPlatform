@@ -94,6 +94,36 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_pub.add_argument("--force", action="store_true")
 
+    p_base = sub.add_parser(
+        "baseline",
+        help="Promote latest_* official runs → committed eval/official/baseline/",
+    )
+    p_base.add_argument(
+        "--update",
+        action="store_true",
+        help="Write baseline JSON from latest_retrieval/context/coding.json",
+    )
+    p_base.add_argument(
+        "--suites",
+        default="retrieval,context,coding",
+        help="Comma list: retrieval,context,coding",
+    )
+    p_base.add_argument(
+        "--show",
+        action="store_true",
+        help="Print current committed baseline path/contents summary",
+    )
+    p_base.add_argument(
+        "--compare",
+        action="store_true",
+        help="Diff latest_* vs committed baseline (primary metrics table)",
+    )
+    p_base.add_argument(
+        "--write-scorecard",
+        action="store_true",
+        help="Regenerate SCORECARD.md from committed baseline JSON",
+    )
+
     args = parser.parse_args(argv)
     ensure_dirs()
 
@@ -103,6 +133,71 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "BENCH_DATA_DIR": str(data_dir()),
                     "BENCH_REPORTS_DIR": str(reports_dir()),
+                },
+                indent=2,
+            )
+        )
+        return 0
+
+    if args.cmd == "baseline":
+        from .baseline import (
+            baseline_path,
+            compare_latest_to_baseline,
+            format_compare_table,
+            load_baseline,
+            scorecard_path,
+            update_baseline_from_latest,
+            write_scorecard,
+        )
+
+        suites = tuple(s.strip() for s in str(args.suites).split(",") if s.strip())
+
+        if args.write_scorecard and not args.update:
+            doc = load_baseline()
+            if not doc:
+                raise SystemExit(f"no baseline at {baseline_path()}")
+            sp = write_scorecard(doc)
+            print(json.dumps({"scorecard": str(sp)}, indent=2))
+            return 0
+
+        if args.compare:
+            report = compare_latest_to_baseline(suites=suites)
+            print(format_compare_table(report))
+            print()
+            print(json.dumps({"latest_meta": report.get("latest_meta")}, indent=2))
+            return 0
+
+        if args.show and not args.update:
+            path = baseline_path()
+            doc = load_baseline()
+            print(
+                json.dumps(
+                    {
+                        "path": str(path),
+                        "scorecard": str(scorecard_path()),
+                        "exists": path.is_file(),
+                        "protocol_version": (doc or {}).get("protocol_version"),
+                        "suites": list(((doc or {}).get("suites") or {}).keys()),
+                        "updated_at": (doc or {}).get("updated_at"),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        if not args.update:
+            raise SystemExit(
+                "baseline: pass --update / --compare / --show / --write-scorecard"
+            )
+        path, doc = update_baseline_from_latest(suites=suites)
+        meta = doc.get("_meta") or {}
+        print(
+            json.dumps(
+                {
+                    "wrote": str(path),
+                    "scorecard": str(scorecard_path()),
+                    "updated_suites": meta.get("updated_suites"),
+                    "skipped": meta.get("skipped"),
+                    "protocol_version": doc.get("protocol_version"),
                 },
                 indent=2,
             )

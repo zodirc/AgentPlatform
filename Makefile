@@ -45,7 +45,9 @@ WEB_REBUILD_DEPS ?= 0
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
 	official-bench-paths official-bench-pull official-bench-retrieval \
 	official-bench-context official-bench-coding-pull official-bench-coding-infer \
-	official-bench-coding-eval official-bench-all official-bench-publish
+	official-bench-coding-eval official-bench-all official-bench-publish \
+	official-bench-update-baseline official-bench-show-baseline \
+	official-bench-compare official-bench-live
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -80,7 +82,9 @@ help: ## 显示常用命令
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
 	@echo "  make retrieval-bench 离线检索 A/B（docs/15 契约近似；hash）"
 	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
-	@echo "  make official-bench-pull/-retrieval/-context/-coding-*  官方小量（BEIR/LongBench/SWE Lite）"
+	@echo "  make official-bench-live     live 实测官方小量（禁 dry/skip；需 BENCH_MODEL_*）"
+	@echo "  make official-bench-compare  latest vs 仓库 SCORECARD/baseline Δ 表"
+	@echo "  make official-bench-update-baseline  认可后写入 baseline+SCORECARD"
 	@echo "  make sync-sources    Turn 外索引（进度在本终端；含挂载 seed）"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make intel-corpus-fetch  拉取/转换 intel vendor 语料（gitignore；docs seed/intel）"
@@ -540,6 +544,40 @@ official-bench-publish: ## 将 latest（或 RUN_ID=）run 导入 Ops（需 OPS_T
 	  test -n "$${OPS_TEST_SECRET:-}" || (echo "OPS_TEST_SECRET missing in env/.env"; exit 1); \
 	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py publish \
 	    $(if $(RUN_ID),--run-id $(RUN_ID),) --force
+
+official-bench-update-baseline: ## 将 latest_* 效果分写入仓库 baseline JSON + SCORECARD.md
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --update \
+	  $(if $(SUITES),--suites $(SUITES),)
+
+official-bench-show-baseline: ## 查看已提交的官方 baseline
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --show
+
+official-bench-compare: ## latest_* vs 仓库 baseline 主指标 Δ（调优看这张表）
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --compare \
+	  $(if $(SUITES),--suites $(SUITES),)
+
+# Live measured official small: ST retrieval + real LLM context/coding (no dry/skip).
+# Requires bench stack + BENCH_MODEL_API_KEY (or MODEL_API_KEY) for context/coding.
+# LIVE_SWE_TIER defaults to n10 (affordable loops); override LIVE_SWE_TIER=n25 etc.
+LIVE_SWE_TIER ?= n10
+official-bench-live: ## live 实测官方小量 → compare（不自动改 baseline）
+	@set -a; [ -f .env ] && . ./.env; set +a; \
+	  key="$${BENCH_MODEL_API_KEY:-$${MODEL_API_KEY:-$${OPENAI_API_KEY:-}}}"; \
+	  if [ -z "$$key" ]; then \
+	    echo "ERROR: live context/coding need BENCH_MODEL_API_KEY (or MODEL_API_KEY)"; \
+	    exit 1; \
+	  fi; \
+	  echo "==> official-bench-live protocol=$$(grep -E '^protocol_version:' eval/official/suites.small.yaml | head -1)"; \
+	  echo "==> SWE tier=$(LIVE_SWE_TIER) harness=$(OFFICIAL_SWE_HARNESS) (SKIP_API forced off)"; \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py pull --suite all; \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval; \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py context --limit $(OFFICIAL_CONTEXT_LIMIT); \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer \
+	    --tier $(LIVE_SWE_TIER) $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),) \
+	    $(if $(filter 1,$(OFFICIAL_SWE_HARNESS)),--harness,); \
+	  echo ""; echo "==> compare vs committed baseline"; \
+	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --compare; \
+	  echo ""; echo "认可本次则: make official-bench-update-baseline && git add eval/official/baseline/"
 
 retrieval-bench: ## 离线检索 A/B（docs/15 契约近似；json+hash）
 	@cd services/runtime && \

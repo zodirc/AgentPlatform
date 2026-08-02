@@ -266,7 +266,12 @@ function Row({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function yn(v: boolean | null | undefined, t: (typeof COPY)["zh"]): string {
+type OverviewCopy = (typeof COPY)[Locale];
+
+function yn(
+  v: boolean | null | undefined,
+  t: Pick<OverviewCopy, "yes" | "no">,
+): string {
   if (v === true) return t.yes;
   if (v === false) return t.no;
   return "—";

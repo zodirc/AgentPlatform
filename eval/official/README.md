@@ -6,10 +6,13 @@
 
 每次跑分写：
 
-- 过程：`eval/reports/official/runs/<uuid>/process.jsonl`
+- 过程：`eval/reports/official/runs/<uuid>/process.jsonl`（**不进 git**）
 - 结果：`manifest.json` / `result.json`
 - 可视化：`report.html`（浏览器直接打开）
 - Ops：自动 `publish`（需 `OPS_TEST_SECRET` + 栈）→ **官方评测**页 / 历史 `suite=official`
+- **仓库一眼看板**：[`baseline/SCORECARD.md`](baseline/SCORECARD.md)（主指标表）  
+- **机器锚点**：`baseline/<protocol_version>.json`  
+  Live 调优：`make official-bench-live` → `make official-bench-compare` → 认可后 `make official-bench-update-baseline`
 
 ---
 
