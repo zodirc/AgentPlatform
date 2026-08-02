@@ -4,6 +4,14 @@
 数据进 `BENCH_DATA_DIR`（默认 `~/.cache/agentplatform-bench`），**不进 git**。  
 协议：`protocol_version: official-small-2026-08-m1`（见 [`suites.small.yaml`](suites.small.yaml)）。
 
+> **调优方案（主指数 = 主 agent Turn × 官方题集）**：[`docs/topics/official-bench-agent-tuning.md`](../../docs/topics/official-bench-agent-tuning.md)。  
+>
+> **L1（agent-path，已接线）**：Ops 官方页「评测路径 = L1 agent」或  
+> `make official-bench-retrieval-agent` / `context-agent` / `coding-infer-agent`  
+> （需 `make up`、`OPS_TEST_SECRET`、`BENCH_MODEL_*`；冒烟可加 `QUERY_LIMIT=5`）。  
+> 协议戳记 `official-small-2026-08-m2`。L0 component（m1 hybrid/旁路）仍可用作对照。  
+> **中文全流程图**：[`docs/assets/ops/official-l1-agent-path-flow-zh.png`](../../docs/assets/ops/official-l1-agent-path-flow-zh.png)
+
 每次跑分写：
 
 - 过程：`eval/reports/official/runs/<uuid>/process.jsonl`（**不进 git**）

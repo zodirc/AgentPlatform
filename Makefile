@@ -47,7 +47,9 @@ WEB_REBUILD_DEPS ?= 0
 	official-bench-context official-bench-coding-pull official-bench-coding-infer \
 	official-bench-coding-eval official-bench-all official-bench-publish \
 	official-bench-update-baseline official-bench-show-baseline \
-	official-bench-compare official-bench-live
+	official-bench-compare official-bench-live \
+	official-bench-retrieval-agent official-bench-context-agent \
+	official-bench-coding-infer-agent
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -502,6 +504,7 @@ OFFICIAL_CONTEXT_LIMIT ?= 0
 OFFICIAL_SWE_TIER ?= n25
 OFFICIAL_SWE_N ?=
 OFFICIAL_SWE_HARNESS ?= 0
+QUERY_LIMIT ?= 0
 
 official-bench-paths: ## 打印官方评测数据/报告目录
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py paths
@@ -512,12 +515,24 @@ official-bench-pull: ## 拉取 BEIR + LongBench 小切片 + SWE-bench Lite（需
 official-bench-retrieval: ## 官方 BEIR 小量（hybrid 主分 + BM25 对照）
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval
 
+# L1 agent-path（产品 Turn；需 make up + OPS_TEST_SECRET + BENCH_MODEL_*）
+# 冒烟可加 QUERY_LIMIT=5 / OFFICIAL_CONTEXT_LIMIT=3 / OFFICIAL_SWE_TIER=n3
+official-bench-retrieval-agent: ## L1 BEIR：search_sources via Turn（Ops API）
+	set -a && [ -f .env ] && . ./.env; set +a; \
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval --eval-path agent \
+	  --query-limit $(QUERY_LIMIT)
+
 official-bench-context: ## 官方 LongBench 小量双臂（CONTEXT_DRY=1 仅流水线）
 	@if [ "$(CONTEXT_DRY)" = "1" ]; then \
 	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py context --dry-metrics --limit $(OFFICIAL_CONTEXT_LIMIT); \
 	else \
 	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py context --limit $(OFFICIAL_CONTEXT_LIMIT); \
 	fi
+
+official-bench-context-agent: ## L1 LongBench：落盘 + Turn 终答（Ops API）
+	set -a && [ -f .env ] && . ./.env; set +a; \
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py context --eval-path agent \
+	  --limit $(OFFICIAL_CONTEXT_LIMIT)
 
 official-bench-coding-pull: ## 拉取 SWE-bench Lite 题集
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase pull
@@ -528,6 +543,11 @@ official-bench-coding-infer: ## SWE tier 推理写 predictions（OFFICIAL_SWE_SK
 	else \
 	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --tier $(OFFICIAL_SWE_TIER) $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),) $(if $(filter 1,$(OFFICIAL_SWE_HARNESS)),--harness,); \
 	fi
+
+official-bench-coding-infer-agent: ## L1 SWE infer：platform Turn（Ops API）
+	set -a && [ -f .env ] && . ./.env; set +a; \
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --eval-path agent \
+	  --tier $(OFFICIAL_SWE_TIER) $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),)
 
 official-bench-coding-eval: ## 官方 swebench.harness 评分（需 Docker + pip install swebench）
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase eval

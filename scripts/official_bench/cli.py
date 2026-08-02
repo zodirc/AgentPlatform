@@ -40,6 +40,18 @@ def main(argv: list[str] | None = None) -> int:
 
     p_ret = sub.add_parser("retrieval", help="Run BEIR small (BM25 + nDCG/Recall)")
     p_ret.add_argument("--force-pull", action="store_true")
+    p_ret.add_argument(
+        "--eval-path",
+        choices=["component", "agent"],
+        default="component",
+        help="component=L0 bench IR; agent=L1 product Turn via Ops API",
+    )
+    p_ret.add_argument(
+        "--query-limit",
+        type=int,
+        default=0,
+        help="L1 only: cap queries per dataset (0=all)",
+    )
 
     p_ctx = sub.add_parser(
         "context",
@@ -51,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-metrics",
         action="store_true",
         help="Skip LLM calls (pipeline smoke only)",
+    )
+    p_ctx.add_argument(
+        "--eval-path",
+        choices=["component", "agent"],
+        default="component",
+        help="component=L0 arms; agent=L1 product Turn via Ops API",
     )
 
     p_code = sub.add_parser("coding", help="SWE-bench Lite phases")
@@ -73,6 +91,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Write empty patches (harness wiring only)",
     )
     p_code.add_argument("--predictions", type=Path, default=None)
+    p_code.add_argument(
+        "--eval-path",
+        choices=["component", "agent"],
+        default="component",
+        help="component=L0 bench_model; agent=L1 product Turn via Ops API",
+    )
 
     p_all = sub.add_parser("all", help="Pull all + run retrieval; context/coding per flags")
     p_all.add_argument("--force-pull", action="store_true")
@@ -228,9 +252,27 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "retrieval":
+        if getattr(args, "eval_path", "component") == "agent":
+            from .agent_path_ops import model_from_env, start_and_wait
+
+            data = start_and_wait(
+                ["retrieval"],
+                model=model_from_env(),
+                retrieval_query_limit=int(args.query_limit or 0),
+            )
+            return 0 if str(data.get("status")) == "completed" else 1
         return _exit_from_manifest(run_beir_small(force_pull=args.force_pull))
 
     if args.cmd == "context":
+        if getattr(args, "eval_path", "component") == "agent":
+            from .agent_path_ops import model_from_env, start_and_wait
+
+            data = start_and_wait(
+                ["context"],
+                model=model_from_env(),
+                context_limit=int(args.limit or 0),
+            )
+            return 0 if str(data.get("status")) == "completed" else 1
         return _exit_from_manifest(
             run_context_small(
                 force_pull=args.force_pull,
@@ -243,6 +285,19 @@ def main(argv: list[str] | None = None) -> int:
         if args.phase == "pull":
             run_swe_pull_only(force_pull=args.force_pull)
             return 0
+        if getattr(args, "eval_path", "component") == "agent" and args.phase in {
+            "infer",
+            "all",
+        }:
+            from .agent_path_ops import model_from_env, start_and_wait
+
+            data = start_and_wait(
+                ["coding_infer"],
+                model=model_from_env(),
+                coding_tier=args.tier,
+                coding_n_instances=args.n_instances,
+            )
+            return 0 if str(data.get("status")) == "completed" else 1
         if args.phase == "infer":
             return _exit_from_manifest(
                 run_swe_infer(

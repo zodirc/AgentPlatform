@@ -620,6 +620,8 @@ export function OfficialBenchPage() {
     { id: "custom", n_instances: null },
   ]);
   const [retrievalProd, setRetrievalProd] = useState(true);
+  /** agent = L1 product Turn (default); component = L0 bench worker. */
+  const [evalPath, setEvalPath] = useState<"agent" | "component">("agent");
   // Empty until user picks a preset or restores real prefs — do not invent deepseek defaults.
   const [modelProvider, setModelProvider] = useState("");
   const [modelApiStyle, setModelApiStyle] = useState<ApiStyle>("openai");
@@ -1336,6 +1338,7 @@ export function OfficialBenchPage() {
           coding_n_instances: tier === "custom" ? nInst : null,
           coding_harness: harness,
           retrieval_prod: prod,
+          eval_path: evalPath,
           force: Boolean(opts?.force),
           model: modelPayload ?? null,
         }),
@@ -1841,6 +1844,23 @@ export function OfficialBenchPage() {
               </label>
             </>
           ) : null}
+          <label
+            className="inline-flex items-center gap-2"
+            title="agent=主指数（产品 Turn）；component=L0 bench 旁路对照"
+          >
+            <span className="text-muted-foreground">评测路径</span>
+            <select
+              value={evalPath}
+              disabled={busy}
+              onChange={(e) =>
+                setEvalPath(e.target.value === "component" ? "component" : "agent")
+              }
+              className="rounded border border-border bg-background px-1.5 py-0.5"
+            >
+              <option value="agent">L1 agent（主路径）</option>
+              <option value="component">L0 component（对照）</option>
+            </select>
+          </label>
           <button
             type="button"
             disabled={busy || Array.from(selectedSuites).filter(targetEnabled).length === 0}

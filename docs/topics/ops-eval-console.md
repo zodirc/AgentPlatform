@@ -5,7 +5,8 @@
 > 测试核心是结果一致，不是跟手时间。不进写作热路径（见 [13](../core/13-rate-redlines.md) R1–R5）。  
 > **边界**：Ops 是内部后端能力（密钥 URL + api）；与面向用户的 Web / `/workspace` / Work **文件系统隔离**。  
 > **观测**：检索审计 → [§6](#6-检索审计观测-hm5--ro1)；模型信封 → [§7](#7-模型信封-hm4)；Raw → [§8](#8-raw-快照只读-hm2) · [33](../archive/33-harness-maturity-backlog.md)。  
-> **速率纪律**：Ops 仅密钥 URL + 只读 API/页；**不**进入写作/Agent 工作台导航热路径，**不**改 `AgentEngine` / SSE 主路径（R1–R5）。
+> **速率纪律**：Ops 仅密钥 URL + 只读 API/页；**不**进入写作/Agent 工作台导航热路径，**不**改 `AgentEngine` / SSE 主路径（R1–R5）。  
+> **官方小量调优**：主指数应走主 agent Turn — 见 [official-bench-agent-tuning](official-bench-agent-tuning.md)。
 
 ## 0. 流程图
 

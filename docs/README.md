@@ -46,6 +46,7 @@ Agent Platform：**一个 Runtime，多个 Scenario**。验证：`make gate` · 
 | 多租户 | [multi-tenancy](topics/multi-tenancy.md) |
 | Proof / UX | [proof-gate-and-ux-signals](topics/proof-gate-and-ux-signals.md) |
 | Ops | [ops-eval-console](topics/ops-eval-console.md) |
+| Official Bench 调优 | [official-bench-agent-tuning](topics/official-bench-agent-tuning.md)（主 agent 路径 × 官方题集） |
 | 沙箱 | [sandbox](topics/sandbox.md) |
 | 读降本 | [read-cache](topics/read-cache.md) |
 | collab | [collab-multi-agent](topics/collab-multi-agent.md) |

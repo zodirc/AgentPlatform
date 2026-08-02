@@ -32,24 +32,24 @@ CRITERIA: list[dict[str, str]] = [
         "official": "BEIR",
         "title": "检索（BEIR 小量）",
         "metrics": "nDCG@k · Recall@k · MAP@k（宏平均）",
-        "pass_rule": "以 hybrid 宏平均为主分；BM25 为对照地板。看 hybrid−BM25 的 Δ 与前后跑次回归。",
-        "notes": "默认臂=平台 hybrid（BM25∥向量→RRF）。hash=冒烟；真向量在独立 bench 服务（ST，不进 agent runtime）。",
+        "pass_rule": "L1(agent)=search_sources hits；L0(component)=hybrid IR。同 eval_path 才可比 Δ。",
+        "notes": "L1=产品 Turn（主指数，见 official-bench-agent-tuning）。L0=bench hybrid∥BM25 对照。",
     },
     {
         "id": "context",
         "official": "LongBench",
         "title": "上下文（LongBench 小量）",
-        "metrics": "full_f1 · budget_f1 · compact_f1 · retention_vs_full · retention_compact_vs_full",
-        "pass_rule": "三臂同模型：full 上限、truncate 地板、ContextEngine compact。dry=无模型管道，不作效果结论。",
-        "notes": "bench 进程内 import ContextEngine；不写产品 sessions / 不经 Turn。",
+        "metrics": "L1 agent_f1；L0 full/truncate/compact F1",
+        "pass_rule": "L1=落盘+Turn 终答；L0=旁路三臂。dry=无模型管道，不作效果结论。",
+        "notes": "L1 不经单消息 assemble；走 read_file/search_sources 主路径。",
     },
     {
         "id": "coding",
         "official": "SWE-bench Lite",
         "title": "编码（SWE-bench Lite）",
         "metrics": "coding_tier · n_instances · patch_rate；resolve 仅 harness+Docker",
-        "pass_rule": "同 protocol + 同 coding_tier/n_instances/选题指纹才可比 Δ。官方效果=harness resolve；skip_api≠效果。",
-        "notes": "默认 n25；档位 3/5/10/25/full300/custom≥3。默认 bench 直出 patch，不经产品 Turn。",
+        "pass_rule": "同 protocol + eval_path + coding_tier/fingerprint 才可比。官方效果=harness resolve。",
+        "notes": "L1=platform Turn+propose_patch；L0=bench 直出。默认锚点档 n25。",
     },
 ]
 
@@ -82,6 +82,10 @@ class OfficialLiveRun:
     coding_n_instances: int | None = None
     coding_harness: bool = False
     retrieval_prod: bool = False
+    # agent = L1 product Turn path; component = L0 bench worker (legacy default for UI compat)
+    eval_path: str = "agent"
+    context_limit: int = 0
+    retrieval_query_limit: int = 0
     model: dict[str, Any] | None = None
     logs: list[dict[str, Any]] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -222,6 +226,9 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "coding_n_instances": run.coding_n_instances,
             "coding_harness": run.coding_harness,
             "retrieval_prod": run.retrieval_prod,
+            "eval_path": run.eval_path,
+            "context_limit": run.context_limit,
+            "retrieval_query_limit": run.retrieval_query_limit,
             "bench_job_id": run._bench_job_id,
             "phase_hint": run.phase_hint,
             "model": _model_meta_safe(run.model),
@@ -520,6 +527,9 @@ async def create_and_start(
     retrieval_prod: bool = True,
     force: bool = False,
     model: dict[str, Any] | None = None,
+    eval_path: str = "agent",
+    context_limit: int = 0,
+    retrieval_query_limit: int = 0,
 ) -> OfficialLiveRun:
     cleaned: list[str] = []
     for t in targets:
@@ -560,6 +570,10 @@ async def create_and_start(
             else:
                 raise ValueError(f"official_run_already_active:{r.id}")
 
+    path = (eval_path or "agent").strip().lower()
+    if path not in {"agent", "component"}:
+        raise ValueError(f"unknown_eval_path:{eval_path}")
+
     run = OfficialLiveRun(
         id=str(uuid4()),
         targets=cleaned,
@@ -569,8 +583,16 @@ async def create_and_start(
         coding_n_instances=coding_n_instances,
         coding_harness=coding_harness,
         retrieval_prod=retrieval_prod,
+        eval_path=path,
+        context_limit=max(0, int(context_limit or 0)),
+        retrieval_query_limit=max(0, int(retrieval_query_limit or 0)),
         model=model,
         progress_total=len(cleaned),
+        phase_hint=(
+            "L1 agent-path：产品 Turn → 官方指标"
+            if path == "agent"
+            else "L0 component：bench 旁路对照"
+        ),
         cases=[
             {
                 "case_id": f"official.{t}",
@@ -817,6 +839,78 @@ async def _execute_via_bench(run: OfficialLiveRun) -> None:
         run.status = "cancelled" if run.cancel_requested else "failed"
 
 
+async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
+    """L1: official suites through product Turns (not agent-bench)."""
+    from app.services.ops import official_agent_path
+
+    await _publish(
+        run,
+        {
+            "kind": "log",
+            "message": "[ops] L1 agent-path — product Session/Turn (not bench worker)",
+        },
+    )
+    run.current_phase = "eval"
+    run.phase_hint = "L1：主 agent Turn 评测中"
+
+    async def on_progress(ev: dict[str, Any]) -> None:
+        if run.cancel_requested:
+            return
+        msg = str(ev.get("message") or ev.get("kind") or "")
+        if msg:
+            await _publish(run, {"kind": "log", "message": msg})
+        if len(run.logs) % 15 == 0:
+            await _persist_snapshot(run)
+
+    # pull is embedded per-suite; drop standalone pull target for L1
+    targets = [t for t in run.targets if t not in {"pull", "coding_pull"}]
+    if not targets:
+        targets = ["retrieval"]
+    for case in run.cases:
+        cid = str(case.get("case_id") or "")
+        suite = cid.removeprefix("official.")
+        if suite in targets or suite == "coding" and "coding_infer" in targets:
+            case["status"] = "running"
+
+    try:
+        results = await official_agent_path.run_l1_targets(
+            targets,
+            model=run.model,
+            coding_tier=run.coding_tier,
+            coding_n_instances=run.coding_n_instances,
+            context_limit=run.context_limit,
+            retrieval_query_limit=run.retrieval_query_limit,
+            on_progress=on_progress,
+        )
+    except Exception as exc:  # noqa: BLE001
+        run.error = str(exc)
+        for case in run.cases:
+            if case.get("status") in {"pending", "running"}:
+                case["status"] = "fail"
+                case["error"] = str(exc)
+        raise
+
+    for case in run.cases:
+        suite = str(case.get("case_id") or "").removeprefix("official.")
+        key = "coding_infer" if suite == "coding" else suite
+        manifest = results.get(key) or results.get(suite)
+        if manifest is None and suite == "coding":
+            manifest = results.get("coding_infer") or results.get("coding")
+        if isinstance(manifest, dict):
+            case["status"] = "pass" if manifest.get("status") != "failed" else "fail"
+            case["metrics"] = manifest.get("metrics") or {}
+            case["error"] = manifest.get("error")
+            run.child_reports.append(
+                {
+                    "suite": suite,
+                    "run_id": manifest.get("id") or manifest.get("run_id"),
+                    "eval_path": "agent",
+                }
+            )
+        elif case.get("status") == "running":
+            case["status"] = "skipped"
+
+
 async def _execute(run_id: str) -> None:
     run = _RUNS.get(run_id)
     if run is None:
@@ -831,7 +925,9 @@ async def _execute(run_id: str) -> None:
     env = {"BENCH_REPORTS_DIR": reports_dir}
 
     try:
-        if bench_client.bench_enabled():
+        if run.eval_path == "agent":
+            await _execute_via_agent_path(run)
+        elif bench_client.bench_enabled():
             await _execute_via_bench(run)
         else:
             await _execute_local(run)
@@ -1056,6 +1152,9 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "coding_n_instances": run.coding_n_instances,
         "coding_harness": run.coding_harness,
         "retrieval_prod": run.retrieval_prod,
+        "eval_path": run.eval_path,
+        "context_limit": run.context_limit,
+        "retrieval_query_limit": run.retrieval_query_limit,
         "model": _model_meta_safe(run.model),
         "created_at": run.created_at,
         "finished_at": run.finished_at,

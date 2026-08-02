@@ -991,20 +991,38 @@ class AgentEngine:
             if mode in {"vector", "keyword", "hybrid", "keyword-fallback"}:
                 raw_hits = result.get("hits", [])
                 hits_preview: list[dict[str, Any]] = []
+                # Keep path+score for up to 100 hits so official L1 / Ops can score
+                # nDCG@10 and R@100 without changing the tool_result the model sees.
+                ranked_for_score: list[dict[str, Any]] = []
                 if isinstance(raw_hits, list):
-                    for hit in raw_hits[:5]:
+                    for i, hit in enumerate(raw_hits[:100]):
                         if not isinstance(hit, dict):
                             continue
+                        path = str(hit.get("path", ""))
+                        score = hit.get("score")
+                        ranked_for_score.append(
+                            {
+                                "path": path,
+                                **({"score": score} if score is not None else {}),
+                                **(
+                                    {"chunk_id": str(hit["chunk_id"])}
+                                    if hit.get("chunk_id")
+                                    else {}
+                                ),
+                            }
+                        )
+                        if i >= 5:
+                            continue
                         preview: dict[str, Any] = {
-                            "path": str(hit.get("path", "")),
+                            "path": path,
                             "excerpt": str(hit.get("excerpt", ""))[:200],
                         }
                         if hit.get("citation_id"):
                             preview["citation_id"] = str(hit["citation_id"])
                         if hit.get("chunk_id"):
                             preview["chunk_id"] = str(hit["chunk_id"])
-                        if hit.get("score") is not None:
-                            preview["score"] = hit["score"]
+                        if score is not None:
+                            preview["score"] = score
                         hits_preview.append(preview)
                 retrieval_payload: dict[str, Any] = {
                     "query": str(result.get("query", "")),
@@ -1012,6 +1030,7 @@ class AgentEngine:
                     "hit_count": len(raw_hits) if isinstance(raw_hits, list) else 0,
                     "summary": str(result.get("summary", ""))[:512],
                     "hits": hits_preview,
+                    "ranked": ranked_for_score,
                 }
                 index_info = result.get("index")
                 if isinstance(index_info, dict):

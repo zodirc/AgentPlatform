@@ -51,6 +51,10 @@ class StartOfficialBody(BaseModel):
     coding_harness: bool = False
     # Default = real ST vectors on bench worker (effect score). Hash is opt-in smoke.
     retrieval_prod: bool = True
+    # agent = L1 product Turn (default); component = L0 bench worker.
+    eval_path: Literal["agent", "component"] = "agent"
+    context_limit: int = Field(default=0, ge=0, le=10_000)
+    retrieval_query_limit: int = Field(default=0, ge=0, le=50_000)
     force: bool = False
     model: ModelBody | None = None
 
@@ -475,6 +479,9 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             retrieval_prod=body.retrieval_prod,
             force=body.force,
             model=body.model.model_dump() if body.model else None,
+            eval_path=body.eval_path,
+            context_limit=body.context_limit,
+            retrieval_query_limit=body.retrieval_query_limit,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
