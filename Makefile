@@ -8,6 +8,9 @@ COMPOSE_OPS_EVAL := docker compose -f deploy/docker-compose.yml -f deploy/compos
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
+# Daily make up/start enable Ops bench via profile. Not exported — CI/smoke/eval
+# must not inherit it (see scripts/proof_compose_env.sh / smoke_test.sh).
+COMPOSE_PROFILES ?= bench
 # Isolated stub golden uses runtime-lite (hash, thin Dockerfile) so evals do not
 # rebuild the default sentence-transformers image. Restore uses main COMPOSE (live + ST).
 EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml
@@ -100,7 +103,7 @@ fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
 	@bash scripts/ensure_workspace_sources_writable.sh
 
 start: ensure-ops-secret ensure-git-hooks ## 启动栈（不 rebuild，最快）
-	$(COMPOSE) up -d
+	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d
 	@$(MAKE) --no-print-directory fix-workspace-sources
 
 # Safe: only removes untagged (<none>) images left by retag-after-build.
@@ -112,7 +115,7 @@ define docker_auto_prune
 endef
 
 up: ensure-ops-secret ensure-git-hooks ## 重建并启动全部服务
-	$(COMPOSE) up -d --build
+	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
 
@@ -159,11 +162,11 @@ up-runtime: ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 S
 up-bench: ensure-ops-secret ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
 	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench"; \
-	  $(COMPOSE) build --no-cache bench; \
+	  COMPOSE_PROFILES=bench $(COMPOSE) build --no-cache bench; \
 	fi
 	@echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"
-	$(COMPOSE) up -d bench-postgres
-	$(COMPOSE) up -d --build bench
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d --build bench
 	$(docker_auto_prune)
 
 restart-web: ## 重启 web（不 rebuild）
@@ -186,13 +189,13 @@ web-dev: ## 前端开发服务器（代理 /api → localhost:8000）
 	cd services/web && corepack enable && pnpm dev
 
 down:
-	$(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval down
+	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval down
 
 ps:
-	$(COMPOSE) ps
+	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) ps
 
 logs:
-	$(COMPOSE) logs -f api runtime
+	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) logs -f api runtime
 
 build:
 	$(COMPOSE) build

@@ -301,7 +301,8 @@ def search_hybrid_all(
             flush=True,
         )
         workers = search_workers()
-        pool = search_pool_mode()
+        # Shared SentenceTransformer must not be process-multiplied (OOM / BrokenProcessPool).
+        pool = search_pool_mode(default="thread")
         items = list(queries.items())
         print(
             f"[eval] hybrid search {len(items)} queries · "
@@ -310,6 +311,11 @@ def search_hybrid_all(
         )
 
         if pool == "process" and workers > 1 and len(items) > 1:
+            print(
+                "[eval] hybrid process pool is opt-in (BENCH_SEARCH_POOL=process); "
+                "expect high RSS (ST×workers)",
+                flush=True,
+            )
             return map_queries_process(
                 items,
                 _hybrid_worker_search,

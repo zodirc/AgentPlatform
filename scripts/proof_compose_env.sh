@@ -11,8 +11,42 @@
 # Override: PROOF_KEEP_APP_ENV=1 to honor .env APP_ENV during proof.
 # Optional: PROOF_APP_ENV=development|production
 # Optional: PROOF_KEEP_MIRRORS=1 to keep China mirrors even under CI=true.
+# Optional: PROOF_WITH_BENCH=1 / SMOKE_WITH_BENCH=1 to keep compose profile "bench".
+
+# Remove a single name from COMPOSE_PROFILES (comma-separated).
+_proof_strip_compose_profile() {
+  local name="$1"
+  local cur="${COMPOSE_PROFILES:-}"
+  local out=""
+  local part
+  if [[ -z "${cur}" ]]; then
+    export COMPOSE_PROFILES=""
+    return 0
+  fi
+  local _parts
+  IFS=',' read -r -a _parts <<<"${cur}"
+  for part in "${_parts[@]}"; do
+    part="${part//[[:space:]]/}"
+    [[ -z "${part}" || "${part}" == "${name}" ]] && continue
+    if [[ -n "${out}" ]]; then
+      out="${out},${part}"
+    else
+      out="${part}"
+    fi
+  done
+  export COMPOSE_PROFILES="${out}"
+}
 
 proof_compose_env_apply() {
+  # Ops bench is unrelated to smoke/golden. Under CI, omit profile so
+  # `compose up --build` does not build the ST bench worker.
+  if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then
+    if [[ "${PROOF_WITH_BENCH:-0}" != "1" && "${SMOKE_WITH_BENCH:-0}" != "1" ]]; then
+      _proof_strip_compose_profile bench
+      echo "==> proof: compose profile 'bench' disabled (PROOF_WITH_BENCH=1 / SMOKE_WITH_BENCH=1 to keep)"
+    fi
+  fi
+
   if [[ "${PROOF_KEEP_APP_ENV:-0}" != "1" ]]; then
     # Only normalize when running the CI/preflight proof path.
     if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then

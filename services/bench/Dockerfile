@@ -1,16 +1,45 @@
 # syntax=docker/dockerfile:1
 # Ops Bench worker: official small suites with real ST embeddings.
-# Decoupled from agent runtime Turn path — only shares the baked MiniLM
-# weights from the runtime image when available (no HF download at build).
+# Self-contained MiniLM bake (does NOT FROM agent-platform-runtime:default).
+# CI smoke uses runtime-lite and omits the compose profile "bench" so gate
+# never needs the heavy ST runtime image just to start api.
 
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
 ARG APT_MIRROR=mirrors.aliyun.com
-ARG RUNTIME_IMAGE=agent-platform-runtime:default
+ARG HF_ENDPOINT=https://hf-mirror.com
 ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
 
-FROM ${RUNTIME_IMAGE} AS model-src
+FROM python:3.11-slim AS model-baker
+ARG EMBEDDING_MODEL
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG TORCH_FIND_LINKS
+ARG HF_ENDPOINT
+ARG APT_MIRROR
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HF_ENDPOINT=${HF_ENDPOINT} \
+    HUGGINGFACE_HUB_ENDPOINT=${HF_ENDPOINT}
+
+RUN set -eux; \
+    if [ -n "${APT_MIRROR}" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
+      elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
+      fi; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
+    && pip install --no-cache-dir "sentence-transformers>=3.0"
+RUN python -c "\
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"
 
 FROM python:3.11-slim AS deps
 ARG PIP_INDEX_URL
@@ -42,8 +71,7 @@ RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir -r /tmp/bench-requirements.txt \
     && rm -f /tmp/bench-requirements.txt
 
-# Reuse MiniLM weights already baked into the retrieval runtime image.
-COPY --from=model-src --chown=app:app /app/models-baked /app/models-baked
+COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
 
 FROM deps AS app
 ARG EMBEDDING_MODEL

@@ -22,6 +22,11 @@ if [[ "${SMOKE_RUNTIME_LITE:-}" == "1" ]] || [[ "${CI:-}" == "true" ]]; then
   COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml --env-file .env"
   export EMBEDDING_BACKEND="${EMBEDDING_BACKEND:-hash}"
   export EMBEDDING_DIMENSIONS="${EMBEDDING_DIMENSIONS:-256}"
+  # Bench profile pulls ST worker; not needed for L0 smoke / golden gate.
+  if [[ "${SMOKE_WITH_BENCH:-0}" != "1" ]]; then
+    _proof_strip_compose_profile bench
+    echo "==> smoke: compose profile 'bench' omitted (runtime-lite / CI)"
+  fi
 fi
 BASE_URL="${SMOKE_BASE_URL:-http://localhost}"
 # L0 smoke is a contract path (docs/11 / docs/28): default stub so gate does not

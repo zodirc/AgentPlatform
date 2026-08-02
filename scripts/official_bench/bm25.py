@@ -94,7 +94,8 @@ def search_all(
 ) -> dict[str, dict[str, float]]:
     items = list(queries.items())
     workers = search_workers()
-    pool = search_pool_mode()
+    # Light picklable index — process pool is the matching parallel unit.
+    pool = search_pool_mode(default="process")
     if items:
         print(
             f"[eval] bm25 search {len(items)} queries · "

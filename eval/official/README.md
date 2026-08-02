@@ -41,6 +41,8 @@
 - ① 检索：**默认 ST 真向量**（独立 `agent-bench` + **专用 `bench-postgres`/pgvector**，不碰产品库）；仅调试管线时再改用 hash 冒烟或 `BENCH_RETRIEVAL_BACKEND=json`
 - ② 上下文：三臂 **full / truncate / ContextEngine compact**（bench 内 import，不写产品 sessions）；「无模型（管道）」= dry
 - ③ 编码：可调档 **3 / 5 / 10 / 25（默认）/ full300 / custom≥3**；默认 bench 直出 patch；官方 resolve 需勾选 harness（Docker）
+- 评测模型区 **测试联通**：从 `agent-bench` 出站短请求（与正式评测同路径）；DeepSeek 预设默认 `deepseek-v4-flash`
+- 聊天调用自动重试瞬断 / 429 / 5xx（`BENCH_MODEL_MAX_RETRIES`，默认 6）
 - 历史旁 **清空**：删 Bench 历史与报告目录，**保留** BEIR 等数据缓存
 
 重建：`make up-bench && make up-api && make up-web`（`up-bench` 会拉起 `bench-postgres`）
@@ -133,8 +135,8 @@ grep OPS_TEST_SECRET .env
 
 | Make 目标 | 官方来源 | 指标 | 产品对齐 | 非对齐 |
 |-----------|----------|------|----------|--------|
-| `official-bench-retrieval` | BEIR | nDCG@k / Recall@k | 平台 hybrid + ST/pgvector（bench 专用库） | hash 冒烟 |
-| `official-bench-context` | LongBench | full / truncate / compact F1 + retention | ContextEngine assemble（库导入） | dry 管道 |
+| `official-bench-retrieval` | BEIR | nDCG@k / Recall@k | 平台 hybrid + ST/pgvector（bench 专用库）；hybrid 搜索默认 thread（避免 ST×N OOM），BM25 默认 process | hash 冒烟 |
+| `official-bench-context` | LongBench | full / truncate / compact F1 + retention | ContextEngine assemble（库导入）；pull 走官方 `data.zip`（兼容 datasets≥4） | dry 管道 |
 | `official-bench-coding-*` | SWE-bench Lite | patch_rate；**resolve=harness** | bench 直出 patch + 固定档位切片 | skip_api；产品 Turn（默认关） |
 
 改 harness 后：固定模型与 `protocol_version`（及编码档指纹），对比两次 `report.html` / Ops 指标 Δ。

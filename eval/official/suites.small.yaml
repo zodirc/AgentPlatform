@@ -36,8 +36,11 @@ suites:
   context:
     id: longbench.small
     official: LongBench
-    # HuggingFace: THUDM/LongBench — small task slice for three-arm harness.
+    # Primary pull: official data.zip (datasets≥4 rejects THUDM loader scripts).
+    # Fallback: hf_dataset / hf_dataset_parquet via `datasets`.
     hf_dataset: THUDM/LongBench
+    hf_dataset_parquet: GinkgoQ/LongBench
+    hf_data_zip: https://huggingface.co/datasets/THUDM/LongBench/resolve/main/data.zip
     hf_revision: main
     tasks:
       - multifieldqa_en

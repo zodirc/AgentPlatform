@@ -183,6 +183,213 @@ def pull_beir(cfg: dict[str, Any] | None = None, *, force: bool = False) -> Path
     return root
 
 
+_LONGBENCH_DATA_ZIP_DEFAULT = (
+    "https://huggingface.co/datasets/THUDM/LongBench/resolve/main/data.zip"
+)
+# Parquet mirror (datasets≥4): THUDM/LongBench still ships a loader script that
+# HuggingFace datasets 4.x rejects entirely.
+_LONGBENCH_HF_PARQUET_FALLBACK = "GinkgoQ/LongBench"
+
+
+def _normalize_longbench_row(task: str, idx: int, row: dict[str, Any]) -> dict[str, Any]:
+    """Map a LongBench record into the official-bench slice schema."""
+    return {
+        "task": task,
+        "idx": idx,
+        "input": row.get("input") or row.get("context") or "",
+        "context": row.get("context") or "",
+        "question": row.get("input") or row.get("question") or "",
+        "answers": row.get("answers") if row.get("answers") is not None else row.get("answer"),
+        "length": row.get("length"),
+        "dataset": row.get("dataset") or task,
+        "language": row.get("language") or "en",
+        "all_classes": row.get("all_classes"),
+        "_raw_keys": sorted(list(row.keys())),
+    }
+
+
+def _read_longbench_task_jsonl(path: Path, *, task: str, max_n: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            raw = json.loads(line)
+            if not isinstance(raw, dict):
+                continue
+            rows.append(_normalize_longbench_row(task, len(rows), raw))
+            if len(rows) >= max_n:
+                break
+    return rows
+
+
+def _longbench_jsonl_path(extract_root: Path, task: str) -> Path | None:
+    """Locate ``<task>.jsonl`` under a data.zip extract (layout may nest once)."""
+    candidates = [
+        extract_root / "data" / f"{task}.jsonl",
+        extract_root / f"{task}.jsonl",
+        extract_root / "data" / "data" / f"{task}.jsonl",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    # Last resort: scan one level.
+    for base in (extract_root, extract_root / "data"):
+        if not base.is_dir():
+            continue
+        hit = base / f"{task}.jsonl"
+        if hit.is_file():
+            return hit
+    return None
+
+
+def _pull_longbench_from_zip(
+    root: Path,
+    ctx: dict[str, Any],
+    *,
+    force: bool,
+) -> list[dict[str, Any]]:
+    """Official path: download THUDM data.zip and slice task JSONL files.
+
+    Avoids ``load_dataset('THUDM/LongBench', …)`` which fails on datasets≥4
+    (remote dataset scripts removed).
+    """
+    max_n = int(ctx.get("max_samples_per_task") or 40)
+    tasks = list(ctx["tasks"])
+    zip_url = (ctx.get("hf_data_zip") or _LONGBENCH_DATA_ZIP_DEFAULT).strip()
+    zip_path = root / "data.zip"
+    extract_root = root / "raw"
+    print(
+        f"[pull] plan LongBench: {len(tasks)} tasks · ≤{max_n} samples each "
+        f"· zip {zip_url}",
+        flush=True,
+    )
+
+    def _tasks_ready() -> bool:
+        return extract_root.is_dir() and all(
+            _longbench_jsonl_path(extract_root, t) is not None for t in tasks
+        )
+
+    need_download = force or not zip_path.is_file()
+    need_unzip = force or not _tasks_ready()
+
+    if need_download:
+        if force and extract_root.exists():
+            shutil.rmtree(extract_root)
+        part = zip_path.with_suffix(zip_path.suffix + ".part")
+        if part.exists():
+            part.unlink()
+        print("[pull] downloading LongBench data.zip…", flush=True)
+        _download(zip_url, zip_path, label="longbench data.zip", dataset_i=1, dataset_n=1)
+        need_unzip = True
+    else:
+        print(f"[pull] longbench zip cached → {zip_path}", flush=True)
+
+    if need_unzip:
+        if extract_root.exists():
+            shutil.rmtree(extract_root)
+        extract_root.mkdir(parents=True, exist_ok=True)
+        print(f"[pull] unzip {zip_path.name}", flush=True)
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_root)
+    else:
+        print(f"[pull] longbench extract cached → {extract_root}", flush=True)
+
+    rows: list[dict[str, Any]] = []
+    for ti, task in enumerate(tasks, start=1):
+        print(f"[pull] dataset {ti}/{len(tasks)} {task}", flush=True)
+        print(
+            f"[progress] pull dataset={ti}/{len(tasks)} file={task} pct=0",
+            flush=True,
+        )
+        path = _longbench_jsonl_path(extract_root, task)
+        if path is None:
+            raise RuntimeError(
+                f"LongBench task file missing after unzip: {task}.jsonl under {extract_root}"
+            )
+        task_rows = _read_longbench_task_jsonl(path, task=task, max_n=max_n)
+        if not task_rows:
+            raise RuntimeError(f"LongBench task empty: {path}")
+        rows.extend(task_rows)
+        print(
+            f"[progress] pull dataset={ti}/{len(tasks)} file={task} pct=100",
+            flush=True,
+        )
+    return rows
+
+
+def _pull_longbench_via_datasets(
+    ctx: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Fallback when zip pull is unavailable (offline mirror / old cache)."""
+    try:
+        from datasets import load_dataset
+    except ImportError as e:
+        raise SystemExit(
+            "LongBench pull needs a networkable data.zip or `datasets`. "
+            "pip install -r eval/official/requirements.txt"
+        ) from e
+
+    max_n = int(ctx.get("max_samples_per_task") or 40)
+    tasks = list(ctx["tasks"])
+    primary = (ctx.get("hf_dataset") or "THUDM/LongBench").strip()
+    parquet_fallback = (
+        (ctx.get("hf_dataset_parquet") or _LONGBENCH_HF_PARQUET_FALLBACK).strip()
+    )
+    revision = ctx.get("hf_revision") or "main"
+    candidates = [primary]
+    if parquet_fallback and parquet_fallback not in candidates:
+        candidates.append(parquet_fallback)
+
+    last_err: BaseException | None = None
+    for repo in candidates:
+        print(
+            f"[pull] plan LongBench (datasets fallback): {len(tasks)} tasks · "
+            f"≤{max_n} samples · HF {repo}",
+            flush=True,
+        )
+        rows: list[dict[str, Any]] = []
+        try:
+            for ti, task in enumerate(tasks, start=1):
+                print(f"[pull] dataset {ti}/{len(tasks)} {task}", flush=True)
+                print(
+                    f"[progress] pull dataset={ti}/{len(tasks)} file={task} pct=0",
+                    flush=True,
+                )
+                try:
+                    ds = load_dataset(
+                        repo,
+                        task,
+                        split="test",
+                        revision=revision,
+                        trust_remote_code=True,
+                    )
+                except TypeError:
+                    # datasets≥4 removed trust_remote_code; parquet repos need no flag.
+                    ds = load_dataset(
+                        repo,
+                        task,
+                        split="test",
+                        revision=revision,
+                    )
+                for i, row in enumerate(ds):
+                    if i >= max_n:
+                        break
+                    rows.append(_normalize_longbench_row(task, i, dict(row)))
+                print(
+                    f"[progress] pull dataset={ti}/{len(tasks)} file={task} pct=100",
+                    flush=True,
+                )
+            return rows
+        except Exception as e:  # noqa: BLE001 — try next candidate
+            last_err = e
+            print(f"[pull] datasets fallback {repo} failed: {e}", flush=True)
+            continue
+    assert last_err is not None
+    raise last_err
+
+
 def pull_longbench(cfg: dict[str, Any] | None = None, *, force: bool = False) -> Path:
     ensure_data_dir()
     suites = cfg or load_suites()
@@ -196,58 +403,14 @@ def pull_longbench(cfg: dict[str, Any] | None = None, *, force: bool = False) ->
         print("[progress] pull dataset=1/1 file=longbench pct=100 cached=1", flush=True)
         return root
 
+    rows: list[dict[str, Any]]
+    source = "zip"
     try:
-        from datasets import load_dataset
-    except ImportError as e:
-        raise SystemExit(
-            "LongBench pull needs `datasets`. "
-            "pip install -r eval/official/requirements.txt"
-        ) from e
-
-    max_n = int(ctx.get("max_samples_per_task") or 40)
-    tasks = list(ctx["tasks"])
-    print(
-        f"[pull] plan LongBench: {len(tasks)} tasks · ≤{max_n} samples each "
-        f"· HF {ctx['hf_dataset']}",
-        flush=True,
-    )
-    rows: list[dict[str, Any]] = []
-    for ti, task in enumerate(tasks, start=1):
-        print(f"[pull] dataset {ti}/{len(tasks)} {task}", flush=True)
-        print(
-            f"[progress] pull dataset={ti}/{len(tasks)} file={task} pct=0",
-            flush=True,
-        )
-        ds = load_dataset(
-            ctx["hf_dataset"],
-            task,
-            split="test",
-            revision=ctx.get("hf_revision") or "main",
-        )
-        for i, row in enumerate(ds):
-            if i >= max_n:
-                break
-            rows.append(
-                {
-                    "task": task,
-                    "idx": i,
-                    "input": row.get("input") or row.get("context") or "",
-                    "context": row.get("context") or "",
-                    "question": row.get("input") or row.get("question") or "",
-                    "answers": row.get("answers")
-                    if row.get("answers") is not None
-                    else row.get("answer"),
-                    "length": row.get("length"),
-                    "dataset": row.get("dataset") or task,
-                    "language": row.get("language") or "en",
-                    "all_classes": row.get("all_classes"),
-                    "_raw_keys": sorted(list(row.keys())),
-                }
-            )
-        print(
-            f"[progress] pull dataset={ti}/{len(tasks)} file={task} pct=100",
-            flush=True,
-        )
+        rows = _pull_longbench_from_zip(root, ctx, force=force)
+    except Exception as zip_err:  # noqa: BLE001 — fall back to HF datasets
+        print(f"[pull] LongBench zip path failed ({zip_err}); trying datasets…", flush=True)
+        rows = _pull_longbench_via_datasets(ctx)
+        source = "datasets"
 
     with out_file.open("w", encoding="utf-8") as f:
         for r in rows:
@@ -255,16 +418,18 @@ def pull_longbench(cfg: dict[str, Any] | None = None, *, force: bool = False) ->
     marker.write_text(
         json.dumps(
             {
-                "hf_dataset": ctx["hf_dataset"],
+                "hf_dataset": ctx.get("hf_dataset"),
+                "hf_data_zip": ctx.get("hf_data_zip") or _LONGBENCH_DATA_ZIP_DEFAULT,
+                "source": source,
                 "tasks": ctx["tasks"],
-                "max_samples_per_task": max_n,
+                "max_samples_per_task": int(ctx.get("max_samples_per_task") or 40),
                 "n_rows": len(rows),
             },
             indent=2,
         ),
         encoding="utf-8",
     )
-    print(f"[pull] longbench wrote {len(rows)} rows → {out_file}")
+    print(f"[pull] longbench wrote {len(rows)} rows → {out_file} (source={source})")
     return root
 
 

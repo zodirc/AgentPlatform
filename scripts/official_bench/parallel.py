@@ -20,14 +20,21 @@ def search_workers() -> int:
         except ValueError:
             pass
     cpu = os.cpu_count() or 4
-    # Process pool multiplies memory (each worker loads an index copy).
+    # Cap at 4: process pools multiply RSS; thread pools contend on GIL/DB.
     return max(1, min(4, cpu))
 
 
-def search_pool_mode() -> str:
-    """``process`` (default, real CPU speedup) or ``thread`` (GIL-limited)."""
-    raw = os.environ.get("BENCH_SEARCH_POOL", "process").strip().lower()
-    return raw if raw in {"process", "thread"} else "process"
+def search_pool_mode(*, default: str = "process") -> str:
+    """Return ``process`` or ``thread``.
+
+    ``BENCH_SEARCH_POOL`` overrides when set. Arm-specific defaults differ:
+    hybrid (shared ST embedder) → ``thread``; BM25 (light picklable index) → ``process``.
+    """
+    raw = os.environ.get("BENCH_SEARCH_POOL", "").strip().lower()
+    if raw in {"process", "thread"}:
+        return raw
+    d = (default or "process").strip().lower()
+    return d if d in {"process", "thread"} else "process"
 
 
 def map_queries(

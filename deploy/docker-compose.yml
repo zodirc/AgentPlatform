@@ -31,7 +31,10 @@ services:
 
   # Ops Bench only — isolated pgvector so official eval never shares CPU/IO/locks
   # with the product agent database (docs: mature control-plane vs data-plane).
+  # Profile "bench": omitted from CI/runtime-lite smoke (gate); enabled by default
+  # via Makefile COMPOSE_PROFILES=bench for daily make up / make up-bench.
   bench-postgres:
+    profiles: [bench]
     image: pgvector/pgvector:pg16
     container_name: agent-bench-postgres
     restart: unless-stopped
@@ -206,8 +209,10 @@ services:
         condition: service_healthy
       runtime:
         condition: service_healthy
+      # Optional: CI/runtime-lite smoke omits profile "bench"; Ops official needs it.
       bench:
         condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/ready"]
       interval: 10s
@@ -218,6 +223,7 @@ services:
   # Ops Bench worker: official suites with ST + dedicated bench-postgres (pgvector).
   # Not the agent Turn path — keeps eval decoupled from runtime product DB.
   bench:
+    profiles: [bench]
     image: agent-platform-bench:latest
     build:
       context: ..
@@ -232,7 +238,9 @@ services:
     container_name: agent-bench
     restart: unless-stopped
     logging: *default-logging
-    mem_limit: 4g
+    # 6g: headroom for ST index peaks (FiQA-scale); hybrid search stays thread-pooled
+    # so we do not size for ST×N process copies. Product runtime mem_limit unchanged.
+    mem_limit: 6g
     environment:
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       BENCH_DATA_DIR: /data/ops-official/data
