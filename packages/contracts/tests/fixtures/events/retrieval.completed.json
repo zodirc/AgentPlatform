@@ -13,6 +13,13 @@
         "score": 0.58
       }
     ],
+    "ranked": [
+      {
+        "path": "sources/new-chunk.md",
+        "chunk_id": "sources/new-chunk.md#chunk-0",
+        "score": 0.58
+      }
+    ],
     "index": { "added": 1, "chunks": 3 },
     "audit": {
       "mode": "vector",

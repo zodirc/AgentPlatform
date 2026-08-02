@@ -42,20 +42,24 @@ class ToolExecutor:
         if spec is None:
             return {"error": f"Tool not available: {tool_name}"}
         if spec.requires_approval and not force_approval:
-            # Same-Turn sticky: one write approval covers further file mutations;
-            # one run_command approval covers further shell in this Turn.
-            write_sticky = bool(getattr(state, "writes_preapproved", False))
-            exec_sticky = bool(getattr(state, "exec_preapproved", False))
-            if write_sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
-                pass
-            elif exec_sticky and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
+            # Ops L1 / official bench Turns are unattended — never block on human approve.
+            if bool(getattr(state, "ops_eval", False)):
                 pass
             else:
-                return {
-                    "status": "approval_required",
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                }
+                # Same-Turn sticky: one write approval covers further file mutations;
+                # one run_command approval covers further shell in this Turn.
+                write_sticky = bool(getattr(state, "writes_preapproved", False))
+                exec_sticky = bool(getattr(state, "exec_preapproved", False))
+                if write_sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
+                    pass
+                elif exec_sticky and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
+                    pass
+                else:
+                    return {
+                        "status": "approval_required",
+                        "tool_call_id": tool_call_id,
+                        "tool_name": tool_name,
+                    }
 
         from app.settings import settings
         from app.tools.validate import validate_tool_arguments

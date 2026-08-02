@@ -284,13 +284,15 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
 
     status = str(job.get("status") or "idle")
     # Cross-process sync (make sync-sources) may only update the progress file.
+    # Progress file wins for terminal states: in-memory job can lag as "building"
+    # after mark_sync_finished (L1 poll would never leave building otherwise).
     if isinstance(progress, dict) and progress.get("status"):
         file_status = str(progress.get("status"))
         if file_status == "building":
             status = "building"
-        elif file_status == "error" and status != "building":
+        elif file_status == "error":
             status = "error"
-        elif file_status == "ready" and status in {"idle", "ready"}:
+        elif file_status == "ready":
             status = "ready"
 
     # Disk store is source of truth for a specific path once mtime matches.

@@ -113,8 +113,21 @@ def final_assistant_text(events: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _looks_like_unified_diff(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return False
+    return "@@" in t or t.startswith("--- ") or "diff --git" in t
+
+
+def _span_to_diff(path: str, old_t: str, new_t: str) -> str:
+    if not new_t or new_t == old_t:
+        return ""
+    return f"--- a/{path}\n+++ b/{path}\n@@\n{new_t}\n"
+
+
 def patch_from_events(events: list[dict[str, Any]]) -> str:
-    """Extract unified diff from patch.proposed / tool.completed propose_patch."""
+    """Extract unified diff from patch.proposed / write_file / propose_patch args."""
     for ev in events:
         et = str(ev.get("type") or "")
         payload = ev.get("payload") or {}
@@ -123,17 +136,71 @@ def patch_from_events(events: list[dict[str, Any]]) -> str:
         if et == "patch.proposed":
             for key in ("diff", "patch", "new_text"):
                 val = payload.get(key)
-                if isinstance(val, str) and ("@@" in val or val.startswith("--- ") or "diff --git" in val):
+                if isinstance(val, str) and _looks_like_unified_diff(val):
                     return val
             # span-style propose_patch — synthesise a minimal marker for nonempty rate
             old_t = str(payload.get("old_text") or "")
             new_t = str(payload.get("new_text") or "")
             path = str(payload.get("path") or "file")
-            if new_t and new_t != old_t:
-                return f"--- a/{path}\n+++ b/{path}\n@@\n{new_t}\n"
+            synth = _span_to_diff(path, old_t, new_t)
+            if synth:
+                return synth
+        if et == "tool.started":
+            tool = str(payload.get("tool_name") or "")
+            args = payload.get("arguments") or {}
+            if not isinstance(args, dict):
+                continue
+            if tool == "propose_patch":
+                old_t = str(args.get("old_text") or "")
+                new_t = str(args.get("new_text") or "")
+                path = str(args.get("path") or "file")
+                synth = _span_to_diff(path, old_t, new_t)
+                if synth:
+                    return synth
+                for key in ("diff", "patch", "new_text"):
+                    val = args.get(key)
+                    if isinstance(val, str) and _looks_like_unified_diff(val):
+                        return val
+            if tool in {"write_file", "edit_file", "apply_patch"}:
+                path = str(args.get("path") or "")
+                content = args.get("content") or args.get("new_text") or args.get("text")
+                if isinstance(content, str) and (
+                    path.endswith((".patch", ".diff")) or _looks_like_unified_diff(content)
+                ):
+                    if _looks_like_unified_diff(content) or path.endswith((".patch", ".diff")):
+                        return content if content.strip() else ""
         if et == "tool.completed" and str(payload.get("tool_name") or "") == "propose_patch":
             # summary-only; ignore
             continue
+    # Last-resort: assistant text that embeds a unified diff fence
+    text = final_assistant_text(events)
+    if text:
+        for marker in ("```diff", "```patch", "```"):
+            if marker in text:
+                body = text.split(marker, 1)[1]
+                body = body.split("```", 1)[0]
+                if _looks_like_unified_diff(body):
+                    return body.strip() + "\n"
+        if _looks_like_unified_diff(text):
+            return text.strip() + "\n"
+    return ""
+
+
+def patch_from_work_root(work_root: str | Path) -> str:
+    """Read fix.patch / patch.diff written into the Work (L1 coding fallback)."""
+    root = Path(work_root)
+    for name in ("fix.patch", "patch.diff", "solution.patch", "prediction.patch"):
+        path = root / name
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if text.strip() and (
+            _looks_like_unified_diff(text) or name.endswith((".patch", ".diff"))
+        ):
+            return text
     return ""
 
 

@@ -164,7 +164,49 @@ async def patch_reject_command(
 
 
 @router.post("/sync-sources-index", status_code=status.HTTP_202_ACCEPTED)
-async def sync_sources_index_command(_: None = Depends(verify_internal_token)):
+async def sync_sources_index_command(
+    background_tasks: BackgroundTasks,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    wait: bool = True,
+    _: None = Depends(verify_internal_token),
+):
+    """Full tenant sync, or one Work when work_id+work_root are set (L1 / Ops).
+
+    ``wait=false`` (work-scoped only): queue sync and return pending so callers can
+    poll ``/internal/workspace/sources/index-status`` — needed for FiQA-scale corpora
+    that exceed typical HTTP timeouts.
+    """
+    if work_id and work_root:
+        from app.retrieval.index_scheduler import run_sources_index_sync_work
+
+        if not wait:
+
+            async def _bg_work_sync() -> None:
+                await run_sources_index_sync_work(
+                    work_id=work_id,
+                    work_root=work_root,
+                    owner_user_id=owner_user_id,
+                    reason="api-work",
+                )
+
+            background_tasks.add_task(_bg_work_sync)
+            return {
+                "accepted": True,
+                "status": "pending",
+                "reason": "api-work",
+                "work_id": work_id,
+            }
+
+        result = await run_sources_index_sync_work(
+            work_id=work_id,
+            work_root=work_root,
+            owner_user_id=owner_user_id,
+            reason="api-work",
+        )
+        return {"accepted": True, **result}
+
     from app.tools.core.tools import sync_sources_index
 
     result = await sync_sources_index()

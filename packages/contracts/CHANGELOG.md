@@ -3,6 +3,12 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.0 — 2026-08-02
+
+- `events/payloads/retrieval.completed.json`: 新增可选顶层字段 `ranked`
+  （≤100 条 path/score/chunk_id，供 Ops / official L1 计 nDCG@10 / R@100）。
+  向后兼容；写侧先升 runtime schema，旧消费者忽略未知字段即可。
+
 ## 0.2.0 — 2026-07-27
 
 - `events/payloads/turn.failed.json`:`termination_reason` 枚举新增

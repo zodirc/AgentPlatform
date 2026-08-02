@@ -86,6 +86,7 @@ class OfficialLiveRun:
     eval_path: str = "agent"
     context_limit: int = 0
     retrieval_query_limit: int = 0
+    l1_max_parallel: int = 2
     model: dict[str, Any] | None = None
     logs: list[dict[str, Any]] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -229,6 +230,7 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "eval_path": run.eval_path,
             "context_limit": run.context_limit,
             "retrieval_query_limit": run.retrieval_query_limit,
+            "l1_max_parallel": run.l1_max_parallel,
             "bench_job_id": run._bench_job_id,
             "phase_hint": run.phase_hint,
             "model": _model_meta_safe(run.model),
@@ -530,6 +532,7 @@ async def create_and_start(
     eval_path: str = "agent",
     context_limit: int = 0,
     retrieval_query_limit: int = 0,
+    l1_max_parallel: int = 2,
 ) -> OfficialLiveRun:
     cleaned: list[str] = []
     for t in targets:
@@ -586,6 +589,7 @@ async def create_and_start(
         eval_path=path,
         context_limit=max(0, int(context_limit or 0)),
         retrieval_query_limit=max(0, int(retrieval_query_limit or 0)),
+        l1_max_parallel=max(1, min(8, int(l1_max_parallel or 2))),
         model=model,
         progress_total=len(cleaned),
         phase_hint=(
@@ -872,6 +876,28 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
         if suite in targets or suite == "coding" and "coding_infer" in targets:
             case["status"] = "running"
 
+    async def on_suite_done(ev: dict[str, Any]) -> None:
+        suite = str(ev.get("suite") or "")
+        done = int(ev.get("done") or 0)
+        total = int(ev.get("total") or run.progress_total or 0)
+        run.progress_done = done
+        run.progress_total = total or run.progress_total
+        for case in run.cases:
+            cid = str(case.get("case_id") or "").removeprefix("official.")
+            if cid == suite or (suite in {"coding", "coding_infer"} and cid == "coding"):
+                case["status"] = "pass"
+        await _publish(
+            run,
+            {
+                "kind": "case_finished",
+                "case_id": f"official.{suite}",
+                "status": "pass",
+                "progress_done": run.progress_done,
+                "progress_total": run.progress_total,
+            },
+        )
+        await _persist_snapshot(run)
+
     try:
         results = await official_agent_path.run_l1_targets(
             targets,
@@ -880,7 +906,9 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             coding_n_instances=run.coding_n_instances,
             context_limit=run.context_limit,
             retrieval_query_limit=run.retrieval_query_limit,
+            max_parallel=run.l1_max_parallel,
             on_progress=on_progress,
+            on_suite_done=on_suite_done,
         )
     except Exception as exc:  # noqa: BLE001
         run.error = str(exc)
@@ -1155,6 +1183,7 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "eval_path": run.eval_path,
         "context_limit": run.context_limit,
         "retrieval_query_limit": run.retrieval_query_limit,
+        "l1_max_parallel": run.l1_max_parallel,
         "model": _model_meta_safe(run.model),
         "created_at": run.created_at,
         "finished_at": run.finished_at,

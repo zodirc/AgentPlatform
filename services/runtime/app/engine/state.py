@@ -35,6 +35,8 @@ class TurnState:
     plan_phase: str | None = None
     # docs/29 — ops_eval per-Turn model_mode survives approve/deny checkpoint resume.
     model_mode: str | None = None
+    # Ops / official L1 StartTurn: unattended — auto-approve write/exec gated tools.
+    ops_eval: bool = False
     # docs/30 WN3/AQ1 — cards/focus/plan phase; survives checkpoint resume (not welded into system).
     volatile_context: str = ""
     # After user approves one write-class tool this Turn, further sticky writes skip approval.

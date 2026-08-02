@@ -116,6 +116,48 @@ async def test_tool_executor_requires_approval() -> None:
 
 
 @pytest.mark.asyncio
+async def test_tool_executor_ops_eval_auto_approves() -> None:
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"ok": True, "summary": "wrote"}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="write_file",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=True,
+            )
+        ]
+    )
+    result = await executor.run(
+        tool_name="write_file",
+        tool_call_id="c1",
+        arguments={},
+        state=type(
+            "S",
+            (),
+            {
+                "ops_eval": True,
+                "writes_preapproved": False,
+                "exec_preapproved": False,
+                "turn_id": None,
+                "run_id": None,
+                "session_id": None,
+                "plan_phase": None,
+                "scenario_id": "agent",
+            },
+        )(),
+    )
+    assert result.get("ok") is True
+    assert called["n"] == 1
+
+
+@pytest.mark.asyncio
 async def test_tool_executor_sticky_write_approval_skips_gate() -> None:
     called = {"n": 0}
 

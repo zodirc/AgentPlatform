@@ -1,12 +1,55 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   OpsShell,
   opsOfficialPath,
+  opsRawPath,
   opsRunPath,
   secretFromOpsPath,
   statusClass,
 } from "./OpsShell";
+
+const TURN_ID_IN_LOG = /turn_id=([0-9a-fA-F-]{36})/;
+
+function OfficialLogLine({
+  line,
+  secret,
+}: {
+  line: string;
+  secret: string;
+}) {
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  let m: RegExpExecArray | null;
+  const re = new RegExp(TURN_ID_IN_LOG.source, "g");
+  while ((m = re.exec(line)) !== null) {
+    if (m.index > last) nodes.push(line.slice(last, m.index));
+    const id = m[1];
+    nodes.push(
+      <Link
+        key={`${id}-${m.index}`}
+        to={opsRawPath(secret, id)}
+        className="underline decoration-dotted underline-offset-2 text-foreground hover:text-primary"
+        title="打开 Raw 快照看逐步 turn_events"
+        target="_blank"
+        rel="noreferrer"
+      >
+        turn_id={id}
+      </Link>,
+    );
+    last = m.index + m[0].length;
+  }
+  if (last < line.length) nodes.push(line.slice(last));
+  if (!nodes.length) return <>{line}</>;
+  return <>{nodes}</>;
+}
 
 type Criterion = {
   id: string;
@@ -25,6 +68,9 @@ type TargetMeta = {
   needs_model?: boolean;
 };
 
+type ContextTier = "full" | "40" | "20" | "10" | "5";
+type RetrievalTier = "full" | "50" | "20" | "10" | "5";
+
 type Preset = {
   id: string;
   label: string;
@@ -33,8 +79,94 @@ type Preset = {
   coding_n_instances?: number | null;
   coding_harness?: boolean;
   retrieval_prod?: boolean;
+  eval_path?: "agent" | "component";
+  context_tier?: ContextTier;
+  retrieval_tier?: RetrievalTier;
+  l1_max_parallel?: number;
   hint: string;
 };
+
+const CUSTOM_PROFILE_ID = "custom";
+
+/** Human labels for the profile parameter form. */
+function retrievalTierLabel(t: RetrievalTier): string {
+  if (t === "full") return "全量 qrels (~1.3k)";
+  return `${t} q/集`;
+}
+
+function contextTierLabel(t: ContextTier): string {
+  if (t === "full") return "全量 (~120)";
+  return String(t);
+}
+
+/** Client fallback if meta.presets is old / empty — 一键配置档. */
+const L1_RUN_PROFILES: Preset[] = [
+  {
+    id: "l1_balanced",
+    label: "适中（推荐）",
+    targets: ["retrieval", "coding"],
+    eval_path: "agent",
+    coding_tier: "n5",
+    coding_harness: false,
+    retrieval_prod: true,
+    context_tier: "20",
+    retrieval_tier: "20",
+    l1_max_parallel: 1,
+    hint: "L1 · 检索 20q/集 + 编码 n5 · 并行 1 · 无 harness · 约 1–3h",
+  },
+  {
+    id: "l1_smoke",
+    label: "快速冒烟",
+    targets: ["retrieval", "coding"],
+    eval_path: "agent",
+    coding_tier: "n3",
+    coding_harness: false,
+    retrieval_prod: true,
+    context_tier: "10",
+    retrieval_tier: "10",
+    l1_max_parallel: 1,
+    hint: "L1 · 检索/编码更小 · 约 0.5–1.5h",
+  },
+  {
+    id: "l1_three",
+    label: "三项适中",
+    targets: ["retrieval", "context", "coding"],
+    eval_path: "agent",
+    coding_tier: "n5",
+    coding_harness: false,
+    retrieval_prod: true,
+    context_tier: "20",
+    retrieval_tier: "20",
+    l1_max_parallel: 1,
+    hint: "L1 三套都开 · 上下文 20 · 约 2–4h",
+  },
+  {
+    id: "l1_full",
+    label: "小切片全量",
+    targets: ["retrieval", "context", "coding"],
+    eval_path: "agent",
+    coding_tier: "n25",
+    coding_harness: false,
+    retrieval_prod: true,
+    context_tier: "full",
+    retrieval_tier: "full",
+    l1_max_parallel: 1,
+    hint: "qrels 全量 + LongBench 全量 + n25 · 过夜级",
+  },
+  {
+    id: "retrieval_only",
+    label: "仅检索适中",
+    targets: ["retrieval"],
+    eval_path: "agent",
+    coding_tier: "n5",
+    coding_harness: false,
+    retrieval_prod: true,
+    context_tier: "20",
+    retrieval_tier: "20",
+    l1_max_parallel: 1,
+    hint: "只要检索 L1 · 20q/集 · 无需编码模型也可（仍建议有 key）",
+  },
+];
 
 type CodingTierMeta = { id: string; n_instances: number | null };
 
@@ -361,7 +493,262 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
   return { label, pct, kind };
 }
 
+function suiteFromL1Token(token: string): string | null {
+  const t = token.trim().toLowerCase();
+  if (!t) return null;
+  if (t.startsWith("swe.") || t === "coding" || t.startsWith("coding.")) {
+    return "coding";
+  }
+  if (t.startsWith("longbench.") || t === "context" || t.startsWith("context.")) {
+    return "context";
+  }
+  if (t.startsWith("beir.") || t === "retrieval" || t.startsWith("retrieval.")) {
+    return "retrieval";
+  }
+  return null;
+}
+
 function parseProgressLine(line: string): DetailProgress | null {
+  // L1 agent-path live lines (official_agent_path)
+  const l1Coding = line.match(/^\[L1\]\s+coding\s+(\d+)\s*\/\s*(\d+)\s+(\S+)/i);
+  if (l1Coding) {
+    const cur = Number(l1Coding[1]);
+    const total = Number(l1Coding[2]);
+    const iid = l1Coding[3];
+    const pct =
+      total > 0 && Number.isFinite(cur)
+        ? Math.max(0, Math.min(100, Math.round((cur / total) * 100)))
+        : null;
+    return {
+      kind: "eval",
+      suite: "coding",
+      label: `L1 编码 ${cur}/${total || "?"} · ${iid}`,
+      pct,
+    };
+  }
+  const l1CtxPlan = line.match(
+    /^\[L1\]\s+context plan\s+n=(\d+)(?:\s+parallel=(\d+))?/i,
+  );
+  if (l1CtxPlan) {
+    const n = Number(l1CtxPlan[1]);
+    const p = l1CtxPlan[2] ? ` · 并行${l1CtxPlan[2]}` : "";
+    return {
+      kind: "eval",
+      suite: "context",
+      label: `L1 上下文计划 ${n} 题${p}`,
+      pct: 0,
+    };
+  }
+  const l1CodePlan = line.match(
+    /^\[L1\]\s+coding plan\s+n=(\d+)\s+tier=(\S+)(?:\s+parallel=(\d+))?/i,
+  );
+  if (l1CodePlan) {
+    return {
+      kind: "eval",
+      suite: "coding",
+      label: `L1 编码计划 ${l1CodePlan[1]} · ${l1CodePlan[2]}${
+        l1CodePlan[3] ? ` · 并行${l1CodePlan[3]}` : ""
+      }`,
+      pct: 0,
+    };
+  }
+  const l1RetPlan = line.match(
+    /^\[L1\]\s+(\S+)\s+queries plan\s+n=(\d+)(?:\s+\(qrels-only[^)]*\))?(?:\s+parallel=(\d+))?/i,
+  );
+  if (l1RetPlan) {
+    return {
+      kind: "eval",
+      suite: "retrieval",
+      label: `L1 检索 ${l1RetPlan[1]} · ${l1RetPlan[2]} qrels${
+        l1RetPlan[3] ? ` · 并行${l1RetPlan[3]}` : ""
+      }`,
+      pct: 0,
+    };
+  }
+  const l1Ctx = line.match(/^\[L1\]\s+context\s+(\d+)\s*\/\s*(\d+)/i);
+  if (l1Ctx) {
+    const cur = Number(l1Ctx[1]);
+    const total = Number(l1Ctx[2]);
+    const pct =
+      total > 0 && Number.isFinite(cur)
+        ? Math.max(0, Math.min(100, Math.round((cur / total) * 100)))
+        : null;
+    return {
+      kind: "eval",
+      suite: "context",
+      label: `L1 上下文 ${cur}/${total || "?"}`,
+      pct,
+    };
+  }
+  const l1Q = line.match(/^\[L1\]\s+(\S+)\s+queries\s+(\d+)\s*\/\s*(\d+)/i);
+  if (l1Q) {
+    const ds = l1Q[1];
+    const cur = Number(l1Q[2]);
+    const total = Number(l1Q[3]);
+    const pct =
+      total > 0 && Number.isFinite(cur)
+        ? Math.max(0, Math.min(100, Math.round((cur / total) * 100)))
+        : null;
+    return {
+      kind: "eval",
+      suite: "retrieval",
+      label: `L1 检索 ${ds} · 查询 ${cur}/${total || "?"}`,
+      pct,
+    };
+  }
+  const l1Pull = line.match(/^\[L1\]\s+pull\s+(.+)$/i);
+  if (l1Pull) {
+    const what = l1Pull[1].trim();
+    const suite = /swe/i.test(what)
+      ? "coding"
+      : /longbench|context/i.test(what)
+        ? "context"
+        : "retrieval";
+    return {
+      kind: "pull",
+      suite,
+      label: `L1 拉取 · ${what}`,
+      pct: null,
+    };
+  }
+  const l1Mat = line.match(
+    /^\[L1\]\s+materialize\s+(\S+):\s+(\d+)\s*\/\s*(\d+)/i,
+  );
+  if (l1Mat) {
+    const cur = Number(l1Mat[2]);
+    const total = Number(l1Mat[3]);
+    const pct =
+      total > 0 && Number.isFinite(cur)
+        ? Math.max(0, Math.min(100, Math.round((cur / total) * 100)))
+        : null;
+    return {
+      kind: "eval",
+      suite: "retrieval",
+      label: `L1 物化 ${l1Mat[1]} · ${cur}/${total || "?"}`,
+      pct,
+    };
+  }
+  const l1Sync = line.match(/^\[L1\]\s+sync\s+(\S+):\s+(.+)$/i);
+  if (l1Sync) {
+    const ds = l1Sync[1];
+    const rest = l1Sync[2];
+    if (/^done\b/i.test(rest)) {
+      return {
+        kind: "eval",
+        suite: "retrieval",
+        label: `L1 索引完成 · ${ds}`,
+        pct: 100,
+      };
+    }
+    const files = rest.match(/files=(\d+)\s*\/\s*(\d+)/i);
+    const chunks = rest.match(/chunks=(\d+)\s*\/\s*(\d+)/i);
+    const phase = rest.match(/phase=(\S+)/i)?.[1] || "building";
+    const eta = rest.match(/eta=([\d.]+)s/i)?.[1];
+    const rate = rest.match(/rate=([\d.]+)\/s/i)?.[1];
+    let pct: number | null = null;
+    if (chunks) {
+      const c = Number(chunks[1]);
+      const t = Number(chunks[2]);
+      if (t > 0 && Number.isFinite(c)) {
+        pct = Math.max(0, Math.min(100, Math.round((c / t) * 100)));
+      }
+    } else if (files) {
+      const c = Number(files[1]);
+      const t = Number(files[2]);
+      if (t > 0 && Number.isFinite(c)) {
+        pct = Math.max(0, Math.min(100, Math.round((c / t) * 100)));
+      }
+    }
+    const bits = [`L1 索引 ${ds}`, phase];
+    if (chunks) bits.push(`chunks ${chunks[1]}/${chunks[2]}`);
+    else if (files) bits.push(`files ${files[1]}/${files[2]}`);
+    if (rate) bits.push(`${rate}/s`);
+    if (eta) bits.push(`ETA ${eta}s`);
+    return {
+      kind: "eval",
+      suite: "retrieval",
+      label: bits.join(" · "),
+      pct,
+    };
+  }
+  if (/^\[L1\]\s+dataset\s+\S+:\s+materialize/i.test(line)) {
+    const name = line.match(/^\[L1\]\s+dataset\s+(\S+):/i)?.[1] || "?";
+    return {
+      kind: "eval",
+      suite: "retrieval",
+      label: `L1 检索物化/索引 · ${name}`,
+      pct: null,
+    };
+  }
+  const l1TurnStart = line.match(/^\[L1\]\s+turn start\s+(\S+)/i);
+  if (l1TurnStart) {
+    const label = l1TurnStart[1];
+    const suite = suiteFromL1Token(label);
+    if (suite) {
+      return {
+        kind: "eval",
+        suite,
+        label: `L1 Turn 进行中 · ${label}`,
+        pct: null,
+      };
+    }
+  }
+  const l1TurnDone = line.match(
+    /^\[L1\]\s+turn done\s+(\S+)\s+status=(\S+)\s+events=(\d+)\s+(\d+)s/i,
+  );
+  if (l1TurnDone) {
+    const label = l1TurnDone[1];
+    const suite = suiteFromL1Token(label);
+    if (suite) {
+      return {
+        kind: "eval",
+        suite,
+        label: `L1 Turn 结束 · ${l1TurnDone[2]} · ${l1TurnDone[4]}s · ${label}`,
+        pct: null,
+      };
+    }
+  }
+  const l1Wait = line.match(
+    /^\[L1\]\s+(?:…|\.\.\.)\s+waiting\s+(\S+)\s+(\d+)s\s+last=(\S+)/i,
+  );
+  if (l1Wait) {
+    const label = l1Wait[1];
+    const suite = suiteFromL1Token(label);
+    if (suite) {
+      return {
+        kind: "eval",
+        suite,
+        label: `L1 等待 Turn · ${l1Wait[2]}s · last=${l1Wait[3]} · ${label}`,
+        pct: null,
+      };
+    }
+  }
+  // "[L1] · tool.started read_file · swe.xxx turn_id=..."
+  const l1Step = line.match(/^\[L1\]\s+·\s+(\S+)(?:\s+(.+?))?\s+·\s+(\S+)\s+turn_id=/i);
+  if (l1Step) {
+    const et = l1Step[1];
+    const detail = (l1Step[2] || "").trim();
+    const label = l1Step[3];
+    const suite = suiteFromL1Token(label);
+    if (suite) {
+      return {
+        kind: "eval",
+        suite,
+        label: `L1 ${et}${detail ? ` ${detail}` : ""} · ${label}`,
+        pct: null,
+      };
+    }
+  }
+  if (/^\[L1\]\s+coding infer done/i.test(line)) {
+    return { kind: "eval", suite: "coding", label: "L1 编码套件结束", pct: 100 };
+  }
+  if (/^\[L1\]\s+context done/i.test(line)) {
+    return { kind: "eval", suite: "context", label: "L1 上下文套件结束", pct: 100 };
+  }
+  if (/^\[L1\]\s+retrieval done/i.test(line)) {
+    return { kind: "eval", suite: "retrieval", label: "L1 检索套件结束", pct: 100 };
+  }
+
   // Context / coding infer lines: "[context] infer — 72/120 hotpotqa arm=full"
   // Dash may be em/en/hyphen; keep tolerant for Ops log replay.
   const infer = line.match(
@@ -606,10 +993,10 @@ export function OfficialBenchPage() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [caps, setCaps] = useState<Caps>({});
   const [selectedSuites, setSelectedSuites] = useState<Set<SuiteId>>(
-    () => new Set(["retrieval", "context", "coding"]),
+    () => new Set(["retrieval", "coding"]),
   );
-  const [codingTier, setCodingTier] = useState("n25");
-  const [codingNInstances, setCodingNInstances] = useState(25);
+  const [codingTier, setCodingTier] = useState("n5");
+  const [codingNInstances, setCodingNInstances] = useState(5);
   const [codingHarness, setCodingHarness] = useState(false);
   const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
     { id: "n3", n_instances: 3 },
@@ -622,6 +1009,15 @@ export function OfficialBenchPage() {
   const [retrievalProd, setRetrievalProd] = useState(true);
   /** agent = L1 product Turn (default); component = L0 bench worker. */
   const [evalPath, setEvalPath] = useState<"agent" | "component">("agent");
+  /** L1 LongBench size tier: full ≈120; others are hard caps. */
+  const [contextTier, setContextTier] = useState<ContextTier>("20");
+  /** L1 BEIR qrels queries-per-dataset tier. */
+  const [retrievalTier, setRetrievalTier] = useState<RetrievalTier>("20");
+  /** Concurrent product Turns inside one L1 suite. */
+  const [l1Parallel, setL1Parallel] = useState(1);
+  const [activeProfileId, setActiveProfileId] = useState("l1_balanced");
+  /** Which profile's param form is expanded (click chip again to collapse). */
+  const [profileFormOpen, setProfileFormOpen] = useState(true);
   // Empty until user picks a preset or restores real prefs — do not invent deepseek defaults.
   const [modelProvider, setModelProvider] = useState("");
   const [modelApiStyle, setModelApiStyle] = useState<ApiStyle>("openai");
@@ -980,7 +1376,11 @@ export function OfficialBenchPage() {
       const prev = nextDetails[parsed.suite];
       // Don't let a late pull line clobber eval/infer for the same suite.
       if (parsed.kind === "pull" && prev?.kind === "eval") continue;
-      nextDetails[parsed.suite] = parsed;
+      const pct =
+        parsed.pct != null && Number.isFinite(parsed.pct)
+          ? parsed.pct
+          : (prev?.pct ?? null);
+      nextDetails[parsed.suite] = { ...parsed, pct };
     }
     setSuiteDetails(nextDetails);
 
@@ -1001,7 +1401,7 @@ export function OfficialBenchPage() {
         );
       }
     }
-    if (lines.length) setLiveLogs(lines.slice(-400));
+    if (lines.length) setLiveLogs(lines.slice(-800));
   }, []);
 
   const targetEnabled = useCallback(
@@ -1042,23 +1442,44 @@ export function OfficialBenchPage() {
         coding_n_instances?: number | null;
         coding_harness?: boolean;
         retrieval_prod?: boolean;
+        eval_path?: "agent" | "component";
+        context_tier?: ContextTier;
+        retrieval_tier?: RetrievalTier;
+        l1_max_parallel?: number;
+        targets?: string[];
       };
     };
     setCriteria(body.criteria || []);
     setTargetsMeta(body.targets || []);
-    setPresets(body.presets || []);
+    const apiPresets = body.presets || [];
+    const merged =
+      apiPresets.some((p) => p.id === "l1_balanced" || p.retrieval_tier != null)
+        ? apiPresets
+        : L1_RUN_PROFILES;
+    setPresets(merged);
     setCaps(body.capabilities || {});
     if (body.coding_tiers?.length) setCodingTierMeta(body.coding_tiers);
-    if (body.defaults?.coding_tier) setCodingTier(body.defaults.coding_tier);
-    if (body.defaults?.coding_n_instances != null) {
-      setCodingNInstances(body.defaults.coding_n_instances);
+    const d = body.defaults;
+    if (d?.coding_tier) setCodingTier(d.coding_tier);
+    if (d?.coding_n_instances != null) setCodingNInstances(d.coding_n_instances);
+    if (d?.coding_harness !== undefined) setCodingHarness(d.coding_harness);
+    if (d?.retrieval_prod !== undefined) setRetrievalProd(d.retrieval_prod);
+    if (d?.eval_path === "agent" || d?.eval_path === "component") {
+      setEvalPath(d.eval_path);
     }
-    if (body.defaults?.coding_harness !== undefined) {
-      setCodingHarness(body.defaults.coding_harness);
+    if (d?.context_tier) setContextTier(d.context_tier);
+    if (d?.retrieval_tier) setRetrievalTier(d.retrieval_tier);
+    if (d?.l1_max_parallel != null) setL1Parallel(d.l1_max_parallel);
+    if (d?.targets?.length) {
+      const suites = new Set<SuiteId>();
+      for (const t of d.targets) {
+        if (t === "retrieval" || t === "context" || t === "coding") suites.add(t);
+      }
+      if (suites.size) setSelectedSuites(suites);
     }
-    if (body.defaults?.retrieval_prod !== undefined) {
-      setRetrievalProd(body.defaults.retrieval_prod);
-    }
+    setActiveProfileId(
+      merged.some((p) => p.id === "l1_balanced") ? "l1_balanced" : merged[0]?.id || "",
+    );
     setError(null);
   }, [headers]);
 
@@ -1126,11 +1547,16 @@ export function OfficialBenchPage() {
               setSuiteDetails((prev) => {
                 const cur = prev[parsed.suite!];
                 if (parsed.kind === "pull" && cur?.kind === "eval") return prev;
-                return { ...prev, [parsed.suite!]: parsed };
+                // L1 turn/step lines often omit pct — keep last known fraction.
+                const pct =
+                  parsed.pct != null && Number.isFinite(parsed.pct)
+                    ? parsed.pct
+                    : (cur?.pct ?? null);
+                return { ...prev, [parsed.suite!]: { ...parsed, pct } };
               });
             }
             if (!msg.startsWith("[progress]")) {
-              setLiveLogs((prev) => [...prev.slice(-400), msg]);
+              setLiveLogs((prev) => [...prev.slice(-800), msg]);
             }
           } else if (kind === "case_started") {
             setLiveLogs((prev) => [...prev, `→ ${data.case_id}`]);
@@ -1242,11 +1668,39 @@ export function OfficialBenchPage() {
       else if (t === "coding_infer" || t === "coding_pull") suites.add("coding");
     }
     setSelectedSuites(suites);
-    setCodingTier(p.coding_tier || "n25");
+    setCodingTier(p.coding_tier || "n5");
     if (p.coding_n_instances != null) setCodingNInstances(p.coding_n_instances);
     setCodingHarness(Boolean(p.coding_harness));
     setRetrievalProd(p.retrieval_prod !== false);
+    if (p.eval_path === "agent" || p.eval_path === "component") {
+      setEvalPath(p.eval_path);
+    }
+    if (p.context_tier) setContextTier(p.context_tier);
+    if (p.retrieval_tier) setRetrievalTier(p.retrieval_tier);
+    if (p.l1_max_parallel != null) setL1Parallel(p.l1_max_parallel);
+    setActiveProfileId(p.id);
+    setProfileFormOpen(true);
   };
+
+  const markCustomProfile = () => {
+    setActiveProfileId(CUSTOM_PROFILE_ID);
+    setProfileFormOpen(true);
+  };
+
+  const selectCustomProfile = () => {
+    setActiveProfileId(CUSTOM_PROFILE_ID);
+    setProfileFormOpen(true);
+  };
+
+  const profileButtons = presets.length ? presets : L1_RUN_PROFILES;
+  const activeProfileLabel =
+    activeProfileId === CUSTOM_PROFILE_ID
+      ? "自定义"
+      : profileButtons.find((p) => p.id === activeProfileId)?.label || "自定义";
+  const activeProfileHint =
+    activeProfileId === CUSTOM_PROFILE_ID
+      ? "在下方表单改参数；不再绑定预设档。"
+      : profileButtons.find((p) => p.id === activeProfileId)?.hint || "";
 
   const toggleSuite = (id: SuiteId) => {
     if (!targetEnabled(id)) return;
@@ -1339,6 +1793,15 @@ export function OfficialBenchPage() {
           coding_harness: harness,
           retrieval_prod: prod,
           eval_path: evalPath,
+          context_limit:
+            evalPath === "agent" && contextTier !== "full"
+              ? Number(contextTier)
+              : 0,
+          retrieval_query_limit:
+            evalPath === "agent" && retrievalTier !== "full"
+              ? Number(retrievalTier)
+              : 0,
+          l1_max_parallel: evalPath === "agent" ? l1Parallel : 1,
           force: Boolean(opts?.force),
           model: modelPayload ?? null,
         }),
@@ -1726,159 +2189,358 @@ export function OfficialBenchPage() {
       <section className="mb-5 rounded-xl border border-border bg-gradient-to-b from-card/80 to-background p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold">发起一次 Bench</h2>
-          <div className="flex flex-wrap gap-1.5">
-            {presets.map((p) => (
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={busy || Array.from(selectedSuites).filter(targetEnabled).length === 0}
+              onClick={() => void startRun()}
+              className="rounded-md bg-foreground px-4 py-1.5 text-sm text-background disabled:opacity-40"
+            >
+              {busy ? "运行中…" : "开始"}
+            </button>
+            {error?.includes("已有 Bench") ? (
+              <button
+                type="button"
+                onClick={() => void startRun({ force: true })}
+                className="rounded-md border border-border px-3 py-1.5 text-sm"
+              >
+                强制重开
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          点配置档会套用参数并打开下方表单；再点同一档可收起。改任一字段会切到「自定义」。
+        </p>
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {profileButtons.map((p) => {
+            const on = activeProfileId === p.id;
+            return (
               <button
                 key={p.id}
                 type="button"
                 disabled={busy}
                 title={p.hint}
-                onClick={() => applyPreset(p)}
-                className="rounded-full border border-border px-2.5 py-1 text-[11px] hover:bg-muted disabled:opacity-40"
+                onClick={() => {
+                  if (on && profileFormOpen) {
+                    setProfileFormOpen(false);
+                    return;
+                  }
+                  applyPreset(p);
+                }}
+                className={`rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40 ${
+                  on
+                    ? "border-foreground/60 bg-foreground text-background"
+                    : "border-border hover:bg-muted"
+                }`}
               >
                 {p.label}
               </button>
-            ))}
-          </div>
-        </div>
-
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          勾选多项时套件并行执行（缩短墙钟；同一模型 key 会叠加请求）。不稳时可在 bench 设{" "}
-          <span className="font-mono">BENCH_JOB_MAX_PARALLEL=1</span> 回串行。
-        </p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          {(targetsMeta.length
-            ? targetsMeta
-            : [
-                {
-                  id: "retrieval",
-                  label: "检索",
-                  description: "BEIR · hybrid + BM25",
-                },
-                {
-                  id: "context",
-                  label: "上下文",
-                  description: "LongBench · 三臂",
-                },
-                {
-                  id: "coding",
-                  label: "编码",
-                  description: "SWE-bench Lite",
-                },
-              ]
-          ).map((t) => {
-            const id = t.id as SuiteId;
-            if (!(SUITE_IDS as readonly string[]).includes(id)) return null;
-            const enabled = targetEnabled(id);
-            const on = selectedSuites.has(id);
-            return (
-              <button
-                key={id}
-                type="button"
-                disabled={!enabled || busy}
-                onClick={() => toggleSuite(id)}
-                className={`rounded-lg border px-3 py-2.5 text-left text-xs transition-colors ${
-                  on && enabled
-                    ? "border-foreground/50 bg-foreground/[0.06]"
-                    : "border-border hover:bg-muted/50"
-                } ${!enabled ? "cursor-not-allowed opacity-45" : ""}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-medium">{t.label}</span>
-                  <span
-                    className={`h-2 w-2 rounded-full ${on && enabled ? "bg-foreground" : "bg-border"}`}
-                  />
-                </div>
-                <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                  {t.description}
-                </p>
-              </button>
             );
           })}
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
-          {selectedSuites.has("coding") ? (
-            <>
-              <label className="inline-flex items-center gap-2">
-                <span className="text-muted-foreground">SWE 档位</span>
-                <select
-                  value={codingTier}
-                  disabled={busy}
-                  onChange={(e) => setCodingTier(e.target.value)}
-                  className="rounded border border-border bg-background px-1.5 py-0.5"
-                >
-                  {codingTierMeta.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.id}
-                      {t.n_instances != null ? ` (${t.n_instances})` : " (自定义 N)"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {codingTier === "custom" ? (
-                <label className="inline-flex items-center gap-2">
-                  <span className="text-muted-foreground">N</span>
-                  <input
-                    type="number"
-                    min={3}
-                    max={300}
-                    value={codingNInstances}
-                    disabled={busy}
-                    onChange={(e) => setCodingNInstances(Number(e.target.value) || 3)}
-                    className="w-16 rounded border border-border bg-background px-1.5 py-0.5"
-                  />
-                </label>
-              ) : null}
-              <label
-                className="inline-flex items-center gap-2"
-                title="需 Docker + swebench。官方 resolve 分仅此项。"
-              >
-                <input
-                  type="checkbox"
-                  checked={codingHarness}
-                  disabled={busy}
-                  onChange={(e) => setCodingHarness(e.target.checked)}
-                />
-                harness 官方分
-              </label>
-            </>
-          ) : null}
-          <label
-            className="inline-flex items-center gap-2"
-            title="agent=主指数（产品 Turn）；component=L0 bench 旁路对照"
-          >
-            <span className="text-muted-foreground">评测路径</span>
-            <select
-              value={evalPath}
-              disabled={busy}
-              onChange={(e) =>
-                setEvalPath(e.target.value === "component" ? "component" : "agent")
-              }
-              className="rounded border border-border bg-background px-1.5 py-0.5"
-            >
-              <option value="agent">L1 agent（主路径）</option>
-              <option value="component">L0 component（对照）</option>
-            </select>
-          </label>
           <button
             type="button"
-            disabled={busy || Array.from(selectedSuites).filter(targetEnabled).length === 0}
-            onClick={() => void startRun()}
-            className="ml-auto rounded-md bg-foreground px-4 py-1.5 text-sm text-background disabled:opacity-40"
+            disabled={busy}
+            title="保留当前参数，打开表单自行修改"
+            onClick={() => {
+              if (activeProfileId === CUSTOM_PROFILE_ID && profileFormOpen) {
+                setProfileFormOpen(false);
+                return;
+              }
+              selectCustomProfile();
+            }}
+            className={`rounded-full border px-2.5 py-1 text-[11px] disabled:opacity-40 ${
+              activeProfileId === CUSTOM_PROFILE_ID
+                ? "border-foreground/60 bg-foreground text-background"
+                : "border-border border-dashed hover:bg-muted"
+            }`}
           >
-            {busy ? "运行中…" : "开始"}
+            自定义
           </button>
-          {error?.includes("已有 Bench") ? (
-            <button
-              type="button"
-              onClick={() => void startRun({ force: true })}
-              className="rounded-md border border-border px-3 py-1.5 text-sm"
-            >
-              强制重开
-            </button>
-          ) : null}
         </div>
+
+        {profileFormOpen ? (
+          <div className="mt-3 rounded-lg border border-border bg-muted/15 px-3 py-3">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-xs font-semibold">
+                运行参数 · {activeProfileLabel}
+              </h3>
+              <button
+                type="button"
+                className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                onClick={() => setProfileFormOpen(false)}
+              >
+                收起
+              </button>
+            </div>
+            {activeProfileHint ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {activeProfileHint}
+              </p>
+            ) : null}
+
+            <dl className="mt-3 grid gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-2">
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">评测路径</dt>
+                <dd>
+                  {evalPath === "agent" ? "L1 agent（主路径）" : "L0 component"}
+                </dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">套件</dt>
+                <dd>
+                  {Array.from(selectedSuites)
+                    .map((s) =>
+                      s === "retrieval"
+                        ? "检索"
+                        : s === "context"
+                          ? "上下文"
+                          : "编码",
+                    )
+                    .join(" · ") || "（未选）"}
+                </dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">检索档位</dt>
+                <dd>{retrievalTierLabel(retrievalTier)}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">上下文档位</dt>
+                <dd>{contextTierLabel(contextTier)}</dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">编码档位</dt>
+                <dd>
+                  {selectedSuites.has("coding")
+                    ? codingTier === "custom"
+                      ? `custom N=${codingNInstances}`
+                      : codingTier
+                    : "—（未开编码）"}
+                  {selectedSuites.has("coding") && codingHarness
+                    ? " · harness"
+                    : ""}
+                </dd>
+              </div>
+              <div className="flex gap-2">
+                <dt className="w-20 shrink-0 text-muted-foreground">并行 Turn</dt>
+                <dd>
+                  {evalPath === "agent"
+                    ? l1Parallel === 1
+                      ? "1（串行）"
+                      : String(l1Parallel)
+                    : "—（L0 不用）"}
+                </dd>
+              </div>
+            </dl>
+
+            <p className="mt-3 text-[11px] font-medium text-muted-foreground">
+              修改表单
+            </p>
+            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+              {(targetsMeta.length
+                ? targetsMeta
+                : [
+                    {
+                      id: "retrieval",
+                      label: "检索",
+                      description: "BEIR · hybrid + BM25",
+                    },
+                    {
+                      id: "context",
+                      label: "上下文",
+                      description: "LongBench · 三臂",
+                    },
+                    {
+                      id: "coding",
+                      label: "编码",
+                      description: "SWE-bench Lite",
+                    },
+                  ]
+              ).map((t) => {
+                const id = t.id as SuiteId;
+                if (!(SUITE_IDS as readonly string[]).includes(id)) return null;
+                const enabled = targetEnabled(id);
+                const on = selectedSuites.has(id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    disabled={!enabled || busy}
+                    onClick={() => {
+                      markCustomProfile();
+                      toggleSuite(id);
+                    }}
+                    className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                      on && enabled
+                        ? "border-foreground/50 bg-background"
+                        : "border-border bg-background/60 hover:bg-muted/50"
+                    } ${!enabled ? "cursor-not-allowed opacity-45" : ""}`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium">{t.label}</span>
+                      <span
+                        className={`h-2 w-2 rounded-full ${on && enabled ? "bg-foreground" : "bg-border"}`}
+                      />
+                    </div>
+                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                      {t.description}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
+              <label className="grid gap-1">
+                <span className="text-[11px] text-muted-foreground">评测路径</span>
+                <select
+                  value={evalPath}
+                  disabled={busy}
+                  onChange={(e) => {
+                    markCustomProfile();
+                    setEvalPath(
+                      e.target.value === "component" ? "component" : "agent",
+                    );
+                  }}
+                  className="rounded border border-border bg-background px-1.5 py-1"
+                >
+                  <option value="agent">L1 agent（主路径）</option>
+                  <option value="component">L0 component（对照）</option>
+                </select>
+              </label>
+              {evalPath === "agent" ? (
+                <>
+                  <label className="grid gap-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      检索档位（qrels/集）
+                    </span>
+                    <select
+                      value={retrievalTier}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setRetrievalTier(e.target.value as RetrievalTier);
+                      }}
+                      className="rounded border border-border bg-background px-1.5 py-1"
+                    >
+                      <option value="full">全量 qrels (~1.3k)</option>
+                      <option value="50">50 q/集</option>
+                      <option value="20">20 q/集</option>
+                      <option value="10">10 q/集</option>
+                      <option value="5">5 q/集</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      上下文档位
+                    </span>
+                    <select
+                      value={contextTier}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setContextTier(e.target.value as ContextTier);
+                      }}
+                      className="rounded border border-border bg-background px-1.5 py-1"
+                    >
+                      <option value="full">全量 (~120)</option>
+                      <option value="40">40</option>
+                      <option value="20">20</option>
+                      <option value="10">10</option>
+                      <option value="5">5</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      并行 Turn
+                    </span>
+                    <select
+                      value={l1Parallel}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setL1Parallel(Number(e.target.value) || 1);
+                      }}
+                      className="rounded border border-border bg-background px-1.5 py-1"
+                    >
+                      <option value={1}>1（串行）</option>
+                      <option value={2}>2</option>
+                      <option value={3}>3</option>
+                      <option value={4}>4</option>
+                    </select>
+                  </label>
+                </>
+              ) : null}
+              {selectedSuites.has("coding") ? (
+                <>
+                  <label className="grid gap-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      SWE 档位
+                    </span>
+                    <select
+                      value={codingTier}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setCodingTier(e.target.value);
+                      }}
+                      className="rounded border border-border bg-background px-1.5 py-1"
+                    >
+                      {codingTierMeta.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.id}
+                          {t.n_instances != null
+                            ? ` (${t.n_instances})`
+                            : " (自定义 N)"}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {codingTier === "custom" ? (
+                    <label className="grid gap-1">
+                      <span className="text-[11px] text-muted-foreground">
+                        自定义 N
+                      </span>
+                      <input
+                        type="number"
+                        min={3}
+                        max={300}
+                        value={codingNInstances}
+                        disabled={busy}
+                        onChange={(e) => {
+                          markCustomProfile();
+                          setCodingNInstances(Number(e.target.value) || 3);
+                        }}
+                        className="rounded border border-border bg-background px-1.5 py-1"
+                      />
+                    </label>
+                  ) : null}
+                  <label
+                    className="flex items-end gap-2 pb-1"
+                    title="需 Docker + swebench。官方 resolve 分仅此项。"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={codingHarness}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setCodingHarness(e.target.checked);
+                      }}
+                    />
+                    <span className="text-[11px]">harness 官方分</span>
+                  </label>
+                </>
+              ) : null}
+            </div>
+          </div>
+        ) : (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            参数已收起 — 再点「{activeProfileLabel}」或「自定义」查看表单。
+            {activeProfileHint ? ` ${activeProfileHint}` : ""}
+          </p>
+        )}
 
         <div
           className={`mt-4 rounded-lg border px-3 py-3 ${
@@ -2150,24 +2812,28 @@ export function OfficialBenchPage() {
             </div>
             <div
               ref={logBoxRef}
-              className="max-h-48 overflow-y-auto overscroll-contain rounded-md border border-border/80 bg-muted/40 p-2 font-mono text-[11px] leading-relaxed"
+              className="max-h-72 overflow-y-auto overscroll-contain rounded-md border border-border/80 bg-muted/40 p-2 font-mono text-[11px] leading-relaxed"
             >
               {liveLogs.length === 0 ? (
                 <p className="text-muted-foreground">
-                  日志：先看 [pull] plan（几集、约多少 MiB），再看 %；评测看 [eval] dataset i/n
-                  与 search %…
+                  日志：L1 会打 turn start / tool·retrieval 步骤 / 心跳；点 turn_id 打开 Raw
+                  逐步。L0 仍看 [pull]/[eval]…
                 </p>
               ) : (
                 liveLogs.map((line, i) => (
                   <div
                     key={`${i}-${line.slice(0, 24)}`}
                     className={
-                      line.includes("[phase]") || line.startsWith("[pull] plan")
+                      line.includes("[phase]") ||
+                      line.startsWith("[pull] plan") ||
+                      line.startsWith("[L1] turn ")
                         ? "font-semibold text-foreground"
-                        : undefined
+                        : line.startsWith("[L1] ·") || line.startsWith("[L1] …")
+                          ? "text-muted-foreground"
+                          : undefined
                     }
                   >
-                    {line}
+                    <OfficialLogLine line={line} secret={secret} />
                   </div>
                 ))
               )}

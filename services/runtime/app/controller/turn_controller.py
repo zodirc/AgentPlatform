@@ -381,6 +381,7 @@ async def start_turn(
             message=message,
             trace_id=trace_id,
             plan_phase=plan_phase,
+            ops_eval=bool(ops_eval),
         )
     except Exception as exc:
         logger.exception("start_turn failed turn_id=%s", turn_id)
@@ -1036,6 +1037,7 @@ async def _run_turn(
     message: str,
     trace_id: UUID,
     plan_phase: str | None = None,
+    ops_eval: bool = False,
 ) -> None:
     profile = ScenarioRegistry.get(scenario_id)
     phase = normalize_plan_phase(plan_phase)
@@ -1223,6 +1225,10 @@ async def _run_turn(
         plan_hint=compiled.metadata.get("plan_hint"),
         plan_phase=phase,
         model_mode=current_turn_model_mode(),
+        # Official L1 / Ops eval: skip human approval gates (write_file / run_command / …).
+        ops_eval=bool(ops_eval),
+        writes_preapproved=bool(ops_eval),
+        exec_preapproved=bool(ops_eval),
     )
 
     registry = build_registry()

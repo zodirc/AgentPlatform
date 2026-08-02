@@ -11,6 +11,7 @@ from official_bench.agent_path_extract import (  # noqa: E402
     doc_id_from_path,
     merge_retrieval_rankings,
     patch_from_events,
+    patch_from_work_root,
     ranking_scores,
 )
 
@@ -45,6 +46,26 @@ def test_patch_from_proposed() -> None:
     diff = "--- a/x\n+++ b/x\n@@\n+hi\n"
     events = [{"type": "patch.proposed", "payload": {"diff": diff}}]
     assert patch_from_events(events) == diff
+
+
+def test_patch_from_write_file_fix_patch() -> None:
+    diff = "--- a/x.py\n+++ b/x.py\n@@\n+fixed\n"
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "write_file",
+                "arguments": {"path": "fix.patch", "content": diff},
+            },
+        }
+    ]
+    assert patch_from_events(events) == diff
+
+
+def test_patch_from_work_root(tmp_path: Path) -> None:
+    diff = "--- a/a\n+++ b/a\n@@\n+x\n"
+    (tmp_path / "fix.patch").write_text(diff, encoding="utf-8")
+    assert patch_from_work_root(tmp_path) == diff
 
 
 def test_called_tools() -> None:

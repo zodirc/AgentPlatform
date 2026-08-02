@@ -41,6 +41,20 @@
         }
       }
     },
+    "ranked": {
+      "type": "array",
+      "maxItems": 100,
+      "description": "Path+score ranking up to R@100 for Ops / official L1 (no excerpts)",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "path": { "type": "string" },
+          "chunk_id": { "type": "string" },
+          "score": { "type": "number" }
+        }
+      }
+    },
     "audit": {
       "type": "object",
       "additionalProperties": false,

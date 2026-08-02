@@ -34,6 +34,7 @@ def start_and_wait(
     coding_n_instances: int | None = None,
     context_limit: int = 0,
     retrieval_query_limit: int = 0,
+    l1_max_parallel: int | None = None,
     poll_s: float = 2.0,
     timeout_s: float = 86_400.0,
 ) -> dict[str, Any]:
@@ -48,6 +49,11 @@ def start_and_wait(
     secret = _ops_secret()
     base = _ops_base()
     headers = {"Authorization": f"Bearer {secret}"}
+    if l1_max_parallel is None:
+        try:
+            l1_max_parallel = int(os.environ.get("OPS_L1_MAX_PARALLEL", "1"))
+        except ValueError:
+            l1_max_parallel = 1
     body: dict[str, Any] = {
         "targets": targets,
         "eval_path": "agent",
@@ -58,6 +64,7 @@ def start_and_wait(
         "retrieval_prod": True,
         "context_limit": context_limit,
         "retrieval_query_limit": retrieval_query_limit,
+        "l1_max_parallel": max(1, min(8, int(l1_max_parallel))),
         "force": True,
     }
     if coding_n_instances is not None:

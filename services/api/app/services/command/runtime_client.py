@@ -57,6 +57,22 @@ class RuntimeClient:
         response.raise_for_status()
         return response
 
+    async def _get(
+        self,
+        path: str,
+        *,
+        timeout: float,
+        params: dict | None = None,
+    ) -> httpx.Response:
+        response = await self._client().get(
+            path,
+            params=params,
+            headers=self._headers(),
+            timeout=timeout,
+        )
+        response.raise_for_status()
+        return response
+
     async def start_turn(
         self,
         *,
@@ -189,8 +205,52 @@ class RuntimeClient:
         }
         await self._post("/internal/commands/patch-reject", timeout=30.0, json=payload)
 
-    async def sync_sources_index(self) -> dict:
-        resp = await self._post("/internal/commands/sync-sources-index", timeout=60.0)
+    async def sync_sources_index(
+        self,
+        *,
+        work_id: UUID | None = None,
+        work_root: str | None = None,
+        owner_user_id: UUID | None = None,
+        wait: bool = True,
+        timeout: float = 60.0,
+    ) -> dict:
+        params: dict[str, str] = {}
+        if work_id is not None:
+            params["work_id"] = str(work_id)
+        if work_root is not None:
+            params["work_root"] = work_root
+        if owner_user_id is not None:
+            params["owner_user_id"] = str(owner_user_id)
+        if work_id is not None and work_root is not None:
+            params["wait"] = "true" if wait else "false"
+        resp = await self._post(
+            "/internal/commands/sync-sources-index",
+            timeout=timeout,
+            params=params or None,
+        )
+        return resp.json()
+
+    async def sources_index_status(
+        self,
+        *,
+        work_id: UUID | None = None,
+        work_root: str | None = None,
+        owner_user_id: UUID | None = None,
+        timeout: float = 15.0,
+    ) -> dict:
+        """Poll runtime ingestion progress (sync_progress.json via workspace API)."""
+        params: dict[str, str] = {}
+        if work_id is not None:
+            params["work_id"] = str(work_id)
+        if work_root is not None:
+            params["work_root"] = work_root
+        if owner_user_id is not None:
+            params["owner_user_id"] = str(owner_user_id)
+        resp = await self._get(
+            "/internal/workspace/sources/index-status",
+            timeout=timeout,
+            params=params or None,
+        )
         return resp.json()
 
     async def verify_pass(self, *, session_id: str | None = None) -> dict:

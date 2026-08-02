@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from app.settings import settings
@@ -173,46 +174,99 @@ def sync_sources_index_blocking() -> dict[str, Any]:
     return merged
 
 
+def sync_sources_index_work_blocking(
+    *,
+    work_id: str,
+    work_root: str,
+    owner_user_id: str | None = None,
+) -> dict[str, Any]:
+    """Index only one Work's ``sources/`` (L1 / Ops; avoid full-tenant sweep)."""
+    root = Path(str(work_root)).resolve()
+    src = root / "sources"
+    result = _sync_one(
+        src,
+        workspace_root=root,
+        work_id=str(work_id),
+        visibility="private",
+        owner_user_id=str(owner_user_id) if owner_user_id else None,
+    )
+    merged = dict(result) if isinstance(result, dict) else {"result": result}
+    merged.setdefault("scopes", 1)
+    return merged
+
+
+async def _finish_sync_locked(
+    *,
+    reason: str,
+    runner: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    """Shared single-flight wrapper used by full + work-scoped sync."""
+    from app.retrieval.sync_progress import (
+        mark_sync_error,
+        mark_sync_finished,
+        mark_sync_started,
+    )
+
+    logger.info("sources index sync starting; reason=%s", reason)
+    mark_sync_started(reason=reason)
+    try:
+        result = await asyncio.to_thread(runner)
+    except Exception as exc:
+        logger.exception("sources index sync failed; reason=%s", reason)
+        mark_sync_error(str(exc), reason=reason)
+        return {"status": "error", "reason": reason, "error": str(exc)}
+    payload = dict(result) if isinstance(result, dict) else {"result": result}
+    payload.setdefault("status", "ok")
+    payload["reason"] = reason
+    if str(payload.get("status") or "") == "error":
+        mark_sync_error(
+            str(payload.get("error") or "sources index sync failed"),
+            reason=reason,
+        )
+    else:
+        mark_sync_finished(payload, reason=reason)
+    logger.info(
+        "sources index sync finished; reason=%s indexed_files=%s chunks=%s "
+        "added=%s updated=%s skipped=%s elapsed_s=%s embed_batch_size=%s",
+        reason,
+        payload.get("indexed_files"),
+        payload.get("chunks"),
+        payload.get("added"),
+        payload.get("updated"),
+        payload.get("skipped"),
+        payload.get("elapsed_s"),
+        payload.get("embed_batch_size"),
+    )
+    return payload
+
+
 async def run_sources_index_sync(*, reason: str = "manual") -> dict[str, Any]:
     """Serialize syncs process-wide (single-flight via lock; waiters re-scan)."""
     async with _sync_lock:
-        from app.retrieval.sync_progress import (
-            mark_sync_error,
-            mark_sync_finished,
-            mark_sync_started,
+        return await _finish_sync_locked(
+            reason=reason,
+            runner=sync_sources_index_blocking,
         )
 
-        logger.info("sources index sync starting; reason=%s", reason)
-        mark_sync_started(reason=reason)
-        try:
-            result = await asyncio.to_thread(sync_sources_index_blocking)
-        except Exception as exc:
-            logger.exception("sources index sync failed; reason=%s", reason)
-            mark_sync_error(str(exc), reason=reason)
-            return {"status": "error", "reason": reason, "error": str(exc)}
-        payload = dict(result) if isinstance(result, dict) else {"result": result}
-        payload.setdefault("status", "ok")
-        payload["reason"] = reason
-        if str(payload.get("status") or "") == "error":
-            mark_sync_error(
-                str(payload.get("error") or "sources index sync failed"),
-                reason=reason,
-            )
-        else:
-            mark_sync_finished(payload, reason=reason)
-        logger.info(
-            "sources index sync finished; reason=%s indexed_files=%s chunks=%s "
-            "added=%s updated=%s skipped=%s elapsed_s=%s embed_batch_size=%s",
-            reason,
-            payload.get("indexed_files"),
-            payload.get("chunks"),
-            payload.get("added"),
-            payload.get("updated"),
-            payload.get("skipped"),
-            payload.get("elapsed_s"),
-            payload.get("embed_batch_size"),
+
+async def run_sources_index_sync_work(
+    *,
+    work_id: str,
+    work_root: str,
+    owner_user_id: str | None = None,
+    reason: str = "work",
+) -> dict[str, Any]:
+    """Serialize work-scoped sync (same lock as full sync)."""
+
+    def _runner() -> dict[str, Any]:
+        return sync_sources_index_work_blocking(
+            work_id=work_id,
+            work_root=work_root,
+            owner_user_id=owner_user_id,
         )
-        return payload
+
+    async with _sync_lock:
+        return await _finish_sync_locked(reason=reason, runner=_runner)
 
 
 async def _delayed_startup_sync() -> None:
