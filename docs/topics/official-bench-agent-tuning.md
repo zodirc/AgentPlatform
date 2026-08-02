@@ -1,6 +1,6 @@
 # Official Bench · Agent-path 调优方案
 
-> **状态**：Phase A 立尺已接线（L1 runner / Ops `eval_path=agent` / make `*-agent`）· 待真跑归因后开 Phase C  
+> **状态**：Phase A 立尺已接线 · **L1 首基线已入库**（`eval/official/baseline/official-small-2026-08-m2.json` / `SCORECARD.md`）· 待归因后开 Phase C  
 > **协议戳记（L1）**：`official-small-2026-08-m2`（L0 对照仍可跑 m1 旁路）  
 > **关联**：[ops-eval-console](ops-eval-console.md) · [eval/official/README](../../eval/official/README.md) · [rag-and-sources](rag-and-sources.md) · [05](../core/05-agent-runtime.md) · [06](../core/06-tools-and-context.md) · [13 R1–R5](../core/13-rate-redlines.md) · [baseline](../../eval/official/baseline/README.md)
 
@@ -142,6 +142,8 @@ m1 基线保留为 **L0 组件对照史**；主栏迁到下文 **L1（agent-path
 | 隔离 | Ops / 隔离 workspace（及可选独立 DB）；不混用户日常会话 |
 | 模型 | 路径必须是产品 Turn；可用评测专用 provider，但不得改走旁路 chat 冒充 L1 |
 | 旁路降级 | `store.search` 直打、单消息 assemble、`bench_model` 直出 → **仅 L0** |
+| 逐步可见 | Ops 官方页直播日志打 `turn start` / `tool.*` / `retrieval.*` / 心跳；`turn_id=` 链到 Raw 快照 |
+| 档位 / 并行 | Ops 可调上下文档位、检索档位、SWE 档位；`并行 Turn`（默认 2）只缩短总等待，不改单题打分 |
 
 ### 4.2 Retrieval × BEIR
 
@@ -150,9 +152,11 @@ m1 基线保留为 **L0 组件对照史**；主栏迁到下文 **L1（agent-path
 | 物化 | 语料 → 题隔离 `sources/`；Turn 外 sync |
 | 输入 | query → 用户消息；`scenario_id` 写入协议（writing 或 agent，固定一种） |
 | 主指标 | 真实 `search_sources` hits 上的 nDCG@k / Recall@k / MAP（多轮合并规则写死进协议） |
+| 查询集 | **仅 qrels 标注 query**（与 L0 `beir_run` / BEIR 官方一致）；禁止扫整份 `queries.jsonl` |
 | 主臂 | **自由 agent**（模型自选是否搜、搜几次） |
 | 诊断臂 | 可选「首轮必须 search」（L2，不进 SCORECARD 主栏） |
 | 辅 | 若样本要求短答，可另报终答 EM/F1 |
+| 档位 | Ops「全量 qrels」≈三集 ~1.3k Turn；50/20/10/5 为每集上限（冒烟） |
 
 ### 4.3 Context × LongBench
 
@@ -293,7 +297,7 @@ make official-bench-update-baseline  # 仅门禁通过后
 - [x] Context L1：passage 落盘 + Turn 终答（oracle 臂后续补）  
 - [x] Coding L1：platform Turn + patch 抽取（harness resolve 仍用既有 eval 目标）  
 - [x] Ops UI：评测路径 L1/L0；CLI/make `*-agent`  
-- [ ] SCORECARD / baseline 双轨：首份 L1 基线入库（真跑后）  
+- [x] SCORECARD / baseline 双轨：首份 L1 基线入库（`m2` + `SCORECARD.md`；`m1` 留作 L0）  
 - [ ] Phase B 归因报告（失败桶 → 点菜 §5.3 → **本轮工程调优方案**另开/附录）  
 - [ ] 首条产品票：**归因后**再定（勿在 L1 首跑前锁定）
 

@@ -1,38 +1,28 @@
 # Official live scorecard
 
-- **protocol**: `official-small-2026-08-m1`
-- **updated_at**: `2026-08-02T04:58:49.880906+00:00`
+- **protocol**: `official-small-2026-08-m2`
+- **eval_path**: `agent`（L1 agent-path 主栏）
+- **updated_at**: `2026-08-02T14:59:11.335475+00:00`
 - **含义**: live 实测官方小量的分数锚点（调优看 Δ）；题集在 `suites.small.yaml` / SWE slices。
 - **明细**: Ops 官方页 / `eval/reports/official/runs/<id>/`（不进 git）
+- **L0 对照**: 旁路组件史见同目录 `official-small-2026-08-m1.json`（不进本表主栏）
 
 ## 主指标（一眼）
 
 | 套件 | 主指标 | 值 | run_id | 备注 |
 |------|--------|----|--------|------|
-| retrieval | hybrid nDCG@10 | 0.4123 | `8f507709-c087-483f-81b2-1ac8f8ebf4c8` | ΔBM25 nDCG@10=0.0093 · R@100=0.5525 |
-| context | compact F1 / retention | 0.2728 / 0.6724 | `958f5568-618c-4239-9c97-03416a44019b` | full=0.4057 · truncate=0.4138 · model=`deepseek-v4-flash` |
-| coding | patch_rate | 0.6667 | `88dcb9d7-d088-42a6-b9dc-8096c6469a60` | tier=`n3` · n=3 · resolve=no · `bench_model` |
+| retrieval | agent nDCG@10 | 0.4030 | `4996145f-8c51-4d70-92c1-d32493ad1384` | n_queries=20 · R@100=0.6019 |
+| context | agent F1 / EM | 0.3149 / 0.0500 | `ebc6abfd-8943-423c-a539-de922af81af6` | arms equal on L1 · model=`deepseek-v4-flash` |
+| coding | patch_rate | 0.4000 | `32ede212-8cfd-4664-a097-4c8c8fda05ce` | tier=`n5` · n=5.0000 · resolve=no · `platform_turn` |
 
-## Retrieval · hybrid cases (nDCG@10)
+## Retrieval / Context cases
 
-| case | nDCG@10 | R@100 |
-|------|---------|-------|
-| `beir.fiqa.hybrid` | 0.2670 | 0.5808 |
-| `beir.nfcorpus.hybrid` | 0.3231 | 0.2307 |
-| `beir.scifact.hybrid` | 0.6469 | 0.8460 |
-
-## Context · per task
-
-| case | full F1 | truncate F1 | compact F1 | compact retention |
-|------|---------|-------------|------------|-------------------|
-| `longbench.hotpotqa` | 0.5372 | 0.5135 | 0.4244 | 0.7900 |
-| `longbench.multifieldqa_en` | 0.4879 | 0.5031 | 0.1797 | 0.3682 |
-| `longbench.narrativeqa` | 0.1920 | 0.2248 | 0.2143 | 1.1162 |
+L1 首基线以套件宏分为主；per-query / per-turn 明细见 Ops / `eval/reports/official/runs/<id>/`。
 
 ## 怎么用（live 调优）
 
 ```bash
-make official-bench-live          # 实测三套（需 BENCH_MODEL_*；禁止 dry/skip）
+make official-bench-retrieval-agent context-agent coding-infer-agent   # L1 实测
 make official-bench-compare       # latest vs 本 scorecard/baseline 打 Δ 表
-make official-bench-update-baseline  # 认可后写 JSON + 刷新本文件
+make official-bench-update-baseline  # 认可后写 JSON + 刷新本文件（协议跟 latest）
 ```

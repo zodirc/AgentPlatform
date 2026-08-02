@@ -1,0 +1,220 @@
+{
+  "protocol_version": "official-small-2026-08-m2",
+  "updated_at": "2026-08-02T14:59:11.335475+00:00",
+  "eval_path": "agent",
+  "suites": {
+    "retrieval": {
+      "run_id": "4996145f-8c51-4d70-92c1-d32493ad1384",
+      "finished_at": "2026-08-02T14:39:14.312824+00:00",
+      "eval_path": "agent",
+      "protocol_version": "official-small-2026-08-m2",
+      "primary_arm": "agent",
+      "metrics": {
+        "ndcg_at_1": 0.39444444444444443,
+        "recall_at_1": 0.22082334484316582,
+        "map_at_1": 0.22082334484316582,
+        "ndcg_at_10": 0.4030453974494786,
+        "recall_at_10": 0.364479153081559,
+        "map_at_10": 0.2756131217246583,
+        "ndcg_at_100": 0.42017590158294693,
+        "recall_at_100": 0.601876931959107,
+        "map_at_100": 0.294401920844089,
+        "n_queries": 20.0,
+        "n_qrels": 423.6666666666667
+      },
+      "bm25_metrics": {},
+      "delta_vs_bm25": {},
+      "cases": {
+        "beir.scifact.agent": {
+          "ndcg_at_1": 0.45,
+          "recall_at_1": 0.45,
+          "map_at_1": 0.45,
+          "ndcg_at_10": 0.5691948990155687,
+          "recall_at_10": 0.675,
+          "map_at_10": 0.53125,
+          "ndcg_at_100": 0.6309137135409969,
+          "recall_at_100": 0.95,
+          "map_at_100": 0.5445908234207653
+        },
+        "beir.nfcorpus.agent": {
+          "ndcg_at_1": 0.4833333333333333,
+          "recall_at_1": 0.012470034529497446,
+          "map_at_1": 0.012470034529497446,
+          "ndcg_at_10": 0.3565373509715465,
+          "recall_at_10": 0.0767707925780102,
+          "map_at_10": 0.05475603184064158,
+          "ndcg_at_100": 0.28556790378629693,
+          "recall_at_100": 0.20563079587732078,
+          "map_at_100": 0.08952683004617283
+        },
+        "beir.fiqa.agent": {
+          "ndcg_at_1": 0.25,
+          "recall_at_1": 0.2,
+          "map_at_1": 0.2,
+          "ndcg_at_10": 0.2834039423613205,
+          "recall_at_10": 0.3416666666666667,
+          "map_at_10": 0.24083333333333332,
+          "ndcg_at_100": 0.3440460874215469,
+          "recall_at_100": 0.65,
+          "map_at_100": 0.24908810906532897
+        }
+      }
+    },
+    "context": {
+      "run_id": "ebc6abfd-8943-423c-a539-de922af81af6",
+      "finished_at": "2026-08-02T14:43:43.633255+00:00",
+      "eval_path": "agent",
+      "protocol_version": "official-small-2026-08-m2",
+      "model": "deepseek-v4-flash",
+      "dry_metrics": false,
+      "metrics": {
+        "full_f1": 0.3149037699619565,
+        "budget_f1": 0.3149037699619565,
+        "compact_f1": 0.3149037699619565,
+        "retention_compact_vs_full": 1.0,
+        "agent_em": 0.05,
+        "agent_f1": 0.3149037699619565
+      },
+      "cases": {
+        "longbench.multifieldqa_en.0": {
+          "em": 0.0,
+          "f1": 0.26666666666666666,
+          "compact_f1": 0.26666666666666666,
+          "full_f1": 0.26666666666666666
+        },
+        "longbench.multifieldqa_en.2": {
+          "em": 0.0,
+          "f1": 0.2777777777777778,
+          "compact_f1": 0.2777777777777778,
+          "full_f1": 0.2777777777777778
+        },
+        "longbench.multifieldqa_en.1": {
+          "em": 0.0,
+          "f1": 0.0,
+          "compact_f1": 0.0,
+          "full_f1": 0.0
+        },
+        "longbench.multifieldqa_en.5": {
+          "em": 0.0,
+          "f1": 0.14925373134328357,
+          "compact_f1": 0.14925373134328357,
+          "full_f1": 0.14925373134328357
+        },
+        "longbench.multifieldqa_en.4": {
+          "em": 0.0,
+          "f1": 0.25263157894736843,
+          "compact_f1": 0.25263157894736843,
+          "full_f1": 0.25263157894736843
+        },
+        "longbench.multifieldqa_en.3": {
+          "em": 0.0,
+          "f1": 0.7500000000000001,
+          "compact_f1": 0.7500000000000001,
+          "full_f1": 0.7500000000000001
+        },
+        "longbench.multifieldqa_en.7": {
+          "em": 1.0,
+          "f1": 1.0,
+          "compact_f1": 1.0,
+          "full_f1": 1.0
+        },
+        "longbench.multifieldqa_en.6": {
+          "em": 0.0,
+          "f1": 0.6,
+          "compact_f1": 0.6,
+          "full_f1": 0.6
+        },
+        "longbench.multifieldqa_en.8": {
+          "em": 0.0,
+          "f1": 0.4444444444444445,
+          "compact_f1": 0.4444444444444445,
+          "full_f1": 0.4444444444444445
+        },
+        "longbench.multifieldqa_en.9": {
+          "em": 0.0,
+          "f1": 0.47058823529411764,
+          "compact_f1": 0.47058823529411764,
+          "full_f1": 0.47058823529411764
+        },
+        "longbench.multifieldqa_en.10": {
+          "em": 0.0,
+          "f1": 0.3055555555555555,
+          "compact_f1": 0.3055555555555555,
+          "full_f1": 0.3055555555555555
+        },
+        "longbench.multifieldqa_en.12": {
+          "em": 0.0,
+          "f1": 0.2978723404255319,
+          "compact_f1": 0.2978723404255319,
+          "full_f1": 0.2978723404255319
+        },
+        "longbench.multifieldqa_en.13": {
+          "em": 0.0,
+          "f1": 0.0,
+          "compact_f1": 0.0,
+          "full_f1": 0.0
+        },
+        "longbench.multifieldqa_en.15": {
+          "em": 0.0,
+          "f1": 0.09523809523809525,
+          "compact_f1": 0.09523809523809525,
+          "full_f1": 0.09523809523809525
+        },
+        "longbench.multifieldqa_en.16": {
+          "em": 0.0,
+          "f1": 0.41860465116279066,
+          "compact_f1": 0.41860465116279066,
+          "full_f1": 0.41860465116279066
+        },
+        "longbench.multifieldqa_en.17": {
+          "em": 0.0,
+          "f1": 0.09411764705882353,
+          "compact_f1": 0.09411764705882353,
+          "full_f1": 0.09411764705882353
+        },
+        "longbench.multifieldqa_en.14": {
+          "em": 0.0,
+          "f1": 0.0,
+          "compact_f1": 0.0,
+          "full_f1": 0.0
+        },
+        "longbench.multifieldqa_en.18": {
+          "em": 0.0,
+          "f1": 0.8181818181818182,
+          "compact_f1": 0.8181818181818182,
+          "full_f1": 0.8181818181818182
+        },
+        "longbench.multifieldqa_en.19": {
+          "em": 0.0,
+          "f1": 0.05714285714285714,
+          "compact_f1": 0.05714285714285714,
+          "full_f1": 0.05714285714285714
+        },
+        "longbench.multifieldqa_en.11": {
+          "em": 0.0,
+          "f1": 0.0,
+          "compact_f1": 0.0,
+          "full_f1": 0.0
+        }
+      }
+    },
+    "coding": {
+      "run_id": "32ede212-8cfd-4664-a097-4c8c8fda05ce",
+      "finished_at": "2026-08-02T14:50:57.974453+00:00",
+      "eval_path": "agent",
+      "protocol_version": "official-small-2026-08-m2",
+      "coding_tier": "n5",
+      "n_instances": 5.0,
+      "instance_fingerprint": "0e11348da8e8219d41c1f18b1e6d6484a224f86f66dcf36ad0d55fc6c7a50d0a",
+      "infer_mode": "platform_turn",
+      "harness": false,
+      "model": null,
+      "metrics": {
+        "n_instances": 5.0,
+        "n_nonempty_patches": 2.0,
+        "patch_rate": 0.4
+      },
+      "note": null
+    }
+  }
+}

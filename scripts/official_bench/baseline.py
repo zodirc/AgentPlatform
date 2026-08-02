@@ -39,6 +39,8 @@ _CONTEXT_KEYS = (
     "compact_em",
     "compact_f1",
     "retention_compact_vs_full",
+    "agent_em",
+    "agent_f1",
 )
 _CONTEXT_CASE_KEYS = (
     "full_f1",
@@ -55,8 +57,41 @@ def protocol_version(cfg: dict[str, Any] | None = None) -> str:
     return str(data.get("protocol_version") or "official-small")
 
 
+def _manifest_protocol(manifest: dict[str, Any] | None) -> str | None:
+    if not isinstance(manifest, dict):
+        return None
+    meta = manifest.get("model_meta") if isinstance(manifest.get("model_meta"), dict) else {}
+    result = manifest.get("result") if isinstance(manifest.get("result"), dict) else {}
+    for blob in (meta, result, manifest):
+        pv = blob.get("protocol_version")
+        if isinstance(pv, str) and pv.strip():
+            return pv.strip()
+    return None
+
+
+def _manifest_eval_path(manifest: dict[str, Any] | None) -> str | None:
+    if not isinstance(manifest, dict):
+        return None
+    meta = manifest.get("model_meta") if isinstance(manifest.get("model_meta"), dict) else {}
+    result = manifest.get("result") if isinstance(manifest.get("result"), dict) else {}
+    for blob in (meta, result, manifest):
+        ep = blob.get("eval_path")
+        if isinstance(ep, str) and ep.strip():
+            return ep.strip().lower()
+    return None
+
+
+def protocol_from_latest() -> str | None:
+    """Prefer protocol stamped on latest_* (L1 → m2) over suites.small.yaml (L0 m1)."""
+    for name in ("latest_retrieval.json", "latest_context.json", "latest_coding.json"):
+        pv = _manifest_protocol(_read_latest(name))
+        if pv:
+            return pv
+    return None
+
+
 def baseline_path(protocol: str | None = None) -> Path:
-    pv = protocol or protocol_version()
+    pv = protocol or protocol_from_latest() or protocol_version()
     return BASELINE_DIR / f"{pv}.json"
 
 
@@ -153,16 +188,26 @@ def extract_suite_snapshot(manifest: dict[str, Any]) -> dict[str, Any] | None:
     metrics_raw = manifest.get("metrics") or summary.get("metrics") or {}
     model_meta = manifest.get("model_meta") if isinstance(manifest.get("model_meta"), dict) else {}
 
+    eval_path = _manifest_eval_path(manifest) or "component"
+    protocol = _manifest_protocol(manifest)
+
     if suite == "retrieval":
-        # Prefer hybrid.* prefixed macros; fall back to unprefixed primary.
+        # L1 prefers agent.*; L0 prefers hybrid.*; then unprefixed primary.
+        prefixes = ("agent.", "hybrid.", "") if eval_path == "agent" else ("hybrid.", "agent.", "")
         primary: dict[str, float] = {}
         if isinstance(metrics_raw, dict):
             for k in _RETRIEVAL_KEYS:
-                hk = f"hybrid.{k}"
-                if isinstance(metrics_raw.get(hk), (int, float)):
-                    primary[k] = float(metrics_raw[hk])
-                elif isinstance(metrics_raw.get(k), (int, float)):
-                    primary[k] = float(metrics_raw[k])
+                for prefix in prefixes:
+                    key = f"{prefix}{k}" if prefix else k
+                    if isinstance(metrics_raw.get(key), (int, float)):
+                        primary[k] = float(metrics_raw[key])
+                        break
+            for extra in ("n_queries", "n_qrels"):
+                for prefix in (("agent.", "") if eval_path == "agent" else ("", "agent.")):
+                    key = f"{prefix}{extra}" if prefix else extra
+                    if isinstance(metrics_raw.get(key), (int, float)):
+                        primary[extra] = float(metrics_raw[key])
+                        break
         bm25 = {
             k: float(metrics_raw[f"bm25.{k}"])
             for k in _RETRIEVAL_KEYS
@@ -179,7 +224,9 @@ def extract_suite_snapshot(manifest: dict[str, Any]) -> dict[str, Any] | None:
         return {
             "run_id": run_id,
             "finished_at": manifest.get("finished_at"),
-            "primary_arm": "hybrid",
+            "eval_path": eval_path,
+            "protocol_version": protocol,
+            "primary_arm": "agent" if eval_path == "agent" else "hybrid",
             "metrics": primary,
             "bm25_metrics": bm25,
             "delta_vs_bm25": delta,
@@ -192,14 +239,23 @@ def extract_suite_snapshot(manifest: dict[str, Any]) -> dict[str, Any] | None:
         cases_out: dict[str, dict[str, float]] = {}
         for cid, m in _case_metrics_map(
             manifest.get("cases"),
-            keys=_CONTEXT_CASE_KEYS + ("retention_vs_full_f1",),
+            keys=_CONTEXT_CASE_KEYS + ("retention_vs_full_f1", "em", "f1"),
         ).items():
             if "retention" not in m and "retention_vs_full_f1" in m:
                 m = {**m, "retention": m["retention_vs_full_f1"]}
-            cases_out[cid] = {k: v for k, v in m.items() if k in _CONTEXT_CASE_KEYS or k == "retention"}
+            # L1 per-question cases expose em/f1 → map into compact/full for glance.
+            if "compact_f1" not in m and isinstance(m.get("f1"), (int, float)):
+                m = {**m, "compact_f1": float(m["f1"]), "full_f1": float(m["f1"])}
+            cases_out[cid] = {
+                k: v
+                for k, v in m.items()
+                if k in _CONTEXT_CASE_KEYS or k in {"retention", "em", "f1"}
+            }
         return {
             "run_id": run_id,
             "finished_at": manifest.get("finished_at"),
+            "eval_path": eval_path,
+            "protocol_version": protocol,
             "model": model_meta.get("model") or (manifest.get("result") or {}).get("model"),
             "dry_metrics": False,
             "metrics": metrics,
@@ -224,11 +280,16 @@ def extract_suite_snapshot(manifest: dict[str, Any]) -> dict[str, Any] | None:
         return {
             "run_id": run_id,
             "finished_at": manifest.get("finished_at"),
-            "coding_tier": m.get("coding_tier"),
-            "n_instances": m.get("n_instances"),
-            "instance_fingerprint": m.get("instance_fingerprint"),
-            "infer_mode": m.get("infer_mode"),
-            "harness": bool(m.get("resolve_rate") is not None),
+            "eval_path": eval_path,
+            "protocol_version": protocol,
+            "coding_tier": m.get("coding_tier") or model_meta.get("coding_tier"),
+            "n_instances": m.get("n_instances") or model_meta.get("n_instances"),
+            "instance_fingerprint": m.get("instance_fingerprint")
+            or model_meta.get("instance_fingerprint"),
+            "infer_mode": m.get("infer_mode") or model_meta.get("infer_mode"),
+            "harness": bool(
+                m.get("resolve_rate") is not None or model_meta.get("harness") is True
+            ),
             "model": model_meta.get("model") or m.get("model_name_or_path"),
             "metrics": metrics,
             "note": m.get("note"),
@@ -254,7 +315,7 @@ def build_baseline_from_latest(
     protocol: str | None = None,
 ) -> dict[str, Any]:
     """Assemble baseline document from ``latest_{suite}.json`` pointers."""
-    pv = protocol or protocol_version()
+    pv = protocol or protocol_from_latest() or protocol_version()
     existing = load_baseline(pv) or {}
     suite_blocks: dict[str, Any] = {}
     if isinstance(existing.get("suites"), dict):
@@ -267,6 +328,7 @@ def build_baseline_from_latest(
     }
     updated: list[str] = []
     skipped: list[str] = []
+    eval_paths: set[str] = set()
     for suite in suites:
         fname = mapping.get(suite)
         if not fname:
@@ -280,12 +342,18 @@ def build_baseline_from_latest(
         if not snap:
             skipped.append(f"{suite}:not_eligible")
             continue
+        ep = snap.get("eval_path")
+        if isinstance(ep, str) and ep:
+            eval_paths.add(ep)
         suite_blocks[suite] = snap
         updated.append(suite)
 
     return {
         "protocol_version": pv,
         "updated_at": datetime.now(timezone.utc).isoformat(),
+        "eval_path": next(iter(eval_paths)) if len(eval_paths) == 1 else (
+            "agent" if "agent" in eval_paths else "mixed"
+        ),
         "suites": suite_blocks,
         "_meta": {
             "updated_suites": updated,
@@ -312,63 +380,122 @@ def _fmt(v: Any, *, digits: int = 4) -> str:
 def render_scorecard(doc: dict[str, Any]) -> str:
     """Human-facing markdown for git glance (not a substitute for Ops HTML)."""
     suites = doc.get("suites") if isinstance(doc.get("suites"), dict) else {}
+    eval_path = str(doc.get("eval_path") or "").strip().lower()
+    is_l1 = eval_path == "agent"
     lines: list[str] = [
         "# Official live scorecard",
         "",
         f"- **protocol**: `{doc.get('protocol_version')}`",
+        f"- **eval_path**: `{eval_path or '—'}`"
+        + ("（L1 agent-path 主栏）" if is_l1 else "（L0 组件对照）"),
         f"- **updated_at**: `{doc.get('updated_at')}`",
         "- **含义**: live 实测官方小量的分数锚点（调优看 Δ）；题集在 `suites.small.yaml` / SWE slices。",
         "- **明细**: Ops 官方页 / `eval/reports/official/runs/<id>/`（不进 git）",
-        "",
-        "## 主指标（一眼）",
-        "",
-        "| 套件 | 主指标 | 值 | run_id | 备注 |",
-        "|------|--------|----|--------|------|",
     ]
+    if is_l1:
+        lines.append(
+            "- **L0 对照**: 旁路组件史见同目录 `official-small-2026-08-m1.json`（不进本表主栏）"
+        )
+    lines.extend(
+        [
+            "",
+            "## 主指标（一眼）",
+            "",
+            "| 套件 | 主指标 | 值 | run_id | 备注 |",
+            "|------|--------|----|--------|------|",
+        ]
+    )
 
     ret = suites.get("retrieval") if isinstance(suites.get("retrieval"), dict) else {}
     rm = ret.get("metrics") if isinstance(ret.get("metrics"), dict) else {}
     rd = ret.get("delta_vs_bm25") if isinstance(ret.get("delta_vs_bm25"), dict) else {}
+    ret_label = "agent nDCG@10" if is_l1 else "hybrid nDCG@10"
+    ret_note = (
+        f"n_queries={_fmt(rm.get('n_queries'), digits=0)} · R@100={_fmt(rm.get('recall_at_100'))}"
+        if is_l1
+        else f"ΔBM25 nDCG@10={_fmt(rd.get('ndcg_at_10'))} · R@100={_fmt(rm.get('recall_at_100'))}"
+    )
     lines.append(
-        "| retrieval | hybrid nDCG@10 | "
-        f"{_fmt(rm.get('ndcg_at_10'))} | `{_fmt(ret.get('run_id'))}` | "
-        f"ΔBM25 nDCG@10={_fmt(rd.get('ndcg_at_10'))} · R@100={_fmt(rm.get('recall_at_100'))} |"
+        f"| retrieval | {ret_label} | "
+        f"{_fmt(rm.get('ndcg_at_10'))} | `{_fmt(ret.get('run_id'))}` | {ret_note} |"
     )
 
     ctx = suites.get("context") if isinstance(suites.get("context"), dict) else {}
     cm = ctx.get("metrics") if isinstance(ctx.get("metrics"), dict) else {}
-    lines.append(
-        "| context | compact F1 / retention | "
-        f"{_fmt(cm.get('compact_f1'))} / {_fmt(cm.get('retention_compact_vs_full'))} | "
-        f"`{_fmt(ctx.get('run_id'))}` | "
-        f"full={_fmt(cm.get('full_f1'))} · truncate={_fmt(cm.get('budget_f1'))} · model=`{_fmt(ctx.get('model'))}` |"
-    )
+    if is_l1 and isinstance(cm.get("agent_f1"), (int, float)):
+        lines.append(
+            "| context | agent F1 / EM | "
+            f"{_fmt(cm.get('agent_f1'))} / {_fmt(cm.get('agent_em'))} | "
+            f"`{_fmt(ctx.get('run_id'))}` | "
+            f"arms equal on L1 · model=`{_fmt(ctx.get('model'))}` |"
+        )
+    else:
+        lines.append(
+            "| context | compact F1 / retention | "
+            f"{_fmt(cm.get('compact_f1'))} / {_fmt(cm.get('retention_compact_vs_full'))} | "
+            f"`{_fmt(ctx.get('run_id'))}` | "
+            f"full={_fmt(cm.get('full_f1'))} · truncate={_fmt(cm.get('budget_f1'))} · "
+            f"model=`{_fmt(ctx.get('model'))}` |"
+        )
 
     cod = suites.get("coding") if isinstance(suites.get("coding"), dict) else {}
     km = cod.get("metrics") if isinstance(cod.get("metrics"), dict) else {}
+    cod_note = (
+        f"tier=`{_fmt(cod.get('coding_tier'))}` · n={_fmt(cod.get('n_instances'))} · "
+        f"resolve={'yes' if cod.get('harness') else 'no'} · `{_fmt(cod.get('infer_mode'))}`"
+    )
+    if cod.get("note"):
+        cod_note = f"{cod_note} · {cod.get('note')}"
     lines.append(
         "| coding | patch_rate | "
-        f"{_fmt(km.get('patch_rate'))} | `{_fmt(cod.get('run_id'))}` | "
-        f"tier=`{_fmt(cod.get('coding_tier'))}` · n={_fmt(cod.get('n_instances'))} · "
-        f"resolve={'yes' if cod.get('harness') else 'no'} · `{_fmt(cod.get('infer_mode'))}` |"
+        f"{_fmt(km.get('patch_rate'))} | `{_fmt(cod.get('run_id'))}` | {cod_note} |"
     )
 
-    lines.extend(["", "## Retrieval · hybrid cases (nDCG@10)", "", "| case | nDCG@10 | R@100 |", "|------|---------|-------|"])
-    cases = ret.get("cases") if isinstance(ret.get("cases"), dict) else {}
-    for cid in sorted(cases):
-        if ".hybrid" not in cid:
-            continue
-        m = cases[cid] if isinstance(cases[cid], dict) else {}
-        lines.append(f"| `{cid}` | {_fmt(m.get('ndcg_at_10'))} | {_fmt(m.get('recall_at_100'))} |")
-
-    lines.extend(["", "## Context · per task", "", "| case | full F1 | truncate F1 | compact F1 | compact retention |", "|------|---------|-------------|------------|-------------------|"])
-    cc = ctx.get("cases") if isinstance(ctx.get("cases"), dict) else {}
-    for cid in sorted(cc):
-        m = cc[cid] if isinstance(cc[cid], dict) else {}
-        lines.append(
-            f"| `{cid}` | {_fmt(m.get('full_f1'))} | {_fmt(m.get('budget_f1'))} | "
-            f"{_fmt(m.get('compact_f1'))} | {_fmt(m.get('retention_compact_vs_full') or m.get('retention'))} |"
+    if is_l1:
+        lines.extend(
+            [
+                "",
+                "## Retrieval / Context cases",
+                "",
+                "L1 首基线以套件宏分为主；per-query / per-turn 明细见 Ops / `eval/reports/official/runs/<id>/`。",
+            ]
         )
+    else:
+        lines.extend(
+            [
+                "",
+                "## Retrieval · hybrid cases (nDCG@10)",
+                "",
+                "| case | nDCG@10 | R@100 |",
+                "|------|---------|-------|",
+            ]
+        )
+        cases = ret.get("cases") if isinstance(ret.get("cases"), dict) else {}
+        for cid in sorted(cases):
+            if ".hybrid" not in cid:
+                continue
+            m = cases[cid] if isinstance(cases[cid], dict) else {}
+            lines.append(
+                f"| `{cid}` | {_fmt(m.get('ndcg_at_10'))} | {_fmt(m.get('recall_at_100'))} |"
+            )
+
+        lines.extend(
+            [
+                "",
+                "## Context · per task",
+                "",
+                "| case | full F1 | truncate F1 | compact F1 | compact retention |",
+                "|------|---------|-------------|------------|-------------------|",
+            ]
+        )
+        cc = ctx.get("cases") if isinstance(ctx.get("cases"), dict) else {}
+        for cid in sorted(cc):
+            m = cc[cid] if isinstance(cc[cid], dict) else {}
+            lines.append(
+                f"| `{cid}` | {_fmt(m.get('full_f1'))} | {_fmt(m.get('budget_f1'))} | "
+                f"{_fmt(m.get('compact_f1'))} | "
+                f"{_fmt(m.get('retention_compact_vs_full') or m.get('retention'))} |"
+            )
 
     lines.extend(
         [
@@ -376,9 +503,9 @@ def render_scorecard(doc: dict[str, Any]) -> str:
             "## 怎么用（live 调优）",
             "",
             "```bash",
-            "make official-bench-live          # 实测三套（需 BENCH_MODEL_*；禁止 dry/skip）",
+            "make official-bench-retrieval-agent context-agent coding-infer-agent   # L1 实测",
             "make official-bench-compare       # latest vs 本 scorecard/baseline 打 Δ 表",
-            "make official-bench-update-baseline  # 认可后写 JSON + 刷新本文件",
+            "make official-bench-update-baseline  # 认可后写 JSON + 刷新本文件（协议跟 latest）",
             "```",
             "",
         ]
@@ -405,7 +532,14 @@ def compare_latest_to_baseline(
 
     primary_keys = {
         "retrieval": ("ndcg_at_10", "recall_at_100", "map_at_100"),
-        "context": ("full_f1", "budget_f1", "compact_f1", "retention_compact_vs_full"),
+        "context": (
+            "agent_f1",
+            "agent_em",
+            "full_f1",
+            "budget_f1",
+            "compact_f1",
+            "retention_compact_vs_full",
+        ),
         "coding": ("patch_rate", "resolve_rate", "n_nonempty_patches"),
     }
     rows: list[dict[str, Any]] = []

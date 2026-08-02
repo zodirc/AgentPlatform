@@ -57,3 +57,29 @@ def test_suite_metrics_reads_block() -> None:
     doc = {"suites": {"retrieval": {"metrics": {"ndcg_at_10": 0.42}}}}
     m = suite_metrics(doc, "retrieval")
     assert m == {"ndcg_at_10": 0.42}
+
+
+def test_extract_agent_retrieval_prefers_agent_prefix() -> None:
+    manifest = {
+        "id": "r-l1",
+        "official_suite": "retrieval",
+        "status": "completed",
+        "finished_at": "2026-08-02T00:00:00+00:00",
+        "model_meta": {
+            "protocol_version": "official-small-2026-08-m2",
+            "eval_path": "agent",
+        },
+        "metrics": {
+            "ndcg_at_10": 0.40,
+            "agent.ndcg_at_10": 0.403,
+            "hybrid.ndcg_at_10": 0.41,
+            "recall_at_100": 0.60,
+            "agent.recall_at_100": 0.6019,
+        },
+    }
+    snap = extract_suite_snapshot(manifest)
+    assert snap is not None
+    assert snap["eval_path"] == "agent"
+    assert snap["primary_arm"] == "agent"
+    assert snap["metrics"]["ndcg_at_10"] == 0.403
+    assert snap["protocol_version"] == "official-small-2026-08-m2"
