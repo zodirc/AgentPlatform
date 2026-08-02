@@ -12,6 +12,16 @@ from .pull import pull_all, pull_beir, pull_longbench, pull_swebench
 from .swe_run import CODING_TIERS, DEFAULT_CODING_TIER, run_swe_eval, run_swe_infer, run_swe_pull_only
 
 
+def _exit_from_manifest(manifest: object) -> int:
+    """Non-zero when suite finished with failed/error status (so Ops ✓/✗ matches metrics)."""
+    if not isinstance(manifest, dict):
+        return 0
+    status = str(manifest.get("status") or "").strip().lower()
+    if status in {"failed", "error", "fail"}:
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="official-bench",
@@ -123,32 +133,35 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "retrieval":
-        run_beir_small(force_pull=args.force_pull)
-        return 0
+        return _exit_from_manifest(run_beir_small(force_pull=args.force_pull))
 
     if args.cmd == "context":
-        run_context_small(
-            force_pull=args.force_pull,
-            limit=args.limit,
-            dry_metrics=args.dry_metrics,
+        return _exit_from_manifest(
+            run_context_small(
+                force_pull=args.force_pull,
+                limit=args.limit,
+                dry_metrics=args.dry_metrics,
+            )
         )
-        return 0
 
     if args.cmd == "coding":
         if args.phase == "pull":
             run_swe_pull_only(force_pull=args.force_pull)
-        elif args.phase == "infer":
-            run_swe_infer(
-                force_pull=args.force_pull,
-                skip_api=args.skip_api,
-                tier=args.tier,
-                n_instances=args.n_instances,
-                run_harness=args.harness,
+            return 0
+        if args.phase == "infer":
+            return _exit_from_manifest(
+                run_swe_infer(
+                    force_pull=args.force_pull,
+                    skip_api=args.skip_api,
+                    tier=args.tier,
+                    n_instances=args.n_instances,
+                    run_harness=args.harness,
+                )
             )
-        elif args.phase == "eval":
-            run_swe_eval(predictions=args.predictions)
-        else:
-            run_swe_pull_only(force_pull=args.force_pull)
+        if args.phase == "eval":
+            return _exit_from_manifest(run_swe_eval(predictions=args.predictions))
+        run_swe_pull_only(force_pull=args.force_pull)
+        code = _exit_from_manifest(
             run_swe_infer(
                 force_pull=False,
                 skip_api=args.skip_api,
@@ -156,26 +169,37 @@ def main(argv: list[str] | None = None) -> int:
                 n_instances=args.n_instances,
                 run_harness=args.harness,
             )
-            if not args.harness:
-                run_swe_eval(predictions=args.predictions)
+        )
+        if code != 0:
+            return code
+        if not args.harness:
+            return _exit_from_manifest(run_swe_eval(predictions=args.predictions))
         return 0
 
     if args.cmd == "all":
         pull_all(force=args.force_pull)
-        run_beir_small(force_pull=False)
+        code = _exit_from_manifest(run_beir_small(force_pull=False))
+        if code != 0:
+            return code
         if args.with_context:
-            run_context_small(
-                force_pull=False,
-                limit=args.context_limit,
-                dry_metrics=args.context_dry_metrics,
+            code = _exit_from_manifest(
+                run_context_small(
+                    force_pull=False,
+                    limit=args.context_limit,
+                    dry_metrics=args.context_dry_metrics,
+                )
             )
+            if code != 0:
+                return code
         if args.with_coding_infer:
-            run_swe_infer(
-                force_pull=False,
-                skip_api=False,
-                tier=args.tier,
-                n_instances=args.n_instances,
-                run_harness=args.harness,
+            return _exit_from_manifest(
+                run_swe_infer(
+                    force_pull=False,
+                    skip_api=False,
+                    tier=args.tier,
+                    n_instances=args.n_instances,
+                    run_harness=args.harness,
+                )
             )
         return 0
 

@@ -176,15 +176,35 @@ def _build_prompt(row: dict[str, Any], context: str) -> str:
     )
 
 
-def _chat_complete(prompt: str, *, model: str, base_url: str, api_key: str) -> str:
+def _chat_complete(
+    prompt: str,
+    *,
+    model: str,
+    base_url: str,
+    api_key: str,
+    provider: str | None = None,
+    api_style: str | None = None,
+) -> str:
     from official_bench.llm_client import chat_complete
 
+    # Thinking-on: CoT + answer share max_tokens. Size for first-shot success
+    # (no length→retry loop — that wastes a full generation).
+    max_tokens = int(os.environ.get("BENCH_CONTEXT_MAX_TOKENS", "65536") or "65536")
+    extra = None
+    if (provider or "").lower() == "deepseek" or "deepseek.com" in (base_url or "").lower():
+        extra = {
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": os.environ.get("BENCH_MODEL_REASONING_EFFORT", "high"),
+        }
     return chat_complete(
         prompt,
         model=model,
         base_url=base_url,
         api_key=api_key,
-        max_tokens=256,
+        provider=provider,
+        api_style=api_style,
+        max_tokens=max_tokens,
+        extra_body=extra,
     )
 
 
@@ -247,14 +267,16 @@ def run_context_small(
             or ""
         ).strip()
         session.extra["model"] = None if dry_metrics else model
-        session.extra["provider"] = (
+        provider = (
             None if dry_metrics else (os.environ.get("BENCH_MODEL_PROVIDER") or "").strip() or None
         )
-        session.extra["api_style"] = (
+        api_style = (
             None
             if dry_metrics
             else (os.environ.get("BENCH_MODEL_API_STYLE") or "").strip() or None
         )
+        session.extra["provider"] = provider
+        session.extra["api_style"] = api_style
         session.extra["context_window_tokens"] = int(cw) if cw.isdigit() else None
 
         if not dry_metrics and not api_key:
@@ -285,20 +307,51 @@ def run_context_small(
             compact_context = compact_with_context_engine(context, budget)
             prompt_compact = _build_prompt(row, compact_context)
 
+            n_rows = len(rows)
+            cur = i + 1
+            pct = int(100 * cur / n_rows) if n_rows else 0
+
+            def _progress_arm(arm: str) -> None:
+                # Ops detail bar only tracks [progress] lines reliably.
+                print(
+                    f"[progress] eval dataset={cur}/{n_rows} name={task} "
+                    f"arm={arm} stage=infer unit={cur}/{n_rows} pct={pct}",
+                    flush=True,
+                )
+
             if dry_metrics:
+                _progress_arm("full")
                 pred_full, pred_budget, pred_compact = "", "", ""
             else:
-                session.log("infer", f"{i + 1}/{len(rows)} {task} arm=full")
+                session.log("infer", f"{cur}/{n_rows} {task} arm=full")
+                _progress_arm("full")
                 pred_full = _chat_complete(
-                    prompt_full, model=model, base_url=base_url, api_key=api_key
+                    prompt_full,
+                    model=model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    provider=provider,
+                    api_style=api_style,
                 )
-                session.log("infer", f"{i + 1}/{len(rows)} {task} arm=truncate")
+                session.log("infer", f"{cur}/{n_rows} {task} arm=truncate")
+                _progress_arm("truncate")
                 pred_budget = _chat_complete(
-                    prompt_budget, model=model, base_url=base_url, api_key=api_key
+                    prompt_budget,
+                    model=model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    provider=provider,
+                    api_style=api_style,
                 )
-                session.log("infer", f"{i + 1}/{len(rows)} {task} arm=compact")
+                session.log("infer", f"{cur}/{n_rows} {task} arm=compact")
+                _progress_arm("compact")
                 pred_compact = _chat_complete(
-                    prompt_compact, model=model, base_url=base_url, api_key=api_key
+                    prompt_compact,
+                    model=model,
+                    base_url=base_url,
+                    api_key=api_key,
+                    provider=provider,
+                    api_style=api_style,
                 )
 
             s_full = score_prediction(pred_full, golds)

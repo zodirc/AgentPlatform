@@ -103,6 +103,25 @@ async def _caps() -> dict[str, bool]:
     return caps
 
 
+@router.post("/model/probe")
+async def official_model_probe(body: ModelBody) -> dict[str, Any]:
+    """Test chat connectivity from the bench worker (not the browser / api)."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    from app.services.ops import bench_client
+
+    if not bench_client.bench_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="bench worker unavailable — run make up-bench",
+        )
+    payload = body.model_dump(exclude_none=True)
+    try:
+        return await bench_client.probe_model(payload)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=str(exc)[:500]) from exc
+
+
 @router.get("/meta")
 async def official_meta() -> dict[str, Any]:
     if not ops_eval_enabled():

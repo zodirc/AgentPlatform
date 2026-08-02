@@ -82,7 +82,7 @@ class Job:
     error: str | None = None
     cancel_requested: bool = False
     lines: list[str] = field(default_factory=list)
-    _proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
+    _procs: list[asyncio.subprocess.Process] = field(default_factory=list, repr=False)
     _subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
     _task: asyncio.Task | None = field(default=None, repr=False)
     _persisted_line_count: int = field(default=0, repr=False)
@@ -126,7 +126,8 @@ def _persist_job(job: Job) -> None:
         "cancel_requested": job.cancel_requested,
         "updated_at": job.updated_at,
         "lines": job.lines[-200:],
-        "pid": job._proc.pid if job._proc is not None else None,
+        "pids": [p.pid for p in job._procs if p.returncode is None],
+        "pid": next((p.pid for p in job._procs if p.returncode is None), None),
     }
     jobs_dir = _jobs_dir()
     jobs_dir.mkdir(parents=True, exist_ok=True)
@@ -296,8 +297,8 @@ def _job_env(*, retrieval_prod: bool, model: dict[str, Any] | None = None) -> di
             env["BENCH_MODEL_CONTEXT_WINDOW"] = str(model["context_window_tokens"])
     if not env.get("BENCH_SEARCH_WORKERS", "").strip():
         env["BENCH_SEARCH_WORKERS"] = str(min(4, os.cpu_count() or 4))
-    if not env.get("BENCH_SEARCH_POOL", "").strip():
-        env["BENCH_SEARCH_POOL"] = "process"
+    # Do not force BENCH_SEARCH_POOL: hybrid defaults to thread, BM25 to process
+    # inside official_bench (avoids ST×N RSS under the bench mem_limit).
     repo = _repo_root()
     runtime = str(repo / "services" / "runtime")
     scripts = str(repo / "scripts")
@@ -358,6 +359,88 @@ async def _kill(proc: asyncio.subprocess.Process) -> None:
             pass
 
 
+async def _kill_all(job: Job) -> None:
+    procs = list(job._procs)
+    if not procs:
+        return
+    await asyncio.gather(*(_kill(p) for p in procs), return_exceptions=True)
+
+
+def _job_max_parallel(n_targets: int) -> int:
+    """Cap concurrent suite subprocesses. Default = all selected targets."""
+    raw = (os.environ.get("BENCH_JOB_MAX_PARALLEL") or "").strip()
+    if raw.isdigit():
+        return max(1, min(int(raw), max(1, n_targets)))
+    return max(1, n_targets)
+
+
+async def _run_one_target(
+    job: Job,
+    target: str,
+    *,
+    env: dict[str, str],
+    repo: Path,
+    sem: asyncio.Semaphore,
+) -> tuple[str, str, int | None]:
+    """Run one suite subprocess. Returns (target, status, exit_code)."""
+    async with sem:
+        if job.cancel_requested:
+            await _publish(job, f"[bench] target_end {target} status=cancelled")
+            return target, "cancelled", None
+
+        cmd = _cmd_for_target(
+            target,
+            context_dry=job.context_dry,
+            coding_skip_api=job.coding_skip_api,
+            coding_tier=job.coding_tier,
+            coding_n_instances=job.coding_n_instances,
+            coding_harness=job.coding_harness,
+        )
+        await _publish(job, f"[bench] target_start {target}")
+        await _publish(job, "$ " + " ".join(cmd))
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(repo),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
+        )
+        job._procs.append(proc)
+        _persist_job(job)
+        assert proc.stdout is not None
+        while True:
+            if job.cancel_requested and proc.returncode is None:
+                await _kill(proc)
+                break
+            try:
+                raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            if not raw:
+                break
+            text = raw.decode("utf-8", errors="replace").rstrip()
+            if not text:
+                continue
+            # Tag phase lines so the Ops aggregator can keep per-suite status
+            # when multiple targets run in parallel (stdout is interleaved).
+            if text.startswith("[phase]"):
+                phase_body = text.removeprefix("[phase]").strip()
+                await _publish(job, f"[bench] target_phase {target} {phase_body}")
+            await _publish(job, text)
+        rc = await proc.wait()
+        if proc in job._procs:
+            job._procs.remove(proc)
+        if job.cancel_requested:
+            await _publish(job, f"[bench] target_end {target} status=cancelled")
+            return target, "cancelled", rc
+        if rc != 0:
+            await _publish(job, f"[bench] target_end {target} status=fail exit={rc}")
+            return target, "fail", rc
+        await _publish(job, f"[bench] target_end {target} status=pass")
+        return target, "pass", rc
+
+
 async def _run_job(job_id: str) -> None:
     job = _JOBS.get(job_id)
     if job is None:
@@ -367,76 +450,48 @@ async def _run_job(job_id: str) -> None:
     env = _job_env(retrieval_prod=job.retrieval_prod, model=job.model)
     repo = _repo_root()
     model_name = (job.model or {}).get("model_name") if job.model else None
+    max_parallel = _job_max_parallel(len(job.targets))
     await _publish(
         job,
         f"[bench] worker start retrieval_prod={int(job.retrieval_prod)} "
-        f"targets={job.targets}"
+        f"targets={job.targets} parallel={max_parallel}"
         + (f" model={model_name}" if model_name else ""),
     )
+    # Suite-level parallelism: N selected targets → up to N concurrent subprocesses.
+    # Failures do not cancel siblings; cancel kills all. Set BENCH_JOB_MAX_PARALLEL=1
+    # to force serial (e.g. shared LLM key under rate-limit pressure).
     try:
-        for target in job.targets:
-            if job.cancel_requested:
-                job.status = "cancelled"
-                _persist_job(job)
-                break
-            cmd = _cmd_for_target(
-                target,
-                context_dry=job.context_dry,
-                coding_skip_api=job.coding_skip_api,
-                coding_tier=job.coding_tier,
-                coding_n_instances=job.coding_n_instances,
-                coding_harness=job.coding_harness,
-            )
-            await _publish(job, f"[bench] target_start {target}")
-            await _publish(job, "$ " + " ".join(cmd))
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(repo),
-                env=env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT,
-                start_new_session=True,
-            )
-            job._proc = proc
+        if job.cancel_requested:
+            job.status = "cancelled"
             _persist_job(job)
-            assert proc.stdout is not None
-            while True:
-                if job.cancel_requested and proc.returncode is None:
-                    await _kill(proc)
-                    break
-                try:
-                    raw = await asyncio.wait_for(proc.stdout.readline(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                if not raw:
-                    break
-                text = raw.decode("utf-8", errors="replace").rstrip()
-                if text:
-                    await _publish(job, text)
-            rc = await proc.wait()
-            job._proc = None
-            if job.cancel_requested:
-                await _publish(job, f"[bench] target_end {target} status=cancelled")
-                job.status = "cancelled"
-                _persist_job(job)
-                break
-            if rc != 0:
-                await _publish(job, f"[bench] target_end {target} status=fail exit={rc}")
-                job.status = "failed"
-                job.error = f"target_{target}_exit_{rc}"
-                _persist_job(job)
-                await _publish(job, f"[bench] FAIL {job.error}")
-                break
-            await _publish(job, f"[bench] target_end {target} status=pass")
         else:
-            job.status = "completed"
+            sem = asyncio.Semaphore(max_parallel)
+            results = await asyncio.gather(
+                *(
+                    _run_one_target(job, target, env=env, repo=repo, sem=sem)
+                    for target in job.targets
+                )
+            )
+            if job.cancel_requested or any(status == "cancelled" for _, status, _ in results):
+                job.status = "cancelled"
+            else:
+                fails = [(t, rc) for t, status, rc in results if status == "fail"]
+                if fails:
+                    job.status = "failed"
+                    parts = [f"target_{t}_exit_{rc}" for t, rc in fails]
+                    job.error = ";".join(parts)
+                    await _publish(job, f"[bench] FAIL {job.error}")
+                else:
+                    job.status = "completed"
             _persist_job(job)
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.error = str(exc)
         _persist_job(job)
         await _publish(job, f"[bench] ERROR {exc}")
+        await _kill_all(job)
     finally:
+        job._procs.clear()
         job.finished_at = _utc()
         await _publish(job, f"[bench] finished status={job.status}")
         _persist_job(job)
@@ -473,7 +528,33 @@ async def caps() -> dict[str, Any]:
         "context": bool(h.get("script")),
         "coding_pull": bool(h.get("script")),
         "coding_infer": bool(h.get("script")),
+        "model_probe": True,
     }
+
+
+@app.post("/v1/model/probe", dependencies=[Depends(require_internal)])
+async def probe_model(body: BenchModelBody) -> dict[str, Any]:
+    """Live round-trip from the bench container (same egress as context/coding)."""
+    repo = _repo_root()
+    scripts = str(repo / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    try:
+        from official_bench.llm_client import probe_model as _probe
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=500, detail=f"official_bench.llm_client unavailable: {exc}"
+        ) from exc
+
+    result = await asyncio.to_thread(
+        _probe,
+        model=body.model_name,
+        api_key=body.api_key,
+        base_url=body.base_url or "",
+        api_style=body.api_style,
+        provider=body.provider,
+    )
+    return result
 
 
 @app.post("/v1/jobs", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_internal)])
@@ -559,8 +640,7 @@ async def stop_job(job_id: str) -> dict[str, Any]:
     if job is None:
         raise HTTPException(status_code=404, detail="job_not_found")
     job.cancel_requested = True
-    if job._proc is not None:
-        await _kill(job._proc)
+    await _kill_all(job)
     _persist_job(job)
     return await get_job(job_id)
 

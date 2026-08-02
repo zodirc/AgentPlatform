@@ -46,6 +46,25 @@ async def health() -> dict[str, Any]:
         return resp.json()
 
 
+async def probe_model(model: dict[str, Any]) -> dict[str, Any]:
+    """Ask the bench worker to ping the configured chat endpoint."""
+    base = bench_base_url()
+    if not base:
+        raise RuntimeError("BENCH_URL unset — start the bench worker")
+    async with httpx.AsyncClient(timeout=90.0) as client:
+        resp = await client.post(
+            f"{base}/v1/model/probe",
+            headers=_headers(),
+            json=model,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(resp.text or f"bench_probe_http_{resp.status_code}")
+        data = resp.json()
+        if not isinstance(data, dict):
+            raise RuntimeError("bench_probe_invalid_response")
+        return data
+
+
 async def start_job(
     *,
     targets: list[str],

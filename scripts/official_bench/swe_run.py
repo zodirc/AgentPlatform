@@ -161,6 +161,22 @@ def _api_infer_one(instance: dict[str, Any], *, base_url: str, token: str) -> st
         return patch
 
 
+def _strip_patch_fences(text: str) -> str:
+    """Keep unified diff body if the model wrapped it in Markdown fences."""
+    import re
+
+    raw = (text or "").strip()
+    if not raw:
+        return ""
+    fenced = re.search(r"```(?:diff|patch)?\s*\n([\s\S]*?)```", raw, re.I)
+    if fenced:
+        raw = fenced.group(1).strip()
+    # Prefer a hunk that looks like a unified diff.
+    if "@@" in raw or raw.startswith("--- ") or raw.startswith("diff --git"):
+        return raw
+    return raw
+
+
 def _bench_infer_one(
     instance: dict[str, Any], *, model: str, base_url: str, api_key: str
 ) -> str:
@@ -173,13 +189,38 @@ def _bench_infer_one(
         f"Instance: {instance.get('instance_id')} ({instance.get('repo')})\n\n"
         f"{instance.get('problem_statement') or ''}"
     )
-    return chat_complete(
+    # Mature path: keep DeepSeek V4 thinking ON (API default). Give a large enough
+    # max_tokens so CoT (reasoning_content) + final patch (content) both fit.
+    # Patch is taken from content only — never from reasoning_content.
+    extra: dict[str, Any] | None = None
+    provider = (os.environ.get("BENCH_MODEL_PROVIDER") or "").strip().lower()
+    if (
+        provider == "deepseek"
+        or "deepseek" in (model or "").lower()
+        or "deepseek.com" in (base_url or "").lower()
+    ):
+        extra = {
+            "thinking": {"type": "enabled"},
+            "reasoning_effort": os.environ.get("BENCH_MODEL_REASONING_EFFORT", "high"),
+        }
+    max_tokens = int(os.environ.get("BENCH_MODEL_MAX_TOKENS", "65536") or "65536")
+    text = chat_complete(
         prompt,
         model=model,
         base_url=base_url,
         api_key=api_key,
-        max_tokens=int(os.environ.get("BENCH_MODEL_MAX_TOKENS", "4096")),
+        max_tokens=max_tokens,
+        extra_body=extra,
     )
+    patch = _strip_patch_fences(text)
+    if not patch.strip():
+        print(
+            f"[coding] empty_patch instance={instance.get('instance_id')} "
+            f"content_len={len(text or '')} max_tokens={max_tokens} "
+            f"(thinking on; check stderr for reasoning_content_len / finish_reason)",
+            flush=True,
+        )
+    return patch
 
 
 def write_predictions(
@@ -339,10 +380,23 @@ def run_swe_infer(
         patches: dict[str, str] = {}
         if skip_api:
             session.log("infer", "skip_api — empty patches")
+            print(
+                "[progress] eval dataset=1/1 name=swebench_lite arm=skip_api "
+                "stage=infer unit=1/1 pct=100",
+                flush=True,
+            )
         else:
+            n_inst = len(instances)
             for i, inst in enumerate(instances):
                 iid = str(inst["instance_id"])
-                session.log("infer", f"{i + 1}/{len(instances)} {iid}")
+                cur = i + 1
+                pct = int(100 * cur / n_inst) if n_inst else 0
+                session.log("infer", f"{cur}/{n_inst} {iid}")
+                print(
+                    f"[progress] eval dataset={cur}/{n_inst} name={iid} "
+                    f"arm=infer stage=infer unit={cur}/{n_inst} pct={pct}",
+                    flush=True,
+                )
                 try:
                     if infer_mode == "platform_turn":
                         patches[iid] = _api_infer_one(inst, base_url=base_url, token=api_key)

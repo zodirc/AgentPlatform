@@ -455,6 +455,9 @@ export function AgentChatPanel({
     stickToBottomRef.current = distance <= STICK_THRESHOLD_PX;
   };
 
+  const planItemsKey =
+    wb.plan?.items?.map((i) => `${i.id}:${i.status}`).join("|") ?? "";
+
   useEffect(() => {
     if (!stickToBottomRef.current) return;
     endRef.current?.scrollIntoView({ block: "end" });
@@ -469,7 +472,7 @@ export function AgentChatPanel({
     wb.awaitingApproval,
     wb.historyLoading,
     wb.plan?.items?.length,
-    wb.plan?.items?.map((i) => `${i.id}:${i.status}`).join("|"),
+    planItemsKey,
     wb.canExecutePlan,
     activeTab,
     activeSub?.streamText,

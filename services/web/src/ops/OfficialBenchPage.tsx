@@ -76,9 +76,9 @@ const PROVIDER_PRESETS: ProviderPreset[] = [
     id: "deepseek",
     label: "DeepSeek",
     api_style: "openai",
-    model: "deepseek-chat",
+    model: "deepseek-v4-flash",
     base_url: "https://api.deepseek.com",
-    context_window: "65536",
+    context_window: "128000",
   },
   {
     id: "openrouter",
@@ -251,8 +251,6 @@ type OfficialRun = {
   }>;
 };
 
-const KNOWN_TARGETS = ["pull", "retrieval", "context", "coding_pull", "coding_infer"] as const;
-
 function isActiveStatus(status?: string): boolean {
   return status === "queued" || status === "running" || status === "cancelling";
 }
@@ -319,9 +317,83 @@ type DetailProgress = {
   kind: "pull" | "eval" | "idle";
   label: string;
   pct: number | null;
+  /** Suite key when line is attributable (context / coding / retrieval). */
+  suite?: string;
 };
 
+const SUITE_DETAIL_LABEL: Record<string, string> = {
+  context: "上下文",
+  coding: "编码",
+  retrieval: "检索",
+};
+
+function formatSuiteDetails(details: Record<string, DetailProgress>): {
+  label: string;
+  pct: number | null;
+  kind: DetailProgress["kind"];
+} {
+  const keys = Object.keys(details);
+  if (!keys.length) {
+    return { label: "尚未开始", pct: null, kind: "idle" };
+  }
+  const order = ["retrieval", "context", "coding"];
+  const sorted = [
+    ...order.filter((k) => k in details),
+    ...keys.filter((k) => !order.includes(k)).sort(),
+  ];
+  const label = sorted
+    .map((k) => {
+      const d = details[k];
+      if (k === "_") return d.label;
+      const name = SUITE_DETAIL_LABEL[k] || k;
+      return `${name}: ${d.label}`;
+    })
+    .join(" · ");
+  const pcts = sorted
+    .map((k) => details[k].pct)
+    .filter((p): p is number => p != null && Number.isFinite(p));
+  const pct = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
+  const kind = sorted.some((k) => details[k].kind === "eval")
+    ? "eval"
+    : sorted.some((k) => details[k].kind === "pull")
+      ? "pull"
+      : "idle";
+  return { label, pct, kind };
+}
+
 function parseProgressLine(line: string): DetailProgress | null {
+  // Context / coding infer lines: "[context] infer — 72/120 hotpotqa arm=full"
+  // Dash may be em/en/hyphen; keep tolerant for Ops log replay.
+  const infer = line.match(
+    /^\[(context|coding)\]\s+infer\s+\D*?(\d+)\s*\/\s*(\d+)\s+(.+)$/i,
+  );
+  if (infer) {
+    const suite = infer[1].toLowerCase();
+    const cur = Number(infer[2]);
+    const total = Number(infer[3]);
+    const rest = infer[4].trim();
+    const pct =
+      total > 0 && Number.isFinite(cur)
+        ? Math.max(0, Math.min(100, Math.round((cur / total) * 100)))
+        : null;
+    return {
+      kind: "eval",
+      suite,
+      label: `推理 ${cur}/${total || "?"} · ${rest}`,
+      pct,
+    };
+  }
+  if (/^\[(context|coding)\]\s+run_finished/i.test(line)) {
+    const suite = line.match(/^\[(context|coding)\]/i)?.[1]?.toLowerCase();
+    const failed = /\bfailed\b/i.test(line);
+    return {
+      kind: "eval",
+      suite,
+      label: failed ? "套件结束（未达标）" : "套件结束",
+      pct: 100,
+    };
+  }
+
   const m = line.match(
     /^\[progress\]\s+(pull|eval)\s+(.+)$/i,
   );
@@ -333,9 +405,12 @@ function parseProgressLine(line: string): DetailProgress | null {
     const eq = part.indexOf("=");
     if (eq > 0) kv[part.slice(0, eq)] = part.slice(eq + 1);
   }
+  // Retrieval (and other) [progress] lines — attribute to retrieval when present.
+  const suite = "retrieval";
   if (kind === "pull" && rest.startsWith("plan")) {
     return {
       kind: "pull",
+      suite,
       label: `拉取计划：共 ${kv.total || "?"} 集 · 已缓存 ${kv.cached || "0"} · 待下 ${kv.need || "?"} · 约 ${kv.approx_mib || "?"} MiB`,
       pct: kv.need === "0" ? 100 : 0,
     };
@@ -346,6 +421,7 @@ function parseProgressLine(line: string): DetailProgress | null {
     const cached = kv.cached === "1" ? "（缓存跳过）" : "";
     return {
       kind: "pull",
+      suite,
       label: `拉取 ${kv.dataset || "?"} · ${kv.file || ""}${size}${cached}`,
       pct: Number.isFinite(pct as number) ? (pct as number) : null,
     };
@@ -353,6 +429,7 @@ function parseProgressLine(line: string): DetailProgress | null {
   if (rest.startsWith("plan")) {
     return {
       kind: "eval",
+      suite,
       label: `评测计划：${kv.datasets || "?"} 集 × ${kv.arms || "?"} 臂 = ${kv.units || "?"} 块`,
       pct: kv.pct != null && Number.isFinite(Number(kv.pct)) ? Number(kv.pct) : 0,
     };
@@ -363,6 +440,7 @@ function parseProgressLine(line: string): DetailProgress | null {
   const unit = kv.unit ? `块 ${kv.unit}` : `集 ${kv.dataset || "?"}`;
   return {
     kind: "eval",
+    suite,
     label: `评测 ${unit} · ${kv.name || ""}${arm} · ${kv.stage || ""}${q}`,
     pct: Number.isFinite(pct as number) ? (pct as number) : null,
   };
@@ -542,13 +620,16 @@ export function OfficialBenchPage() {
     { id: "custom", n_instances: null },
   ]);
   const [retrievalProd, setRetrievalProd] = useState(true);
-  // Empty until user picks a preset or restores real prefs — do not invent deepseek-chat.
+  // Empty until user picks a preset or restores real prefs — do not invent deepseek defaults.
   const [modelProvider, setModelProvider] = useState("");
   const [modelApiStyle, setModelApiStyle] = useState<ApiStyle>("openai");
   const [modelName, setModelName] = useState("");
   const [modelBaseUrl, setModelBaseUrl] = useState("");
   const [modelApiKey, setModelApiKey] = useState("");
   const [modelContextWindow, setModelContextWindow] = useState("");
+  const [probeBusy, setProbeBusy] = useState(false);
+  const [probeMessage, setProbeMessage] = useState<string | null>(null);
+  const [probeOk, setProbeOk] = useState<boolean | null>(null);
   const [prefsReady, setPrefsReady] = useState(false);
   /** Last api_key successfully written to localStorage ("" = none saved). */
   const [storedApiKey, setStoredApiKey] = useState("");
@@ -568,11 +649,11 @@ export function OfficialBenchPage() {
   const [phaseHint, setPhaseHint] = useState(
     "全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标",
   );
-  const [detailProgress, setDetailProgress] = useState<DetailProgress>({
-    kind: "idle",
-    label: "尚未开始",
-    pct: null,
-  });
+  const [suiteDetails, setSuiteDetails] = useState<Record<string, DetailProgress>>({});
+  const detailProgress = useMemo(
+    () => formatSuiteDetails(suiteDetails),
+    [suiteDetails],
+  );
   const [tab, setTab] = useState<"overview" | "metrics" | "cases" | "log">("overview");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const logBoxRef = useRef<HTMLDivElement>(null);
@@ -614,10 +695,22 @@ export function OfficialBenchPage() {
         const restoreModel = (saved.v ?? 0) >= 2 || hasKey;
         if (restoreModel) {
           if (saved.provider) setModelProvider(saved.provider);
-          if (saved.model_name) setModelName(saved.model_name);
+          if (saved.model_name) {
+            const migrated =
+              saved.provider === "deepseek" &&
+              saved.model_name === "deepseek-chat"
+                ? "deepseek-v4-flash"
+                : saved.model_name;
+            setModelName(migrated);
+          }
           if (saved.base_url != null) setModelBaseUrl(saved.base_url);
           if (saved.context_window_tokens != null) {
             setModelContextWindow(String(saved.context_window_tokens));
+          } else if (
+            saved.provider === "deepseek" &&
+            (!saved.model_name || saved.model_name === "deepseek-chat")
+          ) {
+            setModelContextWindow("128000");
           }
           setModelApiStyle(inferApiStyle(saved.provider || "", saved.api_style));
         }
@@ -751,6 +844,87 @@ export function OfficialBenchPage() {
     setApiKeySaveFlash(false);
   }, [persistApiKey]);
 
+  const probeModel = useCallback(async () => {
+    const key = modelApiKey.trim();
+    const name = modelName.trim();
+    const provider = modelProvider.trim() || "custom";
+    if (!key || !name) {
+      setProbeOk(false);
+      setProbeMessage("请先填写 model_name 与 api_key。");
+      return;
+    }
+    setProbeBusy(true);
+    setProbeOk(null);
+    setProbeMessage("正在从 bench 容器探测…");
+    try {
+      const cw = Number(modelContextWindow);
+      const resp = await fetch("/api/v1/ops/official/model/probe", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          provider,
+          api_style: inferApiStyle(provider, modelApiStyle),
+          model_name: name,
+          api_key: key,
+          base_url: modelBaseUrl.trim() || undefined,
+          context_window_tokens:
+            Number.isFinite(cw) && cw >= 1024 ? Math.floor(cw) : undefined,
+        }),
+      });
+      const text = await resp.text();
+      let data: {
+        ok?: boolean;
+        latency_ms?: number;
+        preview?: string;
+        error?: string;
+        endpoint?: string;
+        detail?: string;
+      } = {};
+      try {
+        data = JSON.parse(text) as typeof data;
+      } catch {
+        /* keep */
+      }
+      if (!resp.ok) {
+        setProbeOk(false);
+        setProbeMessage(
+          data.detail || data.error || text || `HTTP ${resp.status}`,
+        );
+        return;
+      }
+      if (data.ok) {
+        setProbeOk(true);
+        const preview = (data.preview || "").replace(/\s+/g, " ").trim();
+        setProbeMessage(
+          `联通成功 · ${data.latency_ms ?? "?"}ms` +
+            (data.endpoint ? ` · ${data.endpoint}` : "") +
+            (preview ? ` · 回复「${preview.slice(0, 40)}」` : ""),
+        );
+      } else {
+        setProbeOk(false);
+        setProbeMessage(
+          data.error ||
+            `联通失败` +
+              (data.endpoint ? ` · ${data.endpoint}` : "") +
+              (data.latency_ms != null ? ` · ${data.latency_ms}ms` : ""),
+        );
+      }
+    } catch (e) {
+      setProbeOk(false);
+      setProbeMessage(e instanceof Error ? e.message : String(e));
+    } finally {
+      setProbeBusy(false);
+    }
+  }, [
+    headers,
+    modelApiKey,
+    modelApiStyle,
+    modelBaseUrl,
+    modelContextWindow,
+    modelName,
+    modelProvider,
+  ]);
+
   const apiKeyDirty = modelApiKey.trim() !== storedApiKey;
   const apiKeyStored = Boolean(storedApiKey);
 
@@ -795,15 +969,25 @@ export function OfficialBenchPage() {
     if (run.phase_hint || run.current_phase) {
       setPhaseHint(cleanPhase(run.phase_hint || run.current_phase || ""));
     }
+    // Rebuild per-suite detail from logs (parallel suites keep independent rows).
+    const nextDetails: Record<string, DetailProgress> = {};
+    for (const item of run.logs || []) {
+      if (String(item.kind || "") !== "log" || !item.message) continue;
+      const parsed = parseProgressLine(String(item.message));
+      if (!parsed?.suite) continue;
+      const prev = nextDetails[parsed.suite];
+      // Don't let a late pull line clobber eval/infer for the same suite.
+      if (parsed.kind === "pull" && prev?.kind === "eval") continue;
+      nextDetails[parsed.suite] = parsed;
+    }
+    setSuiteDetails(nextDetails);
+
     if (opts?.logs === false) return;
     const lines: string[] = [];
-    let lastDetail: DetailProgress | null = null;
     for (const item of run.logs || []) {
       const kind = String(item.kind || "");
       if (kind === "log" && item.message) {
         const msg = String(item.message);
-        const parsed = parseProgressLine(msg);
-        if (parsed) lastDetail = parsed;
         if (!msg.startsWith("[progress]")) lines.push(msg);
       } else if (kind === "phase" && item.message) {
         setPhaseHint(cleanPhase(String(item.message)));
@@ -815,7 +999,6 @@ export function OfficialBenchPage() {
         );
       }
     }
-    if (lastDetail) setDetailProgress(lastDetail);
     if (lines.length) setLiveLogs(lines.slice(-400));
   }, []);
 
@@ -921,7 +1104,7 @@ export function OfficialBenchPage() {
       setError(null);
       if (opts?.resetLogs) {
         setLiveLogs([]);
-        setDetailProgress({ kind: "idle", label: "启动中…", pct: null });
+        setSuiteDetails({});
       }
       const es = new EventSourcePolyfill(
         `/api/v1/ops/official/runs/${runId}/stream`,
@@ -937,7 +1120,13 @@ export function OfficialBenchPage() {
           } else if (kind === "log") {
             const msg = String(data.message || "");
             const parsed = parseProgressLine(msg);
-            if (parsed) setDetailProgress(parsed);
+            if (parsed?.suite) {
+              setSuiteDetails((prev) => {
+                const cur = prev[parsed.suite!];
+                if (parsed.kind === "pull" && cur?.kind === "eval") return prev;
+                return { ...prev, [parsed.suite!]: parsed };
+              });
+            }
             if (!msg.startsWith("[progress]")) {
               setLiveLogs((prev) => [...prev.slice(-400), msg]);
             }
@@ -962,10 +1151,13 @@ export function OfficialBenchPage() {
             es.close();
             if (attachedRunIdRef.current === runId) attachedRunIdRef.current = null;
             setBusy(false);
-            setDetailProgress({
-              kind: "idle",
-              label: "本轮结束",
-              pct: 100,
+            setSuiteDetails((prev) => {
+              if (!Object.keys(prev).length) {
+                return {
+                  _: { kind: "idle", label: "本轮结束", pct: 100 },
+                };
+              }
+              return prev;
             });
             void loadDetail();
             void loadList();
@@ -1170,7 +1362,10 @@ export function OfficialBenchPage() {
         throw new Error(msg);
       }
       const created = (await resp.json()) as OfficialRun;
-      setProgress({ done: 0, total: created.progress_total || targets.length });
+      setProgress({
+        done: 0,
+        total: created.progress_total || apiTargets.length,
+      });
       navigate(opsOfficialPath(secret, created.id));
       attachLiveStream(created.id, { resetLogs: true });
     } catch (err) {
@@ -1184,7 +1379,7 @@ export function OfficialBenchPage() {
     if (!id) return;
     setError(null);
     setPhaseHint("正在停止…");
-    setDetailProgress({ kind: "idle", label: "正在停止…", pct: null });
+    setSuiteDetails({ _: { kind: "idle", label: "正在停止…", pct: null } });
     const resp = await fetch(`/api/v1/ops/official/runs/${id}/stop`, {
       method: "POST",
       headers,
@@ -1200,7 +1395,7 @@ export function OfficialBenchPage() {
       }
       if (body && !isActiveStatus(body.status)) {
         setBusy(false);
-        setDetailProgress({ kind: "idle", label: "已取消", pct: null });
+        setSuiteDetails({ _: { kind: "idle", label: "已取消", pct: null } });
         setPhaseHint("已停止");
       } else {
         // Force UI out of infinite「正在停止…」even if SSE is wedged.
@@ -1210,12 +1405,12 @@ export function OfficialBenchPage() {
             if (!latest || !isActiveStatus(latest.status)) {
               setBusy(false);
               setPhaseHint("已停止");
-              setDetailProgress({ kind: "idle", label: "已取消", pct: null });
+              setSuiteDetails({ _: { kind: "idle", label: "已取消", pct: null } });
               return;
             }
             setBusy(false);
             setPhaseHint("停止超时 — 可强制重开");
-            setDetailProgress({ kind: "idle", label: "停止超时", pct: null });
+            setSuiteDetails({ _: { kind: "idle", label: "停止超时", pct: null } });
             setError("停止超过约 8s 仍未终态。可刷新或点「强制重开」。");
             await loadList();
           })();
@@ -1271,7 +1466,7 @@ export function OfficialBenchPage() {
         setDetail(null);
         setLiveLogs([]);
         setProgress({ done: 0, total: 0 });
-        setDetailProgress({ kind: "idle", label: "尚未开始", pct: null });
+        setSuiteDetails({});
         if (selectedId) {
           navigate(opsOfficialPath(secret), { replace: true });
         }
@@ -1544,6 +1739,10 @@ export function OfficialBenchPage() {
           </div>
         </div>
 
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          勾选多项时套件并行执行（缩短墙钟；同一模型 key 会叠加请求）。不稳时可在 bench 设{" "}
+          <span className="font-mono">BENCH_JOB_MAX_PARALLEL=1</span> 回串行。
+        </p>
         <div className="mt-3 grid gap-2 sm:grid-cols-3">
           {(targetsMeta.length
             ? targetsMeta
@@ -1834,9 +2033,41 @@ export function OfficialBenchPage() {
                 disabled={busy || !needsLiveModel}
                 onChange={(e) => setModelContextWindow(e.target.value)}
                 className="rounded border border-border bg-background px-2 py-1.5 text-xs disabled:opacity-50"
-                placeholder="如 65536"
+                placeholder="如 128000"
               />
             </label>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={
+                busy ||
+                probeBusy ||
+                !modelApiKey.trim() ||
+                !modelName.trim() ||
+                !modelProvider.trim()
+              }
+              onClick={() => void probeModel()}
+              className="rounded border border-border bg-background px-2.5 py-1.5 text-xs hover:bg-muted disabled:opacity-40"
+            >
+              {probeBusy ? "探测中…" : "测试联通"}
+            </button>
+            <span className="text-[10px] text-muted-foreground">
+              从 bench 容器出站探测（与正式评测同路径）
+            </span>
+            {probeMessage ? (
+              <p
+                className={`w-full text-[11px] ${
+                  probeOk === true
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : probeOk === false
+                      ? "text-red-700 dark:text-red-400"
+                      : "text-muted-foreground"
+                }`}
+              >
+                {probeMessage}
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -1846,7 +2077,7 @@ export function OfficialBenchPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span>
                   <span className="text-muted-foreground">当前阶段 · </span>
-                  <span className="font-medium">{phaseHint}</span>
+                  <span className="font-medium whitespace-pre-wrap">{phaseHint}</span>
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   {timingLabel ? (
@@ -1882,7 +2113,9 @@ export function OfficialBenchPage() {
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
                 套件完成 {progress.done}/{progress.total || "—"}
-                （检索 / 上下文 / 编码各算 1；套件内进度看上面「明细」）
+                {progress.total
+                  ? `（本次勾选 ${progress.total} 项；套件内进度看上面「明细」）`
+                  : ""}
               </span>
               <span className="tabular-nums">
                 {barPct}%

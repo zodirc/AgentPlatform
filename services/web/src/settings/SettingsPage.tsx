@@ -46,7 +46,7 @@ const PROVIDER_SUGGESTIONS = [
 const MODEL_PRESETS: Record<string, string> = {
   anthropic: "claude-sonnet-4-20250514",
   openai: "gpt-4o-mini",
-  deepseek: "deepseek-chat",
+  deepseek: "deepseek-v4-flash",
 };
 
 type ConfigDraft = {

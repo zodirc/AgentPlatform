@@ -95,6 +95,8 @@ class OfficialLiveRun:
     _bench_job_id: str | None = field(default=None, repr=False)
     _proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
     _subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
+    # Per-suite phase text while targets run in parallel on the bench worker.
+    _target_phases: dict[str, str] = field(default_factory=dict, repr=False)
 
 
 _LOCK = asyncio.Lock()
@@ -622,10 +624,62 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
     return run
 
 
+def _suite_label(target: str) -> str:
+    return {
+        "retrieval": "检索",
+        "context": "上下文",
+        "coding_pull": "编码拉取",
+        "coding_infer": "编码",
+        "pull": "拉取",
+    }.get(target, target)
+
+
+def _compose_phase_hint(run: OfficialLiveRun) -> str:
+    if not run._target_phases:
+        return run.phase_hint
+    # Preserve target order from the run when possible.
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for t in run.targets:
+        if t in run._target_phases and t not in seen:
+            ordered.append(t)
+            seen.add(t)
+    for t in run._target_phases:
+        if t not in seen:
+            ordered.append(t)
+            seen.add(t)
+    parts = [f"{_suite_label(t)}: {run._target_phases[t]}" for t in ordered]
+    return " · ".join(parts)
+
+
+async def _publish_phase_hint(run: OfficialLiveRun) -> None:
+    run.phase_hint = _compose_phase_hint(run)
+    run.current_phase = run.phase_hint
+    await _publish(
+        run,
+        {
+            "kind": "phase",
+            "phase": run.current_phase,
+            "message": run.phase_hint,
+            "target_phases": dict(run._target_phases),
+        },
+    )
+
+
 async def _handle_bench_line(run: OfficialLiveRun, text: str, reports: Path) -> None:
-    if text.startswith("[phase]"):
+    # Prefer tagged per-target phases under suite-level parallelism.
+    if text.startswith("[bench] target_phase "):
+        rest = text.removeprefix("[bench] target_phase ").strip()
+        target, _, body = rest.partition(" ")
+        if target:
+            run._target_phases[target] = body.strip() or target
+            await _publish_phase_hint(run)
+    elif text.startswith("[phase]") and len(run.targets) <= 1:
+        # Serial / single-suite fallback (untagged [phase] from the script).
         run.current_phase = text.removeprefix("[phase]").strip()
         run.phase_hint = run.current_phase
+        if run.targets:
+            run._target_phases[run.targets[0]] = run.current_phase
         await _publish(
             run,
             {"kind": "phase", "phase": run.current_phase, "message": text},
@@ -645,18 +699,14 @@ async def _handle_bench_line(run: OfficialLiveRun, text: str, reports: Path) -> 
                     },
                 )
                 break
-        run.current_phase = f"{target}:start"
-        run.phase_hint = {
-            "retrieval": "检索：①拉取 → ②hybrid+BM25 → ③回归（bench worker）",
-            "context": "上下文（bench worker）",
-            "coding_pull": "编码拉取（bench worker）",
-            "coding_infer": "编码推理（bench worker）",
-            "pull": "拉取（bench worker）",
-        }.get(target, target)
-        await _publish(
-            run,
-            {"kind": "phase", "phase": run.current_phase, "message": run.phase_hint},
-        )
+        run._target_phases[target] = {
+            "retrieval": "①拉取 → ②hybrid+BM25 → ③回归",
+            "context": "启动中",
+            "coding_pull": "拉取中",
+            "coding_infer": "启动中",
+            "pull": "拉取中",
+        }.get(target, "运行中")
+        await _publish_phase_hint(run)
     if text.startswith("[bench] target_end "):
         # [bench] target_end retrieval status=pass
         parts = text.split()
@@ -665,20 +715,28 @@ async def _handle_bench_line(run: OfficialLiveRun, text: str, reports: Path) -> 
         for p in parts:
             if p.startswith("status="):
                 status_token = p.split("=", 1)[1]
-        for idx, case in enumerate(run.cases):
+        for case in run.cases:
             if case.get("case_id") != f"official.{target}":
                 continue
             case["finished_at"] = _utc()
             if status_token == "pass":
                 case["status"] = "pass"
                 _attach_latest_child_report(run, case, reports)
+                run._target_phases[target] = "完成"
             elif status_token == "cancelled":
                 case["status"] = "skipped"
                 case["error"] = "cancelled"
+                run._target_phases[target] = "已取消"
             else:
                 case["status"] = "fail"
                 case["error"] = text
-            run.progress_done = max(run.progress_done, idx + 1)
+                run._target_phases[target] = "失败"
+            run.progress_done = sum(
+                1
+                for c in run.cases
+                if c.get("status") in {"pass", "fail", "skipped"}
+            )
+            await _publish_phase_hint(run)
             await _publish(
                 run,
                 {
@@ -871,8 +929,7 @@ async def _execute_local(run: OfficialLiveRun) -> None:
             env["BENCH_MODEL_CONTEXT_WINDOW"] = str(run.model["context_window_tokens"])
     if not env.get("BENCH_SEARCH_WORKERS", "").strip():
         env["BENCH_SEARCH_WORKERS"] = str(min(4, os.cpu_count() or 4))
-    if not env.get("BENCH_SEARCH_POOL", "").strip():
-        env["BENCH_SEARCH_POOL"] = "process"
+    # Leave BENCH_SEARCH_POOL unset: hybrid→thread, BM25→process (official_bench).
     runtime = str(repo / "services" / "runtime")
     scripts = str(repo / "scripts")
     env["PYTHONPATH"] = (
