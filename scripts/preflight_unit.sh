@@ -352,13 +352,20 @@ run_contracts_local() {
 
 run_ux_self_check_docker() {
   echo "==> [preflight] UX signals self-check (docker/runtime)  [$(elapsed)]"
+  # scripts/ux_signals.py resolves CORE as <repo>/packages/contracts/python/agent_contracts/…
+  # relative to the copied tree root (/tmp/preflight-ux), so the layout must match the repo.
   "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/preflight-ux
-  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/preflight-ux/packages /tmp/preflight-ux/scripts
+  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p \
+    /tmp/preflight-ux/scripts \
+    /tmp/preflight-ux/packages/contracts/python \
+    /tmp/preflight-ux/eval/reports
   docker cp "$ROOT/scripts/ux_signals.py" agent-runtime:/tmp/preflight-ux/scripts/ux_signals.py
-  docker cp "$ROOT/packages/contracts/python" agent-runtime:/tmp/preflight-ux/packages/contracts-python
+  docker cp "$ROOT/packages/contracts/python/." agent-runtime:/tmp/preflight-ux/packages/contracts/python/
+  # docker cp as root leaves the tree root-owned; runtime runs as app.
+  "${COMPOSE[@]}" exec -T -u root runtime chown -R app:app /tmp/preflight-ux
   with_heartbeat "docker ux self-check" "${COMPOSE[@]}" exec -T runtime bash -c \
     'echo "==> [preflight/docker] pip install contracts…"
-     python -m pip install --progress-bar on /tmp/preflight-ux/packages/contracts-python
+     python -m pip install --progress-bar on /tmp/preflight-ux/packages/contracts/python
      python /tmp/preflight-ux/scripts/ux_signals.py --self-check'
 }
 
