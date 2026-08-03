@@ -1,4 +1,4 @@
-"""Sources sync cancel + ephemeral ops-l1 skip."""
+"""Sources sync cancel + ops-l1 full-tenant skip."""
 
 from __future__ import annotations
 
@@ -35,3 +35,17 @@ def test_ephemeral_ops_l1_root_skip(tmp_path: Path) -> None:
     assert sched._is_ephemeral_ops_l1_root(ephemeral) is True
     assert sched._is_ephemeral_ops_l1_root(cache) is False
     assert sched._is_ephemeral_ops_l1_root(other) is False
+
+
+def test_full_tenant_sync_skips_all_ops_l1_including_beir_index(tmp_path: Path) -> None:
+    """Global reason=api must not chew beir-index; L1 uses api-work only."""
+    ephemeral = tmp_path / "ops-l1" / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" / "retrieval" / "scifact"
+    ephemeral.mkdir(parents=True)
+    cache = tmp_path / "ops-l1" / "beir-index" / "fiqa"
+    cache.mkdir(parents=True)
+    other = tmp_path / "data" / "works" / "w1"
+    other.mkdir(parents=True)
+
+    assert sched._is_ops_l1_root(ephemeral) is True
+    assert sched._is_ops_l1_root(cache) is True
+    assert sched._is_ops_l1_root(other) is False

@@ -3,6 +3,8 @@
 Startup / admin sync must never run on the search_sources hot path.
 Syncs standing seed + each Work's private sources (when works table exists).
 Never indexes legacy private with NULL work_id.
+Official L1 trees under ``ops-l1/`` (including ``beir-index``) are skipped in
+full-tenant sync; L1 indexes those via work-scoped ``api-work`` only.
 """
 
 from __future__ import annotations
@@ -65,8 +67,22 @@ def check_sync_cancelled() -> None:
         raise SourcesSyncCancelled("sources index sync cancelled")
 
 
+def _is_ops_l1_root(root: Path) -> bool:
+    """True for Official L1 trees under ``ops-l1`` (ephemeral runs + beir-index).
+
+    Full-tenant sync (startup / sources_watch / write-triggered ``reason=api``)
+    must skip these. L1 retrieval indexes ``beir-index`` only via work-scoped
+    ``api-work``; letting global sync touch FiQA mid-materialize double-embeds
+    and steals the process-wide sync lock.
+    """
+    return "ops-l1" in root.resolve().parts
+
+
 def _is_ephemeral_ops_l1_root(root: Path) -> bool:
-    """True for Official L1 per-run trees under ops-l1 (not beir-index cache)."""
+    """True for per-run L1 trees (excludes shared ``beir-index`` cache).
+
+    Prefer :func:`_is_ops_l1_root` for full-tenant skip decisions.
+    """
     parts = root.resolve().parts
     if "ops-l1" not in parts:
         return False
@@ -171,9 +187,9 @@ def sync_sources_index_blocking() -> dict[str, Any]:
                 works = cur.fetchall()
         for work_id, work_root, owner_id in works:
             root = Path(str(work_root)).resolve()
-            if _is_ephemeral_ops_l1_root(root):
+            if _is_ops_l1_root(root):
                 logger.info(
-                    "sources index sync skip ephemeral ops-l1 work; work_id=%s dir=%s",
+                    "sources index sync skip ops-l1 work; work_id=%s dir=%s",
                     work_id,
                     root,
                 )

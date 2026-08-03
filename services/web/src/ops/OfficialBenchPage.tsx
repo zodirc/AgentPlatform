@@ -504,6 +504,11 @@ type DetailProgress = {
   /** Sub-buckets (e.g. BEIR dataset → query counts) so multi-part suites accumulate. */
   parts?: Record<string, { done: number; total: number }>;
   partKey?: string;
+  /**
+   * True while a BEIR dataset is materializing/indexing before its
+   * `queries plan` lands — avoids a false "剩 0 查询" between datasets.
+   */
+  pipelineGap?: boolean;
 };
 
 const SUITE_DETAIL_LABEL: Record<string, string> = {
@@ -530,6 +535,19 @@ function aggregateParts(
   };
 }
 
+/** Prefer sibling BEIR dataset qrels count when the next corpus is still indexing. */
+function inferQueryTotal(
+  parts: Record<string, { done: number; total: number }>,
+  excludeKey?: string,
+): number | null {
+  let max = 0;
+  for (const [k, v] of Object.entries(parts)) {
+    if (excludeKey && k === excludeKey) continue;
+    if (Number.isFinite(v.total) && v.total > max) max = v.total;
+  }
+  return max > 0 ? max : null;
+}
+
 function mergeDetailProgress(
   prev: DetailProgress | undefined,
   next: DetailProgress,
@@ -551,6 +569,14 @@ function mergeDetailProgress(
   ) {
     parts[next.partKey] = { done: next.done, total: next.total };
   }
+  // Index/materialize for a dataset that has no queries plan yet: reserve a
+  // bucket (same qrels/集 as siblings) so 40/40 does not look finished.
+  if (next.pipelineGap && next.partKey && !parts[next.partKey]) {
+    const inferred = inferQueryTotal(parts, next.partKey);
+    if (inferred != null) {
+      parts[next.partKey] = { done: 0, total: inferred };
+    }
+  }
 
   const summed = aggregateParts(Object.keys(parts).length ? parts : undefined);
   const pct =
@@ -570,6 +596,10 @@ function mergeDetailProgress(
     summed && summed.total > 0
       ? Math.max(0, Math.min(100, Math.round((summed.done / summed.total) * 100)))
       : pct;
+  const pipelineGap =
+    next.pipelineGap !== undefined
+      ? next.pipelineGap
+      : Boolean(prev?.pipelineGap);
   return {
     ...next,
     pct: outPct,
@@ -578,6 +608,7 @@ function mergeDetailProgress(
     unit,
     parts: Object.keys(parts).length ? parts : undefined,
     partKey: next.partKey || prev?.partKey,
+    pipelineGap,
   };
 }
 
@@ -634,7 +665,16 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
     if (d.total != null && Number.isFinite(d.total) && d.total > 0) {
       focus = d;
       focusKey = k;
-      if (d.done == null || d.done < d.total) break;
+      const unfinished =
+        d.done == null ||
+        d.done < d.total ||
+        d.pipelineGap === true;
+      if (unfinished) break;
+    } else if (d.pipelineGap === true) {
+      // Indexing before any queries plan — still the active suite.
+      focus = d;
+      focusKey = k;
+      break;
     }
   }
   if (!focus) {
@@ -649,8 +689,13 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
   }
   const done = focus?.done ?? null;
   const total = focus?.total ?? null;
-  const remain =
+  let remain =
     done != null && total != null ? Math.max(0, total - done) : null;
+  // Between BEIR datasets, query counters can look "complete" while the next
+  // corpus is still embedding — never claim "剩 0" in that gap.
+  if (focus?.pipelineGap && remain === 0) {
+    remain = null;
+  }
   const unit =
     focus?.unit ||
     (focusKey ? SUITE_UNIT[focusKey] : null) ||
@@ -750,6 +795,7 @@ function parseProgressLine(line: string): DetailProgress | null {
       unit: "查询",
       partKey: ds,
       parts: Number.isFinite(n) ? { [ds]: { done: 0, total: n } } : undefined,
+      pipelineGap: false,
     };
   }
   const l1Ctx = line.match(/^\[L1\]\s+context\s+(\d+)\s*\/\s*(\d+)/i);
@@ -792,6 +838,7 @@ function parseProgressLine(line: string): DetailProgress | null {
         Number.isFinite(cur) && Number.isFinite(total)
           ? { [ds]: { done: cur, total } }
           : undefined,
+      pipelineGap: false,
     };
   }
   const l1Pull = line.match(/^\[L1\]\s+pull\s+(.+)$/i);
@@ -819,11 +866,15 @@ function parseProgressLine(line: string): DetailProgress | null {
       total > 0 && Number.isFinite(cur)
         ? Math.max(0, Math.min(100, Math.round((cur / total) * 100)))
         : null;
+    const doneMat = total > 0 && cur >= total;
     return {
       kind: "eval",
       suite: "retrieval",
       label: `L1 物化 ${l1Mat[1]} · ${cur}/${total || "?"}`,
       pct,
+      partKey: l1Mat[1],
+      unit: "查询",
+      pipelineGap: !doneMat,
     };
   }
   const l1Sync = line.match(/^\[L1\]\s+sync\s+(\S+):\s+(.+)$/i);
@@ -836,6 +887,10 @@ function parseProgressLine(line: string): DetailProgress | null {
         suite: "retrieval",
         label: `L1 索引完成 · ${ds}`,
         pct: 100,
+        partKey: ds,
+        unit: "查询",
+        // Still waiting for queries plan / turns.
+        pipelineGap: true,
       };
     }
     const files = rest.match(/files=(\d+)\s*\/\s*(\d+)/i);
@@ -867,6 +922,9 @@ function parseProgressLine(line: string): DetailProgress | null {
       suite: "retrieval",
       label: bits.join(" · "),
       pct,
+      partKey: ds,
+      unit: "查询",
+      pipelineGap: true,
     };
   }
   if (/^\[L1\]\s+dataset\s+\S+:\s+materialize/i.test(line)) {
@@ -876,6 +934,9 @@ function parseProgressLine(line: string): DetailProgress | null {
       suite: "retrieval",
       label: `L1 检索物化/索引 · ${name}`,
       pct: null,
+      partKey: name,
+      unit: "查询",
+      pipelineGap: true,
     };
   }
   const l1TurnStart = line.match(/^\[L1\]\s+turn start\s+(\S+)/i);
@@ -944,7 +1005,13 @@ function parseProgressLine(line: string): DetailProgress | null {
     return { kind: "eval", suite: "context", label: "L1 上下文套件结束", pct: 100 };
   }
   if (/^\[L1\]\s+retrieval done/i.test(line)) {
-    return { kind: "eval", suite: "retrieval", label: "L1 检索套件结束", pct: 100 };
+    return {
+      kind: "eval",
+      suite: "retrieval",
+      label: "L1 检索套件结束",
+      pct: 100,
+      pipelineGap: false,
+    };
   }
 
   // Context / coding infer lines: "[context] infer — 72/120 hotpotqa arm=full"
@@ -1676,7 +1743,8 @@ export function OfficialBenchPage() {
         );
       }
     }
-    if (lines.length) setLiveLogs(lines.slice(-800));
+    // Always replace — empty finished runs must not keep another run's live buffer.
+    setLiveLogs(lines.slice(-800));
   }, []);
 
   const targetEnabled = useCallback(
@@ -1846,6 +1914,8 @@ export function OfficialBenchPage() {
       );
       esRef.current = es;
       es.onmessage = (ev) => {
+        // Drop events if user navigated away / stream was superseded.
+        if (attachedRunIdRef.current !== runId) return;
         try {
           const data = JSON.parse(ev.data) as Record<string, unknown>;
           const kind = String(data.kind || "");
@@ -1997,6 +2067,23 @@ export function OfficialBenchPage() {
     [runs],
   );
 
+  // Leaving a live run must detach SSE immediately — otherwise its logs keep
+  // appending into the shared buffer while another (finished) run is selected.
+  useEffect(() => {
+    if (
+      attachedRunIdRef.current &&
+      selectedId !== attachedRunIdRef.current
+    ) {
+      esRef.current?.close();
+      esRef.current = null;
+      attachedRunIdRef.current = null;
+      setBusy(false);
+    }
+    // Clear the shared pane until the selected run's own snapshot/SSE fills it.
+    setLiveLogs([]);
+    setSuiteDetails({});
+  }, [selectedId]);
+
   useEffect(() => {
     void (async () => {
       const body = await loadDetail();
@@ -2008,12 +2095,14 @@ export function OfficialBenchPage() {
           resetLogs: attachedRunIdRef.current !== body.id,
         });
       } else {
-        applyRunSnapshot(body);
-        if (attachedRunIdRef.current === body.id) {
+        // Finished run: always take its own snapshot; never keep another run's SSE.
+        if (attachedRunIdRef.current) {
           esRef.current?.close();
+          esRef.current = null;
           attachedRunIdRef.current = null;
           setBusy(false);
         }
+        applyRunSnapshot(body);
       }
     })();
   }, [loadDetail, applyRunSnapshot, attachLiveStream]);
