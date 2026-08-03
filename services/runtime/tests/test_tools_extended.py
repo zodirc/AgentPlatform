@@ -153,6 +153,237 @@ async def test_propose_patch_rejects_ambiguous_span(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_propose_patch_git_apply_check_when_repo(workspace: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    (workspace / "f.md").write_text("line one\nline two\n", encoding="utf-8")
+    subprocess.run(["git", "add", "f.md"], cwd=workspace, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    )
+    proposed = await core.propose_patch("f.md", "line two", "line two fixed", summary="s")
+    assert proposed["status"] == "pending"
+    assert proposed["applies"] is True
+    assert proposed.get("apply_check") in {"git_apply_check", "span_unique"}
+
+
+@pytest.mark.asyncio
+async def test_write_file_patch_precheck_no_git(workspace: Path) -> None:
+    patch = (
+        "diff --git a/x.md b/x.md\n"
+        "--- a/x.md\n"
+        "+++ b/x.md\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    out = await core.write_file("change.patch", patch)
+    assert (workspace / "change.patch").exists()
+    assert out.get("apply_check") == "no_git"
+
+
+@pytest.mark.asyncio
+async def test_write_file_patch_precheck_with_git(workspace: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    (workspace / "x.md").write_text("old\n", encoding="utf-8")
+    subprocess.run(["git", "add", "x.md"], cwd=workspace, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    )
+    patch = (
+        "diff --git a/x.md b/x.md\n"
+        "--- a/x.md\n"
+        "+++ b/x.md\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    out = await core.write_file("change.patch", patch)
+    assert out.get("apply_check") == "git_apply_check"
+    assert "applies" in out
+
+
+@pytest.mark.asyncio
+async def test_write_file_truncates_old_text_preview(workspace: Path) -> None:
+    (workspace / "big.md").write_text("Z" * 40_000, encoding="utf-8")
+    out = await core.write_file("big.md", "tiny")
+    assert out["status"] == "written"
+    assert out["old_text"].endswith("...[truncated]")
+    assert len(out["old_text"]) < 40_000
+
+
+@pytest.mark.asyncio
+async def test_propose_patch_rejects_identical_span(workspace: Path) -> None:
+    (workspace / "f.md").write_text("same", encoding="utf-8")
+    bad = await core.propose_patch("f.md", "same", "same", summary="s")
+    assert bad["status"] == "error"
+    assert bad["applies"] is False
+    assert "identical" in bad["error"]
+
+
+@pytest.mark.asyncio
+async def test_propose_patch_missing_file(workspace: Path) -> None:
+    bad = await core.propose_patch("nope.md", "a", "b", summary="s")
+    assert bad["status"] == "error"
+    assert bad["applies"] is False
+
+
+@pytest.mark.asyncio
+async def test_span_apply_precheck_git_warning_on_bad_diff(workspace: Path) -> None:
+    """Git worktree + synthetic patch that fails --check still returns applies=True."""
+    import subprocess
+
+    from app.tools.core.tools import _span_apply_precheck
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    (workspace / "f.md").write_text("alpha\nbeta\n", encoding="utf-8")
+    subprocess.run(["git", "add", "f.md"], cwd=workspace, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"],
+        cwd=workspace,
+        check=True,
+        capture_output=True,
+    )
+    # Unique span — authoritative gate; git apply may warn.
+    out = _span_apply_precheck("f.md", "beta", "beta-fixed")
+    assert out["applies"] is True
+    assert out.get("apply_check") in {"git_apply_check", "span_unique"}
+
+
+def test_span_apply_precheck_oserror(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.tools.core import tools as t
+
+    boom = MagicMock()
+    boom.exists.return_value = True
+    boom.read_text.side_effect = OSError("denied")
+    monkeypatch.setattr(t, "_resolve_path", lambda _path: boom)
+    bad = t._span_apply_precheck("locked.md", "hello", "world")
+    assert bad["applies"] is False
+    assert "cannot read" in bad["apply_check_error"]
+
+
+def test_span_apply_precheck_git_timeout_and_warning(workspace: Path) -> None:
+    import subprocess
+
+    from app.tools.core.tools import _span_apply_precheck
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    (workspace / "f.md").write_text("one\ntwo\n", encoding="utf-8")
+
+    with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1)):
+        out = _span_apply_precheck("f.md", "two", "two-b")
+    assert out["applies"] is True
+    assert out.get("apply_check") == "span_unique"
+
+    with patch("subprocess.run") as run:
+        run.return_value = MagicMock(returncode=1, stderr="patch does not apply", stdout="")
+        out2 = _span_apply_precheck("f.md", "two", "two-b")
+    assert out2["applies"] is True
+    assert out2.get("apply_check") == "span_unique"
+    assert "apply_check_warning" in out2
+
+    with patch("difflib.unified_diff", side_effect=RuntimeError("boom")):
+        out3 = _span_apply_precheck("f.md", "two", "two-b")
+    assert out3 == {"applies": True, "apply_check": "span_unique"}
+
+    with patch("difflib.unified_diff", return_value=[]):
+        out4 = _span_apply_precheck("f.md", "two", "two-b")
+    assert out4 == {"applies": True, "apply_check": "span_unique"}
+
+
+def test_budget_limits_settings_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from app.context import engine as eng
+    import app.settings as settings_mod
+
+    monkeypatch.setattr(settings_mod, "settings", SimpleNamespace())
+    default_b, read_b, protect = eng._budget_limits()
+    assert default_b == eng.TOOL_RESULT_CHAR_BUDGET
+    assert read_b == eng.TOOL_RESULT_LATEST_READ_CHAR_BUDGET
+    assert protect is True
+
+
+def test_unified_patch_precheck_timeout(workspace: Path) -> None:
+    import subprocess
+
+    from app.tools.core.tools import _unified_patch_apply_precheck
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    body = "diff --git a/x.md b/x.md\n--- a/x.md\n+++ b/x.md\n@@ -1 +1 @@\n-a\n+b\n"
+    with patch("subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="git", timeout=1)):
+        out = _unified_patch_apply_precheck(body)
+    assert out.get("apply_check") == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_missing_and_ambiguous(workspace: Path) -> None:
+    missing = await core.apply_patch("gone.md", "new", old_text="old")
+    assert missing["status"] == "error"
+
+    (workspace / "f.md").write_text("aa aa", encoding="utf-8")
+    amb = await core.apply_patch("f.md", "bb", old_text="aa")
+    assert amb["status"] == "error"
+    assert "matches" in amb["error"]
+
+
+@pytest.mark.asyncio
+async def test_unified_patch_precheck_empty_and_fail(workspace: Path) -> None:
+    from app.tools.core.tools import _unified_patch_apply_precheck
+    import subprocess
+
+    assert _unified_patch_apply_precheck("") == {}
+    assert _unified_patch_apply_precheck("not a patch") == {}
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    bad = _unified_patch_apply_precheck(
+        "diff --git a/missing.md b/missing.md\n"
+        "--- a/missing.md\n"
+        "+++ b/missing.md\n"
+        "@@ -1 +1 @@\n"
+        "-x\n"
+        "+y\n"
+    )
+    assert bad.get("applies") is False
+    assert bad.get("apply_check") == "git_apply_check"
+
+
+@pytest.mark.asyncio
+async def test_write_file_patch_surfaces_apply_failure(workspace: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=workspace, check=True, capture_output=True)
+    patch = (
+        "diff --git a/ghost.md b/ghost.md\n"
+        "--- a/ghost.md\n"
+        "+++ b/ghost.md\n"
+        "@@ -1 +1 @@\n"
+        "-x\n"
+        "+y\n"
+    )
+    out = await core.write_file("bad.patch", patch)
+    assert out.get("applies") is False
+    assert "does not apply" in out.get("summary", "")
+
+
+@pytest.mark.asyncio
+async def test_edit_file_rejects_ambiguous_span(workspace: Path) -> None:
+    (workspace / "f.md").write_text("aa aa", encoding="utf-8")
+    bad = await core.edit_file("f.md", "aa", "bb")
+    assert bad.get("applies") is False
+    assert "matches" in bad.get("error", "")
+
+
+@pytest.mark.asyncio
 async def test_apply_patch_surgical_replace(workspace: Path) -> None:
     (workspace / "outline.md").write_text(
         "# Vol1\nAAA\n# Vol2\nBBB\n# Vol3\nCCC\n",

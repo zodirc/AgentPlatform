@@ -469,7 +469,7 @@ def test_estimate_window_breakdown_splits_categories() -> None:
     assert breakdown["assistant"] > 0
 
 
-def test_tool_result_budget_preserves_writing_section_extract() -> None:
+def test_apply_tool_result_budget_preserves_writing_section_extract() -> None:
     from app.context.engine import _apply_tool_result_budget
 
     payload = json.dumps(
@@ -491,6 +491,58 @@ def test_tool_result_budget_preserves_writing_section_extract() -> None:
     assert truncated == 0
     assert "X" * 100 in out[0]["content"][0]["content"]
     assert "budget_truncated" not in out[0]["content"][0]["content"]
+
+
+def test_protected_tail_and_latest_read_budget_edges() -> None:
+    from app.context.engine import (
+        _apply_tool_result_budget,
+        _budget_limits,
+        _protected_tail_start,
+    )
+    from app.engine.state import assistant_tool_uses, tool_result_message, user_message
+    from unittest.mock import patch
+
+    # Explicit latest_read_budget override.
+    huge = "y" * 10_000
+    messages = [
+        user_message("q"),
+        assistant_tool_uses([{"id": "r1", "name": "read_file", "input": {"path": "a"}}]),
+        tool_result_message("r1", huge),
+        {
+            "role": "tool",
+            "content": [{"type": "text", "text": "noise"}],
+        },
+    ]
+    out, n = _apply_tool_result_budget(
+        messages, char_budget=100, latest_read_budget=50_000
+    )
+    assert n == 0
+    assert out[2]["content"][0]["content"] == huge
+
+    # Protect floor: tail starts at latest read cycle / last user.
+    start = _protected_tail_start(messages)
+    assert start >= 0
+    assert start <= 1
+
+    # Orphan tool result (no preceding tool_use) still protects at that index.
+    orphan = [
+        user_message("q"),
+        tool_result_message("orphan", "data"),
+    ]
+    # Force name map to treat orphan as read_file via patched helper.
+    with patch(
+        "app.context.engine._tool_use_name_by_id",
+        return_value={"orphan": "read_file"},
+    ):
+        assert _protected_tail_start(orphan) >= 0
+
+    with patch("app.context.engine._budget_limits", return_value=(4000, 32000, False)):
+        assert _protected_tail_start(messages) == 0
+
+    # Empty messages + protect off path via monkeypatch.
+    limits = _budget_limits()
+    assert limits[0] > 0
+    assert _protected_tail_start([]) == 0
 
 
 def test_assemble_ms_large_latest_read_stays_bounded() -> None:

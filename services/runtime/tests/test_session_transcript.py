@@ -33,6 +33,7 @@ def test_prepare_messages_below_snip_keeps_history() -> None:
 
 
 def test_prepare_messages_applies_tool_budget_always() -> None:
+    # Persist uses a flat 4k budget (not the live 32k latest-read allowance).
     huge = "x" * 20_000
     messages = [
         user_message("read file"),

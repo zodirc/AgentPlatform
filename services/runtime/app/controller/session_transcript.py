@@ -52,10 +52,13 @@ def prepare_messages_for_persist(
 ) -> tuple[list[dict[str, Any]], int]:
     """Deterministic trim for DB persist. No LLM. Only snip/collapse when fill is high."""
     policy = policy or CompactionPolicy.from_settings()
+    # Persist path: keep a flat char budget (do not retain the live 32k latest-read
+    # allowance — session rows should stay compact).
     prepared, _ = _apply_tool_result_budget(
         [dict(m) for m in messages],
         TOOL_RESULT_CHAR_BUDGET,
         preserve_short=True,
+        latest_read_budget=TOOL_RESULT_CHAR_BUDGET,
     )
     fill_ratio, _ = _window_fill(
         messages=prepared,
