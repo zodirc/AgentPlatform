@@ -1702,12 +1702,29 @@ async def run_l1_targets(
         else:
             raise ValueError(f"unsupported_l1_target:{t}")
         if on_suite_done:
+            manifest = out.get(t)
+            metrics: dict[str, Any] = {}
+            status = "pass"
+            err: str | None = None
+            rid: str | None = None
+            if isinstance(manifest, dict):
+                raw_m = manifest.get("metrics")
+                if isinstance(raw_m, dict):
+                    metrics = raw_m
+                if manifest.get("status") == "failed":
+                    status = "fail"
+                err = str(manifest.get("error") or "") or None
+                rid = str(manifest.get("id") or manifest.get("run_id") or "") or None
             await on_suite_done(
                 {
                     "kind": "suite_done",
                     "suite": t,
                     "done": idx + 1,
                     "total": len(live),
+                    "status": status,
+                    "metrics": metrics,
+                    "error": err,
+                    "run_id": rid,
                 }
             )
     return out

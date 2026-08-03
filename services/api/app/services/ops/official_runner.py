@@ -927,18 +927,28 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
         suite = str(ev.get("suite") or "")
         done = int(ev.get("done") or 0)
         total = int(ev.get("total") or run.progress_total or 0)
+        status = "fail" if str(ev.get("status") or "") == "fail" else "pass"
+        metrics = ev.get("metrics") if isinstance(ev.get("metrics"), dict) else {}
+        err = ev.get("error")
         run.progress_done = done
         run.progress_total = total or run.progress_total
+        case_id = "official.coding" if suite in {"coding", "coding_infer"} else f"official.{suite}"
         for case in run.cases:
             cid = str(case.get("case_id") or "").removeprefix("official.")
             if cid == suite or (suite in {"coding", "coding_infer"} and cid == "coding"):
-                case["status"] = "pass"
+                case["status"] = status
+                case["metrics"] = dict(metrics)
+                if err:
+                    case["error"] = str(err)
+                elif "error" in case:
+                    case.pop("error", None)
         await _publish(
             run,
             {
                 "kind": "case_finished",
-                "case_id": f"official.{suite}",
-                "status": "pass",
+                "case_id": case_id,
+                "status": status,
+                "metrics": dict(metrics),
                 "progress_done": run.progress_done,
                 "progress_total": run.progress_total,
             },

@@ -483,17 +483,6 @@ function elapsedSeconds(
   return Math.max(0, (end - start) / 1000);
 }
 
-/** ETA from wall clock + overall fraction in [0,1]. Null when too early / stuck. */
-function estimateEtaSeconds(elapsedSec: number, frac: number): number | null {
-  if (!(elapsedSec >= 3) || !(frac >= 0.03) || frac >= 0.995) return null;
-  const total = elapsedSec / frac;
-  const remain = total - elapsedSec;
-  if (!Number.isFinite(remain) || remain < 0) return null;
-  // Cap absurd ETAs (e.g. progress stuck at 3% for a long time)
-  if (remain > elapsedSec * 40) return null;
-  return remain;
-}
-
 function shortId(id: string): string {
   return id.slice(0, 8);
 }
@@ -508,6 +497,13 @@ type DetailProgress = {
   pct: number | null;
   /** Suite key when line is attributable (context / coding / retrieval). */
   suite?: string;
+  /** Within-suite counters when known (queries / cases / instances). */
+  done?: number | null;
+  total?: number | null;
+  unit?: string;
+  /** Sub-buckets (e.g. BEIR dataset → query counts) so multi-part suites accumulate. */
+  parts?: Record<string, { done: number; total: number }>;
+  partKey?: string;
 };
 
 const SUITE_DETAIL_LABEL: Record<string, string> = {
@@ -516,14 +512,97 @@ const SUITE_DETAIL_LABEL: Record<string, string> = {
   retrieval: "检索",
 };
 
+const SUITE_UNIT: Record<string, string> = {
+  retrieval: "查询",
+  context: "题",
+  coding: "题",
+};
+
+function aggregateParts(
+  parts: Record<string, { done: number; total: number }> | undefined,
+): { done: number; total: number } | null {
+  if (!parts) return null;
+  const vals = Object.values(parts);
+  if (!vals.length) return null;
+  return {
+    done: vals.reduce((a, p) => a + (Number.isFinite(p.done) ? p.done : 0), 0),
+    total: vals.reduce((a, p) => a + (Number.isFinite(p.total) ? p.total : 0), 0),
+  };
+}
+
+function mergeDetailProgress(
+  prev: DetailProgress | undefined,
+  next: DetailProgress,
+): DetailProgress {
+  const parts: Record<string, { done: number; total: number }> = {
+    ...(prev?.parts || {}),
+  };
+  if (next.parts) {
+    for (const [k, v] of Object.entries(next.parts)) {
+      parts[k] = { ...parts[k], ...v };
+    }
+  }
+  if (
+    next.partKey &&
+    next.done != null &&
+    Number.isFinite(next.done) &&
+    next.total != null &&
+    Number.isFinite(next.total)
+  ) {
+    parts[next.partKey] = { done: next.done, total: next.total };
+  }
+
+  const summed = aggregateParts(Object.keys(parts).length ? parts : undefined);
+  const pct =
+    next.pct != null && Number.isFinite(next.pct) ? next.pct : (prev?.pct ?? null);
+  const done = summed
+    ? summed.done
+    : next.done != null && Number.isFinite(next.done)
+      ? next.done
+      : (prev?.done ?? null);
+  const total = summed
+    ? summed.total
+    : next.total != null && Number.isFinite(next.total)
+      ? next.total
+      : (prev?.total ?? null);
+  const unit = next.unit || prev?.unit || undefined;
+  const outPct =
+    summed && summed.total > 0
+      ? Math.max(0, Math.min(100, Math.round((summed.done / summed.total) * 100)))
+      : pct;
+  return {
+    ...next,
+    pct: outPct,
+    done,
+    total,
+    unit,
+    parts: Object.keys(parts).length ? parts : undefined,
+    partKey: next.partKey || prev?.partKey,
+  };
+}
+
 function formatSuiteDetails(details: Record<string, DetailProgress>): {
   label: string;
   pct: number | null;
   kind: DetailProgress["kind"];
+  done: number | null;
+  total: number | null;
+  remain: number | null;
+  unit: string | null;
+  suiteKey: string | null;
 } {
   const keys = Object.keys(details);
   if (!keys.length) {
-    return { label: "尚未开始", pct: null, kind: "idle" };
+    return {
+      label: "尚未开始",
+      pct: null,
+      kind: "idle",
+      done: null,
+      total: null,
+      remain: null,
+      unit: null,
+      suiteKey: null,
+    };
   }
   const order = ["retrieval", "context", "coding"];
   const sorted = [
@@ -535,19 +614,53 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
       const d = details[k];
       if (k === "_") return d.label;
       const name = SUITE_DETAIL_LABEL[k] || k;
-      return `${name}: ${d.label}`;
+      const bucket =
+        d.done != null && d.total != null ? ` ${d.done}/${d.total}` : "";
+      return `${name}: ${d.label}${bucket && !d.label.includes(`${d.done}/${d.total}`) ? bucket : ""}`;
     })
     .join(" · ");
-  const pcts = sorted
-    .map((k) => details[k].pct)
-    .filter((p): p is number => p != null && Number.isFinite(p));
-  const pct = pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : null;
   const kind = sorted.some((k) => details[k].kind === "eval")
     ? "eval"
     : sorted.some((k) => details[k].kind === "pull")
       ? "pull"
       : "idle";
-  return { label, pct, kind };
+
+  // Active suite = last unfinished among known suite keys; else latest with totals.
+  let focus: DetailProgress | null = null;
+  let focusKey: string | null = null;
+  for (const k of order) {
+    const d = details[k];
+    if (!d) continue;
+    if (d.total != null && Number.isFinite(d.total) && d.total > 0) {
+      focus = d;
+      focusKey = k;
+      if (d.done == null || d.done < d.total) break;
+    }
+  }
+  if (!focus) {
+    for (const k of [...sorted].reverse()) {
+      const d = details[k];
+      if (d.total != null && Number.isFinite(d.total) && d.total > 0) {
+        focus = d;
+        focusKey = k === "_" ? null : k;
+        break;
+      }
+    }
+  }
+  const done = focus?.done ?? null;
+  const total = focus?.total ?? null;
+  const remain =
+    done != null && total != null ? Math.max(0, total - done) : null;
+  const unit =
+    focus?.unit ||
+    (focusKey ? SUITE_UNIT[focusKey] : null) ||
+    null;
+  const pct =
+    done != null && total != null && total > 0
+      ? Math.max(0, Math.min(100, Math.round((done / total) * 100)))
+      : focus?.pct ?? null;
+
+  return { label, pct, kind, done, total, remain, unit, suiteKey: focusKey };
 }
 
 function suiteFromL1Token(token: string): string | null {
@@ -581,6 +694,9 @@ function parseProgressLine(line: string): DetailProgress | null {
       suite: "coding",
       label: `L1 编码 ${cur}/${total || "?"} · ${iid}`,
       pct,
+      done: Number.isFinite(cur) ? cur : null,
+      total: Number.isFinite(total) ? total : null,
+      unit: "题",
     };
   }
   const l1CtxPlan = line.match(
@@ -594,12 +710,16 @@ function parseProgressLine(line: string): DetailProgress | null {
       suite: "context",
       label: `L1 上下文计划 ${n} 题${p}`,
       pct: 0,
+      done: 0,
+      total: Number.isFinite(n) ? n : null,
+      unit: "题",
     };
   }
   const l1CodePlan = line.match(
     /^\[L1\]\s+coding plan\s+n=(\d+)\s+tier=(\S+)(?:\s+parallel=(\d+))?/i,
   );
   if (l1CodePlan) {
+    const n = Number(l1CodePlan[1]);
     return {
       kind: "eval",
       suite: "coding",
@@ -607,19 +727,29 @@ function parseProgressLine(line: string): DetailProgress | null {
         l1CodePlan[3] ? ` · 并行${l1CodePlan[3]}` : ""
       }`,
       pct: 0,
+      done: 0,
+      total: Number.isFinite(n) ? n : null,
+      unit: "题",
     };
   }
   const l1RetPlan = line.match(
     /^\[L1\]\s+(\S+)\s+queries plan\s+n=(\d+)(?:\s+\(qrels-only[^)]*\))?(?:\s+parallel=(\d+))?/i,
   );
   if (l1RetPlan) {
+    const n = Number(l1RetPlan[2]);
+    const ds = l1RetPlan[1];
     return {
       kind: "eval",
       suite: "retrieval",
-      label: `L1 检索 ${l1RetPlan[1]} · ${l1RetPlan[2]} qrels${
+      label: `L1 检索 ${ds} · ${l1RetPlan[2]} qrels${
         l1RetPlan[3] ? ` · 并行${l1RetPlan[3]}` : ""
       }`,
       pct: 0,
+      done: 0,
+      total: Number.isFinite(n) ? n : null,
+      unit: "查询",
+      partKey: ds,
+      parts: Number.isFinite(n) ? { [ds]: { done: 0, total: n } } : undefined,
     };
   }
   const l1Ctx = line.match(/^\[L1\]\s+context\s+(\d+)\s*\/\s*(\d+)/i);
@@ -635,6 +765,9 @@ function parseProgressLine(line: string): DetailProgress | null {
       suite: "context",
       label: `L1 上下文 ${cur}/${total || "?"}`,
       pct,
+      done: Number.isFinite(cur) ? cur : null,
+      total: Number.isFinite(total) ? total : null,
+      unit: "题",
     };
   }
   const l1Q = line.match(/^\[L1\]\s+(\S+)\s+queries\s+(\d+)\s*\/\s*(\d+)/i);
@@ -651,6 +784,14 @@ function parseProgressLine(line: string): DetailProgress | null {
       suite: "retrieval",
       label: `L1 检索 ${ds} · 查询 ${cur}/${total || "?"}`,
       pct,
+      done: Number.isFinite(cur) ? cur : null,
+      total: Number.isFinite(total) ? total : null,
+      unit: "查询",
+      partKey: ds,
+      parts:
+        Number.isFinite(cur) && Number.isFinite(total)
+          ? { [ds]: { done: cur, total } }
+          : undefined,
     };
   }
   const l1Pull = line.match(/^\[L1\]\s+pull\s+(.+)$/i);
@@ -901,7 +1042,8 @@ function parseProgressLine(line: string): DetailProgress | null {
 }
 
 function isEffectEligible(r: OfficialRun): boolean {
-  /** Exclude dry / skip_api / reclaimed from effect aggregates. */
+  /** Only completed runs; exclude dry / skip_api / reclaimed from effect aggregates. */
+  if (String(r.status || "") !== "completed") return false;
   if (r.model_meta?.reclaimed) return false;
   const err = String(r.error || "");
   if (err.includes("reclaimed")) return false;
@@ -984,7 +1126,11 @@ function aggregateMetrics(runs: OfficialRun[]): MetricAgg[] {
 function MetricBars({ metrics }: { metrics: Record<string, number> }) {
   const entries = Object.entries(metrics);
   if (!entries.length) {
-    return <p className="text-sm text-muted-foreground">本次尚无数值指标（流水线/dry 常见）。</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        本次尚无数值指标（套件未完成、dry / skip_api，或旧跑次未按套件回写时常见）。
+      </p>
+    );
   }
   return (
     <div className="space-y-2">
@@ -1104,6 +1250,7 @@ export function OfficialBenchPage() {
   const [apiKeyEditing, setApiKeyEditing] = useState(false);
   const [apiKeySaveFlash, setApiKeySaveFlash] = useState(false);
   const [showCriteria, setShowCriteria] = useState(false);
+  const [pagePane, setPagePane] = useState<"run" | "summary">("run");
   const [suiteFilter, setSuiteFilter] = useState<string>("");
   const [runs, setRuns] = useState<OfficialRun[]>([]);
   const [detail, setDetail] = useState<OfficialRun | null>(null);
@@ -1455,8 +1602,12 @@ export function OfficialBenchPage() {
   const apiKeyStored = Boolean(storedApiKey);
 
   const needsLiveModel = useMemo(
-    () => selectedSuites.has("context") || selectedSuites.has("coding"),
-    [selectedSuites],
+    () =>
+      selectedSuites.has("context") ||
+      selectedSuites.has("coding") ||
+      // L1 retrieval drives real Turns → must use Ops 评测模型 (not product Web settings).
+      (evalPath === "agent" && selectedSuites.has("retrieval")),
+    [selectedSuites, evalPath],
   );
 
   const applyProviderPreset = (provider: string) => {
@@ -1504,11 +1655,7 @@ export function OfficialBenchPage() {
       const prev = nextDetails[parsed.suite];
       // Don't let a late pull line clobber eval/infer for the same suite.
       if (parsed.kind === "pull" && prev?.kind === "eval") continue;
-      const pct =
-        parsed.pct != null && Number.isFinite(parsed.pct)
-          ? parsed.pct
-          : (prev?.pct ?? null);
-      nextDetails[parsed.suite] = { ...parsed, pct };
+      nextDetails[parsed.suite] = mergeDetailProgress(prev, parsed);
     }
     setSuiteDetails(nextDetails);
 
@@ -1711,12 +1858,10 @@ export function OfficialBenchPage() {
               setSuiteDetails((prev) => {
                 const cur = prev[parsed.suite!];
                 if (parsed.kind === "pull" && cur?.kind === "eval") return prev;
-                // L1 turn/step lines often omit pct — keep last known fraction.
-                const pct =
-                  parsed.pct != null && Number.isFinite(parsed.pct)
-                    ? parsed.pct
-                    : (cur?.pct ?? null);
-                return { ...prev, [parsed.suite!]: { ...parsed, pct } };
+                return {
+                  ...prev,
+                  [parsed.suite!]: mergeDetailProgress(cur, parsed),
+                };
               });
             } else if (
               msg.startsWith("[pull]") ||
@@ -1745,10 +1890,56 @@ export function OfficialBenchPage() {
               ...prev,
               `${data.status === "pass" ? "✓" : data.status === "skipped" ? "○" : "✗"} ${data.case_id}`,
             ]);
-            setProgress({
-              done: Number(data.progress_done || 0),
-              total: Number(data.progress_total || 0),
-            });
+            setProgress((prev) => ({
+              done: Number(
+                data.progress_done != null ? data.progress_done : prev.done,
+              ),
+              total: Number(data.progress_total || prev.total || 0),
+            }));
+            // Optimistic: paint suite metrics as soon as SSE carries them (L1 per-suite).
+            const sseMetrics = data.metrics;
+            const finishedCaseId = String(data.case_id || "");
+            if (
+              finishedCaseId &&
+              sseMetrics &&
+              typeof sseMetrics === "object" &&
+              !Array.isArray(sseMetrics)
+            ) {
+              setDetail((prev) => {
+                if (!prev || prev.id !== runId) return prev;
+                const nextCases = (prev.cases || []).map((c) =>
+                  c.case_id === finishedCaseId
+                    ? {
+                        ...c,
+                        status: String(data.status || c.status),
+                        metrics: sseMetrics as Record<string, number>,
+                      }
+                    : c,
+                );
+                const pass = nextCases.filter((c) => c.status === "pass").length;
+                const fail = nextCases.filter((c) => c.status === "fail").length;
+                const skipped = nextCases.filter((c) => c.status === "skipped").length;
+                const pending = nextCases.filter(
+                  (c) => c.status === "pending" || c.status === "running",
+                ).length;
+                return {
+                  ...prev,
+                  cases: nextCases,
+                  summary: {
+                    ...(prev.summary || {}),
+                    total: nextCases.length,
+                    pass,
+                    fail,
+                    skipped,
+                    pending,
+                    progress_done: Number(data.progress_done || prev.summary?.progress_done || 0),
+                    progress_total: Number(
+                      data.progress_total || prev.summary?.progress_total || 0,
+                    ),
+                  },
+                };
+              });
+            }
             void loadDetail();
             void loadList();
           } else if (kind === "run_started") {
@@ -1786,21 +1977,25 @@ export function OfficialBenchPage() {
     void loadMeta();
     void (async () => {
       const list = await loadList();
+      // Do not auto-navigate into the latest/live run — user picks from 历史.
+      // Only reconnect SSE when the URL already points at that live run.
       const live = list.find(
         (r) => isActiveStatus(r.status) && (r.source === "live" || !r.finished_at),
       );
-      if (!live) return;
-      if (!selectedId) {
-        navigate(opsOfficialPath(secret, live.id), { replace: true });
-        return;
-      }
-      if (selectedId === live.id) {
-        applyRunSnapshot(live, { logs: false });
-        attachLiveStream(live.id, { resetLogs: true });
-      }
+      if (!live || !selectedId || selectedId !== live.id) return;
+      applyRunSnapshot(live, { logs: false });
+      attachLiveStream(live.id, { resetLogs: true });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount reconnect
   }, [loadMeta, loadList, secret]);
+
+  const liveRun = useMemo(
+    () =>
+      runs.find(
+        (r) => isActiveStatus(r.status) && (r.source === "live" || !r.finished_at),
+      ) ?? null,
+    [runs],
+  );
 
   useEffect(() => {
     void (async () => {
@@ -1926,10 +2121,17 @@ export function OfficialBenchPage() {
       );
       if (!ok) return;
     }
-    const needModel = suites.includes("context") || suites.includes("coding");
+    const needModel =
+      suites.includes("context") ||
+      suites.includes("coding") ||
+      (evalPath === "agent" && suites.includes("retrieval"));
     const hasKey = Boolean(modelApiKey.trim() && modelName.trim() && modelProvider.trim());
     if (needModel && !hasKey) {
-      setError("已选上下文/编码：请填写下方评测模型（供应商 / model / api_key）。");
+      setError(
+        evalPath === "agent" && suites.includes("retrieval") && !suites.includes("context") && !suites.includes("coding")
+          ? "L1 检索需走真实 Turn：请填写下方评测模型（供应商 / model / api_key）并点保存。"
+          : "已选上下文/编码（或 L1 检索）：请填写下方评测模型（供应商 / model / api_key）。",
+      );
       return;
     }
     let modelPayload:
@@ -2235,35 +2437,50 @@ export function OfficialBenchPage() {
   // Prefer fine-grained bar while a suite is mid-flight (suite bar stuck at 0/N is misleading).
   const barPct =
     busy && detailPct != null
-      ? Math.max(4, Math.round((suitePct * 0.35) + (detailPct * 0.65)))
+      ? Math.max(4, Math.round(suitePct * 0.35 + detailPct * 0.65))
       : suitePct || (busy ? 4 : 0);
 
-  // Overall fraction for ETA: finished suites + current suite's detail %.
-  const overallFrac = (() => {
-    const total = progress.total || 0;
-    if (total <= 0) return barPct / 100;
-    const done = Math.min(progress.done, total);
-    const within =
-      detailPct != null && done < total ? Math.max(0, Math.min(1, detailPct / 100)) : 0;
-    return Math.min(1, (done + within) / total);
+  const suitesRemaining =
+    progress.total > 0 ? Math.max(0, progress.total - progress.done) : null;
+  const currentSuiteNo =
+    progress.total > 0 && busy
+      ? Math.min(
+          progress.total,
+          progress.done + (suitesRemaining && suitesRemaining > 0 ? 1 : 0),
+        )
+      : null;
+  const activeSuiteName = detailProgress.suiteKey
+    ? SUITE_DETAIL_LABEL[detailProgress.suiteKey] || detailProgress.suiteKey
+    : null;
+  // L1 pipeline suites = retrieval / context / coding (at most 3), NOT BEIR datasets / queries.
+  const suiteProgressLabel =
+    progress.total > 0
+      ? busy && suitesRemaining != null && suitesRemaining > 0
+        ? `L1套件 ${progress.done}/${progress.total}` +
+          (activeSuiteName
+            ? ` · 进行中：${activeSuiteName}`
+            : ` · 进行中第 ${currentSuiteNo} 套`)
+        : `L1套件 ${progress.done}/${progress.total}`
+      : null;
+  const itemsRemainLabel =
+    detailProgress.remain != null && detailProgress.unit
+      ? `${activeSuiteName || "套内"} ${detailProgress.done ?? 0}/${detailProgress.total ?? "?"} · 剩 ${detailProgress.remain} ${detailProgress.unit}`
+      : null;
+  const remainLabel = (() => {
+    const parts: string[] = [];
+    if (itemsRemainLabel) parts.push(itemsRemainLabel);
+    if (suiteProgressLabel) parts.push(suiteProgressLabel);
+    return parts.length ? parts.join(" · ") : null;
   })();
 
   const runStartedAt = detail?.created_at || null;
   const runFinishedAt = busy ? null : detail?.finished_at || null;
   const elapsedSec = elapsedSeconds(runStartedAt, runFinishedAt, nowMs);
-  const etaSec = busy
-    ? estimateEtaSeconds(elapsedSec ?? 0, overallFrac)
-    : null;
   const timingLabel = (() => {
     if (elapsedSec == null) return null;
     if (busy) {
-      const etaPart =
-        etaSec != null
-          ? ` · 预计剩余 ${formatDuration(etaSec)}`
-          : overallFrac < 0.03
-            ? " · 预计剩余 —（进度太少）"
-            : " · 预计剩余 —";
-      return `已用 ${formatDuration(elapsedSec)}${etaPart}`;
+      const rem = remainLabel ? ` · ${remainLabel}` : "";
+      return `已用 ${formatDuration(elapsedSec)}${rem}`;
     }
     if (runFinishedAt) return `用时 ${formatDuration(elapsedSec)}`;
     return `已用 ${formatDuration(elapsedSec)}`;
@@ -2276,11 +2493,16 @@ export function OfficialBenchPage() {
     );
   }, [runs, suiteFilter]);
 
-  const metricAggs = useMemo(() => aggregateMetrics(filteredRuns), [filteredRuns]);
-  const scoredRunCount = useMemo(
-    () =>
-      filteredRuns.filter((r) => Object.keys(runMetrics(r)).length > 0).length,
+  /** History list keeps all statuses; aggregates only completed (+ effect-eligible). */
+  const summaryRuns = useMemo(
+    () => filteredRuns.filter((r) => isEffectEligible(r)),
     [filteredRuns],
+  );
+
+  const metricAggs = useMemo(() => aggregateMetrics(summaryRuns), [summaryRuns]);
+  const scoredRunCount = useMemo(
+    () => summaryRuns.filter((r) => Object.keys(runMetrics(r)).length > 0).length,
+    [summaryRuns],
   );
 
   const detailMetrics = runMetrics(detail);
@@ -2293,6 +2515,26 @@ export function OfficialBenchPage() {
       subtitle="BEIR · LongBench · SWE-bench Lite · 指标与过程"
       actions={
         <>
+          <div className="flex rounded-md border border-border p-0.5 text-xs">
+            <button
+              type="button"
+              onClick={() => setPagePane("run")}
+              className={`rounded px-2.5 py-1 ${
+                pagePane === "run" ? "bg-foreground text-background" : "hover:bg-muted"
+              }`}
+            >
+              评测
+            </button>
+            <button
+              type="button"
+              onClick={() => setPagePane("summary")}
+              className={`rounded px-2.5 py-1 ${
+                pagePane === "summary" ? "bg-foreground text-background" : "hover:bg-muted"
+              }`}
+            >
+              指标汇总
+            </button>
+          </div>
           <button
             type="button"
             onClick={() => setShowCriteria((v) => !v)}
@@ -2346,6 +2588,8 @@ export function OfficialBenchPage() {
         </section>
       ) : null}
 
+      {pagePane === "run" ? (
+      <>
       {/* Process legend */}
       <section className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs">
         <p className="font-semibold text-foreground">你始终该知道在干嘛（每个套件都是这三步）</p>
@@ -2365,7 +2609,7 @@ export function OfficialBenchPage() {
           <li className="rounded-lg border border-border bg-background/80 px-3 py-2">
             <span className="font-medium">③ 回归 Regress</span>
             <p className="mt-0.5 text-muted-foreground">
-              下方汇总表看多次跑分的最高 / 平均 / 中位；相对上次 Δ 也在检索日志里。
+              「指标汇总」页看多次 <strong>completed</strong> 跑分的最高 / 平均 / 中位；相对上次 Δ 也在检索日志里。
             </p>
           </li>
         </ol>
@@ -2796,11 +3040,14 @@ export function OfficialBenchPage() {
           }`}
         >
           <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h3 className="text-xs font-semibold">评测模型（上下文 / 编码）</h3>
+            <h3 className="text-xs font-semibold">
+              评测模型
+              {needsLiveModel ? "（本次运行需要）" : "（L0 仅检索可留空）"}
+            </h3>
             <p className="text-[11px] text-muted-foreground">
               {needsLiveModel
-                ? "供应商与模型自动记住；api_key 需点保存"
-                : "仅检索时可留空"}
+                ? "供应商与模型自动记住；api_key 需点「保存」。L1 检索也会下发此模型，不走 Web 用户设置。"
+                : "L0 组件检索不调模型；切到 L1 或勾选上下文/编码后需填写"}
             </p>
           </div>
           <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -3032,7 +3279,14 @@ export function OfficialBenchPage() {
                   </span>
                 </span>
                 <span className="tabular-nums text-muted-foreground">
-                  {detailPct != null ? `${detailPct}%` : "—"}
+                  {detailProgress.done != null && detailProgress.total != null
+                    ? `${detailProgress.done}/${detailProgress.total}` +
+                      (detailProgress.remain != null && detailProgress.unit
+                        ? ` · 剩 ${detailProgress.remain} ${detailProgress.unit}`
+                        : "")
+                    : detailPct != null
+                      ? `${detailPct}%`
+                      : "—"}
                 </span>
               </div>
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -3044,14 +3298,21 @@ export function OfficialBenchPage() {
             </div>
             <div className="flex justify-between text-[11px] text-muted-foreground">
               <span>
-                套件完成 {progress.done}/{progress.total || "—"}
-                {progress.total
-                  ? `（本次勾选 ${progress.total} 项；套件内进度看上面「明细」）`
-                  : ""}
+                {suiteProgressLabel ||
+                  `L1套件 ${progress.done}/${progress.total || "—"}`}
+                <span className="text-muted-foreground/80">
+                  {" "}
+                  （检索/上下文/编码，最多 3 套；与 BEIR 三数据集不是同一层）
+                </span>
               </span>
               <span className="tabular-nums">
-                {barPct}%
-                {busy && etaSec != null ? ` · ~${formatDuration(etaSec)}` : ""}
+                {busy && itemsRemainLabel
+                  ? itemsRemainLabel
+                  : busy && suiteProgressLabel
+                    ? suiteProgressLabel
+                    : progress.total
+                      ? `${suitePct}%`
+                      : "—"}
               </span>
             </div>
             <div className="h-2 overflow-hidden rounded-full bg-muted">
@@ -3095,71 +3356,24 @@ export function OfficialBenchPage() {
         )}
       </section>
 
-      {/* Multi-run aggregates */}
-      <section className="mb-5 rounded-xl border border-border p-4">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-semibold">指标汇总</h2>
-            <p className="text-[11px] text-muted-foreground">
-              已排除 dry / skip_api / reclaimed / 仅 hash 冒烟（不作效果结论）
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              对筛选范围内、已有数值的跑次：n · 最低 · 中位 · 平均 · 最高 · 最近一次。
-              {scoredRunCount > 0 ? ` 当前 ${scoredRunCount} 次有分。` : ""}
-            </p>
-          </div>
-          <label className="flex items-center gap-1.5 text-xs">
-            筛选
-            <select
-              className="rounded-md border border-border bg-background px-2 py-1"
-              value={suiteFilter}
-              onChange={(e) => setSuiteFilter(e.target.value)}
-            >
-              <option value="">全部套件</option>
-              <option value="retrieval">含 retrieval</option>
-              <option value="context">含 context</option>
-              <option value="coding">含 coding</option>
-            </select>
-          </label>
+      {liveRun && liveRun.id !== selectedId ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs">
+          <span>
+            有进行中的跑次{" "}
+            <span className="font-mono">{shortId(liveRun.id)}</span>
+            {" · "}
+            {liveRun.official_suite || liveRun.model_meta?.official_suite || "bench"}
+            （不会自动打开，需手动进入）
+          </span>
+          <button
+            type="button"
+            className="rounded-md border border-border bg-background px-2.5 py-1 hover:bg-muted"
+            onClick={() => navigate(opsOfficialPath(secret, liveRun.id))}
+          >
+            打开进行中
+          </button>
         </div>
-
-        {metricAggs.length === 0 ? (
-          <p className="mt-4 text-xs text-muted-foreground">
-            还没有可汇总的数值。先跑完「仅检索」（不要中途取消），指标会出现在这里。
-          </p>
-        ) : (
-          <div className="mt-3 overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-muted-foreground">
-                  <th className="border-b border-border py-2 pr-2 font-medium">指标</th>
-                  <th className="border-b border-border py-2 pr-2 font-medium">n</th>
-                  <th className="border-b border-border py-2 pr-2 font-medium">最低</th>
-                  <th className="border-b border-border py-2 pr-2 font-medium">中位</th>
-                  <th className="border-b border-border py-2 pr-2 font-medium">平均</th>
-                  <th className="border-b border-border py-2 pr-2 font-medium">最高</th>
-                  <th className="border-b border-border py-2 font-medium">最近</th>
-                </tr>
-              </thead>
-              <tbody>
-                {metricAggs.map((row) => (
-                  <tr key={row.key} className="border-b border-border/60">
-                    <td className="py-1.5 pr-2 font-mono text-[11px]">{row.key}</td>
-                    <td className="py-1.5 pr-2 tabular-nums text-muted-foreground">{row.n}</td>
-                    <td className="py-1.5 pr-2 tabular-nums">{row.min.toFixed(4)}</td>
-                    <td className="py-1.5 pr-2 tabular-nums">{row.median.toFixed(4)}</td>
-                    <td className="py-1.5 pr-2 tabular-nums font-medium">{row.mean.toFixed(4)}</td>
-                    <td className="py-1.5 pr-2 tabular-nums">{row.max.toFixed(4)}</td>
-                    <td className="py-1.5 tabular-nums text-muted-foreground">
-                      {row.latest.toFixed(4)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      ) : null}
 
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
         {/* History table */}
@@ -3248,7 +3462,10 @@ export function OfficialBenchPage() {
               <button
                 type="button"
                 className="text-[11px] text-muted-foreground underline"
-                onClick={() => void loadList()}
+                onClick={() => {
+                  void loadList();
+                  if (selectedId) void loadDetail();
+                }}
               >
                 刷新
               </button>
@@ -3339,7 +3556,7 @@ export function OfficialBenchPage() {
         <div className="rounded-xl border border-border p-4">
           {!selectedId ? (
             <p className="text-sm text-muted-foreground">
-              从左侧选一次 run，或点「开始」发起新评测。观测重点：指标趋势与 A/B Δ。
+              从左侧历史手动选一次 run 查看详情。进入评测台不会自动打开最新结果。
             </p>
           ) : !detail ? (
             <p className="text-sm text-muted-foreground">加载中…</p>
@@ -3358,9 +3575,7 @@ export function OfficialBenchPage() {
                       {" · "}
                       <span className="tabular-nums">
                         {busy ? "已用" : "用时"} {formatDuration(elapsedSec)}
-                        {busy && etaSec != null
-                          ? ` · 预计剩余 ${formatDuration(etaSec)}`
-                          : ""}
+                        {busy && remainLabel ? ` · ${remainLabel}` : ""}
                       </span>
                     </>
                   ) : null}
@@ -3425,9 +3640,9 @@ export function OfficialBenchPage() {
                       <div className="text-xl font-semibold tabular-nums">{val ?? 0}</div>
                     </div>
                   ))}
-                  <div className="sm:col-span-4">
-                    <MetricBars metrics={detailMetrics} />
-                  </div>
+                  <p className="sm:col-span-4 text-xs text-muted-foreground">
+                    单次指标见「指标」页签；跨跑次汇总见顶栏「指标汇总」（仅 completed）。
+                  </p>
                 </div>
               ) : null}
 
@@ -3477,6 +3692,73 @@ export function OfficialBenchPage() {
           )}
         </div>
       </div>
+      </>
+      ) : (
+      <section className="mb-5 rounded-xl border border-border p-4">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold">指标汇总</h2>
+            <p className="text-[11px] text-muted-foreground">
+              仅统计 <strong>completed</strong>；已排除 running / cancelled / dry / skip_api / reclaimed / 仅 hash 冒烟
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              n · 最低 · 中位 · 平均 · 最高 · 最近一次。
+              {scoredRunCount > 0 ? ` 当前 ${scoredRunCount} 次 completed 计入。` : ""}
+            </p>
+          </div>
+          <label className="flex items-center gap-1.5 text-xs">
+            筛选
+            <select
+              className="rounded-md border border-border bg-background px-2 py-1"
+              value={suiteFilter}
+              onChange={(e) => setSuiteFilter(e.target.value)}
+            >
+              <option value="">全部套件</option>
+              <option value="retrieval">含 retrieval</option>
+              <option value="context">含 context</option>
+              <option value="coding">含 coding</option>
+            </select>
+          </label>
+        </div>
+
+        {metricAggs.length === 0 ? (
+          <p className="mt-4 text-xs text-muted-foreground">
+            还没有可汇总的 completed 跑次。跑完整场并成功结束后，指标会出现在这里。
+          </p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="border-b border-border py-2 pr-2 font-medium">指标</th>
+                  <th className="border-b border-border py-2 pr-2 font-medium">n</th>
+                  <th className="border-b border-border py-2 pr-2 font-medium">最低</th>
+                  <th className="border-b border-border py-2 pr-2 font-medium">中位</th>
+                  <th className="border-b border-border py-2 pr-2 font-medium">平均</th>
+                  <th className="border-b border-border py-2 pr-2 font-medium">最高</th>
+                  <th className="border-b border-border py-2 font-medium">最近</th>
+                </tr>
+              </thead>
+              <tbody>
+                {metricAggs.map((row) => (
+                  <tr key={row.key} className="border-b border-border/60">
+                    <td className="py-1.5 pr-2 font-mono text-[11px]">{row.key}</td>
+                    <td className="py-1.5 pr-2 tabular-nums text-muted-foreground">{row.n}</td>
+                    <td className="py-1.5 pr-2 tabular-nums">{row.min.toFixed(4)}</td>
+                    <td className="py-1.5 pr-2 tabular-nums">{row.median.toFixed(4)}</td>
+                    <td className="py-1.5 pr-2 tabular-nums font-medium">{row.mean.toFixed(4)}</td>
+                    <td className="py-1.5 pr-2 tabular-nums">{row.max.toFixed(4)}</td>
+                    <td className="py-1.5 tabular-nums text-muted-foreground">
+                      {row.latest.toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+      )}
     </OpsShell>
   );
 }

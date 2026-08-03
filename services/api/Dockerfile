@@ -21,7 +21,7 @@ RUN set -eux; \
       fi; \
     fi; \
     apt-get update && apt-get install -y --no-install-recommends \
-      curl ca-certificates docker-cli docker-compose \
+      curl ca-certificates docker-cli docker-compose git \
     && rm -rf /var/lib/apt/lists/* \
     && docker --version \
     && docker-compose version

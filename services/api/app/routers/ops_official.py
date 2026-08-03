@@ -144,7 +144,7 @@ async def official_meta() -> dict[str, Any]:
                 "id": "retrieval",
                 "label": "检索",
                 "group": "retrieval",
-                "description": "BEIR 小量 · hybrid 主分 + BM25 对照 · ST 真向量",
+                "description": "BEIR 小量 · L0 可不填模型；L1 agent 路径需 Ops 评测模型",
                 "needs_model": False,
             },
             {
