@@ -1,8 +1,8 @@
 # Official Bench · Round 1 — 归因 + 执行方案（Phase B → C 施工蓝图）
 
-> **状态**：M1 立尺已接线 · **C-1/C-2 产品落地** · **C-4 离线面已落** · **C-3 冒烟网格已跑**（保持 `default`）· free 行为桶已干净（drift/cap）· **第五刀 soft-rerank+limit50 已回滚**（free nDCG@10 0.434→0.395）  
-> **下一硬门**：回滚后同条件 free 20q 确认回到 ~0.43；另机 **M2** m3 全量锚；官方 Δ / `update-baseline` 仍禁止用冒烟叙事  
-> **完整自含简报（流程 + 历次对照 + 问题，供高级模型续作）**：`docs/topics/retrieval-free-l1-tuning-brief.md`  
+> **状态**：M1 立尺已接线 · **C-1/C-2 产品落地** · **C-4 离线面已落** · **C-3 冒烟网格已跑**（保持 `default`）· **第五刀已回滚**；回滚确认 free nDCG@10 **0.409**（未回到 0.434；与 soft#2 0.411 同带 → 当前冒烟平台 **~0.41**）  
+> **下一硬门**：以 ~0.41 为对照设计下一刀（重要改动 N≥2）；另机 **M2** m3 全量锚；禁止冒烟单次入库  
+> **完整自含简报（流程 + 历次对照含 soft#2/回滚确认 + 问题，供高级模型续作）**：`docs/topics/retrieval-free-l1-tuning-brief.md`  
 > **输入**：`eval/official/baseline/official-small-2026-08-m2.json` · `m1.json` · `eval/reports/official/c3_grid_latest.json` · `eval/reports/official/retrieval_bucket_latest.json`  
 > **纲领**：[official-bench-agent-tuning](official-bench-agent-tuning.md)（本文是其 §9「Phase B 归因 + 本轮工程调优方案」交付物，并细化为可施工计划）  
 > **流程图（含数字释义）**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) — 分桶怎么读、为何 drift↓/ok↑/cap↓ 算行为正向、C-3「8 点 macro 打平」、search_cap 复测后 IR 平台期  
@@ -234,8 +234,10 @@
 > **四次补强（search_cap）**：达 cap 轨迹多为「首搜已有 hit 仍同义换词 3–5 次」。契约改为默认 ≤2 搜；首搜有 on-topic path 则停搜改 `read_file`。已热部署 runtime。  
 > **四次复测（Ops · `0526901a` · debug.log）**：宏指标几乎持平（nDCG@10 **0.434**，←0.427）；**行为** `search_cap` **18%→2%**（1/60）· `ok` **77%→92%**（55/60）· drift 仍低 · `no_search` 2 · R@100 略降。报告：`retrieval_bucket_after_search_cap.json`。**搜次文案生效；IR 未明显跟涨 → 不入库。下一刀不宜再拧搜次。**  
 > **五次 Index/排序刀（`07b4e3e` + 覆盖测 `f8f583b`）**：假设长 claim 的 lexical overlap 淹没 RRF；改 `rerank.py`（bonus 按 `|score|` 缩放）+ `search_sources` default limit **10→50**。意图抬排序并间接抬 free nDCG。  
-> **五次复测（Ops · `a6de7860` · free · 20q · `TEST.log`）**：nDCG@10 **0.395**（←0.434，**−0.039**）· R@10 **0.437** · R@100 **0.504**（↓）· 分库 NFCorpus/FiQA 仍拖后腿。团队确认 **只认自由搜、不跑 forced 洗白** → **判定失败**。  
-> **回滚（2026-08-03）**：`cf87911` / `4189325` 还原上述两提交；**不入库**。完整对照与运行流程见 `docs/topics/retrieval-free-l1-tuning-brief.md`。
+> **五次复测 soft#1（Ops · `a6de7860` · free · 20q）**：nDCG@10 **0.395** · R@10 **0.437** · R@100 **0.504**。  
+> **五次复测 soft#2（Ops · `f7fc1b1a` · 同 soft 代码再跑）**：nDCG@10 **0.411** · R@10 **0.466** · R@100 **0.517**（相对 soft#1 +0.016 → **20q 噪声**；仍低于第 4 轮 0.434）。  
+> **回滚（2026-08-03）**：`cf87911` / `4189325`；runtime 重建后确认容器 `limit=10`、无 soft 缩放。  
+> **回滚确认（Ops · `689cfe71` · free · 20q）**：nDCG@10 **0.409** · R@10 **0.412** · R@100 **0.468** — **未回到 0.434**，与 soft#2 同带；行为桶有 cap/drift 回潮。裁决：**刀可丢（无稳定正 Δ）**；当前冒烟平台记 **~0.41**；**不入库**。明细见 `docs/topics/retrieval-free-l1-tuning-brief.md`。
 
 | 项 | 内容 |
 |----|------|

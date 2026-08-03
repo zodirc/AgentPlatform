@@ -1,7 +1,7 @@
 # Free-L1 Retrieval Tuning Brief（交给后续模型的完整上下文）
 
 > **受众**：高级模型 / 下一轮调优负责人  
-> **日期戳记**：2026-08-03  
+> **日期戳记**：2026-08-03（含 soft 二次冒烟 + 回滚后确认复测）  
 > **唯一验收温度计**：自由搜（`eval_path=agent` · `arm=free` · L1 产品 Turn）  
 > **不作为验收**：forced 臂、纯 Index L0、coding（本轮不可信）  
 > **本文自含**：不依赖阅读其他专题文档即可理解流程、历史与问题
@@ -12,12 +12,15 @@
 
 | 项 | 结论 |
 |----|------|
-| 第五刀（soft lexical rerank + `search_sources` default limit 10→50） | **已回滚** |
+| 第五刀（soft lexical rerank + `search_sources` default limit 10→50） | **已回滚**；运行时已重建为回滚代码（容器内 `amp_weak` 不存在 · `limit=10`） |
 | 回滚提交 | `cf87911` 还原覆盖测；`4189325` 还原功能改动（对应原 `f8f583b` / `07b4e3e`） |
-| 回滚原因 | 唯一温度计 **free L1 20q** 上 nDCG@10 **0.434 → 0.395**（符号与目标相反） |
+| 初判回滚理由 | soft#1 free nDCG@10 **0.434 → 0.395** |
+| **修订后证据** | soft#2 再跑得 **0.411**；回滚后确认跑 **0.409**。soft 两次均值 ≈ **0.403**，与回滚后几乎同带 → **20q 噪声大**；第 4 轮 **0.434 可能是偏高单次**，不能当「回滚后必回」的锚 |
+| 回滚是否仍成立 | **是**——没有稳定正 Δ，无入库理由；但 **不要期待回滚本身抬 IR** |
+| 当前工作平台（冒烟） | free nDCG@10 **~0.41**（非 ~0.43）；下一刀以此为对照，勿再默认 0.434 |
 | SCORECARD / baseline | **未更新、不入库** |
-| 行为侧前几刀（verbatim 首搜、≤2 搜次） | **保留**（行为桶显著变好；宏 IR 平台期） |
-| 下一轮硬约束 | 继续只认 free；勿用 forced 为 free 掉分开脱；20q 冒烟不作效果入库 |
+| 行为侧前几刀（verbatim 首搜、≤2 搜次） | **保留**；但近几次复测 cap/drift 有回潮（见 §3.6） |
+| 下一轮硬约束 | 继续只认 free；勿用 forced 洗白；20q 单次不作效果入库；重要刀至少 **N≥2** 同条件复跑 |
 
 ---
 
@@ -165,27 +168,39 @@ official.context.agent_em
 | 4 | `0526901a` | ≤2 搜；有 hit 则停搜改读 | cap **18%→2%**；ok **77%→92%** | **0.434** | ≈持平 | 略降 | **行为验收通过；IR 平台期 → 不入库；停拧搜次** |
 | C-3 | `c3_grid_…` | Index fusion 8 点网格；**rerank=0** | （非 L1） | macro **0.54552 全相同** | — | — | **保持 `RETRIEVAL_PROFILE=default`**；打平=无证据改 fusion |
 | 5 | `07b4e3e` + 测 `f8f583b` | soft lexical rerank（bonus 按 \|score\| 缩放）+ default limit **10→50** | 意图：抬排序天花板，间接抬 free | 目标：相对 0.43 **上升** | — | — | 假设：长 claim overlap 洗 RRF |
-| 5 复测 | `a6de7860` / `TEST.log` | 热部署后 free 20q | ok 为主；仍有 fail / 少量 drift·no_search | **0.395** | **0.437** | **0.504** | **相对第 4 轮 −0.039 → 失败** |
-| 回滚 | `4189325` / `cf87911` | 还原第 5 刀代码与覆盖测 | — | 待同条件复测确认回到 ~0.43 | — | — | **已执行** |
+| 5a | `a6de7860` soft#1 | 热部署后 free 20q（仍 soft 代码） | ok 为主；fail 7；少量 drift/no_search | **0.395** | **0.437** | **0.504** | 初看相对第 4 轮 −0.039 |
+| 5b | `f7fc1b1a` soft#2 | **同 soft 代码再跑**（回滚部署前） | ok 54；search_cap 3；drift 2；no_search 1；57/6 | **0.411** | **0.466** | **0.517** | 相对 soft#1 **+0.016**（噪声）；仍低于 0.434 |
+| 回滚 | `4189325` / `cf87911` | 还原第 5 刀；随后 `make up-runtime` 类重建 | — | — | — | — | **已执行** |
+| 5c | `689cfe71` 回滚后 | 容器确认 soft=False · limit=10；free 20q | ok 54；search_cap 3；drift 3；59/4 | **0.409** | **0.412** | **0.468** | **未回到 0.434**；与 soft#2 同带 |
 
-### 3.2 第 4 轮 → 第 5 轮 详细 Δ（同一温度计：free）
+### 3.2 同温度计多跑对照（free · 20q · 修订结论）
 
-| 指标 | 第 4 轮后（`0526901a`） | 第 5 轮后（`a6de7860`） | Δ |
-|------|-------------------------|-------------------------|---|
-| nDCG@10 | 0.434 | 0.395 | **−0.039** |
-| R@10 | ~0.45 量级（第 3 轮 0.454） | 0.437 | 略降 |
-| R@100 | 第 3 轮 0.565；第 4 略降 | 0.504 | **明显降** |
-| 用例 | 约 60 | 63（56 pass / 7 fail） | — |
+| 标签 | run_id | nDCG@10 | R@10 | R@100 | vs 第 4 轮 0.434 |
+|------|--------|---------|------|-------|------------------|
+| 第 4 轮高峰 | `0526901a` | 0.434 | ~0.45 | ~0.56 | — |
+| soft#1 | `a6de7860` | 0.395 | 0.437 | 0.504 | −0.039 |
+| soft#2 | `f7fc1b1a` | 0.411 | 0.466 | 0.517 | −0.023 |
+| soft 两次均值 | — | **0.403** | — | — | **−0.031** |
+| **回滚后确认** | `689cfe71` | **0.409** | **0.412** | **0.468** | −0.026 |
 
-第 5 轮分库快照（`a6de7860` / `result.json`）：
+**修订读法（重要）：**
 
-| 子集 | nDCG@10 | R@10 | R@100 |
-|------|---------|------|-------|
-| SciFact | ≈0.516 | ≈0.750 | ≈0.875 |
-| NFCorpus | ≈0.307 | ≈0.070 | ≈0.144 |
-| FiQA | ≈0.362 | ≈0.492 | ≈0.492（R@10≈R@100 → 深度不足） |
+1. soft#1 的 0.395 **偏悲观**；同配置 soft#2 拉回 0.411 → 单次 20q 抖动约 **1.5–4pp** 量级。
+2. 回滚后 **0.409 ≈ soft#2**，**没有**「一回滚就回到 0.434」。回滚证明的是「第五刀无稳定增益、可丢」，不是「第五刀造成了可逆的稳定回归」。
+3. 第 4 轮 **0.434 不宜再当硬锚**；当前诚实冒烟平台按 **~0.41** 记。
+4. 回滚后 R@10/R@100 反而略弱于 soft#2 → 深度/行为噪声仍在，勿过度解读单点。
 
-失败轨迹特征（7 fail，非完整归因）：多数 **已搜 1 次**，随后大量 `list_dir` / `grep` / `read_file`；另有 `no_search`、`query_drift` 各见。说明 free 分数仍耦合 **搜后行为**，不是纯 Index 读数。
+### 3.2b 分库快照（三次邻近 free 跑）
+
+| 子集 / 跑次 | soft#1 nDCG@10 | soft#2 | 回滚后 |
+|-------------|----------------|--------|--------|
+| SciFact | 0.516 | 0.544 | 0.536 |
+| NFCorpus | 0.307 | 0.276 | 0.336 |
+| FiQA | 0.362（R10=R100≈0.49） | 0.412（R10=R100≈0.54） | 0.353（R10=R100≈0.49） |
+
+NFCorpus / FiQA 仍是宏平均拖累；FiQA 多次出现 **R@10≈R@100**（合并 hit 有效深度不足）。
+
+soft#1 失败轨迹特征（7 fail）：多数已搜 1 次后大量 `list_dir`/`grep`/`read_file`；另有 `no_search`、`query_drift`。free 分数仍耦合搜后行为。
 
 ### 3.3 第 5 刀设计意图（为何后来想动 Index）
 
@@ -196,7 +211,7 @@ official.context.agent_em
 - 假设：lexical rerank 对长 claim 的 token-overlap 加分淹没 RRF（量级 ~0.01）。
 - 改法：weak/strong bonus 按 `max(|score|)` 缩放 + `tanh`；`search_sources` 默认 limit 10→50；agent system 文案改为 prefer limit≥50。
 
-**与团队最终立场的冲突**：该刀虽自称 Index/排序，但验收写的是「热部署后 **Ops free L1 20q**」。团队后来明确 **只认自由搜** → free 下行即否决，**不再用 forced 补测洗白**。
+**与团队最终立场的冲突**：该刀虽自称 Index/排序，但验收写的是「热部署后 **Ops free L1 20q**」。团队后来明确 **只认自由搜** → 不以 forced 洗白；多跑之后进一步改为：**无稳定正 Δ 即丢刀**，同时承认冒烟噪声，不以单次 0.395 叙事「深度回归」。
 
 ### 3.4 Context 旁证（非第 5 刀目标）
 
@@ -211,37 +226,51 @@ official.context.agent_em
 
 本轮最新 coding official run **failed**；历史 patch_rate 在无 repo/无 harness 下 **无效果含义**。后续思考 **忽略 coding**，直至尺修干净。
 
+### 3.6 行为桶近况（相对第 4 轮高峰有回潮）
+
+| 跑次 | ok（约） | search_cap | query_drift | no_search | pass/fail |
+|------|----------|------------|-------------|-----------|-----------|
+| 第 4 轮 `0526901a` | **92%** | **2%** | 低 | 2 | — |
+| soft#1 `a6de7860` | 高（58 ok 量级） | 低 | 1 | 1 | 56/7 |
+| soft#2 `f7fc1b1a` | 54 | **3** | **2** | 1 | 57/6 |
+| 回滚后 `689cfe71` | 54 | **3** | **3** | 0 | 59/4 |
+
+结论：契约刀仍在代码里，但 **近三次 free 冒烟的 cap/drift 不如第 4 轮干净**；行为「保持」不能假设为永远 92% ok。
+
 ---
 
 ## 4. 当前问题清单（给下一模型）
 
-### P1 — 宏 IR 停在平台期（free）
+### P1 — 宏 IR 工作平台下修到 ~0.41
 
-- 行为刀已把 drift/cap 压下去，但 free nDCG@10 仍在 **~0.42–0.43** 平台，且曾因排序刀掉到 **0.395**。
-- **尚未**有「同协议 free、改动可归因、IR 显著正 Δ」的入库候选。
+- 不宜再写「停在 0.42–0.43」；**当前诚实冒烟中枢 ≈ 0.41**（soft 均值 0.403；回滚后 0.409）。
+- 第 4 轮 0.434 视为 **历史高峰单次**，不是可复现基线。
+- **尚未**有「同协议 free、改动可归因、IR 显著正 Δ、N≥2」的入库候选。
 
 ### P2 — 分库极不均衡
 
 - **NFCorpus** 长期拖宏平均（R@10 极低是官方多 qrels 特性 + 深度/排序问题缠在一起）。
-- **FiQA** 出现 R@10≈R@100 → 合并 hit 列表有效深度不够（模型 `limit`、停搜过早、或合并策略）。
+- **FiQA** 多次 **R@10≈R@100** → 合并 hit 列表有效深度不够（模型 `limit`、停搜过早、或合并策略）。
 
 ### P3 — free 分数 ≠ 纯 Index
 
-- 即使用户拒绝跑 forced，也必须承认：free nDCG 含 **是否搜、query 忠实、搜几次、读哪些、hit 合并序**。
-- 第 5 刀把「排序」和「default limit」绑在同一 commit，free 复测失败后 **无法 internally 拆因**（已整包回滚）。
+- free nDCG 含 **是否搜、query 忠实、搜几次、读哪些、hit 合并序**。
+- 第 5 刀把「排序」和「default limit」绑在同一 commit，已整包回滚，**未拆因**。
 
-### P4 — 冒烟噪声
+### P4 — 冒烟噪声（已用三次邻近跑钉死）
 
-- 20q/集方差大；单次 −4pp 足够 **否决该刀**，不足以精细比较 0.01 级 fusion 差异（C-3 八个点打平已提示）。
+- soft#1→#2 同配置 **+0.016**；回滚后与 soft#2 差 **<0.003**（nDCG@10）。
+- 单次 −4pp **不够**证明「稳定回归」；**N≥2 同条件**才谈刀的去留与入库。
+- 仍不足以分辨 0.01 级 fusion（C-3 八点打平已提示）。
 
 ### P5 — 弱命中桶信号不足
 
-- 行为过关后，应用 `weak_hits` 驱动 Index/embed 票；当前公开复盘里 **weak_hits 计数偏少/未成为主叙事**，下一轮应强制输出分桶直方图 + 低 nDCG case 列表。
+- 应用 `weak_hits` 驱动 Index/embed 票；强制输出分桶直方图 + 低 nDCG case 列表。
 
-### P6 — 搜后行为回潮风险
+### P6 — 行为桶回潮（已部分证实）
 
-- 第 5 轮 fail 里再现「搜完去逛目录」；第 2 刀曾禁搜前 `list_dir`，**搜后**纪律可能仍松。
-- 回滚后应用第 4 轮同条件 free 复测，确认行为桶仍在 ~ok 90% / cap~2% / drift 低。
+- 回滚后确认跑仍见 **search_cap×3、query_drift×3**，未回到第 4 轮 92% ok / 2% cap。
+- 搜后 `list_dir`/`grep` 逛目录问题在 soft#1 fail 中仍在；需单独观察，勿与 IR 刀绑死。
 
 ### P7 — Embed / INDEX 升级未做
 
@@ -250,16 +279,16 @@ official.context.agent_em
 
 ---
 
-## 5. 回滚后代码状态（预期）
+## 5. 回滚后代码与运行时状态（已确认）
 
-恢复为第 5 刀之前：
+Git 与容器（2026-08-03 确认复测时）一致：
 
-- `services/runtime/app/retrieval/rerank.py`：原 lexical 加分（`score + overlap*0.15 + …`），无 `amp_weak` / `tanh` 缩放。
-- `search_sources` / tool schema：**default `limit=10`**。
+- `rerank.py`：原 lexical 加分（`score + overlap*0.15 + …`），**无** `amp_weak` / `tanh` 缩放（`docker exec`：`'amp_weak' in source` → False）。
+- `search_sources`：**default `limit=10`**。
 - agent `system.md`：prefer limit ≥20（非 50）类表述。
-- 覆盖 soft-rerank 边界的大段单测移除（随 revert）。
+- soft 边界覆盖测随 revert 移除。
 
-**仍保留**：verbatim 首搜契约、≤2 搜次 / 有 hit 停搜、C-1 读预算、C-3「保持 default」结论、m3 free runner 与分桶探针。
+**仍保留**：verbatim 首搜契约、≤2 搜次 / 有 hit 停搜、C-1 读预算、C-3「保持 default」、m3 free runner 与分桶探针。
 
 ---
 
@@ -267,23 +296,25 @@ official.context.agent_em
 
 请后续模型在 **只认 free** 的约束下推演，优先回答：
 
-1. **回滚确认**：同条件 free 20q 是否回到 nDCG@10≈0.43 且行为桶不塌？
-2. **IR 若要动**：改动如何在 free 轨迹上可观测（例如 `weak_hits` 案例的 hit 序 vs qrels）？避免再把「纯排序假设」与「limit/行为」绑死同一 commit。
-3. **NFCorpus / FiQA**：分治还是统一杠杆？深度问题（limit/合并）与相关性问题（embed）如何用 free 证据拆开？
-4. **是否开 embed 升级票**：前置测量、回滚条件、与 R1–R5（热路径无同步重嵌）如何写死？
-5. **入库门禁**：何种 free 跑量 + 重复次数才允许碰 SCORECARD？
+1. **基线重钉**：以回滚后 `689cfe71`（≈0.409）为冒烟对照，是否再跑 1–2 次取均值当「当前平台」？
+2. **IR 若要动**：如何在 free 轨迹上可观测（`weak_hits` hit 序 vs qrels）？**禁止**再把排序假设与 limit/行为绑同一 commit；重要刀 **N≥2**。
+3. **NFCorpus / FiQA**：分治还是统一杠杆？深度（limit/合并）vs 相关性（embed）怎么用 free 证据拆开？
+4. **行为回潮**：cap/drift 从 2%/低 → 再出现 3+，要不要单独开契约/预算刀，还是先当噪声？
+5. **embed 升级票**：前置测量、回滚条件、R1–R5（热路径无同步重嵌）如何写死？
+6. **入库门禁**：何种 free 跑量 + 重复次数才允许碰 SCORECARD？
 
 禁止项提醒：
 
 - 不要把 forced/Index 涨分写成主栏成功。
 - 不要在 free 掉分时用诊断臂「上限涨了」否决回滚。
-- 不要在 20q 单次噪声上 `update-baseline`。
+- 不要在 20q **单次**噪声上 `update-baseline`。
+- 不要假设「回滚后 IR 应回到 0.434」。
 
 ---
 
 ## 7. 关键原始读数附录
 
-### 7.1 `TEST.log`（第 5 刀 free 复测导出，约 2026-08-03）
+### 7.1 soft#1 · `a6de7860`（第 5 刀首次 free 复测）
 
 ```text
 official.retrieval.ndcg_at_10 = 0.3950
@@ -292,22 +323,49 @@ official.retrieval.recall_at_100 = 0.5037
 official.retrieval.ndcg_at_1 = 0.3556
 official.retrieval.map_at_10 = 0.2627
 official.retrieval.n_queries = 20
-official.retrieval.agent.* = 与上列同值
 official.context.agent_f1 = 0.3305
 official.context.agent_em = 0.2500
 ```
 
-对应 run：retrieval `a6de7860-b126-4b2a-957c-99e308bb8a49`（title 含 `arm=free`）；context `48c4aee1-7149-4be2-8ea3-5e95cef3f661`。
+context 旁证 run：`48c4aee1-7149-4be2-8ea3-5e95cef3f661`。
 
-### 7.2 第 4 轮行为验收数字（保留刀的高峰）
+### 7.2 soft#2 · `f7fc1b1a`（同 soft 代码再跑 · 回滚部署前）
+
+```text
+official.retrieval.ndcg_at_10 = 0.4107
+official.retrieval.recall_at_10 = 0.4658
+official.retrieval.recall_at_100 = 0.5166
+official.retrieval.ndcg_at_1 = 0.3556
+official.retrieval.map_at_10 = 0.2821
+official.retrieval.n_queries = 20
+# 本次 TEST.log 无 context 段
+```
+
+pass/fail 57/6；桶：ok 54 · search_cap 3 · query_drift 2 · no_search 1。
+
+### 7.3 回滚后确认 · `689cfe71`（容器 soft=False · limit=10）
+
+```text
+official.retrieval.ndcg_at_10 = 0.4085
+official.retrieval.recall_at_10 = 0.4116
+official.retrieval.recall_at_100 = 0.4680
+official.retrieval.ndcg_at_1 = 0.3944
+official.retrieval.map_at_10 = 0.2746
+official.retrieval.n_queries = 20
+```
+
+pass/fail 59/4；桶：ok 54 · search_cap 3 · query_drift 3。  
+分库：SciFact 0.536 / NFCorpus 0.336 / FiQA 0.353。
+
+### 7.4 第 4 轮行为验收数字（历史高峰 · 非当前可复现锚）
 
 ```text
 search_cap: 18% → 2%
 ok:         77% → 92%
-nDCG@10:    0.427 → 0.434（持平级，不入库）
+nDCG@10:    0.427 → 0.434（持平级，不入库；其后多次复测未再现）
 ```
 
-### 7.3 C-3 fusion 冒烟
+### 7.5 C-3 fusion 冒烟
 
 ```text
 8 个 fusion 配置 macro nDCG@10 全为 0.54552（rerank 关闭）
@@ -321,9 +379,10 @@ nDCG@10:    0.427 → 0.434（持平级，不入库）
 ```text
 改动候选
   ├─ 只改善行为桶、IR 持平     → 可合入产品；不入库；记录「行为正向」
-  ├─ free IR 显著↑（同协议）   → 才考虑 compare + update-baseline
-  ├─ free IR ↓ 或反向噪声大    → 回滚或拆 commit 重测；禁止 forced 洗白
+  ├─ free IR 显著↑（同协议·N≥2）→ 才考虑 compare + update-baseline
+  ├─ free IR ↓ 但 N=1 噪声带内 → 同配置再跑；勿单次定生死
+  ├─ free IR 无稳定正 Δ（N≥2） → 丢刀 / 回滚；禁止 forced 洗白
   └─ 仅 Index/L0/forced ↑      → 对本团队 = 未验收；最多当假说，不进主栏
 ```
 
-**当前节点**：第 5 刀走了「free IR ↓」分支 → **已回滚**；停留在第 4 轮「行为正向 + IR 平台期」；等待回滚后的 free 确认复测与下一杠杆设计。
+**当前节点**：第五刀 **已回滚**；回滚确认跑完成 → IR **未**回到 0.434，与 soft 二次冒烟同处 **~0.41 平台**；行为桶较第 4 轮有回潮。下一轮从 **~0.41 + 分桶回潮** 出发设计杠杆，不要从 0.434 出发。
