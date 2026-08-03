@@ -230,6 +230,14 @@ class RuntimeClient:
         )
         return resp.json()
 
+    async def cancel_sources_index(self, *, timeout: float = 15.0) -> dict:
+        """Abort in-flight / queued sources index sync on runtime."""
+        resp = await self._post(
+            "/internal/commands/cancel-sources-index",
+            timeout=timeout,
+        )
+        return resp.json()
+
     async def sources_index_status(
         self,
         *,

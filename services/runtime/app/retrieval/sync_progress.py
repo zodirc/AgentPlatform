@@ -139,13 +139,24 @@ def report_sync_progress(
         return payload
 
 
-def mark_sync_started(*, reason: str = "manual", path: str | None = None) -> None:
+def mark_sync_started(
+    *,
+    reason: str = "manual",
+    path: str | None = None,
+    work_id: str | None = None,
+) -> None:
+    """Start a sync progress epoch.
+
+    ``work_id=None`` clears any prior work scope so L1 pollers do not attribute
+    a full-tenant or other-work sync to their Work.
+    """
     report_sync_progress(
         force=True,
         status="building",
         phase="starting",
         reason=reason,
         path=path,
+        work_id=work_id,
         error=None,
         files_done=0,
         files_total=None,
@@ -160,12 +171,15 @@ def mark_sync_started(*, reason: str = "manual", path: str | None = None) -> Non
 
 def mark_sync_finished(result: dict[str, Any] | None = None, *, reason: str = "manual") -> None:
     result = result or {}
+    wid = result.get("work_id")
     report_sync_progress(
         force=True,
         status="ready",
         phase="finished",
         reason=reason,
         error=None,
+        work_id=wid if wid is not None else None,
+        path=result.get("path") or result.get("work_root"),
         files_done=result.get("indexed_files"),
         files_total=result.get("indexed_files"),
         chunks_embedded=result.get("chunks"),
@@ -187,19 +201,27 @@ def mark_sync_finished(result: dict[str, Any] | None = None, *, reason: str = "m
                 "elapsed_s",
                 "embed_batch_size",
                 "status",
+                "work_id",
             )
             if k in result or result.get(k) is not None
         },
     )
 
 
-def mark_sync_error(message: str, *, reason: str = "manual", path: str | None = None) -> None:
+def mark_sync_error(
+    message: str,
+    *,
+    reason: str = "manual",
+    path: str | None = None,
+    work_id: str | None = None,
+) -> None:
     report_sync_progress(
         force=True,
         status="error",
         phase="error",
         reason=reason,
         path=path,
+        work_id=work_id,
         error=message,
         eta_s=None,
     )

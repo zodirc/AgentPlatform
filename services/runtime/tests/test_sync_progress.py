@@ -75,3 +75,32 @@ def test_sources_index_status_includes_progress(tmp_path: Path, monkeypatch) -> 
     assert status["status"] == "building"
     assert status["progress"] is not None
     assert status["progress"]["phase"] == "scan"
+
+
+def test_mark_sync_started_scopes_and_clears_work_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(sp.settings, "data_dir", str(tmp_path))
+    sp.mark_sync_started(reason="api-work", path="/data/w1", work_id="w1")
+    mid = sp.read_sync_progress()
+    assert mid is not None
+    assert mid["work_id"] == "w1"
+    assert mid["path"] == "/data/w1"
+
+    sp.mark_sync_started(reason="startup")
+    cleared = sp.read_sync_progress()
+    assert cleared is not None
+    assert "work_id" not in cleared
+    assert cleared["reason"] == "startup"
+
+
+def test_mark_sync_finished_keeps_work_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(sp.settings, "data_dir", str(tmp_path))
+    sp.mark_sync_started(reason="api-work", work_id="abc")
+    sp.mark_sync_finished(
+        {"indexed_files": 3, "chunks": 9, "elapsed_s": 1.2, "work_id": "abc"},
+        reason="api-work",
+    )
+    done = sp.read_sync_progress()
+    assert done is not None
+    assert done["phase"] == "finished"
+    assert done["work_id"] == "abc"
+    assert done["last_result"]["work_id"] == "abc"

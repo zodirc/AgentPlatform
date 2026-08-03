@@ -364,6 +364,9 @@ class PgvectorSourceRetrievalStore:
                 except Exception:
                     pass
                 for fp in sorted(sources_dir.rglob("*")):
+                    from app.retrieval.index_scheduler import check_sync_cancelled
+
+                    check_sync_cancelled()
                     if not fp.is_file() or not should_index_source(fp):
                         continue
                     rel = str(fp.relative_to(workspace_root.resolve())).replace(
@@ -469,6 +472,9 @@ class PgvectorSourceRetrievalStore:
                     nonlocal chunks_embedded, files_done, added, updated, total_chunks
                     if not buffer_jobs:
                         return
+                    from app.retrieval.index_scheduler import check_sync_cancelled
+
+                    check_sync_cancelled()
                     flat: list[dict[str, Any]] = []
                     for job in buffer_jobs:
                         flat.extend(job["chunks"])

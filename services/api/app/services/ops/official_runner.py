@@ -641,6 +641,26 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
         {"kind": "phase", "phase": "stopping", "message": "正在停止…"},
     )
     await _persist_snapshot(run)
+    # Abort in-flight sources index (L1 materialize/sync) — does not wait for embed finish.
+    try:
+        from app.services.command.runtime_factory import runtime_client_for_new_turn
+
+        client = runtime_client_for_new_turn()
+        cancelled = await client.cancel_sources_index()
+        await _publish(
+            run,
+            {
+                "kind": "log",
+                "message": (
+                    f"[ops] sources sync cancel: "
+                    f"{cancelled.get('status') or cancelled}"
+                ),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        await _publish(
+            run, {"kind": "log", "message": f"[ops] sources sync cancel failed: {exc}"}
+        )
     if run._bench_job_id:
         try:
             from app.services.ops import bench_client
@@ -940,8 +960,17 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             context_arm=run.context_arm,
             coding_checkout_repo=run.coding_checkout_repo,
             coding_harness=run.coding_harness,
+            should_cancel=lambda: run.cancel_requested,
         )
     except Exception as exc:  # noqa: BLE001
+        if run.cancel_requested or "cancelled" in str(exc).lower():
+            run.status = "cancelled"
+            run.phase_hint = "已停止"
+            for case in run.cases:
+                if case.get("status") in {"pending", "running"}:
+                    case["status"] = "skipped"
+                    case["error"] = "cancelled"
+            return
         run.error = str(exc)
         for case in run.cases:
             if case.get("status") in {"pending", "running"}:

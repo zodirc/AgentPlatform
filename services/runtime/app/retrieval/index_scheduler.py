@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
+import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from app.settings import settings
@@ -19,6 +20,61 @@ logger = logging.getLogger(__name__)
 
 _sync_lock = asyncio.Lock()
 _startup_task: asyncio.Task[None] | None = None
+# Cooperative cancel: bump generation so in-flight + queued waiters abort.
+_cancel_gen = 0
+_cancel_lock = threading.Lock()
+_active_cancel_token = threading.local()
+
+
+class SourcesSyncCancelled(Exception):
+    """Raised when sources index sync is cancelled (Ops stop / explicit cancel)."""
+
+
+def bump_sync_cancel() -> int:
+    """Invalidate in-flight and lock-waiters; returns new generation."""
+    global _cancel_gen
+    with _cancel_lock:
+        _cancel_gen += 1
+        gen = _cancel_gen
+    logger.info("sources index sync cancel requested; gen=%s", gen)
+    return gen
+
+
+def sync_cancel_token() -> int:
+    with _cancel_lock:
+        return _cancel_gen
+
+
+def bind_sync_cancel_token(token: int) -> None:
+    _active_cancel_token.token = token
+
+
+def clear_sync_cancel_token() -> None:
+    if hasattr(_active_cancel_token, "token"):
+        delattr(_active_cancel_token, "token")
+
+
+def check_sync_cancelled() -> None:
+    """Call from embed/write loops (thread-safe)."""
+    token = getattr(_active_cancel_token, "token", None)
+    if token is None:
+        return
+    with _cancel_lock:
+        current = _cancel_gen
+    if token != current:
+        raise SourcesSyncCancelled("sources index sync cancelled")
+
+
+def _is_ephemeral_ops_l1_root(root: Path) -> bool:
+    """True for Official L1 per-run trees under ops-l1 (not beir-index cache)."""
+    parts = root.resolve().parts
+    if "ops-l1" not in parts:
+        return False
+    i = parts.index("ops-l1")
+    rest = parts[i + 1 :]
+    if not rest:
+        return False
+    return rest[0] != "beir-index"
 
 
 def _sync_one(
@@ -31,6 +87,7 @@ def _sync_one(
 ) -> dict[str, Any]:
     from app.retrieval.store import get_sources_store
 
+    check_sync_cancelled()
     if not sources_dir.exists():
         return {
             "indexed_files": 0,
@@ -56,6 +113,7 @@ def _sync_one(
             phase="scope",
             visibility=visibility,
             path=str(sources_dir),
+            work_id=work_id,
         )
     except Exception:
         logger.debug("sync progress scope report skipped", exc_info=True)
@@ -86,7 +144,6 @@ def sync_sources_index_blocking() -> dict[str, Any]:
     workspace_root = Path(settings.workspace_root).resolve()
     results: list[dict[str, Any]] = []
 
-    # Standing seed under deploy workspace (shared visibility).
     seed_dir = workspace_root / "sources" / "seed"
     if seed_dir.is_dir():
         results.append(
@@ -98,7 +155,6 @@ def sync_sources_index_blocking() -> dict[str, Any]:
             )
         )
 
-    # Per-work private sources (docs/27 MT5c). Includes claimed /workspace Work.
     work_roots_synced: set[Path] = set()
     try:
         import psycopg
@@ -115,10 +171,18 @@ def sync_sources_index_blocking() -> dict[str, Any]:
                 works = cur.fetchall()
         for work_id, work_root, owner_id in works:
             root = Path(str(work_root)).resolve()
+            if _is_ephemeral_ops_l1_root(root):
+                logger.info(
+                    "sources index sync skip ephemeral ops-l1 work; work_id=%s dir=%s",
+                    work_id,
+                    root,
+                )
+                continue
             src = root / "sources"
             if not src.is_dir():
                 continue
             work_roots_synced.add(root)
+            check_sync_cancelled()
             results.append(
                 _sync_one(
                     src,
@@ -128,11 +192,11 @@ def sync_sources_index_blocking() -> dict[str, Any]:
                     owner_user_id=str(owner_id) if owner_id else None,
                 )
             )
+    except SourcesSyncCancelled:
+        raise
     except Exception as exc:
         logger.warning("works-scoped index sync skipped: %s", exc)
 
-    # Always cover settings.workspace_root when it is not already a Work root
-    # (unit tests, ops per-case trees, empty works table).
     if workspace_root.resolve() not in work_roots_synced:
         sources_root = workspace_root / "sources"
         if sources_root.is_dir():
@@ -146,7 +210,6 @@ def sync_sources_index_blocking() -> dict[str, Any]:
                     )
                 )
             except ValueError as exc:
-                # pgvector private sync requires work_id; json/hash backends do not.
                 logger.warning("workspace_root sources sync skipped: %s", exc)
 
     orphan = _purge_orphan_private()
@@ -199,6 +262,9 @@ async def _finish_sync_locked(
     *,
     reason: str,
     runner: Callable[[], dict[str, Any]],
+    work_id: str | None = None,
+    path: str | None = None,
+    cancel_token: int,
 ) -> dict[str, Any]:
     """Shared single-flight wrapper used by full + work-scoped sync."""
     from app.retrieval.sync_progress import (
@@ -207,28 +273,68 @@ async def _finish_sync_locked(
         mark_sync_started,
     )
 
-    logger.info("sources index sync starting; reason=%s", reason)
-    mark_sync_started(reason=reason)
+    logger.info(
+        "sources index sync starting; reason=%s work_id=%s cancel_token=%s",
+        reason,
+        work_id or "-",
+        cancel_token,
+    )
+    if cancel_token != sync_cancel_token():
+        mark_sync_error(
+            "cancelled while waiting for sync lock",
+            reason=reason,
+            path=path,
+            work_id=work_id,
+        )
+        return {
+            "status": "cancelled",
+            "reason": reason,
+            "error": "cancelled while waiting for sync lock",
+        }
+
+    mark_sync_started(reason=reason, path=path, work_id=work_id)
     try:
-        result = await asyncio.to_thread(runner)
+
+        def _runner_bound() -> dict[str, Any]:
+            bind_sync_cancel_token(cancel_token)
+            try:
+                if cancel_token != sync_cancel_token():
+                    raise SourcesSyncCancelled("sources index sync cancelled")
+                return runner()
+            finally:
+                clear_sync_cancel_token()
+
+        result = await asyncio.to_thread(_runner_bound)
+    except SourcesSyncCancelled as exc:
+        logger.info("sources index sync cancelled; reason=%s", reason)
+        mark_sync_error(str(exc), reason=reason, path=path, work_id=work_id)
+        return {"status": "cancelled", "reason": reason, "error": str(exc)}
     except Exception as exc:
         logger.exception("sources index sync failed; reason=%s", reason)
-        mark_sync_error(str(exc), reason=reason)
+        mark_sync_error(str(exc), reason=reason, path=path, work_id=work_id)
         return {"status": "error", "reason": reason, "error": str(exc)}
+
     payload = dict(result) if isinstance(result, dict) else {"result": result}
     payload.setdefault("status", "ok")
     payload["reason"] = reason
+    if work_id:
+        payload["work_id"] = work_id
+    if path:
+        payload.setdefault("path", path)
     if str(payload.get("status") or "") == "error":
         mark_sync_error(
             str(payload.get("error") or "sources index sync failed"),
             reason=reason,
+            path=path,
+            work_id=work_id,
         )
     else:
         mark_sync_finished(payload, reason=reason)
     logger.info(
-        "sources index sync finished; reason=%s indexed_files=%s chunks=%s "
+        "sources index sync finished; reason=%s work_id=%s indexed_files=%s chunks=%s "
         "added=%s updated=%s skipped=%s elapsed_s=%s embed_batch_size=%s",
         reason,
+        work_id or "-",
         payload.get("indexed_files"),
         payload.get("chunks"),
         payload.get("added"),
@@ -242,10 +348,14 @@ async def _finish_sync_locked(
 
 async def run_sources_index_sync(*, reason: str = "manual") -> dict[str, Any]:
     """Serialize syncs process-wide (single-flight via lock; waiters re-scan)."""
+    token = sync_cancel_token()
     async with _sync_lock:
         return await _finish_sync_locked(
             reason=reason,
             runner=sync_sources_index_blocking,
+            work_id=None,
+            path=None,
+            cancel_token=token,
         )
 
 
@@ -257,6 +367,7 @@ async def run_sources_index_sync_work(
     reason: str = "work",
 ) -> dict[str, Any]:
     """Serialize work-scoped sync (same lock as full sync)."""
+    token = sync_cancel_token()
 
     def _runner() -> dict[str, Any]:
         return sync_sources_index_work_blocking(
@@ -266,7 +377,22 @@ async def run_sources_index_sync_work(
         )
 
     async with _sync_lock:
-        return await _finish_sync_locked(reason=reason, runner=_runner)
+        return await _finish_sync_locked(
+            reason=reason,
+            runner=_runner,
+            work_id=str(work_id),
+            path=str(work_root),
+            cancel_token=token,
+        )
+
+
+async def cancel_sources_index_sync() -> dict[str, Any]:
+    """Abort in-flight sources sync and any waiters queued on the lock."""
+    gen = bump_sync_cancel()
+    from app.retrieval.sync_progress import mark_sync_error
+
+    mark_sync_error("sources index sync cancelled", reason="cancel")
+    return {"accepted": True, "status": "cancelling", "cancel_gen": gen}
 
 
 async def _delayed_startup_sync() -> None:
@@ -294,6 +420,7 @@ async def cancel_startup_sources_sync() -> None:
     _startup_task = None
     if task is None:
         return
+    bump_sync_cancel()
     task.cancel()
     try:
         await task

@@ -6,6 +6,7 @@ Component (L0) benches stay on agent-bench. This module never bypasses AgentEngi
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -27,9 +28,69 @@ from app.services.resource.works import Work, _work_from_row
 logger = logging.getLogger(__name__)
 
 ProgressCb = Callable[[dict[str, Any]], Awaitable[None]]
+CancelCheck = Callable[[], bool]
 
 PROTOCOL_L1 = "official-small-2026-08-m3"
 L1_ROOT = Path(os.environ.get("OPS_L1_WORKSPACE_ROOT", "/data/ops-l1"))
+# Stable BEIR index cache (shared across L1 runs) — avoids N× full ST embeds.
+_BEIR_INDEX_CACHE = L1_ROOT / "beir-index"
+_FP_NAME = ".l1_beir_fp"
+
+
+def _beir_corpus_fingerprint(name: str, corpus: dict[str, str]) -> str:
+    """Stable id for corpus + embed/index identity (not full text hash)."""
+    h = hashlib.sha256()
+    h.update(str(name).encode("utf-8"))
+    h.update(b"|n=")
+    h.update(str(len(corpus)).encode("ascii"))
+    for doc_id in sorted(corpus.keys()):
+        text = corpus.get(doc_id) or ""
+        h.update(b"|")
+        h.update(str(doc_id).encode("utf-8", errors="replace"))
+        h.update(b":")
+        h.update(str(len(text)).encode("ascii"))
+    h.update(b"|idx=")
+    h.update(
+        (
+            os.environ.get("INDEX_VERSION")
+            or os.environ.get("RETRIEVAL_INDEX_VERSION")
+            or ""
+        ).encode("utf-8")
+    )
+    h.update(b"|emb=")
+    h.update(
+        (os.environ.get("EMBEDDING_BACKEND") or "sentence_transformers").encode("utf-8")
+    )
+    return h.hexdigest()[:20]
+
+
+def _progress_for_work(status: dict[str, Any], work: Work) -> bool:
+    """True when shared sync_progress belongs to this Work (or is unscoped legacy)."""
+    prog = status.get("progress") if isinstance(status.get("progress"), dict) else {}
+    if not isinstance(prog, dict):
+        prog = {}
+    wid = str(prog.get("work_id") or "").strip()
+    if wid:
+        return wid == str(work.id)
+    path = str(prog.get("path") or status.get("path") or "")
+    root = str(work.work_root or "").rstrip("/")
+    if path and root and root in path.replace("\\", "/"):
+        return True
+    # Unscoped progress: only treat as ours when not actively building another job.
+    phase = str(prog.get("phase") or "")
+    st = str(status.get("status") or "")
+    if st == "building" or phase in {
+        "starting",
+        "scan",
+        "plan",
+        "embed",
+        "write",
+        "scope",
+        "loading_embedder",
+        "building",
+    }:
+        return False
+    return True
 
 
 def _l1_fingerprint(model: dict[str, Any] | None) -> dict[str, Any]:
@@ -277,26 +338,95 @@ async def _wait_turn_verbose(
     )
 
 
-async def _create_l1_work(work_root: str, *, name: str) -> Work:
-    """Non-default Work under shared /data so runtime can see sources + index."""
-    work_id = uuid4()
+async def _create_l1_work(
+    work_root: str,
+    *,
+    name: str,
+    work_id: UUID | None = None,
+) -> Work:
+    """Non-default Work under shared /data so runtime can see sources + index.
+
+    Idempotent on ``work_root`` (and optional stable ``work_id``): reuse when
+    the path or id already exists (BEIR index cache across L1 runs).
+    """
+    from uuid import uuid5, NAMESPACE_URL
+
     root = Path(work_root)
     root.mkdir(parents=True, exist_ok=True)
     prepare_ops_workspace(root)
+    root_s = str(root)
     pool = await get_pool()
-    row = await pool.fetchrow(
+    existing = await pool.fetchrow(
         """
-        INSERT INTO works (id, owner_user_id, name, work_root, is_default, visibility_seed)
-        VALUES ($1, $2, $3, $4, false, false)
-        RETURNING id, owner_user_id, name, work_root, is_default, visibility_seed
+        SELECT id, owner_user_id, name, work_root, is_default, visibility_seed
+        FROM works
+        WHERE rtrim(work_root, '/') = rtrim($1::text, '/')
+        LIMIT 1
         """,
-        work_id,
-        SYSTEM_USER_ID,
-        name[:120],
-        str(root),
+        root_s,
     )
+    if existing is not None:
+        return _work_from_row(existing)
+
+    wid = work_id or uuid5(NAMESPACE_URL, f"agent-l1-work:{root_s}")
+    by_id = await pool.fetchrow(
+        """
+        SELECT id, owner_user_id, name, work_root, is_default, visibility_seed
+        FROM works
+        WHERE id = $1
+        """,
+        wid,
+    )
+    if by_id is not None:
+        return _work_from_row(by_id)
+
+    try:
+        row = await pool.fetchrow(
+            """
+            INSERT INTO works (id, owner_user_id, name, work_root, is_default, visibility_seed)
+            VALUES ($1, $2, $3, $4, false, false)
+            RETURNING id, owner_user_id, name, work_root, is_default, visibility_seed
+            """,
+            wid,
+            SYSTEM_USER_ID,
+            name[:120],
+            root_s,
+        )
+    except Exception as exc:
+        # Race: another L1 run inserted the same id or root.
+        again = await pool.fetchrow(
+            """
+            SELECT id, owner_user_id, name, work_root, is_default, visibility_seed
+            FROM works
+            WHERE id = $1 OR rtrim(work_root, '/') = rtrim($2::text, '/')
+            LIMIT 1
+            """,
+            wid,
+            root_s,
+        )
+        if again is not None:
+            return _work_from_row(again)
+        raise
     assert row is not None
     return _work_from_row(row)
+
+
+async def _ensure_beir_index_work(
+    name: str,
+    corpus: dict[str, str],
+) -> tuple[Work, str, Path]:
+    """Stable Work + sources path for a BEIR dataset (shared across L1 runs)."""
+    from uuid import uuid5, NAMESPACE_URL
+
+    fp = _beir_corpus_fingerprint(name, corpus)
+    work_root = _BEIR_INDEX_CACHE / name
+    work = await _create_l1_work(
+        str(work_root),
+        name=f"l1-beir-index-{name}",
+        work_id=uuid5(NAMESPACE_URL, f"agent-l1-beir-index:{name}"),
+    )
+    sources_dest = Path(work.work_root) / "sources" / "beir" / name
+    return work, fp, sources_dest
 
 
 async def _start_turn(
@@ -363,6 +493,9 @@ def _format_sync_progress_line(label: str, status: dict[str, Any]) -> str:
         prog = {}
     phase = str(prog.get("phase") or status.get("status") or "building")
     parts = [f"phase={phase}"]
+    wid = prog.get("work_id")
+    if wid:
+        parts.append(f"work={str(wid)[:8]}")
     fd, ft = prog.get("files_done"), prog.get("files_total")
     if fd is not None or ft is not None:
         parts.append(f"files={fd if fd is not None else '?'}/{ft if ft is not None else '?'}")
@@ -393,6 +526,7 @@ _BUILDING_PHASES = frozenset(
         "scan",
         "plan",
         "embed",
+        "write",
         "scope",
         "loading_embedder",
         "building",
@@ -407,19 +541,42 @@ async def _sync_sources(
     label: str = "",
     expect_files: int = 0,
     wait_s: float = 7200.0,
+    should_cancel: CancelCheck | None = None,
 ) -> dict[str, Any]:
     """Queue work-scoped index (non-blocking HTTP) and poll until ready.
 
     FiQA-scale corpora (~57k files) need ~15–20+ minutes of ST embeds — longer
     than a single HTTP hold. ``wait=false`` + status polling avoids empty timeouts.
+
+    Progress is scoped by ``work_id`` so concurrent L1 runs do not steal each
+    other's shared ``sync_progress.json`` lines.
     """
     client = runtime_client_for_new_turn()
     tag = label or "sources"
+
+    async def _abort_if_cancelled() -> dict[str, Any] | None:
+        if should_cancel is None or not should_cancel():
+            return None
+        try:
+            await client.cancel_sources_index()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("L1 sync cancel request failed: %s", exc)
+        await _emit(
+            on_progress,
+            "log",
+            message=f"[L1] sync {tag}: phase=cancelled",
+        )
+        return {"status": "cancelled", "error": "cancelled", "work_id": str(work.id)}
+
+    early = await _abort_if_cancelled()
+    if early is not None:
+        return early
+
     await _emit(
         on_progress,
         "log",
         message=(
-            f"[L1] sync {tag}: phase=starting"
+            f"[L1] sync {tag}: phase=starting work={str(work.id)[:8]}"
             + (f" expect_files={expect_files}" if expect_files else "")
         ),
     )
@@ -453,6 +610,10 @@ async def _sync_sources(
     saw_building = False
     ready_ticks = 0
     while True:
+        early = await _abort_if_cancelled()
+        if early is not None:
+            return early
+
         elapsed = time.monotonic() - t0
         if elapsed > wait_s:
             err = (
@@ -476,9 +637,24 @@ async def _sync_sources(
         if not isinstance(st, dict):
             st = {}
         prog = st.get("progress") if isinstance(st.get("progress"), dict) else {}
+        if not isinstance(prog, dict):
+            prog = {}
         status = str(st.get("status") or "")
         phase = str(prog.get("phase") or "")
         err_msg = str(st.get("error") or prog.get("error") or "").strip()
+        ours = _progress_for_work(st, work)
+
+        if not ours:
+            foreign_wid = str(prog.get("work_id") or "")[:8] or "?"
+            msg = (
+                f"[L1] sync {tag}: waiting "
+                f"(lock busy work={foreign_wid} phase={phase or status or '?'})"
+            )
+            if msg != last_msg:
+                await _emit(on_progress, "log", message=msg)
+                last_msg = msg
+            await asyncio.sleep(2.0)
+            continue
 
         msg = _format_sync_progress_line(tag, st)
         if msg != last_msg:
@@ -486,8 +662,18 @@ async def _sync_sources(
             last_msg = msg
 
         if status == "error" or phase == "error":
+            if "cancel" in err_msg.lower():
+                return {
+                    "status": "cancelled",
+                    "error": err_msg or "cancelled",
+                    "work_id": str(work.id),
+                }
             err = err_msg or "runtime sync reported error (empty message)"
-            return {"status": "error", "error": err, **{k: st.get(k) for k in ("indexed_files", "chunks")}}
+            return {
+                "status": "error",
+                "error": err,
+                **{k: st.get(k) for k in ("indexed_files", "chunks")},
+            }
 
         # Terminal progress phase must win over a lagging job.status=building.
         finished = phase in {"finished", "ready"} or (
@@ -520,6 +706,7 @@ async def _sync_sources(
                     "chunks": st.get("chunks") or prog.get("chunks_embedded"),
                     "elapsed_s": round(elapsed, 1),
                     "reason": prog.get("reason") or "api-work",
+                    "work_id": str(work.id),
                 }
         elif (
             not saw_building
@@ -536,6 +723,7 @@ async def _sync_sources(
                     "chunks": st.get("chunks"),
                     "elapsed_s": round(elapsed, 1),
                     "note": "ready-without-building-observed",
+                    "work_id": str(work.id),
                 }
 
         await asyncio.sleep(2.0)
@@ -547,12 +735,38 @@ async def _materialize_corpus(
     *,
     on_progress: ProgressCb | None = None,
     label: str = "",
-) -> None:
-    """Write corpus files in batches; emit ``[L1] materialize name: done/total``."""
+    fingerprint: str = "",
+) -> bool:
+    """Write corpus files in batches; emit ``[L1] materialize name: done/total``.
+
+    Returns True when files were (re)written; False when fingerprint cache hit.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     items = list(corpus.items())
     total = len(items)
     tag = label or "corpus"
+    # dest = work_root/sources/beir/<name> → marker at work_root/.l1_beir_fp
+    if fingerprint:
+        work_root = dest.parent.parent.parent
+        fp_path = work_root / _FP_NAME
+        marker = f"{tag}:{fingerprint}:{total}"
+        if fp_path.is_file():
+            try:
+                prev = fp_path.read_text(encoding="utf-8").strip()
+            except OSError:
+                prev = ""
+            on_disk = sum(1 for _ in dest.glob("*.txt")) if dest.is_dir() else 0
+            if prev == marker and on_disk >= total:
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=(
+                        f"[L1] materialize {tag}: cache hit "
+                        f"files={on_disk} fp={fingerprint[:8]}"
+                    ),
+                )
+                return False
+
     await _emit(on_progress, "log", message=f"[L1] materialize {tag}: 0/{total}")
 
     def _write_batch(batch: list[tuple[str, str]]) -> None:
@@ -570,6 +784,16 @@ async def _materialize_corpus(
             "log",
             message=f"[L1] materialize {tag}: {done}/{total}",
         )
+
+    if fingerprint:
+        work_root = dest.parent.parent.parent
+        fp_path = work_root / _FP_NAME
+        marker = f"{tag}:{fingerprint}:{total}"
+        try:
+            fp_path.write_text(marker, encoding="utf-8")
+        except OSError:
+            logger.warning("failed to write L1 beir fingerprint at %s", fp_path)
+    return True
 
 
 def _load_beir_maps(
@@ -593,6 +817,7 @@ async def run_retrieval_l1(
     scenario_id: str = "writing",
     max_parallel: int | None = None,
     arm: str = "free",
+    should_cancel: CancelCheck | None = None,
 ) -> dict[str, Any]:
     """BEIR small via real Turns + search_sources events.
 
@@ -645,7 +870,6 @@ async def run_retrieval_l1(
     )
     k_values = list(retrieval.get("k_values") or [1, 10, 100])
     limit_k = max(k_values)
-    run_root = L1_ROOT / session.run_id / "retrieval"
     all_runs: dict[str, dict[str, dict[str, float]]] = {}
     case_metrics: dict[str, dict[str, float]] = {}
 
@@ -673,35 +897,37 @@ async def run_retrieval_l1(
             q_items = list(queries.items())
             if limit_queries > 0:
                 q_items = q_items[:limit_queries]
-            work = await _create_l1_work(
-                str(run_root / name),
-                name=f"l1-beir-{name}-{session.run_id[:8]}",
-            )
+            work, corpus_fp, sources_dest = await _ensure_beir_index_work(name, corpus)
             await _emit(
                 on_progress,
                 "log",
                 message=(
                     f"[L1] dataset {name}: corpus={len(corpus)} "
-                    f"qrels_queries={len(q_items)}"
+                    f"qrels_queries={len(q_items)} "
+                    f"index_work={str(work.id)[:8]} fp={corpus_fp[:8]}"
                 ),
             )
             await _materialize_corpus(
                 corpus,
-                Path(work.work_root) / "sources" / "beir" / name,
+                sources_dest,
                 on_progress=on_progress,
                 label=name,
+                fingerprint=corpus_fp,
             )
             sync_res = await _sync_sources(
                 work,
                 on_progress=on_progress,
                 label=name,
                 expect_files=len(corpus),
+                should_cancel=should_cancel,
             )
             await _emit(
                 on_progress,
                 "log",
                 message=f"[L1] sync {name}: done {json.dumps(sync_res, ensure_ascii=False)[:240]}",
             )
+            if str(sync_res.get("status") or "") == "cancelled":
+                raise RuntimeError("L1 cancelled during sources sync")
             if str(sync_res.get("status") or "") == "error" or sync_res.get("error"):
                 raise RuntimeError(
                     f"L1 sync_sources_index failed for {name}: "
@@ -1436,6 +1662,7 @@ async def run_l1_targets(
     context_arm: str = "free",
     coding_checkout_repo: bool = True,
     coding_harness: bool = False,
+    should_cancel: CancelCheck | None = None,
 ) -> dict[str, Any]:
     """Run selected L1 suites; returns {target: manifest}."""
     out: dict[str, Any] = {}
@@ -1443,6 +1670,8 @@ async def run_l1_targets(
     if not live:
         live = ["retrieval"]
     for idx, t in enumerate(live):
+        if should_cancel is not None and should_cancel():
+            raise RuntimeError("L1 cancelled")
         if t == "retrieval":
             out[t] = await run_retrieval_l1(
                 limit_queries=retrieval_query_limit,
@@ -1450,6 +1679,7 @@ async def run_l1_targets(
                 on_progress=on_progress,
                 max_parallel=max_parallel,
                 arm=retrieval_arm,
+                should_cancel=should_cancel,
             )
         elif t == "context":
             out[t] = await run_context_l1(

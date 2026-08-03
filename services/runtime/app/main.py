@@ -213,6 +213,16 @@ async def sync_sources_index_command(
     return {"accepted": True, **result}
 
 
+@router.post("/cancel-sources-index", status_code=status.HTTP_200_OK)
+async def cancel_sources_index_command(
+    _: None = Depends(verify_internal_token),
+):
+    """Abort in-flight / queued sources index sync (Ops stop / L1 cancel)."""
+    from app.retrieval.index_scheduler import cancel_sources_index_sync
+
+    return await cancel_sources_index_sync()
+
+
 @router.post("/verify-pass", status_code=status.HTTP_200_OK)
 async def verify_pass_command(
     session_id: str | None = None,

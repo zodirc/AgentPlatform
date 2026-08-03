@@ -54,6 +54,9 @@ def assign_deferred_vectors(
     assigned = 0
     t0 = time.monotonic()
     for start in range(0, len(pending), batch):
+        from app.retrieval.index_scheduler import check_sync_cancelled
+
+        check_sync_cancelled()
         slice_ = pending[start : start + batch]
         texts = [inp for _, inp in slice_]
         vectors = embed_many(embedder, texts)
