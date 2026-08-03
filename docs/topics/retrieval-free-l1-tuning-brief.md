@@ -133,6 +133,119 @@ no_search → query_drift → search_cap → weak_hits → ok
 | `weak_hits` | 行为过关，但该 case nDCG 低于套件中位 | Index / embed / fusion / 排序 |
 | `ok` | 行为过关（**不论** nDCG 高低） | 行为合格 |
 
+### 1.4 RAG 因果栈与可调影响面（高级模型必读）
+
+温度计与用户写作 RAG 共享下列栈。改任何一层前：先标「加热的是哪一层」，再过原则一/二，再用 free N≥2 看间接分数。
+
+#### 因果栈（自由 L1 检索）
+
+```text
+BEIR 语料物化 → sources/beir/<dataset>/<doc_id>.txt（title+text 拼接）
+  → Turn 外：切块 / embed（生产 MiniLM-L6-v2@384）/ INDEX_VERSION / pgvector
+  → StartTurn：scenario 默认 writing（见下「场景陷阱」）+ 自由题面
+  → 模型调用 search_sources(query≈?, limit 常默认 10)
+  → hybrid：向量 ∥ BM25 → RRF →（可选）two-level doc 加成 → lexical rerank
+  → 工具侧：excerpt 覆盖词提升序 → 格式化 excerpt(200字) → tool_result
+  → 同时写 retrieval.completed.ranked（path+score，最多约 100）← IR 计分只用这个
+  → ContextEngine 组装时普通 tool_result 常被 4k 预算截断 ← 只影响下一步行为，不影响已发出的 ranked
+  → 多搜合并：first-seen union → nDCG@k / R@k
+```
+
+#### 场景陷阱（同构缝隙）
+
+| 表面 | 默认 scenario | 是否有 `search_sources` | 含义 |
+|------|---------------|-------------------------|------|
+| **Free L1 检索温度计** | **`writing`**（`run_retrieval_l1` 默认） | 有 | 测的是**写作 RAG 工具面 + writing system 文案** |
+| 用户写作 Work | `writing` | 有 | 与温度计最同构 |
+| 用户 intel Work | `intel` | 有（常带 `path_prefix`） | 另有前缀作用域 |
+| 用户 agent Work | `agent` | **无**（仅有 `search_codebase`≈grep） | **不是**本温度计；`agent/system.md` 里写 search_sources 纪律 ≠ 工具已注册 |
+
+推演时勿把「优化 agent 模式代码检索」与「抬 BEIR free L1」混为一谈，除非先改协议/场景。
+
+#### 影响面表（按层 · 当前默认 · 动它会怎样）
+
+**A. Index plane（Turn 外 · 质量主战场 · 重活必须离线）**
+
+| 触点 | 当前默认（生产取向） | 影响什么 | 改动风险 |
+|------|----------------------|----------|----------|
+| 切块大小/重叠 | 4000 / 400 字符 | 命中粒度、边界漏检 | 须 bump `INDEX_VERSION` + 全量重建（R4） |
+| 宽表拆出 | 行/字阈值触发 | 表体可能不进 embed，靠 `read_file` | 排序与可读证据分叉 |
+| embed 文本 | path 线索 + 可选 tags + body | 路径弱的扁平 BEIR 比树状 seed 吃亏 | 重建索引 |
+| Embed 模型/维 | compose：`all-MiniLM-L6-v2` @384（代码默认 hash 仅开发） | 向量车道天花板；升级票未开 | R4；维数变更会弄坏 ANN |
+| `INDEX_VERSION` | 代码 **8** | 遗忘 bump → 新旧向量混用 | 逻辑正确性 |
+| 后端 | pgvector；schema 可隔离 | ANN + SQL BM25 | 切 json 只适合冒烟 |
+| 同步/watch | 启动延迟/轮询/防抖；**查询路径禁止 sync** | 索引滞后 → 空召回/keyword-fallback | 热路径 sync = 违 R4/A9 |
+| L1 物化形状 | 扁平 `sources/beir/<ds>/<id>.txt`，非 seed 树 | path/tag 增益难迁移到产品树状语料 | 温度计≠产品语料分布 |
+| `visibility_seed` | L1 常关 seed | 避免 seed 污染 BEIR | 误开则分数不可比 |
+
+**B. 查询融合与排序（热路径 · 只许轻量）**
+
+| 触点 | 当前默认 | 影响什么 | 改动风险 |
+|------|----------|----------|----------|
+| `retrieval_mode` | hybrid | 单车道会改召回族 | 逻辑 |
+| RRF `k` | 60 | 融合陡度；C-3 冒烟八点打平 | 20q 上难见 Δ |
+| profile | **default** 1:1 + doc_boost 0.35（`vector_heavy` 1.6/0.4/0.45 已备未切） | 车道嗓门 | 无 free 证据勿切默认 |
+| two-level | 开；超时 0.3s；doc_limit 8 | 同 doc 块加成 | 超时↑吃 R3 |
+| lexical rerank | **开**；经典 overlap/title/phrase 加分（soft 缩放已回滚） | 可搅动小 RRF 分 | 轻量 R3；须 free N≥2 |
+| cross-encoder | **关**；池≤20；超时 50ms | 文档禁止默认上热路径 | 打开≈打 R3 |
+| over-fetch | 约 `limit*2~4` 再截断 | 截断前池深 | CPU |
+| excerpt 覆盖提升序 | `_prefer_excerpt_covering_hits` | **会改写返回序 → 进 IR ranked** | 逻辑；可与纯 RRF 对抗 |
+| ANN 无覆盖词 → keyword-fallback | 有 | 救弱向量；排序族切换 | 行为/IR |
+
+**C. 工具契约与模型行为（常被低估 · 直接进 free 分）**
+
+| 触点 | 当前默认 | 影响什么 | 改动风险 |
+|------|----------|----------|----------|
+| `search_sources` limit | schema+实现默认 **10**（曾试 50，随第五刀回滚） | 深度；FiQA 常见 R@10≈R@100 | 行为+IR；单独开刀、N≥2 |
+| excerpt 长度 | **200** 字符 | 模型可见证据窗；**不进 IR 公式** | 行为（再搜 vs 读） |
+| soft 搜次文案 | ≤2；有 hit 停搜改读 | drift/cap 桶 | 纯文案，R 友好 |
+| hard 闸 | `search_sources_max_per_turn=3` | 与 soft≤2 不一致；cap 桶在 ≥3 且换词 | 逻辑 |
+| low_score hint | 0.15 | 弱命中提示改读 | 行为 |
+| writing `system.md` | 近乎原文首搜、库地图、path_prefix 习惯 | **L1 正在用**；扁平 BEIR 上易诱发 list_dir/逛库 | 行为；勿为刷分写死强制搜 |
+| late-stage 可丢工具 | 含 `search_sources` | 末段可能 no_search | 行为 |
+| 自由题面 | 无工具剧本 | 温度计合法性 | 写回 forced 即毁主臂 |
+
+**D. 计分合并 vs 模型上下文（两套窗）**
+
+| 触点 | 当前默认 | 影响什么 | 改动风险 |
+|------|----------|----------|----------|
+| IR 用 `ranked` | 最多约 100 条 path+score | nDCG/R/MAP | 改 cap = 协议级 |
+| 多搜合并 | **first-seen union**（先出现的 doc 保留位次） | 第二次搜不能重排已见 doc；深度≈各次 limit 并集 | 改合并=协议 bump |
+| 未搜 | 空榜 → 0 分 | no_search 诚实 | 勿改成跳过不计 |
+| tool_result 预算 | 普通结果 **4k**；最近一次 read **32k** | 搜结果 JSON 易被截 → 模型丢后排 hit | **只改行为，不改已发 ranked** |
+| assemble 压力链 | fold→budget→microcompact→collapse→snip | 多步 Turn 里早先 search JSON 更易丢 | 行为 |
+
+**E. 题集结构坑（归因时别误判杠杆）**
+
+| 现象 | 含义 | 错误对策 |
+|------|------|----------|
+| NFCorpus R@10 极低 | 每查询相关文极多；R@10 结构上难大 | 只盯 R@10 猛调 embed |
+| FiQA R@10≈R@100 | 合并 hit 深度不够（limit/停搜/合并） | 只怪 MiniLM |
+| 20q ±1.5–4pp | 冒烟噪声 | 单次定生死 / 单次入库 |
+| C-3 fusion 打平 | 本档拧 rrf/profile 无 macro Δ | 无证据切 `vector_heavy` |
+| writing 文案 × 扁平 BEIR | 行为像「逛目录」 | 当成纯 Index 坏了 |
+
+#### 高杠杆优先序（在原则门禁内）
+
+1. **行为/契约可观测缺口**：drift、cap、搜后 list_dir、limit 常落 10（深度）——改动能在分桶直接看见。  
+2. **深度与合并**：default limit、搜次数、first-seen union ——对 FiQA 类 R@10=R@100。  
+3. **Index/embed**：MiniLM 天花板、切块、INDEX bump ——R4 离线；要用 weak_hits 案例说话。  
+4. **轻量排序**：lexical / excerpt-promote / two-level ——须 free N≥2；勿默认开 CE。  
+5. **Context 4k 截 search JSON** ——优先改善「搜完不会用 hit」，IR 数字可能不动。  
+6. **场景同构**：若产品目标含 agent 模式 RAG，须先注册工具或改 L1 scenario，否则优化 agent/system.md 对温度计无效。
+
+#### 提案时建议填写的最小卡片（给后续模型）
+
+```text
+加热层: Index | 融合排序 | 工具契约 | 合并/深度 | Context 行为 | 场景同构
+改动点: <文件/Settings 键>
+预期用户路径变化: <一句话>
+R1–R5 / while / 强制搜: 通过 / 否决原因
+分桶预期: drift/cap/weak_hits/ok 怎样变
+free 验收: N≥2 · 对照 run · 主看 nDCG@10（兼看分库）
+非目标: 不靠 forced 涨分叙事
+```
+
 ---
 
 ## 2. 端到端运行流程（完整细节）
@@ -345,10 +458,22 @@ soft#1 失败轨迹特征（7 fail）：多数已搜 1 次后大量 `list_dir`/`
 - 回滚后确认跑仍见 **search_cap×3、query_drift×3**，未回到第 4 轮 92% ok / 2% cap。
 - 搜后 `list_dir`/`grep` 逛目录问题在 soft#1 fail 中仍在；需单独观察，勿与 IR 刀绑死。
 
-### P7 — Embed / INDEX 升级未做
+### P8 — 温度计场景 = writing，不是 agent
 
-- 生产仍 MiniLM-L6-v2 @384；升级需 Turn 外重建 + `INDEX_VERSION` bump + free 配对；**未开工**。
-- Fusion 默认保持；无证据切 `vector_heavy`。
+- L1 retrieval 默认 `scenario_id=writing`；`agent` 配置**未注册** `search_sources`。
+- 优化 `agent/system.md` 或代码检索 **不会**自动抬 BEIR free L1。
+- 若产品要「agent 模式也能 hybrid RAG」，须先补工具注册/协议，再谈同构温度计。
+
+### P9 — 计分窗 ≠ 模型窗
+
+- IR：`retrieval.completed.ranked` + first-seen union。
+- 模型：200 字 excerpt + 组装期 4k 截断。
+- 只改 Context/excerpt 可能「体感更好」而 nDCG 不动——仍可算产品正向，但**不要**写成 IR 入库理由。
+
+### P10 — 查询路径上的「静默重排」
+
+- `_prefer_excerpt_covering_hits` 等会在工具返回前改序，从而改 IR。
+- 调 fusion/rerank 时若忽略这层，归因会漂。
 
 ---
 
@@ -375,11 +500,12 @@ Git 与容器（2026-08-03 确认复测时）一致：
 通过后再在 **只认 free** 下回答：
 
 1. **基线重钉**：以回滚后 `689cfe71`（≈0.409）为冒烟对照，是否再跑 1–2 次取均值当「当前平台」？
-2. **检索工程改哪一层**：Index / embed / 合并深度 / 契约行为——如何在 free 轨迹上可观测（如 `weak_hits` hit 序 vs qrels）？**禁止**排序假设与 limit/行为绑同一 commit；重要刀 **N≥2**。
-3. **NFCorpus / FiQA**：分治还是统一杠杆？深度（limit/合并）vs 相关性（embed）怎么用 free 证据拆开？
-4. **行为回潮**：cap/drift 再出现，单独开契约刀还是当噪声？（契约刀也不得伤速率）
-5. **embed 升级票**：Turn 外重建、回滚条件、R3/R4 写死（查询路径无同步重嵌）。
-6. **入库门禁**：何种 free 跑量 + 重复次数才允许碰 SCORECARD？记住：**入库的是「检索变好的间接证明」**，不是分数本身。
+2. **检索工程改哪一层**（见 §1.4）：Index / 融合排序 / 契约行为 / 合并深度 / Context 行为 / 场景同构——如何在 free 轨迹上可观测？**禁止**多杠杆绑同一 commit；重要刀 **N≥2**。
+3. **NFCorpus / FiQA**：分治还是统一？深度（limit/合并）vs 相关性（embed）怎么用 free 证据拆开？
+4. **行为回潮**：cap/drift、搜后 list_dir——契约刀还是噪声？（不得伤速率）
+5. **writing 温度计 vs agent 产品**：是否接受「只优化 writing RAG」？若要 agent hybrid，先补工具面再改温度计。
+6. **embed 升级票**：Turn 外重建、回滚条件、R3/R4 写死。
+7. **入库门禁**：何种 free 跑量 + 重复次数？入库叙事 = 检索工程变好的间接证明。
 
 禁止项提醒：
 
@@ -389,6 +515,7 @@ Git 与容器（2026-08-03 确认复测时）一致：
 - 不要在 20q **单次**噪声上 `update-baseline`。
 - 不要假设「回滚后 IR 应回到 0.434」。
 - 不要用同步 CE / 启动时重嵌 / 改 while / 强制每轮搜 换分数。
+- 不要只改 `agent/system.md` 却宣称 BEIR L1 会动。
 
 ---
 
