@@ -47,6 +47,7 @@ Agent Platform：**一个 Runtime，多个 Scenario**。验证：`make gate` · 
 | Proof / UX | [proof-gate-and-ux-signals](topics/proof-gate-and-ux-signals.md) |
 | Ops | [ops-eval-console](topics/ops-eval-console.md) |
 | Official Bench 调优 | [official-bench-agent-tuning](topics/official-bench-agent-tuning.md)（主 agent 路径 × 官方题集） |
+| Free-L1 检索调优简报 | [retrieval-free-l1-tuning-brief](topics/retrieval-free-l1-tuning-brief.md)（自含：运行流程 · 历次对照 · 第五刀回滚 · 供续作） |
 | 沙箱 | [sandbox](topics/sandbox.md) |
 | 读降本 | [read-cache](topics/read-cache.md) |
 | collab | [collab-multi-agent](topics/collab-multi-agent.md) |

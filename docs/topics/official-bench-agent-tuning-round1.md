@@ -1,11 +1,12 @@
 # Official Bench · Round 1 — 归因 + 执行方案（Phase B → C 施工蓝图）
 
-> **状态**：M1 立尺已接线 · **C-1/C-2 产品落地** · **C-4 离线面已落** · **C-3 冒烟网格已跑**（保持 `default`）· **free L1 分桶冒烟**：`query_drift` 主导 → C-2 忠实度已补强 · stub golden agent.*+shared.04 绿  
-> **下一硬门**：复测 free L1 冒烟看 `query_drift`↓；另机 **M2** m3 全量锚 + A-6 分桶 → 官方 Δ / `update-baseline`  
+> **状态**：M1 立尺已接线 · **C-1/C-2 产品落地** · **C-4 离线面已落** · **C-3 冒烟网格已跑**（保持 `default`）· free 行为桶已干净（drift/cap）· **第五刀 soft-rerank+limit50 已回滚**（free nDCG@10 0.434→0.395）  
+> **下一硬门**：回滚后同条件 free 20q 确认回到 ~0.43；另机 **M2** m3 全量锚；官方 Δ / `update-baseline` 仍禁止用冒烟叙事  
+> **完整自含简报（流程 + 历次对照 + 问题，供高级模型续作）**：`docs/topics/retrieval-free-l1-tuning-brief.md`  
 > **输入**：`eval/official/baseline/official-small-2026-08-m2.json` · `m1.json` · `eval/reports/official/c3_grid_latest.json` · `eval/reports/official/retrieval_bucket_latest.json`  
 > **纲领**：[official-bench-agent-tuning](official-bench-agent-tuning.md)（本文是其 §9「Phase B 归因 + 本轮工程调优方案」交付物，并细化为可施工计划）  
 > **流程图（含数字释义）**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) — 分桶怎么读、为何 drift↓/ok↑/cap↓ 算行为正向、C-3「8 点 macro 打平」、search_cap 复测后 IR 平台期  
-> **纪律**：评测面已 bump → **m3**；**宣称由 official 驱动**的合入仍须 M2 分桶 + L2 验证（纲领 §0.2）；纯产品痛点票可先行，**不得**用 m2/冒烟分作涨分叙事
+> **纪律**：评测面已 bump → **m3**；**验收温度计 = free L1 only**（不用 forced 为 free 掉分开脱）；**宣称由 official 驱动**的合入仍须 M2 分桶 + L2 验证（纲领 §0.2）；纯产品痛点票可先行，**不得**用 m2/冒烟分作涨分叙事
 本方案受三条原则约束，全篇按此裁剪：
 
 | # | 原则 | 在本方案中的落点 |
@@ -231,7 +232,10 @@
 > **二次补强（2026-08-03）**：分桶对照原句显示主因是**首搜被压成 keyword bag**（相对 claim 全文 Levenshtein >0.35），非乱搜无关题。已改 `search_sources` 契约 + agent/writing：`query` **近乎原文**；禁搜前反复 `list_dir`。热部署 runtime。  
 > **三次复测（Ops · `8a6b5814` · debug.log）**：`query_drift` **5%**（3/60，←67%）· `ok` **77%**（46/60）· `search_cap` **18%**（11/60）· `no_search` 0 · nDCG@10 **0.427**（↑自 0.418；仍 < 改前 0.49）· R@10 **0.454** / R@100 **0.565**（明显回升）。报告：`retrieval_bucket_after_verbatim.json`。**原文首搜成立。**  
 > **四次补强（search_cap）**：达 cap 轨迹多为「首搜已有 hit 仍同义换词 3–5 次」。契约改为默认 ≤2 搜；首搜有 on-topic path 则停搜改 `read_file`。已热部署 runtime。  
-> **四次复测（Ops · `0526901a` · debug.log）**：宏指标几乎持平（nDCG@10 **0.434**，←0.427）；**行为** `search_cap` **18%→2%**（1/60）· `ok` **77%→92%**（55/60）· drift 仍低 · `no_search` 2 · R@100 略降。报告：`retrieval_bucket_after_search_cap.json`。**搜次文案生效；IR 未明显跟涨 → 不入库。下一刀不宜再拧搜次。**
+> **四次复测（Ops · `0526901a` · debug.log）**：宏指标几乎持平（nDCG@10 **0.434**，←0.427）；**行为** `search_cap` **18%→2%**（1/60）· `ok` **77%→92%**（55/60）· drift 仍低 · `no_search` 2 · R@100 略降。报告：`retrieval_bucket_after_search_cap.json`。**搜次文案生效；IR 未明显跟涨 → 不入库。下一刀不宜再拧搜次。**  
+> **五次 Index/排序刀（`07b4e3e` + 覆盖测 `f8f583b`）**：假设长 claim 的 lexical overlap 淹没 RRF；改 `rerank.py`（bonus 按 `|score|` 缩放）+ `search_sources` default limit **10→50**。意图抬排序并间接抬 free nDCG。  
+> **五次复测（Ops · `a6de7860` · free · 20q · `TEST.log`）**：nDCG@10 **0.395**（←0.434，**−0.039**）· R@10 **0.437** · R@100 **0.504**（↓）· 分库 NFCorpus/FiQA 仍拖后腿。团队确认 **只认自由搜、不跑 forced 洗白** → **判定失败**。  
+> **回滚（2026-08-03）**：`cf87911` / `4189325` 还原上述两提交；**不入库**。完整对照与运行流程见 `docs/topics/retrieval-free-l1-tuning-brief.md`。
 
 | 项 | 内容 |
 |----|------|

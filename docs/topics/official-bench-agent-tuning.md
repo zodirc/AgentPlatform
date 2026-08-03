@@ -3,6 +3,7 @@
 > **状态**：Phase A 立尺已接线（**`official-small-2026-08-m3`**）· C-1/C-2 已作**产品票**落地（非 official 驱动）· 待 m3 诚实锚 + 分桶后再宣称 Phase C official Δ  
 > **协议戳记（L1）**：`official-small-2026-08-m3`（L0 对照仍可跑 m1 旁路；m2 为强制臂过渡基线）  
 > **本轮施工**： [official-bench-agent-tuning-round1](official-bench-agent-tuning-round1.md)  
+> **Free-L1 自含简报（2026-08-03 · 第五刀已回滚）**：[retrieval-free-l1-tuning-brief](retrieval-free-l1-tuning-brief.md)  
 > **关联**：[ops-eval-console](ops-eval-console.md) · [eval/official/README](../../eval/official/README.md) · [rag-and-sources](rag-and-sources.md) · [05](../core/05-agent-runtime.md) · [06](../core/06-tools-and-context.md) · [13 R1–R5](../core/13-rate-redlines.md) · [baseline](../../eval/official/baseline/README.md)
 
 本文定义两件事，且**因果不可反**：
