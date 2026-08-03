@@ -38,6 +38,18 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_pull.add_argument("--force", action="store_true")
 
+    p_c3 = sub.add_parser(
+        "c3-grid",
+        help="C-3 Index-plane fusion grid (BEIR L0 + prod-bench)",
+    )
+    p_c3.add_argument("--query-limit", type=int, default=20, help="0 = full qrels")
+    p_c3.add_argument("--skip-prod-bench", action="store_true")
+    p_c3.add_argument(
+        "--datasets",
+        default="",
+        help="Comma list; smoke default skips fiqa",
+    )
+
     p_ret = sub.add_parser("retrieval", help="Run BEIR small (BM25 + nDCG/Recall)")
     p_ret.add_argument("--force-pull", action="store_true")
     p_ret.add_argument(
@@ -249,6 +261,17 @@ def main(argv: list[str] | None = None) -> int:
             print(pull_longbench(force=args.force))
         else:
             print(pull_swebench(force=args.force))
+        return 0
+
+    if args.cmd == "c3-grid":
+        from .c3_grid import run_c3_grid
+
+        ds = [x.strip() for x in str(getattr(args, "datasets", "") or "").split(",") if x.strip()]
+        run_c3_grid(
+            query_limit=int(args.query_limit),
+            skip_prod_bench=bool(args.skip_prod_bench),
+            datasets=ds or None,
+        )
         return 0
 
     if args.cmd == "retrieval":

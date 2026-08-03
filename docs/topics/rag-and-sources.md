@@ -375,6 +375,7 @@ owner / tenant / work
 ## 9. 下一刀：检索质量优化（RQ1 · 2026-07-22）
 
 > **状态**：**RQ1a–e ✅**（2026-07-22）。大库可将 `RETRIEVAL_PROFILE=vector_heavy`；效果仍以 prod-bench 为准。  
+> **C-3 冒烟标定（2026-08-03）**：`make c3-retrieval-grid C3_QUERY_LIMIT=20`（rerank=0）→ **维持生产 `default`**（fusion 点无 macro 差异；详见 `eval/reports/official/c3_grid_latest.json` / [round1 C-3](official-bench-agent-tuning-round1.md)）。全量三集与 embed 升级另票。  
 > **服从**：[13](../core/13-rate-redlines.md) R1–R5；§0 Q1–Q3；**禁止**热路径默认同步 LLM / CE / query rewrite。  
 > **不混入**：写作去 AI 腔 → [14](writing/quality.md)；Harness cache/压缩 → [12](../core/12-model-harness.md)。
 

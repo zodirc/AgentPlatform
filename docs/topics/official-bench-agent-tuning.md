@@ -304,7 +304,8 @@ make official-bench-update-baseline  # 仅门禁通过后
 - [x] C-1 / C-2 **产品落地**（大 read 预算 + snip 地板；agent 续读/RAG/diff 薄说明）——单测 + stub golden 绿；**不以 official 涨分作合入叙事**  
 - [x] C-4 **离线面**（抽取/分桶单测；propose_patch apply 预检；Bugfix）——官方 resolve 仍挂锚  
 - [ ] C-1/C-2/C-4 **官方 DoD**：m3 配对复测 + 分桶后再 `update-baseline`  
-- [ ] C-3 网格标定（forced + prod-bench；未在本轮离线清单强跑）
+- [ ] C-3 **全量**网格 / embed 升级（可选后置）  
+- [x] C-3 **冒烟**网格（2026-08-03：`c3-retrieval-grid` · 保持 `default` · 报告 `eval/reports/official/c3_grid_latest.json`；不改生产、不作 official Δ）
 ---
 
 ## 10. 维护纪律

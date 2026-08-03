@@ -49,7 +49,7 @@ WEB_REBUILD_DEPS ?= 0
 	official-bench-update-baseline official-bench-show-baseline \
 	official-bench-compare official-bench-live \
 	official-bench-retrieval-agent official-bench-context-agent \
-	official-bench-coding-infer-agent
+	official-bench-coding-infer-agent c3-retrieval-grid
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -616,6 +616,34 @@ retrieval-bench-prod: ## IX4 真相档难 qrels（容器内 ST+pgvector；隔离
 	    --qrels /tmp/ix4-bench/retrieval/qrels_hard.yaml \
 	    --corpus /tmp/ix4-bench/retrieval/corpus \
 	    --mode hybrid'
+
+# C-3 Index-plane fusion grid (round1): BEIR L0 ST+pgvector × profiles + prod-bench.
+# QUERY_LIMIT=20 smoke (default); QUERY_LIMIT=0 full qrels. Needs profile bench + bench-postgres.
+# Runs a one-shot runtime container on the compose network (bench has no runtime retrieval pkg).
+C3_QUERY_LIMIT ?= 20
+c3-retrieval-grid: ## C-3 RQ1e 网格标定（forced/Index 诊断 ≡ L0 hybrid；不改 SCORECARD）
+	@test -f .env || (echo "missing .env"; exit 1)
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres
+	@echo "==> C-3 grid query_limit=$(C3_QUERY_LIMIT) (Index-plane; no SCORECARD write)"
+	docker run --rm --network deploy_default \
+	  -v "$(CURDIR):/repo:ro" \
+	  -v "$(CURDIR)/eval/official/.local-data:/data/ops-official/data:rw" \
+	  -v "$(CURDIR)/eval/reports/official:/data/ops-official/reports:rw" \
+	  -e BENCH_DATA_DIR=/data/ops-official/data \
+	  -e BENCH_REPORTS_DIR=/data/ops-official/reports \
+	  -e BENCH_RETRIEVAL_PROD=1 \
+	  -e BENCH_RETRIEVAL_BACKEND=pgvector \
+	  -e BENCH_DATABASE_URL=postgresql://bench:bench@bench-postgres:5432/bench \
+	  -e DATABASE_URL=postgresql://bench:bench@bench-postgres:5432/bench \
+	  -e PYTHONPATH=/repo/services/runtime:/repo/scripts \
+	  -e EMBEDDING_MODEL_DIR=/app/models-baked \
+	  -e TRANSFORMERS_OFFLINE=1 \
+	  -e HF_HUB_OFFLINE=1 \
+	  -w /tmp \
+	  -u 0 \
+	  --entrypoint python \
+	  agent-platform-runtime:default \
+	  -m official_bench.c3_grid --query-limit $(C3_QUERY_LIMIT)
 
 turn-effect-bench: ## RE2 效果闸（先 MODEL_MODE=stub make up-runtime && migrate）
 	python3 scripts/turn_effect_bench.py

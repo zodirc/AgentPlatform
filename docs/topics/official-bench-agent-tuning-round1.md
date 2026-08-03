@@ -1,9 +1,10 @@
 # Official Bench · Round 1 — 归因 + 执行方案（Phase B → C 施工蓝图）
 
-> **状态**：M1 立尺已接线 · **C-1/C-2 产品落地** · **C-4 离线面已落**（预检/抽取单测/Bugfix）· `retrieval-bench` 18/18 · stub golden agent.*+shared.04 绿  
-> **下一硬门**：另机 **M2** m3 全量锚 + A-6 分桶 → 官方 Δ / `update-baseline`；C-3 网格需 forced 臂/prod-bench（本机可做但未跑全量标定）  
-> **输入**：`eval/official/baseline/official-small-2026-08-m2.json`（L1 过渡基线）· `m1.json`（L0 对照）· L1 runner / runtime 生产面代码  
+> **状态**：M1 立尺已接线 · **C-1/C-2 产品落地** · **C-4 离线面已落** · **C-3 冒烟网格已跑**（保持 `default`）· **free L1 分桶冒烟**：`query_drift` 主导 → C-2 忠实度已补强 · stub golden agent.*+shared.04 绿  
+> **下一硬门**：复测 free L1 冒烟看 `query_drift`↓；另机 **M2** m3 全量锚 + A-6 分桶 → 官方 Δ / `update-baseline`  
+> **输入**：`eval/official/baseline/official-small-2026-08-m2.json` · `m1.json` · `eval/reports/official/c3_grid_latest.json` · `eval/reports/official/retrieval_bucket_latest.json`  
 > **纲领**：[official-bench-agent-tuning](official-bench-agent-tuning.md)（本文是其 §9「Phase B 归因 + 本轮工程调优方案」交付物，并细化为可施工计划）  
+> **流程图（含数字释义）**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) — 分桶怎么读、为何 drift↓/ok↑/cap↓ 算行为正向、C-3「8 点 macro 打平」、search_cap 复测后 IR 平台期  
 > **纪律**：评测面已 bump → **m3**；**宣称由 official 驱动**的合入仍须 M2 分桶 + L2 验证（纲领 §0.2）；纯产品痛点票可先行，**不得**用 m2/冒烟分作涨分叙事
 本方案受三条原则约束，全篇按此裁剪：
 
@@ -224,7 +225,13 @@
 | **DoD** | ✅ 预算/地板单测；✅ assemble_ms 护栏；✅ stub golden（agent + shared.04）；⏳ context L1 同协议配对 |
 ### C-2 工具契约 / 系统提示薄说明 （杠杆 1 · 优先级 2）
 
-> **落地（产品票 · 2026-08）**：agent `system.md` 补 `[budget_truncated]`/续读/禁止臆造未读内容 + unified diff + Bugfix；`search_sources` / `search_codebase` 弱命中换词。stub golden **`agent.*` 12/12 绿**。**官方 DoD（L1 行为率）仍挂 M2 后复测。**
+> **落地（产品票 · 2026-08）**：agent `system.md` 补 `[budget_truncated]`/续读/禁止臆造未读内容 + unified diff + Bugfix；`search_sources` / `search_codebase` 弱命中换词。stub golden **`agent.*` 12/12 绿**。  
+> **分桶驱动补强（2026-08-03）**：基线 free L1（`ccad8723`）`query_drift` **83%** → 收紧首搜忠实度文案。  
+> **复测（Ops · `caf49721` · deepseek-v4-flash · 20q · debug.log）**：`query_drift` **67%**（−16pp）· `ok` **25%**（+12pp）· `no_search`≈2% · nDCG@10 **0.418**（基线 0.489，−7pp）· fail_turns 14/60。报告：`eval/reports/official/retrieval_bucket_after_c2.json`。**行为改善成立；宏 IR 未涨且有失败噪声 → 不入库。**  
+> **二次补强（2026-08-03）**：分桶对照原句显示主因是**首搜被压成 keyword bag**（相对 claim 全文 Levenshtein >0.35），非乱搜无关题。已改 `search_sources` 契约 + agent/writing：`query` **近乎原文**；禁搜前反复 `list_dir`。热部署 runtime。  
+> **三次复测（Ops · `8a6b5814` · debug.log）**：`query_drift` **5%**（3/60，←67%）· `ok` **77%**（46/60）· `search_cap` **18%**（11/60）· `no_search` 0 · nDCG@10 **0.427**（↑自 0.418；仍 < 改前 0.49）· R@10 **0.454** / R@100 **0.565**（明显回升）。报告：`retrieval_bucket_after_verbatim.json`。**原文首搜成立。**  
+> **四次补强（search_cap）**：达 cap 轨迹多为「首搜已有 hit 仍同义换词 3–5 次」。契约改为默认 ≤2 搜；首搜有 on-topic path 则停搜改 `read_file`。已热部署 runtime。  
+> **四次复测（Ops · `0526901a` · debug.log）**：宏指标几乎持平（nDCG@10 **0.434**，←0.427）；**行为** `search_cap` **18%→2%**（1/60）· `ok` **77%→92%**（55/60）· drift 仍低 · `no_search` 2 · R@100 略降。报告：`retrieval_bucket_after_search_cap.json`。**搜次文案生效；IR 未明显跟涨 → 不入库。下一刀不宜再拧搜次。**
 
 | 项 | 内容 |
 |----|------|
@@ -236,14 +243,18 @@
 | **DoD** | ✅ stub agent golden；⏳ L1：`used_next_offset` / `no_search` 可见改善 |
 ### C-3 RAG / Index plane 标定 （杠杆 2 · 优先级 3）
 
+> **冒烟标定（2026-08-03）**：`make c3-retrieval-grid C3_QUERY_LIMIT=20`（scifact+nfcorpus · Index L0 ST+pgvector · **rerank=0** 量纯 fusion；prod-bench default/vector_heavy 均 19/19）。报告：`eval/reports/official/c3_grid_latest.json`（`c3_grid_20260803T075929Z`）。  
+> **结论**：`recommend_switch_default=false` · **保持生产 `RETRIEVAL_PROFILE=default`**；8 个 fusion 点 macro nDCG@10 **无差异**（拧 rrf_k/doc_boost/车道/`vector_heavy` 在本档分不出）；SciFact vs BM25 Δ≈−0.03（冒烟噪声，不作切默认依据）。**未改** runtime 默认、未 bump INDEX、未 `update-baseline`。  
+> **仍欠**：全量三集（含 FiQA）网格；自由臂 L1 配对（本结论不宣称 official Δ）；embed 升级单独开票。
+
 | 项 | 内容 |
 |----|------|
-| 现状 | RRF `k=60`、default profile 1:1 等权、`doc_boost=0.35`（`profile.py:35-57`）；生产 embed = MiniLM-L6-v2 @384（compose:101-105）；`vector_heavy` profile 已备未标定 |
-| 改法 | ① BEIR **forced 诊断臂（A-1 产物）** + prod-bench 做 `default` vs `vector_heavy` 及 rrf_k / doc_boost 网格标定（RQ1e 既定路径，[rag-and-sources §9](rag-and-sources.md)）；② embed 升级候选（bge-small-en-v1.5 / gte-small 级别）单独开票：`INDEX_VERSION` bump + Turn 外全量重建 + prod-bench 通过才切 |
-| L1 预期 | retrieval nDCG@10 **+0.02–0.06**（纲领 §6 C 档预测）；SciFact 不得显著负于词法 |
+| 现状 | RRF `k=60`、default profile 1:1 等权、`doc_boost=0.35`（`profile.py:35-57`）；生产 embed = MiniLM-L6-v2 @384（compose:101-105）；`vector_heavy` profile 已备；**冒烟网格已标定 → 维持 default** |
+| 改法 | ① BEIR Index 诊断（`scripts/official_bench/c3_grid.py` / forced 臂）+ prod-bench 网格（RQ1e，[rag-and-sources §9](rag-and-sources.md)）；② embed 升级候选（bge-small-en-v1.5 / gte-small）单独开票：`INDEX_VERSION` bump + Turn 外全量重建 + prod-bench 通过才切 |
+| L1 预期 | retrieval nDCG@10 **+0.02–0.06**（纲领 §6 C 档预测）；SciFact 不得显著负于词法 — **冒烟未支撑切默认** |
 | R1–R5 | 索引重建离线（R4 ✅）；查询路径无新同步模型（R2/R3 ✅）；cross-encoder 保持默认关 |
 | 否决条件 | 仅诊断臂/L0 涨、自由臂 L1 不动（纲领 §3 裁决）；检索延迟 P95 劣化 |
-| **DoD** | 网格标定报告（诊断臂 + prod-bench）附票；选型写进 rag-and-sources §9 记录；自由臂 L1 配对复测正向；INDEX bump 后全量重建在 Turn 外完成有日志佐证 |
+| **DoD** | ✅ 冒烟网格报告 + 保持 default 记录；⏳ 全量网格（可选）；⏳ 自由臂 L1 配对（仅当切默认时）；embed 升级另票 |
 
 ### C-4 执行面 / 护栏 （杠杆 4 · 优先级 4 · **前置 = A-3**）
 
