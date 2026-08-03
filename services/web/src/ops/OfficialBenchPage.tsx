@@ -186,6 +186,45 @@ const L1_RUN_PROFILES: Preset[] = [
   },
 ];
 
+/** Infer which profile chip matches saved run params (legacy prefs without active_profile_id). */
+function inferProfileIdFromSaved(saved: {
+  suites?: string[];
+  coding_tier?: string;
+  coding_harness?: boolean;
+  coding_checkout_repo?: boolean;
+  retrieval_prod?: boolean;
+  eval_path?: string;
+  context_tier?: string;
+  retrieval_tier?: string;
+  l1_max_parallel?: number;
+  retrieval_arm?: string;
+  context_arm?: string;
+}): string {
+  const suites = new Set(saved.suites || []);
+  for (const p of L1_RUN_PROFILES) {
+    const want = new Set(
+      (p.targets || [])
+        .map((t) => (t === "coding_infer" || t === "coding" ? "coding" : t))
+        .filter((t): t is SuiteId => (SUITE_IDS as readonly string[]).includes(t)),
+    );
+    if (want.size !== suites.size || [...want].some((s) => !suites.has(s))) continue;
+    if ((p.coding_tier || "n5") !== (saved.coding_tier || "n5")) continue;
+    if ((p.coding_harness === true) !== (saved.coding_harness === true)) continue;
+    if ((p.coding_checkout_repo !== false) !== (saved.coding_checkout_repo !== false)) {
+      continue;
+    }
+    if ((p.retrieval_prod !== false) !== (saved.retrieval_prod !== false)) continue;
+    if ((p.eval_path || "agent") !== (saved.eval_path || "agent")) continue;
+    if ((p.context_tier || "20") !== (saved.context_tier || "20")) continue;
+    if ((p.retrieval_tier || "20") !== (saved.retrieval_tier || "20")) continue;
+    if ((p.l1_max_parallel ?? 1) !== (saved.l1_max_parallel ?? 1)) continue;
+    if ((p.retrieval_arm || "free") !== (saved.retrieval_arm || "free")) continue;
+    if ((p.context_arm || "free") !== (saved.context_arm || "free")) continue;
+    return p.id;
+  }
+  return CUSTOM_PROFILE_ID;
+}
+
 type CodingTierMeta = { id: string; n_instances: number | null };
 
 type Caps = Record<string, boolean>;
@@ -1098,7 +1137,7 @@ export function OfficialBenchPage() {
     [secret],
   );
 
-  // Restore Bench prefs (model + suites). api_key only if explicitly saved before.
+  // Restore Bench prefs (model + suites + run profile). api_key only if explicitly saved.
   // v1 auto-wrote form defaults (deepseek-chat) — only restore model when v>=2 or key present.
   useEffect(() => {
     try {
@@ -1117,6 +1156,15 @@ export function OfficialBenchPage() {
           coding_tier?: string;
           coding_n?: number;
           coding_harness?: boolean;
+          coding_checkout_repo?: boolean;
+          retrieval_prod?: boolean;
+          eval_path?: string;
+          context_tier?: string;
+          retrieval_tier?: string;
+          l1_max_parallel?: number;
+          retrieval_arm?: string;
+          context_arm?: string;
+          active_profile_id?: string;
         };
         const storedKey =
           saved.remember_api_key === false ? "" : String(saved.api_key || "");
@@ -1158,6 +1206,37 @@ export function OfficialBenchPage() {
         if (saved.coding_tier) setCodingTier(saved.coding_tier);
         if (saved.coding_n != null) setCodingNInstances(saved.coding_n);
         if (typeof saved.coding_harness === "boolean") setCodingHarness(saved.coding_harness);
+        if (typeof saved.coding_checkout_repo === "boolean") {
+          setCodingCheckoutRepo(saved.coding_checkout_repo);
+        }
+        if (typeof saved.retrieval_prod === "boolean") setRetrievalProd(saved.retrieval_prod);
+        if (saved.eval_path === "agent" || saved.eval_path === "component") {
+          setEvalPath(saved.eval_path);
+        }
+        if (saved.context_tier === "10" || saved.context_tier === "20" || saved.context_tier === "full") {
+          setContextTier(saved.context_tier);
+        }
+        if (
+          saved.retrieval_tier === "10" ||
+          saved.retrieval_tier === "20" ||
+          saved.retrieval_tier === "full"
+        ) {
+          setRetrievalTier(saved.retrieval_tier);
+        }
+        if (saved.l1_max_parallel != null && Number.isFinite(saved.l1_max_parallel)) {
+          setL1Parallel(Number(saved.l1_max_parallel));
+        }
+        if (saved.retrieval_arm === "free" || saved.retrieval_arm === "forced") {
+          setRetrievalArm(saved.retrieval_arm);
+        }
+        if (saved.context_arm === "free" || saved.context_arm === "oracle") {
+          setContextArm(saved.context_arm);
+        }
+        if (typeof saved.active_profile_id === "string" && saved.active_profile_id) {
+          setActiveProfileId(saved.active_profile_id);
+        } else if (Array.isArray(saved.suites) && saved.suites.length) {
+          setActiveProfileId(inferProfileIdFromSaved(saved));
+        }
       } else {
         const old = localStorage.getItem("ops.bench.model");
         if (old) {
@@ -1209,7 +1288,7 @@ export function OfficialBenchPage() {
       localStorage.setItem(
         "ops.bench.prefs",
         JSON.stringify({
-          v: 2,
+          v: 3,
           provider: modelProvider,
           api_style: modelApiStyle,
           model_name: modelName,
@@ -1220,6 +1299,15 @@ export function OfficialBenchPage() {
           coding_tier: codingTier,
           coding_n: codingNInstances,
           coding_harness: codingHarness,
+          coding_checkout_repo: codingCheckoutRepo,
+          retrieval_prod: retrievalProd,
+          eval_path: evalPath,
+          context_tier: contextTier,
+          retrieval_tier: retrievalTier,
+          l1_max_parallel: l1Parallel,
+          retrieval_arm: retrievalArm,
+          context_arm: contextArm,
+          active_profile_id: activeProfileId,
         }),
       );
     } catch {
@@ -1236,6 +1324,15 @@ export function OfficialBenchPage() {
     codingTier,
     codingNInstances,
     codingHarness,
+    codingCheckoutRepo,
+    retrievalProd,
+    evalPath,
+    contextTier,
+    retrievalTier,
+    l1Parallel,
+    retrievalArm,
+    contextArm,
+    activeProfileId,
   ]);
 
   const persistApiKey = useCallback((key: string) => {
@@ -1490,27 +1587,63 @@ export function OfficialBenchPage() {
     setPresets(merged);
     setCaps(body.capabilities || {});
     if (body.coding_tiers?.length) setCodingTierMeta(body.coding_tiers);
-    const d = body.defaults;
-    if (d?.coding_tier) setCodingTier(d.coding_tier);
-    if (d?.coding_n_instances != null) setCodingNInstances(d.coding_n_instances);
-    if (d?.coding_harness !== undefined) setCodingHarness(d.coding_harness);
-    if (d?.retrieval_prod !== undefined) setRetrievalProd(d.retrieval_prod);
-    if (d?.eval_path === "agent" || d?.eval_path === "component") {
-      setEvalPath(d.eval_path);
-    }
-    if (d?.context_tier) setContextTier(d.context_tier);
-    if (d?.retrieval_tier) setRetrievalTier(d.retrieval_tier);
-    if (d?.l1_max_parallel != null) setL1Parallel(d.l1_max_parallel);
-    if (d?.targets?.length) {
-      const suites = new Set<SuiteId>();
-      for (const t of d.targets) {
-        if (t === "retrieval" || t === "context" || t === "coding") suites.add(t);
+
+    // Local prefs win over API defaults. Previously loadMeta always forced
+    // l1_balanced + defaults, so refresh after 「自定义」looked like 「适中」again.
+    let hasLocalRunPrefs = false;
+    let savedProfileId = "";
+    try {
+      const raw = localStorage.getItem("ops.bench.prefs");
+      if (raw) {
+        const saved = JSON.parse(raw) as {
+          suites?: unknown;
+          active_profile_id?: string;
+        };
+        hasLocalRunPrefs = Array.isArray(saved.suites) && saved.suites.length > 0;
+        if (typeof saved.active_profile_id === "string") {
+          savedProfileId = saved.active_profile_id;
+        }
       }
-      if (suites.size) setSelectedSuites(suites);
+    } catch {
+      /* ignore */
     }
-    setActiveProfileId(
-      merged.some((p) => p.id === "l1_balanced") ? "l1_balanced" : merged[0]?.id || "",
-    );
+
+    if (!hasLocalRunPrefs) {
+      const d = body.defaults;
+      if (d?.coding_tier) setCodingTier(d.coding_tier);
+      if (d?.coding_n_instances != null) setCodingNInstances(d.coding_n_instances);
+      if (d?.coding_harness !== undefined) setCodingHarness(d.coding_harness);
+      if (d?.retrieval_prod !== undefined) setRetrievalProd(d.retrieval_prod);
+      if (d?.eval_path === "agent" || d?.eval_path === "component") {
+        setEvalPath(d.eval_path);
+      }
+      if (d?.context_tier) setContextTier(d.context_tier);
+      if (d?.retrieval_tier) setRetrievalTier(d.retrieval_tier);
+      if (d?.l1_max_parallel != null) setL1Parallel(d.l1_max_parallel);
+      if (d?.targets?.length) {
+        const suites = new Set<SuiteId>();
+        for (const t of d.targets) {
+          if (t === "retrieval" || t === "context" || t === "coding") suites.add(t);
+        }
+        if (suites.size) setSelectedSuites(suites);
+      }
+      setActiveProfileId(
+        merged.some((p) => p.id === "l1_balanced") ? "l1_balanced" : merged[0]?.id || "",
+      );
+    } else if (savedProfileId) {
+      const known =
+        savedProfileId === CUSTOM_PROFILE_ID ||
+        merged.some((p) => p.id === savedProfileId) ||
+        L1_RUN_PROFILES.some((p) => p.id === savedProfileId);
+      setActiveProfileId(known ? savedProfileId : CUSTOM_PROFILE_ID);
+    } else {
+      try {
+        const raw = localStorage.getItem("ops.bench.prefs");
+        if (raw) setActiveProfileId(inferProfileIdFromSaved(JSON.parse(raw)));
+      } catch {
+        /* ignore */
+      }
+    }
     setError(null);
   }, [headers]);
 
@@ -2267,7 +2400,7 @@ export function OfficialBenchPage() {
         </div>
 
         <p className="mt-2 text-[11px] text-muted-foreground">
-          点配置档会套用参数并打开下方表单；再点同一档可收起。改任一字段会切到「自定义」。
+          点配置档会套用参数并打开下方表单；再点同一档可收起。改任一字段会切到「自定义」——刷新后仍保留（写在本机 prefs）。
         </p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           {profileButtons.map((p) => {
