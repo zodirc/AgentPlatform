@@ -25,6 +25,10 @@ EVAL_RESTORE_SERVICES ?= runtime api
 EVAL_BUILD ?=
 # After compose --build, prune dangling images (set DOCKER_AUTO_PRUNE=0 to skip).
 DOCKER_AUTO_PRUNE ?= 1
+# WSL/Linux: strip broken Windows credsStore (desktop.exe) before compose build.
+# Docker Desktop often rewrites ~/.docker/config.json; make up/build re-fixes.
+# Set DOCKER_FIX_WSL_CREDS=0 to skip (docs/core/03-docker-runtime.md).
+DOCKER_FIX_WSL_CREDS ?= 1
 # docs/38: set *_REBUILD_DEPS=1 to force --no-cache (rebuild pip/ST deps layers).
 API_REBUILD_DEPS ?= 0
 RUNTIME_REBUILD_DEPS ?= 0
@@ -33,7 +37,7 @@ WEB_REBUILD_DEPS ?= 0
 .DEFAULT_GOAL := help
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
-	ensure-ops-secret fix-workspace-sources \
+	ensure-ops-secret ensure-docker-creds fix-workspace-sources \
 	up-web up-api up-runtime up-bench up-ops-eval restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
@@ -63,6 +67,7 @@ help: ## 显示常用命令
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
 	@echo "  make eval-plan-suggest-tune 搜索权重提案（只写 reports）"
 	@echo "  make ensure-ops-secret  若空则生成 OPS_TEST_SECRET 并打印评测台 URL"
+	@echo "  make ensure-docker-creds  WSL：去掉坏掉的 desktop.exe credsStore（默认开）"
 	@echo "  make up-ops-eval     给 api 挂 docker.sock（Ops 完整证明 ≡ CI 必需）"
 	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
 	@echo "  # docs/38：改 app 代码不必 *_REBUILD_DEPS；改 pyproject/模型才需要"
@@ -101,6 +106,9 @@ help: ## 显示常用命令
 ensure-ops-secret: ## 确保 .env 有 OPS_TEST_SECRET，并打印 /ops/<secret>/test
 	@bash scripts/ensure_ops_test_secret.sh
 
+ensure-docker-creds: ## WSL：去掉 ~/.docker 里坏掉的 desktop.exe credsStore（可关 DOCKER_FIX_WSL_CREDS=0）
+	@DOCKER_FIX_WSL_CREDS=$(DOCKER_FIX_WSL_CREDS) bash scripts/ensure_docker_creds.sh
+
 ensure-git-hooks: ## 本仓库 core.hooksPath=.githooks（make up/start 默认）
 	@bash scripts/install-git-hooks.sh
 
@@ -108,7 +116,7 @@ ensure-git-hooks: ## 本仓库 core.hooksPath=.githooks（make up/start 默认�
 fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
 	@bash scripts/ensure_workspace_sources_writable.sh
 
-start: ensure-ops-secret ensure-git-hooks ## 启动栈（不 rebuild，最快）
+start: ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 启动栈（不 rebuild，最快）
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d
 	@$(MAKE) --no-print-directory fix-workspace-sources
 
@@ -120,14 +128,14 @@ define docker_auto_prune
 	fi
 endef
 
-up: ensure-ops-secret ensure-git-hooks ## 重建并启动全部服务
+up: ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 重建并启动全部服务
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
 
 # Secret is consumed by api only. up-web may generate it for the first time — recreate api then.
 # --no-deps: do not rebuild/restart depends_on (api→runtime); otherwise up-api pays runtime ST/pip.
-up-web: ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
+up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
 	@status=$$(mktemp); \
 	OPS_SECRET_STATUS_FILE=$$status bash scripts/ensure_ops_test_secret.sh; \
 	gen=$$(grep '^generated=' $$status | cut -d= -f2); rm -f $$status; \
@@ -142,7 +150,7 @@ up-web: ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
 	$(COMPOSE) up -d --no-deps --build web
 	$(docker_auto_prune)
 
-up-api: ensure-ops-secret ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache）
+up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache）
 	@if [ "$(API_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> API_REBUILD_DEPS=1 → docker compose build --no-cache api"; \
 	  $(COMPOSE) build --no-cache api; \
@@ -152,12 +160,12 @@ up-api: ensure-ops-secret ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache�
 
 # Opt-in: mount docker.sock so Ops「完整证明」proof_available=true (docs/29).
 # Plain make up / up-api intentionally omit the socket (security default).
-up-ops-eval: ensure-ops-secret ## api + docker.sock（启用 Ops suite=ci）
+up-ops-eval: ensure-ops-secret ensure-docker-creds ## api + docker.sock（启用 Ops suite=ci）
 	$(COMPOSE_OPS_EVAL) up -d --no-deps --force-recreate api
 	@echo "==> Ops 完整证明已启用；刷新 /ops/<OPS_TEST_SECRET>/test"
 	@echo "    注意：之后再 make up / up-api 会去掉 sock，需重跑本目标"
 
-up-runtime: ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
+up-runtime: ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
 	@if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime"; \
 	  $(COMPOSE) build --no-cache runtime; \
@@ -165,7 +173,7 @@ up-runtime: ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 S
 	$(COMPOSE) up -d --no-deps --build runtime
 	$(docker_auto_prune)
 
-up-bench: ensure-ops-secret ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
+up-bench: ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
 	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench"; \
 	  COMPOSE_PROFILES=bench $(COMPOSE) build --no-cache bench; \
@@ -203,7 +211,7 @@ ps:
 logs:
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) logs -f api runtime
 
-build:
+build: ensure-docker-creds
 	$(COMPOSE) build
 	$(docker_auto_prune)
 

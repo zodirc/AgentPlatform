@@ -536,6 +536,7 @@ make eval-ha        # ha_runner golden（stub）
 |------|------|
 | 日常改代码 | 优先 `make start`；只改某一服务用 `make up-web` / `up-api` / `up-runtime` |
 | **自动清理** | `make up` / `up-*` / `build` / `gate` / eval restore 结束后会 `docker image prune -f`（仅悬空 `<none>`）。关：`DOCKER_AUTO_PRUNE=0` |
+| **WSL 凭据** | `make up` / `start` / `build` / `up-*` 前跑 `ensure-docker-creds`：去掉 `~/.docker/config.json` 里 Docker Desktop 写入的 `credsStore=desktop.exe`（Linux 下会 `exec format error`，拉不动 `nginx`/`node` 等）。关：`DOCKER_FIX_WSL_CREDS=0` |
 | 深度清理 | `make docker-prune`：悬空镜像 + **全部**未用 Build Cache（`builder prune -af`；下次冷构建会稍慢） |
 | 更狠 | `docker system prune -a`（会删所有未在跑容器引用的镜像，慎用） |
 
