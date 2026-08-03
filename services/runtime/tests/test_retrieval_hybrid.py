@@ -13,7 +13,12 @@ from app.retrieval.chunking import (
 )
 from app.retrieval.embedder import HashEmbedder
 from app.retrieval.fusion import reciprocal_rank_fusion
-from app.retrieval.rerank import lexical_rerank
+from app.retrieval.rerank import (
+    lexical_rerank,
+    lexical_rerank_bonus,
+    lexical_rerank_score,
+    rerank_hits,
+)
 from app.retrieval.store import get_sources_store
 from app.retrieval.vector_index import ChunkHit, SourceVectorIndex
 from app.settings import settings
@@ -402,6 +407,100 @@ def test_lexical_rerank_does_not_wash_small_rrf_ranks() -> None:
     ]
     reranked = lexical_rerank(long_q, hits, limit=2)
     assert reranked[0].chunk_id == "top"
+
+
+def test_lexical_rerank_helpers_cover_edge_paths(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cover empty-query / late-phrase / score helpers / rerank_hits edges."""
+    monkeypatch.setattr(settings, "search_sources_excerpt_chars", 32)
+    empty = ChunkHit(
+        path="sources/a.md",
+        chunk_id="e",
+        excerpt="hello",
+        citation_id="cite:a",
+        score=1.0,
+        section_title="t",
+    )
+    assert lexical_rerank_bonus("   ", empty) == 0.0
+    assert lexical_rerank("   ", [empty], limit=1)[0].chunk_id == "e"
+
+    buried = ("噪声。" * 40) + "exact-phrase-marker"
+    late = ChunkHit(
+        path="sources/a.md",
+        chunk_id="late",
+        excerpt=buried,
+        citation_id="cite:a",
+        score=1.0,
+        section_title="s",
+    )
+    bonus = lexical_rerank_bonus("exact-phrase-marker", late)
+    assert bonus >= 0.5  # late phrase path (beyond excerpt window)
+
+    scored = lexical_rerank_score("exact-phrase-marker", late)
+    assert scored >= late.score
+
+    assert lexical_rerank("x", [], limit=5) == []
+    assert lexical_rerank("x", [empty], limit=1)[0].chunk_id == "e"
+
+    monkeypatch.setattr(settings, "retrieval_rerank_cross_encoder", False)
+    assert rerank_hits("q", [], limit=3) == []
+    out = rerank_hits(
+        "张白鹿",
+        [
+            ChunkHit(
+                path="sources/a.md",
+                chunk_id="a",
+                excerpt="李云龙",
+                citation_id="cite:a",
+                score=0.4,
+                section_title="李云龙",
+            ),
+            ChunkHit(
+                path="sources/a.md",
+                chunk_id="b",
+                excerpt="张白鹿",
+                citation_id="cite:a",
+                score=0.2,
+                section_title="张白鹿",
+            ),
+        ],
+        limit=1,
+    )
+    assert out[0].chunk_id == "b"
+
+
+def test_rerank_hits_cross_encoder_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "retrieval_rerank_cross_encoder", True)
+    monkeypatch.setattr(settings, "retrieval_rerank_pool", 10)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("no ce")
+
+    monkeypatch.setattr("app.retrieval.rerank.cross_encoder_rerank", _boom)
+    hits = [
+        ChunkHit(
+            path="sources/a.md",
+            chunk_id="a",
+            excerpt="alpha",
+            citation_id="cite:a",
+            score=0.5,
+            section_title="a",
+        ),
+        ChunkHit(
+            path="sources/a.md",
+            chunk_id="b",
+            excerpt="beta",
+            citation_id="cite:a",
+            score=0.4,
+            section_title="b",
+        ),
+    ]
+    out = rerank_hits("alpha", hits, limit=2)
+    assert len(out) == 2
+    assert out[0].chunk_id == "a"
 
 
 def test_json_source_retrieval_store_roundtrip(
