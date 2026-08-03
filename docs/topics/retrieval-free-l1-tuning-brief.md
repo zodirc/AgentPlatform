@@ -1,10 +1,11 @@
-# Free-L1 Retrieval Tuning Brief（交给后续模型的完整上下文）
+# Free-L1 Tuning Brief（检索 + 上下文 · 交给后续模型）
 
 > **受众**：高级模型 / 下一轮调优负责人  
-> **日期戳记**：2026-08-03（含 soft 二次冒烟 + 回滚后确认复测）  
-> **唯一验收温度计**：自由搜（`eval_path=agent` · `arm=free` · L1 产品 Turn）  
-> **不作为验收**：forced 臂、纯 Index L0、coding（本轮不可信）  
-> **本文自含**：不依赖阅读其他专题文档即可理解流程、历史与问题
+> **日期戳记**：2026-08-03（检索 soft 二次/回滚确认 + **上下文最新 free 读数**）  
+> **唯一验收温度计**：L1 产品 Turn · `arm=free`（检索看 nDCG；上下文看 agent_f1/EM）  
+> **不作为验收**：forced/oracle 诊断臂、纯 L0 旁路、coding（本轮不可信）  
+> **本文自含**：不依赖阅读其他专题文档即可理解流程、历史与问题  
+> **调优进度**：检索已多轮行为/排序刀；**上下文尚未做专项调优**（仅有产品向 C-1 读预算等旁路影响），下文记录基线与真实流程供思考
 
 ---
 
@@ -13,22 +14,25 @@
 ### 我们到底在优化什么
 
 ```text
-目标（因）     = 把「检索」这项生产工程做成熟：Index / hybrid 排序 / 工具契约 /
-                 上下文里怎么用搜到的证据 —— 用户主 agent 路径上的真实能力
-手段（温度计） = 用官方小量题集，走与用户相同的 Session→Turn→loop→search_sources
-                 打出 nDCG / Recall 等分数
-结果（果）     = bench 分数若上升，只是检索变好的「间接证明」
+目标（因）     = 把生产工程做成熟：
+                 · 检索：Index / hybrid 排序 / 工具契约 / 如何用 hit
+                 · 上下文：长文 read 预算、续读、答题形态 —— 主 agent 真实能力
+手段（温度计） = 官方小量题集走与用户相同的 Session→Turn→loop→工具
+                 · 检索 → BEIR → nDCG / Recall（search_sources）
+                 · 上下文 → LongBench → agent_f1 / EM（read_file 等）
+结果（果）     = bench 分数若上升，只是工程变好的「间接证明」
 ```
 
 **因果不可反转：**
 
 | 对 | 错 |
 |----|----|
-| 改生产检索 / 契约 / Index → 用户路径变好 → free L1 分数**间接**上升 → 才可谈入库 | 为抬 bench 分改评测臂、注入答案、forced 剧本、评测专用质量分支 |
+| 改生产检索/读预算/契约 → 用户路径变好 → free L1 分数**间接**上升 → 才可谈入库 | 为抬 bench 分改评测臂、注入答案、forced/oracle 剧本、评测专用质量分支 |
 | 跑测试集是为了**量准、归因、否决坏刀** | 跑测试集是为了「把数字刷上去」 |
 | 分桶告诉你失败落在哪层工程 | 分桶分数本身当 KPI 去优化文案糊弄过去 |
 
-因此：本文所有历史刀、回滚、下一刀提案，审查时先问——**「加热的是检索工程，还是在伺候分数？」**
+因此：审查时先问——**「加热的是检索/上下文工程，还是在伺候分数？」**  
+下文检索与上下文两套温度计**分开归因**；不要用一边的分给另一边背书。
 
 ### 原则一：相对成熟、合理的思路
 
@@ -88,7 +92,8 @@
 | 当前工作平台（冒烟） | free nDCG@10 **~0.41**（非 ~0.43）；下一刀以此为对照，勿再默认 0.434 |
 | SCORECARD / baseline | **未更新、不入库** |
 | 行为侧前几刀（verbatim 首搜、≤2 搜次） | **保留**；但近几次复测 cap/drift 有回潮（见 §3.6） |
-| 下一轮硬约束 | 继续只认 free；勿用 forced 洗白；20q 单次不作效果入库；重要刀至少 **N≥2** 同条件复跑；**每刀过原则一+原则二门禁** |
+| **上下文（LongBench free）** | **几乎未专项调优**；最新 `TEST.log`：agent_f1 **0.3295** · EM **0.300**（`c8cc1bc1`，三 task×20）；平台约 **F1≈0.33**。流程与影响面见 **§3.4** |
+| 下一轮硬约束 | 继续只认 free；勿用 forced/oracle 洗白；20q/每 task 冒烟单次不作效果入库；重要刀至少 **N≥2**；**每刀过原则一+原则二门禁**；检索/上下文分开归因 |
 
 ---
 
@@ -399,20 +404,96 @@ soft#1 失败轨迹特征（7 fail）：多数已搜 1 次后大量 `list_dir`/`
 
 **与团队最终立场的冲突**：该刀虽自称 Index/排序，但验收写的是「热部署后 **Ops free L1 20q**」。团队后来明确 **只认自由搜** → 不以 forced 洗白；多跑之后进一步改为：**无稳定正 Δ 即丢刀**，同时承认冒烟噪声，不以单次 0.395 叙事「深度回归」。
 
-### 3.4 Context 旁证（非第 5 刀目标）
+### 3.4 上下文（LongBench · free L1）— 基线记录 · 调优很少
 
-| 跑次 | F1 | EM | 备注 |
-|------|----|----|------|
-| m2 forced 冒烟 `ebc6abfd` | 0.315 | 0.05 | 旧尺 |
-| free `48c4aee1`（与第 5 刀同日） | 0.331 | 0.25 | 60/60 pass；桶：ok 35 / verbose 15 / gave_up_early 10 |
+> **状态**：尺已切到 m3 free（可续读）；产品侧有 C-1「最近一次 read 更高预算」等，但**没有**像检索那样多轮「刀 + 复测 + 回滚」的上下文专项调优。  
+> **本文作用**：把真实流程与当前分数写清，供后续模型设计**第一刀**；勿把检索 Δ 安到 context 上。
 
-**不要**用 context 微升为 soft-rerank 背书（改动面几乎纯 retrieval）。
+#### 3.4.1 当前与历史读数
+
+| 跑次 | 臂/尺 | agent_f1 | agent_em | 备注 |
+|------|-------|----------|----------|------|
+| `272fdb71` | 早期 L1 | 0.279 | 0.05 | 过渡 |
+| `ebc6abfd` | m2 强制单读冒烟 | 0.315 | 0.05 | 旧尺；不可当 free 锚 |
+| `48c4aee1` | free · 与检索 soft 同日 | 0.331 | 0.25 | 60/60；桶 ok35 / verbose15 / gave_up10 |
+| **`c8cc1bc1`（最新 · `TEST.log`）** | **free · m3** | **0.3295** | **0.300** | 59/1；见下分桶与分 task |
+
+最新 `TEST.log`（仅上下文段）：
+
+```text
+official.context.agent_f1 = 0.3295
+official.context.agent_em = 0.3000
+```
+
+**分 task（`c8cc1bc1`，每 task 20 条）**
+
+| task | mean F1 | EM 率 | 桶要点 |
+|------|---------|-------|--------|
+| multifieldqa_en | 0.413 | 0.20 | verbose 与 ok 各 8；gave_up 4 |
+| hotpotqa | 0.320 | 0.55 | ok 12；gave_up 7 |
+| narrativeqa | 0.255 | 0.15 | ok 10；verbose 7；steps_exhausted 1 |
+
+**分桶质量（同跑）**
+
+| bucket | n | mean F1 | 含义 |
+|--------|---|---------|------|
+| ok | 30 | **0.533** | 行为合格且有可对齐答案时，质量其实不差 |
+| verbose_answer | 16 | 0.235 | 有 F1 但答太长 → EM 常 0 |
+| gave_up_early | 13 | **0.000** | 读入相对 passage 过少且 F1=0 |
+| steps_exhausted | 1 | 0.000 | 步数耗尽 |
+
+**读法**：宏 F1≈0.33 被 **gave_up_early + verbose** 拖住；ok 子集已 ~0.53。与检索类似——先分桶，再决定加热「读预算 / 续读纪律 / 答题形态」，不要只盯宏分。两次 free（0.331 / 0.330）几乎重合 → 当前冒烟平台 **F1≈0.33 · EM≈0.25–0.30**。
+
+#### 3.4.2 实际场景流程（对照检索温度计）
+
+与检索 **同构原则相同**（真 Session/Turn/loop），但 **场景、工具、物化、计分完全不同**：
+
+| | 检索 free L1 | **上下文 free L1** |
+|--|--------------|-------------------|
+| 题集 | BEIR SciFact/NFCorpus/FiQA | LongBench：multifieldqa_en / hotpotqa / narrativeqa |
+| 默认 scenario | **`writing`**（有 `search_sources`） | **`agent`**（读/搜代码工具面；passage 靠 `read_file`/`grep`） |
+| 主臂 | free（forced=诊断） | free（**oracle**=诊断：显式要求读完） |
+| 物化 | 多文档 `sources/beir/<ds>/<id>.txt` + 索引 sync | **单文件** `sources/passage.md` = 整段 context（每题独立 Work，防 read 缓存串题） |
+| 题面 | 「Information need: …」去搜库 | 「材料在 passage.md，可用分段 read/grep，**只答短短语**」 |
+| 模型常用工具 | `search_sources` → 可选 read | **`read_file`（含 offset 续读）**、grep 等；一般**不**走 BEIR 索引 |
+| 计分 | `retrieval.completed.ranked` → nDCG/R | 终答文本 vs gold → **token F1 / EM**（官方式短答约定） |
+| 冒烟档 | 每集 20q | **每 task 上限**（本次 20×3=60），不是全局只切第一 task |
+
+**单题因果栈（上下文）**
+
+```text
+Pull LongBench small_slice → 按 task 截断 limit
+  → 每题新建隔离 Work
+  → 写入 sources/passage.md（全文 context，可很长）
+  → StartTurn(scenario=agent, arm=free)
+  → 自由题面：读 passage.md，短短语作答（不限制读法）
+  → 模型：read_file / grep / …（可续读 next_offset）
+  → ContextEngine 组装：普通 tool_result ~4k 截断；
+        最近一次 read_file 可用更高预算（C-1，约 32k）——这是少数已落地、会影响本温度计的产品改动
+  → 终答抽取 → 与 gold 算 F1/EM
+  → L2 分桶：verbose_answer / gave_up_early / truncation 相关 / ok …
+```
+
+**oracle 臂（不进主栏）**：题面改为「必须读完再答，可多次续读」；用于估 retention，**不是**本团队当前验收尺（与检索不做 forced 同理：可诊断，不洗白 free）。
+
+#### 3.4.3 上下文影响面（调优很少 · 供第一刀思考）
+
+| 层 | 触点 | 现状 | 与分数关系 |
+|----|------|------|------------|
+| 读预算 | 普通 tool_result **4k**；最新 read **~32k**（C-1） | 已落地产品票 | 长 passage 仍可能只见局部 → gave_up / 错答 |
+| 续读 | `offset` / `next_offset`；free 题面允许 | 模型常不续读 | 行为桶；勿强制剧本伤同构 |
+| 答题形态 | 题面要求 short phrase；judge 偏短答 | verbose 多 → EM 低 | 契约/system 薄说明（勿改 loop） |
+| 步数 | max_steps 等 | 见 1× steps_exhausted | 速率/逻辑边界 |
+| scenario | **agent** 默认 | 与检索 writing 不同 | 改 agent 读纪律会影响本温度计；改 writing RAG **不会** |
+| 物化 | 整篇 passage.md，无 BEIR 索引 | 不测 hybrid | 不要用检索 fusion 刀期望抬 F1 |
+
+**原则提醒**：上下文优化同样是「加热读/预算/契约工程 → F1 间接升」；禁止为刷分改成强制单读旧尺或把 oracle 当主栏。
 
 ### 3.5 Coding
 
 本轮最新 coding official run **failed**；历史 patch_rate 在无 repo/无 harness 下 **无效果含义**。后续思考 **忽略 coding**，直至尺修干净。
 
-### 3.6 行为桶近况（相对第 4 轮高峰有回潮）
+### 3.6 检索行为桶近况（相对第 4 轮高峰有回潮）
 
 | 跑次 | ok（约） | search_cap | query_drift | no_search | pass/fail |
 |------|----------|------------|-------------|-----------|-----------|
@@ -458,13 +539,18 @@ soft#1 失败轨迹特征（7 fail）：多数已搜 1 次后大量 `list_dir`/`
 - 回滚后确认跑仍见 **search_cap×3、query_drift×3**，未回到第 4 轮 92% ok / 2% cap。
 - 搜后 `list_dir`/`grep` 逛目录问题在 soft#1 fail 中仍在；需单独观察，勿与 IR 刀绑死。
 
-### P8 — 温度计场景 = writing，不是 agent
+### P7 — Embed / INDEX 升级未做（检索）
+
+- 生产仍 MiniLM-L6-v2 @384；升级需 Turn 外重建 + `INDEX_VERSION` bump + free 配对；**未开工**。
+- Fusion 默认保持；无证据切 `vector_heavy`。
+
+### P8 — 检索温度计场景 = writing，不是 agent
 
 - L1 retrieval 默认 `scenario_id=writing`；`agent` 配置**未注册** `search_sources`。
 - 优化 `agent/system.md` 或代码检索 **不会**自动抬 BEIR free L1。
 - 若产品要「agent 模式也能 hybrid RAG」，须先补工具注册/协议，再谈同构温度计。
 
-### P9 — 计分窗 ≠ 模型窗
+### P9 — 检索：计分窗 ≠ 模型窗
 
 - IR：`retrieval.completed.ranked` + first-seen union。
 - 模型：200 字 excerpt + 组装期 4k 截断。
@@ -474,6 +560,13 @@ soft#1 失败轨迹特征（7 fail）：多数已搜 1 次后大量 `list_dir`/`
 
 - `_prefer_excerpt_covering_hits` 等会在工具返回前改序，从而改 IR。
 - 调 fusion/rerank 时若忽略这层，归因会漂。
+
+### P11 — 上下文几乎未专项调优（基线 F1≈0.33）
+
+- 最新 free：F1 **0.3295** · EM **0.30**；与 `48c4aee1` 几乎持平 → 平台稳定在 ~0.33。
+- 主拖累：**gave_up_early**（少读）与 **verbose_answer**（答太长）；ok 子集 F1≈0.53 说明「读对且答短」时并不差。
+- 温度计是 **agent + passage.md + 短答**，不是 writing RAG；第一刀应落在读预算/续读/答题形态，并过 R1–R5。
+- **禁止**用检索 soft/回滚叙事解释 context 分数。
 
 ---
 
@@ -572,12 +665,19 @@ ok:         77% → 92%
 nDCG@10:    0.427 → 0.434（持平级，不入库；其后多次复测未再现）
 ```
 
-### 7.5 C-3 fusion 冒烟
+### 7.6 上下文最新 · `c8cc1bc1`（`TEST.log` 仅 context 段 · 2026-08-03）
 
 ```text
-8 个 fusion 配置 macro nDCG@10 全为 0.54552（rerank 关闭）
-结论：不改生产 RETRIEVAL_PROFILE=default
+official.context.agent_f1 = 0.3295
+official.context.agent_em = 0.3000
 ```
+
+- title：`LongBench small · L1 agent-path · arm=free` · model=`deepseek-v4-flash` · protocol m3  
+- 60 题（三 task×20）：pass 59 / fail 1  
+- 桶：ok 30 · verbose_answer 16 · gave_up_early 13 · steps_exhausted 1  
+- 分 task F1：multifieldqa_en 0.413 · hotpotqa 0.320 · narrativeqa 0.255  
+
+对照同协议 free 前序 `48c4aee1`：F1 0.331 / EM 0.25 → **宏 F1 平台 ≈0.33，几乎未因检索刀而动**（符合「上下文未专项调优」）。
 
 ---
 
@@ -601,4 +701,7 @@ nDCG@10:    0.427 → 0.434（持平级，不入库；其后多次复测未再�
         └─ 仅 Index/L0/forced ↑      → 未验收；最多当假说，不进主栏
 ```
 
-**当前节点**：第五刀 **已回滚**（检索无稳定间接增益）；回滚确认跑完成 → IR **未**回到 0.434，与 soft 二次冒烟同处 **~0.41 平台**；行为桶较第 4 轮有回潮。下一轮从 **~0.41 + 分桶回潮** 出发设计**检索工程**杠杆，分数只作间接验收；全程守住成熟合理与主 agent 速率/逻辑。
+**当前节点**：  
+- **检索**：第五刀已回滚；平台 **nDCG@10≈0.41**；行为桶有回潮。  
+- **上下文**：几乎未专项调优；平台 **F1≈0.33 / EM≈0.30**；拖累在 gave_up_early + verbose；流程见 §3.4（agent + passage.md，异于检索 writing）。  
+下一轮设计杠杆时两套温度计分开；全程守住成熟合理与主 agent 速率/逻辑。
