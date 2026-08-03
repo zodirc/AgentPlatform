@@ -299,6 +299,134 @@ async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
     return {"path": path, "entries": entries[:200]}
 
 
+def _span_apply_precheck(path: str, old_text: str, new_text: str) -> dict[str, Any]:
+    """C-4: soft applyability precheck (span unique + optional ``git apply --check``).
+
+    Does not mutate the file. Returns ``applies`` True/False and optional error detail
+    so the model can re-read and retry without loop changes.
+    """
+    import subprocess
+    import tempfile
+
+    target = _resolve_path(path)
+    if not target.exists():
+        return {
+            "applies": False,
+            "apply_check_error": f"file not found: {path}; read_file then retry",
+        }
+    try:
+        existing = target.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return {"applies": False, "apply_check_error": f"cannot read {path}: {exc}"}
+    count = existing.count(old_text)
+    if count == 0:
+        return {
+            "applies": False,
+            "apply_check_error": "old_text not found in current file; re-read and repropose",
+        }
+    if count > 1:
+        return {
+            "applies": False,
+            "apply_check_error": f"old_text matches {count} times; use a longer unique span",
+        }
+    if old_text == new_text:
+        return {"applies": False, "apply_check_error": "old_text and new_text are identical"}
+
+    # Optional unified-diff check when workspace is a git worktree.
+    # Span uniqueness is the authoritative gate for propose_patch; git apply on a
+    # synthetic difflib patch is advisory only (often fails on path/context noise).
+    root = _workspace_root()
+    git_dir = root / ".git"
+    if not git_dir.exists() and not git_dir.is_file():
+        return {"applies": True, "apply_check": "span_unique"}
+
+    final = existing.replace(old_text, new_text, 1)
+    rel = _normalized_workspace_rel(path)
+    try:
+        import difflib
+
+        udiff = "".join(
+            difflib.unified_diff(
+                existing.splitlines(keepends=True),
+                final.splitlines(keepends=True),
+                fromfile=f"a/{rel}",
+                tofile=f"b/{rel}",
+            )
+        )
+    except Exception:
+        return {"applies": True, "apply_check": "span_unique"}
+    if not udiff.strip():
+        return {"applies": True, "apply_check": "span_unique"}
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".patch", delete=False, encoding="utf-8"
+        ) as fh:
+            fh.write(udiff)
+            patch_path = fh.name
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(root), "apply", "--check", "--", patch_path],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        finally:
+            Path(patch_path).unlink(missing_ok=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"applies": True, "apply_check": "span_unique"}
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "git apply --check failed").strip()
+        return {
+            "applies": True,
+            "apply_check": "span_unique",
+            "apply_check_warning": detail[:800],
+        }
+    return {"applies": True, "apply_check": "git_apply_check"}
+
+
+def _unified_patch_apply_precheck(content: str) -> dict[str, Any]:
+    """When writing a ``.patch``/``.diff``, optionally ``git apply --check``."""
+    import subprocess
+    import tempfile
+
+    text = (content or "").strip()
+    if not text or not (
+        "@@" in text or text.startswith("--- ") or "diff --git" in text
+    ):
+        return {}
+    root = _workspace_root()
+    git_dir = root / ".git"
+    if not git_dir.exists() and not git_dir.is_file():
+        return {"applies": None, "apply_check": "no_git"}
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".patch", delete=False, encoding="utf-8"
+        ) as fh:
+            fh.write(content if content.endswith("\n") else content + "\n")
+            patch_path = fh.name
+        try:
+            proc = subprocess.run(
+                ["git", "-C", str(root), "apply", "--check", "--", patch_path],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        finally:
+            Path(patch_path).unlink(missing_ok=True)
+    except (OSError, subprocess.TimeoutExpired):
+        return {"applies": None, "apply_check": "unavailable"}
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "git apply --check failed").strip()
+        return {
+            "applies": False,
+            "apply_check": "git_apply_check",
+            "apply_check_error": detail[:800],
+        }
+    return {"applies": True, "apply_check": "git_apply_check"}
+
+
 async def propose_patch(
     path: str,
     old_text: str,
@@ -307,6 +435,18 @@ async def propose_patch(
     **_kwargs: Any,
 ) -> dict[str, Any]:
     _assert_not_seed_corpus(path)
+    precheck = _span_apply_precheck(path, old_text, new_text)
+    if not precheck.get("applies"):
+        return {
+            "path": path,
+            "old_text": old_text,
+            "new_text": new_text,
+            "status": "error",
+            "error": precheck.get("apply_check_error") or "patch does not apply",
+            "applies": False,
+            "apply_check": precheck.get("apply_check"),
+            "summary": precheck.get("apply_check_error") or "patch does not apply",
+        }
     patch_id = f"patch-{uuid4().hex[:12]}"
     return {
         "patch_id": patch_id,
@@ -315,6 +455,8 @@ async def propose_patch(
         "new_text": new_text,
         "summary": summary or f"Proposed changes to {path}",
         "status": "pending",
+        "applies": True,
+        "apply_check": precheck.get("apply_check"),
     }
 
 
@@ -1216,7 +1358,7 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
             old_text = ""
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
-    return {
+    out: dict[str, Any] = {
         "path": path,
         "old_text": old_text,
         "new_text": content,
@@ -1224,6 +1366,16 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
         "summary": f"Wrote {path}",
         "status": "written",
     }
+    # C-4: when writing a unified patch file, surface applyability to the model.
+    rel = _normalized_workspace_rel(path)
+    if rel.endswith((".patch", ".diff")):
+        check = _unified_patch_apply_precheck(content)
+        if check:
+            out.update(check)
+            if check.get("applies") is False:
+                err = check.get("apply_check_error") or "git apply --check failed"
+                out["summary"] = f"Wrote {path} but patch does not apply: {err}"
+    return out
 
 
 async def rename_file(
@@ -1287,8 +1439,15 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
     if not target.exists():
         return {"error": f"File not found: {path}"}
     text = target.read_text(encoding="utf-8", errors="replace")
-    if old_text not in text:
-        return {"error": "old_text not found", "path": path}
+    count = text.count(old_text)
+    if count == 0:
+        return {"error": "old_text not found", "path": path, "applies": False}
+    if count > 1:
+        return {
+            "error": f"old_text matches {count} times; use a longer unique span",
+            "path": path,
+            "applies": False,
+        }
     updated = text.replace(old_text, new_text, 1)
     target.write_text(updated, encoding="utf-8")
     return {
@@ -1298,6 +1457,7 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         "bytes_written": len(updated.encode("utf-8")),
         "summary": f"Edited {path}",
         "status": "edited",
+        "applies": True,
     }
 
 

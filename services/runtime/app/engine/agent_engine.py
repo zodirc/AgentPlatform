@@ -1049,9 +1049,22 @@ class AgentEngine:
                 )
 
         if tool_name == "propose_patch" and "patch_id" in result:
+            # Event schema is strict; keep apply_check fields on the tool result
+            # (model-visible) but do not put them on patch.proposed.
+            proposed_payload = {
+                k: v
+                for k, v in result.items()
+                if k
+                not in {
+                    "applies",
+                    "apply_check",
+                    "apply_check_error",
+                    "apply_check_warning",
+                }
+            }
             await self._write_event(
                 event_type="patch.proposed",
-                payload=result,
+                payload=proposed_payload,
                 step_index=step_index,
             )
             if (

@@ -123,14 +123,33 @@ async def test_resolve_path_rejects_escape(workspace: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_propose_and_apply_patch(workspace: Path) -> None:
+    (workspace / "f.md").write_text("old content here", encoding="utf-8")
     proposed = await core.propose_patch("f.md", "old", "new", summary="s")
     assert proposed["status"] == "pending"
+    assert proposed["applies"] is True
     assert proposed["patch_id"].startswith("patch-")
 
-    (workspace / "f.md").write_text("hello", encoding="utf-8")
     applied = await core.apply_patch("f.md", "hello-world", force_full_replace=True)
     assert applied["status"] == "applied"
     assert (workspace / "f.md").read_text(encoding="utf-8") == "hello-world"
+
+
+@pytest.mark.asyncio
+async def test_propose_patch_rejects_missing_span(workspace: Path) -> None:
+    (workspace / "f.md").write_text("hello", encoding="utf-8")
+    bad = await core.propose_patch("f.md", "missing", "new", summary="s")
+    assert bad["status"] == "error"
+    assert bad["applies"] is False
+    assert "not found" in bad["error"]
+
+
+@pytest.mark.asyncio
+async def test_propose_patch_rejects_ambiguous_span(workspace: Path) -> None:
+    (workspace / "f.md").write_text("aa aa", encoding="utf-8")
+    bad = await core.propose_patch("f.md", "aa", "bb", summary="s")
+    assert bad["status"] == "error"
+    assert bad["applies"] is False
+    assert "matches" in bad["error"]
 
 
 @pytest.mark.asyncio

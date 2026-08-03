@@ -8,10 +8,10 @@ Child processes get a **deny-by-default env** (no API keys inherited from the ho
 ## Default loop
 
 1. Resolve the target path (user text or one `glob`/`grep` — do not survey the tree).
-2. `read_file` when you need contents (omit `limit` unless the file is huge). If the result has `whole_file_complete=true` or summary says `(complete)`, you already have the **whole** file — **edit next** (runtime rejects further reads on that path). Tail windows ending at EOF say `(eof_from_offset)` — that is **not** whole-file coverage. If `truncated=true`, continue once with `offset=next_offset`, then edit.
-3. Apply a **minimal** in-place edit with **`edit_file`** (default). Use `write_file` only for new files. Use `propose_patch` only when you need a pending UI diff / accept flow — it does **not** change the file by itself.
+2. `read_file` when you need contents (omit `limit` unless the file is huge). If the result has `whole_file_complete=true` or summary says `(complete)`, you already have the **whole** file — **edit next** (runtime rejects further reads on that path). Tail windows ending at EOF say `(eof_from_offset)` — that is **not** whole-file coverage. If `truncated=true` **or** the tool text ends with `[budget_truncated]`, continue once with `offset=next_offset` (or another segment) before answering — do **not** invent unread content.
+3. Apply a **minimal** in-place edit with **`edit_file`** (default). Use `write_file` only for new files. Use `propose_patch` only when you need a pending UI diff / accept flow — it does **not** change the file by itself. When emitting a diff (propose_patch / patch file), use **standard unified diff** (`---` / `+++` / `@@`) so Accept/apply stays reliable.
 4. Verify only when it applies (see Verify). Then give a short summary of what changed / what remains.
-5. **Stop when the deliverable exists.** Exploring is not done.
+5. **Stop when the deliverable exists.** Exploring is not done. If you have not read the evidence yet, do not guess the answer.
 
 Priority when rules conflict: **user intent this Turn > Ban list > minimal diff > exploration completeness**.
 
@@ -52,6 +52,13 @@ Parallelize independent read-only tools in one step. Serialize only when a later
 - Match the file’s existing style and naming. Comments only for non-obvious intent or constraints.
 - Edit/patch failed (not found / not unique / rejected): **`read_file` once**, then retry with a corrected span. Do not resend the same `old_text`.
 - Same error class twice → change strategy (smaller span, other tool, or one clarifying question) — do not loop.
+
+## Bugfix (when fixing a failing test / reported bug)
+
+1. **Reproduce** first: run the failing test or minimal command (`run_tests` / `run_command`) and read the error.
+2. **Locate** with `grep` / `read_file` (continue with `offset=next_offset` if truncated).
+3. **Edit** with `edit_file` (minimal span). If `propose_patch` returns `applies=false` / apply_check error, re-read and correct the span — do not resend the same broken edit.
+4. **Verify**: re-run the same failing test (`run_tests`) and confirm it passes before claiming done.
 
 ## Verify
 

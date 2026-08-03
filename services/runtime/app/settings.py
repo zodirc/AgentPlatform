@@ -203,6 +203,14 @@ class Settings(BaseSettings):
     writing_export_verify_mode: str = "warn"
     # Fraction of working message budget kept verbatim in collapse tail.
     context_hot_zone_ratio: float = 0.35
+    # C-1 / round1: per-tool_result char budgets (Settings, not module constants).
+    # Default 4k for ordinary tool_result; latest read_file body may use the higher
+    # budget so long reads are not snipped to ~3% before the model sees them.
+    tool_result_char_budget: int = 4_000
+    tool_result_latest_read_char_budget: int = 32_000
+    # When True, snip/collapse must not drop the current user instruction group
+    # or the latest read_file cycle (snip floor).
+    context_snip_protect_latest_read: bool = True
     otel_enabled: bool = False
     otel_service_name: str = "agent-runtime"
 

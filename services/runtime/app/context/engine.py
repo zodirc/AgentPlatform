@@ -21,7 +21,9 @@ from app.tools.registry import (
 
 logger = logging.getLogger(__name__)
 
+# Fallback defaults when Settings import is unavailable (unit isolation).
 TOOL_RESULT_CHAR_BUDGET = 4_000
+TOOL_RESULT_LATEST_READ_CHAR_BUDGET = 32_000
 SHORT_TOOL_RESULT_MAX_CHARS = 800
 
 
@@ -369,18 +371,20 @@ class ContextEngine:
         )
         tokens_before = window_before["tokens_after"]
 
-        messages, budgeted = _apply_tool_result_budget(
-            messages, TOOL_RESULT_CHAR_BUDGET, preserve_short=True
-        )
-        if budgeted:
-            trace.append({"strategy": "budget", "detail": f"truncated_{budgeted}_tool_results"})
-
-        # docs/34 RC4: drop stale read_file bodies before microcompact (always-on, cheap).
+        # C-1: fold stale reads first, then apply differential budgets so the
+        # latest read_file body can keep up to latest_read budget (default 32k).
         messages, folded_reads = _fold_stale_read_file_results(messages, keep_last_per_path=1)
         if folded_reads:
             trace.append(
                 {"strategy": "read_fold", "detail": f"folded_{folded_reads}_read_file_results"}
             )
+
+        messages, budgeted = _apply_tool_result_budget(
+            messages,
+            preserve_short=True,
+        )
+        if budgeted:
+            trace.append({"strategy": "budget", "detail": f"truncated_{budgeted}_tool_results"})
 
         messages, micro = _microcompact_tool_results(messages)
         if micro:
@@ -417,7 +421,8 @@ class ContextEngine:
             )
             if fill_ratio < policy.fill_snip:
                 break
-            if not _pop_oldest_message_group(messages):
+            protect_from = _protected_tail_start(messages)
+            if not _pop_oldest_message_group(messages, protect_from=protect_from):
                 break
             trace.append({"strategy": "snip", "detail": "dropped_oldest_message"})
 
@@ -750,12 +755,94 @@ def _dropped_tools_summary(messages: list[dict[str, Any]]) -> str:
     return "dropped tools: " + ", ".join(parts)
 
 
+def _budget_limits() -> tuple[int, int, bool]:
+    """Return (default_budget, latest_read_budget, snip_protect)."""
+    try:
+        from app.settings import settings
+
+        return (
+            int(settings.tool_result_char_budget),
+            int(settings.tool_result_latest_read_char_budget),
+            bool(settings.context_snip_protect_latest_read),
+        )
+    except Exception:  # noqa: BLE001
+        return (
+            TOOL_RESULT_CHAR_BUDGET,
+            TOOL_RESULT_LATEST_READ_CHAR_BUDGET,
+            True,
+        )
+
+
+def _latest_read_file_tool_use_ids(messages: list[dict[str, Any]]) -> set[str]:
+    """Tool-use ids of the chronologically latest read_file result (any path)."""
+    name_by_id = _tool_use_name_by_id(messages)
+    latest_id: str | None = None
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "tool_result":
+                continue
+            tid = str(block.get("tool_use_id") or "")
+            if name_by_id.get(tid) == "read_file":
+                latest_id = tid
+    return {latest_id} if latest_id else set()
+
+
+def _protected_tail_start(messages: list[dict[str, Any]]) -> int:
+    """Index where protected tail begins (current instruction + latest read cycle).
+
+    Messages ``[:start]`` may be snipped; ``[start:]`` must remain when
+    ``context_snip_protect_latest_read`` is on.
+    """
+    _, _, protect = _budget_limits()
+    if not protect or not messages:
+        return 0
+
+    last_user = 0
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "user":
+            last_user = i
+
+    name_by_id = _tool_use_name_by_id(messages)
+    latest_read_msg: int | None = None
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "tool":
+            continue
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "tool_result":
+                continue
+            tid = str(block.get("tool_use_id") or "")
+            if name_by_id.get(tid) == "read_file":
+                latest_read_msg = i
+
+    protect_at = last_user
+    if latest_read_msg is not None:
+        j = latest_read_msg
+        while j > 0 and messages[j].get("role") == "tool":
+            j -= 1
+        if _message_has_tool_use(messages[j]):
+            protect_at = min(protect_at, j)
+        else:
+            protect_at = min(protect_at, latest_read_msg)
+    return max(0, protect_at)
+
+
 def _apply_tool_result_budget(
     messages: list[dict[str, Any]],
-    char_budget: int,
+    char_budget: int | None = None,
     *,
     preserve_short: bool = False,
+    latest_read_budget: int | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
+    default_budget, read_budget, _ = _budget_limits()
+    if char_budget is not None:
+        default_budget = int(char_budget)
+    if latest_read_budget is not None:
+        read_budget = int(latest_read_budget)
+
+    latest_ids = _latest_read_file_tool_use_ids(messages)
+    name_by_id = _tool_use_name_by_id(messages)
     out: list[dict[str, Any]] = []
     truncated = 0
     for msg in messages:
@@ -776,8 +863,14 @@ def _apply_tool_result_budget(
                 # docs/24: chapter extracts stay intact; do not budget-truncate mid-chapter.
                 new_blocks.append(block)
                 continue
-            if len(text) > char_budget:
-                text = text[:char_budget] + "\n...[budget_truncated]"
+            tid = str(block.get("tool_use_id") or "")
+            limit = (
+                read_budget
+                if tid in latest_ids and name_by_id.get(tid) == "read_file"
+                else default_budget
+            )
+            if len(text) > limit:
+                text = text[:limit] + "\n...[budget_truncated]"
                 truncated += 1
             new_blocks.append({**block, "content": text})
         out.append({**msg, "content": new_blocks})
@@ -950,17 +1043,39 @@ def _microcompact_tool_results(messages: list[dict[str, Any]]) -> tuple[list[dic
     return out, folded
 
 
-def _pop_oldest_message_group(messages: list[dict[str, Any]]) -> bool:
-    """Drop the oldest coherent prefix without leaving orphan tool messages."""
-    while messages and messages[0].get("role") == "tool":
-        messages.pop(0)
-    if len(messages) <= 1:
+def _pop_oldest_message_group(
+    messages: list[dict[str, Any]],
+    *,
+    protect_from: int | None = None,
+) -> bool:
+    """Drop the oldest coherent prefix without leaving orphan tool messages.
+
+    When ``protect_from`` is set (C-1 snip floor), only groups entirely within
+    ``messages[:protect_from]`` may be removed.
+    """
+    limit = len(messages) if protect_from is None else max(0, min(protect_from, len(messages)))
+    if limit <= 0:
         return False
+
+    # Trim leading orphan tool messages only inside the unprotected prefix.
+    while messages and messages[0].get("role") == "tool":
+        if protect_from is not None and protect_from <= 0:
+            return False
+        messages.pop(0)
+        if protect_from is not None:
+            protect_from -= 1
+            limit = max(0, min(protect_from, len(messages)))
+            if limit <= 0:
+                return False
+
+    if len(messages) <= 1 or limit <= 1:
+        return False
+
     if messages[0].get("role") == "assistant" and _message_has_tool_use(messages[0]):
         end = 1
         while end < len(messages) and messages[end].get("role") == "tool":
             end += 1
-        if end >= len(messages):
+        if end >= len(messages) or end > limit:
             return False
         del messages[0:end]
         return True
@@ -968,10 +1083,12 @@ def _pop_oldest_message_group(messages: list[dict[str, Any]]) -> bool:
         end = 1
         while end < len(messages) and messages[end].get("role") != "user":
             end += 1
-        if end >= len(messages):
+        if end >= len(messages) or end > limit:
             return False
         del messages[0:end]
         return True
+    if limit < 1:
+        return False
     messages.pop(0)
     return True
 
@@ -1024,6 +1141,10 @@ def _collapse_tool_history(
     )
     hot_budget = max(1, int(working * policy.hot_zone_ratio))
     tail_start = _tail_start_for_token_budget(messages, hot_budget)
+    # C-1: never collapse away the current instruction / latest read cycle.
+    protect = _protected_tail_start(messages)
+    if protect > 0:
+        tail_start = min(tail_start, protect)
     head = messages[:1] if messages and messages[0].get("role") == "user" else []
     middle = messages[len(head) : tail_start]
     tail = messages[tail_start:]

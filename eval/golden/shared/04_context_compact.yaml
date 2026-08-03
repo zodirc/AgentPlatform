@@ -17,7 +17,9 @@ input:
 model_mode: stub
 
 setup:
-  large_file_chars: 20000
+  # Must exceed Settings.tool_result_latest_read_char_budget (32k) so assemble
+  # still applies the budget strategy and logs "context compaction" (C-1).
+  large_file_chars: 40000
 
 assertions:
   events:

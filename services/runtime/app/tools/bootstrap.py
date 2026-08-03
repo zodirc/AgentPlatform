@@ -72,9 +72,12 @@ def build_registry() -> ToolRegistry:
                 "Queue a surgical edit for UI diff / accept flow: old_text must be an exact "
                 "unique span; new_text replaces only that span. Does NOT modify the file by "
                 "itself — status stays pending until apply_patch or user accept. "
+                "Prechecks applyability (unique span; git apply --check when the worktree "
+                "is a git repo) and returns status=error with apply_check_error if it would "
+                "not apply — re-read and retry, do not resend the same span. "
                 "In agent coding tasks prefer edit_file (applies in place after approval). "
                 "Do not fire many propose_patch calls and then redo the same edits with "
-                "edit_file. If apply fails, read_file once and retry with a corrected span."
+                "edit_file."
             ),
             parameters={
                 "type": "object",
@@ -220,7 +223,9 @@ def build_registry() -> ToolRegistry:
                 "(e.g. 'seed/writing/dramas', 'seed/intel', 'hr', or 'sources/hr'); "
                 "rejects '..' / absolute paths. "
                 "When omitted, ScenarioProfile may apply a default prefix (intel → seed/intel). "
-                "Avoid repeating the same query; use at most a few searches per topic."
+                "If top hits look weak or off-topic, rephrase the query once or twice "
+                "(stay within the per-turn search cap) — do not invent documents. "
+                "Avoid repeating the identical query; use at most a few searches per topic."
             ),
             parameters={
                 "type": "object",
@@ -451,7 +456,8 @@ def build_registry() -> ToolRegistry:
                 "Semantic / hybrid search over the workspace codebase for a natural-language "
                 "or keyword query. Use when the path is unknown or you need related symbols. "
                 "Prefer grep for exact string/regex matches; prefer glob for filename patterns; "
-                "prefer read_file when the path is already known."
+                "prefer read_file when the path is already known. "
+                "If results look weak, rephrase once or twice within the turn search budget."
             ),
             parameters={
                 "type": "object",

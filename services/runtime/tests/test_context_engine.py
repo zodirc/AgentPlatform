@@ -12,6 +12,7 @@ def test_context_engine_truncates_large_tool_results() -> None:
     from app.engine.state import assistant_tool_uses, tool_result_message
 
     engine = ContextEngine(token_budget=500)
+    # Non-read tools still use the default 4k budget (C-1).
     long_text = "x" * 10_000
     state = TurnState(
         turn_id=uuid4(),
@@ -21,7 +22,7 @@ def test_context_engine_truncates_large_tool_results() -> None:
         scenario_id="writing",
         messages=[
             user_message("hi"),
-            assistant_tool_uses([{"id": "t1", "name": "read_file", "input": {"path": "a.md"}}]),
+            assistant_tool_uses([{"id": "t1", "name": "list_dir", "input": {"path": "."}}]),
             tool_result_message("t1", long_text),
         ],
         usage=Usage(),
@@ -31,6 +32,115 @@ def test_context_engine_truncates_large_tool_results() -> None:
     blob = str(assembled)
     assert engine.last_compaction_trace
     assert "budget_truncated" in blob or "autocompact" in blob or "collapsed" in blob
+
+
+def test_latest_read_file_keeps_large_body() -> None:
+    """C-1: latest read_file uses higher char budget (default 32k), not 4k."""
+    from app.context.engine import _apply_tool_result_budget
+    from app.engine.state import assistant_tool_uses, tool_result_message
+
+    body = "ANSWER_NEAR_END_" + ("y" * 12_000) + "_TAIL"
+    messages = [
+        user_message("q"),
+        assistant_tool_uses([{"id": "r1", "name": "read_file", "input": {"path": "p.md"}}]),
+        tool_result_message("r1", body),
+    ]
+    out, truncated = _apply_tool_result_budget(messages, preserve_short=True)
+    text = out[-1]["content"][0]["content"]
+    assert truncated == 0
+    assert "ANSWER_NEAR_END_" in text
+    assert "_TAIL" in text
+    assert "[budget_truncated]" not in text
+
+
+def test_stale_read_still_budgeted_after_fold() -> None:
+    """C-1: after read_fold, only the latest path body is large; older are stubs."""
+    from app.engine.state import assistant_tool_uses, tool_result_message
+
+    engine = ContextEngine(token_budget=200_000)
+    pad_a = json.dumps({"content": "A" * 8_000, "path": "a.md"}, ensure_ascii=False)
+    pad_b = json.dumps({"content": "B" * 8_000, "path": "a.md"}, ensure_ascii=False)
+    state = TurnState(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="agent",
+        messages=[
+            user_message("read twice"),
+            assistant_tool_uses([{"id": "r1", "name": "read_file", "input": {"path": "a.md"}}]),
+            tool_result_message("r1", pad_a),
+            assistant_tool_uses([{"id": "r2", "name": "read_file", "input": {"path": "a.md"}}]),
+            tool_result_message("r2", pad_b),
+        ],
+        usage=Usage(),
+    )
+    assembled = engine.assemble(system_prompt="sys", state=state)
+    blob = str(assembled)
+    assert "BBBB" in blob or "B" * 100 in blob
+    strategies = [e.get("strategy") for e in engine.last_compaction_trace]
+    assert "read_fold" in strategies
+
+
+def test_snip_floor_keeps_latest_read_and_instruction() -> None:
+    """C-1: snip must not drop the current user turn or latest read_file cycle."""
+    from app.context.engine import _pop_oldest_message_group, _protected_tail_start
+    from app.engine.state import assistant_tool_uses, tool_result_message
+
+    marker = "PROTECTED_READ_BODY_" + ("z" * 200)
+    messages = [
+        user_message("old task one"),
+        assistant_tool_uses([{"id": "o1", "name": "list_dir", "input": {"path": "."}}]),
+        tool_result_message("o1", '{"entries":[]}'),
+        user_message("old task two"),
+        assistant_tool_uses([{"id": "o2", "name": "list_dir", "input": {"path": "."}}]),
+        tool_result_message("o2", '{"entries":[]}'),
+        user_message("CURRENT_INSTRUCTION_MARKER"),
+        assistant_tool_uses([{"id": "r1", "name": "read_file", "input": {"path": "big.md"}}]),
+        tool_result_message("r1", marker),
+    ]
+    protect = _protected_tail_start(messages)
+    assert protect > 0
+    # Exhaust unprotected prefix via snip floor.
+    while _pop_oldest_message_group(messages, protect_from=_protected_tail_start(messages)):
+        pass
+    blob = str(messages)
+    assert "CURRENT_INSTRUCTION_MARKER" in blob
+    assert "PROTECTED_READ_BODY_" in blob
+
+    # Assemble with autocompact disabled so snip floor is the path under test.
+    policy = CompactionPolicy(
+        model_window_tokens=400,
+        output_reserve_tokens=50,
+        fill_collapse=0.5,
+        fill_snip=0.55,
+        fill_autocompact=1.01,
+        hot_zone_ratio=0.35,
+    )
+    engine = ContextEngine(policy=policy)
+    state = TurnState(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="agent",
+        messages=[
+            user_message("old task one"),
+            assistant_tool_uses([{"id": "o1", "name": "list_dir", "input": {"path": "."}}]),
+            tool_result_message("o1", '{"entries":[]}'),
+            user_message("old task two"),
+            assistant_tool_uses([{"id": "o2", "name": "list_dir", "input": {"path": "."}}]),
+            tool_result_message("o2", '{"entries":[]}'),
+            user_message("CURRENT_INSTRUCTION_MARKER"),
+            assistant_tool_uses([{"id": "r1", "name": "read_file", "input": {"path": "big.md"}}]),
+            tool_result_message("r1", marker),
+        ],
+        usage=Usage(),
+    )
+    assembled = engine.assemble(system_prompt="sys", state=state)
+    blob2 = str(assembled)
+    assert "CURRENT_INSTRUCTION_MARKER" in blob2
+    assert "PROTECTED_READ_BODY_" in blob2
 
 
 def test_summarize_messages_extracts_snippets() -> None:
@@ -381,3 +491,47 @@ def test_tool_result_budget_preserves_writing_section_extract() -> None:
     assert truncated == 0
     assert "X" * 100 in out[0]["content"][0]["content"]
     assert "budget_truncated" not in out[0]["content"][0]["content"]
+
+
+def test_assemble_ms_large_latest_read_stays_bounded() -> None:
+    """C-1 R5: large latest read_file must assemble without pathological delay."""
+    from app.engine.state import assistant_tool_uses, tool_result_message
+
+    body = ("ANSWER_MARKER_" + ("z" * 28_000) + "_END")
+    policy = CompactionPolicy(
+        model_window_tokens=200_000,
+        output_reserve_tokens=4_000,
+        fill_collapse=0.95,
+        fill_snip=0.97,
+        fill_autocompact=1.01,
+        hot_zone_ratio=0.35,
+    )
+    times: list[float] = []
+    for _ in range(5):
+        engine = ContextEngine(policy=policy)
+        state = TurnState(
+            turn_id=uuid4(),
+            session_id=uuid4(),
+            run_id=uuid4(),
+            trace_id=uuid4(),
+            scenario_id="agent",
+            messages=[
+                user_message("read the long file and answer"),
+                assistant_tool_uses(
+                    [{"id": "r1", "name": "read_file", "input": {"path": "big.md"}}]
+                ),
+                tool_result_message("r1", body),
+            ],
+            usage=Usage(),
+        )
+        assembled = engine.assemble(system_prompt="sys", state=state)
+        blob = str(assembled)
+        assert "ANSWER_MARKER_" in blob
+        assert "_END" in blob
+        times.append(float(engine.last_assemble_ms))
+    assert all(t >= 0 for t in times)
+    # Weak host guardrail: median under 250ms, max under 1s (string/budget only).
+    times_sorted = sorted(times)
+    median = times_sorted[len(times_sorted) // 2]
+    assert median < 250.0, times
+    assert max(times) < 1000.0, times
