@@ -87,6 +87,10 @@ class OfficialLiveRun:
     context_limit: int = 0
     retrieval_query_limit: int = 0
     l1_max_parallel: int = 2
+    # L1 arms (m3): free = SCORECARD primary; forced/oracle = L2 diagnostics.
+    retrieval_arm: str = "free"
+    context_arm: str = "free"
+    coding_checkout_repo: bool = True
     model: dict[str, Any] | None = None
     logs: list[dict[str, Any]] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -231,6 +235,9 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "context_limit": run.context_limit,
             "retrieval_query_limit": run.retrieval_query_limit,
             "l1_max_parallel": run.l1_max_parallel,
+            "retrieval_arm": run.retrieval_arm,
+            "context_arm": run.context_arm,
+            "coding_checkout_repo": run.coding_checkout_repo,
             "bench_job_id": run._bench_job_id,
             "phase_hint": run.phase_hint,
             "model": _model_meta_safe(run.model),
@@ -533,6 +540,9 @@ async def create_and_start(
     context_limit: int = 0,
     retrieval_query_limit: int = 0,
     l1_max_parallel: int = 2,
+    retrieval_arm: str = "free",
+    context_arm: str = "free",
+    coding_checkout_repo: bool = True,
 ) -> OfficialLiveRun:
     cleaned: list[str] = []
     for t in targets:
@@ -590,6 +600,9 @@ async def create_and_start(
         context_limit=max(0, int(context_limit or 0)),
         retrieval_query_limit=max(0, int(retrieval_query_limit or 0)),
         l1_max_parallel=max(1, min(8, int(l1_max_parallel or 2))),
+        retrieval_arm=(retrieval_arm or "free").strip().lower(),
+        context_arm=(context_arm or "free").strip().lower(),
+        coding_checkout_repo=bool(coding_checkout_repo),
         model=model,
         progress_total=len(cleaned),
         phase_hint=(
@@ -854,8 +867,8 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             "message": "[ops] L1 agent-path — product Session/Turn (not bench worker)",
         },
     )
-    run.current_phase = "eval"
-    run.phase_hint = "L1：主 agent Turn 评测中"
+    run.current_phase = "pull"
+    run.phase_hint = "① 拉取数据集（已有则跳过）…"
 
     async def on_progress(ev: dict[str, Any]) -> None:
         if run.cancel_requested:
@@ -863,6 +876,20 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
         msg = str(ev.get("message") or ev.get("kind") or "")
         if msg:
             await _publish(run, {"kind": "log", "message": msg})
+            low = msg.lower()
+            if (
+                msg.startswith("[pull]")
+                or msg.startswith("[progress] pull")
+                or "[l1] pull" in low
+            ):
+                run.current_phase = "pull"
+                hint = msg if len(msg) <= 140 else msg[:137] + "…"
+                run.phase_hint = hint
+                await _publish(run, {"kind": "phase", "message": hint})
+            elif run.current_phase == "pull" and msg.startswith("[L1]") and "pull" not in low:
+                run.current_phase = "eval"
+                run.phase_hint = "② L1 评测中…"
+                await _publish(run, {"kind": "phase", "message": run.phase_hint})
         if len(run.logs) % 15 == 0:
             await _persist_snapshot(run)
 
@@ -909,6 +936,10 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             max_parallel=run.l1_max_parallel,
             on_progress=on_progress,
             on_suite_done=on_suite_done,
+            retrieval_arm=run.retrieval_arm,
+            context_arm=run.context_arm,
+            coding_checkout_repo=run.coding_checkout_repo,
+            coding_harness=run.coding_harness,
         )
     except Exception as exc:  # noqa: BLE001
         run.error = str(exc)
@@ -1184,6 +1215,9 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "context_limit": run.context_limit,
         "retrieval_query_limit": run.retrieval_query_limit,
         "l1_max_parallel": run.l1_max_parallel,
+        "retrieval_arm": run.retrieval_arm,
+        "context_arm": run.context_arm,
+        "coding_checkout_repo": run.coding_checkout_repo,
         "model": _model_meta_safe(run.model),
         "created_at": run.created_at,
         "finished_at": run.finished_at,
@@ -1220,6 +1254,10 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
             "coding_tier": run.coding_tier,
             "coding_n_instances": run.coding_n_instances,
             "coding_harness": run.coding_harness,
+            "eval_path": run.eval_path,
+            "retrieval_arm": run.retrieval_arm,
+            "context_arm": run.context_arm,
+            "coding_checkout_repo": run.coding_checkout_repo,
             "bench_job_id": run._bench_job_id,
             "model": _model_meta_safe(run.model),
             "reclaimed": bool(

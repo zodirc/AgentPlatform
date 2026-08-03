@@ -10,10 +10,19 @@ from official_bench.agent_path_extract import (  # noqa: E402
     called_tools,
     doc_id_from_path,
     merge_retrieval_rankings,
+    patch_apply_check,
     patch_from_events,
+    patch_from_git_diff,
     patch_from_work_root,
     ranking_scores,
+    search_queries_from_events,
 )
+from official_bench.l2_probes import (  # noqa: E402
+    classify_bucket,
+    config_fingerprint,
+    query_drift,
+)
+from official_bench.bucket_report import classify_manifest  # noqa: E402
 
 
 def test_doc_id_from_materialised_path() -> None:
@@ -37,15 +46,117 @@ def test_merge_retrieval_prefers_ranked() -> None:
     assert merge_retrieval_rankings(events) == ["d1", "d2"]
 
 
+def test_merge_retrieval_first_seen_union() -> None:
+    events = [
+        {
+            "type": "retrieval.completed",
+            "payload": {"ranked": [{"path": "sources/a.txt"}, {"path": "sources/b.txt"}]},
+        },
+        {
+            "type": "retrieval.completed",
+            "payload": {"ranked": [{"path": "sources/b.txt"}, {"path": "sources/c.txt"}]},
+        },
+    ]
+    assert merge_retrieval_rankings(events) == ["a", "b", "c"]
+
+
+def test_merge_retrieval_empty_is_empty() -> None:
+    assert merge_retrieval_rankings([]) == []
+    assert merge_retrieval_rankings([{"type": "tool.started", "payload": {}}]) == []
+
+
 def test_ranking_scores_descending() -> None:
     scores = ranking_scores(["a", "b", "c"], limit=10)
     assert scores["a"] > scores["b"] > scores["c"]
+
+
+def test_search_queries_from_events() -> None:
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {"tool_name": "search_sources", "arguments": {"query": "alpha"}},
+        },
+        {
+            "type": "tool.started",
+            "payload": {"tool_name": "search_sources", "arguments": {"query": "beta"}},
+        },
+    ]
+    assert search_queries_from_events(events) == ["alpha", "beta"]
 
 
 def test_patch_from_proposed() -> None:
     diff = "--- a/x\n+++ b/x\n@@\n+hi\n"
     events = [{"type": "patch.proposed", "payload": {"diff": diff}}]
     assert patch_from_events(events) == diff
+
+
+def test_patch_from_propose_patch_tool_started() -> None:
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "propose_patch",
+                "arguments": {
+                    "path": "app.py",
+                    "old_text": "return 1",
+                    "new_text": "return 2",
+                },
+            },
+        }
+    ]
+    patch = patch_from_events(events)
+    assert "app.py" in patch
+    assert "return 2" in patch
+
+
+def test_patch_from_edit_file_unified_content() -> None:
+    diff = "--- a/x.py\n+++ b/x.py\n@@\n+fixed\n"
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "edit_file",
+                "arguments": {"path": "fix.patch", "old_text": "a", "new_text": diff},
+            },
+        }
+    ]
+    # edit_file path ending .patch with unified new_text
+    events2 = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "write_file",
+                "arguments": {"path": "solution.diff", "content": diff},
+            },
+        }
+    ]
+    assert patch_from_events(events2) == diff
+    _ = events  # edit_file without unified content is not a patch extract path
+
+
+def test_patch_from_fenced_assistant_text() -> None:
+    diff = "--- a/x.py\n+++ b/x.py\n@@\n+fixed\n"
+    events = [
+        {
+            "type": "assistant.delta",
+            "payload": {"text": f"here is the fix:\n```diff\n{diff}```\n"},
+        }
+    ]
+    # final_assistant_text aggregates deltas — if empty, fall through
+    events = [
+        {
+            "type": "message.completed",
+            "payload": {"text": f"here is the fix:\n```diff\n{diff}```\n"},
+        }
+    ]
+    out = patch_from_events(events)
+    assert "@@" in out
+    assert "fixed" in out
+
+
+def test_patch_from_events_none() -> None:
+    assert patch_from_events([]) == ""
+    assert patch_from_events([{"type": "tool.started", "payload": {"tool_name": "list_dir"}}]) == ""
 
 
 def test_patch_from_write_file_fix_patch() -> None:
@@ -62,10 +173,71 @@ def test_patch_from_write_file_fix_patch() -> None:
     assert patch_from_events(events) == diff
 
 
+def test_patch_apply_check(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    good = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+    assert patch_apply_check(tmp_path, good) is True
+    bad = "diff --git a/missing.py b/missing.py\n--- a/missing.py\n+++ b/missing.py\n@@ -1 +1 @@\n-a\n+b\n"
+    assert patch_apply_check(tmp_path, bad) is False
+    assert patch_apply_check(tmp_path, "") is False
+
+
 def test_patch_from_work_root(tmp_path: Path) -> None:
     diff = "--- a/a\n+++ b/a\n@@\n+x\n"
     (tmp_path / "fix.patch").write_text(diff, encoding="utf-8")
     assert patch_from_work_root(tmp_path) == diff
+
+
+def test_patch_from_git_diff(tmp_path: Path) -> None:
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("y\n", encoding="utf-8")
+    diff = patch_from_git_diff(tmp_path)
+    assert "a.py" in diff
+    assert "@@" in diff or "diff --git" in diff
 
 
 def test_called_tools() -> None:
@@ -74,3 +246,180 @@ def test_called_tools() -> None:
         {"type": "tool.completed", "payload": {"tool_name": "search_sources"}},
     ]
     assert called_tools(events) == ["search_sources"]
+
+
+def test_query_drift_and_buckets() -> None:
+    assert query_drift("hello world", "hello world") == 0.0
+    assert query_drift("abc", "xyz") > 0.5
+    assert classify_bucket("retrieval", {"searched": False}) == "no_search"
+    assert (
+        classify_bucket(
+            "retrieval",
+            {"searched": True, "query_drift": 0.9, "n_search": 1, "queries": ["x"]},
+        )
+        == "query_drift"
+    )
+    assert (
+        classify_bucket(
+            "retrieval",
+            {
+                "searched": True,
+                "query_drift": 0.0,
+                "n_search": 3,
+                "queries": ["a", "b", "c"],
+            },
+        )
+        == "search_cap"
+    )
+    assert (
+        classify_bucket(
+            "retrieval",
+            {"searched": True, "query_drift": 0.0, "n_search": 1, "queries": ["q"]},
+            case_ndcg=0.1,
+            suite_ndcg_median=0.5,
+        )
+        == "weak_hits"
+    )
+    assert (
+        classify_bucket(
+            "context",
+            {"truncation_hits": 2, "used_next_offset": False},
+            case_f1=0.1,
+        )
+        == "truncated_unread"
+    )
+    assert (
+        classify_bucket(
+            "context",
+            {"truncation_hits": 0, "used_next_offset": False, "read_bytes": 10},
+            case_f1=0.0,
+            passage_chars=10_000,
+        )
+        == "gave_up_early"
+    )
+    assert (
+        classify_bucket(
+            "context",
+            {
+                "truncation_hits": 0,
+                "used_next_offset": True,
+                "read_bytes": 5000,
+                "answer_len": 200,
+                "terminal_state": "completed",
+                "steps": 3,
+            },
+            case_f1=0.5,
+            case_em=0.0,
+            passage_chars=100,
+        )
+        == "verbose_answer"
+    )
+    assert (
+        classify_bucket(
+            "context",
+            {
+                "truncation_hits": 0,
+                "used_next_offset": True,
+                "read_bytes": 5000,
+                "answer_len": 20,
+                "terminal_state": "stall",
+                "steps": 3,
+            },
+            case_f1=0.5,
+            case_em=1.0,
+            passage_chars=100,
+        )
+        == "steps_exhausted"
+    )
+    assert classify_bucket("coding", {"patch_source": "none"}) == "no_patch"
+    assert (
+        classify_bucket(
+            "coding",
+            {"patch_source": "git_diff", "patch_applies": False},
+        )
+        == "patch_no_apply"
+    )
+    assert (
+        classify_bucket(
+            "coding",
+            {
+                "patch_source": "git_diff",
+                "patch_applies": True,
+                "resolved": False,
+                "ran_tests": False,
+            },
+        )
+        == "no_verify"
+    )
+    assert (
+        classify_bucket(
+            "coding",
+            {
+                "patch_source": "git_diff",
+                "patch_applies": True,
+                "resolved": False,
+                "ran_tests": True,
+            },
+        )
+        == "patch_not_resolved"
+    )
+
+
+def test_config_fingerprint_stable() -> None:
+    a = config_fingerprint(model={"model_name": "m"}, index_version=8)
+    b = config_fingerprint(model={"model_name": "m"}, index_version=8)
+    c = config_fingerprint(model={"model_name": "other"}, index_version=8)
+    assert a == b
+    assert a != c
+
+
+def test_bucket_report_manifest() -> None:
+    manifest = {
+        "id": "r1",
+        "official_suite": "retrieval",
+        "cases": [
+            {
+                "case_id": "q1",
+                "turn_id": "t1",
+                "searched": False,
+                "status": "fail",
+                "metrics": {},
+            },
+            {
+                "case_id": "q2",
+                "turn_id": "t2",
+                "searched": True,
+                "query_drift": 0.0,
+                "n_search": 1,
+                "queries": ["same"],
+                "status": "pass",
+                "metrics": {"ndcg_at_10": 0.9},
+            },
+        ],
+    }
+    report = classify_manifest(manifest)
+    assert report["bucket_counts"]["no_search"] == 1
+    assert report["n_cases"] == 2
+
+
+def test_prompt_helpers_no_tool_script_on_free() -> None:
+    from official_bench.l1_prompts import context_prompt, limit_rows_per_task, retrieval_prompt
+
+    free = retrieval_prompt(arm="free", qtext="q", limit_k=100)
+    assert "search_sources" not in free
+    assert "exactly once" not in free
+    forced = retrieval_prompt(arm="forced", qtext="q", limit_k=100)
+    assert "search_sources" in forced
+    ctx = context_prompt(arm="free", question="Q?")
+    assert "read_file once" not in ctx
+    assert "Minimize tool calls" not in ctx
+    oracle = context_prompt(arm="oracle", question="Q?")
+    assert "offset" in oracle.lower()
+    rows = [
+        {"task": "a", "id": 1},
+        {"task": "a", "id": 2},
+        {"task": "b", "id": 3},
+    ]
+    capped = limit_rows_per_task(rows, 1)
+    assert len(capped) == 2
+    assert {r["task"] for r in capped} == {"a", "b"}

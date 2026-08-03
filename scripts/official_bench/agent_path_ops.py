@@ -35,6 +35,10 @@ def start_and_wait(
     context_limit: int = 0,
     retrieval_query_limit: int = 0,
     l1_max_parallel: int | None = None,
+    retrieval_arm: str = "free",
+    context_arm: str = "free",
+    coding_harness: bool = False,
+    coding_checkout_repo: bool = True,
     poll_s: float = 2.0,
     timeout_s: float = 86_400.0,
 ) -> dict[str, Any]:
@@ -60,11 +64,14 @@ def start_and_wait(
         "context_dry": False,
         "coding_skip_api": False,
         "coding_tier": coding_tier,
-        "coding_harness": False,
+        "coding_harness": bool(coding_harness),
+        "coding_checkout_repo": bool(coding_checkout_repo),
         "retrieval_prod": True,
         "context_limit": context_limit,
         "retrieval_query_limit": retrieval_query_limit,
         "l1_max_parallel": max(1, min(8, int(l1_max_parallel))),
+        "retrieval_arm": retrieval_arm,
+        "context_arm": context_arm,
         "force": True,
     }
     if coding_n_instances is not None:

@@ -1343,7 +1343,7 @@ Cancel 解决「用户主动停」；超时解决「外部依赖 hang」。
 
 | 参数 | 默认 |
 |------|------|
-| stall_threshold | 120s 无新事件视为卡住 |
+| stall_threshold | 180s 无新事件视为卡住 |
 | stall_auto_fail | Phase 1 默认 false，仅告警 |
 
 ### 32.3 max_steps 与 token 预算
@@ -1843,7 +1843,7 @@ Model 面重试+快超时：短暂 429/5xx 少无意义整轮失败；Cancel 仍
     "model": 120,
     "tool_default": 60,
     "step": 300,
-    "stall_threshold": 120
+    "stall_threshold": 180
   },
   "delivery_honesty": {
     "explicit_section_ids": true,
@@ -1882,7 +1882,7 @@ Model 面重试+快超时：短暂 429/5xx 少无意义整轮失败；Cancel 仍
 | LangGraph 单节点机制壳，业务在 AgentEngine | `services/runtime/app/graph/runner.py` 仅 `agent_loop` 一节点 |
 | writing max_steps=40，agent=50 | `scenarios/profiles/writing.yaml` / `agent.yaml` |
 | model_timeout=120s，step_timeout=300s，tool_default=60s | `settings.py` |
-| stall_threshold=120s，poll=30s，auto_fail 默认 false | `settings.py` + `stall_watchdog.py` |
+| stall_threshold=180s，poll=30s，auto_fail 默认 false | `settings.py` + `stall_watchdog.py` |
 | 首字节快超时 15s，connect 10s，max_retries=2 | `settings.py`；gateway 在未 emit 前才重试 |
 | Cancel 可打断 backoff sleep | `ModelGateway._interruptible_sleep` |
 | 只读工具并行、写工具串行 | `AgentEngine` tool 调度注释与实现 |

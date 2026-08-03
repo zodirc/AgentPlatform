@@ -1,7 +1,8 @@
 # Official Bench · Agent-path 调优方案
 
-> **状态**：Phase A 立尺已接线 · **L1 首基线已入库**（`eval/official/baseline/official-small-2026-08-m2.json` / `SCORECARD.md`）· 待归因后开 Phase C  
-> **协议戳记（L1）**：`official-small-2026-08-m2`（L0 对照仍可跑 m1 旁路）  
+> **状态**：Phase A 立尺已接线（**`official-small-2026-08-m3`**）· C-1/C-2 已作**产品票**落地（非 official 驱动）· 待 m3 诚实锚 + 分桶后再宣称 Phase C official Δ  
+> **协议戳记（L1）**：`official-small-2026-08-m3`（L0 对照仍可跑 m1 旁路；m2 为强制臂过渡基线）  
+> **本轮施工**： [official-bench-agent-tuning-round1](official-bench-agent-tuning-round1.md)  
 > **关联**：[ops-eval-console](ops-eval-console.md) · [eval/official/README](../../eval/official/README.md) · [rag-and-sources](rag-and-sources.md) · [05](../core/05-agent-runtime.md) · [06](../core/06-tools-and-context.md) · [13 R1–R5](../core/13-rate-redlines.md) · [baseline](../../eval/official/baseline/README.md)
 
 本文定义两件事，且**因果不可反**：
@@ -298,9 +299,12 @@ make official-bench-update-baseline  # 仅门禁通过后
 - [x] Coding L1：platform Turn + patch 抽取（harness resolve 仍用既有 eval 目标）  
 - [x] Ops UI：评测路径 L1/L0；CLI/make `*-agent`  
 - [x] SCORECARD / baseline 双轨：首份 L1 基线入库（`m2` + `SCORECARD.md`；`m1` 留作 L0）  
-- [ ] Phase B 归因报告（失败桶 → 点菜 §5.3 → **本轮工程调优方案**另开/附录）  
-- [ ] 首条产品票：**归因后**再定（勿在 L1 首跑前锁定）
-
+- [x] 协议 bump **`m3`**：自由主臂 / oracle·forced 诊断臂 / L2 探针 / 分桶分类器 / coding checkout+harness / 双档 SCORECARD+档位 compare（round1 A-1…A-6）  
+- [ ] Phase B 正式归因报告（m3 全量锚 + A-6 分桶勾掉 ⚠）——施工蓝图见 [official-bench-agent-tuning-round1](official-bench-agent-tuning-round1.md)  
+- [x] C-1 / C-2 **产品落地**（大 read 预算 + snip 地板；agent 续读/RAG/diff 薄说明）——单测 + stub golden 绿；**不以 official 涨分作合入叙事**  
+- [x] C-4 **离线面**（抽取/分桶单测；propose_patch apply 预检；Bugfix）——官方 resolve 仍挂锚  
+- [ ] C-1/C-2/C-4 **官方 DoD**：m3 配对复测 + 分桶后再 `update-baseline`  
+- [ ] C-3 网格标定（forced + prod-bench；未在本轮离线清单强跑）
 ---
 
 ## 10. 维护纪律

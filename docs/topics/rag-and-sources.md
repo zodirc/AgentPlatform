@@ -349,7 +349,7 @@ owner / tenant / work
 | **生产质量已验收** | IX4 ✅ prod-bench |
 | 成熟多租户（个人） | IX5/RE4 ✅ MT5c（无 Org） |
 | **RQ1 设计** | §9 口径已定 |
-| **RQ1a–e** | ✅ 库况 · path/tag embed · 叶预算/宽表 · profile · 稀疏 tag（`INDEX_VERSION=7`） |
+| **RQ1a–e** | ✅ 库况 · path/tag embed · 叶预算/宽表 · profile · 稀疏 tag（`INDEX_VERSION=8`） |
 | 全程 | 交互未改；search 不建库；不以 hash/浅常识/上传成功冒充效果 |
 
 ---
@@ -385,7 +385,7 @@ owner / tenant / work
 | 不伤交互速率 / 逻辑 | 不改 `AgentEngine` while、不强制 retrieval、搜索路径不 sync/重嵌；质量进 **Index plane** 与**静态**工具/system 文案 |
 | 贴近成熟 agent | RAG 仍为可选工具 → `tool_result`；笔记/代码继续 grep；模型自选搜几次 / 低分改 `read_file` |
 
-**已落地序：** RQ1d → RQ1a → RQ1b → **RQ1e**（profile）→ **RQ1c**（稀疏 tag）。`INDEX_VERSION=7`。
+**已落地序：** RQ1d → RQ1a → RQ1b → **RQ1e**（profile）→ **RQ1c**（稀疏 tag）。`INDEX_VERSION=8`。
 
 ### 9.1 问题与分流
 

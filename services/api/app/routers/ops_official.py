@@ -57,6 +57,10 @@ class StartOfficialBody(BaseModel):
     retrieval_query_limit: int = Field(default=0, ge=0, le=50_000)
     # L1 only: concurrent Turns within a suite (wall-clock; default 1).
     l1_max_parallel: int = Field(default=1, ge=1, le=8)
+    # L1 arms (protocol m3): free = primary; forced/oracle = L2 diagnostics.
+    retrieval_arm: Literal["free", "forced"] = "free"
+    context_arm: Literal["free", "oracle"] = "free"
+    coding_checkout_repo: bool = True
     force: bool = False
     model: ModelBody | None = None
 
@@ -166,11 +170,14 @@ async def official_meta() -> dict[str, Any]:
                 "eval_path": "agent",
                 "coding_tier": "n5",
                 "coding_harness": False,
+                "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
                 "retrieval_tier": "20",
                 "l1_max_parallel": 1,
-                "hint": "L1 · 检索 20q/集 + 编码 n5 · 并行 1 · 无 harness · 约 1–3h",
+                "retrieval_arm": "free",
+                "context_arm": "free",
+                "hint": "L1 m3 · 自由臂 · 检索 20q/集 + 编码 n5 checkout · 冒烟档",
             },
             {
                 "id": "l1_smoke",
@@ -178,12 +185,15 @@ async def official_meta() -> dict[str, Any]:
                 "targets": ["retrieval", "coding"],
                 "eval_path": "agent",
                 "coding_tier": "n3",
-                "coding_harness": False,
+                "coding_harness": True,
+                "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "10",
                 "retrieval_tier": "10",
                 "l1_max_parallel": 1,
-                "hint": "L1 · 检索/编码更小 · 约 0.5–1.5h",
+                "retrieval_arm": "free",
+                "context_arm": "free",
+                "hint": "L1 m3 · n3+harness 冒烟 · 约 0.5–2h",
             },
             {
                 "id": "l1_three",
@@ -192,24 +202,30 @@ async def official_meta() -> dict[str, Any]:
                 "eval_path": "agent",
                 "coding_tier": "n5",
                 "coding_harness": False,
+                "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
                 "retrieval_tier": "20",
                 "l1_max_parallel": 1,
-                "hint": "L1 三套都开 · 上下文 20 · 约 2–4h",
+                "retrieval_arm": "free",
+                "context_arm": "free",
+                "hint": "L1 三套自由臂 · 每 task 20 · 冒烟档",
             },
             {
                 "id": "l1_full",
-                "label": "小切片全量",
+                "label": "小切片全量（锚点）",
                 "targets": ["retrieval", "context", "coding"],
                 "eval_path": "agent",
                 "coding_tier": "n25",
-                "coding_harness": False,
+                "coding_harness": True,
+                "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "full",
                 "retrieval_tier": "full",
                 "l1_max_parallel": 1,
-                "hint": "qrels 全量 + LongBench 全量 + n25 · 过夜级",
+                "retrieval_arm": "free",
+                "context_arm": "free",
+                "hint": "锚点档 · 全量 qrels + LongBench 全量 + n25+harness · 过夜级",
             },
             {
                 "id": "retrieval_only",
@@ -218,11 +234,14 @@ async def official_meta() -> dict[str, Any]:
                 "eval_path": "agent",
                 "coding_tier": "n5",
                 "coding_harness": False,
+                "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
                 "retrieval_tier": "20",
                 "l1_max_parallel": 1,
-                "hint": "只要检索 L1 · 20q/集",
+                "retrieval_arm": "free",
+                "context_arm": "free",
+                "hint": "只要检索 L1 自由臂 · 20q/集",
             },
         ],
         "capabilities": await _caps(),
@@ -231,11 +250,14 @@ async def official_meta() -> dict[str, Any]:
             "coding_tier": "n5",
             "coding_n_instances": None,
             "coding_harness": False,
+            "coding_checkout_repo": True,
             "retrieval_prod": True,
             "eval_path": "agent",
             "context_tier": "20",
             "retrieval_tier": "20",
             "l1_max_parallel": 1,
+            "retrieval_arm": "free",
+            "context_arm": "free",
             "targets": ["retrieval", "coding"],
         },
         "coding_tiers": [
@@ -537,6 +559,9 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             context_limit=body.context_limit,
             retrieval_query_limit=body.retrieval_query_limit,
             l1_max_parallel=body.l1_max_parallel,
+            retrieval_arm=body.retrieval_arm,
+            context_arm=body.context_arm,
+            coding_checkout_repo=body.coding_checkout_repo,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

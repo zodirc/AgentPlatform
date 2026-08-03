@@ -2,14 +2,14 @@
 
 官方小量：`BEIR` · `LongBench` · `SWE-bench Lite`。  
 数据进 `BENCH_DATA_DIR`（默认 `~/.cache/agentplatform-bench`），**不进 git**。  
-协议：`protocol_version: official-small-2026-08-m1`（见 [`suites.small.yaml`](suites.small.yaml)）。
+协议：见 [`suites.small.yaml`](suites.small.yaml) — L0 `protocol_version_l0: official-small-2026-08-m1`；L1 `protocol_version_l1: official-small-2026-08-m3`。
 
 > **调优方案（主指数 = 主 agent Turn × 官方题集）**：[`docs/topics/official-bench-agent-tuning.md`](../../docs/topics/official-bench-agent-tuning.md)。  
 >
 > **L1（agent-path，已接线）**：Ops 官方页「评测路径 = L1 agent」或  
 > `make official-bench-retrieval-agent` / `context-agent` / `coding-infer-agent`  
 > （需 `make up`、`OPS_TEST_SECRET`、`BENCH_MODEL_*`；冒烟可加 `QUERY_LIMIT=5`）。  
-> 协议戳记 `official-small-2026-08-m2`。L0 component（m1 hybrid/旁路）仍可用作对照。  
+> 协议戳记 `official-small-2026-08-m3`（自由主臂）。`m2` 为强制臂过渡史；L0 component（m1 hybrid/旁路）仍可用作对照。  
 > **中文全流程图**：[`docs/assets/ops/official-l1-agent-path-flow-zh.png`](../../docs/assets/ops/official-l1-agent-path-flow-zh.png)
 
 每次跑分写：
@@ -19,7 +19,7 @@
 - 可视化：`report.html`（浏览器直接打开）
 - Ops：自动 `publish`（需 `OPS_TEST_SECRET` + 栈）→ **官方评测**页 / 历史 `suite=official`
 - **仓库一眼看板**：[`baseline/SCORECARD.md`](baseline/SCORECARD.md)（**现为 L1 m2 主栏**）  
-- **机器锚点**：`baseline/official-small-2026-08-m2.json`（L1）；`m1.json` 为 L0 对照  
+- **机器锚点**：`baseline/official-small-2026-08-m2.json`（L1 过渡）；m3 锚待全量跑后入库；`m1.json` 为 L0 对照
   L1 调优：`make official-bench-*-agent` → `make official-bench-compare` → 认可后 `make official-bench-update-baseline`（协议跟 latest，写 m2）
 
 ---

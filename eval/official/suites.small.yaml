@@ -1,8 +1,11 @@
 # Official small suites — data is pulled into BENCH_DATA_DIR (not committed).
 # Protocol versions are pinned; bump deliberately when changing pulls or metrics.
 
-# L0 component benches still emit this id in older runners.
-# L1 agent-path manifests stamp official-small-2026-08-m2 (see official_agent_path.PROTOCOL_L1).
+# L0 component benches (beir_run / context_run / swe_run bypass path).
+protocol_version_l0: "official-small-2026-08-m1"
+# L1 agent-path manifests stamp this via official_agent_path.PROTOCOL_L1.
+protocol_version_l1: "official-small-2026-08-m3"
+# Legacy alias for older L0 loaders (same as protocol_version_l0).
 protocol_version: "official-small-2026-08-m1"
 
 data_dir_env: BENCH_DATA_DIR

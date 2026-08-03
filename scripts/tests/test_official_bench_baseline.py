@@ -8,7 +8,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from official_bench.baseline import (  # noqa: E402
+    compare_latest_to_baseline,
     extract_suite_snapshot,
+    infer_sample_tier,
+    render_scorecard,
     suite_metrics,
 )
 
@@ -66,8 +69,10 @@ def test_extract_agent_retrieval_prefers_agent_prefix() -> None:
         "status": "completed",
         "finished_at": "2026-08-02T00:00:00+00:00",
         "model_meta": {
-            "protocol_version": "official-small-2026-08-m2",
+            "protocol_version": "official-small-2026-08-m3",
             "eval_path": "agent",
+            "arm": "free",
+            "sample_tier": "smoke",
         },
         "metrics": {
             "ndcg_at_10": 0.40,
@@ -75,11 +80,108 @@ def test_extract_agent_retrieval_prefers_agent_prefix() -> None:
             "hybrid.ndcg_at_10": 0.41,
             "recall_at_100": 0.60,
             "agent.recall_at_100": 0.6019,
+            "agent.n_queries": 20.0,
         },
     }
     snap = extract_suite_snapshot(manifest)
     assert snap is not None
     assert snap["eval_path"] == "agent"
-    assert snap["primary_arm"] == "agent"
+    assert snap["primary_arm"] == "free"
+    assert snap["sample_tier"] == "smoke"
     assert snap["metrics"]["ndcg_at_10"] == 0.403
-    assert snap["protocol_version"] == "official-small-2026-08-m2"
+    assert snap["protocol_version"] == "official-small-2026-08-m3"
+
+
+def test_infer_sample_tier() -> None:
+    assert infer_sample_tier(suite="retrieval", limit_queries=20) == "smoke"
+    assert infer_sample_tier(suite="retrieval", limit_queries=0) == "anchor"
+    assert infer_sample_tier(suite="context", context_limit=10) == "smoke"
+    assert infer_sample_tier(suite="context", context_limit=0) == "anchor"
+    assert (
+        infer_sample_tier(suite="coding", coding_tier="n25", harness=True) == "anchor"
+    )
+    assert (
+        infer_sample_tier(suite="coding", coding_tier="n5", harness=False) == "smoke"
+    )
+
+
+def test_scorecard_dual_sections() -> None:
+    md = render_scorecard(
+        {
+            "protocol_version": "official-small-2026-08-m3",
+            "eval_path": "agent",
+            "updated_at": "2026-08-03T00:00:00+00:00",
+            "suites": {
+                "retrieval": {
+                    "run_id": "a1",
+                    "sample_tier": "anchor",
+                    "primary_arm": "free",
+                    "metrics": {"ndcg_at_10": 0.4, "recall_at_100": 0.5, "n_queries": 400},
+                }
+            },
+            "smoke_suites": {
+                "retrieval": {
+                    "run_id": "s1",
+                    "sample_tier": "smoke",
+                    "primary_arm": "free",
+                    "metrics": {"ndcg_at_10": 0.35, "recall_at_100": 0.4, "n_queries": 20},
+                }
+            },
+        }
+    )
+    assert "主栏 · 锚点档" in md
+    assert "冒烟趋势" in md
+    assert "不作效果结论" in md
+
+
+def test_compare_refuses_tier_mismatch(tmp_path: Path, monkeypatch) -> None:
+    import official_bench.baseline as bl
+
+    monkeypatch.setattr(bl, "BASELINE_DIR", tmp_path)
+    monkeypatch.setattr(bl, "reports_dir", lambda: tmp_path)
+    (tmp_path / "official-small-2026-08-m3.json").write_text(
+        json.dumps(
+            {
+                "protocol_version": "official-small-2026-08-m3",
+                "suites": {
+                    "retrieval": {
+                        "sample_tier": "anchor",
+                        "metrics": {
+                            "ndcg_at_10": 0.5,
+                            "recall_at_100": 0.6,
+                            "map_at_100": 0.4,
+                        },
+                    }
+                },
+                "smoke_suites": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "latest_retrieval.json").write_text(
+        json.dumps(
+            {
+                "id": "smoke1",
+                "official_suite": "retrieval",
+                "status": "completed",
+                "finished_at": "2026-08-03T00:00:00+00:00",
+                "model_meta": {
+                    "protocol_version": "official-small-2026-08-m3",
+                    "eval_path": "agent",
+                    "sample_tier": "smoke",
+                    "arm": "free",
+                },
+                "metrics": {
+                    "agent.ndcg_at_10": 0.3,
+                    "agent.recall_at_100": 0.4,
+                    "agent.map_at_100": 0.2,
+                    "agent.n_queries": 20.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(bl, "protocol_from_latest", lambda: "official-small-2026-08-m3")
+    report = compare_latest_to_baseline(suites=("retrieval",))
+    statuses = {r.get("status") for r in report["rows"] if r.get("status")}
+    assert "tier_mismatch" in statuses

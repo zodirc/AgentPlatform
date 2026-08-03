@@ -78,11 +78,14 @@ type Preset = {
   coding_tier?: string;
   coding_n_instances?: number | null;
   coding_harness?: boolean;
+  coding_checkout_repo?: boolean;
   retrieval_prod?: boolean;
   eval_path?: "agent" | "component";
   context_tier?: ContextTier;
   retrieval_tier?: RetrievalTier;
   l1_max_parallel?: number;
+  retrieval_arm?: "free" | "forced";
+  context_arm?: "free" | "oracle";
   hint: string;
 };
 
@@ -108,11 +111,14 @@ const L1_RUN_PROFILES: Preset[] = [
     eval_path: "agent",
     coding_tier: "n5",
     coding_harness: false,
+    coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
     retrieval_tier: "20",
     l1_max_parallel: 1,
-    hint: "L1 · 检索 20q/集 + 编码 n5 · 并行 1 · 无 harness · 约 1–3h",
+    retrieval_arm: "free",
+    context_arm: "free",
+    hint: "L1 m3 · 自由臂 · 检索 20q/集 + 编码 n5 checkout · 冒烟档",
   },
   {
     id: "l1_smoke",
@@ -120,12 +126,15 @@ const L1_RUN_PROFILES: Preset[] = [
     targets: ["retrieval", "coding"],
     eval_path: "agent",
     coding_tier: "n3",
-    coding_harness: false,
+    coding_harness: true,
+    coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "10",
     retrieval_tier: "10",
     l1_max_parallel: 1,
-    hint: "L1 · 检索/编码更小 · 约 0.5–1.5h",
+    retrieval_arm: "free",
+    context_arm: "free",
+    hint: "L1 m3 · n3+harness 冒烟 · 约 0.5–2h",
   },
   {
     id: "l1_three",
@@ -134,24 +143,30 @@ const L1_RUN_PROFILES: Preset[] = [
     eval_path: "agent",
     coding_tier: "n5",
     coding_harness: false,
+    coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
     retrieval_tier: "20",
     l1_max_parallel: 1,
-    hint: "L1 三套都开 · 上下文 20 · 约 2–4h",
+    retrieval_arm: "free",
+    context_arm: "free",
+    hint: "L1 三套自由臂 · 每 task 20 · 冒烟档",
   },
   {
     id: "l1_full",
-    label: "小切片全量",
+    label: "小切片全量（锚点）",
     targets: ["retrieval", "context", "coding"],
     eval_path: "agent",
     coding_tier: "n25",
-    coding_harness: false,
+    coding_harness: true,
+    coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "full",
     retrieval_tier: "full",
     l1_max_parallel: 1,
-    hint: "qrels 全量 + LongBench 全量 + n25 · 过夜级",
+    retrieval_arm: "free",
+    context_arm: "free",
+    hint: "锚点档 · 全量 qrels + LongBench 全量 + n25+harness · 过夜级",
   },
   {
     id: "retrieval_only",
@@ -160,11 +175,14 @@ const L1_RUN_PROFILES: Preset[] = [
     eval_path: "agent",
     coding_tier: "n5",
     coding_harness: false,
+    coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
     retrieval_tier: "20",
     l1_max_parallel: 1,
-    hint: "只要检索 L1 · 20q/集 · 无需编码模型也可（仍建议有 key）",
+    retrieval_arm: "free",
+    context_arm: "free",
+    hint: "只要检索 L1 自由臂 · 20q/集",
   },
 ];
 
@@ -792,9 +810,13 @@ function parseProgressLine(line: string): DetailProgress | null {
     const eq = part.indexOf("=");
     if (eq > 0) kv[part.slice(0, eq)] = part.slice(eq + 1);
   }
-  // Retrieval (and other) [progress] lines — attribute to retrieval when present.
-  const suite = "retrieval";
   if (kind === "pull" && rest.startsWith("plan")) {
+    const fileHint = `${kv.file || ""} ${rest}`.toLowerCase();
+    const suite = /longbench|multifield|hotpot|narrative/.test(fileHint)
+      ? "context"
+      : /swe|instance/.test(fileHint)
+        ? "coding"
+        : "retrieval";
     return {
       kind: "pull",
       suite,
@@ -806,6 +828,12 @@ function parseProgressLine(line: string): DetailProgress | null {
     const pct = kv.pct != null ? Number(kv.pct) : null;
     const size = kv.size_mib ? ` · ${kv.size_mib} MiB` : "";
     const cached = kv.cached === "1" ? "（缓存跳过）" : "";
+    const fileHint = `${kv.file || ""}`.toLowerCase();
+    const suite = /longbench|multifield|hotpot|narrative|data\.zip/.test(fileHint)
+      ? "context"
+      : /swe|instance/.test(fileHint)
+        ? "coding"
+        : "retrieval";
     return {
       kind: "pull",
       suite,
@@ -816,7 +844,7 @@ function parseProgressLine(line: string): DetailProgress | null {
   if (rest.startsWith("plan")) {
     return {
       kind: "eval",
-      suite,
+      suite: "retrieval",
       label: `评测计划：${kv.datasets || "?"} 集 × ${kv.arms || "?"} 臂 = ${kv.units || "?"} 块`,
       pct: kv.pct != null && Number.isFinite(Number(kv.pct)) ? Number(kv.pct) : 0,
     };
@@ -827,7 +855,7 @@ function parseProgressLine(line: string): DetailProgress | null {
   const unit = kv.unit ? `块 ${kv.unit}` : `集 ${kv.dataset || "?"}`;
   return {
     kind: "eval",
-    suite,
+    suite: "retrieval",
     label: `评测 ${unit} · ${kv.name || ""}${arm} · ${kv.stage || ""}${q}`,
     pct: Number.isFinite(pct as number) ? (pct as number) : null,
   };
@@ -998,6 +1026,9 @@ export function OfficialBenchPage() {
   const [codingTier, setCodingTier] = useState("n5");
   const [codingNInstances, setCodingNInstances] = useState(5);
   const [codingHarness, setCodingHarness] = useState(false);
+  const [codingCheckoutRepo, setCodingCheckoutRepo] = useState(true);
+  const [retrievalArm, setRetrievalArm] = useState<"free" | "forced">("free");
+  const [contextArm, setContextArm] = useState<"free" | "oracle">("free");
   const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
     { id: "n3", n_instances: 3 },
     { id: "n5", n_instances: 5 },
@@ -1554,8 +1585,23 @@ export function OfficialBenchPage() {
                     : (cur?.pct ?? null);
                 return { ...prev, [parsed.suite!]: { ...parsed, pct } };
               });
+            } else if (
+              msg.startsWith("[pull]") ||
+              msg.startsWith("[L1] pull") ||
+              msg.startsWith("[progress] pull")
+            ) {
+              // Untyped pull chatter still drives the detail strip.
+              setSuiteDetails((prev) => ({
+                ...prev,
+                _: {
+                  kind: "pull",
+                  label: msg.replace(/^\[(pull|progress|L1)\]\s*/i, "").slice(0, 120),
+                  pct: prev._?.pct ?? null,
+                },
+              }));
             }
-            if (!msg.startsWith("[progress]")) {
+            // Keep pull progress % visible in the log pane (eval [progress] stays out).
+            if (!msg.startsWith("[progress]") || msg.startsWith("[progress] pull")) {
               setLiveLogs((prev) => [...prev.slice(-800), msg]);
             }
           } else if (kind === "case_started") {
@@ -1671,6 +1717,13 @@ export function OfficialBenchPage() {
     setCodingTier(p.coding_tier || "n5");
     if (p.coding_n_instances != null) setCodingNInstances(p.coding_n_instances);
     setCodingHarness(Boolean(p.coding_harness));
+    setCodingCheckoutRepo(p.coding_checkout_repo !== false);
+    if (p.retrieval_arm === "free" || p.retrieval_arm === "forced") {
+      setRetrievalArm(p.retrieval_arm);
+    }
+    if (p.context_arm === "free" || p.context_arm === "oracle") {
+      setContextArm(p.context_arm);
+    }
     setRetrievalProd(p.retrieval_prod !== false);
     if (p.eval_path === "agent" || p.eval_path === "component") {
       setEvalPath(p.eval_path);
@@ -1791,8 +1844,11 @@ export function OfficialBenchPage() {
           coding_tier: tier,
           coding_n_instances: tier === "custom" ? nInst : null,
           coding_harness: harness,
+          coding_checkout_repo: codingCheckoutRepo,
           retrieval_prod: prod,
           eval_path: evalPath,
+          retrieval_arm: retrievalArm,
+          context_arm: contextArm,
           context_limit:
             evalPath === "agent" && contextTier !== "full"
               ? Number(contextTier)
@@ -2470,6 +2526,44 @@ export function OfficialBenchPage() {
                       <option value={4}>4</option>
                     </select>
                   </label>
+                  <label className="grid gap-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      检索臂（m3）
+                    </span>
+                    <select
+                      value={retrievalArm}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setRetrievalArm(
+                          e.target.value === "forced" ? "forced" : "free",
+                        );
+                      }}
+                      className="rounded border border-border bg-background px-1.5 py-1"
+                    >
+                      <option value="free">free（主栏）</option>
+                      <option value="forced">forced（L2 诊断）</option>
+                    </select>
+                  </label>
+                  <label className="grid gap-1">
+                    <span className="text-[11px] text-muted-foreground">
+                      上下文臂（m3）
+                    </span>
+                    <select
+                      value={contextArm}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setContextArm(
+                          e.target.value === "oracle" ? "oracle" : "free",
+                        );
+                      }}
+                      className="rounded border border-border bg-background px-1.5 py-1"
+                    >
+                      <option value="free">free（主栏）</option>
+                      <option value="oracle">oracle（L2 retention）</option>
+                    </select>
+                  </label>
                 </>
               ) : null}
               {selectedSuites.has("coding") ? (
@@ -2529,7 +2623,26 @@ export function OfficialBenchPage() {
                         setCodingHarness(e.target.checked);
                       }}
                     />
-                    <span className="text-[11px]">harness 官方分</span>
+                    <span className="text-[11px] leading-tight">
+                      harness resolve
+                    </span>
+                  </label>
+                  <label
+                    className="flex items-end gap-2 pb-1"
+                    title="A-3：按 base_commit 检出仓库；关闭则仅 problem.md（旧行为）"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={codingCheckoutRepo}
+                      disabled={busy}
+                      onChange={(e) => {
+                        markCustomProfile();
+                        setCodingCheckoutRepo(e.target.checked);
+                      }}
+                    />
+                    <span className="text-[11px] leading-tight">
+                      checkout repo
+                    </span>
                   </label>
                 </>
               ) : null}
@@ -2779,7 +2892,11 @@ export function OfficialBenchPage() {
               <div className="flex flex-wrap items-baseline justify-between gap-2">
                 <span>
                   <span className="text-muted-foreground">明细 · </span>
-                  <span className="font-medium">{detailProgress.label}</span>
+                  <span className="font-medium">
+                    {busy && detailProgress.kind === "idle"
+                      ? "拉取中 / 等待进度…"
+                      : detailProgress.label}
+                  </span>
                 </span>
                 <span className="tabular-nums text-muted-foreground">
                   {detailPct != null ? `${detailPct}%` : "—"}
@@ -2816,8 +2933,9 @@ export function OfficialBenchPage() {
             >
               {liveLogs.length === 0 ? (
                 <p className="text-muted-foreground">
-                  日志：L1 会打 turn start / tool·retrieval 步骤 / 心跳；点 turn_id 打开 Raw
-                  逐步。L0 仍看 [pull]/[eval]…
+                  {busy
+                    ? "等待拉取日志…（L1 会先打 [L1] pull … starting，随后 [pull] / [progress] pull）"
+                    : "日志：L1 会打 pull → turn start / tool·retrieval 步骤 / 心跳；点 turn_id 打开 Raw 逐步。"}
                 </p>
               ) : (
                 liveLogs.map((line, i) => (
@@ -2825,7 +2943,9 @@ export function OfficialBenchPage() {
                     key={`${i}-${line.slice(0, 24)}`}
                     className={
                       line.includes("[phase]") ||
-                      line.startsWith("[pull] plan") ||
+                      line.startsWith("[pull]") ||
+                      line.startsWith("[progress] pull") ||
+                      line.startsWith("[L1] pull") ||
                       line.startsWith("[L1] turn ")
                         ? "font-semibold text-foreground"
                         : line.startsWith("[L1] ·") || line.startsWith("[L1] …")

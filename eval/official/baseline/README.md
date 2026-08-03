@@ -1,7 +1,7 @@
 # Official live 基线（调优账本）
 
 **一眼看分：** 打开同目录 [`SCORECARD.md`](SCORECARD.md)（表格 · **现为 L1 m2 主栏**）。  
-**机器可读：** `official-small-2026-08-m2.json`（L1 agent-path）；`official-small-2026-08-m1.json`（L0 组件对照史）。  
+**机器可读：** `official-small-2026-08-m3` 为现行 L1 协议（跑完锚后入库）；`m2.json` 为强制臂过渡史；`m1.json` 为 L0 组件对照。  
 **题集（case）：** `../suites.small.yaml` + `../swe_lite_slices/` —— 不是本目录。  
 **调优纲领：** [`docs/topics/official-bench-agent-tuning.md`](../../../docs/topics/official-bench-agent-tuning.md)。
 

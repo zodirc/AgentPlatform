@@ -28,8 +28,65 @@ logger = logging.getLogger(__name__)
 
 ProgressCb = Callable[[dict[str, Any]], Awaitable[None]]
 
-PROTOCOL_L1 = "official-small-2026-08-m2"
+PROTOCOL_L1 = "official-small-2026-08-m3"
 L1_ROOT = Path(os.environ.get("OPS_L1_WORKSPACE_ROOT", "/data/ops-l1"))
+
+
+def _l1_fingerprint(model: dict[str, Any] | None) -> dict[str, Any]:
+    """A-5 config fingerprint fields (record product defaults; do not mutate them)."""
+    _ensure_scripts_path()
+    from official_bench.l2_probes import config_fingerprint
+
+    index_version = os.environ.get("INDEX_VERSION") or os.environ.get("RETRIEVAL_INDEX_VERSION")
+    retrieval_profile = os.environ.get("RETRIEVAL_PROFILE") or os.environ.get(
+        "RETRIEVAL_DEFAULT_PROFILE"
+    )
+    settings_snapshot = {
+        "search_sources_max_per_turn": os.environ.get("SEARCH_SOURCES_MAX_PER_TURN"),
+        "retrieval_backend": os.environ.get("RETRIEVAL_BACKEND"),
+        "model_mode": os.environ.get("MODEL_MODE"),
+    }
+    fp = config_fingerprint(
+        model=model,
+        index_version=index_version,
+        retrieval_profile=retrieval_profile,
+        settings_snapshot=settings_snapshot,
+    )
+    return {
+        "config_fingerprint": fp,
+        "index_version": index_version,
+        "retrieval_profile": retrieval_profile,
+        "settings_snapshot": settings_snapshot,
+        "model_snapshot": {
+            "model_name": (model or {}).get("model_name"),
+            "provider": (model or {}).get("provider"),
+            "temperature": (model or {}).get("temperature"),
+        },
+    }
+
+
+def _retrieval_prompt(*, arm: str, qtext: str, limit_k: int) -> str:
+    from official_bench.l1_prompts import retrieval_prompt
+
+    return retrieval_prompt(arm=arm, qtext=qtext, limit_k=limit_k)
+
+
+def _context_prompt(*, arm: str, question: str) -> str:
+    from official_bench.l1_prompts import context_prompt
+
+    return context_prompt(arm=arm, question=question)
+
+
+def _coding_prompt(inst: dict[str, Any], *, has_repo: bool) -> str:
+    from official_bench.l1_prompts import coding_prompt
+
+    return coding_prompt(inst, has_repo=has_repo)
+
+
+def _limit_rows_per_task(rows: list[dict[str, Any]], limit_per_task: int) -> list[dict[str, Any]]:
+    from official_bench.l1_prompts import limit_rows_per_task
+
+    return limit_rows_per_task(rows, limit_per_task)
 
 
 def _clamp_parallel(n: int | None) -> int:
@@ -91,6 +148,39 @@ def _reports() -> Path:
 async def _emit(cb: ProgressCb | None, kind: str, **extra: Any) -> None:
     if cb:
         await cb({"kind": kind, **extra})
+
+
+async def _pull_with_live_logs(
+    label: str,
+    pull_fn: Any,
+    *,
+    on_progress: ProgressCb | None,
+) -> Any:
+    """Run sync ``pull_*`` off the event loop and forward ``[pull]`` lines to Ops SSE."""
+    await _emit(on_progress, "log", message=f"[L1] pull {label} — starting")
+    loop = asyncio.get_running_loop()
+
+    def sink(msg: str) -> None:
+        def _schedule() -> None:
+            asyncio.create_task(_emit(on_progress, "log", message=msg))
+
+        try:
+            loop.call_soon_threadsafe(_schedule)
+        except RuntimeError:
+            pass
+
+    def run() -> Any:
+        from official_bench.pull import reset_pull_log_sink, set_pull_log_sink
+
+        token = set_pull_log_sink(sink)
+        try:
+            return pull_fn()
+        finally:
+            reset_pull_log_sink(token)
+
+    root = await asyncio.to_thread(run)
+    await _emit(on_progress, "log", message=f"[L1] pull {label} — done")
+    return root
 
 
 def _event_step_detail(ev: dict[str, Any]) -> str:
@@ -502,33 +592,57 @@ async def run_retrieval_l1(
     on_progress: ProgressCb | None = None,
     scenario_id: str = "writing",
     max_parallel: int | None = None,
+    arm: str = "free",
 ) -> dict[str, Any]:
-    """BEIR small via real Turns + search_sources events."""
+    """BEIR small via real Turns + search_sources events.
+
+    arm=free (SCORECARD primary) | forced (L2 Index-plane diagnostic).
+    """
     _ensure_scripts_path()
-    from official_bench.agent_path_extract import merge_retrieval_rankings, ranking_scores
+    from official_bench.agent_path_extract import (
+        called_tools,
+        merge_retrieval_rankings,
+        ranking_scores,
+        search_queries_from_events,
+        step_count_from_events,
+        terminal_state_from_events,
+    )
     from official_bench.config import load_suites
+    from official_bench.l2_probes import classify_bucket, query_drift
     from official_bench.metrics_ir import aggregate_metrics
     from official_bench.pull import pull_beir
     from official_bench.run_session import RunSession
 
+    arm_norm = (arm or "free").strip().lower()
+    if arm_norm not in {"free", "forced"}:
+        raise ValueError(f"unsupported_retrieval_arm:{arm}")
+
     cfg = load_suites()
-    # Prefer m2 label for L1 manifests even if yaml still lists m1 during transition.
-    protocol = str(cfg.get("protocol_version") or PROTOCOL_L1)
+    protocol_l0 = str(
+        cfg.get("protocol_version_l0") or cfg.get("protocol_version") or "official-small-2026-08-m1"
+    )
     retrieval = cfg["suites"]["retrieval"]
     session = RunSession(
         suite="retrieval",
-        title="BEIR small · L1 agent-path (search_sources via Turn)",
+        title=f"BEIR small · L1 agent-path · arm={arm_norm}",
     )
     session.extra = {
         "protocol_version": PROTOCOL_L1,
+        "protocol_version_l0": protocol_l0,
         "eval_path": "agent",
-        "yaml_protocol": protocol,
+        "arm": arm_norm,
+        "primary_arm": arm_norm,
         "official": retrieval.get("official"),
-        "primary_arm": "agent_search_sources",
         "scenario_id": scenario_id,
+        "sample_tier": ("smoke" if limit_queries > 0 else "anchor"),
+        "limit_queries": limit_queries,
+        **_l1_fingerprint(model),
     }
-    await _emit(on_progress, "log", message="[L1] pull BEIR (cached ok)")
-    root = pull_beir(cfg, force=False)
+    root = await _pull_with_live_logs(
+        "BEIR",
+        lambda: pull_beir(cfg, force=False),
+        on_progress=on_progress,
+    )
     k_values = list(retrieval.get("k_values") or [1, 10, 100])
     limit_k = max(k_values)
     run_root = L1_ROOT / session.run_id / "retrieval"
@@ -624,12 +738,7 @@ async def run_retrieval_l1(
                         owner_user_id=SYSTEM_USER_ID,
                         work_id=work.id,
                     )
-                    prompt = (
-                        "You are evaluating retrieval on a local sources library. "
-                        f"Call search_sources exactly once with query={qtext!r} "
-                        f"and limit={limit_k}. Do not invent documents. "
-                        "After the tool result, reply with OK."
-                    )
+                    prompt = _retrieval_prompt(arm=arm_norm, qtext=qtext, limit_k=limit_k)
                     turn, _run = await _start_turn(
                         session_id=sess["id"],
                         scenario_id=scenario_id,
@@ -646,15 +755,45 @@ async def run_retrieval_l1(
                         )
                         doc_ids = merge_retrieval_rankings(events)
                         scores = ranking_scores(doc_ids, limit=limit_k)
-                        from official_bench.agent_path_extract import called_tools
-
                         tools = called_tools(events)
+                        queries = search_queries_from_events(events)
+                        drift = (
+                            query_drift(qtext, queries[0])
+                            if queries
+                            else (1.0 if "search_sources" not in tools else 0.0)
+                        )
+                        searched = "search_sources" in tools or bool(doc_ids)
+                        l2 = {
+                            "case_id": f"beir.{name}.q-{qid}",
+                            "turn_id": str(turn["id"]),
+                            "arm": arm_norm,
+                            "searched": searched,
+                            "n_search": sum(1 for t in tools if t == "search_sources"),
+                            "queries": queries,
+                            "query_drift": drift,
+                            "steps": step_count_from_events(events),
+                            "terminal_state": terminal_state_from_events(events),
+                            "tools": tools,
+                        }
+                        l2["bucket"] = classify_bucket("retrieval", l2)
                         err = None
+                        # Unsearched free-arm cases score as empty ranking (0).
                         status = "pass" if doc_ids else "fail"
                     except Exception as exc:  # noqa: BLE001
                         doc_ids = []
                         scores = {}
                         tools = []
+                        l2 = {
+                            "case_id": f"beir.{name}.q-{qid}",
+                            "turn_id": str(turn["id"]),
+                            "arm": arm_norm,
+                            "searched": False,
+                            "n_search": 0,
+                            "queries": [],
+                            "query_drift": 1.0,
+                            "terminal_state": "failed",
+                            "bucket": "no_search",
+                        }
                         err = str(exc)
                         status = "fail"
                     async with case_lock:
@@ -666,8 +805,16 @@ async def run_retrieval_l1(
                             metrics={"n_hits": float(len(doc_ids))},
                             extra={
                                 "turn_id": str(turn["id"]),
-                                "tools": tools,
-                                "searched": "search_sources" in tools,
+                                "tools": l2.get("tools") or tools,
+                                "searched": bool(l2.get("searched")),
+                                "n_search": l2.get("n_search"),
+                                "queries": l2.get("queries"),
+                                "query_drift": l2.get("query_drift"),
+                                "arm": arm_norm,
+                                "bucket": l2.get("bucket"),
+                                "l2": l2,
+                                "terminal_state": l2.get("terminal_state"),
+                                "steps": l2.get("steps"),
                             },
                         )
                         done_count += 1
@@ -712,7 +859,9 @@ async def run_retrieval_l1(
             "official": "BEIR",
             "protocol_version": PROTOCOL_L1,
             "eval_path": "agent",
-            "primary_arm": "agent_search_sources",
+            "arm": arm_norm,
+            "primary_arm": arm_norm,
+            "sample_tier": session.extra.get("sample_tier"),
             "metrics": session.metrics,
             "cases": case_metrics,
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -740,29 +889,51 @@ async def run_context_l1(
     on_progress: ProgressCb | None = None,
     scenario_id: str = "agent",
     max_parallel: int | None = None,
+    arm: str = "free",
 ) -> dict[str, Any]:
-    """LongBench small via file-on-disk + real Turns (not single-message assemble)."""
+    """LongBench small via file-on-disk + real Turns.
+
+    arm=free (SCORECARD primary) | oracle (L2 retention diagnostic).
+    ``limit`` is per-task max samples (A-2), not a global head slice.
+    """
     _ensure_scripts_path()
-    from official_bench.agent_path_extract import final_assistant_text
+    from official_bench.agent_path_extract import (
+        final_assistant_text,
+        read_file_stats_from_events,
+        step_count_from_events,
+        terminal_state_from_events,
+    )
     from official_bench.config import load_suites
     from official_bench.context_run import score_prediction
+    from official_bench.l2_probes import classify_bucket
     from official_bench.pull import pull_longbench
     from official_bench.run_session import RunSession
+
+    arm_norm = (arm or "free").strip().lower()
+    if arm_norm not in {"free", "oracle"}:
+        raise ValueError(f"unsupported_context_arm:{arm}")
 
     cfg = load_suites()
     ctx = cfg["suites"]["context"]
     session = RunSession(
         suite="context",
-        title="LongBench small · L1 agent-path (read_file / search via Turn)",
+        title=f"LongBench small · L1 agent-path · arm={arm_norm}",
     )
     session.extra = {
         "protocol_version": PROTOCOL_L1,
         "eval_path": "agent",
+        "arm": arm_norm,
         "official": ctx.get("official"),
         "dry_metrics": False,
+        "sample_tier": ("smoke" if limit > 0 else "anchor"),
+        "context_limit": limit,
+        **_l1_fingerprint(model),
     }
-    await _emit(on_progress, "log", message="[L1] pull LongBench slice")
-    root = pull_longbench(cfg, force=False)
+    root = await _pull_with_live_logs(
+        "LongBench",
+        lambda: pull_longbench(cfg, force=False),
+        on_progress=on_progress,
+    )
     rows_path = root / "small_slice.jsonl"
     rows: list[dict[str, Any]] = []
     with rows_path.open(encoding="utf-8") as f:
@@ -770,27 +941,20 @@ async def run_context_l1(
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
-    if limit > 0:
-        rows = rows[:limit]
+    rows = _limit_rows_per_task(rows, limit)
     conc = _clamp_parallel(max_parallel)
     await _emit(
         on_progress,
         "log",
         message=(
-            f"[L1] context plan n={len(rows)} parallel={conc}"
-            + (f" limit={limit}" if limit > 0 else " full_slice")
+            f"[L1] context plan n={len(rows)} parallel={conc} arm={arm_norm}"
+            + (f" per_task_limit={limit}" if limit > 0 else " full_slice")
         ),
     )
 
     per_task: dict[str, list[dict[str, float]]] = {}
     run_root = L1_ROOT / session.run_id / "context"
-    # Serial path reuses one Work (rewrite passage.md); parallel uses per-sample Works.
-    shared_work: Work | None = None
-    if conc == 1:
-        shared_work = await _create_l1_work(
-            str(run_root / "shared"),
-            name=f"l1-lb-shared-{session.run_id[:8]}",
-        )
+    # A-2: always per-sample Work (avoid read-cache cross-talk from passage overwrite).
 
     try:
         sem = asyncio.Semaphore(conc)
@@ -811,26 +975,18 @@ async def run_context_l1(
                 else:
                     golds = [str(golds_raw or "")]
 
-                if shared_work is not None:
-                    work = shared_work
-                else:
-                    work = await _create_l1_work(
-                        str(run_root / f"{task}_{idx}"),
-                        name=f"l1-lb-{task}-{idx}",
-                    )
+                work = await _create_l1_work(
+                    str(run_root / f"{task}_{idx}"),
+                    name=f"l1-lb-{task}-{idx}",
+                )
                 passage = Path(work.work_root) / "sources" / "passage.md"
                 passage.parent.mkdir(parents=True, exist_ok=True)
                 passage.write_text(context, encoding="utf-8")
-                # Skip per-sample sources reindex; read_file is enough for one passage.
 
                 sess = await session_svc.create_session(
                     scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
                 )
-                prompt = (
-                    "Call read_file once on sources/passage.md, then reply with a "
-                    "short answer only. Minimize tool calls; do not re-index.\n\n"
-                    f"Question: {question}"
-                )
+                prompt = _context_prompt(arm=arm_norm, question=question)
                 turn, _run = await _start_turn(
                     session_id=sess["id"],
                     scenario_id=scenario_id,
@@ -847,6 +1003,24 @@ async def run_context_l1(
                     )
                     pred = final_assistant_text(events)
                     scores = score_prediction(pred, golds)
+                    read_stats = read_file_stats_from_events(events)
+                    l2 = {
+                        "case_id": f"longbench.{task}.{idx}",
+                        "turn_id": str(turn["id"]),
+                        "arm": arm_norm,
+                        **read_stats,
+                        "answer_len": len(pred or ""),
+                        "extraction_path": "events" if pred else "fallback",
+                        "steps": step_count_from_events(events),
+                        "terminal_state": terminal_state_from_events(events),
+                    }
+                    l2["bucket"] = classify_bucket(
+                        "context",
+                        l2,
+                        case_f1=float(scores.get("f1") or 0.0),
+                        case_em=float(scores.get("em") or 0.0),
+                        passage_chars=len(context),
+                    )
                     status = "pass"
                     err = None
                 except Exception as exc:  # noqa: BLE001
@@ -854,6 +1028,13 @@ async def run_context_l1(
                     status = "fail"
                     err = str(exc)
                     pred = ""
+                    l2 = {
+                        "case_id": f"longbench.{task}.{idx}",
+                        "turn_id": str(turn["id"]),
+                        "arm": arm_norm,
+                        "terminal_state": "failed",
+                        "bucket": "steps_exhausted",
+                    }
                 async with case_lock:
                     per_task.setdefault(task, []).append(scores)
                     session.add_case(
@@ -861,7 +1042,27 @@ async def run_context_l1(
                         status=status,
                         error=err,
                         metrics=scores,
-                        extra={"turn_id": str(turn["id"]), "pred": pred[:500]},
+                        extra={
+                            "turn_id": str(turn["id"]),
+                            "pred": (pred or "")[:500],
+                            "arm": arm_norm,
+                            "passage_chars": len(context),
+                            "bucket": l2.get("bucket"),
+                            "l2": l2,
+                            **{
+                                k: l2[k]
+                                for k in (
+                                    "n_reads",
+                                    "read_bytes",
+                                    "used_next_offset",
+                                    "truncation_hits",
+                                    "answer_len",
+                                    "steps",
+                                    "terminal_state",
+                                )
+                                if k in l2
+                            },
+                        },
                     )
                     done_count += 1
                     if (
@@ -893,22 +1094,26 @@ async def run_context_l1(
             all_em.append(em)
         metrics["agent_f1"] = sum(all_f1) / max(1, len(all_f1))
         metrics["agent_em"] = sum(all_em) / max(1, len(all_em))
-        # Alias for baseline extractors that look for compact/full keys
-        metrics["compact_f1"] = metrics["agent_f1"]
-        metrics["full_f1"] = metrics["agent_f1"]
-        metrics["budget_f1"] = metrics["agent_f1"]
-        metrics["retention_compact_vs_full"] = 1.0
+        # A-2: no full/budget/compact aliases on L1 (those were same-value stubs).
         session.metrics = metrics
         result = {
             "suite": "longbench.small",
             "official": "LongBench",
             "protocol_version": PROTOCOL_L1,
             "eval_path": "agent",
+            "arm": arm_norm,
+            "sample_tier": session.extra.get("sample_tier"),
+            "context_limit": limit,
             "metrics": metrics,
             "cases": case_rollups,
             "model": (model or {}).get("model_name"),
             "dry_metrics": False,
         }
+        # Oracle retention is recorded when both arms are compared offline;
+        # single oracle run still stamps agent_f1 as the arm score.
+        if arm_norm == "oracle":
+            result["oracle_f1"] = metrics["agent_f1"]
+            result["oracle_em"] = metrics["agent_em"]
         manifest = session.finish(status="completed", metrics=metrics, result=result)
         (_reports() / "latest_context.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -929,30 +1134,50 @@ async def run_coding_l1(
     on_progress: ProgressCb | None = None,
     scenario_id: str = "agent",
     max_parallel: int | None = None,
+    checkout_repo: bool = True,
+    run_harness: bool = False,
 ) -> dict[str, Any]:
-    """SWE Lite infer via product Turns (patch extract); harness remains optional offline."""
+    """SWE Lite via product Turns.
+
+    A-3: default materializes repo at base_commit; patch prefers git diff;
+    optional Docker harness after all Turns (``run_harness``).
+    """
     _ensure_scripts_path()
-    from official_bench.agent_path_extract import patch_from_events, patch_from_work_root
+    from official_bench.agent_path_extract import (
+        patch_apply_check,
+        patch_from_events,
+        patch_from_git_diff,
+        patch_from_work_root,
+        ran_tests_from_events,
+        read_file_stats_from_events,
+        step_count_from_events,
+        terminal_state_from_events,
+    )
+    from official_bench.config import load_suites
+    from official_bench.l2_probes import classify_bucket
     from official_bench.pull import pull_swebench
+    from official_bench.repo_materialize import cleanup_worktree, materialize_instance_repo
     from official_bench.run_session import RunSession
     from official_bench.swe_run import (
         _ensure_slice_files,
         _load_instances,
         resolve_coding_selection,
+        run_swe_eval,
         write_predictions,
     )
-    from official_bench.config import load_suites
 
     cfg = load_suites()
-    await _emit(on_progress, "log", message="[L1] pull SWE-bench Lite")
-    root = pull_swebench(cfg, force=False)
+    root = await _pull_with_live_logs(
+        "SWE-bench Lite",
+        lambda: pull_swebench(cfg, force=False),
+        on_progress=on_progress,
+    )
     instances_path = root / "instances.jsonl"
     _ensure_slice_files(instances_path)
     selected_tier, selected_n, ids, fingerprint = resolve_coding_selection(
         tier=tier, n_instances=n_instances
     )
     rows = _load_instances(instances_path, allowed_ids=set(ids))
-    # Preserve tier order
     by_id = {str(r.get("instance_id")): r for r in rows}
     ordered = [by_id[i] for i in ids if i in by_id]
 
@@ -967,16 +1192,27 @@ async def run_coding_l1(
         "n_instances": selected_n,
         "instance_fingerprint": fingerprint,
         "infer_mode": "platform_turn",
-        "harness": False,
+        "harness": bool(run_harness),
+        "checkout_repo": bool(checkout_repo),
+        "sample_tier": (
+            "anchor"
+            if selected_tier in {"n25", "full300"} and run_harness
+            else "smoke"
+        ),
+        **_l1_fingerprint(model),
     }
     patches: dict[str, str] = {}
+    patch_sources: dict[str, str] = {}
     run_root = L1_ROOT / session.run_id / "coding"
     nonempty = 0
     conc = _clamp_parallel(max_parallel)
     await _emit(
         on_progress,
         "log",
-        message=f"[L1] coding plan n={len(ordered)} tier={selected_tier} parallel={conc}",
+        message=(
+            f"[L1] coding plan n={len(ordered)} tier={selected_tier} "
+            f"parallel={conc} checkout={checkout_repo} harness={run_harness}"
+        ),
     )
     try:
         sem = asyncio.Semaphore(conc)
@@ -991,21 +1227,43 @@ async def run_coding_l1(
                     str(run_root / iid.replace("/", "_")),
                     name=f"l1-swe-{iid}"[:120],
                 )
-                readme = Path(work.work_root) / "problem.md"
-                readme.write_text(
-                    str(inst.get("problem_statement") or ""), encoding="utf-8"
-                )
+                has_repo = False
+                mirror_hit = False
+                if checkout_repo:
+                    try:
+                        meta = await asyncio.to_thread(
+                            materialize_instance_repo, inst, work.work_root
+                        )
+                        has_repo = True
+                        mirror_hit = bool(meta.get("mirror_hit"))
+                        await _emit(
+                            on_progress,
+                            "log",
+                            message=(
+                                f"[L1] checkout {iid} mirror_hit={mirror_hit} "
+                                f"repo={meta.get('repo')}"
+                            ),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        await _emit(
+                            on_progress,
+                            "log",
+                            message=f"[L1] checkout failed {iid}: {exc}; fallback problem.md only",
+                        )
+                        readme = Path(work.work_root) / "problem.md"
+                        readme.write_text(
+                            str(inst.get("problem_statement") or ""), encoding="utf-8"
+                        )
+                else:
+                    readme = Path(work.work_root) / "problem.md"
+                    readme.write_text(
+                        str(inst.get("problem_statement") or ""), encoding="utf-8"
+                    )
+
                 sess = await session_svc.create_session(
                     scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
                 )
-                hint = (
-                    f"SWE-bench instance {iid} ({inst.get('repo')}).\n"
-                    "This Work has NO repository checkout — only problem.md.\n"
-                    "Do NOT list empty dirs, glob the whole tree, or use network/curl.\n"
-                    "Read problem.md once, then write a best-effort unified diff to "
-                    "fix.patch via write_file (preferred), or propose_patch with "
-                    "old_text/new_text spans. End the turn when fix.patch exists.\n"
-                )
+                hint = _coding_prompt(inst, has_repo=has_repo)
                 turn, _run = await _start_turn(
                     session_id=sess["id"],
                     scenario_id=scenario_id,
@@ -1013,6 +1271,7 @@ async def run_coding_l1(
                     work=work,
                     model_override=model,
                 )
+                patch_source = "none"
                 try:
                     events = await _wait_turn_verbose(
                         turn["id"],
@@ -1020,15 +1279,66 @@ async def run_coding_l1(
                         label=f"swe.{iid}",
                         timeout=900.0,
                     )
-                    patch = patch_from_events(events)
+                    patch = ""
+                    if has_repo:
+                        patch = patch_from_git_diff(work.work_root)
+                        if patch.strip():
+                            patch_source = "git_diff"
+                    if not str(patch or "").strip():
+                        patch = patch_from_events(events)
+                        if patch.strip():
+                            patch_source = "propose" if "@@" in patch else "fenced"
                     if not str(patch or "").strip():
                         patch = patch_from_work_root(work.work_root)
+                        if patch.strip():
+                            patch_source = "write"
+                    applies = (
+                        patch_apply_check(work.work_root, patch)
+                        if has_repo and patch.strip()
+                        else None
+                    )
+                    read_stats = read_file_stats_from_events(events)
+                    l2 = {
+                        "case_id": iid,
+                        "turn_id": str(turn["id"]),
+                        "arm": "free",
+                        "patch_source": patch_source,
+                        "patch_applies": applies,
+                        "ran_tests": ran_tests_from_events(events),
+                        **read_stats,
+                        "steps": step_count_from_events(events),
+                        "terminal_state": terminal_state_from_events(events),
+                        "mirror_hit": mirror_hit,
+                        "has_repo": has_repo,
+                    }
+                    l2["bucket"] = classify_bucket("coding", l2)
                     err = None
                 except Exception as exc:  # noqa: BLE001
-                    patch = patch_from_work_root(work.work_root)
+                    patch = patch_from_work_root(work.work_root) if has_repo else ""
+                    if not patch:
+                        patch = patch_from_git_diff(work.work_root) if has_repo else ""
+                    patch_source = "git_diff" if patch.strip() else "none"
                     err = str(exc)
+                    l2 = {
+                        "case_id": iid,
+                        "turn_id": str(turn["id"]),
+                        "patch_source": patch_source,
+                        "terminal_state": "failed",
+                        "bucket": "no_patch" if not patch.strip() else "ok",
+                        "has_repo": has_repo,
+                    }
+                # Disk hygiene: drop heavy tree after extract (keep mirror).
+                if has_repo:
+                    try:
+                        await asyncio.to_thread(
+                            cleanup_worktree, work.work_root, keep_problem=True
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.warning("cleanup_worktree failed for %s", iid, exc_info=True)
+
                 async with case_lock:
                     patches[iid] = patch
+                    patch_sources[iid] = patch_source
                     if patch.strip():
                         nonempty += 1
                     session.add_case(
@@ -1036,7 +1346,14 @@ async def run_coding_l1(
                         status="pass" if patch.strip() else "fail",
                         error=err,
                         metrics={"nonempty": 1.0 if patch.strip() else 0.0},
-                        extra={"turn_id": str(turn["id"])},
+                        extra={
+                            "turn_id": str(turn["id"]),
+                            "patch_source": patch_source,
+                            "bucket": l2.get("bucket"),
+                            "l2": l2,
+                            "has_repo": has_repo,
+                            "mirror_hit": mirror_hit,
+                        },
                     )
                     done_count += 1
                     await _emit(
@@ -1054,11 +1371,28 @@ async def run_coding_l1(
             patches=patches,
             out_path=pred_path,
         )
-        metrics = {
+        metrics: dict[str, Any] = {
             "n_instances": float(selected_n),
             "n_nonempty_patches": float(nonempty),
             "patch_rate": float(nonempty) / float(selected_n) if selected_n else 0.0,
         }
+        if run_harness:
+            await _emit(on_progress, "log", message="[L1] coding harness resolve…")
+            try:
+                harness = await asyncio.to_thread(run_swe_eval, predictions=pred_path)
+                h_metrics = harness.get("metrics") or {}
+                metrics.update(h_metrics)
+                if "resolve_rate" not in metrics and isinstance(
+                    h_metrics.get("resolve_rate"), (int, float)
+                ):
+                    metrics["resolve_rate"] = float(h_metrics["resolve_rate"])
+            except Exception as exc:  # noqa: BLE001
+                metrics["harness_error"] = str(exc)
+                metrics["note"] = f"harness failed: {exc}"
+        else:
+            metrics["note"] = (
+                "patch_rate is auxiliary; set coding_harness=true for resolve@tier"
+            )
         session.metrics = metrics
         result = {
             "suite": "swebench.lite",
@@ -1068,10 +1402,12 @@ async def run_coding_l1(
             "n_instances": selected_n,
             "instance_fingerprint": fingerprint,
             "infer_mode": "platform_turn",
-            "harness": False,
+            "harness": bool(run_harness),
+            "checkout_repo": bool(checkout_repo),
+            "sample_tier": session.extra.get("sample_tier"),
             "metrics": metrics,
             "predictions": str(pred_path),
-            "note": "resolve rate requires Docker-backed harness (make official-bench-coding-eval)",
+            "patch_sources": patch_sources,
         }
         manifest = session.finish(status="completed", metrics=metrics, result=result)
         (_reports() / "latest_coding.json").write_text(
@@ -1096,6 +1432,10 @@ async def run_l1_targets(
     max_parallel: int | None = None,
     on_progress: ProgressCb | None = None,
     on_suite_done: ProgressCb | None = None,
+    retrieval_arm: str = "free",
+    context_arm: str = "free",
+    coding_checkout_repo: bool = True,
+    coding_harness: bool = False,
 ) -> dict[str, Any]:
     """Run selected L1 suites; returns {target: manifest}."""
     out: dict[str, Any] = {}
@@ -1109,6 +1449,7 @@ async def run_l1_targets(
                 model=model,
                 on_progress=on_progress,
                 max_parallel=max_parallel,
+                arm=retrieval_arm,
             )
         elif t == "context":
             out[t] = await run_context_l1(
@@ -1116,6 +1457,7 @@ async def run_l1_targets(
                 model=model,
                 on_progress=on_progress,
                 max_parallel=max_parallel,
+                arm=context_arm,
             )
         elif t in {"coding", "coding_infer"}:
             out[t] = await run_coding_l1(
@@ -1124,6 +1466,8 @@ async def run_l1_targets(
                 model=model,
                 on_progress=on_progress,
                 max_parallel=max_parallel,
+                checkout_repo=coding_checkout_repo,
+                run_harness=coding_harness,
             )
         else:
             raise ValueError(f"unsupported_l1_target:{t}")

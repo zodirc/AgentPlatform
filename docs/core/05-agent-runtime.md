@@ -373,7 +373,7 @@ loop 最大的风险是停不下来、烧钱、反复失败。终止条件必须
 
 ```text
 runs.status IN (running, interrupted)
-  AND 最新 turn_events.ts 早于 now() - 120s
+  AND 最新 turn_events.ts 早于 now() - 180s
   → 日志 stall_detected + metric turn_stall_detected_total
   → Phase 1 默认仅告警；默认 stall_auto_fail（无事件超时自动收尾；可用环境变量关闭）
 ```

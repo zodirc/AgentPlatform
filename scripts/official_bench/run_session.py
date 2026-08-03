@@ -85,6 +85,21 @@ class RunSession:
             json.dumps(metrics or {}, ensure_ascii=False)[:240],
             kind="case_finished",
         )
+        # A-5: structured L2 probe line for offline bucket reports.
+        l2 = row.get("l2") if isinstance(row.get("l2"), dict) else None
+        if l2 is not None:
+            probe = {
+                "at": _utc_now(),
+                "kind": "l2_probe",
+                "case_id": case_id,
+                "status": status,
+                **l2,
+            }
+            if row.get("bucket") and "bucket" not in probe:
+                probe["bucket"] = row["bucket"]
+            self.logs.append(probe)
+            with self._process.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(probe, ensure_ascii=False) + "\n")
 
     def finish(
         self,
