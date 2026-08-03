@@ -231,8 +231,7 @@
 > **二次补强（2026-08-03）**：分桶对照原句显示主因是**首搜被压成 keyword bag**（相对 claim 全文 Levenshtein >0.35），非乱搜无关题。已改 `search_sources` 契约 + agent/writing：`query` **近乎原文**；禁搜前反复 `list_dir`。热部署 runtime。  
 > **三次复测（Ops · `8a6b5814` · debug.log）**：`query_drift` **5%**（3/60，←67%）· `ok` **77%**（46/60）· `search_cap` **18%**（11/60）· `no_search` 0 · nDCG@10 **0.427**（↑自 0.418；仍 < 改前 0.49）· R@10 **0.454** / R@100 **0.565**（明显回升）。报告：`retrieval_bucket_after_verbatim.json`。**原文首搜成立。**  
 > **四次补强（search_cap）**：达 cap 轨迹多为「首搜已有 hit 仍同义换词 3–5 次」。契约改为默认 ≤2 搜；首搜有 on-topic path 则停搜改 `read_file`。已热部署 runtime。  
-> **四次复测（Ops · `0526901a` · debug.log）**：宏指标几乎持平（nDCG@10 **0.434**，←0.427）；**行为** `search_cap` **18%→2%**（1/60）· `ok` **77%→92%**（55/60）· drift 仍低 · `no_search` 2 · R@100 略降。报告：`retrieval_bucket_after_search_cap.json`。**搜次文案生效；IR 未明显跟涨 → 不入库。**  
-> **五次 Index 排序（下一阶段）**：行为桶已干净后，free nDCG@10≈0.43 vs Index 冒烟≈0.55，但 **R@10 已接近** → 主缺口是**排序**非漏检。根因假设：lexical rerank 对长 claim 的 token overlap 加分淹没 RRF（~0.01）分数。已改 `rerank.py`：**bonus 按 `max(|score|)` 缩放**（写作专名/early phrase 单测语义保留；小 RRF 不被洗序）；`search_sources` 默认 `limit` **10→50**。**待热部署 runtime 后 Ops free L1 20q 复测 nDCG。**
+> **四次复测（Ops · `0526901a` · debug.log）**：宏指标几乎持平（nDCG@10 **0.434**，←0.427）；**行为** `search_cap` **18%→2%**（1/60）· `ok` **77%→92%**（55/60）· drift 仍低 · `no_search` 2 · R@100 略降。报告：`retrieval_bucket_after_search_cap.json`。**搜次文案生效；IR 未明显跟涨 → 不入库。下一刀不宜再拧搜次。**
 
 | 项 | 内容 |
 |----|------|

@@ -244,14 +244,7 @@ def build_registry() -> ToolRegistry:
                             "otherwise read_file top paths instead of searching again."
                         ),
                     },
-                    "limit": {
-                        "type": "integer",
-                        "default": 50,
-                        "description": (
-                            "Max hits to return. Default 50 for recall depth; use 20–100 "
-                            "for evidence search. Avoid relying on the old default of 10."
-                        ),
-                    },
+                    "limit": {"type": "integer", "default": 10},
                     "path_prefix": {
                         "type": "string",
                         "description": (
