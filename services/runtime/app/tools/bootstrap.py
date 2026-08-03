@@ -223,14 +223,27 @@ def build_registry() -> ToolRegistry:
                 "(e.g. 'seed/writing/dramas', 'seed/intel', 'hr', or 'sources/hr'); "
                 "rejects '..' / absolute paths. "
                 "When omitted, ScenarioProfile may apply a default prefix (intel → seed/intel). "
-                "If top hits look weak or off-topic, rephrase the query once or twice "
-                "(stay within the per-turn search cap) — do not invent documents. "
-                "Avoid repeating the identical query; use at most a few searches per topic."
+                "First search: pass the user's information need / claim nearly verbatim as `query` "
+                "(same wording and order). Do NOT compress into a keyword bag or synonym rewrite "
+                "on the first call — hybrid search already handles phrasing. "
+                "Default: at most **two** searches per topic (verbatim first; optional one rephrase). "
+                "If the first call returns any on-topic paths, stop searching and `read_file` the "
+                "top hits — do not burn the remaining budget on synonym cascades. "
+                "A second search is only for clearly empty / off-topic first hits; keep distinctive "
+                "entities. Prefer a larger limit (e.g. 20–100) when you need broad recall. "
+                "Do not invent documents. For content questions, call this before list_dir inventory."
             ),
             parameters={
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string"},
+                    "query": {
+                        "type": "string",
+                        "description": (
+                            "Search text. First call: copy the user's information need nearly "
+                            "verbatim. At most one follow-up rephrase if hits were empty/off-topic; "
+                            "otherwise read_file top paths instead of searching again."
+                        ),
+                    },
                     "limit": {"type": "integer", "default": 10},
                     "path_prefix": {
                         "type": "string",
@@ -457,7 +470,8 @@ def build_registry() -> ToolRegistry:
                 "or keyword query. Use when the path is unknown or you need related symbols. "
                 "Prefer grep for exact string/regex matches; prefer glob for filename patterns; "
                 "prefer read_file when the path is already known. "
-                "If results look weak, rephrase once or twice within the turn search budget."
+                "If results look weak, rephrase once or twice within the turn search budget, "
+                "keeping distinctive identifiers from the original ask."
             ),
             parameters={
                 "type": "object",

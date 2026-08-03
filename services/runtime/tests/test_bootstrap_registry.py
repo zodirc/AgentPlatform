@@ -46,9 +46,14 @@ def test_search_sources_description_includes_library_map() -> None:
     assert "dramas" in desc
     assert "path_prefix" in desc
     assert "cards" in desc
+    assert "verbatim" in desc.lower() or "nearly verbatim" in desc
+    assert "two" in desc.lower() or "≤ 2" in desc or "at most" in desc.lower()
     props = spec.parameters.get("properties", {})
     prefix = props.get("path_prefix", {})
     assert "seed/writing" in str(prefix.get("description", "")) or "persons" in desc
+    query_desc = str(props.get("query", {}).get("description", "")).lower()
+    assert "verbatim" in query_desc
+    assert "read_file" in query_desc
 
 
 def test_tool_scope_planning_phase_excludes_writes() -> None:

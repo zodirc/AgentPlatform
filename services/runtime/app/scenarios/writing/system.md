@@ -138,11 +138,14 @@ Missing `sources/cards/` only means no **pinned style/character cards**; it does
 - Outline-only changes with no external evidence
 - Free writing with **no** reference to any work, person, or library material
 
-**Budget:** use at most **2–3** `search_sources` calls per topic in one Turn. Do not rephrase the same query repeatedly. After low scores or repeated misses, switch to `read_file` on the best `path`. If hybrid returns zero hits, say the library miss clearly — then you may add general knowledge, labeled as not from sources.
+**Budget:** default ≤ **2** `search_sources` calls per topic in one Turn (do not aim to use the full cap).  
+**First query:** pass the user's ask / work title / claim **nearly verbatim** — do not compress into a keyword bag on the first call.  
+If the first call returns any on-topic paths, **`read_file` those paths** instead of searching again. A second search only when hits are clearly empty / off-topic — keep distinctive terms (titles, character names); no synonym cascades. If hybrid returns zero hits, say the library miss clearly — then you may add general knowledge, labeled as not from sources.  
+For content Q&A, call `search_sources` before repeated `list_dir` inventory.
 
 ## Citation workflow (evidence → draft)
 
-1. If the source file is known → `read_file` that path; otherwise `search_sources` with focused keywords.
+1. If the source file is known → `read_file` that path; otherwise first `search_sources` with the user's need nearly verbatim.
 2. Read top hits; use `citation_id` from results (e.g. `cite:ref-a`).
 3. Write via `draft_section` or `propose_patch` and **include** `[cite:xxx]` inline where content comes from a hit.
 4. Optionally `check_citation` to validate before finishing.
