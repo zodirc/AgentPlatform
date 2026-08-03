@@ -84,6 +84,84 @@ def test_search_queries_from_events() -> None:
     assert search_queries_from_events(events) == ["alpha", "beta"]
 
 
+def test_search_limits_and_ranked_lengths_ret6() -> None:
+    from official_bench.agent_path_extract import (
+        depth_audit_from_events,
+        ranked_lengths_from_events,
+        search_limits_from_events,
+    )
+
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "search_sources",
+                "arguments": {"query": "q1", "limit": 30},
+            },
+        },
+        {
+            "type": "retrieval.completed",
+            "payload": {
+                "hit_count": 10,
+                "ranked": [{"path": f"sources/{i}.txt"} for i in range(10)],
+            },
+        },
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "search_sources",
+                "arguments": {"query": "q2"},  # omit limit → default 30
+            },
+        },
+        {
+            "type": "retrieval.completed",
+            "payload": {"hit_count": 12, "ranked": []},
+        },
+    ]
+    assert search_limits_from_events(events) == [30, 30]
+    assert ranked_lengths_from_events(events) == [10, 12]
+    depth = depth_audit_from_events(events)
+    assert depth["merged_len"] == 10
+    assert depth["max_limit"] == 30
+    assert depth["ranked_lengths"] == [10, 12]
+
+
+def test_depth_audit_aggregate_fiqa_pool_starvation() -> None:
+    from official_bench.l2_probes import depth_audit_aggregate
+
+    cases = []
+    for i in range(10):
+        cases.append(
+            {
+                "case_id": f"beir.fiqa.q-{i}",
+                "turn_id": f"t-{i}",
+                "n_search": 1,
+                "search_limits": [30],
+                "ranked_lengths": [10],
+                "merged_len": 10,
+                "metrics": {"n_hits": 10.0, "ndcg_at_10": 0.1},
+                "l2": {"n_search": 1, "search_limits": [30], "merged_len": 10},
+            }
+        )
+    for i in range(5):
+        cases.append(
+            {
+                "case_id": f"beir.scifact.q-{i}",
+                "turn_id": f"s-{i}",
+                "n_search": 1,
+                "search_limits": [30],
+                "ranked_lengths": [30],
+                "merged_len": 30,
+                "metrics": {"n_hits": 30.0, "ndcg_at_10": 0.5},
+                "l2": {"n_search": 1, "search_limits": [30], "merged_len": 30},
+            }
+        )
+    agg = depth_audit_aggregate(cases)
+    assert agg["fiqa_adjudication"] == "pool_starvation_despite_limit"
+    assert agg["by_dataset"]["fiqa"]["merged_le15"] == 10
+    assert agg["by_dataset"]["scifact"]["merged_ge30"] == 5
+
+
 def test_patch_from_proposed() -> None:
     diff = "--- a/x\n+++ b/x\n@@\n+hi\n"
     events = [{"type": "patch.proposed", "payload": {"diff": diff}}]

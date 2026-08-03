@@ -826,6 +826,7 @@ async def run_retrieval_l1(
     _ensure_scripts_path()
     from official_bench.agent_path_extract import (
         called_tools,
+        depth_audit_from_events,
         excerpt_promote_reorder_count,
         merge_retrieval_rankings,
         ranking_scores,
@@ -839,6 +840,7 @@ async def run_retrieval_l1(
         apply_retrieval_weak_hits,
         bucket_counts,
         classify_bucket,
+        depth_audit_aggregate,
         query_drift,
         weak_hits_snapshots,
     )
@@ -993,6 +995,7 @@ async def run_retrieval_l1(
                         queries = search_queries_from_events(events)
                         top_hits = top_ranked_hits_from_events(events, limit=10)
                         promote_n = excerpt_promote_reorder_count(events)
+                        depth = depth_audit_from_events(events)
                         drift = (
                             query_drift(qtext, queries[0])
                             if queries
@@ -1017,6 +1020,9 @@ async def run_retrieval_l1(
                             "terminal_state": terminal_state_from_events(events),
                             "tools": tools,
                             "excerpt_promote_reorder_n": promote_n,
+                            "search_limits": depth.get("search_limits"),
+                            "ranked_lengths": depth.get("ranked_lengths"),
+                            "merged_len": depth.get("merged_len"),
                         }
                         # weak_hits needs suite median — provisional bucket until post-pass.
                         l2["bucket"] = classify_bucket("retrieval", l2)
@@ -1036,6 +1042,11 @@ async def run_retrieval_l1(
                         tools = []
                         top_hits = []
                         promote_n = 0
+                        depth = {
+                            "search_limits": [],
+                            "ranked_lengths": [],
+                            "merged_len": 0,
+                        }
                         case_metrics_row = {
                             "n_hits": 0.0,
                             "ndcg_at_10": 0.0,
@@ -1054,6 +1065,9 @@ async def run_retrieval_l1(
                             "terminal_state": "failed",
                             "bucket": "no_search",
                             "excerpt_promote_reorder_n": 0,
+                            "search_limits": [],
+                            "ranked_lengths": [],
+                            "merged_len": 0,
                         }
                         err = str(exc)
                         status = "fail"
@@ -1079,6 +1093,13 @@ async def run_retrieval_l1(
                                 "top_hits": top_hits,
                                 "excerpt_promote_reorder_n": promote_n,
                                 "original_claim": qtext,
+                                "search_limits": l2.get("search_limits")
+                                or depth.get("search_limits"),
+                                "ranked_lengths": l2.get("ranked_lengths")
+                                or depth.get("ranked_lengths"),
+                                "merged_len": l2.get("merged_len")
+                                if l2.get("merged_len") is not None
+                                else depth.get("merged_len"),
                             },
                         )
                         done_count += 1
@@ -1132,10 +1153,13 @@ async def run_retrieval_l1(
         promote_total = sum(
             int(c.get("excerpt_promote_reorder_n") or 0) for c in query_cases
         )
+        # RET-6: merge-list depth audit (FiQA R@10≈R@100 attribution).
+        depth_audit = depth_audit_aggregate(query_cases)
         session.extra["bucket_counts"] = counts
         session.extra["suite_ndcg_median"] = suite_median
         session.extra["weak_hits_cases"] = low_score
         session.extra["excerpt_promote_reorder_total"] = promote_total
+        session.extra["depth_audit"] = depth_audit
         session.log(
             "bucket_histogram",
             json.dumps(
@@ -1146,6 +1170,7 @@ async def run_retrieval_l1(
                         [c for c in query_cases if c.get("bucket") == "weak_hits"]
                     ),
                     "excerpt_promote_reorder_total": promote_total,
+                    "depth_audit_fiqa": (depth_audit or {}).get("fiqa_adjudication"),
                 },
                 ensure_ascii=False,
             ),
@@ -1166,6 +1191,7 @@ async def run_retrieval_l1(
             "suite_ndcg_median": suite_median,
             "weak_hits_cases": low_score,
             "excerpt_promote_reorder_total": promote_total,
+            "depth_audit": depth_audit,
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         manifest = session.finish(status="completed", metrics=session.metrics, result=result)

@@ -27,7 +27,16 @@ L2_COMMON_KEYS = (
     "terminal_state",
     "bucket",
 )
-L2_RETRIEVAL_KEYS = ("searched", "n_search", "queries", "query_drift")
+L2_RETRIEVAL_KEYS = (
+    "searched",
+    "n_search",
+    "queries",
+    "query_drift",
+    # RET-6 depth audit (optional on older runs)
+    "search_limits",
+    "ranked_lengths",
+    "merged_len",
+)
 L2_CONTEXT_KEYS = (
     "n_reads",
     "read_bytes",
@@ -261,6 +270,7 @@ def weak_hits_snapshots(
         top_hits = case.get("top_hits") or []
         if isinstance(top_hits, list):
             top_hits = top_hits[:top_n]
+        l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
         out.append(
             {
                 "case_id": case.get("case_id"),
@@ -270,10 +280,130 @@ def weak_hits_snapshots(
                 "queries": queries if isinstance(queries, list) else [],
                 "top_hits": top_hits,
                 "n_search": case.get("n_search")
-                or (case.get("l2") or {}).get("n_search"),
+                or l2.get("n_search"),
                 "excerpt_promote_reorder_n": case.get("excerpt_promote_reorder_n")
-                or (case.get("l2") or {}).get("excerpt_promote_reorder_n"),
+                or l2.get("excerpt_promote_reorder_n"),
+                "search_limits": case.get("search_limits") or l2.get("search_limits"),
+                "ranked_lengths": case.get("ranked_lengths") or l2.get("ranked_lengths"),
+                "merged_len": case.get("merged_len")
+                if case.get("merged_len") is not None
+                else l2.get("merged_len"),
             }
         )
     out.sort(key=lambda r: float(r.get("ndcg_at_10") or 0.0))
     return out
+
+
+def _dataset_from_case_id(case_id: str) -> str:
+    cid = str(case_id or "")
+    for ds in ("scifact", "nfcorpus", "fiqa"):
+        if f".{ds}." in cid or cid.startswith(f"beir.{ds}."):
+            return ds
+    return "other"
+
+
+def _hist_counts(values: list[int]) -> dict[str, int]:
+    """Compact histogram with string keys for JSON stability."""
+    out: dict[str, int] = {}
+    for v in values:
+        key = str(int(v))
+        out[key] = out.get(key, 0) + 1
+    return dict(sorted(out.items(), key=lambda kv: int(kv[0])))
+
+
+def depth_audit_aggregate(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """RET-6 suite rollup: per-dataset merged_len / limit / ranked_len histograms.
+
+    Used to adjudicate FiQA R@10≈R@100: short merge list vs deep-but-irrelevant vs
+    first-seen burial (see retrieval-free-l1-tuning-brief §10.2).
+    """
+    by_ds: dict[str, list[dict[str, Any]]] = {}
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        cid = str(case.get("case_id") or "")
+        if cid.endswith(".agent"):
+            continue
+        if not (isinstance(case.get("l2"), dict) or case.get("turn_id")):
+            continue
+        ds = _dataset_from_case_id(cid)
+        by_ds.setdefault(ds, []).append(case)
+
+    datasets: dict[str, Any] = {}
+    for ds, rows in sorted(by_ds.items()):
+        merged_lens: list[int] = []
+        max_limits: list[int] = []
+        ranked_lens: list[int] = []
+        n_search_vals: list[int] = []
+        short_despite_limit30 = 0
+        for case in rows:
+            l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+            metrics = case.get("metrics") if isinstance(case.get("metrics"), dict) else {}
+            merged = case.get("merged_len")
+            if merged is None:
+                merged = l2.get("merged_len")
+            if merged is None and metrics.get("n_hits") is not None:
+                merged = metrics.get("n_hits")
+            try:
+                merged_i = int(merged) if merged is not None else 0
+            except (TypeError, ValueError):
+                merged_i = 0
+            merged_lens.append(merged_i)
+
+            limits = case.get("search_limits") or l2.get("search_limits") or []
+            numeric_limits = [int(x) for x in limits if isinstance(x, (int, float))]
+            max_lim = max(numeric_limits) if numeric_limits else None
+            if max_lim is not None:
+                max_limits.append(max_lim)
+                if max_lim >= 30 and merged_i <= 15:
+                    short_despite_limit30 += 1
+
+            rlens = case.get("ranked_lengths") or l2.get("ranked_lengths") or []
+            for r in rlens:
+                if isinstance(r, (int, float)):
+                    ranked_lens.append(int(r))
+
+            ns = case.get("n_search")
+            if ns is None:
+                ns = l2.get("n_search")
+            try:
+                n_search_vals.append(int(ns or 0))
+            except (TypeError, ValueError):
+                n_search_vals.append(0)
+
+        n = len(rows)
+        le10 = sum(1 for v in merged_lens if v <= 10)
+        le15 = sum(1 for v in merged_lens if v <= 15)
+        ge30 = sum(1 for v in merged_lens if v >= 30)
+        datasets[ds] = {
+            "n_queries": n,
+            "merged_len_hist": _hist_counts(merged_lens),
+            "max_limit_hist": _hist_counts(max_limits),
+            "ranked_len_hist": _hist_counts(ranked_lens),
+            "n_search_hist": _hist_counts(n_search_vals),
+            "merged_le10": le10,
+            "merged_le15": le15,
+            "merged_ge30": ge30,
+            "short_despite_limit30": short_despite_limit30,
+            "pct_merged_le15": (le15 / n) if n else 0.0,
+            "pct_merged_ge30": (ge30 / n) if n else 0.0,
+        }
+
+    # FiQA three-way adjudication hint (report-side; human confirms).
+    fiqa = datasets.get("fiqa") or {}
+    adjudication = "insufficient_data"
+    if fiqa:
+        if float(fiqa.get("pct_merged_le15") or 0) >= 0.7:
+            if int(fiqa.get("short_despite_limit30") or 0) >= max(1, int(fiqa.get("n_queries") or 0) // 2):
+                adjudication = "pool_starvation_despite_limit"  # limit ok, ranked short
+            else:
+                adjudication = "shallow_limit_or_single_search"  # contract execution
+        elif float(fiqa.get("pct_merged_ge30") or 0) >= 0.7:
+            adjudication = "depth_ok_relevance_or_qrels"  # RET-4 / structure
+        else:
+            adjudication = "mixed"
+
+    return {
+        "by_dataset": datasets,
+        "fiqa_adjudication": adjudication,
+    }

@@ -282,6 +282,83 @@ def search_queries_from_events(events: list[dict[str, Any]]) -> list[str]:
     return out
 
 
+def search_limits_from_events(
+    events: list[dict[str, Any]],
+    *,
+    default_limit: int | None = 30,
+) -> list[int | None]:
+    """Ordered ``limit`` args from ``search_sources`` tool.started events.
+
+    Missing/invalid limit → ``default_limit`` (schema default). Non-search tools ignored.
+    """
+    out: list[int | None] = []
+    for ev in events:
+        if str(ev.get("type") or "") != "tool.started":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("tool_name") or "") != "search_sources":
+            continue
+        args = payload.get("arguments") or {}
+        if not isinstance(args, dict):
+            out.append(default_limit)
+            continue
+        raw = args.get("limit")
+        if raw is None or raw == "":
+            out.append(default_limit)
+            continue
+        try:
+            out.append(int(raw))
+        except (TypeError, ValueError):
+            out.append(default_limit)
+    return out
+
+
+def ranked_lengths_from_events(events: list[dict[str, Any]]) -> list[int]:
+    """Per ``retrieval.completed`` ranked length (prefer ranked list, else hit_count)."""
+    out: list[int] = []
+    for ev in events:
+        if str(ev.get("type") or "") != "retrieval.completed":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        ranked = payload.get("ranked")
+        if isinstance(ranked, list) and ranked:
+            out.append(len(ranked))
+            continue
+        hc = payload.get("hit_count")
+        if isinstance(hc, (int, float)):
+            out.append(int(hc))
+            continue
+        hits = payload.get("hits")
+        if isinstance(hits, list):
+            out.append(len(hits))
+        else:
+            out.append(0)
+    return out
+
+
+def depth_audit_from_events(
+    events: list[dict[str, Any]],
+    *,
+    default_limit: int | None = 30,
+) -> dict[str, Any]:
+    """RET-6 per-query depth fields for FiQA / merge-list attribution."""
+    limits = search_limits_from_events(events, default_limit=default_limit)
+    ranked_lengths = ranked_lengths_from_events(events)
+    merged = merge_retrieval_rankings(events)
+    return {
+        "search_limits": limits,
+        "ranked_lengths": ranked_lengths,
+        "n_search_depth": len(limits),
+        "merged_len": len(merged),
+        "max_limit": max((L for L in limits if isinstance(L, int)), default=None),
+        "min_limit": min((L for L in limits if isinstance(L, int)), default=None),
+    }
+
+
 def terminal_state_from_events(events: list[dict[str, Any]]) -> str:
     for ev in reversed(events):
         et = str(ev.get("type") or "")
