@@ -6,14 +6,15 @@
 > **输入**：`eval/official/baseline/official-small-2026-08-m2.json` · `m1.json` · `eval/reports/official/c3_grid_latest.json` · `eval/reports/official/retrieval_bucket_latest.json`  
 > **纲领**：[official-bench-agent-tuning](official-bench-agent-tuning.md)（本文是其 §9「Phase B 归因 + 本轮工程调优方案」交付物，并细化为可施工计划）  
 > **流程图（含数字释义）**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) — 分桶怎么读、为何 drift↓/ok↑/cap↓ 算行为正向、C-3「8 点 macro 打平」、search_cap 复测后 IR 平台期  
-> **纪律**：评测面已 bump → **m3**；**验收温度计 = free L1 only**（不用 forced 为 free 掉分开脱）；**宣称由 official 驱动**的合入仍须 M2 分桶 + L2 验证（纲领 §0.2）；纯产品痛点票可先行，**不得**用 m2/冒烟分作涨分叙事
-本方案受三条原则约束，全篇按此裁剪：
+> **纪律**：评测面已 bump → **m3**；**验收温度计 = free L1 only**；**目的 = 优化检索工程，bench 分只是间接结果**；**成熟合理 + 不伤主 agent 速率/逻辑（R1–R5）** 一票否决刷分旁路；官方 Δ 仍须 M2；不得用冒烟单次入库  
+本方案受原则约束，全篇按此裁剪（与 `retrieval-free-l1-tuning-brief.md` 文首一致）：
 
 | # | 原则 | 在本方案中的落点 |
 |---|------|------------------|
-| **P-速率** | 不影响 agent 交互速率与交互逻辑 | 评测全部在 Ops / 隔离 Work / bench 面运行，不进用户热路径；所有 C 票逐票过 R1–R5（[13](../core/13-rate-redlines.md)），不改 `AgentEngine` while、不加同步模型调用；评测代码不得在 runtime 留任何影响质量/速率的分支（§5.4 审计清单） |
-| **P-同构** | 评测跑真实主链路，分数提高只是调优的间接结果 | 主臂一律 `Session → Turn → loop → 工具 → assemble → 终态`，用**产品默认参数**（不为评测特调温度/预算/profile）；旁路与脚本化臂只作 L0/L2 探针 |
-| **P-成熟** | 不以「够用」为主导，建立成熟合理的评测方式 | 对齐成熟 agent 评测八要素（§2），补齐轨迹探针、统计协议、自动归因、防作弊审计四块基建（§5），主栏只认全量锚 + 官方裁判 |
+| **P-目的** | 优化的是检索（Index/契约/预算等生产能力）；官方题集用于同构量测与归因；**分数上升只是间接证明** | 禁止为刷分改评测臂/注入答案；C 票写清「加热哪层工程」；入库叙事必须是工程变好而非「分涨了」 |
+| **P-成熟** | 相对成熟、合理的评测与调优思路，不以「够用」旁路为主导 | 对齐成熟 agent 评测八要素（§2）；轨迹探针、统计协议、自动归因、防作弊（§5）；主栏只认全量锚 + 自由臂 + 官方裁判；重要刀 N≥2 |
+| **P-速率** | 不影响主 agent 交互速率与交互逻辑 | 不改 `AgentEngine` while；不加同步模型调用改 query；重活 Turn 外；所有 C 票过 R1–R5；评测不得在 runtime 留官方专用质量分支 |
+| **P-同构** | 评测跑真实主链路（free） | 主臂 `Session → Turn → loop → 工具 → assemble → 终态`，产品默认参数；forced/L0 只作探针 |
 
 ---
 
