@@ -740,6 +740,23 @@ def test_prefer_excerpt_covering_hits_promotes_visible_term() -> None:
     ordered = _prefer_excerpt_covering_hits([late, early], "张白鹿")
     assert ordered[0] is early
     assert ordered[1] is late
+    assert ordered[0].get("_excerpt_promote_reorder") is True
+
+
+def test_prefer_excerpt_covering_hits_no_flag_when_order_unchanged() -> None:
+    from app.tools.core.tools import _prefer_excerpt_covering_hits
+
+    early = {
+        "path": "sources/a.md",
+        "excerpt": "alpha marker here",
+    }
+    late = {
+        "path": "sources/b.md",
+        "excerpt": "unrelated",
+    }
+    ordered = _prefer_excerpt_covering_hits([early, late], "alpha marker")
+    assert ordered[0] is early
+    assert "_excerpt_promote_reorder" not in ordered[0]
 
 
 @pytest.mark.asyncio

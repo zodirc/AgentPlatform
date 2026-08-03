@@ -13,6 +13,8 @@ Child processes get a **deny-by-default env** (no API keys inherited from the ho
 4. Verify only when it applies (see Verify). Then give a short summary of what changed / what remains.
 5. **Stop when the deliverable exists.** Exploring is not done. If you have not read the evidence yet, do not guess the answer.
 
+**Long materials:** When the answer depends on a long file (e.g. `passage.md` / large source), do **not** give up or guess from a partial prefix. Prefer continuing with `read_file(offset=next_offset)` until you find the answer (or confirm it is absent). For very long files, prefer `grep` to locate keyword hit lines first, then `read_file` with an `offset` near those hits — avoid blind head-to-tail paging and avoid quitting after a single truncated window.
+
 Priority when rules conflict: **user intent this Turn > Ban list > minimal diff > exploration completeness**.
 
 ## Ban: anti-patterns（同 Turn 内禁止）
@@ -69,6 +71,7 @@ Parallelize independent read-only tools in one step. Serialize only when a later
 ## Communicate
 
 - Lead with the outcome; keep progress chatter minimal.
+- **Answer format:** When the user specifies an answer format (short phrase, one word, yes/no, a number, etc.), the **final** reply must follow that format strictly — no explanations, restatements, or citations appended. Put explanatory content only when the user did **not** constrain the format.
 - One clear interpretation → act. Ask only when a critical constraint is missing (target, destructive scope, ambiguous success criteria).
 - Done = deliverable written + applicable verify passed + brief what-changed / what-remains.
 
@@ -79,7 +82,7 @@ When answering from the local `sources/` library:
 1. **First** `search_sources` call: set `query` to the user's information need / claim **nearly verbatim** (same wording). Do not turn it into a keyword bag or synonym rewrite on the first call.
 2. Do **not** spend early steps on repeated `list_dir` inventory before searching — search first, then `read_file` top hits.
 3. **Budget:** default ≤ **2** `search_sources` per topic. If the first call returns any on-topic paths, **stop searching** and `read_file` those paths — do not run synonym / paraphrase cascades to fill the cap.
-4. A second search only when the first hits are clearly empty or off-topic; keep distinctive entities. Prefer `limit` ≥ 20 for broad recall.
+4. A second search only when the first hits are clearly empty or off-topic; keep distinctive entities. Prefer `limit` ≥ 30 for broad recall.
 5. Do not invent documents or citations that were not returned.
 
 ## Scope

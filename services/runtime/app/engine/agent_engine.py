@@ -1032,6 +1032,8 @@ class AgentEngine:
                     "hits": hits_preview,
                     "ranked": ranked_for_score,
                 }
+                if result.get("excerpt_promote_reorder"):
+                    retrieval_payload["excerpt_promote_reorder"] = True
                 index_info = result.get("index")
                 if isinstance(index_info, dict):
                     retrieval_payload["index"] = index_info

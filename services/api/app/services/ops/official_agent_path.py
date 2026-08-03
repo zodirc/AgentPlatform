@@ -826,15 +826,23 @@ async def run_retrieval_l1(
     _ensure_scripts_path()
     from official_bench.agent_path_extract import (
         called_tools,
+        excerpt_promote_reorder_count,
         merge_retrieval_rankings,
         ranking_scores,
         search_queries_from_events,
         step_count_from_events,
         terminal_state_from_events,
+        top_ranked_hits_from_events,
     )
     from official_bench.config import load_suites
-    from official_bench.l2_probes import classify_bucket, query_drift
-    from official_bench.metrics_ir import aggregate_metrics
+    from official_bench.l2_probes import (
+        apply_retrieval_weak_hits,
+        bucket_counts,
+        classify_bucket,
+        query_drift,
+        weak_hits_snapshots,
+    )
+    from official_bench.metrics_ir import aggregate_metrics, ndcg_at_k, recall_at_k
     from official_bench.pull import pull_beir
     from official_bench.run_session import RunSession
 
@@ -983,12 +991,20 @@ async def run_retrieval_l1(
                         scores = ranking_scores(doc_ids, limit=limit_k)
                         tools = called_tools(events)
                         queries = search_queries_from_events(events)
+                        top_hits = top_ranked_hits_from_events(events, limit=10)
+                        promote_n = excerpt_promote_reorder_count(events)
                         drift = (
                             query_drift(qtext, queries[0])
                             if queries
                             else (1.0 if "search_sources" not in tools else 0.0)
                         )
                         searched = "search_sources" in tools or bool(doc_ids)
+                        judged = {qid: qrels.get(qid) or {}}
+                        run_one = {qid: scores}
+                        case_ndcg_10 = float(ndcg_at_k(judged, run_one, 10))
+                        case_ndcg_100 = float(ndcg_at_k(judged, run_one, 100))
+                        case_recall_10 = float(recall_at_k(judged, run_one, 10))
+                        case_recall_100 = float(recall_at_k(judged, run_one, 100))
                         l2 = {
                             "case_id": f"beir.{name}.q-{qid}",
                             "turn_id": str(turn["id"]),
@@ -1000,15 +1016,33 @@ async def run_retrieval_l1(
                             "steps": step_count_from_events(events),
                             "terminal_state": terminal_state_from_events(events),
                             "tools": tools,
+                            "excerpt_promote_reorder_n": promote_n,
                         }
+                        # weak_hits needs suite median — provisional bucket until post-pass.
                         l2["bucket"] = classify_bucket("retrieval", l2)
                         err = None
                         # Unsearched free-arm cases score as empty ranking (0).
                         status = "pass" if doc_ids else "fail"
+                        case_metrics_row = {
+                            "n_hits": float(len(doc_ids)),
+                            "ndcg_at_10": case_ndcg_10,
+                            "ndcg_at_100": case_ndcg_100,
+                            "recall_at_10": case_recall_10,
+                            "recall_at_100": case_recall_100,
+                        }
                     except Exception as exc:  # noqa: BLE001
                         doc_ids = []
                         scores = {}
                         tools = []
+                        top_hits = []
+                        promote_n = 0
+                        case_metrics_row = {
+                            "n_hits": 0.0,
+                            "ndcg_at_10": 0.0,
+                            "ndcg_at_100": 0.0,
+                            "recall_at_10": 0.0,
+                            "recall_at_100": 0.0,
+                        }
                         l2 = {
                             "case_id": f"beir.{name}.q-{qid}",
                             "turn_id": str(turn["id"]),
@@ -1019,6 +1053,7 @@ async def run_retrieval_l1(
                             "query_drift": 1.0,
                             "terminal_state": "failed",
                             "bucket": "no_search",
+                            "excerpt_promote_reorder_n": 0,
                         }
                         err = str(exc)
                         status = "fail"
@@ -1028,7 +1063,7 @@ async def run_retrieval_l1(
                             f"beir.{name}.q-{qid}",
                             status=status,
                             error=err,
-                            metrics={"n_hits": float(len(doc_ids))},
+                            metrics=case_metrics_row,
                             extra={
                                 "turn_id": str(turn["id"]),
                                 "tools": l2.get("tools") or tools,
@@ -1041,6 +1076,9 @@ async def run_retrieval_l1(
                                 "l2": l2,
                                 "terminal_state": l2.get("terminal_state"),
                                 "steps": l2.get("steps"),
+                                "top_hits": top_hits,
+                                "excerpt_promote_reorder_n": promote_n,
+                                "original_claim": qtext,
                             },
                         )
                         done_count += 1
@@ -1080,6 +1118,40 @@ async def run_retrieval_l1(
             if vals:
                 macro[key] = sum(vals) / len(vals)
         session.metrics = {**macro, **{f"agent.{k}": v for k, v in macro.items()}}
+
+        # RET-3: force weak_hits observability (suite median + histogram + low-score cards).
+        suite_median = apply_retrieval_weak_hits(session.cases)
+        query_cases = [
+            c
+            for c in session.cases
+            if isinstance(c.get("l2"), dict)
+            and not str(c.get("case_id") or "").endswith(".agent")
+        ]
+        counts = bucket_counts(query_cases)
+        low_score = weak_hits_snapshots(query_cases, suite_median=suite_median)
+        promote_total = sum(
+            int(c.get("excerpt_promote_reorder_n") or 0) for c in query_cases
+        )
+        session.extra["bucket_counts"] = counts
+        session.extra["suite_ndcg_median"] = suite_median
+        session.extra["weak_hits_cases"] = low_score
+        session.extra["excerpt_promote_reorder_total"] = promote_total
+        session.log(
+            "bucket_histogram",
+            json.dumps(
+                {
+                    "bucket_counts": counts,
+                    "suite_ndcg_median": suite_median,
+                    "weak_hits_n": len(
+                        [c for c in query_cases if c.get("bucket") == "weak_hits"]
+                    ),
+                    "excerpt_promote_reorder_total": promote_total,
+                },
+                ensure_ascii=False,
+            ),
+            kind="bucket_histogram",
+        )
+
         result = {
             "suite": "beir.small",
             "official": "BEIR",
@@ -1090,6 +1162,10 @@ async def run_retrieval_l1(
             "sample_tier": session.extra.get("sample_tier"),
             "metrics": session.metrics,
             "cases": case_metrics,
+            "bucket_counts": counts,
+            "suite_ndcg_median": suite_median,
+            "weak_hits_cases": low_score,
+            "excerpt_promote_reorder_total": promote_total,
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         manifest = session.finish(status="completed", metrics=session.metrics, result=result)
@@ -1672,6 +1748,7 @@ async def run_l1_targets(
     for idx, t in enumerate(live):
         if should_cancel is not None and should_cancel():
             raise RuntimeError("L1 cancelled")
+        await _emit(on_progress, "log", message=f"[L1] suite start {t}")
         if t == "retrieval":
             out[t] = await run_retrieval_l1(
                 limit_queries=retrieval_query_limit,

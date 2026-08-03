@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import json
+import logging
 import re
 from functools import partial
 from pathlib import Path
@@ -12,6 +13,7 @@ from uuid import uuid4
 from app.settings import settings
 
 _T = TypeVar("_T")
+logger = logging.getLogger(__name__)
 
 
 async def _run_retrieval_blocking(
@@ -143,11 +145,15 @@ def _slice_file_by_lines(
         "next_offset": next_offset,
     }
     if more_lines and next_offset is not None:
+        read_chars = len("".join(chunk))
+        # Approximate remaining file size from unread lines for the continue hint.
+        unread = "".join(lines[end_line:])
+        total_chars = read_chars + len(unread)
         payload["hint"] = (
-            f"File continues after line {end_line}/{total_lines}. "
-            f"Call read_file again with offset={next_offset}"
+            f"已读 {read_chars} / 共 {total_chars} 字符（lines {start}–{end_line}/{total_lines}），"
+            f"内容未完；续读请传 offset={next_offset}"
             + (f" and limit={limit}" if limit is not None else "")
-            + ". Do not use run_command head/tail/sed/cat to page this file."
+            + "。Do not use run_command head/tail/sed/cat to page this file."
         )
     elif line_char_clipped:
         payload["hint"] = (
@@ -249,22 +255,35 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     )
     eof_from_offset = (not truncated) and offset > 1 and end_line >= total_lines and total_lines > 0
     if truncated:
+        next_off = sliced["next_offset"]
+        read_chars = len(sliced["content"])
+        total_chars = len(content)
         summary = (
             f"Read {path} lines {offset}–{end_line}/{total_lines} "
-            f"(truncated; next_offset={sliced['next_offset']})"
+            f"(truncated; next_offset={next_off})"
         )
+        continue_hint = None
+        if next_off is not None:
+            continue_hint = (
+                f"已读 {read_chars} / 共 {total_chars} 字符，内容未完；"
+                f"续读请传 offset={next_off}"
+            )
     elif total_lines == 0:
         summary = f"Read {path} (empty)"
+        continue_hint = None
     elif whole_file_complete:
         summary = f"Read {path} lines {offset}–{end_line}/{total_lines} (complete)"
+        continue_hint = None
     elif eof_from_offset:
         summary = (
             f"Read {path} lines {offset}–{end_line}/{total_lines} (eof_from_offset); "
             "not a whole-file complete — do not treat as full-file coverage"
         )
+        continue_hint = None
     else:
         summary = f"Read {path} lines {offset}–{end_line}/{total_lines}"
-    return {
+        continue_hint = None
+    out: dict[str, Any] = {
         "path": path,
         "content": sliced["content"],
         "offset": sliced["offset"],
@@ -274,8 +293,11 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
         "next_offset": sliced["next_offset"],
         "whole_file_complete": whole_file_complete,
         "summary": summary,
-        **({"hint": sliced["hint"]} if sliced.get("hint") else {}),
     }
+    hint = continue_hint or sliced.get("hint")
+    if hint:
+        out["hint"] = hint
+    return out
 
 
 async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
@@ -1088,7 +1110,21 @@ def _prefer_excerpt_covering_hits(
             rest.append(hit)
     if not covered:
         return hits
-    return covered + rest
+    promoted = covered + rest
+    # Compare hit identity (same path can still reorder across chunks).
+    if [id(h) for h in promoted] != [id(h) for h in hits]:
+        # P10 audit: silent reorder changes IR ranked order (RET-3).
+        logger.info(
+            "excerpt_promote_reorder n_hits=%s n_covered=%s n_terms=%s",
+            len(hits),
+            len(covered),
+            len(terms),
+        )
+        for hit in promoted:
+            if isinstance(hit, dict):
+                hit["_excerpt_promote_reorder"] = True
+                break
+    return promoted
 
 
 def _hits_cover_query_terms(hits: list[dict[str, Any]], query: str) -> bool:
@@ -1127,7 +1163,7 @@ def _with_retrieval_audit(
 
 async def search_sources(
     query: str,
-    limit: int = 10,
+    limit: int = 30,
     path_prefix: str | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
@@ -1232,6 +1268,11 @@ async def search_sources(
                         ),
                         query,
                     )
+                    excerpt_promote = bool(
+                        hits
+                        and isinstance(hits[0], dict)
+                        and hits[0].pop("_excerpt_promote_reorder", False)
+                    )
                     if hits and _hits_cover_query_terms(hits, query):
                         resolved = {
                             "query": query,
@@ -1241,6 +1282,8 @@ async def search_sources(
                             "index": index_meta,
                             "scope": {**scope_meta, "exclude": exclude_meta},
                         }
+                        if excerpt_promote:
+                            resolved["excerpt_promote_reorder"] = True
                         _attach_filter_meta(resolved, filter_meta)
                         if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
                             top_path = hits[0].get("path", "")

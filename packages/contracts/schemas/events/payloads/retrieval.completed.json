@@ -12,6 +12,10 @@
       "enum": ["vector", "keyword", "hybrid", "keyword-fallback", "none"]
     },
     "hit_count": { "type": "integer", "minimum": 0 },
+    "excerpt_promote_reorder": {
+      "type": "boolean",
+      "description": "P10/RET-3: true when _prefer_excerpt_covering_hits changed hit order before return"
+    },
     "index": {
       "type": "object",
       "additionalProperties": true

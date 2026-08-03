@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     search_sources_max_per_turn: int = 3
     # docs/34 RC5 — hard cap on read_file executions per Turn (0 = disabled).
     read_file_max_per_turn: int = 16
-    search_sources_excerpt_chars: int = 200
+    search_sources_excerpt_chars: int = 400
     search_sources_low_score_hint: float = 0.15
     # RE1: keyword fallback section alignment (docs/15); oversize / timeout → file excerpt only.
     search_sources_keyword_max_file_bytes: int = 262_144

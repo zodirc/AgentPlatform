@@ -166,3 +166,114 @@ def bucket_counts(cases: list[dict[str, Any]]) -> dict[str, int]:
         b = str(case.get("bucket") or "unknown")
         out[b] = out.get(b, 0) + 1
     return out
+
+
+def _case_ndcg_at_10(case: dict[str, Any]) -> float | None:
+    metrics = case.get("metrics") if isinstance(case.get("metrics"), dict) else {}
+    val = metrics.get("ndcg_at_10")
+    if isinstance(val, (int, float)):
+        return float(val)
+    return None
+
+
+def suite_ndcg_median(cases: list[dict[str, Any]]) -> float | None:
+    """Median of per-case nDCG@10 (query-level cases only)."""
+    vals = sorted(v for v in (_case_ndcg_at_10(c) for c in cases) if v is not None)
+    if not vals:
+        return None
+    mid = len(vals) // 2
+    if len(vals) % 2 == 1:
+        return vals[mid]
+    return (vals[mid - 1] + vals[mid]) / 2.0
+
+
+def apply_retrieval_weak_hits(
+    cases: list[dict[str, Any]],
+    *,
+    suite_median: float | None = None,
+) -> float | None:
+    """Reclassify retrieval query cases so weak_hits can fire; mutates cases in place.
+
+    Returns the suite median used (or None when no per-case nDCG).
+    """
+    query_cases = [
+        c
+        for c in cases
+        if isinstance(c, dict)
+        and (isinstance(c.get("l2"), dict) or c.get("turn_id"))
+        and not str(c.get("case_id") or "").endswith(".agent")
+    ]
+    median = suite_median if suite_median is not None else suite_ndcg_median(query_cases)
+    if median is None:
+        return None
+    for case in query_cases:
+        probe = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+        for key in (
+            "searched",
+            "n_search",
+            "queries",
+            "query_drift",
+            "terminal_state",
+            "steps",
+            "arm",
+        ):
+            if key in case and key not in probe:
+                probe[key] = case[key]
+        case_ndcg = _case_ndcg_at_10(case)
+        bucket = classify_bucket(
+            "retrieval",
+            probe,
+            case_ndcg=case_ndcg,
+            suite_ndcg_median=median,
+        )
+        case["bucket"] = bucket
+        if isinstance(case.get("l2"), dict):
+            case["l2"]["bucket"] = bucket
+        elif probe:
+            case["l2"] = {**probe, "bucket": bucket}
+    return median
+
+
+def weak_hits_snapshots(
+    cases: list[dict[str, Any]],
+    *,
+    suite_median: float | None,
+    top_n: int = 10,
+) -> list[dict[str, Any]]:
+    """Low-nDCG case cards: query + top hits (for embed-ticket evidence)."""
+    if suite_median is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        if str(case.get("case_id") or "").endswith(".agent"):
+            continue
+        ndcg = _case_ndcg_at_10(case)
+        if ndcg is None or ndcg >= suite_median:
+            continue
+        queries = case.get("queries") or (case.get("l2") or {}).get("queries") or []
+        query = None
+        if isinstance(queries, list) and queries:
+            query = queries[0]
+        elif case.get("original_claim"):
+            query = case.get("original_claim")
+        top_hits = case.get("top_hits") or []
+        if isinstance(top_hits, list):
+            top_hits = top_hits[:top_n]
+        out.append(
+            {
+                "case_id": case.get("case_id"),
+                "bucket": case.get("bucket"),
+                "ndcg_at_10": ndcg,
+                "query": query,
+                "queries": queries if isinstance(queries, list) else [],
+                "top_hits": top_hits,
+                "n_search": case.get("n_search")
+                or (case.get("l2") or {}).get("n_search"),
+                "excerpt_promote_reorder_n": case.get("excerpt_promote_reorder_n")
+                or (case.get("l2") or {}).get("excerpt_promote_reorder_n"),
+            }
+        )
+    out.sort(key=lambda r: float(r.get("ndcg_at_10") or 0.0))
+    return out

@@ -36,18 +36,59 @@ def write_html_report(path: Path, manifest: dict[str, Any]) -> None:
     cases = manifest.get("cases") or []
     logs = manifest.get("logs") or []
     summary = manifest.get("summary") or {}
+    result = manifest.get("result") if isinstance(manifest.get("result"), dict) else {}
+    model_meta = (
+        manifest.get("model_meta") if isinstance(manifest.get("model_meta"), dict) else {}
+    )
+    bucket_counts = (
+        result.get("bucket_counts")
+        or model_meta.get("bucket_counts")
+        or {}
+    )
+    weak_hits = result.get("weak_hits_cases") or model_meta.get("weak_hits_cases") or []
+    suite_median = result.get("suite_ndcg_median")
+    if suite_median is None:
+        suite_median = model_meta.get("suite_ndcg_median")
 
     case_rows = []
     for c in cases:
         m = c.get("metrics") or {}
+        bucket = c.get("bucket") or ""
         case_rows.append(
             f"<tr>"
             f"<td><code>{_esc(c.get('case_id'))}</code></td>"
             f"<td class='st-{_esc(c.get('status'))}'>{_esc(c.get('status'))}</td>"
+            f"<td>{_esc(bucket or '—')}</td>"
             f"<td><pre>{_esc(json.dumps(m, ensure_ascii=False, indent=2)[:800])}</pre></td>"
             f"<td>{_esc(c.get('error') or '—')}</td>"
             f"</tr>"
         )
+
+    bucket_rows = []
+    if isinstance(bucket_counts, dict) and bucket_counts:
+        for name, n in sorted(bucket_counts.items(), key=lambda kv: (-int(kv[1]), str(kv[0]))):
+            bucket_rows.append(
+                f"<tr><td><code>{_esc(name)}</code></td><td><strong>{_esc(n)}</strong></td></tr>"
+            )
+
+    weak_rows = []
+    if isinstance(weak_hits, list):
+        for item in weak_hits[:40]:
+            if not isinstance(item, dict):
+                continue
+            hits = item.get("top_hits") or []
+            hits_txt = json.dumps(hits[:5], ensure_ascii=False, indent=2)[:500]
+            ndcg_v = item.get("ndcg_at_10")
+            ndcg_txt = f"{float(ndcg_v):.4f}" if isinstance(ndcg_v, (int, float)) else "—"
+            weak_rows.append(
+                f"<tr>"
+                f"<td><code>{_esc(item.get('case_id'))}</code></td>"
+                f"<td>{_esc(item.get('bucket'))}</td>"
+                f"<td>{_esc(ndcg_txt)}</td>"
+                f"<td><pre>{_esc(item.get('query') or '—')}</pre></td>"
+                f"<td><pre>{_esc(hits_txt)}</pre></td>"
+                f"</tr>"
+            )
 
     log_rows = []
     for item in logs:
@@ -56,6 +97,32 @@ def write_html_report(path: Path, manifest: dict[str, Any]) -> None:
             f"<span class='kind'>{_esc(item.get('kind'))}</span> "
             f"{_esc(item.get('message'))}</li>"
         )
+
+    bucket_section = ""
+    if bucket_rows:
+        median_txt = (
+            f"{float(suite_median):.4f}" if isinstance(suite_median, (int, float)) else "—"
+        )
+        bucket_section = f"""
+  <section class="card" style="margin-top:1rem">
+    <h2 style="margin-top:0;font-size:1.1rem">分桶直方图</h2>
+    <p class="muted">suite_ndcg_median={_esc(median_txt)}</p>
+    <table>
+      <thead><tr><th>Bucket</th><th>n</th></tr></thead>
+      <tbody>{"".join(bucket_rows)}</tbody>
+    </table>
+  </section>"""
+
+    weak_section = ""
+    if weak_rows:
+        weak_section = f"""
+  <section class="card" style="margin-top:1rem">
+    <h2 style="margin-top:0;font-size:1.1rem">低分 case（nDCG@10 &lt; median）</h2>
+    <table>
+      <thead><tr><th>Case</th><th>Bucket</th><th>nDCG@10</th><th>Query</th><th>Top hits</th></tr></thead>
+      <tbody>{"".join(weak_rows)}</tbody>
+    </table>
+  </section>"""
 
     doc = f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -129,12 +196,13 @@ def write_html_report(path: Path, manifest: dict[str, Any]) -> None:
     <h2 style="margin-top:0;font-size:1.1rem">指标</h2>
     {_metric_bars(metrics if isinstance(metrics, dict) else {})}
   </section>
-
+{bucket_section}
+{weak_section}
   <section class="card" style="margin-top:1rem">
     <h2 style="margin-top:0;font-size:1.1rem">用例结果</h2>
     <table>
-      <thead><tr><th>Case</th><th>Status</th><th>Metrics</th><th>Error</th></tr></thead>
-      <tbody>{"".join(case_rows) or "<tr><td colspan=4 class='muted'>无用例</td></tr>"}</tbody>
+      <thead><tr><th>Case</th><th>Status</th><th>Bucket</th><th>Metrics</th><th>Error</th></tr></thead>
+      <tbody>{"".join(case_rows) or "<tr><td colspan=5 class='muted'>无用例</td></tr>"}</tbody>
     </table>
   </section>
 

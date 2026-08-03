@@ -82,6 +82,52 @@ def ranking_scores(doc_ids: list[str], *, limit: int = 100) -> dict[str, float]:
     return out
 
 
+def top_ranked_hits_from_events(
+    events: list[dict[str, Any]], *, limit: int = 10
+) -> list[dict[str, Any]]:
+    """First-seen union of retrieval.completed ranked hits (path + optional score)."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ev in events:
+        if str(ev.get("type") or "") != "retrieval.completed":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        ranked = payload.get("ranked")
+        if not isinstance(ranked, list):
+            ranked = payload.get("hits")
+        if not isinstance(ranked, list):
+            continue
+        for hit in ranked:
+            if not isinstance(hit, dict):
+                continue
+            path = str(hit.get("path") or "")
+            doc_id = doc_id_from_path(path)
+            if not doc_id or doc_id in seen:
+                continue
+            seen.add(doc_id)
+            row: dict[str, Any] = {"path": path, "doc_id": doc_id}
+            if hit.get("score") is not None:
+                row["score"] = hit.get("score")
+            out.append(row)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def excerpt_promote_reorder_count(events: list[dict[str, Any]]) -> int:
+    """Count retrieval.completed payloads that flagged excerpt promote reorder."""
+    n = 0
+    for ev in events:
+        if str(ev.get("type") or "") != "retrieval.completed":
+            continue
+        payload = ev.get("payload") or {}
+        if isinstance(payload, dict) and payload.get("excerpt_promote_reorder"):
+            n += 1
+    return n
+
+
 def final_assistant_text(events: list[dict[str, Any]]) -> str:
     """Best-effort final answer text from turn events."""
     texts: list[str] = []

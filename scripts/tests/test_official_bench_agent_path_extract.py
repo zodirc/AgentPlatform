@@ -402,6 +402,86 @@ def test_bucket_report_manifest() -> None:
     assert report["n_cases"] == 2
 
 
+def test_apply_retrieval_weak_hits_and_snapshots() -> None:
+    from official_bench.agent_path_extract import (
+        excerpt_promote_reorder_count,
+        top_ranked_hits_from_events,
+    )
+    from official_bench.l2_probes import (
+        apply_retrieval_weak_hits,
+        bucket_counts,
+        weak_hits_snapshots,
+    )
+
+    cases = [
+        {
+            "case_id": "beir.scifact.q-1",
+            "turn_id": "t1",
+            "searched": True,
+            "query_drift": 0.0,
+            "n_search": 1,
+            "queries": ["claim one"],
+            "l2": {
+                "searched": True,
+                "query_drift": 0.0,
+                "n_search": 1,
+                "queries": ["claim one"],
+            },
+            "metrics": {"ndcg_at_10": 0.2},
+            "top_hits": [{"path": "sources/a.txt", "doc_id": "a", "score": 0.9}],
+        },
+        {
+            "case_id": "beir.scifact.q-2",
+            "turn_id": "t2",
+            "searched": True,
+            "query_drift": 0.0,
+            "n_search": 1,
+            "queries": ["claim two"],
+            "l2": {
+                "searched": True,
+                "query_drift": 0.0,
+                "n_search": 1,
+                "queries": ["claim two"],
+            },
+            "metrics": {"ndcg_at_10": 0.8},
+            "top_hits": [],
+        },
+        {
+            "case_id": "beir.scifact.agent",
+            "status": "pass",
+            "metrics": {"ndcg_at_10": 0.5},
+        },
+    ]
+    median = apply_retrieval_weak_hits(cases)
+    assert median == 0.5
+    assert cases[0]["bucket"] == "weak_hits"
+    assert cases[1]["bucket"] == "ok"
+    counts = bucket_counts([c for c in cases if c.get("turn_id")])
+    assert counts["weak_hits"] == 1
+    assert counts["ok"] == 1
+    snaps = weak_hits_snapshots(cases, suite_median=median)
+    assert len(snaps) == 1
+    assert snaps[0]["case_id"] == "beir.scifact.q-1"
+    assert snaps[0]["query"] == "claim one"
+    assert snaps[0]["top_hits"][0]["doc_id"] == "a"
+
+    events = [
+        {
+            "type": "retrieval.completed",
+            "payload": {
+                "excerpt_promote_reorder": True,
+                "ranked": [
+                    {"path": "sources/beir/x.txt", "score": 0.5},
+                    {"path": "sources/beir/y.txt", "score": 0.4},
+                ],
+            },
+        }
+    ]
+    assert excerpt_promote_reorder_count(events) == 1
+    tops = top_ranked_hits_from_events(events, limit=1)
+    assert tops == [{"path": "sources/beir/x.txt", "doc_id": "x", "score": 0.5}]
+
+
 def test_prompt_helpers_no_tool_script_on_free() -> None:
     from official_bench.l1_prompts import context_prompt, limit_rows_per_task, retrieval_prompt
 

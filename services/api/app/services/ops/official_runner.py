@@ -876,6 +876,44 @@ async def _execute_via_bench(run: OfficialLiveRun) -> None:
         run.status = "cancelled" if run.cancel_requested else "failed"
 
 
+def _l1_suite_phase_hint(msg: str) -> str | None:
+    """Map an L1 progress line to a suite-specific phase strip (检索/上下文/编码)."""
+    if not msg.startswith("[L1]"):
+        return None
+    low = msg.lower()
+    # Coding first: turn events carry ``context.reported`` but label is ``swe.*``.
+    if (
+        low.startswith("[l1] coding")
+        or low.startswith("[l1] suite start coding")
+        or "coding plan" in low
+        or low.startswith("[l1] checkout")
+        or " swe." in low
+        or "· swe." in low
+        or "turn start swe." in low
+        or "turn done swe." in low
+    ):
+        return "② L1 评测 · 编码中…"
+    if (
+        low.startswith("[l1] context ")
+        or low.startswith("[l1] context done")
+        or low.startswith("[l1] suite start context")
+        or "context plan" in low
+        or "longbench." in low
+    ):
+        return "② L1 评测 · 上下文中…"
+    if (
+        "queries plan" in low
+        or low.startswith("[l1] dataset ")
+        or low.startswith("[l1] sync ")
+        or low.startswith("[l1] materialize ")
+        or low.startswith("[l1] suite start retrieval")
+        or "beir." in low
+        or low.startswith("[l1] retrieval")
+    ):
+        return "② L1 评测 · 检索中…"
+    return None
+
+
 async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
     """L1: official suites through product Turns (not agent-bench)."""
     from app.services.ops import official_agent_path
@@ -906,10 +944,26 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
                 hint = msg if len(msg) <= 140 else msg[:137] + "…"
                 run.phase_hint = hint
                 await _publish(run, {"kind": "phase", "message": hint})
-            elif run.current_phase == "pull" and msg.startswith("[L1]") and "pull" not in low:
-                run.current_phase = "eval"
-                run.phase_hint = "② L1 评测中…"
-                await _publish(run, {"kind": "phase", "message": run.phase_hint})
+            else:
+                suite_hint = _l1_suite_phase_hint(msg)
+                if suite_hint and run.phase_hint != suite_hint:
+                    if "编码" in suite_hint:
+                        run.current_phase = "eval.coding"
+                    elif "上下文" in suite_hint:
+                        run.current_phase = "eval.context"
+                    else:
+                        run.current_phase = "eval.retrieval"
+                    run.phase_hint = suite_hint
+                    await _publish(run, {"kind": "phase", "message": suite_hint})
+                elif (
+                    run.current_phase == "pull"
+                    and msg.startswith("[L1]")
+                    and "pull" not in low
+                ):
+                    # Fallback until the first suite-specific line arrives.
+                    run.current_phase = "eval"
+                    run.phase_hint = "② L1 评测中…"
+                    await _publish(run, {"kind": "phase", "message": run.phase_hint})
         if len(run.logs) % 15 == 0:
             await _persist_snapshot(run)
 

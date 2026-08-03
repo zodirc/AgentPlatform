@@ -230,7 +230,7 @@ def build_registry() -> ToolRegistry:
                 "If the first call returns any on-topic paths, stop searching and `read_file` the "
                 "top hits — do not burn the remaining budget on synonym cascades. "
                 "A second search is only for clearly empty / off-topic first hits; keep distinctive "
-                "entities. Prefer a larger limit (e.g. 20–100) when you need broad recall. "
+                "entities. Prefer a larger limit (e.g. 30–100) when you need broad recall. "
                 "Do not invent documents. For content questions, call this before list_dir inventory."
             ),
             parameters={
@@ -244,7 +244,7 @@ def build_registry() -> ToolRegistry:
                             "otherwise read_file top paths instead of searching again."
                         ),
                     },
-                    "limit": {"type": "integer", "default": 10},
+                    "limit": {"type": "integer", "default": 30},
                     "path_prefix": {
                         "type": "string",
                         "description": (

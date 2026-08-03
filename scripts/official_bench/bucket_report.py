@@ -7,7 +7,13 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .l2_probes import bucket_counts, classify_bucket
+from .l2_probes import (
+    apply_retrieval_weak_hits,
+    bucket_counts,
+    classify_bucket,
+    suite_ndcg_median,
+    weak_hits_snapshots,
+)
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -73,8 +79,11 @@ def classify_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         )
         row = {**case, "bucket": bucket, "l2": probe}
         labeled.append(row)
+    median = None
+    if suite == "retrieval":
+        median = apply_retrieval_weak_hits(labeled)
     counts = bucket_counts(labeled)
-    return {
+    report: dict[str, Any] = {
         "suite": suite,
         "run_id": manifest.get("id"),
         "protocol_version": (manifest.get("model_meta") or {}).get("protocol_version")
@@ -83,6 +92,12 @@ def classify_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "n_cases": len(labeled),
         "cases": labeled,
     }
+    if suite == "retrieval":
+        report["suite_ndcg_median"] = median if median is not None else suite_ndcg_median(labeled)
+        report["weak_hits_cases"] = weak_hits_snapshots(
+            labeled, suite_median=report["suite_ndcg_median"]
+        )
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:

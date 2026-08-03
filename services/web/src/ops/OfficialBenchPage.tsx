@@ -523,6 +523,11 @@ const SUITE_UNIT: Record<string, string> = {
   coding: "题",
 };
 
+/** Strip suite prefix from case tokens for the detail strip. */
+function shortCaseToken(token: string): string {
+  return token.replace(/^(swe|beir|longbench)\./i, "");
+}
+
 function aggregateParts(
   parts: Record<string, { done: number; total: number }> | undefined,
 ): { done: number; total: number } | null {
@@ -638,21 +643,11 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
   const order = ["retrieval", "context", "coding"];
   const sorted = [
     ...order.filter((k) => k in details),
-    ...keys.filter((k) => !order.includes(k)).sort(),
+    ...keys.filter((k) => !order.includes(k) && k !== "_").sort(),
   ];
-  const label = sorted
-    .map((k) => {
-      const d = details[k];
-      if (k === "_") return d.label;
-      const name = SUITE_DETAIL_LABEL[k] || k;
-      const bucket =
-        d.done != null && d.total != null ? ` ${d.done}/${d.total}` : "";
-      return `${name}: ${d.label}${bucket && !d.label.includes(`${d.done}/${d.total}`) ? bucket : ""}`;
-    })
-    .join(" · ");
   const kind = sorted.some((k) => details[k].kind === "eval")
     ? "eval"
-    : sorted.some((k) => details[k].kind === "pull")
+    : sorted.some((k) => details[k].kind === "pull") || details._?.kind === "pull"
       ? "pull"
       : "idle";
 
@@ -687,6 +682,11 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
       }
     }
   }
+  if (!focus && details._) {
+    focus = details._;
+    focusKey = null;
+  }
+
   const done = focus?.done ?? null;
   const total = focus?.total ?? null;
   let remain =
@@ -704,6 +704,32 @@ function formatSuiteDetails(details: Record<string, DetailProgress>): {
     done != null && total != null && total > 0
       ? Math.max(0, Math.min(100, Math.round((done / total) * 100)))
       : focus?.pct ?? null;
+
+  // Detail strip: only the active suite (finished suites cluttered the line and
+  // made coding look stuck on an old instance / pull cache hint).
+  const label = (() => {
+    if (focus) {
+      const name = focusKey ? SUITE_DETAIL_LABEL[focusKey] || focusKey : null;
+      const lab = (focus.label || "").replace(/^L1\s+/, "");
+      // 「已完成 a/b」so 1/5 is not read as "item 1 of 5 / current case".
+      const bucket =
+        done != null && total != null
+          ? done < total
+            ? ` · 已完成 ${done}/${total}`
+            : ` · ${done}/${total}`
+          : "";
+      const withBucket =
+        bucket && !lab.includes(`${done}/${total}`) ? `${lab}${bucket}` : lab;
+      return name ? `${name}: ${withBucket}` : withBucket;
+    }
+    return sorted
+      .map((k) => {
+        const d = details[k];
+        const name = SUITE_DETAIL_LABEL[k] || k;
+        return `${name}: ${d.label}`;
+      })
+      .join(" · ");
+  })();
 
   return { label, pct, kind, done, total, remain, unit, suiteKey: focusKey };
 }
@@ -725,6 +751,27 @@ function suiteFromL1Token(token: string): string | null {
 
 function parseProgressLine(line: string): DetailProgress | null {
   // L1 agent-path live lines (official_agent_path)
+  const l1SuiteStart = line.match(/^\[L1\]\s+suite start\s+(\S+)/i);
+  if (l1SuiteStart) {
+    const raw = l1SuiteStart[1].toLowerCase();
+    const suite =
+      raw === "coding_infer" || raw === "coding"
+        ? "coding"
+        : raw === "context"
+          ? "context"
+          : raw === "retrieval"
+            ? "retrieval"
+            : null;
+    if (suite) {
+      return {
+        kind: "eval",
+        suite,
+        label: `L1 开始 · ${SUITE_DETAIL_LABEL[suite]}`,
+        pct: null,
+        unit: SUITE_UNIT[suite],
+      };
+    }
+  }
   const l1Coding = line.match(/^\[L1\]\s+coding\s+(\d+)\s*\/\s*(\d+)\s+(\S+)/i);
   if (l1Coding) {
     const cur = Number(l1Coding[1]);
@@ -737,7 +784,7 @@ function parseProgressLine(line: string): DetailProgress | null {
     return {
       kind: "eval",
       suite: "coding",
-      label: `L1 编码 ${cur}/${total || "?"} · ${iid}`,
+      label: `已完成 ${cur}/${total || "?"} · ${shortCaseToken(iid)}`,
       pct,
       done: Number.isFinite(cur) ? cur : null,
       total: Number.isFinite(total) ? total : null,
@@ -947,10 +994,32 @@ function parseProgressLine(line: string): DetailProgress | null {
       return {
         kind: "eval",
         suite,
-        label: `L1 Turn 进行中 · ${label}`,
+        label: `进行中 · ${shortCaseToken(label)}`,
         pct: null,
       };
     }
+  }
+  const l1CheckoutFail = line.match(
+    /^\[L1\]\s+checkout failed\s+(\S+):\s*(.+)$/i,
+  );
+  if (l1CheckoutFail) {
+    return {
+      kind: "eval",
+      suite: "coding",
+      label: `checkout 失败 · ${shortCaseToken(l1CheckoutFail[1])}（仅 problem.md）`,
+      pct: null,
+    };
+  }
+  const l1CheckoutOk = line.match(
+    /^\[L1\]\s+checkout\s+(\S+)\s+mirror_hit=(\S+)/i,
+  );
+  if (l1CheckoutOk) {
+    return {
+      kind: "eval",
+      suite: "coding",
+      label: `checkout · ${shortCaseToken(l1CheckoutOk[1])} · mirror=${l1CheckoutOk[2]}`,
+      pct: null,
+    };
   }
   const l1TurnDone = line.match(
     /^\[L1\]\s+turn done\s+(\S+)\s+status=(\S+)\s+events=(\d+)\s+(\d+)s/i,
@@ -962,7 +1031,7 @@ function parseProgressLine(line: string): DetailProgress | null {
       return {
         kind: "eval",
         suite,
-        label: `L1 Turn 结束 · ${l1TurnDone[2]} · ${l1TurnDone[4]}s · ${label}`,
+        label: `Turn ${l1TurnDone[2]} · ${shortCaseToken(label)} · ${l1TurnDone[4]}s`,
         pct: null,
       };
     }
@@ -977,7 +1046,7 @@ function parseProgressLine(line: string): DetailProgress | null {
       return {
         kind: "eval",
         suite,
-        label: `L1 等待 Turn · ${l1Wait[2]}s · last=${l1Wait[3]} · ${label}`,
+        label: `等待 · ${shortCaseToken(label)} · ${l1Wait[2]}s · last=${l1Wait[3]}`,
         pct: null,
       };
     }
@@ -990,10 +1059,22 @@ function parseProgressLine(line: string): DetailProgress | null {
     const label = l1Step[3];
     const suite = suiteFromL1Token(label);
     if (suite) {
+      const caseId = shortCaseToken(label);
+      // Detail strip should answer "which case", not dump stream event names
+      // (context.reported → 「上下文就绪」looked like the context suite).
+      if (et.startsWith("tool.")) {
+        const verb = et === "tool.started" ? "工具" : "工具完成";
+        return {
+          kind: "eval",
+          suite,
+          label: `${verb}${detail ? ` ${detail}` : ""} · ${caseId}`,
+          pct: null,
+        };
+      }
       return {
         kind: "eval",
         suite,
-        label: `L1 ${et}${detail ? ` ${detail}` : ""} · ${label}`,
+        label: `进行中 · ${caseId}`,
         pct: null,
       };
     }
@@ -2541,6 +2622,11 @@ export function OfficialBenchPage() {
   const activeSuiteName = detailProgress.suiteKey
     ? SUITE_DETAIL_LABEL[detailProgress.suiteKey] || detailProgress.suiteKey
     : null;
+  // Prefer live suite over the coarse backend "② L1 评测中…" strip.
+  const displayPhaseHint =
+    busy && activeSuiteName && detailProgress.kind === "eval"
+      ? `② L1 评测 · ${activeSuiteName}中…`
+      : phaseHint;
   // L1 pipeline suites = retrieval / context / coding (at most 3), NOT BEIR datasets / queries.
   const suiteProgressLabel =
     progress.total > 0
@@ -2553,7 +2639,9 @@ export function OfficialBenchPage() {
       : null;
   const itemsRemainLabel =
     detailProgress.remain != null && detailProgress.unit
-      ? `${activeSuiteName || "套内"} ${detailProgress.done ?? 0}/${detailProgress.total ?? "?"} · 剩 ${detailProgress.remain} ${detailProgress.unit}`
+      ? busy && (detailProgress.done ?? 0) < (detailProgress.total ?? 0)
+        ? `${activeSuiteName || "套内"} 已完成 ${detailProgress.done ?? 0}/${detailProgress.total ?? "?"} · 进行中`
+        : `${activeSuiteName || "套内"} ${detailProgress.done ?? 0}/${detailProgress.total ?? "?"} · 剩 ${detailProgress.remain} ${detailProgress.unit}`
       : null;
   const remainLabel = (() => {
     const parts: string[] = [];
@@ -3341,7 +3429,7 @@ export function OfficialBenchPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span>
                   <span className="text-muted-foreground">当前阶段 · </span>
-                  <span className="font-medium whitespace-pre-wrap">{phaseHint}</span>
+                  <span className="font-medium whitespace-pre-wrap">{displayPhaseHint}</span>
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   {timingLabel ? (
@@ -3369,10 +3457,12 @@ export function OfficialBenchPage() {
                 </span>
                 <span className="tabular-nums text-muted-foreground">
                   {detailProgress.done != null && detailProgress.total != null
-                    ? `${detailProgress.done}/${detailProgress.total}` +
-                      (detailProgress.remain != null && detailProgress.unit
-                        ? ` · 剩 ${detailProgress.remain} ${detailProgress.unit}`
-                        : "")
+                    ? busy && detailProgress.done < detailProgress.total
+                      ? `已完成 ${detailProgress.done}/${detailProgress.total}`
+                      : `${detailProgress.done}/${detailProgress.total}` +
+                        (detailProgress.remain != null && detailProgress.unit
+                          ? ` · 剩 ${detailProgress.remain} ${detailProgress.unit}`
+                          : "")
                     : detailPct != null
                       ? `${detailPct}%`
                       : "—"}
