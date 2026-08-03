@@ -79,7 +79,7 @@ When answering from the local `sources/` library:
 1. **First** `search_sources` call: set `query` to the user's information need / claim **nearly verbatim** (same wording). Do not turn it into a keyword bag or synonym rewrite on the first call.
 2. Do **not** spend early steps on repeated `list_dir` inventory before searching — search first, then `read_file` top hits.
 3. **Budget:** default ≤ **2** `search_sources` per topic. If the first call returns any on-topic paths, **stop searching** and `read_file` those paths — do not run synonym / paraphrase cascades to fill the cap.
-4. A second search only when the first hits are clearly empty or off-topic; keep distinctive entities. Prefer `limit` ≥ 20 for broad recall.
+4. A second search only when the first hits are clearly empty or off-topic; keep distinctive entities. Prefer `limit` ≥ 50 (default) for broad recall; use 100 when ranking deeply.
 5. Do not invent documents or citations that were not returned.
 
 ## Scope

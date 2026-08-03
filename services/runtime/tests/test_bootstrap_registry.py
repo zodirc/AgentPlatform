@@ -54,6 +54,7 @@ def test_search_sources_description_includes_library_map() -> None:
     query_desc = str(props.get("query", {}).get("description", "")).lower()
     assert "verbatim" in query_desc
     assert "read_file" in query_desc
+    assert int(props.get("limit", {}).get("default") or 0) >= 50
 
 
 def test_tool_scope_planning_phase_excludes_writes() -> None:

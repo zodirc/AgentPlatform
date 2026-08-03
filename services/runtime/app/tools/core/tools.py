@@ -1127,7 +1127,7 @@ def _with_retrieval_audit(
 
 async def search_sources(
     query: str,
-    limit: int = 10,
+    limit: int = 50,
     path_prefix: str | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:

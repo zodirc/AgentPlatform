@@ -372,6 +372,38 @@ def test_lexical_rerank_prefers_early_phrase_in_excerpt() -> None:
     assert reranked[0].chunk_id == "early"
 
 
+def test_lexical_rerank_does_not_wash_small_rrf_ranks() -> None:
+    """Token overlap must not reorder clearly separated tiny hybrid (RRF) scores."""
+    long_q = (
+        "1,000 genomes project enables mapping of genetic sequence variation "
+        "consisting of rare variants with larger penetrance effects than common variants."
+    )
+    hits = [
+        ChunkHit(
+            path="sources/a.txt",
+            chunk_id="top",
+            excerpt="unrelated abstract without the claim tokens clustered",
+            citation_id="cite:a",
+            score=0.04,
+            section_title="intro",
+        ),
+        ChunkHit(
+            path="sources/b.txt",
+            chunk_id="overlap",
+            # High token overlap but NOT the full claim phrase (no phrase_bonus).
+            excerpt=(
+                "population genomes sequencing project catalogs rare variants "
+                "allele frequency penetrance effects genetic variation mapping"
+            ),
+            citation_id="cite:b",
+            score=0.01,
+            section_title="body",
+        ),
+    ]
+    reranked = lexical_rerank(long_q, hits, limit=2)
+    assert reranked[0].chunk_id == "top"
+
+
 def test_json_source_retrieval_store_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
