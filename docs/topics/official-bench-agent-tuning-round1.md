@@ -5,7 +5,10 @@
 > **完整自含简报（流程 + 历次对照含 soft#2/回滚确认 + 问题，供高级模型续作）**：`docs/topics/retrieval-free-l1-tuning-brief.md`  
 > **输入**：`eval/official/baseline/official-small-2026-08-m2.json` · `m1.json` · `eval/reports/official/c3_grid_latest.json` · `eval/reports/official/retrieval_bucket_latest.json`  
 > **纲领**：[official-bench-agent-tuning](official-bench-agent-tuning.md)（本文是其 §9「Phase B 归因 + 本轮工程调优方案」交付物，并细化为可施工计划）  
-> **流程图（含数字释义）**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) — 分桶怎么读、为何 drift↓/ok↑/cap↓ 算行为正向、C-3「8 点 macro 打平」、search_cap 复测后 IR 平台期  
+> **流程图（含数字释义）**：  
+> · 检索：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) — Free-L1 BEIR 分桶/IR 门禁、排序栈存在证据、批次 6（RET-7/12/14/15/9）读数与裁决  
+> · 上下文：[context-tuning-flowchart.png](context-tuning-flowchart.png) — Free-L1 LongBench 分桶、CTX-1/7/9/10 做法与是否提升、下一步 CTX-8  
+> · 重建：`python3 scripts/gen_l1_tuning_lanes_zh.py`（现行流程竖脊 +「我们加的」标注）  
 > **纪律**：评测面已 bump → **m3**；**验收温度计 = free L1 only**；**目的 = 优化检索工程，bench 分只是间接结果**；**成熟合理 + 不伤主 agent 速率/逻辑（R1–R5）** 一票否决刷分旁路；官方 Δ 仍须 M2；不得用冒烟单次入库  
 本方案受原则约束，全篇按此裁剪（与 `retrieval-free-l1-tuning-brief.md` 文首一致）：
 

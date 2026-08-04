@@ -15,7 +15,8 @@
 > **RET-12 行为 N≥2（2026-08-04）**：检索 free `dfe97d37` nDCG@10 **0.422** · 配对 `3c34de88` → **no_stable_delta**（见 **§12.7**）；同批上下文 `c76e07a9` **infra 失败不作对照**  
 > **RET-15-2 free（2026-08-04）**：`6c87e401` nDCG@10 **0.442** · 配对 `dfe97d37` → **no_stable_delta**（见 **§12.8**）· **不写 IR 胜**  
 > **RET-7 消融 N≥2（2026-08-04）**：OFF `bcdbbb85`/`f92bc610` 均值 nDCG@10 **0.447** · vs ON `6c87e401` → 两轮皆 **no_stable_delta** → **默认关 promote**（§12.9）  
-> **CTX-7 N≥2（2026-08-04）**：`13647cb0`/`61624e34` · verbose **11→4** 稳定；EM **↓** → **不记 EM 胜**（§12.9）
+> **CTX-7 N≥2（2026-08-04）**：`13647cb0`/`61624e34` · verbose **11→4** 稳定；EM **↓** → **不记 EM 胜**（§12.9）  
+> **流程图**：检索 [retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) · 上下文 [context-tuning-flowchart.png](context-tuning-flowchart.png)（`python3 scripts/gen_l1_tuning_lanes_zh.py`）
 
 ---
 
