@@ -1,0 +1,24 @@
+{"id":"p01","need":"《我真不想重生啊》的主角叫什么名字？","gold_paths":["novels/novels1.md"],"answer_hint":"陈汉升","frozen":false}
+{"id":"p02","need":"《我真不想重生啊》重生时主角在哪所大学的哪个校区？","gold_paths":["novels/novels1.md"],"answer_hint":"南京大学浦口校区","frozen":false}
+{"id":"p03","need":"《我真不想重生啊》里沈幼楚就读于哪所学校？","gold_paths":["novels/novels1.md"],"answer_hint":"南京师范大学","frozen":false}
+{"id":"p04","need":"小说《亮剑》的作者是谁？首次出版是哪一年？","gold_paths":["dramas/drama1.md"],"answer_hint":"都梁；2000年","frozen":false}
+{"id":"p05","need":"电视剧《亮剑》央视版多少集？首播在哪一年？","gold_paths":["dramas/drama1.md"],"answer_hint":"24集；2005年","frozen":false}
+{"id":"p06","need":"李云龙在1955年授衔时被授予什么军衔？","gold_paths":["dramas/drama1.md"],"answer_hint":"少将","frozen":false}
+{"id":"p07","need":"电视剧《潜伏》的男主角叫什么？他潜伏在哪个机构？","gold_paths":["dramas/drama6.md"],"answer_hint":"余则成；保密局天津站","frozen":false}
+{"id":"p08","need":"《潜伏》里余则成与翠平的公开掩护身份是什么？","gold_paths":["dramas/drama6.md"],"answer_hint":"假夫妻","frozen":false}
+{"id":"p09","need":"《人民的名义》中汉东省两大派系分别叫什么？谁常被称为达康书记？","gold_paths":["dramas/drama4.md"],"answer_hint":"汉大帮与秘书帮；李达康","frozen":false}
+{"id":"p10","need":"《人民的名义》一一六事件与哪家工厂有关？","gold_paths":["dramas/drama4.md"],"answer_hint":"大风服装厂","frozen":false}
+{"id":"p11","need":"电影《心花路放》的导演是谁？领衔主演是谁？","gold_paths":["movie/movie1.md"],"answer_hint":"宁浩；黄渤、徐峥","frozen":false}
+{"id":"p12","need":"《心花路放》公路之旅的终点是哪里？大约票房多少？","gold_paths":["movie/movie1.md"],"answer_hint":"大理；11.67亿","frozen":false}
+{"id":"p13","need":"玄武门之变发生在哪一年？发动者是谁？","gold_paths":["periods/periods2.md"],"answer_hint":"626年；李世民","frozen":false}
+{"id":"p14","need":"玄武门之变中被杀的太子与齐王分别是谁？","gold_paths":["periods/periods2.md"],"answer_hint":"李建成；李元吉","frozen":false}
+{"id":"p15","need":"重庆谈判最终签署的文件叫什么？历时多少天？","gold_paths":["periods/periods4.md"],"answer_hint":"双十协定；43天","frozen":false}
+{"id":"p16","need":"重庆谈判期间中共提出的三大口号是什么？","gold_paths":["periods/periods4.md"],"answer_hint":"和平、民主、团结","frozen":false}
+{"id":"p17","need":"《铁齿铜牙纪晓岚》主要围绕哪几位历史人物的故事？","gold_paths":["dramas/drama3.md"],"answer_hint":"纪晓岚等（以文件概要为准）","frozen":false}
+{"id":"p18","need":"《好先生》男主角的职业设定是什么？","gold_paths":["dramas/drama5.md"],"answer_hint":"以文件概要为准","frozen":false}
+{"id":"p19","need":"写作库中《水浒传》资料文件路径是什么？","gold_paths":["novels/novels2.md"],"answer_hint":"novels/novels2.md","frozen":false}
+{"id":"p20","need":"1950年中国志愿军入朝全过程资料在 writing 库的哪个文件？","gold_paths":["periods/periods1.md"],"answer_hint":"periods/periods1.md","frozen":false}
+{"id":"p21","need":"电影《战争之王》资料的主题 slug 是什么？","gold_paths":["movie/movie2.md"],"answer_hint":"文件 frontmatter 中的主题slug","frozen":false}
+{"id":"p22","need":"《北平无战事》属于 writing 库 dramas 下的哪个文件？","gold_paths":["dramas/drama8.md"],"answer_hint":"dramas/drama8.md","frozen":false}
+{"id":"p23","need":"《五号特工组》资料文件在哪里？","gold_paths":["dramas/drama2.md"],"answer_hint":"dramas/drama2.md","frozen":false}
+{"id":"p24","need":"《渗透》电视剧资料在 writing 库的路径？","gold_paths":["dramas/drama7.md"],"answer_hint":"dramas/drama7.md","frozen":false}

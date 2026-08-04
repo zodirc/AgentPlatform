@@ -256,10 +256,12 @@ def ret17_gold_rank_bands(manifest: dict[str, Any], *, run_id: str) -> dict[str,
 
 
 def _load_longbench_golds() -> dict[str, list[str]]:
-    """task|question → answers (best-effort key)."""
+    """Keys: `longbench.{task}.{idx}` and `task|question` → answers."""
     out: dict[str, list[str]] = {}
     if not LONGBENCH_SLICE.is_file():
         return out
+    # Per-task running index matches runner materialize order (small_slice order).
+    task_counts: dict[str, int] = defaultdict(int)
     for line in LONGBENCH_SLICE.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -277,6 +279,14 @@ def _load_longbench_golds() -> dict[str, list[str]]:
         else:
             golds = [str(golds_raw or "")]
         out[f"{task}|{q}"] = golds
+        idx = row.get("idx")
+        if idx is None:
+            idx = task_counts[task]
+            task_counts[task] += 1
+        else:
+            idx = int(idx)
+            task_counts[task] = max(task_counts[task], idx + 1)
+        out[f"longbench.{task}.{idx}"] = golds
     return out
 
 
@@ -324,9 +334,7 @@ def ctx12_em_residual(manifest: dict[str, Any], *, run_id: str) -> dict[str, Any
         if em >= 1.0 or f1 <= 0.0:
             continue
         pred = str(c.get("pred") or "")
-        # Golds not always on case — leave empty → class falls to gamma/other.
         golds: list[str] = []
-        # Try l2 / extra
         for key in ("golds", "answers", "gold"):
             raw = c.get(key)
             if isinstance(raw, list):
@@ -335,10 +343,12 @@ def ctx12_em_residual(manifest: dict[str, Any], *, run_id: str) -> dict[str, Any
             if isinstance(raw, str) and raw.strip():
                 golds = [raw]
                 break
+        cid = str(c.get("case_id") or "")
+        if not golds and cid in gold_index:
+            golds = gold_index[cid]
         label = _ctx12_class(pred, golds, f1=f1) if golds else (
             "gamma_paraphrase" if f1 > 0 else "other"
         )
-        # Prefer golds from slice when question known (rare on case).
         counts[label] += 1
         classified.append(
             {
@@ -347,6 +357,7 @@ def ctx12_em_residual(manifest: dict[str, Any], *, run_id: str) -> dict[str, Any
                 "em": em,
                 "f1": f1,
                 "pred": pred[:200],
+                "golds": [g[:120] for g in golds[:3]],
                 "class": label,
                 "had_golds": bool(golds),
             }
