@@ -1,7 +1,13 @@
 id: writing.03_reject_patch
 scenario_id: writing
 phase: 1
-description: User rejects proposed patch; workspace unchanged
+description: User rejects proposed patch after stub propose (needs fixture for span precheck)
+
+fixtures:
+  workspace:
+    - path: sections/01.md
+      content: |
+        旧正文
 
 input:
   message: "把第二节改得更简洁 writing.03"
