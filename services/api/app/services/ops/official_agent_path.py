@@ -1019,20 +1019,27 @@ async def run_retrieval_l1(
             async def _one_query(i: int, qid: str, qtext: str) -> None:
                 nonlocal done_count
                 async with sem:
-                    sess = await session_svc.create_session(
-                        scenario_id,
-                        owner_user_id=SYSTEM_USER_ID,
-                        work_id=work.id,
-                    )
-                    prompt = _retrieval_prompt(arm=arm_norm, qtext=qtext, limit_k=limit_k)
-                    turn, _run = await _start_turn(
-                        session_id=sess["id"],
-                        scenario_id=scenario_id,
-                        message=prompt,
-                        work=work,
-                        model_override=model,
-                    )
+                    # INFRA-2: entire case body isolated — preamble transport
+                    # failures must not abort asyncio.gather / suite.
+                    turn_id_s = ""
+                    case_id = f"beir.{name}.q-{qid}"
                     try:
+                        sess = await session_svc.create_session(
+                            scenario_id,
+                            owner_user_id=SYSTEM_USER_ID,
+                            work_id=work.id,
+                        )
+                        prompt = _retrieval_prompt(
+                            arm=arm_norm, qtext=qtext, limit_k=limit_k
+                        )
+                        turn, _run = await _start_turn(
+                            session_id=sess["id"],
+                            scenario_id=scenario_id,
+                            message=prompt,
+                            work=work,
+                            model_override=model,
+                        )
+                        turn_id_s = str(turn["id"])
                         events = await _wait_turn_verbose(
                             turn["id"],
                             on_progress=on_progress,
@@ -1067,8 +1074,8 @@ async def run_retrieval_l1(
                         case_recall_10 = float(recall_at_k(judged, run_one, 10))
                         case_recall_100 = float(recall_at_k(judged, run_one, 100))
                         l2 = {
-                            "case_id": f"beir.{name}.q-{qid}",
-                            "turn_id": str(turn["id"]),
+                            "case_id": case_id,
+                            "turn_id": turn_id_s,
                             "arm": arm_norm,
                             "searched": searched,
                             "n_search": sum(1 for t in tools if t == "search_sources"),
@@ -1117,7 +1124,7 @@ async def run_retrieval_l1(
                             "recall_at_10": case_recall_10,
                             "recall_at_100": case_recall_100,
                         }
-                    except Exception as exc:  # noqa: BLE001
+                    except Exception as exc:  # noqa: BLE001 — case isolation, no re-raise
                         doc_ids = []
                         scores = {}
                         tools = []
@@ -1135,11 +1142,11 @@ async def run_retrieval_l1(
                             "recall_at_10": 0.0,
                             "recall_at_100": 0.0,
                         }
-                        err = str(exc)
+                        err = f"{type(exc).__module__}.{type(exc).__name__}: {exc}"
                         infra = is_infra_channel_failure(err)
                         l2 = {
-                            "case_id": f"beir.{name}.q-{qid}",
-                            "turn_id": str(turn["id"]),
+                            "case_id": case_id,
+                            "turn_id": turn_id_s,
                             "arm": arm_norm,
                             "searched": False,
                             "n_search": 0,
@@ -1158,7 +1165,6 @@ async def run_retrieval_l1(
                         if infra:
                             l2["failure_class"] = INFRA_CHANNEL_BUCKET
                         status = "fail"
-                    case_id = f"beir.{name}.q-{qid}"
                     fail_detail: str | None = None
                     if status == "fail":
                         fail_detail = str(
@@ -1177,7 +1183,7 @@ async def run_retrieval_l1(
                             error=err,
                             metrics=case_metrics_row,
                             extra={
-                                "turn_id": str(turn["id"]),
+                                "turn_id": turn_id_s,
                                 "tools": l2.get("tools") or tools,
                                 "searched": bool(l2.get("searched")),
                                 "n_search": l2.get("n_search"),
@@ -1478,7 +1484,11 @@ async def run_context_l1(
         async def _one_row(idx: int, row: dict[str, Any]) -> None:
             nonlocal done_count
             async with sem:
+                # INFRA-2: entire case body isolated — work/session/start_turn
+                # transport failures must not abort asyncio.gather / suite.
+                turn_id_s = ""
                 task = str(row.get("task") or row.get("dataset") or "longbench")
+                case_id = f"longbench.{task}.{idx}"
                 context = str(row.get("context") or "")
                 question = str(row.get("question") or row.get("input") or "").strip()
                 golds_raw = row.get("answers") or row.get("answer")
@@ -1488,27 +1498,27 @@ async def run_context_l1(
                     golds = [str(x) for x in golds_raw]
                 else:
                     golds = [str(golds_raw or "")]
-
-                work = await _create_l1_work(
-                    str(run_root / f"{task}_{idx}"),
-                    name=f"l1-lb-{task}-{idx}",
-                )
-                passage = Path(work.work_root) / "sources" / "passage.md"
-                passage.parent.mkdir(parents=True, exist_ok=True)
-                passage.write_text(context, encoding="utf-8")
-
-                sess = await session_svc.create_session(
-                    scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
-                )
-                prompt = _context_prompt(arm=arm_norm, question=question)
-                turn, _run = await _start_turn(
-                    session_id=sess["id"],
-                    scenario_id=scenario_id,
-                    message=prompt,
-                    work=work,
-                    model_override=model,
-                )
                 try:
+                    work = await _create_l1_work(
+                        str(run_root / f"{task}_{idx}"),
+                        name=f"l1-lb-{task}-{idx}",
+                    )
+                    passage = Path(work.work_root) / "sources" / "passage.md"
+                    passage.parent.mkdir(parents=True, exist_ok=True)
+                    passage.write_text(context, encoding="utf-8")
+
+                    sess = await session_svc.create_session(
+                        scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
+                    )
+                    prompt = _context_prompt(arm=arm_norm, question=question)
+                    turn, _run = await _start_turn(
+                        session_id=sess["id"],
+                        scenario_id=scenario_id,
+                        message=prompt,
+                        work=work,
+                        model_override=model,
+                    )
+                    turn_id_s = str(turn["id"])
                     events = await _wait_turn_verbose(
                         turn["id"],
                         on_progress=on_progress,
@@ -1529,8 +1539,8 @@ async def run_context_l1(
                     fail_msg = turn_failure_message_from_events(events)
                     fail_class = failure_class_from_events(events)
                     l2 = {
-                        "case_id": f"longbench.{task}.{idx}",
-                        "turn_id": str(turn["id"]),
+                        "case_id": case_id,
+                        "turn_id": turn_id_s,
                         "arm": arm_norm,
                         **read_stats,
                         "read_coverage": read_coverage,
@@ -1552,15 +1562,15 @@ async def run_context_l1(
                     )
                     status = "pass"
                     err = None
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001 — case isolation, no re-raise
                     scores = {"em": 0.0, "f1": 0.0}
                     status = "fail"
-                    err = str(exc)
+                    err = f"{type(exc).__module__}.{type(exc).__name__}: {exc}"
                     pred = ""
                     infra = is_infra_channel_failure(err)
                     l2 = {
-                        "case_id": f"longbench.{task}.{idx}",
-                        "turn_id": str(turn["id"]),
+                        "case_id": case_id,
+                        "turn_id": turn_id_s,
                         "arm": arm_norm,
                         "terminal_state": "failed",
                         "failure_message": err[:500],
@@ -1571,7 +1581,6 @@ async def run_context_l1(
                     }
                     if not infra:
                         l2.pop("failure_class", None)
-                case_id = f"longbench.{task}.{idx}"
                 fail_detail: str | None = None
                 if status == "fail":
                     fail_detail = str(
@@ -1599,7 +1608,7 @@ async def run_context_l1(
                         error=err,
                         metrics=scores,
                         extra={
-                            "turn_id": str(turn["id"]),
+                            "turn_id": turn_id_s,
                             "pred": (pred or "")[:500],
                             "arm": arm_norm,
                             "passage_chars": len(context),

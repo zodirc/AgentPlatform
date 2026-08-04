@@ -39,8 +39,15 @@ def test_infra_channel_detection() -> None:
     assert is_infra_channel_failure(
         "model_error: model retries exhausted after 3 attempts: first byte timeout after 15.0s"
     )
+    # INFRA-2: api↔runtime HTTP disconnect (c76e07a9 class)
+    assert is_infra_channel_failure("httpx.ReadError: ")
+    assert is_infra_channel_failure(
+        "httpcore.RemoteProtocolError: peer closed connection"
+    )
+    assert is_infra_channel_failure("connection reset by peer")
     assert not is_infra_channel_failure("")
     assert not is_infra_channel_failure("tool read_file failed: file not found")
+    assert not is_infra_channel_failure("failed to read error log")
     events = [
         {
             "type": "turn.failed",

@@ -141,7 +141,7 @@ Missing `sources/cards/` only means no **pinned style/character cards**; it does
 **Budget:** default ≤ **2** `search_sources` calls per topic in one Turn (do not aim to use the full cap).  
 **First query:** pass the user's ask / work title / claim **nearly verbatim** — do not compress into a keyword bag on the first call.  
 If the first call returns strong on-topic paths (no weak-score hint), **`read_file` those paths** instead of searching again — do **not** follow a hit with `list_dir` / `grep` "to confirm" the library.  
-**Second search (still within ≤2):** only when (a) hits are clearly empty / off-topic, or (b) the tool returns a **low_score / weak-hit** hint. For (b), keep the **same information need** but switch to **complementary wording** (synonyms, related concepts, alternate entity forms) — do **not** repeat or lightly paraphrase the first query. Distinctive anchors (titles, character names, IDs) may stay; avoid random topic drift. If hybrid still returns zero useful hits, say the library miss clearly — then you may add general knowledge, labeled as not from sources.  
+**Second search (still within ≤2):** only when hits are clearly empty / off-topic, or the tool returns a **low_score / weak-hit** hint — then prefer `read_file` on weak but on-topic hits rather than re-querying the same need. If hybrid still returns zero useful hits, say the library miss clearly — then you may add general knowledge, labeled as not from sources.  
 For content Q&A, call `search_sources` before repeated `list_dir` inventory. Prefer `limit` ≥ 30 when you need broad recall.
 
 ## Citation workflow (evidence → draft)

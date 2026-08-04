@@ -120,6 +120,8 @@ services:
       RETRIEVAL_RERANK_CROSS_ENCODER: ${RETRIEVAL_RERANK_CROSS_ENCODER:-false}
       # RET-7: excerpt-cover promote (default off after N≥2 ablation; set true to re-enable)
       SEARCH_SOURCES_EXCERPT_PROMOTE: ${SEARCH_SOURCES_EXCERPT_PROMOTE:-false}
+      # RET-18: two-level doc boost (default on; set false for ablation free N≥2)
+      RETRIEVAL_TWO_LEVEL_ENABLED: ${RETRIEVAL_TWO_LEVEL_ENABLED:-true}
       STALL_THRESHOLD_SECONDS: ${STALL_THRESHOLD_SECONDS:-180}
       STALL_POLL_INTERVAL_SECONDS: ${STALL_POLL_INTERVAL_SECONDS:-30}
       STALL_AUTO_FAIL: ${STALL_AUTO_FAIL:-true}

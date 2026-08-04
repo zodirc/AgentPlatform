@@ -76,6 +76,20 @@ def _track_turn_finished(turn_id: UUID) -> None:
     metrics.set_gauge("runtime_inflight_turns", float(len(_active_turns)))
 
 
+# turn.completed.summary schema maxLength (packages/contracts/.../turn.completed.json).
+_TURN_COMPLETED_SUMMARY_MAX = 4096
+
+
+def _truncate_turn_summary(text: str | None, *, limit: int = _TURN_COMPLETED_SUMMARY_MAX) -> str:
+    """INFRA-1: clamp summary to schema maxLength so long finals don't fail the event write."""
+    s = text if text is not None else ""
+    if len(s) <= limit:
+        return s
+    if limit <= 1:
+        return s[:limit]
+    return s[: limit - 1] + "…"
+
+
 def _try_claim_command(turn_id: UUID) -> bool:
     """Atomic on the event loop: no await between membership test and add."""
     if turn_id in _inflight_commands:
@@ -846,7 +860,7 @@ async def _finalize_turn(
     async with pool.acquire() as conn:
         async with conn.transaction():
             completed_payload: dict[str, Any] = {
-                "summary": summary or "Turn completed",
+                "summary": _truncate_turn_summary(summary or "Turn completed"),
                 "token_usage": asdict(state.usage),
                 "termination_reason": state.termination_reason,
             }
@@ -1130,7 +1144,7 @@ async def _run_turn(
                         event_type="turn.completed",
                         trace_id=trace_id,
                         payload={
-                            "summary": confirmation,
+                            "summary": _truncate_turn_summary(confirmation),
                             "termination_reason": "local_response",
                         },
                     )
@@ -1152,7 +1166,9 @@ async def _run_turn(
 
             report = run_verify_pass(session_id=str(session_id))
             # turn.completed schema is closed; keep details inside summary only.
-            summary = str(report.get("summary") or "Verify complete")[:4096]
+            summary = _truncate_turn_summary(
+                str(report.get("summary") or "Verify complete")
+            )
             async with pool.acquire() as conn:
                 async with conn.transaction():
                     await append_event(
@@ -1188,7 +1204,9 @@ async def _run_turn(
                         run_id=run_id,
                         event_type="turn.completed",
                         trace_id=trace_id,
-                        payload={"summary": gate.local_response},
+                        payload={
+                            "summary": _truncate_turn_summary(gate.local_response),
+                        },
                     )
                     await conn.execute(
                         "UPDATE turns SET status = 'completed', updated_at = now() WHERE id = $1",

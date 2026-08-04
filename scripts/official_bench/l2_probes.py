@@ -75,7 +75,8 @@ READ_COVERAGE_SUFFICIENT = GAVE_UP_READ_RATIO
 # Provider/channel instability — scored separately, excluded from primary macros.
 INFRA_CHANNEL_BUCKET = "infra_channel"
 
-# Match turn.failed / exception text from ModelGateway (503 / transport / timeouts).
+# Match turn.failed / exception text from ModelGateway (503 / transport / timeouts)
+# and api↔runtime HTTP disconnects (INFRA-2: httpx/httpcore ReadError etc.).
 _INFRA_CHANNEL_MARKERS = (
     "model_error",
     "model retries exhausted",
@@ -87,6 +88,18 @@ _INFRA_CHANNEL_MARKERS = (
     "model api 503",
     "modelprovider timeout",
     "modeltransienterror",
+    # INFRA-2: case-level isolation for eval orchestration channel drops
+    "httpx.readerror",
+    "httpcore.readerror",
+    "httpx.remoteprotocolerror",
+    "httpcore.remoteprotocolerror",
+    "httpx.connecterror",
+    "httpcore.connecterror",
+    "httpx.timeouterror",
+    "httpcore.timeouterror",
+    "connection reset",
+    "server disconnected",
+    "peer closed connection",
 )
 
 

@@ -813,6 +813,18 @@ def test_ret7_excerpt_promote_settings_default_and_enable(monkeypatch) -> None:
     assert ordered[0] is early
 
 
+def test_ret18_two_level_settings_default_on(monkeypatch) -> None:
+    """RET-18: two-level default on; ablation sets RETRIEVAL_TWO_LEVEL_ENABLED=false."""
+    from app.retrieval.profile import active_retrieval_profile
+    from app.settings import Settings, settings as live
+
+    assert Settings().retrieval_two_level_enabled is True
+    monkeypatch.setattr(live, "retrieval_two_level_enabled", False)
+    assert active_retrieval_profile().two_level_enabled is False
+    monkeypatch.setattr(live, "retrieval_two_level_enabled", True)
+    assert active_retrieval_profile().two_level_enabled is True
+
+
 def test_ret15_score_rel_and_low_score_uses_raw(monkeypatch) -> None:
     """RET-15-2: model sees 0–100 rel scores; low_score compares raw fusion score."""
     from app.settings import Settings
