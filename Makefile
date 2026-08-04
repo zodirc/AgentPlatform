@@ -1,10 +1,13 @@
-COMPOSE := docker compose -f deploy/docker-compose.yml --env-file .env
-COMPOSE_DEV := docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml --env-file .env
-COMPOSE_QUEUE := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml --env-file .env
-COMPOSE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml --env-file .env
-COMPOSE_QUEUE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml --env-file .env
-COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml --env-file .env
-COMPOSE_OPS_EVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/ops-eval.yml --env-file .env
+# embedding.auto.env from `make resolve-embedding` (GPU → gte-large, else gte-small).
+# defaults.env is the committed fallback; auto.env overrides when present.
+COMPOSE_ENV := --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env
+COMPOSE := docker compose -f deploy/docker-compose.yml $(COMPOSE_ENV)
+COMPOSE_DEV := docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml $(COMPOSE_ENV)
+COMPOSE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml $(COMPOSE_ENV)
+COMPOSE_OPS_EVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
@@ -37,7 +40,7 @@ WEB_REBUILD_DEPS ?= 0
 .DEFAULT_GOAL := help
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
-	ensure-ops-secret ensure-docker-creds fix-workspace-sources \
+	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
 	up-web up-api up-runtime up-bench up-ops-eval restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
@@ -74,6 +77,7 @@ help: ## 显示常用命令
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
+	@echo "  make resolve-embedding  GPU→gte-large@1024 / 否则 gte-small@384（up/start 自动跑）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动（结束后自动清理悬空镜像）"
@@ -112,11 +116,16 @@ ensure-docker-creds: ## WSL：去掉 ~/.docker 里坏掉的 desktop.exe credsSto
 ensure-git-hooks: ## 本仓库 core.hooksPath=.githooks（make up/start 默认）
 	@bash scripts/install-git-hooks.sh
 
+resolve-embedding: ## 按 GPU 选型 gte-small|gte-large → deploy/embedding.auto.env
+	@bash scripts/resolve_embedding_profile.sh
+	@# Ensure compose always has an auto.env (defaults copy if resolve skipped elsewhere)
+	@test -f deploy/embedding.auto.env || cp deploy/embedding.defaults.env deploy/embedding.auto.env
+
 # Seed RO mount creates sources/ as root; runtime app (uid 1000) must own it to upload.
 fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
 	@bash scripts/ensure_workspace_sources_writable.sh
 
-start: ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 启动栈（不 rebuild，最快）
+start: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 启动栈（不 rebuild，最快）
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d
 	@$(MAKE) --no-print-directory fix-workspace-sources
 
@@ -128,7 +137,7 @@ define docker_auto_prune
 	fi
 endef
 
-up: ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 重建并启动全部服务
+up: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 重建并启动全部服务
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
@@ -165,7 +174,7 @@ up-ops-eval: ensure-ops-secret ensure-docker-creds ## api + docker.sock（启用
 	@echo "==> Ops 完整证明已启用；刷新 /ops/<OPS_TEST_SECRET>/test"
 	@echo "    注意：之后再 make up / up-api 会去掉 sock，需重跑本目标"
 
-up-runtime: ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
+up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
 	@if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime"; \
 	  $(COMPOSE) build --no-cache runtime; \
@@ -173,7 +182,7 @@ up-runtime: ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 �
 	$(COMPOSE) up -d --no-deps --build runtime
 	$(docker_auto_prune)
 
-up-bench: ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
+up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
 	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench"; \
 	  COMPOSE_PROFILES=bench $(COMPOSE) build --no-cache bench; \

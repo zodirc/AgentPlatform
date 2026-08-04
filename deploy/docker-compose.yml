@@ -67,7 +67,7 @@ services:
       dockerfile: services/runtime/Dockerfile.retrieval
       target: app
       args:
-        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
         # China defaults in Dockerfiles; CI clears APT_MIRROR and points pip/npm
         # at public registries (scripts/proof_compose_env.sh) so GHA does not hang.
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
@@ -99,9 +99,9 @@ services:
       RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}
       INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-true}
       EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
       EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
-      # all-MiniLM-L6-v2 → 384; override to 256 only with EMBEDDING_BACKEND=hash
+      # gte-small → 384; gte-large → 1024（make resolve-embedding 按 GPU 写入）
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
       EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
       EMBEDDING_PROGRESS_EVERY_FILES: ${EMBEDDING_PROGRESS_EVERY_FILES:-25}
@@ -238,7 +238,7 @@ services:
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
         HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
-        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
     container_name: agent-bench
     restart: unless-stopped
     logging: *default-logging
@@ -255,10 +255,10 @@ services:
       # Default = product-like ANN; set BENCH_RETRIEVAL_BACKEND=json for file-index smoke.
       BENCH_RETRIEVAL_BACKEND: ${BENCH_RETRIEVAL_BACKEND:-pgvector}
       BENCH_RETRIEVAL_PG_SCHEMA: ${BENCH_RETRIEVAL_PG_SCHEMA:-retrieval_bench}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/all-MiniLM-L6-v2}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
       EMBEDDING_MODEL_DIR: /app/models-baked
       HF_HOME: /data/models
-      # MiniLM weights come from baked models-baked; allow Hub for LongBench/SWE pulls.
+      # GTE weights come from baked models-baked; allow Hub for LongBench/SWE pulls.
       TRANSFORMERS_OFFLINE: ${BENCH_TRANSFORMERS_OFFLINE:-1}
       HF_HUB_OFFLINE: ${BENCH_HF_HUB_OFFLINE:-0}
     volumes:

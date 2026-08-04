@@ -128,9 +128,11 @@ class Settings(BaseSettings):
     # Optional default owner for future multi-tenant rows (empty → NULL / shared).
     sources_index_owner_user_id: str = ""
     embedding_backend: str = "hash"  # hash | sentence_transformers
-    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    # Production default via compose / resolve_embedding_profile: gte-small|gte-large.
+    # MiniLM is retired as a deploy default (RET-4 / §14).
+    embedding_model: str = "thenlper/gte-small"
     embedding_model_dir: str = "/data/models"
-    # Hash default 256; all-MiniLM-L6-v2 is 384 — compose sets 384 with ST.
+    # Hash default 256; gte-small=384; gte-large=1024 — compose/auto.env sets dims.
     embedding_dimensions: int = 256
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64

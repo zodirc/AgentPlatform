@@ -8,12 +8,18 @@ from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
 from app.retrieval.chunking import build_embed_text, chunk_source_text, should_index_source
-from app.retrieval.embedder import cosine_similarity, get_embedder
+from app.retrieval.embedder import (
+    cosine_similarity,
+    effective_embedding_dimensions,
+    effective_index_version,
+    get_embedder,
+)
 from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
 from app.settings import settings
 
-INDEX_VERSION = 9  # RET-4: thenlper/gte-small@384 shadow (was MiniLM @8)
+# Legacy alias — prefer ``effective_index_version()`` (9=gte-small, 10=gte-large).
+INDEX_VERSION = 9
 
 try:
     import numpy as np
@@ -68,7 +74,11 @@ def _chunk_to_hit(chunk: dict[str, Any], score: float) -> ChunkHit:
 class SourceVectorIndex:
     def __init__(self, store_path: Path) -> None:
         self.store_path = store_path
-        self._data: dict[str, Any] = {"version": INDEX_VERSION, "files": {}, "chunks": []}
+        self._data: dict[str, Any] = {
+            "version": effective_index_version(),
+            "files": {},
+            "chunks": [],
+        }
         self._chunk_by_id: dict[str, dict[str, Any]] = {}
         # Cached (n, d) float32 matrix for batched cosine search (unit vectors → matmul).
         self._vector_matrix: Any | None = None
@@ -80,7 +90,11 @@ class SourceVectorIndex:
         try:
             self._data = json.loads(self.store_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            self._data = {"version": INDEX_VERSION, "files": {}, "chunks": []}
+            self._data = {
+                "version": effective_index_version(),
+                "files": {},
+                "chunks": [],
+            }
         self._rebuild_chunk_lookup()
 
     def _invalidate_vector_matrix(self) -> None:
@@ -130,7 +144,20 @@ class SourceVectorIndex:
         self._invalidate_vector_matrix()
 
     def _needs_full_reindex(self) -> bool:
-        return int(self._data.get("version", 0)) != INDEX_VERSION
+        if int(self._data.get("version", 0)) != effective_index_version():
+            return True
+        stored = (self._data.get("embedding_model") or "").strip()
+        current = (settings.embedding_model or "").strip()
+        if stored and current and stored != current:
+            return True
+        stored_dims = self._data.get("embedding_dimensions")
+        if stored_dims is not None:
+            try:
+                if int(stored_dims) != int(effective_embedding_dimensions()):
+                    return True
+            except (TypeError, ValueError):
+                return True
+        return False
 
     def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]:
         import logging
@@ -386,9 +413,11 @@ class SourceVectorIndex:
             chunks = [c for c in chunks if c.get("path") != path]
 
         self._data = {
-            "version": INDEX_VERSION,
+            "version": effective_index_version(),
             "updated_at": datetime.now(UTC).isoformat(),
             "embedding_backend": settings.embedding_backend,
+            "embedding_model": settings.embedding_model,
+            "embedding_dimensions": effective_embedding_dimensions(),
             "files": files_meta,
             "chunks": chunks,
         }

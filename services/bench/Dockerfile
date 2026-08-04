@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # Ops Bench worker: official small suites with real ST embeddings.
-# Self-contained MiniLM bake (does NOT FROM agent-platform-runtime:default).
+# Self-contained GTE bake (does NOT FROM agent-platform-runtime:default).
 # CI smoke uses runtime-lite and omits the compose profile "bench" so gate
 # never needs the heavy ST runtime image just to start api.
 
@@ -9,7 +9,7 @@ ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
 ARG APT_MIRROR=mirrors.aliyun.com
 ARG HF_ENDPOINT=https://hf-mirror.com
-ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+ARG EMBEDDING_MODEL=thenlper/gte-small
 
 FROM python:3.11-slim AS model-baker
 ARG EMBEDDING_MODEL

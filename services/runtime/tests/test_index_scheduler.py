@@ -97,6 +97,10 @@ async def test_schedule_startup_disabled(monkeypatch: pytest.MonkeyPatch) -> Non
 async def test_schedule_startup_runs(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(settings, "sources_startup_sync_enabled", True)
     monkeypatch.setattr(settings, "sources_startup_sync_delay_seconds", 0.01)
+    # Avoid DNS hang on compose hostname if autouse isolation is bypassed.
+    monkeypatch.setattr(
+        settings, "database_url", "postgresql://agent:agent@127.0.0.1:1/agent"
+    )
     seed = tmp_path / "sources" / "seed"
     seed.mkdir(parents=True)
     (seed / "c.md").write_text("# C\n\nx\n", encoding="utf-8")

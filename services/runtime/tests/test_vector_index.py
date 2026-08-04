@@ -34,7 +34,14 @@ def test_cosine_similarity_identical_vectors() -> None:
     assert cosine_similarity(vec, vec) == 1.0
 
 
-def test_source_vector_index_sync_and_search(tmp_path: Path) -> None:
+def test_source_vector_index_sync_and_search(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "embedding_backend", "hash")
+    monkeypatch.setattr(settings, "embedding_dimensions", 64)
+    reset_embedder_cache()
     workspace = tmp_path / "workspace"
     sources = workspace / "sources"
     sources.mkdir(parents=True)

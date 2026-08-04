@@ -153,19 +153,48 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 def effective_embedding_dimensions() -> int:
     """Resolve vector width for stores.
 
-    Hash default is 256. ``all-MiniLM-L6-v2`` outputs 384 — if compose/env left the
-    hash default while using sentence_transformers, coerce so pgvector matches ST.
+    Hash default is 256. GTE-small / legacy MiniLM → 384; GTE-large → 1024.
+    Coerce common misconfig (hash default left on while using ST).
     """
     dims = int(settings.embedding_dimensions)
     backend = (settings.embedding_backend or "").lower()
     model = (settings.embedding_model or "").lower()
     if backend in {"sentence_transformers", "minilm", "neural"}:
-        if dims == 256 and ("minilm-l6" in model or "all-minilm-l6-v2" in model):
+        if "gte-large" in model:
+            if dims not in {1024}:
+                logger.info(
+                    "embedding dimensions coerced %s→1024 for sentence_transformers gte-large",
+                    dims,
+                )
+            return 1024
+        if "gte-small" in model or "minilm-l6" in model or "all-minilm-l6-v2" in model:
+            if dims == 256:
+                logger.info(
+                    "embedding dimensions coerced 256→384 for sentence_transformers "
+                    "gte-small/MiniLM"
+                )
+            return 384
+        if dims == 256:
             logger.info(
-                "embedding dimensions coerced 256→384 for sentence_transformers MiniLM"
+                "embedding dimensions coerced 256→384 for sentence_transformers default"
             )
             return 384
     return dims
+
+
+def effective_index_version() -> int:
+    """Index schema bump when embed space changes.
+
+    8 = legacy MiniLM@384; 9 = gte-small@384; 10 = gte-large@1024.
+    """
+    model = (settings.embedding_model or "").lower()
+    dims = effective_embedding_dimensions()
+    if "gte-large" in model or dims >= 1024:
+        return 10
+    if "minilm" in model:
+        return 8
+    # gte-small and other modern 384-d defaults
+    return 9
 
 
 def _cache_key() -> tuple[str, str, str, int]:

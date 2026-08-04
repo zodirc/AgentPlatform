@@ -6,7 +6,7 @@
 > **不作为验收**：forced/oracle 诊断臂、纯 L0 旁路、coding（本轮不可信）；schema 事故跑（见 §7.7 说明，**不入对照**）  
 > **本文自含**：不依赖阅读其他专题文档即可理解流程、历史与问题  
 > **当前平台锚（冒烟）**：检索 promote-off 均值 nDCG@10 **≈0.447**（`bcdbbb85`/`f92bc610`）；RET-9 两轮均值 **0.453**（丢刀后栈已回滚互补文案，平台仍按 promote-off 锚读）· 上下文 excl-infra F1 **≈0.40–0.42**  
-> **调优进度**：§9–§13 已收；§14 A 离线 ✓；**RET-4 选型 = `thenlper/gte-small`**（生产仍 MiniLM，待换模+重嵌）；CTX-8 文案已部署、free N≥2 **进行中/待补干净对照**；下一执行主线见 **§14.6 / §14.7**  
+> **调优进度**：§9–§13 已收；§14 A 离线 ✓；**RET-4 部署策略 = GPU→`gte-large@1024` / 无合适 GPU→`gte-small@384`**（`make resolve-embedding`）；MiniLM 已退役默认；CTX-8 文案已部署；主线见 **§14.6 / §14.7**  
 > **执行状态总览**：§9 → **§9.6**；§10 批次 5 → **§10.6**；§11 前置 → **§11.7**；§12 → **§12.6–12.9**；§13 → **§13.8**  
 > **第二轮提案（基于 §9 有效跑归因 · 观测先于改动）**：见 **§10**（批次 5–7：复跑凑 N≥2 → 归因/消融 → 单刀契约 → 结构刀）  
 > **第三轮补充思考（外部对标 · 2026-08-04）**：见 **§11**（EVAL 配对判别 / RET-10~13 / CTX-8~9 / 「合理、完备」终态定义）  
@@ -2476,8 +2476,9 @@ free 验收: 不需要；生效标志 = 此后不再出现「开跑前就注定 
 | CTX-12 | ✓ 离线 | `gamma_paraphrase` 主导 → 支持 CTX-8「prefer passage wording」 |
 | RET-17 | ✓ 离线 | gold absent ~18–20%；FiQA 冒烟切片 absent 仍可见 → 支撑 RET-4 主杠杆叙事 |
 | RET-19 | ✓ 离线 | mean Δ **+0.51pp** → **`close_rerank_topic`**（不上热路径 CE） |
-| RET-4 L0 选型 | ✓ **锁定** | **`thenlper/gte-small`**（384-d）；宏观 vs MiniLM **+9.05pp** |
-| RET-4 代码预备 | ✓ 合入待用 | `INDEX_VERSION=9`；embedder CUDA 自动探测（`getattr` 可覆盖）；**尚未**换生产 `EMBEDDING_MODEL`、**尚未**全库重嵌 |
+| RET-4 L0 选型 | ✓ **策略锁定** | **无合适 GPU → `thenlper/gte-small@384`；有合适 GPU（VRAM≥8GiB）→ `thenlper/gte-large@1024`**。L0 冒烟表仍以 small vs MiniLM 为证据；large 为算力升级档 |
+| RET-4 部署接线 | ✓ `make resolve-embedding` | `scripts/resolve_embedding_profile.sh` → `deploy/embedding.auto.env`；`make up`/`start`/`up-runtime`/`up-bench` 自动跑；**MiniLM 已移出 compose/Dockerfile 默认**；entrypoint 按模型 stamp 清掉旧 bake |
+| RET-4 代码预备 | ✓ | `effective_index_version`：9=small / 10=large；embedder CUDA 自动探测；**全库重嵌仍待执行** |
 | CTX-8 | 文案 ✓ · free **N=1 干净** | pass2 `fdd03298` / ops `13a28e28`：excl-infra F1 **0.428** · EM **0.200** · ok=40 / wrong_answer=10 / abandoned=4（健康）；pass1 `39dcede1` inflight 污染作废 → **仍差 1 轮干净** 才满 N≥2 / 停机线 |
 | PROD-1 | 草稿 | `eval/official/prod1/` 24 题 · `frozen=false` · 禁调参 |
 | EVAL-7 | 规则已述 | 效应量门写在 §14.3；冒烟契约刀继续受其约束 |
@@ -2492,9 +2493,12 @@ free 验收: 不需要；生效标志 = 此后不再出现「开跑前就注定 
 | bge-small-en-v1.5 | 0.759 / 0 | 0.412 / 0 | **0.465** / 3 | 0.545 |
 | **gte-small（锁定）** | **0.793** / 0 | **0.482** / 0 | 0.432 / 3 | **0.569** |
 
-- **锁定理由**：同维 384 → 免改 ANN；宏分最高；SciFact/NF 领先。bge 仅 FiQA 略高 → 影子后若 FiQA 回归可回看，**不作为今晚重开选型的理由**。
-- **诚实注**：三模型 FiQA **absent@100 均为 3**——不得用本表宣称「absent 已灭」。
-- **生产现状**：compose 默认仍 `sentence-transformers/all-MiniLM-L6-v2`；代码侧 `INDEX_VERSION=9` 已写好，**未重嵌前查询切 gte = 维同空间异 → 必伤召回**。
+- **部署策略（取代「只锁 small」）**：
+  - `EMBEDDING_PROFILE=auto`（默认）：主机 `nvidia-smi` 显存 ≥ `EMBEDDING_GPU_MIN_MIB`（默认 **8192**）→ **`thenlper/gte-large` @1024 / index 10**；否则 **`thenlper/gte-small` @384 / index 9**。
+  - 强制：`EMBEDDING_PROFILE=small|large`，或高级 `EMBEDDING_FORCE_MODEL=…`。
+  - **MiniLM 不再是生产默认**（compose / Dockerfile.retrieval / bench Dockerfile / settings 已切 GTE）。
+- **诚实注**：三模型 FiQA **absent@100 均为 3**——不得用 L0 表宣称「absent 已灭」。large 未在本机 L0 网格重跑；以 MTEB/算力档位选用，上线后仍须 free N≥2。
+- **生产现状**：`make resolve-embedding` 已按本机 GPU 写出 auto.env；**镜像 bake + 全库重嵌**仍要在 `make up`/`up-runtime` 后完成才算切查询空间。
 
 **本轮推动（已落地 / 未入库）**
 
@@ -2515,7 +2519,7 @@ free 验收: 不需要；生效标志 = 此后不再出现「开跑前就注定 
 | 1 | **B** | CTX-8 free **干净** N≥2（停机线第二票） | 两轮无大规模 abandoned/infra；记子桶 Δ；决定是否触发停机线 | **N=1**（`fdd03298` F1 0.428）；再补 1 轮 |
 | 2 | **B** | RET-18 two-level 消融 N≥2 | 回填 §13.6 排序栈台账第 4 行 | **未执行** |
 | 3 | **C** | REP-3 全量锚（栈冻结） | 检索必跑；上下文按 §13.1 随跑 | **未执行**（硬前置） |
-| 4 | **D** | RET-4：换 `EMBEDDING_MODEL=thenlper/gte-small` → **全库重嵌** → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **未执行**（选型已锁，重嵌未做） |
+| 4 | **D** | RET-4：`make resolve-embedding` 已选 gte-small|large → **bake + 全库重嵌** → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · 重嵌未执行** |
 | 5 | **E** | RET-11(b) / CTX-6 /（条件）rerank 预算票 | 各自 N≥2；与 RET-4 **分影子** | **视 D 余量** |
 | 6 | **F** | PROD-1 首跑迁移率 + §11.6 四问书面作答 | 完备收束 | **未执行** |
 
@@ -2523,37 +2527,23 @@ free 验收: 不需要；生效标志 = 此后不再出现「开跑前就注定 
 
 #### 14.7.2 明天 · 另一台无 GPU 虚拟机换模测试（操作清单）
 
-目标：在 **CPU-only** 环境验证 gte 路径可启动、可重嵌、可跑小量 free——**不**要求 RTX；接受 embed 更慢。
+目标：在 **CPU-only** 环境验证 gte 路径——**自动会落到 `gte-small@384`**（`make resolve-embedding` / `EMBEDDING_PROFILE=auto`）。
 
 ```text
 前置
-  · 拉本仓库含 INDEX_VERSION=9 / embedder CUDA-auto 的 commit
-  · 准备 sentence-transformers + torch（CPU 轮即可；勿装错 +cu 却无驱动）
-  · 磁盘：gte-small 权重 + BEIR 语料；FiQA 全量重嵌最重
+  · 拉含 resolve_embedding_profile / GTE 默认的 commit
+  · 勿设置 EMBEDDING_PROFILE=large（无卡会极慢且无收益）
+  · 可选显式：EMBEDDING_PROFILE=small
 
-环境变量（示例 · 写入该机 .env / compose，勿提交密钥）
-  EMBEDDING_BACKEND=sentence_transformers
-  EMBEDDING_MODEL=thenlper/gte-small
-  EMBEDDING_DIMENSIONS=384          # 与 MiniLM 同维；勿改成 768
-  # 可选强制 CPU：若 settings 暴露 embedding_device 则设 cpu；否则依赖 torch.cuda.is_available()=False
+环境（make up 前）
+  · make resolve-embedding   # 无 GPU → 写入 gte-small@384
+  · cat deploy/embedding.auto.env 确认 MODEL/DIMENSIONS
+  · make up 或 make up-runtime   # bake gte-small，entrypoint 清掉旧 MiniLM stamp
 
-换模步骤（顺序不可跳）
-  1. 停写入流量 / 或使用隔离 compose 项目
-  2. 改 EMBEDDING_MODEL → gte-small；确认 INDEX_VERSION 代码为 9
-  3. 触发 BEIR / 产品库 **全量重嵌**（同步建库；热路径查询须等投影写完）
-     · 官方小量：make official-bench-retrieval-agent QUERY_LIMIT=20 会拉同步；
-       全库以该机既有 reindex/bench 入口为准（约 66k docs 量级，CPU 可能数小时）
-  4. 冒烟：retrieval free limit=20 ×1（先看 FiQA absent@100 与宏 nDCG，勿入库）
-  5. 若空间错乱（分崩）：立刻改回 MiniLM + 旧投影 / 从备份恢复；查是否未重嵌就切了查询
-
-验收（他机 · 仍不算本 brief 入库）
-  · 进程能 load gte；search_sources 返回非空
-  · 同协议 20q 相对该机 MiniLM 基线有方向性对照（记录 run_id，回填本 §）
-  · 不在此机上跑 N≥2 入库叙事，除非协议与主平台锚对齐并完成 REP-3 门禁
-
-注意
-  · GPU 只加速重嵌/encode，不改变选型结论；无 GPU ≠ 不能测 gte
-  · CTX-8 是 LLM 文案刀，与 embed 换模正交；他机测检索时勿顺便改 system.md 对照
+验收
+  · 容器 EMBEDDING_MODEL=thenlper/gte-small；/data/models/.baked_embedding_model 匹配
+  · search_sources 非空；20q 冒烟记 run_id（不入库）
+  · 有 GPU 的机器同一流程会自动选 gte-large@1024（需接受更长 bake/重嵌）
 ```
 
 **下一批执行提醒**：回主平台后优先收束 CTX-8 干净 N≥2 → RET-18 → REP-3 → 再正式影子/生产重嵌 gte。

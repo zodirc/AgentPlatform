@@ -300,7 +300,7 @@ def test_index_version_bump_forces_reindex(tmp_path: Path) -> None:
     third = index.sync(sources, workspace_root=workspace)
     assert third.get("reindexed") is True
     assert third["skipped"] == 0
-    assert int(index._data["version"]) == vi.INDEX_VERSION
+    assert int(index._data["version"]) == vi.effective_index_version()
 
 
 def test_hybrid_search_recalls_named_character(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

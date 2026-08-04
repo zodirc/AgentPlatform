@@ -275,9 +275,10 @@ def fig_retrieval() -> Path:
         nx,
         right_y,
         nw,
-        "§14 / RET-4（2026-08-05）：离线 L0 已锁定 thenlper/gte-small@384（vs MiniLM macro +9.05pp）。"
-        "代码 INDEX_VERSION=9 + CUDA 自动探测已合入，但生产仍 MiniLM，须换 EMBEDDING_MODEL 后"
-        "全库重嵌才切查询；无 GPU 机可走 CPU torch（更慢）。未重嵌前禁止只改查询模型。",
+        "§14 / RET-4（2026-08-05）：向量默认已退役 MiniLM。"
+        "make up 检测：合适 GPU（VRAM≥8GiB）→ thenlper/gte-large@1024（INDEX≈10）；"
+        "否则 → thenlper/gte-small@384（INDEX≈9）。L0 冒烟 gte-small vs MiniLM macro +9.05pp。"
+        "换模后须全库重嵌；未重嵌禁止只改查询模型。无 GPU 机用 small 即可测。",
     )
     right_y += 18
 

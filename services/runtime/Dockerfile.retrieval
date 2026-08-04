@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 # Retrieval runtime: CPU torch + sentence-transformers + baked embedding model.
 # BR3 (docs/38): model-baker + deps (pip/ST/models) then thin app stage.
-# Changing app/** / system.md must not re-download torch or re-bake MiniLM.
+# Changing app/** / system.md must not re-download torch or re-bake GTE.
 
-ARG EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+ARG EMBEDDING_MODEL=thenlper/gte-small
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
