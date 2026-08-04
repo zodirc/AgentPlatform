@@ -9,7 +9,13 @@
 > **执行状态总览**：§9 见 **§9.6**；§10 批次 5 见 **§10.6**（REP/ABL 已跑 · CTX-2 **保留** · RET-6 已部署 · **未入库**）  
 > **第二轮提案（基于 §9 有效跑归因 · 观测先于改动）**：见 **§10**（批次 5–7：复跑凑 N≥2 → 归因/消融 → 单刀契约 → 结构刀）  
 > **第三轮补充思考（外部对标 · 2026-08-04）**：见 **§11**（EVAL 配对判别 / RET-10~13 / CTX-8~9 / 「合理、完备」终态定义）  
-> **批次 6 前置 + 首刀**：见 **§11.7**（EVAL-1/2/3 · RET-10 · CTX-9 · EVAL-infra · RET-12 **均已落地并有 free 观测**；**未入库**）
+> **批次 6 前置 + 首刀**：见 **§11.7**（EVAL-1/2/3 · RET-10 · CTX-9 · EVAL-infra · RET-12 **均已落地并有 free 观测**；**未入库**）  
+> **第四轮补充思考（观测盲区与条件契约刀 · 2026-08-04）**：见 **§12**  
+> **§12 执行进度（2026-08-04）**：见 **§12.6** / **§12.9**（RET-7 消融 **N≥2 已收 → 默认关**；CTX-7 **N≥2 已收**；**RET-9 已落地待 free**；**未入库**）  
+> **RET-12 行为 N≥2（2026-08-04）**：检索 free `dfe97d37` nDCG@10 **0.422** · 配对 `3c34de88` → **no_stable_delta**（见 **§12.7**）；同批上下文 `c76e07a9` **infra 失败不作对照**  
+> **RET-15-2 free（2026-08-04）**：`6c87e401` nDCG@10 **0.442** · 配对 `dfe97d37` → **no_stable_delta**（见 **§12.8**）· **不写 IR 胜**  
+> **RET-7 消融 N≥2（2026-08-04）**：OFF `bcdbbb85`/`f92bc610` 均值 nDCG@10 **0.447** · vs ON `6c87e401` → 两轮皆 **no_stable_delta** → **默认关 promote**（§12.9）  
+> **CTX-7 N≥2（2026-08-04）**：`13647cb0`/`61624e34` · verbose **11→4** 稳定；EM **↓** → **不记 EM 胜**（§12.9）
 
 ---
 
@@ -1529,8 +1535,8 @@ free 验收: N≥2 分 task + EVAL-1 配对；同时观测步数/时延（摘录
 
 | 文件 | chars | ≈tokens | 相对建账点 | 来源刀（累计） |
 |------|------:|--------:|-----------|----------------|
-| `scenarios/agent/system.md` | 8774 | **2193** | 基线（0%） | CTX-1/2b/3 已在栈 |
-| `scenarios/writing/system.md` | 12534 | **3133** | 基线（0%） | verbatim / ≤2 搜 / RET-2 |
+| `scenarios/agent/system.md` | 9030 | **2257** | **+2.9%**（相对 2193） | CTX-1/2b/3 + **CTX-7** |
+| `scenarios/writing/system.md` | 12866 | **3216** | **+2.6%**（相对 3133） | verbatim / ≤2 搜 / RET-2 + **RET-9** |
 | 工具描述 `search_sources` schema | （实现默认） | — | — | RET-1 limit=30；excerpt 属 settings 非 system |
 
 **阈值**：任一文件相对本表建账点 **+15% ≈tokens** → 触发合并精简评审（精简本身按单刀 N≥2）。  
@@ -1538,9 +1544,9 @@ free 验收: N≥2 分 task + EVAL-1 配对；同时观测步数/时延（摘录
 
 | 拟增刀 | 目标文件 | 预估增量（字） | 记入条件 |
 |--------|----------|----------------|----------|
-| RET-9 第二搜互补 | writing/system.md | ~200–400 | 单刀合入后 |
+| RET-9 第二搜互补 | writing/system.md | ~200–400 | **已合入**（+332 字 / ≈+83 tok；待 free N≥2） |
 | RET-12 分层呈现 | 工具格式化（非 system） | 0 system | 不进本台账分子（已落地） |
-| CTX-7 答题示例 | agent/system.md | ~150–250 | 单刀合入后 |
+| CTX-7 答题示例 | agent/system.md | ~150–250 | **已合入**（+256 字 / ≈+64 tok；N≥2 已收） |
 | CTX-8 证据先行 | agent/system.md | ~200–400 | 单刀合入后 |
 
 #### 单测
@@ -1567,12 +1573,423 @@ free 验收: N≥2 分 task + EVAL-1 配对；同时观测步数/时延（摘录
 R 门禁: 纯格式化；ranked/IR 仍用 path+score 全列表
 ```
 
-**状态**：**已部署**；观测跑 `3c34de88` nDCG 持平（`no_stable_delta` vs `0744546e`）符合「不写 nDCG」预期；**行为 N≥2 仍差一轮**；不入库。
+**状态**：**已部署**；观测跑 `3c34de88` nDCG 持平（`no_stable_delta` vs `0744546e`）符合「不写 nDCG」预期；**行为 N≥2 已由 `dfe97d37` 凑齐**（见 §12.7）；不入库。
 
-#### 下一步（严格按 §11.5）
+#### 下一步（严格按 §11.5 · 2026-08-04 修订）
 
-1. 检索再跑一轮 free 20q → RET-12 行为 N≥2（配对 `3c34de88`）。  
-2. 上下文再跑一轮 free 60（通道稳时）→ 与 `1707135c` 凑 N≥2。  
-3. 其后批次 6：**RET-7 → RET-9 → CTX-7 → CTX-8**（CTX-5 仍不开；主看 wrong_answer）。  
-4. 批次 7：**RET-4** embed（weak_hits / `lanes_fed_relevance` 已证成）。  
+1. ~~检索再跑一轮~~ → **已完成**（`dfe97d37`，§12.7）。  
+2. **上下文再跑一轮** free 60（通道稳时）→ 与 `1707135c` 凑 N≥2（`c76e07a9` 为 infra 事故，**不作对照**）。  
+3. 其后批次 6：**RET-7 消融跑**（开关已就绪，见 §12.6）→ RET-9 → CTX-7 → CTX-8（CTX-5 仍不开；主看 wrong_answer；CTX-8 预期按 CTX-10 **full**）。  
+4. 批次 7 前：**REP-3 全量锚**；再 **RET-4** embed（weak_hits / `lanes_fed_relevance` / RET-14 absent-from-ranked 已证成）。  
+5. RET-15 stage-2（归一化分）可排批次 6 尾（审计已证 `never_triggers`）；RET-16 / CTX-11 **不开**。  
+6. 仍 **不** `update-baseline`。
+
+---
+
+## 12. 第四轮补充思考：观测盲区与条件契约刀（2026-08-04）
+
+> **性质**：在 §11.7 落地之后、批次 6 剩余刀（RET-7 消融跑 / RET-9、CTX-7/8）开工之前的补充提案与执行。全部遵守文首两道门 + §9.4 五条 + §10.4 门禁 6/7（观测先于改动、消融对称性）+ §11.4 不做清单；**不推翻任何既有裁决**（RET-4 立项、CTX-5 不开、RET-5/13 挂起均维持），不改 §11.5 已排批次的相对顺序。  
+> **编号承接**：EVAL-4/5 · RET-14~16 · CTX-10~11；REP-3 为既有 ID 的排期前移，非新刀。  
+> **一句话定位**：前三轮把「怎么搜 / 怎么读」的行为面与排序栈逐层观测基本建齐；本轮补的是四处**仍看不见的地方**——它们都有成熟 agent 体系的标准做法,且全部能以零运行时改动的观测刀先行。  
+> **执行进度**：见 **§12.6**（观测/基建 + RET-7 开关已落地；条件契约刀按观测裁决开/关）。
+
+### 12.0 先算账：当前栈还有哪些「看不见的地方」
+
+| # | 盲区 | 现状证据 | 不补的后果 | 成熟做法（对标） | 对应刀 |
+|---|------|----------|------------|------------------|--------|
+| 1 | 检索温度计只量 ranked，**不量「模型最终读没读到 gold」** | read-after-search 58/60 只记「搜后读了」，不记「读对了」 | RET-12/16 这类呈现刀的真实收益不可判；weak_hits 里「榜上有 gold 但模型读错文档」（呈现/行为失败）与「榜上无 gold」（真 Index 失败）混桶 | RAG 评测三元组把 context relevance 与 groundedness 分开量（RAGAS / TruLens 系）；本栈只有前者 | **RET-14** |
+| 2 | `low_score` hint 阈值 **0.15** 从未被审计是否与 RRF 分数量级匹配 | RRF 每车道贡献 ≈1/(60+rank)≈0.016，融合+doc_boost 后仍 ~0.03–0.05 量级；0.15 疑似按别的分数体系设定 → **可能恒触发或永不触发** | 排序栈里存在一层无存在证据的行为开关（违 §11.6 条 1 精神）；模型可见 score 是不可解释小浮点，无法用于「读 vs 再搜」决策 | 成熟 agent 给模型看**归一化/相对**分而非原始融合分 | **RET-15** |
+| 3 | `wrong_answer_after_read` **9 例**（上下文第一大失血桶）未解剖，CTX-8 已按假设立项 | `1707135c`：wrong_answer 9 / abandoned 仅 2 | 若主因是判分器口径（alias/格式）或定位失败而非「凭印象臆答」，CTX-8 文案剂量打空——重演 CTX-5 险些犯的错（CTX-4 解剖救回） | error-analysis-first：先逐例看数据再开刀（评测工程共识） | **CTX-10** |
+| 4 | EVAL-1 只有统计量（CI/win-loss），**无自动轨迹级归因材料**；噪声带 ±1.5–4pp 仍是口口相传 | 逐例归因仍靠人工翻 `process.jsonl`；同配置方差从未系统累计 | 批次 6 每刀 N≥2 的定性裁决成本高、容易被省略成「只看 CI」 | 配对评测标配 top 回归/提升 case 并排错误分析；方差档案化 | **EVAL-4 / EVAL-5** |
+| 5 | REP-3 全量锚**反复被推迟**，批次 7 结构刀却已在排期 | §10.1 立项至今未跑；入库门禁（§9.4 条 4）要求全量锚却无排期约束 | RET-4/11 落地后其 Δ 又只能在 20q 冒烟上讲——重活没有像样的前锚 | 大改动前冻结基线（工程常识） | **REP-3 排期前移**（§12.3） |
+
+### 12.1 观测/基建刀（零运行时行为改动 · 可并入「6 前置」尾部，与两轮待跑复测并行）
+
+#### RET-14 · gold-read 探针（检索温度计的 outcome 层）
+
+```text
+加热层: 可归因性（L2 探针 + 离线计算，Turn 内零改动）
+改动点: 检索 L2 探针增加——本 Turn read 系工具目标与该 query qrels gold 的交集统计：
+        gold_read_rate（读到 ≥1 gold 文档的 query 占比）、read_target_ranks（read 目标在合并榜的名次分布）、
+        gold_on_ranked_but_unread 计数；按数据集聚合进 result
+预期用户路径变化: 无
+R1–R5 / while / 强制搜: 通过——离线对 process.jsonl + qrels 计算，运行时零改动
+分桶预期: 不改分桶；把 weak_hits 一切为二——「榜上无 gold」（真 Index/embed 失败 → RET-4/11 战场）
+        vs「榜上有 gold 但模型没读它」（呈现/行为失败 → RET-12/16 战场）
+free 验收: 不需要（观测刀）；产物质量以「RET-12 行为 N≥2 的裁决能否直接落到 gold_read_rate 配对 Δ」衡量
+非目标: gold/qrels 信息仅在评测侧离线使用，严禁以任何形式进入 runtime 提示或题面（那是注入答案，
+        违反因果表「错」列）
+```
+
+依据：ranked nDCG 是中间量；写作 RAG 的产品之果是「模型拿对证据并用上」。现有轨迹已记 read-after-search 与 read 目标名次（`3c34de88` 已有 58/60 读数），只差与 qrels 的离线交集一步——**成本一个脚本，回报是 weak_hits 的第二次二分**（第一次是 RET-8 的词面分类）。这也让 §11.6 条 2「每一个残余失败可归因」在检索侧真正闭环。
+
+#### RET-15 · score 语义审计 + 归一化呈现（两段式：先审计，条件开第二段）
+
+```text
+加热层: 可归因性（第一段）→ 工具契约/结果呈现（第二段；不进 IR）
+改动点: 第一段（纯审计）：离线统计融合后 score 分布（分车道/分数据集）与 low_score hint(0.15)
+        的实际触发率（每跑触发几次、触发时命中质量如何）；
+        第二段（仅当审计证实阈值与量级失配或分数不可解释才开）：tool_result 中 score 渲染为
+        归一化相对分（如 top1=100 的百分比），low_score hint 阈值改为分位定义；
+        ranked 事件仍写原始分，IR 计分完全不动
+预期用户路径变化: 模型第一次能用 score 做「读 vs 再搜」的可解释决策；low_score hint 恢复设计意图
+R1–R5 / while / 强制搜: 通过——审计离线；归一化为 O(limit) 除法，毫秒级（R3 内）
+分桶预期: 若 hint 此前恒触发（0.15 >> RRF 量级时人人皆「弱」）→ 修复后「强命中仍再搜」类噪声行为 ↓；
+        若永不触发 → 弱命中改读的设计从未生效，修复后 weak_hits 内行为余量可见
+free 验收: 第二段单刀 N≥2 + EVAL-1 配对；主看行为轨迹（hint 触发后的工具选择）与 weak_hits；
+        不写 nDCG 叙事（P9 同款纪律）
+非目标: 审计结果为「正常匹配」则第二段不开（观测先于改动）；不顺手改融合公式
+        （公式层的去留走 RET-7 一族消融，单刀纪律）
+```
+
+依据：这是 §11.6 条 1「每层有存在证据」的字面应用——promote 层有 RET-7 排期，lexical 层有历史消融，**low_score hint 层是排序—行为链上唯一从未被审计过的开关**。且嫌疑具体（量级失配），一次离线统计即可定案。
+
+#### CTX-10 · wrong_answer_after_read 解剖（CTX-8 开刀前置 · 与 CTX-4 同款纪律）
+
+```text
+加热层: 可归因性（离线读 process.jsonl + 判分复核，不动运行时）
+改动点: 对 `1707135c` 的 9 例 wrong_answer_after_read 逐条分类：
+        (i) 证据已读但理解/推理错 —— 真能力墙或 CTX-8「凭印象臆答」战场
+        (ii) 读的区域不含答案 —— 定位失败，归 CTX-3 读法族 / CTX-11 候选证据
+        (iii) 语义等价但判分口径不容（alias/单复数/格式）—— 记为尺子局限，不开刀
+        (iv) 多跳装配失败（第一跳证据被 4k 回落截掉）—— CTX-6/8 战场
+        同时复核 F1/EM 归一化规则（大小写/冠词/标点）与 LongBench 官方口径一致性
+预期用户路径变化: 无
+R1–R5: 通过
+free 验收: 不需要；产出 = 分类占比表，直接决定 CTX-8 的诚实预期上下限、CTX-11 开不开、
+        以及 (iii) 类是否写进 §11.6 终态归因记录（「知道为什么剩、并决定不修」）
+非目标: 不为抬分改判分归一化——判分口径属温度计本体；若确认 bug 单独走尺子修复票并注记
+        新旧读数不可比（与 CTX-9 判据刀同款纪律）
+```
+
+依据：CTX-4 的解剖曾直接否掉 CTX-5，省下一条无效文案；wrong_answer 现在是新口径下的第一大桶（9/53），而 CTX-8 的立项叙事（「防凭印象臆答」「多跳证据保持」）只对 (i)(iv) 两类有效——**若 (ii)(iii) 占大头，CTX-8 的预期须先下修再开刀**。这是门禁 6 的字面要求。
+
+#### EVAL-4 · 配对回归/提升 case 轨迹并排摘要（归因加速器）
+
+```text
+加热层: 可归因性（compare 报告侧，Turn 内零改动）
+改动点: EVAL-1 配对报告追加——按配对 Δ 绝对值取 top-K（建议 K=5）回归与提升 case，
+        自动抽取两跑轨迹关键步（queries、工具序列、read 目标与名次、终答摘要、桶）并排渲染进 report
+预期用户路径变化: 无
+R1–R5: 通过——纯报告生成
+free 验收: 不需要；产物质量以「批次 6 每刀的定性归因不再需要手工翻 process.jsonl」衡量
+非目标: 不用轨迹摘要替代统计裁决（CI 仍是生死线；摘要只供归因与防误判）
+```
+
+#### EVAL-5 · 噪声带实测档案（把 ±1.5–4pp 从口传变成数据）
+
+```text
+加热层: 可归因性
+改动点: 利用既有与未来的同配置重复跑（REP 系、每刀 N≥2 的两跑），持续累计「同配置逐题配对方差」
+        分套件档案；写入 compare 报告脚注（当前实测噪声带 ± 多少、基于几对跑）
+预期用户路径变化: 无
+R1–R5: 通过——离线统计，复用 EVAL-1 已有的每 case 分数
+free 验收: 不需要；生效标志 = §11.6 条 4 停机线（「配对 CI 均含 0」）的判读有实测方差背书
+非目标: 不为凑档案加跑额外冒烟（只回收本来就要跑的重复跑数据）
+```
+
+### 12.2 条件契约刀（对应观测证成后才开 · 嵌入批次 6 尾部 · 单刀 N≥2 配对）
+
+#### RET-16 · 详摘槽 doc 多样性（RET-12 的补丁 · 条件开刀）
+
+```text
+加热层: 工具契约（结果呈现；不进 IR）
+前置观测: 统计 RET-12 现网 top-5 详摘槽的 distinct-doc 数分布（RET-14 数据可顺带产出）；
+        仅当「详摘槽被 ≤2 个 doc 占据」的查询占比可观（建议 ≥1/3）才开刀
+改动点: 详摘槽选择改为「按合并榜序取前 5 个互不相同 doc 的首个块」；被跳过的同 doc 块仍留在单行层；
+        ranked 事件与 IR 完全不动
+预期用户路径变化: two-level doc 加成造成的同 doc 块刷屏不再吃掉全部详摘预算，
+        模型可见证据宽度覆盖更多候选文档（搜索引擎结果页多样性的同款取舍）
+R1–R5 / while / 强制搜: 通过——选择逻辑 O(limit)，毫秒级；无新计算、无重排
+分桶预期: weak_hits 中「榜上有 gold 但未读」类 ↓（以 RET-14 的 gold_read_rate 为主验收位）
+free 验收: N≥2 + EVAL-1 配对；主看 gold_read_rate 与搜后 read 名次分布；不写 nDCG 叙事
+非目标: 不做 MMR/语义去重等超预算计算；不动单行层内容与 ranked 序
+```
+
+#### CTX-11 · read_file 呈现加行号/位置标记（条件开刀 · CTX-8 的配套地基）
+
+```text
+加热层: 工具契约（读结果呈现）
+前置观测: CTX-10 显示 (ii) 定位失败或 (iv) 多跳装配占比可观，且确认当前 read_file 输出无行号/偏移标记
+改动点: read_file 返回内容按行（或固定字节段）加轻量位置前缀；截断 hint 与 next_offset 用同一坐标系；
+        grep 命中行号与 read 坐标对齐（grep→定向 read 换乘不再靠目测估 offset）
+预期用户路径变化: 所有读大文件场景（不止评测）定位更准；CTX-8 摘录纪律的「注明大致位置」有了
+        天然锚点——Cursor / Claude Code 读文件带行号是同款成熟做法
+R1–R5 / while / 强制读: 通过——静态格式化；行号前缀带来约 3–5% 可见面 token 膨胀，
+        记入 EVAL-3 台账单独列行（这是工具可见面成本，非 system 文案成本）
+分桶预期: wrong_answer 中 (ii) 类、及新口径 gave_up 中「续读位置乱跳」类 ↓；
+        主观测位 narrativeqa / hotpotqa 分 task
+free 验收: N≥2 分 task + EVAL-1 配对；同时看 read 轨迹的 offset 跳转合理性
+非目标: 不改 read_file 预算与语义；不强制 grep 先行（读法仍模型自选）
+```
+
+排期注记：CTX-11 若开，须排在 **CTX-8 之前或与其隔批**——若 CTX-8 先落地、CTX-11 后落地，CTX-8 的 N≥2 对照会被坐标系变化污染（与 §11.3「CTX-6 验收基线改为含 CTX-8 的栈」同款依赖管理）。
+
+### 12.3 流程建议：REP-3 全量锚先行（批次 7 的硬前置）
+
+建议把 REP-3（同协议全量锚，约 1.3k Turn 量级）**明确排为批次 7 的硬前置**，即在 RET-4/11 影子索引与 CTX-6 之前，用当前栈（§9 包 + RET-12 + EVAL 基建）各跑一次检索/上下文全量锚：
+
+1. **时机成熟**：检索 §9 包已 N=2 认包（均值 0.449 vs 锚 0.409），当前栈是第一个值得钉全量锚的稳定平台；再等下去锚会一直追着刀跑。
+2. **批次 7 需要它**：结构刀（embed / 语料增强 / 读预算）是本轮最贵的改动，若无全量前锚，其 Δ 又只能在 20q 冒烟上讲——「重活没有像样对照」的风险已在 §9 打包上付过一次学费。
+3. **构成前后对照**：结构刀落地后再跑一次全量锚，两次全量即批次 7 的入库级对照；这是 §9.4 门禁 4 与 §11.6 条 3（「同协议全量锚已入库至少一次」）的唯一合法兑现路径。
+4. **纪律不变**：全量锚入库 ≠ 给冒烟均值背书；入库叙事仍按门禁写成「检索/上下文工程变好的间接证明」；上下文侧若 REP 复测均值仍 <0.40，则上下文全量锚推迟、只钉检索侧。
+
+### 12.4 本节不做清单（承接 §11.4 并追加）
+
+- **不开 BEIR 切块尺寸刀**：BEIR 三集文档普遍远短于 4000 字符，一 doc ≈ 一 chunk，切块杠杆在本温度计上基本不存在；产品树状语料的切块优化另立票，勿借本温度计立项（§1.4-E 同款「别误判杠杆」）。
+- **不做查询侧静态同义词/词典扩展**：lexical_miss 的正解在语料侧（RET-11 词面桥），查询侧扩展徒增 drift 风险且与 verbatim 首搜纪律相抵。
+- **不加答案自评/二次 LLM 验证调用**：违 R2/R3 精神；CTX-8 的摘录纪律已是零成本版自验（先取证后作答），无需再叠一轮模型调用。
+- **不因 RET-15 审计发现失配就顺手改融合公式或阈值以外的东西**：单刀纪律；公式层去留走 RET-7 一族消融。
+- **不把 gold/qrels 信息以任何形式带进 runtime、题面或工具提示**（RET-14 仅评测侧离线用）；不为让 (iii) 类 case 得分而改判分归一化。
+- **不在 RET-12 行为 N≥2 与 REP 上下文复测完成前开本节任何条件契约刀**（§11.7 下一步 1/2 优先级不变）。
+
+### 12.5 排期嵌入与诚实预期（不打乱 §11.5）
+
+| 批次 | §11.5 既定 | 本节追加 | 性质 |
+|------|------------|----------|------|
+| **6 前置（续）** | （已完成部分不变） | EVAL-4/5；RET-14；RET-15 第一段（审计）；CTX-10 | 观测/基建 · 零运行时 · 可与待跑的两轮 N≥2 复测并行 |
+| **6（静态契约单刀）** | RET-7 → RET-9 → CTX-7 → CTX-8 | RET-15 第二段（条件）与 RET-16（条件）排 RET-7/9 之后；CTX-11（条件）排 CTX-8 **之前或隔批**（见 §12.2 注记） | 每刀单 commit · N≥2 · EVAL-1 配对 |
+| **7 前（硬前置）** | — | **REP-3 全量锚**（当前栈 · 检索必跑；上下文视 REP 复测均值） | 入库唯一合法时点 |
+| **7（结构刀）** | RET-4 / RET-11 / CTX-6 | 不变；验收对照改用全量前锚 + 冒烟配对双轨 | 离线重活 / runtime 评审 |
+
+**诚实预期（防事后叙事漂移）**：
+
+- 本节观测刀**不承诺任何分数**；其产出以「能否改变某个既定裁决或预期」衡量（RET-14 可能改写 weak_hits 归因占比、CTX-10 可能下修 CTX-8 预期、RET-15 审计可能发现一层死开关）。
+- 条件契约刀（RET-15 二段 / RET-16 / CTX-11）的宏分 Δ 大概率落在噪声带内，**只在行为轨迹与子桶上可见**——验收全部走 EVAL-1 配对 + 子桶（gold_read_rate / wrong_answer 分类），禁止用宏 nDCG/F1 叙事。
+- 主分弹性仍押在既定结构刀：检索 RET-4/11（终态带 0.46–0.50），上下文 CTX-8/6（终态带 0.45–0.50）。
+- 若 CTX-10 显示 (iii) 判分口径类占比高 → 上下文终态带相应下修，该部分写入归因记录为「尺子局限、决定不修」——这不是失败，是 §11.6 条 2 的完成态。
+
+**与终态四问的关系（§11.6）**：本节全部提案只服务于条 1（每层有存在证据：RET-15 补 low_score hint 层的缺证）与条 2（每败可归因：RET-14 / CTX-10 补两个最大失血桶的最后一次二分），另以 §12.3 直接兑现条 3（全量锚入库）。**不新增终态目标、不抬高任何诚实带**——若四问在批次 7 后全部可答，本 brief 按 §11.6 停机线收束。
+
+---
+
+## 12.6 批次 6 前置（续）执行进度（2026-08-04 · 观测落地 + RET-7 开关）
+
+> **纪律**：§12.1 观测/基建已落地并跑通既有 free 产物；**RET-7 配置开关已合入（默认 on）**，消融 free 跑尚未开。条件刀按下方裁决开/关。**禁止**本节点 `update-baseline`。  
+> **产物**：`scripts/official_bench/batch6_offline_analysis.py` → `eval/reports/official/batch6/`（gitignore）；EVAL-5 档案 → `eval/reports/official/noise_band/archive.json`。
+
+| ID | 内容 | 状态 | 裁决 / 备注 |
+|----|------|------|-------------|
+| EVAL-4 | 配对 top-K 回归/提升 + 轨迹并排摘要 | **已完成** | `paired_case_delta_report` → `improvements`/`regressions` + `trajectory_highlights`；`compare_two_manifests` 自动 enrich |
+| EVAL-5 | 同配置噪声带档案 | **已完成** | `record_noise_band_pair`；`0744546e`↔`3c34de88` 已写入；首对 suggested_noise_pp≈**0.44**（样本少，后续 N≥2 对会抬升） |
+| RET-14 | gold-read 探针（L2 + 离线） | **已完成** | runner 写 `gold_read`；离线对 `3c34de88`：rate **0.783**；slice gold_read42 / absent15 / unread3 |
+| RET-15-1 | low_score@0.15 审计 | **已完成** | **`never_triggers`**（top1 min≈0.78 ≫ 0.15）→ **开 stage-2**（归一化呈现） |
+| CTX-10 | wrong_answer 9 例解剖 | **已完成** | (i)+(iv)=**5/9** → CTX-8 预期 **full**；(ii)=1 → **不开 CTX-11**；(iii)=3 → 尺子局限记入归因 |
+| RET-7 开关 | `search_sources_excerpt_promote`（**默认 False**） | **N≥2 已收 → 默认关** | OFF `bcdbbb85`/`f92bc610` vs ON `6c87e401` 皆 `no_stable_delta`；无正贡献 → 简化栈（§12.9） |
+| RET-16 | 详摘槽多样性 | **不开** | detail 槽 ≤2 doc 占比 **0.018** ≪ 1/3 |
+| CTX-11 | read 行号 | **不开** | (ii) 仅 1/9 |
+| RET-15-2 | 归一化 score 呈现 | **已收（no_stable_delta）** | free `6c87e401` vs `dfe97d37`；**不写 IR 胜**；默认保留呈现（§12.8） |
+| CTX-7 | 答题 good/bad 示例 | **N≥2 已收** | verbose↓ 成立；EM↑ **未过**；保留文案不记宏分胜（§12.9） |
+| RET-9 | 第二搜互补文案 | **已落地（待 free N≥2）** | writing `system.md`；配对锚 promote-off 均值 / `f92bc610`（§12.9） |
+| REP-3 | 全量锚 | **未跑** | 仍为批次 7 硬前置 |
+
+#### RET-14 离线读数（`3c34de88` · top_hits∩qrels∩DB read_paths）
+
+| 数据集 | n | gold_read_rate | absent_from_ranked | on_ranked_but_unread |
+|--------|---|----------------|--------------------|----------------------|
+| SciFact | 20 | 0.95 | 3 | 1 |
+| NFCorpus | 20 | 0.90 | 2 | 1 |
+| FiQA | 20 | **0.50** | **10** | 1 |
+| **合计** | 60 | **0.783** | **15** | **3** |
+
+**读法**：weak_hits 的主因是 **gold 根本不在 ranked**（Index/embed，归 RET-4/11），不是「榜上有 gold 模型没看见」（呈现/RET-12 战场仅 3 例）。FiQA 一半 query 读不到任何 gold → 与 `lanes_fed_relevance` / RET-4 立项一致。
+
+#### RET-15 审计读数（同跑）
+
+- top1 score：min **0.78** · p50 **1.64** · max **3.11**（n=56 有 hit）  
+- `low_score` hint@**0.15** 触发率 **0%** → 设计意图从未生效 → stage-2（相对分 / 分位阈值）立项充分。  
+- 注：brief §12.0 曾按「裸 RRF ~0.03」猜量级；生产融合分已是另一量级，审计以实测为准。
+
+#### CTX-10 分类（`1707135c` · 9 例）
+
+| 类 | n | 含义 | 后续 |
+|----|---|------|------|
+| (iv) multihop_assembly | 4 | 多跳证据丢失 | CTX-8 / CTX-6 |
+| (iii) scorer_alias | 3 | 近义/口径（含 em=1∧f1=0  quirk） | **不修判分刷分**；终态归因「尺子局限」 |
+| (i) read_but_reason_wrong | 1 | 读了理解错 | CTX-8 |
+| (ii) localization_miss | 1 | 定位失败 | CTX-11 门槛未过 |
+
+#### RET-7 开关用法（消融时）
+
+```bash
+# 默认已关（settings + compose default false）。若需临时重开对照：
+SEARCH_SOURCES_EXCERPT_PROMOTE=true
+# recreate runtime 后 free；配对时注明 promote 状态
+```
+
+**裁决后默认 false**；开关保留供回滚对照。不改 while / 不强制搜。
+
+#### 单测
+
+- `scripts/tests/test_official_bench_baseline.py`：EVAL-4 highlights / EVAL-5 archive / RET-14 stats / RET-15 / CTX-10  
+- `services/runtime/tests/test_tools_extended.py`：RET-7 settings default + disable
+
+#### 下一步（承接 §11.7，按观测裁决修订）
+
+1. ~~检索再跑一轮 / RET-15-2 / RET-7 消融 / CTX-7~~ → **均已收**（§12.7–12.9）。  
+2. **当前刀**：**RET-9** free 检索 20q **N≥2**（配对锚 promote-off：`f92bc610` / pass1+2 均值）；主看 weak_hits 与 drift。  
+3. 其后：**CTX-8**（证据先行；CTX-7 已收）；**不开** RET-16 / CTX-11 / CTX-5。  
+4. 批次 7 前 REP-3 全量锚 → RET-4（+ 可选 RET-11）。  
 5. 仍 **不** `update-baseline`。
+
+---
+
+## 12.7 Free 观测批（2026-08-04 · Ops retrieval+context · pass 1/2）
+
+> **窗口**：2026-08-04 14:51:38 → 15:14:25（UTC+8）· ~23m · **pass 1/2**  
+> **栈**：§9 包 + RET-12 + §12.6 观测基建（重建后 runtime/api）· arm=**free** · protocol m3 · `deepseek-v4-flash`  
+> **纪律**：检索有效记入；上下文整跑失败 = **infra**，**不作效果对照、不否决检索**；**不** `update-baseline`。
+
+### 检索 free 20q · `dfe97d37`（**有效**）
+
+| 项 | 值 |
+|----|-----|
+| run_id | `dfe97d37-05ac-4ea9-8d98-8f5ff0fca312` |
+| nDCG@10 | **0.4224** |
+| R@10 | 0.4258 |
+| R@100 | 0.5341 |
+| nDCG@1 | 0.3722 |
+| MAP@10 | 0.2911 |
+| infra_rate | **0**（n_infra_excluded=0） |
+| 桶 | ok **30** · weak_hits **28** · search_cap **2** |
+| promote_total | 58 |
+| FiQA depth / lane | `depth_ok_relevance_or_qrels` · **`lanes_fed_relevance`** |
+| RET-14 gold_read_rate | **0.85**（n=60：gold_read 47 · absent 10 · unread 3） |
+| 分库 gold_read | SciFact/NF **1.0** · FiQA **0.55**（absent 7 · unread 3） |
+
+**配对（EVAL-1/4）vs RET-12 前锚 `3c34de88`**
+
+| | 值 |
+|--|-----|
+| n_paired | 55 |
+| W/L/T | 3 / 4 / 48 |
+| meanΔ | −0.011 |
+| bootstrap 95% CI | 含 0 |
+| verdict | **`no_stable_delta`** |
+| EVAL-5 noise_band | 档案 n=2 · suggested ≈±1.1pp |
+
+**裁决（RET-12）**：IR 持平符合「分层呈现不写 nDCG」预期；行为 N≥2 **已凑齐**；主缺口仍在 weak_hits / FiQA absent-from-ranked → 结构杠杆仍归 **RET-4**。不入库。
+
+原始键（`debug.log` / TEST 导出）：
+
+```text
+official.retrieval.ndcg_at_10 = 0.4224
+official.retrieval.recall_at_10 = 0.4258
+official.retrieval.recall_at_100 = 0.5341
+official.retrieval.ndcg_at_1 = 0.3722
+official.retrieval.map_at_10 = 0.2911
+official.retrieval.n_queries = 20
+official.retrieval.infra_rate = 0
+```
+
+### 上下文 free · `c76e07a9`（**作废 · infra**）
+
+| 项 | 值 |
+|----|-----|
+| run_id | `c76e07a9-8cae-46c1-bc39-09d47502f326` |
+| status | **failed** |
+| 落盘 cases | 仅 **30/60**（multifieldqa_en 20 + hotpotqa 前 10）；无宏 F1/EM |
+| 根因 | `httpx.ReadError` ← `httpcore.ReadError`（api 并行 `asyncio.gather` 等 Turn 时 **读 runtime HTTP 连接断开**） |
+| 归类 | **infra / transport**（EVAL-infra 口径）；**非** agent 读法/答题失败 |
+| 对照 | **禁止**与 `1707135c` 配对；须通道稳时重跑 context-only |
+
+过程现象：`run_finished — failed` 之后 process 仍见后续 case 日志（并行 worker 未立刻停），但会话已失败、主分未写出——典型 gather 一票否决。
+
+**旁注（同窗口、非本次挂因）**：检索阶段 runtime 多次 `turn.completed: summary is too long`（schema `maxLength=4096`），长终答写事件失败；检索仍出完整宏分。可另立截断刀，**不**解释本次 context 整挂。
+
+### RET-15-2 落地（2026-08-04 · 单刀）
+
+```text
+加热层: 工具契约（结果呈现；不进 IR 公式）
+改动:
+  · search_sources 命中：保留 score_raw=融合原分；模型可见 score=相对 top1 的 0–100
+  · retrieval.completed.ranked 优先写 score_raw（agent_engine）
+  · low_score hint 阈值默认 0.15 → 1.0（对 raw；≈冒烟 top1 p10）
+  · 开关 search_sources_score_rel（默认 true）
+验收: free 检索 N≥2 + EVAL-1 配对 vs dfe97d37；主看 low_score 触发后的工具选择 / weak_hits；禁止 nDCG 叙事
+R 门禁: O(limit) 除法；不改 while / 不强制搜
+```
+
+**状态**：代码已重建；free 见 **§12.8** → **`no_stable_delta`**；默认保留呈现；不入库。
+
+### CTX-7 落地（2026-08-04 · 单刀）
+
+```text
+加热层: 工具契约 / 静态 system 文案
+改动: agent/system.md 在 Answer format 后附最小 good/bad 示例（Paris / yes — 无题集内容）
+验收: free 上下文 60 · N≥2 配对 vs b3bb17d9；主看 verbose 桶与 EM；禁止答案后处理
+R 门禁: 纯静态文案
+```
+
+**状态**：已进镜像并 free N≥2 → 见 **§12.9**（verbose↓ 成立；EM↑ 未过；保留文案）。
+
+---
+
+## 12.8 RET-15-2 free + RET-7 消融武装（2026-08-04）
+
+> **纪律**：只记 free；配对同栈；**禁止**用 nDCG 给呈现刀（RET-15-2）叙事胜利；RET-7 是**减法存在证据**刀。不入库。
+
+### RET-15-2 free · `6c87e401`（**有效 · 收刀**）
+
+| 项 | 值 |
+|----|-----|
+| run_id | `6c87e401-eab4-4f68-98e5-95a9fe6c98d5` |
+| nDCG@10 | **0.4419** |
+| R@10 / R@100 | 0.4303 / 0.5307 |
+| infra_rate | **0** |
+| 桶 | ok **29** · weak_hits **27** · search_cap **3** · query_drift **1** |
+| promote_total | **60**（promote 仍开） |
+| gold_read_rate | **0.80**（unread 7；较 `dfe97d37` 的 0.85 略降） |
+| FiQA | nDCG@10 **0.324**；R@10 **0.392** vs R@100 **0.558**（gap≈0.17，深度通道可见） |
+
+**配对 vs `dfe97d37`（RET-15-1 锚）**：n=56 · W4/L3/T49 · meanΔ **+0.017** · CI 含 0 → **`no_stable_delta`**。
+
+**裁决**：符合「呈现层不写 nDCG」预期；默认 **保留** RET-15-2；主缺口仍在 weak_hits / FiQA absent → RET-4。不入库。
+
+### RET-7 消融 · 武装记录（已被 §12.9 收束）
+
+武装窗口：`.env=false` + compose 透传 + recreate；配对锚当时为 promote-on `6c87e401`。结果与默认变更见 **§12.9**。
+
+---
+
+## 12.9 RET-7 / CTX-7 free N≥2 + RET-9 落地（2026-08-04）
+
+> **纪律**：只记 free；两轨分开归因；**不** `update-baseline`。
+
+### RET-7 消融 · N=2（**收刀 · 默认关**）
+
+| | pass1 `bcdbbb85` | pass2 `f92bc610` | 锚 ON `6c87e401` |
+|--|------------------|------------------|------------------|
+| nDCG@10 | 0.4359 | **0.4573** | 0.4419 |
+| R@10 / R@100 | 0.421 / 0.538 | 0.446 / 0.532 | 0.430 / 0.531 |
+| promote_total | **0** | **0** | 60 |
+| weak_hits | 28 | 26 | 27 |
+| infra | 0 | 0 | 0 |
+| vs ON | `no_stable_delta` | `no_stable_delta` | — |
+
+两轮 OFF 均值 nDCG@10 **0.4466**（略高于 ON）。关 promote **无稳定伤 IR** → **无存在证据** → **默认关闭**（`settings.search_sources_excerpt_promote=False`；compose default false）。开关保留供回滚。不入库。
+
+### CTX-7 · N=2（**收刀 · 不记 EM/宏分胜**）
+
+| | 锚 `b3bb17d9` | pass1 `13647cb0` | pass2 `61624e34` |
+|--|--------------|------------------|------------------|
+| F1 | 0.362 | 0.411 | **0.424** |
+| EM | **0.267** | 0.217 | **0.183** |
+| verbose | 11 | **4** | **4** |
+| ok / wrong / abandoned | 33 / 13 / 3 | 40 / 13 / 3 | **44 / 8 / 4** |
+| vs 锚 F1 | — | `no_stable_delta` | `no_stable_delta` |
+
+**裁决**：verbose↓ **稳定成立**；EM↑ **连续未过**（反降）。保留 good/bad 示例作文案边际；**禁止**以 F1/EM 叙事胜利。不入库。主缺口仍偏 wrong_answer → **CTX-8**。
+
+### RET-9 落地（2026-08-04 · 单刀 · 待 free）
+
+```text
+加热层: 工具契约 / 静态 writing system.md
+改动: 弱命中（low_score hint）时第二搜换互补词面，保持原信息需求；仍 ≤2 搜；禁乱漂
+验收: free 检索 20q N≥2；配对锚 promote-off（`f92bc610` 或 OFF 两轮均值）；主看 weak_hits ↓、盯 drift
+R 门禁: 纯静态文案；不强制第二搜；无额外 LLM 改写（R2）
+```
+
+**状态**：源码已改；须 `make up-runtime` 后 Ops free。同批未开 CTX-8。
+
+**下一步（你）**：重建后 Ops → 检索 · L1 · free · limit=20 → N≥2 → 贴 `debug.log`。

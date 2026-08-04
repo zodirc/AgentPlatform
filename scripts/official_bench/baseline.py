@@ -783,6 +783,8 @@ def compare_latest_to_baseline(
             report["sample_tier"] = latest_tier
             report["baseline_run_id"] = b.get("run_id")
             report["latest_run_id"] = l.get("run_id")
+            # Keep EVAL-4 highlights; drop bulky full Δ list from baseline compare.
+            report.pop("case_deltas", None)
             paired[suite] = report
     return {
         "protocol_version": latest_doc.get("protocol_version") or baseline.get("protocol_version"),
@@ -801,8 +803,13 @@ def paired_case_delta_report(
     alt_metrics: tuple[str, ...] = (),
     n_boot: int = 2000,
     seed: int = 0,
+    top_k_highlights: int = 5,
 ) -> dict[str, Any]:
-    """EVAL-1: per-case paired Δ + win/loss/tie + median Δ + bootstrap 95% CI."""
+    """EVAL-1: per-case paired Δ + win/loss/tie + median Δ + bootstrap 95% CI.
+
+    EVAL-4: also returns ``case_deltas`` + top-K ``improvements`` / ``regressions``
+    (id + scores + Δ only; trajectory enrichment is separate).
+    """
     metrics_try = (metric,) + tuple(alt_metrics)
 
     def _val(m: dict[str, Any]) -> float | None:
@@ -816,6 +823,7 @@ def paired_case_delta_report(
     # Prefer query/task cases over suite rollups (skip *.agent dataset rollups).
     shared = [c for c in shared if not str(c).endswith(".agent")]
     deltas: list[float] = []
+    case_deltas: list[dict[str, Any]] = []
     wins = losses = ties = 0
     for cid in shared:
         bm = base_cases.get(cid) if isinstance(base_cases.get(cid), dict) else {}
@@ -826,6 +834,14 @@ def paired_case_delta_report(
             continue
         d = lv - bv
         deltas.append(d)
+        case_deltas.append(
+            {
+                "case_id": cid,
+                "base": bv,
+                "latest": lv,
+                "delta": d,
+            }
+        )
         if abs(d) < 1e-12:
             ties += 1
         elif d > 0:
@@ -872,6 +888,17 @@ def paired_case_delta_report(
     if ci_lo is not None and ci_hi is not None:
         ci_includes_zero = bool(ci_lo <= 0.0 <= ci_hi)
 
+    k = max(0, int(top_k_highlights))
+    improvements = sorted(
+        [c for c in case_deltas if float(c["delta"]) > 1e-12],
+        key=lambda c: float(c["delta"]),
+        reverse=True,
+    )[:k]
+    regressions = sorted(
+        [c for c in case_deltas if float(c["delta"]) < -1e-12],
+        key=lambda c: float(c["delta"]),
+    )[:k]
+
     return {
         "metric": metric,
         "n_paired": n,
@@ -893,7 +920,187 @@ def paired_case_delta_report(
                 else ("positive" if (mean_d or 0) > 0 else "negative")
             )
         ),
+        # EVAL-4
+        "case_deltas": case_deltas,
+        "improvements": improvements,
+        "regressions": regressions,
     }
+
+
+def _case_trajectory_summary(case: dict[str, Any] | None) -> dict[str, Any]:
+    """Compact trajectory card for EVAL-4 side-by-side (no full process.jsonl)."""
+    if not isinstance(case, dict):
+        return {}
+    l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+    tools = case.get("tools") or l2.get("tools") or []
+    if isinstance(tools, list) and len(tools) > 12:
+        tools = tools[:12] + [f"…(+{len(tools) - 12})"]
+    queries = case.get("queries") or l2.get("queries") or []
+    if isinstance(queries, list) and len(queries) > 3:
+        queries = [str(q)[:120] for q in queries[:3]] + ["…"]
+    elif isinstance(queries, list):
+        queries = [str(q)[:120] for q in queries]
+    pred = case.get("pred")
+    if isinstance(pred, str) and len(pred) > 80:
+        pred = pred[:77] + "…"
+    top_hits = case.get("top_hits") or []
+    hit_paths: list[str] = []
+    if isinstance(top_hits, list):
+        for h in top_hits[:5]:
+            if isinstance(h, dict):
+                hit_paths.append(str(h.get("doc_id") or h.get("path") or "")[:60])
+    return {
+        "bucket": case.get("bucket") or l2.get("bucket"),
+        "tools": tools if isinstance(tools, list) else [],
+        "queries": queries if isinstance(queries, list) else [],
+        "n_search": case.get("n_search") if case.get("n_search") is not None else l2.get("n_search"),
+        "n_reads": case.get("n_reads") if case.get("n_reads") is not None else l2.get("n_reads"),
+        "read_coverage": case.get("read_coverage")
+        if case.get("read_coverage") is not None
+        else l2.get("read_coverage"),
+        "pred": pred,
+        "answer_len": case.get("answer_len") or l2.get("answer_len"),
+        "top_hit_docs": hit_paths,
+        "gold_read_failure_slice": case.get("gold_read_failure_slice")
+        or l2.get("gold_read_failure_slice"),
+        "read_any_gold": case.get("read_any_gold")
+        if case.get("read_any_gold") is not None
+        else l2.get("read_any_gold"),
+    }
+
+
+def enrich_paired_trajectory_highlights(
+    report: dict[str, Any],
+    *,
+    manifest_a: dict[str, Any],
+    manifest_b: dict[str, Any],
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """EVAL-4: attach side-by-side trajectory summaries for top regressions/improvements."""
+    cases_a = {
+        str(c.get("case_id")): c
+        for c in (manifest_a.get("cases") or [])
+        if isinstance(c, dict) and c.get("case_id")
+    }
+    cases_b = {
+        str(c.get("case_id")): c
+        for c in (manifest_b.get("cases") or [])
+        if isinstance(c, dict) and c.get("case_id")
+    }
+
+    def _enrich(rows: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row in rows or []:
+            if not isinstance(row, dict):
+                continue
+            cid = str(row.get("case_id") or "")
+            out.append(
+                {
+                    **row,
+                    "a": _case_trajectory_summary(cases_a.get(cid)),
+                    "b": _case_trajectory_summary(cases_b.get(cid)),
+                }
+            )
+        return out[: max(0, int(top_k))]
+
+    report = dict(report)
+    report["improvements"] = _enrich(report.get("improvements"))
+    report["regressions"] = _enrich(report.get("regressions"))
+    report["trajectory_highlights"] = {
+        "top_k": top_k,
+        "improvements": report["improvements"],
+        "regressions": report["regressions"],
+    }
+    return report
+
+
+def noise_band_archive_path() -> Path:
+    """EVAL-5: cumulative same-config paired variance archive."""
+    return reports_dir() / "noise_band" / "archive.json"
+
+
+def record_noise_band_pair(
+    report: dict[str, Any],
+    *,
+    suite: str,
+    a_run_id: str | None = None,
+    b_run_id: str | None = None,
+    config_fingerprint: str | None = None,
+) -> dict[str, Any]:
+    """Append one paired compare into the noise-band archive; return updated footnote.
+
+    Only recovers data from compares that already ran (no extra smoke). Footnote
+    fields: n_pairs, std_of_mean_delta, p50_abs_mean_delta, suggested_noise_pp.
+    """
+    path = noise_band_archive_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    archive: dict[str, Any] = {"pairs": [], "by_suite": {}}
+    if path.is_file():
+        try:
+            archive = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            archive = {"pairs": [], "by_suite": {}}
+    if not isinstance(archive.get("pairs"), list):
+        archive["pairs"] = []
+    if not isinstance(archive.get("by_suite"), dict):
+        archive["by_suite"] = {}
+
+    mean_d = report.get("mean_delta")
+    n_paired = report.get("n_paired")
+    entry = {
+        "suite": suite,
+        "a_run_id": a_run_id or report.get("a_run_id"),
+        "b_run_id": b_run_id or report.get("b_run_id"),
+        "metric": report.get("metric"),
+        "n_paired": n_paired,
+        "mean_delta": mean_d,
+        "median_delta": report.get("median_delta"),
+        "bootstrap_ci95": report.get("bootstrap_ci95"),
+        "ci_includes_zero": report.get("ci_includes_zero"),
+        "config_fingerprint": config_fingerprint,
+    }
+    # Dedup identical a/b pair
+    key = (entry["a_run_id"], entry["b_run_id"], entry["metric"])
+    archive["pairs"] = [
+        p
+        for p in archive["pairs"]
+        if (p.get("a_run_id"), p.get("b_run_id"), p.get("metric")) != key
+    ]
+    archive["pairs"].append(entry)
+
+    suite_means = [
+        float(p["mean_delta"])
+        for p in archive["pairs"]
+        if p.get("suite") == suite and isinstance(p.get("mean_delta"), (int, float))
+    ]
+    footnote: dict[str, Any] = {
+        "suite": suite,
+        "n_archive_pairs": len(suite_means),
+        "suggested_noise_pp": None,
+        "p50_abs_mean_delta": None,
+        "std_of_mean_delta": None,
+    }
+    if suite_means:
+        abs_means = sorted(abs(x) for x in suite_means)
+        mid = len(abs_means) // 2
+        p50 = (
+            abs_means[mid]
+            if len(abs_means) % 2
+            else (abs_means[mid - 1] + abs_means[mid]) / 2.0
+        )
+        mean = sum(suite_means) / len(suite_means)
+        var = sum((x - mean) ** 2 for x in suite_means) / max(1, len(suite_means) - 1)
+        std = var**0.5
+        footnote["p50_abs_mean_delta"] = p50
+        footnote["std_of_mean_delta"] = std
+        # Convert to percentage points for the familiar ±Xpp band.
+        footnote["suggested_noise_pp"] = round(max(p50, std) * 100.0, 2)
+    archive["by_suite"][suite] = footnote
+    path.write_text(json.dumps(archive, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    report = dict(report)
+    report["noise_band"] = footnote
+    report["noise_band_archive"] = str(path)
+    return report
 
 
 def compare_two_manifests(
@@ -901,10 +1108,13 @@ def compare_two_manifests(
     manifest_b: dict[str, Any],
     *,
     metric_hint: str | None = None,
+    record_noise: bool = True,
+    top_k_highlights: int = 5,
 ) -> dict[str, Any]:
     """EVAL-1: pair two run manifests (e.g. N=2 knife acceptance).
 
     ``a`` is treated as baseline/before, ``b`` as latest/after.
+    EVAL-4 attaches trajectory highlights; EVAL-5 appends noise-band archive.
     """
     snap_a = extract_suite_snapshot(manifest_a)
     snap_b = extract_suite_snapshot(manifest_b)
@@ -932,12 +1142,36 @@ def compare_two_manifests(
         cases_b,
         metric=metric,
         alt_metrics=("agent_f1", "f1") if suite == "context" else (),
+        top_k_highlights=top_k_highlights,
     )
     report["suite"] = suite
     report["a_run_id"] = snap_a.get("run_id")
     report["b_run_id"] = snap_b.get("run_id")
     report["a_metrics"] = snap_a.get("metrics")
     report["b_metrics"] = snap_b.get("metrics")
+    report = enrich_paired_trajectory_highlights(
+        report,
+        manifest_a=manifest_a,
+        manifest_b=manifest_b,
+        top_k=top_k_highlights,
+    )
+    # Drop bulky full case_deltas from CLI default payload (still have highlights).
+    report.pop("case_deltas", None)
+    if record_noise and report.get("n_paired"):
+        fp = None
+        for man in (manifest_a, manifest_b):
+            result = man.get("result") if isinstance(man.get("result"), dict) else {}
+            meta = man.get("model_meta") if isinstance(man.get("model_meta"), dict) else {}
+            fp = (
+                result.get("config_fingerprint")
+                or meta.get("config_fingerprint")
+                or fp
+            )
+        report = record_noise_band_pair(
+            report,
+            suite=suite,
+            config_fingerprint=str(fp) if fp else None,
+        )
     return report
 
 
@@ -983,6 +1217,26 @@ def format_compare_table(report: dict[str, Any]) -> str:
                 f"sign_p={_fmt(pr.get('sign_test_p'))}  "
                 f"verdict={pr.get('verdict')}"
             )
+            # EVAL-4: top regressions / improvements (ids only in table)
+            for label, key in (("↑", "improvements"), ("↓", "regressions")):
+                rows = pr.get(key) or []
+                if not rows:
+                    continue
+                bits = []
+                for row in rows[:5]:
+                    if not isinstance(row, dict):
+                        continue
+                    bits.append(
+                        f"{row.get('case_id')}({float(row.get('delta') or 0):+.3f})"
+                    )
+                if bits:
+                    lines.append(f"  {label} {', '.join(bits)}")
+            nb = pr.get("noise_band") if isinstance(pr.get("noise_band"), dict) else None
+            if nb and nb.get("suggested_noise_pp") is not None:
+                lines.append(
+                    f"  noise_band≈±{nb.get('suggested_noise_pp')}pp "
+                    f"(n_archive={nb.get('n_archive_pairs')})"
+                )
     return "\n".join(lines)
 
 

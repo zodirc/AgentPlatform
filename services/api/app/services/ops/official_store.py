@@ -295,6 +295,7 @@ def suite_artifact_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         else meta.get("context_limit"),
         "sample_policy": result.get("sample_policy") or meta.get("sample_policy"),
         "depth_audit": result.get("depth_audit") or meta.get("depth_audit"),
+        "gold_read": result.get("gold_read") or meta.get("gold_read"),
         "suite_ndcg_median": result.get("suite_ndcg_median")
         if result.get("suite_ndcg_median") is not None
         else meta.get("suite_ndcg_median"),

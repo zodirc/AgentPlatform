@@ -57,9 +57,9 @@ class StartOfficialBody(BaseModel):
     retrieval_query_limit: int = Field(default=0, ge=0, le=50_000)
     # L1 only: concurrent Turns within a suite (wall-clock; default 1).
     l1_max_parallel: int = Field(default=1, ge=1, le=8)
-    # L1 arms (protocol m3): free = primary; forced/oracle = L2 diagnostics.
-    retrieval_arm: Literal["free", "forced"] = "free"
-    context_arm: Literal["free", "oracle"] = "free"
+    # Ops acceptance: free arms only (forced/oracle are not exposed).
+    retrieval_arm: Literal["free"] = "free"
+    context_arm: Literal["free"] = "free"
     coding_checkout_repo: bool = True
     force: bool = False
     model: ModelBody | None = None
@@ -587,8 +587,8 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             context_limit=body.context_limit,
             retrieval_query_limit=body.retrieval_query_limit,
             l1_max_parallel=body.l1_max_parallel,
-            retrieval_arm=body.retrieval_arm,
-            context_arm=body.context_arm,
+            retrieval_arm="free",
+            context_arm="free",
             coding_checkout_repo=body.coding_checkout_repo,
         )
     except ValueError as exc:

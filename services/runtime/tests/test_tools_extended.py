@@ -792,6 +792,60 @@ def test_prefer_excerpt_covering_hits_no_flag_when_order_unchanged() -> None:
     assert "_excerpt_promote_reorder" not in ordered[0]
 
 
+def test_ret7_excerpt_promote_settings_default_and_enable(monkeypatch) -> None:
+    """RET-7: default off after ablation; settings flag can re-enable silent promote."""
+    from app.settings import Settings
+    from app.tools.core import tools as tools_mod
+
+    assert Settings().search_sources_excerpt_promote is False
+    monkeypatch.setattr(tools_mod.settings, "search_sources_excerpt_promote", True)
+    assert tools_mod.settings.search_sources_excerpt_promote is True
+    # Function itself still promotes when called directly (switch lives at call site).
+    late = {
+        "path": "sources/seed/writing/dramas/drama1.md",
+        "excerpt": "情节改编\n- 亮剑精神的出处：原著…",
+    }
+    early = {
+        "path": "sources/seed/writing/dramas/drama1.md",
+        "excerpt": "建国后至授衔\n- 情感风波：张白鹿对李云龙产生好感。",
+    }
+    ordered = tools_mod._prefer_excerpt_covering_hits([late, early], "张白鹿")
+    assert ordered[0] is early
+
+
+def test_ret15_score_rel_and_low_score_uses_raw(monkeypatch) -> None:
+    """RET-15-2: model sees 0–100 rel scores; low_score compares raw fusion score."""
+    from app.settings import Settings
+    from app.tools.core import tools as tools_mod
+
+    assert Settings().search_sources_score_rel is True
+    assert Settings().search_sources_low_score_hint == 1.0
+
+    monkeypatch.setattr(tools_mod.settings, "search_sources_score_rel", True)
+    monkeypatch.setattr(tools_mod.settings, "search_sources_low_score_hint", 1.0)
+    monkeypatch.setattr(tools_mod.settings, "search_sources_detail_hits", 5)
+
+    strong = [
+        {"path": "a.md", "excerpt": "x", "score": 2.0},
+        {"path": "b.md", "excerpt": "y", "score": 1.0},
+    ]
+    hits, hint = tools_mod._finalize_search_hits_for_model(strong)
+    assert hits[0]["score"] == 100
+    assert hits[1]["score"] == 50
+    assert hits[0]["score_raw"] == 2.0
+    assert hits[1]["score_raw"] == 1.0
+    assert hint is None or "Low relevance" not in hint
+
+    weak = [
+        {"path": "weak.md", "excerpt": "z", "score": 0.5},
+        {"path": "weaker.md", "excerpt": "w", "score": 0.25},
+    ]
+    whits, whint = tools_mod._finalize_search_hits_for_model(weak)
+    assert whits[0]["score"] == 100
+    assert whits[0]["score_raw"] == 0.5
+    assert whint is not None and "Low relevance" in whint
+
+
 @pytest.mark.asyncio
 async def test_search_sources_keyword_section_fields(
     workspace: Path, monkeypatch: pytest.MonkeyPatch

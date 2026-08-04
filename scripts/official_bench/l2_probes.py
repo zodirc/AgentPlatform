@@ -43,6 +43,13 @@ L2_RETRIEVAL_KEYS = (
     "lane_top_k",
     "two_level_doc_n",
     "over_fetch_multiplier",
+    # RET-14 gold-read outcome (optional on older runs)
+    "read_doc_ids",
+    "gold_read_n",
+    "gold_on_ranked_n",
+    "gold_on_ranked_but_unread_n",
+    "read_any_gold",
+    "gold_read_failure_slice",
 )
 L2_CONTEXT_KEYS = (
     "n_reads",
@@ -376,10 +383,114 @@ def weak_hits_snapshots(
                 "merged_len": case.get("merged_len")
                 if case.get("merged_len") is not None
                 else l2.get("merged_len"),
+                # RET-14 slice (when present)
+                "gold_read_failure_slice": case.get("gold_read_failure_slice")
+                or l2.get("gold_read_failure_slice"),
+                "gold_on_ranked_but_unread_n": case.get(
+                    "gold_on_ranked_but_unread_n"
+                )
+                if case.get("gold_on_ranked_but_unread_n") is not None
+                else l2.get("gold_on_ranked_but_unread_n"),
+                "read_any_gold": case.get("read_any_gold")
+                if case.get("read_any_gold") is not None
+                else l2.get("read_any_gold"),
             }
         )
     out.sort(key=lambda r: float(r.get("ndcg_at_10") or 0.0))
     return out
+
+
+def gold_read_aggregate(cases: list[dict[str, Any]]) -> dict[str, Any]:
+    """RET-14 suite rollup: gold_read_rate + ranked-but-unread vs absent-from-ranked.
+
+    Splits weak_hits-style failures into Index/embed (gold not on ranked) vs
+    presentation/behavior (gold on ranked but model never read it).
+    """
+    by_ds: dict[str, list[dict[str, Any]]] = {}
+    slice_counts: dict[str, int] = {}
+    n_scored = 0
+    n_read_any_gold = 0
+    n_gold_on_ranked = 0
+    n_gold_on_ranked_but_unread = 0
+    all_ranks: list[int] = []
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        cid = str(case.get("case_id") or "")
+        if cid.endswith(".agent"):
+            continue
+        l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+        slice_name = case.get("gold_read_failure_slice") or l2.get(
+            "gold_read_failure_slice"
+        )
+        if (
+            slice_name is None
+            and case.get("read_any_gold") is None
+            and l2.get("read_any_gold") is None
+        ):
+            continue
+        n_scored += 1
+        ds = _dataset_from_case_id(cid)
+        by_ds.setdefault(ds, []).append(case)
+        slice_key = str(slice_name or "unknown")
+        slice_counts[slice_key] = slice_counts.get(slice_key, 0) + 1
+        read_any = case.get("read_any_gold")
+        if read_any is None:
+            read_any = l2.get("read_any_gold")
+        if read_any:
+            n_read_any_gold += 1
+        gold_ranked_n = case.get("gold_on_ranked_n")
+        if gold_ranked_n is None:
+            gold_ranked_n = l2.get("gold_on_ranked_n")
+        if isinstance(gold_ranked_n, (int, float)) and int(gold_ranked_n) > 0:
+            n_gold_on_ranked += 1
+        unread_n = case.get("gold_on_ranked_but_unread_n")
+        if unread_n is None:
+            unread_n = l2.get("gold_on_ranked_but_unread_n")
+        if isinstance(unread_n, (int, float)) and int(unread_n) > 0 and not read_any:
+            n_gold_on_ranked_but_unread += 1
+        ranks = case.get("read_target_ranks") or l2.get("read_target_ranks") or []
+        if isinstance(ranks, list):
+            for r in ranks:
+                if isinstance(r, (int, float)):
+                    all_ranks.append(int(r))
+
+    def _ds_rate(rows: list[dict[str, Any]]) -> dict[str, Any]:
+        n = len(rows) or 1
+        any_g = 0
+        absent = 0
+        unread = 0
+        for row in rows:
+            l2 = row.get("l2") if isinstance(row.get("l2"), dict) else {}
+            if row.get("read_any_gold") or l2.get("read_any_gold"):
+                any_g += 1
+            sl = str(
+                row.get("gold_read_failure_slice")
+                or l2.get("gold_read_failure_slice")
+                or ""
+            )
+            if sl == "gold_absent_from_ranked":
+                absent += 1
+            elif sl == "gold_on_ranked_but_unread":
+                unread += 1
+        return {
+            "n": len(rows),
+            "gold_read_rate": round(any_g / n, 4),
+            "gold_absent_from_ranked_n": absent,
+            "gold_on_ranked_but_unread_n": unread,
+        }
+
+    n = n_scored or 1
+    return {
+        "n_scored": n_scored,
+        "gold_read_rate": round(n_read_any_gold / n, 4) if n_scored else None,
+        "n_read_any_gold": n_read_any_gold,
+        "n_gold_on_ranked": n_gold_on_ranked,
+        "n_gold_on_ranked_but_unread": n_gold_on_ranked_but_unread,
+        "failure_slice_counts": dict(sorted(slice_counts.items())),
+        "read_target_rank_hist": _hist_counts(all_ranks) if all_ranks else {},
+        "by_dataset": {ds: _ds_rate(rows) for ds, rows in sorted(by_ds.items())},
+    }
 
 
 def _dataset_from_case_id(case_id: str) -> str:

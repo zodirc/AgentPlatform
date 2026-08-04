@@ -266,6 +266,104 @@ def called_tools(events: list[dict[str, Any]]) -> list[str]:
     return names
 
 
+def read_targets_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """RET-14: ordered read_file targets (path → doc_id) from tool.started.
+
+    Eval-side only — never injects qrels into runtime. Paths may be relative
+    (``sources/beir/<ds>/<id>.txt``) or absolute under a Work root.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ev in events:
+        if str(ev.get("type") or "") != "tool.started":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("tool_name") or "") != "read_file":
+            continue
+        args = payload.get("arguments") or {}
+        if not isinstance(args, dict):
+            continue
+        path = str(args.get("path") or args.get("file") or "").strip()
+        if not path:
+            continue
+        doc_id = doc_id_from_path(path)
+        key = doc_id or path
+        if key in seen:
+            # Still record duplicate reads for coverage, but rank uses first-seen.
+            out.append({"path": path, "doc_id": doc_id, "duplicate": True})
+            continue
+        seen.add(key)
+        out.append({"path": path, "doc_id": doc_id, "duplicate": False})
+    return out
+
+
+def read_doc_ids_from_events(events: list[dict[str, Any]]) -> list[str]:
+    """Unique first-seen doc ids from read_file targets (RET-14)."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    for row in read_targets_from_events(events):
+        doc_id = str(row.get("doc_id") or "")
+        if not doc_id or doc_id in seen:
+            continue
+        seen.add(doc_id)
+        ids.append(doc_id)
+    return ids
+
+
+def gold_read_case_stats(
+    *,
+    ranked_doc_ids: list[str],
+    read_doc_ids: list[str],
+    gold_doc_ids: set[str] | list[str],
+) -> dict[str, Any]:
+    """Per-query gold ∩ ranked ∩ read intersections (RET-14 · eval offline/L2)."""
+    gold = {str(g) for g in gold_doc_ids if g}
+    ranked = [str(d) for d in ranked_doc_ids if d]
+    read = [str(d) for d in read_doc_ids if d]
+    ranked_set = set(ranked)
+    read_set = set(read)
+    gold_on_ranked = sorted(gold & ranked_set)
+    gold_read = sorted(gold & read_set)
+    gold_on_ranked_but_unread = sorted(set(gold_on_ranked) - read_set)
+    read_ranks: list[int] = []
+    for doc_id in read:
+        if doc_id in ranked_set:
+            read_ranks.append(ranked.index(doc_id) + 1)
+    return {
+        "n_gold": len(gold),
+        "n_ranked": len(ranked),
+        "n_read_docs": len(read_set),
+        "gold_on_ranked": gold_on_ranked,
+        "gold_read": gold_read,
+        "gold_on_ranked_but_unread": gold_on_ranked_but_unread,
+        "read_any_gold": bool(gold_read),
+        "gold_on_ranked_n": len(gold_on_ranked),
+        "gold_read_n": len(gold_read),
+        "gold_on_ranked_but_unread_n": len(gold_on_ranked_but_unread),
+        "read_target_ranks": read_ranks,
+        # weak_hits split: present on ranked but never read vs absent from ranked
+        "failure_slice": (
+            "no_gold"
+            if not gold
+            else (
+                "gold_absent_from_ranked"
+                if not gold_on_ranked
+                else (
+                    "gold_on_ranked_but_unread"
+                    if gold_on_ranked_but_unread and not gold_read
+                    else (
+                        "gold_read"
+                        if gold_read
+                        else "gold_on_ranked_partial"
+                    )
+                )
+            )
+        ),
+    }
+
+
 def search_queries_from_events(events: list[dict[str, Any]]) -> list[str]:
     """Ordered queries passed to search_sources / search_codebase."""
     out: list[str] = []

@@ -216,3 +216,217 @@ def test_paired_case_delta_ci_includes_zero() -> None:
     report = paired_case_delta_report(base, latest, metric="ndcg_at_10")
     assert report["ci_includes_zero"] is True
     assert report["verdict"] == "no_stable_delta"
+
+
+def test_eval4_paired_highlights() -> None:
+    from official_bench.baseline import paired_case_delta_report
+
+    base = {f"beir.fiqa.q-{i}": {"ndcg_at_10": 0.2} for i in range(10)}
+    latest = {
+        f"beir.fiqa.q-{i}": {"ndcg_at_10": 0.5 if i < 3 else (0.05 if i >= 8 else 0.2)}
+        for i in range(10)
+    }
+    report = paired_case_delta_report(
+        base, latest, metric="ndcg_at_10", top_k_highlights=3
+    )
+    assert len(report["improvements"]) == 3
+    assert len(report["regressions"]) == 2
+    assert report["improvements"][0]["delta"] > 0
+    assert report["regressions"][0]["delta"] < 0
+
+
+def test_eval4_trajectory_enrichment_and_eval5_noise(tmp_path, monkeypatch) -> None:
+    from official_bench import baseline as bl
+
+    monkeypatch.setattr(bl, "reports_dir", lambda: tmp_path)
+    man_a = {
+        "id": "run-a",
+        "official_suite": "retrieval",
+        "status": "completed",
+        "finished_at": "2026-08-04T00:00:00+00:00",
+        "model_meta": {
+            "protocol_version": "official-small-2026-08-m3",
+            "eval_path": "agent",
+            "arm": "free",
+            "sample_tier": "smoke",
+        },
+        "metrics": {"agent.ndcg_at_10": 0.4, "agent.n_queries": 5.0},
+        "cases": [
+            {
+                "case_id": f"beir.fiqa.q-{i}",
+                "status": "pass",
+                "metrics": {"ndcg_at_10": 0.2},
+                "bucket": "ok",
+                "tools": ["search_sources"],
+                "queries": [f"q{i}"],
+                "top_hits": [{"doc_id": f"d{i}", "score": 1.0}],
+            }
+            for i in range(8)
+        ],
+    }
+    man_b = {
+        "id": "run-b",
+        "official_suite": "retrieval",
+        "status": "completed",
+        "finished_at": "2026-08-04T01:00:00+00:00",
+        "model_meta": {
+            "protocol_version": "official-small-2026-08-m3",
+            "eval_path": "agent",
+            "arm": "free",
+            "sample_tier": "smoke",
+        },
+        "metrics": {"agent.ndcg_at_10": 0.5, "agent.n_queries": 8.0},
+        "cases": [
+            {
+                "case_id": f"beir.fiqa.q-{i}",
+                "status": "pass",
+                "metrics": {"ndcg_at_10": 0.4 if i < 6 else 0.1},
+                "bucket": "weak_hits" if i >= 6 else "ok",
+                "tools": ["search_sources", "read_file"],
+                "queries": [f"q{i}"],
+                "top_hits": [{"doc_id": f"d{i}", "score": 1.2}],
+            }
+            for i in range(8)
+        ],
+    }
+    report = bl.compare_two_manifests(man_a, man_b)
+    assert report["n_paired"] == 8
+    assert report["verdict"] in {"positive", "no_stable_delta"}
+    assert "trajectory_highlights" in report
+    assert report["improvements"]
+    assert report["improvements"][0]["a"]["tools"] == ["search_sources"]
+    assert "noise_band" in report
+    assert (tmp_path / "noise_band" / "archive.json").is_file()
+    # Second compare should dedup same a/b pair
+    report2 = bl.compare_two_manifests(man_a, man_b)
+    archive = json.loads((tmp_path / "noise_band" / "archive.json").read_text())
+    assert len(archive["pairs"]) == 1
+    assert report2["noise_band"]["n_archive_pairs"] == 1
+
+
+def test_gold_read_case_stats_and_aggregate() -> None:
+    from official_bench.agent_path_extract import (
+        gold_read_case_stats,
+        read_doc_ids_from_events,
+        read_targets_from_events,
+    )
+    from official_bench.l2_probes import gold_read_aggregate
+
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "read_file",
+                "arguments": {"path": "sources/beir/fiqa/111.txt"},
+            },
+        },
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "read_file",
+                "arguments": {"path": "sources/beir/fiqa/222.txt"},
+            },
+        },
+    ]
+    targets = read_targets_from_events(events)
+    assert [t["doc_id"] for t in targets] == ["111", "222"]
+    assert read_doc_ids_from_events(events) == ["111", "222"]
+
+    unread = gold_read_case_stats(
+        ranked_doc_ids=["111", "999", "222"],
+        read_doc_ids=["999"],
+        gold_doc_ids={"111", "222"},
+    )
+    assert unread["failure_slice"] == "gold_on_ranked_but_unread"
+    assert unread["gold_on_ranked_but_unread_n"] == 2
+    assert unread["read_any_gold"] is False
+
+    read_ok = gold_read_case_stats(
+        ranked_doc_ids=["111", "222"],
+        read_doc_ids=["111"],
+        gold_doc_ids={"111"},
+    )
+    assert read_ok["failure_slice"] == "gold_read"
+    assert read_ok["read_target_ranks"] == [1]
+
+    absent = gold_read_case_stats(
+        ranked_doc_ids=["aaa"],
+        read_doc_ids=["aaa"],
+        gold_doc_ids={"gold"},
+    )
+    assert absent["failure_slice"] == "gold_absent_from_ranked"
+
+    cases = [
+        {
+            "case_id": "beir.fiqa.q-1",
+            "read_any_gold": False,
+            "gold_read_failure_slice": "gold_on_ranked_but_unread",
+            "gold_on_ranked_n": 1,
+            "gold_on_ranked_but_unread_n": 1,
+            "read_target_ranks": [3],
+        },
+        {
+            "case_id": "beir.fiqa.q-2",
+            "read_any_gold": True,
+            "gold_read_failure_slice": "gold_read",
+            "gold_on_ranked_n": 1,
+            "gold_on_ranked_but_unread_n": 0,
+            "read_target_ranks": [1],
+        },
+    ]
+    agg = gold_read_aggregate(cases)
+    assert agg["n_scored"] == 2
+    assert agg["gold_read_rate"] == 0.5
+    assert agg["n_gold_on_ranked_but_unread"] == 1
+    assert agg["by_dataset"]["fiqa"]["n"] == 2
+
+
+def test_ret15_score_audit_never_triggers() -> None:
+    from official_bench.batch6_offline_analysis import ret15_score_audit
+
+    man = {
+        "cases": [
+            {
+                "case_id": f"beir.fiqa.q-{i}",
+                "top_hits": [{"doc_id": "d", "score": 1.2}],
+            }
+            for i in range(8)
+        ]
+    }
+    rep = ret15_score_audit(man, threshold=0.15)
+    assert rep["adjudication"] == "never_triggers"
+    assert rep["open_ret15_stage2_normalize"] is True
+    assert rep["top1_trigger_rate"] == 0.0
+
+
+def test_ctx10_classifies_scorer_alias() -> None:
+    from official_bench.batch6_offline_analysis import ctx10_wrong_answer
+
+    man = {
+        "cases": [
+            {
+                "case_id": "longbench.hotpotqa.1",
+                "bucket": "wrong_answer_after_read",
+                "pred": "Paris",
+                "metrics": {"em": 1.0, "f1": 0.0},
+                "read_coverage": 0.5,
+                "n_reads": 2,
+                "used_next_offset": True,
+                "turn_id": None,
+            },
+            {
+                "case_id": "longbench.narrativeqa.2",
+                "bucket": "wrong_answer_after_read",
+                "pred": "wrong",
+                "metrics": {"em": 0.0, "f1": 0.0},
+                "read_coverage": 0.02,
+                "n_reads": 1,
+                "used_next_offset": False,
+                "turn_id": None,
+            },
+        ]
+    }
+    rep = ctx10_wrong_answer(man)
+    assert rep["n_wrong_answer"] == 2
+    assert rep["class_counts"].get("iii_scorer_alias") == 1
+    assert rep["class_counts"].get("ii_localization_miss") == 1

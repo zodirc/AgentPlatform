@@ -72,6 +72,7 @@ Parallelize independent read-only tools in one step. Serialize only when a later
 
 - Lead with the outcome; keep progress chatter minimal.
 - **Answer format:** When the user specifies an answer format (short phrase, one word, yes/no, a number, etc.), the **final** reply must follow that format strictly — no explanations, restatements, or citations appended. Put explanatory content only when the user did **not** constrain the format.
+  - Examples (format only; not task content): user asks for a short phrase → **good:** `Paris` · **bad:** `The answer is Paris, because the passage states…`. User asks for one word → **good:** `yes` · **bad:** `Yes — based on the material, it appears so.`
 - One clear interpretation → act. Ask only when a critical constraint is missing (target, destructive scope, ambiguous success criteria).
 - Done = deliverable written + applicable verify passed + brief what-changed / what-remains.
 

@@ -1040,6 +1040,75 @@ def _search_hit_presentation_note(hits: list[dict[str, Any]]) -> str | None:
     )
 
 
+def _hit_raw_score(hit: dict[str, Any]) -> float:
+    raw = hit.get("score_raw")
+    if raw is None:
+        raw = hit.get("score")
+    try:
+        return float(raw or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _apply_score_rel_for_model(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """RET-15-2: expose 0–100 relative scores to the model; keep raw as score_raw.
+
+    IR ``retrieval.completed.ranked`` must read ``score_raw`` (see agent_engine).
+    Relative scale is top-1 = 100 within this result list (O(n), R3-safe).
+    """
+    if not settings.search_sources_score_rel or not hits:
+        return hits
+    top = 0.0
+    for hit in hits:
+        if isinstance(hit, dict):
+            top = max(top, _hit_raw_score(hit))
+    out: list[dict[str, Any]] = []
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        row = dict(hit)
+        raw = _hit_raw_score(row)
+        row["score_raw"] = round(raw, 4)
+        if top > 0:
+            row["score"] = int(round(100.0 * raw / top))
+        else:
+            row["score"] = 0
+        out.append(row)
+    return out
+
+
+def _maybe_low_score_hint(
+    hits: list[dict[str, Any]],
+    *,
+    presentation_note: str | None,
+) -> str | None:
+    """RET-15-2: low_score uses **raw** fusion score vs calibrated threshold."""
+    if not hits or not isinstance(hits[0], dict):
+        return presentation_note
+    top_raw = _hit_raw_score(hits[0])
+    if top_raw >= float(settings.search_sources_low_score_hint):
+        return presentation_note
+    top_path = str(hits[0].get("path") or "")
+    low = (
+        "Low relevance scores; prefer read_file on the top path "
+        f"({top_path}) instead of repeating search_sources."
+    )
+    if presentation_note:
+        return f"{low} {presentation_note}"
+    return low
+
+
+def _finalize_search_hits_for_model(
+    hits: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Apply RET-15-2 score_rel + low_score hint (raw threshold) + RET-12 note."""
+    note = _search_hit_presentation_note(hits)
+    # Hint against raw scores before rewriting score → relative.
+    hint = _maybe_low_score_hint(hits, presentation_note=note)
+    hits = _apply_score_rel_for_model(hits)
+    return hits, hint
+
+
 def _search_sources_keyword(
     sources: Path,
     *,
@@ -1256,6 +1325,7 @@ async def search_sources(
             hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
             hits = hits[:limit]
             hits = _tier_search_hits_for_model(hits)
+            hits, score_hint = _finalize_search_hits_for_model(hits)
             out = _attach_filter_meta(
                 {
                     "query": query,
@@ -1266,9 +1336,8 @@ async def search_sources(
                 },
                 filter_meta,
             )
-            note = _search_hit_presentation_note(hits)
-            if note:
-                out["hint"] = note if not out.get("hint") else f"{out['hint']}; {note}"
+            if score_hint:
+                out["hint"] = score_hint
             use_slot_capture = False
         else:
             # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
@@ -1325,12 +1394,14 @@ async def search_sources(
                     )
                     use_slot_capture = True
                 else:
-                    hits = _prefer_excerpt_covering_hits(
-                        _format_source_hits(
-                            filtered[:limit], excerpt_chars=excerpt_chars
-                        ),
-                        query,
+                    formatted = _format_source_hits(
+                        filtered[:limit], excerpt_chars=excerpt_chars
                     )
+                    # RET-7: promote is optional; default on for backward-compatible behavior.
+                    if settings.search_sources_excerpt_promote:
+                        hits = _prefer_excerpt_covering_hits(formatted, query)
+                    else:
+                        hits = formatted
                     excerpt_promote = bool(
                         hits
                         and isinstance(hits[0], dict)
@@ -1340,6 +1411,7 @@ async def search_sources(
                     # RET-12: tier after promote + cover check (cover needs excerpts).
                     hits = _tier_search_hits_for_model(hits)
                     if covers:
+                        hits, score_hint = _finalize_search_hits_for_model(hits)
                         resolved = {
                             "query": query,
                             "hits": hits,
@@ -1351,16 +1423,8 @@ async def search_sources(
                         if excerpt_promote:
                             resolved["excerpt_promote_reorder"] = True
                         _attach_filter_meta(resolved, filter_meta)
-                        note = _search_hit_presentation_note(hits)
-                        if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
-                            top_path = hits[0].get("path", "")
-                            low = (
-                                "Low relevance scores; prefer read_file on the top path "
-                                f"({top_path}) instead of repeating search_sources."
-                            )
-                            resolved["hint"] = f"{low} {note}" if note else low
-                        elif note:
-                            resolved["hint"] = note
+                        if score_hint:
+                            resolved["hint"] = score_hint
                         use_slot_capture = True
                     elif hits:
                         index_meta["ann_missed_query_terms"] = True
@@ -1384,6 +1448,7 @@ async def search_sources(
                 hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
                 hits = hits[:limit]
                 hits = _tier_search_hits_for_model(hits)
+                hits, score_hint = _finalize_search_hits_for_model(hits)
                 resolved = _attach_filter_meta(
                     {
                         "query": query,
@@ -1396,9 +1461,9 @@ async def search_sources(
                     },
                     filter_meta,
                 )
-                note = _search_hit_presentation_note(hits)
-                if note:
-                    resolved["hint"] = f"{resolved.get('hint')}; {note}" if resolved.get("hint") else note
+                if score_hint:
+                    # Keep index_lag hint first; append presentation / low_score.
+                    resolved["hint"] = f"{resolved.get('hint')}; {score_hint}"
                 use_slot_capture = False
             out = resolved
     finally:

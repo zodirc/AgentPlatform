@@ -1000,7 +1000,10 @@ class AgentEngine:
                         if not isinstance(hit, dict):
                             continue
                         path = str(hit.get("path", ""))
-                        score = hit.get("score")
+                        # RET-15-2: prefer score_raw for IR ranked; model-facing score may be 0–100.
+                        score = hit.get("score_raw")
+                        if score is None:
+                            score = hit.get("score")
                         ranked_for_score.append(
                             {
                                 "path": path,

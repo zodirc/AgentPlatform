@@ -236,6 +236,19 @@ async def _emit(cb: ProgressCb | None, kind: str, **extra: Any) -> None:
         await cb({"kind": kind, **extra})
 
 
+async def _emit_fail(
+    cb: ProgressCb | None,
+    case_id: str,
+    *,
+    error: str | None = None,
+) -> None:
+    """Surface case/suite failures on the Ops live log (UI has no other channel)."""
+    detail = str(error or "fail").strip() or "fail"
+    if len(detail) > 240:
+        detail = detail[:237] + "…"
+    await _emit(cb, "log", message=f"[L1] fail {case_id} error={detail}")
+
+
 async def _pull_with_live_logs(
     label: str,
     pull_fn: Any,
@@ -854,8 +867,10 @@ async def run_retrieval_l1(
         depth_audit_from_events,
         excerpt_promote_reorder_count,
         failure_class_from_events,
+        gold_read_case_stats,
         merge_retrieval_rankings,
         ranking_scores,
+        read_doc_ids_from_events,
         search_queries_from_events,
         step_count_from_events,
         terminal_state_from_events,
@@ -869,6 +884,7 @@ async def run_retrieval_l1(
         bucket_counts,
         classify_bucket,
         depth_audit_aggregate,
+        gold_read_aggregate,
         is_infra_channel_failure,
         query_drift,
         weak_hits_snapshots,
@@ -1030,6 +1046,14 @@ async def run_retrieval_l1(
                         top_hits = top_ranked_hits_from_events(events, limit=10)
                         promote_n = excerpt_promote_reorder_count(events)
                         depth = depth_audit_from_events(events)
+                        # RET-14: gold ∩ read ∩ ranked (eval-side only; qrels never enter runtime).
+                        read_ids = read_doc_ids_from_events(events)
+                        gold_ids = set((qrels.get(qid) or {}).keys())
+                        gold_stats = gold_read_case_stats(
+                            ranked_doc_ids=doc_ids,
+                            read_doc_ids=read_ids,
+                            gold_doc_ids=gold_ids,
+                        )
                         drift = (
                             query_drift(qtext, queries[0])
                             if queries
@@ -1064,6 +1088,16 @@ async def run_retrieval_l1(
                             "lane_top_k": depth.get("lane_top_k"),
                             "two_level_doc_n": depth.get("two_level_doc_n"),
                             "over_fetch_multiplier": depth.get("over_fetch_multiplier"),
+                            # RET-14
+                            "read_doc_ids": read_ids,
+                            "gold_read_n": gold_stats.get("gold_read_n"),
+                            "gold_on_ranked_n": gold_stats.get("gold_on_ranked_n"),
+                            "gold_on_ranked_but_unread_n": gold_stats.get(
+                                "gold_on_ranked_but_unread_n"
+                            ),
+                            "read_any_gold": gold_stats.get("read_any_gold"),
+                            "gold_read_failure_slice": gold_stats.get("failure_slice"),
+                            "read_target_ranks": gold_stats.get("read_target_ranks"),
                         }
                         fail_msg = turn_failure_message_from_events(events)
                         fail_class = failure_class_from_events(events)
@@ -1124,12 +1158,21 @@ async def run_retrieval_l1(
                         if infra:
                             l2["failure_class"] = INFRA_CHANNEL_BUCKET
                         status = "fail"
+                    case_id = f"beir.{name}.q-{qid}"
+                    fail_detail: str | None = None
+                    if status == "fail":
+                        fail_detail = str(
+                            err
+                            or l2.get("failure_message")
+                            or l2.get("bucket")
+                            or "no_hits"
+                        )
                     async with case_lock:
                         runs[qid] = scores
                         if l2.get("bucket") == INFRA_CHANNEL_BUCKET:
                             infra_qids.add(qid)
                         session.add_case(
-                            f"beir.{name}.q-{qid}",
+                            case_id,
                             status=status,
                             error=err,
                             metrics=case_metrics_row,
@@ -1165,6 +1208,18 @@ async def run_retrieval_l1(
                                 "over_fetch_multiplier": l2.get(
                                     "over_fetch_multiplier"
                                 ),
+                                # RET-14
+                                "read_doc_ids": l2.get("read_doc_ids"),
+                                "gold_read_n": l2.get("gold_read_n"),
+                                "gold_on_ranked_n": l2.get("gold_on_ranked_n"),
+                                "gold_on_ranked_but_unread_n": l2.get(
+                                    "gold_on_ranked_but_unread_n"
+                                ),
+                                "read_any_gold": l2.get("read_any_gold"),
+                                "gold_read_failure_slice": l2.get(
+                                    "gold_read_failure_slice"
+                                ),
+                                "read_target_ranks": l2.get("read_target_ranks"),
                             },
                         )
                         done_count += 1
@@ -1178,6 +1233,8 @@ async def run_retrieval_l1(
                                 "log",
                                 message=f"[L1] {name} queries {done_count}/{n_q}",
                             )
+                    if fail_detail is not None:
+                        await _emit_fail(on_progress, case_id, error=fail_detail)
 
             await asyncio.gather(
                 *[_one_query(i, qid, qtext) for i, (qid, qtext) in enumerate(q_items, start=1)]
@@ -1254,11 +1311,14 @@ async def run_retrieval_l1(
         )
         # RET-6: merge-list depth audit (FiQA R@10≈R@100 attribution).
         depth_audit = depth_audit_aggregate(query_cases)
+        # RET-14: gold-read outcome rollup (eval-side; qrels never enter runtime prompts).
+        gold_read = gold_read_aggregate(query_cases)
         session.extra["bucket_counts"] = counts
         session.extra["suite_ndcg_median"] = suite_median
         session.extra["weak_hits_cases"] = low_score
         session.extra["excerpt_promote_reorder_total"] = promote_total
         session.extra["depth_audit"] = depth_audit
+        session.extra["gold_read"] = gold_read
         session.log(
             "bucket_histogram",
             json.dumps(
@@ -1272,6 +1332,10 @@ async def run_retrieval_l1(
                     "depth_audit_fiqa": (depth_audit or {}).get("fiqa_adjudication"),
                     "depth_audit_fiqa_lane": (depth_audit or {}).get(
                         "fiqa_lane_adjudication"
+                    ),
+                    "gold_read_rate": (gold_read or {}).get("gold_read_rate"),
+                    "gold_on_ranked_but_unread_n": (gold_read or {}).get(
+                        "n_gold_on_ranked_but_unread"
                     ),
                 },
                 ensure_ascii=False,
@@ -1295,6 +1359,7 @@ async def run_retrieval_l1(
             "weak_hits_cases": low_score,
             "excerpt_promote_reorder_total": promote_total,
             "depth_audit": depth_audit,
+            "gold_read": gold_read,
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         manifest = session.finish(status="completed", metrics=session.metrics, result=result)
@@ -1309,6 +1374,7 @@ async def run_retrieval_l1(
         return manifest
     except Exception as exc:  # noqa: BLE001
         logger.exception("L1 retrieval failed")
+        await _emit_fail(on_progress, "suite=retrieval", error=str(exc))
         session.finish(status="failed", error=str(exc))
         raise
 
@@ -1505,11 +1571,30 @@ async def run_context_l1(
                     }
                     if not infra:
                         l2.pop("failure_class", None)
+                case_id = f"longbench.{task}.{idx}"
+                fail_detail: str | None = None
+                if status == "fail":
+                    fail_detail = str(
+                        err
+                        or l2.get("failure_message")
+                        or l2.get("bucket")
+                        or "fail"
+                    )
+                elif l2.get("failure_message") or str(l2.get("terminal_state") or "") in {
+                    "failed",
+                    "turn.failed",
+                }:
+                    # Turn died but case still scored — keep a visible Ops line.
+                    fail_detail = str(
+                        l2.get("failure_message")
+                        or l2.get("terminal_state")
+                        or "turn_failed"
+                    )
                 score_eligible = l2.get("bucket") != INFRA_CHANNEL_BUCKET
                 async with case_lock:
                     per_task.setdefault(task, []).append((scores, score_eligible))
                     session.add_case(
-                        f"longbench.{task}.{idx}",
+                        case_id,
                         status=status,
                         error=err,
                         metrics=scores,
@@ -1551,6 +1636,8 @@ async def run_context_l1(
                             "log",
                             message=f"[L1] context {done_count}/{len(rows)}",
                         )
+                if fail_detail is not None:
+                    await _emit_fail(on_progress, case_id, error=fail_detail)
 
         await asyncio.gather(*[_one_row(idx, row) for idx, row in enumerate(rows)])
 
@@ -1638,6 +1725,7 @@ async def run_context_l1(
         return manifest
     except Exception as exc:  # noqa: BLE001
         logger.exception("L1 context failed")
+        await _emit_fail(on_progress, "suite=context", error=str(exc))
         session.finish(status="failed", error=str(exc))
         raise
 
@@ -1857,9 +1945,10 @@ async def run_coding_l1(
                     patch_sources[iid] = patch_source
                     if patch.strip():
                         nonempty += 1
+                    case_status = "pass" if patch.strip() else "fail"
                     session.add_case(
                         iid,
-                        status="pass" if patch.strip() else "fail",
+                        status=case_status,
                         error=err,
                         metrics={"nonempty": 1.0 if patch.strip() else 0.0},
                         extra={
@@ -1876,6 +1965,12 @@ async def run_coding_l1(
                         on_progress,
                         "log",
                         message=f"[L1] coding {done_count}/{len(ordered)} {iid}",
+                    )
+                if case_status == "fail" or err:
+                    await _emit_fail(
+                        on_progress,
+                        iid,
+                        error=str(err or l2.get("bucket") or "no_patch"),
                     )
 
         await asyncio.gather(*[_one_inst(inst) for inst in ordered])
@@ -1905,6 +2000,7 @@ async def run_coding_l1(
             except Exception as exc:  # noqa: BLE001
                 metrics["harness_error"] = str(exc)
                 metrics["note"] = f"harness failed: {exc}"
+                await _emit_fail(on_progress, "suite=coding.harness", error=str(exc))
         else:
             metrics["note"] = (
                 "patch_rate is auxiliary; set coding_harness=true for resolve@tier"
@@ -1933,6 +2029,7 @@ async def run_coding_l1(
         return manifest
     except Exception as exc:  # noqa: BLE001
         logger.exception("L1 coding failed")
+        await _emit_fail(on_progress, "suite=coding", error=str(exc))
         session.finish(status="failed", error=str(exc))
         raise
 

@@ -68,7 +68,13 @@ class Settings(BaseSettings):
     search_sources_excerpt_chars: int = 400
     # RET-12: top-N hits keep full excerpt; remainder path/title/score only (fit 4k tool_result).
     search_sources_detail_hits: int = 5
-    search_sources_low_score_hint: float = 0.15
+    # RET-15-2: calibrated on free smoke top1 distribution (p10≈1.06); old 0.15 never fired.
+    search_sources_low_score_hint: float = 1.0
+    # RET-15-2: model-facing scores are 0–100 relative to top-1; raw kept as score_raw for IR.
+    search_sources_score_rel: bool = True
+    # RET-7: excerpt-cover promote (silent reorder). Default off after free N≥2
+    # ablation showed no stable IR benefit (docs/topics/retrieval-free-l1-tuning-brief §12.9).
+    search_sources_excerpt_promote: bool = False
     # RE1: keyword fallback section alignment (docs/15); oversize / timeout → file excerpt only.
     search_sources_keyword_max_file_bytes: int = 262_144
     search_sources_keyword_parse_budget_ms: float = 50.0

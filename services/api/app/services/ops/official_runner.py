@@ -601,8 +601,8 @@ async def create_and_start(
         context_limit=max(0, int(context_limit or 0)),
         retrieval_query_limit=max(0, int(retrieval_query_limit or 0)),
         l1_max_parallel=max(1, min(8, int(l1_max_parallel or 2))),
-        retrieval_arm=(retrieval_arm or "free").strip().lower(),
-        context_arm=(context_arm or "free").strip().lower(),
+        retrieval_arm="free",
+        context_arm="free",
         coding_checkout_repo=bool(coding_checkout_repo),
         model=model,
         progress_total=len(cleaned),
@@ -1004,6 +1004,14 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
                 "progress_total": run.progress_total,
             },
         )
+        if status == "fail":
+            detail = str(err or "suite_failed").strip() or "suite_failed"
+            if len(detail) > 240:
+                detail = detail[:237] + "…"
+            await _publish(
+                run,
+                {"kind": "log", "message": f"[L1] fail suite={suite} error={detail}"},
+            )
         await _persist_snapshot(run)
 
     try:

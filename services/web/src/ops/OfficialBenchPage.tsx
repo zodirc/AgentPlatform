@@ -495,6 +495,8 @@ type OfficialRun = {
   }>;
 };
 
+type OfficialLogItem = NonNullable<OfficialRun["logs"]>[number];
+
 function isActiveStatus(status?: string): boolean {
   return status === "queued" || status === "running" || status === "cancelling";
 }
@@ -510,6 +512,75 @@ function formatTime(iso?: string | null): string {
   } catch {
     return iso;
   }
+}
+
+/** Heuristic: highlight error-looking Ops run log lines (no backend level field). */
+function isOpsErrorLogLine(text: string | null | undefined): boolean {
+  const s = String(text || "").trim();
+  if (!s) return false;
+  if (/^error\b/i.test(s)) return true;
+  if (/^\[L1\]\s+fail\b/i.test(s)) return true;
+  if (/\bphase=error\b/i.test(s)) return true;
+  if (/\berror[=:]/i.test(s)) return true;
+  if (/\bcheckout failed\b/i.test(s)) return true;
+  if (/\b(tool|turn)\.failed\b/i.test(s)) return true;
+  if (/\btraceback\b/i.test(s)) return true;
+  if (/\bexception\b/i.test(s)) return true;
+  // Trailing / mid-line failure markers from ops / L1 emitters.
+  if (/\bfailed:\s/i.test(s)) return true;
+  if (/\bfailed\b/i.test(s) && /\b(error|exc|exception)\b/i.test(s)) return true;
+  return false;
+}
+
+/** Detail「日志」Tab: errors + milestones only (full stream stays in the live pane). */
+function isOpsKeyLogItem(item: OfficialLogItem): boolean {
+  const kind = String(item.kind || "").toLowerCase();
+  if (
+    kind === "phase" ||
+    kind === "run_started" ||
+    kind === "run_finished" ||
+    kind === "case_started" ||
+    kind === "case_finished"
+  ) {
+    return true;
+  }
+  if (String(item.status || "").toLowerCase() === "fail") return true;
+  const s = String(item.message || "").trim();
+  if (!s) return false;
+  if (isOpsErrorLogLine(s)) return true;
+  if (/^\[ops\]/i.test(s)) return true;
+  if (/^stop requested/i.test(s)) return true;
+  // L1 milestones (not every tool/step/heartbeat line).
+  if (/^\[L1\]\s+suite start\b/i.test(s)) return true;
+  if (/^\[L1\]\s+turn start\b/i.test(s)) return true;
+  if (/^\[L1\]\s+turn done\b/i.test(s)) return true;
+  if (/^\[L1\]\s+fail\b/i.test(s)) return true;
+  if (/^\[L1\]\s+pull\b/i.test(s)) return true;
+  if (/^\[L1\]\s+checkout\b/i.test(s)) return true;
+  if (/\bplan\s+n=/i.test(s)) return true;
+  if (/^\[L1\]\s+(retrieval|context|coding)\s+done\b/i.test(s)) return true;
+  if (/^\[L1\]\s+coding infer done\b/i.test(s)) return true;
+  if (/^\[L1\]\s+context done\b/i.test(s)) return true;
+  if (/^\[L1\]\s+retrieval done\b/i.test(s)) return true;
+  if (/harness/i.test(s) && /\b(fail|error|resolve)\b/i.test(s)) return true;
+  return false;
+}
+
+function liveLogLineClass(line: string): string | undefined {
+  if (isOpsErrorLogLine(line)) return "font-semibold text-destructive";
+  if (
+    line.includes("[phase]") ||
+    line.startsWith("[pull]") ||
+    line.startsWith("[progress] pull") ||
+    line.startsWith("[L1] pull") ||
+    line.startsWith("[L1] turn ")
+  ) {
+    return "font-semibold text-foreground";
+  }
+  if (line.startsWith("[L1] ·") || line.startsWith("[L1] …")) {
+    return "text-muted-foreground";
+  }
+  return undefined;
 }
 
 /** Human duration: 12s · 3m 05s · 1h 02m */
@@ -1704,8 +1775,6 @@ export function OfficialBenchPage() {
   const [codingNInstances, setCodingNInstances] = useState(5);
   const [codingHarness, setCodingHarness] = useState(false);
   const [codingCheckoutRepo, setCodingCheckoutRepo] = useState(true);
-  const [retrievalArm, setRetrievalArm] = useState<"free" | "forced">("free");
-  const [contextArm, setContextArm] = useState<"free" | "oracle">("free");
   const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
     { id: "n3", n_instances: 3 },
     { id: "n5", n_instances: 5 },
@@ -1750,6 +1819,8 @@ export function OfficialBenchPage() {
   const [historySelectMode, setHistorySelectMode] = useState(false);
   const [checkedRunIds, setCheckedRunIds] = useState<Set<string>>(() => new Set());
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
+  /** Structured SSE/history lines for the detail 「日志」 tab (live pane uses strings). */
+  const [liveLogItems, setLiveLogItems] = useState<OfficialLogItem[]>([]);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [phaseHint, setPhaseHint] = useState(
     "全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标",
@@ -1865,12 +1936,7 @@ export function OfficialBenchPage() {
         if (saved.l1_max_parallel != null && Number.isFinite(saved.l1_max_parallel)) {
           setL1Parallel(Number(saved.l1_max_parallel));
         }
-        if (saved.retrieval_arm === "free" || saved.retrieval_arm === "forced") {
-          setRetrievalArm(saved.retrieval_arm);
-        }
-        if (saved.context_arm === "free" || saved.context_arm === "oracle") {
-          setContextArm(saved.context_arm);
-        }
+        // Arms are free-only on Ops acceptance path; ignore legacy forced/oracle prefs.
         if (typeof saved.active_profile_id === "string" && saved.active_profile_id) {
           setActiveProfileId(saved.active_profile_id);
         } else if (Array.isArray(saved.suites) && saved.suites.length) {
@@ -1944,8 +2010,8 @@ export function OfficialBenchPage() {
           context_tier: contextTier,
           retrieval_tier: retrievalTier,
           l1_max_parallel: l1Parallel,
-          retrieval_arm: retrievalArm,
-          context_arm: contextArm,
+          retrieval_arm: "free",
+          context_arm: "free",
           active_profile_id: activeProfileId,
         }),
       );
@@ -1968,8 +2034,6 @@ export function OfficialBenchPage() {
     contextTier,
     retrievalTier,
     l1Parallel,
-    retrievalArm,
-    contextArm,
     activeProfileId,
   ]);
 
@@ -2168,6 +2232,7 @@ export function OfficialBenchPage() {
     }
     // Always replace — empty finished runs must not keep another run's live buffer.
     setLiveLogs(lines.slice(-800));
+    setLiveLogItems((run.logs || []).slice(-2000));
   }, []);
 
   const targetEnabled = useCallback(
@@ -2366,6 +2431,7 @@ export function OfficialBenchPage() {
       setError(null);
       if (opts?.resetLogs) {
         setLiveLogs([]);
+        setLiveLogItems([]);
         setSuiteDetails({});
       }
       const es = new EventSourcePolyfill(
@@ -2379,8 +2445,19 @@ export function OfficialBenchPage() {
         try {
           const data = JSON.parse(ev.data) as Record<string, unknown>;
           const kind = String(data.kind || "");
+          const at = data.at != null ? String(data.at) : new Date().toISOString();
+          const pushLogItem = (item: OfficialLogItem) => {
+            setLiveLogItems((prev) => [...prev.slice(-1999), item]);
+          };
           if (kind === "phase") {
-            setPhaseHint(cleanPhase(String(data.message || data.phase || "")));
+            const phaseMsg = String(data.message || data.phase || "");
+            setPhaseHint(cleanPhase(phaseMsg));
+            pushLogItem({
+              at,
+              kind: "phase",
+              message: phaseMsg,
+              phase: data.phase != null ? String(data.phase) : undefined,
+            });
           } else if (kind === "log") {
             const msg = String(data.message || "");
             const parsed = parseProgressLine(msg);
@@ -2411,15 +2488,32 @@ export function OfficialBenchPage() {
             // Keep pull progress % visible in the log pane (eval [progress] stays out).
             if (!msg.startsWith("[progress]") || msg.startsWith("[progress] pull")) {
               setLiveLogs((prev) => [...prev.slice(-800), msg]);
+              pushLogItem({ at, kind: "log", message: msg });
             }
           } else if (kind === "case_started") {
             setLiveLogs((prev) => [...prev, `→ ${data.case_id}`]);
+            pushLogItem({
+              at,
+              kind: "case_started",
+              message: data.case_id != null ? `→ ${data.case_id}` : "case_started",
+              case_id: data.case_id != null ? String(data.case_id) : undefined,
+            });
             void loadList();
           } else if (kind === "case_finished") {
             setLiveLogs((prev) => [
               ...prev,
               `${data.status === "pass" ? "✓" : data.status === "skipped" ? "○" : "✗"} ${data.case_id}`,
             ]);
+            pushLogItem({
+              at,
+              kind: "case_finished",
+              message:
+                data.case_id != null
+                  ? `${data.status === "pass" ? "✓" : data.status === "skipped" ? "○" : "✗"} ${data.case_id}`
+                  : "case_finished",
+              case_id: data.case_id != null ? String(data.case_id) : undefined,
+              status: data.status != null ? String(data.status) : undefined,
+            });
             setProgress((prev) => ({
               done: Number(
                 data.progress_done != null ? data.progress_done : prev.done,
@@ -2473,7 +2567,19 @@ export function OfficialBenchPage() {
             void loadDetail();
             void loadList();
           } else if (kind === "run_started") {
+            pushLogItem({
+              at,
+              kind: "run_started",
+              message: "run_started",
+            });
             void loadList();
+          } else if (kind === "run_finished") {
+            pushLogItem({
+              at,
+              kind: "run_finished",
+              message: `run_finished status=${String(data.status || "")}`,
+              status: data.status != null ? String(data.status) : undefined,
+            });
           }
           if (kind === "run_finished") {
             es.close();
@@ -2572,6 +2678,7 @@ export function OfficialBenchPage() {
     }
     // Clear the shared pane until the selected run's own snapshot/SSE fills it.
     setLiveLogs([]);
+    setLiveLogItems([]);
     setSuiteDetails({});
   }, [selectedId]);
 
@@ -2626,12 +2733,6 @@ export function OfficialBenchPage() {
     if (p.coding_n_instances != null) setCodingNInstances(p.coding_n_instances);
     setCodingHarness(Boolean(p.coding_harness));
     setCodingCheckoutRepo(p.coding_checkout_repo !== false);
-    if (p.retrieval_arm === "free" || p.retrieval_arm === "forced") {
-      setRetrievalArm(p.retrieval_arm);
-    }
-    if (p.context_arm === "free" || p.context_arm === "oracle") {
-      setContextArm(p.context_arm);
-    }
     setRetrievalProd(p.retrieval_prod !== false);
     if (p.context_tier) setContextTier(p.context_tier);
     if (p.retrieval_tier) setRetrievalTier(p.retrieval_tier);
@@ -2759,8 +2860,8 @@ export function OfficialBenchPage() {
           coding_checkout_repo: codingCheckoutRepo,
           retrieval_prod: prod,
           eval_path: "agent",
-          retrieval_arm: retrievalArm,
-          context_arm: contextArm,
+          retrieval_arm: "free",
+          context_arm: "free",
           context_limit: contextTier !== "full" ? Number(contextTier) : 0,
           retrieval_query_limit:
             retrievalTier !== "full" ? Number(retrievalTier) : 0,
@@ -3011,6 +3112,14 @@ export function OfficialBenchPage() {
     busy && detailPct != null
       ? Math.max(4, Math.round(suitePct * 0.35 + detailPct * 0.65))
       : suitePct || (busy ? 4 : 0);
+
+  // Live SSE feeds liveLogItems; detail.logs stays stale until suite/run finish refresh.
+  // Tab keeps errors + milestones only; the scrolling pane keeps the full stream.
+  const logTabItems = useMemo(() => {
+    const raw =
+      busy && liveLogItems.length > 0 ? liveLogItems : detail?.logs || [];
+    return raw.filter(isOpsKeyLogItem);
+  }, [busy, liveLogItems, detail?.logs]);
 
   const suitesRemaining =
     progress.total > 0 ? Math.max(0, progress.total - progress.done) : null;
@@ -3457,44 +3566,6 @@ export function OfficialBenchPage() {
                       <option value={4}>4</option>
                     </select>
                   </label>
-                  <label className="grid gap-1">
-                    <span className="text-[11px] text-muted-foreground">
-                      检索臂（m3）
-                    </span>
-                    <select
-                      value={retrievalArm}
-                      disabled={busy}
-                      onChange={(e) => {
-                        markCustomProfile();
-                        setRetrievalArm(
-                          e.target.value === "forced" ? "forced" : "free",
-                        );
-                      }}
-                      className="rounded border border-border bg-background px-1.5 py-1"
-                    >
-                      <option value="free">free（主栏）</option>
-                      <option value="forced">forced（L2 诊断）</option>
-                    </select>
-                  </label>
-                  <label className="grid gap-1">
-                    <span className="text-[11px] text-muted-foreground">
-                      上下文臂（m3）
-                    </span>
-                    <select
-                      value={contextArm}
-                      disabled={busy}
-                      onChange={(e) => {
-                        markCustomProfile();
-                        setContextArm(
-                          e.target.value === "oracle" ? "oracle" : "free",
-                        );
-                      }}
-                      className="rounded border border-border bg-background px-1.5 py-1"
-                    >
-                      <option value="free">free（主栏）</option>
-                      <option value="oracle">oracle（L2 retention）</option>
-                    </select>
-                  </label>
               {selectedSuites.has("coding") ? (
                 <>
                   <label className="grid gap-1">
@@ -3889,17 +3960,7 @@ export function OfficialBenchPage() {
                 liveLogs.map((line, i) => (
                   <div
                     key={`${i}-${line.slice(0, 24)}`}
-                    className={
-                      line.includes("[phase]") ||
-                      line.startsWith("[pull]") ||
-                      line.startsWith("[progress] pull") ||
-                      line.startsWith("[L1] pull") ||
-                      line.startsWith("[L1] turn ")
-                        ? "font-semibold text-foreground"
-                        : line.startsWith("[L1] ·") || line.startsWith("[L1] …")
-                          ? "text-muted-foreground"
-                          : undefined
-                    }
+                    className={liveLogLineClass(line)}
                   >
                     <OfficialLogLine line={line} secret={secret} />
                   </div>
@@ -4240,17 +4301,44 @@ export function OfficialBenchPage() {
 
               {tab === "log" ? (
                 <ol className="max-h-[28rem] space-y-2 overflow-y-auto text-xs">
-                  {(detail.logs || []).map((item, i) => (
-                    <li key={`${item.at}-${i}`} className="border-b border-border/50 pb-2">
-                      <span className="text-muted-foreground">{formatTime(item.at)}</span>{" "}
-                      <span className="rounded-full border border-border px-1.5 text-[10px] uppercase">
-                        {item.kind || "log"}
-                      </span>
-                      <div className="mt-0.5 whitespace-pre-wrap font-mono text-[11px]">
-                        {item.message}
-                      </div>
-                    </li>
-                  ))}
+                  <li className="pb-1 text-[11px] text-muted-foreground">
+                    仅 error 与关键步骤（suite / turn / phase / case）；全量见上方滚动栏
+                  </li>
+                  {logTabItems.length === 0 ? (
+                    <li className="text-muted-foreground">暂无关键日志</li>
+                  ) : null}
+                  {logTabItems.map((item, i) => {
+                    const text = String(item.message || "");
+                    const err =
+                      isOpsErrorLogLine(text) ||
+                      String(item.status || "").toLowerCase() === "fail";
+                    return (
+                      <li
+                        key={`${item.at}-${item.kind}-${i}`}
+                        className={`border-b border-border/50 pb-2 ${
+                          err ? "border-destructive/30" : ""
+                        }`}
+                      >
+                        <span className="text-muted-foreground">{formatTime(item.at)}</span>{" "}
+                        <span
+                          className={`rounded-full border px-1.5 text-[10px] uppercase ${
+                            err
+                              ? "border-destructive/50 text-destructive"
+                              : "border-border text-muted-foreground"
+                          }`}
+                        >
+                          {err ? "error" : item.kind === "log" ? "step" : item.kind || "step"}
+                        </span>
+                        <div
+                          className={`mt-0.5 whitespace-pre-wrap font-mono text-[11px] ${
+                            err ? "font-medium text-destructive" : ""
+                          }`}
+                        >
+                          {text || (item.kind ? `(${item.kind})` : "")}
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ol>
               ) : null}
             </div>
