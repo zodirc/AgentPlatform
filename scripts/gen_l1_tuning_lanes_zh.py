@@ -19,9 +19,23 @@ from PIL import Image, ImageDraw, ImageFont
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "topics"
 
-FONT_REG = "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"
-FONT_MED = "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Medium.ttc"
-FONT_BOLD = "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Bold.ttc"
+def _pick_cjk_font() -> str:
+    candidates = [
+        ROOT / ".cache" / "fonts" / "wqy-zenhei.ttc",
+        ROOT / ".cache" / "fonts" / "NotoSansCJK-Regular.ttc",
+        Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+        Path("/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    ]
+    for p in candidates:
+        if p.is_file():
+            return str(p)
+    return "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
+
+FONT_REG = _pick_cjk_font()
+FONT_MED = FONT_REG
+FONT_BOLD = FONT_REG
 
 BG = (253, 253, 253)
 INK = (20, 24, 32)
@@ -255,6 +269,16 @@ def fig_retrieval() -> Path:
         "并行 · Index 面（Turn 外）",
         "切块、嵌入、目录监视与同步在交互外完成。用户提问热路径只读已有投影，不同步建库。",
     )
+    right_y += 10
+    right_y = draw_note(
+        draw,
+        nx,
+        right_y,
+        nw,
+        "§14 / RET-4（2026-08-05）：离线 L0 已锁定 thenlper/gte-small@384（vs MiniLM macro +9.05pp）。"
+        "代码 INDEX_VERSION=9 + CUDA 自动探测已合入，但生产仍 MiniLM，须换 EMBEDDING_MODEL 后"
+        "全库重嵌才切查询；无 GPU 机可走 CPU torch（更慢）。未重嵌前禁止只改查询模型。",
+    )
     right_y += 18
 
     def place_step(title, body, *, kind="step", ours=False, note_body: str | None = None):
@@ -333,7 +357,7 @@ def fig_retrieval() -> Path:
         ours=True,
         note_body=(
             "弱命中时原地改几个字再搜通常无效；换互补词面扩大召回，且不加额外改写模型。"
-            "工程可行，已进入现行文案；效果仍建议再跑一轮确认，并盯防漂移。"
+            "RET-9 N≥2 后丢刀已回滚该互补文案（§13.8）；本框描述的是历史尝试位，现行默认不再依赖第二搜互补词面提分。"
         ),
     )
 
@@ -475,12 +499,14 @@ def fig_context() -> Path:
     title8 = "8. 贯穿全程的读法 / 答题约定（system）"
     body8 = (
         "用户要短答则终答严格短答；长文未找到前优先续读；超长可先 grep 再定向读；"
-        "附最小好/坏短答示例抑制套话。"
+        "附最小好/坏短答示例抑制套话；"
+        "长材料：先摘 1–3 句支撑引文再答（CTX-8），终答优先沿用原文词面。"
     )
     note8 = (
         "预算解决「看得见」，约定解决「怎么读/怎么答」。"
-        "短答与示例能压冗长，可行有效；但更短≠更准，精确匹配未同步上升——"
-        "故作为格式纪律保留，不当准确率银弹。续读与定位纪律保留。"
+        "CTX-8（2026-08-05）文案已进 agent/system.md：Evidence-before-answer + prefer passage wording；"
+        "打 wrong_answer / 多跳证据丢失。free N≥2 仍为停机线第二票（勿与 RET-4 同批观测）。"
+        "短答与示例压冗长，但更短≠更准——格式纪律保留，不当准确率银弹。"
     )
     h = step_h(draw, bw, title8, body8, ours=True)
     nh = note_h(draw, nw, note8)

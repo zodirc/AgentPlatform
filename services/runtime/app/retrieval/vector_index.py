@@ -13,7 +13,7 @@ from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
 from app.settings import settings
 
-INDEX_VERSION = 8  # Stable HashEmbedder buckets require rebuilding persisted vectors.
+INDEX_VERSION = 9  # RET-4: thenlper/gte-small@384 shadow (was MiniLM @8)
 
 try:
     import numpy as np

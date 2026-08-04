@@ -73,12 +73,14 @@ class SentenceTransformerEmbedder:
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
         cache = model_dir or None
+        device = self._resolve_device()
         # Prefer local cache so startup cannot hang on HuggingFace hub I/O.
         try:
             self._model = SentenceTransformer(
                 model_name,
                 cache_folder=cache,
                 local_files_only=True,
+                device=device,
             )
         except Exception:
             logger.warning(
@@ -86,7 +88,26 @@ class SentenceTransformerEmbedder:
                 model_name,
                 exc_info=True,
             )
-            self._model = SentenceTransformer(model_name, cache_folder=cache)
+            self._model = SentenceTransformer(
+                model_name, cache_folder=cache, device=device
+            )
+
+    @staticmethod
+    def _resolve_device() -> str:
+        """Use CUDA when a usable GPU torch build is present (e.g. RTX 5080)."""
+        forced = (getattr(settings, "embedding_device", None) or "").strip().lower()
+        if forced in {"cpu", "cuda"}:
+            return forced
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                name = torch.cuda.get_device_name(0)
+                logger.info("embedder device=cuda gpu=%s", name)
+                return "cuda"
+        except Exception:
+            logger.debug("embedder CUDA probe failed", exc_info=True)
+        return "cpu"
 
     def embed(self, text: str) -> list[float]:
         vectors = self.embed_many([text])
