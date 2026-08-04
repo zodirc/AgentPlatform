@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 _DOC_ID_RE = re.compile(r"([^/\\]+?)(?:\.[A-Za-z0-9]+)?$")
+_CHARS_READ_HINT_RE = re.compile(r"已读\s+(\d+)\s*/\s*共\s+(\d+)\s*字符")
+_LINES_SUMMARY_RE = re.compile(
+    r"Read\s+.+\s+lines\s+(\d+)[–-](\d+)/(\d+)",
+    re.IGNORECASE,
+)
 
 
 def doc_id_from_path(path: str) -> str:
@@ -345,18 +350,89 @@ def depth_audit_from_events(
     *,
     default_limit: int | None = 30,
 ) -> dict[str, Any]:
-    """RET-6 per-query depth fields for FiQA / merge-list attribution."""
+    """RET-6/RET-10 per-query depth fields for FiQA / merge-list / lane attribution."""
     limits = search_limits_from_events(events, default_limit=default_limit)
     ranked_lengths = ranked_lengths_from_events(events)
     merged = merge_retrieval_rankings(events)
-    return {
+    lane_rows = lane_depth_from_events(events)
+    # Aggregate lane depths across searches in the turn (max per field — pool capacity).
+    vector_ns = [int(r.get("vector_n") or 0) for r in lane_rows]
+    bm25_ns = [int(r.get("bm25_n") or 0) for r in lane_rows]
+    union_ns = [int(r.get("union_n") or 0) for r in lane_rows]
+    two_level_ns = [int(r.get("two_level_doc_n") or 0) for r in lane_rows]
+    top_ks = [
+        int(r["lane_top_k"])
+        for r in lane_rows
+        if isinstance(r.get("lane_top_k"), (int, float))
+    ]
+    over_fetchs = [
+        float(r["over_fetch_multiplier"])
+        for r in lane_rows
+        if isinstance(r.get("over_fetch_multiplier"), (int, float))
+    ]
+    out: dict[str, Any] = {
         "search_limits": limits,
         "ranked_lengths": ranked_lengths,
         "n_search_depth": len(limits),
         "merged_len": len(merged),
         "max_limit": max((L for L in limits if isinstance(L, int)), default=None),
         "min_limit": min((L for L in limits if isinstance(L, int)), default=None),
+        # RET-10
+        "lane_vector_n": max(vector_ns) if vector_ns else None,
+        "lane_bm25_n": max(bm25_ns) if bm25_ns else None,
+        "lane_union_n": max(union_ns) if union_ns else None,
+        "two_level_doc_n": max(two_level_ns) if two_level_ns else None,
+        "lane_top_k": max(top_ks) if top_ks else None,
+        "over_fetch_multiplier": max(over_fetchs) if over_fetchs else None,
+        "lane_depth_searches": lane_rows,
     }
+    return out
+
+
+def lane_depth_from_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per ``retrieval.completed`` audit.lane_depth rows (RET-10)."""
+    out: list[dict[str, Any]] = []
+    for ev in events:
+        if str(ev.get("type") or "") != "retrieval.completed":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        audit = payload.get("audit")
+        if not isinstance(audit, dict):
+            continue
+        lane = audit.get("lane_depth")
+        if isinstance(lane, dict) and lane:
+            out.append(dict(lane))
+    return out
+
+
+def turn_failure_message_from_events(events: list[dict[str, Any]]) -> str:
+    """Best-effort message from the latest ``turn.failed`` payload."""
+    for ev in reversed(events):
+        if str(ev.get("type") or "") != "turn.failed":
+            continue
+        payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
+        return str(
+            (payload or {}).get("message")
+            or (payload or {}).get("reason")
+            or (payload or {}).get("error")
+            or ""
+        )
+    return ""
+
+
+def failure_class_from_events(events: list[dict[str, Any]]) -> str | None:
+    """``infra_channel`` when turn failed on provider/channel instability; else None."""
+    from official_bench.l2_probes import (
+        INFRA_CHANNEL_BUCKET,
+        is_infra_channel_failure,
+    )
+
+    msg = turn_failure_message_from_events(events)
+    if is_infra_channel_failure(msg):
+        return INFRA_CHANNEL_BUCKET
+    return None
 
 
 def terminal_state_from_events(events: list[dict[str, Any]]) -> str:
@@ -368,8 +444,18 @@ def terminal_state_from_events(events: list[dict[str, Any]]) -> str:
             return "cancelled"
         if et == "turn.failed":
             payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
-            reason = str((payload or {}).get("reason") or (payload or {}).get("error") or "")
+            reason = str(
+                (payload or {}).get("message")
+                or (payload or {}).get("reason")
+                or (payload or {}).get("error")
+                or ""
+            )
             low = reason.lower()
+            # Provider channel timeouts stay ``failed`` (infra), not step_timeout.
+            from official_bench.l2_probes import is_infra_channel_failure
+
+            if is_infra_channel_failure(reason):
+                return "failed"
             if "stall" in low:
                 return "stall"
             if "timeout" in low or "step_timeout" in low:
@@ -387,11 +473,19 @@ def step_count_from_events(events: list[dict[str, Any]]) -> int:
 
 
 def read_file_stats_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """n_reads / read_bytes / used_next_offset / truncation_hits from tool traffic."""
+    """n_reads / read_bytes / continue-reads / last offset / truncation (CTX-9).
+
+    ``tool.completed`` does **not** carry full ``content`` (bus size). Prefer
+    explicit ``chars_read`` / ``file_chars`` / ``next_offset`` on the payload
+    (runtime ≥ CTX-9 fix). Fall back to summary/hint parsing for older events.
+    """
     n_reads = 0
     read_bytes = 0
     used_next_offset = False
     truncation_hits = 0
+    continue_reads = 0
+    last_read_offset: int | None = None
+    file_chars_seen: int | None = None
     for ev in events:
         et = str(ev.get("type") or "")
         payload = ev.get("payload") or {}
@@ -401,33 +495,103 @@ def read_file_stats_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         if et == "tool.started" and tool == "read_file":
             n_reads += 1
             args = payload.get("arguments") or {}
-            if isinstance(args, dict) and (
-                args.get("offset") not in (None, 0, "0")
-                or args.get("next_offset") not in (None, 0, "0")
-            ):
-                used_next_offset = True
+            if isinstance(args, dict):
+                off = args.get("offset")
+                if off not in (None, 0, "0"):
+                    used_next_offset = True
+                    continue_reads += 1
+                    try:
+                        last_read_offset = int(off)
+                    except (TypeError, ValueError):
+                        pass
+                elif args.get("next_offset") not in (None, 0, "0"):
+                    used_next_offset = True
+                    continue_reads += 1
         if et == "tool.completed" and tool == "read_file":
-            result = payload.get("result") or payload.get("output") or payload.get("text")
+            # Primary: light coverage fields on the event (no full content).
+            chunk = _chars_read_from_tool_completed(payload)
+            read_bytes += chunk
+            fc = payload.get("file_chars")
+            if isinstance(fc, (int, float)) and int(fc) > 0:
+                file_chars_seen = max(file_chars_seen or 0, int(fc))
+            if payload.get("is_truncated") or payload.get("truncated"):
+                truncation_hits += 1
+            nxt = payload.get("next_offset")
+            if nxt not in (None, 0, "0", ""):
+                used_next_offset = True
+                try:
+                    last_read_offset = int(nxt)
+                except (TypeError, ValueError):
+                    pass
+            off = payload.get("offset")
+            if off not in (None, 0, "0", "") and last_read_offset is None:
+                try:
+                    last_read_offset = int(off)
+                except (TypeError, ValueError):
+                    pass
+            # Legacy: some emitters put a nested result dict (tests / older paths).
+            result = payload.get("result") or payload.get("output")
             if isinstance(result, dict):
                 text = str(result.get("content") or result.get("text") or "")
+                if text and chunk == 0:
+                    read_bytes += len(text)
                 if result.get("next_offset") not in (None, 0, "0"):
                     used_next_offset = True
-            else:
-                text = str(result or "")
-            read_bytes += len(text)
-            if "[budget_truncated]" in text or "budget_truncated" in text:
+                    try:
+                        last_read_offset = int(result["next_offset"])
+                    except (TypeError, ValueError):
+                        pass
+                if "[budget_truncated]" in text or "budget_truncated" in text:
+                    truncation_hits += 1
+            # Truncation markers in summary text
+            summary = str(payload.get("summary") or "")
+            if "truncated" in summary.lower() or "[budget_truncated]" in summary:
                 truncation_hits += 1
         # Also scan assistant/tool text blobs for truncation marker
         for key in ("text", "content", "output", "message"):
             val = payload.get(key)
             if isinstance(val, str) and "[budget_truncated]" in val:
                 truncation_hits += 1
-    return {
+    out: dict[str, Any] = {
         "n_reads": n_reads,
         "read_bytes": read_bytes,
         "used_next_offset": used_next_offset,
         "truncation_hits": truncation_hits,
+        "continue_reads": continue_reads,
+        "last_read_offset": last_read_offset,
     }
+    if file_chars_seen is not None:
+        out["file_chars"] = file_chars_seen
+    return out
+
+
+def _chars_read_from_tool_completed(payload: dict[str, Any]) -> int:
+    """Best-effort chars for one read_file completion (CTX-9)."""
+    raw = payload.get("chars_read")
+    if isinstance(raw, (int, float)) and int(raw) >= 0:
+        return int(raw)
+    # Nested result (tests)
+    result = payload.get("result")
+    if isinstance(result, dict):
+        if isinstance(result.get("chars_read"), (int, float)):
+            return int(result["chars_read"])
+        text = result.get("content") or result.get("text")
+        if isinstance(text, str) and text:
+            return len(text)
+    # Hint / summary: 「已读 X / 共 Y 字符」
+    for key in ("summary", "hint"):
+        blob = str(payload.get(key) or "")
+        m = _CHARS_READ_HINT_RE.search(blob)
+        if m:
+            return int(m.group(1))
+    # Last resort: rough estimate from line span in English summary (~80 chars/line).
+    summary = str(payload.get("summary") or "")
+    m2 = _LINES_SUMMARY_RE.search(summary)
+    if m2:
+        start, end, _total = (int(m2.group(1)), int(m2.group(2)), int(m2.group(3)))
+        n_lines = max(0, end - start + 1)
+        return n_lines * 80
+    return 0
 
 
 def ran_tests_from_events(events: list[dict[str, Any]]) -> bool:

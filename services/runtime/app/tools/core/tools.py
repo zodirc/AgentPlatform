@@ -293,6 +293,9 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
         "next_offset": sliced["next_offset"],
         "whole_file_complete": whole_file_complete,
         "summary": summary,
+        # CTX-9: total file size for coverage probes (event bus carries this, not content).
+        "file_chars": len(content),
+        "chars_read": len(sliced["content"]),
     }
     hint = continue_hint or sliced.get("hint")
     if hint:
@@ -987,6 +990,56 @@ def _format_source_hits(hits: list[Any], *, excerpt_chars: int) -> list[dict[str
     return formatted
 
 
+def _tier_search_hits_for_model(
+    hits: list[dict[str, Any]],
+    *,
+    detail_n: int | None = None,
+) -> list[dict[str, Any]]:
+    """RET-12: top-N keep excerpt; ranks below are path/title/score only.
+
+    Applied **after** excerpt-promote so ordering still sees full excerpts.
+    Does not change IR ``ranked`` construction beyond omitting unused fields —
+    path+score remain on every row.
+    """
+    n = int(
+        settings.search_sources_detail_hits if detail_n is None else detail_n
+    )
+    n = max(0, n)
+    if n <= 0 or len(hits) <= n:
+        return hits
+    out: list[dict[str, Any]] = []
+    for i, hit in enumerate(hits):
+        if not isinstance(hit, dict):
+            continue
+        if i < n:
+            out.append(hit)
+            continue
+        compact: dict[str, Any] = {
+            "path": str(hit.get("path") or ""),
+            "score": hit.get("score"),
+        }
+        title = str(hit.get("section_title") or hit.get("title") or "").strip()
+        if title:
+            compact["title"] = title
+        chunk_id = str(hit.get("chunk_id") or "").strip()
+        if chunk_id:
+            compact["chunk_id"] = chunk_id
+        out.append(compact)
+    return out
+
+
+def _search_hit_presentation_note(hits: list[dict[str, Any]]) -> str | None:
+    detail_n = max(0, int(settings.search_sources_detail_hits))
+    if detail_n <= 0 or len(hits) <= detail_n:
+        return None
+    compact_n = len(hits) - detail_n
+    return (
+        f"Presentation: top {detail_n} hit(s) include excerpts; "
+        f"{compact_n} more listed as path/title/score only — "
+        "read_file any path by rank, not only the excerpted head."
+    )
+
+
 def _search_sources_keyword(
     sources: Path,
     *,
@@ -1202,6 +1255,7 @@ async def search_sources(
             )
             hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
             hits = hits[:limit]
+            hits = _tier_search_hits_for_model(hits)
             out = _attach_filter_meta(
                 {
                     "query": query,
@@ -1212,6 +1266,9 @@ async def search_sources(
                 },
                 filter_meta,
             )
+            note = _search_hit_presentation_note(hits)
+            if note:
+                out["hint"] = note if not out.get("hint") else f"{out['hint']}; {note}"
             use_slot_capture = False
         else:
             # Hot path: load + search only. Never store.sync() here (A9 / docs/13 S2).
@@ -1224,6 +1281,12 @@ async def search_sources(
             # Over-fetch when filtering so prefix/tenant cuts do not starve top-k.
             fetch_limit = limit * 3 if effective_prefix else limit * 2
             try:
+                from app.retrieval.audit import record_lane_depth_meta
+
+                record_lane_depth_meta(
+                    requested_limit=limit,
+                    over_fetch_multiplier=float(fetch_limit) / float(max(limit, 1)),
+                )
                 store = await _run_retrieval_blocking(get_sources_store)
                 # JSON needs its persisted index loaded once. Pgvector searches the
                 # database directly once its schema is ready, so it never materializes
@@ -1273,7 +1336,10 @@ async def search_sources(
                         and isinstance(hits[0], dict)
                         and hits[0].pop("_excerpt_promote_reorder", False)
                     )
-                    if hits and _hits_cover_query_terms(hits, query):
+                    covers = bool(hits) and _hits_cover_query_terms(hits, query)
+                    # RET-12: tier after promote + cover check (cover needs excerpts).
+                    hits = _tier_search_hits_for_model(hits)
+                    if covers:
                         resolved = {
                             "query": query,
                             "hits": hits,
@@ -1285,12 +1351,16 @@ async def search_sources(
                         if excerpt_promote:
                             resolved["excerpt_promote_reorder"] = True
                         _attach_filter_meta(resolved, filter_meta)
+                        note = _search_hit_presentation_note(hits)
                         if hits[0].get("score", 0.0) < settings.search_sources_low_score_hint:
                             top_path = hits[0].get("path", "")
-                            resolved["hint"] = (
+                            low = (
                                 "Low relevance scores; prefer read_file on the top path "
                                 f"({top_path}) instead of repeating search_sources."
                             )
+                            resolved["hint"] = f"{low} {note}" if note else low
+                        elif note:
+                            resolved["hint"] = note
                         use_slot_capture = True
                     elif hits:
                         index_meta["ann_missed_query_terms"] = True
@@ -1313,6 +1383,7 @@ async def search_sources(
                 )
                 hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
                 hits = hits[:limit]
+                hits = _tier_search_hits_for_model(hits)
                 resolved = _attach_filter_meta(
                     {
                         "query": query,
@@ -1325,6 +1396,9 @@ async def search_sources(
                     },
                     filter_meta,
                 )
+                note = _search_hit_presentation_note(hits)
+                if note:
+                    resolved["hint"] = f"{resolved.get('hint')}; {note}" if resolved.get("hint") else note
                 use_slot_capture = False
             out = resolved
     finally:

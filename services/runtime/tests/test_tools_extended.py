@@ -743,6 +743,39 @@ def test_prefer_excerpt_covering_hits_promotes_visible_term() -> None:
     assert ordered[0].get("_excerpt_promote_reorder") is True
 
 
+def test_tier_search_hits_for_model_ret12() -> None:
+    from app.tools.core.tools import _search_hit_presentation_note, _tier_search_hits_for_model
+
+    hits = [
+        {
+            "path": f"sources/{i}.md",
+            "chunk_id": f"c{i}",
+            "excerpt": f"body-{i}-" + ("x" * 50),
+            "section_title": f"Title {i}",
+            "score": 1.0 - i * 0.01,
+            "citation_id": f"cite:{i}",
+        }
+        for i in range(12)
+    ]
+    tiered = _tier_search_hits_for_model(hits, detail_n=5)
+    assert len(tiered) == 12
+    for i in range(5):
+        assert "excerpt" in tiered[i]
+        assert tiered[i]["path"] == f"sources/{i}.md"
+    for i in range(5, 12):
+        assert "excerpt" not in tiered[i]
+        assert "citation_id" not in tiered[i]
+        assert tiered[i]["path"] == f"sources/{i}.md"
+        assert tiered[i]["title"] == f"Title {i}"
+        assert "chunk_id" in tiered[i]
+        assert "score" in tiered[i]
+    note = _search_hit_presentation_note(tiered)
+    assert note is not None
+    assert "top 5" in note
+    assert _search_hit_presentation_note(tiered[:5]) is None
+    assert _tier_search_hits_for_model(hits[:3], detail_n=5) == hits[:3]
+
+
 def test_prefer_excerpt_covering_hits_no_flag_when_order_unchanged() -> None:
     from app.tools.core.tools import _prefer_excerpt_covering_hits
 

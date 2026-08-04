@@ -36,6 +36,13 @@ L2_RETRIEVAL_KEYS = (
     "search_limits",
     "ranked_lengths",
     "merged_len",
+    # RET-10 lane depth (optional on older runs)
+    "lane_vector_n",
+    "lane_bm25_n",
+    "lane_union_n",
+    "lane_top_k",
+    "two_level_doc_n",
+    "over_fetch_multiplier",
 )
 L2_CONTEXT_KEYS = (
     "n_reads",
@@ -44,8 +51,67 @@ L2_CONTEXT_KEYS = (
     "truncation_hits",
     "answer_len",
     "extraction_path",
+    # CTX-9
+    "read_coverage",
+    "continue_reads",
+    "last_read_offset",
+    # infra channel exclusion
+    "failure_class",
+    "failure_message",
 )
 L2_CODING_KEYS = ("patch_source", "patch_applies", "ran_tests", "n_reads", "read_bytes")
+
+# CTX-9: coverage at/above this → wrong_answer_after_read (not abandoned).
+# Same numeric threshold as former gave_up_early; bucket names change (protocol note).
+READ_COVERAGE_SUFFICIENT = GAVE_UP_READ_RATIO
+
+# Provider/channel instability — scored separately, excluded from primary macros.
+INFRA_CHANNEL_BUCKET = "infra_channel"
+
+# Match turn.failed / exception text from ModelGateway (503 / transport / timeouts).
+_INFRA_CHANNEL_MARKERS = (
+    "model_error",
+    "model retries exhausted",
+    "service is too busy",
+    "service_unavailable",
+    "transport error",
+    "first byte timeout",
+    "openai http timeout",
+    "model api 503",
+    "modelprovider timeout",
+    "modeltransienterror",
+)
+
+
+def is_infra_channel_failure(text: str) -> bool:
+    """True when failure is upstream model/channel instability, not agent skill."""
+    low = (text or "").strip().lower()
+    if not low:
+        return False
+    return any(m in low for m in _INFRA_CHANNEL_MARKERS)
+
+
+def probe_is_infra_channel(probe: dict[str, Any]) -> bool:
+    if str(probe.get("failure_class") or "") == INFRA_CHANNEL_BUCKET:
+        return True
+    if str(probe.get("bucket") or "") == INFRA_CHANNEL_BUCKET:
+        return True
+    for key in ("failure_message", "turn_failed_message", "error", "message"):
+        if is_infra_channel_failure(str(probe.get(key) or "")):
+            return True
+    return False
+
+
+def case_is_infra_channel(case: dict[str, Any]) -> bool:
+    """True when a manifest case should be excluded from primary macros."""
+    if str(case.get("bucket") or "") == INFRA_CHANNEL_BUCKET:
+        return True
+    if str(case.get("failure_class") or "") == INFRA_CHANNEL_BUCKET:
+        return True
+    l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+    if probe_is_infra_channel(l2):
+        return True
+    return is_infra_channel_failure(str(case.get("error") or ""))
 
 
 def _levenshtein(a: str, b: str) -> int:
@@ -113,6 +179,9 @@ def classify_bucket(
 ) -> str:
     """Deterministic failure bucket from L2 fields (round1 §5.2). No LLM."""
     s = (suite or "").strip().lower()
+    # Channel instability first — must not pollute abandoned / no_search / steps_exhausted.
+    if probe_is_infra_channel(probe):
+        return INFRA_CHANNEL_BUCKET
     if s == "retrieval":
         if not probe.get("searched"):
             return "no_search"
@@ -141,8 +210,25 @@ def classify_bucket(
             return "truncated_unread"
         read_bytes = int(probe.get("read_bytes") or 0)
         f1 = 0.0 if case_f1 is None else float(case_f1)
-        if passage_chars > 0 and read_bytes < passage_chars * GAVE_UP_READ_RATIO and f1 <= 0.0:
-            return "gave_up_early"
+        # CTX-9: split former gave_up_early into abandoned vs wrong-after-read.
+        # Coverage prefers explicit probe field; else derive from passage_chars.
+        coverage = probe.get("read_coverage")
+        if coverage is None and passage_chars > 0:
+            coverage = float(read_bytes) / float(passage_chars)
+        try:
+            coverage_f = float(coverage) if coverage is not None else None
+        except (TypeError, ValueError):
+            coverage_f = None
+        continue_reads = int(probe.get("continue_reads") or 0)
+        continued = used_off or continue_reads > 0
+        if passage_chars > 0 and f1 <= 0.0 and coverage_f is not None:
+            if coverage_f < READ_COVERAGE_SUFFICIENT and not continued:
+                return "truly_abandoned"
+            if coverage_f < READ_COVERAGE_SUFFICIENT and continued:
+                # Tried offset续读 but still barely covered — still abandonment.
+                return "truly_abandoned"
+            if coverage_f >= READ_COVERAGE_SUFFICIENT:
+                return "wrong_answer_after_read"
         em = 0.0 if case_em is None else float(case_em)
         answer_len = int(probe.get("answer_len") or 0)
         if f1 > 0.0 and em <= 0.0 and answer_len > VERBOSE_ANSWER_CHARS:
@@ -225,6 +311,8 @@ def apply_retrieval_weak_hits(
             "terminal_state",
             "steps",
             "arm",
+            "failure_class",
+            "failure_message",
         ):
             if key in case and key not in probe:
                 probe[key] = case[key]
@@ -375,6 +463,70 @@ def depth_audit_aggregate(cases: list[dict[str, Any]]) -> dict[str, Any]:
         le10 = sum(1 for v in merged_lens if v <= 10)
         le15 = sum(1 for v in merged_lens if v <= 15)
         ge30 = sum(1 for v in merged_lens if v >= 30)
+
+        # RET-10 lane depth rollup
+        def _collect_int(key: str) -> list[int]:
+            vals: list[int] = []
+            for case in rows:
+                l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+                raw = case.get(key)
+                if raw is None:
+                    raw = l2.get(key)
+                if isinstance(raw, (int, float)):
+                    vals.append(int(raw))
+            return vals
+
+        vector_ns = _collect_int("lane_vector_n")
+        bm25_ns = _collect_int("lane_bm25_n")
+        union_ns = _collect_int("lane_union_n")
+        top_ks = _collect_int("lane_top_k")
+        two_level_ns = _collect_int("two_level_doc_n")
+        over_fetch_floats: list[float] = []
+        for case in rows:
+            l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+            raw = case.get("over_fetch_multiplier")
+            if raw is None:
+                raw = l2.get("over_fetch_multiplier")
+            if isinstance(raw, (int, float)):
+                over_fetch_floats.append(float(raw))
+
+        def _mean(vals: list[float] | list[int]) -> float | None:
+            return (sum(vals) / len(vals)) if vals else None
+
+        # Lane starvation heuristic: both lanes return ≪ lane_top_k (pool empty at source)
+        # vs lanes fed (≥ half of top_k) but merged_len still short (relevance).
+        lane_starved = 0
+        lanes_fed_but_short = 0
+        for case in rows:
+            l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+            vn = case.get("lane_vector_n")
+            if vn is None:
+                vn = l2.get("lane_vector_n")
+            bn = case.get("lane_bm25_n")
+            if bn is None:
+                bn = l2.get("lane_bm25_n")
+            tk = case.get("lane_top_k")
+            if tk is None:
+                tk = l2.get("lane_top_k")
+            merged = case.get("merged_len")
+            if merged is None:
+                merged = l2.get("merged_len")
+            try:
+                vn_i = int(vn) if vn is not None else None
+                bn_i = int(bn) if bn is not None else None
+                tk_i = int(tk) if tk is not None else None
+                merged_i = int(merged) if merged is not None else 0
+            except (TypeError, ValueError):
+                continue
+            if vn_i is None or bn_i is None or tk_i is None or tk_i <= 0:
+                continue
+            fed_threshold = max(1, tk_i // 2)
+            max_lane = max(vn_i, bn_i)
+            if max_lane < fed_threshold and merged_i <= 15:
+                lane_starved += 1
+            elif max_lane >= fed_threshold and merged_i <= 15:
+                lanes_fed_but_short += 1
+
         datasets[ds] = {
             "n_queries": n,
             "merged_len_hist": _hist_counts(merged_lens),
@@ -387,11 +539,21 @@ def depth_audit_aggregate(cases: list[dict[str, Any]]) -> dict[str, Any]:
             "short_despite_limit30": short_despite_limit30,
             "pct_merged_le15": (le15 / n) if n else 0.0,
             "pct_merged_ge30": (ge30 / n) if n else 0.0,
+            # RET-10
+            "lane_vector_n_mean": _mean(vector_ns),
+            "lane_bm25_n_mean": _mean(bm25_ns),
+            "lane_union_n_mean": _mean(union_ns),
+            "lane_top_k_mean": _mean(top_ks),
+            "two_level_doc_n_mean": _mean(two_level_ns),
+            "over_fetch_multiplier_mean": _mean(over_fetch_floats),
+            "lane_starved_n": lane_starved,
+            "lanes_fed_but_short_n": lanes_fed_but_short,
         }
 
     # FiQA three-way adjudication hint (report-side; human confirms).
     fiqa = datasets.get("fiqa") or {}
     adjudication = "insufficient_data"
+    lane_adjudication = "insufficient_data"
     if fiqa:
         if float(fiqa.get("pct_merged_le15") or 0) >= 0.7:
             if int(fiqa.get("short_despite_limit30") or 0) >= max(1, int(fiqa.get("n_queries") or 0) // 2):
@@ -403,7 +565,24 @@ def depth_audit_aggregate(cases: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             adjudication = "mixed"
 
+        # RET-10: split pool_starvation into lane-k starvation vs relevance.
+        starved = int(fiqa.get("lane_starved_n") or 0)
+        fed_short = int(fiqa.get("lanes_fed_but_short_n") or 0)
+        n_fiqa = int(fiqa.get("n_queries") or 0)
+        if n_fiqa > 0 and (starved + fed_short) > 0:
+            if starved >= max(1, n_fiqa // 2):
+                lane_adjudication = "lane_top_k_starvation"  # raise lane k / over-fetch
+            elif fed_short >= max(1, n_fiqa // 2):
+                lane_adjudication = "lanes_fed_relevance"  # RET-4 / RET-11
+            else:
+                lane_adjudication = "mixed"
+        elif adjudication == "depth_ok_relevance_or_qrels":
+            lane_adjudication = "lanes_fed_relevance"
+        elif adjudication == "insufficient_data":
+            lane_adjudication = "insufficient_data"
+
     return {
         "by_dataset": datasets,
         "fiqa_adjudication": adjudication,
+        "fiqa_lane_adjudication": lane_adjudication,
     }

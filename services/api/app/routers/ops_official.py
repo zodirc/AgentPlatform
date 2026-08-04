@@ -51,8 +51,8 @@ class StartOfficialBody(BaseModel):
     coding_harness: bool = False
     # Default = real ST vectors on bench worker (effect score). Hash is opt-in smoke.
     retrieval_prod: bool = True
-    # agent = L1 product Turn (default); component = L0 bench worker.
-    eval_path: Literal["agent", "component"] = "agent"
+    # Ops acceptance path is L1 agent only (free thermometer). L0 component rejected.
+    eval_path: Literal["agent"] = "agent"
     context_limit: int = Field(default=0, ge=0, le=10_000)
     retrieval_query_limit: int = Field(default=0, ge=0, le=50_000)
     # L1 only: concurrent Turns within a suite (wall-clock; default 1).
@@ -144,8 +144,8 @@ async def official_meta() -> dict[str, Any]:
                 "id": "retrieval",
                 "label": "检索",
                 "group": "retrieval",
-                "description": "BEIR 小量 · L0 可不填模型；L1 agent 路径需 Ops 评测模型",
-                "needs_model": False,
+                "description": "BEIR 小量 · L1 agent 路径（需 Ops 评测模型）",
+                "needs_model": True,
             },
             {
                 "id": "context",
@@ -277,6 +277,11 @@ async def list_official_runs(
 ) -> dict[str, Any]:
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
+    # Close DB rows left "running" after API loss of the in-memory job.
+    try:
+        await official_runner.reclaim_official_orphans_from_db()
+    except Exception:  # noqa: BLE001
+        pass
     # History = one Ops batch = one row (DB/live). Child FS reports from
     # scripts/official_bench are attached on the batch, not listed separately.
     db_rows, _total = await eval_store.list_runs(limit=limit, suite="official")
@@ -334,6 +339,29 @@ async def get_official_run(run_id: str) -> dict[str, Any]:
         return {**fs, "source": "filesystem"}
     assert db is not None
     return {**_enrich(db), "source": "db"}
+
+
+@router.get("/runs/{run_id}/artifacts")
+async def get_official_run_artifacts(run_id: str) -> dict[str, Any]:
+    """Child suite manifests + bucket histogram for Ops batch detail."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    live = official_runner.get_live(run_id)
+    if live is not None:
+        row = official_runner.run_to_dict(live)
+    else:
+        fs = official_store.get_fs_run(run_id)
+        db = await eval_store.load_run(run_id)
+        if fs is None and db is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if fs and db:
+            row = {**db, **fs}
+        elif fs:
+            row = fs
+        else:
+            assert db is not None
+            row = db
+    return official_store.load_run_artifacts(row)
 
 
 @router.get("/runs/{run_id}/report", response_class=HTMLResponse)
@@ -555,7 +583,7 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             retrieval_prod=body.retrieval_prod,
             force=body.force,
             model=body.model.model_dump() if body.model else None,
-            eval_path=body.eval_path,
+            eval_path="agent",
             context_limit=body.context_limit,
             retrieval_query_limit=body.retrieval_query_limit,
             l1_max_parallel=body.l1_max_parallel,

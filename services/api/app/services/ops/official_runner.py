@@ -82,7 +82,7 @@ class OfficialLiveRun:
     coding_n_instances: int | None = None
     coding_harness: bool = False
     retrieval_prod: bool = False
-    # agent = L1 product Turn path; component = L0 bench worker (legacy default for UI compat)
+    # Ops acceptance path is L1 agent-Turn only.
     eval_path: str = "agent"
     context_limit: int = 0
     retrieval_query_limit: int = 0
@@ -232,6 +232,7 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "coding_harness": run.coding_harness,
             "retrieval_prod": run.retrieval_prod,
             "eval_path": run.eval_path,
+            "targets": list(run.targets),
             "context_limit": run.context_limit,
             "retrieval_query_limit": run.retrieval_query_limit,
             "l1_max_parallel": run.l1_max_parallel,
@@ -584,8 +585,8 @@ async def create_and_start(
                 raise ValueError(f"official_run_already_active:{r.id}")
 
     path = (eval_path or "agent").strip().lower()
-    if path not in {"agent", "component"}:
-        raise ValueError(f"unknown_eval_path:{eval_path}")
+    if path != "agent":
+        raise ValueError("eval_path_must_be_agent")
 
     run = OfficialLiveRun(
         id=str(uuid4()),
@@ -596,7 +597,7 @@ async def create_and_start(
         coding_n_instances=coding_n_instances,
         coding_harness=coding_harness,
         retrieval_prod=retrieval_prod,
-        eval_path=path,
+        eval_path="agent",
         context_limit=max(0, int(context_limit or 0)),
         retrieval_query_limit=max(0, int(retrieval_query_limit or 0)),
         l1_max_parallel=max(1, min(8, int(l1_max_parallel or 2))),
@@ -605,11 +606,7 @@ async def create_and_start(
         coding_checkout_repo=bool(coding_checkout_repo),
         model=model,
         progress_total=len(cleaned),
-        phase_hint=(
-            "L1 agent-path：产品 Turn → 官方指标"
-            if path == "agent"
-            else "L0 component：bench 旁路对照"
-        ),
+        phase_hint="L1 agent-path：产品 Turn → 官方指标",
         cases=[
             {
                 "case_id": f"official.{t}",
@@ -1056,6 +1053,7 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
                 {
                     "suite": suite,
                     "run_id": manifest.get("id") or manifest.get("run_id"),
+                    "bench_run_id": manifest.get("id") or manifest.get("run_id"),
                     "eval_path": "agent",
                 }
             )
@@ -1071,20 +1069,11 @@ async def _execute(run_id: str) -> None:
     await _publish(run, {"kind": "run_started", "run_id": run.id, "targets": run.targets})
     await _persist_snapshot(run)
 
-    from app.services.ops import bench_client
-
     reports_dir = os.environ.get("BENCH_REPORTS_DIR", "/data/ops-official/reports")
     env = {"BENCH_REPORTS_DIR": reports_dir}
 
     try:
-        if run.eval_path == "agent":
-            await _execute_via_agent_path(run)
-        elif bench_client.bench_enabled():
-            await _execute_via_bench(run)
-        else:
-            await _execute_local(run)
-            env = getattr(run, "_last_env", env)
-
+        await _execute_via_agent_path(run)
         if run.cancel_requested and run.status != "cancelled":
             run.status = "cancelled"
         elif any(c.get("status") == "fail" for c in run.cases) and run.status not in {
@@ -1348,6 +1337,7 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
             "coding_n_instances": run.coding_n_instances,
             "coding_harness": run.coding_harness,
             "eval_path": run.eval_path,
+            "targets": list(run.targets),
             "retrieval_arm": run.retrieval_arm,
             "context_arm": run.context_arm,
             "coding_checkout_repo": run.coding_checkout_repo,

@@ -95,6 +95,21 @@
               "truncated": { "type": "boolean" }
             }
           }
+        },
+        "lane_depth": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "RET-10: per-search lane candidate depths (true counts, not STAGE_CAP preview)",
+          "properties": {
+            "vector_n": { "type": "integer", "minimum": 0 },
+            "bm25_n": { "type": "integer", "minimum": 0 },
+            "union_n": { "type": "integer", "minimum": 0 },
+            "two_level_doc_n": { "type": "integer", "minimum": 0 },
+            "two_level_enabled": { "type": "boolean" },
+            "lane_top_k": { "type": "integer", "minimum": 0 },
+            "requested_limit": { "type": "integer", "minimum": 0 },
+            "over_fetch_multiplier": { "type": "number", "minimum": 0 }
+          }
         }
       }
     }

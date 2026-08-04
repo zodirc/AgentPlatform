@@ -192,6 +192,211 @@ def get_fs_run(run_id: str) -> dict[str, Any] | None:
     return _load_manifest(root / "runs" / run_id)
 
 
+_L2_CASE_KEYS = (
+    "n_search",
+    "searched",
+    "queries",
+    "query_drift",
+    "n_reads",
+    "read_bytes",
+    "read_coverage",
+    "continue_reads",
+    "used_next_offset",
+    "truncation_hits",
+    "answer_len",
+    "steps",
+    "terminal_state",
+    "failure_class",
+    "failure_message",
+    "patch_source",
+    "patch_applies",
+    "has_repo",
+    "ran_tests",
+    "merged_len",
+    "search_limits",
+    "ranked_lengths",
+)
+
+
+def _case_bucket(case: dict[str, Any]) -> str | None:
+    raw = case.get("bucket")
+    if raw:
+        return str(raw)
+    l2 = case.get("l2")
+    if isinstance(l2, dict) and l2.get("bucket"):
+        return str(l2["bucket"])
+    return None
+
+
+def _compute_bucket_counts(cases: list[dict[str, Any]]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for case in cases:
+        cid = str(case.get("case_id") or "")
+        if cid.endswith(".agent"):
+            continue
+        bucket = _case_bucket(case)
+        if not bucket:
+            continue
+        counts[bucket] = counts.get(bucket, 0) + 1
+    return counts
+
+
+def _slim_artifact_case(case: dict[str, Any]) -> dict[str, Any]:
+    l2_raw = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+    l2 = {k: l2_raw[k] for k in _L2_CASE_KEYS if k in l2_raw}
+    turn_id = case.get("turn_id") or l2_raw.get("turn_id")
+    out: dict[str, Any] = {
+        "case_id": case.get("case_id"),
+        "status": case.get("status"),
+        "bucket": _case_bucket(case),
+        "metrics": case.get("metrics") if isinstance(case.get("metrics"), dict) else {},
+        "error": case.get("error"),
+        "turn_id": turn_id,
+    }
+    if l2:
+        out["l2"] = l2
+    return out
+
+
+def suite_artifact_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a child suite manifest into Ops UI artifact payload."""
+    result = manifest.get("result") if isinstance(manifest.get("result"), dict) else {}
+    meta = (
+        manifest.get("model_meta") if isinstance(manifest.get("model_meta"), dict) else {}
+    )
+    all_cases = [c for c in (manifest.get("cases") or []) if isinstance(c, dict)]
+    display = [c for c in all_cases if not str(c.get("case_id") or "").endswith(".agent")]
+    buckets = (
+        result.get("bucket_counts")
+        if isinstance(result.get("bucket_counts"), dict)
+        else None
+    ) or (
+        meta.get("bucket_counts") if isinstance(meta.get("bucket_counts"), dict) else None
+    ) or _compute_bucket_counts(display)
+    suite = (
+        manifest.get("official_suite")
+        or meta.get("official_suite")
+        or result.get("suite")
+        or "unknown"
+    )
+    return {
+        "suite": str(suite),
+        "bench_run_id": manifest.get("id"),
+        "status": manifest.get("status"),
+        "title": manifest.get("title") or meta.get("title"),
+        "metrics": manifest.get("metrics")
+        if isinstance(manifest.get("metrics"), dict)
+        else {},
+        "bucket_counts": dict(buckets),
+        "arm": result.get("arm") or result.get("primary_arm") or meta.get("arm"),
+        "sample_tier": result.get("sample_tier") or meta.get("sample_tier"),
+        "context_limit": result.get("context_limit")
+        if result.get("context_limit") is not None
+        else meta.get("context_limit"),
+        "sample_policy": result.get("sample_policy") or meta.get("sample_policy"),
+        "depth_audit": result.get("depth_audit") or meta.get("depth_audit"),
+        "suite_ndcg_median": result.get("suite_ndcg_median")
+        if result.get("suite_ndcg_median") is not None
+        else meta.get("suite_ndcg_median"),
+        "weak_hits_cases": result.get("weak_hits_cases") or meta.get("weak_hits_cases"),
+        "cases": [_slim_artifact_case(c) for c in display],
+        "result": result,
+    }
+
+
+def _child_refs_from_ops_row(row: dict[str, Any]) -> list[dict[str, str]]:
+    """Collect child suite FS run ids from an Ops batch row / aggregate."""
+    refs: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    def _add(suite: str | None, rid: str | None) -> None:
+        cid = str(rid or "").strip()
+        if not cid or cid in seen:
+            return
+        seen.add(cid)
+        refs.append({"suite": str(suite or ""), "bench_run_id": cid})
+
+    for key in ("child_reports",):
+        for child in row.get(key) or []:
+            if not isinstance(child, dict):
+                continue
+            _add(
+                str(child.get("suite") or child.get("case_id") or "").removeprefix(
+                    "official."
+                ),
+                child.get("bench_run_id") or child.get("run_id"),
+            )
+    meta = row.get("model_meta") if isinstance(row.get("model_meta"), dict) else {}
+    for child in meta.get("child_reports") or []:
+        if not isinstance(child, dict):
+            continue
+        _add(
+            str(child.get("suite") or child.get("case_id") or "").removeprefix(
+                "official."
+            ),
+            child.get("bench_run_id") or child.get("run_id"),
+        )
+    for case in row.get("cases") or []:
+        if not isinstance(case, dict):
+            continue
+        suite = str(case.get("case_id") or "").removeprefix("official.")
+        _add(suite, case.get("bench_run_id") or case.get("run_id"))
+
+    root = reports_root()
+    ops_id = str(row.get("id") or "").strip()
+    if root is not None and ops_id:
+        agg_path = root / "runs" / ops_id / "aggregate.json"
+        if agg_path.is_file():
+            try:
+                agg = json.loads(agg_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                agg = {}
+            for child in agg.get("children") or []:
+                if not isinstance(child, dict):
+                    continue
+                _add(
+                    str(child.get("suite") or "").removeprefix("official."),
+                    child.get("bench_run_id") or child.get("run_id"),
+                )
+    return refs
+
+
+def load_run_artifacts(ops_row: dict[str, Any]) -> dict[str, Any]:
+    """Full suite artifacts + bucket histogram for an Ops batch or FS suite run."""
+    run_id = str(ops_row.get("id") or "").strip()
+    suites: list[dict[str, Any]] = []
+    seen_manifest: set[str] = set()
+
+    direct = get_fs_run(run_id) if run_id else None
+    if direct and isinstance(direct.get("cases"), list) and direct["cases"]:
+        # Direct FS suite run (or Ops dir that somehow holds a full manifest).
+        art = suite_artifact_from_manifest(direct)
+        if art.get("cases"):
+            suites.append(art)
+            seen_manifest.add(str(direct.get("id") or run_id))
+
+    for ref in _child_refs_from_ops_row(ops_row):
+        cid = ref["bench_run_id"]
+        if cid in seen_manifest:
+            continue
+        man = get_fs_run(cid)
+        if not man:
+            continue
+        art = suite_artifact_from_manifest(man)
+        if ref.get("suite") and (
+            not art.get("suite") or art.get("suite") in {"unknown", "official"}
+        ):
+            art["suite"] = ref["suite"]
+        suites.append(art)
+        seen_manifest.add(cid)
+
+    return {
+        "run_id": run_id,
+        "suites": suites,
+        "n_suites": len(suites),
+    }
+
+
 def read_report_html(run_id: str) -> str | None:
     root = reports_root()
     if root is None:

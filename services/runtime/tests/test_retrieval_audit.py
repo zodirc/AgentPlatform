@@ -62,6 +62,73 @@ def test_capture_slot_records_pool_and_rank() -> None:
     assert captured["ranked"][0]["path"] == "sources/a.md"
 
 
+def test_capture_records_lane_depth_counts() -> None:
+    from app.retrieval.audit import (
+        begin_audit_capture,
+        end_audit_capture,
+        finalize_audit_for_result,
+        record_lane_depth_meta,
+        record_lane_hits,
+    )
+
+    token = begin_audit_capture()
+    try:
+        vector = [
+            ChunkHit(
+                path=f"sources/v{i}.md",
+                chunk_id=f"v{i}",
+                excerpt="x",
+                citation_id="",
+                score=1.0,
+            )
+            for i in range(5)
+        ]
+        bm25 = [
+            ChunkHit(
+                path=f"sources/b{i}.md",
+                chunk_id=f"b{i}",
+                excerpt="y",
+                citation_id="",
+                score=0.5,
+            )
+            for i in range(3)
+        ]
+        # shared id to shrink union
+        bm25.append(
+            ChunkHit(
+                path="sources/v0.md",
+                chunk_id="v0",
+                excerpt="y",
+                citation_id="",
+                score=0.4,
+            )
+        )
+        record_lane_hits(vector=vector, bm25=bm25)
+        record_lane_depth_meta(
+            lane_top_k=40,
+            requested_limit=10,
+            over_fetch_multiplier=2.0,
+            two_level_doc_n=4,
+            two_level_enabled=True,
+        )
+    finally:
+        captured = end_audit_capture(token)
+    assert captured is not None
+    assert captured["_vector_n"] == 5
+    assert captured["_bm25_n"] == 4
+    assert captured["_union_n"] == 8  # 5+4-1 shared
+    audit = finalize_audit_for_result(
+        captured, hits=[], excerpt_chars=200, mode="hybrid"
+    )
+    ld = audit["lane_depth"]
+    assert ld["vector_n"] == 5
+    assert ld["bm25_n"] == 4
+    assert ld["union_n"] == 8
+    assert ld["lane_top_k"] == 40
+    assert ld["over_fetch_multiplier"] == 2.0
+    assert ld["two_level_doc_n"] == 4
+
+
 def test_finalize_merges_capture_and_entered() -> None:
     token = begin_audit_capture()
     hits_obj = [

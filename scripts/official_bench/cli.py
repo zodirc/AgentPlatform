@@ -155,6 +155,12 @@ def main(argv: list[str] | None = None) -> int:
         help="Diff latest_* vs committed baseline (primary metrics table)",
     )
     p_base.add_argument(
+        "--compare-runs",
+        metavar="A,B",
+        default="",
+        help="EVAL-1: pair two run_ids under reports/runs/ (before,after)",
+    )
+    p_base.add_argument(
         "--write-scorecard",
         action="store_true",
         help="Regenerate SCORECARD.md from committed baseline JSON",
@@ -179,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
         from .baseline import (
             baseline_path,
             compare_latest_to_baseline,
+            compare_two_manifests,
             format_compare_table,
             load_baseline,
             scorecard_path,
@@ -196,11 +203,40 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"scorecard": str(sp)}, indent=2))
             return 0
 
+        compare_runs = str(getattr(args, "compare_runs", "") or "").strip()
+        if compare_runs:
+            parts = [p.strip() for p in compare_runs.split(",") if p.strip()]
+            if len(parts) != 2:
+                raise SystemExit("--compare-runs expects run_id_a,run_id_b")
+            run_a, run_b = parts
+            dir_a = reports_dir() / "runs" / run_a
+            dir_b = reports_dir() / "runs" / run_b
+            man_a_path = dir_a / "manifest.json"
+            man_b_path = dir_b / "manifest.json"
+            if not man_a_path.is_file() or not man_b_path.is_file():
+                raise SystemExit(
+                    f"missing manifest: {man_a_path if not man_a_path.is_file() else man_b_path}"
+                )
+            man_a = json.loads(man_a_path.read_text(encoding="utf-8"))
+            man_b = json.loads(man_b_path.read_text(encoding="utf-8"))
+            report = compare_two_manifests(man_a, man_b)
+            print(json.dumps(report, indent=2, ensure_ascii=False))
+            return 0
+
         if args.compare:
             report = compare_latest_to_baseline(suites=suites)
             print(format_compare_table(report))
             print()
-            print(json.dumps({"latest_meta": report.get("latest_meta")}, indent=2))
+            print(
+                json.dumps(
+                    {
+                        "latest_meta": report.get("latest_meta"),
+                        "paired": report.get("paired"),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            )
             return 0
 
         if args.show and not args.update:

@@ -540,6 +540,13 @@ class SourceVectorIndex:
         bm25_hits = self.search_bm25(query, limit=top_k)
         if audit_capture_active():
             record_lane_hits(vector=vector_hits, bm25=bm25_hits)
+            from app.retrieval.audit import record_lane_depth_meta
+
+            record_lane_depth_meta(
+                lane_top_k=top_k,
+                requested_limit=limit,
+                two_level_enabled=bool(profile.two_level_enabled),
+            )
         if not vector_hits and not bm25_hits:
             return []
         if not vector_hits:
@@ -604,6 +611,13 @@ class SourceVectorIndex:
         if timed_out and not chunk_hits:
             # Absolute degrade: try sync chunk-only once.
             chunk_hits = self._search_hybrid_chunks(query, limit=limit, recall_k=recall_k)
+        from app.retrieval.audit import audit_capture_active, record_lane_depth_meta
+
+        if audit_capture_active():
+            record_lane_depth_meta(
+                two_level_doc_n=len(doc_paths),
+                two_level_enabled=True,
+            )
         return merge_doc_and_chunk_hits(
             doc_paths=doc_paths,
             chunk_hits=chunk_hits,

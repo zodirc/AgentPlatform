@@ -126,6 +126,31 @@ def _l1_fingerprint(model: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _sample_policy_head_slice(
+    *,
+    suite: str,
+    limit: int,
+    selected_ids: list[str],
+) -> dict[str, Any]:
+    """EVAL-2: assert + record deterministic smoke sampling (head slice, no RNG).
+
+    Smoke 20q / 20×3 = first N of qrels-ordered (retrieval) or file-ordered
+    (context) items. Rotation every 4–6 batches is a process rule, not auto-code.
+    """
+    blob = "\n".join(selected_ids)
+    fp = hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+    return {
+        "method": "head_slice",
+        "seed": None,
+        "deterministic": True,
+        "limit": int(limit),
+        "n_selected": len(selected_ids),
+        "ids_fingerprint": fp,
+        "suite": suite,
+        "rotation_policy": "manual_every_4_to_6_batches",
+    }
+
+
 def _retrieval_prompt(*, arm: str, qtext: str, limit_k: int) -> str:
     from official_bench.l1_prompts import retrieval_prompt
 
@@ -828,19 +853,23 @@ async def run_retrieval_l1(
         called_tools,
         depth_audit_from_events,
         excerpt_promote_reorder_count,
+        failure_class_from_events,
         merge_retrieval_rankings,
         ranking_scores,
         search_queries_from_events,
         step_count_from_events,
         terminal_state_from_events,
         top_ranked_hits_from_events,
+        turn_failure_message_from_events,
     )
     from official_bench.config import load_suites
     from official_bench.l2_probes import (
+        INFRA_CHANNEL_BUCKET,
         apply_retrieval_weak_hits,
         bucket_counts,
         classify_bucket,
         depth_audit_aggregate,
+        is_infra_channel_failure,
         query_drift,
         weak_hits_snapshots,
     )
@@ -873,6 +902,7 @@ async def run_retrieval_l1(
         "limit_queries": limit_queries,
         **_l1_fingerprint(model),
     }
+    smoke_ids: list[str] = []
     root = await _pull_with_live_logs(
         "BEIR",
         lambda: pull_beir(cfg, force=False),
@@ -907,6 +937,9 @@ async def run_retrieval_l1(
             q_items = list(queries.items())
             if limit_queries > 0:
                 q_items = q_items[:limit_queries]
+            # EVAL-2: head-slice ids (dataset-qualified for fingerprint uniqueness)
+            for qid, _qtext in q_items:
+                smoke_ids.append(f"{name}:{qid}")
             work, corpus_fp, sources_dest = await _ensure_beir_index_work(name, corpus)
             await _emit(
                 on_progress,
@@ -951,6 +984,7 @@ async def run_retrieval_l1(
                 )
 
             runs: dict[str, dict[str, float]] = {}
+            infra_qids: set[str] = set()
             n_q = len(q_items)
             conc = _clamp_parallel(max_parallel)
             await _emit(
@@ -1023,7 +1057,20 @@ async def run_retrieval_l1(
                             "search_limits": depth.get("search_limits"),
                             "ranked_lengths": depth.get("ranked_lengths"),
                             "merged_len": depth.get("merged_len"),
+                            # RET-10
+                            "lane_vector_n": depth.get("lane_vector_n"),
+                            "lane_bm25_n": depth.get("lane_bm25_n"),
+                            "lane_union_n": depth.get("lane_union_n"),
+                            "lane_top_k": depth.get("lane_top_k"),
+                            "two_level_doc_n": depth.get("two_level_doc_n"),
+                            "over_fetch_multiplier": depth.get("over_fetch_multiplier"),
                         }
+                        fail_msg = turn_failure_message_from_events(events)
+                        fail_class = failure_class_from_events(events)
+                        if fail_msg:
+                            l2["failure_message"] = fail_msg[:500]
+                        if fail_class:
+                            l2["failure_class"] = fail_class
                         # weak_hits needs suite median — provisional bucket until post-pass.
                         l2["bucket"] = classify_bucket("retrieval", l2)
                         err = None
@@ -1054,6 +1101,8 @@ async def run_retrieval_l1(
                             "recall_at_10": 0.0,
                             "recall_at_100": 0.0,
                         }
+                        err = str(exc)
+                        infra = is_infra_channel_failure(err)
                         l2 = {
                             "case_id": f"beir.{name}.q-{qid}",
                             "turn_id": str(turn["id"]),
@@ -1063,16 +1112,22 @@ async def run_retrieval_l1(
                             "queries": [],
                             "query_drift": 1.0,
                             "terminal_state": "failed",
-                            "bucket": "no_search",
+                            "failure_message": err[:500],
+                            "bucket": (
+                                INFRA_CHANNEL_BUCKET if infra else "no_search"
+                            ),
                             "excerpt_promote_reorder_n": 0,
                             "search_limits": [],
                             "ranked_lengths": [],
                             "merged_len": 0,
                         }
-                        err = str(exc)
+                        if infra:
+                            l2["failure_class"] = INFRA_CHANNEL_BUCKET
                         status = "fail"
                     async with case_lock:
                         runs[qid] = scores
+                        if l2.get("bucket") == INFRA_CHANNEL_BUCKET:
+                            infra_qids.add(qid)
                         session.add_case(
                             f"beir.{name}.q-{qid}",
                             status=status,
@@ -1087,6 +1142,8 @@ async def run_retrieval_l1(
                                 "query_drift": l2.get("query_drift"),
                                 "arm": arm_norm,
                                 "bucket": l2.get("bucket"),
+                                "failure_class": l2.get("failure_class"),
+                                "failure_message": l2.get("failure_message"),
                                 "l2": l2,
                                 "terminal_state": l2.get("terminal_state"),
                                 "steps": l2.get("steps"),
@@ -1100,6 +1157,14 @@ async def run_retrieval_l1(
                                 "merged_len": l2.get("merged_len")
                                 if l2.get("merged_len") is not None
                                 else depth.get("merged_len"),
+                                "lane_vector_n": l2.get("lane_vector_n"),
+                                "lane_bm25_n": l2.get("lane_bm25_n"),
+                                "lane_union_n": l2.get("lane_union_n"),
+                                "lane_top_k": l2.get("lane_top_k"),
+                                "two_level_doc_n": l2.get("two_level_doc_n"),
+                                "over_fetch_multiplier": l2.get(
+                                    "over_fetch_multiplier"
+                                ),
                             },
                         )
                         done_count += 1
@@ -1119,11 +1184,38 @@ async def run_retrieval_l1(
             )
 
             # Metrics only over queries we actually ran (cap / missing ids must not zero-fill).
+            # Infra channel failures are excluded from primary IR macros.
             scored_qrels = {qid: qrels[qid] for qid, _ in q_items if qid in qrels}
-            metrics = aggregate_metrics(scored_qrels, runs, k_values=k_values)
+            eligible_runs = {
+                qid: scores for qid, scores in runs.items() if qid not in infra_qids
+            }
+            eligible_qrels = {
+                qid: scored_qrels[qid]
+                for qid in eligible_runs
+                if qid in scored_qrels
+            }
+            metrics_incl = aggregate_metrics(scored_qrels, runs, k_values=k_values)
+            if eligible_runs:
+                metrics = aggregate_metrics(
+                    eligible_qrels, eligible_runs, k_values=k_values
+                )
+            else:
+                metrics = {
+                    k: 0.0
+                    for k, v in metrics_incl.items()
+                    if isinstance(v, (int, float))
+                }
             metrics["n_queries"] = float(len(q_items))
             metrics["n_qrels"] = float(len(qrels))
-            all_runs[name] = runs
+            metrics["n_scored"] = float(len(eligible_runs))
+            metrics["n_infra_excluded"] = float(len(infra_qids))
+            metrics["infra_rate"] = (
+                float(len(infra_qids)) / float(len(q_items)) if q_items else 0.0
+            )
+            for key, val in metrics_incl.items():
+                if isinstance(val, (int, float)):
+                    metrics[f"{key}_incl_infra"] = float(val)
+            all_runs[name] = eligible_runs if eligible_runs else runs
             case_metrics[f"beir.{name}.agent"] = metrics
             session.add_case(
                 f"beir.{name}.agent",
@@ -1139,6 +1231,13 @@ async def run_retrieval_l1(
             if vals:
                 macro[key] = sum(vals) / len(vals)
         session.metrics = {**macro, **{f"agent.{k}": v for k, v in macro.items()}}
+
+        # EVAL-2: record deterministic head-slice sample policy (+ ids fingerprint).
+        session.extra["sample_policy"] = _sample_policy_head_slice(
+            suite="retrieval",
+            limit=int(limit_queries or 0),
+            selected_ids=smoke_ids,
+        )
 
         # RET-3: force weak_hits observability (suite median + histogram + low-score cards).
         suite_median = apply_retrieval_weak_hits(session.cases)
@@ -1171,6 +1270,9 @@ async def run_retrieval_l1(
                     ),
                     "excerpt_promote_reorder_total": promote_total,
                     "depth_audit_fiqa": (depth_audit or {}).get("fiqa_adjudication"),
+                    "depth_audit_fiqa_lane": (depth_audit or {}).get(
+                        "fiqa_lane_adjudication"
+                    ),
                 },
                 ensure_ascii=False,
             ),
@@ -1185,6 +1287,7 @@ async def run_retrieval_l1(
             "arm": arm_norm,
             "primary_arm": arm_norm,
             "sample_tier": session.extra.get("sample_tier"),
+            "sample_policy": session.extra.get("sample_policy"),
             "metrics": session.metrics,
             "cases": case_metrics,
             "bucket_counts": counts,
@@ -1226,14 +1329,21 @@ async def run_context_l1(
     """
     _ensure_scripts_path()
     from official_bench.agent_path_extract import (
+        failure_class_from_events,
         final_assistant_text,
         read_file_stats_from_events,
         step_count_from_events,
         terminal_state_from_events,
+        turn_failure_message_from_events,
     )
     from official_bench.config import load_suites
     from official_bench.context_run import score_prediction
-    from official_bench.l2_probes import classify_bucket
+    from official_bench.l2_probes import (
+        INFRA_CHANNEL_BUCKET,
+        bucket_counts,
+        classify_bucket,
+        is_infra_channel_failure,
+    )
     from official_bench.pull import pull_longbench
     from official_bench.run_session import RunSession
 
@@ -1270,6 +1380,15 @@ async def run_context_l1(
             if line:
                 rows.append(json.loads(line))
     rows = _limit_rows_per_task(rows, limit)
+    ctx_ids = [
+        f"{str(r.get('task') or r.get('dataset') or 'longbench')}:{i}"
+        for i, r in enumerate(rows)
+    ]
+    session.extra["sample_policy"] = _sample_policy_head_slice(
+        suite="context",
+        limit=int(limit or 0),
+        selected_ids=ctx_ids,
+    )
     conc = _clamp_parallel(max_parallel)
     await _emit(
         on_progress,
@@ -1280,7 +1399,8 @@ async def run_context_l1(
         ),
     )
 
-    per_task: dict[str, list[dict[str, float]]] = {}
+    # scores + whether the case counts toward primary macros (infra excluded).
+    per_task: dict[str, list[tuple[dict[str, float], bool]]] = {}
     run_root = L1_ROOT / session.run_id / "context"
     # A-2: always per-sample Work (avoid read-cache cross-talk from passage overwrite).
 
@@ -1332,22 +1452,37 @@ async def run_context_l1(
                     pred = final_assistant_text(events)
                     scores = score_prediction(pred, golds)
                     read_stats = read_file_stats_from_events(events)
+                    passage_chars = len(context)
+                    read_bytes = int(read_stats.get("read_bytes") or 0)
+                    # Clamp: overlapping续读 can sum above file size.
+                    read_coverage = (
+                        min(1.0, float(read_bytes) / float(passage_chars))
+                        if passage_chars > 0
+                        else 0.0
+                    )
+                    fail_msg = turn_failure_message_from_events(events)
+                    fail_class = failure_class_from_events(events)
                     l2 = {
                         "case_id": f"longbench.{task}.{idx}",
                         "turn_id": str(turn["id"]),
                         "arm": arm_norm,
                         **read_stats,
+                        "read_coverage": read_coverage,
                         "answer_len": len(pred or ""),
                         "extraction_path": "events" if pred else "fallback",
                         "steps": step_count_from_events(events),
                         "terminal_state": terminal_state_from_events(events),
                     }
+                    if fail_msg:
+                        l2["failure_message"] = fail_msg[:500]
+                    if fail_class:
+                        l2["failure_class"] = fail_class
                     l2["bucket"] = classify_bucket(
                         "context",
                         l2,
                         case_f1=float(scores.get("f1") or 0.0),
                         case_em=float(scores.get("em") or 0.0),
-                        passage_chars=len(context),
+                        passage_chars=passage_chars,
                     )
                     status = "pass"
                     err = None
@@ -1356,15 +1491,23 @@ async def run_context_l1(
                     status = "fail"
                     err = str(exc)
                     pred = ""
+                    infra = is_infra_channel_failure(err)
                     l2 = {
                         "case_id": f"longbench.{task}.{idx}",
                         "turn_id": str(turn["id"]),
                         "arm": arm_norm,
                         "terminal_state": "failed",
-                        "bucket": "steps_exhausted",
+                        "failure_message": err[:500],
+                        "failure_class": INFRA_CHANNEL_BUCKET if infra else None,
+                        "bucket": (
+                            INFRA_CHANNEL_BUCKET if infra else "steps_exhausted"
+                        ),
                     }
+                    if not infra:
+                        l2.pop("failure_class", None)
+                score_eligible = l2.get("bucket") != INFRA_CHANNEL_BUCKET
                 async with case_lock:
-                    per_task.setdefault(task, []).append(scores)
+                    per_task.setdefault(task, []).append((scores, score_eligible))
                     session.add_case(
                         f"longbench.{task}.{idx}",
                         status=status,
@@ -1376,6 +1519,7 @@ async def run_context_l1(
                             "arm": arm_norm,
                             "passage_chars": len(context),
                             "bucket": l2.get("bucket"),
+                            "failure_class": l2.get("failure_class"),
                             "l2": l2,
                             **{
                                 k: l2[k]
@@ -1387,6 +1531,10 @@ async def run_context_l1(
                                     "answer_len",
                                     "steps",
                                     "terminal_state",
+                                    "read_coverage",
+                                    "continue_reads",
+                                    "last_read_offset",
+                                    "failure_message",
                                 )
                                 if k in l2
                             },
@@ -1410,20 +1558,57 @@ async def run_context_l1(
         case_rollups: dict[str, dict[str, float]] = {}
         all_f1: list[float] = []
         all_em: list[float] = []
-        for task, scores_list in per_task.items():
-            f1 = sum(s["f1"] for s in scores_list) / max(1, len(scores_list))
-            em = sum(s["em"] for s in scores_list) / max(1, len(scores_list))
+        raw_f1: list[float] = []
+        raw_em: list[float] = []
+        n_infra = 0
+        n_scored = 0
+        n_total = 0
+        for task, scored_rows in per_task.items():
+            n_total += len(scored_rows)
+            eligible = [s for s, ok in scored_rows if ok]
+            n_infra += sum(1 for _, ok in scored_rows if not ok)
+            n_scored += len(eligible)
+            # Raw (incl. infra as scored zeros) — audit only.
+            raw_task_f1 = sum(s["f1"] for s, _ in scored_rows) / max(
+                1, len(scored_rows)
+            )
+            raw_task_em = sum(s["em"] for s, _ in scored_rows) / max(
+                1, len(scored_rows)
+            )
+            raw_f1.append(raw_task_f1)
+            raw_em.append(raw_task_em)
+            if not eligible:
+                case_rollups[f"longbench.{task}"] = {
+                    "agent_f1": 0.0,
+                    "agent_em": 0.0,
+                    "n": 0.0,
+                    "n_infra_excluded": float(len(scored_rows)),
+                }
+                continue
+            f1 = sum(s["f1"] for s in eligible) / len(eligible)
+            em = sum(s["em"] for s in eligible) / len(eligible)
             case_rollups[f"longbench.{task}"] = {
                 "agent_f1": f1,
                 "agent_em": em,
-                "n": float(len(scores_list)),
+                "n": float(len(eligible)),
+                "n_infra_excluded": float(len(scored_rows) - len(eligible)),
             }
             all_f1.append(f1)
             all_em.append(em)
+        # Primary macros exclude infra_channel cases.
         metrics["agent_f1"] = sum(all_f1) / max(1, len(all_f1))
         metrics["agent_em"] = sum(all_em) / max(1, len(all_em))
+        metrics["agent_f1_incl_infra"] = sum(raw_f1) / max(1, len(raw_f1))
+        metrics["agent_em_incl_infra"] = sum(raw_em) / max(1, len(raw_em))
+        metrics["n_cases"] = float(n_total)
+        metrics["n_scored"] = float(n_scored)
+        metrics["n_infra_excluded"] = float(n_infra)
+        metrics["infra_rate"] = float(n_infra) / float(n_total) if n_total else 0.0
         # A-2: no full/budget/compact aliases on L1 (those were same-value stubs).
         session.metrics = metrics
+        counts = bucket_counts(session.cases)
+        session.extra["bucket_counts"] = counts
+        session.extra["n_infra_excluded"] = n_infra
         result = {
             "suite": "longbench.small",
             "official": "LongBench",
@@ -1431,9 +1616,12 @@ async def run_context_l1(
             "eval_path": "agent",
             "arm": arm_norm,
             "sample_tier": session.extra.get("sample_tier"),
+            "sample_policy": session.extra.get("sample_policy"),
             "context_limit": limit,
             "metrics": metrics,
             "cases": case_rollups,
+            "bucket_counts": counts,
+            "n_infra_excluded": n_infra,
             "model": (model or {}).get("model_name"),
             "dry_metrics": False,
         }

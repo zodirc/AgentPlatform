@@ -660,7 +660,11 @@ def compare_latest_to_baseline(
     *,
     suites: tuple[str, ...] = ("retrieval", "context", "coding"),
 ) -> dict[str, Any]:
-    """Diff latest_* against committed baseline. A-4: refuse cross-tier Δ."""
+    """Diff latest_* against committed baseline. A-4: refuse cross-tier Δ.
+
+    EVAL-1: when both sides have per-case metrics, also emit paired Δ /
+    win-loss-tie / bootstrap 95% CI (primary metric per suite).
+    """
     baseline = load_baseline() or {"suites": {}, "smoke_suites": {}}
     base_suites = baseline.get("suites") if isinstance(baseline.get("suites"), dict) else {}
     base_smoke = (
@@ -686,7 +690,13 @@ def compare_latest_to_baseline(
         ),
         "coding": ("resolve_rate", "patch_rate", "n_nonempty_patches"),
     }
+    paired_primary = {
+        "retrieval": "ndcg_at_10",
+        "context": "f1",  # per-case key; suite macro is agent_f1
+        "coding": None,
+    }
     rows: list[dict[str, Any]] = []
+    paired: dict[str, Any] = {}
     for suite in suites:
         keys = primary_keys.get(suite) or ()
         # Prefer comparing within the tier that latest actually updated.
@@ -757,12 +767,178 @@ def compare_latest_to_baseline(
                     "latest_run_id": l.get("run_id"),
                 }
             )
+        # EVAL-1 paired case Δ
+        metric = paired_primary.get(suite)
+        if metric:
+            # Context cases may store f1 or agent_f1 depending on snapshot age.
+            base_cases = b.get("cases") if isinstance(b.get("cases"), dict) else {}
+            latest_cases = l.get("cases") if isinstance(l.get("cases"), dict) else {}
+            report = paired_case_delta_report(
+                base_cases,
+                latest_cases,
+                metric=metric,
+                alt_metrics=("agent_f1", "f1") if suite == "context" else (),
+            )
+            report["suite"] = suite
+            report["sample_tier"] = latest_tier
+            report["baseline_run_id"] = b.get("run_id")
+            report["latest_run_id"] = l.get("run_id")
+            paired[suite] = report
     return {
         "protocol_version": latest_doc.get("protocol_version") or baseline.get("protocol_version"),
         "baseline_updated_at": baseline.get("updated_at"),
         "rows": rows,
+        "paired": paired,
         "latest_meta": latest_doc.get("_meta"),
     }
+
+
+def paired_case_delta_report(
+    base_cases: dict[str, Any],
+    latest_cases: dict[str, Any],
+    *,
+    metric: str,
+    alt_metrics: tuple[str, ...] = (),
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """EVAL-1: per-case paired Δ + win/loss/tie + median Δ + bootstrap 95% CI."""
+    metrics_try = (metric,) + tuple(alt_metrics)
+
+    def _val(m: dict[str, Any]) -> float | None:
+        for k in metrics_try:
+            v = m.get(k)
+            if isinstance(v, (int, float)):
+                return float(v)
+        return None
+
+    shared = sorted(set(base_cases) & set(latest_cases))
+    # Prefer query/task cases over suite rollups (skip *.agent dataset rollups).
+    shared = [c for c in shared if not str(c).endswith(".agent")]
+    deltas: list[float] = []
+    wins = losses = ties = 0
+    for cid in shared:
+        bm = base_cases.get(cid) if isinstance(base_cases.get(cid), dict) else {}
+        lm = latest_cases.get(cid) if isinstance(latest_cases.get(cid), dict) else {}
+        bv = _val(bm)  # type: ignore[arg-type]
+        lv = _val(lm)  # type: ignore[arg-type]
+        if bv is None or lv is None:
+            continue
+        d = lv - bv
+        deltas.append(d)
+        if abs(d) < 1e-12:
+            ties += 1
+        elif d > 0:
+            wins += 1
+        else:
+            losses += 1
+
+    n = len(deltas)
+    mean_d = (sum(deltas) / n) if n else None
+    median_d = None
+    if n:
+        s = sorted(deltas)
+        mid = n // 2
+        median_d = s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2.0
+
+    ci_lo = ci_hi = None
+    if n >= 2:
+        import random
+
+        rng = random.Random(seed)
+        boot_means: list[float] = []
+        for _ in range(n_boot):
+            sample = [deltas[rng.randrange(n)] for _ in range(n)]
+            boot_means.append(sum(sample) / n)
+        boot_means.sort()
+        lo_i = int(0.025 * n_boot)
+        hi_i = int(0.975 * n_boot)
+        hi_i = min(hi_i, n_boot - 1)
+        ci_lo = boot_means[lo_i]
+        ci_hi = boot_means[hi_i]
+
+    # Two-sided sign test p-value (binomial under H0: P(win)=P(loss)).
+    sign_n = wins + losses
+    sign_p = None
+    if sign_n > 0:
+        from math import comb
+
+        k = min(wins, losses)
+        # P(X <= k) * 2, clipped at 1; X ~ Bin(sign_n, 0.5)
+        cdf = sum(comb(sign_n, i) for i in range(k + 1)) / (2**sign_n)
+        sign_p = min(1.0, 2.0 * cdf)
+
+    ci_includes_zero = None
+    if ci_lo is not None and ci_hi is not None:
+        ci_includes_zero = bool(ci_lo <= 0.0 <= ci_hi)
+
+    return {
+        "metric": metric,
+        "n_paired": n,
+        "n_shared_ids": len(shared),
+        "wins": wins,
+        "losses": losses,
+        "ties": ties,
+        "mean_delta": mean_d,
+        "median_delta": median_d,
+        "bootstrap_ci95": [ci_lo, ci_hi] if ci_lo is not None else None,
+        "ci_includes_zero": ci_includes_zero,
+        "sign_test_p": sign_p,
+        "verdict": (
+            "insufficient_pairs"
+            if n < 5
+            else (
+                "no_stable_delta"
+                if ci_includes_zero
+                else ("positive" if (mean_d or 0) > 0 else "negative")
+            )
+        ),
+    }
+
+
+def compare_two_manifests(
+    manifest_a: dict[str, Any],
+    manifest_b: dict[str, Any],
+    *,
+    metric_hint: str | None = None,
+) -> dict[str, Any]:
+    """EVAL-1: pair two run manifests (e.g. N=2 knife acceptance).
+
+    ``a`` is treated as baseline/before, ``b`` as latest/after.
+    """
+    snap_a = extract_suite_snapshot(manifest_a)
+    snap_b = extract_suite_snapshot(manifest_b)
+    if snap_a is None or snap_b is None:
+        return {
+            "status": "ineligible_manifest",
+            "a_ok": snap_a is not None,
+            "b_ok": snap_b is not None,
+        }
+    suite_a = str(manifest_a.get("official_suite") or "").lower()
+    suite_b = str(manifest_b.get("official_suite") or "").lower()
+    if suite_a and suite_b and suite_a != suite_b:
+        return {"status": "suite_mismatch", "a": suite_a, "b": suite_b}
+    suite = suite_a or suite_b or "unknown"
+    default_metric = {
+        "retrieval": "ndcg_at_10",
+        "context": "f1",
+        "coding": "resolve_rate",
+    }.get(suite, "ndcg_at_10")
+    metric = metric_hint or default_metric
+    cases_a = snap_a.get("cases") if isinstance(snap_a.get("cases"), dict) else {}
+    cases_b = snap_b.get("cases") if isinstance(snap_b.get("cases"), dict) else {}
+    report = paired_case_delta_report(
+        cases_a,
+        cases_b,
+        metric=metric,
+        alt_metrics=("agent_f1", "f1") if suite == "context" else (),
+    )
+    report["suite"] = suite
+    report["a_run_id"] = snap_a.get("run_id")
+    report["b_run_id"] = snap_b.get("run_id")
+    report["a_metrics"] = snap_a.get("metrics")
+    report["b_metrics"] = snap_b.get("metrics")
+    return report
 
 
 def format_compare_table(report: dict[str, Any]) -> str:
@@ -786,6 +962,27 @@ def format_compare_table(report: dict[str, Any]) -> str:
             f"{str(row.get('suite')):<12} {str(row.get('metric')):<28} "
             f"{_fmt(row.get('baseline')):>10} {_fmt(row.get('latest')):>10} {ds:>10}"
         )
+    paired = report.get("paired") if isinstance(report.get("paired"), dict) else {}
+    if paired:
+        lines.extend(["", "## EVAL-1 paired case Δ (bootstrap 95% CI)", ""])
+        for suite, pr in paired.items():
+            if not isinstance(pr, dict):
+                continue
+            ci = pr.get("bootstrap_ci95")
+            ci_s = (
+                f"[{ci[0]:+.4f}, {ci[1]:+.4f}]"
+                if isinstance(ci, list) and len(ci) == 2 and ci[0] is not None
+                else "—"
+            )
+            lines.append(
+                f"{suite}: n={pr.get('n_paired')}  "
+                f"W/L/T={pr.get('wins')}/{pr.get('losses')}/{pr.get('ties')}  "
+                f"medianΔ={_fmt(pr.get('median_delta'))}  "
+                f"meanΔ={_fmt(pr.get('mean_delta'))}  "
+                f"CI95={ci_s}  "
+                f"sign_p={_fmt(pr.get('sign_test_p'))}  "
+                f"verdict={pr.get('verdict')}"
+            )
     return "\n".join(lines)
 
 

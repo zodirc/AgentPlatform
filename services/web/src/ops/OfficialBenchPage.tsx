@@ -98,8 +98,10 @@ function retrievalTierLabel(t: RetrievalTier): string {
 }
 
 function contextTierLabel(t: ContextTier): string {
-  if (t === "full") return "全量 (~120)";
-  return String(t);
+  const perTask = t === "full" ? 40 : Number(t);
+  const approxTotal = perTask * 3;
+  if (t === "full") return `全量 · ${perTask}/task（≈${approxTotal}）`;
+  return `${perTask}/task（≈${approxTotal}）`;
 }
 
 /** Client fallback if meta.presets is old / empty — 一键配置档. */
@@ -354,15 +356,17 @@ function suitesToTargets(suites: Iterable<string>): string[] {
 function suitesFromRun(r: {
   targets?: string[];
   official_suite?: string;
-  model_meta?: { official_suite?: string };
+  model_meta?: { official_suite?: string; targets?: string[] };
 }): SuiteId[] {
   const raw =
     Array.isArray(r.targets) && r.targets.length > 0
       ? r.targets
-      : String(r.official_suite || r.model_meta?.official_suite || "")
-          .split("+")
-          .map((s) => s.trim())
-          .filter(Boolean);
+      : Array.isArray(r.model_meta?.targets) && r.model_meta.targets.length > 0
+        ? r.model_meta.targets
+        : String(r.official_suite || r.model_meta?.official_suite || "")
+            .split("+")
+            .map((s) => s.trim())
+            .filter(Boolean);
   const suites = new Set<SuiteId>();
   for (const t of raw) {
     if (t === "retrieval") suites.add("retrieval");
@@ -372,6 +376,44 @@ function suitesFromRun(r: {
     }
   }
   return SUITE_IDS.filter((id) => suites.has(id));
+}
+
+function suitesLabelZh(suites: Iterable<string>): string {
+  const labels: string[] = [];
+  for (const s of suites) {
+    if (s === "retrieval") labels.push("检索");
+    else if (s === "context") labels.push("上下文");
+    else if (s === "coding" || s === "coding_infer" || s === "coding_pull") {
+      labels.push("编码");
+    }
+  }
+  return labels.join(" · ") || "bench";
+}
+
+function runSuitesLabel(r: {
+  targets?: string[];
+  official_suite?: string;
+  model_meta?: { official_suite?: string; targets?: string[] };
+}): string {
+  return suitesLabelZh(suitesFromRun(r));
+}
+
+function tierFromLimit(
+  limit: number | null | undefined,
+  kind: "context" | "retrieval",
+): string {
+  const n = Number(limit || 0);
+  if (!Number.isFinite(n) || n <= 0) return kind === "context" ? "full" : "full";
+  if (kind === "context") {
+    if (n >= 40) return "40";
+    if (n >= 20) return "20";
+    if (n >= 10) return "10";
+    return "5";
+  }
+  if (n >= 50) return "50";
+  if (n >= 20) return "20";
+  if (n >= 10) return "10";
+  return "5";
 }
 
 type OfficialRun = {
@@ -394,6 +436,12 @@ type OfficialRun = {
   coding_n_instances?: number | null;
   coding_harness?: boolean;
   retrieval_prod?: boolean;
+  eval_path?: string;
+  context_limit?: number;
+  retrieval_query_limit?: number;
+  l1_max_parallel?: number;
+  retrieval_arm?: string;
+  context_arm?: string;
   cancel_requested?: boolean;
   report_html_available?: boolean;
   child_reports?: Array<{ case_id?: string; bench_run_id?: string; report_html?: string }>;
@@ -411,12 +459,19 @@ type OfficialRun = {
   model_meta?: {
     title?: string;
     official_suite?: string;
+    targets?: string[];
     context_dry?: boolean;
     coding_skip_api?: boolean;
     coding_tier?: string;
     coding_n_instances?: number | null;
     coding_harness?: boolean;
     retrieval_prod?: boolean;
+    eval_path?: string;
+    context_limit?: number;
+    retrieval_query_limit?: number;
+    l1_max_parallel?: number;
+    retrieval_arm?: string;
+    context_arm?: string;
     reclaimed?: boolean;
     report_html_available?: boolean;
     child_reports?: Array<{ case_id?: string; bench_run_id?: string; report_html?: string }>;
@@ -1300,6 +1355,295 @@ function MetricBars({ metrics }: { metrics: Record<string, number> }) {
   );
 }
 
+type ArtifactCase = {
+  case_id?: string;
+  status?: string;
+  bucket?: string | null;
+  metrics?: Record<string, number>;
+  error?: string | null;
+  turn_id?: string | null;
+  l2?: Record<string, unknown>;
+};
+
+type SuiteArtifact = {
+  suite?: string;
+  bench_run_id?: string;
+  status?: string;
+  title?: string;
+  metrics?: Record<string, number>;
+  bucket_counts?: Record<string, number>;
+  arm?: string;
+  sample_tier?: string;
+  context_limit?: number | null;
+  cases?: ArtifactCase[];
+  result?: Record<string, unknown>;
+  depth_audit?: Record<string, unknown> | null;
+  suite_ndcg_median?: number | null;
+};
+
+type RunArtifacts = {
+  run_id?: string;
+  suites?: SuiteArtifact[];
+  n_suites?: number;
+};
+
+const SUITE_ARTIFACT_LABEL: Record<string, string> = {
+  retrieval: "检索",
+  context: "上下文",
+  coding: "编码",
+  coding_infer: "编码",
+};
+
+function metricPreview(m: Record<string, number> | undefined): string {
+  if (!m) return "—";
+  const preferred = [
+    "ndcg_at_10",
+    "agent.ndcg_at_10",
+    "agent_f1",
+    "agent_em",
+    "f1",
+    "em",
+    "resolve_rate",
+    "n_hits",
+  ];
+  const parts: string[] = [];
+  for (const k of preferred) {
+    const v = m[k];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      parts.push(`${k}=${v.toFixed(3)}`);
+    }
+  }
+  if (!parts.length) {
+    for (const [k, v] of Object.entries(m)) {
+      if (typeof v === "number" && Number.isFinite(v) && parts.length < 3) {
+        parts.push(`${k}=${v.toFixed(3)}`);
+      }
+    }
+  }
+  return parts.join(" · ") || "—";
+}
+
+function ArtifactsPanel({
+  data,
+  loading,
+  error,
+  secret,
+}: {
+  data: RunArtifacts | null;
+  loading: boolean;
+  error: string | null;
+  secret: string;
+}) {
+  const suites = data?.suites || [];
+  const [suiteIdx, setSuiteIdx] = useState(0);
+  const [bucketFilter, setBucketFilter] = useState<string>("");
+
+  useEffect(() => {
+    setSuiteIdx(0);
+    setBucketFilter("");
+  }, [data?.run_id, suites.length]);
+
+  if (loading) {
+    return <p className="text-sm text-muted-foreground">加载产物…</p>;
+  }
+  if (error) {
+    return <p className="text-sm text-destructive">{error}</p>;
+  }
+  if (!suites.length) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        尚无子套件产物（跑次未完成，或未写入 child manifest）。
+      </p>
+    );
+  }
+
+  const suite = suites[Math.min(suiteIdx, suites.length - 1)] || suites[0];
+  const counts = suite.bucket_counts || {};
+  const totalBuckets = Object.values(counts).reduce((a, b) => a + b, 0);
+  const bucketKeys = Object.keys(counts).sort(
+    (a, b) => (counts[b] || 0) - (counts[a] || 0),
+  );
+  const cases = (suite.cases || []).filter((c) =>
+    bucketFilter ? c.bucket === bucketFilter : true,
+  );
+
+  return (
+    <div className="space-y-4">
+      {suites.length > 1 ? (
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {suites.map((s, i) => {
+            const key = s.suite || String(i);
+            const label = SUITE_ARTIFACT_LABEL[key] || key;
+            return (
+              <button
+                key={`${key}-${s.bench_run_id || i}`}
+                type="button"
+                onClick={() => {
+                  setSuiteIdx(i);
+                  setBucketFilter("");
+                }}
+                className={`rounded-md border px-2.5 py-1 ${
+                  i === suiteIdx
+                    ? "border-foreground/40 bg-muted"
+                    : "border-border"
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+
+      <div className="text-xs text-muted-foreground">
+        <span className="font-mono">{suite.bench_run_id || "—"}</span>
+        {suite.arm ? ` · arm=${suite.arm}` : ""}
+        {suite.sample_tier ? ` · ${suite.sample_tier}` : ""}
+        {suite.context_limit != null && Number(suite.context_limit) > 0
+          ? ` · limit=${suite.context_limit}/task`
+          : ""}
+        {suite.suite_ndcg_median != null
+          ? ` · median nDCG=${Number(suite.suite_ndcg_median).toFixed(3)}`
+          : ""}
+      </div>
+
+      {Object.keys(suite.metrics || {}).length ? (
+        <div className="text-xs font-mono text-muted-foreground">
+          {metricPreview(suite.metrics)}
+        </div>
+      ) : null}
+
+      <div>
+        <div className="mb-2 text-[11px] text-muted-foreground">
+          分桶{totalBuckets ? ` · n=${totalBuckets}` : ""}
+        </div>
+        {bucketKeys.length ? (
+          <div className="space-y-1.5">
+            {bucketKeys.map((b) => {
+              const n = counts[b] || 0;
+              const pct = totalBuckets > 0 ? Math.round((n / totalBuckets) * 100) : 0;
+              const active = bucketFilter === b;
+              return (
+                <button
+                  key={b}
+                  type="button"
+                  onClick={() => setBucketFilter(active ? "" : b)}
+                  className={`flex w-full items-center gap-2 rounded-md border px-2 py-1 text-left text-xs ${
+                    active
+                      ? "border-foreground/40 bg-muted"
+                      : "border-border/70 hover:bg-muted/40"
+                  }`}
+                >
+                  <span className="w-36 shrink-0 truncate font-mono">{b}</span>
+                  <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-foreground/70"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  <span className="w-16 shrink-0 text-right tabular-nums text-muted-foreground">
+                    {n} · {pct}%
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">无分桶（旧跑或未打桶）。</p>
+        )}
+        {bucketFilter ? (
+          <button
+            type="button"
+            className="mt-2 text-[11px] text-muted-foreground underline"
+            onClick={() => setBucketFilter("")}
+          >
+            清除筛选 · {bucketFilter}
+          </button>
+        ) : null}
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-xs">
+          <thead className="border-b border-border text-muted-foreground">
+            <tr>
+              <th className="py-2 pr-2">case</th>
+              <th className="py-2 pr-2">bucket</th>
+              <th className="py-2 pr-2">状态</th>
+              <th className="py-2">指标 / L2</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cases.map((c) => {
+              const l2bits: string[] = [];
+              const l2 = c.l2 || {};
+              for (const k of [
+                "n_search",
+                "query_drift",
+                "n_reads",
+                "read_coverage",
+                "answer_len",
+                "steps",
+                "terminal_state",
+              ]) {
+                if (l2[k] != null && l2[k] !== "") {
+                  const v = l2[k];
+                  l2bits.push(
+                    typeof v === "number" ? `${k}=${Number(v).toFixed(3)}` : `${k}=${v}`,
+                  );
+                }
+              }
+              return (
+                <tr key={c.case_id} className="border-b border-border/60 align-top">
+                  <td className="py-1.5 pr-2 font-mono text-[10px]">
+                    {c.turn_id ? (
+                      <Link
+                        to={opsRawPath(secret, String(c.turn_id))}
+                        className="underline decoration-dotted underline-offset-2"
+                        title="Raw turn_events"
+                      >
+                        {c.case_id}
+                      </Link>
+                    ) : (
+                      c.case_id
+                    )}
+                  </td>
+                  <td className="py-1.5 pr-2 font-mono text-[10px]">
+                    {c.bucket || "—"}
+                  </td>
+                  <td className={`py-1.5 pr-2 ${statusClass(c.status || "")}`}>
+                    {c.status}
+                  </td>
+                  <td className="py-1.5 font-mono text-[10px] text-muted-foreground">
+                    <div>{metricPreview(c.metrics)}</div>
+                    {l2bits.length ? (
+                      <div className="mt-0.5 opacity-80">{l2bits.join(" · ")}</div>
+                    ) : null}
+                    {c.error ? (
+                      <div className="mt-0.5 text-destructive">{c.error}</div>
+                    ) : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!cases.length ? (
+          <p className="mt-2 text-sm text-muted-foreground">该筛选下无 case。</p>
+        ) : null}
+      </div>
+
+      <details className="rounded-md border border-border/80 text-xs">
+        <summary className="cursor-pointer px-2 py-1.5 text-muted-foreground">
+          原始 result JSON
+        </summary>
+        <pre className="max-h-64 overflow-auto border-t border-border/60 p-2 font-mono text-[10px]">
+          {JSON.stringify(suite.result || {}, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 class EventSourcePolyfill {
   private controller = new AbortController();
   onmessage: ((ev: { data: string }) => void) | null = null;
@@ -1371,8 +1715,6 @@ export function OfficialBenchPage() {
     { id: "custom", n_instances: null },
   ]);
   const [retrievalProd, setRetrievalProd] = useState(true);
-  /** agent = L1 product Turn (default); component = L0 bench worker. */
-  const [evalPath, setEvalPath] = useState<"agent" | "component">("agent");
   /** L1 LongBench size tier: full ≈120; others are hard caps. */
   const [contextTier, setContextTier] = useState<ContextTier>("20");
   /** L1 BEIR qrels queries-per-dataset tier. */
@@ -1417,7 +1759,12 @@ export function OfficialBenchPage() {
     () => formatSuiteDetails(suiteDetails),
     [suiteDetails],
   );
-  const [tab, setTab] = useState<"overview" | "metrics" | "cases" | "log">("overview");
+  const [tab, setTab] = useState<
+    "overview" | "metrics" | "cases" | "artifacts" | "log"
+  >("overview");
+  const [artifacts, setArtifacts] = useState<RunArtifacts | null>(null);
+  const [artifactsLoading, setArtifactsLoading] = useState(false);
+  const [artifactsError, setArtifactsError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const logBoxRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSourcePolyfill | null>(null);
@@ -1505,9 +1852,6 @@ export function OfficialBenchPage() {
           setCodingCheckoutRepo(saved.coding_checkout_repo);
         }
         if (typeof saved.retrieval_prod === "boolean") setRetrievalProd(saved.retrieval_prod);
-        if (saved.eval_path === "agent" || saved.eval_path === "component") {
-          setEvalPath(saved.eval_path);
-        }
         if (saved.context_tier === "10" || saved.context_tier === "20" || saved.context_tier === "full") {
           setContextTier(saved.context_tier);
         }
@@ -1596,7 +1940,7 @@ export function OfficialBenchPage() {
           coding_harness: codingHarness,
           coding_checkout_repo: codingCheckoutRepo,
           retrieval_prod: retrievalProd,
-          eval_path: evalPath,
+          eval_path: "agent",
           context_tier: contextTier,
           retrieval_tier: retrievalTier,
           l1_max_parallel: l1Parallel,
@@ -1621,7 +1965,6 @@ export function OfficialBenchPage() {
     codingHarness,
     codingCheckoutRepo,
     retrievalProd,
-    evalPath,
     contextTier,
     retrievalTier,
     l1Parallel,
@@ -1753,9 +2096,8 @@ export function OfficialBenchPage() {
     () =>
       selectedSuites.has("context") ||
       selectedSuites.has("coding") ||
-      // L1 retrieval drives real Turns → must use Ops 评测模型 (not product Web settings).
-      (evalPath === "agent" && selectedSuites.has("retrieval")),
-    [selectedSuites, evalPath],
+      selectedSuites.has("retrieval"),
+    [selectedSuites],
   );
 
   const applyProviderPreset = (provider: string) => {
@@ -1910,9 +2252,6 @@ export function OfficialBenchPage() {
       if (d?.coding_n_instances != null) setCodingNInstances(d.coding_n_instances);
       if (d?.coding_harness !== undefined) setCodingHarness(d.coding_harness);
       if (d?.retrieval_prod !== undefined) setRetrievalProd(d.retrieval_prod);
-      if (d?.eval_path === "agent" || d?.eval_path === "component") {
-        setEvalPath(d.eval_path);
-      }
       if (d?.context_tier) setContextTier(d.context_tier);
       if (d?.retrieval_tier) setRetrievalTier(d.retrieval_tier);
       if (d?.l1_max_parallel != null) setL1Parallel(d.l1_max_parallel);
@@ -1974,6 +2313,46 @@ export function OfficialBenchPage() {
     }
     return body;
   }, [headers, selectedId]);
+
+  useEffect(() => {
+    setArtifacts(null);
+    setArtifactsError(null);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (tab !== "artifacts" || !selectedId) return;
+    let cancelled = false;
+    setArtifactsLoading(true);
+    setArtifactsError(null);
+    void (async () => {
+      try {
+        const resp = await fetch(
+          `/api/v1/ops/official/runs/${selectedId}/artifacts`,
+          { headers },
+        );
+        if (!resp.ok) {
+          const text = await resp.text();
+          if (!cancelled) {
+            setArtifacts(null);
+            setArtifactsError(text || `HTTP ${resp.status}`);
+          }
+          return;
+        }
+        const body = (await resp.json()) as RunArtifacts;
+        if (!cancelled) setArtifacts(body);
+      } catch (e) {
+        if (!cancelled) {
+          setArtifacts(null);
+          setArtifactsError(e instanceof Error ? e.message : String(e));
+        }
+      } finally {
+        if (!cancelled) setArtifactsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, selectedId, headers]);
 
   const attachLiveStream = useCallback(
     (runId: string, opts?: { resetLogs?: boolean }) => {
@@ -2143,10 +2522,41 @@ export function OfficialBenchPage() {
   const liveRun = useMemo(
     () =>
       runs.find(
-        (r) => isActiveStatus(r.status) && (r.source === "live" || !r.finished_at),
+        (r) => isActiveStatus(r.status) && r.source === "live",
       ) ?? null,
     [runs],
   );
+
+  /** Params shown in the summary: live/selected run truth, else local form. */
+  const paramsFromActiveRun = useMemo(() => {
+    const src =
+      (detail && isActiveStatus(detail.status) && detail.id === selectedId
+        ? detail
+        : null) ||
+      (liveRun && liveRun.id === selectedId ? liveRun : null);
+    if (!src) return null;
+    const suites = suitesFromRun(src);
+    const meta = src.model_meta || {};
+    const ctxLim = src.context_limit ?? meta.context_limit;
+    const retLim = src.retrieval_query_limit ?? meta.retrieval_query_limit;
+    const parallel = src.l1_max_parallel ?? meta.l1_max_parallel ?? 1;
+    return {
+      suites,
+      contextTier: tierFromLimit(ctxLim, "context") as ContextTier,
+      retrievalTier: tierFromLimit(retLim, "retrieval") as RetrievalTier,
+      parallel: Number(parallel) || 1,
+      codingTier: String(src.coding_tier || meta.coding_tier || ""),
+      codingHarness: Boolean(src.coding_harness ?? meta.coding_harness),
+      frozen: true as const,
+    };
+  }, [detail, liveRun, selectedId]);
+
+  const displaySuites = paramsFromActiveRun?.suites ?? Array.from(selectedSuites);
+  const displayContextTier =
+    paramsFromActiveRun?.contextTier ?? contextTier;
+  const displayRetrievalTier =
+    paramsFromActiveRun?.retrievalTier ?? retrievalTier;
+  const displayParallel = paramsFromActiveRun?.parallel ?? l1Parallel;
 
   // Leaving a live run must detach SSE immediately — otherwise its logs keep
   // appending into the shared buffer while another (finished) run is selected.
@@ -2223,9 +2633,6 @@ export function OfficialBenchPage() {
       setContextArm(p.context_arm);
     }
     setRetrievalProd(p.retrieval_prod !== false);
-    if (p.eval_path === "agent" || p.eval_path === "component") {
-      setEvalPath(p.eval_path);
-    }
     if (p.context_tier) setContextTier(p.context_tier);
     if (p.retrieval_tier) setRetrievalTier(p.retrieval_tier);
     if (p.l1_max_parallel != null) setL1Parallel(p.l1_max_parallel);
@@ -2294,13 +2701,13 @@ export function OfficialBenchPage() {
     const needModel =
       suites.includes("context") ||
       suites.includes("coding") ||
-      (evalPath === "agent" && suites.includes("retrieval"));
+      suites.includes("retrieval");
     const hasKey = Boolean(modelApiKey.trim() && modelName.trim() && modelProvider.trim());
     if (needModel && !hasKey) {
       setError(
-        evalPath === "agent" && suites.includes("retrieval") && !suites.includes("context") && !suites.includes("coding")
+        suites.includes("retrieval") && !suites.includes("context") && !suites.includes("coding")
           ? "L1 检索需走真实 Turn：请填写下方评测模型（供应商 / model / api_key）并点保存。"
-          : "已选上下文/编码（或 L1 检索）：请填写下方评测模型（供应商 / model / api_key）。",
+          : "已选套件需评测模型：请填写下方评测模型（供应商 / model / api_key）。",
       );
       return;
     }
@@ -2351,18 +2758,13 @@ export function OfficialBenchPage() {
           coding_harness: harness,
           coding_checkout_repo: codingCheckoutRepo,
           retrieval_prod: prod,
-          eval_path: evalPath,
+          eval_path: "agent",
           retrieval_arm: retrievalArm,
           context_arm: contextArm,
-          context_limit:
-            evalPath === "agent" && contextTier !== "full"
-              ? Number(contextTier)
-              : 0,
+          context_limit: contextTier !== "full" ? Number(contextTier) : 0,
           retrieval_query_limit:
-            evalPath === "agent" && retrievalTier !== "full"
-              ? Number(retrievalTier)
-              : 0,
-          l1_max_parallel: evalPath === "agent" ? l1Parallel : 1,
+            retrievalTier !== "full" ? Number(retrievalTier) : 0,
+          l1_max_parallel: l1Parallel,
           force: Boolean(opts?.force),
           model: modelPayload ?? null,
         }),
@@ -2893,41 +3295,32 @@ export function OfficialBenchPage() {
             <dl className="mt-3 grid gap-x-4 gap-y-1.5 text-[11px] sm:grid-cols-2">
               <div className="flex gap-2">
                 <dt className="w-20 shrink-0 text-muted-foreground">评测路径</dt>
-                <dd>
-                  {evalPath === "agent" ? "L1 agent（主路径）" : "L0 component"}
-                </dd>
+                <dd>L1 agent</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="w-20 shrink-0 text-muted-foreground">套件</dt>
-                <dd>
-                  {Array.from(selectedSuites)
-                    .map((s) =>
-                      s === "retrieval"
-                        ? "检索"
-                        : s === "context"
-                          ? "上下文"
-                          : "编码",
-                    )
-                    .join(" · ") || "（未选）"}
-                </dd>
+                <dd>{suitesLabelZh(displaySuites) || "（未选）"}</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="w-20 shrink-0 text-muted-foreground">检索档位</dt>
-                <dd>{retrievalTierLabel(retrievalTier)}</dd>
+                <dd>{retrievalTierLabel(displayRetrievalTier)}</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="w-20 shrink-0 text-muted-foreground">上下文档位</dt>
-                <dd>{contextTierLabel(contextTier)}</dd>
+                <dd>{contextTierLabel(displayContextTier)}</dd>
               </div>
               <div className="flex gap-2">
                 <dt className="w-20 shrink-0 text-muted-foreground">编码档位</dt>
                 <dd>
-                  {selectedSuites.has("coding")
-                    ? codingTier === "custom"
+                  {displaySuites.includes("coding")
+                    ? (paramsFromActiveRun?.codingTier || codingTier) ===
+                      "custom"
                       ? `custom N=${codingNInstances}`
-                      : codingTier
+                      : paramsFromActiveRun?.codingTier || codingTier
                     : "—（未开编码）"}
-                  {selectedSuites.has("coding") && codingHarness
+                  {(paramsFromActiveRun
+                    ? paramsFromActiveRun.codingHarness
+                    : selectedSuites.has("coding") && codingHarness)
                     ? " · harness"
                     : ""}
                 </dd>
@@ -2935,14 +3328,17 @@ export function OfficialBenchPage() {
               <div className="flex gap-2">
                 <dt className="w-20 shrink-0 text-muted-foreground">并行 Turn</dt>
                 <dd>
-                  {evalPath === "agent"
-                    ? l1Parallel === 1
-                      ? "1（串行）"
-                      : String(l1Parallel)
-                    : "—（L0 不用）"}
+                  {displayParallel === 1
+                    ? "1（串行）"
+                    : String(displayParallel)}
                 </dd>
               </div>
             </dl>
+            {paramsFromActiveRun?.frozen ? (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                以上为当前跑次实际参数；下方表单只影响下一次启动。
+              </p>
+            ) : null}
 
             <p className="mt-3 text-[11px] font-medium text-muted-foreground">
               修改表单
@@ -3002,25 +3398,6 @@ export function OfficialBenchPage() {
             </div>
 
             <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-3">
-              <label className="grid gap-1">
-                <span className="text-[11px] text-muted-foreground">评测路径</span>
-                <select
-                  value={evalPath}
-                  disabled={busy}
-                  onChange={(e) => {
-                    markCustomProfile();
-                    setEvalPath(
-                      e.target.value === "component" ? "component" : "agent",
-                    );
-                  }}
-                  className="rounded border border-border bg-background px-1.5 py-1"
-                >
-                  <option value="agent">L1 agent（主路径）</option>
-                  <option value="component">L0 component（对照）</option>
-                </select>
-              </label>
-              {evalPath === "agent" ? (
-                <>
                   <label className="grid gap-1">
                     <span className="text-[11px] text-muted-foreground">
                       检索档位（qrels/集）
@@ -3054,11 +3431,11 @@ export function OfficialBenchPage() {
                       }}
                       className="rounded border border-border bg-background px-1.5 py-1"
                     >
-                      <option value="full">全量 (~120)</option>
-                      <option value="40">40</option>
-                      <option value="20">20</option>
-                      <option value="10">10</option>
-                      <option value="5">5</option>
+                      <option value="full">{contextTierLabel("full")}</option>
+                      <option value="40">{contextTierLabel("40")}</option>
+                      <option value="20">{contextTierLabel("20")}</option>
+                      <option value="10">{contextTierLabel("10")}</option>
+                      <option value="5">{contextTierLabel("5")}</option>
                     </select>
                   </label>
                   <label className="grid gap-1">
@@ -3118,8 +3495,6 @@ export function OfficialBenchPage() {
                       <option value="oracle">oracle（L2 retention）</option>
                     </select>
                   </label>
-                </>
-              ) : null}
               {selectedSuites.has("coding") ? (
                 <>
                   <label className="grid gap-1">
@@ -3219,12 +3594,12 @@ export function OfficialBenchPage() {
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h3 className="text-xs font-semibold">
               评测模型
-              {needsLiveModel ? "（本次运行需要）" : "（L0 仅检索可留空）"}
+              {needsLiveModel ? "（本次运行需要）" : ""}
             </h3>
             <p className="text-[11px] text-muted-foreground">
               {needsLiveModel
-                ? "供应商与模型自动记住；api_key 需点「保存」。L1 检索也会下发此模型，不走 Web 用户设置。"
-                : "L0 组件检索不调模型；切到 L1 或勾选上下文/编码后需填写"}
+                ? "供应商与模型自动记住；api_key 需点「保存」。L1 套件下发此模型，不走 Web 用户设置。"
+                : "勾选检索 / 上下文 / 编码后需填写评测模型"}
             </p>
           </div>
           <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -3541,7 +3916,7 @@ export function OfficialBenchPage() {
             有进行中的跑次{" "}
             <span className="font-mono">{shortId(liveRun.id)}</span>
             {" · "}
-            {liveRun.official_suite || liveRun.model_meta?.official_suite || "bench"}
+            {runSuitesLabel(liveRun)}
             （不会自动打开，需手动进入）
           </span>
           <button
@@ -3698,9 +4073,7 @@ export function OfficialBenchPage() {
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="font-medium">
-                              {r.official_suite ||
-                                r.model_meta?.official_suite ||
-                                "bench"}
+                              {runSuitesLabel(r)}
                             </span>
                             <span className={statusClass(r.status)}>{r.status}</span>
                           </div>
@@ -3784,7 +4157,9 @@ export function OfficialBenchPage() {
               </header>
 
               <div className="flex flex-wrap gap-1.5 text-xs">
-                {(["overview", "metrics", "cases", "log"] as const).map((t) => (
+                {(
+                  ["overview", "metrics", "cases", "artifacts", "log"] as const
+                ).map((t) => (
                   <button
                     key={t}
                     type="button"
@@ -3799,7 +4174,9 @@ export function OfficialBenchPage() {
                         ? "指标"
                         : t === "cases"
                           ? "步骤"
-                          : "日志"}
+                          : t === "artifacts"
+                            ? "产物"
+                            : "日志"}
                   </button>
                 ))}
               </div>
@@ -3820,7 +4197,7 @@ export function OfficialBenchPage() {
                     </div>
                   ))}
                   <p className="sm:col-span-4 text-xs text-muted-foreground">
-                    单次指标见「指标」页签；跨跑次汇总见顶栏「指标汇总」（仅 completed）。
+                    单次指标见「指标」页签；完整分桶与逐题产物见「产物」；跨跑次汇总见顶栏「指标汇总」（仅 completed）。
                   </p>
                 </div>
               ) : null}
@@ -3850,6 +4227,15 @@ export function OfficialBenchPage() {
                     </tbody>
                   </table>
                 </div>
+              ) : null}
+
+              {tab === "artifacts" ? (
+                <ArtifactsPanel
+                  data={artifacts}
+                  loading={artifactsLoading}
+                  error={artifactsError}
+                  secret={secret}
+                />
               ) : null}
 
               {tab === "log" ? (

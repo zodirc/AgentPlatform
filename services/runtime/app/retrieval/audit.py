@@ -24,6 +24,15 @@ def begin_audit_capture() -> Token:
             "recall_pool": [],
             "ranked": [],
             "rank_method": None,
+            # RET-10: true lane depths (not STAGE_CAP-truncated lists)
+            "_vector_n": 0,
+            "_bm25_n": 0,
+            "_union_n": 0,
+            "_lane_top_k": None,
+            "_requested_limit": None,
+            "_over_fetch_multiplier": None,
+            "_two_level_doc_n": 0,
+            "_two_level_enabled": False,
         }
     )
 
@@ -65,6 +74,39 @@ def record_lane_hits(*, vector: list[Any], bm25: list[Any]) -> None:
         return
     slot["_vector"] = [_hit_row(h, source="vector") for h in vector[:_STAGE_CAP]]
     slot["_bm25"] = [_hit_row(h, source="bm25") for h in bm25[:_STAGE_CAP]]
+    # RET-10: full lane sizes (STAGE_CAP only truncates preview rows).
+    slot["_vector_n"] = int(len(vector))
+    slot["_bm25_n"] = int(len(bm25))
+    seen: set[str] = set()
+    for h in list(vector) + list(bm25):
+        cid = str(getattr(h, "chunk_id", "") or "")
+        if cid:
+            seen.add(cid)
+    slot["_union_n"] = len(seen)
+
+
+def record_lane_depth_meta(
+    *,
+    lane_top_k: int | None = None,
+    requested_limit: int | None = None,
+    over_fetch_multiplier: float | None = None,
+    two_level_doc_n: int | None = None,
+    two_level_enabled: bool | None = None,
+) -> None:
+    """RET-10: lightweight lane/fetch knobs for depth_audit (no hit payloads)."""
+    slot = _audit_slot.get()
+    if slot is None:
+        return
+    if lane_top_k is not None:
+        slot["_lane_top_k"] = int(lane_top_k)
+    if requested_limit is not None:
+        slot["_requested_limit"] = int(requested_limit)
+    if over_fetch_multiplier is not None:
+        slot["_over_fetch_multiplier"] = float(over_fetch_multiplier)
+    if two_level_doc_n is not None:
+        slot["_two_level_doc_n"] = int(two_level_doc_n)
+    if two_level_enabled is not None:
+        slot["_two_level_enabled"] = bool(two_level_enabled)
 
 
 def record_recall_pool(hits: list[Any], *, source: str = "fused") -> None:
@@ -158,6 +200,23 @@ def finalize_audit_for_result(
                 for row in audit["recall_pool"]
             ]
         audit["rank_method"] = captured.get("rank_method")
+        # RET-10 lane depth (true counts; preview lists remain STAGE_CAP-capped).
+        lane_depth: dict[str, Any] = {
+            "vector_n": int(captured.get("_vector_n") or 0),
+            "bm25_n": int(captured.get("_bm25_n") or 0),
+            "union_n": int(captured.get("_union_n") or 0),
+            "two_level_doc_n": int(captured.get("_two_level_doc_n") or 0),
+            "two_level_enabled": bool(captured.get("_two_level_enabled") or False),
+        }
+        if captured.get("_lane_top_k") is not None:
+            lane_depth["lane_top_k"] = int(captured["_lane_top_k"])
+        if captured.get("_requested_limit") is not None:
+            lane_depth["requested_limit"] = int(captured["_requested_limit"])
+        if captured.get("_over_fetch_multiplier") is not None:
+            lane_depth["over_fetch_multiplier"] = float(
+                captured["_over_fetch_multiplier"]
+            )
+        audit["lane_depth"] = lane_depth
     if not audit["recall_pool"] and hits:
         # Keyword / fallback: single stage.
         audit["recall_pool"] = [

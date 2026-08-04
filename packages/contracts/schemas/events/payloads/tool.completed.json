@@ -41,6 +41,34 @@
     "is_truncated": {
       "type": "boolean"
     },
+    "chars_read": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CTX-9: characters returned in this read_file window (not full file dump on the event)."
+    },
+    "file_chars": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CTX-9: total characters of the source file when known (for coverage = chars_read cumulative / file)."
+    },
+    "offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "read_file 1-based start line when applicable."
+    },
+    "end_line": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_lines": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "next_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Continuation line for truncated read_file; omit when complete."
+    },
     "bytes_written": {
       "type": "integer",
       "minimum": 0

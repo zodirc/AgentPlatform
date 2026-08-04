@@ -4,6 +4,7 @@ import asyncio
 from copy import copy, deepcopy
 import json
 import logging
+import re
 import time
 from contextlib import suppress
 from typing import Any, Awaitable, Callable
@@ -1141,6 +1142,46 @@ class AgentEngine:
             "status": tool_status,
             "summary": summary,
         }
+        # CTX-9: light read coverage fields (no full content on the bus).
+        if tool_name == "read_file" and isinstance(result, dict) and not result.get("error"):
+            content = result.get("content")
+            if isinstance(content, str):
+                completed_payload["chars_read"] = len(content)
+            elif result.get("chars_read") is not None:
+                try:
+                    completed_payload["chars_read"] = int(result["chars_read"])
+                except (TypeError, ValueError):
+                    pass
+            # Prefer explicit total; else recover from CTX-2a hint「已读 X / 共 Y 字符」.
+            file_chars = result.get("file_chars")
+            if file_chars is None:
+                hint = str(result.get("hint") or "")
+                m = re.search(r"已读\s+(\d+)\s*/\s*共\s+(\d+)\s*字符", hint)
+                if m:
+                    file_chars = int(m.group(2))
+                    if "chars_read" not in completed_payload:
+                        completed_payload["chars_read"] = int(m.group(1))
+            if file_chars is not None:
+                try:
+                    completed_payload["file_chars"] = int(file_chars)
+                except (TypeError, ValueError):
+                    pass
+            for key in ("offset", "end_line", "total_lines"):
+                if result.get(key) is not None:
+                    try:
+                        completed_payload[key] = int(result[key])
+                    except (TypeError, ValueError):
+                        pass
+            if result.get("next_offset") not in (None, "", 0, "0"):
+                try:
+                    completed_payload["next_offset"] = int(result["next_offset"])
+                except (TypeError, ValueError):
+                    pass
+            if result.get("truncated") is not None:
+                completed_payload["is_truncated"] = bool(result.get("truncated"))
+            path_val = str(result.get("path") or "")
+            if path_val:
+                completed_payload["path"] = path_val
         if tool_name in {"write_file", "edit_file"}:
             args = arguments if isinstance(arguments, dict) else {}
             path_val = str(result.get("path") or args.get("path") or "")

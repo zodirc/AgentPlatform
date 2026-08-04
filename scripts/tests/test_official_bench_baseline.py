@@ -185,3 +185,34 @@ def test_compare_refuses_tier_mismatch(tmp_path: Path, monkeypatch) -> None:
     report = compare_latest_to_baseline(suites=("retrieval",))
     statuses = {r.get("status") for r in report["rows"] if r.get("status")}
     assert "tier_mismatch" in statuses
+
+
+def test_paired_case_delta_report_bootstrap() -> None:
+    from official_bench.baseline import paired_case_delta_report
+
+    base = {f"beir.fiqa.q-{i}": {"ndcg_at_10": 0.2} for i in range(20)}
+    latest = {
+        f"beir.fiqa.q-{i}": {"ndcg_at_10": 0.2 + (0.1 if i < 15 else -0.05)}
+        for i in range(20)
+    }
+    report = paired_case_delta_report(base, latest, metric="ndcg_at_10")
+    assert report["n_paired"] == 20
+    assert report["wins"] == 15
+    assert report["losses"] == 5
+    assert report["ties"] == 0
+    assert report["mean_delta"] is not None and report["mean_delta"] > 0
+    assert report["bootstrap_ci95"] is not None
+    assert report["ci_includes_zero"] is False
+    assert report["verdict"] == "positive"
+
+
+def test_paired_case_delta_ci_includes_zero() -> None:
+    from official_bench.baseline import paired_case_delta_report
+
+    base = {f"c{i}": {"ndcg_at_10": 0.5} for i in range(20)}
+    latest = {
+        f"c{i}": {"ndcg_at_10": 0.5 + (0.01 if i % 2 == 0 else -0.01)} for i in range(20)
+    }
+    report = paired_case_delta_report(base, latest, metric="ndcg_at_10")
+    assert report["ci_includes_zero"] is True
+    assert report["verdict"] == "no_stable_delta"

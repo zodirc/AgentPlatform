@@ -3,9 +3,15 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.1 — 2026-08-04
+
+- `events/payloads/tool.completed.json`: 新增可选 `chars_read` / `file_chars` /
+  `offset` / `end_line` / `total_lines` / `next_offset`（CTX-9 读覆盖探针；
+  不在事件总线携带全文 content）。向后兼容。
+
 ## 0.3.0 — 2026-08-02
 
-- `events/payloads/retrieval.completed.json`: 新增可选顶层字段 `ranked`
+- `events/payloads/retrieval.completed.json`: `audit.lane_depth`（RET-10：vector/bm25/union/top_k/over_fetch/two_level 真计数）
   （≤100 条 path/score/chunk_id，供 Ops / official L1 计 nDCG@10 / R@100）。
   向后兼容；写侧先升 runtime schema，旧消费者忽略未知字段即可。
 

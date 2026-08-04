@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from official_bench.agent_path_extract import (  # noqa: E402
     called_tools,
     doc_id_from_path,
+    failure_class_from_events,
     merge_retrieval_rankings,
     patch_apply_check,
     patch_from_events,
@@ -16,13 +17,58 @@ from official_bench.agent_path_extract import (  # noqa: E402
     patch_from_work_root,
     ranking_scores,
     search_queries_from_events,
+    terminal_state_from_events,
 )
 from official_bench.l2_probes import (  # noqa: E402
     classify_bucket,
     config_fingerprint,
+    is_infra_channel_failure,
     query_drift,
 )
 from official_bench.bucket_report import classify_manifest  # noqa: E402
+
+
+def test_infra_channel_detection() -> None:
+    assert is_infra_channel_failure(
+        'model_error: model retries exhausted after 3 attempts: model API 503: '
+        '{"error":{"message":"Service is too busy."}}'
+    )
+    assert is_infra_channel_failure(
+        "model_error: model retries exhausted after 3 attempts: openai transport error: "
+    )
+    assert is_infra_channel_failure(
+        "model_error: model retries exhausted after 3 attempts: first byte timeout after 15.0s"
+    )
+    assert not is_infra_channel_failure("")
+    assert not is_infra_channel_failure("tool read_file failed: file not found")
+    events = [
+        {
+            "type": "turn.failed",
+            "payload": {
+                "message": (
+                    "model_error: model retries exhausted after 3 attempts: "
+                    "openai http timeout: "
+                ),
+                "termination_reason": "fatal_error",
+            },
+        }
+    ]
+    assert failure_class_from_events(events) == "infra_channel"
+    assert terminal_state_from_events(events) == "failed"
+    # Provider timeout must not be remapped to step_timeout.
+    assert (
+        terminal_state_from_events(
+            [
+                {
+                    "type": "turn.failed",
+                    "payload": {
+                        "message": "model_error: first byte timeout after 15.0s",
+                    },
+                }
+            ]
+        )
+        == "failed"
+    )
 
 
 def test_doc_id_from_materialised_path() -> None:
@@ -68,6 +114,84 @@ def test_merge_retrieval_empty_is_empty() -> None:
 def test_ranking_scores_descending() -> None:
     scores = ranking_scores(["a", "b", "c"], limit=10)
     assert scores["a"] > scores["b"] > scores["c"]
+
+
+def test_read_file_stats_uses_chars_read_on_completed() -> None:
+    """CTX-9: tool.completed has no content; chars_read/file_chars drive coverage."""
+    from official_bench.agent_path_extract import read_file_stats_from_events
+
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "read_file",
+                "arguments": {"path": "sources/passage.md"},
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "read_file",
+                "status": "ok",
+                "summary": "Read sources/passage.md lines 1–100/500 (truncated; next_offset=101)",
+                "chars_read": 4000,
+                "file_chars": 50_000,
+                "offset": 1,
+                "end_line": 100,
+                "total_lines": 500,
+                "next_offset": 101,
+                "is_truncated": True,
+            },
+        },
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "read_file",
+                "arguments": {"path": "sources/passage.md", "offset": 101},
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "read_file",
+                "status": "ok",
+                "chars_read": 3500,
+                "file_chars": 50_000,
+                "offset": 101,
+                "next_offset": 201,
+                "is_truncated": True,
+            },
+        },
+    ]
+    stats = read_file_stats_from_events(events)
+    assert stats["n_reads"] == 2
+    assert stats["read_bytes"] == 7500
+    assert stats["file_chars"] == 50_000
+    assert stats["used_next_offset"] is True
+    assert stats["continue_reads"] == 1
+    assert stats["truncation_hits"] >= 1
+    assert stats["last_read_offset"] == 201
+
+
+def test_read_file_stats_falls_back_to_chinese_hint() -> None:
+    from official_bench.agent_path_extract import read_file_stats_from_events
+
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {"tool_name": "read_file", "arguments": {"path": "p.md"}},
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "read_file",
+                "status": "ok",
+                "summary": "已读 3200 / 共 48000 字符，内容未完；续读请传 offset=80",
+            },
+        },
+    ]
+    stats = read_file_stats_from_events(events)
+    assert stats["read_bytes"] == 3200
 
 
 def test_search_queries_from_events() -> None:
@@ -124,6 +248,101 @@ def test_search_limits_and_ranked_lengths_ret6() -> None:
     assert depth["merged_len"] == 10
     assert depth["max_limit"] == 30
     assert depth["ranked_lengths"] == [10, 12]
+
+
+def test_depth_audit_lane_depth_ret10() -> None:
+    from official_bench.agent_path_extract import depth_audit_from_events
+    from official_bench.l2_probes import depth_audit_aggregate
+
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "search_sources",
+                "arguments": {"query": "q", "limit": 30},
+            },
+        },
+        {
+            "type": "retrieval.completed",
+            "payload": {
+                "hit_count": 10,
+                "ranked": [{"path": f"sources/{i}.txt"} for i in range(10)],
+                "audit": {
+                    "lane_depth": {
+                        "vector_n": 40,
+                        "bm25_n": 40,
+                        "union_n": 55,
+                        "lane_top_k": 120,
+                        "requested_limit": 30,
+                        "over_fetch_multiplier": 2.0,
+                        "two_level_doc_n": 8,
+                        "two_level_enabled": True,
+                    }
+                },
+            },
+        },
+    ]
+    depth = depth_audit_from_events(events)
+    assert depth["lane_vector_n"] == 40
+    assert depth["lane_bm25_n"] == 40
+    assert depth["lane_union_n"] == 55
+    assert depth["lane_top_k"] == 120
+    assert depth["over_fetch_multiplier"] == 2.0
+    assert depth["two_level_doc_n"] == 8
+
+    cases = []
+    for i in range(10):
+        cases.append(
+            {
+                "case_id": f"beir.fiqa.q-{i}",
+                "turn_id": f"t{i}",
+                "merged_len": 10,
+                "lane_vector_n": 100,
+                "lane_bm25_n": 100,
+                "lane_top_k": 120,
+                "search_limits": [30],
+                "l2": {
+                    "n_search": 1,
+                    "merged_len": 10,
+                    "lane_vector_n": 100,
+                    "lane_bm25_n": 100,
+                    "lane_top_k": 120,
+                    "search_limits": [30],
+                },
+            }
+        )
+    agg = depth_audit_aggregate(cases)
+    assert agg["fiqa_lane_adjudication"] == "lanes_fed_relevance"
+    assert agg["by_dataset"]["fiqa"]["lanes_fed_but_short_n"] == 10
+
+
+def test_depth_audit_lane_starvation_adjudication() -> None:
+    from official_bench.l2_probes import depth_audit_aggregate
+
+    cases = []
+    for i in range(10):
+        cases.append(
+            {
+                "case_id": f"beir.fiqa.q-{i}",
+                "turn_id": f"t{i}",
+                "merged_len": 8,
+                "lane_vector_n": 5,
+                "lane_bm25_n": 4,
+                "lane_top_k": 120,
+                "search_limits": [30],
+                "l2": {
+                    "n_search": 1,
+                    "merged_len": 8,
+                    "lane_vector_n": 5,
+                    "lane_bm25_n": 4,
+                    "lane_top_k": 120,
+                    "search_limits": [30],
+                },
+            }
+        )
+    agg = depth_audit_aggregate(cases)
+    assert agg["fiqa_lane_adjudication"] == "lane_top_k_starvation"
+    assert agg["by_dataset"]["fiqa"]["lane_starved_n"] == 10
 
 
 def test_depth_audit_aggregate_fiqa_pool_starvation() -> None:
@@ -373,7 +592,21 @@ def test_query_drift_and_buckets() -> None:
             case_f1=0.0,
             passage_chars=10_000,
         )
-        == "gave_up_early"
+        == "truly_abandoned"
+    )
+    assert (
+        classify_bucket(
+            "context",
+            {
+                "truncation_hits": 0,
+                "used_next_offset": False,
+                "read_bytes": 2000,
+                "read_coverage": 0.2,
+            },
+            case_f1=0.0,
+            passage_chars=10_000,
+        )
+        == "wrong_answer_after_read"
     )
     assert (
         classify_bucket(
@@ -408,6 +641,33 @@ def test_query_drift_and_buckets() -> None:
             passage_chars=100,
         )
         == "steps_exhausted"
+    )
+    assert (
+        classify_bucket(
+            "context",
+            {
+                "failure_class": "infra_channel",
+                "failure_message": "model_error: openai transport error",
+                "truncation_hits": 0,
+                "read_bytes": 0,
+                "read_coverage": 0.0,
+                "terminal_state": "failed",
+            },
+            case_f1=0.0,
+            passage_chars=10_000,
+        )
+        == "infra_channel"
+    )
+    assert (
+        classify_bucket(
+            "retrieval",
+            {
+                "searched": False,
+                "failure_class": "infra_channel",
+                "failure_message": "model API 503: Service is too busy",
+            },
+        )
+        == "infra_channel"
     )
     assert classify_bucket("coding", {"patch_source": "none"}) == "no_patch"
     assert (
