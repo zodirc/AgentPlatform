@@ -328,13 +328,34 @@ def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
         }
 
     results: list[dict[str, Any]] = []
-    for work_id, work_root, owner_id in works:
+    total = len(works)
+    for i, (work_id, work_root, owner_id) in enumerate(works, start=1):
         check_sync_cancelled()
         logger.info(
-            "ops beir index sync start; work_id=%s dir=%s",
+            "ops beir index sync start; work=%s/%s work_id=%s dir=%s",
+            i,
+            total,
             work_id,
             work_root,
         )
+        try:
+            from app.retrieval.sync_progress import report_sync_progress
+
+            report_sync_progress(
+                force=True,
+                status="building",
+                phase="scope",
+                scopes_done=i,
+                scopes_total=total,
+                work_id=work_id,
+                path=work_root,
+                chunks_embedded=0,
+                chunks_total=None,
+                rate_chunks_per_s=None,
+                eta_s=None,
+            )
+        except Exception:
+            logger.debug("ops beir scope progress skipped", exc_info=True)
         results.append(
             sync_sources_index_work_blocking(
                 work_id=work_id,

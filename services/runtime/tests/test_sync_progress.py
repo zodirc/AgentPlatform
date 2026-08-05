@@ -104,3 +104,52 @@ def test_mark_sync_finished_keeps_work_id(tmp_path: Path, monkeypatch) -> None:
     assert done["phase"] == "finished"
     assert done["work_id"] == "abc"
     assert done["last_result"]["work_id"] == "abc"
+
+
+def test_format_cli_progress_line_bar_and_eta() -> None:
+    line = sp.format_cli_progress_line(
+        {
+            "phase": "embed",
+            "path": "/data/ops-l1/beir-index/fiqa",
+            "scopes_done": 2,
+            "scopes_total": 3,
+            "chunks_embedded": 29042,
+            "chunks_total": 58084,
+            "rate_chunks_per_s": 12.5,
+            "eta_s": 2323.0,
+        }
+    )
+    assert "嵌入向量" in line
+    assert "库 2/3" in line
+    assert "fiqa" in line
+    assert "[" in line and "]" in line
+    assert "块 29042/58084" in line
+    assert "12/s" in line or "12.5/s" in line
+    assert "剩余" in line
+
+
+def test_format_eta_s_hours() -> None:
+    assert sp.format_eta_s(45) == "约 45s"
+    assert sp.format_eta_s(120) == "约 2 min"
+    assert sp.format_eta_s(3720) is not None
+    assert "h" in (sp.format_eta_s(3720) or "")
+
+
+def test_install_cli_progress_sink_prints(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sp.settings, "data_dir", str(tmp_path))
+    uninstall = sp.install_cli_progress_sink(min_interval_s=0.0)
+    try:
+        sp.report_sync_progress(
+            force=True,
+            status="building",
+            phase="embed",
+            chunks_embedded=10,
+            chunks_total=100,
+            rate_chunks_per_s=5.0,
+        )
+    finally:
+        uninstall()
+    err = capsys.readouterr().err
+    assert "[sync]" in err
+    assert "嵌入向量" in err
+    assert sp._sink is None
