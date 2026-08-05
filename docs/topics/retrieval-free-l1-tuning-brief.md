@@ -133,7 +133,8 @@
 - qrels / 官方 query **不进** runtime，也不参与 RET-11 生成。  
 - 不为 gold 名次 11–100 开新排序加法；CE 默认关（RET-19 已关闭热路径议题）。  
 - 未重嵌只改查询模型；跳过 REP-3 把 L0 +9pp 写入 SCORECARD —— **禁止**。  
-- RET-5 / RET-13 **挂起**（RET-13 解挂条件含 RET-9 正 Δ，实质已死）。
+- RET-5 / RET-13 **挂起**（RET-13 解挂条件含 RET-9 正 Δ，实质已死）。  
+- **C-MTEB / 中文检索套件**：不并入 BEIR 主栏宏分；不建「BEIR+C-MTEB 混装」全局旁路索引；不为本轮 RET-4/18 验收绑架中文模（见 §7.11 · **暂不实施**）。
 
 **上下文**
 
@@ -323,6 +324,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | **上下文尺子偏离官方口径** | EVAL-8 双锚：v1→v2 F1 +10.4/+12.0pp；EM 双向（+8.3 / −6.5pp） | **已闭合**（v2 切码 + batch16 产物）；旧锚标 v1 |
 | 组装层丢证暴露面 | CTX-13：三分桶合计 **0** / WA（`b5d24c9e` + 佐证 `1707135c`） | **已闭合**；CTX-14/15/6 降级不开 |
 | BEIR≠产品分布 | 自知 + RET-4 污染条款 | **PROD-1** 迁移率 |
+| 缺中文 IR 温度计 | 产品若含中文语料；C-MTEB 可作分栏套件 | **PROD-2**（§7.11 · 草案 · 暂不实施） |
 
 ---
 
@@ -342,9 +344,10 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | 3.6 | B′ | CTX-16 交付面 / 定位面回访 | EVAL-8 复算中的稀释质量 / never_retrieved 质量 ≥ 2.2pp | **关题**（稀释 potential 0.00/2.08pp < 2.2；定位面不立项） |
 | 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **栈已切 OFF**（`.env` + runtime recreate · `force_reindex=False`）；**free N≥2 待 Ops**（CLI `d5b21e9b` 401/infra=1 **作废不入对照**） |
 | 5 | C | **REP-3** 全量锚 | 栈冻结 + 两套件落库 | **未执行**（硬前置） |
-| 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · 重嵌进行中/待验收** |
+| 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · 重嵌 ✓（gte-small）· 待 free 验收** |
 | 7 | E | **RET-11(b)**（视 D 余量） | N≥2；分影子 | **视 D 余量**；rerank 已由 RET-19 关闭 |
 | 8 | F | **PROD-1** 首跑 + 终态四问书面作答 | 完备收束 | **草稿 · 未首跑** |
+| 9 | G | **PROD-2** C-MTEB 小量 + Ops 旁路索引 | 配置草案落地 + 隔离索引同构跑通 | **草案 · 暂不实施**（§7.11；不挡本轮 RET 日历） |
 
 ### 7.2 RET-18 · two-level 消融（减法 · 不计停机线）
 
@@ -532,6 +535,7 @@ free 验收: N≥2 分库 FiQA/NFCorpus + weak_hits；诚实 +0.02~0.05
         （BEIR 涨而 PROD 不涨 → 污染警报必须入入库叙事）
 非目标: 不替代 BEIR；不用 LLM 生成题面；宁小而真
 排期: F 批；可与重嵌并行构建
+中文对照: 另见 §7.11 PROD-2（C-MTEB）；与 PROD-1 正交，勿混栏
 ```
 
 ### 7.9 上下文第二审视：测量面与交付面（2026-08-05 增补 · 新证据）
@@ -630,11 +634,84 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 - 上下文：**CTX-13 已收 · 暴露面=0**；**EVAL-8 已收** → 产品侧不承诺工程抬分；v1 锚 ≈0.41 / **v2 读数 ≈0.53**（校准）；CTX-16/定位面**关题**。  
 - RET-4 后宏分仍平 → 按终态条 2 把检索残余书面归因到 {qrels 结构 / 能力墙}，brief 仍可完备收束——**「证明了修不动」与「修好了」都是完备终态**。  
 - PROD-1 迁移率显著低于 BEIR Δ → 如实写入入库叙事，作为下一轮产品语料专项开题，不是本轮失败。  
-- RET-18 / REP-3 / 观测刀（含已收 CTX-13 / EVAL-8）**不承诺分数**；EVAL-8 Δ 尤其禁止记宏分胜。
+- RET-18 / REP-3 / 观测刀（含已收 CTX-13 / EVAL-8）**不承诺分数**；EVAL-8 Δ 尤其禁止记宏分胜。  
+- **PROD-2（C-MTEB）**：草案见 §7.11；**本轮不实施、不挡 RET 日历**；落地后与 BEIR / PROD-1 三分温度计，禁止混宏分。
 
----
+### 7.11 PROD-2 · C-MTEB 小量配置 + Ops 旁路索引（草案 · **暂不实施**）
 
-## 8. 一页决策树
+> **状态**：2026-08-05 书面收录；**不开工**。本轮火力仍在 RET-18 → REP-3 → RET-4。  
+> **全称**：C-MTEB = Chinese Massive Text Embedding Benchmark（中文大规模文本向量评测；检索子集可作中文 IR 温度计）。  
+> **动机**：BEIR 为英文 IR；产品若含中文语料，需要第二套**分栏**中文检索温度计，且不得污染 BEIR 历史链。
+
+#### 提案要点（已口头对齐 · 写入纪律）
+
+| # | 提案 | 裁决形态 |
+|---|------|----------|
+| 1 | 小量写进配置文件（对齐 `eval/official/suites.small.yaml`） | **采纳方向** · 暂不改文件 |
+| 2 | Ops 评测旁路索引加载 C-MTEB 与 BEIR | **采纳方向** · 旁路=「语料/索引作用域隔离」，**不是**第二套检索器 |
+
+#### ① 配置草案（未落地）
+
+```yaml
+# 拟增于 suites.small.yaml（示意 · 勿直接合入本轮）
+# suites:
+#   retrieval_zh:                    # 与 retrieval(BEIR) 并列，禁止共用 primary 宏分
+#     id: cmteb.small
+#     official: C-MTEB
+#     task_filter: [retrieval]       # 本轮只要检索；STS/分类等不开
+#     datasets:                      # 优先小库；暂缓 T2Retrieval 全量
+#       - CovidRetrieval             # ~1k queries 量级
+#       - MedicalRetrieval           # ~1k
+#       - EcomRetrieval              # ~1k
+#       # 可选第四：CmedqaRetrieval / DuRetrieval（视磁盘与嵌库预算）
+#     sample_policy:
+#       method: head_slice           # 或冻结 ids_fingerprint
+#       limit_queries_per_dataset: 20
+#     metrics: [ndcg_at_10, recall_at_100]
+#     primary_arm: free              # L1 与 BEIR 同 free 协议
+#     protocol_note: "cmteb-small-v0 · 与 beir.small 分 suite 分栏"
+```
+
+- C-MTEB **无官方 small 档**；本仓 `cmteb.small` = 自切片（与 BEIR smoke 同权：量准用，不入库单次噪声）。  
+- 全量 35 库 / 6 任务类型**不进**本票；只开 retrieval 子集小量。
+
+#### ② Ops 旁路索引（形态写死）
+
+```text
+旁路 = 什么
+  ✓ 评测语料不进产品 seed 索引
+  ✓ 每 suite / 每 dataset 独立 work 物化 + 建索引（现 BEIR L1 同构）
+  ✓ Ops 可并列入口：BEIR small ∥ C-MTEB small（分跑或分 tab）
+  ✓ 用户路径仍 Session→Turn→search_sources→hybrid（同产品面）
+
+旁路 ≠ 什么
+  ✗ 一个全局索引混装 BEIR + C-MTEB 语料（串扰 / 不可归因）
+  ✗ 评测专用 ranker / fusion / 强制搜（毁同构；R 红线）
+  ✗ 把中英文 nDCG 平均进同一 SCORECARD 主栏
+```
+
+#### 硬约束
+
+1. **温度计三分**：BEIR（英）· C-MTEB（中）· PROD-1（产品镜像）——分 suite、分宏分、分入库叙事。  
+2. **嵌入模型**：现行默认 `gte-small` 偏英文；C-MTEB 须**中文向量模型**（或明确双模 profile），否则分数无产品意义；换模另立票，不绑 RET-4。  
+3. **排期**：G 批；**硬后置于**本轮 RET-18 / REP-3 / RET-4（±11）与 PROD-1 首跑之后或并行**仅文档/拉数**，禁止抢嵌库与验收窗口。  
+4. **门禁**：冒烟 N≥2 只去留；入库仍要全量或明确锚点档；中文套件涨分不给 BEIR 刀背书。
+
+#### 非目标 / 暂不实施清单
+
+- 本轮不改 `suites.small.yaml`、不拉 C-MTEB 数据、不改 Ops UI、不建旁路索引代码。  
+- 不上 T2Retrieval 全量作小量冒烟。  
+- 不把 C-MTEB 当作「BEIR 不够再补一刀」的抬分通道。
+
+#### 完成判据（若未来开工）
+
+```text
+① suites 配置合入 + protocol 版本 bump 说明
+② pull + 每库隔离索引 + L1 free 冒烟 N≥2 跑通
+③ Ops 分栏展示；SCORECARD 中文栏独立（可先空）
+④ 书面确认：未改 while / 未混索引 / 未用英文模硬评中文主栏
+```
+
 
 ```text
 拟议改动
@@ -653,4 +730,5 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 **当前唯一正确日历**：
 检索——嵌库就绪 → **RET-18** → **REP-3**（须 `agent_f1@v2`）→ **RET-4 验收** → 视余量 RET-11(b)；
 上下文——**产品侧工程停手**；**EVAL-8 已收**（v2 切码 · CTX-16/定位面关题）；
-收束——PROD-1 首跑 + 终态四问书面作答（终态条 3：EVAL-8 ✓ · REP-3 待补）。
+收束——PROD-1 首跑 + 终态四问书面作答（终态条 3：EVAL-8 ✓ · REP-3 待补）；
+ backlog——**PROD-2 C-MTEB 小量 + 旁路索引（§7.11 · 暂不实施）**。
