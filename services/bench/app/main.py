@@ -507,12 +507,14 @@ async def health() -> dict[str, Any]:
     except ImportError:
         st_ok = False
     script = (_repo_root() / "scripts" / "official_bench_run.py").is_file()
+    embedding_model = (os.environ.get("EMBEDDING_MODEL") or "").strip() or None
     return {
         "ok": True,
         "service": "bench",
         "sentence_transformers": st_ok,
         "script": script,
         "retrieval_prod_ready": st_ok and script,
+        "embedding_model": embedding_model,
     }
 
 

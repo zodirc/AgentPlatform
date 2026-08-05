@@ -9,9 +9,11 @@ import pytest
 
 from app.retrieval.embedder import reset_embedder_cache
 from app.retrieval.index_scheduler import (
+    _is_ops_l1_root,
     cancel_startup_sources_sync,
     run_sources_index_sync,
     schedule_startup_sources_sync,
+    sync_ops_beir_indexes_blocking,
     sync_sources_index_blocking,
 )
 from app.retrieval.vector_index import SourceVectorIndex
@@ -134,3 +136,23 @@ async def test_search_sources_does_not_sync(
     result = await core.search_sources("unique-token-xyz")
     assert calls == []
     assert "hits" in result
+
+
+def test_is_ops_l1_root_detects_beir_index(tmp_path: Path) -> None:
+    beir = tmp_path / "data" / "ops-l1" / "beir-index" / "fiqa"
+    beir.mkdir(parents=True)
+    assert _is_ops_l1_root(beir) is True
+    normal = tmp_path / "workspace" / "works" / "abc"
+    normal.mkdir(parents=True)
+    assert _is_ops_l1_root(normal) is False
+
+
+def test_sync_ops_beir_indexes_empty_when_no_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.retrieval.index_scheduler._list_ops_beir_works", lambda: []
+    )
+    out = sync_ops_beir_indexes_blocking()
+    assert out["scopes"] == 0
+    assert out["works"] == []

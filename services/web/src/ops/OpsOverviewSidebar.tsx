@@ -138,11 +138,13 @@ const COPY = {
     healthDown: "异常",
     stReady: "ST 就绪",
     retrievalProd: "真向量",
-    modelApiKey: "模型 Key",
+    modelApiKey: "环境 API Key",
     dataDir: "数据目录",
     browserPrefs: "浏览器评测模型",
     unset: "未配置",
     set: "已保存",
+    inspectHint: "容器状态需 make up-ops-eval（挂 docker.sock）",
+    envKeyHint: "指 .env 的 BENCH_MODEL_API_KEY；页面里配的 Key 见下方「浏览器评测模型」",
     provider: "供应商",
     apiStyle: "API 协议",
     model: "模型",
@@ -208,11 +210,13 @@ const COPY = {
     healthDown: "down",
     stReady: "sentence-transformers",
     retrievalProd: "retrieval_prod",
-    modelApiKey: "MODEL_API_KEY",
+    modelApiKey: "Env API key",
     dataDir: "DATA_DIR",
     browserPrefs: "Browser model prefs",
     unset: "unset",
     set: "set",
+    inspectHint: "Container status needs make up-ops-eval (docker.sock)",
+    envKeyHint: "BENCH_MODEL_API_KEY in .env — browser keys are under Browser model prefs",
     provider: "provider",
     apiStyle: "API style",
     model: "model",
@@ -509,12 +513,21 @@ export function OpsOverviewSidebar({
             <h3 className="mb-2 text-xs font-semibold tracking-tight">{t.secBench}</h3>
             <dl className="space-y-1.5">
               <Row label={t.container} value={bench?.container} />
-              <Row label={t.status} value={bench?.status} />
+              <Row
+                label={t.status}
+                value={bench?.status || "—"}
+              />
+              {!bench?.status ? (
+                <p className="text-[10px] text-muted-foreground">{t.inspectHint}</p>
+              ) : null}
               <Row
                 label={t.health}
                 value={bench?.healthy ? t.healthOk : t.healthDown}
               />
-              <Row label={t.embeddingModel} value={bench?.retrieval_model} />
+              <Row
+                label={t.embeddingModel}
+                value={bench?.retrieval_model || "—"}
+              />
               <Row label={t.retrievalBackend} value={bench?.retrieval_backend} />
               <Row
                 label={t.stReady}
@@ -528,6 +541,7 @@ export function OpsOverviewSidebar({
                 label={t.modelApiKey}
                 value={yn(bench?.bench_model_api_key_configured, t)}
               />
+              <p className="text-[10px] text-muted-foreground">{t.envKeyHint}</p>
               <Row label={t.dataDir} value={bench?.data_dir} />
             </dl>
             <div className="mt-2 rounded-md border border-border/70 bg-background/70 px-2 py-1.5">

@@ -8,15 +8,28 @@ from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
 from app.retrieval.chunking import chunk_source_text, should_index_source
-from app.retrieval.embedder import get_embedder
+from app.retrieval.embedder import (
+    effective_embedding_dimensions,
+    effective_index_version,
+    get_embedder,
+)
 from app.retrieval.fusion import reciprocal_rank_fusion
 from app.retrieval.rerank import rerank_hits
-from app.retrieval.vector_index import ChunkHit, INDEX_VERSION, _chunk_to_hit
+from app.retrieval.vector_index import ChunkHit, _chunk_to_hit
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
 _SCHEMA_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Per-scope stamp fields (RET-4 / Ops BEIR). Global ``version`` alone is not enough:
+# seed sync writing INDEX 9 must not mark FiQA/SciFact works as already re-embedded.
+_SCOPE_STAMP_FIELDS = (
+    "version",
+    "embedding_model",
+    "embedding_dimensions",
+    "embedding_backend",
+)
 
 
 def _vector_literal(values: list[float]) -> str:
@@ -28,6 +41,120 @@ def _safe_schema(name: str) -> str:
     if not _SCHEMA_RE.match(raw):
         raise ValueError(f"invalid retrieval_pg_schema: {name!r}")
     return raw
+
+
+def index_scope_id(*, work_id: str | None, visibility: str) -> str:
+    """Stable id for per-work / seed index stamps in ``source_index_meta``."""
+    vis = (visibility or "private").strip() or "private"
+    if vis == "seed":
+        return "seed"
+    wid = (work_id or "").strip()
+    if not wid:
+        return "private-unscoped"
+    return f"work:{wid}"
+
+
+def scope_meta_key(scope_id: str, field: str) -> str:
+    return f"scope:{scope_id}:{field}"
+
+
+def current_index_stamp() -> dict[str, str]:
+    """Embed-space fingerprint that must match for incremental sync to skip."""
+    return {
+        "version": str(effective_index_version()),
+        "embedding_model": (settings.embedding_model or "").strip(),
+        "embedding_dimensions": str(effective_embedding_dimensions()),
+        "embedding_backend": (settings.embedding_backend or "").strip(),
+    }
+
+
+def scope_stamp_mismatch(stored: dict[str, str], current: dict[str, str] | None = None) -> bool:
+    """True when scope has never been stamped or embed space drifted."""
+    want = current or current_index_stamp()
+    for field in _SCOPE_STAMP_FIELDS:
+        got = (stored.get(field) or "").strip()
+        if not got:
+            return True
+        if got != (want.get(field) or "").strip():
+            return True
+    return False
+
+
+def _read_scope_stamp(cur: Any, scope_id: str) -> dict[str, str]:
+    prefix = f"scope:{scope_id}:"
+    cur.execute(
+        "SELECT key, value FROM source_index_meta WHERE key LIKE %s",
+        (prefix + "%",),
+    )
+    out: dict[str, str] = {}
+    for key, value in cur.fetchall():
+        field = str(key)[len(prefix) :]
+        if field in _SCOPE_STAMP_FIELDS:
+            out[field] = str(value)
+    return out
+
+
+def _write_scope_stamp(cur: Any, scope_id: str, stamp: dict[str, str] | None = None) -> None:
+    want = stamp or current_index_stamp()
+    for field in _SCOPE_STAMP_FIELDS:
+        cur.execute(
+            """
+            INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            (scope_meta_key(scope_id, field), want[field]),
+        )
+    # Global keys: observability + legacy readers (not used alone for force_reindex).
+    cur.execute(
+        """
+        INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        ("version", want["version"]),
+    )
+    cur.execute(
+        """
+        INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        ("embedding_model", want["embedding_model"]),
+    )
+    cur.execute(
+        """
+        INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        ("embedding_dimensions", want["embedding_dimensions"]),
+    )
+    cur.execute(
+        """
+        INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        ("embedding_backend", want["embedding_backend"]),
+    )
+    cur.execute(
+        """
+        INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        ("updated_at", datetime.now(UTC).isoformat()),
+    )
+
+
+def _prepare_hnsw_filtered_scan(cur: Any, *, limit: int) -> None:
+    """Enable pgvector iterative scans so work_id filters do not empty ANN results.
+
+    Shared HNSW + post-filter (seed + many Ops works) otherwise stops after
+    ``ef_search`` global neighbors — all seed → 0 hits for the bound work.
+    """
+    try:
+        cur.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+        # FiQA-scale works need headroom beyond default when seed dominates NN.
+        max_tuples = max(20_000, int(limit) * 500)
+        cur.execute(f"SET LOCAL hnsw.max_scan_tuples = {max_tuples}")
+    except Exception:
+        logger.debug("hnsw.iterative_scan unavailable; continuing", exc_info=True)
 
 
 class PgvectorSourceRetrievalStore:
@@ -306,6 +433,8 @@ class PgvectorSourceRetrievalStore:
         wid = work_id
         if vis == "private" and not wid:
             raise ValueError("private source sync requires work_id (docs/27 MT5c)")
+        scope_id = index_scope_id(work_id=wid, visibility=vis)
+        stamp = current_index_stamp()
         added = 0
         updated = 0
         skipped = 0
@@ -315,14 +444,10 @@ class PgvectorSourceRetrievalStore:
 
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT value FROM source_index_meta WHERE key = %s",
-                    ("version",),
-                )
-                meta_row = cur.fetchone()
-                force_reindex = (
-                    meta_row is None or str(meta_row[0]) != str(INDEX_VERSION)
-                )
+                # Per-work/seed stamp — not global version. Seed bumping INDEX to 9
+                # must not skip FiQA/SciFact that still hold the previous embed space.
+                stored_stamp = _read_scope_stamp(cur, scope_id)
+                force_reindex = scope_stamp_mismatch(stored_stamp, stamp)
 
                 # Scope previous set to this work (or seed) so we do not delete other works' rows.
                 if wid:
@@ -343,11 +468,13 @@ class PgvectorSourceRetrievalStore:
                 scanned = 0
                 scan_every = max(progress_every_files(), 50)
                 logger.info(
-                    "sources index sync scan start; visibility=%s dir=%s "
-                    "force_reindex=%s",
+                    "sources index sync scan start; visibility=%s scope=%s dir=%s "
+                    "force_reindex=%s stamp=%s",
                     vis,
+                    scope_id,
                     sources_dir,
                     force_reindex,
+                    stamp,
                 )
                 try:
                     from app.retrieval.sync_progress import report_sync_progress
@@ -614,35 +741,16 @@ class PgvectorSourceRetrievalStore:
                 removed = [path for path in prev_files if path not in seen_paths]
                 for path in removed:
                     cur.execute("DELETE FROM source_files WHERE path = %s", (path,))
-                cur.execute(
-                    """
-                    INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
-                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-                    """,
-                    ("version", str(INDEX_VERSION)),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
-                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-                    """,
-                    ("updated_at", datetime.now(UTC).isoformat()),
-                )
-                cur.execute(
-                    """
-                    INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
-                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-                    """,
-                    ("embedding_backend", settings.embedding_backend),
-                )
+                _write_scope_stamp(cur, scope_id, stamp)
             conn.commit()
 
         self.load()
         elapsed = time.monotonic() - sync_t0
         logger.info(
-            "sources index sync scope done; visibility=%s indexed_files=%s "
+            "sources index sync scope done; visibility=%s scope=%s indexed_files=%s "
             "chunks=%s added=%s updated=%s skipped=%s removed=%s elapsed_s=%.1f",
             vis,
+            scope_id,
             len(seen_paths),
             total_chunks,
             added,
@@ -659,6 +767,7 @@ class PgvectorSourceRetrievalStore:
             "skipped": skipped,
             "removed": len(removed),
             "reindexed": force_reindex,
+            "scope": scope_id,
             "backend": self.backend,
             "ann": "hnsw",
             "elapsed_s": round(elapsed, 2),
@@ -678,6 +787,7 @@ class PgvectorSourceRetrievalStore:
         seed_ok = current_visibility_seed()
         with self._connect() as conn:
             with conn.cursor() as cur:
+                _prepare_hnsw_filtered_scan(cur, limit=limit)
                 if work_id is not None and seed_ok:
                     cur.execute(
                         """

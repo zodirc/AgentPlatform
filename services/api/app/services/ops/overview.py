@@ -236,6 +236,15 @@ async def _bench_block() -> dict[str, Any]:
     if inspect:
         status = (inspect.get("State") or {}).get("Status")
 
+    # Prefer live bench env (inspect), then health payload, then api env.
+    # Never fall back to retired MiniLM — that string misled Ops overview after
+    # RET-4 when docker.sock was missing (inspect empty → fake MiniLM).
+    retrieval_model = (
+        g("EMBEDDING_MODEL")
+        or str(health.get("embedding_model") or "").strip()
+        or None
+    )
+
     return {
         "container": "agent-bench",
         "status": status,
@@ -249,14 +258,14 @@ async def _bench_block() -> dict[str, Any]:
             "retrieval_prod": caps.get("retrieval_prod"),
         },
         "retrieval_backend": g("BENCH_RETRIEVAL_BACKEND", "RETRIEVAL_BACKEND") or "pgvector",
-        "retrieval_model": g("EMBEDDING_MODEL")
-        or "sentence-transformers/all-MiniLM-L6-v2",
+        "retrieval_model": retrieval_model,
         "bench_model_name": g("BENCH_MODEL_NAME", "MODEL_NAME") or None,
         "bench_model_provider": g("BENCH_MODEL_PROVIDER", "MODEL_PROVIDER") or None,
         "bench_model_api_key_configured": bool(model_key),
         "bench_model_base_url": g("BENCH_MODEL_BASE_URL", "MODEL_BASE_URL") or None,
         "data_dir": g("BENCH_DATA_DIR") or "/data/ops-official/data",
         "reports_dir": g("BENCH_REPORTS_DIR") or "/data/ops-official/reports",
+        "inspect_available": bool(inspect),
     }
 
 

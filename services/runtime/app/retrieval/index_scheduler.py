@@ -274,6 +274,112 @@ def sync_sources_index_work_blocking(
     return merged
 
 
+def _list_ops_beir_works() -> list[tuple[str, str, str | None]]:
+    """Return ``(work_id, work_root, owner_user_id)`` for shared BEIR index works."""
+    import psycopg
+
+    dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+    dsn = dsn.replace("postgres://", "postgresql://")
+    with psycopg.connect(dsn, connect_timeout=5) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id::text, work_root, owner_user_id::text
+                FROM works
+                WHERE work_root LIKE '%/ops-l1/beir-index/%'
+                   OR work_root LIKE '%/ops-l1/beir-index'
+                ORDER BY work_root
+                """
+            )
+            rows = cur.fetchall()
+    out: list[tuple[str, str, str | None]] = []
+    for work_id, work_root, owner_id in rows:
+        root = Path(str(work_root)).resolve()
+        if not _is_ops_l1_root(root):
+            continue
+        # Shared cache only (exclude ephemeral run trees under ops-l1/<run>/…).
+        parts = root.parts
+        if "beir-index" not in parts:
+            continue
+        out.append((str(work_id), str(root), str(owner_id) if owner_id else None))
+    return out
+
+
+def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
+    """Force work-scoped sync for Ops BEIR corpora (FiQA / SciFact / …).
+
+    Full-tenant ``sync_sources_index_blocking`` intentionally skips ``ops-l1``.
+    After embed-model / INDEX bumps, call this (or re-run Ops L1) so each BEIR
+    work re-embeds under its own scope stamp — not skipped because seed already
+    wrote global ``version=9``.
+    """
+    works = _list_ops_beir_works()
+    if not works:
+        logger.info("ops beir index sync: no beir-index works registered")
+        return {
+            "indexed_files": 0,
+            "chunks": 0,
+            "added": 0,
+            "updated": 0,
+            "skipped": 0,
+            "removed": 0,
+            "scopes": 0,
+            "works": [],
+        }
+
+    results: list[dict[str, Any]] = []
+    for work_id, work_root, owner_id in works:
+        check_sync_cancelled()
+        logger.info(
+            "ops beir index sync start; work_id=%s dir=%s",
+            work_id,
+            work_root,
+        )
+        results.append(
+            sync_sources_index_work_blocking(
+                work_id=work_id,
+                work_root=work_root,
+                owner_user_id=owner_id,
+            )
+        )
+
+    merged = {
+        "indexed_files": sum(int(r.get("indexed_files") or 0) for r in results),
+        "chunks": sum(int(r.get("chunks") or 0) for r in results),
+        "added": sum(int(r.get("added") or 0) for r in results),
+        "updated": sum(int(r.get("updated") or 0) for r in results),
+        "skipped": sum(int(r.get("skipped") or 0) for r in results),
+        "removed": sum(int(r.get("removed") or 0) for r in results),
+        "scopes": len(results),
+        "reindexed_scopes": sum(1 for r in results if r.get("reindexed")),
+        "works": [
+            {
+                "work_id": wid,
+                "work_root": root,
+                "reindexed": bool(res.get("reindexed")),
+                "indexed_files": res.get("indexed_files"),
+                "chunks": res.get("chunks"),
+                "elapsed_s": res.get("elapsed_s"),
+            }
+            for (wid, root, _), res in zip(works, results, strict=True)
+        ],
+    }
+    return merged
+
+
+async def run_ops_beir_index_sync(*, reason: str = "ops-beir") -> dict[str, Any]:
+    """Serialize Ops BEIR reindex on the same lock as other sources syncs."""
+    token = sync_cancel_token()
+    async with _sync_lock:
+        return await _finish_sync_locked(
+            reason=reason,
+            runner=sync_ops_beir_indexes_blocking,
+            work_id=None,
+            path="ops-l1/beir-index",
+            cancel_token=token,
+        )
+
+
 async def _finish_sync_locked(
     *,
     reason: str,
