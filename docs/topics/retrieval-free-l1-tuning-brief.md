@@ -1,7 +1,7 @@
 # Free-L1 Tuning Brief（检索 + 上下文 · 收敛版）
 
 > **受众**：下一轮调优负责人 / 高级模型  
-> **日期戳记**：2026-08-05（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · RET-4 重嵌进行中 · **CTX-13 已收 · 组装层暴露面=0 → CTX-14/15/6 不开** · **EVAL-8 已执行**（双锚离线复算 · 口径 v2 已切码 · CTX-16/定位面门槛未过→关题）· **未入库**）  
+> **日期戳记**：2026-08-05（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 重嵌已完成**（gte-small · 11171 chunks）· CTX-13/EVAL-8 已收 · **RET-18：two-level 已默认关待 free N≥2** · **未入库**）  
 > **历史全文备份**：同目录 `retrieval-free-l1-tuning-brief.md.bak-20260805`（原 2563 行叙事稿，裁决以本文为准）  
 > **唯一验收温度计**：L1 产品 Turn · `arm=free`（检索 nDCG；上下文 agent_f1/EM）  
 > **不作为验收**：forced/oracle、纯 L0、coding；schema/inflight 事故跑 **不入对照**  
@@ -340,7 +340,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | 3 | B′ | 依 CTX-13 裁决开组装层结构刀（CTX-14 / CTX-15 / CTX-6） | — | **不开**（门槛未过） |
 | 3.5 | B′ | **EVAL-8** 尺子官方对标（离线复算 → 口径 v2）+ INFRA-3 落盘 | 双锚复算对照 + §7.7 残余表按 v2 重写 + §3 锚更新 | **✓ 已收**（`batch16/eval8_rescore.*` · 代码已切 v2） |
 | 3.6 | B′ | CTX-16 交付面 / 定位面回访 | EVAL-8 复算中的稀释质量 / never_retrieved 质量 ≥ 2.2pp | **关题**（稀释 potential 0.00/2.08pp < 2.2；定位面不立项） |
-| 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **暂缓**（嵌库就绪后） |
+| 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **栈已切 OFF**（`.env` + runtime recreate · `force_reindex=False`）；**free N≥2 待 Ops**（CLI `d5b21e9b` 401/infra=1 **作废不入对照**） |
 | 5 | C | **REP-3** 全量锚 | 栈冻结 + 两套件落库 | **未执行**（硬前置） |
 | 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · 重嵌进行中/待验收** |
 | 7 | E | **RET-11(b)**（视 D 余量） | N≥2；分影子 | **视 D 余量**；rerank 已由 RET-19 关闭 |
