@@ -47,6 +47,96 @@ def test_scope_stamp_mismatch_missing_or_drift(monkeypatch) -> None:
     assert scope_stamp_mismatch({"version": "9"}, current) is True
 
 
+def test_safe_schema_rejects_injection() -> None:
+    from app.retrieval.pgvector_store import _safe_schema
+
+    assert _safe_schema("public") == "public"
+    assert _safe_schema(" retrieval_bench ") == "retrieval_bench"
+    try:
+        _safe_schema("public; drop table")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+
+
+def test_index_scope_id_private_unscoped() -> None:
+    assert index_scope_id(work_id=None, visibility="private") == "private-unscoped"
+    assert index_scope_id(work_id="  ", visibility="private") == "private-unscoped"
+
+
+def test_read_write_scope_stamp_roundtrip(monkeypatch) -> None:
+    from app.retrieval.pgvector_store import _read_scope_stamp, _write_scope_stamp
+
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.settings.embedding_model", "thenlper/gte-small"
+    )
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.settings.embedding_backend", "sentence_transformers"
+    )
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.effective_index_version", lambda: 9
+    )
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.effective_embedding_dimensions", lambda: 384
+    )
+    store: dict[str, str] = {}
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            self._sql = sql
+            self._params = params
+            if params and "LIKE" in sql:
+                self._rows = [
+                    (k, v)
+                    for k, v in store.items()
+                    if k.startswith(str(params[0]).rstrip("%"))
+                ]
+            elif params and len(params) == 2:
+                store[str(params[0])] = str(params[1])
+                self._rows = []
+
+        def fetchall(self):
+            return list(getattr(self, "_rows", []))
+
+    cur = _Cur()
+    stamp = current_index_stamp()
+    _write_scope_stamp(cur, "work:abc", stamp)
+    assert store["scope:work:abc:version"] == "9"
+    assert store["embedding_model"] == "thenlper/gte-small"
+    read = _read_scope_stamp(cur, "work:abc")
+    assert read == {
+        "version": "9",
+        "embedding_model": "thenlper/gte-small",
+        "embedding_dimensions": "384",
+        "embedding_backend": "sentence_transformers",
+    }
+    assert scope_stamp_mismatch(read, stamp) is False
+
+
+def test_prepare_hnsw_filtered_scan_sets_locals() -> None:
+    from app.retrieval.pgvector_store import _prepare_hnsw_filtered_scan
+
+    calls: list[str] = []
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            calls.append(sql)
+
+    _prepare_hnsw_filtered_scan(_Cur(), limit=60)
+    assert any("hnsw.iterative_scan" in c for c in calls)
+    assert any("hnsw.max_scan_tuples" in c for c in calls)
+
+
+def test_prepare_hnsw_filtered_scan_swallows_unsupported() -> None:
+    from app.retrieval.pgvector_store import _prepare_hnsw_filtered_scan
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            raise RuntimeError("unsupported")
+
+    _prepare_hnsw_filtered_scan(_Cur(), limit=10)  # must not raise
+
+
 def test_get_sources_store_defaults_to_json(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr("app.retrieval.store.settings.retrieval_backend", "json")
     monkeypatch.setattr("app.retrieval.store.settings.data_dir", str(tmp_path))

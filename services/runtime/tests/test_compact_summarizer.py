@@ -52,7 +52,14 @@ async def test_llm_autocompact_uses_gateway_summary(
         gateway=gateway,
         tools=[],
     )
-    summary = assembled[-1]["content"][0]["text"]
+    # DeepSeek prefix cache: mutable [runtime_context] trails; autocompact is earlier.
+    assert assembled[-1]["content"][0]["text"].startswith("[runtime_context]")
+    summary = next(
+        m["content"][0]["text"]
+        for m in assembled
+        if m.get("role") == "user"
+        and "autocompact" in str(m.get("content", [{}])[0].get("text", ""))
+    )
     assert "autocompact" in summary
     assert "outline" in summary.lower() or "section two" in summary.lower()
     assert any(t.get("detail") == "autocompact_llm" for t in engine.last_compaction_trace)

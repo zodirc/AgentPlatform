@@ -156,3 +156,100 @@ def test_sync_ops_beir_indexes_empty_when_no_works(
     out = sync_ops_beir_indexes_blocking()
     assert out["scopes"] == 0
     assert out["works"] == []
+
+
+def test_sync_ops_beir_indexes_merges_work_results(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    root = tmp_path / "ops-l1" / "beir-index" / "fiqa"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(
+        "app.retrieval.index_scheduler._list_ops_beir_works",
+        lambda: [("wid-1", str(root), "owner-1")],
+    )
+
+    def _fake_sync(**kwargs):
+        assert kwargs["work_id"] == "wid-1"
+        return {
+            "indexed_files": 3,
+            "chunks": 10,
+            "added": 3,
+            "updated": 0,
+            "skipped": 0,
+            "removed": 0,
+            "reindexed": True,
+            "elapsed_s": 1.5,
+            "scopes": 1,
+        }
+
+    monkeypatch.setattr(
+        "app.retrieval.index_scheduler.sync_sources_index_work_blocking",
+        _fake_sync,
+    )
+    out = sync_ops_beir_indexes_blocking()
+    assert out["scopes"] == 1
+    assert out["chunks"] == 10
+    assert out["reindexed_scopes"] == 1
+    assert out["works"][0]["work_id"] == "wid-1"
+    assert out["works"][0]["reindexed"] is True
+
+
+def test_is_ephemeral_ops_l1_root(tmp_path: Path) -> None:
+    from app.retrieval.index_scheduler import _is_ephemeral_ops_l1_root
+
+    beir = tmp_path / "data" / "ops-l1" / "beir-index" / "fiqa"
+    beir.mkdir(parents=True)
+    assert _is_ephemeral_ops_l1_root(beir) is False
+    run_tree = tmp_path / "data" / "ops-l1" / "run-abc" / "work"
+    run_tree.mkdir(parents=True)
+    assert _is_ephemeral_ops_l1_root(run_tree) is True
+    assert _is_ephemeral_ops_l1_root(tmp_path / "workspace") is False
+
+
+def test_sync_sources_index_work_blocking_missing_dir(tmp_path: Path) -> None:
+    from app.retrieval.index_scheduler import sync_sources_index_work_blocking
+
+    root = tmp_path / "missing-work"
+    root.mkdir()
+    # no sources/ subdir
+    out = sync_sources_index_work_blocking(
+        work_id="w1",
+        work_root=str(root),
+        owner_user_id="o1",
+    )
+    assert out["scopes"] == 1
+    assert out.get("indexed_files", 0) == 0
+
+
+def test_list_ops_beir_works_filters_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from unittest.mock import MagicMock
+
+    from app.retrieval import index_scheduler as sched
+
+    beir = tmp_path / "ops-l1" / "beir-index" / "fiqa"
+    beir.mkdir(parents=True)
+    other = tmp_path / "workspace" / "w"
+    other.mkdir(parents=True)
+
+    cur = MagicMock()
+    cur.fetchall.return_value = [
+        ("id-fiqa", str(beir), "owner"),
+        ("id-other", str(other), "owner"),
+    ]
+    conn = MagicMock()
+    conn.__enter__.return_value = conn
+    conn.cursor.return_value.__enter__.return_value = cur
+
+    fake_psycopg = MagicMock()
+    fake_psycopg.connect.return_value = conn
+    monkeypatch.setitem(__import__("sys").modules, "psycopg", fake_psycopg)
+    monkeypatch.setattr(
+        sched.settings,
+        "database_url",
+        "postgresql://agent:agent@127.0.0.1:1/agent",
+    )
+    works = sched._list_ops_beir_works()
+    assert len(works) == 1
+    assert works[0][0] == "id-fiqa"
