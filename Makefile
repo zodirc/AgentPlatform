@@ -79,7 +79,7 @@ help: ## 显示常用命令
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
 	@echo "  make sync-sources 增量索引 seed/普通 work（本终端 [sync] 进度；不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"
-	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键全量；可见进度）"
+	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键全量；可见进度；默认接管旧 sync）"
 	@echo "  make resolve-embedding  GPU→gte-large@1024 / 否则 gte-small@384（up/start 自动跑）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
@@ -101,7 +101,7 @@ help: ## 显示常用命令
 	@echo "  make official-bench-update-baseline  认可后写入 baseline+SCORECARD"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make sync-ops-indexes  Ops BEIR 按 work stamp 重嵌（换模后；本终端 [sync] 进度）"
-	@echo "  make sync            sync-sources + sync-ops-indexes（一键；可见进度）"
+	@echo "  make sync            sync-sources + sync-ops-indexes（一键；可见进度；默认接管旧 sync）"
 	@echo "  make intel-corpus-fetch  拉取/转换 intel vendor 语料（gitignore；docs seed/intel）"
 	@echo "  make runtime-test 运行时测试"
 	@echo "  make preflight       推送前 unit 门禁（pre-push 默认；无长连接风险）"
@@ -423,8 +423,8 @@ preflight-ci: ## 全量本地 CI（≡ Actions；久。建议: make preflight-ci
 
 hooks-install: ensure-git-hooks ## 同 ensure-git-hooks（兼容旧目标名）
 
-sync-sources: ## Turn 外增量索引（本终端 [sync] 进度行；docs/15）
-	@echo "==> sync-sources: live [sync] progress on this terminal (embedder cold-start may pause 1–3 min)"
+sync-sources: ## Turn 外增量索引（本终端逐行进度条；docs/15）
+	@echo "==> sync-sources: live progress (embedder cold-start may take 1–3 min)"
 	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
 	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode sources --reason make
@@ -434,7 +434,7 @@ seed-sources: ## 同 sync-sources：对挂载的常驻 seed 重新建索引（�
 
 sync-ops-indexes: ## Ops BEIR work 按 scope stamp 重嵌（FiQA 等；跳过 seed；耗时长）
 	@echo "==> sync-ops-indexes: work-scoped BEIR reindex (FiQA-scale can take 15–30+ min)"
-	@echo "    Live [sync] progress on this terminal. Not part of make up."
+	@echo "    Live progress on this terminal. Not part of make up."
 	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
 	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
 	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true

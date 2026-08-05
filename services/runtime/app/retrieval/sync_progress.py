@@ -168,6 +168,12 @@ def mark_sync_started(
         elapsed_s=0.0,
         scopes_done=None,
         scopes_total=None,
+        dirty_files=None,
+        skipped=None,
+        force_reindex=None,
+        reindex_reason=None,
+        label=None,
+        batch_size=None,
         embedding_backend=settings.embedding_backend,
     )
 
@@ -230,15 +236,16 @@ def mark_sync_error(
     )
 
 
-# --- CLI progress (make sync-sources / sync-ops-indexes; docker exec -T) ---
+# --- CLI progress (make sync-sources / sync-ops-indexes) ---
 
 _PHASE_LABEL: dict[str, str] = {
     "starting": "启动",
+    "prepare": "打开索引库",
     "loading_embedder": "加载嵌入模型",
-    "scope": "选择范围",
-    "scan": "扫描切块",
+    "scope": "切换语料",
+    "scan": "扫描文件",
     "chunk": "切块",
-    "plan": "计划嵌入",
+    "plan": "计划",
     "embed": "嵌入向量",
     "index": "建索引",
     "write": "写入索引",
@@ -257,15 +264,15 @@ def format_eta_s(seconds: float | int | None) -> str | None:
     if not (s >= 0) or s != s:  # NaN
         return None
     if s < 60:
-        return f"约 {max(1, int(s + 0.999))}s"
+        return f"{max(1, int(s + 0.999))}s"
     if s < 3600:
-        return f"约 {int(s / 60 + 0.999)} min"
+        return f"{int(s / 60 + 0.999)}m"
     hours = int(s // 3600)
     mins = int((s % 3600) / 60 + 0.999)
     if mins >= 60:
         hours += 1
         mins = 0
-    return f"约 {hours}h{mins:02d}m" if mins else f"约 {hours}h"
+    return f"{hours}h{mins:02d}m" if mins else f"{hours}h"
 
 
 def progress_percent(payload: dict[str, Any]) -> float | None:
@@ -296,111 +303,209 @@ def _short_path(path: str | None, *, max_len: int = 40) -> str | None:
     return text
 
 
-def format_cli_progress_line(payload: dict[str, Any], *, bar_width: int = 20) -> str:
-    """Single human-readable progress line for ``make sync*`` stderr."""
+def _render_bar(pct: float, *, width: int = 24) -> str:
+    filled = int(round(width * float(pct) / 100.0))
+    filled = min(width, max(0, filled))
+    return "[" + ("#" * filled) + ("-" * (width - filled)) + "]"
+
+
+def format_cli_progress_line(
+    payload: dict[str, Any],
+    *,
+    bar_width: int = 24,
+    tick: int = 0,
+) -> str:
+    """Plain-language progress for humans (no fake indeterminate bars)."""
+    _ = tick  # reserved; heartbeats use elapsed text instead of animation
     phase = str(payload.get("phase") or "")
     phase_label = _PHASE_LABEL.get(phase, phase or "同步")
-    parts: list[str] = [phase_label]
-
-    scopes_done = payload.get("scopes_done")
-    scopes_total = payload.get("scopes_total")
-    try:
-        if scopes_total is not None and int(scopes_total) > 0:
-            done_i = int(scopes_done or 0)
-            parts.append(f"库 {done_i}/{int(scopes_total)}")
-    except (TypeError, ValueError):
-        pass
-
-    short = _short_path(payload.get("path") if isinstance(payload.get("path"), str) else None)
-    if short:
-        parts.append(short)
-
+    short = _short_path(
+        payload.get("path") if isinstance(payload.get("path"), str) else None
+    )
     pct = progress_percent(payload)
-    if pct is not None:
-        filled = int(round(bar_width * pct / 100.0))
-        filled = min(bar_width, max(0, filled))
-        bar = "#" * filled + "-" * (bar_width - filled)
-        parts.append(f"[{bar}] {pct:5.1f}%")
 
+    # Determinate embed/write: classic bar + numbers.
+    if pct is not None and phase in ("embed", "write", "index", "plan"):
+        parts = [f"{_render_bar(pct, width=bar_width)} {pct:5.1f}%", phase_label]
+        if short:
+            parts.append(short)
+        try:
+            scopes_total = payload.get("scopes_total")
+            if scopes_total is not None and int(scopes_total) > 0:
+                parts.append(
+                    f"库{int(payload.get('scopes_done') or 0)}/{int(scopes_total)}"
+                )
+        except (TypeError, ValueError):
+            pass
+        try:
+            c_done = payload.get("chunks_embedded")
+            c_total = payload.get("chunks_total")
+            if c_done is not None and c_total is not None and int(c_total) > 0:
+                parts.append(f"{int(c_done)}/{int(c_total)} 块")
+        except (TypeError, ValueError):
+            pass
+        try:
+            rate = payload.get("rate_chunks_per_s")
+            if rate is not None:
+                r = float(rate)
+                if 0 < r <= 200:
+                    parts.append(f"{r:.0f}/s" if r >= 10 else f"{r:.1f}/s")
+        except (TypeError, ValueError):
+            pass
+        eta = format_eta_s(payload.get("eta_s"))
+        try:
+            if eta and float(payload.get("eta_s") or 0) > 0.5:
+                parts.append(f"ETA {eta}")
+        except (TypeError, ValueError):
+            if eta:
+                parts.append(f"ETA {eta}")
+        return "  ".join(parts)
+
+    # Waiting / scan: sentences, not a fake filling bar.
+    bits: list[str] = [phase_label]
+    if short:
+        bits.append(short)
     try:
-        c_done = payload.get("chunks_embedded")
-        c_total = payload.get("chunks_total")
-        if c_done is not None and c_total is not None and int(c_total) > 0:
-            parts.append(f"块 {int(c_done)}/{int(c_total)}")
-        elif payload.get("files_done") is not None:
-            ft = payload.get("files_total")
-            if ft is not None:
-                parts.append(f"文件 {int(payload['files_done'])}/{int(ft)}")
-            else:
-                parts.append(f"文件 {int(payload['files_done'])}")
+        scopes_total = payload.get("scopes_total")
+        if scopes_total is not None and int(scopes_total) > 0:
+            bits.append(f"库{int(payload.get('scopes_done') or 0)}/{int(scopes_total)}")
     except (TypeError, ValueError):
         pass
 
+    if payload.get("force_reindex"):
+        reason = payload.get("reindex_reason") or "stamp/模型变更"
+        bits.append(f"将全量重嵌（{reason}）")
+
     try:
-        rate = payload.get("rate_chunks_per_s")
-        if rate is not None:
-            r = float(rate)
-            # Hide absurd hash/smoke instantaneous rates (mirror Web).
-            if 0 < r <= 200:
-                parts.append(f"{r:.0f}/s" if r >= 10 else f"{r:.1f}/s")
+        files_done = payload.get("files_done")
+        if files_done is not None and phase in ("scan", "chunk"):
+            if phase == "scan":
+                bits.append(f"已检查{int(files_done)}")
+        skipped = payload.get("skipped")
+        if skipped is not None and int(skipped) > 0 and phase in ("scan", "chunk", "plan", "finished"):
+            bits.append(f"跳过{int(skipped)}")
+        dirty = payload.get("dirty_files")
+        if dirty is not None and int(dirty) > 0 and phase in (
+            "scan",
+            "chunk",
+            "plan",
+            "loading_embedder",
+            "embed",
+            "write",
+        ):
+            bits.append(f"待嵌{int(dirty)}个文件")
+        if (
+            phase == "plan"
+            and dirty is not None
+            and int(dirty) == 0
+            and not payload.get("force_reindex")
+        ):
+            bits.append("无需重嵌")
     except (TypeError, ValueError):
         pass
-
-    eta = format_eta_s(payload.get("eta_s"))
-    try:
-        if eta and float(payload.get("eta_s") or 0) > 0.5:
-            parts.append(f"剩余 {eta}")
-    except (TypeError, ValueError):
-        if eta:
-            parts.append(f"剩余 {eta}")
 
     if phase == "loading_embedder":
-        parts.append("冷启动可能 1–3 min")
-    if payload.get("status") == "error" and payload.get("error"):
-        parts.append(str(payload["error"])[:80])
+        bits.append("首次加载约需1–3分钟")
+    if phase == "starting":
+        bits.append("准备中")
+    if phase == "prepare":
+        bits.append("连库/建表；卡住时请重跑 make sync（会清孤儿事务锁）")
+    if phase == "chunk":
+        try:
+            fd = payload.get("files_done")
+            ft = payload.get("files_total")
+            if fd is not None and ft is not None and int(ft) > 0:
+                # Prefer explicit 切块 a/b over generic 已检查.
+                bits = [b for b in bits if not str(b).startswith("已检查")]
+                bits.append(f"切块{int(fd)}/{int(ft)}")
+        except (TypeError, ValueError):
+            pass
 
-    return " · ".join(parts)
+    try:
+        elapsed = payload.get("elapsed_s")
+        if elapsed is not None and float(elapsed) >= 5:
+            bits.append(f"已{int(float(elapsed))}s")
+    except (TypeError, ValueError):
+        pass
+
+    if payload.get("status") == "error" and payload.get("error"):
+        bits.append(str(payload["error"])[:80])
+
+    if phase == "finished":
+        return "完成 · " + " · ".join(bits[1:] if len(bits) > 1 else bits)
+
+    return " · ".join(bits)
 
 
 def install_cli_progress_sink(
     *,
     stream: Any | None = None,
-    min_interval_s: float = 1.0,
+    min_interval_s: float = 1.5,
+    heartbeat_s: float = 15.0,
 ) -> Callable[[], None]:
-    """Print throttled progress lines to stderr (works under ``docker exec -T``).
+    """Print readable progress lines (no fake sliding bars on heartbeat).
 
-    Returns an uninstall callable. Quietens noisy per-batch embed INFO logs so
-    the progress line stays readable.
+    Heartbeat is rare and text-only so it cannot be mistaken for progress.
     """
     out = stream if stream is not None else sys.stderr
-    state = {
+    state: dict[str, Any] = {
         "last_mono": 0.0,
         "last_line": "",
         "last_phase": None,
         "closed": False,
+        "payload": {"phase": "starting", "status": "building"},
+        "t0": time.monotonic(),
     }
+    lock = threading.Lock()
 
-    # Prefer progress lines over hundreds of embed-batch INFO rows.
-    embed_log = logging.getLogger("app.retrieval.index_embed")
-    prev_embed_level = embed_log.level
-    embed_log.setLevel(logging.WARNING)
+    quiet_loggers = (
+        "app.retrieval",
+        "app.retrieval.index_scheduler",
+        "app.retrieval.index_embed",
+        "app.retrieval.pgvector_store",
+        "app.retrieval.vector_index",
+        "app.retrieval.embedder",
+        "sentence_transformers",
+        "httpx",
+        "httpcore",
+        "urllib3",
+    )
+    prev_levels: dict[str, int] = {}
+    for name in quiet_loggers:
+        lg = logging.getLogger(name)
+        prev_levels[name] = lg.level
+        lg.setLevel(logging.WARNING)
 
-    def _emit(payload: dict[str, Any], *, force: bool = False) -> None:
+    def _emit(
+        payload: dict[str, Any],
+        *,
+        force: bool = False,
+        heartbeat: bool = False,
+    ) -> None:
         if state["closed"]:
             return
-        line = format_cli_progress_line(payload)
+        merged = dict(state["payload"])
+        merged.update(payload)
+        phase = str(merged.get("phase") or "")
+        if heartbeat:
+            merged["elapsed_s"] = round(time.monotonic() - float(state["t0"]), 1)
+        state["payload"] = merged
+        line = format_cli_progress_line(merged)
         if not line:
             return
+        if heartbeat:
+            line = f"…仍在进行：{line}"
         mono = time.monotonic()
-        phase = payload.get("phase")
         phase_changed = phase != state["last_phase"]
         terminal = phase in ("finished", "error") or str(
-            payload.get("status") or ""
+            merged.get("status") or ""
         ) in ("ready", "error")
         if not force and not phase_changed and not terminal:
-            if line == state["last_line"]:
+            if heartbeat:
+                pass  # allow rare heartbeat
+            elif line == state["last_line"]:
                 return
-            if (mono - float(state["last_mono"])) < min_interval_s:
+            elif (mono - float(state["last_mono"])) < min_interval_s:
                 return
         print(f"[sync] {line}", file=out, flush=True)
         state["last_mono"] = mono
@@ -408,19 +513,42 @@ def install_cli_progress_sink(
         state["last_phase"] = phase
 
     def _sink(payload: dict[str, Any]) -> None:
-        _emit(payload, force=False)
+        with lock:
+            _emit(payload, force=False)
+
+    stop_hb = threading.Event()
+
+    def _heartbeat() -> None:
+        while not stop_hb.wait(heartbeat_s):
+            with lock:
+                if state["closed"]:
+                    return
+                phase = str((state["payload"] or {}).get("phase") or "")
+                if phase in ("finished", "error"):
+                    continue
+                # Only nudge when we lack a moving percent (avoid spam during embed).
+                if progress_percent(state["payload"] or {}) is not None:
+                    continue
+                _emit({}, force=True, heartbeat=True)
 
     set_progress_sink(_sink)
-    # Immediate banner so cold-start silence is explained.
     print(
-        "[sync] 进度会打到本终端；加载嵌入模型时可能静默 1–3 分钟",
+        "[sync] 开始索引同步（有改动才嵌向量；无改动会跳过）",
         file=out,
         flush=True,
     )
+    with lock:
+        _emit({"phase": "starting", "status": "building"}, force=True)
+
+    hb = threading.Thread(target=_heartbeat, name="sync-cli-heartbeat", daemon=True)
+    hb.start()
 
     def uninstall() -> None:
-        state["closed"] = True
+        stop_hb.set()
+        with lock:
+            state["closed"] = True
         set_progress_sink(None)
-        embed_log.setLevel(prev_embed_level)
+        for name, level in prev_levels.items():
+            logging.getLogger(name).setLevel(level)
 
     return uninstall

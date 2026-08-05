@@ -183,17 +183,8 @@ class SourceVectorIndex:
             }
 
         force_reindex = self._needs_full_reindex()
-        try:
-            from app.retrieval.sync_progress import report_sync_progress
-
-            report_sync_progress(
-                status="building",
-                phase="loading_embedder",
-                embedding_backend=settings.embedding_backend,
-            )
-        except Exception:
-            pass
-        embedder = get_embedder()
+        # Defer cold embedder load until dirty files exist (same as pgvector).
+        embedder = None
         owner_raw = (settings.sources_index_owner_user_id or "").strip() or None
         files_meta: dict[str, Any] = dict(self._data.get("files", {}))
         chunks: list[dict[str, Any]] = list(self._data.get("chunks", []))
@@ -269,7 +260,7 @@ class SourceVectorIndex:
                 continue
             text = fp.read_text(encoding="utf-8", errors="replace")
             new_chunks = chunk_source_text(
-                fp, rel, text, embedder=embedder, embed=False
+                fp, rel, text, embedder=None, embed=False
             )
             chunks_chunked += len(new_chunks)
             if owner_raw:
@@ -306,6 +297,22 @@ class SourceVectorIndex:
             skipped,
             embedding_batch_size(),
         )
+        if pending:
+            try:
+                from app.retrieval.sync_progress import report_sync_progress
+
+                report_sync_progress(
+                    force=True,
+                    status="building",
+                    phase="loading_embedder",
+                    dirty_files=len(pending),
+                    chunks_total=dirty_chunks,
+                    embedding_backend=settings.embedding_backend,
+                    elapsed_s=round(time.monotonic() - sync_t0, 1),
+                )
+            except Exception:
+                pass
+            embedder = get_embedder()
         try:
             from app.retrieval.sync_progress import report_sync_progress
 

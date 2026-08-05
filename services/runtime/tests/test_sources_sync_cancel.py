@@ -24,8 +24,29 @@ def test_bump_sync_cancel_invalidates_token() -> None:
         sched.bump_sync_cancel()
 
 
+def test_cancel_gen_file_is_cross_process(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        sched,
+        "_cancel_gen_path",
+        lambda: tmp_path / "vectorstore" / "sync_cancel_gen",
+    )
+    gen = sched.bump_sync_cancel()
+    assert (tmp_path / "vectorstore" / "sync_cancel_gen").read_text().strip() == str(
+        gen
+    )
+    # Simulate another process: memory gen stale, file ahead.
+    sched._cancel_gen = 0
+    assert sched.sync_cancel_token() == gen
+
+
 def test_ephemeral_ops_l1_root_skip(tmp_path: Path) -> None:
-    ephemeral = tmp_path / "ops-l1" / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" / "retrieval" / "scifact"
+    ephemeral = (
+        tmp_path
+        / "ops-l1"
+        / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        / "retrieval"
+        / "scifact"
+    )
     ephemeral.mkdir(parents=True)
     cache = tmp_path / "ops-l1" / "beir-index" / "scifact"
     cache.mkdir(parents=True)
@@ -39,7 +60,13 @@ def test_ephemeral_ops_l1_root_skip(tmp_path: Path) -> None:
 
 def test_full_tenant_sync_skips_all_ops_l1_including_beir_index(tmp_path: Path) -> None:
     """Global reason=api must not chew beir-index; L1 uses api-work only."""
-    ephemeral = tmp_path / "ops-l1" / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" / "retrieval" / "scifact"
+    ephemeral = (
+        tmp_path
+        / "ops-l1"
+        / "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        / "retrieval"
+        / "scifact"
+    )
     ephemeral.mkdir(parents=True)
     cache = tmp_path / "ops-l1" / "beir-index" / "fiqa"
     cache.mkdir(parents=True)

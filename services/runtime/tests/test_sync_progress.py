@@ -120,24 +120,48 @@ def test_format_cli_progress_line_bar_and_eta() -> None:
         }
     )
     assert "嵌入向量" in line
-    assert "库 2/3" in line
+    assert "库2/3" in line
     assert "fiqa" in line
     assert "[" in line and "]" in line
-    assert "块 29042/58084" in line
+    assert "29042/58084" in line
     assert "12/s" in line or "12.5/s" in line
-    assert "剩余" in line
+    assert "ETA" in line
+
+
+def test_format_cli_progress_waiting_is_plain_language() -> None:
+    line = sp.format_cli_progress_line(
+        {
+            "phase": "scan",
+            "path": "/workspace/sources/seed",
+            "force_reindex": True,
+            "reindex_reason": "缺少 scope stamp（升级后首次需全量）",
+            "elapsed_s": 12,
+        }
+    )
+    assert "扫描文件" in line
+    assert "全量重嵌" in line
+    assert "█" not in line  # no fake sliding bar
+    assert "已12s" in line
+
+
+def test_format_cli_progress_hides_zero_files() -> None:
+    line = sp.format_cli_progress_line(
+        {"phase": "starting", "files_done": 0, "chunks_embedded": 0}
+    )
+    assert "文件 0" not in line
+    assert "准备中" in line
 
 
 def test_format_eta_s_hours() -> None:
-    assert sp.format_eta_s(45) == "约 45s"
-    assert sp.format_eta_s(120) == "约 2 min"
+    assert sp.format_eta_s(45) == "45s"
+    assert sp.format_eta_s(120) == "2m"
     assert sp.format_eta_s(3720) is not None
     assert "h" in (sp.format_eta_s(3720) or "")
 
 
 def test_install_cli_progress_sink_prints(tmp_path: Path, monkeypatch, capsys) -> None:
     monkeypatch.setattr(sp.settings, "data_dir", str(tmp_path))
-    uninstall = sp.install_cli_progress_sink(min_interval_s=0.0)
+    uninstall = sp.install_cli_progress_sink(min_interval_s=0.0, heartbeat_s=60.0)
     try:
         sp.report_sync_progress(
             force=True,

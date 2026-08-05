@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 _sync_lock = asyncio.Lock()
 _startup_task: asyncio.Task[None] | None = None
 # Cooperative cancel: bump generation so in-flight + queued waiters abort.
+# Cross-process: also persisted under data_dir so ``make sync`` can preempt
+# another docker-exec sync_cli / runtime worker.
 _cancel_gen = 0
 _cancel_lock = threading.Lock()
 _active_cancel_token = threading.local()
@@ -32,18 +34,48 @@ class SourcesSyncCancelled(Exception):
     """Raised when sources index sync is cancelled (Ops stop / explicit cancel)."""
 
 
+def _cancel_gen_path() -> Path:
+    from app.settings import settings
+
+    return Path(settings.data_dir) / "vectorstore" / "sync_cancel_gen"
+
+
+def _read_cancel_gen_file() -> int:
+    path = _cancel_gen_path()
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        return int(raw) if raw else 0
+    except (OSError, ValueError):
+        return 0
+
+
+def _write_cancel_gen_file(gen: int) -> None:
+    path = _cancel_gen_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(str(int(gen)), encoding="utf-8")
+    except OSError:
+        logger.warning("failed to persist sync cancel gen", exc_info=True)
+
+
 def bump_sync_cancel() -> int:
     """Invalidate in-flight and lock-waiters; returns new generation."""
     global _cancel_gen
     with _cancel_lock:
-        _cancel_gen += 1
+        file_gen = _read_cancel_gen_file()
+        _cancel_gen = max(int(_cancel_gen), int(file_gen)) + 1
         gen = _cancel_gen
+        _write_cancel_gen_file(gen)
     logger.info("sources index sync cancel requested; gen=%s", gen)
     return gen
 
 
 def sync_cancel_token() -> int:
+    global _cancel_gen
     with _cancel_lock:
+        file_gen = _read_cancel_gen_file()
+        if file_gen > _cancel_gen:
+            _cancel_gen = file_gen
         return _cancel_gen
 
 
@@ -57,14 +89,159 @@ def clear_sync_cancel_token() -> None:
 
 
 def check_sync_cancelled() -> None:
-    """Call from embed/write loops (thread-safe)."""
+    """Call from embed/write loops (thread-safe; honors cross-process cancel file)."""
     token = getattr(_active_cancel_token, "token", None)
     if token is None:
         return
-    with _cancel_lock:
-        current = _cancel_gen
-    if token != current:
+    if token != sync_cancel_token():
         raise SourcesSyncCancelled("sources index sync cancelled")
+
+
+def _terminate_orphan_sync_db_backends() -> list[int]:
+    """Kill leftover sync transactions that hold relation locks after SIGTERM.
+
+    A killed ``sync_cli`` often leaves Postgres ``idle in transaction`` for minutes;
+    the next sync then blocks forever in ``ensure_schema`` ALTER TABLE.
+    """
+    terminated: list[int] = []
+    try:
+        import psycopg
+
+        from app.settings import settings
+
+        dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+        dsn = dsn.replace("postgres://", "postgresql://")
+        with psycopg.connect(dsn, connect_timeout=5, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT pid FROM pg_stat_activity
+                    WHERE datname = current_database()
+                      AND pid <> pg_backend_pid()
+                      AND (
+                        (
+                          state = 'idle in transaction'
+                          AND xact_start < now() - interval '15 seconds'
+                          AND (
+                            query ILIKE '%source_chunks%'
+                            OR query ILIKE '%source_files%'
+                            OR query ILIKE '%source_index%'
+                          )
+                        )
+                        OR (
+                          wait_event_type = 'Lock'
+                          AND state = 'active'
+                          AND (
+                            query ILIKE '%source_files%'
+                            OR query ILIKE '%source_chunks%'
+                            OR query ILIKE '%ALTER TABLE%'
+                          )
+                        )
+                        OR (
+                          state = 'idle in transaction'
+                          AND xact_start < now() - interval '120 seconds'
+                        )
+                      )
+                    """
+                )
+                pids = [int(row[0]) for row in cur.fetchall()]
+                for pid in pids:
+                    cur.execute("SELECT pg_terminate_backend(%s)", (pid,))
+                    terminated.append(pid)
+    except Exception:
+        logger.warning("failed to terminate orphan sync DB backends", exc_info=True)
+    return terminated
+
+
+def request_sync_takeover(*, wait_s: float = 20.0) -> dict[str, Any]:
+    """Cancel any in-flight sync (cross-process) and release orphan DB locks.
+
+    Used by ``make sync`` so a new run preempts a stuck/duplicate sync_cli and
+    can resume via committed per-batch writes + reindex_epoch skips.
+    """
+    import os
+    import signal
+    import time
+
+    prior = None
+    try:
+        from app.retrieval.sync_progress import read_sync_progress
+
+        prior = read_sync_progress()
+    except Exception:
+        prior = None
+
+    building = (
+        isinstance(prior, dict)
+        and str(prior.get("status") or "") == "building"
+        and str(prior.get("phase") or "")
+        not in ("", "finished", "error", "starting")
+    )
+    gen = bump_sync_cancel()
+    my_pid = os.getpid()
+    killed: list[int] = []
+
+    def _kill_sync_cli(sig: int) -> None:
+        try:
+            for entry in Path("/proc").iterdir():
+                if not entry.name.isdigit():
+                    continue
+                pid = int(entry.name)
+                if pid == my_pid:
+                    continue
+                try:
+                    raw = (entry / "cmdline").read_bytes()
+                except OSError:
+                    continue
+                cmd = raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+                if "app.retrieval.sync_cli" in cmd or "retrieval.sync_cli" in cmd:
+                    try:
+                        os.kill(pid, sig)
+                        if pid not in killed:
+                            killed.append(pid)
+                    except OSError:
+                        pass
+        except OSError:
+            pass
+
+    _kill_sync_cli(signal.SIGTERM)
+    time.sleep(1.0)
+    _kill_sync_cli(signal.SIGKILL)
+
+    # Critical: drop idle-in-transaction locks left by killed clients.
+    db_terminated = _terminate_orphan_sync_db_backends()
+    time.sleep(0.3)
+    # Second pass in case terminate raced with a reconnecting waiter.
+    db_terminated2 = _terminate_orphan_sync_db_backends()
+    for pid in db_terminated2:
+        if pid not in db_terminated:
+            db_terminated.append(pid)
+
+    deadline = time.monotonic() + min(8.0, max(0.0, float(wait_s)))
+    while time.monotonic() < deadline:
+        try:
+            from app.retrieval.sync_progress import read_sync_progress
+
+            cur = read_sync_progress()
+        except Exception:
+            cur = None
+        if not isinstance(cur, dict):
+            break
+        status = str(cur.get("status") or "")
+        phase = str(cur.get("phase") or "")
+        if status != "building" or phase in ("finished", "error", ""):
+            break
+        if "cancel" in str(cur.get("error") or "").lower():
+            break
+        time.sleep(0.3)
+
+    return {
+        "cancel_gen": gen,
+        "killed_pids": killed,
+        "db_terminated": db_terminated,
+        "had_building": building,
+        "prior_phase": (prior or {}).get("phase") if isinstance(prior, dict) else None,
+    }
 
 
 def _is_ops_l1_root(root: Path) -> bool:
@@ -125,11 +302,18 @@ def _sync_one(
         from app.retrieval.sync_progress import report_sync_progress
 
         report_sync_progress(
+            force=True,
             status="building",
-            phase="scope",
+            phase="prepare",
             visibility=visibility,
             path=str(sources_dir),
             work_id=work_id,
+            files_done=None,
+            dirty_files=None,
+            skipped=None,
+            chunks_embedded=None,
+            rate_chunks_per_s=None,
+            eta_s=None,
         )
     except Exception:
         logger.debug("sync progress scope report skipped", exc_info=True)

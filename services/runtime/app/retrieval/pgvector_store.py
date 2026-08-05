@@ -142,6 +142,37 @@ def _write_scope_stamp(cur: Any, scope_id: str, stamp: dict[str, str] | None = N
     )
 
 
+def _read_reindex_epoch(cur: Any, scope_id: str) -> float | None:
+    cur.execute(
+        "SELECT value FROM source_index_meta WHERE key = %s",
+        (scope_meta_key(scope_id, "reindex_epoch"),),
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None:
+        return None
+    try:
+        return float(row[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def _write_reindex_epoch(cur: Any, scope_id: str, epoch: float) -> None:
+    cur.execute(
+        """
+        INSERT INTO source_index_meta (key, value) VALUES (%s, %s)
+        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """,
+        (scope_meta_key(scope_id, "reindex_epoch"), f"{float(epoch):.6f}"),
+    )
+
+
+def _clear_reindex_epoch(cur: Any, scope_id: str) -> None:
+    cur.execute(
+        "DELETE FROM source_index_meta WHERE key = %s",
+        (scope_meta_key(scope_id, "reindex_epoch"),),
+    )
+
+
 def _prepare_hnsw_filtered_scan(cur: Any, *, limit: int) -> None:
     """Enable pgvector iterative scans so work_id filters do not empty ANN results.
 
@@ -200,6 +231,9 @@ class PgvectorSourceRetrievalStore:
                 cur.execute(f"CREATE SCHEMA IF NOT EXISTS {self._schema}")
             # vector extension lives in public; keep it on the path.
             cur.execute(f"SET search_path TO {self._schema}, public")
+            # Fail fast instead of hanging behind orphan idle-in-transaction syncs.
+            cur.execute("SET lock_timeout = '15s'")
+            cur.execute("SET statement_timeout = '0'")
         conn.commit()
         return conn
 
@@ -416,18 +450,8 @@ class PgvectorSourceRetrievalStore:
 
         from app.retrieval.tenant_visibility import index_storage_path
 
-        try:
-            from app.retrieval.sync_progress import report_sync_progress
-
-            report_sync_progress(
-                status="building",
-                phase="loading_embedder",
-                visibility=(visibility or "private").strip() or "private",
-                embedding_backend=settings.embedding_backend,
-            )
-        except Exception:
-            pass
-        embedder = get_embedder()
+        # Defer get_embedder() until dirty work is known — cold ST load is 1–3 min
+        # and must not run when stamp+mtime already match (clean make sync skip).
         owner_id = owner_user_id if owner_user_id is not None else self._default_owner_user_id()
         vis = (visibility or "private").strip() or "private"
         wid = work_id
@@ -448,25 +472,64 @@ class PgvectorSourceRetrievalStore:
                 # must not skip FiQA/SciFact that still hold the previous embed space.
                 stored_stamp = _read_scope_stamp(cur, scope_id)
                 force_reindex = scope_stamp_mismatch(stored_stamp, stamp)
+                reindex_reason = None
+                if force_reindex:
+                    if not stored_stamp:
+                        reindex_reason = "缺少 scope stamp（升级后首次需全量）"
+                    else:
+                        reindex_reason = "模型/INDEX 与库内 stamp 不一致"
+
+                # Resume epoch: files flushed+committed during an interrupted force
+                # reindex keep matching mtime + updated_at >= epoch → skip on takeover.
+                reindex_epoch: float | None = None
+                if force_reindex:
+                    reindex_epoch = _read_reindex_epoch(cur, scope_id)
+                    if reindex_epoch is None:
+                        reindex_epoch = time.time()
+                        _write_reindex_epoch(cur, scope_id, reindex_epoch)
+                        conn.commit()
 
                 # Scope previous set to this work (or seed) so we do not delete other works' rows.
+                # Load mtime + chunk_count + updated_at in one query.
                 if wid:
                     cur.execute(
-                        "SELECT path, mtime FROM source_files WHERE work_id = %s::uuid",
+                        """
+                        SELECT path, mtime, chunk_count,
+                               EXTRACT(EPOCH FROM updated_at)
+                        FROM source_files WHERE work_id = %s::uuid
+                        """,
                         (wid,),
                     )
                 elif vis == "seed":
                     cur.execute(
-                        "SELECT path, mtime FROM source_files WHERE visibility = 'seed'"
+                        """
+                        SELECT path, mtime, chunk_count,
+                               EXTRACT(EPOCH FROM updated_at)
+                        FROM source_files WHERE visibility = 'seed'
+                        """
                     )
                 else:
-                    cur.execute("SELECT path, mtime FROM source_files WHERE false")
-                prev_files = {row[0]: float(row[1]) for row in cur.fetchall()}
+                    cur.execute(
+                        """
+                        SELECT path, mtime, chunk_count,
+                               EXTRACT(EPOCH FROM updated_at)
+                        FROM source_files WHERE false
+                        """
+                    )
+                prev_meta = {
+                    row[0]: (
+                        float(row[1]),
+                        int(row[2] or 0),
+                        float(row[3] or 0.0),
+                    )
+                    for row in cur.fetchall()
+                }
+                prev_files = {path: meta[0] for path, meta in prev_meta.items()}
 
-                # Collect dirty files first (defer embed) so we can batch encode.
+                # Two-pass: (1) fast mtime/stamp classify (2) chunk only dirty files.
                 pending_jobs: list[dict[str, Any]] = []
                 scanned = 0
-                scan_every = max(progress_every_files(), 50)
+                scan_every = max(progress_every_files() or 25, 25)
                 logger.info(
                     "sources index sync scan start; visibility=%s scope=%s dir=%s "
                     "force_reindex=%s stamp=%s",
@@ -480,25 +543,37 @@ class PgvectorSourceRetrievalStore:
                     from app.retrieval.sync_progress import report_sync_progress
 
                     report_sync_progress(
+                        force=True,
                         status="building",
                         phase="scan",
                         visibility=vis,
+                        path=str(sources_dir),
+                        work_id=wid,
                         files_done=0,
                         files_total=None,
+                        dirty_files=0,
+                        skipped=0,
                         chunks_embedded=0,
+                        chunks_total=None,
+                        rate_chunks_per_s=None,
+                        eta_s=None,
                         elapsed_s=0.0,
+                        force_reindex=force_reindex,
+                        reindex_reason=reindex_reason,
                     )
                 except Exception:
                     pass
-                for fp in sorted(sources_dir.rglob("*")):
+
+                dirty_paths: list[tuple[Any, str, float, bool]] = []
+                ws_root = workspace_root.resolve()
+                last_scan_report = time.monotonic()
+                for fp in sources_dir.rglob("*"):
                     from app.retrieval.index_scheduler import check_sync_cancelled
 
                     check_sync_cancelled()
                     if not fp.is_file() or not should_index_source(fp):
                         continue
-                    rel = str(fp.relative_to(workspace_root.resolve())).replace(
-                        "\\", "/"
-                    )
+                    rel = str(fp.relative_to(ws_root)).replace("\\", "/")
                     if vis != "seed" and (
                         rel == "sources/seed" or rel.startswith("sources/seed/")
                     ):
@@ -509,15 +584,13 @@ class PgvectorSourceRetrievalStore:
                     seen_paths.add(storage_path)
                     mtime = fp.stat().st_mtime
                     scanned += 1
-                    if scan_every and scanned % scan_every == 0:
-                        logger.info(
-                            "sources index sync scan; visibility=%s scanned=%s "
-                            "dirty=%s skipped=%s",
-                            vis,
-                            scanned,
-                            len(pending_jobs),
-                            skipped,
-                        )
+                    now_mono = time.monotonic()
+                    if (
+                        scanned == 1
+                        or (scan_every and scanned % scan_every == 0)
+                        or (now_mono - last_scan_report) >= 1.0
+                    ):
+                        last_scan_report = now_mono
                         try:
                             from app.retrieval.sync_progress import report_sync_progress
 
@@ -525,35 +598,89 @@ class PgvectorSourceRetrievalStore:
                                 status="building",
                                 phase="scan",
                                 visibility=vis,
+                                path=str(sources_dir),
                                 files_done=scanned,
-                                files_total=None,
-                                dirty_files=len(pending_jobs),
+                                dirty_files=len(dirty_paths),
                                 skipped=skipped,
-                                elapsed_s=round(time.monotonic() - sync_t0, 1),
+                                force_reindex=force_reindex,
+                                reindex_reason=reindex_reason,
+                                elapsed_s=round(now_mono - sync_t0, 1),
                             )
                         except Exception:
                             pass
-                    if not force_reindex and prev_files.get(storage_path) == mtime:
-                        cur.execute(
-                            "SELECT chunk_count FROM source_files WHERE path = %s",
-                            (storage_path,),
-                        )
-                        row = cur.fetchone()
-                        total_chunks += int(row[0]) if row else 0
-                        skipped += 1
-                        continue
-                    text = fp.read_text(encoding="utf-8", errors="replace")
+                    prev = prev_meta.get(storage_path)
+                    if prev is not None and prev[0] == mtime:
+                        # Normal incremental skip, or resume after cancelled force reindex.
+                        if (not force_reindex) or (
+                            reindex_epoch is not None
+                            and prev[2] >= (reindex_epoch - 1.0)
+                            and prev[1] > 0
+                        ):
+                            total_chunks += prev[1]
+                            skipped += 1
+                            continue
+                    dirty_paths.append(
+                        (fp, storage_path, mtime, storage_path in prev_files)
+                    )
+
+                try:
+                    from app.retrieval.sync_progress import report_sync_progress
+
+                    report_sync_progress(
+                        force=True,
+                        status="building",
+                        phase="chunk",
+                        visibility=vis,
+                        path=str(sources_dir),
+                        files_done=0,
+                        files_total=len(dirty_paths),
+                        dirty_files=len(dirty_paths),
+                        skipped=skipped,
+                        force_reindex=force_reindex,
+                        reindex_reason=reindex_reason,
+                        elapsed_s=round(time.monotonic() - sync_t0, 1),
+                    )
+                except Exception:
+                    pass
+
+                chunk_every = max(scan_every, 10)
+                for i, (fp, storage_path, mtime, is_update) in enumerate(
+                    dirty_paths, start=1
+                ):
+                    from app.retrieval.index_scheduler import check_sync_cancelled
+
+                    check_sync_cancelled()
+                    text_body = fp.read_text(encoding="utf-8", errors="replace")
                     new_chunks = chunk_source_text(
-                        fp, storage_path, text, embedder=embedder, embed=False
+                        fp, storage_path, text_body, embedder=None, embed=False
                     )
                     pending_jobs.append(
                         {
                             "storage_path": storage_path,
                             "mtime": mtime,
                             "chunks": new_chunks,
-                            "is_update": storage_path in prev_files,
+                            "is_update": is_update,
                         }
                     )
+                    if chunk_every and (
+                        i % chunk_every == 0 or i == len(dirty_paths)
+                    ):
+                        try:
+                            from app.retrieval.sync_progress import report_sync_progress
+
+                            report_sync_progress(
+                                status="building",
+                                phase="chunk",
+                                visibility=vis,
+                                path=str(sources_dir),
+                                files_done=i,
+                                files_total=len(dirty_paths),
+                                dirty_files=len(dirty_paths),
+                                skipped=skipped,
+                                elapsed_s=round(time.monotonic() - sync_t0, 1),
+                            )
+                        except Exception:
+                            pass
 
                 chunks_total = sum(len(j["chunks"]) for j in pending_jobs)
                 logger.info(
@@ -566,26 +693,57 @@ class PgvectorSourceRetrievalStore:
                     embedding_batch_size(),
                     force_reindex,
                 )
-                try:
-                    from app.retrieval.sync_progress import report_sync_progress
 
-                    report_sync_progress(
-                        force=True,
-                        status="building",
-                        phase="plan",
-                        visibility=vis,
-                        files_done=0,
-                        files_total=len(pending_jobs),
-                        chunks_embedded=0,
-                        chunks_total=chunks_total,
-                        skipped=skipped,
-                        elapsed_s=round(time.monotonic() - sync_t0, 1),
-                        embedding_backend=settings.embedding_backend,
-                        rate_chunks_per_s=None,
-                        eta_s=None,
-                    )
-                except Exception:
-                    pass
+                # Flush deferred embeds in cross-file batches, then write rows.
+                # Report loading_embedder before plan so CLI order matches real work.
+                embedder = None
+                if pending_jobs:
+                    try:
+                        from app.retrieval.sync_progress import report_sync_progress
+
+                        report_sync_progress(
+                            force=True,
+                            status="building",
+                            phase="loading_embedder",
+                            visibility=vis,
+                            path=str(sources_dir),
+                            files_done=None,
+                            files_total=len(pending_jobs),
+                            chunks_total=chunks_total,
+                            dirty_files=len(pending_jobs),
+                            skipped=skipped,
+                            embedding_backend=settings.embedding_backend,
+                            elapsed_s=round(time.monotonic() - sync_t0, 1),
+                            force_reindex=force_reindex,
+                            reindex_reason=reindex_reason,
+                        )
+                    except Exception:
+                        pass
+                    embedder = get_embedder()
+                    try:
+                        from app.retrieval.sync_progress import report_sync_progress
+
+                        report_sync_progress(
+                            force=True,
+                            status="building",
+                            phase="plan",
+                            visibility=vis,
+                            path=str(sources_dir),
+                            files_done=0,
+                            files_total=len(pending_jobs),
+                            chunks_embedded=0,
+                            chunks_total=chunks_total,
+                            skipped=skipped,
+                            dirty_files=len(pending_jobs),
+                            elapsed_s=round(time.monotonic() - sync_t0, 1),
+                            embedding_backend=settings.embedding_backend,
+                            rate_chunks_per_s=None,
+                            eta_s=None,
+                            force_reindex=force_reindex,
+                            reindex_reason=reindex_reason,
+                        )
+                    except Exception:
+                        pass
 
                 # Flush deferred embeds in cross-file batches, then write rows.
                 batch_cap = max(embedding_batch_size(), embedding_batch_size() * 2)
@@ -729,6 +887,8 @@ class PgvectorSourceRetrievalStore:
                             except Exception:
                                 pass
                     buffer_jobs.clear()
+                    # Commit each batch so takeover/resume can skip already-written files.
+                    conn.commit()
 
                 for job in pending_jobs:
                     buffer_jobs.append(job)
@@ -742,6 +902,7 @@ class PgvectorSourceRetrievalStore:
                 for path in removed:
                     cur.execute("DELETE FROM source_files WHERE path = %s", (path,))
                 _write_scope_stamp(cur, scope_id, stamp)
+                _clear_reindex_epoch(cur, scope_id)
             conn.commit()
 
         self.load()
