@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
+from app.retrieval.bm25_document import BM25_EXTRA_FTS_VERSION, BM25_TSVECTOR_SQL
 from app.retrieval.chunking import chunk_source_text, should_index_source
 from app.retrieval.embedder import (
     effective_embedding_dimensions,
@@ -338,6 +339,19 @@ class PgvectorSourceRetrievalStore:
                     ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'private'
                     """
                 )
+                # RET-11(b): path-level pseudo-queries for BM25 only (not embedded).
+                cur.execute(
+                    """
+                    ALTER TABLE source_files
+                    ADD COLUMN IF NOT EXISTS bm25_extra TEXT NOT NULL DEFAULT ''
+                    """
+                )
+                cur.execute(
+                    """
+                    ALTER TABLE source_chunks
+                    ADD COLUMN IF NOT EXISTS bm25_extra TEXT NOT NULL DEFAULT ''
+                    """
+                )
                 cur.execute(
                     """
                     CREATE INDEX IF NOT EXISTS source_chunks_embedding_hnsw
@@ -345,15 +359,7 @@ class PgvectorSourceRetrievalStore:
                     USING hnsw (embedding vector_cosine_ops)
                     """
                 )
-                cur.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS source_chunks_text_fts_idx
-                    ON source_chunks
-                    USING gin (
-                        to_tsvector('simple', coalesce(section_title, '') || ' ' || text)
-                    )
-                    """
-                )
+                self._ensure_bm25_fts_index(cur)
                 cur.execute(
                     """
                     CREATE INDEX IF NOT EXISTS source_chunks_path_idx
@@ -382,6 +388,47 @@ class PgvectorSourceRetrievalStore:
                 )
             conn.commit()
         self._ready = True
+
+    def _ensure_bm25_fts_index(self, cur: Any) -> None:
+        """Recreate FTS gin index for bm25_extra (RET-11(b)). Idempotent by version."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS source_index_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+            """
+        )
+        cur.execute(
+            """
+            SELECT value FROM source_index_meta WHERE key = 'bm25_extra_fts_version'
+            """
+        )
+        row = cur.fetchone()
+        if row and str(row[0]) == BM25_EXTRA_FTS_VERSION:
+            cur.execute(
+                f"""
+                CREATE INDEX IF NOT EXISTS source_chunks_text_fts_idx
+                ON source_chunks
+                USING gin ({BM25_TSVECTOR_SQL})
+                """
+            )
+            return
+        cur.execute("DROP INDEX IF EXISTS source_chunks_text_fts_idx")
+        cur.execute(
+            f"""
+            CREATE INDEX source_chunks_text_fts_idx
+            ON source_chunks
+            USING gin ({BM25_TSVECTOR_SQL})
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO source_index_meta (key, value) VALUES ('bm25_extra_fts_version', %s)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """,
+            (BM25_EXTRA_FTS_VERSION,),
+        )
 
     @property
     def is_ready(self) -> bool:
@@ -847,6 +894,15 @@ class PgvectorSourceRetrievalStore:
                                     vis,
                                 ),
                             )
+                        cur.execute(
+                            """
+                            UPDATE source_chunks AS c
+                            SET bm25_extra = f.bm25_extra
+                            FROM source_files AS f
+                            WHERE c.path = f.path AND f.path = %s
+                            """,
+                            (storage_path,),
+                        )
                         total_chunks += len(new_chunks)
                         if job["is_update"]:
                             updated += 1
@@ -1083,16 +1139,12 @@ class PgvectorSourceRetrievalStore:
                     SELECT chunk_id, path, section_title, text, citation_id,
                            line_start, line_end, work_id, visibility,
                            ts_rank_cd(
-                               to_tsvector(
-                                   'simple', coalesce(section_title, '') || ' ' || text
-                               ),
+                               {BM25_TSVECTOR_SQL},
                                query_terms.value
                            ) AS score
                     FROM source_chunks, query_terms
                     WHERE {visibility_sql}
-                      AND to_tsvector(
-                          'simple', coalesce(section_title, '') || ' ' || text
-                      ) @@ query_terms.value
+                      AND {BM25_TSVECTOR_SQL} @@ query_terms.value
                     ORDER BY score DESC
                     LIMIT %s
                     """,
@@ -1235,6 +1287,138 @@ class PgvectorSourceRetrievalStore:
             limit=limit,
             doc_boost=profile.doc_boost,
         )
+
+    def set_path_bm25_extra(self, path: str, extra: str) -> int:
+        """RET-11(b): store path-level pseudo-queries and denormalize onto chunks.
+
+        Returns number of chunks updated.
+        """
+        from app.retrieval.bm25_document import prune_bm25_extra_lines
+
+        self.ensure_schema()
+        text = prune_bm25_extra_lines(str(extra or ""))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE source_files SET bm25_extra = %s, updated_at = NOW()
+                    WHERE path = %s
+                    """,
+                    (text, path),
+                )
+                if cur.rowcount == 0:
+                    return 0
+                cur.execute(
+                    """
+                    UPDATE source_chunks SET bm25_extra = %s WHERE path = %s
+                    """,
+                    (text, path),
+                )
+                n = int(cur.rowcount or 0)
+            conn.commit()
+        return n
+
+    def prune_all_bm25_extra(self, *, path_like: str | None = None) -> dict[str, int]:
+        """Rewrite stored bm25_extra through :func:`prune_bm25_extra_lines`.
+
+        Returns counts: scanned / changed / cleared.
+        """
+        from app.retrieval.bm25_document import prune_bm25_extra_lines
+
+        self.ensure_schema()
+        args: list[Any] = []
+        where = "bm25_extra <> ''"
+        if path_like:
+            where += " AND path LIKE %s"
+            args.append(path_like)
+        scanned = changed = cleared = 0
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT path, bm25_extra FROM source_files WHERE {where}",
+                    tuple(args),
+                )
+                rows = cur.fetchall()
+            for path, extra in rows:
+                scanned += 1
+                pruned = prune_bm25_extra_lines(str(extra or ""))
+                if pruned == str(extra or "").strip():
+                    continue
+                changed += 1
+                if not pruned:
+                    cleared += 1
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE source_files SET bm25_extra = %s, updated_at = NOW()
+                        WHERE path = %s
+                        """,
+                        (pruned, path),
+                    )
+                    cur.execute(
+                        """
+                        UPDATE source_chunks SET bm25_extra = %s WHERE path = %s
+                        """,
+                        (pruned, path),
+                    )
+            conn.commit()
+        return {"scanned": scanned, "changed": changed, "cleared": cleared}
+
+    def iter_paths_for_doc2query(
+        self,
+        *,
+        path_prefix: str | None = None,
+        path_like: str | None = None,
+        limit: int = 0,
+    ) -> list[dict[str, Any]]:
+        """List indexed files with a short text sample for offline doc2query."""
+        self.ensure_schema()
+        args: list[Any] = []
+        where = "1=1"
+        if path_like:
+            where += " AND f.path LIKE %s"
+            args.append(path_like)
+        if path_prefix:
+            where += " AND f.path LIKE %s"
+            args.append(path_prefix.rstrip("/") + "%")
+        limit_sql = ""
+        if limit and limit > 0:
+            limit_sql = " LIMIT %s"
+            args.append(int(limit))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"""
+                    SELECT f.path, f.bm25_extra, f.chunk_count,
+                           (
+                             SELECT string_agg(sub.t, E'\\n\\n')
+                             FROM (
+                               SELECT c.text AS t
+                               FROM source_chunks c
+                               WHERE c.path = f.path
+                               ORDER BY c.line_start NULLS FIRST, c.chunk_id
+                               LIMIT 3
+                             ) sub
+                           ) AS sample
+                    FROM source_files f
+                    WHERE {where}
+                    ORDER BY f.path
+                    {limit_sql}
+                    """,
+                    tuple(args),
+                )
+                rows = cur.fetchall()
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append(
+                {
+                    "path": str(row[0]),
+                    "bm25_extra": str(row[1] or ""),
+                    "chunk_count": int(row[2] or 0),
+                    "sample": str(row[3] or ""),
+                }
+            )
+        return out
 
     def search(self, query: str, *, limit: int = 10, mode: str | None = None) -> list[ChunkHit]:
         resolved = (mode or settings.retrieval_mode).lower()

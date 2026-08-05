@@ -5,6 +5,9 @@ from typing import Any
 
 from app.retrieval.embedder import tokenize
 
+# Align with FTS weight C vs A: extras help lexical miss, must not dominate.
+_EXTRA_SCORE_SCALE = 0.35
+
 
 class BM25Scorer:
     """Lightweight Okapi BM25 over pre-tokenized chunk texts."""
@@ -12,15 +15,24 @@ class BM25Scorer:
     def __init__(self, chunks: list[dict[str, Any]], *, k1: float = 1.5, b: float = 0.75) -> None:
         self._k1 = k1
         self._b = b
+        from app.retrieval.bm25_document import prune_bm25_extra_lines
+
         self._chunk_ids = [str(chunk.get("chunk_id", "")) for chunk in chunks]
-        self._doc_tokens = [tokenize(str(chunk.get("text", ""))) for chunk in chunks]
-        self._n_docs = len(self._doc_tokens)
-        self._avgdl = (
-            sum(len(tokens) for tokens in self._doc_tokens) / self._n_docs if self._n_docs else 0.0
-        )
+        self._body_tokens: list[list[str]] = []
+        self._extra_tokens: list[list[str]] = []
+        for chunk in chunks:
+            title = str(chunk.get("section_title", "")).strip()
+            text = str(chunk.get("text", "")).strip()
+            body = " ".join(p for p in (title, text) if p)
+            extra = prune_bm25_extra_lines(str(chunk.get("bm25_extra", "")))
+            self._body_tokens.append(tokenize(body))
+            self._extra_tokens.append(tokenize(extra) if extra else [])
+        self._n_docs = len(self._body_tokens)
+        lengths = [len(b) + len(e) for b, e in zip(self._body_tokens, self._extra_tokens)]
+        self._avgdl = sum(lengths) / self._n_docs if self._n_docs else 0.0
         self._df: dict[str, int] = {}
-        for tokens in self._doc_tokens:
-            for term in set(tokens):
+        for body, extra in zip(self._body_tokens, self._extra_tokens):
+            for term in set(body) | set(extra):
                 self._df[term] = self._df.get(term, 0) + 1
 
     def search(self, query: str, *, limit: int = 10) -> list[tuple[str, float]]:
@@ -31,10 +43,13 @@ class BM25Scorer:
             return []
 
         scored: list[tuple[str, float]] = []
-        for doc_idx, tokens in enumerate(self._doc_tokens):
-            if not tokens:
+        for doc_idx, body in enumerate(self._body_tokens):
+            extra = self._extra_tokens[doc_idx]
+            if not body and not extra:
                 continue
-            score = self._score_document(query_tokens, tokens)
+            score = self._score_document(query_tokens, body)
+            if extra:
+                score += _EXTRA_SCORE_SCALE * self._score_document(query_tokens, extra)
             if score <= 0.0:
                 continue
             scored.append((self._chunk_ids[doc_idx], score))

@@ -1,14 +1,15 @@
 # Free-L1 Tuning Brief（检索 + 上下文 · 收敛版）
 
 > **受众**：下一轮调优负责人 / 高级模型  
-> **日期戳记**：2026-08-05（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 重嵌已完成**（gte-small · 11171 chunks）· CTX-13/EVAL-8 已收 · **RET-18：two-level 已默认关待 free N≥2** · **未入库**）  
+> **日期戳记**：2026-08-06（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 重嵌已完成**（gte-large@1024 / index 10）· CTX-13/EVAL-8 已收 · **RET-18 已收：保留 two-level ON** · **RET-11(b) 已回滚** · **REP-3 全量锚已取消**）  
 > **历史全文备份**：同目录 `retrieval-free-l1-tuning-brief.md.bak-20260805`（原 2563 行叙事稿，裁决以本文为准）  
-> **唯一验收温度计**：L1 产品 Turn · `arm=free`（检索 nDCG；上下文 agent_f1/EM）  
-> **不作为验收**：forced/oracle、纯 L0、coding；schema/inflight 事故跑 **不入对照**  
-> **当前平台锚（冒烟）**：检索 promote-off 均值 nDCG@10 **≈0.447**（`bcdbbb85`/`f92bc610`）；上下文 excl-infra F1 **v1≈0.41**（`fdd03298` 0.428 / `b5d24c9e` 0.411）；**v2 复算锚 ≈0.53**（`b5d24c9e` 0.516 / `1707135c` 0.544 · `eval/reports/official/batch16` · **口径修正，非工程涨分**）  
+> **产品目标**：**搜得更好**（召回 / 排序 / 读到金标）——不是立 SCORECARD / 公证全量锚  
+> **唯一工作温度计**：L1 · `arm=free` · **冒烟 20q/库**（N≥2 去留）；**不做全量锚门禁**  
+> **不作为验收**：forced/oracle、纯 L0、coding；schema/inflight 事故跑 **不入对照**；**全量 qrels 锚跑**（已取消，对当前目标无杠杆）  
+> **当前平台锚（冒烟）**：检索 two-level ON + gte-large · `61f00a6d` nDCG@10 **≈0.483**；promote-off 旧锚 ≈0.447（`bcdbbb85`/`f92bc610`）；上下文 **agent_f1@v2 ≈0.52–0.54**  
 > **停机线（EVAL-6）**：**2/2 已触发**（RET-9 + CTX-8）→ **停开新加法契约刀**  
-> **下一刀序**：检索——嵌库就绪后 **RET-18 → REP-3 → RET-4 重嵌验收**；上下文——**产品侧工程停手**（组装层已否决；CTX-16/定位面门槛未过→关题）；**测量面 EVAL-8 已收**（此后新跑须注明 `agent_f1@v2`；旧锚 ≈0.41 = v1，禁止裸比）  
-> **SCORECARD / baseline**：**未更新、不入库**  
+> **下一刀序**：检索——**FiQA 硬召回另议**（RET-11(b) 已回滚）；栈保持 gte-large + two-level ON；上下文——**产品侧工程停手**；**不跑 REP-3**  
+> **SCORECARD / baseline**：**不作为本轮目标**（不跑全量、不 `update-baseline`）  
 > **流程图**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) · [context-tuning-flowchart.png](context-tuning-flowchart.png)
 
 ---
@@ -109,7 +110,7 @@
 |---|----|----------|----------|
 | 1 | 每层有存在证据（或已消融移除） | promote 已默认关；hint 已修；呈现层已收 | **two-level → RET-18** |
 | 2 | 每败可归因 | 检索主归因已闭环；上下文 **CTX-13 + 残余细拆已书面**（尺子近对 / 定位 / 真错；组装层决定不修；**不归咎单模型**） | RET-4 后检索残余书面归因 |
-| 3 | 温度计可信 | EVAL 配对 ✓；D-1 接受 writing-RAG；**EVAL-8 尺子 v2 已切码 + 双锚复算**（§7.9） | **REP-3 全量锚未入库**（须用 v2 尺子） |
+| 3 | 温度计可信 | EVAL 配对 ✓；D-1 接受 writing-RAG；**EVAL-8 尺子 v2**；**日常 = 冒烟 20q** | **REP-3 已取消**（不做全量门禁） |
 | 4 | 有停机线 | **2/2 已触发** | 遵守：停开加法契约 |
 
 诚实带（对照非 KPI）：检索冒烟终态 **0.46–0.50**（须 RET-4/11）；上下文 F1 **v1 诚实带 ≈0.41**；**v2 复算读数 ≈0.52–0.54**（双锚实测；**口径修正，禁止叙述为涨分**）。narrativeqa v2 仍低（≈0.32）：**承认题型局限，不为刷分开刀、不换模背锅**。CTX-16 / 定位面：**门槛未过 → 关题**（§7.9）。
@@ -160,7 +161,7 @@
 - RET-12：top-5 详摘 + 余下单行  
 - RET-15-2：相对分 0–100；low_score 阈值 **1.0 raw**  
 - **promote 默认 False**（开关保留）  
-- **two-level 默认 True**（消融未跑）  
+- **two-level 默认 True**（RET-18 消融：OFF 掉分 → **保留 ON**）  
 - writing `system.md`：有 hit 禁逛库；prefer limit≥30；verbatim / ≤2 搜；**无** RET-9 互补句  
 - soft lexical 缩放：**无**；lexical 经典版开；CE **默认关**；C-3 fusion；protocol **m3**  
 - Embed：`make resolve-embedding` → GPU≥8GiB `gte-large@1024`/index **10**，否则 `gte-small@384`/index **9**；MiniLM **非默认**；**查询空间以重嵌完成为准**
@@ -212,7 +213,8 @@
 # 仓库根；已 make up；已 source .env；BENCH_MODEL_* 可用
 make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 # 配对：official-bench-compare + EVAL-1
-# 认可后才：make official-bench-update-baseline   # 本轮明确禁止，直至 REP-3 前后对照
+# 本轮不做 SCORECARD / update-baseline（REP-3 已取消；目标=搜得更好）
+# make official-bench-update-baseline   # 禁止，除非另开入库票
 ```
 
 ---
@@ -304,7 +306,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | hybrid 双车道 | C-3 弱证据 + 生产常识 | 保留 · 决定不再消融 |
 | RRF k=60 | C-3 打平 | 保留默认 |
 | lexical rerank（经典） | soft 第五刀回滚史 | 保留 |
-| **two-level doc 加成** | **无单独证据** | **→ RET-18** |
+| **two-level doc 加成** | RET-18 N≥2：ON `61f00a6d` nDCG@10 **0.483** vs OFF `d819b698`/`c13f335e` 均值 **0.382**（Δ **−10.1pp**） | **保留 ON**（有正贡献） |
 | excerpt-promote | RET-7 N≥2 无正贡献 | **已默认关** |
 | low_score hint | RET-15 审计+修复 | 已修 |
 | 呈现层 | RET-12/15-2 IR 持平、行为正当 | 保留（不写 IR 叙事） |
@@ -317,9 +319,9 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | 缺口 | 证据 | 下一步 |
 |------|------|--------|
 | FiQA / 多库 gold **absent_from_ranked** | RET-6/8/10/14/17 | **RET-4**（主杠杆） |
-| weak_hits · lexical_miss | RET-8 | RET-4 → 视余量 **RET-11(b)** |
-| two-level 无存在证据 | 台账空行 | **RET-18** |
-| 全量锚未入库 | 门禁 4 / 终态条 3 | **REP-3** |
+| weak_hits · lexical_miss | RET-8 | RET-4；**RET-11(b) 已回滚**（全库伪查询噪声） |
+| two-level 证据 | RET-18：OFF 均值 −10pp | **已闭合 · 保留 ON** |
+| 全量锚 / SCORECARD | — | **本轮不做**（REP-3 已取消；目标=搜得更好） |
 | wrong_answer 残余 | CTX-8 无正 Δ；CTX-13 组装暴露面=0；EVAL-8 后尺子近对部分消解（b5 近对 6 题；CTX-13 WA 中 2 题 v2 F1>0.5） | 产品侧停手；残余仍以定位 + 真错为主；**不开新契约** |
 | **上下文尺子偏离官方口径** | EVAL-8 双锚：v1→v2 F1 +10.4/+12.0pp；EM 双向（+8.3 / −6.5pp） | **已闭合**（v2 切码 + batch16 产物）；旧锚标 v1 |
 | 组装层丢证暴露面 | CTX-13：三分桶合计 **0** / WA（`b5d24c9e` + 佐证 `1707135c`） | **已闭合**；CTX-14/15/6 降级不开 |
@@ -342,10 +344,10 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | 3 | B′ | 依 CTX-13 裁决开组装层结构刀（CTX-14 / CTX-15 / CTX-6） | — | **不开**（门槛未过） |
 | 3.5 | B′ | **EVAL-8** 尺子官方对标（离线复算 → 口径 v2）+ INFRA-3 落盘 | 双锚复算对照 + §7.7 残余表按 v2 重写 + §3 锚更新 | **✓ 已收**（`batch16/eval8_rescore.*` · 代码已切 v2） |
 | 3.6 | B′ | CTX-16 交付面 / 定位面回访 | EVAL-8 复算中的稀释质量 / never_retrieved 质量 ≥ 2.2pp | **关题**（稀释 potential 0.00/2.08pp < 2.2；定位面不立项） |
-| 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **栈已切 OFF**（`.env` + runtime recreate · `force_reindex=False`）；**free N≥2 待 Ops**（CLI `d5b21e9b` 401/infra=1 **作废不入对照**） |
-| 5 | C | **REP-3** 全量锚 | 栈冻结 + 两套件落库 | **未执行**（硬前置） |
+| 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **✓ 已收 · 保留 ON**（OFF #1 `d819b698` 0.389 / #2 `c13f335e` 0.375 vs ON `61f00a6d` 0.483；栈已切回 `RETRIEVAL_TWO_LEVEL_ENABLED=true`） |
+| 5 | C | **REP-3** 全量锚 | — | **已取消**（对「搜得更好」无杠杆；跑次 `7c591a8b` 已 stop；manifest `rep3/freeze_manifest.json` = cancelled） |
 | 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · 重嵌 ✓（gte-small）· 待 free 验收** |
-| 7 | E | **RET-11(b)**（视 D 余量） | N≥2；分影子 | **视 D 余量**；rerank 已由 RET-19 关闭 |
+| 7 | E | **RET-11(b)**（BM25 doc2query） | 冒烟未胜 → 回滚 | **✓ 已回滚**（v1 `406bb48c` 0.436 / v2 `81d309a3` 0.460 vs 锚 `61f00a6d` 0.483；FiQA 仍 −8pp；已清空 `bm25_extra`） |
 | 8 | F | **PROD-1** 首跑 + 终态四问书面作答 | 完备收束 | **草稿 · 未首跑** |
 | 9 | G | **PROD-2** C-MTEB 小量 + Ops 旁路索引 | 配置草案落地 + 隔离索引同构跑通 | **草案 · 暂不实施**（§7.11；不挡本轮 RET 日历） |
 
@@ -364,15 +366,14 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
 完成判据: 回填 §5.5 排序栈台账「two-level」行
 ```
 
-### 7.3 REP-3 · 全量锚（入库唯一合法前锚）
+### 7.3 REP-3 · 全量锚 — **已取消**
 
-| 项 | 规定 |
-|----|------|
-| 时点 | **RET-18 消融裁决之后**、结构刀验收对照之前（硬前置） |
-| 栈冻结 | 锚跑窗口内**禁止任何部署**；manifest 记配置指纹 + promote / two-level 终态 |
-| 范围 | 检索：全量 qrels（~1.3k Turn）× free × m3；上下文：全量 LongBench（excl-infra 已过 ≥0.40，随跑） |
-| 用途 | 结构刀入库级前锚；刀后再全量 = 前后对照；门禁 4 / 终态条 3 的唯一合法路径 |
-| 纪律 | 全量入库 ≠ 给冒烟背书；锚数值**不回填**冒烟对照表 |
+> **2026-08-05 产品裁决**：当前目标是 **检索质量**（召回/排序/读到金标），不是 SCORECARD / 入库公证。  
+> 全量 qrels（~1.3k Turn）只消耗时间与 API，**不直接改善搜索**；日常温度计 = **冒烟 20q/库 · N≥2**。  
+> 已 stop Ops `7c591a8b`；`eval/reports/official/rep3/freeze_manifest.json` → `cancelled`。  
+> **本轮不再把 REP-3 当作硬前置**；若将来要入库再另开票，不挡 RET-4/RET-11 质量刀。
+
+~~原规定（仅存档，不执行）~~：栈冻结 · 全量 retrieval + context · 入库唯一合法前锚 —— **作废**。
 
 ### 7.4 RET-4 · Embed 换代（主菜 · 重嵌验收未完成）
 
@@ -418,19 +419,20 @@ make up / make up-runtime
 验收: 容器 EMBEDDING_MODEL 匹配；.baked_embedding_model stamp 匹配；search_sources 非空；20q 冒烟记 run_id（不入库）
 ```
 
-### 7.5 RET-11(b) · 离线伪查询扩 BM25（视 D 余量 · 分影子）
+### 7.5 RET-11(b) · 离线伪查询扩 BM25（**已回滚 · 2026-08-06**）
 
 ```text
 加热层: Index plane（Turn 外离线重活，R4）
-改动点: 优先变体 (b) doc2query——每 doc 离线生成 3~5 伪查询，仅拼入 BM25 字段；
-        INDEX_VERSION bump + 影子索引；查询路径零改动
-        变体 (a) contextual header：待 RET-4 后按剩余 absent 占比决定
-预期用户路径变化: lexical_miss 类 query 的 BM25 车道可救；对产品树状语料通用
-R1–R5 / while: 通过——全部离线；配置切回即回滚
-分桶预期: weak_hits 中 lexical_miss 收窄（RET-8 同 case 前后对照）
-free 验收: N≥2 分库 FiQA/NFCorpus + weak_hits；诚实 +0.02~0.05
-非目标: 不在查询路径做 HyDE；严禁用 qrels/官方 query 参与生成
-与 RET-4: 正交可叠加；必须分影子分别 N≥2
+改动点: doc2query → source_files/chunks.bm25_extra；FTS/BM25 含伪查询；查询路径零改动
+        **不** bump embedding INDEX_VERSION
+冒烟 v1: 406bb48c vs 61f00a6d · nDCG@10 0.436 vs 0.483（−4.7pp）；FiQA 0.238 vs 0.314（−8pp）
+冒烟 v2: 81d309a3 · 降权+剪枝后宏分 0.460（仍 −2.2pp）；FiQA 0.234（未救回）
+诊断: FiQA 多题 n_hits≈30 且 nDCG=0 → BM25 噪声抬无关文档，金标排不进 top-10
+v2 曾修: FTS setweight(body=A, extra=C)；内存 BM25 extra×0.35；prune 短行；fts_version=2
+裁决: **回滚**——清空全部 bm25_extra（files+chunks）；代码保留（开关=空字段即无效应），不再默认全库生成
+入口（备查）: make retrieval-doc2query / python -m app.retrieval.doc2query [--prune-only]
+非目标: 无 HyDE；严禁 qrels/官方 query 参与生成
+状态: 2026-08-06 清库回滚完成；下一刀勿再全库等权伪查询
 ```
 
 ### 7.6 CTX-6 · 多跳读预算 K=2（**不开** · CTX-13 裁决 fold_budget_miss=0）
@@ -502,7 +504,7 @@ free 验收: N≥2 分库 FiQA/NFCorpus + weak_hits；诚实 +0.02~0.05
 | C 再观测 | 0 分 | 归因已够用 |
 | D 破停机线拧 `system.md` | 已证无稳定 Δ | 停机线 2/2 |
 
-**停手裁决**：现行门禁下上下文**无明确会抬分的下一刀**；工程停手。下一工程火力只在检索嵌库就绪后的 **RET-18 → REP-3 → RET-4**。若日后要换更强模型或改尺子，须**另开产品/温度计票**，不进本轮 free 主栏优化叙事。
+**停手裁决**：现行门禁下上下文**无明确会抬分的下一刀**；工程停手。下一工程火力：**FiQA 硬召回另议**（RET-11(b) **已回滚**；**不跑 REP-3**）。若日后要换更强模型或改尺子，须**另开产品/温度计票**，不进本轮 free 主栏优化叙事。
 
 #### CTX-14 · 相关性选窗截断（**不开**）
 
@@ -634,12 +636,12 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 - 上下文：**CTX-13 已收 · 暴露面=0**；**EVAL-8 已收** → 产品侧不承诺工程抬分；v1 锚 ≈0.41 / **v2 读数 ≈0.53**（校准）；CTX-16/定位面**关题**。  
 - RET-4 后宏分仍平 → 按终态条 2 把检索残余书面归因到 {qrels 结构 / 能力墙}，brief 仍可完备收束——**「证明了修不动」与「修好了」都是完备终态**。  
 - PROD-1 迁移率显著低于 BEIR Δ → 如实写入入库叙事，作为下一轮产品语料专项开题，不是本轮失败。  
-- RET-18 / REP-3 / 观测刀（含已收 CTX-13 / EVAL-8）**不承诺分数**；EVAL-8 Δ 尤其禁止记宏分胜。  
+- RET-18 / 观测刀（含已收 CTX-13 / EVAL-8）**不承诺分数**；EVAL-8 Δ 尤其禁止记宏分胜；**REP-3 已取消**。  
 - **PROD-2（C-MTEB）**：草案见 §7.11；**本轮不实施、不挡 RET 日历**；落地后与 BEIR / PROD-1 三分温度计，禁止混宏分。
 
 ### 7.11 PROD-2 · C-MTEB 小量配置 + Ops 旁路索引（草案 · **暂不实施**）
 
-> **状态**：2026-08-05 书面收录；**不开工**。本轮火力仍在 RET-18 → REP-3 → RET-4。  
+> **状态**：2026-08-05 书面收录；**不开工**。本轮火力：**FiQA 硬召回 / RET-4 冒烟验收 / RET-11**（REP-3 已取消）。  
 > **全称**：C-MTEB = Chinese Massive Text Embedding Benchmark（中文大规模文本向量评测；检索子集可作中文 IR 温度计）。  
 > **动机**：BEIR 为英文 IR；产品若含中文语料，需要第二套**分栏**中文检索温度计，且不得污染 BEIR 历史链。
 
@@ -694,7 +696,7 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 
 1. **温度计三分**：BEIR（英）· C-MTEB（中）· PROD-1（产品镜像）——分 suite、分宏分、分入库叙事。  
 2. **嵌入模型**：现行默认 `gte-small` 偏英文；C-MTEB 须**中文向量模型**（或明确双模 profile），否则分数无产品意义；换模另立票，不绑 RET-4。  
-3. **排期**：G 批；**硬后置于**本轮 RET-18 / REP-3 / RET-4（±11）与 PROD-1 首跑之后或并行**仅文档/拉数**，禁止抢嵌库与验收窗口。  
+3. **排期**：G 批；**硬后置于**本轮质量刀（RET-4 冒烟验收 / RET-11）与 PROD-1 之后或并行**仅文档/拉数**；**不挡、不恢复 REP-3**。  
 4. **门禁**：冒烟 N≥2 只去留；入库仍要全量或明确锚点档；中文套件涨分不给 BEIR 刀背书。
 
 #### 非目标 / 暂不实施清单
@@ -722,13 +724,13 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
   ├─ 过 EVAL-7 效应量门？ → 否 → 不开或仅子桶顺风观测
   ├─ 门禁 6/7（观测先于改动 · 消融对称）？ → 否 → 先补观测/消融
   └─ 通过 → free N≥2 + EVAL-1
-        ├─ 结构刀 + 全量前后对照成立 → 才谈 compare / update-baseline
+        ├─ 结构刀 + 冒烟 N≥2 正 Δ（主看 FiQA absent）→ 保留；**不要求全量锚 / 不 update-baseline**
         ├─ 无稳定正 Δ → 丢刀 / 回滚
         └─ 仅 L0 / forced ↑ → 未验收；最多当假说，不进主栏
 ```
 
 **当前唯一正确日历**：
-检索——嵌库就绪 → **RET-18** → **REP-3**（须 `agent_f1@v2`）→ **RET-4 验收** → 视余量 RET-11(b)；
-上下文——**产品侧工程停手**；**EVAL-8 已收**（v2 切码 · CTX-16/定位面关题）；
-收束——PROD-1 首跑 + 终态四问书面作答（终态条 3：EVAL-8 ✓ · REP-3 待补）；
- backlog——**PROD-2 C-MTEB 小量 + 旁路索引（§7.11 · 暂不实施）**。
+检索——**RET-18 ✓** → **RET-4**（gte-large 已嵌）→ **RET-11(b) 已回滚**（冒烟未胜；已清 `bm25_extra`）；
+上下文——**产品侧工程停手**；**EVAL-8 已收**（v2）；
+**REP-3 全量锚——已取消**（对搜得更好无杠杆）；
+ backlog——PROD-1 / PROD-2 另议，不挡质量刀。

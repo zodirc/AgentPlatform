@@ -1,13 +1,17 @@
-# embedding.auto.env from `make resolve-embedding` (GPU → gte-large, else gte-small).
+# embedding.auto.env from `make resolve-embedding` (GPU → gte-large + CUDA, else gte-small).
 # defaults.env is the committed fallback; auto.env overrides when present.
+# gpu.auto.yml is written by the same script (gpus: all when NVIDIA usable).
 COMPOSE_ENV := --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env
-COMPOSE := docker compose -f deploy/docker-compose.yml $(COMPOSE_ENV)
-COMPOSE_DEV := docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml $(COMPOSE_ENV)
-COMPOSE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE_RETRIEVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_HA := docker compose -f deploy/docker-compose.yml -f deploy/compose/ha.yml $(COMPOSE_ENV)
-COMPOSE_OPS_EVAL := docker compose -f deploy/docker-compose.yml -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
+# Deferred so resolve-embedding can create gpu.auto.yml before compose runs.
+COMPOSE_GPU = $(wildcard deploy/compose/gpu.auto.yml)
+COMPOSE_GPU_FLAG = $(if $(COMPOSE_GPU),-f $(COMPOSE_GPU),)
+COMPOSE = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_ENV)
+COMPOSE_DEV = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
+COMPOSE_RETRIEVAL = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE_RETRIEVAL = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_HA = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
+COMPOSE_OPS_EVAL = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
@@ -80,7 +84,7 @@ help: ## 显示常用命令
 	@echo "  make sync-sources 增量索引 seed/普通 work（本终端 [sync] 进度；不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"
 	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键全量；可见进度；默认接管旧 sync）"
-	@echo "  make resolve-embedding  GPU→gte-large@1024 / 否则 gte-small@384（up/start 自动跑）"
+	@echo "  make resolve-embedding  GPU→gte-large@1024+CUDA / 否则 gte-small@384（up/start 自动跑）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动（结束后自动清理悬空镜像）"
@@ -120,10 +124,11 @@ ensure-docker-creds: ## WSL：去掉 ~/.docker 里坏掉的 desktop.exe credsSto
 ensure-git-hooks: ## 本仓库 core.hooksPath=.githooks（make up/start 默认）
 	@bash scripts/install-git-hooks.sh
 
-resolve-embedding: ## 按 GPU 选型 gte-small|gte-large → deploy/embedding.auto.env
+resolve-embedding: ## 按 GPU 选型 gte-small|gte-large + CUDA torch overlay → deploy/embedding.auto.env
 	@bash scripts/resolve_embedding_profile.sh
 	@# Ensure compose always has an auto.env (defaults copy if resolve skipped elsewhere)
 	@test -f deploy/embedding.auto.env || cp deploy/embedding.defaults.env deploy/embedding.auto.env
+	@test -f deploy/compose/gpu.auto.yml || printf '%s\n' '# no gpu' 'services: {}' > deploy/compose/gpu.auto.yml
 
 # Seed RO mount creates sources/ as root; runtime app (uid 1000) must own it to upload.
 fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
@@ -422,6 +427,35 @@ preflight-ci: ## 全量本地 CI（≡ Actions；久。建议: make preflight-ci
 	@bash scripts/preflight_ci.sh
 
 hooks-install: ensure-git-hooks ## 同 ensure-git-hooks（兼容旧目标名）
+
+# RET-11(b): offline doc2query → source_files/chunks.bm25_extra (BM25/FTS only).
+# Needs BENCH_MODEL_* (or MODEL_*) live key. Default: FiQA under any work.
+# Example: make retrieval-doc2query LIMIT=20 WORKERS=4
+# Prune only: make retrieval-doc2query PRUNE_ONLY=1  (no LLM key needed)
+# Full FiQA (~57k): make retrieval-doc2query WORKERS=512
+retrieval-doc2query: ## RET-11(b) 离线伪查询扩 BM25（默认 FiQA；不重嵌）
+	@if [ "$(PRUNE_ONLY)" = "1" ]; then \
+	  echo "==> retrieval-doc2query --prune-only path_like=$${PATH_LIKE:-%/sources/beir/fiqa/%}"; \
+	  $(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.doc2query \
+	    --path-like "$${PATH_LIKE:-%/sources/beir/fiqa/%}" --prune-only; \
+	else \
+	  test -n "$${BENCH_MODEL_API_KEY:-$${MODEL_API_KEY:-}}" || (echo "ERROR: set BENCH_MODEL_API_KEY"; exit 1); \
+	  echo "==> retrieval-doc2query path_like=$${PATH_LIKE:-%/sources/beir/fiqa/%} limit=$${LIMIT:-0} workers=$${WORKERS:-8}"; \
+	  $(COMPOSE) exec -T \
+	    -e PYTHONUNBUFFERED=1 \
+	    -e BENCH_MODEL_API_KEY \
+	    -e BENCH_MODEL_BASE_URL \
+	    -e BENCH_MODEL_NAME \
+	    -e MODEL_API_KEY \
+	    -e OPENAI_BASE_URL \
+	    -e MODEL_NAME \
+	    runtime python -m app.retrieval.doc2query \
+	      --path-like "$${PATH_LIKE:-%/sources/beir/fiqa/%}" \
+	      $(if $(LIMIT),--limit $(LIMIT),) \
+	      --workers $${WORKERS:-8} \
+	      $(if $(FORCE),--force,) \
+	      $(if $(DRY_RUN),--dry-run,); \
+	fi
 
 sync-sources: ## Turn 外增量索引（本终端逐行进度条；docs/15）
 	@echo "==> sync-sources: live progress (embedder cold-start may take 1–3 min)"
