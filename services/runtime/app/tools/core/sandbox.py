@@ -35,11 +35,17 @@ _sticky_backend: SandboxBackend | None = None
 
 
 def clear_sandbox_backend_cache() -> None:
-    """Reset probe + sticky caches (tests / rare re-probe after ops change)."""
+    """Reset probe + sticky caches (tests / rare re-probe after ops change).
+
+    Tolerates tests that monkeypatch ``_landlock_can_exec`` / ``_bwrap_can_exec``
+    with plain callables (no ``cache_clear``) — teardown must not raise.
+    """
     global _sticky_backend
     _sticky_backend = None
-    _landlock_can_exec.cache_clear()
-    _bwrap_can_exec.cache_clear()
+    for fn in (_landlock_can_exec, _bwrap_can_exec):
+        cache_clear = getattr(fn, "cache_clear", None)
+        if callable(cache_clear):
+            cache_clear()
 
 
 def _which_bwrap() -> str | None:
