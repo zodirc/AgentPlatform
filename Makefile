@@ -48,7 +48,7 @@ WEB_REBUILD_DEPS ?= 0
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources seed-sources sync-ops-indexes intel-corpus-fetch retrieval-bench-prod loc \
+	sync-sources seed-sources sync-ops-indexes sync intel-corpus-fetch retrieval-bench-prod loc \
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
 	official-bench-paths official-bench-pull official-bench-retrieval \
 	official-bench-context official-bench-coding-pull official-bench-coding-infer \
@@ -79,6 +79,7 @@ help: ## 显示常用命令
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
 	@echo "  make sync-sources 增量索引 seed/普通 work（不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"
+	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键全量）"
 	@echo "  make resolve-embedding  GPU→gte-large@1024 / 否则 gte-small@384（up/start 自动跑）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
@@ -100,6 +101,7 @@ help: ## 显示常用命令
 	@echo "  make official-bench-update-baseline  认可后写入 baseline+SCORECARD"
 	@echo "  make seed-sources    同 sync-sources（常驻库不拷贝，只重建索引）"
 	@echo "  make sync-ops-indexes  Ops BEIR 按 work stamp 重嵌（换模后；非 up 默认）"
+	@echo "  make sync            sync-sources + sync-ops-indexes（一键）"
 	@echo "  make intel-corpus-fetch  拉取/转换 intel vendor 语料（gitignore；docs seed/intel）"
 	@echo "  make runtime-test 运行时测试"
 	@echo "  make preflight       推送前 unit 门禁（pre-push 默认；无长连接风险）"
@@ -467,6 +469,13 @@ print(json.dumps(r, ensure_ascii=False, default=str), flush=True)
 raise SystemExit(0 if str(r.get("status") or "ok") == "ok" else 1)
 endef
 export SYNC_OPS_INDEXES_PY
+
+sync: ## 一键：seed/普通 work + Ops BEIR（≡ sync-sources && sync-ops-indexes）
+	@echo "==> make sync: (1/2) sync-sources"
+	@$(MAKE) sync-sources
+	@echo "==> make sync: (2/2) sync-ops-indexes"
+	@$(MAKE) sync-ops-indexes
+	@echo "==> make sync: done"
 
 # ONLY=id1,id2 optional. Requires network + git. Does not touch Turn hot path.
 intel-corpus-fetch: ## 按 SOURCES.yaml 拉取并转换 intel vendor（≤150MiB；gitignore）
