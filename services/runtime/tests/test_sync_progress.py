@@ -177,3 +177,110 @@ def test_install_cli_progress_sink_prints(tmp_path: Path, monkeypatch, capsys) -
     assert "[sync]" in err
     assert "嵌入向量" in err
     assert sp._sink is None
+
+
+def test_format_cli_progress_prepare_chunk_finished_and_errors() -> None:
+    prepare = sp.format_cli_progress_line({"phase": "prepare", "elapsed_s": 8})
+    assert "打开索引库" in prepare
+    assert "孤儿" in prepare or "清" in prepare
+
+    chunk = sp.format_cli_progress_line(
+        {
+            "phase": "chunk",
+            "files_done": 3,
+            "files_total": 10,
+            "skipped": 2,
+            "dirty_files": 5,
+            "path": "/workspace/sources/seed/docs",
+        }
+    )
+    assert "切块3/10" in chunk
+    assert "跳过2" in chunk
+    assert "待嵌5" in chunk
+
+    plan_clean = sp.format_cli_progress_line(
+        {"phase": "plan", "dirty_files": 0, "force_reindex": False}
+    )
+    assert "无需重嵌" in plan_clean
+
+    load = sp.format_cli_progress_line({"phase": "loading_embedder", "dirty_files": 4})
+    assert "首次加载" in load
+
+    done = sp.format_cli_progress_line(
+        {"phase": "finished", "path": "/data/ops-l1/beir-index/fiqa"}
+    )
+    assert done.startswith("完成")
+    assert "fiqa" in done
+
+    err = sp.format_cli_progress_line(
+        {"phase": "scan", "status": "error", "error": "boom-" + ("x" * 100)}
+    )
+    assert "boom-" in err
+
+
+def test_format_eta_and_progress_percent_edge_cases() -> None:
+    assert sp.format_eta_s(None) is None
+    assert sp.format_eta_s("bad") is None
+    assert sp.format_eta_s(float("nan")) is None
+    assert sp.format_eta_s(-1) is None
+    assert sp.format_eta_s(3599) is not None
+    assert "h" in (sp.format_eta_s(3600) or "")
+    # mins rounding that rolls into next hour
+    assert sp.format_eta_s(3599.9) is not None
+
+    assert sp.progress_percent({}) is None
+    assert sp.progress_percent({"chunks_embedded": 5, "chunks_total": 10}) == 50.0
+    assert sp.progress_percent({"files_done": 1, "files_total": 4}) == 25.0
+    assert sp.progress_percent({"chunks_embedded": "x", "chunks_total": 10}) is None
+
+
+def test_short_path_truncates_long_paths() -> None:
+    long = "/workspace/sources/" + ("a" * 80)
+    short = sp._short_path(long, max_len=40)
+    assert short is not None
+    assert short.startswith("…")
+    assert sp._short_path("") is None
+    assert sp._short_path(None) is None
+
+
+def test_read_sync_progress_corrupt_and_sink_errors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(sp.settings, "data_dir", str(tmp_path))
+    path = sp.progress_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not-json", encoding="utf-8")
+    assert sp.read_sync_progress() is None
+    path.write_text("[1,2,3]", encoding="utf-8")
+    assert sp.read_sync_progress() is None
+
+    def boom(_payload):
+        raise RuntimeError("sink down")
+
+    sp.set_progress_sink(boom)
+    try:
+        # force write path + throttled path both tolerate sink errors
+        sp.report_sync_progress(force=True, status="building", phase="scan")
+        sp.report_sync_progress(force=False, status="building", phase="scan", files_done=1)
+    finally:
+        sp.set_progress_sink(None)
+
+
+def test_install_cli_progress_sink_heartbeat(tmp_path: Path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(sp.settings, "data_dir", str(tmp_path))
+    uninstall = sp.install_cli_progress_sink(min_interval_s=99.0, heartbeat_s=0.05)
+    try:
+        sp.report_sync_progress(
+            force=True,
+            status="building",
+            phase="prepare",
+            # no chunks_* so heartbeat is allowed
+        )
+        import time
+
+        time.sleep(0.2)
+    finally:
+        uninstall()
+    err = capsys.readouterr().err
+    assert "[sync]" in err
+    assert "仍在进行" in err or "打开索引库" in err

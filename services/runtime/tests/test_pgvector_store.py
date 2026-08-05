@@ -171,3 +171,42 @@ def test_get_sources_store_falls_back_when_pgvector_probe_fails(tmp_path, monkey
     )
     store = get_sources_store(data_dir=str(tmp_path))
     assert isinstance(store, JsonSourceRetrievalStore)
+
+
+def test_reindex_epoch_read_write_clear() -> None:
+    from app.retrieval.pgvector_store import (
+        _clear_reindex_epoch,
+        _read_reindex_epoch,
+        _write_reindex_epoch,
+        scope_meta_key,
+    )
+
+    store: dict[str, str] = {}
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            self._sql = sql
+            self._params = params
+            if params and "DELETE" in sql.upper():
+                store.pop(str(params[0]), None)
+                self._row = None
+            elif params and "INSERT" in sql.upper():
+                store[str(params[0])] = str(params[1])
+                self._row = None
+            elif params and "SELECT" in sql.upper():
+                key = str(params[0])
+                self._row = (store[key],) if key in store else None
+
+        def fetchone(self):
+            return getattr(self, "_row", None)
+
+    cur = _Cur()
+    assert _read_reindex_epoch(cur, "seed") is None
+    _write_reindex_epoch(cur, "seed", 123.456789)
+    assert store[scope_meta_key("seed", "reindex_epoch")] == "123.456789"
+    assert _read_reindex_epoch(cur, "seed") == 123.456789
+    store[scope_meta_key("seed", "reindex_epoch")] = "not-a-float"
+    assert _read_reindex_epoch(cur, "seed") is None
+    store[scope_meta_key("seed", "reindex_epoch")] = "99.0"
+    _clear_reindex_epoch(cur, "seed")
+    assert scope_meta_key("seed", "reindex_epoch") not in store
