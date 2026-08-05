@@ -1538,16 +1538,28 @@ async def run_context_l1(
                     )
                     fail_msg = turn_failure_message_from_events(events)
                     fail_class = failure_class_from_events(events)
+                    # INFRA-3 / EVAL-8: persist pred+gold(+norms) for offline ruler audits.
+                    from official_bench.context_run import (
+                        SCORER_VERSION as _SCORER_V,
+                        normalize_answer as _norm_ans,
+                    )
+
+                    pred_s = pred or ""
                     l2 = {
                         "case_id": case_id,
                         "turn_id": turn_id_s,
                         "arm": arm_norm,
                         **read_stats,
                         "read_coverage": read_coverage,
-                        "answer_len": len(pred or ""),
+                        "answer_len": len(pred_s),
                         "extraction_path": "events" if pred else "fallback",
                         "steps": step_count_from_events(events),
                         "terminal_state": terminal_state_from_events(events),
+                        "scorer": _SCORER_V,
+                        "pred": pred_s,
+                        "golds": golds,
+                        "pred_norm": _norm_ans(pred_s),
+                        "gold_norms": [_norm_ans(g) for g in golds],
                     }
                     if fail_msg:
                         l2["failure_message"] = fail_msg[:500]
@@ -1609,7 +1621,11 @@ async def run_context_l1(
                         metrics=scores,
                         extra={
                             "turn_id": turn_id_s,
-                            "pred": (pred or "")[:500],
+                            "pred": (pred or "")[:2000],
+                            "golds": golds,
+                            "pred_norm": l2.get("pred_norm"),
+                            "gold_norms": l2.get("gold_norms"),
+                            "scorer": l2.get("scorer"),
                             "arm": arm_norm,
                             "passage_chars": len(context),
                             "bucket": l2.get("bucket"),
@@ -1700,11 +1716,15 @@ async def run_context_l1(
         metrics["n_scored"] = float(n_scored)
         metrics["n_infra_excluded"] = float(n_infra)
         metrics["infra_rate"] = float(n_infra) / float(n_total) if n_total else 0.0
+        from official_bench.context_run import SCORER_VERSION as _SCORER_METRICS
+
+        metrics["agent_f1_scorer"] = 2.0 if _SCORER_METRICS == "v2" else 1.0
         # A-2: no full/budget/compact aliases on L1 (those were same-value stubs).
         session.metrics = metrics
         counts = bucket_counts(session.cases)
         session.extra["bucket_counts"] = counts
         session.extra["n_infra_excluded"] = n_infra
+        session.extra["agent_f1_scorer"] = _SCORER_METRICS
         result = {
             "suite": "longbench.small",
             "official": "LongBench",
@@ -1714,6 +1734,7 @@ async def run_context_l1(
             "sample_tier": session.extra.get("sample_tier"),
             "sample_policy": session.extra.get("sample_policy"),
             "context_limit": limit,
+            "agent_f1_scorer": _SCORER_METRICS,
             "metrics": metrics,
             "cases": case_rollups,
             "bucket_counts": counts,

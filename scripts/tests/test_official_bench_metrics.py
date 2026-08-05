@@ -38,9 +38,11 @@ def test_middle_truncate_and_score() -> None:
     trunc = middle_truncate(text, 40)
     assert "truncated" in trunc
     assert len(trunc) < len(text)
+    # EVAL-8: EM is normalized equality only (no gold⊆pred substring).
     s = score_prediction("the needle is here", ["needle"])
-    assert s["em"] == 1.0
+    assert s["em"] == 0.0
     assert s["f1"] > 0
+    assert score_prediction("needle", ["needle"])["em"] == 1.0
 
 
 def test_search_pool_mode_arm_defaults(monkeypatch) -> None:

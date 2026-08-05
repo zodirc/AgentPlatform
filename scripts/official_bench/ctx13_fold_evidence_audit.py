@@ -25,7 +25,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from official_bench.context_run import _normalize  # noqa: E402
+from official_bench.context_run import _normalize_v1 as _normalize  # noqa: E402
+# CTX-13 evidence matching stays on v1 normalize so historical audits remain
+# bit-stable; EVAL-8 scoring parity is orthogonal (score_prediction default=v2).
 
 RUNS = ROOT / "eval/reports/official/runs"
 OUT = ROOT / "eval/reports/official/batch15"

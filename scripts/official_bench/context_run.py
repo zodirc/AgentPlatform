@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import string
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,10 +17,30 @@ from .pull import pull_longbench
 from .run_session import RunSession
 
 _WS = re.compile(r"\s+")
+_ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
+_PUNCT = set(string.punctuation)
+
+# EVAL-8: LongBench qa_f1_score / SQuAD-style EM parity.
+# v1 = lower+whitespace only (+ EM substring clause). Do not bare-compare across versions.
+SCORER_VERSION = "v2"
+
+
+def _normalize_v1(s: str) -> str:
+    """Pre-EVAL-8 scorer (kept for offline rescoring / fixtures)."""
+    return _WS.sub(" ", (s or "").strip().lower())
+
+
+def normalize_answer(s: str) -> str:
+    """Official LongBench ``normalize_answer`` (lower → de-punct → de-article → ws)."""
+    text = (s or "").lower()
+    text = "".join(ch for ch in text if ch not in _PUNCT)
+    text = _ARTICLES.sub(" ", text)
+    return " ".join(text.split())
 
 
 def _normalize(s: str) -> str:
-    return _WS.sub(" ", (s or "").strip().lower())
+    """Default scorer normalize (= v2 / official)."""
+    return normalize_answer(s)
 
 
 def _answers_list(raw: Any) -> list[str]:
@@ -40,9 +61,9 @@ def _answers_list(raw: Any) -> list[str]:
     return [str(raw)]
 
 
-def _f1(pred: str, gold: str) -> float:
-    p = _normalize(pred).split()
-    g = _normalize(gold).split()
+def _f1_with_normalize(pred: str, gold: str, normalize) -> float:
+    p = normalize(pred).split()
+    g = normalize(gold).split()
     if not p and not g:
         return 1.0
     if not p or not g:
@@ -62,12 +83,36 @@ def _f1(pred: str, gold: str) -> float:
     return 2 * prec * rec / (prec + rec)
 
 
-def score_prediction(pred: str, golds: list[str]) -> dict[str, float]:
+def _f1(pred: str, gold: str) -> float:
+    return _f1_with_normalize(pred, gold, normalize_answer)
+
+
+def score_prediction(
+    pred: str,
+    golds: list[str],
+    *,
+    scorer: str = SCORER_VERSION,
+) -> dict[str, float]:
+    """Score pred against gold list.
+
+    ``scorer=v2`` (default): LongBench F1 normalize + SQuAD EM (normalized equality only).
+    ``scorer=v1``: legacy lower+ws normalize + EM substring clause (rescoring only).
+    """
     if not golds:
         return {"em": 0.0, "f1": 0.0}
-    norm_pred = _normalize(pred)
-    em = 1.0 if any(_normalize(g) == norm_pred or _normalize(g) in norm_pred for g in golds) else 0.0
-    f1 = max(_f1(pred, g) for g in golds)
+    if scorer == "v1":
+        norm = _normalize_v1
+        norm_pred = norm(pred)
+        em = (
+            1.0
+            if any(norm(g) == norm_pred or norm(g) in norm_pred for g in golds)
+            else 0.0
+        )
+        f1 = max(_f1_with_normalize(pred, g, norm) for g in golds)
+    else:
+        norm_pred = normalize_answer(pred)
+        em = 1.0 if any(normalize_answer(g) == norm_pred for g in golds) else 0.0
+        f1 = max(_f1_with_normalize(pred, g, normalize_answer) for g in golds)
     return {"em": em, "f1": f1}
 
 
