@@ -17,6 +17,7 @@ services:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
         HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
     environment:
       RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}

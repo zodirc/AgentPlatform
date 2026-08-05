@@ -97,6 +97,9 @@ PY
   export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-pypi.org}"
   export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}"
   export TORCH_FIND_LINKS="${TORCH_FIND_LINKS:-https://download.pytorch.org/whl/cpu}"
+  # CI runners have no GPU — force CPU torch even if a local shell exported cu128.
+  export TORCH_INDEX_URL="${TORCH_INDEX_URL:-}"
+  export RUNTIME_GPU="${RUNTIME_GPU:-0}"
   export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
   if [[ -z "${APT_MIRROR+x}" ]]; then
     export APT_MIRROR=""

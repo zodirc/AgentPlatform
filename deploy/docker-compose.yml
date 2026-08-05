@@ -74,6 +74,8 @@ services:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        # Empty → CPU torch. GPU hosts: resolve_embedding_profile sets cu128 (RTX 50xx).
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
         HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
     container_name: agent-runtime
     restart: unless-stopped
@@ -104,6 +106,8 @@ services:
       # gte-small → 384; gte-large → 1024（make resolve-embedding 按 GPU 写入）
       EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
       EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+      # auto|cpu|cuda — compose/gpu.auto.yml sets cuda when NVIDIA is detected.
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
       EMBEDDING_PROGRESS_EVERY_FILES: ${EMBEDDING_PROGRESS_EVERY_FILES:-25}
       SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
       SOURCES_STARTUP_SYNC_DELAY_SECONDS: ${SOURCES_STARTUP_SYNC_DELAY_SECONDS:-3}
@@ -236,6 +240,7 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
         HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
@@ -257,6 +262,7 @@ services:
       BENCH_RETRIEVAL_PG_SCHEMA: ${BENCH_RETRIEVAL_PG_SCHEMA:-retrieval_bench}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
       EMBEDDING_MODEL_DIR: /app/models-baked
+      EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
       HF_HOME: /data/models
       # GTE weights come from baked models-baked; allow Hub for LongBench/SWE pulls.
       TRANSFORMERS_OFFLINE: ${BENCH_TRANSFORMERS_OFFLINE:-1}

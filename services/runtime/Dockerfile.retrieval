@@ -1,12 +1,16 @@
 # syntax=docker/dockerfile:1
-# Retrieval runtime: CPU torch + sentence-transformers + baked embedding model.
+# Retrieval runtime: sentence-transformers + baked embedding model.
+# Default: CPU torch (CI / no-GPU). Local NVIDIA: pass TORCH_INDEX_URL
+# (e.g. https://download.pytorch.org/whl/cu128 for RTX 50xx) via compose.
 # BR3 (docs/38): model-baker + deps (pip/ST/models) then thin app stage.
 # Changing app/** / system.md must not re-download torch or re-bake GTE.
+# model-baker stays on CPU wheels (download weights only); deps may use CUDA.
 
 ARG EMBEDDING_MODEL=thenlper/gte-small
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
+ARG TORCH_INDEX_URL=
 ARG HF_ENDPOINT=https://hf-mirror.com
 ARG APT_MIRROR=mirrors.aliyun.com
 
@@ -36,15 +40,25 @@ RUN set -eux; \
 
 RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir "sentence-transformers>=3.0"
-RUN python -c "\
-from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"
+# Prefer offline bake cache (seeded from a prior runtime container) so Hub/proxy
+# flaps do not block CUDA rebuilds. Falls back to Hub download when empty.
+COPY deploy/model-bake-cache/ /models-bake-cache/
+RUN set -eux; \
+    if find /models-bake-cache -mindepth 1 -maxdepth 1 ! -name '.keep' -print -quit | grep -q .; then \
+      echo "model-baker: seeding /models-baked from deploy/model-bake-cache (offline)"; \
+      cp -a /models-bake-cache/. /models-baked/; \
+    else \
+      echo "model-baker: cache empty → download ${EMBEDDING_MODEL}"; \
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
+    fi; \
+    rm -rf /models-bake-cache
 
 FROM python:3.11-slim AS deps
 ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
 ARG TORCH_FIND_LINKS
+ARG TORCH_INDEX_URL
 ARG APT_MIRROR
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
@@ -68,8 +82,20 @@ WORKDIR /app
 
 COPY packages/contracts/python /contracts/python
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
-RUN mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
-    && pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
+# Offline CUDA wheels via bind mount (deploy/torch-wheel-cache) — not copied into the image.
+# Falls back to TORCH_INDEX_URL / CPU find-links when the cache has no .whl files.
+RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,ro \
+    mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
+    && if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
+         echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
+         pip install --no-cache-dir --no-index --find-links=/tmp/torch-wheels torch; \
+       elif [ -n "${TORCH_INDEX_URL}" ]; then \
+         echo "deps: installing CUDA torch from ${TORCH_INDEX_URL}"; \
+         pip install --no-cache-dir --default-timeout=300 --retries=5 torch --index-url "${TORCH_INDEX_URL}"; \
+       else \
+         echo "deps: installing CPU torch from ${TORCH_FIND_LINKS}"; \
+         pip install --no-cache-dir --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
+       fi \
     && pip install --no-cache-dir /contracts/python \
     && pip install --no-cache-dir "/tmp/runtime[retrieval]" \
     && rm -rf /tmp/runtime

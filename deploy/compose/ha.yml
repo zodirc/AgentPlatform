@@ -31,6 +31,7 @@ x-runtime-env: &runtime-env
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
   EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
   EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+  EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
   SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
   SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
   SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
@@ -64,6 +65,7 @@ x-runtime-svc: &runtime-svc
       PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
       APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
       TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+      TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
       HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
   volumes:
     # Shared across replicas — required for Work roots under /data/works/{id}

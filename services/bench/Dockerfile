@@ -7,6 +7,7 @@
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
+ARG TORCH_INDEX_URL=
 ARG APT_MIRROR=mirrors.aliyun.com
 ARG HF_ENDPOINT=https://hf-mirror.com
 ARG EMBEDDING_MODEL=thenlper/gte-small
@@ -37,14 +38,22 @@ RUN set -eux; \
 
 RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir "sentence-transformers>=3.0"
-RUN python -c "\
-from sentence_transformers import SentenceTransformer; \
-SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"
+COPY deploy/model-bake-cache/ /models-bake-cache/
+RUN set -eux; \
+    if find /models-bake-cache -mindepth 1 -maxdepth 1 ! -name '.keep' -print -quit | grep -q .; then \
+      echo "model-baker: seeding /models-baked from deploy/model-bake-cache (offline)"; \
+      cp -a /models-bake-cache/. /models-baked/; \
+    else \
+      echo "model-baker: cache empty → download ${EMBEDDING_MODEL}"; \
+      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
+    fi; \
+    rm -rf /models-bake-cache
 
 FROM python:3.11-slim AS deps
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
 ARG TORCH_FIND_LINKS
+ARG TORCH_INDEX_URL
 ARG APT_MIRROR
 ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
@@ -67,7 +76,17 @@ RUN mkdir -p /data/ops-official/data /data/ops-official/reports /data/models /ap
 WORKDIR /app
 
 COPY services/bench/requirements.txt /tmp/bench-requirements.txt
-RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
+RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,ro \
+    if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
+      echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
+      pip install --no-cache-dir --no-index --find-links=/tmp/torch-wheels torch; \
+    elif [ -n "${TORCH_INDEX_URL}" ]; then \
+      echo "deps: installing CUDA torch from ${TORCH_INDEX_URL}"; \
+      pip install --no-cache-dir --default-timeout=300 --retries=5 torch --index-url "${TORCH_INDEX_URL}"; \
+    else \
+      echo "deps: installing CPU torch from ${TORCH_FIND_LINKS}"; \
+      pip install --no-cache-dir --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
+    fi \
     && pip install --no-cache-dir -r /tmp/bench-requirements.txt \
     && rm -f /tmp/bench-requirements.txt
 

@@ -3,6 +3,11 @@
 .env.*
 !.env.example
 deploy/embedding.auto.env
+deploy/compose/gpu.auto.yml
+deploy/model-bake-cache/**
+!deploy/model-bake-cache/.keep
+deploy/torch-wheel-cache/**
+!deploy/torch-wheel-cache/.keep
 
 # python
 __pycache__/

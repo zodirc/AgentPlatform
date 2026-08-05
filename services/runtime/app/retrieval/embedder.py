@@ -97,7 +97,9 @@ class SentenceTransformerEmbedder:
         """Use CUDA when a usable GPU torch build is present (e.g. RTX 5080)."""
         forced = (getattr(settings, "embedding_device", None) or "").strip().lower()
         if forced in {"cpu", "cuda"}:
+            logger.info("embedder device=%s (forced)", forced)
             return forced
+        # "auto" or empty → probe
         try:
             import torch
 
@@ -107,6 +109,7 @@ class SentenceTransformerEmbedder:
                 return "cuda"
         except Exception:
             logger.debug("embedder CUDA probe failed", exc_info=True)
+        logger.info("embedder device=cpu")
         return "cpu"
 
     def embed(self, text: str) -> list[float]:

@@ -136,6 +136,8 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 256
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64
+    # auto → CUDA when torch.cuda.is_available(); else cpu|cuda force.
+    embedding_device: str = "auto"
     # Progress log every N files during sync (0 = only batch/flush logs).
     embedding_progress_every_files: int = 25
     # Development remains the safe default for local `make up`; production must
