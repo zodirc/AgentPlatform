@@ -206,10 +206,20 @@ class OpenAIProvider:
                         usage.get("completion_tokens") or usage.get("output_tokens") or 0
                     )
                     details = usage.get("prompt_tokens_details") or {}
+                    # OpenAI: prompt_tokens_details.cached_tokens
+                    # Anthropic-compat: cache_read_input_tokens
+                    # DeepSeek: prompt_cache_hit_tokens (official; not under details)
                     cache_read = int(
-                        details.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0
+                        details.get("cached_tokens")
+                        or usage.get("cache_read_input_tokens")
+                        or usage.get("prompt_cache_hit_tokens")
+                        or 0
                     )
-                    cache_creation = int(usage.get("cache_creation_input_tokens") or 0)
+                    cache_creation = int(
+                        details.get("cache_write_tokens")
+                        or usage.get("cache_creation_input_tokens")
+                        or 0
+                    )
                 choice = (event.get("choices") or [{}])[0]
                 delta = choice.get("delta") or {}
                 # Unblock first-byte timeout on any assistant SSE activity.

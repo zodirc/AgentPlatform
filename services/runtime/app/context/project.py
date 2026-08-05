@@ -56,6 +56,11 @@ def build_runtime_context(
     model_name: str | None = None,
     plan_hint: str | None = None,
 ) -> str:
+    """Per-step soft budget hint for the model.
+
+    Must be placed *after* conversation messages (see ContextEngine._materialize_messages)
+    so DeepSeek/OpenAI prefix cache can reuse the append-only history across steps.
+    """
     parts = [
         f"scenario_id={scenario_id}",
         f"step={step_count}/{max_steps}",

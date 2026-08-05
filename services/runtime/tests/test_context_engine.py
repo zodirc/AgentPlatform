@@ -173,7 +173,14 @@ def test_context_engine_autocompact_includes_message_snippets() -> None:
         usage=Usage(),
     )
     assembled = engine.assemble(system_prompt="sys", state=state)
-    summary = assembled[-1]["content"][0]["text"]
+    # Mutable runtime trails the transcript; autocompact summary is in messages body.
+    assert assembled[-1]["content"][0]["text"].startswith("[runtime_context]")
+    summary = next(
+        m["content"][0]["text"]
+        for m in assembled
+        if m.get("role") == "user"
+        and "autocompact" in str(m.get("content", [{}])[0].get("text", ""))
+    )
     assert "autocompact" in summary
     assert any(entry.get("strategy") == "compact" for entry in engine.last_compaction_trace)
 

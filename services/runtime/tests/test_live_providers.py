@@ -106,6 +106,46 @@ async def test_anthropic_provider_streams_tool_call() -> None:
 
 
 @pytest.mark.asyncio
+async def test_openai_provider_parses_deepseek_prompt_cache_hit_tokens() -> None:
+    """DeepSeek usage uses prompt_cache_hit_tokens, not OpenAI cached_tokens."""
+    lines = [
+        f"data: {json.dumps({'choices': [{'delta': {'content': 'ok'}}]})}",
+        "data: "
+        + json.dumps(
+            {
+                "choices": [],
+                "usage": {
+                    "prompt_tokens": 1200,
+                    "completion_tokens": 2,
+                    "prompt_cache_hit_tokens": 900,
+                    "prompt_cache_miss_tokens": 300,
+                },
+            }
+        ),
+        "data: [DONE]",
+    ]
+    provider = OpenAIProvider(api_key="k", model_name="deepseek-v4-flash")
+
+    with patch(
+        "app.model.openai_provider.httpx.AsyncClient",
+        return_value=_FakeAsyncClient(_FakeStreamResponse(lines)),
+    ):
+        chunks = [
+            c
+            async for c in provider.stream(
+                messages=[{"role": "user", "content": [{"type": "text", "text": "hi"}]}],
+                tools=[],
+            )
+        ]
+
+    finals = [c for c in chunks if isinstance(c, ModelResponse)]
+    assert finals
+    assert finals[-1].cache_read_input_tokens == 900
+    assert finals[-1].input_tokens == 1200
+    assert finals[-1].output_tokens == 2
+
+
+@pytest.mark.asyncio
 async def test_openai_provider_streams_text() -> None:
     lines = [
         f"data: {json.dumps({'choices': [{'delta': {'content': 'Hi'}}]})}",

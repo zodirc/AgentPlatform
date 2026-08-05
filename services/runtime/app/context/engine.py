@@ -303,13 +303,17 @@ class ContextEngine:
     def _materialize_messages(self, envelope: ContextEnvelope) -> list[dict[str, Any]]:
         # HM6 / WT5: keep system.md (scenario base) byte-stable for prompt cache.
         # project_context is workspace-derived and may change — never weld into system.
+        # DeepSeek / OpenAI prefix cache: mutable runtime (step=N) must trail messages,
+        # otherwise each step breaks the append-only history prefix.
         out = _prefix_messages(
             system_prompt=envelope.system_prompt,
             project_context=envelope.project_context,
-            runtime_context=envelope.runtime_context,
             volatile_context=envelope.volatile_context,
         )
         out.extend(envelope.messages)
+        runtime_msg = _runtime_user_message(envelope.runtime_context)
+        if runtime_msg is not None:
+            out.append(runtime_msg)
         return out
 
     def _finalize_envelope(self, envelope: ContextEnvelope, turn_id: Any) -> None:
@@ -504,25 +508,24 @@ def _project_user_message(project_context: str) -> dict[str, Any] | None:
     return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 
+def _runtime_user_message(runtime_context: str) -> dict[str, Any] | None:
+    text = (runtime_context or "").strip()
+    if not text:
+        return None
+    return {"role": "user", "content": [{"type": "text", "text": text}]}
+
+
 def _prefix_messages(
     *,
     system_prompt: str,
     project_context: str = "",
-    runtime_context: str = "",
     volatile_context: str = "",
 ) -> list[dict[str, Any]]:
-    """Stable system first; project / runtime / volatile as trailing user blocks."""
+    """Stable cacheable prefix: system → project → volatile (no per-step runtime)."""
     out: list[dict[str, Any]] = [_system_message(system_prompt)]
     project_msg = _project_user_message(project_context)
     if project_msg is not None:
         out.append(project_msg)
-    if runtime_context:
-        out.append(
-            {
-                "role": "user",
-                "content": [{"type": "text", "text": runtime_context}],
-            }
-        )
     volatile_msg = _volatile_user_message(volatile_context)
     if volatile_msg is not None:
         out.append(volatile_msg)
@@ -556,10 +559,12 @@ def _window_fill(
     assembled = _prefix_messages(
         system_prompt=system_prompt,
         project_context=project_context,
-        runtime_context=runtime_context,
         volatile_context=volatile_context,
     )
     assembled.extend(messages)
+    runtime_msg = _runtime_user_message(runtime_context)
+    if runtime_msg is not None:
+        assembled.append(runtime_msg)
     window = estimate_assembled_window(messages=assembled, tools=tools)
     project_tokens = estimate_payload_tokens(project_context)
     runtime_tokens = estimate_payload_tokens(runtime_context)

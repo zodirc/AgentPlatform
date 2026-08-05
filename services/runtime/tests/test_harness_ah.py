@@ -77,8 +77,12 @@ async def test_assemble_injects_project_and_runtime(
     project_text = messages[1]["content"][0]["text"]
     assert project_text.startswith("[project_context]")
     assert "outline.md" in project_text
+    # User turn sits before mutable runtime so DeepSeek prefix cache can append.
     assert messages[2]["role"] == "user"
-    assert messages[2]["content"][0]["text"].startswith("[runtime_context]")
+    assert messages[2]["content"][0]["text"] == "hi"
+    assert messages[-1]["role"] == "user"
+    assert messages[-1]["content"][0]["text"].startswith("[runtime_context]")
+    assert "step=" in messages[-1]["content"][0]["text"]
     assert engine.last_assemble_ms >= 0
     assert "assemble_ms" in engine.last_budget_report
     clear_project_context_cache()
