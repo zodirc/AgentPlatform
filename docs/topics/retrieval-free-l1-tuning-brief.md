@@ -1,15 +1,15 @@
 # Free-L1 Tuning Brief（检索 + 上下文 · 收敛版）
 
 > **受众**：下一轮调优负责人 / 高级模型  
-> **日期戳记**：2026-08-06（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 重嵌已完成**（gte-large@1024 / index 10）· CTX-13/EVAL-8 已收 · **RET-18 已收：保留 two-level ON** · **RET-11(b) 已回滚** · **REP-3 全量锚已取消**）  
+> **日期戳记**：2026-08-06（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 重嵌已完成**（gte-large@1024 / index 10）· **RET-4 free 冒烟 #1 已记** · CTX-13/EVAL-8 已收 · **RET-18 已收：保留 two-level ON** · **RET-11(b) 已回滚** · **REP-3 全量锚已取消**）  
 > **历史全文备份**：同目录 `retrieval-free-l1-tuning-brief.md.bak-20260805`（原 2563 行叙事稿，裁决以本文为准）  
 > **产品目标**：**搜得更好**（召回 / 排序 / 读到金标）——不是立 SCORECARD / 公证全量锚  
 > **唯一工作温度计**：L1 · `arm=free` · **冒烟 20q/库**（N≥2 去留）；**不做全量锚门禁**  
 > **不作为验收**：forced/oracle、纯 L0、coding；schema/inflight 事故跑 **不入对照**；**全量 qrels 锚跑**（已取消，对当前目标无杠杆）  
-> **当前平台锚（冒烟）**：检索 two-level ON + gte-large · `61f00a6d` nDCG@10 **≈0.483**；promote-off 旧锚 ≈0.447（`bcdbbb85`/`f92bc610`）；上下文 **agent_f1@v2 ≈0.52–0.54**  
+> **当前平台读数（冒烟）**：检索 two-level ON + gte-large · **#1** `d31375a5` nDCG@10 **0.5435**（vs 前锚 `61f00a6d` 0.483，Δ **+6.1pp**；**N=1 待复验**）；promote-off 旧锚 ≈0.447（`bcdbbb85`/`f92bc610`）；上下文 **#1** `46df8722` agent_f1@v2 **0.5393** / EM **0.233**（落在 v2 常态带）  
 > **停机线（EVAL-6）**：**2/2 已触发**（RET-9 + CTX-8）→ **停开新加法契约刀**  
-> **下一刀序**：检索——**FiQA 硬召回另议**（RET-11(b) 已回滚）；栈保持 gte-large + two-level ON；上下文——**产品侧工程停手**；**不跑 REP-3**  
-> **SCORECARD / baseline**：**不作为本轮目标**（不跑全量、不 `update-baseline`）  
+> **下一刀序**：检索——**同协议 free 再跑一轮（N≥2）**确认 `d31375a5` 不抖；FiQA 硬召回另议（RET-11(b) 已回滚）；栈保持 gte-large + two-level ON；上下文——**产品侧工程停手**；**不跑 REP-3**  
+> **SCORECARD / baseline**：**不作为本轮目标**（不跑全量、不 `update-baseline`；冒烟趋势可记）  
 > **流程图**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) · [context-tuning-flowchart.png](context-tuning-flowchart.png)
 
 ---
@@ -113,7 +113,7 @@
 | 3 | 温度计可信 | EVAL 配对 ✓；D-1 接受 writing-RAG；**EVAL-8 尺子 v2**；**日常 = 冒烟 20q** | **REP-3 已取消**（不做全量门禁） |
 | 4 | 有停机线 | **2/2 已触发** | 遵守：停开加法契约 |
 
-诚实带（对照非 KPI）：检索冒烟终态 **0.46–0.50**（须 RET-4/11）；上下文 F1 **v1 诚实带 ≈0.41**；**v2 复算读数 ≈0.52–0.54**（双锚实测；**口径修正，禁止叙述为涨分**）。narrativeqa v2 仍低（≈0.32）：**承认题型局限，不为刷分开刀、不换模背锅**。CTX-16 / 定位面：**门槛未过 → 关题**（§7.9）。
+诚实带（对照非 KPI）：检索冒烟前锚 **≈0.48**（`61f00a6d`）；**RET-4 gte-large 重嵌后 #1 `d31375a5` = 0.5435**（待 N≥2）；上下文 F1 **v1 诚实带 ≈0.41**；**v2 复算读数 ≈0.52–0.54**（`46df8722` = 0.539；**口径修正，禁止叙述为涨分**）。narrativeqa v2 仍低（≈0.36）：**承认题型局限，不为刷分开刀、不换模背锅**。CTX-16 / 定位面：**门槛未过 → 关题**（§7.9）。
 
 ### 2.5 不做清单（并集 · 完整保留）
 
@@ -178,10 +178,10 @@
 
 **记账锚（配对时必须注明 promote / two-level）**
 
-| 温度计 | 锚 | 备注 |
-|--------|-----|------|
-| 检索 | promote-off 均值 **≈0.447** | 配对锚；RET-9 回滚后不以 0.453 为锚 |
-| 上下文 | excl-infra F1 **v1≈0.41** · **v2≈0.53**（复算） | CTX-9/EVAL-infra 后口径；**EVAL-8 后须注明 scorer 版本**；勿与旧口径裸比 |
+| 温度计 | 锚 / 读数 | 备注 |
+|--------|-----------|------|
+| 检索 | promote-off 均值 **≈0.447**；two-level ON 前锚 `61f00a6d` **0.483**；**gte-large #1 `d31375a5` 0.5435（待 N≥2）** | 配对仍可对 promote-off；日常读数以 #1 为准直至复验 |
+| 上下文 | excl-infra F1 **v1≈0.41** · **v2≈0.53**（`46df8722`=0.539） | CTX-9/EVAL-infra 后口径；**EVAL-8 后须注明 scorer 版本**；勿与旧口径裸比 |
 
 ---
 
@@ -252,7 +252,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | RET-9 互补词面 | **丢刀回滚** | weak 未收窄；FiQA 全单搜未触发；**停机+1** | `03304987`/`03569f22` |
 | RET-17 gold 名次 | **离线收** | absent ~18–20% → 支撑 RET-4 | batch6b / batch14 |
 | RET-19 CE 回放 | **离线收 · 关闭议题** | mean Δ **+0.51pp** → **不上热路径 CE** | §14 产物 |
-| RET-4 L0+接线 | **选型锁定 · 重嵌未验收** | L0 gte-small macro 0.569 vs MiniLM 0.478（**不进主栏**） | `ret4_selection.json` |
+| RET-4 L0+接线 | **选型锁定 · GPU gte-large 重嵌 ✓ · free 冒烟 #1** | L0 gte-small macro 0.569 vs MiniLM 0.478（**不进主栏**）；L1 #1 `d31375a5` nDCG@10 **0.5435**（+6.1pp vs `61f00a6d`；**待 N≥2**） | `ret4_selection.json` · §7.4 |
 | RET-5 / RET-13 | **挂起** | 解挂条件未满足 / 已死 | — |
 
 ### 5.3 上下文 · 已收
@@ -318,7 +318,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 
 | 缺口 | 证据 | 下一步 |
 |------|------|--------|
-| FiQA / 多库 gold **absent_from_ranked** | RET-6/8/10/14/17 | **RET-4**（主杠杆） |
+| FiQA / 多库 gold **absent_from_ranked** | RET-6/8/10/14/17；#1 后 FiQA nDCG@10 **0.402**（+8.7pp）但 R@100 **0.533**（略 −1.7pp） | RET-4 宏分已见效；**硬召回 / absent 仍另议**（勿用单次宏分宣称 absent 已灭） |
 | weak_hits · lexical_miss | RET-8 | RET-4；**RET-11(b) 已回滚**（全库伪查询噪声） |
 | two-level 证据 | RET-18：OFF 均值 −10pp | **已闭合 · 保留 ON** |
 | 全量锚 / SCORECARD | — | **本轮不做**（REP-3 已取消；目标=搜得更好） |
@@ -346,7 +346,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | 3.6 | B′ | CTX-16 交付面 / 定位面回访 | EVAL-8 复算中的稀释质量 / never_retrieved 质量 ≥ 2.2pp | **关题**（稀释 potential 0.00/2.08pp < 2.2；定位面不立项） |
 | 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **✓ 已收 · 保留 ON**（OFF #1 `d819b698` 0.389 / #2 `c13f335e` 0.375 vs ON `61f00a6d` 0.483；栈已切回 `RETRIEVAL_TWO_LEVEL_ENABLED=true`） |
 | 5 | C | **REP-3** 全量锚 | — | **已取消**（对「搜得更好」无杠杆；跑次 `7c591a8b` 已 stop；manifest `rep3/freeze_manifest.json` = cancelled） |
-| 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · 重嵌 ✓（gte-small）· 待 free 验收** |
+| 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · GPU gte-large 重嵌 ✓ · free #1 ✓（`d31375a5` 0.5435）· 待 N≥2；不做全量后锚** |
 | 7 | E | **RET-11(b)**（BM25 doc2query） | 冒烟未胜 → 回滚 | **✓ 已回滚**（v1 `406bb48c` 0.436 / v2 `81d309a3` 0.460 vs 锚 `61f00a6d` 0.483；FiQA 仍 −8pp；已清空 `bm25_extra`） |
 | 8 | F | **PROD-1** 首跑 + 终态四问书面作答 | 完备收束 | **草稿 · 未首跑** |
 | 9 | G | **PROD-2** C-MTEB 小量 + Ops 旁路索引 | 配置草案落地 + 隔离索引同构跑通 | **草案 · 暂不实施**（§7.11；不挡本轮 RET 日历） |
@@ -375,15 +375,42 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
 
 ~~原规定（仅存档，不执行）~~：栈冻结 · 全量 retrieval + context · 入库唯一合法前锚 —— **作废**。
 
-### 7.4 RET-4 · Embed 换代（主菜 · 重嵌验收未完成）
+### 7.4 RET-4 · Embed 换代（主菜 · 重嵌 ✓ · free 冒烟 #1 已记 · 待 N≥2）
 
-**已完成**：L0 选型；`make resolve-embedding`；MiniLM 移出默认；index 9=small / 10=large；CUDA 探测。
+**已完成**：L0 选型；`make resolve-embedding`；MiniLM 移出默认；index 9=small / 10=large；CUDA 探测；**GPU 机 gte-large@1024 全库重嵌**（含 Ops FiQA → `agent-bench-postgres` / `retrieval_ops`）；**free 冒烟 #1**（2026-08-06）。
 
 **部署策略（锁定）**
 
-- `EMBEDDING_PROFILE=auto`：VRAM≥8GiB → `thenlper/gte-large@1024` / INDEX **10**；否则 `thenlper/gte-small@384` / INDEX **9**  
+- `EMBEDDING_PROFILE=auto`：VRAM≥8GiB → `thenlper/gte-large@1024` / INDEX **10**；否则 `gte-small@384` / INDEX **9**  
 - 强制：`EMBEDDING_PROFILE=small|large` 或 `EMBEDDING_FORCE_MODEL=…`  
 - MiniLM **不再是生产默认**
+
+**Free 冒烟 #1（2026-08-06 · 不作入库结论）**
+
+| 项 | 值 |
+|----|-----|
+| 协议 | `official-small-2026-08-m3` · `eval_path=agent` · `arm=free` · `sample_tier=smoke` · 20q/库 |
+| 栈 | two-level ON · gte-large@1024 · index 10 · CUDA（RTX 5080） |
+| retrieval run | `d31375a5-6884-4007-9bdb-a0d1d65b6d9d` |
+| context run | `46df8722-f2c3-4cc6-8ad5-58efc21d974e`（agent_f1@v2 **0.5393** / EM **0.233**；常态带） |
+| 扁平导出 | 根目录 `TEST.log`（指标镜像；权威仍以 `eval/reports/official/runs/<id>/`） |
+| infra_rate | **0** |
+
+| 宏 IR | #1 `d31375a5` | 前锚 `61f00a6d` | Δ |
+|-------|---------------|----------------|---|
+| nDCG@10 | **0.5435** | 0.4828 | **+6.1pp** |
+| Recall@10 | 0.5165 | 0.4468 | +7.0pp |
+| MAP@10 | 0.4010 | 0.3399 | +6.1pp |
+| Recall@100 | 0.5499 | 0.5388 | +1.1pp |
+| nDCG@1 | 0.4556 | 0.4556 | 0 |
+
+| 分库 nDCG@10 / R@100 | #1 | 前锚 | 读法 |
+|----------------------|----|------|------|
+| SciFact | 0.829 / 0.975 | 0.722 / 0.925 | Top-10 + 深召回双升 |
+| FiQA | 0.402 / 0.533 | 0.314 / 0.550 | **排序升、深召回略降**；absent 未宣称闭合 |
+| NFCorpus | 0.400 / 0.141 | 0.412 / 0.141 | 几乎不动（硬骨头） |
+
+**裁决（#1）**：宏分远超 EVAL-7 噪声门槛（≈2.2pp），叙事 =「gte-large 重嵌后工程变好的间接证明」；**须同协议再跑一轮（N≥2）**才把 `d31375a5` 升为稳定平台读数。**禁止** `update-baseline` / SCORECARD 主栏。下一步优先：复验；FiQA 硬召回另议。
 
 **执行细化（v2 · 立项不变）**
 
@@ -392,12 +419,12 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
         768 维仅当 384 候选 N≥2 后仍不达预期才另立票。本机策略已扩到 GPU→large。
 修订 2: 影子重嵌前 L0 选型（✓ 已做；数字不进主栏）。
 修订 3: BEIR Δ 可能高估产品迁移 → PROD-1 保留意见必须入入库叙事。
-执行序: 离线选型(✓) → bake + 全库重嵌(R4) → 配置切新 INDEX
-        → free 20q N≥2 + EVAL-1 → 分库 NFCorpus/FiQA + RET-14 gold_read/absent 同 case 对照
-        → 正 Δ → 全量后锚 → 入库裁决
+执行序: 离线选型(✓) → bake + 全库重嵌(R4)(✓ GPU large) → 配置切新 INDEX(✓)
+        → free 20q #1(✓) → **#2（N≥2）** + EVAL-1 → 分库 NFCorpus/FiQA + RET-14 gold_read/absent 同 case 对照
+        → 正 Δ 稳定 →（可选）叙事锚更新；**全量后锚本轮不做**
 回滚: 配置切回旧 INDEX，零重建
-诚实预期: 冒烟 0.447 → 0.47–0.51（只许下修）；FiQA absent 显著下降 = 主验收位（比宏分更硬）
-禁止: 未重嵌只改查询模型；与 RET-11 同影子；L0 数字进 SCORECARD
+诚实预期: 原写 0.47–0.51；#1 已到 0.54（乐观侧，待复验）；FiQA absent 显著下降 = 仍硬于宏分
+禁止: 未重嵌只改查询模型；与 RET-11 同影子；L0 数字进 SCORECARD；单次 smoke 入库
 ```
 
 **L0 证据（仅选型 · 不入主栏）** · run 切片 `03569f22` · `eval/reports/official/batch14/ret4_selection.json`
@@ -632,7 +659,7 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 
 ### 7.10 诚实预期（结构刀阶段）
 
-- 检索主分弹性全押 **RET-4**：冒烟带 0.47–0.51（只许下修）；FiQA absent 收窄硬于宏分。  
+- 检索主分弹性全押 **RET-4**：前预期 0.47–0.51；**#1 已到 0.5435**（待 N≥2）；FiQA absent 收窄仍硬于宏分。  
 - 上下文：**CTX-13 已收 · 暴露面=0**；**EVAL-8 已收** → 产品侧不承诺工程抬分；v1 锚 ≈0.41 / **v2 读数 ≈0.53**（校准）；CTX-16/定位面**关题**。  
 - RET-4 后宏分仍平 → 按终态条 2 把检索残余书面归因到 {qrels 结构 / 能力墙}，brief 仍可完备收束——**「证明了修不动」与「修好了」都是完备终态**。  
 - PROD-1 迁移率显著低于 BEIR Δ → 如实写入入库叙事，作为下一轮产品语料专项开题，不是本轮失败。  
@@ -730,7 +757,7 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 ```
 
 **当前唯一正确日历**：
-检索——**RET-18 ✓** → **RET-4**（gte-large 已嵌）→ **RET-11(b) 已回滚**（冒烟未胜；已清 `bm25_extra`）；
-上下文——**产品侧工程停手**；**EVAL-8 已收**（v2）；
+检索——**RET-18 ✓** → **RET-4**（gte-large 已嵌 · free #1 `d31375a5` **0.5435** · **待 N≥2**）→ **RET-11(b) 已回滚**；
+上下文——**产品侧工程停手**；**EVAL-8 已收**（v2；`46df8722` F1 0.539）；
 **REP-3 全量锚——已取消**（对搜得更好无杠杆）；
  backlog——PROD-1 / PROD-2 另议，不挡质量刀。

@@ -2,7 +2,7 @@
 
 - **protocol**: `official-small-2026-08-m3`
 - **eval_path**: `agent`（L1 agent-path 主栏）
-- **updated_at**: `2026-08-03T16:21:02.389205+00:00`
+- **updated_at**: `2026-08-06T12:00:00+00:00`（冒烟趋势已记 RET-4 gte-large #1；**主栏锚点档仍空** · 未 `update-baseline`）
 - **含义**: **主栏 = 锚点档**（全量/自由臂/官方裁判）；冒烟档仅作迭代方向盘，**不作效果结论**。
 - **明细**: Ops 官方页 / `eval/reports/official/runs/<id>/`（不进 git）
 - **L0 对照**: 旁路组件史见同目录 `official-small-2026-08-m1.json`（不进本表主栏）
@@ -18,8 +18,10 @@
 
 | 套件 | 主指标 | 值 | run_id | 备注 |
 |------|--------|----|--------|------|
-| retrieval | agent nDCG@10 | 0.4425 | `307ea1d0-6502-468b-85ea-c209f1377567` | tier=smoke · arm=free · n_queries=20 · R@100=0.5252 |
-| context | agent F1 / EM | 0.3677 / 0.2500 | `9998d9eb-9973-4938-bacf-3207aca4f781` | tier=smoke · arm=free · model=`deepseek-v4-flash` |
+| retrieval | agent nDCG@10 | **0.5435** | `d31375a5-6884-4007-9bdb-a0d1d65b6d9d` | 2026-08-06 · tier=smoke · arm=free · 20q/库 · gte-large+two-level · R@100=0.5499 · vs 前锚 `61f00a6d`≈0.483（**+6.1pp**；**N=1 待复验**）· 明细见 Free-L1 brief §7.4 |
+| context | agent F1 / EM | **0.5393 / 0.2333** | `46df8722-f2c3-4cc6-8ad5-58efc21d974e` | 2026-08-06 · tier=smoke · arm=free · scorer=v2 · 落在 v2 常态带 · 非工程抬分叙事 |
+| retrieval（史） | agent nDCG@10 | 0.4425 | `307ea1d0-6502-468b-85ea-c209f1377567` | 旧 smoke；保留对照 |
+| context（史） | agent F1 / EM | 0.3677 / 0.2500 | `9998d9eb-9973-4938-bacf-3207aca4f781` | 旧 smoke（v1 口径附近）；保留对照 |
 
 ## Retrieval / Context cases
 

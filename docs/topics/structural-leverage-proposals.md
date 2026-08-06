@@ -64,7 +64,7 @@ R1–R5: 通过——候选池百级、内存 Okapi 重打分毫秒级（R3）�
 
 **验收位**
 - 主观测位：RET-8 口径下 lexical_miss 桶收窄（子桶证据，符合 EVAL-7 ②）
-- 宏分：free 20q N≥2，锚 = two-level ON + gte-large `61f00a6d` ≈0.483；分库看 FiQA
+- 宏分：free 20q N≥2，对照锚 = two-level ON + gte-large 前锚 `61f00a6d` ≈0.483；**最新 smoke #1** `d31375a5` ≈0.5435（待复验）；分库看 FiQA
 - 硬指标：FiQA absent_from_ranked（RET-14/17 口径）前后对照
 - **脚本基准（本机 CPU / 无 sync）**：`make micro-p1` 或 Ops 评测台预设「P1 词面微基准」→ `scripts/official_bench/p1_lexical_micro.py`；默认 SciFact 10q，A/B `fts_ts_rank` vs `fts_okapi_rescore`；报告 `eval/reports/official/p1_lexical_micro*.json`。**不进 SCORECARD、不触发重嵌**。
 
