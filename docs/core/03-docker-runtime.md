@@ -590,7 +590,7 @@ make eval-ha        # ha_runner golden（stub）
 
 | 变量 | 说明 |
 |------|------|
-| `CONTEXT_WINDOW_TOKENS` / `CONTEXT_OUTPUT_RESERVE_TOKENS` | 窗与输出预留 |
+| `CONTEXT_WINDOW_TOKENS` / `CONTEXT_OUTPUT_RESERVE_TOKENS` | 窗与输出预留（默认 128K / 30K；预留按 `CONTEXT_OUTPUT_SCALE_REF_WINDOW_TOKENS` 等比例缩放） |
 | `CONTEXT_FILL_*` / `CONTEXT_HOT_ZONE_RATIO` | collapse / snip / autocompact |
 | `TURN_TOKEN_BUDGET` / `MONTHLY_TOKEN_*` | 配额与告警 |
 

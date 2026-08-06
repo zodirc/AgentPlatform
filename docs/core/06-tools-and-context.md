@@ -211,7 +211,7 @@ class ToolResult(BaseModel):
 ### 5.1.2 可取消性与超时（交叉引用）
 
 - 取消：ADR-015、`06` §5.1.1
-- 超时默认值：ADR-016（model 240s、tool `timeout_s`、Step 300s）
+- 超时默认值：ADR-016（model 600s、tool `timeout_s`、Step 720s）
 
 ### 5.2 流式输出
 

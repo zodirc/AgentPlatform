@@ -1319,16 +1319,16 @@ Cancel 解决「用户主动停」；超时解决「外部依赖 hang」。
 
 | 层级 | 默认上限 | 触发 | 典型终止 |
 |------|----------|------|----------|
-| Model 调用 | 120s | ModelGateway 单次 stream/complete | turn.failed，reason=model_timeout |
+| Model 调用 | 600s | ModelGateway 单次 stream/complete | turn.failed，reason=model_timeout |
 | 工具 | ToolSpec.timeout_s，默认 60s | ToolExecutor | tool.completed(status=timeout)，模型改道或终态 |
-| Step 墙钟 | 300s | 自 step.started 起未完成 | turn.failed，reason=step_timeout |
+| Step 墙钟 | 720s | 自 step.started 起未完成 | turn.failed，reason=step_timeout |
 
 规则：
 
 - Model 超时必须断开 provider，禁止无限 await；  
 - Step 墙钟覆盖 model+tools 合计，与 max_steps 正交；  
 - cancel 与 timeout 并行时，cancel 优先则终态 cancelled；  
-- Harness 另强调**首字节快超时**，避免「第一次就干等满 120s」。
+- Harness 另强调**首字节快超时**，避免「第一次就干等满整段 model_timeout」。
 
 ### 32.2 Stall Watchdog
 
@@ -1387,7 +1387,7 @@ AgentEngine while 语义冻结
 - `model_max_retries=2`（最多 3 次尝试）；backoff 基 0.5s、上限 8s，且 sleep 可被 Cancel 打断；  
 - 首字节快超时默认 **15s**，connect **10s**，整段 model 墙钟 **120s**；  
 - 错误分类：ModelTransientError / ModelFatalError / ModelProviderTimeout；  
-- GenerationParams：max_output_tokens 默认对齐 output_reserve（16384）、writing temperature 0.3、tool_choice=auto、thinking 默认关。
+- GenerationParams：max_output_tokens 默认按窗口等比例缩放（128K→30K；Web 改窗口则同步缩放）、writing temperature 0.3、tool_choice=auto、thinking 默认关。
 
 失败路径终态 **不得**伪装成 completed。
 
@@ -1881,7 +1881,7 @@ Model 面重试+快超时：短暂 429/5xx 少无意义整轮失败；Cancel 仍
 |------|----------|
 | LangGraph 单节点机制壳，业务在 AgentEngine | `services/runtime/app/graph/runner.py` 仅 `agent_loop` 一节点 |
 | writing max_steps=40，agent=50 | `scenarios/profiles/writing.yaml` / `agent.yaml` |
-| model_timeout=120s，step_timeout=300s，tool_default=60s | `settings.py` |
+| model_timeout=600s，step_timeout=720s，tool_default=60s | `settings.py` |
 | stall_threshold=180s，poll=30s，auto_fail 默认 false | `settings.py` + `stall_watchdog.py` |
 | 首字节快超时 15s，connect 10s，max_retries=2 | `settings.py`；gateway 在未 emit 前才重试 |
 | Cancel 可打断 backoff sleep | `ModelGateway._interruptible_sleep` |

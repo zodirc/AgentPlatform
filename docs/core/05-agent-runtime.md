@@ -362,9 +362,9 @@ loop 最大的风险是停不下来、烧钱、反复失败。终止条件必须
 
 | 层级 | 默认 | 终止 |
 |------|------|------|
-| **Model 调用** | 240s | `turn.failed`，`termination_reason: model_timeout` |
+| **Model 调用** | 600s | `turn.failed`，`termination_reason: model_timeout` |
 | **工具** | `ToolSpec.timeout_s`（默认 60s） | `tool.completed(status=timeout)` |
-| **Step 墙钟** | 300s（自 `step.started`） | `turn.failed`，`termination_reason: step_timeout` |
+| **Step 墙钟** | 720s（自 `step.started`） | `turn.failed`，`termination_reason: step_timeout` |
 
 - Model 超时须断开 provider 连接。
 - `CancelTurn` 与超时并行时，**cancel 优先**（终态 `cancelled`）。

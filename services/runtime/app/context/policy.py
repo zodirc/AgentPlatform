@@ -8,7 +8,7 @@ class CompactionPolicy:
     """Model-aware context compaction thresholds (ADR-008 Phase A)."""
 
     model_window_tokens: int = 128_000
-    output_reserve_tokens: int = 16_384
+    output_reserve_tokens: int = 30_000
     fill_collapse: float = 0.80
     fill_snip: float = 0.90
     fill_autocompact: float = 0.95
@@ -16,11 +16,13 @@ class CompactionPolicy:
 
     @classmethod
     def from_settings(cls) -> CompactionPolicy:
+        from app.model.generation import scaled_output_reserve_tokens
         from app.settings import settings
 
+        window = int(settings.context_window_tokens)
         return cls(
-            model_window_tokens=settings.context_window_tokens,
-            output_reserve_tokens=settings.context_output_reserve_tokens,
+            model_window_tokens=window,
+            output_reserve_tokens=scaled_output_reserve_tokens(window),
             fill_collapse=settings.context_fill_collapse,
             fill_snip=settings.context_fill_snip,
             fill_autocompact=settings.context_fill_autocompact,
@@ -28,9 +30,13 @@ class CompactionPolicy:
         )
 
     def with_window(self, model_window_tokens: int) -> CompactionPolicy:
+        """Retarget window and scale output reserve (128K→30K proportion)."""
+        from app.model.generation import scaled_output_reserve_tokens
+
+        window = max(1, int(model_window_tokens))
         return CompactionPolicy(
-            model_window_tokens=model_window_tokens,
-            output_reserve_tokens=self.output_reserve_tokens,
+            model_window_tokens=window,
+            output_reserve_tokens=scaled_output_reserve_tokens(window),
             fill_collapse=self.fill_collapse,
             fill_snip=self.fill_snip,
             fill_autocompact=self.fill_autocompact,

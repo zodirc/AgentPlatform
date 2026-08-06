@@ -153,7 +153,7 @@ class Settings(BaseSettings):
     # be selected explicitly and passes the guard below during startup.
     app_env: str = "development"
     log_level: str = "INFO"
-    model_timeout_seconds: float = 240.0
+    model_timeout_seconds: float = 600.0
     # H1 harness: fast-fail first byte / connect so retries start early.
     model_first_byte_timeout_seconds: float = 15.0
     model_connect_timeout_seconds: float = 10.0
@@ -161,7 +161,8 @@ class Settings(BaseSettings):
     model_retry_base_delay_seconds: float = 0.5
     model_retry_max_delay_seconds: float = 8.0
     # Generation strategy (aligned with CompactionPolicy.output_reserve_tokens).
-    model_max_output_tokens: int = 0  # 0 → use context_output_reserve_tokens
+    # 0 → scale reserve with context window (see context_output_* below).
+    model_max_output_tokens: int = 0
     model_temperature_writing: float = 0.3
     model_temperature_agent: Optional[float] = None
     model_top_p: Optional[float] = None
@@ -180,7 +181,8 @@ class Settings(BaseSettings):
     path_preread_timeout_seconds: float = 0.4
     path_preread_max_files: int = 3
     tool_default_timeout_seconds: float = 60.0
-    step_timeout_seconds: float = 300.0
+    # Must exceed model_timeout so a long think cannot lose to step wall-clock first.
+    step_timeout_seconds: float = 720.0
     stall_threshold_seconds: float = 180.0
     stall_poll_interval_seconds: float = 30.0
     # Default on: silent hangs (no new events) must not leave UI spinning forever.
@@ -200,8 +202,11 @@ class Settings(BaseSettings):
     monthly_token_limit: int = 0
     monthly_token_alert_pct: float = 0.8
     context_window_tokens: int = 128_000
-    # Reserved for model output; subtracted from window when computing fill ratio.
-    context_output_reserve_tokens: int = 16_384
+    # Proportional max-output / fill reserve: at ref_window → reserve tokens.
+    # Example: 128K → 30K; Web profile window 256K → 60K. Absolute override:
+    # set MODEL_MAX_OUTPUT_TOKENS > 0.
+    context_output_scale_ref_window_tokens: int = 128_000
+    context_output_reserve_tokens: int = 30_000
     # Assembled-window fill thresholds (0–1) for pressure-driven compaction.
     # Below collapse: keep rolling history verbatim (mainstream-like).
     context_fill_collapse: float = 0.80

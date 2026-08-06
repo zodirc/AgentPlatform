@@ -78,7 +78,7 @@ fill_ratio = estimated_tokens(整窗) / usable
 | 字段 | 默认 | 含义 |
 |------|------|------|
 | `model_window_tokens` | 128_000 | 模型上下文上限 |
-| `output_reserve_tokens` | 16_384 | **预留给输出**，不算进「可塞输入」 |
+| `output_reserve_tokens` | 30_000（128K 窗口；随窗口等比例） | **预留给输出**，不算进「可塞输入」 |
 | `fill_soft_precompact` | 0.78 | Turn 间隙异步备摘要 |
 | `fill_collapse` | **0.80** | 中间历史折叠 |
 | `fill_snip` | **0.90** | 剔最旧消息组 |

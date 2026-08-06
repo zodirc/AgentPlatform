@@ -442,6 +442,8 @@ type OfficialRun = {
   context_limit?: number;
   retrieval_query_limit?: number;
   l1_max_parallel?: number;
+  retrieval_datasets?: string[];
+  retrieval_corpus_mode?: string;
   retrieval_arm?: string;
   context_arm?: string;
   cancel_requested?: boolean;
@@ -472,6 +474,8 @@ type OfficialRun = {
     context_limit?: number;
     retrieval_query_limit?: number;
     l1_max_parallel?: number;
+    retrieval_datasets?: string[];
+    retrieval_corpus_mode?: string;
     retrieval_arm?: string;
     context_arm?: string;
     reclaimed?: boolean;
@@ -2663,14 +2667,9 @@ export function OfficialBenchPage() {
     const retLim = src.retrieval_query_limit ?? meta.retrieval_query_limit;
     const parallel = src.l1_max_parallel ?? meta.l1_max_parallel ?? 1;
     const corpusMode = String(
-      (src as { retrieval_corpus_mode?: string }).retrieval_corpus_mode ||
-        meta.retrieval_corpus_mode ||
-        "full",
+      src.retrieval_corpus_mode || meta.retrieval_corpus_mode || "full",
     );
-    const datasetsRaw =
-      (src as { retrieval_datasets?: string[] }).retrieval_datasets ||
-      meta.retrieval_datasets ||
-      [];
+    const datasetsRaw = src.retrieval_datasets || meta.retrieval_datasets || [];
     const datasets = Array.isArray(datasetsRaw) ? datasetsRaw : [];
     const scifactMicro =
       (corpusMode === "gold" || corpusMode === "micro") &&

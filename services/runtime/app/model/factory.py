@@ -33,16 +33,23 @@ def create_gateway(
     messages: list | None = None,
     scenario_id: str | None = None,
     for_compact: bool = False,
+    context_window_tokens: int | None = None,
 ) -> ModelGateway:
     from app.model.turn_override import current_turn_model_mode, current_turn_model_override
 
     if for_compact:
         config = apply_compact_model(config)
-    generation = GenerationParams.from_settings(scenario_id=scenario_id)
     effective_mode = current_turn_model_mode() or settings.model_mode
     override = current_turn_model_override()
     if override is not None and effective_mode == "live":
         config = override
+    window = context_window_tokens
+    if window is None and config is not None and config.context_window_tokens:
+        window = int(config.context_window_tokens)
+    generation = GenerationParams.from_settings(
+        scenario_id=scenario_id,
+        context_window_tokens=window,
+    )
     if messages is not None and effective_mode == "recorded":
         recorded = create_recorded_gateway(messages)
         if recorded is not None:

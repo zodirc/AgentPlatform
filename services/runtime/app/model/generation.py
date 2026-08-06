@@ -5,18 +5,37 @@ from dataclasses import dataclass
 from app.settings import settings
 
 
+def scaled_output_reserve_tokens(window_tokens: int | None = None) -> int:
+    """Scale output reserve / max_tokens with context window (default 128K → 30K).
+
+    ``MODEL_MAX_OUTPUT_TOKENS`` (when > 0) is an absolute override and skips scaling.
+    """
+    if settings.model_max_output_tokens > 0:
+        return max(1, int(settings.model_max_output_tokens))
+    ref_w = max(1, int(settings.context_output_scale_ref_window_tokens))
+    ref_o = max(1, int(settings.context_output_reserve_tokens))
+    window = int(window_tokens) if window_tokens is not None else int(settings.context_window_tokens)
+    window = max(1, window)
+    return max(1, window * ref_o // ref_w)
+
+
 @dataclass(frozen=True)
 class GenerationParams:
     """Per-turn generation strategy injected into providers (H1)."""
 
     temperature: float | None = None
     top_p: float | None = None
-    max_output_tokens: int = 16_384
+    max_output_tokens: int = 30_000
     tool_choice: str = "auto"  # auto | required | none
     thinking_enabled: bool = False
 
     @classmethod
-    def from_settings(cls, *, scenario_id: str | None = None) -> GenerationParams:
+    def from_settings(
+        cls,
+        *,
+        scenario_id: str | None = None,
+        context_window_tokens: int | None = None,
+    ) -> GenerationParams:
         temperature: float | None
         if scenario_id == "writing":
             temperature = settings.model_temperature_writing
@@ -28,11 +47,10 @@ class GenerationParams:
         else:
             temperature = settings.model_temperature_agent
 
-        max_output = settings.model_max_output_tokens or settings.context_output_reserve_tokens
         return cls(
             temperature=temperature,
             top_p=settings.model_top_p,
-            max_output_tokens=max(1, int(max_output)),
+            max_output_tokens=scaled_output_reserve_tokens(context_window_tokens),
             tool_choice=settings.model_tool_choice,
             thinking_enabled=settings.model_thinking_enabled,
         )

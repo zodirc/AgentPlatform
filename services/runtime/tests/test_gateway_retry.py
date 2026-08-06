@@ -256,7 +256,11 @@ def test_classify_http_status_transient_and_fatal() -> None:
 def test_generation_params_align_max_tokens_and_writing_temp(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("app.model.generation.settings.context_output_reserve_tokens", 16_384)
+    monkeypatch.setattr("app.model.generation.settings.context_output_reserve_tokens", 30_000)
+    monkeypatch.setattr(
+        "app.model.generation.settings.context_output_scale_ref_window_tokens", 128_000
+    )
+    monkeypatch.setattr("app.model.generation.settings.context_window_tokens", 128_000)
     monkeypatch.setattr("app.model.generation.settings.model_max_output_tokens", 0)
     monkeypatch.setattr("app.model.generation.settings.model_temperature_writing", 0.3)
     monkeypatch.setattr("app.model.generation.settings.model_temperature_agent", None)
@@ -265,10 +269,15 @@ def test_generation_params_align_max_tokens_and_writing_temp(
     monkeypatch.setattr("app.model.generation.settings.model_thinking_enabled", False)
 
     writing = GenerationParams.from_settings(scenario_id="writing")
-    assert writing.max_output_tokens == 16_384
+    assert writing.max_output_tokens == 30_000
     assert writing.temperature == 0.3
     assert writing.thinking_enabled is False
 
     agent = GenerationParams.from_settings(scenario_id="agent")
     assert agent.temperature is None
-    assert agent.max_output_tokens == 16_384
+    assert agent.max_output_tokens == 30_000
+
+    wide = GenerationParams.from_settings(
+        scenario_id="writing", context_window_tokens=256_000
+    )
+    assert wide.max_output_tokens == 60_000

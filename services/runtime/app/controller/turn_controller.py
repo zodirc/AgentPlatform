@@ -434,10 +434,13 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     mode = state.model_mode if state.model_mode in {"stub", "live", "recorded"} else None
     tokens = bind_turn_model(mode=mode) if mode else None
     try:
+        cfg = await resolve_model_config(owner_user_id=owner_user_id)
+        window = await resolve_context_window_tokens(cfg)
         gateway = create_gateway(
-            await resolve_model_config(owner_user_id=owner_user_id),
+            cfg,
             messages=state.messages,
             scenario_id=state.scenario_id,
+            context_window_tokens=window,
         )
     finally:
         if tokens is not None:
@@ -907,11 +910,12 @@ async def _finalize_turn(
         soft = float(_settings.context_fill_soft_precompact)
         # Token-estimate fill (assemble report is gone after engine returns).
         from app.context.engine import estimate_payload_tokens
+        from app.model.generation import scaled_output_reserve_tokens
 
         usable = max(
             1,
             int(_settings.context_window_tokens)
-            - int(_settings.context_output_reserve_tokens),
+            - int(scaled_output_reserve_tokens(_settings.context_window_tokens)),
         )
         approx_fill = min(1.0, estimate_payload_tokens(state.messages) / float(usable))
         if soft > 0 and approx_fill >= soft:
@@ -1251,12 +1255,13 @@ async def _run_turn(
 
     registry = build_registry()
     tools = tool_scope(profile, registry, plan_phase=phase)
+    context_window_tokens = await resolve_context_window_tokens(model_config)
     gateway = create_gateway(
         model_config,
         messages=compiled.messages,
         scenario_id=scenario_id,
+        context_window_tokens=context_window_tokens,
     )
-    context_window_tokens = await resolve_context_window_tokens(model_config)
 
     async def check_cancel() -> tuple[bool, bool]:
         return await _check_cancel_flag(turn_id)

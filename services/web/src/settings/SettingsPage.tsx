@@ -564,7 +564,10 @@ function ModelConfigForm({
         />
       </Field>
 
-      <Field label="上下文窗口（tokens）" hint="留空则使用模型或环境变量默认">
+      <Field
+        label="上下文窗口（tokens）"
+        hint="留空则用模型/环境默认；输出上限按 128K→30K 等比例缩放（如 256K→60K）"
+      >
         <input
           className={inputClass}
           inputMode="numeric"

@@ -15,7 +15,7 @@ import httpx
 ApiStyle = Literal["openai", "anthropic"]
 
 _DEFAULT_TIMEOUT = float(os.environ.get("BENCH_MODEL_TIMEOUT_SECONDS", "240") or "240")
-# Probe must fail fast in the Ops UI (not inherit the 240s eval timeout).
+# Probe must fail fast in the Ops UI (not inherit the 600s runtime model timeout).
 _PROBE_TIMEOUT = float(os.environ.get("BENCH_MODEL_PROBE_TIMEOUT_SECONDS", "20") or "20")
 _DEFAULT_MAX_RETRIES = int(os.environ.get("BENCH_MODEL_MAX_RETRIES", "6") or "6")
 _RETRY_BASE_SECONDS = float(os.environ.get("BENCH_MODEL_RETRY_BASE_SECONDS", "1.5") or "1.5")
