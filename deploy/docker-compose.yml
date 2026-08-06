@@ -29,12 +29,11 @@ services:
       timeout: 5s
       retries: 10
 
-  # Ops Bench only — isolated pgvector so official eval never shares CPU/IO/locks
-  # with the product agent database (docs: mature control-plane vs data-plane).
-  # Profile "bench": omitted from CI/runtime-lite smoke (gate); enabled by default
-  # via Makefile COMPOSE_PROFILES=bench for daily make up / make up-bench.
+  # Ops L1 vector plane — isolated pgvector so Official eval source_* never share
+  # locks/IO with the product agent database (Schema A: works/sessions stay on
+  # agent-postgres; L1 corpora under ops-l1/ index here). Always on (not profile
+  # "bench") so shared runtime can route Ops Turns without the L0 bench worker.
   bench-postgres:
-    profiles: [bench]
     image: pgvector/pgvector:pg16
     container_name: agent-bench-postgres
     restart: unless-stopped
@@ -83,6 +82,11 @@ services:
     mem_limit: 4g
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      # Ops L1 vector plane (ops-l1 works → agent-bench-postgres). Prefer OPS_*;
+      # BENCH_* kept as alias for older scripts.
+      OPS_DATABASE_URL: ${OPS_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
+      BENCH_DATABASE_URL: ${BENCH_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
+      OPS_RETRIEVAL_PG_SCHEMA: ${OPS_RETRIEVAL_PG_SCHEMA:-retrieval_ops}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
       MODEL_MODE: ${MODEL_MODE:-live}
@@ -151,6 +155,8 @@ services:
       - ${SEED_INTEL_HOST_PATH:-../seed/sources/intel}:/workspace/sources/seed/intel:ro,z
     depends_on:
       postgres:
+        condition: service_healthy
+      bench-postgres:
         condition: service_healthy
     healthcheck:
       # Use /health/live so first-boot can finish before MODEL_API_KEY / Web provider is set.

@@ -102,52 +102,66 @@ def _terminate_orphan_sync_db_backends() -> list[int]:
 
     A killed ``sync_cli`` often leaves Postgres ``idle in transaction`` for minutes;
     the next sync then blocks forever in ``ensure_schema`` ALTER TABLE.
+    Covers product ``DATABASE_URL`` and Ops ``OPS_DATABASE_URL`` / ``BENCH_DATABASE_URL``.
     """
     terminated: list[int] = []
     try:
         import psycopg
 
+        from app.retrieval.ops_plane import resolved_ops_database_url
         from app.settings import settings
 
-        dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
-        dsn = dsn.replace("postgres://", "postgresql://")
-        with psycopg.connect(dsn, connect_timeout=5, autocommit=True) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    SELECT pid FROM pg_stat_activity
-                    WHERE datname = current_database()
-                      AND pid <> pg_backend_pid()
-                      AND (
-                        (
-                          state = 'idle in transaction'
-                          AND xact_start < now() - interval '15 seconds'
-                          AND (
-                            query ILIKE '%source_chunks%'
-                            OR query ILIKE '%source_files%'
-                            OR query ILIKE '%source_index%'
-                          )
+        dsns: list[str] = [settings.database_url]
+        ops = resolved_ops_database_url()
+        if ops and ops not in dsns:
+            dsns.append(ops)
+
+        for raw_dsn in dsns:
+            dsn = raw_dsn.replace("postgresql+asyncpg://", "postgresql://")
+            dsn = dsn.replace("postgres://", "postgresql://")
+            try:
+                with psycopg.connect(dsn, connect_timeout=5, autocommit=True) as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            SELECT pid FROM pg_stat_activity
+                            WHERE datname = current_database()
+                              AND pid <> pg_backend_pid()
+                              AND (
+                                (
+                                  state = 'idle in transaction'
+                                  AND xact_start < now() - interval '15 seconds'
+                                  AND (
+                                    query ILIKE '%source_chunks%'
+                                    OR query ILIKE '%source_files%'
+                                    OR query ILIKE '%source_index%'
+                                  )
+                                )
+                                OR (
+                                  wait_event_type = 'Lock'
+                                  AND state = 'active'
+                                  AND (
+                                    query ILIKE '%source_files%'
+                                    OR query ILIKE '%source_chunks%'
+                                    OR query ILIKE '%ALTER TABLE%'
+                                  )
+                                )
+                                OR (
+                                  state = 'idle in transaction'
+                                  AND xact_start < now() - interval '120 seconds'
+                                )
+                              )
+                            """
                         )
-                        OR (
-                          wait_event_type = 'Lock'
-                          AND state = 'active'
-                          AND (
-                            query ILIKE '%source_files%'
-                            OR query ILIKE '%source_chunks%'
-                            OR query ILIKE '%ALTER TABLE%'
-                          )
-                        )
-                        OR (
-                          state = 'idle in transaction'
-                          AND xact_start < now() - interval '120 seconds'
-                        )
-                      )
-                    """
+                        pids = [int(row[0]) for row in cur.fetchall()]
+                        for pid in pids:
+                            cur.execute("SELECT pg_terminate_backend(%s)", (pid,))
+                            terminated.append(pid)
+            except Exception:
+                logger.warning(
+                    "failed to terminate orphan sync DB backends for one DSN",
+                    exc_info=True,
                 )
-                pids = [int(row[0]) for row in cur.fetchall()]
-                for pid in pids:
-                    cur.execute("SELECT pg_terminate_backend(%s)", (pid,))
-                    terminated.append(pid)
     except Exception:
         logger.warning("failed to terminate orphan sync DB backends", exc_info=True)
     return terminated
@@ -252,7 +266,9 @@ def _is_ops_l1_root(root: Path) -> bool:
     ``api-work``; letting global sync touch FiQA mid-materialize double-embeds
     and steals the process-wide sync lock.
     """
-    return "ops-l1" in root.resolve().parts
+    from app.retrieval.ops_plane import is_ops_l1_work_root
+
+    return is_ops_l1_work_root(root)
 
 
 def _is_ephemeral_ops_l1_root(root: Path) -> bool:
@@ -317,7 +333,7 @@ def _sync_one(
         )
     except Exception:
         logger.debug("sync progress scope report skipped", exc_info=True)
-    store = get_sources_store()
+    store = get_sources_store(work_root=workspace_root)
     return store.sync(
         sources_dir,
         workspace_root=workspace_root,

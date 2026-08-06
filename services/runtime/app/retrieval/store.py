@@ -5,6 +5,10 @@ import threading
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.retrieval.ops_plane import (
+    retrieval_database_url_for,
+    retrieval_pg_schema_for,
+)
 from app.retrieval.vector_index import ChunkHit, SourceVectorIndex
 from app.settings import settings
 
@@ -79,19 +83,43 @@ _stores: dict[tuple[str, ...], SourceRetrievalStore] = {}
 _stores_lock = threading.RLock()
 
 
-def get_sources_store(*, data_dir: str | None = None) -> SourceRetrievalStore:
+def get_sources_store(
+    *,
+    data_dir: str | None = None,
+    database_url: str | None = None,
+    schema: str | None = None,
+    work_root: Path | str | None = None,
+) -> SourceRetrievalStore:
+    """Return a cached retrieval store.
+
+    When ``work_root`` is under ``ops-l1`` and ``OPS_DATABASE_URL`` (or
+    ``BENCH_DATABASE_URL``) is set, pgvector uses the Ops vector plane.
+    Explicit ``database_url`` / ``schema`` override routing.
+    """
     backend = (settings.retrieval_backend or "pgvector").lower().strip()
     json_path = sources_store_path(data_dir=data_dir).resolve()
     if backend in {"pgvector", "postgres", "ann"}:
         from app.retrieval.embedder import effective_embedding_dimensions
 
+        dsn = (
+            database_url
+            if database_url is not None
+            else retrieval_database_url_for(work_root=work_root)
+        )
+        pg_schema = (
+            schema
+            if schema is not None
+            else retrieval_pg_schema_for(work_root=work_root)
+        )
         key = (
             "pgvector",
-            settings.database_url,
-            settings.retrieval_pg_schema,
+            dsn,
+            pg_schema,
             str(effective_embedding_dimensions()),
         )
     else:
+        dsn = ""
+        pg_schema = ""
         key = ("json", str(json_path))
 
     with _stores_lock:
@@ -103,9 +131,9 @@ def get_sources_store(*, data_dir: str | None = None) -> SourceRetrievalStore:
                 from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
 
                 store = PgvectorSourceRetrievalStore(
-                    settings.database_url,
+                    dsn,
                     dimensions=effective_embedding_dimensions(),
-                    schema=settings.retrieval_pg_schema,
+                    schema=pg_schema,
                 )
                 # Probe extension early so misconfig fails loud at first use.
                 store.ensure_schema()

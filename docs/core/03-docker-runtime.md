@@ -191,11 +191,13 @@ docker compose -f deploy/docker-compose.yml -f deploy/compose/dev.override.yml u
 
 | 服务 | 容器名 | 暴露 | 职责 |
 |------|--------|------|------|
-| `postgres` | `agent-postgres` | 内部 | 关系型存储 + pgvector 扩展 + 健康串联 |
-| `runtime` | `agent-runtime` | 内部 `:8001` | Agent 执行、工具、检索索引（默认 ST embedding） |
+| `postgres` | `agent-postgres` | 内部 | 产品关系型存储 + 用户 Work 的 pgvector `source_*` |
+| `bench-postgres` | `agent-bench-postgres` | 内部 | **Ops L1 向量平面**（`ops-l1/**` 的 `source_*`，schema `retrieval_ops`）；默认常驻，不绑 profile `bench` |
+| `runtime` | `agent-runtime` | 内部 `:8001` | Agent 执行、工具、检索索引（默认 ST embedding）；按 `work_root` 路由产品/Ops 库 |
 | `api` | `agent-api` | 内部 `:8000` | REST、SSE 代理、投影、outbox worker |
 | `web` | `agent-web` | 内部 `:80` | Vite 静态产物（nginx） |
 | `gateway` | `agent-gateway` | `${HTTP_PORT}` / `${HOST_PORT}` | Caddy 反代 `/api` + `/` |
+| `bench`（profile `bench`） | `agent-bench` | 内部 | 可选 L0 component worker；与 L1 主路径无关 |
 
 **陌生机默认（主 compose）**：`MODEL_MODE=live`、`RETRIEVAL_BACKEND=pgvector`、`RETRIEVAL_MODE=hybrid`、`EMBEDDING_BACKEND=sentence_transformers`、镜像 `Dockerfile.retrieval`。模型配置优先 Web「设置 → 模型」；也可用 env `MODEL_API_KEY` 作无 profile 时的 fallback。Compose 健康检查用 `/health/live`（允许无 key 先起栈）；`/health/ready` 表示「env key **或** DB 中任一条激活的 Web profile 可解密」。
 
@@ -585,6 +587,8 @@ make eval-ha        # ha_runner golden（stub）
 | `SEED_SOURCES_*` | 常驻种子库挂载 |
 | `RETRIEVAL_TWO_LEVEL_*` / `RETRIEVAL_RERANK_*` | 召回 / rerank 细调 |
 | `SEARCH_SOURCES_*` | 每 turn 检索预算 |
+| `OPS_DATABASE_URL` / `BENCH_DATABASE_URL` | Ops L1 向量库 DSN（默认 `bench-postgres`）；`work_root` 含 `ops-l1` 时路由至此 |
+| `OPS_RETRIEVAL_PG_SCHEMA` | Ops `source_*` schema（默认 `retrieval_ops`，与 L0 `retrieval_bench` 分开） |
 
 ### A.3 上下文压缩与配额
 

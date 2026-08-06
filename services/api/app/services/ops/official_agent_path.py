@@ -1,6 +1,10 @@
 """Official L1 (agent-path): official suites via product Session/Turn (docs/topics/official-bench-agent-tuning).
 
 Component (L0) benches stay on agent-bench. This module never bypasses AgentEngine.
+
+Schema A data plane: works/sessions live on product ``DATABASE_URL``; L1 corpora
+under ``ops-l1/`` index/search ``source_*`` on runtime ``OPS_DATABASE_URL``
+(``agent-bench-postgres``, schema ``retrieval_ops``).
 """
 
 from __future__ import annotations

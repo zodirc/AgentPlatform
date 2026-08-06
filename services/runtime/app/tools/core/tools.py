@@ -1404,7 +1404,9 @@ async def search_sources(
                     requested_limit=limit,
                     over_fetch_multiplier=float(fetch_limit) / float(max(limit, 1)),
                 )
-                store = await _run_retrieval_blocking(get_sources_store)
+                store = await _run_retrieval_blocking(
+                    get_sources_store, work_root=_workspace_root()
+                )
                 # JSON needs its persisted index loaded once. Pgvector searches the
                 # database directly once its schema is ready, so it never materializes
                 # the complete source_chunks table on a request.

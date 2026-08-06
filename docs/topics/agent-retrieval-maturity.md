@@ -49,6 +49,23 @@
 | **本微图冻结** | 融合公式启发；软 tool 停搜 hint |
 | **下一刀方向** | 结构刀 / 召回质量（主残余 weak_hits）；实体夹具验词面 |
 
+### 0.3 数据面：产品库 vs Ops 向量库（Schema A · 已落地）
+
+共用 **一个 runtime**；**向量/FTS 按 Work 路由**：
+
+| 平面 | DSN | 内容 |
+|------|-----|------|
+| 产品 | `DATABASE_URL` → `agent-postgres` | 用户 Work 的 `source_*`；works/sessions/turns |
+| Ops L1 | `OPS_DATABASE_URL`（或 `BENCH_DATABASE_URL`）→ `agent-bench-postgres` | `ops-l1/**` Work 的 `source_*`（schema `retrieval_ops`） |
+
+路由谓词：`work_root` 含 `ops-l1` → Ops 库。控制面元数据仍在产品库。`bench-postgres` **默认常驻**（不再绑死 profile `bench`）；L0 worker 仍可选。
+
+**UI**：主平台 / Ops Official Bench **无控件变更**（同 Session→Turn→`search_sources`）；仅存储平面切开。
+
+**切库后必做**：已有 BEIR/微图索引若仍在产品库，须对 ops-l1 Work **重新 sync** 再跑 L1，否则 Ops 检索会空。验收建议：① 主平台写作搜用户资料仍命中；② Ops sync 后 `retrieval_ops.source_chunks` 有行且产品库不再涨该批向量。
+
+代码落点：`app/retrieval/ops_plane.py` · `get_sources_store(work_root=…)` · compose `OPS_*`。
+
 ---
 
 ## 0′. 原目标形态（仍作长期参照，执行以 §0 为准）

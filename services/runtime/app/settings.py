@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
+    # Ops L1 vector plane (Schema A): source_* for ops-l1 works. Empty → fall back to
+    # bench_database_url, then (if both empty) product database_url (compat).
+    ops_database_url: str = ""
+    # L0 / legacy alias; runtime Ops plane prefers ops_database_url then this.
+    bench_database_url: str = ""
     # B10: pool command_timeout + PG statement_timeout (seconds).
     db_statement_timeout_seconds: float = 30.0
     # B2: max seconds to wait for in-flight turns on SIGTERM before teardown.
@@ -47,6 +52,8 @@ class Settings(BaseSettings):
     # Postgres schema for source_* tables (IX4 prod-bench uses retrieval_bench to avoid
     # wiping the user index when syncing an isolated temp workspace).
     retrieval_pg_schema: str = "public"
+    # Ops L1 source_* schema on OPS_DATABASE_URL (keep apart from L0 retrieval_bench).
+    ops_retrieval_pg_schema: str = "retrieval_ops"
     # Two-level doc→chunk recall (docs/13 S3 A11): parallel lanes; timeout → chunk-only.
     retrieval_two_level_enabled: bool = True
     retrieval_two_level_timeout_seconds: float = 0.3
