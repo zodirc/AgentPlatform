@@ -53,6 +53,8 @@ WEB_REBUILD_DEPS ?= 0
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
 	sync-sources seed-sources sync-ops-indexes sync intel-corpus-fetch retrieval-bench-prod loc \
+	micro-p1 \
+	micro-l1-prepare \
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
 	official-bench-paths official-bench-pull official-bench-retrieval \
 	official-bench-context official-bench-coding-pull official-bench-coding-infer \
@@ -100,6 +102,8 @@ help: ## 显示常用命令
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
 	@echo "  make retrieval-bench 离线检索 A/B（docs/15 契约近似；hash）"
 	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
+	@echo "  make micro-p1     P1 词面微基准（无 sync/无重嵌；SciFact 10q；ts_rank vs Okapi）"
+	@echo "  make micro-l1-prepare  SciFact 中库微图 gold+干扰（与主图分离）+ gte；Ops「SciFact 微 L1」"
 	@echo "  make official-bench-live     live 实测官方小量（禁 dry/skip；需 BENCH_MODEL_*）"
 	@echo "  make official-bench-compare  latest vs 仓库 SCORECARD/baseline Δ 表"
 	@echo "  make official-bench-update-baseline  认可后写入 baseline+SCORECARD"
@@ -670,6 +674,59 @@ retrieval-bench-prod: ## IX4 真相档难 qrels（容器内 ST+pgvector；隔离
 	    --qrels /tmp/ix4-bench/retrieval/qrels_hard.yaml \
 	    --corpus /tmp/ix4-bench/retrieval/corpus \
 	    --mode hybrid'
+
+# P1 lexical micro (no sync): SciFact default 10q × ts_rank vs Okapi on existing PG text.
+# MICRO_P1_DATASET=scifact|nfcorpus|fiqa  MICRO_P1_LIMIT=10  MICRO_P1_WORK_ID=<uuid>
+MICRO_P1_DATASET ?= scifact
+MICRO_P1_LIMIT ?= 10
+micro-p1: ## P1 词面微基准（无 sync/无重嵌；默认 SciFact 10q；写 eval/reports/official/p1_lexical_micro.json）
+	@test -f .env || (echo "missing .env"; exit 1)
+	@test -f eval/official/.local-data/beir/$(MICRO_P1_DATASET)/queries.jsonl || \
+	  (echo "missing BEIR slice; run: make official-bench-pull"; exit 1)
+	@mkdir -p eval/reports/official
+	@echo "==> micro-p1 dataset=$(MICRO_P1_DATASET) limit=$(MICRO_P1_LIMIT) (no sync; overlay host P1 FTS)"
+	$(COMPOSE) exec -T -u root runtime bash -c '\
+	  rm -rf /tmp/p1-micro && \
+	  mkdir -p /tmp/p1-micro/overlay && \
+	  cp -a /app/app /tmp/p1-micro/overlay/app && \
+	  touch /tmp/p1-micro/overlay/app/retrieval/__init__.py && \
+	  chmod -R a+rwX /tmp/p1-micro'
+	docker cp scripts/official_bench agent-runtime:/tmp/p1-micro/official_bench
+	docker cp eval/official/.local-data/beir agent-runtime:/tmp/p1-micro/beir
+	docker cp services/runtime/app/retrieval/bm25_document.py agent-runtime:/tmp/p1-micro/overlay/app/retrieval/bm25_document.py
+	docker cp services/runtime/app/retrieval/bm25.py agent-runtime:/tmp/p1-micro/overlay/app/retrieval/bm25.py
+	docker cp services/runtime/app/retrieval/pgvector_store.py agent-runtime:/tmp/p1-micro/overlay/app/retrieval/pgvector_store.py
+	$(COMPOSE) exec -T runtime bash -c '\
+	  export PYTHONPATH=/tmp/p1-micro/overlay:/tmp/p1-micro:/app; \
+	  export P1_BEIR_ROOT=/tmp/p1-micro/beir; \
+	  cd /tmp && \
+	  python -c "from app.retrieval.bm25_document import BM25_EXTRA_FTS_VERSION as v; print(f\"[p1-micro] overlay FTS version={v}\")"; \
+	  python /tmp/p1-micro/official_bench/p1_lexical_micro.py \
+	    --dataset "$(MICRO_P1_DATASET)" \
+	    --limit-queries "$(MICRO_P1_LIMIT)" \
+	    $(if $(MICRO_P1_WORK_ID),--work-id "$(MICRO_P1_WORK_ID)",) \
+	    --out /tmp/p1_lexical_micro.json'
+	@docker cp agent-runtime:/tmp/p1_lexical_micro.json eval/reports/official/p1_lexical_micro.json
+	@echo "==> wrote eval/reports/official/p1_lexical_micro.json"
+
+# SciFact mid-corpus micro-index: isolated work scifact-micro (≠ full beir-index/scifact).
+# MICRO_L1_LIMIT=20 — judged query head-slice; corpus = gold + seeded distractors.
+MICRO_L1_LIMIT ?= 20
+MICRO_L1_DISTRACTORS ?= 300
+MICRO_L1_SEED ?= 42
+micro-l1-prepare: ## SciFact 中库微图准备+嵌入（不跑 Turn；不影响多库主图；Ops「SciFact 微 L1」再评）
+	@test -f .env || (echo "missing .env"; exit 1)
+	@test -f eval/official/.local-data/beir/scifact/queries.jsonl || \
+	  (echo "missing BEIR slice; run: make official-bench-pull"; exit 1)
+	@echo "==> micro-l1-prepare limit=$(MICRO_L1_LIMIT) distractors=$(MICRO_L1_DISTRACTORS) → scifact-micro"
+	docker cp scripts/official_bench/scifact_micro_prepare.py agent-api:/tmp/scifact_micro_prepare.py
+	docker cp services/api/app/services/ops/official_agent_path.py agent-api:/app/app/services/ops/official_agent_path.py
+	$(COMPOSE) exec -T api bash -c '\
+	  export PYTHONPATH=/app:/repo/scripts; \
+	  python /tmp/scifact_micro_prepare.py \
+	    --limit-queries "$(MICRO_L1_LIMIT)" \
+	    --distractors "$(MICRO_L1_DISTRACTORS)" \
+	    --seed "$(MICRO_L1_SEED)"'
 
 # C-3 Index-plane fusion grid (round1): BEIR L0 ST+pgvector × profiles + prod-bench.
 # QUERY_LIMIT=20 smoke (default); QUERY_LIMIT=0 full qrels. Needs profile bench + bench-postgres.

@@ -743,14 +743,48 @@ def tool_scope(
     return specs
 
 
-def stage_tool_scope(specs: list[ToolSpec], *, step_count: int, max_steps: int, delivery: dict | None) -> list[ToolSpec]:
-    """Shrink tools JSON in late steps; no LLM routing."""
+def late_stage_tools_disabled(
+    *,
+    step_count: int,
+    max_steps: int,
+    delivery: dict | None,
+) -> bool:
+    """True when late-stage search/memory tools should be runtime-gated (C2)."""
     delivery_ok = isinstance(delivery, dict) and str(delivery.get("delivery_status", "")) in {
         "ok",
         "warning",
     }
     remaining = max_steps - step_count
     late = step_count >= 8 and remaining <= 6
-    if not delivery_ok and not late:
+    return bool(delivery_ok or late)
+
+
+def stage_tool_runtime_blocked(
+    tool_name: str,
+    *,
+    step_count: int,
+    max_steps: int,
+    delivery: dict | None,
+) -> bool:
+    """Runtime gate for tools that used to be removed from the schema."""
+    if tool_name not in _LATE_STAGE_DROP:
+        return False
+    return late_stage_tools_disabled(
+        step_count=step_count, max_steps=max_steps, delivery=delivery
+    )
+
+
+def stage_tool_scope(specs: list[ToolSpec], *, step_count: int, max_steps: int, delivery: dict | None) -> list[ToolSpec]:
+    """Optionally shrink tools JSON in late steps (legacy); default is no-op (C2).
+
+    Prefer ``stage_tool_runtime_blocked`` so the tools schema stays cache-stable.
+    """
+    from app.settings import settings
+
+    if not bool(getattr(settings, "stage_tool_scope_mutate_schema", False)):
+        return specs
+    if not late_stage_tools_disabled(
+        step_count=step_count, max_steps=max_steps, delivery=delivery
+    ):
         return specs
     return [spec for spec in specs if spec.name not in _LATE_STAGE_DROP]

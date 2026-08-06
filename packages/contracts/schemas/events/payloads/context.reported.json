@@ -26,6 +26,21 @@
       "items": { "type": "string" },
       "maxItems": 16
     },
+    "estimated_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "C3 audit: ContextEngine coarse token estimate after assemble (compare to provider input_tokens)."
+    },
+    "budget_truncated_n": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "C3 audit: how many tool_result payloads were hard-truncated for budget this assemble."
+    },
+    "budget_truncated_by_tool": {
+      "type": "object",
+      "description": "C3 audit: per-tool-name counts of budget truncations this assemble.",
+      "additionalProperties": { "type": "integer", "minimum": 0 }
+    },
     "breakdown": {
       "type": "object",
       "additionalProperties": false,

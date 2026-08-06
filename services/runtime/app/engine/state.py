@@ -45,6 +45,10 @@ class TurnState:
     exec_preapproved: bool = False
     # docs/34 RC1 — Turn-scoped read_file coverage (hard-gate read-after-complete).
     read_registry: dict[str, PathReadState] = field(default_factory=dict)
+    # C1: paths whose full read body left the visible assemble window (fold/collapse/snip).
+    # One re-read per path per Turn is allowed without tripping read_after_complete.
+    evicted_paths: set[str] = field(default_factory=set)
+    evicted_reread_used: set[str] = field(default_factory=set)
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

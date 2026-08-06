@@ -27,6 +27,9 @@
       "runtime": 24,
       "volatile": 120
     },
-    "source": "estimated"
+    "source": "estimated",
+    "estimated_tokens": 1800,
+    "budget_truncated_n": 0,
+    "budget_truncated_by_tool": {}
   }
 }

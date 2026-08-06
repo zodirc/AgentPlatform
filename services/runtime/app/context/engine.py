@@ -377,13 +377,16 @@ class ContextEngine:
 
         # C-1: fold stale reads first, then apply differential budgets so the
         # latest read_file body can keep up to latest_read budget (default 32k).
-        messages, folded_reads = _fold_stale_read_file_results(messages, keep_last_per_path=1)
+        messages, folded_reads, folded_paths = _fold_stale_read_file_results(
+            messages, keep_last_per_path=1
+        )
         if folded_reads:
             trace.append(
                 {"strategy": "read_fold", "detail": f"folded_{folded_reads}_read_file_results"}
             )
+        evicted: set[str] = set(folded_paths)
 
-        messages, budgeted = _apply_tool_result_budget(
+        messages, budgeted, truncated_by_tool = _apply_tool_result_budget(
             messages,
             preserve_short=True,
         )
@@ -404,6 +407,7 @@ class ContextEngine:
             volatile_context=volatile,
         )
         if fill_ratio >= policy.fill_collapse and len(messages) > 4:
+            before_collapse = messages
             messages = _collapse_tool_history(
                 messages,
                 trace,
@@ -412,6 +416,8 @@ class ContextEngine:
                 policy=policy,
                 volatile_context=volatile,
             )
+            if messages is not before_collapse:
+                evicted |= _read_paths_missing_after(before_collapse, messages)
 
         while len(messages) > 1:
             fill_ratio, _ = _window_fill(
@@ -426,9 +432,17 @@ class ContextEngine:
             if fill_ratio < policy.fill_snip:
                 break
             protect_from = _protected_tail_start(messages)
+            before_snip = list(messages)
             if not _pop_oldest_message_group(messages, protect_from=protect_from):
                 break
             trace.append({"strategy": "snip", "detail": "dropped_oldest_message"})
+            evicted |= _read_paths_missing_after(before_snip, messages)
+
+        # C1: paths whose bodies left the visible window may be re-read once.
+        if evicted:
+            state.evicted_paths |= {
+                p for p in evicted if p not in state.evicted_reread_used
+            }
 
         fill_ratio, _ = _window_fill(
             messages=messages,
@@ -474,6 +488,10 @@ class ContextEngine:
                 "token_budget": policy.model_window_tokens,
                 "reserve_tokens": reserve_tokens,
                 "fill_ratio": round(fill_ratio, 4),
+                # C3 audit: budget_truncated incidence by tool name.
+                "budget_truncated_n": int(budgeted),
+                "budget_truncated_by_tool": dict(truncated_by_tool),
+                "estimated_tokens": int(window_after["tokens_after"]),
             },
             compaction_trace=trace,
             project_context=project_context,
@@ -839,7 +857,11 @@ def _apply_tool_result_budget(
     *,
     preserve_short: bool = False,
     latest_read_budget: int | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+    """Truncate oversized tool_result bodies.
+
+    Returns ``(messages, truncated_count, truncated_by_tool)`` for C3 audit.
+    """
     default_budget, read_budget, _ = _budget_limits()
     if char_budget is not None:
         default_budget = int(char_budget)
@@ -850,6 +872,7 @@ def _apply_tool_result_budget(
     name_by_id = _tool_use_name_by_id(messages)
     out: list[dict[str, Any]] = []
     truncated = 0
+    truncated_by_tool: dict[str, int] = {}
     for msg in messages:
         if msg.get("role") != "tool":
             out.append(msg)
@@ -877,9 +900,11 @@ def _apply_tool_result_budget(
             if len(text) > limit:
                 text = text[:limit] + "\n...[budget_truncated]"
                 truncated += 1
+                tool_name = name_by_id.get(tid) or "unknown"
+                truncated_by_tool[tool_name] = truncated_by_tool.get(tool_name, 0) + 1
             new_blocks.append({**block, "content": text})
         out.append({**msg, "content": new_blocks})
-    return out, truncated
+    return out, truncated, truncated_by_tool
 
 
 def _preserve_writing_section_extract(text: str) -> bool:
@@ -904,13 +929,54 @@ def _tool_use_name_by_id(messages: list[dict[str, Any]]) -> dict[str, str]:
     return mapping
 
 
+def _read_paths_in_messages(messages: list[dict[str, Any]]) -> set[str]:
+    """Collect normalized read_file paths whose tool_result still has real body."""
+    from app.engine.read_registry import normalize_read_path
+
+    name_by_id = _tool_use_name_by_id(messages)
+    paths: set[str] = set()
+    for msg in messages:
+        if msg.get("role") != "tool":
+            continue
+        for block in msg.get("content", []) or []:
+            if block.get("type") != "tool_result":
+                continue
+            tid = str(block.get("tool_use_id") or "")
+            if name_by_id.get(tid) != "read_file":
+                continue
+            text = str(block.get("content") or "")
+            try:
+                data = json.loads(text)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(data, dict) or data.get("_folded_read"):
+                continue
+            content = data.get("content")
+            if not isinstance(content, str) or len(content) < 80:
+                continue
+            path = normalize_read_path(str(data.get("path") or ""))
+            if path:
+                paths.add(path)
+    return paths
+
+
+def _read_paths_missing_after(
+    before: list[dict[str, Any]], after: list[dict[str, Any]]
+) -> set[str]:
+    return _read_paths_in_messages(before) - _read_paths_in_messages(after)
+
+
 def _fold_stale_read_file_results(
     messages: list[dict[str, Any]],
     *,
     keep_last_per_path: int = 1,
     min_content_chars: int = 400,
-) -> tuple[list[dict[str, Any]], int]:
-    """docs/34 RC4: keep only the latest read_file body per path in the assemble view."""
+) -> tuple[list[dict[str, Any]], int, set[str]]:
+    """docs/34 RC4: keep only the latest read_file body per path in the assemble view.
+
+    Returns ``(messages, folded_count, folded_paths)`` — folded_paths feed C1
+    re-read exemptions.
+    """
     from app.engine.read_registry import normalize_read_path, omit_read_file_content_payload
 
     name_by_id = _tool_use_name_by_id(messages)
@@ -943,20 +1009,23 @@ def _fold_stale_read_file_results(
             candidates.append((mi, bi, path))
 
     if not candidates:
-        return messages, 0
+        return messages, 0, set()
 
     by_path: dict[str, list[tuple[int, int]]] = {}
     for mi, bi, path in candidates:
         by_path.setdefault(path, []).append((mi, bi))
 
     fold_keys: set[tuple[int, int]] = set()
+    folded_paths: set[str] = set()
     keep = max(1, int(keep_last_per_path))
-    for items in by_path.values():
+    for path, items in by_path.items():
         for mi, bi in items[:-keep]:
             fold_keys.add((mi, bi))
+            if not path.startswith("__anon_"):
+                folded_paths.add(path)
 
     if not fold_keys:
-        return messages, 0
+        return messages, 0, set()
 
     out: list[dict[str, Any]] = []
     folded = 0
@@ -985,7 +1054,7 @@ def _fold_stale_read_file_results(
             folded += 1
             changed = True
         out.append({**msg, "content": new_blocks} if changed else msg)
-    return out, folded
+    return out, folded, folded_paths
 
 
 def _message_has_tool_use(msg: dict[str, Any]) -> bool:

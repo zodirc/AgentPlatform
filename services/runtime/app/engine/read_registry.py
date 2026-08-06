@@ -86,8 +86,14 @@ def deny_redundant_read(
     *,
     path: str,
     offset: int = 1,
+    evicted_paths: set[str] | None = None,
+    evicted_reread_used: set[str] | None = None,
 ) -> str | None:
-    """RC1 + RC3: refuse complete re-reads and overlapping offset windows."""
+    """RC1 + RC3: refuse complete re-reads and overlapping offset windows.
+
+    C1: if the path was evicted from the visible window and this Turn has not
+    already used the one-shot re-read exemption, allow the call.
+    """
     key = normalize_read_path(path)
     if not key:
         return None
@@ -97,6 +103,13 @@ def deny_redundant_read(
     if st.allow_reread_once:
         return None
     if st.next_offset is not None and offset == st.next_offset:
+        return None
+    # C1: folded/collapsed content may be re-fetched once per path per Turn.
+    if (
+        evicted_paths is not None
+        and key in evicted_paths
+        and (evicted_reread_used is None or key not in evicted_reread_used)
+    ):
         return None
     if st.whole_file_complete:
         return (
@@ -137,6 +150,21 @@ def note_edit_failure_allows_reread(
         st = PathReadState()
         registry[key] = st
     st.allow_reread_once = True
+
+
+def consume_evicted_reread(
+    *,
+    path: str,
+    evicted_paths: set[str],
+    evicted_reread_used: set[str],
+) -> None:
+    """Mark C1 one-shot exemption as used after a successful re-read."""
+    key = normalize_read_path(path)
+    if not key:
+        return
+    if key in evicted_paths:
+        evicted_reread_used.add(key)
+        evicted_paths.discard(key)
 
 
 def record_successful_read(

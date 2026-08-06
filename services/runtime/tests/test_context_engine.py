@@ -45,7 +45,7 @@ def test_latest_read_file_keeps_large_body() -> None:
         assistant_tool_uses([{"id": "r1", "name": "read_file", "input": {"path": "p.md"}}]),
         tool_result_message("r1", body),
     ]
-    out, truncated = _apply_tool_result_budget(messages, preserve_short=True)
+    out, truncated, _by = _apply_tool_result_budget(messages, preserve_short=True)
     text = out[-1]["content"][0]["content"]
     assert truncated == 0
     assert "ANSWER_NEAR_END_" in text
@@ -494,7 +494,7 @@ def test_apply_tool_result_budget_preserves_writing_section_extract() -> None:
             "content": [{"type": "tool_result", "tool_use_id": "t1", "content": payload}],
         }
     ]
-    out, truncated = _apply_tool_result_budget(messages, 4000)
+    out, truncated, _by = _apply_tool_result_budget(messages, 4000)
     assert truncated == 0
     assert "X" * 100 in out[0]["content"][0]["content"]
     assert "budget_truncated" not in out[0]["content"][0]["content"]
@@ -520,7 +520,7 @@ def test_protected_tail_and_latest_read_budget_edges() -> None:
             "content": [{"type": "text", "text": "noise"}],
         },
     ]
-    out, n = _apply_tool_result_budget(
+    out, n, _by = _apply_tool_result_budget(
         messages, char_budget=100, latest_read_budget=50_000
     )
     assert n == 0

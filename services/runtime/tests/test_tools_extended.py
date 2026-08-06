@@ -726,6 +726,76 @@ def test_hits_cover_query_terms_ignores_runtime_noise() -> None:
     assert _hits_cover_query_terms([own], "TENANT_OWN_MARKER_WAVE_A") is True
 
 
+def test_distinctive_query_terms_keeps_short_scientific_entities() -> None:
+    from app.tools.core.tools import _distinctive_query_terms
+
+    terms = _distinctive_query_terms("ADAR1 binds to Dicer to cleave pre-miRNA")
+    assert "adar1" in terms
+    assert "dicer" in terms
+    assert "cleave" in terms
+    # Short stop-ish verbs stay out.
+    assert "binds" not in terms
+    assert "to" not in terms
+
+
+@pytest.mark.asyncio
+async def test_search_sources_keeps_ann_when_cover_miss_and_keyword_empty(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Claim tokens absent from abstract must not wipe rank-1 ANN (SciFact pattern)."""
+    sources = workspace / "sources"
+    sources.mkdir()
+    # No on-disk lexical overlap with the claim verb "cleave" / "pre-miRNA".
+    (sources / "5953485.txt").write_text(
+        "ADAR1 Forms a Complex with Dicer to Promote MicroRNA Processing\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(settings, "retrieval_mode", "hybrid")
+    monkeypatch.setattr(settings, "data_dir", str(workspace))
+
+    class FakeStore:
+        def load(self) -> None:
+            return None
+
+        def search(self, query: str, limit: int = 10, mode: str = "hybrid"):
+            return [
+                {
+                    "path": "sources/5953485.txt",
+                    "excerpt": (
+                        "ADAR1 Forms a Complex with Dicer to Promote "
+                        "MicroRNA Processing and RNA-Induced Gene Silencing"
+                    ),
+                    "score": 1.69,
+                    "citation_id": "cite:5953485",
+                    "visibility": "private",
+                }
+            ]
+
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
+    monkeypatch.setattr(
+        "app.retrieval.tenant_visibility.filter_hits_for_tenant",
+        lambda hits: hits,
+    )
+    # Force cover miss + empty keyword so we exercise ANN retention (not seed OR-noise).
+    monkeypatch.setattr(
+        "app.tools.core.tools._distinctive_query_terms",
+        lambda _q: ["cleave", "pre-mirna"],
+    )
+    monkeypatch.setattr(
+        "app.tools.core.tools._search_sources_keyword",
+        lambda *_a, **_k: ([], {}),
+    )
+    result = await core.search_sources(
+        "ADAR1 binds to Dicer to cleave pre-miRNA", limit=5
+    )
+    assert result["retrieval"] == "hybrid"
+    assert result["hits"]
+    assert "5953485" in result["hits"][0]["path"]
+    assert result["index"].get("ann_missed_query_terms") is True
+    assert result["index"].get("kept_ann_despite_cover_miss") is True
+    assert result["index"].get("index_lag") is not True
+
+
 def test_prefer_excerpt_covering_hits_promotes_visible_term() -> None:
     from app.tools.core.tools import _prefer_excerpt_covering_hits
 

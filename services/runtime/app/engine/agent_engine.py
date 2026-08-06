@@ -12,6 +12,7 @@ from typing import Any, Awaitable, Callable
 from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
 from app.engine.read_registry import (
+    consume_evicted_reread,
     deny_redundant_read,
     is_mutating_file_tool_failure,
     note_edit_failure_allows_reread,
@@ -259,6 +260,15 @@ class AgentEngine:
                         "breakdown": breakdown,
                         "source": "estimated",
                         "strategies": strategies,
+                        "budget_truncated_n": int(report.get("budget_truncated_n", 0)),
+                        "budget_truncated_by_tool": dict(
+                            report.get("budget_truncated_by_tool") or {}
+                        ),
+                        "estimated_tokens": int(
+                            report.get("estimated_tokens")
+                            or report.get("tokens_after")
+                            or 0
+                        ),
                     },
                     step_index=step_index,
                 )
@@ -373,6 +383,9 @@ class AgentEngine:
                     usage_source = "mixed" if usage_source == "provider" else "estimated"
 
                 retry_count = int(getattr(self._gateway, "retry_count", 0) or 0)
+                estimated = int(
+                    report.get("estimated_tokens") or report.get("tokens_after") or 0
+                )
                 usage_payload: dict[str, Any] = {
                     "step_index": step_index,
                     "input_tokens": state.usage.input_tokens,
@@ -381,7 +394,13 @@ class AgentEngine:
                     "step_output_tokens": step_output_tokens,
                     "source": usage_source,
                     "retry_count": retry_count,
+                    "estimated_tokens": estimated,
                 }
+                # C3: estimate / provider ratio for offline calibration (1.0 = perfect).
+                if usage_source == "provider" and step_input_tokens > 0 and estimated > 0:
+                    usage_payload["estimate_to_provider_ratio"] = round(
+                        float(estimated) / float(step_input_tokens), 4
+                    )
                 if step_cache_read or step_cache_creation:
                     usage_payload["cache_read_input_tokens"] = step_cache_read
                     usage_payload["cache_creation_input_tokens"] = step_cache_creation
@@ -683,6 +702,36 @@ class AgentEngine:
             step_index=step_index,
         )
 
+        # C2: keep tools schema static; reject late-stage tools at runtime.
+        from app.tools.bootstrap import stage_tool_runtime_blocked
+
+        if stage_tool_runtime_blocked(
+            tool_name,
+            step_count=state.step_count,
+            max_steps=state.max_steps,
+            delivery=state.delivery,
+        ):
+            result = {"error": "tool disabled at this stage"}
+            state.messages.append(
+                tool_result_message(
+                    tool_call_id,
+                    json.dumps(result, ensure_ascii=False),
+                    is_error=True,
+                )
+            )
+            await self._write_event(
+                event_type="tool.completed",
+                payload={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "status": "error",
+                    "error": "tool disabled at this stage",
+                },
+                step_index=step_index,
+            )
+            record_tool_call(tool_name=tool_name, status="error")
+            return "tool disabled at this stage"
+
         if tool_name == "read_file":
             args = arguments if isinstance(arguments, dict) else {}
             try:
@@ -696,6 +745,8 @@ class AgentEngine:
                 state.read_registry,
                 path=read_path,
                 offset=read_offset,
+                evicted_paths=state.evicted_paths,
+                evicted_reread_used=state.evicted_reread_used,
             )
             if deny:
                 kind = (
@@ -884,6 +935,11 @@ class AgentEngine:
                 truncated=bool(result.get("truncated")),
                 next_offset=next_off_i,
                 whole_file_complete=bool(result.get("whole_file_complete")),
+            )
+            consume_evicted_reread(
+                path=str(result.get("path") or path_from_tool_arguments(arguments)),
+                evicted_paths=state.evicted_paths,
+                evicted_reread_used=state.evicted_reread_used,
             )
         elif isinstance(result, dict) and is_mutating_file_tool_failure(tool_name, result):
             note_edit_failure_allows_reread(

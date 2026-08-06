@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     retrieval_rrf_vector_weight: float = 1.0
     retrieval_rrf_bm25_weight: float = 1.0
     retrieval_doc_boost: float = 0.35
+    # P1②: FTS recall + in-memory Okapi BM25Scorer rescore (rollback → ts_rank_cd).
+    retrieval_bm25_rescore_enabled: bool = True
     # Backend: pgvector (default ANN via HNSW; needs pgvector image) | json (file fallback).
     retrieval_backend: str = "pgvector"
     # Postgres schema for source_* tables (IX4 prod-bench uses retrieval_bench to avoid
@@ -49,6 +51,8 @@ class Settings(BaseSettings):
     retrieval_two_level_enabled: bool = True
     retrieval_two_level_timeout_seconds: float = 0.3
     retrieval_two_level_doc_limit: int = 8
+    # P3: true source_docs ANN; false / empty table → wide chunk ANN distinct-path approx.
+    retrieval_two_level_doc_table: bool = True
     # Lexical rerank may stay on (cheap). Cross-encoder stays OFF by default
     # (docs/21 Q8/Q13, docs/13 S2 A12). Experimental CE: pool≤20 + ≤50ms + timeout→lexical.
     retrieval_rerank_enabled: bool = True
@@ -88,6 +92,9 @@ class Settings(BaseSettings):
     pii_redact_enabled: bool = True
     secret_scan_enabled: bool = True
     secret_scan_timeout_ms: float = 50.0
+    # C2: when false (default), tools JSON stays static; late-stage drops are runtime gates.
+    # Set true to restore legacy schema mutation (breaks prompt-cache prefix).
+    stage_tool_scope_mutate_schema: bool = False
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
     # Inventory-deterministic pin (docs/14 C1/C3): kind → path sort; per-kind + global caps.
     writing_cards_dir: str = "sources/cards"
@@ -140,6 +147,8 @@ class Settings(BaseSettings):
     embedding_device: str = "auto"
     # Progress log every N files during sync (0 = only batch/flush logs).
     embedding_progress_every_files: int = 25
+    # P2: when false, embed body only (no path:/tags: prefix noise). Re-embed to take effect.
+    embedding_text_include_metadata: bool = False
     # Development remains the safe default for local `make up`; production must
     # be selected explicitly and passes the guard below during startup.
     app_env: str = "development"

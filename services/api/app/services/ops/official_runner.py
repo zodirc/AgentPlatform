@@ -24,6 +24,8 @@ TARGETS = (
     "coding",
     "coding_pull",
     "coding_infer",
+    # Script temperature: FTS ts_rank vs Okapi — no sync / no Turn / no model.
+    "p1_lexical_micro",
 )
 
 CRITERIA: list[dict[str, str]] = [
@@ -91,6 +93,9 @@ class OfficialLiveRun:
     retrieval_arm: str = "free"
     context_arm: str = "free"
     coding_checkout_repo: bool = True
+    # SciFact mid-corpus micro L1: dataset filter + isolated {name}-micro index.
+    retrieval_datasets: list[str] = field(default_factory=list)
+    retrieval_corpus_mode: str = "full"
     model: dict[str, Any] | None = None
     logs: list[dict[str, Any]] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -239,6 +244,8 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "retrieval_arm": run.retrieval_arm,
             "context_arm": run.context_arm,
             "coding_checkout_repo": run.coding_checkout_repo,
+            "retrieval_datasets": list(run.retrieval_datasets),
+            "retrieval_corpus_mode": run.retrieval_corpus_mode,
             "bench_job_id": run._bench_job_id,
             "phase_hint": run.phase_hint,
             "model": _model_meta_safe(run.model),
@@ -544,6 +551,8 @@ async def create_and_start(
     retrieval_arm: str = "free",
     context_arm: str = "free",
     coding_checkout_repo: bool = True,
+    retrieval_datasets: list[str] | None = None,
+    retrieval_corpus_mode: str = "full",
 ) -> OfficialLiveRun:
     cleaned: list[str] = []
     for t in targets:
@@ -564,6 +573,9 @@ async def create_and_start(
         elif t not in expanded:
             expanded.append(t)
     cleaned = expanded
+
+    if "p1_lexical_micro" in cleaned and cleaned != ["p1_lexical_micro"]:
+        raise ValueError("p1_lexical_micro_must_be_alone")
 
     # Soft skip removed for Ops product path: missing model fails at worker / UI.
     # Only one live official run at a time (disk/network heavy).
@@ -604,9 +616,29 @@ async def create_and_start(
         retrieval_arm="free",
         context_arm="free",
         coding_checkout_repo=bool(coding_checkout_repo),
+        retrieval_datasets=[
+            str(x).strip()
+            for x in (retrieval_datasets or [])
+            if str(x).strip()
+        ],
+        retrieval_corpus_mode=(
+            "micro"
+            if str(retrieval_corpus_mode or "full").strip().lower()
+            in {"gold", "micro"}
+            else "full"
+        ),
         model=model,
         progress_total=len(cleaned),
-        phase_hint="L1 agent-path：产品 Turn → 官方指标",
+        phase_hint=(
+            "P1 词面微基准：无 sync / 无重嵌 / 无 Turn"
+            if cleaned == ["p1_lexical_micro"]
+            else (
+                "SciFact 微 L1：中库（gold+干扰）+ gte + Turn（主图多库不受影响）"
+                if str(retrieval_corpus_mode or "").strip().lower()
+                in {"gold", "micro"}
+                else "L1 agent-path：产品 Turn → 官方指标"
+            )
+        ),
         cases=[
             {
                 "case_id": f"official.{t}",
@@ -1030,6 +1062,8 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             coding_checkout_repo=run.coding_checkout_repo,
             coding_harness=run.coding_harness,
             should_cancel=lambda: run.cancel_requested,
+            retrieval_datasets=list(run.retrieval_datasets) or None,
+            retrieval_corpus_mode=run.retrieval_corpus_mode,
         )
     except Exception as exc:  # noqa: BLE001
         if run.cancel_requested or "cancelled" in str(exc).lower():
@@ -1069,6 +1103,151 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             case["status"] = "skipped"
 
 
+async def _execute_p1_lexical_micro(run: OfficialLiveRun) -> None:
+    """Ops entry for script-only P1 lexical A/B (no sync / no Turn / no model)."""
+    repo = _repo_root()
+    script = repo / "scripts" / "official_bench" / "p1_lexical_micro.py"
+    if not script.is_file():
+        raise RuntimeError(f"missing_script:{script}")
+
+    reports_dir = Path(
+        os.environ.get("BENCH_REPORTS_DIR", "/data/ops-official/reports")
+    )
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    out_path = reports_dir / f"p1_lexical_micro_{run.id[:8]}.json"
+
+    beir_candidates = []
+    env_beir = (os.environ.get("P1_BEIR_ROOT") or os.environ.get("BEIR_ROOT") or "").strip()
+    if env_beir:
+        beir_candidates.append(Path(env_beir))
+    beir_candidates.extend(
+        [
+            Path("/data/ops-official/data/beir"),
+            repo / "eval" / "official" / ".local-data" / "beir",
+        ]
+    )
+    beir_root = next((p for p in beir_candidates if p.is_dir()), Path("/data/ops-official/data/beir"))
+    if not beir_root.is_dir():
+        raise RuntimeError(
+            f"BEIR slice root missing ({beir_root}); expected /data/ops-official/data/beir"
+        )
+
+    limit = int(run.retrieval_query_limit or 0)
+    if limit <= 0:
+        limit = 10
+
+    await _publish(
+        run,
+        {
+            "kind": "log",
+            "message": (
+                "[ops] P1 lexical micro — script temperature only "
+                f"(dataset=scifact limit={limit}; no sync / no re-embed / no Turn)"
+            ),
+        },
+    )
+    run.current_phase = "eval.p1_lexical_micro"
+    run.phase_hint = "P1 词面 · SciFact ts_rank vs Okapi…"
+    await _publish(run, {"kind": "phase", "message": run.phase_hint})
+
+    for case in run.cases:
+        if str(case.get("case_id") or "").endswith("p1_lexical_micro"):
+            case["status"] = "running"
+
+    env = os.environ.copy()
+    runtime_src = str(repo / "services" / "runtime")
+    scripts_src = str(repo / "scripts")
+    prev = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (runtime_src, scripts_src, prev) if p
+    )
+    env["P1_BEIR_ROOT"] = str(beir_root)
+    env["PYTHONUNBUFFERED"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+
+    cmd = [
+        sys.executable,
+        str(script),
+        "--dataset",
+        "scifact",
+        "--limit-queries",
+        str(limit),
+        "--ensure-fts",
+        "--out",
+        str(out_path),
+    ]
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env=env,
+        cwd="/tmp",
+    )
+    run._proc = proc
+    assert proc.stdout is not None
+    while True:
+        if run.cancel_requested:
+            await _kill_proc(proc)
+            break
+        line_b = await proc.stdout.readline()
+        if not line_b:
+            break
+        line = line_b.decode("utf-8", errors="replace").rstrip()
+        if line:
+            await _publish(run, {"kind": "log", "message": line})
+    rc = await proc.wait()
+    run._proc = None
+
+    report: dict[str, Any] = {}
+    if out_path.is_file():
+        try:
+            report = json.loads(out_path.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001
+            report = {}
+
+    arms = report.get("arms") if isinstance(report.get("arms"), dict) else {}
+    delta = (
+        report.get("delta_okapi_minus_ts_rank")
+        if isinstance(report.get("delta_okapi_minus_ts_rank"), dict)
+        else {}
+    )
+    metrics: dict[str, Any] = {}
+    for arm_name, arm in arms.items():
+        if not isinstance(arm, dict):
+            continue
+        for k in ("ndcg_at_10", "recall_at_10", "elapsed_s"):
+            if isinstance(arm.get(k), (int, float)):
+                metrics[f"{arm_name}.{k}"] = arm[k]
+        absent = arm.get("absent_at_k") if isinstance(arm.get("absent_at_k"), dict) else {}
+        if isinstance(absent.get("absent_rate"), (int, float)):
+            metrics[f"{arm_name}.absent_rate"] = absent["absent_rate"]
+    for k, v in delta.items():
+        if isinstance(v, (int, float)):
+            metrics[f"delta.{k}"] = v
+
+    ok = rc == 0 and bool(arms)
+    for case in run.cases:
+        if str(case.get("case_id") or "").endswith("p1_lexical_micro"):
+            case["status"] = "pass" if ok else "fail"
+            case["metrics"] = metrics
+            if not ok:
+                case["error"] = f"exit_{rc}" if rc else "empty_report"
+
+    run.progress_done = 1
+    run.child_reports.append(
+        {
+            "suite": "p1_lexical_micro",
+            "status": "pass" if ok else "fail",
+            "metrics": metrics,
+            "report_path": str(out_path) if out_path.is_file() else None,
+            "delta_okapi_minus_ts_rank": delta,
+            "note": report.get("note"),
+        }
+    )
+    if not ok and not run.cancel_requested:
+        raise RuntimeError(f"p1_lexical_micro_failed:exit={rc}")
+
+
 async def _execute(run_id: str) -> None:
     run = _RUNS.get(run_id)
     if run is None:
@@ -1081,7 +1260,10 @@ async def _execute(run_id: str) -> None:
     env = {"BENCH_REPORTS_DIR": reports_dir}
 
     try:
-        await _execute_via_agent_path(run)
+        if run.targets == ["p1_lexical_micro"]:
+            await _execute_p1_lexical_micro(run)
+        else:
+            await _execute_via_agent_path(run)
         if run.cancel_requested and run.status != "cancelled":
             run.status = "cancelled"
         elif any(c.get("status") == "fail" for c in run.cases) and run.status not in {
@@ -1308,6 +1490,8 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "retrieval_arm": run.retrieval_arm,
         "context_arm": run.context_arm,
         "coding_checkout_repo": run.coding_checkout_repo,
+        "retrieval_datasets": list(run.retrieval_datasets),
+        "retrieval_corpus_mode": run.retrieval_corpus_mode,
         "model": _model_meta_safe(run.model),
         "created_at": run.created_at,
         "finished_at": run.finished_at,

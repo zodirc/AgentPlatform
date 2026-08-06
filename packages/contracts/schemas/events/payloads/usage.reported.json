@@ -16,6 +16,16 @@
     "retry_count": { "type": "integer", "minimum": 0 },
     "cache_read_input_tokens": { "type": "integer", "minimum": 0 },
     "cache_creation_input_tokens": { "type": "integer", "minimum": 0 },
-    "cache_hit": { "type": "boolean" }
+    "cache_hit": { "type": "boolean" },
+    "estimated_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "C3 audit: ContextEngine coarse estimate at assemble (same step)."
+    },
+    "estimate_to_provider_ratio": {
+      "type": "number",
+      "minimum": 0,
+      "description": "C3 audit: estimated_tokens / provider step_input_tokens (1.0 = perfect)."
+    }
   }
 }

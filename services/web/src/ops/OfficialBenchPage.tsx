@@ -69,7 +69,8 @@ type TargetMeta = {
 };
 
 type ContextTier = "full" | "40" | "20" | "10" | "5";
-type RetrievalTier = "full" | "50" | "20" | "10" | "5";
+/** Numeric = qrels/集；scifact_micro = SciFact 中库（gold+干扰）20q，与主图分离。 */
+type RetrievalTier = "full" | "50" | "20" | "10" | "5" | "scifact_micro";
 
 type Preset = {
   id: string;
@@ -94,6 +95,7 @@ const CUSTOM_PROFILE_ID = "custom";
 /** Human labels for the profile parameter form. */
 function retrievalTierLabel(t: RetrievalTier): string {
   if (t === "full") return "全量 qrels (~1.3k)";
+  if (t === "scifact_micro") return "SciFact 微 L1（中库 · 20q）";
   return `${t} q/集`;
 }
 
@@ -1470,6 +1472,9 @@ function metricPreview(m: Record<string, number> | undefined): string {
   const preferred = [
     "ndcg_at_10",
     "agent.ndcg_at_10",
+    "fts_okapi_rescore.ndcg_at_10",
+    "fts_ts_rank.ndcg_at_10",
+    "delta.ndcg_at_10",
     "agent_f1",
     "agent_em",
     "f1",
@@ -2283,10 +2288,16 @@ export function OfficialBenchPage() {
     setCriteria(body.criteria || []);
     setTargetsMeta(body.targets || []);
     const apiPresets = body.presets || [];
-    const merged =
+    const merged = (
       apiPresets.some((p) => p.id === "l1_balanced" || p.retrieval_tier != null)
         ? apiPresets
-        : L1_RUN_PROFILES;
+        : L1_RUN_PROFILES
+    ).filter(
+      (p) =>
+        p.id !== "p1_lexical_micro" &&
+        p.id !== "scifact_micro_l1" &&
+        !(p.targets || []).includes("p1_lexical_micro"),
+    );
     setPresets(merged);
     setCaps(body.capabilities || {});
     if (body.coding_tiers?.length) setCodingTierMeta(body.coding_tiers);
@@ -2646,10 +2657,25 @@ export function OfficialBenchPage() {
     const ctxLim = src.context_limit ?? meta.context_limit;
     const retLim = src.retrieval_query_limit ?? meta.retrieval_query_limit;
     const parallel = src.l1_max_parallel ?? meta.l1_max_parallel ?? 1;
+    const corpusMode = String(
+      (src as { retrieval_corpus_mode?: string }).retrieval_corpus_mode ||
+        meta.retrieval_corpus_mode ||
+        "full",
+    );
+    const datasetsRaw =
+      (src as { retrieval_datasets?: string[] }).retrieval_datasets ||
+      meta.retrieval_datasets ||
+      [];
+    const datasets = Array.isArray(datasetsRaw) ? datasetsRaw : [];
+    const scifactMicro =
+      (corpusMode === "gold" || corpusMode === "micro") &&
+      datasets.map((d) => String(d).toLowerCase()).includes("scifact");
     return {
       suites,
       contextTier: tierFromLimit(ctxLim, "context") as ContextTier,
-      retrievalTier: tierFromLimit(retLim, "retrieval") as RetrievalTier,
+      retrievalTier: (scifactMicro
+        ? "scifact_micro"
+        : tierFromLimit(retLim, "retrieval")) as RetrievalTier,
       parallel: Number(parallel) || 1,
       codingTier: String(src.coding_tier || meta.coding_tier || ""),
       codingHarness: Boolean(src.coding_harness ?? meta.coding_harness),
@@ -2725,8 +2751,9 @@ export function OfficialBenchPage() {
   const applyPreset = (p: Preset) => {
     const suites = new Set<SuiteId>();
     for (const t of p.targets) {
-      if (t === "retrieval" || t === "context" || t === "coding") suites.add(t);
-      else if (t === "coding_infer" || t === "coding_pull") suites.add("coding");
+      if (t === "retrieval" || t === "context" || t === "coding") {
+        suites.add(t);
+      } else if (t === "coding_infer" || t === "coding_pull") suites.add("coding");
     }
     setSelectedSuites(suites);
     setCodingTier(p.coding_tier || "n5");
@@ -2751,7 +2778,12 @@ export function OfficialBenchPage() {
     setProfileFormOpen(true);
   };
 
-  const profileButtons = presets.length ? presets : L1_RUN_PROFILES;
+  const profileButtons = (presets.length ? presets : L1_RUN_PROFILES).filter(
+    (p) =>
+      p.id !== "p1_lexical_micro" &&
+      p.id !== "scifact_micro_l1" &&
+      !(p.targets || []).includes("p1_lexical_micro"),
+  );
   const activeProfileLabel =
     activeProfileId === CUSTOM_PROFILE_ID
       ? "自定义"
@@ -2864,8 +2896,16 @@ export function OfficialBenchPage() {
           context_arm: "free",
           context_limit: contextTier !== "full" ? Number(contextTier) : 0,
           retrieval_query_limit:
-            retrievalTier !== "full" ? Number(retrievalTier) : 0,
+            retrievalTier === "scifact_micro"
+              ? 20
+              : retrievalTier !== "full"
+                ? Number(retrievalTier)
+                : 0,
           l1_max_parallel: l1Parallel,
+          retrieval_datasets:
+            retrievalTier === "scifact_micro" ? ["scifact"] : [],
+          retrieval_corpus_mode:
+            retrievalTier === "scifact_micro" ? "micro" : "full",
           force: Boolean(opts?.force),
           model: modelPayload ?? null,
         }),
@@ -3525,6 +3565,9 @@ export function OfficialBenchPage() {
                       <option value="20">20 q/集</option>
                       <option value="10">10 q/集</option>
                       <option value="5">5 q/集</option>
+                      <option value="scifact_micro">
+                        SciFact 微 L1（中库 gold+干扰 · 20q · 与主图分离）
+                      </option>
                     </select>
                   </label>
                   <label className="grid gap-1">

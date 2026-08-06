@@ -10,11 +10,16 @@ import hashlib
 import json
 import logging
 import os
+import random
 import sys
 import time
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import UUID, uuid4
+
+# Isolated SciFact mid-corpus thermometer (≠ full beir-index/{dataset}).
+_MICRO_DISTRACTOR_N_DEFAULT = 300
+_MICRO_DISTRACTOR_SEED = 42
 
 from app.db.pool import get_pool
 from app.services.command.runtime_factory import runtime_client_for_new_turn
@@ -467,6 +472,94 @@ async def _ensure_beir_index_work(
     return work, fp, sources_dest
 
 
+def _gold_corpus_for_queries(
+    corpus: dict[str, str],
+    qrels: dict[str, dict[str, int]],
+    q_items: list[tuple[str, str]],
+) -> dict[str, str]:
+    """Keep only docs judged relevant for the selected query head-slice."""
+    gold_ids: set[str] = set()
+    for qid, _ in q_items:
+        for doc_id, rel in (qrels.get(qid) or {}).items():
+            if int(rel) > 0:
+                gold_ids.add(str(doc_id))
+    return {did: corpus[did] for did in sorted(gold_ids) if did in corpus}
+
+
+def _micro_corpus_for_queries(
+    corpus: dict[str, str],
+    qrels: dict[str, dict[str, int]],
+    q_items: list[tuple[str, str]],
+    *,
+    distractor_n: int = _MICRO_DISTRACTOR_N_DEFAULT,
+    seed: int = _MICRO_DISTRACTOR_SEED,
+) -> dict[str, str]:
+    """Gold docs for the query head-slice plus a seeded random distractor pool.
+
+    Indexed under ``{dataset}-micro`` so full multi-dataset L1
+    (``beir-index/{dataset}``) is untouched.
+    """
+    gold = _gold_corpus_for_queries(corpus, qrels, q_items)
+    gold_ids = set(gold.keys())
+    pool = [did for did in corpus if did not in gold_ids]
+    rng = random.Random(int(seed))
+    rng.shuffle(pool)
+    n = max(0, int(distractor_n))
+    out = dict(gold)
+    for did in pool[:n]:
+        out[did] = corpus[did]
+    return out
+
+
+def _normalize_corpus_mode(corpus_mode: str) -> str:
+    """``full`` | ``micro`` (``gold`` kept as alias for old Ops clients)."""
+    mode = (corpus_mode or "full").strip().lower()
+    if mode == "gold":
+        return "micro"
+    if mode not in {"full", "micro"}:
+        raise ValueError(f"unsupported_corpus_mode:{corpus_mode}")
+    return mode
+
+
+async def _prune_beir_sources(dest: Path) -> int:
+    """Remove all prior *.txt under dest (full reset)."""
+    if not dest.is_dir():
+        return 0
+
+    def _rm() -> int:
+        n = 0
+        for p in dest.glob("*.txt"):
+            try:
+                p.unlink()
+                n += 1
+            except OSError:
+                pass
+        return n
+
+    return int(await asyncio.to_thread(_rm))
+
+
+async def _prune_beir_orphans(dest: Path, keep_ids: set[str]) -> int:
+    """Remove *.txt whose doc id is not in keep_ids (resize-safe; keeps cache)."""
+    if not dest.is_dir():
+        return 0
+    keep = {str(x).replace("/", "_") for x in keep_ids}
+
+    def _rm() -> int:
+        n = 0
+        for p in dest.glob("*.txt"):
+            if p.stem in keep:
+                continue
+            try:
+                p.unlink()
+                n += 1
+            except OSError:
+                pass
+        return n
+
+    return int(await asyncio.to_thread(_rm))
+
+
 async def _start_turn(
     *,
     session_id: UUID,
@@ -847,6 +940,139 @@ def _load_beir_maps(
     return corpus, queries, qrels
 
 
+async def prepare_retrieval_micro_index(
+    *,
+    dataset: str = "scifact",
+    limit_queries: int = 20,
+    distractor_n: int = _MICRO_DISTRACTOR_N_DEFAULT,
+    distractor_seed: int = _MICRO_DISTRACTOR_SEED,
+    on_progress: ProgressCb | None = None,
+    should_cancel: CancelCheck | None = None,
+) -> dict[str, Any]:
+    """Materialize mid-corpus ``{dataset}-micro`` work and sync/embed (no Turns).
+
+    Corpus = gold docs for the query head-slice + seeded distractors.
+    Isolated from full ``beir-index/{dataset}`` (normal multi-dataset L1 untouched).
+    Uses the live runtime embedder (e.g. gte-small) via work-scoped sync.
+    """
+    _ensure_scripts_path()
+    from official_bench.config import load_suites
+    from official_bench.pull import pull_beir
+
+    name = str(dataset or "scifact").strip().lower() or "scifact"
+    limit = max(1, int(limit_queries or 20))
+    n_dist = max(0, int(distractor_n))
+    seed = int(distractor_seed)
+    cfg = load_suites()
+    root = await _pull_with_live_logs(
+        "BEIR",
+        lambda: pull_beir(cfg, force=False),
+        on_progress=on_progress,
+    )
+    corpus_full, queries_all, qrels = _load_beir_maps(root, name)
+    queries = {qid: queries_all[qid] for qid in qrels if qid in queries_all}
+    q_items = list(queries.items())[:limit]
+    gold = _gold_corpus_for_queries(corpus_full, qrels, q_items)
+    corpus = _micro_corpus_for_queries(
+        corpus_full,
+        qrels,
+        q_items,
+        distractor_n=n_dist,
+        seed=seed,
+    )
+    if not gold:
+        raise RuntimeError(
+            f"micro corpus empty gold for {name} (limit_queries={limit})"
+        )
+    index_name = f"{name}-micro"
+    work, corpus_fp, sources_dest = await _ensure_beir_index_work(index_name, corpus)
+    await _emit(
+        on_progress,
+        "log",
+        message=(
+            f"[micro] prepare {index_name}: docs={len(corpus)} "
+            f"(gold={len(gold)} + distractors≤{n_dist} seed={seed}) "
+            f"queries={len(q_items)} work={str(work.id)[:8]} "
+            f"fp={corpus_fp[:8]}"
+        ),
+    )
+    pruned = await _prune_beir_orphans(sources_dest, set(corpus.keys()))
+    if pruned:
+        await _emit(
+            on_progress,
+            "log",
+            message=f"[micro] pruned {pruned} orphan txt under {index_name}",
+        )
+        # Orphans removed → invalidate materialize marker so counts match.
+        fp_path = Path(work.work_root) / _FP_NAME
+        try:
+            if fp_path.is_file():
+                fp_path.unlink()
+        except OSError:
+            pass
+    await _materialize_corpus(
+        corpus,
+        sources_dest,
+        on_progress=on_progress,
+        label=index_name,
+        fingerprint=corpus_fp,
+    )
+    sync_res = await _sync_sources(
+        work,
+        on_progress=on_progress,
+        label=index_name,
+        expect_files=len(corpus),
+        should_cancel=should_cancel,
+    )
+    status = str(sync_res.get("status") or "")
+    indexed = int(sync_res.get("indexed_files") or 0)
+    if status == "error" or sync_res.get("error"):
+        return {
+            "status": "error",
+            "dataset": name,
+            "index_name": index_name,
+            "work_id": str(work.id),
+            "work_root": work.work_root,
+            "docs": len(corpus),
+            "gold_docs": len(gold),
+            "distractor_n": n_dist,
+            "queries": len(q_items),
+            "query_ids": [qid for qid, _ in q_items],
+            "sync": sync_res,
+        }
+    if indexed <= 0:
+        return {
+            "status": "error",
+            "error": "indexed_0_files",
+            "dataset": name,
+            "index_name": index_name,
+            "work_id": str(work.id),
+            "work_root": work.work_root,
+            "docs": len(corpus),
+            "sync": sync_res,
+        }
+    return {
+        "status": "ok",
+        "dataset": name,
+        "index_name": index_name,
+        "work_id": str(work.id),
+        "work_root": work.work_root,
+        "docs": len(corpus),
+        "gold_docs": len(gold),
+        "distractor_n": n_dist,
+        "distractor_seed": seed,
+        "queries": len(q_items),
+        "query_ids": [qid for qid, _ in q_items],
+        "doc_ids": sorted(corpus.keys()),
+        "sync": sync_res,
+        "note": (
+            "Isolated mid-corpus micro-index (gold+distractors) embedded via "
+            "runtime. Does not touch full beir-index/{dataset}. "
+            "Ops 检索档位「SciFact 微 L1」for Turn eval (needs model)."
+        ),
+    }
+
+
 async def run_retrieval_l1(
     *,
     limit_queries: int = 0,
@@ -856,10 +1082,17 @@ async def run_retrieval_l1(
     max_parallel: int | None = None,
     arm: str = "free",
     should_cancel: CancelCheck | None = None,
+    datasets: list[str] | None = None,
+    corpus_mode: str = "full",
 ) -> dict[str, Any]:
     """BEIR small via real Turns + search_sources events.
 
     arm=free (SCORECARD primary) | forced (L2 Index-plane diagnostic).
+
+    datasets: optional subset of suite dataset names (e.g. ``["scifact"]``).
+    corpus_mode: ``full`` (default) or ``micro`` (``gold`` alias) — mid-corpus
+    of gold docs + seeded distractors under ``{name}-micro`` (isolated from
+    full ``beir-index/{name}``; normal multi-dataset L1 untouched).
     """
     _ensure_scripts_path()
     from official_bench.agent_path_extract import (
@@ -896,6 +1129,12 @@ async def run_retrieval_l1(
     arm_norm = (arm or "free").strip().lower()
     if arm_norm not in {"free", "forced"}:
         raise ValueError(f"unsupported_retrieval_arm:{arm}")
+    mode_norm = _normalize_corpus_mode(corpus_mode)
+    dataset_filter = {
+        str(x).strip().lower()
+        for x in (datasets or [])
+        if str(x).strip()
+    }
 
     cfg = load_suites()
     protocol_l0 = str(
@@ -916,6 +1155,8 @@ async def run_retrieval_l1(
         "scenario_id": scenario_id,
         "sample_tier": ("smoke" if limit_queries > 0 else "anchor"),
         "limit_queries": limit_queries,
+        "corpus_mode": mode_norm,
+        "datasets_filter": sorted(dataset_filter) if dataset_filter else None,
         **_l1_fingerprint(model),
     }
     smoke_ids: list[str] = []
@@ -932,6 +1173,13 @@ async def run_retrieval_l1(
     try:
         for ds in retrieval["datasets"]:
             name = str(ds["name"])
+            if dataset_filter and name.lower() not in dataset_filter:
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=f"[L1] dataset {name}: skipped (filter)",
+                )
+                continue
             await _emit(
                 on_progress,
                 "log",
@@ -956,46 +1204,89 @@ async def run_retrieval_l1(
             # EVAL-2: head-slice ids (dataset-qualified for fingerprint uniqueness)
             for qid, _qtext in q_items:
                 smoke_ids.append(f"{name}:{qid}")
-            work, corpus_fp, sources_dest = await _ensure_beir_index_work(name, corpus)
+
+            index_name = name
+            if mode_norm == "micro":
+                corpus = _micro_corpus_for_queries(
+                    corpus,
+                    qrels,
+                    q_items,
+                    distractor_n=_MICRO_DISTRACTOR_N_DEFAULT,
+                    seed=_MICRO_DISTRACTOR_SEED,
+                )
+                index_name = f"{name}-micro"
+                if not corpus:
+                    raise RuntimeError(
+                        f"L1 micro corpus empty for {name} "
+                        f"(limit_queries={limit_queries})"
+                    )
+
+            work, corpus_fp, sources_dest = await _ensure_beir_index_work(
+                index_name, corpus
+            )
             await _emit(
                 on_progress,
                 "log",
                 message=(
                     f"[L1] dataset {name}: corpus={len(corpus)} "
                     f"qrels_queries={len(q_items)} "
-                    f"index_work={str(work.id)[:8]} fp={corpus_fp[:8]}"
+                    f"index_work={str(work.id)[:8]} "
+                    f"index_name={index_name} mode={mode_norm} "
+                    f"fp={corpus_fp[:8]}"
                 ),
             )
+            if mode_norm == "micro":
+                pruned = await _prune_beir_orphans(
+                    sources_dest, set(corpus.keys())
+                )
+                if pruned:
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=(
+                            f"[L1] materialize {index_name}: "
+                            f"pruned {pruned} orphans"
+                        ),
+                    )
+                    fp_path = Path(work.work_root) / _FP_NAME
+                    try:
+                        if fp_path.is_file():
+                            fp_path.unlink()
+                    except OSError:
+                        pass
             await _materialize_corpus(
                 corpus,
                 sources_dest,
                 on_progress=on_progress,
-                label=name,
+                label=index_name,
                 fingerprint=corpus_fp,
             )
             sync_res = await _sync_sources(
                 work,
                 on_progress=on_progress,
-                label=name,
+                label=index_name,
                 expect_files=len(corpus),
                 should_cancel=should_cancel,
             )
             await _emit(
                 on_progress,
                 "log",
-                message=f"[L1] sync {name}: done {json.dumps(sync_res, ensure_ascii=False)[:240]}",
+                message=(
+                    f"[L1] sync {index_name}: done "
+                    f"{json.dumps(sync_res, ensure_ascii=False)[:240]}"
+                ),
             )
             if str(sync_res.get("status") or "") == "cancelled":
                 raise RuntimeError("L1 cancelled during sources sync")
             if str(sync_res.get("status") or "") == "error" or sync_res.get("error"):
                 raise RuntimeError(
-                    f"L1 sync_sources_index failed for {name}: "
+                    f"L1 sync_sources_index failed for {index_name}: "
                     f"{sync_res.get('error') or sync_res}"
                 )
             indexed = int(sync_res.get("indexed_files") or 0)
             if indexed <= 0 and corpus:
                 raise RuntimeError(
-                    f"L1 sync indexed 0 files for {name} "
+                    f"L1 sync indexed 0 files for {index_name} "
                     f"(corpus={len(corpus)}; work_root={work.work_root})"
                 )
 
@@ -2080,6 +2371,8 @@ async def run_l1_targets(
     coding_checkout_repo: bool = True,
     coding_harness: bool = False,
     should_cancel: CancelCheck | None = None,
+    retrieval_datasets: list[str] | None = None,
+    retrieval_corpus_mode: str = "full",
 ) -> dict[str, Any]:
     """Run selected L1 suites; returns {target: manifest}."""
     out: dict[str, Any] = {}
@@ -2098,6 +2391,8 @@ async def run_l1_targets(
                 max_parallel=max_parallel,
                 arm=retrieval_arm,
                 should_cancel=should_cancel,
+                datasets=retrieval_datasets,
+                corpus_mode=retrieval_corpus_mode,
             )
         elif t == "context":
             out[t] = await run_context_l1(

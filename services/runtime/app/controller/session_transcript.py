@@ -54,7 +54,7 @@ def prepare_messages_for_persist(
     policy = policy or CompactionPolicy.from_settings()
     # Persist path: keep a flat char budget (do not retain the live 32k latest-read
     # allowance — session rows should stay compact).
-    prepared, _ = _apply_tool_result_budget(
+    prepared, _, _ = _apply_tool_result_budget(
         [dict(m) for m in messages],
         TOOL_RESULT_CHAR_BUDGET,
         preserve_short=True,

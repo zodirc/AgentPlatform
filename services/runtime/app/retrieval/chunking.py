@@ -78,7 +78,17 @@ def build_embed_text(
     *,
     tags: Sequence[str] | None = None,
 ) -> str:
-    """Compose vector input: path clue + sparse tags + body (docs/15 §9 RQ1a)."""
+    """Compose vector input; metadata prefixes are optional (P2).
+
+    Default (``EMBEDDING_TEXT_INCLUDE_METADATA=false``): body only — BEIR synthetic
+    paths otherwise pollute the highest-influence token positions.
+    """
+    body_text = (body or "").strip()
+    from app.settings import settings
+
+    if not bool(getattr(settings, "embedding_text_include_metadata", False)):
+        return body_text
+
     parts: list[str] = []
     clue = path_embed_clue(rel_path)
     if clue:
@@ -86,7 +96,6 @@ def build_embed_text(
     cleaned_tags = [str(t).strip() for t in (tags or ()) if str(t).strip()]
     if cleaned_tags:
         parts.append("tags: " + " ".join(cleaned_tags))
-    body_text = (body or "").strip()
     if body_text:
         parts.append(body_text)
     return "\n".join(parts)

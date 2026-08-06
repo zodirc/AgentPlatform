@@ -12,7 +12,8 @@ pseudo-queries dominate hybrid BM25 and hurt FiQA ranking in free smoke
 from __future__ import annotations
 
 # Bump when FTS expression changes — pgvector_store recreates gin index.
-BM25_EXTRA_FTS_VERSION = "2"
+# v3: 'simple' → 'english' (stemming + stopwords; P1① structural leverage).
+BM25_EXTRA_FTS_VERSION = "3"
 
 
 def bm25_document_text(
@@ -48,6 +49,6 @@ def prune_bm25_extra_lines(extra: str) -> str:
 # Title+body weight A; offline pseudo-queries weight C (weaker).
 # Outer parens required for gin index / WHERE (|| is not a single primary).
 BM25_TSVECTOR_SQL = (
-    "(setweight(to_tsvector('simple', coalesce(section_title, '') || ' ' || text), 'A') "
-    "|| setweight(to_tsvector('simple', coalesce(bm25_extra, '')), 'C'))"
+    "(setweight(to_tsvector('english', coalesce(section_title, '') || ' ' || text), 'A') "
+    "|| setweight(to_tsvector('english', coalesce(bm25_extra, '')), 'C'))"
 )

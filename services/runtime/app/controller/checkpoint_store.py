@@ -34,6 +34,9 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "writes_preapproved": bool(state.writes_preapproved),
         "exec_preapproved": bool(state.exec_preapproved),
         "read_registry": serialize_read_registry(state.read_registry),
+        # C1: survive approve/deny checkpoint resume.
+        "evicted_paths": sorted(state.evicted_paths),
+        "evicted_reread_used": sorted(state.evicted_reread_used),
     }
 
 
@@ -67,6 +70,12 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         writes_preapproved=bool(data.get("writes_preapproved", False)),
         exec_preapproved=bool(data.get("exec_preapproved", False)),
         read_registry=deserialize_read_registry(data.get("read_registry")),
+        evicted_paths={
+            str(p) for p in (data.get("evicted_paths") or []) if str(p).strip()
+        },
+        evicted_reread_used={
+            str(p) for p in (data.get("evicted_reread_used") or []) if str(p).strip()
+        },
     )
 
 

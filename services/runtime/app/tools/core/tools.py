@@ -967,21 +967,41 @@ async def sync_sources_index() -> dict[str, Any]:
 def _format_source_hits(hits: list[Any], *, excerpt_chars: int) -> list[dict[str, Any]]:
     formatted: list[dict[str, Any]] = []
     for hit in hits:
-        excerpt = str(getattr(hit, "excerpt", "")).strip()
+        if isinstance(hit, dict):
+            excerpt = str(hit.get("excerpt") or "").strip()
+            path = str(hit.get("path") or "")
+            chunk_id = str(hit.get("chunk_id") or "")
+            citation_id = str(hit.get("citation_id") or "")
+            try:
+                score = round(float(hit.get("score") or 0.0), 4)
+            except (TypeError, ValueError):
+                score = 0.0
+            section_title = str(hit.get("section_title") or "").strip()
+            line_start = hit.get("line_start")
+            line_end = hit.get("line_end")
+        else:
+            excerpt = str(getattr(hit, "excerpt", "") or "").strip()
+            path = str(getattr(hit, "path", "") or "")
+            chunk_id = str(getattr(hit, "chunk_id", "") or "")
+            citation_id = str(getattr(hit, "citation_id", "") or "")
+            try:
+                score = round(float(getattr(hit, "score", 0.0) or 0.0), 4)
+            except (TypeError, ValueError):
+                score = 0.0
+            section_title = str(getattr(hit, "section_title", "") or "").strip()
+            line_start = getattr(hit, "line_start", None)
+            line_end = getattr(hit, "line_end", None)
         if len(excerpt) > excerpt_chars:
             excerpt = excerpt[:excerpt_chars] + "…"
         item: dict[str, Any] = {
-            "path": str(getattr(hit, "path", "")),
-            "chunk_id": str(getattr(hit, "chunk_id", "")),
+            "path": path,
+            "chunk_id": chunk_id,
             "excerpt": excerpt,
-            "citation_id": str(getattr(hit, "citation_id", "")),
-            "score": round(float(getattr(hit, "score", 0.0)), 4),
+            "citation_id": citation_id,
+            "score": score,
         }
-        section_title = str(getattr(hit, "section_title", "")).strip()
         if section_title:
             item["section_title"] = section_title
-        line_start = getattr(hit, "line_start", None)
-        line_end = getattr(hit, "line_end", None)
         if line_start is not None:
             item["line_start"] = line_start
         if line_end is not None:
@@ -1128,7 +1148,11 @@ def _search_sources_keyword(
             "hint": err,
         }
 
-    terms = [t for t in re.split(r"\s+", query.strip()) if t]
+    # Prefer distinctive tokens (entities / long words). Whitespace-AND over the
+    # full claim wiped lexical recall when verbs were absent from the abstract.
+    terms = _distinctive_query_terms(query)
+    if not terms:
+        terms = [t for t in re.split(r"\s+", query.strip()) if len(t) >= 3]
     hits: list[dict[str, Any]] = []
     excerpt_chars = settings.search_sources_excerpt_chars
     max_bytes = settings.search_sources_keyword_max_file_bytes
@@ -1146,6 +1170,7 @@ def _search_sources_keyword(
             excerpt_chars=excerpt_chars,
             max_file_bytes=max_bytes,
             parse_budget_ms=budget_ms,
+            require_all_terms=False,
         )
         if hit is None:
             continue
@@ -1168,11 +1193,32 @@ def _attach_filter_meta(payload: dict[str, Any], filter_meta: dict[str, Any]) ->
     return payload
 
 
+def _looks_like_entity_token(token: str) -> bool:
+    """Short Latin tokens that are still real query entities (gene/drug/acronym).
+
+    ``len >= 6`` alone drops ``ADAR1`` / ``Dicer`` / ``Admp``, which then made
+    cover-check ignore rank-1 gold abstracts that literally contain those names.
+    """
+    if len(token) < 3:
+        return False
+    has_alpha = any(c.isalpha() for c in token)
+    has_digit = any(c.isdigit() for c in token)
+    if has_alpha and has_digit:
+        return True  # ADAR1, p53, PPM1D, B12
+    if token.isupper() and len(token) >= 3:
+        return True  # AIRE, AMPK, DNA
+    # TitleCase / CamelCase names (Dicer, Admp, Albendazole already >=6).
+    if len(token) >= 4 and token[0].isupper() and any(c.islower() for c in token[1:]):
+        return True
+    return False
+
+
 def _distinctive_query_terms(query: str) -> list[str]:
     """Tokens that must appear in a hit for ANN results to count as a cover.
 
     Ignores short/runtime-noise tokens so a polluted stub query cannot 'cover'
-    via ``writing`` in ``sources/seed/writing/...``.
+    via ``writing`` in ``sources/seed/writing/...``. Keeps short scientific
+    entities (``ADAR1``, ``Dicer``) so cover does not discard true ANN gold.
     """
     stop = {
         "writing",
@@ -1197,7 +1243,7 @@ def _distinctive_query_terms(query: str) -> list[str]:
         if _cjk.search(t):
             if len(t) >= 2:
                 terms.append(tl)
-        elif len(t) >= 6:
+        elif len(t) >= 6 or _looks_like_entity_token(t):
             terms.append(tl)
     if terms:
         return terms
@@ -1208,8 +1254,10 @@ def _distinctive_query_terms(query: str) -> list[str]:
 
 
 def _hit_covers_query_terms(hit: dict[str, Any], terms: list[str]) -> bool:
+    from app.retrieval.keyword_hit import _term_in_text
+
     blob = f"{hit.get('path', '')}\n{hit.get('excerpt', '')}".lower()
-    return any(term in blob for term in terms)
+    return any(_term_in_text(term, blob) for term in terms)
 
 
 def _prefer_excerpt_covering_hits(
@@ -1373,6 +1421,10 @@ async def search_sources(
                 retrieval = mode if mode in {"vector", "hybrid"} else "hybrid"
 
             resolved: dict[str, Any] | None = None
+            ann_uncovered_hits: list[dict[str, Any]] | None = None
+            ann_uncovered_meta: dict[str, Any] | None = None
+            ann_uncovered_exclude: dict[str, Any] | None = None
+            ann_excerpt_promote = False
             if raw_hits:
                 filtered, filter_meta = filter_hits_by_path_prefix(
                     raw_hits, path_prefix=effective_prefix
@@ -1427,12 +1479,18 @@ async def search_sources(
                             resolved["hint"] = score_hint
                         use_slot_capture = True
                     elif hits:
+                        # Cover miss: try keyword first (seed/hash pollution). If
+                        # keyword also empty, keep ANN — do not wipe rank-1 gold.
                         index_meta["ann_missed_query_terms"] = True
+                        ann_uncovered_hits = hits
+                        ann_uncovered_meta = filter_meta
+                        ann_uncovered_exclude = exclude_meta
+                        ann_excerpt_promote = excerpt_promote
                     else:
                         index_meta["prefix_empty_after_filter"] = True
 
             if resolved is None:
-                # Empty/stale index: keyword filesystem scan (no rebuild), plus lag hint.
+                # Empty/stale index or uncovered ANN: keyword filesystem scan.
                 index_meta["index_lag"] = True
                 index_meta["hint"] = (
                     "Vector index empty or lagging; search used keyword fallback. "
@@ -1448,23 +1506,72 @@ async def search_sources(
                 hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
                 hits = hits[:limit]
                 hits = _tier_search_hits_for_model(hits)
-                hits, score_hint = _finalize_search_hits_for_model(hits)
-                resolved = _attach_filter_meta(
-                    {
-                        "query": query,
-                        "hits": hits,
-                        "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
-                        "retrieval": "keyword-fallback",
-                        "index": index_meta,
-                        "hint": index_meta["hint"],
-                        "scope": {**scope_meta, "exclude": exclude_meta},
-                    },
-                    filter_meta,
-                )
-                if score_hint:
-                    # Keep index_lag hint first; append presentation / low_score.
-                    resolved["hint"] = f"{resolved.get('hint')}; {score_hint}"
-                use_slot_capture = False
+                if hits:
+                    hits, score_hint = _finalize_search_hits_for_model(hits)
+                    resolved = _attach_filter_meta(
+                        {
+                            "query": query,
+                            "hits": hits,
+                            "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
+                            "retrieval": "keyword-fallback",
+                            "index": index_meta,
+                            "hint": index_meta["hint"],
+                            "scope": {**scope_meta, "exclude": exclude_meta},
+                        },
+                        filter_meta,
+                    )
+                    if score_hint:
+                        resolved["hint"] = f"{resolved.get('hint')}; {score_hint}"
+                    use_slot_capture = False
+                elif ann_uncovered_hits:
+                    # Keyword found nothing; keep ANN ranking (SciFact claim≠abstract).
+                    kept, score_hint = _finalize_search_hits_for_model(
+                        list(ann_uncovered_hits)
+                    )
+                    index_meta["kept_ann_despite_cover_miss"] = True
+                    index_meta.pop("index_lag", None)
+                    index_meta["hint"] = (
+                        "ANN hits retained after cover-term miss; keyword fallback empty."
+                    )
+                    resolved = _attach_filter_meta(
+                        {
+                            "query": query,
+                            "hits": kept,
+                            "summary": (
+                                f"search_sources({retrieval}): {len(kept)} hit(s)"
+                            ),
+                            "retrieval": retrieval,
+                            "index": index_meta,
+                            "hint": index_meta["hint"],
+                            "scope": {
+                                **scope_meta,
+                                "exclude": ann_uncovered_exclude or {},
+                            },
+                        },
+                        ann_uncovered_meta or {},
+                    )
+                    if ann_excerpt_promote:
+                        resolved["excerpt_promote_reorder"] = True
+                    if score_hint:
+                        resolved["hint"] = f"{resolved.get('hint')}; {score_hint}"
+                    use_slot_capture = True
+                else:
+                    hits, score_hint = _finalize_search_hits_for_model(hits)
+                    resolved = _attach_filter_meta(
+                        {
+                            "query": query,
+                            "hits": hits,
+                            "summary": f"search_sources(keyword-fallback): {len(hits)} hit(s)",
+                            "retrieval": "keyword-fallback",
+                            "index": index_meta,
+                            "hint": index_meta["hint"],
+                            "scope": {**scope_meta, "exclude": exclude_meta},
+                        },
+                        filter_meta,
+                    )
+                    if score_hint:
+                        resolved["hint"] = f"{resolved.get('hint')}; {score_hint}"
+                    use_slot_capture = False
             out = resolved
     finally:
         captured = end_audit_capture(audit_token)

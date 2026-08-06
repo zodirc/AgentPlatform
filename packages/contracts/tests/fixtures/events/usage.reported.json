@@ -10,6 +10,8 @@
     "retry_count": 0,
     "cache_read_input_tokens": 400,
     "cache_creation_input_tokens": 0,
-    "cache_hit": true
+    "cache_hit": true,
+    "estimated_tokens": 780,
+    "estimate_to_provider_ratio": 0.9606
   }
 }

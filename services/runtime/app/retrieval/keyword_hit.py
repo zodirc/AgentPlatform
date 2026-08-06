@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -9,9 +10,17 @@ from typing import Any
 from app.retrieval.chunking import TextSection, split_markdown_sections
 
 
+def _term_in_text(term: str, lowered: str) -> bool:
+    """Whole-token match so ``cleave`` does not hit ``Cleaver``."""
+    t = (term or "").lower().strip()
+    if not t or not lowered:
+        return False
+    return re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", lowered) is not None
+
+
 def _score_section(section: TextSection, terms: list[str]) -> int:
     blob = f"{section.title}\n{section.body}".lower()
-    return sum(1 for t in terms if t.lower() in blob)
+    return sum(1 for t in terms if _term_in_text(t, blob))
 
 
 def keyword_hit_from_file(
@@ -22,8 +31,14 @@ def keyword_hit_from_file(
     excerpt_chars: int,
     max_file_bytes: int,
     parse_budget_ms: float,
+    require_all_terms: bool = False,
 ) -> dict[str, Any] | None:
-    """Build one keyword hit dict; None if file does not match terms."""
+    """Build one keyword hit dict; None if file does not match terms.
+
+    Default match is OR (any distinctive term): SciFact-style claims often use
+    verbs/entities absent from the abstract, so AND-all wiped true lexical hits.
+    Pass ``require_all_terms=True`` for strict conjunction.
+    """
     try:
         size = fp.stat().st_size
     except OSError:
@@ -31,8 +46,13 @@ def keyword_hit_from_file(
 
     text = fp.read_text(encoding="utf-8", errors="replace")
     lowered = text.lower()
-    if terms and not all(t.lower() in lowered for t in terms):
-        return None
+    if terms:
+        present = [t for t in terms if _term_in_text(t, lowered)]
+        if require_all_terms:
+            if len(present) < len(terms):
+                return None
+        elif not present:
+            return None
 
     citation_id = f"cite:{fp.stem}"
     deadline = time.monotonic() + (parse_budget_ms / 1000.0)

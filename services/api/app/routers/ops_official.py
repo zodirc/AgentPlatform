@@ -41,6 +41,7 @@ class StartOfficialBody(BaseModel):
             "coding",
             "coding_pull",
             "coding_infer",
+            "p1_lexical_micro",
         ]
     ] = Field(min_length=1)
     # Kept for API compat; Ops UI no longer exposes pipeline smoke.
@@ -61,6 +62,10 @@ class StartOfficialBody(BaseModel):
     retrieval_arm: Literal["free"] = "free"
     context_arm: Literal["free"] = "free"
     coding_checkout_repo: bool = True
+    # SciFact mid-corpus micro L1: filter + isolated {name}-micro (gold+distractors).
+    # ``gold`` accepted as alias of ``micro`` for older Ops clients.
+    retrieval_datasets: list[str] = Field(default_factory=list)
+    retrieval_corpus_mode: Literal["full", "micro", "gold"] = "full"
     force: bool = False
     model: ModelBody | None = None
 
@@ -94,6 +99,14 @@ async def _caps() -> dict[str, bool]:
         "context": has_script and has_datasets,
         "coding_pull": has_script and has_datasets,
         "coding_infer": has_script and has_datasets,
+        "p1_lexical_micro": (
+            (
+                official_runner._repo_root()
+                / "scripts"
+                / "official_bench"
+                / "p1_lexical_micro.py"
+            ).is_file()
+        ),
         "datasets": has_datasets,
         "bench_worker": False,
         "retrieval_prod": False,
@@ -548,12 +561,19 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     caps = await _caps()
-    if not caps.get("script") and not caps.get("bench_worker"):
+    only_p1 = list(body.targets) == ["p1_lexical_micro"]
+    if only_p1:
+        if not caps.get("p1_lexical_micro"):
+            raise HTTPException(
+                status_code=400,
+                detail="p1_lexical_micro script unavailable under /repo/scripts/official_bench",
+            )
+    elif not caps.get("script") and not caps.get("bench_worker"):
         raise HTTPException(
             status_code=400,
             detail="bench worker / official_bench_run.py unavailable",
         )
-    if body.retrieval_prod and not caps.get("retrieval_prod"):
+    if body.retrieval_prod and not caps.get("retrieval_prod") and not only_p1:
         raise HTTPException(
             status_code=400,
             detail="真向量需要 bench 服务（sentence_transformers）。先 make up-bench。",
@@ -590,6 +610,8 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             retrieval_arm="free",
             context_arm="free",
             coding_checkout_repo=body.coding_checkout_repo,
+            retrieval_datasets=list(body.retrieval_datasets or []),
+            retrieval_corpus_mode=body.retrieval_corpus_mode,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

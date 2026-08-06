@@ -184,7 +184,7 @@ def test_fold_stale_read_file_results_keeps_latest() -> None:
         assistant_tool_use("r2", "read_file", {"path": "a.html"}),
         tool_result_message("r2", payload2),
     ]
-    out, folded = _fold_stale_read_file_results(messages, keep_last_per_path=1)
+    out, folded, _paths = _fold_stale_read_file_results(messages, keep_last_per_path=1)
     assert folded == 1
     first_body = out[1]["content"][0]["content"]
     second_body = out[3]["content"][0]["content"]

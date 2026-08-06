@@ -275,6 +275,7 @@ class PgvectorSourceRetrievalStore:
                             self._schema,
                         )
                         cur.execute("DROP TABLE IF EXISTS source_chunks CASCADE")
+                        cur.execute("DROP TABLE IF EXISTS source_docs CASCADE")
                         cur.execute("DROP TABLE IF EXISTS source_files CASCADE")
                 cur.execute(
                     """
@@ -384,6 +385,33 @@ class PgvectorSourceRetrievalStore:
                         key TEXT PRIMARY KEY,
                         value TEXT NOT NULL
                     )
+                    """
+                )
+                # P3: true document-level vectors (chunk centroid); two-level doc lane.
+                cur.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS source_docs (
+                        path TEXT PRIMARY KEY
+                            REFERENCES source_files(path) ON DELETE CASCADE,
+                        embedding vector({dim}) NOT NULL,
+                        work_id UUID NULL,
+                        visibility TEXT NOT NULL DEFAULT 'private',
+                        owner_user_id UUID NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS source_docs_embedding_hnsw
+                    ON source_docs
+                    USING hnsw (embedding vector_cosine_ops)
+                    """
+                )
+                cur.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS source_docs_work_idx
+                    ON source_docs (work_id)
                     """
                 )
             conn.commit()
@@ -903,6 +931,38 @@ class PgvectorSourceRetrievalStore:
                             """,
                             (storage_path,),
                         )
+                        # P3: doc vector = mean of chunk embeddings (centroid).
+                        vectors = [
+                            c.get("vector")
+                            for c in new_chunks
+                            if isinstance(c.get("vector"), list)
+                        ]
+                        if vectors:
+                            dim_n = len(vectors[0])
+                            centroid = [
+                                sum(float(v[i]) for v in vectors) / len(vectors)
+                                for i in range(dim_n)
+                            ]
+                            cur.execute(
+                                """
+                                INSERT INTO source_docs (
+                                    path, embedding, work_id, visibility, owner_user_id
+                                ) VALUES (%s, %s::vector, %s, %s, %s)
+                                ON CONFLICT (path) DO UPDATE SET
+                                    embedding = EXCLUDED.embedding,
+                                    work_id = EXCLUDED.work_id,
+                                    visibility = EXCLUDED.visibility,
+                                    owner_user_id = EXCLUDED.owner_user_id,
+                                    updated_at = NOW()
+                                """,
+                                (
+                                    storage_path,
+                                    _vector_literal(centroid),
+                                    wid,
+                                    vis,
+                                    owner_id,
+                                ),
+                            )
                         total_chunks += len(new_chunks)
                         if job["is_update"]:
                             updated += 1
@@ -990,6 +1050,67 @@ class PgvectorSourceRetrievalStore:
             "elapsed_s": round(elapsed, 2),
             "embed_batch_size": embedding_batch_size(),
         }
+
+    def _search_docs_ann(self, query: str, *, limit: int) -> list[str]:
+        """True doc-lane ANN over ``source_docs`` (P3). Empty → caller falls back."""
+        self.ensure_schema()
+        query_vec = get_embedder().embed(query)
+        if not query_vec or len(query_vec) != self._dimensions:
+            return []
+        literal = _vector_literal(query_vec)
+        from app.retrieval.tenant_visibility import display_path_from_index
+        from app.tenant_context import current_visibility_seed, current_work_id
+
+        work_id = current_work_id()
+        seed_ok = current_visibility_seed()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                # Cheap presence check — empty table → approx lane.
+                cur.execute("SELECT 1 FROM source_docs LIMIT 1")
+                if cur.fetchone() is None:
+                    return []
+                _prepare_hnsw_filtered_scan(cur, limit=limit)
+                if work_id is not None and seed_ok:
+                    cur.execute(
+                        """
+                        SELECT path
+                        FROM source_docs
+                        WHERE visibility = 'seed' OR work_id = %s::uuid
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (str(work_id), literal, limit),
+                    )
+                elif work_id is not None:
+                    cur.execute(
+                        """
+                        SELECT path
+                        FROM source_docs
+                        WHERE work_id = %s::uuid
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (str(work_id), literal, limit),
+                    )
+                elif seed_ok:
+                    cur.execute(
+                        """
+                        SELECT path
+                        FROM source_docs
+                        WHERE visibility = 'seed'
+                        ORDER BY embedding <=> %s::vector
+                        LIMIT %s
+                        """,
+                        (literal, limit),
+                    )
+                else:
+                    return []
+                rows = cur.fetchall()
+        return [
+            display_path_from_index(str(row[0] or ""))
+            for row in rows
+            if row and row[0]
+        ]
 
     def search_vector(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
         self.ensure_schema()
@@ -1112,7 +1233,7 @@ class PgvectorSourceRetrievalStore:
         return hits
 
     def _search_bm25_db(self, query: str, *, limit: int) -> list[ChunkHit]:
-        """Use Postgres FTS so hybrid search does not require a full-table cache."""
+        """Postgres FTS recall; optionally Okapi-rescore candidates (P1②)."""
         self.ensure_schema()
         from app.retrieval.tenant_visibility import display_path_from_index
         from app.tenant_context import current_visibility_seed, current_work_id
@@ -1131,26 +1252,77 @@ class PgvectorSourceRetrievalStore:
         else:
             return []
 
+        rescore = bool(settings.retrieval_bm25_rescore_enabled)
+        # Over-fetch when rescoring so Okapi can reorder a wider FTS pool.
+        fetch_limit = max(limit * 4, limit) if rescore else limit
+
         with self._connect() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""
-                    WITH query_terms AS (SELECT plainto_tsquery('simple', %s) AS value)
-                    SELECT chunk_id, path, section_title, text, citation_id,
-                           line_start, line_end, work_id, visibility,
-                           ts_rank_cd(
-                               {BM25_TSVECTOR_SQL},
-                               query_terms.value
-                           ) AS score
-                    FROM source_chunks, query_terms
-                    WHERE {visibility_sql}
-                      AND {BM25_TSVECTOR_SQL} @@ query_terms.value
-                    ORDER BY score DESC
-                    LIMIT %s
-                    """,
-                    (query, *visibility_args, limit),
-                )
+                if rescore:
+                    # FTS ranks the candidate pool; Okapi reorders within it (P1②).
+                    cur.execute(
+                        f"""
+                        WITH query_terms AS (
+                            SELECT plainto_tsquery('english', %s) AS value
+                        )
+                        SELECT chunk_id, path, section_title, text, citation_id,
+                               line_start, line_end, work_id, visibility,
+                               coalesce(bm25_extra, '') AS bm25_extra
+                        FROM source_chunks, query_terms
+                        WHERE {visibility_sql}
+                          AND {BM25_TSVECTOR_SQL} @@ query_terms.value
+                        ORDER BY ts_rank_cd(
+                            {BM25_TSVECTOR_SQL},
+                            query_terms.value
+                        ) DESC
+                        LIMIT %s
+                        """,
+                        (query, *visibility_args, fetch_limit),
+                    )
+                else:
+                    cur.execute(
+                        f"""
+                        WITH query_terms AS (
+                            SELECT plainto_tsquery('english', %s) AS value
+                        )
+                        SELECT chunk_id, path, section_title, text, citation_id,
+                               line_start, line_end, work_id, visibility,
+                               ts_rank_cd(
+                                   {BM25_TSVECTOR_SQL},
+                                   query_terms.value
+                               ) AS score
+                        FROM source_chunks, query_terms
+                        WHERE {visibility_sql}
+                          AND {BM25_TSVECTOR_SQL} @@ query_terms.value
+                        ORDER BY score DESC
+                        LIMIT %s
+                        """,
+                        (query, *visibility_args, fetch_limit),
+                    )
                 rows = cur.fetchall()
+
+        if not rows:
+            return []
+
+        if rescore:
+            chunks: list[dict[str, Any]] = []
+            for row in rows:
+                chunks.append(
+                    {
+                        "chunk_id": str(row[0]),
+                        # Align with vector/doc lanes for merge_doc_and_chunk_hits.
+                        "path": display_path_from_index(str(row[1] or "")),
+                        "section_title": str(row[2] or ""),
+                        "text": str(row[3] or ""),
+                        "citation_id": str(row[4] or ""),
+                        "line_start": row[5],
+                        "line_end": row[6],
+                        "work_id": str(row[7]) if row[7] is not None else None,
+                        "visibility": str(row[8] or ""),
+                        "bm25_extra": str(row[9] or ""),
+                    }
+                )
+            return self._search_bm25_cached(query, chunks=chunks, limit=limit)
 
         return [
             ChunkHit(
@@ -1250,7 +1422,7 @@ class PgvectorSourceRetrievalStore:
                 record_ranked(hits, method="none")
             return hits
 
-        def _doc_lane() -> list[str]:
+        def _doc_lane_approx() -> list[str]:
             # Approximate doc lane from distinct paths in a wider ANN pull.
             wide = self.search_vector(query, limit=max(top_k, 40))
             seen: list[str] = []
@@ -1260,6 +1432,18 @@ class PgvectorSourceRetrievalStore:
                 if len(seen) >= profile.two_level_doc_limit:
                     break
             return seen
+
+        def _doc_lane() -> list[str]:
+            if not bool(settings.retrieval_two_level_doc_table):
+                return _doc_lane_approx()
+            try:
+                paths = self._search_docs_ann(query, limit=profile.two_level_doc_limit)
+            except Exception:
+                logger.debug("source_docs ANN failed; falling back to approx", exc_info=True)
+                return _doc_lane_approx()
+            if not paths:
+                return _doc_lane_approx()
+            return paths
 
         if not profile.two_level_enabled:
             hits = _chunk_lane()
