@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from app.retrieval.bm25 import BM25Scorer
-from app.retrieval.bm25_document import BM25_EXTRA_FTS_VERSION, BM25_TSVECTOR_SQL
+from app.retrieval.bm25_document import (
+    BM25_EXTRA_FTS_VERSION,
+    BM25_TSVECTOR_SQL,
+    build_weighted_or_tsquery,
+)
 from app.retrieval.chunking import chunk_source_text, should_index_source
 from app.retrieval.embedder import (
     effective_embedding_dimensions,
@@ -1265,6 +1269,15 @@ class PgvectorSourceRetrievalStore:
         rescore = bool(settings.retrieval_bm25_rescore_enabled)
         # Over-fetch when rescoring so Okapi can reorder a wider FTS pool.
         fetch_limit = max(limit * 4, limit) if rescore else limit
+        # Weighted OR recall (entity/long :A, else :D). Fall back to plainto AND
+        # only when tokenization yields nothing usable.
+        or_q = build_weighted_or_tsquery(query)
+        if or_q:
+            tsquery_sql = "to_tsquery('english', %s)"
+            tsquery_arg: str = or_q
+        else:
+            tsquery_sql = "plainto_tsquery('english', %s)"
+            tsquery_arg = query
 
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -1273,7 +1286,7 @@ class PgvectorSourceRetrievalStore:
                     cur.execute(
                         f"""
                         WITH query_terms AS (
-                            SELECT plainto_tsquery('english', %s) AS value
+                            SELECT {tsquery_sql} AS value
                         )
                         SELECT chunk_id, path, section_title, text, citation_id,
                                line_start, line_end, work_id, visibility,
@@ -1287,13 +1300,13 @@ class PgvectorSourceRetrievalStore:
                         ) DESC
                         LIMIT %s
                         """,
-                        (query, *visibility_args, fetch_limit),
+                        (tsquery_arg, *visibility_args, fetch_limit),
                     )
                 else:
                     cur.execute(
                         f"""
                         WITH query_terms AS (
-                            SELECT plainto_tsquery('english', %s) AS value
+                            SELECT {tsquery_sql} AS value
                         )
                         SELECT chunk_id, path, section_title, text, citation_id,
                                line_start, line_end, work_id, visibility,
@@ -1307,7 +1320,7 @@ class PgvectorSourceRetrievalStore:
                         ORDER BY score DESC
                         LIMIT %s
                         """,
-                        (query, *visibility_args, fetch_limit),
+                        (tsquery_arg, *visibility_args, fetch_limit),
                     )
                 rows = cur.fetchall()
 
