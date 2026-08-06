@@ -1814,7 +1814,8 @@ export function OfficialBenchPage() {
   const [apiKeyEditing, setApiKeyEditing] = useState(false);
   const [apiKeySaveFlash, setApiKeySaveFlash] = useState(false);
   const [showCriteria, setShowCriteria] = useState(false);
-  const [pagePane, setPagePane] = useState<"run" | "summary">("run");
+  /** 本轮 = 发起+直播；历史 = 列表+详情；指标汇总跨跑次。默认进本轮，不自动摊开历史详情。 */
+  const [pagePane, setPagePane] = useState<"live" | "history" | "summary">("live");
   const [suiteFilter, setSuiteFilter] = useState<string>("");
   const [runs, setRuns] = useState<OfficialRun[]>([]);
   const [detail, setDetail] = useState<OfficialRun | null>(null);
@@ -1826,6 +1827,8 @@ export function OfficialBenchPage() {
   const [liveLogs, setLiveLogs] = useState<string[]>([]);
   /** Structured SSE/history lines for the detail 「日志」 tab (live pane uses strings). */
   const [liveLogItems, setLiveLogItems] = useState<OfficialLogItem[]>([]);
+  /** After a live run ends, keep a one-line handoff on 本轮 without dumping historical logs. */
+  const [lastFinishedLiveId, setLastFinishedLiveId] = useState<string | null>(null);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [phaseHint, setPhaseHint] = useState(
     "全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标",
@@ -1845,6 +1848,8 @@ export function OfficialBenchPage() {
   const logBoxRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSourcePolyfill | null>(null);
   const attachedRunIdRef = useRef<string | null>(null);
+  /** First finished deep-link may open 历史; later finished loads must not yank off 本轮. */
+  const historyDeepLinkDoneRef = useRef(false);
 
   const headers = useMemo(
     () => ({
@@ -2596,15 +2601,14 @@ export function OfficialBenchPage() {
             es.close();
             if (attachedRunIdRef.current === runId) attachedRunIdRef.current = null;
             setBusy(false);
-            setSuiteDetails((prev) => {
-              if (!Object.keys(prev).length) {
-                return {
-                  _: { kind: "idle", label: "本轮结束", pct: 100 },
-                };
-              }
-              return prev;
-            });
-            void loadDetail();
+            setLastFinishedLiveId(runId);
+            setLiveLogs([]);
+            setLiveLogItems([]);
+            setSuiteDetails({});
+            setProgress({ done: 0, total: 0 });
+            setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
+            // Leave 本轮 clean — finished id belongs under 历史.
+            navigate(opsOfficialPath(secret), { replace: true });
             void loadList();
           }
         } catch {
@@ -2617,7 +2621,7 @@ export function OfficialBenchPage() {
         void loadDetail().finally(() => setBusy(false));
       };
     },
-    [secret, loadDetail, loadList],
+    [secret, loadDetail, loadList, navigate],
   );
 
   useEffect(() => {
@@ -2630,6 +2634,7 @@ export function OfficialBenchPage() {
         (r) => isActiveStatus(r.status) && (r.source === "live" || !r.finished_at),
       );
       if (!live || !selectedId || selectedId !== live.id) return;
+      setPagePane((p) => (p === "summary" ? p : "live"));
       applyRunSnapshot(live, { logs: false });
       attachLiveStream(live.id, { resetLogs: true });
     })();
@@ -2702,10 +2707,17 @@ export function OfficialBenchPage() {
       attachedRunIdRef.current = null;
       setBusy(false);
     }
-    // Clear the shared pane until the selected run's own snapshot/SSE fills it.
+    // Clear the live strip until an active run's SSE fills it.
+    // Finished history must not re-hydrate this buffer (see loadDetail effect).
     setLiveLogs([]);
     setLiveLogItems([]);
     setSuiteDetails({});
+    if (!selectedId) {
+      historyDeepLinkDoneRef.current = false;
+      setPagePane((p) => (p === "history" ? "live" : p));
+      setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
+      setProgress({ done: 0, total: 0 });
+    }
   }, [selectedId]);
 
   useEffect(() => {
@@ -2713,20 +2725,28 @@ export function OfficialBenchPage() {
       const body = await loadDetail();
       if (!body) return;
       if (isActiveStatus(body.status)) {
+        historyDeepLinkDoneRef.current = true;
+        setLastFinishedLiveId(null);
+        setPagePane((p) => (p === "summary" ? p : "live"));
         applyRunSnapshot(body, { logs: false });
         // SSE replays in-memory history; only clear if this is a fresh attach.
         attachLiveStream(body.id, {
           resetLogs: attachedRunIdRef.current !== body.id,
         });
       } else {
-        // Finished run: always take its own snapshot; never keep another run's SSE.
+        // Finished / history: never dump logs into the 本轮 live strip.
         if (attachedRunIdRef.current) {
           esRef.current?.close();
           esRef.current = null;
           attachedRunIdRef.current = null;
           setBusy(false);
         }
-        applyRunSnapshot(body);
+        // Deep-link / refresh onto a finished id → 历史 once.
+        // After a live finish, stay on 本轮 (handoff banner); explicit 历史 click sets pane itself.
+        if (!historyDeepLinkDoneRef.current) {
+          historyDeepLinkDoneRef.current = true;
+          setPagePane((p) => (p === "summary" ? p : "history"));
+        }
       }
     })();
   }, [loadDetail, applyRunSnapshot, attachLiveStream]);
@@ -2876,8 +2896,12 @@ export function OfficialBenchPage() {
     }
     setBusy(true);
     setLiveLogs([]);
+    setLiveLogItems([]);
+    setSuiteDetails({});
+    setLastFinishedLiveId(null);
     setError(null);
     setTab("log");
+    setPagePane("live");
     try {
       const resp = await fetch("/api/v1/ops/official/runs", {
         method: "POST",
@@ -2965,8 +2989,13 @@ export function OfficialBenchPage() {
       }
       if (body && !isActiveStatus(body.status)) {
         setBusy(false);
-        setSuiteDetails({ _: { kind: "idle", label: "已取消", pct: null } });
-        setPhaseHint("已停止");
+        setLastFinishedLiveId(id);
+        setLiveLogs([]);
+        setLiveLogItems([]);
+        setSuiteDetails({});
+        setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
+        setProgress({ done: 0, total: 0 });
+        navigate(opsOfficialPath(secret), { replace: true });
       } else {
         // Force UI out of infinite「正在停止…」even if SSE is wedged.
         window.setTimeout(() => {
@@ -2974,8 +3003,12 @@ export function OfficialBenchPage() {
             const latest = await loadDetail();
             if (!latest || !isActiveStatus(latest.status)) {
               setBusy(false);
-              setPhaseHint("已停止");
-              setSuiteDetails({ _: { kind: "idle", label: "已取消", pct: null } });
+              setLastFinishedLiveId(id);
+              setLiveLogs([]);
+              setLiveLogItems([]);
+              setSuiteDetails({});
+              setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
+              navigate(opsOfficialPath(secret), { replace: true });
               return;
             }
             setBusy(false);
@@ -2988,7 +3021,6 @@ export function OfficialBenchPage() {
       }
     }
     await loadList();
-    if (id === selectedId) await loadDetail();
   };
 
   const deleteHistory = async (opts: {
@@ -3235,6 +3267,22 @@ export function OfficialBenchPage() {
 
   const detailMetrics = runMetrics(detail);
 
+  const goLivePane = () => {
+    setPagePane("live");
+    const selIsLive =
+      (liveRun && liveRun.id === selectedId) ||
+      (detail && selectedId === detail.id && isActiveStatus(detail.status));
+    if (selectedId && !selIsLive && !busy) {
+      navigate(opsOfficialPath(secret), { replace: true });
+      setLastFinishedLiveId(null);
+    }
+  };
+
+  const goHistoryPane = () => {
+    historyDeepLinkDoneRef.current = true;
+    setPagePane("history");
+  };
+
   return (
     <OpsShell
       wide
@@ -3246,12 +3294,24 @@ export function OfficialBenchPage() {
           <div className="flex rounded-md border border-border p-0.5 text-xs">
             <button
               type="button"
-              onClick={() => setPagePane("run")}
+              onClick={goLivePane}
               className={`rounded px-2.5 py-1 ${
-                pagePane === "run" ? "bg-foreground text-background" : "hover:bg-muted"
+                pagePane === "live" ? "bg-foreground text-background" : "hover:bg-muted"
               }`}
             >
-              评测
+              本轮
+            </button>
+            <button
+              type="button"
+              onClick={goHistoryPane}
+              className={`rounded px-2.5 py-1 ${
+                pagePane === "history" ? "bg-foreground text-background" : "hover:bg-muted"
+              }`}
+            >
+              历史
+              {filteredRuns.length > 0 ? (
+                <span className="ml-1 tabular-nums opacity-70">({filteredRuns.length})</span>
+              ) : null}
             </button>
             <button
               type="button"
@@ -3316,7 +3376,7 @@ export function OfficialBenchPage() {
         </section>
       ) : null}
 
-      {pagePane === "run" ? (
+      {pagePane === "live" ? (
       <>
       {/* Process legend */}
       <section className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-xs">
@@ -3343,6 +3403,7 @@ export function OfficialBenchPage() {
         </ol>
         <p className="mt-2 text-muted-foreground">
           首次拉 BEIR 走德国 UKP 源，国内慢可开代理；<strong>拉完会缓存</strong>，之后主要是 ②③。
+          历史跑次与详情在顶栏「历史」，进入本页默认只看本轮发起。
         </p>
       </section>
 
@@ -3912,7 +3973,7 @@ export function OfficialBenchPage() {
           </div>
         </div>
 
-        {(busy || liveLogs.length > 0) && (
+        {busy ? (
           <div className="mt-4 space-y-2">
             <div className="rounded-md border border-border/80 bg-background/80 px-3 py-2 text-xs">
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3924,13 +3985,9 @@ export function OfficialBenchPage() {
                   {timingLabel ? (
                     <span className="tabular-nums text-muted-foreground">{timingLabel}</span>
                   ) : null}
-                  {busy ? (
-                    <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] tabular-nums">
-                      直播中
-                    </span>
-                  ) : (
-                    <span className="text-[10px] text-muted-foreground">已结束 · 过程日志保留</span>
-                  )}
+                  <span className="rounded bg-foreground/10 px-1.5 py-0.5 text-[10px] tabular-nums">
+                    直播中
+                  </span>
                 </div>
               </div>
             </div>
@@ -3939,14 +3996,14 @@ export function OfficialBenchPage() {
                 <span>
                   <span className="text-muted-foreground">明细 · </span>
                   <span className="font-medium">
-                    {busy && detailProgress.kind === "idle"
+                    {detailProgress.kind === "idle"
                       ? "拉取中 / 等待进度…"
                       : detailProgress.label}
                   </span>
                 </span>
                 <span className="tabular-nums text-muted-foreground">
                   {detailProgress.done != null && detailProgress.total != null
-                    ? busy && detailProgress.done < detailProgress.total
+                    ? detailProgress.done < (detailProgress.total ?? 0)
                       ? `已完成 ${detailProgress.done}/${detailProgress.total}`
                       : `${detailProgress.done}/${detailProgress.total}` +
                         (detailProgress.remain != null && detailProgress.unit
@@ -3960,7 +4017,7 @@ export function OfficialBenchPage() {
               <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                 <div
                   className="h-full rounded-full bg-foreground/70 transition-[width] duration-200"
-                  style={{ width: `${detailPct != null ? detailPct : busy ? 8 : 0}%` }}
+                  style={{ width: `${detailPct != null ? detailPct : 8}%` }}
                 />
               </div>
             </div>
@@ -3974,9 +4031,9 @@ export function OfficialBenchPage() {
                 </span>
               </span>
               <span className="tabular-nums">
-                {busy && itemsRemainLabel
+                {itemsRemainLabel
                   ? itemsRemainLabel
-                  : busy && suiteProgressLabel
+                  : suiteProgressLabel
                     ? suiteProgressLabel
                     : progress.total
                       ? `${suitePct}%`
@@ -3995,9 +4052,7 @@ export function OfficialBenchPage() {
             >
               {liveLogs.length === 0 ? (
                 <p className="text-muted-foreground">
-                  {busy
-                    ? "等待拉取日志…（L1 会先打 [L1] pull … starting，随后 [pull] / [progress] pull）"
-                    : "日志：L1 会打 pull → turn start / tool·retrieval 步骤 / 心跳；点 turn_id 打开 Raw 逐步。"}
+                  等待拉取日志…（L1 会先打 [L1] pull … starting，随后 [pull] / [progress] pull）
                 </p>
               ) : (
                 liveLogs.map((line, i) => (
@@ -4011,7 +4066,42 @@ export function OfficialBenchPage() {
               )}
             </div>
           </div>
-        )}
+        ) : null}
+
+        {!busy && lastFinishedLiveId ? (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs">
+            <span>
+              本轮已结束 ·{" "}
+              <span className="font-mono">{shortId(lastFinishedLiveId)}</span>
+              {" — 过程日志与指标已写入历史，不再占着本轮发起区。"}
+            </span>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-md border border-border bg-background px-2.5 py-1 hover:bg-muted"
+                onClick={() => {
+                  historyDeepLinkDoneRef.current = true;
+                  setPagePane("history");
+                  navigate(opsOfficialPath(secret, lastFinishedLiveId));
+                }}
+              >
+                查看结果
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-border px-2.5 py-1 text-muted-foreground hover:bg-muted"
+                onClick={() => {
+                  setLastFinishedLiveId(null);
+                  if (selectedId === lastFinishedLiveId) {
+                    navigate(opsOfficialPath(secret), { replace: true });
+                  }
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        ) : null}
       </section>
 
       {liveRun && liveRun.id !== selectedId ? (
@@ -4026,13 +4116,18 @@ export function OfficialBenchPage() {
           <button
             type="button"
             className="rounded-md border border-border bg-background px-2.5 py-1 hover:bg-muted"
-            onClick={() => navigate(opsOfficialPath(secret, liveRun.id))}
+            onClick={() => {
+              setPagePane("live");
+              navigate(opsOfficialPath(secret, liveRun.id));
+            }}
           >
             打开进行中
           </button>
         </div>
       ) : null}
-
+      </>
+      ) : pagePane === "history" ? (
+      <>
       <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
         {/* History table */}
         <aside className="rounded-xl border border-border">
@@ -4172,6 +4267,8 @@ export function OfficialBenchPage() {
                               toggleCheckedRun(r.id);
                               return;
                             }
+                            historyDeepLinkDoneRef.current = true;
+                            setPagePane("history");
                             navigate(opsOfficialPath(secret, r.id));
                           }}
                         >
@@ -4212,7 +4309,7 @@ export function OfficialBenchPage() {
         <div className="rounded-xl border border-border p-4">
           {!selectedId ? (
             <p className="text-sm text-muted-foreground">
-              从左侧历史手动选一次 run 查看详情。进入评测台不会自动打开最新结果。
+              从左侧选一次 run 查看详情。顶栏「本轮」只负责发起与直播，不会自动摊开历史结果。
             </p>
           ) : !detail ? (
             <p className="text-sm text-muted-foreground">加载中…</p>
@@ -4345,7 +4442,7 @@ export function OfficialBenchPage() {
               {tab === "log" ? (
                 <ol className="max-h-[28rem] space-y-2 overflow-y-auto text-xs">
                   <li className="pb-1 text-[11px] text-muted-foreground">
-                    仅 error 与关键步骤（suite / turn / phase / case）；全量见上方滚动栏
+                    仅 error 与关键步骤（suite / turn / phase / case）；完整过程在本页签与产物中查看
                   </li>
                   {logTabItems.length === 0 ? (
                     <li className="text-muted-foreground">暂无关键日志</li>
