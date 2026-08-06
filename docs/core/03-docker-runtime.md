@@ -221,7 +221,7 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - 构建时默认 **CPU** torch；有 NVIDIA 且 VRAM≥8GiB 时由 `make resolve-embedding` 自动切 CUDA（见下条）
 - `HEALTHCHECK` 与 compose healthcheck 保持一致
 - 非 root 用户运行 `USER app`，uid `1000`
-- **CUDA / GPU**：默认构建 CPU torch。本机 `nvidia-smi` 且 VRAM≥8GiB 时，`make resolve-embedding`（`make up`/`start` 自动跑）写入 `TORCH_INDEX_URL=…/cu128`、`EMBEDDING_DEVICE=cuda` 与 `deploy/compose/gpu.auto.yml`（`gpus: all`）。强制 CPU：`RUNTIME_GPU=0`。换 CUDA 轮需 `RUNTIME_REBUILD_DEPS=1 make up-runtime`（或整栈 `make up`）。
+- **CUDA / GPU**：默认构建 CPU torch。本机 `nvidia-smi` 且 VRAM≥8GiB 时，`make resolve-embedding`（`make up`/`start` 自动跑）写入 `TORCH_INDEX_URL=…/cu128`、`EMBEDDING_DEVICE=cuda`、`EMBEDDING_MODEL=BAAI/bge-m3`（1024 维 / INDEX 11；**产品 + BEIR + C-MTEB 共用**，仅 HNSW schema 分图）与 `deploy/compose/gpu.auto.yml`（`gpus: all`）。无卡或 `RUNTIME_GPU=0` → `thenlper/gte-small@384`（INDEX 9；**禁止**默认 bge-m3）。换 CUDA 轮 / 换模需 `RUNTIME_REBUILD_DEPS=1 make up-runtime`（或整栈 `make up`）。
 - **镜像源**：Dockerfile 默认中国镜像（aliyun apt/pip、npmmirror、hf-mirror），本地 `make up` 更快。GitHub Actions / `CI=true` 的 proof 路径经 `scripts/proof_compose_env.sh` 改为官方源（`pypi.org` / `registry.npmjs.org` / 空 `APT_MIRROR`），避免海外 runner 卡在国内源直到 2h job timeout。本地若要强制官方源：导出同名 env 后再 `--build`；`PROOF_KEEP_MIRRORS=1` 可在 CI 下保留国内源。
 - **分层重建**：api / runtime（lite + retrieval）Dockerfile 为 `deps`→`app` 多阶段；compose `target: app`。改 `app/**` 应命中 pip/ST 缓存。强制重打依赖：`API_REBUILD_DEPS=1` / `RUNTIME_REBUILD_DEPS=1` / `WEB_REBUILD_DEPS=1`。详见 [38](../archive/38-image-layer-rebuild-plan.md)。
 
@@ -588,7 +588,8 @@ make eval-ha        # ha_runner golden（stub）
 | `RETRIEVAL_TWO_LEVEL_*` / `RETRIEVAL_RERANK_*` | 召回 / rerank 细调 |
 | `SEARCH_SOURCES_*` | 每 turn 检索预算 |
 | `OPS_DATABASE_URL` / `BENCH_DATABASE_URL` | Ops L1 向量库 DSN（默认 `bench-postgres`）；`work_root` 含 `ops-l1` 时路由至此 |
-| `OPS_RETRIEVAL_PG_SCHEMA` | Ops `source_*` schema（默认 `retrieval_ops`，与 L0 `retrieval_bench` 分开） |
+| `OPS_RETRIEVAL_PG_SCHEMA` | Ops BEIR `source_*` schema（默认 `retrieval_ops`；与 L0 `retrieval_bench` 分开） |
+| `OPS_RETRIEVAL_PG_SCHEMA_ZH` | Ops C-MTEB schema（默认 `retrieval_ops_zh`；**同 embedder**，仅独立 HNSW，勿与 BEIR 混图） |
 
 ### A.3 上下文压缩与配额
 

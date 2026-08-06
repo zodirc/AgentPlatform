@@ -1,14 +1,14 @@
 # Free-L1 Tuning Brief（检索 + 上下文 · 收敛版）
 
 > **受众**：下一轮调优负责人 / 高级模型  
-> **日期戳记**：2026-08-06（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 重嵌已完成**（gte-large@1024 / index 10）· **RET-4 free 冒烟 #1 已记** · CTX-13/EVAL-8 已收 · **RET-18 已收：保留 two-level ON** · **RET-11(b) 已回滚** · **REP-3 全量锚已取消**）  
+> **日期戳记**：2026-08-06（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 gte-large 冒烟 #1 已记（历史）** · **GPU 默认已切 bge-m3@1024 / index 11（PROD-2）** · CTX-13/EVAL-8 已收 · **RET-18 已收：保留 two-level ON** · **RET-11(b) 已回滚** · **REP-3 全量锚已取消** · **§7.11 PROD-2 接线开工**）  
 > **历史全文备份**：同目录 `retrieval-free-l1-tuning-brief.md.bak-20260805`（原 2563 行叙事稿，裁决以本文为准）  
 > **产品目标**：**搜得更好**（召回 / 排序 / 读到金标）——不是立 SCORECARD / 公证全量锚  
 > **唯一工作温度计**：L1 · `arm=free` · **冒烟 20q/库**（N≥2 去留）；**不做全量锚门禁**  
 > **不作为验收**：forced/oracle、纯 L0、coding；schema/inflight 事故跑 **不入对照**；**全量 qrels 锚跑**（已取消，对当前目标无杠杆）  
-> **当前平台读数（冒烟）**：检索 two-level ON + gte-large · **#1** `d31375a5` nDCG@10 **0.5435**（vs 前锚 `61f00a6d` 0.483，Δ **+6.1pp**；**N=1 待复验**）；promote-off 旧锚 ≈0.447（`bcdbbb85`/`f92bc610`）；上下文 **#1** `46df8722` agent_f1@v2 **0.5393** / EM **0.233**（落在 v2 常态带）  
+> **当前平台读数（冒烟）**：检索 two-level ON + **gte-large 历史 #1** `d31375a5` nDCG@10 **0.5435**（vs 前锚 `61f00a6d` 0.483；**栈已切 bge-m3 → 须重嵌后另记 smoke**）；promote-off 旧锚 ≈0.447；上下文 **#1** `46df8722` agent_f1@v2 **0.5393** / EM **0.233**  
 > **停机线（EVAL-6）**：**2/2 已触发**（RET-9 + CTX-8）→ **停开新加法契约刀**  
-> **下一刀序**：检索——**同协议 free 再跑一轮（N≥2）**确认 `d31375a5` 不抖；FiQA 硬召回另议（RET-11(b) 已回滚）；栈保持 gte-large + two-level ON；上下文——**产品侧工程停手**；**不跑 REP-3**  
+> **下一刀序**：GPU **`make resolve-embedding` → bake → `make sync` + `make sync-ops-cmteb`** → BEIR / `retrieval_zh` 各记 free smoke（勿混宏分 · 不 `update-baseline`）；FiQA 硬召回另议；上下文——**产品侧工程停手**；**不跑 REP-3**  
 > **SCORECARD / baseline**：**不作为本轮目标**（不跑全量、不 `update-baseline`；冒烟趋势可记）  
 > **流程图**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) · [context-tuning-flowchart.png](context-tuning-flowchart.png)
 
@@ -135,7 +135,7 @@
 - 不为 gold 名次 11–100 开新排序加法；CE 默认关（RET-19 已关闭热路径议题）。  
 - 未重嵌只改查询模型；跳过 REP-3 把 L0 +9pp 写入 SCORECARD —— **禁止**。  
 - RET-5 / RET-13 **挂起**（RET-13 解挂条件含 RET-9 正 Δ，实质已死）。  
-- **C-MTEB / 中文检索套件**：不并入 BEIR 主栏宏分；不建「BEIR+C-MTEB 混装」全局旁路索引；不为本轮 RET-4/18 验收绑架中文模（见 §7.11 · **暂不实施**）。
+- **C-MTEB / 中文检索套件**：不并入 BEIR 主栏宏分；不建「BEIR+C-MTEB 混装」全局索引。**同 embedder（GPU bge-m3）**；旁路仅分图 = `ops-l1/cmteb-index` → schema **`retrieval_ops_zh`**。见 §7.11 · **接线开工**（重嵌后 smoke 待记）。
 
 **上下文**
 
@@ -164,7 +164,7 @@
 - **two-level 默认 True**（RET-18 消融：OFF 掉分 → **保留 ON**）  
 - writing `system.md`：有 hit 禁逛库；prefer limit≥30；verbatim / ≤2 搜；**无** RET-9 互补句  
 - soft lexical 缩放：**无**；lexical 经典版开；CE **默认关**；C-3 fusion；protocol **m3**  
-- Embed：`make resolve-embedding` → GPU≥8GiB `gte-large@1024`/index **10**，否则 `gte-small@384`/index **9**；MiniLM **非默认**；**查询空间以重嵌完成为准**
+- Embed：`make resolve-embedding` → GPU≥8GiB `BAAI/bge-m3@1024` / index **11**（**产品 + BEIR + C-MTEB 共用**）；否则 `gte-small@384` / index **9**；`RUNTIME_GPU=0` **禁止**默认 bge-m3；MiniLM **非默认**；Ops 仅分 HNSW 图（`retrieval_ops` ∥ `retrieval_ops_zh`）；**查询空间以重嵌完成为准**（gte-large / index 10 为历史档）
 
 **上下文**
 
@@ -180,7 +180,7 @@
 
 | 温度计 | 锚 / 读数 | 备注 |
 |--------|-----------|------|
-| 检索 | promote-off 均值 **≈0.447**；two-level ON 前锚 `61f00a6d` **0.483**；**gte-large #1 `d31375a5` 0.5435（待 N≥2）** | 配对仍可对 promote-off；日常读数以 #1 为准直至复验 |
+| 检索 | promote-off 均值 **≈0.447**；two-level ON 前锚 `61f00a6d` **0.483**；**gte-large 历史 #1 `d31375a5` 0.5435**（**栈已切 bge-m3 → 作废为当前读数**） | 配对仍可对 promote-off；日常读数待 bge-m3 重嵌后新 smoke |
 | 上下文 | excl-infra F1 **v1≈0.41** · **v2≈0.53**（`46df8722`=0.539） | CTX-9/EVAL-infra 后口径；**EVAL-8 后须注明 scorer 版本**；勿与旧口径裸比 |
 
 ---
@@ -326,7 +326,7 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | **上下文尺子偏离官方口径** | EVAL-8 双锚：v1→v2 F1 +10.4/+12.0pp；EM 双向（+8.3 / −6.5pp） | **已闭合**（v2 切码 + batch16 产物）；旧锚标 v1 |
 | 组装层丢证暴露面 | CTX-13：三分桶合计 **0** / WA（`b5d24c9e` + 佐证 `1707135c`） | **已闭合**；CTX-14/15/6 降级不开 |
 | BEIR≠产品分布 | 自知 + RET-4 污染条款 | **PROD-1** 迁移率 |
-| 缺中文 IR 温度计 | 产品若含中文语料；C-MTEB 可作分栏套件 | **PROD-2**（§7.11 · 草案 · 暂不实施） |
+| 缺中文 IR 温度计 | 产品若含中文语料；C-MTEB 可作分栏套件 | **PROD-2**（§7.11 · **接线开工** · 重嵌后 smoke 待记） |
 
 ---
 
@@ -346,10 +346,10 @@ make official-bench-run SUITE=retrieval ARM=free LIMIT=20   # 或 Ops 等价
 | 3.6 | B′ | CTX-16 交付面 / 定位面回访 | EVAL-8 复算中的稀释质量 / never_retrieved 质量 ≥ 2.2pp | **关题**（稀释 potential 0.00/2.08pp < 2.2；定位面不立项） |
 | 4 | B | **RET-18** two-level 消融 N≥2 | 回填 §5.5 台账第 4 行 | **✓ 已收 · 保留 ON**（OFF #1 `d819b698` 0.389 / #2 `c13f335e` 0.375 vs ON `61f00a6d` 0.483；栈已切回 `RETRIEVAL_TWO_LEVEL_ENABLED=true`） |
 | 5 | C | **REP-3** 全量锚 | — | **已取消**（对「搜得更好」无杠杆；跑次 `7c591a8b` 已 stop；manifest `rep3/freeze_manifest.json` = cancelled） |
-| 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **接线 ✓ · GPU gte-large 重嵌 ✓ · free #1 ✓（`d31375a5` 0.5435）· 待 N≥2；不做全量后锚** |
+| 6 | D | **RET-4** bake+全库重嵌 → free 20q N≥2 → 全量后锚 | FiQA absent 收窄 + 宏分正 Δ | **gte-large 历史 #1 ✓**；**GPU 默认已切 bge-m3 / index 11** → 须再 bake+重嵌后记新 smoke；不做全量后锚 |
 | 7 | E | **RET-11(b)**（BM25 doc2query） | 冒烟未胜 → 回滚 | **✓ 已回滚**（v1 `406bb48c` 0.436 / v2 `81d309a3` 0.460 vs 锚 `61f00a6d` 0.483；FiQA 仍 −8pp；已清空 `bm25_extra`） |
 | 8 | F | **PROD-1** 首跑 + 终态四问书面作答 | 完备收束 | **草稿 · 未首跑** |
-| 9 | G | **PROD-2** C-MTEB 小量 + Ops 旁路索引 | 配置草案落地 + 隔离索引同构跑通 | **草案 · 暂不实施**（§7.11；不挡本轮 RET 日历） |
+| 9 | G | **PROD-2** C-MTEB 小量 + Ops 旁路索引 | 配置落地 + 隔离索引同构跑通 | **接线开工**（suite / `retrieval_ops_zh` / L1 / Ops UI）；**重嵌 + free smoke 待记** |
 
 ### 7.2 RET-18 · two-level 消融（减法 · 不计停机线）
 
@@ -375,17 +375,19 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
 
 ~~原规定（仅存档，不执行）~~：栈冻结 · 全量 retrieval + context · 入库唯一合法前锚 —— **作废**。
 
-### 7.4 RET-4 · Embed 换代（主菜 · 重嵌 ✓ · free 冒烟 #1 已记 · 待 N≥2）
+### 7.4 RET-4 · Embed 换代（主菜 · gte-large 历史冒烟 ✓ · **默认已切 bge-m3**）
 
-**已完成**：L0 选型；`make resolve-embedding`；MiniLM 移出默认；index 9=small / 10=large；CUDA 探测；**GPU 机 gte-large@1024 全库重嵌**（含 Ops FiQA → `agent-bench-postgres` / `retrieval_ops`）；**free 冒烟 #1**（2026-08-06）。
+**已完成（历史）**：L0 选型；`make resolve-embedding`；MiniLM 移出默认；index 9=small / 10=gte-large；CUDA 探测；**GPU 机 gte-large@1024 全库重嵌**（含 Ops FiQA → `agent-bench-postgres` / `retrieval_ops`）；**free 冒烟 #1**（2026-08-06）。
 
-**部署策略（锁定）**
+**当前部署策略（PROD-2 锁定 · 2026-08-06）**
 
-- `EMBEDDING_PROFILE=auto`：VRAM≥8GiB → `thenlper/gte-large@1024` / INDEX **10**；否则 `gte-small@384` / INDEX **9**  
-- 强制：`EMBEDDING_PROFILE=small|large` 或 `EMBEDDING_FORCE_MODEL=…`  
-- MiniLM **不再是生产默认**
+- `EMBEDDING_PROFILE=auto`：VRAM≥8GiB → `BAAI/bge-m3@1024` / INDEX **11**（产品/BEIR/C-MTEB **共用**）；否则 `gte-small@384` / INDEX **9**  
+- `RUNTIME_GPU=0` → 强制 CPU / gte-small（**即使 nvidia-smi 可见也不选 bge-m3**）  
+- 强制：`EMBEDDING_PROFILE=small|large|m3` 或 `EMBEDDING_FORCE_MODEL=…`  
+- MiniLM **不再是生产默认**；gte-large 仅作 `FORCE_MODEL` / 历史对照  
+- Ops 分图：BEIR → `retrieval_ops`；C-MTEB → `retrieval_ops_zh`（**不是第二套模型**）  
 
-**Free 冒烟 #1（2026-08-06 · 不作入库结论）**
+**Free 冒烟 #1（2026-08-06 · gte-large · 不作入库结论 · **非当前栈读数**）**
 
 | 项 | 值 |
 |----|-----|
@@ -410,7 +412,7 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
 | FiQA | 0.402 / 0.533 | 0.314 / 0.550 | **排序升、深召回略降**；absent 未宣称闭合 |
 | NFCorpus | 0.400 / 0.141 | 0.412 / 0.141 | 几乎不动（硬骨头） |
 
-**裁决（#1）**：宏分远超 EVAL-7 噪声门槛（≈2.2pp），叙事 =「gte-large 重嵌后工程变好的间接证明」；**须同协议再跑一轮（N≥2）**才把 `d31375a5` 升为稳定平台读数。**禁止** `update-baseline` / SCORECARD 主栏。下一步优先：复验；FiQA 硬召回另议。
+**裁决（#1 · gte-large 历史）**：宏分远超 EVAL-7 噪声门槛（≈2.2pp）；**栈已切 bge-m3 / index 11** → `d31375a5` **不作当前平台读数**，仅作换代前对照。**禁止** `update-baseline` / SCORECARD 主栏。下一步：GPU bake+全库重嵌 → BEIR / C-MTEB 各记新 free smoke。
 
 **执行细化（v2 · 立项不变）**
 
@@ -664,82 +666,62 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 - RET-4 后宏分仍平 → 按终态条 2 把检索残余书面归因到 {qrels 结构 / 能力墙}，brief 仍可完备收束——**「证明了修不动」与「修好了」都是完备终态**。  
 - PROD-1 迁移率显著低于 BEIR Δ → 如实写入入库叙事，作为下一轮产品语料专项开题，不是本轮失败。  
 - RET-18 / 观测刀（含已收 CTX-13 / EVAL-8）**不承诺分数**；EVAL-8 Δ 尤其禁止记宏分胜；**REP-3 已取消**。  
-- **PROD-2（C-MTEB）**：草案见 §7.11；**本轮不实施、不挡 RET 日历**；落地后与 BEIR / PROD-1 三分温度计，禁止混宏分。
+- **PROD-2（C-MTEB）**：见 §7.11 · **接线开工**；与 BEIR / PROD-1 三分温度计，禁止混宏分。
 
-### 7.11 PROD-2 · C-MTEB 小量配置 + Ops 旁路索引（草案 · **暂不实施**）
+### 7.11 PROD-2 · C-MTEB 小量 + Ops 旁路索引（**接线开工**）
 
-> **状态**：2026-08-05 书面收录；**不开工**。本轮火力：**FiQA 硬召回 / RET-4 冒烟验收 / RET-11**（REP-3 已取消）。  
-> **全称**：C-MTEB = Chinese Massive Text Embedding Benchmark（中文大规模文本向量评测；检索子集可作中文 IR 温度计）。  
+> **状态**：2026-08-06 **开工**（配置 / schema / sync / L1 / Ops UI 已接线）；**GPU bge-m3 重嵌 + free smoke 待记**。  
+> **全称**：C-MTEB = Chinese Massive Text Embedding Benchmark（中文大规模文本向量评测；检索子集作中文 IR 温度计）。  
 > **动机**：BEIR 为英文 IR；产品若含中文语料，需要第二套**分栏**中文检索温度计，且不得污染 BEIR 历史链。
 
-#### 提案要点（已口头对齐 · 写入纪律）
+#### 已落地
 
-| # | 提案 | 裁决形态 |
-|---|------|----------|
-| 1 | 小量写进配置文件（对齐 `eval/official/suites.small.yaml`） | **采纳方向** · 暂不改文件 |
-| 2 | Ops 评测旁路索引加载 C-MTEB 与 BEIR | **采纳方向** · 旁路=「语料/索引作用域隔离」，**不是**第二套检索器 |
+| # | 项 | 位置 |
+|---|-----|------|
+| 1 | `suites.retrieval_zh`（Covid / Medical / Ecom） | [`eval/official/suites.small.yaml`](../../eval/official/suites.small.yaml) |
+| 2 | Pull → BEIR 布局 | `scripts/official_bench/pull.py` · `pull_cmteb`；`make official-bench-pull`（`all`） |
+| 3 | 旁路索引平面 | `ops-l1/cmteb-index/{dataset}` → schema **`retrieval_ops_zh`**（**同模**；仅独立 HNSW；BEIR 仍 `retrieval_ops`） |
+| 4 | Sync | `make sync-ops-cmteb`（runtime `--mode ops-cmteb`） |
+| 5 | L1 agent | Ops target `retrieval_zh`；`make official-bench-retrieval-zh-agent` |
+| 6 | Embed | GPU → **`BAAI/bge-m3@1024` / INDEX 11**（中英语料**共用**）；CPU → gte-small（禁止默认 bge-m3） |
 
-#### ① 配置草案（未落地）
-
-```yaml
-# 拟增于 suites.small.yaml（示意 · 勿直接合入本轮）
-# suites:
-#   retrieval_zh:                    # 与 retrieval(BEIR) 并列，禁止共用 primary 宏分
-#     id: cmteb.small
-#     official: C-MTEB
-#     task_filter: [retrieval]       # 本轮只要检索；STS/分类等不开
-#     datasets:                      # 优先小库；暂缓 T2Retrieval 全量
-#       - CovidRetrieval             # ~1k queries 量级
-#       - MedicalRetrieval           # ~1k
-#       - EcomRetrieval              # ~1k
-#       # 可选第四：CmedqaRetrieval / DuRetrieval（视磁盘与嵌库预算）
-#     sample_policy:
-#       method: head_slice           # 或冻结 ids_fingerprint
-#       limit_queries_per_dataset: 20
-#     metrics: [ndcg_at_10, recall_at_100]
-#     primary_arm: free              # L1 与 BEIR 同 free 协议
-#     protocol_note: "cmteb-small-v0 · 与 beir.small 分 suite 分栏"
-```
-
-- C-MTEB **无官方 small 档**；本仓 `cmteb.small` = 自切片（与 BEIR smoke 同权：量准用，不入库单次噪声）。  
-- 全量 35 库 / 6 任务类型**不进**本票；只开 retrieval 子集小量。
-
-#### ② Ops 旁路索引（形态写死）
+#### 旁路形态（写死）
 
 ```text
 旁路 = 什么
   ✓ 评测语料不进产品 seed 索引
-  ✓ 每 suite / 每 dataset 独立 work 物化 + 建索引（现 BEIR L1 同构）
-  ✓ Ops 可并列入口：BEIR small ∥ C-MTEB small（分跑或分 tab）
+  ✓ 每 dataset 独立 work 物化 + 建索引（与 BEIR L1 同构）
+  ✓ **同一 embedder**（GPU bge-m3）；**只分 HNSW 图 / schema**
+  ✓ Ops 并列入口：BEIR ∥ C-MTEB（分跑 / 分 tab；勿混宏分）
   ✓ 用户路径仍 Session→Turn→search_sources→hybrid（同产品面）
 
 旁路 ≠ 什么
-  ✗ 一个全局索引混装 BEIR + C-MTEB 语料（串扰 / 不可归因）
-  ✗ 评测专用 ranker / fusion / 强制搜（毁同构；R 红线）
+  ✗ 一个全局索引混装 BEIR + C-MTEB 语料
+  ✗ 第二套「中文专用」embedding 模型
+  ✗ 评测专用 ranker / fusion / 强制搜
   ✗ 把中英文 nDCG 平均进同一 SCORECARD 主栏
 ```
 
 #### 硬约束
 
 1. **温度计三分**：BEIR（英）· C-MTEB（中）· PROD-1（产品镜像）——分 suite、分宏分、分入库叙事。  
-2. **嵌入模型**：现行默认 `gte-small` 偏英文；C-MTEB 须**中文向量模型**（或明确双模 profile），否则分数无产品意义；换模另立票，不绑 RET-4。  
-3. **排期**：G 批；**硬后置于**本轮质量刀（RET-4 冒烟验收 / RET-11）与 PROD-1 之后或并行**仅文档/拉数**；**不挡、不恢复 REP-3**。  
-4. **门禁**：冒烟 N≥2 只去留；入库仍要全量或明确锚点档；中文套件涨分不给 BEIR 刀背书。
+2. **嵌入模型**：GPU 默认 **bge-m3** = 中英共用单模（产品/BEIR/C-MTEB 同 INDEX）；分栏只分图。CPU 机读数**不可与 GPU 锚比**。  
+3. **门禁**：冒烟 N≥2 只去留；入库仍要全量或明确锚点档；中文套件涨分不给 BEIR 刀背书。  
+4. **禁止** `update-baseline` 自首次 smoke。
 
-#### 非目标 / 暂不实施清单
-
-- 本轮不改 `suites.small.yaml`、不拉 C-MTEB 数据、不改 Ops UI、不建旁路索引代码。  
-- 不上 T2Retrieval 全量作小量冒烟。  
-- 不把 C-MTEB 当作「BEIR 不够再补一刀」的抬分通道。
-
-#### 完成判据（若未来开工）
+#### 完成判据（剩余）
 
 ```text
-① suites 配置合入 + protocol 版本 bump 说明
-② pull + 每库隔离索引 + L1 free 冒烟 N≥2 跑通
-③ Ops 分栏展示；SCORECARD 中文栏独立（可先空）
-④ 书面确认：未改 while / 未混索引 / 未用英文模硬评中文主栏
+① GPU resolve → bake → make sync + make sync-ops-cmteb
+② BEIR free smoke + retrieval_zh free smoke（分栏记 run_id）
+③ SCORECARD 中文栏可先空；主栏仍不混宏分
+④ 书面确认：未改 while / 未混索引 / 未挂第二套中文专模
 ```
+
+#### 非目标
+
+- CPU 默认不上 bge-m3；不上第二套中文专模；不上 T2Retrieval 全量作小量冒烟。  
+- 不把 C-MTEB 当作「BEIR 不够再补一刀」的抬分通道。
 
 
 ```text
@@ -757,7 +739,7 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 ```
 
 **当前唯一正确日历**：
-检索——**RET-18 ✓** → **RET-4**（gte-large 已嵌 · free #1 `d31375a5` **0.5435** · **待 N≥2**）→ **RET-11(b) 已回滚**；
+检索——**RET-18 ✓** → **RET-4 gte-large 历史 ✓** → **bge-m3 / PROD-2 接线 ✓ · 重嵌+双栏 smoke 待办** → **RET-11(b) 已回滚**；
 上下文——**产品侧工程停手**；**EVAL-8 已收**（v2；`46df8722` F1 0.539）；
-**REP-3 全量锚——已取消**（对搜得更好无杠杆）；
- backlog——PROD-1 / PROD-2 另议，不挡质量刀。
+**REP-3 全量锚——已取消**；
+PROD-1 另议，不挡质量刀。

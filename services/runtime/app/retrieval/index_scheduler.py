@@ -474,22 +474,30 @@ def sync_sources_index_work_blocking(
     return merged
 
 
-def _list_ops_beir_works() -> list[tuple[str, str, str | None]]:
-    """Return ``(work_id, work_root, owner_user_id)`` for shared BEIR index works."""
+def _list_ops_index_works(*, index_token: str) -> list[tuple[str, str, str | None]]:
+    """Return ``(work_id, work_root, owner)`` for shared Ops index works.
+
+    ``index_token`` is ``beir-index`` or ``cmteb-index``.
+    """
     import psycopg
 
+    token = str(index_token or "").strip()
+    if token not in {"beir-index", "cmteb-index"}:
+        raise ValueError(f"unsupported ops index token: {index_token}")
     dsn = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
     dsn = dsn.replace("postgres://", "postgresql://")
+    like_child = f"%/ops-l1/{token}/%"
+    like_root = f"%/ops-l1/{token}"
     with psycopg.connect(dsn, connect_timeout=5) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
                 SELECT id::text, work_root, owner_user_id::text
                 FROM works
-                WHERE work_root LIKE '%/ops-l1/beir-index/%'
-                   OR work_root LIKE '%/ops-l1/beir-index'
+                WHERE work_root LIKE %s OR work_root LIKE %s
                 ORDER BY work_root
-                """
+                """,
+                (like_child, like_root),
             )
             rows = cur.fetchall()
     out: list[tuple[str, str, str | None]] = []
@@ -497,25 +505,30 @@ def _list_ops_beir_works() -> list[tuple[str, str, str | None]]:
         root = Path(str(work_root)).resolve()
         if not _is_ops_l1_root(root):
             continue
-        # Shared cache only (exclude ephemeral run trees under ops-l1/<run>/…).
         parts = root.parts
-        if "beir-index" not in parts:
+        if token not in parts:
             continue
         out.append((str(work_id), str(root), str(owner_id) if owner_id else None))
     return out
 
 
-def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
-    """Force work-scoped sync for Ops BEIR corpora (FiQA / SciFact / …).
+def _list_ops_beir_works() -> list[tuple[str, str, str | None]]:
+    """Return ``(work_id, work_root, owner_user_id)`` for shared BEIR index works."""
+    return _list_ops_index_works(index_token="beir-index")
 
-    Full-tenant ``sync_sources_index_blocking`` intentionally skips ``ops-l1``.
-    After embed-model / INDEX bumps, call this (or re-run Ops L1) so each BEIR
-    work re-embeds under its own scope stamp — not skipped because seed already
-    wrote global ``version=9``.
-    """
-    works = _list_ops_beir_works()
+
+def _list_ops_cmteb_works() -> list[tuple[str, str, str | None]]:
+    """Return works for shared C-MTEB index trees (``ops-l1/cmteb-index``)."""
+    return _list_ops_index_works(index_token="cmteb-index")
+
+
+def _sync_ops_index_works_blocking(
+    works: list[tuple[str, str, str | None]],
+    *,
+    label: str,
+) -> dict[str, Any]:
     if not works:
-        logger.info("ops beir index sync: no beir-index works registered")
+        logger.info("ops %s index sync: no works registered", label)
         return {
             "indexed_files": 0,
             "chunks": 0,
@@ -532,7 +545,8 @@ def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
     for i, (work_id, work_root, owner_id) in enumerate(works, start=1):
         check_sync_cancelled()
         logger.info(
-            "ops beir index sync start; work=%s/%s work_id=%s dir=%s",
+            "ops %s index sync start; work=%s/%s work_id=%s dir=%s",
+            label,
             i,
             total,
             work_id,
@@ -555,7 +569,7 @@ def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
                 eta_s=None,
             )
         except Exception:
-            logger.debug("ops beir scope progress skipped", exc_info=True)
+            logger.debug("ops %s scope progress skipped", label, exc_info=True)
         results.append(
             sync_sources_index_work_blocking(
                 work_id=work_id,
@@ -564,7 +578,7 @@ def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
             )
         )
 
-    merged = {
+    return {
         "indexed_files": sum(int(r.get("indexed_files") or 0) for r in results),
         "chunks": sum(int(r.get("chunks") or 0) for r in results),
         "added": sum(int(r.get("added") or 0) for r in results),
@@ -585,7 +599,22 @@ def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
             for (wid, root, _), res in zip(works, results, strict=True)
         ],
     }
-    return merged
+
+
+def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
+    """Force work-scoped sync for Ops BEIR corpora (FiQA / SciFact / …).
+
+    Full-tenant ``sync_sources_index_blocking`` intentionally skips ``ops-l1``.
+    After embed-model / INDEX bumps, call this (or re-run Ops L1) so each BEIR
+    work re-embeds under its own scope stamp — not skipped because seed already
+    wrote global ``version=9``.
+    """
+    return _sync_ops_index_works_blocking(_list_ops_beir_works(), label="beir")
+
+
+def sync_ops_cmteb_indexes_blocking() -> dict[str, Any]:
+    """Force work-scoped sync for Ops C-MTEB corpora (``cmteb-index``)."""
+    return _sync_ops_index_works_blocking(_list_ops_cmteb_works(), label="cmteb")
 
 
 async def run_ops_beir_index_sync(*, reason: str = "ops-beir") -> dict[str, Any]:
@@ -597,6 +626,19 @@ async def run_ops_beir_index_sync(*, reason: str = "ops-beir") -> dict[str, Any]
             runner=sync_ops_beir_indexes_blocking,
             work_id=None,
             path="ops-l1/beir-index",
+            cancel_token=token,
+        )
+
+
+async def run_ops_cmteb_index_sync(*, reason: str = "ops-cmteb") -> dict[str, Any]:
+    """Serialize Ops C-MTEB reindex (independent HNSW schema ``retrieval_ops_zh``)."""
+    token = sync_cancel_token()
+    async with _sync_lock:
+        return await _finish_sync_locked(
+            reason=reason,
+            runner=sync_ops_cmteb_indexes_blocking,
+            work_id=None,
+            path="ops-l1/cmteb-index",
             cancel_token=token,
         )
 

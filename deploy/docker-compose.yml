@@ -87,6 +87,7 @@ services:
       OPS_DATABASE_URL: ${OPS_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
       BENCH_DATABASE_URL: ${BENCH_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
       OPS_RETRIEVAL_PG_SCHEMA: ${OPS_RETRIEVAL_PG_SCHEMA:-retrieval_ops}
+      OPS_RETRIEVAL_PG_SCHEMA_ZH: ${OPS_RETRIEVAL_PG_SCHEMA_ZH:-retrieval_ops_zh}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
       MODEL_MODE: ${MODEL_MODE:-live}

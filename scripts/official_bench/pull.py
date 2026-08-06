@@ -326,6 +326,281 @@ def pull_swebench(cfg: dict[str, Any] | None=None, *, force: bool=False) -> Path
     _log('[progress] pull dataset=1/1 file=swebench_lite pct=100 cached=0')
     return root
 
+def _cmteb_dataset_ready(target: Path) -> bool:
+    qrels = target / 'qrels' / 'test.tsv'
+    if not (
+        (target / 'corpus.jsonl').is_file()
+        and (target / 'queries.jsonl').is_file()
+        and qrels.is_file()
+    ):
+        return False
+    try:
+        # header + ≥1 row
+        return sum(1 for _ in qrels.open(encoding='utf-8')) > 1
+    except OSError:
+        return False
+
+def _as_hf_rows(obj: Any) -> list[dict[str, Any]]:
+    if obj is None:
+        return []
+    if hasattr(obj, 'to_list'):
+        return list(obj.to_list())  # type: ignore[no-any-return]
+    return [dict(x) for x in obj]
+
+def _pick_split(ds: Any, *names: str) -> Any:
+    keys = list(ds.keys()) if hasattr(ds, 'keys') else []
+    for name in names:
+        if name in keys:
+            return ds[name]
+    return ds[keys[0]] if keys else ds
+
+def _parse_qrel_row(row: dict[str, Any]) -> tuple[str, str, int] | None:
+    qid = str(row.get('query-id') or row.get('qid') or row.get('query_id') or '')
+    did = str(
+        row.get('corpus-id')
+        or row.get('pid')
+        or row.get('doc_id')
+        or row.get('corpus_id')
+        or ''
+    )
+    score = int(row.get('score') or row.get('relevance') or 1)
+    if qid and did:
+        return (qid, did, score)
+    return None
+
+def _load_mteb_retrieval_parts(name: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[tuple[str, str, int]]]:
+    """Load corpus / queries / qrels from ``mteb/{name}`` (has qrels; C-MTEB/* often does not)."""
+    from datasets import load_dataset
+    from huggingface_hub import hf_hub_download, list_repo_files
+
+    repo = f'mteb/{name}'
+    files = list_repo_files(repo, repo_type='dataset')
+    corpus_files = sorted(f for f in files if f.startswith('corpus/') and f.endswith('.parquet'))
+    query_files = sorted(f for f in files if f.startswith('queries/') and f.endswith('.parquet'))
+    qrel_files = sorted(f for f in files if f.startswith('data/') and f.endswith('.parquet'))
+    if not corpus_files or not query_files or not qrel_files:
+        raise RuntimeError(f'{repo} missing corpus/queries/data parquet layout')
+
+    def _parquet_rows(rel_paths: list[str]) -> list[dict[str, Any]]:
+        local = [hf_hub_download(repo, p, repo_type='dataset') for p in rel_paths]
+        ds = load_dataset('parquet', data_files=local, split='train')
+        return _as_hf_rows(ds)
+
+    corpus_rows = _parquet_rows(corpus_files)
+    query_rows = _parquet_rows(query_files)
+    qrel_rows: list[tuple[str, str, int]] = []
+    for row in _parquet_rows(qrel_files):
+        parsed = _parse_qrel_row(row)
+        if parsed:
+            qrel_rows.append(parsed)
+    return corpus_rows, query_rows, qrel_rows
+
+def _subsample_cmteb_corpus(
+    corpus_rows: list[dict[str, Any]],
+    qrel_rows: list[tuple[str, str, int]],
+    *,
+    max_docs: int,
+    seed: int,
+) -> tuple[list[dict[str, Any]], list[tuple[str, str, int]]]:
+    """Keep all gold docs from qrels, then fill with seeded distractors up to ``max_docs``."""
+    import random
+
+    def _doc_id(row: dict[str, Any]) -> str:
+        return str(row.get('_id') or row.get('id') or row.get('doc_id') or '')
+
+    by_id = {_doc_id(r): r for r in corpus_rows if _doc_id(r)}
+    gold_ids = {did for _, did, _ in qrel_rows if did in by_id}
+    if max_docs <= 0 or len(by_id) <= max_docs:
+        return corpus_rows, qrel_rows
+
+    keep: set[str] = set(gold_ids)
+    if len(keep) > max_docs:
+        # Extreme budget: keep a seeded subset of gold (still evaluable on those qrels).
+        rng = random.Random(seed)
+        keep = set(rng.sample(sorted(keep), max_docs))
+        qrel_rows = [(q, d, s) for q, d, s in qrel_rows if d in keep]
+    else:
+        rest = [did for did in by_id if did not in keep]
+        rng = random.Random(seed)
+        rng.shuffle(rest)
+        need = max_docs - len(keep)
+        keep.update(rest[:need])
+
+    kept_rows = [by_id[did] for did in keep if did in by_id]
+    # Stable-ish order: gold first, then others (by id).
+    kept_rows.sort(key=lambda r: (0 if _doc_id(r) in gold_ids else 1, _doc_id(r)))
+    return kept_rows, qrel_rows
+
+def _export_cmteb_to_beir_layout(
+    name: str,
+    dest: Path,
+    *,
+    hf_id: str | None = None,
+    max_corpus_docs: int = 0,
+    sample_seed: int = 42,
+) -> dict[str, Any]:
+    """Load retrieval dataset + qrels; optionally cap corpus (keep gold + distractors)."""
+    try:
+        from datasets import load_dataset
+    except ImportError as e:
+        raise SystemExit(
+            'C-MTEB pull needs `datasets`. pip install -r eval/official/requirements.txt'
+        ) from e
+
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / 'qrels').mkdir(parents=True, exist_ok=True)
+
+    corpus_rows: list[dict[str, Any]] = []
+    query_rows: list[dict[str, Any]] = []
+    qrel_rows: list[tuple[str, str, int]] = []
+    source = ''
+
+    # Prefer mteb/{name}: includes qrels under data/*.parquet (C-MTEB/* often has none).
+    try:
+        corpus_rows, query_rows, qrel_rows = _load_mteb_retrieval_parts(name)
+        source = f'mteb/{name}'
+        _log(f'[pull] {name}: loaded {source} (corpus+queries+qrels)')
+    except Exception as exc:
+        _log(f'[pull] {name}: mteb/{name} miss ({exc}); trying {hf_id or f"C-MTEB/{name}"}')
+
+    if not corpus_rows or not query_rows:
+        repo = hf_id or f'C-MTEB/{name}'
+        raw = load_dataset(repo)
+        if hasattr(raw, 'keys') and ({'corpus', 'queries'} & set(raw.keys())):
+            corpus_rows = _as_hf_rows(_pick_split(raw, 'corpus'))
+            query_rows = _as_hf_rows(_pick_split(raw, 'queries', 'query'))
+            if 'qrels' in raw:
+                for row in _as_hf_rows(raw['qrels']):
+                    parsed = _parse_qrel_row(row)
+                    if parsed:
+                        qrel_rows.append(parsed)
+            source = repo
+        else:
+            raise SystemExit(f'failed to load C-MTEB/mteb dataset for {name}')
+
+    if not qrel_rows:
+        # Last resort: mteb qrels only
+        try:
+            _, _, qrel_rows = _load_mteb_retrieval_parts(name)
+            if not source:
+                source = f'mteb/{name} (qrels)'
+        except Exception as exc:
+            raise SystemExit(
+                f'{name}: no qrels found (C-MTEB hub often omits them; mteb/{name} failed: {exc})'
+            ) from exc
+
+    if not corpus_rows or not query_rows or not qrel_rows:
+        raise SystemExit(f'{name}: missing corpus/queries/qrels after load')
+
+    n_full = len(corpus_rows)
+    if max_corpus_docs > 0 and n_full > max_corpus_docs:
+        corpus_rows, qrel_rows = _subsample_cmteb_corpus(
+            corpus_rows,
+            qrel_rows,
+            max_docs=max_corpus_docs,
+            seed=sample_seed,
+        )
+        _log(
+            f'[pull] {name}: corpus capped {n_full} → {len(corpus_rows)} '
+            f'(max_corpus_docs={max_corpus_docs}, seed={sample_seed})'
+        )
+
+    n_corpus = 0
+    with (dest / 'corpus.jsonl').open('w', encoding='utf-8') as f:
+        for row in corpus_rows:
+            doc_id = str(row.get('_id') or row.get('id') or row.get('doc_id') or '')
+            title = str(row.get('title') or '')
+            text = str(row.get('text') or row.get('content') or '')
+            if not doc_id:
+                continue
+            f.write(json.dumps({'_id': doc_id, 'title': title, 'text': text}, ensure_ascii=False) + '\n')
+            n_corpus += 1
+
+    # Keep queries that still have ≥1 qrel after corpus cap.
+    qrel_qids = {qid for qid, _, _ in qrel_rows}
+    n_queries = 0
+    with (dest / 'queries.jsonl').open('w', encoding='utf-8') as f:
+        for row in query_rows:
+            qid = str(row.get('_id') or row.get('id') or row.get('query_id') or '')
+            text = str(row.get('text') or row.get('query') or '')
+            if not qid or qid not in qrel_qids:
+                continue
+            f.write(json.dumps({'_id': qid, 'text': text}, ensure_ascii=False) + '\n')
+            n_queries += 1
+
+    with (dest / 'qrels' / 'test.tsv').open('w', encoding='utf-8') as f:
+        f.write('query-id\tcorpus-id\tscore\n')
+        for qid, did, score in qrel_rows:
+            f.write(f'{qid}\t{did}\t{score}\n')
+
+    return {
+        'n_corpus': n_corpus,
+        'n_corpus_full': n_full,
+        'n_queries': n_queries,
+        'n_qrels': len(qrel_rows),
+        'source': source,
+        'max_corpus_docs': max_corpus_docs,
+        'sample_seed': sample_seed,
+    }
+
+def pull_cmteb(cfg: dict[str, Any] | None=None, *, force: bool=False) -> Path:
+    """Pull C-MTEB retrieval subsets into BEIR-compatible layout under suite_data('cmteb')."""
+    ensure_data_dir()
+    suites = cfg or load_suites()
+    retrieval_zh = suites['suites'].get('retrieval_zh')
+    if not isinstance(retrieval_zh, dict):
+        raise SystemExit('suites.small.yaml missing suites.retrieval_zh')
+    root = suite_data('cmteb')
+    root.mkdir(parents=True, exist_ok=True)
+    _log(f'[pull] BENCH_DATA_DIR={data_dir()} (cmteb)')
+    datasets = list(retrieval_zh.get('datasets') or [])
+    n = len(datasets)
+    # Suite budget (~50k total) split evenly unless per-dataset override.
+    total_budget = int(retrieval_zh.get('max_corpus_docs_total') or 0)
+    default_seed = int(retrieval_zh.get('corpus_sample_seed') or 42)
+    per_default = (total_budget // n) if (total_budget > 0 and n > 0) else 0
+    for (i, ds) in enumerate(datasets, start=1):
+        name = str(ds['name'])
+        hf_id = str(ds.get('hf_dataset') or f'C-MTEB/{name}')
+        target = root / name
+        label = f'dataset {i}/{n} {name}'
+        max_docs = int(ds.get('max_corpus_docs') or per_default or 0)
+        seed = int(ds.get('corpus_sample_seed') or default_seed)
+        if not force and _cmteb_dataset_ready(target):
+            # Re-pull if cached slice exceeds current budget.
+            try:
+                meta = json.loads((target / '.pulled.json').read_text(encoding='utf-8'))
+                cached_cap = int(meta.get('max_corpus_docs') or 0)
+                cached_n = int(meta.get('n_corpus') or 0)
+                if max_docs > 0 and (cached_cap != max_docs or cached_n > max_docs):
+                    _log(f'[pull] {label}: stale cache (n={cached_n} cap={cached_cap}) — refresh')
+                elif int(meta.get('n_qrels') or 0) > 0:
+                    _log(f'[pull] {label}: cached — skip')
+                    continue
+                else:
+                    _log(f'[pull] {label}: cached without qrels — refresh')
+            except Exception:
+                pass
+        if target.exists():
+            shutil.rmtree(target)
+        _log(f'[pull] {label}: load {name} (cap={max_docs or "full"})')
+        stats = _export_cmteb_to_beir_layout(
+            name,
+            target,
+            hf_id=hf_id,
+            max_corpus_docs=max_docs,
+            sample_seed=seed,
+        )
+        (target / '.pulled.json').write_text(
+            json.dumps({'name': name, 'hf_dataset': hf_id, **stats}, indent=2),
+            encoding='utf-8',
+        )
+        _log(
+            f'[pull] {label}: wrote corpus={stats["n_corpus"]} '
+            f'queries={stats["n_queries"]} qrels={stats["n_qrels"]}'
+        )
+    return root
+
 def pull_all(*, force: bool=False) -> dict[str, str]:
     ensure_dirs()
     ensure_data_dir()
@@ -333,4 +608,5 @@ def pull_all(*, force: bool=False) -> dict[str, str]:
     beir = pull_beir(cfg, force=force)
     lb = pull_longbench(cfg, force=force)
     swe = pull_swebench(cfg, force=force)
-    return {'beir': str(beir), 'longbench': str(lb), 'swebench_lite': str(swe)}
+    cmteb = pull_cmteb(cfg, force=force)
+    return {'beir': str(beir), 'longbench': str(lb), 'swebench_lite': str(swe), 'cmteb': str(cmteb)}

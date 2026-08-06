@@ -40,17 +40,21 @@ RUN set -eux; \
 
 RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
     && pip install --no-cache-dir "sentence-transformers>=3.0"
-# Prefer offline bake cache (seeded from a prior runtime container) so Hub/proxy
-# flaps do not block CUDA rebuilds. Falls back to Hub download when empty.
+# Prefer offline bake cache only when it already contains the requested model.
+# (A stale gte-large cache must not skip downloading bge-m3.)
 COPY deploy/model-bake-cache/ /models-bake-cache/
 RUN set -eux; \
-    if find /models-bake-cache -mindepth 1 -maxdepth 1 ! -name '.keep' -print -quit | grep -q .; then \
-      echo "model-baker: seeding /models-baked from deploy/model-bake-cache (offline)"; \
-      cp -a /models-bake-cache/. /models-baked/; \
+    cache_name="models--$(echo "${EMBEDDING_MODEL}" | sed 's|/|--|g')"; \
+    mkdir -p /models-baked; \
+    if [ -d "/models-bake-cache/${cache_name}" ]; then \
+      echo "model-baker: seeding ${cache_name} from deploy/model-bake-cache (offline)"; \
+      cp -a "/models-bake-cache/${cache_name}" /models-baked/; \
+      if [ -f /models-bake-cache/CACHEDIR.TAG ]; then cp -a /models-bake-cache/CACHEDIR.TAG /models-baked/; fi; \
     else \
-      echo "model-baker: cache empty → download ${EMBEDDING_MODEL}"; \
+      echo "model-baker: cache miss for ${cache_name} → download ${EMBEDDING_MODEL} via ${HF_ENDPOINT}"; \
       python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
     fi; \
+    printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model; \
     rm -rf /models-bake-cache
 
 FROM python:3.11-slim AS deps

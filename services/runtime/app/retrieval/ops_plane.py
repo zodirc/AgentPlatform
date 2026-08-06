@@ -4,6 +4,11 @@ Control-plane metadata (works / sessions / turns) stays on product ``DATABASE_UR
 Official L1 corpora under ``ops-l1/`` write and search ``source_*`` on
 ``OPS_DATABASE_URL`` (falls back to ``BENCH_DATABASE_URL``), isolating eval
 vectors from the product pgvector database while sharing one runtime process.
+
+Embedding model/dims are shared (GPU: bge-m3@1024 for product + BEIR + C-MTEB).
+Only HNSW graphs / schemas split by corpus tree:
+  BEIR  ``ops-l1/beir-index``   → ``retrieval_ops``
+  C-MTEB ``ops-l1/cmteb-index`` → ``retrieval_ops_zh``
 """
 
 from __future__ import annotations
@@ -22,6 +27,19 @@ def is_ops_l1_work_root(root: Path | str | None) -> bool:
     except OSError:
         parts = Path(str(root)).parts
     return "ops-l1" in parts
+
+
+def is_ops_cmteb_work_root(root: Path | str | None) -> bool:
+    """True for shared C-MTEB index trees under ``ops-l1/cmteb-index``."""
+    if root is None:
+        return False
+    try:
+        parts = Path(root).expanduser().resolve().parts
+    except OSError:
+        parts = Path(str(root)).parts
+    if "ops-l1" not in parts:
+        return False
+    return "cmteb-index" in parts
 
 
 def resolved_ops_database_url() -> str:
@@ -46,5 +64,13 @@ def retrieval_database_url_for(*, work_root: Path | str | None = None) -> str:
 
 def retrieval_pg_schema_for(*, work_root: Path | str | None = None) -> str:
     if is_ops_l1_work_root(work_root) and ops_retrieval_plane_enabled():
-        return str(settings.ops_retrieval_pg_schema or "retrieval_ops").strip() or "retrieval_ops"
+        if is_ops_cmteb_work_root(work_root):
+            return (
+                str(settings.ops_retrieval_pg_schema_zh or "retrieval_ops_zh").strip()
+                or "retrieval_ops_zh"
+            )
+        return (
+            str(settings.ops_retrieval_pg_schema or "retrieval_ops").strip()
+            or "retrieval_ops"
+        )
     return settings.retrieval_pg_schema

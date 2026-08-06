@@ -170,14 +170,53 @@ async def sync_sources_index_command(
     work_root: str | None = None,
     owner_user_id: str | None = None,
     wait: bool = True,
+    mode: str = "sources",
+    reason: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
-    """Full tenant sync, or one Work when work_id+work_root are set (L1 / Ops).
+    """Full tenant sync, Ops BEIR/C-MTEB plane, or one Work (L1 / Ops).
 
-    ``wait=false`` (work-scoped only): queue sync and return pending so callers can
-    poll ``/internal/workspace/sources/index-status`` — needed for FiQA-scale corpora
-    that exceed typical HTTP timeouts.
+    ``mode``: ``sources`` (default) | ``ops-beir`` | ``ops-cmteb``.
+    ``wait=false``: queue sync and return pending so callers can poll progress
+    (FiQA-scale corpora exceed typical HTTP timeouts). Prefer this for
+    ``make sync*`` so the embedder stays in the uvicorn process (no second GPU load).
     """
+    mode_norm = (mode or "sources").strip().lower()
+    sync_reason = (reason or "").strip() or (
+        "api-work"
+        if work_id and work_root
+        else {
+            "ops-beir": "api-ops-beir",
+            "ops-cmteb": "api-ops-cmteb",
+        }.get(mode_norm, "api")
+    )
+
+    if mode_norm in {"ops-beir", "ops-cmteb"}:
+        from app.retrieval.index_scheduler import (
+            run_ops_beir_index_sync,
+            run_ops_cmteb_index_sync,
+        )
+
+        run = (
+            run_ops_beir_index_sync
+            if mode_norm == "ops-beir"
+            else run_ops_cmteb_index_sync
+        )
+        if not wait:
+
+            async def _bg_ops_sync() -> None:
+                await run(reason=sync_reason)
+
+            background_tasks.add_task(_bg_ops_sync)
+            return {
+                "accepted": True,
+                "status": "pending",
+                "reason": sync_reason,
+                "mode": mode_norm,
+            }
+        result = await run(reason=sync_reason)
+        return {"accepted": True, "mode": mode_norm, **result}
+
     if work_id and work_root:
         from app.retrieval.index_scheduler import run_sources_index_sync_work
 
@@ -188,29 +227,61 @@ async def sync_sources_index_command(
                     work_id=work_id,
                     work_root=work_root,
                     owner_user_id=owner_user_id,
-                    reason="api-work",
+                    reason=sync_reason,
                 )
 
             background_tasks.add_task(_bg_work_sync)
             return {
                 "accepted": True,
                 "status": "pending",
-                "reason": "api-work",
+                "reason": sync_reason,
                 "work_id": work_id,
+                "mode": "sources",
             }
 
         result = await run_sources_index_sync_work(
             work_id=work_id,
             work_root=work_root,
             owner_user_id=owner_user_id,
-            reason="api-work",
+            reason=sync_reason,
         )
-        return {"accepted": True, **result}
+        return {"accepted": True, "mode": "sources", **result}
+
+    if sync_reason != "api":
+        from app.retrieval.index_scheduler import run_sources_index_sync
+
+        if not wait:
+
+            async def _bg_sources_sync_reason() -> None:
+                await run_sources_index_sync(reason=sync_reason)
+
+            background_tasks.add_task(_bg_sources_sync_reason)
+            return {
+                "accepted": True,
+                "status": "pending",
+                "reason": sync_reason,
+                "mode": "sources",
+            }
+        result = await run_sources_index_sync(reason=sync_reason)
+        return {"accepted": True, "mode": "sources", **result}
 
     from app.tools.core.tools import sync_sources_index
 
+    if not wait:
+
+        async def _bg_sources_sync() -> None:
+            await sync_sources_index()
+
+        background_tasks.add_task(_bg_sources_sync)
+        return {
+            "accepted": True,
+            "status": "pending",
+            "reason": sync_reason,
+            "mode": "sources",
+        }
+
     result = await sync_sources_index()
-    return {"accepted": True, **result}
+    return {"accepted": True, "mode": "sources", **result}
 
 
 @router.post("/cancel-sources-index", status_code=status.HTTP_200_OK)

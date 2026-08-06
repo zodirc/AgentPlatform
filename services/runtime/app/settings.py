@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     retrieval_pg_schema: str = "public"
     # Ops L1 source_* schema on OPS_DATABASE_URL (keep apart from L0 retrieval_bench).
     ops_retrieval_pg_schema: str = "retrieval_ops"
+    # C-MTEB corpus HNSW only (same embedder as BEIR/product; not a second model).
+    ops_retrieval_pg_schema_zh: str = "retrieval_ops_zh"
     # Two-level doc→chunk recall (docs/13 S3 A11): parallel lanes; timeout → chunk-only.
     retrieval_two_level_enabled: bool = True
     retrieval_two_level_timeout_seconds: float = 0.3
@@ -142,11 +144,12 @@ class Settings(BaseSettings):
     # Optional default owner for future multi-tenant rows (empty → NULL / shared).
     sources_index_owner_user_id: str = ""
     embedding_backend: str = "hash"  # hash | sentence_transformers
-    # Production default via compose / resolve_embedding_profile: gte-small|gte-large.
-    # MiniLM is retired as a deploy default (RET-4 / §14).
+    # Production default via compose / resolve_embedding_profile:
+    # GPU → bge-m3@1024 (shared EN+ZH embedder for product/BEIR/C-MTEB);
+    # CPU → gte-small@384. MiniLM / gte-large retired as auto defaults.
     embedding_model: str = "thenlper/gte-small"
     embedding_model_dir: str = "/data/models"
-    # Hash default 256; gte-small=384; gte-large=1024 — compose/auto.env sets dims.
+    # Hash default 256; gte-small=384; bge-m3|gte-large=1024 — compose/auto.env sets dims.
     embedding_dimensions: int = 256
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64

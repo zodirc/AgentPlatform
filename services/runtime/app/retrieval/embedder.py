@@ -74,13 +74,16 @@ class SentenceTransformerEmbedder:
 
         cache = model_dir or None
         device = self._resolve_device()
+        st_kwargs: dict[str, Any] = {"cache_folder": cache, "device": device}
+        # bge-m3 (and some FlagEmbedding hubs) need remote code for ST loaders.
+        if "bge-m3" in (model_name or "").lower():
+            st_kwargs["trust_remote_code"] = True
         # Prefer local cache so startup cannot hang on HuggingFace hub I/O.
         try:
             self._model = SentenceTransformer(
                 model_name,
-                cache_folder=cache,
                 local_files_only=True,
-                device=device,
+                **st_kwargs,
             )
         except Exception:
             logger.warning(
@@ -88,9 +91,7 @@ class SentenceTransformerEmbedder:
                 model_name,
                 exc_info=True,
             )
-            self._model = SentenceTransformer(
-                model_name, cache_folder=cache, device=device
-            )
+            self._model = SentenceTransformer(model_name, **st_kwargs)
 
     @staticmethod
     def _resolve_device() -> str:
@@ -156,18 +157,19 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 def effective_embedding_dimensions() -> int:
     """Resolve vector width for stores.
 
-    Hash default is 256. GTE-small / legacy MiniLM → 384; GTE-large → 1024.
-    Coerce common misconfig (hash default left on while using ST).
+    Hash default is 256. GTE-small / legacy MiniLM → 384;
+    bge-m3 / GTE-large → 1024. Coerce common misconfig (hash default left on).
     """
     dims = int(settings.embedding_dimensions)
     backend = (settings.embedding_backend or "").lower()
     model = (settings.embedding_model or "").lower()
     if backend in {"sentence_transformers", "minilm", "neural"}:
-        if "gte-large" in model:
+        if "bge-m3" in model or "gte-large" in model:
             if dims not in {1024}:
                 logger.info(
-                    "embedding dimensions coerced %s→1024 for sentence_transformers gte-large",
+                    "embedding dimensions coerced %s→1024 for sentence_transformers %s",
                     dims,
+                    model or "1024d",
                 )
             return 1024
         if "gte-small" in model or "minilm-l6" in model or "all-minilm-l6-v2" in model:
@@ -188,12 +190,17 @@ def effective_embedding_dimensions() -> int:
 def effective_index_version() -> int:
     """Index schema bump when embed space changes.
 
-    8 = legacy MiniLM@384; 9 = gte-small@384; 10 = gte-large@1024.
+    8 = legacy MiniLM@384; 9 = gte-small@384; 10 = gte-large@1024;
+    11 = bge-m3@1024 (shared EN+ZH GPU default; HNSW graphs still split by schema).
     """
     model = (settings.embedding_model or "").lower()
     dims = effective_embedding_dimensions()
-    if "gte-large" in model or dims >= 1024:
+    if "bge-m3" in model:
+        return 11
+    if "gte-large" in model:
         return 10
+    if dims >= 1024:
+        return 11
     if "minilm" in model:
         return 8
     # gte-small and other modern 384-d defaults

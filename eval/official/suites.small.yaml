@@ -38,6 +38,37 @@ suites:
     retriever: hybrid
     k_values: [1, 10, 100]
 
+  # Chinese IR thermometer (PROD-2). Separate suite / macros / HNSW from BEIR.
+  # Same runtime embedder as BEIR (GPU bge-m3); only schema graph differs.
+  # Materialize under BENCH_DATA_DIR/cmteb/; L1 indexes ops-l1/cmteb-index → retrieval_ops_zh.
+  # Full HF corpora are ~100k docs each; we cap to ~50k total (gold qrels kept + distractors).
+  retrieval_zh:
+    id: cmteb.small
+    official: C-MTEB
+    max_corpus_docs_total: 50000
+    corpus_sample_seed: 42
+    # HuggingFace: prefer mteb/* (includes qrels). C-MTEB/* often has corpus+queries only.
+    datasets:
+      - name: CovidRetrieval
+        hf_dataset: mteb/CovidRetrieval
+        approx_mib: 20
+      - name: MedicalRetrieval
+        hf_dataset: mteb/MedicalRetrieval
+        approx_mib: 15
+      - name: EcomRetrieval
+        hf_dataset: mteb/EcomRetrieval
+        approx_mib: 8
+    split: test
+    metrics: [ndcg_at_10, recall_at_100, map_at_100]
+    primary_arm: hybrid
+    arms: [hybrid, bm25]
+    retriever: hybrid
+    k_values: [1, 10, 100]
+    sample_policy:
+      method: head_slice
+      limit_queries_per_dataset: 20
+    protocol_note: "cmteb-small-v0 · shared bge-m3 · ~50k docs total · HNSW retrieval_ops_zh"
+
   context:
     id: longbench.small
     official: LongBench

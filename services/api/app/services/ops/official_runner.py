@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 TARGETS = (
     "pull",
     "retrieval",
+    "retrieval_zh",
+    "cmteb",
     "context",
     "coding",
     "coding_pull",
@@ -36,6 +38,14 @@ CRITERIA: list[dict[str, str]] = [
         "metrics": "nDCG@k · Recall@k · MAP@k（宏平均）",
         "pass_rule": "L1(agent)=search_sources hits；L0(component)=hybrid IR。同 eval_path 才可比 Δ。",
         "notes": "L1=产品 Turn（主指数，见 official-bench-agent-tuning）。L0=bench hybrid∥BM25 对照。",
+    },
+    {
+        "id": "retrieval_zh",
+        "official": "C-MTEB",
+        "title": "中文检索（C-MTEB 小量）",
+        "metrics": "nDCG@k · Recall@k · MAP@k（宏平均 · 分栏）",
+        "pass_rule": "L1 agent · cmteb-index → retrieval_ops_zh；同 bge-m3，勿与 BEIR 宏分/图混栏。",
+        "notes": "PROD-2 · 共用 GPU bge-m3；仅独立 HNSW；冒烟不作 BEIR 背书。",
     },
     {
         "id": "context",
@@ -565,11 +575,15 @@ async def create_and_start(
         raise ValueError("empty_targets")
 
     # Expand UI suite id "coding" → coding_infer (pull is embedded in infer).
+    # Alias cmteb → retrieval_zh (canonical L1 suite id).
     expanded: list[str] = []
     for t in cleaned:
         if t == "coding":
             if "coding_infer" not in expanded:
                 expanded.append("coding_infer")
+        elif t == "cmteb":
+            if "retrieval_zh" not in expanded:
+                expanded.append("retrieval_zh")
         elif t not in expanded:
             expanded.append(t)
     cleaned = expanded
@@ -715,6 +729,8 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
 def _suite_label(target: str) -> str:
     return {
         "retrieval": "检索",
+        "retrieval_zh": "中文检索",
+        "cmteb": "中文检索",
         "context": "上下文",
         "coding_pull": "编码拉取",
         "coding_infer": "编码",
@@ -937,6 +953,7 @@ def _l1_suite_phase_hint(msg: str) -> str | None:
         or low.startswith("[l1] materialize ")
         or low.startswith("[l1] suite start retrieval")
         or "beir." in low
+        or "cmteb." in low
         or low.startswith("[l1] retrieval")
     ):
         return "② L1 评测 · 检索中…"

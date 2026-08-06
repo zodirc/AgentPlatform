@@ -44,7 +44,18 @@ def test_main_sources_with_takeover(monkeypatch, capsys) -> None:
         "app.retrieval.index_scheduler.run_sources_index_sync", fake_sync
     )
 
-    code = sync_cli.main(["--reason", "test", "--mode", "sources", "--takeover-wait", "1"])
+    code = sync_cli.main(
+        [
+            "--reason",
+            "test",
+            "--mode",
+            "sources",
+            "--via",
+            "local",
+            "--takeover-wait",
+            "1",
+        ]
+    )
     assert code == 0
     assert uninstall_calls["n"] == 1
     out = capsys.readouterr()
@@ -65,7 +76,9 @@ def test_main_ops_beir_without_takeover(monkeypatch, capsys) -> None:
     monkeypatch.setattr(
         "app.retrieval.index_scheduler.run_ops_beir_index_sync", fake_ops
     )
-    code = sync_cli.main(["--mode", "ops-beir", "--no-takeover", "--reason", "ci"])
+    code = sync_cli.main(
+        ["--mode", "ops-beir", "--via", "local", "--no-takeover", "--reason", "ci"]
+    )
     assert code == 1
     out = capsys.readouterr()
     assert "接管" not in out.err

@@ -3,12 +3,14 @@
 # Writes deploy/embedding.auto.env (gitignored). Compose loads it after .env.
 # Also writes deploy/compose/gpu.auto.yml when NVIDIA GPU is usable.
 #
-# Policy (RET-4 / §14):
-#   EMBEDDING_PROFILE=auto|small|large   (default auto)
-#   suitable GPU (CUDA + VRAM ≥ EMBEDDING_GPU_MIN_MIB, default 8192)
-#     → thenlper/gte-large @1024 + CUDA torch (cu128) + compose GPU overlay
+# Policy (shared multilingual embedder; HNSW graphs split by corpus, not by model):
+#   EMBEDDING_PROFILE=auto|small|large|m3   (default auto)
+#   CUDA path (VRAM ≥ EMBEDDING_GPU_MIN_MIB or RUNTIME_GPU=1)
+#     → BAAI/bge-m3 @1024 + CUDA torch (cu128) + compose GPU overlay
+#       (one model for product seed + Ops BEIR + Ops C-MTEB)
 #   otherwise → thenlper/gte-small @384 + CPU torch
-# MiniLM is no longer a production default.
+#   bge-m3 is never the auto/large default without CUDA (RUNTIME_GPU=0 → small).
+# MiniLM / gte-large are no longer production defaults (FORCE_MODEL still works).
 #
 # Overrides:
 #   RUNTIME_GPU=0          force CPU torch / no GPU overlay (even with nvidia-smi)
@@ -27,7 +29,6 @@ DEFAULT_TORCH_INDEX_URL="${TORCH_INDEX_URL_DEFAULT:-https://download.pytorch.org
 if [[ -f "$ROOT/.env" ]]; then
   # shellcheck disable=SC1091
   set -a
-  # Only pull profile / override knobs; ignore parse errors on odd lines.
   while IFS= read -r line || [[ -n "$line" ]]; do
     case "$line" in
       EMBEDDING_PROFILE=*|EMBEDDING_MODEL=*|EMBEDDING_DIMENSIONS=*|EMBEDDING_BACKEND=*|EMBEDDING_GPU_MIN_MIB=*|EMBEDDING_FORCE_MODEL=*|EMBEDDING_DEVICE=*|RUNTIME_GPU=*|TORCH_INDEX_URL=*)
@@ -60,65 +61,7 @@ gpu_vram_mib() {
 vram="$(gpu_vram_mib)"
 vram="${vram:-0}"
 
-pick_large=0
-reason=""
-case "$PROFILE" in
-  large|gte-large|l)
-    pick_large=1
-    reason="EMBEDDING_PROFILE=$PROFILE"
-    ;;
-  small|gte-small|s)
-    pick_large=0
-    reason="EMBEDDING_PROFILE=$PROFILE"
-    ;;
-  auto|"")
-    if [[ "$vram" =~ ^[0-9]+$ ]] && (( vram >= MIN_MIB )); then
-      pick_large=1
-      reason="auto: nvidia VRAM ${vram}MiB ≥ ${MIN_MIB}MiB"
-    else
-      pick_large=0
-      reason="auto: no suitable GPU (vram=${vram}MiB, need≥${MIN_MIB})"
-    fi
-    ;;
-  *)
-    echo "resolve_embedding_profile: unknown EMBEDDING_PROFILE=$PROFILE (use auto|small|large)" >&2
-    exit 2
-    ;;
-esac
-
-if [[ -n "$FORCE_MODEL" ]]; then
-  MODEL="$FORCE_MODEL"
-  if echo "$MODEL" | grep -qi 'gte-large'; then
-    DIMS=1024
-    INDEX_VER=10
-    pick_large=1
-  elif echo "$MODEL" | grep -qi 'gte-small'; then
-    DIMS=384
-    INDEX_VER=9
-    pick_large=0
-  else
-    DIMS="${EMBEDDING_DIMENSIONS:-384}"
-    INDEX_VER=9
-  fi
-  reason="EMBEDDING_FORCE_MODEL=$FORCE_MODEL ($reason)"
-elif (( pick_large )); then
-  MODEL="thenlper/gte-large"
-  DIMS=1024
-  INDEX_VER=10
-else
-  MODEL="thenlper/gte-small"
-  DIMS=384
-  INDEX_VER=9
-fi
-
-BACKEND="${EMBEDDING_BACKEND:-sentence_transformers}"
-if (( pick_large )); then
-  RESOLVED=large
-else
-  RESOLVED=small
-fi
-
-# CUDA torch + compose GPU overlay (make up auto).
+# Decide CUDA before model pick so auto never selects bge-m3 under RUNTIME_GPU=0.
 use_cuda=0
 cuda_reason=""
 case "$RUNTIME_GPU_FLAG" in
@@ -127,8 +70,6 @@ case "$RUNTIME_GPU_FLAG" in
     cuda_reason="RUNTIME_GPU=$RUNTIME_GPU_FLAG"
     ;;
   1|true|yes|on|cuda|gpu)
-    # Explicit opt-in: enable even if nvidia-smi is blocked in this environment
-    # (Docker still needs the NVIDIA toolkit at runtime).
     use_cuda=1
     cuda_reason="RUNTIME_GPU=$RUNTIME_GPU_FLAG (vram=${vram}MiB)"
     ;;
@@ -147,6 +88,73 @@ case "$RUNTIME_GPU_FLAG" in
     ;;
 esac
 
+pick_gpu_m3=0
+reason=""
+case "$PROFILE" in
+  large|m3|bge-m3|l|gte-large)
+    if (( use_cuda )); then
+      pick_gpu_m3=1
+      reason="EMBEDDING_PROFILE=$PROFILE (GPU)"
+    else
+      pick_gpu_m3=0
+      reason="EMBEDDING_PROFILE=$PROFILE but no CUDA → gte-small (bge-m3 is GPU-only)"
+    fi
+    ;;
+  small|gte-small|s)
+    pick_gpu_m3=0
+    reason="EMBEDDING_PROFILE=$PROFILE"
+    ;;
+  auto|"")
+    if (( use_cuda )); then
+      pick_gpu_m3=1
+      reason="auto: GPU → bge-m3 (${cuda_reason})"
+    else
+      pick_gpu_m3=0
+      reason="auto: no CUDA → gte-small (${cuda_reason})"
+    fi
+    ;;
+  *)
+    echo "resolve_embedding_profile: unknown EMBEDDING_PROFILE=$PROFILE (use auto|small|large|m3)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ -n "$FORCE_MODEL" ]]; then
+  MODEL="$FORCE_MODEL"
+  if echo "$MODEL" | grep -qi 'bge-m3'; then
+    DIMS=1024
+    INDEX_VER=11
+    pick_gpu_m3=1
+  elif echo "$MODEL" | grep -qi 'gte-large'; then
+    DIMS=1024
+    INDEX_VER=10
+    pick_gpu_m3=1
+  elif echo "$MODEL" | grep -qi 'gte-small'; then
+    DIMS=384
+    INDEX_VER=9
+    pick_gpu_m3=0
+  else
+    DIMS="${EMBEDDING_DIMENSIONS:-384}"
+    INDEX_VER=9
+  fi
+  reason="EMBEDDING_FORCE_MODEL=$FORCE_MODEL ($reason)"
+elif (( pick_gpu_m3 )); then
+  MODEL="BAAI/bge-m3"
+  DIMS=1024
+  INDEX_VER=11
+else
+  MODEL="thenlper/gte-small"
+  DIMS=384
+  INDEX_VER=9
+fi
+
+BACKEND="${EMBEDDING_BACKEND:-sentence_transformers}"
+if (( pick_gpu_m3 )); then
+  RESOLVED=m3
+else
+  RESOLVED=small
+fi
+
 TORCH_INDEX_URL_VAL=""
 EMBEDDING_DEVICE_VAL="${EMBEDDING_DEVICE:-auto}"
 if (( use_cuda )); then
@@ -155,7 +163,6 @@ if (( use_cuda )); then
     EMBEDDING_DEVICE_VAL="cuda"
   fi
 else
-  # Explicit empty so compose does not keep a stale CUDA index from the shell env.
   TORCH_INDEX_URL_VAL=""
   if [[ -z "${EMBEDDING_DEVICE:-}" || "${EMBEDDING_DEVICE}" == "auto" ]]; then
     EMBEDDING_DEVICE_VAL="auto"
@@ -185,18 +192,18 @@ if (( use_cuda )); then
 services:
   runtime:
     gpus: all
-    mem_limit: 8g
+    mem_limit: 12g
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE_VAL}
-      EMBEDDING_BATCH_SIZE: \${EMBEDDING_BATCH_SIZE:-128}
+      EMBEDDING_BATCH_SIZE: \${EMBEDDING_BATCH_SIZE:-64}
     build:
       args:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL_VAL}
   bench:
     gpus: all
-    mem_limit: 8g
+    mem_limit: 12g
     environment:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility

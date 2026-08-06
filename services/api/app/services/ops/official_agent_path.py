@@ -43,6 +43,8 @@ PROTOCOL_L1 = "official-small-2026-08-m3"
 L1_ROOT = Path(os.environ.get("OPS_L1_WORKSPACE_ROOT", "/data/ops-l1"))
 # Stable BEIR index cache (shared across L1 runs) — avoids N× full ST embeds.
 _BEIR_INDEX_CACHE = L1_ROOT / "beir-index"
+# C-MTEB / Chinese IR — same embedder as BEIR; independent HNSW schema retrieval_ops_zh.
+_CMTEB_INDEX_CACHE = L1_ROOT / "cmteb-index"
 _FP_NAME = ".l1_beir_fp"
 
 
@@ -473,6 +475,27 @@ async def _ensure_beir_index_work(
         work_id=uuid5(NAMESPACE_URL, f"agent-l1-beir-index:{name}"),
     )
     sources_dest = Path(work.work_root) / "sources" / "beir" / name
+    return work, fp, sources_dest
+
+
+async def _ensure_cmteb_index_work(
+    name: str,
+    corpus: dict[str, str],
+) -> tuple[Work, str, Path]:
+    """Stable Work + sources path for a C-MTEB dataset (``cmteb-index`` → zh HNSW schema).
+
+    Uses the same runtime embedder as BEIR; only the pgvector schema/graph differs.
+    """
+    from uuid import uuid5, NAMESPACE_URL
+
+    fp = _beir_corpus_fingerprint(f"cmteb:{name}", corpus)
+    work_root = _CMTEB_INDEX_CACHE / name
+    work = await _create_l1_work(
+        str(work_root),
+        name=f"l1-cmteb-index-{name}",
+        work_id=uuid5(NAMESPACE_URL, f"agent-l1-cmteb-index:{name}"),
+    )
+    sources_dest = Path(work.work_root) / "sources" / "cmteb" / name
     return work, fp, sources_dest
 
 
@@ -1088,10 +1111,14 @@ async def run_retrieval_l1(
     should_cancel: CancelCheck | None = None,
     datasets: list[str] | None = None,
     corpus_mode: str = "full",
+    suite_key: str = "retrieval",
 ) -> dict[str, Any]:
-    """BEIR small via real Turns + search_sources events.
+    """BEIR / C-MTEB small via real Turns + search_sources events.
 
     arm=free (SCORECARD primary) | forced (L2 Index-plane diagnostic).
+
+    suite_key: ``retrieval`` (BEIR → beir-index / retrieval_ops) or
+    ``retrieval_zh`` (C-MTEB → cmteb-index / retrieval_ops_zh).
 
     datasets: optional subset of suite dataset names (e.g. ``["scifact"]``).
     corpus_mode: ``full`` (default) or ``micro`` (``gold`` alias) — mid-corpus
@@ -1127,13 +1154,20 @@ async def run_retrieval_l1(
         weak_hits_snapshots,
     )
     from official_bench.metrics_ir import aggregate_metrics, ndcg_at_k, recall_at_k
-    from official_bench.pull import pull_beir
+    from official_bench.pull import pull_beir, pull_cmteb
     from official_bench.run_session import RunSession
 
     arm_norm = (arm or "free").strip().lower()
     if arm_norm not in {"free", "forced"}:
         raise ValueError(f"unsupported_retrieval_arm:{arm}")
+    suite_key_norm = (suite_key or "retrieval").strip().lower()
+    if suite_key_norm not in {"retrieval", "retrieval_zh"}:
+        raise ValueError(f"unsupported_retrieval_suite:{suite_key}")
+    is_zh = suite_key_norm == "retrieval_zh"
+    case_prefix = "cmteb" if is_zh else "beir"
     mode_norm = _normalize_corpus_mode(corpus_mode)
+    if is_zh and mode_norm == "micro":
+        raise ValueError("retrieval_zh does not support corpus_mode=micro yet")
     dataset_filter = {
         str(x).strip().lower()
         for x in (datasets or [])
@@ -1144,10 +1178,15 @@ async def run_retrieval_l1(
     protocol_l0 = str(
         cfg.get("protocol_version_l0") or cfg.get("protocol_version") or "official-small-2026-08-m1"
     )
-    retrieval = cfg["suites"]["retrieval"]
+    retrieval = cfg["suites"][suite_key_norm]
+    suite_id = str(retrieval.get("id") or ("cmteb.small" if is_zh else "beir.small"))
     session = RunSession(
-        suite="retrieval",
-        title=f"BEIR small · L1 agent-path · arm={arm_norm}",
+        suite=suite_key_norm,
+        title=(
+            f"C-MTEB small · L1 agent-path · arm={arm_norm}"
+            if is_zh
+            else f"BEIR small · L1 agent-path · arm={arm_norm}"
+        ),
     )
     session.extra = {
         "protocol_version": PROTOCOL_L1,
@@ -1161,14 +1200,22 @@ async def run_retrieval_l1(
         "limit_queries": limit_queries,
         "corpus_mode": mode_norm,
         "datasets_filter": sorted(dataset_filter) if dataset_filter else None,
+        "index_plane": "cmteb-index" if is_zh else "beir-index",
         **_l1_fingerprint(model),
     }
     smoke_ids: list[str] = []
-    root = await _pull_with_live_logs(
-        "BEIR",
-        lambda: pull_beir(cfg, force=False),
-        on_progress=on_progress,
-    )
+    if is_zh:
+        root = await _pull_with_live_logs(
+            "C-MTEB",
+            lambda: pull_cmteb(cfg, force=False),
+            on_progress=on_progress,
+        )
+    else:
+        root = await _pull_with_live_logs(
+            "BEIR",
+            lambda: pull_beir(cfg, force=False),
+            on_progress=on_progress,
+        )
     k_values = list(retrieval.get("k_values") or [1, 10, 100])
     limit_k = max(k_values)
     all_runs: dict[str, dict[str, dict[str, float]]] = {}
@@ -1225,8 +1272,10 @@ async def run_retrieval_l1(
                         f"(limit_queries={limit_queries})"
                     )
 
-            work, corpus_fp, sources_dest = await _ensure_beir_index_work(
-                index_name, corpus
+            work, corpus_fp, sources_dest = await (
+                _ensure_cmteb_index_work(index_name, corpus)
+                if is_zh
+                else _ensure_beir_index_work(index_name, corpus)
             )
             await _emit(
                 on_progress,
@@ -1317,7 +1366,7 @@ async def run_retrieval_l1(
                     # INFRA-2: entire case body isolated — preamble transport
                     # failures must not abort asyncio.gather / suite.
                     turn_id_s = ""
-                    case_id = f"beir.{name}.q-{qid}"
+                    case_id = f"{case_prefix}.{name}.q-{qid}"
                     try:
                         sess = await session_svc.create_session(
                             scenario_id,
@@ -1338,7 +1387,7 @@ async def run_retrieval_l1(
                         events = await _wait_turn_verbose(
                             turn["id"],
                             on_progress=on_progress,
-                            label=f"beir.{name}.q-{qid}",
+                            label=f"{case_prefix}.{name}.q-{qid}",
                             timeout=420.0,
                         )
                         doc_ids = merge_retrieval_rankings(events)
@@ -1574,9 +1623,9 @@ async def run_retrieval_l1(
                 if isinstance(val, (int, float)):
                     metrics[f"{key}_incl_infra"] = float(val)
             all_runs[name] = eligible_runs if eligible_runs else runs
-            case_metrics[f"beir.{name}.agent"] = metrics
+            case_metrics[f"{case_prefix}.{name}.agent"] = metrics
             session.add_case(
-                f"beir.{name}.agent",
+                f"{case_prefix}.{name}.agent",
                 status="pass",
                 metrics=metrics,
             )
@@ -1592,7 +1641,7 @@ async def run_retrieval_l1(
 
         # EVAL-2: record deterministic head-slice sample policy (+ ids fingerprint).
         session.extra["sample_policy"] = _sample_policy_head_slice(
-            suite="retrieval",
+            suite=suite_key_norm,
             limit=int(limit_queries or 0),
             selected_ids=smoke_ids,
         )
@@ -1645,8 +1694,8 @@ async def run_retrieval_l1(
         )
 
         result = {
-            "suite": "beir.small",
-            "official": "BEIR",
+            "suite": suite_id,
+            "official": retrieval.get("official") or ("C-MTEB" if is_zh else "BEIR"),
             "protocol_version": PROTOCOL_L1,
             "eval_path": "agent",
             "arm": arm_norm,
@@ -2397,7 +2446,22 @@ async def run_l1_targets(
                 should_cancel=should_cancel,
                 datasets=retrieval_datasets,
                 corpus_mode=retrieval_corpus_mode,
+                suite_key="retrieval",
             )
+        elif t in {"retrieval_zh", "cmteb"}:
+            key = "retrieval_zh"
+            out[key] = await run_retrieval_l1(
+                limit_queries=retrieval_query_limit,
+                model=model,
+                on_progress=on_progress,
+                max_parallel=max_parallel,
+                arm=retrieval_arm,
+                should_cancel=should_cancel,
+                datasets=retrieval_datasets,
+                corpus_mode="full",
+                suite_key="retrieval_zh",
+            )
+            t = key
         elif t == "context":
             out[t] = await run_context_l1(
                 limit=context_limit,

@@ -1,17 +1,26 @@
-# embedding.auto.env from `make resolve-embedding` (GPU → gte-large + CUDA, else gte-small).
+# embedding.auto.env from `make resolve-embedding` (GPU → bge-m3 + CUDA, else gte-small).
 # defaults.env is the committed fallback; auto.env overrides when present.
 # gpu.auto.yml is written by the same script (gpus: all when NVIDIA usable).
+#
+# IMPORTANT: Docker Compose interpolates ${VAR} from the project `.env` file and
+# may ignore later --env-file for build args. Export auto.env into the shell so
+# it wins over a stale EMBEDDING_MODEL=MiniLM in `.env`.
 COMPOSE_ENV := --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env
 # Deferred so resolve-embedding can create gpu.auto.yml before compose runs.
 COMPOSE_GPU = $(wildcard deploy/compose/gpu.auto.yml)
 COMPOSE_GPU_FLAG = $(if $(COMPOSE_GPU),-f $(COMPOSE_GPU),)
-COMPOSE = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_ENV)
-COMPOSE_DEV = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
-COMPOSE_RETRIEVAL = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE_RETRIEVAL = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_HA = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
-COMPOSE_OPS_EVAL = docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
+# Source embedding env into the shell (overrides .env for ${EMBEDDING_MODEL} etc.).
+COMPOSE_EXPORT = set -a && \
+	[ -f deploy/embedding.defaults.env ] && . ./deploy/embedding.defaults.env; \
+	[ -f deploy/embedding.auto.env ] && . ./deploy/embedding.auto.env; \
+	set +a
+COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_ENV)
+COMPOSE_DEV = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
+COMPOSE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_HA = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
+COMPOSE_OPS_EVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
@@ -52,16 +61,16 @@ WEB_REBUILD_DEPS ?= 0
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources seed-sources sync-ops-indexes sync intel-corpus-fetch retrieval-bench-prod loc \
+	sync-sources seed-sources sync-ops-indexes sync-ops-cmteb sync intel-corpus-fetch retrieval-bench-prod loc \
 	micro-p1 \
 	micro-l1-prepare \
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
-	official-bench-paths official-bench-pull official-bench-retrieval \
+	official-bench-paths official-bench-deps official-bench-pull official-bench-pull-cmteb official-bench-retrieval \
 	official-bench-context official-bench-coding-pull official-bench-coding-infer \
 	official-bench-coding-eval official-bench-all official-bench-publish \
 	official-bench-update-baseline official-bench-show-baseline \
 	official-bench-compare official-bench-live \
-	official-bench-retrieval-agent official-bench-context-agent \
+	official-bench-retrieval-agent official-bench-retrieval-zh-agent official-bench-context-agent \
 	official-bench-coding-infer-agent c3-retrieval-grid
 
 help: ## 显示常用命令
@@ -85,8 +94,9 @@ help: ## 显示常用命令
 	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
 	@echo "  make sync-sources 增量索引 seed/普通 work（本终端 [sync] 进度；不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"
-	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键全量；可见进度；默认接管旧 sync）"
-	@echo "  make resolve-embedding  GPU→gte-large@1024+CUDA / 否则 gte-small@384（up/start 自动跑）"
+	@echo "  make sync-ops-cmteb    换模后重嵌 Ops C-MTEB（同模；仅 retrieval_ops_zh 分图）"
+	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键；可见进度）"
+	@echo "  make resolve-embedding  GPU→bge-m3@1024（中英共用）+CUDA / 否则 gte-small@384（up/start 自动跑）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动（结束后自动清理悬空镜像）"
@@ -104,6 +114,8 @@ help: ## 显示常用命令
 	@echo "  make retrieval-bench-prod 真相档难 qrels（ST+pgvector；docs/15 IX4）"
 	@echo "  make micro-p1     P1 词面微基准（无 sync/无重嵌；SciFact 10q；ts_rank vs Okapi）"
 	@echo "  make micro-l1-prepare  SciFact 中库微图 gold+干扰（与主图分离）+ gte；Ops「SciFact 微 L1」"
+	@echo "  make official-bench-pull       拉取 BEIR+LongBench+SWE+C-MTEB 小量（需网络）"
+	@echo "  make official-bench-pull-cmteb  只拉 C-MTEB 三库中文检索（Covid/Medical/Ecom）"
 	@echo "  make official-bench-live     live 实测官方小量（禁 dry/skip；需 BENCH_MODEL_*）"
 	@echo "  make official-bench-compare  latest vs 仓库 SCORECARD/baseline Δ 表"
 	@echo "  make official-bench-update-baseline  认可后写入 baseline+SCORECARD"
@@ -478,12 +490,21 @@ sync-ops-indexes: ## Ops BEIR work 按 scope stamp 重嵌（FiQA 等；跳过 se
 	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode ops-beir --reason make-ops-beir
 
+sync-ops-cmteb: ## Ops C-MTEB 重嵌（同模 bge-m3；仅 cmteb-index → retrieval_ops_zh 分图）
+	@echo "==> sync-ops-cmteb: C-MTEB reindex (same embedder; schema retrieval_ops_zh)"
+	@echo "    Live progress on this terminal. Requires GPU bge-m3 after resolve-embedding."
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/ops_plane.py runtime:/app/app/retrieval/ops_plane.py >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode ops-cmteb --reason make-ops-cmteb
+
 sync: ## 一键：seed/普通 work + Ops BEIR（≡ sync-sources && sync-ops-indexes）
 	@echo "==> make sync: (1/2) sync-sources"
 	@$(MAKE) sync-sources
 	@echo "==> make sync: (2/2) sync-ops-indexes"
 	@$(MAKE) sync-ops-indexes
-	@echo "==> make sync: done"
+	@echo "==> make sync: done (C-MTEB: make sync-ops-cmteb separately after works exist)"
 
 # ONLY=id1,id2 optional. Requires network + git. Does not touch Turn hot path.
 intel-corpus-fetch: ## 按 SOURCES.yaml 拉取并转换 intel vendor（≤150MiB；gitignore）
@@ -555,7 +576,9 @@ eval-path-prefix: ## writing.14 path_prefix golden（isolated stub + runtime-lit
 	  EVAL_ARGS="--filter writing.14"
 
 # Official small benches (pull-to-BENCH_DATA_DIR; eval/official/README.md)
-OFFICIAL_BENCH_PY ?= python3
+# Dedicated uv/venv at eval/official/.venv — root .venv is a symlink to runtime (uv-locked).
+OFFICIAL_BENCH_VENV ?= $(CURDIR)/eval/official/.venv
+OFFICIAL_BENCH_PY ?= $(OFFICIAL_BENCH_VENV)/bin/python
 CONTEXT_DRY ?= 0
 OFFICIAL_SWE_SKIP_API ?= 0
 OFFICIAL_CONTEXT_LIMIT ?= 0
@@ -564,13 +587,41 @@ OFFICIAL_SWE_N ?=
 OFFICIAL_SWE_HARNESS ?= 0
 QUERY_LIMIT ?= 0
 
+official-bench-deps: ## 安装官方评测本地依赖（datasets 等 → eval/official/.venv）
+	@echo "==> official-bench-deps → $(OFFICIAL_BENCH_VENV)"
+	@PIP_INDEX_URL="$${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}"; \
+	export PIP_INDEX_URL; \
+	if command -v uv >/dev/null 2>&1; then \
+	  test -x "$(OFFICIAL_BENCH_VENV)/bin/python" || uv venv "$(OFFICIAL_BENCH_VENV)"; \
+	  "$(OFFICIAL_BENCH_VENV)/bin/python" -c 'import datasets, huggingface_hub, yaml' 2>/dev/null || \
+	    uv pip install -p "$(OFFICIAL_BENCH_VENV)/bin/python" \
+	      --index-url "$$PIP_INDEX_URL" \
+	      -r eval/official/requirements.txt; \
+	else \
+	  test -x "$(OFFICIAL_BENCH_VENV)/bin/python" || python3 -m venv "$(OFFICIAL_BENCH_VENV)"; \
+	  "$(OFFICIAL_BENCH_VENV)/bin/python" -c 'import datasets, huggingface_hub, yaml' 2>/dev/null || \
+	    "$(OFFICIAL_BENCH_VENV)/bin/python" -m pip install -q \
+	      -i "$$PIP_INDEX_URL" -r eval/official/requirements.txt; \
+	fi
+	@"$(OFFICIAL_BENCH_VENV)/bin/python" -c 'import datasets; print("    datasets", datasets.__version__)'
+
 official-bench-paths: ## 打印官方评测数据/报告目录
+	@$(MAKE) -s official-bench-deps
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py paths
 
-official-bench-pull: ## 拉取 BEIR + LongBench 小切片 + SWE-bench Lite（需网络）
+official-bench-pull: official-bench-deps ## 拉取 BEIR + LongBench + SWE + C-MTEB 小量（需网络 / HF_ENDPOINT）
+	set -a && [ -f .env ] && . ./.env; set +a; \
+	HF_ENDPOINT=$${HF_ENDPOINT:-https://hf-mirror.com} \
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py pull --suite all
 
+official-bench-pull-cmteb: official-bench-deps ## 只拉 C-MTEB 三库（合计≈5万篇；FORCE=1 强制重拉）
+	set -a && [ -f .env ] && . ./.env; set +a; \
+	HF_ENDPOINT=$${HF_ENDPOINT:-https://hf-mirror.com} \
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py pull --suite cmteb \
+	  $(if $(filter 1,$(FORCE)),--force,)
+
 official-bench-retrieval: ## 官方 BEIR 小量（hybrid 主分 + BM25 对照）
+	@$(MAKE) -s official-bench-deps
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval
 
 # L1 agent-path（产品 Turn；需 make up + OPS_TEST_SECRET + BENCH_MODEL_*）
@@ -579,6 +630,11 @@ official-bench-retrieval-agent: ## L1 BEIR：search_sources via Turn（Ops API�
 	set -a && [ -f .env ] && . ./.env; set +a; \
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval --eval-path agent \
 	  --query-limit $(QUERY_LIMIT)
+
+official-bench-retrieval-zh-agent: ## L1 C-MTEB：search_sources via Turn（Ops API · retrieval_ops_zh）
+	set -a && [ -f .env ] && . ./.env; set +a; \
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py retrieval --suite retrieval_zh \
+	  --eval-path agent --query-limit $(QUERY_LIMIT)
 
 official-bench-context: ## 官方 LongBench 小量双臂（CONTEXT_DRY=1 仅流水线）
 	@if [ "$(CONTEXT_DRY)" = "1" ]; then \

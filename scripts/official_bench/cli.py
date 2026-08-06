@@ -8,7 +8,7 @@ from .beir_run import run_beir_small
 from .context_run import run_context_small
 from .paths import data_dir, ensure_dirs, reports_dir
 from .publish import publish_run_dir
-from .pull import pull_all, pull_beir, pull_longbench, pull_swebench
+from .pull import pull_all, pull_beir, pull_cmteb, pull_longbench, pull_swebench
 from .swe_run import CODING_TIERS, DEFAULT_CODING_TIER, run_swe_eval, run_swe_infer, run_swe_pull_only
 
 
@@ -33,7 +33,7 @@ def main(argv: list[str] | None = None) -> int:
     p_pull = sub.add_parser("pull", help="Pull suite data into BENCH_DATA_DIR")
     p_pull.add_argument(
         "--suite",
-        choices=["all", "retrieval", "context", "coding"],
+        choices=["all", "retrieval", "retrieval_zh", "cmteb", "context", "coding"],
         default="all",
     )
     p_pull.add_argument("--force", action="store_true")
@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Comma list; smoke default skips fiqa",
     )
 
-    p_ret = sub.add_parser("retrieval", help="Run BEIR small (BM25 + nDCG/Recall)")
+    p_ret = sub.add_parser("retrieval", help="Run BEIR / C-MTEB small (BM25 + nDCG/Recall)")
     p_ret.add_argument("--force-pull", action="store_true")
     p_ret.add_argument(
         "--eval-path",
@@ -63,6 +63,12 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=0,
         help="L1 only: cap queries per dataset (0=all)",
+    )
+    p_ret.add_argument(
+        "--suite",
+        choices=["retrieval", "retrieval_zh", "cmteb"],
+        default="retrieval",
+        help="retrieval=BEIR; retrieval_zh|cmteb=C-MTEB (agent path only for zh)",
     )
 
     p_ctx = sub.add_parser(
@@ -293,6 +299,8 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(pull_all(force=args.force), indent=2))
         elif args.suite == "retrieval":
             print(pull_beir(force=args.force))
+        elif args.suite in {"retrieval_zh", "cmteb"}:
+            print(pull_cmteb(force=args.force))
         elif args.suite == "context":
             print(pull_longbench(force=args.force))
         else:
@@ -311,6 +319,21 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.cmd == "retrieval":
+        suite = str(getattr(args, "suite", "retrieval") or "retrieval").strip().lower()
+        if suite in {"retrieval_zh", "cmteb"}:
+            if getattr(args, "eval_path", "component") != "agent":
+                raise SystemExit(
+                    "retrieval_zh/cmteb only supports --eval-path agent "
+                    "(no L0 component runner yet)"
+                )
+            from .agent_path_ops import model_from_env, start_and_wait
+
+            data = start_and_wait(
+                ["retrieval_zh"],
+                model=model_from_env(),
+                retrieval_query_limit=int(args.query_limit or 0),
+            )
+            return 0 if str(data.get("status")) == "completed" else 1
         if getattr(args, "eval_path", "component") == "agent":
             from .agent_path_ops import model_from_env, start_and_wait
 

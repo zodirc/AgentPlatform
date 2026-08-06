@@ -172,7 +172,7 @@ const L1_RUN_PROFILES: Preset[] = [
     context_arm: "free",
     hint: "锚点档 · 全量 qrels + LongBench 全量 + n25+harness · 过夜级",
   },
-  {
+    {
     id: "retrieval_only",
     label: "仅检索适中",
     targets: ["retrieval"],
@@ -187,6 +187,22 @@ const L1_RUN_PROFILES: Preset[] = [
     retrieval_arm: "free",
     context_arm: "free",
     hint: "只要检索 L1 自由臂 · 20q/集",
+  },
+  {
+    id: "retrieval_zh_only",
+    label: "仅中文检索",
+    targets: ["retrieval_zh"],
+    eval_path: "agent",
+    coding_tier: "n5",
+    coding_harness: false,
+    coding_checkout_repo: true,
+    retrieval_prod: true,
+    context_tier: "20",
+    retrieval_tier: "20",
+    l1_max_parallel: 1,
+    retrieval_arm: "free",
+    context_arm: "free",
+    hint: "C-MTEB L1 · 同模 bge-m3 · 仅 retrieval_ops_zh 分图 · 20q/集 · 勿与 BEIR 混宏分",
   },
 ];
 
@@ -233,7 +249,7 @@ type CodingTierMeta = { id: string; n_instances: number | null };
 
 type Caps = Record<string, boolean>;
 
-const SUITE_IDS = ["retrieval", "context", "coding"] as const;
+const SUITE_IDS = ["retrieval", "retrieval_zh", "context", "coding"] as const;
 type SuiteId = (typeof SUITE_IDS)[number];
 
 type ApiStyle = "openai" | "anthropic";
@@ -339,8 +355,10 @@ function suitesToTargets(suites: Iterable<string>): string[] {
   for (const s of suites) {
     if (s === "coding") {
       if (!out.includes("coding_infer")) out.push("coding_infer");
-    } else if (s === "retrieval" || s === "context") {
+    } else if (s === "retrieval" || s === "retrieval_zh" || s === "context") {
       if (!out.includes(s)) out.push(s);
+    } else if (s === "cmteb") {
+      if (!out.includes("retrieval_zh")) out.push("retrieval_zh");
     } else if (
       s === "coding_infer" ||
       s === "coding_pull" ||
@@ -372,6 +390,7 @@ function suitesFromRun(r: {
   const suites = new Set<SuiteId>();
   for (const t of raw) {
     if (t === "retrieval") suites.add("retrieval");
+    else if (t === "retrieval_zh" || t === "cmteb") suites.add("retrieval_zh");
     else if (t === "context") suites.add("context");
     else if (t === "coding" || t === "coding_infer" || t === "coding_pull") {
       suites.add("coding");
@@ -384,6 +403,7 @@ function suitesLabelZh(suites: Iterable<string>): string {
   const labels: string[] = [];
   for (const s of suites) {
     if (s === "retrieval") labels.push("检索");
+    else if (s === "retrieval_zh" || s === "cmteb") labels.push("中文检索");
     else if (s === "context") labels.push("上下文");
     else if (s === "coding" || s === "coding_infer" || s === "coding_pull") {
       labels.push("编码");
@@ -647,17 +667,19 @@ const SUITE_DETAIL_LABEL: Record<string, string> = {
   context: "上下文",
   coding: "编码",
   retrieval: "检索",
+  retrieval_zh: "中文检索",
 };
 
 const SUITE_UNIT: Record<string, string> = {
   retrieval: "查询",
+  retrieval_zh: "查询",
   context: "题",
   coding: "题",
 };
 
 /** Strip suite prefix from case tokens for the detail strip. */
 function shortCaseToken(token: string): string {
-  return token.replace(/^(swe|beir|longbench)\./i, "");
+  return token.replace(/^(swe|beir|cmteb|longbench)\./i, "");
 }
 
 function aggregateParts(
@@ -1335,6 +1357,7 @@ function isEffectEligible(r: OfficialRun): boolean {
   // Hash smoke retrieval is not an effect score.
   const prod = r.retrieval_prod ?? r.model_meta?.retrieval_prod;
   if (targets.includes("retrieval") && prod === false && targets.length === 1) return false;
+  if (targets.includes("retrieval_zh") && prod === false && targets.length === 1) return false;
   return true;
 }
 
@@ -1466,6 +1489,7 @@ type RunArtifacts = {
 
 const SUITE_ARTIFACT_LABEL: Record<string, string> = {
   retrieval: "检索",
+  retrieval_zh: "中文检索",
   context: "上下文",
   coding: "编码",
   coding_infer: "编码",
@@ -2174,7 +2198,8 @@ export function OfficialBenchPage() {
     () =>
       selectedSuites.has("context") ||
       selectedSuites.has("coding") ||
-      selectedSuites.has("retrieval"),
+      selectedSuites.has("retrieval") ||
+      selectedSuites.has("retrieval_zh"),
     [selectedSuites],
   );
 
@@ -2853,11 +2878,16 @@ export function OfficialBenchPage() {
     const needModel =
       suites.includes("context") ||
       suites.includes("coding") ||
-      suites.includes("retrieval");
+      suites.includes("retrieval") ||
+      suites.includes("retrieval_zh");
     const hasKey = Boolean(modelApiKey.trim() && modelName.trim() && modelProvider.trim());
     if (needModel && !hasKey) {
+      const onlyRet =
+        (suites.includes("retrieval") || suites.includes("retrieval_zh")) &&
+        !suites.includes("context") &&
+        !suites.includes("coding");
       setError(
-        suites.includes("retrieval") && !suites.includes("context") && !suites.includes("coding")
+        onlyRet
           ? "L1 检索需走真实 Turn：请填写下方评测模型（供应商 / model / api_key）并点保存。"
           : "已选套件需评测模型：请填写下方评测模型（供应商 / model / api_key）。",
       );
@@ -3552,7 +3582,7 @@ export function OfficialBenchPage() {
             <p className="mt-3 text-[11px] font-medium text-muted-foreground">
               修改表单
             </p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {(targetsMeta.length
                 ? targetsMeta
                 : [
@@ -3560,6 +3590,11 @@ export function OfficialBenchPage() {
                       id: "retrieval",
                       label: "检索",
                       description: "BEIR · hybrid + BM25",
+                    },
+                    {
+                      id: "retrieval_zh",
+                      label: "中文检索",
+                      description: "C-MTEB · 同模分图 retrieval_ops_zh",
                     },
                     {
                       id: "context",
@@ -4026,7 +4061,7 @@ export function OfficialBenchPage() {
                   `L1套件 ${progress.done}/${progress.total || "—"}`}
                 <span className="text-muted-foreground/80">
                   {" "}
-                  （检索/上下文/编码，最多 3 套；与 BEIR 三数据集不是同一层）
+                  （检索 / 中文检索 / 上下文 / 编码；与 BEIR 三数据集不是同一层）
                 </span>
               </span>
               <span className="tabular-nums">
