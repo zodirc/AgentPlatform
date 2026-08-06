@@ -666,7 +666,7 @@ async def test_search_sources_path_prefix_empty_ann_falls_back_keyword(
                 }
             ]
 
-    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda **_kwargs: FakeStore())
     result = await core.search_sources("张白鹿", path_prefix="writing", limit=5)
     assert result["retrieval"] == "keyword-fallback"
     assert result["index"].get("prefix_empty_after_filter") is True
@@ -705,7 +705,7 @@ async def test_search_sources_ann_without_query_terms_falls_back_keyword(
                 }
             ]
 
-    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
         "app.retrieval.tenant_visibility.filter_hits_for_tenant",
         lambda hits: hits,
@@ -771,7 +771,7 @@ async def test_search_sources_keeps_ann_when_cover_miss_and_keyword_empty(
                 }
             ]
 
-    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda: FakeStore())
+    monkeypatch.setattr("app.retrieval.store.get_sources_store", lambda **_kwargs: FakeStore())
     monkeypatch.setattr(
         "app.retrieval.tenant_visibility.filter_hits_for_tenant",
         lambda hits: hits,

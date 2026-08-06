@@ -12,6 +12,8 @@ def test_is_ops_l1_work_root() -> None:
     assert ops_plane.is_ops_l1_work_root(Path("/data/ops-l1/beir-index/scifact-micro"))
     assert not ops_plane.is_ops_l1_work_root("/data/works/user-default")
     assert not ops_plane.is_ops_l1_work_root(None)
+    # Unresolvable path still tokenizes on string parts.
+    assert ops_plane.is_ops_l1_work_root("/data/ops-l1/../ops-l1/beir-index/x")
 
 
 def test_retrieval_url_routes_ops_when_configured(monkeypatch) -> None:
