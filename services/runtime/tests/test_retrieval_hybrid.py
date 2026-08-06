@@ -140,7 +140,7 @@ def test_extract_source_tags_from_path_and_meta() -> None:
     assert "亮劍" not in tags
 
 
-def test_chunk_includes_auto_tags(tmp_path: Path) -> None:
+def test_chunk_includes_auto_tags(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     workspace = tmp_path / "workspace"
     sources = workspace / "sources" / "seed" / "writing" / "persons"
     sources.mkdir(parents=True)
@@ -153,9 +153,16 @@ def test_chunk_includes_auto_tags(tmp_path: Path) -> None:
     assert chunks
     assert "persons" in chunks[0].get("tags", [])
     assert "person" in chunks[0].get("tags", [])
+    # P2 default: body-only embed input (no path/tags prefixes).
+    monkeypatch.setattr(settings, "embedding_text_include_metadata", False)
     composed = build_embed_text(rel, chunks[0]["text"], tags=chunks[0]["tags"])
-    assert "tags:" in composed
-    assert "persons" in composed
+    assert "tags:" not in composed
+    assert "path:" not in composed
+    assert "抗金名将" in composed or "岳飞" in composed
+    monkeypatch.setattr(settings, "embedding_text_include_metadata", True)
+    with_meta = build_embed_text(rel, chunks[0]["text"], tags=chunks[0]["tags"])
+    assert "tags:" in with_meta
+    assert "persons" in with_meta
 
 
 def test_structure_chunking_keeps_section_title(tmp_path: Path) -> None:
@@ -174,12 +181,21 @@ def test_structure_chunking_keeps_section_title(tmp_path: Path) -> None:
     assert zhang["section_title"] == "张白鹿"
 
 
-def test_path_embed_clue_and_build_embed_text() -> None:
+def test_path_embed_clue_and_build_embed_text(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.retrieval.chunking import build_embed_text, path_embed_clue
 
     assert path_embed_clue("sources/seed/writing/persons/yuefei.md") == (
         "path: seed/writing/persons/yuefei"
     )
+    monkeypatch.setattr(settings, "embedding_text_include_metadata", False)
+    body_only = build_embed_text(
+        "sources/seed/writing/dramas/liangjian.md",
+        "张白鹿细节",
+        tags=["drama", "liangjian"],
+    )
+    assert body_only == "张白鹿细节"
+
+    monkeypatch.setattr(settings, "embedding_text_include_metadata", True)
     composed = build_embed_text(
         "sources/seed/writing/dramas/liangjian.md",
         "张白鹿细节",
@@ -190,8 +206,10 @@ def test_path_embed_clue_and_build_embed_text() -> None:
     assert composed.endswith("张白鹿细节")
 
 
-def test_chunk_embed_uses_path_clue_not_excerpt(tmp_path: Path) -> None:
-    """RQ1a: vector input includes path; text/excerpt stays body-only."""
+def test_chunk_embed_uses_path_clue_not_excerpt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P2: default embed = body; opt-in metadata changes the vector."""
     workspace = tmp_path / "workspace"
     sources = workspace / "sources" / "seed" / "writing" / "persons"
     sources.mkdir(parents=True)
@@ -199,14 +217,21 @@ def test_chunk_embed_uses_path_clue_not_excerpt(tmp_path: Path) -> None:
     path.write_text("## 概要\n专名召回正文。\n", encoding="utf-8")
     embedder = HashEmbedder(dimensions=64)
     rel = str(path.relative_to(workspace))
+
+    monkeypatch.setattr(settings, "embedding_text_include_metadata", False)
     chunks = chunk_source_text(path, rel, path.read_text(encoding="utf-8"), embedder=embedder)
     assert chunks
     body_only = chunks[0]["text"]
     assert "path:" not in body_only
     assert "专名召回正文" in body_only
     body_vec = embedder.embed(body_only)
-    path_vec = chunks[0]["vector"]
-    assert path_vec != body_vec
+    assert chunks[0]["vector"] == body_vec
+
+    monkeypatch.setattr(settings, "embedding_text_include_metadata", True)
+    chunks_meta = chunk_source_text(
+        path, rel, path.read_text(encoding="utf-8"), embedder=embedder
+    )
+    assert chunks_meta[0]["vector"] != body_vec
 
 
 def test_leaf_under_budget_stays_one_chunk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

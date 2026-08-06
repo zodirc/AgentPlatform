@@ -173,6 +173,307 @@ def test_get_sources_store_falls_back_when_pgvector_probe_fails(tmp_path, monkey
     assert isinstance(store, JsonSourceRetrievalStore)
 
 
+def test_ensure_schema_creates_source_docs_and_fts(monkeypatch) -> None:
+    """Drive ensure_schema DDL (incl. P3 source_docs + FTS v3) via a fake cursor."""
+    from app.retrieval.bm25_document import BM25_EXTRA_FTS_VERSION
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._ready = False
+    store._dimensions = 64
+    store._schema = "public"
+    sqls: list[str] = []
+    meta_version: str | None = None
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            sqls.append(sql)
+            self._sql = sql
+            self._params = params
+
+        def fetchone(self):
+            # No prior embedding column → skip dim recreate.
+            if "pg_attribute" in (self._sql or ""):
+                return None
+            if "bm25_extra_fts_version" in (self._sql or ""):
+                return (meta_version,) if meta_version is not None else None
+            return None
+
+    class _Ctx:
+        def __enter__(self):
+            return _Cur()
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return _Ctx()
+
+        def commit(self):
+            return None
+
+    store._connect = lambda: _Conn()  # type: ignore[method-assign]
+    store.ensure_schema()
+    assert store._ready is True
+    assert any("source_docs" in s for s in sqls)
+    assert any("source_docs_embedding_hnsw" in s for s in sqls)
+    assert any("bm25_extra_fts_version" in s for s in sqls)
+    assert any("to_tsvector('english'" in s for s in sqls)
+
+    # Second call short-circuits.
+    n = len(sqls)
+    store.ensure_schema()
+    assert len(sqls) == n
+
+    # FTS already at current version → CREATE INDEX IF NOT EXISTS path.
+    store._ready = False
+    sqls.clear()
+    meta_version = BM25_EXTRA_FTS_VERSION
+    store.ensure_schema()
+    assert any("CREATE INDEX IF NOT EXISTS source_chunks_text_fts_idx" in s for s in sqls)
+
+
+def test_ensure_schema_recreates_on_dim_mismatch(monkeypatch) -> None:
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._ready = False
+    store._dimensions = 384
+    store._schema = "public"
+    sqls: list[str] = []
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            sqls.append(sql)
+            self._sql = sql
+
+        def fetchone(self):
+            if "pg_attribute" in (self._sql or ""):
+                return ("vector(256)",)
+            if "bm25_extra_fts_version" in (self._sql or ""):
+                return None
+            return None
+
+    class _Ctx:
+        def __enter__(self):
+            return _Cur()
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return _Ctx()
+
+        def commit(self):
+            return None
+
+    store._connect = lambda: _Conn()  # type: ignore[method-assign]
+    store.ensure_schema()
+    assert any("DROP TABLE IF EXISTS source_docs" in s for s in sqls)
+    assert any("DROP TABLE IF EXISTS source_chunks" in s for s in sqls)
+
+
+def test_delete_orphan_private_rows_mock() -> None:
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._ready = True
+    counts = {"n": 0}
+
+    class _Cur:
+        rowcount = 3
+
+        def execute(self, sql: str, params=None) -> None:
+            counts["n"] += 1
+
+    class _Ctx:
+        def __enter__(self):
+            return _Cur()
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return _Ctx()
+
+        def commit(self):
+            return None
+
+    store._connect = lambda: _Conn()  # type: ignore[method-assign]
+    out = store.delete_orphan_private_rows()
+    assert out["orphan_chunks_deleted"] == 3
+    assert out["orphan_files_deleted"] == 3
+    assert counts["n"] == 2
+
+
+def test_chunk_vectors_centroid() -> None:
+    from app.retrieval.pgvector_store import _chunk_vectors_centroid
+
+    assert _chunk_vectors_centroid([]) is None
+    assert _chunk_vectors_centroid([[]]) is None
+    assert _chunk_vectors_centroid([[1.0, 3.0], [5.0, 7.0]]) == [3.0, 5.0]
+    assert _chunk_vectors_centroid([[1.0, 2.0], [1.0]]) is None  # ragged
+
+
+def test_search_docs_ann_branches(monkeypatch) -> None:
+    """Cover P3 doc-lane SQL branches without a live Postgres."""
+    from uuid import uuid4
+
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+    from app.tenant_context import (
+        bind_tenant_context,
+        current_work_id,
+        reset_tenant_context,
+    )
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._dimensions = 2
+    store._ready = True
+    store.ensure_schema = lambda: None  # type: ignore[method-assign]
+
+    class _Emb:
+        def embed(self, _q: str) -> list[float]:
+            return [0.1, 0.2]
+
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.get_embedder", lambda: _Emb()
+    )
+    monkeypatch.setattr(
+        "app.retrieval.tenant_visibility.display_path_from_index",
+        lambda p: p.replace("__work__/x/", "sources/"),
+    )
+
+    executed: list[str] = []
+
+    class _Cur:
+        def __init__(self, mode: str) -> None:
+            self.mode = mode
+            self._sql = ""
+
+        def execute(self, sql: str, params=None) -> None:
+            self._sql = sql
+            executed.append(sql)
+
+        def fetchone(self):
+            if "SELECT 1" in self._sql and "source_docs" in self._sql:
+                return None if self.mode == "empty" else (1,)
+            return None
+
+        def fetchall(self):
+            if self.mode == "empty":
+                return []
+            return [("__work__/x/sources/a.txt",), ("sources/seed/b.md",)]
+
+    class _CtxCur:
+        def __init__(self, mode: str) -> None:
+            self._cur = _Cur(mode)
+
+        def __enter__(self):
+            return self._cur
+
+        def __exit__(self, *args):
+            return False
+
+    class _Conn:
+        def __init__(self, mode: str) -> None:
+            self.mode = mode
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def cursor(self):
+            return _CtxCur(self.mode)
+
+    def _install(mode: str) -> None:
+        executed.clear()
+        store._connect = lambda: _Conn(mode)  # type: ignore[method-assign]
+
+    _install("empty")
+    assert store._search_docs_ann("q", limit=5) == []
+
+    wid = uuid4()
+    _install("rows")
+    tokens = bind_tenant_context(work_id=wid, work_root="/tmp", visibility_seed=True)
+    try:
+        paths = store._search_docs_ann("q", limit=3)
+    finally:
+        reset_tenant_context(tokens)
+    assert paths
+    assert any("visibility = 'seed' OR work_id" in sql for sql in executed)
+
+    _install("rows")
+    tokens = bind_tenant_context(work_id=wid, work_root="/tmp", visibility_seed=False)
+    try:
+        store._search_docs_ann("q", limit=3)
+    finally:
+        reset_tenant_context(tokens)
+    doc_sql = [s for s in executed if "FROM source_docs" in s and "ORDER BY" in s]
+    assert doc_sql
+    assert "visibility = 'seed'" not in doc_sql[-1]
+    assert "work_id" in doc_sql[-1]
+
+    _install("rows")
+    tokens = bind_tenant_context(work_root="/tmp", visibility_seed=True)
+    try:
+        assert current_work_id() is None
+        store._search_docs_ann("q", limit=2)
+    finally:
+        reset_tenant_context(tokens)
+    doc_sql = [s for s in executed if "FROM source_docs" in s and "ORDER BY" in s]
+    assert doc_sql
+    assert "visibility = 'seed'" in doc_sql[-1]
+    assert "work_id" not in doc_sql[-1]
+
+    _install("rows")
+    tokens = bind_tenant_context(work_root="/tmp", visibility_seed=False)
+    try:
+        assert store._search_docs_ann("q", limit=2) == []
+    finally:
+        reset_tenant_context(tokens)
+
+
+def test_search_docs_ann_bad_embed_dims(monkeypatch) -> None:
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._dimensions = 4
+    store._ready = True
+    store.ensure_schema = lambda: None  # type: ignore[method-assign]
+
+    class _Emb:
+        def embed(self, _q: str) -> list[float]:
+            return [0.1, 0.2]
+
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.get_embedder", lambda: _Emb()
+    )
+    assert store._search_docs_ann("q", limit=5) == []
+
+
 def test_reindex_epoch_read_write_clear() -> None:
     from app.retrieval.pgvector_store import (
         _clear_reindex_epoch,

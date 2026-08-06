@@ -56,6 +56,15 @@ def test_keyword_hit_or_match_when_not_all_terms_present(tmp_path: Path) -> None
     assert miss is None
 
 
+def test_term_in_text_boundaries() -> None:
+    from app.retrieval.keyword_hit import _term_in_text
+
+    assert _term_in_text("", "abc") is False
+    assert _term_in_text("x", "") is False
+    assert _term_in_text("cleave", "threat-actor-cleaver") is False
+    assert _term_in_text("adar1", "prefix adar1 suffix") is True
+
+
 def test_keyword_hit_oversize_file_skips_sections(tmp_path: Path) -> None:
     fp = tmp_path / "big.md"
     fp.write_text("x" * 300_000 + "\n## Tail\ntail content", encoding="utf-8")

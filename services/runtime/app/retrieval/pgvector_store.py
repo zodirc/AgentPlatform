@@ -37,6 +37,18 @@ def _vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{x:.8f}" for x in values) + "]"
 
 
+def _chunk_vectors_centroid(vectors: list[list[float]]) -> list[float] | None:
+    """Mean of equal-length chunk embeddings (P3 doc lane). None if empty/ragged."""
+    if not vectors:
+        return None
+    dim_n = len(vectors[0])
+    if dim_n <= 0:
+        return None
+    if any(not isinstance(v, list) or len(v) != dim_n for v in vectors):
+        return None
+    return [sum(float(v[i]) for v in vectors) / len(vectors) for i in range(dim_n)]
+
+
 def _safe_schema(name: str) -> str:
     raw = (name or "public").strip() or "public"
     if not _SCHEMA_RE.match(raw):
@@ -937,12 +949,10 @@ class PgvectorSourceRetrievalStore:
                             for c in new_chunks
                             if isinstance(c.get("vector"), list)
                         ]
-                        if vectors:
-                            dim_n = len(vectors[0])
-                            centroid = [
-                                sum(float(v[i]) for v in vectors) / len(vectors)
-                                for i in range(dim_n)
-                            ]
+                        centroid = _chunk_vectors_centroid(
+                            [v for v in vectors if isinstance(v, list)]
+                        )
+                        if centroid is not None:
                             cur.execute(
                                 """
                                 INSERT INTO source_docs (
