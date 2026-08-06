@@ -153,6 +153,10 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 256
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64
+    # 0 → auto: force reindex ≥1024 (batch×16), incremental batch×2. Override flush size.
+    embedding_flush_chunks: int = 0
+    # 0 → auto: force reindex commit every 4 flushes, else every flush (resume checkpoints).
+    embedding_commit_every_flushes: int = 0
     # auto → CUDA when torch.cuda.is_available(); else cpu|cuda force.
     embedding_device: str = "auto"
     # Progress log every N files during sync (0 = only batch/flush logs).

@@ -127,6 +127,40 @@ def test_prepare_hnsw_filtered_scan_sets_locals() -> None:
     assert any("hnsw.max_scan_tuples" in c for c in calls)
 
 
+def test_drop_and_ensure_embedding_hnsw() -> None:
+    from app.retrieval.pgvector_store import _drop_embedding_hnsw, _ensure_embedding_hnsw
+
+    calls: list[str] = []
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            calls.append(" ".join(sql.split()))
+
+    _drop_embedding_hnsw(_Cur())
+    assert any("DROP INDEX IF EXISTS source_chunks_embedding_hnsw" in c for c in calls)
+    assert any("DROP INDEX IF EXISTS source_docs_embedding_hnsw" in c for c in calls)
+    calls.clear()
+    _ensure_embedding_hnsw(_Cur())
+    assert any("CREATE INDEX IF NOT EXISTS source_chunks_embedding_hnsw" in c for c in calls)
+    assert any("CREATE INDEX IF NOT EXISTS source_docs_embedding_hnsw" in c for c in calls)
+
+
+def test_index_flush_cap_force_vs_incremental(monkeypatch) -> None:
+    from app.retrieval import index_embed
+
+    monkeypatch.setattr(index_embed.settings, "embedding_batch_size", 64)
+    monkeypatch.setattr(index_embed.settings, "embedding_flush_chunks", 0)
+    monkeypatch.setattr(index_embed.settings, "embedding_commit_every_flushes", 0)
+    assert index_embed.index_flush_chunk_cap(force_reindex=False) == 128
+    assert index_embed.index_flush_chunk_cap(force_reindex=True) == 1024
+    assert index_embed.index_commit_every_flushes(force_reindex=False) == 1
+    assert index_embed.index_commit_every_flushes(force_reindex=True) == 4
+    monkeypatch.setattr(index_embed.settings, "embedding_flush_chunks", 2048)
+    monkeypatch.setattr(index_embed.settings, "embedding_commit_every_flushes", 8)
+    assert index_embed.index_flush_chunk_cap(force_reindex=True) == 2048
+    assert index_embed.index_commit_every_flushes(force_reindex=True) == 8
+
+
 def test_prepare_hnsw_filtered_scan_swallows_unsupported() -> None:
     from app.retrieval.pgvector_store import _prepare_hnsw_filtered_scan
 

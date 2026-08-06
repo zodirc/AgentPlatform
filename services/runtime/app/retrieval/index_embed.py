@@ -16,6 +16,29 @@ def embedding_batch_size() -> int:
     return max(1, int(getattr(settings, "embedding_batch_size", None) or 64))
 
 
+def index_flush_chunk_cap(*, force_reindex: bool = False) -> int:
+    """How many deferred chunks to buffer before embed+write flush.
+
+    Force reindex (model/INDEX bump) uses a much larger cap so GPU batches and
+    PG writes amortize better; incremental sync stays small for low latency.
+    """
+    base = embedding_batch_size()
+    override = int(getattr(settings, "embedding_flush_chunks", None) or 0)
+    if override > 0:
+        return max(base, override)
+    if force_reindex:
+        return max(1024, base * 16)
+    return max(base, base * 2)
+
+
+def index_commit_every_flushes(*, force_reindex: bool = False) -> int:
+    """Commit every N flushes (resume checkpoints). Force reindex commits less often."""
+    override = int(getattr(settings, "embedding_commit_every_flushes", None) or 0)
+    if override > 0:
+        return max(1, override)
+    return 4 if force_reindex else 1
+
+
 def progress_every_files() -> int:
     return max(0, int(getattr(settings, "embedding_progress_every_files", None) or 25))
 

@@ -41,6 +41,33 @@ def _vector_literal(values: list[float]) -> str:
     return "[" + ",".join(f"{x:.8f}" for x in values) + "]"
 
 
+_CHUNK_HNSW = "source_chunks_embedding_hnsw"
+_DOCS_HNSW = "source_docs_embedding_hnsw"
+
+
+def _drop_embedding_hnsw(cur: Any) -> None:
+    """Drop ANN indexes for bulk load (recreate after force reindex writes)."""
+    cur.execute(f"DROP INDEX IF EXISTS {_CHUNK_HNSW}")
+    cur.execute(f"DROP INDEX IF EXISTS {_DOCS_HNSW}")
+
+
+def _ensure_embedding_hnsw(cur: Any) -> None:
+    cur.execute(
+        f"""
+        CREATE INDEX IF NOT EXISTS {_CHUNK_HNSW}
+        ON source_chunks
+        USING hnsw (embedding vector_cosine_ops)
+        """
+    )
+    cur.execute(
+        f"""
+        CREATE INDEX IF NOT EXISTS {_DOCS_HNSW}
+        ON source_docs
+        USING hnsw (embedding vector_cosine_ops)
+        """
+    )
+
+
 def _chunk_vectors_centroid(vectors: list[list[float]]) -> list[float] | None:
     """Mean of equal-length chunk embeddings (P3 doc lane). None if empty/ragged."""
     if not vectors:
@@ -369,13 +396,6 @@ class PgvectorSourceRetrievalStore:
                     ADD COLUMN IF NOT EXISTS bm25_extra TEXT NOT NULL DEFAULT ''
                     """
                 )
-                cur.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS source_chunks_embedding_hnsw
-                    ON source_chunks
-                    USING hnsw (embedding vector_cosine_ops)
-                    """
-                )
                 self._ensure_bm25_fts_index(cur)
                 cur.execute(
                     """
@@ -419,17 +439,11 @@ class PgvectorSourceRetrievalStore:
                 )
                 cur.execute(
                     """
-                    CREATE INDEX IF NOT EXISTS source_docs_embedding_hnsw
-                    ON source_docs
-                    USING hnsw (embedding vector_cosine_ops)
-                    """
-                )
-                cur.execute(
-                    """
                     CREATE INDEX IF NOT EXISTS source_docs_work_idx
                     ON source_docs (work_id)
                     """
                 )
+                _ensure_embedding_hnsw(cur)
             conn.commit()
         self._ready = True
 
@@ -523,6 +537,8 @@ class PgvectorSourceRetrievalStore:
         from app.retrieval.index_embed import (
             assign_deferred_vectors,
             embedding_batch_size,
+            index_commit_every_flushes,
+            index_flush_chunk_cap,
             progress_every_files,
         )
 
@@ -837,15 +853,95 @@ class PgvectorSourceRetrievalStore:
                         pass
 
                 # Flush deferred embeds in cross-file batches, then write rows.
-                batch_cap = max(embedding_batch_size(), embedding_batch_size() * 2)
+                # Force reindex: drop HNSW for bulk load, larger flush, fewer commits.
+                batch_cap = index_flush_chunk_cap(force_reindex=force_reindex)
+                commit_every = index_commit_every_flushes(force_reindex=force_reindex)
                 buffer_jobs: list[dict[str, Any]] = []
                 buffer_chunk_count = 0
                 chunks_embedded = 0
                 files_done = 0
+                flush_count = 0
+                hnsw_dropped = False
                 every = progress_every_files()
 
-                def _flush_buffer() -> None:
+                if force_reindex and pending_jobs:
+                    try:
+                        from app.retrieval.sync_progress import report_sync_progress
+
+                        report_sync_progress(
+                            status="building",
+                            phase="index",
+                            visibility=vis,
+                            path=str(sources_dir),
+                            label="drop-hnsw",
+                            force_reindex=True,
+                            reindex_reason=reindex_reason,
+                            elapsed_s=round(time.monotonic() - sync_t0, 1),
+                        )
+                    except Exception:
+                        pass
+                    logger.info(
+                        "sources index sync drop HNSW for bulk load; scope=%s "
+                        "dirty_files=%s flush_cap=%s commit_every=%s",
+                        scope_id,
+                        len(pending_jobs),
+                        batch_cap,
+                        commit_every,
+                    )
+                    _drop_embedding_hnsw(cur)
+                    conn.commit()
+                    hnsw_dropped = True
+
+                _CHUNK_UPSERT_SQL = """
+                    INSERT INTO source_chunks (
+                        chunk_id, path, section_title, text, citation_id,
+                        line_start, line_end, embedding, owner_user_id,
+                        work_id, visibility
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s::vector, %s,
+                        %s, %s
+                    )
+                    ON CONFLICT (chunk_id) DO UPDATE SET
+                        path = EXCLUDED.path,
+                        section_title = EXCLUDED.section_title,
+                        text = EXCLUDED.text,
+                        citation_id = EXCLUDED.citation_id,
+                        line_start = EXCLUDED.line_start,
+                        line_end = EXCLUDED.line_end,
+                        embedding = EXCLUDED.embedding,
+                        owner_user_id = EXCLUDED.owner_user_id,
+                        work_id = EXCLUDED.work_id,
+                        visibility = EXCLUDED.visibility
+                    """
+                _FILE_UPSERT_SQL = """
+                    INSERT INTO source_files (
+                        path, mtime, chunk_count, updated_at, owner_user_id,
+                        work_id, visibility
+                    )
+                    VALUES (%s, %s, %s, NOW(), %s, %s, %s)
+                    ON CONFLICT (path) DO UPDATE SET
+                        mtime = EXCLUDED.mtime,
+                        chunk_count = EXCLUDED.chunk_count,
+                        updated_at = NOW(),
+                        owner_user_id = EXCLUDED.owner_user_id,
+                        work_id = EXCLUDED.work_id,
+                        visibility = EXCLUDED.visibility
+                    """
+                _DOC_UPSERT_SQL = """
+                    INSERT INTO source_docs (
+                        path, embedding, work_id, visibility, owner_user_id
+                    ) VALUES (%s, %s::vector, %s, %s, %s)
+                    ON CONFLICT (path) DO UPDATE SET
+                        embedding = EXCLUDED.embedding,
+                        work_id = EXCLUDED.work_id,
+                        visibility = EXCLUDED.visibility,
+                        owner_user_id = EXCLUDED.owner_user_id,
+                        updated_at = NOW()
+                    """
+
+                def _flush_buffer(*, force_commit: bool = False) -> None:
                     nonlocal chunks_embedded, files_done, added, updated, total_chunks
+                    nonlocal flush_count
                     if not buffer_jobs:
                         return
                     from app.retrieval.index_scheduler import check_sync_cancelled
@@ -861,28 +957,21 @@ class PgvectorSourceRetrievalStore:
                         chunks_done_before=chunks_embedded,
                         chunks_total_hint=chunks_total,
                     )
+
+                    paths = [job["storage_path"] for job in buffer_jobs]
+                    cur.execute(
+                        "DELETE FROM source_chunks WHERE path = ANY(%s)",
+                        (paths,),
+                    )
+
+                    file_rows: list[tuple[Any, ...]] = []
+                    chunk_rows: list[tuple[Any, ...]] = []
+                    doc_rows: list[tuple[Any, ...]] = []
                     for job in buffer_jobs:
                         storage_path = job["storage_path"]
                         new_chunks = job["chunks"]
                         mtime = job["mtime"]
-                        cur.execute(
-                            "DELETE FROM source_chunks WHERE path = %s", (storage_path,)
-                        )
-                        cur.execute(
-                            """
-                            INSERT INTO source_files (
-                                path, mtime, chunk_count, updated_at, owner_user_id,
-                                work_id, visibility
-                            )
-                            VALUES (%s, %s, %s, NOW(), %s, %s, %s)
-                            ON CONFLICT (path) DO UPDATE SET
-                                mtime = EXCLUDED.mtime,
-                                chunk_count = EXCLUDED.chunk_count,
-                                updated_at = NOW(),
-                                owner_user_id = EXCLUDED.owner_user_id,
-                                work_id = EXCLUDED.work_id,
-                                visibility = EXCLUDED.visibility
-                            """,
+                        file_rows.append(
                             (
                                 storage_path,
                                 mtime,
@@ -890,7 +979,7 @@ class PgvectorSourceRetrievalStore:
                                 owner_id,
                                 wid,
                                 vis,
-                            ),
+                            )
                         )
                         for chunk in new_chunks:
                             vec = chunk.get("vector")
@@ -902,28 +991,7 @@ class PgvectorSourceRetrievalStore:
                                 raise RuntimeError(
                                     f"embedding dim {len(vec)} != configured {self._dimensions}"
                                 )
-                            cur.execute(
-                                """
-                                INSERT INTO source_chunks (
-                                    chunk_id, path, section_title, text, citation_id,
-                                    line_start, line_end, embedding, owner_user_id,
-                                    work_id, visibility
-                                ) VALUES (
-                                    %s, %s, %s, %s, %s, %s, %s, %s::vector, %s,
-                                    %s, %s
-                                )
-                                ON CONFLICT (chunk_id) DO UPDATE SET
-                                    path = EXCLUDED.path,
-                                    section_title = EXCLUDED.section_title,
-                                    text = EXCLUDED.text,
-                                    citation_id = EXCLUDED.citation_id,
-                                    line_start = EXCLUDED.line_start,
-                                    line_end = EXCLUDED.line_end,
-                                    embedding = EXCLUDED.embedding,
-                                    owner_user_id = EXCLUDED.owner_user_id,
-                                    work_id = EXCLUDED.work_id,
-                                    visibility = EXCLUDED.visibility
-                                """,
+                            chunk_rows.append(
                                 (
                                     chunk["chunk_id"],
                                     storage_path,
@@ -936,18 +1004,8 @@ class PgvectorSourceRetrievalStore:
                                     owner_id,
                                     wid,
                                     vis,
-                                ),
+                                )
                             )
-                        cur.execute(
-                            """
-                            UPDATE source_chunks AS c
-                            SET bm25_extra = f.bm25_extra
-                            FROM source_files AS f
-                            WHERE c.path = f.path AND f.path = %s
-                            """,
-                            (storage_path,),
-                        )
-                        # P3: doc vector = mean of chunk embeddings (centroid).
                         vectors = [
                             c.get("vector")
                             for c in new_chunks
@@ -957,25 +1015,14 @@ class PgvectorSourceRetrievalStore:
                             [v for v in vectors if isinstance(v, list)]
                         )
                         if centroid is not None:
-                            cur.execute(
-                                """
-                                INSERT INTO source_docs (
-                                    path, embedding, work_id, visibility, owner_user_id
-                                ) VALUES (%s, %s::vector, %s, %s, %s)
-                                ON CONFLICT (path) DO UPDATE SET
-                                    embedding = EXCLUDED.embedding,
-                                    work_id = EXCLUDED.work_id,
-                                    visibility = EXCLUDED.visibility,
-                                    owner_user_id = EXCLUDED.owner_user_id,
-                                    updated_at = NOW()
-                                """,
+                            doc_rows.append(
                                 (
                                     storage_path,
                                     _vector_literal(centroid),
                                     wid,
                                     vis,
                                     owner_id,
-                                ),
+                                )
                             )
                         total_chunks += len(new_chunks)
                         if job["is_update"]:
@@ -983,42 +1030,60 @@ class PgvectorSourceRetrievalStore:
                         else:
                             added += 1
                         files_done += 1
-                        if every and files_done % every == 0:
-                            logger.info(
-                                "sources index sync files; visibility=%s files=%s/%s "
-                                "chunks_embedded=%s/%s elapsed_s=%.1f",
-                                vis,
-                                files_done,
-                                len(pending_jobs),
-                                chunks_embedded,
-                                chunks_total,
-                                time.monotonic() - sync_t0,
-                            )
-                            try:
-                                from app.retrieval.sync_progress import (
-                                    report_sync_progress,
-                                )
 
-                                elapsed = time.monotonic() - sync_t0
-                                rate = (
-                                    chunks_embedded / elapsed if elapsed > 0 else 0.0
-                                )
-                                report_sync_progress(
-                                    status="building",
-                                    phase="write",
-                                    visibility=vis,
-                                    files_done=files_done,
-                                    files_total=len(pending_jobs),
-                                    chunks_embedded=chunks_embedded,
-                                    chunks_total=chunks_total,
-                                    rate_chunks_per_s=round(rate, 2),
-                                    elapsed_s=round(elapsed, 1),
-                                )
-                            except Exception:
-                                pass
+                    if file_rows:
+                        cur.executemany(_FILE_UPSERT_SQL, file_rows)
+                    if chunk_rows:
+                        cur.executemany(_CHUNK_UPSERT_SQL, chunk_rows)
+                    if doc_rows:
+                        cur.executemany(_DOC_UPSERT_SQL, doc_rows)
+                    # RET-11(b): copy path-level bm25_extra onto chunks for this batch.
+                    cur.execute(
+                        """
+                        UPDATE source_chunks AS c
+                        SET bm25_extra = f.bm25_extra
+                        FROM source_files AS f
+                        WHERE c.path = f.path AND c.path = ANY(%s)
+                        """,
+                        (paths,),
+                    )
+
+                    if every and files_done % every == 0:
+                        logger.info(
+                            "sources index sync files; visibility=%s files=%s/%s "
+                            "chunks_embedded=%s/%s elapsed_s=%.1f",
+                            vis,
+                            files_done,
+                            len(pending_jobs),
+                            chunks_embedded,
+                            chunks_total,
+                            time.monotonic() - sync_t0,
+                        )
+                    try:
+                        from app.retrieval.sync_progress import report_sync_progress
+
+                        elapsed = time.monotonic() - sync_t0
+                        rate = chunks_embedded / elapsed if elapsed > 0 else 0.0
+                        report_sync_progress(
+                            status="building",
+                            phase="write",
+                            visibility=vis,
+                            files_done=files_done,
+                            files_total=len(pending_jobs),
+                            chunks_embedded=chunks_embedded,
+                            chunks_total=chunks_total,
+                            rate_chunks_per_s=round(rate, 2),
+                            elapsed_s=round(elapsed, 1),
+                            batch_size=batch_cap,
+                        )
+                    except Exception:
+                        pass
+
                     buffer_jobs.clear()
-                    # Commit each batch so takeover/resume can skip already-written files.
-                    conn.commit()
+                    flush_count += 1
+                    # Checkpoint for takeover/resume; force reindex commits less often.
+                    if force_commit or (flush_count % commit_every) == 0:
+                        conn.commit()
 
                 for job in pending_jobs:
                     buffer_jobs.append(job)
@@ -1026,11 +1091,37 @@ class PgvectorSourceRetrievalStore:
                     if buffer_chunk_count >= batch_cap:
                         _flush_buffer()
                         buffer_chunk_count = 0
-                _flush_buffer()
+                _flush_buffer(force_commit=True)
 
                 removed = [path for path in prev_files if path not in seen_paths]
                 for path in removed:
                     cur.execute("DELETE FROM source_files WHERE path = %s", (path,))
+                if hnsw_dropped:
+                    try:
+                        from app.retrieval.sync_progress import report_sync_progress
+
+                        report_sync_progress(
+                            status="building",
+                            phase="index",
+                            visibility=vis,
+                            path=str(sources_dir),
+                            label="create-hnsw",
+                            chunks_embedded=chunks_embedded,
+                            chunks_total=chunks_total,
+                            files_done=files_done,
+                            files_total=len(pending_jobs),
+                            force_reindex=True,
+                            elapsed_s=round(time.monotonic() - sync_t0, 1),
+                        )
+                    except Exception:
+                        pass
+                    logger.info(
+                        "sources index sync rebuild HNSW; scope=%s chunks=%s",
+                        scope_id,
+                        chunks_embedded,
+                    )
+                # Always ensure ANN indexes exist (covers cancelled bulk-load mid-drop).
+                _ensure_embedding_hnsw(cur)
                 _write_scope_stamp(cur, scope_id, stamp)
                 _clear_reindex_epoch(cur, scope_id)
             conn.commit()
@@ -1063,6 +1154,7 @@ class PgvectorSourceRetrievalStore:
             "ann": "hnsw",
             "elapsed_s": round(elapsed, 2),
             "embed_batch_size": embedding_batch_size(),
+            "flush_chunk_cap": index_flush_chunk_cap(force_reindex=force_reindex),
         }
 
     def _search_docs_ann(self, query: str, *, limit: int) -> list[str]:

@@ -167,6 +167,7 @@ class SourceVectorIndex:
         from app.retrieval.index_embed import (
             assign_deferred_vectors,
             embedding_batch_size,
+            index_flush_chunk_cap,
             progress_every_files,
         )
 
@@ -333,7 +334,7 @@ class SourceVectorIndex:
         except Exception:
             pass
 
-        batch_cap = max(embedding_batch_size(), embedding_batch_size() * 2)
+        batch_cap = index_flush_chunk_cap(force_reindex=force_reindex)
         buffer: list[tuple[str, float, list[dict[str, Any]], str, bool]] = []
         buffer_chunks = 0
         chunks_embedded = 0
