@@ -116,6 +116,8 @@ services:
       EMBEDDING_PROGRESS_EVERY_FILES: ${EMBEDDING_PROGRESS_EVERY_FILES:-25}
       # 0 → model default; bge-m3 still auto-caps to 512 in code unless overridden.
       EMBEDDING_MAX_SEQ_LENGTH: ${EMBEDDING_MAX_SEQ_LENGTH:-0}
+      # Embed-space stamp (bge-m3@512 → 12). Must match resolve_embedding / plan board.
+      EMBEDDING_INDEX_VERSION: ${EMBEDDING_INDEX_VERSION:-0}
       SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
       SOURCES_STARTUP_SYNC_DELAY_SECONDS: ${SOURCES_STARTUP_SYNC_DELAY_SECONDS:-3}
       SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}

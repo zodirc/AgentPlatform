@@ -256,7 +256,8 @@ def _container_running(name: str, running: set[str] | None = None) -> bool:
 def _index_version_for_model(model: str, dims: int) -> int:
     m = (model or "").lower()
     if "bge-m3" in m:
-        return 11
+        # Default GPU profile truncates max_seq=512 → INDEX 12 (see resolve_embedding).
+        return 12
     if "gte-large" in m:
         return 10
     if dims >= 1024:

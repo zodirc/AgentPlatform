@@ -224,11 +224,22 @@ def effective_index_version() -> int:
     """Index schema bump when embed space changes.
 
     8 = legacy MiniLM@384; 9 = gte-small@384; 10 = gte-large@1024;
-    11 = bge-m3@1024 (shared EN+ZH GPU default; HNSW graphs still split by schema).
+    11 = bge-m3@1024 with hub-length (or uncapped) sequences;
+    12 = bge-m3@1024 with max_seq≈512 truncate (GPU default; denser short passages).
+
+    Prefer ``settings.embedding_index_version`` when compose/auto.env sets it so the
+    console plan and runtime stamp stay aligned.
     """
+    configured = int(getattr(settings, "embedding_index_version", 0) or 0)
+    if configured > 0:
+        return configured
     model = (settings.embedding_model or "").lower()
     dims = effective_embedding_dimensions()
     if "bge-m3" in model:
+        # Match resolve_embedding_profile: GPU default truncates to 512 → INDEX 12.
+        max_seq = int(getattr(settings, "embedding_max_seq_length", 0) or 0)
+        if max_seq <= 0 or max_seq == 512:
+            return 12
         return 11
     if "gte-large" in model:
         return 10
