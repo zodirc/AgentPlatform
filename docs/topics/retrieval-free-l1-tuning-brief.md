@@ -1,14 +1,14 @@
 # Free-L1 Tuning Brief（检索 + 上下文 · 收敛版）
 
 > **受众**：下一轮调优负责人 / 高级模型  
-> **日期戳记**：2026-08-06（**收敛重写** · CTX-8 N≥2 已收 · 停机线 **2/2** · **RET-4 gte-large 冒烟 #1 已记（历史）** · **GPU 默认已切 bge-m3@1024 / index 11（PROD-2）** · CTX-13/EVAL-8 已收 · **RET-18 已收：保留 two-level ON** · **RET-11(b) 已回滚** · **REP-3 全量锚已取消** · **§7.11 PROD-2 接线开工**）  
+> **日期戳记**：2026-08-07（**bge-m3 / INDEX 12 free smoke 已记** · CTX-8 N≥2 已收 · 停机线 **2/2** · RET-4 gte-large #1 历史 · **GPU 默认 bge-m3@1024 / INDEX 12（max_seq=512）** · CTX-13/EVAL-8 已收 · **RET-18：two-level ON** · **RET-11(b) 已回滚** · **REP-3 取消** · **§7.11 PROD-2**）  
 > **历史全文备份**：同目录 `retrieval-free-l1-tuning-brief.md.bak-20260805`（原 2563 行叙事稿，裁决以本文为准）  
 > **产品目标**：**搜得更好**（召回 / 排序 / 读到金标）——不是立 SCORECARD / 公证全量锚  
 > **唯一工作温度计**：L1 · `arm=free` · **冒烟 20q/库**（N≥2 去留）；**不做全量锚门禁**  
 > **不作为验收**：forced/oracle、纯 L0、coding；schema/inflight 事故跑 **不入对照**；**全量 qrels 锚跑**（已取消，对当前目标无杠杆）  
-> **当前平台读数（冒烟）**：检索 two-level ON + **gte-large 历史 #1** `d31375a5` nDCG@10 **0.5435**（vs 前锚 `61f00a6d` 0.483；**栈已切 bge-m3 → 须重嵌后另记 smoke**）；promote-off 旧锚 ≈0.447；上下文 **#1** `46df8722` agent_f1@v2 **0.5393** / EM **0.233**  
+> **当前平台读数（冒烟 · bge-m3 / INDEX 12）**：BEIR `cd16092c` nDCG@10 **0.4755** · C-MTEB `f84fd420` nDCG@10 **0.6780** · context `b9bcf931` F1/EM **0.5288 / 0.250**（详见 §7.4 · SCORECARD 冒烟栏）；gte-large 史 `d31375a5` 0.5435 **仅换代前对照**  
 > **停机线（EVAL-6）**：**2/2 已触发**（RET-9 + CTX-8）→ **停开新加法契约刀**  
-> **下一刀序**：GPU **`make resolve-embedding` → bake → `make sync` + `make sync-ops-cmteb`** → BEIR / `retrieval_zh` 各记 free smoke（勿混宏分 · 不 `update-baseline`）；FiQA 硬召回另议；上下文——**产品侧工程停手**；**不跑 REP-3**  
+> **下一刀序**：同栈 **N≥2** 复验 BEIR（主盯 FiQA/NFCorpus）；中英分栏、勿混宏分；**不 `update-baseline`**；上下文——**产品侧工程停手**；**不跑 REP-3**  
 > **SCORECARD / baseline**：**不作为本轮目标**（不跑全量、不 `update-baseline`；冒烟趋势可记）  
 > **流程图**：[retrieval-tuning-flowchart.png](retrieval-tuning-flowchart.png) · [context-tuning-flowchart.png](context-tuning-flowchart.png)
 
@@ -381,7 +381,7 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
 
 **当前部署策略（PROD-2 锁定 · 2026-08-06）**
 
-- `EMBEDDING_PROFILE=auto`：VRAM≥8GiB → `BAAI/bge-m3@1024` / INDEX **11**（产品/BEIR/C-MTEB **共用**）；否则 `gte-small@384` / INDEX **9**  
+- `EMBEDDING_PROFILE=auto`：VRAM≥8GiB → `BAAI/bge-m3@1024` / INDEX **12**（`max_seq=512`；产品/BEIR/C-MTEB **共用**）；否则 `gte-small@384` / INDEX **9**  
 - `RUNTIME_GPU=0` → 强制 CPU / gte-small（**即使 nvidia-smi 可见也不选 bge-m3**）  
 - 强制：`EMBEDDING_PROFILE=small|large|m3` 或 `EMBEDDING_FORCE_MODEL=…`  
 - MiniLM **不再是生产默认**；gte-large 仅作 `FORCE_MODEL` / 历史对照  
@@ -412,7 +412,36 @@ free 验收: N≥2 + EVAL-1；锚 = promote=off · RET-9 已回滚 · 注明 two
 | FiQA | 0.402 / 0.533 | 0.314 / 0.550 | **排序升、深召回略降**；absent 未宣称闭合 |
 | NFCorpus | 0.400 / 0.141 | 0.412 / 0.141 | 几乎不动（硬骨头） |
 
-**裁决（#1 · gte-large 历史）**：宏分远超 EVAL-7 噪声门槛（≈2.2pp）；**栈已切 bge-m3 / index 11** → `d31375a5` **不作当前平台读数**，仅作换代前对照。**禁止** `update-baseline` / SCORECARD 主栏。下一步：GPU bake+全库重嵌 → BEIR / C-MTEB 各记新 free smoke。
+**裁决（#1 · gte-large 历史）**：宏分远超 EVAL-7 噪声门槛（≈2.2pp）；**栈已切 bge-m3** → `d31375a5` **不作当前平台读数**，仅作换代前对照。**禁止** `update-baseline` / SCORECARD 主栏。
+
+**Free 冒烟 #2（2026-08-07 · bge-m3@1024 / INDEX 12 · max_seq=512 · 不作入库结论 · 当前栈读数）**
+
+| 项 | 值 |
+|----|-----|
+| 协议 | `official-small-2026-08-m3` · `eval_path=agent` · `arm=free` · `sample_tier=smoke` |
+| 栈 | two-level ON · **BAAI/bge-m3@1024** · INDEX **12** · CUDA（RTX 5080） |
+| BEIR run | `cd16092c-5b35-478b-ba1f-4bbada5876b4` |
+| C-MTEB run | `f84fd420-9fba-4f43-8e81-618ce0e2d7d3` |
+| context run | `b9bcf931-9a7d-4528-af8b-bc5506be6955`（agent_f1@v2 **0.5288** / EM **0.250**） |
+| 扁平导出 | 根目录 `TEST.log`（指标镜像；权威仍以 `eval/reports/official/runs/<id>/`） |
+| infra_rate | **0**（三套件） |
+
+| 宏 IR（BEIR · `cd16092c`） | #2 bge-m3 | 史 #1 gte-large `d31375a5` | 读法 |
+|---------------------------|-----------|---------------------------|------|
+| nDCG@10 | **0.4755** | 0.5435 | **不可跨模直接比 Δ**；当前栈绝对读数 |
+| Recall@10 | 0.4908 | 0.5165 | Top-10 召回约半 |
+| MAP@10 | 0.3280 | 0.4010 | 前列精度弱于史 #1 |
+| Recall@100 | 0.5453 | 0.5499 | 深召回持平量级 |
+| MAP@1 | 0.2463 | — | 首条命中偏弱 |
+
+| 宏 IR（C-MTEB · `f84fd420`） | #2 |
+|-----------------------------|-----|
+| nDCG@10 | **0.6780** |
+| Recall@10 | **0.8667** |
+| MAP@1 / nDCG@1 | **0.5167** |
+| Recall@100 | **0.9000** |
+
+**裁决（#2 · bge-m3 当前）**：中文 C-MTEB 冒烟可用（R@10≈0.87）；英文 BEIR 冒烟弱于中文同栈，短板在排序/首条而非深召回塌方。已写入 [`SCORECARD.md`](../../eval/official/baseline/SCORECARD.md) **冒烟趋势**（非主栏）。**禁止** `update-baseline`。下一步：同栈 N≥2 复验；FiQA/NFCorpus 分库归因。
 
 **执行细化（v2 · 立项不变）**
 
@@ -670,7 +699,7 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 
 ### 7.11 PROD-2 · C-MTEB 小量 + Ops 旁路索引（**接线开工**）
 
-> **状态**：2026-08-06 **开工**（配置 / schema / sync / L1 / Ops UI 已接线）；**GPU bge-m3 重嵌 + free smoke 待记**。  
+> **状态**：2026-08-07 **bge-m3 / INDEX 12 free smoke 已记**（BEIR `cd16092c` · C-MTEB `f84fd420` · context `b9bcf931`）；配置 / schema / sync / L1 / Ops UI 已接线。  
 > **全称**：C-MTEB = Chinese Massive Text Embedding Benchmark（中文大规模文本向量评测；检索子集作中文 IR 温度计）。  
 > **动机**：BEIR 为英文 IR；产品若含中文语料，需要第二套**分栏**中文检索温度计，且不得污染 BEIR 历史链。
 
