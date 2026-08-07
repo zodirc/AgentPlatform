@@ -10,22 +10,67 @@ function formatTokens(n: number | undefined): string {
   return String(value);
 }
 
-const BREAKDOWN_SEGMENTS: Array<{
-  key: keyof ContextWindowBreakdown;
+/**
+ * Display layers aligned with Cursor Context Usage naming, mapped to our
+ * wire channels (system / tools[] / project user / messages history).
+ * Skills / Subagent are not independent metered layers on this platform.
+ */
+const DISPLAY_SEGMENTS: Array<{
+  id: string;
   label: string;
   color: string;
+  keys: Array<keyof ContextWindowBreakdown>;
 }> = [
-  { key: "system", label: "System", color: "bg-muted-foreground" },
-  { key: "tools", label: "Tools", color: "bg-primary/70" },
-  { key: "session", label: "Session", color: "bg-success" },
-  { key: "user", label: "User", color: "bg-primary" },
-  { key: "assistant", label: "Assistant", color: "bg-primary/40" },
-  { key: "tool_results", label: "Tool results", color: "bg-warning" },
-  { key: "compaction", label: "Compact", color: "bg-muted-foreground/50" },
-  { key: "project", label: "Project", color: "bg-success/70" },
-  { key: "runtime", label: "Runtime", color: "bg-warning/70" },
-  { key: "volatile", label: "Writing ctx", color: "bg-primary/55" },
+  {
+    id: "system_prompt",
+    label: "System prompt",
+    color: "bg-muted-foreground",
+    keys: ["system"],
+  },
+  {
+    id: "tool_definitions",
+    label: "Tool definitions",
+    color: "bg-primary/70",
+    keys: ["tools"],
+  },
+  {
+    id: "rules",
+    label: "Rules",
+    color: "bg-success/70",
+    keys: ["project"],
+  },
+  {
+    id: "writing_ctx",
+    label: "Writing ctx",
+    color: "bg-primary/55",
+    keys: ["volatile"],
+  },
+  {
+    id: "runtime",
+    label: "Runtime",
+    color: "bg-warning/70",
+    keys: ["runtime"],
+  },
+  {
+    id: "session",
+    label: "Session",
+    color: "bg-success",
+    keys: ["session"],
+  },
+  {
+    id: "conversation",
+    label: "Conversation",
+    color: "bg-primary",
+    keys: ["user", "assistant", "tool_results", "compaction"],
+  },
 ];
+
+function segmentValue(
+  breakdown: ContextWindowBreakdown,
+  keys: Array<keyof ContextWindowBreakdown>,
+): number {
+  return keys.reduce((sum, key) => sum + Number(breakdown[key] ?? 0), 0);
+}
 
 type Props = {
   contextUsage: ContextUsage | null;
@@ -67,8 +112,8 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
 
   const breakdown = contextUsage?.breakdown;
   const breakdownTotal = breakdown
-    ? BREAKDOWN_SEGMENTS.reduce(
-        (sum, seg) => sum + Number(breakdown[seg.key] ?? 0),
+    ? DISPLAY_SEGMENTS.reduce(
+        (sum, seg) => sum + segmentValue(breakdown, seg.keys),
         0,
       )
     : 0;
@@ -80,10 +125,10 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
       {hasContext ? (
         <div>
           <div className="mb-1 flex items-center justify-between gap-2">
-            <span>上下文窗口</span>
+            <span>Context Usage</span>
             <span>
-              {formatTokens(ctxAfter)} / {formatTokens(ctxBudget)} ({fillPct}%)
-              · {sourceLabel}
+              {formatTokens(ctxAfter)} / {formatTokens(ctxBudget)} ·{" "}
+              {fillPct}% full · {sourceLabel}
             </span>
           </div>
           <div className="h-1.5 overflow-hidden rounded bg-muted">
@@ -102,13 +147,13 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
           {breakdown && breakdownTotal > 0 ? (
             <div className="mt-2 space-y-1">
               <div className="flex h-2 overflow-hidden rounded bg-muted">
-                {BREAKDOWN_SEGMENTS.map((seg) => {
-                  const value = Number(breakdown[seg.key] ?? 0);
+                {DISPLAY_SEGMENTS.map((seg) => {
+                  const value = segmentValue(breakdown, seg.keys);
                   if (value <= 0) return null;
                   const width = Math.max(0.5, (value / barDenominator) * 100);
                   return (
                     <div
-                      key={seg.key}
+                      key={seg.id}
                       className={`${seg.color} h-full`}
                       style={{ width: `${width}%` }}
                       title={`${seg.label}: ${formatTokens(value)}`}
@@ -117,30 +162,37 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
                 })}
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] opacity-70">
-                {BREAKDOWN_SEGMENTS.map((seg) => {
-                  const value = Number(breakdown[seg.key] ?? 0);
+                {DISPLAY_SEGMENTS.map((seg) => {
+                  const value = segmentValue(breakdown, seg.keys);
                   if (value <= 0) return null;
                   const segPct = Math.round((value / barDenominator) * 100);
                   return (
-                    <div key={seg.key} className="flex items-center gap-1">
+                    <div key={seg.id} className="flex items-center gap-1">
                       <span
                         className={`inline-block h-2 w-2 rounded-sm ${seg.color}`}
                       />
                       <span className="truncate">
-                        {seg.label} {formatTokens(value)} ({segPct}%)
+                        {seg.label}{" "}
+                        <span className="opacity-80">
+                          {formatTokens(value)} · {segPct}%
+                        </span>
                       </span>
                     </div>
                   );
                 })}
               </div>
               <p className="text-[10px] opacity-50">
-                Rules 合并在 System；平台暂无独立 Skills 层
+                对齐 Cursor 分层 · 与请求一致：System prompt＝system.md；
+                Tool definitions＝tools[]（how-to + schema）；Rules＝project
+                （AGENT.md 等）。Skills / Subagent definitions＝本平台未单独计量。
+                Writing ctx / Runtime＝后置 user。Conversation＝user +
+                assistant + tool results + compact。
               </p>
             </div>
           ) : (
             <p className="mt-1 truncate opacity-70">
-              sys={formatTokens(contextUsage?.system_tokens)} · tools=
-              {formatTokens(contextUsage?.tools_tokens)} · msgs=
+              system prompt={formatTokens(contextUsage?.system_tokens)} · tool
+              definitions={formatTokens(contextUsage?.tools_tokens)} · msgs=
               {formatTokens(contextUsage?.messages_tokens)}
             </p>
           )}

@@ -82,7 +82,7 @@
 ## 5. 嵌入 → 向量（重点：原理 + 模拟 + 维数）
 
 向量检索能工作，全靠这件事：**同一台「嵌入机器」，把任意一段字符串压成同一个空间里的一个点。**  
-本项目生产默认：`all-MiniLM-L6-v2` → **384 维**。
+本项目生产默认嵌入由 `make resolve-embedding` 决定（常见 **gte-small → 384 维**；GPU 可达 **bge-m3 → 1024 维**）。
 
 > **读法：** 公式相关内容一律以**流程图为主**；图统一放在 `docs/assets/rag/`（与上下文压缩图 `docs/assets/context/` 分目录）。LaTeX 仅作备查，可跳过。
 
@@ -94,8 +94,8 @@
 |---|------|--------|------|
 | 1 | **两平面：索引面 vs 交互面**（旁路建库 vs Turn 热路径 · 为何禁 sync） | ![](../../assets/rag/01-two-planes.png) | [`01-two-planes.png`](../../assets/rag/01-two-planes.png) |
 | 2 | **切块与嵌入输入**（树切块 · embed 文本拼装 · 批嵌入库 · 万级 chunk） | ![](../../assets/rag/02-chunking-embed.png) | [`02-chunking-embed.png`](../../assets/rag/02-chunking-embed.png) |
-| 3 | **万级 chunk 如何快速命中**（HNSW ANN ∥ BM25 → RRF · 场景/租户裁剪） | ![](../../assets/rag/03-fast-hit-ann.png) | [`03-fast-hit-ann.png`](../../assets/rag/03-fast-hit-ann.png) |
-| 4 | **`search_sources` 端到端**（模式分支 · 店内召回 · 过滤进窗 · 审计旁路） | ![](../../assets/rag/04-search-sources.png) | [`04-search-sources.png`](../../assets/rag/04-search-sources.png) |
+| 3 | **万级 chunk 如何快速命中**（HNSW ∥ 强词OR+Okapi → RRF · two-level · limit=30） | ![](../../assets/rag/03-fast-hit-ann.png) | [`03-fast-hit-ann.png`](../../assets/rag/03-fast-hit-ann.png) |
+| 4 | **`search_sources` 端到端**（强词OR→Okapi→RRF→重排→doc_boost→L3） | ![](../../assets/rag/04-search-sources.png) | [`04-search-sources.png`](../../assets/rag/04-search-sources.png) |
 | 5 | **相似度：归一化 / 点积 / 欧氏 / 余弦**（长度影响 · 为何选余弦 · 本项目落点） | ![](../../assets/rag/05-similarity-metrics.png) | [`05-similarity-metrics.png`](../../assets/rag/05-similarity-metrics.png) |
 | 6 | **Ops 检索审计 L1→L2→L3**（评测台边界 · 三层各回答什么 · 页面操作流） | ![](../../assets/rag/06-ops-audit-l1-l2-l3.png) | [`06-ops-audit-l1-l2-l3.png`](../../assets/rag/06-ops-audit-l1-l2-l3.png) |
 | 7 | **HNSW 原理与数据流转**（图状态 · 插入 A–D · SEARCH-LAYER · 查询下沉 · 参数） | ![](../../assets/rag/07-hnsw-principle.png) | [`07-hnsw-principle.png`](../../assets/rag/07-hnsw-principle.png) |

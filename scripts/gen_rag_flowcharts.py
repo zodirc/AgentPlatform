@@ -208,8 +208,8 @@ def fig_two_planes() -> Path:
         "做什么",
         "· Agent 按需调用 search_sources\n"
         "· embed(query) 一次（毫秒～数十毫秒）\n"
-        "· HNSW ANN + BM25 + RRF + 可选重排\n"
-        "· 租户 / path_prefix 过滤后进 tool_result\n"
+        "· HNSW ∥ 强词OR FTS→Okapi → RRF → 词法重排\n"
+        "· two-level doc 加分（默认开）后截断进 tool_result\n"
         "· 旁路写 retrieval.completed 审计（Ops）",
         fill=ACCENT_SOFT,
         outline=ACCENT,
@@ -221,10 +221,11 @@ def fig_two_planes() -> Path:
         40,
         y,
         W - 80,
-        "intel 规模直觉（本仓库实测量级）",
-        "vendor 充实后常见：约 2500 文件 → 约 1 万+ chunk。"
-        "索引面首建可数十分钟；交互面每次查询仍应对 ~10k 行做亚秒～秒级 ANN，"
-        "而不是扫描全部原文。增量同步只嵌 dirty 文件。",
+        "规模与双库（现行）",
+        "· 常设 seed 约 2500 文件量级；产品 source_* 可远大于此（随用户资料涨）。\n"
+        "· 嵌入：make resolve-embedding → CPU gte-small@384 / GPU≥8GiB 常为 bge-m3@1024。\n"
+        "· Schema A：产品 DATABASE_URL 与 Ops L1（bench-postgres / retrieval_ops）按 Work 分平面；"
+        "热路径不 sync。",
         fill=PURPLE_SOFT,
         outline=PURPLE,
         title_color=PURPLE,
@@ -257,7 +258,7 @@ def fig_chunking() -> Path:
         ("1. 选文件", "should_index_source\n.md/.txt/.json 等\n跳过 cards/、隐藏文件"),
         ("2. 树切块", "按 #/##/### 成节\n叶优先整节保留\n宽 GFM 表可拆指针"),
         ("3. 长度预算", "软顶默认 4000 字\n重叠默认 400 字\n超长则滑窗"),
-        ("4. 拼 embed 文本", "path 线索 + tags\n+ 正文 → embed_input\nexcerpt 仍用正文"),
+        ("4. 拼 embed 文本", "默认仅正文\n(metadata 前缀可关)\nexcerpt 用正文"),
     ]
     gap = 16
     bw = (W - 80 - 3 * gap) // 4
@@ -278,7 +279,7 @@ def fig_chunking() -> Path:
         W - 80,
         "批嵌入 → pgvector / JSON store",
         "· embed=False 先切完所有 dirty 文件，再跨文件 batch encode（减少模型调用次数）\n"
-        "· SentenceTransformer：normalize_embeddings=True → 384 维单位向量\n"
+        "· SentenceTransformer：normalize_embeddings=True（维数随 profile）\n"
         "· 每行 chunk：chunk_id、path、section_title、text、embedding、visibility/work_id\n"
         "· INDEX_VERSION 变化会强制全量重建；日常靠 mtime 跳过未改文件",
         fill=OK_SOFT,
@@ -324,7 +325,8 @@ def fig_fast_hit() -> Path:
         draw,
         W,
         "03 · 万级 chunk 如何快速命中",
-        "生产默认：pgvector + HNSW(cosine) ∥ BM25 → RRF → 过滤 → top-limit。复杂度不随「读完全库正文」增长。",
+        "生产默认：pgvector HNSW(cosine) ∥ 强词OR+Okapi → RRF → 词法重排 → doc_boost → top-limit。"
+        "复杂度不随「读完全库正文」增长。",
     )
 
     y = banner(draw, 40, y, W - 80, "查询时刻只做这些（热路径）", ACCENT_SOFT)
@@ -333,13 +335,14 @@ def fig_fast_hit() -> Path:
         40,
         y,
         W - 80,
-        "一次 query 的计算量",
-        "1. embed(query) → 1 个 384-d 向量（已归一化）\n"
-        "2. 向量路：HNSW 近似近邻（vector_cosine_ops），取 top_k（常 limit×4，至少 20）\n"
-        "3. 词法路：Postgres FTS / BM25，同样取 top_k\n"
-        "4. RRF 按名次融合（不把不同尺度的原始分相加）\n"
-        "5. 可选词法重排；CE 默认关\n"
-        "6. 租户谓词 + scenario path_prefix（intel→seed/intel）后再截断到 limit",
+        "一次 query 的计算量（默认 limit=30）",
+        "1. embed(query) → 1 个单位向量（维数随 profile：384 或 1024）\n"
+        "2. 工具多要 fetch_limit=60（有 path_prefix 则 ×3）；店内每车道 top_k≈240\n"
+        "3. 向量路：HNSW ANN（vector_cosine_ops）\n"
+        "4. 词法路：强词 OR tsquery 召回 → 内存 Okapi 重打分（非 plainto 默认）\n"
+        "5. RRF（k=60，1:1）→ L1；词法重排 → L2；CE 默认关\n"
+        "6. two-level：约 8 个相关 path 并行算出，重排后 doc_boost 再截断\n"
+        "7. 租户 / path_prefix 过滤后工具再截到 limit=30（前 5 条带摘录）",
         fill=ACCENT_SOFT,
         outline=ACCENT,
         title_color=ACCENT,
@@ -374,8 +377,8 @@ def fig_fast_hit() -> Path:
     cols = [
         ("场景前缀", "intel Profile\ndefault_path_prefix=\nseed/intel\n写作可排除 intel"),
         ("租户 SQL", "seed OR\n当前 work_id\n跨 Work 不可见"),
-        ("两级召回", "可选 doc 车道\n+ chunk 车道并行\n超时约 0.3s"),
-        ("limit 裁剪", "融合池较宽\n进窗常 10 条\n摘录有字数预算"),
+        ("两级召回", "默认 doc∥chunk\n约 8 path 加分\n超时约 0.3s"),
+        ("limit 裁剪", "默认进窗 30 条\n前 5 带摘录\n约 400 字/条"),
     ]
     bw = (W - 80 - 48) // 4
     bottoms = []
@@ -423,13 +426,13 @@ def fig_fast_hit() -> Path:
 
 
 def fig_search_sources() -> Path:
-    W, H = 1400, 1800
+    W, H = 1400, 2100
     img, draw = new_img(W, H)
     y = title_block(
         draw,
         W,
         "04 · search_sources 端到端",
-        "工具入口到 tool_result。默认 RETRIEVAL_MODE=hybrid。",
+        "工具入口到 tool_result。默认 hybrid；limit=30；强词 OR + 等权 RRF（产品冻结线）。",
     )
 
     flow = [
@@ -437,25 +440,29 @@ def fig_search_sources() -> Path:
             ACCENT_SOFT,
             ACCENT,
             "① 入口",
-            "解析 scenario 默认/排除前缀；begin_audit_capture() 打开 L1/L2 捕获槽。",
+            "解析 scenario 默认/排除前缀；begin_audit_capture() 打开 L1/L2 捕获槽。"
+            "对外 limit=30；对内 fetch_limit=60（有 path_prefix 则 90）。",
         ),
         (
             WARN_SOFT,
             WARN,
             "② 模式分支",
-            "keyword：扫盘词法。hybrid/vector：store.search（永不 sync）。空/滞后 → keyword-fallback + index_lag 提示。",
+            "keyword：扫盘词法。hybrid/vector：store.search（永不 sync）。"
+            "空/cover 未盖住 → keyword-fallback；keyword 仍空可保留 ANN（不整单抹空）。",
         ),
         (
             PURPLE_SOFT,
             PURPLE,
-            "③ 店内召回",
-            "向量车道 ∥ BM25 车道 → RRF → record_recall_pool（L1）→ 词法重排 → record_ranked（L2）。",
+            "③ 店内召回（chunk 车道 ∥ doc 车道）",
+            "向量 HNSW ≤240 ∥ 词法（强词 OR FTS → Okapi）≤240 → RRF(k=60,1:1)→L1 → "
+            "词法重排→L2。并行约 8 个相关 path；重排之后 doc_boost(0.35) merge，交回 ≤60。",
         ),
         (
             OK_SOFT,
             OK,
-            "④ 回工具层",
-            "租户过滤 → path_prefix/exclude → 截断 limit → 格式化摘录 → entered_context（L3）写入返回。",
+            "④ 回工具层 → L3",
+            "租户过滤 → path_prefix/exclude → 截成 ≤30 → 分层呈现（前 5 条约 400 字摘录，"
+            "其余多 path/标题/分）→ entered_context（L3）。",
         ),
         (
             ACCENT_SOFT,
@@ -617,7 +624,8 @@ def fig_ops_audit() -> Path:
             WARN_SOFT,
             WARN,
             "L2 ranked · 排序结果",
-            "词法重排（或 none/CE）后的顺序。看 rank_method。"
+            "chunk 车道内词法重排后的顺序（CE 默认关）。"
+            "two-level doc_boost 发生在 L2 之后、交工具截断之前。"
             "若 hybrid 且三层完全同构，多半是捕获兜底，不是「三层本该一样」。",
         ),
         (
@@ -625,7 +633,7 @@ def fig_ops_audit() -> Path:
             OK,
             "L3 entered_context · 进窗摘录",
             "真正写入 tool_result、模型下一步能读到的短摘录。"
-            "含 truncated/char_len。条数常 = limit。",
+            "含 truncated/char_len。默认条数 = limit（常 30；前 5 带摘录）。",
         ),
     ]
     for i, (fill, outline, t, body) in enumerate(layers):
@@ -1232,9 +1240,9 @@ def fig_hnsw_query_walk() -> Path:
         W - 80,
         "search_sources（向量支路）",
         "用户/模型写出 query 字符串\n"
-        "  → embed → q（单位化 384 维）\n"
+        "  → embed → q（单位化；维数随 embedding profile）\n"
         "  → pgvector HNSW：从上图「②③」走出 top-k 行（ORDER BY embedding <=> q）\n"
-        "  → 与 BM25 路 RRF 融合 → 截断摘录进窗（可选审计 L1/L2/L3）\n"
+        "  → 与词法路（强词OR→Okapi）RRF → 重排 → doc_boost → 截断摘录进窗\n"
         "索引面早已建好图；热路径只走路，不抽 L、不改边。",
         fill=WARN_SOFT,
         outline=WARN,

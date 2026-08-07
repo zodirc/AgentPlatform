@@ -13,9 +13,9 @@
 
 ## 0.1 流程图（详图）
 
-路径：[`docs/assets/tools/read-file-tokenize-flow-zh.png`](../assets/tools/read-file-tokenize-flow-zh.png)
+路径：[`docs/assets/tools/read-file-deny-flow-zh.png`](../assets/tools/read-file-deny-flow-zh.png)
 
-![读文件降本：硬闸 · 折叠 · 已跳过](../assets/tools/read-file-tokenize-flow-zh.png)
+![读文件降本：硬闸 · 折叠 · 已跳过](../assets/tools/read-file-deny-flow-zh.png)
 
 **读图要点：**
 

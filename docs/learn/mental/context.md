@@ -3,11 +3,24 @@
 > 本文用大白话固定「组窗时上下文在干什么」。**卫生天天做；80/90/95 是超限阶梯，不是 100%。**  
 > 数字演练与逐步模拟见 [`20-context-compaction-walkthrough.md`](../context-compaction-walkthrough.md)；面试口述对照 [`21-agent-system-qa.md`](../agent-system-qa.md) Q9。  
 > 实现入口：`services/runtime/app/context/engine.py`（`_build_envelope`）。  
-> 流程图目录：`docs/assets/context/`（与 RAG 图 `docs/assets/rag/` 分开放，互不重叠）。
+> 流程图目录：`docs/assets/context/`（与 RAG 图 `docs/assets/rag/` 分开放，互不重叠）。  
+> **Usage 分层（UI↔请求）**：[`context-usage-layers-zh.png`](../../assets/context/context-usage-layers-zh.png) · 重建：`python3 scripts/gen_context_flowcharts.py`。
 
 ## 1. 一句话
 
 **上下文压缩 = 每次准备调模型前，把「本步真正发给模型的那一窗 messages」整理到塞得下；不删磁盘草稿，通常也不改 Web 聊天记录。**
+
+先分清 **Context Usage 分层**（与工作台同名）：
+
+| UI | 请求通道 |
+|----|----------|
+| System prompt | `system.md` |
+| Tool definitions | `tools[]`（how-to + schema） |
+| Rules | `[project_context]`（AGENT.md / outline.md…，≈2k） |
+| Writing ctx / Runtime / Session | 后置或垫底 user |
+| Conversation | user + assistant + tool results + compact |
+
+![Usage 分层](../../assets/context/context-usage-layers-zh.png)
 
 两套机制必须分开记：
 
@@ -65,6 +78,8 @@
 路径：[`docs/assets/context/context-fill-ratio.png`](../../assets/context/context-fill-ratio.png)
 
 ![填充率](../../assets/context/context-fill-ratio.png)
+
+> 重建：`python3 scripts/gen_context_flowcharts.py`（同时更新 Usage 分层图与 collapse-80）。
 
 ### 3.1 公式（心智版）
 
