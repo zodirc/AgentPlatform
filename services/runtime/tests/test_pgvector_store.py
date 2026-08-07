@@ -545,3 +545,197 @@ def test_reindex_epoch_read_write_clear() -> None:
     store[scope_meta_key("seed", "reindex_epoch")] = "99.0"
     _clear_reindex_epoch(cur, "seed")
     assert scope_meta_key("seed", "reindex_epoch") not in store
+
+
+def _fake_pg_conn(*, prev_files: list[tuple] | None = None, meta: dict[str, str] | None = None):
+    """Minimal psycopg stand-in for PgvectorSourceRetrievalStore.sync unit tests."""
+    meta_store = dict(meta or {})
+    executed: list[str] = []
+    executemany_calls: list[tuple[str, list]] = []
+    prev_rows = list(prev_files or [])
+
+    class _Cur:
+        def execute(self, sql: str, params=None) -> None:
+            compact = " ".join(sql.split())
+            executed.append(compact)
+            self._sql = compact
+            self._params = params
+            self._rows = []
+            self._row = None
+            upper = compact.upper()
+            if "FROM SOURCE_INDEX_META WHERE KEY LIKE" in upper:
+                prefix = str(params[0]).rstrip("%") if params else ""
+                self._rows = [
+                    (k, v) for k, v in meta_store.items() if k.startswith(prefix)
+                ]
+            elif "FROM SOURCE_INDEX_META WHERE KEY =" in upper and params:
+                key = str(params[0])
+                self._row = (meta_store[key],) if key in meta_store else None
+            elif "FROM SOURCE_FILES" in upper and "SELECT PATH, MTIME" in upper:
+                self._rows = list(prev_rows)
+            elif "INSERT INTO SOURCE_INDEX_META" in upper and params:
+                meta_store[str(params[0])] = str(params[1])
+            elif "DELETE FROM SOURCE_INDEX_META" in upper and params:
+                meta_store.pop(str(params[0]), None)
+            elif "DELETE FROM SOURCE_FILES" in upper and params:
+                path = str(params[0])
+                prev_rows[:] = [r for r in prev_rows if r[0] != path]
+
+        def executemany(self, sql: str, rows) -> None:
+            compact = " ".join(sql.split())
+            executed.append(f"MANY:{compact}")
+            executemany_calls.append((compact, list(rows)))
+
+        def fetchall(self):
+            return list(getattr(self, "_rows", []))
+
+        def fetchone(self):
+            return getattr(self, "_row", None)
+
+    class _CtxCur:
+        def __enter__(self):
+            return _Cur()
+
+        def __exit__(self, *a):
+            return False
+
+    class _Conn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def cursor(self):
+            return _CtxCur()
+
+        def commit(self):
+            return None
+
+    return _Conn(), executed, executemany_calls, meta_store
+
+
+def test_sync_missing_dir_and_private_requires_work_id(tmp_path, monkeypatch) -> None:
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._ready = True
+    store._dimensions = 8
+    store.ensure_schema = lambda: None  # type: ignore[method-assign]
+    store.load = lambda: None  # type: ignore[method-assign]
+
+    missing = tmp_path / "no-such-sources"
+    out = store.sync(missing, workspace_root=tmp_path, visibility="seed")
+    assert out["indexed_files"] == 0
+    assert out["backend"] == "pgvector"
+
+    try:
+        store.sync(tmp_path, workspace_root=tmp_path, visibility="private")
+        raise AssertionError("expected ValueError")
+    except ValueError as exc:
+        assert "work_id" in str(exc)
+
+
+def test_sync_force_reindex_bulk_flush_mock(tmp_path, monkeypatch) -> None:
+    """Drive force-reindex path: drop HNSW → executemany upserts → recreate HNSW."""
+    from uuid import uuid4
+
+    from app.retrieval.pgvector_store import PgvectorSourceRetrievalStore
+
+    workspace = tmp_path / "ws"
+    sources = workspace / "sources"
+    sources.mkdir(parents=True)
+    (sources / "note.md").write_text("alpha beta gamma unique-sync-term\n", encoding="utf-8")
+    stale = f"__work__/gone/sources/stale.md"
+    work_id = str(uuid4())
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._ready = True
+    store._dimensions = 8
+    store.ensure_schema = lambda: None  # type: ignore[method-assign]
+    store.load = lambda: None  # type: ignore[method-assign]
+
+    conn, executed, executemany_calls, _meta = _fake_pg_conn(
+        prev_files=[(stale, 1.0, 2, 0.0)],
+        meta={},  # empty stamp → force_reindex
+    )
+    store._connect = lambda: conn  # type: ignore[method-assign]
+
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.get_embedder",
+        lambda: HashEmbedder(dimensions=8),
+    )
+    monkeypatch.setattr(
+        "app.retrieval.pgvector_store.settings.embedding_backend", "hash"
+    )
+    monkeypatch.setattr(
+        "app.retrieval.index_embed.settings.embedding_batch_size", 8
+    )
+    monkeypatch.setattr(
+        "app.retrieval.index_embed.settings.embedding_flush_chunks", 0
+    )
+    monkeypatch.setattr(
+        "app.retrieval.index_embed.settings.embedding_commit_every_flushes", 0
+    )
+    monkeypatch.setattr(
+        "app.retrieval.index_scheduler.check_sync_cancelled", lambda: None
+    )
+
+    stats = store.sync(
+        sources,
+        workspace_root=workspace,
+        work_id=work_id,
+        visibility="private",
+    )
+    assert stats["reindexed"] is True
+    assert stats["added"] >= 1
+    assert stats["removed"] == 1
+    assert stats["chunks"] >= 1
+    assert any("DROP INDEX IF EXISTS source_chunks_embedding_hnsw" in s for s in executed)
+    assert any("CREATE INDEX IF NOT EXISTS source_chunks_embedding_hnsw" in s for s in executed)
+    assert any("INSERT INTO source_chunks" in sql for sql, _ in executemany_calls)
+    assert any("INSERT INTO source_files" in sql for sql, _ in executemany_calls)
+    assert any("INSERT INTO source_docs" in sql for sql, _ in executemany_calls)
+
+
+def test_sync_seed_incremental_skip_mock(tmp_path, monkeypatch) -> None:
+    """Matching mtime + stamp → skip dirty work (seed SELECT branch)."""
+    from app.retrieval.pgvector_store import (
+        PgvectorSourceRetrievalStore,
+        current_index_stamp,
+        scope_meta_key,
+    )
+
+    workspace = tmp_path / "ws"
+    sources = workspace / "sources" / "seed"
+    sources.mkdir(parents=True)
+    note = sources / "guide.md"
+    note.write_text("seed content for skip path\n", encoding="utf-8")
+    mtime = note.stat().st_mtime
+    storage = "sources/seed/guide.md"
+
+    stamp = current_index_stamp()
+    meta = {scope_meta_key("seed", k): v for k, v in stamp.items()}
+
+    store = PgvectorSourceRetrievalStore.__new__(PgvectorSourceRetrievalStore)
+    store._ready = True
+    store._dimensions = 8
+    store.ensure_schema = lambda: None  # type: ignore[method-assign]
+    store.load = lambda: None  # type: ignore[method-assign]
+
+    conn, executed, executemany_calls, _ = _fake_pg_conn(
+        prev_files=[(storage, mtime, 3, mtime)],
+        meta=meta,
+    )
+    store._connect = lambda: conn  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        "app.retrieval.index_scheduler.check_sync_cancelled", lambda: None
+    )
+
+    stats = store.sync(sources, workspace_root=workspace, visibility="seed")
+    assert stats["reindexed"] is False
+    assert stats["skipped"] == 1
+    assert stats["chunks"] == 3
+    assert stats["added"] == 0
+    assert not executemany_calls
+    assert any("visibility = 'seed'" in s for s in executed)
