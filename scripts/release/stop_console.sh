@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Stop background release-console started by ensure_console.sh.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+STATUS_DIR="${RELEASE_STATUS_DIR:-$ROOT/reports/release}"
+PID_FILE="$STATUS_DIR/console.pid"
+ENV_FILE="${ENV_FILE:-$ROOT/.env}"
+
+port=9090
+if [[ -f "$ENV_FILE" ]]; then
+  line="$(grep -E '^[[:space:]]*RELEASE_CONSOLE_PORT=' "$ENV_FILE" | tail -n1 || true)"
+  if [[ -n "$line" ]]; then
+    port="${line#*=}"
+    port="${port%%#*}"
+    port="${port// /}"
+  fi
+fi
+
+stopped=0
+if [[ -f "$PID_FILE" ]]; then
+  pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null || true
+    stopped=1
+  fi
+  rm -f "$PID_FILE"
+fi
+
+# Best-effort: anything still bound to the port that looks like our server.
+if command -v fuser >/dev/null 2>&1; then
+  if fuser "${port}/tcp" >/dev/null 2>&1; then
+    fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+    stopped=1
+  fi
+elif command -v lsof >/dev/null 2>&1; then
+  pids="$(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  if [[ -n "$pids" ]]; then
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    stopped=1
+  fi
+fi
+
+if [[ "$stopped" == "1" ]]; then
+  echo "==> release-console stopped"
+else
+  echo "==> release-console not running"
+fi

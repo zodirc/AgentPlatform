@@ -10,7 +10,8 @@
 | **怎么扩展** | 同一 `AgentEngine`；差异在 `ScenarioProfile`（工具白名单 / 提示词 / 审批），不是再画一张流程图 |
 | **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · exec **bwrap** 沙箱 · Golden/`make gate` 可证明 |
 | **非目标** | 不宣称对齐 Cursor 全功能；Skills / 多模态 / K8s 暂缓 |
-| **起栈** | `cp .env.example .env` → `make up` → `http://localhost/` |
+| **起栈** | `make up` = **分模块**只重建脏服务 + 发布台 `:9090`；全量用 `make up-all` |
+| **发布台** | 随 up 拉起；发布必须勾选模块。见 [scripts/release/README.md](scripts/release/README.md) |
 | **Demo** | 见 [docs/learn/DEMO.md](docs/learn/DEMO.md) |
 | **旁路观测** | `/ops/<OPS_TEST_SECRET>/…` · [Ops](docs/topics/ops-eval-console.md) |
 

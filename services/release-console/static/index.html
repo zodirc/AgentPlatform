@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>部署看板</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --line: #2a3542;
+      --text: #e7eef6;
+      --muted: #8b9aab;
+      --ok: #3d9a78;
+      --warn: #c4a35a;
+      --bad: #c45c5c;
+      --mono: ui-monospace, "SF Mono", Menlo, monospace;
+      --sans: "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; font-family: var(--sans); color: var(--text);
+      background: radial-gradient(900px 420px at 10% -10%, #1a2a22, transparent 55%), var(--bg);
+    }
+    header {
+      padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);
+      display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; flex-wrap: wrap;
+    }
+    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+    header .sub { color: var(--muted); font-size: 0.85rem; }
+    .pill {
+      font-family: var(--mono); font-size: 0.78rem; padding: 0.35rem 0.65rem;
+      border-radius: 999px; border: 1px solid var(--line);
+    }
+    .pill.healthy { color: var(--ok); border-color: #2f6b54; }
+    .pill.action_needed { color: var(--warn); border-color: #7a6430; }
+    main {
+      display: grid; grid-template-columns: minmax(280px, 360px) 1fr;
+      gap: 0; min-height: calc(100vh - 64px);
+    }
+    @media (max-width: 880px) { main { grid-template-columns: 1fr; } }
+    .left { border-right: 1px solid var(--line); padding: 0.75rem; background: #12181f; }
+    .right { padding: 1rem 1.25rem 2rem; }
+    .mod {
+      display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center;
+      padding: 0.75rem; border: 1px solid var(--line); border-radius: 8px;
+      margin-bottom: 0.5rem; background: var(--panel); cursor: pointer;
+    }
+    .mod:hover, .mod.active { border-color: #3d5a4a; }
+    .mod .name { font-weight: 600; font-size: 0.92rem; }
+    .mod .why { color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem; line-height: 1.35; }
+    .tag {
+      font-family: var(--mono); font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: 4px;
+    }
+    .tag.ok { color: var(--ok); background: #122018; }
+    .tag.action { color: var(--warn); background: #241c10; }
+    .tag.unknown { color: var(--muted); background: #1a1f26; }
+    button.act {
+      font-size: 0.75rem; padding: 0.35rem 0.55rem; border-radius: 6px;
+      border: 1px solid #2f7a5e; background: var(--ok); color: #04140e;
+      font-weight: 600; cursor: pointer; white-space: nowrap;
+    }
+    button.act:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.act.ghost {
+      background: transparent; color: var(--muted); border-color: var(--line); font-weight: 500;
+    }
+    .panel-title { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.75rem; }
+    .detail-card {
+      border: 1px solid var(--line); border-radius: 8px; padding: 1rem; background: var(--panel);
+      margin-bottom: 1rem;
+    }
+    .detail-card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+    .detail-card .line { color: var(--muted); font-size: 0.88rem; line-height: 1.45; margin: 0.35rem 0; }
+    .detail-card code { font-family: var(--mono); font-size: 0.8rem; color: var(--ok); }
+    .job { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); margin-bottom: 0.75rem; }
+    .err { color: var(--bad); font-size: 0.85rem; min-height: 1.2em; }
+    pre.log {
+      margin: 0; max-height: 40vh; overflow: auto; font-family: var(--mono);
+      font-size: 0.72rem; line-height: 1.4; white-space: pre-wrap; color: #c5d0db;
+      border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; background: #12181f;
+    }
+    .hint { color: var(--muted); font-size: 0.78rem; margin-top: 0.75rem; line-height: 1.4; }
+    .log-tabs {
+      display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.65rem;
+    }
+    .log-tabs button {
+      font-family: var(--mono); font-size: 0.72rem; padding: 0.3rem 0.55rem;
+      border-radius: 6px; border: 1px solid var(--line); background: transparent;
+      color: var(--muted); cursor: pointer;
+    }
+    .log-tabs button:hover { color: var(--text); border-color: #3d5a4a; }
+    .log-tabs button.on {
+      color: var(--ok); border-color: #2f6b54; background: #122018;
+    }
+    .log-tabs button.has { color: var(--text); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>部署看板</h1>
+      <div class="sub">左栏管健康检查与一键处理；下方用标签切换各模块任务日志。</div>
+    </div>
+    <div id="pill" class="pill">…</div>
+  </header>
+  <main>
+    <aside class="left" id="list"></aside>
+    <section class="right">
+      <div class="job" id="job">—</div>
+      <div class="err" id="err"></div>
+      <div id="detail"></div>
+      <h2 class="panel-title">各模块任务日志</h2>
+      <div class="log-tabs" id="log-tabs"></div>
+      <pre class="log" id="log">—</pre>
+      <p class="hint">每个模块单独一份日志。点上方标签切换；对该模块点「重建/同步」后才会有输出。产品站：<a href="http://localhost/" style="color:#3d9a78">http://localhost/</a></p>
+    </section>
+  </main>
+  <script>
+    let plan = null;
+    let selectedId = null;
+    let logModule = "api";
+    let logMeta = {};
+    let busy = false;
+    const $ = (id) => document.getElementById(id);
+
+    const LOG_TABS = [
+      { id: "api", label: "api" },
+      { id: "runtime", label: "runtime" },
+      { id: "web", label: "web" },
+      { id: "gateway", label: "gateway" },
+      { id: "index_product", label: "产品索引" },
+      { id: "index_ops", label: "Ops 索引" },
+    ];
+
+    // 左侧检查项 → 对应日志标签
+    const ITEM_TO_LOG = {
+      api: "api",
+      runtime: "runtime",
+      web: "web",
+      gateway: "gateway",
+      embedding: "runtime",
+      index_product: "index_product",
+      index_ops: "index_ops",
+    };
+
+    function statusLabel(st) {
+      if (st === "ok") return "已是最新";
+      if (st === "action") return "存在变动";
+      return st || "?";
+    }
+
+    function renderList() {
+      const box = $("list");
+      box.innerHTML = "";
+      if (!plan) return;
+      for (const it of plan.items || []) {
+        const row = document.createElement("div");
+        row.className = "mod" + (selectedId === it.id ? " active" : "");
+        row.onclick = (e) => {
+          if (e.target.closest("button")) return;
+          selectedId = it.id;
+          logModule = ITEM_TO_LOG[it.id] || it.id;
+          renderList();
+          renderDetail();
+          renderLogTabs();
+          loadLog();
+        };
+        const btn = it.button;
+        const canAct = it.status === "action" && btn && !busy;
+        row.innerHTML = `
+          <div>
+            <div class="name">${it.title || it.id}</div>
+            <div class="why">${it.detail || ""}</div>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:0.35rem;align-items:flex-end">
+            <span class="tag ${it.status || "unknown"}">${statusLabel(it.status)}</span>
+            ${btn ? `<button class="act" data-action="${btn.action}" ${canAct ? "" : "disabled"}>${btn.label}</button>` : ""}
+          </div>`;
+        const b = row.querySelector("button.act[data-action]");
+        if (b && canAct) {
+          b.onclick = (ev) => {
+            ev.stopPropagation();
+            runAction(b.getAttribute("data-action"));
+          };
+        }
+        box.appendChild(row);
+      }
+    }
+
+    function renderDetail() {
+      const it = (plan?.items || []).find((x) => x.id === selectedId) || (plan?.items || [])[0];
+      if (it) selectedId = it.id;
+      const el = $("detail");
+      if (!it) {
+        el.innerHTML = "<p class='hint'>暂无检查项</p>";
+        return;
+      }
+      const extra = [];
+      if (it.deployed_sha) {
+        const msg = it.deployed_subject
+          ? ` — ${it.deployed_subject}`
+          : "";
+        const when = it.deployed_date ? ` <span style="opacity:.7">(${it.deployed_date})</span>` : "";
+        extra.push(`已部署基线：<code>${it.deployed_sha}</code>${msg}${when}`);
+      }
+      if (plan?.git_sha_short && it.kind === "code") {
+        const hmsg = plan.git_subject ? ` — ${plan.git_subject}` : "";
+        extra.push(`当前 HEAD：<code>${plan.git_sha_short}</code>${hmsg}`);
+      }
+      if (it.want) extra.push(`目标模型：<code>${it.want}</code> @ ${it.want_dims}d / INDEX ${it.want_index_version}`);
+      if (it.baked) extra.push(`容器 bake：<code>${it.baked}</code>`);
+      if (it.stored && (it.stored.embedding_model || it.stored.version)) {
+        extra.push(`索引戳记：<code>${it.stored.embedding_model || "?"} / INDEX ${it.stored.version || "?"}</code>`);
+      }
+      el.innerHTML = `
+        <div class="detail-card">
+          <h3>${it.title}</h3>
+          <div class="line"><span class="tag ${it.status || "unknown"}">${statusLabel(it.status)}</span>${it.detail ? ` · ${it.detail}` : ""}</div>
+          ${it.action ? `<div class="line">建议：<code>${it.action}</code></div>` : ""}
+          ${extra.map((x) => `<div class="line">${x}</div>`).join("")}
+        </div>`;
+    }
+
+    function renderLogTabs() {
+      const box = $("log-tabs");
+      box.innerHTML = "";
+      for (const t of LOG_TABS) {
+        const b = document.createElement("button");
+        const meta = logMeta[t.id] || {};
+        b.type = "button";
+        b.textContent = t.label + (meta.has_log ? "" : "");
+        b.className = (logModule === t.id ? "on" : "") + (meta.has_log ? " has" : "");
+        b.title = meta.has_log
+          ? `${t.label} 有历史输出`
+          : `${t.label} 尚无输出（对该模块执行重建/同步后出现）`;
+        b.onclick = () => {
+          logModule = t.id;
+          // 尽量同步左侧选中项
+          const match = (plan?.items || []).find((x) => ITEM_TO_LOG[x.id] === t.id);
+          if (match) {
+            selectedId = match.id;
+            renderList();
+            renderDetail();
+          }
+          renderLogTabs();
+          loadLog();
+        };
+        box.appendChild(b);
+      }
+    }
+
+    async function loadLogMeta() {
+      try {
+        const r = await fetch("/api/logs");
+        const j = await r.json();
+        logMeta = j.modules || {};
+        renderLogTabs();
+      } catch (_) {
+        renderLogTabs();
+      }
+    }
+
+    async function loadLog() {
+      if (!logModule) return;
+      try {
+        const lr = await fetch("/api/log?module=" + encodeURIComponent(logModule));
+        const lg = await lr.json();
+        const empty = !lg.text || lg.text.startsWith("（尚无");
+        if (empty) {
+          $("log").textContent =
+            `【${lg.log_key || logModule}】还没有任务输出。\n` +
+            `对该模块点左侧「重建 / 同步」后，stdout 会写到这里。\n` +
+            `用上方标签可切换查看 api / runtime / web / 索引 等各自日志。`;
+        } else {
+          $("log").textContent = lg.text;
+        }
+      } catch (e) {
+        $("log").textContent = String(e);
+      }
+    }
+
+    function renderHeader() {
+      const pill = $("pill");
+      const s = plan?.summary || "error";
+      pill.className = "pill " + s;
+      pill.textContent = s === "healthy" ? "全部最新" : "存在变动";
+      const dep = plan?.deploy || {};
+      $("job").textContent = `任务 ${dep.phase || "idle"}${dep.message ? " · " + dep.message : ""} · HEAD ${plan?.git_sha_short || "?"}`;
+      busy = ["building", "switching", "verifying"].includes(dep.phase || "");
+    }
+
+    async function refresh(force) {
+      try {
+        const r = await fetch("/api/plan" + (force ? "?force=1" : ""));
+        plan = await r.json();
+        if (!selectedId && plan.items?.length) selectedId = plan.items[0].id;
+        if (selectedId && ITEM_TO_LOG[selectedId]) logModule = ITEM_TO_LOG[selectedId];
+        renderHeader();
+        renderList();
+        renderDetail();
+        await loadLogMeta();
+        await loadLog();
+        const scope = plan.detect_scope ? ` · 检测范围：${plan.detect_scope}` : "";
+        const stale = plan.stale ? " · 后台核对中…" : "";
+        const headBit = plan.git_sha_short
+          ? ` · HEAD ${plan.git_sha_short}${plan.git_subject ? " " + plan.git_subject : ""}`
+          : "";
+        $("job").textContent =
+          `任务 ${(plan.deploy || {}).phase || "idle"}${(plan.deploy || {}).message ? " · " + (plan.deploy || {}).message : ""}${headBit}${scope}${stale}`;
+        // 首屏用缓存秒开；若标记 stale，稍后再拉一次拿新结果
+        if (plan.stale && !force) {
+          setTimeout(() => refresh(false), 2200);
+        }
+      } catch (e) {
+        $("err").textContent = String(e);
+      }
+    }
+
+    async function runAction(action) {
+      $("err").textContent = "";
+      busy = true;
+      renderList();
+      try {
+        const r = await fetch("/api/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          $("err").textContent = j.error || r.statusText;
+          busy = false;
+          renderList();
+          return;
+        }
+        $("job").textContent = `已启动 ${action}…`;
+        // 切到该动作对应日志标签
+        const key = {
+          "up-api": "api",
+          "up-runtime": "runtime",
+          "up-web": "web",
+          "up-gateway": "gateway",
+          "sync-sources": "index_product",
+          "sync-ops-indexes": "index_ops",
+        }[action];
+        if (key) logModule = key;
+        setTimeout(() => refresh(true), 1200);
+      } catch (e) {
+        $("err").textContent = String(e);
+        busy = false;
+        renderList();
+      }
+    }
+
+    // 不要 force：磁盘/内存缓存立刻渲染，后台再核对
+    refresh(false);
+    setInterval(() => refresh(false), 8000);
+  </script>
+</body>
+</html>

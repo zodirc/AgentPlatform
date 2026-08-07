@@ -39,6 +39,8 @@ debug.log
 *.log
 ci-proof.log
 reports/eval-last-failures.txt
+reports/release/**
+!reports/release/.gitkeep
 
 # agent runtime sandbox (bind-mounted; user-local)
 workspace/

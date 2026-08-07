@@ -49,6 +49,8 @@ DOCKER_FIX_WSL_CREDS ?= 1
 API_REBUILD_DEPS ?= 0
 RUNTIME_REBUILD_DEPS ?= 0
 WEB_REBUILD_DEPS ?= 0
+# make up/start 后台拉起发布台 :9090；RELEASE_CONSOLE=0 关闭
+RELEASE_CONSOLE ?= 1
 
 .DEFAULT_GOAL := help
 
@@ -71,7 +73,8 @@ WEB_REBUILD_DEPS ?= 0
 	official-bench-update-baseline official-bench-show-baseline \
 	official-bench-compare official-bench-live \
 	official-bench-retrieval-agent official-bench-retrieval-zh-agent official-bench-context-agent \
-	official-bench-coding-infer-agent c3-retrieval-grid
+	official-bench-coding-infer-agent c3-retrieval-grid \
+	release release-status release-detect release-console release-console-stop release-after-up up-all release-plan
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
@@ -91,7 +94,8 @@ help: ## 显示常用命令
 	@echo "  # docs/38：改 app 代码不必 *_REBUILD_DEPS；改 pyproject/模型才需要"
 	@echo ""
 	@echo "完整部署"
-	@echo "  make up           重建并启动全部服务（默认 live + pgvector + embedding）"
+	@echo "  make up           分模块：只重建脏服务 + 发布台 :9090"
+	@echo "  make up-all       强制全量 compose --build（不分模块）"
 	@echo "  make sync-sources 增量索引 seed/普通 work（本终端 [sync] 进度；不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"
 	@echo "  make sync-ops-cmteb    换模后重嵌 Ops C-MTEB（同模；仅 retrieval_ops_zh 分图）"
@@ -128,11 +132,46 @@ help: ## 显示常用命令
 	@echo "  make preflight-ci    全量本地 CI（ci_proof+web；久；推送前手动跑）"
 	@echo "  make hooks-install 启用 .githooks（make up/start 也会自动装）"
 	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
+	@echo ""
+	@echo "发布台（同仓；make up/start 默认拉起 :9090）"
+	@echo "  make release-console  前台跑发布台（调试用）"
+	@echo "  make release-console-stop  停掉 make up 拉起的后台发布台"
+	@echo "  make release-status / release-detect / release"
+	@echo "  RELEASE_CONSOLE=0 make up   起栈但不启发布台"
 
 # If OPS_TEST_SECRET is empty/missing in .env, generate once and print Ops URL (docs/29).
 # Never overwrites an existing secret.
 ensure-ops-secret: ## 确保 .env 有 OPS_TEST_SECRET，并打印 /ops/<secret>/test
 	@bash scripts/ensure_ops_test_secret.sh
+
+# Release console: scripts/release + services/release-console (port 9090).
+# Packaged modules replace the serving stack on :80 — not a second product stack.
+release-status: ## 刷新发布状态 JSON
+	@bash scripts/release/release.sh status
+
+release-plan: ## 健康看板数据（代码/向量模型/索引要不要动）
+	@python3 scripts/release/plan.py
+
+release-detect: ## 检测相对 last_release_sha 的脏模块
+	@bash scripts/release/release.sh detect
+
+release: ## 分模块发布（必须 RELEASE_MODULES=api,web 或先 detect）
+	@if [ -z "$(RELEASE_MODULES)" ]; then \
+	  echo "用法: make release RELEASE_MODULES=api,runtime,web  （必须分模块）"; \
+	  echo "先看脏模块: make release-detect"; \
+	  exit 2; \
+	fi
+	@bash scripts/release/release.sh run --modules=$(RELEASE_MODULES)
+
+release-console: ## 发布台 Web 前台跑（需 .env 中 RELEASE_CONSOLE_SECRET）
+	@PYTHONUNBUFFERED=1 python3 services/release-console/server.py
+
+release-console-stop: ## 停止 make up 拉起的后台发布台
+	@bash scripts/release/stop_console.sh
+
+# After modular release: ensure console only (mark done per-module inside release.sh).
+release-after-up: ## 确保发布台在跑（兼容旧目标名）
+	@RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh
 
 ensure-docker-creds: ## WSL：去掉 ~/.docker 里坏掉的 desktop.exe credsStore（可关 DOCKER_FIX_WSL_CREDS=0）
 	@DOCKER_FIX_WSL_CREDS=$(DOCKER_FIX_WSL_CREDS) bash scripts/ensure_docker_creds.sh
@@ -153,6 +192,7 @@ fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
 start: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 启动栈（不 rebuild，最快）
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d
 	@$(MAKE) --no-print-directory fix-workspace-sources
+	@RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh
 
 # Safe: only removes untagged (<none>) images left by retag-after-build.
 define docker_auto_prune
@@ -162,13 +202,19 @@ define docker_auto_prune
 	fi
 endef
 
-up: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 重建并启动全部服务
+up: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 分模块重建脏服务 + 发布台 :9090
+	@bash scripts/release/release.sh up
+
+up-all: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 强制全量 compose --build（不分模块）
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d --build
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
+	@bash scripts/release/release.sh mark --modules=api,runtime,web,gateway >/dev/null
+	@RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh
 
 # Secret is consumed by api only. up-web may generate it for the first time — recreate api then.
 # --no-deps: do not rebuild/restart depends_on (api→runtime); otherwise up-api pays runtime ST/pip.
+# SKIP_RELEASE_HOOK=1：被 release.sh 调用时跳过 mark/console（由上层统一做）。
 up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
 	@status=$$(mktemp); \
 	OPS_SECRET_STATUS_FILE=$$status bash scripts/ensure_ops_test_secret.sh; \
@@ -183,6 +229,10 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 	fi
 	$(COMPOSE) up -d --no-deps --build web
 	$(docker_auto_prune)
+	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
+	  bash scripts/release/release.sh mark --modules=web >/dev/null; \
+	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
+	fi
 
 up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache）
 	@if [ "$(API_REBUILD_DEPS)" = "1" ]; then \
@@ -191,6 +241,10 @@ up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEP
 	fi
 	$(COMPOSE) up -d --no-deps --build api
 	$(docker_auto_prune)
+	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
+	  bash scripts/release/release.sh mark --modules=api >/dev/null; \
+	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
+	fi
 
 # Opt-in: mount docker.sock so Ops「完整证明」proof_available=true (docs/29).
 # Plain make up / up-api intentionally omit the socket (security default).
@@ -206,6 +260,10 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 	fi
 	$(COMPOSE) up -d --no-deps --build runtime
 	$(docker_auto_prune)
+	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
+	  bash scripts/release/release.sh mark --modules=runtime >/dev/null; \
+	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
+	fi
 
 up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
 	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
@@ -238,6 +296,7 @@ web-dev: ## 前端开发服务器（代理 /api → localhost:8000）
 
 down:
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE_QUEUE_RETRIEVAL) --profile queue --profile retrieval down
+	@bash scripts/release/stop_console.sh || true
 
 ps:
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) ps
