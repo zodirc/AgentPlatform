@@ -123,7 +123,7 @@ def _running_containers() -> set[str]:
 
 
 def _worktree_changed_files() -> list[str]:
-    """Uncommitted (staged + unstaged) + untracked. Always included in dirty check."""
+    """Uncommitted (staged + unstaged) + untracked."""
     blob = "\n".join(
         [
             _git("diff", "--name-only"),
@@ -132,6 +132,38 @@ def _worktree_changed_files() -> list[str]:
         ]
     )
     return [f.strip() for f in blob.splitlines() if f.strip()]
+
+
+def _upstream_info() -> dict:
+    """How local HEAD compares to @{upstream} (no network)."""
+    info = {
+        "upstream": None,
+        "ahead": None,
+        "behind": None,
+        "hint": None,
+    }
+    up = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+    if not up:
+        info["hint"] = "无 upstream（未设置跟踪分支）"
+        return info
+    info["upstream"] = up
+    blob = _git("rev-list", "--left-right", "--count", "HEAD...@{upstream}")
+    if not blob or "\t" not in blob:
+        return info
+    left, _, right = blob.partition("\t")
+    try:
+        ahead, behind = int(left.strip()), int(right.strip())
+    except ValueError:
+        return info
+    info["ahead"] = ahead
+    info["behind"] = behind
+    if behind > 0:
+        info["hint"] = f"落后远程 {behind} 个提交，换机器/同步部署请先「拉取」"
+    elif ahead > 0:
+        info["hint"] = f"本地超前远程 {ahead} 个提交（未 push）"
+    else:
+        info["hint"] = "与远程同步"
+    return info
 
 
 def _committed_since(deployed_sha: str) -> list[str]:
@@ -161,6 +193,7 @@ def _module_dirty(
     *,
     running: set[str],
     worktree_files: list[str],
+    include_worktree: bool,
 ) -> tuple[bool, str]:
     cname = CONTAINERS.get(mod, "")
     if mod != "gateway" and cname and cname not in running:
@@ -174,7 +207,7 @@ def _module_dirty(
         return True, "已部署 sha 无效，需重新发布"
 
     committed = _match_files(_committed_since(deployed_sha), prefixes)
-    dirty_wt = _match_files(worktree_files, prefixes)
+    dirty_wt = _match_files(worktree_files, prefixes) if include_worktree else []
     hit = committed + [f for f in dirty_wt if f not in committed]
     if hit:
         kinds = []
@@ -185,7 +218,9 @@ def _module_dirty(
         sample = ", ".join(hit[:3])
         more = f" 等{len(hit)}个文件" if len(hit) > 3 else ""
         return True, f"存在变动（{'+'.join(kinds)}）：{sample}{more}"
-    return False, "相对已部署；已检查未提交"
+    if include_worktree:
+        return False, "相对已部署；已检查未提交"
+    return False, "相对已部署；仅看已提交"
 
 
 def _container_running(name: str, running: set[str] | None = None) -> bool:
@@ -370,13 +405,18 @@ def _index_item(
     return item
 
 
-def build_plan() -> dict:
+def build_plan(mode: str | None = None) -> dict:
+    mode_raw = (mode or os.environ.get("RELEASE_DETECT_MODE") or "local").strip().lower()
+    mode = mode_raw if mode_raw in {"local", "sync"} else "local"
+    include_worktree = mode == "local"
+
     paths = _load_paths()
     st = _status_doc()
     deployed = st.get("deployed") or {}
     head = _git("rev-parse", "HEAD") or "nogit"
     head_short = _git("rev-parse", "--short", "HEAD") or "nogit"
     head_meta = _commit_meta(head)
+    remote = _upstream_info()
 
     auto = {**_read_env_file(DEFAULT_ENV), **_read_env_file(AUTO_ENV)}
     env_file = _read_env_file(ROOT / ".env")
@@ -392,7 +432,7 @@ def build_plan() -> dict:
     )
 
     running = _running_containers()
-    worktree_files = _worktree_changed_files()
+    worktree_files = _worktree_changed_files() if include_worktree else []
 
     items: list[dict] = []
     dirty_code: list[str] = []
@@ -407,6 +447,7 @@ def build_plan() -> dict:
             sha,
             running=running,
             worktree_files=worktree_files,
+            include_worktree=include_worktree,
         )
         action = None
         if dirty:
@@ -485,20 +526,30 @@ def build_plan() -> dict:
             bits.append("索引")
         headline = "存在变动：" + "；".join(bits)
 
+    if mode == "local":
+        detect_scope = "本地开发：已提交(相对已部署) + 未提交"
+        workflow = "改代码 → 可不 commit 先重建试 → 确认后再 commit"
+    else:
+        detect_scope = "同步部署：仅已提交(相对已部署)；忽略未提交"
+        workflow = "换机器 → 拉取远程 → 按已提交变更重建"
+
     return {
         "summary": summary,
         "headline": headline,
+        "mode": mode,
+        "workflow": workflow,
         "git_sha": head,
         "git_sha_short": head_short,
         "git_subject": head_meta.get("subject"),
         "git_date": head_meta.get("date"),
+        "git_remote": remote,
         "embedding_want": {
             "model": want_model,
             "dims": want_dims,
             "index_version": want_ver,
         },
         "dirty_code_modules": dirty_code,
-        "detect_scope": "已提交(相对已部署) + 未提交(暂存/未暂存/未跟踪)",
+        "detect_scope": detect_scope,
         "counts": {"ok": len(oks), "action": len(actions), "total": len(items)},
         "items": items,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -508,7 +559,13 @@ def build_plan() -> dict:
 
 
 def main() -> None:
-    print(json.dumps(build_plan(), ensure_ascii=False, indent=2))
+    import sys
+
+    mode = None
+    for arg in sys.argv[1:]:
+        if arg.startswith("--mode="):
+            mode = arg.split("=", 1)[1]
+    print(json.dumps(build_plan(mode=mode), ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

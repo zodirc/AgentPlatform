@@ -4,126 +4,414 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>部署看板</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #0f1419;
-      --panel: #1a222c;
-      --line: #2a3542;
-      --text: #e7eef6;
-      --muted: #8b9aab;
-      --ok: #3d9a78;
-      --warn: #c4a35a;
-      --bad: #c45c5c;
-      --mono: ui-monospace, "SF Mono", Menlo, monospace;
-      --sans: "Segoe UI", system-ui, sans-serif;
+      --ink: #0b1220;
+      --ink-2: #101a2b;
+      --panel: #152033;
+      --panel-2: #1a2740;
+      --line: #2a3a55;
+      --line-soft: #22314a;
+      --text: #e8eef8;
+      --muted: #8b9bb8;
+      --accent: #3ecfbf;
+      --accent-dim: #1a4f4a;
+      --ok: #3ecf8e;
+      --ok-bg: #0f2a22;
+      --warn: #e0b35c;
+      --warn-bg: #2a2212;
+      --bad: #e06b6b;
+      --glow: rgba(62, 207, 191, 0.14);
+      --sans: "Sora", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      --radius: 10px;
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
     }
     * { box-sizing: border-box; }
+    html, body { height: 100%; }
     body {
-      margin: 0; min-height: 100vh; font-family: var(--sans); color: var(--text);
-      background: radial-gradient(900px 420px at 10% -10%, #1a2a22, transparent 55%), var(--bg);
+      margin: 0;
+      min-height: 100vh;
+      font-family: var(--sans);
+      color: var(--text);
+      background:
+        radial-gradient(900px 480px at 8% -8%, var(--glow), transparent 55%),
+        radial-gradient(700px 420px at 100% 0%, rgba(70, 110, 200, 0.12), transparent 50%),
+        linear-gradient(180deg, var(--ink-2), var(--ink));
+      background-attachment: fixed;
+    }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      opacity: 0.35;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+      background-size: 48px 48px;
+      mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 75%);
     }
     header {
-      padding: 1rem 1.25rem; border-bottom: 1px solid var(--line);
-      display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; flex-wrap: wrap;
+      position: relative;
+      padding: 1.15rem 1.5rem;
+      border-bottom: 1px solid var(--line-soft);
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      align-items: center;
+      flex-wrap: wrap;
+      backdrop-filter: blur(10px);
+      background: rgba(11, 18, 32, 0.72);
     }
-    header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
-    header .sub { color: var(--muted); font-size: 0.85rem; }
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .brand-mark {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+    }
+    header .sub {
+      color: var(--muted);
+      font-size: 0.82rem;
+      max-width: 42rem;
+      line-height: 1.45;
+    }
     .pill {
-      font-family: var(--mono); font-size: 0.78rem; padding: 0.35rem 0.65rem;
-      border-radius: 999px; border: 1px solid var(--line);
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      padding: 0.45rem 0.85rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      transition: border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
     }
-    .pill.healthy { color: var(--ok); border-color: #2f6b54; }
-    .pill.action_needed { color: var(--warn); border-color: #7a6430; }
+    .pill.healthy {
+      color: var(--ok);
+      border-color: #2f6b54;
+      box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.12);
+    }
+    .pill.action_needed {
+      color: var(--warn);
+      border-color: #7a6430;
+      box-shadow: 0 0 0 3px rgba(224, 179, 92, 0.12);
+    }
     main {
-      display: grid; grid-template-columns: minmax(280px, 360px) 1fr;
-      gap: 0; min-height: calc(100vh - 64px);
+      position: relative;
+      display: grid;
+      grid-template-columns: minmax(300px, 380px) 1fr;
+      min-height: calc(100vh - 88px);
     }
-    @media (max-width: 880px) { main { grid-template-columns: 1fr; } }
-    .left { border-right: 1px solid var(--line); padding: 0.75rem; background: #12181f; }
-    .right { padding: 1rem 1.25rem 2rem; }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      .left { border-right: 0; border-bottom: 1px solid var(--line-soft); max-height: 42vh; overflow: auto; }
+    }
+    .left {
+      border-right: 1px solid var(--line-soft);
+      padding: 0.9rem;
+      background: rgba(16, 26, 43, 0.82);
+    }
+    .right {
+      padding: 1.15rem 1.4rem 2rem;
+    }
     .mod {
-      display: grid; grid-template-columns: 1fr auto; gap: 0.5rem; align-items: center;
-      padding: 0.75rem; border: 1px solid var(--line); border-radius: 8px;
-      margin-bottom: 0.5rem; background: var(--panel); cursor: pointer;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 0.55rem;
+      align-items: center;
+      padding: 0.85rem 0.9rem;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      margin-bottom: 0.55rem;
+      background: linear-gradient(160deg, var(--panel), var(--panel-2));
+      cursor: pointer;
+      transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
     }
-    .mod:hover, .mod.active { border-color: #3d5a4a; }
-    .mod .name { font-weight: 600; font-size: 0.92rem; }
-    .mod .why { color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem; line-height: 1.35; }
+    .mod:hover {
+      border-color: #3d5f72;
+      transform: translateY(-1px);
+    }
+    .mod.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(62, 207, 191, 0.25), var(--shadow);
+    }
+    .mod .name {
+      font-weight: 600;
+      font-size: 0.92rem;
+      letter-spacing: -0.01em;
+    }
+    .mod .why {
+      color: var(--muted);
+      font-size: 0.74rem;
+      margin-top: 0.25rem;
+      line-height: 1.4;
+    }
+    .mod-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      align-items: flex-end;
+    }
     .tag {
-      font-family: var(--mono); font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: 4px;
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      padding: 0.18rem 0.45rem;
+      border-radius: 5px;
+      letter-spacing: 0.02em;
     }
-    .tag.ok { color: var(--ok); background: #122018; }
-    .tag.action { color: var(--warn); background: #241c10; }
-    .tag.unknown { color: var(--muted); background: #1a1f26; }
+    .tag.ok { color: var(--ok); background: var(--ok-bg); }
+    .tag.action { color: var(--warn); background: var(--warn-bg); }
+    .tag.unknown { color: var(--muted); background: #1a2436; }
     button.act {
-      font-size: 0.75rem; padding: 0.35rem 0.55rem; border-radius: 6px;
-      border: 1px solid #2f7a5e; background: var(--ok); color: #04140e;
-      font-weight: 600; cursor: pointer; white-space: nowrap;
+      font-family: var(--sans);
+      font-size: 0.74rem;
+      padding: 0.38rem 0.6rem;
+      border-radius: 7px;
+      border: 1px solid #2f8a78;
+      background: linear-gradient(180deg, #45d4c3, #2aa89a);
+      color: #04221e;
+      font-weight: 650;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: filter 0.15s ease, transform 0.15s ease;
     }
-    button.act:disabled { opacity: 0.4; cursor: not-allowed; }
-    button.act.ghost {
-      background: transparent; color: var(--muted); border-color: var(--line); font-weight: 500;
+    button.act:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
+    button.act:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    .panel-title {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 1.1rem 0 0.65rem;
     }
-    .panel-title { font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 0 0 0.75rem; }
     .detail-card {
-      border: 1px solid var(--line); border-radius: 8px; padding: 1rem; background: var(--panel);
-      margin-bottom: 1rem;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      padding: 1.05rem 1.1rem;
+      background: linear-gradient(165deg, rgba(21, 32, 51, 0.95), rgba(16, 26, 43, 0.92));
+      box-shadow: var(--shadow);
+      animation: rise 0.28s ease;
     }
-    .detail-card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
-    .detail-card .line { color: var(--muted); font-size: 0.88rem; line-height: 1.45; margin: 0.35rem 0; }
-    .detail-card code { font-family: var(--mono); font-size: 0.8rem; color: var(--ok); }
-    .job { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); margin-bottom: 0.75rem; }
-    .err { color: var(--bad); font-size: 0.85rem; min-height: 1.2em; }
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: none; }
+    }
+    .detail-card h3 {
+      margin: 0 0 0.55rem;
+      font-size: 1.08rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+    }
+    .detail-card .line {
+      color: var(--muted);
+      font-size: 0.86rem;
+      line-height: 1.5;
+      margin: 0.4rem 0;
+    }
+    .detail-card code {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: var(--accent);
+      background: rgba(62, 207, 191, 0.08);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+    }
+    .job {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      color: var(--muted);
+      margin-bottom: 0.7rem;
+      line-height: 1.45;
+      padding: 0.55rem 0.7rem;
+      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid var(--line-soft);
+    }
+    .err {
+      color: var(--bad);
+      font-size: 0.84rem;
+      min-height: 1.15em;
+      margin-bottom: 0.35rem;
+    }
     pre.log {
-      margin: 0; max-height: 40vh; overflow: auto; font-family: var(--mono);
-      font-size: 0.72rem; line-height: 1.4; white-space: pre-wrap; color: #c5d0db;
-      border: 1px solid var(--line); border-radius: 8px; padding: 0.75rem; background: #12181f;
+      margin: 0;
+      max-height: 42vh;
+      overflow: auto;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      color: #c9d6ea;
+      border: 1px solid var(--line-soft);
+      border-radius: var(--radius);
+      padding: 0.9rem 1rem;
+      background:
+        linear-gradient(180deg, rgba(8, 14, 26, 0.9), rgba(10, 16, 28, 0.95));
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
-    .hint { color: var(--muted); font-size: 0.78rem; margin-top: 0.75rem; line-height: 1.4; }
+    .hint {
+      color: var(--muted);
+      font-size: 0.76rem;
+      margin-top: 0.8rem;
+      line-height: 1.45;
+    }
+    .hint a { color: var(--accent); text-decoration: none; }
+    .hint a:hover { text-decoration: underline; }
     .log-tabs {
-      display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0 0 0.65rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin: 0;
+      flex: 1;
     }
     .log-tabs button {
-      font-family: var(--mono); font-size: 0.72rem; padding: 0.3rem 0.55rem;
-      border-radius: 6px; border: 1px solid var(--line); background: transparent;
-      color: var(--muted); cursor: pointer;
+      font-family: var(--mono);
+      font-size: 0.7rem;
+      padding: 0.32rem 0.55rem;
+      border-radius: 6px;
+      border: 1px solid var(--line-soft);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     }
-    .log-tabs button:hover { color: var(--text); border-color: #3d5a4a; }
+    .log-tabs button:hover { color: var(--text); border-color: #3d5f72; }
     .log-tabs button.on {
-      color: var(--ok); border-color: #2f6b54; background: #122018;
+      color: var(--accent);
+      border-color: #2f7a72;
+      background: rgba(62, 207, 191, 0.1);
     }
     .log-tabs button.has { color: var(--text); }
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+    .seg {
+      display: inline-flex;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      overflow: hidden;
+      background: rgba(0, 0, 0, 0.2);
+    }
+    .seg button {
+      font-size: 0.74rem;
+      padding: 0.4rem 0.75rem;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: var(--sans);
+      font-weight: 500;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .seg button.on {
+      background: rgba(62, 207, 191, 0.14);
+      color: var(--accent);
+    }
+    button.pull {
+      font-family: var(--sans);
+      font-size: 0.74rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      border: 1px solid #3d6a78;
+      background: linear-gradient(180deg, #1e3348, #172636);
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      transition: border-color 0.15s ease, transform 0.15s ease;
+    }
+    button.pull:hover:not(:disabled) {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    button.pull:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    button.clear-log {
+      font-family: var(--sans);
+      font-size: 0.74rem;
+      padding: 0.35rem 0.7rem;
+      border-radius: 7px;
+      border: 1px solid var(--line-soft);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 500;
+      transition: color 0.15s ease, border-color 0.15s ease;
+    }
+    button.clear-log:hover { color: var(--bad); border-color: #7a3a3a; }
+    button.clear-log:disabled { opacity: 0.4; cursor: not-allowed; }
+    .remote-hint { font-size: 0.74rem; color: var(--muted); }
+    .remote-hint.warn { color: var(--warn); }
   </style>
 </head>
 <body>
   <header>
-    <div>
+    <div class="brand">
+      <div class="brand-mark">Release Console</div>
       <h1>部署看板</h1>
-      <div class="sub">左栏管健康检查与一键处理；下方用标签切换各模块任务日志。</div>
+      <div class="sub">本机边改边试（含未提交）· 换机器先拉取再按已提交部署</div>
     </div>
     <div id="pill" class="pill">…</div>
   </header>
   <main>
     <aside class="left" id="list"></aside>
     <section class="right">
+      <div class="toolbar">
+        <div class="seg" id="mode-seg" title="检测范围">
+          <button type="button" data-mode="local" class="on">本地开发</button>
+          <button type="button" data-mode="sync">同步部署</button>
+        </div>
+        <button type="button" class="pull" id="btn-pull" title="git fetch + pull --ff-only">拉取远程</button>
+        <span class="remote-hint" id="remote-hint"></span>
+      </div>
       <div class="job" id="job">—</div>
       <div class="err" id="err"></div>
       <div id="detail"></div>
       <h2 class="panel-title">各模块任务日志</h2>
-      <div class="log-tabs" id="log-tabs"></div>
+      <div class="toolbar" style="margin-bottom:0.55rem">
+        <div class="log-tabs" id="log-tabs"></div>
+        <button type="button" class="clear-log" id="btn-clear-log" title="清空当前输出栏（不删文件）">清空输出栏</button>
+        <span class="remote-hint" id="log-meta-hint"></span>
+      </div>
       <pre class="log" id="log">—</pre>
-      <p class="hint">每个模块单独一份日志。点上方标签切换；对该模块点「重建/同步」后才会有输出。产品站：<a href="http://localhost/" style="color:#3d9a78">http://localhost/</a></p>
+      <p class="hint">日志形如 <code>[2026-08-07 12:00:00]</code>，上新下旧。「清空输出栏」只清显示。产品站：<a href="http://localhost/">http://localhost/</a></p>
     </section>
   </main>
   <script>
     let plan = null;
     let selectedId = null;
-    let logModule = "api";
+    let logModule = localStorage.getItem("releaseLogModule") || "all";
     let logMeta = {};
     let busy = false;
+    let lastPlanSig = "";
+    let lastLogText = "";
+    let hideLogUntilChange = null;
+    let staleTimer = null;
+    let detectMode = localStorage.getItem("releaseDetectMode") || "local";
+    if (detectMode !== "local" && detectMode !== "sync") detectMode = "local";
     const $ = (id) => document.getElementById(id);
 
     const LOG_TABS = [
+      { id: "all", label: "all" },
+      { id: "git", label: "git" },
       { id: "api", label: "api" },
       { id: "runtime", label: "runtime" },
       { id: "web", label: "web" },
@@ -132,7 +420,6 @@
       { id: "index_ops", label: "Ops 索引" },
     ];
 
-    // 左侧检查项 → 对应日志标签
     const ITEM_TO_LOG = {
       api: "api",
       runtime: "runtime",
@@ -149,6 +436,21 @@
       return st || "?";
     }
 
+    function planSig(p) {
+      if (!p) return "";
+      const items = (p.items || []).map((i) =>
+        [i.id, i.status, i.detail, i.deployed_sha, i.button && i.button.action].join("|")
+      );
+      return [
+        p.summary,
+        p.git_sha_short,
+        p.stale ? "1" : "0",
+        (p.deploy || {}).phase,
+        (p.deploy || {}).message,
+        items.join(";"),
+      ].join("#");
+    }
+
     function renderList() {
       const box = $("list");
       box.innerHTML = "";
@@ -159,7 +461,12 @@
         row.onclick = (e) => {
           if (e.target.closest("button")) return;
           selectedId = it.id;
-          logModule = ITEM_TO_LOG[it.id] || it.id;
+          if (logModule !== "all") {
+            logModule = ITEM_TO_LOG[it.id] || it.id;
+            localStorage.setItem("releaseLogModule", logModule);
+            hideLogUntilChange = null;
+            lastLogText = "";
+          }
           renderList();
           renderDetail();
           renderLogTabs();
@@ -172,7 +479,7 @@
             <div class="name">${it.title || it.id}</div>
             <div class="why">${it.detail || ""}</div>
           </div>
-          <div style="display:flex;flex-direction:column;gap:0.35rem;align-items:flex-end">
+          <div class="mod-actions">
             <span class="tag ${it.status || "unknown"}">${statusLabel(it.status)}</span>
             ${btn ? `<button class="act" data-action="${btn.action}" ${canAct ? "" : "disabled"}>${btn.label}</button>` : ""}
           </div>`;
@@ -196,16 +503,34 @@
         return;
       }
       const extra = [];
-      if (it.deployed_sha) {
-        const msg = it.deployed_subject
-          ? ` — ${it.deployed_subject}`
-          : "";
-        const when = it.deployed_date ? ` <span style="opacity:.7">(${it.deployed_date})</span>` : "";
-        extra.push(`已部署基线：<code>${it.deployed_sha}</code>${msg}${when}`);
-      }
-      if (plan?.git_sha_short && it.kind === "code") {
-        const hmsg = plan.git_subject ? ` — ${plan.git_subject}` : "";
-        extra.push(`当前 HEAD：<code>${plan.git_sha_short}</code>${hmsg}`);
+      if (it.kind === "code") {
+        if (it.deployed_sha) {
+          const msg = it.deployed_subject ? ` — ${it.deployed_subject}` : "";
+          const when = it.deployed_date
+            ? ` <span style="opacity:.7">(${it.deployed_date})</span>`
+            : "";
+          extra.push(`已部署基线（容器按此版本记）：<code>${it.deployed_sha}</code>${msg}${when}`);
+        }
+        if (plan?.git_sha_short) {
+          const hmsg = plan.git_subject ? ` — ${plan.git_subject}` : "";
+          extra.push(`仓库 HEAD：<code>${plan.git_sha_short}</code>${hmsg}`);
+        }
+        if (
+          it.status === "ok" &&
+          it.deployed_sha &&
+          plan?.git_sha_short &&
+          !String(plan.git_sha || "").startsWith(it.deployed_sha) &&
+          it.deployed_sha !== plan.git_sha_short
+        ) {
+          extra.push(
+            "说明：HEAD 已前进，但<strong>本模块路径无相关变更</strong>，无需重建该服务（改的是发布台/文档等其它目录）。"
+          );
+        }
+        if (plan?.mode === "local") {
+          extra.push("模式：本地开发 — 未提交改动也会标「存在变动」，方便先试再 commit。");
+        } else {
+          extra.push("模式：同步部署 — 只看已提交相对基线的差异；未提交改动忽略。换机器请先拉取。");
+        }
       }
       if (it.want) extra.push(`目标模型：<code>${it.want}</code> @ ${it.want_dims}d / INDEX ${it.want_index_version}`);
       if (it.baked) extra.push(`容器 bake：<code>${it.baked}</code>`);
@@ -223,40 +548,59 @@
 
     function renderLogTabs() {
       const box = $("log-tabs");
-      box.innerHTML = "";
-      for (const t of LOG_TABS) {
-        const b = document.createElement("button");
+      const html = LOG_TABS.map((t) => {
         const meta = logMeta[t.id] || {};
-        b.type = "button";
-        b.textContent = t.label + (meta.has_log ? "" : "");
-        b.className = (logModule === t.id ? "on" : "") + (meta.has_log ? " has" : "");
-        b.title = meta.has_log
-          ? `${t.label} 有历史输出`
-          : `${t.label} 尚无输出（对该模块执行重建/同步后出现）`;
-        b.onclick = () => {
-          logModule = t.id;
-          // 尽量同步左侧选中项
-          const match = (plan?.items || []).find((x) => ITEM_TO_LOG[x.id] === t.id);
+        const cls = (logModule === t.id ? "on" : "") + (meta.has_log ? " has" : "");
+        return `<button type="button" data-log="${t.id}" class="${cls}" title="${
+          meta.has_log ? t.label + " 有历史输出" : t.label + " 尚无输出"
+        }">${t.label}</button>`;
+      }).join("");
+      if (box.dataset.html === html) return;
+      box.dataset.html = html;
+      box.innerHTML = html;
+      box.onclick = (ev) => {
+        const b = ev.target.closest("button[data-log]");
+        if (!b) return;
+        logModule = b.getAttribute("data-log");
+        localStorage.setItem("releaseLogModule", logModule);
+        lastLogText = "";
+        hideLogUntilChange = null;
+        if (logModule !== "all" && logModule !== "git") {
+          const match = (plan?.items || []).find((x) => ITEM_TO_LOG[x.id] === logModule);
           if (match) {
             selectedId = match.id;
             renderList();
             renderDetail();
           }
-          renderLogTabs();
-          loadLog();
-        };
-        box.appendChild(b);
-      }
+        }
+        renderLogTabs();
+        loadLog();
+        updateClearBtn();
+      };
+    }
+
+    function updateClearBtn() {
+      const btn = $("btn-clear-log");
+      if (!btn) return;
+      btn.disabled = false;
+      const name = logModule || "all";
+      btn.textContent = "清空输出栏";
+      btn.title = `清空「${name}」输出栏显示（不删除日志文件）`;
     }
 
     async function loadLogMeta() {
       try {
         const r = await fetch("/api/logs");
         const j = await r.json();
-        logMeta = j.modules || {};
-        renderLogTabs();
+        const next = j.modules || {};
+        if (JSON.stringify(next) !== JSON.stringify(logMeta)) {
+          logMeta = next;
+          renderLogTabs();
+        }
+        updateClearBtn();
       } catch (_) {
         renderLogTabs();
+        updateClearBtn();
       }
     }
 
@@ -265,18 +609,55 @@
       try {
         const lr = await fetch("/api/log?module=" + encodeURIComponent(logModule));
         const lg = await lr.json();
-        const empty = !lg.text || lg.text.startsWith("（尚无");
-        if (empty) {
-          $("log").textContent =
-            `【${lg.log_key || logModule}】还没有任务输出。\n` +
-            `对该模块点左侧「重建 / 同步」后，stdout 会写到这里。\n` +
-            `用上方标签可切换查看 api / runtime / web / 索引 等各自日志。`;
-        } else {
-          $("log").textContent = lg.text;
+        const empty =
+          !lg.text ||
+          lg.text.startsWith("（尚无") ||
+          lg.text.startsWith("（尚无任何");
+        const text = empty
+          ? `【${lg.log_key || logModule}】还没有任务输出。\n` +
+            `· 拉取远程 → git / all\n` +
+            `· 重建/同步 → 对应模块；形如 [日期 时间] 日志`
+          : lg.text;
+        if (hideLogUntilChange !== null) {
+          if (text === hideLogUntilChange) {
+            updateClearBtn();
+            return;
+          }
+          hideLogUntilChange = null;
         }
+        if (text === lastLogText) return;
+        lastLogText = text;
+        $("log").textContent = text;
+        const hint = $("log-meta-hint");
+        if (hint) {
+          hint.textContent = lg.newest_ts
+            ? `最新一段：${lg.newest_ts} · ${lg.count || 0} 段`
+            : "";
+        }
+        updateClearBtn();
       } catch (e) {
         $("log").textContent = String(e);
       }
+    }
+
+    function clearLog() {
+      hideLogUntilChange = lastLogText || $("log").textContent || "";
+      lastLogText = "";
+      $("log").textContent = "";
+      const hint = $("log-meta-hint");
+      if (hint) hint.textContent = "已清空显示 · 有新输出时再出现";
+      updateClearBtn();
+    }
+
+    function renderMode() {
+      for (const b of $("mode-seg").querySelectorAll("button[data-mode]")) {
+        b.classList.toggle("on", b.getAttribute("data-mode") === detectMode);
+      }
+      $("btn-pull").disabled = busy;
+      const rem = plan?.git_remote || {};
+      const hint = $("remote-hint");
+      hint.textContent = rem.hint || "";
+      hint.className = "remote-hint" + (rem.behind > 0 ? " warn" : "");
     }
 
     function renderHeader() {
@@ -284,32 +665,40 @@
       const s = plan?.summary || "error";
       pill.className = "pill " + s;
       pill.textContent = s === "healthy" ? "全部最新" : "存在变动";
-      const dep = plan?.deploy || {};
-      $("job").textContent = `任务 ${dep.phase || "idle"}${dep.message ? " · " + dep.message : ""} · HEAD ${plan?.git_sha_short || "?"}`;
-      busy = ["building", "switching", "verifying"].includes(dep.phase || "");
+      busy = ["building", "switching", "verifying"].includes((plan?.deploy || {}).phase || "");
+      renderMode();
     }
 
     async function refresh(force) {
       try {
-        const r = await fetch("/api/plan" + (force ? "?force=1" : ""));
-        plan = await r.json();
-        if (!selectedId && plan.items?.length) selectedId = plan.items[0].id;
-        if (selectedId && ITEM_TO_LOG[selectedId]) logModule = ITEM_TO_LOG[selectedId];
-        renderHeader();
-        renderList();
-        renderDetail();
+        const q = new URLSearchParams({ mode: detectMode });
+        if (force) q.set("force", "1");
+        const r = await fetch("/api/plan?" + q.toString());
+        const next = await r.json();
+        if (!selectedId && next.items?.length) selectedId = next.items[0].id;
+        const sig = planSig(next) + "|" + detectMode;
+        const changed = sig !== lastPlanSig;
+        plan = next;
+        if (changed) {
+          lastPlanSig = sig;
+          renderHeader();
+          renderList();
+          renderDetail();
+        } else {
+          renderMode();
+        }
         await loadLogMeta();
         await loadLog();
-        const scope = plan.detect_scope ? ` · 检测范围：${plan.detect_scope}` : "";
+        const scope = plan.detect_scope ? ` · ${plan.detect_scope}` : "";
         const stale = plan.stale ? " · 后台核对中…" : "";
         const headBit = plan.git_sha_short
           ? ` · HEAD ${plan.git_sha_short}${plan.git_subject ? " " + plan.git_subject : ""}`
           : "";
         $("job").textContent =
           `任务 ${(plan.deploy || {}).phase || "idle"}${(plan.deploy || {}).message ? " · " + (plan.deploy || {}).message : ""}${headBit}${scope}${stale}`;
-        // 首屏用缓存秒开；若标记 stale，稍后再拉一次拿新结果
         if (plan.stale && !force) {
-          setTimeout(() => refresh(false), 2200);
+          if (staleTimer) clearTimeout(staleTimer);
+          staleTimer = setTimeout(() => refresh(false), 2200);
         }
       } catch (e) {
         $("err").textContent = String(e);
@@ -320,6 +709,7 @@
       $("err").textContent = "";
       busy = true;
       renderList();
+      renderMode();
       try {
         const r = await fetch("/api/action", {
           method: "POST",
@@ -331,10 +721,10 @@
           $("err").textContent = j.error || r.statusText;
           busy = false;
           renderList();
+          renderMode();
           return;
         }
         $("job").textContent = `已启动 ${action}…`;
-        // 切到该动作对应日志标签
         const key = {
           "up-api": "api",
           "up-runtime": "runtime",
@@ -342,17 +732,45 @@
           "up-gateway": "gateway",
           "sync-sources": "index_product",
           "sync-ops-indexes": "index_ops",
+          "git-pull": "all",
         }[action];
-        if (key) logModule = key;
-        setTimeout(() => refresh(true), 1200);
+        if (key) {
+          logModule = key;
+          localStorage.setItem("releaseLogModule", logModule);
+          lastLogText = "";
+          hideLogUntilChange = null;
+          renderLogTabs();
+        }
+        if (action === "git-pull") {
+          detectMode = "sync";
+          localStorage.setItem("releaseDetectMode", detectMode);
+          renderMode();
+        }
+        setTimeout(() => refresh(true), action === "git-pull" ? 2500 : 1200);
       } catch (e) {
         $("err").textContent = String(e);
         busy = false;
         renderList();
+        renderMode();
       }
     }
 
-    // 不要 force：磁盘/内存缓存立刻渲染，后台再核对
+    $("mode-seg").onclick = (ev) => {
+      const b = ev.target.closest("button[data-mode]");
+      if (!b) return;
+      const m = b.getAttribute("data-mode");
+      if (m !== "local" && m !== "sync") return;
+      if (m === detectMode) return;
+      detectMode = m;
+      localStorage.setItem("releaseDetectMode", detectMode);
+      lastPlanSig = "";
+      renderMode();
+      refresh(true);
+    };
+    $("btn-pull").onclick = () => runAction("git-pull");
+    $("btn-clear-log").onclick = () => clearLog();
+
+    renderMode();
     refresh(false);
     setInterval(() => refresh(false), 8000);
   </script>
