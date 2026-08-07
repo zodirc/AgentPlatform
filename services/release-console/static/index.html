@@ -9,6 +9,18 @@
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {
+      --sans: "Sora", "Segoe UI", system-ui, sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+      --radius: 10px;
+      --shadow: 0 12px 40px rgba(0, 0, 0, 0.28);
+      --grid-a: rgba(255,255,255,0.035);
+      --header-bg: color-mix(in srgb, var(--ink) 78%, transparent);
+      --left-bg: color-mix(in srgb, var(--ink-2) 88%, transparent);
+      --job-bg: rgba(0, 0, 0, 0.22);
+      --log-bg: linear-gradient(180deg, rgba(8, 14, 26, 0.9), rgba(10, 16, 28, 0.95));
+      --code-bg: color-mix(in srgb, var(--accent) 12%, transparent);
+      --glow-2: rgba(70, 110, 200, 0.12);
+      /* default = teal 墨青 */
       --ink: #0b1220;
       --ink-2: #101a2b;
       --panel: #152033;
@@ -18,17 +30,62 @@
       --text: #e8eef8;
       --muted: #8b9bb8;
       --accent: #3ecfbf;
-      --accent-dim: #1a4f4a;
       --ok: #3ecf8e;
       --ok-bg: #0f2a22;
+      --ok-ring: rgba(62, 207, 142, 0.12);
       --warn: #e0b35c;
       --warn-bg: #2a2212;
+      --warn-ring: rgba(224, 179, 92, 0.12);
       --bad: #e06b6b;
       --glow: rgba(62, 207, 191, 0.14);
-      --sans: "Sora", "Segoe UI", system-ui, sans-serif;
-      --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
-      --radius: 10px;
-      --shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+      --act-border: #2f8a78;
+      --act-grad: linear-gradient(180deg, #45d4c3, #2aa89a);
+      --act-fg: #04221e;
+      --pull-border: #3d6a78;
+      --pull-grad: linear-gradient(180deg, #1e3348, #172636);
+    }
+    html[data-theme="slate"] {
+      --ink: #0e1116; --ink-2: #141820; --panel: #1b212b; --panel-2: #222933;
+      --line: #343c4a; --line-soft: #2a3140; --text: #e9edf4; --muted: #93a0b5;
+      --accent: #7aa2ff; --ok: #6ecf9a; --ok-bg: #143024; --ok-ring: rgba(110, 207, 154, 0.14);
+      --warn: #d6b06a; --warn-bg: #2a2314; --warn-ring: rgba(214, 176, 106, 0.14);
+      --bad: #e07a7a; --glow: rgba(122, 162, 255, 0.14); --glow-2: rgba(90, 120, 180, 0.1);
+      --act-border: #4a6fb0; --act-grad: linear-gradient(180deg, #8ab0ff, #5b84e0); --act-fg: #0a1428;
+      --pull-border: #455872; --pull-grad: linear-gradient(180deg, #243044, #1a2434);
+    }
+    html[data-theme="forest"] {
+      --ink: #0a140f; --ink-2: #101c15; --panel: #16251c; --panel-2: #1c2e23;
+      --line: #2c4336; --line-soft: #24382d; --text: #e6f2ea; --muted: #8eaa98;
+      --accent: #6fdb8c; --ok: #5fd68a; --ok-bg: #123020; --ok-ring: rgba(95, 214, 138, 0.14);
+      --warn: #d4b45c; --warn-bg: #2a2412; --warn-ring: rgba(212, 180, 92, 0.14);
+      --bad: #e07878; --glow: rgba(111, 219, 140, 0.14); --glow-2: rgba(60, 140, 90, 0.12);
+      --act-border: #3f9a5c; --act-grad: linear-gradient(180deg, #7ee29a, #3fad66); --act-fg: #062012;
+      --pull-border: #3d6a4e; --pull-grad: linear-gradient(180deg, #1e3a2a, #16281e);
+    }
+    html[data-theme="ember"] {
+      --ink: #140e0c; --ink-2: #1c1410; --panel: #261a15; --panel-2: #2e2019;
+      --line: #4a342a; --line-soft: #3a2a22; --text: #f3ebe4; --muted: #b39a8c;
+      --accent: #f0a46a; --ok: #7dcf8a; --ok-bg: #16301c; --ok-ring: rgba(125, 207, 138, 0.14);
+      --warn: #e0b35c; --warn-bg: #2a2212; --warn-ring: rgba(224, 179, 92, 0.14);
+      --bad: #e06b6b; --glow: rgba(240, 164, 106, 0.16); --glow-2: rgba(180, 80, 50, 0.12);
+      --act-border: #c47a3d; --act-grad: linear-gradient(180deg, #f2b07a, #d48645); --act-fg: #2a1408;
+      --pull-border: #7a5340; --pull-grad: linear-gradient(180deg, #3a241c, #2a1a14);
+    }
+    html[data-theme="sand"] {
+      --ink: #f3efe6; --ink-2: #ebe5d8; --panel: #fffdf8; --panel-2: #f7f1e6;
+      --line: #d7cebc; --line-soft: #e2d8c6; --text: #1f2430; --muted: #667085;
+      --accent: #0f7a6c; --ok: #1f8a5b; --ok-bg: #e5f5ec; --ok-ring: rgba(31, 138, 91, 0.12);
+      --warn: #9a6b12; --warn-bg: #f7edd4; --warn-ring: rgba(154, 107, 18, 0.12);
+      --bad: #c04545; --glow: rgba(15, 122, 108, 0.12); --glow-2: rgba(180, 140, 80, 0.1);
+      --grid-a: rgba(30, 40, 50, 0.04);
+      --header-bg: color-mix(in srgb, #fffdf8 82%, transparent);
+      --left-bg: color-mix(in srgb, #f3efe6 90%, transparent);
+      --job-bg: rgba(255, 255, 255, 0.55);
+      --log-bg: linear-gradient(180deg, #faf7f0, #f3eee4);
+      --code-bg: rgba(15, 122, 108, 0.1);
+      --shadow: 0 12px 36px rgba(40, 30, 10, 0.08);
+      --act-border: #0f7a6c; --act-grad: linear-gradient(180deg, #1aa090, #0f7a6c); --act-fg: #f5fffc;
+      --pull-border: #c4b79f; --pull-grad: linear-gradient(180deg, #fff, #f3eee4);
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; }
@@ -39,19 +96,20 @@
       color: var(--text);
       background:
         radial-gradient(900px 480px at 8% -8%, var(--glow), transparent 55%),
-        radial-gradient(700px 420px at 100% 0%, rgba(70, 110, 200, 0.12), transparent 50%),
+        radial-gradient(700px 420px at 100% 0%, var(--glow-2), transparent 50%),
         linear-gradient(180deg, var(--ink-2), var(--ink));
       background-attachment: fixed;
+      transition: background 0.35s ease, color 0.25s ease;
     }
     body::before {
       content: "";
       position: fixed;
       inset: 0;
       pointer-events: none;
-      opacity: 0.35;
+      opacity: 0.9;
       background-image:
-        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+        linear-gradient(var(--grid-a) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid-a) 1px, transparent 1px);
       background-size: 48px 48px;
       mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 75%);
     }
@@ -65,7 +123,40 @@
       align-items: center;
       flex-wrap: wrap;
       backdrop-filter: blur(10px);
-      background: rgba(11, 18, 32, 0.72);
+      background: var(--header-bg);
+    }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      flex-wrap: wrap;
+    }
+    .theme-wrap {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .theme-wrap label {
+      font-family: var(--mono);
+      font-size: 0.68rem;
+      color: var(--muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+    .theme-wrap select {
+      font-family: var(--sans);
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.4rem 0.55rem;
+      cursor: pointer;
+      outline: none;
+    }
+    .theme-wrap select:focus {
+      border-color: var(--accent);
     }
     .brand {
       display: flex;
@@ -103,13 +194,13 @@
     }
     .pill.healthy {
       color: var(--ok);
-      border-color: #2f6b54;
-      box-shadow: 0 0 0 3px rgba(62, 207, 142, 0.12);
+      border-color: color-mix(in srgb, var(--ok) 55%, var(--line));
+      box-shadow: 0 0 0 3px var(--ok-ring);
     }
     .pill.action_needed {
       color: var(--warn);
-      border-color: #7a6430;
-      box-shadow: 0 0 0 3px rgba(224, 179, 92, 0.12);
+      border-color: color-mix(in srgb, var(--warn) 55%, var(--line));
+      box-shadow: 0 0 0 3px var(--warn-ring);
     }
     main {
       position: relative;
@@ -124,7 +215,7 @@
     .left {
       border-right: 1px solid var(--line-soft);
       padding: 0.9rem;
-      background: rgba(16, 26, 43, 0.82);
+      background: var(--left-bg);
     }
     .right {
       padding: 1.15rem 1.4rem 2rem;
@@ -143,12 +234,12 @@
       transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
     }
     .mod:hover {
-      border-color: #3d5f72;
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
       transform: translateY(-1px);
     }
     .mod.active {
       border-color: var(--accent);
-      box-shadow: 0 0 0 1px rgba(62, 207, 191, 0.25), var(--shadow);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), var(--shadow);
     }
     .mod .name {
       font-weight: 600;
@@ -176,15 +267,15 @@
     }
     .tag.ok { color: var(--ok); background: var(--ok-bg); }
     .tag.action { color: var(--warn); background: var(--warn-bg); }
-    .tag.unknown { color: var(--muted); background: #1a2436; }
+    .tag.unknown { color: var(--muted); background: color-mix(in srgb, var(--panel) 70%, var(--ink)); }
     button.act {
       font-family: var(--sans);
       font-size: 0.74rem;
       padding: 0.38rem 0.6rem;
       border-radius: 7px;
-      border: 1px solid #2f8a78;
-      background: linear-gradient(180deg, #45d4c3, #2aa89a);
-      color: #04221e;
+      border: 1px solid var(--act-border);
+      background: var(--act-grad);
+      color: var(--act-fg);
       font-weight: 650;
       cursor: pointer;
       white-space: nowrap;
@@ -204,7 +295,7 @@
       border: 1px solid var(--line-soft);
       border-radius: var(--radius);
       padding: 1.05rem 1.1rem;
-      background: linear-gradient(165deg, rgba(21, 32, 51, 0.95), rgba(16, 26, 43, 0.92));
+      background: linear-gradient(165deg, var(--panel), var(--panel-2));
       box-shadow: var(--shadow);
       animation: rise 0.28s ease;
     }
@@ -224,11 +315,11 @@
       line-height: 1.5;
       margin: 0.4rem 0;
     }
-    .detail-card code {
+    .detail-card code, .hint code {
       font-family: var(--mono);
       font-size: 0.78rem;
       color: var(--accent);
-      background: rgba(62, 207, 191, 0.08);
+      background: var(--code-bg);
       padding: 0.1rem 0.35rem;
       border-radius: 4px;
     }
@@ -240,7 +331,7 @@
       line-height: 1.45;
       padding: 0.55rem 0.7rem;
       border-radius: 8px;
-      background: rgba(0, 0, 0, 0.22);
+      background: var(--job-bg);
       border: 1px solid var(--line-soft);
     }
     .err {
@@ -257,13 +348,12 @@
       font-size: 0.72rem;
       line-height: 1.45;
       white-space: pre-wrap;
-      color: #c9d6ea;
+      color: var(--text);
       border: 1px solid var(--line-soft);
       border-radius: var(--radius);
       padding: 0.9rem 1rem;
-      background:
-        linear-gradient(180deg, rgba(8, 14, 26, 0.9), rgba(10, 16, 28, 0.95));
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+      background: var(--log-bg);
+      box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent);
     }
     .hint {
       color: var(--muted);
@@ -291,11 +381,11 @@
       cursor: pointer;
       transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
     }
-    .log-tabs button:hover { color: var(--text); border-color: #3d5f72; }
+    .log-tabs button:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
     .log-tabs button.on {
       color: var(--accent);
-      border-color: #2f7a72;
-      background: rgba(62, 207, 191, 0.1);
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
     .log-tabs button.has { color: var(--text); }
     .toolbar {
@@ -310,7 +400,7 @@
       border: 1px solid var(--line);
       border-radius: 9px;
       overflow: hidden;
-      background: rgba(0, 0, 0, 0.2);
+      background: var(--job-bg);
     }
     .seg button {
       font-size: 0.74rem;
@@ -324,7 +414,7 @@
       transition: background 0.15s ease, color 0.15s ease;
     }
     .seg button.on {
-      background: rgba(62, 207, 191, 0.14);
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
       color: var(--accent);
     }
     button.pull {
@@ -332,8 +422,8 @@
       font-size: 0.74rem;
       padding: 0.4rem 0.8rem;
       border-radius: 8px;
-      border: 1px solid #3d6a78;
-      background: linear-gradient(180deg, #1e3348, #172636);
+      border: 1px solid var(--pull-border);
+      background: var(--pull-grad);
       color: var(--text);
       cursor: pointer;
       font-weight: 600;
@@ -356,7 +446,7 @@
       font-weight: 500;
       transition: color 0.15s ease, border-color 0.15s ease;
     }
-    button.clear-log:hover { color: var(--bad); border-color: #7a3a3a; }
+    button.clear-log:hover { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 50%, var(--line)); }
     button.clear-log:disabled { opacity: 0.4; cursor: not-allowed; }
     .remote-hint { font-size: 0.74rem; color: var(--muted); }
     .remote-hint.warn { color: var(--warn); }
@@ -369,7 +459,19 @@
       <h1>部署看板</h1>
       <div class="sub">本机边改边试（含未提交）· 换机器先拉取再按已提交部署</div>
     </div>
-    <div id="pill" class="pill">…</div>
+    <div class="header-right">
+      <div class="theme-wrap">
+        <label for="theme-sel">主题</label>
+        <select id="theme-sel" title="切换外观主题">
+          <option value="teal">墨青</option>
+          <option value="slate">岩灰</option>
+          <option value="forest">林深</option>
+          <option value="ember">余烬</option>
+          <option value="sand">浅沙</option>
+        </select>
+      </div>
+      <div id="pill" class="pill">…</div>
+    </div>
   </header>
   <main>
     <aside class="left" id="list"></aside>
@@ -407,7 +509,19 @@
     let staleTimer = null;
     let detectMode = localStorage.getItem("releaseDetectMode") || "local";
     if (detectMode !== "local" && detectMode !== "sync") detectMode = "local";
+    const THEMES = ["teal", "slate", "forest", "ember", "sand"];
+    let theme = localStorage.getItem("releaseTheme") || "teal";
+    if (!THEMES.includes(theme)) theme = "teal";
     const $ = (id) => document.getElementById(id);
+
+    function applyTheme(name) {
+      theme = THEMES.includes(name) ? name : "teal";
+      document.documentElement.setAttribute("data-theme", theme);
+      localStorage.setItem("releaseTheme", theme);
+      const sel = $("theme-sel");
+      if (sel) sel.value = theme;
+    }
+    applyTheme(theme);
 
     const LOG_TABS = [
       { id: "all", label: "all" },
@@ -769,6 +883,7 @@
     };
     $("btn-pull").onclick = () => runAction("git-pull");
     $("btn-clear-log").onclick = () => clearLog();
+    $("theme-sel").onchange = (ev) => applyTheme(ev.target.value);
 
     renderMode();
     refresh(false);
