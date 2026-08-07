@@ -1100,6 +1100,94 @@ async def prepare_retrieval_micro_index(
     }
 
 
+async def prepare_ops_cmteb_indexes(
+    *,
+    on_progress: ProgressCb | None = None,
+    datasets: list[str] | None = None,
+) -> dict[str, Any]:
+    """Register ``ops-l1/cmteb-index/{dataset}`` Works and materialize corpus txt.
+
+    Does **not** embed — call ``make sync-ops-cmteb`` (runtime ``--mode ops-cmteb``)
+    afterward so vectors land in ``retrieval_ops_zh``. Expects small C-MTEB already
+    under ``BENCH_DATA_DIR/cmteb`` (Covid / Medical / Ecom · ~50k docs).
+    """
+    root = _bench_data() / "cmteb"
+    if not root.is_dir():
+        raise RuntimeError(f"missing C-MTEB data dir: {root}")
+    names = [
+        str(n).strip()
+        for n in (datasets or [])
+        if str(n).strip()
+    ]
+    if not names:
+        names = sorted(
+            p.name
+            for p in root.iterdir()
+            if p.is_dir() and (p / "corpus.jsonl").is_file()
+        )
+    if not names:
+        raise RuntimeError(f"no C-MTEB datasets under {root}")
+
+    await _emit(
+        on_progress,
+        "log",
+        message=f"[cmteb] prepare {len(names)} dataset(s) from {root}",
+    )
+    out_rows: list[dict[str, Any]] = []
+    for name in names:
+        corpus, _, _ = _load_beir_maps(root, name)
+        if not corpus:
+            raise RuntimeError(f"empty C-MTEB corpus: {name}")
+        work, corpus_fp, sources_dest = await _ensure_cmteb_index_work(name, corpus)
+        await _emit(
+            on_progress,
+            "log",
+            message=(
+                f"[cmteb] prepare {name}: docs={len(corpus)} "
+                f"work={str(work.id)[:8]} fp={corpus_fp[:8]}"
+            ),
+        )
+        pruned = await _prune_beir_orphans(sources_dest, set(corpus.keys()))
+        if pruned:
+            await _emit(
+                on_progress,
+                "log",
+                message=f"[cmteb] pruned {pruned} orphan txt under {name}",
+            )
+            fp_path = Path(work.work_root) / _FP_NAME
+            try:
+                if fp_path.is_file():
+                    fp_path.unlink()
+            except OSError:
+                pass
+        rewritten = await _materialize_corpus(
+            corpus,
+            sources_dest,
+            on_progress=on_progress,
+            label=name,
+            fingerprint=corpus_fp,
+        )
+        out_rows.append(
+            {
+                "dataset": name,
+                "work_id": str(work.id),
+                "work_root": work.work_root,
+                "docs": len(corpus),
+                "rewritten": bool(rewritten),
+                "sources": str(sources_dest),
+            }
+        )
+    return {
+        "status": "ok",
+        "datasets": out_rows,
+        "docs_total": sum(int(r.get("docs") or 0) for r in out_rows),
+        "note": (
+            "Works + corpus txt ready under ops-l1/cmteb-index. "
+            "Embed with make sync-ops-cmteb → retrieval_ops_zh."
+        ),
+    }
+
+
 async def run_retrieval_l1(
     *,
     limit_queries: int = 0,

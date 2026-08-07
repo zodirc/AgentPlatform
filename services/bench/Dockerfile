@@ -36,8 +36,9 @@ RUN set -eux; \
     apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir torch -f "${TORCH_FIND_LINKS}" \
-    && pip install --no-cache-dir "sentence-transformers>=3.0"
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install torch -f "${TORCH_FIND_LINKS}" \
+    && pip install "sentence-transformers>=3.0"
 COPY deploy/model-bake-cache/ /models-bake-cache/
 RUN set -eux; \
     if find /models-bake-cache -mindepth 1 -maxdepth 1 ! -name '.keep' -print -quit | grep -q .; then \
@@ -76,18 +77,21 @@ RUN mkdir -p /data/ops-official/data /data/ops-official/reports /data/models /ap
 WORKDIR /app
 
 COPY services/bench/requirements.txt /tmp/bench-requirements.txt
+# BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local.
+# Do not use pip --no-cache-dir here — that bypasses the mount.
 RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,ro \
+    --mount=type=cache,target=/root/.cache/pip \
     if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
       echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
-      pip install --no-cache-dir --no-index --find-links=/tmp/torch-wheels torch; \
+      pip install --no-index --find-links=/tmp/torch-wheels torch; \
     elif [ -n "${TORCH_INDEX_URL}" ]; then \
       echo "deps: installing CUDA torch from ${TORCH_INDEX_URL}"; \
-      pip install --no-cache-dir --default-timeout=300 --retries=5 torch --index-url "${TORCH_INDEX_URL}"; \
+      pip install --default-timeout=300 --retries=5 torch --index-url "${TORCH_INDEX_URL}"; \
     else \
       echo "deps: installing CPU torch from ${TORCH_FIND_LINKS}"; \
-      pip install --no-cache-dir --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
+      pip install --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
     fi \
-    && pip install --no-cache-dir -r /tmp/bench-requirements.txt \
+    && pip install -r /tmp/bench-requirements.txt \
     && rm -f /tmp/bench-requirements.txt
 
 COPY --from=model-baker --chown=app:app /models-baked /app/models-baked

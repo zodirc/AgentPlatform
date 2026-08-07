@@ -194,6 +194,7 @@ def _module_dirty(
     running: set[str],
     worktree_files: list[str],
     include_worktree: bool,
+    deployed_entry: dict | None = None,
 ) -> tuple[bool, str]:
     cname = CONTAINERS.get(mod, "")
     if mod != "gateway" and cname and cname not in running:
@@ -208,6 +209,23 @@ def _module_dirty(
 
     committed = _match_files(_committed_since(deployed_sha), prefixes)
     dirty_wt = _match_files(worktree_files, prefixes) if include_worktree else []
+
+    # Local mode: uncommitted files already baked by last up-* should not stay dirty.
+    if include_worktree and dirty_wt:
+        try:
+            from worktree_sig import module_worktree_digest  # type: ignore
+        except ImportError:
+            from scripts.release.worktree_sig import module_worktree_digest  # type: ignore
+
+        cur = module_worktree_digest(prefixes, files=worktree_files)
+        prev = ""
+        if isinstance(deployed_entry, dict):
+            prev = str(deployed_entry.get("worktree_digest") or "").strip()
+        if prev and cur and prev == cur:
+            dirty_wt = []
+        elif prev == "" and cur == "":
+            dirty_wt = []
+
     hit = committed + [f for f in dirty_wt if f not in committed]
     if hit:
         kinds = []
@@ -219,6 +237,9 @@ def _module_dirty(
         more = f" 等{len(hit)}个文件" if len(hit) > 3 else ""
         return True, f"存在变动（{'+'.join(kinds)}）：{sample}{more}"
     if include_worktree:
+        dep = deployed_entry if isinstance(deployed_entry, dict) else {}
+        if dep.get("worktree_digest") and _match_files(worktree_files, prefixes):
+            return False, "相对已部署；未提交已包含在上次重建中"
         return False, "相对已部署；已检查未提交"
     return False, "相对已部署；仅看已提交"
 
@@ -309,11 +330,24 @@ def _embedding_item(
     return item
 
 
-def _psql_meta(container: str, user: str, db: str) -> dict[str, str]:
+def _psql_meta(
+    container: str,
+    user: str,
+    db: str,
+    *,
+    schema: str = "public",
+) -> dict[str, str]:
+    # Ops L1 stamps live on bench-postgres in retrieval_ops (not public).
+    sch = (schema or "public").strip() or "public"
+    if not sch.replace("_", "").isalnum():
+        sch = "public"
+    # Prefer global stamp keys (written by scope sync). Also accept seed/work
+    # scope keys so a schema that only has per-work stamps still reports.
     sql = (
-        "SELECT key, value FROM source_index_meta "
+        f"SELECT key, value FROM {sch}.source_index_meta "
         "WHERE key IN ('version','embedding_model','embedding_dimensions','embedding_backend') "
         "OR key LIKE 'scope:seed:%' "
+        "OR key LIKE 'scope:work:%' "
         "ORDER BY key;"
     )
     code, out = _docker_exec(
@@ -353,6 +387,7 @@ def _index_item(
     want_ver: int,
     sync_action: str,
     running: set[str],
+    schema: str = "public",
 ) -> dict:
     item = {
         "id": item_id,
@@ -369,12 +404,28 @@ def _index_item(
         item["detail"] = f"{container} 未运行"
         return item
 
-    meta = _psql_meta(container, user, db)
+    meta = _psql_meta(container, user, db, schema=schema)
+    item["schema"] = schema
+
+    def _meta_field(field: str) -> str | None:
+        # Global keys first; else seed; else any work scope stamp.
+        direct = meta.get(field)
+        if direct:
+            return direct
+        seed = meta.get(f"scope:seed:{field}")
+        if seed:
+            return seed
+        prefix = "scope:work:"
+        suffix = f":{field}"
+        for k, v in meta.items():
+            if k.startswith(prefix) and k.endswith(suffix) and v:
+                return v
+        return None
+
     item["stored"] = {
-        "version": meta.get("version") or meta.get("scope:seed:version"),
-        "embedding_model": meta.get("embedding_model") or meta.get("scope:seed:embedding_model"),
-        "embedding_dimensions": meta.get("embedding_dimensions")
-        or meta.get("scope:seed:embedding_dimensions"),
+        "version": _meta_field("version"),
+        "embedding_model": _meta_field("embedding_model"),
+        "embedding_dimensions": _meta_field("embedding_dimensions"),
     }
     stored_model = (item["stored"].get("embedding_model") or "").strip()
     stored_ver = (item["stored"].get("version") or "").strip()
@@ -403,6 +454,113 @@ def _index_item(
     item["status"] = "ok"
     item["detail"] = f"{want_model} / INDEX {want_ver}"
     return item
+
+
+def _is_bge_m3(model: str) -> bool:
+    return "bge-m3" in (model or "").lower()
+
+
+def _cmteb_corpus_ready(env_file: dict[str, str]) -> bool:
+    """True when C-MTEB slices exist under the host path compose mounts into the stack."""
+    roots: list[Path] = []
+    raw = (env_file.get("HOST_BENCH_DATA_DIR") or "").strip()
+    # Prefer the compose mount source (not container-only paths like /data/...).
+    if raw and not raw.startswith("/data/"):
+        roots.append(Path(raw).expanduser().resolve())
+    roots.append((ROOT / "eval" / "official" / ".local-data").resolve())
+
+    seen: set[Path] = set()
+    for base in roots:
+        if base in seen:
+            continue
+        seen.add(base)
+        cmteb = base / "cmteb"
+        if not cmteb.is_dir():
+            continue
+        for child in cmteb.iterdir():
+            if not child.is_dir():
+                continue
+            if (
+                (child / "corpus.jsonl").is_file()
+                and (child / "queries.jsonl").is_file()
+                and (child / "qrels" / "test.tsv").is_file()
+            ):
+                return True
+    return False
+
+
+def _index_ops_zh_item(
+    *,
+    want_model: str,
+    want_dims: int,
+    want_ver: int,
+    env_file: dict[str, str],
+    auto: dict[str, str],
+    running: set[str],
+) -> dict:
+    """Optional C-MTEB (ZH) Ops index — bge-m3 only; small suite ~50k docs.
+
+    When needed, action is ``bash scripts/release/ensure_ops_cmteb.sh``
+    (pull → materialize ops-l1/cmteb-index Works → sync-ops-cmteb).
+    Already pulled + stamped → ok (no button).
+    """
+    schema = (
+        env_file.get("OPS_RETRIEVAL_PG_SCHEMA_ZH")
+        or auto.get("OPS_RETRIEVAL_PG_SCHEMA_ZH")
+        or "retrieval_ops_zh"
+    )
+    ensure_action = "bash scripts/release/ensure_ops_cmteb.sh"
+    item: dict = {
+        "id": "index_ops_zh",
+        "kind": "index",
+        "title": "索引 · Ops/C-MTEB 中文库",
+        "status": "ok",
+        "action": None,
+        "detail": "",
+        "optional": True,
+        "stored": {},
+        "schema": schema,
+    }
+    if not _is_bge_m3(want_model):
+        item["status"] = "skip"
+        item["detail"] = f"可选 · 仅 bge-m3；当前 {want_model}，跳过"
+        return item
+
+    if not _cmteb_corpus_ready(env_file):
+        item["status"] = "action"
+        item["action"] = ensure_action
+        item["detail"] = (
+            "可选 · 小量中文库未就绪（≈5万篇）— 可一键拉取并嵌入 retrieval_ops_zh"
+        )
+        return item
+
+    checked = _index_item(
+        item_id="index_ops_zh",
+        title="索引 · Ops/C-MTEB 中文库",
+        container="agent-bench-postgres",
+        user=env_file.get("BENCH_POSTGRES_USER") or "bench",
+        db=env_file.get("BENCH_POSTGRES_DB") or "bench",
+        want_model=want_model,
+        want_dims=want_dims,
+        want_ver=want_ver,
+        sync_action=ensure_action,
+        running=running,
+        schema=schema,
+    )
+    checked["optional"] = True
+    if checked.get("status") == "ok":
+        checked["detail"] = f"{want_model} / INDEX {want_ver} · C-MTEB 小量已嵌入"
+        return checked
+    if checked.get("status") == "action":
+        detail = str(checked.get("detail") or "")
+        if "尚无索引戳记" in detail:
+            checked["detail"] = (
+                "语料已在挂载目录 · 未嵌入 — 一键写入 retrieval_ops_zh（≈5万篇）"
+            )
+        else:
+            checked["detail"] = detail + " — 可一键重嵌"
+        checked["action"] = ensure_action
+    return checked
 
 
 def build_plan(mode: str | None = None) -> dict:
@@ -438,9 +596,10 @@ def build_plan(mode: str | None = None) -> dict:
     dirty_code: list[str] = []
 
     for mod in MODULES:
-        sha = ((deployed.get(mod) or {}) if isinstance(deployed.get(mod), dict) else {}).get(
-            "git_sha"
-        ) or ""
+        dep_entry = (
+            (deployed.get(mod) or {}) if isinstance(deployed.get(mod), dict) else {}
+        )
+        sha = dep_entry.get("git_sha") or ""
         dirty, detail = _module_dirty(
             mod,
             paths.get(mod, []),
@@ -448,6 +607,7 @@ def build_plan(mode: str | None = None) -> dict:
             running=running,
             worktree_files=worktree_files,
             include_worktree=include_worktree,
+            deployed_entry=dep_entry,
         )
         action = None
         if dirty:
@@ -475,7 +635,7 @@ def build_plan(mode: str | None = None) -> dict:
             }
         )
 
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=4) as pool:
         fut_emb = pool.submit(_embedding_item, want_model, want_dims, want_ver, running=running)
         fut_prod = pool.submit(
             _index_item,
@@ -497,20 +657,37 @@ def build_plan(mode: str | None = None) -> dict:
             container="agent-bench-postgres",
             user=env_file.get("BENCH_POSTGRES_USER") or "bench",
             db=env_file.get("BENCH_POSTGRES_DB") or "bench",
+            # Ops L1 vectors + stamps are in retrieval_ops (Schema A), not public.
+            schema=(
+                env_file.get("OPS_RETRIEVAL_PG_SCHEMA")
+                or auto.get("OPS_RETRIEVAL_PG_SCHEMA")
+                or "retrieval_ops"
+            ),
             want_model=want_model,
             want_dims=want_dims,
             want_ver=want_ver,
             sync_action="make sync-ops-indexes",
             running=running,
         )
+        fut_ops_zh = pool.submit(
+            _index_ops_zh_item,
+            want_model=want_model,
+            want_dims=want_dims,
+            want_ver=want_ver,
+            env_file=env_file,
+            auto=auto,
+            running=running,
+        )
         emb = fut_emb.result()
         idx_prod = fut_prod.result()
         idx_ops = fut_ops.result()
+        idx_ops_zh = fut_ops_zh.result()
 
-    items.extend([emb, idx_prod, idx_ops])
+    items.extend([emb, idx_prod, idx_ops, idx_ops_zh])
 
     actions = [i for i in items if i.get("status") == "action"]
     oks = [i for i in items if i.get("status") == "ok"]
+    skips = [i for i in items if i.get("status") == "skip"]
 
     if not actions:
         summary = "healthy"
@@ -550,11 +727,19 @@ def build_plan(mode: str | None = None) -> dict:
         },
         "dirty_code_modules": dirty_code,
         "detect_scope": detect_scope,
-        "counts": {"ok": len(oks), "action": len(actions), "total": len(items)},
+        "counts": {
+            "ok": len(oks),
+            "action": len(actions),
+            "skip": len(skips),
+            "total": len(items),
+        },
         "items": items,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "product_url": "http://localhost/",
-        "console_hint": "发布只动代码模块；换模后另做 sync-sources / sync-ops-indexes",
+        "console_hint": (
+            "发布只动代码模块；换模后 sync-sources / sync-ops-indexes；"
+            "C-MTEB 中文小量（≈5万）可选：看板「拉取并嵌入」或 ensure_ops_cmteb.sh（仅 bge-m3）"
+        ),
     }
 
 

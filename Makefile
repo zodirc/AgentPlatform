@@ -41,6 +41,8 @@ EVAL_RESTORE_SERVICES ?= runtime api
 EVAL_BUILD ?=
 # After compose --build, prune dangling images (set DOCKER_AUTO_PRUNE=0 to skip).
 DOCKER_AUTO_PRUNE ?= 1
+# make docker-prune: default dangling images only; set BUILD_CACHE_PRUNE=1 for builder prune -af.
+BUILD_CACHE_PRUNE ?= 0
 # WSL/Linux: strip broken Windows credsStore (desktop.exe) before compose build.
 # Docker Desktop often rewrites ~/.docker/config.json; make up/build re-fixes.
 # Set DOCKER_FIX_WSL_CREDS=0 to skip (docs/core/03-docker-runtime.md).
@@ -49,6 +51,7 @@ DOCKER_FIX_WSL_CREDS ?= 1
 API_REBUILD_DEPS ?= 0
 RUNTIME_REBUILD_DEPS ?= 0
 WEB_REBUILD_DEPS ?= 0
+BENCH_REBUILD_DEPS ?= 0
 # make up/start 后台拉起发布台 :9090；RELEASE_CONSOLE=0 关闭
 RELEASE_CONSOLE ?= 1
 
@@ -56,14 +59,14 @@ RELEASE_CONSOLE ?= 1
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
-	up-web up-api up-runtime up-bench up-ops-eval restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-bench up-ops-eval deps-anchor restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
 	eval-plan-suggest eval-plan-suggest-tune ux-signals \
 	eval-run-isolated load-test codegen alembic-upgrade test-rag retrieval-bench turn-effect-bench eval-writing-rag \
-	sync-sources seed-sources sync-ops-indexes sync-ops-cmteb sync intel-corpus-fetch retrieval-bench-prod loc \
+	sync-sources seed-sources sync-ops-indexes sync-ops-cmteb ops-cmteb-prepare sync intel-corpus-fetch retrieval-bench-prod loc \
 	micro-p1 \
 	micro-l1-prepare \
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
@@ -82,6 +85,7 @@ help: ## 显示常用命令
 	@echo "  make up-web       只重建 web（WEB_REBUILD_DEPS=1 强制 pnpm 重装）"
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
 	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
+	@echo "  make deps-anchor  仅打 api/runtime/web/bench:deps（防 BuildKit GC 掉 pip/pnpm 层）"
 	@echo "  make up-bench     只重建 Ops Bench worker（真向量评测，与 agent 解耦）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
@@ -98,13 +102,14 @@ help: ## 显示常用命令
 	@echo "  make up-all       强制全量 compose --build（不分模块）"
 	@echo "  make sync-sources 增量索引 seed/普通 work（本终端 [sync] 进度；不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"
+	@echo "  make ops-cmteb-prepare 从已拉 C-MTEB 建 ops-l1/cmteb-index Works（不嵌）"
 	@echo "  make sync-ops-cmteb    换模后重嵌 Ops C-MTEB（同模；仅 retrieval_ops_zh 分图）"
 	@echo "  make sync         = sync-sources + sync-ops-indexes（换模后一键；可见进度）"
 	@echo "  make resolve-embedding  GPU→bge-m3@1024（中英共用）+CUDA / 否则 gte-small@384（up/start 自动跑）"
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动（结束后自动清理悬空镜像）"
-	@echo "  make docker-prune 额外清理：悬空镜像 + 旧 build cache"
+	@echo "  make docker-prune 清理悬空镜像（BUILD_CACHE_PRUNE=1 才清 BuildKit 依赖缓存）"
 	@echo "  make down         停止"
 	@echo "  make ps / logs    状态 / 日志"
 	@echo ""
@@ -134,8 +139,8 @@ help: ## 显示常用命令
 	@echo "  make loc          统计源码行数（不含依赖/文档/workspace）"
 	@echo ""
 	@echo "发布台（同仓；make up/start 默认拉起 :9090）"
-	@echo "  make release-console  前台跑发布台（调试用）"
-	@echo "  make release-console-stop  停掉 make up 拉起的后台发布台"
+	@echo "  make release-console  前台跑发布台（须在本机 WSL 终端；勿用 Agent 沙箱代起 :9090）"
+	@echo "  make release-console-stop  停掉后台发布台"
 	@echo "  make release-status / release-detect / release"
 	@echo "  RELEASE_CONSOLE=0 make up   起栈但不启发布台"
 
@@ -224,10 +229,16 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 	  $(COMPOSE) up -d --no-deps --force-recreate api; \
 	fi
 	@if [ "$(WEB_REBUILD_DEPS)" = "1" ]; then \
-	  echo "==> WEB_REBUILD_DEPS=1 → docker compose build --no-cache web"; \
+	  echo "==> WEB_REBUILD_DEPS=1 → docker compose build --no-cache web (+deps anchor)"; \
 	  $(COMPOSE) build --no-cache web; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache web-deps \
+	    || echo "==> warn: web-deps anchor failed (mirror?); web image still built"; \
+	else \
+	  $(COMPOSE) build web; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build web-deps \
+	    || echo "==> warn: web-deps anchor failed (mirror?); web image still built"; \
 	fi
-	$(COMPOSE) up -d --no-deps --build web
+	$(COMPOSE) up -d --no-deps web
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
 	  bash scripts/release/release.sh mark --modules=web >/dev/null; \
@@ -236,10 +247,14 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 
 up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache）
 	@if [ "$(API_REBUILD_DEPS)" = "1" ]; then \
-	  echo "==> API_REBUILD_DEPS=1 → docker compose build --no-cache api"; \
+	  echo "==> API_REBUILD_DEPS=1 → docker compose build --no-cache api (+deps anchor)"; \
 	  $(COMPOSE) build --no-cache api; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache api-deps; \
+	else \
+	  $(COMPOSE) build api; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps; \
 	fi
-	$(COMPOSE) up -d --no-deps --build api
+	$(COMPOSE) up -d --no-deps api
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
 	  bash scripts/release/release.sh mark --modules=api >/dev/null; \
@@ -255,10 +270,14 @@ up-ops-eval: ensure-ops-secret ensure-docker-creds ## api + docker.sock（启用
 
 up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
 	@if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
-	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime"; \
+	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime (+deps anchor)"; \
 	  $(COMPOSE) build --no-cache runtime; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache runtime-deps; \
+	else \
+	  $(COMPOSE) build runtime; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-deps; \
 	fi
-	$(COMPOSE) up -d --no-deps --build runtime
+	$(COMPOSE) up -d --no-deps runtime
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
 	  bash scripts/release/release.sh mark --modules=runtime >/dev/null; \
@@ -267,13 +286,24 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 
 up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
 	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
-	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench"; \
+	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench (+deps anchor)"; \
 	  COMPOSE_PROFILES=bench $(COMPOSE) build --no-cache bench; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache bench-deps; \
+	else \
+	  COMPOSE_PROFILES=bench $(COMPOSE) build bench; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build bench-deps; \
 	fi
 	@echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"
 	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres
-	COMPOSE_PROFILES=bench $(COMPOSE) up -d --build bench
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d --no-deps bench
 	$(docker_auto_prune)
+
+# Tag all deps stages so BuildKit GC is less likely to drop pip/pnpm layers.
+deps-anchor: resolve-embedding ensure-docker-creds ## 仅打 api/runtime/web/bench:deps 锚点镜像
+	@echo "==> building deps-anchor images (api/runtime/web/bench)"
+	COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps runtime-deps web-deps bench-deps
+	@docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
+	  | grep -E 'agent-platform-(api|runtime|web|bench):(deps|latest|default)' || true
 
 restart-web: ## 重启 web（不 rebuild）
 	$(COMPOSE) restart web
@@ -308,11 +338,15 @@ build: ensure-docker-creds
 	$(COMPOSE) build
 	$(docker_auto_prune)
 
-docker-prune: ## 清理悬空镜像 + 全部未用 build cache（可回收那 ~几十 GB）
+docker-prune: ## 清理悬空镜像；BUILD_CACHE_PRUNE=1 才清全部未用 BuildKit cache
 	@echo "==> dangling images"
 	docker image prune -f
-	@echo "==> unused build cache (all; ACTIVE=0 is safe)"
-	docker builder prune -af
+	@if [ "$(BUILD_CACHE_PRUNE)" = "1" ]; then \
+	  echo "==> BUILD_CACHE_PRUNE=1 → unused build cache (all; next cold build re-pips)"; \
+	  docker builder prune -af; \
+	else \
+	  echo "==> skipping BuildKit cache (keep pip/ST layers; BUILD_CACHE_PRUNE=1 to reclaim)"; \
+	fi
 	@echo "==> done; docker system df:"
 	@docker system df
 
@@ -549,9 +583,21 @@ sync-ops-indexes: ## Ops BEIR work 按 scope stamp 重嵌（FiQA 等；跳过 se
 	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode ops-beir --reason make-ops-beir
 
+ops-cmteb-prepare: ## 从挂载 C-MTEB 建 cmteb-index Works+语料 txt（不嵌；需 api）
+	@test -f .env || (echo "missing .env"; exit 1)
+	@test -f eval/official/.local-data/cmteb/CovidRetrieval/corpus.jsonl || \
+	  (echo "missing C-MTEB slice; run: make official-bench-pull-cmteb"; exit 1)
+	@echo "==> ops-cmteb-prepare: materialize ops-l1/cmteb-index (Covid/Medical/Ecom)"
+	@$(COMPOSE) cp services/api/app/services/ops/official_agent_path.py \
+	  api:/app/app/services/ops/official_agent_path.py >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 api bash -c '\
+	  export PYTHONPATH=/app:/repo/scripts; \
+	  python /repo/scripts/official_bench/cmteb_index_prepare.py'
+
 sync-ops-cmteb: ## Ops C-MTEB 重嵌（同模 bge-m3；仅 cmteb-index → retrieval_ops_zh 分图）
 	@echo "==> sync-ops-cmteb: C-MTEB reindex (same embedder; schema retrieval_ops_zh)"
 	@echo "    Live progress on this terminal. Requires GPU bge-m3 after resolve-embedding."
+	@echo "    If no works yet: make ops-cmteb-prepare first (or ensure_ops_cmteb.sh)."
 	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
 	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
 	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
@@ -563,7 +609,7 @@ sync: ## 一键：seed/普通 work + Ops BEIR（≡ sync-sources && sync-ops-ind
 	@$(MAKE) sync-sources
 	@echo "==> make sync: (2/2) sync-ops-indexes"
 	@$(MAKE) sync-ops-indexes
-	@echo "==> make sync: done (C-MTEB: make sync-ops-cmteb separately after works exist)"
+	@echo "==> make sync: done (C-MTEB: make ops-cmteb-prepare && make sync-ops-cmteb)"
 
 # ONLY=id1,id2 optional. Requires network + git. Does not touch Turn hot path.
 intel-corpus-fetch: ## 按 SOURCES.yaml 拉取并转换 intel vendor（≤150MiB；gitignore）
@@ -674,7 +720,12 @@ official-bench-pull: official-bench-deps ## 拉取 BEIR + LongBench + SWE + C-MT
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py pull --suite all
 
 official-bench-pull-cmteb: official-bench-deps ## 只拉 C-MTEB 三库（合计≈5万篇；FORCE=1 强制重拉）
-	set -a && [ -f .env ] && . ./.env; set +a; \
+	@set -a && [ -f .env ] && . ./.env; set +a; \
+	DATA_DIR="$${HOST_BENCH_DATA_DIR:-$(CURDIR)/eval/official/.local-data}"; \
+	case "$$DATA_DIR" in /data/*) DATA_DIR="$(CURDIR)/eval/official/.local-data" ;; esac; \
+	mkdir -p "$$DATA_DIR"; \
+	echo "==> C-MTEB pull → $$DATA_DIR (small · ~50k)"; \
+	BENCH_DATA_DIR="$$DATA_DIR" HOST_BENCH_DATA_DIR="$$DATA_DIR" \
 	HF_ENDPOINT=$${HF_ENDPOINT:-https://hf-mirror.com} \
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py pull --suite cmteb \
 	  $(if $(filter 1,$(FORCE)),--force,)

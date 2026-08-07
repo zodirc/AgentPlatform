@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Ensure RELEASE_CONSOLE_SECRET + start release-console in background (host).
 # Used by make up / start. Skip with RELEASE_CONSOLE=0.
+#
+# Important (WSL / Cursor agent): the console must listen in the *host* network
+# namespace. Starting it from a Cursor agent sandbox leaves a listen socket only
+# inside that netns — the Windows/WSL browser gets "connection refused".
+# We refuse to start from the sandbox; start from a normal WSL terminal instead.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -72,7 +77,7 @@ port_open() {
 import socket, sys
 port = int(sys.argv[1])
 s = socket.socket()
-s.settimeout(0.4)
+s.settimeout(0.6)
 try:
     s.connect(("127.0.0.1", port))
 except OSError:
@@ -83,35 +88,116 @@ raise SystemExit(0)
 PY
 }
 
+# Cursor agent shells run in an isolated netns.
+in_cursor_sandbox() {
+  [[ -n "${CURSOR_SANDBOX:-}" || -n "${CURSOR_AGENT:-}" ]]
+}
+
+netns_mismatch_proven() {
+  local pid="$1"
+  local a b
+  a="$(readlink "/proc/$$/ns/net" 2>/dev/null || true)"
+  b="$(readlink "/proc/${pid}/ns/net" 2>/dev/null || true)"
+  [[ -n "$a" && -n "$b" && "$a" != "$b" ]]
+}
+
+kill_console_procs() {
+  local old=""
+  if [[ -f "$PID_FILE" ]]; then
+    old="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$old" ]] && kill -0 "$old" 2>/dev/null; then
+      kill "$old" 2>/dev/null || true
+      sleep 0.2
+      kill -9 "$old" 2>/dev/null || true
+    fi
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k "${port}/tcp" >/dev/null 2>&1 || true
+  elif command -v lsof >/dev/null 2>&1; then
+    local pids
+    pids="$(lsof -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    if [[ -n "$pids" ]]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+      sleep 0.2
+      # shellcheck disable=SC2086
+      kill -9 $pids 2>/dev/null || true
+    fi
+  fi
+  pkill -f 'services/release-console/server.py' 2>/dev/null || true
+  rm -f "$PID_FILE"
+  sleep 0.3
+}
+
 if port_open; then
   echo "==> release-console already on ${url}"
   exit 0
 fi
 
-# Stale pid?
+# Do not start from Cursor agent sandbox — browser cannot reach that netns.
+if in_cursor_sandbox && [[ "${RELEASE_CONSOLE_ALLOW_SANDBOX:-0}" != "1" ]]; then
+  # Clear unreachable zombies left by earlier sandboxed starts (same sandbox may see them).
+  if [[ -f "$PID_FILE" ]]; then
+    old="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [[ -n "$old" ]] && kill -0 "$old" 2>/dev/null; then
+      echo "==> clearing sandboxed zombie pid $old"
+      kill_console_procs
+    fi
+  fi
+  echo "==> release-console not started (Cursor agent sandbox would bind an unreachable :${port})"
+  echo "    在本机 WSL 终端执行："
+  echo "      make release-console-stop; bash scripts/release/ensure_console.sh"
+  echo "    然后打开 ${url}"
+  exit 0
+fi
+
+# Port closed: clear stale / unreachable pid then start.
 if [[ -f "$PID_FILE" ]]; then
   old="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [[ -n "$old" ]] && kill -0 "$old" 2>/dev/null; then
-    echo "==> release-console pid $old alive but port ${port} closed — restarting"
-    kill "$old" 2>/dev/null || true
-    sleep 0.3
+    echo "==> release-console pid $old alive but :${port} unreachable — clearing zombie"
   fi
-  rm -f "$PID_FILE"
 fi
+kill_console_procs
 
 cd "$ROOT"
-# Load .env into child (server also reads .env itself).
 set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
-nohup env PYTHONUNBUFFERED=1 RELEASE_CONSOLE_PORT="$port" RELEASE_CONSOLE_SECRET="$secret" \
-  python3 services/release-console/server.py >>"$LOG_FILE" 2>&1 &
+
+setsid env PYTHONUNBUFFERED=1 RELEASE_CONSOLE_PORT="$port" RELEASE_CONSOLE_SECRET="$secret" \
+  python3 "$ROOT/services/release-console/server.py" \
+  </dev/null >>"$LOG_FILE" 2>&1 &
 echo $! >"$PID_FILE"
-sleep 0.6
-if port_open; then
-  echo "==> release-console ${url}  (secret in .env · log ${LOG_FILE#"$ROOT"/})"
-else
-  echo "WARNING: release-console failed to bind :${port} — see ${LOG_FILE#"$ROOT"/}" >&2
-  exit 1
+new_pid="$(cat "$PID_FILE")"
+
+ok=0
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  if port_open; then
+    ok=1
+    break
+  fi
+  if ! kill -0 "$new_pid" 2>/dev/null; then
+    break
+  fi
+  sleep 0.3
+done
+
+if [[ "$ok" == "1" ]]; then
+  if netns_mismatch_proven "$new_pid"; then
+    echo "WARNING: release-console started in a different network namespace." >&2
+    echo "         Killing it — run from a normal WSL terminal:" >&2
+    echo "         bash scripts/release/ensure_console.sh" >&2
+    kill_console_procs
+    exit 1
+  fi
+  echo "==> release-console ${url}  (pid $new_pid · log ${LOG_FILE#"$ROOT"/})"
+  exit 0
 fi
+
+echo "WARNING: release-console failed to bind :${port} — see ${LOG_FILE#"$ROOT"/}" >&2
+if ! kill -0 "$new_pid" 2>/dev/null; then
+  rm -f "$PID_FILE"
+fi
+exit 1

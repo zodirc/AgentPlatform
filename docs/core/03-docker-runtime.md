@@ -221,9 +221,15 @@ docker compose -f deploy/docker-compose.yml --env-file .env up -d --build
 - 构建时默认 **CPU** torch；有 NVIDIA 且 VRAM≥8GiB 时由 `make resolve-embedding` 自动切 CUDA（见下条）
 - `HEALTHCHECK` 与 compose healthcheck 保持一致
 - 非 root 用户运行 `USER app`，uid `1000`
-- **CUDA / GPU**：默认构建 CPU torch。本机 `nvidia-smi` 且 VRAM≥8GiB 时，`make resolve-embedding`（`make up`/`start` 自动跑）写入 `TORCH_INDEX_URL=…/cu128`、`EMBEDDING_DEVICE=cuda`、`EMBEDDING_MODEL=BAAI/bge-m3`（1024 维 / INDEX 11；**产品 + BEIR + C-MTEB 共用**，仅 HNSW schema 分图）与 `deploy/compose/gpu.auto.yml`（`gpus: all`）。无卡或 `RUNTIME_GPU=0` → `thenlper/gte-small@384`（INDEX 9；**禁止**默认 bge-m3）。换 CUDA 轮 / 换模需 `RUNTIME_REBUILD_DEPS=1 make up-runtime`（或整栈 `make up`）。
+- **CUDA / GPU**：默认构建 CPU torch。本机 `nvidia-smi` 且 VRAM≥8GiB 时，`make resolve-embedding`（`make up`/`start` 自动跑）写入 `TORCH_INDEX_URL=…/cu128`、`EMBEDDING_DEVICE=cuda`、`EMBEDDING_MODEL=BAAI/bge-m3`（1024 维 / **INDEX 12**；**产品 + BEIR + C-MTEB 共用**，仅 HNSW schema 分图）、`EMBEDDING_MAX_SEQ_LENGTH=512`、`EMBEDDING_BATCH_SIZE=128` 与 `deploy/compose/gpu.auto.yml`（`gpus: all`）。无卡或 `RUNTIME_GPU=0` → `thenlper/gte-small@384`（INDEX 9；**禁止**默认 bge-m3）。换 CUDA 轮 / 换模 / 改 `MAX_SEQ` 需 `RUNTIME_REBUILD_DEPS=1 make up-runtime`（或整栈 `make up`）并重嵌。bge-m3 hub 默认 `max_seq_length=8192` 会在 16GiB 卡上把 batch=64 顶满显存；索引侧固定截断 **512**（`EMBEDDING_MAX_SEQ_LENGTH` 可覆盖）→ INDEX 12。
 - **镜像源**：Dockerfile 默认中国镜像（aliyun apt/pip、npmmirror、hf-mirror），本地 `make up` 更快。GitHub Actions / `CI=true` 的 proof 路径经 `scripts/proof_compose_env.sh` 改为官方源（`pypi.org` / `registry.npmjs.org` / 空 `APT_MIRROR`），避免海外 runner 卡在国内源直到 2h job timeout。本地若要强制官方源：导出同名 env 后再 `--build`；`PROOF_KEEP_MIRRORS=1` 可在 CI 下保留国内源。
-- **分层重建**：api / runtime（lite + retrieval）Dockerfile 为 `deps`→`app` 多阶段；compose `target: app`。改 `app/**` 应命中 pip/ST 缓存。强制重打依赖：`API_REBUILD_DEPS=1` / `RUNTIME_REBUILD_DEPS=1` / `WEB_REBUILD_DEPS=1`。详见 [38](../archive/38-image-layer-rebuild-plan.md)。
+- **分层重建**：api / runtime（lite + retrieval）Dockerfile 为 `deps`→`app` 多阶段；compose `target: app`。改 `app/**` 应命中 pip/ST 缓存（BuildKit 日志里 deps 步标 `CACHED`，不应再 `Collecting …`）。强制重打依赖：`API_REBUILD_DEPS=1` / `RUNTIME_REBUILD_DEPS=1` / `WEB_REBUILD_DEPS=1`。详见 [38](../archive/38-image-layer-rebuild-plan.md)。
+- **为何有时「只改代码」仍全量 pip/pnpm**：多阶段的 `deps` 层主要活在 BuildKit cache 里；磁盘紧或跑过 `BUILD_CACHE_PRUNE=1` / `docker builder prune` 后 cache 被回收，下一次会冷跑依赖安装（最终业务镜像仍在也不够）。缓解：
+  - `make up-api` / `up-runtime` / `up-web` / `up-bench` 会顺带打 `*:deps` 锚点镜像；
+  - 或一次性 `make deps-anchor`（api/runtime/web/bench）；
+  - Dockerfile 使用 BuildKit cache mount（pip：`/root/.cache/pip`；web：pnpm store）；层冷重建时尽量不回源站。
+  - 日常勿 `BUILD_CACHE_PRUNE=1`。命中缓存时日志应见 deps 步 `CACHED`、不应再大段 `Collecting` / `Packages:`。
+  - **gateway** 用上游 `caddy:2-alpine`，无自建 deps 层。
 
 ### 5.2 runtime 镜像特殊要求
 
@@ -540,7 +546,7 @@ make eval-ha        # ha_runner golden（stub）
 | 日常改代码 | 优先 `make start`；只改某一服务用 `make up-web` / `up-api` / `up-runtime` |
 | **自动清理** | `make up` / `up-*` / `build` / `gate` / eval restore 结束后会 `docker image prune -f`（仅悬空 `<none>`）。关：`DOCKER_AUTO_PRUNE=0` |
 | **WSL 凭据** | `make up` / `start` / `build` / `up-*` 前跑 `ensure-docker-creds`：去掉 `~/.docker/config.json` 里 Docker Desktop 写入的 `credsStore=desktop.exe`（Linux 下会 `exec format error`，拉不动 `nginx`/`node` 等）。关：`DOCKER_FIX_WSL_CREDS=0` |
-| 深度清理 | `make docker-prune`：悬空镜像 + **全部**未用 Build Cache（`builder prune -af`；下次冷构建会稍慢） |
+| 深度清理 | `make docker-prune`：默认只清悬空镜像（保留 BuildKit 依赖层）。腾磁盘：`BUILD_CACHE_PRUNE=1 make docker-prune`（`builder prune -af`；下次冷构建会重新 pip） |
 | 更狠 | `docker system prune -a`（会删所有未在跑容器引用的镜像，慎用） |
 
 当前 `docker images` 里大量 `<none>` + `docker system df` 显示 Images Reclaimable ~90% 即此现象。

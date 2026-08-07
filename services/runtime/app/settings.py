@@ -153,6 +153,8 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 256
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64
+    # ST truncate length. 0 → model default, except bge-m3 auto 512 (8k default thrashs VRAM).
+    embedding_max_seq_length: int = 0
     # 0 → auto: force reindex ≥1024 (batch×16), incremental batch×2. Override flush size.
     embedding_flush_chunks: int = 0
     # 0 → auto: force reindex commit every 4 flushes, else every flush (resume checkpoints).

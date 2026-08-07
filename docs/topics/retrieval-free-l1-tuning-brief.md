@@ -683,7 +683,7 @@ EVAL-8 后 never_retrieved 仍为部分 WA 主因，但无可过 EVAL-7 的宏�
 | 3 | 旁路索引平面 | `ops-l1/cmteb-index/{dataset}` → schema **`retrieval_ops_zh`**（**同模**；仅独立 HNSW；BEIR 仍 `retrieval_ops`） |
 | 4 | Sync | `make sync-ops-cmteb`（runtime `--mode ops-cmteb`） |
 | 5 | L1 agent | Ops target `retrieval_zh`；`make official-bench-retrieval-zh-agent` |
-| 6 | Embed | GPU → **`BAAI/bge-m3@1024` / INDEX 11**（中英语料**共用**）；CPU → gte-small（禁止默认 bge-m3） |
+| 6 | Embed | GPU → **`BAAI/bge-m3@1024` / INDEX 12**（`max_seq=512`；中英语料**共用**）；CPU → gte-small（禁止默认 bge-m3） |
 
 #### 旁路形态（写死）
 

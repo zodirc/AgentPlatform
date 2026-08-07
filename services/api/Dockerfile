@@ -33,10 +33,13 @@ COPY packages/contracts/python /contracts/python
 COPY services/api/pyproject.toml /tmp/api/pyproject.toml
 # Minimal stub so hatchling can build the wheel without copying real app sources
 # into the deps layer input (docs/38 §3.3).
-RUN mkdir -p /tmp/api/app && printf '%s\n' '# deps-layer stub' > /tmp/api/app/__init__.py \
-    && pip install --no-cache-dir /contracts/python \
-    && pip install --no-cache-dir /tmp/api \
-    && pip install --no-cache-dir 'datasets>=2.14.0' 'huggingface_hub>=0.20.0' \
+# BuildKit cache mount: if deps layer is GC'd and re-RUN, wheels stay local (no mirror re-fetch).
+# Do not use pip --no-cache-dir here — that bypasses the mount.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p /tmp/api/app && printf '%s\n' '# deps-layer stub' > /tmp/api/app/__init__.py \
+    && pip install /contracts/python \
+    && pip install /tmp/api \
+    && pip install 'datasets>=2.14.0' 'huggingface_hub>=0.20.0' \
     && rm -rf /tmp/api
 
 FROM deps AS app

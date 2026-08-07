@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -47,9 +48,13 @@ ALLOWED_ACTIONS = {
     "up-runtime": ["bash", str(RELEASE_SH), "run", "--modules=runtime"],
     "up-web": ["bash", str(RELEASE_SH), "run", "--modules=web"],
     "up-gateway": ["bash", str(RELEASE_SH), "run", "--modules=gateway"],
+    "up-all": ["bash", str(RELEASE_SH), "run", "--force-all"],
     "sync-sources": ["make", "-C", str(ROOT), "sync-sources"],
     "sync-ops-indexes": ["make", "-C", str(ROOT), "sync-ops-indexes"],
+    "sync-ops-cmteb": ["make", "-C", str(ROOT), "sync-ops-cmteb"],
+    "ensure-ops-cmteb": ["bash", str(ROOT / "scripts" / "release" / "ensure_ops_cmteb.sh")],
     "git-pull": ["bash", str(GIT_PULL_SH)],
+    "cancel-jobs": ["__cancel__"],  # handled in-process, not spawned
 }
 
 # Console action / plan item id → per-module log stem under logs/
@@ -58,9 +63,13 @@ ACTION_LOG_KEY = {
     "up-runtime": "runtime",
     "up-web": "web",
     "up-gateway": "gateway",
+    "up-all": "misc",
     "sync-sources": "index_product",
     "sync-ops-indexes": "index_ops",
+    "sync-ops-cmteb": "index_ops_zh",
+    "ensure-ops-cmteb": "index_ops_zh",
     "git-pull": "git",
+    "cancel-jobs": "misc",
 }
 ITEM_LOG_KEY = {
     "api": "api",
@@ -70,8 +79,1015 @@ ITEM_LOG_KEY = {
     "embedding": "runtime",  # 换模走 runtime 重建
     "index_product": "index_product",
     "index_ops": "index_ops",
+    "index_ops_zh": "index_ops_zh",
     "git": "git",
 }
+
+# Actions that must not double-spawn while a matching job/sync is live.
+_ACTION_ITEM = {
+    "up-api": "api",
+    "up-runtime": "runtime",
+    "up-web": "web",
+    "up-gateway": "gateway",
+    "up-all": "api",  # attach if any deploy live; cancel covers all
+    "sync-sources": "index_product",
+    "sync-ops-indexes": "index_ops",
+    "sync-ops-cmteb": "index_ops_zh",
+    "ensure-ops-cmteb": "index_ops_zh",
+    "git-pull": "git",
+}
+_ITEM_DEFAULT_ACTION = {
+    "api": "up-api",
+    "runtime": "up-runtime",
+    "web": "up-web",
+    "gateway": "up-gateway",
+    "index_product": "sync-sources",
+    "index_ops": "sync-ops-indexes",
+    "index_ops_zh": "ensure-ops-cmteb",
+}
+_SYNC_ACTIVE = frozenset(
+    {
+        "starting",
+        "prepare",
+        "loading_embedder",
+        "scope",
+        "scan",
+        "chunk",
+        "plan",
+        "embed",
+        "write",
+        "index",
+    }
+)
+_jobs_lock = threading.Lock()
+_JOBS_FILE = STATUS_DIR / "jobs.json"
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _load_jobs() -> list[dict]:
+    if not _JOBS_FILE.is_file():
+        return []
+    try:
+        data = json.loads(_JOBS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _save_jobs(jobs: list[dict]) -> None:
+    try:
+        STATUS_DIR.mkdir(parents=True, exist_ok=True)
+        _JOBS_FILE.write_text(
+            json.dumps(jobs, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _reap_jobs() -> list[dict]:
+    with _jobs_lock:
+        alive = [j for j in _load_jobs() if _pid_alive(int(j.get("pid") or 0))]
+        _save_jobs(alive)
+        return alive
+
+
+def _register_job(*, action: str, pid: int, log_key: str) -> None:
+    with _jobs_lock:
+        jobs = [j for j in _load_jobs() if _pid_alive(int(j.get("pid") or 0))]
+        jobs.append(
+            {
+                "action": action,
+                "pid": int(pid),
+                "log_key": log_key,
+                "item_id": _ACTION_ITEM.get(action),
+                "started_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+        )
+        _save_jobs(jobs)
+
+
+# --- serial action queue (deploy + index + cancel) ---------------------------------
+_QUEUE_FILE = STATUS_DIR / "queue.json"
+_queue_lock = threading.Lock()
+_queue_cv = threading.Condition(_queue_lock)
+_queue_state: dict = {"items": [], "seq": 0}
+_queue_abort = False
+_queue_current_pid: int | None = None
+_queue_worker_started = False
+
+_ACTION_LABELS = {
+    "up-api": "重建 api",
+    "up-runtime": "重建 runtime",
+    "up-web": "重建 web",
+    "up-gateway": "重建 gateway",
+    "up-all": "全部重建",
+    "sync-sources": "同步产品索引",
+    "sync-ops-indexes": "同步 Ops BEIR",
+    "sync-ops-cmteb": "同步 C-MTEB",
+    "ensure-ops-cmteb": "拉取并嵌入中文库",
+    "git-pull": "拉取远程",
+    "cancel-jobs": "取消任务",
+}
+
+
+def _utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _queue_save_unlocked() -> None:
+    try:
+        STATUS_DIR.mkdir(parents=True, exist_ok=True)
+        _QUEUE_FILE.write_text(
+            json.dumps(_queue_state, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
+def _queue_trim_unlocked() -> None:
+    items = _queue_state["items"]
+    active = [i for i in items if i.get("status") in {"pending", "running"}]
+    done = [i for i in items if i.get("status") not in {"pending", "running"}]
+    _queue_state["items"] = done[-30:] + active
+
+
+def _queue_load_disk() -> None:
+    global _queue_state
+    if not _QUEUE_FILE.is_file():
+        return
+    try:
+        raw = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(raw, dict):
+        return
+    items = raw.get("items") if isinstance(raw.get("items"), list) else []
+    fixed: list[dict] = []
+    for it in items:
+        if not isinstance(it, dict) or not it.get("action"):
+            continue
+        row = dict(it)
+        # Console restart: resume interrupted running items.
+        if row.get("status") == "running":
+            row["status"] = "pending"
+            row.pop("started_at", None)
+            row["message"] = "控制台重启后重新排队"
+        if row.get("status") in {"pending", "done", "error", "cancelled"}:
+            fixed.append(row)
+    seq = int(raw.get("seq") or 0)
+    for row in fixed:
+        try:
+            n = int(str(row.get("id") or "").lstrip("q") or 0)
+            seq = max(seq, n)
+        except ValueError:
+            pass
+    with _queue_cv:
+        _queue_state = {"items": fixed, "seq": seq}
+        _queue_trim_unlocked()
+        _queue_save_unlocked()
+
+
+def _queue_public() -> dict:
+    with _queue_lock:
+        items = [dict(i) for i in _queue_state["items"]]
+    pending = [i for i in items if i.get("status") in {"pending", "running"}]
+    recent = [i for i in items if i.get("status") not in {"pending", "running"}][-8:]
+    bits = []
+    for i in pending:
+        mark = "▶" if i.get("status") == "running" else "等待"
+        bits.append(f"{mark} {i.get('label') or i.get('action')}")
+    return {
+        "pending": pending,
+        "recent": recent,
+        "summary": " → ".join(bits) if bits else "",
+        "count": len(pending),
+    }
+
+
+def _queue_finish_unlocked(qid: str, status: str, message: str = "") -> None:
+    for i in _queue_state["items"]:
+        if i.get("id") == qid:
+            i["status"] = status
+            i["finished_at"] = _utc_now()
+            if message:
+                i["message"] = message
+            break
+    _queue_trim_unlocked()
+    _queue_save_unlocked()
+
+
+def _enqueue_action(action: str) -> dict:
+    """Append to serial queue. cancel-jobs clears pending and aborts current."""
+    global _queue_abort, _queue_current_pid
+
+    label = _ACTION_LABELS.get(action, action)
+    kill_pid: int | None = None
+
+    with _queue_cv:
+        items = _queue_state["items"]
+
+        if action == "cancel-jobs":
+            if any(
+                i.get("action") == "cancel-jobs" and i.get("status") == "pending"
+                for i in items
+            ):
+                return {
+                    "ok": True,
+                    "queued": True,
+                    "already": True,
+                    "action": action,
+                    "queue": _queue_public_unlocked(items),
+                    "message": "取消已在队列中",
+                }
+            if any(
+                i.get("action") == "cancel-jobs" and i.get("status") == "running"
+                for i in items
+            ):
+                return {
+                    "ok": True,
+                    "attached": True,
+                    "queued": False,
+                    "action": action,
+                    "queue": _queue_public_unlocked(items),
+                    "message": "正在执行取消",
+                }
+            new_items: list[dict] = []
+            for i in items:
+                st = i.get("status")
+                if st == "pending":
+                    row = dict(i)
+                    row["status"] = "cancelled"
+                    row["finished_at"] = _utc_now()
+                    row["message"] = "入队取消时清除"
+                    new_items.append(row)
+                else:
+                    new_items.append(i)
+            _queue_state["seq"] = int(_queue_state.get("seq") or 0) + 1
+            item = {
+                "id": f"q{_queue_state['seq']}",
+                "action": action,
+                "label": label,
+                "status": "pending",
+                "enqueued_at": _utc_now(),
+            }
+            new_items.append(item)
+            _queue_state["items"] = new_items
+            _queue_abort = True
+            kill_pid = _queue_current_pid
+            _queue_trim_unlocked()
+            _queue_save_unlocked()
+            _queue_cv.notify_all()
+            qpub = _queue_public_unlocked(_queue_state["items"])
+        else:
+            for i in items:
+                if i.get("action") == action and i.get("status") == "running":
+                    return {
+                        "ok": True,
+                        "attached": True,
+                        "queued": False,
+                        "action": action,
+                        "item": dict(i),
+                        "queue": _queue_public_unlocked(items),
+                        "message": f"已在执行 · {label}",
+                    }
+                if i.get("action") == action and i.get("status") == "pending":
+                    return {
+                        "ok": True,
+                        "queued": True,
+                        "already": True,
+                        "action": action,
+                        "item": dict(i),
+                        "queue": _queue_public_unlocked(items),
+                        "message": f"已在队列中 · {label}",
+                    }
+            _queue_state["seq"] = int(_queue_state.get("seq") or 0) + 1
+            item = {
+                "id": f"q{_queue_state['seq']}",
+                "action": action,
+                "label": label,
+                "status": "pending",
+                "enqueued_at": _utc_now(),
+            }
+            items.append(item)
+            _queue_trim_unlocked()
+            _queue_save_unlocked()
+            _queue_cv.notify_all()
+            qpub = _queue_public_unlocked(_queue_state["items"])
+
+    if kill_pid:
+        _kill_pid_tree(int(kill_pid))
+
+    return {
+        "ok": True,
+        "queued": True,
+        "attached": False,
+        "already": False,
+        "action": action,
+        "item": item,
+        "queue": qpub,
+        "message": f"已入队 · {label}",
+    }
+
+
+def _queue_public_unlocked(items: list[dict]) -> dict:
+    pending = [dict(i) for i in items if i.get("status") in {"pending", "running"}]
+    recent = [dict(i) for i in items if i.get("status") not in {"pending", "running"}][-8:]
+    bits = []
+    for i in pending:
+        mark = "▶" if i.get("status") == "running" else "等待"
+        bits.append(f"{mark} {i.get('label') or i.get('action')}")
+    return {
+        "pending": pending,
+        "recent": recent,
+        "summary": " → ".join(bits) if bits else "",
+        "count": len(pending),
+    }
+
+
+def _queue_worker_loop() -> None:
+    global _queue_abort, _queue_current_pid
+    while True:
+        with _queue_cv:
+            item = None
+            while True:
+                for i in _queue_state["items"]:
+                    if i.get("status") == "pending":
+                        item = i
+                        break
+                if item is not None:
+                    break
+                _queue_cv.wait(timeout=5.0)
+            qid = str(item.get("id"))
+            action = str(item.get("action") or "")
+            for i in _queue_state["items"]:
+                if i.get("id") == qid:
+                    i["status"] = "running"
+                    i["started_at"] = _utc_now()
+                    i.pop("message", None)
+                    break
+            _queue_abort = False
+            _queue_save_unlocked()
+
+        _plan_cache["at"] = 0.0
+
+        if action == "cancel-jobs":
+            try:
+                result = _cancel_all_jobs()
+                msg = str(result.get("message") or "已取消")
+                st = "done" if result.get("ok") else "error"
+            except Exception as exc:  # noqa: BLE001
+                msg = str(exc)
+                st = "error"
+            with _queue_cv:
+                _queue_finish_unlocked(qid, st, msg)
+                _queue_abort = False
+                _queue_current_pid = None
+                _queue_cv.notify_all()
+            _plan_cache["at"] = 0.0
+            continue
+
+        cmd = ALLOWED_ACTIONS.get(action)
+        if not cmd or cmd == ["__cancel__"]:
+            with _queue_cv:
+                _queue_finish_unlocked(qid, "error", f"unknown action {action}")
+                _queue_cv.notify_all()
+            continue
+
+        # Serial with release.lock: wait out any orphan/outside deploy before up-*.
+        if action.startswith("up-"):
+            waited_out = False
+            deadline = time.time() + 2 * 60 * 60
+            while time.time() < deadline:
+                with _queue_cv:
+                    if _queue_abort:
+                        waited_out = True
+                        break
+                if not _release_deploy_alive():
+                    break
+                time.sleep(1.0)
+            else:
+                with _queue_cv:
+                    _queue_finish_unlocked(qid, "error", "等待发布锁超时")
+                    _queue_cv.notify_all()
+                continue
+            if waited_out:
+                with _queue_cv:
+                    _queue_finish_unlocked(qid, "cancelled", "已中止")
+                    _queue_abort = False
+                    _queue_cv.notify_all()
+                continue
+
+        try:
+            proc = _spawn(cmd, action=action)
+        except Exception as exc:  # noqa: BLE001
+            with _queue_cv:
+                _queue_finish_unlocked(qid, "error", str(exc))
+                _queue_cv.notify_all()
+            continue
+
+        with _queue_cv:
+            _queue_current_pid = int(proc.pid)
+
+        aborted = False
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+            with _queue_cv:
+                aborted = _queue_abort
+            if aborted:
+                _kill_pid_tree(int(proc.pid))
+                try:
+                    proc.wait(timeout=8)
+                except Exception:  # noqa: BLE001
+                    pass
+                break
+            time.sleep(0.45)
+
+        with _queue_cv:
+            aborted = aborted or _queue_abort
+            _queue_current_pid = None
+            if aborted:
+                _queue_finish_unlocked(qid, "cancelled", "已中止")
+                _queue_abort = False
+            elif int(proc.returncode or 0) == 0:
+                _queue_finish_unlocked(qid, "done", "完成")
+            else:
+                _queue_finish_unlocked(
+                    qid, "error", f"退出码 {proc.returncode}"
+                )
+            _queue_cv.notify_all()
+        _plan_cache["at"] = 0.0
+
+
+def _ensure_queue_worker() -> None:
+    global _queue_worker_started
+    with _queue_lock:
+        if _queue_worker_started:
+            return
+        _queue_worker_started = True
+    _queue_load_disk()
+    threading.Thread(
+        target=_queue_worker_loop, daemon=True, name="release-queue"
+    ).start()
+
+
+def _internal_token() -> str:
+    tok = (os.environ.get("INTERNAL_SERVICE_TOKEN") or "").strip()
+    if tok:
+        return tok
+    env_path = ROOT / ".env"
+    if not env_path.is_file():
+        return ""
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line.startswith("INTERNAL_SERVICE_TOKEN="):
+            return line.split("=", 1)[1].strip().strip("'").strip('"')
+    return ""
+
+
+def _cancel_runtime_sync() -> dict:
+    """Ask runtime to abort in-flight sources/ops index sync."""
+    token = _internal_token()
+    if not token:
+        return {"ok": False, "error": "INTERNAL_SERVICE_TOKEN missing"}
+    try:
+        out = subprocess.check_output(
+            [
+                "docker",
+                "exec",
+                "-e",
+                f"INTERNAL_SERVICE_TOKEN={token}",
+                "agent-runtime",
+                "python",
+                "-c",
+                (
+                    "import os,urllib.request;"
+                    "req=urllib.request.Request("
+                    "'http://127.0.0.1:8001/internal/commands/cancel-sources-index',"
+                    "data=b'',method='POST',"
+                    "headers={'X-Internal-Token':os.environ['INTERNAL_SERVICE_TOKEN'],"
+                    "'Accept':'application/json'});"
+                    "print(urllib.request.urlopen(req,timeout=8).read().decode())"
+                ),
+            ],
+            stderr=subprocess.STDOUT,
+            timeout=15,
+        )
+        raw = out.decode("utf-8", errors="replace").strip()
+        try:
+            return {"ok": True, "result": json.loads(raw)}
+        except json.JSONDecodeError:
+            return {"ok": True, "raw": raw[-500:]}
+    except (subprocess.SubprocessError, OSError, FileNotFoundError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+def _kill_pid_tree(pid: int) -> bool:
+    if pid <= 0 or not _pid_alive(pid):
+        return False
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            return False
+    time.sleep(0.4)
+    if _pid_alive(pid):
+        try:
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                return False
+    return True
+
+
+_ACTIVE_DEPLOY_PHASES = frozenset({"detecting", "building", "switching", "verifying"})
+_status_write_lock = threading.Lock()
+
+
+def _write_deploy_status(dep: dict) -> None:
+    with _status_write_lock:
+        try:
+            STATUS_DIR.mkdir(parents=True, exist_ok=True)
+            STATUS_FILE.write_text(
+                json.dumps(dep, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+
+def _release_deploy_alive() -> bool:
+    """True iff release.sh (or equivalent up-*) still holds the deploy."""
+    lock = STATUS_DIR / "release.lock"
+    if lock.is_file():
+        try:
+            raw = lock.read_text(encoding="utf-8").strip()
+            pid = int(raw) if raw.isdigit() else 0
+        except (OSError, ValueError):
+            pid = 0
+        if pid > 0 and _pid_alive(pid):
+            return True
+        try:
+            lock.unlink(missing_ok=True)
+        except OSError:
+            pass
+    for job in _discover_host_action_jobs():
+        act = str(job.get("action") or "")
+        if act.startswith("up-"):
+            return True
+    return False
+
+
+def _mark_deploy_aborted(reason: str) -> dict:
+    """Force status.json out of building/switching after cancel or orphan detect."""
+    dep: dict = {}
+    if STATUS_FILE.is_file():
+        try:
+            raw = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                dep = raw
+        except (OSError, json.JSONDecodeError):
+            dep = {}
+    phase = str(dep.get("phase") or "")
+    if phase not in _ACTIVE_DEPLOY_PHASES:
+        return dep
+    healed = dict(dep)
+    healed["phase"] = "failed"
+    healed["message"] = reason
+    healed["error"] = reason
+    healed["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    _write_deploy_status(healed)
+    return healed
+
+
+def _heal_stale_deploy(dep: dict) -> dict:
+    """If status says deploying but no process/lock, reset — avoids sticky busy UI."""
+    if not isinstance(dep, dict):
+        return {"phase": "idle", "message": "", "changed": [], "deployed": {}}
+    phase = str(dep.get("phase") or "")
+    if phase not in _ACTIVE_DEPLOY_PHASES:
+        return dep
+    if _release_deploy_alive():
+        return dep
+    return _mark_deploy_aborted("发布已中断（无活动进程），状态已复位")
+
+
+def _cancel_all_jobs() -> dict:
+    """Stop console-spawned / discovered rebuild+sync work and runtime embed."""
+    killed: list[dict] = []
+    seen: set[int] = set()
+    for job in list(_reap_jobs()) + _discover_host_action_jobs():
+        pid = int(job.get("pid") or 0)
+        if pid <= 0 or pid in seen:
+            continue
+        seen.add(pid)
+        if _kill_pid_tree(pid):
+            killed.append(
+                {
+                    "pid": pid,
+                    "action": job.get("action"),
+                    "item_id": job.get("item_id"),
+                }
+            )
+    with _jobs_lock:
+        _save_jobs([])
+
+    # Release modular deploy lock holder (release.sh run / up).
+    lock = STATUS_DIR / "release.lock"
+    release_killed = False
+    if lock.is_file():
+        try:
+            raw = lock.read_text(encoding="utf-8").strip()
+            rpid = int(raw) if raw.isdigit() else 0
+        except (OSError, ValueError):
+            rpid = 0
+        if rpid and rpid not in seen and _kill_pid_tree(rpid):
+            killed.append({"pid": rpid, "action": "release", "item_id": None})
+            release_killed = True
+            seen.add(rpid)
+        try:
+            lock.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    _mark_deploy_aborted("已取消")
+
+    sync = _cancel_runtime_sync()
+    # Append a timeline breadcrumb.
+    log_dir = STATUS_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    note = (
+        f"\n==> {stamp} [misc] cancel-jobs "
+        f"killed={len(killed)} sync_ok={bool(sync.get('ok'))} "
+        f"release_lock={release_killed}\n"
+    )
+    try:
+        with (log_dir / "misc.log").open("a", encoding="utf-8") as fh:
+            fh.write(note)
+            for row in killed:
+                fh.write(f"  - pid={row.get('pid')} action={row.get('action')}\n")
+    except OSError:
+        pass
+
+    return {
+        "ok": True,
+        "killed": killed,
+        "sync": sync,
+        "release_lock_cleared": release_killed or not lock.is_file(),
+        "message": (
+            f"已取消 {len(killed)} 个进程"
+            + (" · 已请求停止索引" if sync.get("ok") else " · 索引取消失败/无任务")
+        ),
+    }
+
+
+def _discover_host_action_jobs() -> list[dict]:
+    """Find long-running make/ensure/sync processes even after console restart."""
+    # (substring in cmdline, action, item_id)
+    patterns = (
+        ("ensure_ops_cmteb.sh", "ensure-ops-cmteb", "index_ops_zh"),
+        ("sync_cli --mode ops-cmteb", "sync-ops-cmteb", "index_ops_zh"),
+        ("--mode ops-cmteb", "sync-ops-cmteb", "index_ops_zh"),
+        ("sync_cli --mode ops-beir", "sync-ops-indexes", "index_ops"),
+        ("--mode ops-beir", "sync-ops-indexes", "index_ops"),
+        ("sync_cli --mode sources", "sync-sources", "index_product"),
+        ("release.sh run --modules=api", "up-api", "api"),
+        ("release.sh run --modules=runtime", "up-runtime", "runtime"),
+        ("release.sh run --modules=web", "up-web", "web"),
+        ("release.sh run --modules=gateway", "up-gateway", "gateway"),
+        ("release.sh run --force-all", "up-all", "api"),
+        ("release.sh up", "up-all", "api"),
+    )
+    found: list[dict] = []
+    try:
+        my_pid = os.getpid()
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            if pid == my_pid:
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+            except OSError:
+                continue
+            cmd = raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            if not cmd.strip():
+                continue
+            for needle, action, item_id in patterns:
+                if needle not in cmd:
+                    continue
+                found.append(
+                    {
+                        "action": action,
+                        "pid": pid,
+                        "log_key": ACTION_LOG_KEY.get(action, "misc"),
+                        "item_id": item_id,
+                        "started_at": None,
+                        "source": "host-proc",
+                    }
+                )
+                break
+    except OSError:
+        pass
+    # Dedup by item_id (keep lowest pid = usually parent ensure/make).
+    by_item: dict[str, dict] = {}
+    for job in sorted(found, key=lambda j: int(j["pid"])):
+        iid = str(job.get("item_id") or "")
+        if iid and iid not in by_item:
+            by_item[iid] = job
+    return list(by_item.values())
+
+
+def _read_runtime_sync_progress() -> dict | None:
+    """Best-effort: sync_progress.json inside agent-runtime (/data volume)."""
+    try:
+        out = subprocess.check_output(
+            [
+                "docker",
+                "exec",
+                "agent-runtime",
+                "cat",
+                "/data/vectorstore/sync_progress.json",
+            ],
+            stderr=subprocess.DEVNULL,
+            timeout=3,
+        )
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
+        return None
+    try:
+        data = json.loads(out.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _sync_progress_fresh(prog: dict, *, max_age_s: float = 180.0) -> bool:
+    """True when progress looks recently updated (avoid attaching to a dead hang)."""
+    raw = str(prog.get("updated_at") or "").strip()
+    if not raw:
+        return False
+    try:
+        from datetime import datetime, timezone
+
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (time.time() - dt.timestamp()) <= max_age_s
+    except Exception:
+        return False
+
+
+def _sync_item_id(prog: dict) -> str | None:
+    path = str(prog.get("path") or "")
+    reason = str(prog.get("reason") or "").lower()
+    if "cmteb" in path.lower() or "cmteb" in reason or "ops-cmteb" in reason:
+        return "index_ops_zh"
+    if "beir-index" in path or "ops-beir" in reason or "make-ops-beir" in reason:
+        return "index_ops"
+    if path.startswith("ops-l1") or "/ops-l1/" in path:
+        return "index_ops"
+    return "index_product"
+
+
+def _sync_summary(prog: dict) -> tuple[str, float | None]:
+    phase = str(prog.get("phase") or "")
+    path = str(prog.get("path") or "")
+    short = path
+    for token in ("/data/", "ops-l1/"):
+        if token in short:
+            short = short.split(token, 1)[-1]
+    short = short[-48:] if len(short) > 48 else short
+    pct: float | None = None
+    try:
+        done = prog.get("chunks_embedded")
+        total = prog.get("chunks_total")
+        if done is not None and total is not None and int(total) > 0:
+            pct = round(100.0 * int(done) / int(total), 1)
+    except (TypeError, ValueError):
+        pct = None
+    bits = [f"同步·{phase or 'running'}"]
+    if short:
+        bits.append(short)
+    try:
+        st = prog.get("scopes_total")
+        if st is not None and int(st) > 0:
+            bits.append(f"库{int(prog.get('scopes_done') or 0)}/{int(st)}")
+    except (TypeError, ValueError):
+        pass
+    if pct is not None:
+        bits.append(f"{pct}%")
+        try:
+            bits.append(
+                f"{int(prog.get('chunks_embedded') or 0)}/{int(prog.get('chunks_total') or 0)}块"
+            )
+        except (TypeError, ValueError):
+            pass
+    try:
+        rate = prog.get("rate_chunks_per_s")
+        if rate is not None and float(rate) > 0:
+            r = float(rate)
+            bits.append(f"{r:.0f}/s" if r >= 10 else f"{r:.1f}/s")
+    except (TypeError, ValueError):
+        pass
+    try:
+        eta = prog.get("eta_s")
+        if eta is not None and float(eta) > 1:
+            bits.append(f"ETA {int(float(eta))}s")
+    except (TypeError, ValueError):
+        pass
+    return " · ".join(bits), pct
+
+
+def _collect_live() -> dict[str, dict]:
+    """item_id → live job descriptor (console pid and/or runtime sync / deploy)."""
+    out: dict[str, dict] = {}
+
+    for job in list(_reap_jobs()) + _discover_host_action_jobs():
+        item_id = str(job.get("item_id") or _ACTION_ITEM.get(str(job.get("action") or "")) or "")
+        if not item_id:
+            continue
+        action = str(job.get("action") or _ITEM_DEFAULT_ACTION.get(item_id) or "")
+        # Prefer already-recorded console job over rediscovered host proc.
+        if item_id in out and out[item_id].get("source") == "console":
+            continue
+        out[item_id] = {
+            "item_id": item_id,
+            "action": action,
+            "kind": "job",
+            "pid": job.get("pid"),
+            "summary": f"任务进行中 · {action} (pid {job.get('pid')})",
+            "pct": None,
+            "source": job.get("source") or "console",
+        }
+
+    prog = _read_runtime_sync_progress()
+    if isinstance(prog, dict):
+        status = str(prog.get("status") or "")
+        phase = str(prog.get("phase") or "")
+        active = status == "building" or phase in _SYNC_ACTIVE
+        if (
+            active
+            and phase not in {"finished", "error", ""}
+            and _sync_progress_fresh(prog)
+        ):
+            item_id = _sync_item_id(prog) or "index_product"
+            summary, pct = _sync_summary(prog)
+            action = _ITEM_DEFAULT_ACTION.get(item_id, "sync-sources")
+            prev = out.get(item_id)
+            out[item_id] = {
+                "item_id": item_id,
+                "action": (prev or {}).get("action") or action,
+                "kind": "sync",
+                "pid": (prev or {}).get("pid"),
+                "summary": summary,
+                "pct": pct,
+                "phase": phase,
+                "path": prog.get("path"),
+                "reason": prog.get("reason"),
+                "source": "runtime",
+                "chunks_embedded": prog.get("chunks_embedded"),
+                "chunks_total": prog.get("chunks_total"),
+                "scopes_done": prog.get("scopes_done"),
+                "scopes_total": prog.get("scopes_total"),
+                "rate_chunks_per_s": prog.get("rate_chunks_per_s"),
+                "eta_s": prog.get("eta_s"),
+            }
+
+    dep = _read_deploy_status()
+    phase = str(dep.get("phase") or "")
+    # Only surface deploy as live when a process still holds it (healed above otherwise).
+    if phase in _ACTIVE_DEPLOY_PHASES and _release_deploy_alive():
+        mod = str(dep.get("current_module") or "").strip()
+        if mod in _ITEM_DEFAULT_ACTION:
+            action = _ITEM_DEFAULT_ACTION[mod]
+            msg = str(dep.get("message") or phase)
+            out[mod] = {
+                "item_id": mod,
+                "action": action,
+                "kind": "deploy",
+                "summary": f"构建中 · {mod} · {msg}",
+                "pct": None,
+                "phase": phase,
+                "source": "release",
+                "run_id": dep.get("run_id"),
+            }
+
+    return out
+
+
+def _find_live_for_action(action: str) -> dict | None:
+    item_id = _ACTION_ITEM.get(action)
+    live_map = _collect_live()
+    if item_id and item_id in live_map:
+        return live_map[item_id]
+    # Same log-key family (ensure-ops-cmteb ↔ sync-ops-cmteb).
+    want_key = ACTION_LOG_KEY.get(action)
+    for live in live_map.values():
+        if ACTION_LOG_KEY.get(str(live.get("action") or "")) == want_key:
+            return live
+        if live.get("item_id") and ITEM_LOG_KEY.get(str(live["item_id"])) == want_key:
+            return live
+    return None
+
+
+def _with_live(plan: dict) -> dict:
+    """Overlay live jobs onto plan items (always fresh; cheap docker exec)."""
+    snap = dict(plan)
+    live_map = _collect_live()
+    snap["live"] = list(live_map.values())
+    items = []
+    for raw in snap.get("items") or []:
+        it = dict(raw)
+        live = live_map.get(str(it.get("id") or ""))
+        if live:
+            it["live"] = live
+            it["status"] = "running"
+            it["detail"] = live.get("summary") or it.get("detail") or "进行中"
+            action = str(
+                live.get("action")
+                or (it.get("button") or {}).get("action")
+                or _ITEM_DEFAULT_ACTION.get(str(it.get("id") or ""))
+                or ""
+            )
+            if action:
+                it["button"] = {
+                    "action": action,
+                    "label": "查看进度",
+                    "attach": True,
+                }
+        items.append(it)
+    snap["items"] = items
+    return _with_queue(snap)
+
+
+def _with_queue(plan: dict) -> dict:
+    """Annotate items that are waiting / running in the serial console queue."""
+    snap = dict(plan)
+    qpub = _queue_public()
+    snap["queue"] = qpub
+    by_item: dict[str, dict] = {}
+    for qi in qpub.get("pending") or []:
+        iid = _ACTION_ITEM.get(str(qi.get("action") or ""))
+        if not iid:
+            continue
+        # Prefer running overlay if both somehow present.
+        prev = by_item.get(iid)
+        if prev and prev.get("status") == "running":
+            continue
+        by_item[iid] = qi
+    items = []
+    for raw in snap.get("items") or []:
+        it = dict(raw)
+        qi = by_item.get(str(it.get("id") or ""))
+        if qi and it.get("status") != "running":
+            it["queue"] = qi
+            label = qi.get("label") or qi.get("action")
+            if qi.get("status") == "pending":
+                it["detail"] = f"队列等待 · {label}"
+                btn = dict(it.get("button") or {})
+                action = btn.get("action") or qi.get("action")
+                if action:
+                    it["button"] = {
+                        "action": action,
+                        "label": "排队中",
+                        "queued": True,
+                    }
+            elif qi.get("status") == "running":
+                it["status"] = "running"
+                it["detail"] = f"队列执行中 · {label}"
+                if qi.get("action"):
+                    it["button"] = {
+                        "action": qi["action"],
+                        "label": "查看进度",
+                        "attach": True,
+                    }
+        elif qi and it.get("status") == "running":
+            it["queue"] = qi
+        items.append(it)
+    snap["items"] = items
+    return snap
 
 
 def _load_dotenv() -> None:
@@ -93,16 +1109,20 @@ def _read_deploy_status() -> dict:
     if not STATUS_FILE.is_file():
         return {"phase": "idle", "message": "", "changed": [], "deployed": {}}
     try:
-        return json.loads(STATUS_FILE.read_text(encoding="utf-8"))
+        dep = json.loads(STATUS_FILE.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
         return {"phase": "error", "message": str(exc), "changed": [], "deployed": {}}
+    return _heal_stale_deploy(dep if isinstance(dep, dict) else {})
 
 
 def _build_plan(mode: str = "local") -> dict:
     os.environ["RELEASE_STATUS_DIR"] = str(STATUS_DIR)
-    from plan import build_plan  # type: ignore
+    import importlib
 
-    return build_plan(mode=mode)
+    import plan as plan_mod  # type: ignore
+
+    importlib.reload(plan_mod)
+    return plan_mod.build_plan(mode=mode)
 
 
 def _disk_path(mode: str) -> Path:
@@ -159,7 +1179,7 @@ def _compute_plan(mode: str = "local") -> dict:
     _plan_cache["data"] = plan
     _plan_cache["mode"] = mode
     _persist_plan(plan, mode)
-    return plan
+    return _with_live(plan)
 
 
 def _rebuild_in_background(mode: str) -> None:
@@ -183,7 +1203,10 @@ def _norm_mode(raw: str | None) -> str:
 
 
 def _snapshot(*, force: bool = False, mode: str = "local") -> dict:
-    """Prefer instant stale cache; rebuild sync only when forced or cold-empty."""
+    """Prefer instant stale cache; rebuild sync only when forced or cold-empty.
+
+    Live job overlay is always applied so progress stays fresh without full plan rebuild.
+    """
     mode = _norm_mode(mode)
     now = time.time()
     cached = _plan_cache["data"]
@@ -194,11 +1217,11 @@ def _snapshot(*, force: bool = False, mode: str = "local") -> dict:
         return _compute_plan(mode=mode)
 
     if cached is not None and same_mode and age < _PLAN_TTL_SEC:
-        return _with_deploy(cached)
+        return _with_live(_with_deploy(cached))
 
     if cached is not None and same_mode:
         _rebuild_in_background(mode)
-        snap = _with_deploy(cached)
+        snap = _with_live(_with_deploy(cached))
         snap["stale"] = True
         return snap
 
@@ -208,7 +1231,7 @@ def _snapshot(*, force: bool = False, mode: str = "local") -> dict:
         _plan_cache["at"] = 0.0
         _plan_cache["mode"] = mode
         _rebuild_in_background(mode)
-        snap = _with_deploy(disk)
+        snap = _with_live(_with_deploy(disk))
         snap["stale"] = True
         return snap
 
@@ -227,7 +1250,8 @@ def _button_for(it: dict) -> dict | None:
         "gateway": ("up-gateway", "重建 gateway"),
         "embedding": ("up-runtime", "重建 runtime（换模）"),
         "index_product": ("sync-sources", "同步产品索引"),
-        "index_ops": ("sync-ops-indexes", "同步 Ops 索引"),
+        "index_ops": ("sync-ops-indexes", "同步 Ops BEIR"),
+        "index_ops_zh": ("ensure-ops-cmteb", "拉取并嵌入中文库"),
     }
     if iid not in mapping:
         return None
@@ -265,11 +1289,12 @@ _MANAGED_LOG_KEYS = (
     "gateway",
     "index_product",
     "index_ops",
+    "index_ops_zh",
     "misc",
 )
 
 
-def _spawn(cmd: list[str], *, action: str) -> None:
+def _spawn(cmd: list[str], *, action: str) -> subprocess.Popen:
     env = os.environ.copy()
     env["RELEASE_STATUS_DIR"] = str(STATUS_DIR)
     log_dir = STATUS_DIR / "logs"
@@ -279,7 +1304,7 @@ def _spawn(cmd: list[str], *, action: str) -> None:
     out = open(log_dir / f"{key}.log", "a", encoding="utf-8")  # noqa: SIM115
     out.write(f"\n==> {stamp} [{key}] {' '.join(cmd)}\n")
     out.flush()
-    subprocess.Popen(  # noqa: S603
+    proc = subprocess.Popen(  # noqa: S603
         cmd,
         cwd=str(ROOT),
         env=env,
@@ -287,6 +1312,8 @@ def _spawn(cmd: list[str], *, action: str) -> None:
         stderr=subprocess.STDOUT,
         start_new_session=True,
     )
+    _register_job(action=action, pid=int(proc.pid), log_key=key)
+    return proc
 
 
 def _fmt_local(epoch: float) -> str:
@@ -343,10 +1370,11 @@ def _collect_entries(module: str | None = None) -> list[dict]:
         raw = p.read_text(encoding="utf-8", errors="replace")
         entries.extend(_parse_log_entries(key, raw, p.stat().st_mtime))
 
-    # Optional: one blob for active release.sh run (mtime-based)
-    if module in {None, "", "all", "*"}:
+    # release.sh tee log — show under all / code module tabs (查看进度).
+    code_mods = {"api", "runtime", "web", "gateway"}
+    if module in {None, "", "all", "*", *code_mods}:
         dep = _read_deploy_status()
-        rel = dep.get("log_file") or ""
+        rel = str(dep.get("log_file") or "")
         if rel:
             p = STATUS_DIR / rel
             if p.is_file() and p.stat().st_size > 0:
@@ -435,7 +1463,16 @@ def _clear_logs(module: str) -> dict:
 
 
 def _list_module_logs() -> dict:
-    keys = ("git", "api", "runtime", "web", "gateway", "index_product", "index_ops")
+    keys = (
+        "git",
+        "api",
+        "runtime",
+        "web",
+        "gateway",
+        "index_product",
+        "index_ops",
+        "index_ops_zh",
+    )
     modules: dict = {}
     any_has = False
     newest = 0.0
@@ -496,9 +1533,28 @@ class Handler(SimpleHTTPRequestHandler):
             module = (qs.get("module") or qs.get("item") or ["all"])[0].strip() or "all"
             self._send_json(200, _read_module_log(module))
             return
+        if path == "/api/live":
+            live_map = _collect_live()
+            self._send_json(200, {"ok": True, "live": list(live_map.values())})
+            return
+        if path == "/api/queue":
+            self._send_json(200, {"ok": True, "queue": _queue_public()})
+            return
         if path in ("/", "/index.html"):
             self.path = "/index.html"
-            return super().do_GET()
+            # Always re-read static HTML/JS after console updates (avoid sticky old refresh logic).
+            try:
+                data = (STATIC_DIR / "index.html").read_bytes()
+            except OSError as exc:
+                self.send_error(404, str(exc))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         return super().do_GET()
 
     def do_POST(self) -> None:  # noqa: N802
@@ -527,20 +1583,46 @@ class Handler(SimpleHTTPRequestHandler):
             if action not in ALLOWED_ACTIONS:
                 self._send_json(400, {"ok": False, "error": f"unknown action: {action}"})
                 return
-            dep = _read_deploy_status()
-            if dep.get("phase") in ("building", "switching", "verifying"):
-                if (STATUS_DIR / "release.lock").is_file():
-                    self._send_json(409, {"ok": False, "error": "已有发布任务进行中"})
-                    return
-            if not _run_lock.acquire(blocking=False):
-                self._send_json(409, {"ok": False, "error": "busy"})
-                return
-            try:
-                _spawn(ALLOWED_ACTIONS[action], action=action)
-                _plan_cache["at"] = 0.0  # invalidate; next force/refresh rebuilds
-                self._send_json(202, {"ok": True, "action": action, "message": f"started {action}"})
-            finally:
-                _run_lock.release()
+
+            _ensure_queue_worker()
+
+            # Outside-queue orphan still running → attach (do not double-enqueue).
+            if action != "cancel-jobs":
+                live = _find_live_for_action(action)
+                if action == "up-all" and not live:
+                    for cand in _collect_live().values():
+                        act = str(cand.get("action") or "")
+                        if cand.get("kind") == "deploy" or act.startswith("up-"):
+                            live = cand
+                            break
+                if live:
+                    # If our queue already tracks it, enqueue will attach/dedupe.
+                    q = _queue_public()
+                    tracked = any(
+                        str(i.get("action")) == action
+                        and i.get("status") in {"pending", "running"}
+                        for i in (q.get("pending") or [])
+                    )
+                    if not tracked:
+                        _plan_cache["at"] = 0.0
+                        self._send_json(
+                            200,
+                            {
+                                "ok": True,
+                                "attached": True,
+                                "queued": False,
+                                "action": action,
+                                "live": live,
+                                "queue": q,
+                                "message": f"已接上进行中的任务 · {live.get('summary') or action}",
+                            },
+                        )
+                        return
+
+            result = _enqueue_action(action)
+            _plan_cache["at"] = 0.0
+            code = 200 if result.get("ok") else 500
+            self._send_json(code, result)
             return
 
         self.send_error(404, "not found")
@@ -558,14 +1640,23 @@ def main() -> None:
     }
     STATUS_DIR.mkdir(parents=True, exist_ok=True)
     (STATUS_DIR / "logs").mkdir(parents=True, exist_ok=True)
+    _ensure_queue_worker()
 
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), partial(Handler))
+    # Avoid "address already in use" after quick restart; bind all interfaces for WSL→Windows.
+    ThreadingHTTPServer.allow_reuse_address = True
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", PORT), partial(Handler))
+    except OSError as exc:
+        print(f"ERROR: bind 0.0.0.0:{PORT} failed: {exc}", flush=True)
+        raise SystemExit(1) from exc
     print(f"release-console http://127.0.0.1:{PORT}/", flush=True)
     print(f"local_trust={LOCAL_TRUST} (loopback actions without secret)", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nbye", flush=True)
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

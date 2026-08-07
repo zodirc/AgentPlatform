@@ -123,7 +123,8 @@ if [[ -n "$FORCE_MODEL" ]]; then
   MODEL="$FORCE_MODEL"
   if echo "$MODEL" | grep -qi 'bge-m3'; then
     DIMS=1024
-    INDEX_VER=11
+    # 12: dense truncate max_seq=512 (hub 8192 thrashs 16GiB; was INDEX 11).
+    INDEX_VER=12
     pick_gpu_m3=1
   elif echo "$MODEL" | grep -qi 'gte-large'; then
     DIMS=1024
@@ -141,7 +142,8 @@ if [[ -n "$FORCE_MODEL" ]]; then
 elif (( pick_gpu_m3 )); then
   MODEL="BAAI/bge-m3"
   DIMS=1024
-  INDEX_VER=11
+  # 12: dense truncate max_seq=512 (hub 8192 thrashs 16GiB; was INDEX 11).
+  INDEX_VER=12
 else
   MODEL="thenlper/gte-small"
   DIMS=384
@@ -151,8 +153,13 @@ fi
 BACKEND="${EMBEDDING_BACKEND:-sentence_transformers}"
 if (( pick_gpu_m3 )); then
   RESOLVED=m3
+  # Short-passage truncate + larger batch: hub default 8192 thrashs 16GiB at batch 64.
+  MAX_SEQ="${EMBEDDING_MAX_SEQ_LENGTH:-512}"
+  BATCH_DEFAULT=128
 else
   RESOLVED=small
+  MAX_SEQ="${EMBEDDING_MAX_SEQ_LENGTH:-0}"
+  BATCH_DEFAULT=64
 fi
 
 TORCH_INDEX_URL_VAL=""
@@ -181,6 +188,8 @@ EMBEDDING_DIMENSIONS=${DIMS}
 EMBEDDING_INDEX_VERSION=${INDEX_VER}
 EMBEDDING_PROFILE_RESOLVED=${RESOLVED}
 EMBEDDING_DEVICE=${EMBEDDING_DEVICE_VAL}
+EMBEDDING_MAX_SEQ_LENGTH=${MAX_SEQ}
+EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-$BATCH_DEFAULT}
 RUNTIME_GPU=$( (( use_cuda )) && echo 1 || echo 0 )
 TORCH_INDEX_URL=${TORCH_INDEX_URL_VAL}
 EOF
@@ -197,7 +206,8 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE_VAL}
-      EMBEDDING_BATCH_SIZE: \${EMBEDDING_BATCH_SIZE:-64}
+      EMBEDDING_BATCH_SIZE: \${EMBEDDING_BATCH_SIZE:-${BATCH_DEFAULT}}
+      EMBEDDING_MAX_SEQ_LENGTH: \${EMBEDDING_MAX_SEQ_LENGTH:-${MAX_SEQ}}
     build:
       args:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL_VAL}
@@ -208,6 +218,7 @@ services:
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: compute,utility
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE_VAL}
+      EMBEDDING_MAX_SEQ_LENGTH: \${EMBEDDING_MAX_SEQ_LENGTH:-${MAX_SEQ}}
     build:
       args:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL_VAL}
@@ -222,7 +233,7 @@ fi
 
 echo "==> embedding profile: ${MODEL} @${DIMS}d (index≈${INDEX_VER}) — ${reason}"
 if (( use_cuda )); then
-  echo "==> CUDA: ON — torch ${TORCH_INDEX_URL_VAL} · device=${EMBEDDING_DEVICE_VAL} — ${cuda_reason}"
+  echo "==> CUDA: ON — torch ${TORCH_INDEX_URL_VAL} · device=${EMBEDDING_DEVICE_VAL} · max_seq=${MAX_SEQ} · batch≈${EMBEDDING_BATCH_SIZE:-$BATCH_DEFAULT} — ${cuda_reason}"
 else
   echo "==> CUDA: OFF — CPU torch — ${cuda_reason}"
 fi

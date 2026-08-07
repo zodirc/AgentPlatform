@@ -114,6 +114,8 @@ services:
       # auto|cpu|cuda — compose/gpu.auto.yml sets cuda when NVIDIA is detected.
       EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
       EMBEDDING_PROGRESS_EVERY_FILES: ${EMBEDDING_PROGRESS_EVERY_FILES:-25}
+      # 0 → model default; bge-m3 still auto-caps to 512 in code unless overridden.
+      EMBEDDING_MAX_SEQ_LENGTH: ${EMBEDDING_MAX_SEQ_LENGTH:-0}
       SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
       SOURCES_STARTUP_SYNC_DELAY_SECONDS: ${SOURCES_STARTUP_SYNC_DELAY_SECONDS:-3}
       SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
@@ -167,6 +169,38 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 5
+
+  # Build-only: tags deps stage so BuildKit GC does not drop pip/ST layers between
+  # app-only rebuilds (docs/38 · docs/03 §5.1). Never started as a container.
+  runtime-deps:
+    profiles: [deps-anchor]
+    image: agent-platform-runtime:deps
+    build:
+      context: ..
+      dockerfile: services/runtime/Dockerfile.retrieval
+      target: deps
+      args:
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+
+  # Build-only: tags deps stage so BuildKit GC does not drop pip layers between
+  # app-only rebuilds (docs/38 · docs/03 §5.1). Never started as a container.
+  api-deps:
+    profiles: [deps-anchor]
+    image: agent-platform-api:deps
+    build:
+      context: ..
+      dockerfile: services/api/Dockerfile
+      target: deps
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
 
   api:
     image: agent-platform-api:latest
@@ -250,6 +284,7 @@ services:
     build:
       context: ..
       dockerfile: services/bench/Dockerfile
+      target: app
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
@@ -295,6 +330,34 @@ services:
       timeout: 5s
       start_period: 120s
       retries: 5
+
+  # Build-only: tags web deps (pnpm install) so BuildKit GC does not drop store layers.
+  web-deps:
+    profiles: [deps-anchor]
+    image: agent-platform-web:deps
+    build:
+      context: ..
+      dockerfile: services/web/Dockerfile
+      target: deps
+      args:
+        NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
+
+  # Build-only: tags bench deps (pip + ST bake) — profile deps-anchor (not bench).
+  bench-deps:
+    profiles: [deps-anchor]
+    image: agent-platform-bench:deps
+    build:
+      context: ..
+      dockerfile: services/bench/Dockerfile
+      target: deps
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
 
   web:
     image: agent-platform-web:latest

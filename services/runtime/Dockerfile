@@ -30,9 +30,12 @@ WORKDIR /app
 
 COPY packages/contracts/python /contracts/python
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
-RUN mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
-    && pip install --no-cache-dir /contracts/python \
-    && pip install --no-cache-dir /tmp/runtime \
+# BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local.
+# Do not use pip --no-cache-dir here — that bypasses the mount.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
+    && pip install /contracts/python \
+    && pip install /tmp/runtime \
     && rm -rf /tmp/runtime
 
 FROM deps AS app

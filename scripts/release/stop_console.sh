@@ -22,12 +22,14 @@ if [[ -f "$PID_FILE" ]]; then
   pid="$(cat "$PID_FILE" 2>/dev/null || true)"
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid" 2>/dev/null || true
+    sleep 0.2
+    kill -9 "$pid" 2>/dev/null || true
     stopped=1
   fi
   rm -f "$PID_FILE"
 fi
 
-# Best-effort: anything still bound to the port that looks like our server.
+# Best-effort: anything still bound to the port / matching cmdline (incl. sandboxed zombies).
 if command -v fuser >/dev/null 2>&1; then
   if fuser "${port}/tcp" >/dev/null 2>&1; then
     fuser -k "${port}/tcp" >/dev/null 2>&1 || true
@@ -38,8 +40,14 @@ elif command -v lsof >/dev/null 2>&1; then
   if [[ -n "$pids" ]]; then
     # shellcheck disable=SC2086
     kill $pids 2>/dev/null || true
+    sleep 0.2
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
     stopped=1
   fi
+fi
+if pkill -f 'services/release-console/server.py' 2>/dev/null; then
+  stopped=1
 fi
 
 if [[ "$stopped" == "1" ]]; then

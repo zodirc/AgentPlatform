@@ -69,6 +69,11 @@ class HashEmbedder:
 class SentenceTransformerEmbedder:
     """Optional neural embeddings when sentence-transformers is installed."""
 
+    # bge-m3 hub default is 8192; that pads/activates like a long-context model and
+    # saturates ~16GiB cards at modest batch sizes. Chunked corpora + C-MTEB small
+    # docs are far shorter — 512 is the usual dense-retrieval truncate.
+    _BGE_M3_DEFAULT_MAX_SEQ = 512
+
     def __init__(self, model_name: str, *, model_dir: str | None = None) -> None:
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
@@ -92,6 +97,34 @@ class SentenceTransformerEmbedder:
                 exc_info=True,
             )
             self._model = SentenceTransformer(model_name, **st_kwargs)
+        self._apply_max_seq_length(model_name)
+
+    def _apply_max_seq_length(self, model_name: str) -> None:
+        """Cap ST max_seq_length for throughput (does not change model weights)."""
+        configured = int(getattr(settings, "embedding_max_seq_length", 0) or 0)
+        if configured > 0:
+            target = configured
+        elif "bge-m3" in (model_name or "").lower():
+            target = self._BGE_M3_DEFAULT_MAX_SEQ
+        else:
+            return
+        prev = getattr(self._model, "max_seq_length", None)
+        try:
+            self._model.max_seq_length = int(target)
+        except Exception:
+            logger.warning(
+                "failed to set embedder max_seq_length=%s (was %s)",
+                target,
+                prev,
+                exc_info=True,
+            )
+            return
+        logger.info(
+            "embedder max_seq_length %s → %s (model=%s)",
+            prev,
+            target,
+            model_name,
+        )
 
     @staticmethod
     def _resolve_device() -> str:

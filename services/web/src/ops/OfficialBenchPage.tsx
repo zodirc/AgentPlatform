@@ -373,6 +373,19 @@ function suitesToTargets(suites: Iterable<string>): string[] {
   return out;
 }
 
+function suitesFromTargets(targets: Iterable<string>): Set<SuiteId> {
+  const suites = new Set<SuiteId>();
+  for (const t of targets) {
+    if (t === "retrieval") suites.add("retrieval");
+    else if (t === "retrieval_zh" || t === "cmteb") suites.add("retrieval_zh");
+    else if (t === "context") suites.add("context");
+    else if (t === "coding" || t === "coding_infer" || t === "coding_pull") {
+      suites.add("coding");
+    }
+  }
+  return suites;
+}
+
 function suitesFromRun(r: {
   targets?: string[];
   official_suite?: string;
@@ -387,15 +400,7 @@ function suitesFromRun(r: {
             .split("+")
             .map((s) => s.trim())
             .filter(Boolean);
-  const suites = new Set<SuiteId>();
-  for (const t of raw) {
-    if (t === "retrieval") suites.add("retrieval");
-    else if (t === "retrieval_zh" || t === "cmteb") suites.add("retrieval_zh");
-    else if (t === "context") suites.add("context");
-    else if (t === "coding" || t === "coding_infer" || t === "coding_pull") {
-      suites.add("coding");
-    }
-  }
+  const suites = suitesFromTargets(raw);
   return SUITE_IDS.filter((id) => suites.has(id));
 }
 
@@ -2366,10 +2371,7 @@ export function OfficialBenchPage() {
       if (d?.retrieval_tier) setRetrievalTier(d.retrieval_tier);
       if (d?.l1_max_parallel != null) setL1Parallel(d.l1_max_parallel);
       if (d?.targets?.length) {
-        const suites = new Set<SuiteId>();
-        for (const t of d.targets) {
-          if (t === "retrieval" || t === "context" || t === "coding") suites.add(t);
-        }
+        const suites = suitesFromTargets(d.targets);
         if (suites.size) setSelectedSuites(suites);
       }
       setActiveProfileId(
@@ -2793,13 +2795,7 @@ export function OfficialBenchPage() {
   }, [busy]);
 
   const applyPreset = (p: Preset) => {
-    const suites = new Set<SuiteId>();
-    for (const t of p.targets) {
-      if (t === "retrieval" || t === "context" || t === "coding") {
-        suites.add(t);
-      } else if (t === "coding_infer" || t === "coding_pull") suites.add("coding");
-    }
-    setSelectedSuites(suites);
+    setSelectedSuites(suitesFromTargets(p.targets || []));
     setCodingTier(p.coding_tier || "n5");
     if (p.coding_n_instances != null) setCodingNInstances(p.coding_n_instances);
     setCodingHarness(Boolean(p.coding_harness));

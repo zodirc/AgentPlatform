@@ -207,6 +207,7 @@
       display: grid;
       grid-template-columns: minmax(300px, 380px) 1fr;
       min-height: calc(100vh - 88px);
+      isolation: isolate;
     }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
@@ -216,26 +217,35 @@
       border-right: 1px solid var(--line-soft);
       padding: 0.9rem;
       background: var(--left-bg);
+      overflow-x: hidden;
+      overflow-y: auto;
+      position: relative;
+      z-index: 0;
+      min-width: 0; /* grid: allow clip instead of spilling into detail */
     }
     .right {
       padding: 1.15rem 1.4rem 2rem;
+      position: relative;
+      z-index: 1;
+      background: var(--bg);
+      min-width: 0;
     }
     .mod {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: minmax(0, 1fr) auto;
       gap: 0.55rem;
-      align-items: center;
+      align-items: start;
       padding: 0.85rem 0.9rem;
       border: 1px solid var(--line-soft);
       border-radius: var(--radius);
       margin-bottom: 0.55rem;
       background: linear-gradient(160deg, var(--panel), var(--panel-2));
       cursor: pointer;
-      transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+      overflow: hidden;
+      transition: border-color 0.18s ease, box-shadow 0.18s ease;
     }
     .mod:hover {
       border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-      transform: translateY(-1px);
     }
     .mod.active {
       border-color: var(--accent);
@@ -245,18 +255,22 @@
       font-weight: 600;
       font-size: 0.92rem;
       letter-spacing: -0.01em;
+      overflow-wrap: anywhere;
     }
     .mod .why {
       color: var(--muted);
       font-size: 0.74rem;
       margin-top: 0.25rem;
       line-height: 1.4;
+      overflow-wrap: anywhere;
     }
     .mod-actions {
       display: flex;
       flex-direction: column;
       gap: 0.35rem;
       align-items: flex-end;
+      flex-shrink: 0;
+      max-width: 9.5rem;
     }
     .tag {
       font-family: var(--mono);
@@ -267,6 +281,8 @@
     }
     .tag.ok { color: var(--ok); background: var(--ok-bg); }
     .tag.action { color: var(--warn); background: var(--warn-bg); }
+    .tag.running { color: #0b6e4f; background: color-mix(in srgb, #0b6e4f 16%, transparent); }
+    .tag.skip { color: var(--muted); background: color-mix(in srgb, var(--muted) 18%, transparent); }
     .tag.unknown { color: var(--muted); background: color-mix(in srgb, var(--panel) 70%, var(--ink)); }
     button.act {
       font-family: var(--sans);
@@ -279,10 +295,13 @@
       font-weight: 650;
       cursor: pointer;
       white-space: nowrap;
-      transition: filter 0.15s ease, transform 0.15s ease;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: filter 0.15s ease;
     }
-    button.act:hover:not(:disabled) { filter: brightness(1.06); transform: translateY(-1px); }
-    button.act:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+    button.act:hover:not(:disabled) { filter: brightness(1.06); }
+    button.act:disabled { opacity: 0.4; cursor: not-allowed; }
     .panel-title {
       font-family: var(--mono);
       font-size: 0.68rem;
@@ -327,12 +346,27 @@
       font-family: var(--mono);
       font-size: 0.74rem;
       color: var(--muted);
-      margin-bottom: 0.7rem;
+      margin-bottom: 0.45rem;
       line-height: 1.45;
       padding: 0.55rem 0.7rem;
       border-radius: 8px;
       background: var(--job-bg);
       border: 1px solid var(--line-soft);
+    }
+    .queue {
+      font-family: var(--mono);
+      font-size: 0.74rem;
+      color: var(--text);
+      margin-bottom: 0.7rem;
+      line-height: 1.5;
+      padding: 0.5rem 0.7rem;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--accent) 8%, var(--job-bg));
+      border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line-soft));
+    }
+    .queue .q-label {
+      color: var(--muted);
+      margin-right: 0.35rem;
     }
     .err {
       color: var(--bad);
@@ -434,6 +468,22 @@
       transform: translateY(-1px);
     }
     button.pull:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    button.danger {
+      font-family: var(--sans);
+      font-size: 0.74rem;
+      padding: 0.4rem 0.75rem;
+      border-radius: 8px;
+      border: 1px solid color-mix(in srgb, var(--bad) 45%, var(--line));
+      background: color-mix(in srgb, var(--bad) 12%, var(--panel));
+      color: var(--bad);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.danger:hover:not(:disabled) {
+      border-color: var(--bad);
+      background: color-mix(in srgb, var(--bad) 20%, var(--panel));
+    }
+    button.danger:disabled { opacity: 0.45; cursor: not-allowed; }
     button.clear-log {
       font-family: var(--sans);
       font-size: 0.74rem;
@@ -482,9 +532,12 @@
           <button type="button" data-mode="sync">同步部署</button>
         </div>
         <button type="button" class="pull" id="btn-pull" title="git fetch + pull --ff-only">拉取远程</button>
+        <button type="button" class="pull" id="btn-rebuild-all" title="强制重建 api/runtime/web/gateway">全部重建</button>
+        <button type="button" class="danger" id="btn-cancel" title="取消进行中的重建/索引任务">取消任务</button>
         <span class="remote-hint" id="remote-hint"></span>
       </div>
       <div class="job" id="job">—</div>
+      <div class="queue" id="queue" hidden></div>
       <div class="err" id="err"></div>
       <div id="detail"></div>
       <h2 class="panel-title">各模块任务日志</h2>
@@ -507,6 +560,10 @@
     let lastLogText = "";
     let hideLogUntilChange = null;
     let staleTimer = null;
+    let watchDeploy = false;
+    let watchAction = null;
+    let watchUntil = 0;
+    let watchTimer = null;
     let detectMode = localStorage.getItem("releaseDetectMode") || "local";
     if (detectMode !== "local" && detectMode !== "sync") detectMode = "local";
     const THEMES = ["teal", "slate", "forest", "ember", "sand"];
@@ -531,7 +588,8 @@
       { id: "web", label: "web" },
       { id: "gateway", label: "gateway" },
       { id: "index_product", label: "产品索引" },
-      { id: "index_ops", label: "Ops 索引" },
+      { id: "index_ops", label: "Ops BEIR" },
+      { id: "index_ops_zh", label: "Ops 中文" },
     ];
 
     const ITEM_TO_LOG = {
@@ -542,27 +600,62 @@
       embedding: "runtime",
       index_product: "index_product",
       index_ops: "index_ops",
+      index_ops_zh: "index_ops_zh",
     };
 
     function statusLabel(st) {
       if (st === "ok") return "已是最新";
       if (st === "action") return "存在变动";
+      if (st === "running") return "进行中";
+      if (st === "skip") return "不适用/可选";
       return st || "?";
     }
 
     function planSig(p) {
       if (!p) return "";
       const items = (p.items || []).map((i) =>
-        [i.id, i.status, i.detail, i.deployed_sha, i.button && i.button.action].join("|")
+        [
+          i.id,
+          i.status,
+          i.detail,
+          i.deployed_sha,
+          i.button && i.button.action,
+          i.live && (i.live.summary || ""),
+          i.live && i.live.pct,
+        ].join("|")
       );
+      const dep = (p.deploy && p.deploy.deployed) || {};
+      const depSig = Object.keys(dep)
+        .sort()
+        .map((k) => k + ":" + ((dep[k] && dep[k].git_sha) || "").slice(0, 10))
+        .join(",");
+      const liveSig = (p.live || [])
+        .map((l) => [l.item_id, l.summary, l.pct].join(":"))
+        .join(";");
+      const qSig = ((p.queue || {}).pending || [])
+        .map((i) => [i.id, i.status, i.action].join(":"))
+        .join(";");
       return [
         p.summary,
         p.git_sha_short,
         p.stale ? "1" : "0",
         (p.deploy || {}).phase,
         (p.deploy || {}).message,
+        (p.deploy || {}).current_module || "",
+        depSig,
+        liveSig,
+        qSig,
         items.join(";"),
       ].join("#");
+    }
+
+    function deployPhaseActive(phase) {
+      return ["detecting", "building", "switching", "verifying"].includes(phase || "");
+    }
+
+    function scheduleWatchRefresh(ms) {
+      if (watchTimer) clearTimeout(watchTimer);
+      watchTimer = setTimeout(() => refresh(true), ms);
     }
 
     function renderList() {
@@ -587,7 +680,9 @@
           loadLog();
         };
         const btn = it.button;
-        const canAct = it.status === "action" && btn && !busy;
+        // 队列串行：其它任务进行中仍可点，进入排队；进行中可点查看进度
+        const canAct =
+          !!btn && (it.status === "running" || it.status === "action" || it.queue);
         row.innerHTML = `
           <div>
             <div class="name">${it.title || it.id}</div>
@@ -601,6 +696,17 @@
         if (b && canAct) {
           b.onclick = (ev) => {
             ev.stopPropagation();
+            selectedId = it.id;
+            const logKey = ITEM_TO_LOG[it.id] || it.id;
+            if (logKey) {
+              logModule = logKey;
+              localStorage.setItem("releaseLogModule", logModule);
+              hideLogUntilChange = null;
+              lastLogText = "";
+            }
+            renderList();
+            renderDetail();
+            renderLogTabs();
             runAction(b.getAttribute("data-action"));
           };
         }
@@ -763,11 +869,36 @@
       updateClearBtn();
     }
 
+    function renderQueue() {
+      const el = $("queue");
+      if (!el) return;
+      const q = plan?.queue || {};
+      const pending = q.pending || [];
+      if (!pending.length) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      el.hidden = false;
+      const bits = pending.map((i) => {
+        const mark = i.status === "running" ? "▶" : "等待";
+        return `${mark} ${i.label || i.action}`;
+      });
+      el.innerHTML = `<span class="q-label">队列</span>${bits.join(" → ")}`;
+    }
+
     function renderMode() {
       for (const b of $("mode-seg").querySelectorAll("button[data-mode]")) {
         b.classList.toggle("on", b.getAttribute("data-mode") === detectMode);
       }
-      $("btn-pull").disabled = busy;
+      const qCount = ((plan?.queue || {}).pending || []).length;
+      const hasLive = Array.isArray(plan?.live) && plan.live.length > 0;
+      // 串行队列：工具栏始终可入队；取消在有队列或 live 时可用
+      $("btn-pull").disabled = false;
+      const btnAll = $("btn-rebuild-all");
+      const btnCancel = $("btn-cancel");
+      if (btnAll) btnAll.disabled = false;
+      if (btnCancel) btnCancel.disabled = !(qCount > 0 || hasLive || busy);
       const rem = plan?.git_remote || {};
       const hint = $("remote-hint");
       hint.textContent = rem.hint || "";
@@ -779,8 +910,21 @@
       const s = plan?.summary || "error";
       pill.className = "pill " + s;
       pill.textContent = s === "healthy" ? "全部最新" : "存在变动";
-      busy = ["building", "switching", "verifying"].includes((plan?.deploy || {}).phase || "");
+      const phase = (plan?.deploy || {}).phase || "";
+      const hasLive = Array.isArray(plan?.live) && plan.live.length > 0;
+      const qCount = ((plan?.queue || {}).pending || []).length;
+      const deployLive = hasLive && (plan.live || []).some((l) => l.kind === "deploy" || String(l.action || "").startsWith("up-"));
+      busy = deployLive || qCount > 0 || (hasLive && deployPhaseActive(phase));
       renderMode();
+      renderQueue();
+    }
+
+    function formatFetchErr(e) {
+      const raw = String(e && e.message ? e.message : e);
+      if (/Failed to fetch|NetworkError|fetch/i.test(raw)) {
+        return "连不上看板服务 (:9090)。多半是控制台刚重启或端口瞬断 — 硬刷新本页；若仍失败请确认 release-console 在跑。";
+      }
+      return raw;
     }
 
     async function refresh(force) {
@@ -788,18 +932,22 @@
         const q = new URLSearchParams({ mode: detectMode });
         if (force) q.set("force", "1");
         const r = await fetch("/api/plan?" + q.toString());
+        if (!r.ok) throw new Error(`plan HTTP ${r.status}`);
         const next = await r.json();
         if (!selectedId && next.items?.length) selectedId = next.items[0].id;
         const sig = planSig(next) + "|" + detectMode;
         const changed = sig !== lastPlanSig;
         plan = next;
+        $("err").textContent = "";
+        const phase = (plan.deploy || {}).phase || "idle";
         if (changed) {
           lastPlanSig = sig;
           renderHeader();
           renderList();
           renderDetail();
         } else {
-          renderMode();
+          // Always refresh header job line / busy even if item sig stable.
+          renderHeader();
         }
         await loadLogMeta();
         await loadLog();
@@ -810,18 +958,103 @@
           : "";
         $("job").textContent =
           `任务 ${(plan.deploy || {}).phase || "idle"}${(plan.deploy || {}).message ? " · " + (plan.deploy || {}).message : ""}${headBit}${scope}${stale}`;
-        if (plan.stale && !force) {
+        renderQueue();
+
+        const deploying = deployPhaseActive(phase);
+        const hasLive = Array.isArray(plan.live) && plan.live.length > 0;
+        const qCount = ((plan.queue || {}).pending || []).length;
+        if ((hasLive || qCount > 0) && !watchAction && !watchDeploy) {
+          // Background job / queue — keep following without re-click.
+          watchAction = "live";
+          watchUntil = Date.now() + 6 * 60 * 60 * 1000;
+        }
+        if (watchDeploy) {
+          if (deploying || qCount > 0) {
+            scheduleWatchRefresh(2000);
+          } else if (["done", "failed", "idle"].includes(phase)) {
+            // Deploy settled — one more forced rebuild so rows flip off「存在变动」.
+            watchDeploy = false;
+            scheduleWatchRefresh(700);
+          }
+        }
+
+        if (watchAction) {
+          if (watchAction === "live") {
+            if ((!hasLive && qCount === 0) || Date.now() > watchUntil) {
+              watchAction = null;
+              if (!force) scheduleWatchRefresh(500);
+            } else {
+              scheduleWatchRefresh(2000);
+            }
+          } else {
+            const itemId = {
+              "sync-sources": "index_product",
+              "sync-ops-indexes": "index_ops",
+              "sync-ops-cmteb": "index_ops_zh",
+              "ensure-ops-cmteb": "index_ops_zh",
+            }[watchAction];
+            const it = itemId
+              ? (plan.items || []).find((x) => x.id === itemId)
+              : null;
+            const stillGoing = !!(it && (it.status === "running" || it.live || it.queue));
+            if (stillGoing && Date.now() <= watchUntil) {
+              scheduleWatchRefresh(2000);
+            } else {
+              watchAction = null;
+              if (!force) scheduleWatchRefresh(500);
+            }
+          }
+        }
+
+        // Prefer queue summary, then live progress on the job line.
+        const qSummary = (plan.queue || {}).summary;
+        if (qSummary) {
+          $("job").textContent = qSummary + headBit + scope + stale;
+        } else if (hasLive) {
+          const bits = plan.live.map((l) => l.summary || l.item_id).filter(Boolean);
+          if (bits.length) {
+            $("job").textContent = bits.join(" ｜ ");
+          }
+        }
+
+        if (plan.stale && !force && !deploying && !watchDeploy && !watchAction && qCount === 0) {
           if (staleTimer) clearTimeout(staleTimer);
           staleTimer = setTimeout(() => refresh(false), 2200);
         }
       } catch (e) {
-        $("err").textContent = String(e);
+        $("err").textContent = formatFetchErr(e);
+        // Drop watch locks so a dead console does not freeze the toolbar forever.
+        watchDeploy = false;
+        watchAction = null;
+        busy = false;
+        renderMode();
+        scheduleWatchRefresh(3000);
       }
     }
 
     async function runAction(action) {
       $("err").textContent = "";
-      busy = true;
+      const isModuleDeploy = [
+        "up-api",
+        "up-runtime",
+        "up-web",
+        "up-gateway",
+        "up-all",
+        "git-pull",
+      ].includes(action);
+      if (action === "cancel-jobs") {
+        watchDeploy = false;
+        watchAction = "live";
+        watchUntil = Date.now() + 10 * 60 * 1000;
+      } else if (isModuleDeploy) {
+        watchDeploy = true;
+        watchAction = "live";
+        watchUntil = Date.now() + 6 * 60 * 60 * 1000;
+      } else {
+        watchDeploy = false;
+        watchAction = action;
+        watchUntil = Date.now() + 60 * 60 * 1000;
+      }
       renderList();
       renderMode();
       try {
@@ -833,23 +1066,35 @@
         const j = await r.json().catch(() => ({}));
         if (!r.ok) {
           $("err").textContent = j.error || r.statusText;
-          busy = false;
+          watchDeploy = false;
+          watchAction = null;
           renderList();
           renderMode();
           return;
         }
-        $("job").textContent = `已启动 ${action}…`;
+        const attached = !!j.attached;
+        const queued = !!j.queued;
+        $("job").textContent = j.message || (attached ? `已接上 ${action}` : `已入队 ${action}`);
+        if (j.queue) {
+          plan = plan || {};
+          plan.queue = j.queue;
+          renderQueue();
+        }
         const key = {
           "up-api": "api",
           "up-runtime": "runtime",
           "up-web": "web",
           "up-gateway": "gateway",
+          "up-all": "all",
+          "cancel-jobs": "all",
           "sync-sources": "index_product",
           "sync-ops-indexes": "index_ops",
+          "sync-ops-cmteb": "index_ops_zh",
+          "ensure-ops-cmteb": "index_ops_zh",
           "git-pull": "all",
         }[action];
         if (key) {
-          logModule = key;
+          logModule = key === "all" ? "all" : key;
           localStorage.setItem("releaseLogModule", logModule);
           lastLogText = "";
           hideLogUntilChange = null;
@@ -860,9 +1105,16 @@
           localStorage.setItem("releaseDetectMode", detectMode);
           renderMode();
         }
-        setTimeout(() => refresh(true), action === "git-pull" ? 2500 : 1200);
+        lastPlanSig = "";
+        if (attached || queued) {
+          watchUntil = Date.now() + 6 * 60 * 60 * 1000;
+          watchAction = watchAction || "live";
+        }
+        scheduleWatchRefresh(action === "git-pull" ? 2000 : 500);
       } catch (e) {
-        $("err").textContent = String(e);
+        $("err").textContent = formatFetchErr(e);
+        watchDeploy = false;
+        watchAction = null;
         busy = false;
         renderList();
         renderMode();
@@ -882,6 +1134,14 @@
       refresh(true);
     };
     $("btn-pull").onclick = () => runAction("git-pull");
+    $("btn-rebuild-all").onclick = () => {
+      if (!confirm("强制重建 api / runtime / web / gateway？将进入队列串行执行。")) return;
+      runAction("up-all");
+    };
+    $("btn-cancel").onclick = () => {
+      if (!confirm("将「取消」入队：中止当前任务并清空等待中的队列项。")) return;
+      runAction("cancel-jobs");
+    };
     $("btn-clear-log").onclick = () => clearLog();
     $("theme-sel").onchange = (ev) => applyTheme(ev.target.value);
 

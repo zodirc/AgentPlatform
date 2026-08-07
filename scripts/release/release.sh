@@ -264,6 +264,51 @@ print(dep.get("git_sha") or "")
         [[ "$m" == "$mod" ]] && hit["$mod"]=1
       done < <(module_for_path "$f")
     done <<<"$files"
+
+    # If the only hits are worktree files already covered by last deploy digest, clear.
+    if [[ -n "${hit[$mod]:-}" ]]; then
+      if STATUS_FILE="$STATUS_FILE" ROOT="$ROOT" MOD="$mod" BASELINE="$baseline" python3 <<'PY'
+import json, os, subprocess, sys
+from pathlib import Path
+
+root = Path(os.environ["ROOT"])
+sys.path.insert(0, str(root / "scripts" / "release"))
+from worktree_sig import digest_for_module, load_module_prefixes, match_prefixes, worktree_changed_files
+
+mod = os.environ["MOD"]
+baseline = os.environ["BASELINE"]
+status = Path(os.environ["STATUS_FILE"])
+dep = {}
+if status.is_file():
+    try:
+        dep = (json.load(status.open()).get("deployed") or {}).get(mod) or {}
+    except Exception:
+        dep = {}
+prev = str(dep.get("worktree_digest") or "")
+cur = digest_for_module(mod)
+# Committed-since-baseline still dirty regardless of digest.
+committed = subprocess.run(
+    ["git", "-C", str(root), "diff", "--name-only", f"{baseline}..HEAD"],
+    text=True, capture_output=True, check=False,
+)
+prefixes = load_module_prefixes().get(mod) or []
+committed_hit = match_prefixes(
+    [ln for ln in (committed.stdout or "").splitlines() if ln.strip()],
+    prefixes,
+)
+if committed_hit:
+    raise SystemExit(1)  # keep dirty
+if prev and cur and prev == cur:
+    raise SystemExit(0)  # worktree unchanged since last deploy → clean
+# No digest yet: keep dirty so one redeploy seeds the fingerprint.
+if not prev and match_prefixes(worktree_changed_files(), prefixes):
+    raise SystemExit(1)
+raise SystemExit(1 if match_prefixes(worktree_changed_files(), prefixes) else 0)
+PY
+      then
+        unset "hit[$mod]"
+      fi
+    fi
   done
 
   local out=()
@@ -353,6 +398,58 @@ deploy_module() {
   esac
 }
 
+# Merge module sha(s) into status.json deployed map. Prints JSON for DEPLOYED_JSON.
+# Usage: build_deployed_json <head_sha> <csv_modules> [via]
+# Also records worktree_digest so local uncommitted files baked by up-* stop looking dirty.
+build_deployed_json() {
+  local head="$1"
+  local mods="$2"
+  local via="${3:-}"
+  STATUS_FILE="$STATUS_FILE" HEAD="$head" MODS="$mods" VIA="$via" ROOT="$ROOT" python3 <<'PY'
+import json, os, sys, time
+from pathlib import Path
+
+root = Path(os.environ["ROOT"])
+sys.path.insert(0, str(root / "scripts" / "release"))
+from worktree_sig import digest_for_module  # noqa: E402
+
+prev = {}
+p = Path(os.environ["STATUS_FILE"])
+if p.is_file():
+    try:
+        prev = json.load(p.open()).get("deployed") or {}
+    except Exception:
+        prev = {}
+head = os.environ["HEAD"]
+via = os.environ.get("VIA") or ""
+at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+for m in [x for x in os.environ.get("MODS", "").split(",") if x]:
+    entry = {
+        "git_sha": head,
+        "at": at,
+        "worktree_digest": digest_for_module(m),
+    }
+    if via:
+        entry["via"] = via
+    prev[m] = entry
+print(json.dumps(prev))
+PY
+}
+
+# Persist deployed[mod] immediately so a mid-batch interrupt does not force full rebuild.
+persist_module_deployed() {
+  local mod="$1"
+  local head="$2"
+  local run_id="${3:-}"
+  local log_rel="${4:-}"
+  local csv="${5:-}"
+  local deployed_json
+  deployed_json="$(build_deployed_json "$head" "$mod")"
+  PHASE=switching MESSAGE="marked $mod deployed" CHANGED_CSV="$csv" CURRENT="$mod" \
+    RUN_ID="$run_id" LOG_REL="$log_rel" DEPLOYED_JSON="$deployed_json" \
+    write_status >/dev/null
+}
+
 cmd_run() {
   local force_all=0
   local only=""
@@ -397,24 +494,6 @@ cmd_run() {
     CURRENT="" RUN_ID="$run_id" LOG_REL="$log_rel" write_status >/dev/null
 
   local mod
-  local -A deployed_map=()
-  # load previous deployed
-  eval "$(python3 - "$STATUS_FILE" <<'PY'
-import json, sys
-from pathlib import Path
-p = Path(sys.argv[1])
-d = {}
-if p.is_file():
-    try:
-        d = json.load(p.open()).get("deployed") or {}
-    except Exception:
-        d = {}
-for k, v in d.items():
-    sha = (v or {}).get("git_sha", "")
-    print(f"deployed_map[{k!r}]={sha!r}")
-PY
-)"
-
   local head
   head="$(git_sha)"
 
@@ -426,7 +505,8 @@ PY
         CHANGED_CSV="$csv" CURRENT="$mod" RUN_ID="$run_id" LOG_REL="$log_rel" write_status >/dev/null
       return 1
     fi
-    deployed_map["$mod"]="$head"
+    # Mark each success immediately — interrupt/fail later must not re-dirty this module.
+    persist_module_deployed "$mod" "$head" "$run_id" "$log_rel" "$csv"
   done
 
   PHASE=verifying MESSAGE="health check" CHANGED_CSV="$csv" CURRENT="" \
@@ -434,38 +514,13 @@ PY
   local health
   health="$(cmd_health)"
 
-  DEPLOYED_JSON="$(python3 - "$head" "${targets[@]}" <<'PY'
-import json, sys, time
-head = sys.argv[1]
-mods = sys.argv[2:]
-# merge will happen in write_status via full replace — build full map in bash instead
-print(json.dumps({}))
-PY
-)"
+  # Consistency fallback: re-merge full batch into deployed (already written per-module).
+  local deployed_json
+  deployed_json="$(build_deployed_json "$head" "$csv")"
 
-  # Build full deployed dict in Python
-  DEPLOYED_JSON="$(
-    STATUS_FILE="$STATUS_FILE" HEAD="$head" MODS="$csv" python3 <<'PY'
-import json, os
-from pathlib import Path
-prev = {}
-p = Path(os.environ["STATUS_FILE"])
-if p.is_file():
-    try:
-        prev = json.load(p.open()).get("deployed") or {}
-    except Exception:
-        prev = {}
-head = os.environ["HEAD"]
-for m in [x for x in os.environ.get("MODS", "").split(",") if x]:
-    prev[m] = {"git_sha": head, "at": __import__("time").strftime("%Y-%m-%dT%H:%M:%SZ", __import__("time").gmtime())}
-print(json.dumps(prev))
-PY
-  )"
-
-  # Persist last_release_sha inside status via python merge
   PHASE=done MESSAGE="deployed $csv @ $(git_sha_short)" CHANGED_CSV="$csv" \
     CURRENT="" RUN_ID="$run_id" LOG_REL="$log_rel" \
-    DEPLOYED_JSON="$DEPLOYED_JSON" HEALTH_JSON="$health" \
+    DEPLOYED_JSON="$deployed_json" HEALTH_JSON="$health" \
     write_status >/dev/null
 
   python3 - "$STATUS_FILE" "$(git_sha)" <<'PY'
@@ -584,31 +639,14 @@ cmd_mark() {
   fi
   local -a targets=()
   IFS=',' read -ra targets <<<"$only"
-  local csv head health
+  local csv head health deployed_json
   csv="$(IFS=,; echo "${targets[*]}")"
   head="$(git_sha)"
   health="$(cmd_health)"
-  DEPLOYED_JSON="$(
-    STATUS_FILE="$STATUS_FILE" HEAD="$head" MODS="$csv" python3 -c '
-import json, os, time
-from pathlib import Path
-prev = {}
-p = Path(os.environ["STATUS_FILE"])
-if p.is_file():
-    try:
-        prev = json.load(p.open()).get("deployed") or {}
-    except Exception:
-        prev = {}
-head = os.environ["HEAD"]
-at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-for m in [x for x in os.environ.get("MODS", "").split(",") if x]:
-    prev[m] = {"git_sha": head, "at": at, "via": "mark"}
-print(json.dumps(prev))
-'
-  )"
+  deployed_json="$(build_deployed_json "$head" "$csv" "mark")"
   PHASE=done MESSAGE="marked $csv @ $(git_sha_short)" \
     CHANGED_CSV="" FORCE_CHANGED=1 CURRENT="" \
-    DEPLOYED_JSON="$DEPLOYED_JSON" HEALTH_JSON="$health" \
+    DEPLOYED_JSON="$deployed_json" HEALTH_JSON="$health" \
     write_status >/dev/null
   python3 -c '
 import json, sys
