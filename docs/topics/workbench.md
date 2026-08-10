@@ -95,7 +95,9 @@ Ops UI **强制** `eval_path=agent`：分数必须来自**产品 Session/Turn �
 | **retrieval** | BEIR：scifact · nfcorpus · fiqa | `/data/ops-l1/beir-index` → schema **`retrieval_ops`** | `search_sources` | nDCG@10 · Recall@100 · MAP@100 |
 | **retrieval_zh** | C-MTEB：Covid/Medical/Ecom（约 50k 封顶） | `cmteb-index` → schema **`retrieval_ops_zh`** | 同上 | 同上（**勿与 BEIR 宏分混栏**） |
 | **context** | LongBench 小切 | Work 内 `sources/passage.md` 等 | `read_file` 等 | agent F1 / EM |
-| **coding** | SWE-bench Lite（tier n3…n25/full） | checkout 可选 | `propose_patch` / `write_file` | patch_rate；**resolve 须 harness+Docker** |
+| **coding** | SWE-bench Lite（tier n3…n25/full） | checkout 可选 | `edit_file` / `write_file` | patch_rate；**resolve 须 harness+Docker** |
+
+近期 n5 L1 实测纪要：[`docs/topics/swe-l1-n5-results.md`](./swe-l1-n5-results.md)。
 
 共用 embedder（GPU 时常 **bge-m3**）；BEIR 与 ZH **只分 schema/HNSW**，模型维数要一致才可纵向比。换模型后勿跨 SCORECARD 裸比。
 
@@ -153,7 +155,7 @@ CLI / `agent-bench` worker：`beir_run` · `context_run` · `swe_run` —— **�
 
 1. GitHub Actions `ci.yml`  
 2. 本地 `make ci-proof`  
-3. Ops `/test` · `suite=ci`（需 `make up-ops-eval` 挂 docker.sock）  
+3. Ops `/test` · `suite=ci`（需一次 `make up-ops-eval`；会写粘性 `deploy/ops-eval.auto.env`，部署看板 / `up-api` 保留 docker.sock）  
 
 顺序：stub bootstrap → `unit.*`（ux/runtime cov/api/contracts）→ `make gate`（smoke + eval-all）。  
 步骤展开图：[`ci-proof-zh.png`](../assets/ops/ci-proof-zh.png)。
