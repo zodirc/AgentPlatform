@@ -16,6 +16,7 @@ _owner_user_id: ContextVar[UUID | None] = ContextVar("tenant_owner_user_id", def
 _tenant_id: ContextVar[UUID | None] = ContextVar("tenant_id", default=None)
 _visibility_seed: ContextVar[bool] = ContextVar("tenant_visibility_seed", default=True)
 _resolved_at: ContextVar[str | None] = ContextVar("tenant_resolved_at", default=None)
+_ops_eval: ContextVar[bool] = ContextVar("tenant_ops_eval", default=False)
 
 
 @dataclass(frozen=True)
@@ -30,7 +31,7 @@ class TenantContext:
     resolved_at: str
 
 
-_BindTokens = tuple[Token, Token, Token, Token, Token, Token]
+_BindTokens = tuple[Token, Token, Token, Token, Token, Token, Token]
 
 
 def bind_tenant_context(
@@ -41,6 +42,7 @@ def bind_tenant_context(
     tenant_id: UUID | None = None,
     visibility_seed: bool = True,
     resolved_at: str | None = None,
+    ops_eval: bool = False,
 ) -> _BindTokens:
     root = (work_root or settings.workspace_root).strip() or settings.workspace_root
     # Personal tenant: tenant_id := owner (no Org table in Wave A).
@@ -53,17 +55,30 @@ def bind_tenant_context(
         _tenant_id.set(tid),
         _visibility_seed.set(bool(visibility_seed)),
         _resolved_at.set(resolved),
+        _ops_eval.set(bool(ops_eval)),
     )
 
 
 def reset_tenant_context(tokens: _BindTokens) -> None:
-    t_root, t_id, t_owner, t_tenant, t_seed, t_resolved = tokens
+    t_root, t_id, t_owner, t_tenant, t_seed, t_resolved, t_ops = tokens
     _work_root.reset(t_root)
     _work_id.reset(t_id)
     _owner_user_id.reset(t_owner)
     _tenant_id.reset(t_tenant)
     _visibility_seed.reset(t_seed)
     _resolved_at.reset(t_resolved)
+    _ops_eval.reset(t_ops)
+
+
+def current_ops_eval() -> bool:
+    return bool(_ops_eval.get())
+
+
+def sandbox_network_allowed() -> bool:
+    """False when Ops SWE-bench Lite deny-network is active for this ops_eval Turn."""
+    if settings.ops_eval_deny_network and current_ops_eval():
+        return False
+    return True
 
 
 def current_tenant_context() -> TenantContext:

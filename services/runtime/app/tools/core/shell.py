@@ -258,6 +258,31 @@ async def run_shell_command(
         }
 
     if backend == "off":
+        from app.tenant_context import sandbox_network_allowed
+
+        if not sandbox_network_allowed():
+            # Fail closed: unsandboxed shell would keep host egress (SWE leak ban).
+            try:
+                wrapped, backend = wrap_shell_command_for_exec(command=command, cwd=cwd)
+            except RuntimeError as exc:
+                return {
+                    "status": "failed",
+                    "command": command,
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "exit_code": None,
+                    "summary": f"sandbox unavailable: {exc}",
+                    "sandbox": "error",
+                }
+            result = await _run_exec(
+                argv=wrapped,
+                cwd=cwd,
+                timeout_s=timeout_s,
+                display_command=command,
+                check_cancel=check_cancel,
+            )
+            result["sandbox"] = backend
+            return result
         env = _safe_env()
         env["HOME"] = str(cwd)
         env["PWD"] = str(cwd)

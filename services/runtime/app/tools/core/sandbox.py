@@ -284,8 +284,20 @@ def wrap_argv_for_exec(
     """Possibly wrap argv with bwrap. Landlock keeps argv; use ``sandbox_preexec_fn``.
 
     Returns (final_argv, backend_used).
+    When Ops SWE-bench deny-network is active, force bwrap ``--unshare-net``
+    (landlock cannot revoke egress alone).
     """
+    from app.tenant_context import sandbox_network_allowed
+
+    allow_net = sandbox_network_allowed()
     backend = resolve_sandbox_backend()
+    if not allow_net:
+        # Prefer bwrap for --unshare-net; fail closed if unavailable (SWE leak ban).
+        if _which_bwrap() and _bwrap_can_exec():
+            return build_bwrap_argv(argv=argv, cwd=cwd, network=False), "bwrap"
+        raise RuntimeError(
+            "ops_eval_deny_network requires bwrap (--unshare-net); sandbox cannot deny egress"
+        )
     if backend == "off":
         return list(argv), "off"
     if backend == "landlock":
@@ -298,13 +310,16 @@ def wrap_shell_command_for_exec(
     command: str,
     cwd: Path,
 ) -> tuple[list[str], SandboxBackend]:
-    """Run a shell string under sandbox via ``sh -c`` (FS isolated; network on)."""
+    """Run a shell string under sandbox via ``sh -c`` (FS isolated; network per policy)."""
     sh = shutil.which("sh") or "/bin/sh"
     return wrap_argv_for_exec(argv=[sh, "-c", command], cwd=cwd)
 
 
 def sandbox_status() -> dict[str, object]:
     """Cheap diagnostics for health / ops."""
+    from app.tenant_context import sandbox_network_allowed
+    from app.settings import settings
+
     landlock_usable = _landlock_can_exec()
     bwrap_path = _which_bwrap()
     return {
@@ -314,4 +329,6 @@ def sandbox_status() -> dict[str, object]:
         "bwrap_usable": _bwrap_can_exec() if bwrap_path else False,
         "in_docker": Path("/.dockerenv").exists(),
         "sticky": _sticky_backend is not None,
+        "network_allowed_now": sandbox_network_allowed(),
+        "ops_eval_deny_network": bool(settings.ops_eval_deny_network),
     }

@@ -382,6 +382,7 @@ async def start_turn(
         work_id=work_id,
         owner_user_id=owner_user_id,
         visibility_seed=visibility_seed,
+        ops_eval=bool(ops_eval),
     )
     model_tokens = bind_turn_model(mode=effective_mode, override=override_config)
     _track_turn_started(turn_id)
@@ -467,7 +468,7 @@ async def _resolve_pending(turn_id: UUID, run_id: UUID) -> PendingTurn | None:
     return await _pending_from_checkpoint(run_id)
 
 
-async def _with_session_tenant(session_id: UUID, coro):
+async def _with_session_tenant(session_id: UUID, coro, *, ops_eval: bool = False):
     """Rebind TenantContext for approve/deny/patch resumes (same Work as StartTurn)."""
     from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
 
@@ -477,6 +478,7 @@ async def _with_session_tenant(session_id: UUID, coro):
         work_id=work_id,
         owner_user_id=owner_user_id,
         visibility_seed=visibility_seed,
+        ops_eval=bool(ops_eval),
     )
     try:
         ensure_work_root_exists()
@@ -544,7 +546,11 @@ async def approve_tool_call(
                 _track_turn_finished(turn_id)
                 await _cleanup_pending_after_command(turn_id, run_id)
 
-        await _with_session_tenant(pending.state.session_id, _run())
+        await _with_session_tenant(
+            pending.state.session_id,
+            _run(),
+            ops_eval=bool(getattr(pending.state, "ops_eval", False)),
+        )
     finally:
         _inflight_commands.discard(turn_id)
 
@@ -601,7 +607,11 @@ async def deny_tool_call(
                 _track_turn_finished(turn_id)
                 await _cleanup_pending_after_command(turn_id, run_id)
 
-        await _with_session_tenant(pending.state.session_id, _run())
+        await _with_session_tenant(
+            pending.state.session_id,
+            _run(),
+            ops_eval=bool(getattr(pending.state, "ops_eval", False)),
+        )
     finally:
         _inflight_commands.discard(turn_id)
 
@@ -1093,12 +1103,15 @@ async def _run_turn(
     }
     if phase is not None:
         accepted_payload["plan_phase"] = phase
-    profile_meta = await resolve_active_profile_metadata(owner_user_id=owner_user_id)
-    if profile_meta:
-        accepted_payload.update(profile_meta)
-    elif model_config is not None:
+    # Prefer the effective model (ops_eval override) over the owner's saved profile
+    # so Ops DeepSeek runs are not mis-labeled as SYSTEM_USER openai/gpt-4o-mini.
+    if model_config is not None:
         accepted_payload["model_provider"] = model_config.provider
         accepted_payload["model_name"] = model_config.model_name
+    else:
+        profile_meta = await resolve_active_profile_metadata(owner_user_id=owner_user_id)
+        if profile_meta:
+            accepted_payload.update(profile_meta)
 
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -1255,6 +1268,22 @@ async def _run_turn(
 
     registry = build_registry()
     tools = tool_scope(profile, registry, plan_phase=phase)
+    # CSI §5.1: soft prewarm — never await on StartTurn / first token path.
+    if (
+        settings.structural_enabled
+        and settings.structural_prewarm
+        and scenario_id == "agent"
+    ):
+        from app.structural.adapters import prewarm
+        from app.tenant_context import current_work_root_path
+
+        async def _prewarm_bg() -> None:
+            try:
+                await prewarm(current_work_root_path())
+            except Exception:
+                logger.debug("structural prewarm failed", exc_info=True)
+
+        asyncio.create_task(_prewarm_bg())
     context_window_tokens = await resolve_context_window_tokens(model_config)
     gateway = create_gateway(
         model_config,
