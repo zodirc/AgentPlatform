@@ -100,6 +100,7 @@ export function PatchDiffPanel({
               <CodeMirror
                 value={patch.old_text}
                 height="180px"
+                theme="none"
                 readOnly
                 basicSetup={{ lineNumbers: true, foldGutter: false }}
               />
@@ -109,6 +110,7 @@ export function PatchDiffPanel({
               <CodeMirror
                 value={patch.new_text}
                 height="180px"
+                theme="none"
                 readOnly
                 basicSetup={{ lineNumbers: true, foldGutter: false }}
               />

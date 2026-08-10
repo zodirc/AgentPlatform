@@ -157,6 +157,50 @@
     margin: 0;
     min-height: 100vh;
   }
+
+  /*
+    CodeMirror: @uiw default theme="light" only sets bg #fff while text inherits
+    --foreground (near-white on dark themes → invisible). Use theme="none" + tokens.
+  */
+  .cm-editor {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+
+  .cm-editor .cm-content {
+    caret-color: hsl(var(--foreground));
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .cm-editor.cm-focused {
+    outline: none;
+  }
+
+  .cm-editor .cm-cursor {
+    border-left-color: hsl(var(--primary));
+  }
+
+  .cm-editor .cm-selectionBackground,
+  .cm-editor.cm-focused .cm-selectionBackground,
+  .cm-editor .cm-content ::selection {
+    background-color: hsl(var(--primary) / 0.28);
+  }
+
+  .cm-editor .cm-gutters {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    border: none;
+  }
+
+  .cm-editor .cm-activeLineGutter {
+    background-color: hsl(var(--accent));
+  }
+
+  .cm-editor .cm-activeLine {
+    background-color: hsl(var(--accent) / 0.45);
+  }
 }
 
 @layer utilities {

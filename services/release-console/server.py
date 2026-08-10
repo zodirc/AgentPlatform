@@ -532,7 +532,15 @@ def _queue_worker_loop() -> None:
                     qid, "error", f"退出码 {proc.returncode}"
                 )
             _queue_cv.notify_all()
+        # Drop cached plan so the next poll cannot keep「存在变动」after a successful up-*.
         _plan_cache["at"] = 0.0
+        _plan_cache["data"] = None
+        if (not aborted) and int(proc.returncode or 0) == 0 and action.startswith("up-"):
+            try:
+                mode = _norm_mode(os.environ.get("RELEASE_DETECT_MODE"))
+                _compute_plan(mode=mode)
+            except Exception:  # noqa: BLE001
+                pass
 
 
 def _ensure_queue_worker() -> None:
@@ -1116,12 +1124,23 @@ def _read_deploy_status() -> dict:
 
 
 def _build_plan(mode: str = "local") -> dict:
+    """Reload release scripts every time — console is long-lived; plan/worktree_sig
+    change on disk must not stick as「存在变动」after a successful up-*.
+    """
     os.environ["RELEASE_STATUS_DIR"] = str(STATUS_DIR)
     import importlib
+
+    # worktree_sig first: plan imports it; reload(plan) alone leaves a stale helper.
+    if "worktree_sig" in sys.modules:
+        importlib.reload(sys.modules["worktree_sig"])
+    else:
+        import worktree_sig  # noqa: F401  # type: ignore
 
     import plan as plan_mod  # type: ignore
 
     importlib.reload(plan_mod)
+    # STATUS_FILE is bound at import — force re-bind after RELEASE_STATUS_DIR set.
+    plan_mod.STATUS_FILE = Path(STATUS_DIR) / "status.json"
     return plan_mod.build_plan(mode=mode)
 
 

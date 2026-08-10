@@ -25,7 +25,7 @@ function DocumentOutline({ wb }: Props) {
   if (!outline) return null;
   return (
     <Card className="border-primary/30 bg-primary/10">
-      <CardTitle className="text-primary">文档大纲</CardTitle>
+      <CardTitle className="mb-2 text-primary">文档大纲</CardTitle>
       <DocumentOutlineView artifact={outline} />
     </Card>
   );

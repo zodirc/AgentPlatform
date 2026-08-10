@@ -11,5 +11,6 @@ type Props = {
 
 export function DocumentOutlineView({ artifact }: Props) {
   if (!artifact?.content) return null;
-  return <SectionEditor title="outline" value={String(artifact.content)} />;
+  // Title lives on the parent Card ("文档大纲"); avoid a second label.
+  return <SectionEditor value={String(artifact.content)} />;
 }

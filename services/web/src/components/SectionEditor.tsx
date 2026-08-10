@@ -23,6 +23,7 @@ export function SectionEditor({ value, title, readOnly = true }: Props) {
         <CodeMirror
           value={value}
           height="200px"
+          theme="none"
           extensions={[markdown()]}
           readOnly={readOnly}
           basicSetup={{ lineNumbers: false, foldGutter: false }}

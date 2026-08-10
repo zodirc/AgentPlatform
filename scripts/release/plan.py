@@ -239,9 +239,9 @@ def _module_dirty(
     if include_worktree:
         dep = deployed_entry if isinstance(deployed_entry, dict) else {}
         if dep.get("worktree_digest") and _match_files(worktree_files, prefixes):
-            return False, "相对已部署；未提交已包含在上次重建中"
-        return False, "相对已部署；已检查未提交"
-    return False, "相对已部署；仅看已提交"
+            return False, "已是最新 — 未提交改动已编入当前镜像"
+        return False, "已是最新 — 与已部署一致"
+    return False, "已是最新 — 与已部署一致（仅核对已提交）"
 
 
 def _container_running(name: str, running: set[str] | None = None) -> bool:

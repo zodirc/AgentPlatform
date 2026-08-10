@@ -228,7 +228,8 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 	  echo "==> new OPS_TEST_SECRET → recreating api to load env"; \
 	  $(COMPOSE) up -d --no-deps --force-recreate api; \
 	fi
-	@if [ "$(WEB_REBUILD_DEPS)" = "1" ]; then \
+	@set -e; \
+	if [ "$(WEB_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> WEB_REBUILD_DEPS=1 → docker compose build --no-cache web (+deps anchor)"; \
 	  $(COMPOSE) build --no-cache web; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache web-deps \
@@ -237,7 +238,7 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 	  $(COMPOSE) build web; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build web-deps \
 	    || echo "==> warn: web-deps anchor failed (mirror?); web image still built"; \
-	fi
+	fi; \
 	$(COMPOSE) up -d --no-deps web
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
@@ -246,14 +247,15 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 	fi
 
 up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEPS=1 → --no-cache）
-	@if [ "$(API_REBUILD_DEPS)" = "1" ]; then \
+	@set -e; \
+	if [ "$(API_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> API_REBUILD_DEPS=1 → docker compose build --no-cache api (+deps anchor)"; \
 	  $(COMPOSE) build --no-cache api; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache api-deps; \
 	else \
 	  $(COMPOSE) build api; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps; \
-	fi
+	fi; \
 	$(COMPOSE) up -d --no-deps api
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
@@ -269,14 +271,15 @@ up-ops-eval: ensure-ops-secret ensure-docker-creds ## api + docker.sock（启用
 	@echo "    注意：之后再 make up / up-api 会去掉 sock，需重跑本目标"
 
 up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
-	@if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
+	@set -e; \
+	if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime (+deps anchor)"; \
 	  $(COMPOSE) build --no-cache runtime; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache runtime-deps; \
 	else \
 	  $(COMPOSE) build runtime; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-deps; \
-	fi
+	fi; \
 	$(COMPOSE) up -d --no-deps runtime
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
@@ -285,16 +288,17 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 	fi
 
 up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
-	@if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
+	@set -e; \
+	if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench (+deps anchor)"; \
 	  COMPOSE_PROFILES=bench $(COMPOSE) build --no-cache bench; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache bench-deps; \
 	else \
 	  COMPOSE_PROFILES=bench $(COMPOSE) build bench; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build bench-deps; \
-	fi
-	@echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"
-	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres
+	fi; \
+	echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"; \
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres; \
 	COMPOSE_PROFILES=bench $(COMPOSE) up -d --no-deps bench
 	$(docker_auto_prune)
 
