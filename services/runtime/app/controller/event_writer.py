@@ -131,6 +131,7 @@ class BufferedEventWriter:
     async def _write_rows(self, rows: list[tuple[str, dict, int]]) -> None:
         pool = await get_pool()
         last_error: Exception | None = None
+        pending = rows
         for attempt in range(5):
             try:
                 async with pool.acquire() as conn:
@@ -152,7 +153,7 @@ class BufferedEventWriter:
                                 json.dumps(payload),
                             )
                             for offset, (event_type, payload, step_index) in enumerate(
-                                rows
+                                pending
                             )
                         ]
                         await conn.executemany(_INSERT_SQL, args)
@@ -163,8 +164,27 @@ class BufferedEventWriter:
                     "turn_events batch sequence race turn_id=%s attempt=%s size=%s",
                     self._turn_id,
                     attempt + 1,
-                    len(rows),
+                    len(pending),
                 )
+                continue
+            except (TimeoutError, asyncio.TimeoutError, asyncpg.InterfaceError) as exc:
+                # Long think streams can flush large delta batches under PG
+                # statement_timeout; retry with halves instead of failing the turn.
+                last_error = exc
+                logger.warning(
+                    "turn_events batch timeout/interface turn_id=%s attempt=%s size=%s err=%s",
+                    self._turn_id,
+                    attempt + 1,
+                    len(pending),
+                    type(exc).__name__,
+                )
+                if len(pending) > 1:
+                    mid = max(1, len(pending) // 2)
+                    head, tail = pending[:mid], pending[mid:]
+                    await self._write_rows(head)
+                    pending = tail
+                    continue
+                await asyncio.sleep(0.05 * (attempt + 1))
                 continue
         raise RuntimeError(
             f"failed to append {len(rows)} delta events for turn {self._turn_id} after retries"

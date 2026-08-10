@@ -32,6 +32,9 @@ POLISH_EXPAND = (
 OUTLINE_EXPAND = (
     "[outline] 只产出或修改 outline.md，不写正文；"
     "禁止调用 search_sources；使用 update_outline。"
+    "默认写章纲（每章含目标/阻力、≥4 节拍、章内变化、章末钩子；约 200–400 字/章），"
+    "禁止一章一句话交差；仅当用户要「简略/目录」时才可短写。"
+    "批量扩章用 append 分段写满，本轮内加厚后再结束。"
 )
 # Agent slash expansions (docs/30 AQ2).
 TEST_EXPAND = (
