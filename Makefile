@@ -9,17 +9,23 @@ COMPOSE_ENV := --env-file .env --env-file deploy/embedding.defaults.env --env-fi
 # Deferred so resolve-embedding can create gpu.auto.yml before compose runs.
 COMPOSE_GPU = $(wildcard deploy/compose/gpu.auto.yml)
 COMPOSE_GPU_FLAG = $(if $(COMPOSE_GPU),-f $(COMPOSE_GPU),)
+# Sticky docker.sock on api (coding harness / ci_proof). Written by `make up-ops-eval`.
+# Without this, `make up-api` / 部署看板会卸掉 sock。Delete the file or set 0 to disable.
+-include deploy/ops-eval.auto.env
+OPS_EVAL_DOCKER_SOCK ?= 0
+COMPOSE_OPS_FLAG = $(if $(filter 1 true TRUE yes YES,$(OPS_EVAL_DOCKER_SOCK)),-f deploy/compose/ops-eval.yml,)
 # Source embedding env into the shell (overrides .env for ${EMBEDDING_MODEL} etc.).
 COMPOSE_EXPORT = set -a && \
 	[ -f deploy/embedding.defaults.env ] && . ./deploy/embedding.defaults.env; \
 	[ -f deploy/embedding.auto.env ] && . ./deploy/embedding.auto.env; \
+	[ -f deploy/ops-eval.auto.env ] && . ./deploy/ops-eval.auto.env; \
 	set +a
-COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_ENV)
-COMPOSE_DEV = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
-COMPOSE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_HA = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
+COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) $(COMPOSE_ENV)
+COMPOSE_DEV = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
+COMPOSE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_HA = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
 COMPOSE_OPS_EVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
@@ -59,7 +65,7 @@ RELEASE_CONSOLE ?= 1
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
-	up-web up-api up-runtime up-bench up-ops-eval deps-anchor restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
@@ -77,6 +83,7 @@ RELEASE_CONSOLE ?= 1
 	official-bench-compare official-bench-live \
 	official-bench-retrieval-agent official-bench-retrieval-zh-agent official-bench-context-agent \
 	official-bench-coding-infer-agent c3-retrieval-grid \
+	swebench-structural-dual-track swebench-structural-metrics \
 	release release-status release-detect release-console release-console-stop release-after-up up-all release-plan
 
 help: ## 显示常用命令
@@ -93,7 +100,8 @@ help: ## 显示常用命令
 	@echo "  make eval-plan-suggest-tune 搜索权重提案（只写 reports）"
 	@echo "  make ensure-ops-secret  若空则生成 OPS_TEST_SECRET 并打印评测台 URL"
 	@echo "  make ensure-docker-creds  WSL：去掉坏掉的 desktop.exe credsStore（默认开）"
-	@echo "  make up-ops-eval     给 api 挂 docker.sock（Ops 完整证明 ≡ CI 必需）"
+	@echo "  make up-ops-eval     挂 docker.sock 并粘性保留（部署看板/up-api 不再卸掉）"
+	@echo "  make ops-eval-off    取消粘性挂载（下次 up-api 不再带 sock）"
 	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
 	@echo "  # docs/38：改 app 代码不必 *_REBUILD_DEPS；改 pyproject/模型才需要"
 	@echo ""
@@ -263,12 +271,26 @@ up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEP
 	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
 	fi
 
-# Opt-in: mount docker.sock so Ops「完整证明」proof_available=true (docs/29).
-# Plain make up / up-api intentionally omit the socket (security default).
-up-ops-eval: ensure-ops-secret ensure-docker-creds ## api + docker.sock（启用 Ops suite=ci）
+# Opt-in: mount docker.sock so Ops「完整证明」/ SWE harness work from api.
+# Persists via deploy/ops-eval.auto.env so 部署看板 / make up-api keep the mount.
+up-ops-eval: ensure-ops-secret ensure-docker-creds ## api + docker.sock（粘性；部署看板可保留）
+	@printf '%s\n' \
+	  '# Auto-generated by make up-ops-eval — keep docker.sock on api across up-api / 部署看板.' \
+	  '# Run `make ops-eval-off` or set OPS_EVAL_DOCKER_SOCK=0 to disable.' \
+	  'OPS_EVAL_DOCKER_SOCK=1' \
+	  > deploy/ops-eval.auto.env
 	$(COMPOSE_OPS_EVAL) up -d --no-deps --force-recreate api
-	@echo "==> Ops 完整证明已启用；刷新 /ops/<OPS_TEST_SECRET>/test"
-	@echo "    注意：之后再 make up / up-api 会去掉 sock，需重跑本目标"
+	@echo "==> Ops docker.sock 已挂载，并写入 deploy/ops-eval.auto.env（粘性）"
+	@echo "    部署看板 / make up-api / make up 会继续带上 sock；取消：make ops-eval-off"
+
+ops-eval-off: ## 取消 api docker.sock 粘性（下次 up-api 不再挂载）
+	@rm -f deploy/ops-eval.auto.env
+	@echo "==> 已删除 deploy/ops-eval.auto.env"
+	@echo "    下次 make up-api / 部署看板 将不再挂 docker.sock（当前容器仍可能保留挂载，需 recreate）"
+	@$(COMPOSE) up -d --no-deps --force-recreate api
+	@echo "==> api 已按无 sock 配置 recreate"
+
+# Plain make up / up-api omit the socket unless OPS_EVAL_DOCKER_SOCK=1 (from up-ops-eval).
 
 up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
 	@set -e; \
@@ -779,6 +801,15 @@ official-bench-coding-infer-agent: ## L1 SWE infer：platform Turn（Ops API）
 
 official-bench-coding-eval: ## 官方 swebench.harness 评分（需 Docker + pip install swebench）
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase eval
+
+swebench-structural-dual-track: ## CSI §8：打印/执行 structural on/off 双轨配方（默认 dry-run）
+	python3 eval/swebench/run_dual_track.py --track both --n $(or $(OFFICIAL_SWE_N),50) $(if $(EXECUTE),--execute,)
+
+swebench-structural-metrics: ## CSI §8.3：过程指标（需 PRED= GOLD=）
+	@test -n "$(PRED)" || (echo "PRED=predictions.jsonl required"; exit 1); \
+	test -n "$(GOLD)" || (echo "GOLD=gold.jsonl required"; exit 1); \
+	python3 -m eval.swebench.metrics --pred $(PRED) --gold $(GOLD) \
+	  $(if $(OUT),--out $(OUT),)
 
 official-bench-all: ## pull + BEIR；可选 WITH_CONTEXT=1 / WITH_CODING_INFER=1
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py all \

@@ -15,6 +15,8 @@ import {
   secretFromOpsPath,
   statusClass,
 } from "./OpsShell";
+import { opsApiErrorText, opsDisplayText } from "./opsDisplayText";
+import { OpsTextViewerModal } from "./OpsTextViewerModal";
 
 const TURN_ID_IN_LOG = /turn_id=([0-9a-fA-F-]{36})/;
 
@@ -1384,6 +1386,43 @@ function runMetrics(r: OfficialRun | null | undefined): Record<string, number> {
   return out;
 }
 
+/** Prefer official effect metrics; fall back through prefixed case keys. */
+function historyHeadlineMetric(m: Record<string, number>): {
+  label: string;
+  value: number;
+} | null {
+  const prefer = [
+    "resolve_rate",
+    "official.coding.resolve_rate",
+    "official.coding_infer.resolve_rate",
+    "ndcg_at_10",
+    "retention_vs_full_f1",
+    "patch_rate",
+    "official.coding.patch_rate",
+    "official.coding_infer.patch_rate",
+    "n_instances",
+    "official.coding.n_instances",
+  ];
+  for (const k of prefer) {
+    const v = m[k];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      const short = k.includes(".") ? k.split(".").pop() || k : k;
+      return { label: short, value: v };
+    }
+  }
+  for (const [k, v] of Object.entries(m)) {
+    if (k.endsWith("resolve_rate") && Number.isFinite(v)) {
+      return { label: "resolve_rate", value: v };
+    }
+  }
+  for (const [k, v] of Object.entries(m)) {
+    if (k.endsWith("patch_rate") && Number.isFinite(v)) {
+      return { label: "patch_rate", value: v };
+    }
+  }
+  return null;
+}
+
 function median(sorted: number[]): number {
   if (!sorted.length) return Number.NaN;
   const mid = Math.floor(sorted.length / 2);
@@ -1468,6 +1507,13 @@ type ArtifactCase = {
   error?: string | null;
   turn_id?: string | null;
   l2?: Record<string, unknown>;
+  patch_source?: string | null;
+  patch_applies?: boolean | null;
+  resolved?: boolean | null;
+  has_repo?: boolean | null;
+  ran_tests?: boolean | null;
+  patch_preview?: string | null;
+  patch_chars?: number | null;
 };
 
 type SuiteArtifact = {
@@ -1484,6 +1530,11 @@ type SuiteArtifact = {
   result?: Record<string, unknown>;
   depth_audit?: Record<string, unknown> | null;
   suite_ndcg_median?: number | null;
+  report_html_available?: boolean;
+  predictions_available?: boolean;
+  report_href?: string;
+  predictions_href?: string;
+  coding_scorecard?: Record<string, unknown>;
 };
 
 type RunArtifacts = {
@@ -1500,9 +1551,67 @@ const SUITE_ARTIFACT_LABEL: Record<string, string> = {
   coding_infer: "编码",
 };
 
+function isCodingSuite(suite: SuiteArtifact | undefined): boolean {
+  const s = String(suite?.suite || "").toLowerCase();
+  return (
+    s.includes("coding") ||
+    s.includes("swebench") ||
+    Boolean(suite?.coding_scorecard) ||
+    Boolean(suite?.result?.predictions)
+  );
+}
+
+async function openAuthorizedHtml(
+  href: string,
+  secret: string,
+): Promise<void> {
+  const resp = await fetch(href, {
+    headers: { Authorization: `Bearer ${secret}`, Accept: "text/html" },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(text || `HTTP ${resp.status}`);
+  }
+  const htmlText = await resp.text();
+  const blob = new Blob([htmlText], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, "_blank", "noopener,noreferrer");
+  if (!win) {
+    // Popup blocked — fall back to same-tab navigation via blob.
+    window.location.href = url;
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+async function downloadAuthorizedFile(
+  href: string,
+  secret: string,
+  filename: string,
+): Promise<void> {
+  const resp = await fetch(href, {
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(text || `HTTP ${resp.status}`);
+  }
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function metricPreview(m: Record<string, number> | undefined): string {
   if (!m) return "—";
   const preferred = [
+    "resolve_rate",
+    "patch_rate",
+    "n_resolved",
+    "n_nonempty_patches",
+    "n_instances",
     "ndcg_at_10",
     "agent.ndcg_at_10",
     "fts_okapi_rescore.ndcg_at_10",
@@ -1512,24 +1621,33 @@ function metricPreview(m: Record<string, number> | undefined): string {
     "agent_em",
     "f1",
     "em",
-    "resolve_rate",
     "n_hits",
   ];
   const parts: string[] = [];
   for (const k of preferred) {
     const v = m[k];
     if (typeof v === "number" && Number.isFinite(v)) {
-      parts.push(`${k}=${v.toFixed(3)}`);
+      parts.push(
+        Number.isInteger(v) ? `${k}=${v}` : `${k}=${v.toFixed(3)}`,
+      );
     }
   }
   if (!parts.length) {
     for (const [k, v] of Object.entries(m)) {
       if (typeof v === "number" && Number.isFinite(v) && parts.length < 3) {
-        parts.push(`${k}=${v.toFixed(3)}`);
+        parts.push(
+          Number.isInteger(v) ? `${k}=${v}` : `${k}=${v.toFixed(3)}`,
+        );
       }
     }
   }
   return parts.join(" · ") || "—";
+}
+
+function fmtBool(v: unknown): string {
+  if (v === true) return "yes";
+  if (v === false) return "no";
+  return "—";
 }
 
 function ArtifactsPanel({
@@ -1546,17 +1664,28 @@ function ArtifactsPanel({
   const suites = data?.suites || [];
   const [suiteIdx, setSuiteIdx] = useState(0);
   const [bucketFilter, setBucketFilter] = useState<string>("");
+  const [patchViewer, setPatchViewer] = useState<{
+    title: string;
+    content: string;
+  } | null>(null);
+  const [artifactActionError, setArtifactActionError] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     setSuiteIdx(0);
     setBucketFilter("");
+    setPatchViewer(null);
+    setArtifactActionError(null);
   }, [data?.run_id, suites.length]);
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">加载产物…</p>;
   }
   if (error) {
-    return <p className="text-sm text-destructive">{error}</p>;
+    return (
+      <p className="text-sm text-destructive">{opsDisplayText(error)}</p>
+    );
   }
   if (!suites.length) {
     return (
@@ -1567,6 +1696,7 @@ function ArtifactsPanel({
   }
 
   const suite = suites[Math.min(suiteIdx, suites.length - 1)] || suites[0];
+  const coding = isCodingSuite(suite);
   const counts = suite.bucket_counts || {};
   const totalBuckets = Object.values(counts).reduce((a, b) => a + b, 0);
   const bucketKeys = Object.keys(counts).sort(
@@ -1575,6 +1705,19 @@ function ArtifactsPanel({
   const cases = (suite.cases || []).filter((c) =>
     bucketFilter ? c.bucket === bucketFilter : true,
   );
+  const score = suite.coding_scorecard || {};
+  const resolveRate =
+    typeof score.resolve_rate === "number"
+      ? score.resolve_rate
+      : typeof suite.metrics?.resolve_rate === "number"
+        ? suite.metrics.resolve_rate
+        : null;
+  const patchRate =
+    typeof score.patch_rate === "number"
+      ? score.patch_rate
+      : typeof suite.metrics?.patch_rate === "number"
+        ? suite.metrics.patch_rate
+        : null;
 
   return (
     <div className="space-y-4">
@@ -1604,19 +1747,112 @@ function ArtifactsPanel({
         </div>
       ) : null}
 
-      <div className="text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span className="font-mono">{suite.bench_run_id || "—"}</span>
-        {suite.arm ? ` · arm=${suite.arm}` : ""}
-        {suite.sample_tier ? ` · ${suite.sample_tier}` : ""}
-        {suite.context_limit != null && Number(suite.context_limit) > 0
-          ? ` · limit=${suite.context_limit}/task`
-          : ""}
-        {suite.suite_ndcg_median != null
-          ? ` · median nDCG=${Number(suite.suite_ndcg_median).toFixed(3)}`
-          : ""}
+        {suite.arm ? <span>arm={suite.arm}</span> : null}
+        {suite.sample_tier ? <span>{suite.sample_tier}</span> : null}
+        {suite.context_limit != null && Number(suite.context_limit) > 0 ? (
+          <span>limit={suite.context_limit}/task</span>
+        ) : null}
+        {suite.suite_ndcg_median != null ? (
+          <span>median nDCG={Number(suite.suite_ndcg_median).toFixed(3)}</span>
+        ) : null}
+        {suite.report_href ? (
+          <button
+            type="button"
+            className="underline decoration-dotted underline-offset-2"
+            onClick={() => {
+              setArtifactActionError(null);
+              void openAuthorizedHtml(suite.report_href!, secret).catch((e) =>
+                setArtifactActionError(
+                  e instanceof Error ? e.message : String(e),
+                ),
+              );
+            }}
+          >
+            HTML 报告
+          </button>
+        ) : suite.report_html_available ? (
+          <span>报告已生成</span>
+        ) : null}
+        {suite.predictions_href ? (
+          <button
+            type="button"
+            className="underline decoration-dotted underline-offset-2"
+            onClick={() => {
+              setArtifactActionError(null);
+              const name = `predictions-${(suite.bench_run_id || data?.run_id || "run").slice(0, 8)}.jsonl`;
+              void downloadAuthorizedFile(
+                suite.predictions_href!,
+                secret,
+                name,
+              ).catch((e) =>
+                setArtifactActionError(
+                  e instanceof Error ? e.message : String(e),
+                ),
+              );
+            }}
+          >
+            下载 predictions.jsonl
+          </button>
+        ) : suite.predictions_available ? (
+          <span>predictions 就绪</span>
+        ) : null}
       </div>
+      {artifactActionError ? (
+        <p className="text-[11px] text-destructive">
+          {opsDisplayText(artifactActionError)}
+        </p>
+      ) : null}
 
-      {Object.keys(suite.metrics || {}).length ? (
+      {coding ? (
+        <div className="rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-xs">
+          <div className="mb-1 text-[11px] text-muted-foreground">
+            编码效果（pass≠resolved；resolve 需开启 harness）
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono tabular-nums">
+            <span>
+              resolve_rate=
+              {resolveRate == null ? "—" : Number(resolveRate).toFixed(3)}
+            </span>
+            <span>
+              patch_rate=
+              {patchRate == null ? "—" : Number(patchRate).toFixed(3)}
+            </span>
+            {score.n_resolved != null || score.n_resolved_cases != null ? (
+              <span>
+                resolved=
+                {String(score.n_resolved ?? score.n_resolved_cases)}
+                {score.n_instances != null ? `/${String(score.n_instances)}` : ""}
+              </span>
+            ) : null}
+            {score.n_apply_ok != null ? (
+              <span>
+                apply_ok={String(score.n_apply_ok)}
+                {score.n_with_patch != null
+                  ? `/${String(score.n_with_patch)}`
+                  : ""}
+              </span>
+            ) : null}
+            {score.coding_tier != null ? (
+              <span>tier={String(score.coding_tier)}</span>
+            ) : null}
+            {score.harness != null ? (
+              <span>harness={fmtBool(score.harness)}</span>
+            ) : null}
+          </div>
+          {typeof score.note === "string" && score.note ? (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {opsDisplayText(score.note)}
+            </div>
+          ) : null}
+          {typeof score.harness_error === "string" && score.harness_error ? (
+            <div className="mt-1 text-[11px] text-destructive">
+              {opsDisplayText(score.harness_error)}
+            </div>
+          ) : null}
+        </div>
+      ) : Object.keys(suite.metrics || {}).length ? (
         <div className="text-xs font-mono text-muted-foreground">
           {metricPreview(suite.metrics)}
         </div>
@@ -1677,7 +1913,16 @@ function ArtifactsPanel({
             <tr>
               <th className="py-2 pr-2">case</th>
               <th className="py-2 pr-2">bucket</th>
-              <th className="py-2 pr-2">状态</th>
+              {coding ? (
+                <>
+                  <th className="py-2 pr-2">source</th>
+                  <th className="py-2 pr-2">apply</th>
+                  <th className="py-2 pr-2">resolved</th>
+                  <th className="py-2 pr-2">patch</th>
+                </>
+              ) : (
+                <th className="py-2 pr-2">状态</th>
+              )}
               <th className="py-2">指标 / L2</th>
             </tr>
           </thead>
@@ -1685,22 +1930,37 @@ function ArtifactsPanel({
             {cases.map((c) => {
               const l2bits: string[] = [];
               const l2 = c.l2 || {};
-              for (const k of [
-                "n_search",
-                "query_drift",
-                "n_reads",
-                "read_coverage",
-                "answer_len",
-                "steps",
-                "terminal_state",
-              ]) {
-                if (l2[k] != null && l2[k] !== "") {
-                  const v = l2[k];
+              const l2Keys = coding
+                ? [
+                    "patch_source",
+                    "patch_applies",
+                    "resolved",
+                    "ran_tests",
+                    "has_repo",
+                    "n_reads",
+                    "steps",
+                    "terminal_state",
+                  ]
+                : [
+                    "n_search",
+                    "query_drift",
+                    "n_reads",
+                    "read_coverage",
+                    "answer_len",
+                    "steps",
+                    "terminal_state",
+                  ];
+              for (const k of l2Keys) {
+                const v = l2[k] ?? (c as Record<string, unknown>)[k];
+                if (v != null && v !== "") {
                   l2bits.push(
-                    typeof v === "number" ? `${k}=${Number(v).toFixed(3)}` : `${k}=${v}`,
+                    typeof v === "number"
+                      ? `${k}=${Number(v).toFixed(3)}`
+                      : `${k}=${String(v)}`,
                   );
                 }
               }
+              const preview = c.patch_preview || "";
               return (
                 <tr key={c.case_id} className="border-b border-border/60 align-top">
                   <td className="py-1.5 pr-2 font-mono text-[10px]">
@@ -1719,16 +1979,59 @@ function ArtifactsPanel({
                   <td className="py-1.5 pr-2 font-mono text-[10px]">
                     {c.bucket || "—"}
                   </td>
-                  <td className={`py-1.5 pr-2 ${statusClass(c.status || "")}`}>
-                    {c.status}
-                  </td>
+                  {coding ? (
+                    <>
+                      <td className="py-1.5 pr-2 font-mono text-[10px]">
+                        {c.patch_source ||
+                          (typeof l2.patch_source === "string"
+                            ? l2.patch_source
+                            : "—")}
+                      </td>
+                      <td className="py-1.5 pr-2 font-mono text-[10px]">
+                        {fmtBool(
+                          c.patch_applies ?? l2.patch_applies ?? null,
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-2 font-mono text-[10px]">
+                        {fmtBool(c.resolved ?? l2.resolved ?? null)}
+                      </td>
+                      <td className="py-1.5 pr-2 text-[10px]">
+                        {preview ? (
+                          <button
+                            type="button"
+                            className="underline decoration-dotted underline-offset-2"
+                            onClick={() =>
+                              setPatchViewer({
+                                title: `${c.case_id || "patch"} (${c.patch_chars ?? preview.length} chars)`,
+                                content: preview,
+                              })
+                            }
+                          >
+                            预览
+                            {c.patch_chars != null &&
+                            c.patch_chars > preview.length
+                              ? "…"
+                              : ""}
+                          </button>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </>
+                  ) : (
+                    <td className={`py-1.5 pr-2 ${statusClass(c.status || "")}`}>
+                      {c.status}
+                    </td>
+                  )}
                   <td className="py-1.5 font-mono text-[10px] text-muted-foreground">
                     <div>{metricPreview(c.metrics)}</div>
                     {l2bits.length ? (
                       <div className="mt-0.5 opacity-80">{l2bits.join(" · ")}</div>
                     ) : null}
                     {c.error ? (
-                      <div className="mt-0.5 text-destructive">{c.error}</div>
+                      <div className="mt-0.5 text-destructive">
+                        {opsDisplayText(c.error)}
+                      </div>
                     ) : null}
                   </td>
                 </tr>
@@ -1749,6 +2052,16 @@ function ArtifactsPanel({
           {JSON.stringify(suite.result || {}, null, 2)}
         </pre>
       </details>
+
+      {patchViewer ? (
+        <OpsTextViewerModal
+          open
+          title={patchViewer.title}
+          downloadName={`${(patchViewer.title.split(" ")[0] || "patch").replace(/[^\w.-]+/g, "_")}.diff`}
+          content={patchViewer.content}
+          onClose={() => setPatchViewer(null)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -2159,7 +2472,7 @@ export function OfficialBenchPage() {
       if (!resp.ok) {
         setProbeOk(false);
         setProbeMessage(
-          data.detail || data.error || text || `HTTP ${resp.status}`,
+          opsApiErrorText(data, text || `HTTP ${resp.status}`),
         );
         return;
       }
@@ -2174,7 +2487,7 @@ export function OfficialBenchPage() {
       } else {
         setProbeOk(false);
         setProbeMessage(
-          data.error ||
+          opsDisplayText(data.error) ||
             `联通失败` +
               (data.endpoint ? ` · ${data.endpoint}` : "") +
               (data.latency_ms != null ? ` · ${data.latency_ms}ms` : ""),
@@ -2446,7 +2759,9 @@ export function OfficialBenchPage() {
           const text = await resp.text();
           if (!cancelled) {
             setArtifacts(null);
-            setArtifactsError(text || `HTTP ${resp.status}`);
+            setArtifactsError(
+              opsApiErrorText(text, text || `HTTP ${resp.status}`),
+            );
           }
           return;
         }
@@ -2961,16 +3276,7 @@ export function OfficialBenchPage() {
       });
       if (!resp.ok) {
         const text = await resp.text();
-        let msg = text || `HTTP ${resp.status}`;
-        try {
-          const j = JSON.parse(text) as {
-            error?: { message?: string };
-            detail?: string;
-          };
-          msg = j.error?.message || j.detail || msg;
-        } catch {
-          /* keep */
-        }
+        const msg = opsApiErrorText(text, text || `HTTP ${resp.status}`);
         if (String(msg).includes("official_run_already_active") && !opts?.force) {
           setError(
             "已有 Bench 在跑（或上次未干净结束）。可点右上角「取消」，或点「强制重开」。",
@@ -3005,7 +3311,7 @@ export function OfficialBenchPage() {
     });
     if (!resp.ok) {
       const text = await resp.text();
-      setError(text || `停止失败 HTTP ${resp.status}`);
+      setError(opsApiErrorText(text, text || `停止失败 HTTP ${resp.status}`));
     } else {
       // Live SSE may still deliver run_finished; DB-only cancel won't.
       const body = (await resp.json().catch(() => null)) as OfficialRun | null;
@@ -3072,17 +3378,7 @@ export function OfficialBenchPage() {
       });
       if (!resp.ok) {
         const text = await resp.text();
-        let msg = text || `HTTP ${resp.status}`;
-        try {
-          const j = JSON.parse(text) as {
-            detail?: string;
-            error?: { message?: string };
-          };
-          msg = j.error?.message || j.detail || msg;
-        } catch {
-          /* keep */
-        }
-        throw new Error(msg);
+        throw new Error(opsApiErrorText(text, text || `HTTP ${resp.status}`));
       }
       const deletedIds = new Set(opts.ids || []);
       const wipeAll = !opts.ids?.length && !opts.before;
@@ -3364,7 +3660,7 @@ export function OfficialBenchPage() {
               取消
             </button>
           ) : null}
-          {error?.includes("已有 Bench") ? (
+          {opsDisplayText(error)?.includes("已有 Bench") ? (
             <button
               type="button"
               onClick={() => void startRun({ force: true })}
@@ -3378,7 +3674,7 @@ export function OfficialBenchPage() {
     >
       {error ? (
         <p className="mb-4 whitespace-pre-wrap rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm">
-          {error}
+          {opsDisplayText(error)}
         </p>
       ) : null}
 
@@ -3445,7 +3741,7 @@ export function OfficialBenchPage() {
             >
               {busy ? "运行中…" : "开始"}
             </button>
-            {error?.includes("已有 Bench") ? (
+            {opsDisplayText(error)?.includes("已有 Bench") ? (
               <button
                 type="button"
                 onClick={() => void startRun({ force: true })}
@@ -3746,12 +4042,12 @@ export function OfficialBenchPage() {
                   ) : null}
                   <label
                     className="flex items-end gap-2 pb-1"
-                    title="需 Docker + swebench。官方 resolve 分仅此项。"
+                    title="需 Docker + swebench。官方 resolve 分仅此项。部署看板重建 api 前请先 make up-ops-eval（粘性）。"
                   >
                     <input
                       type="checkbox"
                       checked={codingHarness}
-                      disabled={busy}
+                      disabled={busy || caps.coding_harness === false}
                       onChange={(e) => {
                         markCustomProfile();
                         setCodingHarness(e.target.checked);
@@ -3759,8 +4055,18 @@ export function OfficialBenchPage() {
                     />
                     <span className="text-[11px] leading-tight">
                       harness resolve
+                      {caps.coding_harness === false ? (
+                        <span className="ml-1 text-destructive">不可用</span>
+                      ) : null}
                     </span>
                   </label>
+                  {selectedSuites.has("coding") && caps.coding_harness === false ? (
+                    <p className="basis-full text-[11px] text-destructive">
+                      harness 需要 api 挂 docker.sock。在仓库执行一次{" "}
+                      <code className="font-mono">make up-ops-eval</code>
+                      （会写粘性配置，之后部署看板重建 api 也会保留）。
+                    </p>
+                  ) : null}
                   <label
                     className="flex items-end gap-2 pb-1"
                     title="A-3：按 base_commit 检出仓库；关闭则仅 problem.md（旧行为）"
@@ -4263,11 +4569,7 @@ export function OfficialBenchPage() {
                   const active = selectedId === r.id;
                   const checked = checkedRunIds.has(r.id);
                   const m = runMetrics(r);
-                  const headline =
-                    m.ndcg_at_10 ??
-                    m.retention_vs_full_f1 ??
-                    m.patch_rate ??
-                    m.n_instances;
+                  const head = historyHeadlineMetric(m);
                   const durSec = elapsedSeconds(
                     r.created_at,
                     isActiveStatus(r.status) ? null : r.finished_at,
@@ -4320,8 +4622,12 @@ export function OfficialBenchPage() {
                           <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
                             <span>{shortId(r.id)}</span>
                             <span>
-                              {typeof headline === "number"
-                                ? headline.toFixed(3)
+                              {head
+                                ? `${head.label}=${
+                                    Number.isInteger(head.value)
+                                      ? head.value
+                                      : head.value.toFixed(3)
+                                  }`
                                 : `${r.summary?.pass ?? 0}/${r.summary?.total ?? 0}`}
                             </span>
                           </div>
@@ -4375,6 +4681,35 @@ export function OfficialBenchPage() {
                   >
                     重跑
                   </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-2 py-1 hover:bg-muted"
+                    onClick={() => {
+                      void openAuthorizedHtml(
+                        `/api/v1/ops/official/runs/${encodeURIComponent(detail.id)}/report`,
+                        secret,
+                      ).catch((e) =>
+                        setError(e instanceof Error ? e.message : String(e)),
+                      );
+                    }}
+                  >
+                    HTML 报告
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-md border border-border px-2 py-1 hover:bg-muted"
+                    onClick={() => {
+                      void downloadAuthorizedFile(
+                        `/api/v1/ops/official/runs/${encodeURIComponent(detail.id)}/predictions`,
+                        secret,
+                        `predictions-${detail.id.slice(0, 8)}.jsonl`,
+                      ).catch((e) =>
+                        setError(e instanceof Error ? e.message : String(e)),
+                      );
+                    }}
+                  >
+                    predictions
+                  </button>
                   <Link
                     className="rounded-md border border-border px-2 py-1 hover:bg-muted"
                     to={opsRunPath(secret, detail.id)}
@@ -4383,7 +4718,9 @@ export function OfficialBenchPage() {
                   </Link>
                 </div>
                 {detail.error ? (
-                  <p className="mt-2 text-sm text-destructive">{detail.error}</p>
+                  <p className="mt-2 text-sm text-destructive">
+                    {opsDisplayText(detail.error)}
+                  </p>
                 ) : null}
               </header>
 

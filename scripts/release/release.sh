@@ -391,10 +391,15 @@ deploy_module() {
       set -a
       [[ -f deploy/embedding.defaults.env ]] && . ./deploy/embedding.defaults.env || true
       [[ -f deploy/embedding.auto.env ]] && . ./deploy/embedding.auto.env || true
+      [[ -f deploy/ops-eval.auto.env ]] && . ./deploy/ops-eval.auto.env || true
       set +a
       local gpu_flag=()
       [[ -f deploy/compose/gpu.auto.yml ]] && gpu_flag=(-f deploy/compose/gpu.auto.yml)
-      docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
+      local ops_flag=()
+      case "${OPS_EVAL_DOCKER_SOCK:-0}" in
+        1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
+      esac
+      docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" "${ops_flag[@]}" \
         --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
         up -d --no-deps --force-recreate gateway
       ;;
@@ -563,12 +568,18 @@ compose_infra_up() {
   set -a
   [[ -f deploy/embedding.defaults.env ]] && . ./deploy/embedding.defaults.env || true
   [[ -f deploy/embedding.auto.env ]] && . ./deploy/embedding.auto.env || true
+  [[ -f deploy/ops-eval.auto.env ]] && . ./deploy/ops-eval.auto.env || true
   set +a
   local gpu_flag=()
   [[ -f deploy/compose/gpu.auto.yml ]] && gpu_flag=(-f deploy/compose/gpu.auto.yml)
+  local ops_flag=()
+  case "${OPS_EVAL_DOCKER_SOCK:-0}" in
+    1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
+  esac
   local profiles="${COMPOSE_PROFILES:-bench}"
   echo "==> infra: postgres (+ bench-postgres if profile)"
   COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
+    "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     up -d postgres bench-postgres
 }
@@ -578,11 +589,17 @@ compose_ensure_stack() {
   set -a
   [[ -f deploy/embedding.defaults.env ]] && . ./deploy/embedding.defaults.env || true
   [[ -f deploy/embedding.auto.env ]] && . ./deploy/embedding.auto.env || true
+  [[ -f deploy/ops-eval.auto.env ]] && . ./deploy/ops-eval.auto.env || true
   set +a
   local gpu_flag=()
   [[ -f deploy/compose/gpu.auto.yml ]] && gpu_flag=(-f deploy/compose/gpu.auto.yml)
+  local ops_flag=()
+  case "${OPS_EVAL_DOCKER_SOCK:-0}" in
+    1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
+  esac
   local profiles="${COMPOSE_PROFILES:-bench}"
   COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
+    "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     up -d
 }

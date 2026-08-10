@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 deploy/embedding.auto.env
+deploy/ops-eval.auto.env
 deploy/compose/gpu.auto.yml
 deploy/model-bake-cache/**
 !deploy/model-bake-cache/.keep

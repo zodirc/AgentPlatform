@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
+import subprocess
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.ops.auth import ops_eval_enabled, require_ops_eval_auth
@@ -94,6 +97,29 @@ async def _caps() -> dict[str, bool]:
         has_datasets = True
     except ImportError:
         has_datasets = False
+    try:
+        import swebench  # noqa: F401
+
+        has_swebench = True
+    except ImportError:
+        has_swebench = False
+    docker_sock = Path("/var/run/docker.sock").exists()
+    docker_ok = False
+    if docker_sock and shutil.which("docker"):
+
+        def _docker_info_ok() -> bool:
+            try:
+                proc = subprocess.run(
+                    ["docker", "info"],
+                    capture_output=True,
+                    timeout=8,
+                    check=False,
+                )
+                return proc.returncode == 0
+            except Exception:  # noqa: BLE001
+                return False
+
+        docker_ok = await asyncio.to_thread(_docker_info_ok)
     caps: dict[str, bool] = {
         "script": has_script,
         "retrieval": has_script,
@@ -101,6 +127,10 @@ async def _caps() -> dict[str, bool]:
         "context": has_script and has_datasets,
         "coding_pull": has_script and has_datasets,
         "coding_infer": has_script and has_datasets,
+        "coding_harness": has_swebench and docker_ok,
+        "swebench": has_swebench,
+        "docker_sock": docker_sock,
+        "docker": docker_ok,
         "p1_lexical_micro": (
             (
                 official_runner._repo_root()
@@ -402,6 +432,39 @@ async def get_official_run_artifacts(run_id: str) -> dict[str, Any]:
     return official_store.load_run_artifacts(row)
 
 
+@router.get("/runs/{run_id}/predictions")
+async def get_official_run_predictions(
+    run_id: str,
+    bench_run_id: str | None = Query(default=None),
+) -> FileResponse:
+    """Download SWE predictions.jsonl for a coding suite under this Ops batch."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    live = official_runner.get_live(run_id)
+    if live is not None:
+        row = official_runner.run_to_dict(live)
+    else:
+        fs = official_store.get_fs_run(run_id)
+        db = await eval_store.load_run(run_id)
+        if fs is None and db is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if fs and db:
+            row = {**db, **fs}
+        elif fs:
+            row = fs
+        else:
+            assert db is not None
+            row = db
+    path = official_store.resolve_predictions_path(row, bench_run_id=bench_run_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="predictions.jsonl not found")
+    return FileResponse(
+        path,
+        media_type="application/x-ndjson",
+        filename=f"predictions-{run_id[:8]}.jsonl",
+    )
+
+
 @router.get("/runs/{run_id}/report", response_class=HTMLResponse)
 async def get_official_report_html(run_id: str) -> HTMLResponse:
     if not ops_eval_enabled():
@@ -615,6 +678,23 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             detail=(
                 f"targets {missing} need datasets (bench worker or api image). "
                 "Rebuild bench/api or run host make."
+            ),
+        )
+    wants_coding = any(t in {"coding", "coding_infer"} for t in body.targets)
+    if wants_coding and body.coding_harness and not caps.get("coding_harness"):
+        tips: list[str] = []
+        if not caps.get("swebench"):
+            tips.append("rebuild api image with swebench (make up-api / Dockerfile)")
+        if not caps.get("docker_sock") or not caps.get("docker"):
+            tips.append(
+                "run `make up-ops-eval` once (sticky deploy/ops-eval.auto.env so "
+                "部署看板 / make up-api keep docker.sock)"
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "coding_harness=true requires swebench + Docker from api: "
+                + ("; ".join(tips) if tips else "coding_harness capability unavailable")
             ),
         )
     try:

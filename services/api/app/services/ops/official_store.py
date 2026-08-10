@@ -212,10 +212,14 @@ _L2_CASE_KEYS = (
     "patch_applies",
     "has_repo",
     "ran_tests",
+    "resolved",
+    "mirror_hit",
     "merged_len",
     "search_limits",
     "ranked_lengths",
 )
+
+_PATCH_PREVIEW_CHARS = 2400
 
 
 def _case_bucket(case: dict[str, Any]) -> str | None:
@@ -255,10 +259,129 @@ def _slim_artifact_case(case: dict[str, Any]) -> dict[str, Any]:
     }
     if l2:
         out["l2"] = l2
+    # Promote coding fields to top-level for Ops table columns.
+    for key in ("patch_source", "patch_applies", "resolved", "has_repo", "ran_tests"):
+        if key in l2:
+            out[key] = l2[key]
+        elif key in case and case[key] is not None:
+            out[key] = case[key]
     return out
 
 
-def suite_artifact_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
+def _load_prediction_patches(pred_path: Path | None) -> dict[str, str]:
+    if pred_path is None or not pred_path.is_file():
+        return {}
+    out: dict[str, str] = {}
+    try:
+        for line in pred_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            iid = str(row.get("instance_id") or "").strip()
+            patch = row.get("model_patch")
+            if iid and isinstance(patch, str) and patch.strip():
+                out[iid] = patch
+    except OSError:
+        return {}
+    return out
+
+
+def _attach_coding_artifact_extras(
+    art: dict[str, Any],
+    *,
+    manifest: dict[str, Any],
+    ops_run_id: str | None = None,
+) -> dict[str, Any]:
+    """Add report/predictions links, patch previews, coding scorecard for Ops UI."""
+    result = art.get("result") if isinstance(art.get("result"), dict) else {}
+    bench_id = str(art.get("bench_run_id") or manifest.get("id") or "").strip()
+    root = reports_root()
+    report_ok = False
+    if root is not None and bench_id:
+        report_ok = (root / "runs" / bench_id / "report.html").is_file()
+    pred_raw = result.get("predictions")
+    pred_path = Path(str(pred_raw)) if pred_raw else None
+    if pred_path is None and root is not None and bench_id:
+        cand = root / "runs" / bench_id / "predictions.jsonl"
+        if cand.is_file():
+            pred_path = cand
+            result = {**result, "predictions": str(cand)}
+            art["result"] = result
+    pred_ok = bool(pred_path and pred_path.is_file())
+    art["report_html_available"] = report_ok
+    art["predictions_available"] = pred_ok
+    if ops_run_id:
+        art["report_href"] = f"/api/v1/ops/official/runs/{ops_run_id}/report"
+        if pred_ok:
+            art["predictions_href"] = (
+                f"/api/v1/ops/official/runs/{ops_run_id}/predictions"
+                + (f"?bench_run_id={bench_id}" if bench_id else "")
+            )
+    metrics = art.get("metrics") if isinstance(art.get("metrics"), dict) else {}
+    scorecard: dict[str, Any] = {}
+    for key in (
+        "resolve_rate",
+        "patch_rate",
+        "n_instances",
+        "n_nonempty_patches",
+        "n_resolved",
+        "harness_run_id",
+        "exit_code",
+        "note",
+        "harness_error",
+    ):
+        if key in metrics:
+            scorecard[key] = metrics[key]
+    if result.get("harness") is not None:
+        scorecard["harness"] = result.get("harness")
+    if result.get("coding_tier"):
+        scorecard["coding_tier"] = result.get("coding_tier")
+    if result.get("checkout_repo") is not None:
+        scorecard["checkout_repo"] = result.get("checkout_repo")
+    n_apply = 0
+    n_resolved_cases = 0
+    n_with_patch = 0
+    patches = _load_prediction_patches(pred_path) if pred_ok else {}
+    cases = art.get("cases") if isinstance(art.get("cases"), list) else []
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        iid = str(case.get("case_id") or "")
+        patch = patches.get(iid) or ""
+        if patch:
+            case["patch_chars"] = len(patch)
+            case["patch_preview"] = patch[:_PATCH_PREVIEW_CHARS]
+            n_with_patch += 1
+        if case.get("patch_applies") is True:
+            n_apply += 1
+        if case.get("resolved") is True or (
+            isinstance(case.get("metrics"), dict)
+            and case["metrics"].get("resolved") == 1.0
+        ):
+            n_resolved_cases += 1
+        elif case.get("resolved") is False:
+            pass
+    if cases:
+        scorecard["n_apply_ok"] = n_apply
+        scorecard["n_with_patch"] = n_with_patch
+        if any(isinstance(c, dict) and c.get("resolved") is not None for c in cases):
+            scorecard["n_resolved_cases"] = n_resolved_cases
+    if scorecard:
+        art["coding_scorecard"] = scorecard
+    return art
+
+
+def suite_artifact_from_manifest(
+    manifest: dict[str, Any],
+    *,
+    ops_run_id: str | None = None,
+) -> dict[str, Any]:
     """Normalize a child suite manifest into Ops UI artifact payload."""
     result = manifest.get("result") if isinstance(manifest.get("result"), dict) else {}
     meta = (
@@ -279,7 +402,7 @@ def suite_artifact_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         or result.get("suite")
         or "unknown"
     )
-    return {
+    art = {
         "suite": str(suite),
         "bench_run_id": manifest.get("id"),
         "status": manifest.get("status"),
@@ -303,6 +426,10 @@ def suite_artifact_from_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         "cases": [_slim_artifact_case(c) for c in display],
         "result": result,
     }
+    suite_l = str(suite).lower()
+    if "coding" in suite_l or "swebench" in suite_l or result.get("predictions"):
+        _attach_coding_artifact_extras(art, manifest=manifest, ops_run_id=ops_run_id)
+    return art
 
 
 def _child_refs_from_ops_row(row: dict[str, Any]) -> list[dict[str, str]]:
@@ -371,7 +498,7 @@ def load_run_artifacts(ops_row: dict[str, Any]) -> dict[str, Any]:
     direct = get_fs_run(run_id) if run_id else None
     if direct and isinstance(direct.get("cases"), list) and direct["cases"]:
         # Direct FS suite run (or Ops dir that somehow holds a full manifest).
-        art = suite_artifact_from_manifest(direct)
+        art = suite_artifact_from_manifest(direct, ops_run_id=run_id or None)
         if art.get("cases"):
             suites.append(art)
             seen_manifest.add(str(direct.get("id") or run_id))
@@ -383,7 +510,7 @@ def load_run_artifacts(ops_row: dict[str, Any]) -> dict[str, Any]:
         man = get_fs_run(cid)
         if not man:
             continue
-        art = suite_artifact_from_manifest(man)
+        art = suite_artifact_from_manifest(man, ops_run_id=run_id or None)
         if ref.get("suite") and (
             not art.get("suite") or art.get("suite") in {"unknown", "official"}
         ):
@@ -396,6 +523,36 @@ def load_run_artifacts(ops_row: dict[str, Any]) -> dict[str, Any]:
         "suites": suites,
         "n_suites": len(suites),
     }
+
+
+def resolve_predictions_path(
+    ops_row: dict[str, Any],
+    *,
+    bench_run_id: str | None = None,
+) -> Path | None:
+    """Locate predictions.jsonl for an Ops coding batch or direct FS suite run."""
+    arts = load_run_artifacts(ops_row)
+    wanted = str(bench_run_id or "").strip()
+    for suite in arts.get("suites") or []:
+        if not isinstance(suite, dict):
+            continue
+        if wanted and str(suite.get("bench_run_id") or "") != wanted:
+            continue
+        result = suite.get("result") if isinstance(suite.get("result"), dict) else {}
+        raw = result.get("predictions")
+        if raw:
+            path = Path(str(raw))
+            if path.is_file():
+                return path
+        bid = str(suite.get("bench_run_id") or "").strip()
+        root = reports_root()
+        if root is not None and bid:
+            cand = root / "runs" / bid / "predictions.jsonl"
+            if cand.is_file():
+                return cand
+        if wanted:
+            break
+    return None
 
 
 def read_report_html(run_id: str) -> str | None:
@@ -496,8 +653,19 @@ def write_ops_aggregate_report(
                 f"<p class='muted'>尚无 HTML（该套件未 finish 或被取消）。</p></section>"
             )
             continue
-        # Extract body inner if full document
+        # Extract body inner + child <style> so nested suite CSS still applies.
         lower = html_body.lower()
+        child_styles: list[str] = []
+        search_from = 0
+        while True:
+            s_idx = lower.find("<style", search_from)
+            if s_idx < 0:
+                break
+            s_end = lower.find("</style>", s_idx)
+            if s_end < 0:
+                break
+            child_styles.append(html_body[s_idx : s_end + len("</style>")])
+            search_from = s_end + len("</style>")
         if "<body" in lower:
             start = lower.find("<body")
             start = lower.find(">", start) + 1
@@ -505,8 +673,17 @@ def write_ops_aggregate_report(
             inner = html_body[start:end] if end > start else html_body
         else:
             inner = html_body
+        # Avoid nested <main> breaking outer layout.
+        inner = (
+            inner.replace("<main>", "<div class='suite-main'>")
+            .replace("</main>", "</div>")
+            .replace("<MAIN>", "<div class='suite-main'>")
+            .replace("</MAIN>", "</div>")
+        )
+        style_block = "\n".join(child_styles)
         sections.append(
-            f"<section class='child'><h2>{html.escape(str(label))}</h2>{inner}</section>"
+            f"<section class='child'><h2>{html.escape(str(label))}</h2>"
+            f"{style_block}{inner}</section>"
         )
 
     doc = f"""<!DOCTYPE html>
@@ -517,7 +694,27 @@ def write_ops_aggregate_report(
 body{{margin:0;font-family:system-ui,sans-serif;background:#f6f1e8;color:#1c1916}}
 main{{max-width:960px;margin:0 auto;padding:1.5rem}}
 .child{{margin:1.5rem 0;padding:1rem;background:#fffdf8;border:1px solid #d9d0c3;border-radius:8px}}
+.suite-main{{max-width:none;margin:0;padding:0}}
 .muted{{color:#6b635a}}
+.grid{{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}
+.card{{background:#fffdf8;border:1px solid #d9d0c3;border-radius:12px;padding:1rem 1.1rem}}
+.card strong{{display:block;font-size:1.4rem}}
+.card span{{color:#6b635a;font-size:.85rem}}
+.metric{{margin:.55rem 0}}
+.metric-label{{display:flex;justify-content:space-between;font-size:.9rem;margin-bottom:.2rem}}
+.bar{{height:8px;background:#ece4d8;border-radius:99px;overflow:hidden}}
+.bar i{{display:block;height:100%;background:#0f4c5c}}
+table{{width:100%;border-collapse:collapse;font-size:.92rem}}
+th,td{{border-bottom:1px solid #d9d0c3;padding:.55rem .35rem;vertical-align:top;text-align:left}}
+pre{{margin:0;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem}}
+.st-pass{{color:#1f6b4a;font-weight:700}}
+.st-fail{{color:#9b2c2c;font-weight:700}}
+.st-skipped{{color:#6b635a}}
+ol.process{{padding-left:1.1rem}}
+ol.process li{{margin:.35rem 0}}
+ol.process time{{color:#6b635a;font-size:.8rem;margin-right:.4rem}}
+.kind{{display:inline-block;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;border:1px solid #d9d0c3;border-radius:999px;padding:.05rem .4rem;margin-right:.35rem;color:#0f4c5c}}
+code{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em}}
 </style></head>
 <body><main>
 <h1>{html.escape(title)}</h1>
