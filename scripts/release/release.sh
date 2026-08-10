@@ -273,7 +273,13 @@ from pathlib import Path
 
 root = Path(os.environ["ROOT"])
 sys.path.insert(0, str(root / "scripts" / "release"))
-from worktree_sig import digest_for_module, load_module_prefixes, match_prefixes, worktree_changed_files
+from worktree_sig import (
+    baked_content_matches,
+    digest_for_module,
+    load_module_prefixes,
+    match_prefixes,
+    worktree_changed_files,
+)
 
 mod = os.environ["MOD"]
 baseline = os.environ["BASELINE"]
@@ -286,7 +292,6 @@ if status.is_file():
         dep = {}
 prev = str(dep.get("worktree_digest") or "")
 cur = digest_for_module(mod)
-# Committed-since-baseline still dirty regardless of digest.
 committed = subprocess.run(
     ["git", "-C", str(root), "diff", "--name-only", f"{baseline}..HEAD"],
     text=True, capture_output=True, check=False,
@@ -296,7 +301,9 @@ committed_hit = match_prefixes(
     [ln for ln in (committed.stdout or "").splitlines() if ln.strip()],
     prefixes,
 )
-if committed_hit:
+# Committed-since-baseline is dirty unless those bytes were already baked
+# into the image (deploy-then-commit of the same content).
+if committed_hit and not baked_content_matches(prev, committed_hit):
     raise SystemExit(1)  # keep dirty
 if prev and cur and prev == cur:
     raise SystemExit(0)  # worktree unchanged since last deploy → clean

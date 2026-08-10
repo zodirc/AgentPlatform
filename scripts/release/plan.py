@@ -210,21 +210,35 @@ def _module_dirty(
     committed = _match_files(_committed_since(deployed_sha), prefixes)
     dirty_wt = _match_files(worktree_files, prefixes) if include_worktree else []
 
+    try:
+        from worktree_sig import (  # type: ignore
+            baked_content_matches,
+            module_worktree_digest,
+        )
+    except ImportError:
+        from scripts.release.worktree_sig import (  # type: ignore
+            baked_content_matches,
+            module_worktree_digest,
+        )
+
+    prev = ""
+    if isinstance(deployed_entry, dict):
+        prev = str(deployed_entry.get("worktree_digest") or "").strip()
+    baked_match = False
+
     # Local mode: uncommitted files already baked by last up-* should not stay dirty.
     if include_worktree and dirty_wt:
-        try:
-            from worktree_sig import module_worktree_digest  # type: ignore
-        except ImportError:
-            from scripts.release.worktree_sig import module_worktree_digest  # type: ignore
-
         cur = module_worktree_digest(prefixes, files=worktree_files)
-        prev = ""
-        if isinstance(deployed_entry, dict):
-            prev = str(deployed_entry.get("worktree_digest") or "").strip()
         if prev and cur and prev == cur:
             dirty_wt = []
+            baked_match = True
         elif prev == "" and cur == "":
             dirty_wt = []
+
+    # Same bytes later committed: digest still matches → not a real redeploy need.
+    if committed and prev and baked_content_matches(prev, committed):
+        committed = []
+        baked_match = True
 
     hit = committed + [f for f in dirty_wt if f not in committed]
     if hit:
@@ -238,6 +252,10 @@ def _module_dirty(
         return True, f"存在变动（{'+'.join(kinds)}）：{sample}{more}"
     if include_worktree:
         dep = deployed_entry if isinstance(deployed_entry, dict) else {}
+        if baked_match and dep.get("worktree_digest"):
+            if _match_files(worktree_files, prefixes):
+                return False, "已是最新 — 未提交改动已编入当前镜像"
+            return False, "已是最新 — 已提交内容与部署时编入镜像一致"
         if dep.get("worktree_digest") and _match_files(worktree_files, prefixes):
             return False, "已是最新 — 未提交改动已编入当前镜像"
         return False, "已是最新 — 与已部署一致"
