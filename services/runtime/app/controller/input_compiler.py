@@ -224,7 +224,7 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
             ),
         )
     if _SLASH_VERSION.match(text):
-        return ShouldQueryResult(False, local_response="Agent Platform v0.1.0 (Phase 1)")
+        return ShouldQueryResult(False, local_response="Agent Platform v1.0.0")
     if _SLASH_COMPACT.match(text):
         return ShouldQueryResult(False, slash_command="compact")
     if _SLASH_VERIFY.match(text):

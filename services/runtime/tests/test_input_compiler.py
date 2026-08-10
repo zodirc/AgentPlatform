@@ -28,7 +28,7 @@ def test_should_query_help_short_circuits() -> None:
 def test_should_query_version_short_circuits() -> None:
     result = should_query("/version", has_model_key=True)
     assert result.should_query is False
-    assert "v0.1.0" in (result.local_response or "")
+    assert "v1.0.0" in (result.local_response or "")
 
 
 def test_should_query_empty_fails() -> None:
