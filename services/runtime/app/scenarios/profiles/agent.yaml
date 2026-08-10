@@ -6,11 +6,12 @@ tool_names:
   - list_dir
   - glob
   - grep
-  - propose_patch
   - write_file
   - edit_file
   - rename_file
   - search_codebase
+  - goto_definition
+  - find_references
   - update_plan
   - remember
   - recall

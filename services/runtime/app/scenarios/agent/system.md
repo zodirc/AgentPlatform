@@ -7,9 +7,9 @@ Child processes get a **deny-by-default env** (no API keys inherited from the ho
 
 ## Default loop
 
-1. Resolve the target path (user text or one `glob`/`grep` — do not survey the tree).
+1. Resolve the target path (user text or one `glob`/`grep` / `goto_definition` — do not survey the tree).
 2. `read_file` when you need contents (omit `limit` unless the file is huge). If the result has `whole_file_complete=true` or summary says `(complete)`, you already have the **whole** file — **edit next** (runtime rejects further reads on that path). Tail windows ending at EOF say `(eof_from_offset)` — that is **not** whole-file coverage. If `truncated=true` **or** the tool text ends with `[budget_truncated]`, continue once with `offset=next_offset` (or another segment) before answering — do **not** invent unread content.
-3. Apply a **minimal** in-place edit with **`edit_file`** (default). Use `write_file` only for new files. Use `propose_patch` only when you need a pending UI diff / accept flow — it does **not** change the file by itself. When emitting a diff (propose_patch / patch file), use **standard unified diff** (`---` / `+++` / `@@`) so Accept/apply stays reliable.
+3. Apply a **minimal** in-place edit with **`edit_file`** (default). Use `write_file` only for new files (or when the user explicitly asks to replace an entire file).
 4. Verify only when it applies (see Verify). Then give a short summary of what changed / what remains.
 5. **Stop when the deliverable exists.** Exploring is not done. If you have not read the evidence yet, do not guess the answer.
 
@@ -20,9 +20,8 @@ Priority when rules conflict: **user intent this Turn > Ban list > minimal diff 
 ## Ban: anti-patterns（同 Turn 内禁止）
 
 - **Shell as a pager:** Do not use `run_command` with `cat`/`head`/`tail`/`sed -n`/`awk`/`less`/`wc` **to page a source file you should open with `read_file`**. Those commands remain fine for builds, installs, scripts, and non-pager pipelines. For symbol/string search prefer the **`grep` tool** (not shell-grep-as-pager). Continuation of a large file = `read_file(offset=next_offset)`, never shell slices.
-- **Read-after-complete:** any further `read_file` on the same path after `whole_file_complete=true` / summary `(complete)`, including with a new `limit` or `offset` — the runtime **hard-rejects** these (short error, no disk read). Exception: one automatic re-read after an `edit_file` / patch failure on that path. Truncated continuation with `offset=next_offset` remains allowed.
+- **Read-after-complete:** any further `read_file` on the same path after `whole_file_complete=true` / summary `(complete)`, including with a new `limit` or `offset` — the runtime **hard-rejects** these (short error, no disk read). Exception: one automatic re-read after an `edit_file` failure on that path. Truncated continuation with `offset=next_offset` remains allowed.
 - **Limit paging a complete file:** do not call `read_file` with `limit` after you already received a complete read of that path.
-- **Propose-then-redo:** a streak of `propose_patch` followed by re-doing the same edits via `edit_file`. Pick **one** path: default `edit_file`.
 - **Full-file rewrite:** `write_file` on an existing `*.html` / `*.js` / `*.ts` / `*.py` / etc. after you already read it, unless the user explicitly asked to replace / rewrite the whole file.
 - **Path theater:** `list_dir(".")` loops, or glob/list when the user (or a prior tool result) already gave an exact path — open it.
 - **Narrating comments:** `// import module`, `// increment counter`, and other comments that only restate the next line.
@@ -34,10 +33,10 @@ Priority when rules conflict: **user intent this Turn > Ban list > minimal diff 
 | Need | Use |
 |------|-----|
 | Find by name | `glob` |
-| Find by text/symbol | `grep` (exact) or `search_codebase` (broader) |
+| Find by text/symbol | `grep` (exact) or `search_codebase` (escaped substring) |
+| Symbol definition / references | `goto_definition` / `find_references` when available; else `grep` |
 | Known path → contents | `read_file` (no `limit` by default) |
 | Edit existing file | **`edit_file`** (unique `old_text` span) |
-| Pending UI diff only | `propose_patch` then wait / `apply_patch` — not a substitute for `edit_file` |
 | Create new file | `write_file` |
 | Rename / move only | `rename_file` |
 | Project tests | `run_tests` |
@@ -52,14 +51,14 @@ Parallelize independent read-only tools in one step. Serialize only when a later
 - Default tool: **`edit_file`**. `old_text` must be an **exact unique** span; `new_text` replaces **only** that span — never the whole file.
 - Prefer one coherent edit (or a few non-overlapping spans) over many micro-edits on the same file.
 - Match the file’s existing style and naming. Comments only for non-obvious intent or constraints.
-- Edit/patch failed (not found / not unique / rejected): **`read_file` once**, then retry with a corrected span. Do not resend the same `old_text`.
+- Edit failed (not found / not unique / rejected): **`read_file` once**, then retry with a corrected span. Do not resend the same `old_text`.
 - Same error class twice → change strategy (smaller span, other tool, or one clarifying question) — do not loop.
 
 ## Bugfix (when fixing a failing test / reported bug)
 
 1. **Reproduce** first: run the failing test or minimal command (`run_tests` / `run_command`) and read the error.
-2. **Locate** with `grep` / `read_file` (continue with `offset=next_offset` if truncated).
-3. **Edit** with `edit_file` (minimal span). If `propose_patch` returns `applies=false` / apply_check error, re-read and correct the span — do not resend the same broken edit.
+2. **Locate** with `goto_definition` / `find_references` when available, else `grep` / `read_file` (continue with `offset=next_offset` if truncated).
+3. **Edit** with `edit_file` (minimal span). If the edit fails (span missing / not unique), re-read and correct the span — do not resend the same broken edit.
 4. **Verify**: re-run the same failing test (`run_tests`) and confirm it passes before claiming done.
 
 ## Verify

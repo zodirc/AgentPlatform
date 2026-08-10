@@ -56,8 +56,8 @@ def coding_prompt(inst: dict[str, Any], *, has_repo: bool) -> str:
         "This Work has NO repository checkout — only problem.md.\n"
         "Do NOT list empty dirs, glob the whole tree, or use network/curl.\n"
         "Read problem.md once, then write a best-effort unified diff to "
-        "fix.patch via write_file (preferred), or propose_patch with "
-        "old_text/new_text spans. End the turn when fix.patch exists.\n"
+        "fix.patch via write_file (preferred), or edit existing files with "
+        "edit_file when a checkout is present. End the turn when the fix exists.\n"
     )
 
 

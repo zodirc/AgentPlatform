@@ -25,7 +25,7 @@ def test_agent_system_prompt_contains_cq1_discipline() -> None:
     assert "read_lints" in text
     assert "run_tests" in text
     assert "edit_file" in text
-    assert "propose_patch" in text
+    assert "propose_patch" not in text
     assert "minimal" in text.lower()
     assert "head" in text and "tail" in text
     assert "write_file" in text
@@ -33,7 +33,6 @@ def test_agent_system_prompt_contains_cq1_discipline() -> None:
     assert "## Communicate" in text
     assert "next_offset" in text
     assert "Read-after-complete" in text
-    assert "Propose-then-redo" in text
     assert "**`edit_file`**" in text or "Default tool: **`edit_file`**" in text
     assert "按此执行" in text
 
@@ -57,8 +56,10 @@ def test_agent_tool_descriptions_hygiene() -> None:
     registry = build_registry()
     by_name = {s.name: s for s in tool_scope(profile, registry)}
 
+    assert "propose_patch" not in by_name
+
     write = by_name["write_file"].description
-    assert "propose_patch" in write or "edit_file" in write
+    assert "edit_file" in write
     assert "Create or overwrite a workspace file" not in write
 
     tests = by_name["run_tests"].description
@@ -66,7 +67,7 @@ def test_agent_tool_descriptions_hygiene() -> None:
     assert "pytest" in tests.lower() or "test" in tests.lower()
 
     lints = by_name["read_lints"].description
-    assert "write_file" in lints or "edit_file" in lints or "propose_patch" in lints
+    assert "write_file" in lints or "edit_file" in lints
 
     search = by_name["search_codebase"].description
     assert "grep" in search
@@ -83,11 +84,7 @@ def test_agent_tool_descriptions_hygiene() -> None:
     assert "offset" in params and "limit" in params
 
     edit = by_name["edit_file"].description
-    assert "default" in edit.lower() or "prefer this over propose_patch" in edit.lower()
-
-    propose = by_name["propose_patch"].description
-    assert "pending" in propose.lower() or "does not modify" in propose.lower()
-    assert "edit_file" in propose
+    assert "default" in edit.lower() or "surgical" in edit.lower()
 
     # Tool schemas (names + descriptions) must be deterministic for cache prefix.
     tools = registry.to_openai_tools(list(by_name))

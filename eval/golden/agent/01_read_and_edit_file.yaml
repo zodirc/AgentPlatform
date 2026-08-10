@@ -1,7 +1,7 @@
-id: agent.01_read_and_propose_patch
+id: agent.01_read_and_edit_file
 scenario_id: agent
 phase: 1
-description: Read file then propose patch
+description: Read file then edit_file (in-place after approval)
 
 fixtures:
   workspace:
@@ -9,20 +9,25 @@ fixtures:
       content: "旧正文 for agent.01"
 
 input:
-  message: "读取 README.md 并 propose patch agent.01"
+  message: "读取 README.md 并 edit_file agent.01"
   client_request_id: "00000000-0000-4000-8000-000000000101"
 
 model_mode: stub
+
+commands:
+  - type: approve-tool-call
+    tool_call_id: auto
 
 assertions:
   events:
     sequence_contains:
       - tool.started
-      - patch.proposed
+      - approval.requested
+      - approval.resolved
       - turn.completed
   turn:
     status: completed
   latency:
     ttfb_ms_max: 300
 
-tags: [agent, patch, p1]
+tags: [agent, edit, p1]

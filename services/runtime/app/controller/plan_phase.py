@@ -20,7 +20,7 @@ _EXECUTING_SYSTEM_SUFFIX = """
 
 ## Plan phase (platform · executing)
 You are **executing** an approved plan. The user already clicked「按此执行」— file edits
-(`edit_file` / `propose_patch` / `write_file` / …) are pre-authorized for this checklist;
+(`edit_file` / `write_file` / writing `propose_patch` / …) are pre-authorized for this checklist;
 do not wait for per-edit consent. Follow the checklist step by step.
 - When starting a step: call `update_plan` with that item `in_progress`.
 - When finishing a step: call `update_plan` with that item `done` (or `completed`).

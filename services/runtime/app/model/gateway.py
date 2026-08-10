@@ -467,57 +467,47 @@ class StubModelProvider:
             yield _tool_call("search_codebase", {"query": "AgentEngine"})
             return
 
-        if has_tool_result and last_tool == "search_codebase" and "propose_patch" in tool_names:
-            yield _tool_call(
-                "propose_patch",
-                {
-                    "path": "README.md",
-                    "old_text": "old",
-                    "new_text": "patched via agent",
-                    "summary": "agent patch",
-                },
-            )
+        if has_tool_result and last_tool == "search_codebase":
+            yield ModelResponse(text="search_codebase hits recorded", output_tokens=8)
             return
 
-        # CQ3 agent.10: read → surgical patch → read_lints (quality loop)
+        # CQ3 agent.10: read → surgical edit_file → read_lints (quality loop)
         if _wants_agent_quality_verify(user_text) and "read_file" in tool_names:
             if not has_tool_result:
                 yield _tool_call("read_file", {"path": _extract_path(user_text) or "app.py"})
                 return
-            if last_tool == "read_file" and "propose_patch" in tool_names:
+            if last_tool == "read_file" and "edit_file" in tool_names:
                 path = _extract_path(user_text) or "app.py"
                 yield _tool_call(
-                    "propose_patch",
+                    "edit_file",
                     {
                         "path": path,
                         "old_text": 'return "old"',
                         "new_text": 'return "new"',
-                        "summary": "agent.10 minimal patch",
                     },
                 )
                 return
-            if last_tool == "propose_patch" and "read_lints" in tool_names:
+            if last_tool == "edit_file" and "read_lints" in tool_names:
                 path = _extract_path(user_text) or "app.py"
                 yield _tool_call("read_lints", {"path": path})
                 return
             if last_tool == "read_lints":
                 yield ModelResponse(
-                    text="agent.10 patch applied; lints checked",
+                    text="agent.10 edit applied; lints checked",
                     output_tokens=10,
                 )
                 return
 
-        if has_tool_result and last_tool == "read_file" and "propose_patch" in tool_names and (
+        if has_tool_result and last_tool == "read_file" and "edit_file" in tool_names and (
             _wants_patch(user_text) or "agent.01" in user_text
         ):
             path = _extract_path(user_text) or "README.md"
             yield _tool_call(
-                "propose_patch",
+                "edit_file",
                 {
                     "path": path,
                     "old_text": "旧正文",
                     "new_text": "简洁的新正文",
-                    "summary": "read then patch",
                 },
             )
             return
@@ -670,7 +660,7 @@ def _wants_patch(text: str) -> bool:
 
 
 def _wants_agent_quality_verify(text: str) -> bool:
-    """CQ3: stub path for read → propose_patch → read_lints."""
+    """CQ3: stub path for read → edit_file → read_lints."""
     lowered = text.lower()
     return "agent.10" in lowered or ("quality" in lowered and "read_lints" in lowered)
 

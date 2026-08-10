@@ -260,11 +260,11 @@ async def test_stub_writing_14_path_prefix_search() -> None:
 
 @pytest.mark.asyncio
 async def test_stub_agent_quality_verify_loop() -> None:
-    """CQ3: agent.10 scripts read → propose_patch → read_lints."""
+    """CQ3: agent.10 scripts read → edit_file → read_lints."""
     provider = StubModelProvider()
     tools = [
         {"name": "read_file"},
-        {"name": "propose_patch"},
+        {"name": "edit_file"},
         {"name": "read_lints"},
         {"name": "write_file"},
     ]
@@ -273,7 +273,7 @@ async def test_stub_agent_quality_verify_loop() -> None:
         "content": [
             {
                 "type": "text",
-                "text": "agent.10 读取 app.py，用 propose_patch 最小改动，再 read_lints 校验",
+                "text": "agent.10 读取 app.py，用 edit_file 最小改动，再 read_lints 校验",
             }
         ],
     }
@@ -299,21 +299,21 @@ async def test_stub_agent_quality_verify_loop() -> None:
         tool_result_message("r1", '{"content": "def hello():\\n    return \\"old\\"\\n"}'),
     ]
     second = await _first_tool(after_read)
-    assert second["name"] == "propose_patch"
+    assert second["name"] == "edit_file"
     assert second["input"]["path"] == "app.py"
     assert 'return "old"' in second["input"]["old_text"]
     assert 'return "new"' in second["input"]["new_text"]
 
-    after_patch = [
+    after_edit = [
         *after_read,
-        assistant_tool_use("p1", "propose_patch", second["input"]),
-        tool_result_message("p1", '{"status": "proposed"}'),
+        assistant_tool_use("e1", "edit_file", second["input"]),
+        tool_result_message("e1", '{"status": "ok"}'),
     ]
-    third = await _first_tool(after_patch)
+    third = await _first_tool(after_edit)
     assert third["name"] == "read_lints"
 
     after_lints = [
-        *after_patch,
+        *after_edit,
         assistant_tool_use("l1", "read_lints", {"path": "app.py"}),
         tool_result_message("l1", '{"diagnostics": []}'),
     ]

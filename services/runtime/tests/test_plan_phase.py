@@ -85,7 +85,7 @@ def test_agent_executing_waives_write_approvals() -> None:
     executing = {s.name: s for s in tool_scope(profile, registry, plan_phase="executing")}
     assert executing["edit_file"].requires_approval is False
     assert executing["write_file"].requires_approval is False
-    assert executing["propose_patch"].requires_approval is False
+    assert "propose_patch" not in executing
     # Shell stays gated — not implied by checklist consent.
     assert executing["run_command"].requires_approval is True
 

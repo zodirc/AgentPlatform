@@ -43,7 +43,7 @@ TEST_EXPAND = (
 )
 LINT_EXPAND = (
     "[lint] 对工作区调用 read_lints；汇总诊断；"
-    "若存在你引入的问题再 propose_patch/edit_file 修复；不要无关重构。"
+    "若存在你引入的问题再 edit_file 修复；不要无关重构。"
 )
 
 
