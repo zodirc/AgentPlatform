@@ -80,7 +80,7 @@ export function SessionHistoryDrawer({
     staleTime: 10_000,
   });
 
-  const items = q.data ?? [];
+  const items = useMemo(() => q.data ?? [], [q.data]);
 
   const removeOne = useMutation({
     mutationFn: (sessionId: string) => deleteSession(sessionId),
