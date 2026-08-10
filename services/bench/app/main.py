@@ -37,14 +37,30 @@ def _jobs_dir() -> Path:
 
 
 def _repo_root() -> Path:
+    """Prefer live /repo mount; fall back to image-baked scripts tree."""
+    candidates: list[Path] = []
     mounted = Path("/repo")
-    if (mounted / "scripts" / "official_bench_run.py").is_file():
-        return mounted
+    candidates.append(mounted)
+    baked = Path("/app/repo-baked")
+    candidates.append(baked)
     here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "scripts" / "official_bench_run.py").is_file():
-            return parent
+    candidates.extend(here.parents)
+    for root in candidates:
+        if (root / "scripts" / "official_bench_run.py").is_file():
+            return root
+        if (root / "scripts" / "official_bench" / "llm_client.py").is_file():
+            return root
     return mounted
+
+
+def _ensure_official_bench_path() -> Path:
+    """Insert scripts/ onto sys.path and return the repo root used."""
+    repo = _repo_root()
+    scripts = repo / "scripts"
+    scripts_s = str(scripts)
+    if scripts.is_dir() and scripts_s not in sys.path:
+        sys.path.insert(0, scripts_s)
+    return repo
 
 
 def _token_ok(authorization: str | None) -> bool:
@@ -508,6 +524,8 @@ async def health() -> dict[str, Any]:
         st_ok = False
     script = (_repo_root() / "scripts" / "official_bench_run.py").is_file()
     embedding_model = (os.environ.get("EMBEDDING_MODEL") or "").strip() or None
+    live_repo = Path("/repo")
+    live_ok = (live_repo / "scripts" / "official_bench_run.py").is_file()
     return {
         "ok": True,
         "service": "bench",
@@ -515,6 +533,8 @@ async def health() -> dict[str, Any]:
         "script": script,
         "retrieval_prod_ready": st_ok and script,
         "embedding_model": embedding_model,
+        "repo_root": str(_repo_root()),
+        "repo_mount_live": live_ok,
     }
 
 
@@ -537,15 +557,19 @@ async def caps() -> dict[str, Any]:
 @app.post("/v1/model/probe", dependencies=[Depends(require_internal)])
 async def probe_model(body: BenchModelBody) -> dict[str, Any]:
     """Live round-trip from the bench container (same egress as context/coding)."""
-    repo = _repo_root()
-    scripts = str(repo / "scripts")
-    if scripts not in sys.path:
-        sys.path.insert(0, scripts)
+    repo = _ensure_official_bench_path()
     try:
         from official_bench.llm_client import probe_model as _probe
     except ImportError as exc:
+        live = Path("/repo")
         raise HTTPException(
-            status_code=500, detail=f"official_bench.llm_client unavailable: {exc}"
+            status_code=500,
+            detail=(
+                "official_bench.llm_client unavailable: "
+                f"{exc}; repo_root={repo} "
+                f"live_mount={(live / 'scripts' / 'official_bench').is_dir()} "
+                f"baked={(Path('/app/repo-baked/scripts/official_bench').is_dir())}"
+            ),
         ) from exc
 
     result = await asyncio.to_thread(

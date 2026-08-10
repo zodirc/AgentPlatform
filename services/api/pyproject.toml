@@ -37,6 +37,10 @@ official-bench = [
     "datasets>=2.14.0",
     "huggingface_hub>=0.20.0",
 ]
+# Agent-path coding harness resolve (``swebench.harness.run_evaluation`` + Docker).
+swebench-harness = [
+    "swebench>=2.1.0,<5",
+]
 
 [build-system]
 requires = ["hatchling"]

@@ -2265,6 +2265,13 @@ async def run_coding_l1(
             if selected_tier in {"n25", "full300"} and run_harness
             else "smoke"
         ),
+        # CSI §8.2 — host-side intent; runtime must be recreated with matching env.
+        "structural_enabled_env": os.environ.get("STRUCTURAL_ENABLED", ""),
+        "ops_eval_deny_network_env": os.environ.get(
+            "OPS_EVAL_DENY_NETWORK",
+            "1" if os.environ.get("OFFICIAL_SWE_NETWORK", "").strip().lower() == "deny" else "",
+        ),
+        "official_swe_network": os.environ.get("OFFICIAL_SWE_NETWORK", ""),
         **_l1_fingerprint(model),
     }
     patches: dict[str, str] = {}
@@ -2343,7 +2350,7 @@ async def run_coding_l1(
                         turn["id"],
                         on_progress=on_progress,
                         label=f"swe.{iid}",
-                        timeout=900.0,
+                        timeout=1800.0,
                     )
                     patch = ""
                     if has_repo:
@@ -2449,6 +2456,7 @@ async def run_coding_l1(
             "n_nonempty_patches": float(nonempty),
             "patch_rate": float(nonempty) / float(selected_n) if selected_n else 0.0,
         }
+        harness_result: dict[str, Any] = {}
         if run_harness:
             await _emit(on_progress, "log", message="[L1] coding harness resolve…")
             try:
@@ -2459,6 +2467,32 @@ async def run_coding_l1(
                     h_metrics.get("resolve_rate"), (int, float)
                 ):
                     metrics["resolve_rate"] = float(h_metrics["resolve_rate"])
+                harness_result = (
+                    harness.get("result") if isinstance(harness.get("result"), dict) else {}
+                )
+                resolved_ids = {
+                    str(x)
+                    for x in (harness_result.get("resolved_ids") or [])
+                    if x is not None
+                }
+                # Write harness outcome back onto per-instance cases for Ops.
+                has_resolve_list = isinstance(harness_result.get("resolved_ids"), list)
+                for case in session.cases:
+                    iid = str(case.get("case_id") or "")
+                    if not iid or iid.startswith("swebench.lite"):
+                        continue
+                    l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+                    if has_resolve_list:
+                        l2["resolved"] = iid in resolved_ids
+                    l2["bucket"] = classify_bucket("coding", l2)
+                    case["l2"] = l2
+                    case["bucket"] = l2.get("bucket")
+                    m = dict(case.get("metrics") or {})
+                    if has_resolve_list:
+                        m["resolved"] = 1.0 if l2.get("resolved") else 0.0
+                    case["metrics"] = m
+                if has_resolve_list:
+                    metrics["n_resolved"] = float(len(resolved_ids))
             except Exception as exc:  # noqa: BLE001
                 metrics["harness_error"] = str(exc)
                 metrics["note"] = f"harness failed: {exc}"
@@ -2482,6 +2516,9 @@ async def run_coding_l1(
             "metrics": metrics,
             "predictions": str(pred_path),
             "patch_sources": patch_sources,
+            "resolved_ids": list(harness_result.get("resolved_ids") or []),
+            "unresolved_ids": list(harness_result.get("unresolved_ids") or []),
+            "error_ids": list(harness_result.get("error_ids") or []),
         }
         manifest = session.finish(status="completed", metrics=metrics, result=result)
         (_reports() / "latest_coding.json").write_text(

@@ -61,7 +61,7 @@ CRITERIA: list[dict[str, str]] = [
         "title": "编码（SWE-bench Lite）",
         "metrics": "coding_tier · n_instances · patch_rate；resolve 仅 harness+Docker",
         "pass_rule": "同 protocol + eval_path + coding_tier/fingerprint 才可比。官方效果=harness resolve。",
-        "notes": "L1=platform Turn+propose_patch；L0=bench 直出。默认锚点档 n25。",
+        "notes": "L1=platform Turn+edit_file；L0=bench 直出。默认锚点档 n25。",
     },
 ]
 
@@ -460,11 +460,82 @@ async def reclaim_stale_active_runs() -> list[str]:
     return reclaimed
 
 
+def _salvage_coding_case_from_disk(
+    *,
+    meta: dict[str, Any],
+    cases: list[Any],
+    finished_at: str,
+) -> bool:
+    """If L1 coding finished on disk, merge metrics into the orphan parent case."""
+    targets = meta.get("targets") or []
+    suite = str(meta.get("official_suite") or "")
+    wants_coding = (
+        any(t in {"coding", "coding_infer"} for t in targets)
+        or "coding" in suite
+    )
+    if not wants_coding:
+        return False
+    reports = Path(os.environ.get("BENCH_REPORTS_DIR", "/data/ops-official/reports"))
+    latest = reports / "latest_coding.json"
+    if not latest.is_file():
+        return False
+    try:
+        manifest = json.loads(latest.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict):
+        return False
+    metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
+    status = "pass" if manifest.get("status") != "failed" else "fail"
+    err = manifest.get("error") or (
+        None if status == "pass" else "salvaged_after_restart"
+    )
+    child_id = str(manifest.get("id") or manifest.get("run_id") or "")
+    touched = False
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        cid = str(case.get("case_id") or "")
+        if cid not in {"official.coding", "official.coding_infer", "coding", "coding_infer"}:
+            continue
+        if case.get("status") not in {"pending", "running", "skipped"}:
+            continue
+        case["status"] = status
+        case["metrics"] = dict(metrics)
+        if err:
+            case["error"] = str(err)
+        case["finished_at"] = finished_at
+        if child_id:
+            case["bench_run_id"] = child_id
+        touched = True
+    if touched and child_id:
+        children = [
+            c
+            for c in (meta.get("child_reports") or [])
+            if isinstance(c, dict) and c.get("suite") not in {"coding", "coding_infer"}
+        ]
+        children.append(
+            {
+                "suite": "coding_infer" if "coding_infer" in suite else "coding",
+                "run_id": child_id,
+                "bench_run_id": child_id,
+                "eval_path": "agent",
+                "salvaged": True,
+            }
+        )
+        meta["child_reports"] = children
+    return touched
+
+
 async def reclaim_official_orphans_from_db() -> list[str]:
     """After API restart: finish official DB rows still queued/running/cancelling.
 
     Does not resume subprocesses. Stops remote bench jobs when ``bench_job_id`` is known.
     Preserves model_meta (unlike generic ops eval reconcile).
+
+    When an L1 coding child already finished on disk (``latest_coding.json`` /
+    predictions), salvage those metrics instead of blanking the parent as a
+    pure reclaim skip — agent eval progress should not vanish on API bounce.
     """
     from app.services.ops import store as eval_store
 
@@ -494,6 +565,7 @@ async def reclaim_official_orphans_from_db() -> list[str]:
                 )
         now = _utc()
         cases = list(stored.get("cases") or [])
+        salvaged = _salvage_coding_case_from_disk(meta=meta, cases=cases, finished_at=now)
         for case in cases:
             if isinstance(case, dict) and case.get("status") in {"pending", "running"}:
                 case["status"] = "skipped"
@@ -502,7 +574,11 @@ async def reclaim_official_orphans_from_db() -> list[str]:
         meta = dict(meta)
         meta["reclaimed"] = True
         meta["bench_job_id"] = None
-        meta["phase_hint"] = "已回收（API 重启）"
+        if salvaged:
+            meta["phase_hint"] = "已回收（API 重启；已合并 L1 落盘结果）"
+            meta["salvaged_from_disk"] = True
+        else:
+            meta["phase_hint"] = "已回收（API 重启）"
         summary = stored.get("summary") if isinstance(stored.get("summary"), dict) else {}
         summary = {
             **summary,
@@ -517,14 +593,21 @@ async def reclaim_official_orphans_from_db() -> list[str]:
         was_cancelling = stored.get("status") == "cancelling" or bool(
             stored.get("cancel_requested")
         )
+        # Prefer failed-with-partial over cancelled when we salvaged coding metrics.
+        if salvaged and not was_cancelling:
+            status = "failed"
+            error = "reclaimed_after_restart_partial"
+        else:
+            status = "cancelled" if was_cancelling else "failed"
+            error = "reclaimed_after_restart"
         payload = {
             "id": rid,
-            "status": "cancelled" if was_cancelling else "failed",
+            "status": status,
             "mode": "official",
             "restart_runtime": False,
             "created_at": stored.get("created_at"),
             "finished_at": now,
-            "error": "reclaimed_after_restart",
+            "error": error,
             "model_meta": meta,
             "summary": summary,
             "cases": cases,
@@ -532,14 +615,22 @@ async def reclaim_official_orphans_from_db() -> list[str]:
             + [
                 {
                     "kind": "log",
-                    "message": "reclaimed_after_restart — official orphan closed on API startup",
+                    "message": (
+                        "reclaimed_after_restart — salvaged L1 coding metrics from disk"
+                        if salvaged
+                        else "reclaimed_after_restart — official orphan closed on API startup"
+                    ),
                     "at": now,
                 }
             ],
         }
         await eval_store.upsert_run(payload)
         reclaimed.append(rid)
-        logger.info("official bench reclaimed orphan run_id=%s", rid)
+        logger.info(
+            "official bench reclaimed orphan run_id=%s salvaged=%s",
+            rid,
+            salvaged,
+        )
     return reclaimed
 
 

@@ -40,6 +40,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install /contracts/python \
     && pip install /tmp/api \
     && pip install 'datasets>=2.14.0' 'huggingface_hub>=0.20.0' \
+    && pip install 'swebench>=2.1.0,<5' \
     && rm -rf /tmp/api
 
 FROM deps AS app

@@ -129,7 +129,7 @@ def _api_infer_one(instance: dict[str, Any], *, base_url: str, token: str) -> st
     hint = (
         f"SWE-bench instance {iid} ({repo}).\n"
         "Produce a minimal unified diff patch that fixes the issue. "
-        "Prefer propose_patch / file edits; end when tests should pass.\n\n"
+        "Prefer edit_file for in-place fixes; end when tests should pass.\n\n"
         f"{problem}"
     )
 
@@ -462,8 +462,9 @@ def run_swe_infer(
         raise
 
 
-def _resolve_rate_from_harness(root: Path, harness_run_id: str) -> float | None:
-    """Best-effort read of the official harness JSON results."""
+def _harness_report_from_disk(root: Path, harness_run_id: str) -> dict[str, Any]:
+    """Best-effort read of the official harness summary JSON (rate + id lists)."""
+    out: dict[str, Any] = {}
     for path in root.rglob(f"*{harness_run_id}*.json"):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -471,15 +472,105 @@ def _resolve_rate_from_harness(root: Path, harness_run_id: str) -> float | None:
             continue
         if not isinstance(payload, dict):
             continue
+        # Prefer the run summary (has resolved_ids); skip per-instance report files.
+        has_ids = isinstance(payload.get("resolved_ids"), list)
+        if not has_ids and not any(
+            k in payload for k in ("resolve_rate", "resolved_rate", "resolved", "total_instances")
+        ):
+            continue
+        if has_ids:
+            for key in (
+                "resolved_ids",
+                "unresolved_ids",
+                "error_ids",
+                "empty_patch_ids",
+                "completed_ids",
+                "incomplete_ids",
+                "submitted_ids",
+            ):
+                raw = payload.get(key)
+                if isinstance(raw, list):
+                    out[key] = [str(x) for x in raw]
+            out["report_path"] = str(path)
         for key in ("resolve_rate", "resolved_rate"):
             value = payload.get(key)
             if isinstance(value, (int, float)):
-                return float(value)
-        resolved = payload.get("resolved")
-        total = payload.get("total") or payload.get("n_instances")
-        if isinstance(resolved, (int, float)) and isinstance(total, (int, float)) and total:
-            return float(resolved) / float(total)
-    return None
+                out["resolve_rate"] = float(value)
+                break
+        if "resolve_rate" not in out:
+            resolved = payload.get("resolved")
+            if isinstance(resolved, list):
+                # Some older dumps store resolved as an id list.
+                out.setdefault("resolved_ids", [str(x) for x in resolved])
+                submitted = payload.get("submitted") or payload.get("submitted_ids")
+                if isinstance(submitted, list) and submitted:
+                    out["resolve_rate"] = float(len(resolved)) / float(len(submitted))
+            else:
+                total = (
+                    payload.get("total")
+                    or payload.get("n_instances")
+                    or payload.get("total_instances")
+                    or payload.get("submitted_instances")
+                )
+                if (
+                    isinstance(resolved, (int, float))
+                    and isinstance(total, (int, float))
+                    and total
+                ):
+                    out["resolve_rate"] = float(resolved) / float(total)
+        if out.get("resolve_rate") is not None or out.get("resolved_ids") is not None:
+            if "resolve_rate" not in out and out.get("resolved_ids") is not None:
+                submitted = out.get("submitted_ids") or out.get("completed_ids")
+                if isinstance(submitted, list) and submitted:
+                    out["resolve_rate"] = float(len(out["resolved_ids"])) / float(
+                        len(submitted)
+                    )
+            return out
+    return out
+
+
+def _resolve_rate_from_harness(root: Path, harness_run_id: str) -> float | None:
+    """Best-effort read of the official harness JSON results."""
+    report = _harness_report_from_disk(root, harness_run_id)
+    rate = report.get("resolve_rate")
+    return float(rate) if isinstance(rate, (int, float)) else None
+
+
+def _harness_preflight() -> None:
+    """Fail fast with actionable errors before spawning the official harness."""
+    try:
+        import swebench  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "swebench package missing in this process — rebuild api with "
+            "`swebench` (services/api Dockerfile) or `pip install 'swebench>=2.1,<5'`"
+        ) from exc
+    sock = Path("/var/run/docker.sock")
+    if not sock.exists():
+        raise RuntimeError(
+            "docker.sock not mounted — run `make up-ops-eval` so api can drive "
+            "swebench.harness Docker images"
+        )
+    try:
+        probe = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise RuntimeError(
+            "docker CLI missing in api image — api Dockerfile must install docker-cli"
+        ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("docker info timed out — docker daemon unreachable") from exc
+    if probe.returncode != 0:
+        err = (probe.stderr or probe.stdout or "").strip()[:300]
+        raise RuntimeError(
+            "docker daemon unreachable from api "
+            f"(exit={probe.returncode}): {err or 'no output'}"
+        )
 
 
 def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
@@ -496,7 +587,9 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
     root = suite_data("swebench_lite")
     pred_path = predictions or (root / (coding.get("predictions_filename") or "predictions.jsonl"))
     if not pred_path.exists():
-        raise SystemExit(f"missing predictions: {pred_path} (run coding-infer first)")
+        raise RuntimeError(f"missing predictions: {pred_path} (run coding-infer first)")
+
+    _harness_preflight()
 
     harness_run_id = f"agentplatform-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     cmd = [
@@ -520,11 +613,15 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
     _phase(f"2/3 EVAL — harness exit={proc.returncode}")
     _phase("3/3 REGRESS — compare resolve rate vs prior harness runs in Ops")
     metrics: dict[str, Any] = {"exit_code": proc.returncode, "harness_run_id": harness_run_id}
-    resolve_rate = _resolve_rate_from_harness(root, harness_run_id)
-    if resolve_rate is not None:
-        metrics["resolve_rate"] = resolve_rate
+    report = _harness_report_from_disk(root, harness_run_id)
+    resolve_rate = report.get("resolve_rate")
+    if isinstance(resolve_rate, (int, float)):
+        metrics["resolve_rate"] = float(resolve_rate)
     else:
         metrics["note"] = "resolve rate unavailable; Docker-backed harness results are required"
+    resolved_ids = report.get("resolved_ids") if isinstance(report.get("resolved_ids"), list) else []
+    if resolved_ids:
+        metrics["n_resolved"] = float(len(resolved_ids))
     session.add_case(
         "swebench.lite.evaluate",
         status="pass" if proc.returncode == 0 else "fail",
@@ -536,6 +633,11 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
         "predictions": str(pred_path),
         "harness_run_id": harness_run_id,
         "exit_code": proc.returncode,
+        "resolved_ids": resolved_ids,
+        "unresolved_ids": report.get("unresolved_ids") or [],
+        "error_ids": report.get("error_ids") or [],
+        "empty_patch_ids": report.get("empty_patch_ids") or [],
+        "harness_report_path": report.get("report_path"),
     }
     manifest = session.finish(
         status="completed" if proc.returncode == 0 else "failed",
@@ -549,5 +651,5 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
         json.dumps(result, indent=2), encoding="utf-8"
     )
     if proc.returncode != 0:
-        raise SystemExit(proc.returncode)
+        raise RuntimeError(f"harness exit {proc.returncode}")
     return manifest

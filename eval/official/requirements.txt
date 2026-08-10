@@ -6,8 +6,9 @@ PyYAML>=6.0
 # LongBench / SWE pulls:
 datasets>=2.14.0
 huggingface_hub>=0.20.0
-# SWE official evaluate (heavy; Docker required at eval time):
-# swebench>=2.0.0
+# SWE official evaluate (heavy; Docker required at eval time).
+# Also baked into the api image for Ops L1 ``coding_harness=true``.
+swebench>=2.1.0,<5
 # Context live arm:
 httpx>=0.27.0
 openai>=1.30.0

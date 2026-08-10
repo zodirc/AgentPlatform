@@ -102,7 +102,13 @@ ENV EMBEDDING_MODEL=${EMBEDDING_MODEL} \
     EMBEDDING_MODEL_DIR=/app/models-baked \
     HF_HOME=/data/models \
     TRANSFORMERS_OFFLINE=1 \
-    HF_HUB_OFFLINE=1
+    HF_HUB_OFFLINE=1 \
+    # Fallback when the live /repo bind-mount is empty (Docker Desktop/WSL glitch).
+    PYTHONPATH=/app/repo-baked/scripts:/app/repo-baked/services/runtime
+# Live-mount preferred at runtime; baked copy keeps model probe + script imports working
+# when /repo is an empty tmpfs.
+COPY scripts/official_bench_run.py /app/repo-baked/scripts/official_bench_run.py
+COPY scripts/official_bench /app/repo-baked/scripts/official_bench
 COPY services/bench/app /app/app
 USER app
 EXPOSE 8002
