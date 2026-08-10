@@ -4,6 +4,8 @@ import {
   ChevronUp,
   Download,
   Search,
+  ZoomIn,
+  ZoomOut,
   X,
 } from "lucide-react";
 import {
@@ -27,6 +29,11 @@ type Props = {
 };
 
 type MatchRange = { start: number; end: number };
+
+const FONT_MIN = 11;
+const FONT_MAX = 28;
+const FONT_DEFAULT = 13;
+const FONT_STEP = 1;
 
 function findMatches(content: string, query: string): MatchRange[] {
   const q = query.trim();
@@ -91,6 +98,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [fontSize, setFontSize] = useState(FONT_DEFAULT);
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["workspace-file-viewer", path],
@@ -102,10 +110,21 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   const content = data?.content ?? "";
   const matches = useMemo(() => findMatches(content, query), [content, query]);
 
+  const zoomIn = useCallback(() => {
+    setFontSize((s) => Math.min(FONT_MAX, s + FONT_STEP));
+  }, []);
+  const zoomOut = useCallback(() => {
+    setFontSize((s) => Math.max(FONT_MIN, s - FONT_STEP));
+  }, []);
+  const zoomReset = useCallback(() => {
+    setFontSize(FONT_DEFAULT);
+  }, []);
+
   useEffect(() => {
     setSearchOpen(false);
     setQuery("");
     setActiveIndex(0);
+    setFontSize(FONT_DEFAULT);
     scrollRef.current?.scrollTo({ top: 0 });
   }, [path]);
 
@@ -120,6 +139,12 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
       behavior: "smooth",
     });
   }, [activeIndex, matches.length, searchOpen, query]);
+
+  useEffect(() => {
+    if (!path) return;
+    // Focus the scroll pane so wheel / arrows scroll content, not the page behind.
+    requestAnimationFrame(() => scrollRef.current?.focus({ preventScroll: true }));
+  }, [path, isLoading]);
 
   const goNext = useCallback(() => {
     if (matches.length === 0) return;
@@ -140,6 +165,21 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
     if (!path) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+      if (mod && (e.key === "=" || e.key === "+")) {
+        e.preventDefault();
+        zoomIn();
+        return;
+      }
+      if (mod && e.key === "-") {
+        e.preventDefault();
+        zoomOut();
+        return;
+      }
+      if (mod && e.key === "0") {
+        e.preventDefault();
+        zoomReset();
+        return;
+      }
       if (mod && e.key.toLowerCase() === "f") {
         e.preventDefault();
         openSearch();
@@ -150,20 +190,56 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           e.preventDefault();
           setSearchOpen(false);
           setQuery("");
+          requestAnimationFrame(() =>
+            scrollRef.current?.focus({ preventScroll: true }),
+          );
         }
-        // Close only via the X button (not Esc / backdrop).
         return;
       }
-      if (!searchOpen) return;
-      if (e.key === "Enter") {
+      if (searchOpen) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          if (e.shiftKey) goPrev();
+          else goNext();
+        }
+        return;
+      }
+      // Free reading scroll with keyboard when not searching.
+      const pane = scrollRef.current;
+      if (!pane) return;
+      const step = Math.max(48, Math.floor(pane.clientHeight * 0.85));
+      if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (e.shiftKey) goPrev();
-        else goNext();
+        pane.scrollBy({ top: 40, behavior: "auto" });
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        pane.scrollBy({ top: -40, behavior: "auto" });
+      } else if (e.key === "PageDown" || e.key === " ") {
+        e.preventDefault();
+        pane.scrollBy({ top: step, behavior: "auto" });
+      } else if (e.key === "PageUp") {
+        e.preventDefault();
+        pane.scrollBy({ top: -step, behavior: "auto" });
+      } else if (e.key === "Home") {
+        e.preventDefault();
+        pane.scrollTo({ top: 0 });
+      } else if (e.key === "End") {
+        e.preventDefault();
+        pane.scrollTo({ top: pane.scrollHeight });
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [path, onClose, searchOpen, openSearch, goNext, goPrev]);
+  }, [
+    path,
+    searchOpen,
+    openSearch,
+    goNext,
+    goPrev,
+    zoomIn,
+    zoomOut,
+    zoomReset,
+  ]);
 
   const onDownload = useCallback(async () => {
     if (!path || downloading) return;
@@ -192,13 +268,13 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay p-3 backdrop-blur-sm sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label={`查看文件 ${path}`}
     >
-      <div className="flex h-[min(90vh,900px)] w-[min(96vw,1100px)] flex-col overflow-hidden rounded-xl border border-input bg-background shadow-2xl">
-        <header className="flex shrink-0 items-center gap-3 border-b border-border px-4 py-3">
+      <div className="flex h-[min(94vh,960px)] w-[min(96vw,1100px)] flex-col overflow-hidden rounded-xl border border-input bg-background shadow-2xl">
+        <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
           <Icon className={`h-5 w-5 shrink-0 ${iconClass}`} aria-hidden />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">
@@ -208,6 +284,41 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
             {downloadError ? (
               <p className="truncate text-xs text-destructive">{downloadError}</p>
             ) : null}
+          </div>
+          <div
+            className="flex shrink-0 items-center gap-0.5 rounded-lg border border-border/80 bg-muted/30 p-0.5"
+            role="group"
+            aria-label="字体缩放"
+          >
+            <button
+              type="button"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+              onClick={zoomOut}
+              disabled={fontSize <= FONT_MIN}
+              title="缩小字号 (Ctrl/⌘-)"
+              aria-label="缩小字号"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="min-w-[2.75rem] rounded-md px-1 py-1 text-center text-[11px] tabular-nums text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={zoomReset}
+              title="重置字号 (Ctrl/⌘0)"
+              aria-label={`当前字号 ${fontSize}，点击重置`}
+            >
+              {fontSize}px
+            </button>
+            <button
+              type="button"
+              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+              onClick={zoomIn}
+              disabled={fontSize >= FONT_MAX}
+              title="放大字号 (Ctrl/⌘+)"
+              aria-label="放大字号"
+            >
+              <ZoomIn className="h-4 w-4" />
+            </button>
           </div>
           <button
             type="button"
@@ -232,7 +343,8 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
             type="button"
             className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
             onClick={onClose}
-            title="关闭 (Esc)"
+            title="关闭"
+            aria-label="关闭"
           >
             <X className="h-4 w-4" />
           </button>
@@ -282,6 +394,9 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
               onClick={() => {
                 setSearchOpen(false);
                 setQuery("");
+                requestAnimationFrame(() =>
+                  scrollRef.current?.focus({ preventScroll: true }),
+                );
               }}
               title="关闭查找 (Esc)"
               aria-label="关闭查找"
@@ -293,28 +408,42 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
 
         <div
           ref={scrollRef}
-          className="scrollbar-panel min-h-0 flex-1 overflow-y-scroll overflow-x-auto bg-card/50 p-4"
+          tabIndex={0}
+          className="scrollbar-panel min-h-0 flex-1 overflow-y-auto overflow-x-auto overscroll-contain bg-card/50 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring/40"
+          style={{ WebkitOverflowScrolling: "touch" }}
+          onWheel={(e) => {
+            // Keep wheel scrolling on this pane; avoid background page scroll.
+            e.stopPropagation();
+          }}
         >
-          {isLoading ? (
-            <p className="text-sm text-muted-foreground">加载中…</p>
-          ) : isError ? (
-            <p className="text-sm text-destructive">
-              无法读取文件
-              {error instanceof Error ? `：${error.message}` : ""}
-              （请确认已登录）
-            </p>
-          ) : (
-            <>
-              {truncated ? (
-                <p className="mb-2 text-xs text-warning">
-                  内容超过 32KB，仅显示前段（与 runtime read_file 限制一致）
-                </p>
-              ) : null}
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-relaxed text-foreground">
-                {highlighted}
-              </pre>
-            </>
-          )}
+          <div className="min-h-full p-4 sm:p-5">
+            {isLoading ? (
+              <p className="text-sm text-muted-foreground">加载中…</p>
+            ) : isError ? (
+              <p className="text-sm text-destructive">
+                无法读取文件
+                {error instanceof Error ? `：${error.message}` : ""}
+                （请确认已登录）
+              </p>
+            ) : (
+              <>
+                {truncated ? (
+                  <p className="mb-2 text-xs text-warning">
+                    内容超过 32KB，仅显示前段（与 runtime read_file 限制一致）
+                  </p>
+                ) : null}
+                <pre
+                  className="m-0 max-w-none whitespace-pre-wrap break-words font-mono leading-relaxed text-foreground"
+                  style={{
+                    fontSize: `${fontSize}px`,
+                    lineHeight: 1.65,
+                  }}
+                >
+                  {highlighted}
+                </pre>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

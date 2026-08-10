@@ -11,8 +11,7 @@ import { OpsOverviewSidebar } from "./OpsOverviewSidebar";
 import { SiteBrandMark } from "../shared/SiteBrandMark";
 import { SITE_OPS } from "../shared/siteBrand";
 import { useSiteBrand } from "../shared/useSiteBrand";
-import { useTheme } from "../shared/theme/ThemeProvider";
-import type { ThemeId } from "../shared/theme/theme";
+import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
 import { Link, useLocation } from "react-router-dom";
 
 export {
@@ -54,7 +53,6 @@ export function OpsShell({
    */
   showIngestion?: boolean;
 }) {
-  const { theme, setTheme, themes, meta } = useTheme();
   const { pathname } = useLocation();
   const [overviewOpen, setOverviewOpen] = useState(false);
   useSiteBrand(title);
@@ -100,24 +98,7 @@ export function OpsShell({
               >
                 配置概览
               </button>
-              {themes.map((id: ThemeId) => {
-                const selected = theme === id;
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    title={meta[id].description}
-                    onClick={() => setTheme(id)}
-                    className={`rounded-md border px-2.5 py-1.5 text-xs transition-colors ${
-                      selected
-                        ? "border-primary/50 bg-primary/10 text-foreground ring-1 ring-primary/40"
-                        : "border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
-                    }`}
-                  >
-                    {meta[id].label}
-                  </button>
-                );
-              })}
+              <ThemeSwitcher />
             </div>
           </div>
 

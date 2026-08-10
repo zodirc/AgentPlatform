@@ -17,7 +17,7 @@ import {
 import { useEndUserAuth } from "../shared/auth/EndUserAuth";
 import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
-import type { ThemeId } from "../shared/theme/theme";
+import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
 
 function formatContextWindow(tokens: number | null | undefined): string {
   if (tokens == null || tokens <= 0) return "默认";
@@ -426,36 +426,16 @@ function AccountSection() {
 }
 
 function AppearanceSection() {
-  const { theme, setTheme, themes, meta } = useTheme();
+  const { theme, meta } = useTheme();
   return (
     <section className="rounded-xl border border-border bg-card/60 p-4">
       <h2 className="text-sm font-medium text-foreground">外观</h2>
       <p className="mt-1 text-xs text-muted-foreground">
         仅影响 Web 显示主题，不改变 Agent 交互与速率。偏好按账号保存在本机浏览器。
+        当前：{meta[theme].label}。
       </p>
-      <div className="mt-3 grid gap-2 sm:grid-cols-3">
-        {themes.map((id: ThemeId) => {
-          const selected = theme === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTheme(id)}
-              className={`rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                selected
-                  ? "border-primary/50 bg-primary/10 ring-1 ring-primary/40"
-                  : "border-border bg-background hover:bg-muted"
-              }`}
-            >
-              <span className="block text-sm font-medium text-foreground">
-                {meta[id].label}
-              </span>
-              <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                {meta[id].description}
-              </span>
-            </button>
-          );
-        })}
+      <div className="mt-3">
+        <ThemeSwitcher variant="grid" />
       </div>
     </section>
   );

@@ -26,6 +26,7 @@ import { SiteBrandMark } from "./shared/SiteBrandMark";
 import { SITE_APP } from "./shared/siteBrand";
 import { useSiteBrand } from "./shared/useSiteBrand";
 import { scenarioMetaFromPath } from "./shared/workbench/scenarioMeta";
+import { ThemeSwitcher } from "./shared/theme/ThemeSwitcher";
 
 /** Ops pages stay out of the workbench first paint (route-level code split). */
 const EvalConsolePage = lazy(() =>
@@ -242,6 +243,7 @@ function Nav() {
           设置
         </Link>
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <ThemeSwitcher />
           <AccountMenu />
           {sessionId ? (
             <>
