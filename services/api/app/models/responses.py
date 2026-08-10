@@ -15,6 +15,15 @@ class CreateSessionRequest(BaseModel):
     work_id: UUID | None = None
 
 
+class BulkDeleteSessionsRequest(BaseModel):
+    session_ids: list[UUID] = Field(min_length=1, max_length=100)
+
+
+class BulkDeleteSessionsResponse(BaseModel):
+    deleted: list[UUID]
+    missing: list[UUID]
+
+
 class SessionResponse(BaseModel):
     id: UUID
     default_scenario_id: str

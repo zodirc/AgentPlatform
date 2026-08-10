@@ -250,6 +250,24 @@ export async function deleteSession(sessionId: string): Promise<void> {
   if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
 }
 
+/** Hard-delete many sessions in one request (server-side batch). */
+export async function deleteSessionsBulk(
+  sessionIds: string[],
+): Promise<{ deleted: string[]; missing: string[] }> {
+  const res = await fetch(`${API_BASE}/sessions/bulk-delete`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify({ session_ids: sessionIds }),
+  });
+  if (!res.ok) throw new Error(`deleteSessionsBulk failed: ${res.status}`);
+  const body = (await res.json()) as { deleted: string[]; missing: string[] };
+  return {
+    deleted: body.deleted ?? [],
+    missing: body.missing ?? [],
+  };
+}
+
 export type SessionView = {
   session_id: string;
   default_scenario_id: string;

@@ -119,6 +119,24 @@ def test_delete_session_success(client: TestClient) -> None:
     delete_mock.assert_awaited_once_with(SESSION_ID, OWNER_ID)
 
 
+def test_bulk_delete_sessions_success(client: TestClient) -> None:
+    other = UUID("00000000-0000-4000-8000-000000000099")
+    with patch(
+        "app.services.resource.sessions.delete_sessions_for_owner",
+        new_callable=AsyncMock,
+        return_value=[SESSION_ID],
+    ) as delete_mock:
+        response = client.post(
+            "/api/v1/sessions/bulk-delete",
+            json={"session_ids": [str(SESSION_ID), str(other)]},
+        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["deleted"] == [str(SESSION_ID)]
+    assert body["missing"] == [str(other)]
+    delete_mock.assert_awaited_once_with([SESSION_ID, other], OWNER_ID)
+
+
 def test_delete_session_forbidden(client: TestClient) -> None:
     other_owner = UUID("00000000-0000-4000-8000-000000000088")
     session_row = {

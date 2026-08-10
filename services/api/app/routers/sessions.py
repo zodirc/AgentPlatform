@@ -8,6 +8,8 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app.models.responses import (
+    BulkDeleteSessionsRequest,
+    BulkDeleteSessionsResponse,
     CreateSessionRequest,
     CreateTurnRequest,
     SessionListItem,
@@ -83,6 +85,32 @@ async def get_session(
 ):
     session = await assert_session_owner(session_id, actor)
     return _session_response(session)
+
+
+@router.post(
+    "/sessions/bulk-delete",
+    response_model=BulkDeleteSessionsResponse,
+)
+async def bulk_delete_sessions(
+    body: BulkDeleteSessionsRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """Hard-delete many owned sessions in one DB transaction (history bulk UI)."""
+    requested = list(dict.fromkeys(body.session_ids))
+    deleted = await session_svc.delete_sessions_for_owner(requested, actor.id)
+    deleted_set = set(deleted)
+    missing = [sid for sid in requested if sid not in deleted_set]
+    from app.services.security.audit import record_audit
+
+    if deleted:
+        await record_audit(
+            actor=actor,
+            action="session.bulk_delete",
+            resource_type="session",
+            resource_id=deleted[0],
+            detail={"deleted_count": len(deleted), "requested_count": len(requested)},
+        )
+    return BulkDeleteSessionsResponse(deleted=deleted, missing=missing)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

@@ -146,67 +146,84 @@ async def touch_session(session_id: UUID) -> None:
 
 
 async def delete_session_for_owner(session_id: UUID, owner_user_id: UUID) -> bool:
-    """Hard-delete a session and its turn graph. Returns False if missing or not owned.
+    """Hard-delete a session and its turn graph. Returns False if missing or not owned."""
+    deleted = await delete_sessions_for_owner([session_id], owner_user_id)
+    return session_id in deleted
+
+
+async def delete_sessions_for_owner(
+    session_ids: list[UUID],
+    owner_user_id: UUID,
+) -> list[UUID]:
+    """Hard-delete owned sessions in one transaction. Skips missing / not-owned ids.
 
     phase0 FKs do not CASCADE from sessions→turns; delete child rows explicitly.
     Workspace disk files are intentionally untouched (not session-scoped).
     """
+    if not session_ids:
+        return []
+    # Cap to avoid accidental huge payloads; history UI lists at most 50.
+    unique_ids = list(dict.fromkeys(session_ids))[:100]
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
-            row = await conn.fetchrow(
+            rows = await conn.fetch(
                 """
                 SELECT id FROM sessions
-                WHERE id = $1 AND owner_user_id = $2
+                WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
                 FOR UPDATE
                 """,
-                session_id,
                 owner_user_id,
+                unique_ids,
             )
-            if row is None:
-                return False
+            owned = [row["id"] for row in rows]
+            if not owned:
+                return []
 
             await conn.execute(
                 """
                 DELETE FROM projection_log
-                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
                 """,
-                session_id,
+                owned,
             )
             await conn.execute(
                 """
                 DELETE FROM turn_events
-                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
                 """,
-                session_id,
+                owned,
             )
             await conn.execute(
                 """
                 DELETE FROM runs
-                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
                 """,
-                session_id,
+                owned,
             )
             # No FK on model_request_envelopes — delete explicitly (A12).
             await conn.execute(
                 """
                 DELETE FROM model_request_envelopes
-                WHERE session_id = $1
-                   OR turn_id IN (SELECT id FROM turns WHERE session_id = $1)
+                WHERE session_id = ANY($1::uuid[])
+                   OR turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
                 """,
-                session_id,
+                owned,
             )
             await conn.execute(
-                "DELETE FROM turn_views WHERE session_id = $1",
-                session_id,
+                "DELETE FROM turn_views WHERE session_id = ANY($1::uuid[])",
+                owned,
             )
             await conn.execute(
-                "DELETE FROM turns WHERE session_id = $1",
-                session_id,
+                "DELETE FROM turns WHERE session_id = ANY($1::uuid[])",
+                owned,
             )
             await conn.execute(
-                "DELETE FROM sessions WHERE id = $1 AND owner_user_id = $2",
-                session_id,
+                """
+                DELETE FROM sessions
+                WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
+                """,
                 owner_user_id,
+                owned,
             )
-            return True
+            return owned
