@@ -888,7 +888,10 @@ def test_ret18_two_level_settings_default_on(monkeypatch) -> None:
     from app.retrieval.profile import active_retrieval_profile
     from app.settings import Settings, settings as live
 
-    assert Settings().retrieval_two_level_enabled is True
+    # Host / ablation shells may export RETRIEVAL_TWO_LEVEL_ENABLED=false;
+    # isolate when asserting the code default.
+    monkeypatch.delenv("RETRIEVAL_TWO_LEVEL_ENABLED", raising=False)
+    assert Settings(_env_file=None).retrieval_two_level_enabled is True
     monkeypatch.setattr(live, "retrieval_two_level_enabled", False)
     assert active_retrieval_profile().two_level_enabled is False
     monkeypatch.setattr(live, "retrieval_two_level_enabled", True)
