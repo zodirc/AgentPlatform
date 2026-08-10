@@ -24,6 +24,12 @@ import type {
   TurnHistoryItem,
   WorkbenchState,
 } from "../../shared/workbench/types";
+import {
+  filterSlashCommands,
+  slashQueryFromInput,
+  type SlashCommand,
+} from "../../shared/workbench/slashCommands";
+import { SlashCommandMenu } from "../../shared/workbench/SlashCommandMenu";
 
 type Props = {
   wb: WorkbenchState;
@@ -384,7 +390,37 @@ export function AgentChatPanel({
 
   const [activeTab, setActiveTab] = useState<ChatTab>("main");
   const [closedTabs, setClosedTabs] = useState<Set<string>>(() => new Set());
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
   const seenRunningRef = useRef<Set<string>>(new Set());
+
+  const slashQuery = slashQueryFromInput(wb.message);
+  const slashItems =
+    slashQuery != null && !slashDismissed
+      ? filterSlashCommands(slashQuery, wb.scenarioId)
+      : [];
+  const slashMenuOpen = slashQuery != null && !slashDismissed;
+
+  useEffect(() => {
+    if (slashQuery == null) setSlashDismissed(false);
+  }, [slashQuery]);
+
+  useEffect(() => {
+    setSlashActiveIndex(0);
+  }, [slashQuery, wb.scenarioId]);
+
+  useEffect(() => {
+    if (slashActiveIndex >= slashItems.length && slashItems.length > 0) {
+      setSlashActiveIndex(slashItems.length - 1);
+    }
+  }, [slashActiveIndex, slashItems.length]);
+
+  const applySlashCommand = (cmd: SlashCommand) => {
+    inputHistory.onEdit(cmd.insert);
+    wb.setMessage(cmd.insert);
+    setSlashDismissed(true);
+    setSlashActiveIndex(0);
+  };
 
   const visibleSubs = wb.subagents.filter(
     (s) => !closedTabs.has(s.subagent_id),
@@ -580,7 +616,7 @@ export function AgentChatPanel({
                   发送消息开始任务
                 </p>
                 <p className="mt-1 max-w-sm text-xs text-muted-foreground/70">
-                  Enter 发送 · Shift+Enter 换行 · 输入框为空时 ↑ 回忆历史
+                  Enter 发送 · Shift+Enter 换行 · 输入 / 唤起命令 · 空框 ↑ 回忆历史
                 </p>
               </div>
             ) : null}
@@ -706,11 +742,21 @@ export function AgentChatPanel({
               </ul>
             </div>
           ) : null}
-          <div className="rounded-xl border border-border/80 bg-background focus-within:border-ring/50 focus-within:ring-1 focus-within:ring-ring/30">
+          <div className="relative rounded-xl border border-border/80 bg-background focus-within:border-ring/50 focus-within:ring-1 focus-within:ring-ring/30">
+            {slashMenuOpen ? (
+              <SlashCommandMenu
+                items={slashItems}
+                activeIndex={slashActiveIndex}
+                onActiveIndexChange={setSlashActiveIndex}
+                onSelect={applySlashCommand}
+                onDismiss={() => setSlashDismissed(true)}
+              />
+            ) : null}
             <Textarea
               className="min-h-[88px] resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
               value={wb.message}
               onChange={(e) => {
+                setSlashDismissed(false);
                 inputHistory.onEdit(e.target.value);
                 wb.setMessage(e.target.value);
               }}
@@ -719,8 +765,44 @@ export function AgentChatPanel({
                   ? "本轮进行中也可输入，发送后排队…"
                   : placeholderForScenario(wb.scenarioId)
               }
-              title="输入框为空时按 ↑ 回忆历史输入；↓ 回到草稿"
+              title="输入 / 唤起命令；空框时 ↑ 回忆历史"
               onKeyDown={(e) => {
+                if (slashMenuOpen) {
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    setSlashDismissed(true);
+                    return;
+                  }
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    if (slashItems.length === 0) return;
+                    setSlashActiveIndex(
+                      (i) => (i + 1) % slashItems.length,
+                    );
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    if (slashItems.length === 0) return;
+                    setSlashActiveIndex(
+                      (i) =>
+                        (i - 1 + slashItems.length) % slashItems.length,
+                    );
+                    return;
+                  }
+                  if (
+                    (e.key === "Enter" || e.key === "Tab") &&
+                    !e.shiftKey &&
+                    !e.nativeEvent.isComposing
+                  ) {
+                    const cmd = slashItems[slashActiveIndex];
+                    if (cmd) {
+                      e.preventDefault();
+                      applySlashCommand(cmd);
+                      return;
+                    }
+                  }
+                }
                 inputHistory.onKeyDown(e, wb.message, wb.setMessage);
                 onChatEnterSend(
                   e,

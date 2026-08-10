@@ -1337,9 +1337,10 @@ export function useWorkbenchImpl(): WorkbenchState {
 
 export function placeholderForScenario(scenarioId: ScenarioId): string {
   if (scenarioId === "writing")
-    return "依资料写一段并标注引用，或：请改第二节更简洁…";
-  if (scenarioId === "intel") return "粘贴 IOC 或告警，生成带引用的研判简报…";
+    return "输入 / 查看命令，或：依资料写一段并标注引用…";
+  if (scenarioId === "intel")
+    return "输入 / 查看命令，或粘贴 IOC / 告警生成研判…";
   if (scenarioId === "collab")
-    return "复杂任务可拆给角色并行；简单问答直接问即可…";
-  return "读取 README.md 并总结…";
+    return "输入 / 查看命令；复杂任务可拆角色并行…";
+  return "输入 / 查看命令，或：读取 README.md 并总结…";
 }
