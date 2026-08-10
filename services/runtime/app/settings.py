@@ -200,6 +200,19 @@ class Settings(BaseSettings):
     path_preread_timeout_seconds: float = 0.4
     path_preread_max_files: int = 3
     tool_default_timeout_seconds: float = 60.0
+    # Coding structural intelligence (docs/plan/coding-structural-intelligence.md).
+    # structural_enabled gates nav tool registration in tools[] and LSP lane in
+    # read_lints — off keeps agent prefix bytes identical to the pre-structural baseline.
+    structural_enabled: bool = False
+    structural_nav_timeout_s: float = 15.0
+    structural_diag_timeout_s: float = 60.0
+    structural_max_files_per_call: int = 20
+    structural_max_refs: int = 80
+    structural_prewarm: bool = False
+    # Ops / SWE-bench Lite: when True, ops_eval Turns run shell/LSP children with
+    # no egress (bwrap --unshare-net). Daily non-ops Turns keep host network.
+    # Map OFFICIAL_SWE_NETWORK=deny → OPS_EVAL_DENY_NETWORK=true in compose.
+    ops_eval_deny_network: bool = False
     # Must exceed model_timeout so a long think cannot lose to step wall-clock first.
     step_timeout_seconds: float = 720.0
     stall_threshold_seconds: float = 180.0

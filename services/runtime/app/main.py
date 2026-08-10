@@ -670,6 +670,13 @@ def create_app():
             "model_mode": settings.model_mode,
             "runner_id": settings.runtime_runner_id,
             "sandbox": sandbox_status(),
+            "structural": {
+                "enabled": bool(settings.structural_enabled),
+                "prewarm": bool(settings.structural_prewarm),
+                "ops_eval_deny_network": bool(settings.ops_eval_deny_network),
+                "nav_timeout_s": float(settings.structural_nav_timeout_s),
+                "diag_timeout_s": float(settings.structural_diag_timeout_s),
+            },
         }
 
     @app.get("/metrics")

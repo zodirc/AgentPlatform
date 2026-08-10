@@ -150,6 +150,16 @@ services:
       RUNTIME_RUNNER_ID: ${RUNTIME_RUNNER_ID:-}
       # Review I2: stream delta batch window; 0 = per-event writes (rollback).
       EVENT_BATCH_WINDOW_SECONDS: ${EVENT_BATCH_WINDOW_SECONDS:-0.04}
+      # Coding structural intelligence (docs/plan/coding-structural-intelligence.md).
+      # Dual-track SWE: recreate runtime after flipping STRUCTURAL_ENABLED.
+      STRUCTURAL_ENABLED: ${STRUCTURAL_ENABLED:-false}
+      STRUCTURAL_PREWARM: ${STRUCTURAL_PREWARM:-false}
+      STRUCTURAL_NAV_TIMEOUT_S: ${STRUCTURAL_NAV_TIMEOUT_S:-15}
+      STRUCTURAL_DIAG_TIMEOUT_S: ${STRUCTURAL_DIAG_TIMEOUT_S:-60}
+      STRUCTURAL_MAX_FILES_PER_CALL: ${STRUCTURAL_MAX_FILES_PER_CALL:-20}
+      STRUCTURAL_MAX_REFS: ${STRUCTURAL_MAX_REFS:-80}
+      # SWE-bench Lite answer-leak ban: ops_eval Turns get bwrap --unshare-net.
+      OPS_EVAL_DENY_NETWORK: ${OPS_EVAL_DENY_NETWORK:-false}
     volumes:
       - agent_data:/data
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z

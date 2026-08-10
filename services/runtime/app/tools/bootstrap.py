@@ -69,15 +69,13 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="propose_patch",
             description=(
-                "Queue a surgical edit for UI diff / accept flow: old_text must be an exact "
-                "unique span; new_text replaces only that span. Does NOT modify the file by "
-                "itself — status stays pending until apply_patch or user accept. "
-                "Prechecks applyability (unique span; git apply --check when the worktree "
-                "is a git repo) and returns status=error with apply_check_error if it would "
-                "not apply — re-read and retry, do not resend the same span. "
-                "In agent coding tasks prefer edit_file (applies in place after approval). "
-                "Do not fire many propose_patch calls and then redo the same edits with "
-                "edit_file."
+                "Queue a surgical edit for UI diff / accept flow (writing / intel): old_text "
+                "must be an exact unique span; new_text replaces only that span. Does NOT "
+                "modify the file by itself — status stays pending until apply_patch or user "
+                "accept (writing may auto-apply). Prechecks applyability (unique span; git "
+                "apply --check when the worktree is a git repo) and returns status=error with "
+                "apply_check_error if it would not apply — re-read and retry, do not resend "
+                "the same span. Not available in agent mode — use edit_file there."
             ),
             parameters={
                 "type": "object",
@@ -284,8 +282,9 @@ def build_registry() -> ToolRegistry:
             name="grep",
             description=(
                 "Regex/search file contents under a path (default '.'). Prefer for exact "
-                "symbols, strings, or error text. Use search_codebase for broader semantic "
-                "queries; use glob to find files by name pattern."
+                "symbols, strings, or error text. Use search_codebase for escaped-substring "
+                "scans; use goto_definition/find_references for symbol navigation when "
+                "available; use glob to find files by name pattern."
             ),
             parameters={
                 "type": "object",
@@ -305,7 +304,7 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Find files by glob pattern under a path (e.g. '**/*.py', 'src/**/test_*.ts'). "
                 "Use when you need paths by name/extension. For content matches use grep; "
-                "for semantic discovery use search_codebase."
+                "for escaped-substring discovery use search_codebase."
             ),
             parameters={
                 "type": "object",
@@ -325,8 +324,9 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Create a new file or intentionally overwrite an entire file with content. "
                 "Do NOT use for edits to an existing file (including HTML/JS games) — use "
-                "propose_patch or edit_file for unique spans. Full rewrite only when the "
-                "user explicitly asks to replace the whole file. Requires approval in agent mode."
+                "edit_file for unique spans (writing may use propose_patch). Full rewrite only "
+                "when the user explicitly asks to replace the whole file. Requires approval "
+                "in agent mode."
             ),
             parameters={
                 "type": "object",
@@ -376,9 +376,8 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Default surgical edit for agent mode: replace a unique exact span "
                 "(old_text → new_text) in an existing file after approval. Prefer this over "
-                "propose_patch for normal coding (propose_patch only queues a pending diff). "
-                "Prefer this over write_file for existing files. If the span is missing or "
-                "not unique, read_file once and retry — do not resend blindly."
+                "write_file for existing files. If the span is missing or not unique, "
+                "read_file once and retry — do not resend blindly."
             ),
             parameters={
                 "type": "object",
@@ -416,7 +415,7 @@ def build_registry() -> ToolRegistry:
             name="read_lints",
             description=(
                 "Read lint/diagnostic results for workspace paths (default '.'). "
-                "Call after write_file / edit_file / propose_patch on code; fix new issues "
+                "Call after write_file / edit_file on code; fix new issues "
                 "you introduced before claiming done. Not a substitute for run_tests."
             ),
             parameters={
@@ -424,6 +423,58 @@ def build_registry() -> ToolRegistry:
                 "properties": {"path": {"type": "string", "default": "."}},
             },
             handler=core.read_lints,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="goto_definition",
+            description=(
+                "Resolve a symbol name to its definition location(s) via the language server. "
+                "Prefer passing the symbol name from the issue/code; optional path/line/col "
+                "disambiguate. On failure or empty results, use grep — do not invent locations. "
+                "Not available when structural intelligence is disabled."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Symbol name (primary input)"},
+                    "path": {
+                        "type": "string",
+                        "description": "Optional file path hint to disambiguate",
+                    },
+                    "line": {"type": "integer", "description": "Optional 1-based line hint"},
+                    "col": {"type": "integer", "description": "Optional 1-based column hint"},
+                },
+                "required": ["symbol"],
+            },
+            handler=core.goto_definition,
+            timeout_s=15.0,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="find_references",
+            description=(
+                "Find references to a symbol via the language server (not lexical grep). "
+                "Primary input is the symbol name; optional path/line/col disambiguate. "
+                "Results may be capped per file — follow pointers for the rest. On failure, "
+                "use grep for lexical hits and do not treat those as confirmed references."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "symbol": {"type": "string", "description": "Symbol name (primary input)"},
+                    "path": {
+                        "type": "string",
+                        "description": "Optional file path hint to disambiguate",
+                    },
+                    "line": {"type": "integer", "description": "Optional 1-based line hint"},
+                    "col": {"type": "integer", "description": "Optional 1-based column hint"},
+                },
+                "required": ["symbol"],
+            },
+            handler=core.find_references,
+            timeout_s=15.0,
         )
     )
     registry.register(
@@ -466,12 +517,11 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="search_codebase",
             description=(
-                "Semantic / hybrid search over the workspace codebase for a natural-language "
-                "or keyword query. Use when the path is unknown or you need related symbols. "
-                "Prefer grep for exact string/regex matches; prefer glob for filename patterns; "
-                "prefer read_file when the path is already known. "
-                "If results look weak, rephrase once or twice within the turn search budget, "
-                "keeping distinctive identifiers from the original ask."
+                "Lexical codebase search: exact-substring match (query is regex-escaped, then "
+                "scanned like grep). Not semantic / embedding search. Use for identifiers and "
+                "error strings when the path is unknown. Prefer grep for regex; prefer glob for "
+                "filenames; prefer goto_definition / find_references (when available) for symbol "
+                "navigation; prefer read_file when the path is already known."
             ),
             parameters={
                 "type": "object",
@@ -564,7 +614,7 @@ def build_registry() -> ToolRegistry:
                 "cat, head, tail, sed -n, awk, less, or wc just to flip through code you should "
                 "open with read_file (or the grep tool for symbol search). Those shell commands "
                 "remain OK for builds, installs, scripts, and real pipelines. "
-                "Prefer run_tests for the standard test suite; prefer propose_patch/edit_file/"
+                "Prefer run_tests for the standard test suite; prefer edit_file/"
                 "write_file for file changes — do not use shell redirection to write code."
             ),
             parameters={
@@ -707,6 +757,10 @@ PLANNING_TOOL_ALLOWLIST = frozenset(
 _PLAN_EXECUTING_WAIVE_APPROVAL = ON_WRITE_TOOLS | frozenset({"rename_file"})
 
 
+# Structural nav tools — gated by settings.structural_enabled (docs/plan CSI).
+_STRUCTURAL_NAV_TOOLS = frozenset({"goto_definition", "find_references"})
+
+
 def tool_scope(
     profile: ScenarioProfile,
     registry: ToolRegistry,
@@ -714,9 +768,13 @@ def tool_scope(
     plan_phase: str | None = None,
 ) -> list[ToolSpec]:
     """Filter tools by scenario profile; optionally harden for Plan planning phase."""
+    from app.settings import settings
+
     names = list(profile.tool_names)
     if "stub_echo" not in names:
         names.append("stub_echo")
+    if not settings.structural_enabled:
+        names = [n for n in names if n not in _STRUCTURAL_NAV_TOOLS]
     phase = (plan_phase or "").strip().lower() or None
     if phase == "planning":
         names = [n for n in names if n in PLANNING_TOOL_ALLOWLIST]

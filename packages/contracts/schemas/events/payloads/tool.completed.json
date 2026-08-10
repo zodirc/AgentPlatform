@@ -111,6 +111,28 @@
       "type": "string",
       "minLength": 1,
       "description": "Present when the event originates from a nested delegate sub-agent."
+    },
+    "provider": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "CSI: diagnostic/nav provider (lsp|ruff|jedi|pyright|…)."
+    },
+    "cold_start": {
+      "type": "boolean",
+      "description": "CSI: language server cold start on this call."
+    },
+    "degraded_reason": {
+      "type": "string",
+      "maxLength": 256,
+      "description": "CSI: why structural lane degraded (timeout, unsupported, …)."
+    },
+    "unsupported": {
+      "type": "boolean",
+      "description": "CSI: language/path unsupported by structural provider."
+    },
+    "structural_truncated": {
+      "type": "boolean",
+      "description": "CSI: results truncated (refs/files cap)."
     }
   }
 }

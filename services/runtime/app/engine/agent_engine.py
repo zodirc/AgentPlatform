@@ -1270,6 +1270,20 @@ class AgentEngine:
             )
             if result.get("bytes_written") is not None:
                 completed_payload["bytes_written"] = int(result["bytes_written"])
+        # CSI §11: structural meta for Ops process metrics (lite dual-track).
+        if tool_name in {"read_lints", "goto_definition", "find_references"} and isinstance(
+            result, dict
+        ):
+            if result.get("provider") is not None:
+                completed_payload["provider"] = str(result.get("provider"))[:64]
+            if result.get("cold_start") is not None:
+                completed_payload["cold_start"] = bool(result.get("cold_start"))
+            if result.get("degraded_reason"):
+                completed_payload["degraded_reason"] = str(result.get("degraded_reason"))[:256]
+            if result.get("unsupported") is not None:
+                completed_payload["unsupported"] = bool(result.get("unsupported"))
+            if result.get("truncated") is not None:
+                completed_payload["structural_truncated"] = bool(result.get("truncated"))
         await self._write_event(
             event_type="tool.completed",
             payload=completed_payload,

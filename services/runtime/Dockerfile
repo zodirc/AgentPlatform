@@ -35,7 +35,7 @@ COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/pip \
     mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
     && pip install /contracts/python \
-    && pip install /tmp/runtime \
+    && pip install "/tmp/runtime[structural]" \
     && rm -rf /tmp/runtime
 
 FROM deps AS app

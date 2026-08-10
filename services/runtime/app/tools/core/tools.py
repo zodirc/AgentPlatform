@@ -1805,65 +1805,243 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
 async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
     import shlex
 
+    from app.structural.format import (
+        format_diagnostics_lines,
+        merge_issues,
+        parse_ruff_concise_line,
+    )
+    from app.structural.types import Issue
     from app.tools.core.shell import run_shell_command
 
     root = _resolve_path(path)
-    workspace = Path(settings.workspace_root).resolve()
-    rel = "." if path in {".", ""} else str(root.relative_to(workspace))
+    workspace = _workspace_root().resolve()
+    try:
+        rel = "." if path in {".", ""} else str(root.relative_to(workspace))
+    except ValueError:
+        rel = path
 
+    ruff_issues: list[Issue] = []
+    ruff_status: str | None = None
     result = await run_shell_command(
         command=f"python -m ruff check {shlex.quote(rel)} --output-format concise",
         cwd=workspace,
         timeout_s=min(settings.tool_default_timeout_seconds, 120.0),
     )
+    ruff_status = str(result.get("status") or "")
     stdout = str(result.get("stdout", ""))
     stderr = str(result.get("stderr", ""))
     combined = "\n".join(part for part in (stdout, stderr) if part).strip()
-    issues: list[dict[str, Any]] = []
     for line in combined.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        issues.append({"path": rel, "severity": "warning", "message": line})
+        parsed = parse_ruff_concise_line(line, default_path=rel)
+        if parsed is not None:
+            ruff_issues.append(parsed)
 
-    if result.get("status") == "executed" and not issues:
-        return {
-            "path": path,
-            "issues": [],
-            "issue_count": 0,
-            "summary": f"read_lints: {rel} — no issues",
-        }
-    if result.get("status") == "failed" and issues:
-        return {
-            "path": path,
-            "issues": issues,
-            "issue_count": len(issues),
-            "summary": f"read_lints: {len(issues)} issue(s) in {rel}",
-        }
-    if result.get("status") in {"timeout", "cancelled"}:
+    lsp_issues: list[Issue] = []
+    meta: dict[str, Any] = {
+        "provider": "ruff",
+        "cold_start": False,
+        "truncated": False,
+        "unsupported": False,
+        "degraded_reason": None,
+    }
+    if settings.structural_enabled and ruff_status not in {"timeout", "cancelled"}:
+        try:
+            from app.structural.adapters import get_diagnostics
+
+            lsp_out = await get_diagnostics(
+                workspace,
+                root,
+                timeout_s=float(settings.structural_diag_timeout_s),
+                turn_id=_kwargs.get("turn_id"),
+            )
+            lsp_issues = list(lsp_out.get("issues") or [])
+            lsp_meta = lsp_out.get("meta") or {}
+            meta["cold_start"] = bool(lsp_meta.get("cold_start"))
+            meta["truncated"] = bool(lsp_meta.get("truncated"))
+            meta["unsupported"] = bool(lsp_meta.get("unsupported"))
+            if lsp_meta.get("degraded_reason"):
+                meta["degraded_reason"] = lsp_meta.get("degraded_reason")
+            if lsp_meta.get("provider"):
+                meta["provider"] = f"lsp+ruff:{lsp_meta.get('provider')}"
+            elif lsp_issues:
+                meta["provider"] = "lsp+ruff"
+        except Exception as exc:
+            meta["degraded_reason"] = f"lsp_error:{type(exc).__name__}"
+
+    if ruff_status in {"timeout", "cancelled"} and not lsp_issues:
         return {
             "path": path,
             "issues": [],
             "issue_count": 0,
             "summary": str(result.get("summary", "read_lints interrupted")),
-            "status": result.get("status"),
+            "status": ruff_status,
+            "lines": [],
+            **meta,
         }
 
-    # ruff not installed or path missing — fall back to file scan count
-    if root.is_file():
-        files = [root]
-    elif root.is_dir():
-        files = [p for p in root.rglob("*.py") if p.is_file()][:20]
-    else:
-        return {"path": path, "issues": [], "summary": "No lint targets"}
-    for fp in files:
-        rel_fp = str(fp.relative_to(workspace))
-        issues.append({"path": rel_fp, "severity": "info", "message": "ruff unavailable; file listed only"})
+    # Clean ruff run with no issues (and no LSP hits).
+    if ruff_status == "executed" and not ruff_issues and not lsp_issues:
+        return {
+            "path": path,
+            "issues": [],
+            "issue_count": 0,
+            "summary": f"read_lints: {rel} — no issues",
+            "lines": [],
+            **meta,
+        }
+
+    # ruff unavailable / empty failed run — list files when LSP also empty
+    if not ruff_issues and not lsp_issues:
+        if root.is_file():
+            files = [root]
+        elif root.is_dir():
+            files = [p for p in root.rglob("*.py") if p.is_file()][:20]
+        else:
+            return {
+                "path": path,
+                "issues": [],
+                "issue_count": 0,
+                "summary": "No lint targets",
+                "lines": [],
+                **meta,
+            }
+        listed = [
+            Issue(
+                path=str(fp.relative_to(workspace)),
+                line=1,
+                col=1,
+                severity="info",
+                message="ruff unavailable; file listed only",
+                provider="ruff",
+                sources=("ruff",),
+            )
+            for fp in files
+        ]
+        lines = format_diagnostics_lines(listed)
+        return {
+            "path": path,
+            "issues": [i.to_dict() for i in listed],
+            "issue_count": 0,
+            "summary": f"read_lints: {len(files)} file(s); install ruff for diagnostics",
+            "lines": lines,
+            **meta,
+        }
+
+    merged = merge_issues(lsp_issues, ruff_issues)
+    lines = format_diagnostics_lines(merged)
+    summary = (
+        f"read_lints: {rel} — no issues"
+        if not merged
+        else f"read_lints: {len(merged)} issue(s) in {rel}"
+    )
     return {
         "path": path,
-        "issues": issues,
-        "issue_count": 0,
-        "summary": f"read_lints: {len(files)} file(s); install ruff for diagnostics",
+        "issues": [i.to_dict() for i in merged],
+        "issue_count": len(merged),
+        "summary": summary,
+        "lines": lines,
+        **meta,
+    }
+
+
+async def goto_definition(
+    symbol: str,
+    path: str | None = None,
+    line: int | None = None,
+    col: int | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """Symbol-first definition lookup via LSP; degrades with suggest=grep."""
+    from app.structural.adapters import goto_definition as _goto
+    from app.structural.format import format_locations_lines
+
+    if not settings.structural_enabled:
+        return {
+            "symbol": symbol,
+            "locations": [],
+            "lines": [],
+            "suggest": "grep",
+            "summary": "goto_definition disabled (structural_enabled=false); use grep",
+            "degraded_reason": "structural_disabled",
+        }
+    workspace = _workspace_root().resolve()
+    out = await _goto(
+        workspace,
+        symbol,
+        path=path,
+        line=line,
+        col=col,
+        timeout_s=float(settings.structural_nav_timeout_s),
+        turn_id=_kwargs.get("turn_id"),
+    )
+    locations = list(out.get("locations") or [])
+    lines = format_locations_lines(locations)
+    meta = out.get("meta") or {}
+    summary = out.get("summary") or (
+        f"goto_definition: {len(locations)} location(s) for {symbol!r}"
+        if locations
+        else f"goto_definition: no definition for {symbol!r}"
+    )
+    return {
+        "symbol": symbol,
+        "locations": [loc.to_dict() if hasattr(loc, "to_dict") else loc for loc in locations],
+        "lines": lines,
+        "suggest": out.get("suggest"),
+        "summary": summary,
+        **meta,
+    }
+
+
+async def find_references(
+    symbol: str,
+    path: str | None = None,
+    line: int | None = None,
+    col: int | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """Symbol-first references via LSP; never disguises grep hits as refs."""
+    from app.structural.adapters import find_references as _refs
+    from app.structural.format import format_locations_lines
+
+    if not settings.structural_enabled:
+        return {
+            "symbol": symbol,
+            "locations": [],
+            "lines": [],
+            "pointers": [],
+            "suggest": "grep",
+            "summary": "find_references disabled (structural_enabled=false); use grep",
+            "degraded_reason": "structural_disabled",
+        }
+    workspace = _workspace_root().resolve()
+    out = await _refs(
+        workspace,
+        symbol,
+        path=path,
+        line=line,
+        col=col,
+        timeout_s=float(settings.structural_nav_timeout_s),
+        turn_id=_kwargs.get("turn_id"),
+    )
+    locations = list(out.get("locations") or [])
+    pointers = list(out.get("pointers") or [])
+    lines = format_locations_lines(locations)
+    if pointers:
+        lines = [*lines, *[f"# {p}" for p in pointers]]
+    meta = out.get("meta") or {}
+    summary = out.get("summary") or (
+        f"find_references: {len(locations)} hit(s) for {symbol!r}"
+        if locations
+        else f"find_references: no references for {symbol!r}"
+    )
+    return {
+        "symbol": symbol,
+        "locations": [loc.to_dict() if hasattr(loc, "to_dict") else loc for loc in locations],
+        "lines": lines,
+        "pointers": pointers,
+        "suggest": out.get("suggest"),
+        "summary": summary,
+        **meta,
     }
 
 

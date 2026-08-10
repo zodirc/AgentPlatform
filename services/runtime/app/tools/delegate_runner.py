@@ -29,10 +29,41 @@ SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
     "editor": ["read_file", "propose_patch", "edit_file", "write_file", "rename_file"],
     "fact_checker": ["read_file", "check_citation", "search_sources"],
     "stylist": ["read_file", "draft_section", "propose_patch"],
-    "explore": ["read_file", "list_dir", "grep", "glob", "search_codebase", "search_sources"],
-    "retrieve": ["read_file", "search_sources", "search_codebase", "list_dir"],
-    "verify": ["read_file", "check_citation", "read_lints", "run_tests", "run_command"],
-    "edit": ["read_file", "propose_patch", "write_file", "edit_file", "rename_file"],
+    "explore": [
+        "read_file",
+        "list_dir",
+        "grep",
+        "glob",
+        "search_codebase",
+        "search_sources",
+        "goto_definition",
+        "find_references",
+    ],
+    "retrieve": [
+        "read_file",
+        "search_sources",
+        "search_codebase",
+        "list_dir",
+        "goto_definition",
+        "find_references",
+    ],
+    "verify": [
+        "read_file",
+        "check_citation",
+        "read_lints",
+        "find_references",
+        "run_tests",
+        "run_command",
+    ],
+    "edit": [
+        "read_file",
+        "write_file",
+        "edit_file",
+        "rename_file",
+        "goto_definition",
+        "find_references",
+        "read_lints",
+    ],
     "planner": ["read_file", "list_dir", "update_plan", "grep"],
     "shell": ["read_file", "grep", "run_command"],
 }
@@ -78,10 +109,20 @@ def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> froze
 
 
 def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[ToolSpec]:
+    from app.settings import settings
+
     by_name = {spec.name: spec for spec in parent_tools}
     registry = None
     specs: list[ToolSpec] = []
+    structural_nav = frozenset({"goto_definition", "find_references"})
     for name in SUBAGENT_TOOL_NAMES.get(agent_type, []):
+        # Nav tools only when structural_enabled AND already on the parent scope
+        # (agent Profile). Never inject from the global registry into writing.
+        if name in structural_nav:
+            if not settings.structural_enabled or name not in by_name:
+                continue
+            specs.append(by_name[name])
+            continue
         if name in by_name:
             specs.append(by_name[name])
             continue

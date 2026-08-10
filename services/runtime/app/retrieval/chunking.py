@@ -322,14 +322,23 @@ def is_code_path(path: Path | str) -> bool:
     return suffix in _CODE_EXTS
 
 
-def split_code_sections(text: str) -> list[TextSection]:
-    """Split source by top-level-ish symbol headers (docs/30 CQ4).
+def split_code_sections(text: str, *, language: str | None = None) -> list[TextSection]:
+    """Split source by symbol boundaries (docs/30 CQ4; stage C tree-sitter when available).
 
-    Regex-only — safe for async indexing; not a full AST. Oversized bodies still
-    go through ``_split_oversized``.
+    Prefer tree-sitter AST boundaries for known languages; fall back to regex.
+    Safe for async indexing only — never call on StartTurn / assemble hot path.
     """
     if not text.strip():
         return []
+    if language:
+        ts_sections = _split_code_sections_treesitter(text, language)
+        if ts_sections is not None:
+            return ts_sections
+    return _split_code_sections_regex(text)
+
+
+def _split_code_sections_regex(text: str) -> list[TextSection]:
+    """Regex-only — safe for async indexing; not a full AST."""
     lines = text.splitlines()
     matches = list(_CODE_SYMBOL_RE.finditer(text))
     if not matches:
@@ -377,6 +386,150 @@ def split_code_sections(text: str) -> list[TextSection]:
     return sections
 
 
+# tree-sitter node types used as section roots (per language).
+_TS_SECTION_TYPES: dict[str, frozenset[str]] = {
+    "python": frozenset({"function_definition", "class_definition", "decorated_definition"}),
+    "javascript": frozenset(
+        {"function_declaration", "class_declaration", "method_definition", "export_statement"}
+    ),
+    "typescript": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "method_definition",
+            "export_statement",
+            "interface_declaration",
+            "type_alias_declaration",
+        }
+    ),
+    "tsx": frozenset(
+        {
+            "function_declaration",
+            "class_declaration",
+            "method_definition",
+            "export_statement",
+            "interface_declaration",
+        }
+    ),
+    "go": frozenset({"function_declaration", "method_declaration", "type_declaration"}),
+    "rust": frozenset({"function_item", "impl_item", "struct_item", "enum_item", "mod_item"}),
+    "java": frozenset({"class_declaration", "interface_declaration", "method_declaration", "enum_declaration"}),
+}
+
+_EXT_TO_TS_LANG = {
+    ".py": "python",
+    ".pyi": "python",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+}
+
+
+def language_for_code_path(path: Path | str) -> str | None:
+    return _EXT_TO_TS_LANG.get(Path(path).suffix.lower())
+
+
+def _split_code_sections_treesitter(text: str, language: str) -> list[TextSection] | None:
+    """Return sections from tree-sitter, or None to signal regex fallback."""
+    try:
+        from tree_sitter_language_pack import get_parser
+    except ImportError:
+        return None
+    section_types = _TS_SECTION_TYPES.get(language)
+    if not section_types:
+        return None
+    try:
+        parser = get_parser(language)
+    except Exception:
+        return None
+    try:
+        tree = parser.parse(text.encode("utf-8"))
+    except Exception:
+        return None
+    root = tree.root_node
+    if root is None:
+        return None
+
+    lines = text.splitlines()
+    # Collect top-level-ish section nodes (direct children of module/program, or decorated).
+    nodes = []
+    for child in root.children:
+        node = child
+        if child.type == "decorated_definition" and child.child_count:
+            # Prefer the definition inside the decorator wrapper for title extraction.
+            for sub in child.children:
+                if sub.type in section_types or sub.type in {
+                    "function_definition",
+                    "class_definition",
+                }:
+                    node = child  # keep outer span so decorators stay with body
+                    break
+        if node.type in section_types or (
+            node.type == "decorated_definition" and language == "python"
+        ):
+            nodes.append(node)
+
+    if not nodes:
+        return None
+
+    sections: list[TextSection] = []
+    # Preamble
+    first = nodes[0]
+    if first.start_byte > 0:
+        preamble = text[: first.start_byte].rstrip()
+        if preamble.strip():
+            sections.append(
+                TextSection(
+                    title="",
+                    body=preamble,
+                    line_start=1,
+                    line_end=preamble.count("\n") + 1,
+                )
+            )
+
+    for index, node in enumerate(nodes):
+        start = node.start_byte
+        end = nodes[index + 1].start_byte if index + 1 < len(nodes) else len(text.encode("utf-8"))
+        # Use byte offsets carefully with utf-8
+        body_bytes = text.encode("utf-8")[start:end]
+        body = body_bytes.decode("utf-8", errors="replace").rstrip()
+        if not body.strip():
+            continue
+        title = _ts_node_title(node, text)
+        line_start = node.start_point[0] + 1
+        line_end = line_start + body.count("\n")
+        sections.append(
+            TextSection(
+                title=title,
+                body=body,
+                line_start=line_start,
+                line_end=min(line_end, len(lines)),
+            )
+        )
+    return sections or None
+
+
+def _ts_node_title(node, text: str) -> str:
+    """First non-empty line of the node, truncated."""
+    start = node.start_byte
+    end = min(node.end_byte, start + 200)
+    snippet = text.encode("utf-8")[start:end].decode("utf-8", errors="replace")
+    for line in snippet.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped[:120]
+    return node.type
+
+
+def split_code_sections_legacy(text: str) -> list[TextSection]:
+    """Alias kept for tests — regex path only."""
+    return _split_code_sections_regex(text)
+
+
 def chunk_source_text(
     path: Path,
     rel_path: str,
@@ -399,7 +552,10 @@ def chunk_source_text(
     # CQ4: code files use symbol boundaries; markdown keeps heading/table path.
     if is_code_path(path) or is_code_path(rel_path):
         prepared = text
-        sections = split_code_sections(prepared)
+        sections = split_code_sections(
+            prepared,
+            language=language_for_code_path(path) or language_for_code_path(rel_path),
+        )
     else:
         prepared = detach_wide_tables(text)
         sections = split_markdown_sections(prepared)

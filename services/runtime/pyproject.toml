@@ -35,6 +35,11 @@ retrieval = [
     "sentence-transformers>=3.0",
     "numpy>=1.26",
 ]
+structural = [
+    "jedi-language-server>=0.41",
+    "tree-sitter>=0.23",
+    "tree-sitter-language-pack>=0.7",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -65,4 +70,5 @@ include = [
     "app/tools/bootstrap.py",
     "app/tools/registry.py",
     "app/retrieval/*",
+    "app/structural/*",
 ]
