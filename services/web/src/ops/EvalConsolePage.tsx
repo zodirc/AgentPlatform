@@ -7,6 +7,7 @@ import {
   secretFromOpsPath,
   statusClass,
 } from "./OpsShell";
+import { opsDisplayText } from "./opsDisplayText";
 
 type EvalCase = {
   id: string;
@@ -284,7 +285,7 @@ export function EvalConsolePage() {
   if (authError && cases.length === 0) {
     return (
       <OpsShell secret={secret} title="Golden Turn 评测台">
-        <p className="text-sm text-destructive">{authError}</p>
+        <p className="text-sm text-destructive">{opsDisplayText(authError)}</p>
       </OpsShell>
     );
   }
@@ -577,7 +578,7 @@ export function EvalConsolePage() {
             <>
               <span className="text-sm text-muted-foreground">
                 run {run.id.slice(0, 8)} · {run.suite || "golden"} · {run.status}
-                {run.error ? ` · ${run.error}` : ""}
+                {run.error ? ` · ${opsDisplayText(run.error)}` : ""}
               </span>
               <Link
                 to={opsRunPath(secret, run.id)}
@@ -588,7 +589,9 @@ export function EvalConsolePage() {
             </>
           ) : null}
         </div>
-        {authError ? <p className="text-sm text-destructive">{authError}</p> : null}
+        {authError ? (
+          <p className="text-sm text-destructive">{opsDisplayText(authError)}</p>
+        ) : null}
         {logLines.length > 0 ? (
           <pre className="max-h-48 overflow-auto rounded-md border border-border bg-card p-3 text-[11px] text-muted-foreground">
             {logLines.join("\n")}

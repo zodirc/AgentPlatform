@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
 import { OpsTurnLinks } from "./OpsTurnLinks";
+import { opsDisplayText } from "./opsDisplayText";
 import {
   OPS_TURN_LIST_FILTERS,
   OpsListFilters,
@@ -274,7 +275,7 @@ export function RetrievalAuditPage() {
 
         {error ? (
           <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
+            {opsDisplayText(error)}
           </p>
         ) : null}
 
@@ -413,7 +414,7 @@ export function RetrievalAuditPage() {
                                   : "border-border bg-muted/40 text-muted-foreground"
                               }`}
                             >
-                              {d.message}
+                              {opsDisplayText(d.message)}
                             </li>
                           ))}
                         </ul>

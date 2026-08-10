@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import { OpsShell, secretFromOpsPath, turnIdFromSearch } from "./OpsShell";
 import { OpsTurnLinks } from "./OpsTurnLinks";
 import { OpsPayloadViewerModal } from "./OpsPayloadViewerModal";
+import { opsDisplayText } from "./opsDisplayText";
 import {
   OPS_TURN_LIST_FILTERS,
   OpsListFilters,
@@ -96,7 +97,7 @@ export function RawAuditPage() {
       };
       setRecent(body.items || []);
       setTotal(typeof body.total === "number" ? body.total : (body.items || []).length);
-      if (body.error) setError(body.error);
+      if (body.error) setError(opsDisplayText(body.error));
     } catch (e) {
       setRecent([]);
       setTotal(0);
@@ -197,7 +198,9 @@ export function RawAuditPage() {
           onRefresh={() => void loadRecent()}
         />
 
-        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        {error ? (
+          <p className="text-sm text-destructive">{opsDisplayText(error)}</p>
+        ) : null}
 
         <OpsMasterDetail
           listHeader="最近 Raw Turn"

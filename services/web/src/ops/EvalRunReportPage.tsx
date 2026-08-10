@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { OpsShell, opsConsolePath, secretFromOpsPath, statusClass } from "./OpsShell";
+import { opsDisplayText } from "./opsDisplayText";
 
 type CaseStep = {
   at?: string;
@@ -113,7 +114,7 @@ export function EvalRunReportPage() {
   if (error && !run) {
     return (
       <OpsShell secret={secret} title="评测输出">
-        <p className="text-sm text-destructive">{error}</p>
+        <p className="text-sm text-destructive">{opsDisplayText(error)}</p>
       </OpsShell>
     );
   }
@@ -171,7 +172,7 @@ export function EvalRunReportPage() {
 
       {run.error ? (
         <p className="mb-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {run.error}
+          {opsDisplayText(run.error)}
         </p>
       ) : null}
 
@@ -219,7 +220,7 @@ export function EvalRunReportPage() {
                   <div className="border-t border-border px-3 py-3">
                     {c.error ? (
                       <p className="mb-3 whitespace-pre-wrap text-xs text-destructive">
-                        {c.error}
+                        {opsDisplayText(c.error)}
                       </p>
                     ) : null}
                     <h3 className="mb-2 text-xs font-medium text-muted-foreground">

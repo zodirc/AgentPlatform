@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { opsDisplayText } from "./opsDisplayText";
 
 type Locale = "zh" | "en";
 
@@ -443,7 +444,7 @@ export function OpsOverviewSidebar({
         <div className="flex-1 space-y-3 overflow-y-auto p-3">
           {error ? (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1.5 text-xs">
-              {error}
+              {opsDisplayText(error)}
             </p>
           ) : null}
 
@@ -500,7 +501,9 @@ export function OpsOverviewSidebar({
               ) : null}
             </dl>
             {agent?.usage?.error ? (
-              <p className="mt-1 text-[10px] text-destructive">{agent.usage.error}</p>
+              <p className="mt-1 text-[10px] text-destructive">
+                {opsDisplayText(agent.usage.error)}
+              </p>
             ) : null}
             {agent?.source === "unavailable" ? (
               <p className="mt-2 text-[10px] text-muted-foreground">
@@ -646,9 +649,9 @@ export function OpsOverviewSidebar({
             </h3>
             {!containers?.available ? (
               <p className="text-[11px] text-muted-foreground">
-                {containers?.hint ||
-                  containers?.error ||
-                  t.containersUnavailable}
+                {opsDisplayText(
+                  containers?.hint || containers?.error || t.containersUnavailable,
+                )}
               </p>
             ) : (
               <>

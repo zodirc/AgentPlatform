@@ -6,6 +6,7 @@ import {
   secretFromOpsPath,
   statusClass,
 } from "./OpsShell";
+import { opsDisplayText } from "./opsDisplayText";
 import {
   OpsListFilters,
   OpsListPagination,
@@ -152,7 +153,9 @@ export function EvalHistoryPage() {
         onRefresh={() => void load()}
       />
 
-      {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
+      {error ? (
+        <p className="mb-4 text-sm text-destructive">{opsDisplayText(error)}</p>
+      ) : null}
       {loading && runs.length === 0 ? (
         <p className="text-sm text-muted-foreground">加载中…</p>
       ) : runs.length === 0 ? (
@@ -205,8 +208,11 @@ export function EvalHistoryPage() {
                       <td className="border-b border-border/70 px-2 py-2 font-mono text-xs text-muted-foreground">
                         <span title={r.id}>{r.id.slice(0, 8)}…</span>
                         {r.error ? (
-                          <div className="mt-1 max-w-xs truncate text-destructive" title={r.error}>
-                            {r.error}
+                          <div
+                            className="mt-1 max-w-xs truncate text-destructive"
+                            title={opsDisplayText(r.error)}
+                          >
+                            {opsDisplayText(r.error)}
                           </div>
                         ) : null}
                       </td>
