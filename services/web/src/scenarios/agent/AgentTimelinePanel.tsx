@@ -1,3 +1,4 @@
+import { X } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import type { SubagentLive } from "../../shared/workbench/subagents";
 import { statusLabel } from "../../shared/workbench/subagents";
@@ -12,6 +13,8 @@ type Props = {
   onOpenSubagent?: (subagentId: string) => void;
   title?: string;
   emptyHint?: string;
+  /** When set, render as a closable secondary sheet (drawer chrome). */
+  onClose?: () => void;
 };
 
 function toolLabel(item: TimelineItem, events: TurnEvent[] = []): string {
@@ -141,20 +144,45 @@ export function AgentTimelinePanel({
   onOpenSubagent,
   title = "工具时间线",
   emptyHint = "暂无工具调用",
+  onClose,
 }: Props) {
   const stepCount =
     items.length + subagents.reduce((n, s) => n + s.tools.length, 0);
+  const sheet = Boolean(onClose);
 
   return (
-    <section className="flex h-full flex-col rounded-lg border border-border bg-card/40">
-      <h2 className="shrink-0 border-b border-border px-4 py-3 text-sm font-medium text-foreground/90">
-        {title}
-        {stepCount > 0 ? (
-          <span className="ml-2 text-xs font-normal text-muted-foreground">
-            {stepCount} 步
-          </span>
+    <section
+      className={
+        sheet
+          ? "flex h-full min-h-0 flex-col bg-card"
+          : "flex h-full flex-col rounded-lg border border-border bg-card/40"
+      }
+    >
+      <div
+        className={`flex shrink-0 items-center justify-between gap-2 border-b border-border ${
+          sheet ? "px-3 py-2.5" : "px-4 py-3"
+        }`}
+      >
+        <h2 className="text-sm font-medium text-foreground/90">
+          {title}
+          {stepCount > 0 ? (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              {stepCount} 步
+            </span>
+          ) : null}
+        </h2>
+        {onClose ? (
+          <button
+            type="button"
+            className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            title="收起工具时间线"
+            aria-label="收起工具时间线"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </button>
         ) : null}
-      </h2>
+      </div>
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">
         {stepCount === 0 ? (
           <p className="text-xs text-muted-foreground">{emptyHint}</p>

@@ -113,6 +113,9 @@ export function navigateInputHistory(
 /**
  * Handle ↑/↓ history recall on a chat textarea.
  * Returns true if the event was consumed.
+ *
+ * Entering history from the live draft (↑) only when the field is empty —
+ * with content, ↑/↓ move the caret as usual. Once browsing, ↑/↓ keep walking.
  */
 export function onChatInputHistory(
   e: KeyboardEvent<HTMLTextAreaElement>,
@@ -123,6 +126,10 @@ export function onChatInputHistory(
     e.key === "ArrowUp" ? "ArrowUp" : e.key === "ArrowDown" ? "ArrowDown" : null;
   if (!key) return false;
   if (!canNavigateInputHistory(e, key)) return false;
+  const atDraft = state.index >= state.entries.length;
+  if (key === "ArrowUp" && atDraft && state.current.length > 0) {
+    return false;
+  }
   const next = navigateInputHistory(key, state);
   if (!next) return false;
   e.preventDefault();

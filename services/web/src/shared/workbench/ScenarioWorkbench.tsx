@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { BotMessageSquare } from "lucide-react";
+import { useEffect, useState } from "react";
 import { ErrorBanner } from "./ErrorBanner";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";
@@ -43,6 +42,16 @@ function artifactBadgeCount(
   return previewableTools + fileWrites + patches;
 }
 
+function toolStepCount(
+  timelineItems: TimelineItem[],
+  subagents: { tools: unknown[] }[],
+): number {
+  return (
+    timelineItems.length +
+    subagents.reduce((n, s) => n + s.tools.length, 0)
+  );
+}
+
 type ViewProps = {
   scenarioId: ScenarioId;
   wb: WorkbenchState;
@@ -54,7 +63,11 @@ export function ScenarioWorkbenchView({
   wb,
   fillParent = false,
 }: ViewProps) {
-  const { open: agentOpen, openPanel } = useAgentPanel();
+  const {
+    open: toolsOpen,
+    closePanel: closeTools,
+    togglePanel: toggleTools,
+  } = useAgentPanel();
   const [selection, setSelection] = useState<SidebarSelection | null>(null);
   const [artifactsOpen, setArtifactsOpen] = useState(scenarioId !== "agent");
   const [workspaceViewerPath, setWorkspaceViewerPath] = useState<string | null>(
@@ -71,6 +84,10 @@ export function ScenarioWorkbenchView({
     wb.timelineItems,
     wb.view?.artifacts ?? [],
   );
+  const toolsCount = toolStepCount(
+    wb.timelineItems,
+    isCollab ? [] : wb.subagents,
+  );
 
   const openArtifacts = () => setArtifactsOpen(true);
 
@@ -84,23 +101,29 @@ export function ScenarioWorkbenchView({
   };
 
   const openSubagent = (id: string) => {
-    openPanel();
     setOpenSubagentRequest(id);
   };
 
-  const rootClass = fillParent
-    ? "flex h-full min-h-0 flex-col"
-    : "flex h-[calc(100vh-49px)] flex-col";
+  useEffect(() => {
+    if (!toolsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeTools();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [toolsOpen, closeTools]);
 
-  const mainGridClass = agentOpen
-    ? "grid min-h-0 min-w-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(300px,380px)] overflow-x-auto"
-    : "flex min-h-0 min-w-0 flex-1 overflow-x-auto";
+  const rootClass = fillParent
+    ? "relative flex h-full min-h-0 flex-col"
+    : "relative flex h-[calc(100vh-49px)] flex-col";
 
   return (
     <div className={rootClass}>
-      <div className="shrink-0 space-y-2 border-b border-border px-4 py-2">
-        <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
-      </div>
+      {wb.error ? (
+        <div className="shrink-0 border-b border-border px-4 py-2">
+          <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
+        </div>
+      ) : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {artifactsOpen ? (
@@ -186,54 +209,59 @@ export function ScenarioWorkbenchView({
           </div>
         )}
 
-        <div className={mainGridClass}>
-          <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-hidden border-r border-border p-4">
-            <AgentActivityPanel wb={wb} compact />
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <AgentTimelinePanel
-                title={isCollab ? "主编工具" : undefined}
-                emptyHint={
-                  isCollab
-                    ? "主编下场的工具会出现在这里；工人详情在左侧「团队 / 子任务」"
-                    : undefined
-                }
-                items={wb.timelineItems}
-                events={wb.events}
-                subagents={isCollab ? [] : wb.subagents}
-                selectedIndex={
-                  selection?.kind === "timeline" ? selection.index : null
-                }
-                onSelectItem={selectTimelineItem}
-                onOpenSubagent={isCollab ? undefined : openSubagent}
-              />
-            </div>
-          </main>
-
-          {agentOpen ? (
+        {/* Main stays full width; tools open as an overlay drawer. */}
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 overflow-hidden p-3 sm:p-4">
+          <AgentActivityPanel
+            wb={wb}
+            compact
+            onOpenTools={toggleTools}
+            toolsOpen={toolsOpen}
+            toolsCount={toolsCount}
+          />
+          <div className="min-h-0 flex-1 overflow-hidden">
             <AgentChatPanel
               wb={wb}
               openSubagentRequest={openSubagentRequest}
               onOpenSubagentHandled={() => setOpenSubagentRequest(null)}
             />
-          ) : (
-            <div className="flex w-11 shrink-0 flex-col items-center border-l border-border bg-background py-3">
-              <button
-                type="button"
-                className="group flex flex-col items-center gap-2 rounded-md px-1 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                title="展开 Agent"
-                aria-label="展开 Agent"
-                onClick={() => openPanel()}
-              >
-                <BotMessageSquare className="h-4 w-4" />
-                <span className="text-[10px] font-medium tracking-wide">
-                  Agent
-                </span>
-                <span className="text-xs leading-none">‹</span>
-              </button>
-            </div>
-          )}
-        </div>
+          </div>
+        </main>
       </div>
+
+      {/* Bookmark-style tools drawer: overlays content, does not reflow layout. */}
+      {toolsOpen ? (
+        <div
+          className="absolute inset-0 z-40 flex justify-end bg-overlay"
+          onClick={closeTools}
+          role="presentation"
+        >
+          <aside
+            className="flex h-full w-[min(380px,92vw)] flex-col overflow-hidden border-l border-border bg-card shadow-2xl animate-in slide-in-from-right-4 fade-in duration-200"
+            aria-label="工具时间线"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <AgentTimelinePanel
+              title={isCollab ? "主编工具" : undefined}
+              emptyHint={
+                isCollab
+                  ? "主编下场的工具会出现在这里；工人详情在左侧「团队 / 子任务」"
+                  : undefined
+              }
+              items={wb.timelineItems}
+              events={wb.events}
+              subagents={isCollab ? [] : wb.subagents}
+              selectedIndex={
+                selection?.kind === "timeline" ? selection.index : null
+              }
+              onSelectItem={selectTimelineItem}
+              onOpenSubagent={isCollab ? undefined : openSubagent}
+              onClose={closeTools}
+            />
+          </aside>
+        </div>
+      ) : null}
 
       <WorkspaceFileViewer
         path={workspaceViewerPath}

@@ -75,9 +75,15 @@ function segmentValue(
 type Props = {
   contextUsage: ContextUsage | null;
   tokenUsage: TokenUsage | null;
+  /** Thin one-line meter for the status strip (hides breakdown grid). */
+  compact?: boolean;
 };
 
-export function UsageMeter({ contextUsage, tokenUsage }: Props) {
+export function UsageMeter({
+  contextUsage,
+  tokenUsage,
+  compact = false,
+}: Props) {
   const ctxAfter = contextUsage?.tokens_after;
   const ctxBudget = contextUsage?.token_budget;
   const hasContext =
@@ -119,6 +125,38 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
     : 0;
   const barDenominator =
     ctxBudget && ctxBudget > 0 ? ctxBudget : breakdownTotal || ctxAfter || 1;
+
+  if (compact) {
+    return (
+      <div className="mt-2 flex min-w-0 items-center gap-3 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+        {hasContext ? (
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+              <div
+                className={`h-full rounded-full transition-[width] ${
+                  fillPct >= 90
+                    ? "bg-destructive"
+                    : fillPct >= 70
+                      ? "bg-warning"
+                      : "bg-primary"
+                }`}
+                style={{ width: `${Math.max(fillPct, 1)}%` }}
+              />
+            </div>
+            <span className="shrink-0 tabular-nums">
+              {formatTokens(ctxAfter)}/{formatTokens(ctxBudget)} · {fillPct}%
+            </span>
+          </div>
+        ) : null}
+        {hasToken ? (
+          <span className="shrink-0 tabular-nums">
+            in {formatTokens(tokenUsage?.input_tokens)} · out{" "}
+            {formatTokens(tokenUsage?.output_tokens)}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-2 space-y-1 border-t border-border pt-2 text-[11px] opacity-80">

@@ -86,16 +86,18 @@ function UserBubble({
   meta?: string;
 }) {
   return (
-    <div>
-      <p className="mb-1 text-xs font-medium text-muted-foreground">
-        你
-        {meta ? (
-          <span className="ml-2 text-muted-foreground/80">{meta}</span>
-        ) : null}
-      </p>
-      <p className="rounded-lg bg-card px-3 py-2 text-sm text-foreground">
-        {text}
-      </p>
+    <div className="flex justify-end">
+      <div className="max-w-[min(100%,42rem)]">
+        <p className="mb-1 text-right text-[11px] font-medium text-muted-foreground">
+          你
+          {meta ? (
+            <span className="ml-2 text-muted-foreground/80">{meta}</span>
+          ) : null}
+        </p>
+        <p className="rounded-2xl rounded-br-md bg-primary/15 px-3.5 py-2.5 text-sm leading-relaxed text-foreground">
+          {text}
+        </p>
+      </div>
     </div>
   );
 }
@@ -109,12 +111,12 @@ function AssistantBubble({
   streaming?: boolean;
 }) {
   return (
-    <div>
-      <p className="mb-1 text-xs font-medium text-muted-foreground">助手</p>
+    <div className="max-w-[min(100%,48rem)]">
+      <p className="mb-1 text-[11px] font-medium text-muted-foreground">助手</p>
       {/* aria-live lets screen readers follow streaming output (I23). */}
       <div
         aria-live="polite"
-        className="rounded-lg bg-card/60 px-3 py-2"
+        className="rounded-2xl rounded-tl-md border border-border/60 bg-card/50 px-3.5 py-2.5"
       >
         <Markdown text={text} streaming={streaming} />
       </div>
@@ -157,7 +159,7 @@ function ScenarioModeSwitch({
       <button
         type="button"
         disabled={disabled}
-        className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-background px-2 text-xs text-foreground/90 hover:bg-muted disabled:opacity-50"
+        className="inline-flex h-8 items-center gap-1 rounded-md border border-transparent px-2 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground disabled:opacity-50"
         aria-haspopup="menu"
         aria-expanded={open}
         title="切换场景模式"
@@ -211,7 +213,6 @@ function ChatTabBar({
   onSelect,
   subagents,
   onCloseSub,
-  onCloseChat,
   onNewSession,
   chatTitle,
 }: {
@@ -219,14 +220,13 @@ function ChatTabBar({
   onSelect: (tab: ChatTab) => void;
   subagents: SubagentLive[];
   onCloseSub: (id: string) => void;
-  onCloseChat: () => void;
   onNewSession: () => void;
   chatTitle: string;
 }) {
   return (
-    <div className="flex min-h-9 shrink-0 items-stretch gap-0 overflow-x-auto border-b border-border bg-muted/20">
+    <div className="flex min-h-9 shrink-0 items-stretch gap-0 overflow-x-auto border-b border-border/80 bg-muted/15">
       <div
-        className={`group flex max-w-[200px] shrink-0 items-stretch border-r border-border ${
+        className={`flex max-w-[220px] shrink-0 items-stretch border-r border-border/80 ${
           active === "main"
             ? "bg-background text-foreground"
             : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
@@ -234,7 +234,7 @@ function ChatTabBar({
       >
         <button
           type="button"
-          className={`truncate px-3 py-2 text-xs ${
+          className={`truncate px-3.5 py-2 text-xs ${
             active === "main" ? "font-medium" : ""
           }`}
           title={chatTitle}
@@ -242,27 +242,15 @@ function ChatTabBar({
         >
           {chatTitle}
         </button>
-        <button
-          type="button"
-          className="px-1.5 text-muted-foreground/70 opacity-0 hover:text-foreground group-hover:opacity-100"
-          title="折叠 Agent"
-          aria-label="折叠 Agent"
-          onClick={(e) => {
-            e.stopPropagation();
-            onCloseChat();
-          }}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
       </div>
       <button
         type="button"
-        className="flex shrink-0 items-center border-r border-border px-2 text-muted-foreground hover:bg-background/60 hover:text-foreground"
+        className="flex shrink-0 items-center border-r border-border/80 px-2.5 text-muted-foreground transition-colors hover:bg-background/60 hover:text-foreground"
         title="新建会话"
         aria-label="新建会话"
         onClick={() => onNewSession()}
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="h-3.5 w-3.5" />
       </button>
       {subagents.map((sub) => {
         const selected = active === sub.subagent_id;
@@ -378,7 +366,7 @@ export function AgentChatPanel({
   openSubagentRequest = null,
   onOpenSubagentHandled,
 }: Props) {
-  const { closePanel, createAgent } = useAgentPanel();
+  const { createAgent } = useAgentPanel();
   const inputHistory = useChatInputHistory({
     sessionKey: wb.sessionId,
     seedInputs: wb.turnHistory.map((t) => t.user_input),
@@ -491,23 +479,17 @@ export function AgentChatPanel({
     if (activeTab === id) setActiveTab("main");
   };
 
-  const handleCloseChat = () => {
-    // IDE fold — keep session; reopen via Agent toggle in the nav.
-    closePanel();
-  };
-
   const handleNewSession = () => {
     void createAgent();
   };
 
   return (
-    <aside className="flex h-full min-h-0 flex-col border-l border-border bg-background">
+    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border/80 bg-background shadow-sm">
       <ChatTabBar
         active={onMain ? "main" : activeTab}
         onSelect={setActiveTab}
         subagents={visibleSubs}
         onCloseSub={closeSubTab}
-        onCloseChat={handleCloseChat}
         onNewSession={handleNewSession}
         chatTitle={chatTabTitle(wb)}
       />
@@ -515,7 +497,7 @@ export function AgentChatPanel({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4"
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6"
       >
         {onMain ? (
           <>
@@ -545,59 +527,62 @@ export function AgentChatPanel({
                   (isLive && wb.busy),
               );
               return (
-                <div key={turn.id} className="mb-4 space-y-2">
+                <div key={turn.id} className="mb-6 space-y-3">
                   <UserBubble text={turn.user_input} />
                   {hasAssistantBody ? (
-                    <div>
-                      <p className="mb-1 text-xs font-medium text-muted-foreground">
+                    <div className="max-w-[min(100%,48rem)] space-y-2">
+                      <p className="text-[11px] font-medium text-muted-foreground">
                         助手
                       </p>
-                      <div className="space-y-2">
-                        {turnPlan?.items?.length ? (
-                          <PlanPanel
-                            plan={turnPlan}
-                            turnStatus={turnStatus}
-                            planPhase={turnPlanPhase}
-                            showExecute={Boolean(isLive && wb.canExecutePlan)}
-                            executeDisabled={wb.busy || wb.actionBusy}
-                            onExecute={
-                              isLive
-                                ? () => void wb.handleExecutePlan()
-                                : undefined
-                            }
-                            variant="chat"
-                          />
-                        ) : null}
-                        <ThinkingBlock
-                          text={thinking}
-                          live={liveOpen}
-                          open={liveOpen}
+                      {turnPlan?.items?.length ? (
+                        <PlanPanel
+                          plan={turnPlan}
+                          turnStatus={turnStatus}
+                          planPhase={turnPlanPhase}
+                          showExecute={Boolean(isLive && wb.canExecutePlan)}
+                          executeDisabled={wb.busy || wb.actionBusy}
+                          onExecute={
+                            isLive
+                              ? () => void wb.handleExecutePlan()
+                              : undefined
+                          }
+                          variant="chat"
                         />
-                        {output ? (
-                          <div
-                            aria-live="polite"
-                            className="rounded-lg bg-card/60 px-3 py-2"
-                          >
-                            <Markdown
-                              text={output}
-                              streaming={Boolean(isLive && wb.busy)}
-                            />
-                          </div>
-                        ) : isLive && wb.busy && !thinking ? (
-                          <p className="px-1 text-xs text-muted-foreground">
-                            思考中…
-                          </p>
-                        ) : null}
-                      </div>
+                      ) : null}
+                      <ThinkingBlock
+                        text={thinking}
+                        live={liveOpen}
+                        open={liveOpen}
+                      />
+                      {output ? (
+                        <div
+                          aria-live="polite"
+                          className="rounded-2xl rounded-tl-md border border-border/60 bg-card/50 px-3.5 py-2.5"
+                        >
+                          <Markdown
+                            text={output}
+                            streaming={Boolean(isLive && wb.busy)}
+                          />
+                        </div>
+                      ) : isLive && wb.busy && !thinking ? (
+                        <p className="px-1 text-xs text-muted-foreground">
+                          思考中…
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
               );
             })}
             {!wb.historyLoading && wb.turnHistory.length === 0 ? (
-              <p className="text-xs text-muted-foreground/80">
-                发送消息开始任务…
-              </p>
+              <div className="flex h-full min-h-[12rem] flex-col items-center justify-center text-center">
+                <p className="text-sm text-muted-foreground">
+                  发送消息开始任务
+                </p>
+                <p className="mt-1 max-w-sm text-xs text-muted-foreground/70">
+                  Enter 发送 · Shift+Enter 换行 · 输入框为空时 ↑ 回忆历史
+                </p>
+              </div>
             ) : null}
           </>
         ) : activeSub ? (
@@ -654,21 +639,21 @@ export function AgentChatPanel({
       ) : null}
 
       {onMain ? (
-        <div className="shrink-0 space-y-2 border-t border-border p-4">
+        <div className="shrink-0 space-y-2.5 border-t border-border/80 bg-muted/10 px-4 py-3">
           {/* Plan lives in the scrollback; keep only a thin consent / live-step strip. */}
           {wb.canExecutePlan ? (
-            <p className="truncate text-[11px] font-medium text-amber-800 dark:text-amber-200">
+            <p className="truncate text-[11px] font-medium text-warning">
               计划待确认
               {wb.plan?.items?.length ? ` · ${wb.plan.items.length} 项` : ""}
               · 在上方清单点「按此执行」
             </p>
           ) : currentStep && wb.busy ? (
-            <p className="truncate text-[11px] text-sky-800/90 dark:text-sky-200/90">
+            <p className="truncate text-[11px] text-primary/90">
               计划进行中 · {currentStep.title}
             </p>
           ) : null}
           {wb.showPlanSuggest ? (
-            <div className="flex items-start justify-between gap-2 rounded-md border border-warning/40 bg-warning-muted px-3 py-2 text-[11px] text-warning">
+            <div className="flex items-start justify-between gap-2 rounded-lg border border-warning/40 bg-warning-muted px-3 py-2 text-[11px] text-warning">
               <div className="min-w-0 space-y-0.5">
                 <p>建议先切到 Plan，列出步骤再执行（可忽略）。</p>
                 {wb.planSuggestReason ? (
@@ -678,14 +663,14 @@ export function AgentChatPanel({
               <div className="flex shrink-0 gap-1">
                 <button
                   type="button"
-                  className="rounded bg-warning px-2 py-0.5 text-warning-foreground hover:bg-warning/90"
+                  className="rounded-md bg-warning px-2 py-0.5 text-warning-foreground hover:bg-warning/90"
                   onClick={() => wb.setPlanMode(true)}
                 >
                   切换 Plan
                 </button>
                 <button
                   type="button"
-                  className="rounded px-2 py-0.5 text-warning/80 hover:text-warning"
+                  className="rounded-md px-2 py-0.5 text-warning/80 hover:text-warning"
                   onClick={() => wb.dismissPlanSuggest()}
                 >
                   忽略
@@ -694,7 +679,7 @@ export function AgentChatPanel({
             </div>
           ) : null}
           {wb.outboundQueue.length > 0 ? (
-            <div className="space-y-1 rounded-md border border-border/80 bg-muted/30 px-3 py-2">
+            <div className="space-y-1 rounded-lg border border-border/70 bg-background/60 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-[11px] text-muted-foreground">
                   已排队 {wb.outboundQueue.length}{" "}
@@ -721,78 +706,82 @@ export function AgentChatPanel({
               </ul>
             </div>
           ) : null}
-          <Textarea
-            className="min-h-[80px] resize-none text-sm"
-            value={wb.message}
-            onChange={(e) => {
-              inputHistory.onEdit(e.target.value);
-              wb.setMessage(e.target.value);
-            }}
-            placeholder={
-              wb.busy || wb.awaitingApproval
-                ? "本轮进行中也可输入，发送后排队…"
-                : placeholderForScenario(wb.scenarioId)
-            }
-            title="↑↓ 浏览历史输入"
-            onKeyDown={(e) => {
-              inputHistory.onKeyDown(e, wb.message, wb.setMessage);
-              onChatEnterSend(
-                e,
-                () => {
-                  inputHistory.remember(wb.message);
-                  void wb.handleSend();
-                },
-                Boolean(wb.message.trim()),
-              );
-            }}
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <Button
-              size="sm"
-              variant={wb.planMode ? "default" : "outline"}
-              className={
-                wb.planMode
-                  ? "bg-primary hover:bg-primary/90"
-                  : "border-primary/40 text-primary"
-              }
-              disabled={wb.busy || wb.awaitingApproval}
-              onClick={() => wb.setPlanMode(!wb.planMode)}
-              title="Plan 模式：先规划，确认后再执行"
-            >
-              {wb.planMode ? "Plan · 开" : "Plan"}
-            </Button>
-            <Button
-              size="sm"
-              disabled={!wb.message.trim()}
-              onClick={() => {
-                inputHistory.remember(wb.message);
-                void wb.handleSend();
+          <div className="rounded-xl border border-border/80 bg-background focus-within:border-ring/50 focus-within:ring-1 focus-within:ring-ring/30">
+            <Textarea
+              className="min-h-[88px] resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+              value={wb.message}
+              onChange={(e) => {
+                inputHistory.onEdit(e.target.value);
+                wb.setMessage(e.target.value);
               }}
-              title={
+              placeholder={
                 wb.busy || wb.awaitingApproval
-                  ? "加入队列，本轮结束后合并发送"
-                  : "发送"
+                  ? "本轮进行中也可输入，发送后排队…"
+                  : placeholderForScenario(wb.scenarioId)
               }
-            >
-              {wb.busy || wb.awaitingApproval ? "排队" : "发送"}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="border-destructive/50 text-destructive"
-              disabled={!wb.busy || wb.stopping}
-              onClick={() => void wb.handleStop()}
-            >
-              {wb.stopping ? "停止中…" : "Stop"}
-            </Button>
-            <ScenarioModeSwitch
-              scenarioId={wb.scenarioId}
-              sessionId={wb.sessionId}
-              disabled={wb.busy || wb.awaitingApproval}
+              title="输入框为空时按 ↑ 回忆历史输入；↓ 回到草稿"
+              onKeyDown={(e) => {
+                inputHistory.onKeyDown(e, wb.message, wb.setMessage);
+                onChatEnterSend(
+                  e,
+                  () => {
+                    inputHistory.remember(wb.message);
+                    void wb.handleSend();
+                  },
+                  Boolean(wb.message.trim()),
+                );
+              }}
             />
+            <div className="flex flex-wrap items-center gap-2 border-t border-border/60 px-2.5 py-2">
+              <Button
+                size="sm"
+                variant={wb.planMode ? "default" : "ghost"}
+                className={
+                  wb.planMode
+                    ? undefined
+                    : "text-muted-foreground hover:text-foreground"
+                }
+                disabled={wb.busy || wb.awaitingApproval}
+                onClick={() => wb.setPlanMode(!wb.planMode)}
+                title="Plan 模式：先规划，确认后再执行"
+              >
+                {wb.planMode ? "Plan · 开" : "Plan"}
+              </Button>
+              <ScenarioModeSwitch
+                scenarioId={wb.scenarioId}
+                sessionId={wb.sessionId}
+                disabled={wb.busy || wb.awaitingApproval}
+              />
+              <div className="ml-auto flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                  disabled={!wb.busy || wb.stopping}
+                  onClick={() => void wb.handleStop()}
+                >
+                  {wb.stopping ? "停止中…" : "Stop"}
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={!wb.message.trim()}
+                  onClick={() => {
+                    inputHistory.remember(wb.message);
+                    void wb.handleSend();
+                  }}
+                  title={
+                    wb.busy || wb.awaitingApproval
+                      ? "加入队列，本轮结束后合并发送"
+                      : "发送"
+                  }
+                >
+                  {wb.busy || wb.awaitingApproval ? "排队" : "发送"}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
-    </aside>
+    </section>
   );
 }

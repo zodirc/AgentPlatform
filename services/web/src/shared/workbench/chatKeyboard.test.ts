@@ -165,7 +165,7 @@ describe("canNavigateInputHistory", () => {
 });
 
 describe("onChatInputHistory", () => {
-  it("applies navigation and prevents default", () => {
+  it("applies navigation and prevents default when empty", () => {
     const apply = vi.fn();
     const e = keyEvent("ArrowUp", { value: "", selectionStart: 0 });
     const consumed = onChatInputHistory(
@@ -179,6 +179,41 @@ describe("onChatInputHistory", () => {
       index: 0,
       draft: "",
       value: "prev",
+    });
+  });
+
+  it("does not recall history on ArrowUp when draft has content", () => {
+    const apply = vi.fn();
+    const e = keyEvent("ArrowUp", {
+      value: "typing",
+      selectionStart: 6,
+    });
+    const consumed = onChatInputHistory(
+      e,
+      { entries: ["prev"], index: 1, draft: "typing", current: "typing" },
+      apply,
+    );
+    expect(consumed).toBe(false);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it("still walks history after entering from empty draft", () => {
+    const apply = vi.fn();
+    const e = keyEvent("ArrowUp", {
+      value: "prev",
+      selectionStart: 4,
+    });
+    const consumed = onChatInputHistory(
+      e,
+      { entries: ["older", "prev"], index: 1, draft: "", current: "prev" },
+      apply,
+    );
+    expect(consumed).toBe(true);
+    expect(apply).toHaveBeenCalledWith({
+      index: 0,
+      draft: "",
+      value: "older",
     });
   });
 });

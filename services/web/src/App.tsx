@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
-import { BotMessageSquare, History, Plus } from "lucide-react";
+import { ListTree, History, Plus } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { SettingsPage } from "./settings/SettingsPage";
 import { ErrorBoundary } from "./shared/ErrorBoundary";
@@ -194,7 +194,7 @@ function Nav() {
       : scenario?.title ?? null,
   );
   const { sessionId, startNewSession, openSession } = useWorkbenchSession();
-  const { open: agentOpen, openPanel, togglePanel, createAgent } =
+  const { open: toolsOpen, togglePanel, createAgent } =
     useAgentPanel();
   const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -260,7 +260,6 @@ function Nav() {
                 aria-label="历史会话"
                 onClick={() => {
                   setHistoryOpen(true);
-                  openPanel();
                 }}
               >
                 <History className="h-4 w-4" />
@@ -270,24 +269,24 @@ function Nav() {
                 size="sm"
                 variant="ghost"
                 className={`h-8 w-8 p-0 hover:text-foreground ${
-                  agentOpen
+                  toolsOpen
                     ? "bg-muted text-foreground"
                     : "text-muted-foreground"
                 }`}
-                title={agentOpen ? "折叠 Agent 面板" : "打开 Agent 面板"}
-                aria-label={agentOpen ? "折叠 Agent 面板" : "打开 Agent 面板"}
-                aria-pressed={agentOpen}
+                title={toolsOpen ? "收起工具时间线" : "打开工具时间线"}
+                aria-label={toolsOpen ? "收起工具时间线" : "打开工具时间线"}
+                aria-pressed={toolsOpen}
                 onClick={() => togglePanel()}
               >
-                <BotMessageSquare className="h-4 w-4" />
+                <ListTree className="h-4 w-4" />
               </Button>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
                 className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                title="新建 Agent"
-                aria-label="新建 Agent"
+                title="新建会话"
+                aria-label="新建会话"
                 onClick={() => void createAgent()}
               >
                 <Plus className="h-4 w-4" />
@@ -311,12 +310,10 @@ function Nav() {
         onClose={() => setHistoryOpen(false)}
         onSelect={(id) => {
           setHistoryOpen(false);
-          openPanel();
           void openSession(id);
         }}
         onDeletedCurrent={() => {
           setHistoryOpen(false);
-          openPanel();
           void startNewSession();
         }}
       />

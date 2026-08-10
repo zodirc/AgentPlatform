@@ -1,3 +1,4 @@
+import { ListTree } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import type { WorkbenchState } from "../../shared/workbench/types";
 import {
@@ -84,7 +85,8 @@ export function deriveAgentActivity(
       approvalEv?.payload.tool_name ?? wb.pendingToolName ?? "tool",
     );
     const args = approvalEv?.payload.arguments as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
     const copy = approvalCopy(tool);
     const path = String(
       (approvalEv?.payload.path as string | undefined) ?? args?.path ?? "",
@@ -123,7 +125,8 @@ export function deriveAgentActivity(
   if (runningTool) {
     const toolName = String(runningTool.payload.tool_name ?? "tool");
     const args = runningTool.payload.arguments as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
     const detail = formatToolDetail(toolName, args);
     return {
       phase: "tool",
@@ -161,22 +164,43 @@ export function deriveAgentActivity(
 }
 
 const PHASE_STYLES: Record<AgentPhase, string> = {
-  idle: "border-input bg-card/50 text-foreground/90",
-  thinking: "border-primary/40 bg-primary/10 text-primary",
-  tool: "border-success/40 bg-success-muted text-success",
-  approval: "border-primary/40 bg-primary/10 text-primary",
-  running: "border-warning/40 bg-warning-muted text-warning",
-  warning: "border-warning/40 bg-warning-muted text-warning",
-  completed: "border-success/40 bg-success-muted text-success",
-  failed: "border-destructive/40 bg-destructive/10 text-destructive",
+  idle: "border-border/70 bg-card/40 text-foreground",
+  thinking: "border-primary/30 bg-primary/8 text-foreground",
+  tool: "border-success/30 bg-success-muted/80 text-foreground",
+  approval: "border-primary/35 bg-primary/10 text-foreground",
+  running: "border-warning/30 bg-warning-muted/80 text-foreground",
+  warning: "border-warning/35 bg-warning-muted text-foreground",
+  completed: "border-success/30 bg-success-muted/70 text-foreground",
+  failed: "border-destructive/35 bg-destructive/10 text-foreground",
+};
+
+const PHASE_DOT: Record<AgentPhase, string> = {
+  idle: "bg-muted-foreground/50",
+  thinking: "bg-primary animate-pulse",
+  tool: "bg-success",
+  approval: "bg-primary animate-pulse",
+  running: "bg-warning animate-pulse",
+  warning: "bg-warning",
+  completed: "bg-success",
+  failed: "bg-destructive",
 };
 
 type Props = {
   wb: WorkbenchState;
   compact?: boolean;
+  /** Open / toggle the tools timeline overlay drawer. */
+  onOpenTools?: () => void;
+  toolsOpen?: boolean;
+  toolsCount?: number;
 };
 
-export function AgentActivityPanel({ wb, compact = false }: Props) {
+export function AgentActivityPanel({
+  wb,
+  compact = false,
+  onOpenTools,
+  toolsOpen = false,
+  toolsCount = 0,
+}: Props) {
   const activity = deriveAgentActivity(wb.events, wb);
   const style = PHASE_STYLES[activity.phase];
   const planStep = livePlanStep(wb.plan, wb.displayStatus);
@@ -193,24 +217,40 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
         .filter(Boolean)
         .slice(0, 4)
     : [];
+  const debugTitle = [
+    `status=${wb.displayStatus}`,
+    wb.view?.last_event_sequence != null
+      ? `seq=${wb.view.last_event_sequence}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   return (
     <section
-      className={`min-w-0 shrink-0 overflow-hidden rounded-lg border px-4 py-3 ${style}`}
+      className={`min-w-0 shrink-0 overflow-hidden rounded-xl border px-3.5 py-2.5 ${style}`}
+      title={debugTitle}
     >
-      <div className="flex min-w-0 items-start justify-between gap-2">
+      <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0 flex-1 overflow-hidden">
-          <p className="text-xs uppercase tracking-wide opacity-70">当前状态</p>
-          <p
-            className={
-              compact ? "text-base font-medium" : "text-lg font-medium"
-            }
-          >
-            {activity.label}
-          </p>
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${PHASE_DOT[activity.phase]}`}
+              aria-hidden
+            />
+            <p
+              className={
+                compact
+                  ? "truncate text-sm font-medium tracking-tight"
+                  : "text-lg font-medium"
+              }
+            >
+              {activity.label}
+            </p>
+          </div>
           {activity.detail ? (
             <p
-              className="mt-0.5 truncate text-sm opacity-80"
+              className="mt-0.5 truncate pl-3.5 text-xs text-muted-foreground"
               title={activity.detail}
             >
               {activity.detail}
@@ -218,7 +258,7 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
           ) : null}
           {planStep ? (
             <p
-              className="mt-0.5 truncate text-sm text-primary/90"
+              className="mt-0.5 truncate pl-3.5 text-xs text-primary/90"
               title={planStep.title}
             >
               计划进行中：{planStep.title}
@@ -226,21 +266,40 @@ export function AgentActivityPanel({ wb, compact = false }: Props) {
           ) : null}
           {cardTitles.length > 0 ? (
             <p
-              className="mt-1 truncate text-xs text-primary/90"
+              className="mt-1 truncate pl-3.5 text-xs text-primary/90"
               title={cardTitles.join(" · ")}
             >
               本轮写定：{cardTitles.join(" · ")}
             </p>
           ) : null}
         </div>
-        <div className="shrink-0 text-right text-xs opacity-60">
-          <p>status={wb.displayStatus}</p>
-          {wb.view?.last_event_sequence != null ? (
-            <p>seq={wb.view.last_event_sequence}</p>
-          ) : null}
-        </div>
+        {onOpenTools ? (
+          <button
+            type="button"
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] font-medium transition-colors ${
+              toolsOpen
+                ? "border-primary/40 bg-primary/10 text-foreground"
+                : "border-border/70 bg-background/50 text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            }`}
+            onClick={onOpenTools}
+            title={toolsOpen ? "收起工具时间线" : "打开工具时间线"}
+            aria-pressed={toolsOpen}
+          >
+            <ListTree className="h-3.5 w-3.5" />
+            工具
+            {toolsCount > 0 ? (
+              <span className="min-w-[1rem] rounded-md bg-primary/15 px-1 text-center tabular-nums text-primary">
+                {toolsCount > 99 ? "99+" : toolsCount}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
       </div>
-      <UsageMeter contextUsage={wb.contextUsage} tokenUsage={wb.tokenUsage} />
+      <UsageMeter
+        contextUsage={wb.contextUsage}
+        tokenUsage={wb.tokenUsage}
+        compact={compact}
+      />
     </section>
   );
 }
