@@ -136,7 +136,7 @@ def _fake_pending():
     return SimpleNamespace(state=SimpleNamespace(session_id=uuid4()))
 
 
-async def _passthrough_tenant(_session_id, coro):
+async def _passthrough_tenant(_session_id, coro, **_kwargs):
     return await coro
 
 

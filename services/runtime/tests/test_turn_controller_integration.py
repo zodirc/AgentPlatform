@@ -216,7 +216,7 @@ async def test_deny_tool_call_resumes_via_langgraph(monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tc, "resolve_context_window_tokens", AsyncMock(return_value=128000))
     monkeypatch.setattr(tc, "load_session_owner_user_id", AsyncMock(return_value=None))
 
-    async def _passthrough_tenant(_session_id, coro):
+    async def _passthrough_tenant(_session_id, coro, **_kwargs):
         return await coro
 
     monkeypatch.setattr(tc, "_with_session_tenant", _passthrough_tenant)
@@ -256,7 +256,7 @@ async def test_approve_tool_call_mismatch_skips_resume(monkeypatch: pytest.Monke
     monkeypatch.setattr(tc, "run_via_langgraph", run_lg)
     monkeypatch.setattr(tc, "_cleanup_pending_after_command", AsyncMock())
 
-    async def _passthrough_tenant(_session_id, coro):
+    async def _passthrough_tenant(_session_id, coro, **_kwargs):
         return await coro
 
     monkeypatch.setattr(tc, "_with_session_tenant", _passthrough_tenant)
