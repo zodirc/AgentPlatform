@@ -11,11 +11,10 @@
 | **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · exec **bwrap** 沙箱 · Golden/`make gate` 可证明 |
 | **非目标** | 不宣称对齐 Cursor 全功能；Skills / 多模态 / K8s 暂缓 |
 | **起栈** | `make up` = **分模块**只重建脏服务 + 发布台 `:9090`；全量用 `make up-all` |
-| **发布台** | 随 up 拉起；发布必须勾选模块。见 [scripts/release/README.md](scripts/release/README.md) |
-| **Demo** | 见 [docs/learn/DEMO.md](docs/learn/DEMO.md) |
-| **旁路观测** | `/ops/<OPS_TEST_SECRET>/…` · [Ops](docs/topics/ops-eval-console.md) |
+| **发布台** | 随 up 拉起；脏模块与确认方式见 [架构 · 分模块发布](docs/core/architecture.md) · [scripts/release/README.md](scripts/release/README.md) |
+| **旁路观测** | `/ops/<OPS_TEST_SECRET>/official` Bench · [工作台](docs/topics/workbench.md) |
 
-文档已收敛为 **core / topics / learn / archive**，见 **[docs/README.md](docs/README.md)**。
+文档索引：**[docs/README.md](docs/README.md)**（6 篇正文，每篇 2 张控制流图）。
 
 ## 为什么要重写
 
@@ -35,19 +34,15 @@
 
 | 文档 | 内容 |
 |------|------|
-| [docs/README](docs/README.md) | 总索引（core / topics / learn / archive） |
-| [DEMO](docs/learn/DEMO.md) | 5 分钟路径 |
-| [架构](docs/core/02-architecture.md) | 服务划分、数据流 |
-| [Docker](docs/core/03-docker-runtime.md) | 拓扑、env、工作区/沙箱 |
-| [Runtime / 工具](docs/core/05-agent-runtime.md) | Loop 与工具协议 |
-| [场景](docs/core/09-product-modes.md) | writing / agent / intel |
-| [写作](docs/topics/writing/) | 质量 / 作品 / Token / Plan |
-| [RAG](docs/topics/rag-and-sources.md) | 索引与资料库 |
-| [沙箱](docs/topics/sandbox.md) | exec 隔离（bwrap） |
-| [Ops](docs/topics/ops-eval-console.md) | 评测台与旁路观测 |
-| [contracts](docs/core/contracts.md) | API / 事件 / DDL |
+| [docs/README](docs/README.md) | 总索引（6 篇 · 每篇 2 图） |
+| [架构](docs/core/architecture.md) | 请求路径 · 分模块发布台 · Turn |
+| [Runtime](docs/core/runtime.md) | Engine loop · 审批/取消 |
+| [工具与上下文](docs/core/tools-and-context.md) | 组窗 · bwrap |
+| [事件与契约](docs/core/events.md) | SSE · StartTurn |
+| [RAG](docs/topics/rag.md) | search_sources · 索引面 |
+| [工作台](docs/topics/workbench.md) | 写作 · Ops Bench（BEIR/C-MTEB/LongBench/SWE）· 契约/CI |
 
-> **架构宪法**：一个 Runtime，多个 Scenario。先读 **05、06、09**。原 ADR 已退役，约束写在 `core/` / `topics/`。
+> **架构宪法**：一个 Runtime，多个 Scenario。先读 **Runtime / 工具与上下文 / 架构**。
 
 ## 第一阶段交付标准（Docker Only）
 
@@ -77,7 +72,7 @@ curl -fsS http://localhost/health/live
 make up              # 起栈；并自动启用本仓库 .githooks（pre-push → preflight）
 make preflight       # 手动：CI unit.* 本地镜像（无 Docker；按变更选择性）
 make smoke           # L0
-# 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/topics/ops-eval-console）
+# 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/topics/workbench.md）
 make gate            # CI/无头 Proof 门禁：smoke → eval-all → runtime-test
 make ux-signals      # 体验信号自检（环外）
 make eval-all        # stub golden（isolated + runtime-lite，不改日常 live）
