@@ -181,13 +181,6 @@ export function UsageMeter({ contextUsage, tokenUsage }: Props) {
                   );
                 })}
               </div>
-              <p className="text-[10px] opacity-50">
-                对齐 Cursor 分层 · 与请求一致：System prompt＝system.md；
-                Tool definitions＝tools[]（how-to + schema）；Rules＝project
-                （AGENT.md 等）。Skills / Subagent definitions＝本平台未单独计量。
-                Writing ctx / Runtime＝后置 user。Conversation＝user +
-                assistant + tool results + compact。
-              </p>
             </div>
           ) : (
             <p className="mt-1 truncate opacity-70">
