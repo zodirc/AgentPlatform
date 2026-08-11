@@ -1022,14 +1022,65 @@ async def test_run_tests_simulate(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.asyncio
 async def test_read_lints_fallback_scan(workspace: Path) -> None:
+    """When ruff is down but LSP is not required-failed, list files as info issues."""
     (workspace / "mod.py").write_text("x=1\n", encoding="utf-8")
-    with patch(
-        "app.tools.core.shell.run_shell_command",
-        AsyncMock(return_value={"status": "failed", "stdout": "", "stderr": ""}),
+    with (
+        patch(
+            "app.tools.core.shell.run_shell_command",
+            AsyncMock(return_value={"status": "failed", "stdout": "", "stderr": ""}),
+        ),
+        patch(
+            "app.structural.adapters.get_diagnostics",
+            AsyncMock(
+                return_value={
+                    "issues": [],
+                    "meta": {
+                        "provider": None,
+                        "cold_start": False,
+                        "truncated": False,
+                        "unsupported": False,
+                        "degraded_reason": None,
+                    },
+                }
+            ),
+        ),
     ):
         result = await core.read_lints(".")
     assert result["issue_count"] == 0
     assert result["issues"]
+    assert any("ruff unavailable" in str(i.get("message") or "") for i in result["issues"])
+
+
+@pytest.mark.asyncio
+async def test_read_lints_lsp_infra_failed_is_explicit(workspace: Path) -> None:
+    """LSP infrastructure failure must not silently look like a clean scan."""
+    (workspace / "mod.py").write_text("x=1\n", encoding="utf-8")
+    with (
+        patch(
+            "app.tools.core.shell.run_shell_command",
+            AsyncMock(return_value={"status": "failed", "stdout": "", "stderr": ""}),
+        ),
+        patch(
+            "app.structural.adapters.get_diagnostics",
+            AsyncMock(
+                return_value={
+                    "issues": [],
+                    "meta": {
+                        "provider": None,
+                        "cold_start": False,
+                        "truncated": False,
+                        "unsupported": False,
+                        "degraded_reason": "lsp_unavailable",
+                    },
+                }
+            ),
+        ),
+    ):
+        result = await core.read_lints(".")
+    assert result.get("status") == "failed"
+    assert result["issue_count"] == 0
+    assert result["issues"] == []
+    assert "language server" in str(result.get("summary") or "").lower()
 
 
 @pytest.mark.asyncio

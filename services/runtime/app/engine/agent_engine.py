@@ -158,10 +158,15 @@ _EVENT_STR_TRUNC_SUFFIX = "\n...[truncated]"
 
 def _clamp_event_str(value: Any, max_len: int) -> str:
     text = str(value or "")
+    if max_len < 0:
+        max_len = 0
     if len(text) <= max_len:
         return text
+    # When the budget is smaller than the suffix, hard-cut (never exceed max_len).
+    if max_len <= len(_EVENT_STR_TRUNC_SUFFIX):
+        return text[:max_len]
     # Suffix length must be exact — off-by-one here still fails maxLength.
-    keep = max(0, max_len - len(_EVENT_STR_TRUNC_SUFFIX))
+    keep = max_len - len(_EVENT_STR_TRUNC_SUFFIX)
     return text[:keep] + _EVENT_STR_TRUNC_SUFFIX
 
 
