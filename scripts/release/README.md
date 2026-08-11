@@ -23,6 +23,24 @@ http://127.0.0.1:9090/
 | runtime | `services/runtime/` · `packages/contracts/` | `make up-runtime` |
 | web | `services/web/` | `make up-web` |
 | gateway | caddy / compose | recreate |
+| **Ops · SWE eval 镜像** | `suites.coding.harness`（默认 n5） | `make official-bench-coding-pull-images`（看板一键） |
+
+SWE 官方 resolve 依赖本机 `sweb.eval` 镜像（约 1GiB/题，**不进 git**）。启用 `make up-ops-eval` 后看板会检查是否已预拉；缺则点「预拉 SWE eval 镜像」。Eval 默认 `cache_level=instance`，避免跑完删掉镜像。
+
+拉取时可实时观测：顶栏/该项 detail 显示 **n/N · % · 当前镜像**（读 `reports/release/swe_eval_images_progress.json`）；日志 tab「SWE 镜像」流式输出 `docker pull`；队列与 pid 同其它看板任务。
+
+左侧目录树按轨划分：
+
+```
+产品 Agent/
+  代码/          api · runtime · web · gateway
+  检索/          向量模型 · 语料索引
+Ops/
+  检索/          向量模型（共用 runtime）· BEIR 英文索引 · C-MTEB 中文索引
+  评测/          SWE eval 镜像
+```
+
+Ops 嵌入复用 `agent-runtime` 的同一 `EMBEDDING_MODEL`（C-MTEB 另要求 bge-m3），与产品语料索引分库（`agent-postgres` vs `agent-bench-postgres`）。点文件夹展开/收起；偏好键 `localStorage.releaseTreeOpen`。
 
 确认：看板模块变绿 · `deployed_sha` / `worktree_digest` 已 mark · `docker compose ps` healthy · `curl -fsS http://localhost/health/live`。
 

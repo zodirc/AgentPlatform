@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -290,12 +291,94 @@ def _docker_exec(container: str, *args: str, timeout: float = 8) -> tuple[int, s
     return code, out if code == 0 else err
 
 
+def _ops_eval_sock_enabled(env_file: dict[str, str]) -> bool:
+    """True when api is intended to drive SWE harness via docker.sock."""
+    auto = ROOT / "deploy" / "ops-eval.auto.env"
+    vals: dict[str, str] = {}
+    if auto.is_file():
+        for line in auto.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            vals[k.strip()] = v.strip().strip('"').strip("'")
+    raw = (
+        vals.get("OPS_EVAL_DOCKER_SOCK")
+        or env_file.get("OPS_EVAL_DOCKER_SOCK")
+        or os.environ.get("OPS_EVAL_DOCKER_SOCK")
+        or "0"
+    )
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _swe_eval_images_item(*, env_file: dict[str, str]) -> dict:
+    """Ops readiness: local sweb.eval images for official resolve scoring.
+
+    Shown when ops-eval docker.sock is enabled; otherwise skip (product stack
+    does not need these multi-GB images).
+    """
+    item: dict = {
+        "id": "swe_eval_images",
+        "kind": "ops",
+        "lane": "ops",
+        "title": "SWE eval 镜像",
+        "status": "ok",
+        "action": None,
+        "detail": "",
+        "optional": True,
+    }
+    if not _ops_eval_sock_enabled(env_file):
+        item["status"] = "skip"
+        item["detail"] = "可选 · 未启用 ops-eval（make up-ops-eval）；产品栈不需要"
+        return item
+
+    # Import lazily — scripts/ is on path via release console / make release-plan.
+    try:
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from official_bench.swe_images import harness_cfg, local_image_status  # noqa: WPS433
+    except Exception as exc:  # noqa: BLE001
+        item["status"] = "action"
+        item["action"] = "make official-bench-coding-pull-images"
+        item["detail"] = f"无法检查镜像状态：{exc}"
+        return item
+
+    h = harness_cfg()
+    st = local_image_status(h["board_tier"])
+    item["tier"] = st["tier"]
+    item["n"] = st["n"]
+    item["present_n"] = len(st["present"])
+    item["missing_n"] = len(st["missing"])
+    item["approx_mib"] = st["approx_mib_total"]
+    item["cache_level"] = st["cache_level"]
+    gb = round(st["approx_mib_total"] / 1024.0, 1)
+    if st["ready"]:
+        item["status"] = "ok"
+        item["detail"] = (
+            f"{st['tier']} · {st['n']}/{st['n']} 本地就绪 "
+            f"（约 {gb} GiB 压缩 · cache_level={st['cache_level']}）"
+        )
+        return item
+
+    miss = st["missing"]
+    sample = ", ".join(Path(m).name for m in miss[:2])
+    more = f" 等{len(miss)}个" if len(miss) > 2 else ""
+    item["status"] = "action"
+    item["action"] = "make official-bench-coding-pull-images"
+    item["detail"] = (
+        f"{st['tier']} 缺 {len(miss)}/{st['n']} 张 sweb.eval "
+        f"（约 {gb} GiB；例 {sample}{more}）。"
+        "预拉后才有官方 resolve_rate；勿塞进 git"
+    )
+    return item
+
+
 def _embedding_item(
     want_model: str, want_dims: int, want_ver: int, *, running: set[str]
 ) -> dict:
     item = {
         "id": "embedding",
         "kind": "model",
+        "lane": "product",
         "title": "向量模型",
         "want": want_model,
         "want_dims": want_dims,
@@ -407,10 +490,12 @@ def _index_item(
     sync_action: str,
     running: set[str],
     schema: str = "public",
+    lane: str = "product",
 ) -> dict:
     item = {
         "id": item_id,
         "kind": "index",
+        "lane": lane,
         "title": title,
         "status": "unknown",
         "action": None,
@@ -532,7 +617,8 @@ def _index_ops_zh_item(
     item: dict = {
         "id": "index_ops_zh",
         "kind": "index",
-        "title": "索引 · Ops/C-MTEB 中文库",
+        "lane": "ops",
+        "title": "C-MTEB 中文索引",
         "status": "ok",
         "action": None,
         "detail": "",
@@ -555,7 +641,7 @@ def _index_ops_zh_item(
 
     checked = _index_item(
         item_id="index_ops_zh",
-        title="索引 · Ops/C-MTEB 中文库",
+        title="C-MTEB 中文索引",
         container="agent-bench-postgres",
         user=env_file.get("BENCH_POSTGRES_USER") or "bench",
         db=env_file.get("BENCH_POSTGRES_DB") or "bench",
@@ -565,6 +651,7 @@ def _index_ops_zh_item(
         sync_action=ensure_action,
         running=running,
         schema=schema,
+        lane="ops",
     )
     checked["optional"] = True
     if checked.get("status") == "ok":
@@ -644,7 +731,8 @@ def build_plan(mode: str | None = None) -> dict:
             {
                 "id": mod,
                 "kind": "code",
-                "title": f"代码 · {mod}",
+                "lane": "product",
+                "title": mod,
                 "status": "action" if dirty else "ok",
                 "action": action,
                 "detail": detail,
@@ -654,12 +742,12 @@ def build_plan(mode: str | None = None) -> dict:
             }
         )
 
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    with ThreadPoolExecutor(max_workers=5) as pool:
         fut_emb = pool.submit(_embedding_item, want_model, want_dims, want_ver, running=running)
         fut_prod = pool.submit(
             _index_item,
             item_id="index_product",
-            title="索引 · 产品库",
+            title="语料索引",
             container="agent-postgres",
             user=env_file.get("POSTGRES_USER") or "agent",
             db=env_file.get("POSTGRES_DB") or "agent",
@@ -668,11 +756,12 @@ def build_plan(mode: str | None = None) -> dict:
             want_ver=want_ver,
             sync_action="make sync-sources",
             running=running,
+            lane="product",
         )
         fut_ops = pool.submit(
             _index_item,
             item_id="index_ops",
-            title="索引 · Ops/BEIR 库",
+            title="BEIR 英文索引",
             container="agent-bench-postgres",
             user=env_file.get("BENCH_POSTGRES_USER") or "bench",
             db=env_file.get("BENCH_POSTGRES_DB") or "bench",
@@ -687,6 +776,7 @@ def build_plan(mode: str | None = None) -> dict:
             want_ver=want_ver,
             sync_action="make sync-ops-indexes",
             running=running,
+            lane="ops",
         )
         fut_ops_zh = pool.submit(
             _index_ops_zh_item,
@@ -697,29 +787,64 @@ def build_plan(mode: str | None = None) -> dict:
             auto=auto,
             running=running,
         )
+        fut_swe = pool.submit(_swe_eval_images_item, env_file=env_file)
         emb = fut_emb.result()
         idx_prod = fut_prod.result()
         idx_ops = fut_ops.result()
         idx_ops_zh = fut_ops_zh.result()
+        swe_imgs = fut_swe.result()
 
-    items.extend([emb, idx_prod, idx_ops, idx_ops_zh])
+    items.extend([emb, idx_prod, idx_ops, idx_ops_zh, swe_imgs])
 
-    actions = [i for i in items if i.get("status") == "action"]
+    # Ops 检索嵌入复用产品 runtime 向量模型——单独挂一条，避免和产品轨混在同一组。
+    ops_emb = {
+        "id": "ops_embedding_ref",
+        "kind": "model",
+        "lane": "ops",
+        "title": "向量模型（共用 runtime）",
+        "want": emb.get("want"),
+        "want_dims": emb.get("want_dims"),
+        "want_index_version": emb.get("want_index_version"),
+        "baked": emb.get("baked"),
+        "container_env": emb.get("container_env"),
+        "optional": True,
+        "status": emb.get("status") or "unknown",
+        "action": emb.get("action"),
+        "detail": (
+            "Ops BEIR/C-MTEB 嵌入走 agent-runtime，与产品同一 EMBEDDING_MODEL；"
+            "C-MTEB 另要求 bge-m3"
+            + (f"；当前 {emb.get('detail')}" if emb.get("detail") else "")
+        ),
+    }
+    items.append(ops_emb)
+
+    # ops_embedding_ref mirrors product embedding — don't double-count in summary.
+    actions = [
+        i
+        for i in items
+        if i.get("status") == "action" and i.get("id") != "ops_embedding_ref"
+    ]
     oks = [i for i in items if i.get("status") == "ok"]
     skips = [i for i in items if i.get("status") == "skip"]
 
     if not actions:
         summary = "healthy"
-        headline = "全部已是最新：代码、向量模型、索引均无待处理变动"
+        headline = "全部已是最新：产品与 Ops 均无待处理变动"
     else:
         summary = "action_needed"
         bits = []
         if dirty_code:
-            bits.append("代码 " + ",".join(dirty_code))
+            bits.append("产品代码 " + ",".join(dirty_code))
         if emb.get("status") == "action":
-            bits.append("向量模型")
-        if any(i["id"].startswith("index_") and i["status"] == "action" for i in items):
-            bits.append("索引")
+            bits.append("产品向量模型")
+        if idx_prod.get("status") == "action":
+            bits.append("产品语料索引")
+        if any(
+            i["id"].startswith("index_ops") and i["status"] == "action" for i in items
+        ):
+            bits.append("Ops 索引")
+        if swe_imgs.get("status") == "action":
+            bits.append("SWE eval 镜像")
         headline = "存在变动：" + "；".join(bits)
 
     if mode == "local":
@@ -757,7 +882,8 @@ def build_plan(mode: str | None = None) -> dict:
         "product_url": "http://localhost/",
         "console_hint": (
             "发布只动代码模块；换模后 sync-sources / sync-ops-indexes；"
-            "C-MTEB 中文小量（≈5万）可选：看板「拉取并嵌入」或 ensure_ops_cmteb.sh（仅 bge-m3）"
+            "C-MTEB 中文小量（≈5万）可选：看板「拉取并嵌入」或 ensure_ops_cmteb.sh（仅 bge-m3）；"
+            "SWE 官方 resolve：看板「预拉 SWE eval 镜像」（~1GiB/题，不进 git）"
         ),
     }
 

@@ -53,6 +53,7 @@ ALLOWED_ACTIONS = {
     "sync-ops-indexes": ["make", "-C", str(ROOT), "sync-ops-indexes"],
     "sync-ops-cmteb": ["make", "-C", str(ROOT), "sync-ops-cmteb"],
     "ensure-ops-cmteb": ["bash", str(ROOT / "scripts" / "release" / "ensure_ops_cmteb.sh")],
+    "pull-swe-eval-images": ["make", "-C", str(ROOT), "official-bench-coding-pull-images"],
     "git-pull": ["bash", str(GIT_PULL_SH)],
     "cancel-jobs": ["__cancel__"],  # handled in-process, not spawned
 }
@@ -68,6 +69,7 @@ ACTION_LOG_KEY = {
     "sync-ops-indexes": "index_ops",
     "sync-ops-cmteb": "index_ops_zh",
     "ensure-ops-cmteb": "index_ops_zh",
+    "pull-swe-eval-images": "swe_eval_images",
     "git-pull": "git",
     "cancel-jobs": "misc",
 }
@@ -77,9 +79,11 @@ ITEM_LOG_KEY = {
     "web": "web",
     "gateway": "gateway",
     "embedding": "runtime",  # 换模走 runtime 重建
+    "ops_embedding_ref": "runtime",
     "index_product": "index_product",
     "index_ops": "index_ops",
     "index_ops_zh": "index_ops_zh",
+    "swe_eval_images": "swe_eval_images",
     "git": "git",
 }
 
@@ -94,6 +98,7 @@ _ACTION_ITEM = {
     "sync-ops-indexes": "index_ops",
     "sync-ops-cmteb": "index_ops_zh",
     "ensure-ops-cmteb": "index_ops_zh",
+    "pull-swe-eval-images": "swe_eval_images",
     "git-pull": "git",
 }
 _ITEM_DEFAULT_ACTION = {
@@ -104,6 +109,7 @@ _ITEM_DEFAULT_ACTION = {
     "index_product": "sync-sources",
     "index_ops": "sync-ops-indexes",
     "index_ops_zh": "ensure-ops-cmteb",
+    "swe_eval_images": "pull-swe-eval-images",
 }
 _SYNC_ACTIVE = frozenset(
     {
@@ -199,6 +205,7 @@ _ACTION_LABELS = {
     "sync-ops-indexes": "同步 Ops BEIR",
     "sync-ops-cmteb": "同步 C-MTEB",
     "ensure-ops-cmteb": "拉取并嵌入中文库",
+    "pull-swe-eval-images": "预拉 SWE eval 镜像",
     "git-pull": "拉取远程",
     "cancel-jobs": "取消任务",
 }
@@ -780,6 +787,8 @@ def _discover_host_action_jobs() -> list[dict]:
         ("sync_cli --mode ops-beir", "sync-ops-indexes", "index_ops"),
         ("--mode ops-beir", "sync-ops-indexes", "index_ops"),
         ("sync_cli --mode sources", "sync-sources", "index_product"),
+        ("official-bench-coding-pull-images", "pull-swe-eval-images", "swe_eval_images"),
+        ("coding --phase pull-images", "pull-swe-eval-images", "swe_eval_images"),
         ("release.sh run --modules=api", "up-api", "api"),
         ("release.sh run --modules=runtime", "up-runtime", "runtime"),
         ("release.sh run --modules=web", "up-web", "web"),
@@ -928,6 +937,69 @@ def _sync_summary(prog: dict) -> tuple[str, float | None]:
     return " · ".join(bits), pct
 
 
+def _read_swe_eval_images_progress() -> dict | None:
+    """Progress written by official_bench.swe_images during board/make pull."""
+    path = STATUS_DIR / "swe_eval_images_progress.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
+    total = prog.get("images_total")
+    done = prog.get("images_done")
+    pct: float | None = None
+    try:
+        if total is not None and int(total) > 0 and done is not None:
+            pct = round(100.0 * int(done) / int(total), 1)
+    except (TypeError, ValueError):
+        pct = None
+    status = str(prog.get("status") or "")
+    last = str(prog.get("last_status") or "")
+    short = str(prog.get("current_short") or prog.get("current_ref") or "").strip()
+    if short and "/" in short:
+        short = short.rsplit("/", 1)[-1]
+    if len(short) > 48:
+        short = short[-48:]
+    bits: list[str] = []
+    if status == "error":
+        bits.append("预拉失败")
+        err = str(prog.get("error") or "").strip()
+        if err:
+            bits.append(err[:80])
+    elif status == "ready" or last == "finished":
+        bits.append("预拉完成")
+    else:
+        bits.append("预拉镜像")
+        if last == "pulling":
+            bits.append("下载中")
+        elif last == "cached":
+            bits.append("已缓存跳过")
+        elif last == "pulled":
+            bits.append("已拉取")
+    try:
+        if total is not None and done is not None:
+            bits.append(f"{int(done)}/{int(total)}")
+    except (TypeError, ValueError):
+        pass
+    if pct is not None:
+        bits.append(f"{pct}%")
+    if short and status not in {"ready"} and last != "finished":
+        bits.append(short)
+    try:
+        cached = prog.get("images_cached")
+        pulled = prog.get("images_pulled")
+        if cached is not None or pulled is not None:
+            bits.append(f"cache {int(cached or 0)} · pull {int(pulled or 0)}")
+    except (TypeError, ValueError):
+        pass
+    return " · ".join(bits), pct
+
+
 def _collect_live() -> dict[str, dict]:
     """item_id → live job descriptor (console pid and/or runtime sync / deploy)."""
     out: dict[str, dict] = {}
@@ -949,6 +1021,38 @@ def _collect_live() -> dict[str, dict]:
             "pct": None,
             "source": job.get("source") or "console",
         }
+
+    # Overlay structured SWE image pull progress (n/N + current ref).
+    swe_prog = _read_swe_eval_images_progress()
+    if isinstance(swe_prog, dict):
+        st = str(swe_prog.get("status") or "")
+        phase = str(swe_prog.get("phase") or "")
+        active = st == "building" or phase == "pull" or str(swe_prog.get("last_status")) == "pulling"
+        if active and st not in {"ready", "error"} and _sync_progress_fresh(swe_prog, max_age_s=900.0):
+            summary, pct = _swe_eval_images_summary(swe_prog)
+            prev = out.get("swe_eval_images")
+            out["swe_eval_images"] = {
+                "item_id": "swe_eval_images",
+                "action": (prev or {}).get("action") or "pull-swe-eval-images",
+                "kind": "swe_images",
+                "pid": (prev or {}).get("pid"),
+                "summary": summary,
+                "pct": pct,
+                "source": (prev or {}).get("source") or "progress",
+            }
+        elif st == "error" and _sync_progress_fresh(swe_prog, max_age_s=120.0):
+            summary, pct = _swe_eval_images_summary(swe_prog)
+            # Surface recent failure briefly in live strip; plan refresh will show action.
+            if "swe_eval_images" not in out:
+                out["swe_eval_images"] = {
+                    "item_id": "swe_eval_images",
+                    "action": "pull-swe-eval-images",
+                    "kind": "swe_images",
+                    "pid": None,
+                    "summary": summary,
+                    "pct": pct,
+                    "source": "progress",
+                }
 
     prog = _read_runtime_sync_progress()
     if isinstance(prog, dict):
@@ -1268,9 +1372,11 @@ def _button_for(it: dict) -> dict | None:
         "web": ("up-web", "重建 web"),
         "gateway": ("up-gateway", "重建 gateway"),
         "embedding": ("up-runtime", "重建 runtime（换模）"),
+        "ops_embedding_ref": ("up-runtime", "重建 runtime（换模）"),
         "index_product": ("sync-sources", "同步产品索引"),
         "index_ops": ("sync-ops-indexes", "同步 Ops BEIR"),
         "index_ops_zh": ("ensure-ops-cmteb", "拉取并嵌入中文库"),
+        "swe_eval_images": ("pull-swe-eval-images", "预拉 SWE eval 镜像"),
     }
     if iid not in mapping:
         return None
@@ -1309,6 +1415,7 @@ _MANAGED_LOG_KEYS = (
     "index_product",
     "index_ops",
     "index_ops_zh",
+    "swe_eval_images",
     "misc",
 )
 

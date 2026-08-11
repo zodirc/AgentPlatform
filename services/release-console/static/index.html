@@ -215,13 +215,125 @@
     }
     .left {
       border-right: 1px solid var(--line-soft);
-      padding: 0.9rem;
+      padding: 0.55rem 0.55rem 0.9rem;
       background: var(--left-bg);
       overflow-x: hidden;
       overflow-y: auto;
       position: relative;
       z-index: 0;
       min-width: 0; /* grid: allow clip instead of spilling into detail */
+    }
+    .tree {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+    .tree-row {
+      display: grid;
+      grid-template-columns: 1.1rem minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.35rem;
+      width: 100%;
+      min-height: 1.85rem;
+      padding: 0.28rem 0.4rem;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      background: transparent;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 0.84rem;
+      text-align: left;
+      cursor: pointer;
+    }
+    .tree-row:hover {
+      background: color-mix(in srgb, var(--panel) 70%, transparent);
+      border-color: var(--line-soft);
+    }
+    .tree-row.active {
+      background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+      border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+    }
+    .tree-row.folder {
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-top: 0.35rem;
+    }
+    .tree-row.folder:first-child {
+      margin-top: 0.1rem;
+    }
+    .tree-chevron {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.1rem;
+      height: 1.1rem;
+      color: var(--accent);
+      transition: transform 0.12s ease;
+      font-size: 0.7rem;
+      line-height: 1;
+      user-select: none;
+    }
+    .tree-row.folder.collapsed .tree-chevron {
+      transform: rotate(-90deg);
+    }
+    .tree-row.leaf .tree-chevron {
+      visibility: hidden;
+    }
+    .tree-name {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .tree-row.leaf {
+      padding-left: 0.55rem;
+      font-size: 0.86rem;
+      font-weight: 500;
+      color: var(--text);
+      text-transform: none;
+      letter-spacing: -0.01em;
+    }
+    .tree-row.leaf .tree-name {
+      font-family: var(--sans);
+    }
+    .tree-aside {
+      display: flex;
+      align-items: center;
+      gap: 0.3rem;
+      flex-shrink: 0;
+      max-width: 9.5rem;
+    }
+    .tree-meta {
+      font-family: var(--mono);
+      font-size: 0.64rem;
+      color: var(--muted);
+      letter-spacing: 0;
+      text-transform: none;
+      white-space: nowrap;
+    }
+    .tree-meta.warn { color: var(--warn); }
+    .tree-meta.run { color: var(--accent); }
+    .tree-children {
+      display: flex;
+      flex-direction: column;
+      gap: 0.1rem;
+      margin: 0.05rem 0 0.15rem 0.55rem;
+      padding-left: 0.45rem;
+      border-left: 1px solid var(--line-soft);
+    }
+    .tree-folder.collapsed > .tree-children {
+      display: none;
+    }
+    .tree-children .tree-folder > .tree-row.folder {
+      margin-top: 0.15rem;
+      font-size: 0.7rem;
+    }
+    .tree-children .tree-children {
+      margin-left: 0.35rem;
     }
     .right {
       padding: 1.15rem 1.4rem 2rem;
@@ -230,54 +342,13 @@
       background: var(--bg);
       min-width: 0;
     }
-    .mod {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 0.55rem;
-      align-items: start;
-      padding: 0.85rem 0.9rem;
-      border: 1px solid var(--line-soft);
-      border-radius: var(--radius);
-      margin-bottom: 0.55rem;
-      background: linear-gradient(160deg, var(--panel), var(--panel-2));
-      cursor: pointer;
-      overflow: hidden;
-      transition: border-color 0.18s ease, box-shadow 0.18s ease;
-    }
-    .mod:hover {
-      border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
-    }
-    .mod.active {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent), var(--shadow);
-    }
-    .mod .name {
-      font-weight: 600;
-      font-size: 0.92rem;
-      letter-spacing: -0.01em;
-      overflow-wrap: anywhere;
-    }
-    .mod .why {
-      color: var(--muted);
-      font-size: 0.74rem;
-      margin-top: 0.25rem;
-      line-height: 1.4;
-      overflow-wrap: anywhere;
-    }
-    .mod-actions {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-      align-items: flex-end;
-      flex-shrink: 0;
-      max-width: 9.5rem;
-    }
     .tag {
       font-family: var(--mono);
-      font-size: 0.66rem;
-      padding: 0.18rem 0.45rem;
+      font-size: 0.62rem;
+      padding: 0.14rem 0.38rem;
       border-radius: 5px;
       letter-spacing: 0.02em;
+      white-space: nowrap;
     }
     .tag.ok { color: var(--ok); background: var(--ok-bg); }
     .tag.action { color: var(--warn); background: var(--warn-bg); }
@@ -302,6 +373,11 @@
     }
     button.act:hover:not(:disabled) { filter: brightness(1.06); }
     button.act:disabled { opacity: 0.4; cursor: not-allowed; }
+    .tree-aside button.act {
+      font-size: 0.66rem;
+      padding: 0.18rem 0.4rem;
+      border-radius: 5px;
+    }
     .panel-title {
       font-family: var(--mono);
       font-size: 0.68rem;
@@ -590,6 +666,7 @@
       { id: "index_product", label: "产品索引" },
       { id: "index_ops", label: "Ops BEIR" },
       { id: "index_ops_zh", label: "Ops 中文" },
+      { id: "swe_eval_images", label: "SWE 镜像" },
     ];
 
     const ITEM_TO_LOG = {
@@ -598,9 +675,11 @@
       web: "web",
       gateway: "gateway",
       embedding: "runtime",
+      ops_embedding_ref: "runtime",
       index_product: "index_product",
       index_ops: "index_ops",
       index_ops_zh: "index_ops_zh",
+      swe_eval_images: "swe_eval_images",
     };
 
     function statusLabel(st) {
@@ -658,60 +737,236 @@
       watchTimer = setTimeout(() => refresh(true), ms);
     }
 
+    // 产品 Agent vs Ops 分轨；二级目录像资源管理器。
+    const TREE_SPEC = [
+      {
+        id: "product",
+        label: "产品 Agent",
+        children: [
+          {
+            id: "product_code",
+            label: "代码",
+            match: (it) => it.lane === "product" && it.kind === "code",
+          },
+          {
+            id: "product_retrieval",
+            label: "检索",
+            match: (it) =>
+              it.lane === "product" && (it.kind === "model" || it.kind === "index"),
+          },
+        ],
+      },
+      {
+        id: "ops",
+        label: "Ops",
+        children: [
+          {
+            id: "ops_retrieval",
+            label: "检索",
+            match: (it) =>
+              it.lane === "ops" && (it.kind === "model" || it.kind === "index"),
+          },
+          {
+            id: "ops_eval",
+            label: "评测",
+            match: (it) => it.lane === "ops" && it.kind === "ops",
+          },
+        ],
+      },
+    ];
+
+    // Remember which folders the user opened/closed (true=open).
+    let treeOpen = (() => {
+      try {
+        return JSON.parse(localStorage.getItem("releaseTreeOpen") || "{}") || {};
+      } catch {
+        return {};
+      }
+    })();
+    let lastEnsuredSelect = null;
+
+    function saveTreeOpen() {
+      localStorage.setItem("releaseTreeOpen", JSON.stringify(treeOpen));
+    }
+
+    function isFolderOpen(gid) {
+      if (Object.prototype.hasOwnProperty.call(treeOpen, gid)) return !!treeOpen[gid];
+      // 默认展开产品轨及其代码；Ops 默认收起
+      return gid === "product" || gid === "product_code";
+    }
+
+    function setFolderOpen(gid, open) {
+      treeOpen[gid] = !!open;
+      saveTreeOpen();
+    }
+
+    function toggleFolder(gid) {
+      setFolderOpen(gid, !isFolderOpen(gid));
+    }
+
+    function folderPathOfItem(it) {
+      for (const root of TREE_SPEC) {
+        for (const sub of root.children || []) {
+          if (sub.match(it)) return [root.id, sub.id];
+        }
+        if (typeof root.match === "function" && root.match(it)) return [root.id];
+      }
+      return [];
+    }
+
+    function shortItemTitle(it) {
+      return String(it.title || it.id || "");
+    }
+
+    function collectMatched(items, node) {
+      if (typeof node.match === "function") {
+        return items.filter((it) => node.match(it));
+      }
+      const out = [];
+      for (const child of node.children || []) {
+        out.push(...collectMatched(items, child));
+      }
+      return out;
+    }
+
+    function groupMeta(items) {
+      const n = items.length;
+      const run = items.filter((i) => i.status === "running" || i.live || i.queue).length;
+      const act = items.filter(
+        (i) => i.status === "action" && i.id !== "ops_embedding_ref"
+      ).length;
+      // ops 向量镜像项：仅当产品向量本身未标 action 时才计入，避免重复角标
+      const actMirror = items.filter(
+        (i) => i.status === "action" && i.id === "ops_embedding_ref"
+      ).length;
+      const actShown = act + (act ? 0 : actMirror);
+      if (run) return { text: `${run}/${n}`, cls: "run" };
+      if (actShown) return { text: `${actShown}/${n}`, cls: "warn" };
+      return { text: String(n), cls: "" };
+    }
+
+    function selectItem(it) {
+      selectedId = it.id;
+      for (const gid of folderPathOfItem(it)) setFolderOpen(gid, true);
+      lastEnsuredSelect = it.id;
+      if (logModule !== "all") {
+        logModule = ITEM_TO_LOG[it.id] || it.id;
+        localStorage.setItem("releaseLogModule", logModule);
+        hideLogUntilChange = null;
+        lastLogText = "";
+      }
+      renderList();
+      renderDetail();
+      renderLogTabs();
+      loadLog();
+    }
+
+    function appendLeafRow(box, it) {
+      const row = document.createElement("div");
+      row.className = "tree-row leaf" + (selectedId === it.id ? " active" : "");
+      row.setAttribute("role", "treeitem");
+      row.tabIndex = 0;
+      const btn = it.button;
+      const canAct =
+        !!btn && (it.status === "running" || it.status === "action" || it.queue);
+      row.innerHTML = `
+        <span class="tree-chevron">·</span>
+        <span class="tree-name" title="${(it.detail || it.title || "").replace(/"/g, "&quot;")}">${shortItemTitle(it)}</span>
+        <span class="tree-aside">
+          <span class="tag ${it.status || "unknown"}">${statusLabel(it.status)}</span>
+          ${btn && canAct ? `<button class="act" data-action="${btn.action}">${btn.label}</button>` : ""}
+        </span>`;
+      row.onclick = (e) => {
+        if (e.target.closest("button")) return;
+        selectItem(it);
+      };
+      row.onkeydown = (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          selectItem(it);
+        }
+      };
+      const b = row.querySelector("button.act[data-action]");
+      if (b && canAct) {
+        b.onclick = (ev) => {
+          ev.stopPropagation();
+          selectItem(it);
+          runAction(b.getAttribute("data-action"));
+        };
+      }
+      box.appendChild(row);
+    }
+
+    function renderFolderNode(parent, node, items, placed) {
+      const matched = collectMatched(items, node);
+      if (!matched.length) return;
+      matched.forEach((it) => placed.add(it.id));
+
+      const open = isFolderOpen(node.id);
+      const meta = groupMeta(matched);
+      const folder = document.createElement("div");
+      folder.className = "tree-folder" + (open ? "" : " collapsed");
+      folder.dataset.group = node.id;
+
+      const head = document.createElement("button");
+      head.type = "button";
+      head.className = "tree-row folder" + (open ? "" : " collapsed");
+      head.setAttribute("aria-expanded", open ? "true" : "false");
+      head.innerHTML = `
+        <span class="tree-chevron">▾</span>
+        <span class="tree-name">${node.label}</span>
+        <span class="tree-aside"><span class="tree-meta ${meta.cls}">${meta.text}</span></span>`;
+      head.onclick = (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        toggleFolder(node.id);
+        renderList();
+      };
+
+      const children = document.createElement("div");
+      children.className = "tree-children";
+      children.setAttribute("role", "group");
+
+      if (node.children && node.children.length) {
+        for (const child of node.children) {
+          renderFolderNode(children, child, items, placed);
+        }
+      } else {
+        for (const it of matched) appendLeafRow(children, it);
+      }
+
+      folder.appendChild(head);
+      folder.appendChild(children);
+      parent.appendChild(folder);
+    }
+
     function renderList() {
       const box = $("list");
       box.innerHTML = "";
       if (!plan) return;
-      for (const it of plan.items || []) {
-        const row = document.createElement("div");
-        row.className = "mod" + (selectedId === it.id ? " active" : "");
-        row.onclick = (e) => {
-          if (e.target.closest("button")) return;
-          selectedId = it.id;
-          if (logModule !== "all") {
-            logModule = ITEM_TO_LOG[it.id] || it.id;
-            localStorage.setItem("releaseLogModule", logModule);
-            hideLogUntilChange = null;
-            lastLogText = "";
-          }
-          renderList();
-          renderDetail();
-          renderLogTabs();
-          loadLog();
-        };
-        const btn = it.button;
-        // 队列串行：其它任务进行中仍可点，进入排队；进行中可点查看进度
-        const canAct =
-          !!btn && (it.status === "running" || it.status === "action" || it.queue);
-        row.innerHTML = `
-          <div>
-            <div class="name">${it.title || it.id}</div>
-            <div class="why">${it.detail || ""}</div>
-          </div>
-          <div class="mod-actions">
-            <span class="tag ${it.status || "unknown"}">${statusLabel(it.status)}</span>
-            ${btn ? `<button class="act" data-action="${btn.action}" ${canAct ? "" : "disabled"}>${btn.label}</button>` : ""}
-          </div>`;
-        const b = row.querySelector("button.act[data-action]");
-        if (b && canAct) {
-          b.onclick = (ev) => {
-            ev.stopPropagation();
-            selectedId = it.id;
-            const logKey = ITEM_TO_LOG[it.id] || it.id;
-            if (logKey) {
-              logModule = logKey;
-              localStorage.setItem("releaseLogModule", logModule);
-              hideLogUntilChange = null;
-              lastLogText = "";
-            }
-            renderList();
-            renderDetail();
-            renderLogTabs();
-            runAction(b.getAttribute("data-action"));
-          };
+
+      // 选中项变更时展开路径上的目录（不阻止之后手动收起）
+      if (selectedId && selectedId !== lastEnsuredSelect) {
+        const it = (plan.items || []).find((x) => x.id === selectedId);
+        if (it) {
+          for (const gid of folderPathOfItem(it)) setFolderOpen(gid, true);
         }
-        box.appendChild(row);
+        lastEnsuredSelect = selectedId;
       }
+
+      const tree = document.createElement("div");
+      tree.className = "tree";
+      tree.setAttribute("role", "tree");
+
+      const items = plan.items || [];
+      const placed = new Set();
+      for (const root of TREE_SPEC) {
+        renderFolderNode(tree, root, items, placed);
+      }
+      for (const it of items) {
+        if (!placed.has(it.id)) appendLeafRow(tree, it);
+      }
+      box.appendChild(tree);
     }
 
     function renderDetail() {
@@ -992,6 +1247,7 @@
               "sync-ops-indexes": "index_ops",
               "sync-ops-cmteb": "index_ops_zh",
               "ensure-ops-cmteb": "index_ops_zh",
+              "pull-swe-eval-images": "swe_eval_images",
             }[watchAction];
             const it = itemId
               ? (plan.items || []).find((x) => x.id === itemId)
@@ -1053,7 +1309,9 @@
       } else {
         watchDeploy = false;
         watchAction = action;
-        watchUntil = Date.now() + 60 * 60 * 1000;
+        // SWE eval images ≈1GiB each; n5 can take well over an hour on slow Hub.
+        const longPull = action === "pull-swe-eval-images";
+        watchUntil = Date.now() + (longPull ? 4 : 1) * 60 * 60 * 1000;
       }
       renderList();
       renderMode();
@@ -1091,6 +1349,7 @@
           "sync-ops-indexes": "index_ops",
           "sync-ops-cmteb": "index_ops_zh",
           "ensure-ops-cmteb": "index_ops_zh",
+          "pull-swe-eval-images": "swe_eval_images",
           "git-pull": "all",
         }[action];
         if (key) {
