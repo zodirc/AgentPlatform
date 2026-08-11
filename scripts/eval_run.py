@@ -1077,9 +1077,12 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
             )
             merge_sse_records(events, event_records, turn_records)
         elif needs_approval:
-            approval_records, _, approval_first_token = collect_sse_event_records(
+            approval_records, approval_ttfb, approval_first_token = collect_sse_event_records(
                 base, turn_id, {"approval.requested"}, started_at=turn_started_at
             )
+            # Approval cases still need TTFB for latency asserts (e.g. agent.01 / agent.10).
+            if ttfb_ms is None:
+                ttfb_ms = approval_ttfb
             if first_token_ms is None:
                 first_token_ms = approval_first_token
             merge_sse_records(events, event_records, approval_records)
