@@ -17,4 +17,4 @@ Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `mak
 
 ## 方案（草案）
 
-尚未升格正文的设计稿见 [plan/](plan/)（例如 [Coding 结构智能 · LSP/AST](plan/coding-structural-intelligence.md)）。冲突时以本目录六篇为准。
+尚未升格正文的设计稿见 [plan/](plan/)（例如 [Coding 结构智能 · LSP/SWE](plan/coding-structural-intelligence.md)、[Agent 工作区异步 AST](plan/agent-workspace-ast-index.md)）。冲突时以本目录六篇为准。

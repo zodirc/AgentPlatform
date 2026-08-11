@@ -1,30 +1,40 @@
 # 方案：Coding 结构智能（LSP / AST）
 
-> **状态**：已落地（含 Ops SWE 接线）· 待你跑 lite 双轨实测 · 2026-08-10  
-> **范围**：`agent`（及确需写代码的协作向 Profile）写入链路  
-> **非范围**：默认不进入 `writing` / 纯资料向场景  
+> **状态**：Wave 1 已落地（Locate/Impact 揉合，2026-08-11）· **Wave 2 方案见 §7** · 场景分型见 **§3** · 当前流程 §6.0 · 实测 §6.7  
+> **范围**：`agent` 写入链的 **LSP 结构揉合** + SWE/Ops 评测协议（本文）  
+> **姊妹草案**：[Agent 工作区异步 AST 索引](agent-workspace-ast-index.md)（Cursor 式 codebase · GUI/Work/DB · **未实施**）  
+> **非范围**：writing/intel RAG 主链细节；不以资料检索充当 Agent Locate  
 > **约束权威**：[架构 · R1–R5](../core/architecture.md) · [工具与上下文](../core/tools-and-context.md) · [Runtime](../core/runtime.md) · [RAG 两平面](../topics/rag.md)  
-> **相关现状**：CQ4 正则代码切块（`retrieval/chunking.py`）· `read_lints`≈ruff · `search_codebase`≈转义 grep · OpenCode「LSP/结构化导航」曾作产品备案  
-> **外部基准**：SWE-bench Lite（全 Python，见 §8）——决定语言矩阵 Python-first 与阶段收益排序  
+> **相关现状**：`read_lints`=LSP∪CLI · Locate=`search_codebase`/裸符号 `grep`→definition · Impact=`edit_file.impact` · RAG 切块（writing/intel）  
+> **外部基准**：SWE-bench Lite（全 Python；协议 §8；**实测过程 §6.7**）  
 
-本文回答三件事：
+本文回答五件事：
 
 1. Coding **写入时**应具备怎样的结构能力（不以「够用」为终点）。  
 2. 如何与 **速率红线 R1–R5**、**现有交互逻辑**共存。  
-3. 各种接入方式、失败、降级、场景边界下的具体行为。
+3. 各种接入方式、失败、场景边界下的具体行为。  
+4. **当前端到端流程与问题清单**（Ops L1 → Turn → 工具揉合 → 交卷；见 **§6.0 / §6.7**）。  
+5. **下一波怎么改（Wave 2，§7）**：基于实测工具分布与成熟 agent 已验证做法，把 Verify、编辑失败恢复、复现纪律焊进模型真实高频动词（`edit_file` / `run_command`），零新 Engine 节点、零预注入。  
 
 ---
 
 ## 0. 一句话立场
 
-**LSP / AST 是 coding 写入链的一等结构车道（定位 · 落笔几何 · 验证），不是 Turn 主链上的固定流水线，也不是写作场景的负担。**
+**LSP 是 coding 写入链已落地的结构车道（定位 · Impact · 验证）；写作 / 威胁情报走 RAG。工作区异步 AST 索引为产品向候选，见姊妹草案，不与本文 SWE 评测主线混写。**
 
 形态必须是：
 
 ```text
-能力 = 工具（按需） + 旁路索引（异步）
-差异 = ScenarioProfile 白名单（agent 开 / writing 关）
+能力 = agent Profile 工具面的固有环节
+  · Locate：search_codebase（符号→definition）+ 精度 goto_definition
+  · Impact：edit_file.impact.references + 精度 find_references
+  · Verify：LSP read_lints
+差异 = ScenarioProfile 白名单
+  · agent：结构工具有 / search_sources 无
+  · writing · intel：search_sources 有 / 结构工具无
 Engine = 禁止 if scenario；禁止为结构智能加固定 pipeline 节点
+失败 = 基础设施故障显式 failed（缺 language server 不算「降级成 grep 产品路径」）
+候选 = Agent 工作区异步 AST → agent-workspace-ast-index.md（不携带 RAG）
 ```
 
 ---
@@ -37,9 +47,9 @@ Agent 改代码的质量，不只取决于模型「会不会写」，还取决�
 
 | 写入阶段 | 今天大致靠什么 | 结构层缺失时的典型失败 |
 |----------|----------------|------------------------|
-| **改前定位** | `grep` / `glob` / `search_codebase`(词面) / `read_file` | 假阳性、漏调用点、跨文件符号找不到、多跳靠猜 |
-| **改时落笔** | `edit_file` 唯一 span | 切碎函数、span 不唯一、边界落在字符串/注释里、整文件重写诱惑 |
-| **改后验证** | `read_lints`(ruff) / `run_tests` | 非 Python 弱或无诊断；类型/未解析引用靠测试偶然抓住 |
+| **改前定位** | 模型常点 `grep`/`read_file`/`run_command`；产品契约要求符号走 Locate（`search_codebase` 或裸符号 `grep` 重定向） | 假阳性、漏调用点、跨文件符号找不到、多跳靠猜 |
+| **改时落笔** | `edit_file` 唯一 span；成功后附 `impact.references` | 切碎函数、span 不唯一、改完不知调用面 |
+| **改后验证** | `read_lints`(LSP∪CLI) / `run_tests` | 非 Python 弱或无诊断；类型/未解析引用靠测试偶然抓住 |
 
 CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为闭环**；本文解决的是闭环里 **传感器与手术刀是否够结构化**。两者叠加，不以互斥。
 
@@ -70,8 +80,9 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 2. **场景隔离**：只挂 coding 向 Profile；写作不背成本。  
 3. **两平面**：重活在索引面（R4）；交互面只有按需工具调用。  
 4. **能力即工具**：与 [工具与上下文](../core/tools-and-context.md) 一致——注册 `ToolSpec`，不改 while。  
-5. **降级合法**：无 server / timeout / 不支持语言 → 回落 grep/ruff/正则切块，Run 不卡死。  
-6. **证明优先（R5）**：无 agent 质量 golden / 延迟对照，不合并「感觉更好」。
+5. **失败显式，禁止「够用」冒充成功**：无 server / timeout / 不支持语言 → Locate/Impact 标 `failed` / `locate_incomplete`；**不得**把纯词面命中当成结构 Locate 完成。  
+6. **证明优先（R5）**：无 agent 质量 golden / 延迟对照 / Ops 过程指标，不合并「感觉更好」。  
+7. **揉合进真实调用路径**：能力必须落在模型**实际会点**的动词上（见 §6.7）；禁止只加旁支工具名 + 纪律催用。
 
 ---
 
@@ -82,12 +93,11 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | | |
 |--|--|
 | **是什么** | 把源码解析成语法树；按节点（函数、类、方法）理解边界 |
-| **买入链路** | 索引切块几何；可选：校验 `edit_file` span 是否落在干净节点；符号名抽取 |
-| **不直接买** | 跨文件引用图、类型错误、项目配置感知 |
-| **成本特征** | 单文件解析相对可控；全库同步 parse 伤 R3；适合 **异步索引** 与 **单次工具内** 使用 |
+| **买入链路** | （1）**RAG 旁路**：`sources/` 代码切块几何（writing/intel）；（2）**候选 · Agent 工作区索引**：仓库符号/边界表（无向量）；（3）可选：工具内单文件校验 edit span |
+| **不直接买** | 跨文件引用图、类型错误、项目配置感知（这些仍归 LSP） |
+| **成本特征** | 单文件解析相对可控；全库同步 parse 伤 R3；适合 **异步旁路** 与 **单次工具内** 使用；**Agent 全仓索引 ≠ 必须绑 RAG** |
 
-本仓 CQ4 现状：`retrieval/chunking.py` 用 `_CODE_SYMBOL_RE` 按顶层符号头切块，注释已写明 *not a full AST*。AST 是该车道的正确升级，不是新发明一条热路径。
-
+本仓现状：`retrieval/chunking.py` 在 **RAG sync** 路径上优先 tree-sitter、失败回落 CQ4 正则（*not a full IDE index*）。**Agent Profile 当前不消费该旁路**（无 `search_sources`）。Agent 侧 Cursor 式工作区 AST 索引见 [agent-workspace-ast-index.md](agent-workspace-ast-index.md)。
 ### 2.2 LSP（Language Server Protocol）
 
 | | |
@@ -97,72 +107,145 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | **不直接买** | 「写出更好业务逻辑」；也不能免除测试 |
 | **成本特征** | 进程生命周期、冷启动、内存、工作区同步（didOpen/didChange）、部分 server 会执行项目配置 |
 
-### 2.3 和现有工具的映射（目标态）
+### 2.3 和现有工具的映射（当前态 · 2026-08-11）
 
-| 能力 | 现实现 | 目标态 |
-|------|--------|--------|
-| 词面搜索 | `grep` | 保留（精确字符串仍需要） |
-| 「语义/代码库搜索」 | `search_codebase` = `re.escape` + grep | 正名或升级：LSP `workspace/symbol` / 符号索引混合；避免名实不符长期误导模型 |
-| 诊断 | `read_lints` → `ruff check` | **同一工具名** 背后：LSP diagnostics ∪ CLI；模型侧纪律不变 |
-| 定义/引用 | 无 | 新只读工具（或并入导航族） |
-| 代码切块 | CQ4 正则 | 索引面 tree-sitter（可选，按语言逐步） |
+| 能力 | 当前实现 |
+|------|----------|
+| 词面 / regex 搜索 | `grep`（精确串、报错文本、regex） |
+| 符号 Locate | `search_codebase`（符号→LSP definition）+ **裸符号 `grep` 重定向**同一路径；结果 `definitions[]` / `locate_incomplete` |
+| 精度定义 / 引用 | `goto_definition` / `find_references`（模型极少主动点；供加深与委派） |
+| 改后 Impact | 代码路径 `edit_file` 成功 → **必附** `impact.references`（同 refs 适配器） |
+| 诊断 | `read_lints` = LSP ∪ ruff/CLI |
+| 代码切块（RAG · writing/intel） | `sources/` sync：CQ4 / tree-sitter；**Agent 不消费** |
+| 工作区 AST 索引（Agent） | **未落地** → [agent-workspace-ast-index.md](agent-workspace-ast-index.md) |
 
 ---
 
-## 3. 场景边界：为什么不影响写作
+## 3. 场景分型：写作 / 威胁情报（RAG）vs Agent（LSP + 结构索引）
 
-### 3.1 Profile 事实
+> **硬隔离**：RAG 语料面与 Agent 编码结构面 **不是同一条旁路**。  
+> Agent Profile **没有** `search_sources`；写作 / 威胁情报 **没有** coding 结构工具面。  
+> 不得把「`sources/` sync → embed/FTS」当成 Agent 的 codebase AST；也不得在 writing/intel Session 上偷偷起 LSP。
 
-| Profile | 与结构智能相关的现有工具 |
-|---------|--------------------------|
-| `writing` | 无 `edit_file` / `read_lints` / `search_codebase` / `run_tests` |
-| `agent` | 具备上述编码工具面 |
-| `collab` 等 | 仅当白名单含编码工具时启用结构能力 |
+### 3.0 总表（先读这张）
 
-### 3.2 隔离规则（硬）
+| 场景 | Profile | 主检索 / 定位入口 | 索引 / 旁路 | 与 AST 的关系 | 与 LSP 的关系 |
+|------|---------|-------------------|-------------|---------------|---------------|
+| **写作** | `writing` | `search_sources`（资料 RAG） | `sources/` → `index_scheduler` 切块 + embed/FTS | 代码文件若落在 `sources/`，切块可走 tree-sitter（**RAG 切块几何**，服务检索召回） | **不起** Language Server；无 `search_codebase` / `edit_file` / `read_lints` |
+| **威胁情报** | `intel` | 同左：`search_sources` 为主 | 同左（资料/情报语料面） | 同左；默认 **不开** coding 结构工具 | **默认不起** LSP；若未来只读导航需单独评审，仍不开写副作用结构操作 |
+| **Agent 编码**（含 SWE L1） | `agent` | `search_codebase` / `grep` / `read_file`（**无** `search_sources`） | **当前**：无 Cursor 式工作区符号库；词面扫盘 + LSP 按需 | **当前未揉合**「工作区旁路 AST 索引」；写前语法门可用单文件 `ast`/parse（≠ 全仓索引） | **已揉合**：符号 Locate→definition；Impact→references；`read_lints` = LSP∪CLI |
+| **协作等** | `collab` 等 | 以工具白名单为准 | 仅当白名单含编码工具时启用结构能力 | 同 agent 子集 | 同左 |
 
-1. **工具白名单**：结构工具 **只** 写入 `agent.yaml`（及明确 coding 的 Profile）。  
-2. **进程**：Language Server / tree-sitter worker **不** 因 writing Session 启动。  
-3. **前缀**：writing 的 `system.md` + `tools[]` 字节布局不变（AQ1/WT5 不受影响）。  
-4. **索引**：资料库 Markdown 切块路径不变；代码 AST 切块仅作用于代码扩展名（延续 CQ4 `is_code_path`）。  
-5. **Engine**：禁止场景分支；「无工具注册 = 无能力」即隔离。
+**一句话**：写作 / 情报买的是 **RAG**；Agent 评测/写入主链买的是 **LSP（+ 词面）**；Cursor 式工作区 AST 见姊妹草案（不携带 RAG）。
 
-### 3.3 边界情况
+### 3.1 写作（`writing`）— RAG 语料面
+
+| 项 | 约定 |
+|----|------|
+| 工具 | 有 `search_sources`；**无** `edit_file` / `read_lints` / `search_codebase` / `run_tests` |
+| 旁路在做什么 | 启动 / watch / 显式 sync → 扫 Work 的 **`sources/`** → 切块（Markdown 标题；代码扩展名可 tree-sitter）→ embed / FTS |
+| AST 角色 | **仅服务切块边界**（召回几何），不是符号 Locate，不是 IDE 式 codebase index |
+| 新建 `.py` 在写作工作区 | 仍无结构工具；不偷偷起 LSP；若文件在 `sources/` 内，下一次 **sources sync** 才更新检索切片 |
+| 验收 | writing Profile 工具列表与前缀稳定；RAG 回归不因 Agent 结构改动而变差 |
+
+### 3.2 威胁情报（`intel`）— 同属 RAG 语料面
+
+| 项 | 约定 |
+|----|------|
+| 与写作的关系 | **同一检索平面家族**（`search_sources` + `sources/` 索引），语料与过滤策略可不同（如隐藏 writing 种子语料），但 **不是** Agent 编码链 |
+| 结构智能 | **默认关闭**（无 coding 工具白名单 → 无 LSP / 无 Agent AST 索引） |
+| 未来扩展 | 若要「读代码库做情报」，单独开 **只读** 导航；仍不开 rename 等写副作用；**仍不**把 Agent 工作区 AST 与情报 RAG 绑死 |
+
+### 3.3 Agent（`agent`）— LSP + 词面（当前）；工作区 AST 见姊妹草案
+
+#### 3.3.1 当前已落地（2026-08）
+
+```text
+Locate  ：符号 → search_codebase → LSP definition（裸符号 grep 重定向同一路）
+         非符号 → 词面扫盘（hits）；LSP 基建失败 → 显式 failed（禁止词面冒充 Locate 成功）
+Impact  ：edit_file.impact.references ← LSP references
+Verify  ：read_lints = LSP ∪ ruff/CLI；写前语法门（单文件 parse）
+词面    ：grep / lexical search_codebase（磁盘扫描；须 off-loop，排除 .git/.venv 等噪声）
+RAG     ：Profile **无** search_sources —— 讨论 Agent 结构时 **不考虑** 资料检索旁路
+```
+
+SWE-bench L1 临时 worktree：**不**预建 RAG 索引；Locate 靠 LSP + 词面（与「harness 工作区无预建索引」一致）。
+
+#### 3.3.2 候选：Agent 工作区异步 AST（已拆出）
+
+Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**不在本文展开**，以免与 SWE/Ops 评测主线缠在一起。
+
+→ 见独立草案：[agent-workspace-ast-index.md](agent-workspace-ast-index.md)
+
+要点摘要（详细契约以该文为准）：
+
+- **不携带 RAG**；与 `sources/` embed 流水线隔离。  
+- **主权在 `work_id`**，不在 GUI 模式点击。  
+- 精确定义 / Impact / 诊断仍以 **LSP** 为准；索引可脏须显式 `stale`。  
+- SWE/ops-l1 默认不持久。
+
+### 3.4 Profile 工具事实（对照）
+
+| Profile | 与结构 / RAG 相关的工具事实 |
+|---------|------------------------------|
+| `writing` | 有 `search_sources`；无 coding 结构工具 |
+| `intel` | 有 `search_sources`；默认无 coding 结构工具 |
+| `agent` | 有 `search_codebase` / `edit_file` / `read_lints` / …；**无** `search_sources` |
+
+### 3.5 隔离规则（硬）
+
+1. **工具白名单**：结构工具只写入 `agent.yaml`（及明确 coding 的 Profile）；RAG 入口只在 writing/intel 等资料向 Profile。  
+2. **进程 / Job**：Language Server **不** 因 writing/intel Session 启动；Agent AST **job 按 Work** 调度（可在用户正停留在写作 GUI 时继续跑增量），但 **writing/intel 面板不展示、不调用** 其查询 API。  
+3. **前缀**：writing / intel 的 `system.md` + `tools[]` 字节布局不因 Agent 结构改动而膨胀。  
+4. **两条索引旁路不得混用**：  
+   - RAG：`sources/` → 切块 → embed/FTS（写作/情报）；热语料以用户上传私有库为主  
+   - Agent AST（候选）：工作区 → 符号表（**DB 持久 + 内存投影**，无向量）  
+5. **Engine**：禁止 `if scenario`；「无工具注册 = 无能力」即隔离。  
+6. **GUI**：模式切换只换 Scenario/面板；**禁止**把模式点击绑成「拆掉 / 重建」另一套索引。
+
+### 3.6 边界情况
 
 | 情况 | 行为 |
 |------|------|
-| 用户在 writing 工作区里放了 `.py` | 仍无结构工具；可用 `grep`/`read_file`；不偷偷起 LSP |
-| 同一 Work 先 writing 后切 agent Session | agent Session 可按 §5 软预热；writing Session 不受影响 |
-| `delegate` 子 agent | 仅当子类型工具集包含结构工具时可用（如 `explore`/`verify`）；drafter 等写作子类型不可见 |
-| intel 场景 | 默认不开；若未来要「读代码库做情报」再单独开只读导航，仍不开写副作用结构操作 |
+| 用户在 writing 工作区放了 `.py` | 仍无结构工具；可用资料向检索工具；不偷偷起 LSP；若该 Work 已启用 Agent AST，则 **异步脏更新**（写作 GUI 不显示进度） |
+| GUI 点击 Agent ↔ 写作（同 Work） | 不重建 RAG / 不重建 AST；分别订阅各自进度通道；工具白名单瞬时切换 |
+| 同一账号切换到另一 Work | 进度条与符号查询切到新 `work_id`；旧 Work 索引保留在 DB，idle GC 另议 |
+| 另一账号同名路径 | ACL 隔离；不可见他人 `work_ast_*` 行 |
+| runtime 重启 | 从 DB 恢复 meta + 符号投影；generation 不变则不必全量冷启动，按脏队列追平即可 |
+| 同一 Work 先 writing 后切 agent Session | agent Session 可软预热 LSP；AST 进度显示该 Work 已有世代 |
+| Agent Turn 内 `write_file` 新建代码 | **立即**对词面可见；下次 Locate 可走 LSP；**不**触发写作 RAG sync；Agent AST 异步脏更新 + 进度可短暂 `stale`/`building` |
+| `delegate` 子 agent | 仅当子类型工具集包含结构工具时可用；写作子类型不可见 |
+| intel 要读代码库 | 单独评审只读导航；不自动获得 Agent 全量写码结构面 |
+| Ops L1 / SWE 临时 Work | 默认不写 AST DB（或短 TTL）；详见 [工作区 AST 草案](agent-workspace-ast-index.md) |
 
 ---
 
-## 4. 架构放置：三层模型
+## 4. 架构放置：交互面 · LSP 结构服务 · RAG 隔离
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │  Turn 交互面（AgentEngine loop）                             │
-│  模型按需调用只读/验证工具；写盘仍走 edit_file + 审批         │
-│  ✗ 禁止：assemble 内同步全库 AST / 强制起 LSP 再首 token    │
+│  模型按需调用工具；写盘仍走 edit_file + 审批                 │
+│  ✗ 禁止：assemble 内同步全库 parse / 强制起 LSP 再首 token │
 └─────────────────────────────────────────────────────────────┘
-        │ tool_result（预算截断、紧凑行协议）
+        │ tool_result
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  结构服务（Session/Work 级，可热可冷）                        │
-│  Language Server 池 · 单次 tree-sitter parse · 降级适配器     │
-│  生命周期与 Turn 解耦；Cancel 不要求 ResumeTurn               │
+│  结构服务（本文主线）                                         │
+│  Language Server 池 · Locate/Impact/read_lints 适配器         │
+│  生命周期与 Turn 解耦；失败显式 failed                        │
 └─────────────────────────────────────────────────────────────┘
-        │ 符号/切块产物（可选）
+        │（场景隔离）
         ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  索引面（R4，与 RAG index_scheduler 同构）                   │
-│  代码文件 → AST/tree-sitter 切块 → embed / FTS / 符号表      │
-│  ✗ 禁止：search / StartTurn 同步重建                         │
+│  RAG sources 索引（writing/intel · 已有）                     │
+│  sources/ → 切块 → embed/FTS · ✗ 不充当 Agent Locate        │
 └─────────────────────────────────────────────────────────────┘
+
+候选旁路（Agent 工作区 AST · GUI/Work/DB）→ agent-workspace-ast-index.md
 ```
 
-与 RAG「索引面 vs 交互面」同构：热路径只 **使用** 已有结构，不 **重建** 结构。
+热路径只 **使用** 已有结构，不 **同步重建**（R4）。
 
 ---
 
@@ -185,6 +268,7 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | 旁路软预热（Work 进入 agent 后后台 initialize） | 不挡 TTFB；首次工具可能已热 | ✅ |
 | 首次结构工具冷启动 | 该次 tool 墙钟变长；结果标 `cold_start=true` | ✅（需 timeout） |
 | edit 后对 **受影响路径** 调 `read_lints` | 单次工具延迟 | ✅（现有 CQ1 纪律） |
+| `edit_file` 内联 **单文件** 语法门 + 增量诊断（Wave 2 W1，§7.3） | 单次工具延迟；语法门毫秒级、诊断有 timeout | ✅（timeout 强制、超时显式不失败 edit） |
 | edit 后默认全仓库 LSP diagnostics | Turn 墙钟与上下文膨胀 | ❌ 默认禁用 |
 | 索引面 tree-sitter 切块 | 查询路径不变 | ✅ |
 
@@ -200,30 +284,162 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 
 权威：能力即工具；只读可并行；写盘审批；取消是终态；无 ResumeTurn。
 
-### 6.1 工具族（建议）
+### 6.0 当前端到端流程与问题清单（完整细节）
+
+> 读本节即可回答：「现在一题 SWE L1 从点跑到交卷发生了什么、结构智能插在哪、还卡什么。」  
+> 历史跑数与决策背景见 §6.7；协议与双轨见 §8。
+
+#### 6.0.1 总览（两层）
+
+```text
+┌─ Ops L1 套件层（api / official_agent_path）─────────────────────────────┐
+│  pull Lite → plan(n, checkout, harness) → mirror prewarm                 │
+│  → 每题 checkout(commit) → StartTurn(agent) → 等 Turn 终态                │
+│  → 抽 git_diff / 校验 apply → bucket →（可选）harness → 报告              │
+└──────────────────────────────────────────────────────────────────────────┘
+                              │ Work 已 materialize；prompt 含 Required loop
+                              ▼
+┌─ Turn 交互层（runtime AgentEngine while）────────────────────────────────┐
+│  assemble → model → tool_use* → tool_result 回灌 → … → 终态              │
+│  结构智能不改 while：只在工具 handler / 结果契约里生效（§6.0.3）           │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+#### 6.0.2 Ops L1 套件层（逐步）
+
+| 步 | 谁 | 做什么 | 失败 / 注意 |
+|----|----|--------|-------------|
+| 1 | Ops UI / api | 开跑 L1 coding：`scenario_id=agent`，`checkout=True`（UI 锁定），可选 harness | checkout=False **已禁止**（API 400 / runner hard-require） |
+| 2 | api | pull SWE-bench Lite instances（可缓存） | 缓存命中则跳过下载 |
+| 3 | api | `coding plan`：n、parallel、checkout、harness | 日志可能因重入打两遍 plan；以真实 checkout 为准 |
+| 4 | api | **suite mirror prewarm**：对本批涉及 repo 拉/暖 mirror | `ok`/`failed` 计数；失败题后面 checkout 易挂 |
+| 5 | api | 每题 **checkout** 到 Work：`repo@commit`，写 `problem.md` | `mirror_hit`；**失败 → `checkout_failed`，不再 fallback 成「只有 problem.md」** |
+| 6 | api | `StartTurn`：注入 L1 `coding_prompt`（Required loop：search_codebase Locate → edit → impact/lints） | 禁网：`OPS_EVAL_DENY_NETWORK` 须进 **runtime** 容器 |
+| 7 | runtime | Turn 跑满 / 失败 / 取消（`max_steps` 现默认 **150**） | 步数触顶常见于半截 edit |
+| 8 | api | 从 worktree 抽 patch（`git_diff`，含合理 untracked）；clean-HEAD / reverse **apply-check** | 拒收截断 / 不可 apply；脏树 forward-check 假阴性已修 |
+| 9 | api | 分桶：`ok` / `no_patch` / `patch_no_apply` / `checkout_failed` / … | Official `process.jsonl` **只有 case 摘要**，无逐工具名 |
+| 10 | api/harness | 可选跑 swebench harness → `resolve_rate` | **仍可能 exit 1**（见开放问题）；失败读 `harness.stdout.log` |
+
+并行：同 suite 可 `parallel=2` 多题 Turn 同时跑（各 Work 隔离）。
+
+#### 6.0.3 Turn 内写入流程（模型视角 + runtime 契约）
+
+产品要求的阶段（`system.md` / L1 prompt）与 **runtime 强制契约** 对照：
+
+```text
+① Orient
+   模型：读 problem.md / issue；抽出符号名、失败测试、路径提示
+   Ban：list_dir(".") 摸根、repo tourism
+
+② Locate（结构车道 · 已揉合）
+   模型常点：grep / read_file /（偶尔）search_codebase
+   Runtime：
+     · search_codebase(符号) → adapters.goto_definition → definitions[]
+     · grep(裸符号整串) → 内部同上，事件名仍是 grep，结果带 redirected_from
+     · grep(报错串/regex) → 纯词面
+     · LSP 基建挂 → status=failed（禁止词面冒充 Locate 成功）
+     · 无 definition 仅有词面 → locate_incomplete=true
+   精度：goto_definition（有 path:line / 多跳）——模型实测几乎不点
+
+③ Read
+   read_file 定义命中；完整读完后禁止无故再读同一 path（Read-after-complete）
+
+④ Edit
+   edit_file 唯一 span；失败则 read 一次再改 span
+   Ban：无故 write_file 整文件重写；半截行
+
+⑤ Impact（结构车道 · 已揉合 · 不依赖模型再点 find_references）
+   edit_file 成功且路径为代码（当前 language_for_path：.py/.pyi）→
+     extract_symbols_from_edit(old,new) → adapters.find_references →
+     结果必含 impact{status,symbol,references,lines,…}
+   非代码 / 抽不出符号 → impact.status=skipped
+   LSP 基建挂 → impact.status=failed（文件已改，须显式暴露）
+
+⑥ Verify
+   模型应 read_lints(受影响路径)；必要时 run_tests / 最小 run_command
+   read_lints = LSP ∪ ruff；LSP 基建挂 → status=failed
+
+⑦ 结束
+   worktree 上完整可 apply 的改动；平台用 git_diff 计分，不靠模型口述 patch
+```
+
+**符号判定（Locate 重定向门槛）** — `app/structural/symbols.py`：
+
+- `is_symbol_query`：整串为 `Ident` 或 `a.b.c`，无空白、无 regex 元字符。  
+- 例：`Widget` / `astropy.io.fits` → Locate；`ValueError: boom` / `def foo\(` → 词面 grep。
+
+**Impact 符号抽取**：优先 span 内 `def`/`class`/… 头；否则 old/new 标识符差集；再否则旧 span 中出现的标识符。
+
+> **Wave 2 目标态**（§7.3，待评审）：⑥ Verify 的单文件部分同样焊进 ④ 的结果契约（`edit_file` 附 `checks`：写前语法门 + 写后增量诊断）；② Locate 之前增加 **Reproduce** 相位（先复现失败，修后复跑，纯 prompt 层）；④ 的 span 失配失败改为回显最近候选而非裸失败。
+
+#### 6.0.4 一题内「实际常发生」的调用形态（实测）
+
+设计期望 vs `01599d49` 上模型真实习惯：
+
+```text
+期望：problem.md → search_codebase(符号) → read_file → edit_file(+impact) → read_lints → tests
+实测：problem.md → list_dir?/grep?/run_command(sed -n …) → read_file → …
+      → edit_file →（很少 read_lints）→ …
+      工具名：search_codebase=0, goto=0, refs=0；grep/read/run_command 占主导
+```
+
+因此揉合策略是：**不指望模型改点工具名**，而把 definition/references **焊进它已经会点的 grep / edit_file**。下一趟验收看结果字段，不看 `search_codebase` 计数（§6.7.6）。
+
+#### 6.0.5 问题清单（当前）
+
+| ID | 问题 | 状态 | 说明 |
+|----|------|------|------|
+| P1 | 无仓 / 仅 problem.md，结构工具无意义 | **已解** | checkout 强制 + mirror prewarm；失败 → `checkout_failed` |
+| P2 | `STRUCTURAL_ENABLED` 默认关 / 评测未开 | **已解** | 开关删除；能力=Profile 白名单 |
+| P3 | 缺 LSP 时静默降级成「grep/ruff 也行」 | **已解** | Locate/Impact/read_lints 基建失败 → 显式 `failed` |
+| P4 | `max_steps` 触顶 → 半截 diff | **已缓解** | 默认 150；交卷拒截断；**W3 失败候选回显 + W5 交卷自检** 进一步压缩重试与半截（§7.3） |
+| P5 | 脏树 `git apply --check` 假阴性 → 误 `patch_no_apply` | **已解** | clean-HEAD / reverse-check |
+| P6 | harness 无法给出官方 `resolve_rate` | **根因已定位 · 方案落地中（N0）** | 不是「infer 挂了」：L1 可出可 apply patch（`patch_rate` 代理指标 OK）。卡点是 **本地缺 `sweb.eval` 实例镜像** + Hub 现拉易挂死 + 默认 `cache_level` 评后删图。方案：看板预拉 + `cache_level=instance` + `require_local_images` 失败快返 + 进度可观测（§6.7.1 / §7.5 / §8.5） |
+| P7 | 模型不点 `goto_definition` / `find_references` / `search_codebase` | **部分解** | 能力已揉进 grep/edit；**adoption 的工具名 KPI 仍低**（预期，不再作 KPI；§7.6） |
+| P8 | 大量 `run_command`+`sed -n` 当 pager | **方案已定** | Ban 文案已证偏弱；**W2 纯 pager 软重定向进 `read_file`**（§7.3，同 grep→Locate 手法），排 N3 |
+| P9 | Impact 仅 Python 扩展（`language_for_path`） | **已知边界** | 非 .py 编辑 → `impact.skipped`；Lite 全 Python，暂不扩 |
+| P10 | Ops 面板按工具名找不到 Locate | **文档澄清** | 事件名常为 `grep`；看 `definitions`/`redirected_from`；`process.jsonl` 无工具明细 |
+| P11 | 揉合后尚未用新契约复跑 n5 验收 | **待做 · 排 N2** | 探针扩展为 Wave 1+2 合并清单（§7.6） |
+| P12 | Verify 车道 adoption 同样趋零（两题 `read_lints`=1；纪律催用无效） | **方案已定** | 与 P7 同根：独立工具名不在控制环里。**W1：`checks`（写前语法门 + 写后增量诊断）焊进 `edit_file` 成功契约**（§7.3），排 N1 |
+
+#### 6.0.6 合宪边界（流程里故意不做的）
+
+- **不**在 `turn.accepted` 前 await LSP ready / 全库 parse（R1）。  
+- **不**改 AgentEngine `while`、不加「先 LSP 再说话」节点。  
+- **不**把 writing Profile 挂上结构工具。  
+- **不**默认每次 edit 后全仓库 diagnostics。  
+- **不**为分数预注入符号大纲或读 gold patch。
+
+### 6.1 工具族（已落地）
 
 | 工具 | side_effect | 审批 | 说明 |
 |------|-------------|------|------|
-| `read_lints`（增强） | read | 默认无 | **保留原名**：背后接 LSP∪CLI；CQ1「edit 后 read_lints」零改纪律文案 |
-| `goto_definition` | read | 无 | **符号名为主**（可选 path/行列消歧）→ 定义位置列表；名称解析在适配器内完成，模型只见一次调用 |
-| `find_references` | read | 无 | 同上输入 → 引用列表（按文件聚合、有上限） |
-| `search_codebase` | read | 无 | 短期可仍词面；中期接符号表或混合，并改描述诚实化 |
+| `read_lints` | read | 默认无 | **保留原名**：LSP∪CLI；CQ1「edit 后 read_lints」 |
+| `search_codebase` | read | 无 | **Locate 主入口（名）**：符号 → 同 `goto_definition` 适配器 → `definitions[]`；非符号词面；LSP 基建失败 → `status=failed` |
+| `grep` | read | 无 | 精确串 / regex；**裸符号整串重定向**到 Locate（事件名仍是 `grep`，结果含 `redirected_from`） |
+| `goto_definition` | read | 无 | **精度面**：已有 path/line 或需消歧多跳 |
+| `find_references` | read | 无 | **精度面 / 加深**；成功代码 `edit_file` 已附同传感器 `impact` |
+| `edit_file` | write | 有 | 成功且代码路径 → **必附** `impact.references` |
 | （阶段 D）`rename_symbol` 等 | write | always | 显式写副作用；默认不开 |
 
-不新增 Engine 相位；不新增「结构阶段」事件类型也可先做——若需观测，可在现有 tool 事件上增加 `meta.structural=true` / `provider=lsp|ruff|treesitter`。
+不新增 Engine 相位。观测：工具结果字段 `definitions` / `locate_incomplete` / `impact` / `redirected_from`；事件仍走 `tool.started|completed`（`payload.tool_name`）。
 
-### 6.2 写入闭环（agent `system.md` 目标纪律）
-
-在现有 Default loop / Verify 上加厚，**不加节点**：
+### 6.2 写入闭环（agent `system.md` — 阶段契约，非可选）
 
 ```text
-1. 定位：优先结构导航（有则用）；否则 grep / search_codebase
-2. 读取：read_file（完整或续读规则不变）
-3. 编辑：edit_file 最小 span（默认）；禁止无故 write_file 整文件
-4. 验证：read_lints(受影响路径) → 必要时 find_references 扫调用点
-5. 测试：有测试或用户要求则 run_tests
+1. Orient：从 issue / problem.md 抽符号与错误串（禁止 root list_dir 开局）
+2. Locate：符号 → search_codebase（必交付 definitions[]；同 goto_definition 适配器）
+         裸符号若误点 grep → runtime 重定向同一 Locate（见 §6.7）
+         精度跳转 → goto_definition；词面/报错串 → grep；文件名 → glob
+         locate_incomplete / 空 definitions ≠ Locate 完成
+3. Read → Edit：read_file 后 edit_file 最小 span
+4. Impact：代码 edit_file 成功结果必须带 impact.references（同 find_references 传感器）
+         显式 find_references 用于加深 / 改签名预扫
+5. Verify：read_lints(受影响路径) → 必要时 run_tests
 6. 结束：交付物 + 简要 what-changed
 ```
+
+揉合口径：能力进 **流程入口与写成功契约**；`goto_definition` / `find_references` 保留为精度面，不是可跳过旁支。
 
 ### 6.3 审批与沙箱
 
@@ -260,25 +476,187 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | `edit` | 编辑工具 + 验证；导航按需 |
 | 写作向 `drafter`/`stylist` 等 | 不开放 |
 
+### 6.7 揉合、Ops 实测与完整过程记录（2026-08-10 → 08-11）
+
+**当前流程与问题总表以 §6.0 为准。** 本节是同一事实的历史纪要：早期 n5 数字、复跑工具面计数、揉合决策与验收探针。
+
+#### 6.7.1 时间线（过程）
+
+| 时间 | 阶段 | 发生了什么 |
+|------|------|------------|
+| 2026-08-10 | 早期 n5（`d10472fd` / 子跑 `309e5ab1`） | checkout 有仓；`propose_patch` 已移除；patch 来自 `git_diff`；**patch_rate=0.6** 但 3×`patch_no_apply`（截断 span / 脏树假阴性）；harness **exit 1** → 无 `resolve_rate`；`max_steps` 偏紧 |
+| 随后 | 基建与交卷链 | `max_steps`→150；patch 提取含 untracked；apply-check 改 clean-HEAD；harness 日志加厚；去掉 `STRUCTURAL_ENABLED` 产品开关（能力=Profile）；checkout 强制；suite mirror prewarm；checkout 失败不再 fallback 到仅 `problem.md` |
+| 2026-08-11 | 复跑 n5（`01599d49`） | checkout/mirror **正常**；14182 交出可 apply `git_diff`（`bucket=ok`）；但 **`search_codebase`/`goto_definition`/`find_references` 调用为 0** —— 新问题从「供给」变为 **adoption/绑定** |
+| 同日 | 产品决策 | 禁止「够用 / 可选」；将 definition/references **揉进** agent 流程：Locate 焊 `search_codebase`+裸符号 `grep` 重定向；Impact 焊 `edit_file.impact`；精度面保留显式 goto/refs |
+| 同日 | 落地 | `symbols.py` + tools handler + `system.md` + L1 `coding_prompt`；runtime recreate；单测覆盖 Locate/Impact 契约 |
+| 2026-08-11 | N0 诊断（P6） | 后续 infer（如 `4b2a89c6` / `69f166f2`）**`patch_rate=1.0`**，但开启 harness 时卡在 `Evaluation: 0/5`、实例 `run_instance.log` 空；根因：**本机无 `swebench/sweb.eval.x86_64.*`**，harness 在 **agent-api（ops-eval sock）** 内现拉 Docker Hub **挂死**（连 `hello-world` 亦 Waiting）。早期「完成」的 harness（`8be119d4`）实为 **空 predictions / empty_patch** → `resolve_rate=0`，不是模型真测。默认 `cache_level=env` 会在评后删实例图，下次再挂 |
+| 同日 | N0 方案落地 | `suites.coding.harness`：`cache_level=instance`、`clean=false`、`require_local_images=true`、`board_tier=n5`；`scripts/official_bench/swe_images.py` + `coding --phase pull-images` / `make official-bench-coding-pull-images`；**部署看板 :9090** 项「Ops · SWE eval 镜像」一键预拉；进度写 `reports/release/swe_eval_images_progress.json`，看板 live 显示 **n/N · % · 当前 ref** + 日志 tab「SWE 镜像」。单图压缩约 **1.0–1.2 GiB**（n5 ≈ 5–6 GiB），**不进 git / 不进产品镜像** |
+
+#### 6.7.2 早期 n5 套件结果（`d10472fd`，2026-08-10）
+
+来源：`TEST.log` + 跑次 `d10472fd-548b-4dbe-8299-306f86921a41`（子套件 `309e5ab1-f872-4457-a1f9-c1e56279dd72`）。UTC 约 15:57–16:39。
+
+**配置**
+
+| 项 | 值 |
+|----|-----|
+| 路径 | L1 agent-path（`scenario_id=agent`） |
+| tier | n5（5 题，全 astropy） |
+| checkout | 是（`has_repo=true` / `mirror_hit=true`） |
+| harness | 开启，但 **exit 1** → 无 `resolve_rate` |
+| 写工具 | 白名单已无 `propose_patch`；patch 来源 `git_diff` |
+
+**套件指标**
+
+| 指标 | 值 | 含义 |
+|------|-----|------|
+| `n_instances` | 5 | 题数 |
+| `n_nonempty_patches` | 3 | 非空 patch |
+| `patch_rate` | 0.60 | 3/5 非空 diff（≠ 官方 resolve） |
+| `harness_error` | `harness exit 1` | 无 `resolve_rate` |
+
+分桶：`patch_no_apply`×3（60%）、`no_patch`×2（40%）。
+
+**逐题**
+
+| instance | bucket | source | apply | steps | terminal | 备注 |
+|----------|--------|--------|-------|-------|----------|------|
+| `astropy__astropy-12907` | `no_patch` | none | — | 12 | failed | 有 `ran_tests`；无提取 diff |
+| `astropy__astropy-14182` | `no_patch` | none | — | 57 | failed | 步数触顶附近；无 patch |
+| `astropy__astropy-14365` | `patch_no_apply` | git_diff | no | 50 | completed | diff ~1.8k，当时 `apply --check` 失败 |
+| `astropy__astropy-14995` | `patch_no_apply` | git_diff | no | 50 | completed | diff ~0.7k |
+| `astropy__astropy-6938` | `patch_no_apply` | git_diff | no | 50 | completed | diff ~0.6k |
+
+抽查可见 **diff 行中截断**（半写 span）。事后确认：在已脏 worktree 上做 forward `git apply --check` 会把合法完整 diff 也判失败 —— 已改为 clean-HEAD / reverse-check；解读本跑桶分布需打折。
+
+**当时结论**
+
+1. 尚不能谈官方 resolve（harness 失败）。  
+2. 相对伪 `propose_patch` 有进步（真实 worktree diff）。  
+3. 主卡点曾是「落笔可 apply」+ 步数；测量假阴性已修。  
+4. 下一步曾排：harness → 完整 diff 门禁 → 再跑 n5（结构 adoption 另计）。
+
+产物路径：`eval/reports/official/runs/309e5ab1-…/`；聚合 run `d10472fd-…`。Ops 报告链曾修：鉴权 blob 打开、聚合 HTML CSS。
+
+#### 6.7.3 复跑 n5：基建健康 vs 工具 adoption（`01599d49`，2026-08-11）
+
+跑次：`01599d49-2ef1-441f-bf28-15066b2d948e`。checkout=`True`，mirror prewarm ok，结构能力已在 Profile（无开关剥离）。
+
+抽样 Turn：`f7346ade…`（astropy-14182）、`d0a2c024…`（astropy-12907）。
+
+14182：`patch_source=git_diff` · `patch_applies=true` · `bucket=ok` · 12 步（`terminal_state=failed` 但仍可 apply）。
+
+**本跑两题 `tool.started`（`turn_events`）**
+
+| tool_name | count |
+|-----------|------:|
+| `run_command` | 36 |
+| `read_file` | 20 |
+| `grep` | 6 |
+| `edit_file` | 5 |
+| `list_dir` / `glob` | 3 / 3 |
+| `read_lints` | 1 |
+| `search_codebase` | **0** |
+| `goto_definition` / `find_references` | **0 / 0** |
+
+**全站近 14 天对照（含非 SWE）**
+
+| tool_name | count |
+|-----------|------:|
+| `read_file` | 5288 |
+| `grep` | 2072 |
+| `list_dir` | 1473 |
+| `search_sources` | 1376 |
+| `run_command` | 419 |
+| `edit_file` | 34 |
+| **`search_codebase`** | **27** |
+| `read_lints` | 6 |
+| `goto_definition` | **0** |
+| `find_references` | **0** |
+
+**读法**
+
+1. **供给已满足**：仓在、工具在白名单 —— 不是「没挂上」。  
+2. **adoption 失败**：SWE 上模型几乎不点 `search_codebase` / 精度导航；主路径 `run_command` + `read_file` + `grep`。  
+3. **新问题定义**：结构能力在菜单里，不在控制环里；纪律催用独立工具已证偏弱。  
+4. **产物注意**：Official `process.jsonl` 只有 case 摘要，**不含**逐工具名；分布查 `turn_events` 或实时 `tool.started`。
+
+#### 6.7.4 设计意图 vs 模型真实习惯 → 揉合决策
+
+| | 设计（纪律 / 描述） | Ops 实测 | 决策（禁止够用/可选） |
+|--|---------------------|----------|----------------------|
+| Locate 入口名 | 优先 `search_codebase` / `goto_definition` | 几乎不点；常点 `grep` | Locate **实现**焊进符号向 `search_codebase` + **裸符号 `grep` 重定向** |
+| Impact | 再调 `find_references` | ≈0 | **焊进** `edit_file` 成功回灌 `impact.references` |
+| 精度面 goto/refs | 一等工具 | 调用 0 | **保留**（可测/加深/委派）；不删成「增强 grep」 |
+| Verify | `read_lints` | 偶发 | 保留 CQ1；与 Impact 并列 |
+
+#### 6.7.5 Runtime 实际调用链（已落地）
+
+```text
+模型调用 search_codebase(query)
+  ├─ is_symbol_query? 否 → 词面 hits（mode=lexical）
+  └─ 是 → adapters.goto_definition
+        ├─ LSP 基建失败 → status=failed（禁止词面冒充 Locate 成功）
+        ├─ 有 definitions → locate_incomplete=false
+        └─ 无 definitions → 词面兜底 + locate_incomplete=true
+
+模型调用 grep(pattern)
+  ├─ 裸符号整串 → 内部转 search_codebase（同上）
+  │     tool 事件名仍是 grep；结果含 redirected_from=grep + definitions/…
+  └─ 否则 → 词面/regex matches
+
+模型调用 edit_file(path, …) 且 apply 成功
+  ├─ 非代码扩展名 → impact.status=skipped (non_code_path)
+  ├─ 抽不出符号 → impact.status=skipped (no_symbol_detected)
+  └─ 代码 + 有符号 → adapters.find_references → impact.references
+        └─ LSP 基建失败 → impact.status=failed（edit 本身仍 edited）
+
+模型调用 goto_definition / find_references
+  └─ 精度面直达同一 adapters（可测、可委派、可加深）
+```
+
+代码锚点：`app/structural/symbols.py` · `app/tools/core/tools.py` · `app/tools/bootstrap.py` · `scenarios/agent/system.md` · `scripts/official_bench/l1_prompts.py`。
+
+#### 6.7.6 在 Ops 里怎么观测揉合
+
+| 错误读法 | 正确读法 |
+|----------|----------|
+| 面板搜不到 `search_codebase` ⇒ Locate 没进流程 | SWE 常点 **`grep`**；看结果是否含 `redirected_from` / `definitions` / `locate_incomplete` |
+| 没有 `find_references` 事件 ⇒ 无 Impact | 看 **`edit_file` completed** 是否含 `impact` |
+| `process.jsonl` 无工具名 | 查 **`turn_events`** / 实时 `tool.started` |
+
+下一趟 n5 验收探针：**以 §7.6 的 Wave 1+2 合并清单为准**（本节原有三条已并入其中）。
+
+#### 6.7.7 仍开放
+
+- 重定向路径可附加 `meta.locate=search_codebase` 方便面板过滤（未做）。  
+- `run_command`+`sed -n` 读源仍偏高：Ban 文案已证不够，改走 **W2 软重定向**（§7.3）。  
+- harness exit 1 / 官方 `resolve_rate` 仍待修：升级为 **N0 最高优先**（§7.5）。  
+- Verify 车道 adoption 趋零：**W1 揉进 `edit_file.checks`**（§7.3）。
+
 ---
 
-## 7. 分阶段落地（详细）
+## 7. 揉合波次：Wave 1 落地态与 Wave 2 方案
 
-阶段可并行准备，但 **合并门禁按序收紧**。每阶段默认 **仅 agent Profile**。
+### 7.0 波次总览
 
-以 SWE-bench Lite 为准绳的预期收益排序是 **B（定位）≥ A（验证）≫ C（索引，≈0）**——Lite 任务形态是「issue 文本 → 跨大仓定位 → 最小修改 → 隐藏测试判定」，定位是主要失败源。维持 A 编号在前仅因实现风险最低（复用现有工具名与纪律文案）；**A/B 应并行开发、分轨合并**，不做串行等待。具体工作分解见 §9。
+| 波次 | 内容 | 状态 |
+|------|------|------|
+| **Wave 1** | 结构基建（`structural/` 包、pyright 池、`read_lints` LSP∪ruff、导航双工具、tree-sitter 切块）+ **Locate/Impact 揉合**（裸符号 `grep` 重定向、`edit_file.impact`） | **已落地**（2026-08-10/11；行为契约见 §7.1） |
+| **Wave 2** | **Verify 揉合**（`edit_file.checks`：写前语法门 + 写后增量诊断）· 编辑失败候选回显 · pager 软重定向 · Reproduce / 交卷自检纪律 | **本文提案**（§7.3；里程碑 §7.5） |
+| Wave 3 候选 | 按需 repo map（Aider 式）· 写副作用结构操作（原阶段 D） | 后置（§7.4） |
 
-### 阶段 A — 验证车道升级（优先服务「写入后」）
+Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 `run_command` / `read_file` / `grep` / `edit_file` 四个高频动词**。Wave 1 已把 Locate/Impact 焊进其中两个；Wave 2 把 Verify（`read_lints` 两题仅 1 次调用）和失败恢复也焊进去，并用纯 prompt 层补齐「复现→修→复跑」相位。**不新增模型需要主动学会点的工具名**——这是对「纪律催用独立工具已证偏弱」这一实测结论的一致回应。
 
-**做什么**
+### 7.1 Wave 1 落地态（原阶段 A–C 的行为契约，已落地）
 
-- 增强 `read_lints`：对支持语言走 LSP diagnostics；否则保留 ruff/CLI；再否则显式降级信息。  
-- Python provider：pyright langserver，**openFilesOnly 诊断模式** + 对受影响文件 `didOpen` 定向分析。禁止 workspace 全量模式——django 量级仓库（Lite 常客）全量分析在分钟级，违反工具时延预算。  
-- 诊断获取优先 **LSP 3.17 pull**（`textDocument/diagnostic`，pyright 支持）——同步请求-响应，语义干净；不支持 pull 的 server 用 `didOpen` + 等待 `publishDiagnostics` push（去抖 + timeout），差异由适配器屏蔽，工具 handler 只见同步接口。  
-- 默认范围：调用方传入的 path；目录则有上限（文件数/深度），禁止无界全仓。  
-- system 纪律可强调「受影响路径」，不必改工具名。
+每项默认 **仅 agent Profile**。以下逐情况表是已落地实现的**规范性契约**，回归时对照。
 
-**各种情况**
+#### 7.1.1 阶段 A — 验证车道升级（已落地）
+
+要点：`read_lints` = LSP∪ruff（支持语言走 LSP diagnostics，否则 CLI，再否则显式降级）；pyright langserver **openFilesOnly** + `didOpen` 定向（禁 workspace 全量——django 量级全量分析分钟级）；诊断优先 LSP 3.17 pull，push 差异由适配器屏蔽；范围=调用方 path，目录有文件数/深度上限。
+
+**行为契约（各种情况）**
 
 | 情况 | 期望 |
 |------|------|
@@ -288,19 +666,13 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | path 出 Work 根 | 与现有工具同样拒绝 |
 | 沙箱无网络、需下加载插件 | 不允许运行时下载体；镜像预装 |
 
-**验收**：golden「edit → read_lints → 修新增问题」；ruff-only 基线不回归；writing Profile 工具列表不变；lite-50 冒烟不回归（§8.2）。
+回归基线：golden「edit → read_lints → 修新增问题」；ruff-only 不回归；writing Profile 工具列表不变。
 
-### 阶段 B — 只读导航（服务「改前定位 / 改后扫引用」）
+#### 7.1.2 阶段 B — 只读导航 + Locate/Impact 揉合（已落地）
 
-**做什么**
+要点：`goto_definition` / `find_references` 输入**符号名为主**（适配器内 `workspace/symbol` 两跳，模型只见一次调用；path+行列作消歧提示）；输出紧凑位置列表**每条附单行源码**（行协议 §9.4）；与 A 共用同一 pyright 会话（Work 级进程池）。实测模型几乎不主动点这两个名字，故 **Locate 焊进符号向 `search_codebase` + 裸符号 `grep` 重定向，Impact 焊进 `edit_file.impact`**（完整调用链 §6.7.5）；显式双工具保留为精度面。
 
-- 增加 `goto_definition` / `find_references`（名称可微调，但语义稳定）。  
-- 输入：**符号名为主**——模型从 issue 文本 / 已读代码里拿到的是名字，几乎给不准行列。适配器内部两跳：`workspace/symbol`（或已打开文件的 document symbols）解析名字 → 位置 → `textDocument/definition` / `references`；模型只见一次调用。`path` + 行列作可选消歧提示；多候选按下表列表返回，不擅自选。  
-- 输出：紧凑位置列表，**每条附单行源码片段**（行协议见 §9.4）——省掉模型「拿到位置再 read_file 确认」的一轮往返。  
-- Python provider：与阶段 A 共用同一 pyright 会话；进程池按 Work 复用，避免每次工具调用冷启动。  
-- system：定位优先用导航；连续失败两次换策略（对齐现有失败恢复）。
-
-**各种情况**
+**行为契约（各种情况）**
 
 | 情况 | 期望 |
 |------|------|
@@ -311,18 +683,13 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | 仅词面同名、非引用 | 不得把 grep 结果伪装成 references |
 | server 不可用 | 错误 + 提示用 grep；禁止空 hits 装成功 |
 
-**验收**：跨文件改签名类 golden：references 覆盖调用点；工具误选类不回归；lite-50 文件级定位命中率对照（§8.3）。
+回归基线：跨文件改签名类 golden（references 覆盖调用点）；工具误选类不回归；lite-50 文件级定位命中率对照（§8.3）。
 
-### 阶段 C — 索引面 AST（升级 CQ4）
+#### 7.1.3 阶段 C — 索引面 AST（已落地为可选依赖，正则回落）
 
-**做什么**
+要点：`chunking.py` 代码路径优先 tree-sitter（`py-tree-sitter` + `tree-sitter-language-pack`，构建期安装），失败回落 CQ4 正则；仅旁路（`index_scheduler` / sync-sources）执行；chunk 元数据保留 `symbol` / `section_title` / 行列。**与 SWE-bench Lite 解耦**（harness 工作区无预建索引），验收用离线切块对照（未做，见 §9.3）。
 
-- `chunking.py`：代码路径优先 tree-sitter（按语言 grammar 逐步）；失败回落正则。  
-- 依赖：`py-tree-sitter` + `tree-sitter-language-pack`（预编译 grammar，构建期 pip 安装，满足 §11「不在请求期拉取」）。  
-- 仍只在 `index_scheduler` / sync-sources 等旁路执行。  
-- chunk 元数据保留/增强 `symbol` / `section_title` / 行列。
-
-**各种情况**
+**行为契约（各种情况）**
 
 | 情况 | 期望 |
 |------|------|
@@ -331,26 +698,108 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | 超大生成文件 | 预算上限；跳过或降级，可观测 |
 | 查询热路径 | **零** 新增同步 parse |
 
-**验收**：离线切块对照（同 query 命中率/边界完整率）；`search_sources`/代码检索相关评测不因切块变差；R1–R3 延迟对照持平。
+回归基线：离线切块对照（同 query 命中率/边界完整率）；`search_sources` 相关评测不因切块变差；R1–R3 延迟对照持平。
 
-**说明**：阶段 C 主要提升 **资料/索引检索叶子**；对「当前 workspace 即时写入」的帮助弱于 A/B。特别地，**C 与 SWE-bench Lite 解耦**：harness 工作区是 base commit 的裸 checkout，无预建索引，切块质量不进入基准链路——C 不以 Lite 作验收项，用离线切块对照即可（若产品以 workspace 即时编码为主，可与 B 并行开发、合并仍分轨验收）。
+#### 7.1.4 阶段 D — 写副作用结构操作（维持后置，未落地）
 
-### 阶段 D — 写副作用结构操作（可选，后置）
+`rename_symbol` / 有限 code action；`approval=always`；重命名多文件须可审批可取消；server 部分成功须明确失败集，禁止静默半应用；与手工编辑冲突则失败回读。单独评审，不进 Wave 2。
 
-**做什么**
+### 7.2 借鉴：成熟 agent 的已验证做法 → 本仓映射
 
-- `rename_symbol` / 有限 code action；`approval=always`。  
-- 与 `edit_file` 审批模型对齐；生成的编辑仍应可被用户理解（diff）。
+选取标准：只借鉴**有公开消融/长期产品验证**、且落点是「模型实际高频动词」的做法；与我们「揉合而非催用」的实测结论一致的优先。
 
-**各种情况**
+| 来源 | 被验证的做法 | 为什么可信 | 映射到本仓（Wave 2） |
+|------|--------------|------------|---------------------|
+| SWE-agent（ACI 研究） | **lint 门控编辑**：edit 引入语法错误则拒绝写入并回显错误位置 | 其 ACI 消融中**单项收益最大**的接口改动；直接治「半截 diff / 改坏」 | **W1 语法门**：`edit_file` 写盘前 parse 新全文，坏则拒收（含逃生门） |
+| SWE-agent | 观察结果必须**紧凑**（搜索限条数、文件窗口化） | 同上消融；肥输出挤占上下文与步数 | 已有 budget/行协议（§9.4）；W1/W3 新回灌沿用同协议 |
+| Cursor / Claude Code | edit 后**自动回灌 lint 增量**，模型无须主动点 lint 工具 | 两个最大规模 coding agent 的默认产品行为 | **W1 checks.new_issues**：写后单文件增量诊断随 `edit_file` 结果附回 |
+| Claude Code（text_editor） | str-replace **失配时回显最近候选**，而非裸失败 | 产品验证：显著减少「read→重试」空转 | **W3 编辑失败恢复** |
+| Anthropic SWE-bench 配方 / OpenHands | **先复现失败 → 修 → 复跑同一命令**；工具面保持极简 | 公开复盘中对 resolve 提升最稳定的流程纪律 | **W4 Reproduce 相位**（纯 prompt，零新工具） |
+| OpenHands / Devin | 交卷前**自检**（diff 非空、无半截、测试复跑过） | 产品行为；直接对应我们 `no_patch`/`patch_no_apply` 桶 | **W5 交卷自检契约** |
+| Aider | tree-sitter **repo map**（符号级仓库骨架，按引用排序注入） | 长期产品验证，但形态是**预注入**，与否决 8 冲突 | 改造为按需工具后列 **Wave 3 候选**（§7.4），本波不做 |
 
-| 情况 | 期望 |
-|------|------|
-| 重命名影响多文件 | 单次工具返回 patch 集或多次 edit；须可审批、可取消 |
-| server 部分成功 | 明确失败集；禁止静默半应用 |
-| 与用户手工编辑冲突 | 应用前再校验；冲突则失败回读 |
+共同规律：这些 agent 没有一个靠「加工具名 + 文案催用」获得结构收益——收益全部来自**把结构信息焊进模型无法绕开的动词**（edit 的结果、失败的回显）。这与我们 `01599d49` 的实测结论（§6.7.3/§6.7.4）互为印证，Wave 2 是同一决策在 Verify/恢复车道上的延伸。
 
-**验收**：单独黄金集；默认 Profile 可先关闭，feature flag 打开。
+### 7.3 Wave 2 设计：把 Verify、失败恢复、复现纪律焊进高频动词
+
+全部改动落在**工具 handler 与 prompt 文案**：不加 Engine 节点、不预注入、不新增模型需学会主动点的工具名；writing Profile 零感知（这些动词本就不在其白名单）。
+
+#### W1 — Verify 揉合：`edit_file` 附 `checks`（最高优先）
+
+**动机**：P12——两题 `read_lints` 仅 1 次；Verify 与 Locate/Impact 一样，必须焊进写成功契约而非等模型自觉。
+
+**契约**：代码路径 `edit_file` 结果增加 `checks{status, syntax, new_issues[], baseline_count}`，分两拍：
+
+1. **写前语法门（毫秒级）**：apply 前 parse 编辑后全文（Python 用 `ast.parse`；其他语言 tree-sitter 可用则用，否则 skip）。**旧文本可 parse 而新文本不可 → 拒绝写盘**，返回 `syntax_error` + 出错行单行源码，worktree 不落脏。**逃生门**：旧文本本身 parse 失败 → 仅警告放行（允许修复本就坏的文件）；不支持语言 → `checks.syntax=skipped`。
+2. **写后增量诊断**：对该 path 内部跑 read_lints 同款车道（LSP openFilesOnly ∪ ruff），与**写前基线做差集**，只回灌 `new_issues[]`（上限条数，行协议 §9.4）。timeout / LSP 基建挂 → `checks.status=timeout|failed`，**不影响 edited 结果本身**。
+
+**速率**：单工具时延内；语法门毫秒级；诊断沿用 `structural_diag` 预算与 timeout（§5.1 已列为合宪形态）。禁止借 checks 做全仓诊断（§6.0.6 不变）。
+
+**与 CQ1 关系**：`read_lints` 工具与纪律保留——跨文件/目录级验证仍需显式调用；checks 覆盖的是「刚改的这个文件」这条最高频路径。
+
+**验收**：代码 edit 成功结果 100% 含 `checks`；语法门拦截数与**误拦率**（旧文件已坏场景）单列进观测；n5 复跑 `patch_no_apply` 桶占比应下降。
+
+#### W2 — pager 软重定向：`run_command` → `read_file`
+
+**动机**：P8——两题 36 次 `run_command`，大量 `sed -n 'A,Bp'` 当 pager，绕开 read-fold / 预算 / Read-after-complete 卫生，还烧步数；Ban 文案已证无效。
+
+**契约**：`run_command` handler 识别**纯 pager 型命令**——整条命令无管道 / 重定向 / `&&` / `;`，形如 `sed -n 'A,Bp' path`、`cat path`、`head -n K path`、`tail -n K path`、`awk 'NR>=A&&NR<=B' path`，且 path 在 Work 内——内部转 `read_file(path, 对应行窗)`；事件名仍 `run_command`，结果含 `redirected_from=run_command`。与裸符号 `grep` 重定向完全同一手法。
+
+**保守边界**：任何带管道、多命令、写副作用或解析不确定的命令 → **原样执行，不猜**；误伤率进观测。不升级为硬 Ban（拒绝执行会伤交互，先软重定向看数据）。
+
+**验收**：重定向命中数 / 误伤数；pager 型 `run_command` 占比对照下降。
+
+#### W3 — 编辑失败恢复：span 失配回显候选
+
+**动机**：P4 的主要形态是 span 重试打转烧步数（早期 n5 三题 50 步触顶均含半截 edit）。
+
+**契约**：`edit_file` span 未命中 → 返回 top-k 最近匹配（`path:line | 单行源码`，行协议）；span 不唯一 → 返回全部出现位置。模型据此一步改对 span，省掉「再 read_file 一轮」的往返。
+
+**验收**：edit 失败后的平均恢复步数下降；同 span 连续失败 ≥3 次的 Turn 占比下降。
+
+#### W4 — Reproduce 相位（纯 prompt 层，零新工具）
+
+**动机**：成熟配方公认「先复现 → 修 → 复跑」对 resolve 提升最稳定；当前 ①–⑦（§6.0.3）缺该相位。
+
+**契约**：agent `system.md` 与 L1 `coding_prompt` 的阶段表在 Orient 与 Locate 之间加 **Reproduce**：优先运行 issue 给出的失败片段 / 最小 repro 脚本 / 失败测试（用已有 `run_command` / `run_tests`）；修完在 Verify 中**复跑同一命令**。禁网环境下 repro 限本地执行。无法复现（纯文档 / 环境缺依赖）→ 显式说明后继续，不硬卡。
+
+**速率**：纯文案；前缀字节变化过 hygiene 测试（CQ2）。
+
+#### W5 — 交卷自检（prompt 层 + 观测）
+
+**契约**：宣告完成前自查三条：a) `git diff` 非空且能自述改了什么；b) 最近一次 `edit_file` 不处于 failed 未收尾；c) repro / 相关测试至少复跑一次（做不到须说明）。Ops 侧 apply-check 门禁不变（双保险，见 §6.0.2 步 8）。
+
+**验收**：`no_patch` 桶中「实际动过 edit 但没收尾」子类占比下降。
+
+### 7.4 候选但本波不做（Wave 3）
+
+| 候选 | 内容 | 不进本波的原因 |
+|------|------|----------------|
+| W6 repo map（Aider 式） | 按需 `repo_map` 只读工具：符号级仓库骨架（tree-sitter，按引用密度排序，预算内截断） | 尊重否决 8（不预注入）后只剩按需形态；Lite 工作区无预建索引、首查需现算付冷启动；且实测卡点（Verify/pager/半截）优先级更高。等 Wave 2 数据后复议 |
+| pager 硬 Ban | `run_command` 拒绝执行纯 pager | 伤交互；先 W2 软重定向 + 观测 |
+| 阶段 D 写副作用 | rename / code action | 维持后置（§7.1.4） |
+
+### 7.5 优先级与里程碑（N0–N4）
+
+| 里程碑 | 内容 | 依赖 | 出口判据 |
+|--------|------|------|----------|
+| **N0** | 官方 harness 可测（P6）——本地 `sweb.eval` 就绪 + 跑通 resolve，否则只剩 `patch_rate` 代理指标 | 无；**先于/并行于所有 Wave 2 开发** | 看板/Make 预拉 board_tier 镜像完成；`require_local` 缺图 fail-fast；任一 lite 题产出官方 `% resolved` 并入档（非空 predictions） |
+| **N1** | W1（语法门 + checks）+ W3 + W4/W5 文案 | 无（与 N0 并行） | 单测覆盖拒收/逃生门/timeout；golden；前缀 hygiene 绿 |
+| **N2** | n5 复跑（P11）：验收 Wave 1+2 探针（§7.6） | N0、N1 | 探针全绿；桶分布对照入档 |
+| **N3** | W2 pager 软重定向 | N2 数据确认 P8 仍高 | 重定向命中/误伤入档；pager 占比下降 |
+| **N4** | lite-50 双轨（§8.2）→ 按 §9.3 决策规则定论 | N0–N2 | resolved 差值 + 全过程指标 |
+
+排序依据：N0 是**测量前提**；W1/W3 直接治实测最大失血点（半截 diff、Verify 缺位），且实现面最小（改一个 handler + 文案）；W2 依赖复跑数据确认优先级，避免为已缓解的问题加复杂度。
+
+### 7.6 验收探针（Wave 1+2 合并清单，替代 §6.7.6 原三条）
+
+1. 裸符号 `grep` → 结果含 `definitions` 或 LSP `status=failed`（禁词面冒充 Locate 完成）。  
+2. 代码 `edit_file` 成功 → 必有 `impact` **且**（N1 后）必有 `checks`。  
+3. 语法门拦截数 / 误拦率（旧文件已坏场景）单列。  
+4. pager 型 `run_command` 占比与重定向命中/误伤计数（N3 后）。  
+5. `edit_file` span 失败重试率、失败后平均恢复步数。  
+6. `no_patch` / `patch_no_apply` 桶占比对照（早期 n5 与 `01599d49` 为基线）。  
+7. **不以** `search_codebase` / `goto_definition` / `find_references` 调用次数为 KPI（不变）。
 
 ---
 
@@ -393,9 +842,37 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 3. lite-50 子集一经选定冻结；换子集须记录原因并同时报告新旧两组。  
 4. 基准 runner 的环境差异（禁网、判分容器）只存在于 runner，不回流污染日常 Profile / system 文案。
 
+### 8.5 官方 harness 前置：`sweb.eval` 镜像与部署看板（N0 / P6）
+
+**问题（已核实）**
+
+| 表象 | 实质 |
+|------|------|
+| 「评测挂了」 | L1 **infer 往往正常**（可 apply patch / 高 `patch_rate`）；挂的是 **官方 docker harness** |
+| harness 长时间 `Evaluation: 0/n` | 本机无 `swebench/sweb.eval.x86_64.{instance_id}:latest`，进程在 **api/ops-eval** 内拉 Hub 卡住 |
+| 偶发 `resolve_rate=0` 且很快结束 | 常是 **空/坏 predictions**（`empty_patch_ids` / No instances），**不是**模型 0 分 |
+| 下次又要现拉 | 旧默认 `cache_level` 评后清实例层镜像 |
+
+**解法（已接线）**
+
+| 项 | 位置 / 行为 |
+|----|-------------|
+| 配置 | `eval/official/suites.small.yaml` → `suites.coding.harness`（`cache_level: instance`、`clean: false`、`require_local_images: true`、`board_tier: n5`）；可用 `SWE_HARNESS_*` / `SWE_MAX_WORKERS` 覆盖 |
+| 预拉 CLI | `coding --phase pull-images`；`make official-bench-coding-pull-images`（`OFFICIAL_SWE_IMAGE_TIER` / `FORCE=1`） |
+| 部署看板 | `:9090` 检查项 **Ops · SWE eval 镜像**（仅 `OPS_EVAL_DOCKER_SOCK` 开启时出现）；按钮 → 同上 Make；日志 tab **SWE 镜像** |
+| 实时进度 | 拉取写 `reports/release/swe_eval_images_progress.json`（`images_done/total`、当前 ref、cached/pulled、heartbeat）；看板 `_collect_live` 叠到该项 **detail / 顶栏 job**：`预拉镜像 · 下载中 · k/n · pct% · short-ref`；单图下载中每 15s heartbeat，避免大镜像把 live 判死 |
+| 评测护栏 | harness 前 `_harness_preflight`：缺本地图且 `require_local_images` → **立即失败**（禁止静默 Hub 挂死） |
+| 体积纪律 | 约 **1GiB/题压缩**；只进 **宿主机 Docker 缓存**；不进 git、不 bake 进产品镜像 |
+
+**看板可观测性结论**：队列 pending/running、pid、日志流、**结构化 n/N+%** 均可实时看；单层 docker 层进度仍在日志原文（plain pull），看板以「镜像张数」为第一进度轴（与索引 sync 的 chunk% 同构）。
+
+**出口（N0）**：board_tier 本地 `ready` → 带非空 patch 跑 harness → 报告含官方 `resolve_rate`（可为 0，但必须是真跑完，不是缺图/空 predictions）。
+
 ---
 
 ## 9. 实际执行方案
+
+> §9.1–§9.2 记录 Wave 1 的选型与触点（已落地为准，保留作规范与回归参照）；Wave 2 触点见 §9.2 末行；**现行排期以 §7.5 N0–N4 为准**。
 
 ### 9.1 Provider 与依赖选型
 
@@ -418,27 +895,28 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | `scenarios/profiles/agent.yaml` | `tool_names` 增 `goto_definition` / `find_references`；writing / intel 不动 |
 | `scenarios/agent/system.md` | Tool choice 表加一行「符号定义/引用 → 导航工具」；Verify 文案不改（CQ1 零改动）；前缀字节变化过 hygiene 测试 |
 | `tools/delegate_runner.py` | `explore` / `verify` / `edit` 子集按 §6.6 增导航；写作子类型不动 |
-| `settings.py` | `structural_enabled`（默认 off）——**语义 = 是否注册结构工具并启用 LSP 车道**：off 时导航工具不进 `tools[]`（agent 前缀与今天字节一致，cache 与双轨对照因此诚实）、`read_lints` 走 ruff 现状路径；**不是**「注册了但内部降级」。另：`structural_nav_timeout_s=15` · `structural_diag_timeout_s=60` · `structural_max_files_per_call` · `structural_max_refs`（超限按文件聚合）· `structural_prewarm`（Work 进入 agent 后旁路 initialize） |
+| `settings.py` | **`structural_enabled` 产品开关已废除（2026-08-11）**：能力 = Profile 白名单，缺基建显式 `failed`（§6.7 决策）；双轨对照的 on/off 只存在于**基准 runner 配置**（§8.2），不回流产品语义。保留运行参数：`structural_nav_timeout_s=15` · `structural_diag_timeout_s=60` · `structural_max_files_per_call` · `structural_max_refs`（超限按文件聚合）· `structural_prewarm`。Wave 2 拟增：`checks` 增量诊断上限条数与 timeout（可沿用 diag 预算） |
 | `retrieval/chunking.py` | 阶段 C：`split_code_sections` 优先 tree-sitter，失败回落正则；接口与 chunk 元数据形状不变 |
 | **新增** 基准 runner（`eval/swebench/` 或 make 目标） | lite-50 / lite-300 拉起、禁网覆盖、双轨开关、结果与过程指标落盘 |
 | 测试 | `structural/` 单元（含 server 不可用 / timeout / crash 路径）· golden：lint 修复、跨文件引用 · writing Profile 快照 |
+| **Wave 2 触点（提案，N1/N3）** | `tools/core/tools.py`：`edit_file` handler（写前语法门 + `checks` 增量诊断 + span 失配候选回显）· `run_command` handler（纯 pager 识别 → `read_file` 重定向，`redirected_from` 标注）· `scenarios/agent/system.md` + `scripts/official_bench/l1_prompts.py`（Reproduce 相位、交卷自检；过前缀 hygiene）· `structural/symbols.py` 与适配器**不变**（复用同一车道） |
 
-### 9.3 里程碑
+### 9.3 里程碑（M 序列状态归档；现行排期见 §7.5 N0–N4）
 
-| 里程碑 | 内容 | 出口判据 |
-|--------|------|----------|
-| **M0 基线**（先行，1 项也不依赖 LSP） | 搭基准 runner；现状 agent 跑 lite-50 得 `resolved% / 定位命中率 / 步数` 基线；`search_codebase` 描述诚实化 | 基线数字入库；双轨脚手架可复跑 |
-| **M1 = 阶段 A** | `structural/` 包 + `read_lints` 增强，flag 默认 off | §7-A 验收 + lite-50 双轨不回归、`make gate` 绿 |
-| **M2 = 阶段 B**（与 M1 并行开发，分轨合并） | 导航双工具 + system 一行纪律 + 子 agent 白名单 | §7-B 验收 + lite-50 定位命中率提升可测 |
-| **M3 全量对照** | lite-300 双轨 + 全部过程指标；决定 flag 默认值 | 按下方决策规则定 flag；无回归项 |
-| **M4 = 阶段 C**（与 Lite 解耦） | tree-sitter 切块 + 离线切块对照 | §7-C 验收；不占用基准资源 |
-| （可选）阶段 D | 维持后置，见 §7-D | 单独评审 |
+| 里程碑 | 内容 | 状态 |
+|--------|------|------|
+| **M0 基线** | 搭基准 runner + lite-50 脚手架；`search_codebase` 描述诚实化 | **脚手架已落地**（2026-08-10）；lite-50 基线**数字未入库**——被缺 `sweb.eval` / harness 不可测卡住，随 N0（§8.5）解锁 |
+| **M1 = 阶段 A** | `structural/` 包 + `read_lints` 增强 | **已落地**，并入 Wave 1（§7.1.1）；产品开关随后废除 |
+| **M2 = 阶段 B** | 导航双工具 + 子 agent 白名单 | **已落地**，并入 Wave 1；实测 adoption 为零后追加 **Locate/Impact 揉合**（§6.7.4） |
+| **M3 全量对照** | lite-300 双轨 + 全部过程指标 | 未做；重排到 **N4 之后**（依赖 N0/N2） |
+| **M4 = 阶段 C** | tree-sitter 切块 + 离线切块对照 | 切块**已落地**（可选依赖、正则回落）；**离线对照未做**，与 Lite 解耦不占基准资源 |
+| （可选）阶段 D | 写副作用结构操作 | 维持后置（§7.1.4） |
 
-**M3 flag 决策规则**（事先写死，防「过评审」变成拍脑袋）：
+**全量对照决策规则**（事先写死，防「过评审」变成拍脑杋；产品开关已废除，双轨 on/off 指**基准 runner 配置**，结论作用于「结构车道保留 / 收缩 / 扩展」的产品决策）：
 
-- `on−off` 的 resolved 差值 **> 0**，且时延 / token 成本 / 工具错误率不劣化 → flag 默认转 **on**。  
-- 差值 **≈ 0** 但文件级定位命中率显著提升 → 收益卡在落笔或验证车道：先查 `edit_file` span 失败率与 read_lints 修复率，修纪律/输出契约后重跑一轮再定，flag 暂维持 off。  
-- 差值 **< 0** → 保持 **off** 并复盘。优先排查两类已知模式：模型过度调用导航（步数被挤占）、references 噪声吃掉上下文预算——对应收紧工具描述与 `structural_max_refs`。
+- `on−off` 的 resolved 差值 **> 0**，且时延 / token 成本 / 工具错误率不劣化 → 结构车道现形态**确认保留**，继续 Wave 3 候选评估。  
+- 差值 **≈ 0** 但文件级定位命中率显著提升 → 收益卡在落笔或验证车道：先查 `edit_file` span 失败率与 checks 修复率（Wave 2 探针 §7.6），修输出契约后重跑一轮再定。  
+- 差值 **< 0** → 复盘并考虑收缩。优先排查两类已知模式：模型过度调用导航（步数被挤占）、references/checks 噪声吃掉上下文预算——对应收紧输出上限与 `structural_max_refs`。
 
 ### 9.4 统一输出契约（紧凑行协议）
 
@@ -467,6 +945,9 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | 基准答案泄漏（agent 默认可出网） | 基准 runner 强制禁网（§8.2）；列入否决清单 |
 | 新工具使 agent 前缀变长、cache 失效 | 描述 hygiene（CQ2）+ 前缀稳定测试；加厚须可被 cache 抵消（§6.5 既有要求） |
 | LSP 与用户/agent 并发编辑不同步 | 每次工具调用前对目标文件 didChange 同步（以磁盘为准）；不做常驻文档影子状态 |
+| **W1 语法门误拦**（文件本身语法坏 / 非支持语言） | 逃生门：旧文本 parse 失败仅警告放行；非支持语言 `syntax=skipped`；拦截数与误拦率单列观测（§7.6 探针 3） |
+| **W1 checks 拖慢 `edit_file`** | 语法门毫秒级；增量诊断单文件 openFilesOnly + timeout；超时 `checks.status=timeout` 显式、**不失败 edit** |
+| **W2 pager 重定向误伤**复杂 shell | 只匹配无管道 / 多命令 / 写副作用的纯 pager 整条命令；不匹配则原样执行；误伤计数进观测 |
 
 ---
 
@@ -496,6 +977,8 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 8. 用结构工具结果预注入替代按需调用。  
 9. 宣称替代 `run_tests`。  
 10. 基准运行开外网（答案泄漏），或读 gold patch 做题级调优（§8.4）。
+11. **语法门无逃生门**：旧文件本身不可 parse 也硬拦编辑——门只许拦「由本次 edit 新引入」的语法错误（§7.3 W1）。
+12. **重定向越界**：`run_command` 重定向扩大到含管道 / 多命令 / 写副作用的命令，或以任何方式改变命令语义——只许重定向纯 pager 整条命令（§7.3 W2）。
 
 ---
 
@@ -517,22 +1000,31 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 
 | # | 情况 | 期望行为 |
 |---|------|----------|
-| 1 | writing 会话 | 无结构工具、无 LSP 进程 |
-| 2 | agent 会话，未调用结构工具 | 可不预热；或旁路预热但不挡 TTFB |
-| 3 | 首次 `goto_definition`，server 冷 | 工具内等待至 timeout；标 cold_start；失败则降级提示 |
+| 1 | writing / intel 会话 | 走 RAG（`search_sources`）；无 coding 结构工具、无 LSP；不展示 Agent AST 进度 |
+| 2 | agent 会话，未调用结构工具 | 可不预热 LSP；AST 可按 Work 旁路冷建/恢复，GUI 可显示进度但不挡输入 |
+| 2b | agent 无 `search_sources` | 不以资料 RAG / `sources/` sync 充当 Locate |
+| 2c | GUI 点击切换 Agent↔写作（同 Work） | 只换 Scenario/面板；**不**拆/建索引；进度通道分开订阅 |
+| 2d | 同账号切换 Work | AST/RAG 进度与数据切到新 `work_id`；旧 Work DB 行保留至 GC |
+| 3 | 首次 `goto_definition`，server 冷 | 工具内等待至 timeout；标 cold_start；失败则显式 failed / 降级提示 |
 | 4 | `edit_file` 后 `read_lints` 单文件 | LSP∪CLI；只报该路径（及实现选择的直接依赖，须有上限） |
 | 5 | 模型对 `.` 调 `read_lints` | 目录扫描有文件数/深度上限；超限截断并说明 |
 | 6 | 语言无 provider | `unsupported`，建议 grep/测试 |
 | 7 | LSP 与 ruff 同时有结果 | 合并去重；标注来源；不互相覆盖静默丢弃 |
 | 8 | Cancel 于诊断中 | 取消请求；Turn `cancelled` |
 | 9 | 审批挂起中 server 崩溃 | 恢复执行后降级或旁路重启；不改 run_id 语义 |
-| 10 | 索引 worker 解析失败单文件 | 跳过/回落正则；任务继续 |
-| 11 | `search_codebase` 名实 | 阶段 B/C 前至少改描述诚实化；后接符号/混合 |
+| 10 | RAG 索引 worker 解析失败单文件 | 跳过/回落正则；**仅影响 writing/intel 检索**；任务继续 |
+| 10b | Agent 工作区 AST 脏/过期（候选） | 标 `index_stale`；回落 LSP 或单文件即时 parse；禁止假装 Locate 完成 |
+| 11 | `search_codebase` 名实 | 符号→LSP；非符号→词面；未来可叠加工作区 AST 候选 |
 | 12 | 子 agent verify | 可用增强 `read_lints`；写作子类型不可见 |
 | 13 | 用户只要「解释代码不改」 | 只读导航可用；不强制诊断仪式 |
 | 14 | 超大 monorepo | 必须有 path 范围与超时；禁止隐式全仓 |
 | 15 | stub/eval 环境无 LSP | 固定降级路径，golden 可双轨（structural on/off） |
-| 16 | SWE-bench Lite 基准运行 | runner 强制禁外网；双轨开关；过程指标落盘；差异不回流日常 Profile |
+| 16 | SWE-bench Lite 基准运行 | runner 强制禁外网；双轨开关；过程指标落盘；**默认不建** Agent 全仓 AST（或短 TTL） |
+| 17 | 代码 `edit_file` 引入语法错误（W1 后） | 写前语法门拒收 + 出错行回显；旧文件本身坏 → 仅警告放行 |
+| 18 | 代码 `edit_file` 成功（W1 后） | 结果必含 `impact` + `checks`（增量诊断；timeout 显式，不失败 edit） |
+| 19 | `run_command` 为纯 pager（W2 后） | 内部转 `read_file`，结果带 `redirected_from`；含管道/多命令则原样执行 |
+| 20 | `edit_file` span 未命中 / 不唯一（W3 后） | 回显最近候选 / 全部位置（行协议），不裸失败 |
+| 21 | Agent Turn 内新建代码文件 | 词面立即可见；LSP 下次 Locate 可读盘；RAG sync **不**因此触发；Agent AST（候选）异步脏更新 |
 
 ---
 
@@ -547,22 +1039,32 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | agent 纪律 | `services/runtime/app/scenarios/agent/system.md` |
 | Profile | `services/runtime/app/scenarios/profiles/agent.yaml` · `writing.yaml` |
 | CQ4 切块 | `services/runtime/app/retrieval/chunking.py` |
-| `read_lints` / `search_codebase` | `services/runtime/app/tools/core/tools.py` |
+| 符号启发式 / Locate·Impact | `services/runtime/app/structural/symbols.py` · `tools/core/tools.py` |
+| `read_lints` / 导航 | `services/runtime/app/tools/core/tools.py` |
 | 工具注册 | `services/runtime/app/tools/bootstrap.py` |
+| agent 纪律 | `services/runtime/app/scenarios/agent/system.md` |
+| L1 coding prompt | `scripts/official_bench/l1_prompts.py` |
 | 子 agent 工具集 | `services/runtime/app/tools/delegate_runner.py` |
-| 基准 runner | `eval/swebench/`（双轨配方 + lite-50 + 过程指标）· 官方 harness 仍走 `make official-bench-coding-*` |
+| 基准 runner | `eval/swebench/` · `make official-bench-coding-*` |
+| Ops 实测过程 | **本文 §6.7**（单一纪要） |
 
 ---
 
 ## 14. 建议决策（供评审勾选）
 
-- [ ] **采纳三层模型**（交互工具 / 结构服务 / 索引面），否决主链强制流水线。  
-- [ ] **仅 coding Profile 启用**；writing 零感知列为硬验收。  
+- [ ] **采纳本文主线**：交互工具 + LSP 结构服务；否决主链强制流水线、否决「用 RAG 充当 Agent Locate」。  
+- [ ] **仅 coding Profile 启用结构工具**；writing / intel **零感知**列为硬验收。  
+- [ ] **场景分型按 §3**：写作/情报 = RAG；Agent 评测/写入 = LSP+词面。  
+- [ ] **Agent 工作区异步 AST** 单独立项评审：[agent-workspace-ast-index.md](agent-workspace-ast-index.md)（不阻塞 Wave 2）。  
 - [ ] **语言矩阵 Python-first**（SWE-bench Lite 全 Python）；provider 选型按 §9.1（pyright 首选、jedi 备选、ruff 保底）。  
 - [ ] **落地序：M0 基线先行 → A/B 并行开发分轨合并 → M3 全量对照 → C 解耦后置 → D 可选**（§9.3）。  
 - [ ] **`read_lints` 保留原名增强**，避免破坏 CQ1 文案与 golden。  
-- [ ] **冷启动旁路 + 工具内 timeout + 强制降级** 写进实现契约。  
-- [ ] **SWE-bench Lite 双轨协议（§8）作为外部基准**；基准运行禁外网列为否决项；`on−off` 差值为贡献口径。  
+- [ ] **冷启动旁路 + 工具内 timeout + LSP 基建失败显式 failed** 写进实现契约。  
+- [x] **Locate/Impact 揉合**（§6.7）：裸符号 grep 重定向 + edit_file.impact；不以 search_codebase 调用名为 KPI。  
+- [ ] **N0 官方 harness 可测**（P6）：看板预拉 `sweb.eval` → `require_local` 绿 → 非空 predictions 跑出官方 `resolve_rate`（§7.5 / §8.5）；`patch_rate` 仅代理，不能代替 resolve。  
+- [ ] **Wave 2 揉合（§7.3）**：W1 `edit_file.checks`（写前语法门 + 写后单文件增量诊断，含逃生门）+ W3 span 失配候选回显 + W4 Reproduce 相位 + W5 交卷自检（后两项纯 prompt 层）。  
+- [ ] **W2 pager 软重定向**按 N3 排期：仅纯 pager 整条命令；先软重定向不硬 Ban；命中/误伤入观测。  
+- [ ] **SWE-bench Lite 双轨协议（§8）**；禁外网；过程指标含 definitions/impact/checks 覆盖。  
 - [ ] **R5**：每阶段至少 1 组 agent golden + 延迟对照 + writing 不回归 + lite-50 冒烟。  
 
 ---
@@ -576,4 +1078,11 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | 2026-08-10 | v2.1（执行细节强化）：导航工具改**符号名优先**输入（适配器内 `workspace/symbol` 两跳，模型只见一次调用）；诊断优先 LSP 3.17 pull、push 差异由适配器屏蔽；定义 `structural_enabled` 语义 = 门控工具注册（off 时前缀字节不变）；位置行协议附单行源码；LSP∪ruff 去重键与 severity 三档映射；M3 flag 决策规则写死；§8.2 补 patch 提取 / 每题隔离与墙钟 / 复现存档；§9.1 增 provider 版本纪律 |
 | 2026-08-10 | **落地**：`app/structural/`（client/pool/adapters/format）· `read_lints` LSP∪ruff · `goto_definition`/`find_references` · Profile/system/子 agent 白名单 · tree-sitter 切块（可选依赖，正则回落）· `eval/swebench/` 双轨脚手架与 lite-50 · settings `structural_*`（默认 off） |
 | 2026-08-10 | **Ops 接线**：compose 注入 `STRUCTURAL_*` / `OPS_EVAL_DENY_NETWORK`；ops_eval Turn 禁网（bwrap `--unshare-net`，fail-closed）；`/health/ready` 暴露 structural；`tool.completed` 带 CSI meta；旁路 prewarm；LSP cancel 轮询；L1 coding 归档 env + 每题墙钟 30min；双轨 README 强制 recreate runtime |
-| 2026-08-11 | **n5 L1 实测纪要**：见 [`docs/topics/swe-l1-n5-results.md`](../topics/swe-l1-n5-results.md)（patch_rate=0.6、全为 `git_diff`、3×`patch_no_apply`、harness exit 1 无 resolve；agent 已去掉 `propose_patch`） |
+| 2026-08-11 | **融合 agent 流程**：去掉 `STRUCTURAL_ENABLED` 产品开关；Profile 固有；缺 LSP 显式 failed |
+| 2026-08-11 | **Locate/Impact 揉合 + §6.7 完整过程纪要**：早期 n5、`01599d49` 工具面、Runtime 调用链、观测读法；取消独立 topics 纪要 |
+| 2026-08-11 | **§6.0 当前端到端流程与问题清单**：Ops L1 逐步表、Turn 内①–⑦与 runtime 契约、实测调用形态、P1–P11 已解/未解 |
+| 2026-08-11 | **v3（Wave 2 方案，未实施）**：§7 重构为波次视角——Wave 1 落地态归档（原阶段 A–D 压缩为行为契约）+ 成熟 agent 借鉴对照（SWE-agent lint 门控编辑、Cursor/Claude Code edit 后自动 lint 回灌与失配候选、Anthropic/OpenHands 复现纪律、Aider repo map 列 Wave 3 候选）+ W1–W5 设计 + 里程碑 N0–N4 + 探针 §7.6；§6.0.5 增 P12（Verify adoption 趋零）并给 P4/P6/P8/P11 挂方案指针；§9 修正 `structural_enabled` 已废除口径、M 序列状态归档、新增 W1/W2 风险；否决清单增 11–12（语法门逃生门、重定向边界）；§12 增情况 17–20 |
+| 2026-08-11 | **§3 场景分型重写**：写作 / 威胁情报 = RAG（`search_sources` + `sources/` sync）；Agent = LSP+词面（已落地）· 工作区旁路 AST 索引（候选，不携带 RAG）· 时效/脏队列/`index_stale` 契约；§4 改为两条旁路索引图；§2/§14 对齐 |
+| 2026-08-11 | **§3.3.4–3.3.5**：GUI 模式点击≠重建索引；RAG 异步 embed / 热语料=上传私有库；Agent AST 建议 Work 级 DB 缓存 + 进度条；多账号 ACL / 多 Work 主键；与 `source_chunks` 表隔离 |
+| 2026-08-11 | **文档切分**：工作区异步 AST / GUI / Work·DB 拆至 `agent-workspace-ast-index.md`；本文收回 SWE/Ops + LSP 揉合主线 |
+| 2026-08-11 | **N0/P6 镜像与看板**：§6.0.5 P6、§6.7.1 时间线、§7.5 N0 出口、新增 §8.5（缺 `sweb.eval` / Hub 挂死 / 空 predictions 误报 / 看板预拉与 `swe_eval_images_progress.json` 实时 n/N）；澄清 infer patch OK ≠ 官方 resolve |
