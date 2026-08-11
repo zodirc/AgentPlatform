@@ -1268,12 +1268,8 @@ async def _run_turn(
 
     registry = build_registry()
     tools = tool_scope(profile, registry, plan_phase=phase)
-    # CSI §5.1: soft prewarm — never await on StartTurn / first token path.
-    if (
-        settings.structural_enabled
-        and settings.structural_prewarm
-        and scenario_id == "agent"
-    ):
+    # Structural lane: soft prewarm for agent — never await on StartTurn / first token.
+    if settings.structural_prewarm and scenario_id == "agent":
         from app.structural.adapters import prewarm
         from app.tenant_context import current_work_root_path
 
@@ -1633,14 +1629,34 @@ async def _resume_after_approval(
         )
         set_event_writer(None)
         summary_text = result.get("summary") or result.get("content", "")[:200] or json.dumps(result)[:200]
+        from app.engine.agent_engine import (
+            _TOOL_COMPLETED_SUMMARY_MAX,
+            _TOOL_COMPLETED_SPAN_MAX,
+            _clamp_event_str,
+            _compact_edit_file_event_meta,
+        )
+
         completed_payload: dict[str, Any] = {
             "tool_call_id": tool_call_id,
             "tool_name": tool_name,
             "status": "ok",
-            "summary": summary_text,
+            "summary": _clamp_event_str(summary_text, _TOOL_COMPLETED_SUMMARY_MAX),
         }
         if result.get("bytes_written") is not None:
             completed_payload["bytes_written"] = result.get("bytes_written")
+        if tool_name == "edit_file" and isinstance(result, dict):
+            path_val = str(result.get("path") or arguments.get("path") or "")
+            if path_val:
+                completed_payload["path"] = path_val
+            completed_payload["old_text"] = _clamp_event_str(
+                result.get("old_text") or arguments.get("old_text") or "",
+                _TOOL_COMPLETED_SPAN_MAX,
+            )
+            completed_payload["new_text"] = _clamp_event_str(
+                result.get("new_text") or arguments.get("new_text") or "",
+                _TOOL_COMPLETED_SPAN_MAX,
+            )
+            completed_payload.update(_compact_edit_file_event_meta(result))
         await write_event(
             event_type="tool.completed",
             payload=completed_payload,
@@ -1649,13 +1665,15 @@ async def _resume_after_approval(
         state.messages.append(tool_result_message(tool_call_id, json.dumps(result)))
     else:
         denied = {"status": "denied", "reason": deny_reason, "tool_name": tool_name}
+        from app.engine.agent_engine import _TOOL_COMPLETED_SUMMARY_MAX, _clamp_event_str
+
         await write_event(
             event_type="tool.completed",
             payload={
                 "tool_call_id": tool_call_id,
                 "tool_name": tool_name,
                 "status": "denied",
-                "summary": deny_reason,
+                "summary": _clamp_event_str(deny_reason, _TOOL_COMPLETED_SUMMARY_MAX),
             },
             step_index=step_index,
         )

@@ -54,9 +54,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="list_dir",
             description=(
-                "List one directory's entries (names only). Use to discover structure "
-                "before read/write. Prefer drilling into a subdirectory over listing '.' "
-                "again. For content search use grep/glob/search_codebase — not list_dir."
+                "List one directory's entries (names only). Use only for a specific "
+                "subdirectory you already care about. Do NOT list '.' / repo root to "
+                "tour the project — read the issue/problem.md and use "
+                "goto_definition/grep/glob instead. For content search use grep — not list_dir."
             ),
             parameters={
                 "type": "object",
@@ -281,10 +282,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="grep",
             description=(
-                "Regex/search file contents under a path (default '.'). Prefer for exact "
-                "symbols, strings, or error text. Use search_codebase for escaped-substring "
-                "scans; use goto_definition/find_references for symbol navigation when "
-                "available; use glob to find files by name pattern."
+                "Regex/search file contents for exact error strings, unique literals, or "
+                "regex patterns. Bare symbol/class/function names are redirected to "
+                "search_codebase (Locate via language server) — do not use this tool to "
+                "bypass structural locate. Use glob for filenames; do not use shell find/rg."
             ),
             parameters={
                 "type": "object",
@@ -304,7 +305,7 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Find files by glob pattern under a path (e.g. '**/*.py', 'src/**/test_*.ts'). "
                 "Use when you need paths by name/extension. For content matches use grep; "
-                "for escaped-substring discovery use search_codebase."
+                "for symbol Locate use search_codebase."
             ),
             parameters={
                 "type": "object",
@@ -376,8 +377,13 @@ def build_registry() -> ToolRegistry:
             description=(
                 "Default surgical edit for agent mode: replace a unique exact span "
                 "(old_text → new_text) in an existing file after approval. Prefer this over "
-                "write_file for existing files. If the span is missing or not unique, "
-                "read_file once and retry — do not resend blindly."
+                "write_file for existing files. On successful code edits the result includes "
+                "impact.references (same sensor as find_references) and checks "
+                "(pre-write syntax gate + incremental diagnostics / new_issues) — read both. "
+                "Introduced syntax errors are rejected without writing. If the span is missing "
+                "or not unique, the result includes candidates/lines — adjust the span "
+                "(or read_file once); do not resend blindly. Still call read_lints for "
+                "cross-file coverage."
             ),
             parameters={
                 "type": "object",
@@ -414,9 +420,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="read_lints",
             description=(
-                "Read lint/diagnostic results for workspace paths (default '.'). "
-                "Call after write_file / edit_file on code; fix new issues "
-                "you introduced before claiming done. Not a substitute for run_tests."
+                "Read lint/diagnostic results (language server + CLI) for workspace paths. "
+                "Required after edit_file / write_file on code — pass the affected file "
+                "path(s), not the whole repo by default. Fix new issues before claiming done. "
+                "Not a substitute for run_tests."
             ),
             parameters={
                 "type": "object",
@@ -429,10 +436,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="goto_definition",
             description=(
-                "Resolve a symbol name to its definition location(s) via the language server. "
-                "Prefer passing the symbol name from the issue/code; optional path/line/col "
-                "disambiguate. On failure or empty results, use grep — do not invent locations. "
-                "Not available when structural intelligence is disabled."
+                "Precision definition jump via the language server (path/line/col hints). "
+                "Cold-start symbol locate normally goes through search_codebase (same "
+                "definition sensor). Use this when you already have a file anchor or need "
+                "a disambiguated multi-hop jump. Not optional when refining a known symbol."
             ),
             parameters={
                 "type": "object",
@@ -455,10 +462,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="find_references",
             description=(
-                "Find references to a symbol via the language server (not lexical grep). "
-                "Primary input is the symbol name; optional path/line/col disambiguate. "
-                "Results may be capped per file — follow pointers for the rest. On failure, "
-                "use grep for lexical hits and do not treat those as confirmed references."
+                "Precision reference scan via the language server. Successful edit_file on "
+                "code already attaches impact.references (same sensor) — call this to deepen "
+                "or pre-scan before a signature change. Optional path/line/col disambiguate. "
+                "Results may be capped — follow pointers. Lexical grep hits are not references."
             ),
             parameters={
                 "type": "object",
@@ -517,11 +524,11 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="search_codebase",
             description=(
-                "Lexical codebase search: exact-substring match (query is regex-escaped, then "
-                "scanned like grep). Not semantic / embedding search. Use for identifiers and "
-                "error strings when the path is unknown. Prefer grep for regex; prefer glob for "
-                "filenames; prefer goto_definition / find_references (when available) for symbol "
-                "navigation; prefer read_file when the path is already known."
+                "Primary Locate tool for coding: symbol-shaped queries resolve via the language "
+                "server (same definition sensor as goto_definition) and return definitions[]. "
+                "Empty definitions with lexical hits means locate_incomplete=true — not a "
+                "finished Locate. Non-symbol queries (error strings / phrases) stay lexical. "
+                "Not embedding search. Use glob for filenames; read_file when the path is known."
             ),
             parameters={
                 "type": "object",
@@ -610,10 +617,10 @@ def build_registry() -> ToolRegistry:
                 "exit_code!=0 means the command ran and failed — inspect stderr; do not "
                 "blame the OS sandbox for 'no network'. Child env is allowlisted (no API keys "
                 "unless the platform injects them). Never put secrets in the command string. "
-                "FORBIDDEN for paging source files as a substitute for read_file: do not run "
-                "cat, head, tail, sed -n, awk, less, or wc just to flip through code you should "
-                "open with read_file (or the grep tool for symbol search). Those shell commands "
-                "remain OK for builds, installs, scripts, and real pipelines. "
+                "FORBIDDEN as a substitute for read_file / grep / goto_definition: do not run "
+                "cat, head, tail, sed -n, awk, less, wc, find, rg, or grep just to page or "
+                "search source — use read_file, the grep tool, or goto_definition. "
+                "Those shell commands remain OK inside real build/install/test pipelines. "
                 "Prefer run_tests for the standard test suite; prefer edit_file/"
                 "write_file for file changes — do not use shell redirection to write code."
             ),
@@ -757,10 +764,6 @@ PLANNING_TOOL_ALLOWLIST = frozenset(
 _PLAN_EXECUTING_WAIVE_APPROVAL = ON_WRITE_TOOLS | frozenset({"rename_file"})
 
 
-# Structural nav tools — gated by settings.structural_enabled (docs/plan CSI).
-_STRUCTURAL_NAV_TOOLS = frozenset({"goto_definition", "find_references"})
-
-
 def tool_scope(
     profile: ScenarioProfile,
     registry: ToolRegistry,
@@ -768,13 +771,9 @@ def tool_scope(
     plan_phase: str | None = None,
 ) -> list[ToolSpec]:
     """Filter tools by scenario profile; optionally harden for Plan planning phase."""
-    from app.settings import settings
-
     names = list(profile.tool_names)
     if "stub_echo" not in names:
         names.append("stub_echo")
-    if not settings.structural_enabled:
-        names = [n for n in names if n not in _STRUCTURAL_NAV_TOOLS]
     phase = (plan_phase or "").strip().lower() or None
     if phase == "planning":
         names = [n for n in names if n in PLANNING_TOOL_ALLOWLIST]

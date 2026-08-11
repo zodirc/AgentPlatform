@@ -37,6 +37,97 @@ class StepTimeoutError(Exception):
     """Raised when a step exceeds the configured wall-clock budget."""
 
 
+def _compact_edit_file_event_meta(result: dict[str, Any]) -> dict[str, Any]:
+    """Ops-facing CSI fields for edit_file tool.completed (slim; model still gets full result)."""
+    out: dict[str, Any] = {}
+    if "applies" in result:
+        out["applies"] = bool(result.get("applies"))
+    impact = result.get("impact")
+    if isinstance(impact, dict) and impact:
+        compact: dict[str, Any] = {}
+        if impact.get("status") is not None:
+            compact["status"] = str(impact.get("status"))[:32]
+        if impact.get("symbol") is not None:
+            compact["symbol"] = str(impact.get("symbol"))[:256]
+        if impact.get("reference_count") is not None:
+            try:
+                compact["reference_count"] = int(impact["reference_count"])
+            except (TypeError, ValueError):
+                refs = impact.get("references")
+                if isinstance(refs, list):
+                    compact["reference_count"] = len(refs)
+        elif isinstance(impact.get("references"), list):
+            compact["reference_count"] = len(impact["references"])
+        if impact.get("reason"):
+            compact["reason"] = str(impact.get("reason"))[:256]
+        if compact:
+            out["impact"] = compact
+    checks = result.get("checks")
+    if isinstance(checks, dict) and checks:
+        compact_c: dict[str, Any] = {}
+        if checks.get("status") is not None:
+            compact_c["status"] = str(checks.get("status"))[:32]
+        if checks.get("syntax") is not None:
+            compact_c["syntax"] = str(checks.get("syntax"))[:32]
+        if checks.get("baseline_count") is not None:
+            try:
+                compact_c["baseline_count"] = int(checks["baseline_count"])
+            except (TypeError, ValueError):
+                pass
+        issues = checks.get("new_issues")
+        if isinstance(issues, list):
+            compact_c["new_issue_count"] = len(issues)
+        if checks.get("reason"):
+            compact_c["reason"] = str(checks.get("reason"))[:256]
+        if compact_c:
+            out["checks"] = compact_c
+    candidates = result.get("candidates")
+    if isinstance(candidates, list) and candidates:
+        out["candidate_count"] = len(candidates)
+    if result.get("match_count") is not None:
+        try:
+            out["match_count"] = int(result["match_count"])
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _compact_locate_event_meta(result: dict[str, Any]) -> dict[str, Any]:
+    """Ops-facing Locate fields for grep / search_codebase tool.completed."""
+    out: dict[str, Any] = {}
+    if result.get("redirected_from"):
+        out["redirected_from"] = str(result.get("redirected_from"))[:64]
+    if result.get("mode") is not None:
+        out["locate_mode"] = str(result.get("mode"))[:32]
+    if "locate_incomplete" in result:
+        out["locate_incomplete"] = bool(result.get("locate_incomplete"))
+    defs = result.get("definitions")
+    if isinstance(defs, list):
+        out["definition_count"] = len(defs)
+    elif result.get("definition_count") is not None:
+        try:
+            out["definition_count"] = int(result["definition_count"])
+        except (TypeError, ValueError):
+            pass
+    status = str(result.get("status") or "")
+    if status == "failed" or (
+        str(result.get("degraded_reason") or "").startswith("timeout_or_error")
+        or str(result.get("degraded_reason") or "") in {"lsp_unavailable", "no_provider", "start_failed"}
+    ):
+        out["locate_status"] = "failed"
+    elif out.get("definition_count"):
+        out["locate_status"] = "ok"
+    elif out.get("locate_incomplete"):
+        out["locate_status"] = "incomplete"
+    elif out.get("locate_mode") == "lexical" and not out.get("redirected_from"):
+        out["locate_status"] = "lexical"
+    elif out.get("redirected_from"):
+        out["locate_status"] = "incomplete"
+    if result.get("degraded_reason"):
+        out["degraded_reason"] = str(result.get("degraded_reason"))[:256]
+    return out
+
+
 _TOOL_EVENTS: dict[str, str] = {
     "update_outline": "outline.updated",
     "update_plan": "turn.plan",
@@ -57,6 +148,93 @@ _CACHEABLE_TOOLS = frozenset(
 # Returned only by control paths in _run_tool / _run_tool_batch — never as a
 # normal tool summary string (delegate used to echo subagent "waiting_approval").
 _CONTROL_OUTCOMES = frozenset({"waiting_approval", "CANCELLED", "TERMINATE"})
+
+# Match packages/contracts/.../tool.completed.json — long summaries (e.g. delegate
+# echoing verbatim code) must not abort the Turn via schema_validation_error.
+_TOOL_COMPLETED_SUMMARY_MAX = 4096
+_TOOL_COMPLETED_SPAN_MAX = 65536
+_EVENT_STR_TRUNC_SUFFIX = "\n...[truncated]"
+
+
+def _clamp_event_str(value: Any, max_len: int) -> str:
+    text = str(value or "")
+    if len(text) <= max_len:
+        return text
+    # Suffix length must be exact — off-by-one here still fails maxLength.
+    keep = max(0, max_len - len(_EVENT_STR_TRUNC_SUFFIX))
+    return text[:keep] + _EVENT_STR_TRUNC_SUFFIX
+
+
+def _tool_completed_base(
+    *,
+    tool_call_id: str,
+    tool_name: str,
+    status: str,
+    summary: Any = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build a schema-safe tool.completed payload (no illegal keys; clamped strings)."""
+    payload: dict[str, Any] = {
+        "tool_call_id": tool_call_id,
+        "tool_name": tool_name,
+        "status": status,
+        "summary": _clamp_event_str(summary, _TOOL_COMPLETED_SUMMARY_MAX),
+    }
+    if "path" in extra and extra["path"]:
+        payload["path"] = _clamp_event_str(extra.pop("path"), 4096)
+    if "policy" in extra and extra["policy"]:
+        payload["policy"] = _clamp_event_str(extra.pop("policy"), 128)
+    # Drop known-illegal keys callers might pass through habitually.
+    extra.pop("error", None)
+    payload.update(extra)
+    return payload
+
+
+def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, Any] | None:
+    """Project tool results onto closed domain-event schemas (avoid additionalProperties / maxLength kills)."""
+    if event_type == "turn.plan":
+        items: list[dict[str, str]] = []
+        raw_items = result.get("items")
+        if isinstance(raw_items, list):
+            for it in raw_items:
+                if not isinstance(it, dict):
+                    continue
+                status = str(it.get("status") or "pending")
+                if status not in {"pending", "in_progress", "done", "completed", "cancelled"}:
+                    status = "pending"
+                items.append(
+                    {
+                        "id": str(it.get("id") or len(items) + 1),
+                        "title": _clamp_event_str(it.get("title") or "item", 512),
+                        "status": status,
+                    }
+                )
+        if not items:
+            return None
+        out: dict[str, Any] = {
+            "plan_id": str(result.get("plan_id") or "plan"),
+            "items": items,
+            "summary": _clamp_event_str(result.get("summary") or "", _TOOL_COMPLETED_SUMMARY_MAX),
+        }
+        phase = str(result.get("plan_phase") or "")
+        if phase in {"planning", "executing"}:
+            out["plan_phase"] = phase
+        if "awaiting_consent" in result:
+            out["awaiting_consent"] = bool(result.get("awaiting_consent"))
+        return out
+    if event_type == "outline.updated":
+        mode = str(result.get("mode") or "")
+        out = {
+            "path": str(result.get("path") or "outline.md") or "outline.md",
+            "content": _clamp_event_str(result.get("content") or "", _TOOL_COMPLETED_SPAN_MAX),
+            "summary": _clamp_event_str(result.get("summary") or "", _TOOL_COMPLETED_SUMMARY_MAX),
+        }
+        if result.get("outline_path"):
+            out["outline_path"] = str(result.get("outline_path"))
+        if mode in {"replace", "append"}:
+            out["mode"] = mode
+        return out
+    return dict(result)
 
 
 def _tool_batch_outcome(summary: str) -> str:
@@ -721,12 +899,12 @@ class AgentEngine:
             )
             await self._write_event(
                 event_type="tool.completed",
-                payload={
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                    "status": "error",
-                    "error": "tool disabled at this stage",
-                },
+                payload=_tool_completed_base(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    status="error",
+                    summary="tool disabled at this stage",
+                ),
                 step_index=step_index,
             )
             record_tool_call(tool_name=tool_name, status="error")
@@ -773,14 +951,14 @@ class AgentEngine:
                 )
                 await self._write_event(
                     event_type="tool.completed",
-                    payload={
-                        "tool_call_id": tool_call_id,
-                        "tool_name": tool_name,
-                        "status": "skipped",
-                        "policy": kind,
-                        "summary": ui_summary,
+                    payload=_tool_completed_base(
+                        tool_call_id=tool_call_id,
+                        tool_name=tool_name,
+                        status="skipped",
+                        summary=ui_summary,
+                        policy=kind,
                         **({"path": read_path} if read_path else {}),
-                    },
+                    ),
                     step_index=step_index,
                 )
                 record_tool_call(tool_name=tool_name, status="skipped")
@@ -818,14 +996,14 @@ class AgentEngine:
                     )
                     await self._write_event(
                         event_type="tool.completed",
-                        payload={
-                            "tool_call_id": tool_call_id,
-                            "tool_name": tool_name,
-                            "status": "skipped",
-                            "policy": "read_budget",
-                            "summary": ui_summary,
+                        payload=_tool_completed_base(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            status="skipped",
+                            summary=ui_summary,
+                            policy="read_budget",
                             **({"path": read_path} if read_path else {}),
-                        },
+                        ),
                         step_index=step_index,
                     )
                     record_tool_call(tool_name=tool_name, status="skipped")
@@ -860,12 +1038,12 @@ class AgentEngine:
                     )
                     await self._write_event(
                         event_type="tool.completed",
-                        payload={
-                            "tool_call_id": tool_call_id,
-                            "tool_name": tool_name,
-                            "status": "error",
-                            "summary": result["summary"],
-                        },
+                        payload=_tool_completed_base(
+                            tool_call_id=tool_call_id,
+                            tool_name=tool_name,
+                            status="error",
+                            summary=result["summary"],
+                        ),
                         step_index=step_index,
                     )
                     record_tool_call(tool_name=tool_name, status="error")
@@ -891,7 +1069,10 @@ class AgentEngine:
                     return "CANCELLED"
                 await self._write_event(
                     event_type="section.draft.delta",
-                    payload={"section_id": section_id, "delta": delta},
+                    payload={
+                        "section_id": section_id,
+                        "delta": _clamp_event_str(delta, 8192),
+                    },
                     step_index=step_index,
                 )
 
@@ -1017,12 +1198,12 @@ class AgentEngine:
             summary = str(result.get("summary", "tool timed out"))
             await self._write_event(
                 event_type="tool.completed",
-                payload={
-                    "tool_call_id": tool_call_id,
-                    "tool_name": tool_name,
-                    "status": "timeout",
-                    "summary": summary,
-                },
+                payload=_tool_completed_base(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    status="timeout",
+                    summary=summary,
+                ),
                 step_index=step_index,
             )
             record_tool_call(tool_name=tool_name, status="timeout")
@@ -1036,11 +1217,13 @@ class AgentEngine:
             and result.get("status") != "error"
             and not result.get("error")
         ):
-            await self._write_event(
-                event_type=event_type,
-                payload=result,
-                step_index=step_index,
-            )
+            domain_payload = _domain_event_payload(event_type, result)
+            if domain_payload is not None:
+                await self._write_event(
+                    event_type=event_type,
+                    payload=domain_payload,
+                    step_index=step_index,
+                )
 
         if tool_name == "search_sources":
             mode = str(result.get("retrieval", "none"))
@@ -1075,7 +1258,7 @@ class AgentEngine:
                             continue
                         preview: dict[str, Any] = {
                             "path": path,
-                            "excerpt": str(hit.get("excerpt", ""))[:200],
+                            "excerpt": _clamp_event_str(hit.get("excerpt", ""), 512),
                         }
                         if hit.get("citation_id"):
                             preview["citation_id"] = str(hit["citation_id"])
@@ -1085,10 +1268,10 @@ class AgentEngine:
                             preview["score"] = score
                         hits_preview.append(preview)
                 retrieval_payload: dict[str, Any] = {
-                    "query": str(result.get("query", "")),
+                    "query": _clamp_event_str(result.get("query", ""), 4096),
                     "mode": mode,
                     "hit_count": len(raw_hits) if isinstance(raw_hits, list) else 0,
-                    "summary": str(result.get("summary", ""))[:512],
+                    "summary": _clamp_event_str(result.get("summary", ""), 512),
                     "hits": hits_preview,
                     "ranked": ranked_for_score,
                 }
@@ -1114,21 +1297,19 @@ class AgentEngine:
             # Event schema is strict; keep apply_check fields on the tool result
             # (model-visible) but do not put them on patch.proposed.
             proposed_payload = {
-                k: v
-                for k, v in result.items()
-                if k
-                not in {
-                    "applies",
-                    "apply_check",
-                    "apply_check_error",
-                    "apply_check_warning",
-                }
+                "patch_id": str(result.get("patch_id") or ""),
+                "path": str(result.get("path") or ""),
+                "status": "pending",
+                "old_text": _clamp_event_str(result.get("old_text") or "", _TOOL_COMPLETED_SPAN_MAX),
+                "new_text": _clamp_event_str(result.get("new_text") or "", _TOOL_COMPLETED_SPAN_MAX),
+                "summary": _clamp_event_str(result.get("summary") or "", _TOOL_COMPLETED_SUMMARY_MAX),
             }
-            await self._write_event(
-                event_type="patch.proposed",
-                payload=proposed_payload,
-                step_index=step_index,
-            )
+            if proposed_payload["patch_id"] and proposed_payload["path"]:
+                await self._write_event(
+                    event_type="patch.proposed",
+                    payload=proposed_payload,
+                    step_index=step_index,
+                )
             if (
                 state.scenario_id == "writing"
                 and settings.writing_patch_auto_apply
@@ -1195,12 +1376,13 @@ class AgentEngine:
                 summary = err_text
         tool_status = "error" if result.get("error") or str(result.get("status") or "") == "error" else "ok"
         # Event contract only allows ok|error|denied|timeout (not edited/written).
-        completed_payload: dict[str, Any] = {
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "status": tool_status,
-            "summary": summary,
-        }
+        # Clamp bus fields only — model still receives full tool_result JSON below.
+        completed_payload: dict[str, Any] = _tool_completed_base(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            status=tool_status,
+            summary=summary,
+        )
         # CTX-9: light read coverage fields (no full content on the bus).
         if tool_name == "read_file" and isinstance(result, dict) and not result.get("error"):
             content = result.get("content")
@@ -1247,25 +1429,40 @@ class AgentEngine:
             if path_val:
                 completed_payload["path"] = path_val
             if tool_name == "edit_file":
-                completed_payload["old_text"] = str(
-                    result.get("old_text") or args.get("old_text") or ""
+                completed_payload["old_text"] = _clamp_event_str(
+                    result.get("old_text") or args.get("old_text") or "",
+                    _TOOL_COMPLETED_SPAN_MAX,
                 )
-                completed_payload["new_text"] = str(
-                    result.get("new_text") or args.get("new_text") or ""
+                completed_payload["new_text"] = _clamp_event_str(
+                    result.get("new_text") or args.get("new_text") or "",
+                    _TOOL_COMPLETED_SPAN_MAX,
                 )
             else:
-                completed_payload["old_text"] = str(result.get("old_text") or "")
-                completed_payload["new_text"] = str(
-                    result.get("new_text") or args.get("content") or ""
+                completed_payload["old_text"] = _clamp_event_str(
+                    result.get("old_text") or "",
+                    _TOOL_COMPLETED_SPAN_MAX,
+                )
+                completed_payload["new_text"] = _clamp_event_str(
+                    result.get("new_text") or args.get("content") or "",
+                    _TOOL_COMPLETED_SPAN_MAX,
                 )
             if result.get("bytes_written") is not None:
                 completed_payload["bytes_written"] = int(result["bytes_written"])
+            if tool_name == "edit_file" and isinstance(result, dict):
+                completed_payload.update(_compact_edit_file_event_meta(result))
+        if tool_name in {"grep", "search_codebase"} and isinstance(result, dict):
+            completed_payload.update(_compact_locate_event_meta(result))
         if tool_name == "export_document":
+            issues_raw = result.get("delivery_issues") or []
+            issues = [
+                _clamp_event_str(x, 1024)
+                for x in (issues_raw if isinstance(issues_raw, list) else [])
+            ]
             completed_payload.update(
                 {
                     "delivery_status": str(result.get("delivery_status", "failed")),
-                    "delivery_issues": list(result.get("delivery_issues") or []),
-                    "output_path": str(result.get("output_path", "")),
+                    "delivery_issues": issues,
+                    "output_path": _clamp_event_str(result.get("output_path") or "", 4096),
                 }
             )
             if result.get("bytes_written") is not None:

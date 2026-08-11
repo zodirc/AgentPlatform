@@ -109,17 +109,15 @@ def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> froze
 
 
 def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[ToolSpec]:
-    from app.settings import settings
-
     by_name = {spec.name: spec for spec in parent_tools}
     registry = None
     specs: list[ToolSpec] = []
     structural_nav = frozenset({"goto_definition", "find_references"})
     for name in SUBAGENT_TOOL_NAMES.get(agent_type, []):
-        # Nav tools only when structural_enabled AND already on the parent scope
-        # (agent Profile). Never inject from the global registry into writing.
+        # Nav tools only when already on the parent Profile scope (agent).
+        # Never inject from the global registry into writing.
         if name in structural_nav:
-            if not settings.structural_enabled or name not in by_name:
+            if name not in by_name:
                 continue
             specs.append(by_name[name])
             continue

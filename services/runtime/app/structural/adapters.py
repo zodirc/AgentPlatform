@@ -19,7 +19,8 @@ logger = logging.getLogger(__name__)
 
 
 def structural_available() -> bool:
-    return bool(settings.structural_enabled)
+    """Language-server lane is part of agent; always considered available at the API layer."""
+    return True
 
 
 def _rel(path: Path, workspace: Path) -> str:
@@ -521,7 +522,7 @@ async def find_references(
 
 async def prewarm(workspace_root: Path) -> None:
     """Best-effort background initialize — never awaited on StartTurn."""
-    if not settings.structural_enabled or not settings.structural_prewarm:
+    if not settings.structural_prewarm:
         return
     try:
         await get_session(workspace_root, timeout_s=float(settings.structural_nav_timeout_s))

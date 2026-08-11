@@ -133,6 +133,94 @@
     "structural_truncated": {
       "type": "boolean",
       "description": "CSI: results truncated (refs/files cap)."
+    },
+    "applies": {
+      "type": "boolean",
+      "description": "edit_file: whether the span was applied to disk."
+    },
+    "impact": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "CSI Wave1: compact Impact projection for Ops (not full references).",
+      "properties": {
+        "status": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "symbol": {
+          "type": ["string", "null"],
+          "maxLength": 256
+        },
+        "reference_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "CSI Wave2: compact Verify projection for Ops (not full new_issues).",
+      "properties": {
+        "status": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "syntax": {
+          "type": "string",
+          "maxLength": 32
+        },
+        "baseline_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "new_issue_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 256
+        }
+      }
+    },
+    "candidate_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "edit_file span miss / non-unique: number of candidate locations echoed."
+    },
+    "match_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "edit_file: how many times old_text matched when non-unique."
+    },
+    "redirected_from": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "CSI Locate: tool that was redirected (e.g. grep → search_codebase)."
+    },
+    "locate_mode": {
+      "type": "string",
+      "maxLength": 32,
+      "description": "CSI Locate: symbol|lexical|…"
+    },
+    "locate_incomplete": {
+      "type": "boolean",
+      "description": "CSI Locate: no definitions; lexical fallback only."
+    },
+    "definition_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CSI Locate: number of definitions returned."
+    },
+    "locate_status": {
+      "type": "string",
+      "maxLength": 32,
+      "description": "CSI Locate: ok|failed|incomplete|lexical."
     }
   }
 }

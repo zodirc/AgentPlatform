@@ -1,7 +1,12 @@
 """Coding structural intelligence: LSP diagnostics + symbol navigation (R4 tool/index plane).
 
-See docs/plan/coding-structural-intelligence.md. Heavy work stays out of StartTurn;
-callers use tools that timeout and degrade to ruff/grep.
+See docs/plan/coding-structural-intelligence.md.
+
+Locate fuses into search_codebase (definition adapters); Impact fuses into
+edit_file.impact (reference adapters). Wave 2 Verify fuses into edit_file.checks
+(syntax gate + incremental diagnostics). Precision tools goto_definition /
+find_references remain. Heavy work stays out of StartTurn; infra failure is
+explicit failed (not silent lexical success).
 """
 
 from __future__ import annotations

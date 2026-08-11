@@ -608,3 +608,112 @@ async def test_agent_engine_accepts_evidence_backed_citations(workspace) -> None
     assert draft_payload.get("citation_check") == "ok"
     assert draft_payload.get("unverified_citations") == []
 
+
+
+@pytest.mark.asyncio
+async def test_tool_completed_summary_clamped_to_schema() -> None:
+    """delegate-style huge summaries must not break tool.completed schema (maxLength 4096)."""
+    from app.contracts.event_validation import validate_event_payload
+    from app.engine.agent_engine import (
+        _TOOL_COMPLETED_SUMMARY_MAX,
+    )
+
+    async def huge_echo(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "completed",
+            "summary": "The file `x.py` has **317 lines total**.\n" + ("code\n" * 3000),
+        }
+
+    tool = ToolSpec(
+        name="delegate",
+        description="delegate",
+        parameters={
+            "type": "object",
+            "properties": {"task": {"type": "string"}},
+            "required": ["task"],
+        },
+        handler=huge_echo,
+    )
+    events: list[dict[str, Any]] = []
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        if event_type == "tool.completed":
+            events.append(payload)
+
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [
+                ModelResponse(
+                    tool_calls=[{"id": "d1", "name": "delegate", "input": {"task": "read"}}]
+                ),
+                ModelResponse(text="done"),
+            ],
+            one_per_stream=True,
+        ),
+        tools=[tool],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    state.max_steps = 4
+    await engine.run(state)
+    assert events
+    assert len(events[0]["summary"]) <= _TOOL_COMPLETED_SUMMARY_MAX
+    assert len(events[0]["summary"]) == _TOOL_COMPLETED_SUMMARY_MAX
+    assert events[0]["summary"].endswith("[truncated]")
+    validate_event_payload("tool.completed", events[0])  # must not raise
+    # Model tool_result still gets the full summary.
+    tool_msg = [m for m in state.messages if m.get("role") == "tool"][-1]
+    model_payload = json.loads(tool_msg["content"][0]["content"])
+    assert len(model_payload["summary"]) > _TOOL_COMPLETED_SUMMARY_MAX
+
+
+def test_clamp_event_str_never_exceeds_max() -> None:
+    from app.engine.agent_engine import _clamp_event_str
+
+    for max_len in (1, 15, 16, 4096):
+        out = _clamp_event_str("x" * (max_len + 100), max_len)
+        assert len(out) <= max_len
+    # Exact boundary: unclamped equal length passes through.
+    assert len(_clamp_event_str("a" * 4096, 4096)) == 4096
+
+
+def test_domain_event_payload_clamps_plan_title_and_outline() -> None:
+    from app.contracts.event_validation import validate_event_payload
+    from app.engine.agent_engine import _domain_event_payload
+
+    plan = _domain_event_payload(
+        "turn.plan",
+        {
+            "plan_id": "p1",
+            "summary": "s",
+            "items": [{"id": "1", "title": "t" * 800, "status": "pending"}],
+        },
+    )
+    assert plan is not None
+    assert len(plan["items"][0]["title"]) == 512
+    validate_event_payload("turn.plan", plan)
+
+    outline = _domain_event_payload(
+        "outline.updated",
+        {"path": "outline.md", "content": "c" * 70_000, "summary": "ok", "mode": "replace"},
+    )
+    assert outline is not None
+    assert len(outline["content"]) <= 65536
+    validate_event_payload("outline.updated", outline)
+
+
+def test_tool_completed_base_rejects_error_key() -> None:
+    from app.contracts.event_validation import validate_event_payload
+    from app.engine.agent_engine import _tool_completed_base
+
+    payload = _tool_completed_base(
+        tool_call_id="c1",
+        tool_name="x",
+        status="error",
+        summary="boom",
+        error="must_not_appear",
+    )
+    assert "error" not in payload
+    validate_event_payload("tool.completed", payload)

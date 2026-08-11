@@ -336,10 +336,12 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
-    # Agent prompt: resolve path before survey; ban path-theater / read loops.
-    assert "Resolve the target path" in agent.system_prompt
+    # Agent prompt: locate before survey; ban path-theater / read loops.
+    assert "Locate" in agent.system_prompt or "search_codebase" in agent.system_prompt
     assert "Path theater" in agent.system_prompt
     assert "Read-after-complete" in agent.system_prompt
+    assert "Reproduce" in agent.system_prompt
+    assert "checks" in agent.system_prompt.lower()
     # Intel: analyst markers (stable; docs/39).
     assert "threat-intelligence analyst" in intel.system_prompt
     assert "enrich_ioc" in intel.system_prompt

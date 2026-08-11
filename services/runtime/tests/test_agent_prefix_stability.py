@@ -25,6 +25,15 @@ def test_agent_system_prompt_contains_cq1_discipline() -> None:
     assert "read_lints" in text
     assert "run_tests" in text
     assert "edit_file" in text
+    assert "goto_definition" in text
+    assert "find_references" in text
+    assert "search_codebase" in text
+    assert "impact" in text.lower()
+    assert "checks" in text.lower()
+    assert "Reproduce" in text
+    assert "candidates" in text.lower()
+    assert "Repo tourism" in text or "list_dir" in text
+    assert "Lexical-as-Locate" in text or "locate_incomplete" in text
     assert "propose_patch" not in text
     assert "minimal" in text.lower()
     assert "head" in text and "tail" in text
@@ -68,15 +77,27 @@ def test_agent_tool_descriptions_hygiene() -> None:
 
     lints = by_name["read_lints"].description
     assert "write_file" in lints or "edit_file" in lints
+    assert "Required" in lints or "required" in lints.lower()
+
+    nav = by_name["goto_definition"].description
+    assert "symbol" in nav.lower() or "definition" in nav.lower()
+    assert "search_codebase" in nav or "precision" in nav.lower()
+
+    grep = by_name["grep"].description
+    assert "search_codebase" in grep or "Locate" in grep
+
+    listing = by_name["list_dir"].description
+    assert "NOT" in listing or "Do NOT" in listing
 
     search = by_name["search_codebase"].description
-    assert "grep" in search
+    assert "Locate" in search or "definition" in search.lower()
     assert len(search) > 40
 
     cmd = by_name["run_command"].description
     assert "read_file" in cmd or "run_tests" in cmd
     assert "approval" in cmd.lower()
     assert "head" in cmd.lower() or "FORBIDDEN" in cmd
+    assert "find" in cmd.lower() or "goto_definition" in cmd or "search_codebase" in cmd
 
     read = by_name["read_file"].description
     assert "complete" in read.lower() or "truncated=false" in read.lower()
@@ -85,6 +106,9 @@ def test_agent_tool_descriptions_hygiene() -> None:
 
     edit = by_name["edit_file"].description
     assert "default" in edit.lower() or "surgical" in edit.lower()
+    assert "impact" in edit.lower()
+    assert "checks" in edit.lower() or "syntax" in edit.lower()
+    assert "candidates" in edit.lower()
 
     # Tool schemas (names + descriptions) must be deterministic for cache prefix.
     tools = registry.to_openai_tools(list(by_name))

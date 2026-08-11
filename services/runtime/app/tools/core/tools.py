@@ -4,7 +4,9 @@ import asyncio
 import contextvars
 import json
 import logging
+import os
 import re
+import time
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, TypeVar
@@ -69,6 +71,157 @@ def _assert_not_seed_corpus(rel_path: str) -> None:
 
 
 _READ_FILE_MAX_CHARS = 32_000
+
+# Lexical grep / search_codebase: never scan install/VCS noise (SWE worktrees).
+_LEXICAL_SKIP_DIR_NAMES = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".local",
+        ".venv",
+        "venv",
+        ".tox",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        "node_modules",
+        "__pycache__",
+        "site-packages",
+        ".eggs",
+        "build",
+        "dist",
+    }
+)
+_LEXICAL_SKIP_SUFFIXES = frozenset(
+    {
+        ".pyc",
+        ".pyo",
+        ".so",
+        ".dylib",
+        ".dll",
+        ".a",
+        ".o",
+        ".whl",
+        ".zip",
+        ".gz",
+        ".bz2",
+        ".xz",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".ico",
+        ".pdf",
+        ".bin",
+    }
+)
+_LEXICAL_MAX_FILE_BYTES = 1_048_576
+_LEXICAL_BUDGET_S = 20.0
+
+
+def _lexical_dir_skipped(name: str) -> bool:
+    if name in _LEXICAL_SKIP_DIR_NAMES:
+        return True
+    if name.startswith(".") and name not in {".github"}:
+        # Hidden dirs are almost always tooling; keep .github for workflow text.
+        return True
+    if name.endswith(".dist-info") or name.endswith(".egg-info"):
+        return True
+    return False
+
+
+def _lexical_file_skipped(path: Path) -> bool:
+    if path.name.startswith("."):
+        return True
+    if path.suffix.lower() in _LEXICAL_SKIP_SUFFIXES:
+        return True
+    try:
+        if path.stat().st_size > _LEXICAL_MAX_FILE_BYTES:
+            return True
+    except OSError:
+        return True
+    return False
+
+
+def _lexical_scan_sync(
+    *,
+    root: Path,
+    workspace: Path,
+    pattern: str,
+    escape: bool,
+    limit: int,
+    budget_s: float = _LEXICAL_BUDGET_S,
+) -> dict[str, Any]:
+    """Blocking substring scan — must run via ``asyncio.to_thread``.
+
+    SWE-bench checkouts are large; scanning on the event loop starved asyncpg
+    and surfaced as ``statement timeout`` / ``turn.failed``.
+    """
+    started = time.monotonic()
+    try:
+        rx = re.compile(re.escape(pattern) if escape else pattern, re.I)
+    except re.error as exc:
+        return {
+            "matches": [],
+            "match_count": 0,
+            "truncated": False,
+            "files_scanned": 0,
+            "error": f"invalid pattern: {exc}",
+        }
+    matches: list[dict[str, Any]] = []
+    files_scanned = 0
+    truncated = False
+
+    def _budget_hit() -> bool:
+        return (time.monotonic() - started) >= budget_s
+
+    def _scan_file(fp: Path) -> bool:
+        """Return True if caller should stop (limit or budget)."""
+        nonlocal files_scanned, truncated
+        if _budget_hit():
+            truncated = True
+            return True
+        if _lexical_file_skipped(fp):
+            return False
+        try:
+            text = fp.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return False
+        files_scanned += 1
+        try:
+            rel = str(fp.relative_to(workspace))
+        except ValueError:
+            rel = str(fp)
+        for i, line in enumerate(text.splitlines(), start=1):
+            if rx.search(line):
+                matches.append({"path": rel, "line": i, "text": line[:240]})
+                if len(matches) >= limit:
+                    return True
+        return False
+
+    if root.is_file():
+        _scan_file(root)
+    elif root.is_dir():
+        for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+            if _budget_hit():
+                truncated = True
+                break
+            dirnames[:] = sorted(d for d in dirnames if not _lexical_dir_skipped(d))
+            for name in sorted(filenames):
+                if _scan_file(Path(dirpath) / name):
+                    break
+            if len(matches) >= limit or truncated:
+                break
+
+    return {
+        "matches": matches,
+        "match_count": len(matches),
+        "truncated": truncated,
+        "files_scanned": files_scanned,
+        "elapsed_ms": int((time.monotonic() - started) * 1000),
+    }
 
 
 def _coerce_optional_positive_int(value: Any) -> int | None:
@@ -839,7 +992,7 @@ async def update_plan(
         normalized.append(
             {
                 "id": str(item.get("id", i + 1)),
-                "title": str(item.get("title", item.get("text", "item"))),
+                "title": str(item.get("title", item.get("text", "item")))[:512],
                 "status": status,
             }
         )
@@ -928,32 +1081,57 @@ async def update_outline(
 
 
 async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -> dict[str, Any]:
+    from app.structural.symbols import is_symbol_query
+
+    # Symbol-shaped patterns must use the Locate lane (search_codebase → definition).
+    # Do not allow bare identifiers to escape into pure lexical grep.
+    if is_symbol_query(pattern):
+        out = await search_codebase(query=pattern, path=path, limit=limit, **_kwargs)
+        out = dict(out)
+        out["redirected_from"] = "grep"
+        out["pattern"] = pattern
+        if "matches" not in out:
+            out["matches"] = list(out.get("hits") or [])
+        out["match_count"] = int(out.get("match_count") or len(out["matches"]))
+        summary = str(out.get("summary") or "")
+        out["summary"] = (
+            f"grep redirected symbol {pattern!r} → search_codebase (Locate). {summary}"
+        ).strip()
+        return out
+
     root = _resolve_path(path)
     if not root.exists():
         return {"error": f"Path not found: {path}"}
-    rx = re.compile(pattern, re.I)
-    matches: list[dict[str, Any]] = []
-    files = [root] if root.is_file() else list(root.rglob("*"))
-    for fp in files:
-        if not fp.is_file() or fp.name.startswith("."):
-            continue
-        try:
-            text = fp.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        rel = str(fp.relative_to(_workspace_root()))
-        for i, line in enumerate(text.splitlines(), start=1):
-            if rx.search(line):
-                matches.append({"path": rel, "line": i, "text": line[:240]})
-                if len(matches) >= limit:
-                    break
-        if len(matches) >= limit:
-            break
+    scanned = await asyncio.to_thread(
+        _lexical_scan_sync,
+        root=root,
+        workspace=_workspace_root(),
+        pattern=pattern,
+        escape=False,
+        limit=limit,
+    )
+    if scanned.get("error"):
+        return {
+            "pattern": pattern,
+            "matches": [],
+            "match_count": 0,
+            "mode": "lexical",
+            "error": scanned["error"],
+            "summary": f"grep failed: {scanned['error']}",
+        }
+    matches = list(scanned.get("matches") or [])
+    truncated = bool(scanned.get("truncated"))
+    summary = f"Found {len(matches)} match(es) for {pattern!r}"
+    if truncated:
+        summary += " (scan budget hit — results may be partial)"
     return {
         "pattern": pattern,
         "matches": matches,
         "match_count": len(matches),
-        "summary": f"Found {len(matches)} match(es) for {pattern!r}",
+        "mode": "lexical",
+        "truncated": truncated,
+        "files_scanned": int(scanned.get("files_scanned") or 0),
+        "summary": summary,
     }
 
 
@@ -1586,12 +1764,136 @@ async def search_sources(
     )
 
 
-async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwargs: Any) -> dict[str, Any]:
-    result = await grep(pattern=re.escape(query), path=path, limit=limit, **_kwargs)
+async def _lexical_codebase_hits(
+    query: str, path: str = ".", limit: int = 20, **_kwargs: Any
+) -> dict[str, Any]:
+    """Substring scan (escaped). Used as Locate fallback or non-symbol mode.
+
+    Runs off the event loop — full-tree scans must not block asyncpg writers.
+    """
+    root = _resolve_path(path)
+    if not root.exists():
+        return {"hits": [], "error": f"Path not found: {path}"}
+    scanned = await asyncio.to_thread(
+        _lexical_scan_sync,
+        root=root,
+        workspace=_workspace_root(),
+        pattern=query,
+        escape=True,
+        limit=limit,
+    )
+    if scanned.get("error"):
+        return {"hits": [], "error": str(scanned["error"]), "match_count": 0}
+    hits = list(scanned.get("matches") or [])
+    truncated = bool(scanned.get("truncated"))
+    summary = f"search_codebase (lexical): {len(hits)} hit(s) for {query!r}"
+    if truncated:
+        summary += " (scan budget hit — results may be partial)"
     return {
-        "query": query,
-        "hits": result.get("matches", []),
-        "summary": result.get("summary", f"search_codebase: {query}"),
+        "hits": hits,
+        "match_count": len(hits),
+        "truncated": truncated,
+        "files_scanned": int(scanned.get("files_scanned") or 0),
+        "summary": summary,
+    }
+
+
+async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwargs: Any) -> dict[str, Any]:
+    """Locate entry: symbol queries must resolve via goto_definition adapters."""
+    from app.structural.symbols import is_symbol_query
+
+    q = (query or "").strip()
+    if not is_symbol_query(q):
+        lexical = await _lexical_codebase_hits(q, path=path, limit=limit, **_kwargs)
+        hits = list(lexical.get("hits") or [])
+        return {
+            "query": q,
+            "mode": "lexical",
+            "definitions": [],
+            "hits": hits,
+            "match_count": len(hits),
+            "locate_incomplete": False,
+            "truncated": bool(lexical.get("truncated")),
+            "files_scanned": int(lexical.get("files_scanned") or 0),
+            "summary": lexical.get("error")
+            or lexical.get("summary")
+            or f"search_codebase (lexical): {len(hits)} hit(s) for {q!r}",
+            **({"error": lexical["error"]} if lexical.get("error") else {}),
+        }
+
+    from app.structural.adapters import goto_definition as _goto
+    from app.structural.format import format_locations_lines
+
+    workspace = _workspace_root().resolve()
+    out = await _goto(
+        workspace,
+        q,
+        path=None if path in {".", ""} else path,
+        timeout_s=float(settings.structural_nav_timeout_s),
+        turn_id=_kwargs.get("turn_id"),
+    )
+    locations = list(out.get("locations") or [])
+    lines = format_locations_lines(locations)
+    meta = dict(out.get("meta") or {})
+    reason = str(meta.get("degraded_reason") or "")
+    if _lsp_infra_failed(reason):
+        return {
+            "query": q,
+            "mode": "symbol",
+            "definitions": [],
+            "hits": [],
+            "match_count": 0,
+            "lines": [],
+            "locate_incomplete": True,
+            "status": "failed",
+            "summary": (
+                f"search_codebase: language server required for symbol locate ({reason}); "
+                "fix runtime provider — lexical hits are not a successful Locate"
+            ),
+            **meta,
+        }
+
+    definitions = [
+        loc.to_dict() if hasattr(loc, "to_dict") else loc for loc in locations
+    ]
+    if definitions:
+        return {
+            "query": q,
+            "mode": "symbol",
+            "definitions": definitions,
+            "hits": [],
+            "match_count": len(definitions),
+            "lines": lines,
+            "locate_incomplete": False,
+            "summary": (
+                f"search_codebase (Locate): {len(definitions)} definition(s) for {q!r}"
+            ),
+            **meta,
+        }
+
+    # Structural miss only — lexical fallback allowed, never presented as complete Locate.
+    lexical = await _lexical_codebase_hits(q, path=path, limit=limit, **_kwargs)
+    hits = list(lexical.get("hits") or [])
+    return {
+        "query": q,
+        "mode": "symbol",
+        "definitions": [],
+        "hits": hits,
+        "match_count": len(hits),
+        "lines": [],
+        "locate_incomplete": True,
+        "truncated": bool(lexical.get("truncated")),
+        "files_scanned": int(lexical.get("files_scanned") or 0),
+        "summary": (
+            f"search_codebase: no definition for {q!r}; "
+            f"lexical fallback {len(hits)} hit(s) — Locate incomplete"
+            + (
+                " (scan budget hit — results may be partial)"
+                if lexical.get("truncated")
+                else ""
+            )
+        ),
+        **meta,
     }
 
 
@@ -1724,31 +2026,386 @@ async def rename_file(
     }
 
 
+async def _impact_for_edit(
+    *,
+    path: str,
+    old_text: str,
+    new_text: str,
+    turn_id: object | None = None,
+) -> dict[str, Any]:
+    """Impact stage: same find_references adapters; attached on successful code edits."""
+    from app.structural.providers import language_for_path
+    from app.structural.symbols import extract_symbols_from_edit
+
+    if language_for_path(path) is None:
+        return {
+            "status": "skipped",
+            "reason": "non_code_path",
+            "symbol": None,
+            "references": [],
+            "lines": [],
+        }
+
+    symbols = extract_symbols_from_edit(old_text, new_text, limit=1)
+    if not symbols:
+        return {
+            "status": "skipped",
+            "reason": "no_symbol_detected",
+            "symbol": None,
+            "references": [],
+            "lines": [],
+        }
+
+    symbol = symbols[0]
+    from app.structural.adapters import find_references as _refs
+    from app.structural.format import format_locations_lines
+
+    workspace = _workspace_root().resolve()
+    out = await _refs(
+        workspace,
+        symbol,
+        path=path,
+        timeout_s=float(settings.structural_nav_timeout_s),
+        turn_id=turn_id,
+    )
+    locations = list(out.get("locations") or [])
+    pointers = list(out.get("pointers") or [])
+    lines = format_locations_lines(locations)
+    if pointers:
+        lines = [*lines, *[f"# {p}" for p in pointers]]
+    meta = dict(out.get("meta") or {})
+    reason = str(meta.get("degraded_reason") or "")
+    refs = [loc.to_dict() if hasattr(loc, "to_dict") else loc for loc in locations]
+    if _lsp_infra_failed(reason):
+        return {
+            "status": "failed",
+            "reason": reason,
+            "symbol": symbol,
+            "references": [],
+            "lines": [],
+            "pointers": [],
+            "summary": (
+                f"impact: language server required for references ({reason}); "
+                "fix runtime provider"
+            ),
+            **meta,
+        }
+    return {
+        "status": "ok",
+        "symbol": symbol,
+        "references": refs,
+        "reference_count": len(refs),
+        "lines": lines,
+        "pointers": pointers,
+        "summary": (
+            f"impact: {len(refs)} reference(s) for {symbol!r}"
+            if refs
+            else f"impact: no references for {symbol!r}"
+        ),
+        **meta,
+    }
+
+
+async def _file_diagnostics_issues(
+    path: str,
+    *,
+    turn_id: object | None = None,
+    timeout_s: float | None = None,
+) -> tuple[list[Any], dict[str, Any]]:
+    """Single-file LSP∪ruff diagnostics for edit_file.checks (never raises)."""
+    import asyncio
+    import shlex
+
+    from app.structural.format import merge_issues, parse_ruff_concise_line
+    from app.structural.types import Issue
+    from app.tools.core.shell import run_shell_command
+
+    workspace = _workspace_root().resolve()
+    root = _resolve_path(path)
+    try:
+        rel = str(root.relative_to(workspace))
+    except ValueError:
+        rel = path
+    budget = float(
+        timeout_s
+        if timeout_s is not None
+        else getattr(settings, "structural_checks_timeout_s", settings.structural_diag_timeout_s)
+    )
+    meta: dict[str, Any] = {
+        "provider": "ruff",
+        "degraded_reason": None,
+        "cold_start": False,
+    }
+    ruff_issues: list[Issue] = []
+    try:
+        result = await asyncio.wait_for(
+            run_shell_command(
+                command=f"python -m ruff check {shlex.quote(rel)} --output-format concise",
+                cwd=workspace,
+                timeout_s=min(budget, 120.0),
+            ),
+            timeout=budget + 1.0,
+        )
+        combined = "\n".join(
+            part
+            for part in (str(result.get("stdout") or ""), str(result.get("stderr") or ""))
+            if part
+        ).strip()
+        for line in combined.splitlines():
+            parsed = parse_ruff_concise_line(line, default_path=rel)
+            if parsed is not None:
+                ruff_issues.append(parsed)
+    except asyncio.TimeoutError:
+        meta["degraded_reason"] = "timeout_or_error:ruff"
+        return [], meta
+    except Exception as exc:  # noqa: BLE001
+        meta["degraded_reason"] = f"ruff_error:{type(exc).__name__}"
+
+    lsp_issues: list[Issue] = []
+    try:
+        from app.structural.adapters import get_diagnostics
+
+        lsp_out = await asyncio.wait_for(
+            get_diagnostics(
+                workspace,
+                root,
+                timeout_s=budget,
+                turn_id=turn_id,
+            ),
+            timeout=budget + 1.0,
+        )
+        lsp_issues = list(lsp_out.get("issues") or [])
+        lsp_meta = lsp_out.get("meta") or {}
+        meta["cold_start"] = bool(lsp_meta.get("cold_start"))
+        if lsp_meta.get("provider"):
+            meta["provider"] = f"lsp+ruff:{lsp_meta.get('provider')}"
+        elif lsp_issues:
+            meta["provider"] = "lsp+ruff"
+        reason = str(lsp_meta.get("degraded_reason") or "")
+        if reason:
+            meta["degraded_reason"] = reason
+    except asyncio.TimeoutError:
+        meta["degraded_reason"] = "timeout_or_error:lsp"
+    except Exception as exc:  # noqa: BLE001
+        meta["degraded_reason"] = f"lsp_error:{type(exc).__name__}"
+
+    return merge_issues(lsp_issues, ruff_issues), meta
+
+
+def _issue_key(issue: Any) -> tuple[str, int, str]:
+    code = getattr(issue, "code", None) or ""
+    message = getattr(issue, "message", "") or ""
+    path = (getattr(issue, "path", "") or "").replace("\\", "/")
+    line = int(getattr(issue, "line", 0) or 0)
+    normalized = (code or message).strip().lower()
+    return (path, line, normalized)
+
+
+async def _checks_for_edit(
+    *,
+    path: str,
+    turn_id: object | None = None,
+) -> dict[str, Any]:
+    """Collect pre-write diagnostic baseline for edit_file.checks (Wave 2 W1)."""
+    from app.structural.providers import language_for_path
+
+    if language_for_path(path) is None:
+        return {
+            "status": "skipped",
+            "syntax": "skipped",
+            "new_issues": [],
+            "baseline_count": 0,
+            "lines": [],
+            "reason": "non_code_path",
+        }
+
+    max_issues = int(getattr(settings, "structural_checks_max_issues", 20))
+    timeout_s = float(
+        getattr(settings, "structural_checks_timeout_s", settings.structural_diag_timeout_s)
+    )
+    baseline, _base_meta = await _file_diagnostics_issues(
+        path, turn_id=turn_id, timeout_s=timeout_s
+    )
+    return {
+        "_baseline": baseline,
+        "_baseline_keys": {_issue_key(i) for i in baseline},
+        "_max_issues": max_issues,
+        "_timeout_s": timeout_s,
+    }
+
+
+async def _finalize_checks_after_write(
+    *,
+    path: str,
+    pre: dict[str, Any],
+    gate: Any,
+    turn_id: object | None = None,
+) -> dict[str, Any]:
+    """Diff post-write diagnostics against baseline; timeout never fails the edit."""
+    from app.structural.format import format_diagnostics_lines
+
+    if pre.get("status") == "skipped":
+        return pre
+
+    syntax_payload = gate.to_dict() if hasattr(gate, "to_dict") else {}
+    syntax_status = getattr(gate, "status", None) or "ok"
+    baseline = list(pre.get("_baseline") or [])
+    baseline_keys = set(pre.get("_baseline_keys") or set())
+    max_issues = int(pre.get("_max_issues") or 20)
+    timeout_s = float(pre.get("_timeout_s") or settings.structural_diag_timeout_s)
+
+    after, after_meta = await _file_diagnostics_issues(
+        path, turn_id=turn_id, timeout_s=timeout_s
+    )
+    new_issues = [i for i in after if _issue_key(i) not in baseline_keys][:max_issues]
+    reason = str(after_meta.get("degraded_reason") or "")
+    if reason.startswith("timeout_or_error"):
+        status = "timeout"
+    elif _lsp_infra_failed(reason) and not new_issues and not after:
+        status = "failed"
+    else:
+        status = "ok"
+
+    lines = format_diagnostics_lines(new_issues, limit=max_issues)
+    summary_bits = [f"checks.syntax={syntax_status}"]
+    if new_issues:
+        summary_bits.append(f"{len(new_issues)} new issue(s)")
+    elif status == "ok":
+        summary_bits.append("no new issues")
+    else:
+        summary_bits.append(status)
+    return {
+        "status": status,
+        "syntax": syntax_status,
+        "syntax_detail": syntax_payload,
+        "new_issues": [i.to_dict() if hasattr(i, "to_dict") else i for i in new_issues],
+        "baseline_count": len(baseline),
+        "lines": lines,
+        "summary": "; ".join(summary_bits),
+        "provider": after_meta.get("provider"),
+        "cold_start": after_meta.get("cold_start"),
+        "degraded_reason": after_meta.get("degraded_reason"),
+    }
+
+
 async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> dict[str, Any]:
+    from app.structural.span_match import (
+        format_candidate_lines,
+        nearest_span_candidates,
+        occurrence_locations,
+    )
+    from app.structural.syntax import check_syntax_gate
+
     _assert_not_seed_corpus(path)
     target = _resolve_path(path)
     if not target.exists():
         return {"error": f"File not found: {path}"}
     text = target.read_text(encoding="utf-8", errors="replace")
+    cand_limit = int(getattr(settings, "structural_span_candidates", 5))
     count = text.count(old_text)
     if count == 0:
-        return {"error": "old_text not found", "path": path, "applies": False}
+        candidates = nearest_span_candidates(
+            text, old_text, path=path, limit=cand_limit
+        )
+        lines = format_candidate_lines(candidates)
+        return {
+            "error": "old_text not found",
+            "path": path,
+            "applies": False,
+            "candidates": candidates,
+            "lines": lines,
+            "summary": (
+                f"old_text not found in {path}; "
+                f"{len(candidates)} near candidate(s) — adjust span"
+                if candidates
+                else f"old_text not found in {path}"
+            ),
+        }
     if count > 1:
+        candidates = occurrence_locations(
+            text, old_text, path=path, limit=max(cand_limit, 20)
+        )
+        lines = format_candidate_lines(candidates)
         return {
             "error": f"old_text matches {count} times; use a longer unique span",
             "path": path,
             "applies": False,
+            "match_count": count,
+            "candidates": candidates,
+            "lines": lines,
+            "summary": f"old_text matches {count} times in {path}; pick one occurrence",
         }
+
     updated = text.replace(old_text, new_text, 1)
+    turn_id = _kwargs.get("turn_id")
+
+    # W1 syntax gate (pre-write): reject introduced parse errors; escape hatch if
+    # the file was already broken.
+    gate = check_syntax_gate(path, text, updated)
+    if gate.blocked:
+        line = gate.line or 1
+        col = gate.col or 1
+        msg = gate.message or "syntax error"
+        lines = [
+            f"{path}:{line}:{col} error [syntax] {msg}"
+            + (f" | {gate.snippet}" if gate.snippet else "")
+        ]
+        return {
+            "error": "syntax_error",
+            "path": path,
+            "applies": False,
+            "status": "rejected",
+            "checks": {
+                "status": "rejected",
+                "syntax": "error",
+                "syntax_detail": gate.to_dict(),
+                "new_issues": [],
+                "baseline_count": 0,
+                "lines": lines,
+                "summary": f"syntax gate blocked edit at {path}:{line}",
+            },
+            "lines": lines,
+            "summary": f"Rejected edit of {path}: introduced syntax error at line {line}",
+        }
+
+    # Baseline diagnostics on disk *before* write (incremental new_issues).
+    pre_checks = await _checks_for_edit(path=path, turn_id=turn_id)
+
     target.write_text(updated, encoding="utf-8")
+    impact = await _impact_for_edit(
+        path=path,
+        old_text=old_text,
+        new_text=new_text,
+        turn_id=turn_id,
+    )
+    checks = await _finalize_checks_after_write(
+        path=path, pre=pre_checks, gate=gate, turn_id=turn_id
+    )
+
+    summary = f"Edited {path}"
+    if impact.get("status") == "ok":
+        summary = f"{summary}; {impact.get('summary') or 'impact attached'}"
+    elif impact.get("status") == "failed":
+        summary = f"{summary}; impact failed — {impact.get('reason') or 'lsp'}"
+    if checks.get("status") == "ok" and checks.get("new_issues"):
+        summary = f"{summary}; checks: {len(checks['new_issues'])} new issue(s)"
+    elif checks.get("status") == "ok":
+        summary = f"{summary}; checks: no new issues"
+    elif checks.get("status") in {"timeout", "failed"}:
+        summary = f"{summary}; checks {checks.get('status')}"
+    elif checks.get("syntax") == "warning":
+        summary = f"{summary}; checks: preexisting syntax warning"
+
     return {
         "path": path,
         "old_text": old_text,
         "new_text": new_text,
         "bytes_written": len(updated.encode("utf-8")),
-        "summary": f"Edited {path}",
+        "summary": summary,
         "status": "edited",
         "applies": True,
+        "impact": impact,
+        "checks": checks,
     }
 
 
@@ -1802,6 +2459,16 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
     }
 
 
+def _lsp_infra_failed(reason: str) -> bool:
+    """True when the language server itself is missing/broken (not a symbol miss)."""
+    r = (reason or "").strip()
+    if not r:
+        return False
+    if r in {"lsp_unavailable", "no_provider", "server_unhealthy_backoff"}:
+        return True
+    return r.startswith("timeout_or_error") or r.startswith("start_failed")
+
+
 async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
     import shlex
 
@@ -1844,7 +2511,7 @@ async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
         "unsupported": False,
         "degraded_reason": None,
     }
-    if settings.structural_enabled and ruff_status not in {"timeout", "cancelled"}:
+    if ruff_status not in {"timeout", "cancelled"}:
         try:
             from app.structural.adapters import get_diagnostics
 
@@ -1865,8 +2532,36 @@ async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
                 meta["provider"] = f"lsp+ruff:{lsp_meta.get('provider')}"
             elif lsp_issues:
                 meta["provider"] = "lsp+ruff"
+            reason = str(lsp_meta.get("degraded_reason") or "")
+            if _lsp_infra_failed(reason) and not meta.get("unsupported"):
+                return {
+                    "path": path,
+                    "issues": [],
+                    "issue_count": 0,
+                    "summary": (
+                        f"read_lints: language server required but unavailable ({reason or 'unknown'}); "
+                        "fix runtime image / provider"
+                    ),
+                    "status": "failed",
+                    "lines": [],
+                    **meta,
+                }
         except Exception as exc:
-            meta["degraded_reason"] = f"lsp_error:{type(exc).__name__}"
+            return {
+                "path": path,
+                "issues": [],
+                "issue_count": 0,
+                "summary": (
+                    f"read_lints: language server failed ({type(exc).__name__}: {exc})"
+                ),
+                "status": "failed",
+                "lines": [],
+                "provider": "lsp_error",
+                "cold_start": False,
+                "truncated": False,
+                "unsupported": False,
+                "degraded_reason": f"lsp_error:{type(exc).__name__}",
+            }
 
     if ruff_status in {"timeout", "cancelled"} and not lsp_issues:
         return {
@@ -1951,19 +2646,10 @@ async def goto_definition(
     col: int | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Symbol-first definition lookup via LSP; degrades with suggest=grep."""
+    """Symbol-first definition lookup via LSP (agent structural lane)."""
     from app.structural.adapters import goto_definition as _goto
     from app.structural.format import format_locations_lines
 
-    if not settings.structural_enabled:
-        return {
-            "symbol": symbol,
-            "locations": [],
-            "lines": [],
-            "suggest": "grep",
-            "summary": "goto_definition disabled (structural_enabled=false); use grep",
-            "degraded_reason": "structural_disabled",
-        }
     workspace = _workspace_root().resolve()
     out = await _goto(
         workspace,
@@ -1977,6 +2663,19 @@ async def goto_definition(
     locations = list(out.get("locations") or [])
     lines = format_locations_lines(locations)
     meta = out.get("meta") or {}
+    reason = str(meta.get("degraded_reason") or "")
+    if _lsp_infra_failed(reason):
+        return {
+            "symbol": symbol,
+            "locations": [],
+            "lines": [],
+            "summary": (
+                f"goto_definition: language server required but failed ({reason}); "
+                "fix runtime provider"
+            ),
+            "status": "failed",
+            **meta,
+        }
     summary = out.get("summary") or (
         f"goto_definition: {len(locations)} location(s) for {symbol!r}"
         if locations
@@ -1999,20 +2698,10 @@ async def find_references(
     col: int | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Symbol-first references via LSP; never disguises grep hits as refs."""
+    """Symbol-first references via LSP (agent structural lane)."""
     from app.structural.adapters import find_references as _refs
     from app.structural.format import format_locations_lines
 
-    if not settings.structural_enabled:
-        return {
-            "symbol": symbol,
-            "locations": [],
-            "lines": [],
-            "pointers": [],
-            "suggest": "grep",
-            "summary": "find_references disabled (structural_enabled=false); use grep",
-            "degraded_reason": "structural_disabled",
-        }
     workspace = _workspace_root().resolve()
     out = await _refs(
         workspace,
@@ -2029,6 +2718,20 @@ async def find_references(
     if pointers:
         lines = [*lines, *[f"# {p}" for p in pointers]]
     meta = out.get("meta") or {}
+    reason = str(meta.get("degraded_reason") or "")
+    if _lsp_infra_failed(reason):
+        return {
+            "symbol": symbol,
+            "locations": [],
+            "lines": [],
+            "pointers": [],
+            "summary": (
+                f"find_references: language server required but failed ({reason}); "
+                "fix runtime provider"
+            ),
+            "status": "failed",
+            **meta,
+        }
     summary = out.get("summary") or (
         f"find_references: {len(locations)} hit(s) for {symbol!r}"
         if locations

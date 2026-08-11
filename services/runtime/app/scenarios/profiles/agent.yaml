@@ -28,7 +28,7 @@ subagent_types:
   - edit
   - planner
   - shell
-max_steps: 50
+max_steps: 150
 approval_overrides:
   run_tests: never
   write_file: always

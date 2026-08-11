@@ -437,14 +437,65 @@ async def test_update_outline_append_and_shrink_guard(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_grep_and_search_codebase(workspace: Path) -> None:
+async def test_grep_and_search_codebase(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (workspace / "code.py").write_text("def hello():\n    pass\n", encoding="utf-8")
 
+    async def fake_goto(*_a, **_k):
+        from app.structural.types import Location
+
+        return {
+            "locations": [
+                Location(
+                    path="code.py",
+                    line=1,
+                    col=5,
+                    kind="def",
+                    symbol="hello",
+                )
+            ],
+            "meta": {"provider": "jedi"},
+        }
+
+    monkeypatch.setattr("app.structural.adapters.goto_definition", fake_goto)
+
+    # Bare symbol → Locate redirect (definitions), not pure lexical.
     grep_result = await core.grep("hello", path=".")
-    assert grep_result["match_count"] == 1
+    assert grep_result.get("redirected_from") == "grep"
+    assert grep_result["definitions"]
 
     search = await core.search_codebase("hello")
-    assert search["hits"]
+    assert search["definitions"]
+    assert search["locate_incomplete"] is False
+
+    # Phrase / error-like → lexical path unchanged.
+    lexical = await core.search_codebase("def hello")
+    assert lexical["mode"] == "lexical"
+    assert lexical["hits"]
+
+
+@pytest.mark.asyncio
+async def test_lexical_search_skips_venv_noise_and_stays_off_loop(
+    workspace: Path,
+) -> None:
+    """Regression: .local/site-packages must not enter hits; scan is threaded."""
+    (workspace / "src").mkdir()
+    (workspace / "src" / "app.py").write_text("findme_lexical_token = 1\n", encoding="utf-8")
+    junk = workspace / ".local" / "lib" / "python3.11" / "site-packages" / "erfa"
+    junk.mkdir(parents=True)
+    (junk / "__init__.py").write_text("findme_lexical_token = 'pollute'\n", encoding="utf-8")
+    (workspace / ".venv" / "lib").mkdir(parents=True)
+    (workspace / ".venv" / "lib" / "x.py").write_text("findme_lexical_token\n", encoding="utf-8")
+
+    result = await core.search_codebase("findme_lexical_token =")
+    assert result["mode"] == "lexical"
+    paths = [h["path"] for h in result["hits"]]
+    assert any(p.endswith("src/app.py") or p.endswith("app.py") for p in paths)
+    assert not any(".local" in p or "site-packages" in p or ".venv" in p for p in paths)
+
+    grep = await core.grep(r"findme_lexical_token\s*=", path=".")
+    gpaths = [m["path"] for m in grep["matches"]]
+    assert any("app.py" in p for p in gpaths)
+    assert not any(".local" in p or ".venv" in p for p in gpaths)
 
 
 @pytest.mark.asyncio

@@ -200,15 +200,19 @@ class Settings(BaseSettings):
     path_preread_timeout_seconds: float = 0.4
     path_preread_max_files: int = 3
     tool_default_timeout_seconds: float = 60.0
-    # Coding structural intelligence (docs/plan/coding-structural-intelligence.md).
-    # structural_enabled gates nav tool registration in tools[] and LSP lane in
-    # read_lints — off keeps agent prefix bytes identical to the pre-structural baseline.
-    structural_enabled: bool = False
+    # Coding structural lane (agent Profile): timeouts / prewarm / budgets only.
+    # Capability lives in Profile.tool_names — not a feature flag; no strip/disable.
     structural_nav_timeout_s: float = 15.0
     structural_diag_timeout_s: float = 60.0
     structural_max_files_per_call: int = 20
     structural_max_refs: int = 80
-    structural_prewarm: bool = False
+    # Wave 2 W1: edit_file.checks incremental diagnostics (single-file; not full-repo).
+    structural_checks_max_issues: int = 20
+    structural_checks_timeout_s: float = 30.0
+    # Wave 2 W3: span miss / non-unique candidate echo budget.
+    structural_span_candidates: int = 5
+    # Soft prewarm when an agent Work starts (does not block TTFB / R1).
+    structural_prewarm: bool = True
     # Ops / SWE-bench Lite: when True, ops_eval Turns run shell/LSP children with
     # no egress (bwrap --unshare-net). Daily non-ops Turns keep host network.
     # Map OFFICIAL_SWE_NETWORK=deny → OPS_EVAL_DENY_NETWORK=true in compose.

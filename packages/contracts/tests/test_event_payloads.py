@@ -64,6 +64,51 @@ def test_write_file_tool_completed_allows_bytes_written() -> None:
     )
 
 
+def test_edit_file_tool_completed_allows_impact_checks_meta() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_1",
+            "tool_name": "edit_file",
+            "status": "ok",
+            "summary": "Edited mod.py; impact: 2 reference(s); checks: no new issues",
+            "path": "mod.py",
+            "old_text": "x = 1",
+            "new_text": "x = 2",
+            "bytes_written": 12,
+            "applies": True,
+            "impact": {
+                "status": "ok",
+                "symbol": "alpha",
+                "reference_count": 2,
+            },
+            "checks": {
+                "status": "ok",
+                "syntax": "ok",
+                "baseline_count": 0,
+                "new_issue_count": 0,
+            },
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
+def test_edit_file_tool_completed_allows_candidate_count() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_2",
+            "tool_name": "edit_file",
+            "status": "error",
+            "summary": "old_text not found",
+            "path": "mod.py",
+            "applies": False,
+            "candidate_count": 3,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_payload_schemas_are_valid_json_schema() -> None:
     index = json.loads((SCHEMAS_DIR / "_index.json").read_text(encoding="utf-8"))
     for schema_ref in index.get("properties", {}).values():
