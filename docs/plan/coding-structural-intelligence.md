@@ -849,7 +849,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 | 表象 | 实质 |
 |------|------|
 | 「评测挂了」 | L1 **infer 往往正常**（可 apply patch / 高 `patch_rate`）；挂的是 **官方 docker harness** |
-| harness 长时间 `Evaluation: 0/n` | 本机无 `swebench/sweb.eval.x86_64.{instance_id}:latest`，进程在 **api/ops-eval** 内拉 Hub 卡住 |
+| harness 长时间 `Evaluation: 0/n` | 本机无 `swebench/sweb.eval.x86_64.{id with __→_1776_}:latest`，进程在 **api/ops-eval** 内拉 Hub 卡住 |
 | 偶发 `resolve_rate=0` 且很快结束 | 常是 **空/坏 predictions**（`empty_patch_ids` / No instances），**不是**模型 0 分 |
 | 下次又要现拉 | 旧默认 `cache_level` 评后清实例层镜像 |
 

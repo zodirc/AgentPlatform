@@ -58,7 +58,12 @@ def test_prediction_instance_ids(tmp_path: Path) -> None:
 def test_instance_image_ref() -> None:
     assert (
         swe_images.instance_image_ref("astropy__astropy-12907")
-        == "swebench/sweb.eval.x86_64.astropy__astropy-12907:latest"
+        == "swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest"
+    )
+    # Docker Hub slug is lowercased + __ → _1776_
+    assert (
+        swe_images.instance_image_ref("Django__django-10554")
+        == "swebench/sweb.eval.x86_64.django_1776_django-10554:latest"
     )
 
 
@@ -105,7 +110,7 @@ def test_write_progress_for_board(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
             "images_total": 5,
             "images_done": 2,
             "last_status": "pulling",
-            "current_short": "sweb.eval.x86_64.astropy__astropy-12907:latest",
+            "current_short": "sweb.eval.x86_64.astropy_1776_astropy-12907:latest",
         }
     )
     prog = swe_images.read_progress(max_age_s=60)
@@ -131,3 +136,49 @@ def test_pull_images_cached_emits_progress(
     assert prog["status"] == "ready"
     assert prog["images_done"] == 1
     assert prog["images_cached"] == 1
+
+
+def test_docker_pull_progress_parser() -> None:
+    class _Clock:
+        def __init__(self) -> None:
+            self.t = 1000.0
+
+        def __call__(self) -> float:
+            return self.t
+
+        def advance(self, dt: float) -> None:
+            self.t += dt
+
+    clock = _Clock()
+    t = swe_images.DockerPullProgress(clock=clock)
+    assert t.feed("abc12345: Pulling fs layer")
+    assert t.feed("abc12345: Downloading [==>] 12.5MB/100MB")
+    assert t.feed("def67890: Pulling fs layer")
+    assert t.feed("def67890: Waiting")
+    snap = t.snapshot()
+    assert snap["layers_total"] == 2
+    assert snap["layers_downloading"] == 1
+    assert snap["layers_waiting"] == 1
+    assert snap["bytes_done"] == int(12.5 * 1024**2)
+    assert snap["bytes_total"] == int(100 * 1024**2)
+    assert snap["layer_pct"] == 12.5
+    assert "12.5MiB/100.0MiB" in (snap["layer_detail"] or "")
+    clock.advance(1.0)
+    assert t.feed("abc12345: Downloading [====>] 37.5MB/100MB")
+    snap_speed = t.snapshot()
+    assert snap_speed["speed_bps"] is not None
+    assert snap_speed["speed_bps"] > 1e6  # ~25 MiB over 1s
+    assert snap_speed["speed_label"] and "MiB/s" in snap_speed["speed_label"]
+    assert snap_speed["speed_label"] in (snap_speed["layer_detail"] or "")
+    assert t.feed("abc12345: Download complete")
+    assert t.feed("abc12345: Pull complete")
+    snap2 = t.snapshot()
+    assert snap2["layers_done"] == 1
+    assert snap2["layers_downloaded"] >= 1
+
+
+def test_fmt_speed_units() -> None:
+    assert swe_images._fmt_speed(None) is None
+    assert swe_images._fmt_speed(100.0) == "100 B/s"
+    assert swe_images._fmt_speed(2048.0) == "2.0 KiB/s"
+    assert "MiB/s" in (swe_images._fmt_speed(3.5 * 1024**2) or "")

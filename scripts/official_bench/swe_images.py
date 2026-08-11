@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -134,13 +136,21 @@ def instance_image_ref(
     *,
     namespace: str = "swebench",
     tag: str = "latest",
+    arch: str = "x86_64",
 ) -> str:
-    """Docker ref for one Lite instance (matches current swebench namespace layout)."""
+    """Docker Hub ref for one Lite instance (matches swebench harness naming).
+
+    swebench replaces ``__`` with ``_1776_`` for Docker Hub safety, e.g.::
+
+        astropy__astropy-12907
+          → swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest
+    """
     iid = (instance_id or "").strip()
     if not iid:
         raise ValueError("empty instance_id")
-    # swebench harness: {namespace}/sweb.eval.x86_64.{instance_id}:{tag}
-    return f"{namespace}/sweb.eval.x86_64.{iid}:{tag}"
+    # Same transform as swebench.harness.test_spec.TestSpec.instance_image_key.
+    slug = iid.lower().replace("__", "_1776_")
+    return f"{namespace}/sweb.eval.{arch}.{slug}:{tag}"
 
 
 def tier_instance_ids(tier: str, *, n_instances: int | None = None) -> list[str]:
@@ -222,6 +232,225 @@ def local_image_status(
 
 _DOCKER_PULL_PROGRESS: bool | None = None
 
+_LAYER_LINE_RE = re.compile(
+    r"^([0-9a-f]{8,64}):\s*(.+?)\s*$",
+    re.IGNORECASE,
+)
+_SIZE_PAIR_RE = re.compile(
+    r"([\d.]+)\s*([KMGT]?i?B)\s*/\s*([\d.]+)\s*([KMGT]?i?B)",
+    re.IGNORECASE,
+)
+_SIZE_UNIT = {
+    "B": 1,
+    "KB": 1000,
+    "MB": 1000**2,
+    "GB": 1000**3,
+    "TB": 1000**4,
+    "KIB": 1024,
+    "MIB": 1024**2,
+    "GIB": 1024**3,
+    "TIB": 1024**4,
+}
+
+
+def _parse_size_token(num: str, unit: str) -> int | None:
+    try:
+        n = float(num)
+    except ValueError:
+        return None
+    u = (unit or "B").upper()
+    # docker pull progress labels MB/GB but uses binary multiples.
+    if u in {"KB", "MB", "GB", "TB"}:
+        u = {"KB": "KIB", "MB": "MIB", "GB": "GIB", "TB": "TIB"}[u]
+    mul = _SIZE_UNIT.get(u)
+    if mul is None:
+        return None
+    return int(n * mul)
+
+
+def _fmt_bytes(n: int | None) -> str:
+    if n is None or n < 0:
+        return "?"
+    x = float(n)
+    for unit, div in (("GiB", 1024**3), ("MiB", 1024**2), ("KiB", 1024)):
+        if x >= div:
+            return f"{x / div:.1f}{unit}"
+    return f"{int(x)}B"
+
+
+def _fmt_speed(bps: float | None) -> str | None:
+    """Human download rate, e.g. ``3.1 MiB/s`` (binary units, like docker pull)."""
+    if bps is None or bps < 0:
+        return None
+    if bps < 512:
+        return f"{int(bps)} B/s"
+    x = float(bps)
+    for unit, div in (("GiB/s", 1024**3), ("MiB/s", 1024**2), ("KiB/s", 1024)):
+        if x >= div:
+            return f"{x / div:.1f} {unit}"
+    return f"{int(x)} B/s"
+
+
+class DockerPullProgress:
+    """Parse classic ``docker pull`` layer lines into board-facing stats."""
+
+    def __init__(self, *, clock: Any | None = None) -> None:
+        self.layers: dict[str, str] = {}
+        self.dl_done: dict[str, int] = {}
+        self.dl_total: dict[str, int] = {}
+        self.ex_done: dict[str, int] = {}
+        self.ex_total: dict[str, int] = {}
+        self.last_line = ""
+        self._clock = clock or time.time
+        # Sliding window of (t, cumulative download bytes) for rate.
+        self._speed_samples: list[tuple[float, int]] = []
+        self.speed_bps: float | None = None
+
+    def feed(self, raw: str) -> bool:
+        """Ingest one logical line (may contain ``\\r`` chunks). Return True if state changed."""
+        changed = False
+        for chunk in raw.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+            line = chunk.strip()
+            if not line:
+                continue
+            self.last_line = line[:160]
+            if self._feed_one(line):
+                changed = True
+        if changed:
+            self._note_speed_sample()
+        return changed
+
+    def _feed_one(self, line: str) -> bool:
+        m = _LAYER_LINE_RE.match(line)
+        if not m:
+            return False
+        lid = m.group(1).lower()
+        rest = m.group(2).strip()
+        status = rest.split("[", 1)[0].strip().rstrip(":")
+        status_l = status.lower()
+        prev = self.layers.get(lid)
+        self.layers[lid] = status_l
+        pair = _SIZE_PAIR_RE.search(rest)
+        if pair:
+            a = _parse_size_token(pair.group(1), pair.group(2))
+            b = _parse_size_token(pair.group(3), pair.group(4))
+            if a is not None and b is not None:
+                if "download" in status_l:
+                    self.dl_done[lid] = a
+                    self.dl_total[lid] = b
+                elif "extract" in status_l:
+                    self.ex_done[lid] = a
+                    self.ex_total[lid] = b
+        if "download complete" in status_l or "already exists" in status_l:
+            if lid in self.dl_total:
+                self.dl_done[lid] = self.dl_total[lid]
+        if "pull complete" in status_l:
+            if lid in self.dl_total:
+                self.dl_done[lid] = self.dl_total[lid]
+            if lid in self.ex_total:
+                self.ex_done[lid] = self.ex_total[lid]
+        return prev != status_l or pair is not None
+
+    def _note_speed_sample(self) -> None:
+        now = float(self._clock())
+        total = int(sum(self.dl_done.values())) if self.dl_done else 0
+        samples = self._speed_samples
+        if samples and samples[-1][1] == total and (now - samples[-1][0]) < 0.2:
+            return
+        samples.append((now, total))
+        cutoff = now - 5.0
+        self._speed_samples = [(t, b) for t, b in samples if t >= cutoff]
+        self._recompute_speed()
+
+    def _recompute_speed(self) -> None:
+        samples = self._speed_samples
+        if len(samples) < 2:
+            self.speed_bps = None
+            return
+        t0, b0 = samples[0]
+        t1, b1 = samples[-1]
+        dt = t1 - t0
+        if dt < 0.35:
+            self.speed_bps = None
+            return
+        # Prefer recent 2s window when we have enough points.
+        recent = [(t, b) for t, b in samples if t >= t1 - 2.0]
+        if len(recent) >= 2:
+            t0, b0 = recent[0]
+            t1, b1 = recent[-1]
+            dt = t1 - t0
+            if dt < 0.2:
+                self.speed_bps = None
+                return
+        self.speed_bps = max(0.0, (b1 - b0) / dt)
+
+    def snapshot(self) -> dict[str, Any]:
+        # Refresh rate even on heartbeat writes with no new docker lines.
+        self._note_speed_sample()
+        layers = list(self.layers)
+        n = len(layers)
+        done = sum(
+            1
+            for lid, st in self.layers.items()
+            if "pull complete" in st or "already exists" in st
+        )
+        downloaded = sum(
+            1
+            for lid, st in self.layers.items()
+            if "download complete" in st
+            or "pull complete" in st
+            or "already exists" in st
+            or "extract" in st
+        )
+        waiting = sum(1 for st in self.layers.values() if "wait" in st)
+        downloading = sum(1 for st in self.layers.values() if "download" in st and "complete" not in st)
+        extracting = sum(1 for st in self.layers.values() if "extract" in st and "complete" not in st)
+
+        bytes_done = sum(self.dl_done.values()) if self.dl_done else None
+        bytes_total = sum(self.dl_total.values()) if self.dl_total else None
+        # Prefer byte ratio when we know totals for all known download layers.
+        layer_pct: float | None = None
+        if bytes_total and bytes_total > 0 and bytes_done is not None:
+            layer_pct = round(100.0 * bytes_done / bytes_total, 1)
+        elif n > 0:
+            layer_pct = round(100.0 * done / n, 1)
+
+        speed_bps = self.speed_bps
+        # Hide noisy near-zero while still only Waiting / no byte counters yet.
+        if not self.dl_done and not downloading:
+            speed_bps = None
+        speed_label = _fmt_speed(speed_bps)
+
+        detail_bits: list[str] = []
+        if speed_label and (downloading or (bytes_done or 0) > 0):
+            detail_bits.append(speed_label)
+        if n:
+            detail_bits.append(f"层 {done}/{n}")
+        if bytes_done is not None and bytes_total:
+            detail_bits.append(f"{_fmt_bytes(bytes_done)}/{_fmt_bytes(bytes_total)}")
+        elif downloading:
+            detail_bits.append(f"下载中×{downloading}")
+        elif extracting:
+            detail_bits.append(f"解压中×{extracting}")
+        elif waiting:
+            detail_bits.append(f"排队×{waiting}")
+
+        return {
+            "layers_total": n,
+            "layers_done": done,
+            "layers_downloaded": downloaded,
+            "layers_waiting": waiting,
+            "layers_downloading": downloading,
+            "layers_extracting": extracting,
+            "bytes_done": bytes_done,
+            "bytes_total": bytes_total,
+            "layer_pct": layer_pct,
+            "speed_bps": round(speed_bps, 1) if speed_bps is not None else None,
+            "speed_label": speed_label,
+            "layer_detail": " · ".join(detail_bits) if detail_bits else None,
+            "last_pull_line": self.last_line or None,
+        }
+
 
 def _docker_pull_cmd(ref: str) -> list[str]:
     """Prefer ``--progress=plain`` when the host docker CLI supports it."""
@@ -245,19 +474,65 @@ def _docker_pull_cmd(ref: str) -> list[str]:
 
 
 def _docker_pull(ref: str, *, progress_base: dict[str, Any]) -> int:
-    """Run ``docker pull`` with heartbeat so 看板 progress stays fresh (~1GiB/image)."""
+    """Run ``docker pull``, stream logs, and publish layer progress for 看板."""
     env = os.environ.copy()
     env.setdefault("DOCKER_CLI_HINTS", "false")
+    # Force non-TTY progress lines so we can parse Downloading MB/MB.
+    env["DOCKER_PROGRESS"] = env.get("DOCKER_PROGRESS") or "plain"
     cmd = _docker_pull_cmd(ref)
+    tracker = DockerPullProgress()
+    last_write = 0.0
     try:
-        proc = subprocess.Popen(cmd, env=env)
+        proc = subprocess.Popen(
+            cmd,
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            bufsize=0,
+        )
     except FileNotFoundError as exc:
         raise RuntimeError("docker CLI missing on host") from exc
+
+    assert proc.stdout is not None
+    buf = ""
     while True:
-        try:
-            return int(proc.wait(timeout=15))
-        except subprocess.TimeoutExpired:
-            write_progress({**progress_base, "last_status": "pulling", "heartbeat": True})
+        chunk = proc.stdout.read(256)
+        if not chunk:
+            break
+        text = chunk.decode("utf-8", errors="replace")
+        # Keep board/make logs readable.
+        sys.stdout.write(text)
+        sys.stdout.flush()
+        buf += text
+        # Emit on newline or carriage-return progress ticks.
+        while True:
+            nl = buf.find("\n")
+            cr = buf.find("\r")
+            cuts = [i for i in (nl, cr) if i >= 0]
+            if not cuts:
+                break
+            i = min(cuts)
+            line, buf = buf[: i + 1], buf[i + 1 :]
+            changed = tracker.feed(line)
+            now = time.time()
+            if changed and (now - last_write) >= 0.4:
+                snap = tracker.snapshot()
+                write_progress({**progress_base, "last_status": "pulling", **snap})
+                last_write = now
+    if buf.strip():
+        tracker.feed(buf)
+        print(buf, end="" if buf.endswith("\n") else "\n", flush=True)
+    rc = int(proc.wait())
+    snap = tracker.snapshot()
+    write_progress(
+        {
+            **progress_base,
+            "last_status": "pulling" if rc == 0 else "error",
+            **snap,
+            "heartbeat": True,
+        }
+    )
+    return rc
 
 
 def pull_images(

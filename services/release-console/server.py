@@ -56,6 +56,7 @@ ALLOWED_ACTIONS = {
     "pull-swe-eval-images": ["make", "-C", str(ROOT), "official-bench-coding-pull-images"],
     "git-pull": ["bash", str(GIT_PULL_SH)],
     "cancel-jobs": ["__cancel__"],  # handled in-process, not spawned
+    "restart-console": ["__restart__"],  # detach stop+ensure; not queued
 }
 
 # Console action / plan item id → per-module log stem under logs/
@@ -72,6 +73,7 @@ ACTION_LOG_KEY = {
     "pull-swe-eval-images": "swe_eval_images",
     "git-pull": "git",
     "cancel-jobs": "misc",
+    "restart-console": "misc",
 }
 ITEM_LOG_KEY = {
     "api": "api",
@@ -208,7 +210,56 @@ _ACTION_LABELS = {
     "pull-swe-eval-images": "预拉 SWE eval 镜像",
     "git-pull": "拉取远程",
     "cancel-jobs": "取消任务",
+    "restart-console": "重启看板",
 }
+
+
+def _schedule_console_restart() -> dict:
+    """Detach stop+ensure so the HTTP reply finishes before this process dies."""
+    script = ROOT / "scripts" / "release" / "restart_console.sh"
+    if not script.is_file():
+        return {"ok": False, "error": "restart_console.sh missing"}
+    log_dir = STATUS_DIR / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "misc.log"
+    stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with log_path.open("a", encoding="utf-8") as lf:
+            lf.write(f"\n[{stamp}] restart-console scheduled from API\n")
+    except OSError:
+        pass
+    try:
+        logf = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 — kept for child lifetime
+    except OSError:
+        logf = subprocess.DEVNULL
+    env = os.environ.copy()
+    env["RELEASE_CONSOLE"] = "1"
+    try:
+        subprocess.Popen(
+            ["bash", str(script)],
+            cwd=str(ROOT),
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env=env,
+            close_fds=logf is subprocess.DEVNULL,
+        )
+    except OSError as exc:
+        if logf is not subprocess.DEVNULL:
+            try:
+                logf.close()
+            except OSError:
+                pass
+        return {"ok": False, "error": f"failed to spawn restart: {exc}"}
+    return {
+        "ok": True,
+        "restarting": True,
+        "queued": False,
+        "attached": False,
+        "action": "restart-console",
+        "message": "看板即将重启（约 1–3 秒），页面会自动刷新",
+    }
 
 
 def _utc_now() -> str:
@@ -469,7 +520,7 @@ def _queue_worker_loop() -> None:
             continue
 
         cmd = ALLOWED_ACTIONS.get(action)
-        if not cmd or cmd == ["__cancel__"]:
+        if not cmd or cmd in (["__cancel__"], ["__restart__"]):
             with _queue_cv:
                 _queue_finish_unlocked(qid, "error", f"unknown action {action}")
                 _queue_cv.notify_all()
@@ -724,6 +775,20 @@ def _cancel_all_jobs() -> dict:
                     "item_id": job.get("item_id"),
                 }
             )
+    # Orphan docker pull (make killed but pull reparented) — kill explicitly.
+    for pid in _discover_swe_pull_pids():
+        if pid in seen:
+            continue
+        seen.add(pid)
+        if _kill_pid_tree(pid):
+            killed.append(
+                {
+                    "pid": pid,
+                    "action": "pull-swe-eval-images",
+                    "item_id": "swe_eval_images",
+                }
+            )
+    _mark_swe_images_progress_cancelled("已取消预拉")
     with _jobs_lock:
         _save_jobs([])
 
@@ -789,6 +854,8 @@ def _discover_host_action_jobs() -> list[dict]:
         ("sync_cli --mode sources", "sync-sources", "index_product"),
         ("official-bench-coding-pull-images", "pull-swe-eval-images", "swe_eval_images"),
         ("coding --phase pull-images", "pull-swe-eval-images", "swe_eval_images"),
+        ("docker pull swebench/sweb.eval", "pull-swe-eval-images", "swe_eval_images"),
+        ("docker pull ", "pull-swe-eval-images", "swe_eval_images"),  # filtered: only sweb.eval
         ("release.sh run --modules=api", "up-api", "api"),
         ("release.sh run --modules=runtime", "up-runtime", "runtime"),
         ("release.sh run --modules=web", "up-web", "web"),
@@ -815,6 +882,9 @@ def _discover_host_action_jobs() -> list[dict]:
             for needle, action, item_id in patterns:
                 if needle not in cmd:
                     continue
+                # Generic docker-pull needle must still be an SWE eval image.
+                if needle == "docker pull " and "sweb.eval" not in cmd:
+                    continue
                 found.append(
                     {
                         "action": action,
@@ -828,13 +898,84 @@ def _discover_host_action_jobs() -> list[dict]:
                 break
     except OSError:
         pass
-    # Dedup by item_id (keep lowest pid = usually parent ensure/make).
+    # Dedup by item_id for UI attach; cancel path also scans SWE pulls separately.
     by_item: dict[str, dict] = {}
     for job in sorted(found, key=lambda j: int(j["pid"])):
         iid = str(job.get("item_id") or "")
         if iid and iid not in by_item:
             by_item[iid] = job
     return list(by_item.values())
+
+
+def _iter_host_cmdlines() -> list[tuple[int, str]]:
+    out: list[tuple[int, str]] = []
+    my_pid = os.getpid()
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            if pid == my_pid:
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+            except OSError:
+                continue
+            cmd = raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            if cmd.strip():
+                out.append((pid, cmd))
+    except OSError:
+        pass
+    return out
+
+
+def _discover_swe_pull_pids() -> list[int]:
+    """All PIDs related to SWE eval image pull (make + orphan docker pull)."""
+    needles = (
+        "official-bench-coding-pull-images",
+        "coding --phase pull-images",
+        "sweb.eval",
+    )
+    pids: list[int] = []
+    for pid, cmd in _iter_host_cmdlines():
+        if "docker pull" in cmd and "sweb.eval" in cmd:
+            pids.append(pid)
+            continue
+        if any(n in cmd for n in needles[:2]):
+            pids.append(pid)
+    return pids
+
+
+def _mark_swe_images_progress_cancelled(reason: str = "已取消") -> None:
+    """Clear sticky 看板 live strip after cancel / orphan pull."""
+    path = STATUS_DIR / "swe_eval_images_progress.json"
+    prev: dict = {}
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                prev = raw
+        except (OSError, json.JSONDecodeError):
+            prev = {}
+    st = str(prev.get("status") or "")
+    last = str(prev.get("last_status") or "")
+    if st in {"ready", "cancelled"} and last != "pulling":
+        return
+    body = {
+        **{k: prev.get(k) for k in ("tier", "images_total", "images_done", "current_ref", "current_short")},
+        "status": "cancelled",
+        "phase": "cancelled",
+        "last_status": "cancelled",
+        "error": reason,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    try:
+        STATUS_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(path)
+    except OSError:
+        pass
 
 
 def _read_runtime_sync_progress() -> dict | None:
@@ -952,10 +1093,20 @@ def _read_swe_eval_images_progress() -> dict | None:
 def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
     total = prog.get("images_total")
     done = prog.get("images_done")
+    layer_pct = prog.get("layer_pct")
     pct: float | None = None
     try:
         if total is not None and int(total) > 0 and done is not None:
-            pct = round(100.0 * int(done) / int(total), 1)
+            base = float(int(done))
+            # Blend in-image layer progress so the bar moves during a long pull.
+            try:
+                frac = max(0.0, min(1.0, float(layer_pct) / 100.0)) if layer_pct is not None else 0.0
+            except (TypeError, ValueError):
+                frac = 0.0
+            if int(done) < int(total):
+                pct = round(100.0 * (base + frac) / int(total), 1)
+            else:
+                pct = 100.0
     except (TypeError, ValueError):
         pct = None
     status = str(prog.get("status") or "")
@@ -963,8 +1114,8 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
     short = str(prog.get("current_short") or prog.get("current_ref") or "").strip()
     if short and "/" in short:
         short = short.rsplit("/", 1)[-1]
-    if len(short) > 48:
-        short = short[-48:]
+    if len(short) > 40:
+        short = short[-40:]
     bits: list[str] = []
     if status == "error":
         bits.append("预拉失败")
@@ -988,6 +1139,20 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
         pass
     if pct is not None:
         bits.append(f"{pct}%")
+    speed = str(prog.get("speed_label") or "").strip()
+    detail = str(prog.get("layer_detail") or "").strip()
+    # Prefer explicit speed up front (网速感); skip if already inside layer_detail.
+    if (
+        speed
+        and last == "pulling"
+        and status not in {"ready"}
+        and speed not in detail
+    ):
+        bits.append(speed)
+    if detail and status not in {"ready"} and last != "finished":
+        bits.append(detail)
+    elif layer_pct is not None and last == "pulling":
+        bits.append(f"本图 {layer_pct}%")
     if short and status not in {"ready"} and last != "finished":
         bits.append(short)
     try:
@@ -1022,27 +1187,33 @@ def _collect_live() -> dict[str, dict]:
             "source": job.get("source") or "console",
         }
 
-    # Overlay structured SWE image pull progress (n/N + current ref).
+    # Overlay structured SWE image pull progress onto a live pull job only.
+    # Never invent "进行中" from a stale progress file alone (cancel must clear UI).
     swe_prog = _read_swe_eval_images_progress()
     if isinstance(swe_prog, dict):
         st = str(swe_prog.get("status") or "")
         phase = str(swe_prog.get("phase") or "")
-        active = st == "building" or phase == "pull" or str(swe_prog.get("last_status")) == "pulling"
-        if active and st not in {"ready", "error"} and _sync_progress_fresh(swe_prog, max_age_s=900.0):
+        last = str(swe_prog.get("last_status") or "")
+        active = st == "building" or phase == "pull" or last == "pulling"
+        if (
+            "swe_eval_images" in out
+            and active
+            and st not in {"ready", "error", "cancelled"}
+            and _sync_progress_fresh(swe_prog, max_age_s=900.0)
+        ):
             summary, pct = _swe_eval_images_summary(swe_prog)
-            prev = out.get("swe_eval_images")
+            prev = out["swe_eval_images"]
             out["swe_eval_images"] = {
                 "item_id": "swe_eval_images",
-                "action": (prev or {}).get("action") or "pull-swe-eval-images",
+                "action": prev.get("action") or "pull-swe-eval-images",
                 "kind": "swe_images",
-                "pid": (prev or {}).get("pid"),
+                "pid": prev.get("pid"),
                 "summary": summary,
                 "pct": pct,
-                "source": (prev or {}).get("source") or "progress",
+                "source": prev.get("source") or "progress",
             }
         elif st == "error" and _sync_progress_fresh(swe_prog, max_age_s=120.0):
             summary, pct = _swe_eval_images_summary(swe_prog)
-            # Surface recent failure briefly in live strip; plan refresh will show action.
             if "swe_eval_images" not in out:
                 out["swe_eval_images"] = {
                     "item_id": "swe_eval_images",
@@ -1053,6 +1224,9 @@ def _collect_live() -> dict[str, dict]:
                     "pct": pct,
                     "source": "progress",
                 }
+        elif active and "swe_eval_images" not in out:
+            # Orphan progress after kill/cancel — heal sticky strip.
+            _mark_swe_images_progress_cancelled("预拉已中断（无活动进程）")
 
     prog = _read_runtime_sync_progress()
     if isinstance(prog, dict):
@@ -1708,6 +1882,13 @@ class Handler(SimpleHTTPRequestHandler):
             action = str(body.get("action") or "").strip()
             if action not in ALLOWED_ACTIONS:
                 self._send_json(400, {"ok": False, "error": f"unknown action: {action}"})
+                return
+
+            # Soft-restart: reply first, then detached stop+ensure (not via serial queue).
+            if action == "restart-console":
+                result = _schedule_console_restart()
+                code = 200 if result.get("ok") else 500
+                self._send_json(code, result)
                 return
 
             _ensure_queue_worker()
