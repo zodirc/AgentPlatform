@@ -7,6 +7,7 @@ import json
 import shutil
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 def _candidate_report_roots() -> list[Path]:
     """Resolve report dirs without assuming a fixed parents[N] depth (breaks in /app image)."""
@@ -217,9 +218,71 @@ _L2_CASE_KEYS = (
     "merged_len",
     "search_limits",
     "ranked_lengths",
+    # CSI Wave 1+2 coding probes
+    "n_grep_locate",
+    "n_grep_locate_ok",
+    "n_grep_locate_failed",
+    "n_edit_ok",
+    "n_edit_with_impact",
+    "n_edit_with_checks",
+    "n_syntax_rejected",
+    "n_span_fail",
+    "n_span_fail_with_candidates",
 )
 
 _PATCH_PREVIEW_CHARS = 2400
+
+_RESOLVE_VERDICT_LABELS = {
+    "passed": "官方通过",
+    "failed": "官方未过",
+    "pending": "待 harness",
+    "harness_off": "未开 harness",
+    "no_patch": "无 patch",
+}
+
+
+def _coding_resolve_verdict(case: dict[str, Any], *, harness: bool | None) -> str:
+    """Ops-facing resolve label for one coding case."""
+    patch_chars = case.get("patch_chars")
+    preview = case.get("patch_preview")
+    src = str(case.get("patch_source") or "")
+    l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
+    if not src:
+        src = str(l2.get("patch_source") or "")
+    has_patch = bool(
+        (isinstance(patch_chars, int) and patch_chars > 0)
+        or (isinstance(preview, str) and preview.strip())
+        or src not in {"", "none"}
+    )
+    resolved = case.get("resolved")
+    if resolved is None:
+        resolved = l2.get("resolved")
+    if resolved is None and isinstance(case.get("metrics"), dict):
+        m = case["metrics"].get("resolved")
+        if m == 1.0:
+            resolved = True
+        elif m == 0.0:
+            resolved = False
+    if resolved is True:
+        return "passed"
+    if resolved is False:
+        return "failed" if has_patch else "no_patch"
+    if harness is False:
+        return "harness_off"
+    if not has_patch:
+        return "no_patch"
+    return "pending"
+
+
+def prediction_patch_for_instance(
+    pred_path: Path | None, instance_id: str
+) -> str | None:
+    """Return model_patch text for one instance from predictions.jsonl, or None."""
+    patches = _load_prediction_patches(pred_path)
+    text = patches.get(str(instance_id).strip())
+    if text is None:
+        return None
+    return text if text.strip() else ""
 
 
 def _case_bucket(case: dict[str, Any]) -> str | None:
@@ -314,13 +377,22 @@ def _attach_coding_artifact_extras(
             result = {**result, "predictions": str(cand)}
             art["result"] = result
     pred_ok = bool(pred_path and pred_path.is_file())
+    csi_ok = False
+    if root is not None and bench_id:
+        csi_ok = (root / "runs" / bench_id / "csi_probes.json").is_file()
     art["report_html_available"] = report_ok
     art["predictions_available"] = pred_ok
+    art["csi_probes_available"] = csi_ok
     if ops_run_id:
         art["report_href"] = f"/api/v1/ops/official/runs/{ops_run_id}/report"
         if pred_ok:
             art["predictions_href"] = (
                 f"/api/v1/ops/official/runs/{ops_run_id}/predictions"
+                + (f"?bench_run_id={bench_id}" if bench_id else "")
+            )
+        if csi_ok:
+            art["csi_probes_href"] = (
+                f"/api/v1/ops/official/runs/{ops_run_id}/csi-probes"
                 + (f"?bench_run_id={bench_id}" if bench_id else "")
             )
     metrics = art.get("metrics") if isinstance(art.get("metrics"), dict) else {}
@@ -335,6 +407,18 @@ def _attach_coding_artifact_extras(
         "exit_code",
         "note",
         "harness_error",
+        # CSI §7.6 suite rates
+        "locate_fuse_ok_rate",
+        "locate_fuse_n",
+        "edit_impact_coverage",
+        "edit_checks_coverage",
+        "edit_ok_n",
+        "syntax_reject_count",
+        "syntax_warning_passthrough_count",
+        "span_fail_n",
+        "span_fail_with_candidates_rate",
+        "bucket_share_no_patch",
+        "bucket_share_patch_no_apply",
     ):
         if key in metrics:
             scorecard[key] = metrics[key]
@@ -347,8 +431,25 @@ def _attach_coding_artifact_extras(
     n_apply = 0
     n_resolved_cases = 0
     n_with_patch = 0
+    harness_flag = result.get("harness")
+    if harness_flag is None:
+        harness_flag = metrics.get("harness")
+    if isinstance(harness_flag, (int, float)):
+        harness_flag = bool(harness_flag)
+    elif harness_flag is not None:
+        harness_flag = bool(harness_flag)
     patches = _load_prediction_patches(pred_path) if pred_ok else {}
     cases = art.get("cases") if isinstance(art.get("cases"), list) else []
+    resolved_ids = [
+        str(x)
+        for x in (result.get("resolved_ids") or [])
+        if x is not None and str(x).strip()
+    ]
+    unresolved_ids = [
+        str(x)
+        for x in (result.get("unresolved_ids") or [])
+        if x is not None and str(x).strip()
+    ]
     for case in cases:
         if not isinstance(case, dict):
             continue
@@ -358,6 +459,12 @@ def _attach_coding_artifact_extras(
             case["patch_chars"] = len(patch)
             case["patch_preview"] = patch[:_PATCH_PREVIEW_CHARS]
             n_with_patch += 1
+            if ops_run_id and iid:
+                case["patch_href"] = (
+                    f"/api/v1/ops/official/runs/{ops_run_id}/patch"
+                    f"?instance_id={quote(iid, safe='')}"
+                    + (f"&bench_run_id={quote(bench_id, safe='')}" if bench_id else "")
+                )
         if case.get("patch_applies") is True:
             n_apply += 1
         if case.get("resolved") is True or (
@@ -367,11 +474,31 @@ def _attach_coding_artifact_extras(
             n_resolved_cases += 1
         elif case.get("resolved") is False:
             pass
+        verdict = _coding_resolve_verdict(case, harness=harness_flag)
+        case["resolve_verdict"] = verdict
+        case["resolve_label"] = _RESOLVE_VERDICT_LABELS.get(verdict, verdict)
     if cases:
         scorecard["n_apply_ok"] = n_apply
         scorecard["n_with_patch"] = n_with_patch
         if any(isinstance(c, dict) and c.get("resolved") is not None for c in cases):
             scorecard["n_resolved_cases"] = n_resolved_cases
+    if resolved_ids:
+        scorecard["resolved_ids"] = resolved_ids
+    if unresolved_ids:
+        scorecard["unresolved_ids"] = unresolved_ids
+    if harness_flag is not None:
+        scorecard["harness"] = harness_flag
+    # Human-readable one-liner for Ops scorecard.
+    if harness_flag is False:
+        scorecard["resolve_note"] = "未开 harness — 仅有 patch_rate，无官方 resolved"
+    elif any(
+        isinstance(c, dict) and c.get("resolve_verdict") == "pending" for c in cases
+    ):
+        scorecard["resolve_note"] = "harness 尚未回写 — 等整轮 evaluate 结束"
+    elif any(isinstance(c, dict) and c.get("resolved") is not None for c in cases):
+        scorecard["resolve_note"] = (
+            f"官方 resolve {n_resolved_cases}/{len(cases)} 通过"
+        )
     if scorecard:
         art["coding_scorecard"] = scorecard
     return art
@@ -548,6 +675,30 @@ def resolve_predictions_path(
         root = reports_root()
         if root is not None and bid:
             cand = root / "runs" / bid / "predictions.jsonl"
+            if cand.is_file():
+                return cand
+        if wanted:
+            break
+    return None
+
+
+def resolve_csi_probes_path(
+    ops_row: dict[str, Any],
+    *,
+    bench_run_id: str | None = None,
+) -> Path | None:
+    """Locate csi_probes.json for an Ops coding batch (Wave 1+2 §7.6 artifact)."""
+    arts = load_run_artifacts(ops_row)
+    wanted = str(bench_run_id or "").strip()
+    root = reports_root()
+    for suite in arts.get("suites") or []:
+        if not isinstance(suite, dict):
+            continue
+        if wanted and str(suite.get("bench_run_id") or "") != wanted:
+            continue
+        bid = str(suite.get("bench_run_id") or "").strip()
+        if root is not None and bid:
+            cand = root / "runs" / bid / "csi_probes.json"
             if cand.is_file():
                 return cand
         if wanted:

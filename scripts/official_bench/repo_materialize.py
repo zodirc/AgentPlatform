@@ -67,6 +67,33 @@ def ensure_repo_mirror(repo: str, *, timeout_s: int = 600) -> Path:
     return path
 
 
+def prewarm_repo_mirrors(
+    repos: list[str] | set[str],
+    *,
+    timeout_s: int = 600,
+) -> dict[str, Any]:
+    """Suite-level mirror sync before Turns (bypass heavy fetch off the critical path).
+
+    Materialize per instance still checkouts ``base_commit`` into the Work; this only
+    ensures bare mirrors exist / are fetched so clone-from-mirror is local and fast.
+    """
+    unique = sorted({(r or "").strip() for r in repos if (r or "").strip()})
+    ok: list[str] = []
+    failed: dict[str, str] = {}
+    for repo in unique:
+        try:
+            ensure_repo_mirror(repo, timeout_s=timeout_s)
+            ok.append(repo)
+        except Exception as exc:  # noqa: BLE001
+            failed[repo] = str(exc)[:300]
+            logger.warning("mirror prewarm failed for %s: %s", repo, exc)
+    return {
+        "n_repos": len(unique),
+        "ok": ok,
+        "failed": failed,
+    }
+
+
 def materialize_instance_repo(
     instance: dict[str, Any],
     work_root: str | Path,
@@ -126,12 +153,41 @@ def materialize_instance_repo(
     # Problem statement only — never gold patch / hints
     problem = str(instance.get("problem_statement") or "")
     (root / "problem.md").write_text(problem, encoding="utf-8")
+
+    # api often runs as root while runtime is uid 1000 (app). Without this,
+    # edit_file hits EACCES on checked-out sources (root:root 644).
+    _ensure_runtime_writable(root)
+
     return {
         "repo": repo,
         "base_commit": base,
         "mirror_hit": mirror_hit,
         "work_root": str(root),
     }
+
+
+def _ensure_runtime_writable(root: Path, *, uid: int = 1000, gid: int = 1000) -> None:
+    """Best-effort chown so the runtime container can edit the checkout."""
+    try:
+        if hasattr(os, "chown"):
+            for dirpath, dirnames, filenames in os.walk(root):
+                try:
+                    os.chown(dirpath, uid, gid)
+                except OSError:
+                    pass
+                for name in dirnames:
+                    try:
+                        os.chown(Path(dirpath) / name, uid, gid)
+                    except OSError:
+                        pass
+                for name in filenames:
+                    try:
+                        os.chown(Path(dirpath) / name, uid, gid)
+                    except OSError:
+                        pass
+    except Exception:
+        # Non-fatal: caller still gets a checkout; edit may fail loudly if perms wrong.
+        return
 
 
 def cleanup_worktree(work_root: str | Path, *, keep_problem: bool = False) -> None:

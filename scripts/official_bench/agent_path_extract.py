@@ -697,67 +697,437 @@ def ran_tests_from_events(events: list[dict[str, Any]]) -> bool:
     return bool(tools & {"run_tests", "run_command"})
 
 
+def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Wave 1+2 structural probes from tool.completed (Ops coding / §7.6).
+
+    Relies on compact CSI fields on the event bus (impact/checks/locate_*), not
+    full model tool_result JSON. Counts are per-Turn; suite rates roll up later.
+    """
+    n_grep_locate = 0
+    n_grep_locate_ok = 0
+    n_grep_locate_failed = 0
+    n_grep_locate_incomplete = 0
+    n_search_locate = 0
+    n_search_locate_ok = 0
+    n_edit = 0
+    n_edit_ok = 0
+    n_edit_with_impact = 0
+    n_edit_with_checks = 0
+    n_edit_impact_ok = 0
+    n_edit_checks_ok = 0
+    n_syntax_rejected = 0
+    n_syntax_warning = 0
+    n_span_fail = 0
+    n_span_fail_with_candidates = 0
+    n_pager_run_command = 0  # reserved N3
+
+    for ev in events:
+        if str(ev.get("type") or "") != "tool.completed":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        tool = str(payload.get("tool_name") or "")
+        if tool in {"grep", "search_codebase"}:
+            redirected = str(payload.get("redirected_from") or "")
+            locate_status = str(payload.get("locate_status") or "")
+            def_count = payload.get("definition_count")
+            try:
+                def_n = int(def_count) if def_count is not None else 0
+            except (TypeError, ValueError):
+                def_n = 0
+            is_locate = tool == "search_codebase" or redirected == "grep"
+            if not is_locate:
+                continue
+            if tool == "grep" or redirected == "grep":
+                n_grep_locate += 1
+                if locate_status == "failed":
+                    n_grep_locate_failed += 1
+                elif def_n > 0 or locate_status == "ok":
+                    n_grep_locate_ok += 1
+                elif payload.get("locate_incomplete") or locate_status == "incomplete":
+                    n_grep_locate_incomplete += 1
+            if tool == "search_codebase":
+                n_search_locate += 1
+                if def_n > 0 or locate_status == "ok":
+                    n_search_locate_ok += 1
+            continue
+
+        if tool != "edit_file":
+            continue
+        n_edit += 1
+        applies = payload.get("applies")
+        status = str(payload.get("status") or "")
+        err = str(payload.get("error") or payload.get("summary") or "")
+        impact = payload.get("impact") if isinstance(payload.get("impact"), dict) else {}
+        checks = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
+        cand_n = payload.get("candidate_count")
+        try:
+            cand_n_i = int(cand_n) if cand_n is not None else 0
+        except (TypeError, ValueError):
+            cand_n_i = 0
+
+        syntax = str(checks.get("syntax") or "")
+        checks_status = str(checks.get("status") or "")
+        if checks_status == "rejected" or syntax == "error" or "syntax_error" in err:
+            n_syntax_rejected += 1
+        if syntax == "warning":
+            n_syntax_warning += 1
+
+        span_fail = (
+            applies is False
+            or "old_text not found" in err
+            or "matches" in err and "times" in err
+            or cand_n_i > 0 and applies is False
+        )
+        if span_fail and checks_status != "rejected" and "syntax_error" not in err:
+            n_span_fail += 1
+            if cand_n_i > 0:
+                n_span_fail_with_candidates += 1
+
+        edited_ok = applies is True or (
+            status == "ok" and payload.get("bytes_written") is not None and applies is not False
+        )
+        if not edited_ok:
+            continue
+        n_edit_ok += 1
+        if impact:
+            n_edit_with_impact += 1
+            if str(impact.get("status") or "") == "ok":
+                n_edit_impact_ok += 1
+        if checks:
+            n_edit_with_checks += 1
+            if str(checks.get("status") or "") in {"ok", "timeout", "failed", "skipped"}:
+                # presence on success path counts as coverage; ok is stricter
+                if str(checks.get("status") or "") == "ok":
+                    n_edit_checks_ok += 1
+
+    return {
+        "n_grep_locate": n_grep_locate,
+        "n_grep_locate_ok": n_grep_locate_ok,
+        "n_grep_locate_failed": n_grep_locate_failed,
+        "n_grep_locate_incomplete": n_grep_locate_incomplete,
+        "n_search_locate": n_search_locate,
+        "n_search_locate_ok": n_search_locate_ok,
+        "n_edit": n_edit,
+        "n_edit_ok": n_edit_ok,
+        "n_edit_with_impact": n_edit_with_impact,
+        "n_edit_with_checks": n_edit_with_checks,
+        "n_edit_impact_ok": n_edit_impact_ok,
+        "n_edit_checks_ok": n_edit_checks_ok,
+        "n_syntax_rejected": n_syntax_rejected,
+        "n_syntax_warning": n_syntax_warning,
+        "n_span_fail": n_span_fail,
+        "n_span_fail_with_candidates": n_span_fail_with_candidates,
+        "n_pager_run_command": n_pager_run_command,
+    }
+
+
+def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
+    """Roll per-case CSI counters into suite rates (§7.6 denominators)."""
+    def _sum(key: str) -> int:
+        return int(sum(int(c.get(key) or 0) for c in per_case))
+
+    grep_locate = _sum("n_grep_locate")
+    grep_ok = _sum("n_grep_locate_ok")
+    edit_ok = _sum("n_edit_ok")
+    edit_impact = _sum("n_edit_with_impact")
+    edit_checks = _sum("n_edit_with_checks")
+    span_fail = _sum("n_span_fail")
+    span_cand = _sum("n_span_fail_with_candidates")
+    buckets = [str(c.get("bucket") or "") for c in per_case]
+    n_cases = len(per_case) or 1
+    n_no_patch = sum(1 for b in buckets if b == "no_patch")
+    n_patch_no_apply = sum(1 for b in buckets if b == "patch_no_apply")
+
+    def _rate(num: int, den: int) -> float | None:
+        if den <= 0:
+            return None
+        return float(num) / float(den)
+
+    return {
+        "locate_fuse_ok_rate": _rate(grep_ok, grep_locate),
+        "locate_fuse_n": float(grep_locate),
+        "edit_impact_coverage": _rate(edit_impact, edit_ok),
+        "edit_checks_coverage": _rate(edit_checks, edit_ok),
+        "edit_ok_n": float(edit_ok),
+        "syntax_reject_count": float(_sum("n_syntax_rejected")),
+        "syntax_warning_passthrough_count": float(_sum("n_syntax_warning")),
+        "span_fail_n": float(span_fail),
+        "span_fail_with_candidates_rate": _rate(span_cand, span_fail),
+        "bucket_share_no_patch": float(n_no_patch) / float(n_cases),
+        "bucket_share_patch_no_apply": float(n_patch_no_apply) / float(n_cases),
+        "n_grep_locate_failed": float(_sum("n_grep_locate_failed")),
+        "n_grep_locate_incomplete": float(_sum("n_grep_locate_incomplete")),
+    }
+
+
+_HUNK_HEADER_RE = re.compile(
+    r"^@@\s+-(\d+)(?:,(\d+))?\s+\+(\d+)(?:,(\d+))?\s@@"
+)
+
+
+def patch_hunks_incomplete(patch: str) -> bool:
+    """True when unified-diff hunk line counts do not match body (truncated / corrupt)."""
+    text = patch or ""
+    if not text.strip():
+        return False
+    lines = text.splitlines()
+    i = 0
+    saw_hunk = False
+    while i < len(lines):
+        m = _HUNK_HEADER_RE.match(lines[i])
+        if not m:
+            i += 1
+            continue
+        saw_hunk = True
+        old_n = int(m.group(2) if m.group(2) is not None else "1")
+        new_n = int(m.group(4) if m.group(4) is not None else "1")
+        i += 1
+        old_seen = 0
+        new_seen = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith("diff --git") or line.startswith("--- ") or line.startswith("+++ "):
+                break
+            if line.startswith("@@"):
+                break
+            if line.startswith("\\"):
+                i += 1
+                continue
+            if line.startswith("+") and not line.startswith("+++"):
+                new_seen += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                old_seen += 1
+            elif line.startswith(" ") or line == "":
+                old_seen += 1
+                new_seen += 1
+            i += 1
+        if old_seen != old_n or new_seen != new_n:
+            return True
+    return False if saw_hunk else False
+
+
+# Pathspecs excluded from L1/harness model_patch (agent pip/venv junk in worktree).
+_GIT_DIFF_EXCLUDE_PATHSPECS: tuple[str, ...] = (
+    ":(exclude).local",
+    ":(exclude).local/**",
+    ":(exclude)**/.local/**",
+    ":(exclude).venv",
+    ":(exclude).venv/**",
+    ":(exclude)**/.venv/**",
+    ":(exclude)venv",
+    ":(exclude)venv/**",
+    ":(exclude)**/site-packages/**",
+    ":(exclude)**/__pycache__/**",
+    ":(exclude)**/.pytest_cache/**",
+    ":(exclude)node_modules",
+    ":(exclude)node_modules/**",
+    ":(exclude)**/node_modules/**",
+)
+
+
+def _path_is_diff_noise(path: str) -> bool:
+    """True for env/install pollution that must not enter SWE model_patch."""
+    p = path.replace("\\", "/").lstrip("./")
+    if not p:
+        return False
+    parts = p.split("/")
+    noise_dirs = {
+        ".local",
+        ".venv",
+        "venv",
+        "site-packages",
+        "__pycache__",
+        ".pytest_cache",
+        "node_modules",
+    }
+    return any(part in noise_dirs for part in parts)
+
+
+def filter_unified_diff_noise(diff: str) -> str:
+    """Drop file sections whose path is install/venv noise (safety net after git)."""
+    text = (diff or "").strip()
+    if not text:
+        return ""
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if line.startswith("diff --git "):
+            # ``diff --git a/foo b/foo`` — take path after `` b/`` when present.
+            rest = line[len("diff --git ") :].rstrip("\n")
+            path = ""
+            if " b/" in rest:
+                path = rest.split(" b/", 1)[-1].strip()
+            elif rest.startswith("a/") and " " in rest:
+                path = rest.split(" ", 1)[0][2:]
+            skip = _path_is_diff_noise(path)
+            block = [line]
+            i += 1
+            while i < len(lines) and not lines[i].startswith("diff --git "):
+                block.append(lines[i])
+                i += 1
+            if not skip:
+                out.extend(block)
+            continue
+        # Orphan lines (rare) — keep unless clearly under a noise path header.
+        out.append(line)
+        i += 1
+    cleaned = "".join(out).strip()
+    return cleaned + "\n" if cleaned else ""
+
+
 def patch_from_git_diff(work_root: str | Path, *, base_ref: str = "HEAD") -> str:
-    """Prefer real worktree changes (A-3): ``git diff`` against clean tree / base."""
+    """Prefer real worktree changes (A-3): full diff vs ``base_ref``, including untracked."""
+    import os
     import subprocess
+    import tempfile
 
     root = Path(work_root)
-    if not (root / ".git").exists() and not (root / ".git").is_file():
-        # May be a checkout without nested .git if using --git-dir; try plain diff
+    ref = (base_ref or "HEAD").strip() or "HEAD"
+    # api often extracts as root while materialize chowns the tree to uid 1000;
+    # without safe.directory, git returns empty / "dubious ownership" → false no_patch.
+    _safe = ["-c", "safe.directory=*"]
+    _pathspecs = [".", *_GIT_DIFF_EXCLUDE_PATHSPECS]
+
+    def _run(args: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        # text=True alone uses locale encoding and raises UnicodeDecodeError on
+        # binary blobs that land in ``git diff`` (agent may write/download non-UTF8).
+        # That used to escape the L1 except path when retrying patch_from_git_diff
+        # and fail the whole coding suite (``invalid continuation byte`` at multi-MB offset).
+        return subprocess.run(
+            ["git", *_safe, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            cwd=str(root),
+            env=env,
+        )
+
+    # Temp index: read-tree base + add -A → diff --cached captures tracked + untracked
+    # without mutating the real index / worktree staging state.
+    try:
+        with tempfile.NamedTemporaryFile(prefix="agent-git-idx-", delete=False) as fh:
+            idx_path = fh.name
+        try:
+            env = {**os.environ, "GIT_INDEX_FILE": idx_path}
+            read = _run(["read-tree", ref], env=env)
+            if read.returncode == 0:
+                _run(["add", "-A", "--", *_pathspecs], env=env)
+                proc = _run(
+                    ["diff", "--cached", "--no-color", "--", *_pathspecs], env=env
+                )
+                text = filter_unified_diff_noise((proc.stdout or "").strip())
+                if text and _looks_like_unified_diff(text):
+                    return text
+        finally:
+            Path(idx_path).unlink(missing_ok=True)
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         pass
+
+    # Fallback: tracked unstaged + staged only.
     try:
-        proc = subprocess.run(
-            ["git", "-C", str(root), "diff", "--no-color"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        proc = _run(["diff", "--no-color", ref, "--", *_pathspecs])
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return ""
-    text = (proc.stdout or "").strip()
+    text = filter_unified_diff_noise((proc.stdout or "").strip())
     if text and _looks_like_unified_diff(text):
-        return text + "\n"
-    # staged
+        return text
     try:
-        proc2 = subprocess.run(
-            ["git", "-C", str(root), "diff", "--cached", "--no-color"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        proc2 = _run(["diff", "--cached", "--no-color", "--", *_pathspecs])
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return ""
-    text2 = (proc2.stdout or "").strip()
+    text2 = filter_unified_diff_noise((proc2.stdout or "").strip())
     if text2 and _looks_like_unified_diff(text2):
-        return text2 + "\n"
-    _ = base_ref  # reserved for explicit base comparisons
+        return text2
     return ""
 
 
 def patch_apply_check(work_root: str | Path, patch: str) -> bool | None:
-    """Return True/False if ``git apply --check`` works; None if git unavailable."""
+    """Return True/False if patch applies to **clean HEAD**; None if git unavailable.
+
+    Must not only ``git apply --check`` on a dirty worktree when ``patch`` came from
+    ``git diff`` of that same tree — the change is already present, so a forward
+    check fails (false ``patch_no_apply``). SWE harness applies onto the base
+    commit.
+
+    Strategy:
+    1. Reject incomplete hunks.
+    2. ``git apply --reverse --check`` on the worktree (succeeds when tree == HEAD+patch).
+    3. Detached ``git worktree`` at HEAD + forward ``git apply --check`` (needs a real
+       git dir — plain ``git archive`` + apply is too permissive without ``.git``).
+    """
     import subprocess
     import tempfile
 
     if not (patch or "").strip():
         return False
+    if patch_hunks_incomplete(patch):
+        return False
     root = Path(work_root)
+    patch_text = patch if patch.endswith("\n") else patch + "\n"
+    _safe = ["-c", "safe.directory=*"]
+
+    def _write_patch() -> str:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".patch", delete=False, encoding="utf-8"
+        ) as fh:
+            fh.write(patch_text)
+            return fh.name
+
+    def _git(*args: str, timeout: float = 60) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *_safe, *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+        )
+
     try:
-        with tempfile.NamedTemporaryFile("w", suffix=".patch", delete=False, encoding="utf-8") as fh:
-            fh.write(patch)
-            path = fh.name
+        path = _write_patch()
         try:
-            proc = subprocess.run(
-                ["git", "-C", str(root), "apply", "--check", path],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
+            rev = _git("-C", str(root), "apply", "--reverse", "--check", path)
+            if rev.returncode == 0:
+                return True
         finally:
             Path(path).unlink(missing_ok=True)
-    except (OSError, subprocess.TimeoutExpired):
+
+        with tempfile.TemporaryDirectory(prefix="patch-apply-wt-") as td:
+            td_path = Path(td) / "wt"
+            add = _git(
+                "-C",
+                str(root),
+                "worktree",
+                "add",
+                "--detach",
+                str(td_path),
+                "HEAD",
+                timeout=120,
+            )
+            if add.returncode != 0:
+                return None
+            path = _write_patch()
+            try:
+                proc = _git("-C", str(td_path), "apply", "--check", path)
+                ok = proc.returncode == 0
+            finally:
+                Path(path).unlink(missing_ok=True)
+                _git(
+                    "-C",
+                    str(root),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(td_path),
+                )
+            return ok
+    except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return None
-    return proc.returncode == 0

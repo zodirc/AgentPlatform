@@ -39,6 +39,9 @@ logger = logging.getLogger(__name__)
 ProgressCb = Callable[[dict[str, Any]], Awaitable[None]]
 CancelCheck = Callable[[], bool]
 
+# Max mtime of official_bench/*.py last loaded into this process (bind-mount hot reload).
+_official_bench_loaded_mtime: float | None = None
+
 PROTOCOL_L1 = "official-small-2026-08-m3"
 L1_ROOT = Path(os.environ.get("OPS_L1_WORKSPACE_ROOT", "/data/ops-l1"))
 # Stable BEIR index cache (shared across L1 runs) — avoids N× full ST embeds.
@@ -219,6 +222,57 @@ _STEP_EVENT_TYPES = frozenset(
 )
 
 
+def _official_bench_dir_mtime(scripts_root: Path) -> float:
+    bench = scripts_root / "official_bench"
+    if not bench.is_dir():
+        return 0.0
+    latest = 0.0
+    try:
+        for path in bench.glob("*.py"):
+            try:
+                latest = max(latest, path.stat().st_mtime)
+            except OSError:
+                continue
+    except OSError:
+        return 0.0
+    return latest
+
+
+def _reload_official_bench_if_stale(scripts_root: Path) -> None:
+    """Reload bind-mounted official_bench when *.py mtimes advance.
+
+    Uvicorn keeps ``sys.modules`` across Ops runs; without this, /repo script
+    edits (e.g. git safe.directory) stay invisible until api recreate.
+    """
+    global _official_bench_loaded_mtime
+    import importlib
+
+    mt = _official_bench_dir_mtime(scripts_root)
+    loaded = [n for n in sys.modules if n == "official_bench" or n.startswith("official_bench.")]
+    if not loaded:
+        _official_bench_loaded_mtime = mt
+        return
+    if (
+        _official_bench_loaded_mtime is not None
+        and mt <= _official_bench_loaded_mtime
+    ):
+        return
+    for name in sorted(loaded, key=lambda n: n.count(".")):
+        mod = sys.modules.get(name)
+        if mod is None:
+            continue
+        try:
+            importlib.reload(mod)
+        except Exception:  # noqa: BLE001
+            logger.warning("official_bench reload failed for %s", name, exc_info=True)
+    _official_bench_loaded_mtime = mt
+    logger.info(
+        "reloaded official_bench modules n=%s mtime=%.0f",
+        len(loaded),
+        mt,
+    )
+
+
 def _ensure_scripts_path() -> Path:
     repo = Path("/repo")
     if not (repo / "scripts" / "official_bench").is_dir():
@@ -228,9 +282,11 @@ def _ensure_scripts_path() -> Path:
             if (parent / "scripts" / "official_bench").is_dir():
                 repo = parent
                 break
-    scripts = str(repo / "scripts")
+    scripts_path = repo / "scripts"
+    scripts = str(scripts_path)
     if scripts not in sys.path:
         sys.path.insert(0, scripts)
+    _reload_official_bench_if_stale(scripts_path)
     return repo
 
 
@@ -2208,12 +2264,20 @@ async def run_coding_l1(
     A-3: default materializes repo at base_commit; patch prefers git diff;
     optional Docker harness after all Turns (``run_harness``).
     """
+    if not checkout_repo:
+        raise RuntimeError(
+            "run_coding_l1 requires checkout_repo=true "
+            "(structural navigation + git_diff need a base-commit worktree)"
+        )
     _ensure_scripts_path()
     from official_bench.agent_path_extract import (
+        csi_probes_from_events,
+        csi_suite_rates,
         patch_apply_check,
         patch_from_events,
         patch_from_git_diff,
         patch_from_work_root,
+        patch_hunks_incomplete,
         ran_tests_from_events,
         read_file_stats_from_events,
         step_count_from_events,
@@ -2222,7 +2286,11 @@ async def run_coding_l1(
     from official_bench.config import load_suites
     from official_bench.l2_probes import classify_bucket
     from official_bench.pull import pull_swebench
-    from official_bench.repo_materialize import cleanup_worktree, materialize_instance_repo
+    from official_bench.repo_materialize import (
+        cleanup_worktree,
+        materialize_instance_repo,
+        prewarm_repo_mirrors,
+    )
     from official_bench.run_session import RunSession
     from official_bench.swe_run import (
         _ensure_slice_files,
@@ -2265,8 +2333,9 @@ async def run_coding_l1(
             if selected_tier in {"n25", "full300"} and run_harness
             else "smoke"
         ),
-        # CSI §8.2 — host-side intent; runtime must be recreated with matching env.
-        "structural_enabled_env": os.environ.get("STRUCTURAL_ENABLED", ""),
+        # Structural lane is fused into agent; archive prewarm / deny-net only.
+        "structural_fused": True,
+        "structural_prewarm_env": os.environ.get("STRUCTURAL_PREWARM", ""),
         "ops_eval_deny_network_env": os.environ.get(
             "OPS_EVAL_DENY_NETWORK",
             "1" if os.environ.get("OFFICIAL_SWE_NETWORK", "").strip().lower() == "deny" else "",
@@ -2287,6 +2356,36 @@ async def run_coding_l1(
             f"parallel={conc} checkout={checkout_repo} harness={run_harness}"
         ),
     )
+    # Suite-level mirror sync (bypass): fetch once per unique repo before Turns so
+    # per-instance materialize is local clone+checkout, not cold network.
+    repos = [str(inst.get("repo") or "") for inst in ordered]
+    await _emit(
+        on_progress,
+        "log",
+        message=f"[L1] mirror prewarm starting n_repos={len({r for r in repos if r})}",
+    )
+    prewarm_meta = await asyncio.to_thread(prewarm_repo_mirrors, repos)
+    await _emit(
+        on_progress,
+        "log",
+        message=(
+            f"[L1] mirror prewarm done ok={len(prewarm_meta.get('ok') or [])} "
+            f"failed={len(prewarm_meta.get('failed') or {})}"
+        ),
+    )
+    if prewarm_meta.get("failed"):
+        for repo, err in list((prewarm_meta.get("failed") or {}).items())[:5]:
+            await _emit(
+                on_progress,
+                "log",
+                message=f"[L1] mirror prewarm fail {repo}: {err}",
+            )
+    session.extra["mirror_prewarm"] = {
+        "n_repos": prewarm_meta.get("n_repos"),
+        "n_ok": len(prewarm_meta.get("ok") or []),
+        "n_failed": len(prewarm_meta.get("failed") or {}),
+        "failed_repos": list((prewarm_meta.get("failed") or {}).keys())[:12],
+    }
     try:
         sem = asyncio.Semaphore(conc)
         case_lock = asyncio.Lock()
@@ -2302,41 +2401,67 @@ async def run_coding_l1(
                 )
                 has_repo = False
                 mirror_hit = False
-                if checkout_repo:
-                    try:
-                        meta = await asyncio.to_thread(
-                            materialize_instance_repo, inst, work.work_root
-                        )
-                        has_repo = True
-                        mirror_hit = bool(meta.get("mirror_hit"))
-                        await _emit(
-                            on_progress,
-                            "log",
-                            message=(
-                                f"[L1] checkout {iid} mirror_hit={mirror_hit} "
-                                f"repo={meta.get('repo')}"
-                            ),
-                        )
-                    except Exception as exc:  # noqa: BLE001
-                        await _emit(
-                            on_progress,
-                            "log",
-                            message=f"[L1] checkout failed {iid}: {exc}; fallback problem.md only",
-                        )
-                        readme = Path(work.work_root) / "problem.md"
-                        readme.write_text(
-                            str(inst.get("problem_statement") or ""), encoding="utf-8"
-                        )
-                else:
-                    readme = Path(work.work_root) / "problem.md"
-                    readme.write_text(
-                        str(inst.get("problem_statement") or ""), encoding="utf-8"
+                # checkout_repo is required (enforced above); materialize must succeed
+                # before StartTurn — no silent problem.md-only fallback.
+                try:
+                    meta = await asyncio.to_thread(
+                        materialize_instance_repo, inst, work.work_root
                     )
+                    has_repo = True
+                    mirror_hit = bool(meta.get("mirror_hit"))
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=(
+                            f"[L1] checkout {iid} mirror_hit={mirror_hit} "
+                            f"repo={meta.get('repo')} commit={meta.get('base_commit')}"
+                        ),
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    err = f"checkout_failed: {exc}"
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=f"[L1] checkout failed {iid}: {exc}",
+                    )
+                    l2 = {
+                        "case_id": iid,
+                        "arm": "free",
+                        "patch_source": "none",
+                        "checkout_failed": True,
+                        "has_repo": False,
+                        "mirror_hit": False,
+                        "terminal_state": "failed",
+                        "bucket": "checkout_failed",
+                    }
+                    async with case_lock:
+                        patches[iid] = ""
+                        patch_sources[iid] = "none"
+                        session.add_case(
+                            iid,
+                            status="fail",
+                            error=err,
+                            metrics={"nonempty": 0.0},
+                            extra={
+                                "bucket": "checkout_failed",
+                                "l2": l2,
+                                "has_repo": False,
+                                "mirror_hit": False,
+                            },
+                        )
+                        done_count += 1
+                        await _emit(
+                            on_progress,
+                            "log",
+                            message=f"[L1] coding {done_count}/{len(ordered)} {iid}",
+                        )
+                    await _emit_fail(on_progress, iid, error=err)
+                    return
 
                 sess = await session_svc.create_session(
                     scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
                 )
-                hint = _coding_prompt(inst, has_repo=has_repo)
+                hint = _coding_prompt(inst, has_repo=True)
                 turn, _run = await _start_turn(
                     session_id=sess["id"],
                     scenario_id=scenario_id,
@@ -2345,6 +2470,7 @@ async def run_coding_l1(
                     model_override=model,
                 )
                 patch_source = "none"
+                events: list[dict[str, Any]] = []
                 try:
                     events = await _wait_turn_verbose(
                         turn["id"],
@@ -2365,20 +2491,37 @@ async def run_coding_l1(
                         patch = patch_from_work_root(work.work_root)
                         if patch.strip():
                             patch_source = "write"
+                    incomplete = (
+                        patch_hunks_incomplete(patch) if patch.strip() else False
+                    )
                     applies = (
                         patch_apply_check(work.work_root, patch)
                         if has_repo and patch.strip()
                         else None
                     )
+                    # Accept only patches that would apply on clean HEAD (harness
+                    # semantics). Reject truncated / non-apply from predictions so
+                    # resolve_rate is not polluted by garbage diffs; keep diagnostics.
+                    reject_reason = None
+                    if patch.strip() and incomplete:
+                        reject_reason = "hunks_incomplete"
+                    elif patch.strip() and applies is False:
+                        reject_reason = "apply_check_failed"
+                    accepted_patch = "" if reject_reason else patch
                     read_stats = read_file_stats_from_events(events)
+                    csi = csi_probes_from_events(events)
                     l2 = {
                         "case_id": iid,
                         "turn_id": str(turn["id"]),
                         "arm": "free",
                         "patch_source": patch_source,
                         "patch_applies": applies,
+                        "patch_incomplete": incomplete,
+                        "patch_rejected": reject_reason,
+                        "patch_chars": len(patch) if patch else 0,
                         "ran_tests": ran_tests_from_events(events),
                         **read_stats,
+                        **csi,
                         "steps": step_count_from_events(events),
                         "terminal_state": terminal_state_from_events(events),
                         "mirror_hit": mirror_hit,
@@ -2386,20 +2529,37 @@ async def run_coding_l1(
                     }
                     l2["bucket"] = classify_bucket("coding", l2)
                     err = None
+                    patch = accepted_patch
                 except Exception as exc:  # noqa: BLE001
-                    patch = patch_from_work_root(work.work_root) if has_repo else ""
-                    if not patch:
-                        patch = patch_from_git_diff(work.work_root) if has_repo else ""
-                    patch_source = "git_diff" if patch.strip() else "none"
+                    raw = patch_from_work_root(work.work_root) if has_repo else ""
+                    if not raw:
+                        raw = patch_from_git_diff(work.work_root) if has_repo else ""
+                    patch_source = "git_diff" if raw.strip() else "none"
+                    applies = (
+                        patch_apply_check(work.work_root, raw)
+                        if has_repo and raw.strip()
+                        else None
+                    )
+                    reject_reason = None
+                    if raw.strip() and patch_hunks_incomplete(raw):
+                        reject_reason = "hunks_incomplete"
+                    elif raw.strip() and applies is False:
+                        reject_reason = "apply_check_failed"
+                    patch = "" if reject_reason else raw
                     err = str(exc)
+                    csi = csi_probes_from_events(events)
                     l2 = {
                         "case_id": iid,
                         "turn_id": str(turn["id"]),
                         "patch_source": patch_source,
+                        "patch_applies": applies,
+                        "patch_rejected": reject_reason,
                         "terminal_state": "failed",
-                        "bucket": "no_patch" if not patch.strip() else "ok",
                         "has_repo": has_repo,
+                        "mirror_hit": mirror_hit,
+                        **csi,
                     }
+                    l2["bucket"] = classify_bucket("coding", l2)
                 # Disk hygiene: drop heavy tree after extract (keep mirror).
                 if has_repo:
                     try:
@@ -2455,7 +2615,57 @@ async def run_coding_l1(
             "n_instances": float(selected_n),
             "n_nonempty_patches": float(nonempty),
             "patch_rate": float(nonempty) / float(selected_n) if selected_n else 0.0,
+            "mirror_prewarm_ok": float(len(prewarm_meta.get("ok") or [])),
+            "mirror_prewarm_failed": float(len(prewarm_meta.get("failed") or {})),
         }
+        # CSI §7.6 suite rates from per-case l2 counters (Wave 1+2 probes).
+        csi_cases = [
+            dict(c.get("l2") or {})
+            for c in session.cases
+            if isinstance(c, dict)
+            and str(c.get("case_id") or "")
+            and not str(c.get("case_id") or "").startswith("swebench.lite")
+        ]
+        csi_rates = csi_suite_rates(csi_cases)
+        for key, value in csi_rates.items():
+            if value is not None:
+                metrics[key] = float(value) if isinstance(value, (int, float)) else value
+        csi_artifact = {
+            "protocol": "csi_probes_v1",
+            "suite_rates": csi_rates,
+            "per_case": [
+                {
+                    "case_id": c.get("case_id"),
+                    "turn_id": c.get("turn_id"),
+                    "bucket": c.get("bucket"),
+                    **{
+                        k: c.get(k)
+                        for k in (
+                            "n_grep_locate",
+                            "n_grep_locate_ok",
+                            "n_grep_locate_failed",
+                            "n_grep_locate_incomplete",
+                            "n_edit_ok",
+                            "n_edit_with_impact",
+                            "n_edit_with_checks",
+                            "n_syntax_rejected",
+                            "n_syntax_warning",
+                            "n_span_fail",
+                            "n_span_fail_with_candidates",
+                        )
+                        if k in c
+                    },
+                }
+                for c in csi_cases
+            ],
+        }
+        try:
+            (Path(session.dir) / "csi_probes.json").write_text(
+                json.dumps(csi_artifact, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            logger.warning("failed to write csi_probes.json", exc_info=True)
         harness_result: dict[str, Any] = {}
         if run_harness:
             await _emit(on_progress, "log", message="[L1] coding harness resolve…")
@@ -2499,7 +2709,8 @@ async def run_coding_l1(
                 await _emit_fail(on_progress, "suite=coding.harness", error=str(exc))
         else:
             metrics["note"] = (
-                "patch_rate is auxiliary; set coding_harness=true for resolve@tier"
+                "patch_rate is auxiliary; official resolve requires harness "
+                "(Ops coding always enables harness)"
             )
         session.metrics = metrics
         result = {

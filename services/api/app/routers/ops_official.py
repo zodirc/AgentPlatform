@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.services.ops.auth import ops_eval_enabled, require_ops_eval_auth
@@ -54,7 +54,7 @@ class StartOfficialBody(BaseModel):
     coding_skip_api: bool = False
     coding_tier: str = "n25"
     coding_n_instances: int | None = None
-    coding_harness: bool = False
+    coding_harness: bool = True
     # Default = real ST vectors on bench worker (effect score). Hash is opt-in smoke.
     retrieval_prod: bool = True
     # Ops acceptance path is L1 agent only (free thermometer). L0 component rejected.
@@ -210,7 +210,7 @@ async def official_meta() -> dict[str, Any]:
                 "id": "coding",
                 "label": "编码",
                 "group": "coding",
-                "description": "SWE-bench Lite · 档位见配置档（适中默认 n5）",
+                "description": "SWE-bench Lite · 档位见配置档（适中默认 n5 · 必跑 harness）",
                 "needs_model": True,
             },
         ],
@@ -221,7 +221,7 @@ async def official_meta() -> dict[str, Any]:
                 "targets": ["retrieval", "coding"],
                 "eval_path": "agent",
                 "coding_tier": "n5",
-                "coding_harness": False,
+                "coding_harness": True,
                 "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
@@ -229,7 +229,7 @@ async def official_meta() -> dict[str, Any]:
                 "l1_max_parallel": 1,
                 "retrieval_arm": "free",
                 "context_arm": "free",
-                "hint": "L1 m3 · 自由臂 · 检索 20q/集 + 编码 n5 checkout · 冒烟档",
+                "hint": "L1 m3 · 自由臂 · 检索 20q/集 + 编码 n5 + 官方 harness · 冒烟档",
             },
             {
                 "id": "l1_smoke",
@@ -253,7 +253,7 @@ async def official_meta() -> dict[str, Any]:
                 "targets": ["retrieval", "context", "coding"],
                 "eval_path": "agent",
                 "coding_tier": "n5",
-                "coding_harness": False,
+                "coding_harness": True,
                 "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
@@ -261,7 +261,7 @@ async def official_meta() -> dict[str, Any]:
                 "l1_max_parallel": 1,
                 "retrieval_arm": "free",
                 "context_arm": "free",
-                "hint": "L1 三套自由臂 · 每 task 20 · 冒烟档",
+                "hint": "L1 三套自由臂 · 每 task 20 · 编码必跑 harness · 冒烟档",
             },
             {
                 "id": "l1_full",
@@ -285,7 +285,7 @@ async def official_meta() -> dict[str, Any]:
                 "targets": ["retrieval"],
                 "eval_path": "agent",
                 "coding_tier": "n5",
-                "coding_harness": False,
+                "coding_harness": True,
                 "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
@@ -301,7 +301,7 @@ async def official_meta() -> dict[str, Any]:
                 "targets": ["retrieval_zh"],
                 "eval_path": "agent",
                 "coding_tier": "n5",
-                "coding_harness": False,
+                "coding_harness": True,
                 "coding_checkout_repo": True,
                 "retrieval_prod": True,
                 "context_tier": "20",
@@ -317,7 +317,7 @@ async def official_meta() -> dict[str, Any]:
         "defaults": {
             "coding_tier": "n5",
             "coding_n_instances": None,
-            "coding_harness": False,
+            "coding_harness": True,
             "coding_checkout_repo": True,
             "retrieval_prod": True,
             "eval_path": "agent",
@@ -462,6 +462,80 @@ async def get_official_run_predictions(
         path,
         media_type="application/x-ndjson",
         filename=f"predictions-{run_id[:8]}.jsonl",
+    )
+
+
+@router.get("/runs/{run_id}/patch")
+async def get_official_run_instance_patch(
+    run_id: str,
+    instance_id: str = Query(..., min_length=1),
+    bench_run_id: str | None = Query(default=None),
+) -> PlainTextResponse:
+    """Return one instance's model_patch (full diff) from predictions.jsonl."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    live = official_runner.get_live(run_id)
+    if live is not None:
+        row = official_runner.run_to_dict(live)
+    else:
+        fs = official_store.get_fs_run(run_id)
+        db = await eval_store.load_run(run_id)
+        if fs is None and db is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if fs and db:
+            row = {**db, **fs}
+        elif fs:
+            row = fs
+        else:
+            assert db is not None
+            row = db
+    path = official_store.resolve_predictions_path(row, bench_run_id=bench_run_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="predictions.jsonl not found")
+    patch = official_store.prediction_patch_for_instance(path, instance_id)
+    if patch is None:
+        raise HTTPException(status_code=404, detail=f"instance not in predictions: {instance_id}")
+    return PlainTextResponse(
+        patch,
+        media_type="text/plain; charset=utf-8",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{instance_id.replace("/", "_")}.diff"'
+            )
+        },
+    )
+
+
+@router.get("/runs/{run_id}/csi-probes")
+async def get_official_run_csi_probes(
+    run_id: str,
+    bench_run_id: str | None = Query(default=None),
+) -> FileResponse:
+    """Download csi_probes.json (Wave 1+2 Locate/Impact/Verify coverage)."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    live = official_runner.get_live(run_id)
+    if live is not None:
+        row = official_runner.run_to_dict(live)
+    else:
+        fs = official_store.get_fs_run(run_id)
+        db = await eval_store.load_run(run_id)
+        if fs is None and db is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if fs and db:
+            row = {**db, **fs}
+        elif fs:
+            row = fs
+        else:
+            assert db is not None
+            row = db
+    path = official_store.resolve_csi_probes_path(row, bench_run_id=bench_run_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="csi_probes.json not found")
+    return FileResponse(
+        path,
+        media_type="application/json",
+        filename=f"csi_probes-{run_id[:8]}.json",
     )
 
 
@@ -681,7 +755,20 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             ),
         )
     wants_coding = any(t in {"coding", "coding_infer"} for t in body.targets)
-    if wants_coding and body.coding_harness and not caps.get("coding_harness"):
+    coding_checkout_repo = bool(body.coding_checkout_repo)
+    # Coding without official resolve is not an Ops acceptance path — always harness.
+    coding_harness = bool(wants_coding)
+    if wants_coding and not coding_checkout_repo:
+        # Agent structural lane (goto_definition / LSP read_lints / git_diff) needs a
+        # real base-commit worktree. problem.md-only runs cannot exercise coding flow.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "coding / coding_infer requires coding_checkout_repo=true "
+                "(structural navigation + git_diff scoring need a repo checkout)"
+            ),
+        )
+    if wants_coding and not caps.get("coding_harness"):
         tips: list[str] = []
         if not caps.get("swebench"):
             tips.append("rebuild api image with swebench (make up-api / Dockerfile)")
@@ -693,7 +780,7 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
         raise HTTPException(
             status_code=400,
             detail=(
-                "coding_harness=true requires swebench + Docker from api: "
+                "coding requires official harness (swebench + Docker from api): "
                 + ("; ".join(tips) if tips else "coding_harness capability unavailable")
             ),
         )
@@ -704,7 +791,7 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             coding_skip_api=body.coding_skip_api,
             coding_tier=body.coding_tier,
             coding_n_instances=body.coding_n_instances,
-            coding_harness=body.coding_harness,
+            coding_harness=coding_harness,
             retrieval_prod=body.retrieval_prod,
             force=body.force,
             model=body.model.model_dump() if body.model else None,
@@ -714,7 +801,7 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             l1_max_parallel=body.l1_max_parallel,
             retrieval_arm="free",
             context_arm="free",
-            coding_checkout_repo=body.coding_checkout_repo,
+            coding_checkout_repo=coding_checkout_repo,
             retrieval_datasets=list(body.retrieval_datasets or []),
             retrieval_corpus_mode=body.retrieval_corpus_mode,
         )

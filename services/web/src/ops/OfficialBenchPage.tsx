@@ -116,7 +116,7 @@ const L1_RUN_PROFILES: Preset[] = [
     targets: ["retrieval", "coding"],
     eval_path: "agent",
     coding_tier: "n5",
-    coding_harness: false,
+    coding_harness: true,
     coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
@@ -124,7 +124,7 @@ const L1_RUN_PROFILES: Preset[] = [
     l1_max_parallel: 1,
     retrieval_arm: "free",
     context_arm: "free",
-    hint: "L1 m3 · 自由臂 · 检索 20q/集 + 编码 n5 checkout · 冒烟档",
+    hint: "L1 m3 · 自由臂 · 检索 20q/集 + 编码 n5 + 官方 harness · 冒烟档",
   },
   {
     id: "l1_smoke",
@@ -148,7 +148,7 @@ const L1_RUN_PROFILES: Preset[] = [
     targets: ["retrieval", "context", "coding"],
     eval_path: "agent",
     coding_tier: "n5",
-    coding_harness: false,
+    coding_harness: true,
     coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
@@ -156,7 +156,7 @@ const L1_RUN_PROFILES: Preset[] = [
     l1_max_parallel: 1,
     retrieval_arm: "free",
     context_arm: "free",
-    hint: "L1 三套自由臂 · 每 task 20 · 冒烟档",
+    hint: "L1 三套自由臂 · 每 task 20 · 编码必跑 harness · 冒烟档",
   },
   {
     id: "l1_full",
@@ -180,7 +180,7 @@ const L1_RUN_PROFILES: Preset[] = [
     targets: ["retrieval"],
     eval_path: "agent",
     coding_tier: "n5",
-    coding_harness: false,
+    coding_harness: true,
     coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
@@ -196,7 +196,7 @@ const L1_RUN_PROFILES: Preset[] = [
     targets: ["retrieval_zh"],
     eval_path: "agent",
     coding_tier: "n5",
-    coding_harness: false,
+    coding_harness: true,
     coding_checkout_repo: true,
     retrieval_prod: true,
     context_tier: "20",
@@ -231,7 +231,7 @@ function inferProfileIdFromSaved(saved: {
     );
     if (want.size !== suites.size || [...want].some((s) => !suites.has(s))) continue;
     if ((p.coding_tier || "n5") !== (saved.coding_tier || "n5")) continue;
-    if ((p.coding_harness === true) !== (saved.coding_harness === true)) continue;
+    // coding_harness is always on for coding; do not use it for profile identity.
     if ((p.coding_checkout_repo !== false) !== (saved.coding_checkout_repo !== false)) {
       continue;
     }
@@ -589,6 +589,7 @@ function isOpsKeyLogItem(item: OfficialLogItem): boolean {
   if (/^\[L1\]\s+turn done\b/i.test(s)) return true;
   if (/^\[L1\]\s+fail\b/i.test(s)) return true;
   if (/^\[L1\]\s+pull\b/i.test(s)) return true;
+  if (/^\[L1\]\s+mirror prewarm\b/i.test(s)) return true;
   if (/^\[L1\]\s+checkout\b/i.test(s)) return true;
   if (/\bplan\s+n=/i.test(s)) return true;
   if (/^\[L1\]\s+(retrieval|context|coding)\s+done\b/i.test(s)) return true;
@@ -1514,6 +1515,9 @@ type ArtifactCase = {
   ran_tests?: boolean | null;
   patch_preview?: string | null;
   patch_chars?: number | null;
+  patch_href?: string | null;
+  resolve_verdict?: string | null;
+  resolve_label?: string | null;
 };
 
 type SuiteArtifact = {
@@ -1532,8 +1536,10 @@ type SuiteArtifact = {
   suite_ndcg_median?: number | null;
   report_html_available?: boolean;
   predictions_available?: boolean;
+  csi_probes_available?: boolean;
   report_href?: string;
   predictions_href?: string;
+  csi_probes_href?: string;
   coding_scorecard?: Record<string, unknown>;
 };
 
@@ -1602,6 +1608,27 @@ async function downloadAuthorizedFile(
   a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
+}
+
+async function fetchAuthorizedText(href: string, secret: string): Promise<string> {
+  const resp = await fetch(href, {
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => "");
+    throw new Error(text || `HTTP ${resp.status}`);
+  }
+  return resp.text();
+}
+
+function fmtResolveLabel(c: ArtifactCase): string {
+  if (typeof c.resolve_label === "string" && c.resolve_label) {
+    return c.resolve_label;
+  }
+  const v = c.resolved ?? c.l2?.resolved;
+  if (v === true) return "官方通过";
+  if (v === false) return "官方未过";
+  return "—";
 }
 
 function metricPreview(m: Record<string, number> | undefined): string {
@@ -1798,6 +1825,29 @@ function ArtifactsPanel({
         ) : suite.predictions_available ? (
           <span>predictions 就绪</span>
         ) : null}
+        {suite.csi_probes_href ? (
+          <button
+            type="button"
+            className="underline decoration-dotted underline-offset-2"
+            onClick={() => {
+              setArtifactActionError(null);
+              const name = `csi_probes-${(suite.bench_run_id || data?.run_id || "run").slice(0, 8)}.json`;
+              void downloadAuthorizedFile(
+                suite.csi_probes_href!,
+                secret,
+                name,
+              ).catch((e) =>
+                setArtifactActionError(
+                  e instanceof Error ? e.message : String(e),
+                ),
+              );
+            }}
+          >
+            下载 csi_probes.json
+          </button>
+        ) : suite.csi_probes_available ? (
+          <span>csi_probes 就绪</span>
+        ) : null}
       </div>
       {artifactActionError ? (
         <p className="text-[11px] text-destructive">
@@ -1808,7 +1858,7 @@ function ArtifactsPanel({
       {coding ? (
         <div className="rounded-md border border-border/80 bg-muted/30 px-3 py-2 text-xs">
           <div className="mb-1 text-[11px] text-muted-foreground">
-            编码效果（pass≠resolved；resolve 需开启 harness）
+            编码效果（L1 pass=有 patch；官方 resolve 看下表「官方」列，需 harness）
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono tabular-nums">
             <span>
@@ -1834,6 +1884,36 @@ function ArtifactsPanel({
                   : ""}
               </span>
             ) : null}
+            {typeof score.locate_fuse_ok_rate === "number" ? (
+              <span>
+                locate_fuse=
+                {Number(score.locate_fuse_ok_rate).toFixed(3)}
+                {score.locate_fuse_n != null
+                  ? ` (n=${String(score.locate_fuse_n)})`
+                  : ""}
+              </span>
+            ) : null}
+            {typeof score.edit_impact_coverage === "number" ? (
+              <span>
+                impact_cov={Number(score.edit_impact_coverage).toFixed(3)}
+              </span>
+            ) : null}
+            {typeof score.edit_checks_coverage === "number" ? (
+              <span>
+                checks_cov={Number(score.edit_checks_coverage).toFixed(3)}
+              </span>
+            ) : null}
+            {score.syntax_reject_count != null ? (
+              <span>syntax_rej={String(score.syntax_reject_count)}</span>
+            ) : null}
+            {score.span_fail_n != null ? (
+              <span>
+                span_fail={String(score.span_fail_n)}
+                {typeof score.span_fail_with_candidates_rate === "number"
+                  ? ` (cand=${Number(score.span_fail_with_candidates_rate).toFixed(2)})`
+                  : ""}
+              </span>
+            ) : null}
             {score.coding_tier != null ? (
               <span>tier={String(score.coding_tier)}</span>
             ) : null}
@@ -1841,6 +1921,22 @@ function ArtifactsPanel({
               <span>harness={fmtBool(score.harness)}</span>
             ) : null}
           </div>
+          {typeof score.resolve_note === "string" && score.resolve_note ? (
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {opsDisplayText(score.resolve_note)}
+            </div>
+          ) : null}
+          {Array.isArray(score.resolved_ids) && score.resolved_ids.length ? (
+            <div className="mt-1 text-[10px] font-mono text-muted-foreground">
+              通过: {(score.resolved_ids as unknown[]).map(String).join(", ")}
+            </div>
+          ) : null}
+          {Array.isArray(score.unresolved_ids) &&
+          score.unresolved_ids.length ? (
+            <div className="mt-0.5 text-[10px] font-mono text-muted-foreground">
+              未过: {(score.unresolved_ids as unknown[]).map(String).join(", ")}
+            </div>
+          ) : null}
           {typeof score.note === "string" && score.note ? (
             <div className="mt-1 text-[11px] text-muted-foreground">
               {opsDisplayText(score.note)}
@@ -1917,7 +2013,7 @@ function ArtifactsPanel({
                 <>
                   <th className="py-2 pr-2">source</th>
                   <th className="py-2 pr-2">apply</th>
-                  <th className="py-2 pr-2">resolved</th>
+                  <th className="py-2 pr-2">官方</th>
                   <th className="py-2 pr-2">patch</th>
                 </>
               ) : (
@@ -1940,6 +2036,11 @@ function ArtifactsPanel({
                     "n_reads",
                     "steps",
                     "terminal_state",
+                    "n_grep_locate_ok",
+                    "n_edit_with_impact",
+                    "n_edit_with_checks",
+                    "n_syntax_rejected",
+                    "n_span_fail",
                   ]
                 : [
                     "n_search",
@@ -1992,27 +2093,86 @@ function ArtifactsPanel({
                           c.patch_applies ?? l2.patch_applies ?? null,
                         )}
                       </td>
-                      <td className="py-1.5 pr-2 font-mono text-[10px]">
-                        {fmtBool(c.resolved ?? l2.resolved ?? null)}
+                      <td
+                        className="py-1.5 pr-2 font-mono text-[10px]"
+                        title={
+                          c.resolve_verdict
+                            ? `verdict=${c.resolve_verdict}`
+                            : undefined
+                        }
+                      >
+                        {fmtResolveLabel(c)}
                       </td>
                       <td className="py-1.5 pr-2 text-[10px]">
-                        {preview ? (
-                          <button
-                            type="button"
-                            className="underline decoration-dotted underline-offset-2"
-                            onClick={() =>
-                              setPatchViewer({
-                                title: `${c.case_id || "patch"} (${c.patch_chars ?? preview.length} chars)`,
-                                content: preview,
-                              })
-                            }
-                          >
-                            预览
-                            {c.patch_chars != null &&
-                            c.patch_chars > preview.length
-                              ? "…"
-                              : ""}
-                          </button>
+                        {preview || c.patch_href ? (
+                          <span className="inline-flex flex-wrap gap-x-2 gap-y-0.5">
+                            <button
+                              type="button"
+                              className="underline decoration-dotted underline-offset-2"
+                              onClick={() => {
+                                setArtifactActionError(null);
+                                const titleBase = c.case_id || "patch";
+                                if (c.patch_href) {
+                                  void fetchAuthorizedText(
+                                    c.patch_href,
+                                    secret,
+                                  )
+                                    .then((full) => {
+                                      setPatchViewer({
+                                        title: `${titleBase} (${full.length} chars · full)`,
+                                        content: full,
+                                      });
+                                    })
+                                    .catch((e) => {
+                                      if (preview) {
+                                        setPatchViewer({
+                                          title: `${titleBase} (${c.patch_chars ?? preview.length} chars · preview)`,
+                                          content: preview,
+                                        });
+                                      }
+                                      setArtifactActionError(
+                                        e instanceof Error
+                                          ? e.message
+                                          : String(e),
+                                      );
+                                    });
+                                  return;
+                                }
+                                setPatchViewer({
+                                  title: `${titleBase} (${c.patch_chars ?? preview.length} chars · preview)`,
+                                  content: preview,
+                                });
+                              }}
+                            >
+                              {c.patch_href ? "全文" : "预览"}
+                              {c.patch_chars != null
+                                ? ` (${c.patch_chars})`
+                                : ""}
+                            </button>
+                            {c.patch_href ? (
+                              <button
+                                type="button"
+                                className="underline decoration-dotted underline-offset-2 text-muted-foreground"
+                                onClick={() => {
+                                  setArtifactActionError(null);
+                                  const name = `${(c.case_id || "patch").replace(/[^\w.-]+/g, "_")}.diff`;
+                                  void downloadAuthorizedFile(
+                                    c.patch_href!,
+                                    secret,
+                                    name,
+                                  ).catch((e) =>
+                                    setArtifactActionError(
+                                      e instanceof Error
+                                        ? e.message
+                                        : String(e),
+                                    ),
+                                  );
+                                }}
+                              >
+                                下载
+                              </button>
+                            ) : null}
+                          </span>
                         ) : (
                           <span className="text-muted-foreground">—</span>
                         )}
@@ -2124,7 +2284,7 @@ export function OfficialBenchPage() {
   );
   const [codingTier, setCodingTier] = useState("n5");
   const [codingNInstances, setCodingNInstances] = useState(5);
-  const [codingHarness, setCodingHarness] = useState(false);
+  const [codingHarness] = useState(true);
   const [codingCheckoutRepo, setCodingCheckoutRepo] = useState(true);
   const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
     { id: "n3", n_instances: 3 },
@@ -2274,9 +2434,10 @@ export function OfficialBenchPage() {
         }
         if (saved.coding_tier) setCodingTier(saved.coding_tier);
         if (saved.coding_n != null) setCodingNInstances(saved.coding_n);
-        if (typeof saved.coding_harness === "boolean") setCodingHarness(saved.coding_harness);
+        // coding_harness is always on — ignore saved false from older prefs.
         if (typeof saved.coding_checkout_repo === "boolean") {
-          setCodingCheckoutRepo(saved.coding_checkout_repo);
+          // Checkout is mandatory for coding structural / git_diff — ignore saved false.
+          setCodingCheckoutRepo(true);
         }
         if (typeof saved.retrieval_prod === "boolean") setRetrievalProd(saved.retrieval_prod);
         if (saved.context_tier === "10" || saved.context_tier === "20" || saved.context_tier === "full") {
@@ -2360,7 +2521,7 @@ export function OfficialBenchPage() {
           coding_tier: codingTier,
           coding_n: codingNInstances,
           coding_harness: codingHarness,
-          coding_checkout_repo: codingCheckoutRepo,
+          coding_checkout_repo: true,
           retrieval_prod: retrievalProd,
           eval_path: "agent",
           context_tier: contextTier,
@@ -2678,7 +2839,6 @@ export function OfficialBenchPage() {
       const d = body.defaults;
       if (d?.coding_tier) setCodingTier(d.coding_tier);
       if (d?.coding_n_instances != null) setCodingNInstances(d.coding_n_instances);
-      if (d?.coding_harness !== undefined) setCodingHarness(d.coding_harness);
       if (d?.retrieval_prod !== undefined) setRetrievalProd(d.retrieval_prod);
       if (d?.context_tier) setContextTier(d.context_tier);
       if (d?.retrieval_tier) setRetrievalTier(d.retrieval_tier);
@@ -3113,8 +3273,7 @@ export function OfficialBenchPage() {
     setSelectedSuites(suitesFromTargets(p.targets || []));
     setCodingTier(p.coding_tier || "n5");
     if (p.coding_n_instances != null) setCodingNInstances(p.coding_n_instances);
-    setCodingHarness(Boolean(p.coding_harness));
-    setCodingCheckoutRepo(p.coding_checkout_repo !== false);
+    setCodingCheckoutRepo(true);
     setRetrievalProd(p.retrieval_prod !== false);
     if (p.context_tier) setContextTier(p.context_tier);
     if (p.retrieval_tier) setRetrievalTier(p.retrieval_tier);
@@ -3174,7 +3333,8 @@ export function OfficialBenchPage() {
     if (busy && !opts?.force) return;
     const tier = opts?.coding_tier ?? codingTier;
     const nInst = opts?.coding_n_instances ?? (tier === "custom" ? codingNInstances : null);
-    const harness = opts?.coding_harness ?? codingHarness;
+    // Coding always runs official SWE harness (API also forces this).
+    const harness = suites.includes("coding");
     const prod = opts?.retrieval_prod ?? retrievalProd;
     if (suites.includes("coding") && tier === "custom" && (nInst == null || nInst < 3)) {
       setError("自定义编码档位需要 N ≥ 3（且 ≤ 300）");
@@ -3231,7 +3391,6 @@ export function OfficialBenchPage() {
       setSelectedSuites(new Set(suites));
       setCodingTier(tier);
       if (nInst != null) setCodingNInstances(nInst);
-      setCodingHarness(harness);
       setRetrievalProd(prod);
     }
     setBusy(true);
@@ -3253,7 +3412,7 @@ export function OfficialBenchPage() {
           coding_tier: tier,
           coding_n_instances: tier === "custom" ? nInst : null,
           coding_harness: harness,
-          coding_checkout_repo: codingCheckoutRepo,
+          coding_checkout_repo: true,
           retrieval_prod: prod,
           eval_path: "agent",
           retrieval_arm: "free",
@@ -3851,7 +4010,7 @@ export function OfficialBenchPage() {
                     : "—（未开编码）"}
                   {(paramsFromActiveRun
                     ? paramsFromActiveRun.codingHarness
-                    : selectedSuites.has("coding") && codingHarness)
+                    : selectedSuites.has("coding"))
                     ? " · harness"
                     : ""}
                 </dd>
@@ -4042,19 +4201,16 @@ export function OfficialBenchPage() {
                   ) : null}
                   <label
                     className="flex items-end gap-2 pb-1"
-                    title="需 Docker + swebench。官方 resolve 分仅此项。部署看板重建 api 前请先 make up-ops-eval（粘性）。"
+                    title="编码套件必跑官方 SWE harness resolve（需 Docker + swebench）。部署看板重建 api 前请先 make up-ops-eval（粘性）。"
                   >
                     <input
                       type="checkbox"
-                      checked={codingHarness}
-                      disabled={busy || caps.coding_harness === false}
-                      onChange={(e) => {
-                        markCustomProfile();
-                        setCodingHarness(e.target.checked);
-                      }}
+                      checked={true}
+                      disabled
+                      readOnly
                     />
                     <span className="text-[11px] leading-tight">
-                      harness resolve
+                      harness resolve（必开）
                       {caps.coding_harness === false ? (
                         <span className="ml-1 text-destructive">不可用</span>
                       ) : null}
@@ -4062,26 +4218,23 @@ export function OfficialBenchPage() {
                   </label>
                   {selectedSuites.has("coding") && caps.coding_harness === false ? (
                     <p className="basis-full text-[11px] text-destructive">
-                      harness 需要 api 挂 docker.sock。在仓库执行一次{" "}
+                      编码需要 api 挂 docker.sock + swebench。在仓库执行一次{" "}
                       <code className="font-mono">make up-ops-eval</code>
                       （会写粘性配置，之后部署看板重建 api 也会保留）。
                     </p>
                   ) : null}
                   <label
                     className="flex items-end gap-2 pb-1"
-                    title="A-3：按 base_commit 检出仓库；关闭则仅 problem.md（旧行为）"
+                    title="必须检出 base_commit 仓库：结构导航 / git_diff 评分依赖 worktree（不可关闭）"
                   >
                     <input
                       type="checkbox"
-                      checked={codingCheckoutRepo}
-                      disabled={busy}
-                      onChange={(e) => {
-                        markCustomProfile();
-                        setCodingCheckoutRepo(e.target.checked);
-                      }}
+                      checked={true}
+                      disabled
+                      readOnly
                     />
                     <span className="text-[11px] leading-tight">
-                      checkout repo
+                      checkout repo（必开）
                     </span>
                   </label>
                 </>

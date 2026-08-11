@@ -705,6 +705,10 @@ async def create_and_start(
     if path != "agent":
         raise ValueError("eval_path_must_be_agent")
 
+    wants_coding = any(t in {"coding", "coding_infer"} for t in cleaned)
+    # Ops coding acceptance always includes official harness resolve.
+    effective_harness = bool(wants_coding)
+
     run = OfficialLiveRun(
         id=str(uuid4()),
         targets=cleaned,
@@ -712,7 +716,7 @@ async def create_and_start(
         coding_skip_api=coding_skip_api,
         coding_tier=coding_tier,
         coding_n_instances=coding_n_instances,
-        coding_harness=coding_harness,
+        coding_harness=effective_harness,
         retrieval_prod=retrieval_prod,
         eval_path="agent",
         context_limit=max(0, int(context_limit or 0)),

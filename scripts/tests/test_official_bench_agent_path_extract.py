@@ -8,13 +8,17 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from official_bench.agent_path_extract import (  # noqa: E402
     called_tools,
+    csi_probes_from_events,
+    csi_suite_rates,
     doc_id_from_path,
     failure_class_from_events,
+    filter_unified_diff_noise,
     merge_retrieval_rankings,
     patch_apply_check,
     patch_from_events,
     patch_from_git_diff,
     patch_from_work_root,
+    patch_hunks_incomplete,
     ranking_scores,
     search_queries_from_events,
     terminal_state_from_events,
@@ -508,10 +512,155 @@ def test_patch_apply_check(tmp_path: Path) -> None:
     assert patch_apply_check(tmp_path, "") is False
 
 
+def test_patch_apply_check_on_dirty_tree_after_git_diff(tmp_path: Path) -> None:
+    """Regression: apply-check must use clean HEAD, not the already-dirty worktree."""
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("y\n", encoding="utf-8")
+    (tmp_path / "new.py").write_text("z\n", encoding="utf-8")  # untracked
+    diff = patch_from_git_diff(tmp_path)
+    assert "a.py" in diff
+    assert "new.py" in diff
+    assert patch_apply_check(tmp_path, diff) is True
+
+
+def test_patch_from_git_diff_survives_non_utf8_blob(tmp_path: Path) -> None:
+    """Regression: binary/non-UTF8 in worktree must not raise UnicodeDecodeError.
+
+    L1 coding suite previously failed entire runs with
+    ``utf-8 codec can't decode byte 0xe0 ... invalid continuation byte`` when
+    ``git diff`` stdout was decoded via ``text=True`` without errors=replace,
+    then retried unprotected in the extract except path.
+    """
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("y\n", encoding="utf-8")
+    # Invalid UTF-8 lead byte 0xe0 without continuation — same class as Ops fail.
+    (tmp_path / "blob.bin").write_bytes(b"\xe0" + b"\x00" * 1024)
+    diff = patch_from_git_diff(tmp_path)  # must not raise UnicodeDecodeError
+    assert "a.py" in diff
+    assert "@@" in diff
+
+
+def test_patch_hunks_incomplete() -> None:
+    complete = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+y\n"
+    assert patch_hunks_incomplete(complete) is False
+    truncated = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1,2 +1,2 @@\n-x\n+y\n"
+    # claims 2 old / 2 new lines but only one of each
+    assert patch_hunks_incomplete(truncated) is True
+    assert patch_apply_check(Path("/tmp"), truncated) is False
+
+
 def test_patch_from_work_root(tmp_path: Path) -> None:
     diff = "--- a/a\n+++ b/a\n@@\n+x\n"
     (tmp_path / "fix.patch").write_text(diff, encoding="utf-8")
     assert patch_from_work_root(tmp_path) == diff
+
+
+def test_patch_from_git_diff_excludes_local_site_packages(tmp_path: Path) -> None:
+    """Regression: pip --user / .local junk must not enter SWE model_patch."""
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("y\n", encoding="utf-8")
+    junk = (
+        tmp_path
+        / ".local"
+        / "lib"
+        / "python3.11"
+        / "site-packages"
+        / "erfa"
+    )
+    junk.mkdir(parents=True)
+    (junk / "__init__.py").write_text("POLLUTE\n", encoding="utf-8")
+    diff = patch_from_git_diff(tmp_path)
+    assert "a.py" in diff
+    assert ".local" not in diff
+    assert "site-packages" not in diff
+    assert "POLLUTE" not in diff
+
+
+def test_filter_unified_diff_noise_drops_site_packages() -> None:
+    raw = (
+        "diff --git a/src/ok.py b/src/ok.py\n"
+        "--- a/src/ok.py\n"
+        "+++ b/src/ok.py\n"
+        "@@ -1 +1 @@\n"
+        "-a\n"
+        "+b\n"
+        "diff --git a/.local/lib/python3.11/site-packages/x.py "
+        "b/.local/lib/python3.11/site-packages/x.py\n"
+        "--- a/.local/lib/python3.11/site-packages/x.py\n"
+        "+++ b/.local/lib/python3.11/site-packages/x.py\n"
+        "@@ -0,0 +1 @@\n"
+        "+junk\n"
+    )
+    cleaned = filter_unified_diff_noise(raw)
+    assert "src/ok.py" in cleaned
+    assert ".local" not in cleaned
+    assert "junk" not in cleaned
 
 
 def test_patch_from_git_diff(tmp_path: Path) -> None:
@@ -677,6 +826,13 @@ def test_query_drift_and_buckets() -> None:
         == "infra_channel"
     )
     assert classify_bucket("coding", {"patch_source": "none"}) == "no_patch"
+    assert (
+        classify_bucket(
+            "coding",
+            {"checkout_failed": True, "patch_source": "none"},
+        )
+        == "checkout_failed"
+    )
     assert (
         classify_bucket(
             "coding",
@@ -848,3 +1004,132 @@ def test_prompt_helpers_no_tool_script_on_free() -> None:
     capped = limit_rows_per_task(rows, 1)
     assert len(capped) == 2
     assert {r["task"] for r in capped} == {"a", "b"}
+
+
+def test_csi_probes_from_events_locate_and_edit() -> None:
+    events = [
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "grep",
+                "redirected_from": "grep",
+                "locate_status": "ok",
+                "definition_count": 2,
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "edit_file",
+                "status": "ok",
+                "applies": True,
+                "bytes_written": 10,
+                "impact": {"status": "ok", "symbol": "foo", "reference_count": 1},
+                "checks": {"status": "ok", "syntax": "ok", "new_issue_count": 0},
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "edit_file",
+                "status": "error",
+                "applies": False,
+                "summary": "old_text not found",
+                "candidate_count": 3,
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "edit_file",
+                "status": "error",
+                "applies": False,
+                "checks": {"status": "rejected", "syntax": "error"},
+            },
+        },
+    ]
+    probes = csi_probes_from_events(events)
+    assert probes["n_grep_locate"] == 1
+    assert probes["n_grep_locate_ok"] == 1
+    assert probes["n_edit_ok"] == 1
+    assert probes["n_edit_with_impact"] == 1
+    assert probes["n_edit_with_checks"] == 1
+    assert probes["n_span_fail"] == 1
+    assert probes["n_span_fail_with_candidates"] == 1
+    assert probes["n_syntax_rejected"] == 1
+
+
+def test_csi_suite_rates_denominators() -> None:
+    rates = csi_suite_rates(
+        [
+            {
+                "bucket": "ok",
+                "n_grep_locate": 2,
+                "n_grep_locate_ok": 1,
+                "n_edit_ok": 2,
+                "n_edit_with_impact": 2,
+                "n_edit_with_checks": 1,
+                "n_span_fail": 2,
+                "n_span_fail_with_candidates": 1,
+                "n_syntax_rejected": 0,
+                "n_syntax_warning": 1,
+            },
+            {"bucket": "no_patch", "n_grep_locate": 0, "n_edit_ok": 0},
+        ]
+    )
+    assert rates["locate_fuse_ok_rate"] == 0.5
+    assert rates["edit_impact_coverage"] == 1.0
+    assert rates["edit_checks_coverage"] == 0.5
+    assert rates["span_fail_with_candidates_rate"] == 0.5
+    assert rates["bucket_share_no_patch"] == 0.5
+    assert rates["syntax_warning_passthrough_count"] == 1.0
+
+
+def test_patch_from_git_diff_app_owned_tree_as_root(tmp_path: Path) -> None:
+    """Regression: after materialize chown(1000), api(root) git must still extract."""
+    import os
+    import subprocess
+
+    if os.geteuid() != 0:
+        import pytest
+
+        pytest.skip("needs root to chown like Ops api container")
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("y\n", encoding="utf-8")
+    for dirpath, dirnames, filenames in os.walk(tmp_path):
+        os.chown(dirpath, 1000, 1000)
+        for name in dirnames + filenames:
+            os.chown(os.path.join(dirpath, name), 1000, 1000)
+    # Baseline without safe.directory fails (dubious ownership).
+    bad = subprocess.run(
+        ["git", "diff", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert bad.returncode != 0 or not (bad.stdout or "").strip()
+    diff = patch_from_git_diff(tmp_path)
+    assert "a.py" in diff
+    assert "+y" in diff
+    assert patch_apply_check(tmp_path, diff) is True

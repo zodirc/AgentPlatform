@@ -66,7 +66,23 @@ L2_CONTEXT_KEYS = (
     "failure_class",
     "failure_message",
 )
-L2_CODING_KEYS = ("patch_source", "patch_applies", "ran_tests", "n_reads", "read_bytes")
+L2_CODING_KEYS = (
+    "patch_source",
+    "patch_applies",
+    "ran_tests",
+    "n_reads",
+    "read_bytes",
+    # CSI Wave 1+2 (§7.6) — optional on older runs
+    "n_grep_locate",
+    "n_grep_locate_ok",
+    "n_grep_locate_failed",
+    "n_edit_ok",
+    "n_edit_with_impact",
+    "n_edit_with_checks",
+    "n_syntax_rejected",
+    "n_span_fail",
+    "n_span_fail_with_candidates",
+)
 
 # CTX-9: coverage at/above this → wrong_answer_after_read (not abandoned).
 # Same numeric threshold as former gave_up_early; bucket names change (protocol note).
@@ -261,6 +277,8 @@ def classify_bucket(
         return "ok"
 
     if s == "coding":
+        if probe.get("checkout_failed") or str(probe.get("bucket") or "") == "checkout_failed":
+            return "checkout_failed"
         src = str(probe.get("patch_source") or "none")
         if src in {"", "none"}:
             return "no_patch"
