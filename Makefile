@@ -77,7 +77,8 @@ RELEASE_CONSOLE ?= 1
 	micro-l1-prepare \
 	preflight preflight-ci preflight-unit hooks-install ensure-git-hooks backup \
 	official-bench-paths official-bench-deps official-bench-pull official-bench-pull-cmteb official-bench-retrieval \
-	official-bench-context official-bench-coding-pull official-bench-coding-infer \
+	official-bench-context official-bench-coding-pull official-bench-coding-pull-images \
+	official-bench-coding-infer \
 	official-bench-coding-eval official-bench-all official-bench-publish \
 	official-bench-update-baseline official-bench-show-baseline \
 	official-bench-compare official-bench-live \
@@ -787,6 +788,13 @@ official-bench-context-agent: ## L1 LongBench：落盘 + Turn 终答（Ops API�
 official-bench-coding-pull: ## 拉取 SWE-bench Lite 题集
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase pull
 
+official-bench-coding-pull-images: ## 预拉 sweb.eval 镜像（默认 suites.coding.harness.board_tier=n5）
+	@$(MAKE) -s official-bench-deps
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase pull-images \
+	  $(if $(OFFICIAL_SWE_IMAGE_TIER),--tier $(OFFICIAL_SWE_IMAGE_TIER),) \
+	  $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),) \
+	  $(if $(filter 1,$(FORCE)),--force-pull,)
+
 official-bench-coding-infer: ## SWE tier 推理写 predictions（OFFICIAL_SWE_SKIP_API=1 空补丁）
 	@if [ "$(OFFICIAL_SWE_SKIP_API)" = "1" ]; then \
 	  $(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase infer --tier $(OFFICIAL_SWE_TIER) $(if $(OFFICIAL_SWE_N),--n-instances $(OFFICIAL_SWE_N),) $(if $(filter 1,$(OFFICIAL_SWE_HARNESS)),--harness,) --skip-api; \
@@ -802,8 +810,8 @@ official-bench-coding-infer-agent: ## L1 SWE infer：platform Turn（Ops API）
 official-bench-coding-eval: ## 官方 swebench.harness 评分（需 Docker + pip install swebench）
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py coding --phase eval
 
-swebench-structural-dual-track: ## CSI §8：打印/执行 structural on/off 双轨配方（默认 dry-run）
-	python3 eval/swebench/run_dual_track.py --track both --n $(or $(OFFICIAL_SWE_N),50) $(if $(EXECUTE),--execute,)
+swebench-structural-dual-track: ## CSI：打印/执行 agent coding L1 配方（结构已融合；默认 dry-run）
+	python3 eval/swebench/run_dual_track.py --n $(or $(OFFICIAL_SWE_N),50) $(if $(EXECUTE),--execute,)
 
 swebench-structural-metrics: ## CSI §8.3：过程指标（需 PRED= GOLD=）
 	@test -n "$(PRED)" || (echo "PRED=predictions.jsonl required"; exit 1); \

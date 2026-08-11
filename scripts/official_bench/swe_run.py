@@ -14,6 +14,13 @@ from .paths import ensure_dirs, reports_dir, suite_data
 from .publish import publish_manifest
 from .pull import pull_swebench
 from .run_session import RunSession
+from .swe_images import (
+    CODING_TIERS as _IMAGE_TIERS,
+    harness_cfg,
+    local_image_status,
+    missing_images,
+    pull_tier_images,
+)
 
 CODING_TIERS = {
     "n3": 3,
@@ -23,6 +30,7 @@ CODING_TIERS = {
     "full300": 300,
     "custom": None,
 }
+assert set(CODING_TIERS) == set(_IMAGE_TIERS)
 DEFAULT_CODING_TIER = "n25"
 _SLICE_DIR = Path(__file__).resolve().parents[2] / "eval" / "official" / "swe_lite_slices"
 
@@ -467,8 +475,8 @@ def _harness_report_from_disk(root: Path, harness_run_id: str) -> dict[str, Any]
     out: dict[str, Any] = {}
     for path in root.rglob(f"*{harness_run_id}*.json"):
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
+            payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
             continue
         if not isinstance(payload, dict):
             continue
@@ -536,7 +544,7 @@ def _resolve_rate_from_harness(root: Path, harness_run_id: str) -> float | None:
     return float(rate) if isinstance(rate, (int, float)) else None
 
 
-def _harness_preflight() -> None:
+def _harness_preflight(*, instance_ids: list[str] | None = None) -> dict[str, Any]:
     """Fail fast with actionable errors before spawning the official harness."""
     try:
         import swebench  # noqa: F401
@@ -571,6 +579,68 @@ def _harness_preflight() -> None:
             "docker daemon unreachable from api "
             f"(exit={probe.returncode}): {err or 'no output'}"
         )
+    h = harness_cfg()
+    if h["require_local_images"] and instance_ids:
+        from .swe_images import instance_image_ref
+
+        refs = [
+            instance_image_ref(iid, namespace=h["namespace"], tag=h["image_tag"])
+            for iid in instance_ids
+        ]
+        miss = missing_images(refs)
+        if miss:
+            sample = ", ".join(miss[:3])
+            more = f" (+{len(miss) - 3} more)" if len(miss) > 3 else ""
+            raise RuntimeError(
+                "SWE eval images missing locally "
+                f"({len(miss)}/{len(refs)}). Pre-pull via 部署看板「SWE eval 镜像」or "
+                "`make official-bench-coding-pull-images` "
+                f"(missing e.g. {sample}{more}). "
+                "Set SWE_HARNESS_REQUIRE_LOCAL_IMAGES=0 to allow on-demand docker pull."
+            )
+    return h
+
+
+def run_swe_pull_images(
+    *,
+    tier: str | None = None,
+    n_instances: int | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Pre-pull sweb.eval images for a coding tier (host Docker cache)."""
+    h = harness_cfg()
+    use_tier = (tier or h["board_tier"]).strip() or "n5"
+    _phase(f"PULL-IMAGES — tier={use_tier} cache_level={h['cache_level']}")
+    out = pull_tier_images(use_tier, n_instances=n_instances, force=force)
+    status = local_image_status(use_tier, n_instances=n_instances)
+    _phase(
+        f"PULL-IMAGES — done · ready={status['ready']} "
+        f"{len(status['present'])}/{status['n']} · ~{status['approx_mib_total']} MiB compressed"
+    )
+    return {**out, "status": status}
+
+
+def _prediction_instance_ids(pred_path: Path) -> list[str]:
+    """Read instance_id values from a SWE-bench predictions JSONL."""
+    ids: list[str] = []
+    seen: set[str] = set()
+    try:
+        with pred_path.open(encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                iid = str((row or {}).get("instance_id") or "").strip()
+                if iid and iid not in seen:
+                    seen.add(iid)
+                    ids.append(iid)
+    except OSError:
+        return []
+    return ids
 
 
 def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
@@ -589,9 +659,9 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
     if not pred_path.exists():
         raise RuntimeError(f"missing predictions: {pred_path} (run coding-infer first)")
 
-    _harness_preflight()
-
     harness_run_id = f"agentplatform-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+    instance_ids = _prediction_instance_ids(pred_path)
+    h = _harness_preflight(instance_ids=instance_ids)
     cmd = [
         sys.executable,
         "-m",
@@ -601,55 +671,134 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
         "--predictions_path",
         str(pred_path),
         "--max_workers",
-        os.environ.get("SWE_MAX_WORKERS", "2"),
+        h["max_workers"],
         "--run_id",
         harness_run_id,
+        "--cache_level",
+        h["cache_level"],
+        "--clean",
+        "true" if h["clean"] else "false",
+        "--namespace",
+        h["namespace"],
+        "--instance_image_tag",
+        h["image_tag"],
     ]
-    _phase("1/3 PULL — predictions already on disk (harness may pull Docker images)")
-    _phase("2/3 EVAL — official swebench.harness.run_evaluation")
+    # Subset predictions must scope the harness — otherwise Lite's 300-row
+    # dataset leaves hundreds "incomplete" and some harness versions exit ≠0
+    # even when the submitted subset was fully graded (N0 / P6).
+    if instance_ids:
+        cmd.extend(["--instance_ids", *instance_ids])
+    _phase(
+        "1/3 PULL — predictions on disk; "
+        f"cache_level={h['cache_level']} require_local={h['require_local_images']}"
+    )
+    _phase(
+        "2/3 EVAL — official swebench.harness.run_evaluation"
+        + (f" · n={len(instance_ids)}" if instance_ids else "")
+    )
     session.log("evaluate", " ".join(cmd))
-    session.log("evaluate", "requires Docker + pip install swebench; large image download possible")
-    proc = subprocess.run(cmd, cwd=str(root), check=False)
+    session.log(
+        "evaluate",
+        "requires Docker + swebench; prefer pre-pulled sweb.eval "
+        "(部署看板 / make official-bench-coding-pull-images)",
+    )
+    log_path = Path(session.dir) / "harness.stdout.log"
+    with log_path.open("w", encoding="utf-8") as logf:
+        logf.write(" ".join(cmd) + "\n\n")
+        logf.flush()
+        proc = subprocess.run(
+            cmd,
+            cwd=str(root),
+            check=False,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+        )
     _phase(f"2/3 EVAL — harness exit={proc.returncode}")
     _phase("3/3 REGRESS — compare resolve rate vs prior harness runs in Ops")
-    metrics: dict[str, Any] = {"exit_code": proc.returncode, "harness_run_id": harness_run_id}
+    log_tail = ""
+    try:
+        raw_log = log_path.read_text(encoding="utf-8", errors="replace")
+        log_tail = raw_log[-4000:] if raw_log else ""
+    except OSError:
+        log_tail = ""
+    metrics: dict[str, Any] = {
+        "exit_code": proc.returncode,
+        "harness_run_id": harness_run_id,
+        "harness_log": str(log_path),
+    }
+    if instance_ids:
+        metrics["n_instance_ids"] = float(len(instance_ids))
     report = _harness_report_from_disk(root, harness_run_id)
     resolve_rate = report.get("resolve_rate")
     if isinstance(resolve_rate, (int, float)):
         metrics["resolve_rate"] = float(resolve_rate)
     else:
-        metrics["note"] = "resolve rate unavailable; Docker-backed harness results are required"
+        # Prefer submitted denominator when the JSON only has id lists.
+        resolved_ids_tmp = report.get("resolved_ids") if isinstance(report.get("resolved_ids"), list) else []
+        submitted = (
+            report.get("submitted_ids")
+            if isinstance(report.get("submitted_ids"), list)
+            else instance_ids
+        )
+        if submitted:
+            metrics["resolve_rate"] = float(len(resolved_ids_tmp)) / float(len(submitted))
+        else:
+            metrics["note"] = "resolve rate unavailable; Docker-backed harness results are required"
     resolved_ids = report.get("resolved_ids") if isinstance(report.get("resolved_ids"), list) else []
     if resolved_ids:
         metrics["n_resolved"] = float(len(resolved_ids))
+    has_official_judgment = (
+        isinstance(metrics.get("resolve_rate"), (int, float))
+        or isinstance(report.get("resolved_ids"), list)
+        or bool(report.get("report_path"))
+    )
+    harness_err = None
+    if proc.returncode != 0:
+        snippet = " ".join(log_tail.strip().split())
+        if len(snippet) > 500:
+            snippet = snippet[-500:]
+        harness_err = f"harness exit {proc.returncode}" + (f": {snippet}" if snippet else "")
+        metrics["harness_log_tail"] = log_tail[-1500:] if log_tail else ""
+        # N0: if the official report exists, keep resolve_rate / id lists even when
+        # the process exited non-zero (per-instance apply errors, etc.).
+        if has_official_judgment:
+            metrics["note"] = (
+                f"harness exited {proc.returncode} but official report was archived"
+            )
+            harness_err = None
     session.add_case(
         "swebench.lite.evaluate",
-        status="pass" if proc.returncode == 0 else "fail",
+        status="pass" if harness_err is None else "fail",
         metrics=metrics,
-        error=None if proc.returncode == 0 else f"exit {proc.returncode}",
+        error=harness_err,
     )
     result = {
         "phase": "evaluate",
         "predictions": str(pred_path),
         "harness_run_id": harness_run_id,
         "exit_code": proc.returncode,
+        "instance_ids": instance_ids,
         "resolved_ids": resolved_ids,
         "unresolved_ids": report.get("unresolved_ids") or [],
         "error_ids": report.get("error_ids") or [],
         "empty_patch_ids": report.get("empty_patch_ids") or [],
         "harness_report_path": report.get("report_path"),
+        "harness_log": str(log_path),
     }
+    result_status = "completed" if harness_err is None else "failed"
     manifest = session.finish(
-        status="completed" if proc.returncode == 0 else "failed",
-        error=None if proc.returncode == 0 else f"harness exit {proc.returncode}",
+        status=result_status,
+        error=harness_err,
         metrics=metrics,
         result=result,
     )
     manifest["publish"] = publish_manifest(manifest)
     print(f"[coding] HTML → {session.dir / 'report.html'}")
+    if log_tail and proc.returncode != 0:
+        print(f"[coding] harness log → {log_path}", flush=True)
     (reports_dir() / "swebench_lite_eval.json").write_text(
         json.dumps(result, indent=2), encoding="utf-8"
     )
-    if proc.returncode != 0:
-        raise RuntimeError(f"harness exit {proc.returncode}")
+    if harness_err is not None:
+        raise RuntimeError(harness_err)
     return manifest

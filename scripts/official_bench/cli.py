@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .beir_run import run_beir_small
@@ -9,7 +10,14 @@ from .context_run import run_context_small
 from .paths import data_dir, ensure_dirs, reports_dir
 from .publish import publish_run_dir
 from .pull import pull_all, pull_beir, pull_cmteb, pull_longbench, pull_swebench
-from .swe_run import CODING_TIERS, DEFAULT_CODING_TIER, run_swe_eval, run_swe_infer, run_swe_pull_only
+from .swe_run import (
+    CODING_TIERS,
+    DEFAULT_CODING_TIER,
+    run_swe_eval,
+    run_swe_infer,
+    run_swe_pull_images,
+    run_swe_pull_only,
+)
 
 
 def _exit_from_manifest(manifest: object) -> int:
@@ -92,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     p_code = sub.add_parser("coding", help="SWE-bench Lite phases")
     p_code.add_argument(
         "--phase",
-        choices=["pull", "infer", "eval", "all"],
+        choices=["pull", "pull-images", "infer", "eval", "all"],
         default="pull",
     )
     p_code.add_argument("--force-pull", action="store_true")
@@ -366,6 +374,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "coding":
         if args.phase == "pull":
             run_swe_pull_only(force_pull=args.force_pull)
+            return 0
+        if args.phase == "pull-images":
+            # argparse default --tier is n25 (infer); board readiness uses harness.board_tier.
+            argv_list = argv if argv is not None else sys.argv[1:]
+            tier_explicit = any(
+                a == "--tier" or a.startswith("--tier=") for a in argv_list
+            )
+            run_swe_pull_images(
+                tier=args.tier if tier_explicit else None,
+                n_instances=args.n_instances,
+                force=args.force_pull,
+            )
             return 0
         if getattr(args, "eval_path", "component") == "agent" and args.phase in {
             "infer",

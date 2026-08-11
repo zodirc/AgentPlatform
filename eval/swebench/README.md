@@ -1,6 +1,10 @@
-# SWE-bench Lite · structural dual-track (Ops L1)
+# SWE-bench Lite · structural lane (Ops L1)
 
-See [docs/plan/coding-structural-intelligence.md](../../docs/plan/coding-structural-intelligence.md) §8–§9.
+See [docs/plan/coding-structural-intelligence.md](../../docs/plan/coding-structural-intelligence.md).
+
+Structural navigation / diagnostics are **fused into the agent Profile** (not a
+`STRUCTURAL_ENABLED` feature flag). Measure agent coding with checkout on; process
+metrics live under `eval.swebench.metrics`.
 
 ## Frozen slices
 
@@ -10,31 +14,18 @@ See [docs/plan/coding-structural-intelligence.md](../../docs/plan/coding-structu
 | `../official/swe_lite_slices/swe_lite_slice_50.txt` | 50 | Same IDs |
 | `../official/swe_lite_slices/instance_order.txt` | 300 | Full Lite test order |
 
-## Ops dual-track (required wiring)
-
-`STRUCTURAL_ENABLED` / `OPS_EVAL_DENY_NETWORK` are **runtime container** settings
-(`deploy/docker-compose.yml`). Host `export` alone does **not** flip the flag for Turns.
+## Ops L1 wiring
 
 ```bash
-# Track OFF (baseline)
-STRUCTURAL_ENABLED=false OPS_EVAL_DENY_NETWORK=true \
+# Deny egress for ops_eval Turns (answer-leak ban). Recreate runtime so env applies.
+OPS_EVAL_DENY_NETWORK=true \
   docker compose -f deploy/docker-compose.yml up -d --force-recreate runtime
-# Confirm: curl runtime /health/ready → structural.enabled=false, ops_eval_deny_network=true
+# Confirm: curl runtime /health/ready → structural.fused=true, ops_eval_deny_network=true
 make official-bench-coding-infer-agent OFFICIAL_SWE_N=50
-
-# Track ON
-STRUCTURAL_ENABLED=true STRUCTURAL_PREWARM=true OPS_EVAL_DENY_NETWORK=true \
-  docker compose -f deploy/docker-compose.yml up -d --force-recreate runtime
-make official-bench-coding-infer-agent OFFICIAL_SWE_N=50
-
-# Score both prediction files with official harness
 make official-bench-coding-eval
 ```
 
-Or: `make swebench-structural-dual-track` (dry-run) / `EXECUTE=1 make swebench-structural-dual-track`.
-
-Network **must** be denied for ops_eval Turns (`OPS_EVAL_DENY_NETWORK=true` → bwrap `--unshare-net`).
-Daily agent Profile / `system.md` stays egress-allowed.
+Daily agent Profile / `system.md` stays egress-allowed; only ops_eval Turns deny net.
 
 ## Process metrics
 
@@ -47,4 +38,4 @@ python3 -m eval.swebench.metrics \
 
 Gold is used **only** for post-hoc localization hit rate — never for prompt tuning.
 
-Health check fields for Ops: `GET /health/ready` → `structural.{enabled,prewarm,ops_eval_deny_network}`.
+Health check: `GET /health/ready` → `structural.{fused,prewarm,ops_eval_deny_network}`.
