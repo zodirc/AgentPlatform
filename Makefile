@@ -65,7 +65,7 @@ RELEASE_CONSOLE ?= 1
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
-	up-web up-api up-runtime up-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-bench start-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
@@ -94,7 +94,8 @@ help: ## 显示常用命令
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
 	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
 	@echo "  make deps-anchor  仅打 api/runtime/web/bench:deps（防 BuildKit GC 掉 pip/pnpm 层）"
-	@echo "  make up-bench     只重建 Ops Bench worker（真向量评测，与 agent 解耦）"
+	@echo "  make start-bench  仅启动 Ops Bench（不 rebuild；容器被杀后优先用这个）"
+	@echo "  make up-bench     重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
 	@echo "  make eval-plan-suggest      Plan 建议金标基线（不改权重）"
@@ -310,7 +311,13 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
 	fi
 
-up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 只重建 Ops Bench worker（真向量评测，与 agent 解耦）
+start-bench: resolve-embedding ensure-ops-secret ## 仅启动 Ops Bench（不 rebuild）
+	@set -e; \
+	echo "==> start-bench（不 build；镜像已存在时秒级拉起）"; \
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres; \
+	COMPOSE_PROFILES=bench $(COMPOSE) up -d --no-deps bench
+
+up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）
 	@set -e; \
 	if [ "$(BENCH_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> BENCH_REBUILD_DEPS=1 → docker compose build --no-cache bench (+deps anchor)"; \

@@ -213,6 +213,19 @@ class Settings(BaseSettings):
     structural_span_candidates: int = 5
     # Soft prewarm when an agent Work starts (does not block TTFB / R1).
     structural_prewarm: bool = True
+    # Agent workspace AST index (docs/plan/agent-workspace-ast-index.md). Off-loop only.
+    workspace_ast_enabled: bool = True
+    # Ops/SWE temp works: default off (§7). Set true only for explicit dual-track experiments.
+    workspace_ast_ops_enabled: bool = False
+    workspace_ast_max_files: int = 20_000
+    workspace_ast_max_file_bytes: int = 1_048_576
+    workspace_ast_parse_concurrency: int = 3
+    workspace_ast_dirty_debounce_seconds: float = 0.5
+    workspace_ast_dirty_backpressure: int = 500
+    workspace_ast_locate_top_k: int = 5
+    workspace_ast_idle_ttl_seconds: float = 600.0
+    workspace_ast_max_cached_works: int = 8
+    workspace_ast_poll_seconds: float = 45.0
     # Ops / SWE-bench Lite: when True, ops_eval Turns run shell/LSP children with
     # no egress (bwrap --unshare-net). Daily non-ops Turns keep host network.
     # Map OFFICIAL_SWE_NETWORK=deny → OPS_EVAL_DENY_NETWORK=true in compose.

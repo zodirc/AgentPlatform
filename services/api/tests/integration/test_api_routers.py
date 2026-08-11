@@ -633,6 +633,35 @@ def test_workspace_sources_index_status_proxies_runtime(
     proxy.assert_awaited_once_with(path="sources/ref-a.md", tenant={})
 
 
+def test_workspace_ast_index_status_proxies_runtime(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
+    status = {
+        "status": "building",
+        "files_done": 3,
+        "files_total": 10,
+        "generation": 1,
+        "enabled": True,
+    }
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.ast_index_status",
+        new_callable=AsyncMock,
+        return_value=status,
+    ) as proxy:
+        response = client.get(
+            "/api/v1/admin/workspace/ast-index/status",
+            params={"enqueue": "true"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == status
+    proxy.assert_awaited_once_with(enqueue=True, tenant={})
+
+
 def test_workspace_sources_sync_queues_runtime(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

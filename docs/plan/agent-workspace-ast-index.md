@@ -1,9 +1,11 @@
 # 方案：Agent 工作区异步 AST 索引（Cursor 式 codebase index）
 
-> **状态**：候选方案 v2（2026-08-11 深度评审后修订）· **未实施**  
+> **状态**：候选方案 v2（2026-08-11 深度评审后修订）· **骨架已落地（A0–A5，2026-08-11）** · 验收缺口见文末  
 > **与主方案关系**：从 [Coding 结构智能（LSP / AST）](coding-structural-intelligence.md) 拆出；主方案负责 **已落地 LSP Locate/Impact + SWE/Ops 评测揉合**；本文只谈 **Agent 仓库工作区的异步符号索引**  
 > **非目标**：不替代 LSP；不携带 RAG / embedding；不服务 writing/intel 的 `search_sources`  
 > **约束权威**：[架构 · R1–R5](../core/architecture.md) · [RAG 两平面](../topics/rag.md)（对照隔离）· 主方案 §3 场景分型  
+
+> **落地摘要（2026-08-11）**：DDL/`0018` · `services/runtime/app/structural/workspace_index/` · 焊入 `search_codebase` Locate · dirty 钩子 · status API · GUI `AstIndexStatusBar`。SWE L1 临时 Work 默认不建或短 TTL（与主方案口径一致）。完整 harness n5 结果见主方案 §6.7.8（resolve 0/5；本索引非该跑强制路径）。
 
 本文回答：
 

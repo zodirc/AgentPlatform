@@ -957,12 +957,30 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
     root = _workspace_root()
-    return await run_shell_command(
+    result = await run_shell_command(
         command=command,
         cwd=root,
         timeout_s=settings.tool_default_timeout_seconds,
         check_cancel=check_cancel,
     )
+    # Channel ②: after successful command, budgeted mtime+size light scan (§3.2).
+    try:
+        if int(result.get("exit_code") or 1) == 0:
+            from app.structural.workspace_index.watch import light_scan_after_command
+            from app.tenant_context import current_owner_user_id, current_work_id
+
+            owner = current_owner_user_id()
+            scan = await light_scan_after_command(
+                work_id=current_work_id(),
+                owner_user_id=str(owner) if owner else None,
+                work_root=root,
+                budget_ms=200.0,
+            )
+            if scan.get("status") == "scan_pending":
+                result = {**result, "ast_scan": "scan_pending"}
+    except Exception:
+        pass
+    return result
 
 
 async def update_plan(
@@ -1823,8 +1841,48 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
 
     from app.structural.adapters import goto_definition as _goto
     from app.structural.format import format_locations_lines
+    from app.tenant_context import current_owner_user_id, current_work_id
 
     workspace = _workspace_root().resolve()
+
+    # A3: AST index coarse filter → LSP confirm (docs/plan/agent-workspace-ast-index.md §2.2).
+    try:
+        from app.structural.workspace_index.locate import locate_via_ast_index
+
+        owner = current_owner_user_id()
+        ast_out = await locate_via_ast_index(
+            workspace=workspace,
+            symbol=q,
+            work_id=current_work_id(),
+            owner_user_id=str(owner) if owner else None,
+            goto=_goto,
+            timeout_s=float(settings.structural_nav_timeout_s),
+            turn_id=_kwargs.get("turn_id"),
+            path_hint=None if path in {".", ""} else path,
+        )
+        if ast_out is not None:
+            if ast_out.get("_ast_infra_failed"):
+                reason = str(ast_out.get("reason") or "lsp_unavailable")
+                return {
+                    "query": q,
+                    "mode": "symbol",
+                    "definitions": [],
+                    "hits": [],
+                    "match_count": 0,
+                    "lines": [],
+                    "locate_incomplete": True,
+                    "status": "failed",
+                    "summary": (
+                        f"search_codebase: language server required for symbol locate ({reason}); "
+                        "fix runtime provider — lexical hits are not a successful Locate"
+                    ),
+                    **dict(ast_out.get("meta") or {}),
+                }
+            return ast_out
+    except Exception:
+        # Index faults must never change interactive semantics (§2.2 / §8).
+        pass
+
     out = await _goto(
         workspace,
         q,
@@ -1951,6 +2009,19 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
             old_text = ""
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
+    try:
+        from app.structural.workspace_index.dirty import notify_path_changed
+        from app.tenant_context import current_owner_user_id, current_work_id
+
+        owner = current_owner_user_id()
+        notify_path_changed(
+            path,
+            work_id=current_work_id(),
+            owner_user_id=str(owner) if owner else None,
+            work_root=_workspace_root(),
+        )
+    except Exception:
+        pass
     out: dict[str, Any] = {
         "path": path,
         "old_text": old_text,
@@ -2018,6 +2089,22 @@ async def rename_file(
     if dst.exists() and overwrite:
         dst.unlink()
     src.rename(dst)
+    try:
+        from app.structural.workspace_index.dirty import notify_path_changed
+        from app.tenant_context import current_owner_user_id, current_work_id
+
+        owner = current_owner_user_id()
+        oid = str(owner) if owner else None
+        wid = current_work_id()
+        root = _workspace_root()
+        notify_path_changed(
+            src_rel, work_id=wid, owner_user_id=oid, work_root=root, deleted=True
+        )
+        notify_path_changed(
+            dst_rel, work_id=wid, owner_user_id=oid, work_root=root
+        )
+    except Exception:
+        pass
     return {
         "status": "renamed",
         "path": src_rel,
@@ -2372,6 +2459,19 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
     pre_checks = await _checks_for_edit(path=path, turn_id=turn_id)
 
     target.write_text(updated, encoding="utf-8")
+    try:
+        from app.structural.workspace_index.dirty import notify_path_changed
+        from app.tenant_context import current_owner_user_id, current_work_id
+
+        owner = current_owner_user_id()
+        notify_path_changed(
+            path,
+            work_id=current_work_id(),
+            owner_user_id=str(owner) if owner else None,
+            work_root=_workspace_root(),
+        )
+    except Exception:
+        pass
     impact = await _impact_for_edit(
         path=path,
         old_text=old_text,

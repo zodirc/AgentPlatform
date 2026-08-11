@@ -54,6 +54,8 @@ ALLOWED_ACTIONS = {
     "sync-ops-cmteb": ["make", "-C", str(ROOT), "sync-ops-cmteb"],
     "ensure-ops-cmteb": ["bash", str(ROOT / "scripts" / "release" / "ensure_ops_cmteb.sh")],
     "pull-swe-eval-images": ["make", "-C", str(ROOT), "official-bench-coding-pull-images"],
+    "start-bench": ["make", "-C", str(ROOT), "start-bench"],
+    "up-bench": ["make", "-C", str(ROOT), "up-bench"],
     "git-pull": ["bash", str(GIT_PULL_SH)],
     "cancel-jobs": ["__cancel__"],  # handled in-process, not spawned
     "restart-console": ["__restart__"],  # detach stop+ensure; not queued
@@ -71,6 +73,8 @@ ACTION_LOG_KEY = {
     "sync-ops-cmteb": "index_ops_zh",
     "ensure-ops-cmteb": "index_ops_zh",
     "pull-swe-eval-images": "swe_eval_images",
+    "start-bench": "ops_bench",
+    "up-bench": "ops_bench",
     "git-pull": "git",
     "cancel-jobs": "misc",
     "restart-console": "misc",
@@ -86,6 +90,7 @@ ITEM_LOG_KEY = {
     "index_ops": "index_ops",
     "index_ops_zh": "index_ops_zh",
     "swe_eval_images": "swe_eval_images",
+    "ops_bench": "ops_bench",
     "git": "git",
 }
 
@@ -101,6 +106,8 @@ _ACTION_ITEM = {
     "sync-ops-cmteb": "index_ops_zh",
     "ensure-ops-cmteb": "index_ops_zh",
     "pull-swe-eval-images": "swe_eval_images",
+    "start-bench": "ops_bench",
+    "up-bench": "ops_bench",
     "git-pull": "git",
 }
 _ITEM_DEFAULT_ACTION = {
@@ -112,6 +119,7 @@ _ITEM_DEFAULT_ACTION = {
     "index_ops": "sync-ops-indexes",
     "index_ops_zh": "ensure-ops-cmteb",
     "swe_eval_images": "pull-swe-eval-images",
+    "ops_bench": "start-bench",
 }
 _SYNC_ACTIVE = frozenset(
     {
@@ -208,6 +216,8 @@ _ACTION_LABELS = {
     "sync-ops-cmteb": "同步 C-MTEB",
     "ensure-ops-cmteb": "拉取并嵌入中文库",
     "pull-swe-eval-images": "预拉 SWE eval 镜像",
+    "start-bench": "启动 Ops Bench",
+    "up-bench": "重建 Ops Bench",
     "git-pull": "拉取远程",
     "cancel-jobs": "取消任务",
     "restart-console": "重启看板",
@@ -856,6 +866,9 @@ def _discover_host_action_jobs() -> list[dict]:
         ("coding --phase pull-images", "pull-swe-eval-images", "swe_eval_images"),
         ("docker pull swebench/sweb.eval", "pull-swe-eval-images", "swe_eval_images"),
         ("docker pull ", "pull-swe-eval-images", "swe_eval_images"),  # filtered: only sweb.eval
+        ("start-bench", "start-bench", "ops_bench"),
+        ("up-bench", "up-bench", "ops_bench"),
+        ("COMPOSE_PROFILES=bench", "up-bench", "ops_bench"),
         ("release.sh run --modules=api", "up-api", "api"),
         ("release.sh run --modules=runtime", "up-runtime", "runtime"),
         ("release.sh run --modules=web", "up-web", "web"),
@@ -1551,6 +1564,7 @@ def _button_for(it: dict) -> dict | None:
         "index_ops": ("sync-ops-indexes", "同步 Ops BEIR"),
         "index_ops_zh": ("ensure-ops-cmteb", "拉取并嵌入中文库"),
         "swe_eval_images": ("pull-swe-eval-images", "预拉 SWE eval 镜像"),
+        "ops_bench": ("start-bench", "启动 Ops Bench"),
     }
     if iid not in mapping:
         return None
@@ -1590,6 +1604,7 @@ _MANAGED_LOG_KEYS = (
     "index_ops",
     "index_ops_zh",
     "swe_eval_images",
+    "ops_bench",
     "misc",
 )
 

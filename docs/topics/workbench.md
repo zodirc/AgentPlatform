@@ -97,7 +97,7 @@ Ops UI **强制** `eval_path=agent`：分数必须来自**产品 Session/Turn �
 | **context** | LongBench 小切 | Work 内 `sources/passage.md` 等 | `read_file` 等 | agent F1 / EM |
 | **coding** | SWE-bench Lite（tier n3…n25/full） | checkout 可选 | `edit_file` / `write_file` | patch_rate；**resolve 须 harness+Docker** |
 
-SWE L1 n5 / 工具面实测过程：[`docs/plan/coding-structural-intelligence.md`](../plan/coding-structural-intelligence.md) §6.7。  
+SWE L1 n5 / 工具面实测过程：[`docs/plan/coding-structural-intelligence.md`](../plan/coding-structural-intelligence.md) §6.7；**首次完整 harness 官方 resolve** 见同文 **§6.7.8**（`d459ca51` · resolve 0/5）。  
 Agent 工作区异步 AST（候选）：[`docs/plan/agent-workspace-ast-index.md`](../plan/agent-workspace-ast-index.md)。
 
 共用 embedder（GPU 时常 **bge-m3**）；BEIR 与 ZH **只分 schema/HNSW**，模型维数要一致才可纵向比。换模型后勿跨 SCORECARD 裸比。

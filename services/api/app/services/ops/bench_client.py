@@ -29,11 +29,14 @@ async def fetch_caps() -> dict[str, Any]:
     base = bench_base_url()
     if not base:
         return {}
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(f"{base}/v1/caps", headers=_headers())
-        if resp.status_code >= 400:
-            return {"error": f"bench_caps_http_{resp.status_code}"}
-        return resp.json()
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(f"{base}/v1/caps", headers=_headers())
+            if resp.status_code >= 400:
+                return {"error": f"bench_caps_http_{resp.status_code}"}
+            return resp.json()
+    except Exception as exc:  # noqa: BLE001 — unreachable / reset must not 500 meta
+        return {"error": f"bench_unreachable:{type(exc).__name__}"}
 
 
 async def health() -> dict[str, Any]:

@@ -516,6 +516,75 @@ async def workspace_sources_index_status(
         return sources_index_status(path=path)
 
 
+@workspace_router.get("/ast-index/status")
+async def workspace_ast_index_status(
+    enqueue: bool = False,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """Agent workspace AST index progress (§6.2). Poll-only; never blocks on build."""
+    from uuid import UUID
+
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.structural.workspace_index.service import get_ast_index_service
+    from app.structural.workspace_index.watch import register_active_work
+    from app.tenant_context import current_work_root_path
+
+    if not work_id or not owner_user_id:
+        raise HTTPException(status_code=400, detail="work_id and owner_user_id required")
+    try:
+        wid = UUID(work_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid work_id") from exc
+
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+        root = current_work_root_path()
+        service = get_ast_index_service()
+        status = await service.status(
+            wid,
+            owner_user_id=owner_user_id,
+            work_root=root,
+            enqueue_if_cold=bool(enqueue),
+        )
+        if status.get("enabled"):
+            register_active_work(wid, owner_user_id=owner_user_id, work_root=root)
+        return status
+
+
+@workspace_router.post("/ast-index/rebuild", status_code=status.HTTP_202_ACCEPTED)
+async def workspace_ast_index_rebuild(
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """Enqueue cold-start rebuild (async; R1-safe)."""
+    from uuid import UUID
+
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.structural.workspace_index.service import get_ast_index_service
+    from app.tenant_context import current_work_root_path
+
+    if not work_id or not owner_user_id:
+        raise HTTPException(status_code=400, detail="work_id and owner_user_id required")
+    try:
+        wid = UUID(work_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid work_id") from exc
+
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+        root = current_work_root_path()
+        service = get_ast_index_service()
+        accepted = service.enqueue_cold_start(
+            wid, owner_user_id=owner_user_id, work_root=root
+        )
+        return {"accepted": accepted, "work_id": work_id}
+
+
 @workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)
 async def workspace_sync_sources(
     background_tasks: BackgroundTasks,
@@ -609,18 +678,25 @@ async def lifespan(app):
         cancel_sources_watch,
         schedule_sources_watch,
     )
+    from app.structural.workspace_index.watch import (
+        cancel_ast_index_watch,
+        schedule_ast_index_watch,
+    )
 
     watchdog = asyncio.create_task(stall_watchdog_loop())
     # IX0: Turn-external incremental projection; must not block /health/live.
     schedule_startup_sources_sync()
     # IX2: poll sources/ for host edits; debounced sync (still Turn-external).
     schedule_sources_watch()
+    # Agent workspace AST channel ③ (docs/plan/agent-workspace-ast-index.md).
+    schedule_ast_index_watch()
     try:
         yield
     finally:
         # B2: let in-flight turns finish before tearing down the pool; anything
         # still running past the deadline is reconciled on next startup.
         await drain_active_turns()
+        await cancel_ast_index_watch()
         await cancel_sources_watch()
         await cancel_startup_sources_sync()
         watchdog.cancel()

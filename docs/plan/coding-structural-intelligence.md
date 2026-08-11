@@ -394,12 +394,12 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 | P3 | 缺 LSP 时静默降级成「grep/ruff 也行」 | **已解** | Locate/Impact/read_lints 基建失败 → 显式 `failed` |
 | P4 | `max_steps` 触顶 → 半截 diff | **已缓解** | 默认 150；交卷拒截断；**W3 失败候选回显 + W5 交卷自检** 进一步压缩重试与半截（§7.3） |
 | P5 | 脏树 `git apply --check` 假阴性 → 误 `patch_no_apply` | **已解** | clean-HEAD / reverse-check |
-| P6 | harness 无法给出官方 `resolve_rate` | **根因已定位 · 方案落地中（N0）** | 不是「infer 挂了」：L1 可出可 apply patch（`patch_rate` 代理指标 OK）。卡点是 **本地缺 `sweb.eval` 实例镜像** + Hub 现拉易挂死 + 默认 `cache_level` 评后删图。方案：看板预拉 + `cache_level=instance` + `require_local_images` 失败快返 + 进度可观测（§6.7.1 / §7.5 / §8.5） |
+| P6 | harness 无法给出官方 `resolve_rate` | **已解（N0）** | 2026-08-11：看板预拉 n5 5/5 + `require_local`；首次完整 harness 跑次 `d459ca51` **产出真 `resolve_rate=0/5`**（非缺图/空 predictions）。详见 §6.7.8 |
 | P7 | 模型不点 `goto_definition` / `find_references` / `search_codebase` | **部分解** | 能力已揉进 grep/edit；**adoption 的工具名 KPI 仍低**（预期，不再作 KPI；§7.6） |
 | P8 | 大量 `run_command`+`sed -n` 当 pager | **方案已定** | Ban 文案已证偏弱；**W2 纯 pager 软重定向进 `read_file`**（§7.3，同 grep→Locate 手法），排 N3 |
 | P9 | Impact 仅 Python 扩展（`language_for_path`） | **已知边界** | 非 .py 编辑 → `impact.skipped`；Lite 全 Python，暂不扩 |
 | P10 | Ops 面板按工具名找不到 Locate | **文档澄清** | 事件名常为 `grep`；看 `definitions`/`redirected_from`；`process.jsonl` 无工具明细 |
-| P11 | 揉合后尚未用新契约复跑 n5 验收 | **待做 · 排 N2** | 探针扩展为 Wave 1+2 合并清单（§7.6） |
+| P11 | 揉合后尚未用新契约复跑 n5 验收 | **部分完成** | `d459ca51` 已带 harness+过程探针入档（§6.7.8）：locate/impact/checks 有数，**官方 resolve 仍 0**；Wave 1+2 探针清单对照与双轨仍排后续 |
 | P12 | Verify 车道 adoption 同样趋零（两题 `read_lints`=1；纪律催用无效） | **方案已定** | 与 P7 同根：独立工具名不在控制环里。**W1：`checks`（写前语法门 + 写后增量诊断）焊进 `edit_file` 成功契约**（§7.3），排 N1 |
 
 #### 6.0.6 合宪边界（流程里故意不做的）
@@ -476,9 +476,9 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 | `edit` | 编辑工具 + 验证；导航按需 |
 | 写作向 `drafter`/`stylist` 等 | 不开放 |
 
-### 6.7 揉合、Ops 实测与完整过程记录（2026-08-10 → 08-11）
+### 6.7 揉合、Ops 实测与完整过程记录（2026-08-10 → 08-12）
 
-**当前流程与问题总表以 §6.0 为准。** 本节是同一事实的历史纪要：早期 n5 数字、复跑工具面计数、揉合决策与验收探针。
+**当前流程与问题总表以 §6.0 为准。** 本节是同一事实的历史纪要：早期 n5 数字、复跑工具面计数、揉合决策、**首次完整 harness 官方 resolve**、验收探针。
 
 #### 6.7.1 时间线（过程）
 
@@ -491,6 +491,8 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 | 同日 | 落地 | `symbols.py` + tools handler + `system.md` + L1 `coding_prompt`；runtime recreate；单测覆盖 Locate/Impact 契约 |
 | 2026-08-11 | N0 诊断（P6） | 后续 infer（如 `4b2a89c6` / `69f166f2`）**`patch_rate=1.0`**，但开启 harness 时卡在 `Evaluation: 0/5`、实例 `run_instance.log` 空；根因：**本机无 `swebench/sweb.eval.x86_64.*`**，harness 在 **agent-api（ops-eval sock）** 内现拉 Docker Hub **挂死**（连 `hello-world` 亦 Waiting）。早期「完成」的 harness（`8be119d4`）实为 **空 predictions / empty_patch** → `resolve_rate=0`，不是模型真测。默认 `cache_level=env` 会在评后删实例图，下次再挂 |
 | 同日 | N0 方案落地 | `suites.coding.harness`：`cache_level=instance`、`clean=false`、`require_local_images=true`、`board_tier=n5`；`scripts/official_bench/swe_images.py` + `coding --phase pull-images` / `make official-bench-coding-pull-images`；**部署看板 :9090** 项「Ops · SWE eval 镜像」一键预拉；进度写 `reports/release/swe_eval_images_progress.json`，看板 live 显示 **n/N · % · 当前 ref** + 日志 tab「SWE 镜像」。单图压缩约 **1.0–1.2 GiB**（n5 ≈ 5–6 GiB），**不进 git / 不进产品镜像** |
+| 2026-08-11 晚 | N0 出口达成 | 本机预拉 **n5 5/5** `sweb.eval`；看板增 **Ops Bench worker**（`start-bench` 秒级拉起，避免误点 `up-bench` 全量重建）；`agent-bench` healthy 后 Ops meta 正常 |
+| 2026-08-11→12 | 完整 harness n5（`d459ca51`） | **首次真跑完官方 evaluate**：`patch_rate=1.0` · `apply_ok=5/5` · **`resolve_rate=0.0`（0/5）**；分桶 `patch_not_resolved`×4 + `no_verify`×1（14182 turn 超时）。过程：`locate_fuse≈0.36` · `impact_cov=1` · `checks_cov=1` · `syntax_rej=0`。结论：**基建/harness 过关，效果（官方通过）仍差** — 见 §6.7.8 |
 
 #### 6.7.2 早期 n5 套件结果（`d10472fd`，2026-08-10）
 
@@ -631,8 +633,51 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 
 - 重定向路径可附加 `meta.locate=search_codebase` 方便面板过滤（未做）。  
 - `run_command`+`sed -n` 读源仍偏高：Ban 文案已证不够，改走 **W2 软重定向**（§7.3）。  
-- harness exit 1 / 官方 `resolve_rate` 仍待修：升级为 **N0 最高优先**（§7.5）。  
-- Verify 车道 adoption 趋零：**W1 揉进 `edit_file.checks`**（§7.3）。
+- **官方 resolve 效果**：N0 已可测（§6.7.8 `resolve_rate=0/5`）；下一优先是 **定位/修复质量**（locate_fuse、grep incomplete）与 14182 超时，而非再修 harness 基建。  
+- Verify 车道：本跑 `checks_cov=1.0`（编辑护栏在干活）；独立 `read_lints` adoption 仍非 KPI。
+
+#### 6.7.8 完整 harness n5（`d459ca51`，2026-08-11→12）— 首次官方 resolve 可测
+
+来源：`TEST.log`（Ops smoke HTML 摘要）· 跑次 `d459ca51-ba98-4462-90d8-edae0144a2b2`。  
+配置：L1 agent-path · **tier=n5** · checkout=True · **harness=yes** · mirror prewarm ok=1 · 本地 `sweb.eval` 5/5。
+
+**套件指标**
+
+| 指标 | 值 | 含义 |
+|------|-----|------|
+| `n_instances` | 5 | 题数（全 astropy） |
+| `n_nonempty_patches` | 5 | 非空 patch |
+| `patch_rate` | **1.000** | 5/5 交出 diff |
+| `apply_ok` | **5/5** | `git_diff` 均可 apply |
+| `resolve_rate` | **0.000** | **官方 fail-to-pass 0/5** |
+| `n_resolved` | 0 | 同上 |
+| `locate_fuse_ok_rate` | 0.364 | n=11 · 定位偏弱 |
+| `edit_impact_coverage` | 1.000 | 有编辑时 Impact 覆盖满 |
+| `edit_checks_coverage` | 1.000 | 有编辑时 checks 覆盖满 |
+| `syntax_reject_count` | 0 | 无语法拒编 |
+| `span_fail_n` | 1 | 失配 1 次（带候选） |
+| `n_grep_locate_incomplete` | 7 | Locate 未完成偏多 |
+| harness `exit_code` | 1 | 零通过时的正常语义（报告已归档） |
+
+分桶：`patch_not_resolved`×4（80%）· `no_verify`×1（20%）。
+
+**逐题**
+
+| instance | bucket | apply | 官方 | steps | terminal | 备注 |
+|----------|--------|-------|------|------:|----------|------|
+| `astropy__astropy-14365` | `patch_not_resolved` | yes | 未过 | 32 | completed | span_fail=1；grep_ok=0 |
+| `astropy__astropy-12907` | `patch_not_resolved` | yes | 未过 | 105 | completed | edits=5；仍未 resolve |
+| `astropy__astropy-14182` | `no_verify` | yes | 未过 | — | **failed** | turn 超时等待 completed；未完整 verify |
+| `astropy__astropy-14995` | `patch_not_resolved` | yes | 未过 | 99 | completed | edits=16 · reads=19；最重编辑仍未过 |
+| `astropy__astropy-6938` | `patch_not_resolved` | yes | 未过 | 56 | completed | reads=36 · grep_ok=0 · edits=1 |
+
+**读法（钉死）**
+
+1. **N0 出口已达成**：缺图/空 predictions 误报时代结束；本 `resolve_rate=0` 是 **真测零分**，不是基建假象。  
+2. **L1「有 patch」≠ 官方过**：patch/apply 满分只说明交卷链健康。  
+3. **效果不好的主因**：定位偏弱（fuse≈36%、多题 grep_ok=0）+ 修复未过 fail-to-pass；编辑护栏（impact/checks）在线但救不了「改错点/改错逻辑」。  
+4. **14182** 单独记为超时/`no_verify`，勿与「改错了」混桶。  
+5. 下一优先：压 locate incomplete / pager 重定向（W2）→ 再谈模型与双轨分数。
 
 ---
 
@@ -1061,7 +1106,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 - [ ] **`read_lints` 保留原名增强**，避免破坏 CQ1 文案与 golden。  
 - [ ] **冷启动旁路 + 工具内 timeout + LSP 基建失败显式 failed** 写进实现契约。  
 - [x] **Locate/Impact 揉合**（§6.7）：裸符号 grep 重定向 + edit_file.impact；不以 search_codebase 调用名为 KPI。  
-- [ ] **N0 官方 harness 可测**（P6）：看板预拉 `sweb.eval` → `require_local` 绿 → 非空 predictions 跑出官方 `resolve_rate`（§7.5 / §8.5）；`patch_rate` 仅代理，不能代替 resolve。  
+- [x] **N0 官方 harness 可测**（P6）：看板预拉 `sweb.eval` → `require_local` 绿 → 非空 predictions 跑出官方 `resolve_rate`（§7.5 / §8.5）；`d459ca51` 首次真测 **0/5**（§6.7.8）。`patch_rate` 仅代理，不能代替 resolve。  
 - [ ] **Wave 2 揉合（§7.3）**：W1 `edit_file.checks`（写前语法门 + 写后单文件增量诊断，含逃生门）+ W3 span 失配候选回显 + W4 Reproduce 相位 + W5 交卷自检（后两项纯 prompt 层）。  
 - [ ] **W2 pager 软重定向**按 N3 排期：仅纯 pager 整条命令；先软重定向不硬 Ban；命中/误伤入观测。  
 - [ ] **SWE-bench Lite 双轨协议（§8）**；禁外网；过程指标含 definitions/impact/checks 覆盖。  
@@ -1086,3 +1131,4 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 | 2026-08-11 | **§3.3.4–3.3.5**：GUI 模式点击≠重建索引；RAG 异步 embed / 热语料=上传私有库；Agent AST 建议 Work 级 DB 缓存 + 进度条；多账号 ACL / 多 Work 主键；与 `source_chunks` 表隔离 |
 | 2026-08-11 | **文档切分**：工作区异步 AST / GUI / Work·DB 拆至 `agent-workspace-ast-index.md`；本文收回 SWE/Ops + LSP 揉合主线 |
 | 2026-08-11 | **N0/P6 镜像与看板**：§6.0.5 P6、§6.7.1 时间线、§7.5 N0 出口、新增 §8.5（缺 `sweb.eval` / Hub 挂死 / 空 predictions 误报 / 看板预拉与 `swe_eval_images_progress.json` 实时 n/N）；澄清 infer patch OK ≠ 官方 resolve |
+| 2026-08-12 | **§6.7.8 完整 harness n5（`d459ca51`）**：首次真官方 `resolve_rate=0/5`（patch/apply 满分）；P6→已解、P11→部分完成、N0 checklist 勾选；看板 Ops Bench / `start-bench` 记入时间线 |

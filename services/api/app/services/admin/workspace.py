@@ -150,6 +150,30 @@ async def sources_index_status(
     return resp.json()
 
 
+async def ast_index_status(
+    *,
+    enqueue: bool = False,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    """Agent workspace AST index meta snapshot (separate from RAG sources sync)."""
+    base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {**_tenant_params(tenant or {})}
+    if enqueue:
+        params["enqueue"] = "true"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(
+                f"{base}/internal/workspace/ast-index/status",
+                params=params or None,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
 async def sync_sources(
     *,
     force: bool = False,

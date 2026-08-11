@@ -667,6 +667,7 @@
       { id: "index_product", label: "产品索引" },
       { id: "index_ops", label: "Ops BEIR" },
       { id: "index_ops_zh", label: "Ops 中文" },
+      { id: "ops_bench", label: "Ops Bench" },
       { id: "swe_eval_images", label: "SWE 镜像" },
     ];
 
@@ -680,6 +681,7 @@
       index_product: "index_product",
       index_ops: "index_ops",
       index_ops_zh: "index_ops_zh",
+      ops_bench: "ops_bench",
       swe_eval_images: "swe_eval_images",
     };
 
@@ -1251,6 +1253,8 @@
               "sync-ops-cmteb": "index_ops_zh",
               "ensure-ops-cmteb": "index_ops_zh",
               "pull-swe-eval-images": "swe_eval_images",
+              "start-bench": "ops_bench",
+              "up-bench": "ops_bench",
             }[watchAction];
             const it = itemId
               ? (plan.items || []).find((x) => x.id === itemId)
@@ -1313,7 +1317,9 @@
         watchDeploy = false;
         watchAction = action;
         // SWE eval images ≈1GiB each; n5 can take well over an hour on slow Hub.
-        const longPull = action === "pull-swe-eval-images";
+        // SWE pull / full up-bench rebuild can take a long time.
+        const longPull =
+          action === "pull-swe-eval-images" || action === "up-bench";
         watchUntil = Date.now() + (longPull ? 4 : 1) * 60 * 60 * 1000;
       }
       renderList();
@@ -1353,6 +1359,8 @@
           "sync-ops-cmteb": "index_ops_zh",
           "ensure-ops-cmteb": "index_ops_zh",
           "pull-swe-eval-images": "swe_eval_images",
+          "start-bench": "ops_bench",
+          "up-bench": "ops_bench",
           "git-pull": "all",
         }[action];
         if (key) {

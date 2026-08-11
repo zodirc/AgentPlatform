@@ -108,6 +108,20 @@ async def sources_index_status(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/ast-index/status")
+async def ast_index_status(
+    request: Request,
+    enqueue: bool = Query(default=False),
+    work_id: UUID | None = Query(default=None),
+):
+    """Agent workbench AST index progress — separate from RAG sources ingestion."""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.ast_index_status(enqueue=enqueue, tenant=tenant)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/sources/sync", status_code=202)
 async def sync_sources_library(
     request: Request,

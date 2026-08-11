@@ -3,6 +3,7 @@ import { ErrorBanner } from "./ErrorBanner";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";
 import { AgentChatPanel } from "../../scenarios/agent/AgentChatPanel";
+import { AstIndexStatusBar } from "../../scenarios/agent/AstIndexStatusBar";
 import {
   AgentSidebar,
   type SidebarSelection,
@@ -124,6 +125,7 @@ export function ScenarioWorkbenchView({
           <ErrorBanner error={wb.error} onDismiss={wb.clearError} />
         </div>
       ) : null}
+      {scenarioId === "agent" ? <AstIndexStatusBar /> : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
         {artifactsOpen ? (

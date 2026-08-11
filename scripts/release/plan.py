@@ -32,6 +32,7 @@ CONTAINERS = {
     "gateway": "agent-gateway",
     "postgres": "agent-postgres",
     "bench_postgres": "agent-bench-postgres",
+    "bench": "agent-bench",
 }
 
 
@@ -264,13 +265,68 @@ def _module_dirty(
 
 
 def _container_running(name: str, running: set[str] | None = None) -> bool:
+    """True if ``name`` is up (exact or compose-prefixed ``*_name``)."""
     if running is not None:
-        return name in running
+        if name in running:
+            return True
+        return any(n.endswith("_" + name) for n in running)
     code, out, _ = _run(
         ["docker", "inspect", "-f", "{{.State.Running}}", name],
         timeout=4,
     )
     return code == 0 and out.strip() == "true"
+
+
+def _ops_bench_item(*, running: set[str]) -> dict:
+    """Ops official meta / L1 jobs need the dedicated bench worker container."""
+    item: dict = {
+        "id": "ops_bench",
+        "kind": "ops",
+        "lane": "ops",
+        "title": "Ops Bench worker",
+        "status": "ok",
+        "action": None,
+        "detail": "",
+        "optional": False,
+    }
+    name = CONTAINERS["bench"]
+    actual = name if name in running else next(
+        (n for n in running if n.endswith("_" + name)),
+        None,
+    )
+    if actual:
+        # Prefer compose health when present; missing Health → treat as up.
+        code, health, _ = _run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+                actual,
+            ],
+            timeout=4,
+        )
+        st = (health or "").strip().lower() if code == 0 else "none"
+        if st in {"", "none", "healthy", "starting"}:
+            item["status"] = "ok"
+            detail = "agent-bench 运行中 · Ops /official/meta 与真向量评测依赖"
+            if st == "starting":
+                detail = "agent-bench 启动中（health=starting）"
+            item["detail"] = detail
+            return item
+        item["status"] = "action"
+        item["action"] = "make start-bench"
+        item["detail"] = (
+            f"agent-bench 不健康（health={st}）— Ops meta 会失败；先 start-bench（不 rebuild）"
+        )
+        return item
+
+    item["status"] = "action"
+    item["action"] = "make start-bench"
+    item["detail"] = (
+        "agent-bench 未运行 — Ops meta/真向量会失败；一键 start-bench（不 rebuild）"
+    )
+    return item
 
 def _index_version_for_model(model: str, dims: int) -> int:
     m = (model or "").lower()
@@ -742,7 +798,7 @@ def build_plan(mode: str | None = None) -> dict:
             }
         )
 
-    with ThreadPoolExecutor(max_workers=5) as pool:
+    with ThreadPoolExecutor(max_workers=6) as pool:
         fut_emb = pool.submit(_embedding_item, want_model, want_dims, want_ver, running=running)
         fut_prod = pool.submit(
             _index_item,
@@ -788,13 +844,15 @@ def build_plan(mode: str | None = None) -> dict:
             running=running,
         )
         fut_swe = pool.submit(_swe_eval_images_item, env_file=env_file)
+        fut_bench = pool.submit(_ops_bench_item, running=running)
         emb = fut_emb.result()
         idx_prod = fut_prod.result()
         idx_ops = fut_ops.result()
         idx_ops_zh = fut_ops_zh.result()
         swe_imgs = fut_swe.result()
+        ops_bench = fut_bench.result()
 
-    items.extend([emb, idx_prod, idx_ops, idx_ops_zh, swe_imgs])
+    items.extend([emb, idx_prod, idx_ops, idx_ops_zh, ops_bench, swe_imgs])
 
     # Ops 检索嵌入复用产品 runtime 向量模型——单独挂一条，避免和产品轨混在同一组。
     ops_emb = {
@@ -843,6 +901,8 @@ def build_plan(mode: str | None = None) -> dict:
             i["id"].startswith("index_ops") and i["status"] == "action" for i in items
         ):
             bits.append("Ops 索引")
+        if ops_bench.get("status") == "action":
+            bits.append("Ops Bench worker")
         if swe_imgs.get("status") == "action":
             bits.append("SWE eval 镜像")
         headline = "存在变动：" + "；".join(bits)

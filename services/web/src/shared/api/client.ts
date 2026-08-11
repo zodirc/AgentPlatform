@@ -733,6 +733,45 @@ export async function fetchSourcesIndexStatus(
   return res.json();
 }
 
+/** Agent workspace AST index meta (separate from RAG sources sync). */
+export type AstIndexStatus = {
+  work_id?: string;
+  owner_user_id?: string;
+  status?:
+    | "cold"
+    | "building"
+    | "ready"
+    | "stale"
+    | "error"
+    | "disabled"
+    | "scan_pending"
+    | string;
+  generation?: number;
+  files_total?: number;
+  files_done?: number;
+  files_indexed?: number;
+  error?: string | null;
+  enabled?: boolean;
+};
+
+export async function fetchAstIndexStatus(opts?: {
+  enqueue?: boolean;
+  workId?: string;
+}): Promise<AstIndexStatus> {
+  const params = new URLSearchParams();
+  if (opts?.enqueue) params.set("enqueue", "true");
+  if (opts?.workId) params.set("work_id", opts.workId);
+  const qs = params.toString();
+  const res = await fetch(
+    `${API_BASE}/admin/workspace/ast-index/status${qs ? `?${qs}` : ""}`,
+    { ...sessionFetchInit, headers: apiAuthHeaders() },
+  );
+  if (!res.ok) {
+    throw new Error(`fetchAstIndexStatus failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 /** IX1: queue Turn-external incremental sync (does not block chat). */
 export async function syncSourcesIndex(): Promise<{
   accepted?: boolean;
