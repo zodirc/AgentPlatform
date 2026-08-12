@@ -226,6 +226,11 @@ class Settings(BaseSettings):
     workspace_ast_idle_ttl_seconds: float = 600.0
     workspace_ast_max_cached_works: int = 8
     workspace_ast_poll_seconds: float = 45.0
+    # Eval-ephemeral cold-start hard budget (§7.2); partial → stale, queryable.
+    workspace_ast_eval_budget_seconds: float = 60.0
+    # Cap files/parse threads for eval so indexing cannot starve StartTurn.
+    workspace_ast_eval_max_files: int = 4_000
+    workspace_ast_eval_parse_concurrency: int = 2
     # Ops / SWE-bench Lite: when True, ops_eval Turns run shell/LSP children with
     # no egress (bwrap --unshare-net). Daily non-ops Turns keep host network.
     # Map OFFICIAL_SWE_NETWORK=deny → OPS_EVAL_DENY_NETWORK=true in compose.

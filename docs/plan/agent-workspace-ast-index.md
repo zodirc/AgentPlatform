@@ -1,19 +1,22 @@
 # 方案：Agent 工作区异步 AST 索引（Cursor 式 codebase index）
 
-> **状态**：候选方案 v2（2026-08-11 深度评审后修订）· **骨架已落地（A0–A5，2026-08-11）** · 验收缺口见文末  
+> **状态**：候选方案 **v4**（2026-08-12 进程边界修订）· A0–A5/E1 骨架已落地 · **成熟目标拓扑 = 独立 indexer 生产、runtime 只消费（§0.4 / §3.0）尚未落地** · 验收缺口：双轨 n5 数字尚未入库  
 > **与主方案关系**：从 [Coding 结构智能（LSP / AST）](coding-structural-intelligence.md) 拆出；主方案负责 **已落地 LSP Locate/Impact + SWE/Ops 评测揉合**；本文只谈 **Agent 仓库工作区的异步符号索引**  
 > **非目标**：不替代 LSP；不携带 RAG / embedding；不服务 writing/intel 的 `search_sources`  
 > **约束权威**：[架构 · R1–R5](../core/architecture.md) · [RAG 两平面](../topics/rag.md)（对照隔离）· 主方案 §3 场景分型  
 
-> **落地摘要（2026-08-11）**：DDL/`0018` · `services/runtime/app/structural/workspace_index/` · 焊入 `search_codebase` Locate · dirty 钩子 · status API · GUI `AstIndexStatusBar`。SWE L1 临时 Work 默认不建或短 TTL（与主方案口径一致）。完整 harness n5 结果见主方案 §6.7.8（resolve 0/5；本索引非该跑强制路径）。
+> **落地摘要（2026-08-12）**：DDL/`0018` · `structural/workspace_index/`（含 `query.py` 归一化/排序、`ct` 容器、`locate` incomplete→`candidates[]`、memory-only cold start）· 焊入 `search_codebase` · dirty/watch · status/rebuild/purge API · GUI `AstIndexStatusBar` · CSI `locate_fuse_fail_reason` 分桶 · `suites.coding.workspace_index`（默认 `true`；checkout 后 enqueue 评测瞬态索引；对照基线时改 `false`）。完整 harness n5 基线见主方案 §6.7.8（resolve 0/5；索引 on 双轨待跑）。  
+> **v4 要点**：同进程冷启动在 L1 `parallel≥2` 下与 Turn/Jedi/DB 互抢 → 假慢与成片 `turn.failed`；成熟架构定为 **indexer 旁路进程生产快照、runtime 仅加载投影并 lookup**（对标 Cursor / SCIP）。
 
 本文回答：
 
 1. 为什么要在 LSP + 词面之外，再给 Agent 一条 **工作区 AST 旁路**；它是否可行、成熟（§0.1 评审结论）。  
 2. AST 与 LSP 的 **结合面矩阵**（§2）：索引买什么、LSP 保留什么、二者如何在同一条 Locate 漏斗里协作。  
-3. 生命周期 / **变更捕获三通道** / content-hash 失效（§3–§4）。  
-4. **本地存储**（Postgres schema 草案 + 内存投影）、GUI、多账号 / 多 Work、GC（§5–§7）。  
-5. 如何 **零感知** 于 agent 交互速率与交互逻辑（§8 红线映射）。
+3. **为何不能让冷启动占满 runtime**、Cursor/SCIP 式进程边界、以及目标部署拓扑（§0.4 / §3.0）。  
+4. 生命周期 / **变更捕获三通道** / content-hash 失效（§3–§4）。  
+5. **本地存储**（Postgres schema 草案 + 内存投影）、GUI、多账号 / 多 Work、GC（§5–§7）。  
+6. 如何 **零感知** 于 agent 交互速率与交互逻辑（§8 红线映射）。  
+7. **评测效果差（`d459ca51` 官方 resolve 0/5）时，本索引能救什么、不能救什么**（§0.3 归因），以及如何在评测里可控启用并证明差值（§7 评测瞬态索引 + 双轨）。
 
 ---
 
@@ -49,13 +52,116 @@ v1 草案的三处不成熟与修正：
 
 | 系统 | 被验证的做法 | 借鉴 | 不借鉴 |
 |------|--------------|------|--------|
-| **Cursor** codebase index | 客户端 Merkle 式 content-hash 树做增量同步；重启/重连只对账差异，不全量重建 | content-hash 失效判据；「重启从快照恢复 + 只追差异」的对账语义（§4.2） | 服务端 embedding 检索（本文无向量红线） |
+| **Cursor** codebase index | 客户端/旁路后台建索引；对话路径消费；Merkle 式 content-hash 增量对账；不全量在答话进程重建 | content-hash 失效；对账语义（§4.2）；**索引器与交互面进程分离**（§0.4） | 服务端 embedding 检索（本文无向量红线） |
 | **ctags / gtags** | 纯 definitions 符号表，几十年 IDE/编辑器验证；refs 交给更精确的工具 | 索引最小面 = **definitions only**（name/kind/位置）；references/类型一律归 LSP（§2.1） | 全局单库（我们按 `work_id` 分域） |
 | **Zed / Helix** | tree-sitter 单文件即时 parse（毫秒级）做 outline/符号，无持久层也可用 | stale 时的回落路径 = **单文件即时 parse**，不必等索引追平（§4.1） | 无持久化（我们要「重启点回 Agent 还能用」，故 DB 快照） |
 | **Sourcegraph SCIP / LSIF** | 快照式符号索引 + 由 commit/内容驱动失效；索引器与查询端解耦 | `generation` 世代语义；索引是**可丢弃的加速快照**，权威在源码与 LSP（§4） | 跨仓全局图（超出 Work 边界） |
 | **Aider** repo map | tree-sitter tags 抽符号骨架，按引用密度排序 | 本索引即未来 Wave 3 `repo_map` 按需工具的**现成数据源**（§2.3），一份投入两处消费 | 预注入形态（主方案否决 8） |
 
 共同规律与主方案 §7.2 一致：**收益来自把结构信息焊进模型无法绕开的路径，而不是加新入口催用**。本文消费面设计（§2.2）是同一决策的延伸。
+
+### 0.3 评测归因与本文的位置（v3 新增，基于 `d459ca51` 完整 harness n5）
+
+首次真跑官方 harness（主方案 §6.7.8）：`patch_rate=1.0` · `apply_ok=5/5` · **`resolve_rate=0/5`**。逐指标归因，明确哪些是本文的作用面：
+
+| 指标（`d459ca51`） | 值 | 归因 | 是否本文作用面 |
+|---|---|---|---|
+| `patch_rate` / `apply_ok` / `impact_cov` / `checks_cov` / `syntax_rej` | 1.0 / 5/5 / 1.0 / 1.0 / 0 | **交卷链与编辑护栏健康**；失败不在「能不能改」 | 否（已由主方案 Wave 1/2 覆盖） |
+| `locate_fuse_ok_rate` | **0.364**（n=11） | 符号 Locate 融合三次两空。机制：pyright **openFilesOnly** 下 `workspace/symbol` 对未打开文件召回差，两跳常落空（主方案 §7.1.1 已知禁全仓 indexing 的代价）——**全仓符号面缺位**正是 §1.1 定义的缺口 | ✅ **主责** |
+| `n_grep_locate_incomplete` | **7** | 同上：LSP 无候选可确认 → `locate_incomplete`，模型只拿到词面兜底 | ✅ **主责** |
+| 3/5 题 `grep_ok=0`；6938 `reads=36`、12907 `steps=105`、14995 `steps=99` | — | Locate 落空后模型退回**词面漫游**：靠连环 read/grep 猜文件，步数烧在找位置上 | ✅ 间接（候选回显压缩漫游，§2.2.1） |
+| 14182 turn 超时（`no_verify` 桶） | 1/5 | Turn 级预算/收尾问题 | 否 → 主方案 P4 / W5 |
+| 4/5 `patch_not_resolved`（找到了也改了，官方仍未过） | — | **修复正确性**：缺「复现→修→复跑」相位与增量验证深度 | 否 → 主方案 Wave 2 W1/W4 |
+
+三条核心判断：
+
+1. **自我排除与短板重合**：本文 v2 §7 口径是「SWE 临时 Work 默认不建」——即评测测的产品恰好没有本索引；而 `d459ca51` 显示评测**最大的可测短板（Locate 段）正是本索引的唯一主责能力**。继续默认不建，等于放着已设计好的解药不进对照组。  
+2. **索引不是评测银弹**：resolve 的另一半（改对逻辑、复现验证）在主方案 Wave 2（W1/W3/W4/W5），优先级不因本文变化；本文只认领 Locate 段指标（fuse 率、incomplete 数、找位置的步数），**不承诺 resolve 直接翻正**——瓶颈可能在 fuse 修复后转移，这本身就是双轨要回答的问题。  
+3. **修订方向**：v3 把 §7 从「默认不建」改写为「**评测瞬态索引 + 双轨可测**」（构建在 StartTurn 之前、纯内存、失败回落现行为），并给 §2.2 补 **incomplete 候选回显契约**（§2.2.1）。全部改动不加工具名、不改交互逻辑、不动 Turn 路径速率（§8 红线映射不变）。
+
+**验收前置（归因探针，先于一切开关）**：现有指标只知道 fuse 失败了、不知道**为什么**失败。须先给 Locate 融合失败加原因分桶（进主方案 §7.6 探针清单）：
+
+```text
+locate_fuse_fail_reason ∈
+  no_workspace_symbol_match   # LSP 两跳无候选（预期主桶；索引直接可救）
+  definition_null             # 有候选但 definition 确认为空（索引只能部分救）
+  lsp_failed | lsp_timeout    # 基建故障（索引救不了，另修）
+```
+
+该探针纯观测、不改行为；没有它，索引 on/off 的差值无法归因，双轨结论不可信。
+
+### 0.4 进程边界与成熟架构（v4 · 2026-08-12 实战复盘）
+
+> **总判断：同进程冷启动可以作为骨架验证消费面，但不是成熟产品形态。成熟目标 = 独立 indexer 生产、runtime 只消费——与 Cursor / SCIP / ctags 的共性一致。**
+
+#### 0.4.1 现有问题（已观测，非推测）
+
+E1 落地后 n5（`workspace_index=true`，`parallel=2`）暴露的不是「tree-sitter 算法太慢」，而是 **部署拓扑错误**：
+
+| 观测 | 含义 |
+|------|------|
+| 空闲单文件 parse ≈ 毫秒级；负载下 60s 预算常 `done≈4/900` | **假慢**：CPU/线程被 Turn、模型流、Jedi、写库挤占，不是语法解析本身要数秒/文件 |
+| 双题同时 `first byte timeout` → DB `TimeoutError` / `QueryCanceledError` → 成片 `turn.failed` | 索引与 agent 主环 **同进程互抢**，连带拖垮 Postgres 连接与事件写路径 |
+| `LSP start failed (jedi)` 与 `search_codebase` 后失败叠加 | Locate 确认步与冷启动叠在同一条性命攸关的执行带上 |
+| 单题 `start_turn` `ReadTimeout`（隔离后不再拖垮整场） | HTTP 受理面也被同机负载拖住 |
+| 看板曾误报「已编入」而 API 镜像陈旧 | 发布判据问题（已修）；与索引拓扑正交，但说明评测环境对「是否真在测目标代码」敏感 |
+
+结论：**把全仓 walk+parse 放进 `agent-runtime` 与 `_run_turn` 同居，违反「索引面 / 交互面分离」的成熟规律**（主方案 §7.2 / 本文 §8 R4 的精神）。`asyncio.to_thread` + 独立线程池只能减缓事件循环饿死，**不能**提供进程级隔离与独立扩缩。
+
+#### 0.4.2 思路（对标什么）
+
+| 参照 | 成熟规律 | 落到本仓 |
+|------|----------|----------|
+| **Cursor** codebase index | 旁路/客户端后台建索引；对话路径 **消费** 已有符号面；Merkle/content-hash **增量对账**，不全量互殴；「很快」= 先可用 + 后台变全，不是答话进程里同步建仓 | 索引 **不** 与 StartTurn / 模型流 / Jedi 抢同一进程；增量语义已在 §4，缺的是 **进程边界** |
+| **SCIP / LSIF** | **索引器与查询端解耦**：indexer 产出可丢弃快照，IDE/服务只读 | `work_ast_*` + 内存投影 = 快照；**生产端应是独立 worker** |
+| **ctags** | 外部工具生成 defs 表，编辑器只查 | 同构：defs-only 表；runtime = 编辑器侧 |
+| **Zed** | 热路径毫秒级单文件 parse | 保留为 stale 回落（§4.1），**不是**全仓冷启动的宿主 |
+
+一句话：**生产（parse/walk/hash/upsert）与消费（lookup / Locate 粗筛）必须是两条生命线。** Runtime 是 Agent 的交互面与 LSP 宿主；它只该：投递任务、加载投影、回答查询。
+
+不采用的「够用」捷径（可作过渡，**不得**写成终态）：
+
+- 仅把评测改为 `parallel=1` 假装问题解决；  
+- 仅加长 60s 预算、幻想同进程下能「建完再稳」；  
+- StartTurn await 全仓 ready（否决 13 / R1）；  
+- 在 runtime 内再叠更多线程「看起来像异步」。
+
+#### 0.4.3 目标解决方案（成熟拓扑）
+
+```text
+                    ┌─────────────────────────────────────┐
+  checkout / 工具钩子 │  agent-api / agent-runtime（交互面） │
+  dirty path ───────►│  · enqueue(work_id, root, gen)      │
+                     │  · 内存投影 lookup（热路径）         │
+                     │  · Locate 漏斗消费（§2.2）           │
+                     │  · 永不在本进程做全仓 parse          │
+                     └──────────────┬──────────────────────┘
+                                    │ 队列（PG SKIP LOCKED /
+                                    │  Redis / NATS；实现选型见下）
+                                    ▼
+                     ┌─────────────────────────────────────┐
+                     │  agent-ast-indexer（索引面 · 旁路）   │
+                     │  · walk code_only + hash + parse    │
+                     │  · 批量写 work_ast_* 或 eval 投影 IPC │
+                     │  · 独立 CPU/内存配额；可水平扩副本   │
+                     │  · 进度写 meta（GUI/轮询仍读 runtime）│
+                     └─────────────────────────────────────┘
+```
+
+**契约（写死）：**
+
+| 项 | 约定 |
+|----|------|
+| Runtime 职责 | `enqueue` / `status` / `purge` 编排；**唯一查询面仍是进程内投影**（R3）；投影来源 = DB 快照加载 **或** indexer 推送的 generation 包 |
+| Indexer 职责 | 冷启动 + 增量 parse；写 DB（产品态）或写共享投影介质（评测 memory-only 可用 mmap/临时快照文件 + runtime 加载） |
+| 隔离 | compose 独立服务（推荐）或至少 **独立进程**（同机不同 PID）；禁止再把 `run_cold_start` 绑进 uvicorn worker 与 Turn 同环 |
+| 优先级 | Indexer nice/cgroup 可低于 runtime；**丢进度可以，拖死 Turn 不行** |
+| 分阶段可查 | 先索引 `.py`/已打开路径 → 标 `stale` 可查 → 再补全；对齐 Cursor「先可用」 |
+| 动态预算 | `budget_s = clamp(f(n_code_files), min, max)` 由 **indexer** 执行；封顶防墙钟爆炸；**不能**替代进程隔离 |
+| 评测态 | 仍禁止 StartTurn await ready（否决 13）；但 indexer 旁路后，Turn 与建索引可真并行而不互杀——这才是测「有索引的 coding 质量」的前提 |
+| 队列选型 | 首期可用 Postgres `FOR UPDATE SKIP LOCKED` 任务表（与本仓 meta 同库、运维简单）；流量起来再迁专用队列——**接口稳定，传输可换** |
+
+**落地步（记 A6，不挡 E1 消费面验证）：** 见 §9。E1 在 A6 落地前可继续用同进程 job 做 **消费面/探针** 冒烟，但 **双轨定论跑与 parallel>1 的正式臂，以 A6 为目标拓扑**；文档与看板不得把同进程挤兑下的失败归因成「索引无价值」。
 
 ---
 
@@ -80,7 +186,7 @@ v1 草案的三处不成熟与修正：
 - 不因 GUI 点「写作→Agent」同步全仓 rebuild。  
 - 不新增模型需要主动学会点的工具名（`search_codebase` / `grep` 契约不变，仅内部粗筛升级）。  
 - 不做 references 图 / 调用图（归 LSP；ctags 教训：糙 refs 比没有更伤信任）。  
-- SWE/ops-l1 临时 Work **默认不建**（或极短 TTL）——评测主链仍见主方案（LSP + 词面）。
+- SWE/ops-l1 临时 Work 不走产品态全量生命周期（不落 DB、无 GUI、无 GC）——**v3 起改为「评测瞬态索引」按 §7 双轨可控启用**；修复正确性主链仍见主方案 Wave 2。
 
 ### 1.3 与主方案文档的分工
 
@@ -132,6 +238,19 @@ v1 草案的三处不成熟与修正：
 2. **收益可测**：同一 golden 对照「索引 on/off」的 Locate 墙钟与 definitions 命中率即可验收（§9 A3）。  
 3. **失败面不扩大**：任何索引故障 = 回到今日行为，交互逻辑零变化。
 
+#### 2.2.1 v3 增补：incomplete 候选回显 + 排序与查询归一化契约
+
+`d459ca51` 的失血形态是「Locate 落空 → 词面漫游烧步数」（§0.3 行 3）。因此当索引有候选但 **LSP definition 确认失败/超时/为空** 时，不许把候选整个扔掉：
+
+| 项 | 契约 |
+|---|---|
+| 候选回显 | 结果仍 `locate_incomplete=true`（否决 3 不变，**绝不**标成 `definitions[]`），但附 `candidates[]`：`path:line kind \| 单行源码`（行协议同主方案 §9.4），标 `source=ast_index`、`confirmed=false`；top-k 截断（建议 5） |
+| 价值 | 模型下一步直接 `read_file` 最可能的文件，替代 30+ 次 read/grep 漫游；与主方案 W3（span 失配回显候选）**同一手法**——失败结果必须可行动 |
+| 排序 | ① 精确名匹配 > 限定名尾段链匹配 > 大小写不敏感 > 前缀；② 同级按 kind：`class`/顶层 `def` > method > 顶层赋值；③ 再按路径深度浅优先（`src/` 优于 `tests/`、`examples/` 的启发式仅作 tie-break，禁止按仓库定制） |
+| 查询归一化 | issue 文本里的符号常是限定形态：`astropy.io.fits.Card` 用**尾段**（`Card`）查倒排、用限定链过滤/加权；`Card.fromstring` 用容器字段匹配（method 挂在哪个 class 下） |
+| 投影结构影响 | postings 条目须带 `container`（所属 class/module 链）——对应 §5.1 symbols blob 增 `ct` 字段 |
+| 反过拟合 | 排序规则全局一致；**禁止**用 gold patch 调排序、禁止题级/仓级特判（承主方案 §8.4） |
+
 ### 2.3 其余消费面（只读、按需、后置）
 
 | 消费者 | 形态 | 排期 |
@@ -144,17 +263,31 @@ v1 草案的三处不成熟与修正：
 
 ## 3. 生命周期
 
+### 3.0 部署拓扑：Indexer 生产 · Runtime 消费（v4）
+
+§0.4 的落点。生命周期状态机（§3.3）与消费契约（§2）不变；**变的是谁执行 walk/parse**：
+
+| 阶段 | Runtime | Indexer |
+|------|---------|---------|
+| 启用 / rebuild | 写任务行（或 RPC enqueue），立即返回 | 领取任务，advisory/单飞按 `work_id` |
+| building | 只读 meta 进度供 GUI/轮询 | walk → hash → parse → 批量 upsert / 投影包 |
+| ready / stale | **加载或热替换内存投影**；Locate 只读投影 | 空闲或处理脏队列 |
+| 工具改文件 | 通道 ① **只投递 path**（不 parse） | debounce 后重 parse 该文件 |
+| purge / Work 结束 | 编排 purge；丢本地投影 | 取消 inflight；删快照 |
+
+过渡期（A6 前）：代码路径仍可在 runtime 内跑 `run_cold_start`（E1 已如此），但架构评审与排期必须以本节为准，禁止把过渡实现写成终态。
+
 ### 3.1 冷启动
 
 ```text
 Work 启用 Agent 索引（首次进入 agent-workbench 或显式开启）
-  → advisory-lock 单飞 enqueue 异步 job（复用 index_scheduler 单飞先例；不挡 StartTurn / 首 token）
-  → 走 work_root（复用现有 ignore 规则：.git/.venv/node_modules/dist/…，与 grep 排除表同源）
-  → 每文件一趟顺带完成：读取 → content-hash → tree-sitter 抽符号（def/class/method/顶层赋值等 definitions）
-       · 解析用 asyncio.to_thread + semaphore 限并发（建议 2–4）；单文件失败跳过不崩 job
-       · 不支持语言 / 超大文件（>1MB 或行数上限）→ 记 lang=skipped，只存 hash 供失效判断
-  → 每 N 文件（如 200）一事务批量 upsert work_ast_files + 更新 meta 进度
-  → 写内存投影
+  → runtime enqueue 到 indexer（advisory-lock / 任务单飞；不挡 StartTurn / 首 token）
+  → indexer 走 work_root（ignore 与 grep 同源；默认 code_only：仅 language_for_code_path 可映射后缀）
+  → 每文件一趟：读取 → content-hash → tree-sitter 抽 definitions
+       · 解析在 indexer 进程内线程池限并发（建议 2–4）；单文件失败跳过不崩 job
+       · 不支持语言 / 超大文件 → lang=skipped，只存 hash
+       · 分阶段：先 Python（及已打开路径）→ 投影可查（stale/ready）→ 再补其它语言
+  → 每 N 文件批量 upsert work_ast_files + meta；runtime 按 generation 加载/热替换投影
   → status: cold → building (files_done/files_total) → ready | error
 ```
 
@@ -164,7 +297,7 @@ Agent 工作区与 `sources/` 的关键差异：**变更的主要制造者就是
 
 | 通道 | 触发 | 精度 | 成本 |
 |------|------|------|------|
-| **① 工具钩子（主）** | `edit_file` / `write_file` / 删除类工具**成功后**，同进程将 path 投入脏队列 | 精确到文件，零延迟 | ~0（一次 enqueue） |
+| **① 工具钩子（主）** | `edit_file` / `write_file` / 删除类工具**成功后**，runtime 将 path **入队**（不在本进程 parse） | 精确到文件，零延迟 | ~0（一次 enqueue） |
 | **② `run_command` 后轻扫** | `run_command` 成功返回后，对 work_root 做一次 mtime+size 快速比对（只比投影，不读内容）；变更者入脏队列；超时间预算（如 200ms）则中断并标 `scan_pending`，留给通道 ③ | 文件级 | 有上限，off-loop |
 | **③ 低频轮询兜底** | 周期（如 30–60s，仅该 Work 有活跃 agent Session 时）mtime+size 全扫；复用 `sources_watch.py` 的 poll+debounce 模式（明确不依赖 inotify，Docker/WSL 一致） | 兜住外部改动（宿主编辑器、git 操作、容器外脚本） | 与 sources watch 同量级 |
 
@@ -237,7 +370,7 @@ CREATE TABLE work_ast_files (
     content_hash  text NOT NULL,
     mtime_ns      bigint NOT NULL,
     size          bigint NOT NULL,
-    symbols       jsonb NOT NULL,           -- [{"n":name,"k":kind,"l":line,"c":col,"el":end_line}, …]
+    symbols       jsonb NOT NULL,           -- [{"n":name,"k":kind,"l":line,"c":col,"el":end_line,"ct":container}, …]（ct=所属 class/module 链，供 §2.2.1 限定名/方法匹配）
     generation    bigint NOT NULL,
     PRIMARY KEY (work_id, path)
 );
@@ -301,13 +434,52 @@ GUI 点击「写作」
 
 ---
 
-## 7. 与 SWE / Ops 评测
+## 7. 与 SWE / Ops 评测（v3 重写：从「默认不建」到「瞬态索引 + 双轨可测」）
+
+### 7.1 口径变更与公平性辨析
+
+v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness 工作区无预建索引、避免评测特权）。`d459ca51` 归因（§0.3）暴露该口径的两个问题：
+
+1. **测的不是产品**：真实用户的 Work 会有本索引（§3 生命周期），评测 Work 却没有——评测在测一个能力被阉割的产品，`locate_fuse=0.364` 部分是自我设限的结果。  
+2. **短板与主责重合**：评测最大可测短板（Locate 段）恰是本索引唯一主责，继续排除等于放弃唯一直接杠杆。
+
+公平性辨析（为什么这不算作弊）：
+
+| 质疑 | 回答 |
+|------|------|
+| 是否评测特权？ | 索引是**产品固有能力**（Cursor 用户天然有 codebase index），对 300 题一视同仁，与题目内容无关 |
+| 是否预注入？ | 否。索引只改 `search_codebase`/`grep` 的**工具内部粗筛**与失败候选字段，不向 prompt 注入任何字节（否决 8 / 主方案否决 8 均不触碰） |
+| 是否 gold 泄漏？ | 否。构建输入只有 checkout 后的 worktree 本身；排序规则全局一致、禁止题级调优（§2.2.1 反过拟合行） |
+| 与「无预建索引」口径矛盾？ | 该口径真正要防的是**题级预热的检索特权**（如预算好的 embedding / 预注入骨架）。本索引 = 从当前 worktree 现算的语法事实，任何选手用 ctags 都能得到，属工具链而非先验知识 |
+
+### 7.2 评测瞬态索引 profile（eval-ephemeral）
+
+与产品态（§3–§6 全量生命周期）不同，评测态是其**最小可信子集**：
 
 | 项 | 约定 |
 |----|------|
-| 默认 | ops-l1 / SWE 临时 Work **不建** 或短 TTL、不面向评测 GUI（与「harness 工作区无预建索引」口径一致） |
-| 评测主链 | 仍以主方案为准：LSP + 词面 + Wave 2 揉合；官方 resolve 靠 harness |
-| 若未来开浅索引 | 不得挡 Turn；不得把索引缺失当 case fail；若开，须进主方案 §8.2 双轨对照（索引 on/off 是新的 structural 变量，禁止跨配置比数字） |
+| 构建时机 | 套件层每题 **checkout 完成后、StartTurn 已受理之后** enqueue（Turn 先 202，索引在 Turn 期间异步补齐）；**不阻塞开题**——StartTurn 时索引尚未 ready 则走 §2.2 分支 ②，ready 后自然生效 |
+| 存续 | **仅内存投影，不写 `work_ast_*` 表**（与主方案 §3.6「SWE 临时 Work 默认不写 AST DB」兼容——变更的是建不建，不是持久化口径）；Work 结束即弃，无 GC 负担 |
+| 增量 | **仅通道 ①**（工具钩子）。SWE worktree 的全部变更来自 runtime 工具（`edit_file`/`write_file`/`run_command` 内脚本极少改源码），通道 ②③ 不进评测态 |
+| GUI | 不挂进度（评测无面板诉求；§6 全部不适用） |
+| 预算 | **动态** `clamp(f(n_code_files), min, max)`（由 indexer 执行；建议 min≈45s、max≈180–240s）；硬封顶防套件墙钟爆炸；超限 → partial/`stale`，已建部分可查。固定 60s 仅作 A6 前过渡默认，**不是**成熟口径 |
+| 失败面 | job 失败/超时 = 该题走现行为（今日基线），**不得**把索引缺失记 case fail、不得重试阻塞套件 |
+| 开关 | 只存在于**基准 runner 配置**（`suites.coding.workspace_index`）；**默认 `true`**（产品同构臂）；对照基线时改 `false`。不回流产品语义——与主方案「structural on/off 只存在于 runner」同一先例 |
+
+### 7.3 双轨协议与决策规则（事先写死，防拍脑袋）
+
+| 项 | 约定 |
+|----|------|
+| 协议 | 承主方案 §8.2 全部条款（同模型/同 prompt/同种子/禁网/复现存档）；`workspace_index` 是新的 structural 变量，**禁止跨配置比数字** |
+| 样本 | n5 冒烟（与 `d459ca51` 同 5 题，可直接对基线）→ lite-50 定论 |
+| 主判据（Locate 段，本文认领） | `locate_fuse_ok_rate`（基线 0.364）· `n_grep_locate_incomplete`（基线 7）· 融合失败原因分桶（§0.3 探针）· 首次命中 gold 涉及文件前的 steps/reads |
+| 从判据 | 官方 `resolve_rate` 差值 · 步数 p50 · TTFB / assemble_ms 持平（R1/R3 旁证） |
+| 决策规则 | ① fuse 显著升 **且** resolve 差值 ≥ 0 且速率不劣化 → 评测默认 on，进 lite-300；② fuse 显著升但 resolve 不动 → 定位瓶颈已解除、瓶颈转移至修复正确性——索引保持 on（它已买到步数与定位），**火力回主方案 Wave 2 W1/W4**；③ fuse 不升 → 查失败原因分桶：若主桶本就是 `definition_null`/`lsp_failed` 而非 `no_workspace_symbol_match`，说明缺口判断错了，索引回默认 off 并复盘 §0.3 归因 |
+| 反过拟合 | 不用 gold patch 调排序/建索引参数；lite-50 子集冻结（主方案 §8.4） |
+
+### 7.4 与主方案排期的关系
+
+不阻塞、不抢主方案 Wave 2（N1 的 W1/W3/W4/W5 仍是 resolve 的最大杠杆）。建议挂点：**N2（n5 复跑）之后作为并行轨（记 N2.5）**，复用同一批跑次做 index on/off 双轨，避免另起炉灶烧配额。归因探针（§0.3）应随 N2 一并落，先于开关。
 
 ---
 
@@ -318,7 +490,7 @@ GUI 点击「写作」
 | **R1** 不挡受理/TTFB | 冷启动/增量全部异步 job；StartTurn 不 await 索引任何状态 | `turn.accepted` 前 await building 完成 |
 | **R2** 首 token 前无同步模型 | 索引纯语法层，无任何模型调用 | 用 LLM 抽符号 |
 | **R3** 热路径 CPU 毫秒级 | 查询 = 内存 dict/倒排查找；候选校验 = 单次 stat；**热路径零 DB 查询、零同步 parse**（stale 单文件即时 parse 是毫秒级且有 timeout） | 查询现查 Postgres；查询触发重建 |
-| **R4** 重活异步 | parse/hash/DB 写全在 job（to_thread + 限并发）；通道 ② 轻扫有硬预算 | `search_codebase` 内 rebuild |
+| **R4** 重活异步 | parse/hash/DB 写在 **indexer 进程**（§3.0）；runtime 热路径零全仓 parse；通道 ② 轻扫有硬预算 | `search_codebase` 内 rebuild；在 uvicorn/Turn 同环跑全仓冷启动 |
 | **R5** 可测才合并 | 每步验收见 §9；A3 需 Locate 墙钟 + definitions 命中率 on/off 对照 | 「手感快了」无对照合入 |
 
 交互逻辑零变化清单：
@@ -332,16 +504,20 @@ GUI 点击「写作」
 
 ## 9. 落地序（未排进 Wave 2 主轨；每步独立可回退）
 
+> **v3 排序**：A0→A1→A3 快车道 + E1 评测轨。**v4 增补**：A6（indexer 进程解耦）为产品与正式双轨的 **架构正确性步**；E1 消费面可先于 A6 冒烟，但 parallel>1 / 定论跑以 A6 为目标。
+
 | 步 | 内容 | 触点（实施时） | 验收 |
 |----|------|----------------|------|
-| A0 | 表结构（§5.1）+ meta 读写 + 内存投影骨架（load/replace/lookup） | 新增 `structural/workspace_index/`（store / projection）；Alembic 独立迁移 | 单测：upsert/恢复/ACL 过滤；与 RAG 迁移零交集 |
+| A0 | 表结构（§5.1，symbols blob 含 `ct` 容器字段）+ meta 读写 + 内存投影骨架（load/replace/lookup，postings 带 container） | 新增 `structural/workspace_index/`（store / projection）；Alembic 独立迁移 | 单测：upsert/恢复/ACL 过滤；与 RAG 迁移零交集 |
 | A1 | 单 Work 冷启动 job（walk + hash + parse + 批量 upsert）+ 进度 GET endpoint | job + `main.py` 路由；解析复用 chunking/tree-sitter 基建 | GUI 显示 building→ready；R1 延迟对照持平（TTFB / assemble_ms 不变） |
-| A2 | 通道 ① 工具钩子 + 脏队列 + content-hash 失效 + stale 单文件回落 | `edit_file`/`write_file` handler 成功路径加 enqueue（一行级侵入） | 编辑后 generation 变；篡改 mtime 场景下 hash 仍判对；delete 后查询无幽灵条目 |
-| A3 | **Locate 粗筛接入**（§2.2，焊进 `search_codebase` 符号路径） | `tools/core/tools.py` Locate 分支加「索引候选 → LSP 确认」前置 | golden：索引 on/off 双轨——definitions 命中率不降、符号 Locate p50 墙钟下降；索引 off 行为与今日逐字节一致；**不以任何新工具调用数为 KPI** |
+| A2 | 通道 ① 工具钩子 + 脏队列 + content-hash 失效 + stale 单文件回落（评测态只需此步的钩子部分） | `edit_file`/`write_file` handler 成功路径加 enqueue（一行级侵入） | 编辑后 generation 变；篡改 mtime 场景下 hash 仍判对；delete 后查询无幽灵条目 |
+| A3 | **Locate 粗筛接入**（§2.2）+ **incomplete 候选回显与排序**（§2.2.1）+ 融合失败原因分桶探针（§0.3） | `tools/core/tools.py` Locate 分支加「索引候选 → LSP 确认」前置；结果 schema 增可选 `candidates[]`（仅 incomplete 时出现） | golden：索引 on/off 双轨——definitions 命中率不降、符号 Locate p50 墙钟下降、`candidates[]` 排序单测（限定名/方法/大小写）；索引 off 行为与今日逐字节一致；**不以任何新工具调用数为 KPI** |
+| **E1**（评测轨，v3 新增） | 评测瞬态索引 profile（§7.2）：runner 开关 + checkout 后 enqueue + 纯内存 + 仅通道 ①；随后 n5 → lite-50 双轨（§7.3） | 基准 runner 配置 + 套件层 checkout 尾部一处 enqueue；runtime 侧复用 A0/A1/A3 | 双轨判据（§7.3）：`locate_fuse_ok_rate` 对 0.364 基线、`n_grep_locate_incomplete` 对 7 基线、失败原因分桶入档、resolve 差值与速率持平；决策按 §7.3 三分支执行，结论入 §12 修订记录 |
+| **A6**（架构，v4 新增） | **独立 `agent-ast-indexer` 进程/服务**（§0.4 / §3.0）：任务队列 + runtime 仅投影消费；分阶段可查；动态预算；从 runtime 移除全仓 `run_cold_start` 同环执行 | compose 新服务或 sidecar；enqueue API；投影加载/热替换；脏 path 只入队 | `parallel=2` 下 Turn 无成片 DB/模型超时归因于索引；indexer CPU 与 runtime 可分 cgroup；空闲冷启动逼近方案预估（数百 py / 数十秒量级）；杀 indexer 不影响已 ready 投影的 lookup |
 | A4 | 通道 ② run_command 轻扫（预算内）+ 通道 ③ 低频兜底轮询 | `run_command` handler 尾部 + lifespan 定时任务（仿 sources_watch） | 外部 `git checkout` 后 ≤1 轮询周期内追平；轻扫超预算正确转 `scan_pending` 不阻塞工具返回 |
 | A5 | 多 Work LRU 淘汰 + GC purge job + 多账号 ACL 端到端 | 淘汰策略 + purge | 跨用户不可见；删 Work 级联清；投影内存有上限且淘汰可观测 |
 
-依赖关系：A0→A1→A2 串行；A3 依赖 A1（有索引可查即可，不依赖 A2/A4 全齐）；A4/A5 可与 A3 并行。主方案 Wave 2（Verify/失败恢复等）**不依赖** 本文任何一步。
+依赖关系：A0→A1 串行；A3 依赖 A1；**E1 依赖 A1+A3（+A2 钩子）**；**A6 依赖 A1 语义稳定，可与 E1 冒烟并行开发，正式双轨/parallel>1 以 A6 为准**；A4/A5 可与其后并行。主方案 Wave 2 **不依赖** 本文任何一步。
 
 ---
 
@@ -349,15 +525,20 @@ GUI 点击「写作」
 
 | 风险 | 对策 |
 |------|------|
-| 大仓冷启动 parse 耗时/耗 CPU | 限并发（2–4）+ 单文件超时跳过 + 文件数/大小上限进 settings；building 期 Locate 走现行为，用户无感 |
+| 大仓冷启动 parse 耗时/耗 CPU | **A6 进程隔离** + indexer 限并发（2–4）+ 单文件超时跳过 + 动态预算封顶 + 分阶段可查；building 期 Locate 走现行为或已建子集 |
+| **同进程索引挤兑 Turn**（v4） | 禁止终态同环冷启动（§0.4）；A6 独立 indexer；正式 parallel>1 双轨不以同进程臂定论 |
 | 投影内存膨胀（多 Work 常驻） | 惰性加载 + LRU/idle 淘汰（与 LSP 池 600s 同纪律）；每 Work 投影字节数进观测 |
 | hash 计算成本 | 冷启动与重 parse 时和读文件同趟算（读都读了）；扫描快速路径只 stat 不读内容 |
 | 索引候选与 LSP 结果不一致 | LSP 永远权威；候选仅决定「先看哪个文件」；错位候选被确认步自然过滤 |
 | Postgres 写放大 | per-file blob + 批量事务（冷启动每 200 文件一批；增量单文件单事务，天然低频） |
-| 多副本重复建索引 | advisory lock 单飞（复用 index_scheduler 先例）；无锁副本只读 |
+| 多副本重复建索引 | advisory lock / 任务单飞（indexer 侧）；无锁副本只读 |
 | tree-sitter 语言覆盖不全 | `lang=skipped` 显式记录，只存 hash；该文件 Locate 走现行为；语言矩阵 Python-first（与主方案 §9.1 一致），grammar 构建期打入镜像，禁运行时下载 |
 | `run_command` 轻扫误判/超时 | 只比 stat 不读内容；硬预算 + `scan_pending` 显式转兜底轮询；误判由 hash 权威层兜住 |
 | 与用户/agent 并发编辑竞态 | 投影替换为原子操作（整 FileEntry 换）；查询时校验（§4.1）是最后一道闸 |
+| **评测冷启动挤占套件墙钟**（v3） | A6 后与 Turn 真并行；动态预算封顶；StartTurn 永不等待索引（§7.2） |
+| **`candidates[]` 噪声误导模型**（v3） | top-k=5 截断 + kind/限定名排序 + 附单行源码供模型自判；双轨若 steps/reads 反而变差 → 收紧 k 或只在 `no_workspace_symbol_match` 桶回显 |
+| **评测公平性质疑**（v3） | §7.1 辨析入档：产品固有能力、零预注入、零 gold 输入；on/off 双轨永久保留，差值透明可复现 |
+| **双轨差值无法归因**（v3） | 失败原因分桶探针（§0.3）先于开关落地；无探针不跑双轨 |
 
 ---
 
@@ -372,7 +553,12 @@ GUI 点击「写作」
 7. 为索引新增模型需主动学会点的工具名（重蹈 adoption 覆辙）。  
 8. runtime 启动时全量加载所有 Work 投影（必须惰性 + 淘汰）。  
 9. 仅凭 mtime 判「未变」而跳过 hash 权威裁决路径（checkout 场景必失效）。  
-10. 在索引里存 references / 调用图并对外提供（糙 refs 伤信任；归 LSP）。
+10. 在索引里存 references / 调用图并对外提供（糙 refs 伤信任；归 LSP）。  
+11. **把评测瞬态索引做成预注入**（repo map / 符号骨架文本进 prompt）——评测态只许工具内部粗筛 + `candidates[]` 结果字段（§7.1 公平性辨析的前提）。  
+12. **用 gold patch 调候选排序 / 建索引参数，或做题级、仓级排序特判**（§2.2.1 / 主方案 §8.4）。  
+13. **StartTurn 等待评测索引 ready**，或把索引构建失败记为 case fail（评测态失败面 = 今日基线，§7.2）。  
+14. **将全仓 AST 冷启动/增量 parse 留在 runtime 与 Turn 同进程作为产品终态**（§0.4）；同进程仅允许作 A6 前过渡，不得写入「已成熟」口径。  
+15. **用 parallel=1 或加长预算掩盖同进程挤兑，并据此宣称索引无价值 / 双轨定论**（须在 A6 拓扑或明确标注过渡臂下复跑）。
 
 ---
 
@@ -380,5 +566,8 @@ GUI 点击「写作」
 
 | 日期 | 修订 |
 |------|------|
-| 2026-08-11 | 从 `coding-structural-intelligence.md` §3.3.2–3.3.5 等拆出独立草案：工作区异步 AST、GUI、Work/DB、与 RAG/LSP/评测隔离 |
+| 2026-08-11 | 从 `coding-structural-intelligence.md` §3.3.2–3.3.5 等拆出独立草案：工作区异步 AST、GUI/Work/DB、与 RAG/LSP/评测隔离 |
 | 2026-08-11 | **v2（深度评审修订）**：新增 §0.1 可行性结论（三处不成熟：消费面未闭环 / 失效仅 mtime / 存储粒度未定，逐一修正）与 §0.2 成熟参照系（Cursor 对账、ctags defs-only、Zed 即时 parse 回落、SCIP 世代、Aider repo map 数据源）；§2 重写为 AST×LSP×词面结合面矩阵 + Locate 漏斗消费契约（焊进 `search_codebase`/`grep`，零新工具名）；§3.2 变更捕获三通道（工具钩子主 / run_command 轻扫 / 低频轮询兜底，对齐 sources_watch poll 先例）；§4 content-hash 权威失效 + 惰性恢复对账；§5 存储定型 per-file JSONB blob + 内存投影唯一查询面 + DDL 草案（含 works 无级联删除现状的显式 purge 要求）；§6.2 进度先复用 meta 快照 + 轮询先例（SSE 后置）；§8 R1–R5 映射与交互零感知清单；§9 落地序细化为 A0–A5（触点 + 验收 + 依赖）；§10 风险表；否决清单扩至 10 条 |
+| 2026-08-12 | **v3（评测归因修订，基于 `d459ca51` 官方 resolve 0/5）**：新增 §0.3 逐指标归因——交卷链/编辑护栏健康，短板集中在 Locate 段（`locate_fuse=0.364`、`incomplete=7`、3/5 题 `grep_ok=0`、Locate 落空后词面漫游烧步数），恰为本索引主责，而 v2 §7「SWE 默认不建」使评测测的是能力被阉割的产品；修复正确性（4/5 `patch_not_resolved`）与 Turn 超时（14182）明确归主方案 Wave 2 / P4，本文不认领。§7 重写为「评测瞬态索引」：checkout 后 StartTurn 前异步构建、纯内存不落 DB、仅通道 ①、失败回落今日基线、开关只在 runner 配置；含公平性辨析（产品固有能力 ≠ 预注入 ≠ gold 泄漏）与三分支决策规则（fuse↑且 resolve≥0 → 默认 on；fuse↑但 resolve 平 → 火力回主方案 W1/W4；fuse 不升 → 按失败原因分桶复盘）。§2.2.1 新增 incomplete 候选回显与排序契约（`candidates[]` 不冒充 definitions、限定名/方法归一化、投影加 container）；§5.1 symbols blob 增 `ct` 字段。§9 排序变更：A0→A1→A3 快车道 + 评测轨 E1（挂主方案 N2 后并行，记 N2.5），A4/A5 后置不进评测轨；归因探针（融合失败原因分桶）列为双轨前置。§1.2 旧口径同步更新；风险表增 4 行、否决清单增 11–13 |
+| 2026-08-12 | **v3 代码落地**：`query.py` 归一化/排序；`SymbolRec.ct` + parse 容器链；`locate` incomplete→`candidates[]` + `locate_fuse_fail_reason`；CSI 探针分桶；`run_cold_start(memory_only=)`；runtime rebuild/purge；`suites.coding.workspace_index` + L1 checkout 后 fire-and-forget enqueue；单测覆盖 incomplete/candidates、memory-only、qualified sort |
+| 2026-08-12 | **v4（进程边界）**：§0.4 实战复盘——同进程冷启动在 parallel≥2 下与 Turn/Jedi/DB 互抢致假慢与成片 `turn.failed`；思路对标 Cursor/SCIP「索引器与查询端解耦」；目标拓扑 `agent-ast-indexer` 生产、runtime 只消费。新增 §3.0；修订 §3.1/通道①/§7.2 动态预算/§8 R4；§9 增 A6；风险与否决 14–15；明确 parallel=1/加长预算仅为过渡，不得作终态或错误归因依据 |

@@ -108,12 +108,23 @@ class DirtyQueue:
 
         registry = get_projection_registry()
         proj = registry.get(work_id)
-        try:
-            meta = await self.store.get_meta(work_id, owner_user_id=owner)
-        except Exception:
-            logger.exception("workspace_ast dirty meta read failed")
-            return
+        from app.structural.workspace_index.service import get_ast_index_service
+
+        ephemeral = get_ast_index_service().is_ephemeral(work_id) or (
+            proj is not None and bool(proj.meta.ephemeral)
+        )
+
+        meta: IndexMeta | None = None
+        if proj is not None:
+            meta = proj.meta
+        if meta is None and not ephemeral:
+            try:
+                meta = await self.store.get_meta(work_id, owner_user_id=owner)
+            except Exception:
+                logger.exception("workspace_ast dirty meta read failed")
+                return
         if meta is None:
+            # No projection and no DB meta — nothing to refresh (cold / disabled).
             return
 
         generation = int(meta.generation) + 1
@@ -122,12 +133,15 @@ class DirtyQueue:
 
         for ev in events:
             if ev.kind == DirtyKind.DELETE:
-                try:
-                    await self.store.delete_file(
-                        work_id, ev.path, owner_user_id=owner
-                    )
-                except Exception:
-                    logger.exception("workspace_ast delete_file failed path=%s", ev.path)
+                if not ephemeral:
+                    try:
+                        await self.store.delete_file(
+                            work_id, ev.path, owner_user_id=owner
+                        )
+                    except Exception:
+                        logger.exception(
+                            "workspace_ast delete_file failed path=%s", ev.path
+                        )
                 if proj is not None:
                     proj.drop_file(ev.path)
                 continue
@@ -141,18 +155,18 @@ class DirtyQueue:
                 max_file_bytes=max_bytes,
             )
             if entry is None:
-                # Missing after upsert → treat as delete.
-                try:
-                    await self.store.delete_file(
-                        work_id, ev.path, owner_user_id=owner
-                    )
-                except Exception:
-                    pass
+                if not ephemeral:
+                    try:
+                        await self.store.delete_file(
+                            work_id, ev.path, owner_user_id=owner
+                        )
+                    except Exception:
+                        pass
                 if proj is not None:
                     proj.drop_file(ev.path)
                 continue
 
-            # content-hash authority: skip DB write when unchanged.
+            # content-hash authority: skip write when unchanged.
             if proj is not None:
                 old = proj.file_entry(ev.path)
                 if old is not None and old.content_hash == entry.content_hash:
@@ -162,31 +176,38 @@ class DirtyQueue:
         new_status = IndexStatus.STALE if prefer_turn else IndexStatus.READY
         if meta.status == IndexStatus.BUILDING:
             new_status = IndexStatus.BUILDING
+        bumped = bool(processed) or any(e.kind == DirtyKind.DELETE for e in events)
         new_meta = IndexMeta(
             work_id=work_id,
             owner_user_id=owner,
-            status=new_status if processed or events else meta.status,
-            generation=generation if processed or any(e.kind == DirtyKind.DELETE for e in events) else meta.generation,
+            status=new_status if bumped else meta.status,
+            generation=generation if bumped else meta.generation,
             files_total=meta.files_total,
             files_done=meta.files_done,
             error=None,
+            ephemeral=bool(meta.ephemeral or ephemeral),
         )
         if processed:
-            try:
-                await self.store.upsert_files_batch(
-                    work_id, processed, owner_user_id=owner, meta=new_meta
-                )
-            except Exception:
-                logger.exception("workspace_ast dirty upsert failed")
-                return
+            if not ephemeral:
+                try:
+                    await self.store.upsert_files_batch(
+                        work_id, processed, owner_user_id=owner, meta=new_meta
+                    )
+                except Exception:
+                    logger.exception("workspace_ast dirty upsert failed")
+                    return
             if proj is not None:
                 for entry in processed:
                     proj.upsert_file(entry, meta=new_meta)
+            elif ephemeral:
+                # Projection dropped mid-turn — nothing else to do.
+                pass
         elif any(e.kind == DirtyKind.DELETE for e in events):
-            try:
-                await self.store.upsert_meta(new_meta)
-            except Exception:
-                logger.exception("workspace_ast dirty meta bump failed")
+            if not ephemeral:
+                try:
+                    await self.store.upsert_meta(new_meta)
+                except Exception:
+                    logger.exception("workspace_ast dirty meta bump failed")
             if proj is not None:
                 proj.meta = new_meta
 
@@ -215,7 +236,7 @@ def notify_path_changed(
     from app.structural.workspace_index.service import get_ast_index_service
 
     root = Path(work_root)
-    if not get_ast_index_service().enabled_for_work(work_root=root):
+    if not get_ast_index_service().enabled_for_work(work_id=work_id, work_root=root):
         return
     get_dirty_queue().enqueue(
         work_id,

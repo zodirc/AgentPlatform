@@ -419,6 +419,10 @@ def _attach_coding_artifact_extras(
         "span_fail_with_candidates_rate",
         "bucket_share_no_patch",
         "bucket_share_patch_no_apply",
+        "n_locate_fuse_no_ws_symbol",
+        "n_locate_fuse_definition_null",
+        "n_locate_fuse_lsp_failed",
+        "n_locate_fuse_lsp_timeout",
     ):
         if key in metrics:
             scorecard[key] = metrics[key]

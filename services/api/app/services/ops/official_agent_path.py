@@ -696,7 +696,9 @@ async def _start_turn(
 
 
 def _exc_text(exc: BaseException) -> str:
-    text = str(exc).strip() or repr(exc)
+    text = str(exc).strip()
+    if not text:
+        text = repr(exc)
     return f"{type(exc).__name__}: {text}"
 
 
@@ -2301,6 +2303,9 @@ async def run_coding_l1(
     )
 
     cfg = load_suites()
+    coding_cfg = (cfg.get("suites") or {}).get("coding") or {}
+    # E1 dual-track: suites.coding.workspace_index on|off (§7 eval-ephemeral).
+    workspace_index_on = bool(coding_cfg.get("workspace_index"))
     root = await _pull_with_live_logs(
         "SWE-bench Lite",
         lambda: pull_swebench(cfg, force=False),
@@ -2328,6 +2333,7 @@ async def run_coding_l1(
         "infer_mode": "platform_turn",
         "harness": bool(run_harness),
         "checkout_repo": bool(checkout_repo),
+        "workspace_index": bool(workspace_index_on),
         "sample_tier": (
             "anchor"
             if selected_tier in {"n25", "full300"} and run_harness
@@ -2395,179 +2401,269 @@ async def run_coding_l1(
             nonlocal nonempty, done_count
             iid = str(inst.get("instance_id"))
             async with sem:
-                work = await _create_l1_work(
-                    str(run_root / iid.replace("/", "_")),
-                    name=f"l1-swe-{iid}"[:120],
-                )
+                # INFRA: entire case body isolated — StartTurn / transport
+                # failures must not abort asyncio.gather / suite.
+                work = None
+                turn: dict[str, Any] | None = None
                 has_repo = False
                 mirror_hit = False
-                # checkout_repo is required (enforced above); materialize must succeed
-                # before StartTurn — no silent problem.md-only fallback.
+                patch = ""
+                patch_source = "none"
+                err: str | None = None
+                l2: dict[str, Any] = {
+                    "case_id": iid,
+                    "arm": "free",
+                    "patch_source": "none",
+                    "terminal_state": "failed",
+                    "has_repo": False,
+                    "mirror_hit": False,
+                    "bucket": "infra_error",
+                }
                 try:
-                    meta = await asyncio.to_thread(
-                        materialize_instance_repo, inst, work.work_root
+                    work = await _create_l1_work(
+                        str(run_root / iid.replace("/", "_")),
+                        name=f"l1-swe-{iid}"[:120],
                     )
-                    has_repo = True
-                    mirror_hit = bool(meta.get("mirror_hit"))
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=(
-                            f"[L1] checkout {iid} mirror_hit={mirror_hit} "
-                            f"repo={meta.get('repo')} commit={meta.get('base_commit')}"
-                        ),
-                    )
-                except Exception as exc:  # noqa: BLE001
-                    err = f"checkout_failed: {exc}"
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=f"[L1] checkout failed {iid}: {exc}",
-                    )
-                    l2 = {
-                        "case_id": iid,
-                        "arm": "free",
-                        "patch_source": "none",
-                        "checkout_failed": True,
-                        "has_repo": False,
-                        "mirror_hit": False,
-                        "terminal_state": "failed",
-                        "bucket": "checkout_failed",
-                    }
-                    async with case_lock:
-                        patches[iid] = ""
-                        patch_sources[iid] = "none"
-                        session.add_case(
-                            iid,
-                            status="fail",
-                            error=err,
-                            metrics={"nonempty": 0.0},
-                            extra={
-                                "bucket": "checkout_failed",
-                                "l2": l2,
-                                "has_repo": False,
-                                "mirror_hit": False,
-                            },
+                    # checkout_repo is required (enforced above); materialize must succeed
+                    # before StartTurn — no silent problem.md-only fallback.
+                    try:
+                        meta = await asyncio.to_thread(
+                            materialize_instance_repo, inst, work.work_root
                         )
-                        done_count += 1
+                        has_repo = True
+                        mirror_hit = bool(meta.get("mirror_hit"))
                         await _emit(
                             on_progress,
                             "log",
-                            message=f"[L1] coding {done_count}/{len(ordered)} {iid}",
+                            message=(
+                                f"[L1] checkout {iid} mirror_hit={mirror_hit} "
+                                f"repo={meta.get('repo')} commit={meta.get('base_commit')}"
+                            ),
                         )
-                    await _emit_fail(on_progress, iid, error=err)
-                    return
+                    except Exception as exc:  # noqa: BLE001
+                        err = f"checkout_failed: {exc}"
+                        await _emit(
+                            on_progress,
+                            "log",
+                            message=f"[L1] checkout failed {iid}: {exc}",
+                        )
+                        l2 = {
+                            "case_id": iid,
+                            "arm": "free",
+                            "patch_source": "none",
+                            "checkout_failed": True,
+                            "has_repo": False,
+                            "mirror_hit": False,
+                            "terminal_state": "failed",
+                            "bucket": "checkout_failed",
+                        }
+                        async with case_lock:
+                            patches[iid] = ""
+                            patch_sources[iid] = "none"
+                            session.add_case(
+                                iid,
+                                status="fail",
+                                error=err,
+                                metrics={"nonempty": 0.0},
+                                extra={
+                                    "bucket": "checkout_failed",
+                                    "l2": l2,
+                                    "has_repo": False,
+                                    "mirror_hit": False,
+                                },
+                            )
+                            done_count += 1
+                            await _emit(
+                                on_progress,
+                                "log",
+                                message=f"[L1] coding {done_count}/{len(ordered)} {iid}",
+                            )
+                        await _emit_fail(on_progress, iid, error=err)
+                        return
 
-                sess = await session_svc.create_session(
-                    scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
-                )
-                hint = _coding_prompt(inst, has_repo=True)
-                turn, _run = await _start_turn(
-                    session_id=sess["id"],
-                    scenario_id=scenario_id,
-                    message=hint,
-                    work=work,
-                    model_override=model,
-                )
-                patch_source = "none"
-                events: list[dict[str, Any]] = []
-                try:
-                    events = await _wait_turn_verbose(
-                        turn["id"],
-                        on_progress=on_progress,
-                        label=f"swe.{iid}",
-                        timeout=1800.0,
+                    sess = await session_svc.create_session(
+                        scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
                     )
-                    patch = ""
-                    if has_repo:
-                        patch = patch_from_git_diff(work.work_root)
-                        if patch.strip():
-                            patch_source = "git_diff"
-                    if not str(patch or "").strip():
-                        patch = patch_from_events(events)
-                        if patch.strip():
-                            patch_source = "propose" if "@@" in patch else "fenced"
-                    if not str(patch or "").strip():
-                        patch = patch_from_work_root(work.work_root)
-                        if patch.strip():
-                            patch_source = "write"
-                    incomplete = (
-                        patch_hunks_incomplete(patch) if patch.strip() else False
+                    hint = _coding_prompt(inst, has_repo=True)
+                    # Accept StartTurn first so AST cold-start cannot starve the
+                    # 202 path (R1). Index still builds during the Turn (E1).
+                    turn, _run = await _start_turn(
+                        session_id=sess["id"],
+                        scenario_id=scenario_id,
+                        message=hint,
+                        work=work,
+                        model_override=model,
                     )
-                    applies = (
-                        patch_apply_check(work.work_root, patch)
-                        if has_repo and patch.strip()
-                        else None
+                    if workspace_index_on:
+                        try:
+                            from app.services.admin import workspace as workspace_svc
+
+                            tenant = {
+                                "work_id": str(work.id),
+                                "work_root": str(work.work_root),
+                                "owner_user_id": SYSTEM_USER_ID,
+                            }
+                            asyncio.create_task(
+                                workspace_svc.ast_index_rebuild(
+                                    memory_only=True, tenant=tenant
+                                )
+                            )
+                            await _emit(
+                                on_progress,
+                                "log",
+                                message=(
+                                    f"[L1] workspace_index enqueue (ephemeral) {iid}"
+                                ),
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "workspace_index enqueue failed for %s",
+                                iid,
+                                exc_info=True,
+                            )
+
+                    patch_source = "none"
+                    events: list[dict[str, Any]] = []
+                    try:
+                        events = await _wait_turn_verbose(
+                            turn["id"],
+                            on_progress=on_progress,
+                            label=f"swe.{iid}",
+                            timeout=1800.0,
+                        )
+                        patch = ""
+                        if has_repo:
+                            patch = patch_from_git_diff(work.work_root)
+                            if patch.strip():
+                                patch_source = "git_diff"
+                        if not str(patch or "").strip():
+                            patch = patch_from_events(events)
+                            if patch.strip():
+                                patch_source = (
+                                    "propose" if "@@" in patch else "fenced"
+                                )
+                        if not str(patch or "").strip():
+                            patch = patch_from_work_root(work.work_root)
+                            if patch.strip():
+                                patch_source = "write"
+                        incomplete = (
+                            patch_hunks_incomplete(patch) if patch.strip() else False
+                        )
+                        applies = (
+                            patch_apply_check(work.work_root, patch)
+                            if has_repo and patch.strip()
+                            else None
+                        )
+                        reject_reason = None
+                        if patch.strip() and incomplete:
+                            reject_reason = "hunks_incomplete"
+                        elif patch.strip() and applies is False:
+                            reject_reason = "apply_check_failed"
+                        accepted_patch = "" if reject_reason else patch
+                        read_stats = read_file_stats_from_events(events)
+                        csi = csi_probes_from_events(events)
+                        l2 = {
+                            "case_id": iid,
+                            "turn_id": str(turn["id"]),
+                            "arm": "free",
+                            "patch_source": patch_source,
+                            "patch_applies": applies,
+                            "patch_incomplete": incomplete,
+                            "patch_rejected": reject_reason,
+                            "patch_chars": len(patch) if patch else 0,
+                            "ran_tests": ran_tests_from_events(events),
+                            **read_stats,
+                            **csi,
+                            "steps": step_count_from_events(events),
+                            "terminal_state": terminal_state_from_events(events),
+                            "mirror_hit": mirror_hit,
+                            "has_repo": has_repo,
+                        }
+                        l2["bucket"] = classify_bucket("coding", l2)
+                        err = None
+                        patch = accepted_patch
+                    except Exception as exc:  # noqa: BLE001
+                        raw = patch_from_work_root(work.work_root) if has_repo else ""
+                        if not raw:
+                            raw = (
+                                patch_from_git_diff(work.work_root) if has_repo else ""
+                            )
+                        patch_source = "git_diff" if raw.strip() else "none"
+                        applies = (
+                            patch_apply_check(work.work_root, raw)
+                            if has_repo and raw.strip()
+                            else None
+                        )
+                        reject_reason = None
+                        if raw.strip() and patch_hunks_incomplete(raw):
+                            reject_reason = "hunks_incomplete"
+                        elif raw.strip() and applies is False:
+                            reject_reason = "apply_check_failed"
+                        patch = "" if reject_reason else raw
+                        err = _exc_text(exc)
+                        csi = csi_probes_from_events(events)
+                        l2 = {
+                            "case_id": iid,
+                            "turn_id": str(turn["id"]),
+                            "patch_source": patch_source,
+                            "patch_applies": applies,
+                            "patch_rejected": reject_reason,
+                            "terminal_state": "failed",
+                            "has_repo": has_repo,
+                            "mirror_hit": mirror_hit,
+                            **csi,
+                        }
+                        l2["bucket"] = classify_bucket("coding", l2)
+                except Exception as exc:  # noqa: BLE001 — case isolation, no re-raise
+                    err = _exc_text(exc)
+                    logger.warning(
+                        "L1 coding case failed iid=%s err=%s", iid, err, exc_info=True
                     )
-                    # Accept only patches that would apply on clean HEAD (harness
-                    # semantics). Reject truncated / non-apply from predictions so
-                    # resolve_rate is not polluted by garbage diffs; keep diagnostics.
-                    reject_reason = None
-                    if patch.strip() and incomplete:
-                        reject_reason = "hunks_incomplete"
-                    elif patch.strip() and applies is False:
-                        reject_reason = "apply_check_failed"
-                    accepted_patch = "" if reject_reason else patch
-                    read_stats = read_file_stats_from_events(events)
-                    csi = csi_probes_from_events(events)
                     l2 = {
                         "case_id": iid,
-                        "turn_id": str(turn["id"]),
+                        "turn_id": str(turn["id"]) if turn else "",
                         "arm": "free",
                         "patch_source": patch_source,
-                        "patch_applies": applies,
-                        "patch_incomplete": incomplete,
-                        "patch_rejected": reject_reason,
-                        "patch_chars": len(patch) if patch else 0,
-                        "ran_tests": ran_tests_from_events(events),
-                        **read_stats,
-                        **csi,
-                        "steps": step_count_from_events(events),
-                        "terminal_state": terminal_state_from_events(events),
-                        "mirror_hit": mirror_hit,
-                        "has_repo": has_repo,
-                    }
-                    l2["bucket"] = classify_bucket("coding", l2)
-                    err = None
-                    patch = accepted_patch
-                except Exception as exc:  # noqa: BLE001
-                    raw = patch_from_work_root(work.work_root) if has_repo else ""
-                    if not raw:
-                        raw = patch_from_git_diff(work.work_root) if has_repo else ""
-                    patch_source = "git_diff" if raw.strip() else "none"
-                    applies = (
-                        patch_apply_check(work.work_root, raw)
-                        if has_repo and raw.strip()
-                        else None
-                    )
-                    reject_reason = None
-                    if raw.strip() and patch_hunks_incomplete(raw):
-                        reject_reason = "hunks_incomplete"
-                    elif raw.strip() and applies is False:
-                        reject_reason = "apply_check_failed"
-                    patch = "" if reject_reason else raw
-                    err = str(exc)
-                    csi = csi_probes_from_events(events)
-                    l2 = {
-                        "case_id": iid,
-                        "turn_id": str(turn["id"]),
-                        "patch_source": patch_source,
-                        "patch_applies": applies,
-                        "patch_rejected": reject_reason,
                         "terminal_state": "failed",
                         "has_repo": has_repo,
                         "mirror_hit": mirror_hit,
-                        **csi,
+                        "failure_message": err[:500],
+                        "bucket": "infra_error",
                     }
-                    l2["bucket"] = classify_bucket("coding", l2)
+                    patch = ""
+                    patch_source = "none"
+
                 # Disk hygiene: drop heavy tree after extract (keep mirror).
-                if has_repo:
+                if work is not None and has_repo:
                     try:
                         await asyncio.to_thread(
                             cleanup_worktree, work.work_root, keep_problem=True
                         )
                     except Exception:  # noqa: BLE001
-                        logger.warning("cleanup_worktree failed for %s", iid, exc_info=True)
+                        logger.warning(
+                            "cleanup_worktree failed for %s", iid, exc_info=True
+                        )
+                    if workspace_index_on:
+                        # Never block the suite on purge (runtime may be busy indexing).
+                        async def _purge_ast(wid: str = str(work.id), wr: str = str(work.work_root)) -> None:
+                            try:
+                                from app.services.admin import workspace as workspace_svc
+
+                                await workspace_svc.ast_index_purge(
+                                    tenant={
+                                        "work_id": wid,
+                                        "work_root": wr,
+                                        "owner_user_id": SYSTEM_USER_ID,
+                                    }
+                                )
+                            except Exception:  # noqa: BLE001
+                                logger.warning(
+                                    "workspace_index purge failed for %s",
+                                    iid,
+                                    exc_info=True,
+                                )
+
+                        asyncio.create_task(_purge_ast())
 
                 async with case_lock:
                     patches[iid] = patch
@@ -2581,7 +2677,7 @@ async def run_coding_l1(
                         error=err,
                         metrics={"nonempty": 1.0 if patch.strip() else 0.0},
                         extra={
-                            "turn_id": str(turn["id"]),
+                            "turn_id": str(turn["id"]) if turn else "",
                             "patch_source": patch_source,
                             "bucket": l2.get("bucket"),
                             "l2": l2,
@@ -2739,8 +2835,8 @@ async def run_coding_l1(
         return manifest
     except Exception as exc:  # noqa: BLE001
         logger.exception("L1 coding failed")
-        await _emit_fail(on_progress, "suite=coding", error=str(exc))
-        session.finish(status="failed", error=str(exc))
+        await _emit_fail(on_progress, "suite=coding", error=_exc_text(exc))
+        session.finish(status="failed", error=_exc_text(exc))
         raise
 
 

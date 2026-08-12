@@ -707,6 +707,10 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     n_grep_locate_ok = 0
     n_grep_locate_failed = 0
     n_grep_locate_incomplete = 0
+    n_locate_fuse_no_ws_symbol = 0
+    n_locate_fuse_definition_null = 0
+    n_locate_fuse_lsp_failed = 0
+    n_locate_fuse_lsp_timeout = 0
     n_search_locate = 0
     n_search_locate_ok = 0
     n_edit = 0
@@ -739,6 +743,15 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             is_locate = tool == "search_codebase" or redirected == "grep"
             if not is_locate:
                 continue
+            fuse_reason = str(payload.get("locate_fuse_fail_reason") or "")
+            if fuse_reason == "no_workspace_symbol_match":
+                n_locate_fuse_no_ws_symbol += 1
+            elif fuse_reason == "definition_null":
+                n_locate_fuse_definition_null += 1
+            elif fuse_reason == "lsp_failed":
+                n_locate_fuse_lsp_failed += 1
+            elif fuse_reason == "lsp_timeout":
+                n_locate_fuse_lsp_timeout += 1
             if tool == "grep" or redirected == "grep":
                 n_grep_locate += 1
                 if locate_status == "failed":
@@ -807,6 +820,10 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "n_grep_locate_ok": n_grep_locate_ok,
         "n_grep_locate_failed": n_grep_locate_failed,
         "n_grep_locate_incomplete": n_grep_locate_incomplete,
+        "n_locate_fuse_no_ws_symbol": n_locate_fuse_no_ws_symbol,
+        "n_locate_fuse_definition_null": n_locate_fuse_definition_null,
+        "n_locate_fuse_lsp_failed": n_locate_fuse_lsp_failed,
+        "n_locate_fuse_lsp_timeout": n_locate_fuse_lsp_timeout,
         "n_search_locate": n_search_locate,
         "n_search_locate_ok": n_search_locate_ok,
         "n_edit": n_edit,
@@ -859,6 +876,10 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
         "bucket_share_patch_no_apply": float(n_patch_no_apply) / float(n_cases),
         "n_grep_locate_failed": float(_sum("n_grep_locate_failed")),
         "n_grep_locate_incomplete": float(_sum("n_grep_locate_incomplete")),
+        "n_locate_fuse_no_ws_symbol": float(_sum("n_locate_fuse_no_ws_symbol")),
+        "n_locate_fuse_definition_null": float(_sum("n_locate_fuse_definition_null")),
+        "n_locate_fuse_lsp_failed": float(_sum("n_locate_fuse_lsp_failed")),
+        "n_locate_fuse_lsp_timeout": float(_sum("n_locate_fuse_lsp_timeout")),
     }
 
 

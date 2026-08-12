@@ -42,6 +42,20 @@ def test_baked_content_matches_deploy_then_commit(
     assert worktree_sig.baked_content_matches(baked, [rel]) is False
 
 
+def test_host_to_image_path_api_runtime() -> None:
+    assert (
+        worktree_sig.host_to_image_path("api", "services/api/app/services/admin/workspace.py")
+        == "/app/app/services/admin/workspace.py"
+    )
+    assert (
+        worktree_sig.host_to_image_path(
+            "runtime", "services/runtime/app/structural/workspace_index/query.py"
+        )
+        == "/app/app/structural/workspace_index/query.py"
+    )
+    assert worktree_sig.host_to_image_path("web", "services/web/src/App.tsx") is None
+
+
 def test_module_dirty_commit_after_deploy_same_bytes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -59,6 +73,12 @@ def test_module_dirty_commit_after_deploy_same_bytes(
     monkeypatch.setattr(
         "plan._run",
         lambda cmd, timeout=8: (0, "", ""),
+    )
+    # web has no container path map → verify skips; digest exemption still applies
+    monkeypatch.setattr(
+        worktree_sig,
+        "verify_image_files",
+        lambda *a, **k: ("skip", []),
     )
 
     dirty, detail = _module_dirty(
@@ -99,3 +119,67 @@ def test_module_dirty_commit_after_deploy_changed_bytes(
     )
     assert dirty is True
     assert "已提交" in detail
+
+
+def test_module_dirty_digest_match_but_image_stale(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Digest says baked; container /app is stale → must stay dirty."""
+    monkeypatch.setattr(worktree_sig, "ROOT", tmp_path)
+    rel = "services/api/app/services/admin/workspace.py"
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    path.write_text("def ast_index_rebuild(): ...\n", encoding="utf-8")
+    digest = worktree_sig.content_digest([rel])
+
+    monkeypatch.setattr("plan._committed_since", lambda _sha: [])
+    monkeypatch.setattr("plan._run", lambda cmd, timeout=8: (0, "", ""))
+    monkeypatch.setattr(
+        worktree_sig,
+        "verify_image_files",
+        lambda *a, **k: ("mismatch", [rel]),
+    )
+
+    dirty, detail = _module_dirty(
+        "api",
+        ["services/api/"],
+        deployed_sha="abc123",
+        running={"agent-api"},
+        worktree_files=[rel],
+        include_worktree=True,
+        deployed_entry={"git_sha": "abc123", "worktree_digest": digest},
+    )
+    assert dirty is True
+    assert "镜像未同步" in detail
+    assert "强制重建" in detail
+
+
+def test_module_dirty_digest_match_and_image_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(worktree_sig, "ROOT", tmp_path)
+    rel = "services/api/app/services/admin/workspace.py"
+    path = tmp_path / rel
+    path.parent.mkdir(parents=True)
+    path.write_text("def ast_index_rebuild(): ...\n", encoding="utf-8")
+    digest = worktree_sig.content_digest([rel])
+
+    monkeypatch.setattr("plan._committed_since", lambda _sha: [])
+    monkeypatch.setattr("plan._run", lambda cmd, timeout=8: (0, "", ""))
+    monkeypatch.setattr(
+        worktree_sig,
+        "verify_image_files",
+        lambda *a, **k: ("match", []),
+    )
+
+    dirty, detail = _module_dirty(
+        "api",
+        ["services/api/"],
+        deployed_sha="abc123",
+        running={"agent-api"},
+        worktree_files=[rel],
+        include_worktree=True,
+        deployed_entry={"git_sha": "abc123", "worktree_digest": digest},
+    )
+    assert dirty is False
+    assert "已编入当前镜像" in detail

@@ -19,13 +19,18 @@ class IndexStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class SymbolRec:
-    """One definition row inside a per-file JSONB blob (§5.1)."""
+    """One definition row inside a per-file JSONB blob (§5.1).
+
+    ``container`` (`ct` in JSON) is the enclosing class/module chain for
+    qualified / method matching (§2.2.1).
+    """
 
     name: str
     kind: str
     line: int
     col: int = 1
     end_line: int | None = None
+    container: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -36,16 +41,20 @@ class SymbolRec:
         }
         if self.end_line is not None:
             out["el"] = int(self.end_line)
+        if self.container:
+            out["ct"] = self.container
         return out
 
     @classmethod
     def from_json(cls, raw: dict[str, Any]) -> SymbolRec:
+        ct = raw.get("ct")
         return cls(
             name=str(raw.get("n") or ""),
             kind=str(raw.get("k") or "symbol"),
             line=int(raw.get("l") or 1),
             col=int(raw.get("c") or 1),
             end_line=int(raw["el"]) if raw.get("el") is not None else None,
+            container=str(ct) if ct else None,
         )
 
 
@@ -101,6 +110,7 @@ class IndexMeta:
     files_total: int = 0
     files_done: int = 0
     error: str | None = None
+    ephemeral: bool = False  # eval-only memory projection (§7.2)
 
     def to_status_dict(self) -> dict[str, Any]:
         return {
@@ -111,6 +121,7 @@ class IndexMeta:
             "files_total": int(self.files_total),
             "files_done": int(self.files_done),
             "error": self.error,
+            "ephemeral": bool(self.ephemeral),
         }
 
 
@@ -123,3 +134,4 @@ class SymbolHit:
     name: str
     content_hash: str
     generation: int
+    container: str | None = None

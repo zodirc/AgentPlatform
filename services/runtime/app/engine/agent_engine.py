@@ -125,6 +125,15 @@ def _compact_locate_event_meta(result: dict[str, Any]) -> dict[str, Any]:
         out["locate_status"] = "incomplete"
     if result.get("degraded_reason"):
         out["degraded_reason"] = str(result.get("degraded_reason"))[:256]
+    # §0.3 fuse-fail reason buckets (probe; observation only).
+    fuse = result.get("locate_fuse_fail_reason")
+    if fuse:
+        out["locate_fuse_fail_reason"] = str(fuse)[:64]
+    cands = result.get("candidates")
+    if isinstance(cands, list) and cands:
+        out["candidate_count"] = len(cands)
+        if result.get("candidates_from"):
+            out["candidates_from"] = str(result.get("candidates_from"))[:32]
     return out
 
 

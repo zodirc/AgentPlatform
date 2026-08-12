@@ -174,6 +174,51 @@ async def ast_index_status(
     return resp.json()
 
 
+async def ast_index_rebuild(
+    *,
+    memory_only: bool = False,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    """Fire-and-forget AST cold start (E1 eval-ephemeral uses memory_only=True)."""
+    base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {**_tenant_params(tenant or {})}
+    if memory_only:
+        params["memory_only"] = "true"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/ast-index/rebuild",
+                params=params or None,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def ast_index_purge(
+    *,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    """Explicit GC purge for a Work AST index (§4.2 / A5)."""
+    base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {**_tenant_params(tenant or {})}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/ast-index/purge",
+                params=params or None,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
 async def sync_sources(
     *,
     force: bool = False,

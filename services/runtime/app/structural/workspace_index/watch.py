@@ -50,7 +50,7 @@ async def light_scan_after_command(
     if work_id is None or not owner_user_id:
         return {"status": "skipped", "reason": "no_tenant"}
     service = get_ast_index_service()
-    if not service.enabled_for_work(work_root=work_root):
+    if not service.enabled_for_work(work_id=work_id, work_root=work_root):
         return {"status": "skipped", "reason": "disabled"}
 
     proj = get_projection_registry().get(work_id)

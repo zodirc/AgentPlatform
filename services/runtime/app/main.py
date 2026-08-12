@@ -560,9 +560,13 @@ async def workspace_ast_index_rebuild(
     work_root: str | None = None,
     owner_user_id: str | None = None,
     visibility_seed: str | None = None,
+    memory_only: bool = False,
     _: None = Depends(verify_internal_token),
 ):
-    """Enqueue cold-start rebuild (async; R1-safe)."""
+    """Enqueue cold-start rebuild (async; R1-safe).
+
+    ``memory_only=true`` → eval-ephemeral profile (§7.2): no DB writes, ops path allowed.
+    """
     from uuid import UUID
 
     from app.services.workspace_scope import workspace_tenant_scope
@@ -580,9 +584,42 @@ async def workspace_ast_index_rebuild(
         root = current_work_root_path()
         service = get_ast_index_service()
         accepted = service.enqueue_cold_start(
-            wid, owner_user_id=owner_user_id, work_root=root
+            wid,
+            owner_user_id=owner_user_id,
+            work_root=root,
+            memory_only=bool(memory_only),
         )
-        return {"accepted": accepted, "work_id": work_id}
+        return {
+            "accepted": accepted,
+            "work_id": work_id,
+            "memory_only": bool(memory_only),
+        }
+
+
+@workspace_router.post("/ast-index/purge", status_code=status.HTTP_200_OK)
+async def workspace_ast_index_purge(
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """Explicit GC purge for a Work (§4.2 / A5)."""
+    from uuid import UUID
+
+    from app.services.workspace_scope import workspace_tenant_scope
+    from app.structural.workspace_index.service import get_ast_index_service
+
+    if not work_id or not owner_user_id:
+        raise HTTPException(status_code=400, detail="work_id and owner_user_id required")
+    try:
+        wid = UUID(work_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="invalid work_id") from exc
+
+    with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+        await get_ast_index_service().purge_work(wid)
+        return {"purged": True, "work_id": work_id}
 
 
 @workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)

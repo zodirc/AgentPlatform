@@ -1,6 +1,7 @@
 """Definition extraction via tree-sitter (Python-first; regex fallback).
 
 Async/index path only — never call on StartTurn hot path (R3/R4).
+Symbols include optional ``container`` (enclosing class/module chain, §2.2.1).
 """
 
 from __future__ import annotations
@@ -30,6 +31,10 @@ _KIND_BY_NODE: dict[str, str] = {
     "mod_item": "module",
     "decorated_definition": "symbol",
 }
+
+_CONTAINER_KINDS = frozenset(
+    {"class", "interface", "struct", "enum", "module", "type", "impl"}
+)
 
 _DEF_NODE_TYPES = frozenset(_KIND_BY_NODE) | frozenset({"decorated_definition"})
 
@@ -65,14 +70,32 @@ def extract_definitions_for_path(path: Path | str, text: str) -> tuple[str, list
     return lang, symbols
 
 
-def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
+_PARSER_CACHE: dict[str, object] = {}
+
+
+def _get_cached_parser(language: str):
+    parser = _PARSER_CACHE.get(language)
+    if parser is not None:
+        return parser
     try:
         from tree_sitter_language_pack import get_parser
     except ImportError:
         return None
     try:
         parser = get_parser(language)
-        tree = parser.parse(text.encode("utf-8"))
+    except Exception:
+        return None
+    _PARSER_CACHE[language] = parser
+    return parser
+
+
+def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
+    parser = _get_cached_parser(language)
+    if parser is None:
+        return None
+    try:
+        raw = text.encode("utf-8")
+        tree = parser.parse(raw)  # type: ignore[union-attr]
     except Exception:
         return None
     root = tree.root_node
@@ -82,7 +105,7 @@ def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
     out: list[SymbolRec] = []
     seen: set[tuple[str, int, str]] = set()
 
-    def walk(node) -> None:
+    def walk(node, container_stack: list[str]) -> None:
         ntype = node.type
         if ntype in _DEF_NODE_TYPES:
             target = node
@@ -93,14 +116,18 @@ def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
                         target = child
                         kind = _KIND_BY_NODE[child.type]
                         break
-            name = _node_name(target, text)
+            name = _node_name(target, raw)
             if name:
+                # Nested function inside class → method.
+                if kind == "function" and container_stack:
+                    kind = "method"
                 line = int(target.start_point[0]) + 1
                 col = int(target.start_point[1]) + 1
                 end_line = int(target.end_point[0]) + 1
                 key = (name, line, kind)
                 if key not in seen:
                     seen.add(key)
+                    ct = ".".join(container_stack) if container_stack else None
                     out.append(
                         SymbolRec(
                             name=name,
@@ -108,25 +135,32 @@ def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
                             line=line,
                             col=col,
                             end_line=end_line,
+                            container=ct,
                         )
                     )
-            # Still walk children for nested methods / nested classes.
+                child_stack = list(container_stack)
+                if kind in _CONTAINER_KINDS:
+                    child_stack.append(name)
+                for child in node.children:
+                    walk(child, child_stack)
+                return
         for child in node.children:
-            walk(child)
+            walk(child, container_stack)
 
-    walk(root)
+    walk(root, [])
     return out
 
 
-def _node_name(node, text: str) -> str | None:
-    """Prefer an identifier / name field; fall back to first token on the def line."""
-    # tree-sitter named children often expose `name`.
+def _node_name(node, raw: bytes) -> str | None:
+    """Prefer an identifier / name field; fall back to first token on the def line.
+
+    ``raw`` is the UTF-8 bytes already used for ``parser.parse`` (avoid re-encode).
+    """
     try:
         name_node = node.child_by_field_name("name")
         if name_node is not None:
             start, end = name_node.start_byte, name_node.end_byte
-            raw = text.encode("utf-8")[start:end].decode("utf-8", errors="replace")
-            token = raw.strip()
+            token = raw[start:end].decode("utf-8", errors="replace").strip()
             if token:
                 return token.split(".")[-1]
     except Exception:
@@ -134,13 +168,12 @@ def _node_name(node, text: str) -> str | None:
     for child in node.children:
         if child.type in {"identifier", "type_identifier", "property_identifier"}:
             start, end = child.start_byte, child.end_byte
-            raw = text.encode("utf-8")[start:end].decode("utf-8", errors="replace")
-            if raw.strip():
-                return raw.strip()
-    # Last resort: first line token after def/class/func keywords.
+            token = raw[start:end].decode("utf-8", errors="replace").strip()
+            if token:
+                return token
     start = node.start_byte
     end = min(node.end_byte, start + 160)
-    snippet = text.encode("utf-8")[start:end].decode("utf-8", errors="replace")
+    snippet = raw[start:end].decode("utf-8", errors="replace")
     m = re.search(
         r"(?:def|class|function|func|fn|interface|type|struct|enum|mod)\s+([A-Za-z_][A-Za-z0-9_]*)",
         snippet,
@@ -153,21 +186,30 @@ def _node_name(node, text: str) -> str | None:
 def _extract_regex(text: str, *, language: str | None) -> list[SymbolRec]:
     out: list[SymbolRec] = []
     seen: set[tuple[str, int]] = set()
+    # (indent_len, class_name) stack for container.
+    class_stack: list[tuple[int, str]] = []
     for m in _PY_DEF_RE.finditer(text):
         name = m.group("name")
         kw = m.group("kw")
         indent = m.group("indent") or ""
+        indent_len = len(indent.expandtabs(8))
         line = text[: m.start()].count("\n") + 1
-        kind = "class" if kw == "class" else ("method" if indent else "function")
+        while class_stack and class_stack[-1][0] >= indent_len:
+            class_stack.pop()
+        if kw == "class":
+            kind = "class"
+            ct = ".".join(c for _, c in class_stack) or None
+            class_stack.append((indent_len, name))
+        else:
+            kind = "method" if indent else "function"
+            ct = ".".join(c for _, c in class_stack) or None
         key = (name, line)
         if key in seen:
             continue
         seen.add(key)
-        out.append(SymbolRec(name=name, kind=kind, line=line, col=1))
-    # Top-level assignment constants (Python-first; skip nested).
+        out.append(SymbolRec(name=name, kind=kind, line=line, col=1, container=ct))
     if language in {None, "python"}:
         for m in _ASSIGN_RE.finditer(text):
-            # Only column-0-ish assignments (no indent).
             line_start = text.rfind("\n", 0, m.start()) + 1
             if m.start() - line_start > 0:
                 continue

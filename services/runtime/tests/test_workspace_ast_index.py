@@ -55,6 +55,64 @@ def test_extract_definitions_python() -> None:
     kinds = {s.name: s.kind for s in symbols}
     assert kinds.get("Foo") == "class"
     assert kinds.get("baz") in {"function", "method"}
+    by_name = {s.name: s for s in symbols}
+    if "bar" in by_name:
+        assert by_name["bar"].kind == "method"
+        assert by_name["bar"].container == "Foo"
+        assert by_name["bar"].to_json().get("ct") == "Foo"
+
+
+def test_normalize_and_rank_qualified_query() -> None:
+    from app.structural.workspace_index.query import (
+        normalize_symbol_query,
+        rank_hits,
+    )
+    from app.structural.workspace_index.types import SymbolHit
+
+    nq = normalize_symbol_query("astropy.io.fits.Card")
+    assert nq.tail == "Card"
+    assert nq.container_hint == "fits"
+    nq2 = normalize_symbol_query("Card.fromstring")
+    assert nq2.tail == "fromstring"
+    assert nq2.container_hint == "Card"
+
+    hits = [
+        SymbolHit(
+            path="tests/test_card.py",
+            line=10,
+            col=1,
+            kind="class",
+            name="Card",
+            content_hash="a",
+            generation=1,
+            container=None,
+        ),
+        SymbolHit(
+            path="astropy/io/fits/card.py",
+            line=5,
+            col=1,
+            kind="class",
+            name="Card",
+            content_hash="b",
+            generation=1,
+            container="fits",
+        ),
+        SymbolHit(
+            path="astropy/io/fits/card.py",
+            line=40,
+            col=1,
+            kind="method",
+            name="fromstring",
+            content_hash="b",
+            generation=1,
+            container="Card",
+        ),
+    ]
+    ranked = rank_hits(hits, nq, limit=5)
+    assert ranked[0].path.startswith("astropy/")
+    method_hits = rank_hits(hits, nq2, limit=5)
+    assert method_hits[0].name == "fromstring"
+    assert method_hits[0].container == "Card"
 
 
 def test_projection_lookup_and_acl() -> None:
@@ -135,6 +193,19 @@ def test_walk_skips_venv(tmp_path: Path) -> None:
     assert file_skipped(Path("x.pyc"))
 
 
+def test_walk_code_only_skips_non_source(tmp_path: Path) -> None:
+    (tmp_path / "a.py").write_text("def a():\n  pass\n", encoding="utf-8")
+    (tmp_path / "README.rst").write_text("docs\n", encoding="utf-8")
+    (tmp_path / "data.fits").write_bytes(b"\x00" * 32)
+    code = walk_work_files(tmp_path, max_files=100, max_file_bytes=1_000_000, code_only=True)
+    rels = {p.relative_to(tmp_path).as_posix() for p in code}
+    assert rels == {"a.py"}
+    all_files = walk_work_files(
+        tmp_path, max_files=100, max_file_bytes=1_000_000, code_only=False
+    )
+    assert len(all_files) >= 3
+
+
 def test_parse_file_entry_and_hash(tmp_path: Path) -> None:
     path = tmp_path / "mod.py"
     path.write_text("class Widget:\n    pass\n", encoding="utf-8")
@@ -211,7 +282,7 @@ async def test_locate_via_ast_index_confirms_with_lsp(tmp_path: Path, monkeypatc
     get_projection_registry().put(proj)
 
     class StubService(AstIndexService):
-        def enabled_for_work(self, *, work_root=None) -> bool:
+        def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
             return True
 
         async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20):
@@ -264,7 +335,7 @@ async def test_locate_via_ast_index_falls_through_when_cold(monkeypatch, tmp_pat
     wid = uuid4()
 
     class ColdService(AstIndexService):
-        def enabled_for_work(self, *, work_root=None) -> bool:
+        def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
             return True
 
         async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20):
@@ -405,3 +476,142 @@ async def test_light_scan_marks_scan_pending_on_budget(tmp_path: Path, monkeypat
     text = path.read_text()
     assert 'down_revision = "0017_phase1l_audit_log"' in text
     assert "phase1m_work_ast_index.sql" in text
+
+
+@pytest.mark.asyncio
+async def test_locate_incomplete_echoes_candidates(tmp_path: Path, monkeypatch) -> None:
+    """§2.2.1: AST hits + empty LSP → candidates[] with locate_incomplete, never definitions."""
+    from app.structural.workspace_index.locate import (
+        FUSE_DEFINITION_NULL,
+        locate_via_ast_index,
+    )
+    from app.structural.workspace_index.projection import get_projection_registry
+    from app.structural.workspace_index.service import AstIndexService
+
+    wid = uuid4()
+    owner = "owner-1"
+    path = tmp_path / "svc.py"
+    path.write_text("class Widget:\n    pass\n", encoding="utf-8")
+    entry = parse_file_entry(path, work_root=tmp_path, generation=1, max_file_bytes=1_000_000)
+    assert entry is not None
+    meta = IndexMeta(
+        work_id=wid, owner_user_id=owner, status=IndexStatus.READY, generation=1
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([entry], meta=meta)
+    get_projection_registry().put(proj)
+
+    class StubService(AstIndexService):
+        def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
+            return True
+
+        async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20):
+            return proj.lookup(name, limit=limit, owner_user_id=owner_user_id), meta
+
+        async def ensure_projection(self, work_id, *, owner_user_id):
+            return proj
+
+    monkeypatch.setattr(
+        "app.structural.workspace_index.locate.get_ast_index_service",
+        lambda: StubService(),
+    )
+
+    async def empty_goto(*_a, **_k):
+        return {"locations": [], "meta": {}}
+
+    out = await locate_via_ast_index(
+        workspace=tmp_path,
+        symbol="Widget",
+        work_id=wid,
+        owner_user_id=owner,
+        goto=empty_goto,
+        timeout_s=5.0,
+        turn_id=None,
+    )
+    assert out is not None
+    assert out["locate_incomplete"] is True
+    assert out["definitions"] == []
+    assert out["candidates"]
+    assert out["candidates"][0]["source"] == "ast_index"
+    assert out["candidates"][0]["confirmed"] is False
+    assert out["locate_fuse_fail_reason"] == FUSE_DEFINITION_NULL
+
+
+@pytest.mark.asyncio
+async def test_memory_only_cold_start_skips_db(tmp_path: Path, monkeypatch) -> None:
+    from app.structural.workspace_index import job as job_mod
+    from app.structural.workspace_index.projection import get_projection_registry
+    from app.structural.workspace_index.types import IndexStatus
+
+    (tmp_path / "m.py").write_text("def hello():\n    return 1\n", encoding="utf-8")
+    wid = uuid4()
+    owner = "eval-owner"
+
+    class BoomStore:
+        async def ensure_meta(self, *a, **k):
+            raise AssertionError("memory_only must not touch DB")
+
+        async def upsert_meta(self, *a, **k):
+            raise AssertionError("memory_only must not touch DB")
+
+        async def upsert_files_batch(self, *a, **k):
+            raise AssertionError("memory_only must not touch DB")
+
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_max_files", 100)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_max_file_bytes", 1_000_000)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_parse_concurrency", 2)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_seconds", 30.0)
+
+    meta = await job_mod.run_cold_start(
+        work_id=wid,
+        owner_user_id=owner,
+        work_root=tmp_path,
+        store=BoomStore(),  # type: ignore[arg-type]
+        memory_only=True,
+    )
+    assert meta.ephemeral is True
+    assert meta.status in {IndexStatus.READY, IndexStatus.STALE}
+    proj = get_projection_registry().get(wid)
+    assert proj is not None
+    assert proj.lookup("hello", owner_user_id=owner)
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_dirty_flush_updates_projection(tmp_path: Path) -> None:
+    """§7.2 channel ① must refresh memory-only projection without DB meta."""
+    from app.structural.workspace_index.dirty import DirtyKind, DirtyQueue
+    from app.structural.workspace_index.projection import get_projection_registry
+    from app.structural.workspace_index.service import get_ast_index_service
+
+    wid = uuid4()
+    owner = "eval"
+    path = tmp_path / "w.py"
+    path.write_text("def old_name():\n    return 0\n", encoding="utf-8")
+    entry = parse_file_entry(
+        path, work_root=tmp_path, generation=1, max_file_bytes=1_000_000
+    )
+    assert entry is not None
+    meta = IndexMeta(
+        work_id=wid,
+        owner_user_id=owner,
+        status=IndexStatus.READY,
+        generation=1,
+        ephemeral=True,
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([entry], meta=meta)
+    get_projection_registry().put(proj)
+    get_ast_index_service().mark_ephemeral(wid)
+
+    path.write_text("def new_name():\n    return 1\n", encoding="utf-8")
+    q = DirtyQueue()
+    q.enqueue(
+        wid,
+        "w.py",
+        owner_user_id=owner,
+        work_root=tmp_path,
+        kind=DirtyKind.UPSERT,
+    )
+    await q._flush(wid)
+    assert proj.lookup("new_name", owner_user_id=owner)
+    assert not proj.lookup("old_name", owner_user_id=owner)

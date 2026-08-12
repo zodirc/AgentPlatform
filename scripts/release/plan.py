@@ -216,11 +216,13 @@ def _module_dirty(
         from worktree_sig import (  # type: ignore
             baked_content_matches,
             module_worktree_digest,
+            verify_image_files,
         )
     except ImportError:
         from scripts.release.worktree_sig import (  # type: ignore
             baked_content_matches,
             module_worktree_digest,
+            verify_image_files,
         )
 
     prev = ""
@@ -228,10 +230,28 @@ def _module_dirty(
         prev = str(deployed_entry.get("worktree_digest") or "").strip()
     baked_match = False
 
+    def _image_out_of_sync(paths: list[str], kind: str) -> tuple[bool, str] | None:
+        """If container bytes diverge from host, return a dirty verdict.
+
+        ``skip`` (no mapping / docker unavailable) keeps digest-only behavior.
+        """
+        if not paths or not cname:
+            return None
+        status, bad = verify_image_files(mod, paths, container=cname)
+        if status != "mismatch":
+            return None
+        sample = ", ".join(bad[:3])
+        more = f" 等{len(bad)}个文件" if len(bad) > 3 else ""
+        return True, f"镜像未同步{kind}（需强制重建）：{sample}{more}"
+
     # Local mode: uncommitted files already baked by last up-* should not stay dirty.
+    # Digest match alone is insufficient (Docker COPY cache can leave /app stale).
     if include_worktree and dirty_wt:
         cur = module_worktree_digest(prefixes, files=worktree_files)
         if prev and cur and prev == cur:
+            stale = _image_out_of_sync(dirty_wt, "工作区")
+            if stale is not None:
+                return stale
             dirty_wt = []
             baked_match = True
         elif prev == "" and cur == "":
@@ -239,6 +259,9 @@ def _module_dirty(
 
     # Same bytes later committed: digest still matches → not a real redeploy need.
     if committed and prev and baked_content_matches(prev, committed):
+        stale = _image_out_of_sync(committed, "已提交内容")
+        if stale is not None:
+            return stale
         committed = []
         baked_match = True
 

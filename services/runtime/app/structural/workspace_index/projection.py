@@ -9,6 +9,10 @@ from dataclasses import dataclass, field
 from typing import Iterable
 from uuid import UUID
 
+from app.structural.workspace_index.query import (
+    collect_candidate_hits,
+    normalize_symbol_query,
+)
 from app.structural.workspace_index.types import FileEntry, IndexMeta, SymbolHit
 
 
@@ -39,17 +43,7 @@ class IndexProjection:
             for sym in entry.symbols:
                 if not sym.name:
                     continue
-                postings[sym.name].append(
-                    SymbolHit(
-                        path=entry.path,
-                        line=sym.line,
-                        col=sym.col,
-                        kind=sym.kind,
-                        name=sym.name,
-                        content_hash=entry.content_hash,
-                        generation=entry.generation,
-                    )
-                )
+                postings[sym.name].append(_hit_from(entry, sym))
         with self._lock:
             self.files = files
             self._postings = postings
@@ -69,17 +63,7 @@ class IndexProjection:
             for sym in entry.symbols:
                 if not sym.name:
                     continue
-                self._postings[sym.name].append(
-                    SymbolHit(
-                        path=entry.path,
-                        line=sym.line,
-                        col=sym.col,
-                        kind=sym.kind,
-                        name=sym.name,
-                        content_hash=entry.content_hash,
-                        generation=entry.generation,
-                    )
-                )
+                self._postings[sym.name].append(_hit_from(entry, sym))
             if meta is not None:
                 self.meta = meta
             self.touch()
@@ -101,23 +85,23 @@ class IndexProjection:
         limit: int = 20,
         owner_user_id: str | None = None,
     ) -> list[SymbolHit]:
-        """Exact name lookup. ACL: refuse when owner filter mismatches."""
+        """Normalized name lookup with §2.2.1 ranking. ACL refuse on owner mismatch."""
         with self._lock:
             self.touch()
             if owner_user_id is not None and owner_user_id != self.owner_user_id:
                 return []
-            hits = list(self._postings.get(name) or [])
-        # Prefer exact kind order: class > function > method > other; then path.
-        kind_rank = {"class": 0, "interface": 1, "function": 2, "method": 3, "type": 4}
-        hits.sort(
-            key=lambda h: (
-                kind_rank.get(h.kind, 9),
-                0 if h.name == name else 1,
-                h.path,
-                h.line,
-            )
+            nq = normalize_symbol_query(name)
+            exact = list(self._postings.get(nq.tail) or [])
+            # Also try raw full string when it differs (rare single-segment aliases).
+            if nq.raw and nq.raw != nq.tail:
+                exact = exact + list(self._postings.get(nq.raw) or [])
+            postings_snapshot = {k: list(v) for k, v in self._postings.items()}
+        return collect_candidate_hits(
+            exact,
+            nq=nq,
+            all_names=postings_snapshot,
+            limit=limit,
         )
-        return hits[: max(1, int(limit))]
 
     def file_entry(self, path: str) -> FileEntry | None:
         with self._lock:
@@ -144,18 +128,30 @@ class IndexProjection:
                 del self._postings[sym.name]
 
 
+def _hit_from(entry: FileEntry, sym) -> SymbolHit:
+    return SymbolHit(
+        path=entry.path,
+        line=sym.line,
+        col=sym.col,
+        kind=sym.kind,
+        name=sym.name,
+        content_hash=entry.content_hash,
+        generation=entry.generation,
+        container=sym.container,
+    )
+
+
 def _entry_bytes(entry: FileEntry) -> int:
-    # Rough: path + hash + JSON-ish symbols.
     return (
         len(entry.path)
         + len(entry.content_hash)
-        + sum(len(s.name) + 16 for s in entry.symbols)
+        + sum(len(s.name) + len(s.container or "") + 16 for s in entry.symbols)
         + 64
     )
 
 
 class ProjectionRegistry:
-    """Process-wide lazy projections keyed by work_id (idle eviction later / A5)."""
+    """Process-wide lazy projections keyed by work_id (idle eviction / A5)."""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()

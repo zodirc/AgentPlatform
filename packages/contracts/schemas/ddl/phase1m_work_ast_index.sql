@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS work_ast_files (
     content_hash  TEXT NOT NULL,
     mtime_ns      BIGINT NOT NULL,
     size          BIGINT NOT NULL,
-    symbols       JSONB NOT NULL,           -- [{"n","k","l","c","el"}, …]
+    symbols       JSONB NOT NULL,           -- [{"n","k","l","c","el","ct"}, …] ct=container chain
     generation    BIGINT NOT NULL,
     PRIMARY KEY (work_id, path)
 );

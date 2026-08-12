@@ -101,6 +101,10 @@ suites:
     # Tiers n3/n5/n10/n25 use canonical HF-test-order slices; full300 is all IDs.
     # Official resolve scoring requires Docker + swebench.harness (see README).
     evaluate_with: swebench.harness.run_evaluation
+    # E1 (docs/plan/agent-workspace-ast-index.md §7): eval-ephemeral AST index after
+    # checkout (memory-only, never blocks StartTurn). Default on — product-parity arm.
+    # Set false only for explicit index-off baseline dual-track.
+    workspace_index: true
     # Official sweb.eval images (~1.0–1.2 GiB compressed / instance). Not in git.
     # Pre-pull via 部署看板「SWE eval 镜像」or: make official-bench-coding-pull-images
     harness:

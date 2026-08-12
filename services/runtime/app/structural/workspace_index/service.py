@@ -1,4 +1,4 @@
-"""Facade: status / lazy load / cold-start enqueue / symbol lookup (§2–§3)."""
+"""Facade: status / lazy load / cold-start enqueue / symbol lookup (§2–§3 / §7.2)."""
 
 from __future__ import annotations
 
@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 # Process-local single-flight (complements PG advisory for multi-replica).
 _build_lock = asyncio.Lock()
 _inflight: dict[UUID, asyncio.Task] = {}
+# Eval-ephemeral works (§7.2): enabled even under ops path markers; memory-only build.
+_ephemeral_works: set[UUID] = set()
 
 
 class AstIndexService:
@@ -32,9 +34,25 @@ class AstIndexService:
         self.store = store or AstIndexStore()
         self.registry = get_projection_registry()
 
-    def enabled_for_work(self, *, work_root: Path | str | None = None) -> bool:
+    def mark_ephemeral(self, work_id: UUID) -> None:
+        _ephemeral_works.add(work_id)
+
+    def clear_ephemeral(self, work_id: UUID) -> None:
+        _ephemeral_works.discard(work_id)
+
+    def is_ephemeral(self, work_id: UUID) -> bool:
+        return work_id in _ephemeral_works
+
+    def enabled_for_work(
+        self,
+        *,
+        work_id: UUID | None = None,
+        work_root: Path | str | None = None,
+    ) -> bool:
         if not bool(settings.workspace_ast_enabled):
             return False
+        if work_id is not None and work_id in _ephemeral_works:
+            return True
         if bool(settings.workspace_ast_ops_enabled):
             return True
         try:
@@ -44,7 +62,7 @@ class AstIndexService:
                 return False
         except Exception:
             pass
-        # Default: skip ops-l1 / SWE temp workspaces (§7).
+        # Default: skip ops-l1 / SWE temp workspaces unless ephemeral / ops flag.
         root = str(work_root or "")
         markers = (
             "/ops-eval/",
@@ -66,7 +84,7 @@ class AstIndexService:
         enqueue_if_cold: bool = False,
     ) -> dict:
         """Meta snapshot for GUI polling (§6.2). Never blocks on build."""
-        if not self.enabled_for_work(work_root=work_root):
+        if not self.enabled_for_work(work_id=work_id, work_root=work_root):
             return {
                 "work_id": str(work_id),
                 "owner_user_id": owner_user_id,
@@ -76,6 +94,7 @@ class AstIndexService:
                 "files_done": 0,
                 "error": None,
                 "enabled": False,
+                "ephemeral": False,
             }
 
         proj = self.registry.get(work_id)
@@ -84,7 +103,33 @@ class AstIndexService:
             out["enabled"] = True
             if enqueue_if_cold and proj.meta.status == IndexStatus.COLD:
                 self.enqueue_cold_start(
-                    work_id, owner_user_id=owner_user_id, work_root=Path(work_root or ".")
+                    work_id,
+                    owner_user_id=owner_user_id,
+                    work_root=Path(work_root or "."),
+                    memory_only=bool(proj.meta.ephemeral or work_id in _ephemeral_works),
+                )
+                out["status"] = IndexStatus.BUILDING.value
+            return out
+
+        # Ephemeral works never consult DB.
+        if work_id in _ephemeral_works:
+            out = {
+                "work_id": str(work_id),
+                "owner_user_id": owner_user_id,
+                "status": IndexStatus.COLD.value,
+                "generation": 0,
+                "files_total": 0,
+                "files_done": 0,
+                "error": None,
+                "enabled": True,
+                "ephemeral": True,
+            }
+            if enqueue_if_cold:
+                self.enqueue_cold_start(
+                    work_id,
+                    owner_user_id=owner_user_id,
+                    work_root=Path(work_root or "."),
+                    memory_only=True,
                 )
                 out["status"] = IndexStatus.BUILDING.value
             return out
@@ -101,6 +146,7 @@ class AstIndexService:
                 "files_done": 0,
                 "error": str(exc),
                 "enabled": True,
+                "ephemeral": False,
             }
 
         out = meta.to_status_dict()
@@ -124,6 +170,8 @@ class AstIndexService:
             if existing.owner_user_id != owner_user_id:
                 return None
             return existing
+        if work_id in _ephemeral_works:
+            return None
         meta = await self.store.get_meta(work_id, owner_user_id=owner_user_id)
         if meta is None:
             return None
@@ -142,10 +190,14 @@ class AstIndexService:
         *,
         owner_user_id: str,
         work_root: Path,
+        memory_only: bool = False,
     ) -> bool:
         """Fire-and-forget cold start. Returns False if already inflight / disabled."""
-        if not self.enabled_for_work(work_root=work_root):
+        if memory_only:
+            self.mark_ephemeral(work_id)
+        if not self.enabled_for_work(work_id=work_id, work_root=work_root):
             return False
+        use_memory = bool(memory_only or work_id in _ephemeral_works)
         task = _inflight.get(work_id)
         if task is not None and not task.done():
             return False
@@ -153,10 +205,19 @@ class AstIndexService:
         async def _runner() -> None:
             conn = None
             try:
+                if use_memory:
+                    async with _build_lock:
+                        await run_cold_start(
+                            work_id=work_id,
+                            owner_user_id=owner_user_id,
+                            work_root=work_root,
+                            store=self.store,
+                            memory_only=True,
+                        )
+                    return
                 try:
                     conn, locked = await self.store.acquire_advisory_conn(work_id)
                 except Exception:
-                    # DB unavailable — still attempt process-local single-flight build.
                     logger.warning(
                         "workspace_ast advisory lock unavailable; using process lock only",
                         exc_info=True,
@@ -174,6 +235,7 @@ class AstIndexService:
                         owner_user_id=owner_user_id,
                         work_root=work_root,
                         store=self.store,
+                        memory_only=False,
                     )
             except Exception:
                 logger.exception("workspace_ast cold_start task failed work_id=%s", work_id)
@@ -187,7 +249,9 @@ class AstIndexService:
                 if current is asyncio.current_task():
                     _inflight.pop(work_id, None)
 
-        _inflight[work_id] = asyncio.create_task(_runner(), name=f"ast-index-{work_id}")
+        _inflight[work_id] = asyncio.create_task(
+            _runner(), name=f"ast-index-{work_id}"
+        )
         return True
 
     async def lookup_symbol(
@@ -206,6 +270,18 @@ class AstIndexService:
             return [], proj.meta
         hits = proj.lookup(name, limit=limit, owner_user_id=owner_user_id)
         return hits, proj.meta
+
+    async def purge_work(self, work_id: UUID) -> None:
+        """A5: drop projection + DB snapshot; clear ephemeral mark."""
+        self.registry.drop(work_id)
+        self.clear_ephemeral(work_id)
+        task = _inflight.pop(work_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+        try:
+            await self.store.purge_work(work_id)
+        except Exception:
+            logger.exception("workspace_ast purge_work DB failed work_id=%s", work_id)
 
 
 _service: AstIndexService | None = None

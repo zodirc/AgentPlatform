@@ -1085,6 +1085,50 @@ def test_csi_suite_rates_denominators() -> None:
     assert rates["syntax_warning_passthrough_count"] == 1.0
 
 
+def test_csi_probes_locate_fuse_fail_reason_buckets() -> None:
+    """§0.3 attribution probe: fuse-fail reason histogram from tool.completed."""
+    events = [
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "grep",
+                "redirected_from": "grep",
+                "locate_status": "incomplete",
+                "locate_incomplete": True,
+                "definition_count": 0,
+                "locate_fuse_fail_reason": "no_workspace_symbol_match",
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "search_codebase",
+                "locate_status": "incomplete",
+                "locate_incomplete": True,
+                "definition_count": 0,
+                "locate_fuse_fail_reason": "definition_null",
+                "candidate_count": 3,
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "grep",
+                "redirected_from": "grep",
+                "locate_status": "failed",
+                "definition_count": 0,
+                "locate_fuse_fail_reason": "lsp_timeout",
+            },
+        },
+    ]
+    probes = csi_probes_from_events(events)
+    assert probes["n_locate_fuse_no_ws_symbol"] == 1
+    assert probes["n_locate_fuse_definition_null"] == 1
+    assert probes["n_locate_fuse_lsp_timeout"] == 1
+    rates = csi_suite_rates([probes])
+    assert rates["n_locate_fuse_definition_null"] == 1.0
+
+
 def test_patch_from_git_diff_app_owned_tree_as_root(tmp_path: Path) -> None:
     """Regression: after materialize chown(1000), api(root) git must still extract."""
     import os

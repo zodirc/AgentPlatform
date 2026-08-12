@@ -1863,21 +1863,38 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
         if ast_out is not None:
             if ast_out.get("_ast_infra_failed"):
                 reason = str(ast_out.get("reason") or "lsp_unavailable")
-                return {
+                # Keep candidates[] echo when present (§2.2.1); never as definitions.
+                payload = {
                     "query": q,
                     "mode": "symbol",
                     "definitions": [],
                     "hits": [],
                     "match_count": 0,
-                    "lines": [],
+                    "lines": list(ast_out.get("lines") or []),
                     "locate_incomplete": True,
                     "status": "failed",
                     "summary": (
                         f"search_codebase: language server required for symbol locate ({reason}); "
                         "fix runtime provider — lexical hits are not a successful Locate"
                     ),
+                    **{
+                        k: v
+                        for k, v in ast_out.items()
+                        if k
+                        in {
+                            "candidates",
+                            "candidates_from",
+                            "index_gen",
+                            "locate_fuse_fail_reason",
+                        }
+                        and v is not None
+                    },
                     **dict(ast_out.get("meta") or {}),
                 }
+                if "locate_fuse_fail_reason" not in payload:
+                    fuse = "lsp_timeout" if "timeout" in reason else "lsp_failed"
+                    payload["locate_fuse_fail_reason"] = fuse
+                return payload
             return ast_out
     except Exception:
         # Index faults must never change interactive semantics (§2.2 / §8).
@@ -1895,6 +1912,7 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
     meta = dict(out.get("meta") or {})
     reason = str(meta.get("degraded_reason") or "")
     if _lsp_infra_failed(reason):
+        fuse = "lsp_timeout" if "timeout" in reason.lower() else "lsp_failed"
         return {
             "query": q,
             "mode": "symbol",
@@ -1904,6 +1922,7 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
             "lines": [],
             "locate_incomplete": True,
             "status": "failed",
+            "locate_fuse_fail_reason": fuse,
             "summary": (
                 f"search_codebase: language server required for symbol locate ({reason}); "
                 "fix runtime provider — lexical hits are not a successful Locate"
@@ -1940,6 +1959,7 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
         "match_count": len(hits),
         "lines": [],
         "locate_incomplete": True,
+        "locate_fuse_fail_reason": "no_workspace_symbol_match",
         "truncated": bool(lexical.get("truncated")),
         "files_scanned": int(lexical.get("files_scanned") or 0),
         "summary": (
