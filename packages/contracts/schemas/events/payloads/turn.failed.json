@@ -16,7 +16,10 @@
         "approval_resume_timeout",
         "approval_state_lost",
         "budget_exceeded",
-        "runner_restart"
+        "runner_restart",
+        "runner_lost",
+        "db_timeout",
+        "start_timeout"
       ]
     },
     "message": { "type": "string", "maxLength": 1024 }

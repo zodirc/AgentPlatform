@@ -26,3 +26,15 @@
 | `tool.completed` | `tool.completed.json` |
 
 其余 type 在首次实现该事件时追加 schema。
+
+## 保留策略（O7 / WP3）
+
+应用批删（`events_retention`），非强制分区：
+
+| 类别 | types（示例） | 默认保留 |
+|------|---------------|----------|
+| Stream | `thinking.delta` · `turn.token` · `tool.delta` | 终态 Turn 后 **7d** |
+| Structural | 其余 type（含 `turn.*` 终态、tool/approval 等） | 终态 Turn 后 **90d** |
+
+旋钮：`EVENTS_STREAM_RETENTION_DAYS` / `EVENTS_STRUCTURAL_RETENTION_DAYS`。
+DDL 注释见 `schemas/ddl/phase2_events_retention.sql`。

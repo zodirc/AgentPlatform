@@ -3,10 +3,25 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.3 — 2026-08-13
+
+- `schemas/ddl/phase2_run_commands.sql` + alembic `0021`：`run_commands` 表
+  （approve/deny/patch/cancel）+ partial unique + NOTIFY 通道（O2 / WP6）。
+- `schemas/ddl/phase2_events_retention.sql` + alembic `0022`：`turn_events`
+  分级保留注释；应用侧 stream 7d / structural 90d 批删（O7 / WP3；分区改写另开维护窗）。
+- 默认分发：`TURN_DISPATCH=pull`（WP9）；push 仍可一键回退。
+
+## 0.3.2 — 2026-08-13
+
+- `events/payloads/turn.failed.json`: `termination_reason` 枚举新增 `runner_lost`
+  （副本租约过期回收，O3 / WP1）、`db_timeout`（O10）、`start_timeout`
+  （pull 分发无人 claim，O1 / WP5）。向后兼容。
+- `schemas/ddl/phase2_runners_lease.sql`: `runners` 表 + `runs.lease_expires_at`。
+
 ## 0.3.1 — 2026-08-04
 
 - `events/payloads/tool.completed.json`: 新增可选 `chars_read` / `file_chars` /
-  `offset` / `end_line` / `total_lines` / `next_offset`（CTX-9 读覆盖探针；
+  `offset` / `end_line` / `total_lines` / `next_offset`（CTX-9 可视覆盖探针；
   不在事件总线携带全文 content）。向后兼容。
 
 ## 0.3.0 — 2026-08-02
