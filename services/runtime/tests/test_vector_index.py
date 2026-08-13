@@ -98,12 +98,17 @@ def test_search_vector_batched_matches_loop(tmp_path: Path, monkeypatch: pytest.
         assert abs(a.score - b.score) < 1e-5
 
 
+def _inner_embedder(embedder):
+    """``get_embedder`` may wrap with PriorityLaneEmbedder (O5 query lanes)."""
+    return getattr(embedder, "_inner", embedder)
+
+
 def test_get_embedder_defaults_to_hash(monkeypatch) -> None:
     from app.settings import settings
 
     monkeypatch.setattr(settings, "embedding_backend", "hash")
     embedder = get_embedder()
-    assert isinstance(embedder, HashEmbedder)
+    assert isinstance(_inner_embedder(embedder), HashEmbedder)
 
 
 def test_get_embedder_is_process_singleton(monkeypatch) -> None:
@@ -124,8 +129,9 @@ def test_get_embedder_rebuilds_when_settings_change(monkeypatch) -> None:
     monkeypatch.setattr(settings, "embedding_dimensions", 128)
     second = get_embedder()
     assert first is not second
-    assert isinstance(second, HashEmbedder)
-    assert second.dimensions == 128
+    inner = _inner_embedder(second)
+    assert isinstance(inner, HashEmbedder)
+    assert inner.dimensions == 128
 
 
 def test_warmup_embedder_loads_hash(monkeypatch) -> None:
