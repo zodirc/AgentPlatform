@@ -15,6 +15,12 @@ Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `mak
 
 起栈见仓库根 README。图对齐 [`assets/harness/agent-engine-loop-zh.png`](assets/harness/agent-engine-loop-zh.png)（大字号中文 · 编号步骤 · 菱形 · 虚线边界 · 侧注 · 图例）。旧材料见 [archive/](archive/)（仅指针；正文以本目录六篇为准）。契约包：`packages/contracts`。
 
+## 运维
+
+| 文档 | 说明 |
+|------|------|
+| [Pull 分发运维手册](ops/pull-dispatch-runbook.md) | 扩缩、回退、指标阈值、故障注入、429/租约语义 |
+
 ## 方案（草案）
 
-尚未升格正文的设计稿见 [plan/](plan/)（例如 [Coding 结构智能 · LSP/SWE](plan/coding-structural-intelligence.md)、[Agent 工作区异步 AST](plan/agent-workspace-ast-index.md)、[威胁情报 · 验证闭环](plan/intel-closed-loop-verification.md)）。冲突时以本目录六篇为准。
+尚未升格正文的设计稿见 [plan/](plan/)（例如 [后端架构全景](plan/backend-architecture.md)、[Coding 结构智能 · LSP/SWE](plan/coding-structural-intelligence.md)、[Agent 工作区异步 AST](plan/agent-workspace-ast-index.md)、[威胁情报 · 验证闭环](plan/intel-closed-loop-verification.md)）。冲突时以本目录六篇为准。
