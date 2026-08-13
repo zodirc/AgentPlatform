@@ -1,14 +1,22 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import { searchKeymap } from "@codemirror/search";
+import { EditorState, Prec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import {
   ChevronDown,
   ChevronUp,
   Download,
+  Pencil,
+  Save,
   Search,
   ZoomIn,
   ZoomOut,
   X,
 } from "lucide-react";
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -20,12 +28,17 @@ import { Input } from "../../components/ui/input";
 import {
   downloadWorkspaceFile,
   fetchWorkspaceFile,
+  saveWorkspaceFile,
 } from "../../shared/api/client";
+import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
 import { workspaceEntryIcon } from "./workspaceFileIcon";
+
+const CodeMirror = lazy(() => import("@uiw/react-codemirror"));
 
 type Props = {
   path: string | null;
   onClose: () => void;
+  onSaved?: (path: string) => void;
 };
 
 type MatchRange = { start: number; end: number };
@@ -86,12 +99,25 @@ function renderHighlighted(
   return nodes;
 }
 
-export function WorkspaceFileViewer({ path, onClose }: Props) {
+/** Shared monospace look for read <pre> and edit CodeMirror. */
+function viewerTypography(fontSize: number) {
+  return {
+    fontSize: `${fontSize}px`,
+    lineHeight: 1.65,
+    fontFamily:
+      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+  } as const;
+}
+
+export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
+  const queryClient = useQueryClient();
   const fileName = path?.split("/").pop() ?? "";
   const { Icon, className: iconClass } = workspaceEntryIcon(fileName, false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
+  const editorViewRef = useRef<{ focus: () => void } | null>(null);
+  const saveFnRef = useRef<() => void>(() => {});
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -99,8 +125,14 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState(FONT_DEFAULT);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
 
-  const { data, isLoading, isError, error } = useQuery({
+  const seedLocked = Boolean(path && isSeedCorpusPath(path));
+
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["workspace-file-viewer", path],
     queryFn: () => fetchWorkspaceFile(path!),
     enabled: Boolean(path),
@@ -108,7 +140,43 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   });
 
   const content = data?.content ?? "";
+  const truncated =
+    Boolean(data?.truncated) || content.includes("\n...[truncated]");
   const matches = useMemo(() => findMatches(content, query), [content, query]);
+  const dirty = editing && draft !== content;
+  const canEdit =
+    Boolean(path) && !seedLocked && !truncated && !isLoading && !isError;
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!path) throw new Error("path required");
+      return saveWorkspaceFile(path, draft);
+    },
+    onSuccess: async () => {
+      setSaveError(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["workspace-file-viewer", path],
+      });
+      const refreshed = await refetch();
+      const next = refreshed.data?.content ?? draft;
+      setDraft(next);
+      // Stay in edit mode after save (VS Code-like).
+      setJustSaved(true);
+      window.setTimeout(() => setJustSaved(false), 1500);
+      if (path) onSaved?.(path);
+    },
+    onError: (err: Error) => {
+      setSaveError(err.message);
+    },
+  });
+
+  const runSave = useCallback(() => {
+    if (!editing || saveMutation.isPending) return;
+    if (draft === content) return;
+    saveMutation.mutate();
+  }, [editing, saveMutation, draft, content]);
+
+  saveFnRef.current = runSave;
 
   const zoomIn = useCallback(() => {
     setFontSize((s) => Math.min(FONT_MAX, s + FONT_STEP));
@@ -125,26 +193,36 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
     setQuery("");
     setActiveIndex(0);
     setFontSize(FONT_DEFAULT);
+    setEditing(false);
+    setDraft("");
+    setSaveError(null);
+    setJustSaved(false);
+    editorViewRef.current = null;
     scrollRef.current?.scrollTo({ top: 0 });
   }, [path]);
+
+  useEffect(() => {
+    if (!editing) setDraft(content);
+  }, [content, editing]);
 
   useEffect(() => {
     setActiveIndex(0);
   }, [query]);
 
   useEffect(() => {
-    if (!searchOpen || matches.length === 0) return;
+    if (!searchOpen || matches.length === 0 || editing) return;
     activeMatchRef.current?.scrollIntoView({
       block: "center",
       behavior: "smooth",
     });
-  }, [activeIndex, matches.length, searchOpen, query]);
+  }, [activeIndex, matches.length, searchOpen, query, editing]);
 
   useEffect(() => {
-    if (!path) return;
-    // Focus the scroll pane so wheel / arrows scroll content, not the page behind.
-    requestAnimationFrame(() => scrollRef.current?.focus({ preventScroll: true }));
-  }, [path, isLoading]);
+    if (!path || editing) return;
+    requestAnimationFrame(() =>
+      scrollRef.current?.focus({ preventScroll: true }),
+    );
+  }, [path, isLoading, editing]);
 
   const goNext = useCallback(() => {
     if (matches.length === 0) return;
@@ -157,14 +235,102 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
   }, [matches.length]);
 
   const openSearch = useCallback(() => {
+    if (editing) return;
     setSearchOpen(true);
     requestAnimationFrame(() => searchInputRef.current?.focus());
-  }, []);
+  }, [editing]);
+
+  const requestClose = useCallback(() => {
+    if (dirty && !window.confirm("有未保存的修改，确定关闭？")) return;
+    onClose();
+  }, [dirty, onClose]);
+
+  const startEdit = useCallback(() => {
+    if (!canEdit) return;
+    setDraft(content);
+    setEditing(true);
+    setSearchOpen(false);
+    setSaveError(null);
+    setJustSaved(false);
+  }, [canEdit, content]);
+
+  const cancelEdit = useCallback(() => {
+    if (dirty && !window.confirm("放弃未保存的修改？")) return;
+    setDraft(content);
+    setEditing(false);
+    setSaveError(null);
+    setJustSaved(false);
+  }, [content, dirty]);
+
+  const editorExtensions = useMemo(() => {
+    const typo = viewerTypography(fontSize);
+    return [
+      history({ minDepth: 100 }),
+      EditorView.lineWrapping,
+      EditorView.theme({
+        "&": {
+          height: "100%",
+          fontSize: typo.fontSize,
+          backgroundColor: "transparent",
+        },
+        "&.cm-focused": { outline: "none" },
+        ".cm-scroller": {
+          fontFamily: typo.fontFamily,
+          lineHeight: String(typo.lineHeight),
+          overflow: "auto",
+        },
+        ".cm-content": {
+          fontFamily: typo.fontFamily,
+          fontSize: typo.fontSize,
+          lineHeight: String(typo.lineHeight),
+          padding: "1.25rem",
+          caretColor: "hsl(var(--foreground))",
+          color: "hsl(var(--foreground))",
+        },
+        ".cm-line": {
+          padding: "0",
+        },
+        ".cm-cursor": {
+          borderLeftColor: "hsl(var(--foreground))",
+        },
+        ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+          backgroundColor: "hsl(var(--primary) / 0.28) !important",
+        },
+      }),
+      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+      Prec.highest(
+        keymap.of([
+          {
+            key: "Mod-s",
+            run: () => {
+              saveFnRef.current();
+              return true;
+            },
+            preventDefault: true,
+          },
+        ]),
+      ),
+      EditorState.allowMultipleSelections.of(true),
+    ];
+  }, [fontSize]);
 
   useEffect(() => {
     if (!path) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
+      if (editing) {
+        if (mod && e.key.toLowerCase() === "s") {
+          e.preventDefault();
+          runSave();
+          return;
+        }
+        // Let CodeMirror own Mod-z / Mod-Shift-z / Mod-y / typing.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelEdit();
+        }
+        return;
+      }
       if (mod && (e.key === "=" || e.key === "+")) {
         e.preventDefault();
         zoomIn();
@@ -185,6 +351,11 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
         openSearch();
         return;
       }
+      if (mod && e.key.toLowerCase() === "e" && canEdit) {
+        e.preventDefault();
+        startEdit();
+        return;
+      }
       if (e.key === "Escape") {
         if (searchOpen) {
           e.preventDefault();
@@ -193,7 +364,9 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           requestAnimationFrame(() =>
             scrollRef.current?.focus({ preventScroll: true }),
           );
+          return;
         }
+        requestClose();
         return;
       }
       if (searchOpen) {
@@ -204,7 +377,6 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
         }
         return;
       }
-      // Free reading scroll with keyboard when not searching.
       const pane = scrollRef.current;
       if (!pane) return;
       const step = Math.max(48, Math.floor(pane.clientHeight * 0.85));
@@ -239,6 +411,12 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
     zoomIn,
     zoomOut,
     zoomReset,
+    editing,
+    canEdit,
+    startEdit,
+    cancelEdit,
+    runSave,
+    requestClose,
   ]);
 
   const onDownload = useCallback(async () => {
@@ -256,7 +434,6 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
 
   if (!path) return null;
 
-  const truncated = Boolean(data?.content?.includes("\n...[truncated]"));
   const highlighted = renderHighlighted(
     content,
     searchOpen && query.trim() ? matches : [],
@@ -266,12 +443,16 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
     },
   );
 
+  const typo = viewerTypography(fontSize);
+  // Find marks need <pre>; otherwise use the same CM shell for read + edit.
+  const usePreForSearch = !editing && searchOpen;
+
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay p-3 backdrop-blur-sm sm:p-4"
       role="dialog"
       aria-modal="true"
-      aria-label={`查看文件 ${path}`}
+      aria-label={`${editing ? "编辑" : "查看"}文件 ${path}`}
     >
       <div className="flex h-[min(94vh,960px)] w-[min(96vw,1100px)] flex-col overflow-hidden rounded-xl border border-input bg-background shadow-2xl">
         <header className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2.5 sm:gap-3 sm:px-4 sm:py-3">
@@ -279,10 +460,21 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-foreground">
               {fileName}
+              {dirty ? (
+                <span className="ml-1 text-xs font-normal text-warning">
+                  · 未保存
+                </span>
+              ) : justSaved ? (
+                <span className="ml-1 text-xs font-normal text-muted-foreground">
+                  · 已保存
+                </span>
+              ) : null}
             </p>
             <p className="truncate text-xs text-muted-foreground">{path}</p>
-            {downloadError ? (
-              <p className="truncate text-xs text-destructive">{downloadError}</p>
+            {downloadError || saveError ? (
+              <p className="truncate text-xs text-destructive">
+                {saveError || downloadError}
+              </p>
             ) : null}
           </div>
           <div
@@ -320,6 +512,46 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
               <ZoomIn className="h-4 w-4" />
             </button>
           </div>
+          {editing ? (
+            <>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-lg border border-primary/40 bg-primary/15 px-2.5 py-1.5 text-xs text-primary hover:bg-primary/25 disabled:opacity-50"
+                onClick={runSave}
+                disabled={!dirty || saveMutation.isPending}
+                title="保存 (Ctrl/⌘S)"
+              >
+                <Save className="h-3.5 w-3.5" />
+                {saveMutation.isPending ? "保存中…" : "保存"}
+              </button>
+              <button
+                type="button"
+                className="rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={cancelEdit}
+                disabled={saveMutation.isPending}
+                title="退出编辑 (Esc)"
+              >
+                完成
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40"
+              onClick={startEdit}
+              disabled={!canEdit}
+              title={
+                seedLocked
+                  ? "系统资料只读"
+                  : truncated
+                    ? "内容已截断，无法安全编辑"
+                    : "编辑 (Ctrl/⌘E)"
+              }
+            >
+              <Pencil className="h-3.5 w-3.5" />
+              编辑
+            </button>
+          )}
           <button
             type="button"
             className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
@@ -330,19 +562,21 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           >
             <Download className="h-4 w-4" />
           </button>
+          {!editing ? (
+            <button
+              type="button"
+              className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onClick={openSearch}
+              title="查找 (Ctrl/⌘F)"
+              aria-label="文件内查找"
+            >
+              <Search className="h-4 w-4" />
+            </button>
+          ) : null}
           <button
             type="button"
             className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={openSearch}
-            title="查找 (Ctrl/⌘F)"
-            aria-label="文件内查找"
-          >
-            <Search className="h-4 w-4" />
-          </button>
-          <button
-            type="button"
-            className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground"
-            onClick={onClose}
+            onClick={requestClose}
             title="关闭"
             aria-label="关闭"
           >
@@ -350,7 +584,7 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
           </button>
         </header>
 
-        {searchOpen ? (
+        {searchOpen && !editing ? (
           <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
             <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
             <Input
@@ -408,39 +642,77 @@ export function WorkspaceFileViewer({ path, onClose }: Props) {
 
         <div
           ref={scrollRef}
-          tabIndex={0}
+          tabIndex={editing || !usePreForSearch ? -1 : 0}
           className="scrollbar-panel min-h-0 flex-1 overflow-y-auto overflow-x-auto overscroll-contain bg-card/50 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring/40"
           style={{ WebkitOverflowScrolling: "touch" }}
           onWheel={(e) => {
-            // Keep wheel scrolling on this pane; avoid background page scroll.
             e.stopPropagation();
           }}
         >
-          <div className="min-h-full p-4 sm:p-5">
+          <div className="min-h-full">
             {isLoading ? (
-              <p className="text-sm text-muted-foreground">加载中…</p>
+              <p className="p-4 text-sm text-muted-foreground">加载中…</p>
             ) : isError ? (
-              <p className="text-sm text-destructive">
+              <p className="p-4 text-sm text-destructive">
                 无法读取文件
                 {error instanceof Error ? `：${error.message}` : ""}
                 （请确认已登录）
               </p>
-            ) : (
-              <>
-                {truncated ? (
-                  <p className="mb-2 text-xs text-warning">
-                    内容超过 32KB，仅显示前段（与 runtime read_file 限制一致）
-                  </p>
-                ) : null}
+            ) : usePreForSearch ? (
+              <div className="p-4 sm:p-5">
                 <pre
-                  className="m-0 max-w-none whitespace-pre-wrap break-words font-mono leading-relaxed text-foreground"
-                  style={{
-                    fontSize: `${fontSize}px`,
-                    lineHeight: 1.65,
-                  }}
+                  className="m-0 max-w-none whitespace-pre-wrap break-words text-foreground"
+                  style={typo}
                 >
                   {highlighted}
                 </pre>
+              </div>
+            ) : (
+              <>
+                {truncated ? (
+                  <p className="px-5 pt-4 text-xs text-warning">
+                    内容超过 2MB，仅显示前段；请下载后编辑或缩小文件后再改
+                  </p>
+                ) : null}
+                {seedLocked ? (
+                  <p className="px-5 pt-4 text-xs text-muted-foreground">
+                    系统资料只读，不可在工作台修改
+                  </p>
+                ) : null}
+                <Suspense
+                  fallback={
+                    <p className="p-4 text-sm text-muted-foreground">
+                      加载编辑器…
+                    </p>
+                  }
+                >
+                  <CodeMirror
+                    value={editing ? draft : content}
+                    height="100%"
+                    minHeight="480px"
+                    theme="none"
+                    editable={editing}
+                    readOnly={!editing}
+                    basicSetup={false}
+                    extensions={editorExtensions}
+                    onChange={(value) => {
+                      if (editing) setDraft(value);
+                    }}
+                    onCreateEditor={(view) => {
+                      editorViewRef.current = view;
+                      if (editing) {
+                        requestAnimationFrame(() => view.focus());
+                      }
+                    }}
+                    className="h-full min-h-[480px] bg-transparent [&_.cm-editor]:min-h-[480px] [&_.cm-editor]:bg-transparent [&_.cm-gutters]:hidden"
+                  />
+                </Suspense>
+                {editing ? (
+                  <p className="border-t border-border/60 px-4 py-1.5 text-[10px] text-muted-foreground">
+                    Ctrl/⌘S 保存 · Ctrl/⌘Z 撤销 · Ctrl/⌘⇧Z 重做 · Esc
+                    退出编辑
+                  </p>
+                ) : null}
               </>
             )}
           </div>

@@ -22,6 +22,21 @@ class WorkspaceDeleteBody(BaseModel):
     paths: list[str] = Field(min_length=1)
 
 
+class WorkspaceSaveBody(BaseModel):
+    path: str = Field(min_length=1)
+    content: str = ""
+
+
+class WorkspaceMkdirBody(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class WorkspaceRenameBody(BaseModel):
+    path: str = Field(min_length=1)
+    new_path: str = Field(min_length=1)
+    overwrite: bool = False
+
+
 @router.get("/entries")
 async def list_workspace_entries(
     request: Request,
@@ -44,6 +59,21 @@ async def read_workspace_file(
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.read_file(path=path, tenant=tenant)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.put("/file")
+async def save_workspace_file(
+    request: Request,
+    body: WorkspaceSaveBody,
+    work_id: UUID | None = Query(default=None),
+):
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.save_file(
+            path=body.path, content=body.content, tenant=tenant
+        )
     except WorkspaceProxyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
@@ -91,6 +121,37 @@ async def delete_workspace_entries(
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.delete_paths(paths=body.paths, tenant=tenant)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/entries/mkdir")
+async def mkdir_workspace_entry(
+    request: Request,
+    body: WorkspaceMkdirBody,
+    work_id: UUID | None = Query(default=None),
+):
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.mkdir_path(path=body.path, tenant=tenant)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/entries/rename")
+async def rename_workspace_entry(
+    request: Request,
+    body: WorkspaceRenameBody,
+    work_id: UUID | None = Query(default=None),
+):
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.rename_path(
+            path=body.path,
+            new_path=body.new_path,
+            overwrite=body.overwrite,
+            tenant=tenant,
+        )
     except WorkspaceProxyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 

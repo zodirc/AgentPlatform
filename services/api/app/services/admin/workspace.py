@@ -44,6 +44,17 @@ def _tenant_params(tenant: dict[str, str]) -> dict[str, str]:
     return {k: v for k, v in tenant.items() if v}
 
 
+_workspace_http: httpx.AsyncClient | None = None
+
+
+def _workspace_http_client() -> httpx.AsyncClient:
+    """Reuse one client — avoid TLS/handshake cost on every tree expand."""
+    global _workspace_http
+    if _workspace_http is None or _workspace_http.is_closed:
+        _workspace_http = httpx.AsyncClient(timeout=15.0)
+    return _workspace_http
+
+
 async def list_entries(
     *,
     path: str = ".",
@@ -51,12 +62,11 @@ async def list_entries(
 ) -> dict:
     base = settings.runtime_url.rstrip("/")
     params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            f"{base}/internal/workspace/entries",
-            params=params,
-            headers={"X-Internal-Token": settings.internal_service_token},
-        )
+    resp = await _workspace_http_client().get(
+        f"{base}/internal/workspace/entries",
+        params=params,
+        headers={"X-Internal-Token": settings.internal_service_token},
+    )
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
@@ -65,12 +75,11 @@ async def list_entries(
 async def read_file(*, path: str, tenant: dict[str, str] | None = None) -> dict:
     base = settings.runtime_url.rstrip("/")
     params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        resp = await client.get(
-            f"{base}/internal/workspace/file",
-            params=params,
-            headers={"X-Internal-Token": settings.internal_service_token},
-        )
+    resp = await _workspace_http_client().get(
+        f"{base}/internal/workspace/file",
+        params=params,
+        headers={"X-Internal-Token": settings.internal_service_token},
+    )
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
@@ -253,13 +262,83 @@ async def delete_paths(
 ) -> dict:
     base = settings.runtime_url.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                f"{base}/internal/workspace/entries/delete",
-                params=_tenant_params(tenant or {}),
-                json={"paths": paths},
-                headers={"X-Internal-Token": settings.internal_service_token},
-            )
+        resp = await _workspace_http_client().post(
+            f"{base}/internal/workspace/entries/delete",
+            params=_tenant_params(tenant or {}),
+            json={"paths": paths},
+            headers={"X-Internal-Token": settings.internal_service_token},
+            timeout=60.0,
+        )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def save_file(
+    *,
+    path: str,
+    content: str,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    base = settings.runtime_url.rstrip("/")
+    try:
+        resp = await _workspace_http_client().put(
+            f"{base}/internal/workspace/file",
+            params=_tenant_params(tenant or {}),
+            json={"path": path, "content": content},
+            headers={"X-Internal-Token": settings.internal_service_token},
+            timeout=60.0,
+        )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def mkdir_path(
+    *,
+    path: str,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    base = settings.runtime_url.rstrip("/")
+    try:
+        resp = await _workspace_http_client().post(
+            f"{base}/internal/workspace/entries/mkdir",
+            params=_tenant_params(tenant or {}),
+            json={"path": path},
+            headers={"X-Internal-Token": settings.internal_service_token},
+            timeout=30.0,
+        )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def rename_path(
+    *,
+    path: str,
+    new_path: str,
+    overwrite: bool = False,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    base = settings.runtime_url.rstrip("/")
+    try:
+        resp = await _workspace_http_client().post(
+            f"{base}/internal/workspace/entries/rename",
+            params=_tenant_params(tenant or {}),
+            json={
+                "path": path,
+                "new_path": new_path,
+                "overwrite": overwrite,
+            },
+            headers={"X-Internal-Token": settings.internal_service_token},
+            timeout=30.0,
+        )
     except httpx.HTTPError as exc:
         raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
     if resp.status_code >= 400:

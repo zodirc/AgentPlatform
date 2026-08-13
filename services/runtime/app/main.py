@@ -441,6 +441,16 @@ class WorkspaceWriteBody(BaseModel):
     content: str = ""
 
 
+class WorkspaceMkdirBody(BaseModel):
+    path: str = Field(min_length=1)
+
+
+class WorkspaceRenameBody(BaseModel):
+    path: str = Field(min_length=1)
+    new_path: str = Field(min_length=1)
+    overwrite: bool = False
+
+
 class SourceUploadBody(BaseModel):
     filename: str = Field(min_length=1)
     content: str = ""
@@ -487,17 +497,67 @@ async def workspace_write_file(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
-    from app.services.workspace_browser import write_workspace_file
+    from app.services.workspace_browser import save_workspace_file
     from app.services.workspace_scope import workspace_tenant_scope
 
     try:
         with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
-            result = await write_workspace_file(path=body.path, content=body.content)
+            result = await save_workspace_file(path=body.path, content=body.content)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result.get("error"):
         raise HTTPException(status_code=400, detail=str(result["error"]))
     return result
+
+
+@workspace_router.post("/entries/mkdir")
+async def workspace_mkdir(
+    body: WorkspaceMkdirBody,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import mkdir_workspace_path
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    try:
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+            return await mkdir_workspace_path(body.path)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@workspace_router.post("/entries/rename")
+async def workspace_rename(
+    body: WorkspaceRenameBody,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    from app.services.workspace_browser import rename_workspace_path
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    try:
+        with workspace_tenant_scope(**_tenant_query(work_id, work_root, owner_user_id, visibility_seed)):
+            return await rename_workspace_path(
+                path=body.path,
+                new_path=body.new_path,
+                overwrite=body.overwrite,
+            )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @workspace_router.get("/sources/index-status")

@@ -186,6 +186,25 @@ export function ScenarioWorkbenchView({
                 setSelection(null);
               }
             }}
+            onWorkspaceRenamed={(from, to) => {
+              if (workspaceViewerPath === from) {
+                setWorkspaceViewerPath(to);
+              } else if (workspaceViewerPath?.startsWith(`${from}/`)) {
+                setWorkspaceViewerPath(
+                  `${to}${workspaceViewerPath.slice(from.length)}`,
+                );
+              }
+              if (selection?.kind === "workspace") {
+                if (selection.path === from) {
+                  setSelection({ kind: "workspace", path: to });
+                } else if (selection.path.startsWith(`${from}/`)) {
+                  setSelection({
+                    kind: "workspace",
+                    path: `${to}${selection.path.slice(from.length)}`,
+                  });
+                }
+              }
+            }}
             onClose={() => setArtifactsOpen(false)}
           />
         ) : (

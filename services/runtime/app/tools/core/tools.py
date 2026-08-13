@@ -457,12 +457,26 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
 
 
 async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
+    import os
+
     target = _resolve_path(path)
     if not target.exists():
         return {"error": f"Directory not found: {path}"}
     if not target.is_dir():
         return {"error": f"Not a directory: {path}"}
-    entries = sorted(p.name + ("/" if p.is_dir() else "") for p in target.iterdir())
+    # scandir caches type bits — much faster than Path.is_dir() per entry on large trees.
+    entries: list[str] = []
+    try:
+        with os.scandir(target) as it:
+            for entry in it:
+                try:
+                    is_dir = entry.is_dir(follow_symlinks=False)
+                except OSError:
+                    continue
+                entries.append(entry.name + ("/" if is_dir else ""))
+    except OSError as exc:
+        return {"error": f"Cannot list directory: {exc}"}
+    entries.sort()
     # Hide seed mount when Work disabled product corpus (docs/27 visibility_seed).
     from app.tenant_context import current_visibility_seed
 

@@ -12,6 +12,33 @@ from app.services.workspace_browser import (
 
 
 @pytest.mark.asyncio
+async def test_save_mkdir_rename_workspace_paths(workspace) -> None:
+    from app.services.workspace_browser import (
+        mkdir_workspace_path,
+        rename_workspace_path,
+        save_workspace_file,
+    )
+
+    written = await save_workspace_file(path="notes/hello.md", content="hi\n")
+    assert written["path"] == "notes/hello.md"
+    assert (workspace / "notes" / "hello.md").read_text(encoding="utf-8") == "hi\n"
+
+    folder = await mkdir_workspace_path("exports/bundle")
+    assert folder["status"] == "created"
+    assert (workspace / "exports" / "bundle").is_dir()
+
+    moved = await rename_workspace_path(
+        path="notes/hello.md",
+        new_path="exports/bundle/hello.md",
+    )
+    assert moved["status"] == "renamed"
+    assert not (workspace / "notes" / "hello.md").exists()
+    assert (workspace / "exports" / "bundle" / "hello.md").read_text(
+        encoding="utf-8"
+    ) == "hi\n"
+
+
+@pytest.mark.asyncio
 async def test_read_workspace_file_returns_full_manuscript(workspace) -> None:
     """Web preview must not get agent read_file index stub (docs/24)."""
     from app.services.workspace_browser import read_workspace_file

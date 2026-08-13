@@ -556,6 +556,8 @@ export type WorkspaceEntries = {
 export type WorkspaceFile = {
   path: string;
   content: string;
+  truncated?: boolean;
+  file_bytes?: number;
 };
 
 export async function fetchWorkspaceEntries(
@@ -577,6 +579,66 @@ export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`fetchWorkspaceFile failed: ${res.status}`);
+  return res.json();
+}
+
+export async function saveWorkspaceFile(
+  path: string,
+  content: string,
+): Promise<WorkspaceFile & { bytes_written?: number; status?: string }> {
+  const res = await fetch(`${API_BASE}/admin/workspace/file`, {
+    method: "PUT",
+    ...sessionFetchInit,
+    headers: {
+      ...apiAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ path, content }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`saveWorkspaceFile failed: ${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
+export async function mkdirWorkspacePath(
+  path: string,
+): Promise<{ path: string; status: string; summary?: string }> {
+  const res = await fetch(`${API_BASE}/admin/workspace/entries/mkdir`, {
+    method: "POST",
+    ...sessionFetchInit,
+    headers: {
+      ...apiAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`mkdirWorkspacePath failed: ${res.status} ${detail}`);
+  }
+  return res.json();
+}
+
+export async function renameWorkspacePath(
+  path: string,
+  newPath: string,
+  overwrite = false,
+): Promise<{ path: string; new_path: string; status: string; summary?: string }> {
+  const res = await fetch(`${API_BASE}/admin/workspace/entries/rename`, {
+    method: "POST",
+    ...sessionFetchInit,
+    headers: {
+      ...apiAuthHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ path, new_path: newPath, overwrite }),
+  });
+  if (!res.ok) {
+    const detail = await res.text();
+    throw new Error(`renameWorkspacePath failed: ${res.status} ${detail}`);
+  }
   return res.json();
 }
 

@@ -2,7 +2,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2 } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
-import { deleteWorkspacePaths } from "../../shared/api/client";
+import {
+  deleteWorkspacePaths,
+  downloadWorkspaceFile,
+  mkdirWorkspacePath,
+  renameWorkspacePath,
+  saveWorkspaceFile,
+} from "../../shared/api/client";
 import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
 import { isWorkSurfaceHiddenPath } from "../../shared/workspace/harnessPath";
 import {
@@ -10,7 +16,10 @@ import {
   type PatchArtifact,
 } from "../../components/PatchDiffPanel";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
-import { artifactToWritePreview, writePreviewFromTimeline } from "../../shared/workbench/filePreview";
+import {
+  artifactToWritePreview,
+  writePreviewFromTimeline,
+} from "../../shared/workbench/filePreview";
 import type {
   TimelineItem,
   WorkbenchState,
@@ -18,7 +27,7 @@ import type {
 import { ArtifactView } from "./ArtifactView";
 import { RetrievalView } from "./RetrievalView";
 import { WritingCardsView } from "../writing/WritingCardsView";
-import { WorkspaceTree } from "./WorkspaceTree";
+import { WorkspaceTree, joinWorkspacePath, parentDirOf, patchWorkspaceEntriesCache, removeWorkspaceEntryFromCache, toWorkspaceRelativePath } from "./WorkspaceTree";
 
 export type SidebarSelection =
   | { kind: "timeline"; item: TimelineItem; index: number }
@@ -34,6 +43,7 @@ type Props = {
   onOpenWorkspaceFile: (path: string) => void;
   onOpenSourcesLibrary?: () => void;
   onWorkspaceDeleted?: (deletedPaths: string[]) => void;
+  onWorkspaceRenamed?: (from: string, to: string) => void;
   onClose?: () => void;
 };
 
@@ -59,7 +69,8 @@ function timelinePath(item: TimelineItem, events: TurnEvent[]): string | null {
         String(e.payload.tool_call_id ?? "") === toolCallId,
     );
     const args = started?.payload.arguments as
-      Record<string, unknown> | undefined;
+      | Record<string, unknown>
+      | undefined;
     if (typeof args?.path === "string") return args.path;
     if (typeof args?.pattern === "string") return args.pattern;
     if (typeof args?.query === "string") return args.query.slice(0, 48);
@@ -85,6 +96,14 @@ function previewFromTimeline(item: TimelineItem): string {
   return summary;
 }
 
+function isMutableWorkspacePath(path: string): boolean {
+  return (
+    path !== "." &&
+    !isSeedCorpusPath(path) &&
+    !isWorkSurfaceHiddenPath(path)
+  );
+}
+
 export function AgentSidebar({
   wb,
   selection,
@@ -93,23 +112,33 @@ export function AgentSidebar({
   onOpenWorkspaceFile,
   onOpenSourcesLibrary,
   onWorkspaceDeleted,
+  onWorkspaceRenamed,
   onClose,
 }: Props) {
   const queryClient = useQueryClient();
   const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
   const [multiSelectMode, setMultiSelectMode] = useState(false);
-  const [checkedPaths, setCheckedPaths] = useState<Set<string>>(() => new Set());
+  const [checkedPaths, setCheckedPaths] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [cutPath, setCutPath] = useState<string | null>(null);
   const view = wb.view;
   const artifacts = useMemo(() => view?.artifacts ?? [], [view]);
 
-  const refreshWorkspace = async () => {
+  const refreshWorkspace = async (paths?: string[]) => {
     setWorkspaceRefreshing(true);
     try {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["workspace-entries"] }),
-        queryClient.invalidateQueries({ queryKey: ["workspace-file-viewer"] }),
-        queryClient.invalidateQueries({ queryKey: ["workspace-sources"] }),
-      ]);
+      if (paths && paths.length > 0) {
+        await Promise.all(
+          paths.map((path) =>
+            queryClient.invalidateQueries({
+              queryKey: ["workspace-entries", path],
+            }),
+          ),
+        );
+      } else {
+        await queryClient.invalidateQueries({ queryKey: ["workspace-entries"] });
+      }
     } finally {
       setWorkspaceRefreshing(false);
     }
@@ -118,9 +147,27 @@ export function AgentSidebar({
   const deleteSelected = useMutation({
     mutationFn: (paths: string[]) => deleteWorkspacePaths(paths),
     onSuccess: (result) => {
-      void refreshWorkspace();
+      const parents = [
+        ...new Set(result.deleted.map((p) => parentDirOf(p))),
+      ];
+      for (const path of result.deleted) {
+        removeWorkspaceEntryFromCache(
+          queryClient,
+          parentDirOf(path),
+          path.split("/").pop() || path,
+        );
+      }
+      void refreshWorkspace(parents);
       setCheckedPaths(new Set());
       setMultiSelectMode(false);
+      if (
+        cutPath &&
+        result.deleted.some(
+          (p) => cutPath === p || cutPath.startsWith(`${p}/`),
+        )
+      ) {
+        setCutPath(null);
+      }
       if (result.deleted.length > 0) {
         onWorkspaceDeleted?.(result.deleted);
       }
@@ -162,6 +209,135 @@ export function AgentSidebar({
     );
     if (!ok) return;
     deleteSelected.mutate(paths);
+  };
+
+  const commitCreateFile = async (parentDir: string, name: string) => {
+    if (isSeedCorpusPath(parentDir)) {
+      window.alert("不能在系统资料目录下新建文件。");
+      return;
+    }
+    const path = joinWorkspacePath(parentDir, name);
+    try {
+      await saveWorkspaceFile(path, "");
+      patchWorkspaceEntriesCache(queryClient, parentDir, name, false);
+      void refreshWorkspace([parentDir]);
+      onSelect({ kind: "workspace", path });
+      onOpenWorkspaceFile(path);
+    } catch (error) {
+      window.alert(
+        `新建失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  };
+
+  const commitCreateFolder = async (parentDir: string, name: string) => {
+    if (isSeedCorpusPath(parentDir)) {
+      window.alert("不能在系统资料目录下新建文件夹。");
+      return;
+    }
+    const path = joinWorkspacePath(parentDir, name);
+    try {
+      await mkdirWorkspacePath(path);
+      patchWorkspaceEntriesCache(queryClient, parentDir, name, true);
+      void refreshWorkspace([parentDir]);
+    } catch (error) {
+      window.alert(
+        `新建失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  };
+
+  const commitRename = async (path: string, newName: string) => {
+    if (!isMutableWorkspacePath(path)) {
+      window.alert("该路径不可重命名。");
+      return;
+    }
+    const leaf = path.split("/").pop() || path;
+    if (newName === leaf) return;
+    const parent = parentDirOf(path);
+    const newPath = joinWorkspacePath(parent, newName);
+    const parentData = queryClient.getQueryData<{ entries: string[] }>([
+      "workspace-entries",
+      parent,
+    ]);
+    const wasDir = Boolean(
+      parentData?.entries.some((e) => e === `${leaf}/`),
+    );
+    try {
+      await renameWorkspacePath(path, newPath);
+      removeWorkspaceEntryFromCache(queryClient, parent, leaf);
+      patchWorkspaceEntriesCache(queryClient, parent, newName, wasDir);
+      if (cutPath === path) setCutPath(newPath);
+      void refreshWorkspace([parent]);
+      onWorkspaceRenamed?.(path, newPath);
+      onSelect({ kind: "workspace", path: newPath });
+    } catch (error) {
+      window.alert(
+        `重命名失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+      throw error;
+    }
+  };
+
+  const deleteOne = async (path: string) => {
+    if (!isMutableWorkspacePath(path)) {
+      window.alert("该路径不可删除。");
+      return;
+    }
+    const ok = window.confirm(`确定删除 ${path}？\n\n此操作不可恢复。`);
+    if (!ok) return;
+    deleteSelected.mutate([path]);
+  };
+
+  const copyRelativePath = async (path: string) => {
+    const rel = toWorkspaceRelativePath(path);
+    if (!rel) {
+      // Root node — nothing useful to copy as X/X
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(rel);
+    } catch {
+      window.prompt("工作区相对路径：", rel);
+    }
+  };
+
+  const pasteCutInto = async (parentDir: string) => {
+    if (!cutPath) return;
+    if (isSeedCorpusPath(parentDir)) {
+      window.alert("不能粘贴到系统资料目录。");
+      return;
+    }
+    const leaf = cutPath.split("/").pop() || cutPath;
+    const newPath = joinWorkspacePath(parentDir, leaf);
+    if (newPath === cutPath) {
+      setCutPath(null);
+      return;
+    }
+    try {
+      const fromParent = parentDirOf(cutPath);
+      const fromData = queryClient.getQueryData<{ entries: string[] }>([
+        "workspace-entries",
+        fromParent,
+      ]);
+      const wasDir = Boolean(
+        fromData?.entries.some((e) => e === `${leaf}/`),
+      );
+      await renameWorkspacePath(cutPath, newPath);
+      removeWorkspaceEntryFromCache(queryClient, fromParent, leaf);
+      patchWorkspaceEntriesCache(queryClient, parentDir, leaf, wasDir);
+      const from = cutPath;
+      setCutPath(null);
+      void refreshWorkspace([fromParent, parentDir]);
+      onWorkspaceRenamed?.(from, newPath);
+      onSelect({ kind: "workspace", path: newPath });
+    } catch (error) {
+      window.alert(
+        `移动失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
 
   const patches = artifacts.filter(
@@ -318,10 +494,16 @@ export function AgentSidebar({
               ) : null}
             </div>
           </div>
+          {cutPath ? (
+            <p className="mb-2 truncate rounded bg-muted/50 px-2 py-1 text-[10px] text-muted-foreground">
+              已剪切：{cutPath}（右键目录粘贴）
+            </p>
+          ) : null}
           <WorkspaceTree
             selectedPath={treeSelectedPath}
             multiSelectMode={multiSelectMode}
             checkedPaths={checkedPaths}
+            cutPath={cutPath}
             onTogglePath={toggleCheckedPath}
             onSelectFile={(path) => {
               setWorkspaceSelectPath(path);
@@ -329,11 +511,25 @@ export function AgentSidebar({
             }}
             onOpenFile={onOpenWorkspaceFile}
             onOpenSourcesLibrary={onOpenSourcesLibrary}
+            onCommitCreateFile={commitCreateFile}
+            onCommitCreateFolder={commitCreateFolder}
+            onCommitRename={commitRename}
+            onDeletePath={(path) => void deleteOne(path)}
+            onCopyPath={(path) => void copyRelativePath(path)}
+            onCutPath={(path) => {
+              if (!isMutableWorkspacePath(path)) {
+                window.alert("该路径不可剪切。");
+                return;
+              }
+              setCutPath(path);
+            }}
+            onPasteInto={(dir) => void pasteCutInto(dir)}
+            onDownloadPath={(path) => void downloadWorkspaceFile(path)}
           />
           <p className="mt-2 text-[10px] text-muted-foreground/80">
             {multiSelectMode
               ? "多选模式下点击条目勾选，可删除文件或目录"
-              : "单击选中 · 双击在新窗口查看完整内容"}
+              : "单击选中 · 双击打开 · 树内联新建/重命名 · 右键更多操作"}
           </p>
         </section>
 
@@ -367,7 +563,9 @@ export function AgentSidebar({
                         )
                       }
                     >
-                      <span className="text-muted-foreground">{item.tool_name}</span>
+                      <span className="text-muted-foreground">
+                        {item.tool_name}
+                      </span>
                       <span className="ml-1 truncate">{label}</span>
                     </button>
                   </li>
@@ -465,9 +663,7 @@ export function AgentSidebar({
             {"loading" in selectedPreview && selectedPreview.loading ? (
               <p className="text-xs text-muted-foreground">加载文件…</p>
             ) : "error" in selectedPreview && selectedPreview.error ? (
-              <p className="text-xs text-destructive">
-                无法读取文件
-              </p>
+              <p className="text-xs text-destructive">无法读取文件</p>
             ) : "writePreview" in selectedPreview &&
               selectedPreview.writePreview ? (
               <WriteFileDiffPanel preview={selectedPreview.writePreview} />
@@ -486,7 +682,7 @@ export function AgentSidebar({
           </div>
         ) : (
           <p className="p-4 text-xs text-muted-foreground/80">
-            双击工作区文件在新窗口查看，或点击工具产物预览
+            双击工作区文件打开编辑，或点击工具产物预览
           </p>
         )}
       </div>

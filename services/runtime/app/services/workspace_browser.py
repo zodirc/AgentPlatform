@@ -8,12 +8,15 @@ from pathlib import Path
 from typing import Any
 
 from app.settings import settings
-from app.tools.core.tools import list_dir, read_file, write_file
+from app.tools.core.tools import list_dir, write_file
 
 logger = logging.getLogger(__name__)
 
 MAX_SOURCE_BYTES = 1_048_576  # 1 MiB
+MAX_WORKSPACE_WRITE_BYTES = 2_097_152  # 2 MiB — workbench editor saves
+MAX_UI_READ_BYTES = 2_097_152  # 2 MiB — full preview/edit (not agent 32k window)
 _SAFE_SOURCE_NAME = re.compile(r"^[a-zA-Z0-9_\-\.\u4e00-\u9fff]+$")
+_SAFE_ENTRY_NAME = re.compile(r"^[a-zA-Z0-9_\-\.\u4e00-\u9fff]+$")
 
 _index_lock = threading.Lock()
 _index_job: dict[str, Any] = {
@@ -74,17 +77,82 @@ def _assert_not_harness_internal(path: str) -> None:
     rel = normalized_workspace_rel(path)
     if rel == ".agent" or rel.startswith(".agent/"):
         raise PermissionError(
-            "cannot delete harness path `.agent/` from the workbench "
+            "cannot modify harness path `.agent/` from the workbench "
             "(internal drafts/manifests; user deliverables live at manuscript.md / exports/)"
         )
 
 
+def _normalize_rel_path(path: str, *, allow_root: bool = False) -> str:
+    normalized = path.strip().lstrip("/").replace("\\", "/")
+    if not normalized or normalized == ".":
+        if allow_root:
+            return "."
+        raise ValueError("path is required")
+    if ".." in Path(normalized).parts:
+        raise ValueError(f"invalid path: {path}")
+    return normalized
+
+
+def safe_entry_name(name: str) -> str:
+    """Single path segment for create/rename (files or folders)."""
+    raw = (name or "").strip()
+    if not raw or "/" in raw or "\\" in raw or raw in {".", ".."}:
+        raise ValueError("invalid name")
+    base = Path(raw).name.strip()
+    if not base or base in {".", ".."}:
+        raise ValueError("invalid name")
+    if not _SAFE_ENTRY_NAME.match(base):
+        raise ValueError("name contains unsupported characters")
+    return base
+
+
 async def read_workspace_file(path: str) -> dict:
-    """Human/UI file preview — always full text, never agent token-economy index mode."""
-    return await read_file(path, full=True)
+    """Human/UI file preview — full text up to ``MAX_UI_READ_BYTES`` (not agent 32k)."""
+    from app.tools.core.tools import _resolve_path
+
+    rel = _normalize_rel_path(path)
+    target = _resolve_path(rel)
+    if not target.exists():
+        return {"error": f"File not found: {rel}", "path": rel}
+    if not target.is_file():
+        return {"error": f"Not a file: {rel}", "path": rel}
+    try:
+        raw = target.read_bytes()
+    except OSError as exc:
+        return {"error": str(exc), "path": rel}
+    truncated = len(raw) > MAX_UI_READ_BYTES
+    chunk = raw[:MAX_UI_READ_BYTES] if truncated else raw
+    text = chunk.decode("utf-8", errors="replace")
+    if truncated:
+        text = text + "\n...[truncated]"
+    return {
+        "path": rel,
+        "content": text,
+        "truncated": truncated,
+        "file_bytes": len(raw),
+        "summary": f"Read {rel}" + (" (truncated)" if truncated else ""),
+    }
+
+
+async def save_workspace_file(*, path: str, content: str) -> dict:
+    """Workbench save / create — any non-seed, non-harness workspace path."""
+    from app.tools.core.tools import _assert_not_seed_corpus
+
+    normalized = _normalize_rel_path(path)
+    _assert_not_harness_internal(normalized)
+    _assert_not_seed_corpus(normalized)
+    parent_name = Path(normalized).name
+    if parent_name in {".", ".."} or not parent_name:
+        raise ValueError("invalid path")
+    # Allow nested dirs; only validate the leaf name.
+    safe_entry_name(parent_name)
+    if len(content.encode("utf-8")) > MAX_WORKSPACE_WRITE_BYTES:
+        raise ValueError(f"content exceeds {MAX_WORKSPACE_WRITE_BYTES} bytes")
+    return await write_file(normalized, content)
 
 
 async def write_workspace_file(*, path: str, content: str) -> dict:
+    """Sources upload helper — only ``sources/`` paths (legacy + upload route)."""
     normalized = path.strip().lstrip("/")
     if not normalized.startswith("sources/"):
         raise ValueError("only sources/ paths are writable from web upload")
@@ -96,6 +164,105 @@ async def write_workspace_file(*, path: str, content: str) -> dict:
     if len(content.encode("utf-8")) > MAX_SOURCE_BYTES:
         raise ValueError(f"content exceeds {MAX_SOURCE_BYTES} bytes")
     return await write_file(normalized, content)
+
+
+async def mkdir_workspace_path(path: str) -> dict[str, Any]:
+    """Create a directory (parents included)."""
+    from app.tools.core.tools import _assert_not_seed_corpus, _resolve_path
+
+    normalized = _normalize_rel_path(path)
+    _assert_not_harness_internal(normalized)
+    _assert_not_seed_corpus(normalized)
+    safe_entry_name(Path(normalized).name)
+    target = _resolve_path(normalized)
+    if target.exists():
+        if target.is_dir():
+            return {
+                "path": normalized,
+                "status": "exists",
+                "summary": f"Directory already exists: {normalized}",
+            }
+        raise ValueError(f"path exists and is not a directory: {normalized}")
+    target.mkdir(parents=True, exist_ok=False)
+    return {
+        "path": normalized,
+        "status": "created",
+        "summary": f"Created directory {normalized}",
+    }
+
+
+async def rename_workspace_path(
+    *,
+    path: str,
+    new_path: str,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    """Rename or move a file or directory within the work root."""
+    from app.tools.core.tools import _assert_not_seed_corpus, _resolve_path
+
+    src_rel = _normalize_rel_path(path)
+    dst_rel = _normalize_rel_path(new_path)
+    if src_rel == dst_rel:
+        return {
+            "status": "ok",
+            "path": src_rel,
+            "new_path": dst_rel,
+            "summary": f"Already named {dst_rel}",
+        }
+
+    _assert_not_harness_internal(src_rel)
+    _assert_not_harness_internal(dst_rel)
+    _assert_not_seed_corpus(src_rel)
+    _assert_not_seed_corpus(dst_rel)
+    safe_entry_name(Path(dst_rel).name)
+
+    src = _resolve_path(src_rel)
+    dst = _resolve_path(dst_rel)
+    if not src.exists():
+        raise FileNotFoundError(f"not found: {src_rel}")
+    if dst.exists():
+        if not overwrite:
+            raise ValueError(f"destination exists: {dst_rel}")
+        if dst.is_dir():
+            raise ValueError(f"destination is a directory: {dst_rel}")
+        if src.is_dir():
+            raise ValueError("cannot overwrite a file with a directory")
+        dst.unlink()
+
+    # Refuse moving a directory into itself / a descendant.
+    if src.is_dir():
+        try:
+            dst.resolve().relative_to(src.resolve())
+        except ValueError:
+            pass
+        else:
+            raise ValueError("cannot move a directory into itself")
+
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+
+    try:
+        from app.structural.workspace_index.dirty import notify_path_changed
+        from app.tenant_context import current_owner_user_id, current_work_id
+        from app.tools.core.tools import _workspace_root
+
+        owner = current_owner_user_id()
+        oid = str(owner) if owner else None
+        wid = current_work_id()
+        root = _workspace_root()
+        notify_path_changed(
+            src_rel, work_id=wid, owner_user_id=oid, work_root=root, deleted=True
+        )
+        notify_path_changed(dst_rel, work_id=wid, owner_user_id=oid, work_root=root)
+    except Exception:
+        pass
+
+    return {
+        "status": "renamed",
+        "path": src_rel,
+        "new_path": dst_rel,
+        "summary": f"Renamed {src_rel} → {dst_rel}",
+    }
 
 
 def _normalize_delete_path(path: str) -> str:
