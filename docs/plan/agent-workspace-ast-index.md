@@ -571,3 +571,4 @@ v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness
 | 2026-08-12 | **v4（进程边界）**：§0.4 实战复盘——同进程冷启动在 parallel≥2 下与 Turn/Jedi/DB 互抢致假慢与成片 `turn.failed`；思路对标 Cursor/SCIP「索引器与查询端解耦」；目标拓扑 `agent-ast-indexer` 生产、runtime 只消费。新增 §3.0；修订 §3.1/通道①/§7.2 动态预算/§8 R4；§9 增 A6；风险与否决 14–15；明确 parallel=1/加长预算仅为过渡，不得作终态或错误归因依据 |
 | 2026-08-13 | **A6 代码落地**：`work_ast_index_jobs` + alembic · queue/worker/snapshot · 默认 remote enqueue · compose `ast-indexer`；正式双轨 n5 仍待本拓扑复跑 |
 | 2026-08-13 | **文档回写**：§9 落地序改为状态表（A0–A6 主链已接线）；与六篇正文 / CSI 状态条对齐 |
+| 2026-08-13 | **基线对照补记**：主方案 §6.7.9（`b3357dd6`）官方 resolve **3/5**，而 `locate_fuse≈0.27`（主桶 `no_ws_symbol=10/11`）仍弱——强化「本文认领 Locate 段、不认领 resolve 单指标」；双轨 n5 仍待 A6 拓扑复跑 |
