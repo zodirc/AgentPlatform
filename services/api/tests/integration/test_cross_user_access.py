@@ -60,6 +60,11 @@ def intruder_client() -> TestClient:
             new_callable=AsyncMock,
             return_value=0,
         ),
+        patch(
+            "app.main.reconcile_expired_leases",
+            new_callable=AsyncMock,
+            return_value=0,
+        ),
         patch("app.main.TurnEventListener") as listener_cls,
         patch(
             "app.services.resource.sessions.get_session",

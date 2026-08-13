@@ -34,6 +34,8 @@ from app.routers.admin import model_providers as admin_model_providers
 from app.routers.admin import ux_signals as admin_ux_signals
 from app.routers.admin import workspace as admin_workspace
 from app.services.projection.session_projector import reconcile_lagging_projections, reconcile_stale_turns
+from app.services.projection.lease_reclaim import reconcile_expired_leases
+from app.services.projection.claim_timeout import reconcile_unclaimed_turns
 from app.services.command.runtime_client import close_runtime_clients
 from app.services.realtime.listener import TurnEventListener
 from app.observability.tracing import instrument_fastapi, setup_tracing
@@ -42,6 +44,7 @@ from app.settings import settings
 logger = logging.getLogger(__name__)
 
 _PROJECTION_RECONCILE_INTERVAL_SECONDS = 300.0
+
 
 _HTTP_ERROR_CODES = {
     400: "BAD_REQUEST",
@@ -57,19 +60,65 @@ _HTTP_ERROR_CODES = {
 
 
 async def _projection_reconcile_loop() -> None:
+    from app.services.projection.advisory import LOCK_PROJECTION_RECONCILE, try_advisory_lock
+
     while True:
         await asyncio.sleep(_PROJECTION_RECONCILE_INTERVAL_SECONDS)
         try:
-            stale = await reconcile_stale_turns()
-            lagging = await reconcile_lagging_projections()
-            if stale or lagging:
-                logger.info(
-                    "periodic projection reconcile stale=%s lagging=%s",
-                    stale,
-                    lagging,
-                )
+            async with try_advisory_lock(LOCK_PROJECTION_RECONCILE) as held:
+                if not held:
+                    continue
+                stale = await reconcile_stale_turns()
+                lagging = await reconcile_lagging_projections()
+                if stale or lagging:
+                    logger.info(
+                        "periodic projection reconcile stale=%s lagging=%s",
+                        stale,
+                        lagging,
+                    )
         except Exception:
             logger.exception("periodic projection reconcile failed")
+
+
+async def _lease_reclaim_loop() -> None:
+    from app.services.projection.advisory import (
+        LOCK_CLAIM_TIMEOUT,
+        LOCK_EVENTS_RETENTION,
+        LOCK_LEASE_RECLAIM,
+        try_advisory_lock,
+    )
+    from app.services.projection.events_retention import run_events_retention
+
+    interval = max(5.0, float(settings.runner_lease_reconcile_interval_seconds))
+    retention_every = max(60.0, float(settings.events_retention_interval_seconds))
+    last_retention = 0.0
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            reclaimed = 0
+            timed_out = 0
+            if settings.runner_lease_enabled:
+                async with try_advisory_lock(LOCK_LEASE_RECLAIM) as held:
+                    if held:
+                        reclaimed = await reconcile_expired_leases()
+                        if reclaimed:
+                            logger.info("periodic lease reclaim count=%s", reclaimed)
+            async with try_advisory_lock(LOCK_CLAIM_TIMEOUT) as held:
+                if held:
+                    timed_out = await reconcile_unclaimed_turns()
+                    if timed_out:
+                        logger.info("periodic claim timeout count=%s", timed_out)
+            if reclaimed or timed_out:
+                await reconcile_lagging_projections()
+
+            now = asyncio.get_running_loop().time()
+            if now - last_retention >= retention_every:
+                async with try_advisory_lock(LOCK_EVENTS_RETENTION) as held:
+                    if held:
+                        await run_events_retention()
+                last_retention = now
+        except Exception:
+            logger.exception("periodic lease/claim/retention failed")
 
 
 @asynccontextmanager
@@ -86,6 +135,13 @@ async def lifespan(app: FastAPI):
     lagging = await reconcile_lagging_projections()
     if lagging:
         logger.info("reconciled %s lagging projection(s) on startup", lagging)
+    if settings.runner_lease_enabled:
+        try:
+            reclaimed = await reconcile_expired_leases()
+            if reclaimed:
+                logger.info("startup lease reclaim count=%s", reclaimed)
+        except Exception:
+            logger.exception("startup lease reclaim failed")
     if (settings.ops_test_secret or "").strip():
         from app.services.ops.runs import reconcile_orphaned_runs
         from app.services.ops import official_runner
@@ -103,10 +159,16 @@ async def lifespan(app: FastAPI):
     await listener.start()
     app.state.event_listener = listener
     reconcile_task = asyncio.create_task(_projection_reconcile_loop())
+    lease_task = asyncio.create_task(_lease_reclaim_loop())
     try:
         yield
     finally:
+        lease_task.cancel()
         reconcile_task.cancel()
+        try:
+            await lease_task
+        except asyncio.CancelledError:
+            pass
         try:
             await reconcile_task
         except asyncio.CancelledError:

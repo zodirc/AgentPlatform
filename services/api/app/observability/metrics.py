@@ -72,6 +72,16 @@ class MetricsRegistry:
                 hist = self._histograms[key] = _Histogram()
             hist.observe(value)
 
+    def get_gauge(self, name: str, default: float = 0.0, **labels: str) -> float:
+        key = _label_key(name, labels)
+        with self._lock:
+            return float(self._gauges.get(key, default))
+
+    def get_counter(self, name: str, default: float = 0.0, **labels: str) -> float:
+        key = _label_key(name, labels)
+        with self._lock:
+            return float(self._counters.get(key, default))
+
     def render_prometheus(self) -> str:
         lines: list[str] = []
         typed: set[str] = set()

@@ -40,6 +40,7 @@ def client() -> TestClient:
         patch("app.main.apply_migrations", new_callable=AsyncMock),
         patch("app.main.reconcile_stale_turns", new_callable=AsyncMock, return_value=0),
         patch("app.main.reconcile_lagging_projections", new_callable=AsyncMock, return_value=0),
+        patch("app.main.reconcile_expired_leases", new_callable=AsyncMock, return_value=0),
         patch("app.main.TurnEventListener") as listener_cls,
         patch(
             "app.services.resource.sessions.get_session",
@@ -226,6 +227,11 @@ def test_create_turn_success(client: TestClient) -> None:
             return_value=work,
         ),
         patch("app.routers.sessions.runtime_client_for_new_turn", return_value=runtime),
+        patch.object(
+            __import__("app.settings", fromlist=["settings"]).settings,
+            "turn_dispatch",
+            "push",
+        ),
     ):
         response = client.post(
             f"/api/v1/sessions/{SESSION_ID}/turns",

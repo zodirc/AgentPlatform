@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from uuid import UUID
 
 from app.db.pool import get_pool
+from app.observability.slo import observe_event_pipeline_lag, observe_turn_accepted
 from app.services.projection.projector import project_turn
 from app.services.realtime.listener import TurnEventListener
 
@@ -95,6 +96,9 @@ async def iter_turn_events(
             idle_polls = 0
         for event in events:
             cursor = event["sequence"]
+            if event["type"] == "turn.accepted":
+                observe_turn_accepted(turn_id)
+            observe_event_pipeline_lag(event.get("ts"))
             yield event
             if event["type"] in TERMINAL_EVENTS:
                 stop_stream = True

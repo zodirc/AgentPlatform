@@ -10,8 +10,13 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
-    # B10: pool command_timeout + PG statement_timeout (seconds).
+    # B10 legacy single timeout (kept for env compat; hot pool prefers db_hot_*).
     db_statement_timeout_seconds: float = 30.0
+    # O10 / WP4: dual-pool timeouts (hot Turn/SSE/projection · bypass RAG/AST/Ops).
+    db_hot_statement_timeout_seconds: float = 5.0
+    db_bypass_statement_timeout_seconds: float = 120.0
+    db_pool_min_size: int = 1
+    db_pool_max_size: int = 5
     runtime_url: str = "http://runtime:8001"
     runtime_url_map: str = ""
     internal_service_token: str = "change-me-internal"
@@ -33,6 +38,21 @@ class Settings(BaseSettings):
     worker_batch_size: int = 10
     otel_enabled: bool = False
     otel_service_name: str = "agent-api"
+    # O3 / WP1: api-side lease reclaim (pair with runtime RUNNER_LEASE_*).
+    runner_lease_enabled: bool = True
+    runner_lease_reconcile_interval_seconds: float = 30.0
+    # O1 / WP5→WP9: default pull (set TURN_DISPATCH=push to roll back).
+    turn_dispatch: str = "pull"
+    turn_claim_timeout_seconds: float = 15.0
+    # O2 / WP6: approve/deny/patch/cancel via run_commands table (false → legacy HTTP).
+    run_commands_channel_enabled: bool = True
+    # O4 / WP7: pull-mode admission caps (0 global → default 32).
+    dispatch_queue_max: int = 0
+    per_tenant_queue_max: int = 2
+    # O7 / WP3: turn_events retention.
+    events_stream_retention_days: int = 7
+    events_structural_retention_days: int = 90
+    events_retention_interval_seconds: float = 3600.0
     # docs/27 — Work roots (path strings stored in DB; runtime mounts/creates dirs)
     workspace_root: str = "/workspace"
     works_root: str = "/data/works"

@@ -173,53 +173,84 @@ async def create_turn(
     scenario_id = body.scenario_id or session["default_scenario_id"]
     trace_id = uuid4()
 
+    from app.settings import settings as api_settings
+    from app.services.command.admission import check_dispatch_admission
+
+    # O4: pull-mode queue caps — reject before inserting another accepted run.
+    if (api_settings.turn_dispatch or "push").strip().lower() == "pull":
+        replay = None
+        if body.client_request_id is not None:
+            replay = await turn_svc.find_existing_turn(session_id, body.client_request_id)
+        if replay is None:
+            allowed, reason, retry_after = await check_dispatch_admission(
+                owner_user_id=actor.id
+            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=reason,
+                    headers={"Retry-After": str(retry_after)},
+                )
+
     turn, run, created = await turn_svc.create_turn(
         session_id=session_id,
         scenario_id=scenario_id,
         message=body.message,
         client_request_id=body.client_request_id,
+        plan_phase=body.plan_phase,
     )
     await session_svc.touch_session(session_id)
 
     if created:
-        try:
-            from app.services.resource.works import resolve_session_tenant
+        dispatch = (api_settings.turn_dispatch or "push").strip().lower()
+        if dispatch == "pull":
+            from app.observability.slo import mark_turn_accepted_at_api
 
-            work = await resolve_session_tenant(session_id, owner_user_id=actor.id)
-            client = runtime_client_for_new_turn()
-            await client.start_turn(
-                turn_id=turn["id"],
-                run_id=run["id"],
-                session_id=session_id,
-                scenario_id=scenario_id,
-                message=body.message,
-                client_request_id=body.client_request_id,
-                trace_id=trace_id,
-                plan_phase=body.plan_phase,
-                work_id=work.id,
-                work_root=work.work_root,
-                owner_user_id=actor.id,
-                visibility_seed=work.visibility_seed,
-            )
+            mark_turn_accepted_at_api(turn["id"])
             listener = request.app.state.event_listener
             await listener.notify(turn["id"])
-        except (httpx.HTTPError, Exception) as exc:
-            logger.exception("start_turn failed turn_id=%s", turn["id"])
-            await turn_svc.mark_turn_start_failed(
-                turn["id"],
-                run["id"],
-                message=str(exc),
-            )
-            detail = f"Failed to start turn on runtime: {type(exc).__name__}: {exc}"
-            if isinstance(exc, httpx.HTTPStatusError):
-                detail = (
-                    f"Failed to start turn on runtime: HTTP {exc.response.status_code} "
-                    f"{exc.response.text[:300]}"
+        else:
+            try:
+                from app.services.resource.works import resolve_session_tenant
+
+                work = await resolve_session_tenant(session_id, owner_user_id=actor.id)
+                client = runtime_client_for_new_turn()
+                await client.start_turn(
+                    turn_id=turn["id"],
+                    run_id=run["id"],
+                    session_id=session_id,
+                    scenario_id=scenario_id,
+                    message=body.message,
+                    client_request_id=body.client_request_id,
+                    trace_id=trace_id,
+                    plan_phase=body.plan_phase,
+                    work_id=work.id,
+                    work_root=work.work_root,
+                    owner_user_id=actor.id,
+                    visibility_seed=work.visibility_seed,
                 )
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=detail,
-            ) from exc
+                from app.observability.slo import mark_turn_accepted_at_api
+
+                mark_turn_accepted_at_api(turn["id"])
+                listener = request.app.state.event_listener
+                await listener.notify(turn["id"])
+            except (httpx.HTTPError, Exception) as exc:
+                logger.exception("start_turn failed turn_id=%s", turn["id"])
+                await turn_svc.mark_turn_start_failed(
+                    turn["id"],
+                    run["id"],
+                    message=str(exc),
+                )
+                detail = f"Failed to start turn on runtime: {type(exc).__name__}: {exc}"
+                if isinstance(exc, httpx.HTTPStatusError):
+                    detail = (
+                        f"Failed to start turn on runtime: HTTP {exc.response.status_code} "
+                        f"{exc.response.text[:300]}"
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=detail,
+                ) from exc
     else:
         response.status_code = status.HTTP_200_OK
 

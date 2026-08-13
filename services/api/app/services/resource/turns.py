@@ -34,13 +34,81 @@ async def _find_existing_turn(
     return turn, {"id": existing["run_id"]}
 
 
+async def find_existing_turn(
+    session_id: UUID, client_request_id: UUID
+) -> tuple[dict, dict] | None:
+    pool = await get_pool()
+    return await _find_existing_turn(pool, session_id, client_request_id)
+
+
+def _normalize_plan_phase(plan_phase: str | None) -> str | None:
+    if plan_phase is None:
+        return None
+    phase = str(plan_phase).strip().lower()
+    if phase in {"planning", "executing"}:
+        return phase
+    return None
+
+
+def _normalize_model_mode(model_mode: str | None) -> str | None:
+    if model_mode is None:
+        return None
+    mode = str(model_mode).strip().lower()
+    if mode in {"stub", "live", "recorded"}:
+        return mode
+    return None
+
+
+def resolve_pull_eligible(
+    *,
+    dispatch_notify: bool = True,
+    pull_eligible: bool | None = None,
+) -> bool:
+    """Legacy escape hatch: dispatch_notify=False still blocks pull.
+
+    Prefer StartSpec + secret escrow (ops_eval / model_override on create_turn)
+    so Ops and Web share one pull queue.
+    """
+    eligible = dispatch_notify if pull_eligible is None else bool(pull_eligible)
+    if not dispatch_notify:
+        return False
+    return eligible
+
+
 async def create_turn(
     session_id: UUID,
     scenario_id: str,
     message: str,
     client_request_id: UUID | None,
+    *,
+    dispatch_notify: bool = True,
+    pull_eligible: bool | None = None,
+    plan_phase: str | None = None,
+    ops_eval: bool = False,
+    model_mode: str | None = None,
+    model_override: dict[str, Any] | None = None,
 ) -> tuple[dict, dict, bool]:
-    """Create turn + run. Returns (turn, run, created_new)."""
+    """Create turn + run (+ optional StartSpec / model escrow).
+
+    Mature path: Ops passes ``ops_eval=True`` and optional ``model_override``;
+    override is Fernet-encrypted into ``turn_model_secrets`` and the run stays
+    ``pull_eligible`` so claim reconstructs ``start_turn`` (no HTTP push fork).
+    """
+    eligible = resolve_pull_eligible(
+        dispatch_notify=dispatch_notify,
+        pull_eligible=pull_eligible,
+    )
+    phase = _normalize_plan_phase(plan_phase)
+    mode = _normalize_model_mode(model_mode)
+    want_ops = bool(ops_eval)
+    override = model_override if isinstance(model_override, dict) else None
+    if override and override.get("api_key"):
+        want_ops = True
+        if mode is None:
+            mode = "live"
+    elif want_ops and mode is None:
+        mode = "live"
+
     pool = await get_pool()
 
     if client_request_id is not None:
@@ -58,27 +126,37 @@ async def create_turn(
             # duplicate returns no row here and we read the winner below.
             turn_row = await conn.fetchrow(
                 """
-                INSERT INTO turns (id, session_id, scenario_id, status, user_input, client_request_id)
-                VALUES ($1, $2, $3, 'pending', $4, $5)
+                INSERT INTO turns (
+                    id, session_id, scenario_id, status, user_input,
+                    client_request_id, plan_phase
+                )
+                VALUES ($1, $2, $3, 'pending', $4, $5, $6)
                 ON CONFLICT (session_id, client_request_id) DO NOTHING
-                RETURNING id, session_id, scenario_id, status, user_input, created_at
+                RETURNING id, session_id, scenario_id, status, user_input,
+                          created_at, plan_phase
                 """,
                 turn_id,
                 session_id,
                 scenario_id,
                 message,
                 client_request_id,
+                phase,
             )
             run_row = None
             if turn_row is not None:
                 run_row = await conn.fetchrow(
                     """
-                    INSERT INTO runs (id, turn_id, status)
-                    VALUES ($1, $2, 'accepted')
-                    RETURNING id, turn_id, status
+                    INSERT INTO runs (
+                        id, turn_id, status, pull_eligible, ops_eval, model_mode
+                    )
+                    VALUES ($1, $2, 'accepted', $3, $4, $5)
+                    RETURNING id, turn_id, status, pull_eligible, ops_eval, model_mode
                     """,
                     run_id,
                     turn_id,
+                    eligible,
+                    want_ops,
+                    mode,
                 )
                 await conn.execute(
                     """
@@ -93,6 +171,23 @@ async def create_turn(
                     scenario_id,
                     message,
                 )
+                if override and override.get("api_key"):
+                    from app.services.resource.turn_model_secrets import (
+                        store_turn_model_secret,
+                    )
+
+                    await store_turn_model_secret(
+                        conn,
+                        run_id=run_id,
+                        turn_id=turn_id,
+                        model_override=override,
+                    )
+                # O1 pull: wake runtimes in the same transaction as accept.
+                if eligible and dispatch_notify:
+                    await conn.execute(
+                        "SELECT pg_notify('turn_dispatch_channel', $1)",
+                        str(run_id),
+                    )
 
     if turn_row is None:
         # Lost the ON CONFLICT race — the winner has committed by the time

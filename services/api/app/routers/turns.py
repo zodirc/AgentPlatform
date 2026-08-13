@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from app.db.pool import get_pool
 from app.models.responses import TurnResponse, TurnView
 from app.services.command import idempotency
+from app.services.command.run_commands import enqueue_run_command
 from app.services.security.audit import record_audit
 from app.services.command.runtime_factory import runtime_client_for_turn
 from app.services.end_user.auth import (
@@ -22,10 +23,15 @@ from app.services.realtime.events import fetch_turn_events
 from app.services.realtime.sse import stream_turn_events
 from app.services.realtime.ws import handle_turn_websocket
 from app.services.resource import turns as turn_svc
+from app.settings import settings
 
 PATCH_ALLOWED_STATUSES = frozenset({"completed", "running", "waiting_approval"})
 
 router = APIRouter(tags=["turns"])
+
+
+def _commands_via_db() -> bool:
+    return bool(getattr(settings, "run_commands_channel_enabled", True))
 
 
 class CancelTurnRequest(BaseModel):
@@ -236,14 +242,25 @@ async def cancel_turn(
         req.force,
     )
 
-    client = await runtime_client_for_turn(turn_id)
-    await client.cancel_turn(
-        turn_id=turn_id,
-        run_id=run["id"],
-        trace_id=trace_id,
-        reason=req.reason,
-        force=req.force,
-    )
+    if _commands_via_db():
+        await enqueue_run_command(
+            run_id=run["id"],
+            command_type="cancel",
+            payload={
+                "trace_id": str(trace_id),
+                "reason": req.reason,
+                "force": req.force,
+            },
+        )
+    else:
+        client = await runtime_client_for_turn(turn_id)
+        await client.cancel_turn(
+            turn_id=turn_id,
+            run_id=run["id"],
+            trace_id=trace_id,
+            reason=req.reason,
+            force=req.force,
+        )
     await record_audit(
         actor=actor,
         action="turn.cancel",
@@ -274,13 +291,23 @@ async def approve_tool_call(
         raise HTTPException(status_code=409, detail=f"Turn not awaiting approval: {turn['status']}")
 
     trace_id = uuid4()
-    client = await runtime_client_for_turn(turn_id)
-    await client.approve_tool_call(
-        turn_id=turn_id,
-        run_id=run["id"],
-        tool_call_id=body.tool_call_id,
-        trace_id=trace_id,
-    )
+    if _commands_via_db():
+        await enqueue_run_command(
+            run_id=run["id"],
+            command_type="approve",
+            payload={
+                "trace_id": str(trace_id),
+                "tool_call_id": body.tool_call_id,
+            },
+        )
+    else:
+        client = await runtime_client_for_turn(turn_id)
+        await client.approve_tool_call(
+            turn_id=turn_id,
+            run_id=run["id"],
+            tool_call_id=body.tool_call_id,
+            trace_id=trace_id,
+        )
     await record_audit(
         actor=actor,
         action="tool_call.approve",
@@ -313,14 +340,25 @@ async def deny_tool_call(
         raise HTTPException(status_code=409, detail=f"Turn not awaiting approval: {turn['status']}")
 
     trace_id = uuid4()
-    client = await runtime_client_for_turn(turn_id)
-    await client.deny_tool_call(
-        turn_id=turn_id,
-        run_id=run["id"],
-        tool_call_id=body.tool_call_id,
-        trace_id=trace_id,
-        reason=body.reason or "user_denied",
-    )
+    if _commands_via_db():
+        await enqueue_run_command(
+            run_id=run["id"],
+            command_type="deny",
+            payload={
+                "trace_id": str(trace_id),
+                "tool_call_id": body.tool_call_id,
+                "reason": body.reason or "user_denied",
+            },
+        )
+    else:
+        client = await runtime_client_for_turn(turn_id)
+        await client.deny_tool_call(
+            turn_id=turn_id,
+            run_id=run["id"],
+            tool_call_id=body.tool_call_id,
+            trace_id=trace_id,
+            reason=body.reason or "user_denied",
+        )
     await record_audit(
         actor=actor,
         action="tool_call.deny",
@@ -357,13 +395,20 @@ async def accept_patch(
     _ensure_patch_allowed(turn)
 
     trace_id = uuid4()
-    client = await runtime_client_for_turn(turn_id)
-    await client.accept_patch(
-        turn_id=turn_id,
-        run_id=run["id"],
-        patch_id=body.patch_id,
-        trace_id=trace_id,
-    )
+    if _commands_via_db():
+        await enqueue_run_command(
+            run_id=run["id"],
+            command_type="patch_accept",
+            payload={"trace_id": str(trace_id), "patch_id": body.patch_id},
+        )
+    else:
+        client = await runtime_client_for_turn(turn_id)
+        await client.accept_patch(
+            turn_id=turn_id,
+            run_id=run["id"],
+            patch_id=body.patch_id,
+            trace_id=trace_id,
+        )
     await record_audit(
         actor=actor,
         action="patch.accept",
@@ -392,14 +437,25 @@ async def reject_patch(
     _ensure_patch_allowed(turn)
 
     trace_id = uuid4()
-    client = await runtime_client_for_turn(turn_id)
-    await client.reject_patch(
-        turn_id=turn_id,
-        run_id=run["id"],
-        patch_id=body.patch_id,
-        trace_id=trace_id,
-        reason=body.reason or "user_rejected",
-    )
+    if _commands_via_db():
+        await enqueue_run_command(
+            run_id=run["id"],
+            command_type="patch_reject",
+            payload={
+                "trace_id": str(trace_id),
+                "patch_id": body.patch_id,
+                "reason": body.reason or "user_rejected",
+            },
+        )
+    else:
+        client = await runtime_client_for_turn(turn_id)
+        await client.reject_patch(
+            turn_id=turn_id,
+            run_id=run["id"],
+            patch_id=body.patch_id,
+            trace_id=trace_id,
+            reason=body.reason or "user_rejected",
+        )
     await record_audit(
         actor=actor,
         action="patch.reject",
