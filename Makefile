@@ -32,6 +32,7 @@ EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
 # Daily make up/start enable Ops bench via profile. Not exported — CI/smoke/eval
 # must not inherit it (see scripts/proof_compose_env.sh / smoke_test.sh).
+# Constrained hosts: `COMPOSE_PROFILES= make up` skips bench + bench-postgres.
 COMPOSE_PROFILES ?= bench
 # Isolated stub golden uses runtime-lite (hash, thin Dockerfile) so evals do not
 # rebuild the default sentence-transformers image. Restore uses main COMPOSE (live + ST).
@@ -64,6 +65,7 @@ RELEASE_CONSOLE ?= 1
 .DEFAULT_GOAL := help
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
+	pull-dispatch-maturity \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
 	up-web up-api up-runtime up-ast-indexer up-bench start-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
@@ -126,6 +128,7 @@ help: ## 显示常用命令
 	@echo "其他"
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
+	@echo "  make pull-dispatch-maturity  pull 分发成熟度冒烟（指标/表/保留）"
 	@echo "  make gate         Proof 一键门禁（smoke→eval-all→runtime-test；docs/28）"
 	@echo "  make ux-signals   体验信号日聚合/告警（docs/28 PX1；环外，不进 Turn）"
 	@echo "  make test-rag     RAG 检索效果对比（根目录一条命令）"
@@ -396,6 +399,9 @@ backup: ## 备份 Postgres（pg_dump）+ agent_data 卷（保留最近 7 份）
 
 smoke:
 	bash scripts/smoke_test.sh
+
+pull-dispatch-maturity: ## pull 分发成熟度冒烟（schema/LISTEN/retention/metrics；无 kill）
+	bash scripts/ops/pull_dispatch_maturity.sh
 
 gate: ## Docker 门禁：smoke → eval-all → runtime-test（完整 CI 请用 make ci-proof）
 	bash scripts/gate.sh

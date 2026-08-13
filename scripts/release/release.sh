@@ -571,6 +571,16 @@ Status file: $STATUS_FILE
 EOF
 }
 
+compose_profiles_value() {
+  # Unset → default bench. Empty-but-set COMPOSE_PROFILES must stay empty
+  # (do not use :-) so constrained hosts can skip bench + bench-postgres.
+  if [[ -n "${COMPOSE_PROFILES+x}" ]]; then
+    printf '%s' "$COMPOSE_PROFILES"
+  else
+    printf '%s' "bench"
+  fi
+}
+
 compose_infra_up() {
   # Bring dependency containers without rebuilding product images.
   set -a
@@ -584,12 +594,17 @@ compose_infra_up() {
   case "${OPS_EVAL_DOCKER_SOCK:-0}" in
     1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
   esac
-  local profiles="${COMPOSE_PROFILES:-bench}"
-  echo "==> infra: postgres (+ bench-postgres if profile)"
+  local profiles
+  profiles="$(compose_profiles_value)"
+  local infra_services=(postgres)
+  case ",${profiles}," in
+    *,bench,*) infra_services+=(bench-postgres) ;;
+  esac
+  echo "==> infra: ${infra_services[*]} (COMPOSE_PROFILES='${profiles}')"
   COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
-    up -d postgres bench-postgres
+    up -d "${infra_services[@]}"
 }
 
 compose_ensure_stack() {
@@ -605,7 +620,8 @@ compose_ensure_stack() {
   case "${OPS_EVAL_DOCKER_SOCK:-0}" in
     1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
   esac
-  local profiles="${COMPOSE_PROFILES:-bench}"
+  local profiles
+  profiles="$(compose_profiles_value)"
   COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \

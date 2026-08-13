@@ -1,4 +1,4 @@
-# Optional HA profile: dual runtime + runner_id affinity (docs/03 §8.5 · docs/27 MT7)
+# Optional HA profile: dual runtime + pull dispatch (backend-scaling O1/O2 / WP9)
 #
 # Multi-tenancy (Work isolation) + multi-replica (concurrent Turns) are both
 # required for a real multi-user web platform. Default `make up` stays single
@@ -7,6 +7,7 @@
 #   make up-ha
 #
 # `--scale runtime=0` disables the single `runtime` service from the base file.
+# TURN_DISPATCH=pull: runtimes LISTEN/claim; no RUNTIME_URL_MAP round-robin.
 
 x-runtime-env: &runtime-env
   DATABASE_URL: ${DATABASE_URL}
@@ -44,6 +45,8 @@ x-runtime-env: &runtime-env
   STALL_AUTO_FAIL: ${STALL_AUTO_FAIL:-true}
   # Per-replica soft cap (docs/27 MT5b); total ≈ replicas × this.
   RUNTIME_MAX_INFLIGHT_TURNS: ${RUNTIME_MAX_INFLIGHT_TURNS:-16}
+  TURN_DISPATCH: pull
+  RUN_COMMANDS_CHANNEL_ENABLED: "true"
 
 x-runtime-svc: &runtime-svc
   image: agent-platform-runtime:default
@@ -100,8 +103,10 @@ services:
 
   api:
     environment:
+      # O1: claim-based dispatch (no RUNTIME_URL_MAP). Commands via run_commands.
+      TURN_DISPATCH: pull
+      RUN_COMMANDS_CHANNEL_ENABLED: "true"
       RUNTIME_URL: http://runtime-a:8001
-      RUNTIME_URL_MAP: '{"runtime-a":"http://runtime-a:8001","runtime-b":"http://runtime-b:8001"}'
     depends_on:
       runtime:
         required: false

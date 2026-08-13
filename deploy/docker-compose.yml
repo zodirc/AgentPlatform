@@ -31,14 +31,17 @@ services:
 
   # Ops L1 vector plane — isolated pgvector so Official eval source_* never share
   # locks/IO with the product agent database (Schema A: works/sessions stay on
-  # agent-postgres; L1 corpora under ops-l1/ index here). Always on (not profile
-  # "bench") so shared runtime can route Ops Turns without the L0 bench worker.
+  # agent-postgres; L1 corpora under ops-l1/ index here).
+  # Profile [bench] (O9): gated with the L0 bench worker so constrained hosts
+  # can skip ~1g cgroup via `COMPOSE_PROFILES=` / omit bench. Start via
+  # COMPOSE_PROFILES=bench or make up-bench / start-bench.
   bench-postgres:
     image: pgvector/pgvector:pg16
     container_name: agent-bench-postgres
     restart: unless-stopped
     logging: *default-logging
     mem_limit: 1g
+    profiles: [bench]
     environment:
       POSTGRES_USER: ${BENCH_POSTGRES_USER:-bench}
       POSTGRES_PASSWORD: ${BENCH_POSTGRES_PASSWORD:-bench}
@@ -175,8 +178,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      bench-postgres:
-        condition: service_healthy
+      # bench-postgres is profile [bench] only (O9); product Turns use agent-postgres.
     healthcheck:
       # Use /health/live so first-boot can finish before MODEL_API_KEY / Web provider is set.
       # /health/ready still means "model configured" for ops probes.
