@@ -217,6 +217,9 @@ class Settings(BaseSettings):
     workspace_ast_enabled: bool = True
     # Ops/SWE temp works: default off (§7). Set true only for explicit dual-track experiments.
     workspace_ast_ops_enabled: bool = False
+    # A6: False = enqueue to work_ast_index_jobs (remote indexer). True = legacy
+    # same-process cold start (unit tests / emergency fallback only — not product终态).
+    workspace_ast_inline: bool = False
     workspace_ast_max_files: int = 20_000
     workspace_ast_max_file_bytes: int = 1_048_576
     workspace_ast_parse_concurrency: int = 3
@@ -226,8 +229,14 @@ class Settings(BaseSettings):
     workspace_ast_idle_ttl_seconds: float = 600.0
     workspace_ast_max_cached_works: int = 8
     workspace_ast_poll_seconds: float = 45.0
-    # Eval-ephemeral cold-start hard budget (§7.2); partial → stale, queryable.
-    workspace_ast_eval_budget_seconds: float = 60.0
+    # Eval-ephemeral cold-start budget (§7.2): dynamic clamp(f(n_files), min, max).
+    # Fixed seconds are only an explicit override / walk reserve — not the mature path.
+    workspace_ast_eval_budget_seconds: float = 0.0  # 0 = use dynamic; >0 overrides whole job
+    workspace_ast_eval_budget_min_seconds: float = 60.0
+    workspace_ast_eval_budget_max_seconds: float = 900.0
+    workspace_ast_eval_budget_seconds_per_file: float = 0.75
+    workspace_ast_eval_budget_overhead_seconds: float = 45.0
+    workspace_ast_eval_walk_budget_seconds: float = 90.0
     # Cap files/parse threads for eval so indexing cannot starve StartTurn.
     workspace_ast_eval_max_files: int = 4_000
     workspace_ast_eval_parse_concurrency: int = 2

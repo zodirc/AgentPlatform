@@ -65,7 +65,7 @@ RELEASE_CONSOLE ?= 1
 
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
-	up-web up-api up-runtime up-bench start-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-ast-indexer up-bench start-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
@@ -305,11 +305,18 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-deps; \
 	fi; \
 	$(COMPOSE) up -d --no-deps runtime
+	@$(COMPOSE) up -d --no-deps --force-recreate ast-indexer || true
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
 	  bash scripts/release/release.sh mark --modules=runtime >/dev/null; \
 	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
 	fi
+
+up-ast-indexer: ensure-docker-creds ## 只重建/拉起 agent-ast-indexer（A6）
+	@set -e; \
+	$(COMPOSE) build runtime; \
+	$(COMPOSE) up -d --no-deps --force-recreate ast-indexer
+	$(docker_auto_prune)
 
 start-bench: resolve-embedding ensure-ops-secret ## 仅启动 Ops Bench（不 rebuild）
 	@set -e; \

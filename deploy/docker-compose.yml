@@ -159,6 +159,9 @@ services:
       STRUCTURAL_CHECKS_MAX_ISSUES: ${STRUCTURAL_CHECKS_MAX_ISSUES:-20}
       STRUCTURAL_CHECKS_TIMEOUT_S: ${STRUCTURAL_CHECKS_TIMEOUT_S:-30}
       STRUCTURAL_SPAN_CANDIDATES: ${STRUCTURAL_SPAN_CANDIDATES:-5}
+      # A6: runtime enqueues jobs; agent-ast-indexer parses (inline=true only for emergency).
+      WORKSPACE_AST_ENABLED: ${WORKSPACE_AST_ENABLED:-true}
+      WORKSPACE_AST_INLINE: ${WORKSPACE_AST_INLINE:-false}
       # SWE-bench Lite answer-leak ban: ops_eval Turns get bwrap --unshare-net.
       OPS_EVAL_DENY_NETWORK: ${OPS_EVAL_DENY_NETWORK:-false}
     volumes:
@@ -181,6 +184,78 @@ services:
       interval: 10s
       timeout: 5s
       start_period: 120s
+      retries: 5
+
+  # A6: Agent workspace AST indexer (docs/plan/agent-workspace-ast-index.md §0.4).
+  # Same image as runtime; separate PID — never shares Turn / Jedi / model loop.
+  # Claims work_ast_index_jobs via FOR UPDATE SKIP LOCKED.
+  ast-indexer:
+    image: agent-platform-runtime:default
+    build:
+      context: ..
+      dockerfile: services/runtime/Dockerfile.retrieval
+      target: app
+      args:
+        EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+        TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
+        HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+    container_name: agent-ast-indexer
+    restart: unless-stopped
+    logging: *default-logging
+    # Keep small on constrained hosts (≤8Gi); parse concurrency 1.
+    mem_limit: ${AST_INDEXER_MEM_LIMIT:-768m}
+    cpus: ${AST_INDEXER_CPUS:-1.0}
+    command:
+      [
+        "python",
+        "-m",
+        "app.structural.workspace_index.worker",
+      ]
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      DATA_DIR: /data
+      WORKSPACE_ROOT: /workspace
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WORKSPACE_AST_ENABLED: ${WORKSPACE_AST_ENABLED:-true}
+      WORKSPACE_AST_INLINE: "false"
+      WORKSPACE_AST_PARSE_CONCURRENCY: ${WORKSPACE_AST_PARSE_CONCURRENCY:-2}
+      WORKSPACE_AST_EVAL_PARSE_CONCURRENCY: ${WORKSPACE_AST_EVAL_PARSE_CONCURRENCY:-2}
+      # 0 = §7.2 dynamic clamp(f(n_files)); set >0 only to force a fixed wall clock.
+      WORKSPACE_AST_EVAL_BUDGET_SECONDS: ${WORKSPACE_AST_EVAL_BUDGET_SECONDS:-0}
+      WORKSPACE_AST_EVAL_BUDGET_MIN_SECONDS: ${WORKSPACE_AST_EVAL_BUDGET_MIN_SECONDS:-60}
+      WORKSPACE_AST_EVAL_BUDGET_MAX_SECONDS: ${WORKSPACE_AST_EVAL_BUDGET_MAX_SECONDS:-900}
+      WORKSPACE_AST_EVAL_BUDGET_SECONDS_PER_FILE: ${WORKSPACE_AST_EVAL_BUDGET_SECONDS_PER_FILE:-0.75}
+      WORKSPACE_AST_EVAL_MAX_FILES: ${WORKSPACE_AST_EVAL_MAX_FILES:-4000}
+      AST_INDEXER_POLL_SECONDS: ${AST_INDEXER_POLL_SECONDS:-0.5}
+      AST_INDEXER_HEARTBEAT: /data/ast_indexer_heartbeat
+      # Indexer does not call models / embeddings.
+      MODEL_MODE: stub
+      RETRIEVAL_BACKEND: hash
+      EMBEDDING_BACKEND: hash
+    volumes:
+      - agent_data:/data
+      - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+    depends_on:
+      postgres:
+        condition: service_healthy
+      runtime:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import time,pathlib; p=pathlib.Path('/data/ast_indexer_heartbeat'); t=float(p.read_text()); assert time.time()-t < 45",
+        ]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
       retries: 5
 
   # Build-only: tags deps stage so BuildKit GC does not drop pip/ST layers between

@@ -39,11 +39,85 @@ logger = logging.getLogger(__name__)
 ProgressCb = Callable[[dict[str, Any]], Awaitable[None]]
 CancelCheck = Callable[[], bool]
 
+
+class L1Cancelled(RuntimeError):
+    """Ops L1 cooperative cancel — must not be swallowed as a per-case infra fail."""
+
+
+class L1TurnTracker:
+    """Track product Turns started by an Ops L1 run so stop/replace can cancel them."""
+
+    def __init__(self) -> None:
+        self._turns: dict[str, UUID] = {}
+        self._lock = asyncio.Lock()
+
+    async def register(self, turn_id: UUID, run_id: UUID) -> None:
+        tid = turn_id if isinstance(turn_id, UUID) else UUID(str(turn_id))
+        rid = run_id if isinstance(run_id, UUID) else UUID(str(run_id))
+        async with self._lock:
+            self._turns[str(tid)] = rid
+
+    async def unregister(self, turn_id: UUID) -> None:
+        tid = str(turn_id)
+        async with self._lock:
+            self._turns.pop(tid, None)
+
+    def snapshot(self) -> list[tuple[UUID, UUID]]:
+        return [(UUID(tid), rid) for tid, rid in list(self._turns.items())]
+
+    async def cancel_all(self, *, reason: str = "ops_eval_stopped") -> int:
+        async with self._lock:
+            items = list(self._turns.items())
+            self._turns.clear()
+        if not items:
+            return 0
+        client = runtime_client_for_new_turn()
+        n_ok = 0
+        for tid, rid in items:
+            try:
+                await client.cancel_turn(
+                    turn_id=UUID(tid),
+                    run_id=rid if isinstance(rid, UUID) else UUID(str(rid)),
+                    trace_id=uuid4(),
+                    reason=reason,
+                    force=True,
+                )
+                n_ok += 1
+            except Exception:  # noqa: BLE001 — best-effort stop
+                logger.warning(
+                    "L1 cancel_turn failed turn_id=%s", tid, exc_info=True
+                )
+        return n_ok
+
+
+async def _request_cancel_turn(
+    turn_id: UUID,
+    run_id: UUID,
+    *,
+    reason: str = "ops_eval_stopped",
+) -> None:
+    try:
+        client = runtime_client_for_new_turn()
+        await client.cancel_turn(
+            turn_id=turn_id if isinstance(turn_id, UUID) else UUID(str(turn_id)),
+            run_id=run_id if isinstance(run_id, UUID) else UUID(str(run_id)),
+            trace_id=uuid4(),
+            reason=reason,
+            force=True,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "L1 cancel_turn request failed turn_id=%s", turn_id, exc_info=True
+        )
+
+
 # Max mtime of official_bench/*.py last loaded into this process (bind-mount hot reload).
 _official_bench_loaded_mtime: float | None = None
 
 PROTOCOL_L1 = "official-small-2026-08-m3"
 L1_ROOT = Path(os.environ.get("OPS_L1_WORKSPACE_ROOT", "/data/ops-l1"))
+# SWE coding Turns often need >30m on cold checkout + long tool loops.
+L1_CODING_TURN_TIMEOUT_S = float(os.environ.get("L1_CODING_TURN_TIMEOUT_S", "3600"))
 # Stable BEIR index cache (shared across L1 runs) — avoids N× full ST embeds.
 _BEIR_INDEX_CACHE = L1_ROOT / "beir-index"
 # C-MTEB / Chinese IR — same embedder as BEIR; independent HNSW schema retrieval_ops_zh.
@@ -316,6 +390,79 @@ async def _emit_fail(
     await _emit(cb, "log", message=f"[L1] fail {case_id} error={detail}")
 
 
+async def _watch_workspace_index_progress(
+    *,
+    iid: str,
+    tenant: dict[str, str],
+    on_progress: ProgressCb | None,
+    should_cancel: CancelCheck | None = None,
+    timeout_s: float = 900.0,
+    poll_s: float = 2.0,
+) -> None:
+    """Poll ephemeral AST index status into Ops logs (non-blocking side task).
+
+    Line shape (stable for OfficialBenchPage parse)::
+
+        [L1] workspace_index {iid} status=building files=120/914 gen=1 ephemeral=1
+    """
+    from app.services.admin import workspace as workspace_svc
+
+    t0 = time.monotonic()
+    last_line = ""
+    while time.monotonic() - t0 < timeout_s:
+        if should_cancel is not None and should_cancel():
+            await _emit(
+                on_progress,
+                "log",
+                message=f"[L1] workspace_index {iid} status=cancelled",
+            )
+            return
+        try:
+            st = await workspace_svc.ast_index_status(enqueue=False, tenant=tenant)
+        except Exception as exc:  # noqa: BLE001 — best-effort visibility
+            msg = (
+                f"[L1] workspace_index {iid} status=poll_error "
+                f"error={_exc_text(exc)[:120]}"
+            )
+            if msg != last_line:
+                await _emit(on_progress, "log", message=msg)
+                last_line = msg
+            await asyncio.sleep(poll_s)
+            continue
+        if not isinstance(st, dict):
+            await asyncio.sleep(poll_s)
+            continue
+        status = str(st.get("status") or "unknown")
+        fd, ft = st.get("files_done"), st.get("files_total")
+        gen = st.get("generation")
+        parts = [f"[L1] workspace_index {iid} status={status}"]
+        if fd is not None or ft is not None:
+            parts.append(
+                f"files={fd if fd is not None else '?'}/"
+                f"{ft if ft is not None else '?'}"
+            )
+        if gen is not None:
+            parts.append(f"gen={gen}")
+        if st.get("ephemeral"):
+            parts.append("ephemeral=1")
+        err = st.get("error")
+        if err and status == "error":
+            parts.append(f"error={str(err)[:80]}")
+        line = " ".join(parts)
+        if line != last_line:
+            await _emit(on_progress, "log", message=line)
+            last_line = line
+        # stale = budget-truncated but queryable; treat as terminal for this watch.
+        if status in {"ready", "error", "disabled", "stale"}:
+            return
+        await asyncio.sleep(poll_s)
+    await _emit(
+        on_progress,
+        "log",
+        message=f"[L1] workspace_index {iid} status=watch_timeout",
+    )
+
+
 async def _pull_with_live_logs(
     label: str,
     pull_fn: Any,
@@ -384,6 +531,9 @@ async def _wait_turn_verbose(
     label: str,
     timeout: float,
     heartbeat_s: float = 30.0,
+    should_cancel: CancelCheck | None = None,
+    run_id: UUID | None = None,
+    turn_tracker: L1TurnTracker | None = None,
 ) -> list[dict[str, Any]]:
     """Wait for Turn terminal events while streaming step lines to Ops logs."""
     tid = str(turn_id)
@@ -392,55 +542,85 @@ async def _wait_turn_verbose(
         "log",
         message=f"[L1] turn start {label} turn_id={tid}",
     )
+    if turn_tracker is not None and run_id is not None:
+        await turn_tracker.register(turn_id, run_id)
+
+    async def _abort_for_ops_cancel(*, terminal: str | None = None) -> None:
+        await _emit(
+            on_progress,
+            "log",
+            message=(
+                f"[L1] cancel {label} turn_id={tid}"
+                + (f" terminal={terminal}" if terminal else "")
+            ),
+        )
+        if turn_tracker is not None:
+            await turn_tracker.cancel_all(reason="ops_eval_stopped")
+        elif run_id is not None:
+            await _request_cancel_turn(turn_id, run_id)
+        raise L1Cancelled(f"L1 cancelled during {label}")
+
     deadline = time.monotonic() + timeout
     collected: list[dict[str, Any]] = []
     cursor = 0
     last_beat = time.monotonic()
     last_type = "waiting"
     started = time.monotonic()
-    while time.monotonic() < deadline:
-        batch = await _fetch_events(turn_id, since=cursor)
-        if batch:
-            collected.extend(batch)
-            cursor = max(int(e["sequence"]) for e in batch)
-            for ev in batch:
-                et = str(ev.get("type") or "")
-                last_type = et or last_type
-                if et in _STEP_EVENT_TYPES:
-                    detail = _event_step_detail(ev)
-                    suffix = f" {detail}" if detail else ""
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=f"[L1] · {et}{suffix} · {label} turn_id={tid}",
-                    )
-                if et in TERMINAL:
-                    elapsed = time.monotonic() - started
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=(
-                            f"[L1] turn done {label} status={et} "
-                            f"events={len(collected)} {elapsed:.0f}s turn_id={tid}"
-                        ),
-                    )
-                    return collected
-            last_beat = time.monotonic()
-        elif time.monotonic() - last_beat >= heartbeat_s:
-            elapsed = time.monotonic() - started
-            await _emit(
-                on_progress,
-                "log",
-                message=(
-                    f"[L1] … waiting {label} {elapsed:.0f}s "
-                    f"last={last_type} events={len(collected)} turn_id={tid}"
-                ),
-            )
-            last_beat = time.monotonic()
-        await asyncio.sleep(0.25)
-    raise TimeoutError(
-        f"timed out waiting for {sorted(TERMINAL)} on turn {tid} ({label})"
-    )
+    try:
+        while time.monotonic() < deadline:
+            if should_cancel is not None and should_cancel():
+                await _abort_for_ops_cancel()
+            batch = await _fetch_events(turn_id, since=cursor)
+            if batch:
+                collected.extend(batch)
+                cursor = max(int(e["sequence"]) for e in batch)
+                for ev in batch:
+                    et = str(ev.get("type") or "")
+                    last_type = et or last_type
+                    if et in _STEP_EVENT_TYPES:
+                        detail = _event_step_detail(ev)
+                        suffix = f" {detail}" if detail else ""
+                        await _emit(
+                            on_progress,
+                            "log",
+                            message=f"[L1] · {et}{suffix} · {label} turn_id={tid}",
+                        )
+                    if et in TERMINAL:
+                        elapsed = time.monotonic() - started
+                        await _emit(
+                            on_progress,
+                            "log",
+                            message=(
+                                f"[L1] turn done {label} status={et} "
+                                f"events={len(collected)} {elapsed:.0f}s turn_id={tid}"
+                            ),
+                        )
+                        # Eager ops cancel_all may finish the Turn as cancelled;
+                        # surface that as suite cancel when a cancel hook is wired.
+                        if should_cancel is not None and (
+                            should_cancel() or et == "turn.cancelled"
+                        ):
+                            raise L1Cancelled(f"L1 cancelled during {label}")
+                        return collected
+                last_beat = time.monotonic()
+            elif time.monotonic() - last_beat >= heartbeat_s:
+                elapsed = time.monotonic() - started
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=(
+                        f"[L1] … waiting {label} {elapsed:.0f}s "
+                        f"last={last_type} events={len(collected)} turn_id={tid}"
+                    ),
+                )
+                last_beat = time.monotonic()
+            await asyncio.sleep(0.25)
+        raise TimeoutError(
+            f"timed out waiting for {sorted(TERMINAL)} on turn {tid} ({label})"
+        )
+    finally:
+        if turn_tracker is not None:
+            await turn_tracker.unregister(turn_id)
 
 
 async def _create_l1_work(
@@ -1255,6 +1435,7 @@ async def run_retrieval_l1(
     max_parallel: int | None = None,
     arm: str = "free",
     should_cancel: CancelCheck | None = None,
+    turn_tracker: L1TurnTracker | None = None,
     datasets: list[str] | None = None,
     corpus_mode: str = "full",
     suite_key: str = "retrieval",
@@ -1509,6 +1690,8 @@ async def run_retrieval_l1(
             async def _one_query(i: int, qid: str, qtext: str) -> None:
                 nonlocal done_count
                 async with sem:
+                    if should_cancel is not None and should_cancel():
+                        raise L1Cancelled("L1 cancelled")
                     # INFRA-2: entire case body isolated — preamble transport
                     # failures must not abort asyncio.gather / suite.
                     turn_id_s = ""
@@ -1535,6 +1718,9 @@ async def run_retrieval_l1(
                             on_progress=on_progress,
                             label=f"{case_prefix}.{name}.q-{qid}",
                             timeout=420.0,
+                            should_cancel=should_cancel,
+                            run_id=_run["id"],
+                            turn_tracker=turn_tracker,
                         )
                         doc_ids = merge_retrieval_rankings(events)
                         scores = ranking_scores(doc_ids, limit=limit_k)
@@ -1614,6 +1800,8 @@ async def run_retrieval_l1(
                             "recall_at_10": case_recall_10,
                             "recall_at_100": case_recall_100,
                         }
+                    except L1Cancelled:
+                        raise
                     except Exception as exc:  # noqa: BLE001 — case isolation, no re-raise
                         doc_ids = []
                         scores = {}
@@ -1732,9 +1920,19 @@ async def run_retrieval_l1(
                     if fail_detail is not None:
                         await _emit_fail(on_progress, case_id, error=fail_detail)
 
-            await asyncio.gather(
-                *[_one_query(i, qid, qtext) for i, (qid, qtext) in enumerate(q_items, start=1)]
+            results = await asyncio.gather(
+                *[
+                    _one_query(i, qid, qtext)
+                    for i, (qid, qtext) in enumerate(q_items, start=1)
+                ],
+                return_exceptions=True,
             )
+            if any(isinstance(r, L1Cancelled) for r in results) or (
+                should_cancel is not None and should_cancel()
+            ):
+                if turn_tracker is not None:
+                    await turn_tracker.cancel_all(reason="ops_eval_stopped")
+                raise L1Cancelled("L1 cancelled")
 
             # Metrics only over queries we actually ran (cap / missing ids must not zero-fill).
             # Infra channel failures are excluded from primary IR macros.
@@ -1883,6 +2081,8 @@ async def run_context_l1(
     scenario_id: str = "agent",
     max_parallel: int | None = None,
     arm: str = "free",
+    should_cancel: CancelCheck | None = None,
+    turn_tracker: L1TurnTracker | None = None,
 ) -> dict[str, Any]:
     """LongBench small via file-on-disk + real Turns.
 
@@ -1974,6 +2174,8 @@ async def run_context_l1(
         async def _one_row(idx: int, row: dict[str, Any]) -> None:
             nonlocal done_count
             async with sem:
+                if should_cancel is not None and should_cancel():
+                    raise L1Cancelled("L1 cancelled")
                 # INFRA-2: entire case body isolated — work/session/start_turn
                 # transport failures must not abort asyncio.gather / suite.
                 turn_id_s = ""
@@ -2014,6 +2216,9 @@ async def run_context_l1(
                         on_progress=on_progress,
                         label=f"longbench.{task}.{idx}",
                         timeout=600.0,
+                        should_cancel=should_cancel,
+                        run_id=_run["id"],
+                        turn_tracker=turn_tracker,
                     )
                     pred = final_assistant_text(events)
                     scores = score_prediction(pred, golds)
@@ -2064,6 +2269,8 @@ async def run_context_l1(
                     )
                     status = "pass"
                     err = None
+                except L1Cancelled:
+                    raise
                 except Exception as exc:  # noqa: BLE001 — case isolation, no re-raise
                     scores = {"em": 0.0, "f1": 0.0}
                     status = "fail"
@@ -2154,7 +2361,16 @@ async def run_context_l1(
                 if fail_detail is not None:
                     await _emit_fail(on_progress, case_id, error=fail_detail)
 
-        await asyncio.gather(*[_one_row(idx, row) for idx, row in enumerate(rows)])
+        results = await asyncio.gather(
+            *[_one_row(idx, row) for idx, row in enumerate(rows)],
+            return_exceptions=True,
+        )
+        if any(isinstance(r, L1Cancelled) for r in results) or (
+            should_cancel is not None and should_cancel()
+        ):
+            if turn_tracker is not None:
+                await turn_tracker.cancel_all(reason="ops_eval_stopped")
+            raise L1Cancelled("L1 cancelled")
 
         metrics: dict[str, float] = {}
         case_rollups: dict[str, dict[str, float]] = {}
@@ -2260,6 +2476,8 @@ async def run_coding_l1(
     max_parallel: int | None = None,
     checkout_repo: bool = True,
     run_harness: bool = False,
+    should_cancel: CancelCheck | None = None,
+    turn_tracker: L1TurnTracker | None = None,
 ) -> dict[str, Any]:
     """SWE Lite via product Turns.
 
@@ -2401,10 +2619,13 @@ async def run_coding_l1(
             nonlocal nonempty, done_count
             iid = str(inst.get("instance_id"))
             async with sem:
+                if should_cancel is not None and should_cancel():
+                    raise L1Cancelled("L1 cancelled")
                 # INFRA: entire case body isolated — StartTurn / transport
                 # failures must not abort asyncio.gather / suite.
                 work = None
                 turn: dict[str, Any] | None = None
+                run_row: dict[str, Any] | None = None
                 has_repo = False
                 mirror_hit = False
                 patch = ""
@@ -2487,7 +2708,7 @@ async def run_coding_l1(
                     hint = _coding_prompt(inst, has_repo=True)
                     # Accept StartTurn first so AST cold-start cannot starve the
                     # 202 path (R1). Index still builds during the Turn (E1).
-                    turn, _run = await _start_turn(
+                    turn, run_row = await _start_turn(
                         session_id=sess["id"],
                         scenario_id=scenario_id,
                         message=hint,
@@ -2512,8 +2733,18 @@ async def run_coding_l1(
                                 on_progress,
                                 "log",
                                 message=(
-                                    f"[L1] workspace_index enqueue (ephemeral) {iid}"
+                                    f"[L1] workspace_index enqueue (ephemeral) {iid} "
+                                    f"work={str(work.id)[:8]}"
                                 ),
+                            )
+                            asyncio.create_task(
+                                _watch_workspace_index_progress(
+                                    iid=iid,
+                                    tenant=tenant,
+                                    on_progress=on_progress,
+                                    should_cancel=should_cancel,
+                                ),
+                                name=f"ast-watch-{iid}",
                             )
                         except Exception:  # noqa: BLE001
                             logger.warning(
@@ -2529,7 +2760,10 @@ async def run_coding_l1(
                             turn["id"],
                             on_progress=on_progress,
                             label=f"swe.{iid}",
-                            timeout=1800.0,
+                            timeout=L1_CODING_TURN_TIMEOUT_S,
+                            should_cancel=should_cancel,
+                            run_id=run_row["id"],
+                            turn_tracker=turn_tracker,
                         )
                         patch = ""
                         if has_repo:
@@ -2582,6 +2816,8 @@ async def run_coding_l1(
                         l2["bucket"] = classify_bucket("coding", l2)
                         err = None
                         patch = accepted_patch
+                    except L1Cancelled:
+                        raise
                     except Exception as exc:  # noqa: BLE001
                         raw = patch_from_work_root(work.work_root) if has_repo else ""
                         if not raw:
@@ -2614,6 +2850,8 @@ async def run_coding_l1(
                             **csi,
                         }
                         l2["bucket"] = classify_bucket("coding", l2)
+                except L1Cancelled:
+                    raise
                 except Exception as exc:  # noqa: BLE001 — case isolation, no re-raise
                     err = _exc_text(exc)
                     logger.warning(
@@ -2698,7 +2936,16 @@ async def run_coding_l1(
                         error=str(err or l2.get("bucket") or "no_patch"),
                     )
 
-        await asyncio.gather(*[_one_inst(inst) for inst in ordered])
+        results = await asyncio.gather(
+            *[_one_inst(inst) for inst in ordered],
+            return_exceptions=True,
+        )
+        if any(isinstance(r, L1Cancelled) for r in results) or (
+            should_cancel is not None and should_cancel()
+        ):
+            if turn_tracker is not None:
+                await turn_tracker.cancel_all(reason="ops_eval_stopped")
+            raise L1Cancelled("L1 cancelled")
 
         pred_path = Path(session.dir) / "predictions.jsonl"
         write_predictions(
@@ -2856,6 +3103,7 @@ async def run_l1_targets(
     coding_checkout_repo: bool = True,
     coding_harness: bool = False,
     should_cancel: CancelCheck | None = None,
+    turn_tracker: L1TurnTracker | None = None,
     retrieval_datasets: list[str] | None = None,
     retrieval_corpus_mode: str = "full",
 ) -> dict[str, Any]:
@@ -2866,7 +3114,7 @@ async def run_l1_targets(
         live = ["retrieval"]
     for idx, t in enumerate(live):
         if should_cancel is not None and should_cancel():
-            raise RuntimeError("L1 cancelled")
+            raise L1Cancelled("L1 cancelled")
         await _emit(on_progress, "log", message=f"[L1] suite start {t}")
         if t == "retrieval":
             out[t] = await run_retrieval_l1(
@@ -2876,6 +3124,7 @@ async def run_l1_targets(
                 max_parallel=max_parallel,
                 arm=retrieval_arm,
                 should_cancel=should_cancel,
+                turn_tracker=turn_tracker,
                 datasets=retrieval_datasets,
                 corpus_mode=retrieval_corpus_mode,
                 suite_key="retrieval",
@@ -2889,6 +3138,7 @@ async def run_l1_targets(
                 max_parallel=max_parallel,
                 arm=retrieval_arm,
                 should_cancel=should_cancel,
+                turn_tracker=turn_tracker,
                 datasets=retrieval_datasets,
                 corpus_mode="full",
                 suite_key="retrieval_zh",
@@ -2901,6 +3151,8 @@ async def run_l1_targets(
                 on_progress=on_progress,
                 max_parallel=max_parallel,
                 arm=context_arm,
+                should_cancel=should_cancel,
+                turn_tracker=turn_tracker,
             )
         elif t in {"coding", "coding_infer"}:
             out[t] = await run_coding_l1(
@@ -2911,6 +3163,8 @@ async def run_l1_targets(
                 max_parallel=max_parallel,
                 checkout_repo=coding_checkout_repo,
                 run_harness=coding_harness,
+                should_cancel=should_cancel,
+                turn_tracker=turn_tracker,
             )
         else:
             raise ValueError(f"unsupported_l1_target:{t}")

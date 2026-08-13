@@ -35,7 +35,7 @@ SWE 官方 resolve 依赖本机 `sweb.eval` 镜像（约 1GiB/题，**不进 git
 
 ```
 产品 Agent/
-  代码/          api · runtime · web · gateway
+  代码/          api · runtime · ast-indexer · web · gateway
   检索/          向量模型 · 语料索引
 Ops/
   检索/          向量模型（共用 runtime）· BEIR 英文索引 · C-MTEB 中文索引

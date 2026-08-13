@@ -2,7 +2,7 @@
 
 > **状态**：Wave 1 已落地（Locate/Impact 揉合，2026-08-11）· **Wave 2 方案见 §7** · 场景分型见 **§3** · 当前流程 §6.0 · 实测 §6.7  
 > **范围**：`agent` 写入链的 **LSP 结构揉合** + SWE/Ops 评测协议（本文）  
-> **姊妹草案**：[Agent 工作区异步 AST 索引](agent-workspace-ast-index.md)（Cursor 式 codebase · **v4：目标拓扑 = 独立 indexer 生产 / runtime 消费** · A0–A5/E1 骨架已落地 · A6 进程解耦待做）  
+> **姊妹草案**：[Agent 工作区异步 AST 索引](agent-workspace-ast-index.md)（Cursor 式 codebase · **v4/A6：`agent-ast-indexer` 旁路已接线** · A0–A5/E1 骨架已落地 · 双轨 n5 数字待 A6 拓扑复跑）  
 > **非范围**：writing/intel RAG 主链细节；不以资料检索充当 Agent Locate  
 > **约束权威**：[架构 · R1–R5](../core/architecture.md) · [工具与上下文](../core/tools-and-context.md) · [Runtime](../core/runtime.md) · [RAG 两平面](../topics/rag.md)  
 > **相关现状**：`read_lints`=LSP∪CLI · Locate=`search_codebase`/裸符号 `grep`→definition · Impact=`edit_file.impact` · RAG 切块（writing/intel）  

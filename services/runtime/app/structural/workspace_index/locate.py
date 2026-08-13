@@ -133,6 +133,7 @@ async def locate_via_ast_index(
         symbol,
         owner_user_id=owner_user_id,
         limit=max(1, int(settings.workspace_ast_locate_top_k)),
+        work_root=workspace,
     )
     if meta is None or meta.status in {IndexStatus.COLD, IndexStatus.ERROR}:
         return None
@@ -173,7 +174,9 @@ async def locate_via_ast_index(
             st = abs_path.stat()
             size = int(st.st_size)
             mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
-            proj = await service.ensure_projection(work_id, owner_user_id=owner_user_id)
+            proj = await service.ensure_projection(
+                work_id, owner_user_id=owner_user_id, work_root=workspace
+            )
             entry = proj.file_entry(hit.path) if proj else None
             stale = False
             if entry is None:

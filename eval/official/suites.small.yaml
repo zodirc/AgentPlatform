@@ -113,7 +113,7 @@ suites:
       clean: false
       namespace: swebench
       image_tag: latest
-      max_workers: 2
+      max_workers: 1
       # Board / make default readiness tier (n5 ≈ 5–6 GiB download).
       board_tier: n5
       # Fail-fast when images missing (avoid Evaluation 0/5 hang on bad Docker Hub).
@@ -121,3 +121,4 @@ suites:
       require_local_images: true
       # approx compressed size per instance (UI / plan hint only)
       approx_mib_per_image: 1100
+      # Constrained hosts (≤8Gi / 6CPU): keep harness workers at 1; override via SWE_MAX_WORKERS.

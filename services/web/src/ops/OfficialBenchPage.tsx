@@ -254,6 +254,78 @@ type Caps = Record<string, boolean>;
 const SUITE_IDS = ["retrieval", "retrieval_zh", "context", "coding"] as const;
 type SuiteId = (typeof SUITE_IDS)[number];
 
+/** Product scenario → which official suites primarily exercise that path. */
+type BenchScenarioId = "writing" | "agent" | "intel" | "collab";
+
+const BENCH_SCENARIO_GROUPS: {
+  id: BenchScenarioId;
+  label: string;
+  hint: string;
+  suiteIds: readonly SuiteId[];
+}[] = [
+  {
+    id: "writing",
+    label: "写作 writing",
+    hint: "资料 RAG / 长文上下文（search_sources 主路径）",
+    suiteIds: ["retrieval", "retrieval_zh", "context"],
+  },
+  {
+    id: "agent",
+    label: "Agent 编码",
+    hint: "SWE-bench · 补丁 / harness resolve",
+    suiteIds: ["coding"],
+  },
+  {
+    id: "intel",
+    label: "威胁情报 intel",
+    hint: "闭环效果臂尚未挂接 · 见 docs/plan/intel-closed-loop-verification.md",
+    suiteIds: [],
+  },
+];
+
+const SUITE_TO_SCENARIO: Record<SuiteId, BenchScenarioId> = {
+  retrieval: "writing",
+  retrieval_zh: "writing",
+  context: "writing",
+  coding: "agent",
+};
+
+const FALLBACK_SUITE_META: Record<
+  SuiteId,
+  { id: SuiteId; label: string; description: string }
+> = {
+  retrieval: {
+    id: "retrieval",
+    label: "检索",
+    description: "BEIR · hybrid + BM25",
+  },
+  retrieval_zh: {
+    id: "retrieval_zh",
+    label: "中文检索",
+    description: "C-MTEB · 同模分图 retrieval_ops_zh",
+  },
+  context: {
+    id: "context",
+    label: "上下文",
+    description: "LongBench · 三臂",
+  },
+  coding: {
+    id: "coding",
+    label: "编码",
+    description: "SWE-bench Lite",
+  },
+};
+
+function scenarioLabelForSuite(id: string): string {
+  const sid = id as SuiteId;
+  if ((SUITE_IDS as readonly string[]).includes(sid)) {
+    const scen = SUITE_TO_SCENARIO[sid];
+    const g = BENCH_SCENARIO_GROUPS.find((x) => x.id === scen);
+    return g?.label ?? scen;
+  }
+  return "其他";
+}
+
 type ApiStyle = "openai" | "anthropic";
 
 type ProviderPreset = {
@@ -596,6 +668,15 @@ function isOpsKeyLogItem(item: OfficialLogItem): boolean {
   if (/^\[L1\]\s+coding infer done\b/i.test(s)) return true;
   if (/^\[L1\]\s+context done\b/i.test(s)) return true;
   if (/^\[L1\]\s+retrieval done\b/i.test(s)) return true;
+  // AST index milestones (skip intermediate building ticks in history tab).
+  if (/^\[L1\]\s+workspace_index\s+enqueue\b/i.test(s)) return true;
+  if (
+    /^\[L1\]\s+workspace_index\s+\S+\s+status=(ready|stale|error|cancelled|watch_timeout)\b/i.test(
+      s,
+    )
+  ) {
+    return true;
+  }
   if (/harness/i.test(s) && /\b(fail|error|resolve)\b/i.test(s)) return true;
   return false;
 }
@@ -610,6 +691,13 @@ function liveLogLineClass(line: string): string | undefined {
     line.startsWith("[L1] turn ")
   ) {
     return "font-semibold text-foreground";
+  }
+  if (line.startsWith("[L1] workspace_index")) {
+    if (/\bstatus=ready\b/i.test(line)) return "font-semibold text-foreground";
+    if (/\bstatus=(error|poll_error|watch_timeout)\b/i.test(line)) {
+      return "font-semibold text-destructive";
+    }
+    return "text-muted-foreground";
   }
   if (line.startsWith("[L1] ·") || line.startsWith("[L1] …")) {
     return "text-muted-foreground";
@@ -688,6 +776,58 @@ const SUITE_UNIT: Record<string, string> = {
 /** Strip suite prefix from case tokens for the detail strip. */
 function shortCaseToken(token: string): string {
   return token.replace(/^(swe|beir|cmteb|longbench)\./i, "");
+}
+
+type AstIndexLive = {
+  iid: string;
+  status: string;
+  filesDone: number | null;
+  filesTotal: number | null;
+  ephemeral: boolean;
+};
+
+/** Parse `[L1] workspace_index …` progress lines into a per-instance card. */
+function parseAstIndexLine(line: string): AstIndexLive | null {
+  const enqueue = line.match(
+    /^\[L1\]\s+workspace_index\s+enqueue\s+\(ephemeral\)\s+(\S+)/i,
+  );
+  if (enqueue) {
+    return {
+      iid: enqueue[1],
+      status: "queued",
+      filesDone: null,
+      filesTotal: null,
+      ephemeral: true,
+    };
+  }
+  const m = line.match(
+    /^\[L1\]\s+workspace_index\s+(\S+)\s+status=(\S+)(?:\s+files=(\d+|\?)\/(\d+|\?))?/i,
+  );
+  if (!m) return null;
+  const doneRaw = m[3];
+  const totalRaw = m[4];
+  return {
+    iid: m[1],
+    status: m[2],
+    filesDone:
+      doneRaw && doneRaw !== "?" && Number.isFinite(Number(doneRaw))
+        ? Number(doneRaw)
+        : null,
+    filesTotal:
+      totalRaw && totalRaw !== "?" && Number.isFinite(Number(totalRaw))
+        ? Number(totalRaw)
+        : null,
+    ephemeral: /\bephemeral=1\b/i.test(line),
+  };
+}
+
+function formatAstIndexRows(byIid: Record<string, AstIndexLive>): AstIndexLive[] {
+  const order = ["building", "cold", "queued", "stale", "ready", "error"];
+  return Object.values(byIid).sort((a, b) => {
+    const ia = order.indexOf(a.status);
+    const ib = order.indexOf(b.status);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.iid.localeCompare(b.iid);
+  });
 }
 
 function aggregateParts(
@@ -2340,9 +2480,16 @@ export function OfficialBenchPage() {
     "全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标",
   );
   const [suiteDetails, setSuiteDetails] = useState<Record<string, DetailProgress>>({});
+  const [astIndexByIid, setAstIndexByIid] = useState<Record<string, AstIndexLive>>(
+    {},
+  );
   const detailProgress = useMemo(
     () => formatSuiteDetails(suiteDetails),
     [suiteDetails],
+  );
+  const astIndexRows = useMemo(
+    () => formatAstIndexRows(astIndexByIid),
+    [astIndexByIid],
   );
   const [tab, setTab] = useState<
     "overview" | "metrics" | "cases" | "artifacts" | "log"
@@ -2720,16 +2867,23 @@ export function OfficialBenchPage() {
     }
     // Rebuild per-suite detail from logs (parallel suites keep independent rows).
     const nextDetails: Record<string, DetailProgress> = {};
+    const nextAst: Record<string, AstIndexLive> = {};
     for (const item of run.logs || []) {
       if (String(item.kind || "") !== "log" || !item.message) continue;
-      const parsed = parseProgressLine(String(item.message));
-      if (!parsed?.suite) continue;
-      const prev = nextDetails[parsed.suite];
-      // Don't let a late pull line clobber eval/infer for the same suite.
-      if (parsed.kind === "pull" && prev?.kind === "eval") continue;
-      nextDetails[parsed.suite] = mergeDetailProgress(prev, parsed);
+      const msg = String(item.message);
+      const parsed = parseProgressLine(msg);
+      if (parsed?.suite) {
+        const prev = nextDetails[parsed.suite];
+        // Don't let a late pull line clobber eval/infer for the same suite.
+        if (!(parsed.kind === "pull" && prev?.kind === "eval")) {
+          nextDetails[parsed.suite] = mergeDetailProgress(prev, parsed);
+        }
+      }
+      const ast = parseAstIndexLine(msg);
+      if (ast) nextAst[ast.iid] = ast;
     }
     setSuiteDetails(nextDetails);
+    setAstIndexByIid(nextAst);
 
     if (opts?.logs === false) return;
     const lines: string[] = [];
@@ -2955,6 +3109,7 @@ export function OfficialBenchPage() {
         setLiveLogs([]);
         setLiveLogItems([]);
         setSuiteDetails({});
+        setAstIndexByIid({});
       }
       const es = new EventSourcePolyfill(
         `/api/v1/ops/official/runs/${runId}/stream`,
@@ -3006,6 +3161,10 @@ export function OfficialBenchPage() {
                   pct: prev._?.pct ?? null,
                 },
               }));
+            }
+            const ast = parseAstIndexLine(msg);
+            if (ast) {
+              setAstIndexByIid((prev) => ({ ...prev, [ast.iid]: ast }));
             }
             // Keep pull progress % visible in the log pane (eval [progress] stays out).
             if (!msg.startsWith("[progress]") || msg.startsWith("[progress] pull")) {
@@ -3111,6 +3270,7 @@ export function OfficialBenchPage() {
             setLiveLogs([]);
             setLiveLogItems([]);
             setSuiteDetails({});
+            setAstIndexByIid({});
             setProgress({ done: 0, total: 0 });
             setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
             // Leave 本轮 clean — finished id belongs under 历史.
@@ -3213,6 +3373,7 @@ export function OfficialBenchPage() {
     setLiveLogs([]);
     setLiveLogItems([]);
     setSuiteDetails({});
+    setAstIndexByIid({});
     if (!selectedId) {
       historyDeepLinkDoneRef.current = false;
       setPagePane((p) => (p === "history" ? "live" : p));
@@ -3397,6 +3558,7 @@ export function OfficialBenchPage() {
     setLiveLogs([]);
     setLiveLogItems([]);
     setSuiteDetails({});
+    setAstIndexByIid({});
     setLastFinishedLiveId(null);
     setError(null);
     setTab("log");
@@ -3483,6 +3645,7 @@ export function OfficialBenchPage() {
         setLiveLogs([]);
         setLiveLogItems([]);
         setSuiteDetails({});
+        setAstIndexByIid({});
         setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
         setProgress({ done: 0, total: 0 });
         navigate(opsOfficialPath(secret), { replace: true });
@@ -3497,6 +3660,7 @@ export function OfficialBenchPage() {
               setLiveLogs([]);
               setLiveLogItems([]);
               setSuiteDetails({});
+              setAstIndexByIid({});
               setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
               navigate(opsOfficialPath(secret), { replace: true });
               return;
@@ -3549,6 +3713,7 @@ export function OfficialBenchPage() {
         setLiveLogs([]);
         setProgress({ done: 0, total: 0 });
         setSuiteDetails({});
+        setAstIndexByIid({});
         if (selectedId) {
           navigate(opsOfficialPath(secret), { replace: true });
         }
@@ -3838,21 +4003,102 @@ export function OfficialBenchPage() {
       ) : null}
 
       {showCriteria ? (
-        <section className="mb-5 grid gap-3 md:grid-cols-3">
-          {criteria.map((c) => (
-            <article key={c.id} className="rounded-lg border border-border bg-card/50 p-3 text-xs">
-              <h3 className="font-semibold tracking-tight">{c.title}</h3>
-              <p className="mt-0.5 text-muted-foreground">{c.official}</p>
-              <p className="mt-2">
-                <span className="text-muted-foreground">指标 </span>
-                {c.metrics}
-              </p>
-              <p className="mt-1">
-                <span className="text-muted-foreground">判定 </span>
-                {c.pass_rule}
-              </p>
-            </article>
-          ))}
+        <section className="mb-5 space-y-4">
+          {BENCH_SCENARIO_GROUPS.map((group) => {
+            const items = criteria.filter((c) => {
+              const id = String(c.id || "");
+              if (group.suiteIds.length === 0) return false;
+              return group.suiteIds.some(
+                (sid) => id === sid || id.startsWith(`${sid}`),
+              );
+            });
+            // Fallback: map known criterion ids when API uses suite names
+            const mapped =
+              items.length > 0
+                ? items
+                : criteria.filter((c) =>
+                    group.suiteIds.includes(c.id as SuiteId),
+                  );
+            if (mapped.length === 0 && group.suiteIds.length === 0) {
+              return (
+                <div key={group.id}>
+                  <div className="mb-2 flex flex-wrap items-baseline gap-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {group.label}
+                    </h3>
+                    <span className="text-[11px] text-muted-foreground">{group.hint}</span>
+                  </div>
+                  <p className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                    尚无挂接的官方套件（产品主栏 Closed-Loop Suite 规划中）。
+                  </p>
+                </div>
+              );
+            }
+            if (mapped.length === 0) return null;
+            return (
+              <div key={group.id}>
+                <div className="mb-2 flex flex-wrap items-baseline gap-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.label}
+                  </h3>
+                  <span className="text-[11px] text-muted-foreground">{group.hint}</span>
+                </div>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {mapped.map((c) => (
+                    <article
+                      key={c.id}
+                      className="rounded-lg border border-border bg-card/50 p-3 text-xs"
+                    >
+                      <h3 className="font-semibold tracking-tight">{c.title}</h3>
+                      <p className="mt-0.5 text-muted-foreground">{c.official}</p>
+                      <p className="mt-2">
+                        <span className="text-muted-foreground">指标 </span>
+                        {c.metrics}
+                      </p>
+                      <p className="mt-1">
+                        <span className="text-muted-foreground">判定 </span>
+                        {c.pass_rule}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+          {/* Any criterion not mapped to a known scenario group */}
+          {(() => {
+            const known = new Set(
+              BENCH_SCENARIO_GROUPS.flatMap((g) => [...g.suiteIds]),
+            );
+            const orphan = criteria.filter((c) => !known.has(c.id as SuiteId));
+            if (orphan.length === 0) return null;
+            return (
+              <div>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  其他
+                </h3>
+                <div className="grid gap-3 md:grid-cols-3">
+                  {orphan.map((c) => (
+                    <article
+                      key={c.id}
+                      className="rounded-lg border border-border bg-card/50 p-3 text-xs"
+                    >
+                      <h3 className="font-semibold tracking-tight">{c.title}</h3>
+                      <p className="mt-0.5 text-muted-foreground">{c.official}</p>
+                      <p className="mt-2">
+                        <span className="text-muted-foreground">指标 </span>
+                        {c.metrics}
+                      </p>
+                      <p className="mt-1">
+                        <span className="text-muted-foreground">判定 </span>
+                        {c.pass_rule}
+                      </p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </section>
       ) : null}
 
@@ -4031,63 +4277,97 @@ export function OfficialBenchPage() {
             ) : null}
 
             <p className="mt-3 text-[11px] font-medium text-muted-foreground">
-              修改表单
+              按场景选择套件
             </p>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-              {(targetsMeta.length
-                ? targetsMeta
-                : [
-                    {
-                      id: "retrieval",
-                      label: "检索",
-                      description: "BEIR · hybrid + BM25",
-                    },
-                    {
-                      id: "retrieval_zh",
-                      label: "中文检索",
-                      description: "C-MTEB · 同模分图 retrieval_ops_zh",
-                    },
-                    {
-                      id: "context",
-                      label: "上下文",
-                      description: "LongBench · 三臂",
-                    },
-                    {
-                      id: "coding",
-                      label: "编码",
-                      description: "SWE-bench Lite",
-                    },
-                  ]
-              ).map((t) => {
-                const id = t.id as SuiteId;
-                if (!(SUITE_IDS as readonly string[]).includes(id)) return null;
-                const enabled = targetEnabled(id);
-                const on = selectedSuites.has(id);
+            <div className="mt-2 space-y-3">
+              {BENCH_SCENARIO_GROUPS.map((group) => {
+                const metaById = new Map(
+                  (targetsMeta.length
+                    ? targetsMeta
+                    : Object.values(FALLBACK_SUITE_META)
+                  ).map((t) => [t.id, t]),
+                );
                 return (
-                  <button
-                    key={id}
-                    type="button"
-                    disabled={!enabled || busy}
-                    onClick={() => {
-                      markCustomProfile();
-                      toggleSuite(id);
-                    }}
-                    className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
-                      on && enabled
-                        ? "border-foreground/50 bg-background"
-                        : "border-border bg-background/60 hover:bg-muted/50"
-                    } ${!enabled ? "cursor-not-allowed opacity-45" : ""}`}
+                  <div
+                    key={group.id}
+                    className="rounded-lg border border-border/80 bg-background/50 px-3 py-2.5"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-medium">{t.label}</span>
-                      <span
-                        className={`h-2 w-2 rounded-full ${on && enabled ? "bg-foreground" : "bg-border"}`}
-                      />
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+                      <div>
+                        <p className="text-xs font-semibold text-foreground">
+                          {group.label}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">{group.hint}</p>
+                      </div>
+                      {group.suiteIds.length > 0 ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          className="text-[11px] text-muted-foreground underline-offset-2 hover:underline disabled:opacity-40"
+                          onClick={() => {
+                            markCustomProfile();
+                            setSelectedSuites((prev) => {
+                              const next = new Set(prev);
+                              const allOn = group.suiteIds.every((id) =>
+                                next.has(id),
+                              );
+                              for (const id of group.suiteIds) {
+                                if (allOn) next.delete(id);
+                                else if (targetEnabled(id)) next.add(id);
+                              }
+                              return next;
+                            });
+                          }}
+                        >
+                          {group.suiteIds.every((id) => selectedSuites.has(id))
+                            ? "取消本场景"
+                            : "全选本场景"}
+                        </button>
+                      ) : null}
                     </div>
-                    <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-                      {t.description}
-                    </p>
-                  </button>
+                    {group.suiteIds.length === 0 ? (
+                      <p className="rounded-md border border-dashed border-border px-2.5 py-2 text-[11px] text-muted-foreground">
+                        暂无可跑官方套件（intel Closed-Loop Bench 规划中）。
+                      </p>
+                    ) : (
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {group.suiteIds.map((id) => {
+                          const t = metaById.get(id) || FALLBACK_SUITE_META[id];
+                          const enabled = targetEnabled(id);
+                          const on = selectedSuites.has(id);
+                          return (
+                            <button
+                              key={id}
+                              type="button"
+                              disabled={!enabled || busy}
+                              onClick={() => {
+                                markCustomProfile();
+                                toggleSuite(id);
+                              }}
+                              className={`rounded-md border px-3 py-2 text-left text-xs transition-colors ${
+                                on && enabled
+                                  ? "border-foreground/50 bg-background"
+                                  : "border-border bg-background/60 hover:bg-muted/50"
+                              } ${!enabled ? "cursor-not-allowed opacity-45" : ""}`}
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="font-medium">{t.label}</span>
+                                <span
+                                  className={`h-2 w-2 rounded-full ${on && enabled ? "bg-foreground" : "bg-border"}`}
+                                />
+                              </div>
+                              <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+                                {t.description}
+                              </p>
+                              <p className="mt-1 text-[10px] text-muted-foreground/80">
+                                场景 · {scenarioLabelForSuite(id)}
+                              </p>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -4535,6 +4815,68 @@ export function OfficialBenchPage() {
                 style={{ width: `${barPct}%` }}
               />
             </div>
+            {astIndexRows.length > 0 ? (
+              <div
+                className="mt-2 rounded-md border border-border/80 bg-muted/20 px-2.5 py-2"
+                aria-label="编码题 AST 索引"
+              >
+                <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  AST 索引（按题 · ephemeral）
+                </div>
+                <ul className="space-y-1.5">
+                  {astIndexRows.map((row) => {
+                    const pct =
+                      row.filesTotal != null &&
+                      row.filesTotal > 0 &&
+                      row.filesDone != null
+                        ? Math.max(
+                            0,
+                            Math.min(
+                              100,
+                              Math.round((row.filesDone / row.filesTotal) * 100),
+                            ),
+                          )
+                        : null;
+                    const building =
+                      row.status === "building" ||
+                      row.status === "cold" ||
+                      row.status === "queued" ||
+                      row.status === "stale";
+                    return (
+                      <li key={row.iid} className="text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="truncate font-mono text-foreground/90">
+                            {shortCaseToken(row.iid)}
+                          </span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {row.status}
+                            {row.filesDone != null && row.filesTotal != null
+                              ? ` · ${row.filesDone}/${row.filesTotal}`
+                              : ""}
+                          </span>
+                        </div>
+                        {building ? (
+                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-foreground/40 transition-[width] duration-500"
+                              style={{
+                                width: pct != null ? `${pct}%` : "28%",
+                                ...(pct == null
+                                  ? {
+                                      animation:
+                                        "pulse 1.4s ease-in-out infinite",
+                                    }
+                                  : null),
+                              }}
+                            />
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ) : null}
             <div
               ref={logBoxRef}
               className="max-h-72 overflow-y-auto overscroll-contain rounded-md border border-border/80 bg-muted/40 p-2 font-mono text-[11px] leading-relaxed"

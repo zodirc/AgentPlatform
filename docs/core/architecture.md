@@ -60,11 +60,12 @@ make up / make release-plan / 浏览器 :9090
 | 模块 | 路径前缀（任一命中即可能 dirty） | 重建目标 |
 |------|----------------------------------|----------|
 | **api** | `services/api/` · `packages/contracts/` | `make up-api` |
-| **runtime** | `services/runtime/` · `packages/contracts/` | `make up-runtime` |
+| **runtime** | `services/runtime/` · `packages/contracts/` | `make up-runtime`（并 recreate `ast-indexer`） |
+| **ast-indexer** | `services/runtime/.../workspace_index/` · compose 入口 | `make up-ast-indexer` |
 | **web** | `services/web/` | `make up-web` |
 | **gateway** | `deploy/caddy/` · compose 入口 | compose recreate（无独立 image 时） |
 
-改 `packages/contracts/` 会同时弄脏 **api + runtime**。
+改 `packages/contracts/` 会同时弄脏 **api + runtime**。改工作区 AST 包会弄脏 **runtime + ast-indexer**。
 
 ### 2.2 怎样算 dirty
 
@@ -72,7 +73,7 @@ make up / make release-plan / 浏览器 :9090
 |------|------|
 | **committed since `deployed_sha`** | 上次 mark 之后有已提交改动落在该模块前缀 |
 | **worktree_digest** | 本地未提交内容；已 bake 进上次 `up-*` 的同 digest 不再当 dirty |
-| **容器未起** | 对应 `agent-api` / `agent-runtime` / `agent-web` / `agent-gateway` 不在 `docker ps` |
+| **容器未起** | 对应 `agent-api` / `agent-runtime` / `agent-ast-indexer` / `agent-web` / `agent-gateway` 不在 `docker ps` |
 
 两种看板模式（见 `scripts/release/README.md`）：
 

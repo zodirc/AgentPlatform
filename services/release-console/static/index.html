@@ -608,7 +608,7 @@
           <button type="button" data-mode="sync">同步部署</button>
         </div>
         <button type="button" class="pull" id="btn-pull" title="git fetch + pull --ff-only">拉取远程</button>
-        <button type="button" class="pull" id="btn-rebuild-all" title="强制重建 api/runtime/web/gateway">全部重建</button>
+        <button type="button" class="pull" id="btn-rebuild-all" title="强制重建 api/runtime/ast-indexer/web/gateway">全部重建</button>
         <button type="button" class="pull" id="btn-restart" title="重启看板进程以加载最新代码（产品容器不受影响）">重启看板</button>
         <button type="button" class="danger" id="btn-cancel" title="取消进行中的重建/索引任务">取消任务</button>
         <span class="remote-hint" id="remote-hint"></span>
@@ -662,6 +662,7 @@
       { id: "git", label: "git" },
       { id: "api", label: "api" },
       { id: "runtime", label: "runtime" },
+      { id: "ast_indexer", label: "ast_indexer" },
       { id: "web", label: "web" },
       { id: "gateway", label: "gateway" },
       { id: "index_product", label: "产品索引" },
@@ -674,6 +675,7 @@
     const ITEM_TO_LOG = {
       api: "api",
       runtime: "runtime",
+      ast_indexer: "ast_indexer",
       web: "web",
       gateway: "gateway",
       embedding: "runtime",
@@ -1300,6 +1302,7 @@
       const isModuleDeploy = [
         "up-api",
         "up-runtime",
+        "up-ast-indexer",
         "up-web",
         "up-gateway",
         "up-all",
@@ -1350,6 +1353,7 @@
         const key = {
           "up-api": "api",
           "up-runtime": "runtime",
+          "up-ast-indexer": "ast_indexer",
           "up-web": "web",
           "up-gateway": "gateway",
           "up-all": "all",
@@ -1405,7 +1409,7 @@
     };
     $("btn-pull").onclick = () => runAction("git-pull");
     $("btn-rebuild-all").onclick = () => {
-      if (!confirm("强制重建 api / runtime / web / gateway？将进入队列串行执行。")) return;
+      if (!confirm("强制重建 api / runtime / ast-indexer / web / gateway？将进入队列串行执行。")) return;
       runAction("up-all");
     };
     $("btn-restart").onclick = () => restartConsole();

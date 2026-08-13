@@ -46,6 +46,7 @@ GIT_PULL_SH = ROOT / "scripts" / "release" / "git_pull.sh"
 ALLOWED_ACTIONS = {
     "up-api": ["bash", str(RELEASE_SH), "run", "--modules=api"],
     "up-runtime": ["bash", str(RELEASE_SH), "run", "--modules=runtime"],
+    "up-ast-indexer": ["bash", str(RELEASE_SH), "run", "--modules=ast_indexer"],
     "up-web": ["bash", str(RELEASE_SH), "run", "--modules=web"],
     "up-gateway": ["bash", str(RELEASE_SH), "run", "--modules=gateway"],
     "up-all": ["bash", str(RELEASE_SH), "run", "--force-all"],
@@ -65,6 +66,7 @@ ALLOWED_ACTIONS = {
 ACTION_LOG_KEY = {
     "up-api": "api",
     "up-runtime": "runtime",
+    "up-ast-indexer": "ast_indexer",
     "up-web": "web",
     "up-gateway": "gateway",
     "up-all": "misc",
@@ -82,6 +84,7 @@ ACTION_LOG_KEY = {
 ITEM_LOG_KEY = {
     "api": "api",
     "runtime": "runtime",
+    "ast_indexer": "ast_indexer",
     "web": "web",
     "gateway": "gateway",
     "embedding": "runtime",  # 换模走 runtime 重建
@@ -98,6 +101,7 @@ ITEM_LOG_KEY = {
 _ACTION_ITEM = {
     "up-api": "api",
     "up-runtime": "runtime",
+    "up-ast-indexer": "ast_indexer",
     "up-web": "web",
     "up-gateway": "gateway",
     "up-all": "api",  # attach if any deploy live; cancel covers all
@@ -113,6 +117,7 @@ _ACTION_ITEM = {
 _ITEM_DEFAULT_ACTION = {
     "api": "up-api",
     "runtime": "up-runtime",
+    "ast_indexer": "up-ast-indexer",
     "web": "up-web",
     "gateway": "up-gateway",
     "index_product": "sync-sources",
@@ -208,6 +213,7 @@ _queue_worker_started = False
 _ACTION_LABELS = {
     "up-api": "重建 api",
     "up-runtime": "重建 runtime",
+    "up-ast-indexer": "重建 ast_indexer",
     "up-web": "重建 web",
     "up-gateway": "重建 gateway",
     "up-all": "全部重建",
@@ -871,10 +877,12 @@ def _discover_host_action_jobs() -> list[dict]:
         ("COMPOSE_PROFILES=bench", "up-bench", "ops_bench"),
         ("release.sh run --modules=api", "up-api", "api"),
         ("release.sh run --modules=runtime", "up-runtime", "runtime"),
+        ("release.sh run --modules=ast_indexer", "up-ast-indexer", "ast_indexer"),
         ("release.sh run --modules=web", "up-web", "web"),
         ("release.sh run --modules=gateway", "up-gateway", "gateway"),
         ("release.sh run --force-all", "up-all", "api"),
         ("release.sh up", "up-all", "api"),
+        ("make up-ast-indexer", "up-ast-indexer", "ast_indexer"),
     )
     found: list[dict] = []
     try:
@@ -1556,6 +1564,7 @@ def _button_for(it: dict) -> dict | None:
     mapping = {
         "api": ("up-api", "重建 api"),
         "runtime": ("up-runtime", "重建 runtime"),
+        "ast_indexer": ("up-ast-indexer", "重建 ast_indexer"),
         "web": ("up-web", "重建 web"),
         "gateway": ("up-gateway", "重建 gateway"),
         "embedding": ("up-runtime", "重建 runtime（换模）"),
@@ -1598,6 +1607,7 @@ _MANAGED_LOG_KEYS = (
     "git",
     "api",
     "runtime",
+    "ast_indexer",
     "web",
     "gateway",
     "index_product",
@@ -1686,7 +1696,7 @@ def _collect_entries(module: str | None = None) -> list[dict]:
         entries.extend(_parse_log_entries(key, raw, p.stat().st_mtime))
 
     # release.sh tee log — show under all / code module tabs (查看进度).
-    code_mods = {"api", "runtime", "web", "gateway"}
+    code_mods = {"api", "runtime", "ast_indexer", "web", "gateway"}
     if module in {None, "", "all", "*", *code_mods}:
         dep = _read_deploy_status()
         rel = str(dep.get("log_file") or "")
@@ -1782,6 +1792,7 @@ def _list_module_logs() -> dict:
         "git",
         "api",
         "runtime",
+        "ast_indexer",
         "web",
         "gateway",
         "index_product",

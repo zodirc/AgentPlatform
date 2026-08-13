@@ -26,6 +26,7 @@ PATHS_ENV = Path(__file__).resolve().parent / "paths.env"
 CONTAINERS = {
     "api": "agent-api",
     "runtime": "agent-runtime",
+    "ast_indexer": "agent-ast-indexer",
     "web": "agent-web",
     "gateway": "agent-gateway",
 }
@@ -179,6 +180,11 @@ def host_to_image_path(mod: str, rel: str) -> str | None:
             return "/app/packages/contracts/plan_suggest/" + rel[
                 len("packages/contracts/plan_suggest/") :
             ]
+        return None
+    if mod == "ast_indexer":
+        # Same runtime image layout; verify against agent-ast-indexer container.
+        if rel.startswith("services/runtime/app/structural/workspace_index/"):
+            return "/app/app/" + rel[len("services/runtime/app/") :]
         return None
     return None
 

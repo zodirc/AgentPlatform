@@ -2,13 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import {
   fetchAstIndexStatus,
+  fetchDefaultWork,
   type AstIndexStatus,
 } from "../../shared/api/client";
 
 function labelFor(status: AstIndexStatus | undefined): string {
   const s = status?.status || "cold";
   if (s === "disabled") return "";
-  if (s === "building") {
+  if (s === "building" || s === "scan_pending") {
     const done = status?.files_done ?? 0;
     const total = status?.files_total ?? 0;
     return total > 0
@@ -25,12 +26,22 @@ function labelFor(status: AstIndexStatus | undefined): string {
 /** Collapsible AST index progress — agent-workbench only (§6.2). Not RAG. */
 export function AstIndexStatusBar() {
   const [collapsed, setCollapsed] = useState(false);
+  const work = useQuery({
+    queryKey: ["works", "default"],
+    queryFn: fetchDefaultWork,
+    staleTime: 60_000,
+  });
+  const workId = work.data?.id;
   const query = useQuery({
-    queryKey: ["ast-index-status"],
-    queryFn: () => fetchAstIndexStatus({ enqueue: true }),
+    queryKey: ["ast-index-status", workId ?? "default"],
+    queryFn: () =>
+      fetchAstIndexStatus({ enqueue: true, workId: workId }),
+    enabled: Boolean(workId),
     refetchInterval: (q) => {
       const s = q.state.data?.status;
-      if (s === "building" || s === "cold" || s === "stale") return 1500;
+      if (s === "building" || s === "cold" || s === "stale" || s === "scan_pending") {
+        return 1500;
+      }
       return 12_000;
     },
     retry: 1,

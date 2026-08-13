@@ -1,12 +1,11 @@
 # 方案：Agent 工作区异步 AST 索引（Cursor 式 codebase index）
 
-> **状态**：候选方案 **v4**（2026-08-12 进程边界修订）· A0–A5/E1 骨架已落地 · **成熟目标拓扑 = 独立 indexer 生产、runtime 只消费（§0.4 / §3.0）尚未落地** · 验收缺口：双轨 n5 数字尚未入库  
+> **状态**：候选方案 **v4→A6 落地中**（2026-08-13）· A0–A5/E1 骨架已落地 · **A6：`agent-ast-indexer` 旁路进程 + `work_ast_index_jobs` SKIP LOCKED 队列已接线**（runtime 默认 `WORKSPACE_AST_INLINE=false`，不再同环全仓 `run_cold_start`）· 验收缺口：A6 拓扑下双轨 n5 数字尚未入库  
 > **与主方案关系**：从 [Coding 结构智能（LSP / AST）](coding-structural-intelligence.md) 拆出；主方案负责 **已落地 LSP Locate/Impact + SWE/Ops 评测揉合**；本文只谈 **Agent 仓库工作区的异步符号索引**  
 > **非目标**：不替代 LSP；不携带 RAG / embedding；不服务 writing/intel 的 `search_sources`  
 > **约束权威**：[架构 · R1–R5](../core/architecture.md) · [RAG 两平面](../topics/rag.md)（对照隔离）· 主方案 §3 场景分型  
 
-> **落地摘要（2026-08-12）**：DDL/`0018` · `structural/workspace_index/`（含 `query.py` 归一化/排序、`ct` 容器、`locate` incomplete→`candidates[]`、memory-only cold start）· 焊入 `search_codebase` · dirty/watch · status/rebuild/purge API · GUI `AstIndexStatusBar` · CSI `locate_fuse_fail_reason` 分桶 · `suites.coding.workspace_index`（默认 `true`；checkout 后 enqueue 评测瞬态索引；对照基线时改 `false`）。完整 harness n5 基线见主方案 §6.7.8（resolve 0/5；索引 on 双轨待跑）。  
-> **v4 要点**：同进程冷启动在 L1 `parallel≥2` 下与 Turn/Jedi/DB 互抢 → 假慢与成片 `turn.failed`；成熟架构定为 **indexer 旁路进程生产快照、runtime 仅加载投影并 lookup**（对标 Cursor / SCIP）。
+> **落地摘要（2026-08-13 A6）**：compose 服务 `ast-indexer`（同 runtime 镜像、独立 PID、mem≈768m、parse concurrency=1）· DDL `phase1n_work_ast_index_jobs` · runtime `enqueue`→队列 / indexer `worker` claim · 评测 ephemeral 经 `.agent/ast_index_snapshot.json` 跨进程 · harness `max_workers` 默认 1（受限主机）。此前摘要：DDL/`0018` · `structural/workspace_index/` · 焊入 `search_codebase` · dirty/watch · status/rebuild/purge API · GUI `AstIndexStatusBar` · CSI `locate_fuse_fail_reason` · `suites.coding.workspace_index`。
 
 本文回答：
 
@@ -571,3 +570,4 @@ v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness
 | 2026-08-12 | **v3（评测归因修订，基于 `d459ca51` 官方 resolve 0/5）**：新增 §0.3 逐指标归因——交卷链/编辑护栏健康，短板集中在 Locate 段（`locate_fuse=0.364`、`incomplete=7`、3/5 题 `grep_ok=0`、Locate 落空后词面漫游烧步数），恰为本索引主责，而 v2 §7「SWE 默认不建」使评测测的是能力被阉割的产品；修复正确性（4/5 `patch_not_resolved`）与 Turn 超时（14182）明确归主方案 Wave 2 / P4，本文不认领。§7 重写为「评测瞬态索引」：checkout 后 StartTurn 前异步构建、纯内存不落 DB、仅通道 ①、失败回落今日基线、开关只在 runner 配置；含公平性辨析（产品固有能力 ≠ 预注入 ≠ gold 泄漏）与三分支决策规则（fuse↑且 resolve≥0 → 默认 on；fuse↑但 resolve 平 → 火力回主方案 W1/W4；fuse 不升 → 按失败原因分桶复盘）。§2.2.1 新增 incomplete 候选回显与排序契约（`candidates[]` 不冒充 definitions、限定名/方法归一化、投影加 container）；§5.1 symbols blob 增 `ct` 字段。§9 排序变更：A0→A1→A3 快车道 + 评测轨 E1（挂主方案 N2 后并行，记 N2.5），A4/A5 后置不进评测轨；归因探针（融合失败原因分桶）列为双轨前置。§1.2 旧口径同步更新；风险表增 4 行、否决清单增 11–13 |
 | 2026-08-12 | **v3 代码落地**：`query.py` 归一化/排序；`SymbolRec.ct` + parse 容器链；`locate` incomplete→`candidates[]` + `locate_fuse_fail_reason`；CSI 探针分桶；`run_cold_start(memory_only=)`；runtime rebuild/purge；`suites.coding.workspace_index` + L1 checkout 后 fire-and-forget enqueue；单测覆盖 incomplete/candidates、memory-only、qualified sort |
 | 2026-08-12 | **v4（进程边界）**：§0.4 实战复盘——同进程冷启动在 parallel≥2 下与 Turn/Jedi/DB 互抢致假慢与成片 `turn.failed`；思路对标 Cursor/SCIP「索引器与查询端解耦」；目标拓扑 `agent-ast-indexer` 生产、runtime 只消费。新增 §3.0；修订 §3.1/通道①/§7.2 动态预算/§8 R4；§9 增 A6；风险与否决 14–15；明确 parallel=1/加长预算仅为过渡，不得作终态或错误归因依据 |
+| 2026-08-13 | **A6 代码落地**：`work_ast_index_jobs` + alembic `0019` · `queue.py` / `worker.py` / `snapshot.py` · `AstIndexService` 默认 remote enqueue（`workspace_ast_inline=false`）· dirty 只投递 path · compose `ast-indexer` · `make up-ast-indexer` · suites harness `max_workers=1`；正式双轨 n5 仍待在本拓扑下复跑入档 |

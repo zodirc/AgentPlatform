@@ -35,6 +35,64 @@ def test_ddl_file_exists_and_isolated_from_rag() -> None:
     assert "CREATE TABLE IF NOT EXISTS work_ast_files" in text
     assert "CREATE TABLE IF NOT EXISTS source_chunks" not in text
     assert "CREATE TABLE IF NOT EXISTS source_index_meta" not in text
+    jobs = root / "packages" / "contracts" / "schemas" / "ddl" / "phase1n_work_ast_index_jobs.sql"
+    assert jobs.is_file()
+    jtext = jobs.read_text()
+    assert "CREATE TABLE IF NOT EXISTS work_ast_index_jobs" in jtext
+    assert "status" in jtext
+    assert "source_chunks" not in jtext
+
+
+def test_snapshot_roundtrip(tmp_path: Path) -> None:
+    from app.structural.workspace_index.snapshot import read_snapshot, write_snapshot
+
+    wid = uuid4()
+    meta = IndexMeta(
+        work_id=wid,
+        owner_user_id="u1",
+        status=IndexStatus.READY,
+        generation=3,
+        files_total=1,
+        files_done=1,
+        ephemeral=True,
+    )
+    entry = FileEntry(
+        path="a.py",
+        lang="python",
+        content_hash="abc",
+        mtime_ns=1,
+        size=10,
+        symbols=[SymbolRec(name="Foo", kind="class", line=1, container=None)],
+        generation=3,
+    )
+    write_snapshot(tmp_path, meta=meta, entries=[entry])
+    loaded = read_snapshot(tmp_path)
+    assert loaded is not None
+    m2, files = loaded
+    assert m2.generation == 3
+    assert m2.status == IndexStatus.READY
+    assert files[0].path == "a.py"
+    assert files[0].symbols[0].name == "Foo"
+
+
+def test_dirty_payload_structured() -> None:
+    from app.structural.workspace_index.queue import AstIndexJob, dirty_payload
+
+    job = AstIndexJob(
+        id=uuid4(),
+        work_id=uuid4(),
+        owner_user_id="u",
+        kind="dirty",
+        status="pending",
+        work_root="/w",
+        memory_only=True,
+        paths=["a.py"],
+        attempts=0,
+        paths_raw={"upsert": ["a.py", "b.py"], "delete": ["c.py"]},
+    )
+    ups, dels = dirty_payload(job)
+    assert ups == ["a.py", "b.py"]
+    assert dels == ["c.py"]
 
 
 def test_extract_definitions_python() -> None:
@@ -285,11 +343,13 @@ async def test_locate_via_ast_index_confirms_with_lsp(tmp_path: Path, monkeypatc
         def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
             return True
 
-        async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20):
+        async def lookup_symbol(
+            self, work_id, name, *, owner_user_id, limit=20, work_root=None
+        ):
             hits = proj.lookup(name, limit=limit, owner_user_id=owner_user_id)
             return hits, meta
 
-        async def ensure_projection(self, work_id, *, owner_user_id):
+        async def ensure_projection(self, work_id, *, owner_user_id, work_root=None):
             return proj
 
     monkeypatch.setattr(
@@ -338,7 +398,9 @@ async def test_locate_via_ast_index_falls_through_when_cold(monkeypatch, tmp_pat
         def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
             return True
 
-        async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20):
+        async def lookup_symbol(
+            self, work_id, name, *, owner_user_id, limit=20, work_root=None
+        ):
             return [], IndexMeta(
                 work_id=wid, owner_user_id=owner_user_id, status=IndexStatus.COLD
             )
@@ -462,20 +524,21 @@ async def test_light_scan_marks_scan_pending_on_budget(tmp_path: Path, monkeypat
     )
     assert out["status"] in {"scan_pending", "ok"}
 
+
+def test_alembic_work_ast_index_chain() -> None:
     from pathlib import Path as P
 
-    # services/runtime/tests → services/api/alembic/versions
-    path = (
-        P(__file__).resolve().parents[2]
-        / "api"
-        / "alembic"
-        / "versions"
-        / "0018_phase1m_work_ast_index.py"
-    )
-    assert path.is_file(), path
-    text = path.read_text()
+    versions = P(__file__).resolve().parents[2] / "api" / "alembic" / "versions"
+    m18 = versions / "0018_phase1m_work_ast_index.py"
+    m19 = versions / "0019_phase1n_work_ast_index_jobs.py"
+    assert m18.is_file(), m18
+    text = m18.read_text()
     assert 'down_revision = "0017_phase1l_audit_log"' in text
     assert "phase1m_work_ast_index.sql" in text
+    assert m19.is_file(), m19
+    t19 = m19.read_text()
+    assert 'down_revision = "0018_phase1m_work_ast_index"' in t19
+    assert "phase1n_work_ast_index_jobs.sql" in t19
 
 
 @pytest.mark.asyncio
@@ -505,10 +568,10 @@ async def test_locate_incomplete_echoes_candidates(tmp_path: Path, monkeypatch) 
         def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
             return True
 
-        async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20):
+        async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20, work_root=None):
             return proj.lookup(name, limit=limit, owner_user_id=owner_user_id), meta
 
-        async def ensure_projection(self, work_id, *, owner_user_id):
+        async def ensure_projection(self, work_id, *, owner_user_id, work_root=None):
             return proj
 
     monkeypatch.setattr(
@@ -560,7 +623,9 @@ async def test_memory_only_cold_start_skips_db(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(job_mod.settings, "workspace_ast_max_files", 100)
     monkeypatch.setattr(job_mod.settings, "workspace_ast_max_file_bytes", 1_000_000)
     monkeypatch.setattr(job_mod.settings, "workspace_ast_parse_concurrency", 2)
-    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_seconds", 30.0)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_seconds", 0.0)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_min_seconds", 30.0)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_max_seconds", 120.0)
 
     meta = await job_mod.run_cold_start(
         work_id=wid,
@@ -568,6 +633,7 @@ async def test_memory_only_cold_start_skips_db(tmp_path: Path, monkeypatch) -> N
         work_root=tmp_path,
         store=BoomStore(),  # type: ignore[arg-type]
         memory_only=True,
+        budget_s=30.0,
     )
     assert meta.ephemeral is True
     assert meta.status in {IndexStatus.READY, IndexStatus.STALE}
@@ -576,13 +642,32 @@ async def test_memory_only_cold_start_skips_db(tmp_path: Path, monkeypatch) -> N
     assert proj.lookup("hello", owner_user_id=owner)
 
 
+def test_eval_budget_scales_with_file_count(monkeypatch) -> None:
+    from app.structural.workspace_index import job as job_mod
+
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_min_seconds", 60.0)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_max_seconds", 900.0)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_seconds_per_file", 0.75)
+    monkeypatch.setattr(job_mod.settings, "workspace_ast_eval_budget_overhead_seconds", 45.0)
+
+    tiny = job_mod.eval_budget_seconds(10, concurrency=2)
+    astropy = job_mod.eval_budget_seconds(935, concurrency=2)
+    huge = job_mod.eval_budget_seconds(50_000, concurrency=2)
+    assert tiny == 60.0  # clamped to min
+    # 45 + 935*0.75/2 ≈ 395.6
+    assert 390.0 <= astropy <= 400.0
+    assert huge == 900.0  # clamped to max
+
+
 @pytest.mark.asyncio
-async def test_ephemeral_dirty_flush_updates_projection(tmp_path: Path) -> None:
+async def test_ephemeral_dirty_flush_updates_projection(tmp_path: Path, monkeypatch) -> None:
     """§7.2 channel ① must refresh memory-only projection without DB meta."""
+    from app.settings import settings
     from app.structural.workspace_index.dirty import DirtyKind, DirtyQueue
     from app.structural.workspace_index.projection import get_projection_registry
     from app.structural.workspace_index.service import get_ast_index_service
 
+    monkeypatch.setattr(settings, "workspace_ast_inline", True)
     wid = uuid4()
     owner = "eval"
     path = tmp_path / "w.py"

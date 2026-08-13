@@ -122,6 +122,35 @@ async def ast_index_status(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.post("/ast-index/rebuild", status_code=202)
+async def ast_index_rebuild(
+    request: Request,
+    work_id: UUID | None = Query(default=None),
+    memory_only: bool = Query(default=False),
+):
+    """Enqueue Agent workspace AST cold-start rebuild (async; not RAG)."""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.ast_index_rebuild(
+            memory_only=memory_only, tenant=tenant
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/ast-index/purge", status_code=200)
+async def ast_index_purge(
+    request: Request,
+    work_id: UUID | None = Query(default=None),
+):
+    """Explicit GC purge for the current Work AST index."""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.ast_index_purge(tenant=tenant)
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.post("/sources/sync", status_code=202)
 async def sync_sources_library(
     request: Request,

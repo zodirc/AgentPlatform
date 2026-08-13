@@ -121,6 +121,8 @@ class OfficialLiveRun:
     _subscribers: list[asyncio.Queue] = field(default_factory=list, repr=False)
     # Per-suite phase text while targets run in parallel on the bench worker.
     _target_phases: dict[str, str] = field(default_factory=dict, repr=False)
+    # Product Turns started by in-process L1 (coding/context/retrieval).
+    _turn_tracker: Any = field(default=None, repr=False)
 
 
 _LOCK = asyncio.Lock()
@@ -352,11 +354,31 @@ def _cmd_for_target(
     raise ValueError(f"unknown_target:{target}")
 
 
+async def _cancel_inflight_l1_turns(run: OfficialLiveRun) -> None:
+    """Best-effort cancel of product Turns owned by this Ops run."""
+    tracker = run._turn_tracker
+    if tracker is None:
+        return
+    try:
+        n = await tracker.cancel_all(reason="ops_eval_stopped")
+        if n:
+            await _publish(
+                run,
+                {
+                    "kind": "log",
+                    "message": f"[ops] cancelled {n} in-flight L1 turn(s)",
+                },
+            )
+    except Exception:  # noqa: BLE001
+        logger.warning("ops L1 turn cancel_all failed run_id=%s", run.id, exc_info=True)
+
+
 async def _force_finish_cancelled(run: OfficialLiveRun, *, reason: str = "cancelled") -> None:
     """Mark a live run cancelled when the subprocess is gone or stop must win immediately."""
     if run.status in {"cancelled", "completed", "failed"}:
         return
     run.cancel_requested = True
+    await _cancel_inflight_l1_turns(run)
     if run.status in {"queued", "running", "cancelling"}:
         run.status = "cancelled"
     run.finished_at = run.finished_at or _utc()
@@ -779,6 +801,8 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
         {"kind": "phase", "phase": "stopping", "message": "正在停止…"},
     )
     await _persist_snapshot(run)
+    # Stop in-flight product Turns immediately (coding/context/retrieval L1).
+    await _cancel_inflight_l1_turns(run)
     # Abort in-flight sources index (L1 materialize/sync) — does not wait for embed finish.
     try:
         from app.services.command.runtime_factory import runtime_client_for_new_turn
@@ -1159,6 +1183,10 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
         await _persist_snapshot(run)
 
     try:
+        from app.services.ops.official_agent_path import L1TurnTracker
+
+        if run._turn_tracker is None:
+            run._turn_tracker = L1TurnTracker()
         results = await official_agent_path.run_l1_targets(
             targets,
             model=run.model,
@@ -1174,6 +1202,7 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             coding_checkout_repo=run.coding_checkout_repo,
             coding_harness=run.coding_harness,
             should_cancel=lambda: run.cancel_requested,
+            turn_tracker=run._turn_tracker,
             retrieval_datasets=list(run.retrieval_datasets) or None,
             retrieval_corpus_mode=run.retrieval_corpus_mode,
         )

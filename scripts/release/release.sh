@@ -24,7 +24,7 @@ PATHS_ENV="$ROOT/scripts/release/paths.env"
 # shellcheck disable=SC1090
 source "$PATHS_ENV"
 
-MODULES=(api runtime web gateway)
+MODULES=(api runtime ast_indexer web gateway)
 
 mkdir -p "$STATUS_DIR" "$LOG_DIR"
 
@@ -199,6 +199,7 @@ detect_changed() {
     case "$1" in
       api) echo agent-api ;;
       runtime) echo agent-runtime ;;
+      ast_indexer) echo agent-ast-indexer ;;
       web) echo agent-web ;;
       gateway) echo agent-gateway ;;
       *) echo "" ;;
@@ -382,6 +383,9 @@ deploy_module() {
     runtime)
       SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-runtime
       ;;
+    ast_indexer)
+      SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-ast-indexer
+      ;;
     web)
       SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-web
       ;;
@@ -519,6 +523,10 @@ cmd_run() {
     fi
     # Mark each success immediately — interrupt/fail later must not re-dirty this module.
     persist_module_deployed "$mod" "$head" "$run_id" "$log_rel" "$csv"
+    # up-runtime also recreates agent-ast-indexer — keep board digests aligned.
+    if [[ "$mod" == "runtime" ]]; then
+      persist_module_deployed "ast_indexer" "$head" "$run_id" "$log_rel" "$csv"
+    fi
   done
 
   PHASE=verifying MESSAGE="health check" CHANGED_CSV="$csv" CURRENT="" \
@@ -553,8 +561,8 @@ Usage: bash scripts/release/release.sh <command>
 
   status              Show/refresh status.json (+ gateway health)
   detect [--force-all]
-  run [--force-all] [--modules=api,runtime,web,gateway]
-  mark [--modules=api,runtime,web,gateway]   Record HEAD as deployed (after make up)
+  run [--force-all] [--modules=api,runtime,ast_indexer,web,gateway]
+  mark [--modules=api,runtime,ast_indexer,web,gateway]   Record HEAD as deployed (after make up)
   up [--force-all] [--modules=...]           Modular make up: infra + dirty modules only
   plan                                       Health board JSON (code · model · index)
   health              Probe product gateway on :80

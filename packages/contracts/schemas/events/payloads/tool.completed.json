@@ -221,6 +221,16 @@
       "type": "string",
       "maxLength": 32,
       "description": "CSI Locate: ok|failed|incomplete|lexical."
+    },
+    "locate_fuse_fail_reason": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "CSI Locate fuse probe (§0.3): no_workspace_symbol_match|definition_null|lsp_failed|lsp_timeout."
+    },
+    "candidates_from": {
+      "type": "string",
+      "maxLength": 32,
+      "description": "CSI Locate incomplete echo source (e.g. ast_index)."
     }
   }
 }

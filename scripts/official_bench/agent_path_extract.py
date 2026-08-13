@@ -929,7 +929,9 @@ def patch_hunks_incomplete(patch: str) -> bool:
     return False if saw_hunk else False
 
 
-# Pathspecs excluded from L1/harness model_patch (agent pip/venv junk in worktree).
+# Pathspecs excluded from L1/harness model_patch (venv junk + platform scaffolding).
+# Platform paths (``.agent/``, root ``problem.md``, ``sources/seed``) must not inflate
+# nonempty/apply rates or ship multi-MB AST snapshots into SWE predictions.
 _GIT_DIFF_EXCLUDE_PATHSPECS: tuple[str, ...] = (
     ":(exclude).local",
     ":(exclude).local/**",
@@ -945,14 +947,35 @@ _GIT_DIFF_EXCLUDE_PATHSPECS: tuple[str, ...] = (
     ":(exclude)node_modules",
     ":(exclude)node_modules/**",
     ":(exclude)**/node_modules/**",
+    ":(exclude).agent",
+    ":(exclude).agent/**",
+    ":(exclude)**/.agent/**",
+    ":(exclude)problem.md",
+    ":(exclude)sources/seed",
+    ":(exclude)sources/seed/**",
+)
+
+# Exact worktree-root paths that are platform overlays, not repo edits.
+_PLATFORM_DIFF_NOISE_FILES: frozenset[str] = frozenset(
+    {
+        "problem.md",
+        "sources/seed",
+    }
 )
 
 
 def _path_is_diff_noise(path: str) -> bool:
-    """True for env/install pollution that must not enter SWE model_patch."""
-    p = path.replace("\\", "/").lstrip("./")
+    """True for env/install/platform pollution that must not enter SWE model_patch."""
+    p = path.replace("\\", "/")
+    # Do not use str.lstrip("./") — that strips any leading '.' chars and
+    # turns ``.agent/…`` into ``agent/…`` (false negative).
+    while p.startswith("./"):
+        p = p[2:]
+    p = p.lstrip("/")
     if not p:
         return False
+    if p in _PLATFORM_DIFF_NOISE_FILES or p.startswith("sources/seed/"):
+        return True
     parts = p.split("/")
     noise_dirs = {
         ".local",
@@ -962,12 +985,13 @@ def _path_is_diff_noise(path: str) -> bool:
         "__pycache__",
         ".pytest_cache",
         "node_modules",
+        ".agent",
     }
     return any(part in noise_dirs for part in parts)
 
 
 def filter_unified_diff_noise(diff: str) -> str:
-    """Drop file sections whose path is install/venv noise (safety net after git)."""
+    """Drop file sections whose path is install/venv/platform noise (safety net after git)."""
     text = (diff or "").strip()
     if not text:
         return ""

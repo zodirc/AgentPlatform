@@ -772,6 +772,48 @@ export async function fetchAstIndexStatus(opts?: {
   return res.json();
 }
 
+export async function rebuildAstIndex(opts?: {
+  workId?: string;
+  memoryOnly?: boolean;
+}): Promise<{ accepted?: boolean; work_id?: string }> {
+  const params = new URLSearchParams();
+  if (opts?.workId) params.set("work_id", opts.workId);
+  if (opts?.memoryOnly) params.set("memory_only", "true");
+  const qs = params.toString();
+  const res = await fetch(
+    `${API_BASE}/admin/workspace/ast-index/rebuild${qs ? `?${qs}` : ""}`,
+    {
+      ...sessionFetchInit,
+      method: "POST",
+      headers: apiAuthHeaders(),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`rebuildAstIndex failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function purgeAstIndex(opts?: {
+  workId?: string;
+}): Promise<Record<string, unknown>> {
+  const params = new URLSearchParams();
+  if (opts?.workId) params.set("work_id", opts.workId);
+  const qs = params.toString();
+  const res = await fetch(
+    `${API_BASE}/admin/workspace/ast-index/purge${qs ? `?${qs}` : ""}`,
+    {
+      ...sessionFetchInit,
+      method: "POST",
+      headers: apiAuthHeaders(),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`purgeAstIndex failed: ${res.status}`);
+  }
+  return res.json();
+}
+
 /** IX1: queue Turn-external incremental sync (does not block chat). */
 export async function syncSourcesIndex(): Promise<{
   accepted?: boolean;

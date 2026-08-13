@@ -663,6 +663,125 @@ def test_filter_unified_diff_noise_drops_site_packages() -> None:
     assert "junk" not in cleaned
 
 
+def test_filter_unified_diff_noise_drops_platform_scaffolding() -> None:
+    """AST snapshot / problem.md / sources/seed must not stay in model_patch."""
+    raw = (
+        "diff --git a/.agent/ast_index_snapshot.json "
+        "b/.agent/ast_index_snapshot.json\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/.agent/ast_index_snapshot.json\n"
+        "@@ -0,0 +1 @@\n"
+        '+{"version":1,"meta":{"work_id":"x"}}\n'
+        "diff --git a/problem.md b/problem.md\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/problem.md\n"
+        "@@ -0,0 +1 @@\n"
+        "+issue text\n"
+        "diff --git a/sources/seed b/sources/seed\n"
+        "new file mode 120000\n"
+        "--- /dev/null\n"
+        "+++ b/sources/seed\n"
+        "@@ -0,0 +1 @@\n"
+        "+/workspace/sources/seed\n"
+        "diff --git a/pkg/mod.py b/pkg/mod.py\n"
+        "--- a/pkg/mod.py\n"
+        "+++ b/pkg/mod.py\n"
+        "@@ -1 +1 @@\n"
+        "-old\n"
+        "+new\n"
+    )
+    cleaned = filter_unified_diff_noise(raw)
+    assert "pkg/mod.py" in cleaned
+    assert "+new" in cleaned
+    assert ".agent" not in cleaned
+    assert "ast_index_snapshot" not in cleaned
+    assert "problem.md" not in cleaned
+    assert "sources/seed" not in cleaned
+    assert "issue text" not in cleaned
+
+
+def test_patch_from_git_diff_excludes_platform_scaffolding(tmp_path: Path) -> None:
+    """Regression: AST index + L1 overlays must not inflate SWE git_diff patches."""
+    import os
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("y\n", encoding="utf-8")
+    agent_dir = tmp_path / ".agent"
+    agent_dir.mkdir()
+    (agent_dir / "ast_index_snapshot.json").write_text(
+        '{"version":1,"blob":"' + ("Z" * 4096) + '"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "problem.md").write_text("Please fix the bug\n", encoding="utf-8")
+    (tmp_path / "sources").mkdir()
+    os.symlink("/workspace/sources/seed", tmp_path / "sources" / "seed")
+    diff = patch_from_git_diff(tmp_path)
+    assert "a.py" in diff
+    assert "+y" in diff
+    assert ".agent" not in diff
+    assert "ast_index_snapshot" not in diff
+    assert "problem.md" not in diff
+    assert "sources/seed" not in diff
+    assert "Please fix" not in diff
+
+
+def test_patch_from_git_diff_platform_noise_alone_is_empty(tmp_path: Path) -> None:
+    """Only platform overlays → empty model_patch (true no_patch), not nonempty junk."""
+    import os
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "t"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / "a.py").write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a.py"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    (tmp_path / ".agent").mkdir()
+    (tmp_path / ".agent" / "ast_index_snapshot.json").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "problem.md").write_text("issue\n", encoding="utf-8")
+    (tmp_path / "sources").mkdir()
+    os.symlink("/workspace/sources/seed", tmp_path / "sources" / "seed")
+    assert patch_from_git_diff(tmp_path) == ""
+
+
 def test_patch_from_git_diff(tmp_path: Path) -> None:
     import subprocess
 

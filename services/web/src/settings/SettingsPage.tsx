@@ -18,6 +18,7 @@ import { useEndUserAuth } from "../shared/auth/EndUserAuth";
 import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
+import { AstIndexSettingsCard } from "./AstIndexSettingsCard";
 
 function formatContextWindow(tokens: number | null | undefined): string {
   if (tokens == null || tokens <= 0) return "默认";
@@ -365,6 +366,8 @@ function AccountSection() {
           <p className="mt-2 text-xs text-destructive">{seedError}</p>
         ) : null}
       </section>
+
+      <AstIndexSettingsCard />
 
       <section className="rounded-xl border border-border bg-card/60 p-4">
         <h2 className="text-sm font-medium text-foreground">修改密码</h2>

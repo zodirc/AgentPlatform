@@ -109,6 +109,23 @@ def test_edit_file_tool_completed_allows_candidate_count() -> None:
     )
 
 
+def test_locate_tool_completed_allows_fuse_probe_meta() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_3",
+            "tool_name": "locate_symbol",
+            "status": "ok",
+            "summary": "locate incomplete",
+            "locate_status": "incomplete",
+            "locate_fuse_fail_reason": "no_workspace_symbol_match",
+            "candidates_from": "ast_index",
+            "candidate_count": 2,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_payload_schemas_are_valid_json_schema() -> None:
     index = json.loads((SCHEMAS_DIR / "_index.json").read_text(encoding="utf-8"))
     for schema_ref in index.get("properties", {}).values():

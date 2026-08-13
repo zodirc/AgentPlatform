@@ -114,6 +114,25 @@ class DirtyQueue:
             proj is not None and bool(proj.meta.ephemeral)
         )
 
+        # A6: path-only enqueue — indexer process parses (runtime must not).
+        if not bool(settings.workspace_ast_inline):
+            ups = [e.path for e in events if e.kind == DirtyKind.UPSERT]
+            dels = [e.path for e in events if e.kind == DirtyKind.DELETE]
+            try:
+                from app.structural.workspace_index.queue import AstIndexJobQueue
+
+                await AstIndexJobQueue().enqueue_dirty(
+                    work_id=work_id,
+                    owner_user_id=owner,
+                    work_root=str(root),
+                    paths=ups,
+                    deletes=dels,
+                    memory_only=ephemeral,
+                )
+            except Exception:
+                logger.exception("workspace_ast dirty remote enqueue failed")
+            return
+
         meta: IndexMeta | None = None
         if proj is not None:
             meta = proj.meta
@@ -176,6 +195,12 @@ class DirtyQueue:
         new_status = IndexStatus.STALE if prefer_turn else IndexStatus.READY
         if meta.status == IndexStatus.BUILDING:
             new_status = IndexStatus.BUILDING
+        elif (
+            ephemeral
+            and meta.status == IndexStatus.STALE
+            and int(meta.files_done) < int(meta.files_total or 0)
+        ):
+            new_status = IndexStatus.STALE
         bumped = bool(processed) or any(e.kind == DirtyKind.DELETE for e in events)
         new_meta = IndexMeta(
             work_id=work_id,

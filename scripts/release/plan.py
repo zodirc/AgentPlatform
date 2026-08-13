@@ -3,7 +3,7 @@
 
 Outputs JSON for the release console / ``release.sh plan``.
 Checks (modular):
-  - code: api / runtime / web / gateway (git vs last deployed + container up)
+  - code: api / runtime / ast_indexer / web / gateway (git vs last deployed + container up)
   - embedding: resolved profile vs runtime container bake/env
   - index: product + ops source_index_meta vs current embed space
 """
@@ -24,10 +24,11 @@ PATHS_ENV = Path(__file__).resolve().parent / "paths.env"
 AUTO_ENV = ROOT / "deploy" / "embedding.auto.env"
 DEFAULT_ENV = ROOT / "deploy" / "embedding.defaults.env"
 
-MODULES = ("api", "runtime", "web", "gateway")
+MODULES = ("api", "runtime", "ast_indexer", "web", "gateway")
 CONTAINERS = {
     "api": "agent-api",
     "runtime": "agent-runtime",
+    "ast_indexer": "agent-ast-indexer",
     "web": "agent-web",
     "gateway": "agent-gateway",
     "postgres": "agent-postgres",
@@ -204,6 +205,10 @@ def _module_dirty(
     if not deployed_sha:
         if mod == "gateway":
             return False, "无基线（gateway 仅配置变更时重建）"
+        # Newly added board module: if the container is already healthy, don't
+        # look "broken" forever next to api/runtime — treat as ok until paths drift.
+        if mod == "ast_indexer" and cname and cname in running:
+            return False, "已是最新 — 容器已运行（首次接入；点重建可写入部署基线）"
         return True, "尚未记录过该模块的已部署版本"
     code, _, _ = _run(["git", "-C", str(ROOT), "cat-file", "-e", f"{deployed_sha}^{{commit}}"])
     if code != 0:
@@ -801,11 +806,26 @@ def build_plan(mode: str | None = None) -> dict:
                 action = "make up-api"
             elif mod == "runtime":
                 action = "make up-runtime"
+            elif mod == "ast_indexer":
+                action = "make up-ast-indexer"
             elif mod == "web":
                 action = "make up-web"
             elif mod == "gateway":
                 action = "make release RELEASE_MODULES=gateway"
         dep_meta = _commit_meta(sha) if sha else {"sha": None, "subject": None, "date": None}
+        # Align first-seen display with siblings: show HEAD as the implied baseline
+        # when the container is up and we soft-ok'd the missing mark.
+        if (
+            mod == "ast_indexer"
+            and not dep_meta.get("sha")
+            and not dirty
+            and CONTAINERS.get(mod) in running
+        ):
+            dep_meta = {
+                "sha": head_meta.get("sha"),
+                "subject": head_meta.get("subject"),
+                "date": head_meta.get("date"),
+            }
         items.append(
             {
                 "id": mod,

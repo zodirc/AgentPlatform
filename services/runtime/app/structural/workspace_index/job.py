@@ -39,10 +39,48 @@ def _ast_executor() -> ThreadPoolExecutor:
     return _AST_EXECUTOR
 
 
+def _reset_ast_executor() -> None:
+    """Drop a poisoned pool (cancelled wait_for leaves threads running)."""
+    global _AST_EXECUTOR
+    old = _AST_EXECUTOR
+    _AST_EXECUTOR = None
+    if old is None:
+        return
+    try:
+        old.shutdown(wait=False, cancel_futures=True)
+    except Exception:
+        logger.debug("ast executor shutdown failed", exc_info=True)
+
+
 async def _to_ast_thread(fn, /, *args, **kwargs):
     loop = asyncio.get_running_loop()
     call = partial(fn, *args, **kwargs) if kwargs else partial(fn, *args)
     return await loop.run_in_executor(_ast_executor(), call)
+
+
+def eval_budget_seconds(n_files: int, *, concurrency: int) -> float:
+    """§7.2 dynamic budget: clamp(overhead + n*per_file/conc, min, max).
+
+    Hard cap only so a pathological tree cannot burn the suite wall clock.
+    Normal astropy-scale (~1k py) should finish well inside the clamp.
+    """
+    min_s = float(
+        getattr(settings, "workspace_ast_eval_budget_min_seconds", 60.0) or 60.0
+    )
+    max_s = float(
+        getattr(settings, "workspace_ast_eval_budget_max_seconds", 900.0) or 900.0
+    )
+    if max_s < min_s:
+        max_s = min_s
+    per_file = float(
+        getattr(settings, "workspace_ast_eval_budget_seconds_per_file", 0.75) or 0.75
+    )
+    overhead = float(
+        getattr(settings, "workspace_ast_eval_budget_overhead_seconds", 45.0) or 45.0
+    )
+    conc = max(1, int(concurrency))
+    raw = overhead + (max(0, int(n_files)) * per_file) / conc
+    return max(min_s, min(max_s, raw))
 
 
 def walk_work_files(
@@ -181,10 +219,28 @@ async def run_cold_start(
         )
         if eval_conc > 0:
             concurrency = max(1, min(concurrency, eval_conc))
-    budget = budget_s
-    if budget is None and memory_only:
-        budget = float(settings.workspace_ast_eval_budget_seconds)
-    deadline = (time.monotonic() + float(budget)) if budget and budget > 0 else None
+
+    # Budget policy:
+    # - explicit budget_s → whole-job wall clock (tests / callers)
+    # - memory_only + workspace_ast_eval_budget_seconds > 0 → legacy fixed override
+    # - memory_only default → walk reserve, then dynamic f(n_files) for parse
+    # - product (not memory_only) → no deadline
+    fixed_budget: float | None = budget_s
+    if fixed_budget is None and memory_only:
+        legacy = float(
+            getattr(settings, "workspace_ast_eval_budget_seconds", 0.0) or 0.0
+        )
+        if legacy > 0:
+            fixed_budget = legacy
+    deadline: float | None = None
+    if fixed_budget is not None and fixed_budget > 0:
+        deadline = time.monotonic() + float(fixed_budget)
+    elif memory_only:
+        walk_budget = float(
+            getattr(settings, "workspace_ast_eval_walk_budget_seconds", 90.0) or 90.0
+        )
+        if walk_budget > 0:
+            deadline = time.monotonic() + walk_budget
 
     if memory_only:
         generation = 1
@@ -215,14 +271,61 @@ async def run_cold_start(
 
     # Budget covers walk + parse (astropy-scale trees must not burn the whole
     # window on non-code noise before any symbol is queryable).
-    paths = await _to_ast_thread(
-        walk_work_files,
-        work_root,
-        max_files=max_files,
-        max_file_bytes=max_bytes,
-        code_only=True,
-        deadline=deadline,
-    )
+    walk_timeout = None
+    if deadline is not None:
+        walk_timeout = max(0.05, deadline - time.monotonic())
+    try:
+        if walk_timeout is not None:
+            paths = await asyncio.wait_for(
+                _to_ast_thread(
+                    walk_work_files,
+                    work_root,
+                    max_files=max_files,
+                    max_file_bytes=max_bytes,
+                    code_only=True,
+                    deadline=deadline,
+                ),
+                timeout=walk_timeout,
+            )
+        else:
+            paths = await _to_ast_thread(
+                walk_work_files,
+                work_root,
+                max_files=max_files,
+                max_file_bytes=max_bytes,
+                code_only=True,
+                deadline=deadline,
+            )
+    except asyncio.TimeoutError:
+        _reset_ast_executor()
+        logger.warning(
+            "workspace_ast cold_start walk budget hit work_id=%s", work_id
+        )
+        meta = IndexMeta(
+            work_id=work_id,
+            owner_user_id=owner_user_id,
+            status=IndexStatus.ERROR,
+            generation=generation,
+            files_total=0,
+            files_done=0,
+            error="budget_timeout",
+            ephemeral=memory_only,
+        )
+        if not memory_only:
+            await store.upsert_meta(meta)
+        if memory_only:
+            from app.structural.workspace_index.snapshot import write_snapshot
+
+            write_snapshot(work_root, meta=meta, entries=[])
+        proj = registry.get(work_id) or IndexProjection(
+            work_id=work_id,
+            owner_user_id=owner_user_id,
+            meta=meta,
+        )
+        proj.meta = meta
+        registry.put(proj)
+        return meta
+
     meta = IndexMeta(
         work_id=work_id,
         owner_user_id=owner_user_id,
@@ -245,11 +348,33 @@ async def run_cold_start(
     else:
         proj.meta = meta
 
+    # Ephemeral: publish totals immediately so Ops UI is not stuck on 0/0.
+    if memory_only:
+        from app.structural.workspace_index.snapshot import write_snapshot
+
+        try:
+            write_snapshot(work_root, meta=meta, entries=[])
+        except Exception:
+            logger.debug("workspace_ast early snapshot failed", exc_info=True)
+
+    # After walk we know n_files → apply §7.2 dynamic parse budget (unless fixed).
+    if memory_only and fixed_budget is None:
+        parse_budget = eval_budget_seconds(len(paths), concurrency=concurrency)
+        deadline = time.monotonic() + parse_budget
+        logger.info(
+            "workspace_ast eval budget work_id=%s files=%s conc=%s budget=%.1fs",
+            work_id,
+            len(paths),
+            concurrency,
+            parse_budget,
+        )
+
     sem = asyncio.Semaphore(concurrency)
     entries: list[FileEntry] = []
     batch: list[FileEntry] = []
     done = 0
     timed_out = False
+    last_snap_at = 0.0
 
     async def _one(path: Path) -> FileEntry | None:
         async with sem:
@@ -260,6 +385,33 @@ async def run_cold_start(
                 generation=generation,
                 max_file_bytes=max_bytes,
             )
+
+    def _publish_building() -> None:
+        nonlocal last_snap_at
+        if not memory_only:
+            return
+        now = time.monotonic()
+        # Throttle disk writes; always allow first post-walk snap already done.
+        if done > 0 and now - last_snap_at < 2.0 and done % max(1, _BATCH_SIZE) != 0:
+            return
+        from app.structural.workspace_index.snapshot import write_snapshot
+
+        snap_meta = IndexMeta(
+            work_id=work_id,
+            owner_user_id=owner_user_id,
+            status=IndexStatus.BUILDING,
+            generation=generation,
+            files_total=len(paths),
+            files_done=done,
+            ephemeral=True,
+        )
+        try:
+            write_snapshot(
+                work_root, meta=snap_meta, entries=list(entries)
+            )
+            last_snap_at = now
+        except Exception:
+            logger.debug("workspace_ast progress snapshot failed", exc_info=True)
 
     try:
         for i in range(0, len(paths), concurrency):
@@ -273,7 +425,37 @@ async def run_cold_start(
                 )
                 break
             chunk = paths[i : i + concurrency]
-            results = await asyncio.gather(*[_one(p) for p in chunk], return_exceptions=True)
+            gather_coro = asyncio.gather(
+                *[_one(p) for p in chunk], return_exceptions=True
+            )
+            try:
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        timed_out = True
+                        logger.info(
+                            "workspace_ast cold_start budget hit work_id=%s done=%s/%s",
+                            work_id,
+                            done,
+                            len(paths),
+                        )
+                        break
+                    results = await asyncio.wait_for(
+                        gather_coro, timeout=max(0.05, remaining)
+                    )
+                else:
+                    results = await gather_coro
+            except asyncio.TimeoutError:
+                timed_out = True
+                _reset_ast_executor()
+                logger.info(
+                    "workspace_ast cold_start budget hit (wait_for) "
+                    "work_id=%s done=%s/%s",
+                    work_id,
+                    done,
+                    len(paths),
+                )
+                break
             # Yield so StartTurn / health can progress while indexing.
             await asyncio.sleep(0)
             for result in results:
@@ -302,6 +484,9 @@ async def run_cold_start(
                     for e in batch:
                         proj.upsert_file(e, meta=meta)
                     batch = []
+                    _publish_building()
+                elif memory_only and (done in {1, 10, 50} or done % 100 == 0):
+                    _publish_building()
         if batch:
             meta = IndexMeta(
                 work_id=work_id,
@@ -319,12 +504,13 @@ async def run_cold_start(
             for e in batch:
                 proj.upsert_file(e, meta=meta)
 
-        # Partial budget → stale (queryable); full → ready (§7.2).
-        final_status = (
-            IndexStatus.STALE if timed_out and done > 0 else IndexStatus.READY
-        )
+        # Partial budget → stale (queryable); only full pass without timeout → ready.
         if timed_out and done == 0:
             final_status = IndexStatus.ERROR
+        elif timed_out:
+            final_status = IndexStatus.STALE
+        else:
+            final_status = IndexStatus.READY
         meta = IndexMeta(
             work_id=work_id,
             owner_user_id=owner_user_id,
@@ -339,6 +525,10 @@ async def run_cold_start(
             await store.upsert_meta(meta)
         proj.replace_all(entries, meta=meta)
         registry.put(proj)
+        if memory_only:
+            from app.structural.workspace_index.snapshot import write_snapshot
+
+            write_snapshot(work_root, meta=meta, entries=entries)
         return meta
     except Exception as exc:
         error = str(exc)[:500]
@@ -359,6 +549,13 @@ async def run_cold_start(
             except Exception:
                 logger.exception("workspace_ast failed to persist error meta")
         proj.meta = meta
+        if memory_only:
+            try:
+                from app.structural.workspace_index.snapshot import write_snapshot
+
+                write_snapshot(work_root, meta=meta, entries=entries)
+            except Exception:
+                logger.debug("workspace_ast error snapshot failed", exc_info=True)
         return meta
 
 
