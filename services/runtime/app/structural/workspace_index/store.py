@@ -8,7 +8,7 @@ from uuid import UUID
 
 import asyncpg
 
-from app.db.pool import get_pool
+from app.db.pool import get_bypass_pool
 from app.structural.workspace_index.types import FileEntry, IndexMeta, IndexStatus
 
 
@@ -21,7 +21,7 @@ class AstIndexStore:
     async def _conn(self) -> asyncpg.Pool:
         if self._pool is not None:
             return self._pool
-        return await get_pool()
+        return await get_bypass_pool()
 
     async def get_meta(
         self,

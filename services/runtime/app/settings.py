@@ -19,8 +19,13 @@ class Settings(BaseSettings):
     ops_database_url: str = ""
     # L0 / legacy alias; runtime Ops plane prefers ops_database_url then this.
     bench_database_url: str = ""
-    # B10: pool command_timeout + PG statement_timeout (seconds).
+    # B10 legacy single timeout (kept for env compat; hot pool prefers db_hot_*).
     db_statement_timeout_seconds: float = 30.0
+    # O10 / WP4: dual-pool timeouts.
+    db_hot_statement_timeout_seconds: float = 5.0
+    db_bypass_statement_timeout_seconds: float = 120.0
+    db_pool_min_size: int = 1
+    db_pool_max_size: int = 5
     # B2: max seconds to wait for in-flight turns on SIGTERM before teardown.
     shutdown_drain_seconds: float = 25.0
     # B9: evict abandoned approval state after this long (checkpoint fallback).
@@ -153,6 +158,10 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 256
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64
+    # O5 / WP2: query embed preempts index batch encode (set false to A/B).
+    embedding_query_priority: bool = True
+    # CPU torch thread cap when embedding on CPU (event-loop friendliness).
+    embedding_torch_num_threads: int = 2
     # ST truncate length. 0 → model default, except bge-m3 auto 512 (8k default thrashs VRAM).
     embedding_max_seq_length: int = 0
     # Embed-space index stamp. 0 → derive from model/max_seq (see effective_index_version).
@@ -251,6 +260,15 @@ class Settings(BaseSettings):
     # Default on: silent hangs (no new events) must not leave UI spinning forever.
     stall_auto_fail: bool = True
     runtime_runner_id: str = socket.gethostname()
+    # O3 / WP1: DB heartbeat + run lease (set false to roll back to stall-only reclaim).
+    runner_lease_enabled: bool = True
+    runner_lease_seconds: int = 60
+    runner_heartbeat_interval_seconds: float = 10.0
+    # O1 / WP5→WP9: default pull (set TURN_DISPATCH=push to roll back).
+    turn_dispatch: str = "pull"
+    turn_dispatch_poll_seconds: float = 2.0
+    # O2 / WP6: consume run_commands for owned runs.
+    run_commands_channel_enabled: bool = True
     # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).
     runtime_max_inflight_turns: int = 16
     event_payload_validation: bool = True

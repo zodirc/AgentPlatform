@@ -82,7 +82,11 @@ def assign_deferred_vectors(
         check_sync_cancelled()
         slice_ = pending[start : start + batch]
         texts = [inp for _, inp in slice_]
-        vectors = embed_many(embedder, texts)
+        from app.retrieval.embedding_lanes import LANE_INDEX
+
+        vectors = embed_many(embedder, texts, lane=LANE_INDEX)
+        # Yield between index batches so query lane can interleave (O5).
+        time.sleep(0)
         for (chunk, _), vec in zip(slice_, vectors, strict=True):
             chunk["vector"] = vec
         assigned += len(slice_)

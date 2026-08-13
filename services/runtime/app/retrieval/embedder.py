@@ -164,16 +164,37 @@ class SentenceTransformerEmbedder:
         return [[float(x) for x in row] for row in raw]
 
 
-def embed_many(embedder: Any, texts: Sequence[str]) -> list[list[float]]:
-    """Call ``embed_many`` when available; else fall back to per-text ``embed``."""
+def embed_many(
+    embedder: Any,
+    texts: Sequence[str],
+    *,
+    lane: int | None = None,
+) -> list[list[float]]:
+    """Call ``embed_many`` when available; else fall back to per-text ``embed``.
+
+    ``lane`` selects query vs index priority when the embedder is lane-aware
+    (O5 / WP2). Default keeps query priority for hot-path callers.
+    """
     if not texts:
         return []
+    from app.retrieval.embedding_lanes import LANE_QUERY
+
+    effective_lane = LANE_QUERY if lane is None else int(lane)
     many = getattr(embedder, "embed_many", None)
     if callable(many):
-        out = many(texts)
+        try:
+            out = many(texts, lane=effective_lane)
+        except TypeError:
+            out = many(texts)
         if isinstance(out, list) and len(out) == len(texts):
             return out
-    return [embedder.embed(text) for text in texts]
+    embed = getattr(embedder, "embed", None)
+    if callable(embed):
+        try:
+            return [embed(text, lane=effective_lane) for text in texts]
+        except TypeError:
+            return [embed(text) for text in texts]
+    raise TypeError("embedder must provide embed or embed_many")
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
@@ -264,6 +285,17 @@ def _build_embedder() -> Embedder:
     backend = settings.embedding_backend.lower()
     if backend in {"sentence_transformers", "minilm", "neural"}:
         try:
+            # O5: cap CPU torch threads so batch embed does not starve the
+            # uvicorn event loop / tool threads on constrained hosts.
+            try:
+                import torch
+
+                if not torch.cuda.is_available():
+                    torch.set_num_threads(
+                        max(1, int(getattr(settings, "embedding_torch_num_threads", 2) or 2))
+                    )
+            except Exception:
+                logger.debug("torch.set_num_threads skipped", exc_info=True)
             return SentenceTransformerEmbedder(
                 settings.embedding_model,
                 model_dir=settings.embedding_model_dir or None,
@@ -279,6 +311,13 @@ def _build_embedder() -> Embedder:
 def reset_embedder_cache() -> None:
     """Drop the process-wide embedder (tests / config reload)."""
     global _embedder, _embedder_key
+    if _embedder is not None:
+        close = getattr(_embedder, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.debug("embedder close failed", exc_info=True)
     _embedder = None
     _embedder_key = None
 
@@ -297,7 +336,9 @@ def get_embedder() -> Embedder:
         dims,
     )
     t0 = time.monotonic()
-    _embedder = _build_embedder()
+    from app.retrieval.embedding_lanes import maybe_wrap_lanes
+
+    _embedder = maybe_wrap_lanes(_build_embedder())
     _embedder_key = key
     logger.info(
         "embedder ready; backend=%s elapsed_s=%.1f model_dir=%s",

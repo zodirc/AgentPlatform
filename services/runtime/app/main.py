@@ -721,6 +721,16 @@ async def lifespan(app):
     )
 
     watchdog = asyncio.create_task(stall_watchdog_loop())
+    from app.controller.runner_heartbeat import start_runner_heartbeat, stop_runner_heartbeat
+    from app.controller.turn_dispatch import start_turn_dispatch_listener, stop_turn_dispatch_listener
+    from app.controller.run_commands_listener import (
+        start_run_commands_listener,
+        stop_run_commands_listener,
+    )
+
+    start_runner_heartbeat()
+    start_turn_dispatch_listener()
+    start_run_commands_listener()
     # IX0: Turn-external incremental projection; must not block /health/live.
     schedule_startup_sources_sync()
     # IX2: poll sources/ for host edits; debounced sync (still Turn-external).
@@ -733,6 +743,9 @@ async def lifespan(app):
         # B2: let in-flight turns finish before tearing down the pool; anything
         # still running past the deadline is reconciled on next startup.
         await drain_active_turns()
+        await stop_run_commands_listener()
+        await stop_turn_dispatch_listener()
+        await stop_runner_heartbeat()
         await cancel_ast_index_watch()
         await cancel_sources_watch()
         await cancel_startup_sources_sync()

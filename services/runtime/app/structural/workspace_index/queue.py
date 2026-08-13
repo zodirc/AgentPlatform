@@ -11,7 +11,7 @@ from uuid import UUID
 
 import asyncpg
 
-from app.db.pool import get_pool
+from app.db.pool import get_bypass_pool
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class AstIndexJobQueue:
     async def _conn(self) -> asyncpg.Pool:
         if self._pool is not None:
             return self._pool
-        return await get_pool()
+        return await get_bypass_pool()
 
     async def enqueue_cold_start(
         self,

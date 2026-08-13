@@ -326,35 +326,47 @@ async def start_turn(
     model_mode: str | None = None,
     model_override: dict | None = None,
     ops_eval: bool = False,
+    already_claimed: bool = False,
+    reject_when_full: bool = True,
 ) -> None:
     if turn_id in _active_turns:
         return
     max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)
-    if max_inflight > 0 and len(_active_turns) >= max_inflight:
+    if (
+        not already_claimed
+        and max_inflight > 0
+        and len(_active_turns) >= max_inflight
+    ):
         logger.warning(
             "start_turn rejected: inflight=%s max=%s turn=%s",
             len(_active_turns),
             max_inflight,
             turn_id,
         )
-        try:
-            await _fail_turn(
-                turn_id=turn_id,
-                run_id=run_id,
-                trace_id=trace_id,
-                termination_reason="budget_exceeded",
-                message=f"runtime_max_inflight_turns={max_inflight}",
-                scenario_id=scenario_id,
-            )
-        except Exception:
-            logger.exception("start_turn inflight fail_turn failed turn_id=%s", turn_id)
+        if reject_when_full:
+            try:
+                await _fail_turn(
+                    turn_id=turn_id,
+                    run_id=run_id,
+                    trace_id=trace_id,
+                    termination_reason="budget_exceeded",
+                    message=f"runtime_max_inflight_turns={max_inflight}",
+                    scenario_id=scenario_id,
+                )
+            except Exception:
+                logger.exception("start_turn inflight fail_turn failed turn_id=%s", turn_id)
         return
     if not await run_exists(turn_id, run_id):
         logger.warning("start_turn: run not found turn=%s run=%s", turn_id, run_id)
         return
-    if not await ensure_run_owned_by_runner(run_id=run_id):
-        logger.warning("start_turn: run already claimed by another runner turn=%s run=%s", turn_id, run_id)
-        return
+    if not already_claimed:
+        if not await ensure_run_owned_by_runner(run_id=run_id):
+            logger.warning(
+                "start_turn: run already claimed by another runner turn=%s run=%s",
+                turn_id,
+                run_id,
+            )
+            return
 
     # docs/29 — only ops_eval StartTurn may set per-Turn model_mode / override.
     effective_mode = model_mode if ops_eval else None

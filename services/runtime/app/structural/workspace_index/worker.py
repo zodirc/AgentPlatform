@@ -15,7 +15,7 @@ import socket
 import time
 from pathlib import Path
 
-from app.db.pool import close_pool, get_pool
+from app.db.pool import close_pool, get_bypass_pool
 from app.settings import settings
 from app.structural.workspace_index.job import parse_file_entry, run_cold_start
 from app.structural.workspace_index.projection import get_projection_registry
@@ -51,6 +51,23 @@ def _write_heartbeat() -> None:
         _HEARTBEAT.write_text(str(time.time()), encoding="utf-8")
     except OSError:
         logger.debug("heartbeat write failed", exc_info=True)
+
+
+async def _write_heartbeat_db(worker_id: str) -> None:
+    """O3 dual-write: file heartbeat remains for compose healthcheck transition."""
+    if not bool(getattr(settings, "runner_lease_enabled", True)):
+        return
+    try:
+        from app.controller.run_lock import upsert_runner_heartbeat
+
+        await upsert_runner_heartbeat(
+            runner_id=worker_id,
+            kind="ast_indexer",
+            capacity=1,
+            inflight=0,
+        )
+    except Exception:
+        logger.debug("db heartbeat write failed", exc_info=True)
 
 
 async def _handle_cold(job: AstIndexJob, store: AstIndexStore) -> None:
@@ -218,7 +235,7 @@ async def run_loop() -> None:
     store = AstIndexStore()
     queue = AstIndexJobQueue()
     # Ensure pool is up before claiming.
-    await get_pool()
+    await get_bypass_pool()
     logger.info(
         "ast-indexer started id=%s poll=%.2fs concurrency=%s",
         worker_id,
@@ -228,6 +245,7 @@ async def run_loop() -> None:
     last_reclaim = 0.0
     while not _STOP.is_set():
         _write_heartbeat()
+        await _write_heartbeat_db(worker_id)
         now = time.monotonic()
         if now - last_reclaim >= reclaim_every:
             try:
