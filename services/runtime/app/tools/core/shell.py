@@ -203,8 +203,20 @@ async def run_argv_command(
 ) -> dict[str, Any]:
     """Run a pre-parsed argv list (no shell). Used by run_tests after SB0 gate."""
     from app.tools.core.sandbox import sandbox_preexec_fn, wrap_argv_for_exec
+    from app.tools.core.shell_work_jail import argv_jail_violation
 
     display = display_command or " ".join(argv)
+    jail_hit = argv_jail_violation(tuple(str(a) for a in argv), cwd)
+    if jail_hit:
+        return {
+            "status": "failed",
+            "command": display,
+            "stdout": "",
+            "stderr": jail_hit,
+            "exit_code": None,
+            "summary": jail_hit,
+            "sandbox": "soft-jail",
+        }
     try:
         wrapped, backend = wrap_argv_for_exec(argv=argv, cwd=cwd)
         preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
@@ -243,6 +255,19 @@ async def run_shell_command(
         sandbox_preexec_fn,
         wrap_shell_command_for_exec,
     )
+    from app.tools.core.shell_work_jail import shell_command_jail_violation
+
+    jail_hit = shell_command_jail_violation(command, cwd)
+    if jail_hit:
+        return {
+            "status": "failed",
+            "command": command,
+            "stdout": "",
+            "stderr": jail_hit,
+            "exit_code": None,
+            "summary": jail_hit,
+            "sandbox": "soft-jail",
+        }
 
     try:
         backend = resolve_sandbox_backend()

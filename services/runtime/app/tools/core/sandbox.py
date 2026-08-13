@@ -157,7 +157,8 @@ def _autodetect_backend() -> SandboxBackend:
         return "bwrap"
     logger.warning(
         "tool exec sandbox backend=off (degraded: no landlock/bwrap); "
-        "outer Docker + path gates + approval still apply"
+        "tool exec sandbox backend=off (degraded: no landlock/bwrap); "
+        "soft path jail + outer Docker + approval still apply"
     )
     return "off"
 
