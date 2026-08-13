@@ -3,11 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from .config import load_suites
 from .paths import ensure_dirs, reports_dir, suite_data
@@ -21,6 +22,19 @@ from .swe_images import (
     missing_images,
     pull_tier_images,
 )
+
+# tqdm Evaluation:  40%|████ | 2/5 [06:58<10:27, 209.31s/it, ✓=1, ✖=1, error=0]
+_EVAL_TQDM_RE = re.compile(
+    r"Evaluation:\s*(?P<pct>\d+)%\|[^|]*\|\s*(?P<done>\d+)\s*/\s*(?P<total>\d+)"
+    r".*?(?:✓|√)\s*=\s*(?P<ok>\d+).*?(?:✖|×|x)\s*=\s*(?P<fail>\d+).*?error\s*=\s*(?P<err>\d+)",
+    re.IGNORECASE,
+)
+_RUNNING_INSTANCES_RE = re.compile(r"Running\s+(\d+)\s+instances", re.IGNORECASE)
+_FOUND_IMAGES_RE = re.compile(
+    r"Found\s+(\d+)\s+existing\s+instance\s+images", re.IGNORECASE
+)
+_ALL_INSTANCES_RE = re.compile(r"All instances run", re.IGNORECASE)
+_GENERATING_SPLIT_RE = re.compile(r"Generating\s+(dev|test)\s+split", re.IGNORECASE)
 
 CODING_TIERS = {
     "n3": 3,
@@ -643,8 +657,159 @@ def _prediction_instance_ids(pred_path: Path) -> list[str]:
     return ids
 
 
-def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
-    """Invoke official SWE-bench evaluation harness if installed."""
+def parse_harness_stdout_line(line: str) -> dict[str, Any] | None:
+    """Map a raw swebench harness stdout fragment into a structured event.
+
+    Returns ``None`` for noise (httpx, HF redirects). Used by Ops live progress.
+    """
+    text = (line or "").strip()
+    if not text:
+        return None
+    if " - httpx - " in text or "huggingface_hub" in text:
+        return None
+    if text.startswith("HTTP Request:") or "Temporary Redirect" in text:
+        return None
+    m = _EVAL_TQDM_RE.search(text)
+    if m:
+        return {
+            "kind": "progress",
+            "pct": int(m.group("pct")),
+            "done": int(m.group("done")),
+            "total": int(m.group("total")),
+            "resolved": int(m.group("ok")),
+            "unresolved": int(m.group("fail")),
+            "error": int(m.group("err")),
+        }
+    m_run = _RUNNING_INSTANCES_RE.search(text)
+    if m_run:
+        return {
+            "kind": "stage",
+            "stage": "evaluating",
+            "n": int(m_run.group(1)),
+            "detail": text,
+        }
+    m_img = _FOUND_IMAGES_RE.search(text)
+    if m_img:
+        return {
+            "kind": "stage",
+            "stage": "images_ready",
+            "n": int(m_img.group(1)),
+            "detail": text,
+        }
+    if _ALL_INSTANCES_RE.search(text):
+        return {"kind": "stage", "stage": "instances_done", "detail": text}
+    m_split = _GENERATING_SPLIT_RE.search(text)
+    if m_split:
+        return {
+            "kind": "stage",
+            "stage": "load_dataset",
+            "detail": f"Generating {m_split.group(1)} split",
+        }
+    if text.startswith("Warning:") or text.startswith("<frozen"):
+        return None
+    if len(text) <= 240 and not text.startswith("{"):
+        return {"kind": "log", "detail": text}
+    return None
+
+
+def format_l1_harness_event(ev: dict[str, Any]) -> str | None:
+    """Render a structured harness event as an ``[L1] coding harness …`` log line."""
+    kind = ev.get("kind")
+    if kind == "progress":
+        return (
+            f"[L1] coding harness progress done={ev['done']}/{ev['total']} "
+            f"pct={ev['pct']} resolved={ev['resolved']} "
+            f"unresolved={ev['unresolved']} error={ev['error']}"
+        )
+    if kind == "stage":
+        stage = str(ev.get("stage") or "unknown")
+        n = ev.get("n")
+        detail = str(ev.get("detail") or "").strip()
+        parts = [f"[L1] coding harness stage {stage}"]
+        if n is not None:
+            parts.append(f"n={n}")
+        if detail and "Evaluation:" not in detail:
+            parts.append(f"detail={detail[:160]}")
+        return " ".join(parts)
+    if kind == "log":
+        detail = str(ev.get("detail") or "").strip()
+        if not detail:
+            return None
+        return f"[L1] coding harness log {detail[:200]}"
+    return None
+
+
+def _stream_harness_process(
+    cmd: list[str],
+    *,
+    cwd: str,
+    log_path: Path,
+    on_line: Callable[[str], None] | None = None,
+) -> int:
+    """Run harness with live stdout (handles tqdm ``\\r`` updates)."""
+    env = os.environ.copy()
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    env.setdefault("TQDM_MININTERVAL", "1")
+    with log_path.open("w", encoding="utf-8") as logf:
+        logf.write(" ".join(cmd) + "\n\n")
+        logf.flush()
+        proc = subprocess.Popen(
+            cmd,
+            cwd=cwd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+        assert proc.stdout is not None
+        buf = ""
+        try:
+            while True:
+                chunk = proc.stdout.read(256)
+                if not chunk:
+                    break
+                text = chunk.decode("utf-8", errors="replace")
+                logf.write(text)
+                logf.flush()
+                buf += text
+                while True:
+                    idx_n = buf.find("\n")
+                    idx_r = buf.find("\r")
+                    if idx_n < 0 and idx_r < 0:
+                        break
+                    if idx_n < 0:
+                        cut = idx_r
+                    elif idx_r < 0:
+                        cut = idx_n
+                    else:
+                        cut = min(idx_n, idx_r)
+                    line = buf[:cut]
+                    buf = buf[cut + 1 :]
+                    if buf.startswith("\n") and cut == idx_r:
+                        buf = buf[1:]
+                    cleaned = line.strip()
+                    if cleaned and on_line is not None:
+                        on_line(cleaned)
+            leftover = buf.strip()
+            if leftover and on_line is not None:
+                on_line(leftover)
+        finally:
+            try:
+                proc.stdout.close()
+            except OSError:
+                pass
+        return int(proc.wait())
+
+
+def run_swe_eval(
+    *,
+    predictions: Path | None = None,
+    on_line: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    """Invoke official SWE-bench evaluation harness if installed.
+
+    ``on_line`` receives cleaned stdout fragments (tqdm updates included) so
+    Ops can surface mid-harness progress without waiting for process exit.
+    """
     ensure_dirs()
     cfg = load_suites()
     coding = cfg["suites"]["coding"]
@@ -664,6 +829,7 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
     h = _harness_preflight(instance_ids=instance_ids)
     cmd = [
         sys.executable,
+        "-u",
         "-m",
         "swebench.harness.run_evaluation",
         "--dataset_name",
@@ -703,16 +869,41 @@ def run_swe_eval(*, predictions: Path | None = None) -> dict[str, Any]:
         "(部署看板 / make official-bench-coding-pull-images)",
     )
     log_path = Path(session.dir) / "harness.stdout.log"
-    with log_path.open("w", encoding="utf-8") as logf:
-        logf.write(" ".join(cmd) + "\n\n")
-        logf.flush()
-        proc = subprocess.run(
-            cmd,
-            cwd=str(root),
-            check=False,
-            stdout=logf,
-            stderr=subprocess.STDOUT,
-        )
+    last_progress_key: tuple[Any, ...] | None = None
+
+    def _forward(raw: str) -> None:
+        nonlocal last_progress_key
+        if on_line is not None:
+            on_line(raw)
+        ev = parse_harness_stdout_line(raw)
+        if ev is None:
+            return
+        if ev.get("kind") == "progress":
+            key = (
+                ev.get("done"),
+                ev.get("total"),
+                ev.get("resolved"),
+                ev.get("unresolved"),
+                ev.get("error"),
+            )
+            if key == last_progress_key:
+                return
+            last_progress_key = key
+        rendered = format_l1_harness_event(ev)
+        if rendered:
+            print(rendered, flush=True)
+
+    exit_code = _stream_harness_process(
+        cmd,
+        cwd=str(root),
+        log_path=log_path,
+        on_line=_forward,
+    )
+
+    class _Proc:
+        returncode = exit_code
+
+    proc = _Proc()
     _phase(f"2/3 EVAL — harness exit={proc.returncode}")
     _phase("3/3 REGRESS — compare resolve rate vs prior harness runs in Ops")
     log_tail = ""

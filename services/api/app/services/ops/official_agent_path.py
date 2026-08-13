@@ -2514,6 +2514,7 @@ async def run_coding_l1(
         csi_probes_from_events,
         csi_suite_rates,
         patch_apply_check,
+        patch_from_edit_events,
         patch_from_events,
         patch_from_git_diff,
         patch_from_work_root,
@@ -2812,6 +2813,17 @@ async def run_coding_l1(
                             patch = patch_from_git_diff(work.work_root)
                             if patch.strip():
                                 patch_source = "git_diff"
+                        # Repair path: empty OR truncated hunks (strip bug / corrupt)
+                        # → rebuild from edit_file spans before rejecting the case.
+                        if (not str(patch or "").strip()) or patch_hunks_incomplete(
+                            patch
+                        ):
+                            repaired = patch_from_edit_events(events)
+                            if repaired.strip() and not patch_hunks_incomplete(
+                                repaired
+                            ):
+                                patch = repaired
+                                patch_source = "edit_events"
                         if not str(patch or "").strip():
                             patch = patch_from_events(events)
                             if patch.strip():
@@ -3069,7 +3081,53 @@ async def run_coding_l1(
             )
             await _emit(on_progress, "log", message="[L1] coding harness resolve…")
             try:
-                harness = await asyncio.to_thread(run_swe_eval, predictions=pred_path)
+                from official_bench.swe_run import (
+                    format_l1_harness_event,
+                    parse_harness_stdout_line,
+                )
+
+                loop = asyncio.get_running_loop()
+                last_emit_key: tuple[Any, ...] | None = None
+
+                def _harness_sink(raw: str) -> None:
+                    nonlocal last_emit_key
+                    ev = parse_harness_stdout_line(raw)
+                    if ev is None:
+                        return
+                    # Mid-run focus: progress + stage. Skip chatty log fragments.
+                    if ev.get("kind") == "log":
+                        return
+                    if ev.get("kind") == "progress":
+                        key = (
+                            "progress",
+                            ev.get("done"),
+                            ev.get("total"),
+                            ev.get("resolved"),
+                            ev.get("unresolved"),
+                            ev.get("error"),
+                        )
+                    else:
+                        key = ("stage", ev.get("stage"), ev.get("n"), ev.get("detail"))
+                    if key == last_emit_key:
+                        return
+                    last_emit_key = key
+                    msg = format_l1_harness_event(ev)
+                    if not msg:
+                        return
+
+                    def _schedule() -> None:
+                        asyncio.create_task(_emit(on_progress, "log", message=msg))
+
+                    try:
+                        loop.call_soon_threadsafe(_schedule)
+                    except RuntimeError:
+                        pass
+
+                harness = await asyncio.to_thread(
+                    run_swe_eval,
+                    predictions=pred_path,
+                    on_line=_harness_sink,
+                )
                 h_metrics = harness.get("metrics") or {}
                 metrics.update(h_metrics)
                 if "resolve_rate" not in metrics and isinstance(

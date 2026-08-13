@@ -801,6 +801,10 @@ type CodingCaseLive = {
 type CodingHarnessLive = {
   phase: "idle" | "running" | "done" | "failed";
   n: number | null;
+  /** Completed instances inside harness (mid-run). */
+  done: number | null;
+  pct: number | null;
+  stage: string | null;
   resolved: number | null;
   total: number | null;
   unresolved: number | null;
@@ -813,6 +817,13 @@ type CodingLiveEvent =
   | { kind: "plan"; n: number }
   | { kind: "case"; case: CodingCaseLive }
   | { kind: "harness"; harness: Partial<CodingHarnessLive> & { phase: CodingHarnessLive["phase"] } };
+
+const HARNESS_STAGE_LABEL: Record<string, string> = {
+  load_dataset: "加载数据集",
+  images_ready: "镜像就绪",
+  evaluating: "按题评测中",
+  instances_done: "实例跑完",
+};
 
 /** Parse `[L1] coding …` / harness lines into the coding progress card. */
 function parseCodingLiveLine(line: string): CodingLiveEvent | null {
@@ -846,15 +857,65 @@ function parseCodingLiveLine(line: string): CodingLiveEvent | null {
       },
     };
   }
+  const hProgress = line.match(
+    /^\[L1\]\s+coding\s+harness\s+progress\s+done=(\d+)\/(\d+)\s+pct=(\d+)\s+resolved=(\d+)\s+unresolved=(\d+)\s+error=(\d+)/i,
+  );
+  if (hProgress) {
+    return {
+      kind: "harness",
+      harness: {
+        phase: "running",
+        done: Number(hProgress[1]),
+        total: Number(hProgress[2]),
+        n: Number(hProgress[2]),
+        pct: Number(hProgress[3]),
+        resolved: Number(hProgress[4]),
+        unresolved: Number(hProgress[5]),
+        error: Number(hProgress[6]),
+        stage: "evaluating",
+      },
+    };
+  }
+  const hStage = line.match(
+    /^\[L1\]\s+coding\s+harness\s+stage\s+(\S+)(?:\s+n=(\d+))?(?:\s+detail=(.*))?$/i,
+  );
+  if (hStage) {
+    const patch: Partial<CodingHarnessLive> & {
+      phase: CodingHarnessLive["phase"];
+    } = {
+      phase: "running",
+      stage: hStage[1],
+    };
+    if (hStage[2] != null) {
+      patch.n = Number(hStage[2]);
+      patch.total = Number(hStage[2]);
+    }
+    const detail = (hStage[3] || "").trim().slice(0, 160);
+    if (detail) patch.detail = detail;
+    return { kind: "harness", harness: patch };
+  }
   const hStart = line.match(/^\[L1\]\s+coding\s+harness\s+start\s+n=(\d+)/i);
   if (hStart) {
     return {
       kind: "harness",
-      harness: { phase: "running", n: Number(hStart[1]), total: Number(hStart[1]) },
+      harness: {
+        phase: "running",
+        n: Number(hStart[1]),
+        total: Number(hStart[1]),
+        done: 0,
+        pct: 0,
+        stage: "start",
+        resolved: 0,
+        unresolved: 0,
+        error: 0,
+      },
     };
   }
   if (/^\[L1\]\s+coding\s+harness\s+resolve/i.test(line)) {
-    return { kind: "harness", harness: { phase: "running" } };
+    return {
+      kind: "harness",
+      harness: { phase: "running", stage: "resolve" },
+    };
   }
   const hFail = line.match(
     /^\[L1\]\s+coding\s+harness\s+done\s+status=failed(?:\s+error=(.*))?/i,
@@ -879,9 +940,12 @@ function parseCodingLiveLine(line: string): CodingLiveEvent | null {
         resolved: Number(hDone[1]),
         total: Number(hDone[2]),
         n: Number(hDone[2]),
+        done: Number(hDone[2]),
+        pct: 100,
         unresolved: Number(hDone[3]),
         error: Number(hDone[4]),
         rate: hDone[5] || null,
+        stage: "done",
       },
     };
   }
@@ -913,14 +977,16 @@ function applyCodingLiveEvent(
     };
   }
   if (ev.kind === "harness") {
-    return {
-      byIid,
-      harness: {
-        ...harness,
-        ...ev.harness,
-        phase: ev.harness.phase,
-      },
-    };
+    const merged: CodingHarnessLive = { ...harness, phase: ev.harness.phase };
+    for (const [k, v] of Object.entries(ev.harness) as [
+      keyof CodingHarnessLive,
+      CodingHarnessLive[keyof CodingHarnessLive],
+    ][]) {
+      if (v !== undefined) {
+        (merged as Record<string, unknown>)[k] = v;
+      }
+    }
+    return { byIid, harness: merged };
   }
   const prev = byIid[ev.case.iid];
   const next: CodingCaseLive = {
@@ -954,6 +1020,9 @@ function formatCodingCaseRows(
 const EMPTY_CODING_HARNESS: CodingHarnessLive = {
   phase: "idle",
   n: null,
+  done: null,
+  pct: null,
+  stage: null,
   resolved: null,
   total: null,
   unresolved: null,
@@ -2662,7 +2731,6 @@ export function OfficialBenchPage() {
     byIid: Record<string, CodingCaseLive>;
     harness: CodingHarnessLive;
   }>({ byIid: {}, harness: EMPTY_CODING_HARNESS });
-  const [codingExpanded, setCodingExpanded] = useState(false);
   const detailProgress = useMemo(
     () => formatSuiteDetails(suiteDetails),
     [suiteDetails],
@@ -5068,22 +5136,112 @@ export function OfficialBenchPage() {
                 className="mt-2 rounded-md border border-border/80 bg-muted/20 px-2.5 py-2"
                 aria-label="编码题进度"
               >
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between gap-2 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  onClick={() => setCodingExpanded((v) => !v)}
-                  aria-expanded={codingExpanded}
-                  title={
-                    codingExpanded ? "收起按题编码进度" : "展开按题编码进度"
-                  }
-                >
-                  <div className="min-w-0">
-                    <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      编码（按题 · infer → harness）
+                {/* Harness mid-run is the primary signal; infer is a compact footer. */}
+                {codingSummary.harness.phase !== "idle" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                          官方 harness（中间过程）
+                        </div>
+                        <div className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
+                          {codingSummary.harness.phase === "running"
+                            ? (() => {
+                                const stageKey = codingSummary.harness.stage || "";
+                                const stageLabel =
+                                  HARNESS_STAGE_LABEL[stageKey] ||
+                                  (stageKey === "start" || stageKey === "resolve"
+                                    ? "启动中"
+                                    : stageKey || "评测中");
+                                const done =
+                                  codingSummary.harness.done != null &&
+                                  codingSummary.harness.total != null
+                                    ? `${codingSummary.harness.done}/${codingSummary.harness.total}`
+                                    : codingSummary.harness.n != null
+                                      ? `n=${codingSummary.harness.n}`
+                                      : null;
+                                const counts =
+                                  codingSummary.harness.resolved != null
+                                    ? `✓${codingSummary.harness.resolved} · ✖${codingSummary.harness.unresolved ?? 0} · err ${codingSummary.harness.error ?? 0}`
+                                    : null;
+                                return [stageLabel, done, counts]
+                                  .filter(Boolean)
+                                  .join(" · ");
+                              })()
+                            : codingSummary.harness.phase === "done"
+                              ? `完成 · resolve ${codingSummary.harness.resolved ?? "?"}/${codingSummary.harness.total ?? "?"}${
+                                  codingSummary.harness.rate
+                                    ? ` · rate=${codingSummary.harness.rate}`
+                                    : ""
+                                }`
+                              : codingSummary.harness.detail
+                                ? `失败 · ${codingSummary.harness.detail}`
+                                : "失败"}
+                        </div>
+                      </div>
+                      <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
+                        {codingSummary.harness.phase === "running" &&
+                        codingSummary.harness.pct != null
+                          ? `${codingSummary.harness.pct}%`
+                          : codingSummary.harness.phase === "done"
+                            ? "100%"
+                            : codingSummary.harness.phase === "failed"
+                              ? "—"
+                              : "…"}
+                      </span>
                     </div>
-                    <div className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
+                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={`h-full rounded-full transition-[width] duration-500 ${
+                          codingSummary.harness.phase === "failed"
+                            ? "bg-destructive/70"
+                            : "bg-foreground/70"
+                        }`}
+                        style={{
+                          width: `${
+                            codingSummary.harness.phase === "done"
+                              ? 100
+                              : codingSummary.harness.phase === "failed"
+                                ? Math.max(codingSummary.harness.pct ?? 8, 8)
+                                : Math.max(
+                                    codingSummary.harness.pct ??
+                                      (codingSummary.harness.done != null &&
+                                      codingSummary.harness.total
+                                        ? Math.round(
+                                            (codingSummary.harness.done /
+                                              codingSummary.harness.total) *
+                                              100,
+                                          )
+                                        : 8),
+                                    8,
+                                  )
+                          }%`,
+                        }}
+                      />
+                    </div>
+                    {codingSummary.harness.detail &&
+                    codingSummary.harness.phase === "running" ? (
+                      <div className="truncate font-mono text-[10px] text-muted-foreground/90">
+                        {codingSummary.harness.detail}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {codingRows.length > 0 ? (
+                  <div
+                    className={
+                      codingSummary.harness.phase !== "idle"
+                        ? "mt-2 border-t border-border/60 pt-2"
+                        : undefined
+                    }
+                  >
+                    <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      infer 出 patch
+                    </div>
+                    <div className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">
                       {codingSummary.total > 0
-                        ? `${codingSummary.total} 题`
+                        ? `${codingSummary.pass + codingSummary.fail}/${codingSummary.total} 完成`
                         : "—"}
                       {codingSummary.running > 0
                         ? ` · 进行中 ${codingSummary.running}`
@@ -5094,65 +5252,12 @@ export function OfficialBenchPage() {
                       {codingSummary.fail > 0
                         ? ` · 失败 ${codingSummary.fail}`
                         : ""}
-                      {codingSummary.harness.phase === "running"
-                        ? " · harness 评测中…"
-                        : ""}
-                      {codingSummary.harness.phase === "done" &&
-                      codingSummary.harness.resolved != null &&
-                      codingSummary.harness.total != null
-                        ? ` · resolve ${codingSummary.harness.resolved}/${codingSummary.harness.total}`
-                        : ""}
-                      {codingSummary.harness.phase === "failed"
-                        ? " · harness 失败"
+                      {codingSummary.harness.phase === "idle"
+                        ? " · 完成后进入 harness"
                         : ""}
                     </div>
-                  </div>
-                  {codingExpanded ? (
-                    <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  )}
-                </button>
-                {codingExpanded ? (
-                  <div className="mt-2 space-y-2 border-t border-border/60 pt-2">
-                    {codingSummary.harness.phase !== "idle" ? (
-                      <div className="text-[11px]">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-muted-foreground">
-                            官方 harness
-                          </span>
-                          <span className="tabular-nums text-muted-foreground">
-                            {codingSummary.harness.phase === "running"
-                              ? codingSummary.harness.n != null
-                                ? `评测中 · n=${codingSummary.harness.n}`
-                                : "评测中…"
-                              : codingSummary.harness.phase === "done"
-                                ? `resolved ${codingSummary.harness.resolved ?? "?"}/${codingSummary.harness.total ?? "?"}${
-                                    codingSummary.harness.rate
-                                      ? ` · rate=${codingSummary.harness.rate}`
-                                      : ""
-                                  }`
-                                : codingSummary.harness.detail
-                                  ? `失败 · ${codingSummary.harness.detail}`
-                                  : "失败"}
-                          </span>
-                        </div>
-                        {codingSummary.harness.phase === "running" ? (
-                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-foreground/40"
-                              style={{
-                                width: "36%",
-                                animation: "pulse 1.4s ease-in-out infinite",
-                              }}
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <ul className="space-y-1.5">
+                    <ul className="mt-1.5 space-y-1">
                       {codingRows.map((row) => {
-                        const running = row.status === "running";
                         const label =
                           row.harness != null
                             ? `${row.status} · harness=${row.harness}`
@@ -5162,27 +5267,16 @@ export function OfficialBenchPage() {
                                 ? `${row.status} · ${row.patchSource}`
                                 : row.status;
                         return (
-                          <li key={row.iid} className="text-[11px]">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="truncate font-mono text-foreground/90">
-                                {shortCaseToken(row.iid)}
-                              </span>
-                              <span className="shrink-0 tabular-nums text-muted-foreground">
-                                {label}
-                              </span>
-                            </div>
-                            {running ? (
-                              <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
-                                <div
-                                  className="h-full rounded-full bg-foreground/40"
-                                  style={{
-                                    width: "28%",
-                                    animation:
-                                      "pulse 1.4s ease-in-out infinite",
-                                  }}
-                                />
-                              </div>
-                            ) : null}
+                          <li
+                            key={row.iid}
+                            className="flex items-center justify-between gap-2 text-[11px]"
+                          >
+                            <span className="truncate font-mono text-foreground/90">
+                              {shortCaseToken(row.iid)}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {label}
+                            </span>
                           </li>
                         );
                       })}
