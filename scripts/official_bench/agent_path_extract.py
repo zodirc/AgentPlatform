@@ -165,16 +165,119 @@ def final_assistant_text(events: list[dict[str, Any]]) -> str:
 
 
 def _looks_like_unified_diff(text: str) -> bool:
-    t = (text or "").strip()
+    t = (text or "").lstrip("\n").rstrip()
     if not t:
         return False
     return "@@" in t or t.startswith("--- ") or "diff --git" in t
 
 
+def _normalize_unified_diff(text: str) -> str:
+    """Keep unified-diff body intact (including trailing ``' \\n'`` context lines).
+
+    ``str.strip()`` is unsafe here: git hunks often end with a blank context line
+    that is a single space + newline. Stripping it makes ``patch_hunks_incomplete``
+    false-positive and rejects otherwise valid SWE model_patches (astropy-12907).
+    """
+    if not text:
+        return ""
+    # Drop only bare leading newlines (not space-prefixed context).
+    i = 0
+    while i < len(text) and text[i] == "\n":
+        i += 1
+    text = text[i:]
+    if not text:
+        return ""
+    if not text.endswith("\n"):
+        text += "\n"
+    return text
+
+
 def _span_to_diff(path: str, old_t: str, new_t: str) -> str:
+    """Build a minimal applyable unified diff from span edit old/new text."""
     if not new_t or new_t == old_t:
         return ""
-    return f"--- a/{path}\n+++ b/{path}\n@@\n{new_t}\n"
+    old_lines = (old_t or "").splitlines()
+    new_lines = new_t.splitlines()
+    old_n = len(old_lines)
+    new_n = len(new_lines)
+    body = [f"-{line}" for line in old_lines] + [f"+{line}" for line in new_lines]
+    if not body:
+        return ""
+    rel = path.lstrip("./")
+    if old_n == 0:
+        hunk = f"@@ -0,0 +1,{new_n} @@"
+        minus = "--- /dev/null"
+        plus = f"+++ b/{rel}"
+    elif new_n == 0:
+        hunk = f"@@ -1,{old_n} +0,0 @@"
+        minus = f"--- a/{rel}"
+        plus = "+++ /dev/null"
+    else:
+        hunk = f"@@ -1,{old_n} +1,{new_n} @@"
+        minus = f"--- a/{rel}"
+        plus = f"+++ b/{rel}"
+    parts = [
+        f"diff --git a/{rel} b/{rel}",
+        minus,
+        plus,
+        hunk,
+        *body,
+    ]
+    return _normalize_unified_diff("\n".join(parts) + "\n")
+
+
+def patch_from_edit_events(events: list[dict[str, Any]]) -> str:
+    """Rebuild model_patch from successful ``edit_file`` / ``write_file`` tool args.
+
+    Used when ``git_diff`` is empty or fails integrity (hunks_incomplete) so a
+    clean span edit is not discarded.
+    """
+    chunks: list[str] = []
+    seen_paths: set[str] = set()
+    # Prefer last edit per path (later tools supersede earlier ones).
+    last_by_path: dict[str, tuple[str, str, str]] = {}
+    for ev in events:
+        if str(ev.get("type") or "") != "tool.started":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        tool = str(payload.get("tool_name") or "")
+        args = payload.get("arguments") or {}
+        if not isinstance(args, dict):
+            continue
+        path = str(args.get("path") or "").strip()
+        if not path or _path_is_diff_noise(path):
+            continue
+        # Skip absolute ops scaffolding paths outside the repo.
+        if path.startswith("/") and "/ops-l1/" in path.replace("\\", "/"):
+            # Keep only the basename-relative tail when it looks like a work path.
+            rel = path.rsplit("/", 1)[-1]
+            if rel.endswith((".py", ".c", ".h", ".js", ".ts", ".java", ".go", ".rs")):
+                path = rel
+            else:
+                continue
+        if tool == "edit_file":
+            old_t = str(args.get("old_text") or args.get("old_string") or "")
+            new_t = str(args.get("new_text") or args.get("new_string") or "")
+            if new_t and new_t != old_t:
+                last_by_path[path] = ("edit", old_t, new_t)
+        elif tool == "write_file":
+            content = args.get("content") or args.get("text") or args.get("new_text")
+            if isinstance(content, str) and content:
+                last_by_path[path] = ("write", "", content)
+    for path, (kind, old_t, new_t) in last_by_path.items():
+        if kind == "edit":
+            synth = _span_to_diff(path, old_t, new_t)
+        else:
+            synth = _span_to_diff(path, "", new_t)
+        if synth and not patch_hunks_incomplete(synth):
+            if path not in seen_paths:
+                seen_paths.add(path)
+                chunks.append(synth.rstrip("\n"))
+    if not chunks:
+        return ""
+    return _normalize_unified_diff("\n".join(chunks) + "\n")
 
 
 def patch_from_events(events: list[dict[str, Any]]) -> str:
@@ -188,7 +291,7 @@ def patch_from_events(events: list[dict[str, Any]]) -> str:
             for key in ("diff", "patch", "new_text"):
                 val = payload.get(key)
                 if isinstance(val, str) and _looks_like_unified_diff(val):
-                    return val
+                    return _normalize_unified_diff(val)
             # span-style propose_patch — synthesise a minimal marker for nonempty rate
             old_t = str(payload.get("old_text") or "")
             new_t = str(payload.get("new_text") or "")
@@ -211,7 +314,7 @@ def patch_from_events(events: list[dict[str, Any]]) -> str:
                 for key in ("diff", "patch", "new_text"):
                     val = args.get(key)
                     if isinstance(val, str) and _looks_like_unified_diff(val):
-                        return val
+                        return _normalize_unified_diff(val)
             if tool in {"write_file", "edit_file", "apply_patch"}:
                 path = str(args.get("path") or "")
                 content = args.get("content") or args.get("new_text") or args.get("text")
@@ -219,10 +322,14 @@ def patch_from_events(events: list[dict[str, Any]]) -> str:
                     path.endswith((".patch", ".diff")) or _looks_like_unified_diff(content)
                 ):
                     if _looks_like_unified_diff(content) or path.endswith((".patch", ".diff")):
-                        return content if content.strip() else ""
+                        return _normalize_unified_diff(content) if content.strip() else ""
         if et == "tool.completed" and str(payload.get("tool_name") or "") == "propose_patch":
             # summary-only; ignore
             continue
+    # Prefer reconstructed span edits from edit_file before assistant fences.
+    edited = patch_from_edit_events(events)
+    if edited:
+        return edited
     # Last-resort: assistant text that embeds a unified diff fence
     text = final_assistant_text(events)
     if text:
@@ -231,9 +338,9 @@ def patch_from_events(events: list[dict[str, Any]]) -> str:
                 body = text.split(marker, 1)[1]
                 body = body.split("```", 1)[0]
                 if _looks_like_unified_diff(body):
-                    return body.strip() + "\n"
+                    return _normalize_unified_diff(body)
         if _looks_like_unified_diff(text):
-            return text.strip() + "\n"
+            return _normalize_unified_diff(text)
     return ""
 
 
@@ -251,7 +358,7 @@ def patch_from_work_root(work_root: str | Path) -> str:
         if text.strip() and (
             _looks_like_unified_diff(text) or name.endswith((".patch", ".diff"))
         ):
-            return text
+            return _normalize_unified_diff(text)
     return ""
 
 
@@ -992,7 +1099,7 @@ def _path_is_diff_noise(path: str) -> bool:
 
 def filter_unified_diff_noise(diff: str) -> str:
     """Drop file sections whose path is install/venv/platform noise (safety net after git)."""
-    text = (diff or "").strip()
+    text = _normalize_unified_diff(diff or "")
     if not text:
         return ""
     lines = text.splitlines(keepends=True)
@@ -1020,8 +1127,7 @@ def filter_unified_diff_noise(diff: str) -> str:
         # Orphan lines (rare) — keep unless clearly under a noise path header.
         out.append(line)
         i += 1
-    cleaned = "".join(out).strip()
-    return cleaned + "\n" if cleaned else ""
+    return _normalize_unified_diff("".join(out))
 
 
 def patch_from_git_diff(work_root: str | Path, *, base_ref: str = "HEAD") -> str:
@@ -1067,7 +1173,7 @@ def patch_from_git_diff(work_root: str | Path, *, base_ref: str = "HEAD") -> str
                 proc = _run(
                     ["diff", "--cached", "--no-color", "--", *_pathspecs], env=env
                 )
-                text = filter_unified_diff_noise((proc.stdout or "").strip())
+                text = filter_unified_diff_noise(proc.stdout or "")
                 if text and _looks_like_unified_diff(text):
                     return text
         finally:
@@ -1080,14 +1186,14 @@ def patch_from_git_diff(work_root: str | Path, *, base_ref: str = "HEAD") -> str
         proc = _run(["diff", "--no-color", ref, "--", *_pathspecs])
     except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return ""
-    text = filter_unified_diff_noise((proc.stdout or "").strip())
+    text = filter_unified_diff_noise(proc.stdout or "")
     if text and _looks_like_unified_diff(text):
         return text
     try:
         proc2 = _run(["diff", "--cached", "--no-color", "--", *_pathspecs])
     except (OSError, subprocess.TimeoutExpired, UnicodeError):
         return ""
-    text2 = filter_unified_diff_noise((proc2.stdout or "").strip())
+    text2 = filter_unified_diff_noise(proc2.stdout or "")
     if text2 and _looks_like_unified_diff(text2):
         return text2
     return ""

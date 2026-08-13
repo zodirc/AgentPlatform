@@ -593,6 +593,64 @@ def test_patch_hunks_incomplete() -> None:
     assert patch_apply_check(Path("/tmp"), truncated) is False
 
 
+def test_normalize_preserves_trailing_blank_context_line() -> None:
+    """Regression: str.strip() ate git's trailing ``' \\n'`` context → false hunks_incomplete.
+
+    Repro'd on astropy__astropy-12907 (~~500-byte one-line edit rejected as patch_no_apply).
+    """
+    from official_bench.agent_path_extract import (
+        filter_unified_diff_noise,
+        _normalize_unified_diff,
+    )
+
+    raw = (
+        "diff --git a/astropy/modeling/separable.py b/astropy/modeling/separable.py\n"
+        "--- a/astropy/modeling/separable.py\n"
+        "+++ b/astropy/modeling/separable.py\n"
+        "@@ -242,7 +242,7 @@ def _cstack(left, right):\n"
+        "         cright = _coord_matrix(right, 'right', noutp)\n"
+        "     else:\n"
+        "         cright = np.zeros((noutp, right.shape[1]))\n"
+        "-        cright[-right.shape[0]:, -right.shape[1]:] = 1\n"
+        "+        cright[-right.shape[0]:, -right.shape[1]:] = right\n"
+        " \n"
+        "     return np.hstack([cleft, cright])\n"
+        " \n"
+    )
+    assert patch_hunks_incomplete(raw) is False
+    # Old bug: strip drops the final space-only context line → counts 6 vs header 7.
+    broken = raw.strip() + "\n"
+    assert patch_hunks_incomplete(broken) is True
+    fixed = filter_unified_diff_noise(raw)
+    assert patch_hunks_incomplete(fixed) is False
+    assert fixed.endswith(" \n") or fixed.rstrip("\n").endswith(" ")
+    assert _normalize_unified_diff(raw.strip())  # still returns something
+    # normalize must not behave like strip on the body
+    assert patch_hunks_incomplete(_normalize_unified_diff(raw)) is False
+
+
+def test_patch_from_edit_events_rebuilds_span(tmp_path: Path) -> None:
+    from official_bench.agent_path_extract import patch_from_edit_events
+
+    events = [
+        {
+            "type": "tool.started",
+            "payload": {
+                "tool_name": "edit_file",
+                "arguments": {
+                    "path": "pkg/a.py",
+                    "old_text": "x = 1",
+                    "new_text": "x = 2",
+                },
+            },
+        }
+    ]
+    diff = patch_from_edit_events(events)
+    assert "diff --git" in diff
+    assert "-x = 1" in diff and "+x = 2" in diff
+    assert patch_hunks_incomplete(diff) is False
+
+
 def test_patch_from_work_root(tmp_path: Path) -> None:
     diff = "--- a/a\n+++ b/a\n@@\n+x\n"
     (tmp_path / "fix.patch").write_text(diff, encoding="utf-8")
