@@ -211,17 +211,111 @@
     }
     @media (max-width: 900px) {
       main { grid-template-columns: 1fr; }
-      .left { border-right: 0; border-bottom: 1px solid var(--line-soft); max-height: 42vh; overflow: auto; }
+      .left-pane {
+        border-right: 0;
+        border-bottom: 1px solid var(--line-soft);
+        max-height: 42vh;
+      }
     }
-    .left {
+    .left-pane {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 0;
+      max-height: calc(100vh - 88px);
       border-right: 1px solid var(--line-soft);
-      padding: 0.55rem 0.55rem 0.9rem;
       background: var(--left-bg);
-      overflow-x: hidden;
-      overflow-y: auto;
       position: relative;
       z-index: 0;
-      min-width: 0; /* grid: allow clip instead of spilling into detail */
+    }
+    .left {
+      flex: 1 1 auto;
+      min-height: 0;
+      padding: 0.55rem 0.55rem 2.6rem;
+      overflow-x: hidden;
+      overflow-y: auto;
+      scroll-behavior: smooth;
+      scrollbar-width: thin;
+      scrollbar-color: color-mix(in srgb, var(--muted) 45%, transparent) transparent;
+    }
+    .left::-webkit-scrollbar {
+      width: 6px;
+    }
+    .left::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--muted) 40%, transparent);
+      border-radius: 999px;
+    }
+    .left-scroll {
+      position: absolute;
+      left: 50%;
+      bottom: 0.55rem;
+      transform: translateX(-50%);
+      z-index: 2;
+      display: inline-flex;
+      align-items: center;
+      gap: 0;
+      padding: 0.18rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+      background: color-mix(in srgb, var(--panel) 78%, transparent);
+      box-shadow:
+        0 8px 24px rgba(0, 0, 0, 0.22),
+        0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease, border-color 0.18s ease;
+    }
+    .left-pane:hover .left-scroll,
+    .left-scroll:focus-within,
+    .left-scroll.is-needed {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .left-scroll.is-needed:not(:hover):not(:focus-within) {
+      opacity: 0.72;
+    }
+    .left-scroll button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.85rem;
+      height: 1.85rem;
+      padding: 0;
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+    }
+    .left-scroll button svg {
+      width: 0.95rem;
+      height: 0.95rem;
+      display: block;
+    }
+    .left-scroll button:hover:not(:disabled) {
+      color: var(--text);
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+    .left-scroll button:active:not(:disabled) {
+      transform: scale(0.94);
+    }
+    .left-scroll button:focus-visible {
+      outline: none;
+      color: var(--accent);
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent);
+    }
+    .left-scroll button:disabled {
+      opacity: 0.28;
+      cursor: default;
+    }
+    .left-scroll-sep {
+      width: 1px;
+      height: 0.95rem;
+      background: color-mix(in srgb, var(--line) 70%, transparent);
+      margin: 0 0.1rem;
     }
     .tree {
       display: flex;
@@ -473,31 +567,142 @@
     }
     .hint a { color: var(--accent); text-decoration: none; }
     .hint a:hover { text-decoration: underline; }
-    .log-tabs {
+    .log-toolbar {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.35rem;
-      margin: 0;
-      flex: 1;
+      gap: 0.55rem;
+      align-items: center;
+      margin-bottom: 0.55rem;
     }
-    .log-tabs button {
+    .log-picker {
+      position: relative;
+      flex: 0 1 auto;
+      min-width: min(14rem, 100%);
+    }
+    .log-picker-trigger {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      width: 100%;
+      min-height: 2.05rem;
+      padding: 0.28rem 0.55rem 0.28rem 0.7rem;
+      border-radius: 999px;
+      border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+      background: color-mix(in srgb, var(--panel) 82%, transparent);
+      color: var(--text);
       font-family: var(--mono);
-      font-size: 0.7rem;
-      padding: 0.32rem 0.55rem;
-      border-radius: 6px;
-      border: 1px solid var(--line-soft);
-      background: transparent;
-      color: var(--muted);
+      font-size: 0.72rem;
       cursor: pointer;
-      transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 6%, transparent);
+      transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
     }
-    .log-tabs button:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 40%, var(--line)); }
-    .log-tabs button.on {
-      color: var(--accent);
+    .log-picker-trigger:hover {
+      border-color: color-mix(in srgb, var(--accent) 40%, var(--line));
+      background: color-mix(in srgb, var(--panel-2) 88%, transparent);
+    }
+    .log-picker.open .log-picker-trigger {
       border-color: color-mix(in srgb, var(--accent) 55%, var(--line));
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+    .log-picker-kicker {
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+    .log-picker-value {
+      flex: 1;
+      min-width: 0;
+      text-align: left;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--accent);
+      font-weight: 600;
+    }
+    .log-picker-dot {
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--muted) 55%, transparent);
+      flex-shrink: 0;
+    }
+    .log-picker-dot.on {
+      background: var(--ok);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 18%, transparent);
+    }
+    .log-picker-chevron {
+      width: 0.9rem;
+      height: 0.9rem;
+      color: var(--muted);
+      flex-shrink: 0;
+      transition: transform 0.15s ease;
+    }
+    .log-picker.open .log-picker-chevron {
+      transform: rotate(180deg);
+      color: var(--accent);
+    }
+    .log-picker-menu {
+      position: absolute;
+      top: calc(100% + 0.35rem);
+      left: 0;
+      right: 0;
+      z-index: 20;
+      max-height: min(50vh, 22rem);
+      overflow: auto;
+      padding: 0.3rem;
+      border-radius: 12px;
+      border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+      background: color-mix(in srgb, var(--panel) 92%, transparent);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    .log-picker-menu[hidden] { display: none !important; }
+    .log-picker-option {
+      display: grid;
+      grid-template-columns: 0.4rem minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 0.55rem;
+      width: 100%;
+      padding: 0.45rem 0.55rem;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .log-picker-option:hover {
       background: color-mix(in srgb, var(--accent) 12%, transparent);
     }
-    .log-tabs button.has { color: var(--text); }
+    .log-picker-option.active {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      color: var(--accent);
+    }
+    .log-picker-option .opt-dot {
+      width: 0.4rem;
+      height: 0.4rem;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--muted) 45%, transparent);
+    }
+    .log-picker-option.has .opt-dot {
+      background: var(--ok);
+    }
+    .log-picker-option .opt-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .log-picker-option .opt-hint {
+      font-size: 0.62rem;
+      color: var(--muted);
+    }
     .toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -600,7 +805,22 @@
     </div>
   </header>
   <main>
-    <aside class="left" id="list"></aside>
+    <div class="left-pane">
+      <aside class="left" id="list"></aside>
+      <div class="left-scroll" id="left-scroll" role="group" aria-label="左侧目录滚动">
+        <button type="button" id="left-scroll-up" title="上滑" aria-label="上滑">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3.5 10.25 8 5.75l4.5 4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        <span class="left-scroll-sep" aria-hidden="true"></span>
+        <button type="button" id="left-scroll-down" title="下滑" aria-label="下滑">
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M3.5 5.75 8 10.25l4.5-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
     <section class="right">
       <div class="toolbar">
         <div class="seg" id="mode-seg" title="检测范围">
@@ -618,8 +838,18 @@
       <div class="err" id="err"></div>
       <div id="detail"></div>
       <h2 class="panel-title">各模块任务日志</h2>
-      <div class="toolbar" style="margin-bottom:0.55rem">
-        <div class="log-tabs" id="log-tabs"></div>
+      <div class="log-toolbar">
+        <div class="log-picker" id="log-picker">
+          <button type="button" class="log-picker-trigger" id="log-picker-btn" aria-haspopup="listbox" aria-expanded="false">
+            <span class="log-picker-kicker">模块</span>
+            <span class="log-picker-value" id="log-picker-value">all</span>
+            <span class="log-picker-dot" id="log-picker-dot" aria-hidden="true"></span>
+            <svg class="log-picker-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M3.5 5.75 8 10.25l4.5-4.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+          <div class="log-picker-menu" id="log-picker-menu" role="listbox" hidden></div>
+        </div>
         <button type="button" class="clear-log" id="btn-clear-log" title="清空当前输出栏（不删文件）">清空输出栏</button>
         <span class="remote-hint" id="log-meta-hint"></span>
       </div>
@@ -1026,37 +1256,87 @@
         </div>`;
     }
 
+    function closeLogPicker() {
+      const picker = $("log-picker");
+      const menu = $("log-picker-menu");
+      const btn = $("log-picker-btn");
+      if (!picker || !menu || !btn) return;
+      picker.classList.remove("open");
+      menu.hidden = true;
+      btn.setAttribute("aria-expanded", "false");
+    }
+
+    function chooseLogModule(nextId) {
+      if (!nextId || nextId === logModule) {
+        closeLogPicker();
+        return;
+      }
+      logModule = nextId;
+      localStorage.setItem("releaseLogModule", logModule);
+      lastLogText = "";
+      hideLogUntilChange = null;
+      if (logModule !== "all" && logModule !== "git") {
+        const match = (plan?.items || []).find((x) => ITEM_TO_LOG[x.id] === logModule);
+        if (match) {
+          selectedId = match.id;
+          renderList();
+          renderDetail();
+        }
+      }
+      closeLogPicker();
+      renderLogTabs();
+      loadLog();
+      updateClearBtn();
+    }
+
     function renderLogTabs() {
-      const box = $("log-tabs");
+      const picker = $("log-picker");
+      const menu = $("log-picker-menu");
+      const valueEl = $("log-picker-value");
+      const dotEl = $("log-picker-dot");
+      const btn = $("log-picker-btn");
+      if (!picker || !menu || !valueEl || !dotEl || !btn) return;
+
+      const current = LOG_TABS.find((t) => t.id === logModule) || LOG_TABS[0];
+      const curMeta = logMeta[current.id] || {};
+      valueEl.textContent = current.label;
+      dotEl.classList.toggle("on", !!curMeta.has_log);
+      btn.title = curMeta.has_log
+        ? `${current.label} · 有历史输出`
+        : `${current.label} · 尚无输出`;
+
       const html = LOG_TABS.map((t) => {
         const meta = logMeta[t.id] || {};
-        const cls = (logModule === t.id ? "on" : "") + (meta.has_log ? " has" : "");
-        return `<button type="button" data-log="${t.id}" class="${cls}" title="${
-          meta.has_log ? t.label + " 有历史输出" : t.label + " 尚无输出"
-        }">${t.label}</button>`;
+        const cls = [
+          "log-picker-option",
+          logModule === t.id ? "active" : "",
+          meta.has_log ? "has" : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return `<button type="button" role="option" class="${cls}" data-log="${t.id}" aria-selected="${
+          logModule === t.id ? "true" : "false"
+        }">
+          <span class="opt-dot" aria-hidden="true"></span>
+          <span class="opt-label">${t.label}</span>
+          <span class="opt-hint">${meta.has_log ? "有输出" : "空"}</span>
+        </button>`;
       }).join("");
-      if (box.dataset.html === html) return;
-      box.dataset.html = html;
-      box.innerHTML = html;
-      box.onclick = (ev) => {
-        const b = ev.target.closest("button[data-log]");
-        if (!b) return;
-        logModule = b.getAttribute("data-log");
-        localStorage.setItem("releaseLogModule", logModule);
-        lastLogText = "";
-        hideLogUntilChange = null;
-        if (logModule !== "all" && logModule !== "git") {
-          const match = (plan?.items || []).find((x) => ITEM_TO_LOG[x.id] === logModule);
-          if (match) {
-            selectedId = match.id;
-            renderList();
-            renderDetail();
-          }
-        }
-        renderLogTabs();
-        loadLog();
-        updateClearBtn();
-      };
+      if (menu.dataset.html !== html) {
+        menu.dataset.html = html;
+        menu.innerHTML = html;
+      }
+    }
+
+    function toggleLogPicker() {
+      const picker = $("log-picker");
+      const menu = $("log-picker-menu");
+      const btn = $("log-picker-btn");
+      if (!picker || !menu || !btn) return;
+      const open = picker.classList.toggle("open");
+      menu.hidden = !open;
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      if (open) renderLogTabs();
     }
 
     function updateClearBtn() {
@@ -1487,6 +1767,127 @@
     }
     $("btn-clear-log").onclick = () => clearLog();
     $("theme-sel").onchange = (ev) => applyTheme(ev.target.value);
+
+    function syncLeftScrollButtons() {
+      const box = $("list");
+      const dock = $("left-scroll");
+      const up = $("left-scroll-up");
+      const down = $("left-scroll-down");
+      if (!box || !dock || !up || !down) return;
+      const max = Math.max(0, box.scrollHeight - box.clientHeight);
+      const needed = max > 8;
+      dock.classList.toggle("is-needed", needed);
+      dock.hidden = !needed;
+      if (!needed) {
+        stopLeftScrollHold();
+        return;
+      }
+      const top = box.scrollTop;
+      up.disabled = top <= 1;
+      down.disabled = top >= max - 1;
+      if (up.disabled && leftScrollHoldDir < 0) stopLeftScrollHold();
+      if (down.disabled && leftScrollHoldDir > 0) stopLeftScrollHold();
+    }
+    function scrollLeftPane(dir, { smooth = true } = {}) {
+      const box = $("list");
+      if (!box) return;
+      const step = Math.max(48, Math.floor(box.clientHeight * (smooth ? 0.75 : 0.12)));
+      box.scrollBy({ top: dir * step, behavior: smooth ? "smooth" : "auto" });
+    }
+    let leftScrollHoldDir = 0;
+    let leftScrollHoldTimer = null;
+    let leftScrollHoldRaf = null;
+    function stopLeftScrollHold() {
+      leftScrollHoldDir = 0;
+      if (leftScrollHoldTimer != null) {
+        clearTimeout(leftScrollHoldTimer);
+        leftScrollHoldTimer = null;
+      }
+      if (leftScrollHoldRaf != null) {
+        cancelAnimationFrame(leftScrollHoldRaf);
+        leftScrollHoldRaf = null;
+      }
+    }
+    function startLeftScrollHold(dir) {
+      stopLeftScrollHold();
+      leftScrollHoldDir = dir;
+      // First tick: one page step (same as click).
+      scrollLeftPane(dir, { smooth: true });
+      leftScrollHoldTimer = setTimeout(() => {
+        const tick = () => {
+          if (!leftScrollHoldDir) return;
+          const box = $("list");
+          if (!box) return;
+          const max = Math.max(0, box.scrollHeight - box.clientHeight);
+          const top = box.scrollTop;
+          if (
+            (leftScrollHoldDir < 0 && top <= 1) ||
+            (leftScrollHoldDir > 0 && top >= max - 1)
+          ) {
+            stopLeftScrollHold();
+            syncLeftScrollButtons();
+            return;
+          }
+          // Continuous hold: small instant steps feel like steady scroll.
+          box.scrollTop = top + leftScrollHoldDir * Math.max(28, Math.floor(box.clientHeight * 0.08));
+          syncLeftScrollButtons();
+          leftScrollHoldRaf = requestAnimationFrame(tick);
+        };
+        leftScrollHoldRaf = requestAnimationFrame(tick);
+      }, 280);
+    }
+    function bindLeftScrollHold(btn, dir) {
+      if (!btn) return;
+      const onDown = (ev) => {
+        if (btn.disabled) return;
+        if (ev.type === "mousedown" && ev.button !== 0) return;
+        ev.preventDefault();
+        startLeftScrollHold(dir);
+      };
+      btn.addEventListener("mousedown", onDown);
+      btn.addEventListener("touchstart", onDown, { passive: false });
+      btn.addEventListener("keydown", (ev) => {
+        if (ev.key !== " " && ev.key !== "Enter") return;
+        ev.preventDefault();
+        startLeftScrollHold(dir);
+      });
+    }
+    bindLeftScrollHold($("left-scroll-up"), -1);
+    bindLeftScrollHold($("left-scroll-down"), 1);
+    window.addEventListener("mouseup", stopLeftScrollHold);
+    window.addEventListener("touchend", stopLeftScrollHold);
+    window.addEventListener("touchcancel", stopLeftScrollHold);
+    window.addEventListener("blur", stopLeftScrollHold);
+    window.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape" || ev.key === "Tab") stopLeftScrollHold();
+    });
+    window.addEventListener("keyup", (ev) => {
+      if (ev.key === " " || ev.key === "Enter") stopLeftScrollHold();
+    });
+    $("list").addEventListener("scroll", syncLeftScrollButtons, { passive: true });
+    window.addEventListener("resize", syncLeftScrollButtons);
+    const _listObs = new MutationObserver(() => syncLeftScrollButtons());
+    _listObs.observe($("list"), { childList: true, subtree: true });
+    syncLeftScrollButtons();
+
+    $("log-picker-btn").onclick = (ev) => {
+      ev.stopPropagation();
+      toggleLogPicker();
+    };
+    $("log-picker-menu").onclick = (ev) => {
+      const opt = ev.target.closest("button[data-log]");
+      if (!opt) return;
+      chooseLogModule(opt.getAttribute("data-log"));
+    };
+    document.addEventListener("click", (ev) => {
+      const picker = $("log-picker");
+      if (!picker || !picker.classList.contains("open")) return;
+      if (picker.contains(ev.target)) return;
+      closeLogPicker();
+    });
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") closeLogPicker();
+    });
 
     renderMode();
     refresh(false);

@@ -453,7 +453,14 @@ async def _watch_workspace_index_progress(
             await _emit(on_progress, "log", message=line)
             last_line = line
         # stale = budget-truncated but queryable; treat as terminal for this watch.
-        if status in {"ready", "error", "disabled", "stale"}:
+        # disabled: ops-l1 is gated until mark_ephemeral — do not exit on the first
+        # poll if rebuild and watch raced (common when both were fire-and-forget).
+        if status == "disabled":
+            if time.monotonic() - t0 < 45.0:
+                await asyncio.sleep(poll_s)
+                continue
+            return
+        if status in {"ready", "error", "stale"}:
             return
         await asyncio.sleep(poll_s)
     await _emit(
@@ -831,17 +838,14 @@ async def _start_turn(
     work: Work,
     model_override: dict[str, Any] | None,
 ) -> tuple[dict, dict]:
+    """Enqueue ops_eval Turn via unified pull StartSpec (+ secret escrow).
+
+    Under ``TURN_DISPATCH=pull`` (default) runtime claim binds override.
+    Under push, fall back to HTTP start_turn with the same override.
+    """
+    from app.settings import settings as api_settings
+
     client_request_id = uuid4()
-    turn, run, created = await turn_svc.create_turn(
-        session_id=session_id,
-        scenario_id=scenario_id,
-        message=message,
-        client_request_id=client_request_id,
-    )
-    await session_svc.touch_session(session_id)
-    if not created:
-        return turn, run
-    client = runtime_client_for_new_turn()
     override: dict[str, Any] | None = None
     mode = None
     if model_override and model_override.get("api_key"):
@@ -856,22 +860,38 @@ async def _start_turn(
         if isinstance(cw, int) and cw >= 4096:
             override["context_window_tokens"] = cw
         mode = "live"
-    await client.start_turn(
-        turn_id=turn["id"],
-        run_id=run["id"],
+    turn, run, created = await turn_svc.create_turn(
         session_id=session_id,
         scenario_id=scenario_id,
         message=message,
         client_request_id=client_request_id,
-        trace_id=uuid4(),
-        work_id=work.id,
-        work_root=work.work_root,
-        owner_user_id=SYSTEM_USER_ID,
-        visibility_seed=False,
+        ops_eval=True,
         model_mode=mode,
         model_override=override,
-        ops_eval=True,
     )
+    await session_svc.touch_session(session_id)
+    if not created:
+        return turn, run
+
+    dispatch = (api_settings.turn_dispatch or "pull").strip().lower()
+    if dispatch != "pull":
+        client = runtime_client_for_new_turn()
+        await client.start_turn(
+            turn_id=turn["id"],
+            run_id=run["id"],
+            session_id=session_id,
+            scenario_id=scenario_id,
+            message=message,
+            client_request_id=client_request_id,
+            trace_id=uuid4(),
+            work_id=work.id,
+            work_root=work.work_root,
+            owner_user_id=SYSTEM_USER_ID,
+            visibility_seed=False,
+            model_mode=mode,
+            model_override=override,
+            ops_eval=True,
+        )
     return turn, run
 
 
@@ -2640,6 +2660,11 @@ async def run_coding_l1(
                     "mirror_hit": False,
                     "bucket": "infra_error",
                 }
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=f"[L1] coding case start {iid}",
+                )
                 try:
                     work = await _create_l1_work(
                         str(run_root / iid.replace("/", "_")),
@@ -2697,7 +2722,10 @@ async def run_coding_l1(
                             await _emit(
                                 on_progress,
                                 "log",
-                                message=f"[L1] coding {done_count}/{len(ordered)} {iid}",
+                                message=(
+                                    f"[L1] coding {done_count}/{len(ordered)} {iid} "
+                                    "status=fail bucket=checkout_failed"
+                                ),
                             )
                         await _emit_fail(on_progress, iid, error=err)
                         return
@@ -2724,28 +2752,42 @@ async def run_coding_l1(
                                 "work_root": str(work.work_root),
                                 "owner_user_id": SYSTEM_USER_ID,
                             }
-                            asyncio.create_task(
-                                workspace_svc.ast_index_rebuild(
-                                    memory_only=True, tenant=tenant
-                                )
+                            # Await rebuild so runtime mark_ephemeral runs before
+                            # status watch — otherwise ops-l1 paths report
+                            # status=disabled and the watch exits as terminal.
+                            rebuild = await workspace_svc.ast_index_rebuild(
+                                memory_only=True, tenant=tenant
                             )
+                            accepted = True
+                            if isinstance(rebuild, dict):
+                                accepted = bool(rebuild.get("accepted", True))
                             await _emit(
                                 on_progress,
                                 "log",
                                 message=(
                                     f"[L1] workspace_index enqueue (ephemeral) {iid} "
-                                    f"work={str(work.id)[:8]}"
+                                    f"work={str(work.id)[:8]} accepted={int(accepted)}"
                                 ),
                             )
-                            asyncio.create_task(
-                                _watch_workspace_index_progress(
-                                    iid=iid,
-                                    tenant=tenant,
-                                    on_progress=on_progress,
-                                    should_cancel=should_cancel,
-                                ),
-                                name=f"ast-watch-{iid}",
-                            )
+                            if accepted:
+                                asyncio.create_task(
+                                    _watch_workspace_index_progress(
+                                        iid=iid,
+                                        tenant=tenant,
+                                        on_progress=on_progress,
+                                        should_cancel=should_cancel,
+                                    ),
+                                    name=f"ast-watch-{iid}",
+                                )
+                            else:
+                                await _emit(
+                                    on_progress,
+                                    "log",
+                                    message=(
+                                        f"[L1] workspace_index {iid} status=disabled "
+                                        "files=0/0 reason=rebuild_not_accepted"
+                                    ),
+                                )
                         except Exception:  # noqa: BLE001
                             logger.warning(
                                 "workspace_index enqueue failed for %s",
@@ -2927,7 +2969,10 @@ async def run_coding_l1(
                     await _emit(
                         on_progress,
                         "log",
-                        message=f"[L1] coding {done_count}/{len(ordered)} {iid}",
+                        message=(
+                            f"[L1] coding {done_count}/{len(ordered)} {iid} "
+                            f"status={case_status} patch_source={patch_source}"
+                        ),
                     )
                 if case_status == "fail" or err:
                     await _emit_fail(
@@ -3011,6 +3056,17 @@ async def run_coding_l1(
             logger.warning("failed to write csi_probes.json", exc_info=True)
         harness_result: dict[str, Any] = {}
         if run_harness:
+            pred_n = 0
+            try:
+                with pred_path.open(encoding="utf-8") as pf:
+                    pred_n = sum(1 for line in pf if line.strip())
+            except OSError:
+                pred_n = len(ordered)
+            await _emit(
+                on_progress,
+                "log",
+                message=f"[L1] coding harness start n={pred_n}",
+            )
             await _emit(on_progress, "log", message="[L1] coding harness resolve…")
             try:
                 harness = await asyncio.to_thread(run_swe_eval, predictions=pred_path)
@@ -3028,6 +3084,16 @@ async def run_coding_l1(
                     for x in (harness_result.get("resolved_ids") or [])
                     if x is not None
                 }
+                unresolved_ids = [
+                    str(x)
+                    for x in (harness_result.get("unresolved_ids") or [])
+                    if x is not None
+                ]
+                error_ids = [
+                    str(x)
+                    for x in (harness_result.get("error_ids") or [])
+                    if x is not None
+                ]
                 # Write harness outcome back onto per-instance cases for Ops.
                 has_resolve_list = isinstance(harness_result.get("resolved_ids"), list)
                 for case in session.cases:
@@ -3046,9 +3112,50 @@ async def run_coding_l1(
                     case["metrics"] = m
                 if has_resolve_list:
                     metrics["n_resolved"] = float(len(resolved_ids))
+                rate = metrics.get("resolve_rate")
+                rate_s = (
+                    f"{float(rate):.4f}"
+                    if isinstance(rate, (int, float))
+                    else "?"
+                )
+                denom = pred_n or max(
+                    len(resolved_ids) + len(unresolved_ids) + len(error_ids), 1
+                )
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=(
+                        f"[L1] coding harness done resolved={len(resolved_ids)}/{denom} "
+                        f"unresolved={len(unresolved_ids)} error={len(error_ids)} "
+                        f"rate={rate_s}"
+                    ),
+                )
+                for hid in sorted(resolved_ids):
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=f"[L1] coding harness case {hid} outcome=resolved",
+                    )
+                for hid in unresolved_ids:
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=f"[L1] coding harness case {hid} outcome=unresolved",
+                    )
+                for hid in error_ids:
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=f"[L1] coding harness case {hid} outcome=error",
+                    )
             except Exception as exc:  # noqa: BLE001
                 metrics["harness_error"] = str(exc)
                 metrics["note"] = f"harness failed: {exc}"
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=f"[L1] coding harness done status=failed error={_exc_text(exc)[:200]}",
+                )
                 await _emit_fail(on_progress, "suite=coding.harness", error=str(exc))
         else:
             metrics["note"] = (

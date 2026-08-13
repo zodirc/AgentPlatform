@@ -145,33 +145,42 @@ async def _start_ops_turn(
     model_override: dict[str, Any] | None,
     plan_phase: str | None = None,
 ) -> tuple[dict, dict]:
+    """Enqueue ops_eval Turn via StartSpec + escrow (pull) or HTTP (push)."""
+    from app.settings import settings as api_settings
+
     turn, run, created = await turn_svc.create_turn(
         session_id=session_id,
         scenario_id=scenario_id,
         message=message,
         client_request_id=client_request_id,
+        plan_phase=plan_phase,
+        ops_eval=True,
+        model_mode=model_mode,
+        model_override=model_override,
     )
     await session_svc.touch_session(session_id)
     if not created:
         return turn, run
 
-    client = runtime_client_for_new_turn()
-    await client.start_turn(
-        turn_id=turn["id"],
-        run_id=run["id"],
-        session_id=session_id,
-        scenario_id=scenario_id,
-        message=message,
-        client_request_id=client_request_id,
-        trace_id=uuid4(),
-        plan_phase=plan_phase,
-        work_id=work_id,
-        work_root=work_root,
-        owner_user_id=SYSTEM_USER_ID,
-        model_mode=model_mode,
-        model_override=model_override,
-        ops_eval=True,
-    )
+    dispatch = (api_settings.turn_dispatch or "pull").strip().lower()
+    if dispatch != "pull":
+        client = runtime_client_for_new_turn()
+        await client.start_turn(
+            turn_id=turn["id"],
+            run_id=run["id"],
+            session_id=session_id,
+            scenario_id=scenario_id,
+            message=message,
+            client_request_id=client_request_id,
+            trace_id=uuid4(),
+            plan_phase=plan_phase,
+            work_id=work_id,
+            work_root=work_root,
+            owner_user_id=SYSTEM_USER_ID,
+            model_mode=model_mode,
+            model_override=model_override,
+            ops_eval=True,
+        )
     return turn, run
 
 

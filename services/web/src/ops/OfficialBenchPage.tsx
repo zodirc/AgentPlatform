@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   OpsShell,
@@ -784,6 +785,180 @@ type AstIndexLive = {
   filesDone: number | null;
   filesTotal: number | null;
   ephemeral: boolean;
+};
+
+/** Per-instance coding infer + harness outcome for the live progress card. */
+type CodingCaseLive = {
+  iid: string;
+  /** Infer phase: pending | running | pass | fail */
+  status: "pending" | "running" | "pass" | "fail";
+  bucket?: string;
+  patchSource?: string;
+  /** Official harness outcome when available. */
+  harness?: "resolved" | "unresolved" | "error";
+};
+
+type CodingHarnessLive = {
+  phase: "idle" | "running" | "done" | "failed";
+  n: number | null;
+  resolved: number | null;
+  total: number | null;
+  unresolved: number | null;
+  error: number | null;
+  rate: string | null;
+  detail?: string;
+};
+
+type CodingLiveEvent =
+  | { kind: "plan"; n: number }
+  | { kind: "case"; case: CodingCaseLive }
+  | { kind: "harness"; harness: Partial<CodingHarnessLive> & { phase: CodingHarnessLive["phase"] } };
+
+/** Parse `[L1] coding …` / harness lines into the coding progress card. */
+function parseCodingLiveLine(line: string): CodingLiveEvent | null {
+  const plan = line.match(
+    /^\[L1\]\s+coding\s+plan\s+n=(\d+)\b/i,
+  );
+  if (plan) {
+    return { kind: "plan", n: Number(plan[1]) };
+  }
+  const start = line.match(/^\[L1\]\s+coding\s+case\s+start\s+(\S+)/i);
+  if (start) {
+    return {
+      kind: "case",
+      case: { iid: start[1], status: "running" },
+    };
+  }
+  const done = line.match(
+    /^\[L1\]\s+coding\s+(\d+)\s*\/\s*(\d+)\s+(\S+)(?:\s+status=(\S+))?(?:\s+bucket=(\S+))?(?:\s+patch_source=(\S+))?/i,
+  );
+  if (done) {
+    const statusRaw = (done[4] || "").toLowerCase();
+    const status: CodingCaseLive["status"] =
+      statusRaw === "pass" ? "pass" : statusRaw === "fail" ? "fail" : "pass";
+    return {
+      kind: "case",
+      case: {
+        iid: done[3],
+        status,
+        bucket: done[5] || undefined,
+        patchSource: done[6] || undefined,
+      },
+    };
+  }
+  const hStart = line.match(/^\[L1\]\s+coding\s+harness\s+start\s+n=(\d+)/i);
+  if (hStart) {
+    return {
+      kind: "harness",
+      harness: { phase: "running", n: Number(hStart[1]), total: Number(hStart[1]) },
+    };
+  }
+  if (/^\[L1\]\s+coding\s+harness\s+resolve/i.test(line)) {
+    return { kind: "harness", harness: { phase: "running" } };
+  }
+  const hFail = line.match(
+    /^\[L1\]\s+coding\s+harness\s+done\s+status=failed(?:\s+error=(.*))?/i,
+  );
+  if (hFail) {
+    return {
+      kind: "harness",
+      harness: {
+        phase: "failed",
+        detail: (hFail[1] || "").trim().slice(0, 160) || undefined,
+      },
+    };
+  }
+  const hDone = line.match(
+    /^\[L1\]\s+coding\s+harness\s+done\s+resolved=(\d+)\/(\d+)\s+unresolved=(\d+)\s+error=(\d+)(?:\s+rate=(\S+))?/i,
+  );
+  if (hDone) {
+    return {
+      kind: "harness",
+      harness: {
+        phase: "done",
+        resolved: Number(hDone[1]),
+        total: Number(hDone[2]),
+        n: Number(hDone[2]),
+        unresolved: Number(hDone[3]),
+        error: Number(hDone[4]),
+        rate: hDone[5] || null,
+      },
+    };
+  }
+  const hCase = line.match(
+    /^\[L1\]\s+coding\s+harness\s+case\s+(\S+)\s+outcome=(resolved|unresolved|error)/i,
+  );
+  if (hCase) {
+    return {
+      kind: "case",
+      case: {
+        iid: hCase[1],
+        status: "pass",
+        harness: hCase[2] as CodingCaseLive["harness"],
+      },
+    };
+  }
+  return null;
+}
+
+function applyCodingLiveEvent(
+  byIid: Record<string, CodingCaseLive>,
+  harness: CodingHarnessLive,
+  ev: CodingLiveEvent,
+): { byIid: Record<string, CodingCaseLive>; harness: CodingHarnessLive } {
+  if (ev.kind === "plan") {
+    return {
+      byIid,
+      harness: { ...harness, n: ev.n, total: harness.total ?? ev.n },
+    };
+  }
+  if (ev.kind === "harness") {
+    return {
+      byIid,
+      harness: {
+        ...harness,
+        ...ev.harness,
+        phase: ev.harness.phase,
+      },
+    };
+  }
+  const prev = byIid[ev.case.iid];
+  const next: CodingCaseLive = {
+    iid: ev.case.iid,
+    status: ev.case.status,
+    bucket: ev.case.bucket ?? prev?.bucket,
+    patchSource: ev.case.patchSource ?? prev?.patchSource,
+    harness: ev.case.harness ?? prev?.harness,
+  };
+  // Harness-only case lines keep prior infer status when present.
+  if (ev.case.harness && prev && !ev.case.bucket && !ev.case.patchSource) {
+    next.status = prev.status;
+  }
+  return {
+    byIid: { ...byIid, [ev.case.iid]: next },
+    harness,
+  };
+}
+
+function formatCodingCaseRows(
+  byIid: Record<string, CodingCaseLive>,
+): CodingCaseLive[] {
+  const order = ["running", "pending", "fail", "pass"];
+  return Object.values(byIid).sort((a, b) => {
+    const ia = order.indexOf(a.status);
+    const ib = order.indexOf(b.status);
+    return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.iid.localeCompare(b.iid);
+  });
+}
+
+const EMPTY_CODING_HARNESS: CodingHarnessLive = {
+  phase: "idle",
+  n: null,
+  resolved: null,
+  total: null,
+  unresolved: null,
+  error: null,
+  rate: null,
 };
 
 /** Parse `[L1] workspace_index …` progress lines into a per-instance card. */
@@ -2483,6 +2658,11 @@ export function OfficialBenchPage() {
   const [astIndexByIid, setAstIndexByIid] = useState<Record<string, AstIndexLive>>(
     {},
   );
+  const [codingLive, setCodingLive] = useState<{
+    byIid: Record<string, CodingCaseLive>;
+    harness: CodingHarnessLive;
+  }>({ byIid: {}, harness: EMPTY_CODING_HARNESS });
+  const [codingExpanded, setCodingExpanded] = useState(false);
   const detailProgress = useMemo(
     () => formatSuiteDetails(suiteDetails),
     [suiteDetails],
@@ -2491,6 +2671,46 @@ export function OfficialBenchPage() {
     () => formatAstIndexRows(astIndexByIid),
     [astIndexByIid],
   );
+  const codingRows = useMemo(
+    () => formatCodingCaseRows(codingLive.byIid),
+    [codingLive.byIid],
+  );
+  const [astIndexExpanded, setAstIndexExpanded] = useState(false);
+  const codingSummary = useMemo(() => {
+    let running = 0;
+    let pass = 0;
+    let fail = 0;
+    let resolved = 0;
+    for (const row of codingRows) {
+      if (row.status === "running" || row.status === "pending") running += 1;
+      else if (row.status === "pass") pass += 1;
+      else if (row.status === "fail") fail += 1;
+      if (row.harness === "resolved") resolved += 1;
+    }
+    return {
+      running,
+      pass,
+      fail,
+      resolved,
+      total: codingRows.length,
+      harness: codingLive.harness,
+    };
+  }, [codingRows, codingLive.harness]);
+  const astIndexSummary = useMemo(() => {
+    let building = 0;
+    let ready = 0;
+    let error = 0;
+    let disabled = 0;
+    for (const row of astIndexRows) {
+      const s = row.status;
+      if (s === "ready" || s === "stale") ready += 1;
+      else if (s === "error" || s === "watch_timeout" || s === "cancelled")
+        error += 1;
+      else if (s === "disabled") disabled += 1;
+      else building += 1;
+    }
+    return { building, ready, error, disabled, total: astIndexRows.length };
+  }, [astIndexRows]);
   const [tab, setTab] = useState<
     "overview" | "metrics" | "cases" | "artifacts" | "log"
   >("overview");
@@ -2868,6 +3088,8 @@ export function OfficialBenchPage() {
     // Rebuild per-suite detail from logs (parallel suites keep independent rows).
     const nextDetails: Record<string, DetailProgress> = {};
     const nextAst: Record<string, AstIndexLive> = {};
+    let nextCoding: Record<string, CodingCaseLive> = {};
+    let nextHarness: CodingHarnessLive = { ...EMPTY_CODING_HARNESS };
     for (const item of run.logs || []) {
       if (String(item.kind || "") !== "log" || !item.message) continue;
       const msg = String(item.message);
@@ -2881,9 +3103,16 @@ export function OfficialBenchPage() {
       }
       const ast = parseAstIndexLine(msg);
       if (ast) nextAst[ast.iid] = ast;
+      const codingEv = parseCodingLiveLine(msg);
+      if (codingEv) {
+        const applied = applyCodingLiveEvent(nextCoding, nextHarness, codingEv);
+        nextCoding = applied.byIid;
+        nextHarness = applied.harness;
+      }
     }
     setSuiteDetails(nextDetails);
     setAstIndexByIid(nextAst);
+    setCodingLive({ byIid: nextCoding, harness: nextHarness });
 
     if (opts?.logs === false) return;
     const lines: string[] = [];
@@ -3110,6 +3339,7 @@ export function OfficialBenchPage() {
         setLiveLogItems([]);
         setSuiteDetails({});
         setAstIndexByIid({});
+        setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
       }
       const es = new EventSourcePolyfill(
         `/api/v1/ops/official/runs/${runId}/stream`,
@@ -3165,6 +3395,17 @@ export function OfficialBenchPage() {
             const ast = parseAstIndexLine(msg);
             if (ast) {
               setAstIndexByIid((prev) => ({ ...prev, [ast.iid]: ast }));
+            }
+            const codingEv = parseCodingLiveLine(msg);
+            if (codingEv) {
+              setCodingLive((prev) => {
+                const applied = applyCodingLiveEvent(
+                  prev.byIid,
+                  prev.harness,
+                  codingEv,
+                );
+                return { byIid: applied.byIid, harness: applied.harness };
+              });
             }
             // Keep pull progress % visible in the log pane (eval [progress] stays out).
             if (!msg.startsWith("[progress]") || msg.startsWith("[progress] pull")) {
@@ -3271,6 +3512,7 @@ export function OfficialBenchPage() {
             setLiveLogItems([]);
             setSuiteDetails({});
             setAstIndexByIid({});
+            setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
             setProgress({ done: 0, total: 0 });
             setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
             // Leave 本轮 clean — finished id belongs under 历史.
@@ -3374,6 +3616,7 @@ export function OfficialBenchPage() {
     setLiveLogItems([]);
     setSuiteDetails({});
     setAstIndexByIid({});
+    setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
     if (!selectedId) {
       historyDeepLinkDoneRef.current = false;
       setPagePane((p) => (p === "history" ? "live" : p));
@@ -3559,6 +3802,7 @@ export function OfficialBenchPage() {
     setLiveLogItems([]);
     setSuiteDetails({});
     setAstIndexByIid({});
+    setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
     setLastFinishedLiveId(null);
     setError(null);
     setTab("log");
@@ -3646,6 +3890,7 @@ export function OfficialBenchPage() {
         setLiveLogItems([]);
         setSuiteDetails({});
         setAstIndexByIid({});
+        setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
         setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
         setProgress({ done: 0, total: 0 });
         navigate(opsOfficialPath(secret), { replace: true });
@@ -3661,6 +3906,7 @@ export function OfficialBenchPage() {
               setLiveLogItems([]);
               setSuiteDetails({});
               setAstIndexByIid({});
+              setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
               setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
               navigate(opsOfficialPath(secret), { replace: true });
               return;
@@ -3714,6 +3960,7 @@ export function OfficialBenchPage() {
         setProgress({ done: 0, total: 0 });
         setSuiteDetails({});
         setAstIndexByIid({});
+        setCodingLive({ byIid: {}, harness: { ...EMPTY_CODING_HARNESS } });
         if (selectedId) {
           navigate(opsOfficialPath(secret), { replace: true });
         }
@@ -4815,66 +5062,233 @@ export function OfficialBenchPage() {
                 style={{ width: `${barPct}%` }}
               />
             </div>
+            {codingRows.length > 0 ||
+            codingSummary.harness.phase !== "idle" ? (
+              <div
+                className="mt-2 rounded-md border border-border/80 bg-muted/20 px-2.5 py-2"
+                aria-label="编码题进度"
+              >
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={() => setCodingExpanded((v) => !v)}
+                  aria-expanded={codingExpanded}
+                  title={
+                    codingExpanded ? "收起按题编码进度" : "展开按题编码进度"
+                  }
+                >
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      编码（按题 · infer → harness）
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
+                      {codingSummary.total > 0
+                        ? `${codingSummary.total} 题`
+                        : "—"}
+                      {codingSummary.running > 0
+                        ? ` · 进行中 ${codingSummary.running}`
+                        : ""}
+                      {codingSummary.pass > 0
+                        ? ` · patch ${codingSummary.pass}`
+                        : ""}
+                      {codingSummary.fail > 0
+                        ? ` · 失败 ${codingSummary.fail}`
+                        : ""}
+                      {codingSummary.harness.phase === "running"
+                        ? " · harness 评测中…"
+                        : ""}
+                      {codingSummary.harness.phase === "done" &&
+                      codingSummary.harness.resolved != null &&
+                      codingSummary.harness.total != null
+                        ? ` · resolve ${codingSummary.harness.resolved}/${codingSummary.harness.total}`
+                        : ""}
+                      {codingSummary.harness.phase === "failed"
+                        ? " · harness 失败"
+                        : ""}
+                    </div>
+                  </div>
+                  {codingExpanded ? (
+                    <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </button>
+                {codingExpanded ? (
+                  <div className="mt-2 space-y-2 border-t border-border/60 pt-2">
+                    {codingSummary.harness.phase !== "idle" ? (
+                      <div className="text-[11px]">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-muted-foreground">
+                            官方 harness
+                          </span>
+                          <span className="tabular-nums text-muted-foreground">
+                            {codingSummary.harness.phase === "running"
+                              ? codingSummary.harness.n != null
+                                ? `评测中 · n=${codingSummary.harness.n}`
+                                : "评测中…"
+                              : codingSummary.harness.phase === "done"
+                                ? `resolved ${codingSummary.harness.resolved ?? "?"}/${codingSummary.harness.total ?? "?"}${
+                                    codingSummary.harness.rate
+                                      ? ` · rate=${codingSummary.harness.rate}`
+                                      : ""
+                                  }`
+                                : codingSummary.harness.detail
+                                  ? `失败 · ${codingSummary.harness.detail}`
+                                  : "失败"}
+                          </span>
+                        </div>
+                        {codingSummary.harness.phase === "running" ? (
+                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                            <div
+                              className="h-full rounded-full bg-foreground/40"
+                              style={{
+                                width: "36%",
+                                animation: "pulse 1.4s ease-in-out infinite",
+                              }}
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    <ul className="space-y-1.5">
+                      {codingRows.map((row) => {
+                        const running = row.status === "running";
+                        const label =
+                          row.harness != null
+                            ? `${row.status} · harness=${row.harness}`
+                            : row.bucket
+                              ? `${row.status} · ${row.bucket}`
+                              : row.patchSource && row.patchSource !== "none"
+                                ? `${row.status} · ${row.patchSource}`
+                                : row.status;
+                        return (
+                          <li key={row.iid} className="text-[11px]">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate font-mono text-foreground/90">
+                                {shortCaseToken(row.iid)}
+                              </span>
+                              <span className="shrink-0 tabular-nums text-muted-foreground">
+                                {label}
+                              </span>
+                            </div>
+                            {running ? (
+                              <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className="h-full rounded-full bg-foreground/40"
+                                  style={{
+                                    width: "28%",
+                                    animation:
+                                      "pulse 1.4s ease-in-out infinite",
+                                  }}
+                                />
+                              </div>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {astIndexRows.length > 0 ? (
               <div
                 className="mt-2 rounded-md border border-border/80 bg-muted/20 px-2.5 py-2"
                 aria-label="编码题 AST 索引"
               >
-                <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  AST 索引（按题 · ephemeral）
-                </div>
-                <ul className="space-y-1.5">
-                  {astIndexRows.map((row) => {
-                    const pct =
-                      row.filesTotal != null &&
-                      row.filesTotal > 0 &&
-                      row.filesDone != null
-                        ? Math.max(
-                            0,
-                            Math.min(
-                              100,
-                              Math.round((row.filesDone / row.filesTotal) * 100),
-                            ),
-                          )
-                        : null;
-                    const building =
-                      row.status === "building" ||
-                      row.status === "cold" ||
-                      row.status === "queued" ||
-                      row.status === "stale";
-                    return (
-                      <li key={row.iid} className="text-[11px]">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="truncate font-mono text-foreground/90">
-                            {shortCaseToken(row.iid)}
-                          </span>
-                          <span className="shrink-0 tabular-nums text-muted-foreground">
-                            {row.status}
-                            {row.filesDone != null && row.filesTotal != null
-                              ? ` · ${row.filesDone}/${row.filesTotal}`
-                              : ""}
-                          </span>
-                        </div>
-                        {building ? (
-                          <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
-                            <div
-                              className="h-full rounded-full bg-foreground/40 transition-[width] duration-500"
-                              style={{
-                                width: pct != null ? `${pct}%` : "28%",
-                                ...(pct == null
-                                  ? {
-                                      animation:
-                                        "pulse 1.4s ease-in-out infinite",
-                                    }
-                                  : null),
-                              }}
-                            />
+                <button
+                  type="button"
+                  className="flex w-full items-center justify-between gap-2 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  onClick={() => setAstIndexExpanded((v) => !v)}
+                  aria-expanded={astIndexExpanded}
+                  title={
+                    astIndexExpanded
+                      ? "收起按题 AST 索引"
+                      : "展开按题 AST 索引"
+                  }
+                >
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      AST 索引（按题 · ephemeral）
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px] tabular-nums text-muted-foreground">
+                      {astIndexSummary.total} 题
+                      {astIndexSummary.building > 0
+                        ? ` · 进行中 ${astIndexSummary.building}`
+                        : ""}
+                      {astIndexSummary.ready > 0
+                        ? ` · ready ${astIndexSummary.ready}`
+                        : ""}
+                      {astIndexSummary.error > 0
+                        ? ` · 失败 ${astIndexSummary.error}`
+                        : ""}
+                      {astIndexSummary.disabled > 0
+                        ? ` · disabled ${astIndexSummary.disabled}`
+                        : ""}
+                    </div>
+                  </div>
+                  {astIndexExpanded ? (
+                    <ChevronUp className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                </button>
+                {astIndexExpanded ? (
+                  <ul className="mt-2 space-y-1.5 border-t border-border/60 pt-2">
+                    {astIndexRows.map((row) => {
+                      const pct =
+                        row.filesTotal != null &&
+                        row.filesTotal > 0 &&
+                        row.filesDone != null
+                          ? Math.max(
+                              0,
+                              Math.min(
+                                100,
+                                Math.round(
+                                  (row.filesDone / row.filesTotal) * 100,
+                                ),
+                              ),
+                            )
+                          : null;
+                      const building =
+                        row.status === "building" ||
+                        row.status === "cold" ||
+                        row.status === "queued" ||
+                        row.status === "stale";
+                      return (
+                        <li key={row.iid} className="text-[11px]">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate font-mono text-foreground/90">
+                              {shortCaseToken(row.iid)}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {row.status}
+                              {row.filesDone != null && row.filesTotal != null
+                                ? ` · ${row.filesDone}/${row.filesTotal}`
+                                : ""}
+                            </span>
                           </div>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
+                          {building ? (
+                            <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted">
+                              <div
+                                className="h-full rounded-full bg-foreground/40 transition-[width] duration-500"
+                                style={{
+                                  width: pct != null ? `${pct}%` : "28%",
+                                  ...(pct == null
+                                    ? {
+                                        animation:
+                                          "pulse 1.4s ease-in-out infinite",
+                                      }
+                                    : null),
+                                }}
+                              />
+                            </div>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
               </div>
             ) : null}
             <div

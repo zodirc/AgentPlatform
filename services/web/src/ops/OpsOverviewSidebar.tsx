@@ -93,6 +93,24 @@ type Overview = {
       mem_usage_raw?: string | null;
     }>;
   };
+  capacity?: {
+    turn_dispatch?: string;
+    dispatch_queue_depth?: number;
+    dispatch_wait_seconds?: number;
+    unclaimed_accepted?: number | null;
+    runner_lease_misses_total?: number;
+    dispatch_start_timeout_total?: number;
+    events_retention_deleted_total?: number;
+    runners?: Array<{
+      runner_id: string;
+      kind: string;
+      last_heartbeat_at?: string | null;
+      inflight?: number;
+      capacity?: number;
+    }>;
+    hints?: Record<string, string>;
+    error?: string;
+  };
 };
 
 type BrowserBenchModel = {
@@ -116,7 +134,17 @@ const COPY = {
     panelAria: "评测台配置概览",
     httpError: (n: number) => `概览 HTTP ${n}`,
     secRuntime: "1. 运行时",
+    secCapacity: "1b. 容量 / 分发",
     secBench: "2. 评测台",
+    dispatchMode: "分发模式",
+    queueDepth: "排队深度",
+    waitSeconds: "最长等待(s)",
+    unclaimed: "未领取",
+    leaseMisses: "租约回收",
+    startTimeouts: "领取超时",
+    retentionDeleted: "事件保留删除",
+    runners: "Runners",
+    scaleHint: "扩容提示",
     secHost: "3. 主机",
     secContainers: "4. 容器",
     container: "容器",
@@ -187,7 +215,17 @@ const COPY = {
     panelAria: "Ops overview",
     httpError: (n: number) => `Overview HTTP ${n}`,
     secRuntime: "1. Runtime",
+    secCapacity: "1b. Capacity / Dispatch",
     secBench: "2. Bench",
+    dispatchMode: "Dispatch",
+    queueDepth: "Queue depth",
+    waitSeconds: "Oldest wait(s)",
+    unclaimed: "Unclaimed",
+    leaseMisses: "Lease reclaim",
+    startTimeouts: "Start timeouts",
+    retentionDeleted: "Events retained deleted",
+    runners: "Runners",
+    scaleHint: "Scale hint",
     secHost: "3. Host",
     secContainers: "4. Containers",
     container: "Container",
@@ -373,6 +411,7 @@ export function OpsOverviewSidebar({
 
   const agent = data?.agent;
   const bench = data?.bench;
+  const capacity = data?.capacity;
   const host = data?.host;
   const containers = data?.containers;
   const virtLabel =
@@ -508,6 +547,85 @@ export function OpsOverviewSidebar({
             {agent?.source === "unavailable" ? (
               <p className="mt-2 text-[10px] text-muted-foreground">
                 {t.inspectUnavailable}
+              </p>
+            ) : null}
+          </section>
+
+          <section className="rounded-lg border border-border bg-card/40 p-2.5">
+            <h3 className="mb-2 text-xs font-semibold tracking-tight">
+              {t.secCapacity}
+            </h3>
+            <dl className="space-y-1.5">
+              <Row label={t.dispatchMode} value={capacity?.turn_dispatch ?? "—"} />
+              <Row
+                label={t.queueDepth}
+                value={
+                  capacity?.dispatch_queue_depth != null
+                    ? String(capacity.dispatch_queue_depth)
+                    : "—"
+                }
+              />
+              <Row
+                label={t.waitSeconds}
+                value={
+                  capacity?.dispatch_wait_seconds != null
+                    ? Number(capacity.dispatch_wait_seconds).toFixed(1)
+                    : "—"
+                }
+              />
+              <Row
+                label={t.unclaimed}
+                value={
+                  capacity?.unclaimed_accepted != null
+                    ? String(capacity.unclaimed_accepted)
+                    : "—"
+                }
+              />
+              <Row
+                label={t.leaseMisses}
+                value={
+                  capacity?.runner_lease_misses_total != null
+                    ? String(capacity.runner_lease_misses_total)
+                    : "—"
+                }
+              />
+              <Row
+                label={t.startTimeouts}
+                value={
+                  capacity?.dispatch_start_timeout_total != null
+                    ? String(capacity.dispatch_start_timeout_total)
+                    : "—"
+                }
+              />
+              <Row
+                label={t.retentionDeleted}
+                value={
+                  capacity?.events_retention_deleted_total != null
+                    ? String(capacity.events_retention_deleted_total)
+                    : "—"
+                }
+              />
+              <Row
+                label={t.runners}
+                value={
+                  (capacity?.runners || [])
+                    .map(
+                      (r) =>
+                        `${r.runner_id}(${r.kind}${
+                          r.inflight != null ? `·${r.inflight}` : ""
+                        })`,
+                    )
+                    .join(" · ") || "—"
+                }
+              />
+              <Row
+                label={t.scaleHint}
+                value={capacity?.hints?.scale_runtime_when ?? "—"}
+              />
+            </dl>
+            {capacity?.error ? (
+              <p className="mt-1 text-[10px] text-destructive">
+                {opsDisplayText(capacity.error)}
               </p>
             ) : null}
           </section>

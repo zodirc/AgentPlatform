@@ -624,20 +624,91 @@ def _containers_block(*, include_stats: bool = False) -> dict[str, Any]:
         }
 
 
+async def _capacity_block() -> dict[str, Any]:
+    """Pull-dispatch capacity signals (O11 maturity)."""
+    from app.observability.metrics import metrics
+
+    out: dict[str, Any] = {
+        "turn_dispatch": (settings.turn_dispatch or "pull").strip().lower(),
+        "dispatch_queue_depth": metrics.get_gauge("dispatch_queue_depth"),
+        "dispatch_wait_seconds": metrics.get_gauge("dispatch_wait_seconds"),
+        "runner_lease_misses_total": metrics.get_counter("runner_lease_misses_total"),
+        "dispatch_start_timeout_total": metrics.get_counter(
+            "dispatch_start_timeout_total"
+        ),
+        "events_retention_deleted_total": metrics.get_counter(
+            "events_retention_deleted_total"
+        ),
+        "runners": [],
+        "unclaimed_accepted": None,
+        "hints": {
+            "scale_runtime_when": "dispatch_wait_seconds p95 high or queue_depth near DISPATCH_QUEUE_MAX",
+            "rollback": "TURN_DISPATCH=push",
+            "runbook": "docs/ops/pull-dispatch-runbook.md",
+        },
+    }
+    try:
+        from app.db.pool import get_pool
+
+        pool = await get_pool()
+        out["unclaimed_accepted"] = int(
+            await pool.fetchval(
+                """
+                SELECT COUNT(*)::int
+                FROM runs r
+                JOIN turns t ON t.id = r.turn_id
+                WHERE r.status = 'accepted'
+                  AND r.pull_eligible
+                  AND t.status = 'pending'
+                """
+            )
+            or 0
+        )
+        rows = await pool.fetch(
+            """
+            SELECT runner_id, kind, node, last_heartbeat_at, capacity, inflight
+            FROM runners
+            ORDER BY kind, runner_id
+            LIMIT 32
+            """
+        )
+        out["runners"] = [
+            {
+                "runner_id": r["runner_id"],
+                "kind": r["kind"],
+                "node": r["node"],
+                "last_heartbeat_at": (
+                    r["last_heartbeat_at"].isoformat()
+                    if r["last_heartbeat_at"] is not None
+                    else None
+                ),
+                "capacity": r["capacity"],
+                "inflight": r["inflight"],
+            }
+            for r in rows
+        ]
+    except Exception as exc:
+        logger.debug("capacity block db failed: %s", exc)
+        out["error"] = str(exc)
+    return out
+
+
 async def build_overview(*, include_stats: bool = False) -> dict[str, Any]:
     import asyncio
 
-    agent, bench, host, containers = await asyncio.gather(
+    agent, bench, host, containers, capacity = await asyncio.gather(
         _agent_block(),
         _bench_block(),
         asyncio.to_thread(_host_block),
         asyncio.to_thread(_containers_block, include_stats=include_stats),
+        _capacity_block(),
     )
     return {
         "agent": agent,
         "bench": bench,
         "host": host,
         "containers": containers,
+        "capacity": capacity,
         "ops": {
             "ops_enabled": bool((settings.ops_test_secret or "").strip()),
             "app_env": settings.app_env,
