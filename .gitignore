@@ -25,6 +25,7 @@ htmlcov/
 # node / web
 services/web/node_modules/
 services/web/.pnpm-store/
+.pnpm-store/
 services/web/dist/
 *.tsbuildinfo
 

@@ -317,6 +317,13 @@
     line-height: 1.5;
   }
 
+  /* Workspace file viewer: size comes from CM theme / parent; don't pin 12px. */
+  .workspace-file-cm .cm-editor .cm-content {
+    font-size: inherit;
+    line-height: inherit;
+    font-family: inherit;
+  }
+
   .cm-editor.cm-focused {
     outline: none;
   }

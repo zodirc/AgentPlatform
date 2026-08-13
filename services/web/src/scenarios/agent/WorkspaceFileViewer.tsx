@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  redo,
+  undo,
+} from "@codemirror/commands";
 import { searchKeymap } from "@codemirror/search";
-import { EditorState, Prec } from "@codemirror/state";
+import { Compartment, EditorState, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import {
   ChevronDown,
@@ -109,6 +115,41 @@ function viewerTypography(fontSize: number) {
   } as const;
 }
 
+/** Explicit px theme so zoom beats global `.cm-content { font-size: 12px }` and triggers CM remeasure. */
+function viewerFontTheme(fontSize: number) {
+  const typo = viewerTypography(fontSize);
+  return EditorView.theme({
+    "&": {
+      height: "100%",
+      fontSize: typo.fontSize,
+      backgroundColor: "transparent",
+    },
+    "&.cm-focused": { outline: "none" },
+    ".cm-scroller": {
+      fontFamily: typo.fontFamily,
+      lineHeight: String(typo.lineHeight),
+      overflow: "auto",
+    },
+    ".cm-content": {
+      fontFamily: typo.fontFamily,
+      fontSize: typo.fontSize,
+      lineHeight: String(typo.lineHeight),
+      padding: "1.25rem",
+      caretColor: "hsl(var(--foreground))",
+      color: "hsl(var(--foreground))",
+    },
+    ".cm-line": {
+      padding: "0",
+    },
+    ".cm-cursor": {
+      borderLeftColor: "hsl(var(--foreground))",
+    },
+    ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+      backgroundColor: "hsl(var(--primary) / 0.28) !important",
+    },
+  });
+}
+
 export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
   const queryClient = useQueryClient();
   const fileName = path?.split("/").pop() ?? "";
@@ -116,8 +157,10 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const activeMatchRef = useRef<HTMLElement | null>(null);
-  const editorViewRef = useRef<{ focus: () => void } | null>(null);
+  const editorViewRef = useRef<EditorView | null>(null);
   const saveFnRef = useRef<() => void>(() => {});
+  const fontCompartmentRef = useRef(new Compartment());
+  const fontSizeRef = useRef(FONT_DEFAULT);
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -177,6 +220,45 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
   }, [editing, saveMutation, draft, content]);
 
   saveFnRef.current = runSave;
+  fontSizeRef.current = fontSize;
+
+  const editorExtensions = useMemo(
+    () => [
+      history({ minDepth: 100 }),
+      EditorView.lineWrapping,
+      fontCompartmentRef.current.of(viewerFontTheme(FONT_DEFAULT)),
+      Prec.highest(
+        keymap.of([
+          { key: "Mod-z", run: undo, preventDefault: true },
+          { key: "Mod-y", run: redo, preventDefault: true },
+          {
+            key: "Mod-s",
+            run: () => {
+              saveFnRef.current();
+              return true;
+            },
+            preventDefault: true,
+          },
+        ]),
+      ),
+      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
+      EditorState.allowMultipleSelections.of(true),
+    ],
+    [],
+  );
+
+  const applyEditorFontSize = useCallback((size: number) => {
+    const view = editorViewRef.current;
+    if (!view?.dom?.isConnected) return;
+    view.dispatch({
+      effects: fontCompartmentRef.current.reconfigure(viewerFontTheme(size)),
+    });
+    view.requestMeasure();
+  }, []);
+
+  useEffect(() => {
+    applyEditorFontSize(fontSize);
+  }, [fontSize, applyEditorFontSize]);
 
   const zoomIn = useCallback(() => {
     setFontSize((s) => Math.min(FONT_MAX, s + FONT_STEP));
@@ -262,75 +344,10 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
     setJustSaved(false);
   }, [content, dirty]);
 
-  const editorExtensions = useMemo(() => {
-    const typo = viewerTypography(fontSize);
-    return [
-      history({ minDepth: 100 }),
-      EditorView.lineWrapping,
-      EditorView.theme({
-        "&": {
-          height: "100%",
-          fontSize: typo.fontSize,
-          backgroundColor: "transparent",
-        },
-        "&.cm-focused": { outline: "none" },
-        ".cm-scroller": {
-          fontFamily: typo.fontFamily,
-          lineHeight: String(typo.lineHeight),
-          overflow: "auto",
-        },
-        ".cm-content": {
-          fontFamily: typo.fontFamily,
-          fontSize: typo.fontSize,
-          lineHeight: String(typo.lineHeight),
-          padding: "1.25rem",
-          caretColor: "hsl(var(--foreground))",
-          color: "hsl(var(--foreground))",
-        },
-        ".cm-line": {
-          padding: "0",
-        },
-        ".cm-cursor": {
-          borderLeftColor: "hsl(var(--foreground))",
-        },
-        ".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
-          backgroundColor: "hsl(var(--primary) / 0.28) !important",
-        },
-      }),
-      keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
-      Prec.highest(
-        keymap.of([
-          {
-            key: "Mod-s",
-            run: () => {
-              saveFnRef.current();
-              return true;
-            },
-            preventDefault: true,
-          },
-        ]),
-      ),
-      EditorState.allowMultipleSelections.of(true),
-    ];
-  }, [fontSize]);
-
   useEffect(() => {
     if (!path) return;
     const onKey = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
-      if (editing) {
-        if (mod && e.key.toLowerCase() === "s") {
-          e.preventDefault();
-          runSave();
-          return;
-        }
-        // Let CodeMirror own Mod-z / Mod-Shift-z / Mod-y / typing.
-        if (e.key === "Escape") {
-          e.preventDefault();
-          cancelEdit();
-        }
-        return;
-      }
       if (mod && (e.key === "=" || e.key === "+")) {
         e.preventDefault();
         zoomIn();
@@ -344,6 +361,18 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
       if (mod && e.key === "0") {
         e.preventDefault();
         zoomReset();
+        return;
+      }
+      if (editing) {
+        if (mod && e.key.toLowerCase() === "s") {
+          e.preventDefault();
+          runSave();
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          cancelEdit();
+        }
         return;
       }
       if (mod && e.key.toLowerCase() === "f") {
@@ -686,33 +715,30 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
                     </p>
                   }
                 >
-                  <CodeMirror
-                    value={editing ? draft : content}
-                    height="100%"
-                    minHeight="480px"
-                    theme="none"
-                    editable={editing}
-                    readOnly={!editing}
-                    basicSetup={false}
-                    extensions={editorExtensions}
-                    onChange={(value) => {
-                      if (editing) setDraft(value);
-                    }}
-                    onCreateEditor={(view) => {
-                      editorViewRef.current = view;
-                      if (editing) {
-                        requestAnimationFrame(() => view.focus());
-                      }
-                    }}
-                    className="h-full min-h-[480px] bg-transparent [&_.cm-editor]:min-h-[480px] [&_.cm-editor]:bg-transparent [&_.cm-gutters]:hidden"
-                  />
+                  <div className="h-full min-h-[480px]" style={typo}>
+                    <CodeMirror
+                      value={editing ? draft : content}
+                      height="100%"
+                      minHeight="480px"
+                      theme="none"
+                      editable={editing}
+                      readOnly={!editing}
+                      basicSetup={false}
+                      extensions={editorExtensions}
+                      onChange={(value) => {
+                        if (editing) setDraft(value);
+                      }}
+                      onCreateEditor={(view) => {
+                        editorViewRef.current = view;
+                        applyEditorFontSize(fontSizeRef.current);
+                        if (editing) {
+                          requestAnimationFrame(() => view.focus());
+                        }
+                      }}
+                      className="workspace-file-cm h-full min-h-[480px] bg-transparent [&_.cm-editor]:min-h-[480px] [&_.cm-editor]:bg-transparent [&_.cm-gutters]:hidden"
+                    />
+                  </div>
                 </Suspense>
-                {editing ? (
-                  <p className="border-t border-border/60 px-4 py-1.5 text-[10px] text-muted-foreground">
-                    Ctrl/⌘S 保存 · Ctrl/⌘Z 撤销 · Ctrl/⌘⇧Z 重做 · Esc
-                    退出编辑
-                  </p>
-                ) : null}
               </>
             )}
           </div>
