@@ -378,6 +378,11 @@ def test_approve_tool_call_success(client: TestClient) -> None:
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
         patch("app.routers.turns.runtime_client_for_turn", new_callable=AsyncMock, return_value=runtime),
+        patch.object(
+            __import__("app.settings", fromlist=["settings"]).settings,
+            "run_commands_channel_enabled",
+            False,
+        ),
     ):
         response = client.post(
             f"/api/v1/turns/{TURN_ID}/approve-tool-call",
@@ -399,6 +404,11 @@ def test_approve_tool_call_replays_duplicate_client_request(
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
         patch("app.routers.turns.runtime_client_for_turn", new_callable=AsyncMock, return_value=runtime),
+        patch.object(
+            __import__("app.settings", fromlist=["settings"]).settings,
+            "run_commands_channel_enabled",
+            False,
+        ),
     ):
         first = client.post(
             f"/api/v1/turns/{TURN_ID}/approve-tool-call",
@@ -425,6 +435,11 @@ def test_cancel_turn_success(client: TestClient) -> None:
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
         patch("app.routers.turns.get_pool", new_callable=AsyncMock, return_value=pool),
         patch("app.routers.turns.runtime_client_for_turn", new_callable=AsyncMock, return_value=runtime),
+        patch.object(
+            __import__("app.settings", fromlist=["settings"]).settings,
+            "run_commands_channel_enabled",
+            False,
+        ),
     ):
         response = client.post(f"/api/v1/turns/{TURN_ID}/cancel", json={})
     assert response.status_code == 202
@@ -455,6 +470,11 @@ def test_deny_tool_call_success(client: TestClient) -> None:
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
         patch("app.routers.turns.runtime_client_for_turn", new_callable=AsyncMock, return_value=runtime),
+        patch.object(
+            __import__("app.settings", fromlist=["settings"]).settings,
+            "run_commands_channel_enabled",
+            False,
+        ),
     ):
         response = client.post(
             f"/api/v1/turns/{TURN_ID}/deny-tool-call",
@@ -512,6 +532,11 @@ def test_accept_patch_allows_running_turn(client: TestClient) -> None:
         patch("app.services.resource.turns.get_run_for_turn", new_callable=AsyncMock, return_value=run),
         patch("app.services.resource.turns.get_turn", new_callable=AsyncMock, return_value=turn),
         patch("app.routers.turns.runtime_client_for_turn", new_callable=AsyncMock, return_value=runtime),
+        patch.object(
+            __import__("app.settings", fromlist=["settings"]).settings,
+            "run_commands_channel_enabled",
+            False,
+        ),
     ):
         response = client.post(
             f"/api/v1/turns/{TURN_ID}/patch/accept",
