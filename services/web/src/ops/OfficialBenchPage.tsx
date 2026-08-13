@@ -17,6 +17,8 @@ import {
   statusClass,
 } from "./OpsShell";
 import { opsApiErrorText, opsDisplayText } from "./opsDisplayText";
+import { harnessProgressView } from "./opsHarnessProgress";
+import { isOpsErrorLogLine } from "./opsLogStyle";
 import { OpsTextViewerModal } from "./OpsTextViewerModal";
 
 const TURN_ID_IN_LOG = /turn_id=([0-9a-fA-F-]{36})/;
@@ -618,24 +620,6 @@ function formatTime(iso?: string | null): string {
   } catch {
     return iso;
   }
-}
-
-/** Heuristic: highlight error-looking Ops run log lines (no backend level field). */
-function isOpsErrorLogLine(text: string | null | undefined): boolean {
-  const s = String(text || "").trim();
-  if (!s) return false;
-  if (/^error\b/i.test(s)) return true;
-  if (/^\[L1\]\s+fail\b/i.test(s)) return true;
-  if (/\bphase=error\b/i.test(s)) return true;
-  if (/\berror[=:]/i.test(s)) return true;
-  if (/\bcheckout failed\b/i.test(s)) return true;
-  if (/\b(tool|turn)\.failed\b/i.test(s)) return true;
-  if (/\btraceback\b/i.test(s)) return true;
-  if (/\bexception\b/i.test(s)) return true;
-  // Trailing / mid-line failure markers from ops / L1 emitters.
-  if (/\bfailed:\s/i.test(s)) return true;
-  if (/\bfailed\b/i.test(s) && /\b(error|exc|exception)\b/i.test(s)) return true;
-  return false;
 }
 
 /** Detail「日志」Tab: errors + milestones only (full stream stays in the live pane). */
@@ -2762,6 +2746,7 @@ export function OfficialBenchPage() {
       resolved,
       total: codingRows.length,
       harness: codingLive.harness,
+      harnessView: harnessProgressView(codingLive.harness),
     };
   }, [codingRows, codingLive.harness]);
   const astIndexSummary = useMemo(() => {
@@ -5153,16 +5138,16 @@ export function OfficialBenchPage() {
                                   (stageKey === "start" || stageKey === "resolve"
                                     ? "启动中"
                                     : stageKey || "评测中");
+                                const view = codingSummary.harnessView;
                                 const done =
-                                  codingSummary.harness.done != null &&
-                                  codingSummary.harness.total != null
-                                    ? `${codingSummary.harness.done}/${codingSummary.harness.total}`
+                                  view.done != null && view.total != null
+                                    ? `${view.done}/${view.total}`
                                     : codingSummary.harness.n != null
                                       ? `n=${codingSummary.harness.n}`
                                       : null;
                                 const counts =
-                                  codingSummary.harness.resolved != null
-                                    ? `✓${codingSummary.harness.resolved} · ✖${codingSummary.harness.unresolved ?? 0} · err ${codingSummary.harness.error ?? 0}`
+                                  view.resolved != null
+                                    ? `✓${view.resolved} · ✖${view.unresolved ?? 0} · err ${view.error ?? 0}`
                                     : null;
                                 return [stageLabel, done, counts]
                                   .filter(Boolean)
@@ -5180,9 +5165,10 @@ export function OfficialBenchPage() {
                         </div>
                       </div>
                       <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
-                        {codingSummary.harness.phase === "running" &&
-                        codingSummary.harness.pct != null
-                          ? `${codingSummary.harness.pct}%`
+                        {codingSummary.harness.phase === "running"
+                          ? codingSummary.harnessView.pct != null
+                            ? `${codingSummary.harnessView.pct}%`
+                            : "…"
                           : codingSummary.harness.phase === "done"
                             ? "100%"
                             : codingSummary.harness.phase === "failed"
@@ -5204,12 +5190,12 @@ export function OfficialBenchPage() {
                               : codingSummary.harness.phase === "failed"
                                 ? Math.max(codingSummary.harness.pct ?? 8, 8)
                                 : Math.max(
-                                    codingSummary.harness.pct ??
-                                      (codingSummary.harness.done != null &&
-                                      codingSummary.harness.total
+                                    codingSummary.harnessView.pct ??
+                                      (codingSummary.harnessView.done != null &&
+                                      codingSummary.harnessView.total
                                         ? Math.round(
-                                            (codingSummary.harness.done /
-                                              codingSummary.harness.total) *
+                                            (codingSummary.harnessView.done /
+                                              codingSummary.harnessView.total) *
                                               100,
                                           )
                                         : 8),
