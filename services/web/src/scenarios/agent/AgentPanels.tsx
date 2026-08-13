@@ -1,6 +1,7 @@
 import { RetrievalView } from "./RetrievalView";
 import { ArtifactView } from "./ArtifactView";
 import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
+import { turnFailureUserMessage } from "../../shared/api/httpErrors";
 import { artifactToWritePreview } from "../../shared/workbench/filePreview";
 import type { WorkbenchState } from "../../shared/workbench/types";
 
@@ -16,16 +17,20 @@ export function AgentPanels({ wb }: Props) {
   const fileWrites = (view?.artifacts ?? [])
     .filter((a) => a.type === "file_write" && typeof a.path === "string")
     .filter((a) => String(a.status ?? "") === "applied");
+  const failureText = errorArtifact
+    ? turnFailureUserMessage(
+        errorArtifact.termination_reason,
+        errorArtifact.message,
+      )
+    : null;
 
   return (
     <>
-      {errorArtifact?.message ? (
+      {failureText ? (
         <section className="rounded-xl border border-destructive/40 bg-destructive/10 p-4">
           <h2 className="mb-1 text-sm font-medium text-destructive">失败原因</h2>
-          <p className="text-sm text-destructive">
-            {String(errorArtifact.message)}
-          </p>
-          {errorArtifact.termination_reason ? (
+          <p className="text-sm text-destructive">{failureText}</p>
+          {errorArtifact?.termination_reason ? (
             <p className="mt-1 text-xs text-destructive/80">
               reason={String(errorArtifact.termination_reason)}
             </p>

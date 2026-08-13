@@ -1,4 +1,5 @@
 import type { components } from "./schema";
+import { throwIfNotOk } from "./httpErrors";
 
 export const API_BASE = "/api/v1";
 
@@ -331,7 +332,9 @@ export async function startTurn(
     headers: apiAuthHeaders({ "Content-Type": "application/json" }),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`startTurn failed: ${res.status}`);
+  if (!res.ok) {
+    await throwIfNotOk(res, "startTurn");
+  }
   return res.json() as Promise<TurnResponse>;
 }
 

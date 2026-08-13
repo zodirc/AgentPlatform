@@ -17,6 +17,10 @@ import {
   type TurnSummary,
   type TurnView,
 } from "../api/client";
+import {
+  formatSendFailure,
+  turnFailureUserMessage,
+} from "../api/httpErrors";
 import { TurnStreamClient } from "../realtime/TurnStreamClient";
 import { TurnWebSocketClient } from "../realtime/TurnWebSocketClient";
 import {
@@ -373,7 +377,12 @@ export function useWorkbenchImpl(): WorkbenchState {
   }
 
   function reportError(context: string, err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err);
+    const detail =
+      context === "发送失败" || context === "任务失败"
+        ? formatSendFailure(err)
+        : err instanceof Error
+          ? err.message
+          : String(err);
     setError(`${context}：${detail}`);
   }
 
@@ -660,8 +669,9 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (ev.type === "turn.failed") {
             setBusy(false);
             setActivePlanPhase(null);
-            const msg = String(
-              ev.payload.message ?? ev.payload.termination_reason ?? "未知错误",
+            const msg = turnFailureUserMessage(
+              ev.payload.termination_reason,
+              ev.payload.message,
             );
             reportError("任务失败", msg);
           }
