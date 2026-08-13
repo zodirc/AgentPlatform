@@ -21,15 +21,14 @@ Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `mak
 |------|------|
 | [Pull 分发运维手册](ops/pull-dispatch-runbook.md) | 默认 pull · lease · 准入 429 · 指标与故障注入 |
 
-## 方案（详册 / 历史）
+## 方案（详册 / 说明）
 
 | 文档 | 状态 |
 |------|------|
+| [三大短板：怎么理解](plan/three-shortboards.md) | 评分中的三点说明 |
 | [后端架构全景](plan/backend-architecture.md) | **现行详册**（机型/并发数字）；摘要已回写六篇正文 |
-| [后端并发演进](plan/backend-scaling-evolution.md) | Phase 0–2 **已落地**；Phase 3 触发条件驱动 |
-| [后端并发 · 开发方案](plan/backend-scaling-implementation.md) | WP0–WP9 **已落地**；WP10 未开 |
 | [Coding 结构智能](plan/coding-structural-intelligence.md) | Wave 1 + 写入链揉合 **已落地**；长文日记保留作对照 |
 | [工作区异步 AST](plan/agent-workspace-ast-index.md) | A6 旁路 indexer **已接线**；双轨 n5 数字待复跑 |
-| [威胁情报 · 验证闭环](plan/intel-closed-loop-verification.md) | 草案 |
+| [威胁情报 · 验证闭环](plan/intel-closed-loop-verification.md) | 草案 · **尚未实施** |
 
-冲突时：**代码与契约 > 六篇正文原则 > plan 措辞**。plan 不再当作「尚未实现」的待办清单。
+冲突时：**代码与契约 > 六篇正文原则 > plan 措辞**。

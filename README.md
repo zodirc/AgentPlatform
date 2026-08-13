@@ -1,113 +1,100 @@
-# Agent Platform（新项目）
+# Agent Platform
 
-> 基于 `agent-langraph` 的经验，从零设计的 **Agent Runtime**：**一个内核，多个场景**。默认 **写作** `writing`；**Agent** `agent` 为通用全工具面。
+自托管 Agent Runtime：**一个内核，多个场景**。同一 `AgentEngine`；差异在 `ScenarioProfile`（工具 / 提示词 / 审批）。
 
-## 30 秒看懂
+产品面 `http://localhost/` · 详文 [docs/README.md](docs/README.md)
 
-| | |
-|--|--|
-| **是什么** | Docker 一键起的 Agent 平台：`api`（控制面）+ `runtime`（单 loop 执行）+ `web`（工作台）+ Caddy + Postgres/pgvector |
-| **怎么扩展** | 同一 `AgentEngine`；差异在 `ScenarioProfile`（工具白名单 / 提示词 / 审批），不是再画一张流程图 |
-| **分发** | 默认 **pull 领取制**（lease / 准入 429）；`push` 可回退 · [运维手册](docs/ops/pull-dispatch-runbook.md) |
-| **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · Coding 结构揉合 · exec 沙箱（bwrap/软 jail）· AST 旁路索引 · Golden/`make gate` |
-| **非目标** | 不宣称对齐 Cursor 全功能；Skills / 多模态 / K8s 暂缓 |
-| **起栈** | `make up` = **分模块**只重建脏服务 + 发布台 `:9090`；全量用 `make up-all` |
-| **发布台** | 随 up 拉起；见 [架构 · 分模块发布](docs/core/architecture.md) |
-| **旁路观测** | `/ops/<OPS_TEST_SECRET>/official` Bench · [工作台](docs/topics/workbench.md) |
+---
 
-文档索引：**[docs/README.md](docs/README.md)**（6 篇正文，每篇 2 张控制流图）。
+## 1. 部署
 
-## 为什么要重写
-
-`agent-langraph` 已验证了大量运行时能力（Turn 闭环、检索、上下文治理、写作交付等），但工程形态上出现了典型「成功系统的债务」：
-
-| 问题 | 表现 | 后果 |
-|------|------|------|
-| 单体进程承载一切 | 一个 FastAPI 进程挂载 20+ 路由、调度器、MCP、A2A、Web 静态资源 | 启动慢、故障域大、无法按能力独立扩缩 |
-| `services/` 膨胀 | 200+ 模块平铺在同一目录 | 边界模糊、依赖网状、新人难以理解改动影响面 |
-| 配置与特性开关过载 | 800+ 行 `config.yaml` + 多份 compose overlay | 本地/生产行为不一致，排障成本高 |
-| 部署组合复杂 | `docker-compose.yml` + `dev` / `redis` / `ha` 叠加 | 「能跑」依赖 Makefile 记忆，而非声明式契约 |
-| 文档与实现脱节 | `arch.md` 1400+ 行描述理想态，代码已多处分叉 | 架构讨论无法落到可执行的模块边界 |
-
-本项目不否定原有业务能力，而是**用清晰的容器边界、模块边界和契约，重新承载这些能力**。
-
-## 文档索引
-
-| 文档 | 内容 |
-|------|------|
-| [docs/README](docs/README.md) | 总索引（6 篇 · 每篇 2 图） |
-| [架构](docs/core/architecture.md) | 请求路径 · 分模块发布台 · Turn |
-| [Runtime](docs/core/runtime.md) | Engine loop · 审批/取消 |
-| [工具与上下文](docs/core/tools-and-context.md) | 组窗 · bwrap |
-| [事件与契约](docs/core/events.md) | SSE · StartTurn |
-| [RAG](docs/topics/rag.md) | search_sources · 索引面 |
-| [工作台](docs/topics/workbench.md) | 写作 · Ops Bench（BEIR/C-MTEB/LongBench/SWE）· 契约/CI |
-
-> **架构宪法**：一个 Runtime，多个 Scenario。先读 **Runtime / 工具与上下文 / 架构**。
-
-## 第一阶段交付标准（Docker Only）
-
-当以下命令在全新机器上**一次成功**时，Phase 0 完成：
+依赖 Docker Compose。LLM 在 Web「设置 → 模型」配置。
 
 ```bash
 cp .env.example .env
-# 起栈后在 Web「设置 → 模型」配置供应商（勿堆 MODEL_* 进 .env）
-make up    # 默认：live + pgvector + sentence-transformers（Dockerfile.retrieval）
+make up      # 默认全量栈 + 发布台 :9090
 make smoke
-curl -fsS http://localhost/health/live
+# 打开 http://localhost/
 ```
 
-验收清单：
+| 命令 | 作用 |
+|------|------|
+| `make up` | 按脏模块重建（日常） |
+| `make up-all` | 全量重建 |
+| `make smoke` / `make gate` | 冒烟 / 门禁 |
 
-- [x] 仅依赖 Docker / Docker Compose，无需本机 Python 环境（CI / eval 可选本机 Python）
-- [x] 所有服务通过 healthcheck 串联启动
-- [x] 配置入口唯一：`.env` → 各服务环境变量
-- [x] 默认栈：`MODEL_MODE=live`、`RETRIEVAL_BACKEND=pgvector`、本地 embedding 全开
-- [x] `docker compose ps` 显示核心服务 `healthy`
-- [x] 访问 `http://localhost/` 可打开 Web 壳层
-- [x] `POST /api/v1/sessions` 可创建会话；stub golden 全绿（`make eval-*` 仍隔离为 stub）
+`curl -fsS http://localhost/health/live`
 
-## 快速验证
+---
 
-```bash
-make up              # 起栈；并自动启用本仓库 .githooks（pre-push → preflight）
-make preflight       # 手动：CI unit.* 本地镜像（无 Docker；按变更选择性）
-make smoke           # L0
-# 日常自测：浏览器打开 /ops/<OPS_TEST_SECRET>/test（docs/topics/workbench.md）
-make gate            # CI/无头 Proof 门禁：smoke → eval-all → runtime-test
-make ux-signals      # 体验信号自检（环外）
-make eval-all        # stub golden（isolated + runtime-lite，不改日常 live）
-make eval-retrieval  # writing.07（默认 ST 镜像）
-make eval-queue      # queue + worker profile（shared.16）
-make runtime-test    # Python 3.11+
+## 2. 架构 · 资源 · 目录
+
+```text
+Browser → Caddy
+            ├─ /      → web
+            └─ /api/* → api → (pull) runtime → 写事件 → api SSE
+Postgres + pgvector · 旁路 ast-indexer · 默认含 bench
 ```
 
-推送绕过（应急）：`SKIP_PREFLIGHT=1 git push` 或 `git push --no-verify`。  
-仅装 hooks、不起栈：`make hooks-install`（`make up` / `make start` 已默认执行）。
+| 模块 | 职责 |
+|------|------|
+| web | 工作台（SSE + 投影） |
+| api | 受理、分发、SSE、Ops |
+| runtime | Agent loop、工具、检索、沙箱 |
+| postgres | 事实总线（服务间无互 import） |
+| ast-indexer | 工作区 AST（旁路） |
+| bench + bench-postgres | Official / L1（`make up` 默认起） |
+| contracts | OpenAPI / 事件 / 命令体 |
 
-## 仓库结构
+`Work` → `Session` → `Turn` ↔ `Run`。分发默认 pull + lease。[架构详文](docs/core/architecture.md)
 
+### `make up` 全量：8 容器
+
+| 容器 | mem_limit | 作用 |
+|------|-----------|------|
+| postgres | 1g | 产品库 / 向量 |
+| bench-postgres | 1g | Bench 隔离库 |
+| runtime | 4g → GPU 时 12g | loop / RAG / embed |
+| ast-indexer | 768m | AST |
+| api | 1g | 控制面 |
+| bench | 6g → GPU 时 12g | 评测 worker |
+| web / gateway | — | 前端 / Caddy |
+
+宿主机另有发布台 `:9090`。
+
+- **内存**：cgroup 上限合计约 **14g**（不含 web/gateway）→ 建议宿主 **≥16 GiB**
+- **磁盘**：建议空闲 **≥40 GiB**（镜像 + 模型 + Bench 数据）
+- **Embedding**（`make up` 自动解析）：无 GPU → **gte-small@384**（CPU）；VRAM≥8GiB → **bge-m3@1024**（CUDA）。权重在 `/data/models`；runtime 与 bench **各加载一份**
+
+```text
+deploy/   compose · Caddy
+services/ api · runtime · web · bench
+packages/contracts/   eval/   docs/   scripts/
 ```
-AgentPlatform/
-├── README.md
-├── docs/                    # core / topics / learn / archive
-├── deploy/
-│   ├── docker-compose.yml   # 唯一 compose 入口
-│   ├── caddy/               # 边缘网关（Caddyfile）
-│   └── compose/             # 可选：queue、retrieval、ha、runtime-lite
-├── services/
-│   ├── api/                 # HTTP API、SSE、投影、Ops 只读观测
-│   ├── runtime/             # Agent 执行、检索、工具沙箱
-│   └── web/                 # Vite + React 工作台 + Ops 页
-├── packages/
-│   └── contracts/           # OpenAPI、事件 schema、agent-contracts
-├── eval/golden/             # Golden Turn 用例
-└── scripts/                 # smoke、eval、codegen、ci_proof
-```
 
-## 与 agent-langraph 的关系
+---
 
-- **不直接迁移代码**：先建立骨架与契约，再按模块逐步 port 能力。
-- **保留已验证的概念**：`Session` / `Run` / `Turn`、证据治理、上下文 gateway、产物诚实性。
-- **废弃的形态**：巨型 `services/` 平铺、单进程全量 lifespan 初始化、多 compose overlay 组合、**13 节点固定 pipeline 图**。
-- **重做的内核**：执行编排从「固定状态图」改为「agentic loop」；接缝闭环见 `contracts`、`07`、`09`。
+## 3. 场景 · 框架 · 技术栈
+
+| 场景 | 做什么 |
+|------|--------|
+| writing | 写作：大纲 / 草稿 / diff / RAG（默认） |
+| agent | 编码全工具：文件 / shell / 测试 / LSP·AST |
+| intel | 情报研判（闭环方案见 [plan](docs/plan/intel-closed-loop-verification.md)，未全落地） |
+| collab | 多 agent（偏薄） |
+
+扩场景 = 改 Profile，不改 Engine 循环。
+
+**框架**：Intake → Engine（组窗 → 模型流 → 工具/审批 → checkpoint）→ 事件 SSE；沙箱 Landlock/bwrap；`make gate` + Golden。
+
+| 层 | 技术 |
+|----|------|
+| 后端 | Python 3.11 · FastAPI · Postgres/pgvector · ST embedding |
+| 前端 | React 18 · Vite · TanStack Query · Tailwind |
+| 部署 | Compose · Caddy · Make |
+
+---
+
+## 文档
+
+[总索引](docs/README.md) · [架构](docs/core/architecture.md) · [Runtime](docs/core/runtime.md) · [工具与上下文](docs/core/tools-and-context.md) · [事件](docs/core/events.md) · [RAG](docs/topics/rag.md) · [工作台](docs/topics/workbench.md)

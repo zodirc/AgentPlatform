@@ -4,7 +4,6 @@
 > **定位**：后端视角的**完整控制流、并发、机型与负载**说明；拓扑 + 时序 + 所有权 + 开发机画像  
 > **冲突裁决**：实现与契约 > 六篇正文原则 > 本文措辞；**机型/并发数字以本文与 compose/settings 为准**  
 > **回写**：主路径摘要已进入 [架构](../core/architecture.md) / [事件](../core/events.md) / [Runtime](../core/runtime.md)；本文保留全景与机型配方  
-> **演进分册**：[backend-scaling-evolution.md](backend-scaling-evolution.md)（Phase 0–2 **已落地**；Phase 3 触发条件驱动）
 
 本文写清：进程怎么连、请求怎么走、谁写什么表、两类索引如何隔离、Bench 怎么跑、**CPU/内存/GPU 如何调度、两台开发机上该怎么配负载**。
 
