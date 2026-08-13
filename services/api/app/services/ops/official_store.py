@@ -769,6 +769,8 @@ def write_ops_aggregate_report(
     title: str,
     status: str,
     children: list[dict[str, Any]],
+    targets: list[str] | None = None,
+    eval_path: str | None = None,
 ) -> Path | None:
     """Write /runs/<ops_id>/report.html aggregating finished child bench reports."""
     root = reports_root()
@@ -776,17 +778,80 @@ def write_ops_aggregate_report(
         return None
     out_dir = root / "runs" / ops_run_id
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        from official_bench.html_report import (
+            _shared_styles,
+            flow_steps_for_ops_targets,
+            render_flow_section,
+            status_zh,
+            suite_zh,
+        )
+    except ImportError:  # pragma: no cover - scripts not on path in some images
+        _shared_styles = None  # type: ignore[assignment]
+
+        def status_zh(v: Any) -> str:  # type: ignore[misc]
+            return str(v or "—")
+
+        def suite_zh(v: Any) -> str:  # type: ignore[misc]
+            return str(v or "—")
+
+        def flow_steps_for_ops_targets(  # type: ignore[misc]
+            _targets: list[str], *, eval_path: str | None = None
+        ) -> list[tuple[str, str]]:
+            return [
+                ("选择评测目标", "、".join(_targets) or "（未指定）"),
+                ("按套件执行", f"路径={eval_path or '未标注'}"),
+                ("聚合报告", "汇总各子套件 HTML"),
+            ]
+
+        def render_flow_section(  # type: ignore[misc]
+            steps: list[tuple[str, str]], *, caption: str
+        ) -> str:
+            lis = "".join(
+                f"<li><strong>{html.escape(t)}</strong> — {html.escape(d)}</li>"
+                for t, d in steps
+            )
+            return (
+                f'<section class="card" style="margin-top:1rem">'
+                f"<h2 style='margin-top:0;font-size:1.1rem'>本次评测流程</h2>"
+                f'<p class="muted">{html.escape(caption)}</p><ol>{lis}</ol></section>'
+            )
+
+    status_label = status_zh(status)
+    inferred_targets = list(targets or [])
+    if not inferred_targets:
+        for child in children:
+            tid = child.get("case_id") or child.get("target")
+            if tid and str(tid) not in inferred_targets:
+                inferred_targets.append(str(tid))
+
     if not children:
         # Still write a stub so the button can explain state
+        flow = render_flow_section(
+            flow_steps_for_ops_targets(inferred_targets, eval_path=eval_path),
+            caption="子套件尚未 finish；取消或中途停止不会生成完整报告。",
+        )
+        styles = _shared_styles() if callable(_shared_styles) else ""
+        if not styles:
+            styles = (
+                "body{font-family:system-ui,sans-serif;max-width:720px;"
+                "margin:2rem auto;padding:0 1rem;color:#1c1916}"
+                ".muted{color:#6b635a}"
+            )
         stub = f"""<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="utf-8"/><title>{html.escape(title)}</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:720px;margin:2rem auto;padding:0 1rem;color:#1c1916}}
-.muted{{color:#6b635a}}</style></head>
+<html lang="zh-CN"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>{html.escape(title)}</title>
+<style>{styles}</style></head>
 <body>
+<main>
 <h1>{html.escape(title)}</h1>
-<p>状态：{html.escape(status)}</p>
-<p class="muted">还没有可展示的官方 HTML。每个套件（检索/上下文/编码）在
+<p>状态：<strong>{html.escape(status_label)}</strong>（{_esc_status_raw(status)}）</p>
+<p class="muted">还没有可展示的官方 HTML。每个套件（检索 / 上下文 / 编码）在
 <strong>完整跑完并 finish</strong> 后才会生成 report.html；取消或中途停止不会有报告。</p>
+{flow}
+</main>
 </body></html>"""
         out = out_dir / "report.html"
         out.write_text(stub, encoding="utf-8")
@@ -794,7 +859,8 @@ def write_ops_aggregate_report(
 
     sections: list[str] = []
     for child in children:
-        label = child.get("case_id") or child.get("target") or child.get("id") or "suite"
+        raw_label = child.get("case_id") or child.get("target") or child.get("id") or "suite"
+        label = f"{suite_zh(raw_label)}（{raw_label}）"
         html_body: str | None = None
         report_path = child.get("report_html")
         bench_id = child.get("bench_run_id") or child.get("id")
@@ -803,9 +869,11 @@ def write_ops_aggregate_report(
         elif bench_id:
             html_body = read_report_html(str(bench_id))
         if not html_body:
+            child_st = status_zh(child.get("status"))
             sections.append(
-                f"<section><h2>{html.escape(str(label))}</h2>"
-                f"<p class='muted'>尚无 HTML（该套件未 finish 或被取消）。</p></section>"
+                f"<section class='child'><h2>{html.escape(str(label))}</h2>"
+                f"<p class='muted'>尚无 HTML（该套件未 finish 或被取消"
+                f"{' · ' + html.escape(child_st) if child.get('status') else ''}）。</p></section>"
             )
             continue
         # Extract body inner + child <style> so nested suite CSS still applies.
@@ -841,48 +909,48 @@ def write_ops_aggregate_report(
             f"{style_block}{inner}</section>"
         )
 
+    flow = render_flow_section(
+        flow_steps_for_ops_targets(inferred_targets, eval_path=eval_path),
+        caption=(
+            f"Ops 聚合 · 状态 {status_label} · 子套件 {len(children)} 个"
+        ),
+    )
+    styles = _shared_styles() if callable(_shared_styles) else ""
+    extra = """
+.child{margin:1.5rem 0;padding:1rem;background:var(--card,#fffdf8);border:1px solid var(--line,#d9d0c3);border-radius:8px}
+.suite-main{max-width:none;margin:0;padding:0}
+"""
     doc = f"""<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>{html.escape(title)}</title>
-<style>
-body{{margin:0;font-family:system-ui,sans-serif;background:#f6f1e8;color:#1c1916}}
-main{{max-width:960px;margin:0 auto;padding:1.5rem}}
-.child{{margin:1.5rem 0;padding:1rem;background:#fffdf8;border:1px solid #d9d0c3;border-radius:8px}}
-.suite-main{{max-width:none;margin:0;padding:0}}
-.muted{{color:#6b635a}}
-.grid{{display:grid;gap:1rem;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}}
-.card{{background:#fffdf8;border:1px solid #d9d0c3;border-radius:12px;padding:1rem 1.1rem}}
-.card strong{{display:block;font-size:1.4rem}}
-.card span{{color:#6b635a;font-size:.85rem}}
-.metric{{margin:.55rem 0}}
-.metric-label{{display:flex;justify-content:space-between;font-size:.9rem;margin-bottom:.2rem}}
-.bar{{height:8px;background:#ece4d8;border-radius:99px;overflow:hidden}}
-.bar i{{display:block;height:100%;background:#0f4c5c}}
-table{{width:100%;border-collapse:collapse;font-size:.92rem}}
-th,td{{border-bottom:1px solid #d9d0c3;padding:.55rem .35rem;vertical-align:top;text-align:left}}
-pre{{margin:0;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem}}
-.st-pass{{color:#1f6b4a;font-weight:700}}
-.st-fail{{color:#9b2c2c;font-weight:700}}
-.st-skipped{{color:#6b635a}}
-ol.process{{padding-left:1.1rem}}
-ol.process li{{margin:.35rem 0}}
-ol.process time{{color:#6b635a;font-size:.8rem;margin-right:.4rem}}
-.kind{{display:inline-block;font-size:.7rem;text-transform:uppercase;letter-spacing:.04em;border:1px solid #d9d0c3;border-radius:999px;padding:.05rem .4rem;margin-right:.35rem;color:#0f4c5c}}
-code{{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.85em}}
-</style></head>
+<style>{styles}{extra}</style></head>
 <body><main>
 <h1>{html.escape(title)}</h1>
-<p class="muted">Ops 聚合报告 · 状态 {html.escape(status)} · 含子套件 {len(children)}</p>
+<p class="muted">Ops 聚合报告 · 状态 {html.escape(status_label)} · 含子套件 {len(children)}</p>
+{flow}
 {''.join(sections)}
 </main></body></html>"""
     out = out_dir / "report.html"
     out.write_text(doc, encoding="utf-8")
     (out_dir / "aggregate.json").write_text(
-        json.dumps({"id": ops_run_id, "children": children}, indent=2),
+        json.dumps(
+            {
+                "id": ops_run_id,
+                "children": children,
+                "targets": inferred_targets,
+                "eval_path": eval_path,
+            },
+            indent=2,
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     return out
+
+
+def _esc_status_raw(status: str) -> str:
+    return html.escape(str(status or ""))
 
 
 async def import_manifest(manifest: dict[str, Any]) -> dict[str, Any]:

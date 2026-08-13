@@ -582,7 +582,7 @@ async def get_official_report_html(run_id: str) -> HTMLResponse:
                 status_label = str(db_row.get("status") or "unknown")
         stub_path = official_store.write_ops_aggregate_report(
             run_id,
-            title=f"Official run {run_id[:8]}",
+            title=f"官方评测 · {run_id[:8]}",
             status=status_label,
             children=[],
         )

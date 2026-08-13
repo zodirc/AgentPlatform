@@ -313,11 +313,24 @@ def _attach_latest_child_report(run: OfficialLiveRun, case: dict[str, Any], repo
     run.child_reports.append(child)
     path = official_store.write_ops_aggregate_report(
         run.id,
-        title=f"Bench · {'+'.join(run.targets)}",
+        title=_ops_report_title(run.targets),
         status=run.status,
         children=run.child_reports,
+        targets=list(run.targets),
+        eval_path=run.eval_path,
     )
     run.report_html_available = path is not None and path.is_file()
+
+
+def _ops_report_title(targets: list[str]) -> str:
+    try:
+        from official_bench.html_report import suite_zh
+    except ImportError:
+        return f"官方评测 · {'+'.join(targets) or '未指定'}"
+    if not targets:
+        return "官方评测 · Ops 聚合"
+    labels = [suite_zh(t) for t in targets]
+    return f"官方评测 · {' + '.join(labels)}"
 
 
 def _cmd_for_target(
@@ -1416,9 +1429,11 @@ async def _execute(run_id: str) -> None:
         try:
             path = official_store.write_ops_aggregate_report(
                 run.id,
-                title=f"Bench · {'+'.join(run.targets)}",
+                title=_ops_report_title(run.targets),
                 status=run.status,
                 children=run.child_reports,
+                targets=list(run.targets),
+                eval_path=run.eval_path,
             )
             run.report_html_available = bool(path and path.is_file())
         except Exception:  # noqa: BLE001
