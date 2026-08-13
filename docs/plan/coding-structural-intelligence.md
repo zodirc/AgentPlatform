@@ -1,26 +1,18 @@
 # 方案：Coding 结构智能（LSP / AST）
 
-> **状态**：Wave 1 已落地（Locate/Impact 揉合，2026-08-11）· **Wave 2 方案见 §7** · 场景分型见 **§3** · 当前流程 §6.0 · 实测 §6.7  
-> **范围**：`agent` 写入链的 **LSP 结构揉合** + SWE/Ops 评测协议（本文）  
-> **姊妹草案**：[Agent 工作区异步 AST 索引](agent-workspace-ast-index.md)（Cursor 式 codebase · **v4/A6：`agent-ast-indexer` 旁路已接线** · A0–A5/E1 骨架已落地 · 双轨 n5 数字待 A6 拓扑复跑）  
-> **非范围**：writing/intel RAG 主链细节；不以资料检索充当 Agent Locate  
-> **约束权威**：[架构 · R1–R5](../core/architecture.md) · [工具与上下文](../core/tools-and-context.md) · [Runtime](../core/runtime.md) · [RAG 两平面](../topics/rag.md)  
-> **相关现状**：`read_lints`=LSP∪CLI · Locate=`search_codebase`/裸符号 `grep`→definition · Impact=`edit_file.impact` · RAG 切块（writing/intel）  
-> **外部基准**：SWE-bench Lite（全 Python；协议 §8；**实测过程 §6.7**）  
+> **状态**：Wave 1 + 写入链揉合（Locate / Impact / `edit_file.checks` / span 候选）**已落地** · 正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3 · 本文保留协议、日记与收尾项  
+> **范围**：`agent` 写入链的 **LSP 结构揉合** + SWE/Ops 评测协议  
+> **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（A6 旁路 indexer **已接线**；双轨 n5 数字待复跑）  
+> **非范围**：writing/intel RAG 主链；不以资料检索充当 Agent Locate  
+> **相关现状**：`read_lints`=LSP∪CLI · Locate=`search_codebase`/裸符号 `grep`→definition · Impact=`edit_file.impact` · Verify=`edit_file.checks`  
 
-本文回答五件事：
-
-1. Coding **写入时**应具备怎样的结构能力（不以「够用」为终点）。  
-2. 如何与 **速率红线 R1–R5**、**现有交互逻辑**共存。  
-3. 各种接入方式、失败、场景边界下的具体行为。  
-4. **当前端到端流程与问题清单**（Ops L1 → Turn → 工具揉合 → 交卷；见 **§6.0 / §6.7**）。  
-5. **下一波怎么改（Wave 2，§7）**：基于实测工具分布与成熟 agent 已验证做法，把 Verify、编辑失败恢复、复现纪律焊进模型真实高频动词（`edit_file` / `run_command`），零新 Engine 节点、零预注入。  
+正文已覆盖主路径时，优先改 core；本文作详册与评测对照。
 
 ---
 
 ## 0. 一句话立场
 
-**LSP 是 coding 写入链已落地的结构车道（定位 · Impact · 验证）；写作 / 威胁情报走 RAG。工作区异步 AST 索引为产品向候选，见姊妹草案，不与本文 SWE 评测主线混写。**
+**LSP 是 coding 写入链已落地的结构车道（定位 · Impact · 验证）；写作 / 威胁情报走 RAG。工作区异步 AST 旁路已接线（见姊妹文），不与资料 RAG 混写，也不替代本文 SWE 评测主线。**
 
 形态必须是：
 
@@ -28,13 +20,13 @@
 能力 = agent Profile 工具面的固有环节
   · Locate：search_codebase（符号→definition）+ 精度 goto_definition
   · Impact：edit_file.impact.references + 精度 find_references
-  · Verify：LSP read_lints
+  · Verify：edit_file.checks + read_lints（LSP∪CLI）
 差异 = ScenarioProfile 白名单
   · agent：结构工具有 / search_sources 无
   · writing · intel：search_sources 有 / 结构工具无
 Engine = 禁止 if scenario；禁止为结构智能加固定 pipeline 节点
 失败 = 基础设施故障显式 failed（缺 language server 不算「降级成 grep 产品路径」）
-候选 = Agent 工作区异步 AST → agent-workspace-ast-index.md（不携带 RAG）
+旁路 = 工作区 AST 索引（A6 已接线）→ agent-workspace-ast-index.md（不携带 RAG）
 ```
 
 ---
@@ -93,7 +85,7 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | | |
 |--|--|
 | **是什么** | 把源码解析成语法树；按节点（函数、类、方法）理解边界 |
-| **买入链路** | （1）**RAG 旁路**：`sources/` 代码切块几何（writing/intel）；（2）**候选 · Agent 工作区索引**：仓库符号/边界表（无向量）；（3）可选：工具内单文件校验 edit span |
+| **买入链路** | （1）**RAG 旁路**：`sources/` 代码切块几何（writing/intel）；（2）**Agent 工作区 AST 旁路**（A6 已接线，无向量）；（3）工具内单文件语法门 / span 候选 |
 | **不直接买** | 跨文件引用图、类型错误、项目配置感知（这些仍归 LSP） |
 | **成本特征** | 单文件解析相对可控；全库同步 parse 伤 R3；适合 **异步旁路** 与 **单次工具内** 使用；**Agent 全仓索引 ≠ 必须绑 RAG** |
 
@@ -117,7 +109,7 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 | 改后 Impact | 代码路径 `edit_file` 成功 → **必附** `impact.references`（同 refs 适配器） |
 | 诊断 | `read_lints` = LSP ∪ ruff/CLI |
 | 代码切块（RAG · writing/intel） | `sources/` sync：CQ4 / tree-sitter；**Agent 不消费** |
-| 工作区 AST 索引（Agent） | **未落地** → [agent-workspace-ast-index.md](agent-workspace-ast-index.md) |
+| 工作区 AST 索引（Agent） | **A6 已接线**（旁路 indexer + 队列；双轨 n5 数字待复跑）→ [agent-workspace-ast-index.md](agent-workspace-ast-index.md) |
 
 ---
 
@@ -133,7 +125,7 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 |------|---------|-------------------|-------------|---------------|---------------|
 | **写作** | `writing` | `search_sources`（资料 RAG） | `sources/` → `index_scheduler` 切块 + embed/FTS | 代码文件若落在 `sources/`，切块可走 tree-sitter（**RAG 切块几何**，服务检索召回） | **不起** Language Server；无 `search_codebase` / `edit_file` / `read_lints` |
 | **威胁情报** | `intel` | 同左：`search_sources` 为主 | 同左（资料/情报语料面） | 同左；默认 **不开** coding 结构工具 | **默认不起** LSP；若未来只读导航需单独评审，仍不开写副作用结构操作 |
-| **Agent 编码**（含 SWE L1） | `agent` | `search_codebase` / `grep` / `read_file`（**无** `search_sources`） | **当前**：无 Cursor 式工作区符号库；词面扫盘 + LSP 按需 | **当前未揉合**「工作区旁路 AST 索引」；写前语法门可用单文件 `ast`/parse（≠ 全仓索引） | **已揉合**：符号 Locate→definition；Impact→references；`read_lints` = LSP∪CLI |
+| **Agent 编码**（含 SWE L1） | `agent` | `search_codebase` / `grep` / `read_file`（**无** `search_sources`） | **旁路**：工作区 AST（A6 已接线）粗筛 + 词面 + LSP | Locate 漏斗可融合 AST 候选；写前语法门 / checks 属单文件 | **已揉合**：Locate→definition；Impact→references；Verify→`edit_file.checks` + `read_lints` |
 | **协作等** | `collab` 等 | 以工具白名单为准 | 仅当白名单含编码工具时启用结构能力 | 同 agent 子集 | 同左 |
 
 **一句话**：写作 / 情报买的是 **RAG**；Agent 评测/写入主链买的是 **LSP（+ 词面）**；Cursor 式工作区 AST 见姊妹草案（不携带 RAG）。
@@ -161,17 +153,17 @@ CQ1–CQ3（system 纪律、工具描述、golden/rubric）解决的是 **行为
 #### 3.3.1 当前已落地（2026-08）
 
 ```text
-Locate  ：符号 → search_codebase → LSP definition（裸符号 grep 重定向同一路）
-         非符号 → 词面扫盘（hits）；LSP 基建失败 → 显式 failed（禁止词面冒充 Locate 成功）
+Locate  ：符号 → search_codebase（可经工作区 AST 粗筛）→ LSP definition（裸符号 grep 重定向同一路）
+         非符号 → 词面扫盘；LSP 基建失败 → 显式 failed（禁止词面冒充 Locate 成功）
 Impact  ：edit_file.impact.references ← LSP references
-Verify  ：read_lints = LSP ∪ ruff/CLI；写前语法门（单文件 parse）
-词面    ：grep / lexical search_codebase（磁盘扫描；须 off-loop，排除 .git/.venv 等噪声）
+Verify  ：edit_file.checks（写前语法门 + 写后增量诊断）+ read_lints = LSP ∪ CLI
+词面    ：grep / lexical search_codebase（磁盘扫描；须 off-loop）
 RAG     ：Profile **无** search_sources —— 讨论 Agent 结构时 **不考虑** 资料检索旁路
 ```
 
-SWE-bench L1 临时 worktree：**不**预建 RAG 索引；Locate 靠 LSP + 词面（与「harness 工作区无预建索引」一致）。
+SWE-bench L1：默认可瞬态建 AST（评测 profile）；Locate 仍以 LSP 确认为权威。
 
-#### 3.3.2 候选：Agent 工作区异步 AST（已拆出）
+#### 3.3.2 Agent 工作区异步 AST（已拆出 · A6 已接线）
 
 Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**不在本文展开**，以免与 SWE/Ops 评测主线缠在一起。
 
@@ -199,7 +191,7 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 3. **前缀**：writing / intel 的 `system.md` + `tools[]` 字节布局不因 Agent 结构改动而膨胀。  
 4. **两条索引旁路不得混用**：  
    - RAG：`sources/` → 切块 → embed/FTS（写作/情报）；热语料以用户上传私有库为主  
-   - Agent AST（候选）：工作区 → 符号表（**DB 持久 + 内存投影**，无向量）  
+   - Agent AST（旁路已接线）：工作区 → 符号表（**DB 持久 + 内存投影**，无向量）  
 5. **Engine**：禁止 `if scenario`；「无工具注册 = 无能力」即隔离。  
 6. **GUI**：模式切换只换 Scenario/面板；**禁止**把模式点击绑成「拆掉 / 重建」另一套索引。
 
@@ -242,7 +234,7 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 │  sources/ → 切块 → embed/FTS · ✗ 不充当 Agent Locate        │
 └─────────────────────────────────────────────────────────────┘
 
-候选旁路（Agent 工作区 AST · GUI/Work/DB）→ agent-workspace-ast-index.md
+旁路（Agent 工作区 AST · A6 已接线 · GUI/Work/DB）→ agent-workspace-ast-index.md
 ```
 
 热路径只 **使用** 已有结构，不 **同步重建**（R4）。
@@ -370,7 +362,7 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 
 **Impact 符号抽取**：优先 span 内 `def`/`class`/… 头；否则 old/new 标识符差集；再否则旧 span 中出现的标识符。
 
-> **Wave 2 目标态**（§7.3，待评审）：⑥ Verify 的单文件部分同样焊进 ④ 的结果契约（`edit_file` 附 `checks`：写前语法门 + 写后增量诊断）；② Locate 之前增加 **Reproduce** 相位（先复现失败，修后复跑，纯 prompt 层）；④ 的 span 失配失败改为回显最近候选而非裸失败。
+> **Wave 2 落地态**（§7.3）：⑥ `edit_file.checks`（写前语法门 + 写后增量诊断）**已焊**；④ span 失配**已回显候选**；② Reproduce / 交卷自检为 **prompt 层已写**；pager→`read_file` 硬重定向仍为纪律文案（未做工具级强制改写）。
 
 #### 6.0.4 一题内「实际常发生」的调用形态（实测）
 
@@ -687,11 +679,11 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 
 | 波次 | 内容 | 状态 |
 |------|------|------|
-| **Wave 1** | 结构基建（`structural/` 包、pyright 池、`read_lints` LSP∪ruff、导航双工具、tree-sitter 切块）+ **Locate/Impact 揉合**（裸符号 `grep` 重定向、`edit_file.impact`） | **已落地**（2026-08-10/11；行为契约见 §7.1） |
-| **Wave 2** | **Verify 揉合**（`edit_file.checks`：写前语法门 + 写后增量诊断）· 编辑失败候选回显 · pager 软重定向 · Reproduce / 交卷自检纪律 | **本文提案**（§7.3；里程碑 §7.5） |
-| Wave 3 候选 | 按需 repo map（Aider 式）· 写副作用结构操作（原阶段 D） | 后置（§7.4） |
+| **Wave 1** | 结构基建 + **Locate/Impact 揉合** | **已落地**（行为契约 §7.1） |
+| **Wave 2** | Verify（`edit_file.checks`）· span 候选回显 · Reproduce/交卷自检（prompt）· pager 纪律 | **主项已落地**；pager 工具级硬重定向仍开放（§7.3 W2） |
+| Wave 3 候选 | 按需 repo map · 写副作用结构操作（原阶段 D） | 后置（§7.4） |
 
-Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 `run_command` / `read_file` / `grep` / `edit_file` 四个高频动词**。Wave 1 已把 Locate/Impact 焊进其中两个；Wave 2 把 Verify（`read_lints` 两题仅 1 次调用）和失败恢复也焊进去，并用纯 prompt 层补齐「复现→修→复跑」相位。**不新增模型需要主动学会点的工具名**——这是对「纪律催用独立工具已证偏弱」这一实测结论的一致回应。
+Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 `run_command` / `read_file` / `grep` / `edit_file` 四个高频动词**。Locate/Impact/Verify 与 span 恢复已焊进结果契约；Reproduce/交卷为 prompt 层。**不新增模型必须主动学会点的工具名**。正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3。
 
 ### 7.1 Wave 1 落地态（原阶段 A–C 的行为契约，已落地）
 
@@ -765,11 +757,19 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 
 共同规律：这些 agent 没有一个靠「加工具名 + 文案催用」获得结构收益——收益全部来自**把结构信息焊进模型无法绕开的动词**（edit 的结果、失败的回显）。这与我们 `01599d49` 的实测结论（§6.7.3/§6.7.4）互为印证，Wave 2 是同一决策在 Verify/恢复车道上的延伸。
 
-### 7.3 Wave 2 设计：把 Verify、失败恢复、复现纪律焊进高频动词
+### 7.3 Wave 2：把 Verify、失败恢复、复现纪律焊进高频动词
 
-全部改动落在**工具 handler 与 prompt 文案**：不加 Engine 节点、不预注入、不新增模型需学会主动点的工具名；writing Profile 零感知（这些动词本就不在其白名单）。
+全部改动落在**工具 handler 与 prompt 文案**：不加 Engine 节点、不预注入、不新增模型需学会主动点的工具名；writing Profile 零感知。
 
-#### W1 — Verify 揉合：`edit_file` 附 `checks`（最高优先）
+| 项 | 状态（2026-08-13） |
+|----|---------------------|
+| **W1** `edit_file.checks` | **已落地** |
+| **W2** pager → `read_file` 硬/软重定向 | **未做工具级改写**（仅 system 纪律文案）；排期仍见 N3 |
+| **W3** span 失配候选 | **已落地** |
+| **W4** Reproduce 相位 | **已落地**（prompt） |
+| **W5** 交卷自检 | **已落地**（prompt） |
+
+#### W1 — Verify 揉合：`edit_file` 附 `checks`（已落地）
 
 **动机**：P12——两题 `read_lints` 仅 1 次；Verify 与 Locate/Impact 一样，必须焊进写成功契约而非等模型自觉。
 
@@ -784,7 +784,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 
 **验收**：代码 edit 成功结果 100% 含 `checks`；语法门拦截数与**误拦率**（旧文件已坏场景）单列进观测；n5 复跑 `patch_no_apply` 桶占比应下降。
 
-#### W2 — pager 软重定向：`run_command` → `read_file`
+#### W2 — pager 软重定向：`run_command` → `read_file`（仍开放）
 
 **动机**：P8——两题 36 次 `run_command`，大量 `sed -n 'A,Bp'` 当 pager，绕开 read-fold / 预算 / Read-after-complete 卫生，还烧步数；Ban 文案已证无效。
 
@@ -794,7 +794,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 
 **验收**：重定向命中数 / 误伤数；pager 型 `run_command` 占比对照下降。
 
-#### W3 — 编辑失败恢复：span 失配回显候选
+#### W3 — 编辑失败恢复：span 失配回显候选（已落地）
 
 **动机**：P4 的主要形态是 span 重试打转烧步数（早期 n5 三题 50 步触顶均含半截 edit）。
 
@@ -802,7 +802,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 
 **验收**：edit 失败后的平均恢复步数下降；同 span 连续失败 ≥3 次的 Turn 占比下降。
 
-#### W4 — Reproduce 相位（纯 prompt 层，零新工具）
+#### W4 — Reproduce 相位（已落地 · 纯 prompt）
 
 **动机**：成熟配方公认「先复现 → 修 → 复跑」对 resolve 提升最稳定；当前 ①–⑦（§6.0.3）缺该相位。
 
@@ -810,7 +810,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 
 **速率**：纯文案；前缀字节变化过 hygiene 测试（CQ2）。
 
-#### W5 — 交卷自检（prompt 层 + 观测）
+#### W5 — 交卷自检（已落地 · prompt + 观测）
 
 **契约**：宣告完成前自查三条：a) `git diff` 非空且能自述改了什么；b) 最近一次 `edit_file` 不处于 failed 未收尾；c) repro / 相关测试至少复跑一次（做不到须说明）。Ops 侧 apply-check 门禁不变（双保险，见 §6.0.2 步 8）。
 
@@ -940,11 +940,10 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 | `scenarios/profiles/agent.yaml` | `tool_names` 增 `goto_definition` / `find_references`；writing / intel 不动 |
 | `scenarios/agent/system.md` | Tool choice 表加一行「符号定义/引用 → 导航工具」；Verify 文案不改（CQ1 零改动）；前缀字节变化过 hygiene 测试 |
 | `tools/delegate_runner.py` | `explore` / `verify` / `edit` 子集按 §6.6 增导航；写作子类型不动 |
-| `settings.py` | **`structural_enabled` 产品开关已废除（2026-08-11）**：能力 = Profile 白名单，缺基建显式 `failed`（§6.7 决策）；双轨对照的 on/off 只存在于**基准 runner 配置**（§8.2），不回流产品语义。保留运行参数：`structural_nav_timeout_s=15` · `structural_diag_timeout_s=60` · `structural_max_files_per_call` · `structural_max_refs`（超限按文件聚合）· `structural_prewarm`。Wave 2 拟增：`checks` 增量诊断上限条数与 timeout（可沿用 diag 预算） |
-| `retrieval/chunking.py` | 阶段 C：`split_code_sections` 优先 tree-sitter，失败回落正则；接口与 chunk 元数据形状不变 |
-| **新增** 基准 runner（`eval/swebench/` 或 make 目标） | lite-50 / lite-300 拉起、禁网覆盖、双轨开关、结果与过程指标落盘 |
-| 测试 | `structural/` 单元（含 server 不可用 / timeout / crash 路径）· golden：lint 修复、跨文件引用 · writing Profile 快照 |
-| **Wave 2 触点（提案，N1/N3）** | `tools/core/tools.py`：`edit_file` handler（写前语法门 + `checks` 增量诊断 + span 失配候选回显）· `run_command` handler（纯 pager 识别 → `read_file` 重定向，`redirected_from` 标注）· `scenarios/agent/system.md` + `scripts/official_bench/l1_prompts.py`（Reproduce 相位、交卷自检；过前缀 hygiene）· `structural/symbols.py` 与适配器**不变**（复用同一车道） |
+| `settings.py` | **`structural_enabled` 产品开关已废除**：能力 = Profile 白名单。运行参数含 `structural_nav_timeout_s` · `structural_diag_timeout_s` · `structural_checks_max_issues` · `structural_checks_timeout_s` 等 |
+| `retrieval/chunking.py` | 阶段 C：代码切块优先 tree-sitter，失败回落正则 |
+| 基准 runner / 测试 | swebench 双轨脚手架 · structural 单元 · writing 不回归 |
+| **Wave 2 触点** | **已落地**：`edit_file`（`checks` + span 候选）· `system.md` / L1 prompt（Reproduce · 交卷自检）。**仍开放**：`run_command` pager→`read_file` 工具级重定向（N3） |
 
 ### 9.3 里程碑（M 序列状态归档；现行排期见 §7.5 N0–N4）
 
@@ -1097,20 +1096,14 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 
 ## 14. 建议决策（供评审勾选）
 
-- [ ] **采纳本文主线**：交互工具 + LSP 结构服务；否决主链强制流水线、否决「用 RAG 充当 Agent Locate」。  
-- [ ] **仅 coding Profile 启用结构工具**；writing / intel **零感知**列为硬验收。  
-- [ ] **场景分型按 §3**：写作/情报 = RAG；Agent 评测/写入 = LSP+词面。  
-- [ ] **Agent 工作区异步 AST** 单独立项评审：[agent-workspace-ast-index.md](agent-workspace-ast-index.md)（不阻塞 Wave 2）。  
-- [ ] **语言矩阵 Python-first**（SWE-bench Lite 全 Python）；provider 选型按 §9.1（pyright 首选、jedi 备选、ruff 保底）。  
-- [ ] **落地序：M0 基线先行 → A/B 并行开发分轨合并 → M3 全量对照 → C 解耦后置 → D 可选**（§9.3）。  
-- [ ] **`read_lints` 保留原名增强**，避免破坏 CQ1 文案与 golden。  
-- [ ] **冷启动旁路 + 工具内 timeout + LSP 基建失败显式 failed** 写进实现契约。  
-- [x] **Locate/Impact 揉合**（§6.7）：裸符号 grep 重定向 + edit_file.impact；不以 search_codebase 调用名为 KPI。  
-- [x] **N0 官方 harness 可测**（P6）：看板预拉 `sweb.eval` → `require_local` 绿 → 非空 predictions 跑出官方 `resolve_rate`（§7.5 / §8.5）；`d459ca51` 首次真测 **0/5**（§6.7.8）。`patch_rate` 仅代理，不能代替 resolve。  
-- [ ] **Wave 2 揉合（§7.3）**：W1 `edit_file.checks`（写前语法门 + 写后单文件增量诊断，含逃生门）+ W3 span 失配候选回显 + W4 Reproduce 相位 + W5 交卷自检（后两项纯 prompt 层）。  
-- [ ] **W2 pager 软重定向**按 N3 排期：仅纯 pager 整条命令；先软重定向不硬 Ban；命中/误伤入观测。  
-- [ ] **SWE-bench Lite 双轨协议（§8）**；禁外网；过程指标含 definitions/impact/checks 覆盖。  
-- [ ] **R5**：每阶段至少 1 组 agent golden + 延迟对照 + writing 不回归 + lite-50 冒烟。  
+- [x] **Agent 工作区异步 AST**：[agent-workspace-ast-index.md](agent-workspace-ast-index.md) A6 旁路已接线；双轨 n5 数字待复跑。  
+- [x] **语言矩阵 Python-first**（SWE-bench Lite 全 Python）。  
+- [x] **Locate/Impact 揉合**（§6.7）：裸符号 grep 重定向 + edit_file.impact。  
+- [x] **N0 官方 harness 可测**：`d459ca51` 首次真测 resolve **0/5**（§6.7.8）；`patch_rate` 仅代理。  
+- [x] **Wave 2 主项（§7.3）**：W1 `checks` · W3 span 候选 · W4/W5 prompt。  
+- [ ] **W2 pager 工具级重定向**（N3）：仅纯 pager 整条命令；先软重定向不硬 Ban。  
+- [ ] **SWE-bench Lite 双轨协议（§8）** 定论跑（含 AST on/off 若启用）。  
+- [ ] **R5**：每阶段至少 1 组 agent golden + 延迟对照 + writing 不回归。  
 
 ---
 
@@ -1132,3 +1125,4 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 | 2026-08-11 | **文档切分**：工作区异步 AST / GUI / Work·DB 拆至 `agent-workspace-ast-index.md`；本文收回 SWE/Ops + LSP 揉合主线 |
 | 2026-08-11 | **N0/P6 镜像与看板**：§6.0.5 P6、§6.7.1 时间线、§7.5 N0 出口、新增 §8.5（缺 `sweb.eval` / Hub 挂死 / 空 predictions 误报 / 看板预拉与 `swe_eval_images_progress.json` 实时 n/N）；澄清 infer patch OK ≠ 官方 resolve |
 | 2026-08-12 | **§6.7.8 完整 harness n5（`d459ca51`）**：首次真官方 `resolve_rate=0/5`（patch/apply 满分）；P6→已解、P11→部分完成、N0 checklist 勾选；看板 Ops Bench / `start-bench` 记入时间线 |
+| 2026-08-13 | **文档回写**：正文 [工具与上下文](../core/tools-and-context.md) 增 Coding 揉合图；Wave 2 主项（W1/W3/W4/W5）标已落地；W2 pager 工具级重定向仍开放；AST 姊妹文 A6 已接线；§14 勾选同步 |

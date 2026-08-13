@@ -8,10 +8,11 @@
 |--|--|
 | **是什么** | Docker 一键起的 Agent 平台：`api`（控制面）+ `runtime`（单 loop 执行）+ `web`（工作台）+ Caddy + Postgres/pgvector |
 | **怎么扩展** | 同一 `AgentEngine`；差异在 `ScenarioProfile`（工具白名单 / 提示词 / 审批），不是再画一张流程图 |
-| **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · exec **bwrap** 沙箱 · Golden/`make gate` 可证明 |
+| **分发** | 默认 **pull 领取制**（lease / 准入 429）；`push` 可回退 · [运维手册](docs/ops/pull-dispatch-runbook.md) |
+| **亮点** | 流式 SSE · 可取消 · 写作 RAG+diff · Coding 结构揉合 · exec 沙箱（bwrap/软 jail）· AST 旁路索引 · Golden/`make gate` |
 | **非目标** | 不宣称对齐 Cursor 全功能；Skills / 多模态 / K8s 暂缓 |
 | **起栈** | `make up` = **分模块**只重建脏服务 + 发布台 `:9090`；全量用 `make up-all` |
-| **发布台** | 随 up 拉起；脏模块与确认方式见 [架构 · 分模块发布](docs/core/architecture.md) · [scripts/release/README.md](scripts/release/README.md) |
+| **发布台** | 随 up 拉起；见 [架构 · 分模块发布](docs/core/architecture.md) |
 | **旁路观测** | `/ops/<OPS_TEST_SECRET>/official` Bench · [工作台](docs/topics/workbench.md) |
 
 文档索引：**[docs/README.md](docs/README.md)**（6 篇正文，每篇 2 张控制流图）。

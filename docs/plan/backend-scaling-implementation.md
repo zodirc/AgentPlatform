@@ -1,9 +1,9 @@
 # 开发方案：后端并发架构演进落地
 
-> **状态**：实施计划 **v0.2**（2026-08-13）· **WP0–WP9 已落地**；WP10 仍为触发条件驱动  
-> **上游**：[backend-scaling-evolution.md](backend-scaling-evolution.md) v0.2 · [backend-architecture.md](backend-architecture.md) v0.3  
-> **定位**：把演进文档的 O1–O11 / Phase 0–3 转成**可排期、可验收、可回滚**的工程包；以仓内代码核实为准  
-> **红线**：① Turn 热路径 TTFB / 事件延迟不回退；② 客户端契约（202/200/502、SSE、审批流）不破坏（O4 饱和态除外，显式开关）；③ 机型 A（6C6G）仍能跑完整产品栈
+> **状态**：**历史实施手册** v0.2（2026-08-13）· **WP0–WP9 已落地**；WP10 仍为触发条件驱动  
+> **上游**：[backend-scaling-evolution.md](backend-scaling-evolution.md) · [backend-architecture.md](backend-architecture.md)  
+> **定位**：保留工作包、验收与回滚记录；新改动以代码 + 六篇正文为准  
+> **红线**：TTFB / 事件延迟不回退；客户端契约不破坏（O4 除外）；机型 A 可跑完整栈
 
 ---
 

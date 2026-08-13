@@ -1,17 +1,17 @@
 # 事件与契约
 
-事实事件如何从 runtime 到达 Web，以及 api 如何用内部命令启动/取消/审批 Turn。两张图覆盖管道与 StartTurn 链。
+事实事件如何从 runtime 到达 Web，以及 Turn 如何被启动、取消与审批。两张图覆盖管道与 StartTurn 链。
 
 ## 图
 
 1. [事件 · SSE · 投影](../assets/events/event-sse-zh.png) — INSERT → NOTIFY → LISTEN → SSE / views  
-2. [StartTurn 命令链](../assets/events/start-turn-command-zh.png) — POST turns → 内部 start-turn  
+2. [StartTurn 命令链](../assets/events/start-turn-command-zh.png) — 默认 pull 领取；push 回退  
 
 ![事件 SSE 投影](../assets/events/event-sse-zh.png)
 
 ![StartTurn 命令链](../assets/events/start-turn-command-zh.png)
 
-## 1. 事实管道（Pull 模型）
+## 1. 事实管道（事件拉取）
 
 采用 **事件表拉取**，不用 runtime→api 内存推送，也不让 runtime 对浏览器开 SSE。
 
@@ -19,31 +19,26 @@
 runtime（TurnController / AgentEngine）
   · 关键节点 append-only INSERT turn_events（递增 sequence）
   · 大正文进 artifacts；事件行带摘要/指针
-  · AFTER INSERT → pg_notify('turn_events_channel', turn_id)
+  · AFTER INSERT → pg_notify(turn_events 通道, turn_id)
 
 Postgres
 
 api
-  · 启动时 LISTEN turn_events_channel
-  · 收到 turn_id → asyncio.Queue（SSE 与 projection 共用触发）
-  · Queue 空闲约 2s 轮询 turn_events 兜底（防丢通知/断连）
+  · 启动时 LISTEN
+  · 收到 turn_id → 队列（SSE 与投影共用触发）
+  · 队列空闲约 2s 轮询 turn_events 兜底
 
 分流：
-  · SSE  GET /api/v1/turns/{id}/stream
-        按 sequence 回放增量；thinking.delta 只走 SSE
-        约 14s 发 :ping；客户端可用 Last-Event-ID 重连
+  · SSE  GET …/turns/{id}/stream
+        按 sequence 回放；thinking.delta 只走 SSE
+        约 14s :ping；可用 Last-Event-ID 重连
   · Projection
-        同批事件 UPSERT turn_views
-        列表 / 首屏 / 重连 / 终态确认 → GET /view（可 ETag/304）
+        同批 UPSERT turn_views
+        列表 / 首屏 / 重连 / 终态 → GET /view（可 ETag/304）
         thinking.delta 默认不进 view 快照
 ```
 
-禁止：
-
-- runtime 直连浏览器 SSE  
-- 仅靠进程内 channel 当事唯一源  
-- 在 Turn 热路径上同步做重投影计算  
-
+禁止：runtime 直连浏览器 SSE；仅靠进程内 channel 当事唯一源；Turn 热路径上同步重投影。  
 UI **不推断**阶段：只跟事件流与 `turn_views`。
 
 ## 2. 写主权
@@ -53,45 +48,58 @@ UI **不推断**阶段：只跟事件流与 `turn_views`。
 | **runtime** | `turn_events`、runs/turns 执行态、checkpoint、transcript 真源、工具产物引用 |
 | **api** | `turn_views`、对外 SSE、触发/更新 `sessions.context_summary`（常异步） |
 
-无分布式事务：领域表若短暂落后，用事件序 **reconcile** 修。  
-派生字段（如 `cancellable`、interrupt 视图）可读时计算，不必全部落成 `turn_views` 列——以 `packages/contracts` DDL 与 api 实现为准。
+无分布式事务：领域表若短暂落后，用事件序 **reconcile** 修。
 
 ## 3. 命令与资源
 
-### 3.1 StartTurn（主路径）
+### 3.1 StartTurn（默认 pull）
 
-1. 客户端 `POST /api/v1/sessions/{id}/turns`（input、附件、scenario 等）。  
-2. api 鉴权，校验 session · `work_id` · `scenario_id`。  
-3. 落库：插入 `turns` + `runs`；尽快发出 **`turn.accepted`**（服务 TTFB）。  
-4. 内部 HTTP：`POST runtime /internal/commands/start-turn`，头带 `INTERNAL_SERVICE_TOKEN`。  
-5. runtime `TurnController`：Intake → Profile → shouldQuery → Engine 或本地完结。  
+```text
+1. 客户端 POST …/sessions/{id}/turns
+2. api 鉴权，校验 session · work · scenario
+3. 准入：全局/租户未领取队列满 → 429 + Retry-After
+4. 同一事务落库 turns + runs（+ 视图种子）；
+   pull 且可领取 → NOTIFY 分发通道；客户端先得 202
+5. runtime claim（有空位才领）+ lease 心跳；
+   读 StartSpec（含 plan_phase / ops_eval 密文等）
+6. runtime 发 turn.accepted → Intake → shouldQuery → Engine 或本地完结
+```
 
-### 3.2 同族内部命令（同一 token）
+**易混点**：api「尽快」只做落库 + 分发通知；**业务首事件 `turn.accepted` 在 runtime 领取成功后发出**。TTFB 看该事件经 SSE 到达的时刻。
 
-| 命令 | 用途 |
+| 模式 | 行为 |
 |------|------|
-| `cancel-turn` | 软/硬取消 |
-| `approve-tool-call` / `deny-tool-call` | 审批续跑或拒绝 |
-| `patch-accept` / `patch-reject` | diff 接受/拒绝 |
-| `sync-sources-index` / `cancel-sources-index` | 索引面 |
-| `verify-pass` · `warmup-retrieval` 等 | 验证/预热类 |
+| **pull（默认）** | NOTIFY → runtime 领取；超时 → `failed(start_timeout)`；租约丢 → `failed(runner_lost)` |
+| **push（回退）** | api HTTP `start-turn`；传输失败 → 客户端 502 |
+
+运维旋钮与故障注入：[Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+
+### 3.2 同族控制命令
+
+默认走 **`run_commands` + NOTIFY**，由持有 lease 的 runtime 消费（HTTP 内部命令可作兼容回退）：
+
+| 命令族 | 用途 |
+|--------|------|
+| 取消 | 软 / 硬取消 |
+| 工具审批 | 批准 / 拒绝 tool_call |
+| patch | 接受 / 拒绝 diff |
+| 索引 | 资料索引同步 / 取消 |
+| 其它 | 验证 pass、检索预热等 |
 
 ### 3.3 只读资源（不触发 loop）
 
 `GET /turns/{id}` · `/view` · `/stream` · `GET /runs/{id}` · Sessions/Works/健康检查等。
 
-公开契约与版本：`packages/contracts`（OpenAPI ⊆ api 测试；事件 schema；DDL；changelog）。改字段先改契约包，再改实现与 web 生成类型。
+公开契约与版本以契约包为准；改字段先改契约，再改实现与 web 生成类型。
 
-## 4. 常见事件形态（概念）
-
-不必背全表，但主链上会反复见到：
+## 4. 常见事件形态
 
 | 阶段 | 例 |
 |------|-----|
-| 受理 | `turn.accepted` |
+| 受理 | `turn.accepted`（runtime 领取后） |
 | 模型 | `turn.thinking.delta` · 文本增量 |
 | 工具 | `tool.started` / `tool.completed` · `approval.requested` |
-| 检索旁路 | `retrieval.completed`（audit，给 Ops L1/L2/L3；见[工作台](../topics/workbench.md)） |
+| 检索旁路 | `retrieval.completed`（审计，给 Ops） |
 | 终态 | `turn.completed` / `turn.failed` / `turn.cancelled` |
 
-完整枚举与 payload 以契约包事件 schema 为准，并与投影消费逻辑对齐。
+完整枚举与 payload 以契约包事件 schema 为准。

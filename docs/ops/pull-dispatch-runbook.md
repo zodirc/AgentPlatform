@@ -1,7 +1,8 @@
 # Pull 分发运维手册（成熟度）
 
 > 对应：`TURN_DISPATCH=pull`（默认）· lease · `run_commands` · 准入 429  
-> 指标：`GET /metrics`（Bearer `INTERNAL_SERVICE_TOKEN`）· Ops 概览「容量 / 分发」卡
+> 主路径说明：[架构](../core/architecture.md) · [事件与契约](../core/events.md) · [Runtime](../core/runtime.md)  
+> 指标：`GET /metrics`（Bearer 内部 token）· Ops 概览「容量 / 分发」卡
 
 ## 1. 正常扩缩
 

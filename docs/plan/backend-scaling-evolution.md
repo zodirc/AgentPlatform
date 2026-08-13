@@ -1,8 +1,9 @@
 # 方案：后端并发架构演进（双机开发 → 可扩容部署）
 
-> **状态**：优化草案 **v0.2**（2026-08-13）· Phase 0–2 / WP0–WP9 **已落地**（见 [`backend-scaling-implementation.md`](backend-scaling-implementation.md)）  
-> **定位**：不改交互语义的前提下，把当前"单机 compose 架构"演进为"同构可扩容架构"的**优化清单与分阶段执行方案**  
-> **红线**：本方案所有优化项必须满足 —— ① Turn 热路径 TTFB / 事件延迟不回退；② 客户端契约（202/200/502、SSE、审批流）不破坏（O4 饱和态除外）；③ 机型 A（6C6G）仍能跑完整产品栈
+> **状态**：**历史演进册** v0.2（2026-08-13）· Phase 0–2 / WP0–WP9 **已落地** · Phase 3 / WP10 仍为触发条件驱动  
+> **现行主路径**：已回写 [架构](../core/architecture.md) · [事件](../core/events.md) · [运维手册](../ops/pull-dispatch-runbook.md)；机型/数字详册见 [backend-architecture.md](backend-architecture.md)  
+> **定位**：记录「为何从推送制转到领取制」的决策与阶段；**勿再当作未开工待办**  
+> **红线**：TTFB / 事件延迟不回退；客户端契约不破坏（O4 饱和态除外）；机型 A 仍能跑完整产品栈
 
 ---
 
@@ -432,16 +433,16 @@ owner 副本 LISTEN：只消费自己 claim 的 run 的命令（WHERE runner_id 
 
 ## 6. 与现有文档的关系
 
-- 本文是 [`backend-architecture.md`](backend-architecture.md)（现状全景）的**演进分册**：那边写"现在是什么"，本文写"往哪改、为什么、何时"。
-- 弱点编号 W1–W12 ↔ 全景文档章节的映射见 §1.2 表内"证据"列。
-- 各优化项落地后：现状描述回写全景文档对应章节（§3 分发写序、§8 并发矩阵、§10 机型配方），本文对应项标注「已落地 → 见 xxx」。
-- 「改 X 去哪」补充：
+- **现行主路径**已回写：[架构](../core/architecture.md) · [事件](../core/events.md) · [Runtime](../core/runtime.md) · [运维手册](../ops/pull-dispatch-runbook.md)。  
+- 本文是 [backend-architecture.md](backend-architecture.md) 的**演进历史册**：Phase 0–2 / WP0–WP9 **已落地**；Phase 3 / WP10 仍触发条件驱动。  
+- **勿再把 §1.2 弱点表当「当前未修清单」**——多数项已关闭；未关闭项见 Phase 3（work 亲和、embedding sidecar、多节点演练）。  
+- 「改 X 去哪」：
 
-| 改什么 | 落点 |
-|--------|------|
-| 分发模式 / claim 谓词 | `turn_controller.py` · `run_lock.py` · `TURN_DISPATCH` |
-| 命令通道 | `run_commands` DDL · api `routers/turns.py` |
-| 租约与回收 | `runners` DDL · api reconcile 循环 |
-| 准入帽 | api `routers/sessions.py` · `DISPATCH_QUEUE_MAX` / `PER_TENANT_QUEUE_MAX` |
-| 机型 overlay | ~~取消 `dev-{a,b}` / `MACHINE=`~~ · bench-pg `profiles: [bench]` · `.env` 手调 §10 |
-| 事件保留 | alembic 分区迁移 · outbox `events.retention` |
+| 改什么 | 落点（概念） |
+|--------|----------------|
+| 分发模式 / claim | runtime 领取与租约 · `TURN_DISPATCH` |
+| 命令通道 | `run_commands` · api Turn 路由 |
+| 租约与回收 | runners · api reconcile |
+| 准入帽 | api 准入 · 队列上限 |
+| 机型 / bench 门控 | compose profiles · `.env` |
+| 事件保留 | 保留策略 · 批删作业 |

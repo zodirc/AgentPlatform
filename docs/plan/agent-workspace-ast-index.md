@@ -1,9 +1,8 @@
 # 方案：Agent 工作区异步 AST 索引（Cursor 式 codebase index）
 
-> **状态**：候选方案 **v4→A6 落地中**（2026-08-13）· A0–A5/E1 骨架已落地 · **A6：`agent-ast-indexer` 旁路进程 + `work_ast_index_jobs` SKIP LOCKED 队列已接线**（runtime 默认 `WORKSPACE_AST_INLINE=false`，不再同环全仓 `run_cold_start`）· 验收缺口：A6 拓扑下双轨 n5 数字尚未入库  
-> **与主方案关系**：从 [Coding 结构智能（LSP / AST）](coding-structural-intelligence.md) 拆出；主方案负责 **已落地 LSP Locate/Impact + SWE/Ops 评测揉合**；本文只谈 **Agent 仓库工作区的异步符号索引**  
+> **状态**：A6 **已接线**（2026-08-13）· A0–A5/E1 骨架已落地 · 旁路进程 + SKIP LOCKED 队列已运行（runtime 默认不同环全仓冷启动）· **验收缺口**：A6 拓扑下双轨 n5 数字尚未入库  
+> **与主方案关系**：从 [Coding 结构智能](coding-structural-intelligence.md) 拆出；正文摘要见 [架构](../core/architecture.md) 旁路与 [工具与上下文](../core/tools-and-context.md)  
 > **非目标**：不替代 LSP；不携带 RAG / embedding；不服务 writing/intel 的 `search_sources`  
-> **约束权威**：[架构 · R1–R5](../core/architecture.md) · [RAG 两平面](../topics/rag.md)（对照隔离）· 主方案 §3 场景分型  
 
 > **落地摘要（2026-08-13 A6）**：compose 服务 `ast-indexer`（同 runtime 镜像、独立 PID、mem≈768m、parse concurrency=1）· DDL `phase1n_work_ast_index_jobs` · runtime `enqueue`→队列 / indexer `worker` claim · 评测 ephemeral 经 `.agent/ast_index_snapshot.json` 跨进程 · harness `max_workers` 默认 1（受限主机）。此前摘要：DDL/`0018` · `structural/workspace_index/` · 焊入 `search_codebase` · dirty/watch · status/rebuild/purge API · GUI `AstIndexStatusBar` · CSI `locate_fuse_fail_reason` · `suites.coding.workspace_index`。
 
@@ -501,22 +500,22 @@ v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness
 
 ---
 
-## 9. 落地序（未排进 Wave 2 主轨；每步独立可回退）
+## 9. 落地序（A0–A6 主链已接线；双轨数字待复跑）
 
-> **v3 排序**：A0→A1→A3 快车道 + E1 评测轨。**v4 增补**：A6（indexer 进程解耦）为产品与正式双轨的 **架构正确性步**；E1 消费面可先于 A6 冒烟，但 parallel>1 / 定论跑以 A6 为目标。
+> **状态（2026-08-13）**：A0–A5/E1 骨架 + **A6 旁路 indexer** 已接线。下表保留原验收口径；「待」仅指评测数字/增强通道，不再表示骨架未写。
 
-| 步 | 内容 | 触点（实施时） | 验收 |
-|----|------|----------------|------|
-| A0 | 表结构（§5.1，symbols blob 含 `ct` 容器字段）+ meta 读写 + 内存投影骨架（load/replace/lookup，postings 带 container） | 新增 `structural/workspace_index/`（store / projection）；Alembic 独立迁移 | 单测：upsert/恢复/ACL 过滤；与 RAG 迁移零交集 |
-| A1 | 单 Work 冷启动 job（walk + hash + parse + 批量 upsert）+ 进度 GET endpoint | job + `main.py` 路由；解析复用 chunking/tree-sitter 基建 | GUI 显示 building→ready；R1 延迟对照持平（TTFB / assemble_ms 不变） |
-| A2 | 通道 ① 工具钩子 + 脏队列 + content-hash 失效 + stale 单文件回落（评测态只需此步的钩子部分） | `edit_file`/`write_file` handler 成功路径加 enqueue（一行级侵入） | 编辑后 generation 变；篡改 mtime 场景下 hash 仍判对；delete 后查询无幽灵条目 |
-| A3 | **Locate 粗筛接入**（§2.2）+ **incomplete 候选回显与排序**（§2.2.1）+ 融合失败原因分桶探针（§0.3） | `tools/core/tools.py` Locate 分支加「索引候选 → LSP 确认」前置；结果 schema 增可选 `candidates[]`（仅 incomplete 时出现） | golden：索引 on/off 双轨——definitions 命中率不降、符号 Locate p50 墙钟下降、`candidates[]` 排序单测（限定名/方法/大小写）；索引 off 行为与今日逐字节一致；**不以任何新工具调用数为 KPI** |
-| **E1**（评测轨，v3 新增） | 评测瞬态索引 profile（§7.2）：runner 开关 + checkout 后 enqueue + 纯内存 + 仅通道 ①；随后 n5 → lite-50 双轨（§7.3） | 基准 runner 配置 + 套件层 checkout 尾部一处 enqueue；runtime 侧复用 A0/A1/A3 | 双轨判据（§7.3）：`locate_fuse_ok_rate` 对 0.364 基线、`n_grep_locate_incomplete` 对 7 基线、失败原因分桶入档、resolve 差值与速率持平；决策按 §7.3 三分支执行，结论入 §12 修订记录 |
-| **A6**（架构，v4 新增） | **独立 `agent-ast-indexer` 进程/服务**（§0.4 / §3.0）：任务队列 + runtime 仅投影消费；分阶段可查；动态预算；从 runtime 移除全仓 `run_cold_start` 同环执行 | compose 新服务或 sidecar；enqueue API；投影加载/热替换；脏 path 只入队 | `parallel=2` 下 Turn 无成片 DB/模型超时归因于索引；indexer CPU 与 runtime 可分 cgroup；空闲冷启动逼近方案预估（数百 py / 数十秒量级）；杀 indexer 不影响已 ready 投影的 lookup |
-| A4 | 通道 ② run_command 轻扫（预算内）+ 通道 ③ 低频兜底轮询 | `run_command` handler 尾部 + lifespan 定时任务（仿 sources_watch） | 外部 `git checkout` 后 ≤1 轮询周期内追平；轻扫超预算正确转 `scan_pending` 不阻塞工具返回 |
-| A5 | 多 Work LRU 淘汰 + GC purge job + 多账号 ACL 端到端 | 淘汰策略 + purge | 跨用户不可见；删 Work 级联清；投影内存有上限且淘汰可观测 |
+| 步 | 内容 | 状态 | 验收要点 |
+|----|------|------|----------|
+| A0 | 表结构 + 内存投影骨架 | **已落地** | upsert/恢复/ACL；与 RAG 迁移隔离 |
+| A1 | 冷启动 job + 进度 API | **已落地** | building→ready；不挡 TTFB |
+| A2 | 工具钩子 + 脏队列 + hash 失效 | **已落地** | 编辑后世代变；无幽灵条目 |
+| A3 | Locate 粗筛 + incomplete 候选 | **已落地** | 焊进既有 Locate 漏斗；off 时行为一致 |
+| E1 | 评测瞬态索引 profile | **骨架已落地** | 双轨 n5 数字待 A6 拓扑复跑入库 |
+| A6 | 独立 ast-indexer 进程 + 队列 | **已接线** | runtime 默认不同环全仓冷启动 |
+| A4 | run_command 轻扫 + 低频轮询 | 可增强 | 外部 checkout 追平 |
+| A5 | 多 Work LRU + GC + ACL | 可增强 | 跨用户不可见；内存有上限 |
 
-依赖关系：A0→A1 串行；A3 依赖 A1；**E1 依赖 A1+A3（+A2 钩子）**；**A6 依赖 A1 语义稳定，可与 E1 冒烟并行开发，正式双轨/parallel>1 以 A6 为准**；A4/A5 可与其后并行。主方案 Wave 2 **不依赖** 本文任何一步。
+依赖：正式 parallel>1 / 定论双轨以 A6 拓扑为准。主方案 Wave 2 **不依赖**本文未完成增强步。
 
 ---
 
@@ -570,4 +569,5 @@ v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness
 | 2026-08-12 | **v3（评测归因修订，基于 `d459ca51` 官方 resolve 0/5）**：新增 §0.3 逐指标归因——交卷链/编辑护栏健康，短板集中在 Locate 段（`locate_fuse=0.364`、`incomplete=7`、3/5 题 `grep_ok=0`、Locate 落空后词面漫游烧步数），恰为本索引主责，而 v2 §7「SWE 默认不建」使评测测的是能力被阉割的产品；修复正确性（4/5 `patch_not_resolved`）与 Turn 超时（14182）明确归主方案 Wave 2 / P4，本文不认领。§7 重写为「评测瞬态索引」：checkout 后 StartTurn 前异步构建、纯内存不落 DB、仅通道 ①、失败回落今日基线、开关只在 runner 配置；含公平性辨析（产品固有能力 ≠ 预注入 ≠ gold 泄漏）与三分支决策规则（fuse↑且 resolve≥0 → 默认 on；fuse↑但 resolve 平 → 火力回主方案 W1/W4；fuse 不升 → 按失败原因分桶复盘）。§2.2.1 新增 incomplete 候选回显与排序契约（`candidates[]` 不冒充 definitions、限定名/方法归一化、投影加 container）；§5.1 symbols blob 增 `ct` 字段。§9 排序变更：A0→A1→A3 快车道 + 评测轨 E1（挂主方案 N2 后并行，记 N2.5），A4/A5 后置不进评测轨；归因探针（融合失败原因分桶）列为双轨前置。§1.2 旧口径同步更新；风险表增 4 行、否决清单增 11–13 |
 | 2026-08-12 | **v3 代码落地**：`query.py` 归一化/排序；`SymbolRec.ct` + parse 容器链；`locate` incomplete→`candidates[]` + `locate_fuse_fail_reason`；CSI 探针分桶；`run_cold_start(memory_only=)`；runtime rebuild/purge；`suites.coding.workspace_index` + L1 checkout 后 fire-and-forget enqueue；单测覆盖 incomplete/candidates、memory-only、qualified sort |
 | 2026-08-12 | **v4（进程边界）**：§0.4 实战复盘——同进程冷启动在 parallel≥2 下与 Turn/Jedi/DB 互抢致假慢与成片 `turn.failed`；思路对标 Cursor/SCIP「索引器与查询端解耦」；目标拓扑 `agent-ast-indexer` 生产、runtime 只消费。新增 §3.0；修订 §3.1/通道①/§7.2 动态预算/§8 R4；§9 增 A6；风险与否决 14–15；明确 parallel=1/加长预算仅为过渡，不得作终态或错误归因依据 |
-| 2026-08-13 | **A6 代码落地**：`work_ast_index_jobs` + alembic `0019` · `queue.py` / `worker.py` / `snapshot.py` · `AstIndexService` 默认 remote enqueue（`workspace_ast_inline=false`）· dirty 只投递 path · compose `ast-indexer` · `make up-ast-indexer` · suites harness `max_workers=1`；正式双轨 n5 仍待在本拓扑下复跑入档 |
+| 2026-08-13 | **A6 代码落地**：`work_ast_index_jobs` + alembic · queue/worker/snapshot · 默认 remote enqueue · compose `ast-indexer`；正式双轨 n5 仍待本拓扑复跑 |
+| 2026-08-13 | **文档回写**：§9 落地序改为状态表（A0–A6 主链已接线）；与六篇正文 / CSI 状态条对齐 |
