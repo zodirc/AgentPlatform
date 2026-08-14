@@ -75,10 +75,11 @@ export function CorpusChunksCard() {
     enabled: Boolean(workId && selected?.path),
   });
 
-  const files = filesQuery.data?.files ?? [];
+  const files = filesQuery.data?.files;
   const grouped = useMemo(() => {
-    const seed = files.filter((f) => f.visibility === "seed");
-    const local = files.filter((f) => f.visibility !== "seed");
+    const list = files ?? [];
+    const seed = list.filter((f) => f.visibility === "seed");
+    const local = list.filter((f) => f.visibility !== "seed");
     return { seed, local };
   }, [files]);
 
@@ -135,7 +136,7 @@ export function CorpusChunksCard() {
             <p className="p-3 text-xs text-destructive">
               {(filesQuery.error as Error).message || "无法读取切分"}
             </p>
-          ) : files.length === 0 ? (
+          ) : !files?.length ? (
             <p className="p-3 text-xs text-muted-foreground">
               暂无已索引切块。可先在资料库同步，或确认种子未关闭。
             </p>
