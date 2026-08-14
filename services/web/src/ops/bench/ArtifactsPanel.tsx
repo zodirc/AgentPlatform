@@ -306,6 +306,35 @@ export function ArtifactsPanel({
                 checks_cov={Number(score.edit_checks_coverage).toFixed(3)}
               </span>
             ) : null}
+            {typeof score.file_hit_rate === "number" ? (
+              <span>
+                file_hit={Number(score.file_hit_rate).toFixed(3)}
+                {score.file_hit_n != null
+                  ? ` (n=${String(score.file_hit_n)})`
+                  : ""}
+              </span>
+            ) : null}
+            {typeof score.repro_rerun_rate === "number" ? (
+              <span>
+                repro_rerun={Number(score.repro_rerun_rate).toFixed(3)}
+              </span>
+            ) : null}
+            {typeof score.tests_before_submit_rate === "number" ? (
+              <span>
+                tests_submit={Number(score.tests_before_submit_rate).toFixed(3)}
+              </span>
+            ) : null}
+            {typeof score.read_outline_coverage === "number" ? (
+              <span>
+                outline_cov={Number(score.read_outline_coverage).toFixed(3)}
+              </span>
+            ) : null}
+            {typeof score.edit_related_tests_coverage === "number" ? (
+              <span>
+                related_tests=
+                {Number(score.edit_related_tests_coverage).toFixed(3)}
+              </span>
+            ) : null}
             {score.syntax_reject_count != null ? (
               <span>syntax_rej={String(score.syntax_reject_count)}</span>
             ) : null}

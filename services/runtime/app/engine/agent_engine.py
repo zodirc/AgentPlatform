@@ -89,6 +89,14 @@ def _compact_edit_file_event_meta(result: dict[str, Any]) -> dict[str, Any]:
             out["match_count"] = int(result["match_count"])
         except (TypeError, ValueError):
             pass
+    related = result.get("related_tests")
+    if isinstance(related, list) and related:
+        out["related_tests_count"] = len(related)
+    elif result.get("related_tests_count") is not None:
+        try:
+            out["related_tests_count"] = int(result["related_tests_count"])
+        except (TypeError, ValueError):
+            pass
     return out
 
 
@@ -1440,6 +1448,14 @@ class AgentEngine:
                     pass
             if result.get("truncated") is not None:
                 completed_payload["is_truncated"] = bool(result.get("truncated"))
+                completed_payload["truncated"] = bool(result.get("truncated"))
+            if result.get("outline_count") is not None:
+                try:
+                    completed_payload["outline_count"] = int(result["outline_count"])
+                except (TypeError, ValueError):
+                    pass
+            elif isinstance(result.get("outline"), list):
+                completed_payload["outline_count"] = len(result["outline"])
             path_val = str(result.get("path") or "")
             if path_val:
                 completed_payload["path"] = path_val

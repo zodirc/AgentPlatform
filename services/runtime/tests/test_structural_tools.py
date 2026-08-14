@@ -230,6 +230,40 @@ async def test_edit_file_attaches_impact_on_code(
 
 
 @pytest.mark.asyncio
+async def test_edit_file_attaches_related_tests(
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (workspace / "pkg").mkdir()
+    (workspace / "pkg" / "mod.py").write_text(
+        "def alpha():\n    return 1\n", encoding="utf-8"
+    )
+    (workspace / "pkg" / "tests").mkdir()
+    (workspace / "pkg" / "tests" / "test_mod.py").write_text(
+        "from pkg.mod import alpha\n\ndef test_alpha():\n    assert alpha() == 1\n",
+        encoding="utf-8",
+    )
+
+    async def fake_refs(*_a, **_k):
+        return {"locations": [], "pointers": [], "meta": {"provider": "jedi"}}
+
+    async def fake_diag(*_a, **_k):
+        return [], {"provider": "ruff"}
+
+    monkeypatch.setattr("app.structural.adapters.find_references", fake_refs)
+    monkeypatch.setattr(core, "_file_diagnostics_issues", fake_diag)
+    result = await core.edit_file(
+        "pkg/mod.py",
+        "def alpha():\n    return 1\n",
+        "def alpha():\n    return 2\n",
+    )
+    assert result["status"] == "edited"
+    assert "related_tests" in result
+    assert any(p.endswith("test_mod.py") for p in result["related_tests"])
+    assert result["related_tests_count"] >= 1
+
+
+@pytest.mark.asyncio
 async def test_edit_file_markdown_skips_impact(workspace: Path) -> None:
     (workspace / "doc.md").write_text("hello\n", encoding="utf-8")
     result = await core.edit_file("doc.md", "hello", "HELLO")

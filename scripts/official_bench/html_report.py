@@ -64,6 +64,12 @@ _METRIC_ZH = {
     "edit_impact_coverage": "编辑影响覆盖",
     "locate_fuse_ok_rate": "定位融合成功率",
     "locate_fuse_n": "定位融合次数",
+    "file_hit_rate": "文件命中率",
+    "file_hit_n": "文件命中计分题数",
+    "repro_rerun_rate": "复现复跑率",
+    "tests_before_submit_rate": "交卷前测过率",
+    "read_outline_coverage": "截断读大纲覆盖",
+    "edit_related_tests_coverage": "相关测试附带覆盖",
 }
 
 _SUITE_ZH = {

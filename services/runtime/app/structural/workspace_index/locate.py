@@ -105,6 +105,84 @@ def _incomplete_payload(
     return out
 
 
+def _instant_def_hits(
+    workspace: Path,
+    symbol: str,
+    *,
+    limit: int = 5,
+    max_files: int = 8,
+) -> list[SymbolHit]:
+    """Bounded filename → single-file parse when the index has no postings yet.
+
+    Covers BUILDING/COLD races and thin indexes without awaiting full ready (R1).
+    Never invents definitions — only extracts from disk files named after the
+    symbol tail (e.g. ``Card`` → ``**/Card.py``).
+    """
+    from app.structural.workspace_index.ignore import dir_skipped, file_skipped
+    from app.structural.workspace_index.job import parse_single_file_fallback
+
+    nq = normalize_symbol_query(symbol)
+    tail = nq.tail
+    if not tail or not tail.isidentifier():
+        return []
+    root = workspace.resolve()
+    candidates: list[Path] = []
+    # Prefer exact filename matches (Card.py / card.py).
+    for dirpath, dirnames, filenames in _bounded_walk(root, max_dirs=200):
+        dirnames[:] = [d for d in dirnames if not dir_skipped(d)]
+        for name in filenames:
+            stem = Path(name).stem
+            if stem != tail and stem.lower() != tail.lower():
+                continue
+            path = dirpath / name
+            if file_skipped(path):
+                continue
+            candidates.append(path)
+            if len(candidates) >= max_files:
+                break
+        if len(candidates) >= max_files:
+            break
+
+    hits: list[SymbolHit] = []
+    for abs_path in candidates:
+        try:
+            rel = str(abs_path.resolve().relative_to(root)).replace("\\", "/")
+        except ValueError:
+            continue
+        try:
+            symbols = parse_single_file_fallback(abs_path, work_root=root, generation=0)
+        except Exception:
+            continue
+        for sym in symbols:
+            if sym.name == tail or sym.name.lower() == tail.lower():
+                hits.append(
+                    SymbolHit(
+                        path=rel,
+                        name=sym.name,
+                        kind=sym.kind,
+                        line=int(sym.line),
+                        col=int(sym.col),
+                        container=sym.container,
+                        content_hash="",
+                        generation=0,
+                    )
+                )
+        if len(hits) >= limit:
+            break
+    return hits[: max(1, int(limit))]
+
+
+def _bounded_walk(root: Path, *, max_dirs: int = 200):
+    import os
+
+    n = 0
+    for dirpath, dirnames, filenames in os.walk(root):
+        yield Path(dirpath), dirnames, filenames
+        n += 1
+        if n >= max_dirs:
+            return
+
+
 async def locate_via_ast_index(
     *,
     workspace: Path,
@@ -128,17 +206,28 @@ async def locate_via_ast_index(
     if not service.enabled_for_work(work_id=work_id, work_root=workspace):
         return None
 
+    top_k = max(1, int(settings.workspace_ast_locate_top_k))
     hits, meta = await service.lookup_symbol(
         work_id,
         symbol,
         owner_user_id=owner_user_id,
-        limit=max(1, int(settings.workspace_ast_locate_top_k)),
+        limit=top_k,
         work_root=workspace,
     )
-    if meta is None or meta.status in {IndexStatus.COLD, IndexStatus.ERROR}:
+    if meta is None:
         return None
+    if meta.status == IndexStatus.ERROR:
+        return None
+    # D2: index miss / still cold → bounded filename instant parse (Zed-style).
+    # Same logic; offload so a large walk does not block cancel/health checks.
     if not hits:
-        return None
+        import asyncio
+
+        hits = await asyncio.to_thread(
+            _instant_def_hits, workspace, symbol, limit=top_k
+        )
+        if not hits:
+            return None
 
     if path_hint and path_hint not in {".", ""}:
         prefix = path_hint.replace("\\", "/").lstrip("./")

@@ -341,6 +341,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "Path theater" in agent.system_prompt
     assert "Read-after-complete" in agent.system_prompt
     assert "Reproduce" in agent.system_prompt
+    assert "related_tests" in agent.system_prompt.lower()
     assert "checks" in agent.system_prompt.lower()
     # Intel: analyst markers (stable; docs/39).
     assert "threat-intelligence analyst" in intel.system_prompt

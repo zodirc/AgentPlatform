@@ -393,6 +393,10 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     hint = continue_hint or sliced.get("hint")
     if hint:
         out["hint"] = hint
+    if truncated:
+        from app.structural.outline import attach_outline_if_truncated
+
+        attach_outline_if_truncated(out, text=content, path=path)
     return out
 
 
@@ -483,23 +487,86 @@ async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -
         "files_scanned": int(scanned.get("files_scanned") or 0),
         "summary": summary,
     }
+def _glob_sync(
+    base: Path,
+    workspace: Path,
+    pattern: str,
+    *,
+    limit: int,
+    budget_s: float = 15.0,
+) -> dict[str, Any]:
+    """Blocking glob off the event loop.
+
+    Primary stop is ``limit`` (product behavior). Time budget is a safety net only —
+    large ``**`` trees should not hang a worker forever, but we do not truncate
+    aggressively when results are still arriving within a few seconds.
+    """
+    import time
+
+    started = time.monotonic()
+    matches: list[str] = []
+    truncated = False
+    try:
+        iterator = base.glob(pattern)
+    except ValueError as exc:
+        return {
+            "matches": [],
+            "match_count": 0,
+            "truncated": False,
+            "error": f"invalid pattern: {exc}",
+        }
+    for fp in iterator:
+        if len(matches) >= limit:
+            break
+        if (time.monotonic() - started) >= budget_s:
+            truncated = True
+            break
+        if not fp.is_file():
+            continue
+        try:
+            rel = str(fp.relative_to(workspace))
+        except ValueError:
+            continue
+        matches.append(rel)
+    matches.sort()
+    return {
+        "matches": matches,
+        "match_count": len(matches),
+        "truncated": truncated,
+    }
+
+
 async def glob(pattern: str, path: str = ".", limit: int = 100, **_kwargs: Any) -> dict[str, Any]:
     root = _resolve_path(path)
     if not root.exists():
         return {"error": f"Path not found: {path}", "matches": []}
     base = root if root.is_dir() else root.parent
-    matches: list[str] = []
-    for fp in sorted(base.glob(pattern)):
-        if not fp.is_file():
-            continue
-        rel = str(fp.relative_to(_workspace_root()))
-        matches.append(rel)
-        if len(matches) >= limit:
-            break
+    scanned = await asyncio.to_thread(
+        _glob_sync,
+        base,
+        _workspace_root(),
+        pattern,
+        limit=max(1, int(limit)),
+    )
+    if scanned.get("error"):
+        return {
+            "pattern": pattern,
+            "path": path,
+            "matches": [],
+            "match_count": 0,
+            "error": scanned["error"],
+            "summary": f"glob failed: {scanned['error']}",
+        }
+    matches = list(scanned.get("matches") or [])
+    truncated = bool(scanned.get("truncated"))
+    summary = f"glob {pattern!r}: {len(matches)} file(s)"
+    if truncated:
+        summary += " (budget hit — results may be partial)"
     return {
         "pattern": pattern,
         "path": path,
         "matches": matches,
         "match_count": len(matches),
-        "summary": f"glob {pattern!r}: {len(matches)} file(s)",
+        "truncated": truncated,
+        "summary": summary,
     }

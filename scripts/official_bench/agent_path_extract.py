@@ -804,11 +804,89 @@ def ran_tests_from_events(events: list[dict[str, Any]]) -> bool:
     return bool(tools & {"run_tests", "run_command"})
 
 
+_DIFF_FILE_RE = re.compile(r"^\+\+\+\s+(?:b/)?(.+)$", re.M)
+_TESTISH_CMD_RE = re.compile(
+    r"\b(pytest|py\.test|unittest|nosetests|tox|run_tests)\b|"
+    r"\bpython\s+-m\s+pytest\b|"
+    r"\bpython\s+-m\s+unittest\b",
+    re.IGNORECASE,
+)
+
+
+def files_from_patch(patch: str) -> set[str]:
+    """Paths touched by a unified diff (+++ b/ lines). Shared with D1 file_hit."""
+    files: set[str] = set()
+    for match in _DIFF_FILE_RE.finditer(patch or ""):
+        name = match.group(1).strip()
+        if name == "/dev/null":
+            continue
+        files.add(name.replace("\\", "/"))
+    return files
+
+
+def file_hit(*, model_patch: str, gold_patch: str) -> bool | None:
+    """§7.7.1 D1: model∩gold files ≠ ∅. None when gold has no files (unscored)."""
+    gold = files_from_patch(gold_patch)
+    if not gold:
+        return None
+    model = files_from_patch(model_patch)
+    return bool(model & gold)
+
+
+def _command_fingerprint(payload: dict[str, Any]) -> str:
+    """Normalize run_tests / run_command argv for repro_rerun equality."""
+    for key in ("command", "display_command", "summary"):
+        raw = payload.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return " ".join(raw.strip().split())
+    argv = payload.get("argv")
+    if isinstance(argv, list) and argv:
+        return " ".join(str(x) for x in argv)
+    return ""
+
+
+def _is_testish_command(cmd: str) -> bool:
+    return bool(cmd) and _TESTISH_CMD_RE.search(cmd) is not None
+
+
+def evidence_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """§7.7.1 D1 process evidence from tool.completed (post-hoc; no gold)."""
+    cmd_counts: dict[str, int] = {}
+    tests_before_submit = False
+    for ev in events:
+        if str(ev.get("type") or "") != "tool.completed":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        tool = str(payload.get("tool_name") or "")
+        if tool == "run_tests":
+            tests_before_submit = True
+            fp = _command_fingerprint(payload) or "run_tests"
+            cmd_counts[fp] = cmd_counts.get(fp, 0) + 1
+            continue
+        if tool != "run_command":
+            continue
+        fp = _command_fingerprint(payload)
+        if not _is_testish_command(fp):
+            continue
+        tests_before_submit = True
+        cmd_counts[fp] = cmd_counts.get(fp, 0) + 1
+    repro_rerun = any(n >= 2 for n in cmd_counts.values())
+    return {
+        "repro_rerun": bool(repro_rerun),
+        "tests_before_submit": bool(tests_before_submit),
+        "n_testish_commands": int(sum(cmd_counts.values())),
+        "n_distinct_testish_commands": int(len(cmd_counts)),
+    }
+
+
 def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Wave 1+2 structural probes from tool.completed (Ops coding / §7.6).
 
     Relies on compact CSI fields on the event bus (impact/checks/locate_*), not
     full model tool_result JSON. Counts are per-Turn; suite rates roll up later.
+    Also folds §7.7.1 D1 evidence flags (repro_rerun / tests_before_submit).
     """
     n_grep_locate = 0
     n_grep_locate_ok = 0
@@ -824,6 +902,7 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     n_edit_ok = 0
     n_edit_with_impact = 0
     n_edit_with_checks = 0
+    n_edit_with_related_tests = 0
     n_edit_impact_ok = 0
     n_edit_checks_ok = 0
     n_syntax_rejected = 0
@@ -831,6 +910,8 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     n_span_fail = 0
     n_span_fail_with_candidates = 0
     n_pager_run_command = 0  # reserved N3
+    n_read_truncated = 0
+    n_read_with_outline = 0
 
     for ev in events:
         if str(ev.get("type") or "") != "tool.completed":
@@ -871,6 +952,20 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
                 n_search_locate += 1
                 if def_n > 0 or locate_status == "ok":
                     n_search_locate_ok += 1
+            continue
+
+        if tool == "read_file":
+            truncated = payload.get("truncated")
+            if truncated is None:
+                truncated = payload.get("is_truncated")
+            if truncated is True:
+                n_read_truncated += 1
+                try:
+                    outline_n = int(payload.get("outline_count") or 0)
+                except (TypeError, ValueError):
+                    outline_n = 0
+                if outline_n > 0 or payload.get("outline"):
+                    n_read_with_outline += 1
             continue
 
         if tool != "edit_file":
@@ -921,7 +1016,16 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
                 # presence on success path counts as coverage; ok is stricter
                 if str(checks.get("status") or "") == "ok":
                     n_edit_checks_ok += 1
+        try:
+            related_n = int(payload.get("related_tests_count") or 0)
+        except (TypeError, ValueError):
+            related_n = 0
+        if related_n > 0 or (
+            isinstance(payload.get("related_tests"), list) and payload.get("related_tests")
+        ):
+            n_edit_with_related_tests += 1
 
+    evidence = evidence_from_events(events)
     return {
         "n_grep_locate": n_grep_locate,
         "n_grep_locate_ok": n_grep_locate_ok,
@@ -937,6 +1041,7 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "n_edit_ok": n_edit_ok,
         "n_edit_with_impact": n_edit_with_impact,
         "n_edit_with_checks": n_edit_with_checks,
+        "n_edit_with_related_tests": n_edit_with_related_tests,
         "n_edit_impact_ok": n_edit_impact_ok,
         "n_edit_checks_ok": n_edit_checks_ok,
         "n_syntax_rejected": n_syntax_rejected,
@@ -944,11 +1049,15 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "n_span_fail": n_span_fail,
         "n_span_fail_with_candidates": n_span_fail_with_candidates,
         "n_pager_run_command": n_pager_run_command,
+        "n_read_truncated": n_read_truncated,
+        "n_read_with_outline": n_read_with_outline,
+        "repro_rerun": bool(evidence.get("repro_rerun")),
+        "tests_before_submit": bool(evidence.get("tests_before_submit")),
     }
 
 
 def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
-    """Roll per-case CSI counters into suite rates (§7.6 denominators)."""
+    """Roll per-case CSI counters into suite rates (§7.6 / §7.7.1 denominators)."""
     def _sum(key: str) -> int:
         return int(sum(int(c.get(key) or 0) for c in per_case))
 
@@ -957,8 +1066,11 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
     edit_ok = _sum("n_edit_ok")
     edit_impact = _sum("n_edit_with_impact")
     edit_checks = _sum("n_edit_with_checks")
+    edit_related = _sum("n_edit_with_related_tests")
     span_fail = _sum("n_span_fail")
     span_cand = _sum("n_span_fail_with_candidates")
+    read_trunc = _sum("n_read_truncated")
+    read_outline = _sum("n_read_with_outline")
     buckets = [str(c.get("bucket") or "") for c in per_case]
     n_cases = len(per_case) or 1
     n_no_patch = sum(1 for b in buckets if b == "no_patch")
@@ -969,11 +1081,21 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
             return None
         return float(num) / float(den)
 
+    # D1: file_hit is bool|None per case; suite rate over scored cases only.
+    file_hit_vals = [c.get("file_hit") for c in per_case if c.get("file_hit") is not None]
+    file_hit_true = sum(1 for v in file_hit_vals if v is True)
+    file_hit_n = len(file_hit_vals)
+
+    repro_true = sum(1 for c in per_case if c.get("repro_rerun") is True)
+    tests_true = sum(1 for c in per_case if c.get("tests_before_submit") is True)
+    n_cases_scored = len(per_case)
+
     return {
         "locate_fuse_ok_rate": _rate(grep_ok, grep_locate),
         "locate_fuse_n": float(grep_locate),
         "edit_impact_coverage": _rate(edit_impact, edit_ok),
         "edit_checks_coverage": _rate(edit_checks, edit_ok),
+        "edit_related_tests_coverage": _rate(edit_related, edit_ok),
         "edit_ok_n": float(edit_ok),
         "syntax_reject_count": float(_sum("n_syntax_rejected")),
         "syntax_warning_passthrough_count": float(_sum("n_syntax_warning")),
@@ -987,6 +1109,17 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
         "n_locate_fuse_definition_null": float(_sum("n_locate_fuse_definition_null")),
         "n_locate_fuse_lsp_failed": float(_sum("n_locate_fuse_lsp_failed")),
         "n_locate_fuse_lsp_timeout": float(_sum("n_locate_fuse_lsp_timeout")),
+        # §7.7.1 D1
+        "file_hit_rate": _rate(file_hit_true, file_hit_n),
+        "file_hit_n": float(file_hit_n),
+        "repro_rerun_rate": _rate(repro_true, n_cases_scored) if n_cases_scored else None,
+        "tests_before_submit_rate": (
+            _rate(tests_true, n_cases_scored) if n_cases_scored else None
+        ),
+        # §7.7.3–7.7.4 Wave 3 probes
+        "read_outline_coverage": _rate(read_outline, read_trunc),
+        "n_read_truncated": float(read_trunc),
+        "n_read_with_outline": float(read_outline),
     }
 
 

@@ -423,6 +423,16 @@ def _attach_coding_artifact_extras(
         "n_locate_fuse_definition_null",
         "n_locate_fuse_lsp_failed",
         "n_locate_fuse_lsp_timeout",
+        # §7.7.1 D1 evidence
+        "file_hit_rate",
+        "file_hit_n",
+        "repro_rerun_rate",
+        "tests_before_submit_rate",
+        # Wave 3 W7/W8
+        "read_outline_coverage",
+        "n_read_truncated",
+        "n_read_with_outline",
+        "edit_related_tests_coverage",
     ):
         if key in metrics:
             scorecard[key] = metrics[key]

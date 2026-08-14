@@ -79,9 +79,30 @@ async def test_read_file_line_window_char_budget(workspace: Path) -> None:
     assert first["next_offset"] is not None
     assert first["end_line"] < first["total_lines"]
     assert "offset=" in first.get("hint", "")
+    # Non-code truncated reads must not grow an outline field.
+    assert "outline" not in first
     second = await core.read_file("many.txt", offset=first["next_offset"])
     assert second["offset"] == first["next_offset"]
     assert second["content"]
+
+
+@pytest.mark.asyncio
+async def test_read_file_truncated_code_attaches_outline(workspace: Path) -> None:
+    # Force truncation via line limit so outline attaches (Wave 3 W7).
+    parts = ["class Big:\n"]
+    for i in range(80):
+        parts.append(f"    def meth_{i}(self):\n        return {i}\n")
+    (workspace / "bigmod.py").write_text("".join(parts), encoding="utf-8")
+    result = await core.read_file("bigmod.py", limit=5)
+    assert result["truncated"] is True
+    assert result.get("outline")
+    assert result["outline_count"] >= 1
+    assert any("class Big" in line or "def " in line or "method " in line for line in result["outline"])
+    # Complete small read: no outline.
+    (workspace / "tiny.py").write_text("def ok():\n    return 1\n", encoding="utf-8")
+    tiny = await core.read_file("tiny.py")
+    assert tiny["truncated"] is False
+    assert "outline" not in tiny
 
 
 @pytest.mark.asyncio

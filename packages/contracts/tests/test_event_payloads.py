@@ -109,6 +109,41 @@ def test_edit_file_tool_completed_allows_candidate_count() -> None:
     )
 
 
+def test_edit_file_tool_completed_allows_related_tests_count() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_2b",
+            "tool_name": "edit_file",
+            "status": "ok",
+            "summary": "Edited mod.py; related_tests: 2 path(s)",
+            "path": "mod.py",
+            "applies": True,
+            "related_tests_count": 2,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
+def test_read_file_tool_completed_allows_outline_count() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_2c",
+            "tool_name": "read_file",
+            "status": "ok",
+            "summary": "Read big.py truncated",
+            "path": "big.py",
+            "truncated": True,
+            "is_truncated": True,
+            "outline_count": 12,
+            "chars_read": 32000,
+            "file_chars": 90000,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_locate_tool_completed_allows_fuse_probe_meta() -> None:
     validate_event_payload(
         "tool.completed",

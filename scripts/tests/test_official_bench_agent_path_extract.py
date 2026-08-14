@@ -1246,20 +1246,95 @@ def test_csi_suite_rates_denominators() -> None:
                 "n_edit_ok": 2,
                 "n_edit_with_impact": 2,
                 "n_edit_with_checks": 1,
+                "n_edit_with_related_tests": 1,
                 "n_span_fail": 2,
                 "n_span_fail_with_candidates": 1,
                 "n_syntax_rejected": 0,
                 "n_syntax_warning": 1,
+                "n_read_truncated": 2,
+                "n_read_with_outline": 1,
+                "file_hit": True,
+                "repro_rerun": True,
+                "tests_before_submit": True,
             },
-            {"bucket": "no_patch", "n_grep_locate": 0, "n_edit_ok": 0},
+            {
+                "bucket": "no_patch",
+                "n_grep_locate": 0,
+                "n_edit_ok": 0,
+                "file_hit": False,
+                "repro_rerun": False,
+                "tests_before_submit": False,
+            },
         ]
     )
     assert rates["locate_fuse_ok_rate"] == 0.5
     assert rates["edit_impact_coverage"] == 1.0
     assert rates["edit_checks_coverage"] == 0.5
+    assert rates["edit_related_tests_coverage"] == 0.5
     assert rates["span_fail_with_candidates_rate"] == 0.5
     assert rates["bucket_share_no_patch"] == 0.5
     assert rates["syntax_warning_passthrough_count"] == 1.0
+    assert rates["file_hit_rate"] == 0.5
+    assert rates["file_hit_n"] == 2.0
+    assert rates["repro_rerun_rate"] == 0.5
+    assert rates["tests_before_submit_rate"] == 0.5
+    assert rates["read_outline_coverage"] == 0.5
+
+
+def test_d1_file_hit_and_evidence_from_events() -> None:
+    from official_bench.agent_path_extract import (
+        evidence_from_events,
+        file_hit,
+        files_from_patch,
+    )
+
+    gold = "+++ b/a.py\n@@\n+x\n+++ b/b.py\n@@\n+y\n"
+    model_hit = "+++ b/a.py\n@@\n+z\n"
+    model_miss = "+++ b/c.py\n@@\n+z\n"
+    assert files_from_patch(gold) == {"a.py", "b.py"}
+    assert file_hit(model_patch=model_hit, gold_patch=gold) is True
+    assert file_hit(model_patch=model_miss, gold_patch=gold) is False
+    assert file_hit(model_patch=model_hit, gold_patch="") is None
+
+    events = [
+        {
+            "type": "tool.completed",
+            "payload": {"tool_name": "run_tests", "command": "pytest -q tests/test_a.py"},
+        },
+        {
+            "type": "tool.completed",
+            "payload": {"tool_name": "run_tests", "command": "pytest -q tests/test_a.py"},
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "read_file",
+                "truncated": True,
+                "outline_count": 3,
+            },
+        },
+        {
+            "type": "tool.completed",
+            "payload": {
+                "tool_name": "edit_file",
+                "applies": True,
+                "status": "ok",
+                "bytes_written": 10,
+                "impact": {"status": "ok"},
+                "checks": {"status": "ok"},
+                "related_tests_count": 2,
+            },
+        },
+    ]
+    ev = evidence_from_events(events)
+    assert ev["repro_rerun"] is True
+    assert ev["tests_before_submit"] is True
+    probes = csi_probes_from_events(events)
+    assert probes["repro_rerun"] is True
+    assert probes["tests_before_submit"] is True
+    assert probes["n_read_truncated"] == 1
+    assert probes["n_read_with_outline"] == 1
+    assert probes["n_edit_with_related_tests"] == 1
 
 
 def test_csi_probes_locate_fuse_fail_reason_buckets() -> None:

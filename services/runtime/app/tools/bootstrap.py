@@ -19,9 +19,10 @@ def build_registry() -> ToolRegistry:
                 "whole_file_complete=true means the whole file is in hand — stop reading "
                 "that path this Turn (runtime enforces this). Tail windows that reach EOF "
                 "use (eof_from_offset), not (complete). If truncated=true, continue with "
-                "next_offset only. Never head/tail/sed/cat. Optional offset (1-based) / "
-                "limit for large files. For manuscript.md / draft manuscript, pass "
-                "section_id to load one chapter (default lists chapters only); set "
+                "next_offset only; code files also include an outline of defs/classes to "
+                "navigate without blind paging. Never head/tail/sed/cat. Optional offset "
+                "(1-based) / limit for large files. For manuscript.md / draft manuscript, "
+                "pass section_id to load one chapter (default lists chapters only); set "
                 "full=true only for whole-book review."
             ),
             parameters={
@@ -378,12 +379,13 @@ def build_registry() -> ToolRegistry:
                 "Default surgical edit for agent mode: replace a unique exact span "
                 "(old_text → new_text) in an existing file after approval. Prefer this over "
                 "write_file for existing files. On successful code edits the result includes "
-                "impact.references (same sensor as find_references) and checks "
-                "(pre-write syntax gate + incremental diagnostics / new_issues) — read both. "
-                "Introduced syntax errors are rejected without writing. If the span is missing "
-                "or not unique, the result includes candidates/lines — adjust the span "
-                "(or read_file once); do not resend blindly. Still call read_lints for "
-                "cross-file coverage."
+                "impact.references (same sensor as find_references), checks "
+                "(pre-write syntax gate + incremental diagnostics / new_issues), and when "
+                "found related_tests paths (paths only — run them via run_tests / "
+                "run_command). Introduced syntax errors are rejected without writing. If "
+                "the span is missing or not unique, the result includes candidates/lines — "
+                "adjust the span (or read_file once); do not resend blindly. Still call "
+                "read_lints for cross-file coverage."
             ),
             parameters={
                 "type": "object",

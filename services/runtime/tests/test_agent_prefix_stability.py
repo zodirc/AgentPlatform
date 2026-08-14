@@ -30,6 +30,7 @@ def test_agent_system_prompt_contains_cq1_discipline() -> None:
     assert "search_codebase" in text
     assert "impact" in text.lower()
     assert "checks" in text.lower()
+    assert "related_tests" in text.lower()
     assert "Reproduce" in text
     assert "candidates" in text.lower()
     assert "Repo tourism" in text or "list_dir" in text
@@ -101,6 +102,7 @@ def test_agent_tool_descriptions_hygiene() -> None:
 
     read = by_name["read_file"].description
     assert "complete" in read.lower() or "truncated=false" in read.lower()
+    assert "outline" in read.lower()
     params = by_name["read_file"].parameters.get("properties") or {}
     assert "offset" in params and "limit" in params
 
@@ -108,6 +110,7 @@ def test_agent_tool_descriptions_hygiene() -> None:
     assert "default" in edit.lower() or "surgical" in edit.lower()
     assert "impact" in edit.lower()
     assert "checks" in edit.lower() or "syntax" in edit.lower()
+    assert "related_tests" in edit.lower()
     assert "candidates" in edit.lower()
 
     # Tool schemas (names + descriptions) must be deterministic for cache prefix.

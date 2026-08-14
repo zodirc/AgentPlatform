@@ -504,6 +504,21 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         path=path, pre=pre_checks, gate=gate, turn_id=turn_id
     )
 
+    related_tests: list[str] = []
+    try:
+        import asyncio
+
+        from app.structural.providers import language_for_path
+        from app.structural.related_tests import related_tests_for_path
+
+        if language_for_path(path) is not None:
+            # Off event loop: even bounded scans must not starve cancel/health.
+            related_tests = await asyncio.to_thread(
+                related_tests_for_path, path, limit=5
+            )
+    except Exception:
+        related_tests = []
+
     summary = f"Edited {path}"
     if impact.get("status") == "ok":
         summary = f"{summary}; {impact.get('summary') or 'impact attached'}"
@@ -517,8 +532,10 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         summary = f"{summary}; checks {checks.get('status')}"
     elif checks.get("syntax") == "warning":
         summary = f"{summary}; checks: preexisting syntax warning"
+    if related_tests:
+        summary = f"{summary}; related_tests: {len(related_tests)} path(s)"
 
-    return {
+    out: dict[str, Any] = {
         "path": path,
         "old_text": old_text,
         "new_text": new_text,
@@ -529,6 +546,10 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         "impact": impact,
         "checks": checks,
     }
+    if related_tests:
+        out["related_tests"] = related_tests
+        out["related_tests_count"] = len(related_tests)
+    return out
 
 
 async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) -> dict[str, Any]:

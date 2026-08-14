@@ -136,7 +136,14 @@ async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
         if root.is_file():
             files = [root]
         elif root.is_dir():
-            files = [p for p in root.rglob("*.py") if p.is_file()][:20]
+            import asyncio
+            from itertools import islice
+
+            def _list_py(limit: int = 20) -> list:
+                # Early-stop: do not materialize a full-tree list then slice.
+                return list(islice((p for p in root.rglob("*.py") if p.is_file()), limit))
+
+            files = await asyncio.to_thread(_list_py)
         else:
             return {
                 "path": path,

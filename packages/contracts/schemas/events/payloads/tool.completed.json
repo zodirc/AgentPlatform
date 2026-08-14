@@ -41,6 +41,15 @@
     "is_truncated": {
       "type": "boolean"
     },
+    "truncated": {
+      "type": "boolean",
+      "description": "Alias of is_truncated for CSI/read_file probes (Wave 3 W7)."
+    },
+    "outline_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wave 3 W7: number of outline symbols attached on truncated code reads."
+    },
     "chars_read": {
       "type": "integer",
       "minimum": 0,
@@ -192,6 +201,11 @@
       "type": "integer",
       "minimum": 0,
       "description": "edit_file span miss / non-unique: number of candidate locations echoed."
+    },
+    "related_tests_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Wave 3 W8: number of related test paths attached to a successful code edit."
     },
     "match_count": {
       "type": "integer",
