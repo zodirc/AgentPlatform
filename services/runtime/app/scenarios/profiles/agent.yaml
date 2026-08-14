@@ -35,3 +35,8 @@ approval_overrides:
   edit_file: always
 workspace_layout: repository
 web_layout: agent-workbench
+generation:
+  temperature: null
+structural_prewarm: true
+plan_suggest:
+  threshold: 4

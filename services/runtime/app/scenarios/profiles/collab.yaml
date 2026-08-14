@@ -35,3 +35,15 @@ approval_overrides:
   edit_file: always
 workspace_layout: repository
 web_layout: collab-workbench
+generation:
+  temperature: null
+plan_suggest:
+  threshold: 4
+subagent_prompt_suffix: >-
+  For durable handoffs, write short findings under artifacts/collab/
+  when a later worker will need them. End with one line
+  `ARTIFACT_REFS: path1, path2` (workspace-relative).
+  Do not paste large file bodies into the summary.
+hooks:
+  volatile_composer: collab_orchestrator
+  step_checkpoint: collab_gap_hint

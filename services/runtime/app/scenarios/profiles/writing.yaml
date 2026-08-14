@@ -34,3 +34,14 @@ web_layout: writing-workbench
 retrieval:
   exclude_path_prefixes:
     - seed/intel
+generation:
+  temperature: 0.3
+patch_auto_apply: true
+plan_suggest:
+  threshold: 4
+post_turn_jobs:
+  - sources.index_sync
+hooks:
+  system_prompt_composer: writing_cards
+  compact_bookmark: writing_focus
+  post_turn: writing_continuity

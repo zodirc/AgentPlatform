@@ -157,10 +157,18 @@ class PlanSuggestWeights:
 
     def threshold_for(self, scenario_id: str | None) -> int:
         key = (scenario_id or "writing").strip().lower()
-        if key == "agent":
-            return self.threshold_agent
-        if key == "intel":
-            return self.threshold_intel
+        if key:
+            try:
+                from app.scenarios.registry import ScenarioRegistry
+
+                profile = ScenarioRegistry.get(key)
+                raw = (profile.plan_suggest or {}).get("threshold")
+                if isinstance(raw, int):
+                    return raw
+                if isinstance(raw, float):
+                    return int(raw)
+            except (ValueError, TypeError, KeyError):
+                pass
         return self.threshold_writing
 
     def to_dict(self) -> dict[str, int]:

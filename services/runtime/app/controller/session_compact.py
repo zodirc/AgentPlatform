@@ -80,43 +80,22 @@ async def compact_session_context(
         source="manual_compact",
     )
 
-    # docs/24 WT2: writing bookmark (deterministic; no extra LLM)
-    if (scenario_id or "").strip() == "writing":
-        from pathlib import Path
+    # docs/24 WT2: compact bookmark via Profile hooks.compact_bookmark (deterministic; no extra LLM)
+    try:
+        from app.scenarios.hooks import resolve
+        from app.scenarios.registry import ScenarioRegistry
 
-        from app.settings import settings
-        from app.writing.focus import (
-            build_writing_bookmark,
-            format_writing_bookmark,
-            infer_focus_section_id,
-            outline_toc_snippet,
+        profile = ScenarioRegistry.get((scenario_id or "").strip()) if scenario_id else None
+        hook = resolve(profile.hooks.get("compact_bookmark")) if profile else None
+    except (ValueError, RuntimeError):
+        hook = None
+    if hook is not None:
+        hook(
+            record=record,
+            summary=summary,
+            last_user_message=last_user_message,
+            rows=rows,
         )
-        from app.writing.manuscript import list_section_ids, load_manuscript_doc
-
-        doc, _rel = load_manuscript_doc(Path(settings.workspace_root))
-        sections = list_section_ids(doc) if doc else []
-        focus = infer_focus_section_id(last_user_message, sections)
-        if not focus and sections:
-            focus = sections[-1]
-        # Prefer last user turn text from history when slash message is just /compact
-        recent_user = last_user_message
-        if (not recent_user or recent_user.strip() in {"/compact", "compact"}) and rows:
-            recent_user = str(rows[0].get("user_input") or "")
-            focus = infer_focus_section_id(recent_user, sections) or focus
-        bookmark = build_writing_bookmark(
-            focus=focus,
-            sections=sections,
-            outline_toc=outline_toc_snippet(),
-            notes=(summary.task or "")[:500],
-            last_user=recent_user,
-        )
-        record["writing_bookmark"] = bookmark
-        bookmark_text = format_writing_bookmark(bookmark)
-        # Keep bookmark in narrative so transcript replacement retains it.
-        if summary.narrative:
-            summary.narrative = f"{bookmark_text}\n\n{summary.narrative}"[:4000]
-        else:
-            summary.narrative = bookmark_text[:4000]
 
     await save_session_context_summary(session_id, record)
     await replace_session_transcript_with_summary(session_id, summary)

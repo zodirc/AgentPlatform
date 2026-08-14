@@ -38,6 +38,15 @@ async def test_enqueue_turn_jobs_for_writing(monkeypatch: pytest.MonkeyPatch) ->
     turn_id = uuid4()
     await enqueue_turn_jobs(turn_id=turn_id, scenario_id="writing")
     job_types = {name for name, _ in calls}
+    assert "sources.index_sync" not in job_types  # needs explicit post_turn_jobs
+
+    calls.clear()
+    await enqueue_turn_jobs(
+        turn_id=turn_id,
+        scenario_id="writing",
+        post_turn_jobs=["sources.index_sync"],
+    )
+    job_types = {name for name, _ in calls}
     assert "sources.index_sync" in job_types
     assert "projection.refresh" in job_types
     assert "session.summary" in job_types

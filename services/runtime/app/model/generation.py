@@ -19,6 +19,25 @@ def scaled_output_reserve_tokens(window_tokens: int | None = None) -> int:
     return max(1, window * ref_o // ref_w)
 
 
+def _temperature_for_scenario(scenario_id: str | None) -> float | None:
+    """Resolve temperature from ScenarioProfile.generation (C1); settings as fallback."""
+    sid = (scenario_id or "").strip()
+    if sid:
+        try:
+            from app.scenarios.registry import ScenarioRegistry
+
+            profile = ScenarioRegistry.get(sid)
+            gen = profile.generation if isinstance(profile.generation, dict) else {}
+            if "temperature" in gen:
+                raw = gen.get("temperature")
+                if raw is None:
+                    return None
+                return float(raw)
+        except (ValueError, TypeError, KeyError):
+            pass
+    return settings.model_temperature_agent
+
+
 @dataclass(frozen=True)
 class GenerationParams:
     """Per-turn generation strategy injected into providers (H1)."""
@@ -36,19 +55,8 @@ class GenerationParams:
         scenario_id: str | None = None,
         context_window_tokens: int | None = None,
     ) -> GenerationParams:
-        temperature: float | None
-        if scenario_id == "writing":
-            temperature = settings.model_temperature_writing
-        elif scenario_id == "intel":
-            # Intel briefs are prose/report oriented (docs/39); reuse writing temp.
-            temperature = settings.model_temperature_writing
-        elif scenario_id == "agent" or scenario_id == "collab":
-            temperature = settings.model_temperature_agent
-        else:
-            temperature = settings.model_temperature_agent
-
         return cls(
-            temperature=temperature,
+            temperature=_temperature_for_scenario(scenario_id),
             top_p=settings.model_top_p,
             max_output_tokens=scaled_output_reserve_tokens(context_window_tokens),
             tool_choice=settings.model_tool_choice,

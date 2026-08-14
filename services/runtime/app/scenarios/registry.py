@@ -36,6 +36,15 @@ class ScenarioProfile:
     subagent_types: list[str] = field(default_factory=list)
     # Declarative retrieval scope (default/exclude prefixes). Tools apply; Engine does not branch.
     retrieval: dict = field(default_factory=dict)
+    # C1 scalars — differences via Profile, not ``if scenario == …``.
+    generation: dict = field(default_factory=dict)
+    patch_auto_apply: bool = False
+    structural_prewarm: bool = False
+    plan_suggest: dict = field(default_factory=dict)
+    subagent_prompt_suffix: str = ""
+    post_turn_jobs: list[str] = field(default_factory=list)
+    # C2: named hook bindings (slot → implementation name). Empty until hooks land.
+    hooks: dict[str, str] = field(default_factory=dict)
 
 
 # Retired ids stay readable in history but cannot StartTurn (docs/39 TI6).
@@ -52,9 +61,18 @@ class ScenarioRegistry:
 
     @classmethod
     def load(cls) -> None:
+        from app.scenarios.hooks import ensure_builtins_registered, validate_profile_hooks
+
+        ensure_builtins_registered()
         cls._profiles.clear()
         for path in sorted(PROFILES_DIR.glob("*.yaml")):
             data = yaml.safe_load(path.read_text())
+            hooks = {
+                str(k): str(v)
+                for k, v in dict(data.get("hooks") or {}).items()
+                if k and v is not None
+            }
+            validate_profile_hooks(hooks)
             profile = ScenarioProfile(
                 scenario_id=data["scenario_id"],
                 display_name=data.get("display_name", data["scenario_id"]),
@@ -66,6 +84,13 @@ class ScenarioRegistry:
                 web_layout=data.get("web_layout", "default"),
                 subagent_types=list(data.get("subagent_types", [])),
                 retrieval=dict(data.get("retrieval") or {}),
+                generation=dict(data.get("generation") or {}),
+                patch_auto_apply=bool(data.get("patch_auto_apply", False)),
+                structural_prewarm=bool(data.get("structural_prewarm", False)),
+                plan_suggest=dict(data.get("plan_suggest") or {}),
+                subagent_prompt_suffix=str(data.get("subagent_prompt_suffix") or ""),
+                post_turn_jobs=list(data.get("post_turn_jobs") or []),
+                hooks=hooks,
             )
             cls.register(profile)
 

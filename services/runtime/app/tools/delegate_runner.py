@@ -68,22 +68,6 @@ SUBAGENT_TOOL_NAMES: dict[str, list[str]] = {
     "shell": ["read_file", "grep", "run_command"],
 }
 
-# Writing keeps role specialists and also allows explore/retrieve/planner:
-# models often default to explore; workspace + sources exploration is legitimate.
-WRITING_DEFAULT_SUBAGENTS = frozenset(
-    {
-        "researcher",
-        "drafter",
-        "editor",
-        "fact_checker",
-        "stylist",
-        "explore",
-        "retrieve",
-        "planner",
-    }
-)
-AGENT_DEFAULT_SUBAGENTS = frozenset({"explore", "retrieve", "verify", "edit", "planner", "shell"})
-
 # Parent projection / meters must not absorb sub-agent side effects.
 # Live UI events are forwarded with subagent_id stamped (nested readonly chat).
 _SUPPRESSED_SUB_EVENTS = frozenset(
@@ -103,9 +87,10 @@ _SUPPRESSED_SUB_EVENTS = frozenset(
 def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> frozenset[str]:
     if profile_types:
         return frozenset(profile_types)
-    if scenario_id == "writing":
-        return WRITING_DEFAULT_SUBAGENTS
-    return AGENT_DEFAULT_SUBAGENTS
+    raise ValueError(
+        f"scenario {scenario_id!r} has empty subagent_types in Profile "
+        "(configure profiles/*.yaml; hard-coded defaults removed)"
+    )
 
 
 def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[ToolSpec]:
@@ -220,14 +205,8 @@ async def run_delegate(
 
     depth_token = bump_delegate_depth()
     try:
-        collab_board = ""
-        if ctx.scenario_id == "collab":
-            collab_board = (
-                " For durable handoffs, write short findings under artifacts/collab/ "
-                "when a later worker will need them. End with one line "
-                "`ARTIFACT_REFS: path1, path2` (workspace-relative). "
-                "Do not paste large file bodies into the summary."
-            )
+        suffix = (ctx.parent_profile.subagent_prompt_suffix or "").strip()
+        collab_board = f" {suffix}" if suffix else ""
         engine = AgentEngine(
             gateway=ctx.gateway,
             tools=sub_tools,

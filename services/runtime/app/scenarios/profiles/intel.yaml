@@ -31,3 +31,7 @@ web_layout: writing-workbench
 retrieval:
   default_path_prefix: seed/intel
   exclude_path_prefixes: []
+generation:
+  temperature: 0.3
+plan_suggest:
+  threshold: 4

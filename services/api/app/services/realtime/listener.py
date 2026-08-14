@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from uuid import UUID
 
@@ -160,10 +161,10 @@ class TurnEventListener:
         pool = await get_pool()
         row = await pool.fetchrow(
             """
-            SELECT t.scenario_id, te.type AS last_type
+            SELECT t.scenario_id, te.type AS last_type, te.payload AS last_payload
             FROM turns t
             JOIN LATERAL (
-                SELECT type FROM turn_events
+                SELECT type, payload FROM turn_events
                 WHERE turn_id = t.id
                 ORDER BY sequence DESC
                 LIMIT 1
@@ -174,4 +175,20 @@ class TurnEventListener:
         )
         if row is None or row["last_type"] not in TERMINAL_EVENTS:
             return
-        await enqueue_turn_jobs(turn_id=turn_id, scenario_id=row["scenario_id"])
+        jobs: list[str] = []
+        raw = row["last_payload"]
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                raw = None
+        if isinstance(raw, dict):
+            for item in raw.get("post_turn_jobs") or []:
+                name = str(item or "").strip()
+                if name:
+                    jobs.append(name)
+        await enqueue_turn_jobs(
+            turn_id=turn_id,
+            scenario_id=row["scenario_id"],
+            post_turn_jobs=jobs,
+        )

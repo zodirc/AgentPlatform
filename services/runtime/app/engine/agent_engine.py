@@ -1325,50 +1325,56 @@ class AgentEngine:
                     step_index=step_index,
                 )
             if (
-                state.scenario_id == "writing"
-                and settings.writing_patch_auto_apply
+                settings.writing_patch_auto_apply
                 and str(result.get("status") or "") == "pending"
                 and not result.get("error")
             ):
-                from app.tools.core import tools as core_tools
+                from app.scenarios.registry import ScenarioRegistry
 
                 try:
-                    applied = await core_tools.apply_patch(
-                        path=str(result.get("path", "")),
-                        new_text=str(result.get("new_text", "")),
-                        old_text=str(result.get("old_text") or ""),
-                    )
-                    if applied.get("status") == "error":
-                        result["status"] = "error"
-                        result["auto_applied"] = False
-                        err = applied.get("error")
-                        result["error"] = err
-                        result["auto_apply_error"] = err
-                    else:
-                        result["status"] = "applied"
-                        result["auto_applied"] = True
-                        if applied.get("bytes_written") is not None:
-                            result["bytes_written"] = applied["bytes_written"]
-                        await self._write_event(
-                            event_type="patch.applied",
-                            payload={
-                                "patch_id": result["patch_id"],
-                                "path": result.get("path"),
-                                "status": "applied",
-                                "auto_applied": True,
-                                "bytes_written": applied.get("bytes_written"),
-                            },
-                            step_index=step_index,
+                    _profile = ScenarioRegistry.get(state.scenario_id)
+                except ValueError:
+                    _profile = None
+                if _profile and _profile.patch_auto_apply:
+                    from app.tools.core import tools as core_tools
+
+                    try:
+                        applied = await core_tools.apply_patch(
+                            path=str(result.get("path", "")),
+                            new_text=str(result.get("new_text", "")),
+                            old_text=str(result.get("old_text") or ""),
                         )
-                except Exception as exc:
-                    result["status"] = "error"
-                    result["error"] = str(exc)
-                    result["auto_applied"] = False
-                    result["auto_apply_error"] = str(exc)
-                    logger.exception(
-                        "writing patch auto-apply failed patch_id=%s",
-                        result.get("patch_id"),
-                    )
+                        if applied.get("status") == "error":
+                            result["status"] = "error"
+                            result["auto_applied"] = False
+                            err = applied.get("error")
+                            result["error"] = err
+                            result["auto_apply_error"] = err
+                        else:
+                            result["status"] = "applied"
+                            result["auto_applied"] = True
+                            if applied.get("bytes_written") is not None:
+                                result["bytes_written"] = applied["bytes_written"]
+                            await self._write_event(
+                                event_type="patch.applied",
+                                payload={
+                                    "patch_id": result["patch_id"],
+                                    "path": result.get("path"),
+                                    "status": "applied",
+                                    "auto_applied": True,
+                                    "bytes_written": applied.get("bytes_written"),
+                                },
+                                step_index=step_index,
+                            )
+                    except Exception as exc:
+                        result["status"] = "error"
+                        result["error"] = str(exc)
+                        result["auto_applied"] = False
+                        result["auto_apply_error"] = str(exc)
+                        logger.exception(
+                            "writing patch auto-apply failed patch_id=%s",
+                            result.get("patch_id"),
+                        )
 
         if tool_name == "export_document":
             state.delivery = {

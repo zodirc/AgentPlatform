@@ -24,10 +24,20 @@ def test_writing_subagent_types_have_tool_mappings(agent_type: str) -> None:
 
 
 def test_writing_allows_explore_by_default() -> None:
-    allowed = delegate_runner._allowed_subagent_types("writing", [])
+    from app.scenarios.registry import ScenarioRegistry
+
+    profile = ScenarioRegistry.get("writing")
+    allowed = delegate_runner._allowed_subagent_types(
+        "writing", list(profile.subagent_types)
+    )
     assert "explore" in allowed
     assert "retrieve" in allowed
     assert "planner" in allowed
+
+
+def test_empty_subagent_types_raises() -> None:
+    with pytest.raises(ValueError, match="empty subagent_types"):
+        delegate_runner._allowed_subagent_types("writing", [])
 
 
 @pytest.mark.parametrize(

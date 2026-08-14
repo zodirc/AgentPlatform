@@ -34,10 +34,23 @@ async def enqueue_job(
     return job_id
 
 
-async def enqueue_turn_jobs(*, turn_id: UUID, scenario_id: str) -> None:
+async def enqueue_turn_jobs(
+    *,
+    turn_id: UUID,
+    scenario_id: str,
+    post_turn_jobs: list[str] | None = None,
+) -> None:
+    """Enqueue projection + session.summary, plus Profile-declared post_turn_jobs.
+
+    ``post_turn_jobs`` comes from the terminal turn event payload (runtime Profile).
+    Scenario-name branching is not used here (Profile post_turn_jobs).
+    """
     await enqueue_job("projection.refresh", {"turn_id": str(turn_id)})
-    if scenario_id == "writing":
-        await enqueue_job("sources.index_sync", {"turn_id": str(turn_id)})
+    for job_type in post_turn_jobs or []:
+        name = str(job_type or "").strip()
+        if not name:
+            continue
+        await enqueue_job(name, {"turn_id": str(turn_id)})
     await enqueue_job("session.summary", {"turn_id": str(turn_id)})
 
 

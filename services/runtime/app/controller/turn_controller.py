@@ -80,6 +80,22 @@ def _track_turn_finished(turn_id: UUID) -> None:
 _TURN_COMPLETED_SUMMARY_MAX = 4096
 
 
+def _post_turn_jobs_payload(scenario_id: str) -> dict[str, list[str]]:
+    """Attach Profile.post_turn_jobs for api outbox (C3); empty → omit."""
+    sid = (scenario_id or "").strip()
+    if not sid:
+        return {}
+    try:
+        jobs = [
+            str(j).strip()
+            for j in (ScenarioRegistry.get(sid).post_turn_jobs or [])
+            if str(j).strip()
+        ]
+    except ValueError:
+        return {}
+    return {"post_turn_jobs": jobs} if jobs else {}
+
+
 def _truncate_turn_summary(text: str | None, *, limit: int = _TURN_COMPLETED_SUMMARY_MAX) -> str:
     """INFRA-1: clamp summary to schema maxLength so long finals don't fail the event write."""
     s = text if text is not None else ""
@@ -284,7 +300,10 @@ async def maybe_finalize_orphan_cancel(turn_id: UUID, *, force: bool = False) ->
                 run_id=run_id,
                 event_type="turn.cancelled",
                 trace_id=trace_id,
-                payload={"reason": "user_requested"},
+                payload={
+                    "reason": "user_requested",
+                    **_post_turn_jobs_payload(scenario_id),
+                },
             )
             await conn.execute(
                 "UPDATE turns SET status = 'cancelled', updated_at = now() WHERE id = $1",
@@ -780,9 +799,10 @@ async def _fail_turn(
 ) -> None:
     # Drain any buffered stream deltas so turn.failed is sequenced after them.
     await close_event_writer(turn_id)
-    payload: dict[str, str] = {"termination_reason": termination_reason}
+    payload: dict[str, Any] = {"termination_reason": termination_reason}
     if message:
         payload["message"] = message[:1024]
+    payload.update(_post_turn_jobs_payload(scenario_id))
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -846,7 +866,10 @@ async def _finalize_turn(
                     run_id=run_id,
                     event_type="turn.cancelled",
                     trace_id=trace_id,
-                    payload={"reason": "user_requested"},
+                    payload={
+                        "reason": "user_requested",
+                        **_post_turn_jobs_payload(state.scenario_id),
+                    },
                 )
                 await conn.execute(
                     "UPDATE turns SET status = 'cancelled', updated_at = now() WHERE id = $1",
@@ -891,6 +914,7 @@ async def _finalize_turn(
             }
             if state.delivery is not None:
                 completed_payload.update(state.delivery)
+            completed_payload.update(_post_turn_jobs_payload(state.scenario_id))
             await append_event(
                 conn,
                 turn_id=turn_id,
@@ -965,56 +989,20 @@ async def _finalize_turn(
 
 
 async def _maybe_write_continuity_pending(state: TurnState, *, turn_id: UUID) -> None:
-    """WN1: after writing turns, extract continuity candidates into cards/pending/ (R4)."""
-    if state.scenario_id != "writing":
-        return
-    try:
-        from app.writing.continuity import (
-            extract_continuity_candidates,
-            write_pending_candidates,
-        )
-        from app.writing.focus import infer_focus_section_id
-        from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
+    """WN1: after turns that declare ``hooks.post_turn``, run the bound impl (R4)."""
+    from app.scenarios.hooks import resolve
+    from app.scenarios.registry import ScenarioRegistry
 
-        doc, _rel = load_manuscript_doc()
-        if not doc.strip():
-            return
-        available = list_section_ids(doc)
-        # Prefer last user text for focus; fall back to last chapter on disk.
-        user_text = ""
-        for msg in reversed(state.messages):
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content")
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        user_text = str(block.get("text") or "")
-                        break
-            elif isinstance(content, str):
-                user_text = content
-            if user_text:
-                break
-        focus = infer_focus_section_id(user_text, available) or (available[-1] if available else "")
-        chapter_text = extract_section(doc, focus) if focus else doc
-        if not (chapter_text or "").strip():
-            return
-        candidates = extract_continuity_candidates(
-            chapter_text,
-            section_id=focus or "",
-        )
-        written = write_pending_candidates(
-            candidates,
-            turn_id=str(turn_id),
-        )
-        if written:
-            logger.info(
-                "wn1 pending continuity cards turn_id=%s count=%s",
-                turn_id,
-                len(written),
-            )
-    except Exception:
-        logger.exception("wn1 continuity pending failed turn_id=%s", turn_id)
+    try:
+        profile = ScenarioRegistry.get(state.scenario_id)
+    except ValueError:
+        return
+    hook = resolve(profile.hooks.get("post_turn"))
+    if hook is None:
+        return
+    result = hook(state, turn_id=turn_id)
+    if hasattr(result, "__await__"):
+        await result
 
 
 async def _backfill_plan_open_items(state: TurnState) -> None:
@@ -1280,8 +1268,8 @@ async def _run_turn(
 
     registry = build_registry()
     tools = tool_scope(profile, registry, plan_phase=phase)
-    # Structural lane: soft prewarm for agent — never await on StartTurn / first token.
-    if settings.structural_prewarm and scenario_id == "agent":
+    # Structural lane: soft prewarm when Profile declares it — never await on StartTurn / first token.
+    if settings.structural_prewarm and profile.structural_prewarm:
         from app.structural.adapters import prewarm
         from app.tenant_context import current_work_root_path
 
@@ -1306,12 +1294,11 @@ async def _run_turn(
     engine_ref: list[Any] = []
 
     async def on_step_checkpoint(st: TurnState, step_index: int) -> None:
-        if scenario_id == "collab" and engine_ref:
-            from app.scenarios.collab_hints import apply_collab_gap_hint
+        from app.scenarios.hooks import resolve
 
-            refreshed = apply_collab_gap_hint(st.volatile_context, st.messages)
-            st.volatile_context = refreshed
-            engine_ref[0]._volatile_context = refreshed
+        hook = resolve(profile.hooks.get("step_checkpoint"))
+        if hook is not None:
+            hook(st, engine_ref)
         await save_checkpoint(
             run_id=run_id,
             turn_id=turn_id,
@@ -1319,24 +1306,27 @@ async def _run_turn(
             step_index=step_index,
         )
 
+    from app.scenarios.hooks import resolve as resolve_hook
+
     system_prompt = profile.system_prompt
     volatile_context = ""
-    if scenario_id == "writing":
-        from app.writing.cards import prepare_writing_system_prompt
-
-        pin = prepare_writing_system_prompt(profile.system_prompt, message)
-        system_prompt = pin.prompt
-        volatile_context = pin.volatile_block
-        await write_event(
-            event_type="cards.pinned",
-            payload=pin.event_payload(),
-            step_index=0,
-        )
-    elif scenario_id == "collab":
-        # Hot reminder each Turn (not welded into cacheable system). docs/37.
-        from app.scenarios.collab_hints import collab_orchestrator_block
-
-        volatile_context = collab_orchestrator_block()
+    composer = resolve_hook(profile.hooks.get("system_prompt_composer"))
+    if composer is not None:
+        new_prompt, vol, events = composer(profile.system_prompt, message)
+        if new_prompt is not None:
+            system_prompt = new_prompt
+        if vol:
+            volatile_context = vol
+        for etype, payload in events or []:
+            await write_event(event_type=etype, payload=payload, step_index=0)
+    else:
+        vcomp = resolve_hook(profile.hooks.get("volatile_composer"))
+        if vcomp is not None:
+            _np, vol, events = vcomp(profile.system_prompt, message)
+            if vol:
+                volatile_context = vol
+            for etype, payload in events or []:
+                await write_event(event_type=etype, payload=payload, step_index=0)
     # AQ1/WN3: Plan phase stays out of the cacheable system prefix.
     phase_block = plan_phase_block(phase)
     if phase_block:
@@ -1588,12 +1578,11 @@ async def _resume_after_approval(
     )
 
     async def on_step_checkpoint(st: TurnState, step_index: int) -> None:
-        if state.scenario_id == "collab" and engine_ref:
-            from app.scenarios.collab_hints import apply_collab_gap_hint
+        from app.scenarios.hooks import resolve
 
-            refreshed = apply_collab_gap_hint(st.volatile_context, st.messages)
-            st.volatile_context = refreshed
-            engine_ref[0]._volatile_context = refreshed
+        hook = resolve(pending.profile.hooks.get("step_checkpoint"))
+        if hook is not None:
+            hook(st, engine_ref)
         await save_checkpoint(
             run_id=run_id,
             turn_id=turn_id,
