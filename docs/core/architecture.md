@@ -153,6 +153,36 @@ pending → running ⇄ waiting_approval
 Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过滤、子 agent 类型等。  
 **AgentEngine 禁止** `if scenario == "..."`；差异只经 Profile / ToolScope 注入。
 
+### 4.1 扩展点清单（官方替代方案）
+
+场景差异只能走下列挂载点（实现见 `scenarios/registry.py` · `scenarios/hooks.py` · profiles `*.yaml`）：
+
+**标量 / 声明式字段（Profile）**
+
+| 字段 | 作用 |
+|------|------|
+| `tool_names` / `approval_overrides` / `subagent_types` | 工具面与审批（ToolScope） |
+| `retrieval` | 检索 path 过滤（工具侧消费） |
+| `generation.temperature` | 采样温度 |
+| `patch_auto_apply` | `propose_patch` 后自动 apply（settings 总闸仍可关） |
+| `structural_prewarm` | StartTurn LSP 软预热 |
+| `plan_suggest.threshold` | Plan 建议阈值 |
+| `subagent_prompt_suffix` | 子 agent 系统提示追加文案 |
+| `post_turn_jobs` | Turn 终态后 api outbox 额外任务（如 `sources.index_sync`） |
+
+**命名 Hook 槽位（`Profile.hooks` → 实现名）**
+
+| 槽位 | 典型实现 | 何时 |
+|------|----------|------|
+| `system_prompt_composer` | `writing_cards` | StartTurn 组窗 |
+| `volatile_composer` | `collab_orchestrator` | StartTurn volatile |
+| `step_checkpoint` | `collab_gap_hint` | 每步 checkpoint |
+| `post_turn` | `writing_continuity` | Turn 收尾旁路 |
+| `compact_bookmark` | `writing_focus` | `/compact` |
+
+槽位集合固定；未知槽位 / 未知实现名 → **启动期 fail-fast**。  
+静态门禁：`make constitution-check`（`scripts/check_scenario_leak.py`）禁止新增 `if scenario == "…"`。
+
 ## 5. 速率红线 R1–R5
 
 | # | 原则 | 验收含义 |

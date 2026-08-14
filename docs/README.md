@@ -25,7 +25,6 @@ Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `mak
 
 | 文档 | 状态 |
 |------|------|
-| [三大短板：怎么理解](plan/three-shortboards.md) | 评分中的三点说明 |
 | [后端架构全景](plan/backend-architecture.md) | **现行详册**（机型/并发数字）；摘要已回写六篇正文 |
 | [Coding 结构智能](plan/coding-structural-intelligence.md) | Wave 1 + 写入链揉合 **已落地**；长文日记保留作对照 |
 | [工作区异步 AST](plan/agent-workspace-ast-index.md) | A6 旁路 indexer **已接线**；双轨 n5 数字待复跑 |

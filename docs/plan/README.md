@@ -4,7 +4,6 @@
 
 | 文档 | 状态 | 摘要 |
 |------|------|------|
-| [三大短板：怎么理解](three-shortboards.md) | 说明 | 巨模块 · 宪法泄漏 · 效果锚未闭合 |
 | [后端架构全景](backend-architecture.md) | 详册 **v0.3** | 控制流全文；机型负载配方 |
 | [Coding 结构智能](coding-structural-intelligence.md) | Wave1+揉合 **已落地** | Locate/Impact/Verify；SWE/Ops 日记 |
 | [Agent 工作区异步 AST](agent-workspace-ast-index.md) | A6 **已接线** | 旁路 indexer；双轨 n5 数字待复跑 |
