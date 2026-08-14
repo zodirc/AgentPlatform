@@ -7,11 +7,8 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.ops.official_agent_path import (
-    L1Cancelled,
-    L1TurnTracker,
-    _wait_turn_verbose,
-)
+from app.services.ops.l1.common import L1Cancelled, L1TurnTracker
+from app.services.ops.l1.turn_driver import _wait_turn_verbose
 
 
 @pytest.mark.asyncio
@@ -25,11 +22,11 @@ async def test_wait_turn_verbose_raises_when_should_cancel() -> None:
 
     with (
         patch(
-            "app.services.ops.official_agent_path._fetch_events",
+            "app.services.ops.l1.turn_driver._fetch_events",
             new=AsyncMock(return_value=[]),
         ),
         patch(
-            "app.services.ops.official_agent_path.runtime_client_for_new_turn",
+            "app.services.ops.l1.common.runtime_client_for_new_turn",
         ) as client_factory,
     ):
         client = AsyncMock()
@@ -59,7 +56,7 @@ async def test_wait_turn_verbose_raises_on_turn_cancelled_terminal() -> None:
     run_id = uuid4()
 
     with patch(
-        "app.services.ops.official_agent_path._fetch_events",
+        "app.services.ops.l1.turn_driver._fetch_events",
         new=AsyncMock(
             return_value=[
                 {"type": "turn.cancelled", "sequence": 1, "payload": {}},
@@ -86,7 +83,7 @@ async def test_turn_tracker_cancel_all() -> None:
     await tracker.register(t2, r2)
 
     with patch(
-        "app.services.ops.official_agent_path.runtime_client_for_new_turn",
+        "app.services.ops.l1.common.runtime_client_for_new_turn",
     ) as client_factory:
         client = AsyncMock()
         client.cancel_turn = AsyncMock()

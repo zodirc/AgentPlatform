@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from app.services.ops import official_agent_path as oap
+from app.services.ops.l1 import common, index_ops
 from app.services.resource.works import Work
 
 
@@ -13,8 +13,8 @@ def test_beir_corpus_fingerprint_stable_on_same_corpus(monkeypatch) -> None:
     monkeypatch.delenv("RETRIEVAL_INDEX_VERSION", raising=False)
     monkeypatch.setenv("EMBEDDING_BACKEND", "sentence_transformers")
     corpus = {"a": "hello", "b": "world"}
-    a = oap._beir_corpus_fingerprint("scifact", corpus)
-    b = oap._beir_corpus_fingerprint("scifact", dict(reversed(list(corpus.items()))))
+    a = common._beir_corpus_fingerprint("scifact", corpus)
+    b = common._beir_corpus_fingerprint("scifact", dict(reversed(list(corpus.items()))))
     assert a == b
     assert len(a) == 20
 
@@ -22,9 +22,9 @@ def test_beir_corpus_fingerprint_stable_on_same_corpus(monkeypatch) -> None:
 def test_beir_corpus_fingerprint_changes_with_backend(monkeypatch) -> None:
     monkeypatch.setenv("EMBEDDING_BACKEND", "sentence_transformers")
     corpus = {"a": "x"}
-    a = oap._beir_corpus_fingerprint("scifact", corpus)
+    a = common._beir_corpus_fingerprint("scifact", corpus)
     monkeypatch.setenv("EMBEDDING_BACKEND", "hash")
-    b = oap._beir_corpus_fingerprint("scifact", corpus)
+    b = common._beir_corpus_fingerprint("scifact", corpus)
     assert a != b
 
 
@@ -37,11 +37,11 @@ def test_progress_for_work_matches_work_id() -> None:
         is_default=False,
     )
     other = uuid4()
-    assert oap._progress_for_work(
+    assert common._progress_for_work(
         {"status": "building", "progress": {"work_id": str(work.id), "phase": "embed"}},
         work,
     )
-    assert not oap._progress_for_work(
+    assert not common._progress_for_work(
         {"status": "building", "progress": {"work_id": str(other), "phase": "embed"}},
         work,
     )
@@ -55,7 +55,7 @@ def test_progress_for_work_path_fallback() -> None:
         work_root="/data/ops-l1/beir-index/scifact",
         is_default=False,
     )
-    assert oap._progress_for_work(
+    assert common._progress_for_work(
         {
             "status": "building",
             "progress": {
@@ -75,14 +75,14 @@ def test_progress_for_work_rejects_unscoped_building() -> None:
         work_root="/data/ops-l1/beir-index/scifact",
         is_default=False,
     )
-    assert not oap._progress_for_work(
+    assert not common._progress_for_work(
         {"status": "building", "progress": {"phase": "embed", "files_done": 100}},
         work,
     )
 
 
 def test_format_sync_progress_includes_work() -> None:
-    line = oap._format_sync_progress_line(
+    line = index_ops._format_sync_progress_line(
         "scifact",
         {
             "status": "building",
