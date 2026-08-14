@@ -1,9 +1,9 @@
 # 方案：Coding 结构智能（LSP / AST）
 
-> **状态**：Wave 1 + 写入链揉合（Locate / Impact / `edit_file.checks` / span 候选）**已落地** · 正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3 · 本文保留协议、日记与收尾项  
+> **状态**：Wave 1–3（Locate / Impact / `edit_file.checks` / span 候选 / D1 证据 / W7 outline / W8 related_tests / D2 即时符号）**已落地** · 正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3 · 本文保留协议、日记与收尾项  
 > **范围**：`agent` 写入链的 **LSP 结构揉合** + SWE/Ops 评测协议  
-> **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（A6 旁路 indexer **已接线**；双轨 n5 数字待复跑）  
-> **最新 n5 harness**：`b3357dd6` · **resolve 3/5**（§6.7.9）；对照 `d459ca51` resolve 0/5（§6.7.8）· 下一步 **Wave 3 方案** §7.7  
+> **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（A6 旁路 indexer **已接线**；D2 即时回落已落地；双轨 n5 数字待复跑）  
+> **最新 n5 harness**：`b3357dd6` · **resolve 3/5**（§6.7.9）；对照 `d459ca51` resolve 0/5（§6.7.8）· Wave 3 **已落地** §7.7  
 > **非范围**：writing/intel RAG 主链；不以资料检索充当 Agent Locate  
 > **相关现状**：`read_lints`=LSP∪CLI · Locate=`search_codebase`/裸符号 `grep`→definition · Impact=`edit_file.impact` · Verify=`edit_file.checks`  
 
@@ -716,6 +716,52 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 4. **未过两题画像**：14365 路径最短（35 steps / 5 reads）偏改少或改偏；14182 最长（72 / 22）且先前曾 `no_verify` 超时，本跑完整完成仍 `patch_not_resolved`——偏修复正确性 / 验证相位（Wave 2），非交卷失败。  
 5. **下一刀分开量**：AST 双轨认领 fuse / incomplete（§7.7.2 D2）；剩余 `patch_not_resolved` 走 **Wave 3 修复正确性主攻（§7.7）**。勿用 resolve 单指标混评索引 on/off。
 
+**N5 回溯（H1/H2 · 预分类 · 无 D1 当时指标）** — 本跑尚无 `file_hit` / `tests_before_submit`，仅凭过程画像预归类，**不作定论**；定论等下一趟 D1 启用跑：
+
+| instance | 预归类 | 依据（§6.7.9 表） | 待 D1 确认 |
+|----------|--------|-------------------|------------|
+| `astropy__astropy-14365` | **偏 H1**（改错位置 / 读得少） | 35 steps · 5 reads · grep_ok=0 · patch 619 字 | `file_hit` 是否假 |
+| `astropy__astropy-14182` | **偏 H2**（改了仍逻辑未过） | 72 steps · 22 reads · 完整 completed · patch 1359 字 | `tests_before_submit` / `repro_rerun` |
+
+### 6.7.10 Wave 3 后 n5 复跑（`66077649` · 2026-08-14）
+
+- **Ops**：`6fe50571-0b6c-4d75-8b4d-98e2fb49b2ed` · model=`deepseek-v4-flash` · tier=n5 · harness=on  
+- **Child**：L1 agent-path `66077649-7e89-491c-9a9f-010c69aa18d5`；harness evaluate `defb80de-0fee-42d4-a918-173823e8da8d`（`agentplatform-20260814045027`）  
+- **记法**：跑中曾因 `suite_coding` 误 `return harness_result` 未写 child manifest；已修复代码并 salvage 本跑产物后再归档。
+
+**套件指标（对照 §6.7.9 `b3357dd6`）**
+
+| 指标 | `b3357dd6` | **本跑** | 读法 |
+|------|------------|----------|------|
+| `patch_rate` / apply | 1.0 / 5/5 | **1.0 / 5/5** | 交卷链仍满 |
+| `resolve_rate` | **0.600** | **0.600** | 官方通过仍 3/5；**未抬分** |
+| 通过题 | 12907 / 14995 / 6938 | **同三题** | 未过仍是 14182 / 14365 |
+| `locate_fuse_ok_rate` | 0.273（n=11） | **0.429**（n=7） | Locate 略好；`no_ws_symbol` 10→**3** |
+| `n_grep_locate_incomplete` | 8 | **4** | 词面 incomplete 减半 |
+| `edit_impact` / `checks` | 1.0 / 1.0 | **1.0 / 1.0** | 揉合满 |
+| `edit_related_tests_coverage` | — | **0.455** | W8 有附带；未覆盖全部 edit |
+| `read_outline_coverage` | — | **0.952** | W7 截断读几乎都有 outline |
+| **`file_hit_rate`（D1）** | — | **1.000**（5/5） | 未过两题也命中 gold 文件 |
+| **`tests_before_submit_rate`（D1）** | — | **0.200** | 仅 12907 交卷前跑测 |
+| **`repro_rerun_rate`（D1）** | — | **0.000** | 无题做 fail→再跑对照 |
+
+**逐题（官方 resolve + D1）**
+
+| instance | 官方 | file_hit | tests_before_submit | repro_rerun | patch_source | 备注 |
+|----------|------|----------|---------------------|-------------|--------------|------|
+| `astropy__astropy-12907` | **通过** | yes | **yes** | no | git_diff | 唯一交卷前跑测 |
+| `astropy__astropy-14995` | **通过** | yes | no | no | git_diff | |
+| `astropy__astropy-6938` | **通过** | yes | no | no | git_diff | |
+| `astropy__astropy-14365` | 未过 | **yes** | no | no | git_diff | 否决「纯 H1 改错文件」 |
+| `astropy__astropy-14182` | 未过 | **yes** | no | no | git_diff | 仍偏 H2；验证仍浅 |
+
+**读法（钉死）**
+
+1. **Wave 3 未抬 resolve**：同题同 3/5；结构供给（fuse / outline / related_tests）有改善，但官方 fail-to-pass 未动。  
+2. **D1 纠正 H1 预判**：14365 / 14182 的 `file_hit=true` → 短板主要是 **H2 逻辑/验证**，不是「连文件都改错」。§6.7.9 对 14365「偏 H1」仅作过程画像，**本跑以 D1 为准改判**。  
+3. **验证仍薄**：`tests_before_submit=0.2`、`repro_rerun=0`；W8 related_tests 覆盖约半，模型多半未据此跑测。  
+4. **下一刀**：加深 Verify（交卷前测 / related_tests 采用），勿再把 n5 同分误读成回归；锚点仍须 n25+harness。
+
 ---
 
 ## 7. 揉合波次：Wave 1 落地态与 Wave 2 方案
@@ -726,7 +772,7 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 |------|------|------|
 | **Wave 1** | 结构基建 + **Locate/Impact 揉合** | **已落地**（行为契约 §7.1） |
 | **Wave 2** | Verify（`edit_file.checks`）· span 候选回显 · Reproduce/交卷自检（prompt）· pager 纪律 | **主项已落地**；pager 工具级硬重定向仍开放（§7.3 W2） |
-| **Wave 3** | **修复正确性主攻**：证据归档 D1 · AST 符号供给 D2 · `read_file` 截断折叠 W7 · `edit_file.related_tests` W8 | **方案已定（§7.7，未实施）** |
+| **Wave 3** | **修复正确性主攻**：证据归档 D1 · AST 符号供给 D2 · `read_file` 截断折叠 W7 · `edit_file.related_tests` W8 | **已落地**；**n5 复跑已入档 §6.7.10**（resolve 仍 0.6；D1 齐备）；lite-50 / 锚点 n25 仍待 |
 | Wave 3 外候选 | 按需 repo map · 写副作用结构操作（原阶段 D） | 后置（§7.4） |
 
 Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 `run_command` / `read_file` / `grep` / `edit_file` 四个高频动词**。Locate/Impact/Verify 与 span 恢复已焊进结果契约；Reproduce/交卷为 prompt 层。**不新增模型必须主动学会点的工具名**。正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3。
@@ -815,6 +861,7 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 | **W4** Reproduce 相位 | **已落地**（prompt） |
 | **W5** 交卷自检 | **已落地**（prompt） |
 
+
 #### W1 — Verify 揉合：`edit_file` 附 `checks`（已落地）
 
 **动机**：P12——两题 `read_lints` 仅 1 次；Verify 与 Locate/Impact 一样，必须焊进写成功契约而非等模型自觉。
@@ -899,9 +946,17 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 10. `related_tests` 附带率 / 命中率；「编辑后跑过相关测试」题占比（N7 后）。  
 11. `locate_fuse` 仅作 AST 供给回归信号，**不以单指标追高**（§7.7.0）。
 
-### 7.7 Wave 3：修复正确性主攻（`b3357dd6` 之后 · 方案，未实施）
+### 7.7 Wave 3：修复正确性主攻（`b3357dd6` 之后）
 
 > 本波回答一个问题：**patch 全部可 apply 之后，为什么官方测试还是不绿？** 全部改动仍遵守 §7.3 同一约束：只焊进模型已在点的动词（`read_file` / `edit_file` / `run_tests`）与评测侧归档；不加新工具名、不预注入、不动 Engine、不动模型与步数预算（控制变量）；writing Profile 零感知。
+
+| 项 | 状态（2026-08-14） |
+|----|---------------------|
+| **D1** 证据归档 | **已落地**（`file_hit` / `repro_rerun` / `tests_before_submit`） |
+| **D2** AST 即时符号回落 | **已落地**（索引 miss/cold 时有界文件名 parse；双轨 n5 数字待复跑） |
+| **W7** `read_file` outline | **已落地** |
+| **W8** `related_tests` | **已落地** |
+| **W2** pager | **仍开放**（N3 条件触发，不在本波） |
 
 #### 7.7.0 读数 → 主攻推导
 
@@ -927,7 +982,7 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | `repro_rerun` | 同一 repro / 测试命令在 Turn 内运行 ≥2 次（改前 + 改后） | W4 纪律是否真被执行 |
 | `tests_before_submit` | 交卷前是否运行过任何 pytest / `run_tests` 类命令 | H2：验证深度下限 |
 
-**验收**：下一次 n5 / lite-50 报告含三指标；`b3357dd6` 两失败题回溯分类入档（14365 / 14182 各归 H1 或 H2）。
+**验收**：下一次 n5 / lite-50 报告含三指标（代码已接线）。`b3357dd6` 两失败题**预归类**已入档 §6.7.9（14365 偏 H1 · 14182 偏 H2；无当时 D1 指标，不作定论）。
 
 #### 7.7.2 D2 — Locate 供给修复（AST 姊妹文认领）
 
@@ -1065,7 +1120,7 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | `retrieval/chunking.py` | 阶段 C：代码切块优先 tree-sitter，失败回落正则 |
 | 基准 runner / 测试 | swebench 双轨脚手架 · structural 单元 · writing 不回归 |
 | **Wave 2 触点** | **已落地**：`edit_file`（`checks` + span 候选）· `system.md` / L1 prompt（Reproduce · 交卷自检）。**仍开放**：`run_command` pager→`read_file` 工具级重定向（N3） |
-| **Wave 3 触点（方案，§7.7）** | `read_file`（截断附 `outline[]`）· `edit_file`（`related_tests[]`）· `system.md` / L1（Verify 测试锚定一句）· official bench 报告（D1 三指标 `file_hit` / `repro_rerun` / `tests_before_submit`）；AST 符号供给修复在姊妹文（D2） |
+| **Wave 3 触点（§7.7 · 已落地）** | `read_file`（截断附 `outline[]`）· `edit_file`（`related_tests[]`）· `system.md` / L1（Verify 测试锚定）· official bench（D1 三指标）· `locate._instant_def_hits`（D2） |
 
 ### 9.3 里程碑（M 序列状态归档；现行排期见 §7.5 N0–N4）
 
@@ -1227,7 +1282,7 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 - [x] **Locate/Impact 揉合**（§6.7）：裸符号 grep 重定向 + edit_file.impact。  
 - [x] **N0 官方 harness 可测**：`d459ca51` 首次真测 resolve **0/5**（§6.7.8）；`b3357dd6` 第二跑 resolve **3/5**（§6.7.9）；`patch_rate` 仅代理。  
 - [x] **Wave 2 主项（§7.3）**：W1 `checks` · W3 span 候选 · W4/W5 prompt。  
-- [ ] **Wave 3 方案（§7.7）**：D1 证据归档（`file_hit` / `repro_rerun` / `tests_before_submit`）· D2 AST 符号供给（姊妹文）· W7 `read_file` 截断折叠 · W8 `edit_file.related_tests`；仍不做 best-of-n / repo map 预注入 / 换模型追分。  
+- [x] **Wave 3 方案（§7.7）**：D1 证据归档 · D2 AST 即时符号回落 · W7 `read_file` 截断折叠 · W8 `edit_file.related_tests`；双轨 n5 / lite-50 数字待复跑。  
 - [ ] **W2 pager 工具级重定向**（N3）：仅纯 pager 整条命令；先软重定向不硬 Ban。  
 - [ ] **SWE-bench Lite 双轨协议（§8）** 定论跑（含 AST on/off 若启用）。  
 - [ ] **R5**：每阶段至少 1 组 agent golden + 延迟对照 + writing 不回归。  
@@ -1255,3 +1310,4 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | 2026-08-13 | **文档回写**：正文 [工具与上下文](../core/tools-and-context.md) 增 Coding 揉合图；Wave 2 主项（W1/W3/W4/W5）标已落地；W2 pager 工具级重定向仍开放；AST 姊妹文 A6 已接线；§14 勾选同步 |
 | 2026-08-13 | **§6.7.9 完整 harness n5（`b3357dd6`）**：官方 `resolve_rate=3/5`（对照 §6.7.8 的 0/5）；patch/apply/impact/checks 仍满；locate_fuse≈0.27（主桶 no_ws_symbol）；P11→已有第二跑；§14 N0 勾选补第二跑 |
 | 2026-08-14 | **v4（Wave 3 方案，未实施）**：基于 `b3357dd6` 读数确立主攻 = **修复正确性**（交卷链/护栏满分退出主攻；失败全为 `patch_not_resolved`）；新增 §7.7（7.7.0 读数推导 · D1 证据归档 · D2 AST 供给认领 · W7 `read_file` 截断折叠 · W8 `related_tests` + Verify 测试锚定 · 本波仍不做清单）；§7.5 里程碑扩 N5–N7 并定顺序 N5→(N6∥N7)→N3→N4；§7.6 探针 8–11；§7.0 / §7.4 / §9.2 / §9.5 / §12（情况 22–23）/ §14 对齐 |
+| 2026-08-14 | **v4 代码落地**：D1（`file_hit`/`repro_rerun`/`tests_before_submit` + suite/HTML/Ops）· D2（`locate._instant_def_hits` 有界文件名即时 parse）· W7（`read_file` 截断附 `outline`）· W8（`edit_file.related_tests` + Verify prompt）· contracts/CSI 探针扩展 · 单测 |

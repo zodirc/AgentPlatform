@@ -572,3 +572,4 @@ v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness
 | 2026-08-13 | **A6 代码落地**：`work_ast_index_jobs` + alembic · queue/worker/snapshot · 默认 remote enqueue · compose `ast-indexer`；正式双轨 n5 仍待本拓扑复跑 |
 | 2026-08-13 | **文档回写**：§9 落地序改为状态表（A0–A6 主链已接线）；与六篇正文 / CSI 状态条对齐 |
 | 2026-08-13 | **基线对照补记**：主方案 §6.7.9（`b3357dd6`）官方 resolve **3/5**，而 `locate_fuse≈0.27`（主桶 `no_ws_symbol=10/11`）仍弱——强化「本文认领 Locate 段、不认领 resolve 单指标」；双轨 n5 仍待 A6 拓扑复跑 |
+| 2026-08-14 | **D2 即时回落落地**：`locate._instant_def_hits`——索引 COLD/miss 时按符号尾名有界扫 `**/Tail.py` 并单文件 parse，再交 LSP 确认（不 await ready、不冒充 definition）；主方案 Wave 3 N6 认领；双轨 n5 数字仍待复跑 |
