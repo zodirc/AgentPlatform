@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Keep in sync with tools.core.tools._LEXICAL_SKIP_DIR_NAMES (shared family, not RAG).
+# Keep in sync with tools.core.read_tools._LEXICAL_SKIP_DIR_NAMES (shared family, not RAG).
 SKIP_DIR_NAMES = frozenset(
     {
         ".git",
