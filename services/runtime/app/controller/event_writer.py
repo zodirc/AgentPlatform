@@ -157,6 +157,14 @@ class BufferedEventWriter:
                             )
                         ]
                         await conn.executemany(_INSERT_SQL, args)
+                # Proving liveness while streaming (thinking.delta floods can delay
+                # the global heartbeat task past a short lease TTL).
+                try:
+                    from app.controller import run_lock
+
+                    await run_lock.touch_run_lease(run_id=self._run_id)
+                except Exception:
+                    pass
                 return
             except asyncpg.UniqueViolationError as exc:
                 last_error = exc

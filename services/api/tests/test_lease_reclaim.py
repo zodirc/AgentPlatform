@@ -30,7 +30,6 @@ async def test_reconcile_expired_leases_fails_running_turn() -> None:
         "runner_id": "runtime-a",
         "turn_status": "running",
         "trace_id": trace_id,
-        "has_checkpoint": False,
     }
 
     pool = MagicMock()
@@ -77,7 +76,6 @@ async def test_reconcile_expired_leases_skips_race() -> None:
         "runner_id": "runtime-a",
         "turn_status": "running",
         "trace_id": None,
-        "has_checkpoint": False,
     }
 
     pool = MagicMock()
@@ -102,3 +100,47 @@ async def test_reconcile_expired_leases_skips_race() -> None:
         patch.object(lr, "get_pool", AsyncMock(return_value=pool)),
     ):
         assert await lr.reconcile_expired_leases() == 0
+
+
+@pytest.mark.asyncio
+async def test_reconcile_message_distinguishes_waiting_approval() -> None:
+    from app.services.projection import lease_reclaim as lr
+
+    turn_id = uuid4()
+    run_id = uuid4()
+    row = {
+        "run_id": run_id,
+        "turn_id": turn_id,
+        "runner_id": "runtime-a",
+        "turn_status": "waiting_approval",
+        "trace_id": uuid4(),
+    }
+
+    pool = MagicMock()
+    pool.fetch = AsyncMock(return_value=[row])
+
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(return_value={"id": run_id})
+    conn.execute = AsyncMock()
+    conn.fetchval = AsyncMock(return_value=1)
+
+    tx = MagicMock()
+    tx.__aenter__ = AsyncMock(return_value=None)
+    tx.__aexit__ = AsyncMock(return_value=None)
+    conn.transaction = MagicMock(return_value=tx)
+
+    acquired = MagicMock()
+    acquired.__aenter__ = AsyncMock(return_value=conn)
+    acquired.__aexit__ = AsyncMock(return_value=None)
+    pool.acquire = MagicMock(return_value=acquired)
+
+    with (
+        patch.object(lr.settings, "runner_lease_enabled", True),
+        patch.object(lr, "get_pool", AsyncMock(return_value=pool)),
+        patch.object(lr, "_append_failed_event", new=AsyncMock()) as append,
+    ):
+        assert await lr.reconcile_expired_leases() == 1
+
+    msg = append.await_args.kwargs["message"]
+    assert "waiting_approval" in msg
+    assert "checkpoint present" not in msg

@@ -33,17 +33,14 @@ import {
   PROVIDER_PRESETS,
   retrievalTierLabel,
   runSuitesLabel,
-  scenarioLabelForSuite,
   suitesFromRun,
   suitesFromTargets,
   suitesLabelZh,
-  suitesToTargets,
   tierFromLimit,
 } from "./bench/presets";
 import {
   shortCaseToken,
   SUITE_DETAIL_LABEL,
-  targetsFromRun,
 } from "./bench/progressParse";
 import { downloadAuthorizedFile, openAuthorizedHtml } from "./bench/sse";
 import { SummaryPane } from "./bench/SummaryPane";
@@ -849,20 +846,15 @@ export function OfficialBenchPage() {
     lastFinishedId: lastFinishedLiveId,
     progress,
     phaseHint,
-    suiteDetails,
     detailProgress,
     astIndexRows,
     codingRows,
     codingSummary,
     astIndexSummary,
-    setLogs: setLiveLogs,
-    setLogItems: setLiveLogItems,
     setLastFinishedId: setLastFinishedLiveId,
     setProgress,
     setPhaseHint,
     setSuiteDetails,
-    setAstIndexByIid,
-    setCoding: setCodingLive,
     applyRunSnapshot,
     reset: resetLive,
   } = live;
@@ -988,6 +980,8 @@ export function OfficialBenchPage() {
       setPhaseHint("全过程：① 拉取（已有则跳过）→ ② 评测 → ③ 回归对比上次指标");
       setProgress({ done: 0, total: 0 });
     }
+    // Stream methods are stable; selection is the intended reset trigger.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
   useEffect(() => {
@@ -1014,6 +1008,8 @@ export function OfficialBenchPage() {
         }
       }
     })();
+    // Loading a selected run is the trigger; the hook methods are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadDetail, applyRunSnapshot, attachLiveStream]);
 
   useEffect(() => {

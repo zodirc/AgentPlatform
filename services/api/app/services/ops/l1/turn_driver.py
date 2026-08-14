@@ -34,19 +34,25 @@ async def _watch_workspace_index_progress(
     tenant: dict[str, str],
     on_progress: ProgressCb | None,
     should_cancel: CancelCheck | None = None,
-    timeout_s: float = 900.0,
-    poll_s: float = 2.0,
+    timeout_s: float = 600.0,
+    poll_s: float = 15.0,
+    max_poll_errors: int = 4,
 ) -> None:
-    """Poll ephemeral AST index status into Ops logs (non-blocking side task).
+    """Poll ephemeral AST index status into Ops logs (best-effort side task).
 
     Line shape (stable for OfficialBenchPage parse)::
 
         [L1] workspace_index {iid} status=building files=120/914 gen=1 ephemeral=1
+
+    Observability only — never compete hard with Turn traffic. Slow/failing
+    status polls back off and pause so a busy runtime is not hammered.
     """
     from app.services.admin import workspace as workspace_svc
 
     t0 = time.monotonic()
     last_line = ""
+    backoff = poll_s
+    err_streak = 0
     while time.monotonic() - t0 < timeout_s:
         if should_cancel is not None and should_cancel():
             await _emit(
@@ -56,8 +62,12 @@ async def _watch_workspace_index_progress(
             )
             return
         try:
-            st = await workspace_svc.ast_index_status(enqueue=False, tenant=tenant)
+            # Short timeout: status is a snapshot; waiting long only blocks api.
+            st = await workspace_svc.ast_index_status(
+                enqueue=False, tenant=tenant, timeout=2.0
+            )
         except Exception as exc:  # noqa: BLE001 — best-effort visibility
+            err_streak += 1
             msg = (
                 f"[L1] workspace_index {iid} status=poll_error "
                 f"error={_exc_text(exc)[:120]}"
@@ -65,8 +75,21 @@ async def _watch_workspace_index_progress(
             if msg != last_line:
                 await _emit(on_progress, "log", message=msg)
                 last_line = msg
-            await asyncio.sleep(poll_s)
+            if err_streak >= max_poll_errors:
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=(
+                        f"[L1] workspace_index {iid} status=watch_paused "
+                        "reason=runtime_busy (index may still build; Turn continues)"
+                    ),
+                )
+                return
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2.0, 60.0)
             continue
+        err_streak = 0
+        backoff = poll_s
         if not isinstance(st, dict):
             await asyncio.sleep(poll_s)
             continue

@@ -67,8 +67,9 @@ async def _append_failed_event(
 async def reconcile_expired_leases() -> int:
     """Fail running turns whose lease expired and clear lease column.
 
-    WP1 fail-safe: waiting_approval / checkpoint turns are also failed with
-    ``runner_lost`` (WP6 will add hand-off). Logged distinctly for metrics.
+    WP1 fail-safe: turns stuck in ``waiting_approval`` are also failed with
+    ``runner_lost`` when the lease dies (WP6 will add hand-off). Step
+    checkpoints alone are normal HA state — do not label them as approval.
     """
     if not settings.runner_lease_enabled:
         return 0
@@ -86,10 +87,7 @@ async def reconcile_expired_leases() -> int:
                  WHERE te.turn_id = r.turn_id
                  ORDER BY te.sequence DESC
                  LIMIT 1
-               ) AS trace_id,
-               EXISTS (
-                 SELECT 1 FROM checkpoints c WHERE c.run_id = r.id
-               ) AS has_checkpoint
+               ) AS trace_id
         FROM runs r
         JOIN turns t ON t.id = r.turn_id
         WHERE r.status IN ('running', 'interrupted')
@@ -105,12 +103,12 @@ async def reconcile_expired_leases() -> int:
     for row in rows:
         turn_id = row["turn_id"]
         run_id = row["run_id"]
-        waiting = row["turn_status"] == "waiting_approval" or bool(row["has_checkpoint"])
-        message = (
-            f"runner lease expired (runner_id={row['runner_id'] or '?'}"
-            + ("; approval checkpoint present — WP1 fail-safe" if waiting else "")
-            + ")"
-        )
+        waiting = row["turn_status"] == "waiting_approval"
+        message = f"runner lease expired (runner_id={row['runner_id'] or '?'}"
+        if waiting:
+            # True human/approval gate — WP6 will hand off instead of fail-safe.
+            message += "; waiting_approval — WP1 fail-safe"
+        message += ")"
         try:
             async with pool.acquire() as conn:
                 async with conn.transaction():
@@ -145,7 +143,7 @@ async def reconcile_expired_leases() -> int:
             fixed += 1
             metrics.inc("runner_lease_misses_total")
             logger.warning(
-                "reclaimed expired lease turn_id=%s run_id=%s waiting_approvalish=%s",
+                "reclaimed expired lease turn_id=%s run_id=%s waiting_approval=%s",
                 turn_id,
                 run_id,
                 waiting,

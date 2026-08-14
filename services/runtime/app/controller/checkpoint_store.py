@@ -104,6 +104,13 @@ async def save_checkpoint(
         json.dumps(_serialize_state(state)),
         json.dumps(interrupt_payload) if interrupt_payload else None,
     )
+    # Step boundaries are natural liveness proofs for the lease reclaim path.
+    try:
+        from app.controller import run_lock
+
+        await run_lock.touch_run_lease(run_id=run_id)
+    except Exception:
+        pass
 
 
 async def load_checkpoint(run_id: UUID) -> tuple[TurnState, dict[str, Any] | None] | None:

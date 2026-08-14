@@ -163,6 +163,7 @@ async def ast_index_status(
     *,
     enqueue: bool = False,
     tenant: dict[str, str] | None = None,
+    timeout: float = 15.0,
 ) -> dict:
     """Agent workspace AST index meta snapshot (separate from RAG sources sync)."""
     base = settings.runtime_url.rstrip("/")
@@ -170,7 +171,7 @@ async def ast_index_status(
     if enqueue:
         params["enqueue"] = "true"
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=float(timeout)) as client:
             resp = await client.get(
                 f"{base}/internal/workspace/ast-index/status",
                 params=params or None,

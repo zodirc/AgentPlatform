@@ -17,8 +17,16 @@ async def test_wait_turn_verbose_raises_when_should_cancel() -> None:
     run_id = uuid4()
     cancel_calls: list[tuple] = []
 
-    async def _fake_cancel(*, turn_id, run_id, trace_id, reason="user_requested", force=False):
-        cancel_calls.append((turn_id, run_id, reason, force))
+    async def _fake_cancel(
+        *,
+        turn_id,
+        run_id,
+        trace_id,
+        reason="user_requested",
+        force=False,
+        timeout=30.0,
+    ):
+        cancel_calls.append((turn_id, run_id, reason, force, timeout))
 
     with (
         patch(
@@ -93,3 +101,32 @@ async def test_turn_tracker_cancel_all() -> None:
     assert n == 2
     assert tracker.snapshot() == []
     assert client.cancel_turn.await_count == 2
+    # Parallel cancel uses a short per-turn timeout so stop UX cannot hang.
+    for call in client.cancel_turn.await_args_list:
+        assert call.kwargs.get("timeout") == 5.0
+
+
+@pytest.mark.asyncio
+async def test_turn_tracker_cancel_all_survives_timeout() -> None:
+    tracker = L1TurnTracker()
+    await tracker.register(uuid4(), uuid4())
+
+    async def _hang(**_kwargs):
+        import asyncio
+
+        await asyncio.sleep(60)
+
+    with patch(
+        "app.services.ops.l1.common.runtime_client_for_new_turn",
+    ) as client_factory:
+        client = AsyncMock()
+        client.cancel_turn = AsyncMock(side_effect=_hang)
+        client_factory.return_value = client
+        # cancel_turn itself should honor timeout via RuntimeClient; here we
+        # simulate a slow client that still returns — use wait_for at call site.
+        # Tracker must not raise when cancel_turn raises.
+        client.cancel_turn = AsyncMock(side_effect=TimeoutError("read timeout"))
+        n = await tracker.cancel_all(reason="ops_eval_stopped", per_turn_timeout=0.1)
+
+    assert n == 0
+    assert tracker.snapshot() == []

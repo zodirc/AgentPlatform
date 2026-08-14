@@ -1,7 +1,12 @@
 import { Link } from "react-router-dom";
-import { ArtifactsPanel } from "./ArtifactsPanel";
 import { targetsFromRun } from "./progressParse";
+import type { OfficialLogItem, OfficialRun } from "./types";
 
+type OfficialCase = NonNullable<OfficialRun["cases"]>[number];
+
+// The parent owns this deliberately broad cross-pane state bag; callbacks are
+// typed at their use sites so strict TypeScript still checks rendered behavior.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type HistoryPaneModel = Record<string, any>;
 
 export function HistoryPane({ model }: { model: HistoryPaneModel }) {
@@ -21,7 +26,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                     className="text-[11px] text-muted-foreground underline disabled:opacity-40"
                     disabled={runs.length === 0}
                     onClick={() => {
-                      setHistorySelectMode((v) => {
+                      setHistorySelectMode((v: boolean) => {
                         if (v) setCheckedRunIds(new Set());
                         return !v;
                       });
@@ -36,19 +41,19 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                         className="text-[11px] text-muted-foreground underline disabled:opacity-40"
                         disabled={filteredRuns.length === 0}
                         onClick={() => {
-                          const allVisible = filteredRuns.every((r) =>
+                          const allVisible = filteredRuns.every((r: OfficialRun) =>
                             checkedRunIds.has(r.id),
                           );
                           if (allVisible) {
                             setCheckedRunIds(new Set());
                           } else {
                             setCheckedRunIds(
-                              new Set(filteredRuns.map((r) => r.id)),
+                              new Set(filteredRuns.map((r: OfficialRun) => r.id)),
                             );
                           }
                         }}
                       >
-                        {filteredRuns.every((r) => checkedRunIds.has(r.id)) &&
+                        {filteredRuns.every((r: OfficialRun) => checkedRunIds.has(r.id)) &&
                         filteredRuns.length > 0
                           ? "取消全选"
                           : "全选"}
@@ -117,7 +122,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                   </p>
                 ) : (
                   <ul>
-                    {filteredRuns.map((r) => {
+                    {filteredRuns.map((r: OfficialRun) => {
                       const active = selectedId === r.id;
                       const checked = checkedRunIds.has(r.id);
                       const m = runMetrics(r);
@@ -251,7 +256,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                           void openAuthorizedHtml(
                             `/api/v1/ops/official/runs/${encodeURIComponent(detail.id)}/report`,
                             secret,
-                          ).catch((e) =>
+                          ).catch((e: unknown) =>
                             setError(
                               e instanceof Error ? e.message : String(e),
                             ),
@@ -268,7 +273,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                             `/api/v1/ops/official/runs/${encodeURIComponent(detail.id)}/predictions`,
                             secret,
                             `predictions-${detail.id.slice(0, 8)}.jsonl`,
-                          ).catch((e) =>
+                          ).catch((e: unknown) =>
                             setError(
                               e instanceof Error ? e.message : String(e),
                             ),
@@ -368,7 +373,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                           </tr>
                         </thead>
                         <tbody>
-                          {(detail.cases || []).map((c) => (
+                          {(detail.cases || []).map((c: OfficialCase) => (
                             <tr
                               key={c.case_id}
                               className="border-b border-border/60"
@@ -409,7 +414,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                       {logTabItems.length === 0 ? (
                         <li className="text-muted-foreground">暂无关键日志</li>
                       ) : null}
-                      {logTabItems.map((item, i) => {
+                      {logTabItems.map((item: OfficialLogItem, i: number) => {
                         const text = String(item.message || "");
                         const err =
                           isOpsErrorLogLine(text) ||

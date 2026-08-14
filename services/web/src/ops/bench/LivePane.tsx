@@ -1,7 +1,17 @@
 import { LiveProgress } from "./LiveProgress";
 import { scenarioLabelForSuite } from "./presets";
-import type { ApiStyle, ContextTier, RetrievalTier } from "./types";
+import type {
+  ApiStyle,
+  CodingTierMeta,
+  ContextTier,
+  Preset,
+  ProviderPreset,
+  RetrievalTier,
+  SuiteId,
+  TargetMeta,
+} from "./types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type LivePaneModel = Record<string, any>;
 
 export function LivePane({ model }: { model: LivePaneModel }) {
@@ -158,7 +168,7 @@ export function LivePane({ model }: { model: LivePaneModel }) {
               prefs）。
             </p>
             <div className="mt-3 flex flex-wrap gap-1.5">
-              {profileButtons.map((p) => {
+              {profileButtons.map((p: Preset) => {
                 const on = activeProfileId === p.id;
                 return (
                   <button
@@ -242,11 +252,16 @@ export function LivePane({ model }: { model: LivePaneModel }) {
                     套件（按场景）
                   </p>
                   <div className="space-y-3">
-                    {BENCH_SCENARIO_GROUPS.map((group) => {
+                    {BENCH_SCENARIO_GROUPS.map((group: {
+                      id: string;
+                      label: string;
+                      hint: string;
+                      suiteIds: readonly SuiteId[];
+                    }) => {
                       const groupTargets = group.suiteIds
                         .map(
-                          (id) =>
-                            targetsMeta.find((t) => t.id === id) ||
+                          (id: SuiteId) =>
+                            targetsMeta.find((t: TargetMeta) => t.id === id) ||
                             FALLBACK_SUITE_META[id],
                         )
                         .filter(Boolean);
@@ -267,7 +282,7 @@ export function LivePane({ model }: { model: LivePaneModel }) {
                             </p>
                           ) : (
                             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                              {groupTargets.map((t) => {
+                              {groupTargets.map((t: TargetMeta) => {
                                 const id = t.id;
                                 const on = selectedSuites.has(id);
                                 const enabled = targetEnabled(id);
@@ -384,7 +399,7 @@ export function LivePane({ model }: { model: LivePaneModel }) {
                           }}
                           className="rounded border border-border bg-background px-1.5 py-1"
                         >
-                          {(codingTierMeta || []).map((t) => (
+                          {(codingTierMeta || []).map((t: CodingTierMeta) => (
                             <option key={t.id} value={t.id}>
                               {t.id}
                             </option>
@@ -458,7 +473,7 @@ export function LivePane({ model }: { model: LivePaneModel }) {
                           }}
                           className="rounded border border-border bg-background px-1.5 py-1"
                         >
-                          {PROVIDER_PRESETS.map((p) => (
+                          {PROVIDER_PRESETS.map((p: ProviderPreset) => (
                             <option key={p.id} value={p.id}>
                               {p.label}
                             </option>

@@ -279,6 +279,17 @@ def classify_bucket(
     if s == "coding":
         if probe.get("checkout_failed") or str(probe.get("bucket") or "") == "checkout_failed":
             return "checkout_failed"
+        fail_msg = str(
+            probe.get("failure_message")
+            or probe.get("turn_failed_message")
+            or probe.get("error")
+            or ""
+        ).lower()
+        # Dispatch / claim failures — runtime never ran the agent.
+        if "start_timeout" in fail_msg or "no runtime claimed" in fail_msg:
+            return "start_timeout"
+        if "runner lease expired" in fail_msg or "runner_lost" in fail_msg:
+            return "runner_lost"
         src = str(probe.get("patch_source") or "none")
         if src in {"", "none"}:
             return "no_patch"

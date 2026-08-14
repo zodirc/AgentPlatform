@@ -62,7 +62,7 @@ async def ensure_run_owned_by_runner(*, run_id: UUID, runner_id: str | None = No
     or api lease reclaim (O3) instead.
     """
     owner = runner_id or settings.runtime_runner_id
-    lease_seconds = max(1, int(getattr(settings, "runner_lease_seconds", 60) or 60))
+    lease_seconds = max(1, int(getattr(settings, "runner_lease_seconds", 180) or 180))
     lease_enabled = bool(getattr(settings, "runner_lease_enabled", True))
     pool = await get_pool()
     if lease_enabled:
@@ -115,7 +115,7 @@ async def renew_run_leases(*, runner_id: str | None = None, run_ids: list[UUID] 
     if not bool(getattr(settings, "runner_lease_enabled", True)):
         return 0
     owner = runner_id or settings.runtime_runner_id
-    lease_seconds = max(1, int(getattr(settings, "runner_lease_seconds", 60) or 60))
+    lease_seconds = max(1, int(getattr(settings, "runner_lease_seconds", 180) or 180))
     pool = await get_pool()
     if run_ids is not None:
         if not run_ids:
@@ -150,6 +150,57 @@ async def renew_run_leases(*, runner_id: str | None = None, run_ids: list[UUID] 
         return int(str(result).split()[-1])
     except Exception:
         return 0
+
+
+# Opportunistic per-run touch (event flush / checkpoint) — throttle in-process.
+_last_lease_touch_mono: dict[str, float] = {}
+
+
+async def touch_run_lease(*, run_id: UUID, force: bool = False) -> bool:
+    """Extend lease for one run if this process is actively working it.
+
+    Used from event flushes and step checkpoints so a busy event loop that
+    delays the global heartbeat still proves liveness. Throttled to avoid
+    one UPDATE per thinking.delta.
+    """
+    if not bool(getattr(settings, "runner_lease_enabled", True)):
+        return False
+    import time
+
+    key = str(run_id)
+    min_gap = float(
+        getattr(settings, "runner_lease_touch_min_interval_seconds", 5.0) or 5.0
+    )
+    now = time.monotonic()
+    if not force:
+        last = _last_lease_touch_mono.get(key)
+        if last is not None and (now - last) < max(0.5, min_gap):
+            return False
+    _last_lease_touch_mono[key] = now
+    lease_seconds = max(1, int(getattr(settings, "runner_lease_seconds", 180) or 180))
+    owner = settings.runtime_runner_id
+    try:
+        pool = await get_pool()
+        result = await pool.execute(
+            """
+            UPDATE runs
+            SET lease_expires_at = now() + ($2::text || ' seconds')::interval,
+                updated_at = now()
+            WHERE id = $1
+              AND runner_id = $3
+              AND status IN ('running', 'interrupted')
+            """,
+            run_id,
+            str(lease_seconds),
+            owner,
+        )
+        try:
+            return int(str(result).split()[-1]) > 0
+        except Exception:
+            return False
+    except Exception:
+        logger.debug("touch_run_lease failed run_id=%s", run_id, exc_info=True)
+        return False
 
 
 async def persist_cancel_request(*, turn_id: UUID, force: bool = False) -> None:

@@ -71,3 +71,25 @@ async def test_upsert_runner_heartbeat(monkeypatch: pytest.MonkeyPatch) -> None:
     assert args[1] == "runtime-a"
     assert args[2] == "runtime"
     assert args[3] == "node-1"
+
+
+@pytest.mark.asyncio
+async def test_touch_run_lease_throttled(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.controller import run_lock
+
+    monkeypatch.setattr(run_lock.settings, "runner_lease_enabled", True)
+    monkeypatch.setattr(run_lock.settings, "runner_lease_seconds", 180)
+    monkeypatch.setattr(run_lock.settings, "runner_lease_touch_min_interval_seconds", 60.0)
+    monkeypatch.setattr(run_lock.settings, "runtime_runner_id", "runtime-a")
+    run_lock._last_lease_touch_mono.clear()
+
+    pool = MagicMock()
+    pool.execute = AsyncMock(return_value="UPDATE 1")
+    monkeypatch.setattr(run_lock, "get_pool", AsyncMock(return_value=pool))
+
+    run_id = uuid4()
+    assert await run_lock.touch_run_lease(run_id=run_id) is True
+    assert await run_lock.touch_run_lease(run_id=run_id) is False  # throttled
+    assert pool.execute.await_count == 1
+    assert await run_lock.touch_run_lease(run_id=run_id, force=True) is True
+    assert pool.execute.await_count == 2

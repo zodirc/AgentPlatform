@@ -261,9 +261,13 @@ class Settings(BaseSettings):
     stall_auto_fail: bool = True
     runtime_runner_id: str = socket.gethostname()
     # O3 / WP1: DB heartbeat + run lease (set false to roll back to stall-only reclaim).
+    # 180s TTL: coding steps often run 60–160s under parallel load; 60s was reclaiming
+    # live turns when heartbeat contended with thinking.delta floods.
     runner_lease_enabled: bool = True
-    runner_lease_seconds: int = 60
+    runner_lease_seconds: int = 180
     runner_heartbeat_interval_seconds: float = 10.0
+    # Min gap between opportunistic lease touches (event flush / step checkpoint).
+    runner_lease_touch_min_interval_seconds: float = 5.0
     # O1 / WP5→WP9: default pull (set TURN_DISPATCH=push to roll back).
     turn_dispatch: str = "pull"
     turn_dispatch_poll_seconds: float = 2.0

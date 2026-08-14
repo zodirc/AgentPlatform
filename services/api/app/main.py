@@ -264,9 +264,12 @@ async def health_ready():
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.fetchval("SELECT 1")
+    # Probe runtime liveness only — /health/ready on runtime can wait on the
+    # model/event loop under parallel SWE turns and would cascade into api
+    # Docker "unhealthy" (compose healthcheck timeout is short).
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{settings.runtime_url}/health/ready")
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{settings.runtime_url}/health/live")
             resp.raise_for_status()
     except httpx.HTTPError as exc:
         return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(exc)})

@@ -360,7 +360,9 @@ services:
         condition: service_healthy
         required: false
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/ready"]
+      # Process up + DB reachable path uses /health/live for Docker; /health/ready
+      # still probes runtime live for ops, but must not depend on a busy Turn loop.
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8000/health/live"]
       interval: 10s
       timeout: 5s
       start_period: 45s

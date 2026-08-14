@@ -127,6 +127,7 @@ class RuntimeClient:
         trace_id: UUID,
         reason: str = "user_requested",
         force: bool = False,
+        timeout: float = 30.0,
     ) -> None:
         payload = {
             "turn_id": str(turn_id),
@@ -135,7 +136,9 @@ class RuntimeClient:
             "reason": reason,
             "force": force,
         }
-        await self._post("/internal/commands/cancel-turn", timeout=30.0, json=payload)
+        await self._post(
+            "/internal/commands/cancel-turn", timeout=float(timeout), json=payload
+        )
 
     async def approve_tool_call(
         self,

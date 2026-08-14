@@ -57,15 +57,21 @@ class L1TurnTracker:
     def snapshot(self) -> list[tuple[UUID, UUID]]:
         return [(UUID(tid), rid) for tid, rid in list(self._turns.items())]
 
-    async def cancel_all(self, *, reason: str = "ops_eval_stopped") -> int:
+    async def cancel_all(
+        self,
+        *,
+        reason: str = "ops_eval_stopped",
+        per_turn_timeout: float = 5.0,
+    ) -> int:
+        """Best-effort parallel cancel; never block stop UX on a dead runtime."""
         async with self._lock:
             items = list(self._turns.items())
             self._turns.clear()
         if not items:
             return 0
         client = runtime_client_for_new_turn()
-        n_ok = 0
-        for tid, rid in items:
+
+        async def _one(tid: str, rid: UUID) -> bool:
             try:
                 await client.cancel_turn(
                     turn_id=UUID(tid),
@@ -73,13 +79,20 @@ class L1TurnTracker:
                     trace_id=uuid4(),
                     reason=reason,
                     force=True,
+                    timeout=per_turn_timeout,
                 )
-                n_ok += 1
+                return True
             except Exception:  # noqa: BLE001 — best-effort stop
                 logger.warning(
                     "L1 cancel_turn failed turn_id=%s", tid, exc_info=True
                 )
-        return n_ok
+                return False
+
+        results = await asyncio.gather(
+            *(_one(tid, rid) for tid, rid in items),
+            return_exceptions=True,
+        )
+        return sum(1 for r in results if r is True)
 
 
 async def _request_cancel_turn(
@@ -87,6 +100,7 @@ async def _request_cancel_turn(
     run_id: UUID,
     *,
     reason: str = "ops_eval_stopped",
+    timeout: float = 5.0,
 ) -> None:
     try:
         client = runtime_client_for_new_turn()
@@ -96,6 +110,7 @@ async def _request_cancel_turn(
             trace_id=uuid4(),
             reason=reason,
             force=True,
+            timeout=timeout,
         )
     except Exception:  # noqa: BLE001
         logger.warning(

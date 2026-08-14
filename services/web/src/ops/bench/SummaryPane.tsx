@@ -1,3 +1,6 @@
+import type { MetricAgg } from "./types";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SummaryPaneModel = Record<string, any>;
 
 export function SummaryPane({ model }: { model: SummaryPaneModel }) {
@@ -67,7 +70,7 @@ export function SummaryPane({ model }: { model: SummaryPaneModel }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {metricAggs.map((row) => (
+                  {metricAggs.map((row: MetricAgg) => (
                     <tr key={row.key} className="border-b border-border/60">
                       <td className="py-1.5 pr-2 font-mono text-[11px]">
                         {row.key}

@@ -373,7 +373,7 @@ async def _cancel_inflight_l1_turns(run: OfficialLiveRun) -> None:
     if tracker is None:
         return
     try:
-        n = await tracker.cancel_all(reason="ops_eval_stopped")
+        n = await tracker.cancel_all(reason="ops_eval_stopped", per_turn_timeout=5.0)
         if n:
             await _publish(
                 run,
@@ -815,13 +815,23 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
     )
     await _persist_snapshot(run)
     # Stop in-flight product Turns immediately (coding/context/retrieval L1).
-    await _cancel_inflight_l1_turns(run)
+    # Cap wait: overloaded runtime must not block "stop requested…" for 30s×N.
+    try:
+        await asyncio.wait_for(_cancel_inflight_l1_turns(run), timeout=8.0)
+    except asyncio.TimeoutError:
+        await _publish(
+            run,
+            {
+                "kind": "log",
+                "message": "[ops] cancel_turn budget exceeded; continuing stop",
+            },
+        )
     # Abort in-flight sources index (L1 materialize/sync) — does not wait for embed finish.
     try:
         from app.services.command.runtime_factory import runtime_client_for_new_turn
 
         client = runtime_client_for_new_turn()
-        cancelled = await client.cancel_sources_index()
+        cancelled = await asyncio.wait_for(client.cancel_sources_index(), timeout=5.0)
         await _publish(
             run,
             {
@@ -831,6 +841,10 @@ async def request_stop(run_id: str) -> OfficialLiveRun:
                     f"{cancelled.get('status') or cancelled}"
                 ),
             },
+        )
+    except asyncio.TimeoutError:
+        await _publish(
+            run, {"kind": "log", "message": "[ops] sources sync cancel timed out"}
         )
     except Exception as exc:  # noqa: BLE001
         await _publish(
@@ -1245,11 +1259,35 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             case["status"] = "pass" if manifest.get("status") != "failed" else "fail"
             case["metrics"] = manifest.get("metrics") or {}
             case["error"] = manifest.get("error")
+            child_id = str(
+                manifest.get("id") or manifest.get("run_id") or ""
+            ).strip()
+            # Coding: if suite returned harness-only payload (legacy bug), recover
+            # the finished L1 / evaluate id from latest pointers.
+            if not child_id and suite in {"coding", "coding_infer"}:
+                try:
+                    reports = Path(
+                        os.environ.get("BENCH_REPORTS_DIR", "/data/ops-official/reports")
+                    )
+                    for name in ("latest_coding.json", "latest_run.json"):
+                        p = reports / name
+                        if not p.is_file():
+                            continue
+                        meta = json.loads(p.read_text(encoding="utf-8"))
+                        child_id = str(
+                            meta.get("id") or meta.get("run_id") or ""
+                        ).strip()
+                        if child_id:
+                            break
+                except (OSError, json.JSONDecodeError, TypeError):
+                    child_id = ""
+            if child_id:
+                case["bench_run_id"] = child_id
             run.child_reports.append(
                 {
                     "suite": suite,
-                    "run_id": manifest.get("id") or manifest.get("run_id"),
-                    "bench_run_id": manifest.get("id") or manifest.get("run_id"),
+                    "run_id": child_id or None,
+                    "bench_run_id": child_id or None,
                     "eval_path": "agent",
                 }
             )

@@ -39,6 +39,7 @@ async def run_coding_l1(
     from official_bench.agent_path_extract import (
         csi_probes_from_events,
         csi_suite_rates,
+        file_hit,
         patch_apply_check,
         patch_from_edit_events,
         patch_from_events,
@@ -49,6 +50,7 @@ async def run_coding_l1(
         read_file_stats_from_events,
         step_count_from_events,
         terminal_state_from_events,
+        turn_failure_message_from_events,
     )
     from official_bench.config import load_suites
     from official_bench.l2_probes import classify_bucket
@@ -376,6 +378,9 @@ async def run_coding_l1(
                         accepted_patch = "" if reject_reason else patch
                         read_stats = read_file_stats_from_events(events)
                         csi = csi_probes_from_events(events)
+                        # §7.7.1 D1 file_hit: gold patch only post-hoc (§8.4 — never in prompt).
+                        gold_patch = str(inst.get("patch") or "")
+                        hit = file_hit(model_patch=accepted_patch or patch, gold_patch=gold_patch)
                         l2 = {
                             "case_id": iid,
                             "turn_id": str(turn["id"]),
@@ -386,6 +391,7 @@ async def run_coding_l1(
                             "patch_rejected": reject_reason,
                             "patch_chars": len(patch) if patch else 0,
                             "ran_tests": ran_tests_from_events(events),
+                            "file_hit": hit,
                             **read_stats,
                             **csi,
                             "steps": step_count_from_events(events),
@@ -393,8 +399,17 @@ async def run_coding_l1(
                             "mirror_hit": mirror_hit,
                             "has_repo": has_repo,
                         }
+                        fail_msg = turn_failure_message_from_events(events)
+                        if fail_msg:
+                            l2["failure_message"] = fail_msg[:500]
                         l2["bucket"] = classify_bucket("coding", l2)
-                        err = None
+                        # Infra turn death (e.g. start_timeout) must not look like
+                        # "agent produced no patch" — surface the real reason.
+                        term = str(l2.get("terminal_state") or "")
+                        if term in {"failed", "step_timeout", "stall"} and not patch.strip():
+                            err = fail_msg or term
+                        else:
+                            err = None
                         patch = accepted_patch
                     except L1Cancelled:
                         raise
@@ -418,6 +433,8 @@ async def run_coding_l1(
                         patch = "" if reject_reason else raw
                         err = _exc_text(exc)
                         csi = csi_probes_from_events(events)
+                        gold_patch = str(inst.get("patch") or "")
+                        hit = file_hit(model_patch=patch, gold_patch=gold_patch)
                         l2 = {
                             "case_id": iid,
                             "turn_id": str(turn["id"]),
@@ -427,6 +444,7 @@ async def run_coding_l1(
                             "terminal_state": "failed",
                             "has_repo": has_repo,
                             "mirror_hit": mirror_hit,
+                            "file_hit": hit,
                             **csi,
                         }
                         l2["bucket"] = classify_bucket("coding", l2)
@@ -510,13 +528,23 @@ async def run_coding_l1(
                         message=(
                             f"[L1] coding {done_count}/{len(ordered)} {iid} "
                             f"status={case_status} patch_source={patch_source}"
+                            + (
+                                f" error={str(err)[:160]}"
+                                if err
+                                else ""
+                            )
                         ),
                     )
                 if case_status == "fail" or err:
                     await _emit_fail(
                         on_progress,
                         iid,
-                        error=str(err or l2.get("bucket") or "no_patch"),
+                        error=str(
+                            err
+                            or l2.get("failure_message")
+                            or l2.get("bucket")
+                            or "no_patch"
+                        ),
                     )
 
         results = await asyncio.gather(
@@ -574,10 +602,16 @@ async def run_coding_l1(
                             "n_edit_ok",
                             "n_edit_with_impact",
                             "n_edit_with_checks",
+                            "n_edit_with_related_tests",
                             "n_syntax_rejected",
                             "n_syntax_warning",
                             "n_span_fail",
                             "n_span_fail_with_candidates",
+                            "n_read_truncated",
+                            "n_read_with_outline",
+                            "file_hit",
+                            "repro_rerun",
+                            "tests_before_submit",
                         )
                         if k in c
                     },
@@ -747,7 +781,6 @@ async def run_coding_l1(
                 "(Ops coding always enables harness)"
             )
 
-        return harness_result
         session.metrics = metrics
         result = {
             "suite": "swebench.lite",

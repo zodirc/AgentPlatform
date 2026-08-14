@@ -1,5 +1,6 @@
-import { ChevronDown, ChevronUp } from "lucide-react";
+import type { AstIndexLive, CodingCaseLive } from "./types";
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type LiveProgressModel = Record<string, any>;
 
 export function LiveProgress({ model }: { model: LiveProgressModel }) {
@@ -222,7 +223,7 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                             : ""}
                         </div>
                         <ul className="mt-1.5 space-y-1">
-                          {codingRows.map((row) => {
+                          {codingRows.map((row: CodingCaseLive) => {
                             const label =
                               row.harness != null
                                 ? `${row.status} · harness=${row.harness}`
@@ -259,7 +260,7 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                     <button
                       type="button"
                       className="flex w-full items-center justify-between gap-2 text-left transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      onClick={() => setAstIndexExpanded((v) => !v)}
+                      onClick={() => setAstIndexExpanded((v: boolean) => !v)}
                       aria-expanded={astIndexExpanded}
                       title={
                         astIndexExpanded
@@ -295,7 +296,7 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                     </button>
                     {astIndexExpanded ? (
                       <ul className="mt-2 space-y-1.5 border-t border-border/60 pt-2">
-                        {astIndexRows.map((row) => {
+                        {astIndexRows.map((row: AstIndexLive) => {
                           const pct =
                             row.filesTotal != null &&
                             row.filesTotal > 0 &&
@@ -362,7 +363,7 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                       / [progress] pull）
                     </p>
                   ) : (
-                    liveLogs.map((line, i) => (
+                    liveLogs.map((line: string, i: number) => (
                       <div
                         key={`${i}-${line.slice(0, 24)}`}
                         className={liveLogLineClass(line)}

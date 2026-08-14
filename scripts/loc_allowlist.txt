@@ -4,7 +4,7 @@
 #   - Non-test .py/.ts/.tsx under services/ hard cap 800 unless listed here.
 #   - Listed files may not grow above max+20; drop below 800 → remove from this file.
 #   - Tighten max when a split lands (ratchet down only).
-services/web/src/ops/OfficialBenchPage.tsx	1783
+services/web/src/ops/OfficialBenchPage.tsx	1779
 services/release-console/server.py	1996
 services/runtime/app/controller/turn_controller.py	1822
 services/runtime/app/retrieval/pgvector_store.py	1728
