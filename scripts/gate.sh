@@ -46,12 +46,17 @@ SMOKE_RUNTIME_LITE="${SMOKE_RUNTIME_LITE:-1}"
 SKIP_RT="${GATE_SKIP_RUNTIME_TEST:-0}"
 
 echo "========================================"
-echo " GATE — smoke → eval-all"
+echo " GATE — constitution → smoke → eval-all"
 if [[ "$SKIP_RT" != "1" ]]; then
   echo "         → runtime-test"
 fi
 echo " (lite smoke=${SMOKE_RUNTIME_LITE})"
 echo "========================================"
+
+echo ""
+echo "==> [0/3] constitution gates (LOC ratchet + scenario leak)"
+python3 "$ROOT/scripts/check_file_size.py"
+python3 "$ROOT/scripts/check_scenario_leak.py"
 
 echo ""
 echo "==> [1/3] smoke"

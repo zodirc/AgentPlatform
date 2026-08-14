@@ -403,7 +403,11 @@ smoke:
 pull-dispatch-maturity: ## pull 分发成熟度冒烟（schema/LISTEN/retention/metrics；无 kill）
 	bash scripts/ops/pull_dispatch_maturity.sh
 
-gate: ## Docker 门禁：smoke → eval-all → runtime-test（完整 CI 请用 make ci-proof）
+constitution-check: ## 三大短板门禁：LOC 棘轮 + scenario 泄漏扫描（S0/C0）
+	python3 scripts/check_file_size.py
+	python3 scripts/check_scenario_leak.py
+
+gate: ## Docker 门禁：constitution → smoke → eval-all → runtime-test（完整 CI 请用 make ci-proof）
 	bash scripts/gate.sh
 
 ci-proof: ## 完整 CI 证明（≡ GitHub Actions / Ops suite=ci；unit 后 gate 不再重复 pytest）
@@ -637,6 +641,8 @@ ops-cmteb-prepare: ## 从挂载 C-MTEB 建 cmteb-index Works+语料 txt（不嵌
 	@echo "==> ops-cmteb-prepare: materialize ops-l1/cmteb-index (Covid/Medical/Ecom)"
 	@$(COMPOSE) cp services/api/app/services/ops/official_agent_path.py \
 	  api:/app/app/services/ops/official_agent_path.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/api/app/services/ops/l1 \
+	  api:/app/app/services/ops/l1 >/dev/null 2>&1 || true
 	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 api bash -c '\
 	  export PYTHONPATH=/app:/repo/scripts; \
 	  python /repo/scripts/official_bench/cmteb_index_prepare.py'
@@ -856,6 +862,10 @@ official-bench-update-baseline: ## 将 latest_* 效果分写入仓库 baseline J
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --update \
 	  $(if $(SUITES),--suites $(SUITES),)
 
+official-bench-promote-run: ## 按 run_id 升锚点档（须 sample_tier=anchor；不依赖 latest 时序）
+	@test -n "$(RUN_ID)" || (echo "Usage: make official-bench-promote-run RUN_ID=<uuid>"; exit 1)
+	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --promote-run $(RUN_ID)
+
 official-bench-show-baseline: ## 查看已提交的官方 baseline
 	$(OFFICIAL_BENCH_PY) scripts/official_bench_run.py baseline --show
 
@@ -950,6 +960,7 @@ micro-l1-prepare: ## SciFact 中库微图准备+嵌入（不跑 Turn；不影响
 	@echo "==> micro-l1-prepare limit=$(MICRO_L1_LIMIT) distractors=$(MICRO_L1_DISTRACTORS) → scifact-micro"
 	docker cp scripts/official_bench/scifact_micro_prepare.py agent-api:/tmp/scifact_micro_prepare.py
 	docker cp services/api/app/services/ops/official_agent_path.py agent-api:/app/app/services/ops/official_agent_path.py
+	docker cp services/api/app/services/ops/l1 agent-api:/app/app/services/ops/l1
 	$(COMPOSE) exec -T api bash -c '\
 	  export PYTHONPATH=/app:/repo/scripts; \
 	  python /tmp/scifact_micro_prepare.py \

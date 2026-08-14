@@ -1,0 +1,2 @@
+# Constitution leak allowlist (target: empty).
+# After C1–C3 there should be zero stock leaks. New hits fail CI.
