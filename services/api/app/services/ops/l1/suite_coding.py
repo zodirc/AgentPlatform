@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio, json, logging, os
 from pathlib import Path
 from typing import Any
+from uuid import UUID
 from app.services.end_user.users import SYSTEM_USER_ID
 from app.services.resource import sessions as session_svc
 from .common import (CancelCheck, L1Cancelled, L1TurnTracker, L1_CODING_TURN_TIMEOUT_S,
@@ -11,6 +12,52 @@ from .common import (CancelCheck, L1Cancelled, L1TurnTracker, L1_CODING_TURN_TIM
 from .turn_driver import (_create_l1_work, _pull_with_live_logs, _start_turn,
     _wait_turn_verbose, _watch_workspace_index_progress)
 logger = logging.getLogger(__name__)
+
+
+def _thinking_sidecar_src(work_root: Path | str, turn_id: UUID | str) -> Path:
+    return Path(work_root) / ".agent" / "thinking" / f"{turn_id}.jsonl"
+
+
+def _promote_thinking_sidecar(
+    *,
+    session_dir: Path,
+    iid: str,
+    turn_id: UUID | str,
+    work_root: Path | str,
+) -> Path | None:
+    """Copy eval thinking JSONL out of the worktree before cleanup."""
+    src = _thinking_sidecar_src(work_root, turn_id)
+    if not src.is_file() or src.stat().st_size <= 0:
+        return None
+    dest_dir = Path(session_dir) / "thinking"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / f"{iid}.jsonl"
+    with src.open(encoding="utf-8") as fh, dest.open("w", encoding="utf-8") as out:
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(row, dict):
+                continue
+            row["instance_id"] = iid
+            row["turn_id"] = str(turn_id)
+            out.write(json.dumps(row, ensure_ascii=False) + "\n")
+    return dest if dest.is_file() and dest.stat().st_size > 0 else None
+
+
+def _assemble_thinking_jsonl(session_dir: Path) -> Path | None:
+    parts = sorted((Path(session_dir) / "thinking").glob("*.jsonl"))
+    if not parts:
+        return None
+    out = Path(session_dir) / "thinking.jsonl"
+    with out.open("w", encoding="utf-8") as dest:
+        for part in parts:
+            dest.write(part.read_text(encoding="utf-8"))
+    return out if out.is_file() and out.stat().st_size > 0 else None
 
 async def run_coding_l1(
     *,
@@ -469,6 +516,29 @@ async def run_coding_l1(
                     patch = ""
                     patch_source = "none"
 
+                # Keep eval thinking before wiping the worktree (not in turn_events).
+                if work is not None and turn is not None:
+                    try:
+                        dest = _promote_thinking_sidecar(
+                            session_dir=Path(session.dir),
+                            iid=iid,
+                            turn_id=turn["id"],
+                            work_root=work.work_root,
+                        )
+                        if dest is not None:
+                            await _emit(
+                                on_progress,
+                                "log",
+                                message=(
+                                    f"[L1] thinking sidecar {iid} "
+                                    f"bytes={dest.stat().st_size} (not in DB)"
+                                ),
+                            )
+                    except Exception:  # noqa: BLE001
+                        logger.warning(
+                            "thinking sidecar promote failed for %s", iid, exc_info=True
+                        )
+
                 # Disk hygiene: drop heavy tree after extract (keep mirror).
                 if work is not None and has_repo:
                     try:
@@ -626,6 +696,19 @@ async def run_coding_l1(
             )
         except OSError:
             logger.warning("failed to write csi_probes.json", exc_info=True)
+        try:
+            assembled = _assemble_thinking_jsonl(Path(session.dir))
+            if assembled is not None:
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=(
+                        f"[L1] thinking.jsonl bytes={assembled.stat().st_size} "
+                        "(download from artifacts)"
+                    ),
+                )
+        except OSError:
+            logger.warning("failed to assemble thinking.jsonl", exc_info=True)
         harness_result: dict[str, Any] = {}
         if run_harness:
             pred_n = 0

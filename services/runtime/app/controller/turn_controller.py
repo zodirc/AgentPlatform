@@ -18,6 +18,7 @@ from app.controller.event_writer import (
     close_event_writer,
     register_event_writer,
 )
+from app.controller.thinking_sidecar import thinking_sidecar_path
 from app.controller.events import append_event, run_exists
 from app.controller.input_compiler import InputCompiler, should_query
 from app.controller.session_compact import compact_session_context, save_session_context_summary, session_turn_count
@@ -729,9 +730,27 @@ async def _make_write_event(
     turn_id: UUID,
     run_id: UUID,
     trace_id: UUID,
+    ops_eval: bool = False,
 ) -> Any:
     pool = await get_pool()
-    buffered = BufferedEventWriter(turn_id=turn_id, run_id=run_id, trace_id=trace_id)
+    skip_thinking = bool(ops_eval) and not bool(settings.ops_eval_persist_thinking)
+    sidecar = None
+    if skip_thinking and bool(settings.ops_eval_thinking_sidecar):
+        from app.tenant_context import current_work_root
+
+        sidecar = thinking_sidecar_path(current_work_root(), turn_id)
+        logger.info(
+            "ops_eval thinking diverted to sidecar turn_id=%s path=%s",
+            turn_id,
+            sidecar,
+        )
+    buffered = BufferedEventWriter(
+        turn_id=turn_id,
+        run_id=run_id,
+        trace_id=trace_id,
+        skip_thinking_db=skip_thinking,
+        sidecar_path=sidecar,
+    )
     register_event_writer(turn_id, buffered)
 
     async def write_event(
@@ -1092,7 +1111,9 @@ async def _run_turn(
     gate = should_query(message, has_model_key=has_model_key)
 
     pool = await get_pool()
-    write_event = await _make_write_event(turn_id=turn_id, run_id=run_id, trace_id=trace_id)
+    write_event = await _make_write_event(
+        turn_id=turn_id, run_id=run_id, trace_id=trace_id, ops_eval=bool(ops_eval)
+    )
 
     from app.model.turn_override import current_turn_model_mode
 
@@ -1534,7 +1555,12 @@ async def _resume_after_approval(
         return
 
     pool = await get_pool()
-    write_event = await _make_write_event(turn_id=turn_id, run_id=run_id, trace_id=trace_id)
+    write_event = await _make_write_event(
+        turn_id=turn_id,
+        run_id=run_id,
+        trace_id=trace_id,
+        ops_eval=bool(getattr(pending.state, "ops_eval", False)),
+    )
     step_index = call.get("step_index", 0)
     tool_name = call.get("tool_name", "")
     arguments = call.get("arguments", {})

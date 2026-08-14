@@ -539,6 +539,39 @@ async def get_official_run_csi_probes(
     )
 
 
+@router.get("/runs/{run_id}/thinking")
+async def get_official_run_thinking(
+    run_id: str,
+    bench_run_id: str | None = Query(default=None),
+) -> FileResponse:
+    """Download eval thinking.jsonl (reasoning sidecar; not stored in turn_events)."""
+    if not ops_eval_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    live = official_runner.get_live(run_id)
+    if live is not None:
+        row = official_runner.run_to_dict(live)
+    else:
+        fs = official_store.get_fs_run(run_id)
+        db = await eval_store.load_run(run_id)
+        if fs is None and db is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if fs and db:
+            row = {**db, **fs}
+        elif fs:
+            row = fs
+        else:
+            assert db is not None
+            row = db
+    path = official_store.resolve_thinking_path(row, bench_run_id=bench_run_id)
+    if path is None or not path.is_file():
+        raise HTTPException(status_code=404, detail="thinking.jsonl not found")
+    return FileResponse(
+        path,
+        media_type="application/x-ndjson",
+        filename=f"thinking-{run_id[:8]}.jsonl",
+    )
+
+
 @router.get("/runs/{run_id}/report", response_class=HTMLResponse)
 async def get_official_report_html(run_id: str) -> HTMLResponse:
     if not ops_eval_enabled():

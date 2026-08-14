@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,60 @@ from .common import (
     _exc_text,
     _request_cancel_turn,
 )
+
+_AST_FILES_RE = re.compile(r"files=(\d+|\?)/(\d+|\?)")
+_AST_STATUS_RE = re.compile(r"status=(\S+)")
+
+
+def _ast_progress_should_emit(
+    last_line: str,
+    line: str,
+    *,
+    status: str,
+    files_done: Any,
+    files_total: Any,
+) -> bool:
+    """Skip near-duplicate building ticks so Ops log trim keeps per-case milestones."""
+    if line == last_line:
+        return False
+    if not last_line:
+        return True
+    last_st = ""
+    matched = _AST_STATUS_RE.search(last_line)
+    if matched:
+        last_st = matched.group(1)
+    if status != last_st:
+        return True
+    if status in {
+        "ready",
+        "error",
+        "stale",
+        "disabled",
+        "cancelled",
+        "watch_timeout",
+        "watch_paused",
+        "poll_error",
+    }:
+        return True
+    try:
+        fd = int(files_done) if files_done is not None else None
+        ft = int(files_total) if files_total is not None else None
+    except (TypeError, ValueError):
+        fd, ft = None, None
+    last_fd = None
+    files_m = _AST_FILES_RE.search(last_line)
+    if files_m and files_m.group(1) != "?":
+        last_fd = int(files_m.group(1))
+    if fd is not None and ft is not None and fd >= ft:
+        return True
+    step = 50
+    if ft:
+        step = max(50, int(ft) // 10)
+    if fd is not None and last_fd is not None and fd - last_fd >= step:
+        return True
+    if fd is not None and last_fd is None:
+        return True
+    return False
 
 async def _watch_workspace_index_progress(
     *,
@@ -110,7 +165,9 @@ async def _watch_workspace_index_progress(
         if err and status == "error":
             parts.append(f"error={str(err)[:80]}")
         line = " ".join(parts)
-        if line != last_line:
+        if _ast_progress_should_emit(
+            last_line, line, status=status, files_done=fd, files_total=ft
+        ):
             await _emit(on_progress, "log", message=line)
             last_line = line
         # stale = budget-truncated but queryable; treat as terminal for this watch.

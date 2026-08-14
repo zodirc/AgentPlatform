@@ -179,6 +179,13 @@ export type AstIndexLive = {
   ephemeral: boolean;
 };
 
+/** Transient watcher/log-noise statuses that must not clobber a real index snapshot. */
+export const AST_INDEX_WEAK_STATUSES = new Set([
+  "poll_error",
+  "watch_paused",
+  "watch_timeout",
+]);
+
 /** Per-instance coding infer + harness outcome for the live progress card. */
 export type CodingCaseLive = {
   iid: string;
@@ -260,9 +267,11 @@ export type SuiteArtifact = {
   report_html_available?: boolean;
   predictions_available?: boolean;
   csi_probes_available?: boolean;
+  thinking_available?: boolean;
   report_href?: string;
   predictions_href?: string;
   csi_probes_href?: string;
+  thinking_href?: string;
   coding_scorecard?: Record<string, unknown>;
 };
 

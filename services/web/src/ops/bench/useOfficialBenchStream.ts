@@ -7,6 +7,8 @@ import {
   EMPTY_CODING_HARNESS,
   formatAstIndexRows,
   formatCodingCaseRows,
+  mergeAstIndexEntry,
+  mergeCodingLiveState,
   parseAstIndexLine,
   parseCodingLiveLine,
 } from "./codingLive";
@@ -102,7 +104,7 @@ export function useOfficialBenchStream({
         }
       }
       const ast = parseAstIndexLine(msg);
-      if (ast) nextAst[ast.iid] = ast;
+      if (ast) nextAst[ast.iid] = mergeAstIndexEntry(nextAst[ast.iid], ast);
       const codingEvent = parseCodingLiveLine(msg);
       if (codingEvent) {
         const applied = applyCodingLiveEvent(nextCoding, nextHarness, codingEvent);
@@ -111,8 +113,25 @@ export function useOfficialBenchStream({
       }
     }
     setSuiteDetails(nextDetails);
-    setAstIndexByIid(nextAst);
-    setCoding({ byIid: nextCoding, harness: nextHarness });
+    setAstIndexByIid((prev) => {
+      const merged = { ...prev };
+      for (const ast of Object.values(nextAst)) {
+        merged[ast.iid] = mergeAstIndexEntry(merged[ast.iid], ast);
+      }
+      return merged;
+    });
+    if (
+      (nextHarness.n == null || nextHarness.n <= 0) &&
+      typeof run.coding_n_instances === "number" &&
+      run.coding_n_instances > 0
+    ) {
+      nextHarness = {
+        ...nextHarness,
+        n: run.coding_n_instances,
+        total: nextHarness.total ?? run.coding_n_instances,
+      };
+    }
+    setCoding((prev) => mergeCodingLiveState(prev, nextCoding, nextHarness));
     if (opts?.logs === false) return;
     const lines: string[] = [];
     for (const item of run.logs || []) {
@@ -202,7 +221,11 @@ export function useOfficialBenchStream({
               }));
             }
             const ast = parseAstIndexLine(message);
-            if (ast) setAstIndexByIid((prev) => ({ ...prev, [ast.iid]: ast }));
+            if (ast)
+              setAstIndexByIid((prev) => ({
+                ...prev,
+                [ast.iid]: mergeAstIndexEntry(prev[ast.iid], ast),
+              }));
             const codingEvent = parseCodingLiveLine(message);
             if (codingEvent) {
               setCoding((prev) => {
@@ -316,7 +339,10 @@ export function useOfficialBenchStream({
   useEffect(() => () => sourceRef.current?.close(), []);
 
   const detailProgress = useMemo(() => formatSuiteDetails(suiteDetails), [suiteDetails]);
-  const astIndexRows = useMemo(() => formatAstIndexRows(astIndexByIid), [astIndexByIid]);
+  const astIndexRows = useMemo(
+    () => formatAstIndexRows(astIndexByIid, coding.byIid),
+    [astIndexByIid, coding.byIid],
+  );
   const codingRows = useMemo(() => formatCodingCaseRows(coding.byIid), [coding.byIid]);
   const codingSummary = useMemo(() => {
     let running = 0;
@@ -334,7 +360,11 @@ export function useOfficialBenchStream({
       pass,
       fail,
       resolved,
-      total: codingRows.length,
+      total: Math.max(
+        codingRows.length,
+        Number(coding.harness.n || 0),
+        Number(coding.harness.total || 0),
+      ),
       harness: coding.harness,
       harnessView: harnessProgressView(coding.harness),
     };
@@ -345,7 +375,8 @@ export function useOfficialBenchStream({
     let error = 0;
     let disabled = 0;
     for (const row of astIndexRows) {
-      if (row.status === "ready" || row.status === "stale") ready += 1;
+      if (row.status === "ready" || row.status === "stale" || row.status === "purged")
+        ready += 1;
       else if (
         row.status === "error" ||
         row.status === "watch_timeout" ||

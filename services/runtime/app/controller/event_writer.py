@@ -24,12 +24,14 @@ import json
 import logging
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
 
 from app.contracts.event_validation import maybe_validate_event_payload
 from app.controller.events import next_sequence
+from app.controller.thinking_sidecar import sidecar_line
 from app.db.pool import get_pool
 from app.settings import settings
 
@@ -63,6 +65,9 @@ class BufferedEventWriter:
         run_id: UUID,
         trace_id: UUID,
         window_seconds: float | None = None,
+        skip_thinking_db: bool = False,
+        sidecar_path: Path | None = None,
+        heartbeat_seconds: float | None = None,
     ) -> None:
         self._turn_id = turn_id
         self._run_id = run_id
@@ -77,12 +82,25 @@ class BufferedEventWriter:
         self._flush_task: asyncio.Task | None = None
         self._last_flush = 0.0
         self._closed = False
+        self._skip_thinking_db = bool(skip_thinking_db)
+        self._sidecar_path = sidecar_path
+        self._heartbeat_seconds = (
+            float(settings.ops_eval_thinking_heartbeat_seconds)
+            if heartbeat_seconds is None
+            else float(heartbeat_seconds)
+        )
+        self._sidecar_buf: list[str] = []
+        self._last_heartbeat = 0.0
+        self._omitted_thinking = 0
 
     async def append_delta(
         self, *, event_type: str, payload: dict, step_index: int
     ) -> None:
         """Buffer one delta event; validation errors raise at the call site."""
         maybe_validate_event_payload(event_type, payload)
+        if event_type == "turn.thinking.delta" and self._skip_thinking_db:
+            await self._divert_thinking(payload=payload, step_index=step_index)
+            return
         if self._closed or self._window <= 0:
             # Rollback knob / post-close stragglers: per-event write path.
             await self._write_rows([(event_type, payload, step_index)])
@@ -92,6 +110,60 @@ class BufferedEventWriter:
             await self.flush()
         elif self._flush_task is None or self._flush_task.done():
             self._flush_task = asyncio.create_task(self._delayed_flush())
+
+    async def _divert_thinking(self, *, payload: dict, step_index: int) -> None:
+        """Sidecar + occasional liveness row; no per-chunk turn_events INSERT."""
+        self._omitted_thinking += 1
+        if self._sidecar_path is not None:
+            self._sidecar_buf.append(
+                sidecar_line(
+                    step_index=step_index,
+                    delta=str(payload.get("delta") or ""),
+                )
+            )
+            if len(self._sidecar_buf) >= 32:
+                await self._flush_sidecar()
+        now = time.monotonic()
+        if self._heartbeat_seconds > 0 and (
+            self._last_heartbeat == 0.0
+            or now - self._last_heartbeat >= self._heartbeat_seconds
+        ):
+            self._last_heartbeat = now
+            await self._flush_sidecar()
+            live_payload = {"step_index": step_index, "label": "sidecar-live"}
+            maybe_validate_event_payload("turn.thinking", live_payload)
+            async with self._flush_lock:
+                await self._write_rows(
+                    [
+                        (
+                            "turn.thinking",
+                            live_payload,
+                            step_index,
+                        )
+                    ]
+                )
+
+    async def _flush_sidecar(self) -> None:
+        if not self._sidecar_buf or self._sidecar_path is None:
+            return
+        blob = "".join(self._sidecar_buf)
+        self._sidecar_buf = []
+        path = self._sidecar_path
+
+        def _write() -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as fh:
+                fh.write(blob)
+
+        try:
+            await asyncio.to_thread(_write)
+        except Exception:
+            logger.warning(
+                "thinking sidecar write failed turn_id=%s path=%s",
+                self._turn_id,
+                path,
+                exc_info=True,
+            )
 
     async def flush(self) -> None:
         """Drain the buffer in one multi-row insert transaction."""
@@ -116,6 +188,14 @@ class BufferedEventWriter:
         except Exception:
             logger.exception(
                 "final delta flush failed turn_id=%s (deltas dropped)", self._turn_id
+            )
+        try:
+            await self._flush_sidecar()
+        except Exception:
+            logger.warning(
+                "final thinking sidecar flush failed turn_id=%s",
+                self._turn_id,
+                exc_info=True,
             )
 
     async def _delayed_flush(self) -> None:

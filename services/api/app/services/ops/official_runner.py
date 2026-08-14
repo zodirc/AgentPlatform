@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -128,6 +129,66 @@ class OfficialLiveRun:
 _LOCK = asyncio.Lock()
 _RUNS: dict[str, OfficialLiveRun] = {}
 
+_CODING_PLAN = re.compile(r"^\[L1\]\s+coding\s+plan\s+n=", re.IGNORECASE)
+_CODING_START = re.compile(
+    r"^\[L1\]\s+coding\s+case\s+start\s+(\S+)", re.IGNORECASE
+)
+_CODING_DONE = re.compile(
+    r"^\[L1\]\s+coding\s+\d+\s*/\s*\d+\s+(\S+)\s+status=", re.IGNORECASE
+)
+_WS_INDEX_ENQUEUE = re.compile(
+    r"^\[L1\]\s+workspace_index\s+enqueue\s+\(ephemeral\)\s+(\S+)",
+    re.IGNORECASE,
+)
+_WS_INDEX_STATUS = re.compile(
+    r"^\[L1\]\s+workspace_index\s+(\S+)\s+status=(\S+)",
+    re.IGNORECASE,
+)
+
+
+def _workspace_index_iid(message: str) -> str | None:
+    text = str(message or "")
+    enqueue = _WS_INDEX_ENQUEUE.match(text)
+    if enqueue:
+        return enqueue.group(1)
+    status = _WS_INDEX_STATUS.match(text)
+    if status:
+        return status.group(1)
+    return None
+
+
+def trim_official_logs(
+    logs: list[dict[str, Any]],
+    *,
+    limit: int = 1500,
+) -> list[dict[str, Any]]:
+    """Drop log overflow but keep coding/AST milestones per instance."""
+    if len(logs) <= limit:
+        return logs
+    pinned: dict[str, int] = {}
+    pinned_plan: int | None = None
+    for i, item in enumerate(logs):
+        if str((item or {}).get("kind") or "") != "log":
+            continue
+        msg = str((item or {}).get("message") or "")
+        iid = _workspace_index_iid(msg)
+        if iid:
+            pinned[f"ast:{iid}"] = i
+        if _CODING_PLAN.match(msg):
+            pinned_plan = i
+        start = _CODING_START.match(msg)
+        if start:
+            pinned[f"coding:{start.group(1)}"] = i
+        done = _CODING_DONE.match(msg)
+        if done:
+            pinned[f"coding:{done.group(1)}"] = i
+    start = len(logs) - limit
+    keep = set(range(max(0, start), len(logs)))
+    keep.update(pinned.values())
+    if pinned_plan is not None:
+        keep.add(pinned_plan)
+    return [logs[i] for i in sorted(keep)]
+
 
 def list_criteria() -> list[dict[str, str]]:
     return list(CRITERIA)
@@ -185,9 +246,10 @@ def unsubscribe(run: OfficialLiveRun, q: asyncio.Queue) -> None:
 async def _publish(run: OfficialLiveRun, event: dict[str, Any]) -> None:
     item = {"at": _utc(), **event}
     run.logs.append(item)
-    # trim
+    # trim — keep last workspace_index line per iid so the live AST card
+    # can reconstruct finished cases after building-tick overflow.
     if len(run.logs) > 2000:
-        run.logs = run.logs[-1500:]
+        run.logs = trim_official_logs(run.logs, limit=1500)
     dead: list[asyncio.Queue] = []
     for q in run._subscribers:
         try:

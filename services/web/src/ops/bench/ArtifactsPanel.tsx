@@ -248,6 +248,29 @@ export function ArtifactsPanel({
         ) : suite.csi_probes_available ? (
           <span>csi_probes 就绪</span>
         ) : null}
+        {suite.thinking_href ? (
+          <button
+            type="button"
+            className="underline decoration-dotted underline-offset-2"
+            onClick={() => {
+              setArtifactActionError(null);
+              const name = `thinking-${(suite.bench_run_id || data?.run_id || "run").slice(0, 8)}.jsonl`;
+              void downloadAuthorizedFile(
+                suite.thinking_href!,
+                secret,
+                name,
+              ).catch((e) =>
+                setArtifactActionError(
+                  e instanceof Error ? e.message : String(e),
+                ),
+              );
+            }}
+          >
+            下载 thinking.jsonl
+          </button>
+        ) : suite.thinking_available ? (
+          <span>thinking 就绪</span>
+        ) : null}
       </div>
       {artifactActionError ? (
         <p className="text-[11px] text-destructive">

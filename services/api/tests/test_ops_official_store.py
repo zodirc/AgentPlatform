@@ -160,6 +160,9 @@ def test_coding_artifacts_scorecard_and_patch_preview(tmp_path: Path, monkeypatc
         encoding="utf-8",
     )
     (child_dir / "report.html").write_text("<html>ok</html>", encoding="utf-8")
+    (child_dir / "thinking.jsonl").write_text(
+        '{"instance_id":"repo__x-1","delta":"why"}\n', encoding="utf-8"
+    )
     manifest = {
         "id": child_id,
         "suite": "official",
@@ -212,6 +215,9 @@ def test_coding_artifacts_scorecard_and_patch_preview(tmp_path: Path, monkeypatc
     assert suite["predictions_available"] is True
     assert suite["report_href"].endswith(f"/runs/{ops_id}/report")
     assert "predictions" in suite["predictions_href"]
+    assert suite["thinking_available"] is True
+    assert "thinking" in suite["thinking_href"]
+    assert official_store.resolve_thinking_path({"id": ops_id}).name == "thinking.jsonl"
     sc = suite["coding_scorecard"]
     assert sc["resolve_rate"] == 0.0
     assert sc["patch_rate"] == 1.0

@@ -182,3 +182,63 @@ async def test_write_event_orders_non_delta_after_buffered_deltas(
     assert order == ["batch:1", "batch:1", "event:tool.started"]
     await ew.close_event_writer(turn_id)
     monkeypatch.setattr(_FakeConn, "executemany", original_executemany)
+
+
+@pytest.mark.asyncio
+async def test_skip_thinking_writes_sidecar_not_db(
+    store: _FakeStore, tmp_path
+) -> None:
+    sidecar = tmp_path / "think.jsonl"
+    writer = ew.BufferedEventWriter(
+        turn_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        window_seconds=10.0,
+        skip_thinking_db=True,
+        sidecar_path=sidecar,
+        heartbeat_seconds=0.0,
+    )
+    await writer.append_delta(
+        event_type="turn.thinking.delta", payload=_delta("reason-a"), step_index=1
+    )
+    await writer.append_delta(
+        event_type="turn.thinking.delta", payload=_delta("reason-b"), step_index=1
+    )
+    await writer.append_delta(
+        event_type="turn.token", payload=_delta("ok"), step_index=1
+    )
+    await writer.close()
+
+    types = [row[4] for row in store.rows]
+    assert "turn.thinking.delta" not in types
+    assert "turn.token" in types
+    text = sidecar.read_text(encoding="utf-8")
+    assert "reason-a" in text
+    assert "reason-b" in text
+
+
+@pytest.mark.asyncio
+async def test_skip_thinking_heartbeat_inserts_live_marker(
+    store: _FakeStore, tmp_path
+) -> None:
+    sidecar = tmp_path / "think.jsonl"
+    writer = ew.BufferedEventWriter(
+        turn_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        window_seconds=10.0,
+        skip_thinking_db=True,
+        sidecar_path=sidecar,
+        heartbeat_seconds=0.01,
+    )
+    await writer.append_delta(
+        event_type="turn.thinking.delta", payload=_delta("x"), step_index=0
+    )
+    await asyncio.sleep(0.03)
+    await writer.append_delta(
+        event_type="turn.thinking.delta", payload=_delta("y"), step_index=0
+    )
+    await writer.close()
+    types = [row[4] for row in store.rows]
+    assert types.count("turn.thinking") >= 2
+    assert "turn.thinking.delta" not in types

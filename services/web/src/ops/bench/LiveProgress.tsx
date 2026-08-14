@@ -323,11 +323,15 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                                   {shortCaseToken(row.iid)}
                                 </span>
                                 <span className="shrink-0 tabular-nums text-muted-foreground">
-                                  {row.status}
+                                  {row.status === "purged"
+                                    ? "done"
+                                    : row.status}
                                   {row.filesDone != null &&
                                   row.filesTotal != null
                                     ? ` · ${row.filesDone}/${row.filesTotal}`
-                                    : ""}
+                                    : row.status === "purged"
+                                      ? " · ephemeral"
+                                      : ""}
                                 </span>
                               </div>
                               {building ? (

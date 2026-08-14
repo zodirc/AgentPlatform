@@ -383,6 +383,10 @@ def _attach_coding_artifact_extras(
     art["report_html_available"] = report_ok
     art["predictions_available"] = pred_ok
     art["csi_probes_available"] = csi_ok
+    thinking_ok = False
+    if root is not None and bench_id:
+        thinking_ok = (root / "runs" / bench_id / "thinking.jsonl").is_file()
+    art["thinking_available"] = thinking_ok
     if ops_run_id:
         art["report_href"] = f"/api/v1/ops/official/runs/{ops_run_id}/report"
         if pred_ok:
@@ -393,6 +397,11 @@ def _attach_coding_artifact_extras(
         if csi_ok:
             art["csi_probes_href"] = (
                 f"/api/v1/ops/official/runs/{ops_run_id}/csi-probes"
+                + (f"?bench_run_id={bench_id}" if bench_id else "")
+            )
+        if thinking_ok:
+            art["thinking_href"] = (
+                f"/api/v1/ops/official/runs/{ops_run_id}/thinking"
                 + (f"?bench_run_id={bench_id}" if bench_id else "")
             )
     metrics = art.get("metrics") if isinstance(art.get("metrics"), dict) else {}
@@ -433,6 +442,13 @@ def _attach_coding_artifact_extras(
         "n_read_truncated",
         "n_read_with_outline",
         "edit_related_tests_coverage",
+        "test_summary_attach_rate",
+        "related_tests_adoption_rate",
+        "verify_receipt_rate",
+        "verify_receipt_then_test_rate",
+        "n_verify_receipt",
+        "n_test_summary",
+        "n_testish_tool",
     ):
         if key in metrics:
             scorecard[key] = metrics[key]
@@ -713,6 +729,30 @@ def resolve_csi_probes_path(
         bid = str(suite.get("bench_run_id") or "").strip()
         if root is not None and bid:
             cand = root / "runs" / bid / "csi_probes.json"
+            if cand.is_file():
+                return cand
+        if wanted:
+            break
+    return None
+
+
+def resolve_thinking_path(
+    ops_row: dict[str, Any],
+    *,
+    bench_run_id: str | None = None,
+) -> Path | None:
+    """Locate thinking.jsonl (eval reasoning sidecar; not persisted in turn_events)."""
+    arts = load_run_artifacts(ops_row)
+    wanted = str(bench_run_id or "").strip()
+    root = reports_root()
+    for suite in arts.get("suites") or []:
+        if not isinstance(suite, dict):
+            continue
+        if wanted and str(suite.get("bench_run_id") or "") != wanted:
+            continue
+        bid = str(suite.get("bench_run_id") or "").strip()
+        if root is not None and bid:
+            cand = root / "runs" / bid / "thinking.jsonl"
             if cand.is_file():
                 return cand
         if wanted:

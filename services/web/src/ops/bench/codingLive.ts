@@ -4,6 +4,7 @@ import type {
   CodingHarnessLive,
   CodingLiveEvent,
 } from "./types";
+import { AST_INDEX_WEAK_STATUSES } from "./types";
 
 export const HARNESS_STAGE_LABEL: Record<string, string> = {
   load_dataset: "加载数据集",
@@ -174,9 +175,18 @@ export function applyCodingLiveEvent(
     return { byIid, harness: merged };
   }
   const prev = byIid[ev.case.iid];
+  const incoming = ev.case.status;
+  let status = incoming;
+  if (
+    prev &&
+    (prev.status === "pass" || prev.status === "fail") &&
+    (incoming === "running" || incoming === "pending")
+  ) {
+    status = prev.status;
+  }
   const next: CodingCaseLive = {
     iid: ev.case.iid,
-    status: ev.case.status,
+    status,
     bucket: ev.case.bucket ?? prev?.bucket,
     patchSource: ev.case.patchSource ?? prev?.patchSource,
     harness: ev.case.harness ?? prev?.harness,
@@ -189,6 +199,58 @@ export function applyCodingLiveEvent(
     byIid: { ...byIid, [ev.case.iid]: next },
     harness,
   };
+}
+
+export function mergeCodingCase(
+  prev: CodingCaseLive | undefined,
+  next: CodingCaseLive,
+): CodingCaseLive {
+  if (!prev) return next;
+  let status = next.status;
+  if (
+    (prev.status === "pass" || prev.status === "fail") &&
+    (next.status === "running" || next.status === "pending")
+  ) {
+    status = prev.status;
+  }
+  const patchSource =
+    next.patchSource && next.patchSource !== "none"
+      ? next.patchSource
+      : prev.patchSource;
+  return {
+    ...prev,
+    ...next,
+    status,
+    patchSource,
+    bucket: next.bucket ?? prev.bucket,
+    harness: next.harness ?? prev.harness,
+  };
+}
+
+export function mergeCodingLiveState(
+  prev: {
+    byIid: Record<string, CodingCaseLive>;
+    harness: CodingHarnessLive;
+  },
+  nextByIid: Record<string, CodingCaseLive>,
+  nextHarness: CodingHarnessLive,
+): { byIid: Record<string, CodingCaseLive>; harness: CodingHarnessLive } {
+  const byIid = { ...prev.byIid };
+  for (const row of Object.values(nextByIid)) {
+    byIid[row.iid] = mergeCodingCase(byIid[row.iid], row);
+  }
+  const harness = {
+    ...(nextHarness.phase !== "idle" ? nextHarness : prev.harness),
+  };
+  if (
+    (harness.n == null || harness.n <= 0) &&
+    prev.harness.n != null &&
+    prev.harness.n > 0
+  ) {
+    harness.n = prev.harness.n;
+    harness.total = harness.total ?? prev.harness.total ?? prev.harness.n;
+  }
+  return { byIid, harness };
 }
 
 export function formatCodingCaseRows(
@@ -252,11 +314,74 @@ export function parseAstIndexLine(line: string): AstIndexLive | null {
   };
 }
 
+export function mergeAstIndexEntry(
+  prev: AstIndexLive | undefined,
+  next: AstIndexLive,
+): AstIndexLive {
+  if (!prev) return next;
+  if (
+    AST_INDEX_WEAK_STATUSES.has(next.status) &&
+    !AST_INDEX_WEAK_STATUSES.has(prev.status)
+  ) {
+    return {
+      ...prev,
+      filesDone: prev.filesDone ?? next.filesDone,
+      filesTotal: prev.filesTotal ?? next.filesTotal,
+      ephemeral: prev.ephemeral || next.ephemeral,
+    };
+  }
+  return {
+    ...next,
+    filesDone: next.filesDone ?? prev.filesDone,
+    filesTotal: next.filesTotal ?? prev.filesTotal,
+    ephemeral: next.ephemeral || prev.ephemeral,
+  };
+}
+
+function astPlaceholderForCoding(caseRow: CodingCaseLive): AstIndexLive {
+  const finished = caseRow.status === "pass" || caseRow.status === "fail";
+  return {
+    iid: caseRow.iid,
+    status: finished ? "purged" : "queued",
+    filesDone: null,
+    filesTotal: null,
+    ephemeral: true,
+  };
+}
+
+/**
+ * Align AST cards with coding instances. Log truncation / ephemeral purge
+ * must not drop finished cases from the live strip.
+ */
 export function formatAstIndexRows(
   byIid: Record<string, AstIndexLive>,
+  codingByIid?: Record<string, CodingCaseLive>,
 ): AstIndexLive[] {
-  const order = ["building", "cold", "queued", "stale", "ready", "error"];
-  return Object.values(byIid).sort((a, b) => {
+  const merged: Record<string, AstIndexLive> = { ...byIid };
+  for (const row of Object.values(codingByIid || {})) {
+    const existing = merged[row.iid];
+    if (!existing) {
+      merged[row.iid] = astPlaceholderForCoding(row);
+      continue;
+    }
+    const finished = row.status === "pass" || row.status === "fail";
+    if (finished && AST_INDEX_WEAK_STATUSES.has(existing.status)) {
+      merged[row.iid] = {
+        ...existing,
+        status: existing.filesTotal ? "ready" : "purged",
+      };
+    }
+  }
+  const order = [
+    "building",
+    "cold",
+    "queued",
+    "stale",
+    "ready",
+    "purged",
+    "error",
+  ];
+  return Object.values(merged).sort((a, b) => {
     const ia = order.indexOf(a.status);
     const ib = order.indexOf(b.status);
     return (
