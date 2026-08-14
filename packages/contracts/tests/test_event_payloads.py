@@ -131,6 +131,33 @@ def test_locate_tool_completed_allows_fuse_probe_meta() -> None:
     )
 
 
+def test_terminal_turn_payloads_allow_post_turn_jobs() -> None:
+    jobs = ["sources.index_sync"]
+    validate_event_payload(
+        "turn.completed",
+        {
+            "summary": "done",
+            "termination_reason": "final",
+            "post_turn_jobs": jobs,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+    validate_event_payload(
+        "turn.failed",
+        {
+            "termination_reason": "fatal_error",
+            "message": "boom",
+            "post_turn_jobs": jobs,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+    validate_event_payload(
+        "turn.cancelled",
+        {"reason": "user_requested", "post_turn_jobs": jobs},
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_payload_schemas_are_valid_json_schema() -> None:
     index = json.loads((SCHEMAS_DIR / "_index.json").read_text(encoding="utf-8"))
     for schema_ref in index.get("properties", {}).values():

@@ -14,6 +14,11 @@
     "cancelled_at_phase": {
       "type": "string",
       "enum": ["model_stream", "tool_exec", "assemble", "step_boundary"]
+    },
+    "post_turn_jobs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "maxItems": 32
     }
   }
 }

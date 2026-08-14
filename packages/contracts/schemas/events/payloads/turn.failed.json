@@ -22,6 +22,11 @@
         "start_timeout"
       ]
     },
-    "message": { "type": "string", "maxLength": 1024 }
+    "message": { "type": "string", "maxLength": 1024 },
+    "post_turn_jobs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+      "maxItems": 32
+    }
   }
 }
