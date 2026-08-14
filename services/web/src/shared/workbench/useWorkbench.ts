@@ -14,19 +14,12 @@ import {
   startTurn,
   warmupRetrieval,
   type TurnEvent,
-  type TurnSummary,
   type TurnView,
 } from "../api/client";
-import {
-  formatSendFailure,
-  turnFailureUserMessage,
-} from "../api/httpErrors";
+import { formatSendFailure, turnFailureUserMessage } from "../api/httpErrors";
 import { TurnStreamClient } from "../realtime/TurnStreamClient";
 import { TurnWebSocketClient } from "../realtime/TurnWebSocketClient";
-import {
-  parentTimelineItems,
-  resolveSubagents,
-} from "./subagents";
+import { parentTimelineItems, resolveSubagents } from "./subagents";
 import type {
   ContextUsage,
   ScenarioId,
@@ -41,7 +34,6 @@ import {
   executePlanMessage,
   isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
-  normalizePlanArtifact,
   planFromEventPayload,
   planIsProposedOnly,
   planSuggestPrimaryReason,
@@ -55,7 +47,18 @@ import {
 import { scenarioMeta } from "./scenarioMeta";
 import { tokenUsageFromEvents } from "./tokenUsage";
 import { mergeOutboundQueue } from "./outboundQueue";
+import {
+  historyItemFromView,
+  mergeEventsBySequence,
+  patchHistoryPlan,
+  toHistoryItem,
+  upsertHistoryItem,
+} from "./workbenchHistory";
 import { useWorkbenchSession } from "./workbenchSession";
+import {
+  useStreamDeltaBuffer,
+  type SubagentDeltaBuffer,
+} from "./streamDeltaBuffer";
 
 type StreamClient = TurnStreamClient | TurnWebSocketClient;
 
@@ -64,13 +67,6 @@ const ACTIVE_TURN_STATUSES = new Set([
   "running",
   "waiting_approval",
 ]);
-/** Live-only accumulation for subagent cards; replay from events covers refresh. */
-type SubagentDeltaBuffer = {
-  stream: string;
-  thinking: string;
-  tools: Record<string, string>;
-};
-
 const STREAM_DELTA_EVENT_TYPES = new Set([
   "turn.token",
   "turn.thinking.delta",
@@ -78,74 +74,6 @@ const STREAM_DELTA_EVENT_TYPES = new Set([
   "tool.delta",
 ]);
 const DRAFT_MANUSCRIPT_PATH = "drafts/manuscript.md";
-
-/** Merge snapshot + any SSE events that arrived while the snapshot was in flight. */
-function mergeEventsBySequence(
-  snapshot: TurnEvent[],
-  live: TurnEvent[],
-): TurnEvent[] {
-  if (live.length === 0) return snapshot;
-  if (snapshot.length === 0) return live;
-  const bySeq = new Map<number, TurnEvent>();
-  for (const ev of snapshot) {
-    if (typeof ev.sequence === "number") bySeq.set(ev.sequence, ev);
-  }
-  for (const ev of live) {
-    if (typeof ev.sequence === "number") bySeq.set(ev.sequence, ev);
-  }
-  return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
-}
-
-function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
-  return {
-    id: turn.id,
-    scenario_id: turn.scenario_id as ScenarioId,
-    status: turn.status,
-    user_input: turn.user_input ?? "",
-    latest_output: turn.latest_output,
-    created_at: turn.created_at,
-    plan: normalizePlanArtifact(turn.plan ?? null),
-  };
-}
-
-function upsertHistoryItem(
-  items: TurnHistoryItem[],
-  item: TurnHistoryItem,
-): TurnHistoryItem[] {
-  const idx = items.findIndex((row) => row.id === item.id);
-  if (idx < 0) return [...items, item];
-  const next = [...items];
-  const prev = next[idx];
-  next[idx] = {
-    ...prev,
-    ...item,
-    // Avoid clobbering a live plan with an older partial merge that omitted plan.
-    plan: item.plan !== undefined ? item.plan : prev.plan,
-  };
-  return next;
-}
-
-function historyItemFromView(v: TurnView): TurnHistoryItem {
-  return {
-    id: v.turn_id,
-    scenario_id: v.scenario_id as ScenarioId,
-    status: v.status,
-    user_input: v.user_input,
-    latest_output: v.latest_output ?? null,
-    created_at: v.updated_at,
-    plan: latestPlanFromArtifacts(
-      v.artifacts as Record<string, unknown>[] | undefined,
-    ),
-  };
-}
-
-function patchHistoryPlan(
-  items: TurnHistoryItem[],
-  turnId: string,
-  plan: PlanArtifact | null,
-): TurnHistoryItem[] {
-  return items.map((row) => (row.id === turnId ? { ...row, plan } : row));
-}
 
 export function useWorkbenchImpl(): WorkbenchState {
   const [searchParams] = useSearchParams();
@@ -222,111 +150,32 @@ export function useWorkbenchImpl(): WorkbenchState {
   const flushOutboundLockRef = useRef(false);
   /** Pending stop-escalation timers; cleared when a new turn starts / unmount. */
   const stopTimersRef = useRef<number[]>([]);
-  const deltaFrameRef = useRef<number | null>(null);
-  const pendingDeltasRef = useRef<{
-    streamText: string;
-    thinkingText: string;
-    sectionDraft: string;
-    toolStreams: Record<string, string>;
-    subagents: Record<string, SubagentDeltaBuffer>;
-  }>({
-    streamText: "",
-    thinkingText: "",
-    sectionDraft: "",
-    toolStreams: {},
-    subagents: {},
+  const {
+    appendSectionDraft,
+    appendStreamText,
+    appendSubagentStream,
+    appendSubagentThinking,
+    appendSubagentTool,
+    appendThinkingText,
+    appendToolStream,
+    clearPendingDeltas,
+    flushPendingDeltas,
+  } = useStreamDeltaBuffer({
+    streamTextRef,
+    sectionDraftRef,
+    setStreamText,
+    setThinkingText,
+    setSectionDraft,
+    setToolLiveStreams,
+    setSubagentLive,
   });
   turnIdRef.current = turnId;
   streamTextRef.current = streamText;
   sectionDraftRef.current = sectionDraft;
   outboundQueueRef.current = outboundQueue;
 
-  function flushPendingDeltas() {
-    if (deltaFrameRef.current !== null) {
-      cancelAnimationFrame(deltaFrameRef.current);
-      deltaFrameRef.current = null;
-    }
-    const pending = pendingDeltasRef.current;
-    pendingDeltasRef.current = {
-      streamText: "",
-      thinkingText: "",
-      sectionDraft: "",
-      toolStreams: {},
-      subagents: {},
-    };
-    if (pending.streamText) {
-      streamTextRef.current += pending.streamText;
-      setStreamText((text) => text + pending.streamText);
-    }
-    if (pending.thinkingText) {
-      setThinkingText((text) => text + pending.thinkingText);
-    }
-    if (pending.sectionDraft) {
-      sectionDraftRef.current += pending.sectionDraft;
-      setSectionDraft((text) => text + pending.sectionDraft);
-    }
-    if (Object.keys(pending.toolStreams).length > 0) {
-      setToolLiveStreams((previous) => {
-        const next = { ...previous };
-        for (const [toolCallId, delta] of Object.entries(pending.toolStreams)) {
-          next[toolCallId] = (next[toolCallId] ?? "") + delta;
-        }
-        return next;
-      });
-    }
-    if (Object.keys(pending.subagents).length > 0) {
-      setSubagentLive((previous) => {
-        const next = { ...previous };
-        for (const [sid, buf] of Object.entries(pending.subagents)) {
-          const cur = next[sid] ?? { stream: "", thinking: "", tools: {} };
-          const tools = { ...cur.tools };
-          for (const [toolCallId, delta] of Object.entries(buf.tools)) {
-            tools[toolCallId] = (tools[toolCallId] ?? "") + delta;
-          }
-          next[sid] = {
-            stream: cur.stream + buf.stream,
-            thinking: cur.thinking + buf.thinking,
-            tools,
-          };
-        }
-        return next;
-      });
-    }
-  }
-
-  function scheduleDeltaFlush() {
-    if (deltaFrameRef.current !== null) return;
-    deltaFrameRef.current = requestAnimationFrame(flushPendingDeltas);
-  }
-
-  function clearPendingDeltas() {
-    if (deltaFrameRef.current !== null) {
-      cancelAnimationFrame(deltaFrameRef.current);
-      deltaFrameRef.current = null;
-    }
-    pendingDeltasRef.current = {
-      streamText: "",
-      thinkingText: "",
-      sectionDraft: "",
-      toolStreams: {},
-      subagents: {},
-    };
-  }
-
-  function pendingSubagentBuffer(sid: string): SubagentDeltaBuffer {
-    const buffers = pendingDeltasRef.current.subagents;
-    let buf = buffers[sid];
-    if (!buf) {
-      buf = { stream: "", thinking: "", tools: {} };
-      buffers[sid] = buf;
-    }
-    return buf;
-  }
-
   function syncHistoryFromView(v: TurnView) {
-    setTurnHistory((prev) =>
-      upsertHistoryItem(prev, historyItemFromView(v)),
-    );
+    setTurnHistory((prev) => upsertHistoryItem(prev, historyItemFromView(v)));
   }
 
   function extractWriteFilePreview(
@@ -471,7 +320,7 @@ export function useWorkbenchImpl(): WorkbenchState {
       clearStopTimers();
       streamRef.current?.close();
     },
-    [],
+    [clearPendingDeltas],
   );
 
   function connectStream(id: string, sinceSequence = lastSequenceRef.current) {
@@ -503,31 +352,24 @@ export function useWorkbenchImpl(): WorkbenchState {
             const delta = String(ev.payload.delta ?? "");
             if (ev.payload.subagent_id) {
               if (delta) {
-                pendingSubagentBuffer(String(ev.payload.subagent_id)).stream +=
-                  delta;
-                scheduleDeltaFlush();
+                appendSubagentStream(String(ev.payload.subagent_id), delta);
               }
               return;
             }
             if (delta) {
-              pendingDeltasRef.current.streamText += delta;
-              scheduleDeltaFlush();
+              appendStreamText(delta);
             }
           }
           if (ev.type === "turn.thinking.delta") {
             const delta = String(ev.payload.delta ?? "");
             if (ev.payload.subagent_id) {
               if (delta) {
-                pendingSubagentBuffer(
-                  String(ev.payload.subagent_id),
-                ).thinking += delta;
-                scheduleDeltaFlush();
+                appendSubagentThinking(String(ev.payload.subagent_id), delta);
               }
               return;
             }
             if (delta) {
-              pendingDeltasRef.current.thinkingText += delta;
-              scheduleDeltaFlush();
+              appendThinkingText(delta);
             }
           }
           if (ev.type === "turn.thinking") {
@@ -538,8 +380,7 @@ export function useWorkbenchImpl(): WorkbenchState {
           if (ev.type === "section.draft.delta") {
             const delta = String(ev.payload.delta ?? "");
             if (delta) {
-              pendingDeltasRef.current.sectionDraft += delta;
-              scheduleDeltaFlush();
+              appendSectionDraft(delta);
             }
           }
           if (ev.type === "tool.delta") {
@@ -547,18 +388,16 @@ export function useWorkbenchImpl(): WorkbenchState {
             const delta = String(ev.payload.delta ?? "");
             if (ev.payload.subagent_id) {
               if (toolCallId && delta) {
-                const buf = pendingSubagentBuffer(
+                appendSubagentTool(
                   String(ev.payload.subagent_id),
+                  toolCallId,
+                  delta,
                 );
-                buf.tools[toolCallId] = (buf.tools[toolCallId] ?? "") + delta;
-                scheduleDeltaFlush();
               }
               return;
             }
             if (toolCallId && delta) {
-              const pending = pendingDeltasRef.current.toolStreams;
-              pending[toolCallId] = (pending[toolCallId] ?? "") + delta;
-              scheduleDeltaFlush();
+              appendToolStream(toolCallId, delta);
             }
           }
           if (ev.type === "tool.started") {
@@ -1229,7 +1068,8 @@ export function useWorkbenchImpl(): WorkbenchState {
 
   const displayStatus =
     pendingApproval ||
-    (view?.status === "waiting_approval" && Boolean(view?.interrupt?.tool_call_id))
+    (view?.status === "waiting_approval" &&
+      Boolean(view?.interrupt?.tool_call_id))
       ? "waiting_approval"
       : busy
         ? "running"
@@ -1274,8 +1114,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     ? planSuggestPrimaryReason(message, suggestOpts)
     : null;
 
-  const showPlanSuggest =
-    !planMode && !busy && planSuggestDecision;
+  const showPlanSuggest = !planMode && !busy && planSuggestDecision;
 
   const meta = scenarioMeta(activeScenarioId);
 
@@ -1343,14 +1182,4 @@ export function useWorkbenchImpl(): WorkbenchState {
     handleDeny,
     refreshView,
   };
-}
-
-export function placeholderForScenario(scenarioId: ScenarioId): string {
-  if (scenarioId === "writing")
-    return "输入 / 查看命令，或：依资料写一段并标注引用…";
-  if (scenarioId === "intel")
-    return "输入 / 查看命令，或粘贴 IOC / 告警生成研判…";
-  if (scenarioId === "collab")
-    return "输入 / 查看命令；复杂任务可拆角色并行…";
-  return "输入 / 查看命令，或：读取 README.md 并总结…";
 }

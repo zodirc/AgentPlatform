@@ -38,6 +38,15 @@ export function scenarioMeta(id: ScenarioId): ScenarioMeta {
   return SCENARIO_META[id];
 }
 
+export function placeholderForScenario(scenarioId: ScenarioId): string {
+  if (scenarioId === "writing")
+    return "输入 / 查看命令，或：依资料写一段并标注引用…";
+  if (scenarioId === "intel")
+    return "输入 / 查看命令，或粘贴 IOC / 告警生成研判…";
+  if (scenarioId === "collab") return "输入 / 查看命令；复杂任务可拆角色并行…";
+  return "输入 / 查看命令，或：读取 README.md 并总结…";
+}
+
 export function scenarioMetaFromPath(pathname: string): ScenarioMeta | null {
   if (pathname.startsWith("/writing")) return SCENARIO_META.writing;
   if (pathname.startsWith("/agent")) return SCENARIO_META.agent;

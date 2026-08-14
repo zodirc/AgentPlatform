@@ -11,8 +11,10 @@ import {
 } from "../../shared/workbench/toolApproval";
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
 import { useChatInputHistory } from "../../shared/workbench/useChatInputHistory";
-import { placeholderForScenario } from "../../shared/workbench/useWorkbench";
-import { SCENARIO_META } from "../../shared/workbench/scenarioMeta";
+import {
+  placeholderForScenario,
+  SCENARIO_META,
+} from "../../shared/workbench/scenarioMeta";
 import { PlanPanel } from "../../shared/workbench/PlanPanel";
 import { livePlanStep } from "../../shared/workbench/plan";
 import { pathWithSession } from "../../shared/workbench/sessionUrl";
@@ -84,13 +86,7 @@ function ThinkingBlock({
   );
 }
 
-function UserBubble({
-  text,
-  meta,
-}: {
-  text: string;
-  meta?: string;
-}) {
+function UserBubble({ text, meta }: { text: string; meta?: string }) {
   return (
     <div className="flex justify-end">
       <div className="max-w-[min(100%,42rem)]">
@@ -171,7 +167,9 @@ function ScenarioModeSwitch({
         title="切换场景模式"
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="font-medium">{SCENARIO_META[scenarioId].navLabel}</span>
+        <span className="font-medium">
+          {SCENARIO_META[scenarioId].navLabel}
+        </span>
         <span className="text-muted-foreground">▾</span>
       </button>
       {open ? (
@@ -289,11 +287,7 @@ function ChatTabBar({
             <button
               type="button"
               className="px-1.5 text-muted-foreground/80 hover:bg-muted hover:text-foreground"
-              title={
-                running
-                  ? "关闭标签（后台仍继续，不取消）"
-                  : "关闭标签"
-              }
+              title={running ? "关闭标签（后台仍继续，不取消）" : "关闭标签"}
               aria-label="关闭子任务标签"
               onClick={(e) => {
                 e.stopPropagation();
@@ -379,8 +373,7 @@ export function AgentChatPanel({
   });
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
-    | Record<string, unknown>
-    | undefined;
+    Record<string, unknown> | undefined;
   const approval = approvalCopy(wb.pendingToolName);
   const currentStep = livePlanStep(wb.plan, wb.displayStatus);
   const approvalSubagentId =
@@ -546,9 +539,7 @@ export function AgentChatPanel({
               const output = assistantText(wb, turn);
               const isLive = turn.id === wb.turnId;
               const thinking =
-                isLive && wb.thinkingText.trim()
-                  ? wb.thinkingText.trim()
-                  : "";
+                isLive && wb.thinkingText.trim() ? wb.thinkingText.trim() : "";
               const liveOpen = Boolean(
                 isLive && wb.busy && !wb.stopping && !output,
               );
@@ -558,9 +549,9 @@ export function AgentChatPanel({
               const turnStatus = isLive ? wb.displayStatus : turn.status;
               const hasAssistantBody = Boolean(
                 turnPlan?.items?.length ||
-                  thinking ||
-                  output ||
-                  (isLive && wb.busy),
+                thinking ||
+                output ||
+                (isLive && wb.busy),
               );
               return (
                 <div key={turn.id} className="mb-6 space-y-3">
@@ -616,7 +607,8 @@ export function AgentChatPanel({
                   发送消息开始任务
                 </p>
                 <p className="mt-1 max-w-sm text-xs text-muted-foreground/70">
-                  Enter 发送 · Shift+Enter 换行 · 输入 / 唤起命令 · 空框 ↑ 回忆历史
+                  Enter 发送 · Shift+Enter 换行 · 输入 / 唤起命令 · 空框 ↑
+                  回忆历史
                 </p>
               </div>
             ) : null}
@@ -680,8 +672,8 @@ export function AgentChatPanel({
           {wb.canExecutePlan ? (
             <p className="truncate text-[11px] font-medium text-warning">
               计划待确认
-              {wb.plan?.items?.length ? ` · ${wb.plan.items.length} 项` : ""}
-              · 在上方清单点「按此执行」
+              {wb.plan?.items?.length ? ` · ${wb.plan.items.length} 项` : ""}·
+              在上方清单点「按此执行」
             </p>
           ) : currentStep && wb.busy ? (
             <p className="truncate text-[11px] text-primary/90">
@@ -776,17 +768,14 @@ export function AgentChatPanel({
                   if (e.key === "ArrowDown") {
                     e.preventDefault();
                     if (slashItems.length === 0) return;
-                    setSlashActiveIndex(
-                      (i) => (i + 1) % slashItems.length,
-                    );
+                    setSlashActiveIndex((i) => (i + 1) % slashItems.length);
                     return;
                   }
                   if (e.key === "ArrowUp") {
                     e.preventDefault();
                     if (slashItems.length === 0) return;
                     setSlashActiveIndex(
-                      (i) =>
-                        (i - 1 + slashItems.length) % slashItems.length,
+                      (i) => (i - 1 + slashItems.length) % slashItems.length,
                     );
                     return;
                   }

@@ -11,7 +11,7 @@ import { artifactToWritePreview } from "./filePreview";
 import { approvalCopy, lastApprovalEvent } from "./toolApproval";
 import { ErrorBanner } from "./ErrorBanner";
 import { onChatEnterSend } from "./chatKeyboard";
-import { placeholderForScenario } from "./useWorkbench";
+import { placeholderForScenario } from "./scenarioMeta";
 import type { WorkbenchState } from "./types";
 
 type Props = {
@@ -122,7 +122,9 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
       {wb.awaitingApproval && (
         <Card className="border-primary/40 bg-primary/10">
           <CardTitle className="text-primary">{approval.title}</CardTitle>
-          <p className="mb-1 text-sm text-foreground/90">{approval.description}</p>
+          <p className="mb-1 text-sm text-foreground/90">
+            {approval.description}
+          </p>
           {wb.pendingWriteFile ? (
             <div className="mb-3">
               <WriteFileDiffPanel
