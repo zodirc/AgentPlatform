@@ -81,9 +81,33 @@ class DirtyQueue:
             )
         self._schedule_flush(work_id)
 
+    def pending_counts(self, work_id: UUID) -> dict[str, int]:
+        state = self._by_work.get(work_id)
+        if state is None:
+            return {"upsert": 0, "delete": 0}
+        upsert = 0
+        delete = 0
+        for ev in state.events.values():
+            if ev.kind == DirtyKind.DELETE:
+                delete += 1
+            else:
+                upsert += 1
+        return {"upsert": upsert, "delete": delete}
+
+    async def flush_now(self, work_id: UUID) -> None:
+        """Flush without waiting for debounce (Settings status / GC)."""
+        state = self._by_work.get(work_id)
+        if state is not None and state.debounce_handle is not None:
+            state.debounce_handle.cancel()
+            state.debounce_handle = None
+        await self._flush(work_id)
+
     def _schedule_flush(self, work_id: UUID) -> None:
         state = self._by_work[work_id]
-        loop = asyncio.get_running_loop()
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
         if state.debounce_handle is not None:
             state.debounce_handle.cancel()
         delay = max(0.05, float(settings.workspace_ast_dirty_debounce_seconds))
@@ -91,20 +115,41 @@ class DirtyQueue:
             delay, lambda: asyncio.create_task(self._flush(work_id))
         )
 
+    def _pop_flush_batch(
+        self, work_id: UUID
+    ) -> tuple[list[DirtyEvent], str, Path, int] | None:
+        """Take up to backpressure-cap events. Overflow stays queued (never dropped)."""
+        state = self._by_work.get(work_id)
+        if state is None or not state.events or state.work_root is None:
+            return None
+        cap = max(1, int(settings.workspace_ast_dirty_backpressure))
+        all_events = list(state.events.values())
+        turn = [e for e in all_events if e.touched_in_turn]
+        rest = [e for e in all_events if not e.touched_in_turn]
+        if len(all_events) > cap and turn:
+            batch = turn[:cap]
+        else:
+            batch = (turn + rest)[:cap]
+        for ev in batch:
+            cur = state.events.get(ev.path)
+            if cur is ev:
+                state.events.pop(ev.path, None)
+        return batch, state.owner_user_id, state.work_root, len(state.events)
+
+    def _requeue_batch(self, work_id: UUID, batch: list[DirtyEvent]) -> None:
+        state = self._by_work[work_id]
+        for ev in batch:
+            existing = state.events.get(ev.path)
+            if existing is None or ev.kind == DirtyKind.DELETE:
+                state.events[ev.path] = ev
+
     async def _flush(self, work_id: UUID) -> None:
         async with self._lock:
-            state = self._by_work.get(work_id)
-            if state is None or not state.events or state.work_root is None:
-                return
-            events = list(state.events.values())
-            state.events.clear()
-            owner = state.owner_user_id
-            root = state.work_root
-
-        backlog = len(events)
-        prefer_turn = backlog > int(settings.workspace_ast_dirty_backpressure)
-        if prefer_turn:
-            events = [e for e in events if e.touched_in_turn] or events[:50]
+            taken = self._pop_flush_batch(work_id)
+        if taken is None:
+            return
+        events, owner, root, leftover = taken
+        prefer_turn = leftover > 0
 
         registry = get_projection_registry()
         proj = registry.get(work_id)
@@ -131,6 +176,11 @@ class DirtyQueue:
                 )
             except Exception:
                 logger.exception("workspace_ast dirty remote enqueue failed")
+                async with self._lock:
+                    self._requeue_batch(work_id, events)
+                return
+            if leftover:
+                self._schedule_flush(work_id)
             return
 
         meta: IndexMeta | None = None
@@ -202,13 +252,14 @@ class DirtyQueue:
         ):
             new_status = IndexStatus.STALE
         bumped = bool(processed) or any(e.kind == DirtyKind.DELETE for e in events)
+        n_files = len(proj.files) if proj is not None else int(meta.files_total)
         new_meta = IndexMeta(
             work_id=work_id,
             owner_user_id=owner,
             status=new_status if bumped else meta.status,
             generation=generation if bumped else meta.generation,
-            files_total=meta.files_total,
-            files_done=meta.files_done,
+            files_total=n_files,
+            files_done=n_files,
             error=None,
             ephemeral=bool(meta.ephemeral or ephemeral),
         )
@@ -220,6 +271,8 @@ class DirtyQueue:
                     )
                 except Exception:
                     logger.exception("workspace_ast dirty upsert failed")
+                    if leftover:
+                        self._schedule_flush(work_id)
                     return
             if proj is not None:
                 for entry in processed:
@@ -235,6 +288,9 @@ class DirtyQueue:
                     logger.exception("workspace_ast dirty meta bump failed")
             if proj is not None:
                 proj.meta = new_meta
+
+        if leftover:
+            self._schedule_flush(work_id)
 
 
 _dirty: DirtyQueue | None = None
@@ -262,6 +318,12 @@ def notify_path_changed(
 
     root = Path(work_root)
     if not get_ast_index_service().enabled_for_work(work_id=work_id, work_root=root):
+        return
+    from app.structural.workspace_index.ignore import code_file_indexable
+
+    # Upserts of writing/RAG files must not create lang=skipped AST rows.
+    # Deletes still enqueue so a leftover blob can be dropped.
+    if not deleted and not code_file_indexable(path):
         return
     get_dirty_queue().enqueue(
         work_id,

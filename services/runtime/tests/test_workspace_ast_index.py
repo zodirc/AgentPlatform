@@ -249,6 +249,12 @@ def test_walk_skips_venv(tmp_path: Path) -> None:
     assert not any("node_modules" in r for r in rels)
     assert dir_skipped(".venv")
     assert file_skipped(Path("x.pyc"))
+    from app.structural.workspace_index.ignore import code_file_indexable
+
+    assert code_file_indexable("app/engine.py")
+    assert not code_file_indexable(
+        "sources/cards/pending/20260806T070756Z_066d381a-d72e-4ce2-9c7e-464707fae8ca_松了一.md"
+    )
 
 
 def test_walk_code_only_skips_non_source(tmp_path: Path) -> None:
@@ -273,6 +279,9 @@ def test_parse_file_entry_and_hash(tmp_path: Path) -> None:
     assert entry.generation == 3
     assert entry.content_hash
     assert any(s.name == "Widget" for s in entry.symbols)
+    md = tmp_path / "note.md"
+    md.write_text("# heading\n", encoding="utf-8")
+    assert parse_file_entry(md, work_root=tmp_path, generation=3, max_file_bytes=1_000_000) is None
 
 
 def test_oversized_file_marked_skipped(tmp_path: Path) -> None:
@@ -525,6 +534,121 @@ async def test_light_scan_marks_scan_pending_on_budget(tmp_path: Path, monkeypat
     assert out["status"] in {"scan_pending", "ok"}
 
 
+@pytest.mark.asyncio
+async def test_light_scan_gc_drops_missing_when_walk_pending(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Deleted trees must leave the index even if os.walk hits the budget."""
+    from app.structural.workspace_index.projection import (
+        IndexProjection,
+        get_projection_registry,
+    )
+    from app.structural.workspace_index.types import IndexMeta, IndexStatus
+    from app.structural.workspace_index.watch import light_scan_after_command
+
+    wid = uuid4()
+    owner = "o"
+    ghost = FileEntry(
+        path="astropy.root.backup/cosmology/io/tests/test_table.py",
+        lang="python",
+        content_hash="gone",
+        mtime_ns=1,
+        size=10,
+        symbols=[SymbolRec(name="ToFromTableTestMixin", kind="class", line=17)],
+        generation=1,
+    )
+    live = tmp_path / "keep.py"
+    live.write_text("def keep():\n    return 1\n", encoding="utf-8")
+    keep = parse_file_entry(
+        live, work_root=tmp_path, generation=1, max_file_bytes=1_000_000
+    )
+    assert keep is not None
+    meta = IndexMeta(
+        work_id=wid,
+        owner_user_id=owner,
+        status=IndexStatus.READY,
+        files_total=2,
+        files_done=2,
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([ghost, keep], meta=meta)
+    get_projection_registry().put(proj)
+    for i in range(40):
+        (tmp_path / f"f{i}.py").write_text(f"def f{i}():\n  pass\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "app.structural.workspace_index.watch.get_ast_index_service",
+        lambda: type("S", (), {"enabled_for_work": lambda self, **k: True})(),
+    )
+    out = await light_scan_after_command(
+        work_id=wid,
+        owner_user_id=owner,
+        work_root=tmp_path,
+        budget_ms=0.01,
+    )
+    assert ghost.path not in proj.files
+    assert keep.path in proj.files
+    assert proj.meta.files_total == len(proj.files)
+    assert out["dirty"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_light_scan_does_not_index_writing_markdown(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from app.structural.workspace_index.dirty import get_dirty_queue
+    from app.structural.workspace_index.projection import (
+        IndexProjection,
+        get_projection_registry,
+    )
+    from app.structural.workspace_index.types import IndexMeta, IndexStatus
+    from app.structural.workspace_index.watch import light_scan_after_command
+
+    wid = uuid4()
+    owner = "o"
+    keep = tmp_path / "keep.py"
+    keep.write_text("def keep():\n    return 1\n", encoding="utf-8")
+    card = (
+        tmp_path
+        / "sources"
+        / "cards"
+        / "pending"
+        / "20260806T070756Z_066d381a-d72e-4ce2-9c7e-464707fae8ca_松了一.md"
+    )
+    card.parent.mkdir(parents=True)
+    card.write_text("# 松了一\n", encoding="utf-8")
+    entry = parse_file_entry(
+        keep, work_root=tmp_path, generation=1, max_file_bytes=1_000_000
+    )
+    assert entry is not None
+    meta = IndexMeta(
+        work_id=wid,
+        owner_user_id=owner,
+        status=IndexStatus.READY,
+        files_total=1,
+        files_done=1,
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([entry], meta=meta)
+    get_projection_registry().put(proj)
+    monkeypatch.setattr(
+        "app.structural.workspace_index.watch.get_ast_index_service",
+        lambda: type("S", (), {"enabled_for_work": lambda self, **k: True})(),
+    )
+    out = await light_scan_after_command(
+        work_id=wid,
+        owner_user_id=owner,
+        work_root=tmp_path,
+        budget_ms=2_000.0,
+    )
+    rel = card.relative_to(tmp_path).as_posix()
+    assert rel not in proj.files
+    state = get_dirty_queue()._by_work.get(wid)
+    pending_paths = set(state.events) if state else set()
+    assert rel not in pending_paths
+    assert out["status"] in {"ok", "scan_pending"}
+
+
 def test_alembic_work_ast_index_chain() -> None:
     from pathlib import Path as P
 
@@ -700,3 +824,134 @@ async def test_ephemeral_dirty_flush_updates_projection(tmp_path: Path, monkeypa
     await q._flush(wid)
     assert proj.lookup("new_name", owner_user_id=owner)
     assert not proj.lookup("old_name", owner_user_id=owner)
+
+
+@pytest.mark.asyncio
+async def test_dirty_flush_keeps_overflow_over_backpressure(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """GC deletes above the backpressure cap must stay queued, not be dropped."""
+    from uuid import UUID
+
+    from app.settings import settings
+    from app.structural.workspace_index.dirty import DirtyKind, DirtyQueue
+
+    monkeypatch.setattr(settings, "workspace_ast_dirty_backpressure", 2)
+    monkeypatch.setattr(settings, "workspace_ast_inline", False)
+
+    enqueued: list[dict] = []
+
+    async def fake_enqueue(self, **kwargs):
+        enqueued.append(kwargs)
+        return UUID(int=1)
+
+    monkeypatch.setattr(
+        "app.structural.workspace_index.queue.AstIndexJobQueue.enqueue_dirty",
+        fake_enqueue,
+    )
+
+    q = DirtyQueue()
+    wid = uuid4()
+    for i in range(5):
+        q.enqueue(
+            wid,
+            f"g{i}.py",
+            owner_user_id="u",
+            work_root=tmp_path,
+            kind=DirtyKind.DELETE,
+            touched_in_turn=False,
+        )
+    await q.flush_now(wid)
+    assert len(enqueued) == 1
+    assert len(enqueued[0]["deletes"]) == 2
+    leftover = q.pending_counts(wid)
+    assert leftover["delete"] == 3
+
+
+@pytest.mark.asyncio
+async def test_status_exposes_catchup_progress_after_gc(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from unittest.mock import AsyncMock
+
+    from app.settings import settings
+    from app.structural.workspace_index.dirty import get_dirty_queue
+    from app.structural.workspace_index.projection import get_projection_registry
+    from app.structural.workspace_index.service import get_ast_index_service
+
+    monkeypatch.setattr(settings, "workspace_ast_enabled", True)
+    monkeypatch.setattr(settings, "workspace_ast_ops_enabled", True)
+
+    wid = uuid4()
+    owner = "user-1"
+    keep = tmp_path / "keep.py"
+    keep.write_text("def keep():\n    return 1\n", encoding="utf-8")
+    live = parse_file_entry(
+        keep, work_root=tmp_path, generation=3, max_file_bytes=1_000_000
+    )
+    assert live is not None
+    ghost = FileEntry(
+        path="gone.py",
+        lang="python",
+        content_hash="x",
+        mtime_ns=1,
+        size=1,
+        symbols=[],
+        generation=3,
+    )
+    meta = IndexMeta(
+        work_id=wid,
+        owner_user_id=owner,
+        status=IndexStatus.READY,
+        generation=3,
+        files_total=2,
+        files_done=2,
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([live, ghost], meta=meta)
+    get_projection_registry().put(proj)
+
+    svc = get_ast_index_service()
+    monkeypatch.setattr(svc.store, "get_meta", AsyncMock(return_value=meta))
+    monkeypatch.setattr(svc.store, "count_files", AsyncMock(return_value=2))
+    monkeypatch.setattr(
+        svc.store, "list_paths", AsyncMock(return_value=["keep.py", "gone.py"])
+    )
+
+    async def fake_backlog(self, work_id):
+        return {
+            "upsert": 0,
+            "delete": 0,
+            "jobs_pending": 0,
+            "jobs_running": 0,
+            "cold": False,
+        }
+
+    async def noop_flush(self, work_id):
+        return None
+
+    monkeypatch.setattr(
+        "app.structural.workspace_index.queue.AstIndexJobQueue.backlog",
+        fake_backlog,
+    )
+    monkeypatch.setattr(
+        "app.structural.workspace_index.dirty.DirtyQueue.flush_now",
+        noop_flush,
+    )
+
+    out = await svc.status(wid, owner_user_id=owner, work_root=tmp_path)
+    assert ghost.path not in proj.files
+    assert out["status"] == "stale"
+    assert out["files_indexed"] == 1
+    assert out["pending_delete"] >= 1
+    assert out["catchup_remaining"] >= 1
+    assert out["files_done"] == out["files_total"]
+
+    get_dirty_queue()._by_work.pop(wid, None)
+    monkeypatch.setattr(svc.store, "count_files", AsyncMock(return_value=1))
+    proj.meta.status = IndexStatus.STALE
+    out_ready = await svc.status(wid, owner_user_id=owner, work_root=tmp_path)
+    assert out_ready["status"] == "ready"
+    assert out_ready["catchup_remaining"] == 0
+    get_projection_registry().drop(wid)
+    get_ast_index_service().clear_ephemeral(wid)

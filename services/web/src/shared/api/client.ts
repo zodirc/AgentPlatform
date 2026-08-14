@@ -815,6 +815,13 @@ export type AstIndexStatus = {
   files_total?: number;
   files_done?: number;
   files_indexed?: number;
+  files_stored?: number;
+  pending_upsert?: number;
+  pending_delete?: number;
+  jobs_pending?: number;
+  jobs_running?: number;
+  catchup_remaining?: number;
+  catchup_total?: number;
   error?: string | null;
   enabled?: boolean;
 };

@@ -138,6 +138,24 @@ class AstIndexStore:
             )
         return [FileEntry.from_row(r) for r in rows]
 
+    async def count_files(self, work_id: UUID) -> int:
+        pool = await self._conn()
+        async with pool.acquire() as conn:
+            n = await conn.fetchval(
+                "SELECT COUNT(*) FROM work_ast_files WHERE work_id = $1",
+                work_id,
+            )
+        return int(n or 0)
+
+    async def list_paths(self, work_id: UUID) -> list[str]:
+        pool = await self._conn()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT path FROM work_ast_files WHERE work_id = $1",
+                work_id,
+            )
+        return [str(r["path"]) for r in rows]
+
     async def upsert_files_batch(
         self,
         work_id: UUID,

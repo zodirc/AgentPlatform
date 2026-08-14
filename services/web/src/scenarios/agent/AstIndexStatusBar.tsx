@@ -5,6 +5,7 @@ import {
   fetchDefaultWork,
   type AstIndexStatus,
 } from "../../shared/api/client";
+import { progressPercent } from "../../settings/astIndexStatusView";
 
 function labelFor(status: AstIndexStatus | undefined): string {
   const s = status?.status || "cold";
@@ -17,7 +18,19 @@ function labelFor(status: AstIndexStatus | undefined): string {
       : "代码索引 building…";
   }
   if (s === "ready") return "代码索引 ready";
-  if (s === "stale") return "代码索引 stale（后台追平）";
+  if (s === "stale") {
+    const del = status?.pending_delete ?? 0;
+    const up = status?.pending_upsert ?? 0;
+    const remaining = status?.catchup_remaining ?? del + up;
+    if (del || up || remaining) {
+      const bits = ["代码索引 stale"];
+      if (del) bits.push(`待删 ${del}`);
+      if (up) bits.push(`待更新 ${up}`);
+      if (!del && !up && remaining) bits.push(`待处理 ${remaining}`);
+      return bits.join(" · ");
+    }
+    return "代码索引 stale（后台追平）";
+  }
   if (s === "error") return `代码索引 error${status?.error ? ` · ${status.error}` : ""}`;
   if (s === "cold") return "代码索引 cold";
   return `代码索引 ${s}`;
@@ -39,7 +52,14 @@ export function AstIndexStatusBar() {
     enabled: Boolean(workId),
     refetchInterval: (q) => {
       const s = q.state.data?.status;
-      if (s === "building" || s === "cold" || s === "stale" || s === "scan_pending") {
+      const remaining = q.state.data?.catchup_remaining ?? 0;
+      if (
+        s === "building" ||
+        s === "cold" ||
+        s === "stale" ||
+        s === "scan_pending" ||
+        remaining > 0
+      ) {
         return 1500;
       }
       return 12_000;
@@ -58,14 +78,13 @@ export function AstIndexStatusBar() {
   const text = labelFor(status);
   if (!text) return null;
 
-  const building = status.status === "building" || status.status === "cold";
-  const pct =
-    status.files_total && status.files_total > 0
-      ? Math.min(
-          100,
-          Math.round(((status.files_done ?? 0) / status.files_total) * 100),
-        )
-      : null;
+  const catchingUp =
+    status.status === "building" ||
+    status.status === "cold" ||
+    status.status === "stale" ||
+    status.status === "scan_pending" ||
+    (status.catchup_remaining ?? 0) > 0;
+  const pct = progressPercent(status);
 
   return (
     <div
@@ -82,13 +101,13 @@ export function AstIndexStatusBar() {
           收起
         </button>
       </div>
-      {building ? (
+      {catchingUp ? (
         <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-muted">
           <div
             className="h-full rounded-full bg-foreground/40 transition-[width] duration-500"
             style={{
-              width: pct != null ? `${pct}%` : "30%",
-              ...(pct == null
+              width: pct != null ? `${Math.max(pct, pct === 0 ? 4 : 0)}%` : "30%",
+              ...(pct == null || pct === 0
                 ? { animation: "pulse 1.4s ease-in-out infinite" }
                 : null),
             }}

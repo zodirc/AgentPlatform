@@ -664,6 +664,59 @@ def test_workspace_sources_index_status_proxies_runtime(
     proxy.assert_awaited_once_with(path="sources/ref-a.md", tenant={})
 
 
+def test_workspace_sources_chunks_proxies_runtime(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
+    payload = {
+        "files": [{"path": "sources/seed/a.md", "visibility": "seed", "chunk_count": 2}],
+        "total": 1,
+    }
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.sources_chunks",
+        new_callable=AsyncMock,
+        return_value=payload,
+    ) as proxy:
+        response = client.get(
+            "/api/v1/admin/workspace/sources/chunks",
+            params={"visibility": "seed", "q": "legal"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    proxy.assert_awaited_once_with(
+        path=None, visibility="seed", q="legal", limit=200, tenant={}
+    )
+
+
+def test_workspace_ast_index_inspect_proxies_runtime(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import app.services.admin.auth as auth_mod
+    from app.settings import Settings
+
+    monkeypatch.setattr(auth_mod, "settings", Settings(auth_enabled=False))
+    payload = {"files": [{"path": "app/main.py", "symbol_count": 3}], "file": None}
+    with patch(
+        "app.routers.admin.workspace.workspace_svc.ast_index_inspect",
+        new_callable=AsyncMock,
+        return_value=payload,
+    ) as proxy:
+        response = client.get(
+            "/api/v1/admin/workspace/ast-index/inspect",
+            params={"path": "app/main.py"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    proxy.assert_awaited_once_with(
+        path="app/main.py", q=None, limit=200, tenant={}
+    )
+
+
 def test_workspace_ast_index_status_proxies_runtime(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

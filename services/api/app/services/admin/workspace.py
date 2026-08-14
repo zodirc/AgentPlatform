@@ -345,3 +345,66 @@ async def rename_path(
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
+
+
+async def sources_chunks(
+    *,
+    path: str | None = None,
+    visibility: str | None = None,
+    q: str | None = None,
+    limit: int | None = None,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    """Inspect indexed RAG chunks (actual text, no embeddings)."""
+    base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {**_tenant_params(tenant or {})}
+    if path:
+        params["path"] = path
+    if visibility:
+        params["visibility"] = visibility
+    if q:
+        params["q"] = q
+    if limit is not None:
+        params["limit"] = str(limit)
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{base}/internal/workspace/sources/chunks",
+                params=params or None,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()
+
+
+async def ast_index_inspect(
+    *,
+    path: str | None = None,
+    q: str | None = None,
+    limit: int | None = None,
+    tenant: dict[str, str] | None = None,
+) -> dict:
+    """Inspect AST index files / one-file definition tree."""
+    base = settings.runtime_url.rstrip("/")
+    params: dict[str, str] = {**_tenant_params(tenant or {})}
+    if path:
+        params["path"] = path
+    if q:
+        params["q"] = q
+    if limit is not None:
+        params["limit"] = str(limit)
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                f"{base}/internal/workspace/ast-index/inspect",
+                params=params or None,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()

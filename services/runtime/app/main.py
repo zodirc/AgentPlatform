@@ -743,6 +743,19 @@ async def workspace_upload_source(
     return result
 
 
+def _register_workspace_inspect() -> None:
+    from app.routers.workspace_inspect import register_inspect_routes
+
+    register_inspect_routes(
+        workspace_router,
+        verify_internal_token=verify_internal_token,
+        tenant_query=_tenant_query,
+    )
+
+
+_register_workspace_inspect()
+
+
 @asynccontextmanager
 async def lifespan(app):
     import asyncio

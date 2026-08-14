@@ -11,7 +11,11 @@ from uuid import UUID
 
 from app.settings import settings
 from app.structural.workspace_index.dirty import DirtyKind, get_dirty_queue
-from app.structural.workspace_index.ignore import dir_skipped, file_skipped
+from app.structural.workspace_index.ignore import (
+    code_file_indexable,
+    dir_skipped,
+    file_skipped,
+)
 from app.structural.workspace_index.projection import get_projection_registry
 from app.structural.workspace_index.service import get_ast_index_service
 
@@ -39,6 +43,61 @@ def touch_active_work(work_id: UUID) -> None:
         _active_works[work_id] = (cur[0], cur[1], time.monotonic())
 
 
+def gc_missing_indexed_files(
+    *,
+    work_id: UUID,
+    owner_user_id: str,
+    work_root: Path,
+    budget_s: float | None = None,
+) -> dict:
+    """Drop indexed paths that are gone on disk, or are not code.
+
+    Independent of ``os.walk`` completeness: O(indexed files) ``exists`` checks.
+    Memory projection updates immediately; DB/indexer follow via dirty DELETE.
+    Writing cards / RAG markdown must not remain as ``lang=skipped`` ghosts.
+    """
+    from app.structural.workspace_index.types import IndexStatus
+
+    proj = get_projection_registry().get(work_id)
+    if proj is None or proj.owner_user_id != owner_user_id:
+        return {"dropped": 0, "checked": 0, "pending": False}
+    root = work_root.resolve()
+    started = time.perf_counter()
+    dropped = 0
+    checked = 0
+    pending = False
+    known = list(proj.files)
+    for rel in known:
+        if budget_s is not None and (time.perf_counter() - started) >= budget_s:
+            pending = True
+            break
+        checked += 1
+        try:
+            exists = (root / rel).is_file()
+        except OSError:
+            exists = False
+        if exists and code_file_indexable(rel):
+            continue
+        proj.drop_file(rel)
+        get_dirty_queue().enqueue(
+            work_id,
+            rel,
+            owner_user_id=owner_user_id,
+            work_root=root,
+            kind=DirtyKind.DELETE,
+            touched_in_turn=False,
+        )
+        dropped += 1
+    if dropped:
+        n = len(proj.files)
+        proj.meta.files_total = n
+        proj.meta.files_done = n
+        proj.catchup_total = max(int(proj.catchup_total or 0), dropped)
+        if proj.meta.status == IndexStatus.READY:
+            proj.meta.status = IndexStatus.STALE
+    return {"dropped": dropped, "checked": checked, "pending": pending}
+
+
 async def light_scan_after_command(
     *,
     work_id: UUID | None,
@@ -64,7 +123,6 @@ async def light_scan_after_command(
     scan_pending = False
     root = work_root.resolve()
     known = dict(proj.files)
-    seen: set[str] = set()
 
     def _over_budget() -> bool:
         return (time.perf_counter() - started) >= budget_s
@@ -80,7 +138,7 @@ async def light_scan_after_command(
                     scan_pending = True
                     break
                 path = Path(dirpath) / name
-                if file_skipped(path):
+                if file_skipped(path) or not code_file_indexable(path):
                     continue
                 try:
                     rel = path.resolve().relative_to(root).as_posix()
@@ -88,7 +146,6 @@ async def light_scan_after_command(
                 except (OSError, ValueError):
                     continue
                 scanned += 1
-                seen.add(rel)
                 mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
                 size = int(st.st_size)
                 old = known.get(rel)
@@ -105,18 +162,16 @@ async def light_scan_after_command(
             if scan_pending:
                 break
 
-        if not scan_pending:
-            for rel in known:
-                if rel not in seen:
-                    get_dirty_queue().enqueue(
-                        work_id,
-                        rel,
-                        owner_user_id=owner_user_id,
-                        work_root=root,
-                        kind=DirtyKind.DELETE,
-                        touched_in_turn=False,
-                    )
-                    dirty += 1
+        # Missing-file GC is O(index), not O(tree). Always run — a truncated
+        # walk must not leave deleted trees (astropy.root.backup) as ghosts.
+        gc = gc_missing_indexed_files(
+            work_id=work_id,
+            owner_user_id=owner_user_id,
+            work_root=root,
+        )
+        dirty += int(gc.get("dropped") or 0)
+        if gc.get("pending"):
+            scan_pending = True
     except Exception:
         logger.exception("workspace_ast light_scan failed")
         return {"status": "error", "scanned": scanned, "dirty": dirty}

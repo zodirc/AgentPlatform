@@ -18,7 +18,8 @@ import { useEndUserAuth } from "../shared/auth/EndUserAuth";
 import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
-import { AstIndexSettingsCard } from "./AstIndexSettingsCard";
+import { IndexInspectSection } from "./IndexInspectSection";
+import { SETTINGS_TABS, tabFromPath } from "./settingsTabs";
 
 function formatContextWindow(tokens: number | null | undefined): string {
   if (tokens == null || tokens <= 0) return "默认";
@@ -108,14 +109,6 @@ function Field({
 const inputClass =
   "w-full rounded border border-input bg-background px-3 py-2 text-sm text-foreground";
 
-type SettingsTab = "account" | "appearance" | "model" | "signals";
-
-function tabFromPath(pathname: string): SettingsTab {
-  if (pathname.endsWith("/model")) return "model";
-  if (pathname.endsWith("/appearance")) return "appearance";
-  if (pathname.endsWith("/signals")) return "signals";
-  return "account";
-}
 
 function formatRate(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
@@ -366,8 +359,6 @@ function AccountSection() {
           <p className="mt-2 text-xs text-destructive">{seedError}</p>
         ) : null}
       </section>
-
-      <AstIndexSettingsCard />
 
       <section className="rounded-xl border border-border bg-card/60 p-4">
         <h2 className="text-sm font-medium text-foreground">修改密码</h2>
@@ -831,22 +822,7 @@ export function SettingsPage() {
       </div>
 
       <nav className="mt-6 flex flex-wrap gap-2 border-b border-border pb-3">
-        {(
-          [
-            { id: "account" as const, to: "/settings", label: "账户" },
-            {
-              id: "appearance" as const,
-              to: "/settings/appearance",
-              label: "外观",
-            },
-            { id: "model" as const, to: "/settings/model", label: "模型" },
-            {
-              id: "signals" as const,
-              to: "/settings/signals",
-              label: "体验信号",
-            },
-          ] as const
-        ).map((item) => (
+        {SETTINGS_TABS.map((item) => (
           <Link
             key={item.id}
             to={item.to}
@@ -871,6 +847,12 @@ export function SettingsPage() {
       {tab === "appearance" ? (
         <div className="mt-6">
           <AppearanceSection />
+        </div>
+      ) : null}
+
+      {tab === "index" ? (
+        <div className="mt-6">
+          <IndexInspectSection />
         </div>
       ) : null}
 

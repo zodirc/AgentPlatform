@@ -118,7 +118,7 @@ def _instant_def_hits(
     Never invents definitions — only extracts from disk files named after the
     symbol tail (e.g. ``Card`` → ``**/Card.py``).
     """
-    from app.structural.workspace_index.ignore import dir_skipped, file_skipped
+    from app.structural.workspace_index.ignore import code_file_indexable, dir_skipped, file_skipped
     from app.structural.workspace_index.job import parse_single_file_fallback
 
     nq = normalize_symbol_query(symbol)
@@ -135,7 +135,7 @@ def _instant_def_hits(
             if stem != tail and stem.lower() != tail.lower():
                 continue
             path = dirpath / name
-            if file_skipped(path):
+            if file_skipped(path) or not code_file_indexable(path):
                 continue
             candidates.append(path)
             if len(candidates) >= max_files:

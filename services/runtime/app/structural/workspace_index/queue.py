@@ -247,6 +247,53 @@ class AstIndexJobQueue:
                 (error or "")[:500],
             )
 
+    async def backlog(self, work_id: UUID) -> dict[str, int | bool]:
+        """Pending/running job path counts for Settings catch-up UI (off-loop)."""
+        pool = await self._conn()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT kind, status, paths
+                FROM work_ast_index_jobs
+                WHERE work_id = $1 AND status IN ($2, $3)
+                """,
+                work_id,
+                STATUS_PENDING,
+                STATUS_RUNNING,
+            )
+        jobs_pending = 0
+        jobs_running = 0
+        upsert = 0
+        delete = 0
+        cold = False
+        for row in rows:
+            kind = str(row["kind"] or "")
+            st = str(row["status"] or "")
+            if st == STATUS_PENDING:
+                jobs_pending += 1
+            elif st == STATUS_RUNNING:
+                jobs_running += 1
+            if kind == KIND_COLD:
+                cold = True
+                continue
+            if kind != KIND_DIRTY:
+                continue
+            raw = row["paths"]
+            if isinstance(raw, str):
+                raw = json.loads(raw)
+            if isinstance(raw, dict):
+                upsert += len([p for p in (raw.get("upsert") or []) if p])
+                delete += len([p for p in (raw.get("delete") or []) if p])
+            elif isinstance(raw, list):
+                upsert += len([p for p in raw if p])
+        return {
+            "upsert": upsert,
+            "delete": delete,
+            "jobs_pending": jobs_pending,
+            "jobs_running": jobs_running,
+            "cold": cold,
+        }
+
     async def reclaim_stale(self, *, older_than_seconds: float = 900.0) -> int:
         """Re-queue running jobs whose lock is older than budget (crashed worker)."""
         pool = await self._conn()

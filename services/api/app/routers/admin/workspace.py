@@ -169,6 +169,43 @@ async def sources_index_status(
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
+@router.get("/sources/chunks")
+async def sources_chunks(
+    request: Request,
+    path: str | None = Query(default=None),
+    visibility: str | None = Query(default="all"),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=400),
+    work_id: UUID | None = Query(default=None),
+):
+    """Indexed RAG chunks: file list, or one path's actual text."""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.sources_chunks(
+            path=path, visibility=visibility, q=q, limit=limit, tenant=tenant
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.get("/ast-index/inspect")
+async def ast_index_inspect(
+    request: Request,
+    path: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    limit: int = Query(default=200, ge=1, le=400),
+    work_id: UUID | None = Query(default=None),
+):
+    """AST index files and one-file definition tree (not RAG)."""
+    try:
+        tenant = await resolve_workspace_tenant(request, work_id=work_id)
+        return await workspace_svc.ast_index_inspect(
+            path=path, q=q, limit=limit, tenant=tenant
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
 @router.get("/ast-index/status")
 async def ast_index_status(
     request: Request,

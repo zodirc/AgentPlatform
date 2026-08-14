@@ -150,9 +150,35 @@ class AstIndexService:
                 )
                 proj = self.registry.get(work_id)
 
+        if work_root is not None:
+            loaded = await self.ensure_projection(
+                work_id, owner_user_id=owner_user_id, work_root=work_root
+            )
+            if loaded is not None:
+                proj = loaded
         if proj is not None and proj.owner_user_id == owner_user_id:
+            if work_root is not None:
+                from app.structural.workspace_index.watch import gc_missing_indexed_files
+
+                gc_missing_indexed_files(
+                    work_id=work_id,
+                    owner_user_id=owner_user_id,
+                    work_root=Path(work_root),
+                )
+                if not self.is_ephemeral(work_id):
+                    proj = await self._sync_projection_from_store(
+                        proj,
+                        owner_user_id=owner_user_id,
+                        work_root=Path(work_root),
+                    )
             out = proj.status_dict()
             out["enabled"] = True
+            out = await self._attach_catchup(
+                out,
+                proj,
+                owner_user_id=owner_user_id,
+                work_root=Path(work_root) if work_root is not None else None,
+            )
             if enqueue_if_cold and proj.meta.status == IndexStatus.COLD:
                 self.enqueue_cold_start(
                     work_id,
@@ -208,6 +234,150 @@ class AstIndexService:
                 work_id, owner_user_id=owner_user_id, work_root=Path(work_root or ".")
             )
             out["status"] = IndexStatus.BUILDING.value
+        return out
+
+    async def _sync_projection_from_store(
+        self,
+        proj: IndexProjection,
+        *,
+        owner_user_id: str,
+        work_root: Path,
+    ) -> IndexProjection:
+        """Reload memory when indexer committed a newer generation.
+
+        Equal generation is a no-op: reload would restore GC'd ghosts.
+        """
+        try:
+            db_meta = await self.store.get_meta(
+                proj.work_id, owner_user_id=owner_user_id
+            )
+        except Exception:
+            return proj
+        if db_meta is None or int(db_meta.generation) <= int(proj.meta.generation):
+            return proj
+        try:
+            files = await self.store.load_files(
+                proj.work_id, owner_user_id=owner_user_id
+            )
+        except Exception:
+            logger.exception("workspace_ast reload from store failed")
+            return proj
+        proj.replace_all(files, meta=db_meta)
+        from app.structural.workspace_index.watch import gc_missing_indexed_files
+
+        gc_missing_indexed_files(
+            work_id=proj.work_id,
+            owner_user_id=owner_user_id,
+            work_root=work_root,
+        )
+        return proj
+
+    async def _attach_catchup(
+        self,
+        out: dict,
+        proj: IndexProjection,
+        *,
+        owner_user_id: str,
+        work_root: Path | None,
+    ) -> dict:
+        """Expose pending upsert/delete + DB-vs-memory gap for the Settings bar."""
+        from app.structural.workspace_index.dirty import DirtyKind, get_dirty_queue
+
+        q = get_dirty_queue()
+        try:
+            await q.flush_now(proj.work_id)
+        except Exception:
+            logger.exception("workspace_ast dirty flush on status failed")
+
+        mem = q.pending_counts(proj.work_id)
+        jobs: dict = {
+            "upsert": 0,
+            "delete": 0,
+            "jobs_pending": 0,
+            "jobs_running": 0,
+            "cold": False,
+        }
+        files_indexed = len(proj.files)
+        files_stored = files_indexed
+        if not self.is_ephemeral(proj.work_id):
+            try:
+                from app.structural.workspace_index.queue import AstIndexJobQueue
+
+                jobs = await AstIndexJobQueue().backlog(proj.work_id)
+            except Exception:
+                logger.debug("workspace_ast job backlog unavailable", exc_info=True)
+            try:
+                files_stored = await self.store.count_files(proj.work_id)
+            except Exception:
+                files_stored = files_indexed
+
+        mem_up = int(mem.get("upsert") or 0)
+        mem_del = int(mem.get("delete") or 0)
+        job_up = int(jobs.get("upsert") or 0)
+        db_gap = max(0, int(files_stored) - files_indexed)
+
+        if (
+            db_gap > 0
+            and mem_del == 0
+            and int(jobs.get("delete") or 0) == 0
+            and work_root is not None
+            and not self.is_ephemeral(proj.work_id)
+        ):
+            try:
+                stored_paths = await self.store.list_paths(proj.work_id)
+                known = set(proj.files)
+                for rel in stored_paths:
+                    if rel in known:
+                        continue
+                    q.enqueue(
+                        proj.work_id,
+                        rel,
+                        owner_user_id=owner_user_id,
+                        work_root=work_root,
+                        kind=DirtyKind.DELETE,
+                        touched_in_turn=False,
+                    )
+                await q.flush_now(proj.work_id)
+                mem = q.pending_counts(proj.work_id)
+                mem_up = int(mem.get("upsert") or 0)
+                mem_del = int(mem.get("delete") or 0)
+                try:
+                    from app.structural.workspace_index.queue import AstIndexJobQueue
+
+                    jobs = await AstIndexJobQueue().backlog(proj.work_id)
+                    job_up = int(jobs.get("upsert") or 0)
+                except Exception:
+                    pass
+            except Exception:
+                logger.exception("workspace_ast requeue stored ghosts failed")
+
+        delete_remaining = max(mem_del, db_gap)
+        upsert_remaining = mem_up + job_up
+        remaining = delete_remaining + upsert_remaining
+
+        if remaining > 0:
+            proj.catchup_total = max(int(proj.catchup_total or 0), remaining)
+            if proj.meta.status == IndexStatus.READY:
+                proj.meta.status = IndexStatus.STALE
+        elif proj.meta.status == IndexStatus.STALE and not jobs.get("cold"):
+            proj.meta.status = IndexStatus.READY
+            proj.catchup_total = 0
+            n = files_indexed
+            proj.meta.files_total = n
+            proj.meta.files_done = n
+
+        out["status"] = proj.meta.status.value
+        out["generation"] = int(proj.meta.generation)
+        out["files_indexed"] = files_indexed
+        out["files_stored"] = int(files_stored)
+        out["files_total"] = int(proj.meta.files_total)
+        out["files_done"] = int(proj.meta.files_done)
+        out["pending_upsert"] = upsert_remaining
+        out["pending_delete"] = delete_remaining
+        out["jobs_pending"] = int(jobs.get("jobs_pending") or 0)
+        out["jobs_running"] = int(jobs.get("jobs_running") or 0)
+        out["catchup_remaining"] = remaining
+        out["catchup_total"] = int(proj.catchup_total or 0)
         return out
 
     async def _load_ephemeral_snapshot(

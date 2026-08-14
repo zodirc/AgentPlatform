@@ -176,13 +176,19 @@ async def _handle_dirty(job: AstIndexJob, store: AstIndexStore) -> None:
         new_status = IndexStatus.STALE if incomplete else IndexStatus.READY
     else:
         new_status = meta.status
+    if proj is not None:
+        n_files = len(proj.files)
+    elif not ephemeral:
+        n_files = await store.count_files(job.work_id)
+    else:
+        n_files = max(0, int(meta.files_total) - len(dels))
     new_meta = IndexMeta(
         work_id=job.work_id,
         owner_user_id=job.owner_user_id,
         status=new_status,
         generation=generation if bumped else meta.generation,
-        files_total=meta.files_total,
-        files_done=meta.files_done,
+        files_total=n_files,
+        files_done=n_files,
         error=None,
         ephemeral=ephemeral or bool(meta.ephemeral),
     )

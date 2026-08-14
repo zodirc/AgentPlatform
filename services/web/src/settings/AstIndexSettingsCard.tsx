@@ -3,35 +3,12 @@ import {
   fetchAstIndexStatus,
   fetchDefaultWork,
   rebuildAstIndex,
-  type AstIndexStatus,
 } from "../shared/api/client";
-
-function statusLabel(status: AstIndexStatus | undefined): string {
-  const s = status?.status || "cold";
-  if (s === "disabled") return "未启用";
-  if (s === "building" || s === "scan_pending") {
-    const done = status?.files_done ?? 0;
-    const total = status?.files_total ?? 0;
-    return total > 0 ? `构建中 · ${done}/${total}` : "构建中…";
-  }
-  if (s === "ready") {
-    const n = status?.files_indexed ?? status?.files_done ?? status?.files_total;
-    return n != null && n > 0 ? `就绪 · ${n} 文件` : "就绪";
-  }
-  if (s === "stale") return "落后 · 后台追平中";
-  if (s === "error") {
-    return status?.error ? `失败 · ${status.error}` : "失败";
-  }
-  if (s === "cold") return "未建索引";
-  return s;
-}
-
-function progressPercent(status: AstIndexStatus | undefined): number | null {
-  const total = status?.files_total ?? 0;
-  if (total <= 0) return null;
-  const done = status?.files_done ?? 0;
-  return Math.min(100, Math.round((done / total) * 100));
-}
+import {
+  catchupHint,
+  progressPercent,
+  statusLabel,
+} from "./astIndexStatusView";
 
 /** Settings · 当前账号默认 Work 的 AST 索引进度（非 RAG）。 */
 export function AstIndexSettingsCard() {
@@ -53,7 +30,14 @@ export function AstIndexSettingsCard() {
     enabled: Boolean(workId),
     refetchInterval: (q) => {
       const s = q.state.data?.status;
-      if (s === "building" || s === "cold" || s === "stale" || s === "scan_pending") {
+      const remaining = q.state.data?.catchup_remaining ?? 0;
+      if (
+        s === "building" ||
+        s === "cold" ||
+        s === "stale" ||
+        s === "scan_pending" ||
+        remaining > 0
+      ) {
         return 1500;
       }
       return 12_000;
@@ -65,19 +49,22 @@ export function AstIndexSettingsCard() {
     mutationFn: () => rebuildAstIndex({ workId }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["ast-index-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["ast-index-inspect"] });
     },
   });
 
   const status = indexQuery.data;
   const disabled =
     status?.enabled === false || status?.status === "disabled";
-  const building =
+  const catchingUp =
     status?.status === "building" ||
     status?.status === "cold" ||
     status?.status === "scan_pending" ||
-    status?.status === "stale";
+    status?.status === "stale" ||
+    (status?.catchup_remaining ?? 0) > 0;
   const pct = progressPercent(status);
-  const barActive = building || (pct != null && pct < 100);
+  const barActive = catchingUp || (pct != null && pct < 100);
+  const hint = catchupHint(status);
 
   return (
     <section
@@ -149,20 +136,23 @@ export function AstIndexSettingsCard() {
               }`}
               style={{
                 width:
-                  status?.status === "ready"
+                  status?.status === "ready" && !catchingUp
                     ? "100%"
                     : pct != null
-                      ? `${pct}%`
+                      ? `${Math.max(pct, pct === 0 && barActive ? 4 : 0)}%`
                       : barActive
                         ? "35%"
                         : "0%",
-                ...(barActive && pct == null
+                ...(barActive && (pct == null || pct === 0)
                   ? { animation: "pulse 1.4s ease-in-out infinite" }
                   : null),
               }}
             />
           </div>
 
+          {hint ? (
+            <p className="text-[11px] text-muted-foreground">{hint}</p>
+          ) : null}
           {status?.status === "error" && status.error ? (
             <p className="text-[11px] text-destructive">{status.error}</p>
           ) : null}

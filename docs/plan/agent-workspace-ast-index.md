@@ -296,7 +296,7 @@ Agent 工作区与 `sources/` 的关键差异：**变更的主要制造者就是
 | 通道 | 触发 | 精度 | 成本 |
 |------|------|------|------|
 | **① 工具钩子（主）** | `edit_file` / `write_file` / 删除类工具**成功后**，runtime 将 path **入队**（不在本进程 parse） | 精确到文件，零延迟 | ~0（一次 enqueue） |
-| **② `run_command` 后轻扫** | `run_command` 成功返回后，对 work_root 做一次 mtime+size 快速比对（只比投影，不读内容）；变更者入脏队列；超时间预算（如 200ms）则中断并标 `scan_pending`，留给通道 ③ | 文件级 | 有上限，off-loop |
+| **② `run_command` 后轻扫** | `run_command` 成功返回后，对 work_root 做一次 mtime+size 快速比对（只比投影，不读内容）；**仅 code_only 后缀入队**（与冷启动相同，写作 `sources/cards/*.md` 不进 AST）；变更者入脏队列；超时间预算（如 200ms）则中断并标 `scan_pending`，留给通道 ③。**GC 不依赖 walk 走完**：盘上没有、或不是代码文件 → 立刻 drop + DELETE | 文件级 | 有上限，off-loop |
 | **③ 低频轮询兜底** | 周期（如 30–60s，仅该 Work 有活跃 agent Session 时）mtime+size 全扫；复用 `sources_watch.py` 的 poll+debounce 模式（明确不依赖 inotify，Docker/WSL 一致） | 兜住外部改动（宿主编辑器、git 操作、容器外脚本） | 与 sources watch 同量级 |
 
 脏队列纪律（承 v1，细化）：
