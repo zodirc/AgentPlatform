@@ -235,6 +235,8 @@ services:
       WORKSPACE_AST_EVAL_MAX_FILES: ${WORKSPACE_AST_EVAL_MAX_FILES:-4000}
       AST_INDEXER_POLL_SECONDS: ${AST_INDEXER_POLL_SECONDS:-0.5}
       AST_INDEXER_HEARTBEAT: /data/ast_indexer_heartbeat
+      # Background file HB thread; compose health age window is 120s (see healthcheck).
+      AST_INDEXER_HEARTBEAT_SECONDS: ${AST_INDEXER_HEARTBEAT_SECONDS:-10}
       # Indexer does not call models / embeddings.
       MODEL_MODE: stub
       RETRIEVAL_BACKEND: hash
@@ -247,18 +249,20 @@ services:
         condition: service_healthy
       runtime:
         condition: service_healthy
+    # File HB is a daemon thread. Age window covers brief GIL stalls during
+    # parse/snapshot; full-tree dirty must not rely on this (see light_scan fix).
     healthcheck:
       test:
         [
           "CMD",
           "python",
           "-c",
-          "import time,pathlib; p=pathlib.Path('/data/ast_indexer_heartbeat'); t=float(p.read_text()); assert time.time()-t < 45",
+          "import time,pathlib; p=pathlib.Path('/data/ast_indexer_heartbeat'); t=float(p.read_text()); assert time.time()-t < 120",
         ]
       interval: 15s
       timeout: 5s
       start_period: 20s
-      retries: 5
+      retries: 3
 
   # Build-only: tags deps stage so BuildKit GC does not drop pip/ST layers between
   # app-only rebuilds (docs/38 · docs/03 §5.1). Never started as a container.

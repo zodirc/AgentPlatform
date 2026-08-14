@@ -123,6 +123,15 @@ async def light_scan_after_command(
     scan_pending = False
     root = work_root.resolve()
     known = dict(proj.files)
+    # Incomplete cold_start (budget-truncated STALE / BUILDING): files absent from
+    # the projection are "not yet indexed", NOT dirty. Treating them as upsert
+    # enqueued full-tree dirty jobs (~900 paths) that blocked the indexer for
+    # minutes while Turn was still running.
+    from app.structural.workspace_index.types import IndexStatus
+
+    incomplete = proj.meta.status == IndexStatus.BUILDING or (
+        int(proj.meta.files_done or 0) < int(proj.meta.files_total or 0)
+    )
 
     def _over_budget() -> bool:
         return (time.perf_counter() - started) >= budget_s
@@ -149,16 +158,21 @@ async def light_scan_after_command(
                 mtime_ns = int(getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9)))
                 size = int(st.st_size)
                 old = known.get(rel)
-                if old is None or old.mtime_ns != mtime_ns or old.size != size:
-                    get_dirty_queue().enqueue(
-                        work_id,
-                        rel,
-                        owner_user_id=owner_user_id,
-                        work_root=root,
-                        kind=DirtyKind.UPSERT,
-                        touched_in_turn=False,
-                    )
-                    dirty += 1
+                if old is None:
+                    if incomplete:
+                        continue
+                    # New file after a complete index baseline.
+                elif old.mtime_ns == mtime_ns and old.size == size:
+                    continue
+                get_dirty_queue().enqueue(
+                    work_id,
+                    rel,
+                    owner_user_id=owner_user_id,
+                    work_root=root,
+                    kind=DirtyKind.UPSERT,
+                    touched_in_turn=False,
+                )
+                dirty += 1
             if scan_pending:
                 break
 
@@ -179,8 +193,6 @@ async def light_scan_after_command(
     status = "scan_pending" if scan_pending else "ok"
     if scan_pending and proj is not None:
         # Soft marker — query still allowed (§3.2).
-        from app.structural.workspace_index.types import IndexStatus
-
         if proj.meta.status == IndexStatus.READY:
             proj.meta.status = IndexStatus.STALE
     return {

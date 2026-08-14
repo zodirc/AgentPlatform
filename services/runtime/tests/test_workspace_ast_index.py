@@ -535,6 +535,60 @@ async def test_light_scan_marks_scan_pending_on_budget(tmp_path: Path, monkeypat
 
 
 @pytest.mark.asyncio
+async def test_light_scan_skips_unindexed_while_cold_start_incomplete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Budget-truncated index must not enqueue the rest of the tree as dirty."""
+    from app.structural.workspace_index.dirty import get_dirty_queue
+    from app.structural.workspace_index.projection import (
+        IndexProjection,
+        get_projection_registry,
+    )
+    from app.structural.workspace_index.types import IndexMeta, IndexStatus
+    from app.structural.workspace_index.watch import light_scan_after_command
+
+    wid = uuid4()
+    owner = "o"
+    indexed = tmp_path / "a.py"
+    indexed.write_text("def a():\n    return 1\n", encoding="utf-8")
+    entry = parse_file_entry(
+        indexed, work_root=tmp_path, generation=1, max_file_bytes=1_000_000
+    )
+    assert entry is not None
+    for name in ("b.py", "c.py", "d.py"):
+        (tmp_path / name).write_text(f"def {name[0]}():\n    pass\n", encoding="utf-8")
+
+    meta = IndexMeta(
+        work_id=wid,
+        owner_user_id=owner,
+        status=IndexStatus.STALE,
+        files_total=4,
+        files_done=1,
+        ephemeral=True,
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([entry], meta=meta)
+    get_projection_registry().put(proj)
+    get_dirty_queue()._by_work.pop(wid, None)
+
+    monkeypatch.setattr(
+        "app.structural.workspace_index.watch.get_ast_index_service",
+        lambda: type("S", (), {"enabled_for_work": lambda self, **k: True})(),
+    )
+    out = await light_scan_after_command(
+        work_id=wid,
+        owner_user_id=owner,
+        work_root=tmp_path,
+        budget_ms=5_000.0,
+    )
+    pending = get_dirty_queue().pending_counts(wid)
+    assert pending["upsert"] == 0
+    assert out["dirty"] == 0
+    get_dirty_queue()._by_work.pop(wid, None)
+    get_projection_registry().drop(wid)
+
+
+@pytest.mark.asyncio
 async def test_light_scan_gc_drops_missing_when_walk_pending(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -955,3 +1009,33 @@ async def test_status_exposes_catchup_progress_after_gc(
     assert out_ready["catchup_remaining"] == 0
     get_projection_registry().drop(wid)
     get_ast_index_service().clear_ephemeral(wid)
+
+
+@pytest.mark.asyncio
+async def test_file_heartbeat_thread_stays_fresh_when_loop_blocked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compose healthcheck must survive event-loop stalls during cold_start/snapshot."""
+    import time
+
+    from app.structural.workspace_index import worker as worker_mod
+
+    hb = tmp_path / "ast_indexer_heartbeat"
+    monkeypatch.setattr(worker_mod, "_HEARTBEAT", hb)
+    monkeypatch.setenv("AST_INDEXER_HEARTBEAT_SECONDS", "0.05")
+    worker_mod._STOP.clear()
+    worker_mod._STOP_THREAD.clear()
+
+    thread = worker_mod._start_file_heartbeat_thread()
+    try:
+        time.sleep(0.15)
+        assert hb.is_file()
+        # Event loop / main thread stalled (sleep releases GIL like blocking I/O).
+        time.sleep(0.3)
+        age = time.time() - float(hb.read_text())
+        assert age < 0.5
+    finally:
+        worker_mod._request_stop()
+        thread.join(timeout=2.0)
+        worker_mod._STOP.clear()
+        worker_mod._STOP_THREAD.clear()
