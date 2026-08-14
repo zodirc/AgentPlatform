@@ -49,6 +49,12 @@ class TurnState:
     # One re-read per path per Turn is allowed without tripping read_after_complete.
     evicted_paths: set[str] = field(default_factory=set)
     evicted_reread_used: set[str] = field(default_factory=set)
+    # Wave 4 W9: verify receipt trackers (tool facts only; survive checkpoint).
+    verify_pending: bool = False
+    verify_receipt_sent: bool = False
+    code_edits_since_verify: int = 0
+    related_tests_union: list[dict[str, str]] = field(default_factory=list)
+    last_repro_command: str = ""
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

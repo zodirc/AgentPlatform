@@ -125,6 +125,61 @@ def test_edit_file_tool_completed_allows_related_tests_count() -> None:
     )
 
 
+def test_edit_file_tool_completed_allows_related_tests_commands() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_2b2",
+            "tool_name": "edit_file",
+            "status": "ok",
+            "summary": "Edited mod.py; related_tests: 1 path(s)",
+            "path": "mod.py",
+            "applies": True,
+            "related_tests_count": 1,
+            "related_tests_commands": [
+                "python -m pytest tests/test_mod.py -x -q",
+            ],
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
+def test_run_tests_tool_completed_allows_test_summary() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_ts",
+            "tool_name": "run_tests",
+            "status": "ok",
+            "summary": "Tests: pytest -q",
+            "command": "pytest -q",
+            "has_test_summary": True,
+            "test_summary": {
+                "passed": 2,
+                "failed": 1,
+                "errors": 0,
+                "first_failure_count": 1,
+                "provider": "pytest",
+            },
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
+def test_verify_receipt_tool_completed_allows_flag() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "verify_receipt-3",
+            "tool_name": "verify_receipt",
+            "status": "ok",
+            "summary": "verify_receipt injected (once)",
+            "verify_receipt": True,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_read_file_tool_completed_allows_outline_count() -> None:
     validate_event_payload(
         "tool.completed",

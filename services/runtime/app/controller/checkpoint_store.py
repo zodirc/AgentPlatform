@@ -37,6 +37,11 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         # C1: survive approve/deny checkpoint resume.
         "evicted_paths": sorted(state.evicted_paths),
         "evicted_reread_used": sorted(state.evicted_reread_used),
+        "verify_pending": bool(state.verify_pending),
+        "verify_receipt_sent": bool(state.verify_receipt_sent),
+        "code_edits_since_verify": int(state.code_edits_since_verify or 0),
+        "related_tests_union": list(state.related_tests_union or []),
+        "last_repro_command": str(state.last_repro_command or ""),
     }
 
 
@@ -76,7 +81,27 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         evicted_reread_used={
             str(p) for p in (data.get("evicted_reread_used") or []) if str(p).strip()
         },
+        verify_pending=bool(data.get("verify_pending", False)),
+        verify_receipt_sent=bool(data.get("verify_receipt_sent", False)),
+        code_edits_since_verify=int(data.get("code_edits_since_verify") or 0),
+        related_tests_union=_related_union(data.get("related_tests_union")),
+        last_repro_command=str(data.get("last_repro_command") or ""),
     )
+
+
+def _related_union(raw: object) -> list[dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    for item in raw:
+        if isinstance(item, dict):
+            path = str(item.get("path") or "").strip()
+            cmd = str(item.get("command") or "").strip()
+            if path:
+                out.append({"path": path, "command": cmd})
+        elif isinstance(item, str) and item.strip():
+            out.append({"path": item.strip(), "command": ""})
+    return out
 
 
 async def save_checkpoint(

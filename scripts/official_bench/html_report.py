@@ -70,6 +70,10 @@ _METRIC_ZH = {
     "tests_before_submit_rate": "交卷前测过率",
     "read_outline_coverage": "截断读大纲覆盖",
     "edit_related_tests_coverage": "相关测试附带覆盖",
+    "test_summary_attach_rate": "测试摘要附带率",
+    "related_tests_adoption_rate": "相关测试采纳率",
+    "verify_receipt_rate": "Verify 回执触发率",
+    "verify_receipt_then_test_rate": "回执后跑测率",
 }
 
 _SUITE_ZH = {

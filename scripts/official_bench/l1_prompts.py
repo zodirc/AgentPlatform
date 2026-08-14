@@ -58,7 +58,7 @@ def coding_prompt(inst: dict[str, Any], *, has_repo: bool) -> str:
             "grep only for exact error strings; bare symbols are redirected to Locate.\n"
             "4) edit_file minimal complete spans; read impact.references and checks "
             "(syntax + new_issues). On span miss use candidates/lines — do not resend blindly.\n"
-            "5) Fix checks.new_issues; prefer related_tests paths from the edit result; "
+            "5) Fix checks.new_issues; prefer related_tests[].command from the edit result; "
             "read_lints on touched paths if needed; re-run the same Reproduce command.\n"
             "6) Before stop: nonempty git diff you can describe; no unfinished failed "
             "edit; repro re-run done (or explained). Platform scores git diff; "

@@ -1,9 +1,9 @@
 # 方案：Coding 结构智能（LSP / AST）
 
-> **状态**：Wave 1–3（Locate / Impact / `edit_file.checks` / span 候选 / D1 证据 / W7 outline / W8 related_tests / D2 即时符号）**已落地** · 正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3 · 本文保留协议、日记与收尾项  
+> **状态**：Wave 1–3（Locate / Impact / `edit_file.checks` / span 候选 / D1 证据 / W7 outline / W8 related_tests / D2 即时符号）**已落地** · Wave 4（W9 终局回执 / W10 `test_summary` / W11 命令化 related_tests）**代码已落地** · n5 冒烟已入档 §6.7.11（效果不定论） · 正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3 · 本文保留协议、日记与收尾项  
 > **范围**：`agent` 写入链的 **LSP 结构揉合** + SWE/Ops 评测协议  
 > **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（A6 旁路 indexer **已接线**；D2 即时回落已落地；双轨 n5 数字待复跑）  
-> **最新 n5 harness**：`b3357dd6` · **resolve 3/5**（§6.7.9）；对照 `d459ca51` resolve 0/5（§6.7.8）· Wave 3 **已落地** §7.7  
+> **最新 n5 harness**：`5a4e9ba9`（§6.7.11）· **resolve 3/5**（与 `66077649` / `b3357dd6` 同分同题）· Wave 4 **代码已落地** §7.8 · n5 冒烟**已入档、不作效果结论** · n25/lite-50 仍待条件  
 > **非范围**：writing/intel RAG 主链；不以资料检索充当 Agent Locate  
 > **相关现状**：`read_lints`=LSP∪CLI · Locate=`search_codebase`/裸符号 `grep`→definition · Impact=`edit_file.impact` · Verify=`edit_file.checks`  
 
@@ -394,6 +394,8 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 | P10 | Ops 面板按工具名找不到 Locate | **文档澄清** | 事件名常为 `grep`；看 `definitions`/`redirected_from`；`process.jsonl` 无工具明细 |
 | P11 | 揉合后尚未用新契约复跑 n5 验收 | **已有第二跑** | `d459ca51`（§6.7.8，resolve 0/5）→ **`b3357dd6`（§6.7.9，resolve 3/5）**：交卷/impact/checks 仍满；官方通过跃迁；Locate fuse 仍弱。双轨 AST on/off 仍排后续 |
 | P12 | Verify 车道 adoption 同样趋零（两题 `read_lints`=1；纪律催用无效） | **方案已定** | 与 P7 同根：独立工具名不在控制环里。**W1：`checks`（写前语法门 + 写后增量诊断）焊进 `edit_file` 成功契约**（§7.3），排 N1 |
+| P13 | Verify **执行**缺结构化闭环：§6.7.10 `tests_before_submit=0.2`；§6.7.11 指纹升至 1.0 但 `test_summary` 附带仍 0 | **方案已定 · 冒烟未关** | W9 回执 3/5 触发且触发后都跑测；W10 未接到事件（pytest 多经 `tail` / 沙箱无摘要行）。**不定论**。排 N8–N9 观测补齐 |
+| P14 | n5 三跑同分同题（3/5），**测量已饱和**，测不出后续改动的正负效果 | **方案已定** | n5 降级为冒烟档；**n25+harness 立锚 + lite-50 双轨定论**（§7.8.4），排 N10 |
 
 #### 6.0.6 合宪边界（流程里故意不做的）
 
@@ -737,6 +739,7 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 | `resolve_rate` | **0.600** | **0.600** | 官方通过仍 3/5；**未抬分** |
 | 通过题 | 12907 / 14995 / 6938 | **同三题** | 未过仍是 14182 / 14365 |
 | `locate_fuse_ok_rate` | 0.273（n=11） | **0.429**（n=7） | Locate 略好；`no_ws_symbol` 10→**3** |
+| `n_locate_fuse_definition_null` | 1 | **4** | **失败主桶迁移**：候选供给已至（D2 生效），卡在 LSP definition 确认为空 → 姊妹文追查 |
 | `n_grep_locate_incomplete` | 8 | **4** | 词面 incomplete 减半 |
 | `edit_impact` / `checks` | 1.0 / 1.0 | **1.0 / 1.0** | 揉合满 |
 | `edit_related_tests_coverage` | — | **0.455** | W8 有附带；未覆盖全部 edit |
@@ -760,7 +763,49 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 1. **Wave 3 未抬 resolve**：同题同 3/5；结构供给（fuse / outline / related_tests）有改善，但官方 fail-to-pass 未动。  
 2. **D1 纠正 H1 预判**：14365 / 14182 的 `file_hit=true` → 短板主要是 **H2 逻辑/验证**，不是「连文件都改错」。§6.7.9 对 14365「偏 H1」仅作过程画像，**本跑以 D1 为准改判**。  
 3. **验证仍薄**：`tests_before_submit=0.2`、`repro_rerun=0`；W8 related_tests 覆盖约半，模型多半未据此跑测。  
-4. **下一刀**：加深 Verify（交卷前测 / related_tests 采用），勿再把 n5 同分误读成回归；锚点仍须 n25+harness。
+4. **下一刀**：加深 Verify（交卷前测 / related_tests 采用），勿再把 n5 同分误读成回归；锚点仍须 n25+harness。方案已成文：**§7.8 Wave 4**。
+
+### 6.7.11 Wave 4 后 n5 冒烟（`5a4e9ba9` · 2026-08-14）
+
+- **Ops 父**：`05bb784b-b86c-4768-b011-3ea527090a49` · model=`deepseek-v4-flash` · tier=n5 · harness=on · 墙钟 1h28m（infer ~69m · harness ~19m · `parallel=2`）  
+- **Child**：L1 agent-path `5a4e9ba9-c3d2-4df6-bf0c-39e87d891826`；harness evaluate `3b5d555d-410f-4efd-a78e-7269be578c96`（`agentplatform-20260814082644`）  
+- **记法**：**冒烟档**；与 §6.7.10 对照过程指标，**不以 resolve 定 Wave 4 效果**。
+
+**套件指标（对照 §6.7.10 `66077649`）**
+
+| 指标 | `66077649` | **本跑** | 读法 |
+|------|------------|----------|------|
+| `patch_rate` / apply | 1.0 / 5/5 | **1.0 / 5/5** | 交卷链仍满 |
+| `resolve_rate` | **0.600** | **0.600** | 官方仍 3/5；**未抬分** |
+| 通过题 | 12907 / 14995 / 6938 | **同三题** | 未过仍是 14182 / 14365 |
+| `file_hit_rate`（D1） | 1.000 | **1.000** | 未过两题也命中 gold 文件 |
+| `tests_before_submit_rate`（D1） | 0.200 | **1.000** | 5/5 有 testish 命令；**不是** `test_summary` |
+| `repro_rerun_rate`（D1） | 0.000 | **0.200** | 仅 14995 |
+| `verify_receipt_rate` | — | **0.600**（3/5） | 缺 14182（infra 死）与 6938 |
+| `verify_receipt_then_test_rate` | — | **1.000** | 有回执的 3 题后面都跑了测 |
+| `related_tests_adoption_rate` | — | **0.500** | 4 题有 related_tests，2 题采纳 |
+| **`test_summary_attach_rate`** | — | **0 / 55** | W10 **未接到** `tool.completed` |
+| `locate_fuse_ok_rate` | 0.429（n=7） | **0.167**（n=18） | 调用变多、incomplete 15；LSP failed/timeout=0 |
+| `edit_ok_n` | 11 | **22** | 14995 单题 13 次 edit |
+| `n_read_truncated` | 21 | **50** | 读得更碎 |
+
+**逐题（官方 resolve + D1 + Wave 4）**
+
+| instance | session | turn | 官方 | 终态 | tests_before_submit | verify_receipt | 备注 |
+|----------|---------|------|------|------|---------------------|----------------|------|
+| `astropy__astropy-12907` | `c1e94349-…` | `abbd113e-…` | **通过** | completed | yes | yes | 49 步 |
+| `astropy__astropy-14995` | `19eb659e-…` | `5589f066-…` | **通过** | completed | yes | yes | 135 步；唯一 `repro_rerun` |
+| `astropy__astropy-6938` | `fd2d1bb6-…` | `9313216f-…` | **通过** | completed | yes | no | 59 步；`run_tests` 缺文件 |
+| `astropy__astropy-14365` | `10dfc614-…` | `5a7b6725-…` | 未过 | completed | yes | yes | 128 步；locate 5/5 incomplete；自加测试接口可疑 |
+| `astropy__astropy-14182` | `fe68ba79-…` | `7daf3cc0-…` | 未过 | **failed** | yes | no | step 77 **PG COMMIT TimeoutError**；L1 仍收了 `rst.py` git_diff |
+
+**读法（钉死）**
+
+1. **Wave 4 未抬 resolve，也不据此判无效**：n5 一题 = 20pp，三跑同分同题只确认交卷/harness 仍稳。  
+2. **14182 本趟记 infra / `no_verify`**，勿与「改完仍没过」混桶。上一趟 `66077649` 完整 completed 也未过，说明即便不死，现有 patch 也过不了 F2P。  
+3. **`tests_before_submit=1.0` 是指纹启发式**；W10 设计目标（结构化失败给回执用）这次没有发生——模型大量 `pytest … \| tail`，两次 `run_tests` 分别是 `exit 1` 无摘要 / `No such file or directory`。  
+4. thinking 已旁路到 sidecar（111MB / 无 `turn.thinking.delta`），但 **`turn.token` 仍密**（单 turn 2k–3.6k 条），并行时仍能把长 turn 打死。  
+5. **下一刀不在再刷 n5 看 resolve**：token 落库、W10 附带（管道/stdout）、效果测量上 n25 / lite-50。
 
 ---
 
@@ -773,7 +818,8 @@ Cursor 式「按 Work 冷启动 + 增量符号表 + GUI 进度 + DB 缓存」**�
 | **Wave 1** | 结构基建 + **Locate/Impact 揉合** | **已落地**（行为契约 §7.1） |
 | **Wave 2** | Verify（`edit_file.checks`）· span 候选回显 · Reproduce/交卷自检（prompt）· pager 纪律 | **主项已落地**；pager 工具级硬重定向仍开放（§7.3 W2） |
 | **Wave 3** | **修复正确性主攻**：证据归档 D1 · AST 符号供给 D2 · `read_file` 截断折叠 W7 · `edit_file.related_tests` W8 | **已落地**；**n5 复跑已入档 §6.7.10**（resolve 仍 0.6；D1 齐备）；lite-50 / 锚点 n25 仍待 |
-| Wave 3 外候选 | 按需 repo map · 写副作用结构操作（原阶段 D） | 后置（§7.4） |
+| **Wave 4** | **验证闭环焊接 + 测量升级**：W9 终局 Verify 回执 · W10 测试输出结构化 · W11 `related_tests` 命令化 · M n25 锚点 / lite-50 双轨 | **代码已落地**（§7.8）；**n5 冒烟已入档 §6.7.11**（resolve 仍 0.6；效果不定论）；n25/lite-50 仍待条件 |
+| Wave 外候选 | 按需 repo map · 写副作用结构操作（原阶段 D） | 后置（§7.4） |
 
 Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 `run_command` / `read_file` / `grep` / `edit_file` 四个高频动词**。Locate/Impact/Verify 与 span 恢复已焊进结果契约；Reproduce/交卷为 prompt 层。**不新增模型必须主动学会点的工具名**。正文摘要见 [工具与上下文](../core/tools-and-context.md) 图 3。
 
@@ -929,8 +975,11 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 | **N5** | D1 证据归档：`file_hit` / `repro_rerun` / `tests_before_submit`（§7.7.1） | 无（评测侧，零交互影响） | 报告含三指标；`b3357dd6` 两失败题回溯分类（H1/H2）入档 |
 | **N6** | D2 AST `no_ws_symbol` 修复 + 双轨 n5（姊妹文执行，§7.7.2） | N5 | fuse 失败主桶显著消减；AST on/off 过程对照入档 |
 | **N7** | W7 `read_file` 截断折叠 + W8 `related_tests`（§7.7.3–7.7.4） | N5 证据支持（`file_hit` 低→W7 优先；`tests_before_submit` 低→W8 优先） | 单测 + 探针 8–10 绿；前缀 hygiene 绿；n5 复跑对照入档 |
+| **N8** | W10 测试输出结构化 + W11 `related_tests` 命令化（§7.8.2–7.8.3；纯 handler） | 无 | `test_summary` 附带率入观测、解析误报为零；`related_tests` 附带率 ≥0.8；单测 |
+| **N9** | W9 终局 Verify 回执（§7.8.1） | N8（回执引用 `test_summary` / 命令化 `related_tests` 事实） | golden 两路径绿；否决 13 边界单测（单次 / 低步数不触发 / 不阻塞取消）；n5 冒烟 `tests_before_submit` 上升 |
+| **N10** | 测量升级：n25+harness 立锚 + lite-50 双轨（§7.8.4；落实并替代 N4/N6 的定论跑） | N8–N9 | n25 前后对照入档；lite-50 双轨差值 + 探针 8–14 齐备，按 §9.3 规则出结论 |
 
-排序依据：N0 是**测量前提**；W1/W3 直接治实测最大失血点（半截 diff、Verify 缺位），且实现面最小（改一个 handler + 文案）；W2 依赖复跑数据确认优先级，避免为已缓解的问题加复杂度。**N0–N2 已达成（§6.7.8–§6.7.9）**。Wave 3 追加 N5–N7，现行顺序 **N5 →（N6 ∥ N7）→ N3（条件触发）→ N4 定论**——证据先行，防对 n5 两个失败题过拟合（§7.7.0）。
+排序依据：N0 是**测量前提**；W1/W3 直接治实测最大失血点（半截 diff、Verify 缺位），且实现面最小（改一个 handler + 文案）；W2 依赖复跑数据确认优先级，避免为已缓解的问题加复杂度。**N0–N2 已达成（§6.7.8–§6.7.9）**。Wave 3 追加 N5–N7，**已全部落地并复跑入档（§6.7.10）**。Wave 4：**N8–N9 代码已落地**（单测绿）；**n5 冒烟已入档 §6.7.11**（`tests_before_submit` 指纹升、`test_summary` 附带仍 0；resolve 仍 3/5）；**N10 定论仍待条件**。现行顺序 **N8 → N9 →（n5 已冒烟）→ N10（条件允许时）→（N3 条件触发）**。
 
 ### 7.6 验收探针（Wave 1+2 合并清单，替代 §6.7.6 原三条）
 
@@ -944,7 +993,10 @@ Wave 2 的核心判断来自实测（§6.7.3）：**模型的控制环只经过 
 8. 每跑归档 `file_hit` / `repro_rerun` / `tests_before_submit`（N5 后；§7.7.1）。  
 9. `read_file` outline 附带率与工具 p95 时延对照；同一大文件重复 read 次数（N7 后）。  
 10. `related_tests` 附带率 / 命中率；「编辑后跑过相关测试」题占比（N7 后）。  
-11. `locate_fuse` 仅作 AST 供给回归信号，**不以单指标追高**（§7.7.0）。
+11. `locate_fuse` 仅作 AST 供给回归信号，**不以单指标追高**（§7.7.0）。  
+12. `test_summary` 附带率与解析误报计数（N8 后；误报零容忍）。  
+13. `related_tests` **采纳率**（模型执行所附命令的题占比）与命令化后附带率（N8 后）。  
+14. W9 回执：触发率 / 触发后实际跑测率 / 回执后新增步数分布 / 「说明无法跑」放行占比（N9 后）。
 
 ### 7.7 Wave 3：修复正确性主攻（`b3357dd6` 之后）
 
@@ -1021,6 +1073,107 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | 换模型 / 调采样参数追分 | 控制变量；模型变更走 §8.2 复现存档 + 重跑对照，不混入本波 |
 | W2 pager 提前 / 硬 Ban | 维持 N3 条件触发（复跑数据确认 P8 仍高才做） |
 | 自动执行 `related_tests` | 执行副作用越权；先给路径看采纳率，数据支持后另评 |
+
+### 7.8 Wave 4：验证闭环焊接 + 测量升级（`66077649` 之后 · 代码已落地 · n5 冒烟 §6.7.11）
+
+> 本波回答一个问题：**D1 已证明短板是 H2（文件改对、逻辑未过、验证没做）之后，怎样让「修完必验」真的发生？** 前三波确立的规律在本跑第三次重演：**prompt 纪律三次失效**（CQ1 `read_lints` 催用 → P12；W4 Reproduce → `repro_rerun=0`；W5 交卷自检 → `tests_before_submit=0.2`），**契约焊接三次全中**（Locate / Impact / checks 覆盖率均 100%）。Wave 4 把同一手法推进到最后一个没有焊的相位——Verify 的**执行**——并同步解决 n5 测不出差值的测量问题。约束不变：不加新工具名、不预注入、零模型调用、writing Profile 零感知；本波唯一触碰 handler 之外的机制（W9）单独做合宪论证并以否决 13 钉死边界。
+
+| 项 | 状态（2026-08-14） |
+|----|---------------------|
+| **W10** `test_summary` | **已落地**（模型侧 + bus 紧凑投影 + D1/探针可读） |
+| **W11** `related_tests` 命令化 | **已落地**（`{path, command}` + 索引 import 反查优先 / 文件扫回落） |
+| **W9** 终局 Verify 回执 | **已落地**（单次回执 + `tool.completed`/`verify_receipt` 事件供探针 14） |
+| **探针 12–14** | **已落地**（`test_summary_attach_rate` / `related_tests_adoption_rate` / `verify_receipt_*`） |
+| **M** n25 / lite-50 | **未跑**（本次条件用 n5 冒烟；定论仍认 N10） |
+| **n5 冒烟** | **已入档 §6.7.11**（`5a4e9ba9` · resolve 仍 3/5 · `test_summary` 附带 0；效果不据此定论） |
+
+#### 7.8.0 读数 → 主攻推导
+
+| `66077649` 事实（§6.7.10） | 推论 |
+|---------------------------|------|
+| resolve 3/5 与上跑同题同分；`file_hit=1.0`（未过两题也命中 gold 文件） | H1（改错位置）**被 D1 否决**；短板收敛为 **H2：改对文件、改错/改不全逻辑，且没有验证回路暴露它** |
+| `tests_before_submit=0.2`（仅 12907）· `repro_rerun=0.0` | W4/W5 prompt 纪律**第三次失效**（与 P7/P12 同根）：验证执行不在任何契约点上 |
+| 通过题中唯一交卷前跑测的恰是 12907 | n=5 不能作因果结论，但方向与外部共识一致（Anthropic / OpenHands 配方：复现→修→复跑是公开复盘中最稳定的 resolve 杠杆） |
+| `related_tests` 附带 0.455，但模型未据此跑测 | 供给已有、采纳为零——与 §6.7.3 的 adoption 教训**同构**：给路径不给闭环等于没给 |
+| 两跑 n5 同分同题（3/5；14182 / 14365） | **n5 已饱和**：分辨率 = 1 题 = 20pp，测不出任何 Wave 4 的正负效果；测量升级从「里程碑」升格为**并行主线** |
+| `locate_fuse` 失败主桶迁移：`no_ws_symbol` 10→3、`definition_null` 1→4 | D2 即时回落已消掉大半供给缺口；剩余是「有候选但 LSP definition 确认为空」——记回姊妹文追查，**不进本波主攻** |
+
+#### 7.8.1 W9 — 终局 Verify 回执：把「修完必验」焊进 Turn 终局（核心）
+
+**动机**：repro / tests 的执行动词（`run_tests` / `run_command`）模型会点，但**没有任何契约点强制它在改完之后回来点**。Locate/Impact/checks 能焊成功，是因为存在必经动词（grep / edit）；Verify **执行**的必经点只有一个——**Turn 终局**（模型自认为做完、停止调用工具的那一刻）。
+
+**成熟先例**：Claude Code **Stop hook**（终局钩子可回执一次让 agent 继续）；OpenHands `finish` 工具的完成前 checklist；SWE-agent `submit` 的显式收尾步。共同点：验证提醒发生在「agent 认为做完了」的边沿，而不是散落在过程 prompt 里等自觉。
+
+**契约**：
+
+- **触发条件（纯工具事实，零场景判断）**：模型产出无工具调用的终局回复，且本 Turn 有 ≥1 次代码 `edit_file` 成功，且**最后一次成功 edit 之后无任何测试类执行**（`run_tests`，或命中 pytest/unittest 模式的 `run_command`）。
+- **行为**：runtime 注入**一条**系统回执（行协议，内容全部来自已计算的工具事实，不经模型生成），while 循环续行：
+
+```text
+verify_receipt: 本 Turn 改动 <N> 个代码文件，最后一次编辑后未运行任何测试
+  related_tests: <本 Turn 各 edit_file.related_tests 并集，≤5 条，含可执行命令>
+  repro: <本 Turn 内最近一次失败的测试 / repro 命令，如有>
+  要求: 运行上述任一验证后再交卷；确实无法运行则说明原因后交卷
+```
+
+- **硬边界**：每 Turn **至多一次**（第二次终局回复无条件放行）；不阻塞 cancel / failed 终态；不改稳定前缀（回执以对话内消息注入，prompt cache 不失效）；步数预算照扣；剩余步数低于预留值 K（建议 10）时**不触发**，防挤占交卷。
+- **逃生门**：模型明确说明「无法运行测试 + 原因」即满足回执，**不做语义判断循环**——回执是提醒，不是判卷。
+
+**合宪讨论（不回避）**：W9 是本方案首个落在工具 handler 之外的机制，须对照否决 2 逐条过：① 无 `if scenario`——触发条件全部是工具事实（有代码 edit、无测试执行），writing Profile 无 `edit_file` 天然不触发；② 非固定 pipeline 节点——不在 assemble / 模型路径上加相位，只在终局边沿做一次有界回执，Turn 语义（终态、取消、审批、无 ResumeTurn）全部不变；③ 零模型调用、零预注入（R2 / 否决 8 不触碰）；④ 回执内容 = `related_tests` 并集 + 已发生的 repro 命令，均为既有契约字段，无新信息面。同时新增**否决 13**把边界钉死（§10.2），防止未来演化成多次打回或「测试绿才许交卷」的强制 pipeline。
+
+**验收**：`tests_before_submit_rate`（基线 0.2）与 `repro_rerun_rate`（基线 0.0）显著上升；回执触发率 / 触发后实际跑测率 / 回执后新增步数分布入观测；golden 两条路径：改码未验 → 回执 → 跑测 → 交卷；改码未验 → 回执 → 说明无法跑 → 放行。
+
+#### 7.8.2 W10 — 测试输出结构化回灌（焊进执行动词）
+
+**动机**：即便模型跑了测试，pytest 长输出经 4k 截断后失败要点可能被截走；「跑了但没读懂」与「没跑」对 resolve 是同一结果。SWE-agent ACI 消融：紧凑观察是单项收益最大的接口改动之一（§7.2 已引）。
+
+**契约**：`run_tests` 与命中测试模式的 `run_command` 结果附 `test_summary{passed, failed, errors, first_failures[]}`——从 stdout 解析 pytest / unittest 概要行与前 K 个失败测试的「名称 + 断言/异常单行」（行协议 §9.4）；解析失败或格式不确定 → **省略字段，原输出照旧**，不猜。W9 回执与 D1 指标（`tests_before_submit` / `repro_rerun`）改读该结构化事实，不再靠字符串启发式。
+
+**验收**：`test_summary` 附带率；「跑测后下一步动作是否针对 first_failure」抽样入档；解析误报（把通过判失败）为零容忍观测项。
+
+#### 7.8.3 W11 — `related_tests` 从路径升级为命令（治采纳率）
+
+**动机**：附带率 0.455 且采纳为零。只给路径要求模型自己拼命令，多一步就多一分流失；且反查通道目前仅命名约定 + 词面，覆盖不足。
+
+**契约**：① `related_tests[]` 每条附可直接执行的命令行（如 `python -m pytest <path> -x -q`），模型可原样复制进 `run_command`；② 反查通道升级为**工作区 AST 索引 import 反查**（D2 已建成的符号表现成可用），提升覆盖与准确；③ W9 回执引用同一并集，两处一份数据。上限 ≤5 / 存在性检查 / 只给不执行等既有边界（§7.7.4）不变。
+
+**验收**：附带率 0.455 → ≥0.8；`related_tests` 采纳率（模型执行了所附命令的题占比）从 0 转正。
+
+#### 7.8.4 M — 测量升级：n5 退役为冒烟，n25+harness 立锚，lite-50 双轨定论
+
+**动机**：两跑 n5 同分同题——n5 只剩探针回归与交卷链健康检查的价值，**测不出任何 Wave 4 行为项的效果方向**。继续以 n5 论效果 = 对 2 题过拟合（§7.7.0 已预警）。
+
+**契约**：
+
+- n5 保留为**冒烟档**（探针 1–14 回归 + 交卷链健康），不再作为效果结论依据；
+- **n25+harness 为新锚点档**（SCORECARD 升锚口径已有）：Wave 4 任一行为项落地后先跑 n25 前后对照入档；
+- **lite-50 双轨为定论口径**（§8.2 全部条款）：`structural on/off` 与 AST `workspace_index on/off`（姊妹文 §7.3）复用同批跑次；决策规则沿用 §9.3 写死条款，不另造；
+- D1 三指标 + 探针 12–14 在 n25 / lite-50 全程归档；H2 假设在更大样本上复核——`file_hit` 若在 n25 掉下来，H1（定位/阅读供给）重新入场，W7/D2 线加码。
+
+**出口**：n25 对照（Wave 4 前 vs 后）入档；lite-50 双轨差值 + 过程指标齐备，按 §9.3 规则出「保留 / 收缩 / 扩展」结论。
+
+#### 7.8.5 本波仍不做
+
+| 候选 | 原因 |
+|------|------|
+| 自动执行 `related_tests` / 回执内替模型跑测 | 执行副作用越权（§7.7.5 原判不变）；W9 只回执事实，执行权在模型 + 现有审批/沙箱 |
+| 回执循环（多次打回直到测试绿） | 变相把 `run_tests` 做成交卷前置强制 pipeline（否决 9 精神 + 新否决 13）；一次回执是提醒，多次是绑架，且有死循环风险 |
+| LLM 生成 repro 测试注入 | 属模型行为面且有引入错误断言的风险；先把「跑已有测试」的闭环焊上，数据说话后另评 |
+| best-of-n / 换模型 / 调采样 | 维持 §7.7.5 原判（控制变量） |
+| W2 pager 提前 | 维持 N3 条件触发 |
+
+#### 7.8.6 本波自评：这真的能更好吗？（原则 5）
+
+**能改善的机制链（证据完整）**：D1 把短板钉在 H2，且 n5 中唯一交卷前跑测的题恰好通过（§7.8.0）；官方判分 = FAIL_TO_PASS + PASS_TO_PASS，交卷前跑仓库测试能暴露「改坏回归」与部分「改不全」；三波历史一致证明**焊接有效、催用无效**，W9 正是把已验证三次的手法用到最后一个未焊相位；外部成熟系统（Claude Code / OpenHands / SWE-agent）在同一位置放同一机制并有公开收益。W10/W11 是纯 handler 改动，风险面与 W1/W7/W8 同级。
+
+**诚实的上限与风险**：
+
+1. **n5 上可能看不见**：分辨率 20pp/题，即便 W9 完全生效，n5 仍可能是 3/5——因此测量升级（§7.8.4）与行为项**同波并行**，效果结论只认 n25 / lite-50，不接受用 n5 同分宣布失败，也不接受用手感宣布成功。
+2. **W9 不能让模型「想出正确逻辑」**：它只保证错误被本地测试暴露的机会存在。若 14182 类失败连仓库现有测试也测不出（官方 F2P 测试常是修复后新增的），W9 无法直接翻案——预期收益主要来自「改坏没发现」「改不全没发现」两个子类，量级须实测。
+3. **首次触碰终局边沿**：虽经合宪论证 + 否决 13 钉边界，实现与回归成本高于纯 handler 改动；golden 必须覆盖回执两条路径（跑测 / 说明后放行），并单测「每 Turn 至多一次」「低步数不触发」「不阻塞取消」。
+4. **步数与墙钟代价**：回执后跑测增加步数与 Turn 时长（评测 30min 墙钟内）；回执后新增步数分布入观测，若挤占交卷则上调预留 K 或收紧触发。
+
+**结论**：在当前证据下，这是期望值最高的一刀——直接打 D1 实测出的唯一缺口、复用三次验证过的焊接手法、有成熟产品先例、且不动交互速率与前缀。但**它是否真的更好，只能由 n25 / lite-50 的对照数字回答**——这正是把测量升级并列为本波主线而非附属的原因。
 
 ---
 
@@ -1121,6 +1274,7 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | 基准 runner / 测试 | swebench 双轨脚手架 · structural 单元 · writing 不回归 |
 | **Wave 2 触点** | **已落地**：`edit_file`（`checks` + span 候选）· `system.md` / L1 prompt（Reproduce · 交卷自检）。**仍开放**：`run_command` pager→`read_file` 工具级重定向（N3） |
 | **Wave 3 触点（§7.7 · 已落地）** | `read_file`（截断附 `outline[]`）· `edit_file`（`related_tests[]`）· `system.md` / L1（Verify 测试锚定）· official bench（D1 三指标）· `locate._instant_def_hits`（D2） |
+| **Wave 4 触点（§7.8 · 代码已落地）** | `run_tests` / `run_command`（`test_summary`，W10）· `edit_file.related_tests` 命令化 + AST-first import 反查（W11）· Turn 终局回执（`verify_receipt.py`，否决 13，W9）· settings `verify_receipt_reserve_steps` |
 
 ### 9.3 里程碑（M 序列状态归档；现行排期见 §7.5 N0–N4）
 
@@ -1171,6 +1325,10 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | **W2 pager 重定向误伤**复杂 shell | 只匹配无管道 / 多命令 / 写副作用的纯 pager 整条命令；不匹配则原样执行；误伤计数进观测 |
 | **W7 outline 膨胀 / 噪声** | 仅截断时附带；上限约 40 条 + 层级折叠；走行协议与统一 budget；非代码 / 解析失败省略字段 |
 | **W8 related_tests 误导**（列出无关测试） | 只给路径不执行；≤5 条 + 存在性检查；命中率进观测；空集省略字段，模型回退 repro / 全量 `run_tests` |
+| **W9 回执打扰 / 挤占步数** | 每 Turn 至多一次；剩余步数低于预留 K 不触发；「无法跑测 + 原因」即放行；回执后新增步数分布进观测（探针 14） |
+| **W9 演化成强制 pipeline** | 否决 13 钉死：单次、终局边沿、纯工具事实触发、不阻塞终态；多次打回 / 语义判卷 / 「测试绿才许交卷」一律否决 |
+| **W10 解析误报**（把通过判失败误导模型） | 只解析 pytest/unittest 已知概要格式；不确定 → 省略字段回退原输出；误报零容忍进观测（探针 12） |
+| **W11 命令化命令不可执行**（环境差异） | 命令模板固定且保守（`python -m pytest <path> -x -q`）；执行失败模型自然看到 stderr 并可改跑 `run_tests`；不做环境探测魔法 |
 
 ---
 
@@ -1202,6 +1360,7 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 10. 基准运行开外网（答案泄漏），或读 gold patch 做题级调优（§8.4）。
 11. **语法门无逃生门**：旧文件本身不可 parse 也硬拦编辑——门只许拦「由本次 edit 新引入」的语法错误（§7.3 W1）。
 12. **重定向越界**：`run_command` 重定向扩大到含管道 / 多命令 / 写副作用的命令，或以任何方式改变命令语义——只许重定向纯 pager 整条命令（§7.3 W2）。
+13. **Verify 回执越界**（§7.8.1）：每 Turn 超过一次、以语义判断打回、阻塞 cancel/failed 终态、把「测试绿」做成交卷前置条件、或按 scenario 条件触发——只许**单次 · 终局边沿 · 纯工具事实触发 · 事实性回执 + 逃生门**。
 
 ---
 
@@ -1250,6 +1409,8 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | 21 | Agent Turn 内新建代码文件 | 词面立即可见；LSP 下次 Locate 可读盘；RAG sync **不**因此触发；Agent AST（候选）异步脏更新 |
 | 22 | `read_file` 命中截断且为代码文件（W7 后） | 尾部附 `outline[]`（行协议，上限条数）；非代码 / 解析失败省略；未截断读取输出不变 |
 | 23 | 代码 `edit_file` 成功（W8 后） | 可附 `related_tests[]`（≤5 真实路径，不执行）；空集省略；Verify 优先复跑相关测试 |
+| 24 | 终局回复且存在「最后一次代码 edit 后无测试执行」（W9 后） | 注入一次 `verify_receipt`（related_tests 并集 + repro 命令 + 逃生门）；第二次终局无条件放行；剩余步数低于预留 K 不触发；cancel/failed 不受影响 |
+| 25 | `run_tests` / pytest 型 `run_command` 完成（W10 后） | 结果附 `test_summary`（概要 + 前 K 失败单行，行协议）；解析失败省略字段、原输出照旧 |
 
 ---
 
@@ -1282,9 +1443,10 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 - [x] **Locate/Impact 揉合**（§6.7）：裸符号 grep 重定向 + edit_file.impact。  
 - [x] **N0 官方 harness 可测**：`d459ca51` 首次真测 resolve **0/5**（§6.7.8）；`b3357dd6` 第二跑 resolve **3/5**（§6.7.9）；`patch_rate` 仅代理。  
 - [x] **Wave 2 主项（§7.3）**：W1 `checks` · W3 span 候选 · W4/W5 prompt。  
-- [x] **Wave 3 方案（§7.7）**：D1 证据归档 · D2 AST 即时符号回落 · W7 `read_file` 截断折叠 · W8 `edit_file.related_tests`；双轨 n5 / lite-50 数字待复跑。  
+- [x] **Wave 3 方案（§7.7）**：D1 证据归档 · D2 AST 即时符号回落 · W7 `read_file` 截断折叠 · W8 `edit_file.related_tests`；**n5 复跑已入档（§6.7.10，resolve 仍 3/5；D1 齐备）**。  
+- [x] **Wave 4 方案（§7.8）**：W9 终局 Verify 回执（单次 · 否决 13 边界）· W10 `test_summary` · W11 `related_tests` 命令化 — **代码已落地**；n5 冒烟已入档 §6.7.11（效果不定论）；测量升级（n25 立锚 / lite-50 双轨）仍待条件。  
 - [ ] **W2 pager 工具级重定向**（N3）：仅纯 pager 整条命令；先软重定向不硬 Ban。  
-- [ ] **SWE-bench Lite 双轨协议（§8）** 定论跑（含 AST on/off 若启用）。  
+- [ ] **SWE-bench Lite 双轨协议（§8）** 定论跑（含 AST on/off 若启用；随 N10 落实）。  
 - [ ] **R5**：每阶段至少 1 组 agent golden + 延迟对照 + writing 不回归。  
 
 ---
@@ -1311,3 +1473,7 @@ H1/H2 目前**不可区分**——这正是 D1 要补的测量。两失败题画
 | 2026-08-13 | **§6.7.9 完整 harness n5（`b3357dd6`）**：官方 `resolve_rate=3/5`（对照 §6.7.8 的 0/5）；patch/apply/impact/checks 仍满；locate_fuse≈0.27（主桶 no_ws_symbol）；P11→已有第二跑；§14 N0 勾选补第二跑 |
 | 2026-08-14 | **v4（Wave 3 方案，未实施）**：基于 `b3357dd6` 读数确立主攻 = **修复正确性**（交卷链/护栏满分退出主攻；失败全为 `patch_not_resolved`）；新增 §7.7（7.7.0 读数推导 · D1 证据归档 · D2 AST 供给认领 · W7 `read_file` 截断折叠 · W8 `related_tests` + Verify 测试锚定 · 本波仍不做清单）；§7.5 里程碑扩 N5–N7 并定顺序 N5→(N6∥N7)→N3→N4；§7.6 探针 8–11；§7.0 / §7.4 / §9.2 / §9.5 / §12（情况 22–23）/ §14 对齐 |
 | 2026-08-14 | **v4 代码落地**：D1（`file_hit`/`repro_rerun`/`tests_before_submit` + suite/HTML/Ops）· D2（`locate._instant_def_hits` 有界文件名即时 parse）· W7（`read_file` 截断附 `outline`）· W8（`edit_file.related_tests` + Verify prompt）· contracts/CSI 探针扩展 · 单测 |
+| 2026-08-14 | **v5（Wave 4 方案，未实施）**：基于 `66077649`（§6.7.10）读数——D1 否决 H1（`file_hit=1.0`）、验证执行缺位（`tests_before_submit=0.2` / `repro_rerun=0`，prompt 纪律第三次失效）、n5 两跑同分饱和——确立主攻 = **验证闭环焊接 + 测量升级**。新增 §7.8（W9 终局 Verify 回执含合宪论证与逃生门 · W10 测试输出结构化 · W11 `related_tests` 命令化 + AST import 反查 · §7.8.4 测量升级：n5 退役冒烟 / n25 立锚 / lite-50 双轨定论 · §7.8.6 自评）；§6.0.5 增 P13/P14；§6.7.10 补 `definition_null` 桶迁移（1→4，记回姊妹文）；§7.5 增 N8–N10；§7.6 探针 12–14；§9.2 / §9.5 / §10.2（否决 13）/ §12（情况 24–25）/ §14 对齐 |
+| 2026-08-14 | **v5 代码落地（N8–N9）**：W10 `structural/test_summary.py` + `run_tests`/`run_command` 附带 · W11 `related_tests`→`{path,command}` + tree-sitter import 反查 · W9 `engine/verify_receipt.py` + `AgentEngine` 终局单次回执（checkpoint 字段 / `verify_receipt_reserve_steps`）· 单测 `test_wave4_verify.py`；n5 冒烟由用户手跑，N10 定论仍待条件 |
+| 2026-08-14 | **v5 收尾开发**：bus 紧凑 `test_summary` / `related_tests_commands` / `verify_receipt` / `command` 入 `tool.completed` schema · D1 优先读结构化摘要 · 探针 12–14（附带率/采纳率/回执率）· AST 索引 `FileEntry.imports` + `lookup_importers` 优先反查 · schema 校验全绿 |
+| 2026-08-14 | **§6.7.11 Wave 4 后 n5 冒烟（`5a4e9ba9`）**：resolve 仍 **3/5** 同题（12907/14995/6938）；`tests_before_submit=1.0`（指纹）· `test_summary=0/55` · 回执 3/5 · 14182 `turn.failed` PG timeout。入档 SCORECARD.notes / RESULTS；**不作效果结论**；N10 仍待 n25/lite-50 |

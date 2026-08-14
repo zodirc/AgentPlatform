@@ -20,7 +20,12 @@ from app.engine.read_registry import (
     record_successful_read,
     user_facing_policy_summary,
 )
-from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message
+from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message, user_message
+from app.engine.verify_receipt import (
+    build_verify_receipt_text,
+    note_tool_result_for_verify,
+    should_inject_verify_receipt,
+)
 from app.model.gateway import ModelError, ModelGateway, ModelResponse, StreamActivity
 from app.observability.metrics import record_step_duration, record_tool_call, record_tool_misuse
 from app.settings import settings
@@ -92,11 +97,47 @@ def _compact_edit_file_event_meta(result: dict[str, Any]) -> dict[str, Any]:
     related = result.get("related_tests")
     if isinstance(related, list) and related:
         out["related_tests_count"] = len(related)
+        cmds: list[str] = []
+        for item in related[:5]:
+            if isinstance(item, dict):
+                cmd = str(item.get("command") or "").strip()
+                if cmd:
+                    cmds.append(cmd[:512])
+            elif isinstance(item, str) and item.strip():
+                # legacy path-only → synthesize conservative command
+                from app.structural.related_tests import pytest_command_for
+
+                cmds.append(pytest_command_for(item)[:512])
+        if cmds:
+            out["related_tests_commands"] = cmds
     elif result.get("related_tests_count") is not None:
         try:
             out["related_tests_count"] = int(result["related_tests_count"])
         except (TypeError, ValueError):
             pass
+    return out
+
+
+def _compact_test_summary_event_meta(result: dict[str, Any]) -> dict[str, Any]:
+    """Ops-facing Wave 4 W10 compact test_summary (no stdout dump)."""
+    summary = result.get("test_summary")
+    if not isinstance(summary, dict) or not summary:
+        return {}
+    out: dict[str, Any] = {"has_test_summary": True}
+    compact: dict[str, Any] = {}
+    for key in ("passed", "failed", "errors"):
+        if summary.get(key) is not None:
+            try:
+                compact[key] = int(summary[key])
+            except (TypeError, ValueError):
+                pass
+    failures = summary.get("first_failures")
+    if isinstance(failures, list):
+        compact["first_failure_count"] = len(failures)
+    if summary.get("provider"):
+        compact["provider"] = str(summary.get("provider"))[:32]
+    if compact:
+        out["test_summary"] = compact
     return out
 
 
@@ -647,6 +688,28 @@ class AgentEngine:
                 if response_text:
                     state.messages.append(assistant_text(response_text))
                     final_summary = response_text
+                # Wave 4 W9: one-shot verify receipt (veto 13 — single, final-edge, tool facts).
+                if should_inject_verify_receipt(
+                    state,
+                    reserve_steps=int(
+                        getattr(settings, "verify_receipt_reserve_steps", 10) or 10
+                    ),
+                ):
+                    receipt = build_verify_receipt_text(state)
+                    state.messages.append(user_message(receipt))
+                    state.verify_receipt_sent = True
+                    await self._write_event(
+                        event_type="tool.completed",
+                        payload=_tool_completed_base(
+                            tool_call_id=f"verify_receipt-{step_index}",
+                            tool_name="verify_receipt",
+                            status="ok",
+                            summary="verify_receipt injected (once)",
+                            verify_receipt=True,
+                        ),
+                        step_index=step_index,
+                    )
+                    continue
                 record_step_duration(
                     scenario_id=state.scenario_id,
                     duration_seconds=_step_elapsed(),
@@ -1151,6 +1214,13 @@ class AgentEngine:
             )
 
         self._ingest_evidence(tool_name, result)
+        if isinstance(result, dict):
+            note_tool_result_for_verify(
+                state,
+                tool_name=tool_name,
+                result=result,
+                arguments=arguments if isinstance(arguments, dict) else None,
+            )
         if settings.citation_verify_enabled:
             self._annotate_unverified_citations(tool_name, arguments, result)
 
@@ -1488,6 +1558,11 @@ class AgentEngine:
                 completed_payload.update(_compact_edit_file_event_meta(result))
         if tool_name in {"grep", "search_codebase"} and isinstance(result, dict):
             completed_payload.update(_compact_locate_event_meta(result))
+        if tool_name in {"run_tests", "run_command"} and isinstance(result, dict):
+            completed_payload.update(_compact_test_summary_event_meta(result))
+            cmd = str(result.get("command") or "").strip()
+            if cmd:
+                completed_payload["command"] = cmd[:1024]
         if tool_name == "export_document":
             issues_raw = result.get("delivery_issues") or []
             issues = [

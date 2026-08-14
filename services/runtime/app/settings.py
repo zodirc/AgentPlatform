@@ -222,6 +222,8 @@ class Settings(BaseSettings):
     structural_span_candidates: int = 5
     # Soft prewarm when an agent Work starts (does not block TTFB / R1).
     structural_prewarm: bool = True
+    # Wave 4 W9: omit verify_receipt when remaining steps < this reserve.
+    verify_receipt_reserve_steps: int = 10
     # Agent workspace AST index (docs/plan/agent-workspace-ast-index.md). Off-loop only.
     workspace_ast_enabled: bool = True
     # Ops/SWE temp works: default off (§7). Set true only for explicit dual-track experiments.
@@ -276,6 +278,13 @@ class Settings(BaseSettings):
     # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).
     runtime_max_inflight_turns: int = 16
     event_payload_validation: bool = True
+    # Ops eval: do not INSERT turn.thinking.delta (write amplification). Product
+    # Turns always persist. Set true to restore eval thinking in turn_events.
+    ops_eval_persist_thinking: bool = False
+    # When thinking is diverted, append JSONL under work_root/.agent/thinking/.
+    ops_eval_thinking_sidecar: bool = True
+    # Cheap DB liveness while thinking is off the event table (stall/lease).
+    ops_eval_thinking_heartbeat_seconds: float = 15.0
     # Review I2: coalesce stream delta events into one multi-row insert per
     # window. 0 disables batching (per-event writes, instant rollback knob).
     event_batch_window_seconds: float = 0.04

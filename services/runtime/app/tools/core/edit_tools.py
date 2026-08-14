@@ -504,7 +504,7 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
         path=path, pre=pre_checks, gate=gate, turn_id=turn_id
     )
 
-    related_tests: list[str] = []
+    related_tests: list[dict[str, str]] = []
     try:
         import asyncio
 
@@ -553,6 +553,7 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
 
 
 async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) -> dict[str, Any]:
+    from app.structural.test_summary import attach_test_summary_for_run_tests
     from app.tools.core.shell import run_argv_command
     from app.tools.core.test_command_gate import gate_run_tests_command
 
@@ -571,13 +572,14 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
 
     assert gated.argv is not None
     if settings.run_command_mode == "simulate":
-        return {
+        out = {
             "command": command,
             "status": "passed",
             "stdout": "[simulated] 3 passed",
             "exit_code": 0,
             "summary": f"Simulated tests: {command}",
         }
+        return attach_test_summary_for_run_tests(out)
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
@@ -591,7 +593,7 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
     )
     exit_code = result.get("exit_code")
     passed = exit_code == 0 and result.get("status") == "executed"
-    return {
+    out = {
         "command": command,
         "status": "passed" if passed else result.get("status", "failed"),
         "stdout": result.get("stdout", ""),
@@ -600,3 +602,4 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
         "summary": result.get("summary", f"Tests: {command}"),
         "sandbox": result.get("sandbox"),
     }
+    return attach_test_summary_for_run_tests(out)

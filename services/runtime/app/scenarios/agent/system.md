@@ -72,7 +72,7 @@ Parallelize independent read-only tools in one step. Serialize only when a later
 
 ## Verify
 
-- After code edits: read **`impact.references`** and **`checks`** (syntax + incremental diagnostics on the edited file); when **`related_tests`** is present, run those paths first (via `run_tests` / minimal `run_command`), then **`read_lints`** on affected paths for broader coverage; fix **new** issues you introduced.
+- After code edits: read **`impact.references`** and **`checks`** (syntax + incremental diagnostics on the edited file); when **`related_tests`** is present, run the attached **`command`** (or path via `run_tests` / minimal `run_command`), then **`read_lints`** on affected paths for broader coverage; fix **new** issues you introduced.
 - Before claiming done: self-check nonempty diff / no unfinished failed edit / repro re-run. If the workspace has a test suite **or** the user asked to verify, run `run_tests` (or the project’s usual test command). Fix failures you caused.
 - Skip empty ritual: static single-file / no linter / no tests and user did not ask → deliver without forcing `run_tests` / shell checks — but still prefer reading **`checks`** / `read_lints` when you edited code and the tool is listed.
 

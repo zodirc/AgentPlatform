@@ -24,16 +24,18 @@ def _make_cancel_checker(turn_id: object):
 
 
 async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, Any]:
+    from app.structural.test_summary import attach_test_summary_for_run_command
     from app.tools.core.shell import run_shell_command
 
     if settings.run_command_mode == "simulate":
-        return {
+        out = {
             "status": "executed",
             "command": command,
             "stdout": f"[simulated] {command}",
             "exit_code": 0,
             "summary": f"Simulated: {command[:80]}",
         }
+        return attach_test_summary_for_run_command(out, command=command)
 
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
@@ -61,7 +63,7 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
                 result = {**result, "ast_scan": "scan_pending"}
     except Exception:
         pass
-    return result
+    return attach_test_summary_for_run_command(result, command=command)
 async def check_citation(citation_id: str, source_path: str, **_kwargs: Any) -> dict[str, Any]:
     target = _resolve_path(source_path)
     if not target.exists():

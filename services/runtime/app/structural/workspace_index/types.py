@@ -67,15 +67,23 @@ class FileEntry:
     size: int
     symbols: list[SymbolRec] = field(default_factory=list)
     generation: int = 0
+    # Import targets extracted at index time (Wave 4 W11 reverse lookup).
+    imports: list[str] = field(default_factory=list)
 
     def to_row(self) -> dict[str, Any]:
+        # Persist imports as kind=import rows inside symbols JSONB (no migration).
+        symbols_out = [s.to_json() for s in self.symbols]
+        for name in self.imports:
+            if not name:
+                continue
+            symbols_out.append({"n": str(name), "k": "import", "l": 1, "c": 1})
         return {
             "path": self.path,
             "lang": self.lang,
             "content_hash": self.content_hash,
             "mtime_ns": int(self.mtime_ns),
             "size": int(self.size),
-            "symbols": [s.to_json() for s in self.symbols],
+            "symbols": symbols_out,
             "generation": int(self.generation),
         }
 
@@ -86,9 +94,17 @@ class FileEntry:
             import json
 
             symbols_raw = json.loads(symbols_raw)
-        symbols = [
-            SymbolRec.from_json(s) for s in (symbols_raw or []) if isinstance(s, dict)
-        ]
+        symbols: list[SymbolRec] = []
+        imports: list[str] = []
+        for s in symbols_raw or []:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("k") or "") == "import":
+                name = str(s.get("n") or "").strip()
+                if name:
+                    imports.append(name)
+                continue
+            symbols.append(SymbolRec.from_json(s))
         get = row.__getitem__ if not isinstance(row, dict) else row.__getitem__
         return cls(
             path=str(get("path")),
@@ -98,6 +114,7 @@ class FileEntry:
             size=int(get("size")),
             symbols=symbols,
             generation=int(get("generation") or 0),
+            imports=imports,
         )
 
 

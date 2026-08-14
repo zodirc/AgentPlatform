@@ -38,7 +38,10 @@ def test_related_tests_naming_and_import(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     paths = related_tests_for_path("pkg/widget.py", workspace=tmp_path)
-    assert any(p.endswith("test_widget.py") for p in paths)
+    assert any(
+        (p["path"] if isinstance(p, dict) else p).endswith("test_widget.py") for p in paths
+    )
+    assert all(isinstance(p, dict) and "command" in p for p in paths)
 
 
 def test_instant_def_hits_by_filename(tmp_path: Path) -> None:

@@ -61,7 +61,9 @@ make official-bench-promote-run RUN_ID=<uuid>  # 按跑次升主栏（须 sample
 | context（史） | agent F1 / EM | **0.5393 / 0.2333** | `46df8722-f2c3-4cc6-8ad5-58efc21d974e` | 2026-08-06 · gte-large 同期 · scorer=v2 |
 | retrieval（史） | agent nDCG@10 | 0.4425 | `307ea1d0-6502-468b-85ea-c209f1377567` | 更旧 smoke；保留对照 |
 | context（史） | agent F1 / EM | 0.3677 / 0.2500 | `9998d9eb-9973-4938-bacf-3207aca4f781` | 旧 smoke（v1 口径附近）；保留对照 |
-| coding（烟） | resolve_rate | **0.600** | `b3357dd6-19d5-4669-ae06-ec3bc1a50d27` | 2026-08-13 · **n5 + harness** · 3/5 官方通过 · **非锚点档**（锚点须 n25/full300） |
+| coding（烟） | resolve_rate | **0.600** | `5a4e9ba9-c3d2-4df6-bf0c-39e87d891826` | 2026-08-14 · **n5 + harness** · Wave 4 后 · **3/5**（同未过 14182/14365；14182 `turn.failed` PG COMMIT timeout）· `file_hit=1.0` · `tests_before_submit=1.0`（指纹）· `test_summary=0/55` · Ops `05bb784b…` · **非锚点** |
+| coding（烟·史） | resolve_rate | **0.600** | `66077649-7e89-491c-9a9f-010c69aa18d5` | 2026-08-14 · n5 + harness · Wave 3 后 · 3/5 同题 · `tests_before_submit=0.2` · Ops `6fe50571…` |
+| coding（烟·史） | resolve_rate | **0.600** | `b3357dd6-19d5-4669-ae06-ec3bc1a50d27` | 2026-08-13 · n5 + harness · 3/5 · Wave 3 前对照（无完整 D1） |
 
 ## 复跑触发条件（锚点落章后）
 

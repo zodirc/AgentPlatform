@@ -11,10 +11,13 @@ from functools import partial
 from pathlib import Path
 from uuid import UUID
 
-from app.retrieval.chunking import language_for_code_path
 from app.settings import settings
 from app.structural.workspace_index.hashutil import hash_bytes
-from app.structural.workspace_index.ignore import dir_skipped, file_skipped
+from app.structural.workspace_index.ignore import (
+    code_file_indexable,
+    dir_skipped,
+    file_skipped,
+)
 from app.structural.workspace_index.parse import extract_definitions_for_path
 from app.structural.workspace_index.projection import IndexProjection, get_projection_registry
 from app.structural.workspace_index.store import AstIndexStore
@@ -106,9 +109,7 @@ def walk_work_files(
         dirnames[:] = [d for d in dirnames if not dir_skipped(d)]
         for name in filenames:
             path = Path(dirpath) / name
-            if file_skipped(path):
-                continue
-            if code_only and language_for_code_path(path) is None:
+            if file_skipped(path) or (code_only and not code_file_indexable(path)):
                 continue
             try:
                 st = path.stat()
@@ -138,6 +139,8 @@ def parse_file_entry(
             return None
         rel = rel.replace("\\", "/")
     except ValueError:
+        return None
+    if not code_file_indexable(abs_path):
         return None
     try:
         st = abs_path.stat()
@@ -179,6 +182,14 @@ def parse_file_entry(
             generation=generation,
         )
     lang, symbols = extract_definitions_for_path(abs_path, text)
+    imports: list[str] = []
+    if lang == "python" or str(abs_path).endswith(".py"):
+        try:
+            from app.structural.related_tests import _import_targets_from_text
+
+            imports = sorted(_import_targets_from_text(text))
+        except Exception:
+            imports = []
     return FileEntry(
         path=rel,
         lang=lang,
@@ -187,6 +198,7 @@ def parse_file_entry(
         size=size,
         symbols=list(symbols),
         generation=generation,
+        imports=imports,
     )
 
 

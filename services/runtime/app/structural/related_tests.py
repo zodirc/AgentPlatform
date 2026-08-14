@@ -1,6 +1,8 @@
-"""Suggest related test paths after a successful code edit (Wave 3 W8).
+"""Suggest related tests after a successful code edit (Wave 3 W8 + Wave 4 W11).
 
-Paths only — never executes tests. Empty list → omit field on edit_file result.
+Returns ``[{path, command}, …]`` — never executes. Empty list → omit field on
+edit_file result. Commands are conservative templates the model can copy into
+``run_command`` / ``run_tests``.
 
 Balance: useful hints on real repos (incl. nested ``tests/``) without unbounded
 whole-tree work. Callers should run this off the event loop (``to_thread``).
@@ -12,6 +14,7 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Any
 
 from app.structural.providers import language_for_path
 
@@ -38,6 +41,37 @@ _SKIP_DIR_NAMES = frozenset(
         ".eggs",
     }
 )
+
+_PYTEST_CMD_TMPL = "python -m pytest {path} -x -q"
+
+
+def pytest_command_for(path: str) -> str:
+    """Conservative, copy-pasteable pytest invocation for one test path."""
+    rel = path.replace("\\", "/").lstrip("./")
+    return _PYTEST_CMD_TMPL.format(path=rel)
+
+
+def _as_entries(paths: list[str]) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for p in paths:
+        rel = p.replace("\\", "/").lstrip("./")
+        if not rel:
+            continue
+        out.append({"path": rel, "command": pytest_command_for(rel)})
+    return out
+
+
+def related_test_paths(entries: list[Any]) -> list[str]:
+    """Normalize related_tests payload (str paths or {path,command}) → path list."""
+    out: list[str] = []
+    for item in entries or []:
+        if isinstance(item, str) and item.strip():
+            out.append(item.replace("\\", "/").lstrip("./"))
+        elif isinstance(item, dict):
+            p = item.get("path")
+            if isinstance(p, str) and p.strip():
+                out.append(p.replace("\\", "/").lstrip("./"))
+    return out
 
 
 def _module_stem(rel: str) -> str:
@@ -127,7 +161,6 @@ def _naming_convention_tests(workspace: Path, rel: str, *, limit: int) -> list[s
             return out
 
     # 2) Nested tests trees (astropy-style): recursive name match with time budget.
-    # Early-stop at ``limit`` — do not collect the whole tree then slice.
     top_tests = workspace / "tests"
     if top_tests.is_dir() and len(out) < limit:
         deadline = time.monotonic() + (_NAMING_RGLOB_BUDGET_MS / 1000.0)
@@ -160,6 +193,86 @@ def _iter_test_files_under(tests_root: Path, *, budget_files: int, deadline: flo
                 return
 
 
+def _import_targets_from_text(text: str) -> set[str]:
+    """AST (tree-sitter) import targets when available; regex fallback otherwise."""
+    targets = _import_targets_treesitter(text)
+    if targets is not None:
+        return targets
+    return _import_targets_regex(text)
+
+
+def _import_targets_treesitter(text: str) -> set[str] | None:
+    try:
+        from tree_sitter_language_pack import get_parser
+    except ImportError:
+        return None
+    try:
+        parser = get_parser("python")
+        raw = text.encode("utf-8")
+        tree = parser.parse(raw)
+    except Exception:
+        return None
+    root = tree.root_node
+    out: set[str] = set()
+
+    def _node_text(node) -> str:
+        return raw[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
+
+    def walk(node) -> None:
+        typ = node.type
+        if typ == "import_statement":
+            for child in node.children:
+                if child.type in {"dotted_name", "aliased_import"}:
+                    if child.type == "aliased_import":
+                        for c2 in child.children:
+                            if c2.type == "dotted_name":
+                                name = _node_text(c2).strip()
+                                if name:
+                                    out.add(name)
+                                    out.update(_prefix_forms(name))
+                                break
+                    else:
+                        name = _node_text(child).strip()
+                        if name:
+                            out.add(name)
+                            out.update(_prefix_forms(name))
+        elif typ == "import_from_statement":
+            module_name = None
+            for child in node.children:
+                if child.type == "dotted_name" and module_name is None:
+                    module_name = _node_text(child).strip()
+                    break
+            if module_name:
+                out.add(module_name)
+                out.update(_prefix_forms(module_name))
+        for child in node.children:
+            walk(child)
+
+    try:
+        walk(root)
+    except Exception:
+        return None
+    return out
+
+
+def _prefix_forms(dotted: str) -> set[str]:
+    parts = [p for p in dotted.split(".") if p]
+    return {".".join(parts[:i]) for i in range(1, len(parts) + 1)}
+
+
+def _import_targets_regex(text: str) -> set[str]:
+    out: set[str] = set()
+    for m in re.finditer(
+        r"(?m)^\s*(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))",
+        text,
+    ):
+        name = (m.group(1) or m.group(2) or "").strip()
+        if name:
+            out.add(name)
+            out.update(_prefix_forms(name))
+    return out
+
+
 def _import_reverse_tests(
     workspace: Path,
     rel: str,
@@ -168,15 +281,81 @@ def _import_reverse_tests(
     budget_files: int = _IMPORT_BUDGET_FILES,
     budget_ms: float = _IMPORT_BUDGET_MS,
 ) -> list[str]:
-    """Lexical scan under ``tests/`` for imports of the edited module."""
-    forms = _module_import_forms(rel)
+    """Prefer workspace AST index import reverse; fall back to file scan."""
+    forms = set(_module_import_forms(rel))
+    if not forms:
+        return []
+    indexed = _import_reverse_from_index(forms, limit=limit)
+    if indexed:
+        # Keep only paths that still exist under workspace.
+        out: list[str] = []
+        seen: set[str] = set()
+        rel_norm = rel.replace("\\", "/")
+        for p in indexed:
+            path = workspace / p
+            if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
+                break
+        if out:
+            return out
+    return _import_reverse_scan(
+        workspace,
+        rel,
+        forms=forms,
+        limit=limit,
+        budget_files=budget_files,
+        budget_ms=budget_ms,
+    )
+
+
+def _import_reverse_from_index(forms: set[str], *, limit: int) -> list[str]:
+    """Memory projection lookup — zero when index cold/unavailable."""
+    try:
+        from app.structural.workspace_index.projection import get_projection_registry
+        from app.structural.workspace_index.types import IndexStatus
+        from app.tenant_context import current_owner_user_id, current_work_id
+    except Exception:
+        return []
+    work_id = current_work_id()
+    if work_id is None:
+        return []
+    try:
+        proj = get_projection_registry().get(work_id)
+    except Exception:
+        return []
+    if proj is None:
+        return []
+    status = getattr(getattr(proj, "meta", None), "status", None)
+    if status not in {IndexStatus.READY, IndexStatus.STALE, IndexStatus.BUILDING}:
+        return []
+    owner = current_owner_user_id()
+    try:
+        return list(
+            proj.lookup_importers(
+                forms,
+                limit=limit,
+                test_only=True,
+                owner_user_id=str(owner) if owner else None,
+            )
+        )
+    except Exception:
+        return []
+
+
+def _import_reverse_scan(
+    workspace: Path,
+    rel: str,
+    *,
+    forms: set[str],
+    limit: int,
+    budget_files: int = _IMPORT_BUDGET_FILES,
+    budget_ms: float = _IMPORT_BUDGET_MS,
+) -> list[str]:
+    """Scan under ``tests/`` for imports of the edited module (AST-first)."""
     if not forms:
         return []
     tests_root = workspace / "tests"
     if not tests_root.is_dir():
         return []
-    alts = "|".join(re.escape(f) for f in forms)
-    pattern = re.compile(rf"(?m)^\s*(?:from\s+({alts})\b|import\s+({alts})\b)")
     out: list[str] = []
     seen: set[str] = set()
     rel_norm = rel.replace("\\", "/")
@@ -188,7 +367,8 @@ def _import_reverse_tests(
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if not pattern.search(text):
+        targets = _import_targets_from_text(text)
+        if not (targets & forms):
             continue
         if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
             break
@@ -200,8 +380,8 @@ def related_tests_for_path(
     *,
     workspace: Path | None = None,
     limit: int = _RELATED_MAX,
-) -> list[str]:
-    """Return ≤limit existing test paths related to ``path``; never executes."""
+) -> list[dict[str, str]]:
+    """Return ≤limit ``{path, command}`` entries; never executes."""
     if language_for_path(path) is None:
         return []
     from app.tools.core.paths import _workspace_root
@@ -234,4 +414,4 @@ def related_tests_for_path(
         merged.append(p)
         if len(merged) >= max_n:
             break
-    return merged
+    return _as_entries(merged)

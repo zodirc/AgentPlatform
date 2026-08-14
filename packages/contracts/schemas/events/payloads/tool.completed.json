@@ -207,6 +207,40 @@
       "minimum": 0,
       "description": "Wave 3 W8: number of related test paths attached to a successful code edit."
     },
+    "related_tests_commands": {
+      "type": "array",
+      "description": "Wave 4 W11: copy-pasteable pytest commands attached to edit (≤5); used for adoption probes.",
+      "maxItems": 5,
+      "items": {
+        "type": "string",
+        "maxLength": 512
+      }
+    },
+    "has_test_summary": {
+      "type": "boolean",
+      "description": "Wave 4 W10: whether a parseable test_summary was attached to run_tests / testish run_command."
+    },
+    "test_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Wave 4 W10: compact test report for Ops/CSI (not full stdout).",
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "first_failure_count": { "type": "integer", "minimum": 0 },
+        "provider": { "type": "string", "maxLength": 32 }
+      }
+    },
+    "verify_receipt": {
+      "type": "boolean",
+      "description": "Wave 4 W9: true when a one-shot verify_receipt was injected at Turn final edge."
+    },
+    "command": {
+      "type": "string",
+      "maxLength": 1024,
+      "description": "run_tests / run_command display command (Wave 4 adoption / D1 fingerprints)."
+    },
     "match_count": {
       "type": "integer",
       "minimum": 0,

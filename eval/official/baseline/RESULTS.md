@@ -87,8 +87,8 @@
 
 | 字段 | 值 |
 |------|----|
-| run_id | `66077649-7e89-491c-9a9f-010c69aa18d5` |
-| ops_run_id | `6fe50571-0b6c-4d75-8b4d-98e2fb49b2ed` |
+| run_id | `5a4e9ba9-c3d2-4df6-bf0c-39e87d891826` |
+| ops_run_id | `05bb784b-b86c-4768-b011-3ea527090a49` |
 | date | 2026-08-14 |
 | model | deepseek-v4-flash |
 | coding_tier | n5 |
@@ -101,33 +101,40 @@
 | resolve_rate | 0.6 |
 | n_resolved | 3 |
 | exit_code | 0 |
-| harness_run_id | agentplatform-20260814045027 |
-| harness_child | `defb80de-0fee-42d4-a918-173823e8da8d` |
-| locate_fuse_ok_rate | 0.42857142857142855 |
-| locate_fuse_n | 7 |
-| n_locate_fuse_no_ws_symbol | 3 |
-| n_locate_fuse_definition_null | 4 |
+| harness_run_id | agentplatform-20260814082644 |
+| harness_child | `3b5d555d-410f-4efd-a78e-7269be578c96` |
+| locate_fuse_ok_rate | 0.16666666666666666 |
+| locate_fuse_n | 18 |
+| n_locate_fuse_no_ws_symbol | 11 |
+| n_locate_fuse_definition_null | 6 |
 | n_locate_fuse_lsp_failed | 0 |
 | n_locate_fuse_lsp_timeout | 0 |
 | n_grep_locate_failed | 0 |
-| n_grep_locate_incomplete | 4 |
+| n_grep_locate_incomplete | 15 |
 | edit_impact_coverage | 1.0 |
 | edit_checks_coverage | 1.0 |
-| edit_related_tests_coverage | 0.45454545454545453 |
-| edit_ok_n | 11 |
+| edit_related_tests_coverage | 0.22727272727272727 |
+| edit_ok_n | 22 |
 | syntax_reject_count | 0 |
 | syntax_warning_passthrough_count | 0 |
-| span_fail_n | 0 |
+| span_fail_n | 1 |
 | bucket_share_no_patch | 0.0 |
 | bucket_share_patch_no_apply | 0.0 |
 | file_hit_rate | 1.0 |
 | file_hit_n | 5 |
-| repro_rerun_rate | 0.0 |
-| tests_before_submit_rate | 0.2 |
-| read_outline_coverage | 0.9523809523809523 |
-| n_read_truncated | 21 |
-| n_read_with_outline | 20 |
+| repro_rerun_rate | 0.2 |
+| tests_before_submit_rate | 1.0 |
+| read_outline_coverage | 0.94 |
+| n_read_truncated | 50 |
+| n_read_with_outline | 47 |
+| test_summary_attach_rate | 0.0 |
+| n_testish_tool | 55 |
+| n_test_summary | 0 |
+| related_tests_adoption_rate | 0.5 |
+| verify_receipt_rate | 0.6 |
+| verify_receipt_then_test_rate | 1.0 |
+| n_verify_receipt | 3 |
 | resolved_ids | astropy-12907, astropy-14995, astropy-6938 |
 | unresolved_ids | astropy-14182, astropy-14365 |
 
-> 对照上一烟 `b3357dd6`（2026-08-13）：resolve 同为 **0.6 / 同未过两题**；本跑为 **Wave 3 后首趟 D1 齐备** 烟（`file_hit=1.0` · outline≈0.95 · related_tests≈0.45）。详见 `docs/plan/coding-structural-intelligence.md` §6.7.10。
+> 对照上一烟 `66077649`（Wave 3 后）：resolve 同为 **0.6 / 同未过两题**。本跑为 **Wave 4 后首趟 n5 冒烟**（`tests_before_submit=1.0` 为 testish 指纹，`test_summary` 附带 0/55；14182 `turn.failed` PG timeout，勿与「改完仍没过」混桶）。**不作效果结论**。详见 `docs/plan/coding-structural-intelligence.md` §6.7.11。

@@ -850,9 +850,14 @@ def _is_testish_command(cmd: str) -> bool:
 
 
 def evidence_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """§7.7.1 D1 process evidence from tool.completed (post-hoc; no gold)."""
+    """§7.7.1 D1 process evidence from tool.completed (post-hoc; no gold).
+
+    Wave 4: prefer structured ``has_test_summary`` / ``test_summary`` when present;
+    still accept testish command fingerprints (compat with older runs).
+    """
     cmd_counts: dict[str, int] = {}
     tests_before_submit = False
+    n_test_summary = 0
     for ev in events:
         if str(ev.get("type") or "") != "tool.completed":
             continue
@@ -860,6 +865,13 @@ def evidence_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(payload, dict):
             continue
         tool = str(payload.get("tool_name") or "")
+        if tool == "verify_receipt":
+            continue
+        if payload.get("has_test_summary") or (
+            isinstance(payload.get("test_summary"), dict) and payload.get("test_summary")
+        ):
+            tests_before_submit = True
+            n_test_summary += 1
         if tool == "run_tests":
             tests_before_submit = True
             fp = _command_fingerprint(payload) or "run_tests"
@@ -878,6 +890,7 @@ def evidence_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "tests_before_submit": bool(tests_before_submit),
         "n_testish_commands": int(sum(cmd_counts.values())),
         "n_distinct_testish_commands": int(len(cmd_counts)),
+        "n_test_summary": int(n_test_summary),
     }
 
 
@@ -912,6 +925,15 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     n_pager_run_command = 0  # reserved N3
     n_read_truncated = 0
     n_read_with_outline = 0
+    # Wave 4 probes 12–14
+    n_testish_tool = 0
+    n_test_summary = 0
+    n_verify_receipt = 0
+    related_cmds: set[str] = set()
+    executed_test_fps: set[str] = set()
+    related_adopted = False
+    test_ran_after_receipt = False
+    saw_receipt = False
 
     for ev in events:
         if str(ev.get("type") or "") != "tool.completed":
@@ -966,6 +988,26 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
                     outline_n = 0
                 if outline_n > 0 or payload.get("outline"):
                     n_read_with_outline += 1
+            continue
+
+        if tool == "verify_receipt" or payload.get("verify_receipt") is True:
+            n_verify_receipt += 1
+            saw_receipt = True
+            continue
+
+        if tool in {"run_tests", "run_command"}:
+            fp = _command_fingerprint(payload)
+            is_testish = tool == "run_tests" or _is_testish_command(fp)
+            if is_testish:
+                n_testish_tool += 1
+                if fp:
+                    executed_test_fps.add(fp)
+                if saw_receipt:
+                    test_ran_after_receipt = True
+            if payload.get("has_test_summary") or (
+                isinstance(payload.get("test_summary"), dict) and payload.get("test_summary")
+            ):
+                n_test_summary += 1
             continue
 
         if tool != "edit_file":
@@ -1024,6 +1066,22 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             isinstance(payload.get("related_tests"), list) and payload.get("related_tests")
         ):
             n_edit_with_related_tests += 1
+        cmds = payload.get("related_tests_commands")
+        if isinstance(cmds, list):
+            for c in cmds:
+                if isinstance(c, str) and c.strip():
+                    related_cmds.add(" ".join(c.strip().split()))
+
+    # Adoption: any executed testish command matches an attached related_tests command
+    # (exact fingerprint or path substring overlap).
+    if related_cmds and executed_test_fps:
+        for rc in related_cmds:
+            for fp in executed_test_fps:
+                if fp == rc or rc in fp or fp in rc:
+                    related_adopted = True
+                    break
+            if related_adopted:
+                break
 
     evidence = evidence_from_events(events)
     return {
@@ -1051,6 +1109,12 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "n_pager_run_command": n_pager_run_command,
         "n_read_truncated": n_read_truncated,
         "n_read_with_outline": n_read_with_outline,
+        "n_testish_tool": n_testish_tool,
+        "n_test_summary": n_test_summary,
+        "n_verify_receipt": n_verify_receipt,
+        "related_tests_adopted": bool(related_adopted),
+        "verify_receipt_triggered": bool(n_verify_receipt > 0),
+        "verify_receipt_then_tested": bool(test_ran_after_receipt),
         "repro_rerun": bool(evidence.get("repro_rerun")),
         "tests_before_submit": bool(evidence.get("tests_before_submit")),
     }
@@ -1089,6 +1153,16 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
     repro_true = sum(1 for c in per_case if c.get("repro_rerun") is True)
     tests_true = sum(1 for c in per_case if c.get("tests_before_submit") is True)
     n_cases_scored = len(per_case)
+    testish = _sum("n_testish_tool")
+    test_summary = _sum("n_test_summary")
+    related_adopted_n = sum(1 for c in per_case if c.get("related_tests_adopted") is True)
+    cases_with_related = sum(
+        1 for c in per_case if int(c.get("n_edit_with_related_tests") or 0) > 0
+    )
+    receipt_n = sum(1 for c in per_case if c.get("verify_receipt_triggered") is True)
+    receipt_then_test_n = sum(
+        1 for c in per_case if c.get("verify_receipt_then_tested") is True
+    )
 
     return {
         "locate_fuse_ok_rate": _rate(grep_ok, grep_locate),
@@ -1120,6 +1194,16 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
         "read_outline_coverage": _rate(read_outline, read_trunc),
         "n_read_truncated": float(read_trunc),
         "n_read_with_outline": float(read_outline),
+        # §7.6 probes 12–14 (Wave 4)
+        "test_summary_attach_rate": _rate(test_summary, testish),
+        "n_testish_tool": float(testish),
+        "n_test_summary": float(test_summary),
+        "related_tests_adoption_rate": _rate(related_adopted_n, cases_with_related),
+        "verify_receipt_rate": (
+            _rate(receipt_n, n_cases_scored) if n_cases_scored else None
+        ),
+        "verify_receipt_then_test_rate": _rate(receipt_then_test_n, receipt_n),
+        "n_verify_receipt": float(_sum("n_verify_receipt")),
     }
 
 

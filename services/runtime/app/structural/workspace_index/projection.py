@@ -13,7 +13,12 @@ from app.structural.workspace_index.query import (
     collect_candidate_hits,
     normalize_symbol_query,
 )
-from app.structural.workspace_index.types import FileEntry, IndexMeta, SymbolHit
+from app.structural.workspace_index.types import (
+    FileEntry,
+    IndexMeta,
+    IndexStatus,
+    SymbolHit,
+)
 
 
 @dataclass
@@ -28,6 +33,8 @@ class IndexProjection:
     bytes_estimate: int = 0
     last_access_monotonic: float = field(default_factory=time.monotonic)
     _lock: threading.RLock = field(default_factory=threading.RLock)
+    # GUI catch-up high-water (not persisted). Remaining vs this drives the bar.
+    catchup_total: int = 0
 
     def touch(self) -> None:
         self.last_access_monotonic = time.monotonic()
@@ -49,6 +56,8 @@ class IndexProjection:
             self._postings = postings
             self.bytes_estimate = nbytes
             self.meta = meta
+            if meta.status == IndexStatus.READY:
+                self.catchup_total = 0
             self.touch()
 
     def upsert_file(self, entry: FileEntry, *, meta: IndexMeta | None = None) -> None:
@@ -108,6 +117,35 @@ class IndexProjection:
             self.touch()
             return self.files.get(path)
 
+    def lookup_importers(
+        self,
+        forms: set[str] | list[str],
+        *,
+        limit: int = 5,
+        test_only: bool = True,
+        owner_user_id: str | None = None,
+    ) -> list[str]:
+        """Return paths whose indexed imports intersect ``forms`` (Wave 4 W11)."""
+        wanted = {str(f).strip() for f in forms if str(f).strip()}
+        if not wanted:
+            return []
+        max_n = max(1, int(limit))
+        out: list[str] = []
+        with self._lock:
+            self.touch()
+            if owner_user_id is not None and owner_user_id != self.owner_user_id:
+                return []
+            for path, entry in self.files.items():
+                if test_only and not _is_test_path(path):
+                    continue
+                imports = set(entry.imports or [])
+                if not (imports & wanted):
+                    continue
+                out.append(path)
+                if len(out) >= max_n:
+                    break
+        return out
+
     def status_dict(self) -> dict:
         with self._lock:
             self.touch()
@@ -128,6 +166,13 @@ class IndexProjection:
                 del self._postings[sym.name]
 
 
+def _is_test_path(path: str) -> bool:
+    name = path.replace("\\", "/").rsplit("/", 1)[-1]
+    return name.startswith("test_") or name.endswith("_test.py") or "/tests/" in path.replace(
+        "\\", "/"
+    )
+
+
 def _hit_from(entry: FileEntry, sym) -> SymbolHit:
     return SymbolHit(
         path=entry.path,
@@ -146,6 +191,7 @@ def _entry_bytes(entry: FileEntry) -> int:
         len(entry.path)
         + len(entry.content_hash)
         + sum(len(s.name) + len(s.container or "") + 16 for s in entry.symbols)
+        + sum(len(i) + 8 for i in (entry.imports or []))
         + 64
     )
 

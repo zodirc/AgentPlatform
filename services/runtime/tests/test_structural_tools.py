@@ -259,8 +259,14 @@ async def test_edit_file_attaches_related_tests(
     )
     assert result["status"] == "edited"
     assert "related_tests" in result
-    assert any(p.endswith("test_mod.py") for p in result["related_tests"])
+    assert any(
+        (p["path"] if isinstance(p, dict) else p).endswith("test_mod.py")
+        for p in result["related_tests"]
+    )
     assert result["related_tests_count"] >= 1
+    assert all(
+        isinstance(p, dict) and p.get("command") for p in result["related_tests"]
+    )
 
 
 @pytest.mark.asyncio

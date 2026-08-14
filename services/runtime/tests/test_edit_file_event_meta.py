@@ -6,6 +6,7 @@ from pathlib import Path
 from app.engine.agent_engine import (
     _compact_edit_file_event_meta,
     _compact_locate_event_meta,
+    _compact_test_summary_event_meta,
     _tool_completed_base,
 )
 
@@ -64,6 +65,54 @@ def test_compact_edit_file_event_meta_span_miss() -> None:
     )
     assert meta["applies"] is False
     assert meta["candidate_count"] == 3
+
+
+def test_compact_edit_file_event_meta_related_commands() -> None:
+    meta = _compact_edit_file_event_meta(
+        {
+            "applies": True,
+            "related_tests": [
+                {
+                    "path": "tests/test_a.py",
+                    "command": "python -m pytest tests/test_a.py -x -q",
+                }
+            ],
+        }
+    )
+    assert meta["related_tests_count"] == 1
+    assert meta["related_tests_commands"] == [
+        "python -m pytest tests/test_a.py -x -q"
+    ]
+
+
+def test_compact_test_summary_and_validate() -> None:
+    contracts = _contracts_dir()
+    if str(contracts) not in sys.path:
+        sys.path.insert(0, str(contracts))
+    from validate_payload import validate_event_payload
+
+    meta = _compact_test_summary_event_meta(
+        {
+            "test_summary": {
+                "passed": 1,
+                "failed": 0,
+                "errors": 0,
+                "first_failures": [],
+                "provider": "pytest",
+            }
+        }
+    )
+    payload = _tool_completed_base(
+        tool_call_id="t1",
+        tool_name="run_tests",
+        status="ok",
+        summary="Tests: pytest -q",
+        command="pytest -q",
+        **meta,
+    )
+    validate_event_payload(
+        "tool.completed", payload, schemas_dir=contracts / "schemas" / "events" / "payloads"
+    )
 
 
 def test_search_codebase_tool_completed_fuse_meta_validates() -> None:
