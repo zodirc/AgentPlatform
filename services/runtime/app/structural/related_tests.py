@@ -203,13 +203,15 @@ def _import_targets_from_text(text: str) -> set[str]:
 
 def _import_targets_treesitter(text: str) -> set[str] | None:
     try:
-        from tree_sitter_language_pack import get_parser
-    except ImportError:
-        return None
-    try:
-        parser = get_parser("python")
+        # Reuse workspace_index parser gate — raw get_parser can GIL-block forever
+        # when grammars are not cached locally (tree-sitter-language-pack 1.14+).
+        from app.structural.workspace_index.parse import _get_cached_parser
+
+        parser = _get_cached_parser("python")
+        if parser is None:
+            return None
         raw = text.encode("utf-8")
-        tree = parser.parse(raw)
+        tree = parser.parse(raw)  # type: ignore[union-attr]
     except Exception:
         return None
     root = tree.root_node

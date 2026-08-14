@@ -9,8 +9,8 @@ from app.services.resource import sessions as session_svc
 from .common import (CancelCheck, L1Cancelled, L1TurnTracker, L1_CODING_TURN_TIMEOUT_S,
     L1_ROOT, PROTOCOL_L1, ProgressCb, _clamp_parallel, _coding_prompt, _emit,
     _emit_fail, _ensure_scripts_path, _exc_text, _l1_fingerprint, _reports)
-from .turn_driver import (_create_l1_work, _pull_with_live_logs, _start_turn,
-    _wait_turn_verbose, _watch_workspace_index_progress)
+from .turn_driver import (_create_l1_work, _enqueue_ephemeral_workspace_index,
+    _pull_with_live_logs, _start_turn, _wait_turn_verbose)
 logger = logging.getLogger(__name__)
 
 
@@ -120,6 +120,25 @@ async def run_coding_l1(
     coding_cfg = (cfg.get("suites") or {}).get("coding") or {}
     # E1 dual-track: suites.coding.workspace_index on|off (§7 eval-ephemeral).
     workspace_index_on = bool(coding_cfg.get("workspace_index"))
+    # Optional: await ready|stale before StartTurn (product-parity Locate).
+    # Env WORKSPACE_INDEX_WAIT_READY=1|0 overrides yaml when set.
+    _wait_env = os.environ.get("WORKSPACE_INDEX_WAIT_READY", "").strip().lower()
+    if _wait_env in {"1", "true", "yes", "on"}:
+        workspace_index_wait_ready = True
+    elif _wait_env in {"0", "false", "no", "off"}:
+        workspace_index_wait_ready = False
+    else:
+        workspace_index_wait_ready = bool(coding_cfg.get("workspace_index_wait_ready"))
+    try:
+        workspace_index_wait_timeout_s = float(
+            os.environ.get(
+                "WORKSPACE_INDEX_WAIT_TIMEOUT_S",
+                coding_cfg.get("workspace_index_wait_timeout_s", 300),
+            )
+        )
+    except (TypeError, ValueError):
+        workspace_index_wait_timeout_s = 300.0
+    workspace_index_wait_timeout_s = max(30.0, min(workspace_index_wait_timeout_s, 1800.0))
     root = await _pull_with_live_logs(
         "SWE-bench Lite",
         lambda: pull_swebench(cfg, force=False),
@@ -148,6 +167,10 @@ async def run_coding_l1(
         "harness": bool(run_harness),
         "checkout_repo": bool(checkout_repo),
         "workspace_index": bool(workspace_index_on),
+        "workspace_index_wait_ready": bool(
+            workspace_index_on and workspace_index_wait_ready
+        ),
+        "workspace_index_wait_timeout_s": float(workspace_index_wait_timeout_s),
         "sample_tier": (
             "anchor"
             if selected_tier in {"n25", "full300"} and run_harness
@@ -173,7 +196,9 @@ async def run_coding_l1(
         "log",
         message=(
             f"[L1] coding plan n={len(ordered)} tier={selected_tier} "
-            f"parallel={conc} checkout={checkout_repo} harness={run_harness}"
+            f"parallel={conc} checkout={checkout_repo} harness={run_harness} "
+            f"workspace_index={int(workspace_index_on)} "
+            f"wait_ready={int(workspace_index_on and workspace_index_wait_ready)}"
         ),
     )
     # Suite-level mirror sync (bypass): fetch once per unique repo before Turns so
@@ -310,8 +335,30 @@ async def run_coding_l1(
                         scenario_id, owner_user_id=SYSTEM_USER_ID, work_id=work.id
                     )
                     hint = _coding_prompt(inst, has_repo=True)
-                    # Accept StartTurn first so AST cold-start cannot starve the
-                    # 202 path (R1). Index still builds during the Turn (E1).
+                    tenant = {
+                        "work_id": str(work.id),
+                        "work_root": str(work.work_root),
+                        "owner_user_id": SYSTEM_USER_ID,
+                    }
+                    # Default (wait_ready=false): StartTurn first (R1) — index
+                    # builds during the Turn. Optional wait_ready: enqueue +
+                    # await ready|stale before StartTurn (product-parity Locate).
+                    if workspace_index_on and workspace_index_wait_ready:
+                        try:
+                            await _enqueue_ephemeral_workspace_index(
+                                iid=iid,
+                                tenant=tenant,
+                                on_progress=on_progress,
+                                should_cancel=should_cancel,
+                                wait_ready=True,
+                                wait_timeout_s=workspace_index_wait_timeout_s,
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "workspace_index wait_ready failed for %s",
+                                iid,
+                                exc_info=True,
+                            )
                     turn, run_row = await _start_turn(
                         session_id=sess["id"],
                         scenario_id=scenario_id,
@@ -319,51 +366,15 @@ async def run_coding_l1(
                         work=work,
                         model_override=model,
                     )
-                    if workspace_index_on:
+                    if workspace_index_on and not workspace_index_wait_ready:
                         try:
-                            from app.services.admin import workspace as workspace_svc
-
-                            tenant = {
-                                "work_id": str(work.id),
-                                "work_root": str(work.work_root),
-                                "owner_user_id": SYSTEM_USER_ID,
-                            }
-                            # Await rebuild so runtime mark_ephemeral runs before
-                            # status watch — otherwise ops-l1 paths report
-                            # status=disabled and the watch exits as terminal.
-                            rebuild = await workspace_svc.ast_index_rebuild(
-                                memory_only=True, tenant=tenant
+                            await _enqueue_ephemeral_workspace_index(
+                                iid=iid,
+                                tenant=tenant,
+                                on_progress=on_progress,
+                                should_cancel=should_cancel,
+                                wait_ready=False,
                             )
-                            accepted = True
-                            if isinstance(rebuild, dict):
-                                accepted = bool(rebuild.get("accepted", True))
-                            await _emit(
-                                on_progress,
-                                "log",
-                                message=(
-                                    f"[L1] workspace_index enqueue (ephemeral) {iid} "
-                                    f"work={str(work.id)[:8]} accepted={int(accepted)}"
-                                ),
-                            )
-                            if accepted:
-                                asyncio.create_task(
-                                    _watch_workspace_index_progress(
-                                        iid=iid,
-                                        tenant=tenant,
-                                        on_progress=on_progress,
-                                        should_cancel=should_cancel,
-                                    ),
-                                    name=f"ast-watch-{iid}",
-                                )
-                            else:
-                                await _emit(
-                                    on_progress,
-                                    "log",
-                                    message=(
-                                        f"[L1] workspace_index {iid} status=disabled "
-                                        "files=0/0 reason=rebuild_not_accepted"
-                                    ),
-                                )
                         except Exception:  # noqa: BLE001
                             logger.warning(
                                 "workspace_index enqueue failed for %s",

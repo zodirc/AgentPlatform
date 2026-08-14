@@ -55,6 +55,59 @@ def test_prediction_instance_ids(tmp_path: Path) -> None:
     assert swe_run._prediction_instance_ids(pred) == ["a__1", "b__2"]
 
 
+def test_harness_dataset_arg_prefers_local_jsonl(tmp_path: Path) -> None:
+    root = tmp_path / "swebench_lite"
+    root.mkdir()
+    instances = root / "instances.jsonl"
+    instances.write_text('{"instance_id":"astropy__astropy-12907"}\n', encoding="utf-8")
+    assert swe_run._harness_dataset_arg(root) == str(instances.resolve())
+
+
+def test_harness_dataset_arg_missing_raises(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="instances.jsonl"):
+        swe_run._harness_dataset_arg(tmp_path)
+    empty = tmp_path / "instances.jsonl"
+    empty.write_text("", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="instances.jsonl"):
+        swe_run._harness_dataset_arg(tmp_path)
+
+
+def test_stream_harness_process_applies_env_extra(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen: dict[str, Any] = {}
+
+    class _FakeStdout:
+        def read(self, _n: int) -> bytes:
+            return b""
+
+        def close(self) -> None:
+            return None
+
+    class _FakeProc:
+        stdout = _FakeStdout()
+
+        def wait(self) -> int:
+            return 0
+
+    def _fake_popen(cmd, **kwargs):  # noqa: ANN001, ANN003
+        seen["cmd"] = cmd
+        seen["env"] = kwargs.get("env") or {}
+        return _FakeProc()
+
+    monkeypatch.setattr(swe_run.subprocess, "Popen", _fake_popen)
+    log_path = tmp_path / "harness.log"
+    code = swe_run._stream_harness_process(
+        ["true"],
+        cwd=str(tmp_path),
+        log_path=log_path,
+        env_extra={"HF_HUB_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1"},
+    )
+    assert code == 0
+    assert seen["env"].get("HF_HUB_OFFLINE") == "1"
+    assert seen["env"].get("HF_DATASETS_OFFLINE") == "1"
+
+
 def test_instance_image_ref() -> None:
     assert (
         swe_images.instance_image_ref("astropy__astropy-12907")

@@ -3,7 +3,7 @@
 > **状态**：草案 v0.1（2026-08-13）· 目标与边界对齐中 · **尚未排期实现** · 已补 **§5 基准测试思考**  
 > **范围**：`intel` Scenario 的产品叙事、阶段契约、评测分层、与现有 RAG/工具面的演进方向  
 > **非范围**：`agent` 编码链 / LSP / 工作区 AST；不以资料检索冒充 PoC；不以扫描告警台替代验证闭环  
-> **约束权威**：[架构 · R1–R5](../core/architecture.md) · [工作台 · Ops Bench](../topics/workbench.md) · [场景分型（CSI §3）](coding-structural-intelligence.md) · [RAG](../topics/rag.md) · 现网 `scenarios/intel/*`  
+> **约束权威**：[架构 · R1–R5](../core/architecture.md) · [工作台 · Ops Bench](../topics/workbench.md) · [场景分型（CSI §1.4）](coding-structural-intelligence.md) · [RAG](../topics/rag.md) · 现网 `scenarios/intel/*`  
 > **产品隐喻**：破阵子式「不是扫描，是以攻促防的验证闭环」——把可疑线索转化为可交付、可复核的实证结论  
 
 本文回答：
@@ -408,7 +408,7 @@ make up-bench（或复用）
 | [架构](../core/architecture.md) | Scenario 扩展方式、R1–R5；本文遵守 |
 | [工作台 · Ops Bench](../topics/workbench.md) | 三层评测与 L1 agent-path；intel suite 应对齐此纪律 |
 | [RAG](../topics/rag.md) | intel 检索平面；L0/L1 主依赖；bench 索引隔离 |
-| [CSI §3](coding-structural-intelligence.md) | writing/intel vs agent 隔离；本文不推翻 |
+| [CSI §1.4](coding-structural-intelligence.md) | writing/intel vs agent 隔离；本文不推翻 |
 | [工作区 AST](agent-workspace-ast-index.md) | **非目标**；intel 面板不挂 AST 进度 |
 | [eval/official](../../eval/official/README.md) | Pull→Eval→Regress 与 SCORECARD 先例 |
 | 现网 `scenarios/intel/system.md` | L0 将回写阶段契约；以评审后补丁为准 |

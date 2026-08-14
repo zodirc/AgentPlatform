@@ -108,6 +108,15 @@ RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,r
     && pip install "/tmp/runtime[retrieval,structural]" \
     && rm -rf /tmp/runtime
 
+# Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).
+# Prefer offline seed from deploy/ts-grammar-cache when populated; else prefetch().
+COPY deploy/ts-grammar-cache/ /tmp/ts-grammar-seed/
+COPY services/runtime/scripts/bake_ts_grammars.py /tmp/bake_ts_grammars.py
+RUN mkdir -p /home/app/.cache \
+    && chown -R app:app /home/app \
+    && su -s /bin/bash app -c 'HOME=/home/app TS_GRAMMAR_SEED_DIR=/tmp/ts-grammar-seed python -u /tmp/bake_ts_grammars.py' \
+    && rm -rf /tmp/ts-grammar-seed /tmp/bake_ts_grammars.py
+
 COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
 
 FROM deps AS app

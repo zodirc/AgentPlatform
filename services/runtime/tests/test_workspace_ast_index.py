@@ -120,6 +120,71 @@ def test_extract_definitions_python() -> None:
         assert by_name["bar"].to_json().get("ct") == "Foo"
 
 
+def test_get_cached_parser_skips_undownloaded_grammar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing on-disk grammar must not call get_parser (can GIL-block forever)."""
+    from app.structural.workspace_index import parse as parse_mod
+
+    parse_mod._PARSER_CACHE.clear()
+    called = {"n": 0}
+
+    def _boom(_lang: str):
+        called["n"] += 1
+        raise AssertionError("get_parser must not be called")
+
+    import sys
+    import types
+
+    fake = types.ModuleType("tree_sitter_language_pack")
+    fake.downloaded_languages = lambda: []  # type: ignore[attr-defined]
+    fake.get_parser = _boom  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tree_sitter_language_pack", fake)
+
+    assert parse_mod._get_cached_parser("python") is None
+    assert called["n"] == 0
+    src = "class Foo:\n    pass\ndef baz():\n    pass\n"
+    names = {s.name for s in extract_definitions(src, language="python")}
+    assert "Foo" in names and "baz" in names
+    parse_mod._PARSER_CACHE.clear()
+
+
+def test_get_cached_parser_timeout_falls_back_to_regex(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hung grammar load must not freeze cold_start at 0/N."""
+    import time
+
+    from app.structural.workspace_index import parse as parse_mod
+
+    parse_mod._PARSER_CACHE.clear()
+    monkeypatch.setattr(parse_mod, "_PARSER_INIT_TIMEOUT_S", 0.2)
+
+    def _hang(_lang: str):
+        time.sleep(5.0)
+        raise AssertionError("should have timed out")
+
+    import sys
+    import types
+
+    fake = types.ModuleType("tree_sitter_language_pack")
+    fake.downloaded_languages = lambda: ["python"]  # type: ignore[attr-defined]
+    fake.get_parser = _hang  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "tree_sitter_language_pack", fake)
+
+    assert parse_mod._get_cached_parser("python") is None
+    # Failure is sticky — second call must not wait again.
+    t0 = time.perf_counter()
+    assert parse_mod._get_cached_parser("python") is None
+    assert time.perf_counter() - t0 < 0.1
+
+    src = "class Foo:\n    pass\ndef baz():\n    pass\n"
+    symbols = extract_definitions(src, language="python")
+    names = {s.name for s in symbols}
+    assert "Foo" in names and "baz" in names
+    parse_mod._PARSER_CACHE.clear()
+
+
 def test_normalize_and_rank_qualified_query() -> None:
     from app.structural.workspace_index.query import (
         normalize_symbol_query,
@@ -278,10 +343,120 @@ def test_parse_file_entry_and_hash(tmp_path: Path) -> None:
     assert entry.path == "mod.py"
     assert entry.generation == 3
     assert entry.content_hash
-    assert any(s.name == "Widget" for s in entry.symbols)
+    widget = next(s for s in entry.symbols if s.name == "Widget")
+    assert widget.col == 7  # "class Widget" — identifier, not col=1
     md = tmp_path / "note.md"
     md.write_text("# heading\n", encoding="utf-8")
     assert parse_file_entry(md, work_root=tmp_path, generation=3, max_file_bytes=1_000_000) is None
+
+
+def test_extract_definitions_name_column_not_def_kw() -> None:
+    """P15: LSP confirm needs identifier col; def-node / regex col=1 were wrong."""
+    from app.structural.workspace_index.parse import _extract_regex, extract_definitions
+
+    text = (
+        "class NDArithmeticMixin:\n"
+        "    def _arithmetic_mask(self, operation):\n"
+        "        return None\n"
+    )
+    # Regex path (forces name-group column even without tree-sitter).
+    rx = _extract_regex(text, language="python")
+    method = next(s for s in rx if s.name == "_arithmetic_mask")
+    assert method.line == 2
+    assert method.col == 9  # "    def _arithmetic_mask"
+    cls = next(s for s in rx if s.name == "NDArithmeticMixin")
+    assert cls.col == 7
+
+    # Prefer tree-sitter when available; same name-column contract.
+    ts = extract_definitions(text, language="python")
+    method_ts = next(s for s in ts if s.name == "_arithmetic_mask")
+    assert method_ts.col == 9
+    assert method_ts.line == 2
+
+
+def test_snap_hit_col_fixes_legacy_col1() -> None:
+    from app.structural.workspace_index.locate import _identifier_col_on_line
+
+    assert _identifier_col_on_line("    def _arithmetic_mask(self):", "_arithmetic_mask") == 9
+    assert _identifier_col_on_line("class Widget:", "Widget") == 7
+
+
+@pytest.mark.asyncio
+async def test_locate_passes_identifier_col_to_goto(tmp_path: Path, monkeypatch) -> None:
+    """Legacy projection col=1 must be snapped to the identifier before LSP confirm."""
+    from app.structural.workspace_index.locate import locate_via_ast_index
+    from app.structural.workspace_index.projection import IndexProjection, get_projection_registry
+    from app.structural.workspace_index.service import AstIndexService
+    from app.structural.workspace_index.types import FileEntry, IndexMeta, IndexStatus, SymbolRec
+
+    wid = uuid4()
+    owner = "owner-1"
+    path = tmp_path / "svc.py"
+    path.write_text("class Widget:\n    pass\n", encoding="utf-8")
+    # Simulate pre-fix snapshot: correct line, wrong col=1.
+    entry = FileEntry(
+        path="svc.py",
+        lang="python",
+        content_hash="x",
+        mtime_ns=path.stat().st_mtime_ns,
+        size=path.stat().st_size,
+        symbols=[SymbolRec(name="Widget", kind="class", line=1, col=1)],
+        generation=1,
+    )
+    meta = IndexMeta(
+        work_id=wid, owner_user_id=owner, status=IndexStatus.READY, generation=1
+    )
+    proj = IndexProjection(work_id=wid, owner_user_id=owner, meta=meta)
+    proj.replace_all([entry], meta=meta)
+    get_projection_registry().put(proj)
+
+    class StubService(AstIndexService):
+        def enabled_for_work(self, *, work_id=None, work_root=None) -> bool:
+            return True
+
+        async def lookup_symbol(self, work_id, name, *, owner_user_id, limit=20, work_root=None):
+            return proj.lookup(name, limit=limit, owner_user_id=owner_user_id), meta
+
+        async def ensure_projection(self, work_id, *, owner_user_id, work_root=None):
+            return proj
+
+    monkeypatch.setattr(
+        "app.structural.workspace_index.locate.get_ast_index_service",
+        lambda: StubService(),
+    )
+
+    seen: list[tuple[int, int]] = []
+
+    async def goto_capture(workspace, symbol, **kwargs):
+        del workspace, symbol
+        seen.append((int(kwargs["line"]), int(kwargs["col"])))
+        from app.structural.types import Location
+
+        return {
+            "locations": [
+                Location(
+                    path="svc.py",
+                    line=1,
+                    col=7,
+                    kind="def",
+                    symbol="Widget",
+                )
+            ],
+            "meta": {},
+        }
+
+    out = await locate_via_ast_index(
+        workspace=tmp_path,
+        symbol="Widget",
+        work_id=wid,
+        owner_user_id=owner,
+        goto=goto_capture,
+        timeout_s=5.0,
+        turn_id=None,
+    )
+    assert out is not None
+    assert out.get("locate_incomplete") is False
+    assert seen == [(1, 7)]
 
 
 def test_oversized_file_marked_skipped(tmp_path: Path) -> None:

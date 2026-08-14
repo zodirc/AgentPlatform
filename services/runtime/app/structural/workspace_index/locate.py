@@ -7,6 +7,7 @@ Welded into search_codebase — no new tool name. Incomplete hits echo
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 from uuid import UUID
@@ -45,6 +46,33 @@ def _line_snippet(workspace: Path, rel: str, line: int) -> str:
     except OSError:
         pass
     return ""
+
+
+def _identifier_col_on_line(line_text: str, name: str) -> int | None:
+    """1-based column of ``name`` on a definition line (prefer ``def``/``class`` form)."""
+    if not name or not line_text:
+        return None
+    for prefix in ("async def ", "def ", "class "):
+        needle = prefix + name
+        idx = line_text.find(needle)
+        if idx >= 0:
+            return idx + len(prefix) + 1
+    m = re.search(rf"\b{re.escape(name)}\b", line_text)
+    if m:
+        return m.start() + 1
+    return None
+
+
+def _snap_hit_col(abs_path: Path, line: int, col: int, name: str) -> int:
+    """Prefer identifier column on ``line`` so legacy col=1 / def-kw cols still confirm."""
+    try:
+        lines = abs_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        if not (1 <= int(line) <= len(lines)):
+            return col
+        fixed = _identifier_col_on_line(lines[int(line) - 1], name)
+        return fixed if fixed is not None else col
+    except OSError:
+        return col
 
 
 def _candidate_dict(workspace: Path, hit: SymbolHit, *, symbol: str) -> dict[str, Any]:
@@ -313,6 +341,9 @@ async def locate_via_ast_index(
                     pass
         except OSError:
             continue
+
+        name_for_col = hit.name or nq.tail or symbol
+        col = _snap_hit_col(abs_path, line, col, name_for_col)
 
         out = await goto(
             workspace,

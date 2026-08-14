@@ -26,7 +26,7 @@ Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `mak
 | 文档 | 状态 |
 |------|------|
 | [后端架构全景](plan/backend-architecture.md) | **现行详册**（机型/并发数字）；摘要已回写六篇正文 |
-| [Coding 结构智能](plan/coding-structural-intelligence.md) | Wave 1 + 写入链揉合 **已落地**；长文日记保留作对照 |
+| [Coding 结构智能](plan/coding-structural-intelligence.md) | 流程 · 已优化 · 观测定位 · harness 方案（已收敛） |
 | [工作区异步 AST](plan/agent-workspace-ast-index.md) | A6 旁路 indexer **已接线**；双轨 n5 数字待复跑 |
 | [威胁情报 · 验证闭环](plan/intel-closed-loop-verification.md) | 草案 · **尚未实施** |
 

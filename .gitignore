@@ -9,6 +9,9 @@ deploy/model-bake-cache/**
 !deploy/model-bake-cache/.keep
 deploy/torch-wheel-cache/**
 !deploy/torch-wheel-cache/.keep
+deploy/ts-grammar-cache/**
+!deploy/ts-grammar-cache/README.md
+!deploy/ts-grammar-cache/.keep
 
 # python
 __pycache__/

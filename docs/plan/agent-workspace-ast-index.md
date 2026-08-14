@@ -190,7 +190,7 @@ E1 落地后 n5（`workspace_index=true`，`parallel=2`）暴露的不是「tree
 
 | 文档 | 内容 |
 |------|------|
-| [coding-structural-intelligence.md](coding-structural-intelligence.md) | LSP 揉合、Wave 1/2、Ops L1 / SWE-bench、writing/intel 场景隔离总表 |
+| [coding-structural-intelligence.md](coding-structural-intelligence.md) | 现行流程、观测定位、harness 优化方案；writing/intel 隔离 |
 | **本文** | Agent 工作区异步 AST：结合面、生命周期、失效、存储、GUI、Work/账号、GC |
 
 ---
@@ -456,7 +456,7 @@ v2 口径「SWE 临时 Work 默认不建」的出发点是评测洁癖（harness
 
 | 项 | 约定 |
 |----|------|
-| 构建时机 | 套件层每题 **checkout 完成后、StartTurn 已受理之后** enqueue（Turn 先 202，索引在 Turn 期间异步补齐）；**不阻塞开题**——StartTurn 时索引尚未 ready 则走 §2.2 分支 ②，ready 后自然生效 |
+| 构建时机 | 套件层每题 **checkout 完成后** enqueue。默认：StartTurn 先 202，索引在 Turn 期间异步补齐（不阻塞开题；未 ready 走 §2.2 分支 ②）。可选 **`workspace_index_wait_ready`**（`suites.coding` / `WORKSPACE_INDEX_WAIT_READY=1`）：先等 `ready\|stale`（或超时回落基线）再 StartTurn，贴近真实「索引已建好再编码」 |
 | 存续 | **仅内存投影，不写 `work_ast_*` 表**（与主方案 §3.6「SWE 临时 Work 默认不写 AST DB」兼容——变更的是建不建，不是持久化口径）；Work 结束即弃，无 GC 负担 |
 | 增量 | **仅通道 ①**（工具钩子）。SWE worktree 的全部变更来自 runtime 工具（`edit_file`/`write_file`/`run_command` 内脚本极少改源码），通道 ②③ 不进评测态 |
 | GUI | 不挂进度（评测无面板诉求；§6 全部不适用） |

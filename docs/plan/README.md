@@ -5,7 +5,7 @@
 | 文档 | 状态 | 摘要 |
 |------|------|------|
 | [后端架构全景](backend-architecture.md) | 详册 **v0.3** | 控制流全文；机型负载配方 |
-| [Coding 结构智能](coding-structural-intelligence.md) | Wave1+揉合 **已落地** | Locate/Impact/Verify；SWE/Ops 日记 |
+| [Coding 结构智能](coding-structural-intelligence.md) | **已收敛** | 流程 / 已优化 / 观测定位 / harness 方案 |
 | [Agent 工作区异步 AST](agent-workspace-ast-index.md) | A6 **已接线** | 旁路 indexer；双轨 n5 数字待复跑 |
 | [威胁情报 · 验证闭环](intel-closed-loop-verification.md) | 草案 · **未实施** | intel 验证闭环与 Bench 对照 |
 

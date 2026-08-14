@@ -181,11 +181,12 @@ module_for_path() {
 
 detect_changed() {
   # Per-module dirty detection (required). Never rely on a single global sha alone.
-  # Module is dirty if:
+  # Module is dirty (needs rebuild) if:
   #   - force_all
   #   - no deployed[module].git_sha baseline
   #   - git diff baseline..HEAD / dirty worktree touches module paths
-  #   - serving container missing / not running (api|runtime|web)
+  # Container stopped/missing is NOT rebuild-dirty — cmd_up starts existing images
+  # first (compose_ensure_stack). Same class of bug as Hub-vs-local cache.
   local force_all="$1"
   local -A hit=()
   local mod baseline files f
@@ -194,28 +195,6 @@ detect_changed() {
     printf '%s\n' "${MODULES[@]}"
     return 0
   fi
-
-  container_name() {
-    case "$1" in
-      api) echo agent-api ;;
-      runtime) echo agent-runtime ;;
-      ast_indexer) echo agent-ast-indexer ;;
-      web) echo agent-web ;;
-      gateway) echo agent-gateway ;;
-      *) echo "" ;;
-    esac
-  }
-
-  container_missing() {
-    local name="$1"
-    [[ -z "$name" ]] && return 1
-    if ! docker inspect "$name" >/dev/null 2>&1; then
-      return 0
-    fi
-    local st
-    st="$(docker inspect -f '{{.State.Running}}' "$name" 2>/dev/null || echo false)"
-    [[ "$st" != "true" ]]
-  }
 
   module_baseline() {
     python3 -c '
@@ -237,15 +216,6 @@ print(dep.get("git_sha") or "")
 
   for mod in "${MODULES[@]}"; do
     baseline="$(module_baseline "$mod")"
-
-    local cname
-    cname="$(container_name "$mod")"
-    if container_missing "$cname"; then
-      if [[ "$mod" != "gateway" ]]; then
-        hit["$mod"]=1
-        continue
-      fi
-    fi
 
     if [[ -z "$baseline" ]] || ! git -C "$ROOT" cat-file -e "${baseline}^{commit}" 2>/dev/null; then
       if [[ "$mod" != "gateway" ]]; then
@@ -641,6 +611,11 @@ cmd_up() {
   done
 
   compose_infra_up
+  # After host reboot, containers are stopped but images remain. Start the stack
+  # before dirty detect so we do not treat "not running" as rebuild-needed, and
+  # so worktree/image byte checks can exec into running containers.
+  echo "==> ensuring existing images are up (no --build)"
+  compose_ensure_stack
 
   local -a targets=()
   if [[ -n "$only" ]]; then
@@ -650,8 +625,7 @@ cmd_up() {
   fi
 
   if [[ ${#targets[@]} -eq 0 ]]; then
-    echo "==> no dirty modules — ensuring stack is up (no rebuild)"
-    compose_ensure_stack
+    echo "==> no dirty modules — stack already up (no rebuild)"
     make -C "$ROOT" --no-print-directory fix-workspace-sources || true
     PHASE=done MESSAGE="no module rebuild needed" CHANGED_CSV="" FORCE_CHANGED=1 \
       write_status >/dev/null
@@ -659,7 +633,7 @@ cmd_up() {
     return 0
   fi
 
-  echo "==> dirty modules: $(IFS=,; echo "${targets[*]}")"
+  echo "==> dirty modules (rebuild): $(IFS=,; echo "${targets[*]}")"
   # Rebuild only those modules (cmd_run takes flags, not the word "run")
   local args=()
   [[ "$force_all" == "1" ]] && args+=(--force-all)

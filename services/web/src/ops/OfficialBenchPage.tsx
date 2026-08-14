@@ -137,7 +137,7 @@ function isOpsKeyLogItem(item: OfficialLogItem): boolean {
   // AST index milestones (skip intermediate building ticks in history tab).
   if (/^\[L1\]\s+workspace_index\s+enqueue\b/i.test(s)) return true;
   if (
-    /^\[L1\]\s+workspace_index\s+\S+\s+status=(ready|stale|error|cancelled|watch_timeout)\b/i.test(
+    /^\[L1\]\s+workspace_index\s+\S+\s+status=(ready|stale|error|cancelled|watch_timeout|wait_timeout|wait_done)\b/i.test(
       s,
     )
   ) {

@@ -102,9 +102,15 @@ suites:
     # Official resolve scoring requires Docker + swebench.harness (see README).
     evaluate_with: swebench.harness.run_evaluation
     # E1 (docs/plan/agent-workspace-ast-index.md §7): eval-ephemeral AST index after
-    # checkout (memory-only, never blocks StartTurn). Default on — product-parity arm.
+    # checkout (memory-only). Default on — product-parity arm.
     # Set false only for explicit index-off baseline dual-track.
     workspace_index: true
+    # Optional: await ready|stale before StartTurn (closer to real coding).
+    # Default false preserves R1 (Turn first). Enable for dual-track on-arm measure.
+    # Override without yaml edit: WORKSPACE_INDEX_WAIT_READY=1
+    # Timeout override: WORKSPACE_INDEX_WAIT_TIMEOUT_S=300
+    workspace_index_wait_ready: false
+    workspace_index_wait_timeout_s: 300
     # Official sweb.eval images (~1.0–1.2 GiB compressed / instance). Not in git.
     # Pre-pull via 部署看板「SWE eval 镜像」or: make official-bench-coding-pull-images
     harness:

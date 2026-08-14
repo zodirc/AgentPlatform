@@ -199,9 +199,13 @@ def _module_dirty(
     include_worktree: bool,
     deployed_entry: dict | None = None,
 ) -> tuple[bool, str]:
+    """Return whether the module needs an image *rebuild* (``make up-*``).
+
+    Container stopped / missing is **not** rebuild-dirty — that is ``make start``
+    (reuse existing images). Same dual-cache class of bug as harness Hub vs
+    local ``instances.jsonl``: after reboot the board must not force pip/ST rebuilds.
+    """
     cname = CONTAINERS.get(mod, "")
-    if mod != "gateway" and cname and cname not in running:
-        return True, f"容器 {cname} 未运行"
     if not deployed_sha:
         if mod == "gateway":
             return False, "无基线（gateway 仅配置变更时重建）"
@@ -209,6 +213,10 @@ def _module_dirty(
         # look "broken" forever next to api/runtime — treat as ok until paths drift.
         if mod == "ast_indexer" and cname and cname in running:
             return False, "已是最新 — 容器已运行（首次接入；点重建可写入部署基线）"
+        # No deploy baseline yet: still need one rebuild to seed status.json —
+        # but only when we cannot already serve from a running container.
+        if cname and cname in running:
+            return False, "已是最新 — 容器已运行（缺部署基线；点重建可写入）"
         return True, "尚未记录过该模块的已部署版本"
     code, _, _ = _run(["git", "-C", str(ROOT), "cat-file", "-e", f"{deployed_sha}^{{commit}}"])
     if code != 0:
@@ -473,8 +481,8 @@ def _embedding_item(
     }
     if not _container_running("agent-runtime", running):
         item["status"] = "action"
-        item["action"] = "make up   # 或只重建 runtime"
-        item["detail"] = "runtime 未运行，无法核对容器内模型"
+        item["action"] = "make start"
+        item["detail"] = "runtime 未运行，无法核对容器内模型 — 先拉起已有镜像（勿默认重建）"
         return item
 
     # One exec for both values
@@ -785,6 +793,7 @@ def build_plan(mode: str | None = None) -> dict:
     items: list[dict] = []
     dirty_code: list[str] = []
 
+    needs_start_modules: list[str] = []
     for mod in MODULES:
         dep_entry = (
             (deployed.get(mod) or {}) if isinstance(deployed.get(mod), dict) else {}
@@ -799,6 +808,8 @@ def build_plan(mode: str | None = None) -> dict:
             include_worktree=include_worktree,
             deployed_entry=dep_entry,
         )
+        cname = CONTAINERS.get(mod, "")
+        stopped = bool(mod != "gateway" and cname and cname not in running)
         action = None
         if dirty:
             dirty_code.append(mod)
@@ -812,6 +823,11 @@ def build_plan(mode: str | None = None) -> dict:
                 action = "make up-web"
             elif mod == "gateway":
                 action = "make release RELEASE_MODULES=gateway"
+        elif stopped:
+            # Images already built — reboot / docker stop must not look like rebuild.
+            needs_start_modules.append(mod)
+            action = "make start"
+            detail = f"容器 {cname} 未运行 — 拉起已有镜像即可（make start；勿 make up-*）"
         dep_meta = _commit_meta(sha) if sha else {"sha": None, "subject": None, "date": None}
         # Align first-seen display with siblings: show HEAD as the implied baseline
         # when the container is up and we soft-ok'd the missing mark.
@@ -832,7 +848,7 @@ def build_plan(mode: str | None = None) -> dict:
                 "kind": "code",
                 "lane": "product",
                 "title": mod,
-                "status": "action" if dirty else "ok",
+                "status": "action" if (dirty or stopped) else "ok",
                 "action": action,
                 "detail": detail,
                 "deployed_sha": dep_meta["sha"],
@@ -936,6 +952,10 @@ def build_plan(mode: str | None = None) -> dict:
         bits = []
         if dirty_code:
             bits.append("产品代码 " + ",".join(dirty_code))
+        if needs_start_modules and not dirty_code:
+            bits.append("产品栈未拉起（make start）")
+        elif needs_start_modules:
+            bits.append("另有未拉起 " + ",".join(needs_start_modules))
         if emb.get("status") == "action":
             bits.append("产品向量模型")
         if idx_prod.get("status") == "action":
@@ -973,6 +993,7 @@ def build_plan(mode: str | None = None) -> dict:
             "index_version": want_ver,
         },
         "dirty_code_modules": dirty_code,
+        "needs_start_modules": needs_start_modules,
         "detect_scope": detect_scope,
         "counts": {
             "ok": len(oks),

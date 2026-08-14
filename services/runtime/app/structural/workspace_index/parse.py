@@ -6,11 +6,16 @@ Symbols include optional ``container`` (enclosing class/module chain, §2.2.1).
 
 from __future__ import annotations
 
+import logging
+import os
 import re
+import threading
 from pathlib import Path
 
 from app.retrieval.chunking import language_for_code_path
 from app.structural.workspace_index.types import SymbolRec
+
+logger = logging.getLogger(__name__)
 
 # Node type → kind for definitions-only index (ctags-style; no refs).
 _KIND_BY_NODE: dict[str, str] = {
@@ -70,22 +75,71 @@ def extract_definitions_for_path(path: Path | str, text: str) -> tuple[str, list
     return lang, symbols
 
 
-_PARSER_CACHE: dict[str, object] = {}
+_PARSER_CACHE: dict[str, object | None] = {}
+_PARSER_LOCK = threading.Lock()
+# tree-sitter-language-pack may download grammars on first get_parser(); behind a
+# bad registry/proxy that call blocks forever and freezes cold_start at 0/N.
+_PARSER_INIT_TIMEOUT_S = float(os.environ.get("WORKSPACE_AST_PARSER_TIMEOUT_S", "8"))
 
 
 def _get_cached_parser(language: str):
-    parser = _PARSER_CACHE.get(language)
-    if parser is not None:
-        return parser
+    """Return a tree-sitter Parser, or None to force regex fallback.
+
+    Caches failures so a hung/unavailable grammar is not retried per file.
+    """
+    with _PARSER_LOCK:
+        if language in _PARSER_CACHE:
+            return _PARSER_CACHE[language]
+
+    parser: object | None = None
     try:
-        from tree_sitter_language_pack import get_parser
+        from tree_sitter_language_pack import downloaded_languages, get_parser
     except ImportError:
+        with _PARSER_LOCK:
+            _PARSER_CACHE[language] = None
         return None
+
+    # tree-sitter-language-pack>=1.14 may block forever inside get_parser while
+    # downloading grammars (GIL held → thread timeouts cannot save us). If the
+    # language is not already on disk, skip get_parser and use regex.
     try:
-        parser = get_parser(language)
+        on_disk = {str(x) for x in (downloaded_languages() or [])}
     except Exception:
+        on_disk = set()
+    if language not in on_disk:
+        logger.warning(
+            "tree-sitter grammar %s not in local cache %s — using regex fallback",
+            language,
+            sorted(on_disk)[:8],
+        )
+        with _PARSER_LOCK:
+            _PARSER_CACHE[language] = None
         return None
-    _PARSER_CACHE[language] = parser
+
+    try:
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+
+        # Still bound load time; wait=False so a wedged native call cannot re-block.
+        pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ts-parser-init")
+        try:
+            fut = pool.submit(get_parser, language)
+            parser = fut.result(timeout=max(0.5, _PARSER_INIT_TIMEOUT_S))
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+    except FuturesTimeout:
+        logger.warning(
+            "tree-sitter get_parser(%s) timed out after %.1fs — using regex fallback",
+            language,
+            _PARSER_INIT_TIMEOUT_S,
+        )
+        parser = None
+    except Exception:
+        logger.debug("tree-sitter get_parser(%s) failed", language, exc_info=True)
+        parser = None
+
+    with _PARSER_LOCK:
+        # Cache None so cold_start does not pay the timeout on every file.
+        _PARSER_CACHE[language] = parser
     return parser
 
 
@@ -116,13 +170,12 @@ def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
                         target = child
                         kind = _KIND_BY_NODE[child.type]
                         break
-            name = _node_name(target, raw)
-            if name:
+            span = _name_span(target, raw)
+            if span:
+                name, line, col = span
                 # Nested function inside class → method.
                 if kind == "function" and container_stack:
                     kind = "method"
-                line = int(target.start_point[0]) + 1
-                col = int(target.start_point[1]) + 1
                 end_line = int(target.end_point[0]) + 1
                 key = (name, line, kind)
                 if key not in seen:
@@ -151,10 +204,12 @@ def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
     return out
 
 
-def _node_name(node, raw: bytes) -> str | None:
-    """Prefer an identifier / name field; fall back to first token on the def line.
+def _name_span(node, raw: bytes) -> tuple[str, int, int] | None:
+    """Return ``(name, line, col)`` for the definition identifier (1-based).
 
-    ``raw`` is the UTF-8 bytes already used for ``parser.parse`` (avoid re-encode).
+    LSP ``textDocument/definition`` must land on the identifier, not ``def`` /
+    ``class`` or leading whitespace — hence name-node coordinates, not the
+    enclosing definition node's ``start_point``.
     """
     try:
         name_node = node.child_by_field_name("name")
@@ -162,7 +217,11 @@ def _node_name(node, raw: bytes) -> str | None:
             start, end = name_node.start_byte, name_node.end_byte
             token = raw[start:end].decode("utf-8", errors="replace").strip()
             if token:
-                return token.split(".")[-1]
+                return (
+                    token.split(".")[-1],
+                    int(name_node.start_point[0]) + 1,
+                    int(name_node.start_point[1]) + 1,
+                )
     except Exception:
         pass
     for child in node.children:
@@ -170,7 +229,11 @@ def _node_name(node, raw: bytes) -> str | None:
             start, end = child.start_byte, child.end_byte
             token = raw[start:end].decode("utf-8", errors="replace").strip()
             if token:
-                return token
+                return (
+                    token,
+                    int(child.start_point[0]) + 1,
+                    int(child.start_point[1]) + 1,
+                )
     start = node.start_byte
     end = min(node.end_byte, start + 160)
     snippet = raw[start:end].decode("utf-8", errors="replace")
@@ -179,8 +242,18 @@ def _node_name(node, raw: bytes) -> str | None:
         snippet,
     )
     if m:
-        return m.group(1)
+        # Approximate col from def-node start + match offset (UTF-8 safe for ASCII ids).
+        abs_byte = start + m.start(1)
+        line = int(node.start_point[0]) + 1 + raw[start:abs_byte].count(b"\n")
+        line_start = raw.rfind(b"\n", 0, abs_byte) + 1
+        col = abs_byte - line_start + 1
+        return m.group(1), line, col
     return None
+
+
+def _col_1based_at(text: str, abs_offset: int) -> int:
+    line_start = text.rfind("\n", 0, abs_offset) + 1
+    return abs_offset - line_start + 1
 
 
 def _extract_regex(text: str, *, language: str | None) -> list[SymbolRec]:
@@ -194,6 +267,7 @@ def _extract_regex(text: str, *, language: str | None) -> list[SymbolRec]:
         indent = m.group("indent") or ""
         indent_len = len(indent.expandtabs(8))
         line = text[: m.start()].count("\n") + 1
+        col = _col_1based_at(text, m.start("name"))
         while class_stack and class_stack[-1][0] >= indent_len:
             class_stack.pop()
         if kw == "class":
@@ -207,7 +281,7 @@ def _extract_regex(text: str, *, language: str | None) -> list[SymbolRec]:
         if key in seen:
             continue
         seen.add(key)
-        out.append(SymbolRec(name=name, kind=kind, line=line, col=1, container=ct))
+        out.append(SymbolRec(name=name, kind=kind, line=line, col=col, container=ct))
     if language in {None, "python"}:
         for m in _ASSIGN_RE.finditer(text):
             line_start = text.rfind("\n", 0, m.start()) + 1
@@ -215,9 +289,10 @@ def _extract_regex(text: str, *, language: str | None) -> list[SymbolRec]:
                 continue
             name = m.group("name")
             line = text[: m.start()].count("\n") + 1
+            col = _col_1based_at(text, m.start("name"))
             key = (name, line)
             if key in seen:
                 continue
             seen.add(key)
-            out.append(SymbolRec(name=name, kind="variable", line=line, col=1))
+            out.append(SymbolRec(name=name, kind="variable", line=line, col=col))
     return out

@@ -80,15 +80,15 @@ make up / make release-plan / 浏览器 :9090
 
 改契约包会同时弄脏 **api + runtime**。改工作区 AST 包会弄脏 **runtime + ast-indexer**。
 
-### 2.2 怎样算 dirty
+### 2.2 怎样算 dirty（需重建）
 
 | 信号 | 含义 |
 |------|------|
-| **已提交相对 deployed** | 上次 mark 之后有提交落在该模块前缀 |
+| **已提交相对 deployed** | 上次 mark 之后有提交落在该模块前缀 → **`make up-*`** |
 | **工作树指纹** | 未提交改动；已 bake 进上次重建的同指纹不再当 dirty |
-| **容器未起** | 对应 `agent-*` 不在运行列表 |
+| **容器未起** | **不是** rebuild dirty。重启主机后镜像仍在 → **`make start`**（或 `make up` 会先拉起再只重建真正脏的模块） |
 
-看板模式：本地开发看「已提交 + 未提交」；同步部署只看已提交。
+看板模式：本地开发看「已提交 + 未提交」；同步部署只看已提交。Ops Bench 未起同样是 `make start-bench`，不 rebuild。
 
 ### 2.3 如何确认更新已生效
 
@@ -98,7 +98,7 @@ make up / make release-plan / 浏览器 :9090
 4. 产品面：`curl -fsS http://localhost/health/live`；改 UI 则硬刷新。  
 5. 新生成的 Ops 密钥会触发 api recreate。
 
-强制全量：`make up-all`。日常优先 `make up` 只重建脏的。
+强制全量：`make up-all`。日常优先 `make up`（先拉起已有镜像，再只重建脏模块）。主机重启后优先 `make start`；只有代码相对已部署有变才需要 `up-*`。
 
 ## 3. 领域对象与状态
 

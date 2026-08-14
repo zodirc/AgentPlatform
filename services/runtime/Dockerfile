@@ -38,6 +38,15 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && pip install "/tmp/runtime[structural]" \
     && rm -rf /tmp/runtime
 
+# Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).
+# Prefer offline seed from deploy/ts-grammar-cache when populated; else prefetch().
+COPY deploy/ts-grammar-cache/ /tmp/ts-grammar-seed/
+COPY services/runtime/scripts/bake_ts_grammars.py /tmp/bake_ts_grammars.py
+RUN mkdir -p /home/app/.cache \
+    && chown -R app:app /home/app \
+    && su -s /bin/bash app -c 'HOME=/home/app TS_GRAMMAR_SEED_DIR=/tmp/ts-grammar-seed python -u /tmp/bake_ts_grammars.py' \
+    && rm -rf /tmp/ts-grammar-seed /tmp/bake_ts_grammars.py
+
 FROM deps AS app
 COPY services/runtime/app /app/app
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads

@@ -91,7 +91,7 @@ RELEASE_CONSOLE ?= 1
 
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
-	@echo "  make start        启动栈，不重建镜像（改代码后配合下面单服务命令）"
+	@echo "  make start        启动栈，不重建（主机重启 / 容器停了优先用这个）"
 	@echo "  make up-web       只重建 web（WEB_REBUILD_DEPS=1 强制 pnpm 重装）"
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
 	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
@@ -110,7 +110,7 @@ help: ## 显示常用命令
 	@echo "  # docs/38：改 app 代码不必 *_REBUILD_DEPS；改 pyproject/模型才需要"
 	@echo ""
 	@echo "完整部署"
-	@echo "  make up           分模块：只重建脏服务 + 发布台 :9090"
+	@echo "  make up           先拉起已有镜像，再只重建真正脏的模块 + 发布台 :9090"
 	@echo "  make up-all       强制全量 compose --build（不分模块）"
 	@echo "  make sync-sources 增量索引 seed/普通 work（本终端 [sync] 进度；不含 ops-l1 BEIR）"
 	@echo "  make sync-ops-indexes  换模后重嵌 Ops BEIR（FiQA 等；耗时长，非 make up 默认）"

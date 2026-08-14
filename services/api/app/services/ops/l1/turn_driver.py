@@ -188,6 +188,155 @@ async def _watch_workspace_index_progress(
     )
 
 
+async def _await_workspace_index_ready(
+    *,
+    iid: str,
+    tenant: dict[str, str],
+    on_progress: ProgressCb | None,
+    should_cancel: CancelCheck | None = None,
+    timeout_s: float = 300.0,
+    poll_s: float = 1.5,
+) -> str:
+    """Block until ephemeral AST index is queryable (ready|stale) or give up.
+
+    Used only when ``suites.coding.workspace_index_wait_ready`` is on — product
+    StartTurn still never awaits (R1 / veto 13). Timeout/error → proceed with
+    Turn on today's baseline (do not fail the case).
+    """
+    from app.services.admin import workspace as workspace_svc
+
+    t0 = time.monotonic()
+    last_line = ""
+    while time.monotonic() - t0 < timeout_s:
+        if should_cancel is not None and should_cancel():
+            await _emit(
+                on_progress,
+                "log",
+                message=f"[L1] workspace_index {iid} status=cancelled",
+            )
+            return "cancelled"
+        try:
+            st = await workspace_svc.ast_index_status(
+                enqueue=False, tenant=tenant, timeout=5.0
+            )
+        except Exception as exc:  # noqa: BLE001
+            msg = (
+                f"[L1] workspace_index {iid} status=poll_error "
+                f"error={_exc_text(exc)[:120]}"
+            )
+            if msg != last_line:
+                await _emit(on_progress, "log", message=msg)
+                last_line = msg
+            await asyncio.sleep(poll_s)
+            continue
+        if not isinstance(st, dict):
+            await asyncio.sleep(poll_s)
+            continue
+        status = str(st.get("status") or "unknown")
+        fd, ft = st.get("files_done"), st.get("files_total")
+        gen = st.get("generation")
+        parts = [f"[L1] workspace_index {iid} status={status}"]
+        if fd is not None or ft is not None:
+            parts.append(
+                f"files={fd if fd is not None else '?'}/"
+                f"{ft if ft is not None else '?'}"
+            )
+        if gen is not None:
+            parts.append(f"gen={gen}")
+        if st.get("ephemeral"):
+            parts.append("ephemeral=1")
+        err = st.get("error")
+        if err and status == "error":
+            parts.append(f"error={str(err)[:80]}")
+        line = " ".join(parts)
+        if _ast_progress_should_emit(
+            last_line, line, status=status, files_done=fd, files_total=ft
+        ):
+            await _emit(on_progress, "log", message=line)
+            last_line = line
+        if status == "disabled":
+            # Race: mark_ephemeral not visible yet — keep polling briefly.
+            if time.monotonic() - t0 < 45.0:
+                await asyncio.sleep(poll_s)
+                continue
+            return "disabled"
+        if status in {"ready", "stale"}:
+            return status
+        if status == "error":
+            return "error"
+        await asyncio.sleep(poll_s)
+    await _emit(
+        on_progress,
+        "log",
+        message=f"[L1] workspace_index {iid} status=wait_timeout",
+    )
+    return "wait_timeout"
+
+
+async def _enqueue_ephemeral_workspace_index(
+    *,
+    iid: str,
+    tenant: dict[str, str],
+    on_progress: ProgressCb | None,
+    should_cancel: CancelCheck | None = None,
+    wait_ready: bool = False,
+    wait_timeout_s: float = 300.0,
+) -> dict[str, Any]:
+    """Enqueue eval-ephemeral cold_start; optionally await ready before caller StartsTurn."""
+    from app.services.admin import workspace as workspace_svc
+
+    rebuild = await workspace_svc.ast_index_rebuild(memory_only=True, tenant=tenant)
+    accepted = True
+    if isinstance(rebuild, dict):
+        accepted = bool(rebuild.get("accepted", True))
+    await _emit(
+        on_progress,
+        "log",
+        message=(
+            f"[L1] workspace_index enqueue (ephemeral) {iid} "
+            f"work={str(tenant.get('work_id') or '')[:8]} accepted={int(accepted)} "
+            f"wait_ready={int(bool(wait_ready))}"
+        ),
+    )
+    if not accepted:
+        await _emit(
+            on_progress,
+            "log",
+            message=(
+                f"[L1] workspace_index {iid} status=disabled "
+                "files=0/0 reason=rebuild_not_accepted"
+            ),
+        )
+        return {"accepted": False, "wait_status": "disabled"}
+    if wait_ready:
+        wait_status = await _await_workspace_index_ready(
+            iid=iid,
+            tenant=tenant,
+            on_progress=on_progress,
+            should_cancel=should_cancel,
+            timeout_s=wait_timeout_s,
+        )
+        await _emit(
+            on_progress,
+            "log",
+            message=(
+                f"[L1] workspace_index {iid} wait_done status={wait_status} "
+                "(StartTurn follows)"
+            ),
+        )
+        return {"accepted": True, "wait_status": wait_status}
+    asyncio.create_task(
+        _watch_workspace_index_progress(
+            iid=iid,
+            tenant=tenant,
+            on_progress=on_progress,
+            should_cancel=should_cancel,
+        ),
+        name=f"ast-watch-{iid}",
+    )
+    return {"accepted": True, "wait_status": None}
+
+
 async def _pull_with_live_logs(
     label: str,
     pull_fn: Any,

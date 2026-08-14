@@ -53,6 +53,23 @@ def _phase(msg: str) -> None:
     print(f"[phase] {msg}", flush=True)
 
 
+def _harness_dataset_arg(root: Path) -> str:
+    """Path for ``--dataset_name``: local ``instances.jsonl`` (never Hub by default).
+
+    SWE-bench's ``load_swebench_dataset`` accepts ``*.json`` / ``*.jsonl`` paths.
+    Platform Pull already materializes Lite under ``suite_data('swebench_lite')``;
+    evaluate must consume that file so offline / ``Network is unreachable`` hosts
+    do not call ``datasets.load_dataset`` against Hugging Face.
+    """
+    instances = root / "instances.jsonl"
+    if instances.is_file() and instances.stat().st_size > 0:
+        return str(instances.resolve())
+    raise RuntimeError(
+        f"missing local SWE-bench dataset: {instances} "
+        "(run coding-pull / pull_swebench first; evaluate must not hit Hub)"
+    )
+
+
 def _read_instance_ids(path: Path) -> list[str]:
     if not path.is_file():
         raise ValueError(f"missing SWE Lite selection file: {path}")
@@ -745,11 +762,14 @@ def _stream_harness_process(
     cwd: str,
     log_path: Path,
     on_line: Callable[[str], None] | None = None,
+    env_extra: dict[str, str] | None = None,
 ) -> int:
     """Run harness with live stdout (handles tqdm ``\\r`` updates)."""
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     env.setdefault("TQDM_MININTERVAL", "1")
+    if env_extra:
+        env.update(env_extra)
     with log_path.open("w", encoding="utf-8") as logf:
         logf.write(" ".join(cmd) + "\n\n")
         logf.flush()
@@ -827,13 +847,15 @@ def run_swe_eval(
     harness_run_id = f"agentplatform-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
     instance_ids = _prediction_instance_ids(pred_path)
     h = _harness_preflight(instance_ids=instance_ids)
+    # Prefer local Pull cache over coding["hf_dataset"] Hub id (H0 / offline evaluate).
+    dataset_name = _harness_dataset_arg(root)
     cmd = [
         sys.executable,
         "-u",
         "-m",
         "swebench.harness.run_evaluation",
         "--dataset_name",
-        coding["hf_dataset"],
+        dataset_name,
         "--predictions_path",
         str(pred_path),
         "--max_workers",
@@ -861,12 +883,14 @@ def run_swe_eval(
     _phase(
         "2/3 EVAL — official swebench.harness.run_evaluation"
         + (f" · n={len(instance_ids)}" if instance_ids else "")
+        + f" · dataset={dataset_name}"
     )
     session.log("evaluate", " ".join(cmd))
     session.log(
         "evaluate",
         "requires Docker + swebench; prefer pre-pulled sweb.eval "
-        "(部署看板 / make official-bench-coding-pull-images)",
+        "(部署看板 / make official-bench-coding-pull-images); "
+        f"dataset=local:{dataset_name} (hf_dataset={coding.get('hf_dataset')})",
     )
     log_path = Path(session.dir) / "harness.stdout.log"
     last_progress_key: tuple[Any, ...] | None = None
@@ -893,11 +917,17 @@ def run_swe_eval(
         if rendered:
             print(rendered, flush=True)
 
+    # Force Hub/datasets offline for evaluate: metadata comes from local jsonl.
+    # Parent BENCH_HF_HUB_OFFLINE may be 0 so coding-pull can still reach Hub.
     exit_code = _stream_harness_process(
         cmd,
         cwd=str(root),
         log_path=log_path,
         on_line=_forward,
+        env_extra={
+            "HF_HUB_OFFLINE": "1",
+            "HF_DATASETS_OFFLINE": "1",
+        },
     )
 
     class _Proc:
@@ -916,6 +946,7 @@ def run_swe_eval(
         "exit_code": proc.returncode,
         "harness_run_id": harness_run_id,
         "harness_log": str(log_path),
+        "dataset_name": dataset_name,
     }
     if instance_ids:
         metrics["n_instance_ids"] = float(len(instance_ids))

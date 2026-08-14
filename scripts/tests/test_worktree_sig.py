@@ -154,6 +154,46 @@ def test_module_dirty_digest_match_but_image_stale(
     assert "强制重建" in detail
 
 
+def test_module_dirty_stopped_container_is_not_rebuild(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reboot / docker stop must not look like ``make up-*`` (H0-class)."""
+    monkeypatch.setattr("plan._committed_since", lambda _sha: [])
+    monkeypatch.setattr(
+        "plan._run",
+        lambda cmd, timeout=8: (
+            (0, "", "")
+            if cmd[:3] == ["git", "-C", str(worktree_sig.ROOT)]
+            or (len(cmd) >= 3 and cmd[2] == "-e")
+            else (0, "", "")
+        ),
+    )
+    # cat-file -e must succeed for deployed sha
+    def _run(cmd, timeout=8):  # noqa: ANN001, ANN201
+        if len(cmd) >= 3 and cmd[-1].endswith("^{commit}"):
+            return 0, "", ""
+        return 0, "", ""
+
+    monkeypatch.setattr("plan._run", _run)
+    monkeypatch.setattr(
+        worktree_sig,
+        "verify_image_files",
+        lambda *a, **k: ("skip", []),
+    )
+
+    dirty, detail = _module_dirty(
+        "api",
+        ["services/api/"],
+        deployed_sha="abc123",
+        running=set(),  # container not running
+        worktree_files=[],
+        include_worktree=True,
+        deployed_entry={"git_sha": "abc123", "worktree_digest": ""},
+    )
+    assert dirty is False
+    assert "最新" in detail or "一致" in detail
+
+
 def test_module_dirty_digest_match_and_image_ok(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
