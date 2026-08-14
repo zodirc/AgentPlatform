@@ -4,6 +4,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
@@ -430,3 +432,134 @@ def test_ctx10_classifies_scorer_alias() -> None:
     assert rep["n_wrong_answer"] == 2
     assert rep["class_counts"].get("iii_scorer_alias") == 1
     assert rep["class_counts"].get("ii_localization_miss") == 1
+
+
+def test_scorecard_appends_notes(tmp_path: Path, monkeypatch) -> None:
+    import official_bench.baseline as bl
+
+    monkeypatch.setattr(bl, "BASELINE_DIR", tmp_path)
+    (tmp_path / "SCORECARD.notes.md").write_text(
+        "# notes\n\nHAND_NOTE_MARKER\n", encoding="utf-8"
+    )
+    md = render_scorecard(
+        {
+            "protocol_version": "official-small-2026-08-m3",
+            "eval_path": "agent",
+            "updated_at": "2026-08-14T00:00:00+00:00",
+            "suites": {},
+            "smoke_suites": {},
+        }
+    )
+    assert "HAND_NOTE_MARKER" in md
+    assert "SCORECARD.notes.md" in md
+    # Idempotent: notes appear once under the appendix heading.
+    assert md.count("HAND_NOTE_MARKER") == 1
+
+
+def test_promote_run_refuses_smoke(tmp_path: Path, monkeypatch) -> None:
+    import official_bench.baseline as bl
+
+    monkeypatch.setattr(bl, "BASELINE_DIR", tmp_path)
+    runs = tmp_path / "runs" / "smoke-run"
+    runs.mkdir(parents=True)
+    (tmp_path / "official-small-2026-08-m3.json").write_text(
+        json.dumps(
+            {
+                "protocol_version": "official-small-2026-08-m3",
+                "eval_path": "agent",
+                "suites": {},
+                "smoke_suites": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (runs / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "smoke-run",
+                "official_suite": "coding",
+                "status": "completed",
+                "finished_at": "2026-08-13T00:00:00+00:00",
+                "model_meta": {
+                    "protocol_version": "official-small-2026-08-m3",
+                    "eval_path": "agent",
+                    "sample_tier": "smoke",
+                    "coding_tier": "n5",
+                    "harness": True,
+                    "config_fingerprint": "fp-test",
+                    "model_snapshot": {"model": "x"},
+                },
+                "metrics": {
+                    "resolve_rate": 0.6,
+                    "patch_rate": 1.0,
+                    "n_instances": 5,
+                    "coding_tier": "n5",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="sample_tier='smoke'"):
+        bl.promote_run_to_baseline("smoke-run", reports=tmp_path)
+
+
+def test_promote_run_accepts_anchor(tmp_path: Path, monkeypatch) -> None:
+    import official_bench.baseline as bl
+
+    monkeypatch.setattr(bl, "BASELINE_DIR", tmp_path)
+    runs = tmp_path / "runs" / "anchor-run"
+    runs.mkdir(parents=True)
+    (tmp_path / "official-small-2026-08-m3.json").write_text(
+        json.dumps(
+            {
+                "protocol_version": "official-small-2026-08-m3",
+                "eval_path": "agent",
+                "suites": {},
+                "smoke_suites": {"retrieval": {"run_id": "old-smoke"}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "SCORECARD.notes.md").write_text("NOTE_KEEP\n", encoding="utf-8")
+    (runs / "manifest.json").write_text(
+        json.dumps(
+            {
+                "id": "anchor-run",
+                "official_suite": "context",
+                "status": "completed",
+                "finished_at": "2026-08-14T00:00:00+00:00",
+                "model_meta": {
+                    "protocol_version": "official-small-2026-08-m3",
+                    "eval_path": "agent",
+                    "sample_tier": "anchor",
+                    "arm": "free",
+                    "context_limit": 0,
+                    "config_fingerprint": "fp-anchor",
+                    "settings_snapshot": {"x": 1},
+                    "model": "test-model",
+                },
+                "metrics": {"agent_f1": 0.5, "agent_em": 0.25},
+            }
+        ),
+        encoding="utf-8",
+    )
+    path, doc = bl.promote_run_to_baseline("anchor-run", reports=tmp_path)
+    assert path.is_file()
+    assert "context" in doc["suites"]
+    assert doc["suites"]["context"]["run_id"] == "anchor-run"
+    assert doc["smoke_suites"]["retrieval"]["run_id"] == "old-smoke"
+    scorecard = (tmp_path / "SCORECARD.md").read_text(encoding="utf-8")
+    assert "NOTE_KEEP" in scorecard
+    assert "anchor-run" in scorecard
+
+
+def test_promote_b3357dd6_smoke_negative() -> None:
+    """A0 exit criterion: real n5+harness run must be refused."""
+    import official_bench.baseline as bl
+
+    rid = "b3357dd6-19d5-4669-ae06-ec3bc1a50d27"
+    man = bl.reports_dir() / "runs" / rid / "manifest.json"
+    if not man.is_file():
+        pytest.skip("b3357dd6 artifacts not present on this machine")
+    with pytest.raises(ValueError, match="sample_tier="):
+        bl.promote_run_to_baseline(rid)

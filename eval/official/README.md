@@ -18,9 +18,11 @@
 - 结果：`manifest.json` / `result.json`
 - 可视化：`report.html`（浏览器直接打开）
 - Ops：自动 `publish`（需 `OPS_TEST_SECRET` + 栈）→ **官方评测**页 / 历史 `suite=official`
-- **仓库一眼看板**：[`baseline/SCORECARD.md`](baseline/SCORECARD.md)（**现为 L1 m2 主栏**）  
-- **机器锚点**：`baseline/official-small-2026-08-m2.json`（L1 过渡）；m3 锚待全量跑后入库；`m1.json` 为 L0 对照
-  L1 调优：`make official-bench-*-agent` → `make official-bench-compare` → 认可后 `make official-bench-update-baseline`（协议跟 latest，写 m2）
+- **仓库一眼看板**：[`baseline/SCORECARD.md`](baseline/SCORECARD.md)（**现行 L1 m3**；主栏锚点档待全量入库；手记见 [`SCORECARD.notes.md`](baseline/SCORECARD.notes.md)）  
+- **机器锚点**：`baseline/official-small-2026-08-m3.json`（现行 L1）；`m2.json` 为强制臂过渡史；`m1.json` 为 L0 对照  
+  L1 调优：`make official-bench-*-agent` → `make official-bench-compare` → 认可后  
+  `make official-bench-update-baseline`（从 latest_*）或  
+  `make official-bench-promote-run RUN_ID=…`（按跑次升主栏，须 `sample_tier=anchor`）
 
 ---
 

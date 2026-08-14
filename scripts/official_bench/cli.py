@@ -179,6 +179,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Regenerate SCORECARD.md from committed baseline JSON",
     )
+    p_base.add_argument(
+        "--promote-run",
+        metavar="RUN_ID",
+        default="",
+        help=(
+            "Promote eval/reports/official/runs/<id>/manifest.json into baseline "
+            "suites (requires sample_tier=anchor; does not use latest_* pointers)"
+        ),
+    )
 
     args = parser.parse_args(argv)
     ensure_dirs()
@@ -202,12 +211,35 @@ def main(argv: list[str] | None = None) -> int:
             compare_two_manifests,
             format_compare_table,
             load_baseline,
+            promote_run_to_baseline,
             scorecard_path,
             update_baseline_from_latest,
             write_scorecard,
         )
 
         suites = tuple(s.strip() for s in str(args.suites).split(",") if s.strip())
+
+        promote_run = str(getattr(args, "promote_run", "") or "").strip()
+        if promote_run:
+            try:
+                path, doc = promote_run_to_baseline(promote_run)
+            except (ValueError, FileNotFoundError) as exc:
+                raise SystemExit(f"promote-run failed: {exc}") from exc
+            meta = doc.get("_meta") or {}
+            print(
+                json.dumps(
+                    {
+                        "wrote": str(path),
+                        "scorecard": str(scorecard_path()),
+                        "promoted": meta.get("updated_suites"),
+                        "source": meta.get("source"),
+                        "protocol_version": doc.get("protocol_version"),
+                        "suites": list((doc.get("suites") or {}).keys()),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
 
         if args.write_scorecard and not args.update:
             doc = load_baseline()
@@ -272,7 +304,8 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if not args.update:
             raise SystemExit(
-                "baseline: pass --update / --compare / --show / --write-scorecard"
+                "baseline: pass --update / --compare / --show / "
+                "--write-scorecard / --promote-run"
             )
         path, doc = update_baseline_from_latest(suites=suites)
         meta = doc.get("_meta") or {}

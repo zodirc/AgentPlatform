@@ -456,6 +456,22 @@ def scorecard_path() -> Path:
     return BASELINE_DIR / "SCORECARD.md"
 
 
+def scorecard_notes_path() -> Path:
+    return BASELINE_DIR / "SCORECARD.notes.md"
+
+
+def load_scorecard_notes() -> str:
+    """Hand notes preserved across scorecard regenerations (A0)."""
+    path = scorecard_notes_path()
+    if not path.is_file():
+        return ""
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    return text
+
+
 def _fmt(v: Any, *, digits: int = 4) -> str:
     if isinstance(v, float):
         return f"{v:.{digits}f}"
@@ -481,6 +497,7 @@ def render_scorecard(doc: dict[str, Any]) -> str:
         f"- **updated_at**: `{doc.get('updated_at')}`",
         "- **含义**: **主栏 = 锚点档**（全量/自由臂/官方裁判）；冒烟档仅作迭代方向盘，**不作效果结论**。",
         "- **明细**: Ops 官方页 / `eval/reports/official/runs/<id>/`（不进 git）",
+        "- **手记**: 同目录 [`SCORECARD.notes.md`](SCORECARD.notes.md)（生成时拼接；改手记只改 notes）",
     ]
     if is_l1:
         lines.append(
@@ -582,7 +599,7 @@ def render_scorecard(doc: dict[str, Any]) -> str:
     if smoke_rows:
         lines.extend(smoke_rows)
     else:
-        lines.append("| — | — | — | — | 尚无冒烟指针 |")
+        lines.append("| — | — | — | — | 尚无冒烟指针（过程手记见 SCORECARD.notes.md） |")
 
     if is_l1:
         lines.extend(
@@ -641,11 +658,32 @@ def render_scorecard(doc: dict[str, Any]) -> str:
             "```bash",
             "make official-bench-retrieval-agent context-agent coding-infer-agent   # L1 实测",
             "make official-bench-compare       # latest vs 本 scorecard/baseline 打 Δ 表（同档才比）",
-            "make official-bench-update-baseline  # 认可后写 JSON + 刷新本文件（协议跟 latest）",
+            "make official-bench-update-baseline  # 从 latest_* 写入（smoke→冒烟栏；anchor→主栏）",
+            "make official-bench-promote-run RUN_ID=<uuid>  # 按跑次升主栏（须 sample_tier=anchor）",
             "```",
             "",
         ]
     )
+
+    notes = load_scorecard_notes()
+    if notes:
+        # Avoid a second document-level H1 under the appendix heading.
+        note_lines = notes.splitlines()
+        if note_lines and note_lines[0].startswith("# "):
+            note_lines = note_lines[1:]
+            while note_lines and not note_lines[0].strip():
+                note_lines = note_lines[1:]
+            notes = "\n".join(note_lines).strip()
+        lines.extend(
+            [
+                "---",
+                "",
+                "## 手记附录（自动拼接自 SCORECARD.notes.md）",
+                "",
+                notes,
+                "",
+            ]
+        )
     return "\n".join(lines)
 
 
@@ -654,6 +692,140 @@ def write_scorecard(doc: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(render_scorecard(doc), encoding="utf-8")
     return path
+
+
+def _suite_name_from_manifest(manifest: dict[str, Any]) -> str | None:
+    suite = str(manifest.get("official_suite") or "").strip().lower()
+    if suite in {"retrieval", "context"}:
+        return suite
+    if suite in {"coding", "coding_infer", "coding_eval"}:
+        return "coding"
+    return None
+
+
+def _promote_archive_ok(manifest: dict[str, Any]) -> tuple[bool, str]:
+    """Require existing replay fingerprints (model/settings/config snapshots)."""
+    meta = manifest.get("model_meta") if isinstance(manifest.get("model_meta"), dict) else {}
+    result = manifest.get("result") if isinstance(manifest.get("result"), dict) else {}
+    blobs = (meta, result, manifest)
+    protocol = _manifest_protocol(manifest)
+    if not protocol:
+        return False, "missing protocol_version"
+    has_snap = False
+    for blob in blobs:
+        for key in (
+            "model_snapshot",
+            "settings_snapshot",
+            "config_fingerprint",
+            "model",
+            "model_name_or_path",
+        ):
+            val = blob.get(key)
+            if val not in (None, "", {}, []):
+                has_snap = True
+                break
+        if has_snap:
+            break
+    if not has_snap:
+        return False, "missing model/settings/config archive fields"
+    return True, ""
+
+
+def promote_run_to_baseline(
+    run_id: str,
+    *,
+    reports: Path | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    """Promote a single archived run into baseline ``suites`` (anchor only).
+
+    Hard gates (A0):
+    1. ``sample_tier == anchor``
+    2. ``_eligible_manifest`` (via ``extract_suite_snapshot``)
+    3. ``protocol_version`` present and matches target baseline protocol
+    4. replay archive fingerprints present
+    """
+    rid = (run_id or "").strip()
+    if not rid:
+        raise ValueError("run_id required")
+    root = reports if reports is not None else reports_dir()
+    man_path = root / "runs" / rid / "manifest.json"
+    if not man_path.is_file():
+        # Also accept short prefix match under runs/
+        runs_dir = root / "runs"
+        matches = sorted(runs_dir.glob(f"{rid}*/manifest.json")) if runs_dir.is_dir() else []
+        if len(matches) == 1:
+            man_path = matches[0]
+            rid = man_path.parent.name
+        else:
+            raise FileNotFoundError(f"manifest not found: {man_path}")
+
+    try:
+        manifest = json.loads(man_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"unreadable manifest: {man_path}: {exc}") from exc
+    if not isinstance(manifest, dict):
+        raise ValueError("manifest root must be object")
+
+    suite = _suite_name_from_manifest(manifest)
+    if not suite:
+        raise ValueError(
+            f"unsupported official_suite={manifest.get('official_suite')!r} "
+            f"(want retrieval|context|coding)"
+        )
+
+    ok_arch, arch_reason = _promote_archive_ok(manifest)
+    if not ok_arch:
+        raise ValueError(f"promote refused: {arch_reason}")
+
+    snap = extract_suite_snapshot(manifest)
+    if not snap:
+        raise ValueError(
+            "promote refused: manifest not effect-eligible "
+            "(dry / skip_api / hash / incomplete)"
+        )
+
+    tier = str(snap.get("sample_tier") or "").strip().lower()
+    if tier != "anchor":
+        raise ValueError(
+            f"promote refused: sample_tier={tier!r} (want anchor). "
+            f"n5/smoke runs belong in smoke_suites via --update, not promote-run."
+        )
+
+    run_protocol = str(snap.get("protocol_version") or "").strip()
+    if not run_protocol:
+        raise ValueError("promote refused: snapshot missing protocol_version")
+
+    existing = load_baseline(run_protocol) or {}
+    existing_pv = str(existing.get("protocol_version") or "").strip()
+    if existing_pv and existing_pv != run_protocol:
+        raise ValueError(
+            f"promote refused: protocol mismatch baseline={existing_pv!r} run={run_protocol!r}"
+        )
+
+    suite_blocks: dict[str, Any] = {}
+    smoke_blocks: dict[str, Any] = {}
+    if isinstance(existing.get("suites"), dict):
+        suite_blocks.update(existing["suites"])
+    if isinstance(existing.get("smoke_suites"), dict):
+        smoke_blocks.update(existing["smoke_suites"])
+    suite_blocks[suite] = snap
+
+    eval_path = str(snap.get("eval_path") or existing.get("eval_path") or "agent")
+    doc: dict[str, Any] = {
+        "protocol_version": run_protocol,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "eval_path": eval_path,
+        "suites": suite_blocks,
+        "smoke_suites": smoke_blocks,
+        "_meta": {
+            "updated_suites": [f"{suite}:anchor"],
+            "skipped": [],
+            "source": f"promote-run:{rid}",
+            "note": "suites=anchor 主栏；smoke_suites=冒烟趋势（不作效果结论）",
+        },
+    }
+    path = write_baseline(doc, protocol=run_protocol)
+    return path, doc
 
 
 def compare_latest_to_baseline(
