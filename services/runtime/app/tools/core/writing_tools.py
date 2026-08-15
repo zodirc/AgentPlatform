@@ -4,6 +4,9 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from app.settings import settings
+from app.tools.core.paths import _resolve_path
+
 _LAST_PLAN_SIG: dict[str, tuple[tuple[str, str, str], ...]] = {}
 
 
@@ -236,6 +239,8 @@ async def draft_section(
     if history_path:
         result["history_path"] = history_path
     return result
+
+
 async def update_plan(
     items: list[dict[str, Any]],
     summary: str = "",
