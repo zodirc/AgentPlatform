@@ -42,6 +42,22 @@ export function runMetrics(
       }
     }
   }
+  return dropAliasedMetrics(out);
+}
+
+/** Drop L1 `agent.*` copies when the unprefixed twin already exists. */
+export function dropAliasedMetrics(
+  m: Record<string, number>,
+): Record<string, number> {
+  const out = { ...m };
+  for (const k of Object.keys(out)) {
+    if (!k.includes("agent.")) continue;
+    const stripped = k.startsWith("agent.")
+      ? k.slice("agent.".length)
+      : k.replace(".agent.", ".");
+    if (stripped === k || !(stripped in out)) continue;
+    if (out[stripped] === out[k]) delete out[k];
+  }
   return out;
 }
 

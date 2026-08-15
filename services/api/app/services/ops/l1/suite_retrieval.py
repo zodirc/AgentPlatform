@@ -592,14 +592,15 @@ async def run_retrieval_l1(
                 metrics=metrics,
             )
 
-        # Macro over datasets (same spirit as L0 hybrid macro)
+        # Macro over datasets. No agent.* copy — Ops is L1-only; old
+        # manifests still expose agent.* and SCORECARD falls back to it.
         macro: dict[str, float] = {}
         keys = {k for m in case_metrics.values() for k in m}
         for key in keys:
             vals = [m[key] for m in case_metrics.values() if key in m]
             if vals:
                 macro[key] = sum(vals) / len(vals)
-        session.metrics = {**macro, **{f"agent.{k}": v for k, v in macro.items()}}
+        session.metrics = dict(macro)
 
         # EVAL-2: record deterministic head-slice sample policy (+ ids fingerprint).
         session.extra["sample_policy"] = _sample_policy_head_slice(

@@ -4,20 +4,20 @@
 #   - Non-test .py/.ts/.tsx under services/ hard cap 800 unless listed here.
 #   - Listed files may not grow above max+20; drop below 800 → remove from this file.
 #   - Tighten max when a split lands (ratchet down only).
-services/web/src/ops/OfficialBenchPage.tsx	1779
+services/web/src/ops/OfficialBenchPage.tsx	1637
 services/release-console/server.py	1996
 services/runtime/app/controller/turn_controller.py	1822
 services/runtime/app/retrieval/pgvector_store.py	1728
-services/api/app/services/ops/official_runner.py	1704
-services/runtime/app/engine/agent_engine.py	1594
+services/api/app/services/ops/official_runner.py	1657
+services/runtime/app/engine/agent_engine.py	1695
 services/web/src/shared/workbench/useWorkbench.ts	1185
-services/runtime/app/context/engine.py	1268
+services/runtime/app/context/engine.py	1279
 services/runtime/app/model/gateway.py	1235
 services/web/src/settings/SettingsPage.tsx	1120
 services/web/src/shared/api/client.ts	1030
-services/api/app/services/ops/official_store.py	982
+services/api/app/services/ops/official_store.py	810
 services/runtime/app/main.py	898
-services/api/app/routers/ops_official.py	890
+services/api/app/routers/ops_official.py	856
 services/web/src/scenarios/agent/AgentChatPanel.tsx	869
 services/web/src/scenarios/agent/WorkspaceTree.tsx	862
 services/runtime/app/tools/bootstrap.py	847

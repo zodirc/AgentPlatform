@@ -195,10 +195,12 @@ async def run_context_l1(
                     # INFRA-3 / EVAL-8: persist pred+gold(+norms) for offline ruler audits.
                     from official_bench.context_run import (
                         SCORER_VERSION as _SCORER_V,
+                        extract_pred_answer as _extract_pred,
                         normalize_answer as _norm_ans,
                     )
 
                     pred_s = pred or ""
+                    pred_scored = _extract_pred(pred_s)
                     l2 = {
                         "case_id": case_id,
                         "turn_id": turn_id_s,
@@ -211,8 +213,9 @@ async def run_context_l1(
                         "terminal_state": terminal_state_from_events(events),
                         "scorer": _SCORER_V,
                         "pred": pred_s,
+                        "pred_scored": pred_scored,
                         "golds": golds,
-                        "pred_norm": _norm_ans(pred_s),
+                        "pred_norm": _norm_ans(pred_scored),
                         "gold_norms": [_norm_ans(g) for g in golds],
                     }
                     if fail_msg:

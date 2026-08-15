@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   OpsShell,
   opsOfficialPath,
-  opsRawPath,
   opsRunPath,
   secretFromOpsPath,
   statusClass,
@@ -13,6 +12,14 @@ import { opsApiErrorText, opsDisplayText } from "./opsDisplayText";
 import { isOpsErrorLogLine } from "./opsLogStyle";
 import { ArtifactsPanel } from "./bench/ArtifactsPanel";
 import { HARNESS_STAGE_LABEL } from "./bench/codingLive";
+import {
+  cleanPhase,
+  elapsedSeconds,
+  formatDuration,
+  formatTime,
+  isActiveStatus,
+  shortId,
+} from "./bench/format";
 import { HistoryPane } from "./bench/HistoryPane";
 import { LivePane } from "./bench/LivePane";
 import {
@@ -21,6 +28,12 @@ import {
   isEffectEligible,
   runMetrics,
 } from "./bench/metrics";
+import {
+  isOpsKeyLogItem,
+  liveLogLineClass,
+  MetricBars,
+  OfficialLogLine,
+} from "./bench/officialLog";
 import {
   BENCH_SCENARIO_GROUPS,
   contextTierLabel,
@@ -51,7 +64,6 @@ import type {
   CodingTierMeta,
   ContextTier,
   Criterion,
-  OfficialLogItem,
   OfficialRun,
   Preset,
   RetrievalTier,
@@ -60,185 +72,6 @@ import type {
   TargetMeta,
 } from "./bench/types";
 import { SUITE_IDS } from "./bench/types";
-
-const TURN_ID_IN_LOG = /turn_id=([0-9a-fA-F-]{36})/;
-
-function OfficialLogLine({ line, secret }: { line: string; secret: string }) {
-  const nodes: ReactNode[] = [];
-  let last = 0;
-  let m: RegExpExecArray | null;
-  const re = new RegExp(TURN_ID_IN_LOG.source, "g");
-  while ((m = re.exec(line)) !== null) {
-    if (m.index > last) nodes.push(line.slice(last, m.index));
-    const id = m[1];
-    nodes.push(
-      <Link
-        key={`${id}-${m.index}`}
-        to={opsRawPath(secret, id)}
-        className="underline decoration-dotted underline-offset-2 text-foreground hover:text-primary"
-        title="打开 Raw 快照看逐步 turn_events"
-        target="_blank"
-        rel="noreferrer"
-      >
-        turn_id={id}
-      </Link>,
-    );
-    last = m.index + m[0].length;
-  }
-  if (last < line.length) nodes.push(line.slice(last));
-  if (!nodes.length) return <>{line}</>;
-  return <>{nodes}</>;
-}
-
-function isActiveStatus(status?: string): boolean {
-  return status === "queued" || status === "running" || status === "cancelling";
-}
-
-function formatTime(iso?: string | null): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-
-/** Detail「日志」Tab: errors + milestones only (full stream stays in the live pane). */
-function isOpsKeyLogItem(item: OfficialLogItem): boolean {
-  const kind = String(item.kind || "").toLowerCase();
-  if (
-    kind === "phase" ||
-    kind === "run_started" ||
-    kind === "run_finished" ||
-    kind === "case_started" ||
-    kind === "case_finished"
-  ) {
-    return true;
-  }
-  if (String(item.status || "").toLowerCase() === "fail") return true;
-  const s = String(item.message || "").trim();
-  if (!s) return false;
-  if (isOpsErrorLogLine(s)) return true;
-  if (/^\[ops\]/i.test(s)) return true;
-  if (/^stop requested/i.test(s)) return true;
-  // L1 milestones (not every tool/step/heartbeat line).
-  if (/^\[L1\]\s+suite start\b/i.test(s)) return true;
-  if (/^\[L1\]\s+turn start\b/i.test(s)) return true;
-  if (/^\[L1\]\s+turn done\b/i.test(s)) return true;
-  if (/^\[L1\]\s+fail\b/i.test(s)) return true;
-  if (/^\[L1\]\s+pull\b/i.test(s)) return true;
-  if (/^\[L1\]\s+mirror prewarm\b/i.test(s)) return true;
-  if (/^\[L1\]\s+checkout\b/i.test(s)) return true;
-  if (/\bplan\s+n=/i.test(s)) return true;
-  if (/^\[L1\]\s+(retrieval|context|coding)\s+done\b/i.test(s)) return true;
-  if (/^\[L1\]\s+coding infer done\b/i.test(s)) return true;
-  if (/^\[L1\]\s+context done\b/i.test(s)) return true;
-  if (/^\[L1\]\s+retrieval done\b/i.test(s)) return true;
-  // AST index milestones (skip intermediate building ticks in history tab).
-  if (/^\[L1\]\s+workspace_index\s+enqueue\b/i.test(s)) return true;
-  if (
-    /^\[L1\]\s+workspace_index\s+\S+\s+status=(ready|stale|error|cancelled|watch_timeout|wait_timeout|wait_done)\b/i.test(
-      s,
-    )
-  ) {
-    return true;
-  }
-  if (/harness/i.test(s) && /\b(fail|error|resolve)\b/i.test(s)) return true;
-  return false;
-}
-
-function liveLogLineClass(line: string): string | undefined {
-  if (isOpsErrorLogLine(line)) return "font-semibold text-destructive";
-  if (
-    line.includes("[phase]") ||
-    line.startsWith("[pull]") ||
-    line.startsWith("[progress] pull") ||
-    line.startsWith("[L1] pull") ||
-    line.startsWith("[L1] turn ")
-  ) {
-    return "font-semibold text-foreground";
-  }
-  if (line.startsWith("[L1] workspace_index")) {
-    if (/\bstatus=ready\b/i.test(line)) return "font-semibold text-foreground";
-    if (/\bstatus=(error|poll_error|watch_timeout)\b/i.test(line)) {
-      return "font-semibold text-destructive";
-    }
-    return "text-muted-foreground";
-  }
-  if (line.startsWith("[L1] ·") || line.startsWith("[L1] …")) {
-    return "text-muted-foreground";
-  }
-  return undefined;
-}
-
-/** Human duration: 12s · 3m 05s · 1h 02m */
-function formatDuration(seconds: number | null | undefined): string {
-  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return "—";
-  const s = Math.floor(seconds);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  const rem = s % 60;
-  if (m < 60) return `${m}m ${String(rem).padStart(2, "0")}s`;
-  const h = Math.floor(m / 60);
-  const remM = m % 60;
-  return `${h}h ${String(remM).padStart(2, "0")}m`;
-}
-
-function elapsedSeconds(
-  startedIso: string | null | undefined,
-  endedIso: string | null | undefined,
-  nowMs: number,
-): number | null {
-  if (!startedIso) return null;
-  const start = Date.parse(startedIso);
-  if (!Number.isFinite(start)) return null;
-  const end = endedIso ? Date.parse(endedIso) : nowMs;
-  if (!Number.isFinite(end)) return null;
-  return Math.max(0, (end - start) / 1000);
-}
-
-function shortId(id: string): string {
-  return id.slice(0, 8);
-}
-
-function cleanPhase(raw: string): string {
-  return raw.replace(/^\[phase\]\s*/i, "").trim();
-}
-
-function MetricBars({ metrics }: { metrics: Record<string, number> }) {
-  const entries = Object.entries(metrics);
-  if (!entries.length) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        本次尚无数值指标（套件未完成、dry /
-        skip_api，或旧跑次未按套件回写时常见）。
-      </p>
-    );
-  }
-  return (
-    <div className="space-y-2">
-      {entries.map(([k, v]) => {
-        const width = Math.max(0, Math.min(100, v > 1 ? v : v * 100));
-        return (
-          <div key={k}>
-            <div className="mb-0.5 flex justify-between gap-2 text-xs">
-              <span className="truncate font-mono text-muted-foreground">
-                {k}
-              </span>
-              <strong className="shrink-0 tabular-nums">{v.toFixed(4)}</strong>
-            </div>
-            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-              <div
-                className="h-full rounded-full bg-foreground/75"
-                style={{ width: `${width}%` }}
-              />
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
 
 export function OfficialBenchPage() {
   const { pathname } = useLocation();

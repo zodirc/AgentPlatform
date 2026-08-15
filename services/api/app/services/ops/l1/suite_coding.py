@@ -3,9 +3,14 @@ from __future__ import annotations
 import asyncio, json, logging, os, time
 from pathlib import Path
 from typing import Any
-from uuid import UUID
 from app.services.end_user.users import SYSTEM_USER_ID
 from app.services.resource import sessions as session_svc
+from .coding_harness import maybe_run_coding_harness
+from .coding_thinking import (
+    assemble_thinking_jsonl,
+    coding_case_done_message,
+    promote_thinking_sidecar,
+)
 from .common import (CancelCheck, L1Cancelled, L1TurnTracker, L1_CODING_TURN_TIMEOUT_S,
     L1_ROOT, PROTOCOL_L1, ProgressCb, _clamp_parallel, _coding_prompt, _emit,
     _emit_fail, _ensure_scripts_path, _exc_text, _l1_fingerprint, _reports)
@@ -13,78 +18,6 @@ from .turn_driver import (_create_l1_work, _enqueue_ephemeral_workspace_index,
     _pull_with_live_logs, _start_turn, _wait_turn_verbose)
 logger = logging.getLogger(__name__)
 
-
-def _coding_case_done_message(
-    *,
-    done: int,
-    total: int,
-    iid: str,
-    status: str,
-    bucket: str | None = None,
-    patch_source: str | None = None,
-    steps: int | None = None,
-    elapsed_s: float | None = None,
-    error: str | None = None,
-) -> str:
-    """Stable log line for Ops live parse (steps / elapsed_s per instance)."""
-    parts = [f"[L1] coding {done}/{total} {iid} status={status}"]
-    if bucket:
-        parts.append(f"bucket={bucket}")
-    if patch_source:
-        parts.append(f"patch_source={patch_source}")
-    if steps is not None:
-        parts.append(f"steps={int(steps)}")
-    if elapsed_s is not None:
-        parts.append(f"elapsed_s={float(elapsed_s):.1f}")
-    if error:
-        parts.append(f"error={str(error)[:160]}")
-    return " ".join(parts)
-
-
-def _thinking_sidecar_src(work_root: Path | str, turn_id: UUID | str) -> Path:
-    return Path(work_root) / ".agent" / "thinking" / f"{turn_id}.jsonl"
-
-
-def _promote_thinking_sidecar(
-    *,
-    session_dir: Path,
-    iid: str,
-    turn_id: UUID | str,
-    work_root: Path | str,
-) -> Path | None:
-    """Copy eval thinking JSONL out of the worktree before cleanup."""
-    src = _thinking_sidecar_src(work_root, turn_id)
-    if not src.is_file() or src.stat().st_size <= 0:
-        return None
-    dest_dir = Path(session_dir) / "thinking"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / f"{iid}.jsonl"
-    with src.open(encoding="utf-8") as fh, dest.open("w", encoding="utf-8") as out:
-        for raw in fh:
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                row = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(row, dict):
-                continue
-            row["instance_id"] = iid
-            row["turn_id"] = str(turn_id)
-            out.write(json.dumps(row, ensure_ascii=False) + "\n")
-    return dest if dest.is_file() and dest.stat().st_size > 0 else None
-
-
-def _assemble_thinking_jsonl(session_dir: Path) -> Path | None:
-    parts = sorted((Path(session_dir) / "thinking").glob("*.jsonl"))
-    if not parts:
-        return None
-    out = Path(session_dir) / "thinking.jsonl"
-    with out.open("w", encoding="utf-8") as dest:
-        for part in parts:
-            dest.write(part.read_text(encoding="utf-8"))
-    return out if out.is_file() and out.stat().st_size > 0 else None
 
 async def run_coding_l1(
     *,
@@ -140,7 +73,6 @@ async def run_coding_l1(
         _ensure_slice_files,
         _load_instances,
         resolve_coding_selection,
-        run_swe_eval,
         write_predictions,
     )
 
@@ -361,7 +293,7 @@ async def run_coding_l1(
                             await _emit(
                                 on_progress,
                                 "log",
-                                message=_coding_case_done_message(
+                                message=coding_case_done_message(
                                     done=done_count,
                                     total=len(ordered),
                                     iid=iid,
@@ -573,7 +505,7 @@ async def run_coding_l1(
                 # Keep eval thinking before wiping the worktree (not in turn_events).
                 if work is not None and turn is not None:
                     try:
-                        dest = _promote_thinking_sidecar(
+                        dest = promote_thinking_sidecar(
                             session_dir=Path(session.dir),
                             iid=iid,
                             turn_id=turn["id"],
@@ -656,7 +588,7 @@ async def run_coding_l1(
                     await _emit(
                         on_progress,
                         "log",
-                        message=_coding_case_done_message(
+                        message=coding_case_done_message(
                             done=done_count,
                             total=len(ordered),
                             iid=iid,
@@ -781,7 +713,7 @@ async def run_coding_l1(
         except OSError:
             logger.warning("failed to write csi_probes.json", exc_info=True)
         try:
-            assembled = _assemble_thinking_jsonl(Path(session.dir))
+            assembled = assemble_thinking_jsonl(Path(session.dir))
             if assembled is not None:
                 await _emit(
                     on_progress,
@@ -793,160 +725,14 @@ async def run_coding_l1(
                 )
         except OSError:
             logger.warning("failed to assemble thinking.jsonl", exc_info=True)
-        harness_result: dict[str, Any] = {}
-        if run_harness:
-            pred_n = 0
-            try:
-                with pred_path.open(encoding="utf-8") as pf:
-                    pred_n = sum(1 for line in pf if line.strip())
-            except OSError:
-                pred_n = len(ordered)
-            await _emit(
-                on_progress,
-                "log",
-                message=f"[L1] coding harness start n={pred_n}",
-            )
-            await _emit(on_progress, "log", message="[L1] coding harness resolve…")
-            try:
-                from official_bench.swe_run import (
-                    format_l1_harness_event,
-                    parse_harness_stdout_line,
-                )
-
-                loop = asyncio.get_running_loop()
-                last_emit_key: tuple[Any, ...] | None = None
-
-                def _harness_sink(raw: str) -> None:
-                    nonlocal last_emit_key
-                    ev = parse_harness_stdout_line(raw)
-                    if ev is None:
-                        return
-                    # Mid-run focus: progress + stage. Skip chatty log fragments.
-                    if ev.get("kind") == "log":
-                        return
-                    if ev.get("kind") == "progress":
-                        key = (
-                            "progress",
-                            ev.get("done"),
-                            ev.get("total"),
-                            ev.get("resolved"),
-                            ev.get("unresolved"),
-                            ev.get("error"),
-                        )
-                    else:
-                        key = ("stage", ev.get("stage"), ev.get("n"), ev.get("detail"))
-                    if key == last_emit_key:
-                        return
-                    last_emit_key = key
-                    msg = format_l1_harness_event(ev)
-                    if not msg:
-                        return
-
-                    def _schedule() -> None:
-                        asyncio.create_task(_emit(on_progress, "log", message=msg))
-
-                    try:
-                        loop.call_soon_threadsafe(_schedule)
-                    except RuntimeError:
-                        pass
-
-                harness = await asyncio.to_thread(
-                    run_swe_eval,
-                    predictions=pred_path,
-                    on_line=_harness_sink,
-                )
-                h_metrics = harness.get("metrics") or {}
-                metrics.update(h_metrics)
-                if "resolve_rate" not in metrics and isinstance(
-                    h_metrics.get("resolve_rate"), (int, float)
-                ):
-                    metrics["resolve_rate"] = float(h_metrics["resolve_rate"])
-                harness_result = (
-                    harness.get("result") if isinstance(harness.get("result"), dict) else {}
-                )
-                resolved_ids = {
-                    str(x)
-                    for x in (harness_result.get("resolved_ids") or [])
-                    if x is not None
-                }
-                unresolved_ids = [
-                    str(x)
-                    for x in (harness_result.get("unresolved_ids") or [])
-                    if x is not None
-                ]
-                error_ids = [
-                    str(x)
-                    for x in (harness_result.get("error_ids") or [])
-                    if x is not None
-                ]
-                # Write harness outcome back onto per-instance cases for Ops.
-                has_resolve_list = isinstance(harness_result.get("resolved_ids"), list)
-                for case in session.cases:
-                    iid = str(case.get("case_id") or "")
-                    if not iid or iid.startswith("swebench.lite"):
-                        continue
-                    l2 = case.get("l2") if isinstance(case.get("l2"), dict) else {}
-                    if has_resolve_list:
-                        l2["resolved"] = iid in resolved_ids
-                    l2["bucket"] = classify_bucket("coding", l2)
-                    case["l2"] = l2
-                    case["bucket"] = l2.get("bucket")
-                    m = dict(case.get("metrics") or {})
-                    if has_resolve_list:
-                        m["resolved"] = 1.0 if l2.get("resolved") else 0.0
-                    case["metrics"] = m
-                if has_resolve_list:
-                    metrics["n_resolved"] = float(len(resolved_ids))
-                rate = metrics.get("resolve_rate")
-                rate_s = (
-                    f"{float(rate):.4f}"
-                    if isinstance(rate, (int, float))
-                    else "?"
-                )
-                denom = pred_n or max(
-                    len(resolved_ids) + len(unresolved_ids) + len(error_ids), 1
-                )
-                await _emit(
-                    on_progress,
-                    "log",
-                    message=(
-                        f"[L1] coding harness done resolved={len(resolved_ids)}/{denom} "
-                        f"unresolved={len(unresolved_ids)} error={len(error_ids)} "
-                        f"rate={rate_s}"
-                    ),
-                )
-                for hid in sorted(resolved_ids):
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=f"[L1] coding harness case {hid} outcome=resolved",
-                    )
-                for hid in unresolved_ids:
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=f"[L1] coding harness case {hid} outcome=unresolved",
-                    )
-                for hid in error_ids:
-                    await _emit(
-                        on_progress,
-                        "log",
-                        message=f"[L1] coding harness case {hid} outcome=error",
-                    )
-            except Exception as exc:  # noqa: BLE001
-                metrics["harness_error"] = str(exc)
-                metrics["note"] = f"harness failed: {exc}"
-                await _emit(
-                    on_progress,
-                    "log",
-                    message=f"[L1] coding harness done status=failed error={_exc_text(exc)[:200]}",
-                )
-                await _emit_fail(on_progress, "suite=coding.harness", error=str(exc))
-        else:
-            metrics["note"] = (
-                "patch_rate is auxiliary; official resolve requires harness "
-                "(Ops coding always enables harness)"
-            )
+        harness_result = await maybe_run_coding_harness(
+            run_harness=run_harness,
+            pred_path=pred_path,
+            ordered=ordered,
+            session=session,
+            metrics=metrics,
+            on_progress=on_progress,
+        )
 
         session.metrics = metrics
         result = {

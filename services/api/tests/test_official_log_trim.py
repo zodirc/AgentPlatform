@@ -65,3 +65,19 @@ def test_ast_progress_skips_small_building_ticks() -> None:
     assert _ast_progress_should_emit(
         last, ready, status="ready", files_done=900, files_total=900
     )
+
+
+def test_trim_keeps_suite_start_and_case_finished() -> None:
+    logs: list[dict] = [
+        {"kind": "log", "message": "[L1] suite start retrieval"},
+        {"kind": "case_finished", "case_id": "official.retrieval"},
+    ]
+    for i in range(1600):
+        logs.append({"kind": "log", "message": f"[L1] · noise {i}"})
+    logs.append({"kind": "log", "message": "[L1] suite start context"})
+    out = trim_official_logs(logs, limit=1500)
+    messages = [str(x.get("message") or "") for x in out]
+    kinds = [str(x.get("kind") or "") for x in out]
+    assert any("suite start retrieval" in m for m in messages)
+    assert any("suite start context" in m for m in messages)
+    assert "case_finished" in kinds

@@ -48,6 +48,8 @@ describe("parseCodingLiveLine", () => {
         status: "pass",
         bucket: "patched",
         patchSource: "final",
+        steps: null,
+        elapsedSec: null,
       },
     });
   });

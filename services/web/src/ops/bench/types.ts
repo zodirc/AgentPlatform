@@ -143,6 +143,8 @@ export type OfficialRun = {
     status: string;
     metrics?: Record<string, number>;
     error?: string | null;
+    /** Sequential L1 suite wall seconds (Ops 总览). */
+    suite_wall_s?: number;
   }>;
   logs?: Array<{
     at?: string;

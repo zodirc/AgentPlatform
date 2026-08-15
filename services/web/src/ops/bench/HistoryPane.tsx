@@ -1,5 +1,8 @@
 import { Link } from "react-router-dom";
+import { HeadlineMetrics, MetricGuide } from "./MetricGuide";
+import { describeMetric } from "./metricGlossary";
 import { targetsFromRun } from "./progressParse";
+import { suiteWallTimes } from "./suiteTiming";
 import type { OfficialLogItem, OfficialRun } from "./types";
 
 type OfficialCase = NonNullable<OfficialRun["cases"]>[number];
@@ -11,6 +14,7 @@ export type HistoryPaneModel = Record<string, any>;
 
 export function HistoryPane({ model }: { model: HistoryPaneModel }) {
   const { filteredRuns, runs, historySelectMode, setHistorySelectMode, setCheckedRunIds, checkedRunIds, clearingHistory, deleteSelectedHistory, clearHistory, clearHistoryBefore, loadList, selectedId, loadDetail, shortId, toggleCheckedRun, runMetrics, historyHeadlineMetric, elapsedSeconds, isActiveStatus, nowMs, setPagePane, historyDeepLinkDoneRef, navigate, opsOfficialPath, secret, runSuitesLabel, statusClass, formatTime, formatDuration, detail, elapsedSec, busy, remainLabel, targetEnabled, rerunFrom, openAuthorizedHtml, setError, opsDisplayText, downloadAuthorizedFile, opsRunPath, tab, setTab, MetricBars, detailMetrics, ArtifactsPanel, artifacts, artifactsLoading, artifactsError, logTabItems, isOpsErrorLogLine } = model;
+  const suiteTimes = detail ? suiteWallTimes(detail, nowMs) : [];
   return (
         <>
           <div className="grid gap-5 lg:grid-cols-[320px_1fr]">
@@ -127,6 +131,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                       const checked = checkedRunIds.has(r.id);
                       const m = runMetrics(r);
                       const head = historyHeadlineMetric(m);
+                      const headInfo = head ? describeMetric(head.label) : null;
                       const durSec = elapsedSeconds(
                         r.created_at,
                         isActiveStatus(r.status) ? null : r.finished_at,
@@ -183,9 +188,15 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                               </div>
                               <div className="mt-1 flex justify-between font-mono text-[10px] text-muted-foreground">
                                 <span>{shortId(r.id)}</span>
-                                <span>
-                                  {head
-                                    ? `${head.label}=${
+                                <span
+                                  title={
+                                    headInfo
+                                      ? `${headInfo.en} — ${headInfo.effect}`
+                                      : undefined
+                                  }
+                                >
+                                  {head && headInfo
+                                    ? `${headInfo.zh} ${head.label}=${
                                         Number.isInteger(head.value)
                                           ? head.value
                                           : head.value.toFixed(3)
@@ -330,6 +341,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                   </div>
 
                   {tab === "overview" ? (
+                    <div className="space-y-3">
                     <div className="grid gap-3 sm:grid-cols-4">
                       {(
                         [
@@ -351,15 +363,52 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                           </div>
                         </div>
                       ))}
-                      <p className="sm:col-span-4 text-xs text-muted-foreground">
-                        单次指标见「指标」页签；完整分桶与逐题产物见「产物」；跨跑次汇总见顶栏「指标汇总」（仅
-                        completed）。
+                    </div>
+                    {suiteTimes.length > 0 ? (
+                        <div className="rounded-lg border border-border/70 px-3 py-2">
+                          <div className="text-[11px] text-muted-foreground">
+                            套件用时（墙钟，按执行顺序）
+                          </div>
+                          <ul className="mt-1.5 space-y-1">
+                            {suiteTimes.map((row) => (
+                              <li
+                                key={row.key}
+                                className="flex items-baseline justify-between gap-3 text-sm"
+                              >
+                                <span>{row.label}</span>
+                                <span className="tabular-nums text-muted-foreground">
+                                  {row.elapsedSec == null
+                                    ? "—"
+                                    : `${row.running ? "已用 " : ""}${formatDuration(row.elapsedSec)}`}
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                    ) : null}
+                    {Object.keys(detailMetrics).length > 0 ? (
+                      <div className="rounded-lg border border-border/70 px-3 py-2">
+                        <div className="text-[11px] text-muted-foreground">
+                          本次主指标
+                        </div>
+                        <div className="mt-1.5">
+                          <HeadlineMetrics metrics={detailMetrics} />
+                        </div>
+                      </div>
+                    ) : null}
+                    <MetricGuide />
+                      <p className="text-xs text-muted-foreground">
+                        其余数值见「指标」页签（悬停可见英文全称与读法）；完整分桶与逐题产物见「产物」；跨跑次汇总见顶栏「指标汇总」（仅
+                        completed）。冒烟数字不作效果结论。
                       </p>
                     </div>
                   ) : null}
 
                   {tab === "metrics" ? (
-                    <MetricBars metrics={detailMetrics} />
+                    <div className="space-y-3">
+                      <MetricGuide />
+                      <MetricBars metrics={detailMetrics} />
+                    </div>
                   ) : null}
 
                   {tab === "cases" ? (

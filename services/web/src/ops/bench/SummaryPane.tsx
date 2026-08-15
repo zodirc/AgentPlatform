@@ -1,4 +1,6 @@
 import type { MetricAgg } from "./types";
+import { describeMetric } from "./metricGlossary";
+import { MetricGuide } from "./MetricGuide";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type SummaryPaneModel = Record<string, any>;
@@ -19,6 +21,7 @@ export function SummaryPane({ model }: { model: SummaryPaneModel }) {
                 {scoredRunCount > 0
                   ? ` 当前 ${scoredRunCount} 次 completed 计入。`
                   : ""}
+                冒烟跑次即使 completed 也不作效果结论。
               </p>
             </div>
             <label className="flex items-center gap-1.5 text-xs">
@@ -34,6 +37,10 @@ export function SummaryPane({ model }: { model: SummaryPaneModel }) {
                 <option value="coding">含 coding</option>
               </select>
             </label>
+          </div>
+
+          <div className="mt-3">
+            <MetricGuide />
           </div>
 
           {metricAggs.length === 0 ? (
@@ -70,10 +77,23 @@ export function SummaryPane({ model }: { model: SummaryPaneModel }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {metricAggs.map((row: MetricAgg) => (
+                  {metricAggs.map((row: MetricAgg) => {
+                    const info = describeMetric(row.key);
+                    return (
                     <tr key={row.key} className="border-b border-border/60">
-                      <td className="py-1.5 pr-2 font-mono text-[11px]">
-                        {row.key}
+                      <td className="py-1.5 pr-2" title={`${info.en} — ${info.effect}`}>
+                        <div className="font-medium">
+                          {info.scope ? `${info.scope} · ${info.zh}` : info.zh}
+                        </div>
+                        <div className="font-mono text-[11px] text-muted-foreground">
+                          {row.key}
+                          <span className="ml-1.5 font-sans">
+                            {info.en}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
+                          {info.effect}
+                        </div>
                       </td>
                       <td className="py-1.5 pr-2 tabular-nums text-muted-foreground">
                         {row.n}
@@ -94,7 +114,8 @@ export function SummaryPane({ model }: { model: SummaryPaneModel }) {
                         {row.latest.toFixed(4)}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

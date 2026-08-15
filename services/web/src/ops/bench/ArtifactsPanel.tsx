@@ -4,11 +4,8 @@ import { opsRawPath, statusClass } from "../OpsShell";
 import { opsDisplayText } from "../opsDisplayText";
 import { OpsTextViewerModal } from "../OpsTextViewerModal";
 import type { ArtifactCase, RunArtifacts, SuiteArtifact } from "./types";
-import {
-  downloadAuthorizedFile,
-  fetchAuthorizedText,
-  openAuthorizedHtml,
-} from "./sse";
+import { downloadAuthorizedFile, fetchAuthorizedText, openAuthorizedHtml } from "./sse";
+import { dropAliasedMetrics } from "./metrics";
 
 export const SUITE_ARTIFACT_LABEL: Record<string, string> = {
   retrieval: "检索",
@@ -39,6 +36,7 @@ export function fmtResolveLabel(c: ArtifactCase): string {
 
 export function metricPreview(m: Record<string, number> | undefined): string {
   if (!m) return "—";
+  const metrics = dropAliasedMetrics(m);
   const preferred = [
     "resolve_rate",
     "patch_rate",
@@ -46,7 +44,6 @@ export function metricPreview(m: Record<string, number> | undefined): string {
     "n_nonempty_patches",
     "n_instances",
     "ndcg_at_10",
-    "agent.ndcg_at_10",
     "fts_okapi_rescore.ndcg_at_10",
     "fts_ts_rank.ndcg_at_10",
     "delta.ndcg_at_10",
@@ -58,13 +55,13 @@ export function metricPreview(m: Record<string, number> | undefined): string {
   ];
   const parts: string[] = [];
   for (const k of preferred) {
-    const v = m[k];
+    const v = metrics[k];
     if (typeof v === "number" && Number.isFinite(v)) {
       parts.push(Number.isInteger(v) ? `${k}=${v}` : `${k}=${v.toFixed(3)}`);
     }
   }
   if (!parts.length) {
-    for (const [k, v] of Object.entries(m)) {
+    for (const [k, v] of Object.entries(metrics)) {
       if (typeof v === "number" && Number.isFinite(v) && parts.length < 3) {
         parts.push(Number.isInteger(v) ? `${k}=${v}` : `${k}=${v.toFixed(3)}`);
       }

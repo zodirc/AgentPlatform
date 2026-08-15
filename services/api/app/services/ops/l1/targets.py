@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from .common import CancelCheck, L1Cancelled, L1TurnTracker, ProgressCb, _emit
@@ -39,6 +40,7 @@ async def run_l1_targets(
         if should_cancel is not None and should_cancel():
             raise L1Cancelled("L1 cancelled")
         await _emit(on_progress, "log", message=f"[L1] suite start {t}")
+        t0 = time.monotonic()
         if t == "retrieval":
             out[t] = await run_retrieval_l1(
                 limit_queries=retrieval_query_limit,
@@ -116,6 +118,7 @@ async def run_l1_targets(
                     "metrics": metrics,
                     "error": err,
                     "run_id": rid,
+                    "elapsed_s": round(time.monotonic() - t0, 1),
                 }
             )
     return out
