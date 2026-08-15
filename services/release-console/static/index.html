@@ -559,6 +559,18 @@
       background: var(--log-bg);
       box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 6%, transparent);
     }
+    .log-live {
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, var(--log-bg, transparent));
+      border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line-soft));
+      border-radius: var(--radius);
+      padding: 0.55rem 0.8rem;
+      margin: 0 0 0.5rem;
+    }
     .hint {
       color: var(--muted);
       font-size: 0.76rem;
@@ -853,8 +865,9 @@
         <button type="button" class="clear-log" id="btn-clear-log" title="清空当前输出栏（不删文件）">清空输出栏</button>
         <span class="remote-hint" id="log-meta-hint"></span>
       </div>
+      <pre class="log-live" id="log-live" hidden></pre>
       <pre class="log" id="log">—</pre>
-      <p class="hint">日志形如 <code>[2026-08-07 12:00:00]</code>，上新下旧。「清空输出栏」只清显示。产品站：<a href="http://localhost/">http://localhost/</a></p>
+      <p class="hint">实时进度看上方色条（当前墙钟）。任务开始时刻只在段头出现一次。产品站：<a href="http://localhost/">http://localhost/</a></p>
     </section>
   </main>
   <script>
@@ -970,6 +983,77 @@
     function scheduleWatchRefresh(ms) {
       if (watchTimer) clearTimeout(watchTimer);
       watchTimer = setTimeout(() => refresh(true), ms);
+    }
+
+    function indexLiveItems() {
+      return ((plan && plan.live) || []).filter((l) =>
+        ["index_ops", "index_ops_zh", "index_product"].includes(String(l.item_id || ""))
+      );
+    }
+
+    function renderLiveLogBanner() {
+      const el = $("log-live");
+      if (!el) return;
+      const lives = indexLiveItems();
+      if (!lives.length) {
+        el.hidden = true;
+        el.textContent = "";
+        return;
+      }
+      el.hidden = false;
+      el.textContent = lives.map((live) => {
+        const bits = [live.summary || live.item_id || "sync"];
+        if (live.files_done != null && live.files_total) {
+          bits.push(`文件 ${live.files_done}/${live.files_total}`);
+        }
+        return `▶ ${bits.join(" · ")}`;
+      }).join("\n");
+    }
+
+    function followIndexLogModule() {
+      const lives = indexLiveItems();
+      if (!lives.length || (logModule && logModule !== "all")) return;
+      const next = String(lives[0].item_id || "");
+      if (!next || next === logModule) return;
+      logModule = next;
+      try { localStorage.setItem("releaseLogModule", logModule); } catch (_) {}
+      renderLogTabs();
+    }
+
+    function stripClonedJobClock(raw) {
+      const text = String(raw || "");
+      const lines = text.split("\n");
+      const re = /^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\](?: \(最新\))? ?/;
+      const counts = {};
+      for (const ln of lines) {
+        const m = ln.match(re);
+        if (m) counts[m[1]] = (counts[m[1]] || 0) + 1;
+      }
+      let jobTs = "";
+      let max = 0;
+      for (const [ts, n] of Object.entries(counts)) {
+        if (n > max) { max = n; jobTs = ts; }
+      }
+      if (!jobTs || max < 6) return text;
+      const prefix = `[${jobTs}] `;
+      const alt = `[${jobTs}] (最新) `;
+      const out = [];
+      let seenHead = false;
+      for (const ln of lines) {
+        if (ln.startsWith(alt) || ln.startsWith(prefix)) {
+          const rest = ln.startsWith(alt) ? ln.slice(alt.length) : ln.slice(prefix.length);
+          if (!seenHead) {
+            out.push(`任务开始 ${jobTs}`);
+            if (rest) out.push(rest);
+            seenHead = true;
+          } else {
+            out.push(rest);
+          }
+        } else {
+          out.push(ln);
+        }
+      }
+      return out.join("\n");
     }
 
     // 产品 Agent vs Ops 分轨；二级目录像资源管理器。
@@ -1377,7 +1461,7 @@
           ? `【${lg.log_key || logModule}】还没有任务输出。\n` +
             `· 拉取远程 → git / all\n` +
             `· 重建/同步 → 对应模块；形如 [日期 时间] 日志`
-          : lg.text;
+          : stripClonedJobClock(lg.text);
         if (hideLogUntilChange !== null) {
           if (text === hideLogUntilChange) {
             updateClearBtn();
@@ -1482,6 +1566,8 @@
         plan = next;
         $("err").textContent = "";
         const phase = (plan.deploy || {}).phase || "idle";
+        renderLiveLogBanner();
+        followIndexLogModule();
         if (changed) {
           lastPlanSig = sig;
           renderHeader();
@@ -1512,7 +1598,7 @@
         }
         if (watchDeploy) {
           if (deploying || qCount > 0) {
-            scheduleWatchRefresh(2000);
+            scheduleWatchRefresh(indexLiveItems().length ? 1000 : 2000);
           } else if (["done", "failed", "idle"].includes(phase)) {
             // Deploy settled — one more forced rebuild so rows flip off「存在变动」.
             watchDeploy = false;
@@ -1521,12 +1607,13 @@
         }
 
         if (watchAction) {
+          const tick = indexLiveItems().length ? 1000 : 2000;
           if (watchAction === "live") {
             if ((!hasLive && qCount === 0) || Date.now() > watchUntil) {
               watchAction = null;
               if (!force) scheduleWatchRefresh(500);
             } else {
-              scheduleWatchRefresh(2000);
+              scheduleWatchRefresh(tick);
             }
           } else {
             const itemId = {
@@ -1543,7 +1630,7 @@
               : null;
             const stillGoing = !!(it && (it.status === "running" || it.live || it.queue));
             if (stillGoing && Date.now() <= watchUntil) {
-              scheduleWatchRefresh(2000);
+              scheduleWatchRefresh(tick);
             } else {
               watchAction = null;
               if (!force) scheduleWatchRefresh(500);

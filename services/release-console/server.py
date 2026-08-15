@@ -1059,11 +1059,17 @@ def _sync_summary(prog: dict) -> tuple[str, float | None]:
             short = short.split(token, 1)[-1]
     short = short[-48:] if len(short) > 48 else short
     pct: float | None = None
+    chunk_bit = file_bit = ""
     try:
-        done = prog.get("chunks_embedded")
-        total = prog.get("chunks_total")
+        done, total = prog.get("chunks_embedded"), prog.get("chunks_total")
         if done is not None and total is not None and int(total) > 0:
             pct = round(100.0 * int(done) / int(total), 1)
+            chunk_bit = f"{int(done)}/{int(total)}块"
+        fd, ft = prog.get("files_done"), prog.get("files_total")
+        if fd is not None and ft is not None and int(ft) > 0:
+            file_bit = f"{int(fd)}/{int(ft)}文件"
+            if pct is None:
+                pct = round(100.0 * int(fd) / int(ft), 1)
     except (TypeError, ValueError):
         pct = None
     bits = [f"同步·{phase or 'running'}"]
@@ -1077,20 +1083,15 @@ def _sync_summary(prog: dict) -> tuple[str, float | None]:
         pass
     if pct is not None:
         bits.append(f"{pct}%")
-        try:
-            bits.append(
-                f"{int(prog.get('chunks_embedded') or 0)}/{int(prog.get('chunks_total') or 0)}块"
-            )
-        except (TypeError, ValueError):
-            pass
+    if chunk_bit:
+        bits.append(chunk_bit)
+    elif file_bit:
+        bits.append(file_bit)
     try:
         rate = prog.get("rate_chunks_per_s")
         if rate is not None and float(rate) > 0:
             r = float(rate)
             bits.append(f"{r:.0f}/s" if r >= 10 else f"{r:.1f}/s")
-    except (TypeError, ValueError):
-        pass
-    try:
         eta = prog.get("eta_s")
         if eta is not None and float(eta) > 1:
             bits.append(f"ETA {int(float(eta))}s")
@@ -1257,7 +1258,7 @@ def _collect_live() -> dict[str, dict]:
         if (
             active
             and phase not in {"finished", "error", ""}
-            and _sync_progress_fresh(prog)
+            and _sync_progress_fresh(prog, max_age_s=900.0)
         ):
             item_id = _sync_item_id(prog) or "index_product"
             summary, pct = _sync_summary(prog)
@@ -1280,6 +1281,8 @@ def _collect_live() -> dict[str, dict]:
                 "scopes_total": prog.get("scopes_total"),
                 "rate_chunks_per_s": prog.get("rate_chunks_per_s"),
                 "eta_s": prog.get("eta_s"),
+                "files_done": prog.get("files_done"),
+                "files_total": prog.get("files_total"),
             }
 
     dep = _read_deploy_status()
@@ -1603,6 +1606,8 @@ _LOG_ENTRY_RE = re.compile(
     r"^==> (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.*)$",
     re.MULTILINE,
 )
+_LOG_BODY_TAIL = 80_000
+_LOG_TIMELINE_MAX = 160_000
 _MANAGED_LOG_KEYS = (
     "git",
     "api",
@@ -1658,7 +1663,7 @@ def _parse_log_entries(key: str, text: str, file_mtime: float) -> list[dict]:
                 "ts_epoch": file_mtime,
                 "module": key,
                 "title": "（整文件，无分段时间戳）",
-                "body": text.strip()[-8_000:],
+                "body": text.strip()[-_LOG_BODY_TAIL:],
             }
         ]
     entries: list[dict] = []
@@ -1678,7 +1683,7 @@ def _parse_log_entries(key: str, text: str, file_mtime: float) -> list[dict]:
                 "ts_epoch": epoch,
                 "module": key,
                 "title": title[:200],
-                "body": body[-8_000:] if body else "(无输出)",
+                "body": body[-_LOG_BODY_TAIL:] if body else "(无输出)",
             }
         )
     return entries
@@ -1704,7 +1709,7 @@ def _collect_entries(module: str | None = None) -> list[dict]:
             p = STATUS_DIR / rel
             if p.is_file() and p.stat().st_size > 0:
                 mt = p.stat().st_mtime
-                body = p.read_text(encoding="utf-8", errors="replace")[-8_000:].strip()
+                body = p.read_text(encoding="utf-8", errors="replace")[-_LOG_BODY_TAIL:].strip()
                 entries.append(
                     {
                         "ts": _fmt_local(mt),
@@ -1717,6 +1722,19 @@ def _collect_entries(module: str | None = None) -> list[dict]:
     return entries
 
 
+def _live_log_note(log_key: str) -> str:
+    for live in _collect_live().values():
+        if live.get("kind") != "sync":
+            continue
+        item = str(live.get("item_id") or "")
+        if log_key not in {ITEM_LOG_KEY.get(item, ""), "all", item}:
+            continue
+        summary = str(live.get("summary") or "").strip()
+        if summary:
+            return f"【实时 {time.strftime('%Y-%m-%d %H:%M:%S')}】{summary}"
+    return ""
+
+
 def _format_timeline(entries: list[dict], *, log_key: str) -> str:
     if not entries:
         return (
@@ -1726,24 +1744,26 @@ def _format_timeline(entries: list[dict], *, log_key: str) -> str:
     entries = sorted(entries, key=lambda e: float(e["ts_epoch"]), reverse=True)
     lines: list[str] = []
     for i, e in enumerate(entries):
-        tag = e["ts"]  # YYYY-MM-DD HH:MM:SS
+        tag = e["ts"]
         mod = e.get("module") or log_key
         title = (e.get("title") or "").strip()
         body = (e.get("body") or "").rstrip()
         newest = " (最新)" if i == 0 else ""
-        # 段头一行
-        head = f"[{tag}]{newest} [{mod}]"
+        head = f"[{tag}]{newest} [{mod}] 任务开始"
         if title and title not in {"(无输出)", "（整文件，无分段时间戳）"}:
-            head = f"{head} {title}"
+            head = f"{head} · {title}"
         lines.append(head)
+        if i == 0:
+            note = _live_log_note(str(e.get("module") or log_key))
+            if note:
+                lines.append(note)
         if body:
             for raw in body.splitlines():
-                # 正文每行也带同一时间戳，方便扫读
-                lines.append(f"[{tag}] {raw}")
+                lines.append(raw)
         lines.append("")
     text = "\n".join(lines).rstrip() + "\n"
-    if len(text) > 48_000:
-        text = "…(截断更早记录)…\n" + text[:48_000]
+    if len(text) > _LOG_TIMELINE_MAX:
+        text = "…(截断更早记录)…\n" + text[:_LOG_TIMELINE_MAX]
     return text
 
 
