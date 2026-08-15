@@ -27,6 +27,7 @@ export type Preset = {
   coding_n_instances?: number | null;
   coding_harness?: boolean;
   coding_checkout_repo?: boolean;
+  workspace_index_wait_ready?: boolean;
   retrieval_prod?: boolean;
   eval_path?: "agent" | "component";
   context_tier?: ContextTier;
@@ -79,6 +80,8 @@ export type OfficialRun = {
   coding_tier?: string;
   coding_n_instances?: number | null;
   coding_harness?: boolean;
+  coding_checkout_repo?: boolean;
+  workspace_index_wait_ready?: boolean;
   retrieval_prod?: boolean;
   eval_path?: string;
   context_limit?: number;
@@ -115,6 +118,8 @@ export type OfficialRun = {
     coding_tier?: string;
     coding_n_instances?: number | null;
     coding_harness?: boolean;
+    coding_checkout_repo?: boolean;
+    workspace_index_wait_ready?: boolean;
     retrieval_prod?: boolean;
     eval_path?: string;
     context_limit?: number;
@@ -195,6 +200,12 @@ export type CodingCaseLive = {
   patchSource?: string;
   /** Official harness outcome when available. */
   harness?: "resolved" | "unresolved" | "error";
+  /** Agent step.started count (from done log / l2). */
+  steps?: number | null;
+  /** Wall seconds for this instance (server elapsed_s). */
+  elapsedSec?: number | null;
+  /** Client clock when case start was seen (live tick for running). */
+  startedAtMs?: number | null;
 };
 
 export type CodingHarnessLive = {

@@ -1,6 +1,6 @@
 """SWE-bench Official L1 coding suite."""
 from __future__ import annotations
-import asyncio, json, logging, os
+import asyncio, json, logging, os, time
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -12,6 +12,33 @@ from .common import (CancelCheck, L1Cancelled, L1TurnTracker, L1_CODING_TURN_TIM
 from .turn_driver import (_create_l1_work, _enqueue_ephemeral_workspace_index,
     _pull_with_live_logs, _start_turn, _wait_turn_verbose)
 logger = logging.getLogger(__name__)
+
+
+def _coding_case_done_message(
+    *,
+    done: int,
+    total: int,
+    iid: str,
+    status: str,
+    bucket: str | None = None,
+    patch_source: str | None = None,
+    steps: int | None = None,
+    elapsed_s: float | None = None,
+    error: str | None = None,
+) -> str:
+    """Stable log line for Ops live parse (steps / elapsed_s per instance)."""
+    parts = [f"[L1] coding {done}/{total} {iid} status={status}"]
+    if bucket:
+        parts.append(f"bucket={bucket}")
+    if patch_source:
+        parts.append(f"patch_source={patch_source}")
+    if steps is not None:
+        parts.append(f"steps={int(steps)}")
+    if elapsed_s is not None:
+        parts.append(f"elapsed_s={float(elapsed_s):.1f}")
+    if error:
+        parts.append(f"error={str(error)[:160]}")
+    return " ".join(parts)
 
 
 def _thinking_sidecar_src(work_root: Path | str, turn_id: UUID | str) -> Path:
@@ -69,6 +96,7 @@ async def run_coding_l1(
     max_parallel: int | None = None,
     checkout_repo: bool = True,
     run_harness: bool = False,
+    workspace_index_wait_ready: bool | None = None,
     should_cancel: CancelCheck | None = None,
     turn_tracker: L1TurnTracker | None = None,
 ) -> dict[str, Any]:
@@ -120,15 +148,18 @@ async def run_coding_l1(
     coding_cfg = (cfg.get("suites") or {}).get("coding") or {}
     # E1 dual-track: suites.coding.workspace_index on|off (§7 eval-ephemeral).
     workspace_index_on = bool(coding_cfg.get("workspace_index"))
-    # Optional: await ready|stale before StartTurn (product-parity Locate).
-    # Env WORKSPACE_INDEX_WAIT_READY=1|0 overrides yaml when set.
-    _wait_env = os.environ.get("WORKSPACE_INDEX_WAIT_READY", "").strip().lower()
-    if _wait_env in {"1", "true", "yes", "on"}:
-        workspace_index_wait_ready = True
-    elif _wait_env in {"0", "false", "no", "off"}:
-        workspace_index_wait_ready = False
+    # Wait-ready: Ops run param > env > yaml (default false = R1 Turn-first).
+    if workspace_index_wait_ready is not None:
+        wait_ready_flag = bool(workspace_index_wait_ready)
     else:
-        workspace_index_wait_ready = bool(coding_cfg.get("workspace_index_wait_ready"))
+        _wait_env = os.environ.get("WORKSPACE_INDEX_WAIT_READY", "").strip().lower()
+        if _wait_env in {"1", "true", "yes", "on"}:
+            wait_ready_flag = True
+        elif _wait_env in {"0", "false", "no", "off"}:
+            wait_ready_flag = False
+        else:
+            wait_ready_flag = bool(coding_cfg.get("workspace_index_wait_ready"))
+    workspace_index_wait_ready = wait_ready_flag
     try:
         workspace_index_wait_timeout_s = float(
             os.environ.get(
@@ -261,6 +292,7 @@ async def run_coding_l1(
                     "mirror_hit": False,
                     "bucket": "infra_error",
                 }
+                t0 = time.monotonic()
                 await _emit(
                     on_progress,
                     "log",
@@ -311,7 +343,13 @@ async def run_coding_l1(
                                 iid,
                                 status="fail",
                                 error=err,
-                                metrics={"nonempty": 0.0},
+                                metrics={
+                                    "nonempty": 0.0,
+                                    "steps": 0.0,
+                                    "elapsed_s": float(
+                                        round(time.monotonic() - t0, 1)
+                                    ),
+                                },
                                 extra={
                                     "bucket": "checkout_failed",
                                     "l2": l2,
@@ -323,9 +361,14 @@ async def run_coding_l1(
                             await _emit(
                                 on_progress,
                                 "log",
-                                message=(
-                                    f"[L1] coding {done_count}/{len(ordered)} {iid} "
-                                    "status=fail bucket=checkout_failed"
+                                message=_coding_case_done_message(
+                                    done=done_count,
+                                    total=len(ordered),
+                                    iid=iid,
+                                    status="fail",
+                                    bucket="checkout_failed",
+                                    steps=0,
+                                    elapsed_s=time.monotonic() - t0,
                                 ),
                             )
                         await _emit_fail(on_progress, iid, error=err)
@@ -588,11 +631,18 @@ async def run_coding_l1(
                     if patch.strip():
                         nonempty += 1
                     case_status = "pass" if patch.strip() else "fail"
+                    elapsed_s = round(time.monotonic() - t0, 1)
+                    steps_n = int(l2.get("steps") or 0)
+                    l2["elapsed_s"] = elapsed_s
                     session.add_case(
                         iid,
                         status=case_status,
                         error=err,
-                        metrics={"nonempty": 1.0 if patch.strip() else 0.0},
+                        metrics={
+                            "nonempty": 1.0 if patch.strip() else 0.0,
+                            "steps": float(steps_n),
+                            "elapsed_s": float(elapsed_s),
+                        },
                         extra={
                             "turn_id": str(turn["id"]) if turn else "",
                             "patch_source": patch_source,
@@ -606,14 +656,16 @@ async def run_coding_l1(
                     await _emit(
                         on_progress,
                         "log",
-                        message=(
-                            f"[L1] coding {done_count}/{len(ordered)} {iid} "
-                            f"status={case_status} patch_source={patch_source}"
-                            + (
-                                f" error={str(err)[:160]}"
-                                if err
-                                else ""
-                            )
+                        message=_coding_case_done_message(
+                            done=done_count,
+                            total=len(ordered),
+                            iid=iid,
+                            status=case_status,
+                            bucket=str(l2.get("bucket") or "") or None,
+                            patch_source=patch_source,
+                            steps=steps_n,
+                            elapsed_s=elapsed_s,
+                            error=str(err) if err else None,
                         ),
                     )
                 if case_status == "fail" or err:
@@ -653,6 +705,27 @@ async def run_coding_l1(
             "mirror_prewarm_ok": float(len(prewarm_meta.get("ok") or [])),
             "mirror_prewarm_failed": float(len(prewarm_meta.get("failed") or {})),
         }
+        steps_total = 0.0
+        elapsed_total = 0.0
+        for c in session.cases:
+            if not isinstance(c, dict):
+                continue
+            if str(c.get("case_id") or "").startswith("swebench.lite"):
+                continue
+            m = c.get("metrics") if isinstance(c.get("metrics"), dict) else {}
+            l2c = c.get("l2") if isinstance(c.get("l2"), dict) else {}
+            try:
+                steps_total += float(m.get("steps", l2c.get("steps") or 0) or 0)
+            except (TypeError, ValueError):
+                pass
+            try:
+                elapsed_total += float(
+                    m.get("elapsed_s", l2c.get("elapsed_s") or 0) or 0
+                )
+            except (TypeError, ValueError):
+                pass
+        metrics["steps_total"] = steps_total
+        metrics["elapsed_s_total"] = round(elapsed_total, 1)
         # CSI §7.6 suite rates from per-case l2 counters (Wave 1+2 probes).
         csi_cases = [
             dict(c.get("l2") or {})

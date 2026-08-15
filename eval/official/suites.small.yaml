@@ -106,8 +106,8 @@ suites:
     # Set false only for explicit index-off baseline dual-track.
     workspace_index: true
     # Optional: await ready|stale before StartTurn (closer to real coding).
-    # Default false preserves R1 (Turn first). Enable for dual-track on-arm measure.
-    # Override without yaml edit: WORKSPACE_INDEX_WAIT_READY=1
+    # Default false preserves R1 (Turn first). Enable via Ops Bench toggle,
+    # WORKSPACE_INDEX_WAIT_READY=1, or yaml true (Ops run param wins).
     # Timeout override: WORKSPACE_INDEX_WAIT_TIMEOUT_S=300
     workspace_index_wait_ready: false
     workspace_index_wait_timeout_s: 300

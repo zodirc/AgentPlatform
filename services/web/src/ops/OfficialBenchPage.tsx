@@ -257,6 +257,8 @@ export function OfficialBenchPage() {
   const [codingNInstances, setCodingNInstances] = useState(5);
   const [codingHarness] = useState(true);
   const [codingCheckoutRepo, setCodingCheckoutRepo] = useState(true);
+  /** Await AST ready before StartTurn; default off (R1). */
+  const [workspaceIndexWaitReady, setWorkspaceIndexWaitReady] = useState(false);
   const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
     { id: "n3", n_instances: 3 },
     { id: "n5", n_instances: 5 },
@@ -346,6 +348,7 @@ export function OfficialBenchPage() {
           coding_n?: number;
           coding_harness?: boolean;
           coding_checkout_repo?: boolean;
+          workspace_index_wait_ready?: boolean;
           retrieval_prod?: boolean;
           eval_path?: string;
           context_tier?: string;
@@ -404,6 +407,9 @@ export function OfficialBenchPage() {
         if (typeof saved.coding_checkout_repo === "boolean") {
           // Checkout is mandatory for coding structural / git_diff — ignore saved false.
           setCodingCheckoutRepo(true);
+        }
+        if (typeof saved.workspace_index_wait_ready === "boolean") {
+          setWorkspaceIndexWaitReady(saved.workspace_index_wait_ready);
         }
         if (typeof saved.retrieval_prod === "boolean")
           setRetrievalProd(saved.retrieval_prod);
@@ -503,6 +509,7 @@ export function OfficialBenchPage() {
           coding_n: codingNInstances,
           coding_harness: codingHarness,
           coding_checkout_repo: true,
+          workspace_index_wait_ready: workspaceIndexWaitReady,
           retrieval_prod: retrievalProd,
           eval_path: "agent",
           context_tier: contextTier,
@@ -528,6 +535,7 @@ export function OfficialBenchPage() {
     codingNInstances,
     codingHarness,
     codingCheckoutRepo,
+    workspaceIndexWaitReady,
     retrievalProd,
     contextTier,
     retrievalTier,
@@ -954,6 +962,9 @@ export function OfficialBenchPage() {
       parallel: Number(parallel) || 1,
       codingTier: String(src.coding_tier || meta.coding_tier || ""),
       codingHarness: Boolean(src.coding_harness ?? meta.coding_harness),
+      workspaceIndexWaitReady: Boolean(
+        src.workspace_index_wait_ready ?? meta.workspace_index_wait_ready,
+      ),
       frozen: true as const,
     };
   }, [detail, liveRun, selectedId]);
@@ -964,6 +975,8 @@ export function OfficialBenchPage() {
   const displayRetrievalTier =
     paramsFromActiveRun?.retrievalTier ?? retrievalTier;
   const displayParallel = paramsFromActiveRun?.parallel ?? l1Parallel;
+  const displayWaitReady =
+    paramsFromActiveRun?.workspaceIndexWaitReady ?? workspaceIndexWaitReady;
 
   // Leaving a live run must detach SSE immediately — otherwise its logs keep
   // appending into the shared buffer while another (finished) run is selected.
@@ -1084,6 +1097,7 @@ export function OfficialBenchPage() {
     coding_n_instances?: number | null;
     coding_harness?: boolean;
     retrieval_prod?: boolean;
+    workspace_index_wait_ready?: boolean;
   }) => {
     const suites = (opts?.suites ?? Array.from(selectedSuites)).filter((s) =>
       targetEnabled(s),
@@ -1097,6 +1111,8 @@ export function OfficialBenchPage() {
     // Coding always runs official SWE harness (API also forces this).
     const harness = suites.includes("coding");
     const prod = opts?.retrieval_prod ?? retrievalProd;
+    const waitReady =
+      opts?.workspace_index_wait_ready ?? workspaceIndexWaitReady;
     if (
       suites.includes("coding") &&
       tier === "custom" &&
@@ -1159,6 +1175,7 @@ export function OfficialBenchPage() {
       setCodingTier(tier);
       if (nInst != null) setCodingNInstances(nInst);
       setRetrievalProd(prod);
+      setWorkspaceIndexWaitReady(waitReady);
     }
     setBusy(true);
     resetLive();
@@ -1178,6 +1195,7 @@ export function OfficialBenchPage() {
           coding_n_instances: tier === "custom" ? nInst : null,
           coding_harness: harness,
           coding_checkout_repo: true,
+          workspace_index_wait_ready: waitReady,
           retrieval_prod: prod,
           eval_path: "agent",
           retrieval_arm: "free",
@@ -1418,6 +1436,11 @@ export function OfficialBenchPage() {
         r.coding_n_instances ?? r.model_meta?.coding_n_instances ?? null,
       coding_harness: r.coding_harness ?? r.model_meta?.coding_harness ?? false,
       retrieval_prod: r.retrieval_prod ?? r.model_meta?.retrieval_prod ?? true,
+      workspace_index_wait_ready: Boolean(
+        r.workspace_index_wait_ready ??
+          r.model_meta?.workspace_index_wait_ready ??
+          false,
+      ),
     });
   };
 
@@ -1741,7 +1764,9 @@ export function OfficialBenchPage() {
           contextTierLabel, displayContextTier, displayParallel, BENCH_SCENARIO_GROUPS,
           targetsMeta, FALLBACK_SUITE_META, markCustomProfile,
           toggleSuite, retrievalTier, setRetrievalTier, contextTier, setContextTier,
-          l1Parallel, setL1Parallel, codingTierMeta, setCodingTier, caps,
+          l1Parallel, setL1Parallel, codingTierMeta, setCodingTier,
+          workspaceIndexWaitReady, setWorkspaceIndexWaitReady, displayWaitReady,
+          caps,
           needsLiveModel, modelProvider, applyProviderPreset, PROVIDER_PRESETS,
           modelApiStyle, setModelApiStyle, modelName, setModelName, modelBaseUrl,
           setModelBaseUrl, apiKeySaveFlash, apiKeyStored, apiKeyEditing, setApiKeyEditing, apiKeyDirty,
@@ -1754,7 +1779,7 @@ export function OfficialBenchPage() {
           suitePct, barPct, codingRows, codingSummary, HARNESS_STAGE_LABEL,
           shortCaseToken, astIndexRows, astIndexSummary, astIndexExpanded,
           setAstIndexExpanded, ChevronUp, ChevronDown, logBoxRef, liveLogs,
-          liveLogLineClass, OfficialLogLine,
+          liveLogLineClass, OfficialLogLine, nowMs, formatDuration,
         }} />
       ) : pagePane === "history" ? (
         <HistoryPane model={{

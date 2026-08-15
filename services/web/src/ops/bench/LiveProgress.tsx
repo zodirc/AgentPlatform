@@ -1,10 +1,49 @@
 import type { AstIndexLive, CodingCaseLive } from "./types";
+import {
+  formatCodingCaseStats,
+  sumCodingCaseStats,
+} from "./codingLive";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type LiveProgressModel = Record<string, any>;
 
 export function LiveProgress({ model }: { model: LiveProgressModel }) {
-  const { busy, displayPhaseHint, timingLabel, detailProgress, detailPct, suiteProgressLabel, progress, itemsRemainLabel, suitePct, barPct, codingRows, codingSummary, HARNESS_STAGE_LABEL, shortCaseToken, astIndexRows, astIndexSummary, astIndexExpanded, setAstIndexExpanded, ChevronUp, ChevronDown, logBoxRef, liveLogs, liveLogLineClass, OfficialLogLine, secret } = model;
+  const {
+    busy,
+    displayPhaseHint,
+    timingLabel,
+    detailProgress,
+    detailPct,
+    suiteProgressLabel,
+    progress,
+    itemsRemainLabel,
+    suitePct,
+    barPct,
+    codingRows,
+    codingSummary,
+    HARNESS_STAGE_LABEL,
+    shortCaseToken,
+    astIndexRows,
+    astIndexSummary,
+    astIndexExpanded,
+    setAstIndexExpanded,
+    ChevronUp,
+    ChevronDown,
+    logBoxRef,
+    liveLogs,
+    liveLogLineClass,
+    OfficialLogLine,
+    secret,
+    nowMs,
+    formatDuration,
+  } = model;
+  const tickMs = typeof nowMs === "number" ? nowMs : Date.now();
+  const fmt =
+    typeof formatDuration === "function"
+      ? formatDuration
+      : (s: number | null | undefined) =>
+          s == null || !Number.isFinite(s) ? "—" : `${Math.floor(s)}s`;
+  const codingTotals = sumCodingCaseStats(codingRows || [], tickMs);
   return (
     <>
             {busy ? (
@@ -218,6 +257,12 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                           {codingSummary.fail > 0
                             ? ` · 失败 ${codingSummary.fail}`
                             : ""}
+                          {codingTotals.stepsKnown > 0
+                            ? ` · 总步数 ${codingTotals.stepsTotal}`
+                            : ""}
+                          {codingTotals.elapsedKnown > 0
+                            ? ` · 总耗时 ${fmt(codingTotals.elapsedTotalSec)}`
+                            : ""}
                           {codingSummary.harness.phase === "idle"
                             ? " · 完成后进入 harness"
                             : ""}
@@ -233,6 +278,11 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                                       row.patchSource !== "none"
                                     ? `${row.status} · ${row.patchSource}`
                                     : row.status;
+                            const stats = formatCodingCaseStats(
+                              row,
+                              tickMs,
+                              fmt,
+                            );
                             return (
                               <li
                                 key={row.iid}
@@ -241,7 +291,12 @@ export function LiveProgress({ model }: { model: LiveProgressModel }) {
                                 <span className="truncate font-mono text-foreground/90">
                                   {shortCaseToken(row.iid)}
                                 </span>
-                                <span className="shrink-0 tabular-nums text-muted-foreground">
+                                <span className="shrink-0 text-right tabular-nums text-muted-foreground">
+                                  {stats ? (
+                                    <span className="mr-2 text-foreground/70">
+                                      {stats}
+                                    </span>
+                                  ) : null}
                                   {label}
                                 </span>
                               </li>

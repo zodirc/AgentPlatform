@@ -15,16 +15,20 @@
 
 | 套件 | 主指标 | 值 | run_id | 备注 |
 |------|--------|----|--------|------|
-| retrieval | agent nDCG@10 | **0.4755** | `cd16092c-5b35-478b-ba1f-4bbada5876b4` | 2026-08-07 · **bge-m3@1024 / INDEX 12** · smoke · free · BEIR 20q/库 · R@10 **0.4908** · MAP@1 **0.246** · vs gte-large 史 `d31375a5` 0.5435 |
-| retrieval_zh | agent nDCG@10 | **0.6780** | `f84fd420-9fba-4f43-8e81-618ce0e2d7d3` | 2026-08-07 · 同栈 · C-MTEB smoke · free · R@10 **0.8667** · MAP@1 **0.517** · infra_rate 0 · **勿与 BEIR 混宏分** |
-| context | agent F1 / EM | **0.5288 / 0.2500** | `b9bcf931-9a7d-4528-af8b-bc5506be6955` | 2026-08-07 · 同栈 · smoke · free · scorer=v2 · 近 gte-large 史 `46df8722`（0.539/0.233） |
+| retrieval | agent nDCG@10 | **0.4547** | `c44a9f00-c926-4b34-a34c-f2e1fa37a1a2` | 2026-08-15 · **bge-m3@1024 / INDEX 12** · smoke · free · BEIR 20q · R@10 **0.4571** · R@100 **0.5296** · MAP@1 **0.246** · 详见 `RESULTS.md` |
+| retrieval_zh | agent nDCG@10 | **0.6433** | `de6ae46c-029b-4639-a865-2c2f5b455d86` | 2026-08-15 · 同栈 · C-MTEB smoke · free · R@10 **0.8167** · MAP@1 **0.500** · infra_rate 0 · **勿与 BEIR 混宏分** ·（`baseline --update` 暂未写入 smoke 栏） |
+| context | agent F1 / EM | **0.5579 / 0.3000** | `4d090bc1-b0fd-41ad-9b4f-d9ab702653ac` | 2026-08-15 · 同栈 · smoke · free · scorer=v2 · model=`deepseek-v4-flash` · n=60 |
+| coding（烟） | resolve_rate | **0.600** | `ff37ceb5-c15a-4b34-9646-8105f964e222` | 2026-08-15 · **n5 + harness** · **wait_ready=on** · **3/5**（同未过 14182/14365）· stepsΣ **467** · 墙钟Σ **≈1.92h** · fuse_ok≈**0.42** · harness `1a9244ba…` · **非锚点** |
+| retrieval（史） | agent nDCG@10 | **0.4755** | `cd16092c-5b35-478b-ba1f-4bbada5876b4` | 2026-08-07 · bge-m3 · BEIR 20q · R@10 0.4908 · MAP@1 0.246 |
+| retrieval_zh（史） | agent nDCG@10 | **0.6780** | `f84fd420-9fba-4f43-8e81-618ce0e2d7d3` | 2026-08-07 · C-MTEB · R@10 0.8667 · MAP@1 0.517 |
+| context（史） | agent F1 / EM | **0.5288 / 0.2500** | `b9bcf931-9a7d-4528-af8b-bc5506be6955` | 2026-08-07 · scorer=v2 |
 | retrieval（史） | agent nDCG@10 | **0.5435** | `d31375a5-6884-4007-9bdb-a0d1d65b6d9d` | 2026-08-06 · **gte-large 历史** · smoke · free · 换代前对照 |
 | context（史） | agent F1 / EM | **0.5393 / 0.2333** | `46df8722-f2c3-4cc6-8ad5-58efc21d974e` | 2026-08-06 · gte-large 同期 · scorer=v2 |
 | retrieval（史） | agent nDCG@10 | 0.4425 | `307ea1d0-6502-468b-85ea-c209f1377567` | 更旧 smoke；保留对照 |
 | context（史） | agent F1 / EM | 0.3677 / 0.2500 | `9998d9eb-9973-4938-bacf-3207aca4f781` | 旧 smoke（v1 口径附近）；保留对照 |
-| coding（烟） | resolve_rate | **0.600** | `5a4e9ba9-c3d2-4df6-bf0c-39e87d891826` | 2026-08-14 · **n5 + harness** · Wave 4 后 · **3/5**（同未过 14182/14365；14182 `turn.failed` PG COMMIT timeout）· `file_hit=1.0` · `tests_before_submit=1.0`（指纹）· `test_summary=0/55` · Ops `05bb784b…` · **非锚点** |
-| coding（烟·史） | resolve_rate | **0.600** | `66077649-7e89-491c-9a9f-010c69aa18d5` | 2026-08-14 · n5 + harness · Wave 3 后 · 3/5 同题 · `tests_before_submit=0.2` · Ops `6fe50571…` |
-| coding（烟·史） | resolve_rate | **0.600** | `b3357dd6-19d5-4669-ae06-ec3bc1a50d27` | 2026-08-13 · n5 + harness · 3/5 · Wave 3 前对照（无完整 D1） |
+| coding（烟·史） | resolve_rate | **0.600** | `5a4e9ba9-c3d2-4df6-bf0c-39e87d891826` | 2026-08-14 · Wave 4 后 · 3/5 同题 · Ops `05bb784b…` |
+| coding（烟·史） | resolve_rate | **0.600** | `66077649-7e89-491c-9a9f-010c69aa18d5` | 2026-08-14 · Wave 3 后 · 3/5 同题 |
+| coding（烟·史） | resolve_rate | **0.600** | `b3357dd6-19d5-4669-ae06-ec3bc1a50d27` | 2026-08-13 · Wave 3 前对照 |
 
 ## 复跑触发条件（锚点落章后）
 

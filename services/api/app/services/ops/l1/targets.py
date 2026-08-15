@@ -24,6 +24,7 @@ async def run_l1_targets(
     context_arm: str = "free",
     coding_checkout_repo: bool = True,
     coding_harness: bool = False,
+    workspace_index_wait_ready: bool | None = None,
     should_cancel: CancelCheck | None = None,
     turn_tracker: L1TurnTracker | None = None,
     retrieval_datasets: list[str] | None = None,
@@ -85,6 +86,7 @@ async def run_l1_targets(
                 max_parallel=max_parallel,
                 checkout_repo=coding_checkout_repo,
                 run_harness=coding_harness,
+                workspace_index_wait_ready=workspace_index_wait_ready,
                 should_cancel=should_cancel,
                 turn_tracker=turn_tracker,
             )

@@ -55,6 +55,9 @@ export function LivePane({ model }: { model: LivePaneModel }) {
     setL1Parallel,
     codingTierMeta,
     setCodingTier,
+    workspaceIndexWaitReady,
+    setWorkspaceIndexWaitReady,
+    displayWaitReady,
     caps,
     needsLiveModel,
     modelProvider,
@@ -245,6 +248,12 @@ export function LivePane({ model }: { model: LivePaneModel }) {
                     <span className="text-muted-foreground">并行 </span>
                     {displayParallel}
                   </div>
+                  {displaySuites.includes("coding") ? (
+                    <div className="rounded-md border border-border bg-muted/20 px-2 py-1.5">
+                      <span className="text-muted-foreground">AST 先就绪 </span>
+                      {displayWaitReady ? "开" : "关"}
+                    </div>
+                  ) : null}
                 </div>
 
                 <div>
@@ -442,6 +451,23 @@ export function LivePane({ model }: { model: LivePaneModel }) {
                               不可用
                             </span>
                           ) : null}
+                        </span>
+                      </label>
+                      <label
+                        className="flex items-end gap-2 pb-1"
+                        title="开启后：checkout 后先等 ephemeral AST 到 ready/stale（或超时）再 StartTurn，贴近「索引建好再编码」。关闭（默认）遵循 R1：先开题，索引在 Turn 期间异步补。"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={workspaceIndexWaitReady}
+                          disabled={busy || Boolean(paramsFromActiveRun)}
+                          onChange={(e) => {
+                            markCustomProfile();
+                            setWorkspaceIndexWaitReady(e.target.checked);
+                          }}
+                        />
+                        <span className="text-[11px] leading-tight">
+                          先建 AST 索引再开题
                         </span>
                       </label>
                       {selectedSuites.has("coding") &&

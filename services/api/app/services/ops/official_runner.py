@@ -104,6 +104,8 @@ class OfficialLiveRun:
     retrieval_arm: str = "free"
     context_arm: str = "free"
     coding_checkout_repo: bool = True
+    # Ops toggle: await AST ready before StartTurn (default false = R1).
+    workspace_index_wait_ready: bool = False
     # SciFact mid-corpus micro L1: dataset filter + isolated {name}-micro index.
     retrieval_datasets: list[str] = field(default_factory=list)
     retrieval_corpus_mode: str = "full"
@@ -318,6 +320,7 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "retrieval_arm": run.retrieval_arm,
             "context_arm": run.context_arm,
             "coding_checkout_repo": run.coding_checkout_repo,
+            "workspace_index_wait_ready": run.workspace_index_wait_ready,
             "retrieval_datasets": list(run.retrieval_datasets),
             "retrieval_corpus_mode": run.retrieval_corpus_mode,
             "bench_job_id": run._bench_job_id,
@@ -749,6 +752,7 @@ async def create_and_start(
     retrieval_arm: str = "free",
     context_arm: str = "free",
     coding_checkout_repo: bool = True,
+    workspace_index_wait_ready: bool = False,
     retrieval_datasets: list[str] | None = None,
     retrieval_corpus_mode: str = "full",
 ) -> OfficialLiveRun:
@@ -822,6 +826,7 @@ async def create_and_start(
         retrieval_arm="free",
         context_arm="free",
         coding_checkout_repo=bool(coding_checkout_repo),
+        workspace_index_wait_ready=bool(workspace_index_wait_ready),
         retrieval_datasets=[
             str(x).strip()
             for x in (retrieval_datasets or [])
@@ -1290,6 +1295,7 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             context_arm=run.context_arm,
             coding_checkout_repo=run.coding_checkout_repo,
             coding_harness=run.coding_harness,
+            workspace_index_wait_ready=run.workspace_index_wait_ready,
             should_cancel=lambda: run.cancel_requested,
             turn_tracker=run._turn_tracker,
             retrieval_datasets=list(run.retrieval_datasets) or None,
@@ -1746,6 +1752,7 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "retrieval_arm": run.retrieval_arm,
         "context_arm": run.context_arm,
         "coding_checkout_repo": run.coding_checkout_repo,
+        "workspace_index_wait_ready": run.workspace_index_wait_ready,
         "retrieval_datasets": list(run.retrieval_datasets),
         "retrieval_corpus_mode": run.retrieval_corpus_mode,
         "model": _model_meta_safe(run.model),
@@ -1789,6 +1796,7 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
             "retrieval_arm": run.retrieval_arm,
             "context_arm": run.context_arm,
             "coding_checkout_repo": run.coding_checkout_repo,
+            "workspace_index_wait_ready": run.workspace_index_wait_ready,
             "bench_job_id": run._bench_job_id,
             "model": _model_meta_safe(run.model),
             "reclaimed": bool(

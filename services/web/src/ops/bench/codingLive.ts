@@ -23,16 +23,24 @@ export function parseCodingLiveLine(line: string): CodingLiveEvent | null {
   if (start) {
     return {
       kind: "case",
-      case: { iid: start[1], status: "running" },
+      case: {
+        iid: start[1],
+        status: "running",
+        startedAtMs: Date.now(),
+        steps: null,
+        elapsedSec: null,
+      },
     };
   }
   const done = line.match(
-    /^\[L1\]\s+coding\s+(\d+)\s*\/\s*(\d+)\s+(\S+)(?:\s+status=(\S+))?(?:\s+bucket=(\S+))?(?:\s+patch_source=(\S+))?/i,
+    /^\[L1\]\s+coding\s+(\d+)\s*\/\s*(\d+)\s+(\S+)(?:\s+status=(\S+))?(?:\s+bucket=(\S+))?(?:\s+patch_source=(\S+))?(?:\s+steps=(\d+))?(?:\s+elapsed_s=([0-9.]+))?(?:\s+error=.*)?/i,
   );
   if (done) {
     const statusRaw = (done[4] || "").toLowerCase();
     const status: CodingCaseLive["status"] =
       statusRaw === "pass" ? "pass" : statusRaw === "fail" ? "fail" : "pass";
+    const stepsRaw = done[7];
+    const elapsedRaw = done[8];
     return {
       kind: "case",
       case: {
@@ -40,6 +48,14 @@ export function parseCodingLiveLine(line: string): CodingLiveEvent | null {
         status,
         bucket: done[5] || undefined,
         patchSource: done[6] || undefined,
+        steps:
+          stepsRaw != null && Number.isFinite(Number(stepsRaw))
+            ? Number(stepsRaw)
+            : null,
+        elapsedSec:
+          elapsedRaw != null && Number.isFinite(Number(elapsedRaw))
+            ? Number(elapsedRaw)
+            : null,
       },
     };
   }
@@ -190,6 +206,9 @@ export function applyCodingLiveEvent(
     bucket: ev.case.bucket ?? prev?.bucket,
     patchSource: ev.case.patchSource ?? prev?.patchSource,
     harness: ev.case.harness ?? prev?.harness,
+    steps: ev.case.steps ?? prev?.steps ?? null,
+    elapsedSec: ev.case.elapsedSec ?? prev?.elapsedSec ?? null,
+    startedAtMs: ev.case.startedAtMs ?? prev?.startedAtMs ?? null,
   };
   // Harness-only case lines keep prior infer status when present.
   if (ev.case.harness && prev && !ev.case.bucket && !ev.case.patchSource) {
@@ -224,6 +243,9 @@ export function mergeCodingCase(
     patchSource,
     bucket: next.bucket ?? prev.bucket,
     harness: next.harness ?? prev.harness,
+    steps: next.steps ?? prev.steps ?? null,
+    elapsedSec: next.elapsedSec ?? prev.elapsedSec ?? null,
+    startedAtMs: next.startedAtMs ?? prev.startedAtMs ?? null,
   };
 }
 
@@ -264,6 +286,60 @@ export function formatCodingCaseRows(
       (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.iid.localeCompare(b.iid)
     );
   });
+}
+
+/** Compact per-case steps + wall time for the live strip. */
+export function formatCodingCaseStats(
+  row: CodingCaseLive,
+  nowMs: number,
+  formatDuration: (seconds: number | null | undefined) => string,
+): string {
+  const bits: string[] = [];
+  if (row.steps != null && Number.isFinite(row.steps)) {
+    bits.push(`${row.steps}步`);
+  }
+  let sec: number | null = null;
+  if (row.elapsedSec != null && Number.isFinite(row.elapsedSec)) {
+    sec = row.elapsedSec;
+  } else if (
+    (row.status === "running" || row.status === "pending") &&
+    row.startedAtMs != null &&
+    Number.isFinite(row.startedAtMs)
+  ) {
+    sec = Math.max(0, (nowMs - row.startedAtMs) / 1000);
+  }
+  if (sec != null) {
+    bits.push(formatDuration(sec));
+  }
+  return bits.join(" · ");
+}
+
+export function sumCodingCaseStats(
+  rows: CodingCaseLive[],
+  nowMs: number,
+): { stepsTotal: number; elapsedTotalSec: number; stepsKnown: number; elapsedKnown: number } {
+  let stepsTotal = 0;
+  let elapsedTotalSec = 0;
+  let stepsKnown = 0;
+  let elapsedKnown = 0;
+  for (const row of rows) {
+    if (row.steps != null && Number.isFinite(row.steps)) {
+      stepsTotal += row.steps;
+      stepsKnown += 1;
+    }
+    if (row.elapsedSec != null && Number.isFinite(row.elapsedSec)) {
+      elapsedTotalSec += row.elapsedSec;
+      elapsedKnown += 1;
+    } else if (
+      (row.status === "running" || row.status === "pending") &&
+      row.startedAtMs != null &&
+      Number.isFinite(row.startedAtMs)
+    ) {
+      elapsedTotalSec += Math.max(0, (nowMs - row.startedAtMs) / 1000);
+      elapsedKnown += 1;
+    }
+  }
+  return { stepsTotal, elapsedTotalSec, stepsKnown, elapsedKnown };
 }
 
 export const EMPTY_CODING_HARNESS: CodingHarnessLive = {
