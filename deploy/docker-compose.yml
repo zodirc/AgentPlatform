@@ -7,6 +7,37 @@ x-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+# Code≠deps: keep deps layers via tagged *:deps images (deps-anchor) + pinned bases.
+# pull: false — Hub floating tags must not override pinned PYTHON_BASE digests.
+# Do not put short image names in cache_from: Compose Bake treats them as Docker Hub
+# library/* and wastes time on failed registry imports. BuildKit reuses layers from
+# the local graph after deps-anchor / prior builds; :deps tags resist GC.
+x-build-cache-api: &build-cache-api
+  pull: false
+
+x-build-cache-runtime: &build-cache-runtime
+  pull: false
+
+x-build-cache-web: &build-cache-web
+  pull: false
+
+x-build-cache-bench: &build-cache-bench
+  pull: false
+
+# Named contexts for multi-GB offline caches (excluded from main context via .dockerignore).
+# Paths are relative to this compose file (deploy/).
+x-build-contexts-runtime: &build-contexts-runtime
+  model_bake_cache: ./model-bake-cache
+  torch_wheel_cache: ./torch-wheel-cache
+  ts_grammar_cache: ./ts-grammar-cache
+
+x-build-contexts-lite: &build-contexts-lite
+  ts_grammar_cache: ./ts-grammar-cache
+
+x-build-contexts-bench: &build-contexts-bench
+  model_bake_cache: ./model-bake-cache
+  torch_wheel_cache: ./torch-wheel-cache
+
 services:
   postgres:
     # Product agent DB + default retrieval (RETRIEVAL_BACKEND=pgvector).
@@ -62,13 +93,16 @@ services:
   runtime:
     image: agent-platform-runtime:default
     build:
+      <<: *build-cache-runtime
       context: ..
+      additional_contexts: *build-contexts-runtime
       # Default deploy image includes baked sentence-transformers (docs/03).
       # Lightweight hash-only image: services/runtime/Dockerfile (CI / make eval-*).
       # target app = thin layer (docs/38); deps stage holds pip + ST bake.
       dockerfile: services/runtime/Dockerfile.retrieval
       target: app
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
         # China defaults in Dockerfiles; CI clears APT_MIRROR and points pip/npm
         # at public registries (scripts/proof_compose_env.sh) so GHA does not hang.
@@ -194,10 +228,13 @@ services:
   ast-indexer:
     image: agent-platform-runtime:default
     build:
+      <<: *build-cache-runtime
       context: ..
+      additional_contexts: *build-contexts-runtime
       dockerfile: services/runtime/Dockerfile.retrieval
       target: app
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
@@ -266,14 +303,18 @@ services:
 
   # Build-only: tags deps stage so BuildKit GC does not drop pip/ST layers between
   # app-only rebuilds (docs/38 · docs/03 §5.1). Never started as a container.
+  # Also the primary cache_from source for runtime/app builds.
   runtime-deps:
     profiles: [deps-anchor]
     image: agent-platform-runtime:deps
     build:
+      <<: *build-cache-runtime
       context: ..
+      additional_contexts: *build-contexts-runtime
       dockerfile: services/runtime/Dockerfile.retrieval
       target: deps
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
@@ -288,10 +329,12 @@ services:
     profiles: [deps-anchor]
     image: agent-platform-api:deps
     build:
+      <<: *build-cache-api
       context: ..
       dockerfile: services/api/Dockerfile
       target: deps
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
@@ -299,10 +342,12 @@ services:
   api:
     image: agent-platform-api:latest
     build:
+      <<: *build-cache-api
       context: ..
       dockerfile: services/api/Dockerfile
       target: app
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
@@ -378,10 +423,13 @@ services:
     profiles: [bench]
     image: agent-platform-bench:latest
     build:
+      <<: *build-cache-bench
       context: ..
+      additional_contexts: *build-contexts-bench
       dockerfile: services/bench/Dockerfile
       target: app
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
@@ -432,10 +480,13 @@ services:
     profiles: [deps-anchor]
     image: agent-platform-web:deps
     build:
+      <<: *build-cache-web
       context: ..
       dockerfile: services/web/Dockerfile
       target: deps
       args:
+        NODE_BASE: ${NODE_BASE:-node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293}
+        NGINX_BASE: ${NGINX_BASE:-nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752}
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
 
   # Build-only: tags bench deps (pip + ST bake) — profile deps-anchor (not bench).
@@ -443,10 +494,13 @@ services:
     profiles: [deps-anchor]
     image: agent-platform-bench:deps
     build:
+      <<: *build-cache-bench
       context: ..
+      additional_contexts: *build-contexts-bench
       dockerfile: services/bench/Dockerfile
       target: deps
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         TORCH_FIND_LINKS: ${TORCH_FIND_LINKS:-https://mirrors.aliyun.com/pytorch-wheels/cpu}
@@ -458,9 +512,12 @@ services:
   web:
     image: agent-platform-web:latest
     build:
+      <<: *build-cache-web
       context: ..
       dockerfile: services/web/Dockerfile
       args:
+        NODE_BASE: ${NODE_BASE:-node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293}
+        NGINX_BASE: ${NGINX_BASE:-nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752}
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     container_name: agent-web
     restart: unless-stopped

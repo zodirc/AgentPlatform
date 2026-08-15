@@ -21,9 +21,9 @@ bash scripts/release/stop_console.sh && bash scripts/release/ensure_console.sh
 
 | 模块 | 路径（`paths.env`） | 命令 |
 |------|---------------------|------|
-| api | `services/api/` · `packages/contracts/` | `make up-api` |
-| runtime | `services/runtime/` · `packages/contracts/` | `make up-runtime` |
-| web | `services/web/` | `make up-web` |
+| api | `services/api/` · `packages/contracts/` · `deploy/base-images.env` | `make up-api` |
+| runtime | `services/runtime/` · `packages/contracts/` · `deploy/base-images.env` | `make up-runtime` |
+| web | `services/web/` · `deploy/base-images.env` | `make up-web` |
 | gateway | caddy / compose | recreate |
 | **Ops · SWE eval 镜像** | `suites.coding.harness`（默认 n5） | `make official-bench-coding-pull-images`（看板一键） |
 

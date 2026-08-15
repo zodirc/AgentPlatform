@@ -34,6 +34,15 @@ deploy/workspace
 deploy/backups
 reports
 seed/corpus
+.cache
+eval/official/.local-data
+eval/official/.venv
+
+# Multi-GB offline caches — Dockerfiles use RUN --mount=type=bind (not COPY).
+# Keeping them in context made every runtime build transfer ~9GB even on CACHED layers.
+deploy/model-bake-cache
+deploy/torch-wheel-cache
+deploy/ts-grammar-cache
 
 # Logs and local junk
 *.log

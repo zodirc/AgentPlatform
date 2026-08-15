@@ -5,10 +5,14 @@ services:
   runtime:
     image: agent-platform-runtime:lite
     build:
+      pull: false
       context: ..
+      additional_contexts:
+        ts_grammar_cache: ../ts-grammar-cache
       dockerfile: services/runtime/Dockerfile
       target: app
       args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}

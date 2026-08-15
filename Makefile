@@ -5,7 +5,7 @@
 # IMPORTANT: Docker Compose interpolates ${VAR} from the project `.env` file and
 # may ignore later --env-file for build args. Export auto.env into the shell so
 # it wins over a stale EMBEDDING_MODEL=MiniLM in `.env`.
-COMPOSE_ENV := --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env
+COMPOSE_ENV := --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env --env-file deploy/base-images.env
 # Deferred so resolve-embedding can create gpu.auto.yml before compose runs.
 COMPOSE_GPU = $(wildcard deploy/compose/gpu.auto.yml)
 COMPOSE_GPU_FLAG = $(if $(COMPOSE_GPU),-f $(COMPOSE_GPU),)
@@ -14,10 +14,11 @@ COMPOSE_GPU_FLAG = $(if $(COMPOSE_GPU),-f $(COMPOSE_GPU),)
 -include deploy/ops-eval.auto.env
 OPS_EVAL_DOCKER_SOCK ?= 0
 COMPOSE_OPS_FLAG = $(if $(filter 1 true TRUE yes YES,$(OPS_EVAL_DOCKER_SOCK)),-f deploy/compose/ops-eval.yml,)
-# Source embedding env into the shell (overrides .env for ${EMBEDDING_MODEL} etc.).
+# Source embedding + pinned base images into the shell (overrides .env for ${EMBEDDING_MODEL} etc.).
 COMPOSE_EXPORT = set -a && \
 	[ -f deploy/embedding.defaults.env ] && . ./deploy/embedding.defaults.env; \
 	[ -f deploy/embedding.auto.env ] && . ./deploy/embedding.auto.env; \
+	[ -f deploy/base-images.env ] && . ./deploy/base-images.env; \
 	[ -f deploy/ops-eval.auto.env ] && . ./deploy/ops-eval.auto.env; \
 	set +a
 COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) $(COMPOSE_ENV)
@@ -68,7 +69,7 @@ RELEASE_CONSOLE ?= 1
 	pull-dispatch-maturity \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
 	up-web up-api up-runtime up-ast-indexer up-bench start-bench up-ops-eval ops-eval-off deps-anchor restart-web restart-api restart-runtime \
-	dev dev-init web-dev docker-prune \
+	dev dev-init web-dev docker-prune docker-prune-safe \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
 	contracts-test eval-stall eval-ha eval-recorded eval-retrieval eval-queue \
@@ -92,10 +93,12 @@ RELEASE_CONSOLE ?= 1
 help: ## 显示常用命令
 	@echo "日常开发（推荐）"
 	@echo "  make start        启动栈，不重建（主机重启 / 容器停了优先用这个）"
+	@echo "  make up           只重建脏模块；依赖层应命中 :deps 缓存（只改 app 不重装 pip/pnpm）"
 	@echo "  make up-web       只重建 web（WEB_REBUILD_DEPS=1 强制 pnpm 重装）"
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
 	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
 	@echo "  make deps-anchor  仅打 api/runtime/web/bench:deps（防 BuildKit GC 掉 pip/pnpm 层）"
+	@echo "  make docker-prune-safe  按 deploy/docker-keep.list 清理（保留产品/deps/SWE/构建基座；默认不清 BuildKit）"
 	@echo "  make start-bench  仅启动 Ops Bench（不 rebuild；容器被杀后优先用这个）"
 	@echo "  make up-bench     重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
@@ -107,7 +110,8 @@ help: ## 显示常用命令
 	@echo "  make up-ops-eval     挂 docker.sock 并粘性保留（部署看板/up-api 不再卸掉）"
 	@echo "  make ops-eval-off    取消粘性挂载（下次 up-api 不再带 sock）"
 	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
-	@echo "  # docs/38：改 app 代码不必 *_REBUILD_DEPS；改 pyproject/模型才需要"
+	@echo "  # 依赖与代码分缓存：改 app/** 不必 *_REBUILD_DEPS；改 pyproject/lock 随模块重建；bump base-images.env 由 paths.env 脏检测触发 make up"
+	@echo "  # 基础镜像 digests：deploy/base-images.env（浮动 tag 不会再冲掉 deps）"
 	@echo ""
 	@echo "完整部署"
 	@echo "  make up           先拉起已有镜像，再只重建真正脏的模块 + 发布台 :9090"
@@ -233,6 +237,7 @@ up-all: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks
 # Secret is consumed by api only. up-web may generate it for the first time — recreate api then.
 # --no-deps: do not rebuild/restart depends_on (api→runtime); otherwise up-api pays runtime ST/pip.
 # SKIP_RELEASE_HOOK=1：被 release.sh 调用时跳过 mark/console（由上层统一做）。
+# Build order: warm :deps first (cache_from), then thin app — code changes must not re-pip/pnpm.
 up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
 	@status=$$(mktemp); \
 	OPS_SECRET_STATUS_FILE=$$status bash scripts/ensure_ops_test_secret.sh; \
@@ -248,9 +253,10 @@ up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache web-deps \
 	    || echo "==> warn: web-deps anchor failed (mirror?); web image still built"; \
 	else \
-	  $(COMPOSE) build web; \
+	  echo "==> web: warm deps anchor then app (pnpm only if lock/deps inputs changed)"; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build web-deps \
-	    || echo "==> warn: web-deps anchor failed (mirror?); web image still built"; \
+	    || echo "==> warn: web-deps anchor failed (mirror?); continuing with app build"; \
+	  $(COMPOSE) build web; \
 	fi; \
 	$(COMPOSE) up -d --no-deps web
 	$(docker_auto_prune)
@@ -266,8 +272,9 @@ up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEP
 	  $(COMPOSE) build --no-cache api; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache api-deps; \
 	else \
-	  $(COMPOSE) build api; \
+	  echo "==> api: warm deps anchor then app (pip only if pyproject/contracts changed)"; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps; \
+	  $(COMPOSE) build api; \
 	fi; \
 	$(COMPOSE) up -d --no-deps api
 	$(docker_auto_prune)
@@ -304,8 +311,9 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 	  $(COMPOSE) build --no-cache runtime; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache runtime-deps; \
 	else \
-	  $(COMPOSE) build runtime; \
+	  echo "==> runtime: warm deps anchor then app (torch/ST only if deps inputs changed)"; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-deps; \
+	  $(COMPOSE) build runtime; \
 	fi; \
 	$(COMPOSE) up -d --no-deps runtime
 	@$(COMPOSE) up -d --no-deps --force-recreate ast-indexer || true
@@ -334,8 +342,9 @@ up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 重建并�
 	  COMPOSE_PROFILES=bench $(COMPOSE) build --no-cache bench; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache bench-deps; \
 	else \
-	  COMPOSE_PROFILES=bench $(COMPOSE) build bench; \
+	  echo "==> bench: warm deps anchor then app"; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build bench-deps; \
+	  COMPOSE_PROFILES=bench $(COMPOSE) build bench; \
 	fi; \
 	echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"; \
 	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres; \
@@ -382,17 +391,10 @@ build: ensure-docker-creds
 	$(COMPOSE) build
 	$(docker_auto_prune)
 
-docker-prune: ## 清理悬空镜像；BUILD_CACHE_PRUNE=1 才清全部未用 BuildKit cache
-	@echo "==> dangling images"
-	docker image prune -f
-	@if [ "$(BUILD_CACHE_PRUNE)" = "1" ]; then \
-	  echo "==> BUILD_CACHE_PRUNE=1 → unused build cache (all; next cold build re-pips)"; \
-	  docker builder prune -af; \
-	else \
-	  echo "==> skipping BuildKit cache (keep pip/ST layers; BUILD_CACHE_PRUNE=1 to reclaim)"; \
-	fi
-	@echo "==> done; docker system df:"
-	@docker system df
+docker-prune-safe: ## 按 deploy/docker-keep.list 清理（默认保留 BuildKit；BUILD_CACHE_PRUNE=1 才清）
+	@DRY_RUN=$(DRY_RUN) BUILD_CACHE_PRUNE=$(BUILD_CACHE_PRUNE) bash scripts/docker_prune_safe.sh
+
+docker-prune: docker-prune-safe ## 同 docker-prune-safe（旧名兼容）
 
 backup: ## 备份 Postgres（pg_dump）+ agent_data 卷（保留最近 7 份）
 	bash deploy/backup.sh

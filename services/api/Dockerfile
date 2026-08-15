@@ -1,8 +1,10 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # BR1 (docs/38): deps stage installs pip from pyproject + stub package only;
 # app stage COPY real sources. Changing app/** must not re-run pip.
+# Base digest pinned (deploy/base-images.env) so Hub tag moves do not bust deps.
 
-FROM python:3.11-slim AS deps
+ARG PYTHON_BASE=python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1
+FROM ${PYTHON_BASE} AS deps
 
 # China-friendly defaults; override at build time for CI (see proof_compose_env.sh).
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple

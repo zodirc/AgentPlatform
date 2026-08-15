@@ -1,8 +1,10 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # Lightweight runtime (hash embedding). BR2 (docs/38): deps/app stages so
 # app/** changes do not re-run pip.
+# Base digest pinned (deploy/base-images.env) so Hub tag moves do not bust deps.
 
-FROM python:3.11-slim AS deps
+ARG PYTHON_BASE=python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1
+FROM ${PYTHON_BASE} AS deps
 
 # Defaults favor China local builds. CI / GitHub Actions override via compose
 # build-args (see scripts/proof_compose_env.sh).
@@ -39,13 +41,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && rm -rf /tmp/runtime
 
 # Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).
-# Prefer offline seed from deploy/ts-grammar-cache when populated; else prefetch().
-COPY deploy/ts-grammar-cache/ /tmp/ts-grammar-seed/
+# Prefer offline seed from named context `ts_grammar_cache`; else prefetch().
 COPY services/runtime/scripts/bake_ts_grammars.py /tmp/bake_ts_grammars.py
-RUN mkdir -p /home/app/.cache \
+RUN --mount=type=bind,from=ts_grammar_cache,target=/tmp/ts-grammar-seed,ro \
+    mkdir -p /home/app/.cache \
     && chown -R app:app /home/app \
     && su -s /bin/bash app -c 'HOME=/home/app TS_GRAMMAR_SEED_DIR=/tmp/ts-grammar-seed python -u /tmp/bake_ts_grammars.py' \
-    && rm -rf /tmp/ts-grammar-seed /tmp/bake_ts_grammars.py
+    && rm -f /tmp/bake_ts_grammars.py
 
 FROM deps AS app
 COPY services/runtime/app /app/app

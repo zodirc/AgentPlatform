@@ -59,10 +59,16 @@ x-runtime-svc: &runtime-svc
       max-file: "3"
   mem_limit: 4g
   build:
+    pull: false
     context: ..
+    additional_contexts:
+      model_bake_cache: ../model-bake-cache
+      torch_wheel_cache: ../torch-wheel-cache
+      ts_grammar_cache: ../ts-grammar-cache
     dockerfile: services/runtime/Dockerfile.retrieval
     target: app
     args:
+      PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
       PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}

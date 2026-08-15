@@ -1,11 +1,14 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # Retrieval runtime: sentence-transformers + baked embedding model.
 # Default: CPU torch (CI / no-GPU). Local NVIDIA: pass TORCH_INDEX_URL
 # (e.g. https://download.pytorch.org/whl/cu128 for RTX 50xx) via compose.
 # BR3 (docs/38): model-baker + deps (pip/ST/models) then thin app stage.
 # Changing app/** / system.md must not re-download torch or re-bake GTE.
-# model-baker stays on CPU wheels (download weights only); deps may use CUDA.
+# model-baker installs torch from offline torch_wheel_cache when present (same as deps);
+# otherwise falls back to TORCH_FIND_LINKS (CPU). Final image keeps baked models only.
+# Base digest pinned (deploy/base-images.env) so Hub tag moves do not bust deps.
 
+ARG PYTHON_BASE=python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1
 ARG EMBEDDING_MODEL=thenlper/gte-small
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
@@ -14,7 +17,7 @@ ARG TORCH_INDEX_URL=
 ARG HF_ENDPOINT=https://hf-mirror.com
 ARG APT_MIRROR=mirrors.aliyun.com
 
-FROM python:3.11-slim AS model-baker
+FROM ${PYTHON_BASE} AS model-baker
 ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
@@ -38,13 +41,26 @@ RUN set -eux; \
     apt-get update && apt-get install -y --no-install-recommends curl bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install torch -f "${TORCH_FIND_LINKS}" \
-    && pip install "sentence-transformers>=3.0"
-# Prefer offline bake cache only when it already contains the requested model.
-# (A stale gte-large cache must not skip downloading bge-m3.)
-COPY deploy/model-bake-cache/ /models-bake-cache/
-RUN set -eux; \
+# Prefer offline torch from named context `torch_wheel_cache` (same as deps) so
+# cold builds after prune do not re-download ~192MB CPU torch from the mirror.
+# Baker only needs torch to load/save ST weights; final image keeps models only.
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=cache,target=/root/.cache/pip \
+    set -eux; \
+    if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
+      echo "model-baker: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
+      pip install --no-index --find-links=/tmp/torch-wheels torch; \
+    else \
+      echo "model-baker: no wheel cache → torch from ${TORCH_FIND_LINKS}"; \
+      pip install torch -f "${TORCH_FIND_LINKS}"; \
+    fi; \
+    pip install "sentence-transformers>=3.0"
+# Offline model seed via named build context `model_bake_cache` (compose
+# additional_contexts) — not the main context, so multi-GB trees are not
+# transferred on every build. Content changes do not bust this layer — bump
+# EMBEDDING_MODEL or RUNTIME_REBUILD_DEPS=1 to re-bake.
+RUN --mount=type=bind,from=model_bake_cache,target=/models-bake-cache,ro \
+    set -eux; \
     cache_name="models--$(echo "${EMBEDDING_MODEL}" | sed 's|/|--|g')"; \
     mkdir -p /models-baked; \
     if [ -d "/models-bake-cache/${cache_name}" ]; then \
@@ -55,10 +71,9 @@ RUN set -eux; \
       echo "model-baker: cache miss for ${cache_name} → download ${EMBEDDING_MODEL} via ${HF_ENDPOINT}"; \
       python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
     fi; \
-    printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model; \
-    rm -rf /models-bake-cache
+    printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model
 
-FROM python:3.11-slim AS deps
+FROM ${PYTHON_BASE} AS deps
 ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
@@ -87,11 +102,11 @@ WORKDIR /app
 
 COPY packages/contracts/python /contracts/python
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
-# Offline CUDA wheels via bind mount (deploy/torch-wheel-cache) — not copied into the image.
+# Offline CUDA wheels via named context `torch_wheel_cache` (not main context).
 # Falls back to TORCH_INDEX_URL / CPU find-links when the cache has no .whl files.
 # BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local (no mirror re-fetch).
 # Do not use pip --no-cache-dir here — that bypasses the mount.
-RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,ro \
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
     --mount=type=cache,target=/root/.cache/pip \
     mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
     && if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
@@ -109,13 +124,13 @@ RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,r
     && rm -rf /tmp/runtime
 
 # Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).
-# Prefer offline seed from deploy/ts-grammar-cache when populated; else prefetch().
-COPY deploy/ts-grammar-cache/ /tmp/ts-grammar-seed/
+# Prefer offline seed from named context `ts_grammar_cache`; else prefetch().
 COPY services/runtime/scripts/bake_ts_grammars.py /tmp/bake_ts_grammars.py
-RUN mkdir -p /home/app/.cache \
+RUN --mount=type=bind,from=ts_grammar_cache,target=/tmp/ts-grammar-seed,ro \
+    mkdir -p /home/app/.cache \
     && chown -R app:app /home/app \
     && su -s /bin/bash app -c 'HOME=/home/app TS_GRAMMAR_SEED_DIR=/tmp/ts-grammar-seed python -u /tmp/bake_ts_grammars.py' \
-    && rm -rf /tmp/ts-grammar-seed /tmp/bake_ts_grammars.py
+    && rm -f /tmp/bake_ts_grammars.py
 
 COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
 

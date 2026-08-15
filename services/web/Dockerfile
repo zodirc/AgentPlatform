@@ -1,8 +1,12 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # BR5 (docs/38): install keyed on package.json+lock; src COPY after pnpm install.
 # deps stage = pnpm install only (anchored as agent-platform-web:deps).
+# Base digests pinned (deploy/base-images.env) so Hub tag moves do not bust deps.
 
-FROM node:20-alpine AS deps
+ARG NODE_BASE=node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
+ARG NGINX_BASE=nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
+
+FROM ${NODE_BASE} AS deps
 # Keep monorepo-relative imports working (planSuggest → packages/contracts/...)
 WORKDIR /workspace
 # Default: China npm mirror. CI overrides to registry.npmjs.org (npmmirror hangs
@@ -36,7 +40,7 @@ COPY services/web/public ./public
 COPY services/web/src ./src
 RUN ./node_modules/.bin/vite build
 
-FROM nginx:alpine
+FROM ${NGINX_BASE}
 COPY services/web/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=builder /workspace/services/web/dist /usr/share/nginx/html
 EXPOSE 80

@@ -1,9 +1,11 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
 # Ops Bench worker: official small suites with real ST embeddings.
 # Self-contained GTE bake (does NOT FROM agent-platform-runtime:default).
 # CI smoke uses runtime-lite and omits the compose profile "bench" so gate
 # never needs the heavy ST runtime image just to start api.
+# Base digest pinned (deploy/base-images.env) so Hub tag moves do not bust deps.
 
+ARG PYTHON_BASE=python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1
 ARG PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple
 ARG PIP_TRUSTED_HOST=mirrors.aliyun.com
 ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
@@ -12,7 +14,7 @@ ARG APT_MIRROR=mirrors.aliyun.com
 ARG HF_ENDPOINT=https://hf-mirror.com
 ARG EMBEDDING_MODEL=thenlper/gte-small
 
-FROM python:3.11-slim AS model-baker
+FROM ${PYTHON_BASE} AS model-baker
 ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
@@ -36,21 +38,30 @@ RUN set -eux; \
     apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install torch -f "${TORCH_FIND_LINKS}" \
-    && pip install "sentence-transformers>=3.0"
-COPY deploy/model-bake-cache/ /models-bake-cache/
-RUN set -eux; \
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=cache,target=/root/.cache/pip \
+    set -eux; \
+    if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
+      echo "model-baker: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
+      pip install --no-index --find-links=/tmp/torch-wheels torch; \
+    else \
+      echo "model-baker: no wheel cache → torch from ${TORCH_FIND_LINKS}"; \
+      pip install torch -f "${TORCH_FIND_LINKS}"; \
+    fi; \
+    pip install "sentence-transformers>=3.0"
+# Named context `model_bake_cache` (compose additional_contexts) — not main context.
+RUN --mount=type=bind,from=model_bake_cache,target=/models-bake-cache,ro \
+    set -eux; \
     if find /models-bake-cache -mindepth 1 -maxdepth 1 ! -name '.keep' -print -quit | grep -q .; then \
       echo "model-baker: seeding /models-baked from deploy/model-bake-cache (offline)"; \
+      mkdir -p /models-baked; \
       cp -a /models-bake-cache/. /models-baked/; \
     else \
       echo "model-baker: cache empty → download ${EMBEDDING_MODEL}"; \
       python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
-    fi; \
-    rm -rf /models-bake-cache
+    fi
 
-FROM python:3.11-slim AS deps
+FROM ${PYTHON_BASE} AS deps
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
 ARG TORCH_FIND_LINKS
@@ -77,9 +88,10 @@ RUN mkdir -p /data/ops-official/data /data/ops-official/reports /data/models /ap
 WORKDIR /app
 
 COPY services/bench/requirements.txt /tmp/bench-requirements.txt
+# Named context `torch_wheel_cache` (compose additional_contexts).
 # BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local.
 # Do not use pip --no-cache-dir here — that bypasses the mount.
-RUN --mount=type=bind,source=deploy/torch-wheel-cache,target=/tmp/torch-wheels,ro \
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
     --mount=type=cache,target=/root/.cache/pip \
     if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
       echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
