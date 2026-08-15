@@ -164,7 +164,7 @@ def _manifest_sample_tier(manifest: dict[str, Any], suite: str) -> str:
             return st.strip().lower()
     metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
     if suite == "retrieval":
-        nq = metrics.get("n_queries") or metrics.get("agent.n_queries")
+        nq = metrics.get("n_queries") or metrics.get("agent.n_queries")  # legacy L1 alias
         return infer_sample_tier(
             suite="retrieval",
             n_queries=nq if isinstance(nq, (int, float)) else None,
@@ -251,7 +251,8 @@ def extract_suite_snapshot(manifest: dict[str, Any]) -> dict[str, Any] | None:
     protocol = _manifest_protocol(manifest)
 
     if suite == "retrieval":
-        # L1 prefers agent.*; L0 prefers hybrid.*; then unprefixed primary.
+        # L1 now writes unprefixed macros; agent.* is a leftover alias on old
+        # manifests. Prefer agent.* when present so mixed fixtures still pin L1.
         prefixes = ("agent.", "hybrid.", "") if eval_path == "agent" else ("hybrid.", "agent.", "")
         primary: dict[str, float] = {}
         if isinstance(metrics_raw, dict):

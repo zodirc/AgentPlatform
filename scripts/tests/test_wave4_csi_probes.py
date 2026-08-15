@@ -48,6 +48,27 @@ def test_wave4_test_summary_and_adoption_probes() -> None:
     assert evidence["n_test_summary"] == 1
 
 
+def test_wave4_pager_and_non_definition_probes() -> None:
+    events = [
+        _ev(
+            "run_command",
+            command="sed -n '10,20p' pkg/mod.py",
+            redirected_from="run_command",
+        ),
+        _ev(
+            "search_codebase",
+            locate_status="incomplete",
+            locate_incomplete=True,
+            locate_fuse_fail_reason="non_definition_query",
+            definition_count=0,
+        ),
+    ]
+    probes = csi_probes_from_events(events)
+    assert probes["n_pager_run_command"] >= 1
+    assert probes["n_locate_fuse_non_definition"] == 1
+    assert probes["n_search_locate"] == 0  # excluded from fuse denominator
+
+
 def test_wave4_verify_receipt_then_test() -> None:
     events = [
         _ev("edit_file", applies=True, impact={"status": "ok"}, checks={"status": "ok"}),

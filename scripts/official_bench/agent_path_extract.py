@@ -811,6 +811,10 @@ _TESTISH_CMD_RE = re.compile(
     r"\bpython\s+-m\s+unittest\b",
     re.IGNORECASE,
 )
+_PAGER_CMD_RE = re.compile(
+    r"^\s*(?:cat|nl|head|tail|sed)\b",
+    re.IGNORECASE,
+)
 
 
 def files_from_patch(patch: str) -> set[str]:
@@ -847,6 +851,14 @@ def _command_fingerprint(payload: dict[str, Any]) -> str:
 
 def _is_testish_command(cmd: str) -> bool:
     return bool(cmd) and _TESTISH_CMD_RE.search(cmd) is not None
+
+
+def _is_pager_command(cmd: str) -> bool:
+    if not cmd:
+        return False
+    if any(ch in cmd for ch in "|><;") or "&&" in cmd:
+        return False
+    return bool(_PAGER_CMD_RE.match(cmd))
 
 
 def evidence_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -909,6 +921,7 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     n_locate_fuse_definition_null = 0
     n_locate_fuse_lsp_failed = 0
     n_locate_fuse_lsp_timeout = 0
+    n_locate_fuse_non_definition = 0
     n_search_locate = 0
     n_search_locate_ok = 0
     n_edit = 0
@@ -922,7 +935,7 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
     n_syntax_warning = 0
     n_span_fail = 0
     n_span_fail_with_candidates = 0
-    n_pager_run_command = 0  # reserved N3
+    n_pager_run_command = 0
     n_read_truncated = 0
     n_read_with_outline = 0
     # Wave 4 probes 12–14
@@ -954,6 +967,9 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
             if not is_locate:
                 continue
             fuse_reason = str(payload.get("locate_fuse_fail_reason") or "")
+            if fuse_reason == "non_definition_query":
+                n_locate_fuse_non_definition += 1
+                continue
             if fuse_reason == "no_workspace_symbol_match":
                 n_locate_fuse_no_ws_symbol += 1
             elif fuse_reason == "definition_null":
@@ -997,6 +1013,10 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         if tool in {"run_tests", "run_command"}:
             fp = _command_fingerprint(payload)
+            if tool == "run_command" and (
+                payload.get("redirected_from") or _is_pager_command(fp)
+            ):
+                n_pager_run_command += 1
             is_testish = tool == "run_tests" or _is_testish_command(fp)
             if is_testish:
                 n_testish_tool += 1
@@ -1093,6 +1113,7 @@ def csi_probes_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
         "n_locate_fuse_definition_null": n_locate_fuse_definition_null,
         "n_locate_fuse_lsp_failed": n_locate_fuse_lsp_failed,
         "n_locate_fuse_lsp_timeout": n_locate_fuse_lsp_timeout,
+        "n_locate_fuse_non_definition": n_locate_fuse_non_definition,
         "n_search_locate": n_search_locate,
         "n_search_locate_ok": n_search_locate_ok,
         "n_edit": n_edit,
@@ -1183,6 +1204,7 @@ def csi_suite_rates(per_case: list[dict[str, Any]]) -> dict[str, Any]:
         "n_locate_fuse_definition_null": float(_sum("n_locate_fuse_definition_null")),
         "n_locate_fuse_lsp_failed": float(_sum("n_locate_fuse_lsp_failed")),
         "n_locate_fuse_lsp_timeout": float(_sum("n_locate_fuse_lsp_timeout")),
+        "n_locate_fuse_non_definition": float(_sum("n_locate_fuse_non_definition")),
         # §7.7.1 D1
         "file_hit_rate": _rate(file_hit_true, file_hit_n),
         "file_hit_n": float(file_hit_n),

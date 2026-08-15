@@ -29,13 +29,14 @@ def context_prompt(*, arm: str, question: str) -> str:
             "The passage is at sources/passage.md. Read the material completely "
             "before answering (you may call read_file multiple times and use "
             "offset / next_offset to continue). Then answer with a short phrase "
-            "only.\n\n"
+            "only. End with a single line: Answer: <phrase>\n\n"
             f"Question: {question}"
         )
     return (
         "The relevant material is in sources/passage.md in this Work. "
         "Use whatever reading strategy you need (read_file segments, grep, etc.), "
-        "then answer with a short phrase only.\n\n"
+        "then answer with a short phrase only. End with a single line: "
+        "Answer: <phrase>\n\n"
         f"Question: {question}"
     )
 

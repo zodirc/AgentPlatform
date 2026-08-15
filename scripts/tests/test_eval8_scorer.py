@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from official_bench.context_run import (  # noqa: E402
     SCORER_VERSION,
+    extract_pred_answer,
     normalize_answer,
     score_prediction,
 )
@@ -54,3 +55,25 @@ def test_default_score_prediction_is_v2() -> None:
     s = score_prediction("flexibility", ["Flexibility."])
     assert s["f1"] == 1.0
     assert s["em"] == 1.0
+
+
+def test_extract_pred_answer_last_labeled_line() -> None:
+    assert extract_pred_answer("**Answer:** Berlin") == "Berlin"
+    assert extract_pred_answer("Answer: <phrase>\nAnswer: Berlin") == "Berlin"
+    assert extract_pred_answer("The capital is X.\nAnswer: Berlin") == "Berlin"
+    # No labeled line → leave prose (v2 EM still exact-equality).
+    assert extract_pred_answer("the needle is here") == "the needle is here"
+    # Gold-shaped text without the label is not extracted.
+    assert extract_pred_answer("  The Answer. ") == "  The Answer. "
+
+
+def test_score_prediction_strips_answer_prefix() -> None:
+    """X-3 agent format vs completion LongBench: label must not zero EM."""
+    labeled = score_prediction("Answer: Berlin", ["berlin"])
+    assert labeled["em"] == 1.0
+    assert labeled["f1"] == 1.0
+    mixed = score_prediction("I read the file.\nAnswer: Flexibility.", ["Flexibility."])
+    assert mixed["em"] == 1.0
+    assert mixed["f1"] == 1.0
+    # Prefix path is pred-only; golds are unchanged.
+    assert score_prediction("Berlin", ["Answer: Berlin"])["em"] == 0.0

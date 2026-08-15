@@ -19,10 +19,33 @@ from .run_session import RunSession
 _WS = re.compile(r"\s+")
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT = set(string.punctuation)
+# Agent X-3 / system.md ask for a final ``Answer: <phrase>`` line. Completion-style
+# LongBench prompts already end with ``Answer:`` so the model only emits the phrase;
+# agent turns repeat the label. Line-anchored so golds like ``The Answer.`` stay intact.
+_ANSWER_LINE = re.compile(
+    r"(?im)^\s*(?:\*\*|__)?\s*answer\s*(?:\*\*|__)?\s*:\s*(?:\*\*|__)?\s*(.+?)\s*$"
+)
+_ANSWER_PLACEHOLDER = re.compile(r"^<[^>]+>$")
 
 # EVAL-8: LongBench qa_f1_score / SQuAD-style EM parity.
 # v1 = lower+whitespace only (+ EM substring clause). Do not bare-compare across versions.
 SCORER_VERSION = "v2"
+
+
+def extract_pred_answer(pred: str) -> str:
+    """Last non-empty ``Answer: …`` line from an agent prediction, else ``pred``.
+
+    Golds are never rewritten. Empty / ``<phrase>`` echoes of the instruction
+    are skipped so a later real answer line still wins.
+    """
+    text = pred or ""
+    spans: list[str] = []
+    for m in _ANSWER_LINE.finditer(text):
+        span = (m.group(1) or "").strip()
+        if not span or _ANSWER_PLACEHOLDER.match(span):
+            continue
+        spans.append(span)
+    return spans[-1] if spans else text
 
 
 def _normalize_v1(s: str) -> str:
@@ -97,9 +120,14 @@ def score_prediction(
 
     ``scorer=v2`` (default): LongBench F1 normalize + SQuAD EM (normalized equality only).
     ``scorer=v1``: legacy lower+ws normalize + EM substring clause (rescoring only).
+
+    Predictions are first reduced to the last ``Answer:`` line when present so
+    the agent format matches completion-style LongBench (prompt already ate the
+    label). Extra prose without that line still fails v2 EM — same as before.
     """
     if not golds:
         return {"em": 0.0, "f1": 0.0}
+    pred = extract_pred_answer(pred)
     if scorer == "v1":
         norm = _normalize_v1
         norm_pred = norm(pred)
