@@ -379,7 +379,7 @@ Cancel → abort event → provider 撕掉 httpx 流（`stream_abort`）。
 
 - **索引面**：启动延迟 sync、`sources_watch`（mtime poll ~2s / debounce ~1.5s；**不用 inotify**，适配 Docker/WSL bind）、上传、`sync-sources-index`；`_sync_lock` 单飞。  
 - **交互面**：hybrid = embed 一次 → Chunk HNSW∥FTS(+Okapi) → Doc lane（默认 ON，0.3s）→ RRF(k=60) → lexical rerank（CE 默认 OFF）→ doc_boost → ACL → cover → keyword-fallback（不重建）。  
-- 默认：`search_sources` limit 30、每 Turn≤3、chunk 4000/overlap 400。  
+- 默认：`search_sources` limit 30、每 Turn≤3、chunk **450 token / overlap 64**（char 回退 1800/200）；bge-m3@512 → INDEX 13。  
 - Ops L1：`OPS_DATABASE_URL` → bench-postgres，schema `retrieval_ops` / `retrieval_ops_zh`。
 
 ### 5.2 AST（A6）

@@ -44,7 +44,7 @@
 | BM25 rescore | ON；Okapi `k1=1.5` `b=0.75` |
 | Rerank | lexical **ON**；cross-encoder **OFF**；pool≥**20** |
 | 摘录 | `excerpt_chars=400`；模型窗前 **5** 条带摘录 |
-| Chunk（建库） | `max_chars=4000` · `overlap=400` |
+| Chunk（建库） | `max_tokens=450` · `overlap=64` token；tokenizer 不可用时 char 回退 **1800/200** |
 
 代码入口：`tools/core/tools.py`（`search_sources`）· `retrieval/pgvector_store.py` · `retrieval/profile.py` · `retrieval/audit.py`。
 
@@ -122,8 +122,8 @@ top_k = max(fetch_limit × 4, 20)
 
 1. 比较 mtime / scope stamp（模型名、维数、INDEX 协议）→ 增量或 force。  
 2. Force：drop/rebuild chunks/docs 上 HNSW。  
-3. `chunk_source_text`：按标题/代码切分，再滑窗 **4000/400**；宽表可 detach。  
-4. Embed（默认 **body only**，不把 path/tags 噪声焊进向量前缀）批量写 `source_chunks`。  
+3. `chunk_source_text`：H1–H6 / Setext 切节，超长叶按段落/行/句边界滑窗（**450 token / overlap 64**）；宽表 detach 后另派生行线性化 chunk。  
+4. Embed 文本前加标题面包屑（只进向量，不改存库 body）；path/tags 仍默认不焊进向量前缀。bge-m3@512 对应 **INDEX 13**，换戳会 force reindex。  
 5. Chunk centroid → `source_docs`；`bm25_extra` 摊到 chunk；维护 FTS GIN。  
 6. 私有路径可存 `__work__/{work_id}/…`，展示时剥前缀。  
 7. 进度写入 `sync_progress.json`（资料库 / Ops 条）；ingestion 与效果平面分开，避免「扫完=可宣称效果」。

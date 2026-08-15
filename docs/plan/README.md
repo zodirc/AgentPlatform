@@ -6,6 +6,7 @@
 |------|------|------|
 | [后端架构全景](backend-architecture.md) | 详册 **v0.3** | 控制流全文；机型负载配方 |
 | [Coding 结构智能](coding-structural-intelligence.md) | **已收敛** | 流程 / 已优化 / 观测定位 / harness 方案 |
+| [三线质量提升](quality-uplift-2026-08.md) | 批 1–3 **已落地** · R-5 未开 · INDEX 13 **第2轮已对照** | Coding 验证回灌 / Retrieval token chunk / Context outline 与证据保留 |
 | [Agent 工作区异步 AST](agent-workspace-ast-index.md) | A6 **已接线** | 旁路 indexer；双轨 n5 数字待复跑 |
 | [威胁情报 · 验证闭环](intel-closed-loop-verification.md) | 草案 · **未实施** | intel 验证闭环与 Bench 对照 |
 

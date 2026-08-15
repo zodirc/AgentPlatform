@@ -67,13 +67,13 @@
 
 | 步骤 | 做什么 |
 |------|--------|
-| **budget** | 单条超长 `tool_result` 截断，留再读指针 |
-| **read_fold** | 同一 path 的旧 `read_file` 正文去掉，只留最近一次 |
+| **budget** | 单条超长 `tool_result` **头尾各半**截断（middle-truncate），留再读指针 |
+| **read_fold** | 同一 path 的旧 `read_file` 留首尾约 300 字符 + 行号范围，只保留最近一次全文 |
 | **microcompact** | 历史里成串旧 tool 结果折成短占位；**不拆**当前配对 |
 
 微折叠是卫生，**不是**超限压缩。
 
-> Coding 注：纯 pager 型 `run_command` 的工具级改写尚未落地；目前靠场景纪律文案引导改用 `read_file`（见 plan CSI §7.3 W2）。
+> Coding 注：纯 pager 型 `run_command`（`cat`/`head`/`tail`/`sed -n a,bp`/`nl`，单文件、无管道）在 handler 内转 `read_file`，结果带 `redirected_from="run_command"`。
 
 ### 4.2 填充率与阶梯
 

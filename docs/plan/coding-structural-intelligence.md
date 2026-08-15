@@ -1,7 +1,7 @@
 # 方案：Coding 结构智能（LSP / AST）
 
 > **状态（2026-08-15）**：Wave 1–4 代码已落地 · 工作区 AST（A6）已接线 · P15 确认坐标 Bug 已修  
-> **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（冷启 / 快照 / wait-ready / grammar bake）  
+> **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（冷启 / 快照 / wait-ready / grammar bake）· [三线质量提升](quality-uplift-2026-08.md)（H1/H2 主项的跨线落地清单：test_summary 修复 · pager 重定向 · 检索/上下文）  
 > **正文**：[工具与上下文](../core/tools-and-context.md) 图 3  
 > **非范围**：writing/intel RAG；不以资料检索充当 Agent Locate  
 
@@ -67,7 +67,7 @@ pull Lite → plan → mirror prewarm → checkout(commit)
 | 波次 / 项 | 内容 | 状态 |
 |-----------|------|------|
 | Wave 1 | `read_lints`=LSP∪CLI；Locate/Impact 揉进 grep/`edit_file`；pyright openFilesOnly | 已落地 |
-| Wave 2 | `edit_file.checks`；span 失配候选；Reproduce/交卷 prompt | 主项已落地；**pager→read_file 硬重定向未落地** |
+| Wave 2 | `edit_file.checks`；span 失配候选；Reproduce/交卷 prompt | 主项已落地；**W2 pager→read_file 已由质量提升 C-2 落地** |
 | Wave 3 | D1 证据指标；D2 即时符号；`read_file` outline；`related_tests` | 已落地 |
 | Wave 4 | W9 终局回执；W10 `test_summary`；W11 命令化 related_tests | 代码已落地；冒烟中 `test_summary` 附带常为 0 |
 | AST A6 | 旁路 indexer + ephemeral 快照；可选 wait-ready；grammar bake / 未缓存→regex | 已接线 |
