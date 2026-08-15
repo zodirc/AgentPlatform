@@ -246,7 +246,8 @@ def effective_index_version() -> int:
 
     8 = legacy MiniLM@384; 9 = gte-small@384; 10 = gte-large@1024;
     11 = bge-m3@1024 with hub-length (or uncapped) sequences;
-    12 = bge-m3@1024 with max_seq≈512 truncate (GPU default; denser short passages).
+    12 = bge-m3@1024 with max_seq≈512 truncate (legacy short-passage stamp);
+    13 = bge-m3@1024 max_seq≈512 + token-aligned chunker / heading breadcrumbs / table rows.
 
     Prefer ``settings.embedding_index_version`` when compose/auto.env sets it so the
     console plan and runtime stamp stay aligned.
@@ -257,10 +258,10 @@ def effective_index_version() -> int:
     model = (settings.embedding_model or "").lower()
     dims = effective_embedding_dimensions()
     if "bge-m3" in model:
-        # Match resolve_embedding_profile: GPU default truncates to 512 → INDEX 12.
+        # Match resolve_embedding_profile: GPU default truncates to 512 → INDEX 13.
         max_seq = int(getattr(settings, "embedding_max_seq_length", 0) or 0)
         if max_seq <= 0 or max_seq == 512:
-            return 12
+            return 13
         return 11
     if "gte-large" in model:
         return 10
@@ -347,6 +348,13 @@ def get_embedder() -> Embedder:
         model_dir or "(default)",
     )
     return _embedder
+
+
+def peek_hf_tokenizer():
+    """Return the loaded ST HF tokenizer, or None. Never triggers a model load."""
+    model = getattr(_embedder, "_model", None) if _embedder is not None else None
+    tok = getattr(model, "tokenizer", None)
+    return tok
 
 
 def warmup_embedder() -> str:

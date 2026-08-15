@@ -226,7 +226,28 @@ def user_facing_policy_summary(policy: str, *, path: str = "", budget: int = 0) 
 
 
 def omit_read_file_content_payload(data: dict[str, Any]) -> dict[str, Any]:
-    """RC4: shrink a prior read_file tool_result for assemble (keep ids/shape)."""
+    """RC4: shrink a prior read_file tool_result for assemble; keep a short evidence stub."""
+    content = data.get("content")
+    body = content if isinstance(content, str) else ""
+    offset = data.get("offset")
+    end_line = data.get("end_line")
+    try:
+        off_i = int(offset) if offset is not None else None
+    except (TypeError, ValueError):
+        off_i = None
+    try:
+        end_i = int(end_line) if end_line is not None else None
+    except (TypeError, ValueError):
+        end_i = None
+    span = ""
+    if off_i is not None and end_i is not None:
+        span = f"lines {off_i}-{end_i} "
+    head = body[:300]
+    tail = body[-300:] if len(body) > 300 else ""
+    if tail and tail != head:
+        stub = f"[{span}already read this Turn; head: {head} … tail: {tail}]"
+    else:
+        stub = f"[{span}already read this Turn; head: {head}]"
     out = {
         "path": data.get("path"),
         "offset": data.get("offset"),
@@ -236,7 +257,7 @@ def omit_read_file_content_payload(data: dict[str, Any]) -> dict[str, Any]:
         "next_offset": data.get("next_offset"),
         "whole_file_complete": data.get("whole_file_complete"),
         "summary": data.get("summary") or data.get("path"),
-        "content": "[omitted; already read this Turn — edit_file, or re-read only after edit failure]",
+        "content": stub,
         "_folded_read": True,
     }
     if data.get("hint"):

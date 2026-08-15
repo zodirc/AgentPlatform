@@ -199,6 +199,42 @@ def test_read_file_tool_completed_allows_outline_count() -> None:
     )
 
 
+def test_run_command_tool_completed_allows_pager_redirected_from() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_pager",
+            "tool_name": "run_command",
+            "status": "ok",
+            "summary": "Read pkg/mod.py",
+            "command": "sed -n '10,20p' pkg/mod.py",
+            "redirected_from": "run_command",
+            "path": "pkg/mod.py",
+            "offset": 10,
+            "end_line": 20,
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
+def test_locate_tool_completed_allows_non_definition_query() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_nd",
+            "tool_name": "search_codebase",
+            "status": "ok",
+            "summary": "non-definition query",
+            "locate_mode": "lexical",
+            "locate_incomplete": True,
+            "definition_count": 0,
+            "locate_status": "incomplete",
+            "locate_fuse_fail_reason": "non_definition_query",
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_locate_tool_completed_allows_fuse_probe_meta() -> None:
     validate_event_payload(
         "tool.completed",

@@ -31,7 +31,10 @@ def file_outline_lines(
     path: str | Path,
     limit: int = _OUTLINE_MAX,
 ) -> list[str]:
-    """Return ``<line> <kind> <name>`` rows; empty on non-code / parse failure."""
+    """Return ``<line> <kind> <name>`` rows; empty on parse failure."""
+    suffix = Path(path).suffix.lower()
+    if suffix in {".md", ".markdown", ".txt"}:
+        return _markdown_outline_lines(text, limit=limit)
     if language_for_path(path) is None:
         return []
     if not text or not text.strip():
@@ -64,13 +67,24 @@ def file_outline_lines(
     return lines
 
 
+def _markdown_outline_lines(text: str, *, limit: int) -> list[str]:
+    try:
+        from app.retrieval.chunking import iter_markdown_headings
+    except Exception:
+        return []
+    if not text or not text.strip():
+        return []
+    rows = iter_markdown_headings(text, limit=max(1, int(limit)))
+    return [f"{line} heading {title}" for line, title in rows if title]
+
+
 def attach_outline_if_truncated(
     result: dict[str, Any],
     *,
     text: str,
     path: str,
 ) -> dict[str, Any]:
-    """Mutate/return read_file result: add outline only when truncated + code."""
+    """Mutate/return read_file result: add outline only when truncated."""
     if not result.get("truncated"):
         return result
     lines = file_outline_lines(text, path=path)

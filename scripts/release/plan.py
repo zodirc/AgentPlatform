@@ -367,8 +367,8 @@ def _ops_bench_item(*, running: set[str]) -> dict:
 def _index_version_for_model(model: str, dims: int) -> int:
     m = (model or "").lower()
     if "bge-m3" in m:
-        # Default GPU profile truncates max_seq=512 → INDEX 12 (see resolve_embedding).
-        return 12
+        # Default GPU profile truncates max_seq=512 → INDEX 13 (see resolve_embedding).
+        return 13
     if "gte-large" in m:
         return 10
     if dims >= 1024:

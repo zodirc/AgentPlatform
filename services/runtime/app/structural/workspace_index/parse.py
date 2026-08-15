@@ -161,6 +161,24 @@ def _extract_treesitter(text: str, language: str) -> list[SymbolRec] | None:
 
     def walk(node, container_stack: list[str]) -> None:
         ntype = node.type
+        if not container_stack and ntype in {"assignment", "type_alias_statement"}:
+            span = _assign_name_span(node, raw)
+            if span:
+                name, line, col = span
+                key = (name, line, "variable")
+                if key not in seen:
+                    seen.add(key)
+                    out.append(
+                        SymbolRec(
+                            name=name,
+                            kind="variable",
+                            line=line,
+                            col=col,
+                            end_line=int(node.end_point[0]) + 1,
+                            container=None,
+                        )
+                    )
+            return
         if ntype in _DEF_NODE_TYPES:
             target = node
             kind = _KIND_BY_NODE.get(ntype, "symbol")
@@ -249,6 +267,28 @@ def _name_span(node, raw: bytes) -> tuple[str, int, int] | None:
         col = abs_byte - line_start + 1
         return m.group(1), line, col
     return None
+
+
+def _assign_name_span(node, raw: bytes) -> tuple[str, int, int] | None:
+    """Module-level assignment / TypeAlias identifier (1-based)."""
+    try:
+        left = node.child_by_field_name("left") or node.child_by_field_name("name")
+        target = left if left is not None else None
+        if target is None:
+            for child in node.children:
+                if child.type in {"identifier", "type_identifier"}:
+                    target = child
+                    break
+        if target is None:
+            return None
+        if target.type not in {"identifier", "type_identifier"}:
+            return None
+        token = raw[target.start_byte : target.end_byte].decode("utf-8", errors="replace").strip()
+        if not token or not token.isidentifier():
+            return None
+        return token, int(target.start_point[0]) + 1, int(target.start_point[1]) + 1
+    except Exception:
+        return None
 
 
 def _col_1based_at(text: str, abs_offset: int) -> int:

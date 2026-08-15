@@ -24,8 +24,26 @@ def _make_cancel_checker(turn_id: object):
 
 
 async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, Any]:
+    from app.structural.pager_redirect import resolve_pager_window, try_parse_pager_command
     from app.structural.test_summary import attach_test_summary_for_run_command
     from app.tools.core.shell import run_shell_command
+
+    pager = try_parse_pager_command(command)
+    if pager is not None:
+        target = _resolve_path(str(pager["path"]))
+        if target.is_file():
+            from app.tools.core.read_tools import read_file
+
+            offset, limit = resolve_pager_window(
+                path=target,
+                offset=pager.get("offset"),
+                limit=pager.get("limit"),
+                from_end=pager.get("from_end"),
+            )
+            out = await read_file(str(pager["path"]), offset=offset, limit=limit)
+            out["redirected_from"] = "run_command"
+            out["command"] = command
+            return out
 
     if settings.run_command_mode == "simulate":
         out = {

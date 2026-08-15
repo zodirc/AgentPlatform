@@ -28,6 +28,7 @@ FUSE_NO_WS_SYMBOL = "no_workspace_symbol_match"
 FUSE_DEFINITION_NULL = "definition_null"
 FUSE_LSP_FAILED = "lsp_failed"
 FUSE_LSP_TIMEOUT = "lsp_timeout"
+FUSE_NON_DEFINITION = "non_definition_query"
 
 
 def _infra_fuse_reason(reason: str) -> str:

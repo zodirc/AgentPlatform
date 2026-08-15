@@ -218,7 +218,7 @@ def _slice_file_by_lines(
         if chunk and chars + len(line) > max_chars:
             break
         if not chunk and len(line) > max_chars:
-            chunk.append(line[:max_chars] + "\n...[truncated]")
+            chunk.append(line[:max_chars] + "\n...[line truncated]")
             end_line = idx + 1
             line_char_clipped = True
             break
@@ -250,7 +250,8 @@ def _slice_file_by_lines(
         )
     elif line_char_clipped:
         payload["hint"] = (
-            f"Line {end_line} exceeds the {max_chars}-char read budget and was clipped. "
+            f"Line {end_line} exceeds the {max_chars}-char read budget and was clipped "
+            f"(next_offset is omitted because a single line cannot be continued by offset). "
             "Prefer grep for symbols in this file; do not page with shell head/tail/sed."
         )
     return payload

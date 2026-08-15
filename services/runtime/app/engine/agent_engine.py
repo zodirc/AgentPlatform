@@ -1308,6 +1308,7 @@ class AgentEngine:
             event_type
             and result.get("status") != "error"
             and not result.get("error")
+            and not (tool_name == "update_plan" and result.get("unchanged"))
         ):
             domain_payload = _domain_event_payload(event_type, result)
             if domain_payload is not None:
@@ -1563,6 +1564,8 @@ class AgentEngine:
             cmd = str(result.get("command") or "").strip()
             if cmd:
                 completed_payload["command"] = cmd[:1024]
+            if result.get("redirected_from"):
+                completed_payload["redirected_from"] = str(result.get("redirected_from"))[:64]
         if tool_name == "export_document":
             issues_raw = result.get("delivery_issues") or []
             issues = [
@@ -1592,11 +1595,13 @@ class AgentEngine:
                 completed_payload["unsupported"] = bool(result.get("unsupported"))
             if result.get("truncated") is not None:
                 completed_payload["structural_truncated"] = bool(result.get("truncated"))
-        await self._write_event(
-            event_type="tool.completed",
-            payload=completed_payload,
-            step_index=step_index,
-        )
+        skip_completed = tool_name == "update_plan" and bool(result.get("unchanged"))
+        if not skip_completed:
+            await self._write_event(
+                event_type="tool.completed",
+                payload=completed_payload,
+                step_index=step_index,
+            )
         record_tool_call(tool_name=tool_name, status=tool_status)
         is_error = bool(result.get("error")) or tool_status == "error"
         # HM5: keep audit on events only — do not inflate model tool_result tokens.

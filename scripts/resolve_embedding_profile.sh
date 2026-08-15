@@ -123,8 +123,8 @@ if [[ -n "$FORCE_MODEL" ]]; then
   MODEL="$FORCE_MODEL"
   if echo "$MODEL" | grep -qi 'bge-m3'; then
     DIMS=1024
-    # 12: dense truncate max_seq=512 (hub 8192 thrashs 16GiB; was INDEX 11).
-    INDEX_VER=12
+    # 13: dense truncate max_seq=512 + token-aligned chunker (was INDEX 12).
+    INDEX_VER=13
     pick_gpu_m3=1
   elif echo "$MODEL" | grep -qi 'gte-large'; then
     DIMS=1024
@@ -142,8 +142,8 @@ if [[ -n "$FORCE_MODEL" ]]; then
 elif (( pick_gpu_m3 )); then
   MODEL="BAAI/bge-m3"
   DIMS=1024
-  # 12: dense truncate max_seq=512 (hub 8192 thrashs 16GiB; was INDEX 11).
-  INDEX_VER=12
+  # 13: dense truncate max_seq=512 + token-aligned chunker (was INDEX 12).
+  INDEX_VER=13
 else
   MODEL="thenlper/gte-small"
   DIMS=384

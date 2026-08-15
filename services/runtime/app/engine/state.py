@@ -55,6 +55,7 @@ class TurnState:
     code_edits_since_verify: int = 0
     related_tests_union: list[dict[str, str]] = field(default_factory=list)
     last_repro_command: str = ""
+    last_test_first_failure: str = ""
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

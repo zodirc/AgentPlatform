@@ -153,3 +153,83 @@ def test_search_codebase_tool_completed_fuse_meta_validates() -> None:
     assert payload["candidates_from"] == "ast_index"
     assert payload["candidate_count"] == 2
     validate_event_payload("tool.completed", payload, schemas_dir=contracts / "schemas" / "events" / "payloads")
+
+
+def test_pager_redirect_tool_completed_validates() -> None:
+    contracts = _contracts_dir()
+    if str(contracts) not in sys.path:
+        sys.path.insert(0, str(contracts))
+    from validate_payload import validate_event_payload
+
+    payload = _tool_completed_base(
+        tool_call_id="run_command-pager",
+        tool_name="run_command",
+        status="ok",
+        summary="Read pkg/mod.py",
+        command="sed -n '10,20p' pkg/mod.py",
+        redirected_from="run_command",
+        path="pkg/mod.py",
+    )
+    validate_event_payload(
+        "tool.completed", payload, schemas_dir=contracts / "schemas" / "events" / "payloads"
+    )
+
+
+def test_non_definition_query_tool_completed_validates() -> None:
+    contracts = _contracts_dir()
+    if str(contracts) not in sys.path:
+        sys.path.insert(0, str(contracts))
+    from validate_payload import validate_event_payload
+
+    result = {
+        "mode": "lexical",
+        "locate_incomplete": True,
+        "definitions": [],
+        "locate_fuse_fail_reason": "non_definition_query",
+        "summary": "no workspace symbol (non-definition query)",
+    }
+    payload = _tool_completed_base(
+        tool_call_id="search_codebase-nd",
+        tool_name="search_codebase",
+        status="ok",
+        summary=result["summary"],
+        **_compact_locate_event_meta(result),
+    )
+    assert payload["locate_fuse_fail_reason"] == "non_definition_query"
+    validate_event_payload(
+        "tool.completed", payload, schemas_dir=contracts / "schemas" / "events" / "payloads"
+    )
+
+
+def test_failure_feed_stays_off_event_bus() -> None:
+    """C-1c failure_feed is model-facing tool_result only; additionalProperties=false."""
+    contracts = _contracts_dir()
+    if str(contracts) not in sys.path:
+        sys.path.insert(0, str(contracts))
+    from validate_payload import validate_event_payload
+
+    raw = {
+        "test_summary": {
+            "passed": 0,
+            "failed": 1,
+            "errors": 0,
+            "first_failures": [{"nodeid": "tests/test_a.py::test_bad", "detail": "boom"}],
+            "provider": "pytest",
+        },
+        "failure_feed": "First failing test: tests/test_a.py::test_bad",
+        "command": "pytest -q",
+    }
+    meta = _compact_test_summary_event_meta(raw)
+    payload = _tool_completed_base(
+        tool_call_id="run_tests-ff",
+        tool_name="run_tests",
+        status="ok",
+        summary=str(raw["failure_feed"]),
+        command=raw["command"],
+        **meta,
+    )
+    assert "failure_feed" not in payload
+    assert "first_failures" not in payload.get("test_summary", {})
+    validate_event_payload(
+        "tool.completed", payload, schemas_dir=contracts / "schemas" / "events" / "payloads"
+    )

@@ -175,8 +175,15 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
         }
 
     # Structural miss only — lexical fallback allowed, never presented as complete Locate.
+    from app.structural.symbols import is_non_definition_query
+
     lexical = await _lexical_codebase_hits(q, path=path, limit=limit, **_kwargs)
     hits = list(lexical.get("hits") or [])
+    fuse = (
+        "non_definition_query"
+        if is_non_definition_query(q)
+        else "no_workspace_symbol_match"
+    )
     return {
         "query": q,
         "mode": "symbol",
@@ -185,7 +192,7 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
         "match_count": len(hits),
         "lines": [],
         "locate_incomplete": True,
-        "locate_fuse_fail_reason": "no_workspace_symbol_match",
+        "locate_fuse_fail_reason": fuse,
         "truncated": bool(lexical.get("truncated")),
         "files_scanned": int(lexical.get("files_scanned") or 0),
         "summary": (

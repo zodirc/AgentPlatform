@@ -49,6 +49,7 @@ def note_tool_result_for_verify(
         cmd = str(result.get("command") or (arguments or {}).get("command") or "").strip()
         if cmd and result.get("status") not in {"passed", "executed"}:
             state.last_repro_command = cmd[:500]
+        _note_first_failure(state, result)
         return
 
     if name == "run_command":
@@ -58,6 +59,20 @@ def note_tool_result_for_verify(
         state.verify_pending = False
         if result.get("status") not in {"executed", "passed"} or int(result.get("exit_code") or 1) != 0:
             state.last_repro_command = cmd[:500]
+        _note_first_failure(state, result)
+
+
+def _note_first_failure(state: Any, result: dict[str, Any]) -> None:
+    from app.structural.test_summary import format_failure_feed
+
+    feed = result.get("failure_feed")
+    if isinstance(feed, str) and feed.strip():
+        state.last_test_first_failure = feed.strip()[:400]
+        return
+    summary = result.get("test_summary")
+    formatted = format_failure_feed(summary if isinstance(summary, dict) else None)
+    if formatted:
+        state.last_test_first_failure = formatted[:400]
 
 
 def should_inject_verify_receipt(
@@ -104,8 +119,14 @@ def build_verify_receipt_text(state: Any) -> str:
     repro = str(getattr(state, "last_repro_command", "") or "").strip()
     if repro:
         lines.append(f"  repro: {repro}")
+    fail = str(getattr(state, "last_test_first_failure", "") or "").strip()
+    if fail:
+        lines.append("  last_failure:")
+        for fline in fail.splitlines():
+            lines.append(f"    {fline}")
     lines.append(
-        "  要求: 运行上述任一验证后再交卷；确实无法运行则说明原因后交卷"
+        "  要求: 运行上述任一验证后再交卷；若有 last_failure 须针对该条修复并重跑同一测；"
+        "确实无法运行则说明原因后交卷"
     )
     return "\n".join(lines)
 

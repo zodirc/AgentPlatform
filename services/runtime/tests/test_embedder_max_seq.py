@@ -50,12 +50,12 @@ def test_explicit_max_seq_overrides_bge_default(monkeypatch) -> None:
     assert model._model.max_seq_length == 1024
 
 
-def test_bge_m3_index_version_defaults_to_12(monkeypatch) -> None:
+def test_bge_m3_index_version_defaults_to_13(monkeypatch) -> None:
     monkeypatch.setattr(emb.settings, "embedding_index_version", 0)
     monkeypatch.setattr(emb.settings, "embedding_max_seq_length", 0)
     monkeypatch.setattr(emb.settings, "embedding_model", "BAAI/bge-m3")
     monkeypatch.setattr(emb.settings, "embedding_dimensions", 1024)
-    assert emb.effective_index_version() == 12
+    assert emb.effective_index_version() == 13
 
 
 def test_explicit_index_version_wins(monkeypatch) -> None:

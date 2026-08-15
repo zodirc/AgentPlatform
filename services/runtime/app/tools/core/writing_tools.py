@@ -4,8 +4,11 @@ import json
 from typing import Any
 from uuid import uuid4
 
-from app.settings import settings
-from app.tools.core.paths import _resolve_path
+_LAST_PLAN_SIG: dict[str, tuple[tuple[str, str, str], ...]] = {}
+
+
+def _plan_signature(items: list[dict[str, str]]) -> tuple[tuple[str, str, str], ...]:
+    return tuple((row["id"], row["title"], row["status"]) for row in items)
 
 def _section_filename(section_id: str) -> str:
     normalized = section_id.strip()
@@ -236,6 +239,7 @@ async def draft_section(
 async def update_plan(
     items: list[dict[str, Any]],
     summary: str = "",
+    turn_id=None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
     plan_id = f"plan-{uuid4().hex[:8]}"
@@ -290,6 +294,16 @@ async def update_plan(
         result["awaiting_consent"] = True
         if summary:
             result["summary"] = summary
+    sig = _plan_signature(normalized)
+    key = str(turn_id) if turn_id is not None else ""
+    if key and _LAST_PLAN_SIG.get(key) == sig:
+        result["unchanged"] = True
+        result["summary"] = "Plan unchanged"
+        return result
+    if key:
+        if len(_LAST_PLAN_SIG) > 256:
+            _LAST_PLAN_SIG.clear()
+        _LAST_PLAN_SIG[key] = sig
     return result
 
 

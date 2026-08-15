@@ -169,6 +169,8 @@ async def _finish_process(
     stdout = _maybe_redact(stdout_b.decode("utf-8", errors="replace"))
     stderr = _maybe_redact(stderr_b.decode("utf-8", errors="replace"))
     truncated = False
+    stdout_full = stdout
+    stderr_full = stderr
     if len(stdout) > MAX_OUTPUT_CHARS:
         stdout = stdout[:MAX_OUTPUT_CHARS] + "\n...[truncated]"
         truncated = True
@@ -182,7 +184,7 @@ async def _finish_process(
     if truncated:
         summary = f"{summary} (output truncated)"
 
-    return {
+    result: dict[str, Any] = {
         "status": status,
         "command": _maybe_redact(command) if command else command,
         "stdout": stdout,
@@ -191,6 +193,11 @@ async def _finish_process(
         "is_truncated": truncated,
         "summary": summary,
     }
+    # C-1a: keep untruncated streams for test_summary parse; stripped before model sees them.
+    if truncated:
+        result["_stdout_full"] = stdout_full
+        result["_stderr_full"] = stderr_full
+    return result
 
 
 async def run_argv_command(

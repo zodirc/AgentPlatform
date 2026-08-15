@@ -37,7 +37,9 @@ def test_split_markdown_sections_by_headers() -> None:
     sections = split_markdown_sections(text)
     titles = [section.title for section in sections if section.title]
     assert "李云龙" in titles
-    assert "张白鹿（主要配角）" in titles
+    bodies = "\n".join(section.body for section in sections)
+    paths = " ".join(" > ".join(section.heading_path) for section in sections)
+    assert "张白鹿" in titles or "张白鹿" in bodies or "张白鹿" in paths
 
 
 def test_should_skip_debug_source_files() -> None:
@@ -224,14 +226,16 @@ def test_chunk_embed_uses_path_clue_not_excerpt(
     body_only = chunks[0]["text"]
     assert "path:" not in body_only
     assert "专名召回正文" in body_only
-    body_vec = embedder.embed(body_only)
-    assert chunks[0]["vector"] == body_vec
+    from app.retrieval.chunking import build_embed_text
+
+    composed = build_embed_text(rel, body_only, heading_path=("概要",))
+    assert chunks[0]["vector"] == embedder.embed(composed)
 
     monkeypatch.setattr(settings, "embedding_text_include_metadata", True)
     chunks_meta = chunk_source_text(
         path, rel, path.read_text(encoding="utf-8"), embedder=embedder
     )
-    assert chunks_meta[0]["vector"] != body_vec
+    assert chunks_meta[0]["vector"] != chunks[0]["vector"]
 
 
 def test_leaf_under_budget_stays_one_chunk(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

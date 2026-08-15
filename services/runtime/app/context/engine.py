@@ -851,6 +851,17 @@ def _protected_tail_start(messages: list[dict[str, Any]]) -> int:
     return max(0, protect_at)
 
 
+def _middle_truncate_text(text: str, limit: int) -> str:
+    """Keep head and tail of an oversized tool_result (X-2)."""
+    if limit <= 0 or len(text) <= limit:
+        return text
+    marker = "\n...[budget_truncated]...\n"
+    keep = (limit - len(marker)) // 2
+    if keep < 64:
+        return text[: max(0, limit - len("\n...[budget_truncated]"))] + "\n...[budget_truncated]"
+    return text[:keep] + marker + text[-keep:]
+
+
 def _apply_tool_result_budget(
     messages: list[dict[str, Any]],
     char_budget: int | None = None,
@@ -898,7 +909,7 @@ def _apply_tool_result_budget(
                 else default_budget
             )
             if len(text) > limit:
-                text = text[:limit] + "\n...[budget_truncated]"
+                text = _middle_truncate_text(text, limit)
                 truncated += 1
                 tool_name = name_by_id.get(tid) or "unknown"
                 truncated_by_tool[tool_name] = truncated_by_tool.get(tool_name, 0) + 1

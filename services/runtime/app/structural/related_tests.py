@@ -141,18 +141,32 @@ def _naming_convention_tests(workspace: Path, rel: str, *, limit: int) -> list[s
     seen: set[str] = set()
     rel_norm = rel.replace("\\", "/")
     pattern = f"test_{stem}*.py"
+    alt_pattern = f"{stem}_test.py"
+    package = Path(rel).parent.name
 
     # 1) Same directory + sibling/ancestor tests/ (non-recursive) — high precision.
     local: list[Path] = []
-    local.extend(parent.glob(pattern))
+    for pat in (pattern, alt_pattern):
+        local.extend(parent.glob(pat))
     sibling_tests = parent / "tests"
     if sibling_tests.is_dir():
-        local.extend(sibling_tests.glob(pattern))
+        for pat in (pattern, alt_pattern):
+            local.extend(sibling_tests.glob(pat))
+        mod_dir = sibling_tests / stem
+        if mod_dir.is_dir():
+            local.extend(mod_dir.rglob("test_*.py"))
+            local.extend(mod_dir.rglob(alt_pattern))
     pkg = parent
     for _ in range(4):
         tests_dir = pkg / "tests"
         if tests_dir.is_dir():
-            local.extend(tests_dir.glob(pattern))
+            for pat in (pattern, alt_pattern):
+                local.extend(tests_dir.glob(pat))
+            if package:
+                local.extend(tests_dir.glob(f"test_{package}*.py"))
+            nested = tests_dir / stem
+            if nested.is_dir():
+                local.extend(nested.rglob("test_*.py"))
         if pkg == workspace.resolve() or pkg.parent == pkg:
             break
         pkg = pkg.parent
@@ -165,6 +179,20 @@ def _naming_convention_tests(workspace: Path, rel: str, *, limit: int) -> list[s
     if top_tests.is_dir() and len(out) < limit:
         deadline = time.monotonic() + (_NAMING_RGLOB_BUDGET_MS / 1000.0)
         for path in top_tests.rglob(pattern):
+            if time.monotonic() >= deadline:
+                break
+            if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
+                break
+        if len(out) < limit:
+            for path in top_tests.rglob(alt_pattern):
+                if time.monotonic() >= deadline:
+                    break
+                if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
+                    break
+    top_mod = workspace / "tests" / stem
+    if top_mod.is_dir() and len(out) < limit:
+        deadline = time.monotonic() + (_NAMING_RGLOB_BUDGET_MS / 1000.0)
+        for path in list(top_mod.rglob("test_*.py")) + list(top_mod.rglob(f"{stem}_test.py")):
             if time.monotonic() >= deadline:
                 break
             if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
@@ -377,6 +405,19 @@ def _import_reverse_scan(
     return out
 
 
+def _proximity_key(edited_rel: str, test_rel: str) -> tuple[int, int, str]:
+    """Prefer tests sharing the longest path prefix with the edited file."""
+    e_parts = Path(edited_rel.replace("\\", "/")).parts
+    t_parts = Path(test_rel.replace("\\", "/")).parts
+    common = 0
+    for a, b in zip(e_parts, t_parts):
+        if a == b:
+            common += 1
+        else:
+            break
+    return (-common, len(t_parts), test_rel)
+
+
 def related_tests_for_path(
     path: str,
     *,
@@ -400,10 +441,7 @@ def related_tests_for_path(
 
     max_n = max(1, int(limit))
     naming = _naming_convention_tests(root, rel, limit=max_n)
-    remaining = max_n - len(naming)
-    imports: list[str] = []
-    if remaining > 0:
-        imports = _import_reverse_tests(root, rel, limit=remaining)
+    imports = _import_reverse_tests(root, rel, limit=max_n)
 
     merged: list[str] = []
     seen: set[str] = set()
@@ -414,6 +452,5 @@ def related_tests_for_path(
             continue
         seen.add(p)
         merged.append(p)
-        if len(merged) >= max_n:
-            break
-    return _as_entries(merged)
+    merged.sort(key=lambda p: _proximity_key(rel, p))
+    return _as_entries(merged[:max_n])

@@ -74,9 +74,14 @@ class Settings(BaseSettings):
     retrieval_rerank_model: str = "BAAI/bge-reranker-base"
     retrieval_rerank_pool: int = 20
     retrieval_rerank_timeout_seconds: float = 0.05
-    # RQ1b: title-tree leaf soft budget (~2000 token char approx) then sliding window.
-    retrieval_chunk_max_chars: int = 4000
-    retrieval_chunk_overlap_chars: int = 400
+    # R-5: enable CE only after GPU P95 < this (ms). Unused until measured; default stays off.
+    retrieval_rerank_cross_encoder_max_p95_ms: float = 150.0
+    # Token-aligned budget (R-1). Kept ≤ embedding_max_seq≈512 with headroom.
+    retrieval_chunk_max_tokens: int = 450
+    retrieval_chunk_overlap_tokens: int = 64
+    # Char fallback when tokenizer is unavailable (latin ≈4 char/token → ~1800).
+    retrieval_chunk_max_chars: int = 1800
+    retrieval_chunk_overlap_chars: int = 200
     # Wide markdown tables → pointer in indexed body (full table stays on disk for read_file).
     retrieval_table_detach_min_rows: int = 6
     retrieval_table_detach_min_chars: int = 800
@@ -165,7 +170,7 @@ class Settings(BaseSettings):
     # ST truncate length. 0 → model default, except bge-m3 auto 512 (8k default thrashs VRAM).
     embedding_max_seq_length: int = 0
     # Embed-space index stamp. 0 → derive from model/max_seq (see effective_index_version).
-    # resolve_embedding_profile writes EMBEDDING_INDEX_VERSION (bge-m3@512 → 12).
+    # resolve_embedding_profile writes EMBEDDING_INDEX_VERSION (bge-m3@512 → 13).
     embedding_index_version: int = 0
     # 0 → auto: force reindex ≥1024 (batch×16), incremental batch×2. Override flush size.
     embedding_flush_chunks: int = 0

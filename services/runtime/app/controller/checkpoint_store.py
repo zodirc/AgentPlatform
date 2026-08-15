@@ -42,6 +42,7 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "code_edits_since_verify": int(state.code_edits_since_verify or 0),
         "related_tests_union": list(state.related_tests_union or []),
         "last_repro_command": str(state.last_repro_command or ""),
+        "last_test_first_failure": str(getattr(state, "last_test_first_failure", "") or ""),
     }
 
 
@@ -86,6 +87,7 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         code_edits_since_verify=int(data.get("code_edits_since_verify") or 0),
         related_tests_union=_related_union(data.get("related_tests_union")),
         last_repro_command=str(data.get("last_repro_command") or ""),
+        last_test_first_failure=str(data.get("last_test_first_failure") or ""),
     )
 
 

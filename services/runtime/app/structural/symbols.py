@@ -83,6 +83,20 @@ def is_symbol_query(text: str) -> bool:
     return bool(_SYMBOL_QUERY_RE.fullmatch(q))
 
 
+_MODULE_PATH_RE = re.compile(r"^[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+$")
+_NON_DEF_BARE = frozenset({"self", "cls", "args", "kwargs", "msg", "exc", "err"})
+
+
+def is_non_definition_query(text: str) -> bool:
+    """P16: dotted package path or parameter-like name — defs-only index cannot answer."""
+    q = (text or "").strip()
+    if not is_symbol_query(q):
+        return False
+    if q in _NON_DEF_BARE or q in _SKIP_IDENTS:
+        return True
+    return bool(_MODULE_PATH_RE.fullmatch(q))
+
+
 def extract_symbols_from_edit(old_text: str, new_text: str, *, limit: int = 3) -> list[str]:
     """Pick primary symbol(s) from a surgical edit span for Impact (find_references)."""
     ordered: list[str] = []

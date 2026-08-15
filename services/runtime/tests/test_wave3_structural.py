@@ -25,8 +25,17 @@ def test_file_outline_lines_python() -> None:
     assert "def top" in joined or "method Foo.bar" in joined or "def Foo.bar" in joined
 
 
-def test_file_outline_skips_non_code() -> None:
-    assert file_outline_lines("# hello\n", path="notes.md") == []
+def test_file_outline_markdown_headings() -> None:
+    text = "# Hello\n\nbody\n\n## World\nmore\n"
+    lines = file_outline_lines(text, path="notes.md")
+    assert lines
+    joined = "\n".join(lines)
+    assert "Hello" in joined
+    assert "World" in joined
+
+
+def test_file_outline_skips_plain_text_without_headings() -> None:
+    assert file_outline_lines("just a paragraph\n" * 3, path="notes.txt") == []
 
 
 def test_related_tests_naming_and_import(tmp_path: Path) -> None:

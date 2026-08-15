@@ -1,6 +1,7 @@
 """Parse pytest / unittest stdout into a compact test_summary (Wave 4 W10).
 
 Omit the field when format is uncertain — never invent failures.
+Quality-uplift C-1: parse from untruncated streams; accept -q / short footers.
 """
 
 from __future__ import annotations
@@ -12,12 +13,22 @@ _PYTEST_SUMMARY_RE = re.compile(
     r"=+\s*(?P<body>.+?)\s*=+\s*$",
     re.MULTILINE,
 )
+_PYTEST_QUIET_RE = re.compile(
+    r"(?P<body>(?:\d+\s+(?:passed|failed|errors?|error|skipped|xfailed|xpassed|warnings?)"
+    r"(?:,\s*)?)+)"
+    r"(?:\s+in\s+[0-9.]+s)?",
+    re.IGNORECASE,
+)
 _COUNT_RE = re.compile(
     r"(?P<n>\d+)\s+(?P<label>passed|failed|errors?|error|skipped|xfailed|xpassed|warnings?)",
     re.IGNORECASE,
 )
 _FAILED_HEADER_RE = re.compile(
     r"^_{2,}\s+(?P<nodeid>\S.*?)\s+_{2,}\s*$",
+    re.MULTILINE,
+)
+_SHORT_FAIL_RE = re.compile(
+    r"^(?:FAILED|ERROR)\s+(?P<nodeid>\S+)(?:\s+-\s+(?P<rest>.+))?\s*$",
     re.MULTILINE,
 )
 _ASSERT_LINE_RE = re.compile(
@@ -47,6 +58,9 @@ _TESTISH_CMD_RE = re.compile(
 )
 
 _FIRST_FAILURES_MAX = 5
+_DETAIL_MAX = 400
+_STDOUT_FULL_KEY = "_stdout_full"
+_STDERR_FULL_KEY = "_stderr_full"
 
 
 def is_testish_command(command: str | None) -> bool:
@@ -70,16 +84,55 @@ def parse_test_summary(
     return _parse_unittest(text, max_failures=max_failures)
 
 
-def attach_test_summary_for_run_tests(result: dict[str, Any]) -> dict[str, Any]:
-    """Always attempt parse for run_tests results (command is inherently testish)."""
-    summary = parse_test_summary(
-        str(result.get("stdout") or ""),
-        stderr=str(result.get("stderr") or ""),
-    )
+def format_failure_feed(summary: dict[str, Any] | None) -> str | None:
+    """Fixed subsection for the first failing test (C-1c) — ≤400 chars of detail."""
+    if not isinstance(summary, dict):
+        return None
+    fails = summary.get("first_failures")
+    if not isinstance(fails, list) or not fails:
+        return None
+    first = fails[0] if isinstance(fails[0], dict) else None
+    if not first:
+        return None
+    name = str(first.get("name") or "").strip()
+    detail = str(first.get("detail") or "").strip()[:_DETAIL_MAX]
+    if not name:
+        return None
+    lines = [f"First failing test: {name}"]
+    if detail:
+        lines.append(f"  {detail}")
+    return "\n".join(lines)
+
+
+def _streams_for_parse(result: dict[str, Any]) -> tuple[str, str]:
+    stdout = str(result.get(_STDOUT_FULL_KEY) or result.get("stdout") or "")
+    stderr = str(result.get(_STDERR_FULL_KEY) or result.get("stderr") or "")
+    return stdout, stderr
+
+
+def _drop_full_streams(result: dict[str, Any]) -> dict[str, Any]:
+    result.pop(_STDOUT_FULL_KEY, None)
+    result.pop(_STDERR_FULL_KEY, None)
+    return result
+
+
+def _attach_parsed(result: dict[str, Any], summary: dict[str, Any] | None) -> dict[str, Any]:
+    _drop_full_streams(result)
     if summary is None:
         return result
     result["test_summary"] = summary
+    feed = format_failure_feed(summary)
+    if feed:
+        result["failure_feed"] = feed
+        prev = str(result.get("summary") or "").strip()
+        result["summary"] = f"{feed}\n{prev}" if prev else feed
     return result
+
+
+def attach_test_summary_for_run_tests(result: dict[str, Any]) -> dict[str, Any]:
+    """Always attempt parse for run_tests results (command is inherently testish)."""
+    stdout, stderr = _streams_for_parse(result)
+    return _attach_parsed(result, parse_test_summary(stdout, stderr=stderr))
 
 
 def attach_test_summary_for_run_command(
@@ -88,25 +141,27 @@ def attach_test_summary_for_run_command(
     command: str,
 ) -> dict[str, Any]:
     if not is_testish_command(command):
-        return result
-    summary = parse_test_summary(
-        str(result.get("stdout") or ""),
-        stderr=str(result.get("stderr") or ""),
-    )
-    if summary is None:
-        return result
-    result["test_summary"] = summary
-    return result
+        return _drop_full_streams(result)
+    stdout, stderr = _streams_for_parse(result)
+    return _attach_parsed(result, parse_test_summary(stdout, stderr=stderr))
+
+
+def _counts_from_body(body: str) -> dict[str, int]:
+    return {m.group("label").lower(): int(m.group("n")) for m in _COUNT_RE.finditer(body)}
 
 
 def _parse_pytest(text: str, *, max_failures: int) -> dict[str, Any] | None:
-    # Prefer the last ===== summary ===== line (pytest footer).
-    bodies = list(_PYTEST_SUMMARY_RE.finditer(text))
-    if not bodies:
+    body = ""
+    banners = list(_PYTEST_SUMMARY_RE.finditer(text))
+    if banners:
+        body = banners[-1].group("body")
+    else:
+        quiet = list(_PYTEST_QUIET_RE.finditer(text))
+        if quiet:
+            body = quiet[-1].group("body")
+    if not body:
         return None
-    body = bodies[-1].group("body")
-    # Require at least one known count label so we don't grab random ==== banners.
-    counts = {m.group("label").lower(): int(m.group("n")) for m in _COUNT_RE.finditer(body)}
+    counts = _counts_from_body(body)
     if not counts:
         return None
     if not any(k in counts for k in ("passed", "failed", "error", "errors")):
@@ -131,11 +186,11 @@ def _parse_pytest(text: str, *, max_failures: int) -> dict[str, Any] | None:
 
 def _pytest_first_failures(text: str, *, max_failures: int) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
+    seen: set[str] = set()
     for m in _FAILED_HEADER_RE.finditer(text):
         nodeid = m.group("nodeid").strip()
         if not nodeid or nodeid.lower() in {"failures", "errors", "short test summary info"}:
             continue
-        # Slice until next failure header or short summary.
         start = m.end()
         nxt = _FAILED_HEADER_RE.search(text, start)
         end = nxt.start() if nxt else len(text)
@@ -146,37 +201,53 @@ def _pytest_first_failures(text: str, *, max_failures: int) -> list[dict[str, st
             detail = am.group(0).strip()
             if detail.startswith("E "):
                 detail = detail[2:].strip()
-        entry = {"name": nodeid[:200]}
+        key = nodeid[:200]
+        if key in seen:
+            continue
+        seen.add(key)
+        entry = {"name": key}
         if detail:
-            entry["detail"] = detail[:200]
+            entry["detail"] = detail[:_DETAIL_MAX]
         out.append(entry)
         if len(out) >= max_failures:
+            return out
+    for m in _SHORT_FAIL_RE.finditer(text):
+        if len(out) >= max_failures:
             break
+        nodeid = m.group("nodeid").strip()
+        if not nodeid or nodeid in seen:
+            continue
+        seen.add(nodeid)
+        entry = {"name": nodeid[:200]}
+        rest = (m.group("rest") or "").strip()
+        if rest:
+            entry["detail"] = rest[:_DETAIL_MAX]
+        out.append(entry)
     return out
 
 
 def _parse_unittest(text: str, *, max_failures: int) -> dict[str, Any] | None:
     ran = _UNITTEST_RAN_RE.search(text)
-    if not ran:
+    fl = _UNITTEST_FAILED_LINE_RE.search(text)
+    names = [m.group("name").strip() for m in _UNITTEST_FAIL_RE.finditer(text)]
+    ok = _UNITTEST_OK_RE.search(text) is not None
+    if not ran and not fl and not names and not ok:
         return None
-    total = int(ran.group("ran"))
+
     failed = 0
     errors = 0
-    fl = _UNITTEST_FAILED_LINE_RE.search(text)
     if fl:
         failed = int(fl.group("f") or 0)
         errors = int(fl.group("e") or 0)
-    elif _UNITTEST_OK_RE.search(text):
+    elif ok:
         failed = 0
         errors = 0
-    else:
-        # FAIL/ERROR headers present without FAILED(...) line.
-        names = [m.group("name").strip() for m in _UNITTEST_FAIL_RE.finditer(text)]
-        if not names and total > 0:
-            # Ambiguous — omit rather than invent.
-            return None
+    elif names:
         failed = len(names)
+    elif ran:
+        return None
 
+    total = int(ran.group("ran")) if ran else max(failed + errors, len(names))
     first: list[dict[str, str]] = []
     for m in _UNITTEST_FAIL_RE.finditer(text):
         first.append({"name": m.group("name").strip()[:200]})

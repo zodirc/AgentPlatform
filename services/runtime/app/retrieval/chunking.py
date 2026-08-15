@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
 # Legacy aliases / fallbacks when settings are unavailable (tests, import order).
-# RQ1b default soft leaf ≈ ~2000 tokens via char budget (see settings).
-CHUNK_SIZE = 4000
-CHUNK_OVERLAP = 400
-HEADER_RE = re.compile(r"^(#{1,3})\s+(.+)$")
+# Char fallback ≈ 450 tokens latin (4 char/token); tokenizer path uses max_tokens.
+CHUNK_SIZE = 1800
+CHUNK_OVERLAP = 200
+HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+SETEXT_H1_RE = re.compile(r"^=+\s*$")
+SETEXT_H2_RE = re.compile(r"^-{3,}\s*$")
+_MIN_LEAF_CHARS = 200
+_TABLE_ROW_GROUP = 8
 # GFM table rows: leading | … |
 _TABLE_LINE_RE = re.compile(r"^\s*\|.*\|\s*$")
 _TABLE_SEP_RE = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$")
@@ -45,6 +49,7 @@ class TextSection:
     body: str
     line_start: int
     line_end: int
+    heading_path: tuple[str, ...] = field(default_factory=tuple)
 
 
 def should_index_source(path: Path) -> bool:
@@ -77,13 +82,16 @@ def build_embed_text(
     body: str,
     *,
     tags: Sequence[str] | None = None,
+    heading_path: Sequence[str] | None = None,
 ) -> str:
-    """Compose vector input; metadata prefixes are optional (P2).
+    """Compose vector input; heading breadcrumbs always prefix the body (R-3).
 
-    Default (``EMBEDDING_TEXT_INCLUDE_METADATA=false``): body only — BEIR synthetic
-    paths otherwise pollute the highest-influence token positions.
+    Path/tags metadata prefixes stay optional (``EMBEDDING_TEXT_INCLUDE_METADATA``).
     """
     body_text = (body or "").strip()
+    crumb = " > ".join(str(p).strip() for p in (heading_path or ()) if str(p).strip())
+    if crumb:
+        body_text = f"{crumb}\n\n{body_text}" if body_text else crumb
     from app.settings import settings
 
     if not bool(getattr(settings, "embedding_text_include_metadata", False)):
@@ -145,15 +153,18 @@ def extract_source_tags(rel_path: str, text: str, *, max_tags: int = 8) -> list[
     return found[: max(1, max_tags)]
 
 
-def _chunk_limits() -> tuple[int, int]:
+def _chunk_limits() -> tuple[int, int, int, int]:
+    """Return ``(size_chars, overlap_chars, size_tokens, overlap_tokens)``."""
     try:
         from app.settings import settings
 
-        size = max(200, int(settings.retrieval_chunk_max_chars))
-        overlap = max(0, min(size - 1, int(settings.retrieval_chunk_overlap_chars)))
-        return size, overlap
+        size = max(200, int(getattr(settings, "retrieval_chunk_max_chars", CHUNK_SIZE)))
+        overlap = max(0, min(size - 1, int(getattr(settings, "retrieval_chunk_overlap_chars", CHUNK_OVERLAP))))
+        size_tok = max(64, int(getattr(settings, "retrieval_chunk_max_tokens", 450)))
+        ov_tok = max(0, min(size_tok - 1, int(getattr(settings, "retrieval_chunk_overlap_tokens", 64))))
+        return size, overlap, size_tok, ov_tok
     except Exception:
-        return CHUNK_SIZE, CHUNK_OVERLAP
+        return CHUNK_SIZE, CHUNK_OVERLAP, 450, 64
 
 
 def _table_detach_thresholds() -> tuple[int, int]:
@@ -228,6 +239,92 @@ def detach_wide_tables(text: str) -> str:
     return "".join(out)
 
 
+def _table_cells(line: str) -> list[str]:
+    return [c.strip() for c in line.strip().strip("|").split("|")]
+
+
+def iter_wide_table_chunks(text: str) -> list[TextSection]:
+    """Linearize detached wide tables into row-group chunks (R-4)."""
+    if not text:
+        return []
+    min_rows, min_chars = _table_detach_thresholds()
+    lines = text.splitlines()
+    out: list[TextSection] = []
+    i = 0
+    caption = ""
+    while i < len(lines):
+        stripped = lines[i].strip()
+        hm = HEADER_RE.match(stripped)
+        if hm:
+            caption = hm.group(2).strip()
+        if not _is_table_line(lines[i]):
+            i += 1
+            continue
+        start = i
+        while i < len(lines) and _is_table_line(lines[i]):
+            i += 1
+        block = lines[start:i]
+        data_rows = [
+            ln for ln in block if _is_table_line(ln) and not _TABLE_SEP_RE.match(ln.rstrip())
+        ]
+        block_text = "\n".join(block)
+        if len(data_rows) < min_rows and len(block_text) < min_chars:
+            continue
+        if not data_rows:
+            continue
+        headers = _table_cells(data_rows[0])
+        body_rows = data_rows[1:]
+        title = caption or (headers[0] if headers else "table")
+        for g in range(0, max(1, len(body_rows)), _TABLE_ROW_GROUP):
+            batch = body_rows[g : g + _TABLE_ROW_GROUP]
+            linearized: list[str] = []
+            for row in batch:
+                cells = _table_cells(row)
+                pairs = [f"{h}: {c}" for h, c in zip(headers, cells) if c and h]
+                if pairs:
+                    linearized.append("; ".join(pairs))
+            if not linearized:
+                continue
+            line_start = start + 1 + g
+            line_end = min(i, line_start + len(batch) + 1)
+            out.append(
+                TextSection(
+                    title=title,
+                    body=f"{title} | " + " || ".join(linearized),
+                    line_start=line_start,
+                    line_end=line_end,
+                    heading_path=(title,),
+                )
+            )
+    return out
+
+
+def iter_markdown_headings(text: str, *, limit: int = 40) -> list[tuple[int, str]]:
+    """Return ``(line, title)`` for ATX H1–H6 and Setext headings."""
+    lines = text.splitlines()
+    found: list[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        m = HEADER_RE.match(line)
+        if m:
+            found.append((i + 1, m.group(2).strip()))
+            if len(found) >= limit:
+                return found
+            i += 1
+            continue
+        if i + 1 < len(lines) and line.strip() and not line.lstrip().startswith("#"):
+            nxt = lines[i + 1]
+            if SETEXT_H1_RE.match(nxt) or SETEXT_H2_RE.match(nxt):
+                found.append((i + 1, line.strip()))
+                if len(found) >= limit:
+                    return found
+                i += 2
+                continue
+        i += 1
+    return found
+
+
 def split_markdown_sections(text: str) -> list[TextSection]:
     lines = text.splitlines()
     if not lines:
@@ -235,11 +332,13 @@ def split_markdown_sections(text: str) -> list[TextSection]:
 
     sections: list[TextSection] = []
     current_title = ""
+    current_path: tuple[str, ...] = ()
     current_lines: list[str] = []
     current_start = 1
+    stack: list[tuple[int, str]] = []
 
     def flush(end_line: int) -> None:
-        nonlocal current_title, current_lines, current_start
+        nonlocal current_title, current_lines, current_start, current_path
         body = "\n".join(current_lines).strip()
         if body or current_title:
             sections.append(
@@ -248,35 +347,82 @@ def split_markdown_sections(text: str) -> list[TextSection]:
                     body=body,
                     line_start=current_start,
                     line_end=end_line,
+                    heading_path=current_path,
                 )
             )
         current_lines = []
 
+    def push_heading(level: int, title: str, line_no: int) -> None:
+        nonlocal current_title, current_start, current_path
+        flush(line_no - 1 if current_lines or current_title else line_no)
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+        stack.append((level, title))
+        current_title = title
+        current_path = tuple(t for _, t in stack)
+        current_start = line_no
+
+    skip_next = False
     for index, line in enumerate(lines, start=1):
+        if skip_next:
+            skip_next = False
+            continue
         match = HEADER_RE.match(line)
         if match:
-            flush(index - 1 if current_lines or current_title else index)
-            current_title = match.group(2).strip()
-            current_start = index
+            push_heading(len(match.group(1)), match.group(2).strip(), index)
             continue
+        if index < len(lines) and line.strip() and not line.lstrip().startswith("#"):
+            nxt = lines[index]
+            if SETEXT_H1_RE.match(nxt) or SETEXT_H2_RE.match(nxt):
+                level = 1 if SETEXT_H1_RE.match(nxt) else 2
+                push_heading(level, line.strip(), index)
+                skip_next = True
+                continue
         current_lines.append(line)
 
     flush(len(lines))
-    return sections
+    return _merge_small_leaves(sections)
+
+
+def _merge_small_leaves(sections: list[TextSection]) -> list[TextSection]:
+    if len(sections) <= 1:
+        return sections
+    out: list[TextSection] = [sections[0]]
+    for sec in sections[1:]:
+        if len(sec.body) < _MIN_LEAF_CHARS and len(sec.heading_path) >= 4 and out:
+            prev = out[-1]
+            extra = sec.body
+            if sec.title and sec.title not in extra:
+                extra = f"{sec.title}\n{extra}".strip()
+            body = prev.body
+            if extra:
+                body = f"{body}\n\n{extra}".strip() if body else extra
+            out[-1] = TextSection(
+                title=prev.title,
+                body=body,
+                line_start=prev.line_start,
+                line_end=sec.line_end,
+                heading_path=prev.heading_path,
+            )
+        else:
+            out.append(sec)
+    return out
 
 
 def _split_oversized(text: str, *, size: int, overlap: int) -> list[str]:
-    if len(text) <= size:
-        return [text]
-    parts: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(len(text), start + size)
-        parts.append(text[start:end])
-        if end >= len(text):
-            break
-        start = max(0, end - overlap)
-    return parts
+    """Char-window split kept for tests; production uses ``chunk_split.split_oversized``."""
+    from app.retrieval.chunk_split import split_oversized
+
+    return [
+        part
+        for part, _ in split_oversized(
+            text,
+            size_chars=size,
+            overlap_chars=overlap,
+            size_tokens=0,
+            overlap_tokens=0,
+        )
+    ]
 
 
 # CQ4: light code symbol boundaries (async index path only; no tree-sitter on hot path).
@@ -559,6 +705,9 @@ def chunk_source_text(
     else:
         prepared = detach_wide_tables(text)
         sections = split_markdown_sections(prepared)
+        extra = iter_wide_table_chunks(text)
+        if extra:
+            sections = list(sections) + extra
     if not sections:
         sections = [
             TextSection(
@@ -569,7 +718,9 @@ def chunk_source_text(
             )
         ]
 
-    chunk_size, chunk_overlap = _chunk_limits()
+    chunk_size, chunk_overlap, size_tokens, overlap_tokens = _chunk_limits()
+    from app.retrieval.chunk_split import split_oversized as _split_payload
+
     chunks: list[dict[str, Any]] = []
     embed_inputs: list[str] = []
     chunk_idx = 0
@@ -594,23 +745,38 @@ def chunk_source_text(
         if not payload:
             continue
 
-        for part in _split_oversized(payload, size=chunk_size, overlap=chunk_overlap):
+        heading_path = tuple(section.heading_path or (() if not section.title else (section.title,)))
+        section_tags = list(tag_list)
+        for crumb in heading_path:
+            if crumb and crumb not in section_tags:
+                section_tags.append(crumb[:40])
+
+        for part, origin in _split_payload(
+            payload,
+            size_chars=chunk_size,
+            overlap_chars=chunk_overlap,
+            size_tokens=size_tokens,
+            overlap_tokens=overlap_tokens,
+        ):
             chunk_id = f"{rel_path}#chunk-{chunk_idx}"
-            line_end = section.line_start + part.count("\n")
-            embed_input = build_embed_text(rel_path, part, tags=tag_list)
+            line_start = section.line_start + payload[:origin].count("\n")
+            line_end = line_start + part.count("\n")
+            embed_input = build_embed_text(
+                rel_path, part, tags=section_tags, heading_path=heading_path
+            )
             chunk: dict[str, Any] = {
                 "chunk_id": chunk_id,
                 "path": rel_path,
                 "citation_id": f"cite:{path.stem}",
                 "section_title": section.title,
-                "line_start": section.line_start,
+                "line_start": line_start,
                 "line_end": line_end,
                 # Display / BM25 / excerpt — body only (no path noise in cites).
                 "text": part,
                 "mtime": path.stat().st_mtime,
             }
-            if tag_list:
-                chunk["tags"] = list(tag_list)
+            if section_tags:
+                chunk["tags"] = list(section_tags)
             if section.title:
                 chunk["symbol"] = section.title
             chunks.append(chunk)
