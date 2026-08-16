@@ -56,6 +56,24 @@ class TurnState:
     related_tests_union: list[dict[str, str]] = field(default_factory=list)
     last_repro_command: str = ""
     last_test_first_failure: str = ""
+    # Issue-behavior repro (problem.md): after green repo tests, one more gate.
+    issue_repro_loaded: bool = False
+    issue_repro_commands: list[str] = field(default_factory=list)
+    issue_repro_markers: list[str] = field(default_factory=list)
+    issue_repro_required_tokens: list[str] = field(default_factory=list)
+    issue_repro_assets: list[str] = field(default_factory=list)
+    issue_repro_casefold_assets: list[str] = field(default_factory=list)
+    issue_repro_fail_signals: list[str] = field(default_factory=list)
+    issue_repro_expect_signals: list[str] = field(default_factory=list)
+    issue_repro_need_roundtrip: bool = False
+    issue_repro_need_casefold: bool = False
+    issue_repro_roundtrip_formats: list[str] = field(default_factory=list)
+    issue_repro_roundtrip_kwargs: list[str] = field(default_factory=list)
+    issue_repro_armed: bool = False
+    issue_repro_satisfied: bool = False
+    issue_repro_receipt_sent: bool = False
+    # Code edits since last successful issue repro (must be 0 to stay satisfied).
+    issue_repro_edits_since: int = 0
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

@@ -195,6 +195,277 @@ def test_verify_receipt_cleared_by_run_tests() -> None:
     assert should_inject_verify_receipt(state) is False
 
 
+def test_issue_repro_extract_from_problem_fence_only() -> None:
+    from app.structural.issue_repro import (
+        command_matches_issue_repro,
+        extract_issue_repro_hints,
+        obligations_met_for_command,
+    )
+
+    problem = """
+ascii.qdp assumes commands are upper case; QDP is not case sensitive and accepts "read serr 1 2".
+### Expected behavior
+```
+read serr 1 2
+1 0.5 1 0.5
+```
+>>> from astropy.table import Table
+>>> Table.read('test.qdp', format='ascii.qdp')
+"""
+    hints = extract_issue_repro_hints(problem)
+    assert hints["assets"]
+    assert hints["need_casefold"] is True
+    assert "read serr 1 2" in hints["assets"][0]
+    assert "1 0.5 1 0.5" in hints["assets"][0]
+    # Must not invent lowercase NO — not present in the issue sample.
+    assert "no" not in hints["required_tokens"]
+    assert not command_matches_issue_repro(
+        "python -m pytest astropy/io/ascii/tests/test_qdp.py -q",
+        hints["markers"],
+        required_tokens=hints["required_tokens"],
+        assets=hints["assets"],
+    )
+    # Token-only command (missing data rows) must not cover the asset.
+    assert not command_matches_issue_repro(
+        'python -c "print(\'read serr 1 2\')"',
+        hints["markers"],
+        required_tokens=hints["required_tokens"],
+        assets=hints["assets"],
+    )
+    repro = (
+        'python -c "from astropy.table import Table; '
+        "open('t.qdp','w').write('read serr 1 2\\n1 0.5 1 0.5\\n'); "
+        'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
+    )
+    assert command_matches_issue_repro(
+        repro,
+        hints["markers"],
+        required_tokens=hints["required_tokens"],
+        assets=hints["assets"],
+    )
+    # Casefold claim: sample already lower — still require an explicit fold transform.
+    assert obligations_met_for_command(repro, hints) is False
+    repro_cf = (
+        'python -c "from astropy.table import Table; '
+        "body='read serr 1 2\\n1 0.5 1 0.5\\n'; "
+        "open('t.qdp','w').write(body.lower()); "
+        'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
+    )
+    assert obligations_met_for_command(repro_cf, hints) is True
+
+
+def test_issue_repro_roundtrip_required_for_write_header_rows() -> None:
+    from app.structural.issue_repro import (
+        extract_issue_repro_hints,
+        obligations_met_for_command,
+    )
+
+    problem = """
+Please support header rows in RestructuredText output
+>>> tbl.write(sys.stdout, format="ascii.rst", header_rows=["name", "unit"])
+TypeError: RST.__init__() got an unexpected keyword argument 'header_rows'
+"""
+    hints = extract_issue_repro_hints(problem)
+    assert hints["need_roundtrip"] is True
+    assert "header_rows" in hints["roundtrip_kwargs"]
+    assert any("ascii.rst" in f for f in hints["roundtrip_formats"])
+    write_only = (
+        'python -c "t.write(\'o.txt\', format=\'ascii.rst\', '
+        'header_rows=[\'name\',\'unit\'])"'
+    )
+    assert obligations_met_for_command(write_only, hints) is False
+    roundtrip = (
+        'python -c "from astropy.table import Table, QTable; import astropy.units as u; '
+        "t=QTable({'wave':[350,950]*u.nm}); "
+        "t.write('o.txt', format='ascii.rst', header_rows=['name','unit']); "
+        "Table.read('o.txt', format='ascii.rst', header_rows=['name','unit'])\""
+    )
+    assert obligations_met_for_command(roundtrip, hints) is True
+
+
+def test_issue_repro_fail_signal_blocks_clearing() -> None:
+    from app.structural.issue_repro import (
+        extract_issue_repro_hints,
+        is_clearing_repro_result,
+    )
+
+    problem = """
+### Bug
+```
+>>> Table.read('bad.txt', format='ascii.qdp')
+Traceback (most recent call last):
+  ...
+ValueError: Unrecognized QDP command 'no'
+```
+### Expected behavior
+Should accept the command without raising.
+"""
+    hints = extract_issue_repro_hints(problem)
+    assert any("ValueError" in s for s in hints["fail_signals"])
+    ok = {
+        "status": "ok",
+        "exit_code": 0,
+        "summary": "sweb.eval (reused): ok",
+        "stdout": "",
+        "stderr": "",
+    }
+    assert is_clearing_repro_result(ok, fail_signals=hints["fail_signals"]) is True
+    still_broken = {
+        "status": "ok",
+        "exit_code": 0,
+        "summary": "sweb.eval (reused): ok",
+        "stderr": "ValueError: Unrecognized QDP command 'no'",
+    }
+    assert (
+        is_clearing_repro_result(still_broken, fail_signals=hints["fail_signals"])
+        is False
+    )
+
+
+def test_issue_repro_receipt_after_green_repo_tests() -> None:
+    from app.engine.verify_receipt import mark_verify_receipt_injected
+
+    state = _state()
+    state.issue_repro_loaded = True
+    state.issue_repro_markers = ["read serr 1 2"]
+    state.issue_repro_required_tokens = ["read serr 1 2"]
+    state.issue_repro_commands = []
+    note_tool_result_for_verify(
+        state,
+        tool_name="edit_file",
+        result={"status": "edited", "impact": {"status": "ok"}, "checks": {"status": "ok"}},
+    )
+    note_tool_result_for_verify(
+        state,
+        tool_name="run_tests",
+        result={
+            "status": "passed",
+            "command": "python -m pytest astropy/io/ascii/tests/test_qdp.py -q",
+            "exit_code": 0,
+            "test_summary": {"passed": 8, "failed": 0, "errors": 0},
+        },
+    )
+    assert state.verify_pending is False
+    assert state.issue_repro_armed is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+    text = build_verify_receipt_text(state)
+    assert "required_tokens" in text
+    assert "read serr" in text
+    kind = mark_verify_receipt_injected(state)
+    assert kind == "issue_repro"
+    assert state.issue_repro_receipt_sent is True
+    assert should_inject_verify_receipt(state) is False
+
+
+def test_issue_repro_pre_edit_does_not_satisfy() -> None:
+    state = _state()
+    state.issue_repro_loaded = True
+    state.issue_repro_markers = ["read serr 1 2"]
+    state.issue_repro_required_tokens = ["read serr 1 2"]
+    state.issue_repro_commands = []
+    note_tool_result_for_verify(
+        state,
+        tool_name="run_command",
+        result={
+            "status": "ok",
+            "command": (
+                'python -c "open(\'t.qdp\',\'w\').write('
+                "'read serr 1 2\\n1 0.5\\n'); print('ok')\""
+            ),
+            "exit_code": 0,
+            "summary": "sweb.eval (reused): ok",
+        },
+    )
+    assert state.issue_repro_satisfied is True
+    note_tool_result_for_verify(
+        state,
+        tool_name="edit_file",
+        result={"status": "edited", "impact": {"status": "ok"}, "checks": {"status": "ok"}},
+    )
+    assert state.issue_repro_satisfied is False
+    assert state.issue_repro_edits_since >= 1
+    note_tool_result_for_verify(
+        state,
+        tool_name="run_tests",
+        result={
+            "status": "passed",
+            "command": "python -m pytest tests/test_qdp.py -q",
+            "exit_code": 0,
+            "test_summary": {"passed": 8, "failed": 0, "errors": 0},
+        },
+    )
+    assert state.issue_repro_armed is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+
+
+def test_issue_repro_post_edit_success_satisfies() -> None:
+    state = _state()
+    state.issue_repro_loaded = True
+    state.issue_repro_markers = ["read serr 1 2"]
+    state.issue_repro_required_tokens = ["read serr 1 2"]
+    state.issue_repro_armed = True
+    state.issue_repro_edits_since = 1
+    note_tool_result_for_verify(
+        state,
+        tool_name="run_command",
+        result={
+            "status": "ok",
+            "command": (
+                'python -c "open(\'t.qdp\',\'w\').write('
+                "'read serr 1 2\\n1 0.5\\n'); print('ok')\""
+            ),
+            "exit_code": 0,
+            "summary": "sweb.eval (reused): ok",
+        },
+    )
+    assert state.issue_repro_satisfied is True
+    assert state.issue_repro_edits_since == 0
+    assert should_inject_verify_receipt(state) is False
+
+
+def test_issue_repro_failed_match_does_not_satisfy() -> None:
+    state = _state()
+    state.issue_repro_loaded = True
+    state.issue_repro_required_tokens = ["read serr 1 2"]
+    state.issue_repro_markers = ["read serr 1 2"]
+    state.issue_repro_armed = True
+    note_tool_result_for_verify(
+        state,
+        tool_name="run_command",
+        result={
+            "status": "ok",
+            "command": 'python -c "print(\'read serr 1 2\')"',
+            "summary": "sweb.eval failed (exit 1): boom",
+        },
+    )
+    assert state.issue_repro_satisfied is False
+
+
+def test_issue_repro_still_showing_fail_signal_does_not_satisfy() -> None:
+    state = _state()
+    state.issue_repro_loaded = True
+    state.issue_repro_assets = ["read serr 1 2\n1 0.5 1 0.5"]
+    state.issue_repro_markers = ["read serr 1 2"]
+    state.issue_repro_fail_signals = ["ValueError: Unrecognized QDP command"]
+    state.issue_repro_armed = True
+    state.issue_repro_edits_since = 1
+    note_tool_result_for_verify(
+        state,
+        tool_name="run_command",
+        result={
+            "status": "ok",
+            "exit_code": 0,
+            "command": (
+                'python -c "open(\'t.qdp\',\'w\').write('
+                "'read serr 1 2\\n1 0.5 1 0.5\\n')\""
+            ),
+            "summary": "sweb.eval (reused): ok",
+            "stderr": "ValueError: Unrecognized QDP command 'READ'",
+        },
+    )
+    assert state.issue_repro_satisfied is False
+
+
 def test_verify_receipt_skips_low_remaining_steps() -> None:
     state = _state(step_count=35, max_steps=40)
     note_tool_result_for_verify(

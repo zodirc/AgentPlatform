@@ -23,6 +23,7 @@ from app.engine.read_registry import (
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message, user_message
 from app.engine.verify_receipt import (
     build_verify_receipt_text,
+    mark_verify_receipt_injected,
     note_tool_result_for_verify,
     should_inject_verify_receipt,
 )
@@ -696,15 +697,16 @@ class AgentEngine:
                     ),
                 ):
                     receipt = build_verify_receipt_text(state)
+                    kind = mark_verify_receipt_injected(state)
                     state.messages.append(user_message(receipt))
-                    state.verify_receipt_sent = True
                     await self._write_event(
                         event_type="tool.completed",
                         payload=_tool_completed_base(
                             tool_call_id=f"verify_receipt-{step_index}",
                             tool_name="verify_receipt",
                             status="ok",
-                            summary="verify_receipt injected (once)",
+                            # kind only in summary — schema allows verify_receipt, not verify_receipt_kind
+                            summary=f"verify_receipt injected ({kind})",
                             verify_receipt=True,
                         ),
                         step_index=step_index,

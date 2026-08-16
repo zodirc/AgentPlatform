@@ -43,6 +43,38 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "related_tests_union": list(state.related_tests_union or []),
         "last_repro_command": str(state.last_repro_command or ""),
         "last_test_first_failure": str(getattr(state, "last_test_first_failure", "") or ""),
+        "issue_repro_loaded": bool(getattr(state, "issue_repro_loaded", False)),
+        "issue_repro_commands": list(getattr(state, "issue_repro_commands", None) or []),
+        "issue_repro_markers": list(getattr(state, "issue_repro_markers", None) or []),
+        "issue_repro_required_tokens": list(
+            getattr(state, "issue_repro_required_tokens", None) or []
+        ),
+        "issue_repro_assets": list(getattr(state, "issue_repro_assets", None) or []),
+        "issue_repro_casefold_assets": list(
+            getattr(state, "issue_repro_casefold_assets", None) or []
+        ),
+        "issue_repro_fail_signals": list(
+            getattr(state, "issue_repro_fail_signals", None) or []
+        ),
+        "issue_repro_expect_signals": list(
+            getattr(state, "issue_repro_expect_signals", None) or []
+        ),
+        "issue_repro_need_roundtrip": bool(
+            getattr(state, "issue_repro_need_roundtrip", False)
+        ),
+        "issue_repro_need_casefold": bool(
+            getattr(state, "issue_repro_need_casefold", False)
+        ),
+        "issue_repro_roundtrip_formats": list(
+            getattr(state, "issue_repro_roundtrip_formats", None) or []
+        ),
+        "issue_repro_roundtrip_kwargs": list(
+            getattr(state, "issue_repro_roundtrip_kwargs", None) or []
+        ),
+        "issue_repro_armed": bool(getattr(state, "issue_repro_armed", False)),
+        "issue_repro_satisfied": bool(getattr(state, "issue_repro_satisfied", False)),
+        "issue_repro_receipt_sent": bool(getattr(state, "issue_repro_receipt_sent", False)),
+        "issue_repro_edits_since": int(getattr(state, "issue_repro_edits_since", 0) or 0),
     }
 
 
@@ -88,6 +120,40 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         related_tests_union=_related_union(data.get("related_tests_union")),
         last_repro_command=str(data.get("last_repro_command") or ""),
         last_test_first_failure=str(data.get("last_test_first_failure") or ""),
+        issue_repro_loaded=bool(data.get("issue_repro_loaded", False)),
+        issue_repro_commands=[
+            str(x) for x in (data.get("issue_repro_commands") or []) if str(x).strip()
+        ],
+        issue_repro_markers=[
+            str(x) for x in (data.get("issue_repro_markers") or []) if str(x).strip()
+        ],
+        issue_repro_required_tokens=[
+            str(x) for x in (data.get("issue_repro_required_tokens") or []) if str(x).strip()
+        ],
+        issue_repro_assets=[
+            str(x) for x in (data.get("issue_repro_assets") or []) if str(x).strip()
+        ],
+        issue_repro_casefold_assets=[
+            str(x) for x in (data.get("issue_repro_casefold_assets") or []) if str(x).strip()
+        ],
+        issue_repro_fail_signals=[
+            str(x) for x in (data.get("issue_repro_fail_signals") or []) if str(x).strip()
+        ],
+        issue_repro_expect_signals=[
+            str(x) for x in (data.get("issue_repro_expect_signals") or []) if str(x).strip()
+        ],
+        issue_repro_need_roundtrip=bool(data.get("issue_repro_need_roundtrip", False)),
+        issue_repro_need_casefold=bool(data.get("issue_repro_need_casefold", False)),
+        issue_repro_roundtrip_formats=[
+            str(x) for x in (data.get("issue_repro_roundtrip_formats") or []) if str(x).strip()
+        ],
+        issue_repro_roundtrip_kwargs=[
+            str(x) for x in (data.get("issue_repro_roundtrip_kwargs") or []) if str(x).strip()
+        ],
+        issue_repro_armed=bool(data.get("issue_repro_armed", False)),
+        issue_repro_satisfied=bool(data.get("issue_repro_satisfied", False)),
+        issue_repro_receipt_sent=bool(data.get("issue_repro_receipt_sent", False)),
+        issue_repro_edits_since=int(data.get("issue_repro_edits_since") or 0),
     )
 
 
