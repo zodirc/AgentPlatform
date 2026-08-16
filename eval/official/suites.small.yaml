@@ -105,14 +105,17 @@ suites:
     # checkout (memory-only). Default on — product-parity arm.
     # Set false only for explicit index-off baseline dual-track.
     workspace_index: true
-    # Optional: await ready|stale before StartTurn (closer to real coding).
-    # Default false preserves R1 (Turn first). Enable via Ops Bench toggle,
-    # WORKSPACE_INDEX_WAIT_READY=1, or yaml true (Ops run param wins).
-    # Timeout override: WORKSPACE_INDEX_WAIT_TIMEOUT_S=300
-    workspace_index_wait_ready: false
+    # Await ready|stale before StartTurn (closer to real coding).
+    # Eval-suite default is true so the coding suite actually exercises the AST
+    # index (Locate fuse ~0.17→~0.42 vs racing the Turn); the product path is
+    # untouched — R1 (Turn-first, no wait) remains the runtime default.
+    # Override per-run via Ops Bench toggle or WORKSPACE_INDEX_WAIT_READY=0.
+    workspace_index_wait_ready: true
     workspace_index_wait_timeout_s: 300
     # Official sweb.eval images (~1.0–1.2 GiB compressed / instance). Not in git.
     # Pre-pull via 部署看板「SWE eval 镜像」or: make official-bench-coding-pull-images
+    # Pull also env-smokes each image (python/pytest/testbed); board ready = present+smoke.
+    # Same images are reused by ops_eval run_tests (solve reproduce) under ops-eval overlay.
     harness:
       # Keep instance images after grading (harness default cache_level=env deletes them).
       cache_level: instance

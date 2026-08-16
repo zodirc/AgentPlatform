@@ -553,6 +553,39 @@ def test_promote_run_accepts_anchor(tmp_path: Path, monkeypatch) -> None:
     assert "anchor-run" in scorecard
 
 
+def test_build_baseline_maps_retrieval_zh(tmp_path: Path, monkeypatch) -> None:
+    import official_bench.baseline as bl
+
+    monkeypatch.setattr(bl, "reports_dir", lambda: tmp_path)
+    monkeypatch.setattr(bl, "BASELINE_DIR", tmp_path)
+    (tmp_path / "latest_retrieval_zh.json").write_text(
+        json.dumps(
+            {
+                "id": "zh-run",
+                "official_suite": "retrieval_zh",
+                "status": "completed",
+                "finished_at": "2026-08-16T00:00:00+00:00",
+                "model_meta": {
+                    "protocol_version": "official-small-2026-08-m3",
+                    "eval_path": "agent",
+                    "sample_tier": "smoke",
+                    "arm": "free",
+                },
+                "metrics": {"ndcg_at_10": 0.7, "recall_at_100": 0.85},
+            }
+        ),
+        encoding="utf-8",
+    )
+    doc = bl.build_baseline_from_latest(
+        suites=("retrieval_zh",), protocol="official-small-2026-08-m3"
+    )
+    assert "retrieval_zh" in (doc.get("smoke_suites") or {})
+    assert doc["smoke_suites"]["retrieval_zh"]["run_id"] == "zh-run"
+    meta = doc.get("_meta") if isinstance(doc.get("_meta"), dict) else {}
+    assert "retrieval_zh:unknown" not in (meta.get("skipped") or [])
+    assert "retrieval_zh:smoke" in (meta.get("updated_suites") or [])
+
+
 def test_promote_b3357dd6_smoke_negative() -> None:
     """A0 exit criterion: real n5+harness run must be refused."""
     import official_bench.baseline as bl

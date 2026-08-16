@@ -19,6 +19,9 @@ from .run_session import RunSession
 _WS = re.compile(r"\s+")
 _ARTICLES = re.compile(r"\b(a|an|the)\b", re.IGNORECASE)
 _PUNCT = set(string.punctuation)
+# CJK unified ideographs (BMP + ext-A) — gate for the zh scorer branch.
+_CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
+_ZH_PUNCT = set("，。！？、；：“”‘’「」『』（）《》〈〉【】〔〕…—～·﹏＿")
 # Agent X-3 / system.md ask for a final ``Answer: <phrase>`` line. Completion-style
 # LongBench prompts already end with ``Answer:`` so the model only emits the phrase;
 # agent turns repeat the label. Line-anchored so golds like ``The Answer.`` stay intact.
@@ -66,6 +69,26 @@ def _normalize(s: str) -> str:
     return normalize_answer(s)
 
 
+def has_cjk(s: str) -> bool:
+    """True when the string contains CJK ideographs (zh scorer gate)."""
+    return bool(_CJK_RE.search(s or ""))
+
+
+def normalize_zh_answer(s: str) -> str:
+    """Official LongBench ``normalize_zh_answer`` (lower → de-punct zh+en → no ws)."""
+    text = (s or "").lower()
+    return "".join(
+        ch
+        for ch in text
+        if ch not in _PUNCT and ch not in _ZH_PUNCT and not ch.isspace()
+    )
+
+
+def answers_list(raw: Any) -> list[str]:
+    """Public alias: flatten LongBench answers (str | list | nested list) to list[str]."""
+    return _answers_list(raw)
+
+
 def _answers_list(raw: Any) -> list[str]:
     if raw is None:
         return []
@@ -84,9 +107,8 @@ def _answers_list(raw: Any) -> list[str]:
     return [str(raw)]
 
 
-def _f1_with_normalize(pred: str, gold: str, normalize) -> float:
-    p = normalize(pred).split()
-    g = normalize(gold).split()
+def _f1_from_tokens(p: list[str], g: list[str]) -> float:
+    """Token-bag F1 (SQuAD / LongBench qa_f1_score core)."""
     if not p and not g:
         return 1.0
     if not p or not g:
@@ -106,6 +128,19 @@ def _f1_with_normalize(pred: str, gold: str, normalize) -> float:
     return 2 * prec * rec / (prec + rec)
 
 
+def _f1_with_normalize(pred: str, gold: str, normalize) -> float:
+    return _f1_from_tokens(normalize(pred).split(), normalize(gold).split())
+
+
+def _f1_zh_char(pred: str, gold: str) -> float:
+    """Char-bag F1 after zh normalize (jieba-free stand-in for qa_f1_zh_score).
+
+    English whitespace tokenisation scores ~0 on unsegmented Chinese answers;
+    character bags are the standard segmentation-free approximation.
+    """
+    return _f1_from_tokens(list(normalize_zh_answer(pred)), list(normalize_zh_answer(gold)))
+
+
 def _f1(pred: str, gold: str) -> float:
     return _f1_with_normalize(pred, gold, normalize_answer)
 
@@ -115,11 +150,16 @@ def score_prediction(
     golds: list[str],
     *,
     scorer: str = SCORER_VERSION,
+    lang: str | None = None,
 ) -> dict[str, float]:
     """Score pred against gold list.
 
     ``scorer=v2`` (default): LongBench F1 normalize + SQuAD EM (normalized equality only).
     ``scorer=v1``: legacy lower+ws normalize + EM substring clause (rescoring only).
+
+    ``lang="zh"`` (or auto-detected CJK golds) switches v2 to the zh scorer:
+    char-bag F1 + zh-normalized EM — English whitespace F1 is meaningless on
+    unsegmented Chinese answers.
 
     Predictions are first reduced to the last ``Answer:`` line when present so
     the agent format matches completion-style LongBench (prompt already ate the
@@ -137,6 +177,13 @@ def score_prediction(
             else 0.0
         )
         f1 = max(_f1_with_normalize(pred, g, norm) for g in golds)
+        return {"em": em, "f1": f1}
+    lang_norm = (lang or "").strip().lower()
+    is_zh = lang_norm == "zh" or (not lang_norm and any(has_cjk(g) for g in golds))
+    if is_zh:
+        norm_pred = normalize_zh_answer(pred)
+        em = 1.0 if any(normalize_zh_answer(g) == norm_pred for g in golds) else 0.0
+        f1 = max(_f1_zh_char(pred, g) for g in golds)
     else:
         norm_pred = normalize_answer(pred)
         em = 1.0 if any(normalize_answer(g) == norm_pred for g in golds) else 0.0

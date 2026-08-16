@@ -45,10 +45,21 @@ def test_scenario_leak_passes_on_repo() -> None:
 
 def test_scenario_leak_detects_new_hit(tmp_path: Path) -> None:
     mod = _load("check_scenario_leak")
-    # Empty allowlist → every stock leak is NEW.
+    # Inject a synthetic leak — the repo may have zero stock leaks.
+    leak_root = tmp_path / "app"
+    leak_root.mkdir()
+    (leak_root / "leaky.py").write_text(
+        'if scenario_id == "writing":\n    pass\n',
+        encoding="utf-8",
+    )
     allow = tmp_path / "allow.txt"
     allow.write_text("# empty\n", encoding="utf-8")
-    assert mod.main(["--allowlist", str(allow)]) == 1
+    assert (
+        mod.main(
+            ["--allowlist", str(allow), "--scan-root", str(leak_root)]
+        )
+        == 1
+    )
 
 
 def test_scenario_leak_stale_allowlist(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -181,6 +182,7 @@ def test_pull_images_cached_emits_progress(
     out = swe_images.pull_images(
         ["swebench/sweb.eval.x86_64.demo:latest"],
         tier="n5",
+        skip_smoke=True,
     )
     assert out["n"] == 1
     assert out["results"][0]["status"] == "cached"
@@ -189,6 +191,127 @@ def test_pull_images_cached_emits_progress(
     assert prog["status"] == "ready"
     assert prog["images_done"] == 1
     assert prog["images_cached"] == 1
+    assert prog.get("smoke_skipped") is True
+
+
+def test_smoke_image_ok_and_fail(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Ok:
+        returncode = 0
+        stdout = "Python 3.11\npytest 7.0\n"
+        stderr = ""
+
+    class _Fail:
+        returncode = 2
+        stdout = ""
+        stderr = "pytest: command not found"
+
+    calls: list[list[str]] = []
+
+    def _run(argv, **kwargs):  # noqa: ANN001, ANN003
+        calls.append(list(argv))
+        if any("fail-image" in a for a in argv):
+            return _Fail()
+        return _Ok()
+
+    monkeypatch.setattr(swe_images.subprocess, "run", _run)
+    ok = swe_images.smoke_image("swebench/sweb.eval.x86_64.ok:latest")
+    assert ok["ok"] is True
+    assert ok["exit_code"] == 0
+    assert "docker" in calls[0][0]
+    assert "--network" in calls[0]
+    bad = swe_images.smoke_image("swebench/sweb.eval.x86_64.fail-image:latest")
+    assert bad["ok"] is False
+    assert bad["error"] == "smoke_exit_2"
+
+
+def test_pull_images_runs_smoke_and_persists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RELEASE_STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(swe_images, "docker_image_present", lambda ref, **k: True)
+
+    def _smoke(refs, **kwargs):  # noqa: ANN001, ANN003
+        by_ref = {
+            r: {"ref": r, "ok": True, "exit_code": 0, "elapsed_s": 0.1} for r in refs
+        }
+        payload = {
+            "tier": kwargs.get("tier"),
+            "n": len(refs),
+            "ok_n": len(refs),
+            "failed_n": 0,
+            "all_ok": True,
+            "by_ref": by_ref,
+            "failed": [],
+        }
+        swe_images.write_smoke_results(payload)
+        return payload
+
+    monkeypatch.setattr(swe_images, "smoke_images", _smoke)
+    ref = "swebench/sweb.eval.x86_64.demo:latest"
+    out = swe_images.pull_images([ref], tier="n5")
+    assert out["smoke"]["all_ok"] is True
+    stored = swe_images.read_smoke_results(max_age_s=60)
+    assert stored is not None
+    assert stored["by_ref"][ref]["ok"] is True
+    smoke = swe_images.read_smoke_ok_for_refs([ref])
+    assert smoke["all_ok"] is True
+
+
+def test_local_image_status_requires_smoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RELEASE_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("SWE_EVAL_REQUIRE_SMOKE", "1")
+    refs = ["swebench/sweb.eval.x86_64.a:latest", "swebench/sweb.eval.x86_64.b:latest"]
+    monkeypatch.setattr(swe_images, "image_refs_for_tier", lambda *a, **k: refs)
+    monkeypatch.setattr(swe_images, "docker_image_present", lambda ref, **k: True)
+    st = swe_images.local_image_status("n5")
+    assert st["images_ready"] is True
+    assert st["smoke_ready"] is False
+    assert st["ready"] is False
+    assert len(st["smoke_missing"]) == 2
+
+    swe_images.write_smoke_results(
+        {
+            "tier": "n5",
+            "n": 2,
+            "ok_n": 2,
+            "failed_n": 0,
+            "all_ok": True,
+            "by_ref": {
+                refs[0]: {"ref": refs[0], "ok": True},
+                refs[1]: {"ref": refs[1], "ok": True},
+            },
+            "failed": [],
+        }
+    )
+    st2 = swe_images.local_image_status("n5")
+    assert st2["ready"] is True
+    assert st2["smoke_ready"] is True
+
+
+def test_local_image_status_smoke_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RELEASE_STATUS_DIR", str(tmp_path))
+    refs = ["swebench/sweb.eval.x86_64.a:latest"]
+    monkeypatch.setattr(swe_images, "image_refs_for_tier", lambda *a, **k: refs)
+    monkeypatch.setattr(swe_images, "docker_image_present", lambda ref, **k: True)
+    swe_images.write_smoke_results(
+        {
+            "tier": "n5",
+            "n": 1,
+            "ok_n": 0,
+            "failed_n": 1,
+            "all_ok": False,
+            "by_ref": {refs[0]: {"ref": refs[0], "ok": False, "error": "smoke_exit_1"}},
+            "failed": [{"ref": refs[0], "error": "smoke_exit_1"}],
+        }
+    )
+    st = swe_images.local_image_status("n5")
+    assert st["images_ready"] is True
+    assert st["ready"] is False
+    assert st["smoke_failed"]
 
 
 def test_docker_pull_progress_parser() -> None:
@@ -235,3 +358,79 @@ def test_fmt_speed_units() -> None:
     assert swe_images._fmt_speed(100.0) == "100 B/s"
     assert swe_images._fmt_speed(2048.0) == "2.0 KiB/s"
     assert "MiB/s" in (swe_images._fmt_speed(3.5 * 1024**2) or "")
+
+
+def test_harness_report_picks_newest_matching_run(tmp_path: Path) -> None:
+    run_id = "agentplatform-20260816120000"
+    old = tmp_path / "old"
+    new = tmp_path / "new"
+    old.mkdir()
+    new.mkdir()
+    (old / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "resolved_ids": ["old__1"],
+                "submitted_ids": ["old__1"],
+                "resolve_rate": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (new / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "resolved_ids": ["new__1"],
+                "unresolved_ids": ["new__2"],
+                "submitted_ids": ["new__1", "new__2"],
+                "resolve_rate": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    import os
+    import time
+
+    os.utime(old / f"{run_id}.json", (1, 1))
+    now = time.time()
+    os.utime(new / f"{run_id}.json", (now, now))
+    out = swe_run._harness_report_from_disk(tmp_path, run_id)
+    assert out["resolve_rate"] == 0.5
+    assert out["resolved_ids"] == ["new__1"]
+
+
+def test_harness_report_rejects_disjoint_instance_set(tmp_path: Path) -> None:
+    run_id = "agentplatform-20260816120100"
+    (tmp_path / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "resolved_ids": ["other__1"],
+                "submitted_ids": ["other__1"],
+                "resolve_rate": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = swe_run._harness_report_from_disk(
+        tmp_path, run_id, expected_instance_ids=["ours__1", "ours__2"]
+    )
+    assert out == {}
+
+
+def test_harness_report_accepts_overlapping_instance_set(tmp_path: Path) -> None:
+    run_id = "agentplatform-20260816120200"
+    (tmp_path / f"{run_id}.json").write_text(
+        json.dumps(
+            {
+                "resolved_ids": ["ours__1"],
+                "unresolved_ids": ["ours__2"],
+                "submitted_ids": ["ours__1", "ours__2"],
+                "resolve_rate": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    out = swe_run._harness_report_from_disk(
+        tmp_path, run_id, expected_instance_ids=["ours__1", "ours__2"]
+    )
+    assert out["resolve_rate"] == 0.5
+    assert out["resolved_ids"] == ["ours__1"]

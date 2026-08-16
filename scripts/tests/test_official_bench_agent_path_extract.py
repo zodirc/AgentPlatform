@@ -14,6 +14,7 @@ from official_bench.agent_path_extract import (  # noqa: E402
     failure_class_from_events,
     filter_unified_diff_noise,
     merge_retrieval_rankings,
+    rrf_fusion_scores,
     patch_apply_check,
     patch_from_events,
     patch_from_git_diff,
@@ -103,7 +104,8 @@ def test_merge_retrieval_prefers_ranked() -> None:
     assert merge_retrieval_rankings(events) == ["d1", "d2"]
 
 
-def test_merge_retrieval_first_seen_union() -> None:
+def test_merge_retrieval_rrf_fusion() -> None:
+    """Docs hit by multiple searches outrank one-off early hits (RRF)."""
     events = [
         {
             "type": "retrieval.completed",
@@ -114,12 +116,74 @@ def test_merge_retrieval_first_seen_union() -> None:
             "payload": {"ranked": [{"path": "sources/b.txt"}, {"path": "sources/c.txt"}]},
         },
     ]
-    assert merge_retrieval_rankings(events) == ["a", "b", "c"]
+    # b: 1/(60+2)+1/(60+1) > a: 1/(60+1) > c: 1/(60+2)
+    assert merge_retrieval_rankings(events) == ["b", "a", "c"]
+
+
+def test_merge_retrieval_single_search_order_preserved() -> None:
+    events = [
+        {
+            "type": "retrieval.completed",
+            "payload": {
+                "ranked": [
+                    {"path": "sources/x.txt"},
+                    {"path": "sources/y.txt"},
+                    {"path": "sources/z.txt"},
+                ]
+            },
+        },
+    ]
+    assert merge_retrieval_rankings(events) == ["x", "y", "z"]
+
+
+def test_merge_retrieval_rrf_tie_breaks_first_seen() -> None:
+    events = [
+        {
+            "type": "retrieval.completed",
+            "payload": {"ranked": [{"path": "sources/p.txt"}]},
+        },
+        {
+            "type": "retrieval.completed",
+            "payload": {"ranked": [{"path": "sources/q.txt"}]},
+        },
+    ]
+    # Same rank in separate searches → equal score → first seen wins.
+    assert merge_retrieval_rankings(events) == ["p", "q"]
 
 
 def test_merge_retrieval_empty_is_empty() -> None:
     assert merge_retrieval_rankings([]) == []
     assert merge_retrieval_rankings([{"type": "tool.started", "payload": {}}]) == []
+
+
+def test_ranking_scores_keeps_rrf_magnitudes() -> None:
+    events = [
+        {
+            "type": "retrieval.completed",
+            "payload": {
+                "ranked": [
+                    {"path": "sources/a.txt"},
+                    {"path": "sources/b.txt"},
+                ]
+            },
+        },
+        {
+            "type": "retrieval.completed",
+            "payload": {
+                "ranked": [
+                    {"path": "sources/b.txt"},
+                    {"path": "sources/c.txt"},
+                ]
+            },
+        },
+    ]
+    doc_ids = merge_retrieval_rankings(events)
+    raw, _ = rrf_fusion_scores(events)
+    scores = ranking_scores(doc_ids, limit=100, raw_scores=raw)
+    assert scores[doc_ids[0]] == raw[doc_ids[0]]
+    assert scores[doc_ids[0]] > scores[doc_ids[1]]
+    fallback = ranking_scores(doc_ids, limit=10)
+    assert fallback[doc_ids[0]] == 10.0
 
 
 def test_ranking_scores_descending() -> None:
@@ -1164,13 +1228,18 @@ def test_prompt_helpers_no_tool_script_on_free() -> None:
     from official_bench.l1_prompts import context_prompt, limit_rows_per_task, retrieval_prompt
 
     free = retrieval_prompt(arm="free", qtext="q", limit_k=100)
-    assert "search_sources" not in free
+    # Free names the library, not a forced one-shot tool script.
     assert "exactly once" not in free
+    assert "Information need: q" in free
+    assert "first action" in free
     forced = retrieval_prompt(arm="forced", qtext="q", limit_k=100)
     assert "search_sources" in forced
+    assert "exactly once" in forced
     ctx = context_prompt(arm="free", question="Q?")
     assert "read_file once" not in ctx
     assert "Minimize tool calls" not in ctx
+    assert "passage.md" in ctx
+    assert "Answer: <phrase>" in ctx
     oracle = context_prompt(arm="oracle", question="Q?")
     assert "offset" in oracle.lower()
     rows = [

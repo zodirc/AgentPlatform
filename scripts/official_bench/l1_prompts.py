@@ -16,8 +16,11 @@ def retrieval_prompt(*, arm: str, qtext: str, limit_k: int) -> str:
         )
     return (
         "Answer the following information need using the local sources library "
-        "in this Work. Search the library for supporting evidence and cite what "
-        "you find. Do not invent documents.\n\n"
+        "in this Work. Ground every claim in that library: your first action "
+        "must search the library with the information need below as the query "
+        "(copy it; do not paraphrase on the first search). If the first hits "
+        "look weak, refine the query and search again. Cite the documents you "
+        "used. Do not answer from memory alone and do not invent documents.\n\n"
         f"Information need: {qtext}"
     )
 
@@ -34,9 +37,10 @@ def context_prompt(*, arm: str, question: str) -> str:
         )
     return (
         "The relevant material is in sources/passage.md in this Work. "
-        "Use whatever reading strategy you need (read_file segments, grep, etc.), "
-        "then answer with a short phrase only. End with a single line: "
-        "Answer: <phrase>\n\n"
+        "Start by reading that file (continue with offset / next_offset if a "
+        "read is truncated). Use grep only to jump, not as a substitute for "
+        "reading the passage. Then answer with a short phrase only. End with "
+        "a single line: Answer: <phrase>\n\n"
         f"Question: {question}"
     )
 
@@ -62,8 +66,8 @@ def coding_prompt(inst: dict[str, Any], *, has_repo: bool) -> str:
             "5) Fix checks.new_issues; prefer related_tests[].command from the edit result; "
             "read_lints on touched paths if needed; re-run the same Reproduce command.\n"
             "6) Before stop: nonempty git diff you can describe; no unfinished failed "
-            "edit; repro re-run done (or explained). Platform scores git diff; "
-            "incomplete spans do not count.\n"
+            "edit; re-run the same Reproduce command after the last edit (or explain "
+            "why impossible). Platform scores git diff; incomplete spans do not count.\n"
         )
     return (
         f"SWE-bench instance {iid} ({repo}).\n"

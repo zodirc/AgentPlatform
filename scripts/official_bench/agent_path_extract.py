@@ -61,29 +61,62 @@ def ranked_doc_ids_from_retrieval_payload(payload: dict[str, Any]) -> list[str]:
     return ordered
 
 
-def merge_retrieval_rankings(events: list[dict[str, Any]]) -> list[str]:
-    """Merge all retrieval.completed events (first-seen doc wins for RRF-like union)."""
-    merged: list[str] = []
-    seen: set[str] = set()
+# Standard RRF dampening constant (Cormack et al. 2009).
+_RRF_K = 60.0
+
+
+def rrf_fusion_scores(
+    events: list[dict[str, Any]],
+) -> tuple[dict[str, float], dict[str, int]]:
+    """RRF scores + first-seen order from all ``retrieval.completed`` events.
+
+    Each search contributes ``1/(k + rank)`` per doc (Cormack k=60). Docs found
+    by several searches (or ranked high in a later, better query) outrank
+    one-off early hits. Single-search Turns stay order-preserving.
+    """
+    scores: dict[str, float] = {}
+    first_seen: dict[str, int] = {}
+    order = 0
     for ev in events:
         if str(ev.get("type") or "") != "retrieval.completed":
             continue
         payload = ev.get("payload") or {}
         if not isinstance(payload, dict):
             continue
-        for doc_id in ranked_doc_ids_from_retrieval_payload(payload):
-            if doc_id in seen:
-                continue
-            seen.add(doc_id)
-            merged.append(doc_id)
-    return merged
+        for rank, doc_id in enumerate(
+            ranked_doc_ids_from_retrieval_payload(payload), start=1
+        ):
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (_RRF_K + rank)
+            if doc_id not in first_seen:
+                first_seen[doc_id] = order
+                order += 1
+    return scores, first_seen
 
 
-def ranking_scores(doc_ids: list[str], *, limit: int = 100) -> dict[str, float]:
-    """Convert ranked ids to {doc_id: score} with higher=better for metrics_ir."""
+def merge_retrieval_rankings(events: list[dict[str, Any]]) -> list[str]:
+    """RRF-fuse all retrieval.completed rankings into one merged list."""
+    scores, first_seen = rrf_fusion_scores(events)
+    return sorted(scores, key=lambda d: (-scores[d], first_seen[d]))
+
+
+def ranking_scores(
+    doc_ids: list[str],
+    *,
+    limit: int = 100,
+    raw_scores: dict[str, float] | None = None,
+) -> dict[str, float]:
+    """Convert ranked ids to {doc_id: score} with higher=better for metrics_ir.
+
+    When ``raw_scores`` is given (typically RRF fusion scores), those magnitudes
+    are kept so graded qrels (SciFact) see a real score, not a rank-only
+    ``limit-i`` staircase. Missing ids still get a rank fallback.
+    """
     out: dict[str, float] = {}
     for i, doc_id in enumerate(doc_ids[:limit]):
-        out[doc_id] = float(limit - i)
+        if raw_scores and doc_id in raw_scores:
+            out[doc_id] = float(raw_scores[doc_id])
+        else:
+            out[doc_id] = float(limit - i)
     return out
 
 
@@ -1436,6 +1469,151 @@ def patch_from_git_diff(work_root: str | Path, *, base_ref: str = "HEAD") -> str
     if text2 and _looks_like_unified_diff(text2):
         return text2
     return ""
+
+
+def edited_paths_from_events(events: list[dict[str, Any]]) -> list[str]:
+    """Relative repo paths touched by successful edit_file / write_file tools."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for ev in events:
+        if str(ev.get("type") or "") != "tool.started":
+            continue
+        payload = ev.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("tool_name") or "") not in {"edit_file", "write_file"}:
+            continue
+        args = payload.get("arguments") or {}
+        if not isinstance(args, dict):
+            continue
+        path = str(args.get("path") or "").strip().replace("\\", "/")
+        while path.startswith("./"):
+            path = path[2:]
+        if not path or path.startswith("/") or _path_is_diff_noise(path):
+            continue
+        if path not in seen:
+            seen.add(path)
+            out.append(path)
+    return out
+
+
+def patch_from_baseline_diff(
+    work_root: str | Path,
+    events: list[dict[str, Any]] | None = None,
+    *,
+    base_ref: str = "HEAD",
+) -> str:
+    """Repair path: rebuild a real per-file unified diff against the checkout baseline.
+
+    Used when the whole-tree ``git diff`` came back empty or with corrupt hunks
+    although the agent did edit files. Baseline content is ``git show REF:path``;
+    the worktree file is compared via ``git diff --no-index`` so hunk offsets,
+    ``\\ No newline`` markers and binary detection are git-exact — unlike the
+    older whole-file ``@@ -1,N`` span synth which rarely applied onto the base
+    commit and silently discarded real work as ``no_patch``.
+    """
+    import os
+    import subprocess
+    import tempfile
+
+    root = Path(work_root)
+    ref = (base_ref or "HEAD").strip() or "HEAD"
+    _safe = ["-c", "safe.directory=*"]
+
+    def _git(*args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *_safe, "-C", str(root), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+        )
+
+    # Candidate paths: dirty worktree state ∪ edit-event targets.
+    paths: list[str] = []
+    seen: set[str] = set()
+    try:
+        status = _git("status", "--porcelain")
+        if status.returncode == 0:
+            for line in (status.stdout or "").splitlines():
+                if len(line) < 4:
+                    continue
+                rel = line[3:].strip().strip('"')
+                if " -> " in rel:  # rename: take the new side
+                    rel = rel.split(" -> ", 1)[1].strip().strip('"')
+                rel = rel.replace("\\", "/")
+                if rel and not _path_is_diff_noise(rel) and rel not in seen:
+                    seen.add(rel)
+                    paths.append(rel)
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    for rel in edited_paths_from_events(events or []):
+        if rel not in seen:
+            seen.add(rel)
+            paths.append(rel)
+    if not paths:
+        return ""
+
+    chunks: list[str] = []
+    for rel in paths:
+        current = root / rel
+        if current.is_dir():
+            continue
+        show = _git("show", f"{ref}:{rel}")
+        has_baseline = show.returncode == 0
+        has_current = current.is_file()
+        if not has_baseline and not has_current:
+            continue
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                prefix="ap-baseline-",
+                suffix=Path(rel).suffix or ".txt",
+                delete=False,
+                encoding="utf-8",
+            ) as fh:
+                if has_baseline:
+                    fh.write(show.stdout or "")
+                left = fh.name
+        except OSError:
+            continue
+        try:
+            left_arg = left if has_baseline else os.devnull
+            right_arg = str(current) if has_current else os.devnull
+            proc = _git(
+                "diff", "--no-index", "--no-color", "--", left_arg, right_arg
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            Path(left).unlink(missing_ok=True)
+            continue
+        finally:
+            Path(left).unlink(missing_ok=True)
+        # --no-index: 0 = identical, 1 = differences, >1 = error.
+        if proc.returncode != 1 or not (proc.stdout or "").strip():
+            continue
+        body = proc.stdout
+        if "Binary files" in body and "@@" not in body:
+            continue
+        fixed: list[str] = []
+        for line in body.splitlines():
+            if line.startswith("diff --git "):
+                fixed.append(f"diff --git a/{rel} b/{rel}")
+            elif line.startswith("--- "):
+                fixed.append("--- /dev/null" if "/dev/null" in line else f"--- a/{rel}")
+            elif line.startswith("+++ "):
+                fixed.append("+++ /dev/null" if "/dev/null" in line else f"+++ b/{rel}")
+            else:
+                fixed.append(line)
+        chunk = _normalize_unified_diff("\n".join(fixed) + "\n")
+        if chunk and not patch_hunks_incomplete(chunk):
+            chunks.append(chunk.rstrip("\n"))
+    if not chunks:
+        return ""
+    return filter_unified_diff_noise(
+        _normalize_unified_diff("\n".join(chunks) + "\n")
+    )
 
 
 def patch_apply_check(work_root: str | Path, patch: str) -> bool | None:

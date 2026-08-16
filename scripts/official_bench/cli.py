@@ -155,8 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     p_base.add_argument(
         "--suites",
-        default="retrieval,context,coding",
-        help="Comma list: retrieval,context,coding",
+        default="retrieval,retrieval_zh,context,coding",
+        help="Comma list: retrieval,retrieval_zh,context,coding",
     )
     p_base.add_argument(
         "--show",

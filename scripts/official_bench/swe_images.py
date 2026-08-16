@@ -4,9 +4,10 @@ Images are ~1GiB compressed each and must not live in git. Pre-pull via
 部署看板 or ``make official-bench-coding-pull-images``. Config:
 ``eval/official/suites.small.yaml`` → ``suites.coding.harness``.
 
-Progress for the release console is written to
-``reports/release/swe_eval_images_progress.json`` (override with
-``RELEASE_STATUS_DIR``).
+After pull, each image is **env-smoked** (python / pytest /testbed) so 看板
+「就绪」means present **and** suitable for resolve + solve-side reproduce.
+Progress: ``reports/release/swe_eval_images_progress.json``; durable smoke
+results: ``swe_eval_images_smoke.json`` (override dir with ``RELEASE_STATUS_DIR``).
 """
 
 from __future__ import annotations
@@ -35,12 +36,20 @@ CODING_TIERS = {
 }
 
 
-def progress_path() -> Path:
-    base = Path(
+def _status_dir() -> Path:
+    return Path(
         os.environ.get("RELEASE_STATUS_DIR")
         or (_ROOT / "reports" / "release")
     )
-    return base / "swe_eval_images_progress.json"
+
+
+def progress_path() -> Path:
+    return _status_dir() / "swe_eval_images_progress.json"
+
+
+def smoke_results_path() -> Path:
+    """Durable per-image env smoke results (board readiness + solve gate)."""
+    return _status_dir() / "swe_eval_images_smoke.json"
 
 
 def write_progress(payload: dict[str, Any]) -> None:
@@ -54,6 +63,66 @@ def write_progress(payload: dict[str, Any]) -> None:
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)
+
+
+def write_smoke_results(payload: dict[str, Any]) -> None:
+    path = smoke_results_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = {
+        **payload,
+        "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    text = json.dumps(body, ensure_ascii=False, indent=2) + "\n"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+    # Mirror so runtime (ops-eval) can gate solve-side run_tests without
+    # depending solely on the release-console status dir mount.
+    mirrors: list[Path] = []
+    bench_reports = (os.environ.get("BENCH_REPORTS_DIR") or "").strip()
+    if bench_reports:
+        mirrors.append(Path(bench_reports) / "swe_eval_images_smoke.json")
+    mirrors.append(Path("/data/ops-official/reports") / "swe_eval_images_smoke.json")
+    mirrors.append(_ROOT / "eval" / "reports" / "official" / "swe_eval_images_smoke.json")
+    seen = {str(path.resolve()) if path.exists() else str(path)}
+    for mirror in mirrors:
+        key = str(mirror)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            mirror.parent.mkdir(parents=True, exist_ok=True)
+            mtmp = mirror.with_suffix(".tmp")
+            mtmp.write_text(text, encoding="utf-8")
+            mtmp.replace(mirror)
+        except OSError:
+            continue
+
+
+def read_smoke_results(*, max_age_s: float = 0.0) -> dict[str, Any] | None:
+    path = smoke_results_path()
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if max_age_s > 0:
+        raw = str(data.get("updated_at") or "").strip()
+        if raw:
+            try:
+                from datetime import datetime, timezone
+
+                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                if (time.time() - dt.timestamp()) > max_age_s:
+                    return None
+            except Exception:
+                pass
+    return data
 
 
 def read_progress(*, max_age_s: float = 600.0) -> dict[str, Any] | None:
@@ -205,11 +274,209 @@ def missing_images(refs: list[str]) -> list[str]:
     return [r for r in refs if not docker_image_present(r)]
 
 
+DEFAULT_SMOKE_SHELL = (
+    "set -euo pipefail; "
+    "python -V; "
+    "(python -m pytest --version || pytest --version); "
+    "test -d /testbed"
+)
+
+
+def smoke_timeout_s() -> float:
+    raw = os.environ.get("SWE_EVAL_SMOKE_TIMEOUT_S", "").strip()
+    if raw:
+        try:
+            return max(10.0, float(raw))
+        except ValueError:
+            pass
+    return 120.0
+
+
+def smoke_shell_cmd() -> str:
+    return (os.environ.get("SWE_EVAL_SMOKE_CMD") or "").strip() or DEFAULT_SMOKE_SHELL
+
+
+def smoke_image(
+    ref: str,
+    *,
+    timeout_s: float | None = None,
+    shell_cmd: str | None = None,
+) -> dict[str, Any]:
+    """Run a lightweight env probe inside one local sweb.eval image.
+
+    Checks python, pytest, and ``/testbed`` without network or worktree mounts.
+    """
+    limit = float(timeout_s if timeout_s is not None else smoke_timeout_s())
+    cmd = (shell_cmd if shell_cmd is not None else smoke_shell_cmd()).strip()
+    if not cmd:
+        cmd = DEFAULT_SMOKE_SHELL
+    argv = [
+        "docker",
+        "run",
+        "--rm",
+        "--network",
+        "none",
+        "-w",
+        "/testbed",
+        ref,
+        "bash",
+        "-lc",
+        cmd,
+    ]
+    t0 = time.monotonic()
+    try:
+        proc = subprocess.run(
+            argv,
+            capture_output=True,
+            text=True,
+            timeout=limit,
+            check=False,
+        )
+    except FileNotFoundError:
+        return {
+            "ref": ref,
+            "ok": False,
+            "error": "docker_cli_missing",
+            "elapsed_s": round(time.monotonic() - t0, 2),
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "ref": ref,
+            "ok": False,
+            "error": f"smoke_timeout_{int(limit)}s",
+            "elapsed_s": round(time.monotonic() - t0, 2),
+        }
+    out = (proc.stdout or "")[-800:]
+    err = (proc.stderr or "")[-800:]
+    ok = proc.returncode == 0
+    return {
+        "ref": ref,
+        "ok": ok,
+        "exit_code": int(proc.returncode),
+        "stdout_tail": out,
+        "stderr_tail": err,
+        "error": None if ok else f"smoke_exit_{proc.returncode}",
+        "elapsed_s": round(time.monotonic() - t0, 2),
+    }
+
+
+def read_smoke_ok_for_refs(refs: list[str]) -> dict[str, Any]:
+    """Merge durable smoke file with requested refs → ok / failed / missing_smoke."""
+    stored = read_smoke_results(max_age_s=0) or {}
+    by_ref = stored.get("by_ref") if isinstance(stored.get("by_ref"), dict) else {}
+    ok_refs: list[str] = []
+    failed: list[dict[str, Any]] = []
+    missing_smoke: list[str] = []
+    for ref in refs:
+        row = by_ref.get(ref)
+        if not isinstance(row, dict):
+            missing_smoke.append(ref)
+            continue
+        if row.get("ok") is True:
+            ok_refs.append(ref)
+        else:
+            failed.append(
+                {
+                    "ref": ref,
+                    "error": row.get("error") or "smoke_failed",
+                    "exit_code": row.get("exit_code"),
+                }
+            )
+    return {
+        "ok_refs": ok_refs,
+        "failed": failed,
+        "missing_smoke": missing_smoke,
+        "all_ok": not failed and not missing_smoke and bool(refs),
+        "smoke_updated_at": stored.get("updated_at"),
+        "tier": stored.get("tier"),
+    }
+
+
+def smoke_images(
+    refs: list[str],
+    *,
+    tier: str | None = None,
+    progress_base: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Smoke every ref; persist results; update board progress while running."""
+    total = len(refs)
+    base = dict(progress_base or {})
+    base.update(
+        {
+            "status": "building",
+            "phase": "smoke",
+            "tier": tier or base.get("tier"),
+            "images_total": total,
+            "smoke_total": total,
+            "smoke_done": 0,
+            "last_status": "smoking",
+        }
+    )
+    write_progress(base)
+    by_ref: dict[str, Any] = {}
+    results: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for idx, ref in enumerate(refs, start=1):
+        short = ref.rsplit("/", 1)[-1]
+        print(f"[swe-images] [{idx}/{total}] smoke {ref}", flush=True)
+        write_progress(
+            {
+                **base,
+                "images_done": idx - 1,
+                "smoke_done": idx - 1,
+                "current_ref": ref,
+                "current_short": short,
+                "last_status": "smoking",
+            }
+        )
+        row = smoke_image(ref)
+        by_ref[ref] = row
+        results.append(row)
+        if not row.get("ok"):
+            failed.append(row)
+            print(
+                f"[swe-images] smoke FAIL {ref}: {row.get('error')} "
+                f"exit={row.get('exit_code')}",
+                flush=True,
+            )
+        else:
+            print(
+                f"[swe-images] smoke ok {ref} ({row.get('elapsed_s')}s)",
+                flush=True,
+            )
+        write_progress(
+            {
+                **base,
+                "images_done": idx,
+                "smoke_done": idx,
+                "current_ref": ref,
+                "current_short": short,
+                "last_status": "smoked" if row.get("ok") else "smoke_error",
+            }
+        )
+
+    payload = {
+        "tier": tier,
+        "n": total,
+        "ok_n": total - len(failed),
+        "failed_n": len(failed),
+        "all_ok": not failed and total > 0,
+        "by_ref": by_ref,
+        "failed": [
+            {"ref": r["ref"], "error": r.get("error"), "exit_code": r.get("exit_code")}
+            for r in failed
+        ],
+    }
+    write_smoke_results(payload)
+    return payload
+
+
 def local_image_status(
     tier: str | None = None,
     *,
     n_instances: int | None = None,
     cfg: dict[str, Any] | None = None,
+    require_smoke: bool | None = None,
 ) -> dict[str, Any]:
     h = harness_cfg(cfg)
     use_tier = (tier or h["board_tier"]).strip() or "n5"
@@ -217,13 +484,48 @@ def local_image_status(
     missing = missing_images(refs)
     present = [r for r in refs if r not in missing]
     approx = int(h["approx_mib_per_image"]) * len(refs)
+    want_smoke = (
+        bool(require_smoke)
+        if require_smoke is not None
+        else _env_bool("SWE_EVAL_REQUIRE_SMOKE", default=True)
+    )
+    smoke = (
+        read_smoke_ok_for_refs(present)
+        if present
+        else {
+            "ok_refs": [],
+            "failed": [],
+            "missing_smoke": [],
+            "all_ok": False,
+            "smoke_updated_at": None,
+            "tier": None,
+        }
+    )
+    images_ready = not missing
+    if not want_smoke:
+        smoke_ready = True
+    elif not images_ready or not present:
+        smoke_ready = False
+    else:
+        smoke_ready = (
+            bool(smoke.get("all_ok"))
+            and not smoke.get("failed")
+            and not smoke.get("missing_smoke")
+        )
     return {
         "tier": use_tier,
         "n": len(refs),
         "refs": refs,
         "present": present,
         "missing": missing,
-        "ready": not missing,
+        "ready": images_ready and smoke_ready,
+        "images_ready": images_ready,
+        "smoke_ready": smoke_ready,
+        "require_smoke": want_smoke,
+        "smoke_ok_n": len(smoke.get("ok_refs") or []),
+        "smoke_failed": smoke.get("failed") or [],
+        "smoke_missing": smoke.get("missing_smoke") or [],
+        "smoke_updated_at": smoke.get("smoke_updated_at"),
         "approx_mib_total": approx,
         "cache_level": h["cache_level"],
         "require_local_images": h["require_local_images"],
@@ -540,16 +842,19 @@ def pull_images(
     *,
     force: bool = False,
     tier: str | None = None,
+    skip_smoke: bool = False,
 ) -> dict[str, Any]:
-    """Pull missing (or all if force) images. Host docker required.
+    """Pull missing (or all if force) images, then env-smoke each.
 
     Emits line logs + ``swe_eval_images_progress.json`` for 部署看板.
+    Ready status requires smoke unless ``skip_smoke`` / ``SWE_EVAL_SKIP_SMOKE=1``.
     """
     total = len(refs)
     results: list[dict[str, Any]] = []
     done = 0
     cached_n = 0
     pulled_n = 0
+    smoke_out: dict[str, Any] | None = None
     write_progress(
         {
             "status": "building",
@@ -624,6 +929,41 @@ def pull_images(
                     "last_status": "pulled",
                 }
             )
+
+        do_smoke = not skip_smoke and not _env_bool("SWE_EVAL_SKIP_SMOKE", default=False)
+        if do_smoke and refs:
+            smoke_out = smoke_images(
+                refs,
+                tier=tier,
+                progress_base={
+                    "tier": tier,
+                    "images_total": total,
+                    "images_cached": cached_n,
+                    "images_pulled": pulled_n,
+                },
+            )
+            if not smoke_out.get("all_ok"):
+                fail = (smoke_out.get("failed") or [{}])[0]
+                err = (
+                    f"sweb.eval env smoke failed: {fail.get('ref')} "
+                    f"({fail.get('error') or 'unknown'})"
+                )
+                write_progress(
+                    {
+                        "status": "error",
+                        "phase": "smoke_error",
+                        "tier": tier,
+                        "images_total": total,
+                        "images_done": total,
+                        "images_cached": cached_n,
+                        "images_pulled": pulled_n,
+                        "smoke_failed_n": smoke_out.get("failed_n"),
+                        "last_status": "smoke_error",
+                        "error": err[:400],
+                    }
+                )
+                raise RuntimeError(err)
+
         write_progress(
             {
                 "status": "ready",
@@ -633,6 +973,8 @@ def pull_images(
                 "images_done": total,
                 "images_cached": cached_n,
                 "images_pulled": pulled_n,
+                "smoke_ok": bool(smoke_out.get("all_ok")) if smoke_out else (not do_smoke),
+                "smoke_skipped": not do_smoke,
                 "current_ref": None,
                 "last_status": "finished",
             }
@@ -650,7 +992,15 @@ def pull_images(
                 }
             )
         raise
-    return {"n": total, "results": results}
+    out: dict[str, Any] = {"n": total, "results": results}
+    if smoke_out is not None:
+        out["smoke"] = {
+            "all_ok": smoke_out.get("all_ok"),
+            "ok_n": smoke_out.get("ok_n"),
+            "failed_n": smoke_out.get("failed_n"),
+            "failed": smoke_out.get("failed"),
+        }
+    return out
 
 
 def pull_tier_images(
@@ -658,11 +1008,12 @@ def pull_tier_images(
     *,
     n_instances: int | None = None,
     force: bool = False,
+    skip_smoke: bool = False,
     cfg: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     h = harness_cfg(cfg)
     use_tier = (tier or h["board_tier"]).strip() or "n5"
     refs = image_refs_for_tier(use_tier, n_instances=n_instances, cfg=cfg)
-    out = pull_images(refs, force=force, tier=use_tier)
+    out = pull_images(refs, force=force, tier=use_tier, skip_smoke=skip_smoke)
     out["tier"] = use_tier
     return out

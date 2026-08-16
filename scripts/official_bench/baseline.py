@@ -88,7 +88,12 @@ def _manifest_eval_path(manifest: dict[str, Any] | None) -> str | None:
 
 def protocol_from_latest() -> str | None:
     """Prefer protocol stamped on latest_* (L1 → m2) over suites.small.yaml (L0 m1)."""
-    for name in ("latest_retrieval.json", "latest_context.json", "latest_coding.json"):
+    for name in (
+        "latest_retrieval.json",
+        "latest_retrieval_zh.json",
+        "latest_context.json",
+        "latest_coding.json",
+    ):
         pv = _manifest_protocol(_read_latest(name))
         if pv:
             return pv
@@ -139,7 +144,7 @@ def infer_sample_tier(
 ) -> str:
     """A-4: ``anchor`` = SCORECARD primary; ``smoke`` = direction only (no effect Δ)."""
     s = (suite or "").strip().lower()
-    if s == "retrieval":
+    if s in {"retrieval", "retrieval_zh"}:
         if limit_queries > 0:
             return "smoke"
         if isinstance(n_queries, (int, float)) and 0 < float(n_queries) <= 50:
@@ -163,7 +168,7 @@ def _manifest_sample_tier(manifest: dict[str, Any], suite: str) -> str:
         if isinstance(st, str) and st.strip():
             return st.strip().lower()
     metrics = manifest.get("metrics") if isinstance(manifest.get("metrics"), dict) else {}
-    if suite == "retrieval":
+    if suite in {"retrieval", "retrieval_zh"}:
         nq = metrics.get("n_queries") or metrics.get("agent.n_queries")  # legacy L1 alias
         return infer_sample_tier(
             suite="retrieval",
@@ -250,7 +255,7 @@ def extract_suite_snapshot(manifest: dict[str, Any]) -> dict[str, Any] | None:
     eval_path = _manifest_eval_path(manifest) or "component"
     protocol = _manifest_protocol(manifest)
 
-    if suite == "retrieval":
+    if suite in {"retrieval", "retrieval_zh"}:
         # L1 now writes unprefixed macros; agent.* is a leftover alias on old
         # manifests. Prefer agent.* when present so mixed fixtures still pin L1.
         prefixes = ("agent.", "hybrid.", "") if eval_path == "agent" else ("hybrid.", "agent.", "")
@@ -387,7 +392,7 @@ def _read_latest(name: str) -> dict[str, Any] | None:
 
 def build_baseline_from_latest(
     *,
-    suites: tuple[str, ...] = ("retrieval", "context", "coding"),
+    suites: tuple[str, ...] = ("retrieval", "retrieval_zh", "context", "coding"),
     protocol: str | None = None,
 ) -> dict[str, Any]:
     """Assemble baseline document from ``latest_{suite}.json`` pointers.
@@ -406,6 +411,8 @@ def build_baseline_from_latest(
 
     mapping = {
         "retrieval": "latest_retrieval.json",
+        "retrieval_zh": "latest_retrieval_zh.json",
+        "cmteb": "latest_retrieval_zh.json",
         "context": "latest_context.json",
         "coding": "latest_coding.json",
     }
@@ -533,6 +540,20 @@ def render_scorecard(doc: dict[str, Any]) -> str:
             out.append(
                 f"| retrieval | {ret_label} | "
                 f"{_fmt(rm.get('ndcg_at_10'))} | `{_fmt(ret.get('run_id'))}` | {ret_note} |"
+            )
+
+        ret_zh = (
+            block.get("retrieval_zh") if isinstance(block.get("retrieval_zh"), dict) else {}
+        )
+        zm = ret_zh.get("metrics") if isinstance(ret_zh.get("metrics"), dict) else {}
+        if ret_zh:
+            zh_note = (
+                f"tier={_fmt(ret_zh.get('sample_tier'))} · arm={_fmt(ret_zh.get('primary_arm'))} · "
+                f"n_queries={_fmt(zm.get('n_queries'), digits=0)} · R@100={_fmt(zm.get('recall_at_100'))}"
+            )
+            out.append(
+                f"| retrieval_zh | {'agent nDCG@10' if is_l1 else 'hybrid nDCG@10'} | "
+                f"{_fmt(zm.get('ndcg_at_10'))} | `{_fmt(ret_zh.get('run_id'))}` | {zh_note} |"
             )
 
         ctx = block.get("context") if isinstance(block.get("context"), dict) else {}
@@ -697,8 +718,10 @@ def write_scorecard(doc: dict[str, Any]) -> Path:
 
 def _suite_name_from_manifest(manifest: dict[str, Any]) -> str | None:
     suite = str(manifest.get("official_suite") or "").strip().lower()
-    if suite in {"retrieval", "context"}:
+    if suite in {"retrieval", "retrieval_zh", "context"}:
         return suite
+    if suite == "cmteb":
+        return "retrieval_zh"
     if suite in {"coding", "coding_infer", "coding_eval"}:
         return "coding"
     return None
@@ -831,7 +854,7 @@ def promote_run_to_baseline(
 
 def compare_latest_to_baseline(
     *,
-    suites: tuple[str, ...] = ("retrieval", "context", "coding"),
+    suites: tuple[str, ...] = ("retrieval", "retrieval_zh", "context", "coding"),
 ) -> dict[str, Any]:
     """Diff latest_* against committed baseline. A-4: refuse cross-tier Δ.
 
@@ -851,6 +874,7 @@ def compare_latest_to_baseline(
 
     primary_keys = {
         "retrieval": ("ndcg_at_10", "recall_at_100", "map_at_100"),
+        "retrieval_zh": ("ndcg_at_10", "recall_at_100", "map_at_100"),
         "context": (
             "agent_f1",
             "agent_em",
@@ -865,6 +889,7 @@ def compare_latest_to_baseline(
     }
     paired_primary = {
         "retrieval": "ndcg_at_10",
+        "retrieval_zh": "ndcg_at_10",
         "context": "f1",  # per-case key; suite macro is agent_f1
         "coding": None,
     }
@@ -1304,6 +1329,7 @@ def compare_two_manifests(
     suite = suite_a or suite_b or "unknown"
     default_metric = {
         "retrieval": "ndcg_at_10",
+        "retrieval_zh": "ndcg_at_10",
         "context": "f1",
         "coding": "resolve_rate",
     }.get(suite, "ndcg_at_10")
@@ -1426,7 +1452,7 @@ def write_baseline(doc: dict[str, Any], *, protocol: str | None = None) -> Path:
 
 def update_baseline_from_latest(
     *,
-    suites: tuple[str, ...] = ("retrieval", "context", "coding"),
+    suites: tuple[str, ...] = ("retrieval", "retrieval_zh", "context", "coding"),
 ) -> tuple[Path, dict[str, Any]]:
     doc = build_baseline_from_latest(suites=suites)
     path = write_baseline(doc)

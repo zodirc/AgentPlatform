@@ -9,8 +9,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from official_bench.context_run import (  # noqa: E402
     SCORER_VERSION,
+    answers_list,
     extract_pred_answer,
+    has_cjk,
     normalize_answer,
+    normalize_zh_answer,
     score_prediction,
 )
 
@@ -77,3 +80,41 @@ def test_score_prediction_strips_answer_prefix() -> None:
     assert mixed["f1"] == 1.0
     # Prefix path is pred-only; golds are unchanged.
     assert score_prediction("Berlin", ["Answer: Berlin"])["em"] == 0.0
+
+
+def test_has_cjk_gate() -> None:
+    assert has_cjk("北京")
+    assert has_cjk("the answer is 北京")
+    assert not has_cjk("Berlin only")
+    assert not has_cjk("")
+
+
+def test_normalize_zh_answer_strips_punct_and_ws() -> None:
+    assert normalize_zh_answer("北京市。") == "北京市"
+    assert normalize_zh_answer("答案：北京 （首都）") == "答案北京首都"
+    assert normalize_zh_answer("  Beijing, 北京！ ") == "beijing北京"
+
+
+def test_score_prediction_zh_char_f1() -> None:
+    """Chinese golds auto-route to char-bag F1 (whitespace F1 would be 0)."""
+    exact = score_prediction("北京", ["北京"])
+    assert exact["em"] == 1.0
+    assert exact["f1"] == 1.0
+    # 2 shared chars of pred=3 / gold=2 → P=2/3, R=1 → F1=0.8
+    partial = score_prediction("北京市", ["北京"])
+    assert partial["em"] == 0.0
+    assert abs(partial["f1"] - 0.8) < 1e-9
+    # Explicit lang="zh" forces the branch even for mixed text.
+    forced = score_prediction("Answer: 北京", ["北京。"], lang="zh")
+    assert forced["em"] == 1.0
+    # English golds keep the whitespace-token scorer.
+    en = score_prediction("one joule per second", ["Watt, one joule per second."])
+    assert en["em"] == 0.0
+    assert en["f1"] > 0.8
+
+
+def test_answers_list_flattens_nested() -> None:
+    assert answers_list("x") == ["x"]
+    assert answers_list(["a", ["b", "c"]]) == ["a", "b", "c"]
+    assert answers_list(None) == []
+    assert answers_list(3) == ["3"]

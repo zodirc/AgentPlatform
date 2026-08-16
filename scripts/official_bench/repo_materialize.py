@@ -7,6 +7,7 @@ checkouts cleaned after the run. Never writes gold ``patch`` / ``test_patch`` /
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -154,6 +155,33 @@ def materialize_instance_repo(
     problem = str(instance.get("problem_statement") or "")
     (root / "problem.md").write_text(problem, encoding="utf-8")
 
+    # Marker for solve-side run_tests → local sweb.eval (no gold fields).
+    iid = str(instance.get("instance_id") or "").strip()
+    if iid:
+        try:
+            from official_bench.swe_images import harness_cfg, instance_image_ref
+
+            h = harness_cfg()
+            marker = {
+                "instance_id": iid,
+                "repo": repo,
+                "base_commit": base,
+                "image_ref": instance_image_ref(
+                    iid,
+                    namespace=str(h.get("namespace") or "swebench"),
+                    tag=str(h.get("image_tag") or "latest"),
+                ),
+                "testbed": "/testbed",
+            }
+            (root / ".agent_swe_instance.json").write_text(
+                json.dumps(marker, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "swe instance marker write failed for %s: %s", iid, exc
+            )
+
     # api often runs as root while runtime is uid 1000 (app). Without this,
     # edit_file hits EACCES on checked-out sources (root:root 644).
     _ensure_runtime_writable(root)
@@ -163,6 +191,7 @@ def materialize_instance_repo(
         "base_commit": base,
         "mirror_hit": mirror_hit,
         "work_root": str(root),
+        "instance_id": iid or None,
     }
 
 

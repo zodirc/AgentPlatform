@@ -49,8 +49,15 @@ DEFAULT_CODING_TIER = "n25"
 _SLICE_DIR = Path(__file__).resolve().parents[2] / "eval" / "official" / "swe_lite_slices"
 
 
-def _phase(msg: str) -> None:
-    print(f"[phase] {msg}", flush=True)
+def _phase(msg: str, *, on_line: Callable[[str], None] | None = None) -> None:
+    """Print a bench phase line; optionally forward into Ops harness sink."""
+    text = f"[phase] {msg}"
+    print(text, flush=True)
+    if on_line is not None:
+        try:
+            on_line(text)
+        except Exception:
+            pass
 
 
 def _harness_dataset_arg(root: Path) -> str:
@@ -501,78 +508,119 @@ def run_swe_infer(
         raise
 
 
-def _harness_report_from_disk(root: Path, harness_run_id: str) -> dict[str, Any]:
-    """Best-effort read of the official harness summary JSON (rate + id lists)."""
+def _parse_harness_report_payload(payload: dict[str, Any], path: Path) -> dict[str, Any]:
+    """Extract rate + id lists from one harness summary JSON, or ``{}`` if not one."""
     out: dict[str, Any] = {}
+    # Prefer the run summary (has resolved_ids); skip per-instance report files.
+    has_ids = isinstance(payload.get("resolved_ids"), list)
+    if not has_ids and not any(
+        k in payload for k in ("resolve_rate", "resolved_rate", "resolved", "total_instances")
+    ):
+        return {}
+    if has_ids:
+        for key in (
+            "resolved_ids",
+            "unresolved_ids",
+            "error_ids",
+            "empty_patch_ids",
+            "completed_ids",
+            "incomplete_ids",
+            "submitted_ids",
+        ):
+            raw = payload.get(key)
+            if isinstance(raw, list):
+                out[key] = [str(x) for x in raw]
+        out["report_path"] = str(path)
+    for key in ("resolve_rate", "resolved_rate"):
+        value = payload.get(key)
+        if isinstance(value, (int, float)):
+            out["resolve_rate"] = float(value)
+            break
+    if "resolve_rate" not in out:
+        resolved = payload.get("resolved")
+        if isinstance(resolved, list):
+            # Some older dumps store resolved as an id list.
+            out.setdefault("resolved_ids", [str(x) for x in resolved])
+            submitted = payload.get("submitted") or payload.get("submitted_ids")
+            if isinstance(submitted, list) and submitted:
+                out["resolve_rate"] = float(len(resolved)) / float(len(submitted))
+        else:
+            total = (
+                payload.get("total")
+                or payload.get("n_instances")
+                or payload.get("total_instances")
+                or payload.get("submitted_instances")
+            )
+            if (
+                isinstance(resolved, (int, float))
+                and isinstance(total, (int, float))
+                and total
+            ):
+                out["resolve_rate"] = float(resolved) / float(total)
+    if out.get("resolve_rate") is None and out.get("resolved_ids") is None:
+        return {}
+    if "resolve_rate" not in out and out.get("resolved_ids") is not None:
+        submitted = out.get("submitted_ids") or out.get("completed_ids")
+        if isinstance(submitted, list) and submitted:
+            out["resolve_rate"] = float(len(out["resolved_ids"])) / float(len(submitted))
+    return out
+
+
+def _report_ids(report: dict[str, Any]) -> set[str]:
+    """All instance ids mentioned by a parsed harness report (for prediction checks)."""
+    ids: set[str] = set()
+    for key in (
+        "resolved_ids",
+        "unresolved_ids",
+        "error_ids",
+        "empty_patch_ids",
+        "completed_ids",
+        "incomplete_ids",
+        "submitted_ids",
+    ):
+        raw = report.get(key)
+        if isinstance(raw, list):
+            ids.update(str(x) for x in raw)
+    return ids
+
+
+def _harness_report_from_disk(
+    root: Path,
+    harness_run_id: str,
+    *,
+    expected_instance_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    """Read the official harness summary JSON (rate + id lists) for one run.
+
+    Deterministic selection: newest matching file wins (``rglob`` order is
+    filesystem-dependent), and reports whose instance ids are disjoint from the
+    submitted predictions are rejected so a stray ``*{run_id}*.json`` can never
+    be mistaken for this run's verdict.
+    """
+    candidates: list[tuple[float, Path]] = []
     for path in root.rglob(f"*{harness_run_id}*.json"):
+        try:
+            candidates.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    expected = {str(x) for x in (expected_instance_ids or [])}
+    for _mtime, path in sorted(candidates, key=lambda t: t[0], reverse=True):
         try:
             payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
         except (OSError, UnicodeError, json.JSONDecodeError):
             continue
         if not isinstance(payload, dict):
             continue
-        # Prefer the run summary (has resolved_ids); skip per-instance report files.
-        has_ids = isinstance(payload.get("resolved_ids"), list)
-        if not has_ids and not any(
-            k in payload for k in ("resolve_rate", "resolved_rate", "resolved", "total_instances")
-        ):
+        out = _parse_harness_report_payload(payload, path)
+        if not out:
             continue
-        if has_ids:
-            for key in (
-                "resolved_ids",
-                "unresolved_ids",
-                "error_ids",
-                "empty_patch_ids",
-                "completed_ids",
-                "incomplete_ids",
-                "submitted_ids",
-            ):
-                raw = payload.get(key)
-                if isinstance(raw, list):
-                    out[key] = [str(x) for x in raw]
-            out["report_path"] = str(path)
-        for key in ("resolve_rate", "resolved_rate"):
-            value = payload.get(key)
-            if isinstance(value, (int, float)):
-                out["resolve_rate"] = float(value)
-                break
-        if "resolve_rate" not in out:
-            resolved = payload.get("resolved")
-            if isinstance(resolved, list):
-                # Some older dumps store resolved as an id list.
-                out.setdefault("resolved_ids", [str(x) for x in resolved])
-                submitted = payload.get("submitted") or payload.get("submitted_ids")
-                if isinstance(submitted, list) and submitted:
-                    out["resolve_rate"] = float(len(resolved)) / float(len(submitted))
-            else:
-                total = (
-                    payload.get("total")
-                    or payload.get("n_instances")
-                    or payload.get("total_instances")
-                    or payload.get("submitted_instances")
-                )
-                if (
-                    isinstance(resolved, (int, float))
-                    and isinstance(total, (int, float))
-                    and total
-                ):
-                    out["resolve_rate"] = float(resolved) / float(total)
-        if out.get("resolve_rate") is not None or out.get("resolved_ids") is not None:
-            if "resolve_rate" not in out and out.get("resolved_ids") is not None:
-                submitted = out.get("submitted_ids") or out.get("completed_ids")
-                if isinstance(submitted, list) and submitted:
-                    out["resolve_rate"] = float(len(out["resolved_ids"])) / float(
-                        len(submitted)
-                    )
-            return out
-    return out
-
-
-def _resolve_rate_from_harness(root: Path, harness_run_id: str) -> float | None:
-    """Best-effort read of the official harness JSON results."""
-    report = _harness_report_from_disk(root, harness_run_id)
-    rate = report.get("resolve_rate")
-    return float(rate) if isinstance(rate, (int, float)) else None
+        if expected:
+            seen = _report_ids(out)
+            if seen and not (seen & expected):
+                # Report is about a different instance set — not our verdict.
+                continue
+        return out
+    return {}
 
 
 def _harness_preflight(*, instance_ids: list[str] | None = None) -> dict[str, Any]:
@@ -686,6 +734,17 @@ def parse_harness_stdout_line(line: str) -> dict[str, Any] | None:
         return None
     if text.startswith("HTTP Request:") or "Temporary Redirect" in text:
         return None
+    if text.startswith("[phase]"):
+        detail = text[len("[phase]") :].strip()
+        stage = "prepare"
+        low = detail.lower()
+        if "eval" in low or "run_evaluation" in low:
+            stage = "evaluating"
+        elif "pull" in low or "predict" in low:
+            stage = "load_dataset"
+        elif "regress" in low or "compare" in low:
+            stage = "instances_done"
+        return {"kind": "stage", "stage": stage, "detail": detail[:200]}
     m = _EVAL_TQDM_RE.search(text)
     if m:
         return {
@@ -752,7 +811,11 @@ def format_l1_harness_event(ev: dict[str, Any]) -> str | None:
         detail = str(ev.get("detail") or "").strip()
         if not detail:
             return None
-        return f"[L1] coding harness log {detail[:200]}"
+        # Keep Ops readable; drop ultra-noisy fragments.
+        low = detail.lower()
+        if low.startswith("http request:") or "temporary redirect" in low:
+            return None
+        return f"[L1] coding harness note {detail[:200]}"
     return None
 
 
@@ -849,6 +912,18 @@ def run_swe_eval(
     h = _harness_preflight(instance_ids=instance_ids)
     # Prefer local Pull cache over coding["hf_dataset"] Hub id (H0 / offline evaluate).
     dataset_name = _harness_dataset_arg(root)
+    if on_line is not None:
+        # Structured breadcrumbs before SWE-bench stdout starts (often a long quiet gap).
+        on_line(
+            f"[phase] preflight ok · n={len(instance_ids)} · "
+            f"cache_level={h['cache_level']} · workers={h['max_workers']} · "
+            f"require_local={h['require_local_images']}"
+        )
+        if instance_ids:
+            shown = ", ".join(instance_ids[:8])
+            more = f" …(+{len(instance_ids) - 8})" if len(instance_ids) > 8 else ""
+            on_line(f"[phase] instance_ids={shown}{more}")
+        on_line(f"[phase] dataset={dataset_name}")
     cmd = [
         sys.executable,
         "-u",
@@ -878,12 +953,14 @@ def run_swe_eval(
         cmd.extend(["--instance_ids", *instance_ids])
     _phase(
         "1/3 PULL — predictions on disk; "
-        f"cache_level={h['cache_level']} require_local={h['require_local_images']}"
+        f"cache_level={h['cache_level']} require_local={h['require_local_images']}",
+        on_line=on_line,
     )
     _phase(
         "2/3 EVAL — official swebench.harness.run_evaluation"
         + (f" · n={len(instance_ids)}" if instance_ids else "")
-        + f" · dataset={dataset_name}"
+        + f" · dataset={dataset_name}",
+        on_line=on_line,
     )
     session.log("evaluate", " ".join(cmd))
     session.log(
@@ -934,8 +1011,11 @@ def run_swe_eval(
         returncode = exit_code
 
     proc = _Proc()
-    _phase(f"2/3 EVAL — harness exit={proc.returncode}")
-    _phase("3/3 REGRESS — compare resolve rate vs prior harness runs in Ops")
+    _phase(f"2/3 EVAL — harness exit={proc.returncode}", on_line=on_line)
+    _phase(
+        "3/3 REGRESS — compare resolve rate vs prior harness runs in Ops",
+        on_line=on_line,
+    )
     log_tail = ""
     try:
         raw_log = log_path.read_text(encoding="utf-8", errors="replace")
@@ -950,12 +1030,22 @@ def run_swe_eval(
     }
     if instance_ids:
         metrics["n_instance_ids"] = float(len(instance_ids))
-    report = _harness_report_from_disk(root, harness_run_id)
+    report = _harness_report_from_disk(
+        root, harness_run_id, expected_instance_ids=instance_ids
+    )
+    # Official judgment exists only when the harness archived a report on disk.
+    # Never fabricate resolve_rate=0.0 from the prediction list alone — a
+    # crashed harness must surface as failure, not as "0 resolved, completed".
+    has_official_judgment = (
+        isinstance(report.get("resolve_rate"), (int, float))
+        or isinstance(report.get("resolved_ids"), list)
+        or bool(report.get("report_path"))
+    )
     resolve_rate = report.get("resolve_rate")
     if isinstance(resolve_rate, (int, float)):
         metrics["resolve_rate"] = float(resolve_rate)
-    else:
-        # Prefer submitted denominator when the JSON only has id lists.
+    elif has_official_judgment:
+        # Report found but no rate field — derive from id lists (submitted first).
         resolved_ids_tmp = report.get("resolved_ids") if isinstance(report.get("resolved_ids"), list) else []
         submitted = (
             report.get("submitted_ids")
@@ -964,16 +1054,11 @@ def run_swe_eval(
         )
         if submitted:
             metrics["resolve_rate"] = float(len(resolved_ids_tmp)) / float(len(submitted))
-        else:
-            metrics["note"] = "resolve rate unavailable; Docker-backed harness results are required"
+    if "resolve_rate" not in metrics:
+        metrics["note"] = "resolve rate unavailable; Docker-backed harness results are required"
     resolved_ids = report.get("resolved_ids") if isinstance(report.get("resolved_ids"), list) else []
     if resolved_ids:
         metrics["n_resolved"] = float(len(resolved_ids))
-    has_official_judgment = (
-        isinstance(metrics.get("resolve_rate"), (int, float))
-        or isinstance(report.get("resolved_ids"), list)
-        or bool(report.get("report_path"))
-    )
     harness_err = None
     if proc.returncode != 0:
         snippet = " ".join(log_tail.strip().split())
@@ -988,6 +1073,10 @@ def run_swe_eval(
                 f"harness exited {proc.returncode} but official report was archived"
             )
             harness_err = None
+    elif not has_official_judgment:
+        # exit 0 without a report is still not an official verdict.
+        harness_err = "harness exited 0 but no official report JSON was found on disk"
+        metrics["harness_log_tail"] = log_tail[-1500:] if log_tail else ""
     session.add_case(
         "swebench.lite.evaluate",
         status="pass" if harness_err is None else "fail",
