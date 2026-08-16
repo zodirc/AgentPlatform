@@ -84,10 +84,14 @@ work_root/
   → 创建官方 run
   → 拒非 agent 路径
   → retrieval / retrieval_zh / context / coding
+       ├ 检索：多轮 search_sources → 评测侧 RRF → nDCG
+       ├ 上下文：读 passage.md → 抽 Answer: → F1/EM
+       └ 编码：真实 checkout + harness；无 resolve_rate 则 failed
   → 从 tool / turn 事件取结果 → 对照 SCORECARD
+  → manifest ⊨ ops_run_manifest.schema.json
 ```
 
-计分臂以 **free**（自然搜/读/改）为主。依赖 bench 库隔离；SWE resolve 另需 harness + Docker。
+计分臂以 **free**（自然搜/读/改）为主。依赖 bench 库隔离；SWE resolve 另需 harness + Docker。`coding_skip_api` 默认关（空补丁只通管道，非验收）。
 
 ### 2.3 套件原理
 
@@ -96,10 +100,11 @@ work_root/
 | **retrieval** | BEIR 小集 | `search_sources` | nDCG@10 等 |
 | **retrieval_zh** | C-MTEB 小切 | 同上 | 同上（勿与 BEIR 混栏） |
 | **context** | LongBench 小切 | `read_file` 等 | agent F1 / EM |
-| **coding** | SWE-bench Lite | `edit_file` / `write_file` 等 | patch_rate；resolve 须 harness |
+| **coding** | SWE-bench Lite | `edit_file` / `write_file` 等 | **resolve_rate**（harness）；patch_rate 仅辅助 |
 
 Coding 结构探针（fuse / impact / checks）用于观测揉合是否在线，**不代替**官方 resolve。  
-工作区 AST 可在评测 profile 下瞬态启用，与产品 RAG 面隔离。
+工作区 AST：评测套件默认 `workspace_index_wait_ready=true`（产品 Turn-first 不变）；与产品 RAG 面隔离。  
+Harness 失败 / 无 `resolve_rate` → suite **failed**（契约 `ops_run_manifest.schema.json`）。
 
 ### 2.4 与产品面隔离
 

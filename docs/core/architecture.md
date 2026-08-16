@@ -53,6 +53,7 @@ Postgres 16 + pgvector
 - 契约源在 `packages/contracts`（OpenAPI、事件 JSON Schema、DDL）；api/web 由此派生。
 
 起栈：`make up`（分模块重建脏服务）+ 发布台 `:9090`；全量 `make up-all`。配置入口 `.env`；**模型供应商在 Web「设置 → 模型」配置**。可选 overlay：queue、ha（双 runtime，同为 pull）、runtime-lite、ops-eval、bench。  
+Ops coding：看板 **SWE 评测环境** 一键完成挂 sock + 预拉/冒烟（`make ops-swe-eval-ready`），为官方 resolve 与解题复现的必要步骤。  
 扩缩与故障注入见 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
 
 ## 2. 分模块发布（:9090）
@@ -196,3 +197,48 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 | **R5** | 可测才合并 | `make gate` / Ops `suite=ci` 等同完整证明 |
 
 索引、Ops、Golden 都必须是 **环外或工具中介**，不能为了分数改 loop 语义。
+
+## 6. Ops L1 评测（环外）
+
+效果温度计，不进 StartTurn 热路径。契约：[`docs/contracts.md` §4](../contracts.md)。
+
+```text
+/official 或 make *-agent
+  → eval_path=agent（非 agent 拒）
+  → 产品 Session / Turn / 真实工具
+       ├ retrieval      BEIR     search_sources → 多轮 RRF → nDCG/R/MAP
+       ├ retrieval_zh   C-MTEB   同上（独立 latest_ 指针，勿与 BEIR 混栏）
+       ├ context        LongBench  passage.md → Answer: → F1/EM
+       └ coding         SWE Lite  checkout → 评测态 AST wait_ready
+                                   → run_tests∈本地 sweb.eval（预拉+环境冒烟）
+                                   → git_diff / baseline repair
+                                   → swebench.harness.resolve（无 resolve 则 suite failed）
+  → latest_<suite>.json · manifest ⊨ ops_run_manifest.schema.json
+```
+
+产品默认仍是 Turn-first（R1）；`workspace_index_wait_ready` **只**在评测套件打开。Harness 失败不得标 `completed`。
+
+SWE 评测环境（看板一键 / `make ops-swe-eval-ready`）= **docker.sock + resolve 镜像 + 解题复现**：挂 api/runtime sock，拉齐后对每张 `sweb.eval` 做 python/pytest/`/testbed` 冒烟；看板「就绪」依赖二者都过。解题侧 `run_tests` 把 worktree tar 进 `/testbed`（禁网）；缺镜像或冒烟失败硬失败可归因。
+
+### 6.1 编码一题（ASCII · 与原图风格一致）
+
+```text
+① checkout base_commit（写 .agent_swe_instance.json）
+② AST cold_start ──wait_ready──► ready|stale （仅评测）
+③ StartTurn ──► Locate / Edit / Verify
+   └ run_tests → docker run 本地 sweb.eval（tar→/testbed，--network none）
+④ 抽 patch：git_diff ─残缺► baseline repair ─拒收► l2.patch_rejected
+⑤ predictions.jsonl
+⑥ swebench.harness ──┬─ resolve_rate ──► completed
+                      └─ harness_error ──► failed（可见）
+```
+
+### 6.2 检索一题（ASCII）
+
+```text
+① pull BEIR|C-MTEB → materialize → HNSW
+② Turn(writing) → search_sources（可多轮）
+③ 评测侧 RRF 融合各次 ranked（k=60）
+④ nDCG / Recall / MAP
+⑤ latest_retrieval.json | latest_retrieval_zh.json （互不覆盖）
+```

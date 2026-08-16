@@ -145,7 +145,21 @@ top_k = max(fetch_limit × 4, 20)
 | 契约 / golden / stub | 协议与主路径不炸 | **不能**冒充生产召回 |
 | `make retrieval-bench-prod` 等真相档 | 离线召回/排序 | 需 live embed + pgvector |
 | 工作台自然问句 | hybrid 轨迹、cite、polish **0 搜** | 时间线 + `/retrieval` 审计漏斗 |
-| Ops `/official` L1 | BEIR / C-MTEB agent-path 宏分 | 独立 schema；**≠** 契约 golden；见[工作台 · Bench](workbench.md) |
+| Ops `/official` L1 | BEIR / C-MTEB agent-path 宏分 | 独立 schema；**≠** 契约 golden；见[工作台 · Bench](workbench.md) · [契约 §4](../contracts.md) |
 | Ops `suite=ci` / `make ci-proof` | 主路径不炸 + gate | **≠** 生产召回分数 |
 
 三标尺同时满足才谈「检索变好」：不伤 TTFB、效果闸有对照、形态仍是工具中介而非每轮预注入。
+
+## 6. Ops L1 多轮融合（评测侧，不改店内）
+
+产品一次 `search_sources` 仍是店内 RRF（§3.2）。free 臂一题可多次搜索；L1 **评测侧**再把各次 `retrieval.completed` 做一次 RRF（k=60），用融合分而不是 first-seen 或 `limit-i` 伪分去算 nDCG。单次搜索顺序不变。
+
+```text
+Turn
+  → search_sources #1  ranked A
+  → search_sources #2  ranked B
+  → L1 merge: score[d] += 1/(60+rank)   （评测侧）
+  → nDCG / Recall / MAP
+```
+
+C-MTEB 写 `latest_retrieval_zh.json`，BEIR 写 `latest_retrieval.json`，互不覆盖。

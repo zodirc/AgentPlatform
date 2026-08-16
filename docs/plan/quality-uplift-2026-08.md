@@ -1,9 +1,9 @@
 # 方案：三线质量提升（Coding / Retrieval / Context）
 
-> **状态（2026-08-15）**：批 1–3 **代码已落地** · R-5 仍关 · INDEX 13 第2轮冒烟已对照 · **不升 SCORECARD 主栏**  
+> **状态（2026-08-16）**：批 1–3 **代码已落地** · 第3轮工程加固已落地（harness 失败可见 · 评测侧多轮 RRF · AST wait_ready · ops manifest 契约）· 完整 smoke **未入账**（主动终止）· **不升 SCORECARD 主栏**  
 > **第2轮冒烟**（对照第1轮 INDEX 12 · 2026-08-15 12:14–13:01 CST）：coding resolve 仍 0.6 · C-MTEB nDCG@10 0.643→0.696 · **BEIR R@100 0.530→0.495（第一验收位未过）** · LongBench F1 0.558→0.456 / **EM 0.30→0**  
-> **基线**：`eval/official/baseline/RESULTS.md`（第1轮 INDEX 12 · 2026-08-15 12:14–13:01 CST：coding resolve 0.6 · BEIR ndcg@10 0.4547 · LongBench agent_f1 0.5579）  
-> **姊妹**：[Coding 结构智能](coding-structural-intelligence.md)（轨道 M/T/Q/L 承接）· [工作区异步 AST](agent-workspace-ast-index.md)  
+> **基线**：`eval/official/baseline/RESULTS.md`（第2轮效果锚；第3轮见「工程加固」节）  
+> **姊妹**：[Coding 结构智能](coding-structural-intelligence.md)（轨道 M/T/Q/L 承接）· [工作区异步 AST](agent-workspace-ast-index.md) · [契约索引](../contracts.md)  
 > **硬原则**：不改 AgentEngine while；不新增模型必须学会的工具名；**所有改动不得进 StartTurn / assemble 热路径加重活**（速率红线 R1–R5）；成熟参照优先（Cursor / Anthropic contextual retrieval / SWE-agent / OpenHands 已验证做法）
 
 ---

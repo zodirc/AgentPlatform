@@ -33,14 +33,20 @@
 
 ```text
 pull Lite → plan → mirror prewarm → checkout(commit)
-  →（可选）AST enqueue + wait-ready
+  →（评测套件默认）AST enqueue + wait_ready=true
   → StartTurn(agent)
        Orient → Locate → Read → Edit(+impact+checks[+related_tests])
               → Verify（lints / tests / W9）→ 终态
-  → git_diff / apply-check →（可选）官方 harness → 报告
+  → 抽 patch：git_diff →（残缺则）baseline repair（git diff --no-index）
+       → apply-check；拒收写 l2.patch_rejected（不得假 no_patch）
+  → Ops 强制官方 harness（Docker + swebench）
+       ├ 有 resolve_rate → suite completed
+       └ harness_error / 无报告 → suite failed（不得粉饰 completed）
+  → latest_coding.json · manifest ⊨ ops_run_manifest.schema.json
 ```
 
-并行：`l1_max_parallel`（常 2）；indexer 与 runtime **分进程**。
+并行：`l1_max_parallel`（常 2）；indexer 与 runtime **分进程**。  
+产品路径仍 Turn-first（R1）；`wait_ready` **只**在评测套件打开。
 
 ### 1.3 Locate 漏斗（现行）
 
@@ -178,7 +184,7 @@ pull Lite → plan → mirror prewarm → checkout(commit)
 |----|------|------|
 | 官方评价题集接线 | harness **改吃**已有 `swebench_lite/instances.jsonl`；evaluate 子进程强制 `HF_HUB_OFFLINE=1`；失败标 `harness_infra`，**不得**记成模型 0 分 | **已修**（`swe_run._harness_dataset_arg`）；历史 `7f235e7c` 为接线前样本 |
 | 实例镜像 | 维持 `sweb.eval` 预拉 + `require_local_images`（已有 N0） | evaluate 不挂死 |
-| 分桶校正 | `resolve_rate` 仅在 harness exit 0 时写入；否则 `resolve_rate=null` + `harness_error` | 看板不再把基建失败读成「模型 0 分」 |
+| 分桶校正 | 无可信 `resolve_rate` → `harness_error` + suite `failed`（不得 `completed`）；报告按 run_id+mtime+instance 交集选取 | 看板不再把基建失败读成「模型 0 分」；契约见 `ops_run_manifest.schema.json` |
 | 探针口径 | `n_pager_run_command` 与 turn 命令分类对齐（sed/head/tail/nl） | 时长归因与 CSI 一致 |
 
 #### H1 — 执行环层（打 Q1 时长）

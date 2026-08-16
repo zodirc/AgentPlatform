@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agentplatform/contracts/eval/ops_run_manifest.schema.json",
+  "title": "Ops official-bench run manifest (RunSession.finish output)",
+  "description": "Contract for eval/reports/official/runs/<id>/manifest.json and latest_<suite>.json pointers. Producers: scripts/official_bench/run_session.py (L0 + L1). Consumers: Ops official page, baseline.py, bucket reports. Coding acceptance rule: a completed harness run MUST carry metrics.resolve_rate and MUST NOT carry metrics.harness_error.",
+  "type": "object",
+  "required": [
+    "id",
+    "suite",
+    "official_suite",
+    "status",
+    "created_at",
+    "summary",
+    "cases",
+    "metrics"
+  ],
+  "properties": {
+    "id": { "type": "string", "minLength": 8 },
+    "suite": { "const": "official" },
+    "official_suite": {
+      "enum": ["retrieval", "retrieval_zh", "context", "coding"]
+    },
+    "title": { "type": "string" },
+    "status": { "enum": ["running", "completed", "failed", "cancelled"] },
+    "mode": { "type": "string" },
+    "created_at": { "type": "string", "minLength": 10 },
+    "finished_at": { "type": ["string", "null"] },
+    "error": { "type": ["string", "null"] },
+    "summary": {
+      "type": "object",
+      "required": ["total", "pass", "fail", "metrics"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "pass": { "type": "integer", "minimum": 0 },
+        "fail": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "pending": { "type": "integer", "minimum": 0 },
+        "metrics": { "$ref": "#/$defs/metrics" }
+      },
+      "additionalProperties": true
+    },
+    "cases": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/case" }
+    },
+    "logs": { "type": "array", "items": { "type": "object" } },
+    "metrics": { "$ref": "#/$defs/metrics" },
+    "result": { "type": "object" },
+    "model_meta": { "type": "object" },
+    "report_html": { "type": "string" },
+    "process_log": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "$comment": "P0: harness runs cannot be 'completed' without an official verdict.",
+      "if": {
+        "required": ["official_suite", "status", "result"],
+        "properties": {
+          "official_suite": { "const": "coding" },
+          "status": { "const": "completed" },
+          "result": {
+            "type": "object",
+            "required": ["harness"],
+            "properties": { "harness": { "const": true } }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "metrics": {
+            "required": ["resolve_rate"],
+            "not": { "required": ["harness_error"] }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "unit_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "count": { "type": "number", "minimum": 0 },
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "resolve_rate": { "$ref": "#/$defs/unit_rate" },
+        "patch_rate": { "$ref": "#/$defs/unit_rate" },
+        "apply_rate": { "$ref": "#/$defs/unit_rate" },
+        "n_resolved": { "$ref": "#/$defs/count" },
+        "n_instances": { "$ref": "#/$defs/count" },
+        "n_nonempty_patches": { "$ref": "#/$defs/count" },
+        "n_apply_ok": { "$ref": "#/$defs/count" },
+        "harness_error": { "type": "string", "minLength": 1 },
+        "exit_code": { "type": "number" },
+        "ndcg_at_1": { "$ref": "#/$defs/unit_rate" },
+        "ndcg_at_10": { "$ref": "#/$defs/unit_rate" },
+        "ndcg_at_100": { "$ref": "#/$defs/unit_rate" },
+        "recall_at_10": { "$ref": "#/$defs/unit_rate" },
+        "recall_at_100": { "$ref": "#/$defs/unit_rate" },
+        "map_at_10": { "$ref": "#/$defs/unit_rate" },
+        "map_at_100": { "$ref": "#/$defs/unit_rate" },
+        "f1": { "$ref": "#/$defs/unit_rate" },
+        "em": { "$ref": "#/$defs/unit_rate" },
+        "n_queries": { "$ref": "#/$defs/count" },
+        "n_qrels": { "$ref": "#/$defs/count" },
+        "agent_f1": { "$ref": "#/$defs/unit_rate" },
+        "agent_em": { "$ref": "#/$defs/unit_rate" },
+        "agent_f1_incl_infra": { "$ref": "#/$defs/unit_rate" },
+        "agent_em_incl_infra": { "$ref": "#/$defs/unit_rate" },
+        "n_cases": { "$ref": "#/$defs/count" },
+        "n_scored": { "$ref": "#/$defs/count" },
+        "n_infra_excluded": { "$ref": "#/$defs/count" },
+        "infra_rate": { "$ref": "#/$defs/unit_rate" }
+      },
+      "additionalProperties": true
+    },
+    "case": {
+      "type": "object",
+      "required": ["case_id", "status"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["pass", "fail", "skipped"] },
+        "error": { "type": ["string", "null"] },
+        "metrics": { "type": "object" },
+        "l2": { "type": "object" },
+        "bucket": { "type": ["string", "null"] },
+        "started_at": { "type": "string" },
+        "finished_at": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}
