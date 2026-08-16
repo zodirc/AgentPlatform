@@ -912,7 +912,7 @@
       { id: "index_ops", label: "Ops BEIR" },
       { id: "index_ops_zh", label: "Ops 中文" },
       { id: "ops_bench", label: "Ops Bench" },
-      { id: "swe_eval_images", label: "SWE 镜像" },
+      { id: "swe_eval_images", label: "SWE 环境" },
     ];
 
     const ITEM_TO_LOG = {
@@ -927,6 +927,7 @@
       index_ops: "index_ops",
       index_ops_zh: "index_ops_zh",
       ops_bench: "ops_bench",
+      ops_eval_docker: "swe_eval_images",
       swe_eval_images: "swe_eval_images",
     };
 
@@ -1621,6 +1622,8 @@
               "sync-ops-indexes": "index_ops",
               "sync-ops-cmteb": "index_ops_zh",
               "ensure-ops-cmteb": "index_ops_zh",
+              "ensure-swe-eval-env": "swe_eval_images",
+              "up-ops-eval": "swe_eval_images",
               "pull-swe-eval-images": "swe_eval_images",
               "start-bench": "ops_bench",
               "up-bench": "ops_bench",
@@ -1673,6 +1676,7 @@
         "up-web",
         "up-gateway",
         "up-all",
+        "ensure-swe-eval-env",
         "git-pull",
       ].includes(action);
       if (action === "cancel-jobs") {
@@ -1689,7 +1693,9 @@
         // SWE eval images ≈1GiB each; n5 can take well over an hour on slow Hub.
         // SWE pull / full up-bench rebuild can take a long time.
         const longPull =
-          action === "pull-swe-eval-images" || action === "up-bench";
+          action === "ensure-swe-eval-env" ||
+          action === "pull-swe-eval-images" ||
+          action === "up-bench";
         watchUntil = Date.now() + (longPull ? 4 : 1) * 60 * 60 * 1000;
       }
       renderList();
@@ -1729,6 +1735,8 @@
           "sync-ops-indexes": "index_ops",
           "sync-ops-cmteb": "index_ops_zh",
           "ensure-ops-cmteb": "index_ops_zh",
+          "ensure-swe-eval-env": "swe_eval_images",
+          "up-ops-eval": "swe_eval_images",
           "pull-swe-eval-images": "swe_eval_images",
           "start-bench": "ops_bench",
           "up-bench": "ops_bench",

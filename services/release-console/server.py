@@ -54,6 +54,8 @@ ALLOWED_ACTIONS = {
     "sync-ops-indexes": ["make", "-C", str(ROOT), "sync-ops-indexes"],
     "sync-ops-cmteb": ["make", "-C", str(ROOT), "sync-ops-cmteb"],
     "ensure-ops-cmteb": ["bash", str(ROOT / "scripts" / "release" / "ensure_ops_cmteb.sh")],
+    "ensure-swe-eval-env": ["make", "-C", str(ROOT), "ops-swe-eval-ready"],
+    "up-ops-eval": ["make", "-C", str(ROOT), "up-ops-eval"],
     "pull-swe-eval-images": ["make", "-C", str(ROOT), "official-bench-coding-pull-images"],
     "start-bench": ["make", "-C", str(ROOT), "start-bench"],
     "up-bench": ["make", "-C", str(ROOT), "up-bench"],
@@ -74,6 +76,8 @@ ACTION_LOG_KEY = {
     "sync-ops-indexes": "index_ops",
     "sync-ops-cmteb": "index_ops_zh",
     "ensure-ops-cmteb": "index_ops_zh",
+    "ensure-swe-eval-env": "swe_eval_images",
+    "up-ops-eval": "swe_eval_images",
     "pull-swe-eval-images": "swe_eval_images",
     "start-bench": "ops_bench",
     "up-bench": "ops_bench",
@@ -109,6 +113,8 @@ _ACTION_ITEM = {
     "sync-ops-indexes": "index_ops",
     "sync-ops-cmteb": "index_ops_zh",
     "ensure-ops-cmteb": "index_ops_zh",
+    "ensure-swe-eval-env": "swe_eval_images",
+    "up-ops-eval": "swe_eval_images",
     "pull-swe-eval-images": "swe_eval_images",
     "start-bench": "ops_bench",
     "up-bench": "ops_bench",
@@ -123,7 +129,7 @@ _ITEM_DEFAULT_ACTION = {
     "index_product": "sync-sources",
     "index_ops": "sync-ops-indexes",
     "index_ops_zh": "ensure-ops-cmteb",
-    "swe_eval_images": "pull-swe-eval-images",
+    "swe_eval_images": "ensure-swe-eval-env",
     "ops_bench": "start-bench",
 }
 _SYNC_ACTIVE = frozenset(
@@ -221,7 +227,9 @@ _ACTION_LABELS = {
     "sync-ops-indexes": "同步 Ops BEIR",
     "sync-ops-cmteb": "同步 C-MTEB",
     "ensure-ops-cmteb": "拉取并嵌入中文库",
-    "pull-swe-eval-images": "预拉 SWE eval 镜像",
+    "ensure-swe-eval-env": "准备 SWE 评测环境",
+    "up-ops-eval": "启用 Ops Docker",
+    "pull-swe-eval-images": "预拉 SWE eval 镜像（含环境冒烟）",
     "start-bench": "启动 Ops Bench",
     "up-bench": "重建 Ops Bench",
     "git-pull": "拉取远程",
@@ -800,7 +808,7 @@ def _cancel_all_jobs() -> dict:
             killed.append(
                 {
                     "pid": pid,
-                    "action": "pull-swe-eval-images",
+                    "action": "ensure-swe-eval-env",
                     "item_id": "swe_eval_images",
                 }
             )
@@ -868,10 +876,12 @@ def _discover_host_action_jobs() -> list[dict]:
         ("sync_cli --mode ops-beir", "sync-ops-indexes", "index_ops"),
         ("--mode ops-beir", "sync-ops-indexes", "index_ops"),
         ("sync_cli --mode sources", "sync-sources", "index_product"),
-        ("official-bench-coding-pull-images", "pull-swe-eval-images", "swe_eval_images"),
-        ("coding --phase pull-images", "pull-swe-eval-images", "swe_eval_images"),
-        ("docker pull swebench/sweb.eval", "pull-swe-eval-images", "swe_eval_images"),
-        ("docker pull ", "pull-swe-eval-images", "swe_eval_images"),  # filtered: only sweb.eval
+        ("ops-swe-eval-ready", "ensure-swe-eval-env", "swe_eval_images"),
+        ("up-ops-eval", "ensure-swe-eval-env", "swe_eval_images"),
+        ("official-bench-coding-pull-images", "ensure-swe-eval-env", "swe_eval_images"),
+        ("coding --phase pull-images", "ensure-swe-eval-env", "swe_eval_images"),
+        ("docker pull swebench/sweb.eval", "ensure-swe-eval-env", "swe_eval_images"),
+        ("docker pull ", "ensure-swe-eval-env", "swe_eval_images"),  # filtered: only sweb.eval
         ("start-bench", "start-bench", "ops_bench"),
         ("up-bench", "up-bench", "ops_bench"),
         ("COMPOSE_PROFILES=bench", "up-bench", "ops_bench"),
@@ -1116,9 +1126,16 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
     total = prog.get("images_total")
     done = prog.get("images_done")
     layer_pct = prog.get("layer_pct")
+    phase = str(prog.get("phase") or "")
+    smoke_total = prog.get("smoke_total")
+    smoke_done = prog.get("smoke_done")
     pct: float | None = None
     try:
-        if total is not None and int(total) > 0 and done is not None:
+        if phase == "smoke" and smoke_total is not None and int(smoke_total) > 0:
+            sd = int(smoke_done or 0)
+            # Pull finished → smoke is the second half of board progress.
+            pct = round(50.0 + 50.0 * sd / int(smoke_total), 1)
+        elif total is not None and int(total) > 0 and done is not None:
             base = float(int(done))
             # Blend in-image layer progress so the bar moves during a long pull.
             try:
@@ -1126,9 +1143,11 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
             except (TypeError, ValueError):
                 frac = 0.0
             if int(done) < int(total):
-                pct = round(100.0 * (base + frac) / int(total), 1)
+                # Reserve upper half for smoke when smoke will follow.
+                pull_pct = 100.0 * (base + frac) / int(total)
+                pct = round(pull_pct * 0.5, 1)
             else:
-                pct = 100.0
+                pct = 50.0 if phase in {"smoke", "pull"} else 100.0
     except (TypeError, ValueError):
         pct = None
     status = str(prog.get("status") or "")
@@ -1140,12 +1159,27 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
         short = short[-40:]
     bits: list[str] = []
     if status == "error":
-        bits.append("预拉失败")
+        if phase in {"smoke_error", "smoke"} or last in {"smoke_error"}:
+            bits.append("环境冒烟失败")
+        else:
+            bits.append("预拉失败")
         err = str(prog.get("error") or "").strip()
         if err:
             bits.append(err[:80])
     elif status == "ready" or last == "finished":
-        bits.append("预拉完成")
+        if prog.get("smoke_skipped"):
+            bits.append("预拉完成（跳过冒烟）")
+        else:
+            bits.append("预拉+冒烟完成")
+        if pct is None:
+            pct = 100.0
+    elif phase == "smoke" or last in {"smoking", "smoked"}:
+        bits.append("环境基准冒烟")
+        try:
+            if smoke_total is not None and smoke_done is not None:
+                bits.append(f"{int(smoke_done)}/{int(smoke_total)}")
+        except (TypeError, ValueError):
+            pass
     else:
         bits.append("预拉镜像")
         if last == "pulling":
@@ -1155,7 +1189,7 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
         elif last == "pulled":
             bits.append("已拉取")
     try:
-        if total is not None and done is not None:
+        if phase != "smoke" and total is not None and done is not None:
             bits.append(f"{int(done)}/{int(total)}")
     except (TypeError, ValueError):
         pass
@@ -1171,7 +1205,7 @@ def _swe_eval_images_summary(prog: dict) -> tuple[str, float | None]:
         and speed not in detail
     ):
         bits.append(speed)
-    if detail and status not in {"ready"} and last != "finished":
+    if detail and status not in {"ready"} and last != "finished" and phase != "smoke":
         bits.append(detail)
     elif layer_pct is not None and last == "pulling":
         bits.append(f"本图 {layer_pct}%")
@@ -1227,7 +1261,7 @@ def _collect_live() -> dict[str, dict]:
             prev = out["swe_eval_images"]
             out["swe_eval_images"] = {
                 "item_id": "swe_eval_images",
-                "action": prev.get("action") or "pull-swe-eval-images",
+                "action": prev.get("action") or "ensure-swe-eval-env",
                 "kind": "swe_images",
                 "pid": prev.get("pid"),
                 "summary": summary,
@@ -1239,7 +1273,7 @@ def _collect_live() -> dict[str, dict]:
             if "swe_eval_images" not in out:
                 out["swe_eval_images"] = {
                     "item_id": "swe_eval_images",
-                    "action": "pull-swe-eval-images",
+                    "action": "ensure-swe-eval-env",
                     "kind": "swe_images",
                     "pid": None,
                     "summary": summary,
@@ -1575,7 +1609,8 @@ def _button_for(it: dict) -> dict | None:
         "index_product": ("sync-sources", "同步产品索引"),
         "index_ops": ("sync-ops-indexes", "同步 Ops BEIR"),
         "index_ops_zh": ("ensure-ops-cmteb", "拉取并嵌入中文库"),
-        "swe_eval_images": ("pull-swe-eval-images", "预拉 SWE eval 镜像"),
+        "ops_eval_docker": ("ensure-swe-eval-env", "准备 SWE 评测环境"),  # legacy id alias
+        "swe_eval_images": ("ensure-swe-eval-env", "准备 SWE 评测环境"),
         "ops_bench": ("start-bench", "启动 Ops Bench"),
     }
     if iid not in mapping:

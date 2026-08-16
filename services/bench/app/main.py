@@ -86,7 +86,8 @@ class Job:
     targets: list[str]
     status: str = "queued"
     context_dry: bool = True
-    coding_skip_api: bool = True
+    # skip-api writes empty predictions — smoke only, never an acceptance default.
+    coding_skip_api: bool = False
     coding_tier: str = "n25"
     coding_n_instances: int | None = None
     coding_harness: bool = False
@@ -167,7 +168,7 @@ def _job_from_payload(payload: dict[str, Any]) -> Job | None:
         targets=[target for target in targets if isinstance(target, str)],
         status=str(payload.get("status", "failed")),
         context_dry=bool(payload.get("context_dry", True)),
-        coding_skip_api=bool(payload.get("coding_skip_api", True)),
+        coding_skip_api=bool(payload.get("coding_skip_api", False)),
         coding_tier=str(payload.get("coding_tier", "n25")),
         coding_n_instances=payload.get("coding_n_instances")
         if isinstance(payload.get("coding_n_instances"), int)
@@ -230,7 +231,7 @@ class StartJobBody(BaseModel):
         Literal["pull", "retrieval", "context", "coding_pull", "coding_infer"]
     ] = Field(min_length=1)
     context_dry: bool = True
-    coding_skip_api: bool = True
+    coding_skip_api: bool = False
     coding_tier: str = "n25"
     coding_n_instances: int | None = None
     coding_harness: bool = False

@@ -50,13 +50,22 @@ def _required() -> bool:
     }
 
 
+_SEED_HINT = (
+    "offline seed: populate deploy/ts-grammar-cache/ (compose build context "
+    "ts_grammar_cache) from a networked host — see deploy/ts-grammar-cache/README.md: "
+    "docker cp agent-runtime:/home/app/.cache/tree-sitter-language-pack/. "
+    "deploy/ts-grammar-cache/ — then rebuild (make up-runtime / up-ast-indexer)"
+)
+
+
 def _fail_or_warn(msg: str) -> int:
     """Hard-fail when TS_GRAMMAR_BAKE_REQUIRED; else warn so China builds still ship."""
     if _required():
-        print(f"bake_ts_grammars: ERROR {msg}", file=sys.stderr)
+        print(f"bake_ts_grammars: ERROR {msg}\n  {_SEED_HINT}", file=sys.stderr)
         return 1
     print(
-        f"bake_ts_grammars: WARN {msg} — image will use regex AST fallback until rebuild with network/seed",
+        f"bake_ts_grammars: WARN {msg} — image will use regex AST fallback "
+        f"until rebuild with network/seed\n  {_SEED_HINT}",
         file=sys.stderr,
     )
     return 0

@@ -17,6 +17,7 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 STATUS_FILE = Path(os.environ.get("RELEASE_STATUS_DIR", ROOT / "reports" / "release")) / "status.json"
@@ -384,7 +385,7 @@ def _docker_exec(container: str, *args: str, timeout: float = 8) -> tuple[int, s
 
 
 def _ops_eval_sock_enabled(env_file: dict[str, str]) -> bool:
-    """True when api is intended to drive SWE harness via docker.sock."""
+    """True when sticky ops-eval overlay is intended (api+runtime docker.sock)."""
     auto = ROOT / "deploy" / "ops-eval.auto.env"
     vals: dict[str, str] = {}
     if auto.is_file():
@@ -403,66 +404,139 @@ def _ops_eval_sock_enabled(env_file: dict[str, str]) -> bool:
     return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _swe_eval_images_item(*, env_file: dict[str, str]) -> dict:
-    """Ops readiness: local sweb.eval images for official resolve scoring.
+def _container_mount_dests(name: str, *, running: set[str]) -> list[str]:
+    actual = name if name in running else next(
+        (n for n in running if n.endswith("_" + name)),
+        None,
+    )
+    if not actual:
+        return []
+    code, out, _ = _run(
+        [
+            "docker",
+            "inspect",
+            "-f",
+            "{{range .Mounts}}{{.Destination}}\n{{end}}",
+            actual,
+        ],
+        timeout=4,
+    )
+    if code != 0:
+        return []
+    return [ln.strip() for ln in (out or "").splitlines() if ln.strip()]
 
-    Shown when ops-eval docker.sock is enabled; otherwise skip (product stack
-    does not need these multi-GB images).
+
+def _container_has_docker_sock(name: str, *, running: set[str]) -> bool:
+    return "/var/run/docker.sock" in _container_mount_dests(name, running=running)
+
+
+def _ops_eval_sock_ready(*, env_file: dict[str, str], running: set[str]) -> dict[str, Any]:
+    """Sticky flag + live docker.sock mounts on api / runtime."""
+    sticky = _ops_eval_sock_enabled(env_file)
+    api_sock = _container_has_docker_sock(CONTAINERS["api"], running=running)
+    rt_sock = _container_has_docker_sock(CONTAINERS["runtime"], running=running)
+    missing: list[str] = []
+    if not api_sock:
+        missing.append("api")
+    if not rt_sock:
+        missing.append("runtime")
+    return {
+        "sticky": sticky,
+        "api_sock": api_sock,
+        "runtime_sock": rt_sock,
+        "sock_ready": bool(sticky and api_sock and rt_sock),
+        "missing": missing,
+    }
+
+
+def _swe_eval_env_item(*, env_file: dict[str, str], running: set[str]) -> dict:
+    """Ops necessary step: docker.sock (api+runtime) + local sweb.eval + env smoke.
+
+    One board button runs ``make ops-swe-eval-ready`` (enable sock then pull/smoke).
     """
     item: dict = {
         "id": "swe_eval_images",
         "kind": "ops",
         "lane": "ops",
-        "title": "SWE eval 镜像",
+        "title": "SWE 评测环境",
         "status": "ok",
         "action": None,
         "detail": "",
-        "optional": True,
+        "optional": False,
     }
-    if not _ops_eval_sock_enabled(env_file):
-        item["status"] = "skip"
-        item["detail"] = "可选 · 未启用 ops-eval（make up-ops-eval）；产品栈不需要"
-        return item
+    sock = _ops_eval_sock_ready(env_file=env_file, running=running)
+    item["sticky"] = sock["sticky"]
+    item["api_sock"] = sock["api_sock"]
+    item["runtime_sock"] = sock["runtime_sock"]
+    item["sock_ready"] = sock["sock_ready"]
+
+    ensure_action = "make ops-swe-eval-ready"
 
     # Import lazily — scripts/ is on path via release console / make release-plan.
+    st: dict[str, Any] | None = None
     try:
         sys.path.insert(0, str(ROOT / "scripts"))
         from official_bench.swe_images import harness_cfg, local_image_status  # noqa: WPS433
+
+        h = harness_cfg()
+        st = local_image_status(h["board_tier"])
+        item["tier"] = st["tier"]
+        item["n"] = st["n"]
+        item["present_n"] = len(st["present"])
+        item["missing_n"] = len(st["missing"])
+        item["approx_mib"] = st["approx_mib_total"]
+        item["cache_level"] = st["cache_level"]
+        item["smoke_ready"] = bool(st.get("smoke_ready"))
+        item["images_ready"] = bool(st.get("images_ready"))
     except Exception as exc:  # noqa: BLE001
         item["status"] = "action"
-        item["action"] = "make official-bench-coding-pull-images"
-        item["detail"] = f"无法检查镜像状态：{exc}"
-        return item
-
-    h = harness_cfg()
-    st = local_image_status(h["board_tier"])
-    item["tier"] = st["tier"]
-    item["n"] = st["n"]
-    item["present_n"] = len(st["present"])
-    item["missing_n"] = len(st["missing"])
-    item["approx_mib"] = st["approx_mib_total"]
-    item["cache_level"] = st["cache_level"]
-    gb = round(st["approx_mib_total"] / 1024.0, 1)
-    if st["ready"]:
-        item["status"] = "ok"
+        item["action"] = ensure_action
         item["detail"] = (
-            f"{st['tier']} · {st['n']}/{st['n']} 本地就绪 "
-            f"（约 {gb} GiB 压缩 · cache_level={st['cache_level']}）"
+            f"无法检查 sweb.eval 状态：{exc}。"
+            "一键：挂 api+runtime docker.sock 并预拉/环境冒烟"
         )
         return item
 
-    miss = st["missing"]
-    sample = ", ".join(Path(m).name for m in miss[:2])
-    more = f" 等{len(miss)}个" if len(miss) > 2 else ""
+    assert st is not None
+    gb = round(st["approx_mib_total"] / 1024.0, 1)
+    images_ok = bool(st.get("ready"))
+
+    if sock["sock_ready"] and images_ok:
+        item["status"] = "ok"
+        smoke_bit = ""
+        if st.get("require_smoke"):
+            smoke_bit = f" · 冒烟 {st.get('smoke_ok_n', st['n'])}/{st['n']}"
+        item["detail"] = (
+            f"就绪 · docker.sock(api+runtime) · {st['tier']} "
+            f"{st['n']}/{st['n']}{smoke_bit} "
+            f"（约 {gb} GiB · resolve+解题复现）"
+        )
+        return item
+
     item["status"] = "action"
-    item["action"] = "make official-bench-coding-pull-images"
+    item["action"] = ensure_action
+    parts: list[str] = []
+    if not sock["sock_ready"]:
+        if not sock["sticky"]:
+            parts.append("未挂 docker.sock（api+runtime）")
+        else:
+            miss = ", ".join(sock["missing"]) or "未知"
+            parts.append(f"粘性已开但 sock 未挂齐（缺 {miss}）")
+    if not images_ok:
+        if not st.get("images_ready"):
+            miss_n = len(st.get("missing") or [])
+            parts.append(f"缺 {miss_n}/{st['n']} 张 sweb.eval（约 {gb} GiB）")
+        elif st.get("smoke_failed"):
+            parts.append(f"环境冒烟失败 {len(st['smoke_failed'])} 张")
+        else:
+            parts.append(
+                f"尚未环境冒烟（缺 {len(st.get('smoke_missing') or [])}/{st['n']}）"
+            )
     item["detail"] = (
-        f"{st['tier']} 缺 {len(miss)}/{st['n']} 张 sweb.eval "
-        f"（约 {gb} GiB；例 {sample}{more}）。"
-        "预拉后才有官方 resolve_rate；勿塞进 git"
+        "；".join(parts)
+        + "。一键完成：启用 Ops Docker + 预拉镜像 + python/pytest/testbed 冒烟"
     )
     return item
-
 
 def _embedding_item(
     want_model: str, want_dims: int, want_ver: int, *, running: set[str]
@@ -902,7 +976,9 @@ def build_plan(mode: str | None = None) -> dict:
             auto=auto,
             running=running,
         )
-        fut_swe = pool.submit(_swe_eval_images_item, env_file=env_file)
+        fut_swe = pool.submit(
+            _swe_eval_env_item, env_file=env_file, running=running
+        )
         fut_bench = pool.submit(_ops_bench_item, running=running)
         emb = fut_emb.result()
         idx_prod = fut_prod.result()
@@ -967,7 +1043,7 @@ def build_plan(mode: str | None = None) -> dict:
         if ops_bench.get("status") == "action":
             bits.append("Ops Bench worker")
         if swe_imgs.get("status") == "action":
-            bits.append("SWE eval 镜像")
+            bits.append("SWE 评测环境")
         headline = "存在变动：" + "；".join(bits)
 
     if mode == "local":

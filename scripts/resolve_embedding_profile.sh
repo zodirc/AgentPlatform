@@ -162,6 +162,56 @@ else
   BATCH_DEFAULT=64
 fi
 
+# Offline alignment: a cold (post-prune) build downloads the picked model unless
+# deploy/model-bake-cache has it. Auto-realign to a cached known model when the
+# pick is missing (FORCE_MODEL still wins). Set EMBEDDING_OFFLINE_PREFER_CACHED=0
+# to keep the original pick and only warn.
+BAKE_DIR="$ROOT/deploy/model-bake-cache"
+bake_cache_has() { [[ -d "$BAKE_DIR/models--$(echo "$1" | sed 's|/|--|g')" ]]; }
+if ! bake_cache_has "$MODEL"; then
+  prefer_cached="${EMBEDDING_OFFLINE_PREFER_CACHED:-1}"
+  if [[ "$prefer_cached" != "0" && -z "$FORCE_MODEL" ]]; then
+    for cand in "BAAI/bge-m3:1024:13" "thenlper/gte-large:1024:10" "thenlper/gte-small:384:9"; do
+      cand_model="${cand%%:*}"; rest="${cand#*:}"
+      cand_dims="${rest%%:*}"; cand_ver="${rest##*:}"
+      # bge-m3 stays GPU-only (CPU latency policy).
+      if [[ "$cand_model" == "BAAI/bge-m3" ]] && (( ! use_cuda )); then continue; fi
+      if bake_cache_has "$cand_model"; then
+        echo "==> offline realign: ${MODEL} not in model-bake-cache → cached ${cand_model}"
+        MODEL="$cand_model"; DIMS="$cand_dims"; INDEX_VER="$cand_ver"
+        reason="offline_prefer_cached: $cand_model ($reason)"
+        if echo "$MODEL" | grep -qi 'bge-m3\|gte-large'; then
+          pick_gpu_m3=1
+        else
+          pick_gpu_m3=0
+        fi
+        break
+      fi
+    done
+  fi
+  if ! bake_cache_has "$MODEL"; then
+    echo "WARN resolve_embedding_profile: ${MODEL} not in deploy/model-bake-cache/ —" >&2
+    echo "     a cold rebuild will download it via HF_ENDPOINT (breaks fully-offline builds)." >&2
+    echo "     Seed once with network: docker cp agent-runtime:/app/models-baked/. deploy/model-bake-cache/" >&2
+    echo "     or leave EMBEDDING_OFFLINE_PREFER_CACHED=1 (default) to realign to a cached model." >&2
+  fi
+fi
+
+# Recompute profile knobs after a possible bake-cache realign.
+if echo "$MODEL" | grep -qi 'bge-m3'; then
+  RESOLVED=m3
+  MAX_SEQ="${EMBEDDING_MAX_SEQ_LENGTH:-512}"
+  BATCH_DEFAULT=128
+elif echo "$MODEL" | grep -qi 'gte-large'; then
+  RESOLVED=large
+  MAX_SEQ="${EMBEDDING_MAX_SEQ_LENGTH:-512}"
+  BATCH_DEFAULT=64
+else
+  RESOLVED=small
+  MAX_SEQ="${EMBEDDING_MAX_SEQ_LENGTH:-0}"
+  BATCH_DEFAULT=64
+fi
+
 TORCH_INDEX_URL_VAL=""
 EMBEDDING_DEVICE_VAL="${EMBEDDING_DEVICE:-auto}"
 if (( use_cuda )); then

@@ -49,7 +49,10 @@ LEAK_RE = re.compile(
 
 
 def _rel(path: Path) -> str:
-    return path.relative_to(ROOT).as_posix()
+    try:
+        return path.relative_to(ROOT).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def load_allowlist(path: Path) -> set[str]:
@@ -71,9 +74,9 @@ def load_allowlist(path: Path) -> set[str]:
     return out
 
 
-def iter_py_files() -> list[Path]:
+def iter_py_files(scan_roots: tuple[Path, ...] | None = None) -> list[Path]:
     files: list[Path] = []
-    for base in SCAN_ROOTS:
+    for base in scan_roots or SCAN_ROOTS:
         if not base.is_dir():
             continue
         for path in base.rglob("*.py"):
@@ -85,9 +88,11 @@ def iter_py_files() -> list[Path]:
     return sorted(files)
 
 
-def find_leaks() -> list[tuple[str, int, str]]:
+def find_leaks(
+    scan_roots: tuple[Path, ...] | None = None,
+) -> list[tuple[str, int, str]]:
     hits: list[tuple[str, int, str]] = []
-    for path in iter_py_files():
+    for path in iter_py_files(scan_roots):
         text = path.read_text(encoding="utf-8", errors="ignore")
         rel = _rel(path)
         for i, line in enumerate(text.splitlines(), 1):
@@ -99,10 +104,14 @@ def find_leaks() -> list[tuple[str, int, str]]:
     return hits
 
 
-def check(*, allowlist: set[str]) -> list[str]:
+def check(
+    *,
+    allowlist: set[str],
+    scan_roots: tuple[Path, ...] | None = None,
+) -> list[str]:
     errors: list[str] = []
     found_keys: set[str] = set()
-    for rel, lineno, snippet in find_leaks():
+    for rel, lineno, snippet in find_leaks(scan_roots):
         key = f"{rel}:{lineno}"
         found_keys.add(key)
         if key not in allowlist:
@@ -131,15 +140,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="print all hits and exit 0 (no allowlist gate)",
     )
+    parser.add_argument(
+        "--scan-root",
+        action="append",
+        type=Path,
+        default=None,
+        help="override scan roots (repeatable; tests inject a synthetic leak tree)",
+    )
     args = parser.parse_args(argv)
+    scan_roots = tuple(args.scan_root) if args.scan_root else None
 
     if args.print_hits:
-        for rel, lineno, snippet in find_leaks():
+        for rel, lineno, snippet in find_leaks(scan_roots):
             print(f"{rel}:{lineno}:{snippet}")
         return 0
 
     allowlist = load_allowlist(args.allowlist)
-    errors = check(allowlist=allowlist)
+    errors = check(allowlist=allowlist, scan_roots=scan_roots)
     if errors:
         print("Scenario leak gate FAILED:", file=sys.stderr)
         for e in errors:
