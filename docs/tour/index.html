@@ -1,0 +1,1271 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AgentPlatform · 控制流导览</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #eef1f4;
+      --paper: #ffffff;
+      --ink: #14181f;
+      --muted: #5a6573;
+      --line: #d5dbe3;
+      --accent: #0f766e;
+      --accent-soft: #ccfbf1;
+      --warn: #b45309;
+      --warn-soft: #ffedd5;
+      --code-bg: #f1f5f9;
+      --sidebar: #0f172a;
+      --sidebar-text: #cbd5e1;
+      --sidebar-active: #f8fafc;
+      --radius: 10px;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.06);
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: "DM Sans", sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    a:hover { color: #0d9488; }
+    .sidebar {
+      background: var(--sidebar);
+      color: var(--sidebar-text);
+      padding: 1.25rem 0.85rem 2rem;
+      overflow-y: auto;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      border-right: 1px solid #1e293b;
+    }
+    .brand {
+      padding: 0.35rem 0.65rem 1rem;
+      border-bottom: 1px solid #1e293b;
+      margin-bottom: 0.85rem;
+    }
+    .brand h1 {
+      margin: 0;
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #f8fafc;
+      letter-spacing: -0.02em;
+    }
+    .brand p {
+      margin: 0.35rem 0 0;
+      font-size: 0.75rem;
+      line-height: 1.4;
+      color: #94a3b8;
+    }
+    .nav-group { margin-bottom: 0.85rem; }
+    .nav-group-title {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #64748b;
+      padding: 0.4rem 0.65rem;
+      font-weight: 600;
+    }
+    .nav button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 0.82rem;
+      padding: 0.42rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      line-height: 1.35;
+    }
+    .nav button:hover { background: rgba(148, 163, 184, 0.12); color: #f1f5f9; }
+    .nav button.active {
+      background: rgba(15, 118, 110, 0.35);
+      color: var(--sidebar-active);
+      font-weight: 600;
+    }
+    .nav button .num {
+      display: inline-block;
+      width: 1.5rem;
+      color: #64748b;
+      font-variant-numeric: tabular-nums;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+    }
+    .nav button.active .num { color: #5eead4; }
+    .main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      min-height: 100vh;
+    }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0.85rem 1.5rem;
+      background: rgba(255,255,255,0.86);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 5;
+    }
+    .topbar .meta { font-size: 0.8rem; color: var(--muted); }
+    .pager { display: flex; gap: 0.5rem; }
+    .pager button {
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+      padding: 0.45rem 0.85rem;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .pager button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .content {
+      flex: 1;
+      padding: 1.25rem 1.5rem 3rem;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .page { display: none; animation: fade 0.18s ease; }
+    .page.active { display: block; }
+    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    .hero {
+      background: linear-gradient(145deg, #0f172a 0%, #134e4a 55%, #0f766e 100%);
+      color: #f8fafc;
+      border-radius: 16px;
+      padding: 2rem 1.75rem;
+      box-shadow: var(--shadow);
+      margin-bottom: 1.25rem;
+    }
+    .hero h2 { margin: 0 0 0.6rem; font-size: 1.85rem; letter-spacing: -0.03em; }
+    .hero p { margin: 0; max-width: 42rem; color: #d1fae5; line-height: 1.55; }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 1rem; }
+    .badge {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.25rem 0.55rem;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      border: 1px solid rgba(255,255,255,0.18);
+      color: #ecfdf5;
+    }
+    .card {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 1.15rem 1.25rem;
+      box-shadow: var(--shadow);
+      margin-bottom: 1rem;
+    }
+    .card h2, .card h3 { margin-top: 0; letter-spacing: -0.02em; }
+    .card h2 { font-size: 1.35rem; margin-bottom: 0.35rem; }
+    .card h3 { font-size: 1.05rem; margin: 1.1rem 0 0.45rem; }
+    .lede { color: var(--muted); margin: 0 0 0.9rem; line-height: 1.5; }
+    .callout {
+      border-left: 3px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 0.75rem 0.9rem;
+      border-radius: 0 8px 8px 0;
+      margin: 0.85rem 0;
+      font-size: 0.92rem;
+      line-height: 1.5;
+    }
+    .callout.warn {
+      border-left-color: var(--warn);
+      background: var(--warn-soft);
+    }
+    .callout strong { color: inherit; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      margin: 0.6rem 0 0.2rem;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 0.45rem 0.55rem;
+      text-align: left;
+      vertical-align: top;
+      line-height: 1.4;
+    }
+    th { background: #f8fafc; font-weight: 600; }
+    code, .mono {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.84em;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      overflow-x: auto;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.78rem;
+      line-height: 1.45;
+      margin: 0.6rem 0;
+    }
+    ul, ol { margin: 0.4rem 0 0.2rem; padding-left: 1.2rem; }
+    li { margin: 0.25rem 0; line-height: 1.45; }
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.85rem;
+    }
+    @media (max-width: 960px) {
+      body { grid-template-columns: 1fr; }
+      .sidebar { position: relative; height: auto; max-height: 40vh; }
+      .grid-2 { grid-template-columns: 1fr; }
+    }
+    .figure {
+      margin: 0.85rem 0 0.2rem;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+    .figure .diagram-body {
+      padding: 0.85rem 0.9rem 0.55rem;
+      background:
+        radial-gradient(ellipse at top left, rgba(15, 118, 110, 0.05), transparent 48%),
+        #f4f7f5;
+    }
+    .figure .diagram-body.diagram-svg {
+      padding: 0.65rem;
+      background: #eef2f0;
+    }
+    .figure .diagram-body.diagram-svg img {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: none;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #f4f6f4;
+    }
+    .figure .diagram-title {
+      margin: 0 0 0.75rem;
+      font-size: 0.95rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .figure figcaption {
+      padding: 0.55rem 0.75rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      border-top: 1px solid var(--line);
+      background: #fff;
+    }
+    .figure.zoomed {
+      position: fixed;
+      inset: 0.75rem;
+      z-index: 50;
+      margin: 0;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
+      background: #0f172a;
+    }
+    .figure.zoomed .diagram-body {
+      flex: 1;
+      overflow: auto;
+      cursor: zoom-out;
+      background: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .figure.zoomed .diagram-body.diagram-svg img {
+      width: min(96vw, 1400px);
+      border: 0;
+      box-shadow: none;
+    }
+    .figure:not(.zoomed) .diagram-body { cursor: zoom-in; }
+    .figure.zoomed figcaption { color: #cbd5e1; background: #0f172a; border-color: #1e293b; }
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: stretch;
+      gap: 0.4rem;
+    }
+    .flow-col {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      flex: 1 1 150px;
+      min-width: 140px;
+    }
+    .flow-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .fn {
+      border: 1.5px solid #94a3b8;
+      border-radius: 8px;
+      padding: 0.5rem 0.6rem;
+      background: #fff;
+      font-size: 0.78rem;
+      line-height: 1.35;
+    }
+    .fn .n {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 1.15rem;
+      height: 1.15rem;
+      margin-right: 0.3rem;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #ecfdf5;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .fn small {
+      display: block;
+      margin-top: 0.2rem;
+      color: var(--muted);
+      font-size: 0.72rem;
+    }
+    .fn.accent { border-color: var(--accent); background: var(--accent-soft); }
+    .fn.decision {
+      border-color: var(--warn);
+      background: var(--warn-soft);
+      border-radius: 4px;
+      transform: none;
+      box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.15);
+    }
+    .fn.lane {
+      border-style: dashed;
+      background: #f1f5f9;
+    }
+    .fn.sink { border-color: #64748b; background: #e2e8f0; font-weight: 600; }
+    .arr {
+      color: #64748b;
+      font-size: 0.95rem;
+      font-weight: 700;
+      padding: 0 0.15rem;
+      user-select: none;
+    }
+    .arr-v {
+      text-align: center;
+      color: #64748b;
+      font-size: 0.75rem;
+      line-height: 1;
+      padding: 0.1rem 0;
+    }
+    .diagram-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.55rem;
+      margin-top: 0.75rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
+    .diagram-legend span::before {
+      content: "";
+      display: inline-block;
+      width: 0.65rem;
+      height: 0.65rem;
+      margin-right: 0.3rem;
+      border-radius: 2px;
+      vertical-align: -1px;
+      border: 1px solid #94a3b8;
+      background: #fff;
+    }
+    .diagram-legend .l-accent::before { background: var(--accent-soft); border-color: var(--accent); }
+    .diagram-legend .l-decision::before { background: var(--warn-soft); border-color: var(--warn); }
+    .diagram-legend .l-lane::before { background: #f1f5f9; border-style: dashed; }
+    .diagram-note {
+      margin-top: 0.55rem;
+      font-size: 0.74rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .src {
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px dashed var(--line);
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .src code { font-size: 0.76rem; }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>AgentPlatform</h1>
+      <p>控制流导览 · 代码优先于文档<br />快照日期 2026-08-17</p>
+    </div>
+    <nav class="nav" id="nav"></nav>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="meta" id="pageMeta">—</div>
+      <div class="pager">
+        <button type="button" id="prevBtn">← 上一页</button>
+        <button type="button" id="nextBtn">下一页 →</button>
+      </div>
+    </header>
+    <main class="content" id="content">
+
+      <!-- 0 -->
+      <section class="page" data-id="cover" data-group="总览" data-title="封面">
+        <div class="hero">
+          <h2>一个内核，多个场景</h2>
+          <p>自托管 Agent Runtime：同一 <code style="color:#a7f3d0">AgentEngine</code>；差异只经 Profile。近两日主战场是<strong>三线质量提升</strong>（Coding 验证回灌 · Retrieval INDEX13 切块对齐 · Context 长文 outline/证据保留）+ 结构智能 Wave3–4 / issue_repro / sweb 解题改道——本导览按现行代码与第 4/5 轮冒烟改写，不是六篇旧摘要。</p>
+          <div class="badge-row">
+            <span class="badge">quality-uplift 批1–3 已落</span>
+            <span class="badge">INDEX 13</span>
+            <span class="badge">coding smoke 0.8 @ n5</span>
+            <span class="badge">锚点 SCORECARD 仍空</span>
+          </div>
+        </div>
+        <div class="card">
+          <h3>怎么读</h3>
+          <ul>
+            <li>左侧目录 / 顶栏翻页；主图为 <code>docs/assets/**/*-zh.png</code> 中文详图海报（点击放大）。条文以<strong>本仓库代码与契约</strong>为准；图须保持原海报风格，只增补/校正细节。 <code>make docs-tour</code></li>
+            <li><strong>权威</strong>：代码 + contracts → 本页 → docs/core → docs/plan</li>
+            <li>近两日细节集中在：工具面 / 组窗 / Coding 四页 / RAG·索引 / 分数快照</li>
+          </ul>
+          <div class="callout">
+            条文按代码维护。流程图：保持 <code>docs/assets/**/*-zh.png</code> 原海报风格，只增补/校正现行细节。
+          </div>
+        </div>
+      </section>
+
+      <!-- 1 -->
+      <section class="page" data-id="principles" data-group="总览" data-title="原则与红线">
+        <div class="card">
+          <h2>原则与速率红线</h2>
+          <p class="lede">扩能力 = 焊进工具结果或旁路索引；<strong>不改 while、不新增模型必须学会的工具名</strong>。三线 uplift 全部落在索引期 / 组装期 / 结果契约。</p>
+          <table>
+            <thead><tr><th>#</th><th>原则</th><th>验收含义</th></tr></thead>
+            <tbody>
+              <tr><td>R1</td><td>不挡受理</td><td><code>turn.accepted</code> / TTFB 不因新逻辑同步恶化</td></tr>
+              <tr><td>R2</td><td>首 token 前不加同步模型</td><td>禁止热路径同步摘要 / 裁判 / 改写</td></tr>
+              <tr><td>R3</td><td>热路径 CPU 毫秒级</td><td>整库 embed、大扫描不上主链</td></tr>
+              <tr><td>R4</td><td>重活异步</td><td>索引、审计、软预压缩走旁路</td></tr>
+              <tr><td>R5</td><td>可测才合并</td><td><code>make gate</code> / Ops suite 证明</td></tr>
+            </tbody>
+          </table>
+          <h3>硬约束 + 明确不做（近两日钉死）</h3>
+          <ul>
+            <li>服务间无 Python 互 import；事实桥 = Postgres LISTEN/NOTIFY。</li>
+            <li>Engine 禁止 <code>if scenario ==</code>（<code>constitution-check</code>）。</li>
+            <li>Cancel ≠ failed；审批恢复同 <code>run_id</code>；审批门 ⊥ 沙箱门。</li>
+            <li><strong>不做</strong> CST / call-graph / 全仓 LSP indexing；不做给 agent 挂 <code>search_sources</code>（场景隔离）。</li>
+            <li><strong>不做</strong> smoke 升 SCORECARD；harness 无 resolve → suite failed（不得粉饰 completed）。</li>
+            <li>结构车道结论：<code>file_hit≈1</code>、Locate 调用占比极低 → <strong>resolve 瓶颈不在 AST/LSP</strong>，而在验证信号与修复正确性。</li>
+          </ul>
+          <div class="src"><code>architecture.md</code> · <code>quality-uplift-2026-08.md</code> · <code>coding-structural-intelligence.md</code></div>
+        </div>
+      </section>
+
+      <!-- 2 -->
+      <section class="page" data-id="topology" data-group="总览" data-title="部署拓扑">
+        <div class="card">
+          <h2>部署拓扑</h2>
+          <p class="lede">产品面始终 <code>http://localhost/</code>（Caddy）。发布台 <code>:9090</code> 是同仓旁路，不另起业务栈。</p>
+<pre>Client
+  → Caddy :80/:443
+       ├─ /          → web（工作台；SSE + GET /view）
+       └─ /api/*     → api :8000
+              │
+              ├─ 默认 TURN_DISPATCH=pull
+              │    INSERT turns/runs → 准入 → pg_notify
+              │    → runtime LISTEN / claim + lease → TurnController
+              │
+              └─ 回退 push：HTTP /internal/commands/start-turn → runtime :8001
+
+Postgres 16 + pgvector
+  · 领域表 · turn_events · 产品向量 · run_commands / runners 租约
+
+旁路（不挡受理）
+  · ast-indexer：工作区 AST 冷启/增量
+  · bench + bench-postgres：Ops L1（make up 默认起）</pre>
+          <table>
+            <thead><tr><th>组件</th><th>职责</th><th>明确不做</th></tr></thead>
+            <tbody>
+              <tr><td>web</td><td>场景工作台</td><td>推断 Turn 阶段；直连 runtime</td></tr>
+              <tr><td>api</td><td>鉴权、准入、落库、SSE、投影、Ops</td><td>跑 Agent loop</td></tr>
+              <tr><td>runtime</td><td>claim、Intake、Engine、工具、RAG、checkpoint</td><td>对浏览器开 SSE</td></tr>
+              <tr><td>ast-indexer</td><td>工作区符号旁路索引</td><td>进 StartTurn 热路径；替代 LSP</td></tr>
+              <tr><td>bench</td><td>官方评测 worker</td><td>默认产品 Turn 路径</td></tr>
+            </tbody>
+          </table>
+          <div class="grid-2" style="margin-top:0.85rem">
+            <div>
+              <h3>资源量级（make up）</h3>
+              <ul>
+                <li>cgroup 合计约 14g（建议宿主 ≥16 GiB）</li>
+                <li>磁盘建议空闲 ≥40 GiB</li>
+                <li>无 GPU → gte-small@384；VRAM≥8GiB → bge-m3@1024</li>
+              </ul>
+            </div>
+            <div>
+              <h3>常用命令</h3>
+              <ul>
+                <li><code>make up</code> / <code>make up-all</code></li>
+                <li><code>make smoke</code> / <code>make gate</code></li>
+                <li>发布台脏模块重建 <code>:9090</code></li>
+              </ul>
+            </div>
+          </div>
+          <div class="src">来源：根 <code>README.md</code> · <code>deploy/docker-compose.yml</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/release-modular-deploy-zh.png" alt="分模块发布台详流" />
+          </div>
+          <figcaption>分模块发布台详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 3 -->
+      <section class="page" data-id="domain" data-group="领域" data-title="对象与状态机">
+        <div class="card">
+          <h2>领域对象与 Turn 状态机</h2>
+<pre>Principal → Work（work_id, work_root）
+              └── Session*（transcript / 策略 / compact 摘要）
+                    └── Turn（一次用户闭环）
+                          ↔ Run 1:1（checkpoint · cancel · lease）
+                               └── Step*（仅事件粒度）</pre>
+          <table>
+            <thead><tr><th>对象</th><th>含义</th><th>关键约束</th></tr></thead>
+            <tbody>
+              <tr><td>Work</td><td>稿件与资料世界根</td><td>不随 Session compact 拆散</td></tr>
+              <tr><td>Session</td><td>连续性容器</td><td>换 Session 不换默认 Work</td></tr>
+              <tr><td>Turn</td><td>受理到终态</td><td>恰好一个 Run</td></tr>
+              <tr><td>Run</td><td>agentic loop 实例</td><td>审批挂起仍同 run_id</td></tr>
+            </tbody>
+          </table>
+<pre>pending → running ⇄ waiting_approval
+               ↓
+        completed | failed | cancelled</pre>
+          <ul>
+            <li><code>failed(start_timeout)</code>：无人领取超时</li>
+            <li><code>failed(runner_lost)</code>：租约丢失无法安全续跑</li>
+            <li>取消后继续聊 = 同 Session <strong>新 Turn</strong></li>
+          </ul>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/architecture/turn-lifecycle-zh.png" alt="Turn 生命周期" />
+          </div>
+          <figcaption>Turn 生命周期 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 4 -->
+      <section class="page" data-id="request-path" data-group="领域" data-title="请求主路径">
+        <div class="card">
+          <h2>请求主路径（端到端）</h2>
+          <ol>
+            <li>Web POST 会话 turn → api 鉴权 / 准入</li>
+            <li>同一事务 INSERT <code>turns</code> + <code>runs</code>；pull 可领则 NOTIFY</li>
+            <li>客户端先得 <strong>202</strong>；业务首事件 <code>turn.accepted</code> 在 runtime claim 后发出</li>
+            <li>runtime：lease 心跳 → Profile → ToolScope → Intake → Engine</li>
+            <li>关键节点 append-only <code>turn_events</code> → pg_notify</li>
+            <li>api LISTEN → SSE 回放 + UPSERT <code>turn_views</code></li>
+            <li>Web 只消费事件流与投影；不推断阶段</li>
+          </ol>
+          <div class="callout">
+            <strong>易混点：</strong>api「尽快」只做落库 + 分发；TTFB 看 <code>turn.accepted</code> 经 SSE 到达时刻。
+          </div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/architecture/request-path-zh.png" alt="请求主路径详流" />
+          </div>
+          <figcaption>请求主路径详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 5 -->
+      <section class="page" data-id="start-turn" data-group="领域" data-title="StartTurn 命令链">
+        <div class="card">
+          <h2>StartTurn / 控制命令</h2>
+          <table>
+            <thead><tr><th>模式</th><th>行为</th></tr></thead>
+            <tbody>
+              <tr><td>pull（默认）</td><td>NOTIFY → runtime claim；超时 start_timeout；租约丢 runner_lost</td></tr>
+              <tr><td>push（回退）</td><td>api HTTP 内部 start-turn；传输失败 → 客户端 502</td></tr>
+            </tbody>
+          </table>
+          <h3>同族控制命令</h3>
+          <p>取消 / 审批 / patch 等默认经 <code>run_commands</code> + NOTIFY，由持有 lease 的 runtime 副本消费（HTTP 内部命令可作兼容回退）。</p>
+          <h3>Ops 无人值守</h3>
+          <p><code>ops_eval=true</code>：StartTurn 即置 <code>writes_preapproved</code>/<code>exec_preapproved</code>，写盘/exec 门控自动批准（官方 L1 agent-path）。字段随 checkpoint 存活。</p>
+          <h3>旁路预热</h3>
+          <p>Profile <code>structural_prewarm</code> 且 settings 开启时，StartTurn 上 <code>asyncio.create_task</code> 预热 AST，不 await——不挡 <code>turn.accepted</code> / TTFB（<code>turn_controller.py</code>）。</p>
+          <div class="src">代码：<code>services/api/app/routers/</code> · <code>services/runtime/app/controller/turn_dispatch.py</code> · <code>turn_controller.py</code></div>
+        </div>
+                <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/events/start-turn-command-zh.png" alt="StartTurn 命令链" />
+          </div>
+          <figcaption>StartTurn 命令链 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 6 -->
+      <section class="page" data-id="runtime-layers" data-group="Runtime" data-title="Controller 与 Engine">
+        <div class="card">
+          <h2>两层结构</h2>
+<pre>TurnController（不进 while）
+  · pull claim 或 push start-turn
+  · runner lease 心跳；丢失可回收
+  · ScenarioRegistry.get → Profile → ToolScope
+  · Intake：InputCompiler（slash、@path、附件）
+  · shouldQuery：纯本地命令可零模型结束
+  · 发 turn.accepted → Engine；收尾写终态
+
+AgentEngine while step_count &lt; max_steps:
+  1. ContextEngine.assemble（卫生 + 80/90/95）
+  2. ModelGateway.stream（可 abort；网关 Cancel ~50ms；工具流内 ~250ms）
+  3. 解析 text · thinking · tool_use
+  4. 有 tool → 审批？→ 执行 → tool_result
+     · note_tool_result_for_verify；SWE+ops_eval 可改道 sweb
+     · checkpoint → continue
+  5. 无 tool → 若应注入 verify_receipt：
+     · append user_message(receipt) + tool.completed(verify_receipt=true)
+     · continue（再进一轮，非合成 tool_result）
+     · 否则 final 退出
+  6. 每步 finally：checkpoint</pre>
+          <ul>
+            <li>Controller 管 Turn 前后；Engine 管推理循环，不感知 scenario 名字。</li>
+            <li>Guard（取消 / 分层超时 / Stall Watchdog）旁挂全程，不是 while 新节点。</li>
+            <li><code>agent</code> Profile <code>max_steps: 150</code>；<code>writing</code> 为 40。</li>
+          </ul>
+          <div class="src">代码：<code>turn_controller.py</code> · <code>agent_engine.py</code> · <code>engine/state.py</code></div>
+        </div>
+      </section>
+
+      <!-- 7 -->
+      <section class="page" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
+        <div class="card">
+          <h2>AgentEngine 单循环（权威图）</h2>
+          <p class="lede">加能力 = 工具或焊点；不改 while。模型网关：仅在未吐 token 前重试；首字节快超时 + step/model/tool 分层超时。</p>
+          <h3>Intake（确定性，非意图分类）</h3>
+<pre>用户输入 → InputCompiler → shouldQuery
+  ├─ 否：本地响应（/help、部分 /compact）+ completed
+  └─ 是：进 Engine；首轮由模型决定直答或 tool_use</pre>
+          <p><code>scenario_id</code> 由 API/会话指定，不由 LLM 猜测。</p>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/harness/agent-engine-loop-zh.png" alt="AgentEngine 单循环详流" />
+          </div>
+          <figcaption>AgentEngine 单循环详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 8 -->
+      <section class="page" data-id="approval" data-group="Runtime" data-title="审批 · 取消 · 恢复">
+        <div class="card">
+          <h2>审批 · 取消 · 恢复</h2>
+          <ol>
+            <li>需审 → <code>approval.requested</code> → <code>waiting_approval</code>，同 <code>run_id</code> checkpoint（含 <code>verify_*</code> / <code>issue_repro_*</code>）</li>
+            <li>Approve → 同 <code>run_id</code> 续跑；Deny → 拒绝 <code>tool_result</code>（含原因）</li>
+            <li><code>ops_eval=true</code>（L1）：StartTurn 即置 <code>writes_preapproved</code>/<code>exec_preapproved</code>，门控工具自动过审；字段随 checkpoint 恢复</li>
+            <li><strong>写盘粘性</strong>：人工批准一次写类工具后 <code>writes_preapproved</code>，同类写免再审</li>
+            <li><strong>Shell 粘性</strong>：人工批准一次 <code>run_command</code> 后 <code>exec_preapproved</code>，后续 <code>run_command</code> 免审（≠「Shell 永远逐步审」）</li>
+            <li>Plan <code>phase=executing</code>：清单内写盘可按计划免审；普通 <code>update_plan</code> 进度 ≠ 已批准开工</li>
+            <li>审批门 ⊥ 沙箱门；SWE+<code>ops_eval</code> 下 <code>run_command</code>/<code>run_tests</code> 可改道 <code>sweb.eval</code>（剥管道、拒 pip、容器复用）</li>
+          </ol>
+          <table>
+            <thead><tr><th>取消</th><th>含义</th></tr></thead>
+            <tbody>
+              <tr><td>软 <code>cancel_requested</code></td><td>协作式停下</td></tr>
+              <tr><td>硬 <code>cancel_force</code></td><td>可杀流 / 子进程</td></tr>
+            </tbody>
+          </table>
+          <div class="callout">终态 <code>cancelled</code>（≠ failed）；继续对话 = 新 Turn。Cancel 须打断 backoff 与 provider HTTP 流（网关流 ~50ms；工具输出流内检查 ~250ms）。</div>
+          <div class="src"><code>engine/state.py</code> · <code>controller/checkpoint_store.py</code> · approval / cancel 路径</div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/harness/approval-cancel-resume-flow-zh.png" alt="审批·取消·恢复详流" />
+          </div>
+          <figcaption>审批·取消·恢复详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 9 -->
+      <section class="page" data-id="turn-state" data-group="Runtime" data-title="TurnState 现行字段">
+        <div class="card">
+          <h2>TurnState（含 Wave 4）</h2>
+          <p class="lede">执行态 dataclass；经 checkpoint 序列化，审批中断后必须能恢复 verify / issue_repro 追踪器。</p>
+          <div class="grid-2">
+            <div>
+              <h3>核心</h3>
+              <ul>
+                <li>ids · messages · step_count / max_steps · usage</li>
+                <li>cancelled / cancel_force · termination_reason</li>
+                <li>plan_hint · plan_phase · model_mode · ops_eval</li>
+                <li>volatile_context（不焊进 system）</li>
+                <li>writes_preapproved · exec_preapproved</li>
+                <li>read_registry · evicted_paths / evicted_reread_used</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Verify / issue_repro</h3>
+              <ul>
+                <li>verify_pending · verify_receipt_sent</li>
+                <li>code_edits_since_verify · related_tests_union</li>
+                <li>last_repro_command · last_test_first_failure</li>
+                <li>issue_repro_*（loaded / commands / markers / assets / signals）</li>
+                <li>need_roundtrip · need_casefold · armed / satisfied</li>
+                <li>issue_repro_receipt_sent · edits_since</li>
+              </ul>
+            </div>
+          </div>
+          <div class="src">权威：<code>services/runtime/app/engine/state.py</code></div>
+        </div>
+      </section>
+
+      <!-- 10 -->
+      <section class="page" data-id="scenarios" data-group="场景与工具" data-title="场景 Profile">
+        <div class="card">
+          <h2>ScenarioProfile</h2>
+          <table>
+            <thead><tr><th>scenario</th><th>定位</th><th>要点（yaml）</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><code>writing</code></td>
+                <td>默认写作</td>
+                <td>RAG <code>search_sources</code>；draft/outline/patch；排除 <code>seed/intel</code>；max_steps 40；hooks: writing_cards / focus / continuity</td>
+              </tr>
+              <tr>
+                <td><code>agent</code></td>
+                <td>编码全工具</td>
+                <td>LSP/AST 工具；run_command/run_tests；<strong>无</strong> search_sources；max_steps 150；structural_prewarm；run_tests 免审</td>
+              </tr>
+              <tr>
+                <td><code>intel</code></td>
+                <td>情报资料</td>
+                <td>闭环方案见 plan，未全落地</td>
+              </tr>
+              <tr>
+                <td><code>collab</code></td>
+                <td>多 agent</td>
+                <td>偏薄 / 目标态；volatile_composer 等 hook</td>
+              </tr>
+            </tbody>
+          </table>
+          <h3>扩展点（只能走这些）</h3>
+          <ul>
+            <li>声明式：tool_names · approval_overrides · retrieval · generation · patch_auto_apply · structural_prewarm · plan_suggest · post_turn_jobs …</li>
+            <li>Hook 槽：system_prompt_composer · volatile_composer · step_checkpoint · post_turn · compact_bookmark（未知名启动 fail-fast）</li>
+          </ul>
+          <div class="src"><code>scenarios/profiles/*.yaml</code> · <code>scenarios/registry.py</code> · <code>scenarios/hooks.py</code></div>
+        </div>
+      </section>
+
+      <!-- 11 -->
+      <section class="page" data-id="tools" data-group="场景与工具" data-title="工具面">
+        <div class="card">
+          <h2>能力即工具（含 uplift 硬改道）</h2>
+          <p class="lede">RAG 禁止每轮预注入向量包；多 agent 只经 <code>delegate</code>。近两日把高频坏习惯<strong>焊进 handler</strong>，不靠 prompt 劝说。</p>
+          <h3>agent / writing 白名单（节选）</h3>
+          <p class="mono" style="font-size:0.8rem;line-height:1.6">agent: read_file · grep · edit_file · search_codebase · goto_definition · find_references · run_command · run_tests · read_lints · update_plan · …<br/>writing: propose_patch · draft_section · search_sources · …（无 LSP 结构工具）</p>
+          <h3>现行硬改道（代码已落）</h3>
+          <table>
+            <thead><tr><th>项</th><th>行为</th><th>锚点</th></tr></thead>
+            <tbody>
+              <tr><td>C-2 pager</td><td>纯 <code>cat/head/tail/sed -n/nl</code>（单文件、无管道）→ 内部 <code>read_file</code>，<code>redirected_from=run_command</code></td><td><code>pager_redirect.py</code></td></tr>
+              <tr><td>sweb 测改道</td><td>ops_eval + SWE 标记：pytest 管道剥 <code>| tail</code> 等 view filter → 完整输出进 sweb；拒 worktree <code>pip/uv install</code>；env 探针进镜像</td><td><code>test_run_redirect.py</code> · <code>swe_solve_env.py</code></td></tr>
+              <tr><td>C-3 plan</td><td><code>update_plan</code> items 与上次相同 → <code>unchanged=true</code>，不落新 <code>tool.completed</code></td><td><code>agent_engine.py</code></td></tr>
+              <tr><td>read 闸</td><td><code>read_registry</code> 读完再读可 skipped；组窗驱逐 path 允许一次 re-read（<code>evicted_*</code>）</td><td><code>read_registry.py</code> · <code>state.py</code></td></tr>
+              <tr><td>截断 outline</td><td><code>read_file</code> 触预算才附 outline；<strong>.md/.txt 标题扫描</strong>（X-1）+ .py AST</td><td><code>outline.py</code></td></tr>
+            </tbody>
+          </table>
+          <div class="src"><code>misc_tools.py</code> · <code>structural/*_redirect.py</code> · <code>tools/core/swe_solve_env.py</code></div>
+        </div>
+      </section>
+
+      <!-- 12 -->
+      <section class="page" data-id="context" data-group="场景与工具" data-title="组窗阶梯">
+        <div class="card">
+          <h2>ContextEngine 组窗（轨道 X 已落）</h2>
+          <p class="lede">通道：System · Tools[] · Rules · Writing/Runtime/Session · Conversation。LongBench 瓶颈曾核实为：md 无 outline、旧读窗蒸发、终答缺 <code>Answer:</code> 抽取——不是「模型不会读」。</p>
+          <h3>卫生（几乎每步 · X-2 证据保留）</h3>
+          <table>
+            <thead><tr><th>步骤</th><th>现行行为</th></tr></thead>
+            <tbody>
+              <tr><td>budget</td><td>超长 tool_result <strong>头尾各半</strong>（middle-truncate），非纯截尾</td></tr>
+              <tr><td>read_fold</td><td>同 path 旧 read：首尾各 ~300 字 + 行号范围（不再整段 <code>[omitted]</code>）；折叠 path 记入 <code>evicted_paths</code></td></tr>
+              <tr><td>microcompact</td><td>成串旧 tool 折短占位；不拆当前配对；短 pinned 可保留</td></tr>
+            </tbody>
+          </table>
+          <h3>填充率阶梯</h3>
+<pre>fill_ratio ≈ 本窗 token / (context_window − output_reserve)
+≥0.80 collapse · ≥0.90 snip · ≥0.95 autocompact（默认确定性；不上 LLM 摘要默认化）</pre>
+          <h3>LongBench / 长文（X-1 · X-3）</h3>
+          <ul>
+            <li>截断 <code>read_file</code> 对 <code>.md/.markdown/.txt</code> 附标题 outline（≤40 条），与 py outline 同形。</li>
+            <li>评测预测侧抽末行 <code>Answer:</code> 再打 v2 F1/EM（金标不改）；第2轮 EM=0 曾是口径缺口。</li>
+            <li>agent profile <strong>仍不挂</strong> <code>search_sources</code>；长文导航靠 outline + grep。</li>
+          </ul>
+          <p>第4轮 smoke（不作效果结论）：F1/EM <strong>0.5282 / 0.2667</strong>（对照第2轮重打锚 0.5479/0.30）。</p>
+          <div class="src"><code>context/engine.py</code> · <code>structural/outline.py</code> · quality-uplift §4</div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/context/context-assemble-ladder-zh.png" alt="组窗阶梯详流" />
+          </div>
+          <figcaption>组窗阶梯详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 13 -->
+      <section class="page" data-id="sandbox" data-group="场景与工具" data-title="exec 沙箱">
+        <div class="card">
+          <h2>exec 沙箱 + sweb 解题面</h2>
+<pre>审批已过（或免审 / ops_eval 启动即 sticky）
+  → run_command / run_tests
+  → ops_eval + SWE marker？
+       ├─ 是：剥 |tail → run_tests；env/python -c → sweb.eval argv
+       │     拒 pip/uv install；容器复用 + 增量 sync（/testbed）
+       └─ 否：沙箱后端择一（prefer landlock，否则 bwrap，再否则 off）
+            · ops_eval 禁网 → 强制 bwrap --unshare-net
+            · RO/RW/tmpfs 后起子进程（或软 jail）</pre>
+          <ul>
+            <li><code>make ops-swe-eval-ready</code>：挂 docker.sock + 预拉镜像 + 每张 sweb 冒烟（python/pytest）。</li>
+            <li>同实例容器可复用 + 增量 sync（压墙钟）；缺镜像 / 冒烟失败 → 硬失败可归因。</li>
+            <li>第4→5 轮过程烟：步数 409→202、wall ↓；仍见模型偶走普通 <code>run_command</code>，改道继续收紧。</li>
+            <li>Harness 评测吃本地 <code>instances.jsonl</code> + offline（H0）；无 resolve → <code>harness_error</code>，不得标 suite completed。</li>
+          </ul>
+          <div class="src"><code>swe_solve_env.py</code> · <code>test_run_redirect.py</code> · <code>sandbox.py</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/sandbox/bwrap-exec-flow-zh.png" alt="exec / sweb 解题面详流" />
+          </div>
+          <figcaption>exec 沙箱详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 14 -->
+      <section class="page" data-id="coding-fuse" data-group="Coding" data-title="结构智能揉合">
+        <div class="card">
+          <h2>结构智能（非「再造索引」）</h2>
+          <p class="lede">LSP 写权威；AST 只粗筛。揉合进高频动词。归因钉死：<code>file_hit=1</code>、Locate 调用 &lt;3% → <strong>resolve 主因是修复正确性 + 验证信号弱</strong>，不是 AST/LSP 没建好。</p>
+          <table>
+            <thead><tr><th>车道</th><th>焊点</th><th>要点</th></tr></thead>
+            <tbody>
+              <tr><td>Locate</td><td>search_codebase / 裸符号 grep</td><td>AST 候选 → LSP definition；P15 标识符列已修；P16 模块 stem 等标 <code>non_definition_query</code>（defs-only 边界）</td></tr>
+              <tr><td>Impact</td><td>edit_file.impact</td><td>改动影响摘要；精查 find_references</td></tr>
+              <tr><td>Verify</td><td>checks · read_lints · W9 · test_summary · related_tests · issue_repro</td><td>写前语法 + 写后诊断；终局回执；失败首条回灌</td></tr>
+            </tbody>
+          </table>
+          <h3>轨道 M/T/Q/L（近两日）</h3>
+          <table>
+            <thead><tr><th>轨道</th><th>抓手</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td>M 度量</td><td>harness 吃本地 instances.jsonl；无 resolve→failed</td><td>H0 已修</td></tr>
+              <tr><td>T 时长</td><td>pager→read_file；update_plan 去抖；sweb 改道 / 拒 pip</td><td>C-2/C-3 + sweb 已落；第5轮 steps −51%</td></tr>
+              <tr><td>Q 通过</td><td>test_summary 全文解析；related 扩命名；W9；issue_repro 往返/casefold</td><td>代码已落；smoke 波动中</td></tr>
+              <tr><td>L Locate</td><td>顶层 assignment 入索引；wait_ready 仅评测；grammar bake</td><td>C-5/C-6 / A6 已落</td></tr>
+            </tbody>
+          </table>
+          <ul>
+            <li>agent 有结构工具 / 无 search_sources；writing·intel 相反。</li>
+            <li>明确不做：CST、call-graph、references 入 AST、全仓 LSP indexing。</li>
+          </ul>
+          <div class="src"><code>structural/</code> · plan CSI · quality-uplift §2</div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/harness/coding-fuse-zh.png" alt="Coding 写入链揉合" />
+          </div>
+          <figcaption>Coding 写入链揉合 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 15 -->
+      <section class="page" data-id="verify" data-group="Coding" data-title="Verify 回执">
+        <div class="card">
+          <h2>Wave 4 · verify_receipt（W9）</h2>
+          <p class="lede">无 <code>tool_use</code>、模型试图终局时注入：<strong>user 消息</strong>（回执正文）+ 契约事件 <code>tool.completed</code>（<code>tool_name=verify_receipt</code> · <code>verify_receipt=true</code>），然后 <code>continue</code> 再进一轮——<strong>不是</strong> transcript 里的 <code>tool_result</code>，也不是新可点工具。不挡 cancel/failed；每类至多一次；剩余步 &lt; reserve（默认 10）省略。</p>
+          <h3>两类触发</h3>
+          <table>
+            <thead><tr><th>种类</th><th>条件</th></tr></thead>
+            <tbody>
+              <tr><td>classic</td><td>成功代码 edit 后无 testish 清 pending；引用 <code>related_tests_union</code> / <code>last_test_first_failure</code></td></tr>
+              <tr><td>issue_repro</td><td>绿测已过但 problem.md 行为未在<strong>最新编辑后</strong>成功复现（armed）</td></tr>
+            </tbody>
+          </table>
+          <h3>追踪（checkpoint 可恢复）</h3>
+          <ul>
+            <li>代码 edit → <code>verify_pending=true</code>、<code>code_edits_since_verify++</code>、合并 related、加载 problem 提示、作废旧 satisfied</li>
+            <li>run_tests / testish run_command → 清 pending；挂 failure_feed；绿测可 arm issue_repro</li>
+            <li>非 testish 的 <code>python -c</code> 仍可计 issue repro（往返义务）</li>
+          </ul>
+          <p>第5轮：receipt <strong>0.80</strong>（第4轮曾掉到 0.20）；then_test 仅 0.25 → 注入后仍常不跟测。</p>
+          <div class="src"><code>engine/verify_receipt.py</code> · <code>tests/test_wave4_verify.py</code></div>
+        </div>
+      </section>
+
+      <!-- 16 -->
+      <section class="page" data-id="issue-repro" data-group="Coding" data-title="issue_repro">
+        <div class="card">
+          <h2>issue_repro（problem.md 行为门 · 第5轮主因）</h2>
+          <p class="lede">从 <code>problem.md</code> / <code>PROBLEM.md</code> / <code>issue.md</code> 抽线索。<strong>禁金标 F2P 泄漏</strong>：只复现 issue 写过的例子。</p>
+          <h3>一般规则（已落代码）</h3>
+          <ul>
+            <li>优先 fence / 引用命令 / REPL / I/O 样例；成功命令须覆盖 assets</li>
+            <li>issue 失败签名仍出现 → 不算 clearing</li>
+            <li>表/ASCII write + format kwargs → <strong>write→read 往返</strong>（同 format/kwargs）</li>
+            <li>明确 case-insensitive 主张 → 再练 casefolded 变体</li>
+          </ul>
+          <h3>与 n5 事实对照</h3>
+          <ul>
+            <li><strong>14182</strong>（第5轮转绿）：补丁含 <code>header_rows</code> 写路径 + <code>data.start_line</code> 读侧，与往返义务同向；仍最慢（~30min，sweb+复现占主导）</li>
+            <li><strong>14365</strong>（第5轮回落）：仅 <code>re.IGNORECASE</code>；样例无小写 <code>NO</code>，casefold 门未逼出隐藏 F2P（<code>test_roundtrip[True]</code>）</li>
+            <li>前置：sweb 解题环境 + issue_repro 主张 + verify_receipt schema 修复 → run <code>01cd8c79-…</code></li>
+          </ul>
+          <div class="src"><code>structural/issue_repro.py</code> · RESULTS 第5轮</div>
+        </div>
+      </section>
+
+      <!-- 17 -->
+      <section class="page" data-id="related-tests" data-group="Coding" data-title="related_tests / test_summary">
+        <div class="card">
+          <h2>related_tests · test_summary · Locate 漏斗</h2>
+          <h3>C-1 test_summary（曾 attach=0 的杀手）</h3>
+          <ul>
+            <li>旧因：要求 pytest 尾行；模型常 <code>| tail</code> / 输出截断丢 footer / <code>-q</code> 短格式不匹配</li>
+            <li>现行：从<strong>未截断全文</strong>旁路解析；支持 -q / unittest / ERRORS；失败首条 → <code>failure_feed</code>（≤400）进结果与 W9</li>
+            <li>smoke：0 → 0.22（第2）→ 0.17（第4）→ <strong>0.50</strong>（第5）；目标仍 ≥0.6</li>
+          </ul>
+          <h3>C-4 related_tests</h3>
+          <ul>
+            <li>edit 成功后附 <code>[{path,command}]</code> cap5；永不执行；优先精确单文件命令（利 sweb）</li>
+            <li>命名扩 <code>{stem}_test.py</code> / 包路径就近；import 反查有预算（≤250 files / 400ms）</li>
+            <li>第5轮：coverage <strong>1.0</strong> 但 adoption <strong>0.0</strong>（给了没用）——下一抓手是采用率</li>
+          </ul>
+          <h3>Locate 漏斗</h3>
+<pre>AST lookup → goto@标识符列 → definitions[] | definition_null
+  miss → 有界即时 parse → LSP workspace/symbol + 词面
+  基建挂 → lsp_failed | lsp_timeout
+非定义名 → non_definition_query / no_ws（不计「索引故障」）</pre>
+          <p>第5轮 fuse_ok <strong>0.625</strong>（n=8）；Locate 仍非 resolve 主因。</p>
+          <div class="src"><code>test_summary.py</code> · <code>related_tests.py</code> · <code>workspace_index/locate.py</code></div>
+        </div>
+      </section>
+
+      <!-- 18 -->
+      <section class="page" data-id="events" data-group="事件与契约" data-title="事件 · SSE · 投影">
+        <div class="card">
+          <h2>事件管道</h2>
+<pre>runtime → INSERT turn_events（递增 sequence）→ pg_notify(turn_id)
+api LISTEN → 队列（空闲约 2s 轮询兜底）
+  ├─ SSE  …/turns/{id}/stream（Last-Event-ID；~14s ping；thinking.delta 只走 SSE）
+  └─ Projection UPSERT turn_views → GET /view（ETag/304）</pre>
+          <table>
+            <thead><tr><th>所有者</th><th>写什么</th></tr></thead>
+            <tbody>
+              <tr><td>runtime</td><td>turn_events、执行态、checkpoint、transcript 真源、产物引用</td></tr>
+              <tr><td>api</td><td>turn_views、对外 SSE、会话摘要触发（常异步）</td></tr>
+            </tbody>
+          </table>
+          <div class="callout warn">禁止 runtime 直连浏览器 SSE；禁止仅靠进程内 channel 当事唯一源；禁止热路径同步重投影。</div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/events/event-sse-zh.png" alt="事件·SSE·投影详流" />
+          </div>
+          <figcaption>事件·SSE·投影详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 19 -->
+      <section class="page" data-id="contracts" data-group="事件与契约" data-title="契约位置">
+        <div class="card">
+          <h2>契约与目录</h2>
+          <ul>
+            <li>OpenAPI / 事件 JSON Schema / 命令体 / DDL：<code>packages/contracts</code></li>
+            <li>Ops manifest：<code>packages/contracts/eval/ops_run_manifest.schema.json</code></li>
+            <li>正文六篇：<code>docs/core/*</code> · 专题 <code>docs/topics/*</code></li>
+            <li>方案册：<code>docs/plan/*</code>（冲突时低于代码与六篇原则）</li>
+          </ul>
+          <h3>组件地图</h3>
+<pre>services/{api,runtime,web,bench,release-console}
+packages/contracts/
+eval/{golden,official,retrieval,swebench,…}
+deploy/ · scripts/ · seed/ · workspace/</pre>
+        </div>
+      </section>
+
+      <!-- 20 -->
+      <section class="page" data-id="rag" data-group="RAG / 写作" data-title="hybrid 召回">
+        <div class="card">
+          <h2>RAG · search_sources（轨道 R）</h2>
+          <p class="lede">writing/intel 主路径。BM25∥向量 → RRF → 词法 rerank；cross-encoder 默认关（R-5 召回抬起且 P95&lt;150ms 才考虑）。与 coding AST 硬隔离。</p>
+          <h3>曾核实的切分缺陷（用户观测成立 · 已对症）</h3>
+          <ul>
+            <li>INDEX12：chunk 4000<strong>字符</strong> vs bge-m3 512<strong>token</strong> → 向量只代表 chunk 前段 → R@100≈0.53 天花板</li>
+            <li>硬切无句边界；标题只认 H1–H3；宽表 detach 后单元格不可检</li>
+          </ul>
+          <h3>INDEX 13 已落（R-1~R-4）</h3>
+          <ul>
+            <li>token 预算 ~450 + overlap 64；边界感知切分；H1–H6 + Setext；embed 前标题面包屑；宽表行线性化派生 chunk</li>
+            <li>评测侧多轮 RRF（k=60）；BEIR / C-MTEB <strong>独立 HNSW</strong>、<strong>勿混宏分</strong></li>
+          </ul>
+          <h3>第4轮 smoke（不作效果结论）</h3>
+          <table>
+            <thead><tr><th>套件</th><th>nDCG@10</th><th>R@100</th></tr></thead>
+            <tbody>
+              <tr><td>BEIR</td><td>0.4964</td><td>0.5252（回近 INDEX12；第2轮曾掉到 0.495）</td></tr>
+              <tr><td>C-MTEB</td><td>0.6777</td><td>0.9167</td></tr>
+            </tbody>
+          </table>
+          <div class="src"><code>retrieval/chunking.py</code> · <code>chunk_split.py</code> · <code>embedder.effective_index_version</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/rag/search-sources-flow-zh.png" alt="hybrid 召回详流" />
+          </div>
+          <figcaption>hybrid 召回详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 21 -->
+      <section class="page" data-id="index" data-group="RAG / 写作" data-title="索引面">
+        <div class="card">
+          <h2>索引面（异步 · INDEX 戳）</h2>
+          <p>触发 · 切块 · embed · HNSW/GIN · 进度。writing <code>post_turn_jobs: sources.index_sync</code> 经 api outbox（R4），不挡 StartTurn。</p>
+          <table>
+            <thead><tr><th>INDEX</th><th>含义（bge-m3@1024）</th></tr></thead>
+            <tbody>
+              <tr><td>12</td><td>max_seq≈512 truncate（短 passage 旧戳）；chunk 仍偏字符预算</td></tr>
+              <tr><td><strong>13</strong></td><td>现行：512 + <strong>token 对齐切块</strong> / 面包屑 / 表行线性化</td></tr>
+            </tbody>
+          </table>
+          <ul>
+            <li>设置页可检 RAG chunks；AST 索引与磁盘 dirty 对齐（旁路 indexer，不全树误脏）。</li>
+            <li>R-5 cross-encoder：召回未稳抬前<strong>默认关</strong>。</li>
+            <li>换模 / bump INDEX → <code>make sync-sources</code> / <code>sync-ops-indexes</code>（可见进度）。</li>
+          </ul>
+          <div class="src"><code>embedder.py</code> · <code>vector_index.py</code> · <code>workspace_index/</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/rag/index-sync-zh.png" alt="索引面详流" />
+          </div>
+          <figcaption>索引面详流 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 22 -->
+      <section class="page" data-id="writing" data-group="RAG / 写作" data-title="写作工作台">
+        <div class="card">
+          <h2>写作主路径</h2>
+          <ul>
+            <li>Work 树 · 按需检索 · diff-first（propose_patch / patch_auto_apply）</li>
+            <li>hooks 组窗卡片、compact 书签、终态连续性</li>
+            <li>子 agent：researcher / drafter / editor / fact_checker / stylist …</li>
+          </ul>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/writing/writing-main-path-zh.png" alt="写作主路径" />
+          </div>
+          <figcaption>写作主路径 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 23 -->
+      <section class="page" data-id="ops-bench" data-group="评测" data-title="Ops L1 原理">
+        <div class="card">
+          <h2>Ops L1 agent-path</h2>
+          <p class="lede">效果温度计，不进 StartTurn 热路径。必须 <code>eval_path=agent</code>：真 Session/Turn + 真工具。</p>
+          <table>
+            <thead><tr><th>套件</th><th>官方源</th><th>路径摘要</th></tr></thead>
+            <tbody>
+              <tr><td>retrieval</td><td>BEIR small</td><td>search_sources → 多轮 RRF → nDCG/R/MAP</td></tr>
+              <tr><td>retrieval_zh</td><td>C-MTEB</td><td>独立 schema；勿与 BEIR 混栏</td></tr>
+              <tr><td>context</td><td>LongBench</td><td>passage.md → Answer: → F1/EM</td></tr>
+              <tr><td>coding</td><td>SWE Lite</td><td>checkout →（评测）AST wait_ready → 解题 → git_diff → harness resolve</td></tr>
+            </tbody>
+          </table>
+          <h3>编码一题</h3>
+<pre>① checkout base_commit（写 .agent_swe_instance.json）
+② AST cold_start ──wait_ready──► ready|stale （仅评测）
+③ StartTurn → Locate / Edit / Verify（W9 · related · test_summary · issue_repro）
+   └ run_tests / 改道 → 本地 sweb.eval（禁网；剥 |tail；拒 pip）
+④ 抽 patch：git_diff → baseline repair；拒收 l2.patch_rejected
+⑤ predictions.jsonl → swebench.harness（吃本地 instances.jsonl）
+   ├ resolve_rate → suite completed
+   └ harness_error / 无 resolve → failed（不得粉饰）</pre>
+          <p>协议戳：L0 <code>…-m1</code> · L1 <code>…-m3</code>。第3轮工程加固（manifest 契约 / 多轮 RRF / wait_ready）已进第4轮验收。</p>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-bench-principle-zh.png" alt="Ops L1 agent-path" />
+          </div>
+          <figcaption>Ops L1 agent-path · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 24 -->
+      <section class="page" data-id="scorecard" data-group="评测" data-title="现行分数快照">
+        <div class="card">
+          <h2>现行分数快照（对齐 RESULTS · 2026-08-17）</h2>
+          <div class="callout warn"><strong>主 SCORECARD 锚点仍空。</strong>下表 smoke，不作效果结论。模型：deepseek-v4-flash · protocol m3 · INDEX13。</div>
+          <h3>第5轮 coding-only（过程烟 · 01cd8c79）</h3>
+          <table>
+            <thead><tr><th>字段</th><th>第4</th><th>第5</th><th>读法</th></tr></thead>
+            <tbody>
+              <tr><td>resolve</td><td>0.8/4</td><td><strong>0.8/4</strong></td><td>同分异题：14182↑ / 14365↓</td></tr>
+              <tr><td>steps / wall</td><td>409 / 2854s</td><td><strong>202</strong> / ≈2332s</td><td>T 轨道（改道/去抖）同向</td></tr>
+              <tr><td>related cov→adopt</td><td>0.58→0.40</td><td><strong>1.0→0.0</strong></td><td>覆盖够、采用断</td></tr>
+              <tr><td>test_summary</td><td>0.167</td><td><strong>0.50</strong></td><td>仍低于出口 0.6</td></tr>
+              <tr><td>verify_receipt</td><td>0.20</td><td><strong>0.80</strong></td><td>then_test 0.25</td></tr>
+              <tr><td>fuse_ok</td><td>0.36</td><td><strong>0.625</strong></td><td>非 resolve 主因</td></tr>
+            </tbody>
+          </table>
+          <h3>第4轮完整四套件（检索/上下文）</h3>
+          <table>
+            <thead><tr><th>套件</th><th>主指标</th><th>值</th></tr></thead>
+            <tbody>
+              <tr><td>BEIR</td><td>nDCG@10 / R@100</td><td>0.4964 / 0.5252</td></tr>
+              <tr><td>C-MTEB</td><td>nDCG@10 / R@100</td><td>0.6777 / 0.9167</td></tr>
+              <tr><td>LongBench</td><td>F1 / EM</td><td>0.5282 / 0.2667</td></tr>
+            </tbody>
+          </table>
+          <p>升锚：retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</p>
+          <div class="src"><code>eval/official/baseline/RESULTS.md</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ci-proof-zh.png" alt="证明链与分数纪律" />
+          </div>
+          <figcaption>证明链与分数纪律 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <!-- 25 -->
+      <section class="page" data-id="next" data-group="评测" data-title="缺口与下一步">
+        <div class="card">
+          <h2>缺口（对照已落代码）</h2>
+          <ul>
+            <li><strong>锚点</strong>：SCORECARD 主栏仍空；一切 smoke 只作方向盘。</li>
+            <li><strong>Coding Q</strong>：钉死 14365（隐藏 F2P / casefold 力度）；related <em>adoption</em>；receipt→test 跟测率；test_summary→0.6。</li>
+            <li><strong>Coding T</strong>：继续压 14182 墙钟（sweb 复用 / 拒假验证旁路）。</li>
+            <li><strong>Retrieval</strong>：BEIR R@100 第一验收位仍未稳过；R-5 暂缓；需更大 n 才下结论。</li>
+            <li><strong>Context</strong>：F1/EM 略低于第2轮重打锚；outline/Answer 口径已齐，待放量对照。</li>
+            <li><strong>产品</strong>：intel 闭环 / collab 仍薄。</li>
+          </ul>
+          <h3>维护本导览</h3>
+          <ol>
+            <li>先改代码与契约，再改本 HTML 对应页（不另开分页）。</li>
+            <li>改流程图：在原海报风格上增补细节后，直接替换同名 <code>docs/assets/**/*-zh.png</code>。</li>
+            <li>打开：<code>make docs-tour</code> → <code>http://127.0.0.1:8765/tour/</code>。</li>
+          </ol>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      const pages = Array.from(document.querySelectorAll(".page"));
+      const nav = document.getElementById("nav");
+      const meta = document.getElementById("pageMeta");
+      const prevBtn = document.getElementById("prevBtn");
+      const nextBtn = document.getElementById("nextBtn");
+      let idx = 0;
+
+      const groups = [];
+      pages.forEach((p, i) => {
+        const g = p.dataset.group || "其他";
+        if (!groups.length || groups[groups.length - 1].name !== g) {
+          groups.push({ name: g, items: [] });
+        }
+        groups[groups.length - 1].items.push({ el: p, i, title: p.dataset.title || p.dataset.id });
+      });
+
+      groups.forEach((g) => {
+        const wrap = document.createElement("div");
+        wrap.className = "nav-group";
+        const t = document.createElement("div");
+        t.className = "nav-group-title";
+        t.textContent = g.name;
+        wrap.appendChild(t);
+        g.items.forEach((item) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.innerHTML = `<span class="num">${String(item.i).padStart(2, "0")}</span>${item.title}`;
+          b.addEventListener("click", () => go(item.i));
+          item.btn = b;
+          wrap.appendChild(b);
+        });
+        nav.appendChild(wrap);
+      });
+
+      function go(n) {
+        idx = Math.max(0, Math.min(pages.length - 1, n));
+        pages.forEach((p, i) => p.classList.toggle("active", i === idx));
+        groups.forEach((g) => g.items.forEach((item) => item.btn.classList.toggle("active", item.i === idx)));
+        const p = pages[idx];
+        meta.textContent = `${idx + 1} / ${pages.length} · ${p.dataset.group} · ${p.dataset.title}`;
+        prevBtn.disabled = idx === 0;
+        nextBtn.disabled = idx === pages.length - 1;
+        history.replaceState(null, "", `#${p.dataset.id}`);
+        const activeBtn = nav.querySelector("button.active");
+        if (activeBtn) activeBtn.scrollIntoView({ block: "nearest" });
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      }
+
+      prevBtn.addEventListener("click", () => go(idx - 1));
+      nextBtn.addEventListener("click", () => go(idx + 1));
+      window.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft") go(idx - 1);
+        if (e.key === "ArrowRight") go(idx + 1);
+        if (e.key === "Escape") {
+          document.querySelectorAll(".figure.zoomed").forEach((f) => f.classList.remove("zoomed"));
+        }
+      });
+
+      document.querySelectorAll(".figure").forEach((fig) => {
+        fig.addEventListener("click", () => {
+          const sel = window.getSelection && window.getSelection();
+          if (sel && String(sel).length) return;
+          fig.classList.toggle("zoomed");
+        });
+      });
+
+      const hash = location.hash.replace(/^#/, "");
+      const start = Math.max(0, pages.findIndex((p) => p.dataset.id === hash));
+      go(start === -1 ? 0 : start);
+    })();
+  </script>
+</body>
+</html>

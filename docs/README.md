@@ -2,6 +2,15 @@
 
 Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `make smoke`。
 
+## 分页导览（HTML）
+
+```bash
+make docs-tour
+# http://127.0.0.1:8765/tour/
+```
+
+文件：[`tour/index.html`](tour/index.html)。
+
 ## 正文（6 篇 · 每篇配控制流图）
 
 | 文档 | 图 1 | 图 2 |
