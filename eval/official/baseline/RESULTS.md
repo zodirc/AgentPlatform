@@ -89,15 +89,17 @@
 
 ### context · LongBench（n=60 · scorer v2 · limit=20/task）
 
-分桶：ok 46（77%）· verbose_answer 6（10%）· wrong_answer_after_read 6（10%）· truly_abandoned 2（3%）。**EM 全 60 题为 0。**
+分桶：ok 46（77%）· verbose_answer 6（10%）· wrong_answer_after_read 6（10%）· truly_abandoned 2（3%）。
 
-| 字段 | 第1轮 INDEX12 | 第2轮 | Δ |
-|------|-------------|------|---|
-| agent_f1 | 0.5579 | **0.4557** | **−0.102** |
-| agent_em | 0.3000 | **0.0000** | **−0.30** |
-| n_cases / n_scored | 60 / 60 | 60 / 60 | 0 |
+| 字段 | 第1轮 INDEX12 | 第2轮（入账时口径） | 第2轮 **现行口径重打** |
+|------|-------------|------|------|
+| agent_f1 | 0.5579 | 0.4557 | **0.5479** |
+| agent_em | 0.3000 | 0.0000 | **0.3000** |
+| n_cases / n_scored | 60 / 60 | 60 / 60 | 同题 `1029a918-…` |
 | infra | 0 | 0 | 0 |
-| run_id | `4d090bc1-…` | `1029a918-…` | |
+| run_id | `4d090bc1-…` | `1029a918-…` | 离线 `extract_pred_answer` |
+
+**对照锚**：第2轮主读 **F1 0.5479 / EM 0.30**（scorer v2 + 预测侧抽末行 `Answer:`，金标不动）。入账时 0.4557 / 0.0000 是当时未抽 `Answer:` 的口径污染（X-3 让多数题带 `Answer:` 标签，`answer` token 进 F1/EM），**不作导航改动的效果结论**。同题重打相对第1轮仅 −0.010 F1 / EM 持平。
 
 ### 全程归因（方向，不作效果结论）
 
@@ -107,11 +109,11 @@
 
 **BEIR（R-1 真验收，本档未过）** — 英文本应最吃 token 对齐，结果 **R@100 0.530→0.495、R@10 0.457→0.433**。nDCG@1 却 +3.9pt：顶一更准，召回池变窄。n=20 噪声大，但不能把 INDEX 13 说成召回修复。假设待证：450 token 碎片变多、top-k 覆盖不到金标所在的新 chunk；或标题/面包屑改了 BM25 面。R-5 rerank 方案明确写了「召回不抬则不开」。no_search 同样 3 题。
 
-**上下文（X 线本表数字被口径污染）** — 当时 v2 EM 是规范化后的整句相等、**不抽 `Answer:`**。X-3 prompt 强制 `Answer: <phrase>` 后，`answer berlin` 对 gold `berlin` → **EM 必 0**，F1 被前缀稀释。60 题 EM=0、F1 仍 0.46 同向，是统计问题不是阅读归零。verbose_answer 仍 6 题（narrative 最长 252 字），抽取救不了没写 `Answer:` 行的长文。X-1/X-2 是否改善导航，不能用本表判。**scorer 已改为预测侧抽末行 `Answer:`（金标不动）；本表 0.00 / 0.4557 不回溯改写，下次 context 套件才用新口径。**
+**上下文（口径已钉锚）** — 入账时 v2 EM 是规范化后的整句相等、**不抽 `Answer:`**。X-3 prompt 强制 `Answer: <phrase>` 后，`answer berlin` 对 gold `berlin` → **入账 EM 必 0**，F1 被前缀稀释。同题离线用现行 `extract_pred_answer` 重打：F1 **0.4557→0.5479**、EM **0→0.30**。**以后对照一律用 0.5479 / 0.30**，禁止用 0.456/0 验收导航改动。
 
 **下一步（仍 smoke）**
 
-1. Context：用新 scorer 复跑（或对 `1029a918-…` 产物离线重打）再看 F1/EM；不把第2轮 0.00 当效果。
+1. Context：对照锚 **0.5479 / 0.30**；新跑须用同一 `extract_pred_answer` 口径。
 2. BEIR：n≥100 再判 R-1；先查 no_search + chunk 质检（硬切率 / 超 512 token 占比）。
 3. C-1 继续抠 test_summary（管道/截断）。
 4. 不升主栏。
