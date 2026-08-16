@@ -50,9 +50,12 @@ describe("dropAliasedMetrics", () => {
 describe("runMetrics", () => {
   it("flattens official.retrieval_zh without duplicated agent.* copies", () => {
     const run = {
+      id: "test-run",
+      status: "completed",
       cases: [
         {
           case_id: "official.retrieval_zh",
+          status: "passed",
           metrics: {
             recall_at_10: 0.8,
             "agent.recall_at_10": 0.8,

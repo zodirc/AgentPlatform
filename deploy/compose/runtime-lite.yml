@@ -8,7 +8,9 @@ services:
       pull: false
       context: ..
       additional_contexts:
-        ts_grammar_cache: ../ts-grammar-cache
+        # Project dir is deploy/ when -f deploy/docker-compose.yml (Bake resolves
+        # from that dir). Same as docker-compose.yml — not ../ from this overlay.
+        ts_grammar_cache: ./ts-grammar-cache
       dockerfile: services/runtime/Dockerfile
       target: app
       args:

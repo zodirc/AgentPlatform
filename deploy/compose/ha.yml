@@ -62,9 +62,10 @@ x-runtime-svc: &runtime-svc
     pull: false
     context: ..
     additional_contexts:
-      model_bake_cache: ../model-bake-cache
-      torch_wheel_cache: ../torch-wheel-cache
-      ts_grammar_cache: ../ts-grammar-cache
+      # Bake resolves from project dir (deploy/) when merged with docker-compose.yml.
+      model_bake_cache: ./model-bake-cache
+      torch_wheel_cache: ./torch-wheel-cache
+      ts_grammar_cache: ./ts-grammar-cache
     dockerfile: services/runtime/Dockerfile.retrieval
     target: app
     args:

@@ -62,6 +62,9 @@ omit = [
     "app/structural/client.py",
     "app/structural/pool.py",
     "app/structural/adapters.py",
+    # SWE Docker solve-env is integration-heavy (docker.sock / sweb.eval images);
+    # unit coverage lives in tests/test_swe_solve_env.py without the full CLI surface.
+    "app/tools/core/swe_solve_env.py",
 ]
 
 [tool.coverage.report]
