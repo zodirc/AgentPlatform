@@ -76,9 +76,11 @@ async def run_retrieval_l1(
         depth_audit_from_events,
         excerpt_promote_reorder_count,
         failure_class_from_events,
+        final_assistant_text,
         gold_read_case_stats,
         merge_retrieval_rankings,
         ranking_scores,
+        rrf_fusion_scores,
         read_doc_ids_from_events,
         search_queries_from_events,
         step_count_from_events,
@@ -341,7 +343,10 @@ async def run_retrieval_l1(
                             turn_tracker=turn_tracker,
                         )
                         doc_ids = merge_retrieval_rankings(events)
-                        scores = ranking_scores(doc_ids, limit=limit_k)
+                        rrf_scores, _ = rrf_fusion_scores(events)
+                        scores = ranking_scores(
+                            doc_ids, limit=limit_k, raw_scores=rrf_scores
+                        )
                         tools = called_tools(events)
                         queries = search_queries_from_events(events)
                         top_hits = top_ranked_hits_from_events(events, limit=10)
@@ -406,6 +411,18 @@ async def run_retrieval_l1(
                             l2["failure_message"] = fail_msg[:500]
                         if fail_class:
                             l2["failure_class"] = fail_class
+                        # no_search attribution: record what the agent did instead
+                        # of searching so fail cases are diagnosable from the card.
+                        if not searched:
+                            if fail_msg or str(
+                                terminal_state_from_events(events) or ""
+                            ) in {"failed", "step_timeout", "stall"}:
+                                l2["no_search_reason"] = "turn_failed"
+                            else:
+                                l2["no_search_reason"] = "answered_without_search"
+                                snippet = final_assistant_text(events)
+                                if snippet:
+                                    l2["no_search_final_text"] = snippet[:300]
                         # weak_hits needs suite median — provisional bucket until post-pass.
                         l2["bucket"] = classify_bucket("retrieval", l2)
                         err = None
@@ -450,6 +467,7 @@ async def run_retrieval_l1(
                             "query_drift": 1.0,
                             "terminal_state": "failed",
                             "failure_message": err[:500],
+                            "no_search_reason": "turn_exception",
                             "bucket": (
                                 INFRA_CHANNEL_BUCKET if infra else "no_search"
                             ),
@@ -676,17 +694,21 @@ async def run_retrieval_l1(
             "finished_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
         manifest = session.finish(status="completed", metrics=session.metrics, result=result)
-        # latest pointer for baseline compare
-        latest = _reports() / "latest_retrieval.json"
+        # latest pointer for baseline compare — per suite: retrieval (BEIR) and
+        # retrieval_zh (C-MTEB) must not overwrite each other's pointer.
+        latest = _reports() / f"latest_{suite_key_norm}.json"
         latest.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
         (_reports() / "latest_run.json").write_text(
-            json.dumps({"run_id": session.run_id, "suite": "retrieval", "eval_path": "agent"}, indent=2),
+            json.dumps(
+                {"run_id": session.run_id, "suite": suite_key_norm, "eval_path": "agent"},
+                indent=2,
+            ),
             encoding="utf-8",
         )
         await _emit(on_progress, "log", message=f"[L1] retrieval done run_id={session.run_id}")
         return manifest
     except Exception as exc:  # noqa: BLE001
         logger.exception("L1 retrieval failed")
-        await _emit_fail(on_progress, "suite=retrieval", error=str(exc))
+        await _emit_fail(on_progress, f"suite={suite_key_norm}", error=str(exc))
         session.finish(status="failed", error=str(exc))
         raise

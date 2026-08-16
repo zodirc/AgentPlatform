@@ -5,7 +5,11 @@ from pathlib import Path
 from typing import Any
 from app.services.end_user.users import SYSTEM_USER_ID
 from app.services.resource import sessions as session_svc
-from .coding_harness import maybe_run_coding_harness
+from .coding_harness import (
+    coding_harness_fail_error,
+    coding_harness_failed,
+    maybe_run_coding_harness,
+)
 from .coding_thinking import (
     assemble_thinking_jsonl,
     coding_case_done_message,
@@ -49,6 +53,7 @@ async def run_coding_l1(
         csi_suite_rates,
         file_hit,
         patch_apply_check,
+        patch_from_baseline_diff,
         patch_from_edit_events,
         patch_from_events,
         patch_from_git_diff,
@@ -374,17 +379,30 @@ async def run_coding_l1(
                             patch = patch_from_git_diff(work.work_root)
                             if patch.strip():
                                 patch_source = "git_diff"
-                        # Repair path: empty OR truncated hunks (strip bug / corrupt)
-                        # → rebuild from edit_file spans before rejecting the case.
+                        # Repair path: empty OR truncated hunks (strip bug / corrupt).
+                        # First rebuild a git-exact per-file diff vs the checkout
+                        # baseline (real hunk offsets — applies onto base commit);
+                        # only then fall back to edit_file span synthesis.
                         if (not str(patch or "").strip()) or patch_hunks_incomplete(
                             patch
                         ):
-                            repaired = patch_from_edit_events(events)
+                            repaired = (
+                                patch_from_baseline_diff(work.work_root, events)
+                                if has_repo
+                                else ""
+                            )
                             if repaired.strip() and not patch_hunks_incomplete(
                                 repaired
                             ):
                                 patch = repaired
-                                patch_source = "edit_events"
+                                patch_source = "baseline_diff"
+                            else:
+                                repaired = patch_from_edit_events(events)
+                                if repaired.strip() and not patch_hunks_incomplete(
+                                    repaired
+                                ):
+                                    patch = repaired
+                                    patch_source = "edit_events"
                         if not str(patch or "").strip():
                             patch = patch_from_events(events)
                             if patch.strip():
@@ -453,6 +471,11 @@ async def run_coding_l1(
                                 patch_from_git_diff(work.work_root) if has_repo else ""
                             )
                         patch_source = "git_diff" if raw.strip() else "none"
+                        if (not raw.strip() or patch_hunks_incomplete(raw)) and has_repo:
+                            repaired = patch_from_baseline_diff(work.work_root, events)
+                            if repaired.strip() and not patch_hunks_incomplete(repaired):
+                                raw = repaired
+                                patch_source = "baseline_diff"
                         applies = (
                             patch_apply_check(work.work_root, raw)
                             if has_repo and raw.strip()
@@ -735,6 +758,7 @@ async def run_coding_l1(
         )
 
         session.metrics = metrics
+        harness_failed = coding_harness_failed(run_harness, metrics)
         result = {
             "suite": "swebench.lite",
             "protocol_version": PROTOCOL_L1,
@@ -744,6 +768,7 @@ async def run_coding_l1(
             "instance_fingerprint": fingerprint,
             "infer_mode": "platform_turn",
             "harness": bool(run_harness),
+            "harness_failed": harness_failed,
             "checkout_repo": bool(checkout_repo),
             "sample_tier": session.extra.get("sample_tier"),
             "metrics": metrics,
@@ -753,7 +778,14 @@ async def run_coding_l1(
             "unresolved_ids": list(harness_result.get("unresolved_ids") or []),
             "error_ids": list(harness_result.get("error_ids") or []),
         }
-        manifest = session.finish(status="completed", metrics=metrics, result=result)
+        if harness_failed:
+            err = coding_harness_fail_error(metrics)
+            await _emit_fail(on_progress, "suite=coding", error=err)
+            manifest = session.finish(
+                status="failed", error=err, metrics=metrics, result=result
+            )
+        else:
+            manifest = session.finish(status="completed", metrics=metrics, result=result)
         (_reports() / "latest_coding.json").write_text(
             json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
         )

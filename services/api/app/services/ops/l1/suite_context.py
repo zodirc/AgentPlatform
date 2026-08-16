@@ -58,7 +58,7 @@ async def run_context_l1(
         turn_failure_message_from_events,
     )
     from official_bench.config import load_suites
-    from official_bench.context_run import score_prediction
+    from official_bench.context_run import answers_list, score_prediction
     from official_bench.l2_probes import (
         INFRA_CHANNEL_BUCKET,
         bucket_counts,
@@ -142,13 +142,8 @@ async def run_context_l1(
                 case_id = f"longbench.{task}.{idx}"
                 context = str(row.get("context") or "")
                 question = str(row.get("question") or row.get("input") or "").strip()
-                golds_raw = row.get("answers") or row.get("answer")
-                if isinstance(golds_raw, str):
-                    golds = [golds_raw]
-                elif isinstance(golds_raw, list):
-                    golds = [str(x) for x in golds_raw]
-                else:
-                    golds = [str(golds_raw or "")]
+                # Same flattening as L0 context_run (nested lists → list[str]).
+                golds = answers_list(row.get("answers") or row.get("answer"))
                 try:
                     work = await _create_l1_work(
                         str(run_root / f"{task}_{idx}"),

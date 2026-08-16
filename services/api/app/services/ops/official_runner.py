@@ -94,7 +94,8 @@ class OfficialLiveRun:
     finished_at: str | None = None
     error: str | None = None
     context_dry: bool = True
-    coding_skip_api: bool = True
+    # Ops acceptance never writes empty predictions; True only via explicit CLI.
+    coding_skip_api: bool = False
     coding_tier: str = "n25"
     coding_n_instances: int | None = None
     coding_harness: bool = False
@@ -108,8 +109,9 @@ class OfficialLiveRun:
     retrieval_arm: str = "free"
     context_arm: str = "free"
     coding_checkout_repo: bool = True
-    # Ops toggle: await AST ready before StartTurn (default false = R1).
-    workspace_index_wait_ready: bool = False
+    # Ops toggle: await AST ready before StartTurn. None = suites yaml default
+    # (eval suite ships true); product Turn path stays R1 (no wait).
+    workspace_index_wait_ready: bool | None = None
     # SciFact mid-corpus micro L1: dataset filter + isolated {name}-micro index.
     retrieval_datasets: list[str] = field(default_factory=list)
     retrieval_corpus_mode: str = "full"
@@ -178,7 +180,9 @@ def forget_live_runs(
 
 
 def subscribe(run: OfficialLiveRun) -> asyncio.Queue:
-    q: asyncio.Queue = asyncio.Queue(maxsize=500)
+    # Coding turns emit densely; too-small queues used to QueueFull → unsubscribe
+    # and silently kill the Ops live log for the rest of the run (incl. harness).
+    q: asyncio.Queue = asyncio.Queue(maxsize=2000)
     run._subscribers.append(q)
     return q
 
@@ -188,6 +192,24 @@ def unsubscribe(run: OfficialLiveRun, q: asyncio.Queue) -> None:
         run._subscribers.remove(q)
 
 
+def _queue_put_drop_oldest(q: asyncio.Queue, item: dict[str, Any]) -> None:
+    """Never drop the SSE subscriber — drop the oldest buffered event instead."""
+    try:
+        q.put_nowait(item)
+        return
+    except asyncio.QueueFull:
+        pass
+    try:
+        q.get_nowait()
+    except asyncio.QueueEmpty:
+        pass
+    try:
+        q.put_nowait(item)
+    except asyncio.QueueFull:
+        # Extremely rare race with a concurrent getter; skip this one event.
+        pass
+
+
 async def _publish(run: OfficialLiveRun, event: dict[str, Any]) -> None:
     item = {"at": _utc(), **event}
     run.logs.append(item)
@@ -195,14 +217,8 @@ async def _publish(run: OfficialLiveRun, event: dict[str, Any]) -> None:
     # can reconstruct finished cases after building-tick overflow.
     if len(run.logs) > 2000:
         run.logs = trim_official_logs(run.logs, limit=1500)
-    dead: list[asyncio.Queue] = []
-    for q in run._subscribers:
-        try:
-            q.put_nowait(item)
-        except asyncio.QueueFull:
-            dead.append(q)
-    for q in dead:
-        unsubscribe(run, q)
+    for q in list(run._subscribers):
+        _queue_put_drop_oldest(q, item)
     # Snapshot often enough that a browser refresh can hydrate from DB
     # if the live process is briefly unreachable.
     if len(run.logs) % 20 == 0:
@@ -628,7 +644,7 @@ async def create_and_start(
     retrieval_arm: str = "free",
     context_arm: str = "free",
     coding_checkout_repo: bool = True,
-    workspace_index_wait_ready: bool = False,
+    workspace_index_wait_ready: bool | None = None,
     retrieval_datasets: list[str] | None = None,
     retrieval_corpus_mode: str = "full",
 ) -> OfficialLiveRun:
@@ -702,7 +718,11 @@ async def create_and_start(
         retrieval_arm="free",
         context_arm="free",
         coding_checkout_repo=bool(coding_checkout_repo),
-        workspace_index_wait_ready=bool(workspace_index_wait_ready),
+        workspace_index_wait_ready=(
+            None
+            if workspace_index_wait_ready is None
+            else bool(workspace_index_wait_ready)
+        ),
         retrieval_datasets=[
             str(x).strip()
             for x in (retrieval_datasets or [])
@@ -1501,7 +1521,10 @@ async def _execute_local(run: OfficialLiveRun) -> None:
             "retrieval": "检索：①拉取 BEIR（已缓存则跳过）→ ②平台 hybrid + BM25 对照 → ③回归",
             "context": "上下文：①拉取 LongBench（可缓存）→ ②双臂评分（dry=不调模型）",
             "coding_pull": "编码：拉取 SWE-bench Lite 题集（可缓存）",
-            "coding_infer": "编码：写 predictions（skip API=空补丁打通）",
+            "coding_infer": (
+                "编码：写 predictions"
+                + ("（skip-api 冒烟：空补丁，仅通管道，非验收）" if run.coding_skip_api else "（真实 infer）")
+            ),
             "pull": "仅拉取数据（已有则跳过）",
         }.get(target, target)
         await _publish(

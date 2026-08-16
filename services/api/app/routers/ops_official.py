@@ -66,8 +66,9 @@ class StartOfficialBody(BaseModel):
     context_arm: Literal["free"] = "free"
     coding_checkout_repo: bool = True
     # Await ephemeral AST ready|stale before StartTurn (product-parity Locate).
-    # Default false = R1 Turn-first; Ops Bench toggle sets this per run.
-    workspace_index_wait_ready: bool = False
+    # None = follow suites yaml default (eval suite ships true); Ops Bench
+    # toggle sends an explicit bool per run. Product R1 (no wait) is unaffected.
+    workspace_index_wait_ready: bool | None = None
     # SciFact mid-corpus micro L1: filter + isolated {name}-micro (gold+distractors).
     # ``gold`` accepted as alias of ``micro`` for older Ops clients.
     retrieval_datasets: list[str] = Field(default_factory=list)
@@ -767,7 +768,7 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             retrieval_arm="free",
             context_arm="free",
             coding_checkout_repo=coding_checkout_repo,
-            workspace_index_wait_ready=bool(body.workspace_index_wait_ready),
+            workspace_index_wait_ready=body.workspace_index_wait_ready,
             retrieval_datasets=list(body.retrieval_datasets or []),
             retrieval_corpus_mode=body.retrieval_corpus_mode,
         )

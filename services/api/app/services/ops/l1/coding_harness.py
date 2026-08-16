@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from .common import ProgressCb, _emit, _emit_fail, _exc_text
+from .common import ProgressCb, _emit, _emit_fail, _ensure_scripts_path, _exc_text
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,9 @@ async def maybe_run_coding_harness(
         )
         return {}
 
+    # Bind-mounted /repo/scripts/official_bench — pick up log refinements mid-deploy.
+    _ensure_scripts_path()
+
     from official_bench.l2_probes import classify_bucket
     from official_bench.swe_run import run_swe_eval
 
@@ -37,12 +40,32 @@ async def maybe_run_coding_harness(
             pred_n = sum(1 for line in pf if line.strip())
     except OSError:
         pred_n = len(ordered)
+    instance_ids = [
+        str(inst.get("instance_id") or "").strip()
+        for inst in ordered
+        if str(inst.get("instance_id") or "").strip()
+    ]
+    shown = ", ".join(instance_ids[:8])
+    more = f" …(+{len(instance_ids) - 8})" if len(instance_ids) > 8 else ""
     await _emit(
         on_progress,
         "log",
         message=f"[L1] coding harness start n={pred_n}",
     )
-    await _emit(on_progress, "log", message="[L1] coding harness resolve…")
+    if shown:
+        await _emit(
+            on_progress,
+            "log",
+            message=f"[L1] coding harness stage preparing n={pred_n} detail=instances={shown}{more}",
+        )
+    await _emit(
+        on_progress,
+        "log",
+        message=(
+            "[L1] coding harness stage preparing "
+            "detail=docker evaluate (images → run tests → report)"
+        ),
+    )
     harness_result: dict[str, Any] = {}
     try:
         from official_bench.swe_run import (
@@ -58,8 +81,7 @@ async def maybe_run_coding_harness(
             ev = parse_harness_stdout_line(raw)
             if ev is None:
                 return
-            if ev.get("kind") == "log":
-                return
+            # Forward progress / stage / useful notes (no longer drop kind=log).
             if ev.get("kind") == "progress":
                 key = (
                     "progress",
@@ -69,20 +91,21 @@ async def maybe_run_coding_harness(
                     ev.get("unresolved"),
                     ev.get("error"),
                 )
-            else:
+            elif ev.get("kind") == "stage":
                 key = ("stage", ev.get("stage"), ev.get("n"), ev.get("detail"))
+            else:
+                key = ("note", str(ev.get("detail") or "")[:120])
             if key == last_emit_key:
                 return
             last_emit_key = key
             msg = format_l1_harness_event(ev)
             if not msg:
                 return
-
-            def _schedule() -> None:
-                asyncio.create_task(_emit(on_progress, "log", message=msg))
-
             try:
-                loop.call_soon_threadsafe(_schedule)
+                asyncio.run_coroutine_threadsafe(
+                    _emit(on_progress, "log", message=msg),
+                    loop,
+                )
             except RuntimeError:
                 pass
 
@@ -177,4 +200,30 @@ async def maybe_run_coding_harness(
             message=f"[L1] coding harness done status=failed error={_exc_text(exc)[:200]}",
         )
         await _emit_fail(on_progress, "suite=coding.harness", error=str(exc))
+        return harness_result
+    # Harness returned without raising but produced no official verdict
+    # (e.g. exit!=0 and no report JSON) — surface it as a harness error so the
+    # suite cannot finish "completed" without a trustworthy resolve_rate.
+    if "resolve_rate" not in metrics and "harness_error" not in metrics:
+        metrics["harness_error"] = str(
+            harness.get("error")
+            or metrics.get("note")
+            or "harness produced no resolve_rate"
+        )
     return harness_result
+
+
+def coding_harness_failed(run_harness: bool, metrics: dict[str, Any]) -> bool:
+    """True when Ops required an official resolve and did not get one."""
+    if not run_harness:
+        return False
+    if metrics.get("harness_error"):
+        return True
+    return not isinstance(metrics.get("resolve_rate"), (int, float))
+
+
+def coding_harness_fail_error(metrics: dict[str, Any]) -> str:
+    return (
+        "coding_harness_failed: "
+        f"{metrics.get('harness_error') or 'harness produced no resolve_rate'}"
+    )

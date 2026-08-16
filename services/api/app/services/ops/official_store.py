@@ -125,6 +125,7 @@ def clear_fs_runs(*, ids: list[str] | None = None) -> int:
         for name in (
             "latest_run.json",
             "latest_retrieval.json",
+            "latest_retrieval_zh.json",
             "latest_context.json",
             "latest_coding.json",
         ):
