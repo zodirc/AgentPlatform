@@ -2,9 +2,192 @@
 
 - **embed 口径**: `bge-m3@1024` / 下方第1轮主表 = INDEX **12** 锚点；第2轮检索按 INDEX **13**
 - **protocol**: `official-small-2026-08-m3` · L1 agent-path · arm=free · sample_tier=smoke
-- **本表更新**: 2026-08-15 17:12 CST（第2轮 · quality-uplift 四套件齐）
-- **轮次**: 第1轮 2026-08-15 12:14–13:01 CST · INDEX 12；第2轮 2026-08-15 17:12 CST 入账 · INDEX 13
+- **本表更新**: 2026-08-17（第5轮 coding-only smoke 入账 · 未升 SCORECARD）
+- **轮次**: 第1轮 2026-08-15 12:14–13:01 CST · INDEX 12；第2轮 2026-08-15 17:12 CST 入账 · INDEX 13；第3轮 2026-08-16 工程加固（无完整数字）；第4轮 2026-08-16 17:40–19:13 CST 完整 smoke；第5轮 2026-08-16 23:27–00:06 CST coding-only
 - **模型（context / coding）**: `deepseek-v4-flash`（provider=deepseek）
+
+---
+
+## 第5轮 · coding-only smoke（2026-08-16 23:27–00:06 CST 入账 · 未升 SCORECARD）
+
+对照第4轮 coding（`f20e8669-…`）与往返门控落地后的过程烟。**仅编码套件**；smoke 口径 **不作效果结论、不升 SCORECARD 主栏**。
+
+| 项 | 值 |
+|----|-----|
+| run_id | `01cd8c79-af58-46c7-839c-4bb6259fe452` |
+| status | completed · harness ok |
+| model | `deepseek-v4-flash` · free · coding n5+harness · `l1_max_parallel=2` |
+| 前置 | sweb 解题环境 + `issue_repro`（asset / 往返 / casefold 主张）+ verify_receipt schema 修复 |
+
+### coding · SWE-bench Lite n5 + harness
+
+通过 **12907 / 14182 / 14995 / 6938**；未过仅 **14365**（第4轮未过为 14182 → 本轮 **14182 转绿**；第4轮曾绿的 14365 本轮回落）。
+
+| 字段 | 第4轮 | 第5轮 | Δ |
+|------|------|------|---|
+| resolve / n_resolved | 0.8 / 4 | **0.8 / 4** | 同分异题 |
+| patch_rate / file_hit | 1.0 / 1.0 | 1.0 / 1.0 | 0 |
+| steps_total | 409 | **202** | −51% |
+| elapsed_s_total | 5214.0 | **3867.1** | −26% |
+| suite_wall_s（manifest） | 2854.1 | **≈2332** | −18% |
+| related_tests cov | 0.583 | **1.0** | +0.42 |
+| related_tests adoption | 0.40 | **0.0** | −0.40 |
+| test_summary | 7/42（0.167） | **8/16（0.50）** | ↑ |
+| n_testish / edit_ok_n | 42 / 12 | **16 / 9** | 试测更薄 |
+| tests_before_submit | 1.0 | 1.0 | 0 |
+| verify_receipt | 0.20 | **0.80**（n=4） | +0.60 |
+| verify_receipt_then_test | — | **0.25** | |
+| repro_rerun | 0.40 | 0.20 | −0.20 |
+| fuse_ok | 0.360（n=25） | **0.625**（n=8） | ↑ |
+| run_id | `f20e8669-…` | `01cd8c79-…` | |
+
+#### 按题
+
+| instance | 第4轮 steps / s | 第5轮 steps / s | harness |
+|----------|----------------:|----------------:|---------|
+| astropy-12907 | 117 / 1936 | **35 / 848** | resolved → resolved |
+| astropy-14995 | 110 / 684 | **30 / 358** | resolved → resolved |
+| astropy-6938 | 25 / 388 | 57 / 752 | resolved → resolved |
+| astropy-14182 | 114 / 1692 | **56 / 1784** | unresolved → **resolved** |
+| astropy-14365 | 43 / 513 | **24 / 125** | resolved → **unresolved** |
+
+#### 归因（方向，不作效果结论）
+
+- **14182**：补丁含 `header_rows` 写路径 + `data.start_line` 读侧；与「write→read 往返」义务同向。单题仍最慢（~30min），sweb + 回执后复现占主导。
+- **14365**：仍仅 `re.IGNORECASE`；issue 样例无小写 `NO`，casefold 门未逼出隐藏 F2P（`test_roundtrip[True]`）所需修法。
+- **过程**：回执率回升到 0.8；`test_summary` 到 0.5；related 采用率掉到 0（覆盖仍 1.0）。
+
+---
+
+## 第4轮 · 完整 smoke（2026-08-16 17:40–19:13 CST 入账 · 未升 SCORECARD）
+
+对照第2轮（INDEX **13**）。smoke 口径 **不作效果结论、不升 SCORECARD 主栏**。parent run：
+
+| 项 | 值 |
+|----|-----|
+| parent_run_id | `56b562a6-c537-46b0-8726-3d17c769f3c8` |
+| status | completed · 4/4 pass |
+| model | `deepseek-v4-flash` · free · coding n5+harness · `l1_max_parallel=2` |
+| embed | bge-m3@1024 / INDEX 13 |
+
+| 套件 | run_id | suite_wall_s |
+|------|--------|-------------:|
+| coding | `f20e8669-f572-4aff-ae03-3e2b166eab85` | **2854.1** |
+| retrieval_zh | `22961e61-3b9b-4b2e-9ec7-82a4a072c6da` | 730.8 |
+| retrieval（BEIR） | `42772fe3-5e66-4729-a789-7547fddcc572` | 1045.0 |
+| context | `cf2a1957-f95e-4d94-b38d-d279c4793848` | 936.3 |
+
+### coding · SWE-bench Lite n5 + harness
+
+通过 **12907 / 14995 / 6938 / 14365**；未过仅 **14182**（第2轮未过为 14182+14365 → 本轮 **14365 转绿**）。
+
+| 字段 | 第2轮 | 第4轮 | Δ |
+|------|------|------|---|
+| resolve / n_resolved | 0.6 / 3 | **0.8 / 4** | +0.2 / +1 |
+| patch_rate / file_hit | 1.0 / 1.0 | 1.0 / 1.0 | 0 |
+| steps_total | 269 | **409** | +52% |
+| elapsed_s_total | 4027.5 | **5214.0** | +29% |
+| suite_wall_s | 2308.6 | **2854.1** | +24% |
+| fuse_ok | 0.583（n=12） | **0.360**（n=25） | −0.22 |
+| no_ws_symbol | 6 | **17** | +11 |
+| related_tests cov | 0.556 | **0.583** | +0.027 |
+| related_tests adoption | 0.60 | **0.40** | −0.20 |
+| test_summary | 5/23（0.217） | **7/42（0.167）** | 仍远低于 0.6 |
+| n_testish / edit_ok_n | 23 / 9 | **42 / 12** | 试测↑ |
+| tests_before_submit | 1.0 | 1.0 | 0 |
+| verify_receipt | 0.6 | **0.20** | −0.40 |
+| repro_rerun | 0 | **0.40** | +0.40 |
+| run_id | `6926b961-…` | `f20e8669-…` | |
+
+#### 按题
+
+| instance | 第2轮 steps / s | 第4轮 steps / s | harness |
+|----------|----------------:|----------------:|---------|
+| astropy-12907 | 43 / 389 | 117 / 1936 | resolved → resolved |
+| astropy-14995 | 49 / 696 | 110 / 684 | resolved → resolved |
+| astropy-6938 | 47 / 488 | **25 / 388** | resolved → resolved |
+| astropy-14182 | 55 / 1465 | 114 / 1692 | unresolved → unresolved |
+| astropy-14365 | 75 / 990 | **43 / 513** | unresolved → **resolved** |
+
+### retrieval_zh · C-MTEB（n=20/集 · infra=0）
+
+| 字段 | 第2轮 | 第4轮 | Δ |
+|------|------|------|---|
+| ndcg_at_1 | 0.6000 | **0.5000** | −0.10 |
+| ndcg_at_10 | 0.6963 | **0.6777** | −0.019 |
+| ndcg_at_100 | 0.7038 | 0.6904 | −0.013 |
+| recall_at_10 | 0.8167 | **0.8667** | +0.050 |
+| recall_at_100 | 0.8500 | **0.9167** | +0.067 |
+| map_at_10 | 0.6588 | **0.6177** | −0.041 |
+| n_queries / n_qrels | 20 / 983 | 20 / 983 | 同档 |
+| suite_wall_s | 713.9 | 730.8 | +17s |
+| run_id | `4ddcfcfd-…` | `22961e61-…` | |
+
+### retrieval · BEIR（n=20/集 · INDEX 13 · **第一验收位**）
+
+| 字段 | 第2轮 | 第4轮 | Δ |
+|------|------|------|---|
+| ndcg_at_1 | 0.4333 | **0.4556** | +0.022 |
+| ndcg_at_10 | 0.4508 | **0.4964** | +0.046 |
+| ndcg_at_100 | 0.4179 | 0.4617 | +0.044 |
+| recall_at_1 | 0.2469 | **0.2803** | +0.033 |
+| recall_at_10 | 0.4327 | **0.4711** | +0.038 |
+| recall_at_100 | 0.4954 | **0.5252** | +0.030（回近第1轮 0.5296） |
+| map_at_10 | 0.3047 | **0.3520** | +0.047 |
+| map_at_100 | 0.3132 | 0.3619 | +0.049 |
+| n_queries / n_qrels | 20 / 423.7 | 20 / 423.7 | 同档 |
+| suite_wall_s | — | 1045.0 | 第4轮墙钟 |
+| run_id | `8c76c027-…` | `42772fe3-…` | |
+
+### context · LongBench（n=60 · scorer v2）
+
+| 字段 | 第2轮对照锚 | 第4轮 |
+|------|-------------|------|
+| agent_f1 | **0.5479** | **0.5282** |
+| agent_em | **0.3000** | **0.2667** |
+| n_cases / n_scored | 60 / 60 | 60 / 60 |
+| infra | 0 | 0 |
+| suite_wall_s | — | 936.3 |
+| run_id | `1029a918-…` | `cf2a1957-…` |
+
+### 全程归因（方向，不作效果结论）
+
+**编码** — resolve 0.6→0.8，**14365 首次转绿**；唯一未过仍是 14182。但墙钟/步数相对第2轮明显回升（wall 2309→2854、steps 269→409），`test_summary` 仍弱（0.17）。过程诊断：裸 worktree 上 `pip`/ `| tail` 假验证占步；解题侧虽已接 sweb.eval，模型仍常走 `run_command` 旁路。
+
+**中文检索** — R@10/R@100 抬升，nDCG/MAP 略回落；n=20 噪声大，方向可读、不作效果结论。
+
+**BEIR** — 相对第2轮全面回升（含第一验收位 R@100 0.495→0.525），接近第1轮 INDEX12；仍 smoke、不升主栏。
+
+**上下文** — F1/EM 略低于第2轮对照锚（0.528/0.267 vs 0.548/0.30）；同口径可读，不升主栏。
+
+### 第4轮之后已落地、待下一轮验收（不计入本轮数字）
+
+runtime 已重建（2026-08-16 ~19:23 CST）。下一轮 smoke 对照本表看：
+
+1. `run_command` pytest/`|tail` → `run_tests`/sweb 硬改道；拒 `pip`/`uv install`
+2. 同实例 sweb 容器复用 + 增量 sync（墙钟）
+3. env 探针（`python -c` / version → sweb）；拒 pip 时附带 probe
+4. `related_tests` 优先精确单文件命令
+
+关注：`suite_wall_s` / `steps_total` / `elapsed_s_total` / `test_summary_attach_rate`，以及 14182 题内秒数。
+
+> 第5轮 coding-only（`01cd8c79-…`）已对照验收：resolve 同为 0.8，**14182 转绿 / 14365 回落**；详见上文「第5轮」。
+
+---
+
+## 第3轮 · 工程加固与正向优化（2026-08-16 · 无完整数字 · 未升 SCORECARD）
+
+完整四套件曾启动后终止（run `56e39d61-…` → cancelled）；**本轮无效果数字**。工程项被第4轮完整 smoke 承接验收。
+
+### 本轮落地（相对第2轮锚点）
+
+| 线 | 改动 | 性质 |
+|----|------|------|
+| coding | harness 无 `resolve_rate` → suite **failed**（禁软吞 completed）；报告 mtime+instance 校验；baseline repair；`wait_ready=true`；解题侧 `run_tests`→本地 sweb.eval + 预拉冒烟 | **正向**：度量可信 / 真验证面 |
+| retrieval | 多轮 RRF 融合 + RRF 分计 nDCG；`latest_retrieval_zh` 指针；baseline `--update` 认 retrieval_zh | **正向** |
+| context | L1/L0 gold 统一 `answers_list`；CJK 按字 F1；free 臂先读 passage | **正向** |
+| 部署 | `make up` 脏模块重建；bake-cache 离线对齐；ops-eval sock 合成「SWE 评测环境」 | **修复 / 正向** |
+| 契约 | `ops_run_manifest.schema.json` + 单测；`docs/contracts.md` | **正向** |
 
 ---
 
