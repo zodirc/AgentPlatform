@@ -78,7 +78,8 @@ export function isOpsKeyLogItem(item: OfficialLogItem): boolean {
   ) {
     return true;
   }
-  if (/harness/i.test(s) && /\b(fail|error|resolve)\b/i.test(s)) return true;
+  // Full harness breadcrumb stream (progress / stage / case / done).
+  if (/^\[L1\]\s+coding\s+harness\b/i.test(s)) return true;
   return false;
 }
 

@@ -13,20 +13,55 @@ export const HARNESS_STAGE_LABEL: Record<string, string> = {
   instances_done: "实例跑完",
 };
 
+/** Parse Ops log ``at`` (ISO) into epoch ms; null if missing/invalid. */
+export function parseLogAtMs(at: string | null | undefined): number | null {
+  if (at == null || !String(at).trim()) return null;
+  const ms = Date.parse(String(at));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Prefer the earlier start so refresh / late SSE cannot reset a live timer. */
+export function preferEarlierStartedAtMs(
+  a: number | null | undefined,
+  b: number | null | undefined,
+): number | null {
+  const av = a != null && Number.isFinite(a) ? a : null;
+  const bv = b != null && Number.isFinite(b) ? b : null;
+  if (av == null) return bv;
+  if (bv == null) return av;
+  return Math.min(av, bv);
+}
+
+export type ParseCodingLiveOpts = {
+  /** Log event timestamp (ISO). Used for running-case wall clock across refresh. */
+  at?: string | null;
+  /** Fallback clock when ``at`` is absent (live first sighting). */
+  nowMs?: number;
+};
+
 /** Parse `[L1] coding …` / harness lines into the coding progress card. */
-export function parseCodingLiveLine(line: string): CodingLiveEvent | null {
+export function parseCodingLiveLine(
+  line: string,
+  opts?: ParseCodingLiveOpts,
+): CodingLiveEvent | null {
   const plan = line.match(/^\[L1\]\s+coding\s+plan\s+n=(\d+)\b/i);
   if (plan) {
     return { kind: "plan", n: Number(plan[1]) };
   }
   const start = line.match(/^\[L1\]\s+coding\s+case\s+start\s+(\S+)/i);
   if (start) {
+    const fromLog = parseLogAtMs(opts?.at);
+    const startedAtMs =
+      fromLog ??
+      (opts?.nowMs != null && Number.isFinite(opts.nowMs)
+        ? opts.nowMs
+        : Date.now());
     return {
       kind: "case",
       case: {
         iid: start[1],
         status: "running",
-        startedAtMs: Date.now(),
+        startedAtMs,
         steps: null,
         elapsedSec: null,
       },
@@ -208,7 +243,10 @@ export function applyCodingLiveEvent(
     harness: ev.case.harness ?? prev?.harness,
     steps: ev.case.steps ?? prev?.steps ?? null,
     elapsedSec: ev.case.elapsedSec ?? prev?.elapsedSec ?? null,
-    startedAtMs: ev.case.startedAtMs ?? prev?.startedAtMs ?? null,
+    startedAtMs: preferEarlierStartedAtMs(
+      ev.case.startedAtMs,
+      prev?.startedAtMs,
+    ),
   };
   // Harness-only case lines keep prior infer status when present.
   if (ev.case.harness && prev && !ev.case.bucket && !ev.case.patchSource) {
@@ -245,7 +283,7 @@ export function mergeCodingCase(
     harness: next.harness ?? prev.harness,
     steps: next.steps ?? prev.steps ?? null,
     elapsedSec: next.elapsedSec ?? prev.elapsedSec ?? null,
-    startedAtMs: next.startedAtMs ?? prev.startedAtMs ?? null,
+    startedAtMs: preferEarlierStartedAtMs(next.startedAtMs, prev.startedAtMs),
   };
 }
 

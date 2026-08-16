@@ -90,8 +90,8 @@ export function OfficialBenchPage() {
   const [codingNInstances, setCodingNInstances] = useState(5);
   const [codingHarness] = useState(true);
   const [codingCheckoutRepo, setCodingCheckoutRepo] = useState(true);
-  /** Await AST ready before StartTurn; default off (R1). */
-  const [workspaceIndexWaitReady, setWorkspaceIndexWaitReady] = useState(false);
+  /** Await AST ready before StartTurn; eval default on (product R1 unaffected). */
+  const [workspaceIndexWaitReady, setWorkspaceIndexWaitReady] = useState(true);
   const [codingTierMeta, setCodingTierMeta] = useState<CodingTierMeta[]>([
     { id: "n3", n_instances: 3 },
     { id: "n5", n_instances: 5 },

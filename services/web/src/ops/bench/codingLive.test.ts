@@ -31,15 +31,51 @@ describe("parseCodingLiveLine", () => {
   });
 
   it("marks case start for live elapsed ticks", () => {
-    const ev = parseCodingLiveLine("[L1] coding case start foo__bar-1");
+    const ev = parseCodingLiveLine("[L1] coding case start foo__bar-1", {
+      nowMs: 1_700_000_000_000,
+    });
     expect(ev?.kind).toBe("case");
     if (ev?.kind === "case") {
       expect(ev.case.status).toBe("running");
-      expect(typeof ev.case.startedAtMs).toBe("number");
+      expect(ev.case.startedAtMs).toBe(1_700_000_000_000);
+    }
+  });
+
+  it("uses log at for case start so refresh keeps wall clock", () => {
+    const ev = parseCodingLiveLine("[L1] coding case start foo__bar-1", {
+      at: "2026-08-16T12:00:00.000Z",
+      nowMs: 9_999_999_999_999,
+    });
+    expect(ev?.kind).toBe("case");
+    if (ev?.kind === "case") {
+      expect(ev.case.startedAtMs).toBe(Date.parse("2026-08-16T12:00:00.000Z"));
     }
   });
 });
 
+describe("mergeCodingLiveState startedAtMs", () => {
+  it("keeps earlier startedAtMs across snapshot merge", () => {
+    const prev = {
+      byIid: {
+        a: {
+          iid: "a",
+          status: "running" as const,
+          startedAtMs: 1_000,
+        },
+      },
+      harness: { ...EMPTY_CODING_HARNESS },
+    };
+    const next = {
+      a: {
+        iid: "a",
+        status: "running" as const,
+        startedAtMs: 50_000,
+      },
+    };
+    const merged = mergeCodingLiveState(prev, next, EMPTY_CODING_HARNESS);
+    expect(merged.byIid.a?.startedAtMs).toBe(1_000);
+  });
+});
 describe("sumCodingCaseStats", () => {
   it("sums finished steps/elapsed and live running elapsed", () => {
     const rows: CodingCaseLive[] = [

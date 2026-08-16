@@ -457,8 +457,8 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                   {tab === "log" ? (
                     <ol className="max-h-[28rem] space-y-2 overflow-y-auto text-xs">
                       <li className="pb-1 text-[11px] text-muted-foreground">
-                        仅 error 与关键步骤（suite / turn / phase /
-                        case）；完整过程在本页签与产物中查看
+                        仅 error 与关键步骤（suite / turn / phase / case /
+                        harness）；完整过程在「本轮」直播条与产物中查看
                       </li>
                       {logTabItems.length === 0 ? (
                         <li className="text-muted-foreground">暂无关键日志</li>

@@ -105,7 +105,7 @@ export function useOfficialBenchStream({
       }
       const ast = parseAstIndexLine(msg);
       if (ast) nextAst[ast.iid] = mergeAstIndexEntry(nextAst[ast.iid], ast);
-      const codingEvent = parseCodingLiveLine(msg);
+      const codingEvent = parseCodingLiveLine(msg, { at: item.at });
       if (codingEvent) {
         const applied = applyCodingLiveEvent(nextCoding, nextHarness, codingEvent);
         nextCoding = applied.byIid;
@@ -226,7 +226,7 @@ export function useOfficialBenchStream({
                 ...prev,
                 [ast.iid]: mergeAstIndexEntry(prev[ast.iid], ast),
               }));
-            const codingEvent = parseCodingLiveLine(message);
+            const codingEvent = parseCodingLiveLine(message, { at });
             if (codingEvent) {
               setCoding((prev) => {
                 const applied = applyCodingLiveEvent(
