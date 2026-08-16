@@ -144,7 +144,9 @@ def _naming_convention_tests(workspace: Path, rel: str, *, limit: int) -> list[s
     alt_pattern = f"{stem}_test.py"
     package = Path(rel).parent.name
 
-    # 1) Same directory + sibling/ancestor tests/ (non-recursive) — high precision.
+    # 1) Same directory + sibling/ancestor tests/ — stem-specific only (narrow).
+    #    Package-wide globs (test_{package}*) wait until stem hits are exhausted
+    #    so we do not push agents toward whole-suite / broad package runs.
     local: list[Path] = []
     for pat in (pattern, alt_pattern):
         local.extend(parent.glob(pat))
@@ -152,27 +154,44 @@ def _naming_convention_tests(workspace: Path, rel: str, *, limit: int) -> list[s
     if sibling_tests.is_dir():
         for pat in (pattern, alt_pattern):
             local.extend(sibling_tests.glob(pat))
+        # Exact file preferred over directory dump of every test_*.py under stem/.
+        exact = sibling_tests / f"test_{stem}.py"
+        if exact.is_file():
+            local.append(exact)
         mod_dir = sibling_tests / stem
         if mod_dir.is_dir():
-            local.extend(mod_dir.rglob("test_*.py"))
-            local.extend(mod_dir.rglob(alt_pattern))
+            local.extend(mod_dir.glob("test_*.py"))
+            local.extend(mod_dir.glob(alt_pattern))
     pkg = parent
     for _ in range(4):
         tests_dir = pkg / "tests"
         if tests_dir.is_dir():
             for pat in (pattern, alt_pattern):
                 local.extend(tests_dir.glob(pat))
-            if package:
-                local.extend(tests_dir.glob(f"test_{package}*.py"))
             nested = tests_dir / stem
             if nested.is_dir():
-                local.extend(nested.rglob("test_*.py"))
+                local.extend(nested.glob("test_*.py"))
         if pkg == workspace.resolve() or pkg.parent == pkg:
             break
         pkg = pkg.parent
     for path in local:
         if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
             return out
+
+    # 1b) Only if still empty: broader package-named tests (lower precision).
+    if not out and package:
+        pkg = parent
+        for _ in range(4):
+            tests_dir = pkg / "tests"
+            if tests_dir.is_dir():
+                for path in tests_dir.glob(f"test_{package}*.py"):
+                    if _append_unique(
+                        out, seen, workspace, path, rel_norm=rel_norm, limit=limit
+                    ):
+                        return out
+            if pkg == workspace.resolve() or pkg.parent == pkg:
+                break
+            pkg = pkg.parent
 
     # 2) Nested tests trees (astropy-style): recursive name match with time budget.
     top_tests = workspace / "tests"
@@ -380,30 +399,36 @@ def _import_reverse_scan(
     budget_files: int = _IMPORT_BUDGET_FILES,
     budget_ms: float = _IMPORT_BUDGET_MS,
 ) -> list[str]:
-    """Scan under ``tests/`` for imports of the edited module (AST-first)."""
+    """Scan package-local + top-level ``tests/`` for imports (AST-first)."""
     if not forms:
         return []
-    tests_root = workspace / "tests"
-    if not tests_root.is_dir():
+    roots = _candidate_tests_roots(workspace, rel)
+    if not roots:
         return []
     out: list[str] = []
     seen: set[str] = set()
     rel_norm = rel.replace("\\", "/")
     deadline = time.monotonic() + (budget_ms / 1000.0)
-    for path in _iter_test_files_under(
-        tests_root, budget_files=budget_files, deadline=deadline
-    ):
-        try:
-            text = path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        targets = _import_targets_from_text(text)
-        if not (targets & forms):
-            continue
-        if _append_unique(out, seen, workspace, path, rel_norm=rel_norm, limit=limit):
+    remaining = budget_files
+    for tests_root in roots:
+        if remaining <= 0 or time.monotonic() >= deadline:
             break
+        for path in _iter_test_files_under(
+            tests_root, budget_files=remaining, deadline=deadline
+        ):
+            remaining -= 1
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            targets = _import_targets_from_text(text)
+            if not (targets & forms):
+                continue
+            if _append_unique(
+                out, seen, workspace, path, rel_norm=rel_norm, limit=limit
+            ):
+                return out
     return out
-
 
 def _proximity_key(edited_rel: str, test_rel: str) -> tuple[int, int, str]:
     """Prefer tests sharing the longest path prefix with the edited file."""
@@ -418,13 +443,54 @@ def _proximity_key(edited_rel: str, test_rel: str) -> tuple[int, int, str]:
     return (-common, len(t_parts), test_rel)
 
 
+def _specificity_key(edited_rel: str, test_rel: str, stem: str) -> tuple[int, int, int, str]:
+    """Prefer exact ``test_{stem}.py``, then stem prefix, then proximity."""
+    name = Path(test_rel.replace("\\", "/")).name
+    if name == f"test_{stem}.py" or name == f"{stem}_test.py":
+        tier = 0
+    elif name.startswith(f"test_{stem}") or name.startswith(f"{stem}_test"):
+        tier = 1
+    else:
+        tier = 2
+    prox = _proximity_key(edited_rel, test_rel)
+    return (tier, prox[0], prox[1], prox[2])
+
+
+def _candidate_tests_roots(workspace: Path, rel: str) -> list[Path]:
+    """Ancestor/sibling ``tests/`` dirs (astropy layout) plus top-level tests/."""
+    roots: list[Path] = []
+    seen: set[str] = set()
+    parent = (workspace / rel).resolve().parent
+    ws = workspace.resolve()
+    for _ in range(8):
+        t = parent / "tests"
+        if t.is_dir():
+            key = str(t)
+            if key not in seen:
+                seen.add(key)
+                roots.append(t)
+        if parent == ws or parent.parent == parent:
+            break
+        parent = parent.parent
+    top = ws / "tests"
+    if top.is_dir():
+        key = str(top)
+        if key not in seen:
+            roots.append(top)
+    return roots
+
+
 def related_tests_for_path(
     path: str,
     *,
     workspace: Path | None = None,
     limit: int = _RELATED_MAX,
 ) -> list[dict[str, str]]:
-    """Return ≤limit ``{path, command}`` entries; never executes."""
+    """Return ≤limit ``{path, command}`` entries; never executes.
+
+    Commands are **file-scoped** ``python -m pytest <file> -x -q`` (never a
+    whole tests/ directory) so copy-paste stays narrow for sweb.eval.
+    """
     if language_for_path(path) is None:
         return []
     from app.tools.core.paths import _workspace_root
@@ -440,6 +506,7 @@ def related_tests_for_path(
         return []
 
     max_n = max(1, int(limit))
+    stem = _module_stem(rel)
     naming = _naming_convention_tests(root, rel, limit=max_n)
     imports = _import_reverse_tests(root, rel, limit=max_n)
 
@@ -450,7 +517,10 @@ def related_tests_for_path(
             continue
         if not (root / p).is_file():
             continue
+        # Never suggest a directory path as a related test target.
+        if p.endswith("/") or (root / p).is_dir():
+            continue
         seen.add(p)
         merged.append(p)
-    merged.sort(key=lambda p: _proximity_key(rel, p))
+    merged.sort(key=lambda p: _specificity_key(rel, p, stem))
     return _as_entries(merged[:max_n])

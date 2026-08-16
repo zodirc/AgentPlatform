@@ -70,6 +70,192 @@ def test_pager_parse_rejects_pipes_and_globs() -> None:
     assert try_parse_pager_command("head -n 5 a.py b.py") is None
 
 
+def test_extract_test_command_peels_tail_pipeline() -> None:
+    from app.structural.test_run_redirect import extract_test_command_for_redirect
+
+    cmd = (
+        "python -m pytest astropy/io/ascii/tests/test_rst.py -x -q "
+        "2>&1 | tail -15"
+    )
+    out = extract_test_command_for_redirect(cmd)
+    assert out == "python -m pytest astropy/io/ascii/tests/test_rst.py -x -q"
+
+
+def test_extract_test_command_peels_grep_filter() -> None:
+    from app.structural.test_run_redirect import extract_test_command_for_redirect
+
+    out = extract_test_command_for_redirect(
+        "python -m pytest tests/ -q -p no:logging 2>&1 | grep -E '^FAILED'"
+    )
+    assert out == "python -m pytest tests/ -q -p no:logging"
+
+
+def test_extract_test_command_rejects_non_tests() -> None:
+    from app.structural.test_run_redirect import (
+        extract_sweb_env_argv,
+        extract_test_command_for_redirect,
+        is_swe_env_install_command,
+    )
+
+    assert extract_test_command_for_redirect('python -c "import pytest"') is None
+    assert extract_test_command_for_redirect("ls | grep pytest") is None
+    assert is_swe_env_install_command("python -m pip install pytest hypothesis")
+    assert is_swe_env_install_command("pip install pyerfa")
+    assert not is_swe_env_install_command("python -m pytest -q")
+    assert extract_sweb_env_argv('python -c "import pytest"') == [
+        "python",
+        "-c",
+        "import pytest",
+    ]
+    assert extract_sweb_env_argv("python --version") == ["python", "--version"]
+    assert extract_sweb_env_argv("which pytest") == ["which", "pytest"]
+
+
+@pytest.mark.asyncio
+async def test_run_command_redirects_python_c_when_swe_marker(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from app.tools.core import tools as core
+    from app.tenant_context import bind_tenant_context, reset_tenant_context
+
+    (workspace / ".agent_swe_instance.json").write_text(
+        json.dumps(
+            {
+                "instance_id": "x__1",
+                "image_ref": "swebench/sweb.eval.x86_64.demo:latest",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def _fake_argv(**kwargs):  # noqa: ANN003
+        return {
+            "command": kwargs.get("display_command"),
+            "status": "passed",
+            "stdout": "ok",
+            "exit_code": 0,
+            "summary": "sweb.eval env",
+            "sandbox": {"backend": "sweb.eval", "reused": True},
+        }
+
+    monkeypatch.setattr(
+        "app.tools.core.swe_solve_env.maybe_run_swe_eval_argv", _fake_argv
+    )
+    # misc_tools imports the symbol into its local scope via function import —
+    # patch the module attribute used by the call site.
+    monkeypatch.setattr(
+        "app.tools.core.misc_tools.maybe_run_swe_eval_argv",
+        _fake_argv,
+        raising=False,
+    )
+    tokens = bind_tenant_context(work_root=str(workspace), ops_eval=True)
+    try:
+        # Patch where misc_tools resolves the name at call time.
+        import app.tools.core.swe_solve_env as sse
+
+        monkeypatch.setattr(sse, "maybe_run_swe_eval_argv", _fake_argv)
+        out = await core.run_command('python -c "import astropy"')
+    finally:
+        reset_tenant_context(tokens)
+    assert out.get("redirected_from") == "run_command"
+    assert out.get("status") == "passed"
+    assert "sweb.eval" in str(out.get("summary") or "")
+
+
+def test_related_tests_prefers_exact_stem_over_package(tmp_path: Path) -> None:
+    from app.structural.related_tests import related_tests_for_path
+
+    (tmp_path / "astropy/io/ascii").mkdir(parents=True)
+    (tmp_path / "astropy/io/ascii/rst.py").write_text("x=1\n", encoding="utf-8")
+    tests = tmp_path / "astropy/io/ascii/tests"
+    tests.mkdir(parents=True)
+    (tests / "test_rst.py").write_text("import astropy.io.ascii.rst\n", encoding="utf-8")
+    (tests / "test_ascii_basic.py").write_text("# broad\n", encoding="utf-8")
+    entries = related_tests_for_path("astropy/io/ascii/rst.py", workspace=tmp_path)
+    assert entries
+    assert entries[0]["path"].endswith("test_rst.py")
+    assert "python -m pytest" in entries[0]["command"]
+    assert "test_rst.py" in entries[0]["command"]
+    assert "/tests/" not in entries[0]["command"].rstrip("q") or "test_rst.py" in entries[
+        0
+    ]["command"]
+
+
+@pytest.mark.asyncio
+async def test_run_command_redirects_pytest_when_swe_marker(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    from app.tools.core import tools as core
+    from app.tenant_context import bind_tenant_context, reset_tenant_context
+
+    (workspace / ".agent_swe_instance.json").write_text(
+        json.dumps(
+            {
+                "instance_id": "astropy__astropy-14182",
+                "image_ref": "swebench/sweb.eval.x86_64.demo:latest",
+            }
+        ),
+        encoding="utf-8",
+    )
+    seen: dict[str, str] = {}
+
+    async def _fake_run_tests(command: str = "pytest -q", turn_id=None, **kwargs):  # noqa: ANN003
+        seen["command"] = command
+        return {
+            "command": command,
+            "status": "passed",
+            "stdout": "1 passed",
+            "exit_code": 0,
+            "summary": "ok",
+            "sandbox": {"backend": "sweb.eval"},
+        }
+
+    monkeypatch.setattr("app.tools.core.edit_tools.run_tests", _fake_run_tests)
+    tokens = bind_tenant_context(work_root=str(workspace), ops_eval=True)
+    try:
+        out = await core.run_command(
+            "python -m pytest astropy/io/ascii/tests/test_rst.py -q 2>&1 | tail -12"
+        )
+    finally:
+        reset_tenant_context(tokens)
+    assert out.get("redirected_from") == "run_command"
+    assert seen["command"] == "python -m pytest astropy/io/ascii/tests/test_rst.py -q"
+    assert "sweb.eval" in str(out.get("summary") or "") or out.get("sandbox", {}).get(
+        "backend"
+    ) == "sweb.eval"
+
+
+@pytest.mark.asyncio
+async def test_run_command_rejects_pip_install_when_swe_marker(
+    workspace: Path,
+) -> None:
+    import json
+
+    from app.tools.core import tools as core
+    from app.tenant_context import bind_tenant_context, reset_tenant_context
+
+    (workspace / ".agent_swe_instance.json").write_text(
+        json.dumps(
+            {
+                "instance_id": "x__1",
+                "image_ref": "swebench/sweb.eval.x86_64.demo:latest",
+            }
+        ),
+        encoding="utf-8",
+    )
+    tokens = bind_tenant_context(work_root=str(workspace), ops_eval=True)
+    try:
+        out = await core.run_command("python -m pip install pytest hypothesis")
+    finally:
+        reset_tenant_context(tokens)
+    assert out.get("status") == "rejected"
+    assert out.get("error") == "swe_eval_use_run_tests"
+
+
 @pytest.mark.asyncio
 async def test_pager_run_command_redirects_to_read(workspace: Path) -> None:
     from app.tools.core import tools as core

@@ -50,11 +50,25 @@ RUN --mount=type=bind,from=ts_grammar_cache,target=/tmp/ts-grammar-seed,ro \
     && rm -f /tmp/bake_ts_grammars.py
 
 FROM deps AS app
+ARG APT_MIRROR=mirrors.aliyun.com
 COPY services/runtime/app /app/app
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest
 COPY eval/recordings /app/eval/recordings
+# ops-eval solve-side: docker CLI for sweb.eval (see deploy/compose/ops-eval.yml).
+USER root
+RUN set -eux; \
+    if [ -n "${APT_MIRROR}" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
+      elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
+      fi; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends docker-cli ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
 USER app
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

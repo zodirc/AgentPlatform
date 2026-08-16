@@ -136,6 +136,7 @@ COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
 
 FROM deps AS app
 ARG EMBEDDING_MODEL
+ARG APT_MIRROR=mirrors.aliyun.com
 COPY services/runtime/app /app/app
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
@@ -143,6 +144,22 @@ COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest
 COPY eval/recordings /app/eval/recordings
 COPY services/runtime/docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
+
+# ops-eval solve-side run_tests needs the docker CLI (sock is mounted by
+# deploy/compose/ops-eval.yml). Keep this in the thin app stage so app/** /
+# CLI bumps do not re-run pip / sentence-transformers bake.
+USER root
+RUN set -eux; \
+    if [ -n "${APT_MIRROR}" ]; then \
+      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
+      elif [ -f /etc/apt/sources.list ]; then \
+        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
+      fi; \
+    fi; \
+    apt-get update && apt-get install -y --no-install-recommends docker-cli ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
 
 USER app
 ENV EMBEDDING_MODEL=${EMBEDDING_MODEL}

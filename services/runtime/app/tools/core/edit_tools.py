@@ -554,7 +554,9 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
 
 async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) -> dict[str, Any]:
     from app.structural.test_summary import attach_test_summary_for_run_tests
+    from app.tenant_context import current_ops_eval
     from app.tools.core.shell import run_argv_command
+    from app.tools.core.swe_solve_env import maybe_run_swe_eval_tests
     from app.tools.core.test_command_gate import gate_run_tests_command
 
     # SB0: gate before simulate so malicious commands never look "passed".
@@ -584,6 +586,16 @@ async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) ->
     check_cancel = _make_cancel_checker(turn_id) if turn_id is not None else None
 
     root = _workspace_root()
+    swe_out = maybe_run_swe_eval_tests(
+        work_root=root,
+        argv=list(gated.argv),
+        display_command=command,
+        timeout_s=float(settings.tool_default_timeout_seconds),
+        ops_eval=bool(current_ops_eval()),
+    )
+    if swe_out is not None:
+        return attach_test_summary_for_run_tests(swe_out)
+
     result = await run_argv_command(
         argv=gated.argv,
         cwd=root,
