@@ -2,9 +2,12 @@
 """LOC ratchet gate.
 
 Non-test ``.py`` / ``.ts`` / ``.tsx`` under ``services/`` must stay ≤ HARD_CAP
-unless listed in ``scripts/loc_allowlist.txt``. Allowlisted files may not grow
-above ``max + TOLERANCE``; once a file drops ≤ HARD_CAP, its allowlist entry
-must be removed.
+unless listed in ``scripts/loc_allowlist.txt``.
+
+Allowlist entries are **budgets** (round ceilings), not the file's current LOC.
+Allowlisted files may not grow above ``budget + TOLERANCE``. Once a file drops
+≤ HARD_CAP, remove its allowlist entry. Prefer splitting new modules over adding
+allowlist rows.
 """
 
 from __future__ import annotations
@@ -15,8 +18,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST_PATH = ROOT / "scripts" / "loc_allowlist.txt"
+# p95 of services/ sources sits near 800 — keep this as the default hard top.
 HARD_CAP = 800
-TOLERANCE = 20
+# Headroom on allowlisted budgets so small feature PRs do not thrash the allowlist.
+TOLERANCE = 100
 SCAN_ROOT = ROOT / "services"
 SUFFIXES = {".py", ".ts", ".tsx"}
 SKIP_DIR_NAMES = {
@@ -103,14 +108,14 @@ def check(*, allowlist: dict[str, int]) -> list[str]:
                 )
             elif n > cap + TOLERANCE:
                 errors.append(
-                    f"{rel}: grew to {n} lines (allowlist max {cap}, "
-                    f"tolerance +{TOLERANCE}). Split the module or ratchet the allowlist."
+                    f"{rel}: grew to {n} lines (allowlist budget {cap}, "
+                    f"tolerance +{TOLERANCE}). Split the module or raise the budget."
                 )
             continue
         if n > HARD_CAP:
             errors.append(
                 f"{rel}: {n} lines > {HARD_CAP} and not in loc_allowlist.txt. "
-                f"Split the module or (legacy only) add an allowlist entry."
+                f"Split the module or (legacy only) add a budget entry."
             )
     for rel, cap in sorted(allowlist.items()):
         if rel in seen_allow:
