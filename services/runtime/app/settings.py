@@ -201,6 +201,9 @@ class Settings(BaseSettings):
     model_top_p: Optional[float] = None
     model_tool_choice: str = "auto"  # auto | required | none
     model_thinking_enabled: bool = False
+    # OpenAI-compat reasoning. Empty/auto: GPT-5.x → high, DeepSeek → thinking+high.
+    # none disables extras. Relays that reject the fields are stripped on 400/422.
+    model_reasoning_effort: str = ""
     # AH4: autocompact summarizer budget (independent of main turn).
     compact_timeout_seconds: float = 20.0
     compact_max_output_tokens: int = 1024

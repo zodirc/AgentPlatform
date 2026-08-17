@@ -98,5 +98,5 @@ AgentEngine while true:
 
 - **重试**：仅在尚未吐出 token 前。  
 - **超时**：首字节快超时 + step/model/tool 分层超时；Stall Watchdog 防卡死。  
-- **`GenerationParams`**：对齐输出预留、scenario temperature、`tool_choice`。  
+- **`GenerationParams`**：对齐输出预留、scenario temperature、`tool_choice`。OpenAI 兼容路径：GPT-5.x 默认带 `reasoning_effort=high`，DeepSeek 带 `thinking` + `reasoning_effort`；中转 400/422 则剥掉未知字段重试。  
 - **reasoning**：映射为 `turn.thinking.delta`；默认不进投影正文快照。

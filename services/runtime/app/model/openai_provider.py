@@ -15,7 +15,13 @@ from app.model.gateway import (
     StreamActivity,
     classify_http_status,
 )
-from app.model.generation import GenerationParams, apply_tool_choice
+from app.model.generation import (
+    GenerationParams,
+    apply_openai_compat_reasoning,
+    apply_tool_choice,
+    openai_compat_retryable_status,
+    strip_next_openai_compat_field,
+)
 from app.model.openai_messages import _to_openai_messages
 from app.model.stream_abort import close_response_on_abort
 from app.settings import settings
@@ -85,6 +91,7 @@ class OpenAIProvider:
                 for t in tools
             ]
             apply_tool_choice(payload, gen.tool_choice, style="openai")
+        apply_openai_compat_reasoning(payload, model_name=self.model_name, gen=gen)
 
         headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
         text_parts: list[str] = []
@@ -102,74 +109,40 @@ class OpenAIProvider:
 
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream(
-                    "POST",
-                    self.chat_url,
-                    headers=headers,
-                    json=payload,
-                ) as resp:
-                    if resp.status_code >= 400:
-                        body = (await resp.aread()).decode(errors="replace")
-                        # Retry without stream_options for proxies that reject the field.
-                        if "stream_options" in body or resp.status_code in {400, 422}:
-                            payload.pop("stream_options", None)
-                            async with client.stream(
-                                "POST",
-                                self.chat_url,
-                                headers=headers,
-                                json=payload,
-                            ) as retry_resp:
-                                if retry_resp.status_code >= 400:
-                                    retry_body = (await retry_resp.aread()).decode(errors="replace")
-                                    raise classify_http_status(
-                                        retry_resp.status_code,
-                                        body=retry_body,
-                                        headers=retry_resp.headers,
-                                    )
-                                async for item in self._consume_stream(
-                                    retry_resp,
-                                    abort=abort,
-                                    text_parts=text_parts,
-                                    tool_calls=tool_calls,
-                                ):
-                                    if isinstance(item, tuple):
-                                        (
-                                            input_tokens,
-                                            output_tokens,
-                                            cache_read_input_tokens,
-                                            cache_creation_input_tokens,
-                                        ) = item
-                                    else:
-                                        yield item
-                                yield self._final_response(
-                                    text_parts,
-                                    tool_calls,
+                while True:
+                    async with client.stream(
+                        "POST",
+                        self.chat_url,
+                        headers=headers,
+                        json=payload,
+                    ) as resp:
+                        if resp.status_code >= 400:
+                            body = (await resp.aread()).decode(errors="replace")
+                            if openai_compat_retryable_status(
+                                status_code=resp.status_code, body=body
+                            ) and strip_next_openai_compat_field(payload):
+                                continue
+                            raise classify_http_status(
+                                resp.status_code,
+                                body=body,
+                                headers=resp.headers,
+                            )
+                        async for item in self._consume_stream(
+                            resp,
+                            abort=abort,
+                            text_parts=text_parts,
+                            tool_calls=tool_calls,
+                        ):
+                            if isinstance(item, tuple):
+                                (
                                     input_tokens,
                                     output_tokens,
                                     cache_read_input_tokens,
                                     cache_creation_input_tokens,
-                                )
-                                return
-                        raise classify_http_status(
-                            resp.status_code,
-                            body=body,
-                            headers=resp.headers,
-                        )
-                    async for item in self._consume_stream(
-                        resp,
-                        abort=abort,
-                        text_parts=text_parts,
-                        tool_calls=tool_calls,
-                    ):
-                        if isinstance(item, tuple):
-                            (
-                                input_tokens,
-                                output_tokens,
-                                cache_read_input_tokens,
-                                cache_creation_input_tokens,
-                            ) = item
-                        else:
-                            yield item
+                                ) = item
+                            else:
+                                yield item
+                        break
         except (ModelTransientError, ModelFatalError):
             raise
         except httpx.TimeoutException as exc:

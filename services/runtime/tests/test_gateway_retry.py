@@ -267,6 +267,7 @@ def test_generation_params_align_max_tokens_and_writing_temp(
     monkeypatch.setattr("app.model.generation.settings.model_top_p", None)
     monkeypatch.setattr("app.model.generation.settings.model_tool_choice", "auto")
     monkeypatch.setattr("app.model.generation.settings.model_thinking_enabled", False)
+    monkeypatch.setattr("app.model.generation.settings.model_reasoning_effort", "")
 
     writing = GenerationParams.from_settings(scenario_id="writing")
     assert writing.max_output_tokens == 30_000
