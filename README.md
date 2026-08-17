@@ -4,22 +4,23 @@
 
 产品面 `http://localhost/`
 
-## 文档 Wiki（GitHub 上直接点开）
+## 文档 Wiki
 
-在 GitHub 里请读 **Markdown**：标题、正文、控制流图都会渲染。仓库里的 `docs/tour/index.html` 点进去只是源码，不能当网页翻页。
+GitHub 上请点下面这一行（会打开 Markdown，正文和图都会渲染）。不要点仓库里的 `docs/tour/index.html`，那只是源码。
 
-**入口： [文档 Wiki](docs/README.md)**
+https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 
 | 想了解 | 打开 |
 |--------|------|
-| 一次提问怎么从浏览器走到推理 | [架构](docs/core/architecture.md) · [请求主路径图](docs/assets/architecture/request-path-zh.png) |
-| 组窗、问模型、跑工具 | [Runtime](docs/core/runtime.md) · [循环图](docs/assets/harness/agent-engine-loop-zh.png) |
-| 编码：找定义、改完再验 | [工具与上下文](docs/core/tools-and-context.md) |
-| 写作 / 搜资料 | [RAG](docs/topics/rag.md) · [工作台](docs/topics/workbench.md) |
-| 事件怎么上屏 | [事件与契约](docs/core/events.md) |
-| 现行冒烟数字 | [评测日记](eval/official/baseline/RESULTS.md) |
+| 一次提问怎么从浏览器走到推理 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/architecture.md |
+| 组窗、问模型、跑工具 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/runtime.md |
+| 编码：找定义、改完再验 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/tools-and-context.md |
+| 写作 / 搜资料 | https://github.com/zodirc/AgentPlatform/blob/master/docs/topics/rag.md |
+| 工作台（写作对照编码） | https://github.com/zodirc/AgentPlatform/blob/master/docs/topics/workbench.md |
+| 事件怎么上屏 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/events.md |
+| 现行冒烟数字 | https://github.com/zodirc/AgentPlatform/blob/master/eval/official/baseline/RESULTS.md |
 
-翻页导览（逐步「这一步在干什么」+ 图）：本地 `make docs-tour`。在线需仓库打开 GitHub Pages 之后访问 [控制流导览](https://zodirc.github.io/AgentPlatform/tour/)。
+本地翻页导览：`make docs-tour`（http://127.0.0.1:8765/tour/）。
 
 ---
 

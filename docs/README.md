@@ -1,13 +1,14 @@
 # 文档 Wiki
 
-在 **GitHub 网页**里点下面的 Markdown 即可阅读：标题、正文、图都会渲染。不要点 `tour/index.html` 当网页——仓库文件视图里那是源码。
+GitHub 上从仓库首页点进本页，或直接打开：
 
-翻页导览（图 + 逐步「这一步在干什么」）：
+https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 
-- 本地：`make docs-tour` → http://127.0.0.1:8765/tour/
-- 在线：仓库开启 GitHub Pages 之后 → `https://<owner>.github.io/<repo>/tour/`
+下面每一行也是完整地址，点了会进对应 Markdown（图会渲染）。不要点 `tour/index.html` 当网页。
 
-对错：**代码与契约 > 本目录六篇正文 > 导览**。数字以 [`RESULTS.md`](../eval/official/baseline/RESULTS.md) 为准。`plan/` 是可删草稿，不参与权威。
+翻页导览只在本地：`make docs-tour` → http://127.0.0.1:8765/tour/
+
+对错：**代码与契约 > 本目录六篇正文 > 导览**。数字以 https://github.com/zodirc/AgentPlatform/blob/master/eval/official/baseline/RESULTS.md 为准。`plan/` 是可删草稿，不参与权威。
 
 ---
 
