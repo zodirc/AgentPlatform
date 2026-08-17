@@ -788,64 +788,64 @@
       <section class="page" data-id="backend" data-group="总览" data-title="容器 · 负载 · 并发">
         <div class="card">
           <h2>后端：容器、负载与并发</h2>
-          <p class="lede">水平扩缩靠 runtime 副本与旁路 indexer，不把冷启动塞进 Turn 进程。压力先挡在 api 准入（429），再挡在每副本 inflight；满负荷的 runtime 停止领取，而不是把 cgroup 打满。</p>
+          <p class="lede">四层栈划分产品入口、控制面、执行面与数据面。启动受 compose <code>depends_on</code> + <code>service_healthy</code> 约束；跨服务实时事实只经 Postgres（<code>INSERT</code> + <code>NOTIFY</code> / <code>LISTEN</code>）；水平扩容增加 runtime 副本，每副本 inflight 默认 16。</p>
           <ol class="steps">
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what">请求只进产品面容器：Caddy → web 或 api</p>
-                <p class="why">默认栈：<code>agent-gateway</code> :80/:443，<code>agent-web</code>、<code>agent-api</code> :8000、<code>agent-runtime</code> :8001（不公网）、<code>agent-postgres</code>、<code>agent-ast-indexer</code>。可选 profile：<code>bench</code>（worker + 隔离库）、<code>ha</code>（runtime-a/b）、<code>queue</code>（redis + outbox worker）、<code>runtime-lite</code>。发布台是宿主机进程 <code>:9090</code>，不是第二套产品栈。</p>
+                <p class="what">公网仅进入产品面：Caddy 将 <code>/</code> 交给 web，将 <code>/api/*</code> 与 <code>/health/*</code> 交给 api</p>
+                <p class="why">默认栈：<code>agent-gateway</code> :80/:443，<code>agent-web</code>，<code>agent-api</code> :8000，<code>agent-runtime</code> :8001（不对浏览器暴露），<code>agent-postgres</code>，<code>agent-ast-indexer</code>。可选 overlay：<code>bench</code>、<code>ha</code>（<code>runtime-a</code>/<code>runtime-b</code>）、<code>queue</code>、<code>runtime-lite</code>。发布台是宿主机进程 <code>:9090</code>，不是第二套产品栈。无 FastAPI CORS；假定经网关同源。</p>
               </div>
             </li>
             <li>
               <span class="n">2</span>
               <div>
-                <p class="what">cgroup 上限约束单容器，不是宿主机预留</p>
-                <p class="why">postgres / bench-postgres 各 1g；api 1g；runtime 4g（GPU overlay → 12g）；ast-indexer 768m / 1.0 CPU；bench 6g（GPU → 12g）；web / gateway 未设硬限。RSS 之和仍可能打满物理内存。无 GPU → gte-small@384；VRAM≥8GiB → bge-m3@1024。runtime 与 bench 各加载一份权重。日志 json-file 10m × 3。</p>
+                <p class="what">启动顺序由 <code>depends_on</code> 与健康探针决定</p>
+                <p class="why"><code>postgres</code> 先 <code>pg_isready</code>（<code>bench-postgres</code> 仅 profile <code>bench</code>）。<code>runtime</code> 等 postgres，探针 <code>/health/live</code>（<code>start_period</code> 120s；未配置模型仍可起栈）。<code>web</code> 无依赖。<code>ast-indexer</code> 等 postgres+runtime；<code>api</code> 同样（bench 为 <code>required: false</code>）。api lifespan：pool → Alembic → 回收陈旧 Turn / 滞后投影 / 过期租约 → <code>LISTEN turn_events_channel</code>。<code>gateway</code> 等 api+web healthy 之后，产品面 <code>:80</code>/<code>:443</code> 才对外。<code>make start</code> 不 rebuild；<code>make up</code> 只重建 dirty；<code>make up-all</code> 强制全量。</p>
               </div>
             </li>
             <li>
               <span class="n">3</span>
               <div>
-                <p class="what">api 准入：未领取队列有帽，满则 429</p>
-                <p class="why">仅 pull 生效。全局 <code>DISPATCH_QUEUE_MAX</code> 未设时按 32；每用户 <code>PER_TENANT_QUEUE_MAX</code> 默认 2。满员返回 <code>dispatch_queue_full</code> / <code>per_tenant_queue_full</code> + Retry-After 5s。这不是 Turn <code>failed</code>。</p>
+                <p class="what"><code>mem_limit</code> 是单容器 cgroup 上限，不是宿主预留</p>
+                <p class="why">postgres / bench-postgres 各 1g；api 1g；runtime 4g（GPU overlay → 12g）；ast-indexer 768m / 1.0 CPU；bench 6g（GPU → 12g）；web / gateway 未设硬限。容器 RSS 之和仍可能打满物理内存。无 GPU → gte-small@384；VRAM≥8GiB → bge-m3@1024。runtime 与 bench 各加载一份权重。日志 json-file 10m × 3。</p>
               </div>
             </li>
             <li>
               <span class="n">4</span>
               <div>
-                <p class="what">runtime 有 inflight 额度才 claim，并心跳续约</p>
-                <p class="why"><code>RUNTIME_MAX_INFLIGHT_TURNS</code> 默认 16 / 副本；满则不领，任务留在队列。租约 <code>RUNNER_LEASE_SECONDS=60</code>，心跳 10s。无人领取超过 <code>TURN_CLAIM_TIMEOUT_SECONDS=15</code> → <code>failed(start_timeout)</code>。租约丢失且无法安全续跑 → <code>failed(runner_lost)</code>。HA：<code>make up-ha</code> 起 runtime-a/b，总并发 ≈ 副本数 × 16；claim 走 Postgres，不靠共享内存，也不再需要 <code>RUNTIME_URL_MAP</code>。</p>
+                <p class="what">两级压力闸：控制面准入满则 429；执行面 inflight 满则停止 claim</p>
+                <p class="why">仅 pull 生效。未领取队列全局默认 32、每用户 2；满员返回 <code>dispatch_queue_full</code> / <code>per_tenant_queue_full</code> + <code>Retry-After: 5</code>，Turn 尚未创建，不是 <code>failed</code>。<code>RUNTIME_MAX_INFLIGHT_TURNS</code> 默认 16 / 副本；租约 60s、心跳 10s。无人领取超过 15s → 先 202，后 <code>failed(start_timeout)</code>；租约丢失 → <code>failed(runner_lost)</code>。</p>
               </div>
             </li>
             <li>
               <span class="n">5</span>
               <div>
-                <p class="what">扩缩读分发指标，不改 Engine 形状</p>
-                <p class="why"><code>dispatch_wait_seconds</code> 持续偏高或 <code>dispatch_queue_depth</code> 顶满 → 加 runtime。ast-indexer 用 <code>SKIP LOCKED</code> 领解析，与 Turn 分进程。embedding / 资料同步 / SWE harness 在旁路或独立容器。HTTP 默认 1 个 uvicorn worker / 容器；扩副本，勿盲目 <code>workers=N</code>。push 回退才可能在 runtime 不可达时 502。</p>
+                <p class="what">扩容增加 runtime 副本；跨服务事实经 Postgres 闭环</p>
+                <p class="why">默认 1 份；<code>make up-ha</code> 以 <code>--scale runtime=0</code> 起 <code>runtime-a</code>/<code>runtime-b</code>。总 inflight ≈ 副本 × 16。共用同一 Postgres 与 <code>agent_data</code>，不改 Engine，不配置 <code>RUNTIME_URL_MAP</code>。读 <code>dispatch_wait_seconds</code> / <code>dispatch_queue_depth</code> 再扩。api <code>INSERT</code> + <code>pg_notify(turn_dispatch_channel)</code> → runtime <code>LISTEN</code>/claim → <code>INSERT turn_events</code> 触发 <code>turn_events_channel</code> → api <code>LISTEN</code> 后 SSE / <code>turn_views</code>。取消/批准走 <code>run_commands_channel</code>。HTTP 每容器单进程 uvicorn，勿设 <code>workers=N</code>。indexer / bench / 发布台不挡受理。</p>
               </div>
             </li>
           </ol>
           <table>
             <thead><tr><th>机制</th><th>旋钮（现行默认）</th><th>饱和时</th></tr></thead>
             <tbody>
-              <tr><td>分发</td><td><code>TURN_DISPATCH=pull</code></td><td>LISTEN / claim；push 为回退</td></tr>
-              <tr><td>准入</td><td>全局 32 · 每用户 2</td><td>HTTP 429 + Retry-After</td></tr>
-              <tr><td>副本 inflight</td><td>16</td><td>停止领取</td></tr>
+              <tr><td>分发</td><td><code>TURN_DISPATCH=pull</code></td><td>LISTEN / claim；push 为 HTTP 回退</td></tr>
+              <tr><td>准入</td><td>全局 32 · 每用户 2</td><td>HTTP 429 + Retry-After 5s</td></tr>
+              <tr><td>副本 inflight</td><td>16</td><td>停止 claim</td></tr>
               <tr><td>租约</td><td>60s / 心跳 10s</td><td><code>runner_lost</code> 回收</td></tr>
-              <tr><td>claim 超时</td><td>15s</td><td><code>start_timeout</code>（先 202）</td></tr>
+              <tr><td>claim 超时</td><td>15s</td><td>先 202，后 <code>start_timeout</code></td></tr>
               <tr><td>AST 队列</td><td><code>SKIP LOCKED</code></td><td>可多 indexer，不进热路径</td></tr>
               <tr><td>周期任务</td><td><code>pg_try_advisory_lock</code></td><td>单跑 reconcile / 保留</td></tr>
             </tbody>
           </table>
-          <p class="figure-lead">下图是准入、领取与租约的控制流（与 StartTurn 同一张海报）。容器 dirty / 分模块重建见上一页发布台图。细则 <code>docs/ops/pull-dispatch-runbook.md</code>。</p>
+          <p class="figure-lead">下图为分层架构：左栏启动依赖，中环经 Postgres 的 NOTIFY/LISTEN，执行面虚线槽表示再增加 runtime 副本。领取与 StartTurn 写序见后文；dirty 重建见上一页发布台。</p>
           <div class="src"><code>deploy/docker-compose.yml</code> · <code>deploy/compose/ha.yml</code> · <code>admission.py</code> · <code>turn_dispatch.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/events/start-turn-command-zh.png" alt="StartTurn 命令链：准入、领取、租约" />
+            <img src="../assets/architecture/backend-stack-zh.png" alt="后端架构：四层栈、启动依赖、扩容与 Postgres 数据通道" />
           </div>
-          <figcaption>准入 · 领取 · 租约详流 · 点击放大</figcaption>
+          <figcaption>后端架构 · 分层 / 启动 / 扩容 / 数据通道 · 点击放大</figcaption>
         </figure>
       </section>
 
@@ -1674,7 +1674,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         cover: "边界、权威与读法",
         principles: "R1–R5 热路径验收",
         topology: "Caddy · api · runtime",
-        backend: "cgroup · 429 · inflight 16",
+        backend: "四层栈 · 启动依赖 · 扩容",
         domain: "Work / Session / Turn / Run",
         "request-path": "受理 → 领取 → 投影",
         "start-turn": "202 与 turn.accepted",

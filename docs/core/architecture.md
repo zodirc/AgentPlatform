@@ -1,12 +1,12 @@
 # 架构
 
-部署拓扑、分模块发布、领域对象、场景与速率红线。两张主图：请求路径与发布台；Turn 生命周期另附详图。
+部署拓扑、分模块发布、容器负载与并发、领域对象、场景与速率红线。主图：请求路径、发布台、后端栈。
 
 ## 图
 
 1. [请求主路径](../assets/architecture/request-path-zh.png) — 浏览器 → 领取制 → Engine → 事件/SSE → Web  
 2. [分模块发布台](../assets/ops/release-modular-deploy-zh.png) — `:9090` · dirty · 分模块重建 · 如何确认已更新  
-3. [StartTurn 命令链](../assets/events/start-turn-command-zh.png) — 准入 429 · pull claim · 租约；容器/负载/并发见 [§1.2](#backend)  
+3. [后端栈 · 容器 / 负载 / 并发](../assets/architecture/backend-stack-zh.png) — 四层栈 · `depends_on` · NOTIFY/LISTEN · runtime 副本  
 
 ![请求主路径](../assets/architecture/request-path-zh.png)
 
@@ -21,20 +21,20 @@ Client
        └─ /api/* · /health/* → api :8000
               │
               ├─ 默认 TURN_DISPATCH=pull
-              │    INSERT turns/runs → 准入 → pg_notify(分发)
-              │    → runtime 自己领取并心跳续约 → TurnController
+              │    INSERT turns/runs → 准入 → pg_notify(turn_dispatch_channel)
+              │    → runtime LISTEN / claim + 心跳续约 → TurnController
               │
-              └─ 回退 push：HTTP 内部 start-turn → runtime :8001（不公网）
+              └─ 回退 push：HTTP /internal/commands/start-turn → runtime :8001（不公网）
 
 Postgres 16 + pgvector
   · 领域表 · turn_events · 产品向量
   · 另：run_commands / runners 租约（分发与控制命令）
 
 旁路（不挡受理）
-  · ast-indexer：后台把仓库函数/类名做成表。对话时只查这张表粗筛候选，不在提问热路径上重解析全仓。领取解析任务时用 SKIP LOCKED，避免两台 indexer 抢同一文件。
-  ·（可选）bench-postgres：Ops L1 向量隔离
+  · ast-indexer：后台解析工作区符号；Turn 热路径只读已构建投影，不重解析全仓。领取 `work_ast_index_jobs` 使用 `FOR UPDATE SKIP LOCKED`
+  ·（可选）bench-postgres：Ops L1 / 官方评测向量与产品库隔离
 
-卷：用户 Work 根 · /data 运行数据
+卷：宿主 workspace → `/workspace`；`agent_data` → `/data`
 ```
 
 | 组件 | 职责 | 明确不做 |
@@ -68,7 +68,7 @@ Postgres 16 + pgvector
 
 无 GPU → **gte-small@384**（CPU）；VRAM≥8GiB → **bge-m3@1024**。由 `scripts/resolve_embedding_profile.sh` 写 `embedding.auto.env` / `gpu.auto.yml`。runtime 与 bench **各加载一份**权重。
 
-并发要点：分发默认是 runtime 自己领取并心跳续约；一份副本同时在跑的提问数默认最多 16；队列满 → 准入 **429**；扩缩靠 runtime 副本与旁路 indexer，不把冷启动塞进 Turn。细则见下节与 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+并发：默认 `TURN_DISPATCH=pull`。每副本 inflight 默认 16；未领取队列满则准入 HTTP **429**。水平扩容增加 runtime 副本与旁路 indexer；符号表构建与资料同步不进入 Turn 热路径。细则见下节与 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
 
 起栈：`make up`（分模块重建脏服务）+ 发布台 `:9090`；全量 `make up-all`。配置入口 `.env`；**模型供应商在 Web「设置 → 模型」配置**。可选 overlay：queue、ha（双 runtime，同为 pull）、runtime-lite、ops-eval、bench。  
 Ops coding：看板 **SWE 评测环境** 一键完成挂 sock + 预拉/冒烟（`make ops-swe-eval-ready`）。
@@ -77,42 +77,86 @@ Ops coding：看板 **SWE 评测环境** 一键完成挂 sock + 预拉/冒烟（
 
 ### 1.2 容器、负载与并发
 
-主链：产品面进栈 → cgroup 上限 → api 准入 → runtime claim（inflight）→ 指标驱动加副本。发布台负责 dirty 重建，不参与这条热路径。
+下图按**分层位置**画现行 compose 栈，不是逐步流程图。产品面承接公网；控制面负责鉴权、准入与投影；执行面运行 AgentEngine；数据面是唯一跨服务实时桥。左栏为 `depends_on` 启动约束；右栏为扩容旋钮与旁路；中间环为 `INSERT` + `NOTIFY` / `LISTEN`。发布台 `:9090` 只做 dirty 重建，不进入热路径。
 
-```text
-Browser
-  → Caddy :80/:443
-       ├─ /          → web
-       └─ /api/*     → api :8000
-              │
-              ├─ 未领取队列满（全局 32 / 每用户 2）→ HTTP 429 + Retry-After
-              └─ INSERT turns/runs → NOTIFY
-                     │
-                     runtime 副本（默认 1；make up-ha → runtime-a/b）
-                       inflight < 16  → claim + lease 60s / 心跳 10s → TurnController
-                       inflight = 16  → 不领（压力留在队列，不打满 cgroup）
-                       claim > 15s    → failed(start_timeout)
-                       租约丢失       → failed(runner_lost)，可被其他副本回收
+#### 分层
 
-旁路（独立 cgroup / 进程）
-  ast-indexer 768m · 1 CPU · SKIP LOCKED
-  bench 6g（GPU → 12g）+ bench-postgres 1g
-  发布台 :9090（宿主机）
-```
+| 层 | 容器 | 职责 | 明确不做 |
+|----|------|------|----------|
+| **产品面** | `agent-gateway` :80/:443 · `agent-web` | TLS、路由；工作台消费 SSE 与 `GET /view` | 业务状态；直连 runtime |
+| **控制面** | `agent-api` :8000 · cgroup 1g | 鉴权、准入、落库、LISTEN、SSE、投影 `turn_views`、Ops 旁路 | 跑 Agent loop |
+| **执行面** | `agent-runtime` :8001（不公网）· 4g（GPU overlay → 12g） | claim、lease、Intake、AgentEngine、工具、检索、checkpoint、写 `turn_events` | 对浏览器开 SSE；UI 投影 |
+| **数据面** | `agent-postgres`（Postgres 16 + pgvector）· 1g | 领域表、`turn_events`、产品向量、`runners` 租约、`run_commands` | — |
+| **旁路** | `agent-ast-indexer` · `agent-bench` · 发布台 `:9090` | 符号表、官方评测 worker、分模块重建 | 阻塞 Turn 受理 |
+
+HTTP 平面：浏览器只访问 Caddy。Caddy 将 `/` 交给 web，将 `/api/*` 与 `/health/*` 交给 api。无 FastAPI CORS（假定经网关同源）。观测 `GET /metrics` 使用 `INTERNAL_SERVICE_TOKEN`。
+
+#### 启动顺序
+
+Compose 用 `depends_on` + `service_healthy`，不是无序并行拉起。
+
+| 服务 | 等待 | 健康探针 | 备注 |
+|------|------|----------|------|
+| postgres | — | `pg_isready` | 产品库先就绪；`bench-postgres` 仅 profile `bench` |
+| runtime | postgres | `GET :8001/health/live` | `start_period` 120s；未配置模型仍可起栈（`/health/ready` 才要求模型） |
+| web | 无 | 本容器 `GET /` | 可与库并行 |
+| ast-indexer | postgres + runtime | `/data/ast_indexer_heartbeat` 年龄 < 120s | 与 Turn 分进程；同 runtime 镜像、独立 PID |
+| api | postgres + runtime（`bench` 为 `required: false`） | `GET :8000/health/live` | lifespan：pool → Alembic → 回收陈旧 Turn / 滞后投影 / 过期租约 → `LISTEN turn_events_channel` |
+| gateway | api + web | `GET /health` | 此后产品面 `:80` / `:443` 对外 |
+
+起栈命令：
+
+| 命令 | 语义 |
+|------|------|
+| `make start` | 已有镜像，不 rebuild（主机重启后优先） |
+| `make up` | 先拉起，再只重建 dirty 模块；附带发布台 `:9090` |
+| `make up-all` | 强制全量 `compose --build` |
+| `make up-ha` | `--scale runtime=0` 后起 `runtime-a` / `runtime-b` |
+
+api `/health/ready` 会探测 runtime `/health/ready`；compose 健康检查用 `/health/live`，避免未配模型阻塞起栈。
+
+#### 数据流转
+
+服务之间禁止 Python 互 import。跨服务实时事实只经 Postgres：
+
+| 方向 | 机制 | 载荷 |
+|------|------|------|
+| api → PG | 同一事务 `INSERT` turns/runs（及视图种子）+ `pg_notify('turn_dispatch_channel')` | 待领取 Run；`pull_eligible=true` |
+| runtime ← PG | `LISTEN turn_dispatch_channel` + poll claim | 写入 `runners` 租约后进入 TurnController |
+| runtime → PG | `INSERT turn_events`（触发器 `pg_notify('turn_events_channel')`） | 事件行；runtime 不向浏览器推 SSE |
+| api ← PG | `LISTEN turn_events_channel` → 唤醒 SSE / 投影 `turn_views` | web 只读投影与 `GET /view` |
+| api → runtime | `INSERT run_commands` + `pg_notify('run_commands_channel')` | 取消 / 批准 / 补丁；`TURN_DISPATCH=push` 才回退 HTTP `start-turn` |
+| runtime/api → indexer | 入队 `work_ast_index_jobs` | indexer `FOR UPDATE SKIP LOCKED`；不在提问热路径上重解析 |
+
+`queue` overlay 才启用 Redis + outbox worker（`WORKER_MODE=outbox`）；默认 `inline`。
+
+#### 并发与扩容
 
 | 机制 | 旋钮（compose / settings 默认） | 饱和时 |
 |------|-------------------------------|--------|
-| 分发 | `TURN_DISPATCH=pull` | LISTEN/claim；`push` 为 HTTP 回退 |
-| 准入 | `DISPATCH_QUEUE_MAX` 未设→32；`PER_TENANT_QUEUE_MAX=2` | **429**，不是 Turn failed |
-| 副本 inflight | `RUNTIME_MAX_INFLIGHT_TURNS=16` | 停止领取 |
-| 租约 | `RUNNER_LEASE_SECONDS=60` · 心跳 10s | `runner_lost` |
+| 分发 | `TURN_DISPATCH=pull` | LISTEN / claim；`push` 为 HTTP 回退 |
+| 准入 | `DISPATCH_QUEUE_MAX` 未设或 0 → 32；`PER_TENANT_QUEUE_MAX=2` | HTTP **429** + `Retry-After: 5`（`dispatch_queue_full` / `per_tenant_queue_full`）；Turn 尚未创建，不是 `failed` |
+| 副本 inflight | `RUNTIME_MAX_INFLIGHT_TURNS=16` | 停止 claim，压力留在未领取队列，不打满 cgroup |
+| 租约 | `RUNNER_LEASE_SECONDS=60` · 心跳 10s | `failed(runner_lost)`，可被其他副本回收 |
+| claim 超时 | `TURN_CLAIM_TIMEOUT_SECONDS=15` | 先 202，后 `failed(start_timeout)` |
 | AST | indexer `SKIP LOCKED` | 与 Turn 分进程，可多副本 |
-| HTTP 进程 | 1 uvicorn worker / 容器 | 扩容器副本，勿盲目 `workers=N` |
+| HTTP 进程 | Dockerfile `CMD` 为单进程 uvicorn，未设 `--workers` | 扩容器副本；勿盲目 `workers=N` |
+| 周期任务 | `pg_try_advisory_lock` | 单跑 lease reclaim / claim timeout / 事件保留 |
 
-加并发：`make up-ha`（或再加 runtime 副本，同 Postgres）。总在跑 Turn 数 ≈ 副本数 × 16。HA 不依赖 `RUNTIME_URL_MAP`。  
-读指标再扩：`dispatch_wait_seconds` 持续偏高或 `dispatch_queue_depth` 顶满 → 加 runtime；见 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+加并发：`make up-ha`（或再增加 runtime 副本，共用同一 Postgres 与 `agent_data` 卷）。总 inflight ≈ 副本数 × 16。HA **不**配置 `RUNTIME_URL_MAP`（push 遗留）；claim 走数据库，不靠共享内存。`ha.yml` 将 api 的 `RUNTIME_URL` 指到 `runtime-a:8001`，仅供 push 回退。
 
-`mem_limit` 是 cgroup 上限，不是预留；容器 RSS 之和仍可能打满宿主物理内存。GPU overlay 把 runtime/bench 抬到 12g 并 `gpus: all`。queue profile 才起 redis + outbox worker，默认 inline。
+读指标再扩：`dispatch_wait_seconds` 持续偏高，或 `dispatch_queue_depth` / `unclaimed_accepted` 接近帽 → 增加 runtime。勿在 `event_pipeline_lag_seconds` 回退时盲目加副本。见 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+
+`mem_limit` 是 cgroup 上限，不是预留；容器 RSS 之和仍可能打满宿主物理内存。GPU overlay 把 runtime / bench 抬到 12g 并 `gpus: all`。日志 `json-file` 10m × 3。
+
+| 卷 | 用途 |
+|----|------|
+| 宿主 `workspace/` → `/workspace` | 默认 / 遗留 Work 根 |
+| `agent_data` → `/data` | 模型、ops-eval、AST heartbeat、`/data/works/{id}` |
+| seed writing / intel → `sources/seed/*`（RO） | 站立语料，不拷入用户沙箱 |
+| `pg_data` / `caddy_data` | 产品库；Caddy 证书与状态 |
+
+![后端栈 · 容器 / 负载 / 并发](../assets/architecture/backend-stack-zh.png)
 
 ## 2. 分模块发布（:9090）
 
@@ -170,7 +214,7 @@ Principal → default Work（work_id, work_root）
                 └── Session*（对话线程，携带 work_id）
                       └── Turn（一次用户输入的业务闭环）
                             ↔ Run（1:1 执行实例，checkpoint / cancel / 租约）
-                                 └── Step*（组窗 → 模型 → 工具；想收工却还欠验证时再跑一轮；仅事件粒度）
+                                 └── Step*（组窗 → 模型 → 工具；欠验证时可再一轮；仅事件粒度）
 ```
 
 | 对象 | 含义 | 关键约束 |

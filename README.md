@@ -6,25 +6,25 @@
 
 ## 文档 Wiki
 
-别人请打开在线翻页（左侧目录、切章不整页刷新、流程图会留在浏览器里）：
+公开阅读入口（左侧目录切章、不整页刷新；图首次加载后缓存）：
 
 https://zodirc.github.io/AgentPlatform/
 
-本地同样效果：`make docs-tour` → http://127.0.0.1:8765/tour/
+本地：`make docs-tour` → http://127.0.0.1:8765/tour/
 
-不要从 GitHub 文件视图点 Markdown / PNG 当 Wiki：每换一篇都是整页刷新，图约 1.5MB 会再下一次。若只想读正文源文件：
+不要把 GitHub 文件视图当作 Wiki：每次换篇都会整页刷新并重复下载约 1.5MB 的海报。对照源文件请用：
 
 https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 
 | 想了解 | 打开 |
 |--------|------|
-| 一次提问怎么从浏览器走到推理 | https://zodirc.github.io/AgentPlatform/tour/#request-path |
-| 容器、负载、并发 | https://zodirc.github.io/AgentPlatform/tour/#backend |
-| 组窗、问模型、跑工具 | https://zodirc.github.io/AgentPlatform/tour/#engine-loop |
-| 编码：找定义、改完再验 | https://zodirc.github.io/AgentPlatform/tour/#coding-fuse |
-| 写作 / 搜资料 | https://zodirc.github.io/AgentPlatform/tour/#rag |
+| 一次 Turn 如何从浏览器进入推理 | https://zodirc.github.io/AgentPlatform/tour/#request-path |
+| 容器、负载、并发与启动顺序 | https://zodirc.github.io/AgentPlatform/tour/#backend |
+| 组窗、模型调用、工具循环 | https://zodirc.github.io/AgentPlatform/tour/#engine-loop |
+| 编码：查找定义、修改后再验证 | https://zodirc.github.io/AgentPlatform/tour/#coding-fuse |
+| 写作 / 资料检索 | https://zodirc.github.io/AgentPlatform/tour/#rag |
 | 工作台（写作对照编码） | https://zodirc.github.io/AgentPlatform/tour/#writing |
-| 事件怎么上屏 | https://zodirc.github.io/AgentPlatform/tour/#events |
+| 事件如何投影到界面 | https://zodirc.github.io/AgentPlatform/tour/#events |
 | 现行冒烟数字 | https://zodirc.github.io/AgentPlatform/tour/#scorecard |
 
 ---
@@ -69,7 +69,7 @@ Postgres + pgvector · 旁路 ast-indexer · 默认含 bench
 | bench + bench-postgres | Official / L1（`make up` 默认起） |
 | contracts | OpenAPI / 事件 / 命令体 |
 
-`Work`（作品世界）→ `Session`（聊天线程）→ `Turn`（点一次发送）↔ `Run`（真正在跑的实例）。runtime 自己来领活并心跳续约。[架构详文](docs/core/architecture.md)
+`Work`（作品根）→ `Session`（对话线程）→ `Turn`（一次用户闭环）↔ `Run`（执行实例）。默认 `TURN_DISPATCH=pull`：runtime claim 并心跳续约。[架构](docs/core/architecture.md)
 
 ### `make up` 全量：8 容器
 
