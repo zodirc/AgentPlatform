@@ -411,6 +411,62 @@
       color: var(--muted);
     }
     .src code { font-size: 0.76rem; }
+    .steps {
+      list-style: none;
+      margin: 0.35rem 0 0.7rem;
+      padding: 0;
+    }
+    .steps > li {
+      display: grid;
+      grid-template-columns: 2rem 1fr;
+      column-gap: 0.8rem;
+      padding: 0.85rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .steps > li:last-child { border-bottom: 0; }
+    .steps .n {
+      width: 2rem;
+      height: 2rem;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #ecfdf5;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.78rem;
+      font-weight: 700;
+      line-height: 2rem;
+      text-align: center;
+    }
+    .steps .what {
+      margin: 0.1rem 0 0.28rem;
+      font-weight: 650;
+      font-size: 0.98rem;
+      letter-spacing: -0.02em;
+      line-height: 1.4;
+    }
+    .steps .why {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+      line-height: 1.58;
+    }
+    .steps .sig {
+      display: inline-block;
+      margin-top: 0.4rem;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.72rem;
+      color: #0f766e;
+      background: var(--accent-soft);
+      border: 1px solid #99f6e4;
+      border-radius: 999px;
+      padding: 0.1rem 0.5rem;
+    }
+    .figure-lead {
+      margin: 0 0 0.45rem;
+      font-size: 0.86rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    p { line-height: 1.58; }
   </style>
 </head>
 <body>
@@ -436,23 +492,22 @@
       <section class="page" data-id="cover" data-group="总览" data-title="封面">
         <div class="hero">
           <h2>一个内核，多个场景</h2>
-          <p>自托管 Agent Runtime：同一 <code style="color:#a7f3d0">AgentEngine</code>；场景差只经 Profile。本导览是六篇正文的分页版——编码怎么找定义、改完怎么验、评测题的测试为什么进 Docker，都写在「Runtime / 工具 / Coding」几页，按现行代码与第 4/5 轮冒烟。</p>
+          <p>自托管 Agent Runtime：同一条推理循环，写作 / 编码 / 情报只换工具和提示词。图用来看清分支；<strong>本导览的文字把每一步写成「在干什么」</strong>——比六篇正文更细，不把事件名当成流程本身。</p>
           <div class="badge-row">
-            <span class="badge">quality-uplift 批1–3 已落</span>
-            <span class="badge">INDEX 13</span>
-            <span class="badge">coding smoke 0.8 @ n5</span>
-            <span class="badge">锚点 SCORECARD 仍空</span>
+            <span class="badge">图看分支 · 文看逐步</span>
+            <span class="badge">编码冒烟 4/5</span>
+            <span class="badge">SCORECARD 主栏仍空</span>
           </div>
         </div>
         <div class="card">
           <h3>怎么读</h3>
           <ul>
-            <li>左侧目录 / 顶栏翻页；主图为 <code>docs/assets/**/*-zh.png</code> 中文详图海报（点击放大）。条文以<strong>本仓库代码、契约与六篇正文</strong>为准。 <code>make docs-tour</code></li>
-            <li><strong>权威</strong>：代码 + contracts → docs/core · docs/topics → 本页。plan/ 是可删草稿，不参与权威。</li>
-            <li>编码 Turn：找定义、看波及、改完再验、想收工却还欠验证时再催一轮、评测测进 Docker——与六篇同文</li>
+            <li>左侧目录 / 顶栏翻页；主图点击可放大。先看图上的箭头链，再读本页逐步说明——每一步标题是「干什么」，底下灰字是「为什么 / 不做会怎样」，绿色小条才是事件或字段名。</li>
+            <li>冲突时仍以<strong>代码与契约</strong>为准，其次六篇 markdown。本导览负责把流程讲明白，不另立一套权威。</li>
+            <li>GitHub 上请打开仓库 README 里的「文档 Wiki」（Markdown，图会渲染）。本 HTML 在仓库文件视图里只是源码；本地 <code>make docs-tour</code> 或 GitHub Pages 才当网页翻页。</li>
           </ul>
           <div class="callout">
-            条文按代码维护。流程图：保持 <code>docs/assets/**/*-zh.png</code> 原海报风格，只增补/校正现行细节。
+            条文按代码维护。图看分支，本页文字看逐步：标题是干什么，灰字是为什么，绿条才是事件名。
           </div>
         </div>
       </section>
@@ -461,25 +516,57 @@
       <section class="page" data-id="principles" data-group="总览" data-title="原则与红线">
         <div class="card">
           <h2>原则与速率红线</h2>
-          <p class="lede">扩能力 = 焊进工具结果或旁路索引；<strong>不改 while、不新增模型必须学会的工具名</strong>。三线 uplift 全部落在索引期 / 组装期 / 结果契约。</p>
-          <table>
-            <thead><tr><th>#</th><th>原则</th><th>验收含义</th></tr></thead>
-            <tbody>
-              <tr><td>R1</td><td>不挡受理</td><td><code>turn.accepted</code> / TTFB 不因新逻辑同步恶化</td></tr>
-              <tr><td>R2</td><td>首 token 前不加同步模型</td><td>禁止热路径同步摘要 / 裁判 / 改写</td></tr>
-              <tr><td>R3</td><td>热路径 CPU 毫秒级</td><td>整库 embed、大扫描不上主链</td></tr>
-              <tr><td>R4</td><td>重活异步</td><td>索引、审计、软预压缩走旁路</td></tr>
-              <tr><td>R5</td><td>可测才合并</td><td><code>make gate</code> / Ops suite 证明</td></tr>
-            </tbody>
-          </table>
-          <h3>硬约束 + 明确不做（近两日钉死）</h3>
+          <p class="lede">加能力时，把它焊进已有工具的返回值，或放到提问之外的旁路去做。不要改推理循环的形状，也不要让模型再学一套新工具名。下面五条是「用户提问这条热路径上不许变慢」的验收，不是口号编号。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">用户一点发送，就要尽快进入推理，不能为了新功能先卡住</p>
+                <p class="why">建符号表、同步资料库、跑评测，都不得挡在「受理这次提问」前面。产品对话不等索引建完。</p>
+                <span class="sig">不挡受理</span>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">模型开始吐第一个字之前，禁止再同步喊一次模型</p>
+                <p class="why">不要在热路径上做摘要、裁判、改写。这些可以异步，不能让用户干等第二趟调用。</p>
+                <span class="sig">首 token 前不加同步模型</span>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">提问热路径上的 CPU 必须是毫秒级</p>
+                <p class="why">整库向量化、全仓扫描这类重活禁止上主链。查符号表只读已经建好的内存投影。</p>
+                <span class="sig">热路径 CPU 毫秒级</span>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">重活放到提问环外异步做</p>
+                <p class="why">资料索引、审计、软预压缩走旁路。Turn 结束若窗口偏满，可后台刷新会话摘要，不挡下一轮第一个字。</p>
+                <span class="sig">重活异步</span>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">没有可重复的证明，不合并</p>
+                <p class="why"><code>make gate</code> 和完整证明脚本挡合并。官方 Bench 是效果温度计，不是合入门禁。</p>
+                <span class="sig">可测才合并</span>
+              </div>
+            </li>
+          </ol>
+          <h3>还钉死的几件事</h3>
           <ul>
-            <li>服务间无 Python 互 import；事实桥 = Postgres LISTEN/NOTIFY。</li>
-            <li>Engine 禁止 <code>if scenario ==</code>（<code>constitution-check</code>）。</li>
-            <li>Cancel ≠ failed；审批恢复同 <code>run_id</code>；审批门 ⊥ 沙箱门。</li>
-            <li><strong>不做</strong> CST / call-graph / 全仓 LSP indexing；不做给 agent 挂 <code>search_sources</code>（场景隔离）。</li>
-            <li><strong>不做</strong> smoke 升 SCORECARD；harness 无 resolve → suite failed（不得粉饰 completed）。</li>
-            <li>编码结论：模型几乎总能碰到该改的文件，查找调用占比极低 → <strong>官方通过率的瓶颈不在符号表/语言服务器</strong>，而在改对没有、验没验过。</li>
+            <li>api / runtime / web 之间不互相 import Python；实时事实只经 Postgres 通知。</li>
+            <li>推理循环里禁止 <code>if scenario == "…"</code>；场景差只经配置注入。</li>
+            <li>用户点取消是终态，不等于跑失败。审批挂起再用同一个执行实例续跑。</li>
+            <li>「允不允许跑」和「跑起来能写哪」是两道门。官方编码评测还会把测试送进该题 Docker，与这两道门都无关。</li>
+            <li>编码场景不用资料检索来找代码位置；写作场景不打开查找/改文件那套结构工具。</li>
+            <li>冒烟分数不升 SCORECARD 主栏。官方评测程序自己挂了，不得标成「模型得了 0 分」。</li>
           </ul>
           <div class="src"><code>docs/core/architecture.md</code> · <code>docs/core/tools-and-context.md</code></div>
         </div>
@@ -489,32 +576,52 @@
       <section class="page" data-id="topology" data-group="总览" data-title="部署拓扑">
         <div class="card">
           <h2>部署拓扑</h2>
-          <p class="lede">产品面始终 <code>http://localhost/</code>（Caddy）。发布台 <code>:9090</code> 是同仓旁路，不另起业务栈。</p>
-<pre>Client
-  → Caddy :80/:443
-       ├─ /          → web（工作台；SSE + GET /view）
-       └─ /api/*     → api :8000
-              │
-              ├─ 默认 TURN_DISPATCH=pull
-              │    INSERT turns/runs → 准入 → pg_notify
-              │    → runtime LISTEN / claim + lease → TurnController
-              │
-              └─ 回退 push：HTTP /internal/commands/start-turn → runtime :8001
-
-Postgres 16 + pgvector
-  · 领域表 · turn_events · 产品向量 · run_commands / runners 租约
-
-旁路（不挡受理）
-  · ast-indexer：工作区 AST 冷启/增量
-  · bench + bench-postgres：Ops L1（make up 默认起）</pre>
+          <p class="lede">浏览器只打产品面 <code>http://localhost/</code>。Caddy 把页面交给工作台，把接口交给 api。runtime 不对浏览器说话。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">网关只做 TLS 和路由</p>
+                <p class="why">Caddy 把 <code>/</code> 交给 web 工作台，把 <code>/api/*</code> 交给 api。它不存业务状态，也不做鉴权逻辑。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">api 落库这次提问，并通知有人来领</p>
+                <p class="why">鉴权、队列满了回 429、把 turns/runs 写入 Postgres，然后发一条数据库通知。它自己<strong>不跑</strong>推理循环。客户端先拿到 202，表示「已经记下了」，不是「已经开始想了」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">runtime 自己来领活，领了之后心跳续约</p>
+                <p class="why">有空位才领；领了就要持续续约，断了这题作废，控制面可以收回给别的副本。满负荷不领，压力挡在 api，而不是把 runtime 撑爆。只有回退模式才是 api HTTP 把任务推过去。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">runtime 把发生的事写成事件行，api 再发给浏览器</p>
+                <p class="why">推理、工具、审批都在 runtime。它只往 Postgres 追加事件。api 监听这些行，一边做实时流，一边做列表快照。工作台只跟事件流和快照走，不自己猜「现在进行到哪一步」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">符号表和评测在旁路，不挡用户提问</p>
+                <p class="why">后台进程把仓库函数名做成表，对话时只查这张表。评测 worker 用另一套库，避免刷分污染用户资料。发布台 <code>:9090</code> 只用来看哪个模块脏了、一键重建，不是第二套产品。</p>
+              </div>
+            </li>
+          </ol>
           <table>
-            <thead><tr><th>组件</th><th>职责</th><th>明确不做</th></tr></thead>
+            <thead><tr><th>组件</th><th>干什么</th><th>明确不做</th></tr></thead>
             <tbody>
-              <tr><td>web</td><td>场景工作台</td><td>推断 Turn 阶段；直连 runtime</td></tr>
-              <tr><td>api</td><td>鉴权、准入、落库、SSE、投影、Ops</td><td>跑 Agent loop</td></tr>
-              <tr><td>runtime</td><td>claim、Intake、Engine、工具、RAG、checkpoint</td><td>对浏览器开 SSE</td></tr>
-              <tr><td>ast-indexer</td><td>工作区符号旁路索引</td><td>进 StartTurn 热路径；替代 LSP</td></tr>
-              <tr><td>bench</td><td>官方评测 worker</td><td>默认产品 Turn 路径</td></tr>
+              <tr><td>web</td><td>场景工作台：聊天、设置、消费实时流和首屏快照</td><td>推断提问进行到哪；直连 runtime</td></tr>
+              <tr><td>api</td><td>鉴权、准入、落库、通知领取、对外实时流、列表投影、评测旁路</td><td>跑推理循环</td></tr>
+              <tr><td>runtime</td><td>领取任务、读入用户输入、推理循环、工具、检索、断点、写事件</td><td>对浏览器开实时流</td></tr>
+              <tr><td>ast-indexer</td><td>后台扫工作区符号，供找定义时粗筛</td><td>挡在提问前面；替代语言服务器；进资料检索向量库</td></tr>
+              <tr><td>bench</td><td>官方评测 worker</td><td>日常用户提问路径</td></tr>
             </tbody>
           </table>
           <div class="grid-2" style="margin-top:0.85rem">
@@ -535,9 +642,10 @@ Postgres 16 + pgvector
               </ul>
             </div>
           </div>
+          <p class="figure-lead">下图是发布台怎么对比代码、标脏模块、一键重建。上面逐步说的是日常请求怎么穿过 Caddy → api → runtime。</p>
           <div class="src">来源：根 <code>README.md</code> · <code>deploy/docker-compose.yml</code></div>
         </div>
-                                        <figure class="figure">
+        <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/ops/release-modular-deploy-zh.png" alt="分模块发布台详流" />
           </div>
@@ -548,29 +656,40 @@ Postgres 16 + pgvector
       <!-- 3 -->
       <section class="page" data-id="domain" data-group="领域" data-title="对象与状态机">
         <div class="card">
-          <h2>领域对象与 Turn 状态机</h2>
-<pre>Principal → Work（work_id, work_root）
-              └── Session*（transcript / 策略 / compact 摘要）
-                    └── Turn（一次用户闭环）
-                          ↔ Run 1:1（checkpoint · cancel · lease）
-                               └── Step*（仅事件粒度）</pre>
-          <table>
-            <thead><tr><th>对象</th><th>含义</th><th>关键约束</th></tr></thead>
-            <tbody>
-              <tr><td>Work</td><td>稿件与资料世界根</td><td>不随 Session compact 拆散</td></tr>
-              <tr><td>Session</td><td>连续性容器</td><td>换 Session 不换默认 Work</td></tr>
-              <tr><td>Turn</td><td>受理到终态</td><td>恰好一个 Run</td></tr>
-              <tr><td>Run</td><td>agentic loop 实例</td><td>审批挂起仍同 run_id</td></tr>
-            </tbody>
-          </table>
-<pre>pending → running ⇄ waiting_approval
-               ↓
-        completed | failed | cancelled</pre>
-          <ul>
-            <li><code>failed(start_timeout)</code>：无人领取超时</li>
-            <li><code>failed(runner_lost)</code>：租约丢失无法安全续跑</li>
-            <li>取消后继续聊 = 同 Session <strong>新 Turn</strong></li>
-          </ul>
+          <h2>领域对象与一次提问的状态</h2>
+          <p class="lede">用户心里是「一本书 / 一个仓库」。工程上拆成四层，避免把稿件世界和这一次对话缠在一起。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">Work 是稿件和资料的世界根</p>
+                <p class="why">大纲、正文、资料目录都挂在这里。换一条聊天线程，默认还是这个世界，不会因为压缩对话就把书拆散。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">Session 是连续性容器</p>
+                <p class="why">同一本书可以开多条聊天。它装着对话记录、策略、压缩摘要。换 Session 只换天线，不换默认 Work。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">Turn 是用户点一次发送的业务闭环</p>
+                <p class="why">从受理到完成 / 失败 / 取消。一次提问恰好对应一个执行实例。取消后再聊，是同 Session 里的<strong>新一次提问</strong>，不是把旧的续上。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">Run 是这次提问真正在跑的执行实例</p>
+                <p class="why">推理循环、断点、取消、租约都挂在它上面。等人点批准时状态变成「等待审批」，但还是同一个实例；批准后接着跑，不另起炉灶。</p>
+              </div>
+            </li>
+          </ol>
+          <p>状态只能这样走：排队 → 运行 ⇄ 等待审批 → 完成 / 失败 / 取消。无人领取超时、租约丢失，都记在失败族里，不等于用户点了取消。</p>
+          <p class="figure-lead">下图是一次提问的状态怎么走。等待审批是横跳，不是终态。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -584,18 +703,53 @@ Postgres 16 + pgvector
       <section class="page" data-id="request-path" data-group="领域" data-title="请求主路径">
         <div class="card">
           <h2>请求主路径（端到端）</h2>
-          <ol>
-            <li>Web POST 会话 turn → api 鉴权 / 准入</li>
-            <li>同一事务 INSERT <code>turns</code> + <code>runs</code>；pull 可领则 NOTIFY</li>
-            <li>客户端先得 <strong>202</strong>；业务首事件 <code>turn.accepted</code> 在 runtime claim 后发出</li>
-            <li>runtime：lease 心跳 → Profile → ToolScope → Intake → Engine</li>
-            <li>关键节点 append-only <code>turn_events</code> → pg_notify</li>
-            <li>api LISTEN → SSE 回放 + UPSERT <code>turn_views</code></li>
-            <li>Web 只消费事件流与投影；不推断阶段</li>
+          <p class="lede">用户点发送之后，真正「开始想」的时刻，不是 HTTP 202，而是 runtime 领到活之后发出的第一件业务事件。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">工作台把这次提问 POST 给 api</p>
+                <p class="why">api 先鉴权，确认会话、作品、场景都合法。队列已经堆满还没人领 → 直接 429，让客户端过会儿再试，而不是把 runtime 打满。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">同一事务写下提问和执行实例，并通知领取</p>
+                <p class="why">turns 和 runs 一起落库，还播一颗列表视图的种子。然后发数据库通知。客户端此时拿到 202：请求已被接受入队。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">runtime 有空位才领，领了就续约</p>
+                <p class="why">读出启动规格（场景、是否官方评测、模型密文等），发出「这题开始了」。从这一刻起才算业务首事件；首字到达时间看它经实时流到浏览器的时刻。</p>
+                <span class="sig">turn.accepted</span>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">先确定性整理输入，再进推理循环</p>
+                <p class="why">斜杠命令、@路径、附件在进模型前就处理完。纯本地命令（例如 /help）可以零模型结束。场景由 api/会话指定，不让模型猜「这是写作还是编码」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">循环里每件关键事都追加成事件行</p>
+                <p class="why">思考增量、工具起停、等人批准，都写进事件表。api 监听到 turn_id，一边按序号回放给浏览器，一边更新列表快照。思考增量默认只走实时流，不进首屏快照。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">6</span>
+              <div>
+                <p class="what">工作台只消费事件和快照</p>
+                <p class="why">界面不推断阶段。断线用 Last-Event-ID 续上。runtime 不对浏览器开流，也不靠进程内管道当事唯一源。</p>
+              </div>
+            </li>
           </ol>
-          <div class="callout">
-            <strong>易混点：</strong>api「尽快」只做落库 + 分发；TTFB 看 <code>turn.accepted</code> 经 SSE 到达时刻。
-          </div>
+          <p class="figure-lead">下图是这条链的控制流海报。编号圆和箭头对上面逐步。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -608,15 +762,47 @@ Postgres 16 + pgvector
       <!-- 5 -->
       <section class="page" data-id="start-turn" data-group="领域" data-title="StartTurn 命令链">
         <div class="card">
-          <h2>StartTurn / 控制命令</h2>
-          <p class="lede">api 尽快只做落库和分发通知，不把任务推到 runtime。runtime 有空位才领，领了之后心跳续约。客户端先拿到 202；业务上「这题开始了」要等 runtime 发出 <code>turn.accepted</code>。</p>
-          <p>超过领取时限仍无人领 → <code>failed(start_timeout)</code>；租约丢失且无法安全续跑 → <code>failed(runner_lost)</code>。回退模式才是 api HTTP 调 runtime 的 <code>start-turn</code>，传输失败则客户端 502。</p>
-          <h3>同族控制命令</h3>
-          <p>取消 / 审批 / patch 等默认经 <code>run_commands</code> + NOTIFY，由<strong>当前持有租约</strong>的 runtime 副本消费（HTTP 内部命令可作兼容回退）。</p>
-          <h3>官方评测无人值守</h3>
-          <p>这次提问带评测标记时，StartTurn 即预批准写盘和 exec，不拦人审。字段随 checkpoint 存活。</p>
-          <h3>旁路预热</h3>
-          <p>Profile 打开结构预热且设置允许时，StartTurn 上后台预热符号表，不 await——不挡 <code>turn.accepted</code> / 首 token。</p>
+          <h2>一次提问怎么被启动</h2>
+          <p class="lede">api 尽快只做落库和打招呼；真正开工的是 runtime 来领。取消、批准、接受补丁走同一条命令通道，送给<strong>当前持有租约</strong>的那份 runtime。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">客户端发出「开始这一次提问」</p>
+                <p class="why">POST 到当前会话。api 校验会话、作品、场景。未领取队列已经满了就拒绝，并告诉客户端过会儿再试。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">落库后立刻 202，同时通知有空的 runtime</p>
+                <p class="why">提问和执行实例同一事务写入。这时浏览器可以开始听事件，但还没有「开始想」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">runtime 领到活，发出「这题开始了」</p>
+                <p class="why">超过领取时限仍无人领 → 记失败（无人领取）。心跳断了无法安全续跑 → 记失败（租约丢失）。回退才是 api HTTP 把任务推到 runtime，推失败则客户端 502。</p>
+                <span class="sig">turn.accepted</span>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">取消、批准、补丁决定送给正在跑的那份副本</p>
+                <p class="why">写进命令表并通知。只有持有租约的 runtime 会消费。HTTP 内部命令只是兼容回退。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">官方评测题开工即预批准写盘和执行</p>
+                <p class="why">无人值守，不拦人审。编码评测可以在开题前等符号表 ready；产品对话仍然先受理，不等索引。</p>
+              </div>
+            </li>
+          </ol>
+          <p class="figure-lead">下图是这条命令链的海报。菱形「是否领取制」对应第 2–3 步。</p>
           <div class="src">代码：<code>services/api/app/routers/</code> · <code>services/runtime/app/controller/turn_dispatch.py</code> · <code>turn_controller.py</code></div>
         </div>
                 <figure class="figure">
@@ -630,32 +816,46 @@ Postgres 16 + pgvector
       <!-- 6 -->
       <section class="page" data-id="runtime-layers" data-group="Runtime" data-title="Controller 与 Engine">
         <div class="card">
-          <h2>两层结构</h2>
-<pre>TurnController（不进 while）
-  · runtime 自己领取（默认）或 api HTTP 推送 start-turn（回退）
-  · runner 租约心跳；丢失可回收
-  · ScenarioRegistry.get → Profile → ToolScope
-  · Intake：InputCompiler（slash、@path、附件）
-  · shouldQuery：纯本地命令可零模型结束
-  · 发 turn.accepted → Engine；收尾写终态
-
-AgentEngine while step_count &lt; max_steps:
-  1. ContextEngine.assemble（卫生 + 80/90/95）
-  2. ModelGateway.stream（可 abort；网关 Cancel ~50ms；工具流内 ~250ms）
-  3. 解析 text · thinking · tool_use
-  4. 有 tool → 审批？→ 执行 → tool_result
-     · 更新「还欠测试 / 还欠 issue 例子」；官方编码评测可把测改去该题 Docker
-     · checkpoint → continue
-  5. 无 tool → 若想收工却还欠验证：
-     · 塞一条用户口吻提醒 + tool.completed(verify_receipt=true)
-     · continue（再进一轮，不是合成 tool_result）
-     · 否则 final 退出
-  6. 每步 finally：checkpoint</pre>
-          <ul>
-            <li>Controller 管 Turn 前后；Engine 管推理循环，不感知 scenario 名字。</li>
-            <li>Guard（取消 / 分层超时 / Stall Watchdog）旁挂全程，不是 while 新节点。</li>
-            <li><code>agent</code> Profile <code>max_steps: 150</code>；<code>writing</code> 为 40。</li>
-          </ul>
+          <h2>外壳管前后，循环管思考</h2>
+          <p class="lede">TurnController 不进 while：它负责领活、读配置、整理输入、发出「开始了」、收尾写终态。真正反复「组窗 → 问模型 → 跑工具」的是 Engine。取消、超时、卡住看门狗旁挂全程，不是循环里新加的节点。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">为这一步拼出模型窗口</p>
+                <p class="why">先做卫生：超长工具结果头尾截断、同一文件的旧读取折成短占位、成串旧工具结果折短。窗口将满时再按 80% / 90% / 95% 三档加压。只改本步送给模型的窗，磁盘上的稿通常仍完整。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">流式问模型，中途可以打断</p>
+                <p class="why">还没吐出第一个字才允许重试。取消必须能打断等待和供应商 HTTP 流（大约几十毫秒检查一次）。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">看出模型是在说话、在想，还是要点工具</p>
+                <p class="why">三种增量分开写事件。思考增量默认只走实时流，不进列表快照。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">点了工具：先问人允不允许跑，再执行，结果打回窗口</p>
+                <p class="why">执行层可能整条改道（翻页读文件变成 read_file；评测题的 pytest 送进 Docker），工具名不变。编码还会更新「还欠测试 / 还欠 issue 例子」。然后存断点，回到第 1 步。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">没点工具：若写完就收工却还欠验证，再催一轮</p>
+                <p class="why">平台塞一条用户口吻提醒（菜单里点不到），再进一轮组窗/问模型。否则输出终稿，结束这次提问。编码场景最多催两类各一次；步数不够就省略。</p>
+              </div>
+            </li>
+          </ol>
+          <p>编码循环最多约 150 步，写作为 40 步。Engine 不看场景名字；差别只在开工时装进哪些工具和提示词。</p>
           <div class="src">代码：<code>turn_controller.py</code> · <code>agent_engine.py</code> · <code>engine/state.py</code></div>
         </div>
       </section>
@@ -663,13 +863,10 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 7 -->
       <section class="page" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
         <div class="card">
-          <h2>AgentEngine 单循环（权威图）</h2>
-          <p class="lede">加能力 = 工具或焊点；不改 while。模型网关：仅在未吐 token 前重试；首字节快超时 + step/model/tool 分层超时。</p>
-          <h3>Intake（确定性，非意图分类）</h3>
-<pre>用户输入 → InputCompiler → shouldQuery
-  ├─ 否：本地响应（/help、部分 /compact）+ completed
-  └─ 是：进 Engine；首轮由模型决定直答或 tool_use</pre>
-          <p><code>scenario_id</code> 由 API/会话指定，不由 LLM 猜测。</p>
+          <h2>推理循环长什么样</h2>
+          <p class="lede">加能力 = 增强工具或返回值，不改这条循环的形状。下图是权威控制流；上一页已经逐步说过每一格干什么。</p>
+          <p>进循环之前还有一道确定性整理：斜杠命令、@路径当场处理。不需要模型的命令直接结束。需要模型的，第一轮由它决定是直接回答还是先点工具。场景不由模型猜。</p>
+          <p class="figure-lead">海报中间那条从上到下的箭头链，就是第 1–5 步。左右是旁注，不是第二套主链。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -682,24 +879,39 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 8 -->
       <section class="page" data-id="approval" data-group="Runtime" data-title="审批 · 取消 · 恢复">
         <div class="card">
-          <h2>审批 · 取消 · 恢复</h2>
-          <ol>
-            <li>需审 → <code>approval.requested</code> → <code>waiting_approval</code>，同 <code>run_id</code> checkpoint（含「还欠测试 / 还欠 issue 例子」）</li>
-            <li>Approve → 同 <code>run_id</code> 续跑；Deny → 拒绝 <code>tool_result</code>（含原因）</li>
-            <li>官方评测无人值守：StartTurn 即预批准写盘/exec，门控工具自动过审；字段随 checkpoint 恢复</li>
-            <li><strong>写盘粘性</strong>：人工批准一次写类工具后，同类写免再审</li>
-            <li><strong>Shell 粘性</strong>：人工批准一次 <code>run_command</code> 后，本 Turn 后续同类 shell 免审（≠「Shell 永远逐步审」）</li>
-            <li>Plan <code>phase=executing</code>：清单内写盘可按计划免审；普通 <code>update_plan</code> 进度 ≠ 已批准开工</li>
-            <li>审批门 ⊥ 沙箱门；官方编码评测下 <code>run_command</code>/<code>run_tests</code> 可改去该题 Docker 镜像（剥管道、拒 pip、容器复用）</li>
+          <h2>等人点头、点取消、再接着跑</h2>
+          <p class="lede">「允不允许跑」和「跑起来能写哪」是两道门。官方编码评测把测试送进 Docker，是第三件事，跟这两道门都无关。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">需要人批准时，这次提问停住，但执行实例还在</p>
+                <p class="why">界面进入等待。断点里必须记住「还欠测试 / 还欠 issue 例子」，批准后才能接着验，而不是另起炉灶。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">批准就续跑；拒绝则把原因写给模型</p>
+                <p class="why">模型看到拒绝原因，可以改方案或收工。不是直接把提问标失败。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">同一轮里批准过一次之后，同类操作可以免再审</p>
+                <p class="why">写盘批准一次，后面同类写盘免审。命令行第一次仍要审，通过后本轮后续同类命令免审。进度清单更新不等于已经批准开工；计划进入「执行中」只预授权清单里的写盘，不等于命令行免审。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">取消是终态，不等于跑失败</p>
+                <p class="why">软取消请循环自己停；硬取消可以杀掉模型流和子进程。取消必须能打断等待重试和供应商连接。再聊 = 同会话里新的一次提问。</p>
+              </div>
+            </li>
           </ol>
-          <table>
-            <thead><tr><th>取消</th><th>含义</th></tr></thead>
-            <tbody>
-              <tr><td>软 <code>cancel_requested</code></td><td>协作式停下</td></tr>
-              <tr><td>硬 <code>cancel_force</code></td><td>可杀流 / 子进程</td></tr>
-            </tbody>
-          </table>
-          <div class="callout">终态 <code>cancelled</code>（≠ failed）；继续对话 = 新 Turn。Cancel 须打断 backoff 与 provider HTTP 流（网关流 ~50ms；工具输出流内检查 ~250ms）。</div>
+          <p class="figure-lead">下图菱形是「要不要等人」。挂起后走同一执行实例的断点，不是新提问。</p>
           <div class="src"><code>engine/state.py</code> · <code>controller/checkpoint_store.py</code> · approval / cancel 路径</div>
         </div>
                                         <figure class="figure">
@@ -724,37 +936,38 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 10 -->
       <section class="page" data-id="scenarios" data-group="场景与工具" data-title="场景 Profile">
         <div class="card">
-          <h2>ScenarioProfile</h2>
-          <table>
-            <thead><tr><th>scenario</th><th>定位</th><th>要点（yaml）</th></tr></thead>
-            <tbody>
-              <tr>
-                <td><code>writing</code></td>
-                <td>默认写作</td>
-                <td>RAG <code>search_sources</code>；draft/outline/patch；排除 <code>seed/intel</code>；max_steps 40；hooks: writing_cards / focus / continuity</td>
-              </tr>
-              <tr>
-                <td><code>agent</code></td>
-                <td>编码全工具</td>
-                <td>编码：查找/改文件/跑测试全套。找定义、看波及、改完再验写进这些工具的返回值。官方评测题把 pytest 改去该题 Docker。无资料检索。max_steps 150</td>
-              </tr>
-              <tr>
-                <td><code>intel</code></td>
-                <td>情报资料</td>
-                <td>闭环方案见 plan，未全落地</td>
-              </tr>
-              <tr>
-                <td><code>collab</code></td>
-                <td>多 agent</td>
-                <td>偏薄 / 目标态；volatile_composer 等 hook</td>
-              </tr>
-            </tbody>
-          </table>
-          <h3>扩展点（只能走这些）</h3>
-          <ul>
-            <li>声明式：tool_names · approval_overrides · retrieval · generation · patch_auto_apply · structural_prewarm · plan_suggest · post_turn_jobs …</li>
-            <li>Hook 槽：system_prompt_composer · volatile_composer · step_checkpoint · post_turn · compact_bookmark（未知名启动 fail-fast）</li>
-          </ul>
+          <h2>四个场景，同一条循环</h2>
+          <p class="lede">场景差在配置：开哪些工具、用哪份系统提示、要不要检索、审批松紧。推理循环里禁止按场景名字写分支；未知的挂载点启动就失败。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">写作（默认）：大纲、起草、按差异改稿、搜资料</p>
+                <p class="why">大约 40 步封顶。默认不碰情报语料目录。成稿靠卡片和少次有出处的检索。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">编码：查找、改文件、跑测试全套；不搜资料</p>
+                <p class="why">大约 150 步。找定义、看波及、改完再验写进这些工具的返回值。官方评测题把测试送进该题 Docker。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">情报：资料与提示偏情报向</p>
+                <p class="why">核实闭环还没做成产品。现状以这份场景配置为准，不要去草稿目录找「现行流程」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">协作：多助手（仍薄）</p>
+                <p class="why">只能经委派开子执行，摘要打回父窗口。扩展只能走声明字段和固定的几个挂载点（组窗卡片、易变垫底、每步断点、收尾、压缩书签）。</p>
+              </div>
+            </li>
+          </ol>
           <div class="src"><code>scenarios/profiles/*.yaml</code> · <code>scenarios/registry.py</code> · <code>scenarios/hooks.py</code></div>
         </div>
       </section>
@@ -762,7 +975,7 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 11 -->
       <section class="page" data-id="tools" data-group="场景与工具" data-title="工具面">
         <div class="card">
-          <h2>能力即工具（含 uplift 硬改道）</h2>
+          <h2>能力就是工具，坏习惯在执行层改道</h2>
           <p class="lede">RAG 禁止每轮预注入向量包；多 agent 只经 <code>delegate</code>。近两日把高频坏习惯<strong>焊进 handler</strong>，不靠 prompt 劝说。</p>
           <h3>agent / writing 白名单（节选）</h3>
           <p class="mono" style="font-size:0.8rem;line-height:1.6">agent: read_file · grep · edit_file · search_codebase · goto_definition · find_references · run_command · run_tests · read_lints · update_plan · …<br/>writing: propose_patch · draft_section · search_sources · …（无 LSP 结构工具）</p>
@@ -782,28 +995,41 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 12 -->
       <section class="page" data-id="context" data-group="场景与工具" data-title="组窗阶梯">
         <div class="card">
-          <h2>ContextEngine 组窗（轨道 X 已落）</h2>
-          <p class="lede">通道：System · Tools[] · Rules · Writing/Runtime/Session · Conversation。LongBench 瓶颈曾核实为：md 无 outline、旧读窗蒸发、终答缺 <code>Answer:</code> 抽取——不是「模型不会读」。</p>
-          <h3>卫生（几乎每步 · X-2 证据保留）</h3>
-          <table>
-            <thead><tr><th>步骤</th><th>现行行为</th></tr></thead>
-            <tbody>
-              <tr><td>budget</td><td>超长 tool_result <strong>头尾各半</strong>（middle-truncate），非纯截尾</td></tr>
-              <tr><td>read_fold</td><td>同 path 旧 read：首尾各 ~300 字 + 行号范围（不再整段 <code>[omitted]</code>）；折叠 path 记入 <code>evicted_paths</code></td></tr>
-              <tr><td>microcompact</td><td>成串旧 tool 折短占位；不拆当前配对；短 pinned 可保留</td></tr>
-            </tbody>
-          </table>
-          <h3>填充率阶梯</h3>
-<pre>fill_ratio ≈ 本窗 token / (context_window − output_reserve)
-≥0.80 collapse · ≥0.90 snip · ≥0.95 autocompact（默认确定性；不上 LLM 摘要默认化）</pre>
-          <h3>LongBench / 长文（X-1 · X-3）</h3>
-          <ul>
-            <li>截断 <code>read_file</code> 对 <code>.md/.markdown/.txt</code> 附标题 outline（≤40 条），与 py outline 同形。</li>
-            <li>评测预测侧抽末行 <code>Answer:</code> 再打 v2 F1/EM（金标不改）；第2轮 EM=0 曾是口径缺口。</li>
-            <li>agent profile <strong>仍不挂</strong> <code>search_sources</code>；长文导航靠 outline + grep。</li>
-          </ul>
-          <p>第4轮 smoke（不作效果结论）：F1/EM <strong>0.5282 / 0.2667</strong>（对照第2轮重打锚 0.5479/0.30）。</p>
-          <div class="src"><code>context/engine.py</code> · <code>structural/outline.py</code> · quality-uplift §4</div>
+          <h2>每次问模型前，窗口怎么收拾</h2>
+          <p class="lede">送给模型的不是全部历史原文。先走几乎每步都做的卫生，窗口将满再加压。通道分开：系统提示求稳定；工具说明单独一份；作品规矩和焦点是易变垫底；真正被压缩的是对话历史。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">单条结果太长就头尾各留一半</p>
+                <p class="why">中间丢掉，并留下「可以再读」的指针。默认大约 4 千字；刚刚成功读完的那份文件可以放到大约 3 万 2 千字，免得刚读完就被折没。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">同一文件的旧读取折成短占位</p>
+                <p class="why">只保留最近一次全文，更早的同路径读取留首尾约 300 字和行号。被挤掉的路径允许再读一次，避免模型再也打不开刚被折叠的文件。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">成串已经完成的旧工具结果折短</p>
+                <p class="why">不拆当前正在配对的这一次。这是卫生，不是「超限了才压缩」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">窗口占用到约八成：中间折成占位，留头和热尾</p>
+                <p class="why">热区大约是窗口的 35%。还不够再升档：九成开始从最旧完整消息组删；九成五整窗做成结构化摘要（默认定增量，不在第一个字前再喊一次模型）。</p>
+              </div>
+            </li>
+          </ol>
+          <p>长文被截断时会附标题大纲，让模型跳段而不是从第一行盲翻。编码场景仍然不用资料检索来导航长文。磁盘稿和网页聊天记录通常仍完整——压缩只作用于本步模型窗。</p>
+          <p class="figure-lead">下图中主链就是卫生 → 填充率判定 → 三档加压 → 送给模型。</p>
+          <div class="src"><code>context/engine.py</code> · <code>structural/outline.py</code> · <code>docs/core/tools-and-context.md</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -816,22 +1042,33 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 13 -->
       <section class="page" data-id="sandbox" data-group="场景与工具" data-title="exec 沙箱">
         <div class="card">
-          <h2>exec 沙箱 + 评测题在 Docker 里跑测</h2>
-          <p class="lede">日常产品 Turn 过审批后进 Landlock / bwrap / 软路径 jail。官方编码评测题另外把测试和环境探测送进该题的 Docker 镜像，因为工作区只是 checkout 出来的源码，不是评委用的解释器。</p>
-<pre>审批已过（或免审 / 评测启动即预批准）
-  → run_command / run_tests
-  → 这次是官方编码评测题？
-       ├─ 是：剥 |tail → 镜像里跑完整测试；python -c 同样进镜像
-       │     拒 pip/uv install；容器复用 + 增量 sync（/testbed）
-       └─ 否：沙箱后端择一（prefer landlock，否则 bwrap，再否则 off）
-            · 评测禁网 → 强制 bwrap --unshare-net
-            · RO/RW/tmpfs 后起子进程（或软 jail）</pre>
-          <ul>
-            <li><code>make ops-swe-eval-ready</code>：挂 docker.sock + 预拉镜像 + 对每张镜像跑 python/pytest 冒烟。看板「就绪」之后才能信官方通过率。</li>
-            <li>同一道题多次跑测时复用容器，只同步改过的文件；缺镜像或冒烟失败 → 硬失败并写明原因，不得当成模型零分。</li>
-            <li>第4→5 轮过程烟：步数 409→202、墙钟下降；仍见模型偶走普通 <code>run_command</code>，改道继续收紧。</li>
-            <li>官方 harness 吃本地 <code>instances.jsonl</code> + 离线；没有通过率 → 套件 failed，不得标 completed。</li>
-          </ul>
+          <h2>命令跑在哪：日常沙箱，评测进该题镜像</h2>
+          <p class="lede">「人允不允许跑」过了之后，还要决定进程能碰哪。日常用户命令关在工作区里；官方编码评测题的测试不在这棵源码树上跑，因为评委用的是每道题自己的 Docker 镜像。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">先过审批门</p>
+                <p class="why">需要人点头的工具停在等待审批。评测无人值守在开工时就已经预批准写盘和执行。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">若这是官方编码评测题：测试送进该题镜像</p>
+                <p class="why">pytest 后面即使跟着 <code>| tail</code>，也剥掉只为好看的管道，把完整输出丢进镜像的 <code>/testbed</code>。环境探测（python -c、版本）同样进镜像。禁止在裸源码树上 pip/uv。同一道题复用容器，只同步改过的文件。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">否则选一层沙箱关住日常命令</p>
+                <p class="why">优先用内核 Landlock；没有再用 bwrap；再没有就路径软限制，仍然不许爬出当前作品根。编码评测若要求断网，没有 bwrap 就硬失败，不漏到宿主机上网。</p>
+              </div>
+            </li>
+          </ol>
+          <p>看板「SWE 评测环境就绪」= 挂上 docker.sock + 镜像已拉 + 每张镜像 python/pytest 冒烟都过。缺镜像不得当成模型零分。</p>
+          <p class="figure-lead">下图菱形「是不是评测题」对应第 2 步；否分支才是日常沙箱。</p>
           <div class="src"><code>swe_solve_env.py</code> · <code>test_run_redirect.py</code> · <code>sandbox.py</code></div>
         </div>
                                         <figure class="figure">
@@ -845,16 +1082,55 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 14 -->
       <section class="page" data-id="coding-fuse" data-group="Coding" data-title="找定义 · 改完再验">
         <div class="card">
-          <h2>编码 Turn：找定义、看波及、改完再验</h2>
-          <p class="lede">模型已经会点 <code>search_codebase</code>、<code>edit_file</code>、<code>run_tests</code>。平台不另发明导航工具，而是在返回值里塞进它没法假装没看见的事实。官方是否判这道 SWE 题通过，看 Docker 里跑官方测试，不是看这些探针绿没绿。归因也钉死：模型几乎总能碰到该改的文件，查找调用占比极低——瓶颈在改对没有、验没验过，不是符号表没建好。</p>
-          <p><strong>找定义。</strong>符号名走 <code>search_codebase</code>（直接 <code>grep</code> 符号名会被整条改过来）。先在工作区符号表里粗筛候选文件/行，再交给语言服务器确认「这就是这个函数的定义」。确认过的才算找到；词面命中不得冒充。模块名、形参本来就不是定义，查空是结构边界，不是索引没建好。</p>
-          <p><strong>看波及。</strong><code>edit_file</code> 成功时结果里带这段大概影响哪些引用；精查仍可用 <code>find_references</code>。</p>
-          <p><strong>改完再验。</strong>写入时做语法门和增量诊断；附上相关测试文件和一条可复制命令（平台不代跑）；测试从<strong>未截断全文</strong>抽出失败第一条（<code>| tail</code> 丢页脚也不丢摘要）；issue 正文里的例子必须在最新编辑后再跑过；模型想收工却还欠验证时，平台塞一条用户口吻提醒再跑一轮。</p>
-          <ul>
-            <li>agent 有结构工具、无资料检索；writing / intel 相反。</li>
-            <li>明确不做：CST、call-graph、把引用索引进符号表、全仓语言服务器 indexing。</li>
-          </ul>
-          <div class="src"><code>structural/</code> · plan CSI · quality-uplift §2</div>
+          <h2>编码一次提问：从读题到交卷</h2>
+          <p class="lede">模型已经会点查找、改文件、跑测试。平台不另发明导航工具，而是在返回值里塞进它没法假装没看见的事实。官方是否判这道题通过，看 Docker 里跑官方测试，不是看这些探针绿没绿。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">读题，抽出符号名和失败样子</p>
+                <p class="why">工作区里通常是 <code>problem.md</code>。不要先把仓库根目录列一遍当旅游。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">先用 issue 里的最小例子复现坏现象</p>
+                <p class="why">改完必须用<strong>同一条命令</strong>再跑。绿测通过仍不够，见后面「issue 例子还得再跑」。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">按符号名找定义</p>
+                <p class="why">走查找代码。先在工作区符号表粗筛候选文件/行，再让语言服务器确认「这就是这个函数」。确认过的才算找到。模型若直接 grep 一个符号名，执行层会整条改过来。模块名、形参查空是结构边界，不是索引没建好。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">打开定义处再改一小段</p>
+                <p class="why">文件太长被截断时带大纲，让它跳段。改成功时结果里带着：这段大概影响谁、这次写入的诊断、以及一条可复制的相关测试命令。平台不代跑这些测试。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">改完再验：诊断、相关测试、邻文件、同一条复现</p>
+                <p class="why">测试输出从<strong>未截断全文</strong>抽出失败第一条——模型常写 <code>pytest | tail</code>，页脚被吃掉时旧逻辑会静默没有摘要。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">6</span>
+              <div>
+                <p class="what">想交卷却还欠验证：塞一条用户口吻提醒再跑一轮</p>
+                <p class="why">两类欠账：改过代码没跑测试；仓库测试绿了但 issue 例子没在最新编辑后再跑过。菜单里点不到这个工具。每类每轮提问最多一次。</p>
+              </div>
+            </li>
+          </ol>
+          <p>产品对话不等符号表建完。界面进度条只报告扫到哪了，ready 之前不得画成已经能精确定位。写作/情报反过来：用资料检索，不打开这套查找/改文件能力。</p>
+          <p class="figure-lead">下图上半是三列「找 / 波及 / 验」焊进已有工具；下半仍是 Engine 的 while，虚线汇入点工具。</p>
+          <div class="src"><code>structural/</code> · <code>docs/core/tools-and-context.md</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -901,19 +1177,40 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 18 -->
       <section class="page" data-id="events" data-group="事件与契约" data-title="事件 · SSE · 投影">
         <div class="card">
-          <h2>事件管道</h2>
-<pre>runtime → INSERT turn_events（递增 sequence）→ pg_notify(turn_id)
-api LISTEN → 队列（空闲约 2s 轮询兜底）
-  ├─ SSE  …/turns/{id}/stream（Last-Event-ID；~14s ping；thinking.delta 只走 SSE）
-  └─ Projection UPSERT turn_views → GET /view（ETag/304）</pre>
-          <table>
-            <thead><tr><th>所有者</th><th>写什么</th></tr></thead>
-            <tbody>
-              <tr><td>runtime</td><td>turn_events、执行态、checkpoint、transcript 真源、产物引用</td></tr>
-              <tr><td>api</td><td>turn_views、对外 SSE、会话摘要触发（常异步）</td></tr>
-            </tbody>
-          </table>
-          <div class="callout warn">禁止 runtime 直连浏览器 SSE；禁止仅靠进程内 channel 当事唯一源；禁止热路径同步重投影。</div>
+          <h2>事实怎么从 runtime 到达屏幕</h2>
+          <p class="lede">runtime 不对浏览器开流。它只往 Postgres 追加事件行；api 监听这些行，再分给实时流和列表快照。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">关键节点只追加、不改旧行</p>
+                <p class="why">每行带递增序号。大段正文进产物文件，事件行只留摘要和指针。插入之后数据库发一条「这个 turn_id 有新事」的通知。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">api 听到 turn_id，放进队列</p>
+                <p class="why">实时流和投影共用这一下触发。万一通知丢了，空闲大约 2 秒还会轮询事件表兜底。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">实时流按序号回放给浏览器</p>
+                <p class="why">思考增量只走这条路。大约 14 秒打一次心跳。断线用 Last-Event-ID 从断点续上，不用从头重放全部。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">同一批更新列表/首屏快照</p>
+                <p class="why">重连、刷新、终态读快照即可。思考增量默认不进快照，避免列表被内心独白撑爆。界面不自己猜阶段。</p>
+              </div>
+            </li>
+          </ol>
+          <p>写主权：runtime 写事件、执行态、断点、对话真源；api 写快照、对外流、会话摘要（常异步）。两边没有分布式事务，短暂落后用事件序号修好。</p>
+          <p class="figure-lead">下图左辅是写入，中主链是通知→监听→分流，右辅是禁止项。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -943,26 +1240,40 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <!-- 20 -->
       <section class="page" data-id="rag" data-group="RAG / 写作" data-title="hybrid 召回">
         <div class="card">
-          <h2>RAG · search_sources（轨道 R）</h2>
-          <p class="lede">writing/intel 主路径。BM25∥向量 → RRF → 词法 rerank；cross-encoder 默认关（R-5 召回抬起且 P95&lt;150ms 才考虑）。与 coding AST 硬隔离。</p>
-          <h3>曾核实的切分缺陷（用户观测成立 · 已对症）</h3>
-          <ul>
-            <li>INDEX12：chunk 4000<strong>字符</strong> vs bge-m3 512<strong>token</strong> → 向量只代表 chunk 前段 → R@100≈0.53 天花板</li>
-            <li>硬切无句边界；标题只认 H1–H3；宽表 detach 后单元格不可检</li>
-          </ul>
-          <h3>INDEX 13 已落（R-1~R-4）</h3>
-          <ul>
-            <li>token 预算 ~450 + overlap 64；边界感知切分；H1–H6 + Setext；embed 前标题面包屑；宽表行线性化派生 chunk</li>
-            <li>评测侧多轮 RRF（k=60）；BEIR / C-MTEB <strong>独立 HNSW</strong>、<strong>勿混宏分</strong></li>
-          </ul>
-          <h3>第4轮 smoke（不作效果结论）</h3>
-          <table>
-            <thead><tr><th>套件</th><th>nDCG@10</th><th>R@100</th></tr></thead>
-            <tbody>
-              <tr><td>BEIR</td><td>0.4964</td><td>0.5252（回近 INDEX12；第2轮曾掉到 0.495）</td></tr>
-              <tr><td>C-MTEB</td><td>0.6777</td><td>0.9167</td></tr>
-            </tbody>
-          </table>
+          <h2>写作 / 情报怎么查资料</h2>
+          <p class="lede">模型要点「搜资料」才会查。禁止每轮自动塞一包向量进窗口。编码场景没有这个工具，不能靠搜文档来找代码位置。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">解析查询、条数、路径范围</p>
+                <p class="why">没有资料目录就结束，不当成空库去建。不在查询这一下当场整库重嵌。每轮提问最多搜 3 次，超限这次直接拒绝。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">切块车道和文档车道并行召回</p>
+                <p class="why">切块：查询向量只算一次，再在向量索引和全文检索里找相近段落。文档：先找可能相关的整篇，再在篇内精看。两边结果稍后融合。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">融合两路排名，必要时再按词面精排</p>
+                <p class="why">交叉编码器默认关——召回还没稳之前，不在热路径上再加一截模型。权限不够的命中丢掉。没有命中才考虑退回宽松扫描。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">带摘录的结果作为工具返回值打回窗口</p>
+                <p class="why">下一轮组窗才能看见。禁止在提问开始时预注入召回包。审计漏斗给评测看板看，不进模型。</p>
+              </div>
+            </li>
+          </ol>
+          <p>建库切块按大约 450 token、重叠 64（现行索引戳 13）。以前按 4000 字符硬切时，向量其实只代表段落前头，召回会撞天花板。宽表过长会拆成指针，全文仍在磁盘，用读文件再看。</p>
+          <p class="figure-lead">下图上框是两条并行车道，下面宽条带和菱形才是融合、权限、有没有命中。</p>
           <div class="src"><code>retrieval/chunking.py</code> · <code>chunk_split.py</code> · <code>embedder.effective_index_version</code></div>
         </div>
                                         <figure class="figure">
@@ -976,20 +1287,33 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <!-- 21 -->
       <section class="page" data-id="index" data-group="RAG / 写作" data-title="索引面">
         <div class="card">
-          <h2>索引面（异步 · INDEX 戳）</h2>
-          <p>触发 · 切块 · embed · HNSW/GIN · 进度。writing <code>post_turn_jobs: sources.index_sync</code> 经 api outbox（R4），不挡 StartTurn。</p>
-          <table>
-            <thead><tr><th>INDEX</th><th>含义（bge-m3@1024）</th></tr></thead>
-            <tbody>
-              <tr><td>12</td><td>max_seq≈512 truncate（短 passage 旧戳）；chunk 仍偏字符预算</td></tr>
-              <tr><td><strong>13</strong></td><td>现行：512 + <strong>token 对齐切块</strong> / 面包屑 / 表行线性化</td></tr>
-            </tbody>
-          </table>
-          <ul>
-            <li>设置页可检 RAG chunks；AST 索引与磁盘 dirty 对齐（旁路 indexer，不全树误脏）。</li>
-            <li>R-5 cross-encoder：召回未稳抬前<strong>默认关</strong>。</li>
-            <li>换模 / bump INDEX → <code>make sync-sources</code> / <code>sync-ops-indexes</code>（可见进度）。</li>
-          </ul>
+          <h2>资料库什么时候建，什么时候不建</h2>
+          <p class="lede">建库可以慢：启动后延迟同步、目录变更、上传、工作台点「同步资料库」。提问热路径上禁止当场建库。写作一轮结束后，api 可以排队做一次同步，不挡下一轮第一个字。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">发现资料文件变了</p>
+                <p class="why">按修改时间和大小轮询，不依赖 inotify（容器和虚拟机里更稳）。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">按句子边界切成大约 450 token 的块，重叠 64</p>
+                <p class="why">带上标题面包屑再算向量。宽表拆成行，让单元格能被搜到。全文检索索引一并更新。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">写入向量索引，进度可查</p>
+                <p class="why">换嵌入模型或切块规则会抬索引戳，必须重新同步。设置页能看到切块；符号表索引是另一条旁路，不要和资料库画成一块脏。</p>
+              </div>
+            </li>
+          </ol>
+          <p>交叉编码器默认关。中英评测库分开建，分数不要混进同一栏。</p>
+          <p class="figure-lead">下图中主链是触发 → 切块 → 嵌入 → 写入索引；左右是旁路和禁止项。</p>
           <div class="src"><code>embedder.py</code> · <code>vector_index.py</code> · <code>workspace_index/</code></div>
         </div>
                                         <figure class="figure">
@@ -1003,12 +1327,39 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <!-- 22 -->
       <section class="page" data-id="writing" data-group="RAG / 写作" data-title="写作工作台">
         <div class="card">
-          <h2>写作主路径</h2>
-          <ul>
-            <li>Work 树 · 按需检索 · diff-first（propose_patch / patch_auto_apply）</li>
-            <li>hooks 组窗卡片、compact 书签、终态连续性</li>
-            <li>子 agent：researcher / drafter / editor / fact_checker / stylist …</li>
-          </ul>
+          <h2>写作：先成稿，改稿走差异</h2>
+          <p class="lede">用户心里是一本书。每一遍都是用户自己点的一次提问，平台不自动串成润色流水线。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">（可选）先整理大纲</p>
+                <p class="why">立人设、文风靠钉在作品上的卡片，通常不检索。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">据材料新写时，按需搜几次资料，再起草</p>
+                <p class="why">检索要带出处，次数有上限。不是资料越多越好。禁止每轮强制检索、禁止提问末尾再自动裁判。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">改稿走差异：先给出补丁，人点头再落盘</p>
+                <p class="why">局部改稿通常不再搜。同一轮提问里，批准过一次写盘后，同类写盘可以免再审。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">（可选）润色、导出检查</p>
+                <p class="why">仍然是用户下一次发送，不是后台自动接上。</p>
+              </div>
+            </li>
+          </ol>
+          <p class="figure-lead">下图中主链是意图 → 大纲 → 成稿 → 改稿；检索是按需旁路，不是每一步必经。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1021,28 +1372,33 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <!-- 23 -->
       <section class="page" data-id="ops-bench" data-group="评测" data-title="Ops L1 原理">
         <div class="card">
-          <h2>Ops L1 agent-path</h2>
-          <p class="lede">效果温度计，不进 StartTurn 热路径。必须 <code>eval_path=agent</code>：真 Session/Turn + 真工具。</p>
-          <table>
-            <thead><tr><th>套件</th><th>官方源</th><th>路径摘要</th></tr></thead>
-            <tbody>
-              <tr><td>retrieval</td><td>BEIR small</td><td>search_sources → 多轮 RRF → nDCG/R/MAP</td></tr>
-              <tr><td>retrieval_zh</td><td>C-MTEB</td><td>独立 schema；勿与 BEIR 混栏</td></tr>
-              <tr><td>context</td><td>LongBench</td><td>passage.md → Answer: → F1/EM</td></tr>
-              <tr><td>coding</td><td>SWE Lite</td><td>checkout →（仅评测）等符号表 ready → 解题（测进该题 Docker）→ git_diff → 官方 harness 判通过</td></tr>
-            </tbody>
-          </table>
-          <h3>编码一题</h3>
-<pre>① checkout base_commit（写 .agent_swe_instance.json）
-② 后台建符号表 ──等 ready──► ready|stale （仅评测；产品对话不等）
-③ StartTurn → 读题 / 找定义 / 改文件 / 改完再验
-                 （想收工却还欠验证则再催一轮；issue 例子须在最新编辑后再跑过）
-   └ pytest/|tail 改去该题 Docker 镜像跑完整测试（禁网；剥 |tail；拒 pip）
-④ 抽 patch：git_diff → baseline repair；拒收 l2.patch_rejected
-⑤ predictions.jsonl → 官方 harness（吃本地 instances.jsonl）
-   ├ 通过率 → suite completed
-   └ harness 挂了 / 没有通过率 → failed（不得粉饰成模型零分）</pre>
-          <p>协议戳：L0 <code>…-m1</code> · L1 <code>…-m3</code>。第3轮工程加固（manifest 契约 / 多轮 RRF / wait_ready）已进第4轮验收。</p>
+          <h2>官方评测：走产品同一条提问路径</h2>
+          <p class="lede">这是效果温度计，不挡代码合并。分数必须来自真实会话、真实提问、真实工具，禁止为刷分另开捷径。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">检索套件：让写作场景真的去搜资料</p>
+                <p class="why">英文小集和中文小集分开建库、分开记分，不要混进同一栏。多轮搜到的名单在评测侧再融合，看前 10 条好不好、前 100 条有没有金标。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">长文套件：让模型读一篇长 passage，再抽出答案行</p>
+                <p class="why">看的是读完能否对上金标，不是「会不会点搜资料」。编码场景仍然没有资料检索。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">编码套件：checkout 一道 SWE 题，走完整提问</p>
+                <p class="why">只在评测里等符号表 ready。模型改代码、跑测试（测进该题 Docker）。抽补丁交给官方评测程序。程序自己挂了标失败，不得粉饰成模型零分。</p>
+              </div>
+            </li>
+          </ol>
+          <p>找定义揉合成功、失败摘要回灌、想收工时催一轮——这些只说明平台探针在线，<strong>不代替</strong>官方是否判这题通过。</p>
+          <p class="figure-lead">下图是四套件怎么接到同一条产品提问路径。图看分支；上面逐步说每套件在测什么。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1056,17 +1412,17 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <section class="page" data-id="scorecard" data-group="评测" data-title="现行分数快照">
         <div class="card">
           <h2>现行分数快照（对齐 RESULTS · 2026-08-17）</h2>
-          <div class="callout warn"><strong>主 SCORECARD 锚点仍空。</strong>下表 smoke，不作效果结论。模型：deepseek-v4-flash · protocol m3 · INDEX13。</div>
-          <h3>第5轮 coding-only（过程烟 · 01cd8c79）</h3>
+          <div class="callout warn"><strong>主栏锚点仍空。</strong>下表是冒烟日记，不作效果结论。数字以 RESULTS.md 为准。</div>
+          <h3>第5轮只跑编码（5 道题）</h3>
           <table>
-            <thead><tr><th>字段</th><th>第4</th><th>第5</th><th>读法</th></tr></thead>
+            <thead><tr><th>看什么</th><th>第4轮</th><th>第5轮</th><th>说明</th></tr></thead>
             <tbody>
-              <tr><td>resolve</td><td>0.8/4</td><td><strong>0.8/4</strong></td><td>同分异题：14182↑ / 14365↓</td></tr>
-              <tr><td>steps / wall</td><td>409 / 2854s</td><td><strong>202</strong> / ≈2332s</td><td>T 轨道（改道/去抖）同向</td></tr>
-              <tr><td>related cov→adopt</td><td>0.58→0.40</td><td><strong>1.0→0.0</strong></td><td>覆盖够、采用断</td></tr>
-              <tr><td>test_summary</td><td>0.167</td><td><strong>0.50</strong></td><td>仍低于出口 0.6</td></tr>
-              <tr><td>verify_receipt</td><td>0.20</td><td><strong>0.80</strong></td><td>then_test 0.25</td></tr>
-              <tr><td>fuse_ok</td><td>0.36</td><td><strong>0.625</strong></td><td>非 resolve 主因</td></tr>
+              <tr><td>官方判通过</td><td>4/5</td><td><strong>4/5</strong></td><td>还是 4 道过，但换了一道：14182 转绿、14365 回落</td></tr>
+              <tr><td>步数 / 墙钟</td><td>409 / 2854s</td><td><strong>202</strong> / ≈2332s</td><td>翻页改读文件、计划去抖、测进 Docker，步数腰斩</td></tr>
+              <tr><td>相关测试：给到了 / 用了</td><td>0.58→0.40</td><td><strong>1.0→0.0</strong></td><td>命令都塞进结果了，模型一条没跑</td></tr>
+              <tr><td>失败摘要写进工具结果</td><td>0.167</td><td><strong>0.50</strong></td><td>仍低于 0.6 的出口线</td></tr>
+              <tr><td>想收工时催了一轮</td><td>0.20</td><td><strong>0.80</strong></td><td>催完之后真去跑测试的只有 0.25</td></tr>
+              <tr><td>找定义揉合成功</td><td>0.36</td><td><strong>0.625</strong></td><td>不是官方通过率的主因</td></tr>
             </tbody>
           </table>
           <h3>第4轮完整四套件（检索/上下文）</h3>
@@ -1105,7 +1461,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           <ol>
             <li>先改代码与契约，再改本 HTML 对应页（不另开分页）。</li>
             <li>改流程图：在原海报风格上增补细节后，直接替换同名 <code>docs/assets/**/*-zh.png</code>。</li>
-            <li>打开：<code>make docs-tour</code> → <code>http://127.0.0.1:8765/tour/</code>。</li>
+            <li>GitHub 上读仓库 README 的文档 Wiki。本地 <code>make docs-tour</code>；在线是 GitHub Pages 的 <code>/tour/</code>。</li>
           </ol>
         </div>
       </section>

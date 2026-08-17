@@ -1,0 +1,38 @@
+# Publish docs/ as GitHub Pages so the HTML tour is a real website.
+# Enable once: Settings → Pages → Source = GitHub Actions.
+# Site: https://<owner>.github.io/<repo>/tour/
+
+name: docs-pages
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: docs-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,53 +1,114 @@
-# 文档
+# 文档 Wiki
 
-Agent Platform：一个 Runtime，多个 Scenario。验证：`make gate` · `make smoke`。
+在 **GitHub 网页**里点下面的 Markdown 即可阅读：标题、正文、图都会渲染。不要点 `tour/index.html` 当网页——仓库文件视图里那是源码。
 
-## 分页导览（HTML）
+翻页导览（图 + 逐步「这一步在干什么」）：
 
-```bash
-make docs-tour
-# http://127.0.0.1:8765/tour/
-```
+- 本地：`make docs-tour` → http://127.0.0.1:8765/tour/
+- 在线：仓库开启 GitHub Pages 之后 → `https://<owner>.github.io/<repo>/tour/`
 
-文件：[`tour/index.html`](tour/index.html)。导览是六篇的分页版；**现行流程以六篇正文为准**。
+对错：**代码与契约 > 本目录六篇正文 > 导览**。数字以 [`RESULTS.md`](../eval/official/baseline/RESULTS.md) 为准。`plan/` 是可删草稿，不参与权威。
 
-评测日记（含第 4/5 轮 coding 4/5）：[`eval/official/baseline/RESULTS.md`](../eval/official/baseline/RESULTS.md)。SCORECARD 机器栏只保留最近一次 `update-baseline` 指针，**不是**最新冒烟。
+---
 
-## 正文（6 篇 · 每篇配控制流图）
+## 怎么读
 
-| 文档 | 图 1 | 图 2 |
-|------|------|------|
-| [架构](core/architecture.md) | [请求主路径](assets/architecture/request-path-zh.png) | [分模块发布台](assets/ops/release-modular-deploy-zh.png) |
-| [Runtime](core/runtime.md) | [Engine 循环](assets/harness/agent-engine-loop-zh.png) | [审批·取消·恢复](assets/harness/approval-cancel-resume-flow-zh.png) |
-| [工具与上下文](core/tools-and-context.md) | [组窗阶梯](assets/context/context-assemble-ladder-zh.png) | [exec 沙箱](assets/sandbox/bwrap-exec-flow-zh.png) · [Coding 揉合](assets/harness/coding-fuse-zh.png) |
-| [事件与契约](core/events.md) | [事件·SSE·投影](assets/events/event-sse-zh.png) | [StartTurn 命令链](assets/events/start-turn-command-zh.png) |
-| [RAG](topics/rag.md) | [hybrid 召回](assets/rag/search-sources-flow-zh.png) | [索引面](assets/rag/index-sync-zh.png) |
-| [工作台](topics/workbench.md) | [写作主路径](assets/writing/writing-main-path-zh.png) | [Ops Bench 原理](assets/ops/ops-bench-principle-zh.png) |
+图负责看清分支。正文负责说每一步在干什么。绿字/代码名只是事件或字段，不是流程本身。
 
-起栈见仓库根 README。图范式是 **主链详流**（样板：[`StartTurn 命令链`](assets/events/start-turn-command-zh.png)）：左辅栏 · 中宽条带主链（编号圆 + 箭头脊柱 + 黄菱形是/否）· 右辅栏 · 底「要点」。整张手绘 1536×1024 RGB PNG；禁止脚本/卡片堆、禁止在旧图上涂改。
+建议顺序：一次提问怎么走 → 推理循环 → 编码或写作（按你关心的场景）→ 评测怎么计分。
 
-冲突时：**代码与契约 > 本目录六篇正文 > 导览（分页）**。数字以 [`RESULTS.md`](../eval/official/baseline/RESULTS.md) 为准。`docs/plan/` 是落地前的临时草稿，**不参与权威**；无用后删除即可。
+---
 
-## 契约
+## 总览
 
-| 文档 | 说明 |
+| 打开 | 读什么 |
+|------|--------|
+| [架构](core/architecture.md) | 浏览器、api、runtime 各干什么；runtime 自己来领活；符号表在旁路，不挡提问 |
+| [图 · 请求主路径](assets/architecture/request-path-zh.png) | 点发送之后，请求怎么穿过网关落到推理 |
+| [图 · 分模块发布](assets/ops/release-modular-deploy-zh.png) | 哪个容器脏了、怎么重建 |
+
+![一次提问怎么走](assets/architecture/request-path-zh.png)
+
+---
+
+## 一次提问
+
+| 打开 | 读什么 |
+|------|--------|
+| [架构 · 领域对象](core/architecture.md) | 作品世界 / 聊天线程 / 点一次发送 / 真正在跑的实例 |
+| [图 · 提问状态](assets/architecture/turn-lifecycle-zh.png) | 排队 → 运行 ⇄ 等待审批 → 完成或取消 |
+| [事件与契约](core/events.md) | 落库、领取、取消、批准怎么当命令送达 |
+| [图 · 启动命令链](assets/events/start-turn-command-zh.png) | 202 只表示记下了；「开始想」要等 runtime 领到活 |
+
+---
+
+## Runtime
+
+| 打开 | 读什么 |
+|------|--------|
+| [Runtime](core/runtime.md) | 外壳管领活和收尾；循环管组窗 → 问模型 → 跑工具 |
+| [图 · 推理循环](assets/harness/agent-engine-loop-zh.png) | 中间那条从上到下的箭头链 |
+| [图 · 审批与取消](assets/harness/approval-cancel-resume-flow-zh.png) | 等人点头时执行实例还在；取消 ≠ 跑失败 |
+
+---
+
+## 工具 · 组窗 · 沙箱
+
+| 打开 | 读什么 |
+|------|--------|
+| [工具与上下文](core/tools-and-context.md) | 能力就是工具；编码把「找定义、看波及、改完再验」写进返回值 |
+| [图 · 组窗](assets/context/context-assemble-ladder-zh.png) | 每次问模型前怎么收拾窗口 |
+| [图 · 沙箱](assets/sandbox/bwrap-exec-flow-zh.png) | 日常命令关在作品根；评测题的测试进该题 Docker |
+
+---
+
+## 编码
+
+| 打开 | 读什么 |
+|------|--------|
+| [工具与上下文 §2](core/tools-and-context.md) | 读题 → 复现 → 找定义 → 改 → 再验；想交卷却还欠验证会再催一轮 |
+| [图 · 写入链](assets/harness/coding-fuse-zh.png) | 查找 / 波及 / 验证焊进已有工具，不另发明导航工具名 |
+| [工作台 · Agent](topics/workbench.md) | 编码工作台对照写作：同一套作品 → 会话 → 提问 |
+
+---
+
+## 写作 · 检索
+
+| 打开 | 读什么 |
+|------|--------|
+| [RAG](topics/rag.md) | 要点「搜资料」才查；禁止每轮自动塞向量包 |
+| [图 · 店内召回](assets/rag/search-sources-flow-zh.png) | 切块车道和文档车道并行，再融合 |
+| [图 · 建库](assets/rag/index-sync-zh.png) | 建库在提问环外；切块大约 450 token、重叠 64 |
+| [工作台 · 写作](topics/workbench.md) | 一本书；改稿走差异，每一遍都是用户自己点的发送 |
+| [图 · 写作主路径](assets/writing/writing-main-path-zh.png) | 大纲 → 成稿 → 改稿；检索按需 |
+
+---
+
+## 事件
+
+| 打开 | 读什么 |
+|------|--------|
+| [事件与契约](core/events.md) | runtime 只写事件行；api 再发给浏览器。界面不猜进行到哪一步 |
+| [图 · 事件流](assets/events/event-sse-zh.png) | 追加 → 通知 → 实时流 / 列表快照 |
+| [契约索引](contracts.md) | OpenAPI、事件 schema、评测清单 |
+
+---
+
+## 评测
+
+| 打开 | 读什么 |
+|------|--------|
+| [工作台 · Ops](topics/workbench.md) | 效果温度计，不是合入门禁；必须走产品同一条提问路径 |
+| [图 · Bench](assets/ops/ops-bench-principle-zh.png) | 检索 / 长文 / 编码四套件怎么接到真实工具 |
+| [评测日记](../eval/official/baseline/RESULTS.md) | 现行冒烟数字。SCORECARD 机器栏不是最新 |
+
+---
+
+## 运维 · 草稿
+
+| 打开 | 说明 |
 |------|------|
-| [契约索引](contracts.md) | OpenAPI · 事件 · **Ops manifest schema** · L1 评测纪律 |
+| [Pull 分发手册](ops/pull-dispatch-runbook.md) | 领取、租约、队列满回 429 |
+| [`plan/`](plan/README.md) | 落地前草稿，**可删**；不要当现行流程读 |
 
-## 运维
-
-| 文档 | 说明 |
-|------|------|
-| [Pull 分发运维手册](ops/pull-dispatch-runbook.md) | 默认 pull · lease · 准入 429 · 指标与故障注入 |
-
-## 临时草稿（`plan/` · 可删）
-
-落地前的诊断与机型草稿。**现行流程不要从这里读**；已回写六篇的条目随时可删。未落地的 intel 闭环仍只是草案，实施时直接改 Profile / 工具 / 正文，不必先扩 plan。
-
-| 草稿 | 去向 |
-|------|------|
-| backend-architecture | 资源上限、改点表已进 [架构](core/architecture.md) |
-| coding-structural-intelligence | 现行 Turn 已进 [工具与上下文](core/tools-and-context.md) · [Runtime](core/runtime.md) |
-| quality-uplift-2026-08 | 诊断史；效果看 RESULTS |
-| agent-workspace-ast-index | 旁路说明已进架构 ast-indexer 行 |
-| intel-closed-loop-verification | 未实施；intel 场景以 Profile 现状为准 |
+起栈见仓库根 README。图是 **主链详流**（样板：[StartTurn 命令链](assets/events/start-turn-command-zh.png)）：中间一条编号箭头链，左右是注。整张手绘 PNG；禁止脚本出图、禁止在旧图上涂改。

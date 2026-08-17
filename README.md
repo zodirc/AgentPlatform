@@ -1,8 +1,25 @@
 # Agent Platform
 
-自托管 Agent Runtime：**一个内核，多个场景**。同一 `AgentEngine`；差异在 `ScenarioProfile`（工具 / 提示词 / 审批）。
+自托管 Agent Runtime：**一个内核，多个场景**。同一条推理循环；写作 / 编码 / 情报只换工具和提示词。
 
-产品面 `http://localhost/` · 详文 [docs/README.md](docs/README.md)
+产品面 `http://localhost/`
+
+## 文档 Wiki（GitHub 上直接点开）
+
+在 GitHub 里请读 **Markdown**：标题、正文、控制流图都会渲染。仓库里的 `docs/tour/index.html` 点进去只是源码，不能当网页翻页。
+
+**入口： [文档 Wiki](docs/README.md)**
+
+| 想了解 | 打开 |
+|--------|------|
+| 一次提问怎么从浏览器走到推理 | [架构](docs/core/architecture.md) · [请求主路径图](docs/assets/architecture/request-path-zh.png) |
+| 组窗、问模型、跑工具 | [Runtime](docs/core/runtime.md) · [循环图](docs/assets/harness/agent-engine-loop-zh.png) |
+| 编码：找定义、改完再验 | [工具与上下文](docs/core/tools-and-context.md) |
+| 写作 / 搜资料 | [RAG](docs/topics/rag.md) · [工作台](docs/topics/workbench.md) |
+| 事件怎么上屏 | [事件与契约](docs/core/events.md) |
+| 现行冒烟数字 | [评测日记](eval/official/baseline/RESULTS.md) |
+
+翻页导览（逐步「这一步在干什么」+ 图）：本地 `make docs-tour`。在线需仓库打开 GitHub Pages 之后访问 [控制流导览](https://zodirc.github.io/AgentPlatform/tour/)。
 
 ---
 
@@ -46,7 +63,7 @@ Postgres + pgvector · 旁路 ast-indexer · 默认含 bench
 | bench + bench-postgres | Official / L1（`make up` 默认起） |
 | contracts | OpenAPI / 事件 / 命令体 |
 
-`Work` → `Session` → `Turn` ↔ `Run`。分发默认 pull + lease。[架构详文](docs/core/architecture.md)
+`Work`（作品世界）→ `Session`（聊天线程）→ `Turn`（点一次发送）↔ `Run`（真正在跑的实例）。runtime 自己来领活并心跳续约。[架构详文](docs/core/architecture.md)
 
 ### `make up` 全量：8 容器
 
@@ -78,23 +95,17 @@ packages/contracts/   eval/   docs/   scripts/
 
 | 场景 | 做什么 |
 |------|--------|
-| writing | 写作：大纲 / 草稿 / diff / RAG（默认） |
-| agent | 编码全工具：Locate / Impact / Verify（issue_repro · W9）；Ops 下 sweb 解题 |
-| intel | 情报研判（今日：IOC 富化 + RAG 简报；验证闭环未落地） |
-| collab | 多 agent（偏薄） |
+| writing | 写作：大纲 / 草稿 / 按差异改稿 / 按需搜资料（默认） |
+| agent | 编码：查找、改文件、跑测试；找定义和改完再验写进工具返回值；评测题的测试进该题 Docker |
+| intel | 情报向资料与提示（核实闭环未落地） |
+| collab | 多助手协作（偏薄） |
 
-扩场景 = 改 Profile，不改 Engine 循环。
+扩场景 = 改配置，不改推理循环。
 
-**框架**：Intake → Engine（组窗 → 模型流 → 工具/审批 → 或 W9 回执再跑一轮 → checkpoint）→ 事件 SSE。编码 Verify 焊进 `edit_file` / `run_tests`；Ops SWE 测改道本地 `sweb.eval`。沙箱 Landlock/bwrap；`make gate` + Golden。效果日记 [`RESULTS.md`](eval/official/baseline/RESULTS.md)。
+用户点发送之后：整理输入 → 组窗 → 问模型 → 跑工具（要人批准就停住）→ 存断点。编码时若写完就收工却还欠验证，再催一轮。评测题的测试不在工作区源码树上跑。效果日记 [`RESULTS.md`](eval/official/baseline/RESULTS.md)。
 
 | 层 | 技术 |
 |----|------|
 | 后端 | Python 3.11 · FastAPI · Postgres/pgvector · ST embedding |
 | 前端 | React 18 · Vite · TanStack Query · Tailwind |
 | 部署 | Compose · Caddy · Make |
-
----
-
-## 文档
-
-[总索引](docs/README.md) · [导览](docs/tour/index.html) · [架构](docs/core/architecture.md) · [Runtime](docs/core/runtime.md) · [工具与上下文](docs/core/tools-and-context.md) · [事件](docs/core/events.md) · [RAG](docs/topics/rag.md) · [工作台](docs/topics/workbench.md) · [评测日记](eval/official/baseline/RESULTS.md)
