@@ -134,7 +134,7 @@ help: ## 显示常用命令
 	@echo "其他"
 	@echo "  make migrate      数据库迁移"
 	@echo "  make smoke        冒烟测试"
-	@echo "  make docs-tour    本地起静态页并打开控制流导览（WSL→Windows 浏览器）"
+	@echo "  make docs-tour    本地起静态页并打开控制流导览"
 	@echo "  make pull-dispatch-maturity  pull 分发成熟度冒烟（指标/表/保留）"
 	@echo "  make gate         Proof 一键门禁（smoke→eval-all→runtime-test；docs/28）"
 	@echo "  make ux-signals   体验信号日聚合/告警（docs/28 PX1；环外，不进 Turn）"
@@ -402,7 +402,7 @@ docker-prune: docker-prune-safe ## 同 docker-prune-safe（旧名兼容）
 backup: ## 备份 Postgres（pg_dump）+ agent_data 卷（保留最近 7 份）
 	bash deploy/backup.sh
 
-docs-tour: ## 打开 docs/tour（HTTP :8765；WSL 下弹 Windows 浏览器）
+docs-tour: ## 打开 docs/tour（HTTP :8765；有图形会话则弹浏览器）
 	@bash scripts/docs_tour_open.sh
 
 smoke:
