@@ -2,9 +2,61 @@
 
 - **embed 口径**: `bge-m3@1024` / 下方第1轮主表 = INDEX **12** 锚点；第2轮检索按 INDEX **13**
 - **protocol**: `official-small-2026-08-m3` · L1 agent-path · arm=free · sample_tier=smoke
-- **本表更新**: 2026-08-17（第5轮 coding-only smoke 入账 · 未升 SCORECARD）
-- **轮次**: 第1轮 2026-08-15 12:14–13:01 CST · INDEX 12；第2轮 2026-08-15 17:12 CST 入账 · INDEX 13；第3轮 2026-08-16 工程加固（无完整数字）；第4轮 2026-08-16 17:40–19:13 CST 完整 smoke；第5轮 2026-08-16 23:27–00:06 CST coding-only
-- **模型（context / coding）**: `deepseek-v4-flash`（provider=deepseek）
+- **本表更新**: 2026-08-17（第6轮 coding-only · gpt-5.6-luna / wuai · 未升 SCORECARD）
+- **轮次**: 第1轮 2026-08-15 12:14–13:01 CST · INDEX 12；第2轮 2026-08-15 17:12 CST 入账 · INDEX 13；第3轮 2026-08-16 工程加固（无完整数字）；第4轮 2026-08-16 17:40–19:13 CST 完整 smoke；第5轮 2026-08-16 23:27–00:06 CST coding-only（dsflash）；第6轮 2026-08-17 22:58–23:41 CST coding-only（luna）
+- **模型**: 第1–5轮 coding `deepseek-v4-flash`；第6轮 coding `gpt-5.6-luna`（OpenAI 兼容中转 `https://api.wuai.ai/v1` · 请求带 `reasoning_effort=high`）
+
+---
+
+## 第6轮 · coding-only smoke（2026-08-17 22:58–23:41 CST 入账 · 未升 SCORECARD）
+
+换模过程烟：OpenAI 中转站 + `gpt-5.6-luna`（相对第5轮 dsflash）。**仅编码套件**；smoke 口径 **不作效果结论、不升 SCORECARD 主栏**。墙钟与 resolve 观感均不错。
+
+| 项 | 值 |
+|----|-----|
+| parent_run_id（Ops） | `ec0a1226-4c6b-4424-b8fb-845e93dbdcfa` |
+| run_id（coding） | `4471acba-11ce-48d6-baa8-6402ac1bbcb7` |
+| status | completed · harness ok |
+| model | `gpt-5.6-luna` · provider=openai · base=`https://api.wuai.ai/v1` · ctx=256k · free · coding n5+harness · `l1_max_parallel=2` |
+| 推理字段 | `reasoning_effort=high`（族默认；无 DeepSeek `thinking` 字段） |
+| 扁平镜像 | 根目录 `TEST.log` |
+
+### coding · SWE-bench Lite n5 + harness
+
+通过 **12907 / 14182 / 14995 / 6938**；未过仅 **14365**（与第5轮同分同题）。
+
+| 字段 | 第5轮（dsflash） | 第6轮（luna/wuai） | Δ |
+|------|----------------:|------------------:|---|
+| resolve / n_resolved | 0.8 / 4 | **0.8 / 4** | 同题集 |
+| patch_rate / file_hit | 1.0 / 1.0 | 1.0 / 1.0 | 0 |
+| steps_total | 202 | **180** | −11% |
+| elapsed_s_total | 3867.1 | **2908.5** | −25% |
+| suite_wall_s（Ops parent） | ≈2332 | **≈2563** | +10%（并行下仍≈43min） |
+| locate_fuse_ok | 0.625（n=8） | **0.765**（n=34） | ↑ |
+| related_tests cov / adoption | 1.0 / 0.0 | **0.273 / 0.80** | 采用↑ |
+| test_summary | 0.50 | **1.0**（27/27） | ↑ |
+| n_testish / edit_ok_n | 16 / 9 | **27 / 22** | 试测更密 |
+| tests_before_submit | 1.0 | 1.0 | 0 |
+| verify_receipt | 0.80 | **1.0**（n=5） | ↑ |
+| verify_receipt_then_test | 0.25 | **0.80** | ↑ |
+| repro_rerun | 0.20 | **0.60** | ↑ |
+| run_id | `01cd8c79-…` | `4471acba-…` | |
+
+#### 按题
+
+| instance | 第5轮 steps / s | 第6轮 steps / s | harness |
+|----------|----------------:|----------------:|---------|
+| astropy-12907 | 35 / 848 | **37 / 669** | resolved → resolved |
+| astropy-14995 | 30 / 358 | **24 / 347** | resolved → resolved |
+| astropy-6938 | 57 / 752 | **39 / 678** | resolved → resolved |
+| astropy-14182 | 56 / 1784 | **47 / 786** | resolved → resolved |
+| astropy-14365 | 24 / 125 | **33 / 428** | unresolved → unresolved |
+
+#### 归因（方向，不作效果结论）
+
+- **换模**：同题 4/5；未过仍是 **14365**。墙钟 ≈43min，题内 elapsedΣ 明显低于第5轮 dsflash。
+- **14182**：本轮题内秒数约减半（1784→786），仍 resolved。
+- **过程**：`test_summary` / 回执 / 回执后再测均高于第5轮；fuse 调用更多但 ok 率更高。
 
 ---
 
