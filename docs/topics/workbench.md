@@ -8,7 +8,7 @@
 | **Golden** | 接口/契约切片 | 否 |
 | **ci_proof** | unit + gate 完整证明 | **是** |
 
-Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieval/coding 那些效果套件。一次提问落了哪些行，见 [一次真实跑](worked-example.md)。
+Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieval/coding 那些效果套件。
 
 ## 图
 
