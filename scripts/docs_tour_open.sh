@@ -114,7 +114,7 @@ open_windows_browser() {
 
 cd "$DOCS"
 if ! curl -fsS --max-time 0.3 "$URL" >/dev/null 2>&1; then
-  python3 -m http.server "$PORT" --bind 127.0.0.1 >"$LOGFILE" 2>&1 &
+  python3 "$ROOT/scripts/docs_tour_server.py" "$PORT" >"$LOGFILE" 2>&1 &
   echo $! >"$PIDFILE"
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     curl -fsS --max-time 0.3 "$URL" >/dev/null 2>&1 && break

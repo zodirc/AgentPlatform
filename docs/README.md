@@ -1,12 +1,10 @@
 # 文档 Wiki
 
-GitHub 上从仓库首页点进本页，或直接打开：
+在线翻页（推荐）：https://zodirc.github.io/AgentPlatform/
 
-https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
+左侧目录切章、不整页刷新；流程图加载过一次会留在浏览器里。本地同样：`make docs-tour` → http://127.0.0.1:8765/tour/
 
-下面每一行也是完整地址，点了会进对应 Markdown（图会渲染）。不要点 `tour/index.html` 当网页。
-
-翻页导览只在本地：`make docs-tour` → http://127.0.0.1:8765/tour/
+下面是 Markdown 原文目录。从 GitHub 文件视图点这些链接会整页刷新，图也会再下一次，适合对照源文件，不适合当 Wiki 翻。
 
 对错：**代码与契约 > 本目录六篇正文 > 导览**。数字以 https://github.com/zodirc/AgentPlatform/blob/master/eval/official/baseline/RESULTS.md 为准。`plan/` 是可删草稿，不参与权威。
 
@@ -28,7 +26,7 @@ https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 | [图 · 请求主路径](assets/architecture/request-path-zh.png) | 点发送之后，请求怎么穿过网关落到推理 |
 | [图 · 分模块发布](assets/ops/release-modular-deploy-zh.png) | 哪个容器脏了、怎么重建 |
 
-![一次提问怎么走](assets/architecture/request-path-zh.png)
+（图点上面链接打开即可。目录页不再内嵌整张海报，避免每次进 Wiki 都重新拉 1.5MB+。）
 
 ---
 

@@ -6,21 +6,25 @@
 
 ## 文档 Wiki
 
-GitHub 上请点下面这一行（会打开 Markdown，正文和图都会渲染）。不要点仓库里的 `docs/tour/index.html`，那只是源码。
+别人请打开在线翻页（左侧目录、切章不整页刷新、流程图会留在浏览器里）：
+
+https://zodirc.github.io/AgentPlatform/
+
+本地同样效果：`make docs-tour` → http://127.0.0.1:8765/tour/
+
+不要从 GitHub 文件视图点 Markdown / PNG 当 Wiki：每换一篇都是整页刷新，图约 1.5MB 会再下一次。若只想读正文源文件：
 
 https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 
 | 想了解 | 打开 |
 |--------|------|
-| 一次提问怎么从浏览器走到推理 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/architecture.md |
-| 组窗、问模型、跑工具 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/runtime.md |
-| 编码：找定义、改完再验 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/tools-and-context.md |
-| 写作 / 搜资料 | https://github.com/zodirc/AgentPlatform/blob/master/docs/topics/rag.md |
-| 工作台（写作对照编码） | https://github.com/zodirc/AgentPlatform/blob/master/docs/topics/workbench.md |
-| 事件怎么上屏 | https://github.com/zodirc/AgentPlatform/blob/master/docs/core/events.md |
-| 现行冒烟数字 | https://github.com/zodirc/AgentPlatform/blob/master/eval/official/baseline/RESULTS.md |
-
-本地翻页导览：`make docs-tour`（http://127.0.0.1:8765/tour/）。
+| 一次提问怎么从浏览器走到推理 | https://zodirc.github.io/AgentPlatform/tour/#request-path |
+| 组窗、问模型、跑工具 | https://zodirc.github.io/AgentPlatform/tour/#engine-loop |
+| 编码：找定义、改完再验 | https://zodirc.github.io/AgentPlatform/tour/#coding-fuse |
+| 写作 / 搜资料 | https://zodirc.github.io/AgentPlatform/tour/#rag |
+| 工作台（写作对照编码） | https://zodirc.github.io/AgentPlatform/tour/#writing |
+| 事件怎么上屏 | https://zodirc.github.io/AgentPlatform/tour/#events |
+| 现行冒烟数字 | https://zodirc.github.io/AgentPlatform/tour/#scorecard |
 
 ---
 

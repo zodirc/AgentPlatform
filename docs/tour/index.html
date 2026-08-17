@@ -4,9 +4,6 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AgentPlatform · 控制流导览</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <style>
     :root {
       --bg: #eef1f4;
@@ -24,90 +21,168 @@
       --sidebar-active: #f8fafc;
       --radius: 10px;
       --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.06);
+      --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
     body {
-      font-family: "DM Sans", sans-serif;
+      font-family: var(--sans);
       color: var(--ink);
       background: var(--bg);
       display: grid;
-      grid-template-columns: 280px 1fr;
-      min-height: 100vh;
+      grid-template-columns: 272px 1fr;
+      height: 100vh;
+      overflow: hidden;
     }
     a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
     a:hover { color: #0d9488; }
+    .nav-backdrop {
+      display: none;
+    }
     .sidebar {
       background: var(--sidebar);
       color: var(--sidebar-text);
-      padding: 1.25rem 0.85rem 2rem;
-      overflow-y: auto;
-      position: sticky;
-      top: 0;
       height: 100vh;
       border-right: 1px solid #1e293b;
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
     }
-    .brand {
-      padding: 0.35rem 0.65rem 1rem;
+    .sidebar-head {
+      flex: 0 0 auto;
+      padding: 0.85rem 0.75rem 0.65rem;
       border-bottom: 1px solid #1e293b;
-      margin-bottom: 0.85rem;
     }
+    .brand { cursor: pointer; }
     .brand h1 {
       margin: 0;
-      font-size: 1.05rem;
+      font-size: 0.98rem;
       font-weight: 700;
       color: #f8fafc;
       letter-spacing: -0.02em;
     }
     .brand p {
-      margin: 0.35rem 0 0;
-      font-size: 0.75rem;
-      line-height: 1.4;
+      margin: 0.22rem 0 0;
+      font-size: 0.7rem;
+      line-height: 1.35;
       color: #94a3b8;
     }
-    .nav-group { margin-bottom: 0.85rem; }
-    .nav-group-title {
-      font-size: 0.65rem;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #64748b;
-      padding: 0.4rem 0.65rem;
-      font-weight: 600;
-    }
-    .nav button {
+    .nav-search {
+      position: relative;
       display: block;
+      margin-top: 0.7rem;
+    }
+    #navFilter {
+      width: 100%;
+      margin: 0;
+      padding: 0.42rem 1.7rem 0.42rem 0.65rem;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      background: #1e293b;
+      color: #e2e8f0;
+      font: inherit;
+      font-size: 0.8rem;
+    }
+    #navFilter::placeholder { color: #64748b; }
+    #navFilter:focus {
+      outline: none;
+      border-color: #14b8a6;
+    }
+    .nav-search kbd {
+      position: absolute;
+      right: 0.45rem;
+      top: 50%;
+      transform: translateY(-50%);
+      font: 0.68rem var(--mono);
+      color: #64748b;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      padding: 0.02rem 0.28rem;
+      pointer-events: none;
+    }
+    .nav {
+      flex: 1 1 auto;
+      overflow-y: auto;
+      padding: 0.45rem 0.55rem 1.5rem;
+    }
+    .nav-group { margin-bottom: 0.2rem; }
+    .nav-group-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.35rem;
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: #94a3b8;
+      font: inherit;
+      font-size: 0.68rem;
+      font-weight: 650;
+      letter-spacing: 0.04em;
+      padding: 0.45rem 0.45rem 0.2rem;
+      cursor: pointer;
+      text-align: left;
+    }
+    .nav-group-title:hover { color: #e2e8f0; }
+    .nav-group-title .chev {
+      font-size: 0.62rem;
+      color: #64748b;
+      transform: rotate(90deg);
+      transition: transform 0.15s ease;
+    }
+    .nav-group.is-collapsed .chev { transform: rotate(0deg); }
+    .nav-group.is-collapsed > button.nav-item { display: none; }
+    .nav-group.is-empty { display: none; }
+    .nav button.nav-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.4rem;
       width: 100%;
       text-align: left;
       border: 0;
+      border-left: 3px solid transparent;
       background: transparent;
       color: inherit;
       font: inherit;
-      font-size: 0.82rem;
-      padding: 0.42rem 0.65rem;
-      border-radius: 6px;
+      font-size: 0.8rem;
+      padding: 0.32rem 0.45rem 0.32rem 0.4rem;
+      border-radius: 0 8px 8px 0;
       cursor: pointer;
-      line-height: 1.35;
+      line-height: 1.3;
     }
-    .nav button:hover { background: rgba(148, 163, 184, 0.12); color: #f1f5f9; }
-    .nav button.active {
-      background: rgba(15, 118, 110, 0.35);
+    .nav button.nav-item:hover { background: rgba(148, 163, 184, 0.12); color: #f1f5f9; }
+    .nav button.nav-item.active {
+      background: rgba(15, 118, 110, 0.28);
       color: var(--sidebar-active);
-      font-weight: 600;
+      border-left-color: #2dd4bf;
     }
-    .nav button .num {
-      display: inline-block;
-      width: 1.5rem;
+    .nav button.nav-item .num {
+      flex: 0 0 1.35rem;
       color: #64748b;
       font-variant-numeric: tabular-nums;
-      font-family: "JetBrains Mono", monospace;
-      font-size: 0.72rem;
+      font-family: var(--mono);
+      font-size: 0.66rem;
+      padding-top: 0.14rem;
     }
-    .nav button.active .num { color: #5eead4; }
+    .nav button.nav-item.active .num { color: #5eead4; }
+    .nav-text { min-width: 0; }
+    .nav-title { display: block; font-weight: 600; }
+    .nav-blurb {
+      display: none;
+      margin-top: 0.1rem;
+      font-size: 0.68rem;
+      font-weight: 400;
+      color: #99f6e4;
+      line-height: 1.35;
+    }
+    .nav button.nav-item.active .nav-blurb { display: block; }
     .main {
       display: flex;
       flex-direction: column;
       min-width: 0;
-      min-height: 100vh;
+      height: 100vh;
+      overflow: hidden;
     }
     .topbar {
       display: flex;
@@ -122,7 +197,15 @@
       top: 0;
       z-index: 5;
     }
-    .topbar .meta { font-size: 0.8rem; color: var(--muted); }
+    .topbar .meta {
+      flex: 1;
+      min-width: 0;
+      font-size: 0.8rem;
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .pager { display: flex; gap: 0.5rem; }
     .pager button {
       border: 1px solid var(--line);
@@ -137,16 +220,28 @@
     }
     .pager button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
     .pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .nav-toggle {
+      display: none;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      border-radius: 8px;
+      padding: 0.45rem 0.75rem;
+      font: inherit;
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: var(--ink);
+    }
     .content {
       flex: 1;
+      overflow-y: auto;
       padding: 1.25rem 1.5rem 3rem;
       max-width: 1100px;
       width: 100%;
       margin: 0 auto;
     }
-    .page { display: none; animation: fade 0.18s ease; }
+    .page { display: none; }
     .page.active { display: block; }
-    @keyframes fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
     .hero {
       background: linear-gradient(145deg, #0f172a 0%, #134e4a 55%, #0f766e 100%);
       color: #f8fafc;
@@ -208,7 +303,7 @@
     }
     th { background: #f8fafc; font-weight: 600; }
     code, .mono {
-      font-family: "JetBrains Mono", monospace;
+      font-family: var(--mono);
       font-size: 0.84em;
     }
     pre {
@@ -217,7 +312,7 @@
       border-radius: 8px;
       padding: 0.85rem 1rem;
       overflow-x: auto;
-      font-family: "JetBrains Mono", monospace;
+      font-family: var(--mono);
       font-size: 0.78rem;
       line-height: 1.45;
       margin: 0.6rem 0;
@@ -231,7 +326,25 @@
     }
     @media (max-width: 960px) {
       body { grid-template-columns: 1fr; }
-      .sidebar { position: relative; height: auto; max-height: 40vh; }
+      .nav-toggle { display: inline-flex; }
+      .nav-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(15, 23, 42, 0.45);
+        z-index: 30;
+      }
+      body.nav-open .nav-backdrop { display: block; }
+      .sidebar {
+        position: fixed;
+        inset: 0 auto 0 0;
+        width: min(288px, 88vw);
+        z-index: 40;
+        transform: translateX(-105%);
+        transition: transform 0.18s ease;
+        box-shadow: 8px 0 32px rgba(15, 23, 42, 0.35);
+      }
+      body.nav-open .sidebar { transform: none; }
       .grid-2 { grid-template-columns: 1fr; }
     }
     .figure {
@@ -338,7 +451,7 @@
       border-radius: 999px;
       background: var(--accent);
       color: #ecfdf5;
-      font-family: "JetBrains Mono", monospace;
+      font-family: var(--mono);
       font-size: 0.68rem;
       font-weight: 600;
     }
@@ -430,7 +543,7 @@
       border-radius: 999px;
       background: var(--accent);
       color: #ecfdf5;
-      font-family: "JetBrains Mono", monospace;
+      font-family: var(--mono);
       font-size: 0.78rem;
       font-weight: 700;
       line-height: 2rem;
@@ -452,7 +565,7 @@
     .steps .sig {
       display: inline-block;
       margin-top: 0.4rem;
-      font-family: "JetBrains Mono", monospace;
+      font-family: var(--mono);
       font-size: 0.72rem;
       color: #0f766e;
       background: var(--accent-soft);
@@ -470,16 +583,24 @@
   </style>
 </head>
 <body>
-  <aside class="sidebar">
-    <div class="brand">
-      <h1>AgentPlatform</h1>
-      <p>控制流导览 · 代码优先于文档<br />快照日期 2026-08-17</p>
+  <div class="nav-backdrop" id="navBackdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <h1>文档 Wiki</h1>
+        <p>点章节翻页，图加载过就留着</p>
+      </div>
+      <label class="nav-search">
+        <input id="navFilter" type="search" placeholder="筛选章节" autocomplete="off" />
+        <kbd>/</kbd>
+      </label>
     </div>
     <nav class="nav" id="nav"></nav>
   </aside>
 
   <div class="main">
     <header class="topbar">
+      <button type="button" class="nav-toggle" id="navToggle" aria-label="打开目录">目录</button>
       <div class="meta" id="pageMeta">—</div>
       <div class="pager">
         <button type="button" id="prevBtn">← 上一页</button>
@@ -504,7 +625,7 @@
           <ul>
             <li>左侧目录 / 顶栏翻页；主图点击可放大。先看图上的箭头链，再读本页逐步说明——每一步标题是「干什么」，底下灰字是「为什么 / 不做会怎样」，绿色小条才是事件或字段名。</li>
             <li>冲突时仍以<strong>代码与契约</strong>为准，其次六篇 markdown。本导览负责把流程讲明白，不另立一套权威。</li>
-            <li>GitHub 上请打开仓库 README 里的「文档 Wiki」（Markdown，图会渲染）。本 HTML 在仓库文件视图里只是源码；本地 <code>make docs-tour</code> 或 GitHub Pages 才当网页翻页。</li>
+            <li>在线 Wiki：<a href="https://zodirc.github.io/AgentPlatform/">https://zodirc.github.io/AgentPlatform/</a>。本地 <code>make docs-tour</code>。不要在 GitHub 文件视图里打开本 HTML 当网页。</li>
           </ul>
           <div class="callout">
             条文按代码维护。图看分支，本页文字看逐步：标题是干什么，灰字是为什么，绿条才是事件名。
@@ -1461,7 +1582,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           <ol>
             <li>先改代码与契约，再改本 HTML 对应页（不另开分页）。</li>
             <li>改流程图：在原海报风格上增补细节后，直接替换同名 <code>docs/assets/**/*-zh.png</code>。</li>
-            <li>GitHub 上读仓库 README 的文档 Wiki。本地 <code>make docs-tour</code>；在线是 GitHub Pages 的 <code>/tour/</code>。</li>
+            <li>GitHub 上请打开 <a href="https://zodirc.github.io/AgentPlatform/">在线 Wiki</a>。本地 <code>make docs-tour</code>。</li>
           </ol>
         </div>
       </section>
@@ -1471,12 +1592,60 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
 
   <script>
     (function () {
+      const blurbs = {
+        cover: "这套系统是什么",
+        principles: "提问热路径上不许变慢",
+        topology: "浏览器、api、runtime 怎么分工",
+        domain: "作品、会话、一次发送",
+        "request-path": "点发送之后请求怎么走",
+        "start-turn": "记下了 ≠ 开始想",
+        "runtime-layers": "外壳管前后，循环管思考",
+        "engine-loop": "组窗 → 问模型 → 跑工具",
+        approval: "等人点头、取消后再聊",
+        "turn-state": "挂起后还欠的验证不能丢",
+        scenarios: "四个场景，同一条循环",
+        tools: "能力就是工具，捷径会改道",
+        context: "问模型前怎么收拾窗口",
+        sandbox: "日常关沙箱，评测进镜像",
+        "coding-fuse": "从读题到交卷",
+        verify: "想收工却还欠验证",
+        "issue-repro": "绿测不够，issue 例子还得跑",
+        "related-tests": "失败摘要和相关测试命令",
+        events: "事件怎么从 runtime 上屏",
+        contracts: "契约和目录在哪",
+        rag: "要点搜才查资料",
+        index: "资料库什么时候建",
+        writing: "一本书，改稿走差异",
+        "ops-bench": "评测走产品同一条路",
+        scorecard: "现行冒烟数字",
+        next: "还缺什么",
+      };
+
       const pages = Array.from(document.querySelectorAll(".page"));
       const nav = document.getElementById("nav");
       const meta = document.getElementById("pageMeta");
       const prevBtn = document.getElementById("prevBtn");
       const nextBtn = document.getElementById("nextBtn");
+      const filter = document.getElementById("navFilter");
+      const brand = document.querySelector(".brand");
+      const content = document.getElementById("content");
+      const navToggle = document.getElementById("navToggle");
+      const navBackdrop = document.getElementById("navBackdrop");
       let idx = 0;
+      const warmed = new Set();
+
+      function setNavOpen(open) {
+        document.body.classList.toggle("nav-open", open);
+      }
+
+      pages.forEach((p) => {
+        p.querySelectorAll("img").forEach((img) => {
+          img.decoding = "async";
+          img.loading = "lazy";
+          img.width = img.width || 1536;
+          img.height = img.height || 1024;
+        });
+      });
 
       const groups = [];
       pages.forEach((p, i) => {
@@ -1484,48 +1653,132 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         if (!groups.length || groups[groups.length - 1].name !== g) {
           groups.push({ name: g, items: [] });
         }
-        groups[groups.length - 1].items.push({ el: p, i, title: p.dataset.title || p.dataset.id });
+        groups[groups.length - 1].items.push({
+          el: p,
+          i,
+          id: p.dataset.id,
+          title: p.dataset.title || p.dataset.id,
+          blurb: blurbs[p.dataset.id] || "",
+        });
       });
 
       groups.forEach((g) => {
         const wrap = document.createElement("div");
         wrap.className = "nav-group";
-        const t = document.createElement("div");
+        const t = document.createElement("button");
+        t.type = "button";
         t.className = "nav-group-title";
-        t.textContent = g.name;
+        t.innerHTML = `<span></span><span class="chev">▸</span>`;
+        t.querySelector("span").textContent = g.name;
+        t.addEventListener("click", () => wrap.classList.toggle("is-collapsed"));
         wrap.appendChild(t);
         g.items.forEach((item) => {
           const b = document.createElement("button");
           b.type = "button";
-          b.innerHTML = `<span class="num">${String(item.i).padStart(2, "0")}</span>${item.title}`;
-          b.addEventListener("click", () => go(item.i));
+          b.className = "nav-item";
+          b.title = item.blurb;
+          b.dataset.hay = (item.title + " " + item.blurb + " " + g.name).toLowerCase();
+          b.innerHTML =
+            `<span class="num">${String(item.i).padStart(2, "0")}</span>` +
+            `<span class="nav-text"><span class="nav-title"></span><span class="nav-blurb"></span></span>`;
+          b.querySelector(".nav-title").textContent = item.title;
+          b.querySelector(".nav-blurb").textContent = item.blurb;
+          b.addEventListener("click", () => {
+            go(item.i);
+            setNavOpen(false);
+          });
           item.btn = b;
           wrap.appendChild(b);
         });
+        g.wrap = wrap;
         nav.appendChild(wrap);
       });
+
+      function warmImages(i) {
+        const p = pages[i];
+        if (!p || warmed.has(i)) return;
+        p.querySelectorAll("img").forEach((img) => {
+          img.loading = "eager";
+          if (img.src) {
+            const pre = new Image();
+            pre.src = img.src;
+          }
+        });
+        warmed.add(i);
+      }
 
       function go(n) {
         idx = Math.max(0, Math.min(pages.length - 1, n));
         pages.forEach((p, i) => p.classList.toggle("active", i === idx));
-        groups.forEach((g) => g.items.forEach((item) => item.btn.classList.toggle("active", item.i === idx)));
+        groups.forEach((g) => {
+          const here = g.items.some((item) => item.i === idx);
+          if (here) g.wrap.classList.remove("is-collapsed");
+          g.items.forEach((item) => {
+            const on = item.i === idx;
+            item.btn.classList.toggle("active", on);
+            item.btn.setAttribute("aria-current", on ? "page" : "false");
+          });
+        });
         const p = pages[idx];
         meta.textContent = `${idx + 1} / ${pages.length} · ${p.dataset.group} · ${p.dataset.title}`;
         prevBtn.disabled = idx === 0;
         nextBtn.disabled = idx === pages.length - 1;
         history.replaceState(null, "", `#${p.dataset.id}`);
-        const activeBtn = nav.querySelector("button.active");
-        if (activeBtn) activeBtn.scrollIntoView({ block: "nearest" });
-        window.scrollTo({ top: 0, behavior: "smooth" });
+        const activeBtn = nav.querySelector("button.nav-item.active");
+        if (activeBtn) {
+          const navRect = nav.getBoundingClientRect();
+          const btnRect = activeBtn.getBoundingClientRect();
+          if (btnRect.top < navRect.top || btnRect.bottom > navRect.bottom) {
+            nav.scrollTop += btnRect.top - navRect.top - navRect.height / 2 + btnRect.height / 2;
+          }
+        }
+        content.scrollTop = 0;
+        warmImages(idx);
+        warmImages(idx + 1);
+        warmImages(idx - 1);
       }
 
+      function applyFilter() {
+        const q = (filter.value || "").trim().toLowerCase();
+        groups.forEach((g) => {
+          let visible = 0;
+          g.items.forEach((item) => {
+            const show = !q || item.btn.dataset.hay.indexOf(q) !== -1;
+            item.btn.hidden = !show;
+            if (show) visible += 1;
+          });
+          g.wrap.classList.toggle("is-empty", visible === 0);
+          if (q && visible) g.wrap.classList.remove("is-collapsed");
+        });
+      }
+
+      brand.addEventListener("click", () => {
+        go(0);
+        setNavOpen(false);
+      });
+      filter.addEventListener("input", applyFilter);
       prevBtn.addEventListener("click", () => go(idx - 1));
       nextBtn.addEventListener("click", () => go(idx + 1));
+      navToggle.addEventListener("click", () => setNavOpen(!document.body.classList.contains("nav-open")));
+      navBackdrop.addEventListener("click", () => setNavOpen(false));
       window.addEventListener("keydown", (e) => {
-        if (e.key === "ArrowLeft") go(idx - 1);
-        if (e.key === "ArrowRight") go(idx + 1);
+        const typing = e.target === filter || (e.target && e.target.tagName === "INPUT");
         if (e.key === "Escape") {
           document.querySelectorAll(".figure.zoomed").forEach((f) => f.classList.remove("zoomed"));
+          setNavOpen(false);
+          if (filter.value) {
+            filter.value = "";
+            applyFilter();
+          }
+          filter.blur();
+          return;
+        }
+        if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
+        if (e.key === "ArrowLeft" || e.key === "k") go(idx - 1);
+        if (e.key === "ArrowRight" || e.key === "j") go(idx + 1);
+        if (e.key === "/") {
+          e.preventDefault();
+          filter.focus();
         }
       });
 
@@ -1540,6 +1793,21 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       const hash = location.hash.replace(/^#/, "");
       const start = Math.max(0, pages.findIndex((p) => p.dataset.id === hash));
       go(start === -1 ? 0 : start);
+
+      let idle = 0;
+      const warmTimer = setInterval(() => {
+        while (idle < pages.length && warmed.has(idle)) idle += 1;
+        if (idle >= pages.length) {
+          clearInterval(warmTimer);
+          return;
+        }
+        warmImages(idle);
+        idle += 1;
+      }, 500);
+
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("../sw.js").catch(() => {});
+      }
     })();
   </script>
 </body>
