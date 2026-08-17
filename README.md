@@ -79,13 +79,13 @@ packages/contracts/   eval/   docs/   scripts/
 | 场景 | 做什么 |
 |------|--------|
 | writing | 写作：大纲 / 草稿 / diff / RAG（默认） |
-| agent | 编码全工具：文件 / shell / 测试 / LSP·AST |
-| intel | 情报研判（闭环方案见 [plan](docs/plan/intel-closed-loop-verification.md)，未全落地） |
+| agent | 编码全工具：Locate / Impact / Verify（issue_repro · W9）；Ops 下 sweb 解题 |
+| intel | 情报研判（今日：IOC 富化 + RAG 简报；验证闭环未落地） |
 | collab | 多 agent（偏薄） |
 
 扩场景 = 改 Profile，不改 Engine 循环。
 
-**框架**：Intake → Engine（组窗 → 模型流 → 工具/审批 → checkpoint）→ 事件 SSE；沙箱 Landlock/bwrap；`make gate` + Golden。
+**框架**：Intake → Engine（组窗 → 模型流 → 工具/审批 → 或 W9 回执再跑一轮 → checkpoint）→ 事件 SSE。编码 Verify 焊进 `edit_file` / `run_tests`；Ops SWE 测改道本地 `sweb.eval`。沙箱 Landlock/bwrap；`make gate` + Golden。效果日记 [`RESULTS.md`](eval/official/baseline/RESULTS.md)。
 
 | 层 | 技术 |
 |----|------|
@@ -97,4 +97,4 @@ packages/contracts/   eval/   docs/   scripts/
 
 ## 文档
 
-[总索引](docs/README.md) · [架构](docs/core/architecture.md) · [Runtime](docs/core/runtime.md) · [工具与上下文](docs/core/tools-and-context.md) · [事件](docs/core/events.md) · [RAG](docs/topics/rag.md) · [工作台](docs/topics/workbench.md)
+[总索引](docs/README.md) · [导览](docs/tour/index.html) · [架构](docs/core/architecture.md) · [Runtime](docs/core/runtime.md) · [工具与上下文](docs/core/tools-and-context.md) · [事件](docs/core/events.md) · [RAG](docs/topics/rag.md) · [工作台](docs/topics/workbench.md) · [评测日记](eval/official/baseline/RESULTS.md)

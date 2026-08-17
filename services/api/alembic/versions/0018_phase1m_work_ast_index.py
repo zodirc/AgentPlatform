@@ -1,4 +1,4 @@
-"""phase1m work_ast_index for Agent workspace AST (docs/plan/agent-workspace-ast-index.md)"""
+"""phase1m work_ast_index for Agent workspace AST (docs/core/architecture.md)"""
 
 from app.db.migration_sql import run_ddl
 

@@ -1,6 +1,6 @@
 # SWE-bench Lite · structural lane (Ops L1)
 
-See [docs/plan/coding-structural-intelligence.md](../../docs/plan/coding-structural-intelligence.md).
+See [docs/core/tools-and-context.md](../../docs/core/tools-and-context.md) §2 (coding Turn) and [docs/core/architecture.md](../../docs/core/architecture.md) §6.
 
 Structural navigation / diagnostics are **fused into the agent Profile** (not a
 `STRUCTURAL_ENABLED` feature flag). Measure agent coding with checkout on; process

@@ -1,10 +1,6 @@
 # 方案：威胁情报 · 以攻促防的验证闭环
 
-> **状态**：草案 v0.1（2026-08-13）· 目标与边界对齐中 · **尚未排期实现** · 已补 **§5 基准测试思考**  
-> **范围**：`intel` Scenario 的产品叙事、阶段契约、评测分层、与现有 RAG/工具面的演进方向  
-> **非范围**：`agent` 编码链 / LSP / 工作区 AST；不以资料检索冒充 PoC；不以扫描告警台替代验证闭环  
-> **约束权威**：[架构 · R1–R5](../core/architecture.md) · [工作台 · Ops Bench](../topics/workbench.md) · [场景分型（CSI §1.4）](coding-structural-intelligence.md) · [RAG](../topics/rag.md) · 现网 `scenarios/intel/*`  
-> **产品隐喻**：破阵子式「不是扫描，是以攻促防的验证闭环」——把可疑线索转化为可交付、可复核的实证结论  
+> **临时草稿 · 可删。** 尚未实施。intel 现状以 `scenarios/profiles/intel.yaml` 与 [架构 §4](../core/architecture.md) 为准；实施时改 Profile / 工具 / 六篇正文，不必先扩本文。  
 
 本文回答：
 

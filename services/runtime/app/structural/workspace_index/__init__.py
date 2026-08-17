@@ -1,4 +1,4 @@
-"""Agent workspace async AST index (docs/plan/agent-workspace-ast-index.md).
+"""Agent workspace async AST index (docs/core/architecture.md · ast-indexer).
 
 Per-work_id symbol/boundary table — no vectors, no RAG. Memory projection is
 the only query surface; Postgres is a restart snapshot. Locate consumers weld

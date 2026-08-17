@@ -1,6 +1,6 @@
 """SWE-bench Lite helpers for agent coding (structural lane fused into Profile).
 
-Protocol: docs/plan/coding-structural-intelligence.md §8.
+Protocol: docs/core/tools-and-context.md §2.
 
 This package does **not** reimplement the official harness. It:
 1. Freezes the lite-50 stratified slice (also mirrored under eval/official/swe_lite_slices/).

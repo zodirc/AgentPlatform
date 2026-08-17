@@ -101,8 +101,7 @@ suites:
     # Tiers n3/n5/n10/n25 use canonical HF-test-order slices; full300 is all IDs.
     # Official resolve scoring requires Docker + swebench.harness (see README).
     evaluate_with: swebench.harness.run_evaluation
-    # E1 (docs/plan/agent-workspace-ast-index.md §7): eval-ephemeral AST index after
-    # checkout (memory-only). Default on — product-parity arm.
+    # Eval-ephemeral AST index after checkout (docs/core/architecture.md). Default on.
     # Set false only for explicit index-off baseline dual-track.
     workspace_index: true
     # Await ready|stale before StartTurn (closer to real coding).

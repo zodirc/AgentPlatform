@@ -1,11 +1,6 @@
 # 方案：Coding 结构智能（LSP / AST）
 
-> **状态（2026-08-15）**：Wave 1–4 代码已落地 · 工作区 AST（A6）已接线 · P15 确认坐标 Bug 已修  
-> **姊妹**：[工作区异步 AST](agent-workspace-ast-index.md)（冷启 / 快照 / wait-ready / grammar bake）· [三线质量提升](quality-uplift-2026-08.md)（H1/H2 主项的跨线落地清单：test_summary 修复 · pager 重定向 · 检索/上下文）  
-> **正文**：[工具与上下文](../core/tools-and-context.md) 图 3  
-> **非范围**：writing/intel RAG；不以资料检索充当 Agent Locate  
-
-本文只保留现行权威：流程 · 已做优化 · 观测定位 · 解决方案。历史跑次细表已收敛；AST 拓扑细节见姊妹文。
+> **临时草稿 · 可删。** 现行 Turn 只读 [工具与上下文 §2](../core/tools-and-context.md) 与 [Runtime](../core/runtime.md)。下文是落地前诊断，不是阅读入口。
 
 ---
 
@@ -19,7 +14,9 @@
 能力
   Locate ：search_codebase / 裸符号 grep →（可选 AST 候选）→ LSP definition 确认
   Impact ：edit_file.impact.references
-  Verify ：edit_file.checks + read_lints + W9 回执 +（可选）test_summary / related_tests
+  Verify ：edit_file.checks + read_lints + test_summary + related_tests
+           + issue_repro（problem.md 行为门）+ W9 终局回执
+           +（Ops SWE）pytest/|tail → sweb.eval（容器复用）
 隔离
   agent：有结构工具 / 无 search_sources
   writing·intel：有 search_sources / 无结构工具
@@ -35,8 +32,10 @@
 pull Lite → plan → mirror prewarm → checkout(commit)
   →（评测套件默认）AST enqueue + wait_ready=true
   → StartTurn(agent)
-       Orient → Locate → Read → Edit(+impact+checks[+related_tests])
-              → Verify（lints / tests / W9）→ 终态
+       Orient → Reproduce → Locate → Read → Edit(+impact+checks[+related_tests])
+              → Verify（lints / test_summary / related / issue_repro / W9）
+                 pytest/|tail 改道 sweb；拒 pip；同实例容器复用
+              → 终态
   → 抽 patch：git_diff →（残缺则）baseline repair（git diff --no-index）
        → apply-check；拒收写 l2.patch_rejected（不得假 no_patch）
   → Ops 强制官方 harness（Docker + swebench）
@@ -75,7 +74,9 @@ pull Lite → plan → mirror prewarm → checkout(commit)
 | Wave 1 | `read_lints`=LSP∪CLI；Locate/Impact 揉进 grep/`edit_file`；pyright openFilesOnly | 已落地 |
 | Wave 2 | `edit_file.checks`；span 失配候选；Reproduce/交卷 prompt | 主项已落地；**W2 pager→read_file 已由质量提升 C-2 落地** |
 | Wave 3 | D1 证据指标；D2 即时符号；`read_file` outline；`related_tests` | 已落地 |
-| Wave 4 | W9 终局回执；W10 `test_summary`；W11 命令化 related_tests | 代码已落地；冒烟中 `test_summary` 附带常为 0 |
+| Wave 4 | W9 终局回执（classic + issue_repro）；W10 `test_summary`；W11 命令化 related_tests | 代码已落地；第5轮 attach **0.50**（目标仍 ≥0.6） |
+| issue_repro | 从 problem.md 抽样例义务：asset 覆盖 · write→read 往返 · casefold；禁金标 F2P | **已落地**；第5轮 14182 转绿 / 14365 回落 |
+| sweb 解题 | pytest/`|tail` 改道 `run_tests`；拒 pip；容器复用 + 增量 sync；env 探针进镜像 | **已落地**；第5轮 steps −51% |
 | AST A6 | 旁路 indexer + ephemeral 快照；可选 wait-ready；grammar bake / 未缓存→regex | 已接线 |
 | P15 | parse 写 **name 标识符列**；locate 确认前 snap 到标识符（兼容旧 snapshot） | **已修** |
 | 交卷链 | 强制 checkout、clean-HEAD apply、`max_steps` 150、禁网进 runtime | 已解 |
@@ -86,12 +87,14 @@ pull Lite → plan → mirror prewarm → checkout(commit)
 
 ## 3. 观测结果与定位到的问题
 
+> **§3 是历史样本**（08-14 `7f235e7c` 与 08-15 的 3/5 时代）。现行 n5：第4轮 `f20e8669` / 第5轮 `01cd8c79` 均为 **4/5**，未过题对调，见 RESULTS.md。下面的时长归因（pager / 假验证）仍解释「为什么曾经慢」，不解释现行 resolve。
+
 ### 3.1 核验跑次
 
 | 跑次 | 角色 | 关键读数 |
 |------|------|----------|
 | `b3357dd6` / `66077649` / `5a4e9ba9` | 真 harness 可测 | 官方 resolve **稳态 3/5 同题**；`file_hit≈1`；Locate≠resolve |
-| **`7f235e7c`**（ops `2a5b3d97`，2026-08-14） | **现行定位主样本** | 见下；**本跑 resolve_rate=0 无效**（见 §3.2 harness 题集加载） |
+| **`7f235e7c`**（ops `2a5b3d97`，2026-08-14） | **历史时长归因样本** | 见下；**本跑 resolve_rate=0 无效**（见 §3.2 harness 题集加载） |
 
 ### 3.2 现象（`7f235e7c`，已复核）
 
@@ -233,8 +236,11 @@ pull Lite → plan → mirror prewarm → checkout(commit)
 | 锚点 | 路径 |
 |------|------|
 | Locate / Impact / parse | `services/runtime/app/structural/` · `workspace_index/` |
-| 工具揉合 | `tools/core/codebase_search.py` · `tools/core/tools.py` |
+| issue_repro / W9 | `structural/issue_repro.py` · `engine/verify_receipt.py` |
+| sweb 改道 | `structural/test_run_redirect.py` · `tools/core/swe_solve_env.py` |
+| 工具揉合 | `tools/core/codebase_search.py` · `tools/core/misc_tools.py` |
 | 评测 / harness | `eval/swebench/` · `scripts/official_bench/` · `eval/official/suites.small.yaml` |
+| 现行数字 | [`RESULTS.md`](../../eval/official/baseline/RESULTS.md) · 导览 `docs/tour` |
 | AST 旁路 | [agent-workspace-ast-index.md](agent-workspace-ast-index.md) |
 | agent 纪律 | `scenarios/agent/system.md` |
 
@@ -246,6 +252,6 @@ pull Lite → plan → mirror prewarm → checkout(commit)
 |------|------|
 | 2026-08-10→14 | Wave 1–4 落地；AST A6；多轮 n5 入档（详见 git 历史） |
 | 2026-08-15 | P15 坐标修复；`7f235e7c` 工具账定位时长主因 |
-| 2026-08-15 | **文档收敛重写**：删历史大表/波次长文；保留 §1 流程 · §2 已优化 · §3 观测定位 · §5 harness 综合方案 |
+| 2026-08-17 | 回写现行 Verify：issue_repro / sweb 改道 / W9 两类触发；§3 标为历史样本；数字改指 RESULTS 第4–5轮 |
 
 旧版长纪要（§6.7 逐跑、Wave 细则全文）以 git 历史为准，不再在本文展开。

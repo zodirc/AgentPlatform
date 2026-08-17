@@ -1,6 +1,6 @@
 # RAG
 
-索引面（Turn 外）与交互面（`search_sources`）。本文写清生产默认数字与逐步经过；图展开店内召回与建库细节。
+索引面（Turn 外）与交互面（`search_sources`）。生产默认数字与逐步经过以本文为准；图展开店内召回与建库。写作 / 情报走这条面；编码 Agent **不**用资料检索来找代码位置。
 
 ## 图
 
@@ -17,10 +17,10 @@
 
 | 面 | 何时跑 | 硬规则 |
 |----|--------|--------|
-| **索引面** | 启动延迟同步、目录 watch、上传、`make sync-sources`、内部 `sync-sources-index` | 可慢；写 `source_chunks` / `source_docs` / FTS |
-| **交互面** | Turn 内模型调 `search_sources` | 必须快；**禁止**查询路径 `sync()` / 整库重嵌 / 每轮预注入向量包 |
+| **索引面** | 启动延迟同步、目录 watch、上传、工作台「同步资料库」、内部同步命令 | 可慢；写切块向量、文档中心点、FTS |
+| **交互面** | Turn 内模型调 `search_sources` | 必须快；**禁止**查询路径当场建库 / 整库重嵌 / 每轮预注入向量包 |
 
-目录文件是真相；pgvector 是投影。检索结果只能经 `tool_result` 回灌下一轮 `ContextEngine.assemble`。
+目录文件是真相；向量库是投影。检索结果只能经 `tool_result` 回灌下一轮组窗，**不**在 StartTurn 时预塞召回包。每 Turn 最多 **3** 次；超限这次调用直接拒绝再搜。无资料目录则 `retrieval=none`，不当成空库去 sync。
 
 去留（一票否决向）：
 
@@ -44,20 +44,20 @@
 | BM25 rescore | ON；Okapi `k1=1.5` `b=0.75` |
 | Rerank | lexical **ON**；cross-encoder **OFF**；pool≥**20** |
 | 摘录 | `excerpt_chars=400`；模型窗前 **5** 条带摘录 |
-| Chunk（建库） | `max_tokens=450` · `overlap=64` token；tokenizer 不可用时 char 回退 **1800/200** |
-
-代码入口：`tools/core/tools.py`（`search_sources`）· `retrieval/pgvector_store.py` · `retrieval/profile.py` · `retrieval/audit.py`。
+| Chunk（建库） | **450 token / 重叠 64**（INDEX **13**）；无分词器时字符回退 **1800 / 200**（不再按 4000 字硬切） |
+| 宽表 | 行数/长度超阈可拆成指针；全文仍在磁盘，用 `read_file` 再读 |
+| 交叉编码器 | 默认 **关**（R-5；召回未稳定抬之前不开）；热路径 query rewrite 默认关 |
 
 ## 3. 一次 hybrid `search_sources`（逐步）
 
 ### 3.1 入口
 
-1. 解析 `query` / `limit` / `path_prefix`；合并 Scenario 默认 prefix（如 intel→`seed/intel`）与 excludes。  
-2. 无 `sources/` → 直接 `retrieval=none`。  
-3. `begin_audit_capture()` 开 L1/L2 槽。  
-4. **不**调用 `store.sync()`。
+1. 解析查询、条数、路径前缀；合并场景默认前缀（情报默认站内情报语料）与排除（写作默认排除情报站）。  
+2. 无资料目录 → `retrieval=none`，结束。  
+3. 打开审计槽（融合前 / 精排后 / 进窗），供 Ops 漏斗，不进模型。  
+4. **不**在查询路径上同步索引。
 
-### 3.2 `store.search_hybrid`（店内）
+### 3.2 店内 hybrid（并行车道）
 
 对传入的 `fetch_limit`（60/90），每侧 lane 深度大致：
 
@@ -69,12 +69,12 @@ top_k = max(fetch_limit × 4, 20)
 
 **Chunk lane（主）：**
 
-1. `embed(query)` 一次（毫秒～数十毫秒级）。  
-2. **HNSW ANN**：表 `source_chunks`，`embedding vector_cosine_ops`，`ORDER BY embedding <=> q`，距离转相似度 `1-dist`。会话侧常开 `hnsw.iterative_scan=relaxed_order`，并抬 `max_scan_tuples`，避免 Work/seed 过滤后空窗。  
-3. **FTS**：`to_tsvector` 对 `section_title||text`（A）+ `bm25_extra`（C）；查询优先强词 **OR** `tsquery`（强 token 最多约 12），否则 `plainto` AND。  
-4. `@@` + `ts_rank_cd` 初排；再 **Okapi BM25** rescore（extra 分×0.35）。  
-5. SQL **ACL**：`visibility='seed' OR work_id=$current`（或仅 work / 仅 seed，取决于开关）。  
-6. `record_lane_hits(vector, bm25)` 备审计。
+1. 查询向量 **只 embed 一次**（可复用本会话缓存），毫秒～数十毫秒级。  
+2. **HNSW ANN** 走切块表、余弦距离转相似度。Work/seed 过滤后窗口可能变空，会话侧用 relaxed 扫描并抬扫描上限，避免「库里有、窗里没有」。  
+3. **FTS**：标题+正文加权，附加 BM25 extra；查询优先强词 OR（强 token 约 12 个封顶），否则 AND。  
+4. 库内初排后再做 **Okapi BM25** rescore（extra 分×0.35）。  
+5. SQL 层 ACL：seed 或当前 Work（也可只 work / 只 seed，取决于开关）。  
+6. 记下本车道 vector / bm25 命中，供 L1 审计。
 
 **Doc lane（两级，默认开，与 chunk 并行）：**
 
@@ -83,27 +83,27 @@ top_k = max(fetch_limit × 4, 20)
 
 **融合：**
 
-1. 两侧都有命中 → **RRF**：`score += weight/(k+rank+1)`，`k=60`，默认等权 → 记 **L1 `recall_pool`**（预览最多 20 行）。  
-2. **Lexical rerank**（池至少 20）：token overlap / title / 短语 bonus；CE 默认关。记 **L2 `ranked`**。  
-3. **`merge_doc_and_chunk_hits`**：path 落在 doc 赢家上的 chunk `score += doc_boost(0.35)`，boosted 优先，再截到 `fetch_limit`。
+1. 两侧都有命中 → **RRF**（k=60，向量与 BM25 默认等权）→ **L1 召回池**（预览最多 20 行）。  
+2. **词法精排**（池至少 20）：词重叠 / 标题 / 短语加分；交叉编码器默认关。记 **L2 精排序**。  
+3. 切块 path 落在 Doc 赢家上则 **+doc_boost（0.35）**，boosted 优先，再截到本次 fetch_limit（60 或 90）。
 
 ### 3.3 回到工具层
 
-1. 再滤租户：`filter_hits_for_tenant`（seed 需 `visibility_seed`；private 必须本 Work；路径沙箱）。  
-2. `path_prefix` / excludes → `hits[:30]`。  
-3. **Cover**：特色词（如 CJK≥2、较长拉丁/实体）是否出现在任一 hit 的 path/excerpt。  
-4. Cover 过：前 5 条保留 ≤400 字摘录，其余 path/title/score；可选 `score_rel`（相对分 0–100）。`retrieval=hybrid`。  
-5. Cover 失败 / ANN 空 / 滤空 → **keyword-fallback**：扫盘 `sources/**` 词面命中；有结果则 `retrieval=keyword-fallback` 并提示 `index_lag`（重建走同步，**不在查询时**）。Keyword 仍空但曾有 ANN → **保留 ANN**（`kept_ann_despite_cover_miss`），禁止整集清空装无库。
+1. 再滤租户：seed 需账户可见；private 必须本 Work；路径必须在沙箱内。越权则 `retrieval=denied`，不装无库。  
+2. 前缀 / 排除 → 最终 **最多 30** 条。  
+3. **Cover**：特色词（如 CJK≥2、较长拉丁/实体）是否出现在任一命中的 path 或摘录。  
+4. Cover 过：前 **5** 条保留 ≤400 字摘录，其余只留 path/title/score；相对分 0–100（相对本轮第一名）。标记 `retrieval=hybrid`。  
+5. Cover 失败 / ANN 空 / 滤空 → **keyword-fallback**：扫盘词面命中；有结果则标记回退并提示索引滞后（重建走索引面，**不在查询时**）。词面仍空但本轮曾有 ANN → **保留 ANN**，禁止整集清空装成「无库」。
 
 ### 3.4 审计三层（Ops 可读）
 
 | 层 | 含义 |
 |----|------|
-| **L1 recall_pool** | 融合后、rerank 前；含 lane 深度统计 |
-| **L2 ranked** | rerank 后顺序与 `rank_method` |
-| **L3 entered_context** | 真正写入 `tool_result`、进模型窗的 hits |
+| **L1 召回池** | 融合后、精排前；含车道深度 |
+| **L2 精排** | 词法重排后的顺序 |
+| **L3 进窗** | 真正写入 `tool_result`、下一轮组窗能看见的 hits |
 
-旁路事件 `retrieval.completed`（含 audit）给 Ops；**不进**模型上下文。
+旁路检索完成事件给 Ops 审计；**不进**模型上下文。
 
 ## 4. 索引面（逐步）
 
@@ -111,32 +111,32 @@ top_k = max(fetch_limit × 4, 20)
 
 | 来源 | 行为 |
 |------|------|
-| 启动 | 约 **3s** 延迟后 `run_sources_index_sync(reason=startup)`（可关） |
-| Watch | poll 约 **2s**，debounce 约 **1.5s** → 增量 |
-| 手工 | `make sync-sources` · Web「同步资料库」· 内部命令 |
-| Worker | `index_via_worker` 可把重活扔出 api/runtime 热路径 |
+| 启动 | 约 **3s** 延迟后增量同步（可关） |
+| Watch | 轮询约 **2s**，去抖约 **1.5s** → 增量 |
+| 手工 | 工作台同步、内部命令 |
+| Worker | 默认可把重活扔出受理热路径（批量 / 补偿） |
 
-范围：seed（`visibility=seed`）+ 各 Work 私有库；跳过 `ops-l1` 一类评测面；禁止 NULL `work_id` 的 private。
+范围：seed + 各 Work 私有库；跳过评测面语料；private 禁止空 work_id。
 
-### 4.2 `store.sync`
+### 4.2 同步逐步
 
-1. 比较 mtime / scope stamp（模型名、维数、INDEX 协议）→ 增量或 force。  
-2. Force：drop/rebuild chunks/docs 上 HNSW。  
-3. `chunk_source_text`：H1–H6 / Setext 切节，超长叶按段落/行/句边界滑窗（**450 token / overlap 64**）；宽表 detach 后另派生行线性化 chunk。  
-4. Embed 文本前加标题面包屑（只进向量，不改存库 body）；path/tags 仍默认不焊进向量前缀。bge-m3@512 对应 **INDEX 13**，换戳会 force reindex。  
-5. Chunk centroid → `source_docs`；`bm25_extra` 摊到 chunk；维护 FTS GIN。  
-6. 私有路径可存 `__work__/{work_id}/…`，展示时剥前缀。  
-7. 进度写入 `sync_progress.json`（资料库 / Ops 条）；ingestion 与效果平面分开，避免「扫完=可宣称效果」。
+1. 比模型名、维数、索引协议、目录 mtime → 增量或强制全量。  
+2. 强制：清空切块/文档投影并重建 HNSW。  
+3. 按标题、代码围栏、段落切；超长再按句/行边界滑窗（**450 token / 重叠 64**，字符回退 1800/200）。这是为了和嵌入截断对齐，避免「切块 4000 字、向量只代表前三分之一」。宽表过长可拆指针，全文仍在磁盘。  
+4. Embed 默认只嵌正文；标题面包屑可进向量、不改存库正文；路径/标签默认不焊进向量前缀。换模型或维数会推动强制重建。  
+5. 按文件把切块中心点写入文档表；BM25 extra 摊到切块；维护 FTS。  
+6. 私有路径存成 Work 视图前缀，展示时剥掉。  
+7. 进度条与就绪事件分开：扫完 ≠ 可宣称检索效果。
 
-查询撞上空索引或滞后：**只** keyword-fallback / 提示重建，**绝不**在 `search_sources` 里同步建库。
+查询撞上空索引或滞后：**只**词面回退或提示滞后，**绝不**在 `search_sources` 里当场建库。
 
 ### 4.3 Embedding 档位
 
-由部署解析（如 `make resolve-embedding`）：常见 CPU **gte-small@384**，GPU 充足时 **bge-m3@1024** 等。换模型/维数会推动 force reindex。
+由部署解析：无 GPU 常见 **gte-small@384**，显存充足时 **bge-m3@1024**。产品 runtime 与评测 bench **各加载一份**。换模型/维数会推动强制重建。
 
 ### 4.4 种子语料
 
-写作常设 seed 只读挂到工作区 `sources/seed/writing/...`（不拷进用户可写沙箱）。账户开关 `visibility_seed`：关则本 Work 检索/资料库 UI 看不见 seed，挂载与索引仍可保留供其他 Work。下一 Turn 生效。
+写作常设 seed 只读挂到资料树（不拷进用户可写沙箱）。账户可关 seed 可见性：本 Work 检索与资料库 UI 看不见，挂载与索引仍可留给别的 Work。下一 Turn 生效。
 
 ## 5. 验证怎么读
 
@@ -145,7 +145,7 @@ top_k = max(fetch_limit × 4, 20)
 | 契约 / golden / stub | 协议与主路径不炸 | **不能**冒充生产召回 |
 | `make retrieval-bench-prod` 等真相档 | 离线召回/排序 | 需 live embed + pgvector |
 | 工作台自然问句 | hybrid 轨迹、cite、polish **0 搜** | 时间线 + `/retrieval` 审计漏斗 |
-| Ops `/official` L1 | BEIR / C-MTEB agent-path 宏分 | 独立 schema；**≠** 契约 golden；见[工作台 · Bench](workbench.md) · [契约 §4](../contracts.md) |
+| Ops `/official` L1 | BEIR / C-MTEB agent-path 宏分 | 独立 schema；**≠** 契约 golden；现行数字见 [`RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4轮 BEIR R@100 **0.525**，回近 INDEX12；不升 SCORECARD） |
 | Ops `suite=ci` / `make ci-proof` | 主路径不炸 + gate | **≠** 生产召回分数 |
 
 三标尺同时满足才谈「检索变好」：不伤 TTFB、效果闸有对照、形态仍是工具中介而非每轮预注入。

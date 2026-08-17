@@ -808,7 +808,7 @@ async def lifespan(app):
     schedule_startup_sources_sync()
     # IX2: poll sources/ for host edits; debounced sync (still Turn-external).
     schedule_sources_watch()
-    # Agent workspace AST channel ③ (docs/plan/agent-workspace-ast-index.md).
+    # Agent workspace AST watch (docs/core/architecture.md · ast-indexer).
     schedule_ast_index_watch()
     try:
         yield

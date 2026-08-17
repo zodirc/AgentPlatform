@@ -2,7 +2,7 @@
 """Prefetch tree-sitter grammars into the local pack cache (image bake / offline seed).
 
 Languages match ``app.retrieval.chunking._EXT_TO_TS_LANG``. Runtime must not download
-grammars on the hot path (see docs/plan/agent-workspace-ast-index.md).
+grammars on the hot path (see docs/core/architecture.md · ast-indexer).
 """
 
 from __future__ import annotations

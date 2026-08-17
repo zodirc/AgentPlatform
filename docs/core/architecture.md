@@ -21,7 +21,7 @@ Client
               │
               ├─ 默认 TURN_DISPATCH=pull
               │    INSERT turns/runs → 准入 → pg_notify(分发)
-              │    → runtime LISTEN / claim + lease → TurnController
+              │    → runtime 自己领取并心跳续约 → TurnController
               │
               └─ 回退 push：HTTP 内部 start-turn → runtime :8001（不公网）
 
@@ -30,7 +30,7 @@ Postgres 16 + pgvector
   · 另：run_commands / runners 租约（分发与控制命令）
 
 旁路（不挡受理）
-  · ast-indexer：工作区 AST 冷启动/增量
+  · ast-indexer：后台把仓库函数/类名做成表。对话时只查这张表粗筛候选，不在提问热路径上重解析全仓。领取解析任务时用 SKIP LOCKED，避免两台 indexer 抢同一文件。
   ·（可选）bench-postgres：Ops L1 向量隔离
 
 卷：用户 Work 根 · /data 运行数据
@@ -41,8 +41,8 @@ Postgres 16 + pgvector
 | **gateway（Caddy）** | TLS、路由 | 业务状态、鉴权逻辑 |
 | **web** | 场景工作台；消费 SSE + `GET /view` | 推断 Turn 阶段；直连 runtime |
 | **api** | 鉴权、准入、Session/Turn 落库与分发通知、LISTEN、SSE、投影、Ops 旁路 | 跑 Agent loop |
-| **runtime** | claim/lease、Intake、AgentEngine、工具、检索、checkpoint、写 `turn_events` | 对浏览器开 SSE；UI 投影 |
-| **ast-indexer** | 工作区符号索引旁路（入队领取解析） | 进 Turn 热路径；替代 LSP |
+| **runtime** | 领取任务并续约、Intake、AgentEngine、工具、检索、checkpoint、写 `turn_events` | 对浏览器开 SSE；UI 投影 |
+| **ast-indexer** | 后台扫工作区符号：入队时 SKIP LOCKED 领取解析（一台拿了别人拿不到同一文件）；内存里供查询；DB 只做快照 | 进 Turn 热路径；替代语言服务器；不进资料检索的向量面 |
 | **postgres** | 领域表 · 事件 · 向量 · 分发/命令通道 | — |
 | **发布台** | 本机 `:9090` 健康/脏模块/一键重建 | 第二套产品栈；不替代 `:80` |
 
@@ -52,9 +52,25 @@ Postgres 16 + pgvector
 - 跨服务实时事实桥 = **Postgres**（`INSERT` + `NOTIFY` / `LISTEN`）。  
 - 契约源在 `packages/contracts`（OpenAPI、事件 JSON Schema、DDL）；api/web 由此派生。
 
+### 1.1 默认资源上限（`make up`）
+
+`mem_limit` 是 cgroup 上限，不是预留。建议宿主 **≥16 GiB**、磁盘空闲 **≥40 GiB**。
+
+| 容器 | mem_limit | 作用 |
+|------|-----------|------|
+| postgres / bench-postgres | 各 1g | 产品库+向量 / Bench 隔离库 |
+| runtime | 4g（GPU overlay → 12g） | loop · RAG · LSP |
+| ast-indexer | 768m · cpus 1.0 | AST parse（与 Turn 分进程） |
+| api | 1g | 控制面 |
+| bench | 6g（GPU → 12g） | 官方评测 worker |
+| web / gateway | 未设硬限 | 工作台 / Caddy |
+
+无 GPU → **gte-small@384**（CPU）；VRAM≥8GiB → **bge-m3@1024**。由 `scripts/resolve_embedding_profile.sh` 写 `embedding.auto.env` / `gpu.auto.yml`。runtime 与 bench **各加载一份**权重。
+
+并发要点：分发默认是 runtime 自己领取并心跳续约；一份副本同时在跑的提问数默认最多 16；队列满 → 准入 **429**；扩缩靠 runtime 副本与旁路 indexer，不把冷启动塞进 Turn。细则 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+
 起栈：`make up`（分模块重建脏服务）+ 发布台 `:9090`；全量 `make up-all`。配置入口 `.env`；**模型供应商在 Web「设置 → 模型」配置**。可选 overlay：queue、ha（双 runtime，同为 pull）、runtime-lite、ops-eval、bench。  
-Ops coding：看板 **SWE 评测环境** 一键完成挂 sock + 预拉/冒烟（`make ops-swe-eval-ready`），为官方 resolve 与解题复现的必要步骤。  
-扩缩与故障注入见 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+Ops coding：看板 **SWE 评测环境** 一键完成挂 sock + 预拉/冒烟（`make ops-swe-eval-ready`）。
 
 ## 2. 分模块发布（:9090）
 
@@ -111,8 +127,8 @@ make up / make release-plan / 浏览器 :9090
 Principal → default Work（work_id, work_root）
                 └── Session*（对话线程，携带 work_id）
                       └── Turn（一次用户输入的业务闭环）
-                            ↔ Run（1:1 执行实例，checkpoint / cancel / lease）
-                                 └── Step*（assemble → model → tools → checkpoint；仅事件粒度）
+                            ↔ Run（1:1 执行实例，checkpoint / cancel / 租约）
+                                 └── Step*（组窗 → 模型 → 工具；想收工却还欠验证时再跑一轮；仅事件粒度）
 ```
 
 | 对象 | 含义 | 关键约束 |
@@ -148,8 +164,8 @@ pending → running ⇄ waiting_approval
 
 | `scenario_id` | 定位 |
 |---------------|------|
-| `writing` | 写作：大纲/草稿/diff-first、资料 RAG |
-| `agent` | 通用全工具面（shell/测试/结构智能等） |
+| `writing` | 写作：大纲/草稿/diff-first、资料检索 |
+| `agent` | 编码：打开查找/改文件/跑测试全套工具。找定义、看波及、改完再验写进这些工具的返回值；官方评测题还会把 pytest 改去该题 Docker 镜像里跑。**没有**资料检索工具，不以检索资料来找代码位置 |
 | `intel` | 情报向资料与提示 |
 | `collab` | 多 agent 协作（目标态） |
 
@@ -186,7 +202,9 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 槽位集合固定；未知槽位 / 未知实现名 → **启动期 fail-fast**。  
 静态门禁：`make constitution-check`（`scripts/check_scenario_leak.py`）禁止新增 `if scenario == "…"`。
 
-## 5. 速率红线 R1–R5
+## 5. 速率红线
+
+扩能力时必须守住交互速度，不能为了分数把重活塞进用户提问的热路径。五条验收如下。
 
 | # | 原则 | 验收含义 |
 |---|------|----------|
@@ -209,28 +227,31 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
        ├ retrieval      BEIR     search_sources → 多轮 RRF → nDCG/R/MAP
        ├ retrieval_zh   C-MTEB   同上（独立 latest_ 指针，勿与 BEIR 混栏）
        ├ context        LongBench  passage.md → Answer: → F1/EM
-       └ coding         SWE Lite  checkout → 评测态 AST wait_ready
-                                   → run_tests∈本地 sweb.eval（预拉+环境冒烟）
+          └ coding         SWE Lite  checkout → 评测态等符号表 ready
+                                   → pytest/|tail 改去该题 Docker 镜像跑完整测试（复用容器 + 增量 sync）
                                    → git_diff / baseline repair
-                                   → swebench.harness.resolve（无 resolve 则 suite failed）
+                                   → 官方 harness 判是否通过（没有通过率则套件 failed）
   → latest_<suite>.json · manifest ⊨ ops_run_manifest.schema.json
 ```
 
-产品默认仍是 Turn-first（R1）；`workspace_index_wait_ready` **只**在评测套件打开。Harness 失败不得标 `completed`。
+产品默认仍是先受理、不等索引（不挡 TTFB）；`workspace_index_wait_ready` **只**在评测套件打开。Harness 失败不得标 `completed`。
 
-SWE 评测环境（看板一键 / `make ops-swe-eval-ready`）= **docker.sock + resolve 镜像 + 解题复现**：挂 api/runtime sock，拉齐后对每张 `sweb.eval` 做 python/pytest/`/testbed` 冒烟；看板「就绪」依赖二者都过。解题侧 `run_tests` 把 worktree tar 进 `/testbed`（禁网）；缺镜像或冒烟失败硬失败可归因。
+官方编码评测环境（看板一键 / `make ops-swe-eval-ready`）做三件事：给 api/runtime 挂 docker.sock、预拉每道题的官方镜像、对每张镜像跑 python/pytest/`/testbed` 冒烟。看板「就绪」依赖后两件都过。解题时默认**复用这道题的容器**，只把改过的文件增量同步进 `/testbed`（禁网）；模型在 `run_command` 上写的 pytest/`|tail` 会改道进这条路径。缺镜像或冒烟失败硬失败并写明原因。
+
+现行冒烟日记：[`eval/official/baseline/RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4–5轮 coding **4/5**，未升 SCORECARD 主栏）。
 
 ### 6.1 编码一题（ASCII · 与原图风格一致）
 
 ```text
 ① checkout base_commit（写 .agent_swe_instance.json）
-② AST cold_start ──wait_ready──► ready|stale （仅评测）
-③ StartTurn ──► Locate / Edit / Verify
-   └ run_tests → docker run 本地 sweb.eval（tar→/testbed，--network none）
+② 后台建符号表 ──等 ready──► ready|stale （仅评测；产品对话不等）
+③ StartTurn ──► 读题 → 找定义 → 改文件（结果带波及摘要、诊断、相关测试命令）
+                 → 改完再验（邻文件诊断 / 测试失败首条 / issue 例子 / 想收工却还欠验证则再跑一轮）
+   └ pytest/|tail 改去该题 Docker 镜像跑完整测试（复用容器，sync→/testbed，--network none）
 ④ 抽 patch：git_diff ─残缺► baseline repair ─拒收► l2.patch_rejected
 ⑤ predictions.jsonl
-⑥ swebench.harness ──┬─ resolve_rate ──► completed
-                      └─ harness_error ──► failed（可见）
+⑥ 官方 harness ──┬─ 通过率 ──► completed
+                 └─ harness 挂了 ──► failed（可见，不得粉饰成模型零分）
 ```
 
 ### 6.2 检索一题（ASCII）
@@ -242,3 +263,24 @@ SWE 评测环境（看板一键 / `make ops-swe-eval-ready`）= **docker.sock + 
 ④ nDCG / Recall / MAP
 ⑤ latest_retrieval.json | latest_retrieval_zh.json （互不覆盖）
 ```
+
+## 7. 改 X 去哪
+
+| 改什么 | 落点 |
+|--------|------|
+| REST 字段 / 状态码 | `packages/contracts` → `services/api/app/routers/*` |
+| StartTurn 写序 / 幂等 | `api/.../resource/turns.py` · `routers/sessions.py` |
+| Intake / 领取 / 租约 | `runtime/.../turn_controller.py` · `turn_dispatch.py` |
+| Engine / 审批粘性 / 想收工却还欠验证 | `engine/agent_engine.py` · `engine/verify_receipt.py` |
+| 组窗阶梯 | `context/engine.py` · `context/policy.py` |
+| 新工具 / handler 改道 | `tools/bootstrap.py` + `tools/core/*` · `structural/*_redirect.py` |
+| 场景差 | `scenarios/profiles/*.yaml` + `system.md`（禁止 Engine `if scenario`） |
+| 找定义 / issue 例子覆盖 | `structural/` · `workspace_index/` · `issue_repro.py` |
+| RAG | `retrieval/*` · compose `EMBEDDING_*` |
+| AST 旁路 | `structural/workspace_index/*` · ast-indexer compose |
+| 沙箱 / 官方编码解题 | `tools/core/sandbox.py` · `swe_solve_env.py` |
+| 模型配置 | Web「设置 → 模型」· `model/factory.py` |
+| Bench / harness | `scripts/official_bench/` · `eval/official/` |
+| GPU / 嵌入档 | `scripts/resolve_embedding_profile.sh` |
+| 合入门禁 | `scripts/ci_proof.sh`（勿把 Ops Bench 当 gate） |
+

@@ -64,10 +64,12 @@ Ops 验收唯一路径是 **L1 agent-path**（`eval_path=agent`）：产品 Sess
   → retrieval / retrieval_zh / context / coding
        ├ 检索：search_sources → 多轮 RRF 融合 → nDCG/R/MAP
        ├ 上下文：passage.md → 终答 Answer: → F1/EM
-       └ 编码：checkout → AST wait_ready（仅评测套件）→ git_diff → SWE harness resolve
+       └ 编码：checkout → AST wait_ready（仅评测）→ sweb 解题改道
+               → git_diff → SWE harness resolve（无 resolve 则 failed）
 ```
 
-细节：[工作台 · Ops Bench](topics/workbench.md) · [RAG](topics/rag.md)。
+细节：[工作台 · Ops Bench](topics/workbench.md) · [工具与上下文 §2](core/tools-and-context.md) · [架构 §6](core/architecture.md)。  
+现行冒烟日记：[`RESULTS.md`](../eval/official/baseline/RESULTS.md)（第4–5轮 coding 4/5；不升 SCORECARD 主栏）。
 
 ## 6. Golden Turn
 

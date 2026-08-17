@@ -1,10 +1,6 @@
 # 方案：三线质量提升（Coding / Retrieval / Context）
 
-> **状态（2026-08-16）**：批 1–3 **代码已落地** · 第3轮工程加固已落地（harness 失败可见 · 评测侧多轮 RRF · AST wait_ready · ops manifest 契约）· 完整 smoke **未入账**（主动终止）· **不升 SCORECARD 主栏**  
-> **第2轮冒烟**（对照第1轮 INDEX 12 · 2026-08-15 12:14–13:01 CST）：coding resolve 仍 0.6 · C-MTEB nDCG@10 0.643→0.696 · **BEIR R@100 0.530→0.495（第一验收位未过）** · LongBench F1 0.558→0.456 / **EM 0.30→0**  
-> **基线**：`eval/official/baseline/RESULTS.md`（第2轮效果锚；第3轮见「工程加固」节）  
-> **姊妹**：[Coding 结构智能](coding-structural-intelligence.md)（轨道 M/T/Q/L 承接）· [工作区异步 AST](agent-workspace-ast-index.md) · [契约索引](../contracts.md)  
-> **硬原则**：不改 AgentEngine while；不新增模型必须学会的工具名；**所有改动不得进 StartTurn / assemble 热路径加重活**（速率红线 R1–R5）；成熟参照优先（Cursor / Anthropic contextual retrieval / SWE-agent / OpenHands 已验证做法）
+> **临时草稿 · 可删。** 现行切块 / 组窗 / Verify 只读 [RAG](../topics/rag.md) · [工具与上下文](../core/tools-and-context.md) · [Runtime](../core/runtime.md)。效果日记 [`RESULTS.md`](../../eval/official/baseline/RESULTS.md)。下文是第1轮诊断锚，不是阅读入口。
 
 ---
 
@@ -16,7 +12,7 @@
 
 ## 1. 基线读数与归因总表
 
-以下归因均已对照代码核实（锚点见各节），非推测。
+以下归因均已对照**当时**代码核实（第1轮 smoke）。**不是现行效果**；现行见 RESULTS 第4–5轮。
 
 | 线 | 关键读数（第1轮 · 2026-08-15 12:14–13:01 CST · smoke） | 主因定位 | 结论 |
 |----|------------------------------|----------|------|
@@ -270,4 +266,4 @@ system.md 的 Sources/`search_sources` 段按 profile 实际挂载条件改为�
 | 2026-08-15 | 批 1–3 代码落地；R-5 仍关；INDEX 13 待同步重建后进召回面 |
 | 2026-08-15 | 第2轮冒烟（17:12 CST 入账）：coding 同题 0.6、steps −42%、C-4 过线、C-1 0.217；C-MTEB 排序抬、R@10 平；BEIR R@100 0.530→0.495；LongBench EM 0.30→0 |
 | 2026-08-15 | context scorer：预测抽末行 `Answer:`（金标/v2 相等规则不动）；第2轮 EM=0 不回溯改写 |
-| 2026-08-15 | 评测日记改按轮次+时间（第1轮 12:14–13:01 CST / 第2轮 17:12 CST），不再用上下午 |
+| 2026-08-17 | 文头改为指向 RESULTS 第4–5轮；§1 表标明是第1轮诊断锚，不再冒充最新效果 |

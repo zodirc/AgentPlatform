@@ -436,7 +436,7 @@
       <section class="page" data-id="cover" data-group="总览" data-title="封面">
         <div class="hero">
           <h2>一个内核，多个场景</h2>
-          <p>自托管 Agent Runtime：同一 <code style="color:#a7f3d0">AgentEngine</code>；差异只经 Profile。近两日主战场是<strong>三线质量提升</strong>（Coding 验证回灌 · Retrieval INDEX13 切块对齐 · Context 长文 outline/证据保留）+ 结构智能 Wave3–4 / issue_repro / sweb 解题改道——本导览按现行代码与第 4/5 轮冒烟改写，不是六篇旧摘要。</p>
+          <p>自托管 Agent Runtime：同一 <code style="color:#a7f3d0">AgentEngine</code>；场景差只经 Profile。本导览是六篇正文的分页版——编码怎么找定义、改完怎么验、评测题的测试为什么进 Docker，都写在「Runtime / 工具 / Coding」几页，按现行代码与第 4/5 轮冒烟。</p>
           <div class="badge-row">
             <span class="badge">quality-uplift 批1–3 已落</span>
             <span class="badge">INDEX 13</span>
@@ -447,9 +447,9 @@
         <div class="card">
           <h3>怎么读</h3>
           <ul>
-            <li>左侧目录 / 顶栏翻页；主图为 <code>docs/assets/**/*-zh.png</code> 中文详图海报（点击放大）。条文以<strong>本仓库代码与契约</strong>为准；图须保持原海报风格，只增补/校正细节。 <code>make docs-tour</code></li>
-            <li><strong>权威</strong>：代码 + contracts → 本页 → docs/core → docs/plan</li>
-            <li>近两日细节集中在：工具面 / 组窗 / Coding 四页 / RAG·索引 / 分数快照</li>
+            <li>左侧目录 / 顶栏翻页；主图为 <code>docs/assets/**/*-zh.png</code> 中文详图海报（点击放大）。条文以<strong>本仓库代码、契约与六篇正文</strong>为准。 <code>make docs-tour</code></li>
+            <li><strong>权威</strong>：代码 + contracts → docs/core · docs/topics → 本页。plan/ 是可删草稿，不参与权威。</li>
+            <li>编码 Turn：找定义、看波及、改完再验、想收工却还欠验证时再催一轮、评测测进 Docker——与六篇同文</li>
           </ul>
           <div class="callout">
             条文按代码维护。流程图：保持 <code>docs/assets/**/*-zh.png</code> 原海报风格，只增补/校正现行细节。
@@ -479,9 +479,9 @@
             <li>Cancel ≠ failed；审批恢复同 <code>run_id</code>；审批门 ⊥ 沙箱门。</li>
             <li><strong>不做</strong> CST / call-graph / 全仓 LSP indexing；不做给 agent 挂 <code>search_sources</code>（场景隔离）。</li>
             <li><strong>不做</strong> smoke 升 SCORECARD；harness 无 resolve → suite failed（不得粉饰 completed）。</li>
-            <li>结构车道结论：<code>file_hit≈1</code>、Locate 调用占比极低 → <strong>resolve 瓶颈不在 AST/LSP</strong>，而在验证信号与修复正确性。</li>
+            <li>编码结论：模型几乎总能碰到该改的文件，查找调用占比极低 → <strong>官方通过率的瓶颈不在符号表/语言服务器</strong>，而在改对没有、验没验过。</li>
           </ul>
-          <div class="src"><code>architecture.md</code> · <code>quality-uplift-2026-08.md</code> · <code>coding-structural-intelligence.md</code></div>
+          <div class="src"><code>docs/core/architecture.md</code> · <code>docs/core/tools-and-context.md</code></div>
         </div>
       </section>
 
@@ -609,19 +609,14 @@ Postgres 16 + pgvector
       <section class="page" data-id="start-turn" data-group="领域" data-title="StartTurn 命令链">
         <div class="card">
           <h2>StartTurn / 控制命令</h2>
-          <table>
-            <thead><tr><th>模式</th><th>行为</th></tr></thead>
-            <tbody>
-              <tr><td>pull（默认）</td><td>NOTIFY → runtime claim；超时 start_timeout；租约丢 runner_lost</td></tr>
-              <tr><td>push（回退）</td><td>api HTTP 内部 start-turn；传输失败 → 客户端 502</td></tr>
-            </tbody>
-          </table>
+          <p class="lede">api 尽快只做落库和分发通知，不把任务推到 runtime。runtime 有空位才领，领了之后心跳续约。客户端先拿到 202；业务上「这题开始了」要等 runtime 发出 <code>turn.accepted</code>。</p>
+          <p>超过领取时限仍无人领 → <code>failed(start_timeout)</code>；租约丢失且无法安全续跑 → <code>failed(runner_lost)</code>。回退模式才是 api HTTP 调 runtime 的 <code>start-turn</code>，传输失败则客户端 502。</p>
           <h3>同族控制命令</h3>
-          <p>取消 / 审批 / patch 等默认经 <code>run_commands</code> + NOTIFY，由持有 lease 的 runtime 副本消费（HTTP 内部命令可作兼容回退）。</p>
-          <h3>Ops 无人值守</h3>
-          <p><code>ops_eval=true</code>：StartTurn 即置 <code>writes_preapproved</code>/<code>exec_preapproved</code>，写盘/exec 门控自动批准（官方 L1 agent-path）。字段随 checkpoint 存活。</p>
+          <p>取消 / 审批 / patch 等默认经 <code>run_commands</code> + NOTIFY，由<strong>当前持有租约</strong>的 runtime 副本消费（HTTP 内部命令可作兼容回退）。</p>
+          <h3>官方评测无人值守</h3>
+          <p>这次提问带评测标记时，StartTurn 即预批准写盘和 exec，不拦人审。字段随 checkpoint 存活。</p>
           <h3>旁路预热</h3>
-          <p>Profile <code>structural_prewarm</code> 且 settings 开启时，StartTurn 上 <code>asyncio.create_task</code> 预热 AST，不 await——不挡 <code>turn.accepted</code> / TTFB（<code>turn_controller.py</code>）。</p>
+          <p>Profile 打开结构预热且设置允许时，StartTurn 上后台预热符号表，不 await——不挡 <code>turn.accepted</code> / 首 token。</p>
           <div class="src">代码：<code>services/api/app/routers/</code> · <code>services/runtime/app/controller/turn_dispatch.py</code> · <code>turn_controller.py</code></div>
         </div>
                 <figure class="figure">
@@ -637,8 +632,8 @@ Postgres 16 + pgvector
         <div class="card">
           <h2>两层结构</h2>
 <pre>TurnController（不进 while）
-  · pull claim 或 push start-turn
-  · runner lease 心跳；丢失可回收
+  · runtime 自己领取（默认）或 api HTTP 推送 start-turn（回退）
+  · runner 租约心跳；丢失可回收
   · ScenarioRegistry.get → Profile → ToolScope
   · Intake：InputCompiler（slash、@path、附件）
   · shouldQuery：纯本地命令可零模型结束
@@ -649,11 +644,11 @@ AgentEngine while step_count &lt; max_steps:
   2. ModelGateway.stream（可 abort；网关 Cancel ~50ms；工具流内 ~250ms）
   3. 解析 text · thinking · tool_use
   4. 有 tool → 审批？→ 执行 → tool_result
-     · note_tool_result_for_verify；SWE+ops_eval 可改道 sweb
+     · 更新「还欠测试 / 还欠 issue 例子」；官方编码评测可把测改去该题 Docker
      · checkpoint → continue
-  5. 无 tool → 若应注入 verify_receipt：
-     · append user_message(receipt) + tool.completed(verify_receipt=true)
-     · continue（再进一轮，非合成 tool_result）
+  5. 无 tool → 若想收工却还欠验证：
+     · 塞一条用户口吻提醒 + tool.completed(verify_receipt=true)
+     · continue（再进一轮，不是合成 tool_result）
      · 否则 final 退出
   6. 每步 finally：checkpoint</pre>
           <ul>
@@ -689,13 +684,13 @@ AgentEngine while step_count &lt; max_steps:
         <div class="card">
           <h2>审批 · 取消 · 恢复</h2>
           <ol>
-            <li>需审 → <code>approval.requested</code> → <code>waiting_approval</code>，同 <code>run_id</code> checkpoint（含 <code>verify_*</code> / <code>issue_repro_*</code>）</li>
+            <li>需审 → <code>approval.requested</code> → <code>waiting_approval</code>，同 <code>run_id</code> checkpoint（含「还欠测试 / 还欠 issue 例子」）</li>
             <li>Approve → 同 <code>run_id</code> 续跑；Deny → 拒绝 <code>tool_result</code>（含原因）</li>
-            <li><code>ops_eval=true</code>（L1）：StartTurn 即置 <code>writes_preapproved</code>/<code>exec_preapproved</code>，门控工具自动过审；字段随 checkpoint 恢复</li>
-            <li><strong>写盘粘性</strong>：人工批准一次写类工具后 <code>writes_preapproved</code>，同类写免再审</li>
-            <li><strong>Shell 粘性</strong>：人工批准一次 <code>run_command</code> 后 <code>exec_preapproved</code>，后续 <code>run_command</code> 免审（≠「Shell 永远逐步审」）</li>
+            <li>官方评测无人值守：StartTurn 即预批准写盘/exec，门控工具自动过审；字段随 checkpoint 恢复</li>
+            <li><strong>写盘粘性</strong>：人工批准一次写类工具后，同类写免再审</li>
+            <li><strong>Shell 粘性</strong>：人工批准一次 <code>run_command</code> 后，本 Turn 后续同类 shell 免审（≠「Shell 永远逐步审」）</li>
             <li>Plan <code>phase=executing</code>：清单内写盘可按计划免审；普通 <code>update_plan</code> 进度 ≠ 已批准开工</li>
-            <li>审批门 ⊥ 沙箱门；SWE+<code>ops_eval</code> 下 <code>run_command</code>/<code>run_tests</code> 可改道 <code>sweb.eval</code>（剥管道、拒 pip、容器复用）</li>
+            <li>审批门 ⊥ 沙箱门；官方编码评测下 <code>run_command</code>/<code>run_tests</code> 可改去该题 Docker 镜像（剥管道、拒 pip、容器复用）</li>
           </ol>
           <table>
             <thead><tr><th>取消</th><th>含义</th></tr></thead>
@@ -716,34 +711,12 @@ AgentEngine while step_count &lt; max_steps:
       </section>
 
       <!-- 9 -->
-      <section class="page" data-id="turn-state" data-group="Runtime" data-title="TurnState 现行字段">
+      <section class="page" data-id="turn-state" data-group="Runtime" data-title="挂起后还欠什么">
         <div class="card">
-          <h2>TurnState（含 Wave 4）</h2>
-          <p class="lede">执行态 dataclass；经 checkpoint 序列化，审批中断后必须能恢复 verify / issue_repro 追踪器。</p>
-          <div class="grid-2">
-            <div>
-              <h3>核心</h3>
-              <ul>
-                <li>ids · messages · step_count / max_steps · usage</li>
-                <li>cancelled / cancel_force · termination_reason</li>
-                <li>plan_hint · plan_phase · model_mode · ops_eval</li>
-                <li>volatile_context（不焊进 system）</li>
-                <li>writes_preapproved · exec_preapproved</li>
-                <li>read_registry · evicted_paths / evicted_reread_used</li>
-              </ul>
-            </div>
-            <div>
-              <h3>Verify / issue_repro</h3>
-              <ul>
-                <li>verify_pending · verify_receipt_sent</li>
-                <li>code_edits_since_verify · related_tests_union</li>
-                <li>last_repro_command · last_test_first_failure</li>
-                <li>issue_repro_*（loaded / commands / markers / assets / signals）</li>
-                <li>need_roundtrip · need_casefold · armed / satisfied</li>
-                <li>issue_repro_receipt_sent · edits_since</li>
-              </ul>
-            </div>
-          </div>
+          <h2>TurnState（审批挂起后必须还能接着验）</h2>
+          <p class="lede">执行态 dataclass，经 checkpoint 序列化。审批中断后再续跑，不能把「还欠测试 / 还欠 issue 例子」弄丢。</p>
+          <p>核心记住：ids、messages、步数、取消、计划相位、这次是不是官方评测、写盘/exec 是否已预批准、哪些文件已经读过（组窗挤掉的允许再读一次）。易变垫底不焊进 system 提示。</p>
+          <p>编码还欠什么：成功改过代码之后有没有跑过测试；相关测试命令并集；最近一条复现命令和测试失败首条；从 <code>problem.md</code> 抽出的例子、失败签名、是否还要写再读往返 / 大小写折叠；这些义务是否已在<strong>最新一次编辑之后</strong>被成功命令覆盖；两类「想收工却还欠验证」的提醒是否已经发过。</p>
           <div class="src">权威：<code>services/runtime/app/engine/state.py</code></div>
         </div>
       </section>
@@ -763,7 +736,7 @@ AgentEngine while step_count &lt; max_steps:
               <tr>
                 <td><code>agent</code></td>
                 <td>编码全工具</td>
-                <td>LSP/AST 工具；run_command/run_tests；<strong>无</strong> search_sources；max_steps 150；structural_prewarm；run_tests 免审</td>
+                <td>编码：查找/改文件/跑测试全套。找定义、看波及、改完再验写进这些工具的返回值。官方评测题把 pytest 改去该题 Docker。无资料检索。max_steps 150</td>
               </tr>
               <tr>
                 <td><code>intel</code></td>
@@ -794,16 +767,14 @@ AgentEngine while step_count &lt; max_steps:
           <h3>agent / writing 白名单（节选）</h3>
           <p class="mono" style="font-size:0.8rem;line-height:1.6">agent: read_file · grep · edit_file · search_codebase · goto_definition · find_references · run_command · run_tests · read_lints · update_plan · …<br/>writing: propose_patch · draft_section · search_sources · …（无 LSP 结构工具）</p>
           <h3>现行硬改道（代码已落）</h3>
-          <table>
-            <thead><tr><th>项</th><th>行为</th><th>锚点</th></tr></thead>
-            <tbody>
-              <tr><td>C-2 pager</td><td>纯 <code>cat/head/tail/sed -n/nl</code>（单文件、无管道）→ 内部 <code>read_file</code>，<code>redirected_from=run_command</code></td><td><code>pager_redirect.py</code></td></tr>
-              <tr><td>sweb 测改道</td><td>ops_eval + SWE 标记：pytest 管道剥 <code>| tail</code> 等 view filter → 完整输出进 sweb；拒 worktree <code>pip/uv install</code>；env 探针进镜像</td><td><code>test_run_redirect.py</code> · <code>swe_solve_env.py</code></td></tr>
-              <tr><td>C-3 plan</td><td><code>update_plan</code> items 与上次相同 → <code>unchanged=true</code>，不落新 <code>tool.completed</code></td><td><code>agent_engine.py</code></td></tr>
-              <tr><td>read 闸</td><td><code>read_registry</code> 读完再读可 skipped；组窗驱逐 path 允许一次 re-read（<code>evicted_*</code>）</td><td><code>read_registry.py</code> · <code>state.py</code></td></tr>
-              <tr><td>截断 outline</td><td><code>read_file</code> 触预算才附 outline；<strong>.md/.txt 标题扫描</strong>（X-1）+ .py AST</td><td><code>outline.py</code></td></tr>
-            </tbody>
-          </table>
+          <p>不靠提示词劝。模型仍点原来的工具名，执行层改走该走的路：</p>
+          <ul>
+            <li>用 <code>cat</code> / <code>head</code> / <code>tail</code> / <code>sed -n</code> / <code>nl</code> 只读一个文件、没有管道和写盘 → 内部改成 <code>read_file</code>（走大纲、已读登记、组窗折叠）。</li>
+            <li>官方编码评测题：pytest 后面即使跟着 <code>| tail</code>，也剥掉展示用管道，把完整输出丢进该题 Docker 镜像；禁止在裸源码树上 pip/uv；环境探测同样进镜像。</li>
+            <li><code>update_plan</code> 清单和上次完全一样 → 告诉它没变，不再刷一条工具完成事件。</li>
+            <li>同一文件已经完整读过，再读同一覆盖区间 → 拒绝；组窗把旧读折叠掉之后允许再读一次。</li>
+            <li><code>read_file</code> 触预算才附大纲；Markdown/纯文本抽标题，Python 走 AST。</li>
+          </ul>
           <div class="src"><code>misc_tools.py</code> · <code>structural/*_redirect.py</code> · <code>tools/core/swe_solve_env.py</code></div>
         </div>
       </section>
@@ -845,57 +816,43 @@ AgentEngine while step_count &lt; max_steps:
       <!-- 13 -->
       <section class="page" data-id="sandbox" data-group="场景与工具" data-title="exec 沙箱">
         <div class="card">
-          <h2>exec 沙箱 + sweb 解题面</h2>
-<pre>审批已过（或免审 / ops_eval 启动即 sticky）
+          <h2>exec 沙箱 + 评测题在 Docker 里跑测</h2>
+          <p class="lede">日常产品 Turn 过审批后进 Landlock / bwrap / 软路径 jail。官方编码评测题另外把测试和环境探测送进该题的 Docker 镜像，因为工作区只是 checkout 出来的源码，不是评委用的解释器。</p>
+<pre>审批已过（或免审 / 评测启动即预批准）
   → run_command / run_tests
-  → ops_eval + SWE marker？
-       ├─ 是：剥 |tail → run_tests；env/python -c → sweb.eval argv
+  → 这次是官方编码评测题？
+       ├─ 是：剥 |tail → 镜像里跑完整测试；python -c 同样进镜像
        │     拒 pip/uv install；容器复用 + 增量 sync（/testbed）
        └─ 否：沙箱后端择一（prefer landlock，否则 bwrap，再否则 off）
-            · ops_eval 禁网 → 强制 bwrap --unshare-net
+            · 评测禁网 → 强制 bwrap --unshare-net
             · RO/RW/tmpfs 后起子进程（或软 jail）</pre>
           <ul>
-            <li><code>make ops-swe-eval-ready</code>：挂 docker.sock + 预拉镜像 + 每张 sweb 冒烟（python/pytest）。</li>
-            <li>同实例容器可复用 + 增量 sync（压墙钟）；缺镜像 / 冒烟失败 → 硬失败可归因。</li>
-            <li>第4→5 轮过程烟：步数 409→202、wall ↓；仍见模型偶走普通 <code>run_command</code>，改道继续收紧。</li>
-            <li>Harness 评测吃本地 <code>instances.jsonl</code> + offline（H0）；无 resolve → <code>harness_error</code>，不得标 suite completed。</li>
+            <li><code>make ops-swe-eval-ready</code>：挂 docker.sock + 预拉镜像 + 对每张镜像跑 python/pytest 冒烟。看板「就绪」之后才能信官方通过率。</li>
+            <li>同一道题多次跑测时复用容器，只同步改过的文件；缺镜像或冒烟失败 → 硬失败并写明原因，不得当成模型零分。</li>
+            <li>第4→5 轮过程烟：步数 409→202、墙钟下降；仍见模型偶走普通 <code>run_command</code>，改道继续收紧。</li>
+            <li>官方 harness 吃本地 <code>instances.jsonl</code> + 离线；没有通过率 → 套件 failed，不得标 completed。</li>
           </ul>
           <div class="src"><code>swe_solve_env.py</code> · <code>test_run_redirect.py</code> · <code>sandbox.py</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/sandbox/bwrap-exec-flow-zh.png" alt="exec / sweb 解题面详流" />
+            <img src="../assets/sandbox/bwrap-exec-flow-zh.png" alt="exec 沙箱与评测题 Docker 跑测" />
           </div>
           <figcaption>exec 沙箱详流 · 点击放大</figcaption>
         </figure>
       </section>
 
       <!-- 14 -->
-      <section class="page" data-id="coding-fuse" data-group="Coding" data-title="结构智能揉合">
+      <section class="page" data-id="coding-fuse" data-group="Coding" data-title="找定义 · 改完再验">
         <div class="card">
-          <h2>结构智能（非「再造索引」）</h2>
-          <p class="lede">LSP 写权威；AST 只粗筛。揉合进高频动词。归因钉死：<code>file_hit=1</code>、Locate 调用 &lt;3% → <strong>resolve 主因是修复正确性 + 验证信号弱</strong>，不是 AST/LSP 没建好。</p>
-          <table>
-            <thead><tr><th>车道</th><th>焊点</th><th>要点</th></tr></thead>
-            <tbody>
-              <tr><td>Locate</td><td>search_codebase / 裸符号 grep</td><td>AST 候选 → LSP definition；P15 标识符列已修；P16 模块 stem 等标 <code>non_definition_query</code>（defs-only 边界）</td></tr>
-              <tr><td>Impact</td><td>edit_file.impact</td><td>改动影响摘要；精查 find_references</td></tr>
-              <tr><td>Verify</td><td>checks · read_lints · W9 · test_summary · related_tests · issue_repro</td><td>写前语法 + 写后诊断；终局回执；失败首条回灌</td></tr>
-            </tbody>
-          </table>
-          <h3>轨道 M/T/Q/L（近两日）</h3>
-          <table>
-            <thead><tr><th>轨道</th><th>抓手</th><th>状态</th></tr></thead>
-            <tbody>
-              <tr><td>M 度量</td><td>harness 吃本地 instances.jsonl；无 resolve→failed</td><td>H0 已修</td></tr>
-              <tr><td>T 时长</td><td>pager→read_file；update_plan 去抖；sweb 改道 / 拒 pip</td><td>C-2/C-3 + sweb 已落；第5轮 steps −51%</td></tr>
-              <tr><td>Q 通过</td><td>test_summary 全文解析；related 扩命名；W9；issue_repro 往返/casefold</td><td>代码已落；smoke 波动中</td></tr>
-              <tr><td>L Locate</td><td>顶层 assignment 入索引；wait_ready 仅评测；grammar bake</td><td>C-5/C-6 / A6 已落</td></tr>
-            </tbody>
-          </table>
+          <h2>编码 Turn：找定义、看波及、改完再验</h2>
+          <p class="lede">模型已经会点 <code>search_codebase</code>、<code>edit_file</code>、<code>run_tests</code>。平台不另发明导航工具，而是在返回值里塞进它没法假装没看见的事实。官方是否判这道 SWE 题通过，看 Docker 里跑官方测试，不是看这些探针绿没绿。归因也钉死：模型几乎总能碰到该改的文件，查找调用占比极低——瓶颈在改对没有、验没验过，不是符号表没建好。</p>
+          <p><strong>找定义。</strong>符号名走 <code>search_codebase</code>（直接 <code>grep</code> 符号名会被整条改过来）。先在工作区符号表里粗筛候选文件/行，再交给语言服务器确认「这就是这个函数的定义」。确认过的才算找到；词面命中不得冒充。模块名、形参本来就不是定义，查空是结构边界，不是索引没建好。</p>
+          <p><strong>看波及。</strong><code>edit_file</code> 成功时结果里带这段大概影响哪些引用；精查仍可用 <code>find_references</code>。</p>
+          <p><strong>改完再验。</strong>写入时做语法门和增量诊断；附上相关测试文件和一条可复制命令（平台不代跑）；测试从<strong>未截断全文</strong>抽出失败第一条（<code>| tail</code> 丢页脚也不丢摘要）；issue 正文里的例子必须在最新编辑后再跑过；模型想收工却还欠验证时，平台塞一条用户口吻提醒再跑一轮。</p>
           <ul>
-            <li>agent 有结构工具 / 无 search_sources；writing·intel 相反。</li>
-            <li>明确不做：CST、call-graph、references 入 AST、全仓 LSP indexing。</li>
+            <li>agent 有结构工具、无资料检索；writing / intel 相反。</li>
+            <li>明确不做：CST、call-graph、把引用索引进符号表、全仓语言服务器 indexing。</li>
           </ul>
           <div class="src"><code>structural/</code> · plan CSI · quality-uplift §2</div>
         </div>
@@ -908,73 +865,35 @@ AgentEngine while step_count &lt; max_steps:
       </section>
 
       <!-- 15 -->
-      <section class="page" data-id="verify" data-group="Coding" data-title="Verify 回执">
+      <section class="page" data-id="verify" data-group="Coding" data-title="想收工再催一轮">
         <div class="card">
-          <h2>Wave 4 · verify_receipt（W9）</h2>
-          <p class="lede">无 <code>tool_use</code>、模型试图终局时注入：<strong>user 消息</strong>（回执正文）+ 契约事件 <code>tool.completed</code>（<code>tool_name=verify_receipt</code> · <code>verify_receipt=true</code>），然后 <code>continue</code> 再进一轮——<strong>不是</strong> transcript 里的 <code>tool_result</code>，也不是新可点工具。不挡 cancel/failed；每类至多一次；剩余步 &lt; reserve（默认 10）省略。</p>
-          <h3>两类触发</h3>
-          <table>
-            <thead><tr><th>种类</th><th>条件</th></tr></thead>
-            <tbody>
-              <tr><td>classic</td><td>成功代码 edit 后无 testish 清 pending；引用 <code>related_tests_union</code> / <code>last_test_first_failure</code></td></tr>
-              <tr><td>issue_repro</td><td>绿测已过但 problem.md 行为未在<strong>最新编辑后</strong>成功复现（armed）</td></tr>
-            </tbody>
-          </table>
-          <h3>追踪（checkpoint 可恢复）</h3>
-          <ul>
-            <li>代码 edit → <code>verify_pending=true</code>、<code>code_edits_since_verify++</code>、合并 related、加载 problem 提示、作废旧 satisfied</li>
-            <li>run_tests / testish run_command → 清 pending；挂 failure_feed；绿测可 arm issue_repro</li>
-            <li>非 testish 的 <code>python -c</code> 仍可计 issue repro（往返义务）</li>
-          </ul>
-          <p>第5轮：receipt <strong>0.80</strong>（第4轮曾掉到 0.20）；then_test 仅 0.25 → 注入后仍常不跟测。</p>
+          <h2>想收工却还欠验证时再催一轮</h2>
+          <p class="lede">模型不再点工具、直接输出终稿时，平台检查两件事，缺哪条就往对话里塞一条<strong>用户口吻</strong>的提醒（菜单里点不到这个工具，对话记录里也不是 <code>tool_result</code>），落一条 <code>tool.completed</code>（<code>verify_receipt=true</code>），然后 <code>continue</code> 再进一轮。不挡取消/失败；每类每 Turn 至多一次；剩下步数不够（默认还要留 10 步）则省略。</p>
+          <p>第一类：成功改过代码之后还没跑过测试类命令。提醒里会引用已经给过的相关测试命令，以及最近一次测试失败首条（如果有）。</p>
+          <p>第二类：仓库测试已经绿了，但 <code>problem.md</code> 里写过的例子还没在<strong>最新一次编辑之后</strong>被成功命令覆盖。</p>
+          <p>审批挂起后再续跑，这两类「还欠什么」必须能从 checkpoint 恢复。第5轮：这条提醒发出率 0.80（第4轮曾掉到 0.20）；发出后真去跑测试的只有 0.25——催了仍常不跟测。</p>
           <div class="src"><code>engine/verify_receipt.py</code> · <code>tests/test_wave4_verify.py</code></div>
         </div>
       </section>
 
       <!-- 16 -->
-      <section class="page" data-id="issue-repro" data-group="Coding" data-title="issue_repro">
+      <section class="page" data-id="issue-repro" data-group="Coding" data-title="issue 例子还得再跑">
         <div class="card">
-          <h2>issue_repro（problem.md 行为门 · 第5轮主因）</h2>
-          <p class="lede">从 <code>problem.md</code> / <code>PROBLEM.md</code> / <code>issue.md</code> 抽线索。<strong>禁金标 F2P 泄漏</strong>：只复现 issue 写过的例子。</p>
-          <h3>一般规则（已落代码）</h3>
-          <ul>
-            <li>优先 fence / 引用命令 / REPL / I/O 样例；成功命令须覆盖 assets</li>
-            <li>issue 失败签名仍出现 → 不算 clearing</li>
-            <li>表/ASCII write + format kwargs → <strong>write→read 往返</strong>（同 format/kwargs）</li>
-            <li>明确 case-insensitive 主张 → 再练 casefolded 变体</li>
-          </ul>
-          <h3>与 n5 事实对照</h3>
-          <ul>
-            <li><strong>14182</strong>（第5轮转绿）：补丁含 <code>header_rows</code> 写路径 + <code>data.start_line</code> 读侧，与往返义务同向；仍最慢（~30min，sweb+复现占主导）</li>
-            <li><strong>14365</strong>（第5轮回落）：仅 <code>re.IGNORECASE</code>；样例无小写 <code>NO</code>，casefold 门未逼出隐藏 F2P（<code>test_roundtrip[True]</code>）</li>
-            <li>前置：sweb 解题环境 + issue_repro 主张 + verify_receipt schema 修复 → run <code>01cd8c79-…</code></li>
-          </ul>
+          <h2>绿测不够：issue 里的例子改完后还得再跑过</h2>
+          <p class="lede">平台从 <code>problem.md</code> / <code>PROBLEM.md</code> / <code>issue.md</code> 抽出 issue 正文里出现过的例子。只复现 issue 写过的东西，<strong>不得把官方隐藏测试泄漏给模型</strong>。仓库测试绿了仍不够：这些例子必须在<strong>最新一次代码编辑之后</strong>被成功命令覆盖。</p>
+          <p>优先抽代码块、引用命令、REPL、输入输出样例。issue 里的失败签名如果还在输出里，不算覆盖。表/ASCII 一类「按某种 format 写出再读回」必须用同一套参数走一遍写再读。issue 明确说大小写不敏感时，还要用折叠大小写后的变体再练。</p>
+          <p>第5轮对照：14182 转绿，补丁同时改了写路径（<code>header_rows</code>）和读侧（<code>data.start_line</code>），与写再读义务同向，仍最慢（约 30 分钟，镜像跑测和复现占主导）。14365 回落，补丁只加了 <code>re.IGNORECASE</code>；issue 样例里没有小写 <code>NO</code>，大小写折叠这一门没能逼出官方隐藏的 roundtrip 测。</p>
           <div class="src"><code>structural/issue_repro.py</code> · RESULTS 第5轮</div>
         </div>
       </section>
 
       <!-- 17 -->
-      <section class="page" data-id="related-tests" data-group="Coding" data-title="related_tests / test_summary">
+      <section class="page" data-id="related-tests" data-group="Coding" data-title="失败摘要与相关测试">
         <div class="card">
-          <h2>related_tests · test_summary · Locate 漏斗</h2>
-          <h3>C-1 test_summary（曾 attach=0 的杀手）</h3>
-          <ul>
-            <li>旧因：要求 pytest 尾行；模型常 <code>| tail</code> / 输出截断丢 footer / <code>-q</code> 短格式不匹配</li>
-            <li>现行：从<strong>未截断全文</strong>旁路解析；支持 -q / unittest / ERRORS；失败首条 → <code>failure_feed</code>（≤400）进结果与 W9</li>
-            <li>smoke：0 → 0.22（第2）→ 0.17（第4）→ <strong>0.50</strong>（第5）；目标仍 ≥0.6</li>
-          </ul>
-          <h3>C-4 related_tests</h3>
-          <ul>
-            <li>edit 成功后附 <code>[{path,command}]</code> cap5；永不执行；优先精确单文件命令（利 sweb）</li>
-            <li>命名扩 <code>{stem}_test.py</code> / 包路径就近；import 反查有预算（≤250 files / 400ms）</li>
-            <li>第5轮：coverage <strong>1.0</strong> 但 adoption <strong>0.0</strong>（给了没用）——下一抓手是采用率</li>
-          </ul>
-          <h3>Locate 漏斗</h3>
-<pre>AST lookup → goto@标识符列 → definitions[] | definition_null
-  miss → 有界即时 parse → LSP workspace/symbol + 词面
-  基建挂 → lsp_failed | lsp_timeout
-非定义名 → non_definition_query / no_ws（不计「索引故障」）</pre>
-          <p>第5轮 fuse_ok <strong>0.625</strong>（n=8）；Locate 仍非 resolve 主因。</p>
+          <h2>相关测试命令、失败摘要、找定义怎么走</h2>
+          <p><strong>失败摘要。</strong>旧逻辑要求 pytest 尾行；模型常写 <code>| tail</code>，或输出被截断丢掉页脚，摘要就静默没有。现行从<strong>未截断全文</strong>旁路解析，兼容 <code>-q</code> / unittest / ERRORS；失败第一条（最多约 400 字）写进工具结果，模型想收工时的提醒也会引用它。冒烟从 0 走到第5轮 0.50，目标仍 ≥0.6。</p>
+          <p><strong>相关测试命令。</strong><code>edit_file</code> 成功后附最多 5 条「最像的测试文件 + 可复制 pytest 命令」。平台永不代跑。优先精确到单个测试文件（方便送进该题 Docker）。第5轮：命令都给到了（coverage 1.0），模型一条都没用（adoption 0.0）——下一抓手是采用率。</p>
+          <p><strong>找定义。</strong>符号表粗筛 → 语言服务器在标识符列上确认定义。确认失败时不得把词面命中冒充成功；模块名这类非定义查询单独标出来，不计「索引故障」。产品对话不等符号表 ready；只有评测套件开题前等。第5轮融合成功率 0.625（n=8）；查找仍不是官方通过率的主因。</p>
           <div class="src"><code>test_summary.py</code> · <code>related_tests.py</code> · <code>workspace_index/locate.py</code></div>
         </div>
       </section>
@@ -1012,7 +931,6 @@ api LISTEN → 队列（空闲约 2s 轮询兜底）
             <li>OpenAPI / 事件 JSON Schema / 命令体 / DDL：<code>packages/contracts</code></li>
             <li>Ops manifest：<code>packages/contracts/eval/ops_run_manifest.schema.json</code></li>
             <li>正文六篇：<code>docs/core/*</code> · 专题 <code>docs/topics/*</code></li>
-            <li>方案册：<code>docs/plan/*</code>（冲突时低于代码与六篇原则）</li>
           </ul>
           <h3>组件地图</h3>
 <pre>services/{api,runtime,web,bench,release-console}
@@ -1111,18 +1029,19 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               <tr><td>retrieval</td><td>BEIR small</td><td>search_sources → 多轮 RRF → nDCG/R/MAP</td></tr>
               <tr><td>retrieval_zh</td><td>C-MTEB</td><td>独立 schema；勿与 BEIR 混栏</td></tr>
               <tr><td>context</td><td>LongBench</td><td>passage.md → Answer: → F1/EM</td></tr>
-              <tr><td>coding</td><td>SWE Lite</td><td>checkout →（评测）AST wait_ready → 解题 → git_diff → harness resolve</td></tr>
+              <tr><td>coding</td><td>SWE Lite</td><td>checkout →（仅评测）等符号表 ready → 解题（测进该题 Docker）→ git_diff → 官方 harness 判通过</td></tr>
             </tbody>
           </table>
           <h3>编码一题</h3>
 <pre>① checkout base_commit（写 .agent_swe_instance.json）
-② AST cold_start ──wait_ready──► ready|stale （仅评测）
-③ StartTurn → Locate / Edit / Verify（W9 · related · test_summary · issue_repro）
-   └ run_tests / 改道 → 本地 sweb.eval（禁网；剥 |tail；拒 pip）
+② 后台建符号表 ──等 ready──► ready|stale （仅评测；产品对话不等）
+③ StartTurn → 读题 / 找定义 / 改文件 / 改完再验
+                 （想收工却还欠验证则再催一轮；issue 例子须在最新编辑后再跑过）
+   └ pytest/|tail 改去该题 Docker 镜像跑完整测试（禁网；剥 |tail；拒 pip）
 ④ 抽 patch：git_diff → baseline repair；拒收 l2.patch_rejected
-⑤ predictions.jsonl → swebench.harness（吃本地 instances.jsonl）
-   ├ resolve_rate → suite completed
-   └ harness_error / 无 resolve → failed（不得粉饰）</pre>
+⑤ predictions.jsonl → 官方 harness（吃本地 instances.jsonl）
+   ├ 通过率 → suite completed
+   └ harness 挂了 / 没有通过率 → failed（不得粉饰成模型零分）</pre>
           <p>协议戳：L0 <code>…-m1</code> · L1 <code>…-m3</code>。第3轮工程加固（manifest 契约 / 多轮 RRF / wait_ready）已进第4轮验收。</p>
         </div>
                                         <figure class="figure">
@@ -1176,8 +1095,8 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           <h2>缺口（对照已落代码）</h2>
           <ul>
             <li><strong>锚点</strong>：SCORECARD 主栏仍空；一切 smoke 只作方向盘。</li>
-            <li><strong>Coding Q</strong>：钉死 14365（隐藏 F2P / casefold 力度）；related <em>adoption</em>；receipt→test 跟测率；test_summary→0.6。</li>
-            <li><strong>Coding T</strong>：继续压 14182 墙钟（sweb 复用 / 拒假验证旁路）。</li>
+            <li><strong>编码通过</strong>：钉死 14365（issue 样例没有小写变体时，大小写折叠这一门逼不出官方隐藏测）；相关测试命令的采用率；催完之后真去跑测试的比例；失败摘要回灌率提到 0.6。</li>
+            <li><strong>编码时长</strong>：继续压 14182 墙钟（镜像容器复用 / 拒在裸源码树上装包当验证）。</li>
             <li><strong>Retrieval</strong>：BEIR R@100 第一验收位仍未稳过；R-5 暂缓；需更大 n 才下结论。</li>
             <li><strong>Context</strong>：F1/EM 略低于第2轮重打锚；outline/Answer 口径已齐，待放量对照。</li>
             <li><strong>产品</strong>：intel 闭环 / collab 仍薄。</li>

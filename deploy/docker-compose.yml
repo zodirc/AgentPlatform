@@ -222,7 +222,7 @@ services:
       start_period: 120s
       retries: 5
 
-  # A6: Agent workspace AST indexer (docs/plan/agent-workspace-ast-index.md §0.4).
+  # Agent workspace AST indexer (docs/core/architecture.md).
   # Same image as runtime; separate PID — never shares Turn / Jedi / model loop.
   # Claims work_ast_index_jobs via FOR UPDATE SKIP LOCKED.
   ast-indexer:

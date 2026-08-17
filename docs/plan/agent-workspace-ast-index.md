@@ -1,8 +1,6 @@
 # 方案：Agent 工作区异步 AST 索引（Cursor 式 codebase index）
 
-> **状态**：A6 **已接线**（2026-08-13）· A0–A5/E1 骨架已落地 · 旁路进程 + SKIP LOCKED 队列已运行（runtime 默认不同环全仓冷启动）· **验收缺口**：A6 拓扑下双轨 n5 数字尚未入库  
-> **与主方案关系**：从 [Coding 结构智能](coding-structural-intelligence.md) 拆出；正文摘要见 [架构](../core/architecture.md) 旁路与 [工具与上下文](../core/tools-and-context.md)  
-> **非目标**：不替代 LSP；不携带 RAG / embedding；不服务 writing/intel 的 `search_sources`  
+> **临时草稿 · 可删。** 现行旁路只读 [架构](../core/architecture.md) ast-indexer 行与 [工具与上下文 §2](../core/tools-and-context.md)。下文是 SKIP LOCKED 设计演算，不是阅读入口。  
 
 > **落地摘要（2026-08-13 A6）**：compose 服务 `ast-indexer`（同 runtime 镜像、独立 PID、mem≈768m、parse concurrency=1）· DDL `phase1n_work_ast_index_jobs` · runtime `enqueue`→队列 / indexer `worker` claim · 评测 ephemeral 经 `.agent/ast_index_snapshot.json` 跨进程 · harness `max_workers` 默认 1（受限主机）。此前摘要：DDL/`0018` · `structural/workspace_index/` · 焊入 `search_codebase` · dirty/watch · status/rebuild/purge API · GUI `AstIndexStatusBar` · CSI `locate_fuse_fail_reason` · `suites.coding.workspace_index`。
 

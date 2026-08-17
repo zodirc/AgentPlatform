@@ -229,7 +229,7 @@ class Settings(BaseSettings):
     structural_prewarm: bool = True
     # Wave 4 W9: omit verify_receipt when remaining steps < this reserve.
     verify_receipt_reserve_steps: int = 10
-    # Agent workspace AST index (docs/plan/agent-workspace-ast-index.md). Off-loop only.
+    # Agent workspace AST index (docs/core/architecture.md). Off-loop only.
     workspace_ast_enabled: bool = True
     # Ops/SWE temp works: default off (§7). Set true only for explicit dual-track experiments.
     workspace_ast_ops_enabled: bool = False

@@ -1,6 +1,6 @@
 """Coding structural intelligence: LSP diagnostics + symbol navigation (R4 tool/index plane).
 
-See docs/plan/coding-structural-intelligence.md.
+See docs/core/tools-and-context.md §2.
 
 Locate fuses into search_codebase (definition adapters); Impact fuses into
 edit_file.impact (reference adapters). Wave 2 Verify fuses into edit_file.checks

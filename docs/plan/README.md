@@ -1,18 +1,15 @@
-# 方案（Plan）
+# 临时草稿（可删）
 
-设计详册与说明。原则与主路径以 `docs/core/` · `docs/topics/` 为准；数字、机型配方、评测日记可留在本目录。
+本目录 **不是** 阅读入口。现行流程只在 `docs/core/` · `docs/topics/`。
 
-| 文档 | 状态 | 摘要 |
-|------|------|------|
-| [后端架构全景](backend-architecture.md) | 详册 **v0.3** | 控制流全文；机型负载配方 |
-| [Coding 结构智能](coding-structural-intelligence.md) | **已收敛** | 流程 / 已优化 / 观测定位 / harness 方案 |
-| [三线质量提升](quality-uplift-2026-08.md) | 批 1–3 **已落地** · R-5 未开 · INDEX 13 **第2轮已对照** | Coding 验证回灌 / Retrieval token chunk / Context outline 与证据保留 |
-| [Agent 工作区异步 AST](agent-workspace-ast-index.md) | A6 **已接线** | 旁路 indexer；双轨 n5 数字待复跑 |
-| [威胁情报 · 验证闭环](intel-closed-loop-verification.md) | 草案 · **未实施** | intel 验证闭环与 Bench 对照 |
+写在这里的是落地前的诊断、机型演算、未实施草案。对应能力一旦写进六篇正文和代码，本稿即可删除，不必归档扩写。
 
-约定：
+| 文件 | 已回写到 | 还留着干什么 |
+|------|----------|--------------|
+| `backend-architecture.md` | [架构](../core/architecture.md) 资源表 · §7 改点 | 开发机配方细表，删前可对照 compose |
+| `coding-structural-intelligence.md` | [工具与上下文 §2](../core/tools-and-context.md) · [Runtime](../core/runtime.md) | 08-14 时长归因样本 |
+| `quality-uplift-2026-08.md` | 切块/组窗/Verify 已在 RAG · 工具 · Runtime | 第1轮诊断表 |
+| `agent-workspace-ast-index.md` | 架构 ast-indexer 行 | SKIP LOCKED 设计演算 |
+| `intel-closed-loop-verification.md` | —（未实施） | 情报验证闭环设想 |
 
-- 速率红线 R1–R5、能力即工具、Engine 禁止 `if scenario` 为硬约束。  
-- 分发默认 pull；运维手册见 `docs/ops/pull-dispatch-runbook.md`。  
-- 合入实现须有可测验收；正文已覆盖的主路径勿只改 plan 不改 core。  
-- 冲突时：代码与契约 > 六篇正文 > plan 措辞。
+数字只认 [`eval/official/baseline/RESULTS.md`](../../eval/official/baseline/RESULTS.md)。

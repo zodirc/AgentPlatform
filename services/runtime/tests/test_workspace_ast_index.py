@@ -1,4 +1,4 @@
-"""Unit tests for Agent workspace AST index (docs/plan/agent-workspace-ast-index.md A0–A3)."""
+"""Unit tests for Agent workspace AST index (docs/core/architecture.md · ast-indexer)."""
 
 from __future__ import annotations
 

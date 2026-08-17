@@ -71,7 +71,7 @@ async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwarg
 
     workspace = _workspace_root().resolve()
 
-    # A3: AST index coarse filter → LSP confirm (docs/plan/agent-workspace-ast-index.md §2.2).
+    # AST index coarse filter → LSP confirm (docs/core/tools-and-context.md §2 Locate).
     try:
         from app.structural.workspace_index.locate import locate_via_ast_index
 
