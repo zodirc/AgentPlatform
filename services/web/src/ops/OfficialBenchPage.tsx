@@ -55,6 +55,11 @@ import {
   shortCaseToken,
   SUITE_DETAIL_LABEL,
 } from "./bench/progressParse";
+import {
+  failedRetryPlanFromArtifacts,
+  MAX_RETRY_CASE_IDS,
+  suiteIdForRetry,
+} from "./bench/evalRetry";
 import { downloadAuthorizedFile, openAuthorizedHtml } from "./bench/sse";
 import { SummaryPane } from "./bench/SummaryPane";
 import { useOfficialBenchStream } from "./bench/useOfficialBenchStream";
@@ -931,6 +936,11 @@ export function OfficialBenchPage() {
     coding_harness?: boolean;
     retrieval_prod?: boolean;
     workspace_index_wait_ready?: boolean;
+    retry_case_ids?: string[];
+    context_limit?: number;
+    retrieval_query_limit?: number;
+    retrieval_datasets?: string[];
+    retrieval_corpus_mode?: string;
   }) => {
     const suites = (opts?.suites ?? Array.from(selectedSuites)).filter((s) =>
       targetEnabled(s),
@@ -949,12 +959,13 @@ export function OfficialBenchPage() {
     if (
       suites.includes("coding") &&
       tier === "custom" &&
+      !(opts?.retry_case_ids && opts.retry_case_ids.length > 0) &&
       (nInst == null || nInst < 3)
     ) {
       setError("自定义编码档位需要 N ≥ 3（且 ≤ 300）");
       return;
     }
-    if (suites.includes("coding") && tier === "full300") {
+    if (suites.includes("coding") && tier === "full300" && !opts?.retry_case_ids?.length) {
       const ok = window.confirm(
         "全量 SWE-bench Lite（300 题）耗时长、负载大。确认以 full300 启动？",
       );
@@ -1003,7 +1014,7 @@ export function OfficialBenchPage() {
           Number.isFinite(cw) && cw >= 1024 ? Math.floor(cw) : undefined,
       };
     }
-    if (opts?.suites) {
+    if (opts?.suites && !opts.retry_case_ids?.length) {
       setSelectedSuites(new Set(suites));
       setCodingTier(tier);
       if (nInst != null) setCodingNInstances(nInst);
@@ -1033,18 +1044,30 @@ export function OfficialBenchPage() {
           eval_path: "agent",
           retrieval_arm: "free",
           context_arm: "free",
-          context_limit: contextTier !== "full" ? Number(contextTier) : 0,
-          retrieval_query_limit:
-            retrievalTier === "scifact_micro"
-              ? 20
-              : retrievalTier !== "full"
-                ? Number(retrievalTier)
+          context_limit:
+            opts?.context_limit != null
+              ? opts.context_limit
+              : contextTier !== "full"
+                ? Number(contextTier)
                 : 0,
+          retrieval_query_limit:
+            opts?.retrieval_query_limit != null
+              ? opts.retrieval_query_limit
+              : retrievalTier === "scifact_micro"
+                ? 20
+                : retrievalTier !== "full"
+                  ? Number(retrievalTier)
+                  : 0,
           l1_max_parallel: l1Parallel,
           retrieval_datasets:
-            retrievalTier === "scifact_micro" ? ["scifact"] : [],
+            opts?.retrieval_datasets ??
+            (retrievalTier === "scifact_micro" ? ["scifact"] : []),
           retrieval_corpus_mode:
-            retrievalTier === "scifact_micro" ? "micro" : "full",
+            opts?.retrieval_corpus_mode ??
+            (retrievalTier === "scifact_micro" ? "micro" : "full"),
+          retry_case_ids: opts?.retry_case_ids?.length
+            ? opts.retry_case_ids
+            : undefined,
           force: Boolean(opts?.force),
           model: modelPayload ?? null,
         }),
@@ -1275,6 +1298,128 @@ export function OfficialBenchPage() {
           false,
       ),
     });
+  };
+
+  const startFailedRetry = async (
+    parent: OfficialRun,
+    suites: SuiteId[],
+    caseIds: string[],
+  ) => {
+    const enabled = suites.filter((s) => targetEnabled(s));
+    if (!enabled.length) {
+      setError("无法重跑：当前镜像不支持该套件。");
+      return;
+    }
+    const ids = [
+      ...new Set(caseIds.map((x) => String(x || "").trim()).filter(Boolean)),
+    ].slice(0, MAX_RETRY_CASE_IDS);
+    if (!ids.length) {
+      setError("没有可重跑的未过项。");
+      return;
+    }
+    const preview =
+      ids.length <= 3
+        ? ids.join("、")
+        : `${ids.slice(0, 3).join("、")} 等 ${ids.length} 题`;
+    const ok = window.confirm(
+      busy
+        ? `重跑未过项（${ids.length}）会停掉当前评测。继续？\n${preview}`
+        : ids.length === 1
+          ? `重跑未过题 ${ids[0]}？将新开一轮只跑这一题（smoke，不升 SCORECARD）。`
+          : `一键重跑未过 ${ids.length} 项？将新开一轮只跑这些题（smoke，不升 SCORECARD）。\n${preview}`,
+    );
+    if (!ok) return;
+    const meta = parent.model_meta || {};
+    const parentLimit =
+      parent.context_limit ??
+      (typeof meta.context_limit === "number" ? meta.context_limit : null);
+    const parentQLimit =
+      parent.retrieval_query_limit ??
+      (typeof meta.retrieval_query_limit === "number"
+        ? meta.retrieval_query_limit
+        : null);
+    const parentDatasets = parent.retrieval_datasets ?? meta.retrieval_datasets;
+    const parentCorpus =
+      parent.retrieval_corpus_mode ?? meta.retrieval_corpus_mode;
+    await startRun({
+      force: true,
+      suites: enabled,
+      retry_case_ids: ids,
+      coding_tier:
+        parent.coding_tier ??
+        (typeof meta.coding_tier === "string" ? meta.coding_tier : codingTier),
+      coding_n_instances:
+        parent.coding_n_instances ??
+        (typeof meta.coding_n_instances === "number"
+          ? meta.coding_n_instances
+          : null),
+      coding_harness: true,
+      retrieval_prod:
+        parent.retrieval_prod ??
+        (typeof meta.retrieval_prod === "boolean"
+          ? meta.retrieval_prod
+          : retrievalProd),
+      workspace_index_wait_ready: Boolean(
+        parent.workspace_index_wait_ready ??
+          meta.workspace_index_wait_ready ??
+          workspaceIndexWaitReady,
+      ),
+      context_limit: typeof parentLimit === "number" ? parentLimit : undefined,
+      retrieval_query_limit:
+        typeof parentQLimit === "number" ? parentQLimit : undefined,
+      retrieval_datasets: Array.isArray(parentDatasets)
+        ? parentDatasets.map(String)
+        : undefined,
+      retrieval_corpus_mode:
+        typeof parentCorpus === "string" ? parentCorpus : undefined,
+    });
+  };
+
+  const retryFailedCase = async (suite: string, caseId: string) => {
+    if (!detail) {
+      setError("没有选中的跑次。");
+      return;
+    }
+    const sid = (suiteIdForRetry(suite) || suite) as SuiteId;
+    await startFailedRetry(detail, [sid], [caseId]);
+  };
+
+  const retryFailedItems = async (opts?: {
+    suiteKey?: string;
+    caseIds?: string[];
+  }) => {
+    if (!detail?.id) {
+      setError("没有选中的跑次。");
+      return;
+    }
+    if (opts?.caseIds?.length) {
+      const sid = (suiteIdForRetry(opts.suiteKey) || opts.suiteKey) as SuiteId;
+      await startFailedRetry(detail, [sid], opts.caseIds);
+      return;
+    }
+    let data = artifacts;
+    if (!data || data.run_id !== detail.id) {
+      try {
+        const resp = await fetch(
+          `/api/v1/ops/official/runs/${encodeURIComponent(detail.id)}/artifacts`,
+          { headers },
+        );
+        if (!resp.ok) {
+          const text = await resp.text();
+          setError(opsApiErrorText(text, text || `HTTP ${resp.status}`));
+          return;
+        }
+        data = (await resp.json()) as RunArtifacts;
+        setArtifacts(data);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+        return;
+      }
+    }
+    const plan = failedRetryPlanFromArtifacts(data, {
+      suiteKey: opts?.suiteKey,
+    });
+    await startFailedRetry(detail, plan.suites, plan.caseIds);
   };
 
   const suitePct =
@@ -1623,7 +1768,8 @@ export function OfficialBenchPage() {
           elapsedSeconds, isActiveStatus, nowMs, setPagePane,
           historyDeepLinkDoneRef, navigate, opsOfficialPath, secret,
           runSuitesLabel, statusClass, formatTime, formatDuration, detail,
-          elapsedSec, busy, remainLabel, targetEnabled, rerunFrom,
+          elapsedSec, busy,           remainLabel, targetEnabled, rerunFrom, retryFailedCase,
+          retryFailedItems,
           openAuthorizedHtml, setError, opsDisplayText, downloadAuthorizedFile,
           opsRunPath, tab, setTab, MetricBars, detailMetrics, ArtifactsPanel,
           artifacts, artifactsLoading, artifactsError, logTabItems,

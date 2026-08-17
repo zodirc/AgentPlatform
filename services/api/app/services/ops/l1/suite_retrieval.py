@@ -40,6 +40,7 @@ from .index_ops import (
     _prune_beir_orphans,
     _sync_sources,
 )
+from .retry_ids import retrieval_query_matches
 from .turn_driver import _pull_with_live_logs, _start_turn, _wait_turn_verbose
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,7 @@ async def run_retrieval_l1(
     datasets: list[str] | None = None,
     corpus_mode: str = "full",
     suite_key: str = "retrieval",
+    retry_query_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """BEIR / C-MTEB small via real Turns + search_sources events.
 
@@ -143,10 +145,11 @@ async def run_retrieval_l1(
         "primary_arm": arm_norm,
         "official": retrieval.get("official"),
         "scenario_id": scenario_id,
-        "sample_tier": ("smoke" if limit_queries > 0 else "anchor"),
+        "sample_tier": ("smoke" if limit_queries > 0 or retry_query_ids else "anchor"),
         "limit_queries": limit_queries,
         "corpus_mode": mode_norm,
         "datasets_filter": sorted(dataset_filter) if dataset_filter else None,
+        "retry_query_ids": list(retry_query_ids) if retry_query_ids else None,
         "index_plane": "cmteb-index" if is_zh else "beir-index",
         **_l1_fingerprint(model),
     }
@@ -199,6 +202,22 @@ async def run_retrieval_l1(
             q_items = list(queries.items())
             if limit_queries > 0:
                 q_items = q_items[:limit_queries]
+            if retry_query_ids:
+                wanted = set(retry_query_ids)
+                q_items = [
+                    (qid, qt)
+                    for qid, qt in q_items
+                    if retrieval_query_matches(
+                        name, qid, prefix=case_prefix, wanted=wanted
+                    )
+                ]
+                if not q_items:
+                    await _emit(
+                        on_progress,
+                        "log",
+                        message=f"[L1] dataset {name}: skipped (retry filter)",
+                    )
+                    continue
             # EVAL-2: head-slice ids (dataset-qualified for fingerprint uniqueness)
             for qid, _qtext in q_items:
                 smoke_ids.append(f"{name}:{qid}")
@@ -608,6 +627,12 @@ async def run_retrieval_l1(
                 f"{case_prefix}.{name}.agent",
                 status="pass",
                 metrics=metrics,
+            )
+
+        if retry_query_ids and not smoke_ids:
+            raise ValueError(
+                "retry_case_ids matched no retrieval queries: "
+                + ", ".join(str(x) for x in retry_query_ids[:8])
             )
 
         # Macro over datasets. No agent.* copy — Ops is L1-only; old

@@ -16,6 +16,7 @@ from official_bench.agent_path_extract import (  # noqa: E402
     merge_retrieval_rankings,
     rrf_fusion_scores,
     patch_apply_check,
+    patch_from_baseline_diff,
     patch_from_events,
     patch_from_git_diff,
     patch_from_work_root,
@@ -813,6 +814,12 @@ def test_filter_unified_diff_noise_drops_platform_scaffolding() -> None:
         "@@ -1 +1 @@\n"
         "-old\n"
         "+new\n"
+        "diff --git a/.agent_swe_instance.json b/.agent_swe_instance.json\n"
+        "new file mode 100644\n"
+        "--- /dev/null\n"
+        "+++ b/.agent_swe_instance.json\n"
+        "@@ -0,0 +1 @@\n"
+        '+{"instance_id":"astropy__astropy-14365"}\n'
     )
     cleaned = filter_unified_diff_noise(raw)
     assert "pkg/mod.py" in cleaned
@@ -822,6 +829,8 @@ def test_filter_unified_diff_noise_drops_platform_scaffolding() -> None:
     assert "problem.md" not in cleaned
     assert "sources/seed" not in cleaned
     assert "issue text" not in cleaned
+    assert ".agent_swe_instance.json" not in cleaned
+    assert "astropy__astropy-14365" not in cleaned
 
 
 def test_patch_from_git_diff_excludes_platform_scaffolding(tmp_path: Path) -> None:
@@ -858,6 +867,7 @@ def test_patch_from_git_diff_excludes_platform_scaffolding(tmp_path: Path) -> No
         encoding="utf-8",
     )
     (tmp_path / "problem.md").write_text("Please fix the bug\n", encoding="utf-8")
+    (tmp_path / ".agent_swe_instance.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "sources").mkdir()
     os.symlink("/workspace/sources/seed", tmp_path / "sources" / "seed")
     diff = patch_from_git_diff(tmp_path)
@@ -868,6 +878,7 @@ def test_patch_from_git_diff_excludes_platform_scaffolding(tmp_path: Path) -> No
     assert "problem.md" not in diff
     assert "sources/seed" not in diff
     assert "Please fix" not in diff
+    assert ".agent_swe_instance" not in diff
 
 
 def test_patch_from_git_diff_platform_noise_alone_is_empty(tmp_path: Path) -> None:
@@ -899,9 +910,14 @@ def test_patch_from_git_diff_platform_noise_alone_is_empty(tmp_path: Path) -> No
     (tmp_path / ".agent").mkdir()
     (tmp_path / ".agent" / "ast_index_snapshot.json").write_text("{}\n", encoding="utf-8")
     (tmp_path / "problem.md").write_text("issue\n", encoding="utf-8")
+    (tmp_path / ".agent_swe_instance.json").write_text(
+        '{"instance_id":"astropy__astropy-14365","image_ref":"sweb.eval.x"}\n',
+        encoding="utf-8",
+    )
     (tmp_path / "sources").mkdir()
     os.symlink("/workspace/sources/seed", tmp_path / "sources" / "seed")
     assert patch_from_git_diff(tmp_path) == ""
+    assert patch_from_baseline_diff(tmp_path, []) == ""
 
 
 def test_patch_from_git_diff(tmp_path: Path) -> None:
@@ -1067,6 +1083,34 @@ def test_query_drift_and_buckets() -> None:
         == "infra_channel"
     )
     assert classify_bucket("coding", {"patch_source": "none"}) == "no_patch"
+    assert (
+        classify_bucket(
+            "coding",
+            {
+                "patch_source": "none",
+                "terminal_state": "failed",
+                "failure_message": "Let me start by reading problem.md",
+            },
+        )
+        == "turn_failed"
+    )
+    assert (
+        classify_bucket(
+            "coding",
+            {
+                "patch_source": "baseline_diff",
+                "terminal_state": "failed",
+            },
+        )
+        == "ok"
+    )
+    assert (
+        classify_bucket(
+            "coding",
+            {"patch_source": "none", "terminal_state": "step_timeout"},
+        )
+        == "step_timeout"
+    )
     assert (
         classify_bucket(
             "coding",

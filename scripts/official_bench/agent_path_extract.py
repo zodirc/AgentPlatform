@@ -1332,13 +1332,22 @@ _GIT_DIFF_EXCLUDE_PATHSPECS: tuple[str, ...] = (
     ":(exclude)problem.md",
     ":(exclude)sources/seed",
     ":(exclude)sources/seed/**",
+    # Checkout sidecars at worktree root (not under .agent/).
+    # Keep in sync with services/runtime/app/tools/core/swe_solve_env.py.
+    ":(exclude).agent_swe_instance.json",
+    ":(exclude).agent_swe_sync_state.json",
+    ":(exclude).agent_swe_probe.json",
 )
 
 # Exact worktree-root paths that are platform overlays, not repo edits.
+# Sidecar names match swe_solve_env.MARKER_NAME / SYNC_STATE_NAME / PROBE_CACHE_NAME.
 _PLATFORM_DIFF_NOISE_FILES: frozenset[str] = frozenset(
     {
         "problem.md",
         "sources/seed",
+        ".agent_swe_instance.json",
+        ".agent_swe_sync_state.json",
+        ".agent_swe_probe.json",
     }
 )
 

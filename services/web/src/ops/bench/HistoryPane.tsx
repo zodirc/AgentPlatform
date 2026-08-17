@@ -13,7 +13,7 @@ type OfficialCase = NonNullable<OfficialRun["cases"]>[number];
 export type HistoryPaneModel = Record<string, any>;
 
 export function HistoryPane({ model }: { model: HistoryPaneModel }) {
-  const { filteredRuns, runs, historySelectMode, setHistorySelectMode, setCheckedRunIds, checkedRunIds, clearingHistory, deleteSelectedHistory, clearHistory, clearHistoryBefore, loadList, selectedId, loadDetail, shortId, toggleCheckedRun, runMetrics, historyHeadlineMetric, elapsedSeconds, isActiveStatus, nowMs, setPagePane, historyDeepLinkDoneRef, navigate, opsOfficialPath, secret, runSuitesLabel, statusClass, formatTime, formatDuration, detail, elapsedSec, busy, remainLabel, targetEnabled, rerunFrom, openAuthorizedHtml, setError, opsDisplayText, downloadAuthorizedFile, opsRunPath, tab, setTab, MetricBars, detailMetrics, ArtifactsPanel, artifacts, artifactsLoading, artifactsError, logTabItems, isOpsErrorLogLine } = model;
+  const { filteredRuns, runs, historySelectMode, setHistorySelectMode, setCheckedRunIds, checkedRunIds, clearingHistory, deleteSelectedHistory, clearHistory, clearHistoryBefore, loadList, selectedId, loadDetail, shortId, toggleCheckedRun, runMetrics, historyHeadlineMetric, elapsedSeconds, isActiveStatus, nowMs, setPagePane, historyDeepLinkDoneRef, navigate, opsOfficialPath, secret, runSuitesLabel, statusClass, formatTime, formatDuration, detail, elapsedSec, busy, remainLabel, targetEnabled, rerunFrom, retryFailedCase, retryFailedItems, openAuthorizedHtml, setError, opsDisplayText, downloadAuthorizedFile, opsRunPath, tab, setTab, MetricBars, detailMetrics, ArtifactsPanel, artifacts, artifactsLoading, artifactsError, logTabItems, isOpsErrorLogLine } = model;
   const suiteTimes = detail ? suiteWallTimes(detail, nowMs) : [];
   return (
         <>
@@ -262,6 +262,18 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                       </button>
                       <button
                         type="button"
+                        className="rounded-md border border-border px-2 py-1 hover:bg-muted disabled:opacity-40"
+                        disabled={
+                          !targetsFromRun(detail).some(targetEnabled) ||
+                          Boolean(isActiveStatus(detail.status))
+                        }
+                        title="一键只重跑官方未过 / 失败的题目（新跑次 · smoke · 不升 SCORECARD）"
+                        onClick={() => void retryFailedItems()}
+                      >
+                        重跑未过项
+                      </button>
+                      <button
+                        type="button"
                         className="rounded-md border border-border px-2 py-1 hover:bg-muted"
                         onClick={() => {
                           void openAuthorizedHtml(
@@ -451,6 +463,11 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                       loading={artifactsLoading}
                       error={artifactsError}
                       secret={secret}
+                      onRetryCase={retryFailedCase}
+                      onRetryFailed={(suiteKey, caseIds) =>
+                        void retryFailedItems({ suiteKey, caseIds })
+                      }
+                      retryBusy={busy}
                     />
                   ) : null}
 

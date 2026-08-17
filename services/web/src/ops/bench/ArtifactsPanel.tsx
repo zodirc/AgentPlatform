@@ -4,6 +4,7 @@ import { opsRawPath, statusClass } from "../OpsShell";
 import { opsDisplayText } from "../opsDisplayText";
 import { OpsTextViewerModal } from "../OpsTextViewerModal";
 import type { ArtifactCase, RunArtifacts, SuiteArtifact } from "./types";
+import { artifactCaseNeedsRetry, suiteIdForRetry } from "./evalRetry";
 import { downloadAuthorizedFile, fetchAuthorizedText, openAuthorizedHtml } from "./sse";
 import { dropAliasedMetrics } from "./metrics";
 
@@ -81,11 +82,17 @@ export function ArtifactsPanel({
   loading,
   error,
   secret,
+  onRetryCase,
+  onRetryFailed,
+  retryBusy,
 }: {
   data: RunArtifacts | null;
   loading: boolean;
   error: string | null;
   secret: string;
+  onRetryCase?: (suite: string, caseId: string) => void;
+  onRetryFailed?: (suiteKey: string, caseIds: string[]) => void;
+  retryBusy?: boolean;
 }) {
   const suites = data?.suites || [];
   const [suiteIdx, setSuiteIdx] = useState(0);
@@ -129,6 +136,9 @@ export function ArtifactsPanel({
   const cases = (suite.cases || []).filter((c) =>
     bucketFilter ? c.bucket === bucketFilter : true,
   );
+  const failedRetryIds = (suite.cases || [])
+    .filter((c) => artifactCaseNeedsRetry(suite.suite, c) && c.case_id)
+    .map((c) => String(c.case_id));
   const score = suite.coding_scorecard || {};
   const resolveRate =
     typeof score.resolve_rate === "number"
@@ -458,6 +468,30 @@ export function ArtifactsPanel({
         ) : null}
       </div>
 
+      {onRetryCase || onRetryFailed ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {onRetryFailed && failedRetryIds.length > 0 ? (
+            <button
+              type="button"
+              className="rounded-md border border-border px-2 py-1 text-xs hover:bg-muted disabled:opacity-40"
+              disabled={Boolean(retryBusy)}
+              title="一键只重跑本套件官方未过 / 失败的题目（新跑次 · smoke · 不升 SCORECARD）"
+              onClick={() => {
+                const sid = suite.suite || "";
+                if (!sid) return;
+                onRetryFailed(sid, failedRetryIds);
+              }}
+            >
+              重跑未过项（{failedRetryIds.length}）
+            </button>
+          ) : null}
+          <p className="text-[11px] text-muted-foreground">
+            未过题可一键全重跑，或单步重跑一行。新开一轮、记 smoke，不升
+            SCORECARD 主栏。
+          </p>
+        </div>
+      ) : null}
+
       <div className="overflow-x-auto">
         <table className="w-full text-left text-xs">
           <thead className="border-b border-border text-muted-foreground">
@@ -475,6 +509,7 @@ export function ArtifactsPanel({
                 <th className="py-2 pr-2">状态</th>
               )}
               <th className="py-2">指标 / L2</th>
+              {onRetryCase ? <th className="py-2 pl-2">操作</th> : null}
             </tr>
           </thead>
           <tbody>
@@ -651,6 +686,28 @@ export function ArtifactsPanel({
                       </div>
                     ) : null}
                   </td>
+                  {onRetryCase ? (
+                    <td className="py-1.5 pl-2">
+                      {c.case_id &&
+                      artifactCaseNeedsRetry(suite.suite, c) ? (
+                        <button
+                          type="button"
+                          className="underline decoration-dotted underline-offset-2 disabled:opacity-40"
+                          disabled={Boolean(retryBusy)}
+                          title="只重跑这一题（新跑次 · smoke · 不升 SCORECARD）"
+                          onClick={() => {
+                            const sid = suiteIdForRetry(suite.suite);
+                            if (!sid || !c.case_id) return;
+                            onRetryCase(sid, c.case_id);
+                          }}
+                        >
+                          重跑
+                        </button>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               );
             })}

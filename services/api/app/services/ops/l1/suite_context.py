@@ -28,6 +28,7 @@ from .common import (
     _reports,
     _sample_policy_head_slice,
 )
+from .retry_ids import context_case_matches
 from .turn_driver import _create_l1_work, _pull_with_live_logs, _start_turn, _wait_turn_verbose
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ async def run_context_l1(
     arm: str = "free",
     should_cancel: CancelCheck | None = None,
     turn_tracker: L1TurnTracker | None = None,
+    retry_case_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """LongBench small via file-on-disk + real Turns.
 
@@ -84,8 +86,9 @@ async def run_context_l1(
         "arm": arm_norm,
         "official": ctx.get("official"),
         "dry_metrics": False,
-        "sample_tier": ("smoke" if limit > 0 else "anchor"),
+        "sample_tier": ("smoke" if limit > 0 or retry_case_ids else "anchor"),
         "context_limit": limit,
+        "retry_case_ids": list(retry_case_ids) if retry_case_ids else None,
         **_l1_fingerprint(model),
     }
     root = await _pull_with_live_logs(
@@ -101,9 +104,26 @@ async def run_context_l1(
             if line:
                 rows.append(json.loads(line))
     rows = _limit_rows_per_task(rows, limit)
+    indexed = list(enumerate(rows))
+    if retry_case_ids:
+        wanted = set(retry_case_ids)
+        indexed = [
+            (i, r)
+            for i, r in indexed
+            if context_case_matches(
+                str(r.get("task") or r.get("dataset") or "longbench"),
+                i,
+                wanted,
+            )
+        ]
+        if not indexed:
+            raise ValueError(
+                "retry_case_ids matched no LongBench cases: "
+                + ", ".join(str(x) for x in retry_case_ids[:8])
+            )
     ctx_ids = [
         f"{str(r.get('task') or r.get('dataset') or 'longbench')}:{i}"
-        for i, r in enumerate(rows)
+        for i, r in indexed
     ]
     session.extra["sample_policy"] = _sample_policy_head_slice(
         suite="context",
@@ -115,8 +135,13 @@ async def run_context_l1(
         on_progress,
         "log",
         message=(
-            f"[L1] context plan n={len(rows)} parallel={conc} arm={arm_norm}"
+            f"[L1] context plan n={len(indexed)} parallel={conc} arm={arm_norm}"
             + (f" per_task_limit={limit}" if limit > 0 else " full_slice")
+            + (
+                f" retry_ids={len(indexed)}"
+                if retry_case_ids
+                else ""
+            )
         ),
     )
 
@@ -319,7 +344,7 @@ async def run_context_l1(
                     await _emit_fail(on_progress, case_id, error=fail_detail)
 
         results = await asyncio.gather(
-            *[_one_row(idx, row) for idx, row in enumerate(rows)],
+            *[_one_row(idx, row) for idx, row in indexed],
             return_exceptions=True,
         )
         if any(isinstance(r, L1Cancelled) for r in results) or (

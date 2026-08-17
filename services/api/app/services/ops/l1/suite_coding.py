@@ -27,6 +27,7 @@ async def run_coding_l1(
     *,
     tier: str = "n25",
     n_instances: int | None = None,
+    instance_ids: list[str] | None = None,
     model: dict[str, Any] | None = None,
     on_progress: ProgressCb | None = None,
     scenario_id: str = "agent",
@@ -115,11 +116,17 @@ async def run_coding_l1(
     instances_path = root / "instances.jsonl"
     _ensure_slice_files(instances_path)
     selected_tier, selected_n, ids, fingerprint = resolve_coding_selection(
-        tier=tier, n_instances=n_instances
+        tier=tier, n_instances=n_instances, instance_ids=instance_ids
     )
     rows = _load_instances(instances_path, allowed_ids=set(ids))
     by_id = {str(r.get("instance_id")): r for r in rows}
     ordered = [by_id[i] for i in ids if i in by_id]
+    if instance_ids and not ordered:
+        raise ValueError(
+            "retry instance_ids matched no SWE Lite rows: "
+            + ", ".join(str(x) for x in ids[:8])
+        )
+    retry_subset = bool(instance_ids)
 
     session = RunSession(
         suite="coding",
@@ -141,9 +148,12 @@ async def run_coding_l1(
         "workspace_index_wait_timeout_s": float(workspace_index_wait_timeout_s),
         "sample_tier": (
             "anchor"
-            if selected_tier in {"n25", "full300"} and run_harness
+            if (not retry_subset)
+            and selected_tier in {"n25", "full300"}
+            and run_harness
             else "smoke"
         ),
+        "retry_instance_ids": list(ids) if retry_subset else None,
         # Structural lane is fused into agent; archive prewarm / deny-net only.
         "structural_fused": True,
         "structural_prewarm_env": os.environ.get("STRUCTURAL_PREWARM", ""),
@@ -165,8 +175,13 @@ async def run_coding_l1(
         message=(
             f"[L1] coding plan n={len(ordered)} tier={selected_tier} "
             f"parallel={conc} checkout={checkout_repo} harness={run_harness} "
-            f"workspace_index={int(workspace_index_on)} "
-            f"wait_ready={int(workspace_index_on and workspace_index_wait_ready)}"
+            + (
+                f"retry_ids={','.join(ids[:8])} "
+                if retry_subset
+                else ""
+            )
+            + f"workspace_index={int(workspace_index_on)} "
+            + f"wait_ready={int(workspace_index_on and workspace_index_wait_ready)}"
         ),
     )
     # Suite-level mirror sync (bypass): fetch once per unique repo before Turns so

@@ -6,6 +6,7 @@ import time
 from typing import Any
 
 from .common import CancelCheck, L1Cancelled, L1TurnTracker, ProgressCb, _emit
+from .retry_ids import split_retry_case_ids
 from .suite_coding import run_coding_l1
 from .suite_context import run_context_l1
 from .suite_retrieval import run_retrieval_l1
@@ -30,18 +31,23 @@ async def run_l1_targets(
     turn_tracker: L1TurnTracker | None = None,
     retrieval_datasets: list[str] | None = None,
     retrieval_corpus_mode: str = "full",
+    retry_case_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run selected L1 suites; returns {target: manifest}."""
     out: dict[str, Any] = {}
     live = [t for t in targets if t not in {"pull", "coding_pull"}]
     if not live:
         live = ["retrieval"]
+    retry_parts = split_retry_case_ids(retry_case_ids)
+    retrying = bool(retry_case_ids)
     for idx, t in enumerate(live):
         if should_cancel is not None and should_cancel():
             raise L1Cancelled("L1 cancelled")
         await _emit(on_progress, "log", message=f"[L1] suite start {t}")
         t0 = time.monotonic()
         if t == "retrieval":
+            if retrying and not retry_parts["retrieval"]:
+                raise ValueError("retry_case_ids has no retrieval case")
             out[t] = await run_retrieval_l1(
                 limit_queries=retrieval_query_limit,
                 model=model,
@@ -53,8 +59,11 @@ async def run_l1_targets(
                 datasets=retrieval_datasets,
                 corpus_mode=retrieval_corpus_mode,
                 suite_key="retrieval",
+                retry_query_ids=retry_parts["retrieval"] or None,
             )
         elif t in {"retrieval_zh", "cmteb"}:
+            if retrying and not retry_parts["retrieval_zh"]:
+                raise ValueError("retry_case_ids has no retrieval_zh case")
             key = "retrieval_zh"
             out[key] = await run_retrieval_l1(
                 limit_queries=retrieval_query_limit,
@@ -67,9 +76,12 @@ async def run_l1_targets(
                 datasets=retrieval_datasets,
                 corpus_mode="full",
                 suite_key="retrieval_zh",
+                retry_query_ids=retry_parts["retrieval_zh"] or None,
             )
             t = key
         elif t == "context":
+            if retrying and not retry_parts["context"]:
+                raise ValueError("retry_case_ids has no context case")
             out[t] = await run_context_l1(
                 limit=context_limit,
                 model=model,
@@ -78,11 +90,15 @@ async def run_l1_targets(
                 arm=context_arm,
                 should_cancel=should_cancel,
                 turn_tracker=turn_tracker,
+                retry_case_ids=retry_parts["context"] or None,
             )
         elif t in {"coding", "coding_infer"}:
+            if retrying and not retry_parts["coding"]:
+                raise ValueError("retry_case_ids has no coding instance")
             out[t] = await run_coding_l1(
                 tier=coding_tier,
                 n_instances=coding_n_instances,
+                instance_ids=retry_parts["coding"] or None,
                 model=model,
                 on_progress=on_progress,
                 max_parallel=max_parallel,

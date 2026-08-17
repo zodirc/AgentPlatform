@@ -291,6 +291,15 @@ def classify_bucket(
         if "runner lease expired" in fail_msg or "runner_lost" in fail_msg:
             return "runner_lost"
         src = str(probe.get("patch_source") or "none")
+        term = str(probe.get("terminal_state") or "")
+        # Failed/stalled Turns with no real model patch are not "ok" and not
+        # a clean agent no_patch (noise sidecars used to hide this).
+        if src in {"", "none"} and term in {"failed", "step_timeout", "stall"}:
+            if term == "step_timeout":
+                return "step_timeout"
+            if term == "stall":
+                return "stall"
+            return "turn_failed"
         if src in {"", "none"}:
             return "no_patch"
         if probe.get("patch_applies") is False:

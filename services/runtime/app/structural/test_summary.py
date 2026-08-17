@@ -67,6 +67,15 @@ def is_testish_command(command: str | None) -> bool:
     return bool(command) and _TESTISH_CMD_RE.search(command or "") is not None
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text: str) -> str:
+    if not text or "\x1b" not in text:
+        return text
+    return _ANSI_RE.sub("", text)
+
+
 def parse_test_summary(
     stdout: str,
     *,
@@ -75,6 +84,7 @@ def parse_test_summary(
 ) -> dict[str, Any] | None:
     """Return compact summary or None if stdout is not a recognized test report."""
     text = "\n".join(p for p in (stdout or "", stderr or "") if p)
+    text = _strip_ansi(text)
     if not text.strip():
         return None
 
@@ -150,23 +160,15 @@ def _counts_from_body(body: str) -> dict[str, int]:
     return {m.group("label").lower(): int(m.group("n")) for m in _COUNT_RE.finditer(body)}
 
 
-def _parse_pytest(text: str, *, max_failures: int) -> dict[str, Any] | None:
-    body = ""
-    banners = list(_PYTEST_SUMMARY_RE.finditer(text))
-    if banners:
-        body = banners[-1].group("body")
-    else:
-        quiet = list(_PYTEST_QUIET_RE.finditer(text))
-        if quiet:
-            body = quiet[-1].group("body")
-    if not body:
-        return None
-    counts = _counts_from_body(body)
-    if not counts:
-        return None
-    if not any(k in counts for k in ("passed", "failed", "error", "errors")):
-        return None
+def _counts_look_like_pytest(counts: dict[str, int]) -> bool:
+    return bool(counts) and any(
+        k in counts for k in ("passed", "failed", "error", "errors")
+    )
 
+
+def _summary_from_counts(
+    text: str, counts: dict[str, int], *, max_failures: int
+) -> dict[str, Any]:
     passed = int(counts.get("passed") or 0)
     failed = int(counts.get("failed") or 0)
     errors = int(counts.get("error") or counts.get("errors") or 0)
@@ -182,6 +184,32 @@ def _parse_pytest(text: str, *, max_failures: int) -> dict[str, Any] | None:
     if skipped is not None:
         out["skipped"] = int(skipped)
     return out
+
+
+def _parse_pytest(text: str, *, max_failures: int) -> dict[str, Any] | None:
+    # Prefer a banner whose body actually has passed/failed/error counts.
+    # Last ``=====`` line is often coverage / "short test summary info" / warnings.
+    for banner in reversed(list(_PYTEST_SUMMARY_RE.finditer(text))):
+        counts = _counts_from_body(banner.group("body"))
+        if _counts_look_like_pytest(counts):
+            return _summary_from_counts(text, counts, max_failures=max_failures)
+    quiet = list(_PYTEST_QUIET_RE.finditer(text))
+    if quiet:
+        counts = _counts_from_body(quiet[-1].group("body"))
+        if _counts_look_like_pytest(counts):
+            return _summary_from_counts(text, counts, max_failures=max_failures)
+    # Timeout / truncated: FAILED lines but no footer.
+    first = _pytest_first_failures(text, max_failures=max_failures)
+    if first:
+        n_fail = len(first)
+        return {
+            "passed": 0,
+            "failed": n_fail,
+            "errors": 0,
+            "first_failures": first,
+            "provider": "pytest",
+        }
+    return None
 
 
 def _pytest_first_failures(text: str, *, max_failures: int) -> list[dict[str, str]]:

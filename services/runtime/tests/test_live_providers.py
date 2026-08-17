@@ -9,7 +9,23 @@ import pytest
 
 from app.model.anthropic_provider import AnthropicProvider
 from app.model.gateway import ModelResponse, StreamActivity
-from app.model.openai_provider import OpenAIProvider
+from app.model.openai_provider import OpenAIProvider, openai_chat_completions_url
+
+
+def test_openai_chat_completions_url_does_not_double_v1() -> None:
+    assert openai_chat_completions_url(None) == "https://api.openai.com/v1/chat/completions"
+    assert openai_chat_completions_url("https://api.openai.com") == (
+        "https://api.openai.com/v1/chat/completions"
+    )
+    assert openai_chat_completions_url("https://api.wuai.ai/v1") == (
+        "https://api.wuai.ai/v1/chat/completions"
+    )
+    assert openai_chat_completions_url("https://openrouter.ai/api/v1/") == (
+        "https://openrouter.ai/api/v1/chat/completions"
+    )
+    assert openai_chat_completions_url(
+        "https://api.wuai.ai/v1/chat/completions"
+    ) == "https://api.wuai.ai/v1/chat/completions"
 
 
 class _FakeStreamResponse:

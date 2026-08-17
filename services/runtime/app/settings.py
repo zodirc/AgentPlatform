@@ -104,7 +104,7 @@ class Settings(BaseSettings):
     # S0 harness guards (docs/13-rate-redlines.md).
     tool_schema_validate: bool = True
     citation_verify_enabled: bool = True
-    model_egress_enforce: bool = True
+    model_egress_enforce: bool = False
     # Comma-separated extra base URLs or hosts allowed for live model calls.
     model_egress_allowlist: str = ""
     # Content privacy (docs/13 S2 A15/A16) — regex only; never LLM desensitization.

@@ -21,6 +21,21 @@ from app.model.stream_abort import close_response_on_abort
 from app.settings import settings
 
 
+def openai_chat_completions_url(base_url: str | None) -> str:
+    """Join OpenAI-compatible chat URL without doubling ``/v1``.
+
+    Official OpenAI default is host-only (``https://api.openai.com``) and this
+    client appends ``/v1/chat/completions``. Relays and Ops presets usually
+    already include ``/v1`` (``https://api.wuai.ai/v1``); appending again 404s.
+    """
+    root = (base_url or "https://api.openai.com").rstrip("/")
+    if root.endswith("/chat/completions"):
+        return root
+    if root.endswith("/v1"):
+        return f"{root}/chat/completions"
+    return f"{root}/v1/chat/completions"
+
+
 class OpenAIProvider:
     def __init__(
         self,
@@ -34,6 +49,7 @@ class OpenAIProvider:
         self.model_name = model_name
         self.base_url = (base_url or "https://api.openai.com").rstrip("/")
         self.generation = generation or GenerationParams.from_settings()
+        self.chat_url = openai_chat_completions_url(self.base_url)
 
     async def stream(
         self,
@@ -88,7 +104,7 @@ class OpenAIProvider:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 async with client.stream(
                     "POST",
-                    f"{self.base_url}/v1/chat/completions",
+                    self.chat_url,
                     headers=headers,
                     json=payload,
                 ) as resp:
@@ -99,7 +115,7 @@ class OpenAIProvider:
                             payload.pop("stream_options", None)
                             async with client.stream(
                                 "POST",
-                                f"{self.base_url}/v1/chat/completions",
+                                self.chat_url,
                                 headers=headers,
                                 json=payload,
                             ) as retry_resp:

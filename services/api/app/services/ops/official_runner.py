@@ -14,6 +14,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.services.ops import official_store
+from app.services.ops.l1.retry_ids import MAX_RETRY_CASE_IDS
 from app.services.ops.official_live_util import (
     l1_suite_phase_hint as _l1_suite_phase_hint,
     salvage_coding_case_from_disk as _salvage_coding_case_from_disk,
@@ -115,6 +116,7 @@ class OfficialLiveRun:
     # SciFact mid-corpus micro L1: dataset filter + isolated {name}-micro index.
     retrieval_datasets: list[str] = field(default_factory=list)
     retrieval_corpus_mode: str = "full"
+    retry_case_ids: list[str] = field(default_factory=list)
     model: dict[str, Any] | None = None
     logs: list[dict[str, Any]] = field(default_factory=list)
     cases: list[dict[str, Any]] = field(default_factory=list)
@@ -282,6 +284,7 @@ async def _persist_snapshot(run: OfficialLiveRun) -> None:
             "workspace_index_wait_ready": run.workspace_index_wait_ready,
             "retrieval_datasets": list(run.retrieval_datasets),
             "retrieval_corpus_mode": run.retrieval_corpus_mode,
+            "retry_case_ids": list(run.retry_case_ids),
             "bench_job_id": run._bench_job_id,
             "phase_hint": run.phase_hint,
             "model": _model_meta_safe(run.model),
@@ -647,6 +650,7 @@ async def create_and_start(
     workspace_index_wait_ready: bool | None = None,
     retrieval_datasets: list[str] | None = None,
     retrieval_corpus_mode: str = "full",
+    retry_case_ids: list[str] | None = None,
 ) -> OfficialLiveRun:
     cleaned: list[str] = []
     for t in targets:
@@ -734,6 +738,11 @@ async def create_and_start(
             in {"gold", "micro"}
             else "full"
         ),
+        retry_case_ids=[
+            str(x).strip()
+            for x in (retry_case_ids or [])
+            if str(x).strip()
+        ][:MAX_RETRY_CASE_IDS],
         model=model,
         progress_total=len(cleaned),
         phase_hint=(
@@ -756,6 +765,12 @@ async def create_and_start(
             for t in cleaned
         ],
     )
+    if run.retry_case_ids:
+        n = len(run.retry_case_ids)
+        shown = ", ".join(run.retry_case_ids[:4])
+        extra = "…" if n > 4 else ""
+        kind = "单题重跑" if n == 1 else f"未过项重跑（{n} 题）"
+        run.phase_hint = f"{kind}：{shown}{extra}（smoke，不升 SCORECARD）"
     async with _LOCK:
         _RUNS[run.id] = run
     await _persist_snapshot(run)
@@ -1165,6 +1180,7 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             turn_tracker=run._turn_tracker,
             retrieval_datasets=list(run.retrieval_datasets) or None,
             retrieval_corpus_mode=run.retrieval_corpus_mode,
+            retry_case_ids=list(run.retry_case_ids) or None,
         )
     except Exception as exc:  # noqa: BLE001
         if run.cancel_requested or "cancelled" in str(exc).lower():
@@ -1623,6 +1639,7 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
         "workspace_index_wait_ready": run.workspace_index_wait_ready,
         "retrieval_datasets": list(run.retrieval_datasets),
         "retrieval_corpus_mode": run.retrieval_corpus_mode,
+        "retry_case_ids": list(run.retry_case_ids),
         "model": _model_meta_safe(run.model),
         "created_at": run.created_at,
         "finished_at": run.finished_at,
@@ -1665,6 +1682,7 @@ def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
             "context_arm": run.context_arm,
             "coding_checkout_repo": run.coding_checkout_repo,
             "workspace_index_wait_ready": run.workspace_index_wait_ready,
+            "retry_case_ids": list(run.retry_case_ids),
             "bench_job_id": run._bench_job_id,
             "model": _model_meta_safe(run.model),
             "reclaimed": bool(

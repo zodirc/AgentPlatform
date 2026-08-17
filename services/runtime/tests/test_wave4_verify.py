@@ -53,6 +53,40 @@ def test_parse_pytest_omits_unknown_banner() -> None:
     assert parse_test_summary("==== hello ====\nnot a test report\n") is None
 
 
+def test_parse_pytest_ignores_later_coverage_banner() -> None:
+    stdout = """
+============================= test session starts ==============================
+tests/test_a.py::test_ok PASSED
+=========================== short test summary info ============================
+==================== 2 passed, 1 failed in 0.12s ======================
+---------- coverage: 85% -----------
+============================= 85% ==============================
+"""
+    summary = parse_test_summary(stdout)
+    assert summary is not None
+    assert summary["passed"] == 2
+    assert summary["failed"] == 1
+
+
+def test_parse_pytest_strips_ansi_and_failed_lines_without_footer() -> None:
+    colored = (
+        "\x1b[31m===================== 1 failed, 2 passed in 0.08s ======================\x1b[0m\n"
+    )
+    summary = parse_test_summary(colored)
+    assert summary is not None
+    assert summary["failed"] == 1
+    assert summary["passed"] == 2
+
+    truncated = (
+        "tests/test_a.py::test_ok PASSED\n"
+        "FAILED tests/test_b.py::test_bad - AssertionError: boom\n"
+    )
+    summary = parse_test_summary(truncated)
+    assert summary is not None
+    assert summary["failed"] == 1
+    assert any("test_bad" in f["name"] for f in summary["first_failures"])
+
+
 def test_attach_test_summary_run_tests() -> None:
     result = {
         "command": "pytest -q",

@@ -12,6 +12,7 @@ from app.services.ops.auth import ops_eval_enabled, require_ops_eval_auth
 from app.services.ops import official_runner
 from app.services.ops import official_store
 from app.services.ops.official_caps import official_caps
+from app.services.ops.l1.retry_ids import MAX_RETRY_CASE_IDS
 from app.services.ops import store as eval_store
 
 router = APIRouter(
@@ -73,6 +74,10 @@ class StartOfficialBody(BaseModel):
     # ``gold`` accepted as alias of ``micro`` for older Ops clients.
     retrieval_datasets: list[str] = Field(default_factory=list)
     retrieval_corpus_mode: Literal["full", "micro", "gold"] = "full"
+    # Failed-case retry: artifact case_id(s). New run, sample_tier=smoke.
+    retry_case_ids: list[str] = Field(
+        default_factory=list, max_length=MAX_RETRY_CASE_IDS
+    )
     force: bool = False
     model: ModelBody | None = None
 
@@ -771,6 +776,7 @@ async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
             workspace_index_wait_ready=body.workspace_index_wait_ready,
             retrieval_datasets=list(body.retrieval_datasets or []),
             retrieval_corpus_mode=body.retrieval_corpus_mode,
+            retry_case_ids=list(body.retry_case_ids or []),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

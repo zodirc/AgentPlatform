@@ -89,6 +89,7 @@ export type OfficialRun = {
   l1_max_parallel?: number;
   retrieval_datasets?: string[];
   retrieval_corpus_mode?: string;
+  retry_case_ids?: string[];
   retrieval_arm?: string;
   context_arm?: string;
   cancel_requested?: boolean;
@@ -127,6 +128,7 @@ export type OfficialRun = {
     l1_max_parallel?: number;
     retrieval_datasets?: string[];
     retrieval_corpus_mode?: string;
+    retry_case_ids?: string[];
     retrieval_arm?: string;
     context_arm?: string;
     reclaimed?: boolean;

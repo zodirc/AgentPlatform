@@ -434,3 +434,17 @@ def test_harness_report_accepts_overlapping_instance_set(tmp_path: Path) -> None
     )
     assert out["resolve_rate"] == 0.5
     assert out["resolved_ids"] == ["ours__1"]
+
+
+def test_resolve_coding_selection_explicit_ids() -> None:
+    tier, n, ids, fp = swe_run.resolve_coding_selection(
+        tier="n5", instance_ids=["astropy__astropy-14365"]
+    )
+    assert tier == "n5"
+    assert n == 1
+    assert ids == ["astropy__astropy-14365"]
+    assert len(fp) == 64
+    with pytest.raises(ValueError, match="unknown SWE Lite"):
+        swe_run.resolve_coding_selection(
+            tier="n5", instance_ids=["not-a-real-instance"]
+        )

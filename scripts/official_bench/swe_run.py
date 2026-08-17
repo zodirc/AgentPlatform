@@ -84,14 +84,38 @@ def _read_instance_ids(path: Path) -> list[str]:
 
 
 def resolve_coding_selection(
-    *, tier: str = DEFAULT_CODING_TIER, n_instances: int | None = None
+    *,
+    tier: str = DEFAULT_CODING_TIER,
+    n_instances: int | None = None,
+    instance_ids: list[str] | None = None,
 ) -> tuple[str, int, list[str], str]:
-    """Return tier, count, ordered IDs, and an SHA-256 selection fingerprint."""
+    """Return tier, count, ordered IDs, and an SHA-256 selection fingerprint.
+
+    ``instance_ids`` (Ops single-case retry) overrides slice/head-N. The
+    parent ``tier`` is kept for metadata; callers must mark ``sample_tier=smoke``.
+    """
     if tier not in CODING_TIERS:
         raise ValueError(f"unknown coding tier: {tier}; choose one of {', '.join(CODING_TIERS)}")
     order = _read_instance_ids(_SLICE_DIR / "instance_order.txt")
     if len(order) < 300:
         raise ValueError(f"instance_order.txt must contain 300 IDs, found {len(order)}")
+    explicit: list[str] = []
+    seen: set[str] = set()
+    for raw in instance_ids or []:
+        iid = str(raw or "").strip()
+        if not iid or iid in seen:
+            continue
+        seen.add(iid)
+        explicit.append(iid)
+    if explicit:
+        order_set = set(order)
+        unknown = [i for i in explicit if i not in order_set]
+        if unknown:
+            shown = ", ".join(unknown[:8])
+            more = f" …(+{len(unknown) - 8})" if len(unknown) > 8 else ""
+            raise ValueError(f"unknown SWE Lite instance_id(s): {shown}{more}")
+        fingerprint = hashlib.sha256("\n".join(explicit).encode("utf-8")).hexdigest()
+        return tier, len(explicit), explicit, fingerprint
     if tier == "custom":
         if n_instances is None or n_instances < 3:
             raise ValueError("custom coding tier requires --n-instances >= 3")
