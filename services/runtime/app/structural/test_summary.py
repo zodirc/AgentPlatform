@@ -199,6 +199,9 @@ def _parse_pytest(text: str, *, max_failures: int) -> dict[str, Any] | None:
         if _counts_look_like_pytest(counts):
             return _summary_from_counts(text, counts, max_failures=max_failures)
     # Timeout / truncated: FAILED lines but no footer.
+    # Unittest's ``FAILED (failures=N)`` must not be stolen as a pytest nodeid.
+    if _UNITTEST_FAILED_LINE_RE.search(text) or _UNITTEST_FAIL_RE.search(text):
+        return None
     first = _pytest_first_failures(text, max_failures=max_failures)
     if first:
         n_fail = len(first)
@@ -244,6 +247,8 @@ def _pytest_first_failures(text: str, *, max_failures: int) -> list[dict[str, st
             break
         nodeid = m.group("nodeid").strip()
         if not nodeid or nodeid in seen:
+            continue
+        if nodeid.startswith("("):
             continue
         seen.add(nodeid)
         entry = {"name": nodeid[:200]}
