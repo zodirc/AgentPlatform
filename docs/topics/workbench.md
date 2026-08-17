@@ -1,11 +1,29 @@
-# 工作台（写作 · Ops Bench · 证明）
+# 工作台（写作 · Ops Bench · 合入证明）
 
-写作主路径、Ops 官方 Bench 效果温度计、契约切片与合入证明。
+写作主路径、Ops 官方 Bench（效果温度计）、契约切片、合入证明。后三层**不要混读**：
+
+| 层 | 是什么 | 挡合并？ |
+|----|--------|----------|
+| **Ops Bench** | 官方小集效果：BEIR / C-MTEB / LongBench / SWE | **否** |
+| **Golden** | 接口/契约切片 | 否 |
+| **ci_proof** | unit + gate 完整证明 | **是** |
+
+Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieval/coding 那些效果套件。一次提问落了哪些行，见 [一次真实跑](worked-example.md)。
 
 ## 图
 
 1. [写作主路径](../assets/writing/writing-main-path-zh.png) — Work 树 · 按需检索 · diff-first  
-2. [Ops Bench 原理](../assets/ops/ops-bench-principle-zh.png) — L1 agent-path · 套件 · 隔离 · SCORECARD  
+2. [Ops Bench 原理](../assets/ops/ops-bench-principle-zh.png) — L1 agent-path · 套件 · 隔离  
+3. [评测原理](ops-eval-principles.md) — 题目、命中、harness、审阅偏差  
+4. [实例走查](ops-eval-walkthrough.md) — 本地题目原文与命中判定  
+5. [图 · 检索实例](../assets/ops/ops-eval-walk-retrieval-zh.png) — SciFact q-3 / q-1  
+6. [图 · 上下文实例](../assets/ops/ops-eval-walk-context-zh.png) — LongBench idx 0 / 1 / 2  
+7. [图 · 编码实例](../assets/ops/ops-eval-walk-coding-zh.png) — 14365 / 12907 · harness  
+8. [分数入账](../assets/ops/score-snapshot-zh.png) — `latest_*` → RESULTS vs SCORECARD 主栏  
+9. [检索一题计分](../assets/ops/ops-retrieval-score-zh.png) — 评测侧多轮 RRF · BEIR≠C-MTEB  
+10. [上下文一题计分](../assets/ops/ops-context-score-zh.png) — 抽 `Answer:` · F1/EM  
+11. [编码一题计分](../assets/ops/ops-coding-score-zh.png) — 探针 ≠ harness `resolve_rate`  
+12. [CI 证明](../assets/ops/ci-proof-zh.png) — 合入门禁（与效果套件不是同一条链）
 
 ![写作主路径](../assets/writing/writing-main-path-zh.png)
 
@@ -57,7 +75,7 @@ work_root/
 
 用户心智是「一个仓库 / 一道题」；工程上仍是同一 Work → Session → Turn。
 
-用户把题（或仓库里的 `problem.md`）发进来。模型先读题、用 issue 里的最小例子复现坏现象，再用 `search_codebase` 找定义、打开文件、`edit_file` 就地改。改成功时结果里已经带着：这段大概影响谁、这次写入的诊断、以及一条可复制的相关测试命令——平台不代跑。然后模型自己跑测试、看邻文件诊断，再用同一条复现命令验一遍。
+用户把题（或仓库里的 `problem.md`）发进来。模型先读题、用 issue 里的最小例子复现坏现象，再用 `search_codebase` 找定义、打开文件、`edit_file` 就地改。改成功时结果里已经带着：这段大概影响谁、这次写入的诊断、以及一条可复制的相关测试命令。官方评测 Turn 会在解题环境里代跑那一个邻近测试文件，失败首条焊进 `related_tests_run`；产品工作台仍不代跑。然后模型自己看邻文件诊断，再用同一条复现命令验一遍。
 
 若它这时不再点工具、直接交卷，平台还要看两件事：改过代码之后有没有跑过测试；仓库测试绿了之后，issue 正文里的例子有没有在**最新一次编辑之后**再跑过。缺哪条就往对话里塞一条用户口吻的提醒，再给一轮，而不是默默收下终稿。磁盘上最终留下补丁或回答。
 
@@ -65,20 +83,14 @@ work_root/
 
 细则：[工具与上下文 §2](../core/tools-and-context.md) · [Runtime](../core/runtime.md)。
 
-## 2. Ops 官方 Bench（重点）
+## 2. Ops 官方 Bench（效果，不是 CI）
 
 路径：`/ops/<密钥>/official`。  
-**效果温度计，不是合入门禁**；服从架构文里的速率红线（不挡受理、首 token 前不加同步模型、重活异步、可测才合并）。
+**效果温度计，不是合入门禁**；服从架构文里的速率红线（不挡受理、首 token 前不加同步模型、重活异步、可测才合并）。给了什么题、什么叫命中、harness 干什么：见 [评测原理](ops-eval-principles.md)。分数如何从一次跑写进 `RESULTS.md` / 能否升 SCORECARD 主栏，见 [分数入账图](../assets/ops/score-snapshot-zh.png)。
 
-### 2.1 三层别搞混
+文首三层表已说明 Bench ≠ Golden ≠ ci_proof。本节只讲 Bench。
 
-| 层 | 是什么 | 挡合并？ |
-|----|--------|----------|
-| **Bench** | 官方小集效果：BEIR / C-MTEB / LongBench / SWE | **否** |
-| **Golden** | 接口/契约切片 | 否 |
-| **ci_proof** | unit + gate 完整证明 | **是** |
-
-### 2.2 L1 agent-path（Ops 验收唯一路径）
+### 2.1 L1 agent-path（Ops 验收唯一路径）
 
 分数必须来自 **产品 Session/Turn → AgentEngine → 真实工具**，禁止为刷分绕过 loop。
 
@@ -96,14 +108,16 @@ work_root/
 
 计分臂以 **free**（自然搜/读/改）为主。依赖 bench 库隔离；SWE resolve 另需 harness + Docker。`coding_skip_api` 默认关（空补丁只通管道，非验收）。
 
-### 2.3 套件原理
+### 2.2 套件原理
 
-| 套件 | 官方源 | Turn 里主要工具 | 主指标 |
-|------|--------|-----------------|--------|
-| **retrieval** | BEIR 小集 | `search_sources` | nDCG@10 等 |
+命中定义与审阅偏差以 [评测原理](ops-eval-principles.md) 为准。下表只记「谁出题 / 主工具 / 主指标」。
+
+| 套件 | 官方源 | Turn 里主要工具 | 主指标（命中） |
+|------|--------|-----------------|----------------|
+| **retrieval** | BEIR 小集 | `search_sources` | 排序里的 `doc_id` ∈ qrels；nDCG / **R@100** / MAP |
 | **retrieval_zh** | C-MTEB 小切 | 同上 | 同上（勿与 BEIR 混栏） |
-| **context** | LongBench 小切 | `read_file` 等 | agent F1 / EM |
-| **coding** | SWE-bench Lite | `edit_file` / `write_file` 等 | **官方 harness 通过率**；patch_rate 仅辅助 |
+| **context** | LongBench 小切 | `read_file` 等 | 抽 `Answer:` 后 F1 / EM（v2 不做子串 EM） |
+| **coding** | SWE-bench Lite | `edit_file` / `write_file` 等 | **harness**：F2P 全过且 P2P 全过；patch_rate 仅辅助 |
 
 找定义是否揉合成功、改完有没有回灌失败摘要、想收工时有没有再催一轮——这些探针只观测平台是否在线，**不代替**官方是否判这题通过。  
 工作区符号表：评测套件默认等索引 ready；产品 Turn 仍先受理。与产品资料检索面隔离。  
@@ -111,7 +125,7 @@ work_root/
 Harness 失败或没有通过率 → 套件 **failed**，不得标 completed 粉饰成模型零分。  
 现行冒烟：[`RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4–5轮 coding 4/5，未升主栏）。
 
-### 2.4 与产品面隔离
+### 2.3 与产品面隔离
 
 | 平面 | 谁写 |
 |------|------|
@@ -121,7 +135,7 @@ Harness 失败或没有通过率 → 套件 **failed**，不得标 completed 粉
 
 Bench **不得**为刷分改产品检索默认，也不得把 ops 语料焊进用户可见库。
 
-### 2.5 旁路观测
+### 2.4 旁路观测
 
 | 入口 | 用途 |
 |------|------|
@@ -136,7 +150,7 @@ Bench **不得**为刷分改产品检索默认，也不得把 ops 语料焊进�
 
 ## 4. 完整证明（阻断合并）
 
-同一脚本：Actions · 本地 `make ci-proof` · Ops `suite=ci`。  
+这是 **CI**，不是 Ops 效果跑分。同一脚本：GitHub Actions · 本地 `make ci-proof` · Ops 控制台 **`suite=ci`**（仅触发器，不是 official 四套件之一）。  
 顺序：stub bootstrap → unit → `make gate`（smoke + eval-all）。  
 步骤图：[ci-proof-zh.png](../assets/ops/ci-proof-zh.png)。
 

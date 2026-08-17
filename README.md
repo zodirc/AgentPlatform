@@ -26,6 +26,8 @@ https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 | 工作台（写作对照编码） | https://zodirc.github.io/AgentPlatform/tour/#writing |
 | 事件如何投影到界面 | https://zodirc.github.io/AgentPlatform/tour/#events |
 | 现行冒烟数字 | https://zodirc.github.io/AgentPlatform/tour/#scorecard |
+| Ops 评测原理（题目 / 命中 / harness） | https://zodirc.github.io/AgentPlatform/tour/#ops-eval-why |
+| 评测实例走查 | https://zodirc.github.io/AgentPlatform/tour/#ops-eval-walk |
 
 ---
 

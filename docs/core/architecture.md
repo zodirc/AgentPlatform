@@ -298,13 +298,13 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 | **R2** | 首 token 前不加同步模型 | 禁止热路径同步摘要/裁判/改写 |
 | **R3** | 热路径 CPU 毫秒级 | 整库 embed、大扫描禁止上主链 |
 | **R4** | 重活异步 | 索引、审计、软预压缩走旁路 |
-| **R5** | 可测才合并 | `make gate` / Ops `suite=ci` 等同完整证明 |
+| **R5** | 可测才合并 | `make gate` / Ops `suite=ci` 等同完整证明（**CI**，不是效果分） |
 
-索引、Ops、Golden 都必须是 **环外或工具中介**，不能为了分数改 loop 语义。
+索引、Ops Bench、Golden 都必须是 **环外或工具中介**，不能为了分数改 loop 语义。R5 的证明链与下一节的效果温度计是两条路：[CI 证明图](../assets/ops/ci-proof-zh.png) · [分数入账图](../assets/ops/score-snapshot-zh.png)。
 
-## 6. Ops L1 评测（环外）
+## 6. Ops L1 评测（环外 · 不是 CI）
 
-效果温度计，不进 StartTurn 热路径。契约：[`docs/contracts.md` §4](../contracts.md)。
+效果温度计，不进 StartTurn 热路径，**不挡合并**。契约：[`docs/contracts.md` §4](../contracts.md)。命中定义见 [评测原理](../topics/ops-eval-principles.md)；本地实例见 [评测实例走查](../topics/ops-eval-walkthrough.md)。
 
 ```text
 /official 或 make *-agent
@@ -324,9 +324,11 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 
 官方编码评测环境（看板一键 / `make ops-swe-eval-ready`）做三件事：给 api/runtime 挂 docker.sock、预拉每道题的官方镜像、对每张镜像跑 python/pytest/`/testbed` 冒烟。看板「就绪」依赖后两件都过。解题时默认**复用这道题的容器**，只把改过的文件增量同步进 `/testbed`（禁网）；模型在 `run_command` 上写的 pytest/`|tail` 会改道进这条路径。缺镜像或冒烟失败硬失败并写明原因。
 
-现行冒烟日记：[`eval/official/baseline/RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4–5轮 coding **4/5**，未升 SCORECARD 主栏）。
+现行冒烟日记：[`eval/official/baseline/RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4–5轮 coding **4/5**，未升 SCORECARD 主栏）。入账分支见 [分数入账](../assets/ops/score-snapshot-zh.png)。Wiki：`#ops-eval-why` 再 `#ops-eval-retrieval` / `#ops-eval-context` / `#ops-eval-coding`。
 
-### 6.1 编码一题（ASCII · 与原图风格一致）
+### 6.1 编码一题
+
+主图：[编码一题计分](../assets/ops/ops-coding-score-zh.png)。探针（fuse / 回执）不进 `resolve_rate`。
 
 ```text
 ① checkout base_commit（写 .agent_swe_instance.json）
@@ -340,7 +342,9 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
                  └─ harness 挂了 ──► failed（可见，不得粉饰成模型零分）
 ```
 
-### 6.2 检索一题（ASCII）
+### 6.2 检索一题
+
+主图：[检索一题计分](../assets/ops/ops-retrieval-score-zh.png)。BEIR 与 C-MTEB 分栏；第一验收位 BEIR R@100。
 
 ```text
 ① pull BEIR|C-MTEB → materialize → HNSW
@@ -349,6 +353,10 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 ④ nDCG / Recall / MAP
 ⑤ latest_retrieval.json | latest_retrieval_zh.json （互不覆盖）
 ```
+
+### 6.3 上下文一题
+
+主图：[上下文一题计分](../assets/ops/ops-context-score-zh.png)。抽末行 `Answer:` 再 F1/EM；对照锚 F1 0.5479 / EM 0.30。
 
 ## 7. 改 X 去哪
 

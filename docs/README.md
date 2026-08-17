@@ -12,9 +12,9 @@
 
 ## 怎么读
 
-图给出分层、分支与容量。正文给出职责边界、旋钮与失败语义。事件名与字段名是契约标识，不是流程图本身。
+图给出分层、分支与容量。正文给出职责边界、旋钮与失败语义。事件名与字段名是契约标识，不是流程图本身。Ops 分数页按一次真实跑次回放，先看依据和原因，再看数字。
 
-建议顺序：部署拓扑与后端栈 → 一次 Turn 的请求路径 → AgentEngine 循环 → 场景（编码或写作）→ 评测计分。
+建议顺序：部署拓扑与后端栈 → 一次 Turn 的请求路径 → AgentEngine 循环 → 场景（编码或写作）→ **Ops 评测原理**（给了什么题、什么叫命中、harness 干什么）→ 一次 smoke 数字；与合入 CI 分开读。
 
 ---
 
@@ -95,13 +95,35 @@
 
 ---
 
-## 评测
+## Ops 效果（不是 CI）
+
+效果温度计：走产品同一条 Turn 路径，**不挡合并**。先读评测原理（题目 / 命中 / harness），再看第4轮 smoke + 第5轮编码的数字。`suite=ci` 不在本组。
 
 | 打开 | 读什么 |
 |------|--------|
-| [工作台 · Ops](topics/workbench.md) | 效果温度计，不是合入门禁；必须走产品同一条 Turn 路径 |
-| [图 · Bench](assets/ops/ops-bench-principle-zh.png) | 检索 / 长文 / 编码套件如何接到真实工具 |
-| [评测日记](../eval/official/baseline/RESULTS.md) | 现行冒烟数字。SCORECARD 机器栏不是最新 |
+| [评测原理](topics/ops-eval-principles.md) | 给了什么题、Agent 看见什么、什么叫命中、为什么这样算、审阅偏差 |
+| [实例走查](topics/ops-eval-walkthrough.md) | 本地 SciFact / LongBench / SWE 题目原文与命中判定 |
+| [图 · 检索实例](assets/ops/ops-eval-walk-retrieval-zh.png) | SciFact q-3 rank 1 · q-1 入池未进顶十 |
+| [图 · 上下文实例](assets/ops/ops-eval-walk-context-zh.png) | 抽 `Answer:` · EM / F1 三条实例 |
+| [图 · 编码实例](assets/ops/ops-eval-walk-coding-zh.png) | harness F2P ∧ P2P · 14365 / 12907 |
+| [工作台 · Ops Bench](topics/workbench.md) | L1 agent-path；与 Golden / ci_proof 三层不要混 |
+| [图 · Bench](assets/ops/ops-bench-principle-zh.png) | 四套件如何接到真实工具 |
+| [图 · 分数入账](assets/ops/score-snapshot-zh.png) | `latest_*` → RESULTS 冒烟日记 vs SCORECARD 主栏 |
+| [图 · 检索计分](assets/ops/ops-retrieval-score-zh.png) | 一题 search_sources → 评测侧 RRF → nDCG/R@100 |
+| [图 · 上下文计分](assets/ops/ops-context-score-zh.png) | 读 passage.md → 抽 Answer: → F1/EM |
+| [图 · 编码计分](assets/ops/ops-coding-score-zh.png) | checkout → 探针旁路 → harness `resolve_rate` |
+| [评测日记](../eval/official/baseline/RESULTS.md) | 现行冒烟数字与归因。SCORECARD 主栏仍空 |
+
+---
+
+## 合入证明（CI）
+
+挡合并的是完整证明，不是 Ops 分数。Ops 控制台 `suite=ci` 只是触发同一条脚本。
+
+| 打开 | 读什么 |
+|------|--------|
+| [工作台 · 完整证明](topics/workbench.md#4-完整证明阻断合并) | `make ci-proof` ≡ Actions ≡ `suite=ci` |
+| [图 · CI 证明](assets/ops/ci-proof-zh.png) | stub bootstrap → unit → `make gate` |
 
 ---
 

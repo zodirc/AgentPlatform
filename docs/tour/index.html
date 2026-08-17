@@ -633,6 +633,7 @@
           <h3>读法</h3>
           <ul>
             <li>左侧目录与顶栏翻页；主图点击放大。先沿中间箭头链读分支，再对照本页逐步：标题为该步职责，灰字为约束与失败形态，绿色芯片为事件或字段名。</li>
+            <li>「Ops 效果」先读评测原理，再以本地实例核对命中定义；第 4 轮 smoke 为宏分，合入 CI 另列。</li>
             <li>冲突裁决：<strong>代码与契约</strong>优先，其次 <code>docs/core</code> / <code>docs/topics</code> 六篇正文。本导览不另立权威。</li>
             <li>左上角 <strong>AgentPlatform</strong> 返回 GitHub 主仓库。在线站点 <a href="https://zodirc.github.io/AgentPlatform/">zodirc.github.io/AgentPlatform</a>；本地 <code>make docs-tour</code>。GitHub 文件视图中的 HTML 只是源码。</li>
             <li>流程图按章下载（每张约 1.3–1.9MB）。GitHub Pages 没有预热或加长缓存的仓库开关；进入该页才取图，再次打开走浏览器与 Service Worker。</li>
@@ -1569,37 +1570,36 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       </section>
 
       <!-- 23 -->
-      <section class="page" data-id="ops-bench" data-group="评测" data-title="Ops L1 原理">
+      <section class="page" data-id="ops-bench" data-group="Ops 效果" data-title="Ops L1 原理">
         <div class="card">
           <h2>Ops L1：走产品同一条 Turn 路径</h2>
-          <p class="lede">效果温度计，不进 StartTurn 热路径，也不是 merge gate。契约要求 <code>eval_path=agent</code>：真实 Session / Turn / 工具。禁止为分数另开捷径。manifest 须满足 <code>ops_run_manifest.schema.json</code>。</p>
+          <p class="lede">效果温度计，不进 StartTurn 热路径，也<strong>不是</strong> merge gate。契约要求 <code>eval_path=agent</code>：真实 Session / Turn / 工具。下一页讲评测原理（题目、命中、harness）；再后才是第4轮 smoke + 第5轮编码的数字。合入 CI 见最后一组。</p>
           <ol class="steps">
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what">retrieval / retrieval_zh：writing 场景真实调用 <code>search_sources</code></p>
-                <p class="why">BEIR 与 C-MTEB 分开建库、分开记分（<code>latest_*</code> 指针互不覆盖）。评测侧对各轮 ranked 做 RRF（k=60），看 nDCG@10 与 R@100。中英分数不得混栏。</p>
+                <p class="what">检索：writing 场景真实调用 <code>search_sources</code></p>
+                <p class="why">BEIR 与 C-MTEB 分库分指针。店内一次召回顺序不变；评测侧再把多轮 ranked 做 RRF（k=60）。主看 nDCG@10 与 R@100。</p>
               </div>
             </li>
             <li>
               <span class="n">2</span>
               <div>
-                <p class="what">context：LongBench，读 <code>passage.md</code> 再抽出 <code>Answer:</code> 行</p>
-                <p class="why">指标为 F1 / EM。测的是读完能否对上金标，不是会不会点检索。编码场景仍无 <code>search_sources</code>。</p>
+                <p class="what">上下文：LongBench，读 <code>passage.md</code> 再抽 <code>Answer:</code></p>
+                <p class="why">主指标 F1 / EM。测读完能否对上金标，不是会不会检索。agent 场景无 <code>search_sources</code>。</p>
               </div>
             </li>
             <li>
               <span class="n">3</span>
               <div>
-                <p class="what">coding：checkout SWE 题，走完整产品 Turn</p>
-                <p class="why">仅评测套件等待符号表 ready。pytest 改道进入该题 Docker；抽补丁 <code>git_diff</code>，残缺则 baseline repair，拒收则 <code>l2.patch_rejected</code>。官方 harness 给出通过率才可 <code>completed</code>；harness 自身失败标 <code>failed</code>，不得记为模型 <code>resolve_rate = 0</code>。</p>
+                <p class="what">编码：SWE Lite checkout，完整产品 Turn + 官方 harness</p>
+                <p class="why">唯一效果主指标是 Docker 里隐藏测的 <code>resolve_rate</code>。平台探针（fuse / 回执）只说明在线。harness 自身失败必须 <code>failed</code>，不得记成模型 0 分。</p>
               </div>
             </li>
           </ol>
-          <p>找定义融合成功、失败摘要回灌、verify receipt——只说明平台探针在线，<strong>不代替</strong> <code>resolve_rate</code>。</p>
-          <p class="figure-lead">下图为四套件如何接到同一条产品 Turn 路径。</p>
+          <p class="figure-lead">下图是四套件如何接到同一条产品 Turn。下一页先讲尺子（给了什么题、什么叫命中、harness 干什么），再看一次 smoke 的数字。</p>
         </div>
-                                        <figure class="figure">
+        <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/ops/ops-bench-principle-zh.png" alt="Ops L1 agent-path" />
           </div>
@@ -1607,60 +1607,503 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         </figure>
       </section>
 
-      <!-- 24 -->
-      <section class="page" data-id="scorecard" data-group="评测" data-title="现行分数快照">
+      <section class="page" data-id="ops-eval-why" data-group="Ops 效果" data-title="评测原理">
         <div class="card">
-          <h2>现行分数快照（对齐 RESULTS · 2026-08-17）</h2>
-          <div class="callout warn"><strong>主栏锚点仍空。</strong>下表是冒烟日记，不作效果结论。数字以 RESULTS.md 为准。</div>
-          <h3>第5轮只跑编码（5 道题）</h3>
+          <h2>评测在测什么（审阅用）</h2>
+          <p class="lede">先把尺子讲清楚，再看后面的跑次回放。全文：<code>docs/topics/ops-eval-principles.md</code>。一句话：<strong>产品同一条 Turn 路径，面对官方题集，能不能交出官方指标。</strong>金标永不进模型窗。不是旁路脚本直接 embed / 直接 completion / 空补丁通管道。</p>
           <table>
-            <thead><tr><th>看什么</th><th>第4轮</th><th>第5轮</th><th>说明</th></tr></thead>
+            <thead><tr><th></th><th>检索</th><th>上下文</th><th>编码</th></tr></thead>
             <tbody>
-              <tr><td>官方判通过</td><td>4/5</td><td><strong>4/5</strong></td><td>同分异题：14182 转绿、14365 回落</td></tr>
-              <tr><td>步数 / 墙钟</td><td>409 / 2854s</td><td><strong>202</strong> / ≈2332s</td><td>翻页改 <code>read_file</code>、计划去抖、测进 Docker，步数约 −51%</td></tr>
-              <tr><td>related_tests cov → adoption</td><td>0.58→0.40</td><td><strong>1.0→0.0</strong></td><td>命令已写入结果，模型未采用</td></tr>
-              <tr><td>test_summary 回灌</td><td>0.167</td><td><strong>0.50</strong></td><td>仍低于出口线 0.6</td></tr>
-              <tr><td>verify_receipt / then_test</td><td>0.20 / —</td><td><strong>0.80 / 0.25</strong></td><td>发出后实际再跑测试仍低</td></tr>
-              <tr><td>fuse_ok</td><td>0.36</td><td><strong>0.625</strong></td><td>n=8；非 resolve_rate 主因</td></tr>
+              <tr><td>官方题</td><td>BEIR / C-MTEB 的 query</td><td>LongBench 长文 + 问题</td><td>GitHub issue + <code>base_commit</code> 坏树</td></tr>
+              <tr><td>Agent 看见</td><td><code>sources/&lt;doc_id&gt;.txt</code> 整库 +「用原文去搜」</td><td>只有 <code>passage.md</code> + 短答格式</td><td>工作树 + <code>problem.md</code>（issue 全文）</td></tr>
+              <tr><td>看不见</td><td>qrels</td><td><code>answers</code></td><td><code>FAIL_TO_PASS</code> / gold patch</td></tr>
+              <tr><td>主工具</td><td><code>search_sources</code></td><td><code>read_file</code></td><td><code>edit_file</code> / 测在该题 Docker</td></tr>
+              <tr><td>裁判</td><td>qrels + nDCG / R@k / MAP</td><td>抽 <code>Answer:</code> 后 F1 / EM</td><td><strong>harness</strong>：F2P 全过且 P2P 全过</td></tr>
+              <tr><td>故意不测</td><td>终答写得对不对</td><td>会不会检索</td><td>issue 例子 / 平台探针</td></tr>
+              <tr><td>smoke 偏差</td><td>每集前 20 条 query</td><td>每任务 20 条，共 60</td><td>HF 顺序前 5 题，<strong>全是 astropy</strong></td></tr>
             </tbody>
           </table>
-          <h3>第4轮完整四套件（检索/上下文）</h3>
-          <table>
-            <thead><tr><th>套件</th><th>主指标</th><th>值</th></tr></thead>
-            <tbody>
-              <tr><td>BEIR</td><td>nDCG@10 / R@100</td><td>0.4964 / 0.5252</td></tr>
-              <tr><td>C-MTEB</td><td>nDCG@10 / R@100</td><td>0.6777 / 0.9167</td></tr>
-              <tr><td>LongBench</td><td>F1 / EM</td><td>0.5282 / 0.2667</td></tr>
-            </tbody>
-          </table>
-          <p>升锚：retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。数字以 <code>eval/official/baseline/RESULTS.md</code> 为准。</p>
-          <div class="src"><code>eval/official/baseline/RESULTS.md</code></div>
-        </div>
-                                        <figure class="figure">
-          <div class="diagram-body diagram-svg">
-            <img src="../assets/ops/ci-proof-zh.png" alt="证明链与分数纪律" />
+          <h3>共同纪律（改分数前先改这里）</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what"><code>eval_path=agent</code>，否则拒跑</p>
+                <p class="why">分数必须来自真实 Session/Turn/工具事件。L0 组件对照可以存在，不得进效果主栏。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">金标不进 Work、不进 prompt</p>
+                <p class="why">否则测的是泄漏，不是产品。编码只写 issue；隐藏测和官方补丁留在 harness 镜像里。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">主指标用该领域的官方尺子；探针另记</p>
+                <p class="why">检索不拿终答当命中；上下文不拿「读了几行」当命中；编码不拿 <code>fuse_ok</code> 当通过。否则改切块/组窗/LSP 时无法归因。</p>
+              </div>
+            </li>
+          </ol>
+          <div class="callout warn">
+            <strong>审阅时最值得质疑的三处。</strong>
+            （1）检索主分是「搜到金标文档 ID」，模型把 cite 写错仍可能得高 nDCG。<br>
+            （2）上下文 EM 对同义改写极严，F1 高于 EM 多半是尺子形态。<br>
+            （3）n5 全 astropy，4/5 不能外推 Lite；同分异题更不能写成「稳定 80%」。
           </div>
-          <figcaption>证明链与分数纪律 · 点击放大</figcaption>
+          <p>下一页用本地实例走完命中判定（claim / 短答案 / hidden tests），并配主链图。其后为第 4 / 5 轮宏分总表。</p>
+          <div class="src"><code>docs/topics/ops-eval-principles.md</code> · <code>docs/topics/ops-eval-walkthrough.md</code></div>
+        </div>
+      </section>
+
+      <section class="page" data-id="ops-eval-walk" data-group="Ops 效果" data-title="实例走查">
+        <div class="card">
+          <h2>评测实例走查</h2>
+          <p class="lede">用本地仍可复核的产物，把三套尺子落到具体题目上。全文：<code>docs/topics/ops-eval-walkthrough.md</code>。第 4 / 5 轮报告目录本机已不在；下列跑次取自现存 <code>latest_*.json</code>、<code>.local-data</code> 与 <code>sweb.eval</code> 镜像。宏分仍以 RESULTS 为准。</p>
+          <table>
+            <thead><tr><th>套件</th><th>跑次</th><th>实例</th><th>命中定义</th></tr></thead>
+            <tbody>
+              <tr><td>检索</td><td><code>955b37ce</code> · 2026-08-06</td><td>SciFact q-3 / q-1</td><td>排序 <code>doc_id</code> ∈ qrels</td></tr>
+              <tr><td>上下文</td><td><code>802cdc73</code> · 2026-08-05</td><td>LongBench idx 0 / 1 / 2</td><td>抽 <code>Answer:</code> 后 F1 / EM</td></tr>
+              <tr><td>编码</td><td><code>5a4e9ba9</code> · harness <code>20260814082644</code></td><td>14365 / 12907</td><td>harness F2P ∧ P2P</td></tr>
+            </tbody>
+          </table>
+          <p>切块：INDEX 13 · 450 token / 64 overlap。SciFact 摘要通常对应一个 chunk。检索命中单位是文件名还原的 <code>doc_id</code>。</p>
+          <h3>检索 · SciFact q-3（命中）对照 q-1（入池未进顶十）</h3>
+          <p>官方题是 claim，不是检索指令。q-3 原文：</p>
+          <pre>1,000 genomes project enables mapping of genetic sequence variation consisting of rare variants with larger penetrance effects than common variants.</pre>
+          <p>金标 <code>3 → 14717500 rel=1</code> 不进入模型窗。语料物化为 <code>sources/beir/scifact-micro/14717500.txt</code>。第一次 <code>search_sources</code> 须复制 Information need。</p>
+          <p>本例工具序：<code>list_dir</code> → 原文检索 → <code>read_file</code>×2 → 改写再检索（drift=0.0068）→ <code>grep</code>×2。两次各 30 条，评测侧 RRF 合成 48 条。金标位于 rank 1：DCG@10 = IDCG = 1 → <strong>nDCG@10=1，R@10=1</strong>。终答与 cite 不计分。</p>
+          <div class="callout warn">
+            <strong>对照 q-1。</strong>
+            金标 <code>31715818</code> 不在 top-10 → nDCG@10=0、R@10=0；融合 52 条内含该 ID → <strong>R@100=1.0</strong>，nDCG@100=0.193，<code>weak_hits</code>。第一验收位取 R@100：本题是排序问题，不是零召回。
+          </div>
+          <p class="figure-lead">下图为 q-3 / q-1 的判定主链。店内 hybrid 顺序评测侧不改；多轮再做 RRF。</p>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-eval-walk-retrieval-zh.png" alt="检索实例走查 SciFact q-3 / q-1" />
+          </div>
+          <figcaption>检索实例 · 命中单位 doc_id · 点击放大</figcaption>
+        </figure>
+        <div class="card">
+          <h3>上下文 · LongBench idx 0 / 1 / 2</h3>
+          <p>Work 内仅 <code>passage.md</code>。scorer v2 抽取最后一条 <code>Answer:</code>，再做规范化 EM 与 token 袋 F1。无 harness。主指标不计量 <code>n_reads</code>。</p>
+          <table>
+            <thead><tr><th></th><th>预测 / 金标</th><th>v2</th></tr></thead>
+            <tbody>
+              <tr><td>idx 0</td><td><code>South West Ultras fan club</code> / 同句带句号</td><td><strong>EM=1 F1=1</strong>（<code>n_reads=0</code> 仍满分）</td></tr>
+              <tr><td>idx 1</td><td><code>No</code> / <code>No, it is not necessary.</code></td><td><strong>EM=0 F1=0.333</strong>（语义成立，EM 为零）</td></tr>
+              <tr><td>idx 2</td><td>STM/STS 同义改写</td><td><strong>EM=0 F1=0.8</strong>（F1&gt;EM 为尺子形态）</td></tr>
+            </tbody>
+          </table>
+          <p>推理段落若未抽取 <code>Answer:</code> 行，标签词进入规范化，EM 必为 0。</p>
+          <p class="figure-lead">下图为抽行、规范化与三条实例的分支。</p>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-eval-walk-context-zh.png" alt="上下文实例走查 LongBench" />
+          </div>
+          <figcaption>上下文实例 · scorer v2 · 点击放大</figcaption>
+        </figure>
+        <div class="card">
+          <h3>编码 · 14365（未通过）对照 12907（通过）</h3>
+          <p>Agent 仅见 issue（<code>problem.md</code>）。14365 要求小写 <code>read serr</code> 能读入 Table。隐藏 F2P 为 <code>test_roundtrip[True]</code>。模型补丁忽略命令大小写，并自写了接近 issue 示例的测试。</p>
+          <p><strong>Harness</strong>（镜像 <code>sweb.eval.…astropy-14365</code>）在 <code>eval.sh</code> 中：apply 补丁 → checkout 还原测试文件（撤销模型自写测试）→ 官方 <code>test_patch</code>（<code>True</code> 时把非注释行改为小写，包括数据中的 <code>NO</code>）→ 跑 F2P 与 P2P。</p>
+          <table>
+            <thead><tr><th></th><th>14365</th><th>12907</th></tr></thead>
+            <tbody>
+              <tr><td>apply</td><td>true</td><td>true</td></tr>
+              <tr><td>F2P</td><td><code>test_roundtrip[True]</code> 失败</td><td><code>test_separable[compound_model6/9]</code> 成功</td></tr>
+              <tr><td>P2P</td><td>8 条全部通过</td><td>全部通过</td></tr>
+              <tr><td><code>resolved</code></td><td><strong>false</strong></td><td><strong>true</strong></td></tr>
+            </tbody>
+          </table>
+          <p>本跑次 apply 5/5、<strong>resolved 3/5</strong>。Turn <code>status=pass</code> 只表示产品路径结束。P2P 全绿不能替代 F2P。这是 SWE-bench 定义，不是平台附加门槛。</p>
+          <p class="figure-lead">下图为 harness 主链与两题分支。下一页为第 4 / 5 轮宏分总表。</p>
+          <div class="src"><code>docs/topics/ops-eval-walkthrough.md</code> · harness <code>report.json</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-eval-walk-coding-zh.png" alt="编码实例走查 14365 / 12907" />
+          </div>
+          <figcaption>编码实例 · harness F2P ∧ P2P · 点击放大</figcaption>
         </figure>
       </section>
 
-      <!-- 25 -->
-      <section class="page" data-id="next" data-group="评测" data-title="缺口与下一步">
+      <section class="page" data-id="scorecard" data-group="Ops 效果" data-title="一次完整 smoke">
         <div class="card">
-          <h2>缺口（对照已落代码）</h2>
+          <h2>一次完整 smoke 回放（第4轮 + 第5轮编码）</h2>
+          <p class="lede">模拟你在 <code>/official</code> 点完整四套件之后实际发生的事。数字抄自 RESULTS · 2026-08-17。口径：<code>official-small-2026-08-m3</code> · L1 agent-path · arm=free · <code>sample_tier=smoke</code> · 模型 <code>deepseek-v4-flash</code> · embed bge-m3@1024 / INDEX 13。</p>
+          <div class="callout warn"><strong>不作效果结论，不升 SCORECARD 主栏。</strong>smoke 只是方向盘。升锚要 retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</div>
+          <h3>这一次跑了什么</h3>
+          <table>
+            <thead><tr><th>套件</th><th>run_id</th><th>墙钟</th><th>主指标（怎么判）</th><th>记下的数</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>coding（第5轮覆盖）</td>
+                <td><code>01cd8c79-…</code></td>
+                <td>≈2332s</td>
+                <td>官方 harness <code>resolve_rate</code></td>
+                <td><strong>0.8（4/5）</strong></td>
+              </tr>
+              <tr>
+                <td>retrieval BEIR</td>
+                <td><code>42772fe3-…</code></td>
+                <td>1045s</td>
+                <td>nDCG@10 / <strong>R@100（第一验收位）</strong></td>
+                <td>0.4964 / <strong>0.5252</strong></td>
+              </tr>
+              <tr>
+                <td>retrieval_zh C-MTEB</td>
+                <td><code>22961e61-…</code></td>
+                <td>731s</td>
+                <td>nDCG@10 / R@100（与 BEIR 分栏）</td>
+                <td>0.6777 / 0.9167</td>
+              </tr>
+              <tr>
+                <td>context LongBench</td>
+                <td><code>cf2a1957-…</code></td>
+                <td>936s</td>
+                <td>抽 <code>Answer:</code> 后 F1 / EM</td>
+                <td>0.5282 / 0.2667</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>第4轮 parent <code>56b562a6-…</code> 四套件都 <code>completed</code>（4/4）。第5轮只重跑编码（<code>01cd8c79-…</code>），检索/上下文仍用第4轮指针。</p>
+          <h3>共同的评判纪律（先于分数）</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">必须 <code>eval_path=agent</code>，否则拒跑</p>
+                <p class="why">分数只能来自产品 Session/Turn/真实工具事件。dry-run、skip-api 空补丁不得进 Ops 主栏。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what"><code>RunSession.finish</code> 写出 <code>manifest.json</code>，再写 <code>latest_&lt;suite&gt;.json</code></p>
+                <p class="why">四指针互不覆盖。BEIR 不得盖掉 C-MTEB。coding 无 <code>resolve_rate</code> 不得标 <code>completed</code>。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">smoke 只写入 RESULTS 日记</p>
+                <p class="why">SCORECARD 主栏仍空。机器冒烟栏不是最新过程。n5 / smoke 执行 <code>promote-run</code> 会被拒。</p>
+              </div>
+            </li>
+          </ol>
+          <p class="figure-lead">下图是分数如何入账。尺子本身在上一页；后面三页按套件展开命中定义，并附这一轮量出来的数。</p>
+          <div class="src"><code>eval/official/baseline/RESULTS.md</code> · parent <code>56b562a6</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/score-snapshot-zh.png" alt="现行分数入账详流" />
+          </div>
+          <figcaption>分数入账：smoke 日记 ≠ SCORECARD 主栏 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <section class="page" data-id="ops-eval-retrieval" data-group="Ops 效果" data-title="检索 · 命中定义">
+        <div class="card">
+          <h2>检索：给了什么题，什么叫命中</h2>
+          <p class="lede">测的是「模型有没有把官方 query 搜到 qrels 里的文档」，<strong>不是</strong>终答写得对不对。没有 harness。裁判是 BEIR 式 qrels + nDCG/Recall/MAP。</p>
+          <h3>给了什么题目</h3>
+          <p>不是用户随口问。BEIR：SciFact（科学 claim）、NFCorpus（营养/医学需求）、FiQA（金融问句）。C-MTEB：Covid / Medical / Ecom 中文检索。每条 query 是官方原文，例如 SciFact 一条 claim：「某饮食可否替代鱼粉」这类陈述句。</p>
+          <p>Agent 看见：该 Work 的 <code>sources/&lt;doc_id&gt;.txt</code>（论文摘要/帖子，文件名 = corpus ID），以及 free 臂提示：<em>第一条动作必须用 Information need 原文调用 search_sources，弱再改写重搜，cite，禁止凭记忆编造。</em> qrels 不在盘上、不在 prompt 里。</p>
+          <p>smoke：每个子集 <strong>qrels 顺序前 20 条</strong>（<code>head_slice</code>，无随机）。第4轮 BEIR 三集 ×20；中英分库分指针。</p>
+          <h3>怎么跑完</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">物化进 bench-postgres，再开 writing Turn</p>
+                <p class="why">与产品资料库隔离。模型按需 <code>search_sources</code>（每 Turn ≤3）。店内 hybrid 的一次排序评测侧不改。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">从 <code>retrieval.completed</code> 抽路径 → 文件名还原 <code>doc_id</code></p>
+                <p class="why">多轮则评测侧再 RRF：<code>score[d] += 1/(60+rank)</code>。单轮保持原序。终答文本不参与计分。</p>
+              </div>
+            </li>
+          </ol>
+          <h3>什么叫命中，为什么这样视为</h3>
+          <table>
+            <thead><tr><th>尺子</th><th>一条 query 上怎么算</th><th>为什么用它</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>命中</td>
+                <td>融合排序里的 <code>doc_id</code> 落在该 query 的 qrels 且 <code>rel&gt;0</code></td>
+                <td>官方 IR 的相关文档集合。不认「终答提到了金标标题」。不认「read_file 打开过金标文件」（那是旁路统计）。</td>
+              </tr>
+              <tr>
+                <td>Recall@k</td>
+                <td>|前 k ∩ 金标| / |金标|，再对 query 宏平均</td>
+                <td><strong>R@100 是第一验收位</strong>：金标不进池，nDCG@10 只是运气。召回没抬之前不开交叉编码器。</td>
+              </tr>
+              <tr>
+                <td>nDCG@k</td>
+                <td>按位次折现的增益 / 理想 DCG</td>
+                <td>同样召回下，金标排越前越好。顶一准但池子窄时：nDCG@1 升、R@100 降——第2轮 BEIR 就出现过。</td>
+              </tr>
+              <tr>
+                <td>MAP@k</td>
+                <td>每个命中处的 precision 对 |金标| 平均</td>
+                <td>惩罚「金标散落在很后面」。与 nDCG 一起看排序，不单独当闸。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>先分桶再怪系统：<code>no_search</code>（没点工具）≠ 召回差；<code>query_drift</code>（第一下没复制官方 query）≠ 嵌入差；infra ≠ 模型零分。</p>
+          <div class="callout warn">
+            <strong>审阅偏差。</strong>
+            主分不看终答是否正确，所以这不是 RAG-QA 分。多轮 RRF 会抬后轮改写才搜到的文档，对 iterative search 友好，也会掩盖第一下有多差。前 20 条可能比全集偏易/偏难。
+          </div>
+          <h3>第4轮用这把尺子量出来的数</h3>
+          <table>
+            <thead><tr><th></th><th>BEIR（第一验收位）</th><th>C-MTEB</th></tr></thead>
+            <tbody>
+              <tr><td>run_id</td><td><code>42772fe3-…</code></td><td><code>22961e61-…</code></td></tr>
+              <tr><td>nDCG@10</td><td>0.4964（相对第2轮 +0.046）</td><td>0.6777（−0.019）</td></tr>
+              <tr><td>R@100</td><td><strong>0.5252</strong>（+0.030，回近 INDEX12 的 0.5296）</td><td>0.9167（+0.067）</td></tr>
+              <tr><td>MAP@10</td><td>0.3520（+0.047）</td><td>0.6177（−0.041）</td></tr>
+            </tbody>
+          </table>
+          <div class="callout">C-MTEB 召回升、nDCG/MAP 略降：中位 nDCG 易饱和，排序和召回可以分道。仍是 n=20，不升主栏。</div>
+          <p class="figure-lead">下图是一题如何从 <code>search_sources</code> 计到 nDCG。店内 hybrid 细节见前文召回页。</p>
+          <div class="src"><code>metrics_ir.py</code> · <code>agent_path_extract.py</code> · <code>l1_prompts.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-retrieval-score-zh.png" alt="Ops 检索一题计分详流" />
+          </div>
+          <figcaption>检索一题计分 · 评测侧多轮 RRF · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <section class="page" data-id="ops-eval-context" data-group="Ops 效果" data-title="上下文 · 命中定义">
+        <div class="card">
+          <h2>上下文：给了什么题，什么叫命中</h2>
+          <p class="lede">测的是「读完长文后短答案对不对」，<strong>不是</strong>会不会检索。没有 harness。裁判是抽 <code>Answer:</code> 后的 F1 / EM（scorer v2）。</p>
+          <h3>给了什么题目</h3>
+          <p>LongBench 小切，三类任务各最多 20 条，合计 n=60：<code>multifieldqa_en</code>（多段英文阅读）、<code>hotpotqa</code>（多跳短答）、<code>narrativeqa</code>（长叙事）。每题官方带长文 <code>context</code>、问题 <code>input</code>、可接受短答案 <code>answers</code>。</p>
+          <p>Agent 看见：Work 里<strong>只有</strong> <code>sources/passage.md</code> = 该题长文；用户消息要求先读（截断就 <code>offset</code> 续读），grep 只用来跳，最后一行 <code>Answer: &lt;phrase&gt;</code>。没有 <code>search_sources</code>。金标 <code>answers</code> 不在盘上、不在 prompt 里。</p>
+          <p>注意：hotpotqa 在「单文件 passage」里已经把多篇拼好了，测的不是 Agent 自己去找第二篇。</p>
+          <h3>怎么跑完</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">每题一个 Work，agent Turn 里 <code>read_file</code> → 终答</p>
+                <p class="why">与检索套件隔离：这里没有资料库可搜。读没读完是过程统计，不是主指标。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">抽最后一条非空、非占位的 <code>Answer:</code> 行，再对 gold 取 max</p>
+                <p class="why">Agent 会先写推理。若不抽，预测是 <code>Answer: berlin</code>、gold 是 <code>berlin</code>，v2 EM 必 0。第2轮入账 EM=0 就是这个口径事故。</p>
+              </div>
+            </li>
+          </ol>
+          <h3>什么叫命中，为什么这样视为</h3>
+          <table>
+            <thead><tr><th>尺子</th><th>怎么算</th><th>为什么用它</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>规范化</td>
+                <td>小写、去冠词/标点、压空白；含 CJK 的金标按<strong>字</strong></td>
+                <td>空白分词对中文无意义。金标列表永不改写。</td>
+              </tr>
+              <tr>
+                <td>EM</td>
+                <td>规范化后预测 <strong>等于</strong> 任一条 gold 才得 1</td>
+                <td>v2 <strong>不做</strong>「gold 是 pred 子串就算对」——那是 v1，会把啰嗦解释判成全对。</td>
+              </tr>
+              <tr>
+                <td>F1</td>
+                <td>预测 token 与 gold token 的 bag 重合，多条 gold 取最高</td>
+                <td>LongBench 官方就是 QA F1/EM。给部分分，所以 F1 通常高于 EM——这是尺子形态，不一定是模型「半对」。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>对照锚钉死为第2轮<strong>同口径重打</strong>：F1 0.5479 / EM 0.30。禁止用当时入账的 0.4557 / 0.0000 验收导航改动。infra 失败剔除，不算模型零分。</p>
+          <div class="callout warn">
+            <strong>审阅偏差。</strong>
+            短答案 QA 惩罚正确但换了一种说法（EM 尤甚）。n=60、每任务 head 切片，不能当 LongBench 全文成绩。主指标不回答「是否读到了相关段落」。
+          </div>
+          <h3>第4轮用这把尺子量出来的数</h3>
+          <table>
+            <thead><tr><th></th><th>第2轮对照锚</th><th>第4轮</th></tr></thead>
+            <tbody>
+              <tr><td>agent_f1</td><td>0.5479</td><td><strong>0.5282</strong>（略低）</td></tr>
+              <tr><td>agent_em</td><td>0.3000</td><td><strong>0.2667</strong></td></tr>
+              <tr><td>n_scored</td><td>60 / 60</td><td>60 / 60 · infra=0</td></tr>
+              <tr><td>墙钟</td><td>—</td><td>936s</td></tr>
+            </tbody>
+          </table>
+          <div class="callout">第4轮 F1/EM 略低于对照锚，同口径可读：不能解释成「突然不会抽 Answer:」。更可能是 n=60 波动或个别 verbose / 读后仍答错。以后对照一律用 0.5479 / 0.30。</div>
+          <p class="figure-lead">下图是一题如何从 <code>passage.md</code> 计到 F1/EM。</p>
+          <div class="src"><code>context_run.py</code> · scorer v2 · <code>l1_prompts.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-context-score-zh.png" alt="Ops 上下文一题计分详流" />
+          </div>
+          <figcaption>上下文一题计分 · 抽 Answer: · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <section class="page" data-id="ops-eval-coding" data-group="Ops 效果" data-title="编码 · harness 与命中">
+        <div class="card">
+          <h2>编码：给了什么题，harness 怎么判通过</h2>
+          <p class="lede">测的是「隐藏测过不过」。<strong>harness 才是裁判</strong>，不是平台探针，也不是工作区 pytest。题目来自 SWE-bench Lite；smoke n5 = HF 顺序前 5 个 ID，<strong>全是 astropy</strong>。</p>
+          <h3>给了什么题目</h3>
+          <p>每题官方字段：<code>repo</code>、<code>base_commit</code>、GitHub issue（<code>problem_statement</code>）、隐藏测 <code>FAIL_TO_PASS</code> / <code>PASS_TO_PASS</code>、金标 <code>patch</code>。后三项<strong>不写入 Work</strong>。</p>
+          <p>Agent 看见：<code>base_commit</code> 上的坏树 + 根上 <code>problem.md</code>（issue 全文）。用户消息要求读 issue → 复现 → <code>search_codebase</code> → <code>edit_file</code> → 再验；禁止靠网络。它看不到官方隐藏测名字（除非 issue 自己写了某个失败测）。平台从 issue 抽的「例子覆盖」也只来自 <code>problem.md</code>，故意不泄漏 F2P。</p>
+          <h3>怎么跑完；harness 承担什么</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">checkout + 写 <code>problem.md</code> → 产品 agent Turn（无人值守预批准写盘）</p>
+                <p class="why">评测还会等符号表 ready|stale（比产品对话更乐观）。平台把 pytest 改道进该题 Docker，是解题辅助，<strong>仍不是分数</strong>。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what"><code>swebench.harness.run_evaluation</code>：拉 sweb.eval 镜像、apply 补丁、跑 F2P 与 P2P</p>
+                <p class="why">这是 SWE-bench 论文/排行榜的官方定义，不是我们发明的。镜像里断网。缺镜像或 harness 崩溃 → 套件 <code>failed</code>，禁止写成 <code>resolve_rate=0</code>。</p>
+              </div>
+            </li>
+          </ol>
+          <h3>什么叫命中，为什么这样视为</h3>
+          <table>
+            <thead><tr><th>信号</th><th>是命中吗</th><th>为什么</th></tr></thead>
+            <tbody>
+              <tr><td>非空 git diff（<code>patch_rate</code>）</td><td>否</td><td>乱改也能有 diff。第4–5轮都是 1.0，14365 仍 unresolved。</td></tr>
+              <tr><td><code>fuse_ok</code> / 找到定义</td><td>否</td><td>找对文件不等于修对隐藏测。</td></tr>
+              <tr><td>issue 例子再跑过</td><td>否</td><td>例子在 issue 里；隐藏测可以是没写的 <code>test_roundtrip[True]</code>。</td></tr>
+              <tr><td>verify_receipt / <code>test_summary</code></td><td>否</td><td>平台催验，模型可以不理。出口线 ≥0.6 是过程目标。</td></tr>
+              <tr><td>harness <strong>resolved</strong></td><td><strong>是</strong></td><td>F2P 全部过 <strong>且</strong> P2P 全部过。与排行榜同一把尺。</td></tr>
+            </tbody>
+          </table>
+          <p>为什么不自己在工作区跑测试当分数？Lite 每题环境不同；工作区只是源码 checkout。错误解释器上绿，评委镜像里仍红。</p>
+          <div class="callout warn">
+            <strong>审阅偏差。</strong>
+            n5 全 astropy，不能外推到 django 占多数的 Lite（n25 才开始有 django）。同分异题：4/5 可以是「换了一题过、一题回落」，不是能力稳定在 80%。无人值守预批准比真实用户少一道审批摩擦。
+          </div>
+          <h3>五道题（harness 对错才是原因）</h3>
+          <table>
+            <thead><tr><th>instance</th><th>第4轮</th><th>第5轮</th><th>原因</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>astropy-12907</td>
+                <td>resolved · 117 步 / 1936s</td>
+                <td>resolved · <strong>35 / 848</strong></td>
+                <td>本来就会过；步数降来自翻页改 <code>read_file</code>、测进 Docker，不是新修法。</td>
+              </tr>
+              <tr>
+                <td>astropy-14995</td>
+                <td>resolved · 110 / 684</td>
+                <td>resolved · <strong>30 / 358</strong></td>
+                <td>同上，会过的题变薄。</td>
+              </tr>
+              <tr>
+                <td>astropy-6938</td>
+                <td>resolved · 25 / 388</td>
+                <td>resolved · 57 / 752</td>
+                <td>仍通过；本题变慢，不能用宏步数下降概括。</td>
+              </tr>
+              <tr>
+                <td>astropy-14182</td>
+                <td>unresolved · 114 / 1692</td>
+                <td><strong>resolved</strong> · 56 / 1784</td>
+                <td>补丁含 <code>header_rows</code> 写路径 + <code>data.start_line</code> 读侧，与 write→read 往返义务同向。仍最慢（~30min），复现占墙钟。</td>
+              </tr>
+              <tr>
+                <td>astropy-14365</td>
+                <td>resolved · 43 / 513</td>
+                <td><strong>unresolved</strong> · 24 / 125</td>
+                <td>仍只加了 <code>re.IGNORECASE</code>。issue 样例无小写 <code>NO</code>，casefold 门逼不出隐藏 F2P <code>test_roundtrip[True]</code> 所需修法。这就是「探针绿 / 催验了」也过不了官方测的例子。</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout">
+            <strong>过程探针在说什么（不是通过率）。</strong>
+            第5轮步数 409→202（−51%）、verify_receipt 0.20→0.80、<code>test_summary</code> 0.17→0.50、related 覆盖 1.0 但采用率 0。意思是：命令已经写进 <code>edit_file</code> 结果，模型经常不跑；催验发出去了，真正再测的比例只有 0.25。所以 4/5 同分异题，不能写成「编码能力稳定在 80%」。
+          </div>
+          <p class="figure-lead">下图是一题如何从 checkout 计到 <code>resolve_rate</code>。写入链揉合见前文 Coding 页，那是探针，不是本图的终局门。</p>
+          <div class="src"><code>swebench.harness</code> · <code>suite_coding.py</code> · <code>RESULTS.md</code> 第5轮</div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-coding-score-zh.png" alt="Ops 编码一题计分详流" />
+          </div>
+          <figcaption>编码一题计分 · 探针 ≠ harness · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <section class="page" data-id="ci-proof" data-group="合入证明" data-title="CI 证明门禁">
+        <div class="card">
+          <h2>合入证明：不是 Ops 分数</h2>
+          <p class="lede">挡合并的是 <code>scripts/ci_proof.sh</code>。GitHub Actions、<code>make ci-proof</code>、Ops 控制台 <code>suite=ci</code> 都只是触发同一条脚本。<code>suite=ci</code> <strong>不是</strong> retrieval/context/coding 那些效果套件。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">bootstrap stub 模型 · hash embed · 鉴权旁路</p>
+                <p class="why">证明主路径不炸，不调用生产供应商，也不刷 BEIR/SWE 分数。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">unit（无 Docker）</p>
+                <p class="why">runtime 覆盖率门槛、api、contracts。pre-push preflight 只跑这一截，≠ 完整证明。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what"><code>make gate</code> = smoke + stub golden</p>
+                <p class="why">Golden 断言事件序与接口。全部通过才可合并；nightly live 只告警不阻断。</p>
+              </div>
+            </li>
+          </ol>
+          <div class="callout warn">改 <code>system.md</code> / 工具 / Intake / 契约必须跑完整证明。Ops Bench 绿了不能代替本页。</div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ci-proof-zh.png" alt="CI 证明门禁详流" />
+          </div>
+          <figcaption>CI 证明门禁 · 与 Ops 效果分栏 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <section class="page" data-id="next" data-group="缺口" data-title="缺口与下一步">
+        <div class="card">
+          <h2>缺口（对照刚才那次跑）</h2>
           <ul>
-            <li><strong>锚点</strong>：SCORECARD 主栏仍空；smoke 只作方向盘，升锚条件为 retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</li>
-            <li><strong>编码通过</strong>：钉死 14365（issue 样例无小写变体时，大小写折叠门逼不出官方隐藏测）；related_tests adoption；verify_receipt 之后实际跑测比例；<code>test_summary</code> 回灌率提到 ≥0.6。</li>
-            <li><strong>编码时长</strong>：继续压 14182 墙钟（镜像容器复用 / 拒在裸源码树上装包当验证）。</li>
-            <li><strong>Retrieval</strong>：BEIR R@100 第一验收位仍未稳过；交叉编码器 R-5 暂缓；需更大 n 才下结论。</li>
-            <li><strong>Context</strong>：F1/EM 略低于第2轮重打锚；outline/Answer 口径已齐，待放量对照。</li>
+            <li><strong>锚点</strong>：SCORECARD 主栏仍空。升锚：retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</li>
+            <li><strong>编码通过</strong>：钉死 14365——issue 无小写变体时 casefold 门逼不出隐藏 F2P；related_tests 采用率；verify_receipt 之后实际跑测；<code>test_summary</code> ≥0.6。</li>
+            <li><strong>编码时长</strong>：14182 仍约 30min，复现占主导。</li>
+            <li><strong>BEIR</strong>：R@100 第一验收位仍未稳过；n=20 不够下结论；交叉编码器暂缓。</li>
+            <li><strong>Context</strong>：F1/EM 略低于 0.5479 / 0.30 对照锚，待放量。</li>
             <li><strong>产品</strong>：intel 核实闭环 / collab 仍薄。</li>
           </ul>
           <h3>维护本导览</h3>
           <ol>
             <li>先改代码与契约，再改本 HTML 对应页（不另开分页）。</li>
             <li>改流程图：对照样板整张重绘后替换同名 <code>docs/assets/**/*-zh.png</code>。</li>
-            <li>在线站点 <a href="https://zodirc.github.io/AgentPlatform/">zodirc.github.io/AgentPlatform</a>；左上角返回主仓库。本地 <code>make docs-tour</code>。</li>
+            <li>数字以 <code>eval/official/baseline/RESULTS.md</code> 为准；本回放过期则先改 RESULTS 再改本页表。</li>
+            <li>在线站点 <a href="https://zodirc.github.io/AgentPlatform/">zodirc.github.io/AgentPlatform</a>；本地 <code>make docs-tour</code>。</li>
           </ol>
         </div>
       </section>
@@ -1695,9 +2138,15 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         rag: "search_sources hybrid",
         index: "INDEX 13 · 450 / 64",
         writing: "Work 树与 diff-first",
-        "ops-bench": "L1 agent-path",
-        scorecard: "RESULTS 冒烟快照",
-        next: "对照已落代码的缺口",
+        "ops-bench": "L1 agent-path，不是 CI",
+        "ops-eval-why": "题目、命中、harness、偏差",
+        "ops-eval-walk": "本地实例：qrels / Answer: / F2P",
+        scorecard: "第4轮完整 smoke 回放",
+        "ops-eval-retrieval": "BEIR：搜到 qrels 才算命中",
+        "ops-eval-context": "LongBench：抽 Answer: 后 F1/EM",
+        "ops-eval-coding": "SWE：harness F2P∧P2P 才通过",
+        "ci-proof": "合入门禁，不是效果分",
+        next: "对照刚才那次跑的缺口",
       };
 
       const pages = Array.from(document.querySelectorAll(".page"));

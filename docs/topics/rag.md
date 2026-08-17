@@ -146,7 +146,7 @@ top_k = max(fetch_limit × 4, 20)
 | `make retrieval-bench-prod` 等真相档 | 离线召回/排序 | 需 live embed + pgvector |
 | 工作台自然问句 | hybrid 轨迹、cite、polish **0 搜** | 时间线 + `/retrieval` 审计漏斗 |
 | Ops `/official` L1 | BEIR / C-MTEB agent-path 宏分 | 独立 schema；**≠** 契约 golden；现行数字见 [`RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4轮 BEIR R@100 **0.525**，回近 INDEX12；不升 SCORECARD） |
-| Ops `suite=ci` / `make ci-proof` | 主路径不炸 + gate | **≠** 生产召回分数 |
+| `make ci-proof`（Ops `suite=ci` 只是触发器） | 主路径不炸 + gate | **CI**，≠ 生产召回分数 |
 
 三标尺同时满足才谈「检索变好」：不伤 TTFB、效果闸有对照、形态仍是工具中介而非每轮预注入。
 
