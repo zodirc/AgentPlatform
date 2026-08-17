@@ -6,6 +6,7 @@
 
 1. [请求主路径](../assets/architecture/request-path-zh.png) — 浏览器 → 领取制 → Engine → 事件/SSE → Web  
 2. [分模块发布台](../assets/ops/release-modular-deploy-zh.png) — `:9090` · dirty · 分模块重建 · 如何确认已更新  
+3. [StartTurn 命令链](../assets/events/start-turn-command-zh.png) — 准入 429 · pull claim · 租约；容器/负载/并发见 [§1.2](#backend)  
 
 ![请求主路径](../assets/architecture/request-path-zh.png)
 
@@ -67,10 +68,51 @@ Postgres 16 + pgvector
 
 无 GPU → **gte-small@384**（CPU）；VRAM≥8GiB → **bge-m3@1024**。由 `scripts/resolve_embedding_profile.sh` 写 `embedding.auto.env` / `gpu.auto.yml`。runtime 与 bench **各加载一份**权重。
 
-并发要点：分发默认是 runtime 自己领取并心跳续约；一份副本同时在跑的提问数默认最多 16；队列满 → 准入 **429**；扩缩靠 runtime 副本与旁路 indexer，不把冷启动塞进 Turn。细则 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+并发要点：分发默认是 runtime 自己领取并心跳续约；一份副本同时在跑的提问数默认最多 16；队列满 → 准入 **429**；扩缩靠 runtime 副本与旁路 indexer，不把冷启动塞进 Turn。细则见下节与 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
 
 起栈：`make up`（分模块重建脏服务）+ 发布台 `:9090`；全量 `make up-all`。配置入口 `.env`；**模型供应商在 Web「设置 → 模型」配置**。可选 overlay：queue、ha（双 runtime，同为 pull）、runtime-lite、ops-eval、bench。  
 Ops coding：看板 **SWE 评测环境** 一键完成挂 sock + 预拉/冒烟（`make ops-swe-eval-ready`）。
+
+<a id="backend"></a>
+
+### 1.2 容器、负载与并发
+
+主链：产品面进栈 → cgroup 上限 → api 准入 → runtime claim（inflight）→ 指标驱动加副本。发布台负责 dirty 重建，不参与这条热路径。
+
+```text
+Browser
+  → Caddy :80/:443
+       ├─ /          → web
+       └─ /api/*     → api :8000
+              │
+              ├─ 未领取队列满（全局 32 / 每用户 2）→ HTTP 429 + Retry-After
+              └─ INSERT turns/runs → NOTIFY
+                     │
+                     runtime 副本（默认 1；make up-ha → runtime-a/b）
+                       inflight < 16  → claim + lease 60s / 心跳 10s → TurnController
+                       inflight = 16  → 不领（压力留在队列，不打满 cgroup）
+                       claim > 15s    → failed(start_timeout)
+                       租约丢失       → failed(runner_lost)，可被其他副本回收
+
+旁路（独立 cgroup / 进程）
+  ast-indexer 768m · 1 CPU · SKIP LOCKED
+  bench 6g（GPU → 12g）+ bench-postgres 1g
+  发布台 :9090（宿主机）
+```
+
+| 机制 | 旋钮（compose / settings 默认） | 饱和时 |
+|------|-------------------------------|--------|
+| 分发 | `TURN_DISPATCH=pull` | LISTEN/claim；`push` 为 HTTP 回退 |
+| 准入 | `DISPATCH_QUEUE_MAX` 未设→32；`PER_TENANT_QUEUE_MAX=2` | **429**，不是 Turn failed |
+| 副本 inflight | `RUNTIME_MAX_INFLIGHT_TURNS=16` | 停止领取 |
+| 租约 | `RUNNER_LEASE_SECONDS=60` · 心跳 10s | `runner_lost` |
+| AST | indexer `SKIP LOCKED` | 与 Turn 分进程，可多副本 |
+| HTTP 进程 | 1 uvicorn worker / 容器 | 扩容器副本，勿盲目 `workers=N` |
+
+加并发：`make up-ha`（或再加 runtime 副本，同 Postgres）。总在跑 Turn 数 ≈ 副本数 × 16。HA 不依赖 `RUNTIME_URL_MAP`。  
+读指标再扩：`dispatch_wait_seconds` 持续偏高或 `dispatch_queue_depth` 顶满 → 加 runtime；见 [Pull 分发运维手册](../ops/pull-dispatch-runbook.md)。
+
+`mem_limit` 是 cgroup 上限，不是预留；容器 RSS 之和仍可能打满宿主物理内存。GPU overlay 把 runtime/bench 抬到 12g 并 `gpus: all`。queue profile 才起 redis + outbox worker，默认 inline。
 
 ## 2. 分模块发布（:9090）
 

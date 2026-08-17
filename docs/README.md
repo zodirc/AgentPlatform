@@ -22,9 +22,11 @@
 
 | 打开 | 读什么 |
 |------|--------|
-| [架构](core/architecture.md) | 浏览器、api、runtime 各干什么；runtime 自己来领活；符号表在旁路，不挡提问 |
+| [架构](core/architecture.md) | 浏览器、api、runtime 各干什么；runtime 自己领取；符号表在旁路，不挡提问 |
+| [架构 · 容器 / 负载 / 并发](core/architecture.md#backend) | cgroup 上限、准入 429、每副本 inflight 16、`make up-ha` |
 | [图 · 请求主路径](assets/architecture/request-path-zh.png) | 点发送之后，请求怎么穿过网关落到推理 |
 | [图 · 分模块发布](assets/ops/release-modular-deploy-zh.png) | 哪个容器脏了、怎么重建 |
+| [图 · StartTurn 领取](assets/events/start-turn-command-zh.png) | 202 ≠ `turn.accepted`；队列满 429；租约丢失 |
 
 （图点上面链接打开即可。目录页不再内嵌整张海报，避免每次进 Wiki 都重新拉 1.5MB+。）
 

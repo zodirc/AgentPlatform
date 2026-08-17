@@ -19,6 +19,7 @@ https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
 | 想了解 | 打开 |
 |--------|------|
 | 一次提问怎么从浏览器走到推理 | https://zodirc.github.io/AgentPlatform/tour/#request-path |
+| 容器、负载、并发 | https://zodirc.github.io/AgentPlatform/tour/#backend |
 | 组窗、问模型、跑工具 | https://zodirc.github.io/AgentPlatform/tour/#engine-loop |
 | 编码：找定义、改完再验 | https://zodirc.github.io/AgentPlatform/tour/#coding-fuse |
 | 写作 / 搜资料 | https://zodirc.github.io/AgentPlatform/tour/#rag |
