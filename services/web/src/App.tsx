@@ -228,7 +228,7 @@ function Nav() {
           <span className="text-base">{SITE_APP.name}</span>
         </Link>
         <Link
-          to="/settings"
+          to="/settings/model"
           className={`rounded-lg px-3 py-1.5 text-sm ${
             settingsActive
               ? "bg-muted text-foreground"

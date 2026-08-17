@@ -19,6 +19,7 @@ import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
 import { IndexInspectSection } from "./IndexInspectSection";
+import { nextModelPanelAfterListChange } from "./settingsModelPanel";
 import { SETTINGS_TABS, tabFromPath } from "./settingsTabs";
 
 function formatContextWindow(tokens: number | null | undefined): string {
@@ -675,12 +676,17 @@ export function SettingsPage() {
   }, [error]);
 
   useEffect(() => {
-    if (isLoading || providers.length === 0) return;
-    if (selectedId && providers.some((p) => p.id === selectedId)) return;
-    const active = providers.find((p) => p.is_active);
-    setSelectedId(active?.id ?? providers[0].id);
-    setPanelMode("view");
-  }, [isLoading, providers, selectedId]);
+    const next = nextModelPanelAfterListChange({
+      isLoading,
+      panelMode,
+      selectedId,
+      providerIds: providers.map((p) => p.id),
+      activeId: providers.find((p) => p.is_active)?.id ?? null,
+    });
+    if (!next) return;
+    setSelectedId(next.selectedId);
+    setPanelMode(next.panelMode);
+  }, [isLoading, providers, selectedId, panelMode]);
 
   useEffect(() => {
     if (providers.length === 0 && !isLoading && !loginRequired) {
