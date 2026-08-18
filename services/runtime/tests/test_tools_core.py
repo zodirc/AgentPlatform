@@ -358,6 +358,7 @@ def test_scenario_registry_loads_profiles() -> None:
 
     assert writing.scenario_id == "writing"
     assert "draft_section" in writing.tool_names
+    assert "audit_knowledge_base" in writing.tool_names
     assert agent.scenario_id == "agent"
     assert "glob" in agent.tool_names
     assert intel.scenario_id == "intel"
@@ -372,6 +373,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert intel.system_prompt
     assert collab.system_prompt
     assert "search_sources" in writing.system_prompt
+    assert "audit_knowledge_base" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
     assert "## Prose defaults" in writing.system_prompt

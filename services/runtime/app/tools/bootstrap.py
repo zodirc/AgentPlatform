@@ -284,6 +284,38 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
+            name="audit_knowledge_base",
+            description=(
+                "Deterministic FAQ/knowledge-base quality scan: empty answers, "
+                "duplicates, contradictions vs a rules file, intra-corpus conflicts, "
+                "coverage gaps. Call this FIRST when the user asks for 知识库体检 / "
+                "FAQ 治理 / 过时条目. Default paths: sources/kb/kb_articles.json and "
+                "sources/kb/business_context.md. Returns findings + writes "
+                "drafts/kb-audit-report.md. Then draft_section the business report "
+                "from those findings; do not rescan by reading every article yourself."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "corpus_path": {
+                        "type": "string",
+                        "description": "JSON array of FAQ articles (id/question/answer/...).",
+                    },
+                    "rules_path": {
+                        "type": "string",
+                        "description": "Markdown business rules used as source of truth.",
+                    },
+                    "write_report": {
+                        "type": "boolean",
+                        "description": "Write drafts/kb-audit-report.md (default true).",
+                    },
+                },
+            },
+            handler=core.audit_knowledge_base,
+        )
+    )
+    registry.register(
+        ToolSpec(
             name="grep",
             description=(
                 "Regex/search file contents for exact error strings, unique literals, or "

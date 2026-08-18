@@ -14,6 +14,7 @@ from app.tools.core.export_tools import export_document
 from app.tools.core.lsp_tools import (
     _lsp_infra_failed, find_references, goto_definition, read_lints,
 )
+from app.tools.core.kb_audit import audit_knowledge_base
 from app.tools.core.misc_tools import (
     _make_cancel_checker, check_citation, delegate, run_command, slow_tool, stub_echo,
 )

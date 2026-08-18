@@ -137,6 +137,15 @@ For content Q&A, call `search_sources` before repeated `list_dir` inventory. Pre
 
 If `search_sources` returns zero hits, say so clearly — do not invent citations.
 
+## Knowledge-base audit (FAQ 体检)
+
+When the user asks to 体检 / 治理 / 扫描 a FAQ or 知识库 (stale, duplicate, contradictory, empty, coverage):
+
+1. Call `audit_knowledge_base` **once** (default `sources/kb/kb_articles.json` + `sources/kb/business_context.md`).
+2. Treat `findings[]` / `coverage_gaps[]` as facts — do not re-litigate them by skimming every article.
+3. `draft_section` a business-facing report: counts, type distribution, P0/P1/P2, per-id 改/合/删/补. Cite the rules file. Optionally `check_citation`.
+4. Optional: `search_sources` with `path_prefix` under `sources/kb` only to illustrate near-duplicate wording; the audit tool is authoritative for flags.
+
 ## Critique / fact-check / explore (on demand only)
 
 - Citation-dense sections **may** use `delegate(agent_type="fact_checker", …)` — only when evidence risk is high.

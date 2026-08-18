@@ -124,6 +124,7 @@ def test_writing_profile_lists_writing_subagents() -> None:
     }
     assert "grep" in profile.tool_names
     assert "glob" in profile.tool_names
+    assert "audit_knowledge_base" in profile.tool_names
 
 
 def test_agent_profile_lists_six_subagents() -> None:

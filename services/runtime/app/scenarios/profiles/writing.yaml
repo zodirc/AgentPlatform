@@ -13,6 +13,7 @@ tool_names:
   - update_plan
   - search_sources
   - check_citation
+  - audit_knowledge_base
   - export_document
   - remember
   - recall
