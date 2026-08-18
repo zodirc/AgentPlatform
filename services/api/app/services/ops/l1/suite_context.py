@@ -27,6 +27,8 @@ from .common import (
     _limit_rows_per_task,
     _reports,
     _sample_policy_head_slice,
+    finish_ephemeral_l1_run,
+    start_ephemeral_l1_run,
 )
 from .retry_ids import context_case_matches
 from .turn_driver import _create_l1_work, _pull_with_live_logs, _start_turn, _wait_turn_verbose
@@ -149,6 +151,7 @@ async def run_context_l1(
     per_task: dict[str, list[tuple[dict[str, float], bool]]] = {}
     run_root = L1_ROOT / session.run_id / "context"
     # A-2: always per-sample Work (avoid read-cache cross-talk from passage overwrite).
+    await start_ephemeral_l1_run(session.run_id, on_progress=on_progress)
 
     try:
         sem = asyncio.Semaphore(conc)
@@ -446,3 +449,5 @@ async def run_context_l1(
         await _emit_fail(on_progress, "suite=context", error=str(exc))
         session.finish(status="failed", error=str(exc))
         raise
+    finally:
+        finish_ephemeral_l1_run(session.run_id)

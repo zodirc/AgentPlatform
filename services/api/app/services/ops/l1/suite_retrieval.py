@@ -28,6 +28,8 @@ from .common import (
     _reports,
     _retrieval_prompt,
     _sample_policy_head_slice,
+    finish_ephemeral_l1_run,
+    start_ephemeral_l1_run,
 )
 from .index_ops import (
     _FP_NAME,
@@ -170,6 +172,7 @@ async def run_retrieval_l1(
     limit_k = max(k_values)
     all_runs: dict[str, dict[str, dict[str, float]]] = {}
     case_metrics: dict[str, dict[str, float]] = {}
+    await start_ephemeral_l1_run(session.run_id, on_progress=on_progress)
 
     try:
         for ds in retrieval["datasets"]:
@@ -737,3 +740,5 @@ async def run_retrieval_l1(
         await _emit_fail(on_progress, f"suite={suite_key_norm}", error=str(exc))
         session.finish(status="failed", error=str(exc))
         raise
+    finally:
+        finish_ephemeral_l1_run(session.run_id)

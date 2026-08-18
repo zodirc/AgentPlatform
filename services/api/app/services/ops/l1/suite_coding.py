@@ -18,7 +18,8 @@ from .coding_thinking import (
 )
 from .common import (CancelCheck, L1Cancelled, L1TurnTracker, L1_CODING_TURN_TIMEOUT_S,
     L1_ROOT, PROTOCOL_L1, ProgressCb, _clamp_parallel, _coding_prompt, _emit,
-    _emit_fail, _ensure_scripts_path, _exc_text, _l1_fingerprint, _reports)
+    _emit_fail, _ensure_scripts_path, _exc_text, _l1_fingerprint, _reports,
+    finish_ephemeral_l1_run, start_ephemeral_l1_run)
 from .turn_driver import (_create_l1_work, _enqueue_ephemeral_workspace_index,
     _pull_with_live_logs, _start_turn, _wait_turn_verbose)
 logger = logging.getLogger(__name__)
@@ -150,52 +151,53 @@ async def run_coding_l1(
     run_root = L1_ROOT / session.run_id / "coding"
     nonempty = 0
     conc = _clamp_parallel(max_parallel)
-    await _emit(
-        on_progress,
-        "log",
-        message=(
-            f"[L1] coding plan n={len(ordered)} tier={selected_tier} "
-            f"parallel={conc} checkout={checkout_repo} harness={run_harness} "
-            + (
-                f"retry_ids={','.join(ids[:8])} "
-                if retry_subset
-                else ""
-            )
-            + f"workspace_index={int(workspace_index_on)} "
-            + f"wait_ready={int(workspace_index_on and workspace_index_wait_ready)}"
-        ),
-    )
-    # Suite-level mirror sync (bypass): fetch once per unique repo before Turns so
-    # per-instance materialize is local clone+checkout, not cold network.
-    repos = [str(inst.get("repo") or "") for inst in ordered]
-    await _emit(
-        on_progress,
-        "log",
-        message=f"[L1] mirror prewarm starting n_repos={len({r for r in repos if r})}",
-    )
-    prewarm_meta = await asyncio.to_thread(prewarm_repo_mirrors, repos)
-    await _emit(
-        on_progress,
-        "log",
-        message=(
-            f"[L1] mirror prewarm done ok={len(prewarm_meta.get('ok') or [])} "
-            f"failed={len(prewarm_meta.get('failed') or {})}"
-        ),
-    )
-    if prewarm_meta.get("failed"):
-        for repo, err in list((prewarm_meta.get("failed") or {}).items())[:5]:
-            await _emit(
-                on_progress,
-                "log",
-                message=f"[L1] mirror prewarm fail {repo}: {err}",
-            )
-    session.extra["mirror_prewarm"] = {
-        "n_repos": prewarm_meta.get("n_repos"),
-        "n_ok": len(prewarm_meta.get("ok") or []),
-        "n_failed": len(prewarm_meta.get("failed") or {}),
-        "failed_repos": list((prewarm_meta.get("failed") or {}).keys())[:12],
-    }
+    await start_ephemeral_l1_run(session.run_id, on_progress=on_progress)
     try:
+        await _emit(
+            on_progress,
+            "log",
+            message=(
+                f"[L1] coding plan n={len(ordered)} tier={selected_tier} "
+                f"parallel={conc} checkout={checkout_repo} harness={run_harness} "
+                + (
+                    f"retry_ids={','.join(ids[:8])} "
+                    if retry_subset
+                    else ""
+                )
+                + f"workspace_index={int(workspace_index_on)} "
+                + f"wait_ready={int(workspace_index_on and workspace_index_wait_ready)}"
+            ),
+        )
+        # Suite-level mirror sync (bypass): fetch once per unique repo before Turns so
+        # per-instance materialize is local clone+checkout, not cold network.
+        repos = [str(inst.get("repo") or "") for inst in ordered]
+        await _emit(
+            on_progress,
+            "log",
+            message=f"[L1] mirror prewarm starting n_repos={len({r for r in repos if r})}",
+        )
+        prewarm_meta = await asyncio.to_thread(prewarm_repo_mirrors, repos)
+        await _emit(
+            on_progress,
+            "log",
+            message=(
+                f"[L1] mirror prewarm done ok={len(prewarm_meta.get('ok') or [])} "
+                f"failed={len(prewarm_meta.get('failed') or {})}"
+            ),
+        )
+        if prewarm_meta.get("failed"):
+            for repo, err in list((prewarm_meta.get("failed") or {}).items())[:5]:
+                await _emit(
+                    on_progress,
+                    "log",
+                    message=f"[L1] mirror prewarm fail {repo}: {err}",
+                )
+        session.extra["mirror_prewarm"] = {
+            "n_repos": prewarm_meta.get("n_repos"),
+            "n_ok": len(prewarm_meta.get("ok") or []),
+            "n_failed": len(prewarm_meta.get("failed") or {}),
+            "failed_repos": list((prewarm_meta.get("failed") or {}).keys())[:12],
+        }
         sem = asyncio.Semaphore(conc)
         case_lock = asyncio.Lock()
         done_count = 0
@@ -716,3 +718,5 @@ async def run_coding_l1(
         await _emit_fail(on_progress, "suite=coding", error=_exc_text(exc))
         session.finish(status="failed", error=_exc_text(exc))
         raise
+    finally:
+        finish_ephemeral_l1_run(session.run_id)

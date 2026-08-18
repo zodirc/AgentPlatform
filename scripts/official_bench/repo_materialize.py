@@ -219,25 +219,43 @@ def _ensure_runtime_writable(root: Path, *, uid: int = 1000, gid: int = 1000) ->
         return
 
 
+def _chmod_writable(path: Path) -> None:
+    try:
+        os.chmod(path, 0o700 if path.is_dir() else 0o600)
+    except OSError:
+        return
+
+
+def _rmtree_force(path: Path) -> None:
+    """Delete a checkout even when git objects are read-only."""
+
+    def _onerror(func, p, _exc):  # noqa: ANN001
+        _chmod_writable(Path(p))
+        try:
+            func(p)
+        except OSError:
+            logger.warning("worktree leftover path=%s", p)
+
+    shutil.rmtree(path, onerror=_onerror)
+
+
 def cleanup_worktree(work_root: str | Path, *, keep_problem: bool = False) -> None:
     """Remove checkout after scoring; mirrors are retained."""
     root = Path(work_root)
     if not root.is_dir():
         return
+    problem_text = ""
     if keep_problem:
         problem = root / "problem.md"
-        text = problem.read_text(encoding="utf-8") if problem.is_file() else ""
-        for child in list(root.iterdir()):
-            if child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-            else:
-                child.unlink(missing_ok=True)
-        if text:
-            problem.write_text(text, encoding="utf-8")
-        return
-    # Leave directory but wipe heavy tree (caller owns lifecycle)
+        problem_text = problem.read_text(encoding="utf-8") if problem.is_file() else ""
     for child in list(root.iterdir()):
         if child.is_dir():
-            shutil.rmtree(child, ignore_errors=True)
+            _rmtree_force(child)
         else:
-            child.unlink(missing_ok=True)
+            try:
+                child.unlink(missing_ok=True)
+            except OSError:
+                _chmod_writable(child)
+                child.unlink(missing_ok=True)
+    if problem_text:
+        (root / "problem.md").write_text(problem_text, encoding="utf-8")

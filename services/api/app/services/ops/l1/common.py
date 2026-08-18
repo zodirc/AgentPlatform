@@ -6,6 +6,8 @@ import asyncio
 import hashlib
 import logging
 import os
+import shutil
+import stat
 import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -125,11 +127,119 @@ PROTOCOL_L1 = "official-small-2026-08-m3"
 L1_ROOT = Path(os.environ.get("OPS_L1_WORKSPACE_ROOT", "/data/ops-l1"))
 # SWE coding Turns often need >30m on cold checkout + long tool loops.
 L1_CODING_TURN_TIMEOUT_S = float(os.environ.get("L1_CODING_TURN_TIMEOUT_S", "3600"))
+# Stable index caches (shared across L1 runs) — never GC these.
+L1_RESERVED_INDEX_DIRS = frozenset({"beir-index", "cmteb-index"})
 # Stable BEIR index cache (shared across L1 runs) — avoids N× full ST embeds.
 _BEIR_INDEX_CACHE = L1_ROOT / "beir-index"
 # C-MTEB / Chinese IR — same embedder as BEIR; independent HNSW schema retrieval_ops_zh.
 _CMTEB_INDEX_CACHE = L1_ROOT / "cmteb-index"
 _FP_NAME = ".l1_beir_fp"
+# In-process L1 run ids whose worktrees must survive a concurrent sweep.
+_LIVE_L1_RUN_IDS: set[str] = set()
+
+
+def _is_ephemeral_l1_run_name(name: str) -> bool:
+    """True for a UUID run dir; false for shared caches / unsafe names."""
+    token = str(name or "").strip()
+    if not token or token in L1_RESERVED_INDEX_DIRS:
+        return False
+    if token in {".", ".."} or "/" in token or "\\" in token:
+        return False
+    try:
+        UUID(token)
+    except ValueError:
+        return False
+    return True
+
+
+def _chmod_writable(path: Path) -> None:
+    try:
+        mode = path.stat().st_mode
+        os.chmod(path, mode | stat.S_IWUSR | stat.S_IXUSR | stat.S_IRUSR)
+    except OSError:
+        return
+
+
+def _rmtree_force(path: Path) -> None:
+    """Delete a tree even when git objects are read-only."""
+
+    def _onerror(func: Any, p: str, _exc: Any) -> None:
+        _chmod_writable(Path(p))
+        try:
+            func(p)
+        except OSError:
+            logger.warning("l1 rmtree leftover path=%s", p)
+
+    if not path.exists():
+        return
+    shutil.rmtree(path, onerror=_onerror)
+
+
+def cleanup_ephemeral_l1_run(run_id: str | None) -> bool:
+    """Remove ``L1_ROOT/<uuid>``. Refuses beir-index / cmteb-index / non-UUID names."""
+    name = str(run_id or "").strip()
+    if not _is_ephemeral_l1_run_name(name):
+        if name:
+            logger.warning("refuse cleanup of non-ephemeral l1 name=%r", name)
+        return False
+    try:
+        l1 = L1_ROOT.resolve()
+    except OSError:
+        return False
+    root = (L1_ROOT / name).resolve()
+    if root.parent != l1:
+        logger.warning("refuse cleanup outside L1_ROOT path=%s", root)
+        return False
+    if not root.is_dir():
+        return True
+    _rmtree_force(root)
+    gone = not root.exists()
+    if not gone:
+        logger.warning("l1 ephemeral run dir still present run_id=%s", name)
+    return gone
+
+
+def sweep_orphaned_l1_runs(*, keep: set[str] | None = None) -> list[str]:
+    """Drop UUID run dirs left by crashed suites. Never touches index caches."""
+    keep_all = set(_LIVE_L1_RUN_IDS)
+    if keep:
+        keep_all.update(str(x) for x in keep)
+    if not L1_ROOT.is_dir():
+        return []
+    dropped: list[str] = []
+    for child in L1_ROOT.iterdir():
+        if not child.is_dir() or not _is_ephemeral_l1_run_name(child.name):
+            continue
+        if child.name in keep_all:
+            continue
+        _rmtree_force(child)
+        if not child.exists():
+            dropped.append(child.name)
+    if dropped:
+        logger.info("swept %s orphaned ops-l1 run dirs", len(dropped))
+    return dropped
+
+
+async def start_ephemeral_l1_run(
+    run_id: str,
+    *,
+    on_progress: ProgressCb | None = None,
+) -> None:
+    dropped = sweep_orphaned_l1_runs(keep={str(run_id)})
+    _LIVE_L1_RUN_IDS.add(str(run_id))
+    if dropped:
+        await _emit(
+            on_progress,
+            "log",
+            message=f"[L1] swept {len(dropped)} orphaned ops-l1 run dirs",
+        )
+
+
+def finish_ephemeral_l1_run(run_id: str | None) -> None:
+    rid = str(run_id or "").strip()
+    if rid:
+        _LIVE_L1_RUN_IDS.discard(rid)
+    cleanup_ephemeral_l1_run(rid)
 
 
 def _beir_corpus_fingerprint(name: str, corpus: dict[str, str]) -> str:
