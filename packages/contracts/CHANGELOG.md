@@ -3,6 +3,11 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.4 — 2026-08-18
+
+- `python/agent_contracts/command_allowlist.py`：`run_command` 审批前缀匹配
+  （`normalize_command_prefix` / `command_matches_prefix`）。向后兼容新增模块。
+
 ## 0.3.3 — 2026-08-13
 
 - `schemas/ddl/phase2_run_commands.sql` + alembic `0021`：`run_commands` 表

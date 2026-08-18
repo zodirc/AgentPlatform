@@ -576,15 +576,19 @@ api-test:
 
 runtime-test:
 	@if python3 -c 'import sys; exit(0 if sys.version_info>=(3,11) else 1)' 2>/dev/null; then \
+		  python3 -m pip install -q packages/contracts/python && \
 		  cd services/runtime && python3 -m pip install -q -e ".[dev]" && \
 		  python3 -m pytest tests -q --cov=app --cov-report=term-missing --cov-fail-under=80; \
 	else \
-	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval && \
-	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval /tmp/preflight-contracts && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest /tmp/preflight-contracts/python && \
 	  docker cp services/runtime/tests/. agent-runtime:/tmp/runtime-tests/ && \
+	  docker cp packages/contracts/python/. agent-runtime:/tmp/preflight-contracts/python/ && \
 	  docker cp eval/plan_suggest/cases.json agent-runtime:/tmp/eval/plan_suggest/cases.json && \
 	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T runtime bash -c \
-	    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
+	    'python -m pip install -q pytest pytest-asyncio pytest-cov 2>/dev/null; \
+	     python -m pip install -q /tmp/preflight-contracts/python; \
+	     PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'; \
 	fi
 
 # Prefer local venv/system pip; else Docker (make up). Force: PREFLIGHT_DOCKER=1

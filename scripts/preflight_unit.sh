@@ -318,6 +318,7 @@ run_runtime_local() {
   else
     echo "==> [preflight] runtime deps incomplete — installing .[dev]  [$(elapsed)]"
   fi
+  pip_install "$py" "$ROOT/packages/contracts/python"
   pip_install "$py" -e ".[dev]"
   echo "==> [preflight] pytest services/runtime/tests (+cov≥80)  [$(elapsed)]"
   with_heartbeat "pytest runtime" \
@@ -389,15 +390,17 @@ run_ux_tests_docker() {
 run_runtime_docker() {
   echo "==> [preflight] Runtime unit tests (docker)  [$(elapsed)]"
   ensure_docker_runtime_matches_tree
-  "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval
-  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest
+  "${COMPOSE[@]}" exec -T -u root runtime rm -rf /tmp/runtime-tests /tmp/eval /tmp/preflight-contracts
+  "${COMPOSE[@]}" exec -T -u root runtime mkdir -p /tmp/eval/plan_suggest /tmp/preflight-contracts/python
   docker cp "$ROOT/services/runtime/tests/." agent-runtime:/tmp/runtime-tests/
+  docker cp "$ROOT/packages/contracts/python/." agent-runtime:/tmp/preflight-contracts/python/
   if [[ -f "$ROOT/eval/plan_suggest/cases.json" ]]; then
     docker cp "$ROOT/eval/plan_suggest/cases.json" agent-runtime:/tmp/eval/plan_suggest/cases.json
   fi
   with_heartbeat "docker pytest runtime" "${COMPOSE[@]}" exec -T runtime bash -c \
-    'echo "==> [preflight/docker] pip install pytest extras…"
+    'echo "==> [preflight/docker] pip install pytest extras + contracts…"
      python -m pip install --progress-bar on pytest pytest-asyncio pytest-cov
+     python -m pip install --progress-bar on /tmp/preflight-contracts/python
      echo "==> [preflight/docker] pytest /tmp/runtime-tests…"
      PYTHONPATH=/app python -m pytest /tmp/runtime-tests -q --asyncio-mode=auto'
 }

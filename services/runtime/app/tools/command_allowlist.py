@@ -5,10 +5,18 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from agent_contracts.command_allowlist import command_matches_prefix
-
 from app.controller.session_context import load_session_owner_user_id
 from app.db.pool import get_pool
+
+try:
+    from agent_contracts.command_allowlist import command_matches_prefix
+except ImportError:  # pragma: no cover - stale venv/image still on older agent-contracts
+    def command_matches_prefix(command: str, prefix: str) -> bool:
+        cmd = " ".join((command or "").replace("\n", " ").replace("\t", " ").split())
+        pre = " ".join((prefix or "").replace("\n", " ").replace("\t", " ").split())
+        if not pre or not cmd:
+            return False
+        return cmd == pre or cmd.startswith(pre + " ")
 
 
 async def command_is_allowlisted(state: Any, arguments: dict[str, Any] | None) -> bool:

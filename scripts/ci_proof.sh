@@ -88,6 +88,7 @@ run_unit_ux_tests() {
 
 run_unit_runtime() {
   echo "==> [unit] Runtime unit tests"
+  pip_q packages/contracts/python
   cd services/runtime
   if [[ -x .venv/bin/python ]]; then
     .venv/bin/python -m pip install -q -e ".[dev]"
