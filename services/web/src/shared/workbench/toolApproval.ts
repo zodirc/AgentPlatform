@@ -64,3 +64,17 @@ export function lastApprovalEvent<T extends { type: string }>(
   }
   return undefined;
 }
+
+/** One-line subject for the sticky approval bar (path or command). */
+export function approvalDetailLine(
+  toolName: string | null | undefined,
+  args: Record<string, unknown> | undefined,
+  path?: string,
+): string {
+  const command = typeof args?.command === "string" ? args.command.trim() : "";
+  const resolvedPath =
+    (path ?? "").trim() ||
+    (typeof args?.path === "string" ? args.path.trim() : "");
+  if ((toolName ?? "") === "run_command" && command) return command;
+  return resolvedPath || (toolName ?? "").trim();
+}

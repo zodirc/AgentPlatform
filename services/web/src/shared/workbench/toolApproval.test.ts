@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { approvalCopy, approvalToolKind } from "./toolApproval";
+import {
+  approvalCopy,
+  approvalDetailLine,
+  approvalToolKind,
+} from "./toolApproval";
 
 describe("toolApproval", () => {
   it("labels run_command separately from write_file", () => {
@@ -8,5 +12,15 @@ describe("toolApproval", () => {
     expect(approvalCopy("run_command").approveLabel).toBe("批准执行命令");
     expect(approvalCopy("write_file").approveLabel).toContain("批准写文件");
     expect(approvalCopy("edit_file").description).toContain("后续");
+  });
+
+  it("summarizes path or command for the sticky bar", () => {
+    expect(
+      approvalDetailLine("write_file", { path: "src/a.py" }, "src/a.py"),
+    ).toBe("src/a.py");
+    expect(
+      approvalDetailLine("run_command", { command: "pytest -q" }),
+    ).toBe("pytest -q");
+    expect(approvalDetailLine("run_tests", {})).toBe("run_tests");
   });
 });

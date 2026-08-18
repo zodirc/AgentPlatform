@@ -7,6 +7,7 @@ import { WriteFileDiffPanel } from "../../components/WriteFileDiffPanel";
 import { Markdown } from "../../shared/Markdown";
 import {
   approvalCopy,
+  approvalDetailLine,
   lastApprovalEvent,
 } from "../../shared/workbench/toolApproval";
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
@@ -25,6 +26,7 @@ import type {
   ScenarioId,
   TurnHistoryItem,
   WorkbenchState,
+  WriteFilePreview,
 } from "../../shared/workbench/types";
 import {
   filterSlashCommands,
@@ -361,6 +363,75 @@ function SubagentSessionView({
   );
 }
 
+function ApprovalActionButtons({
+  approveLabel,
+  disabled,
+  onApprove,
+  onDeny,
+}: {
+  approveLabel: string;
+  disabled: boolean;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 flex-wrap gap-2">
+      <Button
+        size="sm"
+        className="bg-success text-success-foreground hover:bg-success/90"
+        disabled={disabled}
+        onClick={onApprove}
+      >
+        {approveLabel}
+      </Button>
+      <Button size="sm" variant="outline" disabled={disabled} onClick={onDeny}>
+        拒绝
+      </Button>
+    </div>
+  );
+}
+
+function ChatApprovalCard({
+  title,
+  description,
+  subagent,
+  writePreview,
+  command,
+}: {
+  title: string;
+  description: string;
+  subagent: boolean;
+  writePreview: WriteFilePreview | null;
+  command: string;
+}) {
+  return (
+    <div
+      className="mb-4 max-w-[min(100%,48rem)] rounded-2xl rounded-tl-md border border-primary/40 bg-primary/10 p-4"
+      data-testid="chat-approval-card"
+      role="region"
+      aria-label="待审批内容"
+    >
+      <p className="text-sm font-medium text-primary">
+        {title}
+        {subagent ? (
+          <span className="ml-2 text-xs font-normal text-primary/80">
+            · 子任务
+          </span>
+        ) : null}
+      </p>
+      <p className="mb-2 text-xs text-muted-foreground">{description}</p>
+      {writePreview ? (
+        <WriteFileDiffPanel preview={writePreview} mode="approval" />
+      ) : null}
+      {command ? (
+        <pre className="mt-2 max-h-48 overflow-auto rounded bg-background p-2 text-xs text-warning">
+          $ {command}
+        </pre>
+      ) : null}
+    </div>
+  );
+}
+
 export function AgentChatPanel({
   wb,
   openSubagentRequest = null,
@@ -380,6 +451,18 @@ export function AgentChatPanel({
     typeof pendingApprovalEvent?.payload.subagent_id === "string"
       ? pendingApprovalEvent.payload.subagent_id
       : "";
+  const approvalCommand =
+    wb.pendingToolName === "run_command" &&
+    typeof pendingArgs?.command === "string"
+      ? pendingArgs.command
+      : "";
+  const approvalSubject = approvalDetailLine(
+    wb.pendingToolName,
+    pendingArgs,
+    typeof pendingApprovalEvent?.payload.path === "string"
+      ? pendingApprovalEvent.payload.path
+      : wb.pendingWriteFile?.path,
+  );
 
   const [activeTab, setActiveTab] = useState<ChatTab>("main");
   const [closedTabs, setClosedTabs] = useState<Set<string>>(() => new Set());
@@ -503,6 +586,12 @@ export function AgentChatPanel({
     endRef.current?.scrollIntoView({ block: "end" });
   }, [wb.turnId, wb.busy, activeTab]);
 
+  useEffect(() => {
+    if (!wb.awaitingApproval || !onMain) return;
+    stickToBottomRef.current = true;
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [wb.awaitingApproval, wb.pendingToolCallId, onMain]);
+
   const closeSubTab = (id: string) => {
     setClosedTabs((prev) => new Set(prev).add(id));
     if (activeTab === id) setActiveTab("main");
@@ -601,7 +690,7 @@ export function AgentChatPanel({
                 </div>
               );
             })}
-            {!wb.historyLoading && wb.turnHistory.length === 0 ? (
+            {!wb.historyLoading && wb.turnHistory.length === 0 && !wb.awaitingApproval ? (
               <div className="flex h-full min-h-[12rem] flex-col items-center justify-center text-center">
                 <p className="text-sm text-muted-foreground">
                   发送消息开始任务
@@ -612,6 +701,15 @@ export function AgentChatPanel({
                 </p>
               </div>
             ) : null}
+            {wb.awaitingApproval ? (
+              <ChatApprovalCard
+                title={approval.title}
+                description={approval.description}
+                subagent={Boolean(approvalSubagentId)}
+                writePreview={wb.pendingWriteFile}
+                command={approvalCommand}
+              />
+            ) : null}
           </>
         ) : activeSub ? (
           <SubagentSessionView sub={activeSub} busy={wb.busy} />
@@ -620,49 +718,22 @@ export function AgentChatPanel({
       </div>
 
       {wb.awaitingApproval && onMain ? (
-        <div className="shrink-0 border-t border-primary/30 bg-primary/10 p-4">
-          <p className="text-sm font-medium text-primary">
+        <div
+          className="flex shrink-0 flex-wrap items-center gap-2 border-t border-primary/30 bg-primary/10 px-4 py-2"
+          data-testid="chat-approval-bar"
+        >
+          <p className="min-w-0 flex-1 truncate text-xs text-primary">
             {approval.title}
-            {approvalSubagentId ? (
-              <span className="ml-2 text-xs font-normal text-primary/80">
-                · 子任务
-              </span>
+            {approvalSubject ? (
+              <span className="text-muted-foreground"> · {approvalSubject}</span>
             ) : null}
           </p>
-          <p className="mb-2 text-xs text-muted-foreground">
-            {approval.description}
-          </p>
-          {wb.pendingWriteFile ? (
-            <div className="mb-2">
-              <WriteFileDiffPanel
-                preview={wb.pendingWriteFile}
-                mode="approval"
-              />
-            </div>
-          ) : null}
-          {wb.pendingToolName === "run_command" && pendingArgs?.command ? (
-            <pre className="mb-2 max-h-32 overflow-auto rounded bg-background p-2 text-xs text-warning">
-              $ {String(pendingArgs.command)}
-            </pre>
-          ) : null}
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              className="bg-success text-success-foreground hover:bg-success/90"
-              disabled={wb.actionBusy || !wb.pendingToolCallId}
-              onClick={() => void wb.handleApprove()}
-            >
-              {approval.approveLabel}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={wb.actionBusy || !wb.pendingToolCallId}
-              onClick={() => void wb.handleDeny()}
-            >
-              拒绝
-            </Button>
-          </div>
+          <ApprovalActionButtons
+            approveLabel={approval.approveLabel}
+            disabled={wb.actionBusy || !wb.pendingToolCallId}
+            onApprove={() => void wb.handleApprove()}
+            onDeny={() => void wb.handleDeny()}
+          />
         </div>
       ) : null}
 
