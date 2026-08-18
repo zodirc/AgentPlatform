@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import sys
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect
+from sqlalchemy import create_engine, inspect, text
 
 from app.db.pool import close_pool, init_pool
 from app.settings import settings
+
+logger = logging.getLogger(__name__)
 
 _ALEMBIC_INI = Path(__file__).resolve().parents[2] / "alembic.ini"
 
@@ -37,10 +41,30 @@ def _maybe_stamp_legacy_db(cfg: Config) -> None:
         command.stamp(cfg, "0001_phase0")
 
 
+def widen_alembic_version_column(connection) -> None:
+    """Alembic's default version_num is varchar(32); some revision ids are longer."""
+    if getattr(getattr(connection, "dialect", None), "name", "") != "postgresql":
+        return
+    connection.execute(
+        text(
+            "ALTER TABLE IF EXISTS alembic_version "
+            "ALTER COLUMN version_num TYPE varchar(64)"
+        )
+    )
+    if connection.in_transaction():
+        connection.commit()
+
+
 def run_alembic_upgrade() -> None:
     cfg = _alembic_cfg()
-    _maybe_stamp_legacy_db(cfg)
-    command.upgrade(cfg, "head")
+    try:
+        _maybe_stamp_legacy_db(cfg)
+        command.upgrade(cfg, "head")
+    except Exception:
+        logger.exception("alembic upgrade to head failed")
+        sys.stderr.flush()
+        sys.stdout.flush()
+        raise
 
 
 async def apply_migrations() -> None:

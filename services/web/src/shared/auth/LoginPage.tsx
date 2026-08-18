@@ -5,6 +5,7 @@ import { SiteBrandMark } from "../SiteBrandMark";
 import { SITE_APP } from "../siteBrand";
 import { useSiteBrand } from "../useSiteBrand";
 import { useEndUserAuth } from "./EndUserAuth";
+import { messageForAuthFailure } from "./authErrors";
 import { readRecentUsernames } from "./recentAccounts";
 
 export function LoginPage() {
@@ -26,12 +27,8 @@ export function LoginPage() {
       } else {
         await register(username.trim(), password);
       }
-    } catch {
-      setError(
-        mode === "login"
-          ? "登录失败，请检查用户名或密码"
-          : "注册失败，用户名可能已占用",
-      );
+    } catch (err) {
+      setError(messageForAuthFailure(err, mode));
     } finally {
       setBusy(false);
     }

@@ -137,7 +137,7 @@ export async function loginUser(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) throw new Error(`login failed: ${res.status}`);
+  await throwIfNotOk(res, "login");
   return res.json() as Promise<EndUser>;
 }
 
@@ -151,7 +151,7 @@ export async function registerUser(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) throw new Error(`register failed: ${res.status}`);
+  await throwIfNotOk(res, "register");
   return res.json() as Promise<EndUser>;
 }
 

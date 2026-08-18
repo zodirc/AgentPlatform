@@ -54,6 +54,8 @@ COPY eval/golden /app/eval/golden
 # Ops Eval's optional docker.sock overlay may require host root/docker group access.
 # Standard production compose does not mount the socket.
 USER root
+# Unbuffered stdio so a crashing lifespan (Alembic) still flushes the traceback.
+ENV PYTHONUNBUFFERED=1
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl -f http://127.0.0.1:8000/health/live || exit 1

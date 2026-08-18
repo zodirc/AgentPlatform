@@ -371,6 +371,7 @@ services:
       ADMIN_SESSION_BYPASS: ${ADMIN_SESSION_BYPASS:-true}
       END_USER_COOKIE_SECURE: ${END_USER_COOKIE_SECURE:-false}
       APP_ENV: ${APP_ENV:-development}
+      PYTHONUNBUFFERED: "1"
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       WORKER_MODE: ${WORKER_MODE:-inline}
       WORKSPACE_ROOT: ${WORKSPACE_ROOT:-/workspace}

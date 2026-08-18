@@ -38,6 +38,17 @@ def test_run_alembic_upgrade(monkeypatch) -> None:
     assert called == ["head"]
 
 
+def test_run_alembic_upgrade_logs_then_reraises(monkeypatch) -> None:
+    monkeypatch.setattr(migrate_mod, "_maybe_stamp_legacy_db", lambda _cfg: None)
+    monkeypatch.setattr(
+        migrate_mod.command,
+        "upgrade",
+        lambda *_a, **_k: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+    with pytest.raises(RuntimeError, match="boom"):
+        migrate_mod.run_alembic_upgrade()
+
+
 def test_maybe_stamp_legacy_db_at_phase0_baseline(monkeypatch) -> None:
     class FakeInspector:
         def get_table_names(self):
