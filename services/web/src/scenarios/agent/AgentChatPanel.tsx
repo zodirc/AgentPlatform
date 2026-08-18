@@ -35,6 +35,12 @@ import {
   type SlashCommand,
 } from "../../shared/workbench/slashCommands";
 import { SlashCommandMenu } from "../../shared/workbench/SlashCommandMenu";
+import {
+  formatTurnElapsed,
+  liveRunningTool,
+  resolveStartedMs,
+  useTickingNow,
+} from "./turnElapsed";
 
 type Props = {
   wb: WorkbenchState;
@@ -507,6 +513,26 @@ export function AgentChatPanel({
     Record<string, unknown> | undefined;
   const approval = approvalCopy(wb.pendingToolName);
   const currentStep = livePlanStep(wb.plan, wb.displayStatus);
+  const runningTool = liveRunningTool(wb.events);
+  const commandLive = Boolean(runningTool) && wb.busy && !wb.awaitingApproval;
+  const commandNowMs = useTickingNow(commandLive);
+  const commandElapsedSeconds =
+    commandLive && runningTool
+      ? (commandNowMs -
+          resolveStartedMs(
+            runningTool.toolCallId,
+            runningTool.startedMs,
+            commandNowMs,
+          )) /
+        1000
+      : null;
+  const commandTimerLabel =
+    runningTool && commandElapsedSeconds != null
+      ? `${runningTool.toolName} · ${formatTurnElapsed(commandElapsedSeconds)}`
+      : null;
+  const commandTimerTitle = runningTool
+    ? [runningTool.detail, commandTimerLabel].filter(Boolean).join(" · ")
+    : undefined;
   const approvalSubagentId =
     typeof pendingApprovalEvent?.payload.subagent_id === "string"
       ? pendingApprovalEvent.payload.subagent_id
@@ -982,6 +1008,15 @@ export function AgentChatPanel({
                 sessionId={wb.sessionId}
                 disabled={wb.busy || wb.awaitingApproval}
               />
+              {commandTimerLabel ? (
+                <span
+                  className="min-w-0 max-w-[16rem] truncate font-mono text-[11px] tabular-nums text-muted-foreground"
+                  title={commandTimerTitle}
+                  aria-live="polite"
+                >
+                  {commandTimerLabel}
+                </span>
+              ) : null}
               <div className="ml-auto flex items-center gap-2">
                 <Button
                   size="sm"

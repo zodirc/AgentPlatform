@@ -33,6 +33,7 @@ async def test_build_turn_view_skips_projection_when_view_is_current(
         "runner_id": None,
         "approval_tool_call_id": None,
         "approval_tool_name": None,
+        "approval_status": None,
     }
     pool.fetchrow = AsyncMock(
         side_effect=[
@@ -487,3 +488,118 @@ async def test_project_turn_copies_export_delivery_onto_tool_timeline() -> None:
     assert row["delivery_status"] == "ok"
     assert row["output_path"] == "exports/document.md"
     assert row["bytes_written"] == 42
+
+
+def _project_pool(events: list[dict]) -> tuple[MagicMock, MagicMock]:
+    conn = MagicMock()
+    conn.execute = AsyncMock()
+    transaction = MagicMock()
+    transaction.__aenter__ = AsyncMock(return_value=transaction)
+    transaction.__aexit__ = AsyncMock(return_value=False)
+    conn.transaction.return_value = transaction
+    acquire_cm = MagicMock()
+    acquire_cm.__aenter__ = AsyncMock(return_value=conn)
+    acquire_cm.__aexit__ = AsyncMock(return_value=False)
+    pool = MagicMock()
+    pool.acquire.return_value = acquire_cm
+    pool.fetch = AsyncMock(return_value=events)
+    return pool, conn
+
+
+@pytest.mark.asyncio
+async def test_project_turn_resumes_running_after_approval_resolved() -> None:
+    """Refresh must not resurrect waiting_approval after the user already approved."""
+    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    pool, conn = _project_pool(
+        [
+            {
+                "sequence": 1,
+                "type": "turn.accepted",
+                "payload": {},
+                "ts": ts,
+            },
+            {
+                "sequence": 2,
+                "type": "approval.requested",
+                "payload": {
+                    "tool_call_id": "cmd-1",
+                    "tool_name": "run_command",
+                    "arguments": {"command": "pytest -q"},
+                },
+                "ts": ts,
+            },
+            {
+                "sequence": 3,
+                "type": "approval.resolved",
+                "payload": {"tool_call_id": "cmd-1", "decision": "approved"},
+                "ts": ts,
+            },
+            {
+                "sequence": 4,
+                "type": "tool.started",
+                "payload": {"tool_call_id": "cmd-1", "tool_name": "run_command"},
+                "ts": ts,
+            },
+        ]
+    )
+    turn = {
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "agent",
+        "status": "waiting_approval",
+        "user_input": "run tests",
+    }
+    with (
+        patch("app.services.projection.projector.get_pool", new_callable=AsyncMock, return_value=pool),
+        patch("app.services.projection.projector.turn_svc.get_turn", new_callable=AsyncMock, return_value=turn),
+    ):
+        await project_turn(TURN_ID)
+
+    view_insert = next(
+        call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
+    )
+    assert view_insert.args[4] == "running"
+    turn_update = next(
+        call for call in conn.execute.await_args_list if "UPDATE turns SET status" in str(call.args[0])
+    )
+    assert turn_update.args[2] == "running"
+
+
+@pytest.mark.asyncio
+async def test_build_turn_view_hides_interrupt_when_approval_already_decided(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = MagicMock()
+    row = {
+        "turn_id": TURN_ID,
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "agent",
+        "status": "waiting_approval",
+        "user_input": "run tests",
+        "latest_output": None,
+        "tool_timeline": [{"tool_call_id": "cmd-1", "tool_name": "run_command", "status": "running"}],
+        "artifacts": [],
+        "last_event_sequence": 4,
+        "updated_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        "cancel_requested_at": None,
+        "runner_id": None,
+        "approval_tool_call_id": "cmd-1",
+        "approval_tool_name": "run_command",
+        "approval_status": "approved",
+    }
+    pool.fetchrow = AsyncMock(
+        side_effect=[
+            {"last_event_sequence": 4},
+            row,
+        ]
+    )
+    pool.fetchval = AsyncMock(return_value=4)
+    project = AsyncMock()
+    monkeypatch.setattr(projector, "get_pool", AsyncMock(return_value=pool))
+    monkeypatch.setattr(projector, "project_turn", project)
+
+    view = await projector.build_turn_view(TURN_ID)
+
+    assert view is not None
+    assert view.interrupt is None
+    project.assert_not_awaited()
+

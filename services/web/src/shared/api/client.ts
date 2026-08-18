@@ -104,6 +104,8 @@ export type TurnEvent = {
   type: string;
   turn_id: string;
   payload: Record<string, unknown>;
+  /** Event time from turn_events.ts (ISO). Used for elapsed timers. */
+  ts?: string;
 };
 
 export type EndUser = { id: string; username: string };

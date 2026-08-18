@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { ListTree } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import type { WorkbenchState } from "../../shared/workbench/types";
@@ -8,7 +7,12 @@ import {
 } from "../../shared/workbench/toolApproval";
 import { UsageMeter } from "./UsageMeter";
 import { livePlanStep } from "../../shared/workbench/plan";
-import { formatTurnElapsed } from "./turnElapsed";
+import {
+  formatTurnElapsed,
+  liveRunningTool,
+  resolveStartedMs,
+  useTickingNow,
+} from "./turnElapsed";
 
 export type AgentPhase =
   | "idle"
@@ -210,17 +214,25 @@ export function AgentActivityPanel({
     wb.displayStatus === "running" ||
     wb.displayStatus === "waiting_approval" ||
     wb.displayStatus === "pending";
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    if (!live) return;
-    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [live]);
+  const nowMs = useTickingNow(live);
   const startedAt = wb.turnHistory.find((t) => t.id === wb.turnId)?.created_at;
   const elapsedLabel =
     startedAt && (live || activity.phase === "completed" || activity.phase === "failed")
       ? `${live ? "已运行" : "用时"} ${formatTurnElapsed(
           (nowMs - Date.parse(startedAt)) / 1000,
+        )}`
+      : null;
+  const runningTool = liveRunningTool(wb.events);
+  const commandElapsedLabel =
+    activity.phase === "tool" && runningTool
+      ? `命令 ${formatTurnElapsed(
+          (nowMs -
+            resolveStartedMs(
+              runningTool.toolCallId,
+              runningTool.startedMs,
+              nowMs,
+            )) /
+            1000,
         )}`
       : null;
   const style = PHASE_STYLES[activity.phase];
@@ -271,6 +283,11 @@ export function AgentActivityPanel({
             {elapsedLabel ? (
               <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
                 {elapsedLabel}
+              </span>
+            ) : null}
+            {commandElapsedLabel ? (
+              <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
+                {commandElapsedLabel}
               </span>
             ) : null}
           </div>

@@ -56,13 +56,23 @@ export function approvalCopy(toolName: string | null | undefined): {
   };
 }
 
-export function lastApprovalEvent<T extends { type: string }>(
-  events: T[],
-): T | undefined {
-  for (let i = events.length - 1; i >= 0; i -= 1) {
-    if (events[i]?.type === "approval.requested") return events[i];
+export function lastApprovalEvent<
+  T extends { type: string; payload?: Record<string, unknown> },
+>(events: T[]): T | undefined {
+  let pending: T | undefined;
+  for (const event of events) {
+    if (event.type === "approval.requested") {
+      pending = event;
+      continue;
+    }
+    if (event.type !== "approval.resolved" || !pending) continue;
+    const pendingId = String(pending.payload?.tool_call_id ?? "");
+    const resolvedId = String(event.payload?.tool_call_id ?? "");
+    if (!resolvedId || !pendingId || resolvedId === pendingId) {
+      pending = undefined;
+    }
   }
-  return undefined;
+  return pending;
 }
 
 /** One-line subject for the sticky approval bar (path or command). */

@@ -5,6 +5,7 @@ import {
   approvalDetailLine,
   approvalToolKind,
   defaultPrefixFromCommand,
+  lastApprovalEvent,
 } from "./toolApproval";
 
 describe("toolApproval", () => {
@@ -28,5 +29,38 @@ describe("toolApproval", () => {
   it("takes the first token as the default allow-list prefix", () => {
     expect(defaultPrefixFromCommand("pytest -q tests/")).toBe("pytest");
     expect(defaultPrefixFromCommand("")).toBe("");
+  });
+
+  it("ignores approval.requested after a matching approval.resolved", () => {
+    expect(
+      lastApprovalEvent([
+        {
+          type: "approval.requested",
+          payload: { tool_call_id: "cmd-1", tool_name: "run_command" },
+        },
+        {
+          type: "approval.resolved",
+          payload: { tool_call_id: "cmd-1", decision: "approved" },
+        },
+      ]),
+    ).toBeUndefined();
+  });
+
+  it("keeps a later unresolved approval after an earlier one was resolved", () => {
+    const next = lastApprovalEvent([
+      {
+        type: "approval.requested",
+        payload: { tool_call_id: "cmd-1" },
+      },
+      {
+        type: "approval.resolved",
+        payload: { tool_call_id: "cmd-1", decision: "approved" },
+      },
+      {
+        type: "approval.requested",
+        payload: { tool_call_id: "cmd-2", arguments: { command: "ls" } },
+      },
+    ]);
+    expect(next?.payload?.tool_call_id).toBe("cmd-2");
   });
 });

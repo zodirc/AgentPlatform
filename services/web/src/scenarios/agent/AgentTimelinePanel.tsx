@@ -3,6 +3,12 @@ import type { TurnEvent } from "../../shared/api/client";
 import type { SubagentLive } from "../../shared/workbench/subagents";
 import { statusLabel } from "../../shared/workbench/subagents";
 import type { TimelineItem } from "../../shared/workbench/types";
+import {
+  formatTurnElapsed,
+  resolveStartedMs,
+  toolCallElapsedSeconds,
+  useTickingNow,
+} from "./turnElapsed";
 
 type Props = {
   items: TimelineItem[];
@@ -56,7 +62,7 @@ function toolStatusLabel(status: string): string {
   if (status === "error") return "失败";
   if (status === "denied") return "已拒绝";
   if (status === "timeout") return "超时";
-  if (status === "ok") return "完成";
+  if (status === "ok" || status === "completed") return "完成";
   if (status === "running") return "进行中";
   return status;
 }
@@ -68,6 +74,7 @@ function ToolRow({
   selected,
   onSelect,
   nested,
+  nowMs,
 }: {
   item: TimelineItem;
   events: TurnEvent[];
@@ -75,12 +82,29 @@ function ToolRow({
   selected: boolean;
   onSelect?: (item: TimelineItem, index: number) => void;
   nested?: boolean;
+  nowMs: number;
 }) {
   const status = String(item.status ?? "pending");
   const isRunning = status === "running";
   const isSkipped = status === "skipped";
   const clickable = Boolean(onSelect) && index != null;
   const label = toolLabel(item, events);
+  const elapsedFromEvents = toolCallElapsedSeconds(
+    events,
+    String(item.tool_call_id ?? ""),
+    nowMs,
+  );
+  const elapsedSeconds =
+    elapsedFromEvents ??
+    (isRunning && item.tool_call_id
+      ? (nowMs -
+          resolveStartedMs(String(item.tool_call_id), null, nowMs)) /
+        1000
+      : null);
+  const statusText =
+    elapsedSeconds == null
+      ? toolStatusLabel(status)
+      : `${toolStatusLabel(status)} · ${formatTurnElapsed(elapsedSeconds)}`;
   return (
     <li className="min-w-0">
       <button
@@ -113,11 +137,11 @@ function ToolRow({
           <span
             className={
               isSkipped
-                ? "shrink-0 text-muted-foreground/80"
-                : "shrink-0 text-muted-foreground"
+                ? "shrink-0 tabular-nums text-muted-foreground/80"
+                : "shrink-0 tabular-nums text-muted-foreground"
             }
           >
-            {toolStatusLabel(status)}
+            {statusText}
           </span>
         </div>
         {item.stream_output ? (
@@ -149,6 +173,12 @@ export function AgentTimelinePanel({
   const stepCount =
     items.length + subagents.reduce((n, s) => n + s.tools.length, 0);
   const sheet = Boolean(onClose);
+  const anyRunning =
+    items.some((item) => String(item.status ?? "") === "running") ||
+    subagents.some((sub) =>
+      sub.tools.some((tool) => String(tool.status ?? "") === "running"),
+    );
+  const nowMs = useTickingNow(anyRunning);
 
   return (
     <section
@@ -196,6 +226,7 @@ export function AgentTimelinePanel({
                 index={idx}
                 selected={selectedIndex === idx}
                 onSelect={onSelectItem}
+                nowMs={nowMs}
               />
             ))}
             {subagents.map((sub) => (
@@ -235,6 +266,7 @@ export function AgentTimelinePanel({
                         index={null}
                         selected={false}
                         nested
+                        nowMs={nowMs}
                       />
                     ))}
                   </ol>

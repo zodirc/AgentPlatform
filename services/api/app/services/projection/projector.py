@@ -254,6 +254,8 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                     artifacts.append(art)
             elif event_type == "approval.resolved":
                 pending_interrupt = None
+                if status in RUNNING_STATUSES:
+                    status = "running"
                 decision = payload.get("decision", "approved")
                 approval_state = {
                     "tool_call_id": payload.get("tool_call_id", ""),
@@ -288,6 +290,8 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                 artifacts.append(art)
         elif event_type == "approval.resolved":
             pending_interrupt = None
+            if status in RUNNING_STATUSES:
+                status = "running"
             decision = payload.get("decision", "approved")
             approval_state = {
                 "tool_call_id": payload.get("tool_call_id", ""),
@@ -587,7 +591,8 @@ async def build_turn_view(turn_id: UUID, *, refresh: bool = False) -> TurnView |
                tv.latest_output, tv.tool_timeline, tv.artifacts, tv.last_event_sequence,
                tv.updated_at, r.cancel_requested_at, r.runner_id,
                av.tool_call_id AS approval_tool_call_id,
-               av.tool_name AS approval_tool_name
+               av.tool_name AS approval_tool_name,
+               av.status AS approval_status
         FROM turn_views tv
         JOIN turns t ON t.id = tv.turn_id
         LEFT JOIN runs r ON r.turn_id = tv.turn_id
@@ -610,13 +615,15 @@ async def build_turn_view(turn_id: UUID, *, refresh: bool = False) -> TurnView |
     status = row["status"]
     interrupt = None
     if status == "waiting_approval":
-        if row["approval_tool_call_id"]:
+        approval_status = row.get("approval_status")
+        approval_pending = approval_status in (None, "pending")
+        if approval_pending and row["approval_tool_call_id"]:
             interrupt = {
                 "kind": "approval",
                 "tool_call_id": row["approval_tool_call_id"],
                 "tool_name": row["approval_tool_name"],
             }
-        else:
+        elif approval_pending:
             for item in reversed(tool_timeline):
                 if item.get("status") == "running":
                     interrupt = {"kind": "approval", "tool_call_id": item.get("tool_call_id", "")}
