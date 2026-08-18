@@ -53,7 +53,8 @@ CREATE TABLE turn_events (
     UNIQUE (turn_id, sequence)
 );
 
-CREATE INDEX idx_turn_events_turn_sequence ON turn_events(turn_id, sequence);
+-- UNIQUE (turn_id, sequence) already provides the lookup index. Do not add a
+-- second btree on the same keys (it doubled turn_events index disk).
 
 -- Phase 0+ NOTIFY trigger (apply at implementation). See docs/09-event-projection-pipeline.md §1, §6.0.
 -- CREATE OR REPLACE FUNCTION notify_turn_event() RETURNS trigger AS $$

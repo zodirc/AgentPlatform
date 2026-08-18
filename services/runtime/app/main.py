@@ -30,6 +30,21 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/internal/commands", tags=["commands"])
 
 
+async def _lsp_reap_loop() -> None:
+    import asyncio
+
+    from app.structural.pool import reap_idle
+
+    while True:
+        await asyncio.sleep(60)
+        try:
+            dropped = await reap_idle()
+            if dropped:
+                logger.info("lsp idle reap dropped=%s", dropped)
+        except Exception:
+            logger.exception("lsp idle reap failed")
+
+
 class StartTurnBody(StartTurnCommand):
     pass
 
@@ -810,6 +825,7 @@ async def lifespan(app):
     schedule_sources_watch()
     # Agent workspace AST watch (docs/core/architecture.md · ast-indexer).
     schedule_ast_index_watch()
+    lsp_reap = asyncio.create_task(_lsp_reap_loop(), name="lsp-idle-reap")
     try:
         yield
     finally:
@@ -822,6 +838,17 @@ async def lifespan(app):
         await cancel_ast_index_watch()
         await cancel_sources_watch()
         await cancel_startup_sources_sync()
+        lsp_reap.cancel()
+        try:
+            await lsp_reap
+        except asyncio.CancelledError:
+            pass
+        try:
+            from app.structural.pool import shutdown_pool
+
+            await shutdown_pool()
+        except Exception:
+            logger.exception("lsp pool shutdown failed")
         watchdog.cancel()
         try:
             await watchdog

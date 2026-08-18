@@ -84,6 +84,7 @@ async def drop_session(workspace_root: Path) -> None:
     async with _lock_for(key):
         session = _POOL.pop(key, None)
         _LAST_USED.pop(key, None)
+        _LOCKS.pop(key, None)
         if session is not None:
             await session.shutdown()
 
@@ -100,9 +101,33 @@ async def reap_idle(*, ttl_s: float = _IDLE_TTL_S) -> int:
                 continue
             session = _POOL.pop(key, None)
             _LAST_USED.pop(key, None)
+            _LOCKS.pop(key, None)
             if session is not None:
                 await session.shutdown()
                 dropped += 1
+    expired_unhealthy = [k for k, until in list(_UNHEALTHY_UNTIL.items()) if until <= now]
+    for key in expired_unhealthy:
+        _UNHEALTHY_UNTIL.pop(key, None)
+        if key not in _POOL:
+            _LOCKS.pop(key, None)
+    return dropped
+
+
+async def shutdown_pool() -> int:
+    """Drop every pooled LSP session (runtime shutdown)."""
+    keys = list(_POOL.keys())
+    dropped = 0
+    for key in keys:
+        async with _lock_for(key):
+            session = _POOL.pop(key, None)
+            _LAST_USED.pop(key, None)
+            if session is not None:
+                await session.shutdown()
+                dropped += 1
+        _LOCKS.pop(key, None)
+        _UNHEALTHY_UNTIL.pop(key, None)
+    _LOCKS.clear()
+    _UNHEALTHY_UNTIL.clear()
     return dropped
 
 

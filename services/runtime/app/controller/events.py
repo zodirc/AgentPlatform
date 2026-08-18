@@ -107,3 +107,28 @@ async def run_exists(turn_id: UUID, run_id: UUID) -> bool:
         turn_id,
     )
     return row is not None
+
+
+async def purge_thinking_deltas(turn_id: UUID) -> int:
+    """Drop turn.thinking.delta rows after the Turn is terminal (W4)."""
+    from app.settings import settings
+
+    if not bool(getattr(settings, "purge_thinking_deltas_on_finalize", True)):
+        return 0
+    pool = await get_pool()
+    result = await pool.execute(
+        "DELETE FROM turn_events WHERE turn_id = $1 AND type = $2",
+        turn_id,
+        "turn.thinking.delta",
+    )
+    try:
+        deleted = int(str(result).split()[-1])
+    except (ValueError, IndexError):
+        deleted = 0
+    if deleted:
+        logger.info("purged thinking.delta turn_id=%s n=%s", turn_id, deleted)
+        try:
+            metrics.inc("thinking_delta_purged_total", float(deleted))
+        except Exception:
+            pass
+    return deleted

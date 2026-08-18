@@ -25,6 +25,8 @@ COMPOSE_EXPORT = set -a && \
 COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) $(COMPOSE_ENV)
 COMPOSE_DEV = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
 COMPOSE_QUEUE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
+# Deprecated overlay — default compose already uses Dockerfile.retrieval.
+# `make up-retrieval` still passes --profile retrieval via this file.
 COMPOSE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
 COMPOSE_QUEUE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
 COMPOSE_HA = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)

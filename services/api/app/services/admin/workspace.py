@@ -55,6 +55,14 @@ def _workspace_http_client() -> httpx.AsyncClient:
     return _workspace_http
 
 
+async def close_workspace_http() -> None:
+    global _workspace_http
+    client = _workspace_http
+    _workspace_http = None
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
+
 async def list_entries(
     *,
     path: str = ".",

@@ -621,7 +621,7 @@ async def delete_official_runs(body: DeleteOfficialRunsBody) -> dict[str, Any]:
             except ValueError:
                 pass
             await official_runner._force_finish_cancelled(r, reason="deleted")
-        official_runner.forget_live_runs(
+        await official_runner.forget_live_runs(
             ids={r.id for r in blocking},
             include_active=True,
         )
@@ -647,11 +647,11 @@ async def delete_official_runs(body: DeleteOfficialRunsBody) -> dict[str, Any]:
 
     # Always purge matching finished/cancelled live entries (the clear bug).
     if ids:
-        forgotten = official_runner.forget_live_runs(ids=set(ids))
+        forgotten = await official_runner.forget_live_runs(ids=set(ids))
     elif before:
-        forgotten = official_runner.forget_live_runs(before_iso=before)
+        forgotten = await official_runner.forget_live_runs(before_iso=before)
     else:
-        forgotten = official_runner.forget_live_runs()
+        forgotten = await official_runner.forget_live_runs()
 
     if ids:
         deleted_db = await eval_store.delete_runs_by_ids(ids, suite="official")

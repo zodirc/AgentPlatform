@@ -20,6 +20,7 @@ from app.services.ops.proof import (
 )
 from app.services.ops.restart import docker_socket_available, recreate_runtime
 from app.services.ops import store as eval_store
+from app.services.ops.official_live_util import trim_official_logs
 from app.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -201,6 +202,8 @@ async def list_run_history(
 
 async def _publish(run: EvalRun, event: dict[str, Any]) -> None:
     run.logs.append(event)
+    if len(run.logs) > 2000:
+        run.logs = trim_official_logs(run.logs, limit=1500)
     dead: list[asyncio.Queue] = []
     for q in run._subscribers:
         try:

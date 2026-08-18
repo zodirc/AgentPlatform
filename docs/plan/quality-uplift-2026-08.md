@@ -96,7 +96,7 @@
 
 ### 3.1 已核实的切分缺陷（用户观测成立）
 
-实现锚点：`services/runtime/app/retrieval/chunking.py`；默认 `retrieval_chunk_max_chars=4000` / `overlap=400`（`settings.py:77-82`）。
+实现锚点：`services/runtime/app/retrieval/chunking.py`。**现行默认（2026-08）**：`retrieval_chunk_max_tokens=450` / `overlap=64` token；char 回退 `1800` / `200`（`settings.py`）。下文 4000/400 是当时核实的缺陷描述，不是当前配置。
 
 | # | 缺陷 | 代码证据 | 危害 |
 |---|------|----------|------|

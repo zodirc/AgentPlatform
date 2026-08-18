@@ -138,6 +138,21 @@ class OfficialLiveRun:
 
 _LOCK = asyncio.Lock()
 _RUNS: dict[str, OfficialLiveRun] = {}
+_MAX_FINISHED_LIVE = 20
+
+
+def _evict_finished_unlocked() -> None:
+    finished = [
+        r
+        for r in _RUNS.values()
+        if r.status not in {"queued", "running", "cancelling"}
+    ]
+    extra = len(finished) - _MAX_FINISHED_LIVE
+    if extra <= 0:
+        return
+    oldest = sorted(finished, key=lambda r: r.created_at)[:extra]
+    for stale in oldest:
+        _RUNS.pop(stale.id, None)
 
 def list_criteria() -> list[dict[str, str]]:
     return list(CRITERIA)
@@ -147,7 +162,7 @@ def get_live(run_id: str) -> OfficialLiveRun | None:
     return _RUNS.get(run_id)
 
 
-def forget_live_runs(
+async def forget_live_runs(
     *,
     ids: set[str] | None = None,
     before_iso: str | None = None,
@@ -161,23 +176,24 @@ def forget_live_runs(
         except ValueError:
             before_dt = None
     removed = 0
-    for rid, run in list(_RUNS.items()):
-        if ids is not None and rid not in ids:
-            continue
-        active = run.status in {"queued", "running", "cancelling"}
-        if active and not include_active:
-            continue
-        if before_dt is not None:
-            try:
-                created = datetime.fromisoformat(
-                    (run.created_at or "").replace("Z", "+00:00")
-                )
-            except ValueError:
-                created = None
-            if created is not None and created >= before_dt:
+    async with _LOCK:
+        for rid, run in list(_RUNS.items()):
+            if ids is not None and rid not in ids:
                 continue
-        del _RUNS[rid]
-        removed += 1
+            active = run.status in {"queued", "running", "cancelling"}
+            if active and not include_active:
+                continue
+            if before_dt is not None:
+                try:
+                    created = datetime.fromisoformat(
+                        (run.created_at or "").replace("Z", "+00:00")
+                    )
+                except ValueError:
+                    created = None
+                if created is not None and created >= before_dt:
+                    continue
+            del _RUNS[rid]
+            removed += 1
     return removed
 
 
@@ -773,6 +789,7 @@ async def create_and_start(
         run.phase_hint = f"{kind}：{shown}{extra}（smoke，不升 SCORECARD）"
     async with _LOCK:
         _RUNS[run.id] = run
+        _evict_finished_unlocked()
     await _persist_snapshot(run)
     asyncio.create_task(_execute(run.id))
     return run

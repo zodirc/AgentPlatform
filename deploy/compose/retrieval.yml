@@ -1,7 +1,7 @@
-# Optional override: keep for backward-compatible `make up-retrieval`.
-# Default deploy already uses Dockerfile.retrieval + sentence_transformers + pgvector
-# (see deploy/docker-compose.yml). This file is only needed if you want an explicit
-# --profile retrieval stack alongside queue/ha overlays.
+# Deprecated compatibility overlay. Default `deploy/docker-compose.yml` already
+# builds `Dockerfile.retrieval` as agent-platform-runtime:default. Prefer
+# `make up` / COMPOSE without this file. Kept so `make up-retrieval` still
+# resolves `--profile retrieval`.
 
 services:
   runtime:

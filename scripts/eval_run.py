@@ -30,6 +30,10 @@ DEFAULT_EVAL_WORKSPACE = ROOT / ".eval-workspace"
 DAILY_WORKSPACE = ROOT / "workspace"
 if str(CONTRACTS_DIR) not in sys.path:
     sys.path.insert(0, str(CONTRACTS_DIR))
+_API_ROOT = ROOT / "services" / "api"
+if str(_API_ROOT) not in sys.path:
+    sys.path.insert(0, str(_API_ROOT))
+from app.services.ops.eval_assert import sequence_contains, sequence_equals  # noqa: E402
 
 _golden_validator = None
 
@@ -619,21 +623,6 @@ def collect_sse_with_reconnect(
     if sequences != sorted(sequences):
         raise AssertionError(f"sequence order broken after reconnect: {sequences}")
     return types
-
-
-def sequence_contains(events: list[str], required: list[str]) -> bool:
-    idx = 0
-    for need in required:
-        while idx < len(events) and events[idx] != need:
-            idx += 1
-        if idx >= len(events):
-            return False
-        idx += 1
-    return True
-
-
-def sequence_equals(events: list[str], required: list[str]) -> bool:
-    return events == required
 
 
 def _first_patch_id(artifacts: list) -> str:

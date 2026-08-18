@@ -175,6 +175,9 @@ async def lifespan(app: FastAPI):
             pass
         await listener.stop()
         await close_runtime_clients()
+        from app.services.admin.workspace import close_workspace_http
+
+        await close_workspace_http()
         await close_pool()
 
 

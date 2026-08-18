@@ -32,6 +32,8 @@ class Settings(BaseSettings):
     pending_store_ttl_seconds: float = 1800.0
     internal_service_token: str = "change-me-internal"
     app_secret_key: str = "change-me-in-production"
+    # Optional Fernet secret for stored model API keys. Empty → APP_SECRET_KEY.
+    config_encryption_key: str = ""
     model_provider: str = "anthropic"
     model_name: str = ""
     model_api_key: str = ""
@@ -159,8 +161,8 @@ class Settings(BaseSettings):
     # CPU → gte-small@384. MiniLM / gte-large retired as auto defaults.
     embedding_model: str = "thenlper/gte-small"
     embedding_model_dir: str = "/data/models"
-    # Hash default 256; gte-small=384; bge-m3|gte-large=1024 — compose/auto.env sets dims.
-    embedding_dimensions: int = 256
+    # Hash default 256 via env; gte-small=384; bge-m3|gte-large=1024 — compose/auto.env sets dims.
+    embedding_dimensions: int = 384
     # Index-plane batch encode size (docs/15). Hot-path search still embeds one query.
     embedding_batch_size: int = 64
     # O5 / WP2: query embed preempts index batch encode (set false to A/B).
@@ -299,6 +301,9 @@ class Settings(BaseSettings):
     # When False (default), high-freq streaming events use a light shape check
     # instead of full jsonschema (R3). Set True in CI for strict delta schemas.
     event_payload_validation_strict_deltas: bool = False
+    # After terminal events, drop turn.thinking.delta rows for that Turn (reconnect
+    # during the Turn still has them). Set false to keep historical thinking streams.
+    purge_thinking_deltas_on_finalize: bool = True
     run_command_mode: str = "shell"  # shell | simulate
     turn_token_budget: int = 0
     monthly_token_limit: int = 0

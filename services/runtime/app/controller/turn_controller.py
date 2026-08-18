@@ -19,7 +19,7 @@ from app.controller.event_writer import (
     register_event_writer,
 )
 from app.controller.thinking_sidecar import thinking_sidecar_path
-from app.controller.events import append_event, run_exists
+from app.controller.events import append_event, purge_thinking_deltas, run_exists
 from app.controller.input_compiler import InputCompiler, should_query
 from app.controller.session_compact import compact_session_context, save_session_context_summary, session_turn_count
 from app.controller.session_transcript import load_session_transcript, save_session_transcript
@@ -323,6 +323,7 @@ async def maybe_finalize_orphan_cancel(turn_id: UUID, *, force: bool = False) ->
         output_tokens=0,
     )
     await delete_checkpoint(run_id)
+    _schedule_purge_thinking(turn_id)
     return True
 
 
@@ -805,6 +806,16 @@ async def _make_write_event(
     return write_event
 
 
+def _schedule_purge_thinking(turn_id: UUID) -> None:
+    try:
+        asyncio.get_running_loop().create_task(
+            purge_thinking_deltas(turn_id),
+            name=f"purge-thinking-{turn_id}",
+        )
+    except RuntimeError:
+        pass
+
+
 async def _fail_turn(
     *,
     turn_id: UUID,
@@ -853,6 +864,7 @@ async def _fail_turn(
         duration_seconds=duration_seconds,
         termination_reason=termination_reason,
     )
+    _schedule_purge_thinking(turn_id)
 
 
 async def _finalize_turn(
@@ -909,6 +921,7 @@ async def _finalize_turn(
         await check_monthly_token_alert()
         await save_session_transcript(state.session_id, state.messages)
         await delete_checkpoint(run_id)
+        _schedule_purge_thinking(turn_id)
         return
 
     if summary == "waiting_approval":
@@ -1005,6 +1018,7 @@ async def _finalize_turn(
         # No running loop (rare in tests) — best-effort sync path.
         await _maybe_write_continuity_pending(state, turn_id=turn_id)
     await delete_checkpoint(run_id)
+    _schedule_purge_thinking(turn_id)
 
 
 async def _maybe_write_continuity_pending(state: TurnState, *, turn_id: UUID) -> None:

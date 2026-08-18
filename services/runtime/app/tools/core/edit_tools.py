@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.settings import settings
@@ -12,6 +13,9 @@ from app.tools.core.paths import (
     _resolve_path,
     _workspace_root,
 )
+
+logger = logging.getLogger(__name__)
+
 
 async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
     from app.privacy.secret_scan import gate_write_content
@@ -43,7 +47,7 @@ async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
             work_root=_workspace_root(),
         )
     except Exception:
-        pass
+        logger.warning("workspace_ast dirty notify failed path=%s", path, exc_info=True)
     out: dict[str, Any] = {
         "path": path,
         "old_text": old_text,
@@ -126,7 +130,12 @@ async def rename_file(
             dst_rel, work_id=wid, owner_user_id=oid, work_root=root
         )
     except Exception:
-        pass
+        logger.warning(
+            "workspace_ast dirty notify failed rename %s -> %s",
+            src_rel,
+            dst_rel,
+            exc_info=True,
+        )
     return {
         "status": "renamed",
         "path": src_rel,
@@ -493,7 +502,7 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
             work_root=_workspace_root(),
         )
     except Exception:
-        pass
+        logger.warning("workspace_ast dirty notify failed path=%s", path, exc_info=True)
     impact = await _impact_for_edit(
         path=path,
         old_text=old_text,

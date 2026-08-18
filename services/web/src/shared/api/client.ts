@@ -10,18 +10,27 @@ export type ModelProvider = components["schemas"]["ModelProviderProfile"];
 export type TurnResponse = components["schemas"]["TurnResponse"];
 
 export function setAdminPassword(password: string) {
-  localStorage.setItem(ADMIN_AUTH_KEY, btoa(`admin:${password}`));
+  const token = btoa(`admin:${password}`);
   try {
-    sessionStorage.removeItem(ADMIN_AUTH_KEY);
+    sessionStorage.setItem(ADMIN_AUTH_KEY, token);
+  } catch {
+    // ignore
+  }
+  try {
+    localStorage.removeItem(ADMIN_AUTH_KEY);
   } catch {
     // ignore
   }
 }
 
 export function clearAdminAuth() {
-  localStorage.removeItem(ADMIN_AUTH_KEY);
   try {
     sessionStorage.removeItem(ADMIN_AUTH_KEY);
+  } catch {
+    // ignore
+  }
+  try {
+    localStorage.removeItem(ADMIN_AUTH_KEY);
   } catch {
     // ignore
   }
@@ -29,12 +38,11 @@ export function clearAdminAuth() {
 
 export function hasAdminAuth(): boolean {
   try {
+    if (sessionStorage.getItem(ADMIN_AUTH_KEY)) return true;
     const fromLocal = localStorage.getItem(ADMIN_AUTH_KEY);
-    if (fromLocal) return true;
-    const legacy = sessionStorage.getItem(ADMIN_AUTH_KEY);
-    if (legacy) {
-      localStorage.setItem(ADMIN_AUTH_KEY, legacy);
-      sessionStorage.removeItem(ADMIN_AUTH_KEY);
+    if (fromLocal) {
+      sessionStorage.setItem(ADMIN_AUTH_KEY, fromLocal);
+      localStorage.removeItem(ADMIN_AUTH_KEY);
       return true;
     }
     return false;
@@ -64,9 +72,20 @@ export async function verifyAdminAuth(): Promise<boolean> {
 function adminAuthHeaders(extra: HeadersInit = {}): HeadersInit {
   let token: string | null = null;
   try {
-    token = localStorage.getItem(ADMIN_AUTH_KEY);
+    token = sessionStorage.getItem(ADMIN_AUTH_KEY);
   } catch {
     token = null;
+  }
+  if (!token) {
+    try {
+      token = localStorage.getItem(ADMIN_AUTH_KEY);
+      if (token) {
+        sessionStorage.setItem(ADMIN_AUTH_KEY, token);
+        localStorage.removeItem(ADMIN_AUTH_KEY);
+      }
+    } catch {
+      token = null;
+    }
   }
   if (!token) return extra;
   return { ...extra, Authorization: `Basic ${token}` };

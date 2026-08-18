@@ -1,20 +1,38 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from uuid import UUID
 
 from app.settings import settings
 
 _PROJECT_FILES = ("AGENT.md", "agent.md", "outline.md", "AGENTS.md")
-_session_project_cache: dict[str, str] = {}
+_CACHE_MAX = 256
+_CACHE_TTL_S = 3600.0
+# key → (text, expires_monotonic)
+_session_project_cache: dict[str, tuple[str, float]] = {}
+
+
+def _purge_project_cache() -> None:
+    now = time.monotonic()
+    expired = [k for k, (_, exp) in _session_project_cache.items() if exp <= now]
+    for key in expired:
+        _session_project_cache.pop(key, None)
+    overflow = len(_session_project_cache) - _CACHE_MAX
+    if overflow <= 0:
+        return
+    oldest = sorted(_session_project_cache.items(), key=lambda kv: kv[1][1])[:overflow]
+    for key, _ in oldest:
+        _session_project_cache.pop(key, None)
 
 
 def load_project_context(*, session_id: UUID | str | None = None) -> str:
     """Load short workspace convention files; session-cached after first read."""
     key = str(session_id) if session_id is not None else "_default"
+    _purge_project_cache()
     cached = _session_project_cache.get(key)
     if cached is not None:
-        return cached
+        return cached[0]
 
     root = Path(settings.workspace_root)
     chunks: list[str] = []
@@ -37,7 +55,7 @@ def load_project_context(*, session_id: UUID | str | None = None) -> str:
         chunks.append(f"## {name}\n{snippet}")
         used += len(snippet)
     result = "\n\n".join(chunks)
-    _session_project_cache[key] = result
+    _session_project_cache[key] = (result, time.monotonic() + _CACHE_TTL_S)
     return result
 
 

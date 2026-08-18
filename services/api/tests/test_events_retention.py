@@ -25,7 +25,10 @@ async def test_run_events_retention_deletes_stream_and_structural() -> None:
     assert out == {"stream": 3, "structural": 1}
     assert pool.execute.await_count == 2
     inc.assert_called_once()
-    assert "thinking.delta" in pool.execute.await_args_list[0].args[2]
+    stream_types = pool.execute.await_args_list[0].args[2]
+    assert "turn.thinking.delta" in stream_types
+    assert "thinking.delta" not in stream_types
+    assert "section.draft.delta" in stream_types
 
 
 @pytest.mark.asyncio

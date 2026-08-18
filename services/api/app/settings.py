@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     events_stream_retention_days: int = 7
     events_structural_retention_days: int = 90
     events_retention_interval_seconds: float = 3600.0
+    events_retention_stream_batch: int = 50_000
+    events_retention_structural_batch: int = 10_000
+    events_retention_budget_seconds: float = 25.0
+    # Optional Fernet secret for model API keys. Empty → APP_SECRET_KEY.
+    config_encryption_key: str = ""
     # docs/27 — Work roots (path strings stored in DB; runtime mounts/creates dirs)
     workspace_root: str = "/workspace"
     works_root: str = "/data/works"
