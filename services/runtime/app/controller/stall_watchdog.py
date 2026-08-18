@@ -38,6 +38,7 @@ async def scan_stalled_runs() -> None:
             r.turn_id,
             r.cancel_requested_at,
             t.scenario_id,
+            t.status AS turn_status,
             (
                 SELECT te.trace_id
                 FROM turn_events te
@@ -81,6 +82,9 @@ async def scan_stalled_runs() -> None:
                 finalized = False
             if finalized:
                 continue
+        # Human approval gate: no new events is the expected pause, not a hang.
+        if str(row["turn_status"] or "") == "waiting_approval":
+            continue
         if last_ts is None or last_ts >= cutoff:
             continue
         if row["cancel_requested_at"] is not None:

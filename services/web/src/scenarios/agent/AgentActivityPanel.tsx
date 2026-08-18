@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ListTree } from "lucide-react";
 import type { TurnEvent } from "../../shared/api/client";
 import type { WorkbenchState } from "../../shared/workbench/types";
@@ -7,6 +8,7 @@ import {
 } from "../../shared/workbench/toolApproval";
 import { UsageMeter } from "./UsageMeter";
 import { livePlanStep } from "../../shared/workbench/plan";
+import { formatTurnElapsed } from "./turnElapsed";
 
 export type AgentPhase =
   | "idle"
@@ -202,6 +204,25 @@ export function AgentActivityPanel({
   toolsCount = 0,
 }: Props) {
   const activity = deriveAgentActivity(wb.events, wb);
+  const live =
+    wb.busy ||
+    wb.awaitingApproval ||
+    wb.displayStatus === "running" ||
+    wb.displayStatus === "waiting_approval" ||
+    wb.displayStatus === "pending";
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [live]);
+  const startedAt = wb.turnHistory.find((t) => t.id === wb.turnId)?.created_at;
+  const elapsedLabel =
+    startedAt && (live || activity.phase === "completed" || activity.phase === "failed")
+      ? `${live ? "已运行" : "用时"} ${formatTurnElapsed(
+          (nowMs - Date.parse(startedAt)) / 1000,
+        )}`
+      : null;
   const style = PHASE_STYLES[activity.phase];
   const planStep = livePlanStep(wb.plan, wb.displayStatus);
   const pinnedCards = [...(wb.view?.artifacts ?? [])]
@@ -247,6 +268,11 @@ export function AgentActivityPanel({
             >
               {activity.label}
             </p>
+            {elapsedLabel ? (
+              <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">
+                {elapsedLabel}
+              </span>
+            ) : null}
           </div>
           {activity.detail ? (
             <p

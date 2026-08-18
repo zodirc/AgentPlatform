@@ -959,7 +959,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
-  async function handleApprove() {
+  async function handleApprove(opts?: { allowPrefix?: string }) {
     const toolCallId = view?.interrupt?.tool_call_id ?? pendingToolCallId;
     if (!turnId || !toolCallId) return;
     setActionBusy(true);
@@ -978,7 +978,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     try {
       // Always approve over HTTP: the WS socket is already closed at the
       // approval pause point, so socket.send would be a silent no-op.
-      await approveToolCall(turnId, toolCallId);
+      await approveToolCall(turnId, toolCallId, opts?.allowPrefix);
       setBusy(true);
       setActionBusy(false);
       connectStream(turnId, lastSequenceRef.current);

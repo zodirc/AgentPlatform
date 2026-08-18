@@ -255,6 +255,42 @@ async def test_run_command_sticky_skips_approval_after_preapprove() -> None:
     assert called["n"] == 1
 
 
+@pytest.mark.asyncio
+async def test_run_command_allowlist_skips_approval(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"n": 0}
+
+    async def handler(**_kwargs):
+        called["n"] += 1
+        return {"ok": True, "summary": "ran"}
+
+    async def allowed(_state, _arguments):
+        return True
+
+    monkeypatch.setattr(
+        "app.tools.command_allowlist.command_is_allowlisted",
+        allowed,
+    )
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="run_command",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+                requires_approval=True,
+            )
+        ]
+    )
+    result = await executor.run(
+        tool_name="run_command",
+        tool_call_id="c1",
+        arguments={"command": "pytest -q"},
+        state=_minimal_state(exec_preapproved=False),
+    )
+    assert result.get("ok") is True
+    assert called["n"] == 1
+
+
 def _minimal_state(**extra: object) -> object:
     base = {
         "turn_id": None,

@@ -129,7 +129,7 @@ export type WorkbenchState = {
   handleStop: () => Promise<void>;
   handleAcceptPatch: (patchId: string) => Promise<void>;
   handleRejectPatch: (patchId: string) => Promise<void>;
-  handleApprove: () => Promise<void>;
+  handleApprove: (opts?: { allowPrefix?: string }) => Promise<void>;
   handleDeny: () => Promise<void>;
   refreshView: () => Promise<void>;
 };

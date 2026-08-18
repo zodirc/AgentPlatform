@@ -19,6 +19,7 @@ import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
 import { IndexInspectSection } from "./IndexInspectSection";
+import { CommandAllowlistCard } from "./CommandAllowlistCard";
 import { nextModelPanelAfterListChange } from "./settingsModelPanel";
 import { SETTINGS_TABS, tabFromPath } from "./settingsTabs";
 
@@ -865,6 +866,12 @@ export function SettingsPage() {
       {tab === "signals" ? (
         <div className="mt-6">
           <SignalsSection />
+        </div>
+      ) : null}
+
+      {tab === "allowlist" ? (
+        <div className="mt-6">
+          <CommandAllowlistCard />
         </div>
       ) : null}
 

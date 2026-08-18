@@ -43,6 +43,7 @@ class ToolCallDecisionRequest(BaseModel):
     tool_call_id: str
     client_request_id: UUID | None = None
     reason: str | None = None
+    allow_prefix: str | None = None
 
 
 class PatchDecisionRequest(BaseModel):
@@ -291,6 +292,14 @@ async def approve_tool_call(
         raise HTTPException(status_code=409, detail=f"Turn not awaiting approval: {turn['status']}")
 
     trace_id = uuid4()
+    prefix = (body.allow_prefix or "").strip()
+    if prefix:
+        from app.services.command_allowlist import AllowlistError, add_prefix
+
+        try:
+            await add_prefix(actor.id, prefix)
+        except AllowlistError as exc:
+            raise HTTPException(status_code=400, detail=exc.message) from exc
     if _commands_via_db():
         await enqueue_run_command(
             run_id=run["id"],
@@ -313,7 +322,7 @@ async def approve_tool_call(
         action="tool_call.approve",
         resource_type="turn",
         resource_id=turn_id,
-        detail={"tool_call_id": body.tool_call_id},
+        detail={"tool_call_id": body.tool_call_id, "allow_prefix": prefix or None},
     )
     response = {"accepted": True, "turn_id": str(turn_id), "trace_id": str(trace_id)}
     idempotency.remember(turn_id, body.client_request_id, response)

@@ -72,7 +72,7 @@ AgentEngine while true:
 1. 需审 → 发审批请求 → `waiting_approval`，**同 `run_id` checkpoint**（含「还欠测试 / 还欠 issue 例子」）。  
 2. 批准 → 续跑；拒绝 → 把原因写进 `tool_result`，由模型决定改方案或结束。  
 3. **写盘粘性**：同 Turn 内批准一次后，同类写盘可免再审。  
-4. **shell 粘性**：`run_command` **第一次仍要审**；通过后本 Turn 后续同类 shell 可免再审。Plan `executing` 只预授权清单内写盘，**不等于** shell 免审。普通进度清单更新 **≠** 已批准开工。  
+4. **shell 审批**：`run_command` 默认每次要审。「批准这次」只放行当前这一条；「加入允许列表」按命令前缀记住，之后相同前缀不再问（设置里可删）。`ops_eval` 仍预批准 exec。Plan `executing` 只预授权清单内写盘，**不等于** shell 免审。  
 5. **官方评测无人值守**：这次提问带评测标记时，StartTurn 即置写盘/exec 预批准，不拦人审。  
 
 正交：

@@ -30,8 +30,8 @@ export function approvalCopy(toolName: string | null | undefined): {
     return {
       title: "待审批：执行命令",
       description:
-        "Agent 要在工作区运行 Shell 命令（不是写文件）。批准后命令会立即执行。",
-      approveLabel: "批准执行命令",
+        "批准这次只放行当前命令。加入允许列表后，相同前缀的后续命令不再询问（可在设置中删除）。",
+      approveLabel: "批准这次",
     };
   }
   if (kind === "edit_file") {
@@ -77,4 +77,11 @@ export function approvalDetailLine(
     (typeof args?.path === "string" ? args.path.trim() : "");
   if ((toolName ?? "") === "run_command" && command) return command;
   return resolvedPath || (toolName ?? "").trim();
+}
+
+/** First token of a shell command, used as the default allow-list prefix. */
+export function defaultPrefixFromCommand(command: string): string {
+  const norm = command.replace(/\s+/g, " ").trim();
+  if (!norm) return "";
+  return norm.split(" ")[0] ?? "";
 }

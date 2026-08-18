@@ -448,6 +448,7 @@ export interface components {
             /** Format: uuid */
             client_request_id?: string;
             reason?: string;
+            allow_prefix?: string;
         };
         PatchDecisionRequest: {
             patch_id: string;

@@ -1605,12 +1605,12 @@ async def _resume_after_approval(
             )
 
     state = pending.state
-    from app.tools.registry import EXEC_APPROVAL_STICKY_TOOLS, WRITE_APPROVAL_STICKY_TOOLS
+    from app.tools.registry import WRITE_APPROVAL_STICKY_TOOLS
 
     if approved and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
         state.writes_preapproved = True
-    if approved and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
-        state.exec_preapproved = True
+    # run_command: one-shot approve does not waive later shell. Prefix allow list
+    # is persisted by the API; ops_eval still sets exec_preapproved at StartTurn.
     owner_user_id = await load_session_owner_user_id(state.session_id)
     model_config = await resolve_model_config(owner_user_id=owner_user_id)
     context_window_tokens = await resolve_context_window_tokens(

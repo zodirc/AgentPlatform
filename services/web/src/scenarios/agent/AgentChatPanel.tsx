@@ -8,6 +8,7 @@ import { Markdown } from "../../shared/Markdown";
 import {
   approvalCopy,
   approvalDetailLine,
+  defaultPrefixFromCommand,
   lastApprovalEvent,
 } from "../../shared/workbench/toolApproval";
 import { onChatEnterSend } from "../../shared/workbench/chatKeyboard";
@@ -368,25 +369,57 @@ function ApprovalActionButtons({
   disabled,
   onApprove,
   onDeny,
+  allowPrefix,
+  onAllowPrefixChange,
+  onAllowlist,
 }: {
   approveLabel: string;
   disabled: boolean;
   onApprove: () => void;
   onDeny: () => void;
+  allowPrefix?: string;
+  onAllowPrefixChange?: (value: string) => void;
+  onAllowlist?: () => void;
 }) {
   return (
-    <div className="flex shrink-0 flex-wrap gap-2">
-      <Button
-        size="sm"
-        className="bg-success text-success-foreground hover:bg-success/90"
-        disabled={disabled}
-        onClick={onApprove}
-      >
-        {approveLabel}
-      </Button>
-      <Button size="sm" variant="outline" disabled={disabled} onClick={onDeny}>
-        拒绝
-      </Button>
+    <div className="flex shrink-0 flex-col items-end gap-1.5">
+      {onAllowlist ? (
+        <label className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+          前缀
+          <input
+            className="w-[9rem] rounded border border-border bg-background px-1.5 py-0.5 font-mono text-[11px] text-foreground"
+            value={allowPrefix ?? ""}
+            onChange={(e) => onAllowPrefixChange?.(e.target.value)}
+            maxLength={200}
+            spellCheck={false}
+          />
+        </label>
+      ) : null}
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button
+          size="sm"
+          className="bg-success text-success-foreground hover:bg-success/90"
+          disabled={disabled}
+          onClick={onApprove}
+        >
+          {approveLabel}
+        </Button>
+        {onAllowlist ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="border-success/40 text-success"
+            disabled={disabled || !(allowPrefix ?? "").trim()}
+            onClick={onAllowlist}
+            title="此后以该前缀开头的命令不再询问"
+          >
+            加入允许列表
+          </Button>
+        ) : null}
+        <Button size="sm" variant="outline" disabled={disabled} onClick={onDeny}>
+          拒绝
+        </Button>
+      </div>
     </div>
   );
 }
@@ -401,6 +434,9 @@ function ChatApprovalCard({
   disabled,
   onApprove,
   onDeny,
+  allowPrefix,
+  onAllowPrefixChange,
+  onAllowlist,
 }: {
   title: string;
   description: string;
@@ -411,6 +447,9 @@ function ChatApprovalCard({
   disabled: boolean;
   onApprove: () => void;
   onDeny: () => void;
+  allowPrefix?: string;
+  onAllowPrefixChange?: (value: string) => void;
+  onAllowlist?: () => void;
 }) {
   return (
     <div
@@ -433,6 +472,9 @@ function ChatApprovalCard({
           disabled={disabled}
           onApprove={onApprove}
           onDeny={onDeny}
+          allowPrefix={allowPrefix}
+          onAllowPrefixChange={onAllowPrefixChange}
+          onAllowlist={onAllowlist}
         />
       </div>
       <div className="p-4">
@@ -484,6 +526,7 @@ export function AgentChatPanel({
 
   const [activeTab, setActiveTab] = useState<ChatTab>("main");
   const [closedTabs, setClosedTabs] = useState<Set<string>>(() => new Set());
+  const [allowPrefix, setAllowPrefix] = useState("");
   const [slashActiveIndex, setSlashActiveIndex] = useState(0);
   const [slashDismissed, setSlashDismissed] = useState(false);
   const seenRunningRef = useRef<Set<string>>(new Set());
@@ -498,6 +541,19 @@ export function AgentChatPanel({
   useEffect(() => {
     if (slashQuery == null) setSlashDismissed(false);
   }, [slashQuery]);
+
+  useEffect(() => {
+    setAllowPrefix(defaultPrefixFromCommand(approvalCommand));
+  }, [wb.pendingToolCallId, approvalCommand]);
+
+  const commandAllow =
+    wb.pendingToolName === "run_command"
+      ? {
+          allowPrefix,
+          onAllowPrefixChange: setAllowPrefix,
+          onAllowlist: () => void wb.handleApprove({ allowPrefix }),
+        }
+      : {};
 
   useEffect(() => {
     setSlashActiveIndex(0);
@@ -735,6 +791,7 @@ export function AgentChatPanel({
                   disabled={wb.actionBusy || !wb.pendingToolCallId}
                   onApprove={() => void wb.handleApprove()}
                   onDeny={() => void wb.handleDeny()}
+                  {...commandAllow}
                 />
               </div>
             ) : null}
@@ -761,6 +818,7 @@ export function AgentChatPanel({
             disabled={wb.actionBusy || !wb.pendingToolCallId}
             onApprove={() => void wb.handleApprove()}
             onDeny={() => void wb.handleDeny()}
+            {...commandAllow}
           />
         </div>
       ) : null}

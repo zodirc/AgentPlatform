@@ -439,7 +439,12 @@ export async function cancelTurn(turnId: string, force = false) {
   return res.json();
 }
 
-export async function approveToolCall(turnId: string, toolCallId: string) {
+export async function approveToolCall(
+  turnId: string,
+  toolCallId: string,
+  allowPrefix?: string,
+) {
+  const prefix = (allowPrefix ?? "").trim();
   const res = await fetch(`${API_BASE}/turns/${turnId}/approve-tool-call`, {
     ...sessionFetchInit,
     method: "POST",
@@ -448,6 +453,7 @@ export async function approveToolCall(turnId: string, toolCallId: string) {
       tool_call_id: toolCallId,
       // Lets the API replay (not re-execute) duplicate submissions.
       client_request_id: crypto.randomUUID(),
+      ...(prefix ? { allow_prefix: prefix } : {}),
     }),
   });
   if (!res.ok) throw new Error(`approveToolCall failed: ${res.status}`);

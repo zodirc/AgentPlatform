@@ -18,6 +18,7 @@ from app.middleware.request_context import RequestContextMiddleware
 from app.models.responses import ErrorBody, ErrorResponse, MetaBody
 from app.routers import (
     auth,
+    command_allowlist,
     health,
     ops_envelope,
     ops_eval,
@@ -187,6 +188,7 @@ setup_tracing(service_name=settings.otel_service_name, enabled=settings.otel_ena
 instrument_fastapi(app, enabled=settings.otel_enabled)
 app.include_router(health.router)
 app.include_router(auth.router, prefix="/api/v1")
+app.include_router(command_allowlist.router, prefix="/api/v1")
 app.include_router(sessions.router, prefix="/api/v1")
 app.include_router(works.router, prefix="/api/v1")
 app.include_router(turns.router, prefix="/api/v1")

@@ -12,8 +12,8 @@ ON_WRITE_TOOLS = frozenset(
 # for the rest of that Turn (progress-checklist / multi-edit UX).
 WRITE_APPROVAL_STICKY_TOOLS = ON_WRITE_TOOLS | frozenset({"rename_file"})
 
-# After one run_command approve in a Turn, further shell calls skip approval.
-# First gate still always; does not cover write_file / network / delegate.
+# Ops/eval StartTurn may set exec_preapproved so unattended shell skips the gate.
+# Interactive Turns use the per-user command-prefix allow list instead.
 EXEC_APPROVAL_STICKY_TOOLS = frozenset({"run_command"})
 
 

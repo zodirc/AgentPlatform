@@ -700,6 +700,9 @@ components:
           format: uuid
         reason:
           type: string
+        allow_prefix:
+          type: string
+          description: Remember this command prefix so later matching run_command calls skip approval.
     PatchDecisionRequest:
       type: object
       required: [patch_id]

@@ -48,14 +48,25 @@ class ToolExecutor:
             if bool(getattr(state, "ops_eval", False)):
                 pass
             else:
-                # Same-Turn sticky: one write approval covers further file mutations;
-                # one run_command approval covers further shell in this Turn.
+                # Same-Turn sticky: one write approval covers further file mutations.
+                # Shell: ops_eval exec_preapproved, or a saved command-prefix allow list.
                 write_sticky = bool(getattr(state, "writes_preapproved", False))
                 exec_sticky = bool(getattr(state, "exec_preapproved", False))
                 if write_sticky and tool_name in WRITE_APPROVAL_STICKY_TOOLS:
                     pass
                 elif exec_sticky and tool_name in EXEC_APPROVAL_STICKY_TOOLS:
                     pass
+                elif tool_name == "run_command":
+                    from app.tools.command_allowlist import command_is_allowlisted
+
+                    if await command_is_allowlisted(state, arguments):
+                        pass
+                    else:
+                        return {
+                            "status": "approval_required",
+                            "tool_call_id": tool_call_id,
+                            "tool_name": tool_name,
+                        }
                 else:
                     return {
                         "status": "approval_required",
