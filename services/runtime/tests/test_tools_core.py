@@ -77,6 +77,44 @@ async def test_draft_section_writes_monofile_manuscript(workspace: Path) -> None
 
 
 @pytest.mark.asyncio
+async def test_draft_section_length_short_on_padded_quota(workspace: Path) -> None:
+    padded = ("甲" * 80) + ("\n\n" * 40)
+    short = await core.draft_section(
+        "ch1",
+        padded,
+        turn_id=uuid4(),
+        turn_user_text="写 300 字",
+    )
+    assert short["visible_chars"] == 80
+    assert short["quota_chars"] == 300
+    assert short["length_short"] is True
+    assert "不要报完工" in short["summary"]
+    assert (workspace / "drafts" / "manuscript.md").is_file()
+
+    met = await core.draft_section(
+        "ch2",
+        "甲" * 300,
+        turn_id=uuid4(),
+        turn_user_text="写 300 字",
+    )
+    assert met["visible_chars"] == 300
+    assert "length_short" not in met
+
+
+@pytest.mark.asyncio
+async def test_draft_section_no_default_quota_without_n(workspace: Path) -> None:
+    result = await core.draft_section(
+        "fix",
+        "改一句。",
+        turn_id=uuid4(),
+        turn_user_text="把这句对白改短一点",
+    )
+    assert result["visible_chars"] == 4
+    assert "quota_chars" not in result
+    assert "length_short" not in result
+
+
+@pytest.mark.asyncio
 async def test_draft_section_appends_chapters_same_file(workspace: Path) -> None:
     await core.draft_section("ch1", "v1", turn_id=uuid4(), session_id=uuid4())
     await core.draft_section("ch2", "v2", turn_id=uuid4(), session_id=uuid4())
@@ -336,6 +374,17 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
+    assert "## Prose defaults" in writing.system_prompt
+    assert "### Length counting" in writing.system_prompt
+    assert "### Outline defaults" in writing.system_prompt
+    assert "### Scene richness" in writing.system_prompt
+    assert "### Also avoid" in writing.system_prompt
+    assert "200–400" in writing.system_prompt
+    assert "1000–2000" in writing.system_prompt
+    assert "1800–3500" in writing.system_prompt
+    # Voice slogans live on the pinned card, not the standing prefix.
+    assert "却说" not in writing.system_prompt
+    assert "特务踹门" not in writing.system_prompt
     # Agent prompt: locate before survey; ban path-theater / read loops.
     assert "Locate" in agent.system_prompt or "search_codebase" in agent.system_prompt
     assert "Path theater" in agent.system_prompt

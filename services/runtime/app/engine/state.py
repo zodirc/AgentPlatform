@@ -74,6 +74,9 @@ class TurnState:
     issue_repro_receipt_sent: bool = False
     # Code edits since last successful issue repro (must be 0 to stay satisfied).
     issue_repro_edits_since: int = 0
+    # This Turn's StartTurn user text (not later injected receipts). Writing tools
+    # parse quota / TOC-only from here; empty on legacy checkpoints.
+    turn_user_text: str = ""
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

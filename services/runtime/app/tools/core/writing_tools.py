@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from app.settings import settings
 from app.tools.core.paths import _resolve_path
+from app.writing.text_metrics import draft_length_fields, outline_thin_fields
 
 _LAST_PLAN_SIG: dict[str, tuple[tuple[str, str, str], ...]] = {}
 
@@ -238,6 +239,12 @@ async def draft_section(
     }
     if history_path:
         result["history_path"] = history_path
+    result.update(
+        draft_length_fields(
+            content,
+            str(_kwargs.get("turn_user_text") or ""),
+        )
+    )
     return result
 
 
@@ -358,10 +365,17 @@ async def update_outline(
         summary = "Outline updated"
 
     target.write_text(final, encoding="utf-8")
-    return {
+    scored = content if mode_n == "append" else final
+    result: dict[str, Any] = {
         "path": path,
         "content": final,
         "summary": summary,
         "outline_path": path,
         "mode": "append" if mode_n == "append" else "replace",
     }
+    thin = outline_thin_fields(scored, str(_kwargs.get("turn_user_text") or ""))
+    suffix = thin.pop("summary_suffix", None)
+    result.update(thin)
+    if suffix:
+        result["summary"] = f"{summary}；{suffix}"
+    return result

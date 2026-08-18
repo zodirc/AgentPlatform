@@ -458,6 +458,46 @@ async def test_update_outline_append_and_shrink_guard(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_outline_thin_unless_toc_ask(workspace: Path) -> None:
+    thin = await core.update_outline(
+        "# 第一章\n一句。\n# 第二章\n两句。",
+        turn_user_text="写一版章纲",
+    )
+    assert thin["outline_thin"] is True
+    assert "第一章" in thin["thin_chapters"]
+    assert (workspace / "outline.md").read_text(encoding="utf-8").startswith("# 第一章")
+
+    fat_body = "目标阻力场面信息变化章末落点。" * 20
+    ok = await core.update_outline(
+        f"# 第一章\n{fat_body}",
+        turn_user_text="写一版章纲",
+    )
+    assert ok["outline_thin"] is False
+
+    toc = await core.update_outline(
+        "# 卷一\n# 卷二\n",
+        turn_user_text="只要目录",
+    )
+    assert toc["outline_thin"] is False
+    assert "thin_chapters" not in toc
+
+
+@pytest.mark.asyncio
+async def test_update_outline_append_scores_new_chunk_only(workspace: Path) -> None:
+    (workspace / "outline.md").write_text("# 旧章\n", encoding="utf-8")
+    fat = "目标阻力场面变化落点。" * 20
+    appended = await core.update_outline(
+        f"# 新章\n{fat}",
+        mode="append",
+        turn_user_text="继续加厚",
+    )
+    assert appended["mode"] == "append"
+    assert appended["outline_thin"] is False
+    text = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert "# 旧章" in text and "# 新章" in text
+
+
+@pytest.mark.asyncio
 async def test_grep_and_search_codebase(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (workspace / "code.py").write_text("def hello():\n    pass\n", encoding="utf-8")
 

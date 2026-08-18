@@ -88,6 +88,7 @@ class ToolExecutor:
                     session_id=state.session_id,
                     plan_phase=state.plan_phase,
                     scenario_id=state.scenario_id,
+                    turn_user_text=getattr(state, "turn_user_text", "") or "",
                 ),
                 timeout=timeout_s,
             )

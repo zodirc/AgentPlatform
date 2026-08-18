@@ -22,17 +22,20 @@ def test_checkpoint_roundtrip_preserves_volatile_context() -> None:
         read_registry={
             "a.py": PathReadState(whole_file_complete=True, covered_ranges=[(1, 10)]),
         },
+        turn_user_text="写 300 字",
     )
     raw = _serialize_state(state)
     assert "李云龙" in raw["volatile_context"]
     assert raw["read_registry"]["a.py"]["whole_file_complete"] is True
     assert raw["exec_preapproved"] is True
+    assert raw["turn_user_text"] == "写 300 字"
     restored = _deserialize_state(raw)
     assert restored.volatile_context == state.volatile_context
     assert restored.plan_phase == "executing"
     assert restored.writes_preapproved is True
     assert restored.exec_preapproved is True
     assert restored.read_registry["a.py"].whole_file_complete is True
+    assert restored.turn_user_text == "写 300 字"
 
 
 def test_checkpoint_deserializes_legacy_without_volatile() -> None:
@@ -48,6 +51,7 @@ def test_checkpoint_deserializes_legacy_without_volatile() -> None:
     restored = _deserialize_state(data)
     assert restored.volatile_context == ""
     assert restored.read_registry == {}
+    assert restored.turn_user_text == ""
 
 
 def test_wants_run_tests_requires_marker() -> None:

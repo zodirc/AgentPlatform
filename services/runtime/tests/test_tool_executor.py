@@ -262,6 +262,7 @@ def _minimal_state(**extra: object) -> object:
         "session_id": None,
         "plan_phase": None,
         "scenario_id": "writing",
+        "turn_user_text": "",
     }
     base.update(extra)
     return type("S", (), base)()
@@ -343,6 +344,34 @@ async def test_tool_executor_handler_exception() -> None:
         state=_minimal_state(),
     )
     assert result == {"error": "boom"}
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_passes_turn_user_text() -> None:
+    seen: dict[str, object] = {}
+
+    async def handler(**kwargs):
+        seen.update(kwargs)
+        return {"ok": True}
+
+    executor = ToolExecutor(
+        [
+            ToolSpec(
+                name="draft_section",
+                description="x",
+                parameters={"type": "object"},
+                handler=handler,
+            )
+        ]
+    )
+    result = await executor.run(
+        tool_name="draft_section",
+        tool_call_id="c1",
+        arguments={"section_id": "ch1", "content": "x"},
+        state=_minimal_state(turn_user_text="写 300 字"),
+    )
+    assert result.get("ok") is True
+    assert seen["turn_user_text"] == "写 300 字"
 
 
 @pytest.mark.asyncio

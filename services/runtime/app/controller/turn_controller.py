@@ -1299,6 +1299,7 @@ async def _run_turn(
         ops_eval=bool(ops_eval),
         writes_preapproved=bool(ops_eval),
         exec_preapproved=bool(ops_eval),
+        turn_user_text=message or "",
     )
 
     registry = build_registry()
