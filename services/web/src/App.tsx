@@ -354,13 +354,31 @@ function MainContent() {
 
 function AppBody() {
   const { sessionId } = useWorkbenchSession();
+  const { pathname } = useLocation();
+  const lockViewport = SCENARIO_PATHS.includes(
+    pathname as (typeof SCENARIO_PATHS)[number],
+  );
 
   return (
     <WorkbenchProvider key={sessionId ?? "pending"}>
       <AgentPanelProvider>
-        <div className="min-h-screen">
-          <Nav />
-          <MainContent />
+        <div
+          className={
+            lockViewport
+              ? "flex h-dvh min-h-0 flex-col overflow-hidden"
+              : "min-h-screen"
+          }
+        >
+          <div className={lockViewport ? "shrink-0" : undefined}>
+            <Nav />
+          </div>
+          <div
+            className={
+              lockViewport ? "min-h-0 flex-1 overflow-hidden" : undefined
+            }
+          >
+            <MainContent />
+          </div>
         </div>
       </AgentPanelProvider>
     </WorkbenchProvider>

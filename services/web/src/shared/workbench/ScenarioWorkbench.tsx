@@ -115,8 +115,8 @@ export function ScenarioWorkbenchView({
   }, [toolsOpen, closeTools]);
 
   const rootClass = fillParent
-    ? "relative flex h-full min-h-0 flex-col"
-    : "relative flex h-[calc(100vh-49px)] flex-col";
+    ? "relative flex h-full min-h-0 flex-col overflow-hidden"
+    : "relative flex h-dvh min-h-0 flex-col overflow-hidden";
 
   return (
     <div className={rootClass}>
@@ -239,7 +239,7 @@ export function ScenarioWorkbenchView({
             toolsOpen={toolsOpen}
             toolsCount={toolsCount}
           />
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="relative min-h-0 flex-1 overflow-hidden">
             <AgentChatPanel
               wb={wb}
               openSubagentRequest={openSubagentRequest}

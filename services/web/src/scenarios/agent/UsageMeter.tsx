@@ -279,7 +279,13 @@ export function UsageMeter({
       ) : null}
 
       {showDetails && hasContext && contextUsage ? (
-        <div className={compact ? "pt-1.5" : undefined}>
+        <div
+          className={
+            compact
+              ? "max-h-28 overflow-y-auto overscroll-contain pt-1.5"
+              : undefined
+          }
+        >
           <ContextBreakdownBody
             contextUsage={contextUsage}
             breakdown={breakdown}

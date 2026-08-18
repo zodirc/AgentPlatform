@@ -397,37 +397,55 @@ function ChatApprovalCard({
   subagent,
   writePreview,
   command,
+  approveLabel,
+  disabled,
+  onApprove,
+  onDeny,
 }: {
   title: string;
   description: string;
   subagent: boolean;
   writePreview: WriteFilePreview | null;
   command: string;
+  approveLabel: string;
+  disabled: boolean;
+  onApprove: () => void;
+  onDeny: () => void;
 }) {
   return (
     <div
-      className="mb-4 max-w-[min(100%,48rem)] rounded-2xl rounded-tl-md border border-primary/40 bg-primary/10 p-4"
+      className="mb-4 max-w-[min(100%,48rem)] rounded-2xl rounded-tl-md border border-primary/40 bg-primary/10"
       data-testid="chat-approval-card"
       role="region"
       aria-label="待审批内容"
     >
-      <p className="text-sm font-medium text-primary">
-        {title}
-        {subagent ? (
-          <span className="ml-2 text-xs font-normal text-primary/80">
-            · 子任务
-          </span>
+      <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 rounded-t-2xl border-b border-primary/30 bg-primary/20 px-4 py-2.5 backdrop-blur-sm">
+        <p className="min-w-0 flex-1 text-sm font-medium text-primary">
+          {title}
+          {subagent ? (
+            <span className="ml-2 text-xs font-normal text-primary/80">
+              · 子任务
+            </span>
+          ) : null}
+        </p>
+        <ApprovalActionButtons
+          approveLabel={approveLabel}
+          disabled={disabled}
+          onApprove={onApprove}
+          onDeny={onDeny}
+        />
+      </div>
+      <div className="p-4">
+        <p className="mb-2 text-xs text-muted-foreground">{description}</p>
+        {writePreview ? (
+          <WriteFileDiffPanel preview={writePreview} mode="approval" />
         ) : null}
-      </p>
-      <p className="mb-2 text-xs text-muted-foreground">{description}</p>
-      {writePreview ? (
-        <WriteFileDiffPanel preview={writePreview} mode="approval" />
-      ) : null}
-      {command ? (
-        <pre className="mt-2 max-h-48 overflow-auto rounded bg-background p-2 text-xs text-warning">
-          $ {command}
-        </pre>
-      ) : null}
+        {command ? (
+          <pre className="mt-2 max-h-48 overflow-auto rounded bg-background p-2 text-xs text-warning">
+            $ {command}
+          </pre>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -547,6 +565,7 @@ export function AgentChatPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const endRef = useRef<HTMLDivElement>(null);
+  const approvalCardRef = useRef<HTMLDivElement>(null);
 
   const onScroll = () => {
     const el = scrollRef.current;
@@ -560,6 +579,7 @@ export function AgentChatPanel({
 
   useEffect(() => {
     if (!stickToBottomRef.current) return;
+    if (wb.awaitingApproval && onMain) return;
     endRef.current?.scrollIntoView({ block: "end" });
   }, [
     wb.turnHistory.length,
@@ -575,6 +595,7 @@ export function AgentChatPanel({
     planItemsKey,
     wb.canExecutePlan,
     activeTab,
+    onMain,
     activeSub?.streamText,
     activeSub?.thinkingText,
     activeSub?.tools.length,
@@ -582,14 +603,15 @@ export function AgentChatPanel({
 
   useEffect(() => {
     if (!wb.busy) return;
+    if (wb.awaitingApproval && onMain) return;
     stickToBottomRef.current = true;
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [wb.turnId, wb.busy, activeTab]);
+  }, [wb.turnId, wb.busy, activeTab, wb.awaitingApproval, onMain]);
 
   useEffect(() => {
     if (!wb.awaitingApproval || !onMain) return;
-    stickToBottomRef.current = true;
-    endRef.current?.scrollIntoView({ block: "end" });
+    stickToBottomRef.current = false;
+    approvalCardRef.current?.scrollIntoView({ block: "start" });
   }, [wb.awaitingApproval, wb.pendingToolCallId, onMain]);
 
   const closeSubTab = (id: string) => {
@@ -602,7 +624,7 @@ export function AgentChatPanel({
   };
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-border/80 bg-background shadow-sm">
+    <section className="absolute inset-0 flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/80 bg-background shadow-sm">
       <ChatTabBar
         active={onMain ? "main" : activeTab}
         onSelect={setActiveTab}
@@ -615,7 +637,7 @@ export function AgentChatPanel({
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6"
+        className="scrollbar-thin min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6"
       >
         {onMain ? (
           <>
@@ -702,13 +724,19 @@ export function AgentChatPanel({
               </div>
             ) : null}
             {wb.awaitingApproval ? (
-              <ChatApprovalCard
-                title={approval.title}
-                description={approval.description}
-                subagent={Boolean(approvalSubagentId)}
-                writePreview={wb.pendingWriteFile}
-                command={approvalCommand}
-              />
+              <div ref={approvalCardRef}>
+                <ChatApprovalCard
+                  title={approval.title}
+                  description={approval.description}
+                  subagent={Boolean(approvalSubagentId)}
+                  writePreview={wb.pendingWriteFile}
+                  command={approvalCommand}
+                  approveLabel={approval.approveLabel}
+                  disabled={wb.actionBusy || !wb.pendingToolCallId}
+                  onApprove={() => void wb.handleApprove()}
+                  onDeny={() => void wb.handleDeny()}
+                />
+              </div>
             ) : null}
           </>
         ) : activeSub ? (
@@ -816,7 +844,9 @@ export function AgentChatPanel({
               />
             ) : null}
             <Textarea
-              className="min-h-[88px] resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+              className={`${
+                wb.awaitingApproval ? "min-h-[52px]" : "min-h-[88px]"
+              } resize-none border-0 bg-transparent text-sm shadow-none focus-visible:ring-0`}
               value={wb.message}
               onChange={(e) => {
                 setSlashDismissed(false);

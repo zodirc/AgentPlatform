@@ -67,7 +67,11 @@ export function WriteFileDiffPanel({ preview, mode = "history" }: Props) {
         </span>
       </div>
 
-      <UnifiedDiffView oldText={oldForDiff} newText={newForDiff} />
+      <UnifiedDiffView
+        oldText={oldForDiff}
+        newText={newForDiff}
+        maxHeightClass={mode === "approval" ? "max-h-40" : "max-h-72"}
+      />
 
       <button
         type="button"
