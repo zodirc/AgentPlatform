@@ -1,6 +1,6 @@
 # 评测实例走查
 
-本文用本地仍可复核的一次产物，把三套尺子落到具体题目上：官方给了什么、Agent 看见什么、过程如何结束、命中如何判定。Wiki 同文：`#ops-eval-walk`。
+本文用本地仍可复核的产物，把三套尺子落到具体题目上：官方字段、Work 可见范围、执行记录、命中判定。Wiki 同文：`#ops-eval-walk`。
 
 **权威顺序**：计分代码 > 本文 > 图注。套件宏分仍以 [`RESULTS.md`](../../eval/official/baseline/RESULTS.md) 为准。第 4 / 5 轮报告目录本机已不在；下列实例取自现存 `latest_*.json`、`eval/official/.local-data` 与本地 `sweb.eval` 镜像。
 
@@ -18,23 +18,24 @@
 
 ![检索实例走查](../assets/ops/ops-eval-walk-retrieval-zh.png)
 
-### 题目与可见范围
+### 官方字段与可见范围
 
-官方题是一条 **claim**（陈述句），不是检索指令。query-id `3` 原文：
+BEIR SciFact 落盘：`queries.jsonl` 的 `text` → 用户消息 Information need；`corpus.jsonl` 的 title+text → `sources/<doc_id>.txt`；`qrels/test.tsv` **不进入模型窗**。
+
+| 字段 | q-3 | q-1 | 进 Work？ |
+|------|-----|-----|-----------|
+| query `_id` / case | `3` · `beir.scifact.q-3` | `1` | case id |
+| `text`（claim） | 见下方 | `0-dimensional biomaterials show inductive properties.` | 是：Information need |
+| 金标 `doc_id` / `rel` | `14717500` / `1`（SUPPORT，evidence sentences 2、5） | `31715818` / `1` | **否** |
+| 语料 `title` | *Rare Variants Create Synthetic Genome-Wide Associations* | *New opportunities: the use of nanotechnologies to manipulate and track stem cells.* | 是：文件正文 |
+
+q-3 claim 原文：
 
 > 1,000 genomes project enables mapping of genetic sequence variation consisting of rare variants with larger penetrance effects than common variants.
 
-金标在 `qrels/test.tsv`，**不进入模型窗**：
+对应语料物化为 `sources/beir/scifact-micro/14717500.txt`（约 1849 字符）。qrels 行：`3	14717500	1`。
 
-```text
-3	14717500	1
-```
-
-对应语料标题为 *Rare Variants Create Synthetic Genome-Wide Associations*（1849 字符），物化为 `sources/beir/scifact-micro/14717500.txt`。
-
-smoke 取样为 qrels 出现顺序的前 20 条 query-id（`head_slice`，无随机）：`1, 3, 5, 13, …, 100`。
-
-free 臂提示要求：第一次 `search_sources` **复制** Information need 原文。
+smoke 取样为 qrels 出现顺序的前 20 条 query-id（`head_slice`，无随机）：`1, 3, 5, 13, …, 100`。free 臂要求第一次 `search_sources` **逐字复制** Information need。
 
 ### 执行记录（q-3）
 
@@ -71,6 +72,12 @@ top-10 为 `24928817, 37762357, …`，**不含**金标，故 nDCG@10 = 0、R@10
 
 Work 内仅有 `sources/passage.md`（该题 `context`）。金标 `answers` 不提供给模型。裁判为抽最后一条非空 `Answer:` 之后的 scorer **v2**（规范化相等为 EM；token 袋重合为 F1；含 CJK 的金标按字计）。无 Docker harness。
 
+| 官方字段 | 进 Work？ |
+|----------|-----------|
+| `input`（问题） | 是：用户消息 `Question:` |
+| `context`（长文） | 是：仅 `passage.md` |
+| `answers` | **否** |
+
 | 实例 | 官方问题 | 金标 | 预测 | 判定 |
 |------|----------|------|------|------|
 | idx 0 | What is the name of the most active fan club? | `South West Ultras fan club.`（约 offset 3043） | `South West Ultras fan club` | 去句号后相等 → **EM=1，F1=1**。`n_reads=0` 仍满分：主指标不计量阅读次数。 |
@@ -85,18 +92,31 @@ Work 内仅有 `sources/passage.md`（该题 `context`）。金标 `answers` 不
 
 ![编码实例走查](../assets/ops/ops-eval-walk-coding-zh.png)
 
-n5 为 HF test 顺序前 5 个 ID，全部为 astropy。本地已有对应 `sweb.eval` 镜像（约 2.7GB / 题）。跑次 `5a4e9ba9`：五题补丁均成功 apply，**`resolve_rate=0.6`（3/5）**。Turn 的 `status=pass` 仅表示产品 Turn 结束，不是官方通过。
+n5 为 HF test 顺序前 5 个 ID，全部为 astropy。官方行来自 `princeton-nlp/SWE-bench_Lite` test（与切片文件一致）。本地已有对应 `sweb.eval` 镜像（约 2.7GB / 题）。走查表仍用较早 harness 产物核对 F2P/P2P 定义；宏分以 RESULTS 为准（第6轮 coding **4/5**，未过仍是 14365）。Turn 的 `status=pass` 仅表示产品 Turn 结束，不是官方通过。
 
-### 可见范围
+| 官方字段 | 含义 | 进 Work？ |
+|----------|------|-----------|
+| `repo` / `base_commit` | GitHub 仓库与出 issue 时的坏树 | 是 |
+| `problem_statement` | GitHub issue 全文 | 是：`problem.md` |
+| `FAIL_TO_PASS` / `PASS_TO_PASS` | 隐藏测 | **否** |
+| 金标 `patch` / `test_patch` / `hints_text` | 官方补丁与提示 | **否** |
 
-`problem.md` 仅为 GitHub issue。14365 题面要求：ascii.qdp 不应强制命令全大写；下列文件应能读入 Table：
+| 字段 | `astropy__astropy-14365` | `astropy__astropy-12907` |
+|------|--------------------------|--------------------------|
+| `repo` | `astropy/astropy` | 同 |
+| `base_commit` | `7269fa3e33e8d02485a647da91a5a2a60a06af61` | `d16bfe05a744909de4b27f5875fe0d4ed41ce607` |
+| GitHub issue | [#14365](https://github.com/astropy/astropy/issues/14365) | [#12907](https://github.com/astropy/astropy/issues/12907) |
+| 进 `problem.md` | `problem_statement` 全文 | 同 |
+| 不进 Work | F2P / gold `patch` / `test_patch` / `hints_text` | 同 |
+
+14365 题面（`problem_statement`）要求：ascii.qdp 不应强制命令全大写；下列文件应能读入 Table：
 
 ```text
 read serr 1 2
 1 0.5 1 0.5
 ```
 
-不写入 Work 的字段：`FAIL_TO_PASS = ["astropy/io/ascii/tests/test_qdp.py::test_roundtrip[True]"]`，以及官方 `patch` / `test_patch`。
+不写入 Work 的字段：`FAIL_TO_PASS = ["astropy/io/ascii/tests/test_qdp.py::test_roundtrip[True]"]`，以及官方 `patch` / `test_patch`。issue 例子没有数据 token `NO`；金标补丁另有 `v.upper() == "NO"`。
 
 模型补丁（`patch.diff`）将 `_command_re` 改为忽略大小写，并新增 `test_read_qdp_lowercase_commands`（内容接近 issue 示例）。
 
@@ -106,7 +126,7 @@ read serr 1 2
 
 1. 在 `/testbed` 激活评测环境  
 2. apply 模型补丁  
-3. `git checkout <base_commit> -- astropy/io/ascii/tests/test_qdp.py`（撤销模型对测试文件的改动）  
+3. `git checkout <base_commit> -- astropy/io/ascii/tests/test_qdp.py`（撤销模型对测试文件的改动；本题 `base_commit=7269fa3e…`）  
 4. apply 官方 `test_patch`（将 `test_roundtrip` 参数化为 `[False, True]`；`True` 时把所有非注释行改为小写，包括数据中的 `NO`）  
 5. 执行 F2P 与 P2P  
 
@@ -123,7 +143,7 @@ read serr 1 2
 | P2P | 8 条全部通过 | 全部通过 |
 | **resolved** | **false** | **true** |
 
-14365 仅处理了命令行 ignore-case，未覆盖金标补丁对数据 token `NO` 的 casefold。P2P 全绿不能替代 F2P。同一次跑次中 14182 的 F2P `test_rst_with_header_rows` 亦失败。五题 P2P 均无失败——回归未破坏，失败点是该题隐藏测。
+14365 仅处理了命令行 ignore-case，未覆盖金标补丁对数据 token `NO` 的 casefold。P2P 全绿不能替代 F2P。上表来自本地 harness 产物（跑次 `5a4e9ba9`，当时 14182 的 F2P 亦失败）。RESULTS 第6轮宏分是 **4/5**：14182 已 resolved，未过仍只剩 14365。五题 P2P 均无失败——回归未破坏，失败点是该题隐藏测。
 
 ---
 

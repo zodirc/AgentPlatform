@@ -324,7 +324,7 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 
 官方编码评测环境（看板一键 / `make ops-swe-eval-ready`）做三件事：给 api/runtime 挂 docker.sock、预拉每道题的官方镜像、对每张镜像跑 python/pytest/`/testbed` 冒烟。看板「就绪」依赖后两件都过。解题时默认**复用这道题的容器**，只把改过的文件增量同步进 `/testbed`（禁网）；模型在 `run_command` 上写的 pytest/`|tail` 会改道进这条路径。缺镜像或冒烟失败硬失败并写明原因。
 
-现行冒烟日记：[`eval/official/baseline/RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4–5轮 coding **4/5**，未升 SCORECARD 主栏）。入账分支见 [分数入账](../assets/ops/score-snapshot-zh.png)。Wiki：`#ops-eval-why` 再 `#ops-eval-retrieval` / `#ops-eval-context` / `#ops-eval-coding`。
+现行冒烟日记：[`eval/official/baseline/RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第6轮 coding **4/5**，未过 14365，未升 SCORECARD 主栏）。入账分支见 [分数入账](../assets/ops/score-snapshot-zh.png)。Wiki：`#ops-eval-why` 再 `#ops-eval-retrieval` / `#ops-eval-context` / `#ops-eval-coding`。
 
 ### 6.1 编码一题
 

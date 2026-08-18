@@ -69,7 +69,7 @@ Ops 验收唯一路径是 **L1 agent-path**（`eval_path=agent`）：产品 Sess
 ```
 
 细节：[工作台 · Ops Bench](topics/workbench.md) · [分数入账图](assets/ops/score-snapshot-zh.png) · [工具与上下文 §2](core/tools-and-context.md) · [架构 §6](core/architecture.md)。合入门禁是另一条链：[CI 证明](assets/ops/ci-proof-zh.png)。  
-现行冒烟日记：[`RESULTS.md`](../eval/official/baseline/RESULTS.md)（第4–5轮 coding 4/5；不升 SCORECARD 主栏）。
+现行冒烟日记：[`RESULTS.md`](../eval/official/baseline/RESULTS.md)（第6轮 coding 4/5；不升 SCORECARD 主栏）。
 
 ## 6. Golden Turn
 

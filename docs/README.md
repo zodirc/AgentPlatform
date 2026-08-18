@@ -14,7 +14,7 @@
 
 图给出分层、分支与容量。正文给出职责边界、旋钮与失败语义。事件名与字段名是契约标识，不是流程图本身。Ops 分数页按一次真实跑次回放，先看依据和原因，再看数字。
 
-建议顺序：部署拓扑与后端栈 → 一次 Turn 的请求路径 → AgentEngine 循环 → 场景（编码或写作）→ **Ops 评测原理**（给了什么题、什么叫命中、harness 干什么）→ 一次 smoke 数字；与合入 CI 分开读。
+建议顺序：部署拓扑与后端栈 → 一次 Turn 的请求路径 → AgentEngine 循环 → 场景（编码或写作）→ **Ops 评测原理**（官方题面、可见范围、命中定义、harness）→ 一次 smoke 数字；与合入 CI 分开读。
 
 ---
 
@@ -97,11 +97,11 @@
 
 ## Ops 效果（不是 CI）
 
-效果温度计：走产品同一条 Turn 路径，**不挡合并**。先读评测原理（题目 / 命中 / harness），再看第4轮 smoke + 第5轮编码的数字。`suite=ci` 不在本组。
+效果温度计：走产品同一条 Turn 路径，**不挡合并**。先读评测原理（官方题面 / 可见范围 / 命中 / harness），再看第4轮 smoke + 第6轮编码的数字。`suite=ci` 不在本组。
 
 | 打开 | 读什么 |
 |------|--------|
-| [评测原理](topics/ops-eval-principles.md) | 给了什么题、Agent 看见什么、什么叫命中、为什么这样算、审阅偏差 |
+| [评测原理](topics/ops-eval-principles.md) | 官方字段、Work 可见范围、命中定义、审阅偏差 |
 | [实例走查](topics/ops-eval-walkthrough.md) | 本地 SciFact / LongBench / SWE 题目原文与命中判定 |
 | [图 · 检索实例](assets/ops/ops-eval-walk-retrieval-zh.png) | SciFact q-3 rank 1 · q-1 入池未进顶十 |
 | [图 · 上下文实例](assets/ops/ops-eval-walk-context-zh.png) | 抽 `Answer:` · EM / F1 三条实例 |

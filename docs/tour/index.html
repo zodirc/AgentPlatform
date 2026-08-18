@@ -4,118 +4,317 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>AgentPlatform · 控制流导览</title>
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("agent.docs.theme");
+        if (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) t = "ink";
+        if (t) document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
   <style>
-    :root {
-      --bg: #eef1f4;
+    :root,
+    [data-theme="paper"] {
+      --bg: #e8edf2;
       --paper: #ffffff;
-      --ink: #14181f;
-      --muted: #5a6573;
-      --line: #d5dbe3;
+      --ink: #15202b;
+      --muted: #5c6b7a;
+      --line: #d5dde6;
       --accent: #0f766e;
+      --accent-hover: #0d9488;
       --accent-soft: #ccfbf1;
+      --accent-ink: #ecfdf5;
       --warn: #b45309;
       --warn-soft: #ffedd5;
       --code-bg: #f1f5f9;
-      --sidebar: #0f172a;
+      --th-bg: #f4f7fa;
+      --sidebar: #111827;
+      --sidebar-border: #1f2937;
       --sidebar-text: #cbd5e1;
+      --sidebar-muted: #94a3b8;
+      --sidebar-hover: rgba(148, 163, 184, 0.12);
+      --sidebar-active-bg: rgba(15, 118, 110, 0.28);
       --sidebar-active: #f8fafc;
-      --radius: 10px;
-      --shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 8px 24px rgba(15, 23, 42, 0.06);
+      --sidebar-accent: #2dd4bf;
+      --sidebar-input: #1e293b;
+      --sidebar-input-border: #334155;
+      --hero-from: #0f172a;
+      --hero-via: #134e4a;
+      --hero-to: #0f766e;
+      --hero-sub: #d1fae5;
+      --figure-wash: #eef2f0;
+      --figure-frame: #f4f6f4;
+      --fn-bg: #fff;
+      --fn-lane: #f1f5f9;
+      --fn-sink: #e2e8f0;
+      --topbar-bg: rgba(255, 255, 255, 0.88);
+      --overlay: rgba(15, 23, 42, 0.45);
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 10px 28px rgba(15, 23, 42, 0.06);
+      --radius: 12px;
       --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
       --mono: ui-monospace, "SFMono-Regular", "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+      color-scheme: light;
+    }
+    [data-theme="mist"] {
+      --bg: #e4e9ef;
+      --paper: #f7f9fc;
+      --ink: #1c2733;
+      --muted: #5a6a7c;
+      --line: #cfd8e3;
+      --accent: #3d5a80;
+      --accent-hover: #4a6d99;
+      --accent-soft: #dbe7f3;
+      --accent-ink: #f8fbff;
+      --warn: #9a3412;
+      --warn-soft: #ffedd5;
+      --code-bg: #eef2f7;
+      --th-bg: #eef3f8;
+      --sidebar: #1b2430;
+      --sidebar-border: #273140;
+      --sidebar-text: #c5d0dc;
+      --sidebar-muted: #8b9aab;
+      --sidebar-hover: rgba(148, 163, 184, 0.14);
+      --sidebar-active-bg: rgba(61, 90, 128, 0.38);
+      --sidebar-active: #f8fafc;
+      --sidebar-accent: #8bb4d9;
+      --sidebar-input: #243040;
+      --sidebar-input-border: #3a4a5c;
+      --hero-from: #1b2430;
+      --hero-via: #2c3e50;
+      --hero-to: #3d5a80;
+      --hero-sub: #d7e6f4;
+      --figure-wash: #e8eef4;
+      --figure-frame: #f3f6fa;
+      --fn-bg: #fff;
+      --fn-lane: #eef2f7;
+      --fn-sink: #dde4ec;
+      --topbar-bg: rgba(247, 249, 252, 0.9);
+      --overlay: rgba(27, 36, 48, 0.48);
+      --shadow: 0 1px 2px rgba(28, 39, 51, 0.05), 0 10px 28px rgba(28, 39, 51, 0.07);
+      color-scheme: light;
+    }
+    [data-theme="ink"] {
+      --bg: #12161e;
+      --paper: #1a202b;
+      --ink: #e6edf3;
+      --muted: #93a0b0;
+      --line: #2a3342;
+      --accent: #2dd4bf;
+      --accent-hover: #5eead4;
+      --accent-soft: rgba(45, 212, 191, 0.12);
+      --accent-ink: #042f2e;
+      --warn: #fbbf24;
+      --warn-soft: rgba(251, 191, 36, 0.12);
+      --code-bg: #12171f;
+      --th-bg: #1f2734;
+      --sidebar: #0d1118;
+      --sidebar-border: #1c2430;
+      --sidebar-text: #b7c2cf;
+      --sidebar-muted: #7d8a99;
+      --sidebar-hover: rgba(148, 163, 184, 0.1);
+      --sidebar-active-bg: rgba(45, 212, 191, 0.16);
+      --sidebar-active: #f0fdfa;
+      --sidebar-accent: #2dd4bf;
+      --sidebar-input: #161d27;
+      --sidebar-input-border: #2a3444;
+      --hero-from: #0b1220;
+      --hero-via: #134e4a;
+      --hero-to: #115e59;
+      --hero-sub: #99f6e4;
+      --figure-wash: #151b24;
+      --figure-frame: #1a202b;
+      --fn-bg: #1f2734;
+      --fn-lane: #232b38;
+      --fn-sink: #2a3342;
+      --topbar-bg: rgba(18, 22, 30, 0.88);
+      --overlay: rgba(0, 0, 0, 0.55);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 12px 32px rgba(0, 0, 0, 0.28);
+      color-scheme: dark;
+    }
+    [data-theme="ocean"] {
+      --bg: #0e1822;
+      --paper: #152230;
+      --ink: #e2eef6;
+      --muted: #8aa3b5;
+      --line: #243646;
+      --accent: #5ba3d0;
+      --accent-hover: #7eb8dc;
+      --accent-soft: rgba(91, 163, 208, 0.14);
+      --accent-ink: #062033;
+      --warn: #f0b429;
+      --warn-soft: rgba(240, 180, 41, 0.12);
+      --code-bg: #101c28;
+      --th-bg: #1a2c3c;
+      --sidebar: #0a121a;
+      --sidebar-border: #1a2a38;
+      --sidebar-text: #b7c9d6;
+      --sidebar-muted: #7a92a4;
+      --sidebar-hover: rgba(91, 163, 208, 0.1);
+      --sidebar-active-bg: rgba(91, 163, 208, 0.18);
+      --sidebar-active: #f0f9ff;
+      --sidebar-accent: #7dd3fc;
+      --sidebar-input: #12202c;
+      --sidebar-input-border: #2a3e50;
+      --hero-from: #0a1620;
+      --hero-via: #16324a;
+      --hero-to: #1d4e73;
+      --hero-sub: #bae6fd;
+      --figure-wash: #101c28;
+      --figure-frame: #152230;
+      --fn-bg: #1a2c3c;
+      --fn-lane: #1c3040;
+      --fn-sink: #243646;
+      --topbar-bg: rgba(14, 24, 34, 0.9);
+      --overlay: rgba(0, 0, 0, 0.55);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 12px 32px rgba(0, 0, 0, 0.3);
+      color-scheme: dark;
+    }
+    [data-theme="contrast"] {
+      --bg: #0a0a0a;
+      --paper: #141414;
+      --ink: #f4f4f5;
+      --muted: #a1a1aa;
+      --line: #2a2a2a;
+      --accent: #e8b923;
+      --accent-hover: #f5d76e;
+      --accent-soft: rgba(232, 185, 35, 0.14);
+      --accent-ink: #1c1403;
+      --warn: #fb7185;
+      --warn-soft: rgba(251, 113, 133, 0.12);
+      --code-bg: #0d0d0d;
+      --th-bg: #1c1c1c;
+      --sidebar: #050505;
+      --sidebar-border: #1f1f1f;
+      --sidebar-text: #d4d4d8;
+      --sidebar-muted: #a1a1aa;
+      --sidebar-hover: rgba(232, 185, 35, 0.08);
+      --sidebar-active-bg: rgba(232, 185, 35, 0.16);
+      --sidebar-active: #fffbeb;
+      --sidebar-accent: #e8b923;
+      --sidebar-input: #141414;
+      --sidebar-input-border: #333;
+      --hero-from: #050505;
+      --hero-via: #1c1403;
+      --hero-to: #854d0e;
+      --hero-sub: #fde68a;
+      --figure-wash: #0d0d0d;
+      --figure-frame: #141414;
+      --fn-bg: #1c1c1c;
+      --fn-lane: #222;
+      --fn-sink: #2a2a2a;
+      --topbar-bg: rgba(10, 10, 10, 0.92);
+      --overlay: rgba(0, 0, 0, 0.65);
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 36px rgba(0, 0, 0, 0.45);
+      color-scheme: dark;
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
+    html { color-scheme: light dark; }
     body {
       font-family: var(--sans);
       color: var(--ink);
       background: var(--bg);
       display: grid;
-      grid-template-columns: 272px 1fr;
+      grid-template-columns: 288px 1fr;
       height: 100vh;
       overflow: hidden;
     }
-    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
-    a:hover { color: #0d9488; }
-    .nav-backdrop {
-      display: none;
-    }
+    ::selection { background: var(--accent-soft); color: var(--ink); }
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+    a:hover { color: var(--accent-hover); }
+    .nav-backdrop { display: none; }
     .sidebar {
       background: var(--sidebar);
       color: var(--sidebar-text);
       height: 100vh;
-      border-right: 1px solid #1e293b;
+      border-right: 1px solid var(--sidebar-border);
       display: flex;
       flex-direction: column;
       min-width: 0;
     }
     .sidebar-head {
       flex: 0 0 auto;
-      padding: 0.85rem 0.75rem 0.65rem;
-      border-bottom: 1px solid #1e293b;
+      padding: 1rem 0.9rem 0.8rem;
+      border-bottom: 1px solid var(--sidebar-border);
     }
     .brand {
-      display: block;
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
       text-decoration: none;
       color: inherit;
-      border-radius: 8px;
-      padding: 0.15rem 0.2rem;
-      margin: -0.15rem -0.2rem 0;
+      border-radius: 10px;
+      padding: 0.2rem 0.15rem;
+      margin: -0.2rem -0.15rem 0;
     }
-    .brand:hover h1 { color: #5eead4; }
-    .brand:hover p { color: #99f6e4; }
+    .brand-mark {
+      flex: 0 0 auto;
+      width: 1.85rem;
+      height: 1.85rem;
+      border-radius: 8px;
+      background:
+        linear-gradient(145deg, var(--sidebar-accent) 0%, var(--accent) 100%);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12);
+    }
+    .brand-copy { min-width: 0; }
     .brand h1 {
       margin: 0;
-      font-size: 0.98rem;
+      font-size: 0.95rem;
       font-weight: 700;
-      color: #f8fafc;
-      letter-spacing: -0.02em;
+      color: var(--sidebar-active);
+      letter-spacing: -0.03em;
+      line-height: 1.2;
     }
     .brand p {
-      margin: 0.22rem 0 0;
-      font-size: 0.7rem;
-      line-height: 1.35;
-      color: #94a3b8;
+      margin: 0.12rem 0 0;
+      font-size: 0.68rem;
+      line-height: 1.3;
+      color: var(--sidebar-muted);
     }
+    .brand:hover h1 { color: var(--sidebar-accent); }
     .nav-search {
       position: relative;
       display: block;
-      margin-top: 0.7rem;
+      margin-top: 0.85rem;
     }
     #navFilter {
       width: 100%;
       margin: 0;
-      padding: 0.42rem 1.7rem 0.42rem 0.65rem;
-      border: 1px solid #334155;
-      border-radius: 8px;
-      background: #1e293b;
-      color: #e2e8f0;
+      padding: 0.48rem 2rem 0.48rem 0.75rem;
+      border: 1px solid var(--sidebar-input-border);
+      border-radius: 9px;
+      background: var(--sidebar-input);
+      color: var(--sidebar-active);
       font: inherit;
       font-size: 0.8rem;
     }
-    #navFilter::placeholder { color: #64748b; }
+    #navFilter::placeholder { color: var(--sidebar-muted); }
     #navFilter:focus {
       outline: none;
-      border-color: #14b8a6;
+      border-color: var(--sidebar-accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
     }
     .nav-search kbd {
       position: absolute;
-      right: 0.45rem;
+      right: 0.5rem;
       top: 50%;
       transform: translateY(-50%);
-      font: 0.68rem var(--mono);
-      color: #64748b;
-      border: 1px solid #475569;
+      font: 0.65rem var(--mono);
+      color: var(--sidebar-muted);
+      border: 1px solid var(--sidebar-input-border);
       border-radius: 4px;
-      padding: 0.02rem 0.28rem;
+      padding: 0.05rem 0.32rem;
       pointer-events: none;
     }
     .nav {
       flex: 1 1 auto;
       overflow-y: auto;
-      padding: 0.45rem 0.55rem 1.5rem;
+      padding: 0.55rem 0.55rem 1rem;
+      scrollbar-width: thin;
+      scrollbar-color: var(--sidebar-input-border) transparent;
     }
-    .nav-group { margin-bottom: 0.2rem; }
+    .nav-group { margin-bottom: 0.15rem; }
     .nav-group-title {
       display: flex;
       align-items: center;
@@ -124,19 +323,38 @@
       width: 100%;
       border: 0;
       background: transparent;
-      color: #94a3b8;
+      color: var(--sidebar-muted);
       font: inherit;
-      font-size: 0.68rem;
-      font-weight: 650;
-      letter-spacing: 0.04em;
-      padding: 0.45rem 0.45rem 0.2rem;
+      font-size: 0.66rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 0.55rem 0.5rem 0.28rem;
       cursor: pointer;
       text-align: left;
     }
-    .nav-group-title:hover { color: #e2e8f0; }
-    .nav-group-title .chev {
+    .nav-group-title:hover { color: var(--sidebar-active); }
+    .nav-group-meta {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .nav-group-count {
+      font-variant-numeric: tabular-nums;
       font-size: 0.62rem;
-      color: #64748b;
+      letter-spacing: 0;
+      text-transform: none;
+      font-weight: 600;
+      color: var(--sidebar-muted);
+      background: var(--sidebar-input);
+      border-radius: 999px;
+      min-width: 1.15rem;
+      padding: 0.05rem 0.32rem;
+      text-align: center;
+    }
+    .nav-group-title .chev {
+      font-size: 0.58rem;
+      color: var(--sidebar-muted);
       transform: rotate(90deg);
       transition: transform 0.15s ease;
     }
@@ -146,46 +364,83 @@
     .nav button.nav-item {
       display: flex;
       align-items: flex-start;
-      gap: 0.4rem;
+      gap: 0.45rem;
       width: 100%;
       text-align: left;
       border: 0;
-      border-left: 3px solid transparent;
+      border-left: 2px solid transparent;
       background: transparent;
       color: inherit;
       font: inherit;
       font-size: 0.8rem;
-      padding: 0.32rem 0.45rem 0.32rem 0.4rem;
+      padding: 0.38rem 0.5rem 0.38rem 0.45rem;
       border-radius: 0 8px 8px 0;
       cursor: pointer;
       line-height: 1.3;
     }
-    .nav button.nav-item:hover { background: rgba(148, 163, 184, 0.12); color: #f1f5f9; }
-    .nav button.nav-item.active {
-      background: rgba(15, 118, 110, 0.28);
+    .nav button.nav-item:hover {
+      background: var(--sidebar-hover);
       color: var(--sidebar-active);
-      border-left-color: #2dd4bf;
+    }
+    .nav button.nav-item.active {
+      background: var(--sidebar-active-bg);
+      color: var(--sidebar-active);
+      border-left-color: var(--sidebar-accent);
     }
     .nav button.nav-item .num {
-      flex: 0 0 1.35rem;
-      color: #64748b;
+      flex: 0 0 1.4rem;
+      color: var(--sidebar-muted);
       font-variant-numeric: tabular-nums;
       font-family: var(--mono);
-      font-size: 0.66rem;
-      padding-top: 0.14rem;
+      font-size: 0.64rem;
+      padding-top: 0.16rem;
     }
-    .nav button.nav-item.active .num { color: #5eead4; }
+    .nav button.nav-item.active .num { color: var(--sidebar-accent); }
     .nav-text { min-width: 0; }
     .nav-title { display: block; font-weight: 600; }
     .nav-blurb {
       display: none;
-      margin-top: 0.1rem;
-      font-size: 0.68rem;
+      margin-top: 0.12rem;
+      font-size: 0.66rem;
       font-weight: 400;
-      color: #99f6e4;
+      color: var(--sidebar-accent);
       line-height: 1.35;
+      opacity: 0.9;
     }
     .nav button.nav-item.active .nav-blurb { display: block; }
+    .sidebar-foot {
+      flex: 0 0 auto;
+      padding: 0.7rem 0.85rem 0.9rem;
+      border-top: 1px solid var(--sidebar-border);
+    }
+    .theme-bar {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .theme-label {
+      font-size: 0.64rem;
+      font-weight: 650;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--sidebar-muted);
+      margin-right: 0.15rem;
+    }
+    .swatch {
+      width: 1.05rem;
+      height: 1.05rem;
+      border-radius: 999px;
+      border: 2px solid transparent;
+      padding: 0;
+      cursor: pointer;
+      background: linear-gradient(135deg, var(--sw-bg) 48%, var(--sw-accent) 52%);
+      box-shadow: 0 0 0 1px var(--sidebar-input-border);
+    }
+    .swatch:hover { transform: scale(1.08); }
+    .swatch[aria-pressed="true"] {
+      border-color: var(--sidebar-active);
+      box-shadow: 0 0 0 2px var(--sidebar-accent);
+    }
     .main {
       display: flex;
       flex-direction: column;
@@ -197,62 +452,96 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1rem;
-      padding: 0.85rem 1.5rem;
-      background: rgba(255,255,255,0.86);
-      backdrop-filter: blur(8px);
+      gap: 0.85rem;
+      padding: 0.7rem 1.35rem 0.7rem;
+      background: var(--topbar-bg);
+      backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--line);
       position: sticky;
       top: 0;
       z-index: 5;
     }
-    .topbar .meta {
+    .crumb {
       flex: 1;
       min-width: 0;
-      font-size: 0.8rem;
-      color: var(--muted);
+      display: flex;
+      align-items: baseline;
+      gap: 0.45rem;
+      font-size: 0.82rem;
+    }
+    .crumb-group {
+      flex: 0 0 auto;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border-radius: 999px;
+      padding: 0.12rem 0.5rem;
+    }
+    .crumb-title {
+      min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
-    }
-    .pager { display: flex; gap: 0.5rem; }
-    .pager button {
-      border: 1px solid var(--line);
-      background: var(--paper);
-      border-radius: 8px;
-      padding: 0.45rem 0.85rem;
-      font: inherit;
-      font-size: 0.85rem;
-      font-weight: 600;
-      cursor: pointer;
+      font-weight: 650;
       color: var(--ink);
     }
-    .pager button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
-    .pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .crumb-count {
+      flex: 0 0 auto;
+      font-variant-numeric: tabular-nums;
+      font-size: 0.72rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
+    .pager { display: flex; gap: 0.4rem; }
+    .pager button,
     .nav-toggle {
-      display: none;
       border: 1px solid var(--line);
       background: var(--paper);
-      border-radius: 8px;
-      padding: 0.45rem 0.75rem;
+      border-radius: 9px;
+      padding: 0.4rem 0.8rem;
       font: inherit;
-      font-size: 0.85rem;
+      font-size: 0.8rem;
       font-weight: 600;
       cursor: pointer;
       color: var(--ink);
+    }
+    .pager button:hover:not(:disabled),
+    .nav-toggle:hover { border-color: var(--accent); color: var(--accent); }
+    .pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .nav-toggle { display: none; }
+    .read-progress {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      background: transparent;
+      pointer-events: none;
+    }
+    .read-progress > i {
+      display: block;
+      height: 100%;
+      width: 0;
+      background: var(--accent);
+      transition: width 0.18s ease;
     }
     .content {
       flex: 1;
       overflow-y: auto;
-      padding: 1.25rem 1.5rem 3rem;
+      padding: 1.35rem 1.6rem 3.2rem;
       max-width: 1100px;
       width: 100%;
       margin: 0 auto;
+      scrollbar-width: thin;
     }
     .page { display: none; }
     .page.active { display: block; }
     .hero {
-      background: linear-gradient(145deg, #0f172a 0%, #134e4a 55%, #0f766e 100%);
+      background: linear-gradient(145deg, var(--hero-from) 0%, var(--hero-via) 55%, var(--hero-to) 100%);
       color: #f8fafc;
       border-radius: 16px;
       padding: 2rem 1.75rem;
@@ -260,7 +549,7 @@
       margin-bottom: 1.25rem;
     }
     .hero h2 { margin: 0 0 0.6rem; font-size: 1.85rem; letter-spacing: -0.03em; }
-    .hero p { margin: 0; max-width: 42rem; color: #d1fae5; line-height: 1.55; }
+    .hero p { margin: 0; max-width: 42rem; color: var(--hero-sub); line-height: 1.55; }
     .badge-row { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 1rem; }
     .badge {
       font-size: 0.72rem;
@@ -275,7 +564,7 @@
       background: var(--paper);
       border: 1px solid var(--line);
       border-radius: var(--radius);
-      padding: 1.15rem 1.25rem;
+      padding: 1.2rem 1.3rem;
       box-shadow: var(--shadow);
       margin-bottom: 1rem;
     }
@@ -310,7 +599,7 @@
       vertical-align: top;
       line-height: 1.4;
     }
-    th { background: #f8fafc; font-weight: 600; }
+    th { background: var(--th-bg); font-weight: 600; }
     code, .mono {
       font-family: var(--mono);
       font-size: 0.84em;
@@ -336,22 +625,23 @@
     @media (max-width: 960px) {
       body { grid-template-columns: 1fr; }
       .nav-toggle { display: inline-flex; }
+      .crumb-group { display: none; }
       .nav-backdrop {
         display: none;
         position: fixed;
         inset: 0;
-        background: rgba(15, 23, 42, 0.45);
+        background: var(--overlay);
         z-index: 30;
       }
       body.nav-open .nav-backdrop { display: block; }
       .sidebar {
         position: fixed;
         inset: 0 auto 0 0;
-        width: min(288px, 88vw);
+        width: min(300px, 90vw);
         z-index: 40;
         transform: translateX(-105%);
         transition: transform 0.18s ease;
-        box-shadow: 8px 0 32px rgba(15, 23, 42, 0.35);
+        box-shadow: 8px 0 32px var(--overlay);
       }
       body.nav-open .sidebar { transform: none; }
       .grid-2 { grid-template-columns: 1fr; }
@@ -361,18 +651,18 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       overflow: hidden;
-      background: #fff;
+      background: var(--paper);
       box-shadow: var(--shadow);
     }
     .figure .diagram-body {
       padding: 0.85rem 0.9rem 0.55rem;
       background:
-        radial-gradient(ellipse at top left, rgba(15, 118, 110, 0.05), transparent 48%),
-        #f4f7f5;
+        radial-gradient(ellipse at top left, var(--accent-soft), transparent 48%),
+        var(--figure-wash);
     }
     .figure .diagram-body.diagram-svg {
       padding: 0.65rem;
-      background: #eef2f0;
+      background: var(--figure-wash);
     }
     .figure .diagram-body.diagram-svg img {
       display: block;
@@ -381,7 +671,7 @@
       max-height: none;
       border-radius: 8px;
       border: 1px solid var(--line);
-      background: #f4f6f4;
+      background: var(--figure-frame);
     }
     .figure .diagram-title {
       margin: 0 0 0.75rem;
@@ -394,7 +684,7 @@
       font-size: 0.78rem;
       color: var(--muted);
       border-top: 1px solid var(--line);
-      background: #fff;
+      background: var(--paper);
     }
     .figure.zoomed {
       position: fixed;
@@ -404,14 +694,14 @@
       border-radius: 12px;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 20px 60px rgba(15, 23, 42, 0.35);
-      background: #0f172a;
+      box-shadow: 0 20px 60px var(--overlay);
+      background: var(--sidebar);
     }
     .figure.zoomed .diagram-body {
       flex: 1;
       overflow: auto;
       cursor: zoom-out;
-      background: #0f172a;
+      background: var(--sidebar);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -422,7 +712,11 @@
       box-shadow: none;
     }
     .figure:not(.zoomed) .diagram-body { cursor: zoom-in; }
-    .figure.zoomed figcaption { color: #cbd5e1; background: #0f172a; border-color: #1e293b; }
+    .figure.zoomed figcaption {
+      color: var(--sidebar-text);
+      background: var(--sidebar);
+      border-color: var(--sidebar-border);
+    }
     .flow {
       display: flex;
       flex-wrap: wrap;
@@ -443,10 +737,10 @@
       gap: 0.35rem;
     }
     .fn {
-      border: 1.5px solid #94a3b8;
+      border: 1.5px solid var(--line);
       border-radius: 8px;
       padding: 0.5rem 0.6rem;
-      background: #fff;
+      background: var(--fn-bg);
       font-size: 0.78rem;
       line-height: 1.35;
     }
@@ -459,7 +753,7 @@
       margin-right: 0.3rem;
       border-radius: 999px;
       background: var(--accent);
-      color: #ecfdf5;
+      color: var(--accent-ink);
       font-family: var(--mono);
       font-size: 0.68rem;
       font-weight: 600;
@@ -476,15 +770,15 @@
       background: var(--warn-soft);
       border-radius: 4px;
       transform: none;
-      box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.15);
+      box-shadow: inset 0 0 0 1px var(--warn);
     }
     .fn.lane {
       border-style: dashed;
-      background: #f1f5f9;
+      background: var(--fn-lane);
     }
-    .fn.sink { border-color: #64748b; background: #e2e8f0; font-weight: 600; }
+    .fn.sink { border-color: var(--muted); background: var(--fn-sink); font-weight: 600; }
     .arr {
-      color: #64748b;
+      color: var(--muted);
       font-size: 0.95rem;
       font-weight: 700;
       padding: 0 0.15rem;
@@ -492,7 +786,7 @@
     }
     .arr-v {
       text-align: center;
-      color: #64748b;
+      color: var(--muted);
       font-size: 0.75rem;
       line-height: 1;
       padding: 0.1rem 0;
@@ -513,12 +807,12 @@
       margin-right: 0.3rem;
       border-radius: 2px;
       vertical-align: -1px;
-      border: 1px solid #94a3b8;
-      background: #fff;
+      border: 1px solid var(--line);
+      background: var(--fn-bg);
     }
     .diagram-legend .l-accent::before { background: var(--accent-soft); border-color: var(--accent); }
     .diagram-legend .l-decision::before { background: var(--warn-soft); border-color: var(--warn); }
-    .diagram-legend .l-lane::before { background: #f1f5f9; border-style: dashed; }
+    .diagram-legend .l-lane::before { background: var(--fn-lane); border-style: dashed; }
     .diagram-note {
       margin-top: 0.55rem;
       font-size: 0.74rem;
@@ -551,7 +845,7 @@
       height: 2rem;
       border-radius: 999px;
       background: var(--accent);
-      color: #ecfdf5;
+      color: var(--accent-ink);
       font-family: var(--mono);
       font-size: 0.78rem;
       font-weight: 700;
@@ -576,9 +870,9 @@
       margin-top: 0.4rem;
       font-family: var(--mono);
       font-size: 0.72rem;
-      color: #0f766e;
+      color: var(--accent);
       background: var(--accent-soft);
-      border: 1px solid #99f6e4;
+      border: 1px solid var(--line);
       border-radius: 999px;
       padding: 0.1rem 0.5rem;
     }
@@ -596,25 +890,38 @@
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-head">
       <a class="brand" href="https://github.com/zodirc/AgentPlatform" title="打开 GitHub 主仓库">
-        <h1>AgentPlatform</h1>
-        <p>GitHub 仓库 ↗</p>
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-copy">
+          <h1>AgentPlatform</h1>
+          <p>控制流导览 · GitHub ↗</p>
+        </span>
       </a>
       <label class="nav-search">
         <input id="navFilter" type="search" placeholder="筛选章节" autocomplete="off" />
         <kbd>/</kbd>
       </label>
     </div>
-    <nav class="nav" id="nav"></nav>
+    <nav class="nav" id="nav" aria-label="章节"></nav>
+    <div class="sidebar-foot">
+      <div class="theme-bar" id="themeBar" role="group" aria-label="外观主题"></div>
+    </div>
   </aside>
 
   <div class="main">
     <header class="topbar">
       <button type="button" class="nav-toggle" id="navToggle" aria-label="打开目录">目录</button>
-      <div class="meta" id="pageMeta">—</div>
-      <div class="pager">
-        <button type="button" id="prevBtn">← 上一页</button>
-        <button type="button" id="nextBtn">下一页 →</button>
+      <div class="crumb" id="pageMeta">
+        <span class="crumb-group" id="pageGroup">—</span>
+        <span class="crumb-title" id="pageTitle">—</span>
+        <span class="crumb-count" id="pageCount"></span>
       </div>
+      <div class="topbar-actions">
+        <div class="pager">
+          <button type="button" id="prevBtn">上一页</button>
+          <button type="button" id="nextBtn">下一页</button>
+        </div>
+      </div>
+      <div class="read-progress" aria-hidden="true"><i id="readProgress"></i></div>
     </header>
     <main class="content" id="content">
 
@@ -632,7 +939,7 @@
         <div class="card">
           <h3>读法</h3>
           <ul>
-            <li>左侧目录与顶栏翻页；主图点击放大。先沿中间箭头链读分支，再对照本页逐步：标题为该步职责，灰字为约束与失败形态，绿色芯片为事件或字段名。</li>
+            <li>左侧目录与顶栏翻页；主图点击放大。先沿中间箭头链读分支，再对照本页逐步：标题为该步职责，灰字为约束与失败形态，芯片为事件或字段名。左下角可切换外观主题。</li>
             <li>「Ops 效果」先读评测原理，再以本地实例核对命中定义；第 4 轮 smoke 为宏分，合入 CI 另列。</li>
             <li>冲突裁决：<strong>代码与契约</strong>优先，其次 <code>docs/core</code> / <code>docs/topics</code> 六篇正文。本导览不另立权威。</li>
             <li>左上角 <strong>AgentPlatform</strong> 返回 GitHub 主仓库。在线站点 <a href="https://zodirc.github.io/AgentPlatform/">zodirc.github.io/AgentPlatform</a>；本地 <code>make docs-tour</code>。GitHub 文件视图中的 HTML 只是源码。</li>
@@ -1573,7 +1880,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <section class="page" data-id="ops-bench" data-group="Ops 效果" data-title="Ops L1 原理">
         <div class="card">
           <h2>Ops L1：走产品同一条 Turn 路径</h2>
-          <p class="lede">效果温度计，不进 StartTurn 热路径，也<strong>不是</strong> merge gate。契约要求 <code>eval_path=agent</code>：真实 Session / Turn / 工具。下一页讲评测原理（题目、命中、harness）；再后才是第4轮 smoke + 第5轮编码的数字。合入 CI 见最后一组。</p>
+          <p class="lede">效果温度计，不进 StartTurn 热路径，也<strong>不是</strong> merge gate。契约要求 <code>eval_path=agent</code>：真实 Session / Turn / 工具。下一页约定官方题面、可见范围与命中定义；再后才是第4轮 smoke + 第6轮编码的数字。合入 CI 见最后一组。</p>
           <ol class="steps">
             <li>
               <span class="n">1</span>
@@ -1597,7 +1904,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               </div>
             </li>
           </ol>
-          <p class="figure-lead">下图是四套件如何接到同一条产品 Turn。下一页先讲尺子（给了什么题、什么叫命中、harness 干什么），再看一次 smoke 的数字。</p>
+          <p class="figure-lead">下图：四套件如何接到同一条产品 Turn。下一页先约定官方题面、可见范围与命中定义，再看一次 smoke 的数字。</p>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1615,8 +1922,8 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
             <thead><tr><th></th><th>检索</th><th>上下文</th><th>编码</th></tr></thead>
             <tbody>
               <tr><td>官方题</td><td>BEIR / C-MTEB 的 query</td><td>LongBench 长文 + 问题</td><td>GitHub issue + <code>base_commit</code> 坏树</td></tr>
-              <tr><td>Agent 看见</td><td><code>sources/&lt;doc_id&gt;.txt</code> 整库 +「用原文去搜」</td><td>只有 <code>passage.md</code> + 短答格式</td><td>工作树 + <code>problem.md</code>（issue 全文）</td></tr>
-              <tr><td>看不见</td><td>qrels</td><td><code>answers</code></td><td><code>FAIL_TO_PASS</code> / gold patch</td></tr>
+              <tr><td>可见范围</td><td><code>sources/&lt;doc_id&gt;.txt</code> 整库 + Information need 原文检索</td><td>仅 <code>passage.md</code> + 短答格式</td><td>工作树 + <code>problem.md</code>（issue 全文）</td></tr>
+              <tr><td>不进 Work</td><td>qrels</td><td><code>answers</code></td><td><code>FAIL_TO_PASS</code> / gold patch</td></tr>
               <tr><td>主工具</td><td><code>search_sources</code></td><td><code>read_file</code></td><td><code>edit_file</code> / 测在该题 Docker</td></tr>
               <tr><td>裁判</td><td>qrels + nDCG / R@k / MAP</td><td>抽 <code>Answer:</code> 后 F1 / EM</td><td><strong>harness</strong>：F2P 全过且 P2P 全过</td></tr>
               <tr><td>故意不测</td><td>终答写得对不对</td><td>会不会检索</td><td>issue 例子 / 平台探针</td></tr>
@@ -1653,7 +1960,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
             （2）上下文 EM 对同义改写极严，F1 高于 EM 多半是尺子形态。<br>
             （3）n5 全 astropy，4/5 不能外推 Lite；同分异题更不能写成「稳定 80%」。
           </div>
-          <p>下一页用本地实例走完命中判定（claim / 短答案 / hidden tests），并配主链图。其后为第 4 / 5 轮宏分总表。</p>
+          <p>下一页用本地实例走完命中判定（claim / 短答案 / hidden tests），并配主链图。其后为第 4 轮宏分 + 第 6 轮编码指针。</p>
           <div class="src"><code>docs/topics/ops-eval-principles.md</code> · <code>docs/topics/ops-eval-walkthrough.md</code></div>
         </div>
       </section>
@@ -1672,9 +1979,9 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           </table>
           <p>切块：INDEX 13 · 450 token / 64 overlap。SciFact 摘要通常对应一个 chunk。检索命中单位是文件名还原的 <code>doc_id</code>。</p>
           <h3>检索 · SciFact q-3（命中）对照 q-1（入池未进顶十）</h3>
-          <p>官方题是 claim，不是检索指令。q-3 原文：</p>
+          <p>官方文件：<code>queries.jsonl</code> 的 <code>text</code> → Information need；<code>corpus.jsonl</code> → <code>sources/&lt;doc_id&gt;.txt</code>；<code>qrels/test.tsv</code> 不进模型窗。q-3 claim：</p>
           <pre>1,000 genomes project enables mapping of genetic sequence variation consisting of rare variants with larger penetrance effects than common variants.</pre>
-          <p>金标 <code>3 → 14717500 rel=1</code> 不进入模型窗。语料物化为 <code>sources/beir/scifact-micro/14717500.txt</code>。第一次 <code>search_sources</code> 须复制 Information need。</p>
+          <p>金标 <code>14717500</code> / <code>rel=1</code>（语料 *Rare Variants Create Synthetic Genome-Wide Associations*）物化为 <code>sources/beir/scifact-micro/14717500.txt</code>。第一次 <code>search_sources</code> 须逐字复制 Information need。</p>
           <p>本例工具序：<code>list_dir</code> → 原文检索 → <code>read_file</code>×2 → 改写再检索（drift=0.0068）→ <code>grep</code>×2。两次各 30 条，评测侧 RRF 合成 48 条。金标位于 rank 1：DCG@10 = IDCG = 1 → <strong>nDCG@10=1，R@10=1</strong>。终答与 cite 不计分。</p>
           <div class="callout warn">
             <strong>对照 q-1。</strong>
@@ -1690,7 +1997,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         </figure>
         <div class="card">
           <h3>上下文 · LongBench idx 0 / 1 / 2</h3>
-          <p>Work 内仅 <code>passage.md</code>。scorer v2 抽取最后一条 <code>Answer:</code>，再做规范化 EM 与 token 袋 F1。无 harness。主指标不计量 <code>n_reads</code>。</p>
+          <p>官方字段：<code>input</code> → 用户消息 Question；<code>context</code> → 仅 <code>passage.md</code>；<code>answers</code> 不进 Work。scorer v2 抽取最后一条 <code>Answer:</code>，再做规范化 EM 与 token 袋 F1。无 harness。主指标不计量 <code>n_reads</code>。</p>
           <table>
             <thead><tr><th></th><th>预测 / 金标</th><th>v2</th></tr></thead>
             <tbody>
@@ -1710,7 +2017,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         </figure>
         <div class="card">
           <h3>编码 · 14365（未通过）对照 12907（通过）</h3>
-          <p>Agent 仅见 issue（<code>problem.md</code>）。14365 要求小写 <code>read serr</code> 能读入 Table。隐藏 F2P 为 <code>test_roundtrip[True]</code>。模型补丁忽略命令大小写，并自写了接近 issue 示例的测试。</p>
+          <p>官方行：<code>repo=astropy/astropy</code>；14365 的 <code>base_commit=7269fa3e…</code>、<a href="https://github.com/astropy/astropy/issues/14365">issue #14365</a>；12907 的 <code>base_commit=d16bfe05…</code>、<a href="https://github.com/astropy/astropy/issues/12907">#12907</a>。Agent 仅见 <code>problem.md</code> = <code>problem_statement</code>。14365 要求小写 <code>read serr</code> 能读入 Table。隐藏 F2P 为 <code>test_roundtrip[True]</code>（不进 Work）。模型补丁忽略命令大小写，并自写了接近 issue 示例的测试。</p>
           <p><strong>Harness</strong>（镜像 <code>sweb.eval.…astropy-14365</code>）在 <code>eval.sh</code> 中：apply 补丁 → checkout 还原测试文件（撤销模型自写测试）→ 官方 <code>test_patch</code>（<code>True</code> 时把非注释行改为小写，包括数据中的 <code>NO</code>）→ 跑 F2P 与 P2P。</p>
           <table>
             <thead><tr><th></th><th>14365</th><th>12907</th></tr></thead>
@@ -1721,8 +2028,8 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               <tr><td><code>resolved</code></td><td><strong>false</strong></td><td><strong>true</strong></td></tr>
             </tbody>
           </table>
-          <p>本跑次 apply 5/5、<strong>resolved 3/5</strong>。Turn <code>status=pass</code> 只表示产品路径结束。P2P 全绿不能替代 F2P。这是 SWE-bench 定义，不是平台附加门槛。</p>
-          <p class="figure-lead">下图为 harness 主链与两题分支。下一页为第 4 / 5 轮宏分总表。</p>
+          <p>本跑次（走查用 harness 产物）apply 5/5、<strong>resolved 3/5</strong>。宏分以 RESULTS 为准：第6轮 <strong>4/5</strong>，未过仍是 14365。Turn <code>status=pass</code> 只表示产品路径结束。P2P 全绿不能替代 F2P。这是 SWE-bench 定义，不是平台附加门槛。</p>
+          <p class="figure-lead">下图为 harness 主链与两题分支。下一页为第 4 轮宏分 + 第 6 轮编码指针。</p>
           <div class="src"><code>docs/topics/ops-eval-walkthrough.md</code> · harness <code>report.json</code></div>
         </div>
         <figure class="figure">
@@ -1735,17 +2042,17 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
 
       <section class="page" data-id="scorecard" data-group="Ops 效果" data-title="一次完整 smoke">
         <div class="card">
-          <h2>一次完整 smoke 回放（第4轮 + 第5轮编码）</h2>
-          <p class="lede">模拟你在 <code>/official</code> 点完整四套件之后实际发生的事。数字抄自 RESULTS · 2026-08-17。口径：<code>official-small-2026-08-m3</code> · L1 agent-path · arm=free · <code>sample_tier=smoke</code> · 模型 <code>deepseek-v4-flash</code> · embed bge-m3@1024 / INDEX 13。</p>
+          <h2>一次完整 smoke 回放（第4轮四套件 + 第6轮编码）</h2>
+          <p class="lede">一次完整四套件跑次的入账结果。数字取自 RESULTS · 2026-08-17。口径：<code>official-small-2026-08-m3</code> · L1 agent-path · arm=free · <code>sample_tier=smoke</code>。检索/上下文仍为第4轮 <code>deepseek-v4-flash</code>；编码指针已被第6轮 <code>gpt-5.6-luna</code> 覆盖。embed bge-m3@1024 / INDEX 13。</p>
           <div class="callout warn"><strong>不作效果结论，不升 SCORECARD 主栏。</strong>smoke 只是方向盘。升锚要 retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</div>
           <h3>这一次跑了什么</h3>
           <table>
             <thead><tr><th>套件</th><th>run_id</th><th>墙钟</th><th>主指标（怎么判）</th><th>记下的数</th></tr></thead>
             <tbody>
               <tr>
-                <td>coding（第5轮覆盖）</td>
-                <td><code>01cd8c79-…</code></td>
-                <td>≈2332s</td>
+                <td>coding（第6轮覆盖）</td>
+                <td><code>4471acba-…</code></td>
+                <td>≈2563s</td>
                 <td>官方 harness <code>resolve_rate</code></td>
                 <td><strong>0.8（4/5）</strong></td>
               </tr>
@@ -1772,7 +2079,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               </tr>
             </tbody>
           </table>
-          <p>第4轮 parent <code>56b562a6-…</code> 四套件都 <code>completed</code>（4/4）。第5轮只重跑编码（<code>01cd8c79-…</code>），检索/上下文仍用第4轮指针。</p>
+          <p>第4轮 parent <code>56b562a6-…</code> 四套件都 <code>completed</code>（4/4）。第6轮只重跑编码（parent <code>ec0a1226-…</code> · coding <code>4471acba-…</code> · luna），检索/上下文仍用第4轮指针。同分同题：未过仍是 14365。</p>
           <h3>共同的评判纪律（先于分数）</h3>
           <ol class="steps">
             <li>
@@ -1797,7 +2104,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               </div>
             </li>
           </ol>
-          <p class="figure-lead">下图是分数如何入账。尺子本身在上一页；后面三页按套件展开命中定义，并附这一轮量出来的数。</p>
+          <p class="figure-lead">下图：分数如何入账。尺子本身在上一页；后面三页按套件展开命中定义，并附这一轮数字。</p>
           <div class="src"><code>eval/official/baseline/RESULTS.md</code> · parent <code>56b562a6</code></div>
         </div>
         <figure class="figure">
@@ -1810,61 +2117,92 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
 
       <section class="page" data-id="ops-eval-retrieval" data-group="Ops 效果" data-title="检索 · 命中定义">
         <div class="card">
-          <h2>检索：给了什么题，什么叫命中</h2>
-          <p class="lede">测的是「模型有没有把官方 query 搜到 qrels 里的文档」，<strong>不是</strong>终答写得对不对。没有 harness。裁判是 BEIR 式 qrels + nDCG/Recall/MAP。</p>
-          <h3>给了什么题目</h3>
-          <p>不是用户随口问。BEIR：SciFact（科学 claim）、NFCorpus（营养/医学需求）、FiQA（金融问句）。C-MTEB：Covid / Medical / Ecom 中文检索。每条 query 是官方原文，例如 SciFact 一条 claim：「某饮食可否替代鱼粉」这类陈述句。</p>
-          <p>Agent 看见：该 Work 的 <code>sources/&lt;doc_id&gt;.txt</code>（论文摘要/帖子，文件名 = corpus ID），以及 free 臂提示：<em>第一条动作必须用 Information need 原文调用 search_sources，弱再改写重搜，cite，禁止凭记忆编造。</em> qrels 不在盘上、不在 prompt 里。</p>
-          <p>smoke：每个子集 <strong>qrels 顺序前 20 条</strong>（<code>head_slice</code>，无随机）。第4轮 BEIR 三集 ×20；中英分库分指针。</p>
-          <h3>怎么跑完</h3>
+          <h2>检索：官方题面、可见范围与命中</h2>
+          <p class="lede">主指标回答的是：融合排序中的 <code>doc_id</code> 是否落入该 query 的 qrels（<code>rel&gt;0</code>）。终答是否正确、cite 是否写对，均不进入该分。无 Docker harness。裁判为 BEIR 式 nDCG / Recall / MAP。第一验收位：BEIR <strong>R@100</strong>。</p>
+          <h3>官方字段</h3>
+          <p>题集为 BEIR（SciFact / NFCorpus / FiQA）与 C-MTEB（Covid / Medical / Ecom）。BEIR 落盘形态：</p>
+          <table>
+            <thead><tr><th>官方文件</th><th>字段</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td><code>queries.jsonl</code></td><td><code>_id</code>、<code>text</code>（query 原文）</td><td><code>text</code> → 用户消息 <code>Information need</code></td></tr>
+              <tr><td><code>corpus.jsonl</code></td><td><code>_id</code>、<code>title</code>、<code>text</code>（摘要/帖子）</td><td>是：<code>sources/&lt;doc_id&gt;.txt</code></td></tr>
+              <tr><td><code>qrels/test.tsv</code></td><td><code>qid</code> · <code>doc_id</code> · <code>rel</code></td><td><strong>否</strong></td></tr>
+            </tbody>
+          </table>
+          <p>Agent 场景为 <code>writing</code>。free 臂要求第一次 <code>search_sources</code> <strong>逐字复制</strong> Information need；qrels 不在磁盘、不在 prompt。smoke：各子集 qrels 出现顺序前 20 条（<code>head_slice</code>，无随机）。中英分库、分指针，不得混栏。</p>
+          <h3>示例：SciFact <code>_id=3</code>（命中）</h3>
+          <p>字段取自 AllenAI SciFact / BEIR SciFact（Wadden et al., EMNLP 2020）。claim 与 corpus 的 <code>doc_id</code> 为 Semantic Scholar CorpusId，不是 PubMed PMID。物化：标题+摘要写入 <code>sources/14717500.txt</code>。</p>
+          <table>
+            <thead><tr><th>官方字段</th><th>本题取值</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td>子集 / query <code>_id</code></td><td>BEIR SciFact · <code>3</code>（smoke 切片中的第二条 qrels query）</td><td>case id <code>beir.scifact.q-3</code></td></tr>
+              <tr><td><code>text</code>（claim）</td><td>见下方原文</td><td>是：Information need</td></tr>
+              <tr><td>金标 <code>doc_id</code> / <code>rel</code></td><td><code>14717500</code> / <code>1</code>（SciFact <code>evidence_label=SUPPORT</code>，evidence sentences 2、5）</td><td><strong>否</strong>（qrels）</td></tr>
+              <tr><td>语料 <code>title</code></td><td><em>Rare Variants Create Synthetic Genome-Wide Associations</em>（Dickson et al., 2010；DOI <code>10.1371/journal.pbio.1000294</code>）</td><td>是：文件正文</td></tr>
+            </tbody>
+          </table>
+          <p>写入用户消息的 Information need（= <code>queries.jsonl</code> 的 <code>text</code>）：</p>
+          <pre>1,000 genomes project enables mapping of genetic sequence variation consisting of rare variants with larger penetrance effects than common variants.</pre>
+          <p>Agent 可检索到的语料节选（= <code>corpus.jsonl</code> 的 title + abstract；约 1849 字符全文在 <code>sources/14717500.txt</code>）：</p>
+          <pre>Rare Variants Create Synthetic Genome-Wide Associations
+
+A large number of different common variants has been associated with very modest increases of risk for various common diseases. A simulation study shows that rare variants with much greater impacts on disease risk may be responsible for some of these associations.</pre>
           <ol class="steps">
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what">物化进 bench-postgres，再开 writing Turn</p>
-                <p class="why">与产品资料库隔离。模型按需 <code>search_sources</code>（每 Turn ≤3）。店内 hybrid 的一次排序评测侧不改。</p>
+                <p class="what">物化 corpus → bench-postgres（schema <code>retrieval_ops</code>），再开 writing Turn</p>
+                <p class="why">与产品资料库隔离。模型按需 <code>search_sources</code>（每 Turn ≤3）。店内 hybrid 一次排序评测侧不改。</p>
               </div>
             </li>
             <li>
               <span class="n">2</span>
               <div>
-                <p class="what">从 <code>retrieval.completed</code> 抽路径 → 文件名还原 <code>doc_id</code></p>
-                <p class="why">多轮则评测侧再 RRF：<code>score[d] += 1/(60+rank)</code>。单轮保持原序。终答文本不参与计分。</p>
+                <p class="what">从 <code>retrieval.completed</code> 抽路径，按文件名还原 <code>doc_id</code></p>
+                <p class="why">多轮则评测侧再 RRF：<code>score[d] += 1/(60+rank)</code>（k=60）。单轮保持原序。终答文本不参与计分。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">与 qrels 计算 nDCG@k / R@k / MAP@k</p>
+                <p class="why">本题金标位于 rank 1、<code>rel=1</code>：DCG@10 = IDCG = 1 → <strong>nDCG@10=1，R@10=1，R@100=1</strong>。<code>read_file</code> 是否打开金标文件只记旁路统计。</p>
               </div>
             </li>
           </ol>
-          <h3>什么叫命中，为什么这样视为</h3>
+          <p>对照 SciFact <code>_id=1</code>。Information need：<code>0-dimensional biomaterials show inductive properties.</code> 金标 <code>31715818</code>（<em>New opportunities: the use of nanotechnologies to manipulate and track stem cells.</em>）不进入模型窗。融合 top-10 不含该 ID → nDCG@10=0、R@10=0；52 条融合列表内含该 ID → <strong>R@100=1.0</strong>，nDCG@100=0.193，<code>bucket=weak_hits</code>。第一验收位取 R@100：本题是排序问题，不是零召回。</p>
+          <h3>命中定义</h3>
           <table>
-            <thead><tr><th>尺子</th><th>一条 query 上怎么算</th><th>为什么用它</th></tr></thead>
+            <thead><tr><th>尺子</th><th>单条 query</th><th>选取理由</th></tr></thead>
             <tbody>
               <tr>
                 <td>命中</td>
-                <td>融合排序里的 <code>doc_id</code> 落在该 query 的 qrels 且 <code>rel&gt;0</code></td>
-                <td>官方 IR 的相关文档集合。不认「终答提到了金标标题」。不认「read_file 打开过金标文件」（那是旁路统计）。</td>
+                <td>融合排序中的 <code>doc_id</code> ∈ 该 query 的 qrels 且 <code>rel&gt;0</code></td>
+                <td>官方 IR 相关文档集合。不计终答是否提及金标标题；不计 <code>read_file</code> 是否打开金标文件。</td>
               </tr>
               <tr>
                 <td>Recall@k</td>
-                <td>|前 k ∩ 金标| / |金标|，再对 query 宏平均</td>
-                <td><strong>R@100 是第一验收位</strong>：金标不进池，nDCG@10 只是运气。召回没抬之前不开交叉编码器。</td>
+                <td>|R<sub>k</sub> ∩ G| / |G|，再对 query 宏平均</td>
+                <td><strong>R@100 为第一验收位</strong>：金标未入池时，nDCG@10 无诊断价值。召回未抬升前不开交叉编码器。</td>
               </tr>
               <tr>
                 <td>nDCG@k</td>
                 <td>按位次折现的增益 / 理想 DCG</td>
-                <td>同样召回下，金标排越前越好。顶一准但池子窄时：nDCG@1 升、R@100 降——第2轮 BEIR 就出现过。</td>
+                <td>同等召回下，金标位次越前越好。第2轮 BEIR 出现过 nDCG@1 升而 R@100 降。</td>
               </tr>
               <tr>
                 <td>MAP@k</td>
-                <td>每个命中处的 precision 对 |金标| 平均</td>
-                <td>惩罚「金标散落在很后面」。与 nDCG 一起看排序，不单独当闸。</td>
+                <td>各命中位置 precision 对 |G| 平均</td>
+                <td>惩罚金标散落在尾部。与 nDCG 一并观察排序，不单独作闸。</td>
               </tr>
             </tbody>
           </table>
-          <p>先分桶再怪系统：<code>no_search</code>（没点工具）≠ 召回差；<code>query_drift</code>（第一下没复制官方 query）≠ 嵌入差；infra ≠ 模型零分。</p>
+          <p>归因分桶：<code>no_search</code> 不是召回失败；<code>query_drift</code>（首次未复制官方 query）不是嵌入失败；infra 失败不得记为模型零分。</p>
           <div class="callout warn">
             <strong>审阅偏差。</strong>
-            主分不看终答是否正确，所以这不是 RAG-QA 分。多轮 RRF 会抬后轮改写才搜到的文档，对 iterative search 友好，也会掩盖第一下有多差。前 20 条可能比全集偏易/偏难。
+            主指标不是 RAG-QA。多轮 RRF 抬高后轮改写才召回的文档，有利于 iterative search，也会掩盖首次检索质量。n=20 的 head 切片相对全集可易可难，不得外推全库。
           </div>
-          <h3>第4轮用这把尺子量出来的数</h3>
+          <h3>第4轮（BEIR / C-MTEB 指针）</h3>
           <table>
             <thead><tr><th></th><th>BEIR（第一验收位）</th><th>C-MTEB</th></tr></thead>
             <tbody>
@@ -1874,9 +2212,9 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               <tr><td>MAP@10</td><td>0.3520（+0.047）</td><td>0.6177（−0.041）</td></tr>
             </tbody>
           </table>
-          <div class="callout">C-MTEB 召回升、nDCG/MAP 略降：中位 nDCG 易饱和，排序和召回可以分道。仍是 n=20，不升主栏。</div>
-          <p class="figure-lead">下图是一题如何从 <code>search_sources</code> 计到 nDCG。店内 hybrid 细节见前文召回页。</p>
-          <div class="src"><code>metrics_ir.py</code> · <code>agent_path_extract.py</code> · <code>l1_prompts.py</code></div>
+          <div class="callout">C-MTEB 召回上升、nDCG/MAP 略降：中位 nDCG 易饱和，排序与召回可以分道。仍为 n=20，不升 SCORECARD 主栏。</div>
+          <p class="figure-lead">下图：一题从 <code>search_sources</code> 计到 nDCG。店内 hybrid 顺序见前文召回页。</p>
+          <div class="src"><code>BeIR/scifact</code> · <code>metrics_ir.py</code> · <code>agent_path_extract.py</code> · RESULTS 第4轮 <code>42772fe3</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1888,32 +2226,63 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
 
       <section class="page" data-id="ops-eval-context" data-group="Ops 效果" data-title="上下文 · 命中定义">
         <div class="card">
-          <h2>上下文：给了什么题，什么叫命中</h2>
-          <p class="lede">测的是「读完长文后短答案对不对」，<strong>不是</strong>会不会检索。没有 harness。裁判是抽 <code>Answer:</code> 后的 F1 / EM（scorer v2）。</p>
-          <h3>给了什么题目</h3>
-          <p>LongBench 小切，三类任务各最多 20 条，合计 n=60：<code>multifieldqa_en</code>（多段英文阅读）、<code>hotpotqa</code>（多跳短答）、<code>narrativeqa</code>（长叙事）。每题官方带长文 <code>context</code>、问题 <code>input</code>、可接受短答案 <code>answers</code>。</p>
-          <p>Agent 看见：Work 里<strong>只有</strong> <code>sources/passage.md</code> = 该题长文；用户消息要求先读（截断就 <code>offset</code> 续读），grep 只用来跳，最后一行 <code>Answer: &lt;phrase&gt;</code>。没有 <code>search_sources</code>。金标 <code>answers</code> 不在盘上、不在 prompt 里。</p>
-          <p>注意：hotpotqa 在「单文件 passage」里已经把多篇拼好了，测的不是 Agent 自己去找第二篇。</p>
-          <h3>怎么跑完</h3>
+          <h2>上下文：官方题面、可见范围与命中</h2>
+          <p class="lede">主指标回答的是：抽取最后一条 <code>Answer:</code> 之后，相对 LongBench <code>answers</code> 的 F1 / EM（scorer v2）。不测检索能力。无 Docker harness。对照锚钉死为第2轮同口径重打：F1 <strong>0.5479</strong> / EM <strong>0.30</strong>。</p>
+          <h3>官方字段</h3>
+          <p>题集为 LongBench（Bai et al.）。物化见 <code>pull.py</code> 的 <code>_normalize_longbench_row</code>。smoke：三任务各最多 20 条，合计 n=60。</p>
+          <table>
+            <thead><tr><th>官方字段</th><th>含义</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td><code>task</code> / slice <code>idx</code></td><td><code>multifieldqa_en</code> · <code>hotpotqa</code> · <code>narrativeqa</code>；idx 为该任务切片内序号</td><td>case id</td></tr>
+              <tr><td><code>input</code></td><td>问题原文</td><td>是：用户消息 <code>Question:</code></td></tr>
+              <tr><td><code>context</code></td><td>长文</td><td>是：仅 <code>sources/passage.md</code></td></tr>
+              <tr><td><code>answers</code></td><td>可接受短答案列表</td><td><strong>否</strong></td></tr>
+            </tbody>
+          </table>
+          <p>Agent 场景为 <code>agent</code>，无 <code>search_sources</code>。hotpotqa 的多篇已拼进单一 <code>passage.md</code>，本套件不测「自行找第二篇」。oracle 臂仅作诊断；主栏用 free。</p>
+          <h3>示例：<code>multifieldqa_en</code> idx 0（EM=1）</h3>
+          <p>字段取自 LongBench <code>multifieldqa_en</code> 切片首条（源数据集同题 <code>input</code> 与 FC Urartu 条目对应）。物化：<code>context</code> → <code>passage.md</code>；<code>answers</code> 留在评测进程。</p>
+          <table>
+            <thead><tr><th>官方字段</th><th>本题取值</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td><code>task</code> / <code>idx</code></td><td><code>multifieldqa_en</code> · <code>0</code></td><td>case id</td></tr>
+              <tr><td><code>input</code></td><td><code>What is the name of the most active fan club?</code></td><td>是</td></tr>
+              <tr><td><code>context</code></td><td>FC Urartu（Yerevan）条目；含 Fans 段</td><td>是：<code>passage.md</code></td></tr>
+              <tr><td><code>answers</code></td><td><code>["South West Ultras fan club."]</code></td><td><strong>否</strong></td></tr>
+            </tbody>
+          </table>
+          <p>用户消息中的 Question（= <code>input</code>）：</p>
+          <pre>What is the name of the most active fan club?</pre>
+          <p>Agent 可见的 <code>passage.md</code> 节选（金标句约在 offset 3043；全文更长）：</p>
+          <pre>Football Club Urartu, commonly known as Urartu, is an Armenian professional
+football team based in the capital Yerevan that currently plays in the
+Armenian Premier League. …
+
+Fans
+The most active group of fans is the South West Ultras fan club, mainly
+composed of residents from several neighbourhoods within the
+Malatia-Sebastia District of Yerevan, since the club is a de facto
+representer of the district.</pre>
           <ol class="steps">
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what">每题一个 Work，agent Turn 里 <code>read_file</code> → 终答</p>
-                <p class="why">与检索套件隔离：这里没有资料库可搜。读没读完是过程统计，不是主指标。</p>
+                <p class="what">每题一个 Work；agent Turn 内 <code>read_file</code> → 终答</p>
+                <p class="why">无资料库可搜。<code>n_reads</code> 为过程统计，不是主指标。本题预测 <code>South West Ultras fan club</code>，去句号后与 gold 相等 → <strong>EM=1，F1=1</strong>（<code>n_reads=0</code> 仍满分）。</p>
               </div>
             </li>
             <li>
               <span class="n">2</span>
               <div>
-                <p class="what">抽最后一条非空、非占位的 <code>Answer:</code> 行，再对 gold 取 max</p>
-                <p class="why">Agent 会先写推理。若不抽，预测是 <code>Answer: berlin</code>、gold 是 <code>berlin</code>，v2 EM 必 0。第2轮入账 EM=0 就是这个口径事故。</p>
+                <p class="what">抽取最后一条非空、非占位的 <code>Answer:</code> 行，对 <code>answers</code> 取 max</p>
+                <p class="why">模型常先写推理。若不抽，预测为 <code>Answer: berlin</code>、gold 为 <code>berlin</code> 时 v2 EM 必为 0。第2轮入账 EM=0 即该口径事故。</p>
               </div>
             </li>
           </ol>
-          <h3>什么叫命中，为什么这样视为</h3>
+          <p>对照 idx 1：<code>input</code> = <code>Is the ISR necessary for transgene reactivation?</code>；<code>answers</code> = <code>["No, it is not necessary."]</code>（context 约 45634 字符，不进评分器可见范围以外的 prompt）。预测 <code>No</code> → token 袋 <code>{no}</code> 对五词金标，P=1、R=1/5 → <strong>EM=0，F1=0.333</strong>。语义成立，EM 仍为零。idx 2 为 STM/STS 同义改写：<strong>EM=0，F1=0.8</strong>。</p>
+          <h3>命中定义</h3>
           <table>
-            <thead><tr><th>尺子</th><th>怎么算</th><th>为什么用它</th></tr></thead>
+            <thead><tr><th>尺子</th><th>计算</th><th>选取理由</th></tr></thead>
             <tbody>
               <tr>
                 <td>规范化</td>
@@ -1922,22 +2291,22 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               </tr>
               <tr>
                 <td>EM</td>
-                <td>规范化后预测 <strong>等于</strong> 任一条 gold 才得 1</td>
-                <td>v2 <strong>不做</strong>「gold 是 pred 子串就算对」——那是 v1，会把啰嗦解释判成全对。</td>
+                <td>规范化后预测 <strong>等于</strong> 任一条 gold 得 1</td>
+                <td>v2 不做「gold 为 pred 子串即判对」（v1 会把带推理的长答判满分）。</td>
               </tr>
               <tr>
                 <td>F1</td>
-                <td>预测 token 与 gold token 的 bag 重合，多条 gold 取最高</td>
-                <td>LongBench 官方就是 QA F1/EM。给部分分，所以 F1 通常高于 EM——这是尺子形态，不一定是模型「半对」。</td>
+                <td>预测与 gold 的 token 袋重合；多条 gold 取最高</td>
+                <td>LongBench 官方 QA 指标。F1 高于 EM 是尺子形态，不必然表示「半对」。</td>
               </tr>
             </tbody>
           </table>
-          <p>对照锚钉死为第2轮<strong>同口径重打</strong>：F1 0.5479 / EM 0.30。禁止用当时入账的 0.4557 / 0.0000 验收导航改动。infra 失败剔除，不算模型零分。</p>
+          <p>禁止用第2轮入账事故值 0.4557 / 0.0000 验收后续改动。infra 失败剔除，不得记为模型零分。</p>
           <div class="callout warn">
             <strong>审阅偏差。</strong>
-            短答案 QA 惩罚正确但换了一种说法（EM 尤甚）。n=60、每任务 head 切片，不能当 LongBench 全文成绩。主指标不回答「是否读到了相关段落」。
+            短答案 QA 惩罚正确但措辞不同的回答（EM 尤甚）。n=60、每任务 head 切片，不得当作 LongBench 全文成绩。主指标不回答「是否读到相关段落」。
           </div>
-          <h3>第4轮用这把尺子量出来的数</h3>
+          <h3>第4轮（相对第2轮对照锚）</h3>
           <table>
             <thead><tr><th></th><th>第2轮对照锚</th><th>第4轮</th></tr></thead>
             <tbody>
@@ -1947,9 +2316,9 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               <tr><td>墙钟</td><td>—</td><td>936s</td></tr>
             </tbody>
           </table>
-          <div class="callout">第4轮 F1/EM 略低于对照锚，同口径可读：不能解释成「突然不会抽 Answer:」。更可能是 n=60 波动或个别 verbose / 读后仍答错。以后对照一律用 0.5479 / 0.30。</div>
-          <p class="figure-lead">下图是一题如何从 <code>passage.md</code> 计到 F1/EM。</p>
-          <div class="src"><code>context_run.py</code> · scorer v2 · <code>l1_prompts.py</code></div>
+          <div class="callout">第4轮 F1/EM 略低于对照锚，同口径可读，不能解释为抽取 <code>Answer:</code> 再次失效。更可能是 n=60 波动、个别 verbose，或读后仍答错。后续对照一律使用 0.5479 / 0.30。</div>
+          <p class="figure-lead">下图：一题从 <code>passage.md</code> 计到 F1/EM。</p>
+          <div class="src"><code>THUDM/LongBench</code> · <code>context_run.py</code> · scorer v2 · RESULTS 第4轮 <code>cf2a1957</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1961,12 +2330,81 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
 
       <section class="page" data-id="ops-eval-coding" data-group="Ops 效果" data-title="编码 · harness 与命中">
         <div class="card">
-          <h2>编码：给了什么题，harness 怎么判通过</h2>
-          <p class="lede">测的是「隐藏测过不过」。<strong>harness 才是裁判</strong>，不是平台探针，也不是工作区 pytest。题目来自 SWE-bench Lite；smoke n5 = HF 顺序前 5 个 ID，<strong>全是 astropy</strong>。</p>
-          <h3>给了什么题目</h3>
-          <p>每题官方字段：<code>repo</code>、<code>base_commit</code>、GitHub issue（<code>problem_statement</code>）、隐藏测 <code>FAIL_TO_PASS</code> / <code>PASS_TO_PASS</code>、金标 <code>patch</code>。后三项<strong>不写入 Work</strong>。</p>
-          <p>Agent 看见：<code>base_commit</code> 上的坏树 + 根上 <code>problem.md</code>（issue 全文）。用户消息要求读 issue → 复现 → <code>search_codebase</code> → <code>edit_file</code> → 再验；禁止靠网络。它看不到官方隐藏测名字（除非 issue 自己写了某个失败测）。平台从 issue 抽的「例子覆盖」也只来自 <code>problem.md</code>，故意不泄漏 F2P。</p>
-          <h3>怎么跑完；harness 承担什么</h3>
+          <h2>编码：官方题面、可见范围与 harness 命中</h2>
+          <p class="lede">主指标回答的是：官方隐藏测是否通过。<strong>裁判为 <code>swebench.harness</code></strong>（F2P 全过且 P2P 全过），不是平台探针，也不是工作区 pytest。题集：HuggingFace <code>princeton-nlp/SWE-bench_Lite</code> test。smoke n5 = 该 split 顺序前 5 个 ID，全部为 astropy。现行编码冒烟：RESULTS 第6轮（<code>gpt-5.6-luna</code>）<strong>4/5</strong>，未过仍为 14365；不作效果结论，不升 SCORECARD。</p>
+          <h3>官方字段</h3>
+          <p>每题官方字段：<code>repo</code>、<code>base_commit</code>、GitHub issue（<code>problem_statement</code>）、隐藏测 <code>FAIL_TO_PASS</code> / <code>PASS_TO_PASS</code>、金标 <code>patch</code>。后三项<strong>不写入 Work</strong>（<code>hints_text</code> 与 issue 评论同样不进）。</p>
+          <p>Agent 可见：<code>base_commit</code> 上的坏树，以及根目录 <code>problem.md</code>（= <code>problem_statement</code> 全文）。用户消息规定读 issue → 复现 → <code>search_codebase</code> → <code>edit_file</code> → 再验；禁止网络。官方隐藏测名称不可见（除非 issue 正文自行写到某失败测）。平台从 issue 抽取的例子覆盖义务仅来自 <code>problem.md</code>，故意不泄漏 F2P。</p>
+          <h3>示例：官方 Lite 一行（第6轮未过题）</h3>
+          <p>字段取自 HuggingFace <code>princeton-nlp/SWE-bench_Lite</code> test split 第 3 行（0-based index 2），与切片 <code>astropy__astropy-14365</code> 一致。物化：<code>repo_materialize.py</code> checkout <code>base_commit</code>，仅将 <code>problem_statement</code> 写入 <code>problem.md</code>。</p>
+          <table>
+            <thead><tr><th>官方字段</th><th>本题取值</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td><code>instance_id</code></td><td><code>astropy__astropy-14365</code></td><td>标记文件；不是 prompt</td></tr>
+              <tr><td><code>repo</code></td><td><a href="https://github.com/astropy/astropy">astropy/astropy</a></td><td>是：clone 源</td></tr>
+              <tr><td><code>base_commit</code></td><td><a href="https://github.com/astropy/astropy/tree/7269fa3e33e8d02485a647da91a5a2a60a06af61"><code>7269fa3e33e8d02485a647da91a5a2a60a06af61</code></a></td><td>是：坏树</td></tr>
+              <tr><td>GitHub issue</td><td><a href="https://github.com/astropy/astropy/issues/14365">astropy/astropy#14365</a>（2023-02-06 · dataset <code>version=5.1</code>）</td><td>正文 → <code>problem.md</code></td></tr>
+              <tr><td><code>FAIL_TO_PASS</code></td><td><code>astropy/io/ascii/tests/test_qdp.py::test_roundtrip[True]</code></td><td><strong>否</strong></td></tr>
+              <tr><td>金标 <code>patch</code> / <code>test_patch</code> / <code>hints_text</code></td><td>官方修法含 <code>v.upper() == "NO"</code>；<code>test_patch</code> 会把非注释行改成小写</td><td><strong>否</strong></td></tr>
+            </tbody>
+          </table>
+          <p><code>problem.md</code> 原文（Issue 标题 + Description / Expected / How to Reproduce；Versions 省略，磁盘上仍有全文）：</p>
+          <pre>ascii.qdp Table format assumes QDP commands are upper case
+### Description
+
+ascii.qdp assumes that commands in a QDP file are upper case, for example,
+for errors they must be "READ SERR 1 2" whereas QDP itself is not case
+sensitive and case use "read serr 1 2".
+
+As many QDP files are created by hand, the expectation that all commands
+be all-caps should be removed.
+
+### Expected behavior
+
+The following qdp file should read into a Table with errors, rather than crashing.
+
+read serr 1 2
+1 0.5 1 0.5
+
+### How to Reproduce
+
+Create a QDP file:
+
+&gt; cat &gt; test.qdp
+read serr 1 2
+1 0.5 1 0.5
+&lt;EOF&gt;
+
+&gt; python
+&gt;&gt;&gt; from astropy.table import Table
+&gt;&gt;&gt; Table.read('test.qdp', format='ascii.qdp')
+ValueError: Unrecognized QDP line: read serr 1 2</pre>
+          <p>按这条字段走完一题（第6轮 luna 仍 unresolved）：</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">checkout <code>7269fa3e…</code>，写入上面这段 <code>problem.md</code></p>
+                <p class="why">工作区是 2023-02 时的坏树。没有 F2P 名字，没有金标补丁。issue 例子只有小写命令 <code>read serr 1 2</code> 和两行数字，<strong>没有</strong>数据 token <code>NO</code>。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">产品 Turn：模型按 issue 修命令大小写</p>
+                <p class="why">常见补丁是 <code>_command_re</code> 加 <code>re.IGNORECASE</code>，再自写一个接近 issue 示例的测试。issue 例子覆盖义务在这里会绿——这仍不是分数。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">harness 在 <code>sweb.eval.…astropy-14365</code> 里：apply 模型补丁 → 还原测试文件 → 官方 <code>test_patch</code> → 跑 F2P ∧ P2P</p>
+                <p class="why"><code>test_roundtrip[True]</code> 把<strong>所有非注释行</strong>改成小写，数据里的 <code>NO</code> 变成 <code>no</code>。只忽略命令大小写不够；金标补丁另有 <code>v.upper() == "NO"</code>。P2P 8 条全绿不能替代这一条 F2P。</p>
+              </div>
+            </li>
+          </ol>
+          <p>对照会过的题 <code>astropy__astropy-12907</code>（同一 <code>repo</code>；<code>base_commit</code> <a href="https://github.com/astropy/astropy/tree/d16bfe05a744909de4b27f5875fe0d4ed41ce607"><code>d16bfe05a744909de4b27f5875fe0d4ed41ce607</code></a>；issue <a href="https://github.com/astropy/astropy/issues/12907">#12907</a>）。<code>problem_statement</code> 是嵌套 <code>CompoundModels</code> 的 <code>separability_matrix</code> 算错：<code>Pix2Sky_TAN() &amp; cm</code> 不应把后两维粘成不可分。issue 里的 REPL 与隐藏 F2P <code>test_separable[compound_model6/9]</code> 同向，第4–6轮均 resolved。</p>
+          <h3>执行路径与 harness 职责</h3>
           <ol class="steps">
             <li>
               <span class="n">1</span>
@@ -1979,15 +2417,15 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
               <span class="n">2</span>
               <div>
                 <p class="what"><code>swebench.harness.run_evaluation</code>：拉 sweb.eval 镜像、apply 补丁、跑 F2P 与 P2P</p>
-                <p class="why">这是 SWE-bench 论文/排行榜的官方定义，不是我们发明的。镜像里断网。缺镜像或 harness 崩溃 → 套件 <code>failed</code>，禁止写成 <code>resolve_rate=0</code>。</p>
+                <p class="why">与 SWE-bench 论文/排行榜定义一致。镜像内断网。缺镜像或 harness 崩溃 → 套件 <code>failed</code>，禁止写成 <code>resolve_rate=0</code>。</p>
               </div>
             </li>
           </ol>
-          <h3>什么叫命中，为什么这样视为</h3>
+          <h3>命中定义</h3>
           <table>
             <thead><tr><th>信号</th><th>是命中吗</th><th>为什么</th></tr></thead>
             <tbody>
-              <tr><td>非空 git diff（<code>patch_rate</code>）</td><td>否</td><td>乱改也能有 diff。第4–5轮都是 1.0，14365 仍 unresolved。</td></tr>
+              <tr><td>非空 git diff（<code>patch_rate</code>）</td><td>否</td><td>乱改也能有 diff。第4–6轮都是 1.0，14365 仍 unresolved。</td></tr>
               <tr><td><code>fuse_ok</code> / 找到定义</td><td>否</td><td>找对文件不等于修对隐藏测。</td></tr>
               <tr><td>issue 例子再跑过</td><td>否</td><td>例子在 issue 里；隐藏测可以是没写的 <code>test_roundtrip[True]</code>。</td></tr>
               <tr><td>verify_receipt / <code>test_summary</code></td><td>否</td><td>平台催验，模型可以不理。出口线 ≥0.6 是过程目标。</td></tr>
@@ -1997,50 +2435,50 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           <p>为什么不自己在工作区跑测试当分数？Lite 每题环境不同；工作区只是源码 checkout。错误解释器上绿，评委镜像里仍红。</p>
           <div class="callout warn">
             <strong>审阅偏差。</strong>
-            n5 全 astropy，不能外推到 django 占多数的 Lite（n25 才开始有 django）。同分异题：4/5 可以是「换了一题过、一题回落」，不是能力稳定在 80%。无人值守预批准比真实用户少一道审批摩擦。
+            n5 全 astropy，不能外推到 django 占多数的 Lite（n25 才开始有 django）。同分异题：4/5 可以是「换了一题过、一题回落」，不是能力稳定在 80%。第6轮换模后仍是同一题未过。无人值守预批准比真实用户少一道审批摩擦。
           </div>
-          <h3>五道题（harness 对错才是原因）</h3>
+          <h3>五道题（第6轮 luna；harness 对错才是原因）</h3>
           <table>
-            <thead><tr><th>instance</th><th>第4轮</th><th>第5轮</th><th>原因</th></tr></thead>
+            <thead><tr><th>instance</th><th>第5轮 dsflash</th><th>第6轮 luna</th><th>原因</th></tr></thead>
             <tbody>
               <tr>
                 <td>astropy-12907</td>
-                <td>resolved · 117 步 / 1936s</td>
-                <td>resolved · <strong>35 / 848</strong></td>
-                <td>本来就会过；步数降来自翻页改 <code>read_file</code>、测进 Docker，不是新修法。</td>
+                <td>resolved · 35 / 848</td>
+                <td>resolved · <strong>37 / 669</strong></td>
+                <td>issue 与 F2P 同向（嵌套 CompoundModel）；会过的题，墙钟略降。</td>
               </tr>
               <tr>
                 <td>astropy-14995</td>
-                <td>resolved · 110 / 684</td>
-                <td>resolved · <strong>30 / 358</strong></td>
+                <td>resolved · 30 / 358</td>
+                <td>resolved · <strong>24 / 347</strong></td>
                 <td>同上，会过的题变薄。</td>
               </tr>
               <tr>
                 <td>astropy-6938</td>
-                <td>resolved · 25 / 388</td>
                 <td>resolved · 57 / 752</td>
-                <td>仍通过；本题变慢，不能用宏步数下降概括。</td>
+                <td>resolved · <strong>39 / 678</strong></td>
+                <td>仍通过；本题第5轮曾变慢，第6轮收回。</td>
               </tr>
               <tr>
                 <td>astropy-14182</td>
-                <td>unresolved · 114 / 1692</td>
-                <td><strong>resolved</strong> · 56 / 1784</td>
-                <td>补丁含 <code>header_rows</code> 写路径 + <code>data.start_line</code> 读侧，与 write→read 往返义务同向。仍最慢（~30min），复现占墙钟。</td>
+                <td>resolved · 56 / 1784</td>
+                <td>resolved · <strong>47 / 786</strong></td>
+                <td>第5轮转绿后稳住。题内秒数约减半；不再是 ~30min 那档。</td>
               </tr>
               <tr>
                 <td>astropy-14365</td>
-                <td>resolved · 43 / 513</td>
-                <td><strong>unresolved</strong> · 24 / 125</td>
-                <td>仍只加了 <code>re.IGNORECASE</code>。issue 样例无小写 <code>NO</code>，casefold 门逼不出隐藏 F2P <code>test_roundtrip[True]</code> 所需修法。这就是「探针绿 / 催验了」也过不了官方测的例子。</td>
+                <td>unresolved · 24 / 125</td>
+                <td><strong>unresolved</strong> · 33 / 428</td>
+                <td>上面那条真实 issue：样例无小写 <code>NO</code>，<code>IGNORECASE</code> 过不了隐藏 <code>test_roundtrip[True]</code>。换模同分同题。</td>
               </tr>
             </tbody>
           </table>
           <div class="callout">
             <strong>过程探针在说什么（不是通过率）。</strong>
-            第5轮步数 409→202（−51%）、verify_receipt 0.20→0.80、<code>test_summary</code> 0.17→0.50、related 覆盖 1.0 但采用率 0。意思是：命令已经写进 <code>edit_file</code> 结果，模型经常不跑；催验发出去了，真正再测的比例只有 0.25。所以 4/5 同分异题，不能写成「编码能力稳定在 80%」。
+            第6轮相对第5轮：步数 202→180（−11%）、题内 elapsedΣ −25%、<code>verify_receipt</code> 0.80→1.0、回执后再测 0.25→0.80、<code>test_summary</code> 0.50→1.0、related 采用率 0→0.80（覆盖却从 1.0 降到 0.273）。意思是：催验和再测更密了，<strong>resolve 仍钉在同一题</strong>。4/5 不能写成「编码能力稳定在 80%」。
           </div>
           <p class="figure-lead">下图是一题如何从 checkout 计到 <code>resolve_rate</code>。写入链揉合见前文 Coding 页，那是探针，不是本图的终局门。</p>
-          <div class="src"><code>swebench.harness</code> · <code>suite_coding.py</code> · <code>RESULTS.md</code> 第5轮</div>
+          <div class="src"><code>princeton-nlp/SWE-bench_Lite</code> test · <code>repo_materialize.py</code> · <code>swebench.harness</code> · RESULTS 第6轮 <code>4471acba</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -2092,8 +2530,8 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           <h2>缺口（对照刚才那次跑）</h2>
           <ul>
             <li><strong>锚点</strong>：SCORECARD 主栏仍空。升锚：retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</li>
-            <li><strong>编码通过</strong>：钉死 14365——issue 无小写变体时 casefold 门逼不出隐藏 F2P；related_tests 采用率；verify_receipt 之后实际跑测；<code>test_summary</code> ≥0.6。</li>
-            <li><strong>编码时长</strong>：14182 仍约 30min，复现占主导。</li>
+            <li><strong>编码通过</strong>：钉死 14365——官方 issue 只有 <code>read serr 1 2</code>，隐藏 F2P 还要求数据 token <code>NO</code> 的 casefold；related_tests 覆盖与采用不要只看一轮。</li>
+            <li><strong>编码时长</strong>：14182 第6轮题内约 13min（786s），已离开第5轮 ~30min；套件墙钟仍约 43min。</li>
             <li><strong>BEIR</strong>：R@100 第一验收位仍未稳过；n=20 不够下结论；交叉编码器暂缓。</li>
             <li><strong>Context</strong>：F1/EM 略低于 0.5479 / 0.30 对照锚，待放量。</li>
             <li><strong>产品</strong>：intel 核实闭环 / collab 仍薄。</li>
@@ -2139,7 +2577,7 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         index: "INDEX 13 · 450 / 64",
         writing: "Work 树与 diff-first",
         "ops-bench": "L1 agent-path，不是 CI",
-        "ops-eval-why": "题目、命中、harness、偏差",
+        "ops-eval-why": "官方题面、可见范围、命中",
         "ops-eval-walk": "本地实例：qrels / Answer: / F2P",
         scorecard: "第4轮完整 smoke 回放",
         "ops-eval-retrieval": "BEIR：搜到 qrels 才算命中",
@@ -2151,15 +2589,69 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
 
       const pages = Array.from(document.querySelectorAll(".page"));
       const nav = document.getElementById("nav");
-      const meta = document.getElementById("pageMeta");
+      const pageGroup = document.getElementById("pageGroup");
+      const pageTitle = document.getElementById("pageTitle");
+      const pageCount = document.getElementById("pageCount");
+      const readProgress = document.getElementById("readProgress");
       const prevBtn = document.getElementById("prevBtn");
       const nextBtn = document.getElementById("nextBtn");
       const filter = document.getElementById("navFilter");
       const content = document.getElementById("content");
       const navToggle = document.getElementById("navToggle");
       const navBackdrop = document.getElementById("navBackdrop");
+      const themeBar = document.getElementById("themeBar");
       let idx = 0;
       const warmed = new Set();
+
+      const THEMES = [
+        { id: "paper", label: "纸色", swBg: "#e8edf2", swAccent: "#0f766e" },
+        { id: "mist", label: "雾色", swBg: "#e4e9ef", swAccent: "#3d5a80" },
+        { id: "ink", label: "墨色", swBg: "#12161e", swAccent: "#2dd4bf" },
+        { id: "ocean", label: "海色", swBg: "#0e1822", swAccent: "#5ba3d0" },
+        { id: "contrast", label: "高对比", swBg: "#0a0a0a", swAccent: "#e8b923" },
+      ];
+      const THEME_KEY = "agent.docs.theme";
+
+      function readTheme() {
+        try {
+          const raw = localStorage.getItem(THEME_KEY);
+          if (THEMES.some((t) => t.id === raw)) return raw;
+        } catch (e) {}
+        if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          return "ink";
+        }
+        return "paper";
+      }
+
+      function applyTheme(id) {
+        const t = THEMES.find((x) => x.id === id) || THEMES[0];
+        document.documentElement.setAttribute("data-theme", t.id);
+        try { localStorage.setItem(THEME_KEY, t.id); } catch (e) {}
+        themeBar.querySelectorAll("[data-theme-id]").forEach((btn) => {
+          btn.setAttribute("aria-pressed", btn.dataset.themeId === t.id ? "true" : "false");
+        });
+      }
+
+      (function mountThemes() {
+        const lab = document.createElement("span");
+        lab.className = "theme-label";
+        lab.textContent = "外观";
+        lab.title = "按 t 循环主题";
+        themeBar.appendChild(lab);
+        THEMES.forEach((t) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "swatch";
+          b.dataset.themeId = t.id;
+          b.title = t.label;
+          b.setAttribute("aria-label", t.label);
+          b.style.setProperty("--sw-bg", t.swBg);
+          b.style.setProperty("--sw-accent", t.swAccent);
+          b.addEventListener("click", () => applyTheme(t.id));
+          themeBar.appendChild(b);
+        });
+        applyTheme(readTheme());
+      })();
 
       function setNavOpen(open) {
         document.body.classList.toggle("nav-open", open);
@@ -2199,8 +2691,8 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         const t = document.createElement("button");
         t.type = "button";
         t.className = "nav-group-title";
-        t.innerHTML = `<span></span><span class="chev">▸</span>`;
-        t.querySelector("span").textContent = g.name;
+        t.innerHTML = `<span class="nav-group-name"></span><span class="nav-group-meta"><span class="nav-group-count">${g.items.length}</span><span class="chev">▸</span></span>`;
+        t.querySelector(".nav-group-name").textContent = g.name;
         t.addEventListener("click", () => wrap.classList.toggle("is-collapsed"));
         wrap.appendChild(t);
         g.items.forEach((item) => {
@@ -2252,7 +2744,10 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
           });
         });
         const p = pages[idx];
-        meta.textContent = `${idx + 1} / ${pages.length} · ${p.dataset.group} · ${p.dataset.title}`;
+        pageGroup.textContent = p.dataset.group || "";
+        pageTitle.textContent = p.dataset.title || "";
+        pageCount.textContent = `${idx + 1} / ${pages.length}`;
+        readProgress.style.width = `${((idx + 1) / pages.length) * 100}%`;
         prevBtn.disabled = idx === 0;
         nextBtn.disabled = idx === pages.length - 1;
         history.replaceState(null, "", `#${p.dataset.id}`);
@@ -2301,6 +2796,11 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
         if (typing || e.ctrlKey || e.metaKey || e.altKey) return;
         if (e.key === "ArrowLeft" || e.key === "k") go(idx - 1);
         if (e.key === "ArrowRight" || e.key === "j") go(idx + 1);
+        if (e.key.toLowerCase() === "t") {
+          const cur = document.documentElement.getAttribute("data-theme") || "paper";
+          const i = THEMES.findIndex((x) => x.id === cur);
+          applyTheme(THEMES[(i + 1 + THEMES.length) % THEMES.length].id);
+        }
         if (e.key === "/") {
           e.preventDefault();
           filter.focus();

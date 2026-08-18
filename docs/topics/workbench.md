@@ -14,7 +14,7 @@ Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieva
 
 1. [写作主路径](../assets/writing/writing-main-path-zh.png) — Work 树 · 按需检索 · diff-first  
 2. [Ops Bench 原理](../assets/ops/ops-bench-principle-zh.png) — L1 agent-path · 套件 · 隔离  
-3. [评测原理](ops-eval-principles.md) — 题目、命中、harness、审阅偏差  
+3. [评测原理](ops-eval-principles.md) — 官方题面、可见范围、命中定义、审阅偏差  
 4. [实例走查](ops-eval-walkthrough.md) — 本地题目原文与命中判定  
 5. [图 · 检索实例](../assets/ops/ops-eval-walk-retrieval-zh.png) — SciFact q-3 / q-1  
 6. [图 · 上下文实例](../assets/ops/ops-eval-walk-context-zh.png) — LongBench idx 0 / 1 / 2  
@@ -86,7 +86,7 @@ work_root/
 ## 2. Ops 官方 Bench（效果，不是 CI）
 
 路径：`/ops/<密钥>/official`。  
-**效果温度计，不是合入门禁**；服从架构文里的速率红线（不挡受理、首 token 前不加同步模型、重活异步、可测才合并）。给了什么题、什么叫命中、harness 干什么：见 [评测原理](ops-eval-principles.md)。分数如何从一次跑写进 `RESULTS.md` / 能否升 SCORECARD 主栏，见 [分数入账图](../assets/ops/score-snapshot-zh.png)。
+**效果温度计，不是合入门禁**；服从架构文里的速率红线（不挡受理、首 token 前不加同步模型、重活异步、可测才合并）。官方题面、可见范围与命中定义：见 [评测原理](ops-eval-principles.md)。分数如何从一次跑写进 `RESULTS.md` / 能否升 SCORECARD 主栏，见 [分数入账图](../assets/ops/score-snapshot-zh.png)。
 
 文首三层表已说明 Bench ≠ Golden ≠ ci_proof。本节只讲 Bench。
 
@@ -123,7 +123,7 @@ work_root/
 工作区符号表：评测套件默认等索引 ready；产品 Turn 仍先受理。与产品资料检索面隔离。  
 解题侧：pytest/`|tail` 改去该题 Docker 镜像跑完整测试（复用容器）；issue 正文里的例子必须在最新编辑后再跑过，且不得把官方隐藏测试泄漏给模型。  
 Harness 失败或没有通过率 → 套件 **failed**，不得标 completed 粉饰成模型零分。  
-现行冒烟：[`RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第4–5轮 coding 4/5，未升主栏）。
+现行冒烟：[`RESULTS.md`](../../eval/official/baseline/RESULTS.md)（第6轮 coding 4/5，未升主栏）。
 
 ### 2.3 与产品面隔离
 
