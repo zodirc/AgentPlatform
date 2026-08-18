@@ -109,6 +109,8 @@ run_unit_api_ux() {
     .venv/bin/python -m pip install -q ../../packages/contracts/python
     .venv/bin/python -m pip install -q -e ".[dev]" 2>/dev/null || .venv/bin/python -m pip install -q -e .
     PYTHONPATH=. .venv/bin/pytest tests -q
+  elif [[ -x .venv/bin/pytest ]]; then
+    PYTHONPATH=. .venv/bin/pytest tests -q
   else
     pip_q packages/contracts/python
     pip_q -e ".[dev]" 2>/dev/null || pip_q -e .

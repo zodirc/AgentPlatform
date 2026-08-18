@@ -330,7 +330,11 @@ run_api_ux_local() {
   echo "==> [preflight] API test suite  [$(elapsed)]"
   cd "$ROOT/services/api"
   if [[ -x .venv/bin/pytest ]]; then
-    pip_install .venv/bin/python "$ROOT/packages/contracts/python"
+    if .venv/bin/python -m pip --version >/dev/null 2>&1; then
+      pip_install .venv/bin/python "$ROOT/packages/contracts/python"
+    else
+      echo "==> [preflight] api .venv has no pip — using import fallback for command_allowlist  [$(elapsed)]"
+    fi
     echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
     with_heartbeat "pytest api" env PYTHONPATH=. .venv/bin/pytest tests -q
   else
