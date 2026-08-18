@@ -41,6 +41,8 @@ def _temperature_for_scenario(scenario_id: str | None) -> float | None:
                 return float(raw)
         except (ValueError, TypeError, KeyError):
             pass
+    if sid == "writing":
+        return float(settings.model_temperature_writing)
     return settings.model_temperature_agent
 
 

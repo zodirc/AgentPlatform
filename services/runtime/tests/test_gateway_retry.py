@@ -262,7 +262,7 @@ def test_generation_params_align_max_tokens_and_writing_temp(
     )
     monkeypatch.setattr("app.model.generation.settings.context_window_tokens", 128_000)
     monkeypatch.setattr("app.model.generation.settings.model_max_output_tokens", 0)
-    monkeypatch.setattr("app.model.generation.settings.model_temperature_writing", 0.3)
+    monkeypatch.setattr("app.model.generation.settings.model_temperature_writing", 0.8)
     monkeypatch.setattr("app.model.generation.settings.model_temperature_agent", None)
     monkeypatch.setattr("app.model.generation.settings.model_top_p", None)
     monkeypatch.setattr("app.model.generation.settings.model_tool_choice", "auto")
@@ -271,7 +271,7 @@ def test_generation_params_align_max_tokens_and_writing_temp(
 
     writing = GenerationParams.from_settings(scenario_id="writing")
     assert writing.max_output_tokens == 30_000
-    assert writing.temperature == 0.3
+    assert writing.temperature == 0.8
     assert writing.thinking_enabled is False
 
     agent = GenerationParams.from_settings(scenario_id="agent")

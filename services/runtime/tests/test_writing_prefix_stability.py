@@ -81,6 +81,19 @@ def test_c4_card_edit_changes_prefix(tmp_path: Path) -> None:
     assert again.event_payload()["prefix_hash"] == hash_after
 
 
+def test_quality_reject_does_not_change_cards_prefix_hash(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    base = "You are a writing assistant."
+    ordinary = prepare_writing_system_prompt(base, "写一章", workspace_root=tmp_path)
+    rejected = prepare_writing_system_prompt(
+        base, "立意不行，没意思", workspace_root=tmp_path
+    )
+    assert ordinary.event_payload()["prefix_hash"] == rejected.event_payload()["prefix_hash"]
+    assert "Story-machine reset" in rejected.volatile_block
+    assert "Story-machine reset" not in extract_cards_block(rejected.volatile_block)
+    assert "Story-machine reset" not in ordinary.volatile_block
+
+
 def test_c5_runtime_and_plan_not_in_cards_prefix(tmp_path: Path) -> None:
     _seed(tmp_path)
     pin = prepare_writing_system_prompt(

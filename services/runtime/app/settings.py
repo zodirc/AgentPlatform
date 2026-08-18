@@ -119,9 +119,9 @@ class Settings(BaseSettings):
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
     # Inventory-deterministic pin (docs/14 C1/C3): kind → path sort; per-kind + global caps.
     writing_cards_dir: str = "sources/cards"
-    writing_cards_max_chars: int = 2000
-    writing_cards_per_card_chars: int = 800
-    writing_cards_style_max_chars: int = 800
+    writing_cards_max_chars: int = 3600
+    writing_cards_per_card_chars: int = 2000
+    writing_cards_style_max_chars: int = 2400
     writing_cards_character_max_chars: int = 1000
     writing_cards_plot_max_chars: int = 600
     writing_cards_general_max_chars: int = 400
@@ -198,7 +198,7 @@ class Settings(BaseSettings):
     # Generation strategy (aligned with CompactionPolicy.output_reserve_tokens).
     # 0 → scale reserve with context window (see context_output_* below).
     model_max_output_tokens: int = 0
-    model_temperature_writing: float = 0.3
+    model_temperature_writing: float = 0.8
     model_temperature_agent: Optional[float] = None
     model_top_p: Optional[float] = None
     model_tool_choice: str = "auto"  # auto | required | none

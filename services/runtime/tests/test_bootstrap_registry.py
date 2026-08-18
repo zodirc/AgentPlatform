@@ -43,8 +43,10 @@ def test_search_sources_description_includes_library_map() -> None:
     assert spec is not None
     desc = spec.description
     assert "persons" in desc
+    assert "periods" in desc
     assert "dramas" in desc
     assert "path_prefix" in desc
+    assert "主线剧情" in desc or "periods" in desc
     assert "cards" in desc
     assert "verbatim" in desc.lower() or "nearly verbatim" in desc
     assert "two" in desc.lower() or "≤ 2" in desc or "at most" in desc.lower()

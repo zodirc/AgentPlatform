@@ -4,7 +4,9 @@ from pathlib import Path
 
 from app.retrieval.chunking import should_index_source
 from app.writing.cards import (
+    BUILTIN_STYLE_PATH,
     build_writing_system_prompt,
+    default_voice_card_path,
     extract_cards_block,
     load_writing_cards,
     parse_style_card_sections,
@@ -143,6 +145,50 @@ def test_import_samples_from_chapter() -> None:
     sections = parse_style_card_sections(merged)
     assert "李云龙" in sections["Samples"]
     assert "张白鹿" in sections["Samples"]
+
+
+def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "立一个民国时代的上海滩故事",
+        workspace_root=tmp_path,
+    )
+    assert any(card.path == BUILTIN_STYLE_PATH for card in pin.cards)
+    assert any(card.kind == "style" for card in pin.cards)
+    assert "## Voice" in pin.volatile_block
+    assert "## Samples" in pin.volatile_block
+    path = default_voice_card_path()
+    assert path.is_file()
+    from app.writing.cards import _parse_frontmatter
+
+    _meta, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
+    sections = parse_style_card_sections(body)
+    assert "76号" not in sections["Samples"]
+    assert "绣花鞋" not in sections["Samples"]
+    assert "踹门" not in sections["Samples"]
+    assert "孔乙己" in sections["Samples"]
+    assert "格局" in sections["Samples"]
+    assert "大约孔乙己的确死了" in sections["Samples"]
+    assert "春风沉醉的晚上" in sections["Samples"]
+    assert "邓脱路" in sections["Samples"]
+    assert "使君" not in sections["Samples"]
+    assert "却说" not in sections["Samples"]
+    assert "人质" in sections["Don't"] or "踹门" in sections["Don't"]
+    assert "大约孔乙己的确死了" in pin.volatile_block
+    assert "邓脱路" in pin.volatile_block
+    assert "米店的牌子" not in pin.volatile_block
+
+
+def test_user_style_card_overrides_builtin(tmp_path: Path) -> None:
+    _seed_cards(tmp_path)
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "按设定写张白鹿",
+        workspace_root=tmp_path,
+    )
+    assert all(card.path != BUILTIN_STYLE_PATH for card in pin.cards)
+    assert "多写战场间隙" in pin.volatile_block
+    assert "米店的牌子" not in pin.volatile_block
 
 
 def test_dont_enabled_frontmatter(tmp_path: Path) -> None:

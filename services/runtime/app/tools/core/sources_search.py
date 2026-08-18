@@ -74,6 +74,16 @@ def _format_source_hits(hits: list[Any], *, excerpt_chars: int) -> list[dict[str
     return formatted
 
 
+def _rescore_hits_for_writing_scenario(
+    hits: list[Any],
+    *,
+    scenario_id: str | None,
+) -> list[Any]:
+    from app.retrieval.writing_section_prior import rescore_hits_for_writing
+
+    return rescore_hits_for_writing(hits, scenario_id=scenario_id)
+
+
 def _tier_search_hits_for_model(
     hits: list[dict[str, Any]],
     *,
@@ -435,6 +445,7 @@ async def search_sources(
                 path_prefix=effective_prefix,
             )
             hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
+            hits = _rescore_hits_for_writing_scenario(hits, scenario_id=scenario_id)
             hits = hits[:limit]
             hits = _tier_search_hits_for_model(hits)
             hits, score_hint = _finalize_search_hits_for_model(hits)
@@ -496,6 +507,9 @@ async def search_sources(
                     raw_hits, path_prefix=effective_prefix
                 )
                 filtered, exclude_meta = filter_hits_by_excludes(
+                    filtered, scenario_id=scenario_id
+                )
+                filtered = _rescore_hits_for_writing_scenario(
                     filtered, scenario_id=scenario_id
                 )
                 if filter_meta.get("filters", {}).get("error"):
@@ -570,6 +584,7 @@ async def search_sources(
                     path_prefix=effective_prefix,
                 )
                 hits, exclude_meta = filter_hits_by_excludes(hits, scenario_id=scenario_id)
+                hits = _rescore_hits_for_writing_scenario(hits, scenario_id=scenario_id)
                 hits = hits[:limit]
                 hits = _tier_search_hits_for_model(hits)
                 if hits:

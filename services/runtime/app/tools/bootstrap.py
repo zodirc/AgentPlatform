@@ -223,6 +223,8 @@ def build_registry() -> ToolRegistry:
                 "(e.g. 'seed/writing/dramas', 'seed/intel', 'hr', or 'sources/hr'); "
                 "rejects '..' / absolute paths. "
                 "When omitted, ScenarioProfile may apply a default prefix (intel → seed/intel). "
+                "Original fiction (立一个故事, no named drama/film): prefer path_prefix "
+                "'seed/writing/periods' for texture; do not imitate drama 主线剧情. "
                 "First search: pass the user's information need / claim nearly verbatim as `query` "
                 "(same wording and order). Do NOT compress into a keyword bag or synonym rewrite "
                 "on the first call — hybrid search already handles phrasing. "
@@ -250,6 +252,7 @@ def build_registry() -> ToolRegistry:
                         "description": (
                             "Optional directory under sources/ to restrict search. "
                             "Relative path; 'seed/writing/persons' or 'hr' means that tree. "
+                            "Original fiction: 'seed/writing/periods'. "
                             "Omit to use ScenarioProfile default when configured "
                             "(intel defaults to seed/intel). "
                             "No '..' or absolute paths."

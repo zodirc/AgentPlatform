@@ -332,7 +332,11 @@ def extract_cards_block(prompt: str) -> str:
     else:
         block = prompt[idx:]
     # Stop before work-index / work-surface / other post-card appendices (docs/24).
-    for stop in ("\n## Work index\n", "\n## Work surface\n"):
+    for stop in (
+        "\n## Work index\n",
+        "\n## Work surface\n",
+        "\n## Story-machine reset",
+    ):
         sidx = block.find(stop)
         if sidx >= 0:
             block = block[:sidx]
@@ -482,6 +486,65 @@ def style_card_template_path() -> Path:
     return Path(__file__).resolve().parents[1] / "scenarios" / "writing" / "templates" / "style_card.md"
 
 
+BUILTIN_STYLE_PATH = "(builtin)/default_voice.md"
+_QUALITY_REJECT_RE = re.compile(
+    r"没意思|立意不行|没激情|没特色|太幼稚|很幼稚|不像小说|看不下去|"
+    r"AI化|AI\s*化|通病|换个核|重立"
+)
+
+
+def default_voice_card_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[1]
+        / "scenarios"
+        / "writing"
+        / "templates"
+        / "default_voice.md"
+    )
+
+
+def load_builtin_default_voice() -> WritingCard | None:
+    path = default_voice_card_path()
+    if not path.is_file():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    meta, body = _parse_frontmatter(text)
+    if not body.strip():
+        return None
+    body = apply_style_meta_for_pin(body.strip(), meta)
+    return WritingCard(
+        path=BUILTIN_STYLE_PATH,
+        title=_card_title(path, meta, body) or "默认叙事声口",
+        kind="style",
+        body=body.strip(),
+        mtime=path.stat().st_mtime,
+    )
+
+
+def with_builtin_style_if_missing(cards: list[WritingCard]) -> list[WritingCard]:
+    """Pin house voice when inventory has no style card. User style fully overrides."""
+    if any(c.kind == "style" for c in cards):
+        return cards
+    builtin = load_builtin_default_voice()
+    if builtin is None:
+        return cards
+    return [builtin, *cards]
+
+
+def quality_reject_steer(message: str) -> str:
+    """Volatile-only: user rejected the story core. Must not enter cards prefix_hash."""
+    if not _QUALITY_REJECT_RE.search(message or ""):
+        return ""
+    return (
+        "## Story-machine reset（本轮用户否决了当前故事）\n"
+        "用户否决的是故事核，不是润色。不要给现有人物换一件道具或换一个历史挂点再写同一本书。\n"
+        "另起社会机器和人物。不要沿用本稿开场的常见核（特务踹门、人质换手艺、伪造证件当主线）。"
+    )
+
+
 @dataclass(frozen=True)
 class WritingCardsPinResult:
     """Writing pin result.
@@ -547,7 +610,7 @@ def prepare_writing_system_prompt(
 ) -> WritingCardsPinResult:
     from app.writing.work_index import format_work_index_block
 
-    cards = load_writing_cards(workspace_root=workspace_root)
+    cards = with_builtin_style_if_missing(load_writing_cards(workspace_root=workspace_root))
     selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)
     work_index = format_work_index_block(workspace_root=workspace_root)
@@ -569,6 +632,9 @@ def prepare_writing_system_prompt(
         surface = build_work_surface_block(message, workspace_root=workspace_root)
         if surface:
             extras.append(surface)
+    reset = quality_reject_steer(message)
+    if reset:
+        extras.append(reset)
 
     volatile = "\n\n".join(extras) if extras else ""
     return WritingCardsPinResult(
