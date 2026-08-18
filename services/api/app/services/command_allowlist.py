@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from agent_contracts.command_allowlist import normalize_command_prefix
-
 from app.db.pool import get_pool
+
+try:
+    from agent_contracts.command_allowlist import normalize_command_prefix
+except ImportError:  # pragma: no cover - stale venv/image still on older agent-contracts
+    def normalize_command_prefix(raw: str, *, max_len: int = 200) -> str:
+        text = " ".join((raw or "").replace("\n", " ").replace("\t", " ").split())
+        if max_len > 0:
+            return text[:max_len]
+        return text
 
 _MAX_PREFIXES = 100
 

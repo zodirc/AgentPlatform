@@ -102,14 +102,15 @@ run_unit_runtime() {
 
 run_unit_api_ux() {
   echo "==> [unit] API test suite"
-  pip_q packages/contracts/python
   cd services/api
   # Prefer api/.venv only when it can install/run tests; a broken venv
   # (python without pip) must not block proof — fall back to $PY.
   if [[ -x .venv/bin/pytest ]] && .venv/bin/python -m pip --version >/dev/null 2>&1; then
+    .venv/bin/python -m pip install -q ../../packages/contracts/python
     .venv/bin/python -m pip install -q -e ".[dev]" 2>/dev/null || .venv/bin/python -m pip install -q -e .
     PYTHONPATH=. .venv/bin/pytest tests -q
   else
+    pip_q packages/contracts/python
     pip_q -e ".[dev]" 2>/dev/null || pip_q -e .
     PYTHONPATH=. pytest_q tests -q
   fi

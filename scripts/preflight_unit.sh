@@ -328,12 +328,13 @@ run_runtime_local() {
 
 run_api_ux_local() {
   echo "==> [preflight] API test suite  [$(elapsed)]"
-  pip_install "$PY" packages/contracts/python
   cd "$ROOT/services/api"
   if [[ -x .venv/bin/pytest ]]; then
+    pip_install .venv/bin/python "$ROOT/packages/contracts/python"
     echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
     with_heartbeat "pytest api" env PYTHONPATH=. .venv/bin/pytest tests -q
   else
+    pip_install "$PY" "$ROOT/packages/contracts/python"
     pip_install "$PY" -e ".[dev]" || pip_install "$PY" -e .
     echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
     with_heartbeat "pytest api" env PYTHONPATH=. "$PY" -m pytest tests -q
@@ -411,11 +412,14 @@ run_api_ux_docker() {
     echo "api container not running — start with make up / make start"
     return 1
   fi
-  "${COMPOSE[@]}" exec -T -u root api rm -rf /tmp/api-tests
+  "${COMPOSE[@]}" exec -T -u root api rm -rf /tmp/api-tests /tmp/preflight-contracts
+  "${COMPOSE[@]}" exec -T -u root api mkdir -p /tmp/api-tests /tmp/preflight-contracts/python
   docker cp "$ROOT/services/api/tests/." agent-api:/tmp/api-tests/
+  docker cp "$ROOT/packages/contracts/python/." agent-api:/tmp/preflight-contracts/python/
   with_heartbeat "docker pytest api" "${COMPOSE[@]}" exec -T api bash -c \
-    'echo "==> [preflight/docker] pip install pytest extras…"
+    'echo "==> [preflight/docker] pip install pytest extras + contracts…"
      python -m pip install --progress-bar on pytest pytest-asyncio httpx pyyaml
+     python -m pip install --progress-bar on /tmp/preflight-contracts/python
      if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi
      if [ -f /repo/packages/contracts/openapi/public.yaml ]; then
        export PUBLIC_OPENAPI_YAML=/repo/packages/contracts/openapi/public.yaml
