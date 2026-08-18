@@ -10,7 +10,7 @@ import pytest
 
 from app.engine.agent_engine import AgentEngine, StepTimeoutError
 from app.engine.state import TurnState
-from app.model.gateway import ModelProviderTimeout, ModelResponse
+from app.model.gateway import ModelProviderTimeout, ModelResponse, StreamActivity
 from app.tools.core import tools as core
 from app.tools.registry import ToolSpec
 
@@ -105,6 +105,38 @@ async def test_agent_engine_text_response(workspace, monkeypatch: pytest.MonkeyP
     assert result == "Hello"
     assert "step.started" in events
     assert "turn.token" in events
+
+
+@pytest.mark.asyncio
+async def test_agent_engine_forwards_reasoning_activity(
+    workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events: list[tuple[str, dict]] = []
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        events.append((event_type, payload))
+
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [
+                StreamActivity(kind="sse", text=""),
+                StreamActivity(kind="reasoning", text="let me think"),
+                "Hello",
+            ]
+        ),
+        tools=[_stub_tool()],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    result = await engine.run(_state())
+    assert result == "Hello"
+    types = [t for t, _ in events]
+    assert "turn.thinking.delta" in types
+    delta = next(p for t, p in events if t == "turn.thinking.delta")
+    assert delta["delta"] == "let me think"
+    assert types.count("turn.thinking.delta") == 1
+    assert "turn.token" in types
 
 
 @pytest.mark.asyncio

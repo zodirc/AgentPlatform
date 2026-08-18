@@ -10,6 +10,7 @@ from .coding_harness import (
     coding_harness_failed,
     maybe_run_coding_harness,
 )
+from .coding_metrics import finish_coding_metrics, resolve_workspace_index_wait
 from .coding_thinking import (
     assemble_thinking_jsonl,
     coding_case_done_message,
@@ -51,7 +52,6 @@ async def run_coding_l1(
     _ensure_scripts_path()
     from official_bench.agent_path_extract import (
         csi_probes_from_events,
-        csi_suite_rates,
         file_hit,
         patch_apply_check,
         patch_from_baseline_diff,
@@ -86,28 +86,9 @@ async def run_coding_l1(
     coding_cfg = (cfg.get("suites") or {}).get("coding") or {}
     # E1 dual-track: suites.coding.workspace_index on|off (§7 eval-ephemeral).
     workspace_index_on = bool(coding_cfg.get("workspace_index"))
-    # Wait-ready: Ops run param > env > yaml (default false = R1 Turn-first).
-    if workspace_index_wait_ready is not None:
-        wait_ready_flag = bool(workspace_index_wait_ready)
-    else:
-        _wait_env = os.environ.get("WORKSPACE_INDEX_WAIT_READY", "").strip().lower()
-        if _wait_env in {"1", "true", "yes", "on"}:
-            wait_ready_flag = True
-        elif _wait_env in {"0", "false", "no", "off"}:
-            wait_ready_flag = False
-        else:
-            wait_ready_flag = bool(coding_cfg.get("workspace_index_wait_ready"))
-    workspace_index_wait_ready = wait_ready_flag
-    try:
-        workspace_index_wait_timeout_s = float(
-            os.environ.get(
-                "WORKSPACE_INDEX_WAIT_TIMEOUT_S",
-                coding_cfg.get("workspace_index_wait_timeout_s", 300),
-            )
-        )
-    except (TypeError, ValueError):
-        workspace_index_wait_timeout_s = 300.0
-    workspace_index_wait_timeout_s = max(30.0, min(workspace_index_wait_timeout_s, 1800.0))
+    workspace_index_wait_ready, workspace_index_wait_timeout_s = (
+        resolve_workspace_index_wait(coding_cfg, workspace_index_wait_ready)
+    )
     root = await _pull_with_live_logs(
         "SWE-bench Lite",
         lambda: pull_swebench(cfg, force=False),
@@ -668,88 +649,12 @@ async def run_coding_l1(
             patches=patches,
             out_path=pred_path,
         )
-        metrics: dict[str, Any] = {
-            "n_instances": float(selected_n),
-            "n_nonempty_patches": float(nonempty),
-            "patch_rate": float(nonempty) / float(selected_n) if selected_n else 0.0,
-            "mirror_prewarm_ok": float(len(prewarm_meta.get("ok") or [])),
-            "mirror_prewarm_failed": float(len(prewarm_meta.get("failed") or {})),
-        }
-        steps_total = 0.0
-        elapsed_total = 0.0
-        for c in session.cases:
-            if not isinstance(c, dict):
-                continue
-            if str(c.get("case_id") or "").startswith("swebench.lite"):
-                continue
-            m = c.get("metrics") if isinstance(c.get("metrics"), dict) else {}
-            l2c = c.get("l2") if isinstance(c.get("l2"), dict) else {}
-            try:
-                steps_total += float(m.get("steps", l2c.get("steps") or 0) or 0)
-            except (TypeError, ValueError):
-                pass
-            try:
-                elapsed_total += float(
-                    m.get("elapsed_s", l2c.get("elapsed_s") or 0) or 0
-                )
-            except (TypeError, ValueError):
-                pass
-        metrics["steps_total"] = steps_total
-        metrics["elapsed_s_total"] = round(elapsed_total, 1)
-        # CSI §7.6 suite rates from per-case l2 counters (Wave 1+2 probes).
-        csi_cases = [
-            dict(c.get("l2") or {})
-            for c in session.cases
-            if isinstance(c, dict)
-            and str(c.get("case_id") or "")
-            and not str(c.get("case_id") or "").startswith("swebench.lite")
-        ]
-        csi_rates = csi_suite_rates(csi_cases)
-        for key, value in csi_rates.items():
-            if value is not None:
-                metrics[key] = float(value) if isinstance(value, (int, float)) else value
-        csi_artifact = {
-            "protocol": "csi_probes_v1",
-            "suite_rates": csi_rates,
-            "per_case": [
-                {
-                    "case_id": c.get("case_id"),
-                    "turn_id": c.get("turn_id"),
-                    "bucket": c.get("bucket"),
-                    **{
-                        k: c.get(k)
-                        for k in (
-                            "n_grep_locate",
-                            "n_grep_locate_ok",
-                            "n_grep_locate_failed",
-                            "n_grep_locate_incomplete",
-                            "n_edit_ok",
-                            "n_edit_with_impact",
-                            "n_edit_with_checks",
-                            "n_edit_with_related_tests",
-                            "n_syntax_rejected",
-                            "n_syntax_warning",
-                            "n_span_fail",
-                            "n_span_fail_with_candidates",
-                            "n_read_truncated",
-                            "n_read_with_outline",
-                            "file_hit",
-                            "repro_rerun",
-                            "tests_before_submit",
-                        )
-                        if k in c
-                    },
-                }
-                for c in csi_cases
-            ],
-        }
-        try:
-            (Path(session.dir) / "csi_probes.json").write_text(
-                json.dumps(csi_artifact, ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
-        except OSError:
-            logger.warning("failed to write csi_probes.json", exc_info=True)
+        metrics = finish_coding_metrics(
+            session=session,
+            selected_n=selected_n,
+            nonempty=nonempty,
+            prewarm_meta=prewarm_meta,
+        )
         try:
             assembled = assemble_thinking_jsonl(Path(session.dir))
             if assembled is not None:

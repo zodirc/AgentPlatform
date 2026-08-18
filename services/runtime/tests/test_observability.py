@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.observability.metrics import (
     metrics,
     record_stall_detected,
@@ -26,6 +28,12 @@ def test_metrics_registry_render() -> None:
     assert "demo_hist_count" in body
 
 
+def test_empty_histogram_renders_nothing() -> None:
+    from app.observability.metrics import _Histogram
+
+    assert _Histogram().render("empty_hist", "") == []
+
+
 def test_record_helpers() -> None:
     record_turn_finished(
         scenario_id="agent",
@@ -46,7 +54,44 @@ def test_record_helpers() -> None:
     assert 'kind="invalid_arguments"' in body
 
 
-def test_tracing_console_exporter() -> None:
+def test_tracing_disabled_is_noop() -> None:
+    setup_tracing(service_name="runtime-test", enabled=False)
+    instrument_fastapi(MagicMock(), enabled=False)
+
+
+def test_tracing_missing_opentelemetry_packages(monkeypatch: pytest.MonkeyPatch) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _boom(name: str, *args: object, **kwargs: object):
+        if str(name).startswith("opentelemetry"):
+            raise ImportError("otel missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+    setup_tracing(service_name="runtime-test", enabled=True)
+    instrument_fastapi(MagicMock(), enabled=True)
+
+
+def test_tracing_otlp_exporter_falls_back_to_console(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _boom(name: str, *args: object, **kwargs: object):
+        if "otlp.proto.http.trace_exporter" in str(name):
+            raise ImportError("otlp missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _boom)
+    with patch.dict(
+        "os.environ",
+        {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4318/v1/traces"},
+    ):
+        setup_tracing(service_name="runtime-test", enabled=True)
     with patch.dict("os.environ", {}, clear=True):
         setup_tracing(service_name="runtime-test", enabled=True)
     instrument_fastapi(MagicMock(), enabled=True)

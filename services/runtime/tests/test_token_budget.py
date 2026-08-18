@@ -28,3 +28,17 @@ async def test_monthly_alert_warning(monkeypatch: pytest.MonkeyPatch) -> None:
         await check_monthly_token_alert()
 
     pool.fetchrow.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_monthly_alert_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "monthly_token_limit", 1000)
+    monkeypatch.setattr(settings, "monthly_token_alert_pct", 0.8)
+
+    pool = MagicMock()
+    pool.fetchrow = AsyncMock(return_value={"total": 1000})
+
+    with patch("app.observability.token_budget.get_pool", AsyncMock(return_value=pool)):
+        await check_monthly_token_alert()
+
+    pool.fetchrow.assert_awaited_once()

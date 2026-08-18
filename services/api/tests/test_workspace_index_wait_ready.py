@@ -105,3 +105,32 @@ async def test_enqueue_ephemeral_wait_ready_awaits(monkeypatch) -> None:
         wait_timeout_s=60.0,
     )
     assert out == {"accepted": True, "wait_status": "ready"}
+
+
+def test_resolve_workspace_index_wait_override_and_bounds(monkeypatch) -> None:
+    from app.services.ops.l1.coding_metrics import resolve_workspace_index_wait
+
+    wait, timeout = resolve_workspace_index_wait({}, True)
+    assert wait is True
+    assert timeout == 300.0
+
+    monkeypatch.setenv("WORKSPACE_INDEX_WAIT_READY", "yes")
+    monkeypatch.setenv("WORKSPACE_INDEX_WAIT_TIMEOUT_S", "10")
+    wait, timeout = resolve_workspace_index_wait({}, None)
+    assert wait is True
+    assert timeout == 30.0
+
+    monkeypatch.setenv("WORKSPACE_INDEX_WAIT_READY", "off")
+    monkeypatch.setenv("WORKSPACE_INDEX_WAIT_TIMEOUT_S", "99999")
+    wait, timeout = resolve_workspace_index_wait({"workspace_index_wait_ready": True}, None)
+    assert wait is False
+    assert timeout == 1800.0
+
+    monkeypatch.delenv("WORKSPACE_INDEX_WAIT_READY", raising=False)
+    monkeypatch.delenv("WORKSPACE_INDEX_WAIT_TIMEOUT_S", raising=False)
+    wait, timeout = resolve_workspace_index_wait(
+        {"workspace_index_wait_ready": True, "workspace_index_wait_timeout_s": "not-a-number"},
+        None,
+    )
+    assert wait is True
+    assert timeout == 300.0

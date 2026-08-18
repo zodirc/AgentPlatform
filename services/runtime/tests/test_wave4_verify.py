@@ -87,6 +87,22 @@ def test_parse_pytest_strips_ansi_and_failed_lines_without_footer() -> None:
     assert any("test_bad" in f["name"] for f in summary["first_failures"])
 
 
+def test_parse_unittest_failed_failures_line_is_not_pytest_nodeid() -> None:
+    stdout = (
+        "FAIL: test_roundtrip (astropy.io.ascii.tests.test_qdp.TestQDP)\n"
+        "----------------------------------------------------------------------\n"
+        "Ran 9 tests in 0.04s\n"
+        "\n"
+        "FAILED (failures=1)\n"
+    )
+    summary = parse_test_summary(stdout)
+    assert summary is not None
+    assert summary["provider"] == "unittest"
+    assert summary["failed"] == 1
+    assert summary["passed"] == 8
+    assert any("test_roundtrip" in f["name"] for f in summary["first_failures"])
+
+
 def test_attach_test_summary_run_tests() -> None:
     result = {
         "command": "pytest -q",
