@@ -464,7 +464,7 @@ export function HistoryPane({ model }: { model: HistoryPaneModel }) {
                       error={artifactsError}
                       secret={secret}
                       onRetryCase={retryFailedCase}
-                      onRetryFailed={(suiteKey, caseIds) =>
+                      onRetryFailed={(suiteKey: string, caseIds: string[]) =>
                         void retryFailedItems({ suiteKey, caseIds })
                       }
                       retryBusy={busy}
