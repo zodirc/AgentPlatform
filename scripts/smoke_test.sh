@@ -106,7 +106,7 @@ if [[ "${SMOKE_SKIP_RESTORE:-0}" != "1" ]]; then
 fi
 
 echo "==> Starting stack (smoke MODEL_MODE=${SMOKE_MODEL_MODE})"
-MODEL_MODE="${SMOKE_MODEL_MODE}" $COMPOSE up -d --build
+MODEL_MODE="${SMOKE_MODEL_MODE}" proof_retry_transient_registry $COMPOSE up -d --build
 
 echo "==> Waiting for services"
 deadline=$((SECONDS + 180))

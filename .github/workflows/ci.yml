@@ -36,6 +36,8 @@ jobs:
     timeout-minutes: 120
     # Dockerfiles default to China mirrors; override for GitHub-hosted runners
     # (aliyun/npmmirror can stall until this job's 2h timeout).
+    # Hub library bases are rewritten to mirror.gcr.io in proof_compose_env.sh
+    # so a registry-1.docker.io 502 cannot fail `make gate`.
     env:
       PIP_INDEX_URL: https://pypi.org/simple
       PIP_TRUSTED_HOST: pypi.org

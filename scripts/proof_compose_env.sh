@@ -11,7 +11,92 @@
 # Override: PROOF_KEEP_APP_ENV=1 to honor .env APP_ENV during proof.
 # Optional: PROOF_APP_ENV=development|production
 # Optional: PROOF_KEEP_MIRRORS=1 to keep China mirrors even under CI=true.
+# Optional: PROOF_KEEP_DOCKERHUB=1 to pull library images from Docker Hub (no gcr mirror).
 # Optional: PROOF_WITH_BENCH=1 / SMOKE_WITH_BENCH=1 to keep compose profile "bench".
+
+# Docker Hub library short name → content-addressed pull via Google's Hub mirror.
+# Same sha256 as deploy/base-images.env; avoids registry-1.docker.io 502 on GHA.
+proof_dockerhub_library_mirror() {
+  local ref="${1:-}"
+  local prefix="${DOCKERHUB_LIBRARY_MIRROR:-mirror.gcr.io/library}"
+  if [[ -z "${ref}" ]]; then
+    echo ""
+    return 0
+  fi
+  case "${ref}" in
+    */*) echo "${ref}" ;;
+    *) echo "${prefix}/${ref}" ;;
+  esac
+}
+
+proof_pin_ci_base_images() {
+  if [[ "${PROOF_KEEP_DOCKERHUB:-0}" == "1" ]]; then
+    return 0
+  fi
+  local envf root saved_py saved_node saved_nginx
+  root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+  envf="${root}/deploy/base-images.env"
+  saved_py="${PYTHON_BASE-}"
+  saved_node="${NODE_BASE-}"
+  saved_nginx="${NGINX_BASE-}"
+  if [[ -f "${envf}" ]]; then
+    # shellcheck disable=SC1090
+    set -a
+    # shellcheck source=deploy/base-images.env
+    source "${envf}"
+    set +a
+  fi
+  [[ -n "${saved_py}" ]] && PYTHON_BASE="${saved_py}"
+  [[ -n "${saved_node}" ]] && NODE_BASE="${saved_node}"
+  [[ -n "${saved_nginx}" ]] && NGINX_BASE="${saved_nginx}"
+  PYTHON_BASE="$(proof_dockerhub_library_mirror "${PYTHON_BASE:-}")"
+  NODE_BASE="$(proof_dockerhub_library_mirror "${NODE_BASE:-}")"
+  NGINX_BASE="$(proof_dockerhub_library_mirror "${NGINX_BASE:-}")"
+  export PYTHON_BASE NODE_BASE NGINX_BASE
+  echo "==> proof: CI base images → node=${NODE_BASE}"
+  echo "    (PROOF_KEEP_DOCKERHUB=1 to keep Docker Hub library names)"
+}
+
+# Hub / registry blips that are worth retrying compose --build.
+proof_is_registry_transient() {
+  local log="${1:-}"
+  [[ -n "${log}" && -f "${log}" ]] || return 1
+  grep -Eiq \
+    '502 Bad Gateway|504 Gateway|429 Too Many|TOOMANYREQUESTS|failed to copy: httpReadSeeker|error from registry|net/http: TLS handshake timeout|connection reset by peer' \
+    "${log}"
+}
+
+# Retry a compose/build command when the log looks like a Hub 502.
+proof_retry_transient_registry() {
+  local attempt=1
+  local max="${DOCKER_BUILD_RETRIES:-4}"
+  local delay="${DOCKER_BUILD_RETRY_DELAY:-8}"
+  local log rc
+  log="$(mktemp)"
+  while true; do
+    set +e
+    set +o pipefail
+    "$@" 2>&1 | tee "${log}"
+    rc=${PIPESTATUS[0]}
+    set -o pipefail
+    set -e
+    if [[ "${rc}" -eq 0 ]]; then
+      rm -f "${log}"
+      return 0
+    fi
+    if ((attempt >= max)) || ! proof_is_registry_transient "${log}"; then
+      rm -f "${log}"
+      return "${rc}"
+    fi
+    echo "==> proof: registry transient (attempt ${attempt}/${max}); retry in ${delay}s"
+    attempt=$((attempt + 1))
+    sleep "${delay}"
+    delay=$((delay * 2))
+    if ((delay > 40)); then
+      delay=40
+    fi
+  done
+}
 
 # Remove a single name from COMPOSE_PROFILES (comma-separated).
 _proof_strip_compose_profile() {
@@ -83,27 +168,25 @@ PY
     fi
   fi
 
-  if [[ "${PROOF_KEEP_MIRRORS:-0}" == "1" ]]; then
-    return 0
+  if [[ "${CI:-}" == "true" || "${CI:-}" == "1" ]]; then
+    if [[ "${PROOF_KEEP_MIRRORS:-0}" != "1" ]]; then
+      # Public registries for GitHub Actions (and CI=true local proof).
+      # APT_MIRROR empty → Dockerfiles skip sed rewrite (Debian defaults).
+      # Use ${VAR-default} in compose so an explicit empty APT_MIRROR is preserved.
+      export PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
+      export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-pypi.org}"
+      export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}"
+      export TORCH_FIND_LINKS="${TORCH_FIND_LINKS:-https://download.pytorch.org/whl/cpu}"
+      # CI runners have no GPU — force CPU torch even if a local shell exported cu128.
+      export TORCH_INDEX_URL="${TORCH_INDEX_URL:-}"
+      export RUNTIME_GPU="${RUNTIME_GPU:-0}"
+      export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
+      if [[ -z "${APT_MIRROR+x}" ]]; then
+        export APT_MIRROR=""
+      fi
+      echo "==> proof: CI build registries → pip=${PIP_INDEX_URL} npm=${NPM_CONFIG_REGISTRY} apt_mirror=${APT_MIRROR:-(debian default)}"
+      echo "    (PROOF_KEEP_MIRRORS=1 to keep Dockerfile China defaults)"
+    fi
+    proof_pin_ci_base_images
   fi
-  if [[ "${CI:-}" != "true" && "${CI:-}" != "1" ]]; then
-    return 0
-  fi
-
-  # Public registries for GitHub Actions (and CI=true local proof).
-  # APT_MIRROR empty → Dockerfiles skip sed rewrite (Debian defaults).
-  # Use ${VAR-default} in compose so an explicit empty APT_MIRROR is preserved.
-  export PIP_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple}"
-  export PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-pypi.org}"
-  export NPM_CONFIG_REGISTRY="${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}"
-  export TORCH_FIND_LINKS="${TORCH_FIND_LINKS:-https://download.pytorch.org/whl/cpu}"
-  # CI runners have no GPU — force CPU torch even if a local shell exported cu128.
-  export TORCH_INDEX_URL="${TORCH_INDEX_URL:-}"
-  export RUNTIME_GPU="${RUNTIME_GPU:-0}"
-  export HF_ENDPOINT="${HF_ENDPOINT:-https://huggingface.co}"
-  if [[ -z "${APT_MIRROR+x}" ]]; then
-    export APT_MIRROR=""
-  fi
-  echo "==> proof: CI build registries → pip=${PIP_INDEX_URL} npm=${NPM_CONFIG_REGISTRY} apt_mirror=${APT_MIRROR:-(debian default)}"
-  echo "    (PROOF_KEEP_MIRRORS=1 to keep Dockerfile China defaults)"
 }
