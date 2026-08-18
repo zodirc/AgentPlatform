@@ -70,8 +70,13 @@ def rescore_hits_for_writing(
     *,
     scenario_id: str | None,
 ) -> list[Any]:
-    """Re-rank writing hits by section title. Other scenarios: identity."""
-    if (scenario_id or "").strip() != "writing" or not hits:
+    """Re-rank hits by section title when Profile.retrieval.section_title_prior=texture."""
+    if not hits:
+        return hits
+    from app.retrieval.scenario_scope import load_retrieval_policy
+
+    policy = load_retrieval_policy(scenario_id)
+    if (policy.section_title_prior or "") != "texture":
         return hits
     weighted: list[tuple[float, int, Any]] = []
     for index, hit in enumerate(hits):

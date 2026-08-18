@@ -18,6 +18,7 @@ class RetrievalPolicy:
 
     default_path_prefix: str | None = None
     exclude_path_prefixes: tuple[str, ...] = ()
+    section_title_prior: str | None = None
 
 
 def policy_from_mapping(raw: dict[str, Any] | None) -> RetrievalPolicy:
@@ -31,9 +32,15 @@ def policy_from_mapping(raw: dict[str, Any] | None) -> RetrievalPolicy:
             s = str(item).strip()
             if s:
                 excludes.append(s)
+    prior_raw = data.get("section_title_prior")
+    if isinstance(prior_raw, bool):
+        prior = "texture" if prior_raw else ""
+    else:
+        prior = str(prior_raw or "").strip()
     return RetrievalPolicy(
         default_path_prefix=default_s or None,
         exclude_path_prefixes=tuple(excludes),
+        section_title_prior=prior or None,
     )
 
 

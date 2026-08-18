@@ -29,6 +29,12 @@ def test_policy_from_mapping_defaults() -> None:
     assert p.exclude_path_prefixes == ("seed/intel",)
 
 
+def test_policy_from_mapping_section_title_prior() -> None:
+    p = policy_from_mapping({"section_title_prior": "texture"})
+    assert p.section_title_prior == "texture"
+    assert policy_from_mapping({"section_title_prior": False}).section_title_prior is None
+
+
 def test_load_retrieval_policy_unknown_scenario() -> None:
     p = load_retrieval_policy("no-such-scenario-xyz")
     assert p.default_path_prefix is None
@@ -122,3 +128,4 @@ def test_intel_profile_yaml_loads_retrieval() -> None:
     assert intel.retrieval.get("default_path_prefix") == "seed/intel"
     writing = ScenarioRegistry.get("writing")
     assert "seed/intel" in (writing.retrieval.get("exclude_path_prefixes") or [])
+    assert writing.retrieval.get("section_title_prior") == "texture"

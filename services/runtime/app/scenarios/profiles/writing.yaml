@@ -31,9 +31,11 @@ approval_overrides: {}
 workspace_layout: document
 web_layout: writing-workbench
 # Hide intel standing corpus from writing RAG (same index plane; filter only).
+# Texture prior: 可引用细节 / 世界观 before 概要 / 主线剧情 (tools apply; no Engine branch).
 retrieval:
   exclude_path_prefixes:
     - seed/intel
+  section_title_prior: texture
 generation:
   temperature: 0.8
 patch_auto_apply: true

@@ -7,9 +7,26 @@ from app.retrieval.writing_section_prior import (
     rescore_hits_for_writing,
     writing_section_multiplier,
 )
+from app.scenarios.registry import ScenarioProfile, ScenarioRegistry
+
+
+def _register_prior(*, scenario_id: str, prior: str | None) -> None:
+    retrieval: dict = {}
+    if prior:
+        retrieval["section_title_prior"] = prior
+    ScenarioRegistry.register(
+        ScenarioProfile(
+            scenario_id=scenario_id,
+            display_name=scenario_id,
+            system_prompt="",
+            tool_names=["search_sources"],
+            retrieval=retrieval,
+        )
+    )
 
 
 def test_texture_section_outranks_plot_summary_for_writing() -> None:
+    _register_prior(scenario_id="writing", prior="texture")
     hits = [
         {"path": "drama.md", "section_title": "主线剧情", "score": 0.9},
         {"path": "period.md", "section_title": "可引用细节", "score": 0.5},
@@ -24,6 +41,7 @@ def test_texture_section_outranks_plot_summary_for_writing() -> None:
 
 
 def test_intel_hits_are_unchanged() -> None:
+    _register_prior(scenario_id="intel", prior=None)
     hits = [
         {"path": "a.md", "section_title": "主线剧情", "score": 0.9},
         {"path": "b.md", "section_title": "可引用细节", "score": 0.5},
@@ -35,6 +53,7 @@ def test_intel_hits_are_unchanged() -> None:
 
 
 def test_chunk_hit_dataclass_is_rescored() -> None:
+    _register_prior(scenario_id="writing", prior="texture")
     hits = [
         ChunkHit(
             path="a.md",
