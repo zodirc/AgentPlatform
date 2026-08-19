@@ -448,6 +448,7 @@ export interface components {
             /** Format: uuid */
             client_request_id?: string;
             reason?: string;
+            /** @description Remember this command prefix so later matching run_command calls skip approval. */
             allow_prefix?: string;
         };
         PatchDecisionRequest: {
