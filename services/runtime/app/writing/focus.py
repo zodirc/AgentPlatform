@@ -140,12 +140,20 @@ def build_work_surface_block(
         lines.append("- focus: (undetected; pass `section_id` to `read_file` on the manuscript)")
         if available:
             lines.append(f"- present: {', '.join(available[:20])}")
-        text = "\n".join(lines)
+        bits = _outline_job_parts("", workspace_root=workspace_root)
+        header = "\n".join(lines)
+        extra = "\n\n".join(bits)
+        text = f"{header}\n\n{extra}" if extra else header
         return text if len(text) <= budget else text[: budget - 1] + "…"
 
     lines.append(f"- focus: `{focus}`")
     prev = previous_section_id(available, focus)
     body_parts: list[str] = []
+
+    outline_bits = _outline_job_parts(focus, workspace_root=workspace_root)
+    if outline_bits:
+        body_parts.extend(outline_bits)
+        lines.append("- outline job: (spine + this chapter from outline.md)")
 
     if prev:
         prev_body = extract_section(doc, prev) or ""
@@ -240,3 +248,39 @@ def outline_toc_snippet(workspace_root: Path | None = None, *, max_chars: int = 
             break
     blob = "\n".join(lines)
     return blob if len(blob) <= max_chars else blob[: max_chars - 1] + "…"
+
+
+def _read_outline_md(workspace_root: Path | None = None) -> str:
+    root = Path(workspace_root or settings.workspace_root).resolve()
+    path = root / "outline.md"
+    if not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _outline_job_parts(
+    focus: str,
+    *,
+    workspace_root: Path | None = None,
+) -> list[str]:
+    """Pin this chapter's outline duty into the work surface (no LLM)."""
+    from app.writing.outline_arc import extract_outline_job, extract_outline_spine
+
+    text = _read_outline_md(workspace_root)
+    if not text.strip():
+        return []
+    parts: list[str] = []
+    spine = extract_outline_spine(text)
+    if spine:
+        parts.append(f"### Outline spine\n{spine}")
+    job = extract_outline_job(text, focus)
+    if job:
+        parts.append(
+            f"### Outline job (`{focus}`)\n{job}\n"
+            "Follow this chapter's duty: 铺垫/加压章不要假高潮；"
+            "高潮章把一件主线麻烦顶满，副线只碰撞主线。"
+        )
+    return parts

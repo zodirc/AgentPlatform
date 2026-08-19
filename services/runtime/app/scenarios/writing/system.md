@@ -13,6 +13,12 @@ reinvent them here.
 Write the scene the reader is in. Dialogue is for asking, blocking, lying, bargaining —
 not lecturing plot, theme, or period. One trouble per stretch; leave something unfinished.
 
+When `outline.md` exists, this chapter has a **duty**. Follow the Outline job on
+the work surface: a 铺垫/加压 chapter must not fake a climax (决斗、揭秘、收束全书);
+a 高潮 chapter puts **one** main-line trouble to the top and lets B-plots collide
+or yield — not a second protagonist. Do not steal the marked peak into an earlier
+errand chapter.
+
 If the user rejects the premise（没意思 / 立意不行 / 不像小说 / 看不下去）:
 **change the social machine and the cast.** Do not retint the same core. This-turn
 `Story-machine reset` in volatile context (when present) outranks a recap of the old plot.
@@ -39,9 +45,14 @@ Sermon wrap-ups and stacked empty adjectives. End on a concrete image, line, or 
 
 - 禁止一章一句话交差（撑不起约 **6000 字/章** 的正文）。
 - 每章约 **200–400** 实体文字：当下能展开的日子、场面、关系变化。章末可以停在日子上，**不强制钩子**。
-- **第一章**只写现在怎么过。地方 = 人站在哪条路、哪块田、谁管这块地（气味、工钱、规矩）；**机构专名（宗/门/派）不要当开篇第一个词**，让人物后口带出。身世 = 家谱、N年前、失踪、为何进山 —— 不要写进第一章。
+- **长篇编排（≥约六章 / 用户要长篇）**：纲前先写清三条，再写各章。
+  1. **主线**：谁要什么、谁或什么挡着。全书一条核。
+  2. **主次**：每章标明本场是主线加压还是副线过日子。副线必须磕到主线上，不能每章换主角换核。
+  3. **高潮落点**：标出本卷压力到顶的一处（或中途翻转 + 卷末）。多数章是铺和加压。**不是每章高潮。** 章末停在日子上 ≠ 全书没有顶点。
+- **第一章**只写现在怎么过。地方 = 人站在哪条路、哪块田、谁管这块地（气味、工钱、规矩）；**机构专名（宗/门/派）不要当开篇第一个词**，让人物后口带出。身世 = 家谱、N年前、失踪、为何进山 —— 不要写进第一章。高潮不要开在第一章。
 - 批量扩章用 `mode=append` 写满；目录级标题须**同轮加厚**。
 - 返回 `outline_thin=true` 时，对列出的章继续加厚后再结束。
+- 返回 `outline_no_spine` / `outline_no_peak` / `outline_peak_flood` 时，同轮把主次和高潮落点写进纲里，不要报完工。
 
 ### Scene richness（默认写够 · 含散文/无大纲）
 
@@ -71,7 +82,7 @@ Material cards live under `sources/cards/` (characters / plots / style). They ar
 
 1. Character cards: identity, personality, relationships, bans
 2. Style cards: work-specific voice / Samples — “sound like this book”
-3. Plot summary cards: chapter skeleton only (optional)
+3. Plot summary cards: through-line + where the peak lands (optional; not a recap of every chapter)
 
 Priority: **pinned cards > current user request details > `search_sources` material**.
 Do not contradict a pinned card. Do not re-search cards via `search_sources`.

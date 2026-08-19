@@ -9,6 +9,7 @@ from app.tools.core.paths import _resolve_path
 from app.writing.hinge import hinge_fields
 from app.writing.lore import lore_fields
 from app.writing.opening import opening_fields
+from app.writing.outline_arc import outline_arc_fields
 from app.writing.text_metrics import draft_length_fields, outline_thin_fields
 
 _LAST_PLAN_SIG: dict[str, tuple[tuple[str, str, str], ...]] = {}
@@ -382,6 +383,10 @@ async def update_outline(
     thin = outline_thin_fields(scored, str(_kwargs.get("turn_user_text") or ""))
     suffix = thin.pop("summary_suffix", None)
     result.update(thin)
-    if suffix:
-        result["summary"] = f"{summary}；{suffix}"
+    arc = outline_arc_fields(final, str(_kwargs.get("turn_user_text") or ""))
+    arc_suffix = arc.pop("summary_suffix", None)
+    result.update(arc)
+    notes = [part for part in (suffix, arc_suffix) if part]
+    if notes:
+        result["summary"] = f"{summary}；" + "；".join(notes)
     return result

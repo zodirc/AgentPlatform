@@ -37,6 +37,24 @@ def test_work_surface_includes_prev_tail(tmp_path: Path) -> None:
     assert "Focus (`ch2`)" in block
 
 
+def test_work_surface_pins_outline_job(tmp_path: Path) -> None:
+    doc = upsert_section("", "ch3", "本章正文。" * 20)
+    drafts = tmp_path / "drafts"
+    drafts.mkdir(parents=True)
+    (drafts / "manuscript.md").write_text(doc, encoding="utf-8")
+    (tmp_path / "outline.md").write_text(
+        "主线：沈禾要保住铺子，挡着的是粮行。\n\n"
+        "# 第三章\n加压：核秤，不摊牌。\n",
+        encoding="utf-8",
+    )
+    block = build_work_surface_block("写第三章", workspace_root=tmp_path)
+    assert "Outline spine" in block
+    assert "保住铺子" in block
+    assert "Outline job (`ch3`)" in block
+    assert "核秤" in block
+    assert "假高潮" in block
+
+
 def test_wants_full_manuscript_read() -> None:
     assert wants_full_manuscript_read("请通读全文检查人称", full_flag=False) is True
     assert wants_full_manuscript_read("写第三章", full_flag=False) is False
