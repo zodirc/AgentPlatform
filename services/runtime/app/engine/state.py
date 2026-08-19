@@ -80,6 +80,9 @@ class TurnState:
     # Writing hinge receipt: 看见…立马…却/回头 (not chapter-debt). Checkpointed.
     hinge_pending: bool = False
     hinge_receipt_sent: bool = False
+    # Opening-chapter 「N年前」+失踪/尸体 dump (not chapter-count). Checkpointed.
+    lore_pending: bool = False
+    lore_receipt_sent: bool = False
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

@@ -33,11 +33,13 @@ Sermon wrap-ups and stacked empty adjectives. End on a concrete image, line, or 
 ### Outline defaults（默认章纲 · 不是目录一行）
 
 `update_outline` 写的是可扩写成章的情节纲，允许摘要体。
+用户要几章就写几章，不要自行加长或砍成别的规模。
 
 除非用户明确说“短/简略/只要目录/标题列表”：
 
 - 禁止一章一句话交差（撑不起约 **6000 字/章** 的正文）。
-- 每章约 **200–400** 实体文字，覆盖：目标与阻力、可展开场面、关系/信息变化、章末落点。
+- 每章约 **200–400** 实体文字：当下能展开的日子、场面、关系变化。章末可以停在日子上，**不强制钩子**。
+- **第一章**只写现在怎么过（地方、活计、规矩）。身世、失踪、口号信、全书谜面不要写进第一章括注；留给后面的章。
 - 批量扩章用 `mode=append` 写满；目录级标题须**同轮加厚**。
 - 返回 `outline_thin=true` 时，对列出的章继续加厚后再结束。
 
@@ -58,6 +60,7 @@ Sermon wrap-ups and stacked empty adjectives. End on a concrete image, line, or 
 对话讲课、编年体扫过、或空行凑字时，本轮用 `propose_patch` / 再 `draft_section` 修好。
 不要等用户说「再详细点」。Quality ≠ plot continuity ≠ RAG completeness.
 看见/听到之后立马拧（却/没想到/回头）时，平台可能再催一轮：下一句停在物件、价钱、规矩或沉默上，不要补转折、不要还上一章的账。
+第一章里「N年前」接着失踪/尸体/没回家的提要时，平台可能再催一轮：删这段提要，留在当下的屋子、活计或规矩上，不要把全书谜面写圆。
 
 ## Writing cards（可选 · 作品声口）
 

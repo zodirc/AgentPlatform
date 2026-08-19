@@ -78,6 +78,8 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "turn_user_text": str(getattr(state, "turn_user_text", "") or ""),
         "hinge_pending": bool(getattr(state, "hinge_pending", False)),
         "hinge_receipt_sent": bool(getattr(state, "hinge_receipt_sent", False)),
+        "lore_pending": bool(getattr(state, "lore_pending", False)),
+        "lore_receipt_sent": bool(getattr(state, "lore_receipt_sent", False)),
     }
 
 
@@ -160,6 +162,8 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         turn_user_text=str(data.get("turn_user_text") or ""),
         hinge_pending=bool(data.get("hinge_pending", False)),
         hinge_receipt_sent=bool(data.get("hinge_receipt_sent", False)),
+        lore_pending=bool(data.get("lore_pending", False)),
+        lore_receipt_sent=bool(data.get("lore_receipt_sent", False)),
     )
 
 

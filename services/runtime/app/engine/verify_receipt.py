@@ -37,8 +37,9 @@ def note_tool_result_for_verify(
         return
     name = str(tool_name or "")
     if name == "draft_section" and result.get("status") == "drafted":
-        # Hinge tell only — length_short stays a field, never a receipt.
+        # Hinge / lore tells only — length_short stays a field, never a receipt.
         state.hinge_pending = bool(result.get("hinge_dense"))
+        state.lore_pending = bool(result.get("lore_dump"))
         return
     if name == "edit_file" and result.get("status") == "edited":
         impact = result.get("impact") if isinstance(result.get("impact"), dict) else {}
@@ -238,9 +239,14 @@ def should_inject_verify_receipt(
     hinge_reserve = min(max(1, int(reserve_steps)), 3)
     if remaining < hinge_reserve:
         return False
-    if bool(getattr(state, "hinge_pending", False)) and not bool(
-        getattr(state, "hinge_receipt_sent", False)
-    ):
+    writing_used = bool(getattr(state, "hinge_receipt_sent", False)) or bool(
+        getattr(state, "lore_receipt_sent", False)
+    )
+    if writing_used:
+        return False
+    if bool(getattr(state, "hinge_pending", False)):
+        return True
+    if bool(getattr(state, "lore_pending", False)):
         return True
     return False
 
@@ -269,6 +275,10 @@ def verify_receipt_kind(state: Any) -> str:
         getattr(state, "hinge_receipt_sent", False)
     ):
         return "hinge"
+    if bool(getattr(state, "lore_pending", False)) and not bool(
+        getattr(state, "lore_receipt_sent", False)
+    ):
+        return "lore"
     return "classic"
 
 
@@ -279,6 +289,11 @@ def mark_verify_receipt_injected(state: Any) -> str:
         state.issue_repro_armed = False
     elif kind == "hinge":
         state.hinge_receipt_sent = True
+        state.hinge_pending = False
+        state.lore_pending = False
+    elif kind == "lore":
+        state.lore_receipt_sent = True
+        state.lore_pending = False
         state.hinge_pending = False
     else:
         state.verify_receipt_sent = True
@@ -291,6 +306,8 @@ def build_verify_receipt_text(state: Any) -> str:
         return _build_issue_repro_receipt_text(state)
     if kind == "hinge":
         return _build_hinge_receipt_text()
+    if kind == "lore":
+        return _build_lore_receipt_text()
     return _build_classic_receipt_text(state)
 
 
@@ -299,6 +316,14 @@ def _build_hinge_receipt_text() -> str:
         "这一段在「看见/听到」之后用了立马/立刻，下一句又在拧（却/没想到/回头）。"
         "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
         "用 draft_section 或 propose_patch 改这一段：下一句停在物件、价钱、规矩或沉默上即可。"
+    )
+
+
+def _build_lore_receipt_text() -> str:
+    return (
+        "这一段在点到人名之后，用「N年前」写成了失踪/尸体提要。"
+        "不要补转折，不要把全书谜面写圆，不要另起一套去AI模板。"
+        "用 draft_section 或 propose_patch 删这段提要：留在当下的屋子、活计、价钱或规矩上即可。"
     )
 
 

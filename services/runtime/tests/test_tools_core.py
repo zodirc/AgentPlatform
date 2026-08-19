@@ -383,6 +383,8 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "不要补转折" in writing.system_prompt
     assert "### Length counting" in writing.system_prompt
     assert "### Outline defaults" in writing.system_prompt
+    assert "不强制钩子" in writing.system_prompt
+    assert "不要写进第一章括注" in writing.system_prompt
     assert "### Scene richness" in writing.system_prompt
     assert "### Also avoid" in writing.system_prompt
     assert "200–400" in writing.system_prompt
