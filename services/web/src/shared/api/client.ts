@@ -1,5 +1,6 @@
 import type { components } from "./schema";
 import { throwIfNotOk } from "./httpErrors";
+import { newClientRequestId } from "./clientRequestId";
 
 export const API_BASE = "/api/v1";
 
@@ -454,7 +455,7 @@ export async function approveToolCall(
     body: JSON.stringify({
       tool_call_id: toolCallId,
       // Lets the API replay (not re-execute) duplicate submissions.
-      client_request_id: crypto.randomUUID(),
+      client_request_id: newClientRequestId(),
       ...(prefix ? { allow_prefix: prefix } : {}),
     }),
   });
@@ -474,7 +475,7 @@ export async function denyToolCall(
     body: JSON.stringify({
       tool_call_id: toolCallId,
       reason,
-      client_request_id: crypto.randomUUID(),
+      client_request_id: newClientRequestId(),
     }),
   });
   if (!res.ok) throw new Error(`denyToolCall failed: ${res.status}`);
