@@ -19,6 +19,18 @@ import {
   workspaceEntryIcon,
   workspaceEntryIconSizeClass,
 } from "./workspaceFileIcon";
+import {
+  joinWorkspacePath,
+  parentDirOf,
+  toWorkspaceRelativePath,
+  isPathChecked,
+} from "./workspacePaths";
+
+export {
+  joinWorkspacePath,
+  parentDirOf,
+  toWorkspaceRelativePath,
+} from "./workspacePaths";
 
 const HIDDEN_ENTRIES = new Set([
   ".ruff_cache",
@@ -28,29 +40,6 @@ const HIDDEN_ENTRIES = new Set([
 ]);
 
 const TREE_STALE_MS = 120_000;
-
-export function joinWorkspacePath(parent: string, name: string): string {
-  if (parent === "." || parent === "") return name;
-  return `${parent.replace(/\/$/, "")}/${name}`;
-}
-
-export function parentDirOf(path: string): string {
-  const normalized = path.replace(/\/$/, "");
-  const idx = normalized.lastIndexOf("/");
-  if (idx < 0) return ".";
-  return normalized.slice(0, idx) || ".";
-}
-
-/** Workspace-root relative path: `notes/a.md` (never absolute, never leading ./). */
-export function toWorkspaceRelativePath(path: string): string {
-  let rel = path.trim().replace(/\\/g, "/");
-  rel = rel.replace(/^file:\/\//i, "");
-  rel = rel.replace(/^\/+(?:workspace|data\/works\/[^/]+)\//i, "");
-  rel = rel.replace(/^\/+/, "");
-  while (rel.startsWith("./")) rel = rel.slice(2);
-  if (!rel || rel === ".") return "";
-  return rel;
-}
 
 function parseEntries(
   parentPath: string,
@@ -240,7 +229,7 @@ type TreeNodeProps = {
   onToggleExpand: (path: string) => void;
   onSelectFile: (path: string) => void;
   onOpenFile: (path: string) => void;
-  onTogglePath: (path: string) => void;
+  onTogglePath: (path: string, isDir: boolean) => void;
   onOpenSourcesLibrary?: () => void;
   onContextMenu: (target: ContextTarget) => void;
   onDraftSubmit: (name: string) => void;
@@ -284,7 +273,7 @@ function TreeNode({
   // Only flash "加载中" on cold load — keep prior rows while background refetching.
   const showColdLoading = isDir && expanded && isPending && !data;
   const selected = selectedPath === path;
-  const checked = checkedPaths.has(path);
+  const checked = isPathChecked(checkedPaths, path);
   const cut = cutPath === path;
   const deletable =
     path !== "." && !isSeedCorpusPath(path) && !isWorkSurfaceHiddenPath(path);
@@ -319,7 +308,10 @@ function TreeNode({
         type="checkbox"
         className="size-3 shrink-0 rounded border-input bg-card accent-primary"
         checked={checked}
-        onChange={() => onTogglePath(path)}
+        onChange={() => {
+          onTogglePath(path, isDir);
+          if (isDir && !expanded) onToggleExpand(path);
+        }}
         onClick={(event) => event.stopPropagation()}
         aria-label={`选择 ${name}`}
       />
@@ -362,7 +354,7 @@ function TreeNode({
           onClick={() =>
             multiSelectMode
               ? deletable
-                ? onTogglePath(path)
+                ? onTogglePath(path, false)
                 : undefined
               : onSelectFile(path)
           }
@@ -440,7 +432,8 @@ function TreeNode({
           }`}
           onClick={() => {
             if (multiSelectMode && deletable) {
-              onTogglePath(path);
+              onTogglePath(path, true);
+              if (!expanded) onToggleExpand(path);
               return;
             }
             onActivateDir(path);
@@ -545,7 +538,9 @@ type Props = {
   cutPath?: string | null;
   onSelectFile: (path: string) => void;
   onOpenFile: (path: string) => void;
-  onTogglePath?: (path: string) => void;
+  onTogglePath?: (path: string, isDir: boolean) => void;
+  /** Expand ancestors so newly written / selected-dir children are visible. */
+  revealPaths?: readonly string[];
   onOpenSourcesLibrary?: () => void;
   /** Create file at parentDir with leaf name (no prompts). */
   onCommitCreateFile?: (parentDir: string, name: string) => Promise<void> | void;
@@ -566,6 +561,7 @@ export function WorkspaceTree({
   onSelectFile,
   onOpenFile,
   onTogglePath,
+  revealPaths = [],
   onOpenSourcesLibrary,
   onCommitCreateFile,
   onCommitCreateFolder,
@@ -604,9 +600,33 @@ export function WorkspaceTree({
     [onSelectFile],
   );
   const handleToggle = useCallback(
-    (path: string) => onTogglePath?.(path),
+    (path: string, isDir: boolean) => onTogglePath?.(path, isDir),
     [onTogglePath],
   );
+
+  useEffect(() => {
+    if (revealPaths.length === 0) return;
+    setExpandedPaths((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      const add = (path: string) => {
+        if (next.has(path)) return;
+        next.add(path);
+        changed = true;
+      };
+      add(".");
+      for (const raw of revealPaths) {
+        const rel = toWorkspaceRelativePath(raw);
+        if (!rel) continue;
+        let acc = ".";
+        for (const part of rel.split("/").filter(Boolean)) {
+          acc = joinWorkspacePath(acc, part);
+          add(acc);
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [revealPaths]);
 
   const toggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {

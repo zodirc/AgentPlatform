@@ -1,7 +1,7 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, Trash2 } from "lucide-react";
-import type { TurnEvent } from "../../shared/api/client";
+import type { TurnEvent, WorkspaceEntries } from "../../shared/api/client";
 import {
   deleteWorkspacePaths,
   downloadWorkspaceFile,
@@ -28,6 +28,15 @@ import { ArtifactView } from "./ArtifactView";
 import { RetrievalView } from "./RetrievalView";
 import { WritingCardsView } from "../writing/WritingCardsView";
 import { WorkspaceTree, joinWorkspacePath, parentDirOf, patchWorkspaceEntriesCache, removeWorkspaceEntryFromCache, toWorkspaceRelativePath } from "./WorkspaceTree";
+import {
+  collectCachedDescendants,
+  collectDescendantPathsWithClient,
+  dropCheckedUnder,
+  uncheckFileKeepingSiblings,
+  syncWorkspaceTreeForWrites,
+  writtenWorkspacePathsFromTurn,
+} from "./workspaceTreeSelect";
+import { isPathChecked } from "./workspacePaths";
 
 export type SidebarSelection =
   | { kind: "timeline"; item: TimelineItem; index: number }
@@ -122,8 +131,25 @@ export function AgentSidebar({
     () => new Set(),
   );
   const [cutPath, setCutPath] = useState<string | null>(null);
+  const [revealPaths, setRevealPaths] = useState<string[]>([]);
+  const syncedWritesRef = useRef<Set<string>>(new Set());
   const view = wb.view;
   const artifacts = useMemo(() => view?.artifacts ?? [], [view]);
+
+  useEffect(() => {
+    syncedWritesRef.current.clear();
+  }, [wb.sessionId]);
+
+  useEffect(() => {
+    const paths = writtenWorkspacePathsFromTurn({
+      artifacts,
+      events: wb.events,
+    });
+    const fresh = paths.filter((path) => !syncedWritesRef.current.has(path));
+    if (fresh.length === 0) return;
+    for (const path of fresh) syncedWritesRef.current.add(path);
+    setRevealPaths(syncWorkspaceTreeForWrites(queryClient, fresh));
+  }, [artifacts, wb.events, queryClient]);
 
   const refreshWorkspace = async (paths?: string[]) => {
     setWorkspaceRefreshing(true);
@@ -183,13 +209,49 @@ export function AgentSidebar({
     },
   });
 
-  const toggleCheckedPath = (path: string) => {
+  const toggleCheckedPath = (path: string, isDir: boolean) => {
+    const cachedEntries = (dir: string) =>
+      queryClient.getQueryData<WorkspaceEntries>(["workspace-entries", dir])
+        ?.entries;
+    const parentEntries = cachedEntries(parentDirOf(path));
+    const leaf = path.split("/").pop() || path;
+    const dir =
+      isDir || Boolean(parentEntries?.some((entry) => entry === `${leaf}/`));
+
+    let turningOn = false;
+    let cachedDirs: string[] = [path];
     setCheckedPaths((prev) => {
+      if (isPathChecked(prev, path)) {
+        return dir
+          ? dropCheckedUnder(prev, path)
+          : uncheckFileKeepingSiblings(prev, path, cachedEntries);
+      }
+      turningOn = true;
       const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
+      next.add(path);
+      if (dir) {
+        const cached = collectCachedDescendants(cachedEntries, path);
+        for (const child of cached.paths) next.add(child);
+        cachedDirs = cached.dirs;
+      }
       return next;
     });
+    if (!dir || !turningOn) return;
+    setRevealPaths(cachedDirs);
+    void (async () => {
+      const { paths, dirs } = await collectDescendantPathsWithClient(
+        queryClient,
+        path,
+      );
+      setCheckedPaths((prev) => {
+        if (!isPathChecked(prev, path) && !prev.has(path)) return prev;
+        const next = new Set(prev);
+        next.add(path);
+        for (const child of paths) next.add(child);
+        return next;
+      });
+      setRevealPaths(dirs);
+    })();
   };
 
   const confirmDeleteSelected = () => {
@@ -504,6 +566,7 @@ export function AgentSidebar({
             multiSelectMode={multiSelectMode}
             checkedPaths={checkedPaths}
             cutPath={cutPath}
+            revealPaths={revealPaths}
             onTogglePath={toggleCheckedPath}
             onSelectFile={(path) => {
               setWorkspaceSelectPath(path);
@@ -528,7 +591,7 @@ export function AgentSidebar({
           />
           <p className="mt-2 text-[10px] text-muted-foreground/80">
             {multiSelectMode
-              ? "多选模式下点击条目勾选，可删除文件或目录"
+              ? "勾选目录会选中其下全部文件；取消勾选某个文件会同时取消上级目录"
               : "单击选中 · 双击打开 · 树内联新建/重命名 · 右键更多操作"}
           </p>
         </section>
