@@ -575,6 +575,7 @@ compose_infra_up() {
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     up -d "${infra_services[@]}"
+  COMPOSE_PROFILES="$profiles" bash "$ROOT/scripts/ensure_bench_postgres.sh" || true
 }
 
 compose_ensure_stack() {
@@ -596,6 +597,7 @@ compose_ensure_stack() {
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     up -d
+  COMPOSE_PROFILES="$profiles" bash "$ROOT/scripts/ensure_bench_postgres.sh" || true
 }
 
 cmd_up() {

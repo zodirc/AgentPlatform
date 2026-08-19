@@ -384,6 +384,40 @@ def _docker_exec(container: str, *args: str, timeout: float = 8) -> tuple[int, s
     return code, out if code == 0 else err
 
 
+def _container_down_detail(container: str) -> str:
+    """Why a container is down — distinguish mount flake from simple stop."""
+    code, out, _ = _run(
+        [
+            "docker",
+            "inspect",
+            "-f",
+            "{{.State.Running}}|{{.State.ExitCode}}|{{.State.Error}}",
+            container,
+        ],
+        timeout=4,
+    )
+    if code != 0:
+        return f"{container} 未运行"
+    parts = (out or "").strip().split("|", 2)
+    if not parts:
+        return f"{container} 未运行"
+    running = parts[0]
+    if running == "true":
+        return f"{container} 运行中"
+    exit_code = parts[1] if len(parts) > 1 else ""
+    err = parts[2] if len(parts) > 2 else ""
+    base = f"{container} 未运行"
+    if exit_code and exit_code not in {"0", "<no value>"}:
+        base += f" (exit {exit_code})"
+    err_l = (err or "").lower()
+    if "mount" in err_l or "not a directory" in err_l or "bind" in err_l:
+        return (
+            f"{container} 启动失败（Docker 挂载异常，非索引内容变化）"
+            " — 再 make start 一次通常可恢复"
+        )
+    return base
+
+
 def _ops_eval_sock_enabled(env_file: dict[str, str]) -> bool:
     """True when sticky ops-eval overlay is intended (api+runtime docker.sock)."""
     auto = ROOT / "deploy" / "ops-eval.auto.env"
@@ -670,8 +704,8 @@ def _index_item(
     }
     if not _container_running(container, running):
         item["status"] = "action"
-        item["action"] = "make start  # 先起数据库"
-        item["detail"] = f"{container} 未运行"
+        item["action"] = "make start"
+        item["detail"] = _container_down_detail(container)
         return item
 
     meta = _psql_meta(container, user, db, schema=schema)

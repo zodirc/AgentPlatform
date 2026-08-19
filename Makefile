@@ -218,6 +218,7 @@ fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
 
 start: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 启动栈（不 rebuild，最快）
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d
+	@COMPOSE_PROFILES=$(COMPOSE_PROFILES) bash scripts/ensure_bench_postgres.sh
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	@RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh
 
@@ -234,6 +235,7 @@ up: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 
 
 up-all: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 强制全量 compose --build（不分模块）
 	COMPOSE_PROFILES=$(COMPOSE_PROFILES) $(COMPOSE) up -d --build
+	@COMPOSE_PROFILES=$(COMPOSE_PROFILES) bash scripts/ensure_bench_postgres.sh
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	$(docker_auto_prune)
 	@bash scripts/release/release.sh mark --modules=api,runtime,web,gateway >/dev/null
@@ -337,7 +339,7 @@ up-ast-indexer: ensure-docker-creds ## 只重建/拉起 agent-ast-indexer（A6�
 start-bench: resolve-embedding ensure-ops-secret ## 仅启动 Ops Bench（不 rebuild）
 	@set -e; \
 	echo "==> start-bench（不 build；镜像已存在时秒级拉起）"; \
-	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres; \
+	COMPOSE_PROFILES=bench bash scripts/ensure_bench_postgres.sh; \
 	COMPOSE_PROFILES=bench $(COMPOSE) up -d --no-deps bench
 
 up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）
@@ -352,7 +354,7 @@ up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 重建并�
 	  COMPOSE_PROFILES=bench $(COMPOSE) build bench; \
 	fi; \
 	echo "==> ensuring dedicated bench-postgres (isolated from agent-postgres)"; \
-	COMPOSE_PROFILES=bench $(COMPOSE) up -d bench-postgres; \
+	COMPOSE_PROFILES=bench bash scripts/ensure_bench_postgres.sh; \
 	COMPOSE_PROFILES=bench $(COMPOSE) up -d --no-deps bench
 	$(docker_auto_prune)
 

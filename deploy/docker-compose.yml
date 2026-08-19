@@ -53,7 +53,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-agent}
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./init/pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+      # Mount init/ as a directory (not a single file): Docker Desktop/WSL2
+      # bind-mounts flake on file→file mounts during container recreate.
+      - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agent} -d ${POSTGRES_DB:-agent}"]
       interval: 5s
@@ -79,7 +81,8 @@ services:
       POSTGRES_DB: ${BENCH_POSTGRES_DB:-bench}
     volumes:
       - bench_pg_data:/var/lib/postgresql/data
-      - ./init/pgvector.sql:/docker-entrypoint-initdb.d/01-pgvector.sql:ro
+      # Same directory mount as postgres — avoids WSL file-bind flake (see above).
+      - ./init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
         [
