@@ -97,7 +97,7 @@ def build_work_index(
 
     if mode == "monofile":
         lines.append(
-            f"Continue writing with `draft_section` (appends/replaces a marked block in `{draft_ms}`); "
+            f"Continue writing with `draft_section` (appends/replaces a chapter heading in `{draft_ms}`); "
             f"promote into `{ms}` via `propose_patch`. Read only the chapter you need — not the whole book."
         )
     else:

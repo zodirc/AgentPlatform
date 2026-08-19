@@ -287,7 +287,7 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
     full_flag = str(_kwargs.get("full", "")).lower() in {"1", "true", "yes"}
     economy = bool(getattr(settings, "writing_token_economy_enabled", True))
 
-    if economy and is_manuscript_rel(path) and "<!-- section:" in content:
+    if economy and is_manuscript_rel(path) and list_section_ids(content):
         sections = list_section_ids(content)
         if wants_full_manuscript_read(full_flag=full_flag):
             clipped, was = clip_text(content, 48_000)

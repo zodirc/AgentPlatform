@@ -14,31 +14,82 @@ import re
 from pathlib import Path
 
 
-def _start(sid: str) -> str:
-    return f"<!-- section:{sid} -->"
+_DIGITS = "零一二三四五六七八九"
+_HTML_RE = re.compile(
+    r"<!--\s*section:(?P<id>[^\s>]+)\s*-->\s*(?P<body>.*?)\s*<!--\s*/section:(?P=id)\s*-->",
+    re.DOTALL,
+)
+_HTML_MARK = re.compile(r"<!--\s*/?section:[^>]+-->[ \t]*\n?")
+_H1_RE = re.compile(r"^#\s+(.+?)\s*$", re.M)
+_CH_ID = re.compile(r"^(?:ch|chapter|section)[_-]?0*(\d+)$", re.I)
 
 
-def _end(sid: str) -> str:
-    return f"<!-- /section:{sid} -->"
+def _title(sid: str) -> str:
+    match = _CH_ID.fullmatch(sid.strip())
+    if not match:
+        return sid.strip()
+    n = int(match.group(1))
+    if 1 <= n <= 9:
+        return f"第{_DIGITS[n]}章"
+    if n == 10:
+        return "第十章"
+    if n < 20:
+        return f"第十{_DIGITS[n - 10]}章"
+    if n < 100:
+        ten, one = divmod(n, 10)
+        return f"第{_DIGITS[ten]}十{(_DIGITS[one] if one else '')}章"
+    return f"第{n}章"
+
+
+def _id_from_heading(title: str) -> str:
+    heading = title.strip()
+    match = re.match(r"^第\s*([0-9]+|[一二三四五六七八九十]+)\s*章", heading)
+    if match:
+        token = match.group(1)
+        if token.isdigit():
+            return f"ch{int(token)}"
+        # 一…十 only; migrate is best-effort for Chinese numerals.
+        if token in _DIGITS:
+            return f"ch{_DIGITS.index(token)}"
+        if token == "十":
+            return "ch10"
+    match = _CH_ID.fullmatch(heading)
+    if match:
+        return f"ch{int(match.group(1))}"
+    return heading
 
 
 def _format(sid: str, content: str) -> str:
-    return f"{_start(sid)}\n{content.strip(chr(10))}\n{_end(sid)}"
+    body = _HTML_MARK.sub("", content).strip("\n")
+    title = _title(sid)
+    if body:
+        return f"# {title}\n\n{body}"
+    return f"# {title}"
 
 
 def _list_ids(doc: str) -> list[str]:
-    return re.findall(r"<!--\s*section:([^\s>]+)\s*-->", doc)
+    html = [m.group("id") for m in _HTML_RE.finditer(doc or "")]
+    if html:
+        return html
+    return [_id_from_heading(m.group(1)) for m in _H1_RE.finditer(doc or "")]
 
 
 def _upsert(doc: str, sid: str, content: str) -> str:
     block = _format(sid, content)
-    start, end = _start(sid), _end(sid)
-    if start in doc and end in doc:
+    title = _title(sid)
+    heading = f"# {title}"
+    if heading in (doc or ""):
+        pattern = re.compile(re.escape(heading) + r"(?:\n.*?)(?=\n# |\Z)", re.DOTALL)
+        updated, n = pattern.subn(block, doc, count=1)
+        if n:
+            return updated if updated.endswith("\n") else updated + "\n"
+    start, end = f"<!-- section:{sid} -->", f"<!-- /section:{sid} -->"
+    if start in (doc or "") and end in (doc or ""):
         pattern = re.compile(re.escape(start) + r".*?" + re.escape(end), re.DOTALL)
         updated, n = pattern.subn(block, doc, count=1)
         if n:
             return updated if updated.endswith("\n") else updated + "\n"
-    base = doc.rstrip()
+    base = (doc or "").rstrip()
     return f"{base}\n\n{block}\n" if base else f"{block}\n"
 
 

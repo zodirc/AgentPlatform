@@ -176,10 +176,10 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 
 ## Delivery workflow
 
-- **Default (monofile):** `draft_section` appends or replaces a marked chapter block inside
+- **Default (monofile):** `draft_section` appends or replaces a chapter inside
   `drafts/manuscript.md` (visible on the workbench file tree; same book across sessions).
-  Markers look like
-  `<!-- section:ch3 -->` … `<!-- /section:ch3 -->`. It does **not** create one file per chapter.
+  Visible fences are markdown H1s (`# 第三章` for `ch3`). Never write `<!-- section:… -->`
+  into files the user opens. It does **not** create one file per chapter.
 - Promote the book with `propose_patch` targeting `manuscript.md` (surgical edit or append).
   Optional split layout: set `WRITING_MANUSCRIPT_MODE=sections` or pass `layout=sections` to
   write `drafts/{section_id}.md` / `sections/` instead.
@@ -188,6 +188,7 @@ If `search_sources` returns zero hits, say so clearly — do not invent citation
 - When the user **explicitly** asks to create or **export** a file (导出 / 生成成稿 / 打包),
   finish with `export_document` using `source="current_draft"` and an explicit, ordered
   `section_ids` list containing exactly the sections drafted for that delivery.
+  The export file is chapter prose only — do not prepend `outline.md`.
   Rename requests are **not** export requests — use `rename_file` instead.
 - Use `source="confirmed"` for accepted text from `manuscript.md` section blocks
   (fallback: `sections/{id}.md`).

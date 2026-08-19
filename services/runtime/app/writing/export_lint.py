@@ -14,19 +14,36 @@ class ExportLintIssue:
     message: str
 
 
+def _export_heading_aliases(section_id: str) -> tuple[str, ...]:
+    from app.writing.manuscript import human_section_title
+
+    title = human_section_title(section_id)
+    if title == section_id:
+        return (section_id,)
+    return (section_id, title)
+
+
+def _find_export_heading(text: str, section_id: str) -> re.Match[str] | None:
+    for label in _export_heading_aliases(section_id):
+        match = re.search(rf"(?m)^##\s+{re.escape(label)}\s*$", text)
+        if match:
+            return match
+    return None
+
+
 def _section_marker_spans(
     text: str, section_ids: list[str]
 ) -> list[tuple[str, int, int]]:
-    """Locate export wrappers ``## {section_id}`` and the body until the next wrapper.
+    """Locate export wrappers ``## {id or 第N章}`` and the body until the next wrapper.
 
-    ``export_document`` prepends ``## {section_id}`` around each section body. Bodies
+    ``export_document`` prepends a chapter heading around each section body. Bodies
     often start with their own ``#`` / ``##`` titles — emptiness must be measured
     until the *next requested section marker*, not until the next any-heading
     (that false-positive ``empty_section`` on otherwise valid exports).
     """
     markers: list[tuple[str, int, int]] = []  # sid, marker_start, body_start
     for sid in section_ids:
-        m = re.search(rf"(?m)^##\s+{re.escape(sid)}\s*$", text)
+        m = _find_export_heading(text, sid)
         if not m:
             continue
         markers.append((sid, m.start(), m.end()))
@@ -96,7 +113,9 @@ def lint_export_markdown(
                     )
 
     if section_ids:
-        missing_ids = [sid for sid in section_ids if sid not in text]
+        missing_ids = [
+            sid for sid in section_ids if _find_export_heading(text, sid) is None
+        ]
         if missing_ids:
             issues.append(
                 ExportLintIssue(

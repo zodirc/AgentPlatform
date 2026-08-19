@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from app.settings import settings
-from app.tools.core.paths import _resolve_path, _workspace_root
+from app.tools.core.paths import _resolve_path
 from app.tools.core.writing_tools import (
     _is_legacy_revision_rel,
     _read_manifest,
@@ -21,8 +21,6 @@ async def export_document(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    # Prefer bound Work root so outline + drafts share the same tree as tools.
-    root = _workspace_root()
     export_profile = (profile or settings.writing_export_profile or "novel-zh").strip() or "novel-zh"
     requested = [str(section_id).strip() for section_id in (section_ids or []) if str(section_id).strip()]
     if not requested:
@@ -70,7 +68,9 @@ async def export_document(
         confirmed_manuscript_rel,
         draft_manuscript_rel,
         extract_section,
+        human_section_title,
         legacy_draft_manuscript_rel,
+        list_section_ids,
         manuscript_mode,
     )
 
@@ -123,7 +123,7 @@ async def export_document(
                 if not path.is_file():
                     continue
                 raw = path.read_text(encoding="utf-8", errors="replace")
-                if Path(rel).name == draft_ms_name or "<!-- section:" in raw:
+                if Path(rel).name == draft_ms_name or list_section_ids(raw):
                     extracted = extract_section(raw, section_id)
                     if extracted is not None and extracted.strip():
                         content = extracted
@@ -156,11 +156,10 @@ async def export_document(
         }
 
     parts: list[str] = []
-    outline = root / "outline.md"
-    if outline.is_file():
-        parts.append(outline.read_text(encoding="utf-8", errors="replace"))
     for section_id, _, section_body in sources:
-        parts.append(f"\n## {section_id}\n\n{section_body.strip()}")
+        parts.append(
+            f"## {human_section_title(section_id)}\n\n{section_body.strip()}"
+        )
     body = "\n".join(parts).strip()
 
     from app.writing.export_lint import lint_export_markdown

@@ -68,8 +68,8 @@ async def test_draft_section_writes_monofile_manuscript(workspace: Path) -> None
     assert result["path"] == "drafts/manuscript.md"
     assert result["layout"] == "monofile"
     text = (workspace / result["path"]).read_text(encoding="utf-8")
-    assert "<!-- section:intro -->" in text
-    assert "# Intro" in text
+    assert "<!--" not in text
+    assert "# intro" in text
     manifest = workspace / ".agent" / "work" / "turns" / f"{turn_id}.json"
     assert '"intro"' in manifest.read_text(encoding="utf-8")
     history = workspace / ".agent" / "work" / "history" / "intro" / f"{turn_id}.md"
@@ -121,7 +121,8 @@ async def test_draft_section_appends_chapters_same_file(workspace: Path) -> None
     await core.draft_section("ch1", "v1b", turn_id=uuid4(), session_id=uuid4())
     path = workspace / "drafts" / "manuscript.md"
     text = path.read_text(encoding="utf-8")
-    assert text.count("<!-- section:ch1 -->") == 1
+    assert text.count("# 第一章") == 1
+    assert "<!--" not in text
     assert "v1b" in text and "v2" in text
 
 
@@ -147,7 +148,8 @@ async def test_draft_section_migrates_legacy_harness_draft(workspace: Path) -> N
     assert result["path"] == "drafts/manuscript.md"
     text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
     assert "old-body" in text and "new-body" in text
-    assert "<!-- section:old -->" in text and "<!-- section:new -->" in text
+    assert "<!--" not in text
+    assert "# old" in text and "# new" in text
 
 
 @pytest.mark.asyncio
@@ -168,6 +170,7 @@ async def test_export_document_reads_work_scoped_drafts(workspace: Path) -> None
     assert result["delivery_status"] == "ok"
     exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
     assert "Session body" in exported
+    assert "# Title" not in exported
 
 
 @pytest.mark.asyncio
@@ -265,7 +268,7 @@ async def test_export_document_from_revisions(workspace: Path) -> None:
     assert result["delivery_status"] == "ok"
     assert result["included_sections"] == ["body"]
     exported = (workspace / "exports" / "out.md").read_text(encoding="utf-8")
-    assert "# Title" in exported
+    assert "# Title" not in exported
     assert "Section body" in exported
 
 
@@ -374,6 +377,8 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "search_sources" in writing.system_prompt
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
+    assert "Visible fences are markdown H1s" in writing.system_prompt
+    assert "do not prepend `outline.md`" in writing.system_prompt
     assert "## Prose defaults" in writing.system_prompt
     assert "不要补转折" in writing.system_prompt
     assert "### Length counting" in writing.system_prompt

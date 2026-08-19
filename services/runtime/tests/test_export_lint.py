@@ -60,7 +60,9 @@ async def test_export_document_ok_when_section_opens_with_h1(workspace: Path) ->
         turn_id=turn_id,
     )
     assert result["delivery_status"] == "ok", result
-    assert (workspace / "exports" / "shentou.md").exists()
+    exported = (workspace / "exports" / "shentou.md").read_text(encoding="utf-8")
+    assert "Workspace outline" not in exported
+    assert "剧名：渗透" in exported
 
 
 @pytest.mark.asyncio
