@@ -37,10 +37,11 @@ def note_tool_result_for_verify(
         return
     name = str(tool_name or "")
     if name == "draft_section" and result.get("status") == "drafted":
-        # Hinge / lore / opening tells — length_short stays a field, never a receipt.
+        # Hinge / lore / staccato tells — length_short stays a field, never a receipt.
         state.hinge_pending = bool(result.get("hinge_dense"))
         state.lore_pending = bool(result.get("lore_dump"))
         state.opening_pending = bool(result.get("opening_institution"))
+        state.staccato_pending = bool(result.get("staccato_uniform"))
         return
     if name == "edit_file" and result.get("status") == "edited":
         impact = result.get("impact") if isinstance(result.get("impact"), dict) else {}
@@ -244,9 +245,12 @@ def should_inject_verify_receipt(
         bool(getattr(state, "hinge_receipt_sent", False))
         or bool(getattr(state, "lore_receipt_sent", False))
         or bool(getattr(state, "opening_receipt_sent", False))
+        or bool(getattr(state, "staccato_receipt_sent", False))
     )
     if writing_used:
         return False
+    if bool(getattr(state, "staccato_pending", False)):
+        return True
     if bool(getattr(state, "hinge_pending", False)):
         return True
     if bool(getattr(state, "opening_pending", False)):
@@ -276,6 +280,10 @@ def verify_receipt_kind(state: Any) -> str:
         and not bool(getattr(state, "verify_receipt_sent", False))
     ):
         return "classic"
+    if bool(getattr(state, "staccato_pending", False)) and not bool(
+        getattr(state, "staccato_receipt_sent", False)
+    ):
+        return "staccato"
     if bool(getattr(state, "hinge_pending", False)) and not bool(
         getattr(state, "hinge_receipt_sent", False)
     ):
@@ -296,21 +304,30 @@ def mark_verify_receipt_injected(state: Any) -> str:
     if kind == "issue_repro":
         state.issue_repro_receipt_sent = True
         state.issue_repro_armed = False
+    elif kind == "staccato":
+        state.staccato_receipt_sent = True
+        state.staccato_pending = False
+        state.hinge_pending = False
+        state.lore_pending = False
+        state.opening_pending = False
     elif kind == "hinge":
         state.hinge_receipt_sent = True
         state.hinge_pending = False
         state.lore_pending = False
         state.opening_pending = False
+        state.staccato_pending = False
     elif kind == "opening":
         state.opening_receipt_sent = True
         state.opening_pending = False
         state.lore_pending = False
         state.hinge_pending = False
+        state.staccato_pending = False
     elif kind == "lore":
         state.lore_receipt_sent = True
         state.lore_pending = False
         state.opening_pending = False
         state.hinge_pending = False
+        state.staccato_pending = False
     else:
         state.verify_receipt_sent = True
     return kind
@@ -320,6 +337,8 @@ def build_verify_receipt_text(state: Any) -> str:
     kind = verify_receipt_kind(state)
     if kind == "issue_repro":
         return _build_issue_repro_receipt_text(state)
+    if kind == "staccato":
+        return _build_staccato_receipt_text()
     if kind == "hinge":
         return _build_hinge_receipt_text()
     if kind == "opening":
@@ -329,11 +348,24 @@ def build_verify_receipt_text(state: Any) -> str:
     return _build_classic_receipt_text(state)
 
 
+def _build_staccato_receipt_text() -> str:
+    return (
+        "这一段对白或句子长短几乎一样短，像机械一问一答；"
+        "或尽是「我知道」「嗯」「懂」这类没有新决定的应声；或把因果在嘴里说圆。"
+        "短可以短，但不能整场一样短。问完可以答不上来、答偏、或只动手，"
+        "不必句句把逻辑接上。不要另起一套去AI模板。"
+        "用 draft_section 或 propose_patch 把节奏拉开：有人把话说满，有人沉默或做事；"
+        "删掉只在占拍的应声。展开日子时把场面写完，不要用三字问答代替叙述。"
+    )
+
+
 def _build_hinge_receipt_text() -> str:
     return (
         "这一段在「看见/听到」之后用了立马/立刻，下一句又在拧（却/没想到/回头）。"
         "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
-        "用 draft_section 或 propose_patch 改这一段：下一句停在物件、价钱、规矩或沉默上即可。"
+        "改的是这一拍的拧法，不是把整场改成三字句。"
+        "用 draft_section 或 propose_patch 改这一段：看见之后可以停在物件、价钱、规矩或沉默上——"
+        "前后句子长短仍要对不齐。"
     )
 
 
@@ -352,6 +384,7 @@ def _build_lore_receipt_text() -> str:
         "这一段在点到人名之后，用「N年前」写成了失踪/尸体提要。"
         "不要补转折，不要把全书谜面写圆，不要另起一套去AI模板。"
         "用 draft_section 或 propose_patch 删这段提要：留在当下的屋子、活计、价钱或规矩上即可。"
+        "删提要时不要改成三字问答连环。"
     )
 
 

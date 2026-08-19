@@ -10,6 +10,7 @@ from app.writing.hinge import hinge_fields
 from app.writing.lore import lore_fields
 from app.writing.opening import opening_fields
 from app.writing.outline_arc import outline_arc_fields
+from app.writing.staccato import staccato_fields
 from app.writing.text_metrics import draft_length_fields, outline_thin_fields
 
 _LAST_PLAN_SIG: dict[str, tuple[tuple[str, str, str], ...]] = {}
@@ -252,6 +253,7 @@ async def draft_section(
     result.update(hinge_fields(content))
     result.update(lore_fields(content, section_id))
     result.update(opening_fields(content, section_id))
+    result.update(staccato_fields(content))
     return result
 
 

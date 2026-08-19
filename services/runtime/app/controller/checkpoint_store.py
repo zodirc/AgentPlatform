@@ -82,6 +82,8 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "lore_receipt_sent": bool(getattr(state, "lore_receipt_sent", False)),
         "opening_pending": bool(getattr(state, "opening_pending", False)),
         "opening_receipt_sent": bool(getattr(state, "opening_receipt_sent", False)),
+        "staccato_pending": bool(getattr(state, "staccato_pending", False)),
+        "staccato_receipt_sent": bool(getattr(state, "staccato_receipt_sent", False)),
     }
 
 
@@ -168,6 +170,8 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         lore_receipt_sent=bool(data.get("lore_receipt_sent", False)),
         opening_pending=bool(data.get("opening_pending", False)),
         opening_receipt_sent=bool(data.get("opening_receipt_sent", False)),
+        staccato_pending=bool(data.get("staccato_pending", False)),
+        staccato_receipt_sent=bool(data.get("staccato_receipt_sent", False)),
     )
 
 

@@ -449,7 +449,9 @@ def set_dont_enabled(body: str, *, enabled: bool) -> str:
             "Don't",
             "按作品定制的禁词与禁结构（去 AI 味）：\n"
             "- 「在这个时代」「不禁」「充满了」\n"
-            "- 三段式排比、空洞形容词堆叠\n",
+            "- 三段式排比、空洞形容词堆叠\n"
+            "- 整场三字问答连环、叙述全是碎句\n"
+            "- 「我知道」「嗯」「懂」只应一声、没有新决定\n",
         )
     return body if "Don't" in sections else merge_style_section(body, "Don't", current or "（待填写）")
 

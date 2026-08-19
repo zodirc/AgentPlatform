@@ -174,6 +174,7 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "使君" not in sections["Samples"]
     assert "却说" not in sections["Samples"]
     assert "人质" in sections["Don't"] or "踹门" in sections["Don't"]
+    assert "三字" in sections["Don't"] or "一问一答" in sections["Don't"]
     assert "章的职务" in sections["Voice"]
     assert "大约孔乙己的确死了" in pin.volatile_block
     assert "邓脱路" in pin.volatile_block

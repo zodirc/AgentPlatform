@@ -86,6 +86,9 @@ class TurnState:
     # Opening-chapter 宗/派 before a standable place. Checkpointed.
     opening_pending: bool = False
     opening_receipt_sent: bool = False
+    # Uniform short beats (三字问答 / 空应声 / 把因果说圆). Checkpointed.
+    staccato_pending: bool = False
+    staccato_receipt_sent: bool = False
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

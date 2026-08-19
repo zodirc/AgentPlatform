@@ -10,8 +10,14 @@ reinvent them here.
 
 ### What to aim for
 
-Write the scene the reader is in. Dialogue is for asking, blocking, lying, bargaining —
-not lecturing plot, theme, or period. One trouble per stretch; leave something unfinished.
+Write the scene the reader is in. Dialogue can ask, block, lie, bargain, ramble,
+or fail to land — not lecture plot, theme, or period. One trouble per stretch;
+leave something unfinished.
+
+Rhythm must vary. Uniformly short Q&A (「跑完了？」「跑完了。」) is mechanical
+homogenization, not restraint. Short lines are allowed; a whole stretch of the
+same short beat is not. Narrative that expands a day or a room should finish the
+shot — do not replace description with a dialogue catalogue.
 
 When `outline.md` exists, this chapter has a **duty**. Follow the Outline job on
 the work surface: a 铺垫/加压 chapter must not fake a climax (决斗、揭秘、收束全书);
@@ -68,11 +74,12 @@ Sermon wrap-ups and stacked empty adjectives. End on a concrete image, line, or 
 
 ### Same-turn fix（仍属本轮，不另开命令）
 
-对话讲课、编年体扫过、或空行凑字时，本轮用 `propose_patch` / 再 `draft_section` 修好。
+对话讲课、编年体扫过、空行凑字、整场三字问答/碎句连环、或「我知道」「嗯」「懂」这类没有新决定的应声时，本轮用 `propose_patch` / 再 `draft_section` 修好。
 不要等用户说「再详细点」。Quality ≠ plot continuity ≠ RAG completeness.
-看见/听到之后立马拧（却/没想到/回头）时，平台可能再催一轮：下一句停在物件、价钱、规矩或沉默上，不要补转折、不要还上一章的账。
+看见/听到之后立马拧（却/没想到/回头）时，平台可能再催一轮：改的是这一拍的拧法，不是把整场改成三字句；看见之后可以停在物件、价钱、规矩或沉默上，前后句子长短仍要对不齐。
 第一章入口落成机构专名（宗/派）而不是可站的地方时，平台可能再催一轮：先改开篇几句，把路、田、价钱或谁管这块地写在机构名前面；身世仍不要写成提要。
-第一章里「N年前」接着失踪/尸体/没回家的提要时，平台可能再催一轮：删这段提要，留在当下的屋子、活计或规矩上，不要把全书谜面写圆。
+第一章里「N年前」接着失踪/尸体/没回家的提要时，平台可能再催一轮：删这段提要，留在当下的屋子、活计或规矩上，不要把全书谜面写圆，也不要改成三字问答。
+对白或句子长短几乎一样短、尽是占拍的应声、或把因果在嘴里说圆时，平台可能再催一轮：把节奏拉开（有人把话说满，有人沉默或做事；删掉只在占拍的应声；问完可以答不上来，不必句句把逻辑接上）。
 
 ## Writing cards（可选 · 作品声口）
 
