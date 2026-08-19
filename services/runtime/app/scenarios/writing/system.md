@@ -57,6 +57,7 @@ Sermon wrap-ups and stacked empty adjectives. End on a concrete image, line, or 
 
 对话讲课、编年体扫过、或空行凑字时，本轮用 `propose_patch` / 再 `draft_section` 修好。
 不要等用户说「再详细点」。Quality ≠ plot continuity ≠ RAG completeness.
+看见/听到之后立马拧（却/没想到/回头）时，平台可能再催一轮：下一句停在物件、价钱、规矩或沉默上，不要补转折、不要还上一章的账。
 
 ## Writing cards（可选 · 作品声口）
 

@@ -77,6 +77,9 @@ class TurnState:
     # This Turn's StartTurn user text (not later injected receipts). Writing tools
     # parse quota / TOC-only from here; empty on legacy checkpoints.
     turn_user_text: str = ""
+    # Writing hinge receipt: 看见…立马…却/回头 (not chapter-debt). Checkpointed.
+    hinge_pending: bool = False
+    hinge_receipt_sent: bool = False
 
 ContentBlock = dict[str, Any]
 MessageRole = Literal["user", "assistant", "tool"]

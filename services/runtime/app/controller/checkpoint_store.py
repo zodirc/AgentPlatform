@@ -76,6 +76,8 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "issue_repro_receipt_sent": bool(getattr(state, "issue_repro_receipt_sent", False)),
         "issue_repro_edits_since": int(getattr(state, "issue_repro_edits_since", 0) or 0),
         "turn_user_text": str(getattr(state, "turn_user_text", "") or ""),
+        "hinge_pending": bool(getattr(state, "hinge_pending", False)),
+        "hinge_receipt_sent": bool(getattr(state, "hinge_receipt_sent", False)),
     }
 
 
@@ -156,6 +158,8 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         issue_repro_receipt_sent=bool(data.get("issue_repro_receipt_sent", False)),
         issue_repro_edits_since=int(data.get("issue_repro_edits_since") or 0),
         turn_user_text=str(data.get("turn_user_text") or ""),
+        hinge_pending=bool(data.get("hinge_pending", False)),
+        hinge_receipt_sent=bool(data.get("hinge_receipt_sent", False)),
     )
 
 

@@ -375,6 +375,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "[cite:xxx]" in writing.system_prompt
     assert "Never omit `section_ids`" in writing.system_prompt
     assert "## Prose defaults" in writing.system_prompt
+    assert "不要补转折" in writing.system_prompt
     assert "### Length counting" in writing.system_prompt
     assert "### Outline defaults" in writing.system_prompt
     assert "### Scene richness" in writing.system_prompt

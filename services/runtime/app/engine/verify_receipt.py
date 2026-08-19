@@ -36,6 +36,10 @@ def note_tool_result_for_verify(
     if not isinstance(result, dict):
         return
     name = str(tool_name or "")
+    if name == "draft_section" and result.get("status") == "drafted":
+        # Hinge tell only — length_short stays a field, never a receipt.
+        state.hinge_pending = bool(result.get("hinge_dense"))
+        return
     if name == "edit_file" and result.get("status") == "edited":
         impact = result.get("impact") if isinstance(result.get("impact"), dict) else {}
         checks = result.get("checks") if isinstance(result.get("checks"), dict) else {}
@@ -207,11 +211,13 @@ def should_inject_verify_receipt(
         return False
     if bool(getattr(state, "budget_exceeded", False)):
         return False
-    if _remaining_steps(state) < max(1, int(reserve_steps)):
-        return False
+
+    remaining = _remaining_steps(state)
+    coding_ok = remaining >= max(1, int(reserve_steps))
 
     if (
-        bool(getattr(state, "verify_pending", False))
+        coding_ok
+        and bool(getattr(state, "verify_pending", False))
         and int(getattr(state, "code_edits_since_verify", 0) or 0) >= 1
         and not bool(getattr(state, "verify_receipt_sent", False))
     ):
@@ -221,10 +227,19 @@ def should_inject_verify_receipt(
         getattr(state, "issue_repro_edits_since", 0) or 0
     ) == 0
     if (
-        bool(getattr(state, "issue_repro_armed", False))
+        coding_ok
+        and bool(getattr(state, "issue_repro_armed", False))
         and not satisfied
         and not bool(getattr(state, "issue_repro_receipt_sent", False))
         and _issue_repro_hints_present(state)
+    ):
+        return True
+
+    hinge_reserve = min(max(1, int(reserve_steps)), 3)
+    if remaining < hinge_reserve:
+        return False
+    if bool(getattr(state, "hinge_pending", False)) and not bool(
+        getattr(state, "hinge_receipt_sent", False)
     ):
         return True
     return False
@@ -245,6 +260,15 @@ def verify_receipt_kind(state: Any) -> str:
         )
     ):
         return "issue_repro"
+    if (
+        bool(getattr(state, "verify_pending", False))
+        and not bool(getattr(state, "verify_receipt_sent", False))
+    ):
+        return "classic"
+    if bool(getattr(state, "hinge_pending", False)) and not bool(
+        getattr(state, "hinge_receipt_sent", False)
+    ):
+        return "hinge"
     return "classic"
 
 
@@ -253,15 +277,29 @@ def mark_verify_receipt_injected(state: Any) -> str:
     if kind == "issue_repro":
         state.issue_repro_receipt_sent = True
         state.issue_repro_armed = False
+    elif kind == "hinge":
+        state.hinge_receipt_sent = True
+        state.hinge_pending = False
     else:
         state.verify_receipt_sent = True
     return kind
 
 
 def build_verify_receipt_text(state: Any) -> str:
-    if verify_receipt_kind(state) == "issue_repro":
+    kind = verify_receipt_kind(state)
+    if kind == "issue_repro":
         return _build_issue_repro_receipt_text(state)
+    if kind == "hinge":
+        return _build_hinge_receipt_text()
     return _build_classic_receipt_text(state)
+
+
+def _build_hinge_receipt_text() -> str:
+    return (
+        "这一段在「看见/听到」之后用了立马/立刻，下一句又在拧（却/没想到/回头）。"
+        "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
+        "用 draft_section 或 propose_patch 改这一段：下一句停在物件、价钱、规矩或沉默上即可。"
+    )
 
 
 def _build_classic_receipt_text(state: Any) -> str:
