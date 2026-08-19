@@ -422,18 +422,24 @@ async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
     except OSError as exc:
         return {"error": f"Cannot list directory: {exc}"}
     entries.sort()
-    # Hide seed mount when Work disabled product corpus (docs/27 visibility_seed).
+    # Standing seed is a RO deploy mount, not copied into isolated work_root
+    # (docs/15 / docs/27). Isolated Works often only have a seed symlink;
+    # advertise it as a directory when the mount exists and visibility is on.
     from app.tenant_context import current_visibility_seed
+    from app.workspace_visibility import apply_seed_listing, filter_work_surface_list_entries
 
-    if not current_visibility_seed():
-        normalized = _normalized_workspace_rel(path)
-        if normalized in {"", ".", "sources"}:
-            entries = [e for e in entries if e.rstrip("/") != "seed"]
+    seed_root = Path(settings.workspace_root).resolve() / "sources" / "seed"
+    entries = apply_seed_listing(
+        path,
+        entries,
+        seed_visible=current_visibility_seed(),
+        seed_present=seed_root.is_dir(),
+    )
     # Align agent listing with Web work surface (hide .agent / cards/pending).
-    from app.workspace_visibility import filter_work_surface_list_entries
-
     entries = filter_work_surface_list_entries(path, entries)
     return {"path": path, "entries": entries[:200]}
+
+
 async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -> dict[str, Any]:
     from app.structural.symbols import is_symbol_query
     from app.tools.core.codebase_search import search_codebase

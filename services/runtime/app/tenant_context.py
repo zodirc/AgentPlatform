@@ -119,15 +119,23 @@ def current_visibility_seed() -> bool:
 def ensure_work_root_exists() -> Path:
     root = current_work_root_path()
     root.mkdir(parents=True, exist_ok=True)
-    # Expose standing seed corpus inside isolated works (docs/15 · docs/27).
+    # Isolated Works need a real ``sources/seed`` directory so list_dir (which
+    # does not follow symlinks) still advertises a folder. Child reads remap
+    # to the deploy mount via ``_resolve_path`` (docs/15 · docs/27).
     legacy = Path(settings.workspace_root).resolve()
     if root != legacy:
         seed_src = legacy / "sources" / "seed"
         seed_dst = root / "sources" / "seed"
-        if seed_src.is_dir() and not seed_dst.exists():
+        if seed_src.is_dir():
             seed_dst.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                seed_dst.symlink_to(seed_src, target_is_directory=True)
-            except OSError:
-                pass
+            if seed_dst.is_symlink():
+                try:
+                    seed_dst.unlink()
+                except OSError:
+                    pass
+            if not seed_dst.exists():
+                try:
+                    seed_dst.mkdir(exist_ok=True)
+                except OSError:
+                    pass
     return root
