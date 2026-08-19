@@ -37,9 +37,10 @@ def note_tool_result_for_verify(
         return
     name = str(tool_name or "")
     if name == "draft_section" and result.get("status") == "drafted":
-        # Hinge / lore tells only — length_short stays a field, never a receipt.
+        # Hinge / lore / opening tells — length_short stays a field, never a receipt.
         state.hinge_pending = bool(result.get("hinge_dense"))
         state.lore_pending = bool(result.get("lore_dump"))
+        state.opening_pending = bool(result.get("opening_institution"))
         return
     if name == "edit_file" and result.get("status") == "edited":
         impact = result.get("impact") if isinstance(result.get("impact"), dict) else {}
@@ -239,12 +240,16 @@ def should_inject_verify_receipt(
     hinge_reserve = min(max(1, int(reserve_steps)), 3)
     if remaining < hinge_reserve:
         return False
-    writing_used = bool(getattr(state, "hinge_receipt_sent", False)) or bool(
-        getattr(state, "lore_receipt_sent", False)
+    writing_used = (
+        bool(getattr(state, "hinge_receipt_sent", False))
+        or bool(getattr(state, "lore_receipt_sent", False))
+        or bool(getattr(state, "opening_receipt_sent", False))
     )
     if writing_used:
         return False
     if bool(getattr(state, "hinge_pending", False)):
+        return True
+    if bool(getattr(state, "opening_pending", False)):
         return True
     if bool(getattr(state, "lore_pending", False)):
         return True
@@ -275,6 +280,10 @@ def verify_receipt_kind(state: Any) -> str:
         getattr(state, "hinge_receipt_sent", False)
     ):
         return "hinge"
+    if bool(getattr(state, "opening_pending", False)) and not bool(
+        getattr(state, "opening_receipt_sent", False)
+    ):
+        return "opening"
     if bool(getattr(state, "lore_pending", False)) and not bool(
         getattr(state, "lore_receipt_sent", False)
     ):
@@ -291,9 +300,16 @@ def mark_verify_receipt_injected(state: Any) -> str:
         state.hinge_receipt_sent = True
         state.hinge_pending = False
         state.lore_pending = False
+        state.opening_pending = False
+    elif kind == "opening":
+        state.opening_receipt_sent = True
+        state.opening_pending = False
+        state.lore_pending = False
+        state.hinge_pending = False
     elif kind == "lore":
         state.lore_receipt_sent = True
         state.lore_pending = False
+        state.opening_pending = False
         state.hinge_pending = False
     else:
         state.verify_receipt_sent = True
@@ -306,6 +322,8 @@ def build_verify_receipt_text(state: Any) -> str:
         return _build_issue_repro_receipt_text(state)
     if kind == "hinge":
         return _build_hinge_receipt_text()
+    if kind == "opening":
+        return _build_opening_receipt_text()
     if kind == "lore":
         return _build_lore_receipt_text()
     return _build_classic_receipt_text(state)
@@ -316,6 +334,16 @@ def _build_hinge_receipt_text() -> str:
         "这一段在「看见/听到」之后用了立马/立刻，下一句又在拧（却/没想到/回头）。"
         "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
         "用 draft_section 或 propose_patch 改这一段：下一句停在物件、价钱、规矩或沉默上即可。"
+    )
+
+
+def _build_opening_receipt_text() -> str:
+    return (
+        "第一章入口写成了机构专名（宗/派/仙门），读者还不知道这是哪块地。"
+        "不要补身世提要，不要另起一套去AI模板。"
+        "用 draft_section 或 propose_patch 改开篇几句：先写可站的地方"
+        "（路、田、价钱、谁在管这块地），机构名让人物后口带出。"
+        "身世、失踪、全书谜面仍不要写进第一章。"
     )
 
 
