@@ -335,6 +335,7 @@ def extract_cards_block(prompt: str) -> str:
     for stop in (
         "\n## Work index\n",
         "\n## Work surface\n",
+        "\n## Writing spec\n",
         "\n## Story-machine reset",
     ):
         sidx = block.find(stop)
@@ -611,6 +612,7 @@ def prepare_writing_system_prompt(
     workspace_root: Path | None = None,
 ) -> WritingCardsPinResult:
     from app.writing.work_index import format_work_index_block
+    from app.writing.signals.spec import build_writing_spec_block
 
     cards = with_builtin_style_if_missing(load_writing_cards(workspace_root=workspace_root))
     selection = select_writing_cards_detailed(message, cards)
@@ -631,6 +633,9 @@ def prepare_writing_system_prompt(
         )
     if work_index:
         extras.append(work_index)
+    spec = build_writing_spec_block(message, workspace_root=workspace_root)
+    if spec:
+        extras.append(spec)
     if getattr(settings, "writing_token_economy_enabled", True):
         from app.writing.focus import build_work_surface_block
 

@@ -76,3 +76,26 @@ def hinge_fields(content: str) -> dict[str, Any]:
         "hinge_see_now": see_now,
         "hinge_see_now_meta": see_now_meta,
     }
+
+
+def find_hinge_span(text: str, *, max_chars: int = 360) -> str:
+    """Exact slice covering the first 看见/听到 + 立刻 chain."""
+    sents = _sentences(text)
+    body = text or ""
+    for i, sent in enumerate(sents):
+        if not (_SEE.search(sent) and _NOW.search(sent)):
+            continue
+        nxt = sents[i + 1] if i + 1 < len(sents) else ""
+        blob = sent if _TWIST.search(sent) or not nxt else f"{sent}{nxt}"
+        idx = body.find(sent)
+        if idx < 0:
+            return blob[:max_chars]
+        end_token = nxt if nxt and not _TWIST.search(sent) else sent
+        end = body.find(end_token, idx)
+        if end < 0:
+            end = idx + len(sent)
+        else:
+            end += len(end_token)
+        span = body[idx:end]
+        return span if len(span) <= max_chars else span[:max_chars]
+    return ""

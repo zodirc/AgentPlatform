@@ -32,14 +32,32 @@ def is_opening_section(section_id: str) -> bool:
 
 def has_lore_dump(text: str) -> bool:
     """True when 「N年前」 is paired with 失踪/没回家/尸体 in this or the next sentence."""
+    return bool(find_lore_span(text))
+
+
+def find_lore_span(text: str, *, max_chars: int = 360) -> str:
+    """Exact slice covering the first N年前 + 失踪/尸体 pair."""
     sents = _sentences(text)
+    body = text or ""
     for i, sent in enumerate(sents):
         if not _YEARS_AGO.search(sent):
             continue
         nxt = sents[i + 1] if i + 1 < len(sents) else ""
-        if _BIO.search(sent) or _BIO.search(nxt):
-            return True
-    return False
+        if not (_BIO.search(sent) or _BIO.search(nxt)):
+            continue
+        idx = body.find(sent)
+        if idx < 0:
+            blob = sent if _BIO.search(sent) or not nxt else f"{sent}{nxt}"
+            return blob[:max_chars]
+        end_token = sent if _BIO.search(sent) or not nxt else nxt
+        end = body.find(end_token, idx)
+        if end < 0:
+            end = idx + len(sent)
+        else:
+            end += len(end_token)
+        span = body[idx:end]
+        return span if len(span) <= max_chars else span[:max_chars]
+    return ""
 
 
 def lore_fields(content: str, section_id: str = "") -> dict[str, Any]:

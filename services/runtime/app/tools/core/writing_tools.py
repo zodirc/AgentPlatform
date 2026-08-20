@@ -188,6 +188,41 @@ def _write_manifest(
     return path
 
 
+def _reject_full_redraft(
+    manifest: dict[str, Any],
+    *,
+    section_id: str,
+    occupy_fresh: bool,
+    path: str,
+) -> dict[str, Any] | None:
+    if occupy_fresh:
+        return None
+    from app.writing.signals.repair import REWRITE_PATCH, should_reject_full_redraft
+
+    prior = (manifest.get("section_drafts") or {}).get(section_id)
+    if not isinstance(prior, dict) or not should_reject_full_redraft(prior):
+        return None
+    span = prior.get("repair_span")
+    err: dict[str, Any] = {
+        "section_id": section_id,
+        "path": path,
+        "status": "error",
+        "error": "rewrite_via_patch",
+        "rewrite_policy": REWRITE_PATCH,
+        "summary": (
+            "本章本轮已成稿。用 propose_patch 只换 writing_signals.repair_span.old_text，"
+            "不要整章再 draft_section。"
+        ),
+    }
+    if span:
+        err["repair_span"] = span
+        err["writing_signals"] = {
+            "repair_span": span,
+            "rewrite_policy": REWRITE_PATCH,
+        }
+    return err
+
+
 async def draft_section(
     section_id: str,
     content: str,
@@ -240,6 +275,11 @@ async def draft_section(
             ),
             occupied=manuscript_is_occupied(existing),
         )
+        blocked = _reject_full_redraft(
+            manifest, section_id=section_id, occupy_fresh=occupy_fresh, path=path
+        )
+        if blocked:
+            return blocked
         if occupy_fresh:
             archived = archive_occupied_writing_docs(layout=layout)
             existing = ""
@@ -258,6 +298,11 @@ async def draft_section(
             ),
             occupied=_section_drafts_occupied(),
         )
+        blocked = _reject_full_redraft(
+            manifest, section_id=section_id, occupy_fresh=occupy_fresh, path=path
+        )
+        if blocked:
+            return blocked
         if occupy_fresh:
             archived = archive_occupied_writing_docs(layout=layout)
             manifest["occupy"] = "fresh"
@@ -283,6 +328,7 @@ async def draft_section(
         manifest["occupy"] = "fresh"
         manifest["sections"] = []
         manifest["revisions"] = {}
+        manifest["section_drafts"] = {}
     sections = manifest.setdefault("sections", [])
     revisions = manifest.setdefault("revisions", {})
     if section_id not in sections:
@@ -331,6 +377,19 @@ async def draft_section(
         result["writing_signals"] = signals
     except Exception:
         pass
+    drafts = manifest.setdefault("section_drafts", {})
+    entry: dict[str, Any] = {
+        "visible_chars": int(result.get("visible_chars") or 0),
+        "length_short": bool(result.get("length_short")),
+    }
+    signals_block = result.get("writing_signals")
+    if isinstance(signals_block, dict):
+        if signals_block.get("repair_span"):
+            entry["repair_span"] = signals_block["repair_span"]
+        if signals_block.get("rewrite_policy"):
+            entry["rewrite_policy"] = signals_block["rewrite_policy"]
+    drafts[section_id] = entry
+    result["manifest_path"] = _write_manifest(turn_id, manifest, session_id=session_id)
     return result
 
 

@@ -49,6 +49,19 @@ def institution_before_place(text: str) -> bool:
     return org.start() < place.start()
 
 
+def find_opening_span(text: str, *, max_chars: int = 360) -> str:
+    """Opening sentences that put 宗/派 before a standable place."""
+    if not institution_before_place(text):
+        return ""
+    body = text or ""
+    org = _ORG.search(body)
+    if org is None:
+        return _opening_window(text)[:max_chars]
+    start = max(0, org.start() - 8)
+    span = body[start : start + max_chars]
+    return span.strip() or _opening_window(text)[:max_chars]
+
+
 def opening_fields(content: str, section_id: str = "") -> dict[str, Any]:
     """Attach to draft_section. Opening chapter only."""
     from app.writing.text_metrics import visible_chars

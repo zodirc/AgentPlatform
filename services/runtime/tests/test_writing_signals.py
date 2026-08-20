@@ -122,6 +122,7 @@ def test_score_writing_fragment_has_signals_block() -> None:
     nearest = out["exemplar_fit"]["nearest"]
     assert nearest["author"] == "鲁迅"
     assert nearest["work"]
+    assert out["rewrite_policy"] in {"draft_ok", "propose_patch"}
 
 
 def test_exemplar_bank_covers_all_fragments() -> None:
@@ -223,6 +224,39 @@ def test_ledger_telegraph_is_penalized_like_staccato() -> None:
     assert "dialogue_rhythm_varied" not in {r["key"] for r in bad["rewards"]}
     assert good["net_signal"] > bad["net_signal"]
     assert bad["net_signal"] < 0.55
+
+
+def test_split_speech_and_contrast_punch_are_penalized() -> None:
+    prefs = platform_prefs_payload()
+    split = score_writing_fragment(
+        "「你家。」他说，「你袖口那块布，就是锁。」",
+        fragment_declared="dialogue_dyad",
+        prefs=prefs,
+    )
+    punch = score_writing_fragment(
+        "「不在了。」\n「你怎么知道？」\n「他来找的是包，不是我。」",
+        fragment_declared="dialogue_dyad",
+        prefs=prefs,
+    )
+    equate = score_writing_fragment(
+        "「你袖口那块布，就是锁。」",
+        fragment_declared="dialogue_dyad",
+        prefs=prefs,
+    )
+    because = score_writing_fragment(
+        "「他来找包，因为只问包在哪。」她把灯芯拨正，油烟贴在碗沿上。" * 3,
+        fragment_declared="dialogue_dyad",
+        prefs=prefs,
+    )
+    assert "staccato_uniform" in {p["key"] for p in split["penalties"]}
+    assert "staccato_uniform" in {p["key"] for p in punch["penalties"]}
+    assert "staccato_uniform" in {p["key"] for p in equate["penalties"]}
+    assert "staccato_uniform" not in {p["key"] for p in because["penalties"]}
+    assert "dialogue_rhythm_varied" not in {r["key"] for r in split["rewards"]}
+    assert "dialogue_rhythm_varied" not in {r["key"] for r in punch["rewards"]}
+    assert split["net_signal"] < because["net_signal"]
+    assert punch["net_signal"] < because["net_signal"]
+    assert equate["net_signal"] < because["net_signal"]
 
 
 def test_live_prefs_do_not_mask_exemplar_penalties() -> None:
@@ -361,4 +395,48 @@ def test_maybe_attach_skips_outline(monkeypatch) -> None:
         )
     )
     assert "writing_signals" not in result
+
+
+def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
+    prefs = platform_prefs_payload()
+    texture = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒。\n\n"
+    ) * 8
+    island = "\n".join(
+        ["「跑完了？」", "「跑完了。」", "「少了谁？」", "「不知道。」"] * 2
+    )
+    tail = (
+        "只有穿长衫的，才踱进店面隔壁的房子里，要酒要菜，慢慢地坐喝。"
+        "柜台上还温着酒，粉板上记着十九个钱。\n\n"
+    ) * 6
+    text = texture + island + "\n\n" + tail
+    out = score_writing_fragment(
+        text, fragment_declared="worldview_texture", prefs=prefs
+    )
+    assert out["windows"]["n"] >= 2
+    assert out["rewrite_policy"] == "propose_patch"
+    span = out["repair_span"]
+    assert "跑完了" in span["old_text"]
+    assert span["old_text"] in text
+    assert span["key"] == "staccato_uniform"
+
+
+def test_short_draft_allows_full_redraft_policy() -> None:
+    prefs = platform_prefs_payload()
+    text = "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台。"
+    out = score_writing_fragment(
+        text, fragment_declared="worldview_texture", prefs=prefs
+    )
+    assert out["rewrite_policy"] == "draft_ok"
+    assert "windows" not in out
+
+
+def test_infer_fragment_from_duty() -> None:
+    from app.writing.signals.spec import infer_fragment_from_duty
+
+    assert infer_fragment_from_duty("过日子，写铺子的规矩和价钱") == "worldview_texture"
+    assert infer_fragment_from_duty("本章高潮，摊牌") == "climax_beat"
+    assert infer_fragment_from_duty("加压，把主线往前推") == "plot_progress"
+    assert infer_fragment_from_duty("铺垫章，不要假高潮") == "mixed"
 

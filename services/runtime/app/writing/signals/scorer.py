@@ -147,6 +147,7 @@ def _collect_penalties(
     alignment: float,
     length_fields: dict[str, Any],
     prefs: dict[str, Any],
+    skip_opening: bool = False,
 ) -> list[dict[str, Any]]:
     coeff = prefs.get("signal_penalties") or {}
     hits: list[dict[str, Any]] = []
@@ -160,8 +161,13 @@ def _collect_penalties(
         hits.append({"key": key, "hit": True, "delta": round(delta, 4), "hint": hint})
 
     add("hinge_dense", bool(hinge_fields(text).get("hinge_dense")), "看见/听到后立马拧")
-    add("staccato_uniform", bool(staccato_fields(text).get("staccato_uniform")), "对白或句长过齐")
-    add("opening_institution", bool(opening_fields(text, section_id).get("opening_institution")), "开篇机构专名")
+    add("staccato_uniform", bool(staccato_fields(text).get("staccato_uniform")), "对白过碎、拆句或「就是」收束")
+    if not skip_opening:
+        add(
+            "opening_institution",
+            bool(opening_fields(text, section_id).get("opening_institution")),
+            "开篇机构专名",
+        )
     add("lore_dump", bool(lore_fields(text, section_id).get("lore_dump")), "第一章身世提要")
     add("length_short", bool(length_fields.get("length_short")), "实体文字不足")
     rubric = score_rubric(text)
@@ -257,13 +263,15 @@ def _collect_rewards(
     return hits
 
 
-def score_writing_fragment(
+def _score_span(
     text: str,
     *,
     fragment_declared: str,
     section_id: str = "",
     prefs: dict[str, Any],
     space: MetricSpace | None = None,
+    skip_opening: bool = False,
+    include_outline_rewards: bool = True,
 ) -> dict[str, Any]:
     declared = normalize_fragment(fragment_declared)
     detected = detect_fragment(text, space=space)
@@ -296,10 +304,11 @@ def score_writing_fragment(
         alignment=alignment,
         length_fields=length_fields,
         prefs=prefs,
+        skip_opening=skip_opening,
     )
     rewards = _collect_rewards(
         text,
-        section_id=section_id,
+        section_id=section_id if include_outline_rewards else "",
         fragment_declared=declared,
         prefs=prefs,
         dimensions=dimensions,
@@ -323,3 +332,76 @@ def score_writing_fragment(
         "length_fields": length_fields,
         "exemplar_fit": exemplar_fit,
     }
+
+
+def score_writing_fragment(
+    text: str,
+    *,
+    fragment_declared: str,
+    section_id: str = "",
+    prefs: dict[str, Any],
+    space: MetricSpace | None = None,
+) -> dict[str, Any]:
+    from app.writing.signals.repair import (
+        WEAK_NET,
+        build_repair_span,
+        rewrite_policy_for,
+    )
+    from app.writing.signals.windows import split_score_windows
+    from app.writing.text_metrics import visible_chars as vis_chars
+
+    body = _score_span(
+        text,
+        fragment_declared=fragment_declared,
+        section_id=section_id,
+        prefs=prefs,
+        space=space,
+    )
+    vis = vis_chars(text)
+    length_short = bool((body.get("length_fields") or {}).get("length_short"))
+    windows = split_score_windows(text)
+    worst_win = None
+    worst_scored: dict[str, Any] | None = None
+    if len(windows) > 1:
+        for i, win in enumerate(windows):
+            scored = _score_span(
+                win.text,
+                fragment_declared=fragment_declared,
+                section_id=section_id,
+                prefs=prefs,
+                space=space,
+                skip_opening=i > 0,
+                include_outline_rewards=False,
+            )
+            if worst_scored is None or float(scored["net_signal"]) < float(
+                worst_scored["net_signal"]
+            ):
+                worst_win, worst_scored = win, scored
+        if worst_scored is not None:
+            body["net_signal"] = round(
+                min(float(body["net_signal"]), float(worst_scored["net_signal"])),
+                4,
+            )
+            body["windows"] = {
+                "n": len(windows),
+                "worst_net": worst_scored["net_signal"],
+            }
+            if worst_scored.get("penalties") and not body.get("penalties"):
+                body["penalties"] = list(worst_scored["penalties"])
+
+    probe_penalties = list(body.get("penalties") or [])
+    if worst_scored is not None and (
+        worst_scored.get("penalties")
+        or float(body["net_signal"]) < WEAK_NET
+    ):
+        probe_penalties = list(worst_scored.get("penalties") or probe_penalties)
+    span = build_repair_span(
+        text,
+        penalties=probe_penalties,
+        window=worst_win,
+        net_signal=float(body["net_signal"]),
+    )
+    if span:
+        body["repair_span"] = span
+    body["rewrite_policy"] = rewrite_policy_for(visible=vis, length_short=length_short)
+    return body

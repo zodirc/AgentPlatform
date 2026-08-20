@@ -158,3 +158,60 @@ def test_work_index_new_piece_warns(tmp_path: Path) -> None:
     )
     assert "occupy=fresh" in text
     assert "different story" in text
+
+
+@pytest.mark.asyncio
+async def test_long_section_second_draft_rejected(workspace: Path) -> None:
+    body = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。"
+    ) * 30
+    turn_id = uuid4()
+    first = await core.draft_section(
+        "ch1",
+        body,
+        turn_id=turn_id,
+        fragment="worldview_texture",
+    )
+    assert first["status"] == "drafted"
+    assert int(first["visible_chars"]) >= 800
+    assert first.get("writing_signals", {}).get("rewrite_policy") == "propose_patch"
+    second = await core.draft_section(
+        "ch1",
+        body + "又整章重交一遍。",
+        turn_id=turn_id,
+        fragment="worldview_texture",
+    )
+    assert second["status"] == "error"
+    assert second["error"] == "rewrite_via_patch"
+    draft = workspace / "drafts" / "manuscript.md"
+    assert "又整章重交一遍" not in draft.read_text(encoding="utf-8")
+    other = await core.draft_section(
+        "ch2",
+        "灯塔夜里还亮着，潮水拍在石阶上。",
+        turn_id=turn_id,
+        fragment="mixed",
+    )
+    assert other["status"] == "drafted"
+
+
+@pytest.mark.asyncio
+async def test_short_or_length_short_may_redraft(workspace: Path) -> None:
+    turn_id = uuid4()
+    first = await core.draft_section(
+        "ch1",
+        "柜台上温着酒。",
+        turn_id=turn_id,
+        fragment="mixed",
+    )
+    assert first["status"] == "drafted"
+    thicker = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台。" * 8
+    )
+    second = await core.draft_section(
+        "ch1",
+        thicker,
+        turn_id=turn_id,
+        fragment="mixed",
+    )
+    assert second["status"] == "drafted"

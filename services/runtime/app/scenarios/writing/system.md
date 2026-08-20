@@ -8,11 +8,11 @@ When drafting narrative (`draft_section` / prose `propose_patch`):
 
 1. Always pass **`fragment`**: `plot_progress` | `worldview_texture` | `climax_beat` | `battle_action` | `dialogue_dyad` | `mixed`.
 2. Optional: `writing_rubric(fragment=…)` before a large draft (weights + chapter duty).
-3. After the tool returns, read **`writing_signals`** (`net_signal`, `penalties`, `rewards`, `exemplar_fit`).
+3. After the tool returns, read **`writing_signals`** (`net_signal`, `penalties`, `rewards`, `exemplar_fit`, `repair_span`).
    `exemplar_alignment` is distance to the **class prototype** (`sig.v1`) — rhythm and texture, not plot search.
    `fragment_mismatch` fires only when the draft is a poor fit for the **declared** type, not when a keyword detector disagrees.
    Platform gold is 鲁迅 / 郁达夫公版节选. Learn the beat; **do not copy their plots**.
-4. Weak `net_signal` or a penalty hit → **same Turn** `propose_patch` / another `draft_section`. Do not start a new Turn.
+4. Weak `net_signal` or a penalty hit → same Turn **`propose_patch`** on `repair_span.old_text`. Do not `draft_section` the whole chapter again. `length_short` may thicken with another `draft_section`.
 5. Optional: `evaluate_writing_fragment` to re-score a span.
 
 If `duty_conflict=true`, do not fake a climax in a 铺垫/加压 chapter.

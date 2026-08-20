@@ -154,3 +154,22 @@ def test_wn3_stable_system_excludes_volatile_and_assemble_postposes(tmp_path: Pa
     assert volatile_msgs
     vtext = volatile_msgs[0]["content"][0]["text"]
     assert "Writing cards" in vtext
+    assert "## Writing spec" in vtext
+
+
+def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    (tmp_path / "outline.md").write_text(
+        "主线：沈禾要保住铺子。\n# 第一章\n过日子，写规矩和价钱。\n",
+        encoding="utf-8",
+    )
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写第一章",
+        workspace_root=tmp_path,
+    )
+    assert "## Writing spec" in pin.volatile_block
+    assert "worldview_texture" in pin.volatile_block
+    assert "propose_patch" in pin.volatile_block
+    assert "## Writing spec" not in pin.prompt
+    assert "Writing spec" not in extract_cards_block(pin.volatile_block)

@@ -138,7 +138,8 @@ def build_registry() -> ToolRegistry:
                 "this story). Inferred from the user text when occupy is omitted. "
                 "Pass layout=sections for one-file-per-chapter under drafts/. "
                 "Promote into manuscript.md via propose_patch. History stays under "
-                ".agent/work/history/."
+                ".agent/work/history/. A second full draft of the same long section "
+                "in one Turn is rejected — patch writing_signals.repair_span instead."
             ),
             parameters={
                 "type": "object",

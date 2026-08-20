@@ -72,6 +72,8 @@ def test_hinge_receipt_once() -> None:
     text = build_verify_receipt_text(state)
     assert "不要补转折" in text
     assert "还上一章" in text
+    assert "propose_patch" in text
+    assert "draft_section 或" not in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "hinge"
     assert state.hinge_receipt_sent is True

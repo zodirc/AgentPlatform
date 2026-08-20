@@ -383,6 +383,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "do not prepend `outline.md`" in writing.system_prompt
     assert "## Writing signals" in writing.system_prompt
     assert "writing_signals" in writing.system_prompt
+    assert "repair_span" in writing.system_prompt
     assert "Settings → 写作风格" in writing.system_prompt
     assert "不强制钩子" in writing.system_prompt
     assert "高潮落点" in writing.system_prompt
