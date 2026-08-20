@@ -37,6 +37,14 @@ def test_hinge_skips_kongyiji_flat() -> None:
     assert hinge_fields(text) == {}
 
 
+def test_hinge_see_now_meta_without_twist() -> None:
+    text = _pad("他看见桌上的刀，立刻明白了。他听到门外脚步，立刻拧身。")
+    assert count_hinge_chains(text) == 0
+    fields = hinge_fields(text)
+    assert fields.get("hinge_dense") is True
+    assert fields.get("hinge_see_now_meta", 0) >= 1
+
+
 def test_hinge_skips_que_without_limma() -> None:
     text = _pad("虽然穷，却还是站着喝。看见柜台要了一碗酒。")
     assert count_hinge_chains(text) == 0

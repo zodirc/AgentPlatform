@@ -74,6 +74,20 @@ def test_staccato_allows_three_short_quotes() -> None:
     assert "staccato_uniform" not in staccato_fields(text)
 
 
+def test_staccato_ledger_telegraph() -> None:
+    """「进来拿。」「我会还。」「先记账。」「记多久？」 is the same mechanical beat."""
+    body = "\n\n".join(["「进来拿。」", "「我会还。」", "「先记账。」", "「记多久？」"])
+    assert max_short_quote_run(body) >= 4
+    assert staccato_fields(body).get("staccato_uniform") is True
+    assert staccato_fields(_pad(body)).get("staccato_uniform") is True
+
+
+def test_staccato_ledger_same_line_and_tagged() -> None:
+    text = "掌柜说：「进来拿。」他说：「我会还。」「先记账。」「记多久？」"
+    assert max_short_quote_run(text) >= 4
+    assert staccato_fields(text).get("staccato_uniform") is True
+
+
 def test_staccato_receipt_beats_hinge() -> None:
     uid = uuid4()
     state = TurnState(
@@ -98,6 +112,7 @@ def test_staccato_receipt_beats_hinge() -> None:
     assert verify_receipt_kind(state) == "staccato"
     text = build_verify_receipt_text(state)
     assert "机械一问一答" in text
+    assert "进来拿" in text
     assert "整场一样短" in text
     assert "我知道" in text
     kind = mark_verify_receipt_injected(state)
@@ -139,7 +154,6 @@ def test_staccato_phatic_acks_with_narrative_between() -> None:
     fields = staccato_fields(text)
     assert fields.get("staccato_uniform") is True
     assert int(fields.get("staccato_phatic") or 0) >= 3
-    assert max_short_quote_run(text) < 4
 
 
 def test_staccato_skips_lai_le_echo() -> None:

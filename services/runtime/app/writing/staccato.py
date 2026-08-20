@@ -29,6 +29,8 @@ _ECHO_MIN = 2
 _LOGIC_MIN = 2
 _DEFER_MIN = 3
 _MIN_VISIBLE = 80
+# Speaker tags (掌柜说：) stay in the run; a real narrative beat resets it.
+_QUOTE_GAP_RESET = 8
 
 
 def _lines(text: str) -> list[str]:
@@ -83,17 +85,29 @@ def _units(text: str) -> list[int]:
 
 
 def max_short_quote_run(text: str) -> int:
-    """Longest run of consecutive quote-only lines with inner visible ≤ 7."""
+    """Longest run of short spoken turns (inner ≤ 7).
+
+    Counts 「进来拿」「我会还」 even when they share a line or have a speaker
+    tag. A longer quote, or a narrative beat longer than ``_QUOTE_GAP_RESET``,
+    breaks the run — so a short answer after a real scene is allowed.
+    """
     from app.writing.text_metrics import visible_chars
 
+    body = text or ""
     run = best = 0
-    for line in _lines(text):
-        inner = _quote_inner(line)
-        if inner is not None and visible_chars(inner) <= _SHORT:
+    last_end = 0
+    for match in _QUOTE_SPAN.finditer(body):
+        gap = visible_chars(body[last_end : match.start()])
+        if gap > _QUOTE_GAP_RESET:
+            run = 0
+        inner = match.group(1).strip()
+        n = visible_chars(inner)
+        if 1 <= n <= _SHORT:
             run += 1
             best = max(best, run)
         else:
             run = 0
+        last_end = match.end()
     return best
 
 
@@ -161,18 +175,25 @@ def count_defer_tells(text: str) -> int:
 
 
 def staccato_fields(content: str) -> dict[str, Any]:
-    """Attach to draft_section. Empty unless a uniform-short or empty-ack stretch is present."""
+    """Attach to draft_section. Empty unless a uniform-short or empty-ack stretch is present.
+
+    Quote-run / phatic still count on short spans. The 80-char floor used to skip
+    them, which made a four-line 三字连环 score as healthy dialogue.
+    """
     from app.writing.text_metrics import visible_chars
 
     text = content or ""
-    if visible_chars(text) < _MIN_VISIBLE:
-        return {}
     quote_run = max_short_quote_run(text)
-    unit_run = max_short_unit_run(text)
     phatic = max_phatic_quote_run(text)
     echo = count_echo_acks(text)
     logic = count_logic_glue_quotes(text)
-    defer = count_defer_tells(text)
+    vis = visible_chars(text)
+    if vis < _MIN_VISIBLE:
+        unit_run = 0
+        defer = 0
+    else:
+        unit_run = max_short_unit_run(text)
+        defer = count_defer_tells(text)
     if (
         quote_run < _QUOTE_RUN
         and unit_run < _UNIT_RUN
