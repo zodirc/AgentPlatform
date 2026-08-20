@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from app.writing.text_metrics import (
+    DEFAULT_CHAPTER_MIN,
     draft_length_fields,
+    looks_like_chapter_draft,
     outline_thin_chapters,
     outline_thin_fields,
     parse_char_quota,
+    resolve_draft_quota,
     visible_chars,
     wants_outline_toc_only,
+    wants_short_prose,
 )
 
 
@@ -53,6 +57,23 @@ def test_draft_length_fields_short_vs_met() -> None:
     assert no_quota["visible_chars"] == 80
     assert "quota_chars" not in no_quota
     assert "length_short" not in no_quota
+
+
+def test_default_chapter_quota_for_chengpian() -> None:
+    assert looks_like_chapter_draft("成篇，写第三章") is True
+    assert looks_like_chapter_draft("写一篇短篇") is True
+    assert looks_like_chapter_draft("把这句对白改短一点") is False
+    assert wants_short_prose("把这句对白改短一点") is True
+    assert resolve_draft_quota("成篇") == DEFAULT_CHAPTER_MIN
+    assert resolve_draft_quota("写 300 字成篇") == 300
+
+    short = draft_length_fields("甲" * 2000, "成篇，默认章节")
+    assert short["quota_chars"] == DEFAULT_CHAPTER_MIN
+    assert short["length_short"] is True
+
+    met = draft_length_fields("甲" * DEFAULT_CHAPTER_MIN, "写第三章")
+    assert met["quota_chars"] == DEFAULT_CHAPTER_MIN
+    assert "length_short" not in met
 
 
 def test_outline_thin_fields_toc_skip() -> None:

@@ -10,6 +10,8 @@ import re
 
 LENGTH_SHORT_RATIO = 0.85
 OUTLINE_MIN_VISIBLE = 200
+DEFAULT_CHAPTER_MIN = 5000
+DEFAULT_CHAPTER_MAX = 6000
 
 # Prefer these stems when several numbers appear in one Turn message.
 _PREFERRED_QUOTA = re.compile(
@@ -34,6 +36,19 @@ _SHORT_OUTLINE_ASK = re.compile(
     r"短(?:一点|一些|点)|"
     r"短(?:大纲|目录|纲)|"
     r"(?:^|[/\s])短(?:$|[\s，。])"
+)
+
+# Surgical / explicitly short prose — do not apply the 5k–6k chapter default.
+_SHORT_PROSE_ASK = re.compile(
+    r"改一句|改短|补一句|只要这句|润色这|"
+    r"(?:写|改)短(?!篇)|"
+    r"短(?:一点|一些|点)|"
+    r"简略"
+)
+
+_CHAPTER_DRAFT_ASK = re.compile(
+    r"成篇|一篇|一章|本章|这一章|扩写|续写|"
+    r"写第|[第][一二三四五六七八九十百千零〇两\d]+章"
 )
 
 _MD_HEADING = re.compile(r"^(#{1,3})\s+(.+?)\s*$", re.M)
@@ -62,6 +77,32 @@ def parse_char_quota(user_text: str) -> int | None:
     fallback = [int(m.group(1)) for m in _ANY_QUOTA.finditer(text)]
     if fallback:
         return max(fallback)
+    return None
+
+
+def wants_short_prose(user_text: str) -> bool:
+    """User asked for a surgical / short span — not a 5k–6k chapter."""
+    text = user_text or ""
+    if not text.strip():
+        return False
+    probe = text.replace("短篇", "")
+    return _SHORT_PROSE_ASK.search(probe) is not None
+
+
+def looks_like_chapter_draft(user_text: str) -> bool:
+    """成篇 / 写一章 / 续写 — apply default chapter quota when N 字 was not named."""
+    text = user_text or ""
+    if not text.strip() or wants_short_prose(text):
+        return False
+    return _CHAPTER_DRAFT_ASK.search(text) is not None
+
+
+def resolve_draft_quota(user_text: str) -> int | None:
+    named = parse_char_quota(user_text)
+    if named is not None:
+        return named
+    if looks_like_chapter_draft(user_text):
+        return DEFAULT_CHAPTER_MIN
     return None
 
 
@@ -100,7 +141,7 @@ def outline_thin_chapters(md: str, *, min_visible: int = OUTLINE_MIN_VISIBLE) ->
 def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
     vis = visible_chars(content)
     out: dict[str, object] = {"visible_chars": vis}
-    quota = parse_char_quota(user_text)
+    quota = resolve_draft_quota(user_text)
     if quota is None:
         return out
     out["quota_chars"] = quota
