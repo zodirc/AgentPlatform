@@ -14,7 +14,13 @@ from app.engine.verify_receipt import (
     should_inject_verify_receipt,
     verify_receipt_kind,
 )
-from app.writing.staccato import max_short_quote_run, staccato_fields
+from app.writing.staccato import (
+    count_contrast_punches,
+    count_equate_punches,
+    count_split_speech,
+    max_short_quote_run,
+    staccato_fields,
+)
 
 
 def _pad(body: str) -> str:
@@ -115,6 +121,10 @@ def test_staccato_receipt_beats_hinge() -> None:
     assert "进来拿" in text
     assert "整场一样短" in text
     assert "我知道" in text
+    assert "是A，不是B" in text or "不是B" in text
+    assert "因为" in text
+    assert "propose_patch" in text
+    assert "draft_section 或" not in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "staccato"
     assert state.staccato_receipt_sent is True
@@ -227,3 +237,49 @@ async def test_draft_section_sets_staccato_uniform(workspace) -> None:
     )
     result = await core.draft_section("ch1", body, turn_id=uuid4())
     assert result.get("staccato_uniform") is True
+
+
+def test_staccato_split_he_said_one_utterance() -> None:
+    text = "「你家。」他说，「你袖口那块布，就是锁。」"
+    fields = staccato_fields(text)
+    assert count_split_speech(text) >= 1
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_split") or 0) >= 1
+
+
+def test_staccato_contrast_punch_after_short_qa() -> None:
+    text = "「不在了。」\n「你怎么知道？」\n「他来找的是包，不是我。」"
+    fields = staccato_fields(text)
+    assert count_contrast_punches(text) >= 1
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_contrast") or 0) >= 1
+
+
+def test_staccato_skips_luxun_comma_attribution() -> None:
+    text = (
+        "「你该记得罢，」母亲便向着我说，「这是斜对门的杨二嫂，……开豆腐店的。」"
+    )
+    assert count_split_speech(text) == 0
+    assert "staccato_uniform" not in staccato_fields(text)
+
+
+def test_staccato_equate_punch_is_metaphor_upgrade() -> None:
+    text = "「你袖口那块布，就是锁。」"
+    assert count_equate_punches(text) >= 1
+    fields = staccato_fields(text)
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_equate") or 0) >= 1
+
+
+def test_staccato_skips_aq_whatever_is_whatever() -> None:
+    text = "阿Q更加高兴的走而且喊道：「好，……我要什么就是什么，我欢喜谁就是谁。」"
+    assert count_equate_punches(text) == 0
+    assert "staccato_uniform" not in staccato_fields(text)
+
+
+def test_staccato_allows_because_in_dialogue() -> None:
+    text = _pad(
+        "「他来找包，因为只问包在哪。」\n"
+        "她把灯芯拨正，油烟贴在碗沿上。\n"
+    )
+    assert "staccato_uniform" not in staccato_fields(text)

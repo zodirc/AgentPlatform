@@ -159,7 +159,7 @@ _PLATFORM_WEIGHTS: dict[str, dict[str, float]] = {
 
 PLATFORM_SIGNAL_PENALTIES: dict[str, float] = {
     "hinge_dense": -0.12,
-    "staccato_uniform": -0.15,
+    "staccato_uniform": -0.18,
     "opening_institution": -0.10,
     "lore_dump": -0.10,
     "length_short": -0.08,

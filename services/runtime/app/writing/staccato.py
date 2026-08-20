@@ -19,6 +19,20 @@ _PHATIC = re.compile(
 )
 _LOGIC_GLUE = re.compile(r"所以|因此|可见|也就是说|换言之")
 _DEFER = re.compile(r"没有立即")
+# 「短句。」他说，「后半句」 — one utterance chopped for a fake beat.
+# First quote must end with 。！？ (not ，); tag is only 他说/掌柜说, not 母亲便向着我说.
+_SPLIT_SPEECH = re.compile(
+    r"「(?P<head>[^」]*[。！？!?])」\s*"
+    r"(?:他|她|我|你|[一-龥]{1,3})说[道着]?\s*[：:，,]\s*「"
+)
+# 「是包，不是我」 after a short ping-pong — epigram instead of 因为.
+_CONTRAST_PUNCH = re.compile(
+    r"(?:是(?![否的了])[^，。；]{1,8}，不是|不是[^，。；]{1,8}，才?是)"
+)
+# 「那块布，就是锁」 — state A, then promote it to a symbol. Not 什么就是什么 / 也就是说.
+_EQUATE_PUNCH = re.compile(
+    r"[，、——](?:那)?就是(?!说|了)[^，。；！？\s]{1,6}[。！]?$"
+)
 
 # Inner quote / sentence entity-chars. 「跑完了？」 inner = 4.
 _SHORT = 7
@@ -174,6 +188,48 @@ def count_defer_tells(text: str) -> int:
     return len(_DEFER.findall(text or ""))
 
 
+def count_split_speech(text: str) -> int:
+    """「你家。」他说，「袖口就是锁」 — one line split around a speaker tag."""
+    from app.writing.text_metrics import visible_chars
+
+    n = 0
+    for match in _SPLIT_SPEECH.finditer(text or ""):
+        if visible_chars(match.group("head")) <= _SHORT:
+            n += 1
+    return n
+
+
+def count_equate_punches(text: str) -> int:
+    """A，就是B in a short quote — the object is upgraded to a metaphor."""
+    from app.writing.text_metrics import visible_chars
+
+    n = 0
+    for inner in _quote_inners(text):
+        vis = visible_chars(inner)
+        if vis <= 22 and _EQUATE_PUNCH.search(inner.strip()):
+            n += 1
+    return n
+
+
+def count_contrast_punches(text: str) -> int:
+    """Short Q&A closed by 是A，不是B. Isolated contrast in a long line is allowed."""
+    from app.writing.text_metrics import visible_chars
+
+    n = 0
+    shorts_before = 0
+    for inner in _quote_inners(text):
+        vis = visible_chars(inner)
+        short = 1 <= vis <= _SHORT
+        punch = vis <= 22 and _CONTRAST_PUNCH.search(inner) is not None
+        if punch and shorts_before >= 2:
+            n += 1
+        if short:
+            shorts_before += 1
+        elif not punch:
+            shorts_before = 0
+    return n
+
+
 def staccato_fields(content: str) -> dict[str, Any]:
     """Attach to draft_section. Empty unless a uniform-short or empty-ack stretch is present.
 
@@ -187,6 +243,9 @@ def staccato_fields(content: str) -> dict[str, Any]:
     phatic = max_phatic_quote_run(text)
     echo = count_echo_acks(text)
     logic = count_logic_glue_quotes(text)
+    split = count_split_speech(text)
+    contrast = count_contrast_punches(text)
+    equate = count_equate_punches(text)
     vis = visible_chars(text)
     if vis < _MIN_VISIBLE:
         unit_run = 0
@@ -201,6 +260,9 @@ def staccato_fields(content: str) -> dict[str, Any]:
         and echo < _ECHO_MIN
         and logic < _LOGIC_MIN
         and defer < _DEFER_MIN
+        and split < 1
+        and contrast < 1
+        and equate < 1
     ):
         return {}
     return {
@@ -211,4 +273,66 @@ def staccato_fields(content: str) -> dict[str, Any]:
         "staccato_echo": echo,
         "staccato_logic": logic,
         "staccato_defer": defer,
+        "staccato_split": split,
+        "staccato_contrast": contrast,
+        "staccato_equate": equate,
     }
+
+
+def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
+    """Exact slice covering the first uniform-short quote run, if any."""
+    from app.writing.text_metrics import visible_chars
+
+    body = text or ""
+    split = _SPLIT_SPEECH.search(body)
+    if split is not None and visible_chars(split.group("head")) <= _SHORT:
+        end = body.find("」", split.end())
+        stop = end + 1 if end >= 0 else min(split.end() + 24, len(body))
+        span = body[split.start() : stop]
+        return span if len(span) <= max_chars else span[:max_chars]
+    run_start: int | None = None
+    run = 0
+    last_end = 0
+    for match in _QUOTE_SPAN.finditer(body):
+        gap = visible_chars(body[last_end : match.start()])
+        if gap > _QUOTE_GAP_RESET:
+            run = 0
+            run_start = None
+        inner = match.group(1).strip()
+        n = visible_chars(inner)
+        if 1 <= n <= _SHORT:
+            if run == 0:
+                run_start = match.start()
+            run += 1
+            if run >= _QUOTE_RUN and run_start is not None:
+                pad = max(run_start - 24, 0)
+                end = min(match.end() + 8, len(body))
+                span = body[pad:end]
+                return span if len(span) <= max_chars else span[:max_chars]
+        else:
+            run = 0
+            run_start = None
+        last_end = match.end()
+    shorts_before = 0
+    start_short: int | None = None
+    for match in _QUOTE_SPAN.finditer(body):
+        inner = match.group(1).strip()
+        vis = visible_chars(inner)
+        short = 1 <= vis <= _SHORT
+        punch = vis <= 22 and _CONTRAST_PUNCH.search(inner) is not None
+        if punch and shorts_before >= 2 and start_short is not None:
+            span = body[start_short : match.end()]
+            return span if len(span) <= max_chars else span[:max_chars]
+        if short:
+            if shorts_before == 0:
+                start_short = match.start()
+            shorts_before += 1
+        elif not punch:
+            shorts_before = 0
+            start_short = None
+    for match in _QUOTE_SPAN.finditer(body):
+        inner = match.group(1).strip()
+        if visible_chars(inner) <= 22 and _EQUATE_PUNCH.search(inner):
+            span = match.group(0)
+            return span if len(span) <= max_chars else span[:max_chars]
+    return ""
