@@ -7,7 +7,6 @@ ARG NODE_BASE=node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632
 ARG NGINX_BASE=nginx:alpine@sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
 
 FROM ${NODE_BASE} AS deps
-# Keep monorepo-relative imports working (planSuggest → packages/contracts/...)
 WORKDIR /workspace
 # Default: China npm mirror. CI overrides to registry.npmjs.org (npmmirror hangs
 # on GitHub-hosted runners and can burn the full 2h job budget).
@@ -19,7 +18,6 @@ ENV NPM_CONFIG_REGISTRY=${NPM_CONFIG_REGISTRY} \
     PNPM_FETCH_RETRY_MAXTIMEOUT=120000 \
     PNPM_NETWORK_CONCURRENCY=8
 RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
-COPY packages/contracts/plan_suggest /workspace/packages/contracts/plan_suggest
 COPY services/web/package.json services/web/pnpm-lock.yaml /workspace/services/web/
 WORKDIR /workspace/services/web
 # BuildKit store cache: if deps layer is GC'd and re-RUN, packages stay local.
@@ -34,6 +32,8 @@ RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \
     fi
 
 FROM deps AS builder
+# weights.json is imported at vite compile time, not pnpm install — keep it off the deps layer.
+COPY packages/contracts/plan_suggest /workspace/packages/contracts/plan_suggest
 COPY services/web/index.html services/web/vite.config.ts services/web/tsconfig.json ./
 COPY services/web/tailwind.config.js services/web/postcss.config.js ./
 COPY services/web/public ./public

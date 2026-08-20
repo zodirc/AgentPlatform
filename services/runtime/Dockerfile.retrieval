@@ -74,7 +74,6 @@ RUN --mount=type=bind,from=model_bake_cache,target=/models-bake-cache,ro \
     printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model
 
 FROM ${PYTHON_BASE} AS deps
-ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
 ARG PIP_TRUSTED_HOST
 ARG TORCH_FIND_LINKS
@@ -100,15 +99,18 @@ RUN mkdir -p /data/vectorstore /data/models /app/models-baked \
     && chown -R app:app /data /app/models-baked
 WORKDIR /app
 
-COPY packages/contracts/python /contracts/python
+COPY packages/contracts/python/pyproject.toml /tmp/contracts/pyproject.toml
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
 # Offline CUDA wheels via named context `torch_wheel_cache` (not main context).
 # Falls back to TORCH_INDEX_URL / CPU find-links when the cache has no .whl files.
 # BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local (no mirror re-fetch).
 # Do not use pip --no-cache-dir here — that bypasses the mount.
+# Contracts *sources* are copied in the app stage so writing_prefs.py does not rebuild torch.
 RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
     --mount=type=cache,target=/root/.cache/pip \
-    mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
+    mkdir -p /tmp/contracts/agent_contracts /tmp/runtime/app \
+    && printf '%s\n' '# deps-layer stub' > /tmp/contracts/agent_contracts/__init__.py \
+    && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
     && if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
          echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
          pip install --no-index --find-links=/tmp/torch-wheels torch; \
@@ -119,9 +121,9 @@ RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
          echo "deps: installing CPU torch from ${TORCH_FIND_LINKS}"; \
          pip install --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
        fi \
-    && pip install /contracts/python \
+    && pip install /tmp/contracts \
     && pip install "/tmp/runtime[retrieval,structural]" \
-    && rm -rf /tmp/runtime
+    && rm -rf /tmp/runtime /tmp/contracts
 
 # Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).
 # Prefer offline seed from named context `ts_grammar_cache`; else prefetch().
@@ -134,33 +136,23 @@ RUN --mount=type=bind,from=ts_grammar_cache,target=/tmp/ts-grammar-seed,ro \
 
 COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
 
+# After pip/ST/models so adding CLI does not invalidate torch. ops-eval mounts the sock.
+RUN apt-get update && apt-get install -y --no-install-recommends docker-cli ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
+
 FROM deps AS app
 ARG EMBEDDING_MODEL
-ARG APT_MIRROR=mirrors.aliyun.com
+# Real contracts overlay the deps stub via PYTHONPATH (no pip / apt on code edits).
+# docker-cli lives in deps so ops-eval sock mounts still work without re-apt.
+ENV PYTHONPATH=/contracts/python
 COPY services/runtime/app /app/app
+COPY packages/contracts/python /contracts/python
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest
 COPY eval/recordings /app/eval/recordings
-COPY services/runtime/docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
-
-# ops-eval solve-side run_tests needs the docker CLI (sock is mounted by
-# deploy/compose/ops-eval.yml). Keep this in the thin app stage so app/** /
-# CLI bumps do not re-run pip / sentence-transformers bake.
-USER root
-RUN set -eux; \
-    if [ -n "${APT_MIRROR}" ]; then \
-      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
-      elif [ -f /etc/apt/sources.list ]; then \
-        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
-      fi; \
-    fi; \
-    apt-get update && apt-get install -y --no-install-recommends docker-cli ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && docker --version
-
+COPY --chmod=755 services/runtime/docker-entrypoint.sh /app/docker-entrypoint.sh
 USER app
 ENV EMBEDDING_MODEL=${EMBEDDING_MODEL}
 EXPOSE 8001

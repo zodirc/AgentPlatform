@@ -30,15 +30,18 @@ RUN useradd --create-home --uid 1000 app
 RUN mkdir -p /data/vectorstore /data/models && chown -R app:app /data
 WORKDIR /app
 
-COPY packages/contracts/python /contracts/python
+COPY packages/contracts/python/pyproject.toml /tmp/contracts/pyproject.toml
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
 # BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local.
 # Do not use pip --no-cache-dir here — that bypasses the mount.
+# Contracts *sources* stay in the app stage — a writing_prefs.py edit must not re-pip.
 RUN --mount=type=cache,target=/root/.cache/pip \
-    mkdir -p /tmp/runtime/app && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
-    && pip install /contracts/python \
+    mkdir -p /tmp/contracts/agent_contracts /tmp/runtime/app \
+    && printf '%s\n' '# deps-layer stub' > /tmp/contracts/agent_contracts/__init__.py \
+    && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
+    && pip install /tmp/contracts \
     && pip install "/tmp/runtime[structural]" \
-    && rm -rf /tmp/runtime
+    && rm -rf /tmp/runtime /tmp/contracts
 
 # Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).
 # Prefer offline seed from named context `ts_grammar_cache`; else prefetch().
@@ -49,26 +52,20 @@ RUN --mount=type=bind,from=ts_grammar_cache,target=/tmp/ts-grammar-seed,ro \
     && su -s /bin/bash app -c 'HOME=/home/app TS_GRAMMAR_SEED_DIR=/tmp/ts-grammar-seed python -u /tmp/bake_ts_grammars.py' \
     && rm -f /tmp/bake_ts_grammars.py
 
+# After pip so adding CLI does not invalidate the wheel layer. ops-eval mounts the sock.
+RUN apt-get update && apt-get install -y --no-install-recommends docker-cli ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
+
 FROM deps AS app
-ARG APT_MIRROR=mirrors.aliyun.com
+# Real contracts overlay the deps stub via PYTHONPATH (no pip / apt on code edits).
+ENV PYTHONPATH=/contracts/python
 COPY services/runtime/app /app/app
+COPY packages/contracts/python /contracts/python
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest
 COPY eval/recordings /app/eval/recordings
-# ops-eval solve-side: docker CLI for sweb.eval (see deploy/compose/ops-eval.yml).
-USER root
-RUN set -eux; \
-    if [ -n "${APT_MIRROR}" ]; then \
-      if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
-        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list.d/debian.sources; \
-      elif [ -f /etc/apt/sources.list ]; then \
-        sed -i "s/deb.debian.org/${APT_MIRROR}/g; s/security.debian.org/${APT_MIRROR}/g" /etc/apt/sources.list; \
-      fi; \
-    fi; \
-    apt-get update && apt-get install -y --no-install-recommends docker-cli ca-certificates \
-    && rm -rf /var/lib/apt/lists/* \
-    && docker --version
 USER app
 EXPOSE 8001
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
