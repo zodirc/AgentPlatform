@@ -7,6 +7,7 @@ describe("tabFromPath", () => {
     expect(tabFromPath("/settings/model")).toBe("model");
     expect(tabFromPath("/settings/index")).toBe("index");
     expect(tabFromPath("/settings/allowlist")).toBe("allowlist");
-    expect(tabFromPath("/settings/signals")).toBe("signals");
+    expect(tabFromPath("/settings/signals")).toBe("writing");
+    expect(tabFromPath("/settings/writing")).toBe("writing");
   });
 });

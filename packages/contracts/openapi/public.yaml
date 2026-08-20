@@ -304,6 +304,50 @@ paths:
       responses:
         '202':
           description: Patch reject accepted
+  /admin/writing-prefs:
+    get:
+      operationId: getWritingPrefs
+      summary: Get writing fragment weights for the logged-in user (cross-Work)
+      security:
+        - endUserCookie: []
+      responses:
+        '200':
+          description: Writing prefs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WritingPrefsResponse'
+    put:
+      operationId: updateWritingPrefs
+      summary: Update writing fragment weights for the logged-in user
+      security:
+        - endUserCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateWritingPrefsRequest'
+      responses:
+        '200':
+          description: Updated prefs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WritingPrefsResponse'
+  /admin/writing-prefs/reset:
+    post:
+      operationId: resetWritingPrefs
+      summary: Reset writing prefs to platform defaults
+      security:
+        - endUserCookie: []
+      responses:
+        '200':
+          description: Reset prefs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WritingPrefsResponse'
   /admin/model-providers:
     get:
       operationId: listModelProviders
@@ -789,3 +833,67 @@ components:
         updated_at:
           type: string
           format: date-time
+    WritingPrefsResponse:
+      type: object
+      required:
+        - preset_label
+        - fragment_weights
+        - signal_penalties
+        - signal_rewards
+        - schema_version
+        - is_custom
+      properties:
+        preset_label:
+          type: string
+        fragment_weights:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: number
+        signal_penalties:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: number
+        signal_rewards:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: number
+        exemplars:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: object
+              additionalProperties:
+                type: string
+        schema_version:
+          type: integer
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        is_custom:
+          type: boolean
+    UpdateWritingPrefsRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        preset_label:
+          type: string
+        fragment_weights:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: number
+        signal_penalties:
+          type: object
+          additionalProperties: true
+        signal_rewards:
+          type: object
+          additionalProperties: true

@@ -26,6 +26,7 @@ from app.routers import (
     ops_official,
     ops_raw,
     ops_retrieval,
+    ops_writing,
     runs,
     sessions,
     turns,
@@ -34,6 +35,7 @@ from app.routers import (
 from app.routers.admin import model_providers as admin_model_providers
 from app.routers.admin import ux_signals as admin_ux_signals
 from app.routers.admin import workspace as admin_workspace
+from app.routers.admin import writing_prefs as admin_writing_prefs
 from app.services.projection.session_projector import reconcile_lagging_projections, reconcile_stale_turns
 from app.services.projection.lease_reclaim import reconcile_expired_leases
 from app.services.projection.claim_timeout import reconcile_unclaimed_turns
@@ -196,6 +198,7 @@ app.include_router(runs.router, prefix="/api/v1")
 app.include_router(admin_model_providers.router, prefix="/api/v1")
 app.include_router(admin_workspace.router, prefix="/api/v1")
 app.include_router(admin_ux_signals.router, prefix="/api/v1")
+app.include_router(admin_writing_prefs.router, prefix="/api/v1")
 if (settings.ops_test_secret or "").strip():
     app.include_router(ops_eval.router, prefix="/api/v1")
     app.include_router(ops_official.router, prefix="/api/v1")
@@ -203,6 +206,7 @@ if (settings.ops_test_secret or "").strip():
     app.include_router(ops_envelope.router, prefix="/api/v1")
     app.include_router(ops_raw.router, prefix="/api/v1")
     app.include_router(ops_ingestion.router, prefix="/api/v1")
+    app.include_router(ops_writing.router, prefix="/api/v1")
 
 
 @app.exception_handler(RequestValidationError)

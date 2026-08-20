@@ -1011,55 +1011,57 @@ export async function warmupRetrieval(prefix = ""): Promise<void> {
   }
 }
 
-export type UxSignalsReport = {
-  generated_at: string;
-  target_day: string;
-  event_count?: number;
-  config?: {
-    min_sample: number;
-    threshold_mult: number;
-    reedit_minutes: number;
-    lookback_days: number;
-  };
-  daily: Array<{
-    day: string;
-    scenario_id: string;
-    rates: {
-      RejectRate: number | null;
-      CancelRate: number | null;
-      ReeditRate: number | null;
-    };
-    samples: { reject: number; reedit: number; cancel_denom: number };
-    counts: Record<string, number>;
-  }>;
-  alerts: Array<{
-    day: string;
-    scenario_id: string;
-    metric: string;
-    value: number;
-    baseline_median: number;
-    sample: number;
-    threshold_mult: number;
-  }>;
+export type WritingExemplarRef = {
+  author: string;
+  work: string;
+  beat: string;
 };
 
-/** docs/28 PX1d — read-only; failures must not block writing. */
-export async function fetchUxSignals(opts?: {
-  lookbackDays?: number;
-  day?: string;
-}): Promise<UxSignalsReport | null> {
-  try {
-    const params = new URLSearchParams();
-    if (opts?.lookbackDays) params.set("lookback_days", String(opts.lookbackDays));
-    if (opts?.day) params.set("day", opts.day);
-    const qs = params.toString();
-    const res = await fetch(
-      `${API_BASE}/admin/ux-signals${qs ? `?${qs}` : ""}`,
-      { ...sessionFetchInit, headers: apiAuthHeaders(adminAuthHeaders()) },
-    );
-    if (!res.ok) return null;
-    return (await res.json()) as UxSignalsReport;
-  } catch {
-    return null;
-  }
+export type WritingPrefs = {
+  preset_label: string;
+  fragment_weights: Record<string, Record<string, number>>;
+  signal_penalties: Record<string, Record<string, number>> | Record<string, number>;
+  signal_rewards: Record<string, Record<string, number>> | Record<string, number>;
+  exemplars?: Record<string, WritingExemplarRef[]>;
+  schema_version: number;
+  updated_at: string | null;
+  is_custom: boolean;
+};
+
+export async function fetchWritingPrefs(): Promise<WritingPrefs> {
+  const res = await fetch(`${API_BASE}/admin/writing-prefs`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(adminAuthHeaders()),
+  });
+  await throwIfNotOk(res);
+  return (await res.json()) as WritingPrefs;
+}
+
+export async function updateWritingPrefs(body: {
+  preset_label?: string;
+  fragment_weights?: Record<string, Record<string, number>>;
+  signal_penalties?: Record<string, Record<string, number>> | Record<string, number>;
+  signal_rewards?: Record<string, Record<string, number>> | Record<string, number>;
+}): Promise<WritingPrefs> {
+  const res = await fetch(`${API_BASE}/admin/writing-prefs`, {
+    method: "PUT",
+    ...sessionFetchInit,
+    headers: {
+      ...apiAuthHeaders(adminAuthHeaders()),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  await throwIfNotOk(res);
+  return (await res.json()) as WritingPrefs;
+}
+
+export async function resetWritingPrefs(): Promise<WritingPrefs> {
+  const res = await fetch(`${API_BASE}/admin/writing-prefs/reset`, {
+    method: "POST",
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(adminAuthHeaders()),
+  });
+  await throwIfNotOk(res);
+  return (await res.json()) as WritingPrefs;
 }
