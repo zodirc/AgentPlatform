@@ -423,8 +423,13 @@ run_api_ux_docker() {
   with_heartbeat "docker pytest api" "${COMPOSE[@]}" exec -T api bash -c \
     'echo "==> [preflight/docker] pip install pytest extras + contracts…"
      python -m pip install --progress-bar on pytest pytest-asyncio httpx pyyaml
-     python -m pip install --progress-bar on /tmp/preflight-contracts/python
-     if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi
+     python -m pip install --progress-bar on --upgrade --force-reinstall --no-deps /tmp/preflight-contracts/python
+     if [ -d /repo/services/api/app ]; then app_path=/repo/services/api; else app_path=/app; fi
+     if [ -d /contracts/python/agent_contracts ]; then
+       export PYTHONPATH=/tmp/preflight-contracts/python:/contracts/python:${app_path}
+     else
+       export PYTHONPATH=/tmp/preflight-contracts/python:${app_path}
+     fi
      if [ -f /repo/packages/contracts/openapi/public.yaml ]; then
        export PUBLIC_OPENAPI_YAML=/repo/packages/contracts/openapi/public.yaml
      fi

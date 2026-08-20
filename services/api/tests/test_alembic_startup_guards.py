@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from app.db.migrate import widen_alembic_version_column
+from app.db.migrate import rewrite_unpushed_revision_ids, widen_alembic_version_column
 
 VERSIONS = Path(__file__).resolve().parents[1] / "alembic" / "versions"
 ENV_PY = Path(__file__).resolve().parents[1] / "alembic" / "env.py"
@@ -37,6 +37,26 @@ def test_new_revision_ids_fit_alembic_default_varchar32() -> None:
 def test_env_widens_version_num_before_upgrade() -> None:
     text = ENV_PY.read_text()
     assert "widen_alembic_version_column" in text
+    assert "rewrite_unpushed_revision_ids" in text
+
+
+def test_rewrite_skips_non_postgres() -> None:
+    conn = MagicMock()
+    conn.dialect.name = "sqlite"
+    rewrite_unpushed_revision_ids(conn)
+    conn.execute.assert_not_called()
+
+
+def test_rewrite_maps_overlong_0028_stamp() -> None:
+    conn = MagicMock()
+    conn.dialect.name = "postgresql"
+    conn.in_transaction.return_value = True
+    rewrite_unpushed_revision_ids(conn)
+    clause = conn.execute.call_args.args[0]
+    sql = str(getattr(clause, "text", clause)).lower()
+    assert "0028_phase2_writing_exemplar_space" in sql
+    assert "0028_phase2_exemplar_space" in sql
+    conn.commit.assert_called_once()
 
 
 def test_widen_skips_non_postgres() -> None:

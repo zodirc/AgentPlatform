@@ -573,11 +573,15 @@ api-test:
 		  cd services/api && python3 -m pip install -q -e ".[dev]" && \
 		  PYTHONPATH=. python3 -m pytest tests -q; \
 	else \
-	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root api rm -rf /tmp/api-tests && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root api rm -rf /tmp/api-tests /tmp/preflight-contracts && \
+	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root api mkdir -p /tmp/preflight-contracts/python && \
 	  docker cp services/api/tests/. agent-api:/tmp/api-tests/ && \
+	  docker cp packages/contracts/python/. agent-api:/tmp/preflight-contracts/python/ && \
 	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T api bash -c \
 	    'python -m pip install -q pytest pytest-asyncio httpx 2>/dev/null; \
-	     if [ -d /repo/services/api/app ]; then export PYTHONPATH=/repo/services/api; else export PYTHONPATH=/app; fi; \
+	     python -m pip install -q --upgrade --force-reinstall --no-deps /tmp/preflight-contracts/python; \
+	     if [ -d /repo/services/api/app ]; then app_path=/repo/services/api; else app_path=/app; fi; \
+	     export PYTHONPATH=/tmp/preflight-contracts/python:${app_path}; \
 	     python -m pytest /tmp/api-tests -q --asyncio-mode=auto'; \
 	fi
 

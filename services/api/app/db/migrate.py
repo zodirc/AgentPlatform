@@ -55,6 +55,29 @@ def widen_alembic_version_column(connection) -> None:
         connection.commit()
 
 
+# Unpushed long id → ≤32 char id. Must run after widen (old value is 34 chars).
+_REWRITE_0028_SQL = """
+DO $rewrite$
+BEGIN
+  IF to_regclass('public.alembic_version') IS NOT NULL THEN
+    UPDATE alembic_version
+       SET version_num = '0028_phase2_exemplar_space'
+     WHERE version_num = '0028_phase2_writing_exemplar_space';
+  END IF;
+END
+$rewrite$;
+"""
+
+
+def rewrite_unpushed_revision_ids(connection) -> None:
+    """Map a local-only overlong stamp onto the published revision id."""
+    if getattr(getattr(connection, "dialect", None), "name", "") != "postgresql":
+        return
+    connection.execute(text(_REWRITE_0028_SQL))
+    if connection.in_transaction():
+        connection.commit()
+
+
 def run_alembic_upgrade() -> None:
     cfg = _alembic_cfg()
     try:

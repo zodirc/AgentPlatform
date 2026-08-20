@@ -2,7 +2,7 @@
 
 from app.db.migration_sql import run_ddl
 
-revision = "0028_phase2_writing_exemplar_space"
+revision = "0028_phase2_exemplar_space"
 down_revision = "0027_phase2_writing_signals"
 branch_labels = None
 depends_on = None
