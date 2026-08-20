@@ -1446,8 +1446,8 @@
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what"><code>writing</code>（默认）：大纲、起草、diff-first 改稿、按需 <code>search_sources</code></p>
-                <p class="why">步数上限约 40。默认排除情报语料目录。质量杠杆是稳定前缀与少次有 cite 的检索，不是资料体积。每个 pass = 用户显式 Turn，平台不自动串 polish pipeline。</p>
+                <p class="what"><code>writing</code>（默认）：大纲、起草、<code>occupy=fresh</code> 归档、同轮 <code>writing_signals</code> 修补、按需 <code>search_sources</code></p>
+                <p class="why">步数上限约 40。默认排除情报语料目录。成篇默认 5000–6000 实体文字。质量杠杆是稳定前缀、少次有 cite 的检索、以及焊在工具返回值里的过程门；不是资料体积，也不是 Turn 末 LLM 裁判。每个 pass = 用户显式 Turn，平台不自动串 polish pipeline。</p>
               </div>
             </li>
             <li>
@@ -1482,7 +1482,7 @@
           <h2>能力即工具；捷径在 handler 改道</h2>
           <p class="lede">检索、改稿、exec、委派以及编码时的定义/波及/验证，都是工具或写入既有 <code>tool_result</code>。RAG 禁止每轮预注入向量包；多 agent 只经 <code>delegate</code>。高频捷径在 handler 层改道，不依赖 prompt 劝说。</p>
           <h3>agent / writing 白名单（节选）</h3>
-          <p class="mono" style="font-size:0.8rem;line-height:1.6">agent: read_file · grep · edit_file · search_codebase · goto_definition · find_references · run_command · run_tests · read_lints · update_plan · …<br/>writing: propose_patch · draft_section · search_sources · …（无 LSP 结构工具）</p>
+          <p class="mono" style="font-size:0.8rem;line-height:1.6">agent: read_file · grep · edit_file · search_codebase · goto_definition · find_references · run_command · run_tests · read_lints · update_plan · …<br/>writing: propose_patch · draft_section · update_outline · search_sources · check_citation · export_document · …（无 LSP 结构工具）</p>
           <p>工具进请求级 <code>tools[]</code>，与 system 文本分离。<code>side_effect</code> 决定并行与审批默认；<code>read_file</code> 先过已读登记，重复覆盖区间可 skipped，每 Turn 次数帽默认 16。</p>
           <h3>现行 handler 改道（代码已落）</h3>
           <ul>
@@ -1834,45 +1834,82 @@ deploy/ · scripts/ · seed/ · workspace/</pre>
       <!-- 22 -->
       <section class="page" data-id="writing" data-group="RAG / 写作" data-title="写作工作台">
         <div class="card">
-          <h2>写作：Work over Session，diff-first</h2>
-          <p class="lede">用户心智是一份稿。工程上 Work 拥有树（<code>outline.md</code>、<code>manuscript.md</code> / <code>sections/</code>、<code>drafts/</code>、<code>sources/</code>、<code>cards/</code>），Session 只是对话线程。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。</p>
+          <h2>写作：Work 拥有树；新一篇归档旧稿</h2>
+          <p class="lede">用户心智是一份稿。工程上 Work 拥有 <code>outline.md</code>、<code>drafts/manuscript.md</code>、<code>drafts/archive/</code>、<code>sources/</code> 与卡片；Session 只是对话线程。用户说「写一篇 / 写个故事」且在编稿已占用时，第一次 <code>draft_section</code> 带 <code>occupy=fresh</code>：把旧稿拷到归档，再只写这篇。不要让用户先删文件。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。</p>
           <ol class="steps">
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what">（可选）大纲工具；立人设与文风靠 pin 在 Work 上的卡片</p>
-                <p class="why">通常不检索。卡片进入 system_prompt_composer（<code>writing_cards</code>），不进资料向量面。</p>
+                <p class="what">意图分流：写一篇 vs 续写 / 下一章 / 第 N 章</p>
+                <p class="why">新一篇且稿占用 → 归档后从第一章起。续写仍 upsert 当前 <code>drafts/manuscript.md</code>。「写一篇章纲」不是新开一篇，除非同时说另/新开。</p>
               </div>
             </li>
             <li>
               <span class="n">2</span>
               <div>
-                <p class="what">据材料新写：按需 <code>search_sources</code>（有 cite、次数有上限）再 <code>draft_section</code></p>
-                <p class="why">质量杠杆是稳定前缀与少次有出处的检索，不是资料越多越好。禁止每轮强制 RAG、禁止 Turn 末自动 judge。</p>
+                <p class="what">（可选）<code>update_outline</code>；立人设与文风靠 pin 在 Work 上的卡片</p>
+                <p class="why">通常不检索。卡片进入 <code>writing_cards</code>，不进资料向量面。章纲过薄（章正文 &lt; 200 实体文字，且用户未要目录）时带 <code>outline_thin</code>。</p>
               </div>
             </li>
             <li>
               <span class="n">3</span>
               <div>
-                <p class="what">改稿 diff-first：<code>propose_patch</code> → 用户批准 → apply</p>
-                <p class="why">局部改稿通常 0 搜。同 Turn 内写盘批准一次后，同类写盘可粘性免再审。<code>patch_auto_apply</code> 受 settings 总闸约束。</p>
+                <p class="what">成稿：按需 <code>search_sources</code>（有 cite、每 Turn 最多 3 次）再 <code>draft_section(fragment=…)</code></p>
+                <p class="why">成篇默认 5000–6000 实体文字。返回值带 L0 receipts 与 L1 <code>writing_signals</code>。禁止每轮强制 RAG、禁止 Turn 末自动 judge。</p>
               </div>
             </li>
             <li>
               <span class="n">4</span>
               <div>
-                <p class="what">（可选）polish、导出 lint、verify</p>
-                <p class="why">仍是用户下一次 Turn，不是后台自动衔接。</p>
+                <p class="what">弱分或 L0：同轮 <code>propose_patch(repair_span)</code>；写作场景默认自动 apply</p>
+                <p class="why">只换最弱窗里的 <code>old_text</code>，不整章再 <code>draft_section</code>（<code>length_short</code> 加厚除外）。UI 仍出示 diff。polish / 导出 / verify 仍是用户下一次 Turn。</p>
               </div>
             </li>
           </ol>
-          <p class="figure-lead">下图中主链：意图 → 大纲 → 成稿 → 改稿。检索是按需旁路，不是每一步必经。</p>
+          <p class="figure-lead">下图中主链：意图 → 占用判定 → 成稿 → 同轮修补。检索是按需旁路。评分环见下一页。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/writing/writing-main-path-zh.png" alt="写作主路径" />
           </div>
           <figcaption>写作主路径 · 点击放大</figcaption>
+        </figure>
+      </section>
+
+      <section class="page" data-id="writing-signals" data-group="RAG / 写作" data-title="写作评分环">
+        <div class="card">
+          <h2>评分焊在工具返回值，不改 Engine while</h2>
+          <p class="lede">L0 是过程门（电报连环、看见立刻明白、开篇机构名、身世提要、篇幅不足），Settings 滑条关不掉。L1 是到类原型 <code>sig.v1</code> 的距离：维度加权 <code>composite</code> 加上惩罚/奖励得到 <code>net_signal</code>。账户「写作风格」滑条只缩放该类 L1 行；维度权重平台钉死。覆盖顺序：Work &gt; 账户 &gt; 平台。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">成稿文本切窗：可见 ≥ 800 实体文字则目标约 480，取最弱窗</p>
+                <p class="why"><code>fragment</code> 为 plot_progress / worldview_texture / climax_beat / battle_action / dialogue_dyad / mixed。错类只在申报≠mixed、申报≠检出、且对齐申报 &lt; 0.60 时记 mismatch。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">L0 receipts 与 L1 <code>writing_signals</code> 一并回灌 <code>tool_result</code></p>
+                <p class="why">L0 对白还认拆句（「…。」他说，「…。」）、升格（「A，就是 B」）、对比收束（「是 A，不是 B」）。对白里因为/可是可以留。平台 <code>staccato_uniform</code> −0.18。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">弱 <code>net_signal</code>（&lt; 0.50）或 L0 命中 → 本 Turn <code>propose_patch</code></p>
+                <p class="why"><code>repair_span.old_text</code> 上限约 360 字。禁止整章重交，除非 <code>length_short</code>。金标是鲁迅 / 郁达夫公版节选，学拍不搬核。Ops <code>/ops/&lt;密钥&gt;/writing</code> 只打分，不进产品 Turn。</p>
+              </div>
+            </li>
+          </ol>
+          <p class="figure-lead">下图中主链：切窗 → L0 / L1 → 是否同轮修补。左右是滑条范围与禁止项，不是第二套主链。</p>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/writing/writing-signals-loop-zh.png" alt="写作评分环" />
+          </div>
+          <figcaption>写作评分环 · 点击放大</figcaption>
         </figure>
       </section>
 
@@ -2575,7 +2612,8 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
         contracts: "packages/contracts",
         rag: "search_sources hybrid",
         index: "INDEX 13 · 450 / 64",
-        writing: "Work 树与 diff-first",
+        writing: "Work 树与 occupy=fresh",
+        "writing-signals": "L0 过程门 · L1 类原型",
         "ops-bench": "L1 agent-path，不是 CI",
         "ops-eval-why": "官方题面、可见范围、命中",
         "ops-eval-walk": "本地实例：qrels / Answer: / F2P",

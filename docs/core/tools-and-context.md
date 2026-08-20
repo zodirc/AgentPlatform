@@ -35,7 +35,7 @@
 - RAG **只**以 `search_sources` 的 `tool_result` 回灌，禁止每轮预注入向量包。  
 - 多 agent **只**经 `delegate` 子 Run，摘要回灌。  
 - `read_file` 先过已读登记：重复覆盖区间可 skipped；每 Turn 次数有硬帽（默认 16）。
-- 写作：`draft_section` / `update_outline` 的返回值带 `visible_chars`（实体文字，不含空白）。用户点名 N 字且不足约定的 85% 时带 `length_short`；章纲过薄（章正文 &lt; 200 实体文字，且用户未要目录）时带 `outline_thin`。这些是软事实，不改磁盘、不加循环。
+- 写作：`draft_section` / `update_outline` 的返回值带 `visible_chars`（实体文字，不含空白）。用户点名 N 字且不足约定的 85% 时带 `length_short`；成篇默认 5000–6000。章纲过薄（章正文 &lt; 200 实体文字，且用户未要目录）时带 `outline_thin`。`draft_section` 另带 L0 receipts 与 L1 `writing_signals`（`net_signal` / `repair_span`）。弱分同轮 `propose_patch`，不改磁盘公式、不加循环节点。无关旧稿走 `occupy=fresh` 归档，不让用户先删文件。
 
 ## 2. Coding（agent 场景）一次用户提问里实际发生什么
 

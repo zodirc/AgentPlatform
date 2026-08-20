@@ -12,7 +12,8 @@ Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieva
 
 ## 图
 
-1. [写作主路径](../assets/writing/writing-main-path-zh.png) — Work 树 · 按需检索 · diff-first  
+1. [写作主路径](../assets/writing/writing-main-path-zh.png) — Work 树 · 写一篇归档 · 同轮修补  
+1b. [写作评分环](../assets/writing/writing-signals-loop-zh.png) — L0 过程门 · L1 类原型 · `repair_span`
 2. [Ops Bench 原理](../assets/ops/ops-bench-principle-zh.png) — L1 agent-path · 套件 · 隔离  
 3. [评测原理](ops-eval-principles.md) — 官方题面、可见范围、命中定义、审阅偏差  
 4. [实例走查](ops-eval-walkthrough.md) — 本地题目原文与命中判定  
@@ -27,6 +28,8 @@ Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieva
 
 ![写作主路径](../assets/writing/writing-main-path-zh.png)
 
+![写作评分环](../assets/writing/writing-signals-loop-zh.png)
+
 ![Ops Bench 原理](../assets/ops/ops-bench-principle-zh.png)
 
 ## 1. 写作：Work over Session
@@ -36,42 +39,59 @@ Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieva
 ```text
 work_root/
   outline.md
-  manuscript.md 或 sections/
-  drafts/                 # 在编
+  manuscript.md           # 正式稿（promote）
+  drafts/manuscript.md    # 在编；章节 H1 upsert
+  drafts/archive/         # 无关旧稿（occupy=fresh）
   sources/                # 资料；cards/ 文风与设定卡
   .agent/work/            # 作品级元数据
 ```
 
-同一账号默认一个 Work；多 Session 换聊天线，不换世界。
+同一账号默认一个 Work；多 Session 换聊天线，不换世界。用户说「写一篇 / 写个故事」且在编稿已有另一篇时，第一次 `draft_section` **`occupy=fresh`**：把旧 `drafts/manuscript.md`（及占用的 `outline.md`）拷到 `drafts/archive/`，再只写这篇。不要让用户先删文件。`续写` / `下一章` / `第N章` 仍接在当前稿上。
 
 ### 1.1 用户可见主路径
 
 ```text
-意图
-  →（可选）大纲工具
-  → 成稿：按需 search_sources（少次）+ draft_section / propose_patch
+意图（新一篇 vs 续写）
+  → 新一篇且稿占用：归档后从 ch1 起
+  →（可选）update_outline
+  → 成稿：按需 search_sources（少次）+ draft_section(fragment=…)
+  → 同轮读 writing_signals / L0 receipts；弱分只 propose_patch(repair_span)
   → 改稿：diff-first · 通常 0 搜
-  →（可选）polish · export lint · verify
+  →（可选，下一 Turn）polish · export · /verify
 ```
 
 规则：
 
 - **每个 pass = 用户显式 Turn**；平台不自动串成 polish pipeline。  
-- 质量杠杆：稳定前缀 + 少次有 cite 的检索；**不是**资料越多越好。  
-- **禁止默认**：每轮强制 RAG、Turn 末 judge、自动串联多模型裁判。
+- 质量杠杆：稳定前缀 + 少次有 cite 的检索 + **同轮**过程门；**不是**资料越多越好，也不是 Turn 末再找一个 LLM 裁判。  
+- 成篇默认 **5000–6000** 实体文字（汉字/字母/数字/标点，不含空白）。  
+- **禁止默认**：每轮强制 RAG、Turn 末 judge、自动串联多模型裁判、整章再 `draft_section`（`length_short` 加厚除外）。
 
-### 1.2 场景与工具（写作）
+### 1.2 评分与同轮修补（L0 / L1）
+
+评分焊在 `draft_section` / 成稿 `propose_patch` 的返回值里，**不改 Engine while**。
+
+| 层 | 是什么 | 谁关 |
+|----|--------|------|
+| **L0 receipts** | `staccato_uniform`、`hinge_dense`、`opening_institution`、`lore_dump`、`length_short`… | 过程门；**Settings 滑条关不掉** |
+| **L1 `writing_signals`** | 维度加权 `composite` + 惩罚/奖励 → `net_signal`；`exemplar_alignment` 是到类原型 `sig.v1` 的距离（节奏/质地，不是搜情节） | 账户「写作风格」滑条只缩放**该类** L1 行；维度权重平台钉死 |
+
+`fragment`：`plot_progress` \| `worldview_texture` \| `climax_beat` \| `battle_action` \| `dialogue_dyad` \| `mixed`。弱 `net_signal` 或 L0 命中 → **本 Turn** `propose_patch` 只换 `repair_span.old_text`。长章按约 480 实体文字切窗，取最弱窗。平台金标是鲁迅 / 郁达夫公版节选，学拍不搬核。
+
+L0 对白门还认：电报连环、「…。」他说，「…。」拆句、「A，就是 B」升格、「是 A，不是 B」收束。对白里因为/可是可以留。
+
+### 1.3 场景与工具（写作）
 
 | 场景 | 主杠杆 | 是否检索 |
 |------|--------|----------|
-| 立人设 / 文风 | 卡 pin | 否 |
-| 据材料新写 | RAG + cite + 卡 | 要（控制次数） |
-| 局部改稿 | patch + 卡 | 通常跳过 |
+| 立人设 / 文风 | 卡 pin；Settings 滑条 | 否 |
+| 据材料新写 | RAG + cite + 卡 + signals | 要（控制次数） |
+| 局部改稿 | `propose_patch` + 卡 + 再评分 | 通常跳过 |
 | polish / 导出 | 样例与 lint | 否 |
 
-写盘走 `propose_patch` → 用户批准 → apply；同 Turn 写盘可粘性免批。
+写作场景 `propose_patch` **自动 apply**（settings 总闸仍可关）；UI 仍出示 diff。同 Turn 写盘粘性免批。Ops 实验室 `/ops/<密钥>/writing` 只打分，不进产品 Turn。
 
-### 1.3 Agent 工作台（对照）
+### 1.4 Agent 工作台（对照）
 
 用户心智是「一个仓库 / 一道题」；工程上仍是同一 Work → Session → Turn。
 

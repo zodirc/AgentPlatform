@@ -250,7 +250,7 @@ pending → running ⇄ waiting_approval
 
 | `scenario_id` | 定位 |
 |---------------|------|
-| `writing` | 写作：大纲/草稿/diff-first、资料检索 |
+| `writing` | 写作：大纲/草稿/`occupy=fresh` 归档、`writing_signals` 同轮修补、按需资料检索 |
 | `agent` | 编码：打开查找/改文件/跑测试全套工具。找定义、看波及、改完再验写进这些工具的返回值；官方评测题还会把 pytest 改去该题 Docker 镜像里跑。**没有**资料检索工具，不以检索资料来找代码位置 |
 | `intel` | 情报向资料与提示 |
 | `collab` | 多 agent 协作（目标态） |

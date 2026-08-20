@@ -80,8 +80,9 @@
 | [RAG](topics/rag.md) | 仅在调用 `search_sources` 时检索；禁止每轮自动注入向量包 |
 | [图 · 店内召回](assets/rag/search-sources-flow-zh.png) | 切块车道与文档车道并行，再融合 |
 | [图 · 建库](assets/rag/index-sync-zh.png) | 建库在提问环外；切块约 450 token、重叠 64 |
-| [工作台 · 写作](topics/workbench.md) | 单部作品；改稿走差异，每一遍由用户显式发送 |
-| [图 · 写作主路径](assets/writing/writing-main-path-zh.png) | 大纲 → 成稿 → 改稿；检索按需 |
+| [工作台 · 写作](topics/workbench.md) | 单部作品；写一篇归档旧稿；成稿后同轮修补 |
+| [图 · 写作主路径](assets/writing/writing-main-path-zh.png) | 新一篇 vs 续写 → `draft_section` → 同轮 `repair_span` |
+| [图 · 写作评分环](assets/writing/writing-signals-loop-zh.png) | L0 过程门 · L1 类原型 · 禁止 Turn 末 judge |
 
 ---
 
