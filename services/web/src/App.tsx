@@ -58,6 +58,11 @@ const OfficialBenchPage = lazy(() =>
     default: m.OfficialBenchPage,
   })),
 );
+const WritingSignalsLabPage = lazy(() =>
+  import("./ops/WritingSignalsLabPage").then((m) => ({
+    default: m.WritingSignalsLabPage,
+  })),
+);
 
 function OpsSuspense({ children }: { children: ReactNode }) {
   return (
@@ -101,6 +106,10 @@ function isOpsRawPath(pathname: string): boolean {
 
 function isOpsOfficialPath(pathname: string): boolean {
   return /^\/ops\/[^/]+\/official(\/[^/]+)?\/?$/.test(pathname);
+}
+
+function isOpsWritingPath(pathname: string): boolean {
+  return /^\/ops\/[^/]+\/writing\/?$/.test(pathname);
 }
 
 
@@ -424,6 +433,8 @@ export function App() {
     <RawAuditPage />
   ) : isOpsOfficialPath(pathname) ? (
     <OfficialBenchPage />
+  ) : isOpsWritingPath(pathname) ? (
+    <WritingSignalsLabPage />
   ) : null;
   if (opsPage !== null) {
     return (

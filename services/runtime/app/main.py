@@ -872,6 +872,9 @@ def create_app():
     instrument_fastapi(app, enabled=settings.otel_enabled)
     app.include_router(router)
     app.include_router(workspace_router)
+    from app.writing.signals.ops_http import router as writing_lab_router
+
+    app.include_router(writing_lab_router)
 
     @app.get("/health/live")
     async def health_live():

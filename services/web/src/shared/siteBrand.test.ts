@@ -11,6 +11,7 @@ describe("siteBrand", () => {
   it("routes ops paths to Ops brand", () => {
     expect(isOpsPath("/ops/secret/test")).toBe(true);
     expect(siteBrandForPath("/ops/x/retrieval").name).toBe(SITE_OPS.name);
+    expect(siteBrandForPath("/ops/x/writing").name).toBe(SITE_OPS.name);
     expect(siteBrandForPath("/writing").name).toBe(SITE_APP.name);
   });
 

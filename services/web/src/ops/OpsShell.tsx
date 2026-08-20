@@ -6,6 +6,7 @@ import {
   opsOfficialPath,
   opsRawPath,
   opsRetrievalPath,
+  opsWritingPath,
 } from "./opsPaths";
 import { OpsOverviewSidebar } from "./OpsOverviewSidebar";
 import { SiteBrandMark } from "../shared/SiteBrandMark";
@@ -21,6 +22,7 @@ export {
   opsOfficialPath,
   opsRawPath,
   opsRetrievalPath,
+  opsWritingPath,
   opsRunPath,
   secretFromOpsPath,
   turnIdFromSearch,
@@ -62,6 +64,7 @@ export function OpsShell({
     { to: opsConsolePath(secret), label: "控制台" },
     { to: opsHistoryPath(secret), label: "历史结果" },
     { to: opsOfficialPath(secret), label: "Bench" },
+    { to: opsWritingPath(secret), label: "写作评分" },
     { to: opsRetrievalPath(secret), label: "检索审计" },
     { to: opsEnvelopePath(secret), label: "模型信封" },
     { to: opsRawPath(secret), label: "Raw 快照" },

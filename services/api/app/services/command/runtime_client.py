@@ -277,3 +277,28 @@ class RuntimeClient:
             "/internal/commands/warmup-retrieval", timeout=15.0, params=params
         )
         return resp.json()
+
+    async def writing_exemplars(self, *, timeout: float = 15.0) -> dict:
+        resp = await self._get("/internal/writing/exemplars", timeout=timeout)
+        return resp.json()
+
+    async def writing_score(
+        self,
+        *,
+        text: str | None = None,
+        fragment: str | None = None,
+        slug: str | None = None,
+        prefs: dict | None = None,
+        timeout: float = 30.0,
+    ) -> dict:
+        payload: dict = {}
+        if text is not None:
+            payload["text"] = text
+        if fragment is not None:
+            payload["fragment"] = fragment
+        if slug is not None:
+            payload["slug"] = slug
+        if prefs is not None:
+            payload["prefs"] = prefs
+        resp = await self._post("/internal/writing/score", timeout=timeout, json=payload)
+        return resp.json()

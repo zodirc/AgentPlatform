@@ -19,6 +19,10 @@ export function opsRawPath(secret: string, turnId?: string): string {
   return turnId ? `${base}?turn=${encodeURIComponent(turnId)}` : base;
 }
 
+export function opsWritingPath(secret: string): string {
+  return `/ops/${encodeURIComponent(secret)}/writing`;
+}
+
 export function opsRunPath(secret: string, runId: string): string {
   return `/ops/${encodeURIComponent(secret)}/test/runs/${runId}`;
 }
