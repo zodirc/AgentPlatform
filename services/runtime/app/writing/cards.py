@@ -615,7 +615,10 @@ def prepare_writing_system_prompt(
     cards = with_builtin_style_if_missing(load_writing_cards(workspace_root=workspace_root))
     selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)
-    work_index = format_work_index_block(workspace_root=workspace_root)
+    work_index = format_work_index_block(
+        workspace_root=workspace_root,
+        message=message,
+    )
     extras: list[str] = []
     if block:
         extras.append(block)

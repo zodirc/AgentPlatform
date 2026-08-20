@@ -500,3 +500,26 @@ async def test_stub_writing10_exports_after_unexpected_prior_tool() -> None:
         for call in (chunk.tool_calls or [])
     ]
     assert [c["name"] for c in calls] == ["export_document"]
+
+
+@pytest.mark.asyncio
+async def test_stub_writing15_draft_with_fragment() -> None:
+    provider = StubModelProvider()
+    tools = [{"name": "draft_section"}]
+    messages = [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "writing.15 draft_section dialogue_dyad writing_signals"}],
+        },
+    ]
+    chunks = [chunk async for chunk in provider.stream(messages=messages, tools=tools)]
+    calls = [
+        call
+        for chunk in chunks
+        if not isinstance(chunk, str)
+        for call in (chunk.tool_calls or [])
+    ]
+    assert len(calls) == 1
+    assert calls[0]["name"] == "draft_section"
+    assert calls[0]["input"].get("fragment") == "dialogue_dyad"
+

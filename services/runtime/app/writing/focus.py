@@ -128,7 +128,24 @@ def build_work_surface_block(
     focus_n = focus_max_chars if focus_max_chars is not None else settings.writing_focus_max_chars
     budget = max(200, int(budget))
 
+    from app.writing.occupy import manuscript_is_occupied, wants_new_piece
+
     doc, rel = load_manuscript_doc(workspace_root)
+    if wants_new_piece(message) and manuscript_is_occupied(doc):
+        ids = list_section_ids(doc)
+        lines = [
+            "## Work surface",
+            f"Source: `{rel}` currently holds a **prior unrelated piece**.",
+            "This Turn is a new standalone story (写一篇 / 写个故事), not 续写.",
+            "First `draft_section`: `occupy=fresh` archives that file to `drafts/archive/`, "
+            "then writes only the new story. Start at `ch1`. Do not append as a later chapter. "
+            "Do not continue those characters or plot.",
+        ]
+        if ids:
+            lines.append(f"- prior sections (will archive): {', '.join(ids[:20])}")
+        text = "\n".join(lines)
+        return text if len(text) <= budget else text[: budget - 1] + "…"
+
     available = list_section_ids(doc) if doc else []
     focus = infer_focus_section_id(message, available)
 

@@ -48,6 +48,7 @@ from app.tools.core.writing_tools import (
     _revision_file_path, _section_filename, _session_scope, _turn_scope,
     _write_manifest, draft_section, update_outline, update_plan,
 )
+from app.writing.signals.assemble import evaluate_writing_fragment, writing_rubric
 
 
 def _span_apply_precheck(path: str, old_text: str, new_text: str):

@@ -50,6 +50,7 @@ def build_work_index(
     *,
     workspace_root: Path | None = None,
     max_chars: int | None = None,
+    message: str = "",
 ) -> str:
     """Return a short markdown block describing the current work tree."""
     root = Path(workspace_root or settings.workspace_root).resolve()
@@ -96,10 +97,26 @@ def build_work_index(
         lines.append(f"- split drafts: {joined}")
 
     if mode == "monofile":
-        lines.append(
-            f"Continue writing with `draft_section` (appends/replaces a chapter heading in `{draft_ms}`); "
-            f"promote into `{ms}` via `propose_patch`. Read only the chapter you need — not the whole book."
-        )
+        from app.writing.occupy import manuscript_is_occupied, wants_new_piece
+
+        draft_text = ""
+        draft_path = root / draft_ms
+        if draft_path.is_file():
+            try:
+                draft_text = draft_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                pass
+        if wants_new_piece(message) and manuscript_is_occupied(draft_text):
+            lines.append(
+                "Prior draft is a different story. First `draft_section` this Turn "
+                "uses occupy=fresh: archives to `drafts/archive/`, then writes only "
+                "the new piece at `ch1`. Do not append as a later chapter."
+            )
+        else:
+            lines.append(
+                f"Continue writing with `draft_section` (appends/replaces a chapter heading in `{draft_ms}`); "
+                f"promote into `{ms}` via `propose_patch`. Read only the chapter you need — not the whole book."
+            )
     else:
         lines.append(
             "Continue a chapter with `read_file` on its draft or section path; "
@@ -115,5 +132,10 @@ def format_work_index_block(
     *,
     workspace_root: Path | None = None,
     max_chars: int | None = None,
+    message: str = "",
 ) -> str:
-    return build_work_index(workspace_root=workspace_root, max_chars=max_chars)
+    return build_work_index(
+        workspace_root=workspace_root,
+        max_chars=max_chars,
+        message=message,
+    )

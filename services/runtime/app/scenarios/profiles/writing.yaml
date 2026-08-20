@@ -17,6 +17,8 @@ tool_names:
   - remember
   - recall
   - delegate
+  - writing_rubric
+  - evaluate_writing_fragment
 subagent_types:
   - researcher
   - drafter

@@ -120,6 +120,23 @@ def _is_legacy_revision_rel(rel_path: str, filename: str) -> bool:
     return rel_path == f".agent/revisions/{filename}"
 
 
+def _section_drafts_occupied() -> bool:
+    from app.writing.occupy import manuscript_is_occupied
+
+    drafts = _resolve_path(_WORK_DRAFTS)
+    if not drafts.is_dir():
+        return False
+    for path in drafts.iterdir():
+        if not (path.is_file() and path.suffix == ".md"):
+            continue
+        try:
+            if manuscript_is_occupied(path.read_text(encoding="utf-8")):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def _prune_section_history(section_id: str, *, keep: int) -> None:
     if keep <= 0:
         return
@@ -189,6 +206,23 @@ async def draft_section(
     if layout not in {"monofile", "sections"}:
         layout = manuscript_mode()
 
+    from app.writing.occupy import (
+        archive_occupied_writing_docs,
+        manuscript_is_occupied,
+        occupy_result_fields,
+        should_occupy_fresh,
+    )
+
+    manifest = _read_manifest(turn_id, session_id=session_id) or {
+        "turn_id": _turn_scope(turn_id),
+        "session_id": _session_scope(session_id),
+        "sections": [],
+        "revisions": {},
+        "layout": layout,
+    }
+    archived: list[str] = []
+    occupy_fresh = False
+
     if layout == "monofile":
         path = draft_manuscript_rel()
         target = _resolve_path(path)
@@ -198,13 +232,36 @@ async def draft_section(
         else:
             legacy = _resolve_path(legacy_draft_manuscript_rel())
             existing = legacy.read_text(encoding="utf-8") if legacy.is_file() else ""
+        occupy_fresh = should_occupy_fresh(
+            occupy_arg=_kwargs.get("occupy"),
+            user_text=str(_kwargs.get("turn_user_text") or ""),
+            already_fresh_this_turn=(
+                turn_id is not None and str(manifest.get("occupy") or "") == "fresh"
+            ),
+            occupied=manuscript_is_occupied(existing),
+        )
+        if occupy_fresh:
+            archived = archive_occupied_writing_docs(layout=layout)
+            existing = ""
+            manifest["occupy"] = "fresh"
         final = upsert_section(existing, section_id, content)
         target.write_text(final, encoding="utf-8")
     else:
         path = _draft_file_path(section_id)
         target = _resolve_path(path)
         target.parent.mkdir(parents=True, exist_ok=True)
-        if not target.exists():
+        occupy_fresh = should_occupy_fresh(
+            occupy_arg=_kwargs.get("occupy"),
+            user_text=str(_kwargs.get("turn_user_text") or ""),
+            already_fresh_this_turn=(
+                turn_id is not None and str(manifest.get("occupy") or "") == "fresh"
+            ),
+            occupied=_section_drafts_occupied(),
+        )
+        if occupy_fresh:
+            archived = archive_occupied_writing_docs(layout=layout)
+            manifest["occupy"] = "fresh"
+        elif not target.exists():
             legacy = _resolve_path(_legacy_draft_file_path(section_id))
             if legacy.is_file():
                 target.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
@@ -219,16 +276,13 @@ async def draft_section(
         hist.write_text(content, encoding="utf-8")
         _prune_section_history(section_id, keep=keep)
 
-    manifest = _read_manifest(turn_id, session_id=session_id) or {
-        "turn_id": _turn_scope(turn_id),
-        "session_id": _session_scope(session_id),
-        "sections": [],
-        "revisions": {},
-        "layout": layout,
-    }
     if session_id is not None and not manifest.get("session_id"):
         manifest["session_id"] = _session_scope(session_id)
     manifest["layout"] = layout
+    if occupy_fresh and turn_id is not None:
+        manifest["occupy"] = "fresh"
+        manifest["sections"] = []
+        manifest["revisions"] = {}
     sections = manifest.setdefault("sections", [])
     revisions = manifest.setdefault("revisions", {})
     if section_id not in sections:
@@ -254,6 +308,29 @@ async def draft_section(
     result.update(lore_fields(content, section_id))
     result.update(opening_fields(content, section_id))
     result.update(staccato_fields(content))
+    if occupy_fresh:
+        occupy_fields = occupy_result_fields(archived)
+        archive_note = str(occupy_fields.pop("summary", "") or "").strip()
+        result.update(occupy_fields)
+        if archive_note:
+            prev = str(result.get("summary") or "").strip()
+            result["summary"] = f"{archive_note} {prev}".strip() if prev else archive_note
+    fragment = str(_kwargs.get("fragment") or "mixed").strip()
+    try:
+        from app.writing.signals.assemble import build_writing_signals
+
+        signals = await build_writing_signals(
+            content,
+            fragment=fragment,
+            section_id=section_id,
+            session_id=session_id,
+            turn_id=turn_id,
+            persist=True,
+        )
+        result["fragment"] = signals.get("fragment")
+        result["writing_signals"] = signals
+    except Exception:
+        pass
     return result
 
 
@@ -345,6 +422,42 @@ async def update_outline(
     mode_n = (mode or "replace").strip().lower()
     force = str(_kwargs.get("force", "")).lower() in {"1", "true", "yes"}
 
+    from app.writing.occupy import (
+        archive_occupied_writing_docs,
+        manuscript_is_occupied,
+        occupy_result_fields,
+        should_occupy_fresh,
+    )
+
+    turn_id = _kwargs.get("turn_id")
+    session_id = _kwargs.get("session_id")
+    manifest = _read_manifest(turn_id, session_id=session_id) or {}
+
+    occupy_fresh = should_occupy_fresh(
+        occupy_arg=_kwargs.get("occupy"),
+        user_text=str(_kwargs.get("turn_user_text") or ""),
+        already_fresh_this_turn=(
+            turn_id is not None and str(manifest.get("occupy") or "") == "fresh"
+        ),
+        occupied=manuscript_is_occupied(existing),
+    )
+    archived: list[str] = []
+    if occupy_fresh:
+        archived = archive_occupied_writing_docs(layout="monofile")
+        existing = ""
+        mode_n = "replace"
+        force = True
+        if turn_id is not None:
+            manifest = {
+                "turn_id": _turn_scope(turn_id),
+                "session_id": _session_scope(session_id),
+                "sections": list(manifest.get("sections") or []),
+                "revisions": dict(manifest.get("revisions") or {}),
+                "layout": str(manifest.get("layout") or "monofile"),
+                "occupy": "fresh",
+            }
+            _write_manifest(turn_id, manifest, session_id=session_id)
+
     if mode_n == "append":
         if existing and not existing.endswith("\n"):
             sep = "\n\n"
@@ -389,6 +502,12 @@ async def update_outline(
     arc_suffix = arc.pop("summary_suffix", None)
     result.update(arc)
     notes = [part for part in (suffix, arc_suffix) if part]
+    if occupy_fresh:
+        occupy_fields = occupy_result_fields(archived)
+        archive_note = str(occupy_fields.pop("summary", "") or "").strip()
+        result.update(occupy_fields)
+        if archive_note:
+            notes.insert(0, archive_note)
     if notes:
         result["summary"] = f"{summary}；" + "；".join(notes)
     return result

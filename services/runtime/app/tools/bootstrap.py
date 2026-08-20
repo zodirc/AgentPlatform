@@ -86,6 +86,18 @@ def build_registry() -> ToolRegistry:
                     "old_text": {"type": "string"},
                     "new_text": {"type": "string"},
                     "summary": {"type": "string"},
+                    "fragment": {
+                        "type": "string",
+                        "enum": [
+                            "plot_progress",
+                            "worldview_texture",
+                            "climax_beat",
+                            "battle_action",
+                            "dialogue_dyad",
+                            "mixed",
+                        ],
+                        "description": "Scene fragment type for writing_signals on applied prose",
+                    },
                 },
                 "required": ["path", "old_text", "new_text"],
             },
@@ -120,6 +132,10 @@ def build_registry() -> ToolRegistry:
                 "Draft or update a chapter. Default monofile: upserts a marked block in "
                 "drafts/manuscript.md (visible work-surface draft; append new chapters / "
                 "replace same section_id). "
+                "If the user asked for a new standalone piece (写一篇 / 写个故事, not 续写) "
+                "and the file already holds another story, pass occupy=fresh on the first "
+                "call this Turn (archives the old file to drafts/archive/, then writes only "
+                "this story). Inferred from the user text when occupy is omitted. "
                 "Pass layout=sections for one-file-per-chapter under drafts/. "
                 "Promote into manuscript.md via propose_patch. History stays under "
                 ".agent/work/history/."
@@ -129,15 +145,101 @@ def build_registry() -> ToolRegistry:
                 "properties": {
                     "section_id": {"type": "string"},
                     "content": {"type": "string"},
+                    "fragment": {
+                        "type": "string",
+                        "enum": [
+                            "plot_progress",
+                            "worldview_texture",
+                            "climax_beat",
+                            "battle_action",
+                            "dialogue_dyad",
+                            "mixed",
+                        ],
+                        "description": "Scene fragment type for writing_signals weights",
+                    },
                     "layout": {
                         "type": "string",
                         "enum": ["monofile", "sections"],
                         "description": "Override WRITING_MANUSCRIPT_MODE for this call",
                     },
+                    "occupy": {
+                        "type": "string",
+                        "enum": ["upsert", "fresh"],
+                        "description": (
+                            "fresh: archive the occupied manuscript and write only this "
+                            "section. upsert: keep other chapters. Omit to infer from "
+                            "the user text (写一篇 vs 续写)."
+                        ),
+                    },
                 },
                 "required": ["section_id", "content"],
             },
             handler=core.draft_section,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="writing_rubric",
+            description=(
+                "Returns platform dimension weights and penalty/reward keys for a fragment type. "
+                "Does not score prose — use evaluate_writing_fragment or draft_section after writing. "
+                "Account style leans are in Settings → 写作风格."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "fragment": {
+                        "type": "string",
+                        "enum": [
+                            "plot_progress",
+                            "worldview_texture",
+                            "climax_beat",
+                            "battle_action",
+                            "dialogue_dyad",
+                            "mixed",
+                        ],
+                    },
+                    "section_id": {
+                        "type": "string",
+                        "description": "Optional chapter id for outline duty",
+                    },
+                },
+                "required": ["fragment"],
+            },
+            handler=core.writing_rubric,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="evaluate_writing_fragment",
+            description=(
+                "Heuristic reward/penalty score for a prose fragment (account weights from Settings). "
+                "Pass text or section_id. Persists cross-session history. "
+                "Prefer draft_section which embeds the same writing_signals block."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "fragment": {
+                        "type": "string",
+                        "enum": [
+                            "plot_progress",
+                            "worldview_texture",
+                            "climax_beat",
+                            "battle_action",
+                            "dialogue_dyad",
+                            "mixed",
+                        ],
+                    },
+                    "text": {"type": "string", "description": "Prose to score"},
+                    "section_id": {
+                        "type": "string",
+                        "description": "Read chapter from manuscript if text omitted",
+                    },
+                },
+                "required": ["fragment"],
+            },
+            handler=core.evaluate_writing_fragment,
         )
     )
     registry.register(

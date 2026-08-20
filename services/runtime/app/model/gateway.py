@@ -274,6 +274,17 @@ class StubModelProvider:
             yield ModelResponse(text="agent.08 glob 完成", output_tokens=6)
             return
 
+        if "draft_section" in tool_names and _wants_writing_signals(user_text) and not has_tool_result:
+            yield _tool_call(
+                "draft_section",
+                {
+                    "section_id": "02",
+                    "content": "「你为何来此？」她问。\n\n「找答案。」他答。\n" * 6,
+                    "fragment": "dialogue_dyad",
+                },
+            )
+            return
+
         if "draft_section" in tool_names and _wants_draft(user_text) and not has_tool_result:
             yield _tool_call(
                 "draft_section",
@@ -691,6 +702,10 @@ def _wants_outline(text: str) -> bool:
 def _wants_plan(text: str) -> bool:
     keywords = ("agent.07", "update_plan", "制定计划")
     return any(k in text.lower() for k in keywords) or "计划" in text
+
+
+def _wants_writing_signals(text: str) -> bool:
+    return "writing.15" in text.lower()
 
 
 def _wants_draft(text: str) -> bool:

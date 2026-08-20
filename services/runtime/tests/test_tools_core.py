@@ -361,6 +361,8 @@ def test_scenario_registry_loads_profiles() -> None:
 
     assert writing.scenario_id == "writing"
     assert "draft_section" in writing.tool_names
+    assert "writing_rubric" in writing.tool_names
+    assert "evaluate_writing_fragment" in writing.tool_names
     assert agent.scenario_id == "agent"
     assert "glob" in agent.tool_names
     assert intel.scenario_id == "intel"
@@ -379,21 +381,21 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "Never omit `section_ids`" in writing.system_prompt
     assert "Visible fences are markdown H1s" in writing.system_prompt
     assert "do not prepend `outline.md`" in writing.system_prompt
-    assert "## Prose defaults" in writing.system_prompt
-    assert "不要补转折" in writing.system_prompt
-    assert "### Length counting" in writing.system_prompt
-    assert "### Outline defaults" in writing.system_prompt
+    assert "## Writing signals" in writing.system_prompt
+    assert "writing_signals" in writing.system_prompt
+    assert "Settings → 写作风格" in writing.system_prompt
     assert "不强制钩子" in writing.system_prompt
     assert "高潮落点" in writing.system_prompt
-    assert "不要写进第一章" in writing.system_prompt
-    assert "### Scene richness" in writing.system_prompt
-    assert "### Also avoid" in writing.system_prompt
     assert "200–400" in writing.system_prompt
-    assert "1000–2000" in writing.system_prompt
-    assert "1800–3500" in writing.system_prompt
-    # Voice slogans live on the pinned card, not the standing prefix.
+    assert "5000–6000" in writing.system_prompt
+    assert "1000–2000" not in writing.system_prompt
+    assert "1800–3500" not in writing.system_prompt
+    # Voice slogans / L0 recipes live on the pinned card and receipts, not the standing prefix.
     assert "却说" not in writing.system_prompt
     assert "特务踹门" not in writing.system_prompt
+    assert "不要补转折" not in writing.system_prompt
+    assert "WRITING_PATCH_AUTO_APPLY" not in writing.system_prompt
+    assert "docs/24" not in writing.system_prompt
     # Agent prompt: locate before survey; ban path-theater / read loops.
     assert "Locate" in agent.system_prompt or "search_codebase" in agent.system_prompt
     assert "Path theater" in agent.system_prompt
