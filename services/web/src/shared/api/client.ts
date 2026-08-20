@@ -1041,7 +1041,7 @@ export async function fetchWritingPrefs(): Promise<WritingPrefs> {
     ...sessionFetchInit,
     headers: apiAuthHeaders(adminAuthHeaders()),
   });
-  await throwIfNotOk(res);
+  await throwIfNotOk(res, "fetchWritingPrefs");
   return (await res.json()) as WritingPrefs;
 }
 
@@ -1060,7 +1060,7 @@ export async function updateWritingPrefs(body: {
     },
     body: JSON.stringify(body),
   });
-  await throwIfNotOk(res);
+  await throwIfNotOk(res, "updateWritingPrefs");
   return (await res.json()) as WritingPrefs;
 }
 
@@ -1070,6 +1070,6 @@ export async function resetWritingPrefs(): Promise<WritingPrefs> {
     ...sessionFetchInit,
     headers: apiAuthHeaders(adminAuthHeaders()),
   });
-  await throwIfNotOk(res);
+  await throwIfNotOk(res, "resetWritingPrefs");
   return (await res.json()) as WritingPrefs;
 }
