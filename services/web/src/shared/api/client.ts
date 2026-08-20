@@ -284,10 +284,18 @@ export async function deleteSessionsBulk(
     body: JSON.stringify({ session_ids: sessionIds }),
   });
   if (!res.ok) throw new Error(`deleteSessionsBulk failed: ${res.status}`);
-  const body = (await res.json()) as { deleted: string[]; missing: string[] };
+  let body: { deleted?: unknown; missing?: unknown };
+  try {
+    body = (await res.json()) as { deleted?: unknown; missing?: unknown };
+  } catch {
+    throw new Error("deleteSessionsBulk: unexpected response");
+  }
+  if (!Array.isArray(body.deleted) || !Array.isArray(body.missing)) {
+    throw new Error("deleteSessionsBulk: unexpected response");
+  }
   return {
-    deleted: body.deleted ?? [],
-    missing: body.missing ?? [],
+    deleted: body.deleted.map(String),
+    missing: body.missing.map(String),
   };
 }
 

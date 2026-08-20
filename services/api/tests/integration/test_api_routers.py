@@ -138,6 +138,13 @@ def test_bulk_delete_sessions_success(client: TestClient) -> None:
     delete_mock.assert_awaited_once_with([SESSION_ID, other], OWNER_ID)
 
 
+def test_bulk_delete_empty_list_hits_bulk_route(client: TestClient) -> None:
+    """Empty body is validated by BulkDeleteSessionsRequest, not UUID path parsing."""
+    response = client.post("/api/v1/sessions/bulk-delete", json={"session_ids": []})
+    assert response.status_code == 422
+    assert "session_ids" in str(response.json())
+
+
 def test_delete_session_forbidden(client: TestClient) -> None:
     other_owner = UUID("00000000-0000-4000-8000-000000000088")
     session_row = {

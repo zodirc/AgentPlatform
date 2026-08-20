@@ -78,15 +78,6 @@ async def list_sessions(
     return [SessionListItem(**row) for row in rows]
 
 
-@router.get("/sessions/{session_id}", response_model=SessionResponse)
-async def get_session(
-    session_id: UUID,
-    actor: EndUser = Depends(require_session_actor),
-):
-    session = await assert_session_owner(session_id, actor)
-    return _session_response(session)
-
-
 @router.post(
     "/sessions/bulk-delete",
     response_model=BulkDeleteSessionsResponse,
@@ -111,6 +102,15 @@ async def bulk_delete_sessions(
             detail={"deleted_count": len(deleted), "requested_count": len(requested)},
         )
     return BulkDeleteSessionsResponse(deleted=deleted, missing=missing)
+
+
+@router.get("/sessions/{session_id}", response_model=SessionResponse)
+async def get_session(
+    session_id: UUID,
+    actor: EndUser = Depends(require_session_actor),
+):
+    session = await assert_session_owner(session_id, actor)
+    return _session_response(session)
 
 
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

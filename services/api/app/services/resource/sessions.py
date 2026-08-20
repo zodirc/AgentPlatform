@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import logging
 from uuid import UUID
+
+import asyncpg
 
 from app.db.pool import get_pool
 from app.services.resource.works import ensure_default_work
+
+logger = logging.getLogger(__name__)
 
 _TITLE_MAX = 80
 
@@ -145,6 +150,22 @@ async def touch_session(session_id: UUID) -> None:
     )
 
 
+async def _delete_optional(conn: asyncpg.Connection, sql: str, *args: object) -> None:
+    """Child tables added in later phases may be absent on old DBs.
+
+    Must use a savepoint: a missing table aborts the Postgres transaction
+    otherwise, and later DELETEs would silently never run.
+    """
+    try:
+        async with conn.transaction():
+            await conn.execute(sql, *args)
+    except asyncpg.UndefinedTableError:
+        logger.warning(
+            "session delete skipped missing table sql=%s",
+            sql.split("FROM", 1)[-1][:80],
+        )
+
+
 async def delete_session_for_owner(session_id: UUID, owner_user_id: UUID) -> bool:
     """Hard-delete a session and its turn graph. Returns False if missing or not owned."""
     deleted = await delete_sessions_for_owner([session_id], owner_user_id)
@@ -158,6 +179,8 @@ async def delete_sessions_for_owner(
     """Hard-delete owned sessions in one transaction. Skips missing / not-owned ids.
 
     phase0 FKs do not CASCADE from sessions→turns; delete child rows explicitly.
+    Later phases declare CASCADE, but production DBs may predate that — still
+    delete those tables before sessions/turns/runs.
     Workspace disk files are intentionally untouched (not session-scoped).
     """
     if not session_ids:
@@ -165,65 +188,112 @@ async def delete_sessions_for_owner(
     # Cap to avoid accidental huge payloads; history UI lists at most 50.
     unique_ids = list(dict.fromkeys(session_ids))[:100]
     pool = await get_pool()
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            rows = await conn.fetch(
-                """
-                SELECT id FROM sessions
-                WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
-                FOR UPDATE
-                """,
-                owner_user_id,
-                unique_ids,
-            )
-            owned = [row["id"] for row in rows]
-            if not owned:
-                return []
+    try:
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                rows = await conn.fetch(
+                    """
+                    SELECT id FROM sessions
+                    WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
+                    FOR UPDATE
+                    """,
+                    owner_user_id,
+                    unique_ids,
+                )
+                owned = [row["id"] for row in rows]
+                if not owned:
+                    return []
 
-            await conn.execute(
-                """
-                DELETE FROM projection_log
-                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
-                """,
-                owned,
-            )
-            await conn.execute(
-                """
-                DELETE FROM turn_events
-                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
-                """,
-                owned,
-            )
-            await conn.execute(
-                """
-                DELETE FROM runs
-                WHERE turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
-                """,
-                owned,
-            )
-            # No FK on model_request_envelopes — delete explicitly (A12).
-            await conn.execute(
-                """
-                DELETE FROM model_request_envelopes
-                WHERE session_id = ANY($1::uuid[])
-                   OR turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
-                """,
-                owned,
-            )
-            await conn.execute(
-                "DELETE FROM turn_views WHERE session_id = ANY($1::uuid[])",
-                owned,
-            )
-            await conn.execute(
-                "DELETE FROM turns WHERE session_id = ANY($1::uuid[])",
-                owned,
-            )
-            await conn.execute(
-                """
-                DELETE FROM sessions
-                WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
-                """,
-                owner_user_id,
-                owned,
-            )
-            return owned
+                turn_in = (
+                    "turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))"
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM projection_log WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM turn_events WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM run_commands WHERE run_id IN "
+                    f"(SELECT id FROM runs WHERE {turn_in})",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM turn_model_secrets WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM checkpoints WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM artifacts WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM approval_views WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    """
+                    DELETE FROM model_request_envelopes
+                    WHERE session_id = ANY($1::uuid[])
+                       OR turn_id IN (SELECT id FROM turns WHERE session_id = ANY($1::uuid[]))
+                    """,
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    f"DELETE FROM runs WHERE {turn_in}",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    "DELETE FROM turn_views WHERE session_id = ANY($1::uuid[])",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    "DELETE FROM session_raw_snapshots WHERE session_id = ANY($1::uuid[])",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    "DELETE FROM session_transcripts WHERE session_id = ANY($1::uuid[])",
+                    owned,
+                )
+                await _delete_optional(
+                    conn,
+                    "DELETE FROM session_views WHERE session_id = ANY($1::uuid[])",
+                    owned,
+                )
+                await conn.execute(
+                    "DELETE FROM turns WHERE session_id = ANY($1::uuid[])",
+                    owned,
+                )
+                await conn.execute(
+                    """
+                    DELETE FROM sessions
+                    WHERE owner_user_id = $1 AND id = ANY($2::uuid[])
+                    """,
+                    owner_user_id,
+                    owned,
+                )
+                return owned
+    except asyncpg.ForeignKeyViolationError:
+        logger.exception(
+            "session delete blocked by foreign key owner=%s requested=%s",
+            owner_user_id,
+            len(unique_ids),
+        )
+        raise

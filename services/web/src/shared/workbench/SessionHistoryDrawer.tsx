@@ -103,35 +103,37 @@ export function SessionHistoryDrawer({
 
   const removeMany = useMutation({
     mutationFn: (ids: string[]) => deleteSessionsBulk(ids),
-    onMutate: async (ids) => {
-      await queryClient.cancelQueries({ queryKey: ["sessions", "mine"] });
-      const previous = queryClient.getQueryData<SessionListItem[]>([
-        "sessions",
-        "mine",
-      ]);
-      const idSet = new Set(ids);
-      queryClient.setQueryData<SessionListItem[]>(["sessions", "mine"], (prev) =>
-        (prev ?? []).filter((row) => !idSet.has(row.id)),
-      );
-      setSelected(new Set());
-      setBulkMode(false);
-      setPeriod("none");
-      setBulkError(null);
-      if (currentSessionId && idSet.has(currentSessionId)) {
-        onDeletedCurrent();
+    onSuccess: async ({ deleted, missing }, ids) => {
+      const gone = new Set(deleted);
+      if (gone.size > 0) {
+        queryClient.setQueryData<SessionListItem[]>(["sessions", "mine"], (prev) =>
+          (prev ?? []).filter((row) => !gone.has(row.id)),
+        );
       }
-      return { previous };
-    },
-    onSuccess: ({ missing }) => {
-      void queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
+      await queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
+      setSelected((prev) => {
+        if (gone.size === 0) return prev;
+        const next = new Set(prev);
+        for (const id of gone) next.delete(id);
+        return next;
+      });
+      if (deleted.length === 0 && ids.length > 0) {
+        setBulkError("服务器没有删掉这些会话，请重试");
+        return;
+      }
       if (missing.length > 0) {
         setBulkError(`${missing.length} 条未找到或无权删除`);
+      } else {
+        setBulkError(null);
+        setBulkMode(false);
+        setPeriod("none");
+        setSelected(new Set());
+      }
+      if (currentSessionId && gone.has(currentSessionId)) {
+        onDeletedCurrent();
       }
     },
-    onError: (_err, _ids, ctx) => {
-      if (ctx?.previous) {
-        queryClient.setQueryData(["sessions", "mine"], ctx.previous);
-      }
+    onError: () => {
       setBulkError("批量删除失败，请稍后重试");
       void queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
     },
@@ -204,7 +206,12 @@ export function SessionHistoryDrawer({
   const busy = removeOne.isPending || removeMany.isPending;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-overlay" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-overlay"
+      onClick={() => {
+        if (!busy) onClose();
+      }}
+    >
       <aside
         className="flex h-full w-full max-w-md flex-col border-l border-border bg-background shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -217,7 +224,7 @@ export function SessionHistoryDrawer({
               size="sm"
               variant={bulkMode ? "default" : "outline"}
               className="h-7 border-input px-2 text-xs"
-              disabled={items.length === 0 && !bulkMode}
+              disabled={busy || (items.length === 0 && !bulkMode)}
               onClick={() => {
                 if (bulkMode) exitBulk();
                 else {
@@ -233,6 +240,7 @@ export function SessionHistoryDrawer({
               size="sm"
               variant="outline"
               className="h-7 border-input px-2 text-xs"
+              disabled={busy}
               onClick={onClose}
             >
               关闭
