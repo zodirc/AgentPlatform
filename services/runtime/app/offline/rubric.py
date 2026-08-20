@@ -17,7 +17,7 @@ _AI_BAN_PHRASES = (
     "as a language model",
 )
 
-# Meta-knowing / summary-voice families from writing/system.md Ban list (docs/30 WN2).
+# Meta-knowing / summary-voice families (pinned default_voice Don't; L1 meta_knowing_high).
 _META_KNOWING_PHRASES = (
     "他知道",
     "她知道",
@@ -36,7 +36,7 @@ _META_KNOWING_PHRASES = (
     "两人之间的空气凝固了",
 )
 
-# Glue phrases (docs/30 WN2 / writing system.md Also avoid).
+# Glue phrases (L1 glue_heavy; same families as the old standing-prefix list).
 _GLUE_PHRASES = (
     "与此同时",
     "就在这时",

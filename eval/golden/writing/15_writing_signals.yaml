@@ -1,0 +1,25 @@
+id: writing.15_writing_signals
+scenario_id: writing
+phase: 2
+description: draft_section embeds writing_signals (fragment weights + net_signal)
+
+input:
+  message: "writing.15 draft_section dialogue_dyad writing_signals"
+  client_request_id: "00000000-0000-4000-8000-000000000015"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.completed
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  turn:
+    status: completed
+  tool:
+    name: draft_section
+    result_matches: "writing_signals"
+
+tags: [writing, rubric, p2]

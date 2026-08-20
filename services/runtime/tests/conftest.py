@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+_ROOT = Path(__file__).resolve().parents[3]
+_CONTRACTS_PY = _ROOT / "packages" / "contracts" / "python"
+if _CONTRACTS_PY.is_dir() and str(_CONTRACTS_PY) not in sys.path:
+    sys.path.insert(0, str(_CONTRACTS_PY))
 
 from app.retrieval.embedder import reset_embedder_cache
 from app.settings import settings

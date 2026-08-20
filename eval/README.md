@@ -10,7 +10,7 @@ Schema：`packages/contracts/eval/golden_turn.schema.json`
 |------|------|------|
 | `golden/shared/` | 15 | 管道、取消、幂等、HA、stall、outbox worker |
 | `golden/agent/` | 9 | agent 场景（含 approval / deny / delegate） |
-| `golden/writing/` | 14 | writing 场景（含 `writing.14` path_prefix） |
+| `golden/writing/` | 15 | writing 场景（含 `writing.14` path_prefix、`writing.15` writing_signals） |
 | `golden/interview/` | 1 | interview stub |
 | `golden/live/` | 2 | 需 `MODEL_API_KEY`（nightly CI） |
 | `retrieval/` | — | 离线 A/B 题集 + corpus（[docs/15](../docs/15-rag-and-sources.md)） |
