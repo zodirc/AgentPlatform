@@ -391,7 +391,6 @@ def test_maybe_attach_skips_outline(monkeypatch) -> None:
             result,
             tool_name="propose_patch",
             arguments={"fragment": "mixed"},
-            scenario_id="writing",
         )
     )
     assert "writing_signals" not in result

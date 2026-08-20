@@ -1457,20 +1457,26 @@ class AgentEngine:
                             result.get("patch_id"),
                         )
 
-        if state.scenario_id == "writing" and isinstance(result, dict):
-            try:
-                from app.writing.signals.assemble import maybe_attach_prose_writing_signals
+        if isinstance(result, dict):
+            from app.scenarios.registry import ScenarioRegistry
 
-                await maybe_attach_prose_writing_signals(
-                    result,
-                    tool_name=tool_name,
-                    arguments=arguments if isinstance(arguments, dict) else {},
-                    scenario_id=state.scenario_id,
-                    session_id=state.session_id,
-                    turn_id=state.turn_id,
-                )
-            except Exception:
-                logger.debug("writing_signals attach skipped", exc_info=True)
+            try:
+                _signals_profile = ScenarioRegistry.get(state.scenario_id)
+            except ValueError:
+                _signals_profile = None
+            if _signals_profile and _signals_profile.attach_writing_signals:
+                try:
+                    from app.writing.signals.assemble import maybe_attach_prose_writing_signals
+
+                    await maybe_attach_prose_writing_signals(
+                        result,
+                        tool_name=tool_name,
+                        arguments=arguments if isinstance(arguments, dict) else {},
+                        session_id=state.session_id,
+                        turn_id=state.turn_id,
+                    )
+                except Exception:
+                    logger.debug("writing_signals attach skipped", exc_info=True)
 
         if tool_name == "export_document":
             state.delivery = {

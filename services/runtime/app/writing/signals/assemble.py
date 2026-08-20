@@ -25,12 +25,14 @@ async def maybe_attach_prose_writing_signals(
     *,
     tool_name: str,
     arguments: dict[str, Any],
-    scenario_id: str,
     session_id: object | None = None,
     turn_id: object | None = None,
 ) -> None:
-    """Attach writing_signals to prose patch tool results (writing scenario only)."""
-    if scenario_id != "writing" or result.get("writing_signals"):
+    """Attach writing_signals to prose patch tool results.
+
+    Callers gate on Profile.attach_writing_signals — no scenario_id branch here.
+    """
+    if result.get("writing_signals"):
         return
     if result.get("error") or str(result.get("status") or "") == "error":
         return

@@ -360,10 +360,13 @@ def test_scenario_registry_loads_profiles() -> None:
     collab = ScenarioRegistry.get("collab")
 
     assert writing.scenario_id == "writing"
+    assert writing.patch_auto_apply is True
+    assert writing.attach_writing_signals is True
     assert "draft_section" in writing.tool_names
     assert "writing_rubric" in writing.tool_names
     assert "evaluate_writing_fragment" in writing.tool_names
     assert agent.scenario_id == "agent"
+    assert agent.attach_writing_signals is False
     assert "glob" in agent.tool_names
     assert intel.scenario_id == "intel"
     assert "enrich_ioc" in intel.tool_names

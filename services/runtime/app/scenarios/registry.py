@@ -39,6 +39,7 @@ class ScenarioProfile:
     # C1 scalars — differences via Profile, not ``if scenario == …``.
     generation: dict = field(default_factory=dict)
     patch_auto_apply: bool = False
+    attach_writing_signals: bool = False
     structural_prewarm: bool = False
     plan_suggest: dict = field(default_factory=dict)
     subagent_prompt_suffix: str = ""
@@ -86,6 +87,7 @@ class ScenarioRegistry:
                 retrieval=dict(data.get("retrieval") or {}),
                 generation=dict(data.get("generation") or {}),
                 patch_auto_apply=bool(data.get("patch_auto_apply", False)),
+                attach_writing_signals=bool(data.get("attach_writing_signals", False)),
                 structural_prewarm=bool(data.get("structural_prewarm", False)),
                 plan_suggest=dict(data.get("plan_suggest") or {}),
                 subagent_prompt_suffix=str(data.get("subagent_prompt_suffix") or ""),

@@ -41,6 +41,7 @@ retrieval:
 generation:
   temperature: 0.8
 patch_auto_apply: true
+attach_writing_signals: true
 plan_suggest:
   threshold: 4
 post_turn_jobs:

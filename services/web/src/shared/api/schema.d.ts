@@ -250,6 +250,41 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/writing-prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get writing fragment weights for the logged-in user (cross-Work) */
+        get: operations["getWritingPrefs"];
+        /** Update writing fragment weights for the logged-in user */
+        put: operations["updateWritingPrefs"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/writing-prefs/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset writing prefs to platform defaults */
+        post: operations["resetWritingPrefs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/admin/model-providers": {
         parameters: {
             query?: never;
@@ -488,6 +523,47 @@ export interface components {
             config_version: number;
             /** Format: date-time */
             updated_at: string;
+        };
+        WritingPrefsResponse: {
+            preset_label: string;
+            fragment_weights: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            signal_penalties: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            signal_rewards: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            exemplars?: {
+                [key: string]: {
+                    [key: string]: string;
+                }[];
+            };
+            schema_version: number;
+            /** Format: date-time */
+            updated_at?: string | null;
+            is_custom: boolean;
+        };
+        UpdateWritingPrefsRequest: {
+            preset_label?: string;
+            fragment_weights?: {
+                [key: string]: {
+                    [key: string]: number;
+                };
+            };
+            signal_penalties?: {
+                [key: string]: unknown;
+            };
+            signal_rewards?: {
+                [key: string]: unknown;
+            };
         };
     };
     responses: never;
@@ -855,6 +931,70 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    getWritingPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Writing prefs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingPrefsResponse"];
+                };
+            };
+        };
+    };
+    updateWritingPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateWritingPrefsRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated prefs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingPrefsResponse"];
+                };
+            };
+        };
+    };
+    resetWritingPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reset prefs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingPrefsResponse"];
+                };
             };
         };
     };

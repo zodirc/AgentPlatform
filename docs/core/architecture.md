@@ -270,6 +270,7 @@ Profile 提供：工具白名单、系统提示、审批覆盖、检索 path 过
 | `retrieval` | 检索 path 过滤（工具侧消费） |
 | `generation.temperature` | 采样温度 |
 | `patch_auto_apply` | `propose_patch` 后自动 apply（settings 总闸仍可关） |
+| `attach_writing_signals` | 成稿/改稿工具结果附 L0/L1 `writing_signals` |
 | `structural_prewarm` | StartTurn LSP 软预热 |
 | `plan_suggest.threshold` | Plan 建议阈值 |
 | `subagent_prompt_suffix` | 子 agent 系统提示追加文案 |
