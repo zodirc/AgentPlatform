@@ -193,7 +193,7 @@ make up / make release-plan / 浏览器 :9090
 
 看板模式：本地开发看「已提交 + 未提交」；同步部署只看已提交。Ops Bench 未起同样是 `make start-bench`，不 rebuild。
 
-**依赖 vs 代码缓存**：`deps`（pip/pnpm/ST）与 `app` 分层；`*:deps` 锚点镜像保住 deps 层；`deploy/base-images.env` 钉死基础镜像 digest + compose `pull: false`（该文件已列入 `paths.env`，bump digest 后 `make up` 会脏 api/runtime/web/ast_indexer）。多 GB 的 `model-bake-cache` / `torch-wheel-cache` / `ts-grammar-cache` 在 `.dockerignore` 里，经 compose `additional_contexts` 按需挂载。清理磁盘用 `make docker-prune-safe`（`deploy/docker-keep.list` 白名单，默认**不清** BuildKit）。只改 `app/**` 不应重装依赖；改 `pyproject`/lock 会随模块路径自动重建；怀疑缓存脏时才用 `*_REBUILD_DEPS=1`。
+**依赖 vs 代码缓存**：`deps`（pip/pnpm/ST）与 `app` 分层；`*:deps` 锚点镜像保住 deps 层；`deploy/base-images.env` 钉死基础镜像 digest + compose `pull: false`（该文件已列入 `paths.env`，bump digest 后 `make up` 会脏 api/runtime/web/ast_indexer）。多 GB 的 `model-bake-cache` / `torch-wheel-cache` / `ts-grammar-cache` 在 `.dockerignore` 里，经 compose `additional_contexts` 按需挂载。清理磁盘用 `make docker-prune-safe`（按需：运行栈 / `:deps` 与 pip·pnpm cache mount / 评测集；丢掉未引用 regular 层，不按时间。`BUILD_CACHE_PRUNE=1` 才清 cache mount）。只改 `app/**` 不应重装依赖；改 `pyproject`/lock 会随模块路径自动重建；怀疑缓存脏时才用 `*_REBUILD_DEPS=1`。
 
 ### 2.3 如何确认更新已生效
 

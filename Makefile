@@ -50,9 +50,11 @@ EVAL_UP_SERVICES ?= runtime api
 EVAL_RUNTIME_ENV ?=
 EVAL_RESTORE_SERVICES ?= runtime api
 EVAL_BUILD ?=
-# After compose --build, prune dangling images (set DOCKER_AUTO_PRUNE=0 to skip).
+# After compose --build, drop what that rebuild *replaced* (dangling images /
+# dangling BuildKit records). Need, not recency (no until=). Current :deps
+# images + pip/pnpm cache mounts stay. Set DOCKER_AUTO_PRUNE=0 to skip.
 DOCKER_AUTO_PRUNE ?= 1
-# make docker-prune: default dangling images only; set BUILD_CACHE_PRUNE=1 for builder prune -af.
+# Nuclear: also drop pip/pnpm cache mounts (docker builder prune -af). Default off.
 BUILD_CACHE_PRUNE ?= 0
 # WSL/Linux: strip broken Windows credsStore (desktop.exe) before compose build.
 # Docker Desktop often rewrites ~/.docker/config.json; make up/build re-fixes.
@@ -101,7 +103,7 @@ help: ## 显示常用命令
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
 	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
 	@echo "  make deps-anchor  仅打 api/runtime/web/bench:deps（防 BuildKit GC 掉 pip/pnpm 层）"
-	@echo "  make docker-prune-safe  按 deploy/docker-keep.list 清理（保留产品/deps/SWE/构建基座；默认不清 BuildKit）"
+	@echo "  make docker-prune-safe  按需清理：留运行栈/:deps/评测集/pip·pnpm；丢掉未引用层（BUILD_CACHE_PRUNE=1 连 cache mount 也清）"
 	@echo "  make start-bench  仅启动 Ops Bench（不 rebuild；容器被杀后优先用这个）"
 	@echo "  make up-bench     重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
@@ -129,7 +131,7 @@ help: ## 显示常用命令
 	@echo "  make up-ha        双 runtime HA（多用户同时跑 Turn；docs/27 MT7）"
 	@echo "  make up-full      全栈：queue worker + retrieval overlay"
 	@echo "  make build        只构建镜像，不启动（结束后自动清理悬空镜像）"
-	@echo "  make docker-prune 清理悬空镜像（BUILD_CACHE_PRUNE=1 才清 BuildKit 依赖缓存）"
+	@echo "  make docker-prune 按需清理（同 docker-prune-safe；不按时间）"
 	@echo "  make down         停止"
 	@echo "  make ps / logs    状态 / 日志"
 	@echo ""
@@ -222,11 +224,12 @@ start: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks 
 	@$(MAKE) --no-print-directory fix-workspace-sources
 	@RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh
 
-# Safe: only removes untagged (<none>) images left by retag-after-build.
+# Drop layers this rebuild replaced. Keep the new image tags and cache mounts.
 define docker_auto_prune
 	@if [ "$(DOCKER_AUTO_PRUNE)" = "1" ]; then \
-	  echo "==> auto-prune dangling images"; \
+	  echo "==> auto-prune dangling images + dangling BuildKit records"; \
 	  docker image prune -f >/dev/null; \
+	  docker builder prune -f >/dev/null || true; \
 	fi
 endef
 
@@ -244,7 +247,7 @@ up-all: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks
 # Secret is consumed by api only. up-web may generate it for the first time — recreate api then.
 # --no-deps: do not rebuild/restart depends_on (api→runtime); otherwise up-api pays runtime ST/pip.
 # SKIP_RELEASE_HOOK=1：被 release.sh 调用时跳过 mark/console（由上层统一做）。
-# Build order: warm :deps first (cache_from), then thin app — code changes must not re-pip/pnpm.
+# Build order: warm :deps first, then thin app — code changes must not re-pip/pnpm.
 up-web: ensure-docker-creds ## 只重建 web（WEB_REBUILD_DEPS=1 → --no-cache）
 	@status=$$(mktemp); \
 	OPS_SECRET_STATUS_FILE=$$status bash scripts/ensure_ops_test_secret.sh; \
@@ -279,7 +282,7 @@ up-api: ensure-ops-secret ensure-docker-creds ## 只重建 api（API_REBUILD_DEP
 	  $(COMPOSE) build --no-cache api; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache api-deps; \
 	else \
-	  echo "==> api: warm deps anchor then app (pip only if pyproject/contracts changed)"; \
+	  echo "==> api: warm deps anchor then app (pip only if pyproject changed)"; \
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps; \
 	  $(COMPOSE) build api; \
 	fi; \
@@ -398,7 +401,7 @@ build: ensure-docker-creds
 	$(COMPOSE) build
 	$(docker_auto_prune)
 
-docker-prune-safe: ## 按 deploy/docker-keep.list 清理（默认保留 BuildKit；BUILD_CACHE_PRUNE=1 才清）
+docker-prune-safe: ## 按需清理（运行栈 / :deps / 评测集；丢掉未引用层，不按时间）
 	@DRY_RUN=$(DRY_RUN) BUILD_CACHE_PRUNE=$(BUILD_CACHE_PRUNE) bash scripts/docker_prune_safe.sh
 
 docker-prune: docker-prune-safe ## 同 docker-prune-safe（旧名兼容）
@@ -488,8 +491,9 @@ eval-run-isolated:
 	    restore_once || echo "WARNING: automatic runtime restore failed; run 'make start'"; \
 	  fi; \
 	  if [ "$${DOCKER_AUTO_PRUNE:-1}" = "1" ]; then \
-	    echo "Auto-prune dangling images after eval restore..."; \
+	    echo "Auto-prune dangling images + dangling BuildKit records after eval restore..."; \
 	    docker image prune -f >/dev/null || true; \
+	    docker builder prune -f >/dev/null || true; \
 	  fi; \
 	  exit $$rc; \
 	}; \
@@ -506,8 +510,9 @@ eval-run-isolated:
 	    $(EVAL_UP_ARGS) $(EVAL_UP_SERVICES); \
 	fi; \
 	if [ "$${DOCKER_AUTO_PRUNE:-1}" = "1" ] && [ -n "$(EVAL_BUILD)" ]; then \
-	  echo "Auto-prune dangling images after eval build..."; \
+	  echo "Auto-prune dangling images + dangling BuildKit records after eval build..."; \
 	  docker image prune -f >/dev/null || true; \
+	  docker builder prune -f >/dev/null || true; \
 	fi; \
 	echo "Waiting for api → runtime readiness..."; \
 	i=0; \

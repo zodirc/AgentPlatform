@@ -1,25 +1,28 @@
-# Docker keep-list (gitignore-style allowlist for `make docker-prune-safe`).
+# Docker keep-list (need, not recency) for `make docker-prune-safe`.
 # Lines: keep patterns for `repository:tag`. Empty / # comments ignored.
 # Globs: * matches any run of non-slash chars in the ref (fnmatch).
 #
-# KEEP these so make up stays fast (deps anchors + build bases) and product /
-# bench / SWE harness remain available. Everything else is a prune candidate.
+# Keep only:
+#   1. Runtime stack (running product + compose infra)
+#   2. Fast rebuild cache (deps-anchor tags + Dockerfile bases)
+#   3. Eval sets (SWE harness images)
+# Host bake caches (deploy/model-bake-cache etc.) are files, not images.
 
-# Product stack + deps anchors (make up cache)
+# Runtime + deps anchors (code change → rebuild app without re-pip/pnpm)
 agent-platform-api:*
 agent-platform-runtime:*
 agent-platform-web:*
 agent-platform-bench:*
 
-# SWE harness eval images
+# Eval sets
 swebench/*
 */swebench/*
 
-# Compose infra
+# Runtime infra
 pgvector/pgvector:pg16
 caddy:2-alpine
 
-# Build bases (pinned digests / tags used by Dockerfiles)
+# Dockerfile bases (fast rebuild; pinned digests live in deploy/base-images.env)
 python:3.11-slim*
 node:20-alpine*
 nginx:alpine*

@@ -645,6 +645,7 @@ cmd_up() {
   make -C "$ROOT" --no-print-directory fix-workspace-sources || true
   if [[ "${DOCKER_AUTO_PRUNE:-1}" == "1" ]]; then
     docker image prune -f >/dev/null 2>&1 || true
+    docker builder prune -f >/dev/null 2>&1 || true
   fi
   RELEASE_CONSOLE="${RELEASE_CONSOLE:-1}" bash "$ROOT/scripts/release/ensure_console.sh"
 }

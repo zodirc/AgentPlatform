@@ -31,8 +31,9 @@ restore_daily_runtime() {
     up -d --force-recreate --remove-orphans --wait --wait-timeout 180 runtime \
     || echo "WARNING: restore failed; run: make start"
   if [[ "${DOCKER_AUTO_PRUNE:-1}" == "1" ]]; then
-    echo "==> auto-prune dangling images"
+    echo "==> auto-prune dangling images + dangling BuildKit records"
     docker image prune -f >/dev/null || true
+    docker builder prune -f >/dev/null || true
   fi
 }
 

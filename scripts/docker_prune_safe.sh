@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Safe Docker cleanup: remove only images/containers NOT on deploy/docker-keep.list.
-# Never touches named deploy_* volumes. BuildKit cache is kept unless BUILD_CACHE_PRUNE=1.
+# Safe Docker cleanup by *need*, not recency.
+# Keep: running product stack, fast-rebuild cache (deps tags + pip/pnpm mounts +
+# Dockerfile bases), eval images. Drop everything else.
+# Never touches named deploy_* volumes. Never uses until= (age ≠ usefulness).
 #
 # Usage:
 #   bash scripts/docker_prune_safe.sh           # apply
 #   DRY_RUN=1 bash scripts/docker_prune_safe.sh # list only
-#   BUILD_CACHE_PRUNE=1 bash scripts/docker_prune_safe.sh  # also prune unused build cache
+#   BUILD_CACHE_PRUNE=1 bash scripts/docker_prune_safe.sh  # also drop pip/pnpm mounts (-a)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,6 +38,11 @@ keep_match() {
     esac
   done
   return 1
+}
+
+# Unreferenced regular layers left after retag. Not cache mounts (pip/pnpm).
+prune_unneeded_regular_cache() {
+  docker builder prune -f --filter type=regular
 }
 
 echo "==> keep list: $KEEP_FILE (${#KEEP_PATTERNS[@]} patterns)"
@@ -74,7 +81,12 @@ done
 
 if [[ "$DRY_RUN" == "1" ]]; then
   dangling_n="$(docker images -f dangling=true -q 2>/dev/null | wc -l | tr -d ' ')"
-  echo "==> dry-run: would remove ${#REMOVE_IDS[@]} tagged + ${dangling_n} dangling; skip apply"
+  echo "==> dry-run: would remove ${#REMOVE_IDS[@]} tagged + ${dangling_n} dangling images;"
+  echo "    plus unreferenced regular BuildKit layers (keep pip/pnpm cache mounts)"
+  if [[ "$BUILD_CACHE_PRUNE" == "1" ]]; then
+    echo "    BUILD_CACHE_PRUNE=1 would also drop cache mounts (next deps rebuild re-fetches)"
+  fi
+  echo "==> skip apply"
 else
   if [[ ${#REMOVE_IDS[@]} -gt 0 ]]; then
     printf '%s\n' "${REMOVE_IDS[@]}" | sort -u | while read -r id; do
@@ -91,15 +103,12 @@ else
     echo "  DROP volume $v"
     docker volume rm "$v" 2>/dev/null || true
   done
-fi
-
-if [[ "$BUILD_CACHE_PRUNE" == "1" ]]; then
-  echo "==> BUILD_CACHE_PRUNE=1 → docker builder prune -f (next cold build may re-pip)"
-  if [[ "$DRY_RUN" != "1" ]]; then
-    docker builder prune -f
+  echo "==> drop unreferenced regular BuildKit layers (keep pip/pnpm cache mounts)"
+  prune_unneeded_regular_cache
+  if [[ "$BUILD_CACHE_PRUNE" == "1" ]]; then
+    echo "==> BUILD_CACHE_PRUNE=1 → docker builder prune -af (cache mounts too)"
+    docker builder prune -af
   fi
-else
-  echo "==> keeping BuildKit cache (set BUILD_CACHE_PRUNE=1 to reclaim; hurts make up cold path)"
 fi
 
 echo "==> done; docker system df:"
