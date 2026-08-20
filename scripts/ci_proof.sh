@@ -103,19 +103,22 @@ run_unit_runtime() {
 run_unit_api_ux() {
   echo "==> [unit] API test suite"
   cd services/api
+  local contracts_py="$ROOT/packages/contracts/python"
   # Prefer api/.venv only when it can install/run tests; a broken venv
   # (python without pip) must not block proof — fall back to $PY.
+  # Overlay the live contracts tree: the image/venv may still have the deps stub
+  # of agent-contracts without writing_prefs.py.
   if [[ -x .venv/bin/pytest ]] && .venv/bin/python -m pip --version >/dev/null 2>&1; then
-    .venv/bin/python -m pip install -q "$ROOT/packages/contracts/python"
+    .venv/bin/python -m pip install -q --upgrade --force-reinstall --no-deps "$contracts_py"
     .venv/bin/python -m pip install -q -e ".[dev]" 2>/dev/null || .venv/bin/python -m pip install -q -e .
-    PYTHONPATH=. .venv/bin/pytest tests -q
+    PYTHONPATH="${contracts_py}:." .venv/bin/pytest tests -q
   elif [[ -x .venv/bin/pytest ]]; then
-    PYTHONPATH=. .venv/bin/pytest tests -q
+    PYTHONPATH="${contracts_py}:." .venv/bin/pytest tests -q
   else
     # cwd is services/api — relative packages/contracts/python does not exist here.
-    pip_q "$ROOT/packages/contracts/python"
+    "$PY" -m pip install -q --upgrade --force-reinstall --no-deps "$contracts_py"
     pip_q -e ".[dev]" 2>/dev/null || pip_q -e .
-    PYTHONPATH=. pytest_q tests -q
+    PYTHONPATH="${contracts_py}:." pytest_q tests -q
   fi
   cd "$ROOT"
 }

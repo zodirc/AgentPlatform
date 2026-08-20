@@ -570,8 +570,9 @@ eval-run-isolated:
 
 api-test:
 	@if python3 -c 'import sys; exit(0 if sys.version_info>=(3,11) else 1)' 2>/dev/null; then \
+		  python3 -m pip install -q --upgrade --force-reinstall --no-deps packages/contracts/python && \
 		  cd services/api && python3 -m pip install -q -e ".[dev]" && \
-		  PYTHONPATH=. python3 -m pytest tests -q; \
+		  PYTHONPATH=../../packages/contracts/python:. python3 -m pytest tests -q; \
 	else \
 	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root api rm -rf /tmp/api-tests /tmp/preflight-contracts && \
 	  docker compose -f deploy/docker-compose.yml --env-file .env exec -T -u root api mkdir -p /tmp/preflight-contracts/python && \

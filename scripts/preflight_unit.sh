@@ -329,19 +329,22 @@ run_runtime_local() {
 run_api_ux_local() {
   echo "==> [preflight] API test suite  [$(elapsed)]"
   cd "$ROOT/services/api"
+  local contracts_py="$ROOT/packages/contracts/python"
   if [[ -x .venv/bin/pytest ]]; then
     if .venv/bin/python -m pip --version >/dev/null 2>&1; then
-      pip_install .venv/bin/python "$ROOT/packages/contracts/python"
+      with_heartbeat "pip contracts force-reinstall" \
+        .venv/bin/python -m pip install --progress-bar on --upgrade --force-reinstall --no-deps "$contracts_py"
     else
-      echo "==> [preflight] api .venv has no pip — using import fallback for command_allowlist  [$(elapsed)]"
+      echo "==> [preflight] api .venv has no pip — overlaying contracts via PYTHONPATH  [$(elapsed)]"
     fi
     echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
-    with_heartbeat "pytest api" env PYTHONPATH=. .venv/bin/pytest tests -q
+    with_heartbeat "pytest api" env PYTHONPATH="${contracts_py}:." .venv/bin/pytest tests -q
   else
-    pip_install "$PY" "$ROOT/packages/contracts/python"
+    with_heartbeat "pip contracts force-reinstall" \
+      "$PY" -m pip install --progress-bar on --upgrade --force-reinstall --no-deps "$contracts_py"
     pip_install "$PY" -e ".[dev]" || pip_install "$PY" -e .
     echo "==> [preflight] pytest services/api/tests  [$(elapsed)]"
-    with_heartbeat "pytest api" env PYTHONPATH=. "$PY" -m pytest tests -q
+    with_heartbeat "pytest api" env PYTHONPATH="${contracts_py}:." "$PY" -m pytest tests -q
   fi
   cd "$ROOT"
 }
