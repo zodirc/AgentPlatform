@@ -3,6 +3,21 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.8 — 2026-08-21
+
+- `events/payloads/tool.completed.json`: 新增可选 `composite` / `reward_sum` /
+  `penalty_sum`（利用率主列用未封顶质地；总线不携带 `rewards[]`）。向后兼容。
+
+## 0.3.7 — 2026-08-21
+
+- `events/payloads/tool.completed.json`: 新增可选 `section_id`（写作利用率按章记账）。向后兼容。
+
+## 0.3.6 — 2026-08-21
+
+- `events/payloads/tool.completed.json`: 新增可选 `net_signal` / `writing_weak` /
+  `repair_key` / `rewrite_policy`（写作利用率探针；不在事件总线携带
+  `writing_signals` 全文）。`draft_section` 的 repair 跨度复用已有 `old_text`。向后兼容。
+
 ## 0.3.4 — 2026-08-18
 
 - `python/agent_contracts/command_allowlist.py`：`run_command` 审批前缀匹配

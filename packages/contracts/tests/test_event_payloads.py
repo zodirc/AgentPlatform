@@ -257,6 +257,29 @@ def test_locate_tool_completed_allows_fuse_probe_meta() -> None:
     )
 
 
+def test_draft_section_tool_completed_allows_writing_utilization_meta() -> None:
+    validate_event_payload(
+        "tool.completed",
+        {
+            "tool_call_id": "call_w1",
+            "tool_name": "draft_section",
+            "status": "ok",
+            "summary": "drafted ch1",
+            "path": "drafts/manuscript.md",
+            "net_signal": 0.42,
+            "composite": 0.65,
+            "reward_sum": 0.1,
+            "penalty_sum": -0.18,
+            "writing_weak": True,
+            "repair_key": "staccato_uniform",
+            "rewrite_policy": "propose_patch",
+            "old_text": "「跑完了？」",
+            "section_id": "ch1",
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+
+
 def test_terminal_turn_payloads_allow_post_turn_jobs() -> None:
     jobs = ["sources.index_sync"]
     validate_event_payload(

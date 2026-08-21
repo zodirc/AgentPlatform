@@ -90,7 +90,7 @@
     "old_text": {
       "type": "string",
       "maxLength": 65536,
-      "description": "Prior span or file preview for write/edit (sticky apply without approval.requested)."
+      "description": "Prior span or file preview for write/edit; on draft_section, repair_span.old_text when present (utilization span_hit)."
     },
     "new_text": {
       "type": "string",
@@ -279,6 +279,45 @@
       "type": "string",
       "maxLength": 32,
       "description": "CSI Locate incomplete echo source (e.g. ast_index)."
+    },
+    "net_signal": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Writing L1 net after penalties/rewards (clamped). Slim probe; full writing_signals stays on the tool_result, not this bus."
+    },
+    "composite": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Writing L1 composite before penalties/rewards. Utilization primary; not the clamped net."
+    },
+    "reward_sum": {
+      "type": "number",
+      "description": "Sum of writing reward deltas. Not the rewards[] array."
+    },
+    "penalty_sum": {
+      "type": "number",
+      "description": "Sum of writing penalty deltas (typically ≤0). Not the penalties[] array."
+    },
+    "writing_weak": {
+      "type": "boolean",
+      "description": "net_signal < 0.50 or a penalty/L0 hit — same-Turn repair candidate."
+    },
+    "repair_key": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "repair_span.key (staccato_uniform, weak_window, …). Not old_text."
+    },
+    "rewrite_policy": {
+      "type": "string",
+      "enum": ["propose_patch", "draft_ok"],
+      "description": "Long-chapter local patch vs short/length_short redraft."
+    },
+    "section_id": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "Writing chapter id (ch1, …) for utilization. Not the full manuscript."
     }
   }
 }
