@@ -72,12 +72,16 @@ def _slug(work: str, beat: str) -> str:
     return f"{work}:{beat_part}"
 
 
-@lru_cache(maxsize=1)
-def load_platform_exemplars() -> dict[str, tuple[Exemplar, ...]]:
+def load_exemplars_dir(
+    directory: Path,
+    *,
+    scope: str = "platform",
+) -> dict[str, tuple[Exemplar, ...]]:
+    """Parse ``### 作者《作品》·拍`` markdown banks. Empty dict if dir missing."""
     bank: dict[str, list[Exemplar]] = {}
-    if not _EXEMPLAR_DIR.is_dir():
+    if not directory.is_dir():
         return {}
-    for path in sorted(_EXEMPLAR_DIR.glob("*.md")):
+    for path in sorted(directory.glob("*.md")):
         fm, body = _parse_frontmatter(path.read_text(encoding="utf-8"))
         fragment = (fm.get("fragment") or path.stem).strip()
         license_ = (fm.get("license") or "public_domain").strip()
@@ -105,10 +109,15 @@ def load_platform_exemplars() -> dict[str, tuple[Exemplar, ...]]:
                     text=text,
                     signature=signature_vec(text),
                     license=license_,
-                    scope="platform",
+                    scope=scope,
                 )
             )
     return {k: tuple(v) for k, v in bank.items()}
+
+
+@lru_cache(maxsize=1)
+def load_platform_exemplars() -> dict[str, tuple[Exemplar, ...]]:
+    return load_exemplars_dir(_EXEMPLAR_DIR, scope="platform")
 
 
 def iter_platform_exemplars() -> tuple[Exemplar, ...]:
