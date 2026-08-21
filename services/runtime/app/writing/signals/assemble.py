@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -9,7 +10,13 @@ normalize_fragment = _writing_prefs().normalize_fragment
 
 from app.controller.session_context import load_session_owner_user_id, load_session_work
 from app.writing.focus import infer_focus_section_id
-from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
+from app.writing.manuscript import (
+    extract_section,
+    is_manuscript_rel,
+    list_section_ids,
+    load_manuscript_doc,
+    section_id_containing_span,
+)
 from app.writing.outline_arc import extract_outline_job
 from app.writing.signals.persist import persist_fragment_evaluation
 from app.writing.signals.bank import find_platform_exemplar
@@ -31,6 +38,7 @@ async def maybe_attach_prose_writing_signals(
     """Attach writing_signals to prose patch tool results.
 
     Callers gate on Profile.attach_writing_signals — no scenario_id branch here.
+    After apply, score the updated chapter on disk (not isolated new_text).
     """
     if result.get("writing_signals"):
         return
@@ -38,8 +46,9 @@ async def maybe_attach_prose_writing_signals(
         return
 
     path = ""
-    text = ""
-    fragment: str | None = None
+    old_text = ""
+    new_text = ""
+    arg_fragment: str | None = None
 
     if tool_name == "propose_patch":
         status = str(result.get("status") or "")
@@ -48,23 +57,39 @@ async def maybe_attach_prose_writing_signals(
         if status not in {"applied", "pending"}:
             return
         path = str(result.get("path") or arguments.get("path") or "")
-        text = str(result.get("new_text") or arguments.get("new_text") or "")
-        fragment = arguments.get("fragment")
+        old_text = str(result.get("old_text") or arguments.get("old_text") or "")
+        new_text = str(result.get("new_text") or arguments.get("new_text") or "")
+        arg_fragment = arguments.get("fragment")
     elif tool_name == "apply_patch":
         if str(result.get("status") or "") != "applied":
             return
         path = str(result.get("path") or arguments.get("path") or "")
-        text = str(arguments.get("new_text") or result.get("new_text") or "")
-        fragment = arguments.get("fragment")
+        old_text = str(arguments.get("old_text") or result.get("old_text") or "")
+        new_text = str(arguments.get("new_text") or result.get("new_text") or "")
+        arg_fragment = arguments.get("fragment")
     else:
         return
 
-    if not is_prose_writing_path(path) or not text.strip():
+    if not is_prose_writing_path(path):
         return
 
-    section_id = section_id_from_path(path)
+    section_id, chapter = _chapter_text_for_patch(
+        path,
+        old_text=old_text,
+        new_text=new_text,
+        section_hint=str(arguments.get("section_id") or result.get("section_id") or ""),
+    )
+    if not chapter.strip():
+        return
+
+    fragment = _inherit_declared_fragment(
+        turn_id=turn_id,
+        session_id=session_id,
+        section_id=section_id,
+        argument=arg_fragment,
+    )
     signals = await build_writing_signals(
-        text,
+        chapter,
         fragment=fragment,
         section_id=section_id,
         session_id=session_id,
@@ -72,11 +97,126 @@ async def maybe_attach_prose_writing_signals(
         persist=True,
     )
     result["writing_signals"] = signals
+    if section_id:
+        result["section_id"] = section_id
+    penalties = signals.get("penalties") if isinstance(signals, dict) else None
+    hits = {
+        str(item.get("key") or "")
+        for item in (penalties or [])
+        if isinstance(item, dict) and item.get("hit")
+    }
+    for key in (
+        "staccato_uniform",
+        "hinge_dense",
+        "lore_dump",
+        "opening_institution",
+    ):
+        if key in hits:
+            result[key] = True
+        else:
+            result.pop(key, None)
     frag = signals.get("fragment")
     if isinstance(frag, dict):
         result["fragment"] = frag.get("declared") or frag.get("detected")
     elif frag:
         result["fragment"] = frag
+
+
+def _read_workspace_text(path: str) -> str:
+    from app.tools.core.paths import _resolve_path
+
+    rel = (path or "").strip()
+    if not rel:
+        return ""
+    target = _resolve_path(rel)
+    if not target.is_file():
+        return ""
+    try:
+        return target.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _chapter_text_for_patch(
+    path: str,
+    *,
+    old_text: str,
+    new_text: str,
+    section_hint: str,
+) -> tuple[str, str]:
+    """Locate the chapter body on disk after apply. Never return isolated new_text."""
+    disk = _read_workspace_text(path)
+    sid = (section_hint or "").strip() or section_id_from_path(path)
+    ids = list_section_ids(disk) if disk else []
+    if not sid and (is_manuscript_rel(path) or ids):
+        sid = section_id_containing_span(disk, new_text) or section_id_containing_span(
+            disk, old_text
+        )
+    if sid and ids:
+        body = extract_section(disk, sid)
+        if body and body.strip():
+            return sid, body
+        return sid, ""
+    if ids:
+        # Monofile with chapters but span didn't uniquely map — do not score the book.
+        return sid, ""
+    if disk.strip():
+        return sid, disk
+    return sid, ""
+
+
+def _inherit_declared_fragment(
+    *,
+    turn_id: object | None,
+    session_id: object | None,
+    section_id: str,
+    argument: object,
+) -> str | None:
+    """Prefer the chapter's draft-time fragment over a patch-local guess."""
+    stored = _manifest_section_fragment(turn_id, session_id, section_id)
+    if stored:
+        return stored
+    if argument is None or str(argument).strip() == "":
+        return None
+    return str(argument)
+
+
+def _manifest_section_fragment(
+    turn_id: object | None,
+    session_id: object | None,
+    section_id: str,
+) -> str | None:
+    if not turn_id or not section_id:
+        return None
+    from app.tools.core.paths import _resolve_path
+
+    tid = str(turn_id)
+    candidates = [f".agent/work/turns/{tid}.json"]
+    if session_id is not None:
+        candidates.append(
+            f".agent/sessions/{session_id}/turns/{tid}/manifest.json"
+        )
+    for rel in candidates:
+        target = _resolve_path(rel)
+        if not target.is_file():
+            continue
+        try:
+            data = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        row = (data.get("section_drafts") or {}).get(section_id)
+        if not isinstance(row, dict):
+            continue
+        frag = row.get("fragment")
+        if isinstance(frag, dict):
+            declared = frag.get("declared")
+            if declared:
+                return str(declared)
+        elif frag:
+            return str(frag)
+    return None
 
 
 async def _resolve_owner_and_work(session_id: object | None) -> tuple[UUID | None, UUID | None]:

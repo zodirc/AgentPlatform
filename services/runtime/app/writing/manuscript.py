@@ -222,6 +222,21 @@ def extract_section(doc: str, section_id: str) -> str | None:
     return None
 
 
+def section_id_containing_span(doc: str, span: str) -> str:
+    """Chapter id whose body uniquely contains ``span``. Empty if none or ambiguous."""
+    needle = (span or "").strip()
+    if not needle:
+        return ""
+    hits = [
+        sid
+        for sid, body in parse_sections(doc)[1]
+        if needle in (body or "")
+    ]
+    if len(hits) == 1:
+        return hits[0]
+    return ""
+
+
 def list_section_ids(doc: str) -> list[str]:
     return [sid for sid, _ in parse_sections(doc)[1]]
 

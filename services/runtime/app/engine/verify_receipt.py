@@ -25,6 +25,44 @@ DEFAULT_VERIFY_RECEIPT_RESERVE_STEPS = 10
 _RELATED_CAP = 5
 
 
+_WRITING_L0 = ("staccato_uniform", "hinge_dense", "lore_dump", "opening_institution")
+_WRITING_PENDING = {
+    "staccato_uniform": "staccato_pending",
+    "hinge_dense": "hinge_pending",
+    "lore_dump": "lore_pending",
+    "opening_institution": "opening_pending",
+}
+
+
+def _writing_l0_hits(result: dict[str, Any]) -> dict[str, bool] | None:
+    """Latest scored L0 flags, or None if this result is not a writing score."""
+    signals = result.get("writing_signals")
+    has_signals = isinstance(signals, dict) and bool(signals)
+    has_top = any(key in result for key in _WRITING_L0) or str(result.get("status") or "") == "drafted"
+    if not has_signals and not has_top:
+        return None
+    hits = {key: False for key in _WRITING_L0}
+    if has_signals:
+        for item in signals.get("penalties") or []:
+            if isinstance(item, dict) and item.get("hit"):
+                key = str(item.get("key") or "")
+                if key in hits:
+                    hits[key] = True
+    for key in _WRITING_L0:
+        if result.get(key):
+            hits[key] = True
+    return hits
+
+
+def note_writing_signals_for_verify(state: Any, result: dict[str, Any]) -> None:
+    """Receipts follow the last scored chapter, not the draft-time flag."""
+    hits = _writing_l0_hits(result)
+    if hits is None:
+        return
+    for key, attr in _WRITING_PENDING.items():
+        setattr(state, attr, bool(hits.get(key)))
+
+
 def note_tool_result_for_verify(
     state: Any,
     *,
@@ -36,12 +74,8 @@ def note_tool_result_for_verify(
     if not isinstance(result, dict):
         return
     name = str(tool_name or "")
-    if name == "draft_section" and result.get("status") == "drafted":
-        # Hinge / lore / staccato tells — length_short stays a field, never a receipt.
-        state.hinge_pending = bool(result.get("hinge_dense"))
-        state.lore_pending = bool(result.get("lore_dump"))
-        state.opening_pending = bool(result.get("opening_institution"))
-        state.staccato_pending = bool(result.get("staccato_uniform"))
+    if name in {"draft_section", "propose_patch", "apply_patch", "evaluate_writing_fragment"}:
+        note_writing_signals_for_verify(state, result)
         return
     if name == "edit_file" and result.get("status") == "edited":
         impact = result.get("impact") if isinstance(result.get("impact"), dict) else {}
@@ -353,6 +387,7 @@ def _build_staccato_receipt_text() -> str:
         "这一段对白或句子长短几乎一样短，像机械一问一答"
         "（「进来拿。」「我会还。」「先记账。」「记多久？」这一路）；"
         "或把一句话拆成「…。」他说，「…。」；或把物件说成「A，就是B」；"
+        "或用「钟不知道，屋子知道」这类对仗收束；"
         "或问答末句用「是A，不是B」收束；"
         "或尽是「我知道」「嗯」「懂」这类没有新决定的应声。"
         "短可以短，但不能整场一样短。问完可以答不上来、答偏、或只动手。"
@@ -360,7 +395,8 @@ def _build_staccato_receipt_text() -> str:
         "不要另起一套去AI模板。"
         "用 propose_patch 只换 writing_signals.repair_span.old_text："
         "有人把话说满，有人沉默或做事；删掉只在占拍的应声。"
-        "不要整章再 draft_section。展开日子时把场面写完，不要用三字问答代替叙述。"
+        "不要把对白改成「告诉他…」的说明。不要整章再 draft_section。"
+        "展开日子时把场面写完，不要用三字问答代替叙述。"
     )
 
 

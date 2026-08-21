@@ -25,6 +25,7 @@ from app.engine.verify_receipt import (
     build_verify_receipt_text,
     mark_verify_receipt_injected,
     note_tool_result_for_verify,
+    note_writing_signals_for_verify,
     should_inject_verify_receipt,
 )
 from app.model.gateway import ModelError, ModelGateway, ModelResponse, StreamActivity
@@ -227,6 +228,84 @@ def _clamp_event_str(value: Any, max_len: int) -> str:
     # Suffix length must be exact — off-by-one here still fails maxLength.
     keep = max_len - len(_EVENT_STR_TRUNC_SUFFIX)
     return text[:keep] + _EVENT_STR_TRUNC_SUFFIX
+
+
+_WRITING_PROSE_TOOLS = frozenset({"draft_section", "propose_patch", "apply_patch"})
+_REWRITE_POLICIES = frozenset({"propose_patch", "draft_ok"})
+
+
+def _signal_delta_sum(items: Any) -> float | None:
+    """Sum hit deltas from rewards/penalties. None if the field is absent."""
+    if not isinstance(items, list):
+        return None
+    total = 0.0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("hit") is False:
+            continue
+        raw = item.get("delta")
+        if raw is None:
+            continue
+        try:
+            total += float(raw)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 4)
+
+
+def _compact_writing_signals_event_meta(result: dict[str, Any]) -> dict[str, Any]:
+    """Ops-facing writing probes for tool.completed (no full writing_signals on the bus)."""
+    signals = result.get("writing_signals")
+    if not isinstance(signals, dict) or not signals:
+        return {}
+    from app.writing.signals.repair import WEAK_NET
+
+    out: dict[str, Any] = {}
+    net: float | None = None
+    raw_net = signals.get("net_signal")
+    if raw_net is not None:
+        try:
+            net = max(0.0, min(1.0, round(float(raw_net), 4)))
+            out["net_signal"] = net
+        except (TypeError, ValueError):
+            net = None
+    raw_composite = signals.get("composite")
+    if raw_composite is not None:
+        try:
+            out["composite"] = max(0.0, min(1.0, round(float(raw_composite), 4)))
+        except (TypeError, ValueError):
+            pass
+    reward_sum = _signal_delta_sum(signals.get("rewards"))
+    if reward_sum is not None:
+        out["reward_sum"] = reward_sum
+    penalty_sum = _signal_delta_sum(signals.get("penalties"))
+    if penalty_sum is not None:
+        out["penalty_sum"] = penalty_sum
+    policy = str(signals.get("rewrite_policy") or result.get("rewrite_policy") or "").strip()
+    if policy in _REWRITE_POLICIES:
+        out["rewrite_policy"] = policy
+    span = signals.get("repair_span")
+    if isinstance(span, dict):
+        key = str(span.get("key") or "").strip()
+        if key:
+            out["repair_key"] = key[:64]
+    weak = False
+    if net is not None and net < float(WEAK_NET):
+        weak = True
+    penalties = signals.get("penalties")
+    if isinstance(penalties, list):
+        for item in penalties:
+            if isinstance(item, dict) and item.get("hit"):
+                weak = True
+                break
+    length_fields = signals.get("length_fields")
+    if isinstance(length_fields, dict) and length_fields.get("length_short"):
+        weak = True
+    if result.get("length_short"):
+        weak = True
+    out["writing_weak"] = weak
+    return out
 
 
 def _tool_completed_base(
@@ -1477,6 +1556,9 @@ class AgentEngine:
                     )
                 except Exception:
                     logger.debug("writing_signals attach skipped", exc_info=True)
+                else:
+                    if tool_name in _WRITING_PROSE_TOOLS or tool_name == "evaluate_writing_fragment":
+                        note_writing_signals_for_verify(state, result)
 
         if tool_name == "export_document":
             state.delivery = {
@@ -1618,6 +1700,28 @@ class AgentEngine:
                 completed_payload["unsupported"] = bool(result.get("unsupported"))
             if result.get("truncated") is not None:
                 completed_payload["structural_truncated"] = bool(result.get("truncated"))
+        if tool_name in _WRITING_PROSE_TOOLS and isinstance(result, dict):
+            completed_payload.update(_compact_writing_signals_event_meta(result))
+            args = arguments if isinstance(arguments, dict) else {}
+            path_val = str(result.get("path") or args.get("path") or "")
+            if path_val:
+                completed_payload["path"] = _clamp_event_str(path_val, 4096)
+            section_id = str(result.get("section_id") or args.get("section_id") or "").strip()
+            if section_id:
+                completed_payload["section_id"] = _clamp_event_str(section_id, 64)
+            if tool_name == "draft_section":
+                signals = result.get("writing_signals")
+                span = signals.get("repair_span") if isinstance(signals, dict) else None
+                if isinstance(span, dict) and span.get("old_text"):
+                    completed_payload["old_text"] = _clamp_event_str(
+                        span.get("old_text"), _TOOL_COMPLETED_SPAN_MAX
+                    )
+            elif tool_name == "propose_patch":
+                patch_old = result.get("old_text") or args.get("old_text") or ""
+                if patch_old:
+                    completed_payload["old_text"] = _clamp_event_str(
+                        patch_old, _TOOL_COMPLETED_SPAN_MAX
+                    )
         skip_completed = tool_name == "update_plan" and bool(result.get("unchanged"))
         if not skip_completed:
             await self._write_event(

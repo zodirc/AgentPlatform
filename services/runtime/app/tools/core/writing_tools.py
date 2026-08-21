@@ -388,6 +388,10 @@ async def draft_section(
             entry["repair_span"] = signals_block["repair_span"]
         if signals_block.get("rewrite_policy"):
             entry["rewrite_policy"] = signals_block["rewrite_policy"]
+        frag = signals_block.get("fragment")
+        declared = frag.get("declared") if isinstance(frag, dict) else frag
+        if declared:
+            entry["fragment"] = declared
     drafts[section_id] = entry
     result["manifest_path"] = _write_manifest(turn_id, manifest, session_id=session_id)
     return result
