@@ -10,6 +10,7 @@ from typing import Any
 from app.writing.hinge import find_hinge_span
 from app.writing.lore import find_lore_span
 from app.writing.opening import find_opening_span
+from app.writing.patch_hygiene import close_span_in_body
 from app.writing.staccato import find_staccato_span
 from app.writing.signals.windows import REPAIR_MIN_VISIBLE, TextWindow
 from app.writing.text_metrics import visible_chars
@@ -21,8 +22,10 @@ WEAK_NET = 0.50
 
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
-        "对白过碎：把一句话说满，不要拆在「他说」两边；"
-        "不要用「A，就是B」或「是A，不是B」收束。不要整章重交"
+        "对白过碎或对仗收束：只换这一处，保留「」。"
+        "碎拍把一句话说满，不要改成「告诉他…」的说明；"
+        "「钟不知道，屋子知道」这类对仗改成场上能做的答，或答不上来。"
+        "不要从上一句的「说。」切开。不要整章重交"
     ),
     "glue_heavy": "叙述里的「与此同时/就在这时」过密才拆；对白里因为/可是可以留",
     "hinge_dense": "看见/听到后不要立马拧：停在物件、价钱或沉默上",
@@ -84,10 +87,8 @@ def build_repair_span(
         span = probe.strip()[:REPAIR_SPAN_MAX]
     if not span:
         return None
-    old = span if len(span) <= REPAIR_SPAN_MAX else span[:REPAIR_SPAN_MAX]
-    if old not in body and window is not None:
-        old = window.text[:REPAIR_SPAN_MAX]
-    if old not in body:
+    old = close_span_in_body(body, span, max_chars=REPAIR_SPAN_MAX)
+    if not old or old not in body:
         return None
     return {
         "old_text": old,

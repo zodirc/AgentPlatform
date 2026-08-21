@@ -15,9 +15,11 @@ from app.engine.verify_receipt import (
     verify_receipt_kind,
 )
 from app.writing.staccato import (
+    count_antithesis_punches,
     count_contrast_punches,
     count_equate_punches,
     count_split_speech,
+    find_staccato_span,
     max_short_quote_run,
     staccato_fields,
 )
@@ -156,6 +158,64 @@ def test_staccato_cleared_by_clean_draft() -> None:
     assert should_inject_verify_receipt(state) is False
 
 
+def test_staccato_cleared_by_clean_patch() -> None:
+    uid = uuid4()
+    state = TurnState(
+        turn_id=uid,
+        session_id=uid,
+        run_id=uid,
+        trace_id=uid,
+        scenario_id="writing",
+        max_steps=40,
+        step_count=2,
+    )
+    note_tool_result_for_verify(
+        state,
+        tool_name="draft_section",
+        result={"status": "drafted", "staccato_uniform": True},
+    )
+    assert state.staccato_pending is True
+    note_tool_result_for_verify(
+        state,
+        tool_name="propose_patch",
+        result={
+            "status": "applied",
+            "writing_signals": {
+                "penalties": [],
+                "net_signal": 1.0,
+                "composite": 0.83,
+            },
+        },
+    )
+    assert state.staccato_pending is False
+    assert should_inject_verify_receipt(state) is False
+
+
+def test_pending_patch_does_not_clear_staccato() -> None:
+    uid = uuid4()
+    state = TurnState(
+        turn_id=uid,
+        session_id=uid,
+        run_id=uid,
+        trace_id=uid,
+        scenario_id="writing",
+        max_steps=40,
+        step_count=2,
+    )
+    note_tool_result_for_verify(
+        state,
+        tool_name="draft_section",
+        result={"status": "drafted", "staccato_uniform": True},
+    )
+    note_tool_result_for_verify(
+        state,
+        tool_name="propose_patch",
+        result={"status": "pending", "path": "drafts/manuscript.md"},
+    )
+    assert state.staccato_pending is True
+    assert should_inject_verify_receipt(state, reserve_steps=10) is True
+
+
 def test_staccato_phatic_acks_with_narrative_between() -> None:
     """「我知道」「嗯」「不懂」「懂」 look direct but add no move."""
     text = _pad(
@@ -283,3 +343,47 @@ def test_staccato_allows_because_in_dialogue() -> None:
         "她把灯芯拨正，油烟贴在碗沿上。\n"
     )
     assert "staccato_uniform" not in staccato_fields(text)
+
+
+def test_staccato_antithesis_clock_house() -> None:
+    """「钟不知道，屋子知道。」 is a closing 对仗, not a watch-shop answer."""
+    text = _pad("「电池还能撑一阵。」他擦了擦玻璃。\n「钟不知道，屋子知道。」他说。\n")
+    assert count_antithesis_punches(text) >= 1
+    fields = staccato_fields(text)
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_antithesis") or 0) >= 1
+    span = find_staccato_span(text)
+    assert "钟不知道" in span
+    assert "屋子知道" in span
+    assert not span.startswith("说。")
+
+
+def test_find_staccato_span_prefers_antithesis_over_split() -> None:
+    text = _pad(
+        "「看不懂。」他说，「但是坏东西总有个坏法。」\n"
+        "「钟不知道，屋子知道。」他说。\n"
+    )
+    span = find_staccato_span(text)
+    assert "钟不知道" in span
+    assert "看不懂" not in span
+
+
+def test_staccato_skips_both_sides_unknown() -> None:
+    text = _pad("「我不知道，他不知道。」桌上的油还没干。")
+    assert count_antithesis_punches(text) == 0
+    assert "staccato_uniform" not in staccato_fields(text)
+
+
+def test_find_staccato_span_does_not_start_at_shuo_period() -> None:
+    text = (
+        "「绳子给我。」他说。\n\n"
+        "一个工人拉住他，指压住地图上的红线。\n"
+        "「进来拿。」\n「我会还。」\n「先记账。」\n「记多久？」\n"
+    )
+    span = find_staccato_span(text)
+    assert span
+    assert not span.startswith("说。")
+    assert not span.startswith("指压住")
+    assert span.lstrip().startswith("「") or "说：" in span[:6]
+    assert "进来拿" in span
+    assert "记多久" in span

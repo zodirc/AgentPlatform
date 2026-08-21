@@ -161,7 +161,7 @@ def _collect_penalties(
         hits.append({"key": key, "hit": True, "delta": round(delta, 4), "hint": hint})
 
     add("hinge_dense", bool(hinge_fields(text).get("hinge_dense")), "看见/听到后立马拧")
-    add("staccato_uniform", bool(staccato_fields(text).get("staccato_uniform")), "对白过碎、拆句或「就是」收束")
+    add("staccato_uniform", bool(staccato_fields(text).get("staccato_uniform")), "对白过碎、拆句、「就是」或对仗收束")
     if not skip_opening:
         add(
             "opening_institution",

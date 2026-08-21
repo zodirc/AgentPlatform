@@ -243,6 +243,11 @@ def test_split_speech_and_contrast_punch_are_penalized() -> None:
         fragment_declared="dialogue_dyad",
         prefs=prefs,
     )
+    antithesis = score_writing_fragment(
+        "「电池还能撑一阵。」他擦了擦玻璃。\n「钟不知道，屋子知道。」他说。",
+        fragment_declared="dialogue_dyad",
+        prefs=prefs,
+    )
     because = score_writing_fragment(
         "「他来找包，因为只问包在哪。」她把灯芯拨正，油烟贴在碗沿上。" * 3,
         fragment_declared="dialogue_dyad",
@@ -251,12 +256,14 @@ def test_split_speech_and_contrast_punch_are_penalized() -> None:
     assert "staccato_uniform" in {p["key"] for p in split["penalties"]}
     assert "staccato_uniform" in {p["key"] for p in punch["penalties"]}
     assert "staccato_uniform" in {p["key"] for p in equate["penalties"]}
+    assert "staccato_uniform" in {p["key"] for p in antithesis["penalties"]}
     assert "staccato_uniform" not in {p["key"] for p in because["penalties"]}
     assert "dialogue_rhythm_varied" not in {r["key"] for r in split["rewards"]}
     assert "dialogue_rhythm_varied" not in {r["key"] for r in punch["rewards"]}
     assert split["net_signal"] < because["net_signal"]
     assert punch["net_signal"] < because["net_signal"]
     assert equate["net_signal"] < because["net_signal"]
+    assert antithesis["net_signal"] < because["net_signal"]
 
 
 def test_live_prefs_do_not_mask_exemplar_penalties() -> None:
@@ -438,4 +445,74 @@ def test_infer_fragment_from_duty() -> None:
     assert infer_fragment_from_duty("本章高潮，摊牌") == "climax_beat"
     assert infer_fragment_from_duty("加压，把主线往前推") == "plot_progress"
     assert infer_fragment_from_duty("铺垫章，不要假高潮") == "mixed"
+
+
+def test_maybe_attach_scores_updated_chapter_not_span(workspace: Path) -> None:
+    import asyncio
+    import json
+
+    from app.writing.manuscript import upsert_section
+    from app.writing.signals.assemble import maybe_attach_prose_writing_signals
+    from app.writing.signals.scorer import score_writing_fragment
+
+    texture = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒。\n\n"
+    ) * 8
+    island = "\n".join(
+        ["「跑完了？」", "「跑完了。」", "「少了谁？」", "「不知道。」"] * 2
+    )
+    tail = (
+        "只有穿长衫的，才踱进店面隔壁的房子里，要酒要菜，慢慢地坐喝。"
+        "柜台上还温着酒，粉板上记着十九个钱。\n\n"
+    ) * 6
+    chapter = texture + island + "\n\n" + tail
+    new_span = "「你还在喘？」他靠着柜台说。"
+    patched = chapter.replace("「跑完了？」", new_span, 1)
+    doc = upsert_section("", "ch1", patched)
+    doc = upsert_section(doc, "ch2", texture)
+    drafts = workspace / "drafts"
+    drafts.mkdir()
+    (drafts / "manuscript.md").write_text(doc, encoding="utf-8")
+    turn_id = "turn-patch-score"
+    manifest = workspace / ".agent" / "work" / "turns" / f"{turn_id}.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps({"section_drafts": {"ch1": {"fragment": "mixed"}}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    result = {
+        "status": "applied",
+        "path": "drafts/manuscript.md",
+        "old_text": "「跑完了？」",
+        "new_text": new_span,
+        "auto_applied": True,
+    }
+    asyncio.run(
+        maybe_attach_prose_writing_signals(
+            result,
+            tool_name="propose_patch",
+            arguments={
+                "path": "drafts/manuscript.md",
+                "fragment": "dialogue_dyad",
+                "old_text": "「跑完了？」",
+                "new_text": new_span,
+            },
+            turn_id=turn_id,
+        )
+    )
+    signals = result.get("writing_signals") or {}
+    assert result.get("section_id") == "ch1"
+    vis = int((signals.get("length_fields") or {}).get("visible_chars") or 0)
+    assert vis >= 800
+    assert vis != len(new_span)
+    assert signals.get("rewrite_policy") == "propose_patch"
+    assert (signals.get("fragment") or {}).get("declared") == "mixed"
+    span_only = score_writing_fragment(
+        new_span, fragment_declared="dialogue_dyad", prefs=platform_prefs_payload()
+    )
+    assert span_only["rewrite_policy"] == "draft_ok"
+    assert result.get("content") is None
+    assert result.get("new_text") == new_span
 

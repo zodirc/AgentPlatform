@@ -33,6 +33,12 @@ _CONTRAST_PUNCH = re.compile(
 _EQUATE_PUNCH = re.compile(
     r"[，、——](?:那)?就是(?!说|了)[^，。；！？\s]{1,6}[。！]?$"
 )
+# 「钟不知道，屋子知道」 — A不X，B X. Not 「我不知道，他不知道」 (both negated).
+_ANTITHESIS_PUNCH = re.compile(
+    r"不(?P<pred>[^，。；！？\s]{1,6})，"
+    r"(?![^，。；]{0,8}不(?P=pred))"
+    r"[^，。；]{1,10}(?P=pred)"
+)
 
 # Inner quote / sentence entity-chars. 「跑完了？」 inner = 4.
 _SHORT = 7
@@ -211,6 +217,18 @@ def count_equate_punches(text: str) -> int:
     return n
 
 
+def count_antithesis_punches(text: str) -> int:
+    """A不X，B X in a short quote — parallel judgment posing as a closing line."""
+    from app.writing.text_metrics import visible_chars
+
+    n = 0
+    for inner in _quote_inners(text):
+        vis = visible_chars(inner)
+        if vis <= 22 and _ANTITHESIS_PUNCH.search(inner.strip()):
+            n += 1
+    return n
+
+
 def count_contrast_punches(text: str) -> int:
     """Short Q&A closed by 是A，不是B. Isolated contrast in a long line is allowed."""
     from app.writing.text_metrics import visible_chars
@@ -246,6 +264,7 @@ def staccato_fields(content: str) -> dict[str, Any]:
     split = count_split_speech(text)
     contrast = count_contrast_punches(text)
     equate = count_equate_punches(text)
+    antithesis = count_antithesis_punches(text)
     vis = visible_chars(text)
     if vis < _MIN_VISIBLE:
         unit_run = 0
@@ -263,6 +282,7 @@ def staccato_fields(content: str) -> dict[str, Any]:
         and split < 1
         and contrast < 1
         and equate < 1
+        and antithesis < 1
     ):
         return {}
     return {
@@ -276,7 +296,16 @@ def staccato_fields(content: str) -> dict[str, Any]:
         "staccato_split": split,
         "staccato_contrast": contrast,
         "staccato_equate": equate,
+        "staccato_antithesis": antithesis,
     }
+
+
+def _closed_span(body: str, start: int, end: int, max_chars: int) -> str:
+    from app.writing.patch_hygiene import close_span_in_body
+
+    start = max(0, min(start, len(body)))
+    end = max(start, min(end, len(body)))
+    return close_span_in_body(body, body[start:end], max_chars=max_chars)
 
 
 def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
@@ -284,12 +313,18 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
     from app.writing.text_metrics import visible_chars
 
     body = text or ""
+    for match in _QUOTE_SPAN.finditer(body):
+        inner = match.group(1).strip()
+        vis = visible_chars(inner)
+        if vis <= 22 and _ANTITHESIS_PUNCH.search(inner):
+            return _closed_span(body, match.start(), match.end(), max_chars)
+        if vis <= 22 and _EQUATE_PUNCH.search(inner):
+            return _closed_span(body, match.start(), match.end(), max_chars)
     split = _SPLIT_SPEECH.search(body)
     if split is not None and visible_chars(split.group("head")) <= _SHORT:
         end = body.find("」", split.end())
         stop = end + 1 if end >= 0 else min(split.end() + 24, len(body))
-        span = body[split.start() : stop]
-        return span if len(span) <= max_chars else span[:max_chars]
+        return _closed_span(body, split.start(), stop, max_chars)
     run_start: int | None = None
     run = 0
     last_end = 0
@@ -305,10 +340,8 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
                 run_start = match.start()
             run += 1
             if run >= _QUOTE_RUN and run_start is not None:
-                pad = max(run_start - 24, 0)
                 end = min(match.end() + 8, len(body))
-                span = body[pad:end]
-                return span if len(span) <= max_chars else span[:max_chars]
+                return _closed_span(body, run_start, end, max_chars)
         else:
             run = 0
             run_start = None
@@ -321,8 +354,7 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
         short = 1 <= vis <= _SHORT
         punch = vis <= 22 and _CONTRAST_PUNCH.search(inner) is not None
         if punch and shorts_before >= 2 and start_short is not None:
-            span = body[start_short : match.end()]
-            return span if len(span) <= max_chars else span[:max_chars]
+            return _closed_span(body, start_short, match.end(), max_chars)
         if short:
             if shorts_before == 0:
                 start_short = match.start()
@@ -330,9 +362,4 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
         elif not punch:
             shorts_before = 0
             start_short = None
-    for match in _QUOTE_SPAN.finditer(body):
-        inner = match.group(1).strip()
-        if visible_chars(inner) <= 22 and _EQUATE_PUNCH.search(inner):
-            span = match.group(0)
-            return span if len(span) <= max_chars else span[:max_chars]
     return ""

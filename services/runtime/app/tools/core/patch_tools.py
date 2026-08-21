@@ -10,6 +10,8 @@ from app.tools.core.paths import (
     _resolve_path,
     _workspace_root,
 )
+from app.writing.patch_hygiene import prose_patch_block_reason, sanitize_prose_patch
+from app.writing.signals.prose_path import is_prose_writing_path
 
 def _span_apply_precheck(path: str, old_text: str, new_text: str) -> dict[str, Any]:
     """C-4: soft applyability precheck (span unique + optional ``git apply --check``).
@@ -147,12 +149,35 @@ async def propose_patch(
     **_kwargs: Any,
 ) -> dict[str, Any]:
     _assert_not_seed_corpus(path)
-    precheck = _span_apply_precheck(path, old_text, new_text)
+    old = old_text
+    new = new_text
+    if is_prose_writing_path(path):
+        target = _resolve_path(path)
+        if target.is_file():
+            try:
+                existing = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                existing = ""
+            if existing:
+                old, new = sanitize_prose_patch(existing, old, new)
+                blocked = prose_patch_block_reason(old, new)
+                if blocked:
+                    return {
+                        "path": path,
+                        "old_text": old,
+                        "new_text": new,
+                        "status": "error",
+                        "error": blocked,
+                        "applies": False,
+                        "apply_check": "dialogue_kept",
+                        "summary": blocked,
+                    }
+    precheck = _span_apply_precheck(path, old, new)
     if not precheck.get("applies"):
         return {
             "path": path,
-            "old_text": old_text,
-            "new_text": new_text,
+            "old_text": old,
+            "new_text": new,
             "status": "error",
             "error": precheck.get("apply_check_error") or "patch does not apply",
             "applies": False,
@@ -163,8 +188,8 @@ async def propose_patch(
     return {
         "patch_id": patch_id,
         "path": path,
-        "old_text": old_text,
-        "new_text": new_text,
+        "old_text": old,
+        "new_text": new,
         "summary": summary or f"Proposed changes to {path}",
         "status": "pending",
         "applies": True,
@@ -188,7 +213,18 @@ async def apply_patch(
     target.parent.mkdir(parents=True, exist_ok=True)
     existing = target.read_text(encoding="utf-8") if target.exists() else ""
     old = old_text or ""
+    new = new_text or ""
     force = str(_kwargs.get("force_full_replace", "")).lower() in {"1", "true", "yes"}
+
+    if old and is_prose_writing_path(path) and existing:
+        old, new = sanitize_prose_patch(existing, old, new)
+        blocked = prose_patch_block_reason(old, new)
+        if blocked:
+            return {
+                "path": path,
+                "status": "error",
+                "error": blocked,
+            }
 
     if old:
         count = existing.count(old)
@@ -204,22 +240,22 @@ async def apply_patch(
                 "status": "error",
                 "error": f"old_text matches {count} times; use a longer unique span",
             }
-        final = existing.replace(old, new_text, 1)
+        final = existing.replace(old, new, 1)
     else:
         if (
             not force
             and len(existing) >= 500
-            and len(new_text) < max(200, int(len(existing) * 0.4))
+            and len(new) < max(200, int(len(existing) * 0.4))
         ):
             return {
                 "path": path,
                 "status": "error",
                 "error": (
-                    f"refusing full replace that shrinks {len(existing)}→{len(new_text)} chars; "
+                    f"refusing full replace that shrinks {len(existing)}→{len(new)} chars; "
                     "pass old_text for a surgical edit, or force_full_replace=true for intentional rewrite"
                 ),
             }
-        final = new_text
+        final = new
 
     target.write_text(final, encoding="utf-8")
     return {
