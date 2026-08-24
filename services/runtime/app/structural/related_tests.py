@@ -1,12 +1,5 @@
-"""Suggest related tests after a successful code edit (Wave 3 W8 + Wave 4 W11).
 
-Returns ``[{path, command}, …]`` — never executes. Empty list → omit field on
-edit_file result. Commands are conservative templates the model can copy into
-``run_command`` / ``run_tests``.
-
-Balance: useful hints on real repos (incl. nested ``tests/``) without unbounded
-whole-tree work. Callers should run this off the event loop (``to_thread``).
-"""
+"""编辑后关联 pytest 路径启发式（命名/import 反向）。"""
 
 from __future__ import annotations
 
@@ -46,7 +39,10 @@ _PYTEST_CMD_TMPL = "python -m pytest {path} -x -q"
 
 
 def pytest_command_for(path: str) -> str:
-    """Conservative, copy-pasteable pytest invocation for one test path."""
+    """作用：pytest_command_for 公开 API。
+
+参数：
+    ``path``"""
     rel = path.replace("\\", "/").lstrip("./")
     return _PYTEST_CMD_TMPL.format(path=rel)
 
@@ -62,7 +58,10 @@ def _as_entries(paths: list[str]) -> list[dict[str, str]]:
 
 
 def related_test_paths(entries: list[Any]) -> list[str]:
-    """Normalize related_tests payload (str paths or {path,command}) → path list."""
+    """作用：related_test_paths 公开 API。
+
+参数：
+    ``entries``"""
     out: list[str] = []
     for item in entries or []:
         if isinstance(item, str) and item.strip():
@@ -486,11 +485,10 @@ def related_tests_for_path(
     workspace: Path | None = None,
     limit: int = _RELATED_MAX,
 ) -> list[dict[str, str]]:
-    """Return ≤limit ``{path, command}`` entries; never executes.
+    """作用：related_tests_for_path 公开 API。
 
-    Commands are **file-scoped** ``python -m pytest <file> -x -q`` (never a
-    whole tests/ directory) so copy-paste stays narrow for sweb.eval.
-    """
+参数：
+    ``path``"""
     if language_for_path(path) is None:
         return []
     from app.tools.core.paths import _workspace_root

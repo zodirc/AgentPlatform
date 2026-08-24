@@ -1,4 +1,4 @@
-"""Thin pre-draft spec for writing volatile context. No LLM."""
+"""Writing spec volatile 块。"""
 
 from __future__ import annotations
 
@@ -40,6 +40,13 @@ _PLOT = re.compile(r"加压|推进|往前")
 
 
 def infer_fragment_from_duty(duty: str) -> str:
+    """章职→fragment。
+    
+    参数:
+        duty。
+    
+    返回:
+        str。"""
     text = duty or ""
     if _PAD.search(text) and _CLIMAX.search(text):
         return "mixed"
@@ -76,7 +83,13 @@ def build_writing_spec_block(
     *,
     workspace_root: Path | None = None,
 ) -> str:
-    """~200–400 chars: fragment + duty + patch-only repair. Volatile only."""
+    """Writing spec 块。
+    
+    参数:
+        message/workspace_root。
+    
+    返回:
+        str。"""
     doc, _rel = load_manuscript_doc(workspace_root)
     outline = _outline_md(workspace_root)
     fresh = wants_new_piece(message) and manuscript_is_occupied(doc)

@@ -1,7 +1,5 @@
-"""Single-file structure outline for truncated read_file (Wave 3 W7).
 
-Only attached when a code read hits the char/line budget — never pre-injected.
-"""
+"""read_file 截断时附加单文件结构 outline（Wave 3 W7）。"""
 
 from __future__ import annotations
 
@@ -31,7 +29,10 @@ def file_outline_lines(
     path: str | Path,
     limit: int = _OUTLINE_MAX,
 ) -> list[str]:
-    """Return ``<line> <kind> <name>`` rows; empty on parse failure."""
+    """作用：file_outline_lines 公开 API。
+
+参数：
+    ``text``"""
     suffix = Path(path).suffix.lower()
     if suffix in {".md", ".markdown", ".txt"}:
         return _markdown_outline_lines(text, limit=limit)
@@ -84,7 +85,10 @@ def attach_outline_if_truncated(
     text: str,
     path: str,
 ) -> dict[str, Any]:
-    """Mutate/return read_file result: add outline only when truncated."""
+    """作用：attach_outline_if_truncated 公开 API。
+
+参数：
+    ``result``"""
     if not result.get("truncated"):
         return result
     lines = file_outline_lines(text, path=path)

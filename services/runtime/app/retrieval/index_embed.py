@@ -1,4 +1,8 @@
-"""Index-plane batch embedding helpers (docs/15). Never used on search hot path."""
+"""索引平面批量嵌入辅助（RAG sync 写入路径，非 search 热路径）。
+
+职责：flush 批量大小、commit 频率、``assign_deferred_vectors`` 填充 chunk.vector。
+在 RAG 链路中的位置：``pgvector_store.sync`` / ``vector_index.sync`` 嵌入阶段。
+"""
 
 from __future__ import annotations
 
@@ -13,15 +17,12 @@ logger = logging.getLogger(__name__)
 
 
 def embedding_batch_size() -> int:
+    """单次 embed_many 的 batch 大小（settings 默认 64）。"""
     return max(1, int(getattr(settings, "embedding_batch_size", None) or 64))
 
 
 def index_flush_chunk_cap(*, force_reindex: bool = False) -> int:
-    """How many deferred chunks to buffer before embed+write flush.
-
-    Force reindex (model/INDEX bump) uses a much larger cap so GPU batches and
-    PG writes amortize better; incremental sync stays small for low latency.
-    """
+    """缓冲多少 deferred chunk 后再 embed+写盘；全量重嵌时用更大 cap。"""
     base = embedding_batch_size()
     override = int(getattr(settings, "embedding_flush_chunks", None) or 0)
     if override > 0:
@@ -32,7 +33,7 @@ def index_flush_chunk_cap(*, force_reindex: bool = False) -> int:
 
 
 def index_commit_every_flushes(*, force_reindex: bool = False) -> int:
-    """Commit every N flushes (resume checkpoints). Force reindex commits less often."""
+    """每 N 次 flush 提交一次 PG 事务（resume checkpoint）。"""
     override = int(getattr(settings, "embedding_commit_every_flushes", None) or 0)
     if override > 0:
         return max(1, override)
@@ -40,6 +41,7 @@ def index_commit_every_flushes(*, force_reindex: bool = False) -> int:
 
 
 def progress_every_files() -> int:
+    """sync 日志/进度每隔多少文件打一条（0 表示仅依赖其它触发）。"""
     return max(0, int(getattr(settings, "embedding_progress_every_files", None) or 25))
 
 
@@ -51,9 +53,15 @@ def assign_deferred_vectors(
     chunks_done_before: int = 0,
     chunks_total_hint: int | None = None,
 ) -> int:
-    """Pop ``embed_input`` from chunks and set ``vector`` via batched encode.
+    """从 chunk 的 ``embed_input`` 批量嵌入并写入 ``vector``。
 
-    Returns number of vectors assigned.
+    参数:
+        chunks: 含 embed_input 或已有 vector 的 chunk dict 列表（原地修改）。
+        embedder: 嵌入器实例。
+        label: 进度日志标签。
+        chunks_done_before / chunks_total_hint: 进度分母提示。
+    返回:
+        本次新赋值的向量条数。
     """
     pending: list[tuple[dict[str, Any], str]] = []
     for chunk in chunks:

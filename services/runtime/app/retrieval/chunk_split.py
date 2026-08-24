@@ -1,7 +1,7 @@
-"""Boundary-aware oversized split (quality-uplift R-1 / R-2).
+"""边界感知超长文本切分（索引平面 R-1/R-2）。
 
-Async/index path only. Token counting uses the ST tokenizer when already loaded;
-otherwise a CJK-aware char estimate. No new third-party splitter.
+职责：在段落/句/词边界 snap，优先 HF tokenizer 窗口，否则 CJK 感知字符预算。
+仅 async/index 路径使用；不在 search 热路径。
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ _SENTENCE_END = frozenset("。！？!?.;")
 
 
 def estimate_tokens(text: str) -> int:
-    """CJK ≈ 1 token/char; latin ≈ 4 chars/token."""
+    """无 tokenizer 时的 token 估算：CJK≈1字/token，拉丁≈4字符/token。"""
     if not text:
         return 0
     cjk = len(_CJK_RE.findall(text))
@@ -24,6 +24,7 @@ def estimate_tokens(text: str) -> int:
 
 
 def count_embed_tokens(text: str) -> int:
+    """计数嵌入 token 数：已加载 HF tokenizer 则精确，否则 ``estimate_tokens``。"""
     tok = _try_hf_tokenizer()
     if tok is None:
         return estimate_tokens(text)
@@ -42,10 +43,14 @@ def split_oversized(
     size_tokens: int,
     overlap_tokens: int,
 ) -> list[tuple[str, int]]:
-    """Return ``(part, origin_char_start)`` slices.
+    """超长段切分为 ``(片段, 起始字符偏移)`` 列表。
 
-    Prefer token windows when a HF tokenizer is already loaded; else char
-    budget (CJK → ~1:1 tokens, latin → ``size_chars``).
+    参数:
+        text: 待切分正文。
+        size_chars / overlap_chars: 字符窗口（无 tokenizer 或 CJK 比例高时使用）。
+        size_tokens / overlap_tokens: token 窗口（HF tokenizer 已加载时优先）。
+    返回:
+        非空时至少一段；原文未超长则 ``[(text, 0)]``。
     """
     if not text:
         return []

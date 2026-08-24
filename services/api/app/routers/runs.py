@@ -1,3 +1,8 @@
+"""Run（单次 turn 执行）只读查询路由。
+
+Run 与 turn 1:1；本模块暴露 run 状态、终止原因与 cancel 标记等运维字段。
+"""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -17,6 +22,15 @@ async def get_run(
     run_id: UUID,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """按 run_id 查询执行记录（须拥有关联 session）。
+
+    参数:
+        run_id: Run UUID。
+        actor: 经 parent turn 的 session 校验 owner。
+
+    返回:
+        RunResponse；run 或 turn 不存在、无权限时 404。
+    """
     run = await turn_svc.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")

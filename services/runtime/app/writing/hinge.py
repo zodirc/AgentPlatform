@@ -1,7 +1,4 @@
-"""Detect AI hinge rhythm: 看见/听到 → 立马 → 却/回头.
-
-Soft facts only. Callers never mutate disk. Not a plot-debt detector.
-"""
+"""AI hinge 节奏检测；仅 soft facts。"""
 
 from __future__ import annotations
 
@@ -23,7 +20,13 @@ def _sentences(text: str) -> list[str]:
 
 
 def count_hinge_chains(text: str) -> int:
-    """Count 看见…立马 plus 却/回头 in the same or next sentence."""
+    """完整 hinge 链数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     sents = _sentences(text)
     n = 0
     used_next = set()
@@ -41,7 +44,13 @@ def count_hinge_chains(text: str) -> int:
 
 
 def count_see_now(text: str) -> int:
-    """看见/听到 + 立刻 in the same sentence (twist not required)."""
+    """看见+立刻句数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     n = 0
     for sent in _sentences(text):
         if _SEE.search(sent) and _NOW.search(sent):
@@ -50,7 +59,13 @@ def count_see_now(text: str) -> int:
 
 
 def count_see_now_meta(text: str) -> int:
-    """看见/听到 + 立刻 + 明白/知道 — the AI stimulus-then-epiphany tell."""
+    """看见+立刻+明白句数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     n = 0
     for sent in _sentences(text):
         if _SEE.search(sent) and _NOW.search(sent) and _SEE_NOW_META.search(sent):
@@ -59,7 +74,13 @@ def count_see_now_meta(text: str) -> int:
 
 
 def hinge_fields(content: str) -> dict[str, Any]:
-    """Attach to draft_section. Dense when a full chain, a see-now-meta, or repeated see-now."""
+    """hinge 软事实。
+    
+    参数:
+        content。
+    
+    返回:
+        dict。"""
     from app.writing.text_metrics import visible_chars
 
     text = content or ""
@@ -79,7 +100,13 @@ def hinge_fields(content: str) -> dict[str, Any]:
 
 
 def find_hinge_span(text: str, *, max_chars: int = 360) -> str:
-    """Exact slice covering the first 看见/听到 + 立刻 chain."""
+    """hinge repair span。
+    
+    参数:
+        text/max_chars。
+    
+    返回:
+        str。"""
     sents = _sentences(text)
     body = text or ""
     for i, sent in enumerate(sents):

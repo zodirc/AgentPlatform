@@ -1,3 +1,9 @@
+"""Turn 与 Run 持久化：创建、幂等、查询及启动失败标记。
+
+负责 ``turns`` / ``runs`` / ``turn_views`` 初始行写入，pull 模式下同事务
+``pg_notify('turn_dispatch_channel')``，以及 Ops 模型密钥 escrow 入口。
+"""
+
 from __future__ import annotations
 
 import json
@@ -37,6 +43,15 @@ async def _find_existing_turn(
 async def find_existing_turn(
     session_id: UUID, client_request_id: UUID
 ) -> tuple[dict, dict] | None:
+    """按 client_request_id 查找已存在的 turn+run（幂等创建）。
+
+    参数:
+        session_id: 会话 UUID。
+        client_request_id: 客户端幂等键。
+
+    返回:
+        ``(turn_dict, run_dict)`` 或 None。
+    """
     pool = await get_pool()
     return await _find_existing_turn(pool, session_id, client_request_id)
 
@@ -64,10 +79,17 @@ def resolve_pull_eligible(
     dispatch_notify: bool = True,
     pull_eligible: bool | None = None,
 ) -> bool:
-    """Legacy escape hatch: dispatch_notify=False still blocks pull.
+    """解析 run 是否进入 pull 队列且可被 runtime claim。
 
-    Prefer StartSpec + secret escrow (ops_eval / model_override on create_turn)
-    so Ops and Web share one pull queue.
+    参数:
+        dispatch_notify: False 时强制不可 pull（legacy 逃生口）。
+        pull_eligible: 显式覆盖；None 时等同 dispatch_notify。
+
+    返回:
+        是否 ``pull_eligible``。
+
+    说明:
+        Ops 与 Web 应统一经 StartSpec + 密钥 escrow，共享同一 pull 队列。
     """
     eligible = dispatch_notify if pull_eligible is None else bool(pull_eligible)
     if not dispatch_notify:
@@ -88,11 +110,25 @@ async def create_turn(
     model_mode: str | None = None,
     model_override: dict[str, Any] | None = None,
 ) -> tuple[dict, dict, bool]:
-    """Create turn + run (+ optional StartSpec / model escrow).
+    """原子创建 turn、run 与空 turn_view；支持幂等与 Ops 模型密钥。
 
-    Mature path: Ops passes ``ops_eval=True`` and optional ``model_override``;
-    override is Fernet-encrypted into ``turn_model_secrets`` and the run stays
-    ``pull_eligible`` so claim reconstructs ``start_turn`` (no HTTP push fork).
+    参数:
+        session_id: 父会话。
+        scenario_id: 场景 id。
+        message: 用户输入。
+        client_request_id: 可选幂等键；冲突时返回已有行且 created=False。
+        dispatch_notify: 是否 pg_notify 唤醒 pull runtime。
+        pull_eligible: 覆盖是否可 claim。
+        plan_phase: planning/executing 或 None。
+        ops_eval: Ops 评测 run 标记。
+        model_mode: stub/live/recorded。
+        model_override: 含 api_key 时 Fernet 写入 turn_model_secrets。
+
+    返回:
+        ``(turn, run, created)``；created False 表示幂等重放。
+
+    说明:
+        ON CONFLICT DO NOTHING 关闭 SELECT-INSERT 竞态；丢失竞态时再读 winner。
     """
     eligible = resolve_pull_eligible(
         dispatch_notify=dispatch_notify,
@@ -206,6 +242,16 @@ async def create_turn(
 
 
 async def mark_turn_start_failed(turn_id: UUID, run_id: UUID, *, message: str) -> None:
+    """push 模式 runtime start_turn 失败时，将 turn/run/view 标为 failed。
+
+    参数:
+        turn_id: Turn UUID。
+        run_id: Run UUID。
+        message: 错误摘要（写入 turn_views.latest_output，截断 512）。
+
+    返回:
+        None。
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -233,6 +279,14 @@ async def mark_turn_start_failed(turn_id: UUID, run_id: UUID, *, message: str) -
 
 
 async def get_turn(turn_id: UUID) -> dict | None:
+    """按 id 读取 turn 基础字段。
+
+    参数:
+        turn_id: Turn UUID。
+
+    返回:
+        行 dict 或 None。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -256,6 +310,14 @@ def _latest_plan_from_artifacts(artifacts: Any) -> dict | None:
 
 
 async def list_turns_for_session(session_id: UUID) -> list[dict]:
+    """列出会话内 turn，LEFT JOIN turn_views 附带 latest_output 与 plan。
+
+    参数:
+        session_id: 会话 UUID。
+
+    返回:
+        dict 列表；``plan`` 取自 artifacts 中最后一个 type=plan 项。
+    """
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -284,6 +346,14 @@ async def list_turns_for_session(session_id: UUID) -> list[dict]:
 
 
 async def get_run_for_turn(turn_id: UUID) -> dict | None:
+    """读取 turn 关联 run（控制命令、cancel 用）。
+
+    参数:
+        turn_id: Turn UUID。
+
+    返回:
+        run 行 dict 或 None。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -296,6 +366,14 @@ async def get_run_for_turn(turn_id: UUID) -> dict | None:
 
 
 async def get_run(run_id: UUID) -> dict | None:
+    """按 run_id 读取完整 run 行（含 termination、时间戳）。
+
+    参数:
+        run_id: Run UUID。
+
+    返回:
+        run 行 dict 或 None。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """

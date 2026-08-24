@@ -1,8 +1,4 @@
-"""Deterministic length / outline-thin facts for writing tool results.
-
-Counts match writing/system.md: 「N 字」= 实体文字 (non-whitespace), not raw
-``len()``. No LLM. Signals only — callers never mutate disk because of these.
-"""
+"""长度/大纲薄度事实；N字=实体文字。"""
 
 from __future__ import annotations
 
@@ -59,14 +55,26 @@ _CHAPTER_LINE = re.compile(
 
 
 def visible_chars(text: str) -> int:
-    """Entity-text count: CJK / letters / digits / punctuation; not whitespace."""
+    """实体字计数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     if not text:
         return 0
     return sum(1 for ch in text if not ch.isspace())
 
 
 def parse_char_quota(user_text: str) -> int | None:
-    """This Turn's user text only. ASCII digits. None if the user did not name N 字."""
+    """解析 N 字配额。
+    
+    参数:
+        user_text。
+    
+    返回:
+        int|None。"""
     text = user_text or ""
     if not text:
         return None
@@ -81,7 +89,13 @@ def parse_char_quota(user_text: str) -> int | None:
 
 
 def wants_short_prose(user_text: str) -> bool:
-    """User asked for a surgical / short span — not a 5k–6k chapter."""
+    """是否短 prose。
+    
+    参数:
+        user_text。
+    
+    返回:
+        bool。"""
     text = user_text or ""
     if not text.strip():
         return False
@@ -90,7 +104,13 @@ def wants_short_prose(user_text: str) -> bool:
 
 
 def looks_like_chapter_draft(user_text: str) -> bool:
-    """成篇 / 写一章 / 续写 — apply default chapter quota when N 字 was not named."""
+    """是否章 draft。
+    
+    参数:
+        user_text。
+    
+    返回:
+        bool。"""
     text = user_text or ""
     if not text.strip() or wants_short_prose(text):
         return False
@@ -98,6 +118,13 @@ def looks_like_chapter_draft(user_text: str) -> bool:
 
 
 def resolve_draft_quota(user_text: str) -> int | None:
+    """draft 配额。
+    
+    参数:
+        user_text。
+    
+    返回:
+        int|None。"""
     named = parse_char_quota(user_text)
     if named is not None:
         return named
@@ -107,7 +134,13 @@ def resolve_draft_quota(user_text: str) -> int | None:
 
 
 def wants_outline_toc_only(user_text: str) -> bool:
-    """User asked for a short TOC / title list — do not flag thin chapters."""
+    """是否短目录。
+    
+    参数:
+        user_text。
+    
+    返回:
+        bool。"""
     text = user_text or ""
     if not text:
         return False
@@ -118,7 +151,13 @@ def wants_outline_toc_only(user_text: str) -> bool:
 
 
 def outline_thin_chapters(md: str, *, min_visible: int = OUTLINE_MIN_VISIBLE) -> list[str]:
-    """Titles whose body has fewer than ``min_visible`` entity chars."""
+    """偏薄章标题。
+    
+    参数:
+        md/min_visible。
+    
+    返回:
+        list。"""
     text = md or ""
     spans: list[tuple[int, int, str]] = []
     for match in _MD_HEADING.finditer(text):
@@ -139,6 +178,13 @@ def outline_thin_chapters(md: str, *, min_visible: int = OUTLINE_MIN_VISIBLE) ->
 
 
 def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
+    """长度软事实。
+    
+    参数:
+        content/user_text。
+    
+    返回:
+        dict。"""
     vis = visible_chars(content)
     out: dict[str, object] = {"visible_chars": vis}
     quota = resolve_draft_quota(user_text)
@@ -155,6 +201,13 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
 
 
 def outline_thin_fields(scored_md: str, user_text: str) -> dict[str, object]:
+    """大纲薄软事实。
+    
+    参数:
+        scored_md/user_text。
+    
+    返回:
+        dict。"""
     if wants_outline_toc_only(user_text):
         return {"outline_thin": False}
     thin = outline_thin_chapters(scored_md)

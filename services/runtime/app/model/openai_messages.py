@@ -1,4 +1,7 @@
+"""内部 message → OpenAI chat 格式；修复 compaction 后 tool_call 链断裂。"""
+
 from __future__ import annotations
+
 
 import json
 from typing import Any

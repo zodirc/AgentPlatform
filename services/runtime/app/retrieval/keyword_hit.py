@@ -1,4 +1,8 @@
-"""Keyword-mode search hit builder with optional section alignment (docs/15 RE1)."""
+"""keyword 模式：直扫文件构建 hit（RAG 非向量回退路径）。
+
+按词项 OR/AND 匹配文件，可选 Markdown 分节对齐最佳 excerpt。
+在 RAG 链路中的位置：``retrieval_mode=keyword`` 且不走向量索引时。
+"""
 
 from __future__ import annotations
 
@@ -33,11 +37,16 @@ def keyword_hit_from_file(
     parse_budget_ms: float,
     require_all_terms: bool = False,
 ) -> dict[str, Any] | None:
-    """Build one keyword hit dict; None if file does not match terms.
+    """从单个文件构建 keyword hit；不匹配 terms 时返回 None。
 
-    Default match is OR (any distinctive term): SciFact-style claims often use
-    verbs/entities absent from the abstract, so AND-all wiped true lexical hits.
-    Pass ``require_all_terms=True`` for strict conjunction.
+    参数:
+        fp: 磁盘文件 Path。
+        rel_path: 展示用相对路径。
+        terms: 查询词列表；默认 OR，``require_all_terms`` 为 AND。
+        excerpt_chars: 摘录最大字符。
+        max_file_bytes / parse_budget_ms: 大文件与分节解析预算。
+    返回:
+        hit dict 或 None。
     """
     try:
         size = fp.stat().st_size

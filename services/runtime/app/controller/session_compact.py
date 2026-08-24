@@ -1,3 +1,9 @@
+"""Session 上下文 compact：历史抽摘要、写 context_summary、替换 transcript。
+
+可走确定性 structured_summary，或在有 gateway 时用 LLM 润色；
+再经 Profile hooks.compact_bookmark 挂写作书签（确定性，不再多调模型）。
+"""
+
 from __future__ import annotations
 
 import json
@@ -16,6 +22,15 @@ from app.model.gateway import ModelGateway
 
 
 async def load_session_turn_history(session_id: UUID, *, limit: int = 20) -> list[dict[str, Any]]:
+    """拉取近期已终态 Turn 的输入/输出摘要行（新→旧，受 limit 限制）。
+
+    参数:
+        session_id: 会话主键。
+        limit: 最多行数，默认 20。
+
+    返回:
+        含 id / user_input / latest_output / status 的 dict 列表。
+    """
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -34,6 +49,14 @@ async def load_session_turn_history(session_id: UUID, *, limit: int = 20) -> lis
 
 
 async def session_turn_count(session_id: UUID) -> int:
+    """统计 session 下 Turn 总数（含进行中）。
+
+    参数:
+        session_id: 会话主键。
+
+    返回:
+        非负整数。
+    """
     pool = await get_pool()
     value = await pool.fetchval(
         "SELECT COUNT(*)::int FROM turns WHERE session_id = $1",
@@ -43,6 +66,12 @@ async def session_turn_count(session_id: UUID) -> int:
 
 
 async def save_session_context_summary(session_id: UUID, summary: dict[str, Any]) -> None:
+    """把 compact 结果写入 sessions.context_summary。
+
+    参数:
+        session_id: 会话主键。
+        summary: 可 JSON 序列化的 summary record。
+    """
     pool = await get_pool()
     await pool.execute(
         """
@@ -63,11 +92,27 @@ async def compact_session_context(
     scenario_id: str | None = None,
     last_user_message: str = "",
 ) -> tuple[StructuredSummary, str]:
+    """对 session 做一次上下文压缩并落库。
+
+    流程：读历史 → 确定性摘要 →（可选）LLM 润色 → 挂 bookmark hook →
+    写 context_summary + 用 summary 替换 transcript。
+
+    参数:
+        session_id: 会话主键。
+        turn_id: 触发 compact 的 Turn（写入 last_turn_id）。
+        gateway: 有则尝试 LLM 摘要；None 则纯确定性。
+        scenario_id: 场景键，用于解析 compact_bookmark hook。
+        last_user_message: 最近用户话，交给 bookmark hook。
+
+    返回:
+        ``(StructuredSummary, 给用户的确认短文)``。
+    """
     rows = await load_session_turn_history(session_id)
     deterministic = structured_summary_from_turn_rows(rows)
 
     summary = deterministic
     if gateway is not None and rows:
+        # LLM 失败时 summarizer 内部应回退 fallback；此处仍以确定性为底。
         summary = await summarize_turn_history_with_gateway(gateway, rows, fallback=deterministic)
 
     turn_count = await session_turn_count(session_id)
@@ -81,6 +126,7 @@ async def compact_session_context(
     )
 
     # docs/24 WT2: compact bookmark via Profile hooks.compact_bookmark (deterministic; no extra LLM)
+    # 书签由场景 hook 确定性写入，避免再烧一轮模型。
     try:
         from app.scenarios.hooks import resolve
         from app.scenarios.registry import ScenarioRegistry

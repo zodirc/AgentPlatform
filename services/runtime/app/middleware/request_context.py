@@ -1,3 +1,5 @@
+"""Starlette 中间件：解析/生成 ``X-Request-ID`` 并绑定 structlog 上下文。"""
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -20,7 +22,18 @@ def _parse_request_id(raw: str) -> UUID:
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
+    """作用：每个 HTTP 请求入口绑定 ``request_id`` 并回写响应头。"""
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        """作用：解析请求 ID、清理/绑定 structlog contextvars、透传下游。
+
+        参数：
+            request: Starlette 请求。
+            call_next: 下一层 ASGI 处理器。
+
+        返回：
+            附带 ``X-Request-ID`` 响应头的 Response。
+        """
         raw = request.headers.get(REQUEST_ID_HEADER, "")
         request_id = _parse_request_id(raw) if raw else uuid4()
         request.state.request_id = request_id

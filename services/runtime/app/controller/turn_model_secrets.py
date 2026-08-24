@@ -1,4 +1,8 @@
-"""Consume per-turn model override escrow at pull claim (once)."""
+"""按 Turn 的模型覆盖密钥托管：pull claim 时一次性消费。
+
+API 侧把覆盖配置加密写入 turn_model_secrets；Runner 领取时
+原子 UPDATE consumed_at 并解密，避免密钥复用或过期后仍被读出。
+"""
 
 from __future__ import annotations
 
@@ -14,10 +18,22 @@ logger = logging.getLogger(__name__)
 
 
 async def consume_turn_model_override(run_id: UUID) -> dict[str, Any] | None:
-    """Atomically read+mark consumed; returns override dict or None."""
+    """原子读取并标记已消费；返回覆盖配置或 None。
+
+    仅认 ``consumed_at IS NULL`` 且未过期的行；解密失败或缺少 api_key
+    时返回 None（已消费标记仍保留，防止反复重试同一坏密文）。
+
+    参数:
+        run_id: 与 Turn/run 绑定的主键。
+
+    返回:
+        含 provider / model_name / api_key / base_url /
+        context_window_tokens 的 dict；无可用行时为 None。
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            # 同事务内 UPDATE…RETURNING，保证多 Runner 抢 claim 时只消费一次。
             row = await conn.fetchrow(
                 """
                 UPDATE turn_model_secrets

@@ -1,4 +1,11 @@
-"""Background runner heartbeat + lease renewal (O3 / WP1)."""
+"""Runner 心跳与租约续期（O3 / WP1）。
+
+English: Periodic runner heartbeat and bulk lease renewal (O3 / WP1).
+
+周期向 ``runners`` 表上报 capacity/inflight，并续期本 runner 持有的 run lease；
+供多实例调度与 api lease reclaim 判断 worker 存活。与 ``touch_run_lease``（单 run
+热路径）互补。
+"""
 
 from __future__ import annotations
 
@@ -44,6 +51,18 @@ async def _heartbeat_loop() -> None:
 
 
 def start_runner_heartbeat() -> None:
+    """启动 runner 心跳后台循环（租约未启用则空操作）。
+
+    作用:
+        lifespan 入口：按 runner_heartbeat_interval_seconds 周期 upsert 心跳并 renew lease；
+        已运行且未结束时不会重复创建。
+
+    参数:
+        无。
+
+    返回:
+        None。
+    """
     global _heartbeat_task
     if not settings.runner_lease_enabled:
         return
@@ -53,6 +72,17 @@ def start_runner_heartbeat() -> None:
 
 
 async def stop_runner_heartbeat() -> None:
+    """取消并等待 runner 心跳后台任务结束。
+
+    作用:
+        lifespan 退出时停止心跳循环并重置模块级 task 引用。
+
+    参数:
+        无。
+
+    返回:
+        None。
+    """
     global _heartbeat_task
     task = _heartbeat_task
     _heartbeat_task = None

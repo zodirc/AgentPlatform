@@ -1,6 +1,10 @@
-from __future__ import annotations
+"""Runtime workspace 代理（Sources/AST 浏览器 HTTP 转发）。
 
-from uuid import UUID
+将 end-user 解析为 ``work_id``/``work_root`` tenant 参数，调用 runtime
+``/internal/workspace/*`` 并映射 ``WorkspaceProxyError``。
+"""
+
+from __future__ import annotations
 
 import httpx
 from fastapi import HTTPException, Request
@@ -11,6 +15,8 @@ from app.settings import settings
 
 
 class WorkspaceProxyError(Exception):
+    """Runtime workspace API 非 2xx 响应包装。"""
+
     def __init__(self, status_code: int, detail: str) -> None:
         self.status_code = status_code
         self.detail = detail
@@ -56,6 +62,7 @@ def _workspace_http_client() -> httpx.AsyncClient:
 
 
 async def close_workspace_http() -> None:
+    """API shutdown：关闭共享 workspace HTTP 客户端。"""
     global _workspace_http
     client = _workspace_http
     _workspace_http = None
@@ -68,6 +75,7 @@ async def list_entries(
     path: str = ".",
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """列出 work 目录条目（代理 runtime ``/entries``）。"""
     base = settings.runtime_url.rstrip("/")
     params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
     resp = await _workspace_http_client().get(
@@ -81,6 +89,7 @@ async def list_entries(
 
 
 async def read_file(*, path: str, tenant: dict[str, str] | None = None) -> dict:
+    """读取文本文件内容与元数据。"""
     base = settings.runtime_url.rstrip("/")
     params: dict[str, str] = {"path": path, **_tenant_params(tenant or {})}
     resp = await _workspace_http_client().get(
@@ -123,6 +132,7 @@ async def upload_source(
     content: str,
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """上传 sources 库文件并触发索引（代理 runtime upload）。"""
     base = settings.runtime_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -149,6 +159,7 @@ async def sources_index_status(
     path: str | None = None,
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """查询 sources 索引/sync 进度。"""
     base = settings.runtime_url.rstrip("/")
     params: dict[str, str] = {**_tenant_params(tenant or {})}
     if path:
@@ -269,6 +280,7 @@ async def delete_paths(
     paths: list[str],
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """批量删除 work 内路径（文件或目录）。"""
     base = settings.runtime_url.rstrip("/")
     try:
         resp = await _workspace_http_client().post(
@@ -291,6 +303,7 @@ async def save_file(
     content: str,
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """保存文本文件到 work 目录。"""
     base = settings.runtime_url.rstrip("/")
     try:
         resp = await _workspace_http_client().put(
@@ -312,6 +325,7 @@ async def mkdir_path(
     path: str,
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """创建目录。"""
     base = settings.runtime_url.rstrip("/")
     try:
         resp = await _workspace_http_client().post(
@@ -335,6 +349,7 @@ async def rename_path(
     overwrite: bool = False,
     tenant: dict[str, str] | None = None,
 ) -> dict:
+    """重命名/移动 work 内路径。"""
     base = settings.runtime_url.rstrip("/")
     try:
         resp = await _workspace_http_client().post(

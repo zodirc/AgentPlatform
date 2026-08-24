@@ -1,4 +1,7 @@
-"""Shared constants, types, and helpers for Official L1 suites."""
+"""Shared constants, types, and helpers for Official L1 suites.
+
+English: Shared constants, types, and helpers for Official L1 suites.
+"""
 
 from __future__ import annotations
 
@@ -46,17 +49,39 @@ class L1TurnTracker:
         self._lock = asyncio.Lock()
 
     async def register(self, turn_id: UUID, run_id: UUID) -> None:
+        """登记 L1 run 启动的产品 Turn，供 stop/replace 时 cancel。
+
+        English: Track a product Turn under this L1 run for cooperative cancel.
+
+        参数:
+            turn_id: 产品 Turn UUID。
+            run_id: 关联 run UUID。
+        """
         tid = turn_id if isinstance(turn_id, UUID) else UUID(str(turn_id))
         rid = run_id if isinstance(run_id, UUID) else UUID(str(run_id))
         async with self._lock:
             self._turns[str(tid)] = rid
 
     async def unregister(self, turn_id: UUID) -> None:
+        """Turn 终态后从 tracker 移除。
+
+        English: Remove a turn from the in-memory tracker.
+
+        参数:
+            turn_id: 已完成或已 cancel 的 Turn UUID。
+        """
         tid = str(turn_id)
         async with self._lock:
             self._turns.pop(tid, None)
 
     def snapshot(self) -> list[tuple[UUID, UUID]]:
+        """返回当前 (turn_id, run_id) 快照（用于并行 cancel）。
+
+        English: Copy of tracked (turn_id, run_id) pairs.
+
+        返回:
+            列表副本，不持有锁。
+        """
         return [(UUID(tid), rid) for tid, rid in list(self._turns.items())]
 
     async def cancel_all(
@@ -225,6 +250,14 @@ async def start_ephemeral_l1_run(
     *,
     on_progress: ProgressCb | None = None,
 ) -> None:
+    """L1 开始前：标记 live run id 并 sweep 孤儿 worktree。
+
+    English: Register live L1 run id and sweep orphaned UUID dirs under L1_ROOT.
+
+    参数:
+        run_id: 本次 ephemeral run 的 UUID 目录名。
+        on_progress: 可选 SSE 日志回调。
+    """
     dropped = sweep_orphaned_l1_runs(keep={str(run_id)})
     _LIVE_L1_RUN_IDS.add(str(run_id))
     if dropped:
@@ -236,6 +269,13 @@ async def start_ephemeral_l1_run(
 
 
 def finish_ephemeral_l1_run(run_id: str | None) -> None:
+    """L1 结束后：从 live 集合移除并删除 ``L1_ROOT/<uuid>`` worktree。
+
+    English: Unregister live id and cleanup ephemeral L1_ROOT/<uuid> directory.
+
+    参数:
+        run_id: ephemeral run UUID；空则仅尝试 cleanup。
+    """
     rid = str(run_id or "").strip()
     if rid:
         _LIVE_L1_RUN_IDS.discard(rid)

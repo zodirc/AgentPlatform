@@ -1,8 +1,8 @@
-"""Named scenario hooks.
+"""命名场景钩子注册与分发。
 
-Fixed slots only — Profile.hooks maps slot → implementation name.
-Implementations live in writing/collab modules; this registry is the sole
-dispatch surface (no ``if scenario == …`` at call sites).
+固定槽位（``HOOK_SLOTS``）—— Profile.hooks 映射 slot → 实现名。
+具体实现分散在 writing/collab 等模块；本模块是唯一 dispatch 面，
+调用方不得 ``if scenario == …`` 分支。
 """
 
 from __future__ import annotations
@@ -19,12 +19,25 @@ HOOK_SLOTS = frozenset(
         "compact_bookmark",
     }
 )
+"""Profile 可绑定的固定钩子槽位名集合。"""
 
 # name → callable
 _REGISTRY: dict[str, Callable[..., Any]] = {}
 
 
 def register(name: str, fn: Callable[..., Any]) -> None:
+    """注册具名钩子实现，供 Profile.hooks 引用。
+
+    参数:
+        name: 实现名（非空字符串）。
+        fn: 可调用对象；签名因槽位而异。
+
+    返回:
+        None。
+
+    抛出:
+        ValueError: ``name`` 为空。
+    """
     key = (name or "").strip()
     if not key:
         raise ValueError("hook implementation name required")
@@ -32,6 +45,17 @@ def register(name: str, fn: Callable[..., Any]) -> None:
 
 
 def resolve(name: str | None) -> Callable[..., Any] | None:
+    """按实现名查找已注册钩子。
+
+    参数:
+        name: Profile.hooks 中的实现名；空或仅空白时视为未绑定。
+
+    返回:
+        已注册的可调用对象；未绑定时为 None。
+
+    抛出:
+        RuntimeError: 名称非空但未注册。
+    """
     key = (name or "").strip()
     if not key:
         return None
@@ -45,7 +69,18 @@ def resolve(name: str | None) -> Callable[..., Any] | None:
 
 
 def validate_profile_hooks(hooks: dict[str, str]) -> None:
-    """Fail-fast at Profile load for unknown slots or missing implementations."""
+    """Profile 加载期 fail-fast：校验槽位合法且实现已注册。
+
+    参数:
+        hooks: YAML ``hooks`` 段解析后的 slot → 实现名映射。
+
+    返回:
+        None。
+
+    抛出:
+        ValueError: 未知槽位。
+        RuntimeError: 实现名未 ``register``。
+    """
     for slot, impl in (hooks or {}).items():
         if slot not in HOOK_SLOTS:
             raise ValueError(
@@ -179,6 +214,14 @@ def _writing_focus_bookmark(
 
 
 def ensure_builtins_registered() -> None:
+    """幂等注册内置钩子实现（writing / collab 等）。
+
+    参数:
+        无。
+
+    返回:
+        None。
+    """
     if _REGISTRY:
         return
     register("writing_cards", _writing_cards_composer)

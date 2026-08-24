@@ -1,6 +1,10 @@
-from __future__ import annotations
+"""终端用户认证依赖与 session 归属校验。
 
-from uuid import UUID
+Cookie/Bearer token、``require_end_user`` / ``require_session_actor``、
+WebSocket 授权及 ``assert_session_owner``（B16 密码版本校验）。
+"""
+
+from __future__ import annotations
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -23,6 +27,14 @@ def _token_from_request(request: Request) -> str | None:
 
 
 async def resolve_end_user(request: Request) -> EndUser | None:
+    """从请求解析终端用户；无效 token 或未登录返回 None。
+
+    参数:
+        request: FastAPI 请求（Cookie 或 Bearer）。
+
+    返回:
+        ``EndUser`` 或 None（含 pv 不匹配、非 active）。
+    """
     token = _token_from_request(request)
     if not token:
         return None
@@ -44,6 +56,11 @@ async def resolve_end_user(request: Request) -> EndUser | None:
 
 
 async def require_end_user(request: Request) -> EndUser:
+    """要求已登录终端用户。
+
+    异常:
+        HTTP 401: 未登录或 token 无效。
+    """
     user = await resolve_end_user(request)
     if user is None:
         raise HTTPException(
@@ -87,6 +104,19 @@ async def require_session_actor(
 
 
 async def assert_session_owner(session_id: UUID, actor: EndUser) -> dict:
+    """校验 session 归属当前用户并返回 session 行。
+
+    参数:
+        session_id: 会话 UUID。
+        actor: 当前终端用户。
+
+    返回:
+        session dict 行。
+
+    异常:
+        HTTP 404: 会话不存在。
+        HTTP 403: owner 为空或不匹配（legacy 无 owner 会话不可共享访问）。
+    """
     from app.services.resource import sessions as session_svc
 
     session = await session_svc.get_session(session_id)

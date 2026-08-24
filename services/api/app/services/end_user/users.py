@@ -1,6 +1,9 @@
-from __future__ import annotations
+"""终端用户注册、登录与 ``EndUser`` 领域模型。
 
-import re
+``end_users`` 表 CRUD；注册时创建默认 Work；``SYSTEM_USER_ID`` 供 eval/回滚模式。
+"""
+
+from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -14,6 +17,8 @@ _USERNAME_RE = re.compile(r"^[a-zA-Z0-9_\-.]{3,64}$")
 
 @dataclass(frozen=True)
 class EndUser:
+    """已认证的终端用户快照（含 token 版本）。"""
+
     id: UUID
     username: str
     status: str
@@ -23,6 +28,8 @@ class EndUser:
 
 
 class UserError(Exception):
+    """用户注册/改密等业务错误。"""
+
     def __init__(self, code: str, message: str):
         self.code = code
         self.message = message
@@ -30,6 +37,17 @@ class UserError(Exception):
 
 
 def validate_username(username: str) -> str:
+    """校验并规范化用户名。
+
+    参数:
+        username: 原始输入。
+
+    返回:
+        去空白后的合法用户名。
+
+    异常:
+        UserError: ``invalid_username`` 或 ``reserved_username``。
+    """
     cleaned = username.strip()
     if not _USERNAME_RE.match(cleaned):
         raise UserError(
@@ -42,6 +60,18 @@ def validate_username(username: str) -> str:
 
 
 async def create_user(username: str, password: str) -> EndUser:
+    """注册新用户并创建默认 Work。
+
+    参数:
+        username: 3–64 字符合法用户名。
+        password: 至少 6 字符。
+
+    返回:
+        新建 ``EndUser``。
+
+    异常:
+        UserError: 弱密码、用户名非法/保留/已占用。
+    """
     from app.services.end_user.tokens import password_token_version
 
     if len(password) < 6:
@@ -77,6 +107,15 @@ async def create_user(username: str, password: str) -> EndUser:
 
 
 async def authenticate(username: str, password: str) -> EndUser | None:
+    """用户名密码登录。
+
+    参数:
+        username: 登录名（大小写不敏感匹配）。
+        password: 明文密码。
+
+    返回:
+        ``EndUser``；不存在、非 active 或密码错误时为 None。
+    """
     from app.services.end_user.tokens import password_token_version
 
     pool = await get_pool()
@@ -103,6 +142,14 @@ async def authenticate(username: str, password: str) -> EndUser | None:
 
 
 async def get_user(user_id: UUID) -> EndUser | None:
+    """按 id 加载用户。
+
+    参数:
+        user_id: 用户 UUID。
+
+    返回:
+        ``EndUser``；不存在时为 None。
+    """
     from app.services.end_user.tokens import password_token_version
 
     pool = await get_pool()
@@ -129,6 +176,16 @@ async def change_password(
     current_password: str,
     new_password: str,
 ) -> None:
+    """修改密码（使旧 token 失效，B16）。
+
+    参数:
+        user_id: 用户 UUID。
+        current_password: 当前明文密码。
+        new_password: 新密码（≥6 字符）。
+
+    异常:
+        UserError: 用户不存在、弱密码或当前密码错误。
+    """
     if len(new_password) < 6:
         raise UserError("weak_password", "Password must be at least 6 characters")
     pool = await get_pool()
@@ -156,6 +213,11 @@ async def change_password(
 
 
 async def system_user() -> EndUser:
+    """返回迁移种子系统用户（eval / auth 关闭模式）。
+
+    异常:
+        RuntimeError: 迁移未创建 system 用户。
+    """
     user = await get_user(SYSTEM_USER_ID)
     if user is None:
         raise RuntimeError("system end_user missing; run migrations")

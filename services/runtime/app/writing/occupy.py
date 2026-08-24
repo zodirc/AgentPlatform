@@ -1,10 +1,4 @@
-"""New standalone piece vs continue the current manuscript (no LLM).
-
-A Work owns one live ``drafts/manuscript.md``. ``draft_section`` upserts chapters
-into that file, which is correct for 续写 / 下一章 and wrong when the user asks
-for an unrelated 一篇. Occupied files are archived under ``drafts/archive/``
-instead of asking the user to delete them.
-"""
+"""新篇 occupy=fresh 与归档逻辑。"""
 
 from __future__ import annotations
 
@@ -48,7 +42,13 @@ _UPSERT_TOKENS = frozenset({"upsert", "continue", "append", "0", "false", "no"})
 
 
 def wants_new_piece(user_text: str) -> bool:
-    """True for a standalone new story, not 续写 / 第N章 of the current file."""
+    """是否另起新篇。
+    
+    参数:
+        user_text。
+    
+    返回:
+        bool。"""
     text = (user_text or "").strip()
     if not text:
         return False
@@ -62,7 +62,13 @@ def wants_new_piece(user_text: str) -> bool:
 
 
 def manuscript_is_occupied(text: str) -> bool:
-    """Any keepable prose — H1 chapters or an unstructured blob."""
+    """稿是否 occupied。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     blob = text or ""
     if visible_chars(blob) <= 0:
         return False
@@ -73,7 +79,13 @@ def manuscript_is_occupied(text: str) -> bool:
 
 
 def parse_occupy_arg(raw: object | None) -> str | None:
-    """Return ``fresh`` / ``upsert`` / None (infer from the user text)."""
+    """解析 occupy 参数。
+    
+    参数:
+        raw。
+    
+    返回:
+        fresh|upsert|None。"""
     if raw is None:
         return None
     token = str(raw).strip().lower()
@@ -93,7 +105,13 @@ def should_occupy_fresh(
     already_fresh_this_turn: bool,
     occupied: bool,
 ) -> bool:
-    """First write of an unrelated new piece onto an occupied manuscript."""
+    """是否应 fresh 归档。
+    
+    参数:
+        occupy/user/flags。
+    
+    返回:
+        bool。"""
     if already_fresh_this_turn:
         return False
     parsed = parse_occupy_arg(occupy_arg)
@@ -107,6 +125,13 @@ def should_occupy_fresh(
 
 
 def next_archive_rel(stem: str) -> str:
+    """archive 路径。
+    
+    参数:
+        stem。
+    
+    返回:
+        str。"""
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     safe = re.sub(r"[^A-Za-z0-9._-]+", "-", (stem or "draft").strip()) or "draft"
     base = f"{ARCHIVE_DIR}/{stamp}-{safe}.md"
@@ -122,7 +147,13 @@ def next_archive_rel(stem: str) -> str:
 
 
 def archive_workspace_file(rel: str) -> str | None:
-    """Copy an occupied file to ``drafts/archive/``. Caller decides whether to unlink."""
+    """复制到 archive。
+    
+    参数:
+        rel。
+    
+    返回:
+        str|None。"""
     from app.tools.core.paths import _resolve_path
 
     normalized = (rel or "").strip().lstrip("/")
@@ -145,11 +176,13 @@ def archive_workspace_file(rel: str) -> str | None:
 
 
 def archive_occupied_writing_docs(*, layout: str = "monofile") -> list[str]:
-    """Archive live manuscript + outline so a new piece can own the work surface.
-
-    Returns archived relative paths. Unlinks the live draft/confirmed
-    manuscript and outline after copy so the new piece owns the work surface.
-    """
+    """归档 live 稿与 outline。
+    
+    参数:
+        layout。
+    
+    返回:
+        list。"""
     archived: list[str] = []
     from app.tools.core.paths import _resolve_path
 
@@ -191,6 +224,13 @@ def archive_occupied_writing_docs(*, layout: str = "monofile") -> list[str]:
 
 
 def occupy_result_fields(archived: list[str]) -> dict[str, Any]:
+    """occupy 结果字段。
+    
+    参数:
+        archived。
+    
+    返回:
+        dict。"""
     fields: dict[str, Any] = {"occupy": "fresh"}
     if archived:
         fields["archived"] = archived

@@ -1,3 +1,5 @@
+"""signals 组装与工具挂载。"""
+
 from __future__ import annotations
 
 import json
@@ -35,11 +37,13 @@ async def maybe_attach_prose_writing_signals(
     session_id: object | None = None,
     turn_id: object | None = None,
 ) -> None:
-    """Attach writing_signals to prose patch tool results.
-
-    Callers gate on Profile.attach_writing_signals — no scenario_id branch here.
-    After apply, score the updated chapter on disk (not isolated new_text).
-    """
+    """patch 后挂 writing_signals。
+    
+    参数:
+        result/tool_name/arguments/session/turn。
+    
+    返回:
+        None（原地修改 result）。"""
     if result.get("writing_signals"):
         return
     if result.get("error") or str(result.get("status") or "") == "error":
@@ -266,6 +270,13 @@ async def build_writing_signals(
     turn_id: object | None = None,
     persist: bool = True,
 ) -> dict[str, Any]:
+    """构建完整 signals。
+    
+    参数:
+        text/fragment/section_id/session/turn/persist。
+    
+    返回:
+        dict。"""
     owner_id, work_id = await _resolve_owner_and_work(session_id)
     prefs = await load_account_prefs(owner_id)
     space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
@@ -336,6 +347,13 @@ async def writing_rubric(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """rubric 工具。
+    
+    参数:
+        fragment/section_id/session。
+    
+    返回:
+        dict。"""
     owner_id, work_id = await _resolve_owner_and_work(session_id)
     prefs = await load_account_prefs(owner_id)
     declared = normalize_fragment(fragment)
@@ -398,6 +416,13 @@ async def evaluate_writing_fragment(
     turn_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """evaluate 工具。
+    
+    参数:
+        fragment/text/section等。
+    
+    返回:
+        dict。"""
     body = (text or "").strip()
     if not body and section_id:
         doc, _ = load_manuscript_doc()
@@ -424,6 +449,10 @@ LAB_TEXT_MAX_CHARS = 50_000
 
 
 class WritingLabError(ValueError):
+    """Lab 错误。
+    
+    参数:
+        code/message。"""
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
@@ -431,7 +460,13 @@ class WritingLabError(ValueError):
 
 
 def overlay_lab_prefs(overlay: dict[str, Any] | None) -> dict[str, Any]:
-    """Platform defaults plus optional Ops trial knobs. Never persisted."""
+    """Lab prefs 覆盖。
+    
+    参数:
+        overlay。
+    
+    返回:
+        dict。"""
     prefs = platform_prefs_payload()
     if not overlay or not isinstance(overlay, dict):
         return prefs
@@ -469,7 +504,13 @@ async def score_writing_lab(
     slug: str | None = None,
     prefs_overlay: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Ops sandbox: platform prefs + platform prototypes; never persist."""
+    """Ops sandbox 评分。
+    
+    参数:
+        text/fragment/slug/prefs。
+    
+    返回:
+        dict。"""
     source: dict[str, Any] = {"kind": "upload"}
     body = (text or "").strip()
     declared = fragment

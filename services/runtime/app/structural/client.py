@@ -1,4 +1,7 @@
+"""LSP JSON-RPC 客户端：stdio 子进程与 path↔uri。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import json
@@ -15,11 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def path_to_uri(path: Path) -> str:
+    """作用：Path → file:// URI。"""
     resolved = path.resolve()
     return "file://" + pathname2url(str(resolved))
 
 
 def uri_to_path(uri: str) -> str:
+    """作用：file URI → Path。"""
     parsed = urlparse(uri)
     if parsed.scheme != "file":
         return uri
@@ -27,7 +32,7 @@ def uri_to_path(uri: str) -> str:
 
 
 class LspSession:
-    """Thin JSON-RPC LSP client over stdio (initialize / didOpen / query / shutdown)."""
+    """作用：LSP stdio 会话封装。"""
 
     def __init__(
         self,

@@ -1,6 +1,9 @@
-from __future__ import annotations
+"""终端用户 Writing 偏好（``writing_account_prefs``）读写。
 
-import json
+与 ``agent_contracts.writing_prefs`` 合并平台默认；支持 preset 与 custom 权重表。
+"""
+
+from __future__ import annotations
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -19,6 +22,8 @@ from app.db.pool import get_pool
 
 
 class WritingPrefsResponse(BaseModel):
+    """用户写作偏好 API 响应。"""
+
     preset_label: str
     fragment_weights: dict[str, dict[str, float]]
     signal_penalties: dict[str, dict[str, float]]
@@ -30,6 +35,8 @@ class WritingPrefsResponse(BaseModel):
 
 
 class UpdateWritingPrefsRequest(BaseModel):
+    """更新写作偏好请求（字段均可选，partial update）。"""
+
     preset_label: str | None = None
     fragment_weights: dict[str, dict[str, float]] | None = None
     signal_penalties: dict[str, Any] | None = None
@@ -52,6 +59,14 @@ def _row_to_response(row: Any | None, *, merged: dict[str, Any]) -> WritingPrefs
 
 
 async def get_prefs(owner_user_id: UUID) -> WritingPrefsResponse:
+    """读取用户偏好；无行时返回平台默认 merged 视图。
+
+    参数:
+        owner_user_id: 终端用户 UUID。
+
+    返回:
+        ``WritingPrefsResponse``（``is_custom`` 表示是否有 DB 行）。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -76,6 +91,15 @@ async def get_prefs(owner_user_id: UUID) -> WritingPrefsResponse:
 
 
 async def upsert_prefs(owner_user_id: UUID, body: UpdateWritingPrefsRequest) -> WritingPrefsResponse:
+    """创建或更新用户写作偏好。
+
+    参数:
+        owner_user_id: 归属用户。
+        body: partial 更新字段。
+
+    返回:
+        更新后的 ``WritingPrefsResponse``。
+    """
     existing = await get_prefs(owner_user_id)
     preset = body.preset_label or existing.preset_label
     if preset not in PRESET_LABELS:
@@ -139,6 +163,14 @@ async def upsert_prefs(owner_user_id: UUID, body: UpdateWritingPrefsRequest) -> 
 
 
 async def reset_prefs(owner_user_id: UUID) -> WritingPrefsResponse:
+    """删除自定义偏好，回退平台默认。
+
+    参数:
+        owner_user_id: 用户 UUID。
+
+    返回:
+        默认 ``WritingPrefsResponse``（``is_custom=False``）。
+    """
     pool = await get_pool()
     await pool.execute(
         "DELETE FROM writing_account_prefs WHERE owner_user_id = $1",

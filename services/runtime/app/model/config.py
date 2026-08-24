@@ -1,4 +1,7 @@
+"""模型配置解析：DB profile、环境变量、Turn 覆盖与 context window 推断。"""
+
 from __future__ import annotations
+
 
 from dataclasses import dataclass
 from uuid import UUID
@@ -17,6 +20,7 @@ _DEFAULT_CONTEXT_WINDOWS: dict[str, int] = {
 
 @dataclass(frozen=True)
 class ModelConfig:
+    """作用：不可变模型连接配置 dataclass。"""
     provider: str
     model_name: str
     api_key: str
@@ -25,6 +29,7 @@ class ModelConfig:
 
 
 async def resolve_model_config(*, owner_user_id: UUID | None = None) -> ModelConfig | None:
+    """作用：解析生效 ModelConfig（Turn 覆盖 > DB > env）。"""
     from app.model.turn_override import current_turn_model_mode, current_turn_model_override
 
     effective_mode = current_turn_model_mode() or settings.model_mode
@@ -74,6 +79,7 @@ async def resolve_active_profile_metadata(
     *,
     owner_user_id: UUID | None = None,
 ) -> dict[str, str] | None:
+    """作用：返回 provider/model_name（无密钥）。"""
     if owner_user_id is None:
         return None
     pool = await get_pool()
@@ -99,6 +105,7 @@ async def resolve_context_window_tokens(
     *,
     owner_user_id: UUID | None = None,
 ) -> int:
+    """作用：解析 context window token 上限。"""
     config = model_config or await resolve_model_config(owner_user_id=owner_user_id)
     if config is not None and config.context_window_tokens:
         return int(config.context_window_tokens)
@@ -133,6 +140,7 @@ async def _any_active_profile_ready() -> bool:
 
 
 async def model_config_ready(*, owner_user_id: UUID | None = None) -> bool:
+    """作用：健康检查：当前模式是否可调用模型。"""
     from app.model.turn_override import current_turn_model_mode
 
     effective_mode = current_turn_model_mode() or settings.model_mode

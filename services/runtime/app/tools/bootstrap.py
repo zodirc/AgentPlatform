@@ -1,3 +1,12 @@
+"""工具注册与场景裁剪。
+
+English: Tool registry bootstrap and scenario-scoped tool lists.
+
+本模块把各 handler 组装成全量 ToolRegistry，再按 ScenarioProfile / Plan 相位裁出
+本 Turn 可用工具列表。面向模型的 ToolSpec.description 保持英文（how-to）；
+本文件 docstring / 注释面向维护者。
+"""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -9,7 +18,16 @@ from app.tools.registry import ON_WRITE_TOOLS, ToolRegistry, ToolSpec
 
 
 def build_registry() -> ToolRegistry:
+    """构建进程内全量工具注册表（所有场景的超集）。
+
+    English: Register all tool handlers into a process-wide ToolRegistry superset.
+
+    返回:
+        已注册读写、写作、检索、编码结构、shell、记忆、情报等工具的 ToolRegistry。
+        实际进模型的子集由 ``tool_scope`` 按 Profile / Plan 相位再裁。
+    """
     registry = ToolRegistry()
+    # --- 只读 / 浏览 ---
     registry.register(
         ToolSpec(
             name="read_file",
@@ -67,6 +85,7 @@ def build_registry() -> ToolRegistry:
             handler=core.list_dir,
         )
     )
+    # --- 写作补丁 / 成稿（writing · intel；agent 用 edit_file）---
     registry.register(
         ToolSpec(
             name="propose_patch",
@@ -857,10 +876,14 @@ def build_registry() -> ToolRegistry:
     return registry
 
 
-# Dropped late in a turn / after successful export (docs/13 S3 A19). Pure rules.
+# Late-stage drop set: when delivery succeeded (or steps nearly exhausted), the
+# runtime gates these retrieval/memory tools without mutating tools[] schema.
+# 成稿/导出成功或接近步数上限时，运行时闸掉的检索/记忆类工具（不改 tools[] schema）。
 _LATE_STAGE_DROP = frozenset({"search_sources", "delegate", "remember", "recall"})
 
-# Plan planning phase: checklist only — no retrieve/write/exec (docs/25 consent gate).
+# Plan phase "planning": only allow plan edits — no retrieval / disk write / exec
+# until the user clicks "execute this plan".
+# Plan「规划中」：只允许改清单，禁止检索/写盘/exec（用户尚未点「按此执行」）。
 PLANNING_TOOL_ALLOWLIST = frozenset(
     {
         "update_plan",
@@ -868,8 +891,8 @@ PLANNING_TOOL_ALLOWLIST = frozenset(
     }
 )
 
-# After「按此执行」, Plan consent covers file mutations — no per-edit approval (docs/25 §2.4).
-# Shell/exec stays on the normal approval path (still high-risk / not implied by a checklist).
+# After "execute this plan": write tools waive re-approval; shell still uses normal approval.
+# 「按此执行」后：清单已同意 → 写盘类免再审；shell 仍走普通审批。
 _PLAN_EXECUTING_WAIVE_APPROVAL = ON_WRITE_TOOLS | frozenset({"rename_file"})
 
 
@@ -879,14 +902,33 @@ def tool_scope(
     *,
     plan_phase: str | None = None,
 ) -> list[ToolSpec]:
-    """Filter tools by scenario profile; optionally harden for Plan planning phase."""
+    """按场景 Profile（及可选 Plan 相位）裁剪本 Turn 可用工具。
+
+    English: Build the per-turn ToolSpec list from ScenarioProfile.tool_names and
+    approval_overrides, then apply plan-phase rules:
+    - ``planning`` → allowlist only (update_plan / stub_echo);
+    - ``executing`` → waive approval for on-write tools (user already approved the plan).
+
+    Always ensures ``stub_echo`` is present for ops/debug probes. Does not register
+    new handlers — only selects and ``replace()``s approval flags from
+    ``build_registry()`` output.
+
+    参数:
+        profile: 场景配置；决定 ``tool_names`` 与 ``approval_overrides``。
+        registry: ``build_registry()`` 产出的全量注册表。
+        plan_phase: 计划相位。``planning`` 时仅清单工具；``executing`` 时对写盘免审。
+            为 ``None`` 时按 Profile 默认审批策略。
+
+    返回:
+        已套用审批覆盖后的 ToolSpec 列表（可直接交给 AgentEngine / ToolExecutor）。
+    """
     names = list(profile.tool_names)
     if "stub_echo" not in names:
         names.append("stub_echo")
     phase = (plan_phase or "").strip().lower() or None
     if phase == "planning":
         names = [n for n in names if n in PLANNING_TOOL_ALLOWLIST]
-        # Ensure plan tool is always present when planning.
+        # 规划相位必须能改计划，即使 Profile 未声明 update_plan。
         if "update_plan" not in names and registry.get("update_plan") is not None:
             names.append("update_plan")
     specs: list[ToolSpec] = []
@@ -902,7 +944,7 @@ def tool_scope(
             requires = False
         elif override == "on_write":
             requires = name in ON_WRITE_TOOLS
-        # Plan executing: user already approved the checklist — waive file-write gates.
+        # 用户已批准清单 → 本相位写盘不再弹审。
         if phase == "executing" and name in _PLAN_EXECUTING_WAIVE_APPROVAL:
             requires = False
         specs.append(replace(base, requires_approval=requires))
@@ -915,7 +957,19 @@ def late_stage_tools_disabled(
     max_steps: int,
     delivery: dict | None,
 ) -> bool:
-    """True when late-stage search/memory tools should be runtime-gated (C2)."""
+    """是否应对晚期检索/记忆类工具做运行时闸（成稿已交付或步数将尽）。
+
+    English: True when delivery_status is ok/warning, or step_count≥8 with ≤6 steps
+    remaining — used to block ``_LATE_STAGE_DROP`` without changing tools[] bytes.
+
+    参数:
+        step_count: 当前已完成步数（累计）。
+        max_steps: 本 Turn 步数上限。
+        delivery: 导出/交付状态字典；``delivery_status`` 为 ok/warning 时视为已交付。
+
+    返回:
+        ``True`` 表示应拦截 ``_LATE_STAGE_DROP`` 中的工具调用。
+    """
     delivery_ok = isinstance(delivery, dict) and str(delivery.get("delivery_status", "")) in {
         "ok",
         "warning",
@@ -932,7 +986,18 @@ def stage_tool_runtime_blocked(
     max_steps: int,
     delivery: dict | None,
 ) -> bool:
-    """Runtime gate for tools that used to be removed from the schema."""
+    """判断某次工具调用是否因晚期策略被运行时拒绝（优先于改 schema）。
+
+    English: Prefer this gate over ``stage_tool_scope`` so tools[] stays byte-stable
+    for provider prefix caching. Non-``_LATE_STAGE_DROP`` tools always return False.
+
+    参数:
+        tool_name: 模型请求的工具名。
+        step_count / max_steps / delivery: 同 ``late_stage_tools_disabled``。
+
+    返回:
+        ``True`` 表示本次调用应被拦截。
+    """
     if tool_name not in _LATE_STAGE_DROP:
         return False
     return late_stage_tools_disabled(
@@ -940,10 +1005,24 @@ def stage_tool_runtime_blocked(
     )
 
 
-def stage_tool_scope(specs: list[ToolSpec], *, step_count: int, max_steps: int, delivery: dict | None) -> list[ToolSpec]:
-    """Optionally shrink tools JSON in late steps (legacy); default is no-op (C2).
+def stage_tool_scope(
+    specs: list[ToolSpec],
+    *,
+    step_count: int,
+    max_steps: int,
+    delivery: dict | None,
+) -> list[ToolSpec]:
+    """可选：晚期从 ``tools[]`` 里物理删掉检索类（遗留开关，默认关闭）。
 
-    Prefer ``stage_tool_runtime_blocked`` so the tools schema stays cache-stable.
+    English: Legacy schema-mutating path behind ``stage_tool_scope_mutate_schema``.
+    Prefer ``stage_tool_runtime_blocked`` to keep tools schema byte-stable for cache.
+
+    参数:
+        specs: 当前步拟发给模型的工具列表。
+        step_count / max_steps / delivery: 同 ``late_stage_tools_disabled``。
+
+    返回:
+        未开 mutate 开关或未达晚期条件时原样返回；否则过滤掉 ``_LATE_STAGE_DROP``。
     """
     from app.settings import settings
 

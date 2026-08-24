@@ -1,4 +1,5 @@
-"""Postgres job queue for A6 remote indexer (SKIP LOCKED)."""
+"""AST 索引任务队列（DB claim）。"""
+
 
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ STATUS_FAILED = "failed"
 
 @dataclass(slots=True)
 class AstIndexJob:
+    """作用：DB 中的索引任务记录。"""
     id: UUID
     work_id: UUID
     owner_user_id: str
@@ -42,6 +44,7 @@ class AstIndexJob:
 
 
 class AstIndexJobQueue:
+    """作用：claim/complete 索引 job。"""
     def __init__(self, pool: asyncpg.Pool | None = None) -> None:
         self._pool = pool
 
@@ -342,6 +345,7 @@ def _job_from_row(row: Any) -> AstIndexJob:
 
 
 def dirty_payload(job: AstIndexJob) -> tuple[list[str], list[str]]:
+    """作用：从 job 提取 dirty 路径列表。"""
     raw = job.paths_raw
     if isinstance(raw, dict):
         ups = [str(p) for p in (raw.get("upsert") or []) if p]

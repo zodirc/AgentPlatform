@@ -1,4 +1,7 @@
+"""structlog + stdlib 统一 JSON 日志管道（B23 ProcessorFormatter 桥接）。"""
+
 from __future__ import annotations
+
 
 import logging
 import sys
@@ -7,12 +10,7 @@ import structlog
 
 
 def configure_logging(*, service: str, level: str = "INFO") -> None:
-    """Route both structlog and stdlib loggers through one JSON pipeline.
-
-    B23: business code overwhelmingly uses ``logging.getLogger`` — without the
-    ProcessorFormatter bridge those lines bypass structlog and come out as
-    bare text with no timestamp, no JSON and no request/turn correlation.
-    """
+    """作用：统一 structlog+stdlib JSON 日志与脱敏 processor。"""
     log_level = getattr(logging, level.upper(), logging.INFO)
 
     from app.privacy.redact import redact_log_event

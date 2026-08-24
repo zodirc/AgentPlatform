@@ -1,4 +1,7 @@
-"""Promote eval thinking JSONL out of the SWE worktree."""
+"""Promote eval thinking JSONL out of the SWE worktree.
+
+English: Promote eval thinking JSONL out of the SWE worktree.
+"""
 from __future__ import annotations
 
 import json
@@ -69,6 +72,16 @@ def promote_thinking_sidecar(
 
 
 def assemble_thinking_jsonl(session_dir: Path) -> Path | None:
+    """合并 session 下 ``thinking/*.jsonl`` 为单文件 ``thinking.jsonl``。
+
+    English: Concatenate per-instance thinking sidecars into session_dir/thinking.jsonl.
+
+    参数:
+        session_dir: Official run 会话目录。
+
+    返回:
+        合并后的路径；无 sidecar 或空文件时 ``None``。
+    """
     parts = sorted((Path(session_dir) / "thinking").glob("*.jsonl"))
     if not parts:
         return None

@@ -17,6 +17,14 @@ _BATCH = 50
 
 
 async def reconcile_unclaimed_turns() -> int:
+    """Pull 模式下将超时未 claim 的 accepted run 标为 start_timeout 失败（O1）。
+
+    参数:
+        无。
+
+    返回:
+        本次修复的 run 数量；非 pull dispatch 时恒为 0。
+    """
     if (settings.turn_dispatch or "push").strip().lower() != "pull":
         return 0
     timeout = max(1.0, float(settings.turn_claim_timeout_seconds or 15.0))

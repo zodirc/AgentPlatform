@@ -1,7 +1,7 @@
-"""Query-over-index embedding lanes (backend-scaling O5 / WP2).
+"""Query 优先于 Index 的嵌入双 lane（RAG 吞吐与延迟隔离）。
 
-A single worker owns the model encode path. ``query`` jobs always drain before
-``index`` jobs so sources sync cannot unbounded-delay ``search_sources``.
+单 worker 串行 encode；``LANE_QUERY`` 始终优先于 ``LANE_INDEX``，避免 sync 饿死 search。
+在 RAG 链路中的位置：``get_embedder()`` 外包 ``PriorityLaneEmbedder``。
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ LANE_INDEX = 1
 
 
 class PriorityLaneEmbedder:
-    """Proxy embedder: sync API, priority-scheduled encode worker."""
+    """同步 API + 优先级队列的后台 embed worker 包装器。"""
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
@@ -41,12 +41,14 @@ class PriorityLaneEmbedder:
         self._worker.start()
 
     def embed(self, text: str, *, lane: int = LANE_QUERY) -> list[float]:
+        """单条嵌入；默认 query lane。"""
         vectors = self.embed_many([text], lane=lane)
         return vectors[0] if vectors else []
 
     def embed_many(
         self, texts: Sequence[str], *, lane: int = LANE_QUERY
     ) -> list[list[float]]:
+        """批量嵌入；``embedding_query_priority`` 关闭时直调 inner。"""
         if not texts:
             return []
         if not bool(getattr(settings, "embedding_query_priority", True)):
@@ -106,6 +108,7 @@ class PriorityLaneEmbedder:
 
 
 def maybe_wrap_lanes(inner: Any) -> Any:
+    """按配置将 inner embedder 包一层 PriorityLaneEmbedder。"""
     if not bool(getattr(settings, "embedding_query_priority", True)):
         return inner
     if isinstance(inner, PriorityLaneEmbedder):

@@ -1,4 +1,4 @@
-"""Writing focus / work-surface loading (docs/24 WT1). Pure heuristics — no LLM."""
+"""focus/work-surface（docs/24 WT1）；纯启发式。"""
 
 from __future__ import annotations
 
@@ -72,6 +72,13 @@ def _candidate_ids_for_number(n: int, available: list[str]) -> list[str]:
 
 
 def infer_focus_section_id(message: str, available: list[str]) -> str | None:
+    """推断 focus 章。
+    
+    参数:
+        message/available。
+    
+    返回:
+        str|None。"""
     text = (message or "").strip()
     if not text:
         return available[-1] if available else None
@@ -107,6 +114,13 @@ def infer_focus_section_id(message: str, available: list[str]) -> str | None:
 
 
 def wants_full_manuscript_read(message: str = "", *, full_flag: bool = False) -> bool:
+    """是否通读全书。
+    
+    参数:
+        message/full_flag。
+    
+    返回:
+        bool。"""
     if full_flag:
         return True
     text = message or ""
@@ -122,7 +136,13 @@ def build_work_surface_block(
     prev_tail_chars: int | None = None,
     focus_max_chars: int | None = None,
 ) -> str:
-    """Short focus+prev block for writing system prompt (docs/24 WT1b)."""
+    """Work surface 块。
+    
+    参数:
+        message/预算参数。
+    
+    返回:
+        str。"""
     budget = max_chars if max_chars is not None else settings.writing_work_surface_max_chars
     prev_n = prev_tail_chars if prev_tail_chars is not None else settings.writing_prev_tail_chars
     focus_n = focus_max_chars if focus_max_chars is not None else settings.writing_focus_max_chars
@@ -210,6 +230,13 @@ def build_writing_bookmark(
     notes: str = "",
     last_user: str = "",
 ) -> dict[str, object]:
+    """bookmark dict。
+    
+    参数:
+        focus/sections等。
+    
+    返回:
+        dict。"""
     from app.writing.manuscript import confirmed_manuscript_rel, draft_manuscript_rel
 
     return {
@@ -224,6 +251,13 @@ def build_writing_bookmark(
 
 
 def format_writing_bookmark(bookmark: dict[str, object]) -> str:
+    """格式化 bookmark。
+    
+    参数:
+        bookmark。
+    
+    返回:
+        str。"""
     sections = bookmark.get("sections_present") or []
     if isinstance(sections, list):
         sec = ", ".join(str(s) for s in sections[:24])
@@ -249,6 +283,13 @@ def format_writing_bookmark(bookmark: dict[str, object]) -> str:
 
 
 def outline_toc_snippet(workspace_root: Path | None = None, *, max_chars: int = 600) -> str:
+    """outline TOC 片段。
+    
+    参数:
+        workspace_root/max_chars。
+    
+    返回:
+        str。"""
     root = Path(workspace_root or settings.workspace_root).resolve()
     path = root / "outline.md"
     if not path.is_file():

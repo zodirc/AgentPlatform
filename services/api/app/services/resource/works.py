@@ -1,4 +1,7 @@
-"""Works (docs/27): account-scoped worlds; default Work auto-provisioned."""
+"""Works（docs/27）：账户级工作区；默认 Work 自动 provision。
+
+English: Works (docs/27): account-scoped worlds; default Work auto-provisioned.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +17,8 @@ _WORK_COLS = "id, owner_user_id, name, work_root, is_default, visibility_seed"
 
 @dataclass(frozen=True)
 class Work:
+    """账户级 Work（工作区）不可变快照。"""
+
     id: UUID
     owner_user_id: UUID
     name: str
@@ -39,6 +44,16 @@ def _isolated_root(work_id: UUID) -> str:
 
 
 async def get_default_work(owner_user_id: UUID) -> Work | None:
+    """查询用户的默认 Work（``is_default=true``）。
+
+    English: Fetch the owner's default Work row, if any.
+
+    参数:
+        owner_user_id: 账户 UUID。
+
+    返回:
+        ``Work`` 或 ``None``。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         f"""
@@ -55,6 +70,16 @@ async def get_default_work(owner_user_id: UUID) -> Work | None:
 
 
 async def get_work(work_id: UUID) -> Work | None:
+    """按 id 加载 Work。
+
+    English: Load a Work by primary key.
+
+    参数:
+        work_id: Work UUID。
+
+    返回:
+        ``Work`` 或不存在时 ``None``。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         f"""

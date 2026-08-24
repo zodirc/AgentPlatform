@@ -1,4 +1,11 @@
-"""Turn pull dispatch: LISTEN + poll claim (backend-scaling O1 / WP5)."""
+"""Turn 拉取分发：LISTEN turn_dispatch_channel + 周期 poll claim。
+
+English: Pull-based turn dispatch — LISTEN on turn_dispatch_channel + periodic poll.
+
+默认 ``TURN_DISPATCH=pull``：api 只落库 accepted Run 并 NOTIFY，本进程有空位才
+领取并调用 ``start_turn(already_claimed=True)``。``push`` 模式下本模块不启动监听；
+api 直接 HTTP 调 runtime ``/internal/commands/start-turn``。
+"""
 
 from __future__ import annotations
 
@@ -13,6 +20,8 @@ from app.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# LISTEN connection keepalive probe interval (seconds).
+# 中文：LISTEN 连接保活探测间隔（秒）。
 _LISTEN_PROBE_SECONDS = 30.0
 _dispatch_task: asyncio.Task | None = None
 _poll_task: asyncio.Task | None = None
@@ -20,10 +29,21 @@ _wake = asyncio.Event()
 
 
 def _pull_enabled() -> bool:
+    """当前配置是否为 pull 分发。
+
+    English: True when TURN_DISPATCH is pull (default); false for push mode.
+    """
     return (settings.turn_dispatch or "push").strip().lower() == "pull"
 
 
 def _has_capacity() -> bool:
+    """本进程 inflight 是否未达 ``RUNTIME_MAX_INFLIGHT_TURNS``。
+
+    English: True when this replica can accept another inflight turn.
+
+    返回:
+        ``True`` 表示还可以 claim；上限 ≤0 视为不限制。
+    """
     from app.controller.turn_controller import _active_turns
 
     max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)
@@ -33,7 +53,16 @@ def _has_capacity() -> bool:
 
 
 async def _load_accepted(run_id: UUID | None = None) -> dict | None:
-    """Load a pull-claimable accepted run (StartSpec columns included)."""
+    """加载一条可 pull 领取的 accepted Run（含 StartSpec 列）。
+
+    English: Fetch one pull_eligible accepted run, optionally by NOTIFY payload id.
+
+    参数:
+        run_id: 指定 Run（NOTIFY payload）；None 则按 created_at 取最早一条。
+
+    返回:
+        行字典；无可领取任务时为 ``None``。
+    """
     pool = await get_pool()
     if run_id is not None:
         return await pool.fetchrow(
@@ -63,7 +92,18 @@ async def _load_accepted(run_id: UUID | None = None) -> dict | None:
 
 
 async def try_claim_and_start(run_id: UUID | None = None) -> bool:
-    """Claim one accepted run when capacity allows; start existing intake path."""
+    """在有容量时领取一条 accepted Run，并走既有 ``start_turn`` 入口。
+
+    English: Claim one accepted run (atomic UPDATE via ensure_run_owned_by_runner)
+    and invoke start_turn with already_claimed=True when this replica wins.
+
+    参数:
+        run_id: NOTIFY 指定的 Run；None 表示 poll 取队首。
+
+    返回:
+        ``True`` 已 claim 并调用了 start_turn；``False`` 未启用 pull、无容量、
+        无任务或被其它副本抢先。
+    """
     if not _pull_enabled():
         return False
     if not _has_capacity():
@@ -130,6 +170,10 @@ async def try_claim_and_start(run_id: UUID | None = None) -> bool:
 
 
 async def _listen_loop() -> None:
+    """LISTEN ``turn_dispatch_channel``；NOTIFY 唤醒 claim 协程。
+
+    English: Dedicated asyncpg connection listening for turn dispatch NOTIFY.
+    """
     import asyncpg
 
     while True:
@@ -168,6 +212,10 @@ async def _listen_loop() -> None:
 
 
 async def _poll_loop() -> None:
+    """周期 poll 队首 accepted Run（LISTEN 丢失时的兜底）。
+
+    English: Poll fallback when NOTIFY is missed; spawns claim task without awaiting full turn.
+    """
     interval = max(0.5, float(getattr(settings, "turn_dispatch_poll_seconds", 2.0) or 2.0))
     while True:
         try:
@@ -182,6 +230,10 @@ async def _poll_loop() -> None:
 
 
 def start_turn_dispatch_listener() -> None:
+    """启动 pull 分发 LISTEN + poll 后台任务（非 pull 模式空操作）。
+
+    English: Start turn-dispatch-listen and turn-dispatch-poll tasks if TURN_DISPATCH=pull.
+    """
     global _dispatch_task, _poll_task
     if not _pull_enabled():
         return
@@ -192,6 +244,10 @@ def start_turn_dispatch_listener() -> None:
 
 
 async def stop_turn_dispatch_listener() -> None:
+    """取消并等待 pull 分发后台任务（lifespan 退出）。
+
+    English: Cancel LISTEN/poll tasks on shutdown.
+    """
     global _dispatch_task, _poll_task
     for task in (_dispatch_task, _poll_task):
         if task is None:

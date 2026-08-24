@@ -1,7 +1,4 @@
-"""Long-outline arrangement facts: spine, peak placement, peak flood.
-
-Soft facts only. Callers never mutate disk. Short TOC / novella asks skip.
-"""
+"""长篇大纲编排 soft facts。"""
 
 from __future__ import annotations
 
@@ -58,7 +55,13 @@ def _preamble(md: str) -> str:
 
 
 def extract_outline_spine(md: str, *, max_chars: int = _SPINE_CHARS) -> str:
-    """Preamble before the first chapter heading (through-line lives here)."""
+    """提取 spine 序言。
+    
+    参数:
+        md/max_chars。
+    
+    返回:
+        str。"""
     blob = _preamble(md)
     if not blob:
         return ""
@@ -66,7 +69,13 @@ def extract_outline_spine(md: str, *, max_chars: int = _SPINE_CHARS) -> str:
 
 
 def extract_opening_outline_blob(md: str, *, max_chars: int = 800) -> str:
-    """Chapter-1 card / 1—N line / 「第一章只写…」 — where the entry is decided."""
+    """第一章入口 blob。
+    
+    参数:
+        md/max_chars。
+    
+    返回:
+        str。"""
     parts: list[str] = []
     job = extract_outline_job(md, "ch1") or extract_outline_job(md, "第一章")
     if job:
@@ -93,7 +102,13 @@ def extract_outline_job(
     *,
     max_chars: int = _JOB_CHARS,
 ) -> str:
-    """Chapter blurb from outline.md matching chN / 第N章."""
+    """章纲 duty。
+    
+    参数:
+        md/section_id/max_chars。
+    
+    返回:
+        str。"""
     from app.writing.manuscript import human_section_title
 
     sid = (section_id or "").strip()
@@ -114,7 +129,13 @@ def extract_outline_job(
 
 
 def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
-    """Flag missing through-line / peak, or too many peaks. Empty if N/A."""
+    """编排软事实。
+    
+    参数:
+        md/user_text。
+    
+    返回:
+        dict。"""
     if wants_outline_toc_only(user_text):
         return {}
     if _SHORT_BOOK.search(user_text or ""):

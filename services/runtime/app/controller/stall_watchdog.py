@@ -1,3 +1,11 @@
+"""Run 停滞检测：扫描长时间无 turn_events 的 running/interrupted Run。
+
+English: Detect stalled runs with no recent turn_events.
+
+跳过 ``waiting_approval`` 与已请求 cancel 的 orphan 路径；可选 ``stall_auto_fail``
+调用 ``_fail_turn(step_timeout)``。同一 ``(turn_id, last_sequence)`` 在 TTL 内只告警一次。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -18,6 +26,17 @@ _ALERTED_TTL_SECONDS = 3600.0
 
 
 async def stall_watchdog_loop() -> None:
+    """停滞看门狗主循环：按配置间隔周期调用 scan_stalled_runs。
+
+    作用:
+        后台常驻任务；单次扫描异常记日志后继续下一轮，不退出循环。
+
+    参数:
+        无。
+
+    返回:
+        None（协程永不正常返回，除非被取消）。
+    """
     while True:
         await asyncio.sleep(settings.stall_poll_interval_seconds)
         try:
@@ -27,6 +46,19 @@ async def stall_watchdog_loop() -> None:
 
 
 async def scan_stalled_runs() -> None:
+    """扫描并处理可能停滞的 Run。
+
+    作用:
+        查询 status 为 running/interrupted 的 Run，先尝试 orphan cancel 收尾；
+        对超过 stall_threshold_seconds 无新事件且非 waiting_approval 的 Run 记指标与日志，
+        stall_auto_fail 开启时调用 _fail_turn(termination_reason=step_timeout)。
+
+    参数:
+        无。
+
+    返回:
+        None。
+    """
     _prune_alerted()
     threshold = timedelta(seconds=settings.stall_threshold_seconds)
     cutoff = datetime.now(timezone.utc) - threshold

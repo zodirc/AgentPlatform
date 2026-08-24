@@ -1,3 +1,5 @@
+"""评分持久化 Postgres。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,6 +26,13 @@ async def persist_fragment_evaluation(
     prototype_scope: str = "",
     nearest_exemplar_slug: str | None = None,
 ) -> str | None:
+    """写 writing_fragment_evaluations。
+    
+    参数:
+        owner/work/session/turn/section/fragments/signals/text/索引字段。
+    
+    返回:
+        evaluation id 或 None。"""
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     payload = json.dumps(writing_signals, ensure_ascii=False)
     sig_payload = signature

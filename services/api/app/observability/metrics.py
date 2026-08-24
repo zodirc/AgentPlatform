@@ -1,3 +1,10 @@
+"""进程内 Prometheus 风格指标注册表（B24）。
+
+线程安全的 counter/gauge/histogram；histogram 使用固定 cumulative buckets
+覆盖 API 毫秒级到 projection 分钟级延迟。全局单例 ``metrics`` 供 middleware、
+projection、dispatch 等观测点使用。
+"""
+
 from __future__ import annotations
 
 import bisect
@@ -14,6 +21,8 @@ _DEFAULT_BUCKETS: tuple[float, ...] = (
 
 
 class _Histogram:
+    """内部直方图：固定上界桶 + sum/count。"""
+
     __slots__ = ("_buckets", "_counts", "_sum", "_count")
 
     def __init__(self, buckets: tuple[float, ...] = _DEFAULT_BUCKETS) -> None:
@@ -23,11 +32,13 @@ class _Histogram:
         self._count = 0
 
     def observe(self, value: float) -> None:
+        """记录一次观测值。"""
         self._counts[bisect.bisect_left(self._buckets, value)] += 1
         self._sum += value
         self._count += 1
 
     def render(self, name: str, labels: str) -> list[str]:
+        """渲染 Prometheus histogram 行（``_bucket``/``_sum``/``_count``）。"""
         if not self._count:
             return []
         lines: list[str] = []
@@ -48,6 +59,8 @@ def _with_le(labels: str, le: str) -> str:
 
 
 class MetricsRegistry:
+    """线程安全的 counter / gauge / histogram 注册与 Prometheus 文本导出。"""
+
     def __init__(self) -> None:
         self._counters: DefaultDict[str, float] = defaultdict(float)
         self._gauges: DefaultDict[str, float] = defaultdict(float)
@@ -55,16 +68,25 @@ class MetricsRegistry:
         self._lock = threading.Lock()
 
     def inc(self, name: str, value: float = 1.0, **labels: str) -> None:
+        """递增 counter。
+
+        参数:
+            name: 指标名。
+            value: 增量（默认 1）。
+            **labels: 标签键值对（排序后参与 series key）。
+        """
         key = _label_key(name, labels)
         with self._lock:
             self._counters[key] += value
 
     def set_gauge(self, name: str, value: float, **labels: str) -> None:
+        """设置 gauge 当前值。"""
         key = _label_key(name, labels)
         with self._lock:
             self._gauges[key] = value
 
     def observe(self, name: str, value: float, **labels: str) -> None:
+        """向 histogram 记录一次观测（如延迟秒数）。"""
         key = _label_key(name, labels)
         with self._lock:
             hist = self._histograms.get(key)
@@ -73,16 +95,23 @@ class MetricsRegistry:
             hist.observe(value)
 
     def get_gauge(self, name: str, default: float = 0.0, **labels: str) -> float:
+        """读取 gauge；不存在时返回 default。"""
         key = _label_key(name, labels)
         with self._lock:
             return float(self._gauges.get(key, default))
 
     def get_counter(self, name: str, default: float = 0.0, **labels: str) -> float:
+        """读取 counter 累计值；不存在时返回 default。"""
         key = _label_key(name, labels)
         with self._lock:
             return float(self._counters.get(key, default))
 
     def render_prometheus(self) -> str:
+        """导出全部 series 为 Prometheus 文本格式。
+
+        返回:
+            以换行结尾的 metrics 文本；无数据时空字符串。
+        """
         lines: list[str] = []
         typed: set[str] = set()
 

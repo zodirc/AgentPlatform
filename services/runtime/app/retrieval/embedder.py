@@ -1,3 +1,17 @@
+"""文本嵌入与向量维度解析（RAG 索引/检索链路的向量化层）。
+
+职责：
+- 提供 ``Embedder`` 协议及 Hash / SentenceTransformer 两种实现
+- 进程级单例 ``get_embedder()``，供切块写入与 ``search_vector`` 查询共用
+- 解析 ``effective_embedding_dimensions`` / ``effective_index_version``，驱动索引 stamp 与全量重嵌
+
+在 RAG 链路中的位置：
+  sources 切块 → ``chunking.build_embed_text`` → 本模块 ``embed*`` → 向量库（pgvector/JSON）
+  用户 query → ``search_vector`` / hybrid → 本模块 ``embed(query)`` → ANN/BM25 融合
+
+不在本模块：切块策略（``chunking``）、存储与 ANN（``pgvector_store`` / ``vector_index``）。
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -14,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 
 class Embedder(Protocol):
+    """嵌入器协议：单条与批量向量化接口。"""
+
     def embed(self, text: str) -> list[float]:
         ...
 
@@ -26,6 +42,13 @@ _embedder_key: tuple[str, str, str, int] | None = None
 
 
 def tokenize(text: str) -> list[str]:
+    """分词：拉丁词 + CJK 字/2–3 gram，供 HashEmbedder 与 BM25 共用。
+
+    参数:
+        text: 原始文本。
+    返回:
+        小写 token 列表（含 CJK n-gram）。
+    """
     tokens: list[str] = []
     for piece in re.findall(r"[a-zA-Z0-9_\u4e00-\u9fff]+", text.lower()):
         tokens.append(piece)
@@ -42,12 +65,23 @@ def tokenize(text: str) -> list[str]:
 
 
 class HashEmbedder:
-    """Deterministic bag-of-words hashing embedding (default, no extra deps)."""
+    """确定性 bag-of-words 哈希嵌入（默认后端，无额外依赖）。
+
+    参数（构造）:
+        dimensions: 哈希桶维度，默认 256。
+    """
 
     def __init__(self, *, dimensions: int = 256) -> None:
         self.dimensions = dimensions
 
     def embed(self, text: str) -> list[float]:
+        """单条文本 → L2 归一化向量。
+
+        参数:
+            text: 待嵌入文本。
+        返回:
+            长度为 ``dimensions`` 的 float 列表。
+        """
         vec = [0.0] * self.dimensions
         for token in tokenize(text):
             # ``hash()`` is salted per interpreter process, which made persisted
@@ -63,11 +97,15 @@ class HashEmbedder:
         return [value / norm for value in vec]
 
     def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        """批量嵌入，逐条调用 ``embed``。"""
         return [self.embed(text) for text in texts]
 
 
 class SentenceTransformerEmbedder:
-    """Optional neural embeddings when sentence-transformers is installed."""
+    """可选神经嵌入（需安装 sentence-transformers）。
+
+    bge-m3 等长上下文模型默认截断至 512 token，避免 GPU 显存打满。
+    """
 
     # bge-m3 hub default is 8192; that pads/activates like a long-context model and
     # saturates ~16GiB cards at modest batch sizes. Chunked corpora + C-MTEB small
@@ -75,6 +113,12 @@ class SentenceTransformerEmbedder:
     _BGE_M3_DEFAULT_MAX_SEQ = 512
 
     def __init__(self, model_name: str, *, model_dir: str | None = None) -> None:
+        """加载 ST 模型；优先本地 cache，miss 时再拉 Hub。
+
+        参数:
+            model_name: HuggingFace 模型 id。
+            model_dir: 可选本地 cache 目录。
+        """
         from sentence_transformers import SentenceTransformer  # type: ignore[import-untyped]
 
         cache = model_dir or None
@@ -100,7 +144,7 @@ class SentenceTransformerEmbedder:
         self._apply_max_seq_length(model_name)
 
     def _apply_max_seq_length(self, model_name: str) -> None:
-        """Cap ST max_seq_length for throughput (does not change model weights)."""
+        """限制 ST ``max_seq_length`` 以提升吞吐（不改权重）。"""
         configured = int(getattr(settings, "embedding_max_seq_length", 0) or 0)
         if configured > 0:
             target = configured
@@ -128,7 +172,7 @@ class SentenceTransformerEmbedder:
 
     @staticmethod
     def _resolve_device() -> str:
-        """Use CUDA when a usable GPU torch build is present (e.g. RTX 5080)."""
+        """解析运行设备：``embedding_device`` 强制或自动探测 CUDA。"""
         forced = (getattr(settings, "embedding_device", None) or "").strip().lower()
         if forced in {"cpu", "cuda"}:
             logger.info("embedder device=%s (forced)", forced)
@@ -147,10 +191,12 @@ class SentenceTransformerEmbedder:
         return "cpu"
 
     def embed(self, text: str) -> list[float]:
+        """单条 query/段落嵌入。"""
         vectors = self.embed_many([text])
         return vectors[0] if vectors else []
 
     def embed_many(self, texts: Sequence[str]) -> list[list[float]]:
+        """批量 encode，``normalize_embeddings=True``。"""
         if not texts:
             return []
         batch_size = max(1, int(getattr(settings, "embedding_batch_size", None) or 64))
@@ -170,10 +216,14 @@ def embed_many(
     *,
     lane: int | None = None,
 ) -> list[list[float]]:
-    """Call ``embed_many`` when available; else fall back to per-text ``embed``.
+    """统一调用嵌入器的批量/单条接口，支持 query/index 优先级 lane。
 
-    ``lane`` selects query vs index priority when the embedder is lane-aware
-    (O5 / WP2). Default keeps query priority for hot-path callers.
+    参数:
+        embedder: 实现 ``Embedder`` 或 lane 包装后的实例。
+        texts: 待嵌入字符串序列。
+        lane: ``LANE_QUERY`` / ``LANE_INDEX``；None 时默认 query 优先。
+    返回:
+        与 ``texts`` 等长的向量列表。
     """
     if not texts:
         return []
@@ -198,6 +248,7 @@ def embed_many(
 
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:
+    """两向量余弦相似度；维数不匹配或零向量时返回 0。"""
     if not a or not b or len(a) != len(b):
         return 0.0
     dot = sum(x * y for x, y in zip(a, b, strict=True))
@@ -209,10 +260,11 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 
 
 def effective_embedding_dimensions() -> int:
-    """Resolve vector width for stores.
+    """解析当前配置下的向量维度（写入 pgvector ``vector(d)`` / JSON）。
 
-    Hash default is 256. GTE-small / legacy MiniLM → 384;
-    bge-m3 / GTE-large → 1024. Coerce common misconfig (hash default left on).
+    返回:
+        Hash 默认 256；gte-small/MiniLM → 384；bge-m3/gte-large → 1024。
+        常见误配（ST 后端仍留 256）会自动纠正并打日志。
     """
     dims = int(settings.embedding_dimensions)
     backend = (settings.embedding_backend or "").lower()
@@ -242,15 +294,12 @@ def effective_embedding_dimensions() -> int:
 
 
 def effective_index_version() -> int:
-    """Index schema bump when embed space changes.
+    """嵌入空间变更时的 INDEX 版本号（scope stamp / JSON ``version``）。
 
-    8 = legacy MiniLM@384; 9 = gte-small@384; 10 = gte-large@1024;
-    11 = bge-m3@1024 with hub-length (or uncapped) sequences;
-    12 = bge-m3@1024 with max_seq≈512 truncate (legacy short-passage stamp);
-    13 = bge-m3@1024 max_seq≈512 + token-aligned chunker / heading breadcrumbs / table rows.
-
-    Prefer ``settings.embedding_index_version`` when compose/auto.env sets it so the
-    console plan and runtime stamp stay aligned.
+    返回:
+        8=MiniLM@384；9=gte-small@384；10=gte-large@1024；
+        11=bge-m3@1024 长序列；12=bge-m3 截断 512；13=512+对齐切块/标题/表格行。
+        若 ``settings.embedding_index_version`` 已设则优先使用，与控制台计划对齐。
     """
     configured = int(getattr(settings, "embedding_index_version", 0) or 0)
     if configured > 0:
@@ -310,7 +359,7 @@ def _build_embedder() -> Embedder:
 
 
 def reset_embedder_cache() -> None:
-    """Drop the process-wide embedder (tests / config reload)."""
+    """清空进程级 embedder 单例（测试或配置热重载）。"""
     global _embedder, _embedder_key
     if _embedder is not None:
         close = getattr(_embedder, "close", None)
@@ -324,7 +373,7 @@ def reset_embedder_cache() -> None:
 
 
 def get_embedder() -> Embedder:
-    """Return the process-wide embedder singleton for the current settings."""
+    """返回与当前 settings 匹配的进程级 embedder 单例（冷启动可能数分钟）。"""
     global _embedder, _embedder_key
     key = _cache_key()
     if _embedder is not None and _embedder_key == key:
@@ -351,17 +400,18 @@ def get_embedder() -> Embedder:
 
 
 def peek_hf_tokenizer():
-    """Return the loaded ST HF tokenizer, or None. Never triggers a model load."""
+    """返回已加载 ST 的 HF tokenizer；未加载模型时为 None（不触发加载）。"""
     model = getattr(_embedder, "_model", None) if _embedder is not None else None
     tok = getattr(model, "tokenizer", None)
     return tok
 
 
 def warmup_embedder() -> str:
-    """Load the configured embedder at startup so first index/search is cheap.
+    """启动时预热 embedder，避免首条索引/检索冷启动。
 
-    Returns a short backend label for logs. Missing retrieval extras are logged
-    as warnings so the default hash path can still start; other failures raise.
+    返回:
+        日志用短标签，如 ``sentence_transformers:SentenceTransformerEmbedder``。
+        retrieval extra 缺失时记 warning 并回退 hash；其它错误抛出。
     """
     backend = settings.embedding_backend.lower()
     try:

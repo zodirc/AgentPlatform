@@ -1,7 +1,4 @@
-"""Work-scoped manuscript index for writing turns (docs/23 WW2).
-
-Pure filesystem metadata — no LLM. Hard-capped for R1–R3.
-"""
+"""作品手稿索引（docs/23）；纯 FS，无 LLM。"""
 
 from __future__ import annotations
 
@@ -52,7 +49,13 @@ def build_work_index(
     max_chars: int | None = None,
     message: str = "",
 ) -> str:
-    """Return a short markdown block describing the current work tree."""
+    """Work index Markdown。
+    
+    参数:
+        workspace_root/max_chars/message。
+    
+    返回:
+        str。"""
     root = Path(workspace_root or settings.workspace_root).resolve()
     budget = max_chars if max_chars is not None else settings.writing_work_index_max_chars
     budget = max(200, int(budget))
@@ -134,6 +137,13 @@ def format_work_index_block(
     max_chars: int | None = None,
     message: str = "",
 ) -> str:
+    """build_work_index 别名。
+    
+    参数:
+        同上。
+    
+    返回:
+        str。"""
     return build_work_index(
         workspace_root=workspace_root,
         max_chars=max_chars,

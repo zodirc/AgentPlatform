@@ -1,3 +1,10 @@
+"""场景 Profile 注册表：从 YAML 加载并解析 scenario 配置。
+
+``ScenarioRegistry`` 在进程启动或首次 ``get`` 时扫描 ``profiles/*.yaml``，
+组装不可变 ``ScenarioProfile``（系统提示、工具集、布局、检索范围、钩子绑定等）。
+已退役的 ``scenario_id`` 保留可读错误信息但禁止 StartTurn（docs/39 TI6）。
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -6,7 +13,10 @@ from pathlib import Path
 import yaml
 
 PROFILES_DIR = Path(__file__).resolve().parent / "profiles"
+"""``profiles/*.yaml`` 所在目录。"""
+
 SCENARIOS_DIR = Path(__file__).resolve().parent
+"""``app.scenarios`` 包根目录；用于解析 ``system_prompt_template`` 相对路径。"""
 
 
 def _load_system_prompt(data: dict) -> str:
@@ -25,6 +35,13 @@ def _load_system_prompt(data: dict) -> str:
 
 @dataclass(frozen=True)
 class ScenarioProfile:
+    """单个 scenario 的不可变配置快照；差异通过 Profile 字段表达，而非调用方分支。
+
+    字段涵盖系统提示、可用工具、步数上限、审批覆盖、前后端布局、子 agent 类型、
+    检索范围（``retrieval``）、生成参数（``generation``）、写作/结构预热开关、
+    计划建议权重、Turn 后异步任务，以及 C2 钩子槽位绑定（``hooks``）。
+    """
+
     scenario_id: str
     display_name: str
     system_prompt: str
@@ -55,13 +72,24 @@ RETIRED_SCENARIOS: dict[str, str] = {
         "(docs/39-intel-scenario.md)"
     ),
 }
+"""已退役 ``scenario_id`` → 用户可读错误文案；历史可读但不可 StartTurn。"""
 
 
 class ScenarioRegistry:
+    """进程内 scenario Profile 索引；懒加载 YAML 并支持运行时 ``register`` 扩展。"""
+
     _profiles: dict[str, ScenarioProfile] = {}
 
     @classmethod
     def load(cls) -> None:
+        """扫描 ``profiles/*.yaml``，校验钩子绑定并重建内存索引。
+
+        参数:
+            无。
+
+        返回:
+            None。
+        """
         from app.scenarios.hooks import ensure_builtins_registered, validate_profile_hooks
 
         ensure_builtins_registered()
@@ -98,10 +126,29 @@ class ScenarioRegistry:
 
     @classmethod
     def register(cls, profile: ScenarioProfile) -> None:
+        """将 Profile 写入内存索引（测试或热插拔扩展用）。
+
+        参数:
+            profile: 待注册的不可变 Profile。
+
+        返回:
+            None。
+        """
         cls._profiles[profile.scenario_id] = profile
 
     @classmethod
     def get(cls, scenario_id: str) -> ScenarioProfile:
+        """按 ``scenario_id`` 取 Profile；索引空时自动 ``load``。
+
+        参数:
+            scenario_id: YAML 中声明的场景标识。
+
+        返回:
+            对应的 ``ScenarioProfile``。
+
+        抛出:
+            ValueError: id 已退役或未知。
+        """
         if not cls._profiles:
             cls.load()
         if scenario_id in RETIRED_SCENARIOS:

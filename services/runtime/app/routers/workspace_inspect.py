@@ -1,4 +1,5 @@
-"""Internal inspect routes for Settings (RAG chunks · AST outline)."""
+
+"""内部 inspect 路由：RAG chunks 与 AST index（Settings 用）。"""
 
 from __future__ import annotations
 
@@ -6,6 +7,7 @@ from fastapi import Depends, HTTPException, Query
 
 
 def register_inspect_routes(router, *, verify_internal_token, tenant_query) -> None:
+    """作用：注册 /sources/chunks 与 /ast-index/inspect 内部路由。"""
     @router.get("/sources/chunks")
     async def workspace_sources_chunks(
         path: str | None = None,

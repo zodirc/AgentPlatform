@@ -1,4 +1,7 @@
+"""进程内 Prometheus 指标：counter/gauge/histogram（B9-② 固定分桶）。"""
+
 from __future__ import annotations
+
 
 import bisect
 import threading
@@ -49,6 +52,7 @@ def _with_le(labels: str, le: str) -> str:
 
 
 class MetricsRegistry:
+    """作用：线程安全 counter/gauge/histogram 注册表。"""
     def __init__(self) -> None:
         self._counters: DefaultDict[str, float] = defaultdict(float)
         self._gauges: DefaultDict[str, float] = defaultdict(float)
@@ -127,6 +131,7 @@ def record_turn_finished(
     input_tokens: int = 0,
     output_tokens: int = 0,
 ) -> None:
+    """作用：Turn 完成 metrics。"""
     metrics.inc("turn_total", scenario_id=scenario_id, status=status)
     metrics.observe("turn_duration_seconds", duration_seconds, scenario_id=scenario_id)
     metrics.observe("turn_steps_total", float(steps), scenario_id=scenario_id)
@@ -137,11 +142,12 @@ def record_turn_finished(
 
 
 def record_tool_call(*, tool_name: str, status: str) -> None:
+    """作用：工具调用 metrics。"""
     metrics.inc("tool_calls_total", tool_name=tool_name, status=status)
 
 
 def record_tool_misuse(*, kind: str, tool_name: str = "") -> None:
-    """Offline-friendly misuse counters (invalid_arguments / cached_repeat / search_budget)."""
+    """作用：工具误用 offline counter。"""
     labels: dict[str, str] = {"kind": kind}
     if tool_name:
         labels["tool_name"] = tool_name
@@ -149,8 +155,10 @@ def record_tool_misuse(*, kind: str, tool_name: str = "") -> None:
 
 
 def record_step_duration(*, scenario_id: str, duration_seconds: float) -> None:
+    """作用：单步耗时 histogram。"""
     metrics.observe("turn_step_duration_seconds", duration_seconds, scenario_id=scenario_id)
 
 
 def record_stall_detected(*, scenario_id: str) -> None:
+    """作用：stall 检测 counter。"""
     metrics.inc("turn_stall_detected_total", scenario_id=scenario_id)

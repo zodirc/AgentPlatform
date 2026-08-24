@@ -1,3 +1,10 @@
+"""只读 workspace 工具：读文件、列目录、grep、glob。
+
+提供 ``read_file``（含写作手稿分章与 offset/limit 分页）、``list_dir``、
+``grep``（符号查询重定向至 ``search_codebase``）与 ``glob``。
+词法扫描在独立线程执行并带时间/体积预算，避免大仓库阻塞 asyncpg 事件循环。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -62,6 +69,14 @@ _LEXICAL_BUDGET_S = 20.0
 
 
 def _lexical_dir_skipped(name: str) -> bool:
+    """判断目录名是否应跳过词法扫描。
+
+    参数:
+        name: 目录 basename。
+
+    返回:
+        ``True`` 表示跳过（VCS/venv/cache 等）；``.github`` 例外保留。
+    """
     if name in _LEXICAL_SKIP_DIR_NAMES:
         return True
     if name.startswith(".") and name not in {".github"}:
@@ -73,6 +88,14 @@ def _lexical_dir_skipped(name: str) -> bool:
 
 
 def _lexical_file_skipped(path: Path) -> bool:
+    """判断单文件是否应跳过词法扫描。
+
+    参数:
+        path: 待扫描文件路径。
+
+    返回:
+        ``True`` 表示跳过（隐藏文件、二进制后缀或超过 ``_LEXICAL_MAX_FILE_BYTES``）。
+    """
     if path.name.startswith("."):
         return True
     if path.suffix.lower() in _LEXICAL_SKIP_SUFFIXES:
@@ -94,10 +117,21 @@ def _lexical_scan_sync(
     limit: int,
     budget_s: float = _LEXICAL_BUDGET_S,
 ) -> dict[str, Any]:
-    """Blocking substring scan — must run via ``asyncio.to_thread``.
+    """阻塞式子串扫描（须在 ``asyncio.to_thread`` 中调用）。
 
-    SWE-bench checkouts are large; scanning on the event loop starved asyncpg
-    and surfaced as ``statement timeout`` / ``turn.failed``.
+    SWE-bench 等大 checkout 若在事件循环上全树扫描会饿死 asyncpg，表现为 statement timeout。
+
+    参数:
+        root: 扫描根（文件或目录）。
+        workspace: 工作区根，用于生成相对 ``path``。
+        pattern: 正则或字面量子串（由 ``escape`` 控制）。
+        escape: ``True`` 时对 pattern 做 ``re.escape``。
+        limit: 最大匹配条数。
+        budget_s: 单调时钟预算（秒），超时设 ``truncated=True``。
+
+    返回:
+        含 ``matches``/``match_count``/``truncated``/``files_scanned``/``elapsed_ms`` 的 dict；
+        非法 pattern 时含 ``error``。
     """
     started = time.monotonic()
     try:
@@ -165,6 +199,14 @@ def _lexical_scan_sync(
 
 
 def _coerce_optional_positive_int(value: Any) -> int | None:
+    """将 tool 参数 coerce 为正整数或 ``None``。
+
+    参数:
+        value: 原始参数（``None``/空串/非法/非正均视为无效）。
+
+    返回:
+        正整数或 ``None``。
+    """
     if value is None or value == "":
         return None
     try:
@@ -181,7 +223,18 @@ def _slice_file_by_lines(
     limit: int | None,
     max_chars: int = _READ_FILE_MAX_CHARS,
 ) -> dict[str, Any]:
-    """Return a line window with explicit continuation metadata (Cursor-style Read)."""
+    """按行窗口切片文件内容，带 Cursor 风格续读元数据。
+
+    参数:
+        content: 完整文件文本。
+        offset: 1-based 起始行号。
+        limit: 最大行数；``None`` 表示读到 EOF 或字符预算耗尽。
+        max_chars: 窗口字符上限（默认 ``_READ_FILE_MAX_CHARS``）。
+
+    返回:
+        含 ``content``/``offset``/``end_line``/``total_lines``/``truncated``/``next_offset`` 的 dict；
+        必要时含 ``hint`` 引导模型用 ``offset`` 续读而非 shell 分页。
+    """
     lines = content.splitlines(keepends=True)
     total_lines = len(lines)
     if total_lines == 0:
@@ -258,15 +311,18 @@ def _slice_file_by_lines(
 
 
 async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
-    """Read a workspace file.
+    """读取工作区文件；写作手稿支持分章/索引；普通文件支持 offset/limit 分页。
 
-    For writing monofile manuscripts (docs/24): default returns one chapter block
-    when ``section_id`` is set; without it returns a section index unless
-    ``full=true`` / full-book intent.
+    参数:
+        path: 工作区相对路径。
+        **_kwargs: 可选 ``section_id``/``full``（手稿）、``offset``/``limit``（行窗口）。
 
-    For normal files: optional ``offset`` (1-based line) + ``limit`` (max lines).
-    Oversized windows set ``truncated`` / ``next_offset`` so the model can continue
-    with the same tool instead of shell paging.
+    返回:
+        成功时含 ``content`` 与分页/手稿元数据；失败时 ``{"error": "..."}``。
+        超大窗口设 ``truncated``/``next_offset``；整文件读完时 ``whole_file_complete=True``。
+
+    说明:
+        手稿默认只返回章节目录索引，避免整书灌入 context；须传 ``section_id`` 读单章。
     """
     target = _resolve_path(path)
     if not target.exists():
@@ -402,6 +458,17 @@ async def read_file(path: str, **_kwargs: Any) -> dict[str, Any]:
 
 
 async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
+    """列出目录条目（最多 200 条），对齐 Web 工作面可见性。
+
+    参数:
+        path: 工作区相对目录路径，默认 ``"."``。
+
+    返回:
+        ``{"path", "entries"}``；目录不存在或非目录时 ``{"error": "..."}``。
+
+    说明:
+        应用 seed 挂载可见性与 ``filter_work_surface_list_entries``，隐藏 ``.agent`` 等内部路径。
+    """
     import os
 
     target = _resolve_path(path)
@@ -441,6 +508,16 @@ async def list_dir(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
 
 
 async def grep(pattern: str, path: str = ".", limit: int = 50, **_kwargs: Any) -> dict[str, Any]:
+    """在工作区子树内做词法 grep；符号形 pattern 重定向至 ``search_codebase``。
+
+    参数:
+        pattern: 搜索模式（非符号时为正则；符号时走 Locate 通道）。
+        path: 扫描根路径，默认 ``"."``。
+        limit: 最大匹配条数。
+
+    返回:
+        词法模式：``matches``/``match_count``/``mode=lexical``；符号重定向时附带 ``redirected_from``。
+    """
     from app.structural.symbols import is_symbol_query
     from app.tools.core.codebase_search import search_codebase
 
@@ -502,11 +579,17 @@ def _glob_sync(
     limit: int,
     budget_s: float = 15.0,
 ) -> dict[str, Any]:
-    """Blocking glob off the event loop.
+    """阻塞式 glob（须在 ``asyncio.to_thread`` 中调用）。
 
-    Primary stop is ``limit`` (product behavior). Time budget is a safety net only —
-    large ``**`` trees should not hang a worker forever, but we do not truncate
-    aggressively when results are still arriving within a few seconds.
+    参数:
+        base: glob 起始目录。
+        workspace: 工作区根（过滤相对路径）。
+        pattern: glob 模式（如 ``**/*.py``）。
+        limit: 最大匹配文件数（主停止条件）。
+        budget_s: 安全网时间预算，防 ``**`` 大树永久挂起。
+
+    返回:
+        ``matches``/``match_count``/``truncated``；非法 pattern 时含 ``error``。
     """
     import time
 
@@ -544,6 +627,16 @@ def _glob_sync(
 
 
 async def glob(pattern: str, path: str = ".", limit: int = 100, **_kwargs: Any) -> dict[str, Any]:
+    """按 glob 模式匹配工作区内的文件路径。
+
+    参数:
+        pattern: glob 模式。
+        path: 搜索根，默认 ``"."``。
+        limit: 最大返回文件数。
+
+    返回:
+        ``pattern``/``path``/``matches``/``match_count``/``summary``；失败时含 ``error``。
+    """
     root = _resolve_path(path)
     if not root.exists():
         return {"error": f"Path not found: {path}", "matches": []}

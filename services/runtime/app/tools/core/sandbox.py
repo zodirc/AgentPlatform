@@ -1,16 +1,15 @@
-"""OS sandbox for tool exec (docs/31 · SB1 / E2 · docs/36).
+"""工具 exec 的 OS 级沙箱（docs/31 · SB1 / E2 · docs/36）。
 
-Default selection (sticky for process lifetime after first resolve):
+默认选择顺序（进程内首次 resolve 后 sticky）：
 
-  Landlock → bwrap → off(degraded)
+  Landlock → bwrap → off（降级）
 
-Threat model: protect the **host / agent server** — child FS is RW only on the
-work root (no cross-Work writes, no escaping the work tree). Outbound network
-stays available so an approved ``run_command`` like ``curl https://…`` works;
-do not confuse host isolation with a product ban on curl.
+威胁模型：保护 **宿主机 / agent 服务**——子进程 FS 仅对工作根 RW，不能跨 Work 写、
+不能逃出 work tree。出站网络默认可用，已审批的 ``curl https://…`` 不应被误杀；
+勿将宿主机隔离与产品层 curl 禁令混淆。
 
-Optional break-glass only: ``TOOL_SANDBOX=off|landlock|bwrap`` (not a normal
-product setting). ``off`` is checked every call; auto choice is pinned.
+可选 break-glass：``TOOL_SANDBOX=off|landlock|bwrap``（非正常产品配置）。
+``off`` 每次调用都生效；自动探测结果会 pin 在进程生命周期内。
 """
 
 from __future__ import annotations
@@ -35,10 +34,10 @@ _sticky_backend: SandboxBackend | None = None
 
 
 def clear_sandbox_backend_cache() -> None:
-    """Reset probe + sticky caches (tests / rare re-probe after ops change).
+    """重置探测缓存与 sticky 后端（测试或运维变更后重探）。
 
-    Tolerates tests that monkeypatch ``_landlock_can_exec`` / ``_bwrap_can_exec``
-    with plain callables (no ``cache_clear``) — teardown must not raise.
+    说明:
+        兼容 monkeypatch 无 ``cache_clear`` 的可调用对象，teardown 不得 raise。
     """
     global _sticky_backend
     _sticky_backend = None
@@ -164,7 +163,14 @@ def _autodetect_backend() -> SandboxBackend:
 
 
 def resolve_sandbox_backend() -> SandboxBackend:
-    """Resolve sandbox backend; auto choice is sticky for the process lifetime."""
+    """解析当前应使用的沙箱后端；自动探测结果进程内 sticky。
+
+    返回:
+        ``"landlock"``/``"bwrap"``/``"off"`` 之一。
+
+    说明:
+        ``TOOL_SANDBOX`` 环境变量可强制 off/landlock/bwrap；强制 landlock/bwrap 不可用时降级 off。
+    """
     global _sticky_backend
 
     forced = os.environ.get("TOOL_SANDBOX", "").strip().lower()
@@ -183,7 +189,14 @@ def resolve_sandbox_backend() -> SandboxBackend:
 
 
 def make_landlock_preexec(work_root: Path) -> Callable[[], None]:
-    """Return a ``preexec_fn`` that applies Landlock in the child before exec."""
+    """返回在子进程 exec 前应用 Landlock FS 规则的 ``preexec_fn``。
+
+    参数:
+        work_root: 工作区根目录（Landlock 允许 RW 的范围）。
+
+    返回:
+        无参 callable，供 ``asyncio.create_subprocess_*`` 的 ``preexec_fn`` 使用。
+    """
     from app.tools.core.landlock_fs import apply_landlock_fs
 
     root = str(work_root.resolve())
@@ -195,7 +208,14 @@ def make_landlock_preexec(work_root: Path) -> Callable[[], None]:
 
 
 def sandbox_preexec_fn(cwd: Path) -> Callable[[], None] | None:
-    """preexec_fn for landlock backend; None for bwrap/off (argv wrap or bare)."""
+    """按当前后端返回 Landlock preexec；bwrap/off 返回 ``None``。
+
+    参数:
+        cwd: 子进程工作目录。
+
+    返回:
+        Landlock 后端的 preexec_fn，或 ``None``（bwrap 通过 argv 包装隔离）。
+    """
     if resolve_sandbox_backend() != "landlock":
         return None
     return make_landlock_preexec(cwd)
@@ -229,13 +249,18 @@ def build_bwrap_argv(
     cwd: Path,
     network: bool = True,
 ) -> list[str]:
-    """Return ``bwrap … -- <argv>`` with RW only on ``cwd`` (work root).
+    """构造 ``bwrap … -- <argv>``，仅对 ``cwd``（工作根）RW。
 
-    Work root is always mounted at ``/work`` (chdir there) so a private ``/tmp``
-    tmpfs never hides pytest paths under host ``/tmp``. When ``cwd`` is not under
-    ``/tmp``, also bind the real absolute path for tools that use abs paths.
+    参数:
+        argv: 原始命令 argv。
+        cwd: 工作区根；在容器内 chdir 到 ``/work``。
+        network: ``False`` 时加 ``--unshare-net``（SWE eval 禁网）。
 
-    Network defaults to **on** (host-protection sandbox, not an egress ban).
+    返回:
+        完整 bwrap argv 列表。
+
+    说明:
+        工作根 bind 到 ``/work``，避免 private ``/tmp`` tmpfs 遮住 pytest 的 ``/tmp`` 路径。
     """
     cwd = cwd.resolve()
     cmd: list[str] = ["bwrap", "--die-with-parent"]
@@ -282,11 +307,17 @@ def wrap_argv_for_exec(
     argv: Sequence[str],
     cwd: Path,
 ) -> tuple[list[str], SandboxBackend]:
-    """Possibly wrap argv with bwrap. Landlock keeps argv; use ``sandbox_preexec_fn``.
+    """按策略包装 argv：Landlock 保持原 argv + preexec；bwrap 外包一层。
 
-    Returns (final_argv, backend_used).
-    When Ops SWE-bench deny-network is active, force bwrap ``--unshare-net``
-    (landlock cannot revoke egress alone).
+    参数:
+        argv: 原始 argv。
+        cwd: 工作目录。
+
+    返回:
+        ``(final_argv, backend_used)`` 元组。
+
+    说明:
+        Ops SWE ``deny_network`` 时强制 bwrap ``--unshare-net``；Landlock  alone 无法撤 egress。
     """
     from app.tenant_context import sandbox_network_allowed
 
@@ -311,13 +342,25 @@ def wrap_shell_command_for_exec(
     command: str,
     cwd: Path,
 ) -> tuple[list[str], SandboxBackend]:
-    """Run a shell string under sandbox via ``sh -c`` (FS isolated; network per policy)."""
+    """将 shell 命令串经 ``sh -c`` 纳入沙箱 exec 路径。
+
+    参数:
+        command: shell 命令字符串。
+        cwd: 工作目录。
+
+    返回:
+        与 ``wrap_argv_for_exec`` 相同。
+    """
     sh = shutil.which("sh") or "/bin/sh"
     return wrap_argv_for_exec(argv=[sh, "-c", command], cwd=cwd)
 
 
 def sandbox_status() -> dict[str, object]:
-    """Cheap diagnostics for health / ops."""
+    """返回沙箱探测与当前策略的轻量诊断信息（health/ops 用）。
+
+    返回:
+        含 ``backend``/``landlock_usable``/``bwrap_usable``/``network_allowed_now`` 等键的 dict。
+    """
     from app.tenant_context import sandbox_network_allowed
     from app.settings import settings
 

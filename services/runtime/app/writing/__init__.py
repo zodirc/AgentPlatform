@@ -1,1 +1,2 @@
-"""Writing-scenario helpers (material cards, etc.)."""
+"""写作场景辅助模块包：素材卡、手稿、focus、signals 等确定性写作能力。"""
+

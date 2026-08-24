@@ -1,4 +1,10 @@
-"""Consume run_commands for runs owned by this runtime (O2 / WP6)."""
+"""Run 命令消费：LISTEN run_commands_channel + 周期 poll（O2 / WP6）。
+
+English: Consume run_commands via LISTEN + poll (O2 / WP6).
+
+监听 PostgreSQL NOTIFY，将 pending 的 run_commands（approve/deny/cancel/patch 等）
+分发给 turn_controller；**仅处理** ``runner_id`` 归属本进程的任务（与 pull claim 一致）。
+"""
 
 from __future__ import annotations
 
@@ -35,7 +41,12 @@ async def _mark_consumed(conn, command_id: UUID) -> bool:
 
 
 async def _dispatch_command(row: dict) -> None:
+    """将单条 run_command 路由到 turn_controller 对应 handler。
+
+    English: Map run_commands.type to approve/deny/patch/cancel controller entrypoints.
+    """
     from app.controller.turn_controller import (
+
         accept_patch,
         approve_tool_call,
         deny_tool_call,
@@ -91,7 +102,18 @@ async def _dispatch_command(row: dict) -> None:
 
 
 async def consume_pending_for_run(run_id: UUID | None = None) -> int:
-    """Consume pending commands for runs owned by this runner."""
+    """消费本 runner 名下 pending 的 run_commands。
+
+    English: Consume up to 20 pending commands for this runner_id; mark consumed
+    in a transaction then dispatch. Failures are logged but left consumed to
+    avoid poison loops (approval paths have their own fail-safes).
+
+    参数:
+        run_id: 限定某一 Run；None 则扫本 runner 全部 pending。
+
+    返回:
+        成功分发的命令条数；通道关闭时为 0。
+    """
     if not _channel_enabled():
         return 0
     pool = await get_pool()
@@ -193,6 +215,18 @@ async def _poll_loop() -> None:
 
 
 def start_run_commands_listener() -> None:
+    """启动 LISTEN 与 poll 后台任务（通道未启用则空操作）。
+
+    作用:
+        lifespan 入口：创建 run-commands-listen / run-commands-poll 协程；
+        已运行且未结束时不会重复创建。
+
+    参数:
+        无。
+
+    返回:
+        None。
+    """
     global _listen_task, _poll_task
     if not _channel_enabled():
         return
@@ -203,6 +237,17 @@ def start_run_commands_listener() -> None:
 
 
 async def stop_run_commands_listener() -> None:
+    """取消并等待 run_commands 监听后台任务结束。
+
+    作用:
+        lifespan 退出时清理 LISTEN 与 poll 任务并重置模块级 task 引用。
+
+    参数:
+        无。
+
+    返回:
+        None。
+    """
     global _listen_task, _poll_task
     for task in (_listen_task, _poll_task):
         if task is None:

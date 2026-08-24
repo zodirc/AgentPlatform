@@ -1,4 +1,4 @@
-"""Official-bench capability probe (docker / datasets / bench worker)."""
+"""Official 基准能力探测：本机脚本/datasets/docker 与 bench worker 远程 caps 合并。"""
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +9,15 @@ from typing import Any
 
 
 async def official_caps(*, repo_root: Path) -> dict[str, bool]:
+    """探测 Official L1 各套件可否在本环境运行。
+
+    参数:
+        repo_root: 仓库根目录，用于检查 ``scripts/official_bench_run.py`` 等。
+
+    返回:
+        布尔 flags dict（``context``/``coding_harness``/``bench_worker`` 等）；
+        bench worker 可达时用远程 caps 覆盖部分本地探测结果。
+    """
     from app.services.ops import bench_client
 
     has_script = (repo_root / "scripts" / "official_bench_run.py").is_file()

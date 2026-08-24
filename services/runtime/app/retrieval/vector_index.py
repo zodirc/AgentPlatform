@@ -1,3 +1,13 @@
+"""JSON 磁盘向量索引（RAG 默认/回退存储与检索实现）。
+
+职责：
+- ``sources.json`` 持久化 files + chunks + 可选 doc_vector
+- sync：mtime 增量、批量嵌入、版本/stamp 不一致时全量重嵌
+- search_vector / search_bm25 / search_hybrid / 两级 doc+chunk
+
+在 RAG 链路中的位置：``JsonSourceRetrievalStore`` 委托本模块；pgvector 不可用时启用。
+"""
+
 from __future__ import annotations
 
 import json
@@ -29,6 +39,7 @@ except ImportError:  # pragma: no cover - hash-only images may omit numpy
 
 @dataclass
 class ChunkHit:
+    """检索命中：路径、chunk 标识、摘录、引用与分数等。"""
     path: str
     chunk_id: str
     excerpt: str
@@ -72,7 +83,12 @@ def _chunk_to_hit(chunk: dict[str, Any], score: float) -> ChunkHit:
 
 
 class SourceVectorIndex:
+    """基于 JSON 文件的源向量索引（chunk 级 + 可选 doc 摘要向量）。"""
+
     def __init__(self, store_path: Path) -> None:
+        """参数:
+            store_path: ``sources.json`` 路径。
+        """
         self.store_path = store_path
         self._data: dict[str, Any] = {
             "version": effective_index_version(),
@@ -85,6 +101,7 @@ class SourceVectorIndex:
         self._vector_chunks: list[dict[str, Any]] = []
 
     def load(self) -> None:
+        """从磁盘加载 JSON；文件不存在则保持空索引。"""
         if not self.store_path.is_file():
             return
         try:
@@ -139,6 +156,7 @@ class SourceVectorIndex:
         return self._vector_matrix, self._vector_chunks
 
     def save(self) -> None:
+        """将内存索引写回 JSON 并失效向量矩阵缓存。"""
         self.store_path.parent.mkdir(parents=True, exist_ok=True)
         self.store_path.write_text(json.dumps(self._data, ensure_ascii=False), encoding="utf-8")
         self._invalidate_vector_matrix()
@@ -160,6 +178,14 @@ class SourceVectorIndex:
         return False
 
     def sync(self, sources_dir: Path, *, workspace_root: Path) -> dict[str, Any]:
+        """扫描 sources_dir，切块、嵌入并更新 JSON 索引。
+
+        参数:
+            sources_dir: 源树根目录。
+            workspace_root: 计算相对路径的 workspace 根。
+        返回:
+            indexed_files、chunks、added/updated/skipped/removed 等统计。
+        """
         import logging
         import time
 
@@ -459,6 +485,7 @@ class SourceVectorIndex:
         return raw if isinstance(raw, list) else []
 
     def search_vector(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
+        """query 嵌入后与 chunk 向量做余弦相似度（numpy 批算或逐条回退）。"""
         self.load()
         query_vec = get_embedder().embed(query)
         if not query_vec or limit <= 0:
@@ -497,6 +524,7 @@ class SourceVectorIndex:
         return scored[:limit]
 
     def search_bm25(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
+        """内存 BM25 排序 chunk。"""
         self.load()
         chunks = self._chunks()
         if not chunks:
@@ -511,7 +539,7 @@ class SourceVectorIndex:
         return hits
 
     def search_docs(self, query: str, *, limit: int = 8) -> list[str]:
-        """Doc-lane recall: rank files by summary embedding similarity."""
+        """doc lane：按文件 summary/doc_vector 相似度返回路径列表。"""
         self.load()
         query_vec = get_embedder().embed(query)
         if not query_vec or limit <= 0:
@@ -627,6 +655,7 @@ class SourceVectorIndex:
         return hits
 
     def search_hybrid(self, query: str, *, limit: int = 10, recall_k: int | None = None) -> list[ChunkHit]:
+        """RRF 混合 + rerank；可选两级 doc+chunk。"""
         from app.retrieval.profile import active_retrieval_profile
 
         self.load()
@@ -663,7 +692,7 @@ class SourceVectorIndex:
         )
 
     def search(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
-        """Backward-compatible entry: hybrid when configured, else vector-only."""
+        """按 ``settings.retrieval_mode`` 分发 keyword / vector / hybrid。"""
         mode = settings.retrieval_mode.lower()
         if mode == "keyword":
             return self.search_bm25(query, limit=limit)

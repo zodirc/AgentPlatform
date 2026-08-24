@@ -1,12 +1,7 @@
-"""RET-11(b) offline doc2query — expand BM25-only lexical field.
+"""RET-11(b) 离线 doc2query：扩展 BM25 专用 ``bm25_extra``（RAG 索引增强）。
 
-Generates 3–5 pseudo search queries per source file from a text sample.
-Writes ``source_files.bm25_extra`` and denormalizes onto ``source_chunks``.
-
-Hard rules (brief §7.5):
-- Index plane only (Turn-external)
-- Never feed official BEIR qrels / gold queries into the generator
-- Query path unchanged (no HyDE)
+LLM 为每文件生成 3–5 条伪搜索 query，写入 pgvector；不参与 query HyDE。
+在 RAG 链路中的位置：Turn 外离线批处理，仅词法 lane 受益。
 """
 
 from __future__ import annotations
@@ -143,6 +138,18 @@ def run_doc2query(
     base_url: str,
     model: str,
 ) -> dict[str, Any]:
+    """批量 doc2query：LLM 生成伪 query 并 ``set_path_bm25_extra``。
+
+    参数:
+        path_like / path_prefix / limit: 文件筛选。
+        n_queries: 每文件目标条数。
+        dry_run: 只生成不写库。
+        skip_existing: 已有 bm25_extra 则跳过。
+        workers / db_writers: LLM 与 PG 写并发度。
+        api_key / base_url / model: OpenAI 兼容 chat API。
+    返回:
+        listed、updated、failed、paths 样本等统计 dict。
+    """
     from app.retrieval.store import get_sources_store
 
     store = get_sources_store()
@@ -263,6 +270,7 @@ def run_doc2query(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI：doc2query 或 ``--prune-only`` 清理 bm25_extra。"""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",

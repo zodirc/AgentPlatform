@@ -1,7 +1,7 @@
-"""Writing-only hit rescoring: texture sections over plot-summary encyclopedia.
+"""写作场景专用 hit 重打分（RAG 后处理，不改索引）。
 
-Deterministic, no model, no index rewrite. Applied after IR fusion so the
-model sees 可引用细节 before 主线剧情 / 概要 (original-fiction prior).
+按 section_title 提升「可引用细节」、降权「概要/主线剧情」；确定性、无模型。
+在 RAG 链路中的位置：IR fusion/rerank 之后，``section_title_prior=texture`` 时启用。
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ DOWNRANK = 0.35
 
 
 def writing_section_multiplier(section_title: str | None) -> float:
+    """section 标题对应的分数乘子（1.0 / BOOST / DOWNRANK）。"""
     title = (section_title or "").strip()
     if not title:
         return 1.0
@@ -70,7 +71,7 @@ def rescore_hits_for_writing(
     *,
     scenario_id: str | None,
 ) -> list[Any]:
-    """Re-rank hits by section title when Profile.retrieval.section_title_prior=texture."""
+    """writing + texture prior 时对 hits 按 section 重排。"""
     if not hits:
         return hits
     from app.retrieval.scenario_scope import load_retrieval_policy

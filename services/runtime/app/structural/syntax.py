@@ -1,8 +1,5 @@
-"""Pre-write syntax gate for edit_file.checks (Wave 2 W1).
 
-Only blocks edits that *introduce* a parse failure. If the old file was already
-unparseable, warn and allow (escape hatch — plan §7.3 / veto 11).
-"""
+"""写入/补丁前语法门控：Python ast 或 tree-sitter。"""
 
 from __future__ import annotations
 
@@ -16,7 +13,7 @@ from app.structural.providers import language_for_path
 
 @dataclass(frozen=True)
 class SyntaxGateResult:
-    """Outcome of comparing old vs new source parseability."""
+    """作用：SyntaxGateResult 类型封装。"""
 
     language: str | None
     status: str  # ok | error | warning | skipped
@@ -98,7 +95,10 @@ def check_syntax_gate(
     old_source: str,
     new_source: str,
 ) -> SyntaxGateResult:
-    """Compare parseability of old vs new file contents for the edit path."""
+    """作用：check_syntax_gate 公开 API。
+
+参数：
+    ``path``、``old_source``、``new_source``"""
     lang = language_for_path(path)
     if lang is None:
         return SyntaxGateResult(

@@ -1,3 +1,18 @@
+"""Agent Runtime HTTP 入口（内网 :8001）。
+
+English: Agent Runtime HTTP entrypoint (internal :8001).
+
+职责
+----
+- **生命周期**：DB 池、孤儿 reconcile（B2）、pull 分发监听、run_commands 消费、
+  sources/AST 旁路索引、LSP 池、优雅关机 drain（B2）。
+- **命令面**：``/internal/commands/*`` — start/cancel/approve/deny/patch/sync-index。
+- **工作区**：只读 inspect、writing lab 等内部路由。
+
+浏览器不直连本服务；产品 SSE 由 **api** 提供。默认 ``TURN_DISPATCH=pull`` 时
+``start-turn`` HTTP 仅为回退路径，主路径是 claim + ``run_commands`` / NOTIFY 通道。
+"""
+
 from __future__ import annotations
 
 import hmac
@@ -31,6 +46,7 @@ router = APIRouter(prefix="/internal/commands", tags=["commands"])
 
 
 async def _lsp_reap_loop() -> None:
+    """后台循环：回收空闲 LSP 会话，避免语言服务器进程常驻占满内存。"""
     import asyncio
 
     from app.structural.pool import reap_idle
@@ -46,22 +62,32 @@ async def _lsp_reap_loop() -> None:
 
 
 class StartTurnBody(StartTurnCommand):
+    """启动 Turn 的命令体（契约 StartTurnCommand）。"""
+
     pass
 
 
 class CancelTurnBody(CancelTurnCommand):
+    """取消 Turn 的命令体。"""
+
     pass
 
 
 class ToolCallBody(ApproveToolCallCommand):
+    """批准工具调用；可附带 reason 供审计。"""
+
     reason: str | None = None
 
 
 class DenyToolBody(DenyToolCallCommand):
+    """拒绝工具调用的命令体。"""
+
     pass
 
 
 class PatchDecisionBody(BaseModel):
+    """接受/拒绝写作补丁时的公共字段。"""
+
     turn_id: UUID
     run_id: UUID
     patch_id: str = Field(min_length=1)
@@ -70,6 +96,14 @@ class PatchDecisionBody(BaseModel):
 
 
 def verify_internal_token(x_internal_token: str = Header(...)) -> None:
+    """校验 X-Internal-Token；与 api/其它内网调用方共享 INTERNAL_SERVICE_TOKEN。
+
+    参数:
+        x_internal_token: 请求头中的内部服务令牌。
+
+    异常:
+        HTTP 401：令牌不匹配。
+    """
     if not hmac.compare_digest(x_internal_token, settings.internal_service_token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token")
 
@@ -80,6 +114,15 @@ async def start_turn_command(
     background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
+    """推送式启动 Turn（pull 模式下的 HTTP 回退）。
+
+    参数:
+        body: 含 turn/run/session、场景、用户消息、租户 Work、可选 ops_eval 模型覆盖。
+        background_tasks: FastAPI 后台任务；真正执行在返回 202 之后。
+
+    返回:
+        空 202；业务开始以 runtime 写出的 turn.accepted 为准。
+    """
     override_dict = None
     if body.ops_eval and body.model_override is not None:
         override_dict = body.model_override.model_dump()
@@ -108,6 +151,12 @@ async def cancel_turn_command(
     body: CancelTurnBody,
     _: None = Depends(verify_internal_token),
 ):
+    """请求取消指定 Turn（软取消或 force 硬取消）。
+
+    参数:
+        body.turn_id: 目标 Turn。
+        body.force: True 时可打断模型流/子进程；False 为协作式停下。
+    """
     await request_cancel(body.turn_id, force=body.force)
     return {"accepted": True, "turn_id": str(body.turn_id)}
 
@@ -118,6 +167,11 @@ async def approve_tool_call_command(
     background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
+    """批准挂起的 tool_call，同 run_id 从 checkpoint 续跑。
+
+    参数:
+        body: turn_id / run_id / tool_call_id / trace_id。
+    """
     background_tasks.add_task(
         approve_tool_call,
         turn_id=body.turn_id,
@@ -134,6 +188,11 @@ async def deny_tool_call_command(
     background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
+    """拒绝挂起的 tool_call；原因写入 tool_result 后由模型改方案或结束。
+
+    参数:
+        body: 同批准，另含拒绝 reason（缺省由控制器使用 user_denied）。
+    """
     background_tasks.add_task(
         deny_tool_call,
         turn_id=body.turn_id,
@@ -151,6 +210,11 @@ async def patch_accept_command(
     background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
+    """接受写作补丁（``propose_patch`` 产出）；后台续跑 Turn。
+
+    参数:
+        body: turn_id / run_id / patch_id / trace_id。
+    """
     background_tasks.add_task(
         accept_patch,
         turn_id=body.turn_id,
@@ -167,6 +231,11 @@ async def patch_reject_command(
     background_tasks: BackgroundTasks,
     _: None = Depends(verify_internal_token),
 ):
+    """拒绝写作补丁；原因写入审计后由模型改方案或结束。
+
+    参数:
+        body: 同接受，另含 ``reason``（缺省 ``user_rejected``）。
+    """
     background_tasks.add_task(
         reject_patch,
         turn_id=body.turn_id,
@@ -356,6 +425,7 @@ def _tenant_query(
     owner_user_id: str | None = None,
     visibility_seed: str | None = None,
 ) -> dict[str, str | None]:
+    """把 Work 租户查询参数打包成 ``workspace_tenant_scope`` 所需 dict。"""
     return {
         "work_id": work_id,
         "work_root": work_root,
@@ -373,6 +443,12 @@ async def workspace_entries(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """列出 Work 根下目录项（api 代理浏览器用）。
+
+    参数:
+        path: 相对 Work 根的路径，默认 ``.``。
+        work_id / work_root / owner_user_id / visibility_seed: 租户作用域。
+    """
     from app.services.workspace_browser import list_workspace_entries
     from app.services.workspace_scope import workspace_tenant_scope
 
@@ -392,6 +468,11 @@ async def workspace_file(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """读取 Work 内文本文件内容（UTF-8；过大由 browser 层截断）。
+
+    参数:
+        path: 必填，相对 Work 根的文件路径。
+    """
     from app.services.workspace_browser import read_workspace_file
     from app.services.workspace_scope import workspace_tenant_scope
 
@@ -452,26 +533,36 @@ async def workspace_download(
 
 
 class WorkspaceWriteBody(BaseModel):
+    """写入或覆盖 Work 内单个文本文件。"""
+
     path: str = Field(min_length=1)
     content: str = ""
 
 
 class WorkspaceMkdirBody(BaseModel):
+    """在 Work 内创建目录（含中间路径）。"""
+
     path: str = Field(min_length=1)
 
 
 class WorkspaceRenameBody(BaseModel):
+    """重命名或移动 Work 内路径。"""
+
     path: str = Field(min_length=1)
     new_path: str = Field(min_length=1)
     overwrite: bool = False
 
 
 class SourceUploadBody(BaseModel):
+    """上传资料到 ``workspace/sources``（触发后台索引）。"""
+
     filename: str = Field(min_length=1)
     content: str = ""
 
 
 class WorkspaceDeleteBody(BaseModel):
+    """批量删除 Work 内路径。"""
+
     paths: list[str] = Field(min_length=1)
 
 
@@ -485,6 +576,7 @@ async def workspace_delete_entries(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """删除一个或多个 Work 路径；若涉及 sources 则排队增量索引。"""
     from app.services.workspace_browser import (
         delete_workspace_paths,
         sync_sources_index_safe,
@@ -512,6 +604,7 @@ async def workspace_write_file(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """写入或覆盖 Work 内文本文件（不自动触发 sources 全量 sync）。"""
     from app.services.workspace_browser import save_workspace_file
     from app.services.workspace_scope import workspace_tenant_scope
 
@@ -536,6 +629,7 @@ async def workspace_mkdir(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """在 Work 内创建目录。"""
     from app.services.workspace_browser import mkdir_workspace_path
     from app.services.workspace_scope import workspace_tenant_scope
 
@@ -557,6 +651,7 @@ async def workspace_rename(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """重命名或移动 Work 内路径；``overwrite`` 控制目标已存在时是否覆盖。"""
     from app.services.workspace_browser import rename_workspace_path
     from app.services.workspace_scope import workspace_tenant_scope
 
@@ -584,6 +679,7 @@ async def workspace_sources_index_status(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """查询 sources 向量索引状态（可选按相对 path 过滤）。"""
     from app.services.workspace_browser import sources_index_status
     from app.services.workspace_scope import workspace_tenant_scope
 
@@ -729,6 +825,7 @@ async def workspace_upload_source(
     visibility_seed: str | None = None,
     _: None = Depends(verify_internal_token),
 ):
+    """上传资料文件到 ``sources/``；索引在后台异步执行以免阻塞 api 代理超时。"""
     from app.services.workspace_browser import (
         sync_sources_index_safe,
         upload_source_file,
@@ -759,6 +856,7 @@ async def workspace_upload_source(
 
 
 def _register_workspace_inspect() -> None:
+    """挂载 workspace 只读 inspect 子路由（符号/引用等，见 workspace_inspect）。"""
     from app.routers.workspace_inspect import register_inspect_routes
 
     register_inspect_routes(
@@ -773,6 +871,25 @@ _register_workspace_inspect()
 
 @asynccontextmanager
 async def lifespan(app):
+    """进程生命周期：起池 → 旁路任务 → yield → 排空 Turn → 停监听 → 关池。
+
+    English: FastAPI lifespan — startup orphan reconcile, embedder warmup, dispatch/
+    run_commands listeners, Turn-external index watchers; shutdown drains inflight
+    turns then stops listeners and closes pools.
+
+    启动顺序:
+      1. validate_production_security / logging / init_pool
+      2. reconcile_runner_orphans（B2）
+      3. ScenarioRegistry.load / embedder warmup
+      4. stall_watchdog + runner_heartbeat + turn_dispatch + run_commands
+      5. sources sync + sources watch + AST watch + LSP idle reap
+
+    关闭顺序:
+      drain_active_turns → stop listeners → LSP pool shutdown → embedder reset → close_pool
+
+    参数:
+        app: FastAPI 应用实例（满足 lifespan 协议）。
+    """
     import asyncio
 
     from app.observability.logging import configure_logging
@@ -781,8 +898,9 @@ async def lifespan(app):
     settings.validate_production_security()
     configure_logging(service="agent-runtime", level=settings.log_level)
     await init_pool()
-    # B2: runs claimed by this runner and left 'running' by a crash have no
-    # worker anymore — fail them fast so turns don't sit in 'running' forever.
+
+    # --- 启动：孤儿 Run 对账与场景注册 ---
+    # 上次崩溃留下的「本 runner 已 claim 仍 running」孤儿 Run → 快速 failed。
     from app.controller.turn_controller import drain_active_turns, reconcile_runner_orphans
 
     try:
@@ -792,6 +910,8 @@ async def lifespan(app):
     except Exception:
         logger.exception("startup orphan reconcile failed")
     ScenarioRegistry.load()
+
+    # --- 启动：Embedder 预热（避免首条索引/检索冷启动） ---
     # Load embedder once at startup so sources index/search do not pay first-use cost.
     await asyncio.to_thread(warmup_embedder)
     from app.controller.stall_watchdog import stall_watchdog_loop
@@ -816,6 +936,7 @@ async def lifespan(app):
         stop_run_commands_listener,
     )
 
+    # --- 启动：Turn 领取 / 心跳 / run_commands 与旁路 watcher ---
     start_runner_heartbeat()
     start_turn_dispatch_listener()
     start_run_commands_listener()
@@ -829,9 +950,11 @@ async def lifespan(app):
     try:
         yield
     finally:
-        # B2: let in-flight turns finish before tearing down the pool; anything
-        # still running past the deadline is reconciled on next startup.
+        # --- 关闭：排空 in-flight Turn（B2）---
+        # 仍运行的 Turn 超过 deadline 则留给下次启动 reconcile。
         await drain_active_turns()
+
+        # --- 关闭：停止监听与 watcher ---
         await stop_run_commands_listener()
         await stop_turn_dispatch_listener()
         await stop_runner_heartbeat()
@@ -843,6 +966,8 @@ async def lifespan(app):
             await lsp_reap
         except asyncio.CancelledError:
             pass
+
+        # --- 关闭：Structural LSP 池与 stall watchdog ---
         try:
             from app.structural.pool import shutdown_pool
 
@@ -854,11 +979,21 @@ async def lifespan(app):
             await watchdog
         except asyncio.CancelledError:
             pass
+
+        # --- 关闭：Embedder 缓存与 DB 连接池 ---
         reset_embedder_cache()
         await close_pool()
 
 
 def create_app():
+    """组装 FastAPI 应用：中间件、命令/工作区路由、健康检查与 metrics。
+
+    English: Factory for uvicorn ``app.main:app`` — middleware, internal routers,
+    /health/live|ready, metrics, OpenTelemetry instrumentation.
+
+    返回:
+        可供 uvicorn 加载的 FastAPI 实例。
+    """
     from fastapi import FastAPI
     from fastapi.responses import JSONResponse
 
@@ -878,10 +1013,12 @@ def create_app():
 
     @app.get("/health/live")
     async def health_live():
+        """存活探针：进程已启动即可，不查 DB / 模型。"""
         return {"status": "ok"}
 
     @app.get("/health/ready")
     async def health_ready():
+        """就绪探针：DB 可连且模型配置已加载。"""
         from app.model.config import model_config_ready
         from app.tools.core.sandbox import sandbox_status
 
@@ -910,6 +1047,10 @@ def create_app():
 
     @app.get("/metrics")
     async def metrics_endpoint(authorization: str | None = Header(default=None)):
+        """Prometheus 文本指标；须 ``Authorization: Bearer <INTERNAL_SERVICE_TOKEN>``。
+
+        指标含工具/场景/租户标签，禁止公网暴露。
+        """
         # Scrape with `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>` —
         # metrics leak tool/scenario/tenant names and must not be public.
         from fastapi.responses import PlainTextResponse

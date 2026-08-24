@@ -1,4 +1,7 @@
+"""OpenAI-compat chat/completions 流式 Provider。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import json
@@ -28,12 +31,10 @@ from app.settings import settings
 
 
 def openai_chat_completions_url(base_url: str | None) -> str:
-    """Join OpenAI-compatible chat URL without doubling ``/v1``.
+    """作用：openai_chat_completions_url 公开 API。
 
-    Official OpenAI default is host-only (``https://api.openai.com``) and this
-    client appends ``/v1/chat/completions``. Relays and Ops presets usually
-    already include ``/v1`` (``https://api.wuai.ai/v1``); appending again 404s.
-    """
+参数：
+    ``base_url``"""
     root = (base_url or "https://api.openai.com").rstrip("/")
     if root.endswith("/chat/completions"):
         return root
@@ -43,6 +44,7 @@ def openai_chat_completions_url(base_url: str | None) -> str:
 
 
 class OpenAIProvider:
+    """作用：OpenAI-compat chat completions 流式封装。"""
     def __init__(
         self,
         *,

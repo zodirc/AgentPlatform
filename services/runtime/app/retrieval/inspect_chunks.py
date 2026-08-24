@@ -1,4 +1,7 @@
-"""Settings inspect: RAG chunk files + raw text (not embeddings). Off-loop only."""
+"""Settings inspect：列出/查看已索引 chunk 原文（RAG 调试，非 search 热路径）。
+
+只读 chunk 文本与元数据，不返回 embedding；供管理/诊断 UI。
+"""
 
 from __future__ import annotations
 
@@ -185,7 +188,16 @@ def inspect_chunk_files(
     limit: int = 200,
     store: Any | None = None,
 ) -> dict[str, Any]:
-    """List indexed source files grouped by seed vs local (private) Work."""
+    """按 visibility/q 列出已索引源文件及 chunk 计数。
+
+    参数:
+        visibility: all/seed/private 等。
+        q: 路径子串过滤。
+        limit: 最多返回文件数。
+        store: 可选注入 store（测试用）。
+    返回:
+        backend、files、total、truncated 等。
+    """
     vis = _wanted_visibility(visibility)
     needle = (q or "").strip().lower()
     cap = _clamp(limit, lo=1, hi=_MAX_FILES)
@@ -259,7 +271,7 @@ def inspect_chunks_for_path(
     limit: int = 80,
     store: Any | None = None,
 ) -> dict[str, Any]:
-    """Return actual chunk text for one indexed source path."""
+    """返回单一路径下 chunk 原文列表（tenant 过滤后）。"""
     rel = (path or "").strip().lstrip("/")
     cap = _clamp(limit, lo=1, hi=_MAX_CHUNKS)
     if not rel:

@@ -1,7 +1,7 @@
-"""Retrieval audit snapshots (HM5 / docs/33 · docs/15 §3.3).
+"""检索审计快照（HM5 / Ops 回放用，非默认热路径开销）。
 
-Captures L1 recall_pool (pre-rerank), L2 ranked (post-rerank), for Ops replay.
-Hot path: only fills when ``begin_audit_capture()`` is active (search_sources).
+职责：在 ``begin_audit_capture`` 激活时记录 L1 recall、L2 ranked、L3 entered_context。
+在 RAG 链路中的位置：``search_sources`` 工具内包裹 hybrid 检索各阶段。
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ _EXCERPT_CAP = 160
 
 
 def begin_audit_capture() -> Token:
+    """开启本 Context 的检索审计槽；返回 reset 用 token。"""
     return _audit_slot.set(
         {
             "recall_pool": [],
@@ -38,6 +39,7 @@ def begin_audit_capture() -> Token:
 
 
 def end_audit_capture(token: Token) -> dict[str, Any] | None:
+    """结束捕获并返回累积 dict；无数据时 None。"""
     data = _audit_slot.get()
     _audit_slot.reset(token)
     if not isinstance(data, dict):
@@ -46,6 +48,7 @@ def end_audit_capture(token: Token) -> dict[str, Any] | None:
 
 
 def audit_capture_active() -> bool:
+    """当前是否在审计捕获中。"""
     return _audit_slot.get() is not None
 
 
@@ -68,7 +71,7 @@ def _hit_row(hit: Any, *, source: str | None = None) -> dict[str, Any]:
 
 
 def record_lane_hits(*, vector: list[Any], bm25: list[Any]) -> None:
-    """L1 partial: vector + bm25 lanes before fusion (ids only merged into recall_pool later)."""
+    """L1 分 lane 记录（融合前 vector/bm25 预览与真实计数）。"""
     slot = _audit_slot.get()
     if slot is None:
         return
@@ -93,7 +96,7 @@ def record_lane_depth_meta(
     two_level_doc_n: int | None = None,
     two_level_enabled: bool | None = None,
 ) -> None:
-    """RET-10: lightweight lane/fetch knobs for depth_audit (no hit payloads)."""
+    """RET-10：记录 lane top_k、two_level 等深度元数据（无 hit 载荷）。"""
     slot = _audit_slot.get()
     if slot is None:
         return
@@ -110,7 +113,7 @@ def record_lane_depth_meta(
 
 
 def record_recall_pool(hits: list[Any], *, source: str = "fused") -> None:
-    """L1: pool entering rerank (or final list when rerank off)."""
+    """L1：进入 rerank 前的 recall pool（或 rerank 关闭时的最终列表）。"""
     slot = _audit_slot.get()
     if slot is None:
         return
@@ -118,7 +121,7 @@ def record_recall_pool(hits: list[Any], *, source: str = "fused") -> None:
 
 
 def record_ranked(hits: list[Any], *, method: str) -> None:
-    """L2: after rerank (or copy of pool when rerank skipped)."""
+    """L2：rerank 之后（或 method=none 时复制 pool）。"""
     slot = _audit_slot.get()
     if slot is None:
         return
@@ -131,7 +134,7 @@ def build_entered_context(
     *,
     excerpt_chars: int,
 ) -> list[dict[str, Any]]:
-    """L3: what was written into tool_result (may be truncated vs index excerpt)."""
+    """L3：写入 tool_result 的摘录行（相对索引 excerpt 可能更短）。"""
     rows: list[dict[str, Any]] = []
     for hit in hits[:_STAGE_CAP]:
         if not isinstance(hit, dict):
@@ -163,7 +166,7 @@ def finalize_audit_for_result(
     excerpt_chars: int,
     mode: str,
 ) -> dict[str, Any]:
-    """Merge capture + L3 for tool result / event payload."""
+    """合并 capture + L3，供 tool result / 事件 payload。"""
     audit: dict[str, Any] = {
         "recall_pool": [],
         "ranked": [],

@@ -1,3 +1,29 @@
+"""Turn 外壳：领取/租约、Intake、审批续跑、事件写回与终态。
+
+English: Turn shell — claim/lease, intake, approval resume, event write-back, and
+terminal status. Does not own the AgentEngine while-loop (assemble → model → tools).
+
+职责边界
+--------
+- **本模块**：``runs``/``turns`` 状态机、runner 租约 claim、用户输入编译（Intake）、
+  ``BufferedEventWriter`` 注入、审批挂起/续跑、终态事件（completed/failed/cancelled）、
+  启动孤儿 reconcile 与关机 drain。
+- **不在本模块**：组窗 fill、模型流式、工具执行细节 → ``AgentEngine``；
+  场景工具裁剪 → ``tools.bootstrap.tool_scope``；租约 SQL 原语 → ``run_lock``。
+
+对外入口（HTTP/命令经 runtime router 调用）
+------------------------------------------
+``start_turn`` · ``request_cancel`` · ``approve_tool_call`` · ``deny_tool_call`` ·
+``accept_patch`` · ``reject_patch`` · ``reconcile_runner_orphans`` · ``drain_active_turns``
+
+并发与安全不变量（维护时勿破坏）
+--------------------------------
+- B3：approve/deny 在任何 ``await`` 前抢 ``_inflight_commands``，防止双击/重试
+  从 checkpoint 双开同一 tool_call。
+- B4：仅 ``accepted`` Run 可 claim；已 ``running`` 禁止再抢（见 ``run_lock``）。
+- 终态事件前必须 ``close_event_writer``，保证 delta 的 sequence 落在终态之前。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -59,20 +85,37 @@ logger = logging.getLogger(__name__)
 
 _active_turns: set[UUID] = set()
 
-# Approve/deny commands currently being processed. Claimed before any await so
+# B3: Approve/deny commands currently being processed. Claimed before any await so
 # two concurrent commands (double-click / HTTP retry) cannot both resolve the
-# same pending turn and execute the approved tool twice (B3). The in-memory
-# pending pop alone is not enough: both losers would fall back to the
-# checkpoint and still double-execute.
+# same pending turn and execute the approved tool twice. The in-memory pending
+# pop alone is not enough: both losers would fall back to the checkpoint and
+# still double-execute.
+#
+# 中文：approve/deny 在飞集合。必须在任何 await 之前抢占；仅靠 pending pop
+# 不够——两方都会回落 checkpoint 并双执行同一 tool_call。
 _inflight_commands: set[UUID] = set()
 
 
 def _track_turn_started(turn_id: UUID) -> None:
+    """登记本进程 inflight Turn，并刷新 ``runtime_inflight_turns`` 指标。
+
+    English: Add turn to in-process inflight set and update the gauge.
+
+    参数:
+        turn_id: 刚开始执行（或审批续跑重新接管）的 Turn。
+    """
     _active_turns.add(turn_id)
     metrics.set_gauge("runtime_inflight_turns", float(len(_active_turns)))
 
 
 def _track_turn_finished(turn_id: UUID) -> None:
+    """从 inflight 集合移除 Turn，并刷新指标。
+
+    English: Drop turn from inflight set (success / fail / cancel / handoff to pending).
+
+    参数:
+        turn_id: 已结束或已交接给 waiting_approval 的 Turn。
+    """
     _active_turns.discard(turn_id)
     metrics.set_gauge("runtime_inflight_turns", float(len(_active_turns)))
 
@@ -82,7 +125,16 @@ _TURN_COMPLETED_SUMMARY_MAX = 4096
 
 
 def _post_turn_jobs_payload(scenario_id: str) -> dict[str, list[str]]:
-    """Attach Profile.post_turn_jobs for api outbox (C3); empty → omit."""
+    """读取 Profile.post_turn_jobs，挂到终态事件供 api outbox 消费。
+
+    English: Attach post_turn_jobs (e.g. sources.index_sync) onto terminal event payloads.
+
+    参数:
+        scenario_id: 场景键；空或未知时返回 ``{}``（调用方应 omit 该字段）。
+
+    返回:
+        ``{\"post_turn_jobs\": [...]}``；无任务时 ``{}``。
+    """
     sid = (scenario_id or "").strip()
     if not sid:
         return {}
@@ -98,7 +150,15 @@ def _post_turn_jobs_payload(scenario_id: str) -> dict[str, list[str]]:
 
 
 def _truncate_turn_summary(text: str | None, *, limit: int = _TURN_COMPLETED_SUMMARY_MAX) -> str:
-    """INFRA-1: clamp summary to schema maxLength so long finals don't fail the event write."""
+    """截断终态 summary，避免超长正文触发事件 schema 校验失败。
+
+    参数:
+        text: 原始摘要；None 视为空串。
+        limit: 最大字符数（含省略号）。
+
+    返回:
+        不超过 limit 的字符串；超长时末尾替换为「…」。
+    """
     s = text if text is not None else ""
     if len(s) <= limit:
         return s
@@ -108,7 +168,16 @@ def _truncate_turn_summary(text: str | None, *, limit: int = _TURN_COMPLETED_SUM
 
 
 def _try_claim_command(turn_id: UUID) -> bool:
-    """Atomic on the event loop: no await between membership test and add."""
+    """在事件循环线程上原子抢占「审批命令在飞」标志（中间不得有 await）。
+
+    English: Synchronously claim exclusive processing of approve/deny for this turn (B3).
+
+    参数:
+        turn_id: 要独占处理的 Turn。
+
+    返回:
+        ``True`` 本调用方获得独占；``False`` 已有并发命令在飞（应直接 return）。
+    """
     if turn_id in _inflight_commands:
         return False
     _inflight_commands.add(turn_id)
@@ -123,10 +192,16 @@ async def _fail_stuck_approval(
     termination_reason: str,
     message: str,
 ) -> None:
-    """Surface approval-command failures instead of silently dropping them (I10).
+    """审批命令失败时显式 ``turn.failed``，避免 UI 永久卡在 waiting_approval。
 
-    Only turns still in waiting_approval are failed — a late/duplicate command
-    after a successful resume must not corrupt a running or terminal turn.
+    English: Fail a turn that is still waiting_approval when approve/deny cannot resume
+    (lost checkpoint, timeout). No-ops if status already left waiting_approval so a
+    late duplicate command cannot corrupt a running/terminal turn.
+
+    参数:
+        turn_id / run_id / trace_id: 领域标识与观测 ID。
+        termination_reason: 写入 ``turn.failed`` 的原因码（如 ``approval_state_lost``）。
+        message: 可读说明，写入 ``payload.message``。
     """
     pool = await get_pool()
     status = await pool.fetchval("SELECT status FROM turns WHERE id = $1", turn_id)
@@ -145,6 +220,15 @@ async def _fail_stuck_approval(
 
 
 async def _wait_turn_inactive(turn_id: UUID, *, timeout: float = 120.0) -> bool:
+    """等到本进程不再将该 Turn 记为 active（便于审批命令安全接手）。
+
+    参数:
+        turn_id: 目标 Turn。
+        timeout: 最长等待秒数。
+
+    返回:
+        True 已空闲；False 超时仍在 _active_turns。
+    """
     deadline = time.monotonic() + timeout
     while turn_id in _active_turns:
         if time.monotonic() >= deadline:
@@ -154,16 +238,22 @@ async def _wait_turn_inactive(turn_id: UUID, *, timeout: float = 120.0) -> bool:
 
 
 class TurnAbortedError(Exception):
-    """Turn already transitioned to failed after a non-recoverable runtime error."""
+    """事件写路径已把 Turn 标为 failed 后，向上打断后续 Engine 逻辑。"""
 
 
 async def reconcile_runner_orphans() -> int:
-    """Fail runs this runner claimed but never finished (B2 crash recovery).
+    """启动时把本 runner 上次崩溃遗留的 ``running`` Run 收成 ``failed``。
 
-    After a crash/restart the in-process worker is gone, so a run left in
-    'running' will never progress: fail it fast with turn.failed instead of
-    letting the turn sit in 'running' forever. Turns paused at an approval
-    (run status 'interrupted') are excluded — they resume from checkpoint.
+    English: On runtime boot, fail runs this runner_id left as ``running`` with no live
+    worker. Approval-suspended runs (``interrupted``) are intentionally skipped —
+    they resume from checkpoint via approve/deny.
+
+    为何需要:
+        进程崩溃后内存工人消失，DB 若仍 ``running`` 会永久卡住 UI；B2 启动 reconcile
+        （本函数）与 api 侧租约回收（O3）互补，禁止对 ``running`` 再 claim（B4）。
+
+    返回:
+        成功收尸的 Run 条数（单次最多扫描 100 行）。
     """
     pool = await get_pool()
     rows = await pool.fetch(
@@ -203,10 +293,13 @@ async def reconcile_runner_orphans() -> int:
 
 
 async def drain_active_turns(timeout: float | None = None) -> bool:
-    """Wait for in-flight turns to finish before shutdown (B2 graceful stop).
+    """关机前等待本进程 inflight Turn 结束（优雅停机）。
 
-    Returns True when everything drained, False on timeout (remaining turns
-    will be failed by reconcile_runner_orphans on next startup).
+    参数:
+        timeout: 最长等待秒数；None 时用 settings.shutdown_drain_seconds。
+
+    返回:
+        True 表示全部排空；False 表示超时（剩余 Run 由下次启动 reconcile_runner_orphans 收尸）。
     """
     limit = settings.shutdown_drain_seconds if timeout is None else timeout
     deadline = time.monotonic() + max(0.0, limit)
@@ -221,9 +314,17 @@ async def drain_active_turns(timeout: float | None = None) -> bool:
 
 
 async def request_cancel(turn_id: UUID, *, force: bool = False) -> None:
+    """持久化取消意图；工人已死时尽量把孤儿 Turn 直接收成 ``cancelled``。
+
+    English: Persist cancel flags (HA-visible), then best-effort orphan finalize so the
+    UI does not stick on “stopping” when no worker is polling cancel.
+
+    参数:
+        turn_id: 目标 Turn。
+        force: ``True`` 硬取消（可 abort 模型流/子进程）；``False`` 软取消（协作点退出）。
+    """
     await persist_cancel_request(turn_id=turn_id, force=force)
-    # If the worker already died (e.g. event sequence race), nothing will poll the
-    # cancel flag — finalize orphaned running turns so the UI leaves「停止中」.
+    # Worker already dead → nobody polls cancel → finalize immediately.
     try:
         await maybe_finalize_orphan_cancel(turn_id, force=force)
     except Exception:
@@ -231,7 +332,19 @@ async def request_cancel(turn_id: UUID, *, force: bool = False) -> None:
 
 
 async def maybe_finalize_orphan_cancel(turn_id: UUID, *, force: bool = False) -> bool:
-    """Cancel a running turn that has gone silent (no live worker checking the flag)."""
+    """无存活工人时，把仍 ``running``/``interrupted`` 的 Turn 收成 ``cancelled``。
+
+    English: If the run row is still non-terminal but events have gone silent (or force),
+    emit turn.cancelling → turn.cancelled and update turns/runs. Live workers own the
+    normal cancel path via ``_check_cancel_flag`` inside AgentEngine.
+
+    参数:
+        turn_id: 目标 Turn。
+        force: 透传给终态事件；硬取消时缩短「静默」等待门槛。
+
+    返回:
+        ``True`` 本函数完成了终态收尾；``False`` 条件不满足（仍有工人/未静默/已终态）。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -262,7 +375,8 @@ async def maybe_finalize_orphan_cancel(turn_id: UUID, *, force: bool = False) ->
     )
     if row is None:
         return False
-    # Worker owns the run row; if it is already terminal, nothing to orphan-finalize.
+    # Worker owns the run row; terminal status → nothing to orphan-finalize.
+    # 工人仍持有或已终态：不在此路径动手。
     if row["run_status"] not in {"running", "interrupted"}:
         return False
 
@@ -350,6 +464,34 @@ async def start_turn(
     already_claimed: bool = False,
     reject_when_full: bool = True,
 ) -> None:
+    """领取（或已 claim）后执行一次完整 Turn：Intake → Engine → 终态。
+
+    English: Own a run (unless ``already_claimed``), bind tenant/model context, then
+    hand off to ``_run_turn``. Idempotent for the same ``turn_id`` already in
+    ``_active_turns``. Push path claims here; pull path claims in the dispatcher
+    and passes ``already_claimed=True``.
+
+    流程概要:
+      1. inflight 闸（可选 ``runtime_max_inflight_turns``）与 ``run_exists`` 校验。
+      2. 未 claim 则 ``ensure_run_owned_by_runner``（B4：仅 accepted）。
+      3. 绑定 work/tenant、ops_eval 模型覆盖，进入 ``_run_turn``。
+      4. 异常路径：``_fail_turn`` / 取消由 Engine 协作点 + ``_finalize_turn`` 收尾。
+
+    参数:
+        turn_id / run_id: 领域 1:1 执行对；事件与 checkpoint 挂在二者上。
+        session_id: 对话线程；用于 transcript / 租户解析。
+        scenario_id: 场景键（writing/agent/…），决定 Profile，不由模型猜测。
+        message: 本轮用户输入原文。
+        trace_id: 观测关联 ID（贯穿 turn_events）。
+        plan_phase: 计划相位（``planning`` / ``executing``）；影响 ``tool_scope`` 审批。
+        work_id / work_root: 作品世界根；绑定租户上下文与沙箱路径。
+        owner_user_id: 会话主人；解析模型供应商配置。
+        visibility_seed: 是否可见 seed 语料（检索 ACL）。
+        model_mode / model_override: **仅** ``ops_eval`` 生效的模型覆盖；产品 Turn 忽略。
+        ops_eval: 官方/L1 评测标记（无人值守预批准、模型密文 escrow 等）。
+        already_claimed: ``True`` 表示 pull 路径已占有 runner 租约，跳过再次 claim。
+        reject_when_full: inflight 已满时是否将 Turn 记为 ``budget_exceeded`` 失败。
+    """
     if turn_id in _active_turns:
         return
     max_inflight = int(getattr(settings, "runtime_max_inflight_turns", 0) or 0)
@@ -451,6 +593,18 @@ async def start_turn(
 
 
 async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
+    """从磁盘 checkpoint 重建 ``PendingTurn``（内存 pending 可能已 TTL/重启丢失）。
+
+    English: Rebuild PendingTurn from step checkpoint + interrupt payload when the
+    in-process store is empty. Recreates gateway/tools from profile; used by
+    approve/deny fallback after B9 eviction or process restart.
+
+    参数:
+        run_id: 执行实例 ID。
+
+    返回:
+        可续跑的 ``PendingTurn``；无 checkpoint 或无 interrupt 元数据时为 ``None``。
+    """
     loaded = await load_checkpoint(run_id)
     if loaded is None:
         return None
@@ -493,8 +647,16 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
 
 
 async def _resolve_pending(turn_id: UUID, run_id: UUID) -> PendingTurn | None:
-    # Prefer in-memory pending (full volatile) when this process still holds it;
-    # fall back to checkpoint for HA / process restart.
+    """解析待续跑状态：优先本进程内存 pending，否则回落 checkpoint。
+
+    参数:
+        turn_id: 业务 Turn（内存 pending 的键）。
+        run_id: 执行实例（checkpoint 的键）。
+
+    返回:
+        PendingTurn；两者皆无时为 None（调用方应 _fail_stuck_approval）。
+    """
+    # 本进程仍持有完整 volatile 时优先内存；HA/重启则靠 checkpoint。
     memory = get(turn_id)
     if memory is not None:
         return memory
@@ -502,7 +664,16 @@ async def _resolve_pending(turn_id: UUID, run_id: UUID) -> PendingTurn | None:
 
 
 async def _with_session_tenant(session_id: UUID, coro, *, ops_eval: bool = False):
-    """Rebind TenantContext for approve/deny/patch resumes (same Work as StartTurn)."""
+    """为审批/补丁续跑重绑与 StartTurn 相同的 TenantContext（Work 根）。
+
+    参数:
+        session_id: 用于解析 work_id / work_root / owner。
+        coro: 已构造好的 awaitable（通常是内嵌 async def _run()）。
+        ops_eval: 是否评测态（影响可见性与部分旁路）。
+
+    返回:
+        await coro 的结果。
+    """
     from app.tenant_context import bind_tenant_context, ensure_work_root_exists, reset_tenant_context
 
     work_id, work_root, owner_user_id, visibility_seed = await load_session_work(session_id)
@@ -521,6 +692,11 @@ async def _with_session_tenant(session_id: UUID, coro, *, ops_eval: bool = False
 
 
 async def _cleanup_pending_after_command(turn_id: UUID, run_id: UUID) -> None:
+    """审批命令结束后：若已离开 waiting_approval，清内存 pending 与 checkpoint。
+
+    参数:
+        turn_id / run_id: 刚处理完的 Turn/Run。
+    """
     pool = await get_pool()
     status = await pool.fetchval("SELECT status FROM turns WHERE id = $1", turn_id)
     if status == "waiting_approval":
@@ -536,6 +712,17 @@ async def approve_tool_call(
     tool_call_id: str,
     trace_id: UUID,
 ) -> None:
+    """批准挂起工具并在同一 ``run_id`` 上续跑（B3 防双开）。
+
+    English: Approve a pending tool_use, restore PendingTurn (memory or checkpoint),
+    execute the tool, then resume AgentEngine. Concurrent duplicate commands are
+    rejected via ``_try_claim_command``.
+
+    参数:
+        turn_id / run_id: 必须与 ``waiting_approval`` 时的 Run 一致（不可换新 Run）。
+        tool_call_id: 待放行的那次 ``tool_use`` id。
+        trace_id: 观测关联 ID。
+    """
     if not _try_claim_command(turn_id):
         logger.warning("approve_tool_call: command already in flight turn %s", turn_id)
         return
@@ -596,6 +783,15 @@ async def deny_tool_call(
     trace_id: UUID,
     reason: str = "user_denied",
 ) -> None:
+    """拒绝挂起工具：把 ``reason`` 写入 ``tool_result`` 后继续或结束循环。
+
+    English: Deny pending tool_use with a user-visible reason, then resume the engine
+    loop (model may choose another tool or finish). Same B3 single-flight guard as approve.
+
+    参数:
+        turn_id / run_id / tool_call_id / trace_id: 同 ``approve_tool_call``。
+        reason: 拒绝原因短码/文案，写入 tool_result，对模型可见。
+    """
     if not _try_claim_command(turn_id):
         logger.warning("deny_tool_call: command already in flight turn %s", turn_id)
         return
@@ -656,6 +852,13 @@ async def accept_patch(
     patch_id: str,
     trace_id: UUID,
 ) -> None:
+    """用户接受写作补丁：按 patch_id 找到 proposed 事件并落到磁盘。
+
+    参数:
+        turn_id / run_id: 所属 Turn/Run。
+        patch_id: propose_patch 产出的补丁标识。
+        trace_id: 观测关联 ID。
+    """
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -713,6 +916,12 @@ async def reject_patch(
     trace_id: UUID,
     reason: str = "user_rejected",
 ) -> None:
+    """用户拒绝写作补丁：落 patch.rejected 事件，不改磁盘。
+
+    参数:
+        turn_id / run_id / patch_id / trace_id: 同 accept_patch。
+        reason: 拒绝原因，写入事件 payload。
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -733,6 +942,19 @@ async def _make_write_event(
     trace_id: UUID,
     ops_eval: bool = False,
 ) -> Any:
+    """构造本 Turn 的 write_event 闭包，并注册 BufferedEventWriter。
+
+    delta 类事件走缓冲合并；非 delta 先 flush 再事务 INSERT。
+    ops_eval 且关闭落库 thinking 时，可把 thinking.delta 改写到 sidecar JSONL。
+
+    参数:
+        turn_id / run_id / trace_id: 事件信封字段。
+        ops_eval: 评测 Turn 可跳过 thinking 入库以减压。
+
+    返回:
+        async write_event(*, event_type, payload, step_index=0, conn=None) 回调。
+        校验失败时会 _fail_turn 并抛 TurnAbortedError。
+    """
     pool = await get_pool()
     skip_thinking = bool(ops_eval) and not bool(settings.ops_eval_persist_thinking)
     sidecar = None
@@ -761,10 +983,17 @@ async def _make_write_event(
         step_index: int = 0,
         conn=None,
     ) -> None:
+        """追加一条 turn_event（或缓冲 delta）。
+
+        参数:
+            event_type: 契约事件类型名。
+            payload: 已按 schema 准备的载荷。
+            step_index: Engine 步序号。
+            conn: 若由调用方托管事务，则先 flush 缓冲再复用该连接写入。
+        """
         try:
             if conn is not None:
-                # Caller-managed transaction: drain buffered deltas first so
-                # ordering matches the per-event write semantics exactly.
+                # 调用方事务：先排空缓冲，保证 sequence 与逐条写入语义一致。
                 await buffered.flush()
                 await append_event(
                     conn,
@@ -807,6 +1036,11 @@ async def _make_write_event(
 
 
 def _schedule_purge_thinking(turn_id: UUID) -> None:
+    """Turn 终态后异步删除 thinking.delta 行（减轻投影/存储）；无事件循环则跳过。
+
+    参数:
+        turn_id: 已结束的 Turn。
+    """
     try:
         asyncio.get_running_loop().create_task(
             purge_thinking_deltas(turn_id),
@@ -827,7 +1061,19 @@ async def _fail_turn(
     steps: int = 0,
     duration_seconds: float = 0.0,
 ) -> None:
-    # Drain any buffered stream deltas so turn.failed is sequenced after them.
+    """写入 ``turn.failed``，并把 ``turns``/``runs`` 标为 failed。
+
+    English: Terminal failure path. Always ``close_event_writer`` first so streamed
+    deltas flush before ``turn.failed`` and sequence ordering stays correct.
+
+    参数:
+        turn_id / run_id / trace_id: 领域与观测标识。
+        termination_reason: 失败原因码（如 ``runner_restart``、``schema_validation_error``）。
+        message: 可选可读说明（截断至 1024）。
+        scenario_id: 用于 ``post_turn_jobs`` 与指标标签。
+        steps / duration_seconds: 观测用步数与墙钟耗时。
+    """
+    # Flush buffered deltas first so turn.failed sequences after them.
     await close_event_writer(turn_id)
     payload: dict[str, Any] = {"termination_reason": termination_reason}
     if message:
@@ -876,7 +1122,24 @@ async def _finalize_turn(
     summary: str | None,
     duration_seconds: float = 0.0,
 ) -> None:
-    # Drain any buffered stream deltas so terminal events sequence after them.
+    """按 ``TurnState`` 写出终态事件并更新 ``turns``/``runs``。
+
+    English: Terminal write-back after Engine returns. Cancel path emits
+    turn.cancelling → turn.cancelled (cancelled ≠ failed). Success path emits
+    turn.completed plus optional transcript persist, plan backfill, continuity hook.
+
+    分支:
+      - ``state.cancelled`` → cancelled（不写 failed）。
+      - ``budget_exceeded`` / 其它失败标志 → ``_fail_turn`` 语义或本函数内 failed。
+      - 否则 → ``turn.completed``（summary 按契约截断）。
+
+    参数:
+        turn_id / run_id / trace_id: 领域与观测标识。
+        state: Engine 结束后的 Turn 状态。
+        summary: 终稿摘要；按 ``turn.completed`` schema maxLength 截断。
+        duration_seconds: 观测用墙钟秒数。
+    """
+    # Flush buffered deltas first so terminal events sequence after them.
     await close_event_writer(turn_id)
     pool = await get_pool()
 
@@ -1022,7 +1285,12 @@ async def _finalize_turn(
 
 
 async def _maybe_write_continuity_pending(state: TurnState, *, turn_id: UUID) -> None:
-    """WN1: after turns that declare ``hooks.post_turn``, run the bound impl (R4)."""
+    """Turn 终态后异步跑 Profile.hooks.post_turn（如写作连续性便签）；不挡用户完成。
+
+    参数:
+        state: 已结束的 Turn 状态。
+        turn_id: 供 hook 落盘/关联用。
+    """
     from app.scenarios.hooks import resolve
     from app.scenarios.registry import ScenarioRegistry
 
@@ -1039,7 +1307,11 @@ async def _maybe_write_continuity_pending(state: TurnState, *, turn_id: UUID) ->
 
 
 async def _backfill_plan_open_items(state: TurnState) -> None:
-    """Turn-tail async: merge pending plan titles into sessions.context_summary (non-blocking path)."""
+    """Turn 尾异步：把未完成计划项合并进 sessions.context_summary（不挡收尾）。
+
+    参数:
+        state: 含 messages 的 Turn 状态，用于抽取 open plan items。
+    """
     open_items = extract_open_plan_items(state.messages)
     if not open_items:
         return
@@ -1055,7 +1327,7 @@ async def _backfill_plan_open_items(state: TurnState) -> None:
             "source": "plan_backfill",
         }
         if not record.get("task"):
-            # Keep a thin task pointer from first open item if none.
+            # 无既有 task 时用首条 open item 作薄指针。
             record["task"] = open_items[0][:300]
         await save_session_context_summary(state.session_id, record)
     except Exception:
@@ -1068,6 +1340,16 @@ async def _resolve_delegate_hot_files(
     path_refs: list[str] | None = None,
     prerread_hot: list[str] | None = None,
 ) -> tuple[str, ...]:
+    """合并 @path / 预读 / session 热文件，供子 agent 委派时带上焦点路径。
+
+    参数:
+        session_id: 读取 sessions.context_summary 中的 hot_files。
+        path_refs: 用户消息里 @ 引用的路径。
+        prerread_hot: Intake 预读得到的热文件。
+
+    返回:
+        去重后最多 12 条路径的元组。
+    """
     files: list[str] = []
     for group in (path_refs or [], prerread_hot or []):
         for item in group:
@@ -1100,6 +1382,27 @@ async def _run_turn(
     plan_phase: str | None = None,
     ops_eval: bool = False,
 ) -> None:
+    """单次 Turn 主路径：Intake → ``turn.accepted`` →（本地短接 | Engine）→ 终态。
+
+    English: Core turn body after lease claim. Compiles user input, emits
+    turn.accepted, optionally short-circuits slash commands without a model call,
+    otherwise builds tool_scope + gateway and runs AgentEngine. On
+    ``waiting_approval``, persists checkpoint/PendingTurn and returns without
+    terminal events; approve/deny later resumes on the same run_id.
+
+    步骤概要:
+      1. 加载 Profile；``InputCompiler`` 处理斜杠 / ``@path``；拼接 session transcript。
+      2. ``should_query``：``/help``、``/compact``、``/verify`` 等可零模型结束。
+      3. 否则 ``tool_scope`` + ``create_gateway`` → ``AgentEngine.run``；
+         审批挂起则 checkpoint + 返回（不 finalize）。
+      4. 正常/取消/失败结束走 ``_finalize_turn`` / ``_fail_turn``。
+
+    参数:
+        turn_id / run_id / session_id / scenario_id / message / trace_id:
+            同 ``start_turn``；租约应已由调用方 claim。
+        plan_phase: 规范化前的计划相位字符串。
+        ops_eval: 评测标记（thinking 落库、预批准等由上游绑定）。
+    """
     profile = ScenarioRegistry.get(scenario_id)
     phase = normalize_plan_phase(plan_phase)
     compiler = InputCompiler()
@@ -1107,12 +1410,12 @@ async def _run_turn(
     compiled = await compiler.enrich_with_preread(compiled)
     prior = await load_session_transcript(session_id)
     if prior:
-        # Rolling session history: continue prior messages; skip thin summary to avoid dup.
+        # 滚动会话历史：接上 prior messages；有 transcript 则不再塞薄摘要以免重复。
         compiled.messages = [*prior, *compiled.messages]
     else:
         session_ctx = await load_session_context(session_id)
         if session_ctx:
-            # Compat fallback for sessions without a transcript yet.
+            # 尚无 transcript 的旧会话：用 context_summary 兜底。
             hot = list(compiled.metadata.get("hot_files") or [])
             if hot:
                 existing = [str(v) for v in session_ctx.get("hot_files") or []]
@@ -1138,8 +1441,7 @@ async def _run_turn(
     }
     if phase is not None:
         accepted_payload["plan_phase"] = phase
-    # Prefer the effective model (ops_eval override) over the owner's saved profile
-    # so Ops DeepSeek runs are not mis-labeled as SYSTEM_USER openai/gpt-4o-mini.
+    # 优先写有效模型（ops_eval 覆盖），避免 Ops 跑 DeepSeek 却标成用户默认 gpt。
     if model_config is not None:
         accepted_payload["model_provider"] = model_config.provider
         accepted_payload["model_name"] = model_config.model_name
@@ -1564,6 +1866,18 @@ async def _resume_after_approval(
     pending: PendingTurn,
     deny_reason: str = "user_denied",
 ) -> None:
+    """审批决议后续跑：执行或拒绝挂起工具，再继续 ``AgentEngine``。
+
+    English: After user approve/deny, re-bind write_event / tenant, mark turn
+    running, execute or synthesize a denied tool_result, then resume the engine
+    loop on the **same** run_id (never start a new run for resume).
+
+    参数:
+        turn_id / run_id / tool_call_id / trace_id: 必须与挂起 interrupt 一致。
+        approved: ``True`` 执行工具；``False`` 把 ``deny_reason`` 写入 tool_result。
+        pending: 内存或 checkpoint 恢复的完整续跑上下文。
+        deny_reason: 拒绝时写入模型可见结果的原因。
+    """
     call = pending.pending_tool_call or {}
     if call.get("tool_call_id") != tool_call_id:
         logger.warning("tool_call_id mismatch turn=%s expected=%s got=%s", turn_id, call.get("tool_call_id"), tool_call_id)

@@ -1,8 +1,5 @@
-"""Locate coarse-filter via AST index (§2.2 / §2.2.1).
+"""codebase_search AST 定位与 fuse 降级。"""
 
-Welded into search_codebase — no new tool name. Incomplete hits echo
-``candidates[]`` (never as definitions). Fuse-fail reasons for CSI probes.
-"""
 
 from __future__ import annotations
 
@@ -223,12 +220,7 @@ async def locate_via_ast_index(
     turn_id: object | None,
     path_hint: str | None = None,
 ) -> dict[str, Any] | None:
-    """Try AST candidates → LSP confirmation.
-
-    Returns a search_codebase-shaped dict on success / incomplete-with-candidates,
-    or None to fall through to today's LSP+lexical behavior.
-    Never invents definitions without LSP confirmation (veto 3).
-    """
+    """作用：codebase_search AST 定位主入口。"""
     if work_id is None or not owner_user_id:
         return None
     service = get_ast_index_service()

@@ -1,4 +1,10 @@
-"""Ops control-plane overview: agent / bench / host / containers (no secrets)."""
+"""Ops 控制面总览：agent / bench / 宿主机 / 容器（不含密钥与 per-user 模型凭据）。
+
+English: Ops control-plane overview: agent / bench / host / containers (no secrets).
+
+供 Ops Console 首页一次性拉取 runtime 健康、bench worker、Docker 栈、
+pull-dispatch 容量信号；默认不跑 ``docker stats`` 以保持响应速度。
+"""
 
 from __future__ import annotations
 
@@ -694,6 +700,15 @@ async def _capacity_block() -> dict[str, Any]:
 
 
 async def build_overview(*, include_stats: bool = False) -> dict[str, Any]:
+    """并行组装 Ops 总览 JSON（agent/bench/host/containers/capacity）。
+
+    参数:
+        include_stats: 为 True 时对运行中容器追加 ``docker stats``（约 +2s）。
+
+    返回:
+        含 ``agent``、``bench``、``host``、``containers``、``capacity``、``ops`` 键的 dict；
+        各块失败时内嵌 ``error`` 字段而非抛异常。
+    """
     import asyncio
 
     agent, bench, host, containers, capacity = await asyncio.gather(

@@ -1,3 +1,9 @@
+"""Patch 提议与应用：span 预检、散文 hygiene 与 surgical apply。
+
+``propose_patch`` 生成 pending patch（含 apply 预检）；``apply_patch`` 按 ``old_text``
+做 surgical 替换，无 ``old_text`` 时整文件写但拒绝可疑的大幅缩短。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -14,10 +20,18 @@ from app.writing.patch_hygiene import prose_patch_block_reason, sanitize_prose_p
 from app.writing.signals.prose_path import is_prose_writing_path
 
 def _span_apply_precheck(path: str, old_text: str, new_text: str) -> dict[str, Any]:
-    """C-4: soft applyability precheck (span unique + optional ``git apply --check``).
+    """C-4：span 唯一性软预检，可选 ``git apply --check``（不修改磁盘）。
 
-    Does not mutate the file. Returns ``applies`` True/False and optional error detail
-    so the model can re-read and retry without loop changes.
+    参数:
+        path: 目标文件相对路径。
+        old_text: 待替换 span。
+        new_text: 替换后 span。
+
+    返回:
+        ``applies`` True/False 及 ``apply_check_error``/``apply_check`` 等，供模型重读重试。
+
+    说明:
+        span 唯一性是 propose 的权威门；git apply 对 synthetic udiff 仅为 advisory。
     """
     import subprocess
     import tempfile
@@ -100,7 +114,14 @@ def _span_apply_precheck(path: str, old_text: str, new_text: str) -> dict[str, A
 
 
 def _unified_patch_apply_precheck(content: str) -> dict[str, Any]:
-    """When writing a ``.patch``/``.diff``, optionally ``git apply --check``."""
+    """写入 ``.patch``/``.diff`` 文件时，可选 ``git apply --check`` 校验。
+
+    参数:
+        content: unified diff 或 patch 全文。
+
+    返回:
+        非 patch 形态返回 ``{}``；无 git 时 ``applies=None``；失败时 ``applies=False`` 与 error 详情。
+    """
     import subprocess
     import tempfile
 
@@ -148,6 +169,21 @@ async def propose_patch(
     summary: str = "",
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """提议一处 span 级变更（不直接写盘），返回 pending patch 与 apply 预检结果。
+
+    参数:
+        path: 目标文件路径。
+        old_text: 待替换片段。
+        new_text: 替换后片段。
+        summary: 可选人类可读摘要。
+
+    返回:
+        成功：``patch_id``/``status=pending``/``applies=True``；
+        失败：``status=error`` 与 ``apply_check_error``；散文路径经 ``sanitize_prose_patch`` 与对话保护。
+
+    说明:
+        seed corpus 只读；散文 ``prose_patch_block_reason`` 可阻止破坏对话结构的 patch。
+    """
     _assert_not_seed_corpus(path)
     old = old_text
     new = new_text
@@ -203,10 +239,19 @@ async def apply_patch(
     old_text: str = "",
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Apply a patch surgically when ``old_text`` is set; otherwise full-file write.
+    """应用 patch：有 ``old_text`` 时 surgical 替换，否则整文件写（带缩短保护）。
 
-    ``propose_patch`` emits ``old_text``/``new_text`` *spans*. Writing the span alone
-    as the whole file destroys long documents after auto-apply.
+    参数:
+        path: 目标文件路径。
+        new_text: 新内容或替换后 span。
+        old_text: 可选；设置则必须在当前文件中唯一出现。
+        **_kwargs: ``force_full_replace=true`` 可 intentional 整文件重写。
+
+    返回:
+        ``status=applied`` 及 ``mode=surgical|full``；span 不唯一/缺失或可疑缩短时 ``status=error``。
+
+    说明:
+        ``propose_patch`` 的 span 若被 auto-apply 误当整文件会毁掉长文档，故默认 surgical。
     """
     _assert_not_seed_corpus(path)
     target = _resolve_path(path)

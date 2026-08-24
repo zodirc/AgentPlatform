@@ -1,4 +1,7 @@
+"""LSP Session 池：按 workspace 复用、idle 回收、unhealthy 重建。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import logging
@@ -38,7 +41,7 @@ async def get_session(
     timeout_s: float,
     provider: ProviderSpec | None = None,
 ) -> tuple[LspSession | None, bool, str | None]:
-    """Return (session, cold_start, degraded_reason)."""
+    """作用：获取或创建 workspace 的 LspSession。"""
     key = _key(workspace_root)
     now = time.monotonic()
     until = _UNHEALTHY_UNTIL.get(key, 0.0)
@@ -71,6 +74,7 @@ async def get_session(
 
 
 async def mark_unhealthy(workspace_root: Path) -> None:
+    """作用：标记 session 需重建。"""
     key = _key(workspace_root)
     async with _lock_for(key):
         session = _POOL.pop(key, None)
@@ -80,6 +84,7 @@ async def mark_unhealthy(workspace_root: Path) -> None:
 
 
 async def drop_session(workspace_root: Path) -> None:
+    """作用：关闭并移除 session。"""
     key = _key(workspace_root)
     async with _lock_for(key):
         session = _POOL.pop(key, None)
@@ -90,7 +95,7 @@ async def drop_session(workspace_root: Path) -> None:
 
 
 async def reap_idle(*, ttl_s: float = _IDLE_TTL_S) -> int:
-    """Drop idle sessions. Safe to call from a background task."""
+    """作用：回收空闲超时的 session。"""
     now = time.monotonic()
     keys = [k for k, ts in list(_LAST_USED.items()) if now - ts > ttl_s]
     dropped = 0
@@ -114,7 +119,7 @@ async def reap_idle(*, ttl_s: float = _IDLE_TTL_S) -> int:
 
 
 async def shutdown_pool() -> int:
-    """Drop every pooled LSP session (runtime shutdown)."""
+    """作用：关闭全部 LSP 子进程。"""
     keys = list(_POOL.keys())
     dropped = 0
     for key in keys:
@@ -132,7 +137,7 @@ async def shutdown_pool() -> int:
 
 
 def reset_pool_for_tests() -> None:
-    """Sync test helper — does not await shutdown."""
+    """作用：测试清空池。"""
     _POOL.clear()
     _LOCKS.clear()
     _LAST_USED.clear()

@@ -1,3 +1,9 @@
+"""Turn 读模型、实时流与控制命令路由。
+
+涵盖：turn/run 查询、投影视图（ETag）、事件分页与 SSE/WebSocket 流、
+取消/工具审批/patch 决策（DB 命令通道或直连 runtime）。
+"""
+
 from __future__ import annotations
 
 from uuid import UUID, uuid4
@@ -31,15 +37,24 @@ router = APIRouter(tags=["turns"])
 
 
 def _commands_via_db() -> bool:
+    """是否经 ``run_commands`` 表 + NOTIFY 下发控制命令（O2/WP6）。
+
+    返回:
+        True 表示 enqueue；False 表示 legacy HTTP 调 runtime。
+    """
     return bool(getattr(settings, "run_commands_channel_enabled", True))
 
 
 class CancelTurnRequest(BaseModel):
+    """取消 turn 请求体。"""
+
     reason: str = "user_requested"
     force: bool = False
 
 
 class ToolCallDecisionRequest(BaseModel):
+    """工具调用批准/拒绝请求体。"""
+
     tool_call_id: str
     client_request_id: UUID | None = None
     reason: str | None = None
@@ -47,12 +62,16 @@ class ToolCallDecisionRequest(BaseModel):
 
 
 class PatchDecisionRequest(BaseModel):
+    """Patch 接受/拒绝请求体。"""
+
     patch_id: str
     client_request_id: UUID | None = None
     reason: str | None = None
 
 
 class TurnEventsResponse(BaseModel):
+    """Turn 事件分页快照响应。"""
+
     events: list[dict]
     last_sequence: int = 0
     # I19: true when the page was truncated; continue from last_sequence.
@@ -60,6 +79,18 @@ class TurnEventsResponse(BaseModel):
 
 
 async def _require_turn_access(turn_id: UUID, actor: EndUser) -> dict:
+    """校验 turn 存在且 actor 拥有其所属 session。
+
+    参数:
+        turn_id: 目标 turn。
+        actor: 当前用户。
+
+    返回:
+        turn 行 dict。
+
+    抛出:
+        HTTPException 404/403。
+    """
     turn = await turn_svc.get_turn(turn_id)
     if turn is None:
         raise HTTPException(status_code=404, detail="Turn not found")
@@ -72,6 +103,15 @@ async def get_turn(
     turn_id: UUID,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """获取 turn 基础元数据（不含投影 timeline）。
+
+    参数:
+        turn_id: Turn UUID。
+        actor: 须拥有 turn 所属 session。
+
+    返回:
+        TurnResponse。
+    """
     turn = await _require_turn_access(turn_id, actor)
     return TurnResponse(
         id=turn["id"],
@@ -84,8 +124,14 @@ async def get_turn(
 
 
 def _view_etag(view: TurnView | dict) -> str:
-    # Weak validator: sequence + status capture every client-visible change.
-    # build_turn_view returns a TurnView model; tests may pass a plain dict.
+    """生成 turn 视图的弱 ETag（sequence + status 覆盖客户端可见变更）。
+
+    参数:
+        view: TurnView 或测试用 dict。
+
+    返回:
+        形如 ``W/"{turn_id}:{seq}:{status}"`` 的字符串。
+    """
     if isinstance(view, dict):
         turn_id = view.get("turn_id")
         seq = view.get("last_event_sequence", 0)
@@ -105,6 +151,18 @@ async def get_turn_view(
     refresh: bool = False,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """获取 turn 物化投影视图；支持 ETag 条件 GET（304）。
+
+    参数:
+        turn_id: Turn UUID。
+        request: 读取 ``If-None-Match`` 请求头。
+        response: 未变时仍设置 ETag 头；匹配则 304 无 body。
+        refresh: True 时强制先 ``project_turn`` 再读库。
+        actor: session owner。
+
+    返回:
+        TurnView 或 304 Response。
+    """
     await _require_turn_access(turn_id, actor)
     view = await build_turn_view(turn_id, refresh=refresh)
     if view is None:
@@ -129,10 +187,16 @@ async def get_turn_events(
     limit: int = 1000,
     actor: EndUser = Depends(require_session_actor),
 ):
-    """Snapshot of persisted turn events for refresh / nested subagent replay.
+    """分页读取已持久化的 turn 事件（刷新 / 嵌套 subagent 回放）。
 
-    Paged: when ``has_more`` is true, call again with
-    ``since_sequence=last_sequence``.
+    参数:
+        turn_id: Turn UUID。
+        since_sequence: 仅返回 sequence 大于此值的事件。
+        limit: 每页上限（硬顶 ``_EVENTS_PAGE_LIMIT``=2000）。
+        actor: session owner。
+
+    返回:
+        TurnEventsResponse；``has_more`` 为真时用 ``last_sequence`` 续拉。
     """
     await _require_turn_access(turn_id, actor)
     if since_sequence < 0:
@@ -154,6 +218,17 @@ async def stream_turn(
     since_sequence: int = 0,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """SSE 实时推送 turn 事件流。
+
+    参数:
+        turn_id: Turn UUID。
+        request: 读取 ``Last-Event-ID`` 与 ``app.state.event_listener``。
+        since_sequence: 起始 sequence；与 Last-Event-ID 取较大值。
+        actor: session owner。
+
+    返回:
+        StreamingResponse（``text/event-stream``）；重连时递增 ``sse_reconnect_total`` 指标。
+    """
     await _require_turn_access(turn_id, actor)
 
     last_event_id = request.headers.get("Last-Event-ID")
@@ -177,6 +252,16 @@ async def stream_turn(
 
 @router.websocket("/turns/{turn_id}/ws")
 async def websocket_turn(websocket: WebSocket, turn_id: UUID, since_sequence: int = 0):
+    """WebSocket 双向 turn 事件流（可在同连接上审批工具）。
+
+    参数:
+        websocket: 连接；Cookie 或 Bearer 鉴权，admin 旁路同 HTTP。
+        turn_id: Turn UUID。
+        since_sequence: 回放起始 sequence。
+
+    返回:
+        无；鉴权/权限失败以 4401/4403/4404 关闭。
+    """
     if not websocket_end_user_authorized(websocket):
         await websocket.close(code=4401)
         return
@@ -223,6 +308,16 @@ async def cancel_turn(
     body: CancelTurnRequest | None = None,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """请求取消进行中的 turn（写 runs.cancel_* 并下发 cancel 命令）。
+
+    参数:
+        turn_id: 目标 turn。
+        body: 可选 reason 与 force（强制终止）。
+        actor: session owner；写 audit。
+
+    返回:
+        ``{"accepted": True, "turn_id", "trace_id"}``；不可取消状态 409。
+    """
     req = body or CancelTurnRequest()
     turn = await _require_turn_access(turn_id, actor)
     run = await turn_svc.get_run_for_turn(turn_id)
@@ -278,6 +373,16 @@ async def approve_tool_call(
     body: ToolCallDecisionRequest,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """批准待审批工具调用；可选 ``allow_prefix`` 写入用户 allowlist。
+
+    参数:
+        turn_id: 处于 ``waiting_approval`` 的 turn。
+        body: tool_call_id、幂等 client_request_id、可选 allow_prefix。
+        actor: session owner。
+
+    返回:
+        接受响应 dict；幂等重放直接返回缓存；非 waiting_approval 时 409。
+    """
     await _require_turn_access(turn_id, actor)
     replayed = idempotency.replay(turn_id, body.client_request_id)
     if replayed is not None:
@@ -335,6 +440,16 @@ async def deny_tool_call(
     body: ToolCallDecisionRequest,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """拒绝待审批工具调用。
+
+    参数:
+        turn_id: 处于 ``waiting_approval`` 的 turn。
+        body: tool_call_id、幂等键、可选 reason（默认 user_denied）。
+        actor: session owner。
+
+    返回:
+        接受响应 dict；支持 client_request_id 幂等。
+    """
     await _require_turn_access(turn_id, actor)
     replayed = idempotency.replay(turn_id, body.client_request_id)
     if replayed is not None:
@@ -381,6 +496,14 @@ async def deny_tool_call(
 
 
 def _ensure_patch_allowed(turn: dict) -> None:
+    """校验 turn 状态允许 patch 决策。
+
+    参数:
+        turn: turn 行 dict。
+
+    抛出:
+        HTTPException 409：status 不在 ``PATCH_ALLOWED_STATUSES``。
+    """
     if turn["status"] not in PATCH_ALLOWED_STATUSES:
         raise HTTPException(
             status_code=409,
@@ -394,6 +517,16 @@ async def accept_patch(
     body: PatchDecisionRequest,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """接受 agent 提出的 patch。
+
+    参数:
+        turn_id: Turn UUID。
+        body: patch_id 与可选幂等 client_request_id。
+        actor: session owner。
+
+    返回:
+        接受响应 dict。
+    """
     turn = await _require_turn_access(turn_id, actor)
     replayed = idempotency.replay(turn_id, body.client_request_id)
     if replayed is not None:
@@ -436,6 +569,16 @@ async def reject_patch(
     body: PatchDecisionRequest,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """拒绝 agent 提出的 patch。
+
+    参数:
+        turn_id: Turn UUID。
+        body: patch_id、可选 reason（默认 user_rejected）与幂等键。
+        actor: session owner。
+
+    返回:
+        接受响应 dict。
+    """
     turn = await _require_turn_access(turn_id, actor)
     replayed = idempotency.replay(turn_id, body.client_request_id)
     if replayed is not None:

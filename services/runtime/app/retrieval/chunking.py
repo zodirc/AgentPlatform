@@ -1,3 +1,16 @@
+"""源文档切块与嵌入文本组装（RAG 索引平面的文档→chunk 层）。
+
+职责：
+- 判定可索引文件、Markdown/代码分节、宽表剥离与行组线性化
+- 生成 chunk 元数据（行号、citation、tags）与 ``build_embed_text`` 向量输入
+- ``chunk_source_text``：同步或延迟嵌入（``embed=False`` 供批量 index 平面）
+
+在 RAG 链路中的位置：
+  sync 扫描文件 → 本模块切块 → ``index_embed.assign_deferred_vectors`` → 向量库
+
+不在热路径：仅 Turn 外索引/sync 调用；StartTurn / search 不切块。
+"""
+
 from __future__ import annotations
 
 import re
@@ -45,6 +58,7 @@ _META_TAGS_RE = re.compile(
 
 @dataclass(frozen=True)
 class TextSection:
+    """Markdown/代码分节：标题、正文、行范围与标题面包屑路径。"""
     title: str
     body: str
     line_start: int
@@ -53,6 +67,7 @@ class TextSection:
 
 
 def should_index_source(path: Path) -> bool:
+    """是否纳入 RAG 索引（跳过 dotfile、cards、paste-debug 等）。"""
     name = path.name
     if name in SOURCE_SKIP_FILENAMES:
         return False
@@ -66,7 +81,7 @@ def should_index_source(path: Path) -> bool:
 
 
 def path_embed_clue(rel_path: str) -> str:
-    """Readable path breadcrumb for embedding (RQ1a); not shown as citation excerpt."""
+    """嵌入用语义路径面包屑 ``path: …``（不出现在 citation excerpt）。"""
     p = rel_path.replace("\\", "/").strip("/")
     if p.startswith("sources/"):
         p = p[len("sources/") :]
@@ -84,9 +99,15 @@ def build_embed_text(
     tags: Sequence[str] | None = None,
     heading_path: Sequence[str] | None = None,
 ) -> str:
-    """Compose vector input; heading breadcrumbs always prefix the body (R-3).
+    """组装送入 embedder 的文本：标题面包屑 + 可选 path/tags 元数据前缀。
 
-    Path/tags metadata prefixes stay optional (``EMBEDDING_TEXT_INCLUDE_METADATA``).
+    参数:
+        rel_path: 工作区内相对路径。
+        body: chunk 正文。
+        tags: 可选稀疏标签。
+        heading_path: 章节标题链。
+    返回:
+        最终嵌入字符串。
     """
     body_text = (body or "").strip()
     crumb = " > ".join(str(p).strip() for p in (heading_path or ()) if str(p).strip())
@@ -110,11 +131,7 @@ def build_embed_text(
 
 
 def extract_source_tags(rel_path: str, text: str, *, max_tags: int = 8) -> list[str]:
-    """Sparse high-diff tags from path + header metadata (RQ1c; no LLM).
-
-    Sources: known directory types, ``> 类型:``, optional ``> tags:``.
-    Aliases are intentionally omitted (too noisy); put high-diff labels in ``tags:``.
-    """
+    """从路径段与文首 metadata（``> 类型:`` / ``> tags:``）提取高区分 tag，无 LLM。"""
     found: list[str] = []
     seen: set[str] = set()
 
@@ -192,11 +209,7 @@ def _table_col_count(header_line: str) -> int:
 
 
 def detach_wide_tables(text: str) -> str:
-    """Replace wide GFM tables with a short pointer (RQ1b); file on disk unchanged.
-
-    Keeps header labels in the pointer so lexical search can still hit column names.
-    Full tables remain available via ``read_file`` / sibling ``tables/`` files.
-    """
+    """宽 GFM 表替换为短指针（磁盘原文不变；全文仍可通过 read_file 读）。"""
     if not text:
         return text
     min_rows, min_chars = _table_detach_thresholds()
@@ -244,7 +257,7 @@ def _table_cells(line: str) -> list[str]:
 
 
 def iter_wide_table_chunks(text: str) -> list[TextSection]:
-    """Linearize detached wide tables into row-group chunks (R-4)."""
+    """将宽表按行组线性化为独立 TextSection（R-4 表格 chunk）。"""
     if not text:
         return []
     min_rows, min_chars = _table_detach_thresholds()
@@ -300,7 +313,7 @@ def iter_wide_table_chunks(text: str) -> list[TextSection]:
 
 
 def iter_markdown_headings(text: str, *, limit: int = 40) -> list[tuple[int, str]]:
-    """Return ``(line, title)`` for ATX H1–H6 and Setext headings."""
+    """返回 ATX/Setext 标题 ``(行号, 标题文本)`` 列表。"""
     lines = text.splitlines()
     found: list[tuple[int, str]] = []
     i = 0
@@ -326,6 +339,7 @@ def iter_markdown_headings(text: str, *, limit: int = 40) -> list[tuple[int, str
 
 
 def split_markdown_sections(text: str) -> list[TextSection]:
+    """按 Markdown 标题切分并合并过短叶子节。"""
     lines = text.splitlines()
     if not lines:
         return []
@@ -464,16 +478,13 @@ _CODE_SYMBOL_RE = re.compile(
 
 
 def is_code_path(path: Path | str) -> bool:
+    """路径后缀是否为已知代码扩展名。"""
     suffix = Path(path).suffix.lower()
     return suffix in _CODE_EXTS
 
 
 def split_code_sections(text: str, *, language: str | None = None) -> list[TextSection]:
-    """Split source by symbol boundaries (docs/30 CQ4; stage C tree-sitter when available).
-
-    Prefer tree-sitter AST boundaries for known languages; fall back to regex.
-    Safe for async indexing only — never call on StartTurn / assemble hot path.
-    """
+    """按符号边界切分源码（优先 tree-sitter，否则 regex）；仅索引平面。"""
     if not text.strip():
         return []
     if language:
@@ -576,6 +587,7 @@ _EXT_TO_TS_LANG = {
 
 
 def language_for_code_path(path: Path | str) -> str | None:
+    """由扩展名映射 tree-sitter 语言 id。"""
     return _EXT_TO_TS_LANG.get(Path(path).suffix.lower())
 
 
@@ -672,7 +684,7 @@ def _ts_node_title(node, text: str) -> str:
 
 
 def split_code_sections_legacy(text: str) -> list[TextSection]:
-    """Alias kept for tests — regex path only."""
+    """测试用别名：仅 regex 分节。"""
     return _split_code_sections_regex(text)
 
 
@@ -685,11 +697,17 @@ def chunk_source_text(
     tags: Sequence[str] | None = None,
     embed: bool = True,
 ) -> list[dict[str, Any]]:
-    """Split a source file into chunks.
+    """将单个源文件切为 chunk 字典列表。
 
-    When ``embed`` is True (default), vectors are attached via ``embed_many``.
-    When False, each chunk gets ``embed_input`` for a later Index-plane batch encode
-    (docs/15 — never on search hot path).
+    参数:
+        path: 磁盘 Path。
+        rel_path: 工作区相对路径（chunk_id / path 字段）。
+        text: 文件全文。
+        embedder: ``embed=True`` 时用于 ``embed_many``。
+        tags: 可选覆盖 tag；None 时自动提取。
+        embed: True 直接写 ``vector``；False 写 ``embed_input`` 供 index 批量嵌入。
+    返回:
+        chunk dict 列表（含 text、line_*、citation_id 等）。
     """
     if not text.strip():
         return []

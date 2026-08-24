@@ -1,7 +1,4 @@
-"""Locate a unique propose_patch span for a weak writing_signals hit.
-
-CPU only. Long chapters repair in place; they are not redrafted whole.
-"""
+"""weak 分 repair_span 定位。"""
 
 from __future__ import annotations
 
@@ -39,6 +36,13 @@ _HINTS: dict[str, str] = {
 
 
 def rewrite_policy_for(*, visible: int, length_short: bool) -> str:
+    """改写策略。
+    
+    参数:
+        visible/length_short。
+    
+    返回:
+        str。"""
     if length_short:
         return REWRITE_DRAFT
     if visible >= REPAIR_MIN_VISIBLE:
@@ -47,6 +51,13 @@ def rewrite_policy_for(*, visible: int, length_short: bool) -> str:
 
 
 def should_reject_full_redraft(prior: dict[str, Any] | None) -> bool:
+    """是否拒整章重交。
+    
+    参数:
+        prior。
+    
+    返回:
+        bool。"""
     if not prior:
         return False
     if prior.get("length_short"):
@@ -61,6 +72,13 @@ def build_repair_span(
     window: TextWindow | None = None,
     net_signal: float,
 ) -> dict[str, Any] | None:
+    """构造 repair_span。
+    
+    参数:
+        text/penalties/window/net。
+    
+    返回:
+        dict|None。"""
     body = text or ""
     keys = [str(p.get("key") or "") for p in penalties if p.get("hit")]
     probe = window.text if window is not None else body

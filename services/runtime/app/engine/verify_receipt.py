@@ -1,9 +1,16 @@
-"""Wave 4 W9: verify receipt at Turn final edge (veto 13).
+"""Turn 终态 verify receipt 注入逻辑（Wave 4 W9，veto 13）。
 
-Classic trigger = code edit succeeded, no testish run after last edit.
-Issue-repro trigger = repo tests went green but problem.md behavior not
-exercised *successfully after the latest code edit*.
-Never blocks cancel/failed; each kind at most once per Turn; omit when remaining < K.
+English: Verify receipt injection before turn finalization (Wave 4 W9, veto 13).
+
+在 Turn 即将结束（final edge）时，根据 TurnState 中仅由工具结果维护的追踪器，
+决定是否向对话注入一条「交卷前须补验证/修稿」的用户 receipt。分两大类触发：
+
+**经典 coding verify**：代码编辑成功后，自最后一次编辑起未运行任何 testish 命令。
+**Issue repro verify**：仓库自带测试已绿，但 problem.md 描述的行为尚未在
+*最新代码编辑之后* 成功验收。
+
+约束：不阻塞 cancel/failed；每类 receipt 每 Turn 至多一次；剩余步数不足 K 时不注入。
+写作场景另有 staccato/hinge/opening/lore 四类 L0 receipt，与 coding verify 共享注入管线。
 """
 
 from __future__ import annotations
@@ -20,7 +27,7 @@ from app.structural.issue_repro import (
 from app.structural.related_tests import related_test_paths
 from app.structural.test_summary import is_testish_command
 
-# Reserve steps so receipt + test run can still finish before max_steps.
+# 预留步数：保证 receipt 注入后仍有步数跑测试/修稿再交卷。
 DEFAULT_VERIFY_RECEIPT_RESERVE_STEPS = 10
 _RELATED_CAP = 5
 
@@ -35,7 +42,14 @@ _WRITING_PENDING = {
 
 
 def _writing_l0_hits(result: dict[str, Any]) -> dict[str, bool] | None:
-    """Latest scored L0 flags, or None if this result is not a writing score."""
+    """从写作评分/草稿结果提取最新 L0 命中标志。
+
+    参数:
+        result: draft_section / evaluate_writing_fragment 等工具返回 dict。
+
+    返回:
+        四类 L0 键 → 是否命中的 dict；非写作评分结果时返回 None。
+    """
     signals = result.get("writing_signals")
     has_signals = isinstance(signals, dict) and bool(signals)
     has_top = any(key in result for key in _WRITING_L0) or str(result.get("status") or "") == "drafted"
@@ -55,7 +69,14 @@ def _writing_l0_hits(result: dict[str, Any]) -> dict[str, bool] | None:
 
 
 def note_writing_signals_for_verify(state: Any, result: dict[str, Any]) -> None:
-    """Receipts follow the last scored chapter, not the draft-time flag."""
+    """根据最近一次 scored 章节更新写作 L0 pending 标志（非 draft 时刻）。
+
+    Receipt 跟随最后评分章节，而非 draft 时的瞬时 flag。
+
+    参数:
+        state: ``TurnState`` 或兼容对象（原地 setattr）。
+        result: 含 writing_signals 或顶层 L0 键的工具结果。
+    """
     hits = _writing_l0_hits(result)
     if hits is None:
         return
@@ -70,7 +91,14 @@ def note_tool_result_for_verify(
     result: dict[str, Any],
     arguments: dict[str, Any] | None = None,
 ) -> None:
-    """Update TurnState verify trackers from a completed tool result."""
+    """根据单次工具完成结果更新 TurnState 上的 verify / issue-repro 追踪器。
+
+    参数:
+        state: ``TurnState``（原地修改 verify_* / issue_repro_* / writing pending）。
+        tool_name: 工具名。
+        result: 工具返回 dict；非 dict 时忽略。
+        arguments: 可选；run_tests/run_command 取 command 的兜底来源。
+    """
     if not isinstance(result, dict):
         return
     name = str(tool_name or "")
@@ -122,6 +150,7 @@ def note_tool_result_for_verify(
 
 
 def _ensure_issue_repro_hints(state: Any) -> None:
+    """懒加载 problem.md 中的 issue 复现提示到 TurnState（每 Turn 至多一次）。"""
     if bool(getattr(state, "issue_repro_loaded", False)):
         return
     state.issue_repro_loaded = True
@@ -146,6 +175,7 @@ def _ensure_issue_repro_hints(state: Any) -> None:
 
 
 def _issue_repro_hints_dict(state: Any) -> dict[str, Any]:
+    """将 TurnState 上 issue repro 字段打包为 structural 模块消费的 dict。"""
     return {
         "commands": list(getattr(state, "issue_repro_commands", None) or []),
         "markers": list(getattr(state, "issue_repro_markers", None) or []),
@@ -162,6 +192,7 @@ def _issue_repro_hints_dict(state: Any) -> dict[str, Any]:
 
 
 def _issue_repro_hints_present(state: Any) -> bool:
+    """TurnState 是否已解析出至少一条可用的 issue repro 义务。"""
     return bool(
         list(getattr(state, "issue_repro_commands", None) or [])
         or list(getattr(state, "issue_repro_markers", None) or [])
@@ -174,6 +205,7 @@ def _issue_repro_hints_present(state: Any) -> bool:
 
 
 def _command_matches_state_issue_repro(state: Any, cmd: str) -> bool:
+    """命令是否满足 problem.md 解析出的 issue repro 义务模式。"""
     return obligations_met_for_command(cmd, _issue_repro_hints_dict(state))
 
 
@@ -184,6 +216,14 @@ def _note_issue_repro_from_command(
     *,
     allow_non_testish: bool = False,
 ) -> None:
+    """根据单次命令执行结果更新 issue repro satisfied / armed 状态。
+
+    参数:
+        state: ``TurnState``。
+        cmd: 实际执行的命令字符串。
+        result: run_tests / run_command 返回 dict。
+        allow_non_testish: True 时允许 ``python -c`` 等非 testish 命令参与 issue repro。
+    """
     if not _issue_repro_hints_present(state):
         _ensure_issue_repro_hints(state)
     if not _issue_repro_hints_present(state):
@@ -204,6 +244,11 @@ def _note_issue_repro_from_command(
 
 
 def _arm_issue_repro_if_needed(state: Any, cmd: str, result: dict[str, Any]) -> None:
+    """仓库测试全绿但未跑 issue repro 时，置 ``issue_repro_armed`` 以待终态 receipt。
+
+    已 satisfied 且编辑计数为 0、或已发过 receipt、或无 hints、或当前 cmd 已是
+    issue repro 义务命令时，不重复 arm。
+    """
     if bool(getattr(state, "issue_repro_satisfied", False)) and int(
         getattr(state, "issue_repro_edits_since", 0) or 0
     ) == 0:
@@ -221,6 +266,7 @@ def _arm_issue_repro_if_needed(state: Any, cmd: str, result: dict[str, Any]) -> 
 
 
 def _note_first_failure(state: Any, result: dict[str, Any]) -> None:
+    """从测试结果提取首条失败摘要写入 ``last_test_first_failure``（供 receipt 引用）。"""
     from app.structural.test_summary import format_failure_feed
 
     feed = result.get("failure_feed")
@@ -234,6 +280,7 @@ def _note_first_failure(state: Any, result: dict[str, Any]) -> None:
 
 
 def _remaining_steps(state: Any) -> int:
+    """本 Turn 剩余可执行 Engine 步数（max_steps - step_count）。"""
     return int(getattr(state, "max_steps", 0) or 0) - int(
         getattr(state, "step_count", 0) or 0
     )
@@ -244,6 +291,15 @@ def should_inject_verify_receipt(
     *,
     reserve_steps: int = DEFAULT_VERIFY_RECEIPT_RESERVE_STEPS,
 ) -> bool:
+    """判断是否应在 Turn 终态注入 verify / 写作 receipt。
+
+    参数:
+        state: ``TurnState``。
+        reserve_steps: 经典/issue repro 触发所需最少剩余步数；写作类用更紧的 hinge_reserve。
+
+    返回:
+        True 表示应注入；cancel/budget 耗尽或步数不足时 False。
+    """
     if bool(getattr(state, "cancelled", False)):
         return False
     if bool(getattr(state, "budget_exceeded", False)):
@@ -295,7 +351,15 @@ def should_inject_verify_receipt(
 
 
 def verify_receipt_kind(state: Any) -> str:
-    """Which receipt text/flags to use when injecting."""
+    """决定本次注入使用的 receipt 种类键。
+
+    参数:
+        state: ``TurnState``。
+
+    返回:
+        ``issue_repro`` | ``classic`` | ``staccato`` | ``hinge`` | ``opening`` | ``lore``。
+        issue_repro 优先于 classic；写作类在 classic 不 pending 时按 staccato→hinge→opening→lore。
+    """
     satisfied = bool(getattr(state, "issue_repro_satisfied", False)) and int(
         getattr(state, "issue_repro_edits_since", 0) or 0
     ) == 0
@@ -334,6 +398,14 @@ def verify_receipt_kind(state: Any) -> str:
 
 
 def mark_verify_receipt_injected(state: Any) -> str:
+    """注入 receipt 后清除对应 pending 并置 sent 标志（每类至多一次）。
+
+    参数:
+        state: ``TurnState``（原地修改）。
+
+    返回:
+        实际标记的 receipt 种类（同 ``verify_receipt_kind``）。
+    """
     kind = verify_receipt_kind(state)
     if kind == "issue_repro":
         state.issue_repro_receipt_sent = True
@@ -368,6 +440,14 @@ def mark_verify_receipt_injected(state: Any) -> str:
 
 
 def build_verify_receipt_text(state: Any) -> str:
+    """按当前 kind 组装注入用户的完整 receipt 正文。
+
+    参数:
+        state: ``TurnState``。
+
+    返回:
+        多行中文/技术混合说明字符串。
+    """
     kind = verify_receipt_kind(state)
     if kind == "issue_repro":
         return _build_issue_repro_receipt_text(state)
@@ -383,6 +463,7 @@ def build_verify_receipt_text(state: Any) -> str:
 
 
 def _build_staccato_receipt_text() -> str:
+    """均匀短拍（三字问答/空应声）L0 修复指引正文。"""
     return (
         "这一段对白或句子长短几乎一样短，像机械一问一答"
         "（「进来拿。」「我会还。」「先记账。」「记多久？」这一路）；"
@@ -401,6 +482,7 @@ def _build_staccato_receipt_text() -> str:
 
 
 def _build_hinge_receipt_text() -> str:
+    """hinge 拧法（看见+立马+却）L0 修复指引正文。"""
     return (
         "这一段在「看见/听到」之后用了立马/立刻，下一句又在拧（却/没想到/回头）。"
         "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
@@ -412,6 +494,7 @@ def _build_hinge_receipt_text() -> str:
 
 
 def _build_opening_receipt_text() -> str:
+    """开篇机构专名（宗/派）L0 修复指引正文。"""
     return (
         "第一章入口写成了机构专名（宗/派/仙门），读者还不知道这是哪块地。"
         "不要补身世提要，不要另起一套去AI模板。"
@@ -422,6 +505,7 @@ def _build_opening_receipt_text() -> str:
 
 
 def _build_lore_receipt_text() -> str:
+    """开篇 lore dump（N年前+失踪/尸体）L0 修复指引正文。"""
     return (
         "这一段在点到人名之后，用「N年前」写成了失踪/尸体提要。"
         "不要补转折，不要把全书谜面写圆，不要另起一套去AI模板。"
@@ -432,6 +516,7 @@ def _build_lore_receipt_text() -> str:
 
 
 def _build_classic_receipt_text(state: Any) -> str:
+    """经典 coding verify：未跑测试的编辑计数、related_tests、末次 repro/失败摘要。"""
     n = int(getattr(state, "code_edits_since_verify", 0) or 0)
     lines = [
         f"verify_receipt: 本 Turn 改动 {n} 个代码文件，最后一次编辑后未运行任何测试",
@@ -465,6 +550,7 @@ def _build_classic_receipt_text(state: Any) -> str:
 
 
 def _build_issue_repro_receipt_text(state: Any) -> str:
+    """Issue repro verify：problem.md 义务、样例资产、建议命令与 must_not_still_show。"""
     lines = [
         "verify_receipt: 仓库自带测试已绿，但编辑后尚未按问题描述完成行为验收",
         "  说明: 现有 test_*.py 全绿 / 编辑前复现 都不算；"
@@ -528,6 +614,7 @@ def _build_issue_repro_receipt_text(state: Any) -> str:
 
 
 def _merge_related(state: Any, related: list[Any]) -> None:
+    """将 edit_file 返回的 related_tests 合并进 Turn 级 union（去重、上限 _RELATED_CAP）。"""
     existing = list(getattr(state, "related_tests_union", None) or [])
     seen = set(related_test_paths(existing))
     for item in related:

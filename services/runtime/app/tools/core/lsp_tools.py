@@ -1,3 +1,10 @@
+"""LSP 结构面工具：诊断、定义跳转与引用查找。
+
+``read_lints`` 合并 ruff 与 LSP diagnostics；``goto_definition``/``find_references``
+是 agent 符号导航通道。LSP 基础设施故障（非 symbol miss）时返回 ``status=failed``，
+与 ``search_codebase`` Locate 语义一致。
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -5,8 +12,16 @@ from typing import Any
 from app.settings import settings
 from app.tools.core.paths import _resolve_path, _workspace_root
 
+
 def _lsp_infra_failed(reason: str) -> bool:
-    """True when the language server itself is missing/broken (not a symbol miss)."""
+    """判断 degraded_reason 是否表示 LSP 基础设施故障（非单纯 symbol 未找到）。
+
+    参数:
+        reason: adapter 返回的 ``degraded_reason`` 字符串。
+
+    返回:
+        ``True`` 表示 provider 不可用/超时/启动失败等，应 fail 而非假装空结果成功。
+    """
     r = (reason or "").strip()
     if not r:
         return False
@@ -16,6 +31,19 @@ def _lsp_infra_failed(reason: str) -> bool:
 
 
 async def read_lints(path: str = ".", **_kwargs: Any) -> dict[str, Any]:
+    """读取路径上的 lint/诊断（ruff + LSP 合并）。
+
+    参数:
+        path: 文件或目录相对路径，默认 ``"."``（工作区根）。
+        **_kwargs: 可选 ``turn_id``。
+
+    返回:
+        ``issues``/``issue_count``/``lines``/``summary``/``provider`` 等；
+        LSP 必需但不可用时 ``status=failed``；ruff 不可用且 LSP 空时列出 py 文件占位。
+
+    说明:
+        ruff 与 LSP 并行尽力；合并去重后格式化 ``lines`` 供模型阅读。
+    """
     import shlex
 
     from app.structural.format import (
@@ -199,7 +227,17 @@ async def goto_definition(
     col: int | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Symbol-first definition lookup via LSP (agent structural lane)."""
+    """通过 LSP 查找符号定义位置（agent 结构面导航）。
+
+    参数:
+        symbol: 符号名。
+        path: 可选源文件 hint。
+        line/col: 可选精确位置（1-based line）。
+        **_kwargs: 可选 ``turn_id``。
+
+    返回:
+        ``locations``/``lines``/``summary``；LSP 基础设施故障时 ``status=failed``。
+    """
     from app.structural.adapters import goto_definition as _goto
     from app.structural.format import format_locations_lines
 
@@ -251,7 +289,17 @@ async def find_references(
     col: int | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Symbol-first references via LSP (agent structural lane)."""
+    """通过 LSP 查找符号引用（agent 结构面导航）。
+
+    参数:
+        symbol: 符号名。
+        path: 可选源文件 hint。
+        line/col: 可选精确位置。
+        **_kwargs: 可选 ``turn_id``。
+
+    返回:
+        ``locations``/``pointers``/``lines``/``summary``；LSP 基础设施故障时 ``status=failed``。
+    """
     from app.structural.adapters import find_references as _refs
     from app.structural.format import format_locations_lines
 

@@ -1,4 +1,7 @@
-"""Shared list filters for Ops recent-turn browse APIs."""
+"""Ops 最近 turn 浏览 API 共用的分页与时间窗 SQL 片段构建。
+
+English: Shared list filters for Ops recent-turn browse APIs.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,16 @@ def normalize_page(
     offset: int = 0,
     max_limit: int = 100,
 ) -> tuple[int, int]:
+    """钳制分页参数，防止过大 limit 拖垮 DB。
+
+    参数:
+        limit: 请求每页条数。
+        offset: 请求偏移。
+        max_limit: 上限，默认 100。
+
+    返回:
+        ``(limit, offset)`` 均已钳制为非负且 limit ≥ 1。
+    """
     return max(1, min(int(limit), max_limit)), max(0, int(offset))
 
 
@@ -91,4 +104,12 @@ def append_turn_filters(
 
 
 def where_sql(clauses: list[str]) -> str:
+    """将 AND 片段列表拼成 ``WHERE ...`` 或空串。
+
+    参数:
+        clauses: 已含 ``$n`` 占位符的 SQL 谓词片段。
+
+    返回:
+        非空 clauses 时 ``WHERE a AND b``；否则 ``""``。
+    """
     return f"WHERE {' AND '.join(clauses)}" if clauses else ""

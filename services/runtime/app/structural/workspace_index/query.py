@@ -1,7 +1,5 @@
-"""Query normalization + candidate ranking (§2.2.1).
+"""符号查询规范化、排序与候选收集。"""
 
-Global rules only — no gold-patch / per-repo tuning (anti-overfit).
-"""
 
 from __future__ import annotations
 
@@ -18,7 +16,7 @@ _PATH_BONUS_SEGMENTS = frozenset({"src", "lib", "astropy", "django", "sympy"})
 
 @dataclass(frozen=True, slots=True)
 class NormalizedQuery:
-    """Tail + qualifier chain for symbol lookup."""
+    """作用：规范化后的符号查询。"""
 
     raw: str
     tail: str  # last segment — primary postings key
@@ -31,7 +29,7 @@ class NormalizedQuery:
 
 
 def normalize_symbol_query(query: str) -> NormalizedQuery:
-    """`astropy.io.fits.Card` → tail=Card; `Card.fromstring` → tail=fromstring, container=Card."""
+    """作用：解析用户查询为 NormalizedQuery。"""
     raw = (query or "").strip()
     parts = tuple(p for p in raw.split(".") if p)
     if not parts:
@@ -109,7 +107,7 @@ def _path_tiebreak(path: str) -> tuple[int, int, str]:
 
 
 def rank_hits(hits: list[SymbolHit], nq: NormalizedQuery, *, limit: int) -> list[SymbolHit]:
-    """§2.2.1 sort: match tier → kind → path depth / src-vs-tests → path,line."""
+    """作用：对 SymbolHit 排序截断。"""
     scored: list[tuple[tuple, SymbolHit]] = []
     for h in hits:
         tier = _match_tier(h, nq)
@@ -137,7 +135,7 @@ def collect_candidate_hits(
     all_names: dict[str, list[SymbolHit]] | None = None,
     limit: int = 20,
 ) -> list[SymbolHit]:
-    """Gather exact + case-insensitive + prefix postings, then rank."""
+    """作用：从投影收集候选 hit。"""
     bucket: dict[tuple[str, int, str], SymbolHit] = {}
 
     def _add(items: list[SymbolHit]) -> None:

@@ -1,3 +1,9 @@
+"""HTTP 请求上下文中间件（request_id、结构化日志、延迟指标）。
+
+为每个入站请求分配或解析 ``X-Request-ID``，绑定 structlog 上下文，并在响应头回写；
+同时按路由模板记录 ``http_request_duration_seconds``（B24 有界基数）。
+"""
+
 from __future__ import annotations
 
 import time
@@ -15,6 +21,14 @@ REQUEST_ID_HEADER = "X-Request-ID"
 
 
 def _parse_request_id(raw: str) -> UUID:
+    """解析客户端传入的 request_id；非法时生成新 UUID。
+
+    参数:
+        raw: ``X-Request-ID`` 头原始字符串。
+
+    返回:
+        合法 UUID 或新生成的 uuid4。
+    """
     try:
         return UUID(raw)
     except ValueError:
@@ -22,7 +36,21 @@ def _parse_request_id(raw: str) -> UUID:
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
+    """Starlette 中间件：贯穿 request_id 与 HTTP 延迟观测。"""
+
     async def dispatch(self, request: Request, call_next) -> Response:
+        """处理单次 HTTP 请求：绑定上下文、计时、回写头。
+
+        参数:
+            request: Starlette 请求。
+            call_next: 下游 ASGI 调用链。
+
+        返回:
+            带 ``X-Request-ID`` 的响应。
+
+        异常:
+            下游路由/处理器抛出的异常原样向上传播。
+        """
         raw = request.headers.get(REQUEST_ID_HEADER, "")
         request_id = _parse_request_id(raw) if raw else uuid4()
         request.state.request_id = request_id

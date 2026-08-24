@@ -1,10 +1,14 @@
-"""Turn-external sources index scheduling (docs/15 IX0 · docs/27 MT3/MT5c).
+"""Turn 外 sources 索引调度（RAG 摄取平面 orchestrator）。
 
-Startup / admin sync must never run on the search_sources hot path.
-Syncs standing seed + each Work's private sources (when works table exists).
-Never indexes legacy private with NULL work_id.
-Official L1 trees under ``ops-l1/`` (including ``beir-index``) are skipped in
-full-tenant sync; L1 indexes those via work-scoped ``api-work`` only.
+English: Turn-external sources index scheduler — serial sync orchestrator for RAG ingest.
+
+职责：
+- 单航班 asyncio 锁串行 sync；startup / watch / CLI / API 共用
+- seed + 各 Work private sources 分 scope 同步；跳过 ops-l1 全租户误触
+- 协作式取消、跨进程 takeover、孤儿 DB 事务清理
+
+在 RAG 链路中的位置：
+  不在 ``search_sources`` 热路径；驱动 ``store.sync`` 与 Ops BEIR/C-MTEB 重嵌。
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ _active_cancel_token = threading.local()
 
 
 class SourcesSyncCancelled(Exception):
-    """Raised when sources index sync is cancelled (Ops stop / explicit cancel)."""
+    """sources 索引 sync 被显式取消时抛出。"""
 
 
 def _cancel_gen_path() -> Path:
@@ -59,7 +63,7 @@ def _write_cancel_gen_file(gen: int) -> None:
 
 
 def bump_sync_cancel() -> int:
-    """Invalidate in-flight and lock-waiters; returns new generation."""
+    """递增取消代数，使在途 sync 与锁等待者中止；返回新 generation。"""
     global _cancel_gen
     with _cancel_lock:
         file_gen = _read_cancel_gen_file()
@@ -89,7 +93,7 @@ def clear_sync_cancel_token() -> None:
 
 
 def check_sync_cancelled() -> None:
-    """Call from embed/write loops (thread-safe; honors cross-process cancel file)."""
+    """嵌入/写入循环中调用；跨进程 cancel 文件与线程 token 均生效。"""
     token = getattr(_active_cancel_token, "token", None)
     if token is None:
         return
@@ -168,10 +172,12 @@ def _terminate_orphan_sync_db_backends() -> list[int]:
 
 
 def request_sync_takeover(*, wait_s: float = 20.0) -> dict[str, Any]:
-    """Cancel any in-flight sync (cross-process) and release orphan DB locks.
+    """取消旧 sync、杀 sync_cli、终止孤儿 PG 锁，供 ``make sync`` 接管/resume。
 
-    Used by ``make sync`` so a new run preempts a stuck/duplicate sync_cli and
-    can resume via committed per-batch writes + reindex_epoch skips.
+    参数:
+        wait_s: 等待旧 building 状态退出的最长时间（秒）。
+    返回:
+        cancel_gen、killed_pids、db_terminated 等诊断信息。
     """
     import os
     import signal
@@ -356,7 +362,7 @@ def _purge_orphan_private() -> dict[str, int]:
 
 
 def sync_sources_index_blocking() -> dict[str, Any]:
-    """Blocking incremental sync (safe for ``asyncio.to_thread``)."""
+    """阻塞式全租户增量 sync（可 ``asyncio.to_thread`` 包装）。"""
     workspace_root = Path(settings.workspace_root).resolve()
     results: list[dict[str, Any]] = []
 
@@ -459,7 +465,7 @@ def sync_sources_index_work_blocking(
     work_root: str,
     owner_user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Index only one Work's ``sources/`` (L1 / Ops; avoid full-tenant sweep)."""
+    """仅同步单个 Work 的 ``sources/``（L1/Ops，避免全租户扫盘）。"""
     root = Path(str(work_root)).resolve()
     src = root / "sources"
     result = _sync_one(
@@ -602,23 +608,17 @@ def _sync_ops_index_works_blocking(
 
 
 def sync_ops_beir_indexes_blocking() -> dict[str, Any]:
-    """Force work-scoped sync for Ops BEIR corpora (FiQA / SciFact / …).
-
-    Full-tenant ``sync_sources_index_blocking`` intentionally skips ``ops-l1``.
-    After embed-model / INDEX bumps, call this (or re-run Ops L1) so each BEIR
-    work re-embeds under its own scope stamp — not skipped because seed already
-    wrote global ``version=9``.
-    """
+    """强制 work-scoped 同步 Ops BEIR 语料（FiQA/SciFact 等）。"""
     return _sync_ops_index_works_blocking(_list_ops_beir_works(), label="beir")
 
 
 def sync_ops_cmteb_indexes_blocking() -> dict[str, Any]:
-    """Force work-scoped sync for Ops C-MTEB corpora (``cmteb-index``)."""
+    """强制 work-scoped 同步 Ops C-MTEB 语料（``cmteb-index``）。"""
     return _sync_ops_index_works_blocking(_list_ops_cmteb_works(), label="cmteb")
 
 
 async def run_ops_beir_index_sync(*, reason: str = "ops-beir") -> dict[str, Any]:
-    """Serialize Ops BEIR reindex on the same lock as other sources syncs."""
+    """在全局 sync 锁下串行 Ops BEIR 重嵌。"""
     token = sync_cancel_token()
     async with _sync_lock:
         return await _finish_sync_locked(
@@ -631,7 +631,7 @@ async def run_ops_beir_index_sync(*, reason: str = "ops-beir") -> dict[str, Any]
 
 
 async def run_ops_cmteb_index_sync(*, reason: str = "ops-cmteb") -> dict[str, Any]:
-    """Serialize Ops C-MTEB reindex (independent HNSW schema ``retrieval_ops_zh``)."""
+    """在全局 sync 锁下串行 Ops C-MTEB 重嵌（独立 schema ``retrieval_ops_zh``）。"""
     token = sync_cancel_token()
     async with _sync_lock:
         return await _finish_sync_locked(
@@ -732,7 +732,7 @@ async def _finish_sync_locked(
 
 
 async def run_sources_index_sync(*, reason: str = "manual") -> dict[str, Any]:
-    """Serialize syncs process-wide (single-flight via lock; waiters re-scan)."""
+    """进程级单航班全租户 sync（锁上等待者会重新扫描）。"""
     token = sync_cancel_token()
     async with _sync_lock:
         return await _finish_sync_locked(
@@ -751,7 +751,7 @@ async def run_sources_index_sync_work(
     owner_user_id: str | None = None,
     reason: str = "work",
 ) -> dict[str, Any]:
-    """Serialize work-scoped sync (same lock as full sync)."""
+    """单 Work scope sync，与全租户 sync 共用锁。"""
     token = sync_cancel_token()
 
     def _runner() -> dict[str, Any]:
@@ -772,7 +772,7 @@ async def run_sources_index_sync_work(
 
 
 async def cancel_sources_index_sync() -> dict[str, Any]:
-    """Abort in-flight sources sync and any waiters queued on the lock."""
+    """中止在途 sync 及锁队列上的等待者。"""
     gen = bump_sync_cancel()
     from app.retrieval.sync_progress import mark_sync_error
 
@@ -788,7 +788,7 @@ async def _delayed_startup_sync() -> None:
 
 
 def schedule_startup_sources_sync() -> asyncio.Task[None] | None:
-    """Fire-and-forget startup incremental sync; does not block lifespan yield."""
+    """启动后延迟 fire-and-forget sync，不阻塞 lifespan。"""
     global _startup_task
     if not settings.sources_startup_sync_enabled:
         logger.info("sources startup sync disabled")

@@ -1,4 +1,5 @@
-"""Cold-start / incremental parse job (§3.1). Off-loop; never awaited from StartTurn."""
+"""冷启动遍历、单文件解析与预算计算。"""
+
 
 from __future__ import annotations
 
@@ -62,11 +63,7 @@ async def _to_ast_thread(fn, /, *args, **kwargs):
 
 
 def eval_budget_seconds(n_files: int, *, concurrency: int) -> float:
-    """§7.2 dynamic budget: clamp(overhead + n*per_file/conc, min, max).
-
-    Hard cap only so a pathological tree cannot burn the suite wall clock.
-    Normal astropy-scale (~1k py) should finish well inside the clamp.
-    """
+    """作用：按文件数估算 cold start 预算秒数。"""
     min_s = float(
         getattr(settings, "workspace_ast_eval_budget_min_seconds", 60.0) or 60.0
     )
@@ -94,11 +91,7 @@ def walk_work_files(
     code_only: bool = True,
     deadline: float | None = None,
 ) -> list[Path]:
-    """Collect candidate files under work_root using lexical-family ignores.
-
-    ``code_only=True`` (default): only extensions with a tree-sitter/regex
-    language mapping — skips .rst/.fits/.c/data noise that cannot feed Locate.
-    """
+    """作用：遍历 Work 内可索引文件。"""
     root = work_root.resolve()
     out: list[Path] = []
     if not root.is_dir():
@@ -132,7 +125,7 @@ def parse_file_entry(
     generation: int,
     max_file_bytes: int,
 ) -> FileEntry | None:
-    """Read → hash → parse one file. Returns skipped entry on unsupported/oversize."""
+    """作用：解析单文件为 FileEntry。"""
     try:
         rel = os.path.relpath(str(abs_path), str(work_root))
         if rel.startswith(".."):
@@ -211,11 +204,7 @@ async def run_cold_start(
     memory_only: bool = False,
     budget_s: float | None = None,
 ) -> IndexMeta:
-    """Full walk + parse + (optional) batch upsert + memory projection replace.
-
-    ``memory_only=True`` (§7.2 eval-ephemeral): skip all ``work_ast_*`` writes;
-    projection lives in-process until Work ends / eviction.
-    """
+    """作用：执行全量 cold 索引构建。"""
     store = store or AstIndexStore()
     registry = get_projection_registry()
     max_files = max(1, int(settings.workspace_ast_max_files))
@@ -577,7 +566,7 @@ def parse_single_file_fallback(
     work_root: Path,
     generation: int = 0,
 ) -> list[SymbolRec]:
-    """Zed-style single-file instant parse for stale query correction (§4.1)."""
+    """作用：单文件解析降级路径。"""
     max_bytes = max(1024, int(settings.workspace_ast_max_file_bytes))
     entry = parse_file_entry(
         abs_path,

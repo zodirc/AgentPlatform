@@ -1,4 +1,7 @@
+"""评测回放 Provider：从 eval/recordings 重放 model 步骤。"""
+
 from __future__ import annotations
+
 
 import json
 import re
@@ -16,7 +19,7 @@ _RECORDING_RE = re.compile(r"\[recording:([^\]]+)\]")
 
 
 class RecordedModelProvider:
-    """Replay model responses from eval/recordings/{case_id}.json."""
+    """作用：按 eval 录音逐步回放。"""
 
     def __init__(self, case_id: str) -> None:
         self._case_id = case_id
@@ -69,6 +72,7 @@ class RecordedModelProvider:
 
 
 def recording_case_id(messages: list[dict[str, Any]]) -> str | None:
+    """作用：从 [recording:case] 解析 case_id。"""
     for msg in messages:
         for block in msg.get("content", []):
             if block.get("type") != "text":
@@ -85,6 +89,7 @@ def _chunk(text: str, size: int = 12) -> list[str]:
 
 
 def create_recorded_gateway(messages: list[dict[str, Any]]) -> ModelGateway | None:
+    """作用：有标记时返回录音网关。"""
     from app.model.turn_override import current_turn_model_mode
 
     effective_mode = current_turn_model_mode() or settings.model_mode

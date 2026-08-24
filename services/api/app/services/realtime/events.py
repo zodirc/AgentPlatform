@@ -1,3 +1,9 @@
+"""Turn 事件读取与异步迭代：DB 分页、LISTEN 唤醒、终端/暂停点停流。
+
+SSE 在 ``approval.requested`` 处关闭连接以便客户端拉 view 后走 REST 审批；
+WebSocket 可 ``stop_on_pause=False`` 保持长连接。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +37,16 @@ _PROJECTION_POLL_SECONDS = 0.05
 async def fetch_turn_events(
     turn_id: UUID, since_sequence: int, *, limit: int | None = None
 ) -> list[dict]:
+    """从 ``turn_events`` 表按 sequence 升序拉取一页。
+
+    参数:
+        turn_id: Turn UUID。
+        since_sequence: 严格大于此 sequence 的事件。
+        limit: 可选 SQL LIMIT。
+
+    返回:
+        事件 dict 列表（payload 已 json 解析，ts 为 ISO 字符串）。
+    """
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -76,15 +92,21 @@ async def iter_turn_events(
     stop_on_pause: bool = True,
     idle_ping_every: int | None = None,
 ) -> AsyncIterator[dict | None]:
-    """Yield turn events until the turn finishes.
+    """异步迭代 turn 事件直至终端或（可选）审批暂停点。
 
-    ``stop_on_pause`` controls behaviour at approval pause points. SSE is
-    unidirectional so the stream closes (the client re-fetches the view and
-    approves over REST, then reconnects). WebSocket is bidirectional and keeps
-    the connection open so the client can approve/deny over the same socket.
+    参数:
+        turn_id: Turn UUID。
+        since_sequence: 起始 cursor。
+        listener: NOTIFY 唤醒用。
+        stop_on_pause: True 时在 approval.requested 停流（SSE 默认）。
+        idle_ping_every: 每 N 次空闲 poll  yield None 供 SSE ping。
 
-    When ``idle_ping_every`` is set, yield ``None`` every N idle polls so SSE
-    can emit comment keep-alives without blocking on new events.
+    返回:
+        AsyncIterator：事件 dict，或 None 表示 idle ping 槽位。
+
+    说明:
+        停流前 ``_ensure_view_caught_up`` 等待投影队列追上，避免客户端
+        读到 stale view；超时后 fallback 本地 ``project_turn``。
     """
     cursor = since_sequence
     stop_stream = False
@@ -121,7 +143,15 @@ async def iter_turn_events(
 
 
 async def _ensure_view_caught_up(turn_id: UUID, sequence: int) -> None:
-    """Wait for the projection consumer to reach ``sequence``; project as fallback."""
+    """等待 turn_views.last_event_sequence ≥ sequence；超时则 fallback 投影。
+
+    参数:
+        turn_id: Turn UUID。
+        sequence: 流已送达的最后 event sequence。
+
+    返回:
+        None。
+    """
     if sequence <= 0:
         return
     pool = await get_pool()

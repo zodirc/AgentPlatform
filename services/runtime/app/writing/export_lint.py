@@ -1,3 +1,5 @@
+"""导出 Markdown lint（docs/14 D6）。"""
+
 from __future__ import annotations
 
 import re
@@ -10,6 +12,10 @@ SECTION_SPLIT_RE = re.compile(r"(?m)^(#{1,6}\s+\S.*)$")
 
 @dataclass(frozen=True)
 class ExportLintIssue:
+    """lint 问题。
+    
+    参数:
+        code/message。"""
     code: str
     message: str
 
@@ -61,7 +67,13 @@ def lint_export_markdown(
     profile: str = "novel-zh",
     section_ids: list[str] | None = None,
 ) -> list[ExportLintIssue]:
-    """Deterministic markdown structure checks before export write (docs/14 D6)."""
+    """结构检查。
+    
+    参数:
+        body/profile/section_ids。
+    
+    返回:
+        list。"""
     issues: list[ExportLintIssue] = []
     text = body.strip()
     if not text:

@@ -1,3 +1,17 @@
+/**
+ * 应用根组件与路由分发。
+ *
+ * 路由概览：
+ * - `/`、`/writing`、`/agent`、`/intel`、`/collab` — 统一工作台（UnifiedWorkbench），`/` 重定向到 `/writing`
+ * - `/s/:sessionId` — 短链，重定向到 `/writing?session=…`
+ * - `/settings`、`/settings/*` — 账户/模型/工作区设置
+ * - `/ops/:workId/test` — Eval 控制台；`/history`、`/runs/:id` 子路由
+ * - `/ops/:workId/retrieval|envelopes|raw|official|writing` — 各 Ops 审计/实验页（lazy + 独立 ErrorBoundary）
+ * - 未匹配路径 — 回退到 `/writing`
+ *
+ * 认证：非 Ops 路径走 AuthenticatedApp（EndUserAuth → WorkbenchSession → WorkbenchProvider）。
+ * Ops 路径与用户工作台隔离边界，避免单侧崩溃拖垮整站。
+ */
 import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Navigate, useLocation } from "react-router-dom";
 import { ListTree, History, Plus } from "lucide-react";
@@ -64,6 +78,7 @@ const WritingSignalsLabPage = lazy(() =>
   })),
 );
 
+/** Ops 子页 lazy 加载时的占位 UI。 */
 function OpsSuspense({ children }: { children: ReactNode }) {
   return (
     <Suspense
@@ -78,6 +93,7 @@ function OpsSuspense({ children }: { children: ReactNode }) {
   );
 }
 
+/** 四场景工作台路径前缀。 */
 const SCENARIO_PATHS = ["/writing", "/agent", "/intel", "/collab"] as const;
 
 function isOpsEvalPath(pathname: string): boolean {
@@ -332,6 +348,9 @@ function Nav() {
   );
 }
 
+/**
+ * 按 pathname 渲染主内容区（设置、场景工作台、短链重定向）。
+ */
 function MainContent() {
   const { pathname, search } = useLocation();
 
@@ -361,6 +380,9 @@ function MainContent() {
   return <Navigate to={`/writing${search}`} replace />;
 }
 
+/**
+ * 已登录用户壳层：Nav + 按 sessionId key  remount WorkbenchProvider。
+ */
 function AppBody() {
   const { sessionId } = useWorkbenchSession();
   const { pathname } = useLocation();
@@ -394,6 +416,7 @@ function AppBody() {
   );
 }
 
+/** 检查 EndUserAuth，未登录显示 LoginPage。 */
 function AuthenticatedApp() {
   const { user, isLoading } = useEndUserAuth();
 
@@ -415,6 +438,10 @@ function AuthenticatedApp() {
   );
 }
 
+/**
+ * 根路由入口：Ops 路径与用户工作台分流。
+ * @returns Ops 懒加载页或 AuthenticatedApp
+ */
 export function App() {
   const { pathname } = useLocation();
   // I13: ops pages get their own boundary so an ops-only crash cannot take

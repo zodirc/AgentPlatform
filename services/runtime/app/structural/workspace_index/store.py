@@ -1,4 +1,5 @@
-"""Postgres snapshot IO for work_ast_* (§5). Hot-path queries must NOT use this."""
+"""AST 索引 PostgreSQL 持久化。"""
+
 
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from app.structural.workspace_index.types import FileEntry, IndexMeta, IndexStat
 
 
 class AstIndexStore:
-    """CRUD for work_ast_index_meta / work_ast_files. Always filter by owner when reading."""
+    """作用：PostgreSQL ast_index_* 表读写。"""
 
     def __init__(self, pool: asyncpg.Pool | None = None) -> None:
         self._pool = pool

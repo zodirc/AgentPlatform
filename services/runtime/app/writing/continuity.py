@@ -1,10 +1,4 @@
-"""WN1: offline continuity card candidates (docs/30).
-
-Candidates land under ``sources/cards/pending/`` after a writing turn.
-They are **never** auto-pinned — ``load_writing_cards`` already skips nothing
-named pending if we keep them outside the cards tree OR under pending/ and
-exclude that directory from pin selection.
-"""
+"""WN1 离线 continuity 候选（docs/30）。"""
 
 from __future__ import annotations
 
@@ -53,6 +47,10 @@ _STOP_NAMES = frozenset(
 
 @dataclass(frozen=True)
 class ContinuityCandidate:
+    """候选卡。
+    
+    参数:
+        kind/title/body/source_hint。"""
     kind: str
     title: str
     body: str
@@ -70,7 +68,13 @@ def extract_continuity_candidates(
     section_id: str = "",
     max_candidates: int = 5,
 ) -> list[ContinuityCandidate]:
-    """Heuristic extraction only — no LLM. Offline / post-turn use (R4)."""
+    """启发式抽取。
+    
+    参数:
+        chapter_text/section_id/max。
+    
+    返回:
+        list。"""
     text = (chapter_text or "").strip()
     if not text:
         return []
@@ -134,6 +138,13 @@ def extract_continuity_candidates(
 
 
 def pending_cards_dir(*, workspace_root: Path | None = None) -> Path:
+    """pending 目录。
+    
+    参数:
+        workspace_root。
+    
+    返回:
+        Path。"""
     root = Path(workspace_root or settings.workspace_root).resolve()
     return (root / "sources" / "cards" / "pending").resolve()
 
@@ -144,7 +155,13 @@ def write_pending_candidates(
     workspace_root: Path | None = None,
     turn_id: str = "",
 ) -> list[Path]:
-    """Write candidate markdown under pending/. Does not pin into live cards."""
+    """写 pending 卡。
+    
+    参数:
+        candidates/workspace/turn_id。
+    
+    返回:
+        list[Path]。"""
     if not candidates:
         return []
     dest = pending_cards_dir(workspace_root=workspace_root)

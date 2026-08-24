@@ -1,4 +1,7 @@
-"""Optional SWE-bench Docker harness after L1 infer."""
+"""Optional SWE-bench Docker harness after L1 infer.
+
+English: Optional SWE-bench Docker harness after L1 infer.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -223,6 +226,16 @@ def coding_harness_failed(run_harness: bool, metrics: dict[str, Any]) -> bool:
 
 
 def coding_harness_fail_error(metrics: dict[str, Any]) -> str:
+    """构造 harness 失败时的标准错误串（供 suite 终态标记 fail）。
+
+    English: Format the error string when Ops required resolve_rate but did not get one.
+
+    参数:
+        metrics: 含 ``harness_error`` 或缺 ``resolve_rate`` 的 metrics dict。
+
+    返回:
+        以 ``coding_harness_failed:`` 开头的错误消息。
+    """
     return (
         "coding_harness_failed: "
         f"{metrics.get('harness_error') or 'harness produced no resolve_rate'}"

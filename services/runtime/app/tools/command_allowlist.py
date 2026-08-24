@@ -1,4 +1,9 @@
-"""Load per-user run_command prefixes and match against a pending command."""
+"""按用户前缀白名单判断 ``run_command`` 是否免审批。
+
+从 ``command_allow_prefixes`` 表加载 session 所属用户的允许命令前缀，
+与待执行命令做规范化前缀匹配（``agent_contracts.command_matches_prefix``）。
+匹配成功时 executor 可跳过 approval 门控。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +25,18 @@ except ImportError:  # pragma: no cover - stale venv/image still on older agent-
 
 
 async def command_is_allowlisted(state: Any, arguments: dict[str, Any] | None) -> bool:
+    """检查本次 ``run_command`` 是否命中用户命令前缀白名单。
+
+    参数:
+        state: Turn 状态对象，须含 ``session_id``。
+        arguments: tool 参数 dict，读取 ``command`` 字段。
+
+    返回:
+        ``True`` 表示命令与某条已存前缀匹配；无 session、空命令、DB 异常或未匹配均为 ``False``。
+
+    说明:
+        DB/网络异常时 fail-closed 返回 ``False``，不静默放行未知命令。
+    """
     session_id = getattr(state, "session_id", None)
     if session_id is None:
         return False

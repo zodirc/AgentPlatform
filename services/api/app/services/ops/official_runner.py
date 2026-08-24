@@ -1,4 +1,7 @@
-"""Run official small benches from Ops (subprocess + SSE progress)."""
+"""从 Ops 运行 Official 小基准（子进程 + SSE 进度）。
+
+English: Run official small benches from Ops (subprocess + SSE progress).
+"""
 
 from __future__ import annotations
 
@@ -88,6 +91,8 @@ def _repo_root() -> Path:
 
 @dataclass
 class OfficialLiveRun:
+    """Official L1 套件内存态 run（SSE 订阅、进度、取消）。"""
+
     id: str
     status: str = "queued"
     targets: list[str] = field(default_factory=list)
@@ -155,10 +160,27 @@ def _evict_finished_unlocked() -> None:
         _RUNS.pop(stale.id, None)
 
 def list_criteria() -> list[dict[str, str]]:
+    """返回 Official 评测可选 target/criteria 元数据列表。
+
+    English: Return static CRITERIA metadata for Ops UI.
+
+    返回:
+        ``CRITERIA`` 的副本（dict 含 id/label 等）。
+    """
     return list(CRITERIA)
 
 
 def get_live(run_id: str) -> OfficialLiveRun | None:
+    """从进程内 live 表取 Official run 对象。
+
+    English: Lookup in-memory OfficialLiveRun by id.
+
+    参数:
+        run_id: live run UUID 字符串。
+
+    返回:
+        ``OfficialLiveRun`` 或 ``None``。
+    """
     return _RUNS.get(run_id)
 
 
@@ -198,6 +220,19 @@ async def forget_live_runs(
 
 
 def subscribe(run: OfficialLiveRun) -> asyncio.Queue:
+    """订阅 live run 的 SSE 事件队列（大队列防 QueueFull 丢订阅）。
+
+    English: Subscribe to live SSE events; maxsize=2000 avoids QueueFull dropping subscribers.
+
+    # Coding turns emit densely; too-small queues used to QueueFull → unsubscribe
+    # and silently kill the Ops live log for the rest of the run (incl. harness).
+
+    参数:
+        run: 进行中的 ``OfficialLiveRun``。
+
+    返回:
+        容量 2000 的 ``asyncio.Queue``，由 caller ``unsubscribe`` 释放。
+    """
     # Coding turns emit densely; too-small queues used to QueueFull → unsubscribe
     # and silently kill the Ops live log for the rest of the run (incl. harness).
     q: asyncio.Queue = asyncio.Queue(maxsize=2000)
@@ -206,6 +241,14 @@ def subscribe(run: OfficialLiveRun) -> asyncio.Queue:
 
 
 def unsubscribe(run: OfficialLiveRun, q: asyncio.Queue) -> None:
+    """取消 SSE 订阅并从 run 的 subscriber 列表移除队列。
+
+    English: Remove queue from run._subscribers.
+
+    参数:
+        run: live run。
+        q: ``subscribe`` 返回的队列。
+    """
     if q in run._subscribers:
         run._subscribers.remove(q)
 
@@ -668,6 +711,23 @@ async def create_and_start(
     retrieval_corpus_mode: str = "full",
     retry_case_ids: list[str] | None = None,
 ) -> OfficialLiveRun:
+    """创建并后台启动 Official live run（bench worker 或 in-process L1）。
+
+    English: Create OfficialLiveRun, persist snapshot, and spawn _execute task.
+
+    参数:
+        targets: 套件 id 列表（``coding`` 展开为 ``coding_infer`` 等）。
+        context_dry / coding_* / retrieval_*: 各套件运行旋钮。
+        force: 为 True 时停止并替换已有 active run。
+        model: 可选 chat 模型配置。
+        retry_case_ids: 单题/失败项重跑 id 列表。
+
+    返回:
+        已入队 ``_execute`` 的 ``OfficialLiveRun``。
+
+    异常:
+        ValueError: 未知 target、已有 active run（非 force）、非法 eval_path 等。
+    """
     cleaned: list[str] = []
     for t in targets:
         t = t.strip()
@@ -796,6 +856,19 @@ async def create_and_start(
 
 
 async def request_stop(run_id: str) -> OfficialLiveRun:
+    """请求 cooperative stop（bench job / subprocess / L1 turns）。
+
+    English: Set cancel_requested and stop bench job or L1 turns best-effort.
+
+    参数:
+        run_id: live run id。
+
+    返回:
+        更新后的 ``OfficialLiveRun``。
+
+    异常:
+        ValueError: ``run_not_found``。
+    """
     run = _RUNS.get(run_id)
     if run is None:
         raise ValueError("run_not_found")
@@ -1077,6 +1150,7 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
     run.phase_hint = "① 拉取数据集（已有则跳过）…"
 
     async def on_progress(ev: dict[str, Any]) -> None:
+        """L1 suite 进度事件 → SSE log / phase_hint 更新。"""
         if run.cancel_requested:
             return
         msg = str(ev.get("message") or ev.get("kind") or "")
@@ -1126,6 +1200,7 @@ async def _execute_via_agent_path(run: OfficialLiveRun) -> None:
             case["status"] = "running"
 
     async def on_suite_done(ev: dict[str, Any]) -> None:
+        """单个 L1 suite 完成 → 更新 case 状态、metrics 与 SCORECARD。"""
         suite = str(ev.get("suite") or "")
         done = int(ev.get("done") or 0)
         total = int(ev.get("total") or run.progress_total or 0)
@@ -1632,6 +1707,16 @@ async def _execute_local(run: OfficialLiveRun) -> None:
 
 
 def run_to_dict(run: OfficialLiveRun) -> dict[str, Any]:
+    """将 ``OfficialLiveRun`` 序列化为 Ops API / SSE 载荷。
+
+    English: Serialize OfficialLiveRun for REST/SSE and DB snapshot.
+
+    参数:
+        run: live run  dataclass。
+
+    返回:
+        JSON 可序列化 dict（含 targets、cases、logs 摘要字段等）。
+    """
     return {
         "id": run.id,
         "status": run.status,

@@ -126,6 +126,18 @@ async def list_recent_raw_turns(
 
 @router.get("/turns/{turn_id}")
 async def get_turn_raw_snapshots(turn_id: UUID) -> dict[str, Any]:
+    """返回指定 turn 的全部 session_raw_snapshots 步序快照。
+
+    参数:
+        turn_id: Turn UUID。
+
+    返回:
+        ``{ turn_id, count, snapshots[] }``。
+
+    异常:
+        HTTP 404: turn 不存在且无快照。
+        HTTP 503: 表未迁移。
+    """
     pool = await get_pool()
     try:
         rows = await pool.fetch(

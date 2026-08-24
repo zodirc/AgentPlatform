@@ -1,3 +1,10 @@
+"""外部 sources 检索与索引同步（vector/hybrid/keyword 多模式）。
+
+``search_sources`` 是写作/研究场景的主检索入口：ANN 检索、cover-term 校验、
+keyword fallback、租户/scenario 过滤、RET-12 分层展示与 RET-15 相对分数。
+``sync_sources_index`` 触发增量索引投影（通常由 scheduler 单飞，API 亦可调）。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,12 +24,27 @@ logger = logging.getLogger(__name__)
 async def _run_retrieval_blocking(
     fn: Callable[..., _T], /, *args: Any, **kwargs: Any
 ) -> _T:
-    """Run retrieval I/O/CPU off-loop with audit ContextVars intact."""
+    """在线程池运行检索 I/O，并保留 audit ContextVar。
+
+    参数:
+        fn: 阻塞 callable（如 ``get_sources_store``/``store.search``）。
+        *args/**kwargs: 传给 fn 的参数。
+
+    返回:
+        fn 的返回值。
+    """
     context = contextvars.copy_context()
     call = partial(fn, *args, **kwargs)
     return await asyncio.to_thread(context.run, call)
 async def sync_sources_index() -> dict[str, Any]:
-    """Incremental sources projection (mtime dirty-set). Prefer scheduler for single-flight."""
+    """增量同步 sources 向量/关键词索引（mtime dirty-set）。
+
+    返回:
+        ``run_sources_index_sync`` 的结果 dict（含同步状态与统计）。
+
+    说明:
+        正常应由 scheduler 单飞；工具/API 调用时使用 ``reason="api"``。
+    """
     from app.retrieval.index_scheduler import run_sources_index_sync
 
     return await run_sources_index_sync(reason="api")
@@ -411,6 +433,21 @@ async def search_sources(
     path_prefix: str | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """在 ``sources/`` 语料库中检索，支持 vector/hybrid/keyword 与多层 fallback。
+
+    参数:
+        query: 自然语言或关键词查询。
+        limit: 返回 hit 上限。
+        path_prefix: 可选路径前缀过滤。
+        **_kwargs: 可选 ``scenario_id`` 用于 scenario scope/exclude。
+
+    返回:
+        含 ``hits``/``retrieval``/``summary``/``audit``/``scope`` 等；空索引时 keyword-fallback。
+
+    说明:
+        查询热路径不 ``store.sync()``；ANN 结果须 cover distinctive terms 否则尝试 keyword；
+        keyword 亦空时可能保留 ANN（SciFact claim≠abstract 场景）。
+    """
     from app.retrieval.audit import begin_audit_capture, end_audit_capture
     from app.retrieval.path_filter import filter_hits_by_path_prefix
     from app.retrieval.scenario_scope import filter_hits_by_excludes, resolve_search_path_prefix

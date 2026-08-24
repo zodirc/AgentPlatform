@@ -1,4 +1,7 @@
-"""Enqueue run control commands via DB + NOTIFY (O2 / WP6)."""
+"""经 ``run_commands`` 表 + NOTIFY 向 runtime 下发 run 控制命令（O2 / WP6）。
+
+替代直连 HTTP approve/deny/cancel 等；pending 行按 (run_id, type) 去重。
+"""
 
 from __future__ import annotations
 
@@ -22,9 +25,18 @@ async def enqueue_run_command(
     command_type: str,
     payload: dict[str, Any] | None = None,
 ) -> UUID:
-    """Insert pending command + notify owner runtime. Returns command id.
+    """插入 pending 命令并 NOTIFY ``run_commands_channel``。
 
-    If an identical pending row already exists (unique index), returns that id.
+    参数:
+        run_id: 目标 run。
+        command_type: approve/deny/patch_accept/patch_reject/cancel 之一。
+        payload: JSON 可序列化 dict（trace_id、tool_call_id 等）。
+
+    返回:
+        命令 UUID；若已有同 run+type 的 pending 行则更新 payload 并返回其 id。
+
+    抛出:
+        ValueError: 未知 command_type。
     """
     if command_type not in COMMAND_TYPES:
         raise ValueError(f"unknown run command type: {command_type}")

@@ -1,3 +1,9 @@
+"""Outbox 异步任务队列（PostgreSQL ``outbox_jobs`` 表）。
+
+Worker 通过 ``claim_jobs`` 拉取 pending/retry 任务；API 侧 ``enqueue_*`` 在 turn
+完成或定时任务触发时写入。含 B5 stale processing 回收与指数退避重试。
+"""
+
 from __future__ import annotations
 
 import json
@@ -18,6 +24,17 @@ async def enqueue_job(
     available_at: datetime | None = None,
     max_attempts: int = 5,
 ) -> UUID:
+    """写入一条 outbox 任务。
+
+    参数:
+        job_type: 处理器键名（如 ``projection.refresh``）。
+        payload: JSON 可序列化参数字典。
+        available_at: 最早可被 claim 的时间；默认立即。
+        max_attempts: 最大尝试次数（含首次）。
+
+    返回:
+        新任务的 UUID。
+    """
     job_id = uuid4()
     pool = await get_pool()
     await pool.execute(
@@ -40,10 +57,18 @@ async def enqueue_turn_jobs(
     scenario_id: str,
     post_turn_jobs: list[str] | None = None,
 ) -> None:
-    """Enqueue projection + session.summary, plus Profile-declared post_turn_jobs.
+    """Turn 终态后入队 projection、Profile 声明的后置任务与会话摘要。
 
-    ``post_turn_jobs`` comes from the terminal turn event payload (runtime Profile).
-    Scenario-name branching is not used here (Profile post_turn_jobs).
+    ``post_turn_jobs`` 来自 runtime 终态事件 payload（Profile 配置），
+    不在此按 scenario 名分支。
+
+    参数:
+        turn_id: 已完成或失败的 turn UUID。
+        scenario_id: 场景 id（当前仅透传上下文，分支由 Profile 驱动）。
+        post_turn_jobs: 额外 job_type 列表。
+
+    返回:
+        无。
     """
     await enqueue_job("projection.refresh", {"turn_id": str(turn_id)})
     for job_type in post_turn_jobs or []:
@@ -60,7 +85,14 @@ _PROCESSING_STALE_MINUTES = 10
 
 
 async def requeue_stale_processing() -> int:
-    """Requeue 'processing' jobs whose worker died mid-flight (B5)."""
+    """将 worker 崩溃后滞留 ``processing`` 的任务改回 retry（B5）。
+
+    参数:
+        无。
+
+    返回:
+        本次 requeue 的行数。
+    """
     pool = await get_pool()
     result = await pool.execute(
         f"""
@@ -78,6 +110,15 @@ async def requeue_stale_processing() -> int:
 
 
 async def claim_jobs(*, limit: int = 10) -> list[dict[str, Any]]:
+    """原子 claim 一批可执行 outbox 任务（``FOR UPDATE SKIP LOCKED``）。
+
+    参数:
+        limit: 单次最多 claim 条数。
+
+    返回:
+        任务 dict 列表，含 ``id``、``job_type``、``payload``、``attempts``、
+        ``max_attempts``；无任务时空列表。
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -122,6 +163,14 @@ async def claim_jobs(*, limit: int = 10) -> list[dict[str, Any]]:
 
 
 async def mark_done(job_id: UUID) -> None:
+    """将任务标记为 ``done``。
+
+    参数:
+        job_id: outbox 任务 UUID。
+
+    返回:
+        无。
+    """
     pool = await get_pool()
     await pool.execute(
         """
@@ -134,6 +183,17 @@ async def mark_done(job_id: UUID) -> None:
 
 
 async def mark_failed(job_id: UUID, *, error: str, attempts: int, max_attempts: int) -> None:
+    """记录失败：未达上限则 ``retry`` 并延迟 ``available_at``，否则 ``failed``。
+
+    参数:
+        job_id: 任务 UUID。
+        error: 错误摘要（截断至 1024 字符）。
+        attempts: 当前已尝试次数（claim 时的值）。
+        max_attempts: 配置的最大尝试次数。
+
+    返回:
+        无。
+    """
     pool = await get_pool()
     if attempts + 1 >= max_attempts:
         status = "failed"

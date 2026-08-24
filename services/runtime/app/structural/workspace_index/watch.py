@@ -1,4 +1,5 @@
-"""Channel ② light scan + channel ③ low-frequency poll (§3.2)."""
+"""Work 活跃跟踪与命令后 light scan。"""
+
 
 from __future__ import annotations
 
@@ -33,11 +34,12 @@ def register_active_work(
     owner_user_id: str,
     work_root: Path,
 ) -> None:
-    """Mark a work as having an active agent session (enables channel ③)."""
+    """作用：登记活跃 Work 供轮询扫描。"""
     _active_works[work_id] = (Path(work_root), owner_user_id, time.monotonic())
 
 
 def touch_active_work(work_id: UUID) -> None:
+    """作用：刷新 Work 最后活跃时间。"""
     cur = _active_works.get(work_id)
     if cur is not None:
         _active_works[work_id] = (cur[0], cur[1], time.monotonic())
@@ -50,12 +52,7 @@ def gc_missing_indexed_files(
     work_root: Path,
     budget_s: float | None = None,
 ) -> dict:
-    """Drop indexed paths that are gone on disk, or are not code.
-
-    Independent of ``os.walk`` completeness: O(indexed files) ``exists`` checks.
-    Memory projection updates immediately; DB/indexer follow via dirty DELETE.
-    Writing cards / RAG markdown must not remain as ``lang=skipped`` ghosts.
-    """
+    """作用：磁盘缺失文件从索引 GC。"""
     from app.structural.workspace_index.types import IndexStatus
 
     proj = get_projection_registry().get(work_id)
@@ -105,7 +102,7 @@ async def light_scan_after_command(
     work_root: Path,
     budget_ms: float = 200.0,
 ) -> dict:
-    """Channel ②: mtime+size compare vs projection only; hard budget; off-loop."""
+    """作用：run_command 后轻量 dirty 扫描。"""
     if work_id is None or not owner_user_id:
         return {"status": "skipped", "reason": "no_tenant"}
     service = get_ast_index_service()
@@ -240,6 +237,7 @@ async def _poll_loop() -> None:
 
 
 def schedule_ast_index_watch() -> None:
+    """作用：启动后台 watch 协程。"""
     global _watch_task
     if _watch_task is not None and not _watch_task.done():
         return
@@ -249,6 +247,7 @@ def schedule_ast_index_watch() -> None:
 
 
 async def cancel_ast_index_watch() -> None:
+    """作用：停止 watch 协程。"""
     global _watch_task
     task = _watch_task
     _watch_task = None

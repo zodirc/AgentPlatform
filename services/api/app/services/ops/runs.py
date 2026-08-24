@@ -1,6 +1,9 @@
-from __future__ import annotations
+"""Ops eval run 生命周期（内存 + DB 持久化、SSE 订阅）。
 
-import asyncio
+Golden 用例 in-process 执行；CI suite 走 proof 容器；支持 cancel/reconcile。
+"""
+
+from __future__ import annotations
 import logging
 import shutil
 from dataclasses import dataclass, field
@@ -28,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CaseResult:
+    """单个 Golden/CI case 执行结果。"""
+
     case_id: str
     status: str = "pending"  # pending | running | pass | fail | skipped
     events: list[str] = field(default_factory=list)
@@ -40,6 +45,8 @@ class CaseResult:
 
 @dataclass
 class EvalRun:
+    """进行中的 eval run 内存态（含 SSE subscribers）。"""
+
     id: str
     status: str = "queued"  # queued | running | completed | failed | cancelled
     suite: str = "golden"  # golden | ci
@@ -62,6 +69,7 @@ _PROOF_LOCK = asyncio.Lock()
 
 
 def get_run(run_id: str) -> EvalRun | None:
+    """从内存 registry 获取活跃 run。"""
     return _RUNS.get(run_id)
 
 
@@ -100,6 +108,7 @@ def _run_from_stored(stored: dict[str, Any]) -> EvalRun:
 
 
 def run_to_dict(run: EvalRun, *, include_logs: bool = True) -> dict[str, Any]:
+    """将 ``EvalRun`` 转为 API/DB JSON 可序列化 dict。"""
     passed = sum(1 for c in run.cases if c.status == "pass")
     failed = sum(1 for c in run.cases if c.status == "fail")
     skipped = sum(1 for c in run.cases if c.status == "skipped")
@@ -147,6 +156,7 @@ def run_to_dict(run: EvalRun, *, include_logs: bool = True) -> dict[str, Any]:
 
 
 async def persist_run(run: EvalRun) -> None:
+    """Best-effort 将 run 快照 UPSERT 到 ``ops_eval_runs``。"""
     try:
         await eval_store.upsert_run(run_to_dict(run, include_logs=True))
     except Exception:
@@ -154,6 +164,7 @@ async def persist_run(run: EvalRun) -> None:
 
 
 async def get_run_payload(run_id: str) -> dict[str, Any] | None:
+    """合并内存活跃 run 与 DB 历史 run 的完整 payload。"""
     live = get_run(run_id)
     if live is not None:
         return run_to_dict(live, include_logs=True)
@@ -175,6 +186,7 @@ async def list_run_history(
     suite: str | None = None,
     q: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
+    """分页查询历史 run 并与内存活跃 run 合并状态。"""
     rows, total = await eval_store.list_runs(
         limit=limit,
         offset=offset,
@@ -215,12 +227,14 @@ async def _publish(run: EvalRun, event: dict[str, Any]) -> None:
 
 
 def subscribe(run: EvalRun) -> asyncio.Queue:
+    """为 SSE 客户端注册事件队列（maxsize 256）。"""
     q: asyncio.Queue = asyncio.Queue(maxsize=256)
     run._subscribers.append(q)
     return q
 
 
 def unsubscribe(run: EvalRun, q: asyncio.Queue) -> None:
+    """SSE 断开时移除订阅队列。"""
     if q in run._subscribers:
         run._subscribers.remove(q)
 
@@ -233,6 +247,11 @@ async def create_run(
     model: dict[str, Any] | None,
     restart_runtime: bool = False,
 ) -> EvalRun:
+    """创建 eval run 并入队后台 ``_execute_run`` / ``_execute_ci_run``。
+
+    异常:
+        ValueError: suite/mode/case/model 校验失败或 CI proof 不可用。
+    """
     if suite not in {"golden", "ci"}:
         raise ValueError("invalid_suite")
     if mode not in {"stub", "live", "recorded"}:

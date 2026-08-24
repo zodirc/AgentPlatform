@@ -1,3 +1,9 @@
+"""确定性引用校验（docs/13 S3 A4）：扫草稿 cite/路径，写报告，不改稿。
+
+仅用户/离线触发；遍历 exports、sections、session revisions 等近期 md，
+核对 cite: 与 sources/|sections/ 路径是否存在于当前 work_root。
+"""
+
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -11,6 +17,11 @@ _REF_PATH_RE_IMPORT = None
 
 
 def _ref_path_re():
+    """懒编译引用路径正则（支持 CJK 文件名）。
+
+    返回:
+        匹配 ``sources|sections/...``.md|txt|markdown 的 Pattern。
+    """
     import re
 
     global _REF_PATH_RE_IMPORT
@@ -23,6 +34,11 @@ def _ref_path_re():
 
 
 def _workspace() -> Path:
+    """当前租户 work_root；无 TenantContext 时回退 settings.workspace_root。
+
+    返回:
+        解析后的绝对 Path。
+    """
     try:
         from app.tenant_context import current_work_root_path
 
@@ -32,6 +48,16 @@ def _workspace() -> Path:
 
 
 def _iter_draft_texts(root: Path) -> list[tuple[str, str]]:
+    """收集待校验草稿：相对路径 + 正文。
+
+    优先最近修改的文件（最多 120），使 verify 命中最新写作轮次。
+
+    参数:
+        root: work_root。
+
+    返回:
+        ``(rel_path, text)`` 列表。
+    """
     candidates: list[Path] = []
     for rel in ("exports", "sections"):
         base = root / rel
@@ -64,6 +90,15 @@ def _iter_draft_texts(root: Path) -> list[tuple[str, str]]:
 
 
 def _source_exists(root: Path, citation_id: str) -> bool:
+    """判断 cite id 是否在 sources/ 下有对应文件或正文命中。
+
+    参数:
+        root: work_root。
+        citation_id: 原始或 ``cite:`` 前缀形式。
+
+    返回:
+        找到匹配则为 True。
+    """
     stem = citation_id.replace("cite:", "").strip()
     sources = root / "sources"
     if not sources.is_dir() or not stem:
@@ -78,6 +113,7 @@ def _source_exists(root: Path, citation_id: str) -> bool:
         if fp.stem == stem:
             return True
         try:
+            # 最后才读全文：路径/文件名未命中时用正文包含兜底。
             if stem in fp.read_text(encoding="utf-8", errors="replace"):
                 return True
         except OSError:
@@ -86,7 +122,14 @@ def _source_exists(root: Path, citation_id: str) -> bool:
 
 
 def scan_text_citations(text: str) -> list[str]:
-    """HM7: return human-readable citation/path issues for a single markdown body."""
+    """HM7：扫描单段 markdown，返回可读的引用/路径问题列表。
+
+    参数:
+        text: markdown 正文。
+
+    返回:
+        如 ``unverified_citation: ...`` / ``missing_path: ...`` 的字符串列表。
+    """
     root = _workspace()
     issues: list[str] = []
     path_re = _ref_path_re()
@@ -103,7 +146,15 @@ def scan_text_citations(text: str) -> list[str]:
 
 
 def run_verify_pass(*, session_id: str | None = None) -> dict[str, Any]:
-    """Deterministic citation verify (docs/13 S3 A4) — user/offline only, no draft mutation."""
+    """跑完整 verify：扫草稿、写 ``.agent/verify-reports/``，不改 draft。
+
+    参数:
+        session_id: 可选，写入报告元数据。
+
+    返回:
+        含 status / checked / invalid / findings / report_path / summary /
+        ``mutated_draft=False`` 的结果 dict。
+    """
     root = _workspace()
     findings: list[dict[str, Any]] = []
     checked = 0

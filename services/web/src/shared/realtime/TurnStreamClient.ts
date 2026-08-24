@@ -1,11 +1,17 @@
+/**
+ * 回合 SSE 流客户端：fetch + ReadableStream 解析 text/event-stream，
+ * 支持断线重连、空闲看门狗与 ADR-015 本地渲染暂停。
+ */
 import { apiAuthHeaders, type TurnEvent } from "../api/client";
 
+/** TurnStreamClient 事件回调集合。 */
 export type TurnStreamHandlers = {
   onEvent: (event: TurnEvent) => void;
   onError?: (error: Error) => void;
   onClose?: () => void;
 };
 
+/** 终止或进入审批暂停后关闭 SSE 连接的事件类型。 */
 const STREAM_END = new Set([
   "turn.completed",
   "turn.failed",
@@ -13,7 +19,7 @@ const STREAM_END = new Set([
   "approval.requested",
 ]);
 
-/** Deltas frozen on Stop (ADR-015); terminal / control events still dispatch. */
+/** Stop 后冻结本地增量渲染，终端/控制事件仍派发（ADR-015）。 */
 const RENDER_PAUSE_TYPES = new Set([
   "turn.token",
   "turn.thinking",
@@ -28,6 +34,9 @@ const BASE_RECONNECT_MS = 300;
 // the proxy has silently hung the connection — drop it and reconnect.
 const IDLE_WATCHDOG_MS = 45_000;
 
+/**
+ * 通过 HTTP SSE 订阅 `/turns/:id/stream`，按 sequence 去重并向上层派发 TurnEvent。
+ */
 export class TurnStreamClient {
   private abort: AbortController | null = null;
   private stopped = false;
@@ -39,6 +48,12 @@ export class TurnStreamClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private onlineListener: (() => void) | null = null;
 
+  /**
+   * 建立或重建 SSE 连接。
+   * @param turnId 回合 ID
+   * @param handlers 事件/错误/关闭回调
+   * @param sinceSequence 断点续传起始 sequence（不含）
+   */
   connect(turnId: string, handlers: TurnStreamHandlers, sinceSequence = 0) {
     this.turnId = turnId;
     this.handlers = handlers;
@@ -187,11 +202,14 @@ export class TurnStreamClient {
     }
   }
 
-  /** ADR-015: stop local render ≤50ms; keep listening for turn.cancelled. */
+  /**
+   * ADR-015：≤50ms 停止本地 token/thinking/tool 渲染；连接保持以接收 turn.cancelled。
+   */
   stopRendering() {
     this.renderPaused = true;
   }
 
+  /** 中止 fetch、清除重连定时器并标记 stopped。 */
   close() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

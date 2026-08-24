@@ -1,6 +1,10 @@
-from __future__ import annotations
+"""Session 资源 DB 访问层（CRUD、历史列表、级联硬删）。
 
-import logging
+创建时绑定 ``owner_user_id`` 与 default/custom Work；删除显式清理 turn 子图
+（兼容 pre-CASCADE 生产库）。
+"""
+
+from __future__ import annotations
 from uuid import UUID
 
 import asyncpg
@@ -19,6 +23,19 @@ async def create_session(
     owner_user_id: UUID,
     work_id: UUID | None = None,
 ) -> dict:
+    """创建会话并绑定 owner 与 work。
+
+    参数:
+        default_scenario_id: 默认场景 id。
+        owner_user_id: 归属终端用户。
+        work_id: 可选 work；省略时使用 default work。
+
+    返回:
+        sessions 行 dict。
+
+    异常:
+        ValueError: ``work_not_found`` 或不属于 owner。
+    """
     work = None
     if work_id is not None:
         from app.services.resource.works import get_work
@@ -44,6 +61,11 @@ async def create_session(
 
 
 async def get_session(session_id: UUID) -> dict | None:
+    """按 id 读取 session 行。
+
+    返回:
+        行 dict；不存在时为 None。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """
@@ -143,6 +165,7 @@ async def list_sessions_for_owner(
 
 
 async def touch_session(session_id: UUID) -> None:
+    """更新 session ``updated_at`` 为 now()。"""
     pool = await get_pool()
     await pool.execute(
         "UPDATE sessions SET updated_at = now() WHERE id = $1",

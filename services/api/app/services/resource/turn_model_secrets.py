@@ -1,4 +1,7 @@
-"""Per-turn model override escrow (encrypted; claim consumes once)."""
+"""Per-turn model override escrow (encrypted; claim consumes once).
+
+English: Per-turn model override escrow (encrypted; claim consumes once).
+"""
 
 from __future__ import annotations
 
@@ -62,6 +65,11 @@ async def store_turn_model_secret(
 
 
 async def purge_expired_turn_model_secrets() -> int:
+    """清理已消费或过期的 turn 级模型密钥 escrow 行。
+
+    返回:
+        删除行数；解析 asyncpg ``DELETE n`` 失败时返回 0。
+    """
     pool = await get_pool()
     result = await pool.execute(
         """

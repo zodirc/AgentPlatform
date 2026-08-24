@@ -1,4 +1,5 @@
-"""Walk ignore rules — same family as lexical grep (§3.1)."""
+"""索引忽略规则：目录/扩展名过滤。"""
+
 
 from __future__ import annotations
 
@@ -57,10 +58,12 @@ SKIP_SUFFIXES = frozenset(
 
 
 def dir_skipped(name: str) -> bool:
+    """作用：目录名是否跳过索引。"""
     return name in SKIP_DIR_NAMES or name.endswith(".egg-info")
 
 
 def file_skipped(path: Path) -> bool:
+    """作用：文件路径是否跳过索引。"""
     name = path.name
     if name.startswith(".") and name not in {".env.example"}:
         # Hidden files are rarely definition sources; skip except explicit allow.
@@ -70,12 +73,7 @@ def file_skipped(path: Path) -> bool:
 
 
 def code_file_indexable(path: Path | str) -> bool:
-    """True when this path can feed Locate (tree-sitter/regex language map).
-
-    Writing/RAG trees (``sources/cards/*.md``, drafts) share the Work with
-    Agent; they are not definition sources. Cold start already uses
-    ``code_only``; light-scan / dirty / GC must use the same gate.
-    """
+    """作用：是否为可索引代码文件。"""
     p = Path(path)
     if file_skipped(p):
         return False

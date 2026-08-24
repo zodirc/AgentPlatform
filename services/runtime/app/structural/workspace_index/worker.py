@@ -1,9 +1,5 @@
-"""Standalone AST indexer process (A6).
+"""AST 索引后台 worker：claim job、cold/dirty/purge。"""
 
-Run: ``python -m app.structural.workspace_index.worker``
-
-Claims ``work_ast_index_jobs`` via SKIP LOCKED; never shares the Turn event loop.
-"""
 
 from __future__ import annotations
 
@@ -322,6 +318,7 @@ async def _process(job: AstIndexJob, store: AstIndexStore) -> None:
 
 
 async def run_loop() -> None:
+    """作用：worker 主循环：claim job 并 dispatch。"""
     worker_id = _worker_id()
     poll = max(0.2, float(os.environ.get("AST_INDEXER_POLL_SECONDS", "0.5")))
     reclaim_every = max(30.0, float(os.environ.get("AST_INDEXER_RECLAIM_SECONDS", "120")))
@@ -396,6 +393,7 @@ async def run_loop() -> None:
 
 
 def main() -> None:
+    """作用：CLI 入口启动 AST index worker。"""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 

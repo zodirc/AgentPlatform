@@ -1,7 +1,4 @@
-"""Detect first-chapter lore dump: N年前 + 失踪/尸体 as a synopsis paragraph.
-
-Soft facts only. Not a chapter-count detector. Callers never mutate disk.
-"""
+"""开篇 lore dump 检测。"""
 
 from __future__ import annotations
 
@@ -20,6 +17,13 @@ def _sentences(text: str) -> list[str]:
 
 
 def is_opening_section(section_id: str) -> bool:
+    """是否开篇章。
+    
+    参数:
+        section_id。
+    
+    返回:
+        bool。"""
     sid = (section_id or "").strip()
     if not sid:
         return True
@@ -31,12 +35,24 @@ def is_opening_section(section_id: str) -> bool:
 
 
 def has_lore_dump(text: str) -> bool:
-    """True when 「N年前」 is paired with 失踪/没回家/尸体 in this or the next sentence."""
+    """是否有 lore dump。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     return bool(find_lore_span(text))
 
 
 def find_lore_span(text: str, *, max_chars: int = 360) -> str:
-    """Exact slice covering the first N年前 + 失踪/尸体 pair."""
+    """lore span。
+    
+    参数:
+        text/max_chars。
+    
+    返回:
+        str。"""
     sents = _sentences(text)
     body = text or ""
     for i, sent in enumerate(sents):
@@ -61,7 +77,13 @@ def find_lore_span(text: str, *, max_chars: int = 360) -> str:
 
 
 def lore_fields(content: str, section_id: str = "") -> dict[str, Any]:
-    """Attach to draft_section. Opening chapter only — later chapters may recap."""
+    """lore 软事实。
+    
+    参数:
+        content/section_id。
+    
+    返回:
+        dict。"""
     from app.writing.text_metrics import visible_chars
 
     if not is_opening_section(section_id):

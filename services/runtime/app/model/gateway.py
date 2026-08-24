@@ -1,4 +1,11 @@
+"""模型网关：重试/超时/abort、Stub 意图路由、Provider 协议与 HTTP 错误分类。
+
+English: Model gateway — retries, timeouts, stream abort, provider adapters, error taxonomy.
+"""
+
+
 from __future__ import annotations
+
 
 import asyncio
 import json
@@ -15,11 +22,17 @@ logger = logging.getLogger(__name__)
 
 
 class ModelError(Exception):
-    """Base for model harness failures (distinct from tool/step errors)."""
+    """模型 harness 失败基类（区别于工具/步骤错误）。
+
+    English: Base class for model provider failures (not tool/step errors).
+    """
 
 
 class ModelTransientError(ModelError):
-    """Retryable before any stream output (429/5xx/connect/first-byte timeout)."""
+    """可重试错误（429/5xx/连接/首字节超时前）。
+
+    English: Retryable provider errors (429/5xx, connect, pre-first-byte timeout).
+    """
 
     def __init__(
         self,
@@ -34,7 +47,10 @@ class ModelTransientError(ModelError):
 
 
 class ModelFatalError(ModelError):
-    """Non-retryable model failure, or failure after streaming already started."""
+    """不可重试或已开始出流后的失败。
+
+    English: Non-retryable failures or errors after streaming started.
+    """
 
     def __init__(self, message: str, *, status_code: int | None = None) -> None:
         super().__init__(message)
@@ -42,11 +58,12 @@ class ModelFatalError(ModelError):
 
 
 class ModelProviderTimeout(ModelError):
-    """Raised when model streaming exceeds configured timeout."""
+    """作用：流式整体超时。"""
 
 
 @dataclass
 class ModelResponse:
+    """作用：流式终局：text、tool_calls、token 用量。"""
     text: str = ""
     tool_calls: list[dict[str, Any]] | None = None
     input_tokens: int = 0
@@ -57,28 +74,21 @@ class ModelResponse:
 
 @dataclass(frozen=True)
 class StreamActivity:
-    """Provider liveness / reasoning signal before text / final ModelResponse.
-
-    OpenAI-compatible models (e.g. DeepSeek) may stream ``reasoning_content`` or
-    ``tool_calls`` for a long time with ``content: null``. Gateway first-byte
-    timeout waits on the first yielded item — without this signal the harness
-    falsely times out while SSE bytes are still arriving.
-
-    When ``text`` is non-empty, the engine forwards it as ``turn.thinking.delta``
-    for ephemeral UI only (not assistant output / not projected into history).
-    """
+    """作用：SSE 存活/推理信号，避免误触首字节超时。"""
 
     kind: str = "sse"
     text: str = ""
 
 
 class AbortSignal(Protocol):
+    """作用：Provider 可 await 的取消协议。"""
     def is_set(self) -> bool: ...
 
     async def wait(self) -> None: ...
 
 
 class ModelProvider(Protocol):
+    """作用：Provider 必须实现的 stream 协议。"""
     def stream(
         self,
         *,
@@ -121,7 +131,7 @@ class _OrAbort:
 
 
 class StubModelProvider:
-    """Deterministic provider for CI and smoke tests without API keys."""
+    """作用：无 API Key 的确定性 CI/smoke 路由 Provider。"""
 
     async def stream(
         self,
@@ -973,7 +983,7 @@ def _extract_path(text: str) -> str | None:
 
 
 class ModelGateway:
-    """Thin harness around a provider: overall timeout, fast first-byte fail, retry."""
+    """作用：包装 Provider：超时、重试、abort、PII 脱敏。"""
 
     def __init__(self, provider: ModelProvider) -> None:
         self._provider = provider
@@ -1180,7 +1190,7 @@ def _backoff_seconds(attempt: int, exc: ModelTransientError) -> float:
 
 
 def classify_provider_exception(exc: BaseException) -> ModelError | BaseException:
-    """Map transport/HTTP failures into harness error types."""
+    """作用：映射 httpx/网络异常为 ModelError 子类。"""
     if isinstance(exc, ModelError):
         return exc
 
@@ -1223,6 +1233,7 @@ def classify_http_status(
     body: str = "",
     headers: Any | None = None,
 ) -> ModelError:
+    """作用：按状态码判断是否瞬态可重试。"""
     retry_after = _parse_retry_after(headers)
     snippet = (body or "")[:400]
     if status_code == 429 or status_code >= 500:

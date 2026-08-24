@@ -1,3 +1,5 @@
+"""fragment 类型检测。"""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -17,7 +19,13 @@ _DETECT_MARGIN = 0.035
 
 
 def fragment_scores(text: str, *, space: MetricSpace | None = None) -> dict[str, float]:
-    """L1 (or whitened) alignment of this span to each class prototype."""
+    """各 fragment 对齐分。
+    
+    参数:
+        text/space。
+    
+    返回:
+        dict。"""
     from app.writing.signals.signature import prototype_alignment, signature_vec
     from app.writing.signals.space import load_platform_space
 
@@ -34,7 +42,13 @@ def fragment_scores(text: str, *, space: MetricSpace | None = None) -> dict[str,
 
 
 def detect_fragment(text: str, *, space: MetricSpace | None = None) -> str:
-    """Nearest class prototype. Ambiguous → mixed. Lexical fallback if space is empty."""
+    """最近原型检测。
+    
+    参数:
+        text/space。
+    
+    返回:
+        str。"""
     body = (text or "").strip()
     if visible_chars(body) < 40:
         return "mixed"

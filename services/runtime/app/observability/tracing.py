@@ -1,4 +1,7 @@
+"""OpenTelemetry 追踪：OTLP 或控制台 span 导出。"""
+
 from __future__ import annotations
+
 
 import logging
 import os
@@ -7,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 def setup_tracing(*, service_name: str, enabled: bool) -> None:
+    """作用：初始化 OpenTelemetry TracerProvider。"""
     if not enabled:
         return
     try:
@@ -36,6 +40,7 @@ def setup_tracing(*, service_name: str, enabled: bool) -> None:
 
 
 def instrument_fastapi(app, *, enabled: bool) -> None:
+    """作用：FastAPI 自动 instrumentation。"""
     if not enabled:
         return
     try:

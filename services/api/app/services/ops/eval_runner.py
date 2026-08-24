@@ -1,4 +1,7 @@
-"""Async Golden case runner for Ops Eval Console (docs/29)."""
+"""Golden 用例异步 runner（Ops Eval Console，docs/29）。
+
+English: Async Golden case runner for Ops Eval Console (docs/29).
+"""
 
 from __future__ import annotations
 
@@ -192,6 +195,19 @@ async def run_case(
     model_override: dict[str, Any] | None,
     on_progress: ProgressCb | None = None,
 ) -> dict[str, Any]:
+    """执行单条 Golden case：fixture → StartTurn → 断言 → 结果 dict。
+
+    English: Run one Golden YAML case end-to-end with fixtures, turn, and assertions.
+
+    参数:
+        case: 解析后的 case dict（id/scenario/input/commands/assertions）。
+        workspace: 隔离 work_root。
+        model_mode / model_override: 模型选择与 per-turn 覆盖。
+        on_progress: 可选 SSE 进度回调。
+
+    返回:
+        含 ``status``、``error``、事件/断言详情的 case 结果 dict。
+    """
     case_id = str(case["id"])
     scenario_id = str(case["scenario_id"])
     message = str(case["input"]["message"])

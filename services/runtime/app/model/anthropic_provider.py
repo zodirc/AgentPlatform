@@ -1,4 +1,7 @@
+"""Anthropic Messages API 流式 Provider（SSE + prompt cache）。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import json
@@ -21,6 +24,7 @@ from app.settings import settings
 
 
 class AnthropicProvider:
+    """作用：Anthropic Messages 流式 API 封装。"""
     def __init__(
         self,
         *,

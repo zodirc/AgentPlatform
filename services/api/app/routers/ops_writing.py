@@ -22,6 +22,8 @@ router = APIRouter(
 
 
 class ScoreBody(BaseModel):
+    """Writing 打分沙箱请求体（proxied to runtime）。"""
+
     text: str | None = Field(default=None, max_length=50_000)
     fragment: str | None = None
     slug: str | None = Field(default=None, max_length=200)
@@ -29,6 +31,7 @@ class ScoreBody(BaseModel):
 
 
 def _proxy_runtime_error(exc: httpx.HTTPError) -> HTTPException:
+    """将 httpx 错误映射为 FastAPI HTTPException（保留 runtime 状态码）。"""
     if isinstance(exc, httpx.HTTPStatusError):
         detail: Any
         try:
@@ -44,6 +47,7 @@ def _proxy_runtime_error(exc: httpx.HTTPError) -> HTTPException:
 
 @router.get("/exemplars")
 async def list_writing_exemplars() -> dict[str, Any]:
+    """代理 runtime ``/internal/writing/exemplars`` 范例列表。"""
     try:
         return await RuntimeClient().writing_exemplars()
     except httpx.HTTPError as exc:
@@ -52,6 +56,7 @@ async def list_writing_exemplars() -> dict[str, Any]:
 
 @router.post("/score")
 async def score_writing_text(body: ScoreBody) -> dict[str, Any]:
+    """代理 runtime writing 打分（persist=False 沙箱）。"""
     try:
         return await RuntimeClient().writing_score(
             text=body.text,

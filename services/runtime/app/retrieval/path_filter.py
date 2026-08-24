@@ -1,4 +1,7 @@
-"""Normalize and apply search_sources path_prefix filters (docs/15)."""
+"""``search_sources`` 的 path_prefix 规范化与命中过滤（RAG 查询约束）。
+
+在 RAG 链路中的位置：工具层解析模型传入 prefix，检索后按 prefix 过滤 hits。
+"""
 
 from __future__ import annotations
 
@@ -10,13 +13,9 @@ SOURCES_ROOT = "sources"
 
 
 def normalize_path_prefix(path_prefix: str | None) -> tuple[str | None, str | None]:
-    """Return (normalized_prefix, error_hint).
+    """规范化 path_prefix；返回 ``(normalized, error_hint)``。
 
-    Frozen rules (RE0):
-    - None / blank → no filter
-    - Relative to workspace; may omit leading ``sources/`` (auto-prefixed)
-    - Must stay under ``sources/``; ``..`` and absolute paths are rejected
-    - Trailing slashes stripped; empty after normalize → error
+    规则：相对路径、自动补 ``sources/``、禁止 ``..`` 与绝对路径。
     """
     if path_prefix is None:
         return None, None
@@ -49,7 +48,7 @@ def normalize_path_prefix(path_prefix: str | None) -> tuple[str | None, str | No
 
 
 def path_matches_prefix(path: str, prefix: str) -> bool:
-    """True when ``path`` is exactly ``prefix`` or a descendant."""
+    """path 等于 prefix 或其子孙路径时为 True。"""
     p = path.replace("\\", "/").rstrip("/")
     pref = prefix.replace("\\", "/").rstrip("/")
     if not pref:
@@ -62,10 +61,7 @@ def filter_hits_by_path_prefix(
     *,
     path_prefix: str | None,
 ) -> tuple[list[Any], dict[str, Any]]:
-    """Filter hit objects/dicts by path_prefix.
-
-    Returns (filtered_hits, meta) where meta may include filters + hint on error.
-    """
+    """按 path_prefix 过滤 hit 列表；非法 prefix 时返回空列表与 hint。"""
     normalized, err = normalize_path_prefix(path_prefix)
     meta: dict[str, Any] = {}
     if err:

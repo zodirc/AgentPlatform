@@ -1,4 +1,4 @@
-"""Versioned style signature: extract + distance (no I/O)."""
+"""风格 signature 向量。"""
 
 from __future__ import annotations
 
@@ -64,6 +64,13 @@ Vec = tuple[float, ...]
 
 
 def extract_signature(text: str) -> dict[str, float]:
+    """特征 dict。
+    
+    参数:
+        text。
+    
+    返回:
+        dict。"""
     body = (text or "").strip()
     vis = max(visible_chars(body), 1)
     lines = [ln.strip() for ln in body.splitlines() if ln.strip()]
@@ -105,11 +112,25 @@ def extract_signature(text: str) -> dict[str, float]:
 
 
 def signature_vec(text: str) -> Vec:
+    """特征 Vec。
+    
+    参数:
+        text。
+    
+    返回:
+        Vec。"""
     feats = extract_signature(text)
     return tuple(float(feats[k]) for k in SIGNATURE_KEYS)
 
 
 def vec_from_mapping(raw: dict[str, float] | Sequence[float]) -> Vec:
+    """映射→Vec。
+    
+    参数:
+        raw。
+    
+    返回:
+        Vec。"""
     if isinstance(raw, dict):
         return tuple(float(raw.get(k, 0.0)) for k in SIGNATURE_KEYS)
     values = [float(x) for x in raw]
@@ -119,6 +140,13 @@ def vec_from_mapping(raw: dict[str, float] | Sequence[float]) -> Vec:
 
 
 def mean_vec(rows: Sequence[Vec], weights: Sequence[float] | None = None) -> Vec:
+    """加权均值。
+    
+    参数:
+        rows/weights。
+    
+    返回:
+        Vec。"""
     if not rows:
         return tuple(0.0 for _ in SIGNATURE_KEYS)
     if weights is None:
@@ -133,6 +161,13 @@ def mean_vec(rows: Sequence[Vec], weights: Sequence[float] | None = None) -> Vec
 
 
 def scale_vec(rows: Sequence[Vec], centroid: Vec) -> Vec:
+    """各维 scale。
+    
+    参数:
+        rows/centroid。
+    
+    返回:
+        Vec。"""
     n = max(len(rows), 1)
     if n < 2:
         return tuple(SCALE_FLOOR for _ in SIGNATURE_KEYS)
@@ -145,6 +180,13 @@ def scale_vec(rows: Sequence[Vec], centroid: Vec) -> Vec:
 
 
 def l1_alignment(a: Vec, b: Vec) -> float:
+    """L1 对齐分。
+    
+    参数:
+        a/b。
+    
+    返回:
+        float。"""
     if not a or not b or len(a) != len(b):
         return 0.0
     dist = sum(abs(x - y) for x, y in zip(a, b)) / len(a)
@@ -152,6 +194,13 @@ def l1_alignment(a: Vec, b: Vec) -> float:
 
 
 def whitened_alignment(a: Vec, centroid: Vec, scale: Vec) -> float:
+    """白化对齐分。
+    
+    参数:
+        a/centroid/scale。
+    
+    返回:
+        float。"""
     n = len(a)
     if n == 0 or n != len(centroid) or n != len(scale):
         return 0.0
@@ -165,6 +214,13 @@ def whitened_alignment(a: Vec, centroid: Vec, scale: Vec) -> float:
 
 
 def prototype_alignment(sig: Vec, centroid: Vec, scale: Vec, *, n: int) -> float:
+    """原型对齐。
+    
+    参数:
+        sig/centroid/scale/n。
+    
+    返回:
+        float。"""
     if n >= WHITEN_MIN_N:
         return whitened_alignment(sig, centroid, scale)
     return l1_alignment(sig, centroid)

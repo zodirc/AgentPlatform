@@ -1,4 +1,7 @@
+"""模型出站 URL 白名单：fail-closed 阻止未授权 base_url。"""
+
 from __future__ import annotations
+
 
 from urllib.parse import urlparse
 
@@ -15,20 +18,24 @@ _DEFAULT_BASE_URLS: dict[str, str] = {
 
 
 def normalize_base_url(url: str) -> str:
+    """作用：规范化 base URL（去尾斜杠）。"""
     return url.strip().rstrip("/")
 
 
 def default_base_url_for_provider(provider: str) -> str:
+    """作用：provider 默认 API host。"""
     return _DEFAULT_BASE_URLS.get(provider.lower(), "https://api.openai.com")
 
 
 def resolve_provider_base_url(provider: str, base_url: str | None) -> str:
+    """作用：显式 URL 或默认。"""
     if base_url and base_url.strip():
         return normalize_base_url(base_url)
     return default_base_url_for_provider(provider)
 
 
 def build_model_egress_allowlist() -> set[str]:
+    """作用：构建出站白名单集合。"""
     allowed: set[str] = {normalize_base_url(u) for u in _DEFAULT_BASE_URLS.values()}
     for raw in (settings.anthropic_base_url, settings.openai_base_url):
         if raw and raw.strip():
@@ -47,6 +54,7 @@ def _host_key(url: str) -> str:
 
 
 def is_model_egress_allowed(provider: str, base_url: str | None) -> bool:
+    """作用：判断是否允许访问该 base_url。"""
     if not settings.model_egress_enforce:
         return True
     if settings.model_mode in {"stub", "recorded"}:
@@ -60,7 +68,7 @@ def is_model_egress_allowed(provider: str, base_url: str | None) -> bool:
 
 
 def ensure_model_egress_allowed(provider: str, base_url: str | None) -> str:
-    """Return normalized base URL or raise ModelFatalError (fail closed, no outbound)."""
+    """作用：校验通过返回 URL，否则 ModelFatalError。"""
     resolved = resolve_provider_base_url(provider, base_url)
     if is_model_egress_allowed(provider, base_url):
         return resolved

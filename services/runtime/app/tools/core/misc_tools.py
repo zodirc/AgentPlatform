@@ -1,3 +1,9 @@
+"""杂项工具：``run_command``、``delegate``、引用校验与测试桩。
+
+``run_command`` 可重定向 pager/测试/SWE env 探针；成功退出后触发轻量 AST 扫描。
+``delegate`` 委托子 Agent；``check_citation`` 做本地 cite 存在性检查。
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,11 +12,13 @@ from app.settings import settings
 from app.tools.core.paths import _resolve_path, _workspace_root
 
 async def stub_echo(message: str, **_kwargs: Any) -> dict[str, Any]:
+    """测试桩：回显 message 前 120 字符摘要。"""
     preview = message[:120]
     return {"summary": f"[stub] processed: {preview}", "echo": message}
 
 
 def _make_cancel_checker(turn_id: object):
+    """构造 async 取消探针，绑定 ``turn_id`` 至 ``_check_cancel_flag``。"""
     from uuid import UUID
 
     from app.controller.turn_controller import _check_cancel_flag
@@ -18,12 +26,23 @@ def _make_cancel_checker(turn_id: object):
     tid = turn_id if isinstance(turn_id, UUID) else UUID(str(turn_id))
 
     async def check_cancel() -> tuple[bool, bool]:
+        """探针：返回 (已取消, …) 元组。"""
         return await _check_cancel_flag(tid)
 
     return check_cancel
 
 
 async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, Any]:
+    """在工作区根执行 shell 命令（或 simulate / 结构化重定向）。
+
+    参数:
+        command: shell 命令字符串。
+        turn_id: 可选，用于长命令取消探针。
+
+    返回:
+        含 ``stdout``/``stderr``/``exit_code``/``summary``；pager 与 SWE 测试会 ``redirected_from``。
+        成功退出时可能附加 ``ast_scan`` 轻量扫描状态。
+    """
     from app.structural.pager_redirect import resolve_pager_window, try_parse_pager_command
     from app.structural.test_run_redirect import (
         extract_sweb_env_argv,
@@ -134,6 +153,7 @@ async def run_command(command: str, turn_id=None, **_kwargs: Any) -> dict[str, A
         pass
     return attach_test_summary_for_run_command(result, command=command)
 async def check_citation(citation_id: str, source_path: str, **_kwargs: Any) -> dict[str, Any]:
+    """校验引用 id 是否出现在指定源文件路径或正文内。"""
     target = _resolve_path(source_path)
     if not target.exists():
         return {"citation_id": citation_id, "valid": False, "error": "source not found"}
@@ -146,6 +166,7 @@ async def check_citation(citation_id: str, source_path: str, **_kwargs: Any) -> 
         "summary": "citation valid" if valid else "citation not found in source",
     }
 async def slow_tool(duration_ms: int = 5000, turn_id=None, **_kwargs: Any) -> dict[str, Any]:
+    """可取消的慢工具桩：按 100ms 步进 sleep，用于测试 turn 取消。"""
     import asyncio
 
     from app.controller.turn_controller import _check_cancel_flag
@@ -166,6 +187,18 @@ async def delegate(
     paths: list[str] | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """启动子 Agent 委托任务（explore / generalPurpose 等）。
+
+    参数:
+        task: 委托 prompt。
+        agent_type: 子 agent 类型。
+        context: 附加上下文文本。
+        context_refs: 上下文引用 id 列表。
+        paths: 限定可读路径列表。
+
+    返回:
+        ``run_delegate`` 的完整结果 dict。
+    """
     from app.tools.delegate_runner import run_delegate
 
     return await run_delegate(

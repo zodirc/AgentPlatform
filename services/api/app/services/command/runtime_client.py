@@ -1,3 +1,9 @@
+"""Runtime 服务内部 HTTP 客户端（``X-Internal-Token`` + request_id 透传）。
+
+按 base_url 复用 ``httpx.AsyncClient``；封装 start/cancel turn、工具审批、
+索引同步、writing/verify 等 ``/internal/*`` 命令与查询。
+"""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -13,7 +19,14 @@ _clients: dict[str, httpx.AsyncClient] = {}
 
 
 async def close_runtime_clients() -> None:
-    """Close process-wide runtime connections during API shutdown."""
+    """关闭进程内全部 runtime HTTP 连接（API shutdown 钩子）。
+
+    参数:
+        无。
+
+    返回:
+        无。
+    """
     clients = list(_clients.values())
     _clients.clear()
     for client in clients:
@@ -21,11 +34,19 @@ async def close_runtime_clients() -> None:
 
 
 class RuntimeClient:
+    """指向单个 runtime replica 的异步命令/查询客户端。"""
+
     def __init__(self, *, base_url: str | None = None) -> None:
+        """构造客户端。
+
+        参数:
+            base_url: Runtime 根 URL；默认 ``settings.runtime_url``。
+        """
         self.base_url = (base_url or settings.runtime_url).rstrip("/")
         self._base_headers = {"X-Internal-Token": settings.internal_service_token}
 
     def _headers(self) -> dict[str, str]:
+        """合并内部 token 与当前 request_id 头。"""
         headers = dict(self._base_headers)
         request_id = get_request_id()
         if request_id is not None:
@@ -33,6 +54,7 @@ class RuntimeClient:
         return headers
 
     def _client(self) -> httpx.AsyncClient:
+        """按 base_url 获取或创建共享 AsyncClient。"""
         client = _clients.get(self.base_url)
         if client is None:
             client = httpx.AsyncClient(base_url=self.base_url, timeout=30.0)
@@ -47,6 +69,7 @@ class RuntimeClient:
         json: dict | None = None,
         params: dict | None = None,
     ) -> httpx.Response:
+        """POST 内部路径并在非 2xx 时 ``raise_for_status``。"""
         response = await self._client().post(
             path,
             json=json,
@@ -64,6 +87,7 @@ class RuntimeClient:
         timeout: float,
         params: dict | None = None,
     ) -> httpx.Response:
+        """GET 内部路径并在非 2xx 时 ``raise_for_status``。"""
         response = await self._client().get(
             path,
             params=params,
@@ -92,6 +116,23 @@ class RuntimeClient:
         model_override: dict | None = None,
         ops_eval: bool = False,
     ) -> None:
+        """向 runtime 下发 StartTurn 命令。
+
+        参数:
+            turn_id, run_id, session_id, scenario_id, message, trace_id: 命令主键与上下文。
+            client_request_id: API 侧幂等键（可选）。
+            plan_phase: Plan 轨道阶段（可选）。
+            work_id, work_root, owner_user_id: 工作区归属（可选）。
+            visibility_seed: 是否种子可见性索引。
+            model_mode, model_override: 仅 ops_eval 时透传模型覆盖。
+            ops_eval: Ops 评测模式标记。
+
+        返回:
+            无。
+
+        异常:
+            httpx.HTTPStatusError: runtime 返回错误状态。
+        """
         payload = {
             "turn_id": str(turn_id),
             "run_id": str(run_id),
@@ -129,6 +170,17 @@ class RuntimeClient:
         force: bool = False,
         timeout: float = 30.0,
     ) -> None:
+        """向 runtime 下发 CancelTurn。
+
+        参数:
+            turn_id, run_id, trace_id: 命令关联 id。
+            reason: 取消原因字符串。
+            force: 是否强制终止。
+            timeout: HTTP 超时秒数。
+
+        异常:
+            httpx.HTTPStatusError: runtime 拒绝或不可达。
+        """
         payload = {
             "turn_id": str(turn_id),
             "run_id": str(run_id),
@@ -148,6 +200,7 @@ class RuntimeClient:
         tool_call_id: str,
         trace_id: UUID,
     ) -> None:
+        """批准 waiting_approval 状态下的工具调用。"""
         payload = {
             "turn_id": str(turn_id),
             "run_id": str(run_id),
@@ -165,6 +218,7 @@ class RuntimeClient:
         trace_id: UUID,
         reason: str = "user_denied",
     ) -> None:
+        """拒绝 waiting_approval 状态下的工具调用。"""
         payload = {
             "turn_id": str(turn_id),
             "run_id": str(run_id),
@@ -182,6 +236,7 @@ class RuntimeClient:
         patch_id: str,
         trace_id: UUID,
     ) -> None:
+        """接受 runtime 提出的 patch 提议。"""
         payload = {
             "turn_id": str(turn_id),
             "run_id": str(run_id),
@@ -199,6 +254,7 @@ class RuntimeClient:
         trace_id: UUID,
         reason: str = "user_rejected",
     ) -> None:
+        """拒绝 patch 提议。"""
         payload = {
             "turn_id": str(turn_id),
             "run_id": str(run_id),
@@ -217,6 +273,16 @@ class RuntimeClient:
         wait: bool = True,
         timeout: float = 60.0,
     ) -> dict:
+        """触发 sources 索引同步；可选阻塞至完成。
+
+        参数:
+            work_id, work_root, owner_user_id: 工作区作用域。
+            wait: 两者均提供时是否等待完成。
+            timeout: HTTP 超时。
+
+        返回:
+            runtime JSON 响应 dict。
+        """
         params: dict[str, str] = {}
         if work_id is not None:
             params["work_id"] = str(work_id)
@@ -234,7 +300,11 @@ class RuntimeClient:
         return resp.json()
 
     async def cancel_sources_index(self, *, timeout: float = 15.0) -> dict:
-        """Abort in-flight / queued sources index sync on runtime."""
+        """中止 runtime 上进行中或排队的 sources 索引同步。
+
+        返回:
+            runtime JSON 响应 dict。
+        """
         resp = await self._post(
             "/internal/commands/cancel-sources-index",
             timeout=timeout,
@@ -249,7 +319,11 @@ class RuntimeClient:
         owner_user_id: UUID | None = None,
         timeout: float = 15.0,
     ) -> dict:
-        """Poll runtime ingestion progress (sync_progress.json via workspace API)."""
+        """轮询 ingestion 进度（workspace sync_progress.json）。
+
+        返回:
+            含进度字段的 dict。
+        """
         params: dict[str, str] = {}
         if work_id is not None:
             params["work_id"] = str(work_id)
@@ -265,6 +339,14 @@ class RuntimeClient:
         return resp.json()
 
     async def verify_pass(self, *, session_id: str | None = None) -> dict:
+        """触发离线 verify-pass（exports/drafts 校验）。
+
+        参数:
+            session_id: 可选限定会话。
+
+        返回:
+            报告 dict。
+        """
         params = {"session_id": session_id} if session_id else None
         resp = await self._post(
             "/internal/commands/verify-pass", timeout=60.0, params=params
@@ -272,6 +354,14 @@ class RuntimeClient:
         return resp.json()
 
     async def warmup_retrieval(self, *, prefix: str = "") -> dict:
+        """预热 retrieval 索引/cache。
+
+        参数:
+            prefix: 可选路径前缀过滤。
+
+        返回:
+            runtime 响应 dict。
+        """
         params = {"prefix": prefix} if prefix else None
         resp = await self._post(
             "/internal/commands/warmup-retrieval", timeout=15.0, params=params
@@ -279,6 +369,11 @@ class RuntimeClient:
         return resp.json()
 
     async def writing_exemplars(self, *, timeout: float = 15.0) -> dict:
+        """读取 writing 范例库列表。
+
+        返回:
+            exemplars JSON dict。
+        """
         resp = await self._get("/internal/writing/exemplars", timeout=timeout)
         return resp.json()
 
@@ -291,6 +386,16 @@ class RuntimeClient:
         prefs: dict | None = None,
         timeout: float = 30.0,
     ) -> dict:
+        """调用 runtime writing 打分接口。
+
+        参数:
+            text, fragment, slug: 待评内容与片段/范例 slug（互斥组合由 runtime 校验）。
+            prefs: 用户写作偏好权重。
+            timeout: HTTP 超时。
+
+        返回:
+            打分结果 dict。
+        """
         payload: dict = {}
         if text is not None:
             payload["text"] = text

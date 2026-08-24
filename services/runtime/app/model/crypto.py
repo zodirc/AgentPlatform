@@ -1,4 +1,7 @@
+"""模型 API Key 对称加解密（Fernet + app_secret/config_encryption_key）。"""
+
 from __future__ import annotations
+
 
 import base64
 import hashlib
@@ -29,6 +32,7 @@ def _fernet() -> Fernet:
 
 
 def decrypt_api_key(ciphertext: bytes) -> str:
+    """作用：解密 DB 中 Fernet 加密的 API Key。"""
     last: Exception | None = None
     for secret in _encryption_secrets():
         try:

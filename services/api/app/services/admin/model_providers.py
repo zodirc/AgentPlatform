@@ -1,6 +1,9 @@
-from __future__ import annotations
+"""管理端模型 Provider 配置 CRUD（``model_provider_profiles``）。
 
-from datetime import datetime
+API Key Fernet 加密存储；激活 profile 时 ``pg_notify`` 通知 runtime 热更新。
+"""
+
+from __future__ import annotations
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -10,6 +13,8 @@ from app.services.admin.crypto import encrypt_api_key, mask_api_key
 
 
 class CreateModelProviderRequest(BaseModel):
+    """创建 model provider 请求体。"""
+
     label: str = Field(min_length=1, max_length=128)
     provider: str = Field(min_length=1, max_length=32)
     model_name: str = Field(min_length=1, max_length=128)
@@ -20,6 +25,8 @@ class CreateModelProviderRequest(BaseModel):
 
 
 class UpdateModelProviderRequest(BaseModel):
+    """更新 model provider 请求体（字段均可选）。"""
+
     label: str | None = None
     provider: str | None = None
     model_name: str | None = None
@@ -29,6 +36,8 @@ class UpdateModelProviderRequest(BaseModel):
 
 
 class ModelProviderProfile(BaseModel):
+    """Model provider 响应（不含明文 API Key，仅 hint）。"""
+
     id: UUID
     label: str
     provider: str
@@ -66,6 +75,7 @@ def _hint_from_ciphertext(ciphertext) -> str:
 
 
 async def list_profiles(*, owner_user_id: UUID) -> list[ModelProviderProfile]:
+    """列出用户全部 provider profiles（按 updated_at 倒序）。"""
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -88,6 +98,7 @@ async def create_profile(
     *,
     owner_user_id: UUID,
 ) -> ModelProviderProfile:
+    """创建 profile；``activate`` 时先 deactivate 同用户其它 active profile。"""
     pool = await get_pool()
     ciphertext = encrypt_api_key(body.api_key)
     async with pool.acquire() as conn:
@@ -138,6 +149,7 @@ async def update_profile(
     *,
     owner_user_id: UUID,
 ) -> ModelProviderProfile | None:
+    """部分更新 profile；空 body 时仅读取当前行。"""
     pool = await get_pool()
     fields: list[str] = []
     values: list[object] = []
@@ -206,6 +218,7 @@ async def activate_profile(
     *,
     owner_user_id: UUID,
 ) -> ModelProviderProfile | None:
+    """激活指定 profile（单 active 约束）。"""
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
@@ -246,6 +259,14 @@ async def activate_profile(
 
 
 async def delete_profile(profile_id: UUID, *, owner_user_id: UUID) -> bool:
+    """删除 profile；active profile 不可删。
+
+    异常:
+        ValueError: 试图删除 active profile。
+
+    返回:
+        True 已删除；False 不存在。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """

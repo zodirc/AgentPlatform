@@ -1,9 +1,5 @@
-"""Agent workspace async AST index (docs/core/architecture.md · ast-indexer).
 
-Per-work_id symbol/boundary table — no vectors, no RAG. Memory projection is
-the only query surface; Postgres is a restart snapshot. Locate consumers weld
-into search_codebase (A3); this package owns store / projection / cold-start.
-"""
+"""Work 级 AST 符号索引子系统（cold/dirty/query/locate）。"""
 
 from __future__ import annotations
 

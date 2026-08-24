@@ -1,10 +1,7 @@
-"""Allowlist gate for run_tests (docs/31 · SB0 / E1).
+"""``run_tests`` 命令白名单门控（docs/31 · SB0 / E1）。
 
-Keeps agent profile ``run_tests: never`` (no extra Approve) while blocking
-arbitrary shell via the free-form ``command`` parameter.
-
-Allowed launchers are executed via argv exec (no ``shell=True``), so
-metacharacters like ``;|&`` cannot spawn side commands.
+在 agent profile ``run_tests: never``（免 Approve）下仍阻止 ``command`` 参数中的任意 shell。
+允许的启动器经 argv exec（无 ``shell=True``），``;|&`` 等元字符无法派生侧命令。
 """
 
 from __future__ import annotations
@@ -21,22 +18,30 @@ _NPX_RUNNERS = frozenset({"vitest", "jest"})
 
 @dataclass(frozen=True)
 class TestCommandGateResult:
+    """``gate_run_tests_command`` 解析结果：合法 argv 或 error 消息。"""
+
     argv: tuple[str, ...] | None
     error: str | None
 
     @property
     def allowed(self) -> bool:
+        """是否通过门控（argv 非空且无 error）。"""
         return self.argv is not None and self.error is None
 
 
 def _basename(token: str) -> str:
+    """取路径 token 的最终路径分量（basename）。"""
     return token.rsplit("/", 1)[-1]
 
 
 def gate_run_tests_command(command: str) -> TestCommandGateResult:
-    """Parse and validate a run_tests command string.
+    """解析并校验 ``run_tests`` 命令字符串。
 
-    Returns argv for ``create_subprocess_exec`` or an error message.
+    参数:
+        command: 原始命令（pytest / python -m pytest / npm test 等）。
+
+    返回:
+        合法时 ``argv`` 供 ``create_subprocess_exec``；否则 ``error`` 说明。
     """
     raw = (command or "").strip()
     if not raw:

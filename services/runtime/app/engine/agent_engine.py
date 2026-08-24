@@ -1,3 +1,24 @@
+"""AgentEngine：单 Turn 推理循环（组窗 → 模型流 → 工具 → checkpoint）。
+
+English: AgentEngine — per-turn reason loop (assemble → model stream → tools →
+checkpoint). Unaware of scenario names; tool surface and system prompt are
+injected by TurnController.
+
+职责边界
+--------
+- **本类**：``while step_count < max_steps``：ContextEngine 组窗、模型流式、
+  工具校验/执行/审批挂起、读文件去重策略、verify_receipt 旁路续跑、
+  step 墙钟超时、预算耗尽退出。
+- **不在本类**：``runs`` claim/租约、终态事件写库、Intake 斜杠编译 → Controller；
+  工具 handler 实现 → ``tools.*``；fill 阶梯策略细节 → ``context.policy``。
+
+终局语义
+--------
+「欠验证再跑一轮」走 ``verify_receipt`` 旁路 ``continue``，**不是**新的图节点。
+审批挂起时设置 ``self.pending_approval`` 并返回 ``\"waiting_approval\"``，
+由 Controller 落 checkpoint 后等待用户 approve/deny。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -41,11 +62,25 @@ CancelChecker = Callable[[], Awaitable[tuple[bool, bool]]]
 
 
 class StepTimeoutError(Exception):
-    """Raised when a step exceeds the configured wall-clock budget."""
+    """单步墙钟超时（分层超时之一）。
+
+    English: Raised when a step exceeds the configured wall-clock budget
+    (``settings.step_timeout_seconds``). Distinct from model provider timeouts.
+    """
 
 
 def _compact_edit_file_event_meta(result: dict[str, Any]) -> dict[str, Any]:
-    """Ops-facing CSI fields for edit_file tool.completed (slim; model still gets full result)."""
+    """从 ``edit_file`` 结果抽出 Ops 侧精简 meta（模型仍拿完整 result）。
+
+    English: Ops-facing CSI fields for edit_file tool.completed (slim; model still
+    gets full result). Truncates long strings and collapses nested impact/checks.
+
+    参数:
+        result: edit_file handler 返回的字典（含 impact / checks / related_tests 等）。
+
+    返回:
+        可写入 ``tool.completed`` 事件的瘦字段集。
+    """
     out: dict[str, Any] = {}
     if "applies" in result:
         out["applies"] = bool(result.get("applies"))
@@ -121,7 +156,7 @@ def _compact_edit_file_event_meta(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compact_test_summary_event_meta(result: dict[str, Any]) -> dict[str, Any]:
-    """Ops-facing Wave 4 W10 compact test_summary (no stdout dump)."""
+    """从 run_tests 结果抽出 Ops 侧 test_summary 精简 meta（不含 stdout）。"""
     summary = result.get("test_summary")
     if not isinstance(summary, dict) or not summary:
         return {}
@@ -144,7 +179,7 @@ def _compact_test_summary_event_meta(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _compact_locate_event_meta(result: dict[str, Any]) -> dict[str, Any]:
-    """Ops-facing Locate fields for grep / search_codebase tool.completed."""
+    """从 grep / search_codebase 结果抽出 Locate 相关 tool.completed 字段。"""
     out: dict[str, Any] = {}
     if result.get("redirected_from"):
         out["redirected_from"] = str(result.get("redirected_from"))[:64]
@@ -217,6 +252,7 @@ _EVENT_STR_TRUNC_SUFFIX = "\n...[truncated]"
 
 
 def _clamp_event_str(value: Any, max_len: int) -> str:
+    """截断事件字符串以符合 jsonschema maxLength（保留 ``...[truncated]`` 后缀）。"""
     text = str(value or "")
     if max_len < 0:
         max_len = 0
@@ -235,7 +271,7 @@ _REWRITE_POLICIES = frozenset({"propose_patch", "draft_ok"})
 
 
 def _signal_delta_sum(items: Any) -> float | None:
-    """Sum hit deltas from rewards/penalties. None if the field is absent."""
+    """累加 writing_signals 中 rewards/penalties 的 delta；字段缺失时 None。"""
     if not isinstance(items, list):
         return None
     total = 0.0
@@ -255,7 +291,7 @@ def _signal_delta_sum(items: Any) -> float | None:
 
 
 def _compact_writing_signals_event_meta(result: dict[str, Any]) -> dict[str, Any]:
-    """Ops-facing writing probes for tool.completed (no full writing_signals on the bus)."""
+    """从写作工具结果抽出 net_signal / rewrite_policy 等 Ops 探针（不上总线全文）。"""
     signals = result.get("writing_signals")
     if not isinstance(signals, dict) or not signals:
         return {}
@@ -316,7 +352,7 @@ def _tool_completed_base(
     summary: Any = "",
     **extra: Any,
 ) -> dict[str, Any]:
-    """Build a schema-safe tool.completed payload (no illegal keys; clamped strings)."""
+    """构造符合 schema 的 tool.completed 基座 payload（非法键剔除、字符串截断）。"""
     payload: dict[str, Any] = {
         "tool_call_id": tool_call_id,
         "tool_name": tool_name,
@@ -334,7 +370,7 @@ def _tool_completed_base(
 
 
 def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, Any] | None:
-    """Project tool results onto closed domain-event schemas (avoid additionalProperties / maxLength kills)."""
+    """把工具结果投影到封闭域事件 schema（避免 additionalProperties / maxLength 杀 Turn）。"""
     if event_type == "turn.plan":
         items: list[dict[str, str]] = []
         raw_items = result.get("items")
@@ -381,6 +417,7 @@ def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, 
 
 
 def _tool_batch_outcome(summary: str) -> str:
+    """把控制流 outcome（waiting_approval 等）编码为 step 可识别的 summary 前缀。"""
     text = str(summary or "")
     if text in _CONTROL_OUTCOMES:
         return f"tool_summary:{text}"
@@ -388,6 +425,12 @@ def _tool_batch_outcome(summary: str) -> str:
 
 
 class AgentEngine:
+    """单 Turn 推理循环执行器（不写库 claim，只通过 ``write_event`` 吐事件）。
+
+    English: Owns the per-turn while-loop. Lease/claim and terminal DB status live
+    in TurnController; this class only mutates ``TurnState`` and emits events.
+    """
+
     def __init__(
         self,
         *,
@@ -400,6 +443,22 @@ class AgentEngine:
         context_window_tokens: int | None = None,
         volatile_context: str = "",
     ) -> None:
+        """注入本 Turn 的模型网关、工具面与组窗策略。
+
+        English: Bind gateway, tool surface, system/volatile prompts, and cancel hook
+        for one turn. ``system_prompt`` should be byte-stable across steps for
+        provider prefix caching; put cards/plan into ``volatile_context``.
+
+        参数:
+            gateway: 模型流式调用网关（可 ``abort_stream``）。
+            tools: 已经过 ``tool_scope`` 的 ToolSpec 列表。
+            system_prompt: 场景稳定 system 前缀（跨 step 求字节稳定）。
+            write_event: 追加 turn_events 的回调（由 Controller 注入）。
+            check_cancel: 异步查询 ``(cancelled, force)`` 取消标志。
+            on_step_checkpoint: 每步结束后可选持久化 checkpoint。
+            context_window_tokens: 覆盖默认窗大小；影响 fill 阶梯分母。
+            volatile_context: 易变垫（卡片/计划等），不焊进可缓存 system。
+        """
         self._gateway = gateway
         self._executor = ToolExecutor(tools)
         self._system_prompt = system_prompt
@@ -421,10 +480,13 @@ class AgentEngine:
         self._openai_tools = self._tools_payload(tools)
 
     async def _abort_gateway_when_cancelled(self, state: TurnState) -> None:
-        """Poll cancel while blocked on provider chunks (incl. long thinking gaps).
+        """在阻塞读模型 chunk 时轮询取消（约 50ms）；命中则 abort 流。
 
-        Interval matches tool cancel (~50ms). Does not run on the happy-path
-        critical path between tokens — only a background sleeper until cancel.
+        English: Background cancel poller while awaiting model stream chunks. On hit,
+        sets ``state.cancelled`` / ``cancel_force`` and calls ``gateway.abort_stream``.
+
+        参数:
+            state: 当前 Turn 可变状态；会写入 cancelled / cancel_force。
         """
         while not state.cancelled:
             cancelled, force = await self._check_cancel()
@@ -439,6 +501,10 @@ class AgentEngine:
 
     @staticmethod
     def _tools_payload(tools: list[ToolSpec]) -> list[dict[str, Any]]:
+        """把 ToolSpec 转成模型网关 ``tools[]`` 形状。
+
+        English: Map ToolSpec → {name, description, input_schema} for the gateway.
+        """
         return [
             {
                 "name": t.name,
@@ -449,6 +515,11 @@ class AgentEngine:
         ]
 
     def _scoped_openai_tools(self, state: TurnState) -> list[dict[str, Any]]:
+        """按晚期策略可选收缩 ``tools[]``（默认不改 schema，仅兼容开关）。
+
+        English: Optionally drop late-stage tools from the schema when
+        ``stage_tool_scope_mutate_schema`` is on; prefer runtime block for cache stability.
+        """
         from app.tools.bootstrap import stage_tool_scope
 
         scoped = stage_tool_scope(
@@ -460,6 +531,21 @@ class AgentEngine:
         return self._tools_payload(scoped)
 
     async def run(self, state: TurnState) -> str | None:
+        """执行 while 循环直至终稿、取消、失败或 ``waiting_approval``。
+
+        English: Main agent loop. Each iteration: cancel/budget checks → assemble
+        context → stream model → handle tool_uses (validate / approve / execute) →
+        optional verify_receipt continue. Returns final summary text, the sentinel
+        ``\"waiting_approval\"`` when paused for user approval, or ``None`` when
+        cancel/budget paths leave Controller to finalize from ``state`` flags.
+
+        参数:
+            state: 可变 Turn 状态（messages、步数、预算、验证欠账、delivery 等）。
+
+        返回:
+            终稿摘要字符串；审批挂起为 ``\"waiting_approval\"``；
+            取消/预算耗尽等路径可能为 ``None``（终态由 Controller 根据 state 收尾）。
+        """
         final_summary: str | None = None
         self._search_sources_calls = 0
         self._evidence_citation_ids = set()
@@ -815,11 +901,13 @@ class AgentEngine:
 
     @staticmethod
     def _tool_cache_key(tool_name: str, arguments: dict[str, Any]) -> str:
+        """只读工具结果缓存键：``tool_name:sorted_json(arguments)``。"""
         return f"{tool_name}:{json.dumps(arguments, sort_keys=True, default=str)}"
 
     def _lookup_tool_cache(
         self, tool_name: str, arguments: dict[str, Any]
     ) -> dict[str, Any] | None:
+        """命中只读工具缓存；重复调用 ≥2 次时附加 _note 并记 misuse 指标。"""
         if tool_name not in _CACHEABLE_TOOLS:
             return None
         cache_key = self._tool_cache_key(tool_name, arguments)
@@ -843,6 +931,7 @@ class AgentEngine:
     def _store_tool_cache(
         self, tool_name: str, arguments: dict[str, Any], result: dict[str, Any]
     ) -> None:
+        """成功且无 error 的只读工具结果写入本 Turn 内存缓存。"""
         if tool_name not in _CACHEABLE_TOOLS or result.get("error"):
             return
         cache_key = self._tool_cache_key(tool_name, arguments)
@@ -850,6 +939,7 @@ class AgentEngine:
         self._tool_repeat_counts[cache_key] = 1
 
     def _budget_exceeded(self, state: TurnState) -> bool:
+        """本 Turn 累计 token 是否达到 ``turn_token_budget``（0 表示不限制）。"""
         limit = settings.turn_token_budget
         if limit <= 0:
             return False
@@ -857,6 +947,7 @@ class AgentEngine:
         return total >= limit
 
     async def _complete_step(self, step_index: int, started_at: float, outcome: str) -> None:
+        """写入 ``step.completed`` 事件（含墙钟 duration_ms）。"""
         await self._write_event(
             event_type="step.completed",
             payload={
@@ -875,7 +966,17 @@ class AgentEngine:
         step_index: int,
         ensure_step_budget: Callable[[], Awaitable[None]] | None = None,
     ) -> str | None:
-        """Run tool_calls: consecutive readonly tools in parallel; mutating serial."""
+        """顺序执行一批 tool_call：连续只读并行，变更类串行。
+
+        参数:
+            tool_calls: 模型本步产出的 tool_use 列表（保序）。
+            state: 可变 Turn 状态。
+            step_index: 当前步序号（写事件用）。
+            ensure_step_budget: 可选墙钟预算检查（超则 StepTimeoutError）。
+
+        返回:
+            末条 summary；遇 CANCELLED / waiting_approval / TERMINATE 时早退。
+        """
         index = 0
         last_summary: str | None = None
         while index < len(tool_calls):
@@ -978,7 +1079,7 @@ class AgentEngine:
     def _merge_readonly_read_registry(
         call: dict[str, Any], isolated: TurnState, state: TurnState
     ) -> None:
-        """Apply a completed parallel read's registry effect in call order."""
+        """把并行 read_file 完成的 read_registry 效果按 call 顺序合并回主 state。"""
         if call.get("name") != "read_file":
             return
         tool_call_id = call.get("id")
@@ -1036,6 +1137,18 @@ class AgentEngine:
         ensure_step_budget: Callable[[], Awaitable[None]] | None = None,
         counters: dict[str, int] | None = None,
     ) -> str | None:
+        """执行单个 tool_call：缓存、gate、executor、事件与 verify_receipt 钩子。
+
+        参数:
+            call: 含 id / name / input 的 tool_use 块。
+            state: 主 Turn 状态（并行只读时会用 isolated 副本）。
+            step_index: 写 step 级事件用。
+            ensure_step_budget: 步墙钟预算检查。
+            counters: 并行批次注入的 per-call 计数器种子。
+
+        返回:
+            工具 summary 或控制 outcome（CANCELLED / waiting_approval / TERMINATE）。
+        """
         tool_call_id = call["id"]
         tool_name = call["name"]
         arguments = call.get("input", {})
@@ -1756,6 +1869,7 @@ class AgentEngine:
         return _tool_batch_outcome(str(summary))
 
     def _ingest_evidence(self, tool_name: str, result: dict[str, Any]) -> None:
+        """把 search_sources / check_citation 命中的 citation_id 记入本 Turn 证据集。"""
         if tool_name == "search_sources":
             hits = result.get("hits")
             if isinstance(hits, list):
@@ -1776,6 +1890,7 @@ class AgentEngine:
         arguments: dict[str, Any],
         result: dict[str, Any],
     ) -> None:
+        """扫描写作/导出工具正文中的引用，标注未在本 Turn 证据集中验证的 citation。"""
         if result.get("error") or result.get("status") in {"approval_required", "timeout", "cancelled"}:
             return
         texts: list[str] = []
@@ -1820,4 +1935,5 @@ class AgentEngine:
 
 
 def _chunk_text(text: str, size: int = 16) -> list[str]:
+    """按固定字符宽度切块（流式 delta 模拟用）。"""
     return [text[i : i + size] for i in range(0, len(text), size)]

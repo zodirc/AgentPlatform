@@ -1,4 +1,7 @@
-"""Optional runtime recreate for Ops Eval (docs/29)."""
+"""Optional runtime recreate for Ops Eval (docs/29).
+
+English: Optional runtime recreate for Ops Eval (docs/29).
+"""
 
 from __future__ import annotations
 
@@ -18,6 +21,11 @@ RUNTIME_CONTAINER = "agent-runtime"
 
 
 def docker_socket_available() -> bool:
+    """判断 Ops 是否可调用 Docker（CLI + 配置的 unix socket + ``docker info``）。
+
+    返回:
+        True 表示 overview/restart/recreate 等 docker 操作可用。
+    """
     if shutil.which("docker") is None:
         return False
     sock = Path(settings.ops_eval_docker_socket)
@@ -176,6 +184,14 @@ def _compose_recreate(inspect: dict) -> None:
 
 
 def recreate_runtime() -> None:
+    """评测前可选重建 ``agent-runtime`` 容器（docs/29 restart_runtime）。
+
+    优先 ``docker compose up --force-recreate runtime``；失败则 ``docker restart``。
+    阻塞直至 health 就绪或超时。
+
+    异常:
+        RuntimeError: docker 不可用、compose 失败或就绪超时。
+    """
     if not docker_socket_available():
         raise RuntimeError("docker_socket_unavailable")
 

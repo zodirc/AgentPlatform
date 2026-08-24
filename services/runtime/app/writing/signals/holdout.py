@@ -1,9 +1,4 @@
-"""Train/holdout split of the platform exemplar bank (report only).
-
-Does not change production prefs, net, or the live prototype space.
-Eval-only passages live in ``exemplars_holdout/`` and are never loaded by
-``load_platform_exemplars``.
-"""
+"""train/holdout 评估报告。"""
 
 from __future__ import annotations
 
@@ -60,6 +55,13 @@ JINJIUYE_PROBE = (
 
 
 def split_of_work(work: str) -> str | None:
+    """作品 split。
+    
+    参数:
+        work。
+    
+    返回:
+        train|holdout|None。"""
     name = (work or "").strip()
     if name in TRAIN_WORKS:
         return "train"
@@ -69,6 +71,13 @@ def split_of_work(work: str) -> str | None:
 
 
 def merge_banks(*banks: dict[str, tuple[Exemplar, ...]]) -> dict[str, tuple[Exemplar, ...]]:
+    """合并 bank。
+    
+    参数:
+        banks。
+    
+    返回:
+        dict。"""
     out: dict[str, list[Exemplar]] = {}
     seen: set[tuple[str, str]] = set()
     for bank in banks:
@@ -83,7 +92,13 @@ def merge_banks(*banks: dict[str, tuple[Exemplar, ...]]) -> dict[str, tuple[Exem
 
 
 def load_eval_holdout_exemplars() -> dict[str, tuple[Exemplar, ...]]:
-    """Passages used only for the holdout report. Not the live prototype bank."""
+    """eval holdout 范文。
+
+    参数:
+        无。
+
+    返回:
+        dict。"""
     bank = load_exemplars_dir(_EVAL_DIR, scope="holdout_eval")
     bad: list[str] = []
     for samples in bank.values():
@@ -96,7 +111,13 @@ def load_eval_holdout_exemplars() -> dict[str, tuple[Exemplar, ...]]:
 
 
 def load_holdout_eval_bank() -> dict[str, tuple[Exemplar, ...]]:
-    """Live bank ∪ eval-only holdout. Train still comes only from live-bank works."""
+    """live∪holdout bank。
+
+    参数:
+        无。
+
+    返回:
+        dict。"""
     return merge_banks(load_platform_exemplars(), load_eval_holdout_exemplars())
 
 
@@ -105,6 +126,13 @@ def filter_exemplars(
     *,
     split: str,
 ) -> dict[str, tuple[Exemplar, ...]]:
+    """按 split 过滤。
+    
+    参数:
+        bank/split。
+    
+    返回:
+        dict。"""
     if split not in {"train", "holdout"}:
         raise ValueError(f"split must be train|holdout, got {split!r}")
     allowed = TRAIN_WORKS if split == "train" else HOLDOUT_WORKS
@@ -118,6 +146,13 @@ def filter_exemplars(
 
 
 def unlabeled_works(bank: dict[str, tuple[Exemplar, ...]] | None = None) -> list[str]:
+    """未标注作品。
+    
+    参数:
+        bank。
+    
+    返回:
+        list。"""
     src = bank if bank is not None else load_platform_exemplars()
     found: set[str] = set()
     for samples in src.values():
@@ -197,7 +232,13 @@ def summarize_holdout(
     prefs: dict[str, Any] | None = None,
     bank: dict[str, tuple[Exemplar, ...]] | None = None,
 ) -> dict[str, Any]:
-    """Train vs holdout signature/composite report. Does not write prefs."""
+    """holdout 报告。
+    
+    参数:
+        prefs/bank。
+    
+    返回:
+        dict。"""
     src = bank if bank is not None else load_holdout_eval_bank()
     unknown = unlabeled_works(src)
     if unknown:

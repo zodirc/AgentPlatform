@@ -1,5 +1,7 @@
 """Admin UX signals — read-only aggregate from turn_events (docs/28 PX1d).
 
+English: Admin UX signals — read-only aggregate from turn_events (docs/28 PX1d).
+
 User-triggered / ops path only. Never called from StartTurn or SSE.
 """
 
@@ -87,6 +89,18 @@ async def aggregate_ux_signals(
     owner_user_id: UUID | None = None,
     target_day: str | None = None,
 ) -> dict[str, Any]:
+    """从 turn_events 聚合 UX 信号报告（docs/28 PX1d，只读 Admin 路径）。
+
+    参数:
+        lookback_days: 拉取事件回溯天数（上限 50k 行）。
+        min_sample: ``build_report`` 最小样本阈值。
+        threshold_mult: 异常检测倍数。
+        work_id / owner_user_id: 可选范围过滤。
+        target_day: 可选目标日（传给 ``build_report``）。
+
+    返回:
+        ``build_report`` 结果并附加 ``source``/``event_count``/``scope`` 元数据。
+    """
     events = await fetch_signal_events(
         lookback_days=lookback_days,
         work_id=work_id,

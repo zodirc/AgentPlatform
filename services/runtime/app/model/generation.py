@@ -1,4 +1,7 @@
+"""生成参数与 OpenAI-compat reasoning/tool_choice 兼容层。"""
+
 from __future__ import annotations
+
 
 from dataclasses import dataclass
 
@@ -12,10 +15,7 @@ _OPENAI_COMPAT_STRIP_STEPS: tuple[tuple[str, ...], ...] = (
 
 
 def scaled_output_reserve_tokens(window_tokens: int | None = None) -> int:
-    """Scale output reserve / max_tokens with context window (default 128K → 30K).
-
-    ``MODEL_MAX_OUTPUT_TOKENS`` (when > 0) is an absolute override and skips scaling.
-    """
+    """作用：按 context window 缩放 max_output_tokens。"""
     if settings.model_max_output_tokens > 0:
         return max(1, int(settings.model_max_output_tokens))
     ref_w = max(1, int(settings.context_output_scale_ref_window_tokens))
@@ -47,7 +47,7 @@ def _temperature_for_scenario(scenario_id: str | None) -> float | None:
 
 
 def normalize_reasoning_effort(raw: str | None) -> str:
-    """Return a known effort token, ``auto``, or empty (treat as auto)."""
+    """作用：规范化 reasoning effort 枚举。"""
     token = (raw or "").strip().lower()
     if token in _REASONING_EFFORTS or token == "auto":
         return token
@@ -55,7 +55,7 @@ def normalize_reasoning_effort(raw: str | None) -> str:
 
 
 def openai_compat_model_family(model_name: str) -> str:
-    """Coarse family for OpenAI-compat extras. ``other`` must not get them by default."""
+    """作用：区分 gpt5/deepseek/other 族。"""
     name = (model_name or "").strip().lower()
     if name.startswith("gpt-5") or "/gpt-5" in name:
         return "gpt5"
@@ -70,12 +70,7 @@ def apply_openai_compat_reasoning(
     model_name: str,
     gen: "GenerationParams",
 ) -> None:
-    """Attach thinking / reasoning_effort for families that actually use them.
-
-    GPT-5.x public numbers assume ``reasoning.effort`` above Luna's medium default.
-    DeepSeek V4 Flash matches the bench client: ``thinking`` on + ``reasoning_effort``.
-    Unknown models stay untouched unless the operator set an explicit effort.
-    """
+    """作用：注入 thinking/reasoning_effort 字段。"""
     requested = normalize_reasoning_effort(gen.reasoning_effort)
     if requested == "none":
         return
@@ -94,7 +89,7 @@ def apply_openai_compat_reasoning(
 
 
 def strip_next_openai_compat_field(payload: dict) -> bool:
-    """Drop the next optional chat.completions key rejected by relays. True if stripped."""
+    """作用：relay 400 时剥离可选字段。"""
     for group in _OPENAI_COMPAT_STRIP_STEPS:
         if any(key in payload for key in group):
             for key in group:
@@ -104,6 +99,7 @@ def strip_next_openai_compat_field(payload: dict) -> bool:
 
 
 def openai_compat_retryable_status(*, status_code: int, body: str) -> bool:
+    """作用：判断是否值得剥离后重试。"""
     if status_code in {400, 422}:
         return True
     lowered = (body or "").lower()
@@ -115,7 +111,7 @@ def openai_compat_retryable_status(*, status_code: int, body: str) -> bool:
 
 @dataclass(frozen=True)
 class GenerationParams:
-    """Per-turn generation strategy injected into providers (H1)."""
+    """作用：per-turn 生成策略 dataclass（H1）。"""
 
     temperature: float | None = None
     top_p: float | None = None
@@ -142,7 +138,7 @@ class GenerationParams:
 
 
 def apply_tool_choice(payload: dict, tool_choice: str, *, style: str) -> None:
-    """Mutate provider payload with tool_choice when tools are present."""
+    """作用：写入 anthropic/openai 风格 tool_choice。"""
     if tool_choice == "auto":
         return
     if style == "anthropic":

@@ -1,4 +1,7 @@
-"""Ops model envelope read API (HM4)."""
+"""Ops model envelope read API (HM4).
+
+只读观测 ``model_request_envelopes`` 采样；OPS_TEST_SECRET 保护，不进入模型上下文。
+"""
 
 from __future__ import annotations
 
@@ -125,6 +128,18 @@ async def list_recent_envelope_turns(
 
 @router.get("/turns/{turn_id}")
 async def get_turn_envelopes(turn_id: UUID) -> dict[str, Any]:
+    """返回指定 turn 的全部 model request envelope 记录。
+
+    参数:
+        turn_id: Turn UUID。
+
+    返回:
+        ``{ turn_id, count, envelopes[] }``（含可选 full envelope JSON）。
+
+    异常:
+        HTTP 404: turn 不存在且无 envelope。
+        HTTP 503: 表未迁移。
+    """
     pool = await get_pool()
     try:
         rows = await pool.fetch(

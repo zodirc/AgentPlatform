@@ -1,4 +1,7 @@
+"""月度 token 用量聚合与限额/阈值告警。"""
+
 from __future__ import annotations
+
 
 import logging
 
@@ -10,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 async def check_monthly_token_alert() -> None:
+    """作用：月度 token 聚合与告警。"""
     limit = settings.monthly_token_limit
     if limit <= 0:
         return

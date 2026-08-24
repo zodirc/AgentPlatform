@@ -1,3 +1,10 @@
+"""写作场景工具：分章草稿、大纲、计划与 turn manifest 管理。
+
+草稿默认写入可见 ``drafts/``；历史与 manifest 在 ``.agent/work/`` 下。
+``draft_section`` 支持 monofile/sections 两种 layout、occupy 归档与 writing_signals；
+``update_plan``/``update_outline`` 服务规划阶段与用户确认流程。
+"""
+
 from __future__ import annotations
 
 import json
@@ -230,6 +237,22 @@ async def draft_section(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """写入或更新某一章节草稿，并更新 turn manifest 与 writing_signals。
+
+    参数:
+        section_id: 章节 ID（映射为 ``drafts/{section_id}.md`` 或 monofile 内区块）。
+        content: 章节正文。
+        turn_id: 可选 Turn ID，用于 manifest/history 作用域。
+        session_id: 兼容参数，manifest 已 work-scoped。
+        **_kwargs: ``layout``/``occupy``/``fragment``/``turn_user_text`` 等写作控制项。
+
+    返回:
+        ``status=drafted`` 及 ``path``/``manifest_path``/``writing_signals`` 等；
+        已成稿章节拒绝整章重写时返回 ``rewrite_via_patch`` 错误。
+
+    说明:
+        ``occupy_fresh`` 会归档旧 occupied 文档并重置 manifest sections；monofile 用 ``upsert_section``。
+    """
     from app.writing.manuscript import (
         draft_manuscript_rel,
         legacy_draft_manuscript_rel,
@@ -403,6 +426,20 @@ async def update_plan(
     turn_id=None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """更新 Turn 进度/计划条目列表，规划阶段可强制全部 pending 等待用户确认。
+
+    参数:
+        items: 计划项 dict 列表（``id``/``title``/``status`` 等）。
+        summary: 可选摘要；缺省时按 phase 生成。
+        turn_id: 用于检测重复提交（unchanged 短路）。
+        **_kwargs: ``plan_phase=planning`` 时全部 pending 并设 ``awaiting_consent``。
+
+    返回:
+        ``plan_id``/``items``/``summary``；未变化时 ``unchanged=True``。
+
+    说明:
+        软约束：至多一个 ``in_progress``，多余项 demote 为 pending。
+    """
     plan_id = f"plan-{uuid4().hex[:8]}"
     normalized: list[dict[str, str]] = []
     in_progress_count = 0
@@ -473,10 +510,18 @@ async def update_outline(
     mode: str = "replace",
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Replace or append ``outline.md``.
+    """写入 ``outline.md``：replace 或 append；replace 时对灾难性缩短做保护。
 
-    ``mode=append`` is the safe path for long outlines / batch continuation.
-    Catastrophic shrink on ``replace`` is rejected unless ``force=true``.
+    参数:
+        content: 大纲 Markdown 内容。
+        mode: ``replace`` 或 ``append``（长大纲续写推荐 append）。
+        **_kwargs: ``force=true`` 可绕过 replace 缩短拒绝；``turn_id``/``session_id``/``occupy`` 等同 draft。
+
+    返回:
+        写入结果 dict；replace 且新内容远小于旧文件时返回 error，除非 ``force``。
+
+    说明:
+        ``occupy_fresh`` 行为与 ``draft_section`` 一致，可归档旧 occupied 写作文档。
     """
     path = "outline.md"
     target = _resolve_path(path)

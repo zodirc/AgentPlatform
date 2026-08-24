@@ -1,4 +1,7 @@
+"""结构能力适配：LSP diagnostic/definition/references 与 Python 收集。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import logging
@@ -19,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 def structural_available() -> bool:
-    """Language-server lane is part of agent; always considered available at the API layer."""
+    """作用：结构 lane 在 API 层恒为可用。"""
     return True
 
 
@@ -85,6 +88,7 @@ def _issue_from_lsp(diag: dict[str, Any], *, rel_path: str) -> Issue:
 
 
 def collect_python_files(root: Path, *, max_files: int, max_depth: int = 4) -> list[Path]:
+    """作用：收集工作区内 Python 文件（深度/数量上限）。"""
     if root.is_file():
         return [root] if language_for_path(root) == "python" else []
     if not root.is_dir():
@@ -149,7 +153,7 @@ async def get_diagnostics(
     timeout_s: float | None = None,
     turn_id: object | None = None,
 ) -> dict[str, Any]:
-    """LSP diagnostics for a file or bounded directory. Degrades cleanly."""
+    """作用：并发 LSP+ruff 诊断。"""
     timeout = timeout_s if timeout_s is not None else float(settings.structural_diag_timeout_s)
     max_files = max(1, int(settings.structural_max_files_per_call))
     files = collect_python_files(target, max_files=max_files)
@@ -292,6 +296,7 @@ async def goto_definition(
     timeout_s: float | None = None,
     turn_id: object | None = None,
 ) -> dict[str, Any]:
+    """作用：LSP definition → Location 列表。"""
     timeout = timeout_s if timeout_s is not None else float(settings.structural_nav_timeout_s)
     meta: dict[str, Any] = {
         "provider": None,
@@ -412,6 +417,7 @@ async def find_references(
     timeout_s: float | None = None,
     turn_id: object | None = None,
 ) -> dict[str, Any]:
+    """作用：LSP references 按文件聚合。"""
     timeout = timeout_s if timeout_s is not None else float(settings.structural_nav_timeout_s)
     max_refs = max(1, int(settings.structural_max_refs))
     meta: dict[str, Any] = {
@@ -521,7 +527,7 @@ async def find_references(
 
 
 async def prewarm(workspace_root: Path) -> None:
-    """Best-effort background initialize — never awaited on StartTurn."""
+    """作用：预热 LSP session。"""
     if not settings.structural_prewarm:
         return
     try:

@@ -1,3 +1,9 @@
+"""工具调用参数校验与引用标记提取。
+
+在 handler 执行前，用 JSON Schema（Draft 2020-12）对模型提交的 tool arguments 做确定性校验；
+失败时返回结构化 ``invalid_arguments`` 载荷，成功返回 ``None``。全程毫秒级、不调用 LLM。
+"""
+
 from __future__ import annotations
 
 from typing import Any
@@ -12,9 +18,16 @@ def validate_tool_arguments(
     arguments: Any,
     parameters: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Return a structured invalid_arguments payload, or None when valid.
+    """校验单次 tool call 的 arguments 是否符合注册表中的 JSON Schema。
 
-    Kept deterministic and millisecond-scale (no LLM). Handlers are not called on failure.
+    参数:
+        tool_name: 工具名，写入错误载荷便于前端/日志定位。
+        arguments: 模型提交的原始参数（应为 dict）。
+        parameters: 该工具在 registry 中声明的 JSON Schema；缺省按 ``{"type": "object"}`` 处理。
+
+    返回:
+        ``None`` 表示校验通过；否则返回含 ``error``/``summary``/``details``/``missing``/``expected``
+        的 dict，executor 据此拒绝调用 handler（不进入业务逻辑）。
     """
     if not isinstance(arguments, dict):
         return {
@@ -73,6 +86,14 @@ def validate_tool_arguments(
 
 
 def _expected_summary(schema: dict[str, Any] | None) -> dict[str, Any]:
+    """从 JSON Schema 提取面向模型的精简「期望形状」摘要。
+
+    参数:
+        schema: 工具的 parameters schema，或 ``None``。
+
+    返回:
+        含 ``type``、可选 ``required`` 与 ``properties`` 键名列表的 dict，供错误回显。
+    """
     if not isinstance(schema, dict):
         return {"type": "object"}
     props = schema.get("properties")
@@ -86,9 +107,16 @@ def _expected_summary(schema: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def extract_citation_ids(text: str) -> list[str]:
-    """Find ``[cite:…]`` / bare ``cite:…`` markers in drafted or patched text.
+    """从草稿或 patch 文本中提取引用标记 ID。
 
-    IDs may include CJK (e.g. ``[cite:亮剑]``).
+    支持 ``[cite:…]`` 与裸 ``cite:…`` 两种形式；ID 体可含 CJK（如 ``[cite:亮剑]``）。
+    优先匹配方括号形式，避免与正文误匹配。
+
+    参数:
+        text: 待扫描的完整文本。
+
+    返回:
+        去重后的 ``cite:…`` 字符串列表，按首次出现顺序排列。
     """
     import re
 

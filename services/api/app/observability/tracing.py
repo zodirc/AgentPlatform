@@ -1,3 +1,9 @@
+"""OpenTelemetry 追踪初始化与 FastAPI 自动埋点。
+
+可选启用：未安装 OTel 包或 ``enabled=False`` 时静默跳过；
+支持 OTLP HTTP exporter 或控制台 fallback。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -7,6 +13,18 @@ logger = logging.getLogger(__name__)
 
 
 def setup_tracing(*, service_name: str, enabled: bool) -> None:
+    """安装全局 ``TracerProvider`` 与 span exporter。
+
+    参数:
+        service_name: OTel ``service.name`` 资源属性。
+        enabled: False 时直接返回。
+
+    返回:
+        无。
+
+    异常:
+        无；ImportError 时打 warning 并禁用追踪。
+    """
     if not enabled:
         return
     try:
@@ -36,6 +54,15 @@ def setup_tracing(*, service_name: str, enabled: bool) -> None:
 
 
 def instrument_fastapi(app, *, enabled: bool) -> None:
+    """为 FastAPI 应用注册 HTTP 服务端 span  instrumentation。
+
+    参数:
+        app: FastAPI/Starlette 应用实例。
+        enabled: False 时跳过。
+
+    返回:
+        无。
+    """
     if not enabled:
         return
     try:

@@ -1,3 +1,7 @@
+/**
+ * 流式增量缓冲：将高频 token/delta 事件合并到 requestAnimationFrame 再写入 React 状态，
+ * 避免每个 SSE 事件触发一次重渲染。
+ */
 import {
   useCallback,
   useRef,
@@ -6,6 +10,7 @@ import {
   type SetStateAction,
 } from "react";
 
+/** 子代理 live 缓冲：主回复、思考链与各 tool_call 的增量文本。 */
 export type SubagentDeltaBuffer = {
   stream: string;
   thinking: string;
@@ -42,6 +47,11 @@ function emptyPendingDeltas(): PendingDeltas {
   };
 }
 
+/**
+ * 管理回合 live 流的增量缓冲与 rAF 批量刷入。
+ * @param options 各 live 文本 ref/setter 的绑定
+ * @returns append* 写入缓冲、flush/clear 控制刷盘
+ */
 export function useStreamDeltaBuffer({
   streamTextRef,
   sectionDraftRef,

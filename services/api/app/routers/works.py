@@ -1,4 +1,7 @@
-"""Works API (docs/27 MT5) — Turn 外；单 Work 用户可不展示切换器."""
+"""Work（工作区）API（docs/27 MT5）— Turn 生命周期外；单 Work 用户可不展示切换器。
+
+Work 绑定会话 tenant 根路径（``work_root``）与种子语料可见性等偏好。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,8 @@ router = APIRouter(tags=["works"])
 
 
 class WorkResponse(BaseModel):
+    """Work 资源对外表示。"""
+
     id: UUID
     name: str
     work_root: str
@@ -29,15 +34,27 @@ class WorkResponse(BaseModel):
 
 
 class CreateWorkRequest(BaseModel):
+    """创建 Work 请求体。"""
+
     name: str = Field(default="work", min_length=1, max_length=128)
 
 
 class PatchWorkRequest(BaseModel):
+    """更新 Work 偏好（当前仅 visibility_seed）。"""
+
     visibility_seed: bool
 
 
 @router.get("/works", response_model=list[WorkResponse])
 async def list_works(actor: EndUser = Depends(require_session_actor)):
+    """列出当前用户全部 Work；若无则先创建默认 Work。
+
+    参数:
+        actor: 终端用户。
+
+    返回:
+        WorkResponse 列表；默认 Work 排在最前。
+    """
     await ensure_default_work(actor.id)
     pool = await get_pool()
     rows = await pool.fetch(
@@ -57,7 +74,15 @@ async def create_work(
     body: CreateWorkRequest | None = None,
     actor: EndUser = Depends(require_session_actor),
 ):
-    """Create an additional Work (not default). New sessions may bind via future API."""
+    """创建附加 Work（非默认）；新会话可通过 API 绑定 work_id。
+
+    参数:
+        body: 可选名称。
+        actor: owner。
+
+    返回:
+        WorkResponse（201）；``work_root`` 为 ``{works_root}/{uuid}``。
+    """
     from uuid import uuid4
 
     from app.settings import settings
@@ -83,6 +108,14 @@ async def create_work(
 
 @router.get("/works/default", response_model=WorkResponse)
 async def get_default_work(actor: EndUser = Depends(require_session_actor)):
+    """获取或惰性创建用户的默认 Work。
+
+    参数:
+        actor: 终端用户。
+
+    返回:
+        WorkResponse；极端情况下仍 404。
+    """
     work = await ensure_default_work(actor.id)
     pool = await get_pool()
     row = await pool.fetchrow(
@@ -103,7 +136,16 @@ async def patch_work(
     body: PatchWorkRequest,
     actor: EndUser = Depends(require_session_actor),
 ):
-    """Update Work preferences (Turn 外). Currently: product seed corpus visibility."""
+    """更新 Work 偏好（Turn 外）；当前支持产品种子语料 ``visibility_seed``。
+
+    参数:
+        work_id: 目标 Work UUID。
+        body: 要更新的字段。
+        actor: 须为 owner。
+
+    返回:
+        更新后的 WorkResponse；非 owner 404。
+    """
     work = await update_work_visibility_seed(
         work_id,
         owner_user_id=actor.id,

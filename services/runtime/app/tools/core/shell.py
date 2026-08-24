@@ -1,3 +1,10 @@
+"""子进程 shell 执行：argv 与 shell 两种入口，带超时/取消与输出截断。
+
+``run_argv_command`` 供 ``run_tests`` 等无 shell 场景；``run_shell_command`` 供
+``run_command``/``read_lints`` 等。子进程环境 deny-by-default，秘密经 PII redact 脱敏。
+与 ``sandbox``/``shell_work_jail`` 协作完成 FS 隔离与软路径 jail。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -46,6 +53,12 @@ _ENV_ALLOW_DEFAULT = frozenset(
 
 
 async def _terminate_process(proc: asyncio.subprocess.Process, *, force: bool) -> None:
+    """终止进程组：先 SIGTERM，必要时 SIGKILL。
+
+    参数:
+        proc: 已 ``start_new_session=True`` 启动的子进程。
+        force: ``True`` 时直接 SIGKILL；否则 grace 后强杀。
+    """
     if proc.returncode is not None:
         return
     try:
@@ -66,6 +79,11 @@ async def _terminate_process(proc: asyncio.subprocess.Process, *, force: bool) -
 
 
 def _safe_env() -> dict[str, str]:
+    """构造子进程允许的环境变量子集（deny-by-default，见 ``_ENV_ALLOW_DEFAULT``）。
+
+    返回:
+        仅含白名单键的 env dict；``PATH``/``LANG`` 保证有合理默认。
+    """
     env: dict[str, str] = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "LANG": os.environ.get("LANG") or "C.UTF-8",
@@ -77,6 +95,14 @@ def _safe_env() -> dict[str, str]:
 
 
 def _maybe_redact(text: str) -> str:
+    """按 settings 对 stdout/stderr 做 PII 脱敏。
+
+    参数:
+        text: 原始输出文本。
+
+    返回:
+        脱敏后文本；未启用 redact 时原样返回。
+    """
     if not settings.pii_redact_enabled or not text:
         return text
     from app.privacy.redact import redact_text
@@ -94,6 +120,21 @@ async def _run_exec(
     preexec_fn: Callable[[], None] | None = None,
     private_tmpdir: bool = False,
 ) -> dict[str, Any]:
+    """创建子进程并等待结束，处理 cancel/timeout 与输出截断。
+
+    参数:
+        argv: 最终 argv（可能已被 bwrap 包装）。
+        cwd: 工作目录（同时设为子进程 HOME/PWD）。
+        timeout_s: 单调时钟超时秒数。
+        display_command: 回显用命令字符串。
+        check_cancel: 可选异步取消检查 ``(cancelled, force)``。
+        preexec_fn: Landlock 等 pre-exec 钩子。
+        private_tmpdir: ``True`` 时在 cwd 下建 ``.agent-tmp`` 作 TMPDIR。
+
+    返回:
+        ``status`` 为 ``executed``/``failed``/``cancelled``/``timeout`` 及 stdout/stderr。
+        截断时附加 ``_stdout_full``/``_stderr_full`` 供 test_summary 解析（模型侧会剥离）。
+    """
     env = _safe_env()
     env["HOME"] = str(cwd)
     env["PWD"] = str(cwd)
@@ -129,6 +170,17 @@ async def _finish_process(
     timeout_s: float,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None,
 ) -> dict[str, Any]:
+    """轮询等待 ``proc.communicate``，响应取消与超时。
+
+    参数:
+        proc: 运行中的子进程。
+        command: 回显命令名。
+        timeout_s: 超时秒数。
+        check_cancel: 可选取消检查。
+
+    返回:
+        与 ``_run_exec`` 相同结构的结果 dict。
+    """
     comm_task = asyncio.create_task(proc.communicate())
     started = time.monotonic()
 
@@ -208,7 +260,21 @@ async def run_argv_command(
     display_command: str | None = None,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
 ) -> dict[str, Any]:
-    """Run a pre-parsed argv list (no shell). Used by run_tests after SB0 gate."""
+    """执行已解析的 argv（不经 shell），供 ``run_tests`` 等在 SB0 门控后调用。
+
+    参数:
+        argv: 命令 argv 序列。
+        cwd: 工作目录。
+        timeout_s: 超时秒数。
+        display_command: 可选展示用命令串。
+        check_cancel: 可选取消检查。
+
+    返回:
+        执行结果 dict，含 ``sandbox`` 后端标识（landlock/bwrap/off/soft-jail）。
+
+    说明:
+        先过 ``argv_jail_violation`` 软 jail；Landlock 用 preexec，bwrap 包装 argv。
+    """
     from app.tools.core.sandbox import sandbox_preexec_fn, wrap_argv_for_exec
     from app.tools.core.shell_work_jail import argv_jail_violation
 
@@ -257,6 +323,20 @@ async def run_shell_command(
     timeout_s: float,
     check_cancel: Callable[[], Awaitable[tuple[bool, bool]]] | None = None,
 ) -> dict[str, Any]:
+    """通过 ``/bin/sh -c`` 执行 shell 命令字符串，带沙箱与软 jail。
+
+    参数:
+        command: 完整 shell 命令字符串。
+        cwd: 工作目录。
+        timeout_s: 超时秒数。
+        check_cancel: 可选取消检查。
+
+    返回:
+        执行结果 dict；jail 违规或沙箱不可用时 ``status=failed``。
+
+    说明:
+        ``backend=off`` 且禁止网络时 fail-closed，强制 bwrap ``--unshare-net``，避免裸 shell 外连。
+    """
     from app.tools.core.sandbox import (
         resolve_sandbox_backend,
         sandbox_preexec_fn,

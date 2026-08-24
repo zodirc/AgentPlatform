@@ -1,3 +1,10 @@
+"""写 workspace 工具：整写、span 编辑、重命名与测试运行。
+
+``write_file``/``edit_file``/``rename_file`` 在写入后通知 workspace AST dirty；
+``edit_file`` 含语法门控、诊断 diff（checks）、符号 impact 与 related_tests 提示。
+``run_tests`` 经 SB0 命令门控与沙箱执行，支持 SWE eval 专用路径。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -18,6 +25,18 @@ logger = logging.getLogger(__name__)
 
 
 async def write_file(path: str, content: str, **_kwargs: Any) -> dict[str, Any]:
+    """整文件写入或覆盖；可选对 ``.patch``/``.diff`` 做 git apply 预检。
+
+    参数:
+        path: 工作区相对路径。
+        content: 写入全文。
+
+    返回:
+        含 ``old_text``/``new_text``/``bytes_written``/``status``；patch 文件可能附加 ``applies`` 等预检字段。
+
+    说明:
+        seed corpus 只读；秘密扫描 ``gate_write_content`` 失败时直接返回 blocked 载荷。
+    """
     from app.privacy.secret_scan import gate_write_content
 
     _assert_not_seed_corpus(path)
@@ -75,7 +94,16 @@ async def rename_file(
     overwrite: bool = False,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Rename or move a workspace file (narrow op — not export / not rewrite)."""
+    """重命名或移动工作区内的单个文件（非目录、非 export）。
+
+    参数:
+        path: 源文件相对路径。
+        new_path: 目标相对路径。
+        overwrite: 目标已存在时是否覆盖。
+
+    返回:
+        ``status`` 为 ``renamed``/``ok``/``error`` 及 ``summary``；失败时含 ``error`` 说明。
+    """
     src_rel = _normalized_workspace_rel(path)
     dst_rel = _normalized_workspace_rel(new_path)
     if not src_rel or not dst_rel:
@@ -151,7 +179,18 @@ async def _impact_for_edit(
     new_text: str,
     turn_id: object | None = None,
 ) -> dict[str, Any]:
-    """Impact stage: same find_references adapters; attached on successful code edits."""
+    """编辑 impact 阶段：对变更符号做 find_references，附在成功 code edit 上。
+
+    参数:
+        path: 被编辑文件相对路径。
+        old_text: 编辑前 span。
+        new_text: 编辑后 span。
+        turn_id: 可选 Turn ID，供 LSP 取消/追踪。
+
+    返回:
+        ``status`` 为 ``ok``/``skipped``/``failed``，含 ``symbol``/``references``/``lines`` 等。
+        非代码路径或 LSP 基础设施故障时 skipped/failed，不抛异常。
+    """
     from app.structural.providers import language_for_path
     from app.structural.symbols import extract_symbols_from_edit
 
@@ -230,7 +269,16 @@ async def _file_diagnostics_issues(
     turn_id: object | None = None,
     timeout_s: float | None = None,
 ) -> tuple[list[Any], dict[str, Any]]:
-    """Single-file LSP∪ruff diagnostics for edit_file.checks (never raises)."""
+    """收集单文件 LSP ∪ ruff 诊断（供 edit_file checks 使用，永不 raise）。
+
+    参数:
+        path: 目标文件相对路径。
+        turn_id: 可选 Turn ID。
+        timeout_s: 诊断预算；``None`` 时用 settings 默认。
+
+    返回:
+        ``(issues 列表, meta dict)``；超时/异常写入 ``meta["degraded_reason"]``。
+    """
     import asyncio
     import shlex
 
@@ -324,7 +372,15 @@ async def _checks_for_edit(
     path: str,
     turn_id: object | None = None,
 ) -> dict[str, Any]:
-    """Collect pre-write diagnostic baseline for edit_file.checks (Wave 2 W1)."""
+    """写入前采集诊断基线，供 ``_finalize_checks_after_write`` 做 new_issues diff。
+
+    参数:
+        path: 目标文件路径。
+        turn_id: 可选 Turn ID。
+
+    返回:
+        内部结构含 ``_baseline``/``_baseline_keys`` 等；非代码路径返回 ``status=skipped``。
+    """
     from app.structural.providers import language_for_path
 
     if language_for_path(path) is None:
@@ -359,7 +415,17 @@ async def _finalize_checks_after_write(
     gate: Any,
     turn_id: object | None = None,
 ) -> dict[str, Any]:
-    """Diff post-write diagnostics against baseline; timeout never fails the edit."""
+    """写入后对比基线诊断，产出 ``checks`` 块；超时不会导致编辑失败。
+
+    参数:
+        path: 已写入文件路径。
+        pre: ``_checks_for_edit`` 返回的预采集结构。
+        gate: 语法门控结果对象。
+        turn_id: 可选 Turn ID。
+
+    返回:
+        面向模型的 ``checks`` dict（``new_issues``/``syntax``/``summary`` 等）。
+    """
     from app.structural.format import format_diagnostics_lines
 
     if pre.get("status") == "skipped":
@@ -407,6 +473,21 @@ async def _finalize_checks_after_write(
 
 
 async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> dict[str, Any]:
+    """按唯一 span 做 surgical 替换，含语法门控、诊断 diff 与 symbol impact。
+
+    参数:
+        path: 工作区相对路径。
+        old_text: 必须在文件中唯一出现的待替换片段。
+        new_text: 替换后片段。
+        **_kwargs: 可选 ``turn_id``。
+
+    返回:
+        成功：``status=edited``/``applies=True`` 及 ``impact``/``checks``；
+        失败：``old_text not found``/多匹配/``syntax_error`` 等，含候选行提示。
+
+    说明:
+        ``old_text`` 不唯一或缺失时返回 ``candidates`` 引导模型加长 span；引入语法错误则拒绝写入。
+    """
     from app.structural.span_match import (
         format_candidate_lines,
         nearest_span_candidates,
@@ -562,6 +643,19 @@ async def edit_file(path: str, old_text: str, new_text: str, **_kwargs: Any) -> 
 
 
 async def run_tests(command: str = "pytest -q", turn_id=None, **_kwargs: Any) -> dict[str, Any]:
+    """在沙箱内运行测试命令（默认 pytest），附结构化 test_summary。
+
+    参数:
+        command: 测试 shell 命令字符串，经 SB0 ``gate_run_tests_command`` 白名单解析。
+        turn_id: 可选，用于注册 cancel checker。
+
+    返回:
+        含 ``status``/``stdout``/``stderr``/``exit_code``/``sandbox``；
+        ``run_command_mode=simulate`` 时返回模拟通过结果。
+
+    说明:
+        门控在 simulate 之前执行，防止恶意命令被模拟成 passed；SWE eval 可走专用 ``maybe_run_swe_eval_tests``。
+    """
     from app.structural.test_summary import attach_test_summary_for_run_tests
     from app.tenant_context import current_ops_eval
     from app.tools.core.shell import run_argv_command

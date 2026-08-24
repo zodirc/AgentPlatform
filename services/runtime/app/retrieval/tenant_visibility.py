@@ -1,4 +1,8 @@
-"""Tenant visibility for retrieval hits (docs/27 MT3 · MT5c)."""
+"""多租户可见性与索引 path 编解码（RAG ACL 防御层）。
+
+职责：hit 是否对当前 Work/seed 可见；private 行 storage path 加 ``__work__/`` 前缀。
+在 RAG 链路中的位置：pgvector 查询 SQL 过滤 + 返回 path 展示 + inspect 工具。
+"""
 
 from __future__ import annotations
 
@@ -13,7 +17,7 @@ def _is_seed_path(rel_path: str) -> bool:
 
 
 def path_visible_in_current_work(rel_path: str) -> bool:
-    """True if path is seed corpus or resolves inside the bound work_root."""
+    """路径为 seed 或在当前 work_root 沙箱内时为 True。"""
     normalized = (rel_path or "").strip().lstrip("/").replace("\\", "/")
     if not normalized:
         return False
@@ -49,7 +53,7 @@ def _hit_work_id(hit: Any) -> UUID | None:
 
 
 def hit_visible_for_tenant(hit: Any) -> bool:
-    """Defense in depth: path sandbox + optional work_id metadata match."""
+    """路径沙箱 + work_id/visibility 元数据双重校验（含 orphan private 拦截）。"""
     if isinstance(hit, dict):
         path = str(hit.get("path") or "")
         visibility = str(hit.get("visibility") or "")
@@ -77,12 +81,12 @@ def hit_visible_for_tenant(hit: Any) -> bool:
 
 
 def filter_hits_for_tenant(hits: list[Any]) -> list[Any]:
-    """Drop hits outside current Work (except seed). Supports ChunkHit or dict."""
+    """丢弃当前 Work 不可见的 hit（seed 例外由 context 控制）。"""
     return [hit for hit in hits if hit_visible_for_tenant(hit)]
 
 
 def index_storage_path(rel_path: str, *, work_id: str | None, visibility: str) -> str:
-    """Scope private rows so path PK does not collide across Works (MT5c)."""
+    """private 行加 work 作用域前缀，避免跨 Work path PK 冲突（MT5c）。"""
     normalized = (rel_path or "").strip().lstrip("/").replace("\\", "/")
     vis = (visibility or "private").strip() or "private"
     if vis == "seed" or not work_id:
@@ -91,7 +95,7 @@ def index_storage_path(rel_path: str, *, work_id: str | None, visibility: str) -
 
 
 def display_path_from_index(index_path: str) -> str:
-    """Strip work-scope prefix for tool hits / citations."""
+    """索引 storage path → 工具/citation 展示用相对路径。"""
     normalized = (index_path or "").strip().lstrip("/").replace("\\", "/")
     if normalized.startswith("__work__/"):
         parts = normalized.split("/", 2)

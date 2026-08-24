@@ -1,4 +1,5 @@
-"""Shared types for workspace AST index (§5)."""
+"""AST 索引核心类型：SymbolRec/FileEntry/IndexMeta。"""
+
 
 from __future__ import annotations
 
@@ -9,6 +10,7 @@ from uuid import UUID
 
 
 class IndexStatus(str, Enum):
+    """作用：索引状态枚举（idle/building/ready/error）。"""
     COLD = "cold"
     BUILDING = "building"
     READY = "ready"
@@ -19,11 +21,7 @@ class IndexStatus(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class SymbolRec:
-    """One definition row inside a per-file JSONB blob (§5.1).
-
-    ``container`` (`ct` in JSON) is the enclosing class/module chain for
-    qualified / method matching (§2.2.1).
-    """
+    """作用：单符号记录（kind/name/span）。"""
 
     name: str
     kind: str
@@ -60,6 +58,7 @@ class SymbolRec:
 
 @dataclass(slots=True)
 class FileEntry:
+    """作用：单文件索引条目与 symbols。"""
     path: str
     lang: str
     content_hash: str
@@ -120,6 +119,7 @@ class FileEntry:
 
 @dataclass(slots=True)
 class IndexMeta:
+    """作用：Work 级索引元数据。"""
     work_id: UUID
     owner_user_id: str
     status: IndexStatus = IndexStatus.COLD
@@ -144,6 +144,7 @@ class IndexMeta:
 
 @dataclass(frozen=True, slots=True)
 class SymbolHit:
+    """作用：查询命中（含 path/line/kind）。"""
     path: str
     line: int
     col: int

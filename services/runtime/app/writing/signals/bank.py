@@ -1,4 +1,4 @@
-"""Platform exemplar source of truth: git markdown (not RAG chunks)."""
+"""平台 markdown 范文库。"""
 
 from __future__ import annotations
 
@@ -19,6 +19,10 @@ _HEADING = re.compile(
 
 @dataclass(frozen=True)
 class Exemplar:
+    """范文样本。
+    
+    参数:
+        fragment/slug/author/work/beat/text/signature等。"""
     fragment: str
     slug: str
     author: str
@@ -32,10 +36,20 @@ class Exemplar:
 
     @property
     def sample_id(self) -> str:
+        """范文 slug 别名。
+
+        返回:
+            与 ``slug`` 相同。
+        """
         return self.slug
 
     @property
     def text_sha256(self) -> str:
+        """范文原文 SHA-256 摘要。
+
+        返回:
+            hex digest 字符串。
+        """
         return hashlib.sha256(self.text.encode("utf-8")).hexdigest()
 
 
@@ -77,7 +91,13 @@ def load_exemplars_dir(
     *,
     scope: str = "platform",
 ) -> dict[str, tuple[Exemplar, ...]]:
-    """Parse ``### 作者《作品》·拍`` markdown banks. Empty dict if dir missing."""
+    """解析范文目录。
+    
+    参数:
+        directory/scope。
+    
+    返回:
+        dict。"""
     bank: dict[str, list[Exemplar]] = {}
     if not directory.is_dir():
         return {}
@@ -117,10 +137,24 @@ def load_exemplars_dir(
 
 @lru_cache(maxsize=1)
 def load_platform_exemplars() -> dict[str, tuple[Exemplar, ...]]:
+    """平台范文（cached）。
+
+    参数:
+        无。
+
+    返回:
+        dict。"""
     return load_exemplars_dir(_EXEMPLAR_DIR, scope="platform")
 
 
 def iter_platform_exemplars() -> tuple[Exemplar, ...]:
+    """迭代全部范文。
+
+    参数:
+        无。
+
+    返回:
+        tuple。"""
     bank = load_platform_exemplars()
     rows: list[Exemplar] = []
     seen: set[tuple[str, str]] = set()
@@ -141,6 +175,13 @@ def iter_platform_exemplars() -> tuple[Exemplar, ...]:
 
 
 def find_platform_exemplar(*, slug: str, fragment: str | None = None) -> Exemplar | None:
+    """按 slug 查找。
+    
+    参数:
+        slug/fragment。
+    
+    返回:
+        Exemplar|None。"""
     want = (slug or "").strip()
     if not want:
         return None
@@ -155,6 +196,13 @@ def find_platform_exemplar(*, slug: str, fragment: str | None = None) -> Exempla
 
 
 def exemplar_lab_payload(sample: Exemplar) -> dict[str, str]:
+    """Lab API payload。
+    
+    参数:
+        sample。
+    
+    返回:
+        dict。"""
     return {
         "fragment": sample.fragment,
         "slug": sample.slug,

@@ -1,3 +1,15 @@
+"""Agent API 应用入口：FastAPI 实例、生命周期钩子与全局异常/健康/指标路由。
+
+English: Agent API FastAPI entry — control plane for sessions/turns, SSE, projection, Ops.
+
+职责域：
+- 启动：数据库连接池、迁移、投影/租约对账、Turn 事件监听器
+- 运行：周期性投影对账、租约回收、claim 超时、事件保留
+- 关闭：取消后台任务、停止监听器、释放连接池与 HTTP 客户端
+
+浏览器与产品 UI 连本服务；Turn **执行**在 runtime，经 run_commands / HTTP 转发。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -63,6 +75,18 @@ _HTTP_ERROR_CODES = {
 
 
 async def _projection_reconcile_loop() -> None:
+    """周期性对账滞后或卡住的 turn 投影（后台守护循环）。
+
+    参数:
+        无。
+
+    返回:
+        None；永不正常退出，仅在应用关闭时被 cancel。
+
+    说明:
+        使用 PostgreSQL advisory lock，多实例部署时仅一个 worker 执行对账，
+        避免重复扫描；间隔 ``_PROJECTION_RECONCILE_INTERVAL_SECONDS``（300s）。
+    """
     from app.services.projection.advisory import LOCK_PROJECTION_RECONCILE, try_advisory_lock
 
     while True:
@@ -84,6 +108,19 @@ async def _projection_reconcile_loop() -> None:
 
 
 async def _lease_reclaim_loop() -> None:
+    """周期性回收过期 runner 租约、处理 claim 超时，并按预算清理 turn_events。
+
+    参数:
+        无。
+
+    返回:
+        None；后台无限循环，应用关闭时 cancel。
+
+    说明:
+        - ``runner_lease_enabled`` 为真时才回收租约（与 runtime RUNNER_LEASE_* 配对）。
+        - claim 超时与租约回收后若发生变更，触发一次 lagging projection 对账。
+        - 事件保留按 ``events_retention_interval_seconds`` 节流，避免每次 tick 都跑大 DELETE。
+    """
     from app.services.projection.advisory import (
         LOCK_CLAIM_TIMEOUT,
         LOCK_EVENTS_RETENTION,
@@ -126,6 +163,14 @@ async def _lease_reclaim_loop() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """FastAPI 应用生命周期：启动初始化与优雅关闭。
+
+    参数:
+        app: FastAPI 实例；``app.state.event_listener`` 在启动后挂载 TurnEventListener。
+
+    返回:
+        异步上下文管理器；yield 之后进入请求服务阶段，finally 块执行清理。
+    """
     from app.observability.logging import configure_logging
 
     settings.validate_production_security()
@@ -211,6 +256,15 @@ if (settings.ops_test_secret or "").strip():
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """将 Pydantic/FastAPI 校验失败包装为标准 ``ErrorResponse`` 信封（422）。
+
+    参数:
+        request: 当前 HTTP 请求；``request.state.request_id`` 写入 meta。
+        exc: 校验异常，details 含 ``errors`` 列表。
+
+    返回:
+        JSONResponse，status_code=422，body 为 contracts.md §6 统一错误形状。
+    """
     request_id = getattr(request.state, "request_id", None) or uuid4()
     return JSONResponse(
         status_code=422,
@@ -223,8 +277,15 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Wrap HTTP errors (404/409/401/...) in the standard ErrorResponse envelope
-    (contracts.md §6) so all error responses share one shape."""
+    """将 HTTPException（404/409/401 等）包装为标准 ``ErrorResponse`` 信封。
+
+    参数:
+        request: 当前 HTTP 请求。
+        exc: Starlette HTTP 异常；status_code 映射为业务 error.code。
+
+    返回:
+        JSONResponse，保留 exc.headers（如 429 的 Retry-After）。
+    """
     request_id = getattr(request.state, "request_id", None) or uuid4()
     code = _HTTP_ERROR_CODES.get(exc.status_code, "ERROR")
     return JSONResponse(
@@ -239,8 +300,14 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 @app.get("/metrics")
 async def metrics_endpoint(authorization: str | None = Header(default=None)):
-    # Scrape with `Authorization: Bearer <INTERNAL_SERVICE_TOKEN>` —
-    # metrics expose scenario/tenant labels and must not be public.
+    """Prometheus 指标抓取端点（需内部服务令牌，不可公开暴露）。
+
+    参数:
+        authorization: ``Bearer <INTERNAL_SERVICE_TOKEN>``；常量时间比较防时序攻击。
+
+    返回:
+        PlainTextResponse，Prometheus exposition 格式；抓取时采样 DB 连接池占用 gauge。
+    """
     from fastapi.responses import PlainTextResponse
 
     from app.observability.metrics import metrics
@@ -265,11 +332,31 @@ async def metrics_endpoint(authorization: str | None = Header(default=None)):
 
 @app.get("/health/live")
 async def health_live():
+    """存活探针：进程已启动即可，不探测依赖。
+
+    参数:
+        无。
+
+    返回:
+        ``{"status": "ok"}``。
+    """
     return {"status": "ok"}
 
 
 @app.get("/health/ready")
 async def health_ready():
+    """就绪探针：PostgreSQL 可查询且 runtime ``/health/live`` 可达。
+
+    参数:
+        无。
+
+    返回:
+        就绪时 ``{"status": "ready"}``；runtime 不可达时 503 JSON。
+
+    说明:
+        仅探测 runtime liveness，不用 ``/health/ready``——并行 SWE turn 下 runtime
+        ready 可能阻塞过久，导致 compose 健康检查误杀 api 容器。
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.fetchval("SELECT 1")

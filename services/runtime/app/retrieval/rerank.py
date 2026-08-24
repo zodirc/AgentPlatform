@@ -1,10 +1,7 @@
-"""Optional post-fusion rerank for hybrid retrieval.
+"""混合检索可选重排层（RAG fusion 之后、截断入 context 之前）。
 
-Default posture (docs/21 Q8/Q13, docs/13 S2 A12):
-- Lexical rerank: ON when ``retrieval_rerank_enabled`` (default True) — cheap CPU.
-- Cross-encoder: OFF by default. If enabled experimentally, only score a pool of
-  at most 20 hits, honor ``retrieval_rerank_timeout_seconds`` (default 50ms), and
-  fall back to lexical order on timeout or load failure.
+默认：``retrieval_rerank_enabled`` 时 lexical CPU 重排；cross-encoder 默认关。
+在 RAG 链路中的位置：``search_hybrid`` → RRF → 本模块 → writing/scenario 后处理。
 """
 from __future__ import annotations
 
@@ -29,6 +26,7 @@ _CROSS_ENCODER_POOL_CAP = 20
 
 
 def lexical_rerank_score(query: str, hit: ChunkHit) -> float:
+    """在原 fusion 分上加词重叠、标题/短语位置等 lexical 信号。"""
     query_norm = query.strip().lower()
     query_tokens = set(tokenize(query))
     if not query_tokens:
@@ -55,6 +53,7 @@ def lexical_rerank_score(query: str, hit: ChunkHit) -> float:
 
 
 def lexical_rerank(query: str, hits: list[ChunkHit], *, limit: int) -> list[ChunkHit]:
+    """按 ``lexical_rerank_score`` 重排并写回 score。"""
     if len(hits) <= 1:
         return hits[:limit]
     scored = [
@@ -84,6 +83,7 @@ def _get_cross_encoder():
 
 
 def cross_encoder_rerank(query: str, hits: list[ChunkHit], *, limit: int) -> list[ChunkHit]:
+    """实验性 cross-encoder 重排；超时则回退 lexical。"""
     if len(hits) <= 1:
         return hits[:limit]
     model = _get_cross_encoder()
@@ -105,6 +105,7 @@ def cross_encoder_rerank(query: str, hits: list[ChunkHit], *, limit: int) -> lis
 
 
 def rerank_hits(query: str, hits: list[ChunkHit], *, limit: int) -> list[ChunkHit]:
+    """统一 rerank 入口：CE 或 lexical，受 pool 与 timeout 配置约束。"""
     if not hits:
         return []
     pool_n = max(limit, settings.retrieval_rerank_pool)

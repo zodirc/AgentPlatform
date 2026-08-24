@@ -1,7 +1,10 @@
-"""Pure-pager run_command → read_file (quality-uplift C-2).
 
-Redirect only when the whole command is a single-file, no-pipe, no-redirect
-pager. Any pipeline / glob / write side-effect is left to the shell.
+"""Shell pager 命令 → ``read_file`` 窗口重定向。
+
+在 ``run_command`` 路径拦截纯只读的 ``cat`` / ``head`` / ``tail`` / ``sed -n``
+等单文件命令，解析出 path + offset/limit，转交 ``read_file`` 工具以复用
+ACL、截断与 read_registry 逻辑。含管道、重定向、子 shell 或 glob 的命令
+一律不拦截（返回 ``None``）。
 """
 
 from __future__ import annotations
@@ -21,7 +24,15 @@ _UNIX_N = re.compile(r"^-(\d+)$")
 
 
 def try_parse_pager_command(command: str) -> dict[str, Any] | None:
-    """Return ``{path, offset, limit}`` or None when the command is not a pure pager."""
+    """解析可重定向的 pager 命令为 read_file 参数字典。
+
+    参数:
+        command: 原始 shell 命令行（单段，无管道）。
+
+    返回:
+        成功时含 ``path``、``offset``、``limit``、``from_end`` 键；
+        不可解析或含不安全元字符时 ``None``。
+    """
     raw = (command or "").strip()
     if not raw or _UNSAFE.search(raw):
         return None
@@ -47,6 +58,14 @@ def try_parse_pager_command(command: str) -> dict[str, Any] | None:
 
 
 def is_pure_pager_command(command: str) -> bool:
+    """命令是否完全由可重定向的 pager 子集构成。
+
+    参数:
+        command: 待检测命令行。
+
+    返回:
+        ``try_parse_pager_command`` 非 ``None`` 时为 True。
+    """
     return try_parse_pager_command(command) is not None
 
 
@@ -57,7 +76,17 @@ def resolve_pager_window(
     limit: int | None,
     from_end: int | None,
 ) -> tuple[int, int | None]:
-    """Map tail-style from_end onto 1-based offset/limit using file line count."""
+    """把 tail 式 ``from_end`` 解析为绝对 ``(offset, limit)``。
+
+    参数:
+        path: 目标文件路径（用于读行数）。
+        offset: 起始行（1-based）；``from_end`` 非空时可忽略。
+        limit: 最大行数；``None`` 表示读到 EOF。
+        from_end: 从文件末尾向前取 N 行；非空时按文件行数换算 offset。
+
+    返回:
+        ``(start_line, line_count)``；读文件失败时退化为 ``(1, from_end)``。
+    """
     if from_end is None:
         return max(1, int(offset or 1)), limit
     try:
@@ -77,6 +106,7 @@ def _single_file(
     limit: int | None,
     allow_flags: bool,
 ) -> dict[str, Any] | None:
+    """解析 cat/nl 类单文件命令的参数列表。"""
     files: list[str] = []
     for p in rest:
         if p == "--":
@@ -95,6 +125,7 @@ def _single_file(
 
 
 def _parse_head_tail(rest: list[str], *, from_start: bool) -> dict[str, Any] | None:
+    """解析 head/tail 的 ``-n`` 与单文件路径。"""
     n = 10
     files: list[str] = []
     i = 0
@@ -125,6 +156,7 @@ def _parse_head_tail(rest: list[str], *, from_start: bool) -> dict[str, Any] | N
 
 
 def _parse_sed(rest: list[str]) -> dict[str, Any] | None:
+    """解析 ``sed -n 'a,bp' file`` / ``sed -n ap file`` 行范围脚本。"""
     # Only ``sed -n 'a,bp' file`` / ``sed -n a,bp file`` / ``sed -n 'ap' file``.
     if not rest or rest[0] not in {"-n", "-ne", "-en"}:
         return None
@@ -157,4 +189,5 @@ def _parse_sed(rest: list[str]) -> dict[str, Any] | None:
 
 
 def _looks_glob(path: str) -> bool:
+    """路径是否含 shell glob 元字符。"""
     return any(ch in path for ch in "*?[]")

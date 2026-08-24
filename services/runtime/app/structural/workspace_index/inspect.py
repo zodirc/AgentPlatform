@@ -1,4 +1,5 @@
-"""Settings inspect: AST index files + nested definition tree. Off-loop only."""
+"""Settings AST inspect API 实现。"""
+
 
 from __future__ import annotations
 
@@ -11,7 +12,7 @@ _MAX_SYMBOLS = 400
 
 
 def nest_symbols(symbols: list[SymbolRec]) -> list[dict[str, Any]]:
-    """Nest definition rows by ``container`` chain (class.method outline)."""
+    """作用：SymbolRec 嵌套树结构。"""
     nodes: list[dict[str, Any]] = []
     by_qual: dict[str, dict[str, Any]] = {}
     for sym in symbols:
@@ -42,7 +43,7 @@ def nest_symbols(symbols: list[SymbolRec]) -> list[dict[str, Any]]:
 
 
 def format_symbol_tree(symbols: list[SymbolRec], *, path: str = "") -> str:
-    """ASCII tree of indexed definitions — the inspect surface for Settings."""
+    """作用：符号树 → 缩进文本。"""
     roots = nest_symbols(symbols)
     lines: list[str] = []
     if path:
@@ -95,7 +96,7 @@ async def inspect_ast_index(
     q: str | None = None,
     limit: int = 200,
 ) -> dict[str, Any]:
-    """List AST files or dump one file's definition tree."""
+    """作用：Settings inspect API 数据组装。"""
     from uuid import UUID
 
     from app.structural.workspace_index.service import get_ast_index_service

@@ -1,3 +1,9 @@
+"""管理端 HTTP Basic 认证与 WebSocket 授权。
+
+``admin`` 用户 + ``settings.admin_password``；``auth_enabled=False`` 时放行。
+``require_admin_or_end_user`` 供 workspace 等共享 tooling 路由使用。
+"""
+
 from __future__ import annotations
 
 import base64
@@ -13,6 +19,7 @@ _security = HTTPBasic(auto_error=False)
 
 
 def _credentials_valid(credentials: HTTPBasicCredentials | None) -> bool:
+    """校验 Basic 凭据是否为配置的 admin 用户/密码。"""
     if credentials is None:
         return False
     password_ok = secrets.compare_digest(
@@ -26,12 +33,22 @@ def _credentials_valid(credentials: HTTPBasicCredentials | None) -> bool:
 async def require_admin(
     credentials: HTTPBasicCredentials | None = Depends(_security),
 ) -> None:
+    """要求 admin Basic 认证（``require_api_access`` 别名）。
+
+    异常:
+        HTTP 401: 未提供或凭据无效。
+    """
     await require_api_access(credentials)
 
 
 async def require_api_access(
     credentials: HTTPBasicCredentials | None = Depends(_security),
 ) -> None:
+    """通用 API Basic 门禁；``auth_enabled=False`` 时无操作。
+
+    异常:
+        HTTP 401: 需要认证或凭据错误。
+    """
     if not settings.auth_enabled:
         return
     if credentials is None:

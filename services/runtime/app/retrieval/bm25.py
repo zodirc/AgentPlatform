@@ -1,3 +1,9 @@
+"""内存 Okapi BM25 打分（RAG 词法召回与 FTS 重排）。
+
+职责：对已 tokenize 的 chunk 集合做 Okapi BM25；``bm25_extra`` 伪查询降权叠加。
+在 RAG 链路中的位置：JSON 索引检索、pgvector FTS 候选池 Okapi 重排、单元测试。
+"""
+
 from __future__ import annotations
 
 import math
@@ -5,14 +11,18 @@ from typing import Any
 
 from app.retrieval.embedder import tokenize
 
-# Align with FTS weight C vs A: extras help lexical miss, must not dominate.
+# 与 FTS 权重 C 对齐：extra 辅助召回，不可压过正文
 _EXTRA_SCORE_SCALE = 0.35
 
 
 class BM25Scorer:
-    """Lightweight Okapi BM25 over pre-tokenized chunk texts."""
+    """轻量 Okapi BM25：输入为 chunk dict 列表（预分词）。"""
 
     def __init__(self, chunks: list[dict[str, Any]], *, k1: float = 1.5, b: float = 0.75) -> None:
+        """参数:
+            chunks: 含 chunk_id、section_title、text、可选 bm25_extra。
+            k1 / b: Okapi 经典参数。
+        """
         self._k1 = k1
         self._b = b
         from app.retrieval.bm25_document import prune_bm25_extra_lines
@@ -36,6 +46,14 @@ class BM25Scorer:
                 self._df[term] = self._df.get(term, 0) + 1
 
     def search(self, query: str, *, limit: int = 10) -> list[tuple[str, float]]:
+        """对 query 分词后在语料上 BM25 排序。
+
+        参数:
+            query: 用户查询字符串。
+            limit: 返回条数。
+        返回:
+            ``(chunk_id, score)`` 列表，score 降序。
+        """
         if self._n_docs == 0:
             return []
         query_tokens = tokenize(query)
@@ -58,6 +76,7 @@ class BM25Scorer:
         return scored[:limit]
 
     def _score_document(self, query_tokens: list[str], doc_tokens: list[str]) -> float:
+        """单字段 token 序列的 BM25 分。"""
         doc_len = len(doc_tokens)
         if doc_len == 0:
             return 0.0

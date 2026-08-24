@@ -1,13 +1,10 @@
-"""Solve-side SWE reproduce: run_tests inside local sweb.eval images.
+"""Solve 侧 SWE 复现：在本地 sweb.eval 镜像内跑 ``run_tests`` / env 探针。
 
-Ops coding checkouts write ``.agent_swe_instance.json`` (instance_id + image_ref).
-When ops_eval Turns call ``run_tests`` / env probes, we sync the worktree into
-the image's ``/testbed`` and execute with ``--network none``.
-
-By default the instance container is **reused** across calls in the same Work
-(incremental mtime/size sync). Set ``SWE_EVAL_SOLVE_REUSE=0`` to fall back to
-one-shot ``docker run --rm``. Missing image / failed board smoke / no
-docker.sock → hard-fail with an attributable error code (never soft-pass).
+Ops coding checkout 写入 ``.agent_swe_instance.json``（instance_id + image_ref）。
+ops_eval Turn 调用 ``run_tests`` 或 env 探针时，将 worktree 同步至镜像 ``/testbed``，
+以 ``--network none`` 执行。默认同 Work 内**复用**实例容器（增量 mtime/size 同步）；
+``SWE_EVAL_SOLVE_REUSE=0`` 回退一次性 ``docker run --rm``。镜像缺失/基准 smoke 失败/无
+docker.sock → 硬失败并返回可归因 error code（禁止 soft-pass）。
 """
 
 from __future__ import annotations
@@ -36,6 +33,7 @@ _INCREMENTAL_CHANGE_CAP = 400  # above → full resync
 
 
 def load_swe_instance_marker(work_root: Path | str) -> dict[str, Any] | None:
+    """读取 Work 根下 ``.agent_swe_instance.json``；缺字段或损坏时返回 ``None``。"""
     root = Path(work_root)
     path = root / MARKER_NAME
     if not path.is_file():
@@ -54,6 +52,7 @@ def load_swe_instance_marker(work_root: Path | str) -> dict[str, Any] | None:
 
 
 def docker_sock_available() -> bool:
+    """docker.sock 或 ``DOCKER_HOST`` 是否可用。"""
     sock = Path(os.environ.get("DOCKER_HOST_SOCK") or "/var/run/docker.sock")
     if sock.exists():
         return True
@@ -62,13 +61,14 @@ def docker_sock_available() -> bool:
 
 
 def docker_cli_available() -> bool:
-    """True when the docker binary is on PATH (sock alone is not enough)."""
+    """PATH 上是否存在 docker 二进制（仅有 sock 不够）。"""
     from shutil import which
 
     return which("docker") is not None
 
 
 def docker_image_present(ref: str, *, timeout: float = 8.0) -> bool:
+    """``docker image inspect ref`` 是否成功（镜像已拉取）。"""
     try:
         proc = subprocess.run(
             ["docker", "image", "inspect", ref],
@@ -83,11 +83,13 @@ def docker_image_present(ref: str, *, timeout: float = 8.0) -> bool:
 
 
 def solve_reuse_enabled() -> bool:
+    """是否启用 solve 容器复用（``SWE_EVAL_SOLVE_REUSE`` 非 0/false/off）。"""
     raw = (os.environ.get("SWE_EVAL_SOLVE_REUSE") or "1").strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 
 def _smoke_results_candidates() -> list[Path]:
+    """部署看板 smoke 结果 ``swe_eval_images_smoke.json`` 候选路径（去重）。"""
     paths: list[Path] = []
     env = (os.environ.get("RELEASE_STATUS_DIR") or "").strip()
     if env:
@@ -110,6 +112,7 @@ def _smoke_results_candidates() -> list[Path]:
 
 
 def read_smoke_row(ref: str) -> dict[str, Any] | None:
+    """从 smoke JSON 的 ``by_ref`` 读取指定 ``image_ref`` 行。"""
     for path in _smoke_results_candidates():
         if not path.is_file():
             continue
@@ -127,7 +130,7 @@ def read_smoke_row(ref: str) -> dict[str, Any] | None:
 
 
 def require_solve_env(marker: dict[str, Any]) -> dict[str, Any] | None:
-    """Return an error payload if solve env is not usable; else None."""
+    """校验 solve 环境是否可用；不可用时返回 error 载荷 dict，否则 ``None``。"""
     ref = str(marker.get("image_ref") or "").strip()
     if not docker_sock_available():
         return {
@@ -190,7 +193,7 @@ def require_solve_env(marker: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def container_name_for(instance_id: str) -> str:
-    """Stable docker name for a SWE instance (safe charset + length)."""
+    """为 SWE instance 生成稳定 docker 容器名（安全字符 + 长度截断）。"""
     raw = (instance_id or "unknown").strip() or "unknown"
     digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:10]
     safe = re.sub(r"[^a-zA-Z0-9_.-]", "-", raw).strip("-._") or "inst"
@@ -204,6 +207,7 @@ def _docker(
     input_bytes: bytes | None = None,
     timeout: float = 30.0,
 ) -> subprocess.CompletedProcess[bytes]:
+    """封装 ``docker`` CLI 子进程调用。"""
     return subprocess.run(
         ["docker", *args],
         input=input_bytes,
@@ -214,6 +218,7 @@ def _docker(
 
 
 def _container_running(name: str) -> bool:
+    """容器是否处于 Running 状态。"""
     try:
         proc = _docker(
             ["inspect", "-f", "{{.State.Running}}", name],
@@ -227,6 +232,7 @@ def _container_running(name: str) -> bool:
 
 
 def _container_image_id(name: str) -> str | None:
+    """运行中容器的 ``.Image`` id；失败时 ``None``。"""
     try:
         proc = _docker(
             ["inspect", "-f", "{{.Image}}", name],
@@ -240,6 +246,7 @@ def _container_image_id(name: str) -> str | None:
 
 
 def _image_id(ref: str) -> str | None:
+    """本地镜像 ref 的 ``.Id``；inspect 失败时 ``None``。"""
     try:
         proc = _docker(
             ["image", "inspect", "-f", "{{.Id}}", ref],
@@ -258,7 +265,7 @@ def ensure_solve_container(
     image_ref: str,
     testbed: str = "/testbed",
 ) -> tuple[str | None, str | None]:
-    """Ensure a long-lived solve container; return (name, error)."""
+    """确保长驻 solve 容器存在；返回 ``(name, error)``。"""
     name = container_name_for(instance_id)
     want = _image_id(image_ref)
     if _container_running(name):
@@ -309,7 +316,7 @@ def ensure_solve_container(
 
 
 def _iter_worktree_files(work_root: Path) -> list[tuple[str, Path]]:
-    """Return (arcname, full_path) for packable files."""
+    """遍历可打包文件，返回 ``(arcname, full_path)`` 列表（跳过 ``.git`` 与 marker）。"""
     out: list[tuple[str, Path]] = []
     for dirpath, dirnames, filenames in os.walk(work_root):
         rel_dir = Path(dirpath).relative_to(work_root)
@@ -326,11 +333,13 @@ def _iter_worktree_files(work_root: Path) -> list[tuple[str, Path]]:
 
 
 def _fingerprint(path: Path) -> dict[str, int]:
+    """文件增量同步指纹：``mtime_ns`` 与 ``size``。"""
     st = path.stat()
     return {"mtime_ns": int(st.st_mtime_ns), "size": int(st.st_size)}
 
 
 def _load_sync_state(work_root: Path) -> dict[str, Any]:
+    """读取 ``.agent_swe_sync_state.json`` 增量同步状态。"""
     path = work_root / SYNC_STATE_NAME
     if not path.is_file():
         return {}
@@ -342,6 +351,7 @@ def _load_sync_state(work_root: Path) -> dict[str, Any]:
 
 
 def _save_sync_state(work_root: Path, state: dict[str, Any]) -> None:
+    """写入增量同步状态（失败静默）。"""
     path = work_root / SYNC_STATE_NAME
     try:
         path.write_text(
@@ -353,6 +363,7 @@ def _save_sync_state(work_root: Path, state: dict[str, Any]) -> None:
 
 
 def _tar_selected(files: list[tuple[str, Path]]) -> bytes:
+    """将选定文件列表打成 tar 字节流。"""
     buf = BytesIO()
     with tarfile.open(fileobj=buf, mode="w") as tar:
         for arc, full in files:
@@ -364,6 +375,7 @@ def _tar_selected(files: list[tuple[str, Path]]) -> bytes:
 
 
 def _tar_worktree_bytes(work_root: Path) -> bytes:
+    """将整个 worktree 可打包文件打成 tar。"""
     return _tar_selected(_iter_worktree_files(work_root))
 
 
@@ -374,7 +386,7 @@ def sync_worktree_to_container(
     testbed: str,
     force_full: bool = False,
 ) -> dict[str, Any]:
-    """Incremental (or full) sync of worktree → container testbed."""
+    """增量（或全量）同步 worktree → 容器 ``testbed``。"""
     root = Path(work_root)
     files = _iter_worktree_files(root)
     prev = _load_sync_state(root)
@@ -480,6 +492,7 @@ def _result_shell(
     status_override: str | None = None,
     stderr_extra: str = "",
 ) -> dict[str, Any]:
+    """组装 sweb.eval shell 执行结果 dict（含 sandbox 元数据与截断 stdout/stderr）。"""
     if proc is None:
         return {
             "command": display_command,
@@ -541,7 +554,7 @@ def run_argv_in_sweb_eval(
     instance_id: str = "",
     skip_sync: bool = False,
 ) -> dict[str, Any]:
-    """Sync worktree (unless skip_sync) and run argv inside sweb.eval."""
+    """同步 worktree（除非 ``skip_sync``）后在 sweb.eval 内执行 ``argv``。"""
     root = Path(work_root)
     t0 = time.monotonic()
     iid = (instance_id or "").strip() or "unknown"
@@ -710,7 +723,7 @@ def run_tests_in_sweb_eval(
     testbed: str = "/testbed",
     instance_id: str = "",
 ) -> dict[str, Any]:
-    """Apply worktree over image testbed and run gated test argv."""
+    """将 worktree 覆盖镜像 testbed 并运行门控后的测试 ``argv``。"""
     return run_argv_in_sweb_eval(
         work_root=work_root,
         argv=argv,
@@ -742,7 +755,7 @@ def probe_solve_env(
     timeout_s: float = 60.0,
     use_cache: bool = True,
 ) -> dict[str, Any]:
-    """Read-only check: python + pytest importable inside the instance image."""
+    """只读探针：实例镜像内 python + pytest 是否可 import（可缓存 ``.agent_swe_probe.json``）。"""
     root = Path(work_root)
     marker = marker or load_swe_instance_marker(root)
     if marker is None:
@@ -829,7 +842,7 @@ def maybe_run_swe_eval_argv(
     ops_eval: bool,
     skip_sync: bool = False,
 ) -> dict[str, Any] | None:
-    """If this Work is a SWE instance checkout, run argv inside sweb.eval."""
+    """若当前 Work 为 SWE instance checkout，则在 sweb.eval 内执行 ``argv``；否则 ``None``。"""
     if not ops_eval:
         return None
     marker = load_swe_instance_marker(work_root)
@@ -875,7 +888,7 @@ def maybe_run_swe_eval_tests(
     timeout_s: float,
     ops_eval: bool,
 ) -> dict[str, Any] | None:
-    """If this Work is a SWE instance checkout, run inside sweb.eval; else None."""
+    """SWE checkout 时在 sweb.eval 内跑测试 argv；非 SWE 或 ops_eval 关闭时 ``None``。"""
     return maybe_run_swe_eval_argv(
         work_root=work_root,
         argv=argv,

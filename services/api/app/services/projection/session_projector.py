@@ -1,6 +1,10 @@
-from __future__ import annotations
+"""会话级读模型投影（``session_views``）与滞后 reconcile。
 
-import json
+由 turn 完成 job、API 读路径或后台 reconcile 触发；与 ``projector.project_turn``
+配合保持 turn/session 视图一致。
+"""
+
+from __future__ import annotations
 import logging
 from uuid import UUID
 
@@ -12,6 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 async def project_session(session_id: UUID) -> None:
+    """将会话行与 turn 统计 UPSERT 到 ``session_views``。
+
+    参数:
+        session_id: 会话 UUID。
+
+    返回:
+        无；会话不存在时静默返回。
+    """
     pool = await get_pool()
     session = await pool.fetchrow(
         "SELECT id, default_scenario_id, status, context_summary FROM sessions WHERE id = $1",
@@ -64,6 +76,14 @@ async def project_session(session_id: UUID) -> None:
 
 
 async def session_view_needs_projection(session_id: UUID) -> bool:
+    """判断 session/turn 源表是否比 ``session_views.updated_at`` 更新。
+
+    参数:
+        session_id: 会话 UUID。
+
+    返回:
+        True 需要重投影。
+    """
     pool = await get_pool()
     view = await pool.fetchrow(
         "SELECT updated_at FROM session_views WHERE session_id = $1",
@@ -90,6 +110,14 @@ async def session_view_needs_projection(session_id: UUID) -> bool:
 
 
 async def build_session_view(session_id: UUID) -> SessionView | None:
+    """按需投影并返回 ``SessionView`` Pydantic 模型。
+
+    参数:
+        session_id: 会话 UUID。
+
+    返回:
+        SessionView；无视图行时为 None。
+    """
     if await session_view_needs_projection(session_id):
         await project_session(session_id)
 
@@ -154,7 +182,14 @@ async def reconcile_lagging_projections() -> int:
 
 
 async def reconcile_stale_turns() -> int:
-    """Fix turns stuck in running when terminal events already exist."""
+    """修复已有终态事件但 turn 仍非终态的滞后投影。
+
+    参数:
+        无。
+
+    返回:
+        本批 ``project_turn`` 调用次数（上限 ``_RECONCILE_BATCH_LIMIT``）。
+    """
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -175,4 +210,9 @@ async def reconcile_stale_turns() -> int:
 
 
 async def project_session_after_turn(session_id: UUID) -> None:
+    """Turn 投影后的会话视图刷新快捷入口。
+
+    参数:
+        session_id: 会话 UUID。
+    """
     await project_session(session_id)

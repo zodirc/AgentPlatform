@@ -1,4 +1,7 @@
+"""诊断/位置格式化、ruff concise 解析与多源合并。"""
+
 from __future__ import annotations
+
 
 import re
 from collections import defaultdict
@@ -11,6 +14,7 @@ _RUFF_LINE_RE = re.compile(
 
 
 def lsp_severity_to_str(value: int | None) -> str:
+    """作用：LSP severity 整数 → 字符串。"""
     # LSP DiagnosticSeverity: 1 Error, 2 Warning, 3 Information, 4 Hint
     if value == 1:
         return "error"
@@ -22,6 +26,7 @@ def lsp_severity_to_str(value: int | None) -> str:
 
 
 def ruff_code_severity(code: str) -> str:
+    """作用：ruff 规则码 → severity。"""
     if not code:
         return "warning"
     head = code[0].upper()
@@ -35,6 +40,7 @@ def ruff_code_severity(code: str) -> str:
 
 
 def parse_ruff_concise_line(line: str, *, default_path: str = ".") -> Issue | None:
+    """作用：解析 ruff concise 输出为 Issue。"""
     text = line.strip()
     if not text:
         return None
@@ -68,7 +74,7 @@ def _dedupe_key(issue: Issue) -> tuple[str, int, str]:
 
 
 def merge_issues(*groups: list[Issue]) -> list[Issue]:
-    """Merge LSP ∪ CLI issues; prefer richer (typed LSP) when keys collide."""
+    """作用：多源 Issue 去重合并。"""
     best: dict[tuple[str, int, str], Issue] = {}
     for group in groups:
         for issue in group:
@@ -100,6 +106,7 @@ def merge_issues(*groups: list[Issue]) -> list[Issue]:
 
 
 def format_diagnostics_lines(issues: list[Issue], *, limit: int = 200) -> list[str]:
+    """作用：Issue → 可读文本行。"""
     lines: list[str] = []
     for issue in issues[:limit]:
         code = issue.code or "diag"
@@ -112,6 +119,7 @@ def format_diagnostics_lines(issues: list[Issue], *, limit: int = 200) -> list[s
 
 
 def format_locations_lines(locations: list[Location], *, limit: int = 200) -> list[str]:
+    """作用：Location → 可读文本行。"""
     lines: list[str] = []
     for loc in locations[:limit]:
         snippet = (loc.snippet or "").strip()
@@ -127,7 +135,7 @@ def aggregate_refs_by_file(
     *,
     max_refs: int,
 ) -> tuple[list[Location], list[str], bool]:
-    """Cap references; overflow becomes per-file pointers."""
+    """作用：引用 Location 按文件分组计数。"""
     if len(locations) <= max_refs:
         return locations, [], False
     kept = locations[:max_refs]

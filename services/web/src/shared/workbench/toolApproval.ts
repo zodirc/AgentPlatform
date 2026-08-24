@@ -1,6 +1,20 @@
-export type ApprovalToolKind =
-  "write_file" | "run_command" | "edit_file" | "run_tests" | "generic";
+/**
+ * 工具审批 UI 辅助：按工具类型生成文案、解析事件、提取命令前缀。
+ */
 
+/** 待审批工具的分类，用于差异化展示批准按钮与说明。 */
+export type ApprovalToolKind =
+  | "write_file"
+  | "run_command"
+  | "edit_file"
+  | "run_tests"
+  | "generic";
+
+/**
+ * 将后端 tool_name 映射为审批 UI 分类。
+ * @param toolName 工具名称，未知时归为 generic
+ * @returns 审批展示用的工具类别
+ */
 export function approvalToolKind(
   toolName: string | null | undefined,
 ): ApprovalToolKind {
@@ -12,6 +26,11 @@ export function approvalToolKind(
   return "generic";
 }
 
+/**
+ * 按工具类型返回审批横幅的标题、说明与批准按钮文案。
+ * @param toolName 待审批工具名
+ * @returns 面向用户的审批 UI 文案
+ */
 export function approvalCopy(toolName: string | null | undefined): {
   title: string;
   description: string;
@@ -56,6 +75,11 @@ export function approvalCopy(toolName: string | null | undefined): {
   };
 }
 
+/**
+ * 从事件流中找出尚未被 approval.resolved 消掉的最后一次 approval.requested。
+ * @param events 回合事件列表（按时间顺序）
+ * @returns 仍待处理的审批请求事件，若无则 undefined
+ */
 export function lastApprovalEvent<
   T extends { type: string; payload?: Record<string, unknown> },
 >(events: T[]): T | undefined {
@@ -75,7 +99,13 @@ export function lastApprovalEvent<
   return pending;
 }
 
-/** One-line subject for the sticky approval bar (path or command). */
+/**
+ * 审批条一行摘要：命令类显示 command，文件类显示 path。
+ * @param toolName 工具名
+ * @param args 工具调用参数
+ * @param path 可选的文件路径（优先于 args.path）
+ * @returns 单行展示文本
+ */
 export function approvalDetailLine(
   toolName: string | null | undefined,
   args: Record<string, unknown> | undefined,
@@ -89,7 +119,11 @@ export function approvalDetailLine(
   return resolvedPath || (toolName ?? "").trim();
 }
 
-/** First token of a shell command, used as the default allow-list prefix. */
+/**
+ * 从 shell 命令提取首个 token，作为「加入允许列表」的默认前缀。
+ * @param command 完整命令字符串
+ * @returns 首个词（空白归一化后），空命令返回 ""
+ */
 export function defaultPrefixFromCommand(command: string): string {
   const norm = command.replace(/\s+/g, " ").trim();
   if (!norm) return "";

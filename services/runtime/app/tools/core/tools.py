@@ -1,3 +1,10 @@
+"""工具门面（facade）：统一路径解析与跨模块依赖注入。
+
+``bootstrap`` 注册表默认从此模块 re-export 公开 handler（``read_file``、``edit_file``、
+``search_sources`` 等）。部分 wrapper 在调用实现前临时 monkeypatch 子模块内的
+路径/诊断/检索辅助函数，使各 ``core/*.py`` 可独立单测而不重复绑定 workspace 根。
+"""
+
 from __future__ import annotations
 
 from app.settings import settings
@@ -52,6 +59,16 @@ from app.writing.signals.assemble import evaluate_writing_fragment, writing_rubr
 
 
 def _span_apply_precheck(path: str, old_text: str, new_text: str):
+    """门面版 span 预检：注入门面 ``_resolve_path`` 后委托 ``patch_tools``。
+
+    参数:
+        path: 工作区相对路径。
+        old_text: 待替换原文 span。
+        new_text: 替换后 span。
+
+    返回:
+        与 ``patch_tools._span_apply_precheck`` 相同结构的 dict。
+    """
     original = _patch_tools._resolve_path
     _patch_tools._resolve_path = _resolve_path
     try:
@@ -61,6 +78,14 @@ def _span_apply_precheck(path: str, old_text: str, new_text: str):
 
 
 async def search_sources(*args, **kwargs):
+    """门面 ``search_sources``：注入门面侧 query 分词与 keyword 实现。
+
+    参数:
+        与 ``sources_search.search_sources`` 相同（``query``/``limit``/``path_prefix`` 等）。
+
+    返回:
+        检索结果 dict（含 ``hits``/``retrieval``/``audit`` 等）。
+    """
     originals = (
         _sources_search._distinctive_query_terms,
         _sources_search._search_sources_keyword,
@@ -77,6 +102,14 @@ async def search_sources(*args, **kwargs):
 
 
 async def edit_file(*args, **kwargs):
+    """门面 ``edit_file``：注入门面侧 ``_file_diagnostics_issues`` 绑定。
+
+    参数:
+        与 ``edit_tools.edit_file`` 相同（``path``/``old_text``/``new_text`` 等）。
+
+    返回:
+        编辑结果 dict（含 ``impact``/``checks``/``related_tests`` 等）。
+    """
     original = _edit_tools._file_diagnostics_issues
     _edit_tools._file_diagnostics_issues = _file_diagnostics_issues
     try:

@@ -1,12 +1,6 @@
-"""CLI entry for Turn-外 sources index sync with visible progress.
+"""Turn 外 sources 索引 sync CLI（RAG 摄取入口）。
 
-Used by ``make sync-sources`` / ``make sync-ops-indexes`` / ``make sync-ops-cmteb``.
-
-Default ``--via server`` triggers sync inside the running uvicorn process so the
-GPU embedder is not loaded a second time. ``--via local`` keeps the legacy
-in-process path (tests / no runtime HTTP).
-
-Default ``--takeover`` cancels any prior sync and resumes via committed batches.
+``make sync-sources`` / sync-ops-indexes 等；默认 ``--via server`` 复用 uvicorn embedder。
 """
 
 from __future__ import annotations
@@ -167,6 +161,7 @@ def _run_local(mode: str, reason: str) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """解析 CLI：takeover → server/local sync → JSON 结果 stdout。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reason", default="make")
     parser.add_argument(

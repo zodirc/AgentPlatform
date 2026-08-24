@@ -1,3 +1,17 @@
+"""Postgres + pgvector 源文档检索存储（RAG 持久化与查询后端）。
+
+职责：
+- DDL：``source_files`` / ``source_chunks`` / ``source_docs`` / HNSW / FTS GIN
+- Turn 外 ``sync``：扫描 mtime、切块、批量嵌入、写入与 scope stamp
+- 查询：向量 ANN、BM25/FTS、RRF 混合、可选两级 doc+chunk、rerank
+
+在 RAG 链路中的位置：
+  ``index_scheduler`` / ``sync_cli`` → 本模块 ``sync`` → DB
+  ``search_sources`` → ``store.get_sources_store`` → 本模块 ``search*``
+
+与 JSON 后端（``vector_index``）接口对齐；Ops L1 走独立 DSN/schema（``ops_plane``）。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -88,7 +102,14 @@ def _safe_schema(name: str) -> str:
 
 
 def index_scope_id(*, work_id: str | None, visibility: str) -> str:
-    """Stable id for per-work / seed index stamps in ``source_index_meta``."""
+    """生成 per-work/seed 索引 stamp 的稳定 scope id。
+
+    参数:
+        work_id: Work UUID 字符串；seed 时为 None。
+        visibility: ``seed`` | ``private`` 等。
+    返回:
+        ``seed``、``private-unscoped`` 或 ``work:{id}``。
+    """
     vis = (visibility or "private").strip() or "private"
     if vis == "seed":
         return "seed"
@@ -99,11 +120,16 @@ def index_scope_id(*, work_id: str | None, visibility: str) -> str:
 
 
 def scope_meta_key(scope_id: str, field: str) -> str:
+    """``source_index_meta`` 中 scope 字段键名。"""
     return f"scope:{scope_id}:{field}"
 
 
 def current_index_stamp() -> dict[str, str]:
-    """Embed-space fingerprint that must match for incremental sync to skip."""
+    """当前嵌入空间指纹；增量 sync 跳过条件。
+
+    返回:
+        version、embedding_model、dimensions、backend 四元组字符串 dict。
+    """
     return {
         "version": str(effective_index_version()),
         "embedding_model": (settings.embedding_model or "").strip(),
@@ -113,7 +139,7 @@ def current_index_stamp() -> dict[str, str]:
 
 
 def scope_stamp_mismatch(stored: dict[str, str], current: dict[str, str] | None = None) -> bool:
-    """True when scope has never been stamped or embed space drifted."""
+    """scope 从未 stamp 或嵌入空间与当前配置不一致时为 True（触发 force reindex）。"""
     want = current or current_index_stamp()
     for field in _SCOPE_STAMP_FIELDS:
         got = (stored.get(field) or "").strip()
@@ -233,10 +259,9 @@ def _prepare_hnsw_filtered_scan(cur: Any, *, limit: int) -> None:
 
 
 class PgvectorSourceRetrievalStore:
-    """Postgres + pgvector ANN backend (docs/21 Q8 · docs/13 S3 A10).
+    """Postgres + pgvector ANN 检索后端。
 
-    Writes happen only via ``sync`` (worker / admin rebuild). Query path is
-    load-schema + ANN / FTS — never rebuilds the index.
+    写入仅经 ``sync``（worker/admin）；查询路径只读 schema + ANN/FTS，不重建索引。
     """
 
     backend = "pgvector"
@@ -248,6 +273,11 @@ class PgvectorSourceRetrievalStore:
         dimensions: int | None = None,
         schema: str | None = None,
     ) -> None:
+        """参数:
+            database_url: psycopg 连接串。
+            dimensions: 向量维数；None 时从 ``effective_embedding_dimensions`` 解析。
+            schema: PG schema；默认 ``settings.retrieval_pg_schema``。
+        """
         self._database_url = database_url
         self._schema = _safe_schema(
             schema if schema is not None else settings.retrieval_pg_schema
@@ -282,6 +312,7 @@ class PgvectorSourceRetrievalStore:
         return conn
 
     def ensure_schema(self) -> None:
+        """创建/迁移表、扩展、HNSW 与 FTS 索引（幂等）。"""
         if self._ready:
             return
         dim = self._dimensions
@@ -497,11 +528,15 @@ class PgvectorSourceRetrievalStore:
         return raw or None
 
     def load(self) -> None:
-        """Warm the database schema without copying source chunks into memory."""
+        """预热 schema，不把 chunk 全量载入进程内存。"""
         self.ensure_schema()
 
     def delete_orphan_private_rows(self) -> dict[str, int]:
-        """Remove private rows with NULL work_id (pre-MT5c leakage surface)."""
+        """删除 ``work_id IS NULL`` 的 private 行（MT5c 泄漏面清理）。
+
+        返回:
+            ``orphan_chunks_deleted`` / ``orphan_files_deleted`` 计数。
+        """
         self.ensure_schema()
         with self._connect() as conn:
             with conn.cursor() as cur:
@@ -531,6 +566,17 @@ class PgvectorSourceRetrievalStore:
         visibility: str = "private",
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        """增量/全量同步 ``sources_dir`` 下可索引文件到 pgvector。
+
+        参数:
+            sources_dir: 待扫描源目录。
+            workspace_root: 用于计算相对路径与 storage_path。
+            work_id: private 同步必填；seed 为 None。
+            visibility: ``seed`` 或 ``private``。
+            owner_user_id: 可选行级 owner。
+        返回:
+            indexed_files、chunks、added/updated/skipped/removed、reindexed 等统计。
+        """
         import logging
         import time
 
@@ -1219,6 +1265,7 @@ class PgvectorSourceRetrievalStore:
         ]
 
     def search_vector(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
+        """chunk 级余弦 ANN；按 tenant context 过滤 seed/work。"""
         self.ensure_schema()
         query_vec = get_embedder().embed(query)
         if not query_vec or len(query_vec) != self._dimensions:
@@ -1316,6 +1363,7 @@ class PgvectorSourceRetrievalStore:
         return kept
 
     def search_bm25(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
+        """BM25：有内存 cache 时走 Okapi；否则 Postgres FTS（可选 Okapi 重排）。"""
         # Retain the cache path for focused unit tests and callers that explicitly
         # provide a small cache. Normal pgvector requests query FTS directly.
         if self._chunk_cache:
@@ -1456,6 +1504,7 @@ class PgvectorSourceRetrievalStore:
         ]
 
     def search_hybrid(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
+        """向量 + BM25 → RRF 融合 → 可选 rerank；profile 开启时并行 doc+chunk 两级。"""
         from app.retrieval.profile import active_retrieval_profile
 
         profile = active_retrieval_profile()
@@ -1720,6 +1769,7 @@ class PgvectorSourceRetrievalStore:
         return out
 
     def search(self, query: str, *, limit: int = 10, mode: str | None = None) -> list[ChunkHit]:
+        """统一检索入口：keyword / vector / hybrid（默认 settings.retrieval_mode）。"""
         resolved = (mode or settings.retrieval_mode).lower()
         if resolved == "keyword":
             return self.search_bm25(query, limit=limit)

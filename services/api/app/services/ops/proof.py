@@ -1,5 +1,7 @@
 """CI-parity proof runner for Ops Eval Console (docs/29 suite=ci).
 
+English: CI-parity proof runner for Ops Eval Console (docs/29 suite=ci).
+
 Runs the same steps as `.github/workflows/ci.yml` via a sibling container with
 the repo bind-mounted at the host path (so `docker compose` relative mounts work).
 """
@@ -24,6 +26,8 @@ PROOF_IMAGE = "agent-ops-proof:local"
 API_CONTAINER = "agent-api"
 
 OnLine = Callable[[str], None]
+"""Proof 子进程 stdout 行回调类型。"""
+
 
 # Active proof processes keyed by container name (for stop from another coroutine).
 _ACTIVE_PROOF: dict[str, subprocess.Popen] = {}
@@ -32,6 +36,8 @@ _ACTIVE_PROOF_LOCK = threading.Lock()
 
 @dataclass(frozen=True)
 class ProofCase:
+    """CI proof 单步用例描述（id / ci_proof.sh step / 说明）。"""
+
     case_id: str
     step: str
     description: str
@@ -53,6 +59,13 @@ CI_PROOF_CASES: tuple[ProofCase, ...] = (
 
 
 def list_ci_proof_cases() -> list[dict[str, str]]:
+    """列出与 ``ci.yml`` 对齐的 CI proof 步骤元数据。
+
+    English: Return CI_PROOF_CASES as id/step/description dicts for Ops UI.
+
+    返回:
+        静态 proof case 描述列表。
+    """
     return [
         {"id": c.case_id, "step": c.step, "description": c.description}
         for c in CI_PROOF_CASES
@@ -123,6 +136,13 @@ def repo_client_path() -> str | None:
 
 
 def proof_available() -> bool:
+    """CI proof 是否可用（docker socket + 可解析的 repo 挂载路径）。
+
+    English: True when docker socket and both repo host/client paths resolve.
+
+    返回:
+        可启动 ``agent-ops-proof`` 容器时为 True。
+    """
     if not docker_socket_available():
         return False
     return repo_host_path() is not None and repo_client_path() is not None
@@ -389,10 +409,22 @@ def _kill_proof_container(name: str, proc: subprocess.Popen[str] | None) -> None
 
 
 def run_proof_step_collect(step: str, *, gate_skip_restore: str | None = None) -> tuple[int, list[str]]:
+    """运行单步 CI proof 并收集 stdout 行。
+
+    English: Run one ci_proof.sh step and return exit code plus captured lines.
+
+    参数:
+        step: ``ci_proof.sh`` 步骤名（如 ``unit.runtime``、``gate``）。
+        gate_skip_restore: 可选，传给 gate 步骤的环境旋钮。
+
+    返回:
+        ``(exit_code, lines)``。
+    """
     lines: list[str] = []
     lock = threading.Lock()
 
     def on_line(msg: str) -> None:
+        """收集 proof 输出行到线程安全列表。"""
         with lock:
             lines.append(msg)
 

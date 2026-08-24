@@ -1,14 +1,19 @@
-"""Work-surface visibility — shared by Web list API and agent ``list_dir``."""
+
+"""Work 表面可见性：Web list API 与 agent list_dir 共享过滤规则。"""
 
 from __future__ import annotations
 
 
 def normalized_workspace_rel(path: str) -> str:
+    """作用：规范化为无前导斜杠的 POSIX 相对路径。"""
     return str(path or "").strip().lstrip("/").replace("\\", "/")
 
 
 def is_work_surface_hidden(path: str) -> bool:
-    """Harness / WN1 pending — on disk for known-path tools; hidden from directory listings."""
+    """作用：is_work_surface_hidden 公开 API。
+
+参数：
+    ``path``"""
     rel = normalized_workspace_rel(path)
     if rel == ".agent" or rel.startswith(".agent/"):
         return True
@@ -18,6 +23,7 @@ def is_work_surface_hidden(path: str) -> bool:
 
 
 def filter_work_surface_list_entries(parent: str, entries: list[str]) -> list[str]:
+    """作用：过滤 list_dir 结果，隐藏 harness 内部路径。"""
     parent_rel = normalized_workspace_rel(parent)
     if parent_rel in {"", "."}:
         parent_rel = ""
@@ -38,12 +44,10 @@ def apply_seed_listing(
     seed_visible: bool,
     seed_present: bool,
 ) -> list[str]:
-    """Show standing ``sources/seed/`` on isolated Works; hide when opted out.
+    """作用：apply_seed_listing 公开 API。
 
-    Isolated Work roots expose seed as a directory symlink. ``list_dir`` uses
-    ``is_dir(follow_symlinks=False)``, so that entry looks like a file and the
-    library walker never descends — while retrieval still hits the seed index.
-    """
+参数：
+    ``path``、``entries``"""
     rel = normalized_workspace_rel(path)
     if rel in {"", "."}:
         rel = ""

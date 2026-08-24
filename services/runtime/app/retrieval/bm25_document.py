@@ -1,16 +1,8 @@
-"""RET-11(b): build the lexical document string for BM25 / Postgres FTS.
+"""BM25/Postgres FTS 文档串与查询构造（RAG 词法 lane 底层）。
 
-Pseudo-queries live in ``bm25_extra`` (path-level source of truth on
-``source_files``, denormalized onto chunks). They must never be fed from
-official qrels / gold queries.
-
-FTS weights (v2): body/title = A, bm25_extra = C. Equal weight (v1) let
-pseudo-queries dominate hybrid BM25 and hurt FiQA ranking in free smoke
-``406bb48c`` (macro −4.7pp, FiQA −8pp).
-
-Query side: SciFact-style long claims under ``plainto_tsquery`` (AND) leave
-the BM25 lane empty (~90% empty FTS pools on micro). Prefer weighted OR
-via ``to_tsquery`` — entity/long tokens weight A, other content tokens D.
+``bm25_extra`` 存 path 级伪查询（doc2query 离线写入），FTS 权重：正文 A、extra C。
+查询侧 ``build_weighted_or_tsquery`` 做强 token OR，避免 SciFact 长 claim 空池。
+在 RAG 链路中的位置：pgvector ``search_bm25``、``BM25Scorer``、GIN 索引 DDL。
 """
 
 from __future__ import annotations
@@ -116,16 +108,7 @@ def _is_strong_fts_token(token: str) -> bool:
 
 
 def build_weighted_or_tsquery(query: str) -> str | None:
-    """Build ``to_tsquery('english', …)`` as **strong-token OR** (BM25-style should).
-
-    Mature shape: match any distinctive term; rank via ts_rank_cd / Okapi.
-    Short ordinary tokens are omitted from the match clause (they were the
-    noise that hurt free nDCG when every content word was OR'd equally).
-
-    Fallback: if no strong tokens, soft-OR the longest remaining tokens (≥4)
-    at weight D so the lane does not go fully empty. Returns None only when
-    tokenization yields nothing (caller may use plainto AND).
-    """
+    """构造 ``to_tsquery('english', …)`` 强 token OR 子句；无可选 token 时 None。"""
     raw = (query or "").strip()
     if not raw:
         return None
@@ -156,7 +139,7 @@ def bm25_document_text(
     text: str = "",
     bm25_extra: str = "",
 ) -> str:
-    """In-memory BM25 body (tests / cache). Extra still appended for recall."""
+    """内存 BM25 文档串（测试/cache）：title + text + bm25_extra 拼接。"""
     parts = [
         str(section_title or "").strip(),
         str(text or "").strip(),
@@ -166,7 +149,7 @@ def bm25_document_text(
 
 
 def prune_bm25_extra_lines(extra: str) -> str:
-    """Drop short / thin pseudo-query lines that add BM25 noise."""
+    """裁剪过短伪查询行，降低 BM25 噪声。"""
     kept: list[str] = []
     for line in str(extra or "").splitlines():
         s = line.strip()

@@ -1,3 +1,5 @@
+"""writing_signals 综合评分。"""
+
 from __future__ import annotations
 
 import re
@@ -122,6 +124,13 @@ def _dimension_scores(
 
 
 def re_heading(text: str) -> bool:
+    """是否含 MD 标题。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     return bool(re.search(r"^#{1,3}\s", text or "", re.M))
 
 
@@ -342,6 +351,13 @@ def score_writing_fragment(
     prefs: dict[str, Any],
     space: MetricSpace | None = None,
 ) -> dict[str, Any]:
+    """完整片段评分含 repair。
+    
+    参数:
+        text/fragment_declared/section_id/prefs/space。
+    
+    返回:
+        dict。"""
     from app.writing.signals.repair import (
         WEAK_NET,
         build_repair_span,

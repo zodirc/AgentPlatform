@@ -1,7 +1,4 @@
-"""Writing reward-utilization ledger from product turn_events (no I/O).
-
-Join tool.completed writing probes with usage.reported. Not an official_suite.
-"""
+"""turn_events 奖励利用率汇总。"""
 
 from __future__ import annotations
 
@@ -43,7 +40,13 @@ def summarize_prose_cycle(
     input_tokens: int = 0,
     output_tokens: int = 0,
 ) -> dict[str, Any] | None:
-    """First scored draft vs later patch on one chapter (or one Turn if unsplit)."""
+    """单章 prose 周期摘要。
+    
+    参数:
+        tools/input_tokens/output_tokens。
+    
+    返回:
+        dict|None。"""
     scored = [p for p in tools if p.get("net_signal") is not None]
     if not scored:
         return None
@@ -111,7 +114,13 @@ def summarize_prose_cycle(
 
 
 def summarize_turn(events: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """One Turn: first scored draft vs later patch. None if no writing score."""
+    """单 Turn 摘要。
+    
+    参数:
+        events。
+    
+    返回:
+        dict|None。"""
     ordered = sorted(
         events,
         key=lambda e: (
@@ -156,6 +165,13 @@ def _tools_by_section(tools: list[dict[str, Any]]) -> dict[str, list[dict[str, A
 
 
 def summarize_writing_turns(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """跨 Turn 聚合。
+    
+    参数:
+        events。
+    
+    返回:
+        dict。"""
     by_turn: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
         turn_id = str(event.get("turn_id") or "").strip()

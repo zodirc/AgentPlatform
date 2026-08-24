@@ -1,4 +1,7 @@
+"""写入前高置信密钥扫描，超时放行并异步复检（A16）。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import logging
@@ -29,6 +32,7 @@ _OVERLAP = 256
 
 @dataclass(frozen=True)
 class SecretScanResult:
+    """作用：密钥扫描结果（findings/timed_out/blocked）。"""
     findings: tuple[str, ...]
     timed_out: bool
     elapsed_ms: float
@@ -39,11 +43,7 @@ class SecretScanResult:
 
 
 def scan_text_for_secrets(text: str, *, timeout_ms: float) -> SecretScanResult:
-    """Synchronous scan with a hard wall-clock budget.
-
-    On timeout: return empty findings + timed_out=True (caller may allow write
-    and schedule an async rescan). Matches found within budget block the write.
-    """
+    """作用：同步扫描，硬 wall-clock 预算。"""
     start = time.perf_counter()
     deadline = start + max(0.0, timeout_ms) / 1000.0
     if not text:
@@ -97,10 +97,7 @@ def _async_rescan(text: str, *, path: str) -> None:
 
 
 def gate_write_content(content: str, *, path: str) -> dict | None:
-    """Return an error payload if the write should be blocked; else None.
-
-    Timeout → allow write, log, and fire async rescan (non-blocking).
-    """
+    """作用：阻断写入或超时放行并异步复检。"""
     from app.settings import settings
 
     if not settings.secret_scan_enabled:

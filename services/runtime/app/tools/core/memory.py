@@ -1,3 +1,9 @@
+"""Agent 偏好/笔记记忆：``remember`` 持久化、``recall`` 按需向量召回。
+
+与 ``sources`` RAG 分离：按 ``namespace`` 分桶存于 ``data/memory/{work_id}/memories.json``，
+嵌入向量 + 重要性排序，上限 500 条；不会每 turn 自动注入上下文。
+"""
+
 from __future__ import annotations
 
 import json
@@ -11,6 +17,7 @@ from app.settings import settings
 
 
 def _memory_path() -> Path:
+    """返回当前 Work 的记忆 JSON 路径（无 work_id 时用全局默认）。"""
     from app.tenant_context import current_work_id
 
     work_id = current_work_id()
@@ -21,6 +28,7 @@ def _memory_path() -> Path:
 
 
 def _load() -> list[dict[str, Any]]:
+    """从磁盘加载记忆列表；文件缺失或损坏时返回空列表。"""
     path = _memory_path()
     if not path.is_file():
         return []
@@ -32,6 +40,7 @@ def _load() -> list[dict[str, Any]]:
 
 
 def _save(items: list[dict[str, Any]]) -> None:
+    """将记忆列表原子写入 ``memories.json``（自动创建父目录）。"""
     path = _memory_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -43,7 +52,16 @@ async def remember(
     importance: float = 0.5,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Persist a preference/note into the memory store (not sources RAG)."""
+    """将偏好/笔记写入记忆库（非 sources RAG）。
+
+    参数:
+        text: 待记忆正文。
+        namespace: 命名空间；``sources``/``rag`` 保留不可用。
+        importance: 0–1 重要性，影响截断保留与召回加权。
+
+    返回:
+        含 ``id``/``namespace``/``status``/``summary`` 的 dict；空 text 或非法 namespace 时 ``status=failed``。
+    """
     body = (text or "").strip()
     if not body:
         return {"error": "text is required", "status": "failed"}
@@ -84,7 +102,16 @@ async def recall(
     limit: int = 5,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """On-demand memory recall — never called automatically each turn."""
+    """按需向量召回记忆（不会每 turn 自动调用）。
+
+    参数:
+        query: 查询文本。
+        namespace: 限定命名空间。
+        limit: 返回条数上限（1–20）。
+
+    返回:
+        含 ``hits``（``id``/``text``/``score``）与 ``summary`` 的 dict。
+    """
     q = (query or "").strip()
     if not q:
         return {"error": "query is required", "hits": [], "status": "failed"}

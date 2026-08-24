@@ -1,4 +1,7 @@
+"""离线 prose/代码编辑启发式 rubric（禁止 Turn 热路径）。"""
+
 from __future__ import annotations
+
 
 import re
 from typing import Sequence
@@ -55,11 +58,7 @@ _SYNOPSIS_CUE = re.compile(
 
 
 def score_rubric(text: str) -> dict:
-    """Heuristic fidelity / structure / style scores in [0, 1] (docs/13 S3 A5; docs/14 WQ4).
-
-    Offline / sample only — never invoke on the turn hot path.
-    Also reports WN2 dimensions: meta_knowing_rate, glue_rate, scene_ratio.
-    """
+    """作用：prose 启发式 fidelity/structure/style 评分。"""
     stripped = text.strip()
     length = len(stripped)
     structure = 0.4
@@ -143,16 +142,7 @@ def score_code_rubric(
     new_text: str = "",
     whole_file_write: bool = False,
 ) -> dict:
-    """Offline code-edit quality heuristics (docs/30 CQ3). Never on the hot path.
-
-    Dimensions (higher is better unless noted):
-    - lint_followed: write/edit/patch followed later by read_lints
-    - tests_followed: write tools followed later by run_tests (soft; 1.0 if no write)
-    - minimal_diff: surgical span vs whole-file rewrite
-    - re_read_before_retry: if propose_patch appears twice, a read_file sits between
-    - single_edit_path: penalize propose_patch + edit_file churn in one turn
-    - read_thrift: penalize excessive read_file calls (post-complete paging proxy)
-    """
+    """作用：代码编辑工具序列质量启发式。"""
     names = [str(n) for n in tool_names]
     write_tools = {"write_file", "edit_file", "propose_patch"}
     write_idxs = [i for i, n in enumerate(names) if n in write_tools]

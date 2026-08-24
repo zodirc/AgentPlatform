@@ -1,3 +1,9 @@
+"""业务记录多表检索占位（docs/13 S3 A20 / docs/17）。
+
+``search_records`` 为确定性规则路由 stub：无 LLM 路由、无图节点；
+真实通道后续将并行竞速（≤300ms 超时）并套 ACL 过滤。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -10,10 +16,15 @@ async def search_records(
     limit: int = 10,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Multi-table recall stub (docs/13 S3 A20 / docs/17).
+    """多表业务记录检索 stub（docs/13 / docs/17）。
 
-    Deterministic rule router placeholder: no LLM routing, no graph node.
-    Real channels will race with ≤300ms timeouts and ACL filters later.
+    参数:
+        query: 检索词。
+        channel: ``auto`` 时并行 crm/orders 占位；否则单通道。
+        limit: 命中上限（当前 stub 恒为 0）。
+
+    返回:
+        ``status=unimplemented`` 与 ``channels`` 并行 scaffold 结果；空 query 时 ``failed``。
     """
     q = (query or "").strip()
     if not q:
@@ -28,6 +39,7 @@ async def search_records(
 
     # Simulate parallel channel scaffold with hard timeout budget.
     async def _empty_channel(name: str) -> dict[str, Any]:
+        """占位通道：立即返回空 hits（模拟 ≤300ms 并行 budget）。"""
         await asyncio.sleep(0)
         return {"channel": name, "hits": [], "degraded": False}
 

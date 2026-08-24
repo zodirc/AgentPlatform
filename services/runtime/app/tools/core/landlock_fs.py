@@ -1,10 +1,7 @@
-"""Landlock FS helpers for tool exec (docs/36 · C0/C1).
+"""Landlock FS 辅助：工具 exec 进程内写 jail（docs/36 · C0/C1）。
 
-Applies a write-jail in the current process (intended for preexec_fn / child
-probe): system paths readable+executable; RW only under ``work_root``.
-
-Requires Linux kernel ≥ 5.13 with Landlock LSM. Probe returns False on ENOSYS
-(e.g. RHEL 8 / 4.18) so callers can fall back to bwrap / off.
+在当前进程（preexec_fn / 子进程探针）施加写限制：系统路径可读可执行；
+仅 ``work_root`` 下可写。需 Linux ≥5.13；ENOSYS 时探针返回 False 供 bwrap/off 降级。
 """
 
 from __future__ import annotations
@@ -61,10 +58,12 @@ _FS_WRITE_BASE = (
 
 
 class _RulesetAttr(ctypes.Structure):
+    """Landlock ``landlock_ruleset_attr`` 用户态镜像。"""
     _fields_ = [("handled_access_fs", ctypes.c_uint64)]
 
 
 class _PathBeneathAttr(ctypes.Structure):
+    """Landlock ``landlock_path_beneath_attr`` 用户态镜像。"""
     _fields_ = [
         ("allowed_access", ctypes.c_uint64),
         ("parent_fd", ctypes.c_int32),
@@ -72,13 +71,14 @@ class _PathBeneathAttr(ctypes.Structure):
 
 
 def _libc() -> ctypes.CDLL:
+    """加载 libc 并配置 ``syscall`` restype。"""
     lib = ctypes.CDLL(None, use_errno=True)
     lib.syscall.restype = ctypes.c_long
     return lib
 
 
 def landlock_abi_version() -> int:
-    """Return Landlock ABI version, or raise OSError if unavailable."""
+    """探测 Landlock ABI 版本；非 Linux 或不可用时抛 ``OSError``。"""
     if not sys.platform.startswith("linux"):
         raise OSError(errno.ENOSYS, "Landlock requires Linux")
     lib = _libc()
@@ -95,6 +95,7 @@ def landlock_abi_version() -> int:
 
 
 def _handled_access_fs(abi: int) -> int:
+    """按 ABI 版本返回 ruleset 应声明的 FS 权限位掩码。"""
     handled = _FS_READ_EXEC | _FS_WRITE_BASE
     if abi >= 2:
         handled |= _FS_REFER
@@ -106,6 +107,7 @@ def _handled_access_fs(abi: int) -> int:
 
 
 def _read_exec_access(abi: int) -> int:
+    """全局只读+执行权限掩码（含 ABI≥2 的 REFER）。"""
     access = _FS_READ_EXEC
     if abi >= 2:
         access |= _FS_REFER
@@ -113,10 +115,12 @@ def _read_exec_access(abi: int) -> int:
 
 
 def _rw_access(abi: int) -> int:
+    """work_root 下读写权限掩码（与 handled 一致）。"""
     return _handled_access_fs(abi)
 
 
 def _add_path_beneath(lib: ctypes.CDLL, ruleset_fd: int, path: str, allowed: int) -> None:
+    """向 ruleset 添加 ``LANDLOCK_RULE_PATH_BENEATH`` 规则。"""
     fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
     try:
         attr = _PathBeneathAttr(allowed_access=allowed, parent_fd=fd)
@@ -135,7 +139,7 @@ def _add_path_beneath(lib: ctypes.CDLL, ruleset_fd: int, path: str, allowed: int
 
 
 def apply_landlock_fs(*, work_root: str | Path) -> None:
-    """Restrict the current thread: RW under work_root; RO+exec elsewhere via ``/``."""
+    """限制当前线程：``work_root`` 可写，其余经 ``/`` 规则只读可执行。"""
     root = str(Path(work_root).resolve())
     if not Path(root).is_dir():
         raise NotADirectoryError(root)

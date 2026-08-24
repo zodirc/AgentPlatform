@@ -1,3 +1,10 @@
+"""Turn 事件 payload 校验：热路径对高频 delta 做轻量结构检查。
+
+完整 jsonschema 校验在 CI/调试时通过 ``EVENT_PAYLOAD_VALIDATION_STRICT_DELTAS``
+开启；默认对 ``turn.token`` / ``tool.delta`` 等仅检查 ``delta``/``text`` 字段，
+避免 R3 热路径 CPU  burn。
+"""
+
 from __future__ import annotations
 
 import sys
@@ -62,6 +69,15 @@ def _light_validate_high_freq(event_type: str, payload: dict[str, Any]) -> None:
 
 
 def maybe_validate_event_payload(event_type: str, payload: dict[str, Any]) -> None:
+    """作用：按 settings 与事件类型决定是否校验 payload。
+
+    参数：
+        event_type: 契约事件类型（如 ``turn.token``）。
+        payload: 待写入 SSE/DB 的字典。
+
+    抛出：
+        EventPayloadValidationError: 结构不合法时。
+    """
     from app.settings import settings
 
     if not settings.event_payload_validation:

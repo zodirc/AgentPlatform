@@ -1,3 +1,9 @@
+"""Outbox 任务类型分派与具体 handler 实现。
+
+``projection.refresh`` / ``session.summary`` / ``sources.index_sync`` /
+``verify.sample``（及 ``critique.batch`` 别名）由 worker 调用。
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,24 +19,53 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_projection_refresh(payload: dict) -> None:
+    """将指定 turn 的事件流投影到 ``turn_views``。
+
+    参数:
+        payload: 须含 ``turn_id`` UUID 字符串。
+
+    返回:
+        无。
+    """
     turn_id = UUID(payload["turn_id"])
     await project_turn(turn_id)
 
 
 async def handle_sources_index_sync(_payload: dict) -> None:
+    """触发 runtime 全量/增量 sources 索引同步。
+
+    参数:
+        _payload: 当前未使用（保留扩展）。
+
+    返回:
+        无。
+    """
     client = RuntimeClient()
     await client.sync_sources_index()
 
 
 async def _session_turn_count(pool, session_id) -> int:
-    value = await pool.fetchval(
-        "SELECT COUNT(*)::int FROM turns WHERE session_id = $1",
-        session_id,
+    return int(
+        await pool.fetchval(
+            "SELECT COUNT(*)::int FROM turns WHERE session_id = $1",
+            session_id,
+        )
+        or 0
     )
-    return int(value or 0)
 
 
 async def handle_session_summary(payload: dict) -> None:
+    """Turn 完成后刷新会话 ``context_summary`` 并投影 ``session_views``。
+
+    跳过用户手动 compact 且 ``last_turn_id`` 已匹配的行；否则从
+    user_input/latest_output 启发式生成摘要 JSON。
+
+    参数:
+        payload: 须含 ``turn_id``。
+
+    返回:
+        无。
+    """
     turn_id = UUID(payload["turn_id"])
     await project_turn(turn_id)
     pool = await get_pool()
@@ -94,7 +129,14 @@ async def handle_session_summary(payload: dict) -> None:
 
 
 async def handle_verify_sample(payload: dict) -> None:
-    """Night/offline sample ≤5% of recent completed sessions (docs/13 S3 A4)."""
+    """夜间/离线抽样 ≤5% 近期会话做 verify-pass（docs/13 S3 A4）。
+
+    参数:
+        payload: 可选 ``sample_rate``（上限 0.05）、``limit`` 候选会话数。
+
+    返回:
+        无；单会话失败仅记日志。
+    """
     import random
 
     sample_rate = float(payload.get("sample_rate", 0.05))
@@ -140,6 +182,19 @@ HANDLERS = {
 
 
 async def dispatch_job(job_type: str, payload: dict) -> None:
+    """按 ``job_type`` 查找并 await 对应 handler。
+
+    参数:
+        job_type: ``HANDLERS`` 键名。
+        payload: 任务 JSON 载荷。
+
+    返回:
+        无。
+
+    异常:
+        ValueError: 未知 ``job_type``。
+        handler 内部异常向上传播（由 worker ``mark_failed`` 处理）。
+    """
     handler = HANDLERS.get(job_type)
     if handler is None:
         raise ValueError(f"unknown job type: {job_type}")

@@ -1,4 +1,10 @@
-"""Persist Ops Eval runs to Postgres (docs/29 history)."""
+"""Ops 评测 run 的 Postgres 持久化（docs/29 历史记录）。
+
+English: Persist Ops Eval runs to Postgres (docs/29 history).
+
+职责：将 Golden/Official 评测 run 的 status、cases、logs、model_meta 写入
+``ops_eval_runs``，供 Ops Console 列表/详情/清理 API 读取。不写 runtime 状态。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +26,15 @@ def _parse_ts(value: str | None) -> datetime | None:
 
 
 def summary_from_cases(cases: list[dict[str, Any]]) -> dict[str, int]:
+    """从 case 行列表汇总 pass/fail/skipped/pending 计数。
+
+    参数:
+        cases: 每条含 ``status`` 字段的 case dict（pass/fail/skipped/pending/running）。
+
+    返回:
+        含 ``total``、``pass``、``fail``、``skipped``、``pending`` 的计数 dict；
+        ``running`` 计入 ``pending``。
+    """
     return {
         "total": len(cases),
         "pass": sum(1 for c in cases if c.get("status") == "pass"),
@@ -30,6 +45,14 @@ def summary_from_cases(cases: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def model_meta_safe(model: dict[str, Any] | None) -> dict[str, Any]:
+    """提取可持久化的模型元数据， deliberately 省略 ``api_key``。
+
+    参数:
+        model: 评测请求里的 model 配置 dict，或 ``None``。
+
+    返回:
+        仅含 ``provider``、``model_name``、``base_url`` 的子集；空输入返回 ``{}``。
+    """
     if not model:
         return {}
     return {
@@ -41,6 +64,15 @@ def model_meta_safe(model: dict[str, Any] | None) -> dict[str, Any]:
 
 
 async def upsert_run(payload: dict[str, Any]) -> None:
+    """插入或更新一条 ops_eval_runs 记录（SSE 进度与终态均走此路径）。
+
+    参数:
+        payload: 含 ``id``、``status``、``mode``、可选 ``cases``/``logs``/``summary``/
+            ``model_meta``/``error``/时间戳等字段的 run 快照。
+
+    返回:
+        无；冲突时按 ``id`` 全量覆盖可变列。
+    """
     pool = await get_pool()
     run_id = UUID(str(payload["id"]))
     cases = list(payload.get("cases") or [])
@@ -87,6 +119,14 @@ async def upsert_run(payload: dict[str, Any]) -> None:
 
 
 async def load_run(run_id: str) -> dict[str, Any] | None:
+    """按 UUID 加载完整 run（含 cases 与 logs）。
+
+    参数:
+        run_id: run 的 UUID 字符串。
+
+    返回:
+        与 ``_row_to_dict(include_logs=True)`` 同形的 dict；非法 UUID 或不存在时 ``None``。
+    """
     pool = await get_pool()
     try:
         uid = UUID(run_id)
@@ -115,6 +155,19 @@ async def list_runs(
     suite: str | None = None,
     q: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
+    """分页列出评测 run（列表项不含 logs，仅 summary 级字段）。
+
+    参数:
+        limit: 每页条数，钳制在 1–100。
+        offset: 偏移。
+        status: 可选，按 run status 过滤。
+        mode: 可选，按 stub/live 等 mode 过滤。
+        suite: 可选，按 ``model_meta.suite`` 过滤；缺 suite 的 legacy 行视为 ``golden``。
+        q: 可选，对 run id 或 error 文本做 ILIKE 模糊搜索。
+
+    返回:
+        ``(rows, total)``：rows 为摘要 dict 列表，total 为匹配总数（分页前）。
+    """
     limit = max(1, min(limit, 100))
     offset = max(0, offset)
     clauses: list[str] = []
@@ -165,7 +218,14 @@ async def list_runs(
 
 
 async def delete_runs(*, suite: str | None = None) -> int:
-    """Delete ops_eval_runs rows. When suite is set, only that suite (model_meta)."""
+    """删除 ops_eval_runs 行；指定 suite 时仅删该套件的历史。
+
+    参数:
+        suite: 可选套件名（``model_meta.suite``）；``None`` 时清空全表。
+
+    返回:
+        实际删除行数（解析 asyncpg ``DELETE n`` 结果）。
+    """
     pool = await get_pool()
     if suite:
         result = await pool.execute(
@@ -189,7 +249,15 @@ async def delete_runs_by_ids(
     *,
     suite: str | None = None,
 ) -> int:
-    """Delete specific run ids (optionally constrained to suite)."""
+    """按 run id 列表批量删除；可选 suite 约束防误删其它套件。
+
+    参数:
+        ids: UUID 字符串列表；空白项忽略。
+        suite: 可选，仅删除 ``model_meta.suite`` 匹配的行。
+
+    返回:
+        删除行数；空 id 列表返回 0。
+    """
     cleaned = [str(i).strip() for i in ids if str(i).strip()]
     if not cleaned:
         return 0
@@ -220,7 +288,15 @@ async def delete_runs_before(
     *,
     suite: str | None = None,
 ) -> int:
-    """Delete runs with created_at strictly before ``before_iso`` (timestamptz)."""
+    """删除 ``created_at`` 严格早于给定时间戳的 run。
+
+    参数:
+        before_iso: ISO8601 时间字符串（作 timestamptz 比较）。
+        suite: 可选套件过滤，语义同 ``delete_runs``。
+
+    返回:
+        删除行数。
+    """
     pool = await get_pool()
     if suite:
         result = await pool.execute(

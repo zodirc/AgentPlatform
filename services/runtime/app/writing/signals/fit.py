@@ -1,7 +1,4 @@
-"""Fit fragment weights / signal masks so platform exemplars score high.
-
-Markdown bank is the source of truth. Hand-tuned 关/轻/中/重 is not.
-"""
+"""范文拟合权重/惩罚诊断。"""
 
 from __future__ import annotations
 
@@ -32,6 +29,13 @@ def _probe_prefs() -> dict[str, Any]:
 
 
 def fit_fragment_weights() -> dict[str, dict[str, float]]:
+    """拟合 fragment 权重。
+
+    参数:
+        无。
+
+    返回:
+        dict。"""
     from app.offline.rubric import score_rubric
 
     bank = load_platform_exemplars()
@@ -68,11 +72,13 @@ def fit_fragment_weights() -> dict[str, dict[str, float]]:
 
 
 def fit_signal_penalties() -> dict[str, dict[str, float]]:
-    """Diagnostic: which live penalties still fire on the class's own bank.
+    """惩罚诊断掩码。
 
-    Production scoring does not apply this mask. If a key is zeroed here, the
-    detector is still hitting 范文 — fix the detector, do not ship the mask.
-    """
+    参数:
+        无。
+
+    返回:
+        dict。"""
     bank = load_platform_exemplars()
     prefs = _probe_prefs()
     table: dict[str, dict[str, float]] = {}
@@ -97,10 +103,13 @@ def fit_signal_penalties() -> dict[str, dict[str, float]]:
 
 
 def exemplars_score_high(*, min_net: float = 0.50) -> list[str]:
-    """Return failure strings; empty means all class exemplars clear the live bar.
-
-    Uses platform prefs as production does. Do not mask penalties the bank itself hits.
-    """
+    """范文 net 门槛检查。
+    
+    参数:
+        min_net。
+    
+    返回:
+        list。"""
     bank = load_platform_exemplars()
     prefs = _probe_prefs()
     failures: list[str] = []

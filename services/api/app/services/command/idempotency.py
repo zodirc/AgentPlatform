@@ -31,6 +31,16 @@ def replay(turn_id: UUID, client_request_id: UUID | None) -> dict | None:
 
 
 def remember(turn_id: UUID, client_request_id: UUID | None, response: dict) -> None:
+    """缓存 turn 命令响应供幂等重放。
+
+    参数:
+        turn_id: Turn UUID。
+        client_request_id: 客户端幂等键；None 时不记录。
+        response: 首次成功响应 dict。
+
+    返回:
+        无。
+    """
     if client_request_id is None:
         return
     _responses[(turn_id, client_request_id)] = response

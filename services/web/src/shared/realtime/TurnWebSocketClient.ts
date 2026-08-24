@@ -1,14 +1,20 @@
+/**
+ * 回合 WebSocket 流客户端：订阅 `/turns/:id/ws`，语义与 TurnStreamClient 对齐。
+ * 审批暂停点 socket 会关闭，批准/拒绝须走 HTTP API。
+ */
 import type { TurnEvent } from "../api/client";
 
+/** TurnWebSocketClient 事件回调集合。 */
 export type TurnStreamHandlers = {
   onEvent: (event: TurnEvent) => void;
   onError?: (error: Error) => void;
   onClose?: () => void;
 };
 
+/** 回合正常结束的事件类型。 */
 const TERMINAL = new Set(["turn.completed", "turn.failed", "turn.cancelled"]);
 
-/** Deltas frozen on Stop (ADR-015); terminal / control events still dispatch. */
+/** Stop 后冻结本地增量渲染，终端/控制事件仍派发（ADR-015）。 */
 const RENDER_PAUSE_TYPES = new Set([
   "turn.token",
   "turn.thinking",
@@ -26,6 +32,9 @@ function wsUrl(turnId: string, sinceSequence: number): string {
   return sinceSequence > 0 ? `${base}?since_sequence=${sinceSequence}` : base;
 }
 
+/**
+ * WebSocket 传输的回合事件订阅（`?transport=ws` 时由 useWorkbench 选用）。
+ */
 export class TurnWebSocketClient {
   private socket: WebSocket | null = null;
   private stopped = false;
@@ -36,6 +45,12 @@ export class TurnWebSocketClient {
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+  /**
+   * 打开 WebSocket 并绑定消息处理。
+   * @param turnId 回合 ID
+   * @param handlers 事件/错误/关闭回调
+   * @param sinceSequence 断点续传起始 sequence（不含）
+   */
   connect(turnId: string, handlers: TurnStreamHandlers, sinceSequence = 0) {
     this.turnId = turnId;
     this.handlers = handlers;
@@ -102,7 +117,9 @@ export class TurnWebSocketClient {
   // Approvals go over the HTTP API: the socket closes at the approval pause
   // point, so socket-based approve/deny would be a silent no-op.
 
-  /** ADR-015: stop local render ≤50ms; keep listening for turn.cancelled. */
+  /**
+   * ADR-015：≤50ms 停止本地 token/thinking/tool 渲染；连接保持以接收 turn.cancelled。
+   */
   stopRendering() {
     this.renderPaused = true;
   }
@@ -122,6 +139,7 @@ export class TurnWebSocketClient {
     }
   }
 
+  /** 标记 stopped 并关闭 socket 与重连定时器。 */
   close() {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);

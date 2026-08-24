@@ -1,7 +1,4 @@
-"""Opening-chapter entry: institution name before a standable place.
-
-Soft facts only. Callers never mutate disk. Not a ban on 宗门 in the book.
-"""
+"""开篇 institution-before-place 检测。"""
 
 from __future__ import annotations
 
@@ -38,7 +35,13 @@ def _opening_window(text: str) -> str:
 
 
 def institution_before_place(text: str) -> bool:
-    """True when 宗/派/仙门 lands before 镇/村/街/店 in the opening window."""
+    """机构先于地点。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     window = _opening_window(text)
     org = _ORG.search(window)
     if org is None:
@@ -50,7 +53,13 @@ def institution_before_place(text: str) -> bool:
 
 
 def find_opening_span(text: str, *, max_chars: int = 360) -> str:
-    """Opening sentences that put 宗/派 before a standable place."""
+    """opening span。
+    
+    参数:
+        text/max_chars。
+    
+    返回:
+        str。"""
     if not institution_before_place(text):
         return ""
     body = text or ""
@@ -63,7 +72,13 @@ def find_opening_span(text: str, *, max_chars: int = 360) -> str:
 
 
 def opening_fields(content: str, section_id: str = "") -> dict[str, Any]:
-    """Attach to draft_section. Opening chapter only."""
+    """opening 软事实。
+    
+    参数:
+        content/section_id。
+    
+    返回:
+        dict。"""
     from app.writing.text_metrics import visible_chars
 
     if not is_opening_section(section_id):

@@ -1,8 +1,14 @@
-/** Recently used usernames for login chips (no passwords). */
+/**
+ * 登录页「最近账号」芯片：仅持久化用户名，不存密码。
+ */
 
 const STORAGE_KEY = "agent.auth.recent_usernames";
 const MAX_RECENT = 5;
 
+/**
+ * 读取 localStorage 中最近使用的用户名列表。
+ * @returns 最多 MAX_RECENT 条，解析失败返回 []
+ */
 export function readRecentUsernames(): string[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -18,6 +24,10 @@ export function readRecentUsernames(): string[] {
   }
 }
 
+/**
+ * 将成功登录的用户名插入最近列表头部（大小写去重）。
+ * @param username 用户名
+ */
 export function rememberUsername(username: string): void {
   const cleaned = username.trim();
   if (!cleaned) return;

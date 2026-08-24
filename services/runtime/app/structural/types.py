@@ -1,4 +1,7 @@
+"""结构工具统一类型：Issue（诊断）与 Location（符号位置）。"""
+
 from __future__ import annotations
+
 
 from dataclasses import dataclass, field
 from typing import Any
@@ -6,6 +9,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Issue:
+    """作用：单条诊断（LSP/ruff）。"""
     path: str
     line: int
     col: int
@@ -33,6 +37,7 @@ class Issue:
 
 @dataclass(frozen=True)
 class Location:
+    """作用：符号定义/引用位置。"""
     path: str
     line: int
     col: int

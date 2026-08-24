@@ -1,3 +1,5 @@
+"""账户 prefs 加载缓存。"""
+
 from __future__ import annotations
 
 import json
@@ -17,6 +19,13 @@ _CACHE_TTL_S = 60.0
 
 
 async def load_account_prefs(owner_user_id: UUID | None) -> dict[str, Any]:
+    """加载 merge prefs。
+    
+    参数:
+        owner_user_id。
+    
+    返回:
+        dict。"""
     if owner_user_id is None:
         return platform_prefs_payload()
     key = str(owner_user_id)
@@ -52,6 +61,13 @@ async def load_account_prefs(owner_user_id: UUID | None) -> dict[str, Any]:
 
 
 def invalidate_prefs_cache(owner_user_id: UUID | str | None) -> None:
+    """失效缓存。
+    
+    参数:
+        owner_user_id。
+    
+    返回:
+        None。"""
     if owner_user_id is None:
         _CACHE.clear()
         return

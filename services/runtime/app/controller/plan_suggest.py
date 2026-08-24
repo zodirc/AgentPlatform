@@ -1,4 +1,8 @@
-"""Plan suggest complexity scoring (docs/26). Soft hint only — never forces plan."""
+"""Plan suggest 复杂度打分（docs/26）。软提示：只建议，从不强制进 Plan。
+
+权重优先读 ``packages/contracts/plan_suggest/weights.json``（容器与仓库深度
+不同，故按 parents 扫描）；缺文件时用内置 _FALLBACK_CONFIG。
+"""
 
 from __future__ import annotations
 
@@ -76,10 +80,13 @@ _FALLBACK_CONFIG: dict[str, Any] = {
 
 
 def plan_suggest_weights_candidates() -> list[Path]:
-    """Candidate weight files (container + repo checkout + local fallback).
+    """候选权重文件路径（容器镜像 + 仓库检出 + 本地兜底）。
 
-    Do not assume a fixed ``parents[N]`` depth: in the image ``__file__`` is
-    ``/app/app/controller/...`` (shallow), while a git checkout is deeper.
+    不假定固定 ``parents[N]``：镜像里 ``__file__`` 较浅（``/app/app/...``），
+    git checkout 更深。
+
+    返回:
+        去重后的 Path 列表，按优先尝试顺序。
     """
     here = Path(__file__).resolve()
     seen: list[Path] = []
@@ -96,6 +103,11 @@ def plan_suggest_weights_candidates() -> list[Path]:
 
 
 def resolve_plan_suggest_weights_path() -> Path | None:
+    """解析第一个存在的权重文件。
+
+    返回:
+        可读 Path；皆不存在时为 None（调用方用 fallback）。
+    """
     for path in plan_suggest_weights_candidates():
         if path.is_file():
             return path
@@ -104,12 +116,18 @@ def resolve_plan_suggest_weights_path() -> Path | None:
 
 @lru_cache(maxsize=1)
 def load_plan_suggest_config() -> dict[str, Any]:
+    """加载并与 _FALLBACK_CONFIG 深合并（scores/threshold/reasons 等）。
+
+    返回:
+        完整配置 dict；缺文件或非 dict 时返回 fallback 拷贝。
+    """
     path = resolve_plan_suggest_weights_path()
     if path is None:
         return dict(_FALLBACK_CONFIG)
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         return dict(_FALLBACK_CONFIG)
+    # 只合并已知键，避免文件里的杂字段污染运行时。
     merged = dict(_FALLBACK_CONFIG)
     merged.update({k: v for k, v in data.items() if k in merged or k in {"version", "description", "scores", "threshold", "high_risk_tokens", "reasons", "cooldown_ms", "abs_min_len", "soft_min_len"}})
     if isinstance(data.get("scores"), dict):
@@ -133,13 +151,18 @@ def load_plan_suggest_config() -> dict[str, Any]:
 
 
 def reload_plan_suggest_config() -> dict[str, Any]:
+    """清 lru_cache 后重新加载权重（运维热更用）。
+
+    返回:
+        最新配置 dict。
+    """
     load_plan_suggest_config.cache_clear()
     return load_plan_suggest_config()
 
 
 @dataclass(frozen=True)
 class PlanSuggestWeights:
-    """Tunable weights (docs/26). Prefer editing packages/contracts/plan_suggest/weights.json."""
+    """可调权重（docs/26）。优先改 contracts 下 weights.json，而非硬编码。"""
 
     multi_numbered: int = 4
     multi_join: int = 2
@@ -156,6 +179,14 @@ class PlanSuggestWeights:
     soft_min_len: int = 24
 
     def threshold_for(self, scenario_id: str | None) -> int:
+        """按场景取阈值；Profile.plan_suggest.threshold 优先于本 dataclass。
+
+        参数:
+            scenario_id: 场景键；空则按 writing。
+
+        返回:
+            整数阈值。
+        """
         key = (scenario_id or "writing").strip().lower()
         if key:
             try:
@@ -172,6 +203,11 @@ class PlanSuggestWeights:
         return self.threshold_writing
 
     def to_dict(self) -> dict[str, int]:
+        """扁平权重 dict（测试/调试序列化）。
+
+        返回:
+            字段名 → int。
+        """
         return {
             "multi_numbered": self.multi_numbered,
             "multi_join": self.multi_join,
@@ -189,7 +225,11 @@ class PlanSuggestWeights:
         }
 
     def to_config_file_dict(self) -> dict[str, Any]:
-        """Shape matching packages/contracts/plan_suggest/weights.json."""
+        """导出与 weights.json 同形的结构（含 reasons / high_risk_tokens）。
+
+        返回:
+            可写回文件的配置 dict。
+        """
         cfg = load_plan_suggest_config()
         return {
             "version": cfg.get("version", 1),
@@ -222,6 +262,14 @@ class PlanSuggestWeights:
 
     @classmethod
     def from_dict(cls, data: dict[str, int] | None) -> PlanSuggestWeights:
+        """在配置基线上用 dict 覆盖允许字段。
+
+        参数:
+            data: 字段覆盖；空则等同 from_config()。
+
+        返回:
+            新的不可变权重实例。
+        """
         if not data:
             return cls.from_config()
         base = cls.from_config()
@@ -231,6 +279,14 @@ class PlanSuggestWeights:
 
     @classmethod
     def from_config(cls, config: dict[str, Any] | None = None) -> PlanSuggestWeights:
+        """从完整配置 dict 构造权重对象。
+
+        参数:
+            config: 可选；默认 load_plan_suggest_config()。
+
+        返回:
+            PlanSuggestWeights。
+        """
         cfg = config or load_plan_suggest_config()
         scores = cfg.get("scores") or {}
         thr = cfg.get("threshold") or {}
@@ -252,11 +308,18 @@ class PlanSuggestWeights:
 
 
 def get_default_weights() -> PlanSuggestWeights:
+    """当前配置下的默认权重实例。
+
+    返回:
+        PlanSuggestWeights.from_config()。
+    """
     return PlanSuggestWeights.from_config()
 
 
 @dataclass(frozen=True)
 class PlanSuggestDecision:
+    """一次打分结果：是否建议、分值、对用户理由、内部信号名。"""
+
     suggest: bool
     score: int
     reasons: list[str]
@@ -268,6 +331,15 @@ def plan_suggest_threshold(
     *,
     weights: PlanSuggestWeights | None = None,
 ) -> int:
+    """查询场景阈值（便捷封装）。
+
+    参数:
+        scenario_id: 场景键。
+        weights: 可选权重覆盖。
+
+    返回:
+        整数阈值。
+    """
     w = weights or get_default_weights()
     return w.threshold_for(scenario_id)
 
@@ -279,6 +351,20 @@ def evaluate_plan_suggest(
     cooldown_active: bool = False,
     weights: PlanSuggestWeights | None = None,
 ) -> PlanSuggestDecision:
+    """对用户消息做复杂度打分，决定是否弹出 Plan 软建议。
+
+    冷却中、过短、已带 Plan/执行前缀、纯「继续」等直接否决；
+    多目标/显式规划/多路径/高风险词加分，续写与微改减分。
+
+    参数:
+        message: 用户原文。
+        scenario_id: 场景键，影响阈值。
+        cooldown_active: 前端/会话冷却未结束时强制不建议。
+        weights: 可选权重覆盖。
+
+    返回:
+        PlanSuggestDecision；suggest=False 时 reasons 通常为空。
+    """
     cfg = load_plan_suggest_config()
     w = weights or PlanSuggestWeights.from_config(cfg)
     reasons_map: dict[str, str] = dict(cfg.get("reasons") or {})
@@ -290,6 +376,7 @@ def evaluate_plan_suggest(
     score = 0
 
     def push(sid: str, delta: int) -> None:
+        """累加信号分，并对用户理由最多保留 2 条。"""
         nonlocal score
         signals.append(sid)
         score += delta
@@ -303,6 +390,7 @@ def evaluate_plan_suggest(
     if not text or len(text) < w.abs_min_len:
         return PlanSuggestDecision(False, 0, [], ["too_short"])
 
+    # 已在 Plan/执行入口的消息不再建议，避免重复打扰。
     if text.startswith(PLAN_PREFIX) or text.startswith(EXECUTE_PREFIX):
         return PlanSuggestDecision(False, 0, [], ["already_plan_prefix"])
 
@@ -314,6 +402,7 @@ def evaluate_plan_suggest(
         push("multi_numbered", w.multi_numbered)
 
     joins = len(_GOAL_JOIN.findall(text))
+    # 短句里的「然后」噪声大，要求长度与连接词双门槛。
     if joins >= 2 and len(text) >= 40:
         push("multi_join", w.multi_join)
 
@@ -326,6 +415,7 @@ def evaluate_plan_suggest(
         push("multi_path", w.multi_path)
 
     lower = text.lower()
+    # ASCII token 用 lower 匹配；中文 token 保留原文匹配。
     risk_hits = [
         tok
         for tok in risk_tokens
@@ -337,6 +427,7 @@ def evaluate_plan_suggest(
             min(w.high_risk_cap, w.high_risk_per_hit * len(risk_hits)),
         )
 
+    # soft_min：弱信号短句不建议；强信号（多目标/显式/高风险）可破例。
     strong = (
         "multi_numbered" in signals
         or "explicit_plan" in signals
@@ -356,13 +447,22 @@ def evaluate_plan_suggest(
     return PlanSuggestDecision(
         suggest=suggest,
         score=score,
+        # 未达标不暴露理由，避免 UI 闪「建议」文案。
         reasons=reasons[:2] if suggest else [],
         signals=signals,
     )
 
 
 def detect_plan_hint(message: str, *, scenario_id: str | None = None) -> str | None:
-    """Soft runtime hint mirrored from Web scoring. Never forces tools."""
+    """运行时软提示文案（与 Web 打分同源）。从不强制工具。
+
+    参数:
+        message: 用户原文。
+        scenario_id: 场景键。
+
+    返回:
+        英文 hint 字符串；不建议时为 None。
+    """
     decision = evaluate_plan_suggest(message, scenario_id=scenario_id)
     if not decision.suggest:
         return None

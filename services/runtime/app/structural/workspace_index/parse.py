@@ -1,8 +1,5 @@
-"""Definition extraction via tree-sitter (Python-first; regex fallback).
+"""tree-sitter/regex 符号抽取。"""
 
-Async/index path only — never call on StartTurn hot path (R3/R4).
-Symbols include optional ``container`` (enclosing class/module chain, §2.2.1).
-"""
 
 from __future__ import annotations
 
@@ -53,7 +50,7 @@ _ASSIGN_RE = re.compile(
 
 
 def extract_definitions(text: str, *, language: str | None) -> list[SymbolRec]:
-    """Return definition symbols for one file. Empty on parse failure (caller marks skipped)."""
+    """作用：从文本按语言抽取 SymbolRec 列表。"""
     if not text or not text.strip():
         return []
     if language:
@@ -64,7 +61,7 @@ def extract_definitions(text: str, *, language: str | None) -> list[SymbolRec]:
 
 
 def extract_definitions_for_path(path: Path | str, text: str) -> tuple[str, list[SymbolRec]]:
-    """Return (lang, symbols). lang=skipped when unsupported / empty."""
+    """作用：按路径推断语言并抽取符号。"""
     lang = language_for_code_path(path)
     if not lang:
         return "skipped", []

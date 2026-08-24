@@ -1,8 +1,4 @@
-"""Detect mechanically uniform short beats: 三字问答 / 空应声 / 把因果说圆.
-
-Soft facts only. Callers never mutate disk. Shortness is allowed;
-uniform shortness, empty acks (我知道/嗯/懂), or spoken 所以-chains are the tell.
-"""
+"""检测 uniform 短拍（三字问答/空应声/所以链）；仅 soft facts。"""
 
 from __future__ import annotations
 
@@ -105,12 +101,13 @@ def _units(text: str) -> list[int]:
 
 
 def max_short_quote_run(text: str) -> int:
-    """Longest run of short spoken turns (inner ≤ 7).
-
-    Counts 「进来拿」「我会还」 even when they share a line or have a speaker
-    tag. A longer quote, or a narrative beat longer than ``_QUOTE_GAP_RESET``,
-    breaks the run — so a short answer after a real scene is allowed.
-    """
+    """最长短对白 run。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     from app.writing.text_metrics import visible_chars
 
     body = text or ""
@@ -132,7 +129,13 @@ def max_short_quote_run(text: str) -> int:
 
 
 def max_short_unit_run(text: str) -> int:
-    """Longest run of consecutive short quotes or short narrative sentences."""
+    """最长短 unit run。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     run = best = 0
     for n in _units(text):
         if 1 <= n <= _SHORT:
@@ -152,7 +155,13 @@ def _quote_inners(text: str) -> list[str]:
 
 
 def max_phatic_quote_run(text: str) -> int:
-    """Longest run of consecutive quotes that are only 嗯/我知道/懂."""
+    """最长 phatic run。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     run = best = 0
     for inner in _quote_inners(text):
         if _PHATIC.match(_norm_quote(inner)):
@@ -164,11 +173,13 @@ def max_phatic_quote_run(text: str) -> int:
 
 
 def count_echo_acks(text: str) -> int:
-    """Adjacent quotes that only restate: 我知道+前句, or 不懂/懂.
-
-    「来了？」「来了。」 is a real answer, not an echo-ack.
-    「砖歪了」「歪了就摆正」 adds a move — skip.
-    """
+    """echo-ack 计数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     inners = _quote_inners(text)
     n = 0
     for prev, cur in zip(inners, inners[1:]):
@@ -185,17 +196,35 @@ def count_echo_acks(text: str) -> int:
 
 
 def count_logic_glue_quotes(text: str) -> int:
-    """Spoken 所以/因此… — the talk is closing the causal chain out loud."""
+    """口播因果 quote 数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     return sum(1 for inner in _quote_inners(text) if _LOGIC_GLUE.search(inner))
 
 
 def count_defer_tells(text: str) -> int:
-    """Narrative 没有立即… — process spelled out instead of a beat."""
+    """没有立即 tell 数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     return len(_DEFER.findall(text or ""))
 
 
 def count_split_speech(text: str) -> int:
-    """「你家。」他说，「袖口就是锁」 — one line split around a speaker tag."""
+    """假 beat 拆句数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     from app.writing.text_metrics import visible_chars
 
     n = 0
@@ -206,7 +235,13 @@ def count_split_speech(text: str) -> int:
 
 
 def count_equate_punches(text: str) -> int:
-    """A，就是B in a short quote — the object is upgraded to a metaphor."""
+    """就是B punch 数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     from app.writing.text_metrics import visible_chars
 
     n = 0
@@ -218,7 +253,13 @@ def count_equate_punches(text: str) -> int:
 
 
 def count_antithesis_punches(text: str) -> int:
-    """A不X，B X in a short quote — parallel judgment posing as a closing line."""
+    """对仗 punch 数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     from app.writing.text_metrics import visible_chars
 
     n = 0
@@ -230,7 +271,13 @@ def count_antithesis_punches(text: str) -> int:
 
 
 def count_contrast_punches(text: str) -> int:
-    """Short Q&A closed by 是A，不是B. Isolated contrast in a long line is allowed."""
+    """是A不是B punch 数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     from app.writing.text_metrics import visible_chars
 
     n = 0
@@ -249,11 +296,13 @@ def count_contrast_punches(text: str) -> int:
 
 
 def staccato_fields(content: str) -> dict[str, Any]:
-    """Attach to draft_section. Empty unless a uniform-short or empty-ack stretch is present.
-
-    Quote-run / phatic still count on short spans. The 80-char floor used to skip
-    them, which made a four-line 三字连环 score as healthy dialogue.
-    """
+    """staccato 软事实。
+    
+    参数:
+        content。
+    
+    返回:
+        dict。"""
     from app.writing.text_metrics import visible_chars
 
     text = content or ""
@@ -309,7 +358,13 @@ def _closed_span(body: str, start: int, end: int, max_chars: int) -> str:
 
 
 def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
-    """Exact slice covering the first uniform-short quote run, if any."""
+    """repair span。
+    
+    参数:
+        text/max_chars。
+    
+    返回:
+        str。"""
     from app.writing.text_metrics import visible_chars
 
     body = text or ""

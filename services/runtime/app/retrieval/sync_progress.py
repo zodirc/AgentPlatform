@@ -1,8 +1,7 @@
-"""Turn-external sources sync progress (ingestion plane only; docs/15 IX3).
+"""Turn 外 sources 索引 sync 进度快照（RAG 摄取 UX / 可观测性）。
 
-Persists a small JSON snapshot under ``data_dir`` so:
-- Web / Ops can poll via ``sources_index_status``
-- ``make sync-sources`` (separate process) and uvicorn share the same file
+持久化 ``sync_progress.json`` 供 Web、``make sync`` 与 uvicorn 共享；含 CLI 格式化。
+在 RAG 链路中的位置：``index_scheduler`` / ``pgvector_store.sync`` 各 phase 上报。
 """
 
 from __future__ import annotations
@@ -29,11 +28,12 @@ _MIN_WRITE_INTERVAL_S = 0.4
 
 
 def progress_path() -> Path:
+    """进度 JSON 文件路径 ``{data_dir}/vectorstore/sync_progress.json``。"""
     return Path(settings.data_dir) / "vectorstore" / "sync_progress.json"
 
 
 def set_progress_sink(fn: Callable[[dict[str, Any]], None] | None) -> None:
-    """Optional in-process sink (e.g. workspace_browser ``_index_job``)."""
+    """注册进程内进度 sink（如 workspace_browser job）。"""
     global _sink
     _sink = fn
 
@@ -59,6 +59,7 @@ def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
 
 
 def read_sync_progress() -> dict[str, Any] | None:
+    """读取磁盘上的 sync 进度快照。"""
     path = progress_path()
     if not path.is_file():
         return None
@@ -74,10 +75,7 @@ def report_sync_progress(
     force: bool = False,
     **fields: Any,
 ) -> dict[str, Any]:
-    """Merge fields into the shared progress snapshot and optionally notify sink.
-
-    Explicit ``None`` clears a key (needed so plan/start do not keep a stale rate).
-    """
+    """合并字段写入进度文件；``force`` 跳过节流；显式 None 清除键。"""
     global _last_write_mono
     now = time.time()
     mono = time.monotonic()
@@ -146,11 +144,7 @@ def mark_sync_started(
     path: str | None = None,
     work_id: str | None = None,
 ) -> None:
-    """Start a sync progress epoch.
-
-    ``work_id=None`` clears any prior work scope so L1 pollers do not attribute
-    a full-tenant or other-work sync to their Work.
-    """
+    """标记 sync 开始（清空 rate/eta，重置 work 作用域）。"""
     report_sync_progress(
         force=True,
         status="building",
@@ -179,6 +173,7 @@ def mark_sync_started(
 
 
 def mark_sync_finished(result: dict[str, Any] | None = None, *, reason: str = "manual") -> None:
+    """标记 sync 成功结束并写入 last_result 摘要。"""
     result = result or {}
     wid = result.get("work_id")
     report_sync_progress(
@@ -224,6 +219,7 @@ def mark_sync_error(
     path: str | None = None,
     work_id: str | None = None,
 ) -> None:
+    """标记 sync 失败或取消。"""
     report_sync_progress(
         force=True,
         status="error",

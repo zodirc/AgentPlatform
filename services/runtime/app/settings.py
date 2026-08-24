@@ -1,3 +1,24 @@
+"""Runtime 环境配置（Pydantic Settings）。
+
+English: Agent Runtime configuration via Pydantic Settings (env + optional .env).
+
+从进程环境变量与可选 ``.env`` 加载；``settings`` 单例在 import 时实例化，
+``main.lifespan`` 启动阶段调用 ``validate_production_security()`` 做生产密钥校验。
+
+配置域概览（按类内分组注释）：
+
+- **数据库与连接池**：主库 / Ops 向量平面、双池 statement timeout、shutdown 排空。
+- **安全与密钥**：``APP_SECRET_KEY``、内部令牌、模型密钥 Fernet、生产弱值拦截。
+- **模型与生成**：provider / mode / 超时重试、reasoning、compact 专用模型。
+- **检索与索引**：hybrid RRF、切块、rerank、两级 doc→chunk、pgvector schema。
+- **Turn 工具预算**：``search_sources`` / ``read_file`` 每 Turn 上限与 excerpt 策略。
+- **写作与导出**：卡片、手稿、token economy、export verify 模式。
+- **Sources 同步**：startup sync、watch 轮询、seed 根、embedding 批处理与设备。
+- **Structural / AST**：coding 导航诊断超时、workspace AST 索引与 eval 预算。
+- **调度与事件**：pull/push Turn、runner lease、stall、事件批写与 thinking 清理。
+- **上下文与组窗**：fill 阶梯、precompact、tool_result 字符预算、OTel。
+"""
+
 import socket
 from typing import Optional
 
@@ -11,8 +32,17 @@ _WEAK_PRODUCTION_VALUES = frozenset(
 
 
 class Settings(BaseSettings):
+    """Agent Runtime 全量可调参数。
+
+    English: All runtime tunables; override via UPPER_SNAKE env vars.
+
+    字段默认面向本地 ``development``；生产须显式设置 ``APP_ENV=production``
+    并通过 ``validate_production_security``。
+    """
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    # --- 数据库与连接池 ---
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
     # Ops L1 vector plane (Schema A): source_* for ops-l1 works. Empty → fall back to
     # bench_database_url, then (if both empty) product database_url (compat).
@@ -30,10 +60,14 @@ class Settings(BaseSettings):
     shutdown_drain_seconds: float = 25.0
     # B9: evict abandoned approval state after this long (checkpoint fallback).
     pending_store_ttl_seconds: float = 1800.0
+
+    # --- 安全与密钥 ---
     internal_service_token: str = "change-me-internal"
     app_secret_key: str = "change-me-in-production"
     # Optional Fernet secret for stored model API keys. Empty → APP_SECRET_KEY.
     config_encryption_key: str = ""
+
+    # --- 模型与生成 ---
     model_provider: str = "anthropic"
     model_name: str = ""
     model_api_key: str = ""
@@ -45,6 +79,8 @@ class Settings(BaseSettings):
     openai_base_url: str = ""
     workspace_root: str = "/workspace"
     data_dir: str = "/data"
+
+    # --- 检索与索引 ---
     retrieval_mode: str = "hybrid"  # keyword | vector | hybrid
     retrieval_rrf_k: int = 60
     # RQ1e: hybrid lane weights / doc boost (profile may override; see retrieval/profile.py).
@@ -87,6 +123,8 @@ class Settings(BaseSettings):
     # Wide markdown tables → pointer in indexed body (full table stays on disk for read_file).
     retrieval_table_detach_min_rows: int = 6
     retrieval_table_detach_min_chars: int = 800
+
+    # --- Turn 工具预算（search / read） ---
     search_sources_max_per_turn: int = 3
     # docs/34 RC5 — hard cap on read_file executions per Turn (0 = disabled).
     read_file_max_per_turn: int = 16
@@ -103,6 +141,8 @@ class Settings(BaseSettings):
     # RE1: keyword fallback section alignment (docs/15); oversize / timeout → file excerpt only.
     search_sources_keyword_max_file_bytes: int = 262_144
     search_sources_keyword_parse_budget_ms: float = 50.0
+
+    # --- 工具 schema / 隐私扫描 ---
     # S0 harness guards (docs/13-rate-redlines.md).
     tool_schema_validate: bool = True
     citation_verify_enabled: bool = True
@@ -116,6 +156,8 @@ class Settings(BaseSettings):
     # C2: when false (default), tools JSON stays static; late-stage drops are runtime gates.
     # Set true to restore legacy schema mutation (breaks prompt-cache prefix).
     stage_tool_scope_mutate_schema: bool = False
+
+    # --- 写作与导出 ---
     # Writing material cards (Agent-outside artifacts; pinned into writing turns).
     # Inventory-deterministic pin (docs/14 C1/C3): kind → path sort; per-kind + global caps.
     writing_cards_dir: str = "sources/cards"
@@ -140,6 +182,7 @@ class Settings(BaseSettings):
     writing_prev_tail_chars: int = 2000
     writing_token_economy_enabled: bool = True
 
+    # --- Sources 同步与 Embedding ---
     index_via_worker: bool = True
     # IX0: Turn-external incremental projection of workspace/sources (docs/15).
     sources_startup_sync_enabled: bool = True
@@ -184,6 +227,8 @@ class Settings(BaseSettings):
     embedding_progress_every_files: int = 25
     # P2: when false, embed body only (no path:/tags: prefix noise). Re-embed to take effect.
     embedding_text_include_metadata: bool = False
+
+    # --- 运行环境与日志 ---
     # Development remains the safe default for local `make up`; production must
     # be selected explicitly and passes the guard below during startup.
     app_env: str = "development"
@@ -219,6 +264,8 @@ class Settings(BaseSettings):
     path_preread_timeout_seconds: float = 0.4
     path_preread_max_files: int = 3
     tool_default_timeout_seconds: float = 60.0
+
+    # --- Structural 编码车道 ---
     # Coding structural lane (agent Profile): timeouts / prewarm / budgets only.
     # Capability lives in Profile.tool_names — not a feature flag; no strip/disable.
     structural_nav_timeout_s: float = 15.0
@@ -234,6 +281,8 @@ class Settings(BaseSettings):
     structural_prewarm: bool = True
     # Wave 4 W9: omit verify_receipt when remaining steps < this reserve.
     verify_receipt_reserve_steps: int = 10
+
+    # --- Workspace AST 索引 ---
     # Agent workspace AST index (docs/core/architecture.md). Off-loop only.
     workspace_ast_enabled: bool = True
     # Ops/SWE temp works: default off (§7). Set true only for explicit dual-track experiments.
@@ -265,6 +314,8 @@ class Settings(BaseSettings):
     # no egress (bwrap --unshare-net). Daily non-ops Turns keep host network.
     # Map OFFICIAL_SWE_NETWORK=deny → OPS_EVAL_DENY_NETWORK=true in compose.
     ops_eval_deny_network: bool = False
+
+    # --- Step / Stall / Runner 租约 ---
     # Must exceed model_timeout so a long think cannot lose to step wall-clock first.
     step_timeout_seconds: float = 720.0
     stall_threshold_seconds: float = 180.0
@@ -280,6 +331,8 @@ class Settings(BaseSettings):
     runner_heartbeat_interval_seconds: float = 10.0
     # Min gap between opportunistic lease touches (event flush / step checkpoint).
     runner_lease_touch_min_interval_seconds: float = 5.0
+
+    # --- Turn 调度与事件持久化 ---
     # O1 / WP5→WP9: default pull (set TURN_DISPATCH=push to roll back).
     turn_dispatch: str = "pull"
     turn_dispatch_poll_seconds: float = 2.0
@@ -308,6 +361,8 @@ class Settings(BaseSettings):
     turn_token_budget: int = 0
     monthly_token_limit: int = 0
     monthly_token_alert_pct: float = 0.8
+
+    # --- 上下文组窗与 compaction ---
     context_window_tokens: int = 128_000
     # Proportional max-output / fill reserve: at ref_window → reserve tokens.
     # Example: 128K → 30K; Web profile window 256K → 60K. Absolute override:
@@ -344,6 +399,8 @@ class Settings(BaseSettings):
     # When True, snip/collapse must not drop the current user instruction group
     # or the latest read_file cycle (snip floor).
     context_snip_protect_latest_read: bool = True
+
+    # --- 可观测性 ---
     otel_enabled: bool = False
     otel_service_name: str = "agent-runtime"
 
@@ -355,7 +412,15 @@ class Settings(BaseSettings):
         return str(value)
 
     def validate_production_security(self) -> None:
-        """Reject bootstrap credentials when the runtime serves production."""
+        """生产环境启动时拒绝仍使用脚手架默认值的敏感密钥。
+
+        当 ``app_env`` 为 ``production`` / ``prod`` 时检查
+        ``APP_SECRET_KEY`` 与 ``INTERNAL_SERVICE_TOKEN``：空值或落在
+        ``_WEAK_PRODUCTION_VALUES``（如 ``change-me``、``admin``）即
+        ``RuntimeError``，避免未轮换密钥的实例对外服务。
+
+        开发 / 测试环境（默认 ``development``）直接返回，不抛异常。
+        """
         if self.app_env.strip().lower() not in {"production", "prod"}:
             return
 

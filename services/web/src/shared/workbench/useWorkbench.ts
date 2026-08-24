@@ -1,3 +1,7 @@
+/**
+ * 工作台核心 Hook：回合生命周期、SSE/WS 流、审批、Plan 模式、出站队列与历史恢复。
+ * 由 WorkbenchProvider 调用，UI 层应使用 useWorkbench()。
+ */
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -75,6 +79,10 @@ const STREAM_DELTA_EVENT_TYPES = new Set([
 ]);
 const DRAFT_MANUSCRIPT_PATH = "drafts/manuscript.md";
 
+/**
+ * 构造 WorkbenchState：管理单 session 内的发送、流式渲染、工具审批与 Plan 流程。
+ * @returns 供 WorkbenchProvider 注入的完整状态与 handler
+ */
 export function useWorkbenchImpl(): WorkbenchState {
   const [searchParams] = useSearchParams();
   const useWebSocket = searchParams.get("transport") === "ws";
@@ -174,16 +182,19 @@ export function useWorkbenchImpl(): WorkbenchState {
   sectionDraftRef.current = sectionDraft;
   outboundQueueRef.current = outboundQueue;
 
+  /** 将 TurnView 合并进 turnHistory 列表。 */
   function syncHistoryFromView(v: TurnView) {
     setTurnHistory((prev) => upsertHistoryItem(prev, historyItemFromView(v)));
   }
 
+  /** 从审批事件 payload 提取写文件预览。 */
   function extractWriteFilePreview(
     payload: Record<string, unknown>,
   ): WriteFilePreview | null {
     return writePreviewFromApprovalPayload(payload);
   }
 
+  /** 根据 TurnView.status / interrupt 同步 pendingApproval 与写文件预览态。 */
   function syncApprovalFromView(v: TurnView) {
     const waiting = v.status === "waiting_approval";
     setPendingApproval(waiting);
@@ -225,6 +236,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 统一错误条文案：发送/任务失败走 formatSendFailure，其余取 Error.message。 */
   function reportError(context: string, err: unknown) {
     const detail =
       context === "发送失败" || context === "任务失败"
@@ -235,6 +247,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setError(`${context}：${detail}`);
   }
 
+  /** 拉取写作手稿基准文本，失败返回空串。 */
   async function fetchDraftTextSafe(): Promise<string> {
     try {
       const file = await fetchWorkspaceFile(DRAFT_MANUSCRIPT_PATH);
@@ -244,6 +257,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 写作场景：回合开始前异步抓取 manuscript 作为 diff 基线。 */
   function prepareDraftBaselineIfNeeded() {
     if (activeScenarioId !== "writing") {
       draftBeforeRef.current = null;
@@ -256,6 +270,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     });
   }
 
+  /** 回合结束后对比基线与当前 manuscript，生成 draftDiffPreview。 */
   async function buildDraftDiffPreviewIfNeeded() {
     if (activeScenarioId !== "writing") return;
     const before = draftBeforeRef.current;
@@ -323,6 +338,11 @@ export function useWorkbenchImpl(): WorkbenchState {
     [clearPendingDeltas],
   );
 
+  /**
+   * 建立 SSE 或 WebSocket 流（由 ?transport=ws 决定），处理 live 事件并驱动 UI 状态。
+   * @param id 回合 ID
+   * @param sinceSequence 断点续传 cursor，默认 lastSequenceRef
+   */
   function connectStream(id: string, sinceSequence = lastSequenceRef.current) {
     streamRef.current?.close();
     const client: StreamClient = useWebSocket
@@ -703,6 +723,12 @@ export function useWorkbenchImpl(): WorkbenchState {
     }) => startTurn(sid, msg, activeScenarioId, { plan_phase: planPhase }),
   });
 
+  /**
+   * 发送一条用户消息并启动新回合（含 Plan phase、乐观历史项、流连接）。
+   * @param textRaw 原始输入，会先 trim
+   * @param opts planModeSend / planPhase 覆盖 Plan 行为
+   * @returns 是否成功发起 startTurn
+   */
   async function handleSendText(
     textRaw: string,
     opts?: { planModeSend?: boolean; planPhase?: PlanPhaseWire | null },
@@ -797,10 +823,14 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 清空 outboundQueue 而不发送。 */
   function clearOutboundQueue() {
     setOutboundQueue([]);
   }
 
+  /**
+   * Composer 发送入口：busy 或待审批时入队，否则调用 handleSendText。
+   */
   async function handleSend() {
     const text = message.trim();
     if (!sessionId || !text) return;
@@ -832,6 +862,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- flush on busy/approval/session only
   }, [busy, pendingApproval, sessionId]);
 
+  /** 用户确认 Plan 清单后，以 executing phase 发送 executePlanMessage()。 */
   async function handleExecutePlan() {
     const snapshot =
       livePlan ??
@@ -850,12 +881,14 @@ export function useWorkbenchImpl(): WorkbenchState {
     });
   }
 
+  /** 关闭 Plan 建议条并写入 session 级 cooldown 时间戳。 */
   function dismissPlanSuggest() {
     const at = Date.now();
     setPlanSuggestDismissedAt(at);
     writePlanSuggestDismissedAt(sessionId, at);
   }
 
+  /** 切换 Plan 模式；开启时同步 dismiss suggest cooldown。 */
   function setPlanModeAndClearSuggest(value: boolean) {
     setPlanMode(value);
     if (value) {
@@ -865,9 +898,13 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 发送 `/verify` 斜杠命令（非 Plan 模式）。 */
   async function handleVerify() {
     await handleSendText("/verify", { planModeSend: false });
   }
+  /**
+   * 停止当前回合：先 stopRendering，软 cancel，500ms 后必要时 force cancel。
+   */
   async function handleStop() {
     if (!turnId) return;
     // Capture the turn being stopped: a fast soft-cancel can let the outbound
@@ -917,6 +954,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 手动拉取当前 turnId 的 TurnView 并同步审批/历史。 */
   async function refreshView() {
     if (!turnId) return;
     try {
@@ -929,6 +967,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 接受 writing patch 并续流。 */
   async function handleAcceptPatch(patchId: string) {
     if (!turnId) return;
     setActionBusy(true);
@@ -944,6 +983,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 拒绝 writing patch 并续流。 */
   async function handleRejectPatch(patchId: string) {
     if (!turnId) return;
     setActionBusy(true);
@@ -959,6 +999,10 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /**
+   * 批准待审工具调用（HTTP only）；乐观清除审批 UI 后重连流。
+   * @param opts.allowPrefix run_command 时可选的前缀白名单
+   */
   async function handleApprove(opts?: { allowPrefix?: string }) {
     const toolCallId = view?.interrupt?.tool_call_id ?? pendingToolCallId;
     if (!turnId || !toolCallId) return;
@@ -990,6 +1034,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
   }
 
+  /** 拒绝待审工具调用（HTTP only）；乐观清除审批 UI 后重连流。 */
   async function handleDeny() {
     const toolCallId = view?.interrupt?.tool_call_id ?? pendingToolCallId;
     if (!turnId || !toolCallId) return;

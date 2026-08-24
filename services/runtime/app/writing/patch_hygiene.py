@@ -1,7 +1,4 @@
-"""Keep surgical prose patches on quote/sentence bounds.
-
-Does not change scoring. Callers still cap repair_span at REPAIR_SPAN_MAX.
-"""
+"""外科 prose 补丁引号/句界卫生。"""
 
 from __future__ import annotations
 
@@ -17,11 +14,24 @@ _LEAD_ECHO_VERB = re.compile(
 
 
 def quotes_balanced(text: str) -> bool:
+    """「」成对。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     return (text or "").count("「") == (text or "").count("」")
 
 
 def clip_to_closed(span: str, max_chars: int) -> str:
-    """Shrink a span so it does not end inside 「」 or mid-sentence."""
+    """截断至闭合界。
+    
+    参数:
+        span/max_chars。
+    
+    返回:
+        str。"""
     raw = span or ""
     if not raw:
         return ""
@@ -43,10 +53,13 @@ def clip_to_closed(span: str, max_chars: int) -> str:
 
 
 def expand_leading_speech_tag(body: str, start: int) -> int:
-    """If the span starts at a quote, include the immediately preceding 他说/问.
-
-    ``说。」 is a finished sentence, not a speech tag — do not eat it.
-    """
+    """纳入前置说话 tag。
+    
+    参数:
+        body/start。
+    
+    返回:
+        int。"""
     if start <= 0 or start > len(body):
         return start
     prefix = body[:start]
@@ -60,7 +73,13 @@ def expand_leading_speech_tag(body: str, start: int) -> int:
 
 
 def snap_span_start(body: str, start: int, end: int) -> int:
-    """Begin at the first 「 (plus its 说：) or at a sentence boundary — never mid-word."""
+    """起点对齐界。
+    
+    参数:
+        body/start/end。
+    
+    返回:
+        int。"""
     start = max(0, start)
     q = body.find("「", start, end)
     if q >= 0:
@@ -76,7 +95,13 @@ def snap_span_start(body: str, start: int, end: int) -> int:
 
 
 def close_span_in_body(body: str, span: str, *, max_chars: int) -> str:
-    """Make ``span`` a closed, preferably unique substring of ``body``."""
+    """闭合唯一子串。
+    
+    参数:
+        body/span/max_chars。
+    
+    返回:
+        str。"""
     needle = (span or "").strip()
     if not needle or needle not in (body or ""):
         return needle
@@ -104,6 +129,13 @@ def close_span_in_body(body: str, span: str, *, max_chars: int) -> str:
 
 
 def strip_prefix_overlap(left: str, new_text: str, *, min_len: int = 2) -> str:
+    """去拼接重叠。
+    
+    参数:
+        left/new_text/min_len。
+    
+    返回:
+        str。"""
     new = new_text or ""
     prefix = left or ""
     max_k = min(len(prefix), len(new), 40)
@@ -114,6 +146,13 @@ def strip_prefix_overlap(left: str, new_text: str, *, min_len: int = 2) -> str:
 
 
 def drop_leading_extra_close_quote(left: str, new_text: str) -> str:
+    """去多余」。
+    
+    参数:
+        left/new_text。
+    
+    返回:
+        str。"""
     new = new_text or ""
     if (left or "").rstrip().endswith("」") and new.lstrip().startswith("」"):
         return new.lstrip()[1:]
@@ -121,7 +160,13 @@ def drop_leading_extra_close_quote(left: str, new_text: str) -> str:
 
 
 def drop_echoed_speech_verb(left: str, new_text: str) -> str:
-    """If left already ends in 问：, drop a second 问： at the start of new_text."""
+    """去重复说话动词。
+    
+    参数:
+        left/new_text。
+    
+    返回:
+        str。"""
     new = new_text or ""
     match = re.search(
         r"(说道|问道|喊道|[说问喊答叫])[着]?\s*[：:，,]?\s*$",
@@ -136,6 +181,13 @@ def drop_echoed_speech_verb(left: str, new_text: str) -> str:
 
 
 def drop_doubled_close_quotes(new_text: str) -> str:
+    """平衡引号。
+    
+    参数:
+        new_text。
+    
+    返回:
+        str。"""
     new = new_text or ""
     while "」」" in new:
         new = new.replace("」」", "」", 1)
@@ -147,7 +199,13 @@ def drop_doubled_close_quotes(new_text: str) -> str:
 
 
 def sanitize_prose_patch(existing: str, old_text: str, new_text: str) -> tuple[str, str]:
-    """Snap old_text onto quote/sentence bounds and tidy new_text at the join."""
+    """整理 patch 对。
+    
+    参数:
+        existing/old/new。
+    
+    返回:
+        tuple。"""
     old = old_text or ""
     new = new_text or ""
     body = existing or ""
@@ -176,7 +234,13 @@ def sanitize_prose_patch(existing: str, old_text: str, new_text: str) -> tuple[s
 
 
 def prose_patch_block_reason(old: str, new: str) -> str | None:
-    """Refuse turning a spoken island into pure narration (说明书)."""
+    """拒绝对白改叙述。
+    
+    参数:
+        old/new。
+    
+    返回:
+        str|None。"""
     if (old or "").count("「") >= 2 and (new or "").count("「") == 0:
         return (
             "对白补丁不能改成纯叙述。保留说话，把短句说满，"

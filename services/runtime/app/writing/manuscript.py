@@ -1,12 +1,4 @@
-"""Single-file manuscript helpers (docs/23 monofile default).
-
-Visible files (`drafts/manuscript.md`, `manuscript.md`) use chapter H1s:
-
-    # 第一章
-    ...
-
-HTML ``<!-- section:id -->`` fences are parse-only (legacy). Writes never emit them.
-"""
+"""单文件手稿 helpers（monofile H1 章）。"""
 
 from __future__ import annotations
 
@@ -44,32 +36,70 @@ _CN_NUM = {
 
 
 def manuscript_mode() -> str:
+    """布局模式。
+
+    参数:
+        无。
+
+    返回:
+        monofile|sections。"""
     mode = (getattr(settings, "writing_manuscript_mode", None) or "monofile").strip().lower()
     return mode if mode in {"monofile", "sections"} else "monofile"
 
 
 def confirmed_manuscript_rel() -> str:
+    """confirmed 相对路径。
+
+    参数:
+        无。
+
+    返回:
+        str。"""
     rel = (getattr(settings, "writing_manuscript_path", None) or "manuscript.md").strip().lstrip("/")
     return rel or "manuscript.md"
 
 
 def draft_manuscript_rel() -> str:
-    """In-progress manuscript on the visible work surface (tree + double-click)."""
+    """draft 相对路径。
+
+    参数:
+        无。
+
+    返回:
+        str。"""
     return f"drafts/{Path(confirmed_manuscript_rel()).name}"
 
 
 def legacy_draft_manuscript_rel() -> str:
-    """Pre-visible-drafts path under harness tree (read/migrate only)."""
+    """legacy draft 路径。
+
+    参数:
+        无。
+
+    返回:
+        str。"""
     return f".agent/work/drafts/{Path(confirmed_manuscript_rel()).name}"
 
 
 def strip_section_html(text: str) -> str:
-    """Drop legacy HTML section fences. Visible files must not keep them."""
+    """去 HTML section 标记。
+    
+    参数:
+        text。
+    
+    返回:
+        str。"""
     return _HTML_MARK_RE.sub("", text or "")
 
 
 def human_section_title(section_id: str) -> str:
-    """H1 text for a section id: ch3 → 第三章; otherwise the id itself."""
+    """id→H1 标题。
+    
+    参数:
+        section_id。
+    
+    返回:
+        str。"""
     sid = section_id.strip()
     match = _CH_ID_RE.fullmatch(sid) or _NUM_ID_RE.fullmatch(sid)
     if match:
@@ -150,6 +180,13 @@ def _prepare_body(content: str, title: str) -> str:
 
 
 def format_section_block(section_id: str, content: str) -> str:
+    """格式化章块。
+    
+    参数:
+        section_id/content。
+    
+    返回:
+        str。"""
     sid = section_id.strip()
     title = human_section_title(sid)
     body = _prepare_body(content, title)
@@ -159,7 +196,13 @@ def format_section_block(section_id: str, content: str) -> str:
 
 
 def parse_sections(doc: str) -> tuple[str, list[tuple[str, str]]]:
-    """Return (preamble, [(section_id, body), ...]). HTML fences or H1 chapters."""
+    """解析 preamble+章。
+    
+    参数:
+        doc。
+    
+    返回:
+        tuple。"""
     text = doc or ""
     html = list(_HTML_SECTION_RE.finditer(text))
     if html:
@@ -195,7 +238,13 @@ def _serialize(preamble: str, sections: list[tuple[str, str]]) -> str:
 
 
 def upsert_section(doc: str, section_id: str, content: str) -> str:
-    """Replace an existing chapter, or append a new one. Always writes H1 form."""
+    """替换/追加章。
+    
+    参数:
+        doc/section_id/content。
+    
+    返回:
+        str。"""
     sid = section_id.strip()
     title = human_section_title(sid)
     body = _prepare_body(content, title)
@@ -214,6 +263,13 @@ def upsert_section(doc: str, section_id: str, content: str) -> str:
 
 
 def extract_section(doc: str, section_id: str) -> str | None:
+    """取章 body。
+    
+    参数:
+        doc/section_id。
+    
+    返回:
+        str|None。"""
     sid = section_id.strip()
     _, sections = parse_sections(doc)
     for existing_id, body in sections:
@@ -223,7 +279,13 @@ def extract_section(doc: str, section_id: str) -> str | None:
 
 
 def section_id_containing_span(doc: str, span: str) -> str:
-    """Chapter id whose body uniquely contains ``span``. Empty if none or ambiguous."""
+    """span 唯一章 id。
+    
+    参数:
+        doc/span。
+    
+    返回:
+        str。"""
     needle = (span or "").strip()
     if not needle:
         return ""
@@ -238,11 +300,24 @@ def section_id_containing_span(doc: str, span: str) -> str:
 
 
 def list_section_ids(doc: str) -> list[str]:
+    """列章 id。
+    
+    参数:
+        doc。
+    
+    返回:
+        list。"""
     return [sid for sid, _ in parse_sections(doc)[1]]
 
 
 def clip_text(text: str, max_chars: int) -> tuple[str, bool]:
-    """Return (text, clipped). Visible omission marker when clipped."""
+    """裁剪+省略标记。
+    
+    参数:
+        text/max_chars。
+    
+    返回:
+        tuple。"""
     if max_chars <= 0 or len(text) <= max_chars:
         return text, False
     if max_chars < 120:
@@ -257,6 +332,13 @@ def clip_text(text: str, max_chars: int) -> tuple[str, bool]:
 
 
 def is_manuscript_rel(path: str) -> bool:
+    """是否手稿路径。
+    
+    参数:
+        path。
+    
+    返回:
+        bool。"""
     rel = path.strip().lstrip("/").replace("\\", "/")
     name = Path(rel).name
     confirmed = Path(confirmed_manuscript_rel()).name
@@ -268,6 +350,13 @@ def is_manuscript_rel(path: str) -> bool:
 
 
 def previous_section_id(section_ids: list[str], focus: str) -> str | None:
+    """focus 前一章。
+    
+    参数:
+        section_ids/focus。
+    
+    返回:
+        str|None。"""
     if focus not in section_ids:
         # focus may be new chapter — prev is last existing
         return section_ids[-1] if section_ids else None
@@ -276,7 +365,13 @@ def previous_section_id(section_ids: list[str], focus: str) -> str | None:
 
 
 def load_manuscript_doc(workspace_root: Path | None = None) -> tuple[str, str]:
-    """Prefer draft manuscript, then legacy draft, then confirmed. Returns (text, rel_path)."""
+    """加载手稿。
+    
+    参数:
+        workspace_root。
+    
+    返回:
+        (text,rel)。"""
     root = Path(workspace_root or settings.workspace_root).resolve()
     for rel in (
         draft_manuscript_rel(),

@@ -1,4 +1,7 @@
+"""结构化会话摘要：从消息/turn 行抽取 task、files、decisions，支持 HM3 增量合并。"""
+
 from __future__ import annotations
+
 
 import json
 import re
@@ -14,6 +17,7 @@ _FILE_IN_TEXT = re.compile(
 
 @dataclass
 class StructuredSummary:
+    """作用：结构化摘要 dataclass。"""
     task: str = ""
     files_touched: list[str] = field(default_factory=list)
     decisions: list[str] = field(default_factory=list)
@@ -48,6 +52,7 @@ class StructuredSummary:
 
 
 def structured_summary_from_messages(messages: list[dict[str, Any]]) -> StructuredSummary:
+    """作用：从 message 列表启发式抽取摘要。"""
     user_bits: list[str] = []
     assistant_bits: list[str] = []
     files: list[str] = []
@@ -100,6 +105,7 @@ def structured_summary_from_messages(messages: list[dict[str, Any]]) -> Structur
 
 
 def structured_summary_from_turn_rows(rows: list[dict[str, Any]]) -> StructuredSummary:
+    """作用：从 turn DB 行抽取摘要。"""
     user_bits: list[str] = []
     assistant_bits: list[str] = []
     files: list[str] = []
@@ -127,6 +133,7 @@ def structured_summary_from_turn_rows(rows: list[dict[str, Any]]) -> StructuredS
 
 
 def merge_structured_summary(base: StructuredSummary, overlay: StructuredSummary) -> StructuredSummary:
+    """作用：合并两份 StructuredSummary。"""
     return StructuredSummary(
         task=overlay.task or base.task,
         files_touched=_dedupe([*base.files_touched, *overlay.files_touched]),
@@ -138,7 +145,7 @@ def merge_structured_summary(base: StructuredSummary, overlay: StructuredSummary
 
 
 def extract_prev_summary(messages: list[dict[str, Any]]) -> StructuredSummary | None:
-    """HM3: find the latest autocompact / session-context summary in the window."""
+    """作用：HM3：找窗口内最近 autocompact/session 摘要。"""
     for msg in reversed(messages):
         for block in msg.get("content", []) or []:
             if block.get("type") != "text":
@@ -153,7 +160,7 @@ def extract_prev_summary(messages: list[dict[str, Any]]) -> StructuredSummary | 
 
 
 def messages_since_last_summary(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return only messages after the last autocompact/session-context marker (HM3 delta)."""
+    """作用：返回上次摘要之后的消息子集。"""
     last_idx = -1
     for i, msg in enumerate(messages):
         for block in msg.get("content", []) or []:
@@ -169,7 +176,7 @@ def messages_since_last_summary(messages: list[dict[str, Any]]) -> list[dict[str
 
 
 def incremental_summary_from_messages(messages: list[dict[str, Any]]) -> StructuredSummary:
-    """Default HM3 path: merge(prev, delta); full only when no prev."""
+    """作用：HM3 默认路径：merge(prev, delta)。"""
     prev = extract_prev_summary(messages)
     delta_msgs = messages_since_last_summary(messages) if prev is not None else messages
     if not delta_msgs and prev is not None:
@@ -181,6 +188,7 @@ def incremental_summary_from_messages(messages: list[dict[str, Any]]) -> Structu
 
 
 def parse_structured_summary_text(text: str) -> StructuredSummary | None:
+    """作用：解析 [autocompact: JSON] 文本。"""
     marker = "[autocompact:"
     if marker not in text:
         return None
@@ -212,6 +220,7 @@ def build_context_summary_record(
     turn_count: int,
     source: str,
 ) -> dict[str, Any]:
+    """作用：构造 sessions.context_summary JSON。"""
     record = {
         "last_turn_id": last_turn_id,
         "last_status": last_status,
@@ -228,6 +237,7 @@ def build_context_summary_record(
 
 
 def structured_summary_to_user_message(summary: StructuredSummary) -> dict[str, Any]:
+    """作用：摘要 → user role 消息。"""
     return {
         "role": "user",
         "content": [{"type": "text", "text": summary.to_message_text()}],
@@ -235,6 +245,7 @@ def structured_summary_to_user_message(summary: StructuredSummary) -> dict[str, 
 
 
 def structured_summary_dict(summary: StructuredSummary) -> dict[str, Any]:
+    """作用：dataclass → dict。"""
     return asdict(summary)
 
 

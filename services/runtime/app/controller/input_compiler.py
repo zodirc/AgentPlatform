@@ -1,3 +1,15 @@
+"""用户输入编译：斜杠命令展开、元数据提取与 @path 预读。
+
+English: User input compiler — slash expansion, metadata extraction, optional @path preread.
+
+在 turn 进入引擎前，将原始用户消息规范化为 ``CompiledInput``（消息列表 + metadata）。
+职责包括：
+
+- 写作/Agent 斜杠（``/polish``、``/outline``、``/test``、``/lint``）展开为确定性用户侧指令（docs/14 §6.4、docs/30 AQ2），**不**修改 system prefix（C3）。
+- 提取 plan hint、选区、``@path`` 引用、recall 轻提示等 metadata。
+- 可选 ``enrich_with_preread``：在预算与超时内将 @path 文件片段追加到用户消息。
+- ``should_query``：本地可响应的斜杠（``/help``、``/version`` 等）与空消息拦截，决定是否走模型。
+"""
 from __future__ import annotations
 
 import asyncio
@@ -18,13 +30,13 @@ _SLASH_OUTLINE = re.compile(r"^\s*/outline(?:\s+(.*))?$", re.I | re.S)
 _SLASH_TEST = re.compile(r"^\s*/test(?:\s+(.*))?$", re.I | re.S)
 _SLASH_LINT = re.compile(r"^\s*/lint(?:\s+(.*))?$", re.I | re.S)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
-# HM9: light recall hint (no auto-inject).
+# HM9: 轻量 recall 提示（不自动注入记忆）。
 _RECALL_HINT = re.compile(
     r"(记得|上次|之前说过|之前说的|recall|remember\s+when|last\s+time)",
     re.I,
 )
 
-# Deterministic user-side expansions (docs/14 §6.4). Do NOT mutate system prefix (C3).
+# 确定性用户侧展开（docs/14 §6.4）。禁止改动 system prefix（C3）。
 POLISH_EXPAND = (
     "[polish] 只改文风与节奏；禁改专名、情节、[cite:*]；"
     "禁止调用 search_sources；逐段 propose_patch。"
@@ -43,7 +55,7 @@ OUTLINE_EXPAND = (
     "仅当用户要「简略/目录」时才可短写。"
     "批量扩章用 append 分段写满，本轮内加厚后再结束。"
 )
-# Agent slash expansions (docs/30 AQ2).
+# Agent 斜杠展开（docs/30 AQ2）。
 TEST_EXPAND = (
     "[test] 运行项目测试并报告失败项；优先调用 run_tests；"
     "仅当标准测试命令不适用时才用 run_command；不要改代码除非用户要求修失败。"
@@ -55,7 +67,14 @@ LINT_EXPAND = (
 
 
 def expand_writing_slash(message: str) -> tuple[str, str | None]:
-    """Expand /polish|/outline into user-message suffixes. Returns (text, slash_name|None)."""
+    """将 ``/polish`` 或 ``/outline`` 展开为用户消息后缀。
+
+    参数:
+        message: 原始用户输入（会先 ``strip``）。
+
+    返回:
+        ``(展开后文本, 斜杠名)``；未匹配时 ``(原 message, None)``。
+    """
     text = message.strip()
     m = _SLASH_POLISH.match(text)
     if m:
@@ -71,7 +90,14 @@ def expand_writing_slash(message: str) -> tuple[str, str | None]:
 
 
 def expand_agent_slash(message: str) -> tuple[str, str | None]:
-    """Expand /test|/lint into unambiguous user instructions (docs/30 AQ2)."""
+    """将 ``/test`` 或 ``/lint`` 展开为明确的 Agent 侧指令（docs/30 AQ2）。
+
+    参数:
+        message: 原始用户输入（会先 ``strip``）。
+
+    返回:
+        ``(展开后文本, 斜杠名)``；未匹配时 ``(原 message, None)``。
+    """
     text = message.strip()
     m = _SLASH_TEST.match(text)
     if m:
@@ -88,11 +114,15 @@ def expand_agent_slash(message: str) -> tuple[str, str | None]:
 
 @dataclass
 class CompiledInput:
+    """编译后的用户输入：引擎可读消息列表与旁路 metadata。"""
+
     messages: list[dict]
     metadata: dict
 
 
 class InputCompiler:
+    """将原始用户消息编译为 ``CompiledInput``。"""
+
     def compile(
         self,
         message: str,
@@ -100,6 +130,16 @@ class InputCompiler:
         selection: str | None = None,
         scenario_id: str | None = None,
     ) -> CompiledInput:
+        """展开斜杠、附加选区与 @path 块，并收集 metadata。
+
+        参数:
+            message: 用户原始文本。
+            selection: 编辑器选区；非空时追加 ``[selection]`` 块并设 ``has_selection``。
+            scenario_id: 场景 ID，传给 ``detect_plan_hint``。
+
+        返回:
+            含单条 ``user`` 消息与 metadata 的 ``CompiledInput``。
+        """
         text = message.strip()
         metadata: dict = {}
         text, slash = expand_writing_slash(text)
@@ -129,7 +169,17 @@ class InputCompiler:
         *,
         abort: asyncio.Event | None = None,
     ) -> CompiledInput:
-        """Budgeted @path prereread into the user message; timeout → keep pointers only."""
+        """在预算与超时内将 @path 文件片段预读并追加到用户消息。
+
+        超时或取消时保留原有 ``[file_refs]`` 指针，仅更新 metadata 状态。
+
+        参数:
+            compiled: ``compile`` 产出；须含 ``metadata["path_refs"]`` 才有预读。
+            abort: 可选取消事件；已 set 则标记 ``path_preread=cancelled`` 并返回。
+
+        返回:
+            新 ``CompiledInput``；无 path_refs 时原样返回同一结构。
+        """
         path_refs = list(compiled.metadata.get("path_refs") or [])
         if not path_refs:
             return compiled
@@ -157,7 +207,7 @@ class InputCompiler:
         block = "\n\n".join(snippets)
         compiled.metadata["path_preread"] = "ok"
         compiled.metadata["hot_files"] = [s.split("\n", 1)[0].replace("## ", "").strip() for s in snippets]
-        # Append prereread to the last user message text.
+        # 预读块追加到最后一条 user 消息的 text 块末尾。
         messages = [dict(m) for m in compiled.messages]
         for msg in reversed(messages):
             if msg.get("role") != "user":
@@ -176,6 +226,15 @@ class InputCompiler:
 
 
 def _preread_paths(paths: list[str], budget: int) -> list[str]:
+    """同步读取 workspace 内相对路径文件头，受字符预算约束。
+
+    参数:
+        paths: 相对 workspace_root 的路径列表（已截断数量由调用方控制）。
+        budget: 全部 snippet 合计最大字符数。
+
+    返回:
+        ``## {rel}\\n{snippet}`` 字符串列表；越界路径或非文件跳过。
+    """
     root = Path(settings.workspace_root).resolve()
     snippets: list[str] = []
     used = 0
@@ -187,6 +246,7 @@ def _preread_paths(paths: list[str], budget: int) -> list[str]:
         try:
             candidate.relative_to(root)
         except ValueError:
+            # 路径逃逸 workspace，跳过。
             continue
         if not candidate.is_file():
             continue
@@ -204,6 +264,8 @@ def _preread_paths(paths: list[str], budget: int) -> list[str]:
 
 @dataclass
 class ShouldQueryResult:
+    """``should_query`` 判定结果：是否走模型及本地短路响应。"""
+
     should_query: bool
     local_response: str | None = None
     failure_reason: str | None = None
@@ -211,6 +273,15 @@ class ShouldQueryResult:
 
 
 def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
+    """判断用户消息是否应发起模型 turn，或本地/斜杠短路。
+
+    参数:
+        message: 用户原始文本。
+        has_model_key: 是否配置模型 API key；无 key 时 stub 模式仍 ``should_query=True``。
+
+    返回:
+        ``ShouldQueryResult``：``should_query=False`` 时看 ``local_response`` 或 ``slash_command``。
+    """
     text = message.strip()
     if not text:
         return ShouldQueryResult(False, failure_reason="empty_message")
@@ -237,6 +308,6 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
     if _SLASH_VERIFY.match(text):
         return ShouldQueryResult(False, slash_command="verify")
     if not has_model_key:
-        # Stub mode still runs engine with deterministic stub provider
+        # 无 key 仍走引擎，使用确定性 stub provider。
         return ShouldQueryResult(True)
     return ShouldQueryResult(True)

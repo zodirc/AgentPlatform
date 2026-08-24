@@ -1,3 +1,5 @@
+"""写作素材卡加载、预算 pin 与 system/volatile 拼装（docs/14 C1/C3）。"""
+
 from __future__ import annotations
 
 import hashlib
@@ -29,6 +31,10 @@ SECTION_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.M)
 
 @dataclass(frozen=True)
 class WritingCard:
+    """单张素材卡快照。
+    
+    参数:
+        path/title/kind/body/mtime/truncated。"""
     path: str
     title: str
     kind: str
@@ -39,6 +45,10 @@ class WritingCard:
 
 @dataclass(frozen=True)
 class DroppedCard:
+    """预算淘汰记录。
+    
+    参数:
+        path/kind/reason。"""
     path: str
     kind: str
     reason: str
@@ -46,18 +56,36 @@ class DroppedCard:
 
 @dataclass(frozen=True)
 class WritingCardsSelection:
+    """完整 pin 结果。
+    
+    参数:
+        cards/dropped/budget。"""
     cards: list[WritingCard]
     dropped: list[DroppedCard] = field(default_factory=list)
     budget: dict[str, object] = field(default_factory=dict)
 
 
 def cards_root(*, workspace_root: Path | None = None) -> Path:
+    """素材卡根目录。
+    
+    参数:
+        workspace_root。
+    
+    返回:
+        Path。"""
     root = Path(workspace_root or settings.workspace_root).resolve()
     rel = settings.writing_cards_dir.strip().lstrip("/")
     return (root / rel).resolve()
 
 
 def is_cards_path(path: Path, *, workspace_root: Path | None = None) -> bool:
+    """路径是否在 cards 树。
+    
+    参数:
+        path/workspace_root。
+    
+    返回:
+        bool。"""
     try:
         rel = path.resolve().relative_to(Path(workspace_root or settings.workspace_root).resolve())
     except ValueError:
@@ -99,6 +127,13 @@ def _card_title(path: Path, meta: dict[str, str], body: str) -> str:
 
 
 def load_writing_cards(*, workspace_root: Path | None = None) -> list[WritingCard]:
+    """扫描解析全部素材卡；跳过 pending。
+    
+    参数:
+        workspace_root。
+    
+    返回:
+        WritingCard 列表。"""
     root = cards_root(workspace_root=workspace_root)
     if not root.is_dir():
         return []
@@ -151,6 +186,13 @@ def kind_budget_map(
     plot_max: int | None = None,
     general_max: int | None = None,
 ) -> dict[str, int]:
+    """各 kind 字符上限。
+    
+    参数:
+        style/character/plot/general_max。
+    
+    返回:
+        dict。"""
     return {
         "style": style_max if style_max is not None else settings.writing_cards_style_max_chars,
         "character": (
@@ -180,11 +222,13 @@ def select_writing_cards(
     plot_max: int | None = None,
     general_max: int | None = None,
 ) -> list[WritingCard]:
-    """Inventory-deterministic pin (docs/14 C1/C3).
-
-    ``message`` is retained for API compatibility but does **not** affect selection.
-    Pin set depends only on cards inventory + budgets + sort key (kind → path).
-    """
+    """确定性 pin（message 不影响）。
+    
+    参数:
+        message/cards/预算参数。
+    
+    返回:
+        WritingCard 列表。"""
     result = select_writing_cards_detailed(
         message,
         cards,
@@ -209,6 +253,13 @@ def select_writing_cards_detailed(
     plot_max: int | None = None,
     general_max: int | None = None,
 ) -> WritingCardsSelection:
+    """完整 pin 含 dropped。
+    
+    参数:
+        message/cards/预算参数。
+    
+    返回:
+        WritingCardsSelection。"""
     del message  # Inventory pin: message must not affect selection (C3 corridor).
     if not cards:
         return WritingCardsSelection(cards=[], dropped=[], budget={})
@@ -296,6 +347,13 @@ def select_writing_cards_detailed(
 
 
 def format_cards_block(cards: list[WritingCard]) -> str:
+    """格式化为 Writing cards Markdown。
+    
+    参数:
+        cards。
+    
+    返回:
+        Markdown。"""
     if not cards:
         return ""
     parts = [
@@ -313,12 +371,25 @@ def format_cards_block(cards: list[WritingCard]) -> str:
 
 
 def stable_cards_prefix_hash(text: str) -> str:
-    """SHA-256 hex digest (truncated) for prefix stability assertions (docs/14 C3)."""
+    """cards 前缀 SHA-256（16 hex）。
+    
+    参数:
+        text。
+    
+    返回:
+        str。"""
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     return digest[:16]
 
 
 def extract_cards_block(prompt: str) -> str:
+    """从 prompt 截取 cards 段。
+    
+    参数:
+        prompt。
+    
+    返回:
+        str。"""
     marker = "## Writing cards（必须遵守）"
     idx = prompt.find(marker)
     if idx < 0:
@@ -345,7 +416,13 @@ def extract_cards_block(prompt: str) -> str:
 
 
 def parse_style_card_sections(body: str) -> dict[str, str]:
-    """Extract Voice / Do / Don't / Samples / Format sections from a style card body."""
+    """解析 style 卡分区。
+    
+    参数:
+        body。
+    
+    返回:
+        dict。"""
     matches = list(SECTION_HEADING_RE.finditer(body))
     sections: dict[str, str] = {}
     for i, match in enumerate(matches):
@@ -374,7 +451,13 @@ def extract_sample_paragraphs(
     max_paragraphs: int = 3,
     max_chars_per: int = 400,
 ) -> list[str]:
-    """Deterministically pull prose paragraphs from a chapter/draft (no LLM)."""
+    """从章节抽 prose 段。
+    
+    参数:
+        text/max_paragraphs/max_chars_per。
+    
+    返回:
+        list。"""
     cleaned = text.strip()
     if not cleaned:
         return []
@@ -407,7 +490,13 @@ def extract_sample_paragraphs(
 
 
 def merge_style_section(body: str, section_key: str, content: str) -> str:
-    """Replace or append a ## section; preserves Voice/Do/Don't/Samples/Format order."""
+    """合并 style ## 分区。
+    
+    参数:
+        body/section_key/content。
+    
+    返回:
+        str。"""
     canonical = section_key
     if canonical.lower() in {"dont", "don't"}:
         canonical = "Don't"
@@ -439,7 +528,13 @@ def merge_style_section(body: str, section_key: str, content: str) -> str:
 
 
 def set_dont_enabled(body: str, *, enabled: bool) -> str:
-    """Toggle Don't list for a work: disabled → placeholder; enabled keeps/restores marker."""
+    """开关 Don't 清单。
+    
+    参数:
+        body/enabled。
+    
+    返回:
+        str。"""
     sections = parse_style_card_sections(body)
     current = sections.get("Don't", "").strip()
     if not enabled:
@@ -464,7 +559,13 @@ def import_samples_into_style_body(
     max_paragraphs: int = 3,
     max_chars_per: int = 400,
 ) -> str:
-    """Fill ## Samples from chapter prose (deterministic; loop-outside helper)."""
+    """章节 prose 填 Samples。
+    
+    参数:
+        style_body/chapter_text/限制。
+    
+    返回:
+        str。"""
     samples = extract_sample_paragraphs(
         chapter_text,
         max_paragraphs=max_paragraphs,
@@ -478,7 +579,13 @@ def import_samples_into_style_body(
 
 
 def apply_style_meta_for_pin(body: str, meta: dict[str, str]) -> str:
-    """Apply frontmatter toggles before pin (dont_enabled=false strips Don't content)."""
+    """pin 前应用 meta。
+    
+    参数:
+        body/meta。
+    
+    返回:
+        str。"""
     raw = (meta.get("dont_enabled") or "true").strip().lower()
     if raw in {"0", "false", "no", "off"}:
         return set_dont_enabled(body, enabled=False)
@@ -486,6 +593,13 @@ def apply_style_meta_for_pin(body: str, meta: dict[str, str]) -> str:
 
 
 def style_card_template_path() -> Path:
+    """style 模板路径。
+
+    参数:
+        无。
+
+    返回:
+        Path。"""
     return Path(__file__).resolve().parents[1] / "scenarios" / "writing" / "templates" / "style_card.md"
 
 
@@ -497,6 +611,13 @@ _QUALITY_REJECT_RE = re.compile(
 
 
 def default_voice_card_path() -> Path:
+    """默认声口卡路径。
+
+    参数:
+        无。
+
+    返回:
+        Path。"""
     return (
         Path(__file__).resolve().parents[1]
         / "scenarios"
@@ -507,6 +628,13 @@ def default_voice_card_path() -> Path:
 
 
 def load_builtin_default_voice() -> WritingCard | None:
+    """加载内置 style 卡。
+
+    参数:
+        无。
+
+    返回:
+        WritingCard|None。"""
     path = default_voice_card_path()
     if not path.is_file():
         return None
@@ -528,7 +656,13 @@ def load_builtin_default_voice() -> WritingCard | None:
 
 
 def with_builtin_style_if_missing(cards: list[WritingCard]) -> list[WritingCard]:
-    """Pin house voice when inventory has no style card. User style fully overrides."""
+    """无 style 时补默认。
+    
+    参数:
+        cards。
+    
+    返回:
+        list。"""
     if any(c.kind == "style" for c in cards):
         return cards
     builtin = load_builtin_default_voice()
@@ -538,7 +672,13 @@ def with_builtin_style_if_missing(cards: list[WritingCard]) -> list[WritingCard]
 
 
 def quality_reject_steer(message: str) -> str:
-    """Volatile-only: user rejected the story core. Must not enter cards prefix_hash."""
+    """否决故事核 volatile 块。
+    
+    参数:
+        message。
+    
+    返回:
+        str。"""
     if not _QUALITY_REJECT_RE.search(message or ""):
         return ""
     return (
@@ -550,13 +690,10 @@ def quality_reject_steer(message: str) -> str:
 
 @dataclass(frozen=True)
 class WritingCardsPinResult:
-    """Writing pin result.
-
-    WN3 / WT5 layout:
-    - ``prompt`` is the **stable** system prefix (``system.md`` / base only) for prompt cache.
-    - ``volatile_block`` holds cards / work index / focus+prev — sent as a post-system user
-      message, not welded into system.
-    """
+    """pin 结果；prompt 稳定，volatile 分离。
+    
+    参数:
+        prompt/cards/available_count/dropped/budget/blocks。"""
 
     prompt: str
     cards: list[WritingCard]
@@ -568,9 +705,19 @@ class WritingCardsPinResult:
 
     @property
     def stable_prompt(self) -> str:
+        """与 ``prompt`` 相同，强调可缓存的稳定 system 段。
+
+        返回:
+            稳定 prompt 字符串。
+        """
         return self.prompt
 
     def event_payload(self) -> dict[str, object]:
+        """生成 turn 事件用的 cards pin 摘要载荷。
+
+        返回:
+            含 cards 元数据、chars、prefix_hash 等的 dict。
+        """
         cards_meta = [
             {
                 "path": card.path,
@@ -611,6 +758,13 @@ def prepare_writing_system_prompt(
     *,
     workspace_root: Path | None = None,
 ) -> WritingCardsPinResult:
+    """组装 base+volatile。
+    
+    参数:
+        base_prompt/message/workspace_root。
+    
+    返回:
+        WritingCardsPinResult。"""
     from app.writing.work_index import format_work_index_block
     from app.writing.signals.spec import build_writing_spec_block
 
@@ -664,7 +818,13 @@ def build_writing_system_prompt(
     *,
     workspace_root: Path | None = None,
 ) -> str:
-    """Legacy welded string (stable + volatile). Prefer ``prepare_writing_system_prompt``."""
+    """Legacy 拼接 system。
+    
+    参数:
+        同 prepare。
+    
+    返回:
+        str。"""
     pin = prepare_writing_system_prompt(
         base_prompt,
         message,

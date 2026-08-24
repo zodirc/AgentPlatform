@@ -1,4 +1,5 @@
-"""In-memory projection — sole query surface (R3: zero DB on hot path)."""
+"""索引投影：symbol→hit 与注册表。"""
+
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from app.structural.workspace_index.types import (
 
 @dataclass
 class IndexProjection:
-    """Per-work inverted index: name → postings + path → FileEntry."""
+    """作用：单 Work 符号投影索引。"""
 
     work_id: UUID
     owner_user_id: str
@@ -197,7 +198,7 @@ def _entry_bytes(entry: FileEntry) -> int:
 
 
 class ProjectionRegistry:
-    """Process-wide lazy projections keyed by work_id (idle eviction / A5)."""
+    """作用：work_id → IndexProjection 注册表。"""
 
     def __init__(self) -> None:
         self._lock = threading.RLock()
@@ -252,4 +253,5 @@ _registry = ProjectionRegistry()
 
 
 def get_projection_registry() -> ProjectionRegistry:
+    """作用：全局 ProjectionRegistry。"""
     return _registry

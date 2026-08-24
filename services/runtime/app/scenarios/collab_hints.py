@@ -1,4 +1,7 @@
-"""Collab harness hints — volatile only; does not change AgentEngine control flow."""
+"""协作场景 volatile 提示块：编排约束、delegate 缺口与 handoff 软提示。
+
+仅改写 ``volatile_context``，不改变 AgentEngine 主控制流。
+"""
 
 from __future__ import annotations
 
@@ -7,12 +10,21 @@ import re
 from typing import Any
 
 COLLAB_GAP_MARK = "[collab_gap]"
+"""``volatile_context`` 中协作缺口提示段的起始标记，便于 mid-Turn 局部刷新。"""
 
 _EDIT_TYPES = frozenset({"edit", "editor", "drafter"})
 _CHECK_TYPES = frozenset({"verify", "shell"})
 
 
 def collab_orchestrator_block() -> str:
+    """生成协作编排 volatile 块：首工具约束、角色混用与简单 Q&A 例外。
+
+    参数:
+        无。
+
+    返回:
+        以 ``[collab_orchestrator]`` 开头的多行提示文本。
+    """
     return (
         "[collab_orchestrator]\n"
         "Orchestration-required (greenfield / multi-deliverable / ≥2 constraints): "
@@ -37,7 +49,14 @@ def _parse_delegate_payload(raw: str) -> dict[str, Any]:
 
 
 def delegate_type_signals(messages: list[dict[str, Any]]) -> tuple[bool, bool]:
-    """Return (saw_edit_delegate, saw_verify_or_shell) from tool results this Turn."""
+    """从本 Turn 消息流推断 delegate 是否已覆盖 edit 与 verify/shell 角色。
+
+    参数:
+        messages: Turn 内 OpenAI/Anthropic 风格消息列表（含 tool / assistant）。
+
+    返回:
+        ``(saw_edit_delegate, saw_verify_or_shell)`` 二元组。
+    """
     saw_edit = False
     saw_check = False
     for msg in messages:
@@ -82,7 +101,15 @@ def delegate_type_signals(messages: list[dict[str, Any]]) -> tuple[bool, bool]:
 
 
 def apply_collab_gap_hint(volatile: str, messages: list[dict[str, Any]]) -> str:
-    """Refresh mid-Turn gap hint without rewriting the rest of volatile_context."""
+    """Mid-Turn 刷新协作缺口提示，不重写 ``volatile_context`` 其余内容。
+
+    参数:
+        volatile: 当前 volatile 上下文全文。
+        messages: 本 Turn 消息列表，供 ``delegate_type_signals`` 扫描。
+
+    返回:
+        更新后的 volatile 字符串（末尾保留换行）。
+    """
     text = volatile or ""
     if COLLAB_GAP_MARK in text:
         text = text.split(COLLAB_GAP_MARK, 1)[0].rstrip() + "\n"
@@ -107,7 +134,17 @@ def handoff_prompt_extra(
     paths: list[str] | None,
     task: str,
 ) -> str:
-    """Soft handoff hint for verify/shell when parent omitted context_refs."""
+    """父 agent 未传 ``context_refs`` 时，为 verify/shell 子 agent 追加软 handoff 提示。
+
+    参数:
+        agent_type: 子 agent 类型（小写）。
+        context_refs: 父级显式传递的上下文路径列表。
+        paths: 备用路径列表（与 ``context_refs`` 合并判断）。
+        task: 委派任务正文，用于路径正则启发。
+
+    返回:
+        追加到子 agent prompt 的 ``[handoff_hint]`` 块；无需提示时为空字符串。
+    """
     if agent_type not in _CHECK_TYPES:
         return ""
     refs = [*(context_refs or []), *(paths or [])]

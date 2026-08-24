@@ -1,4 +1,4 @@
-"""Optional Postgres overlay for account/work exemplars (index plane)."""
+"""Postgres exemplar overlay。"""
 
 from __future__ import annotations
 
@@ -15,7 +15,13 @@ async def load_overlay_exemplars(
     owner_user_id: UUID | None,
     work_id: UUID | None,
 ) -> tuple[str, dict[str, tuple[Exemplar, ...]]]:
-    """Return (scope, bank) for the highest overlay that has rows; else empty."""
+    """加载最高 overlay bank。
+    
+    参数:
+        owner_user_id/work_id。
+    
+    返回:
+        (scope,bank)。"""
     if owner_user_id is None and work_id is None:
         return "platform", {}
     try:
@@ -71,6 +77,13 @@ async def load_metric_space(
     owner_user_id: UUID | None = None,
     work_id: UUID | None = None,
 ) -> MetricSpace:
+    """platform+overlay 空间。
+    
+    参数:
+        owner_user_id/work_id。
+    
+    返回:
+        MetricSpace。"""
     from app.writing.signals.space import load_platform_space
 
     base = load_platform_space()

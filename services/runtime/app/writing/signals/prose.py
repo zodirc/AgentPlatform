@@ -1,4 +1,4 @@
-"""Prose-only metrics for writing_signals (not the docs/code rubric)."""
+"""prose 专用指标。"""
 
 from __future__ import annotations
 
@@ -28,16 +28,37 @@ def _clamp(value: float) -> float:
 
 
 def paragraphs(text: str) -> list[str]:
+    """分段。
+    
+    参数:
+        text。
+    
+    返回:
+        list。"""
     body = (text or "").strip()
     parts = [p.strip() for p in re.split(r"\n\s*\n", body) if p.strip()]
     return parts or ([body] if body else [])
 
 
 def sentence_count(text: str) -> int:
+    """句数。
+    
+    参数:
+        text。
+    
+    返回:
+        int。"""
     return len([p for p in _SENT_SPLIT.split(text or "") if p.strip()])
 
 
 def paragraph_shown(para: str) -> bool:
+    """段是否在场上。
+    
+    参数:
+        para。
+    
+    返回:
+        bool。"""
     if "「" in para and "」" in para:
         return True
     # Told-not-shown: 终于/本章/于是 without a spoken beat.
@@ -49,6 +70,13 @@ def paragraph_shown(para: str) -> bool:
 
 
 def narrative_scene_ratio(text: str) -> float:
+    """场面比。
+    
+    参数:
+        text。
+    
+    返回:
+        float。"""
     paras = paragraphs(text)
     if not paras:
         return 0.0
@@ -58,6 +86,13 @@ def narrative_scene_ratio(text: str) -> float:
 
 
 def synopsis_rate(text: str) -> float:
+    """提要段比例。
+    
+    参数:
+        text。
+    
+    返回:
+        float。"""
     paras = paragraphs(text)
     if not paras:
         return 0.0
@@ -66,12 +101,25 @@ def synopsis_rate(text: str) -> float:
 
 
 def has_person_on_stage(text: str) -> bool:
+    """是否有人在场。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     body = text or ""
     return bool(_PERSON.search(body) or ("「" in body and "」" in body))
 
 
 def shown_for_fragment(fragment: str, *, scene: float, feats: dict[str, float]) -> bool:
-    """Type-aware 'shown not told'. Dialogue is not required for texture/action."""
+    """类型 aware shown。
+    
+    参数:
+        fragment/scene/feats。
+    
+    返回:
+        bool。"""
     quote = float(feats.get("quote_ratio") or 0.0)
     battle = float(feats.get("battle_density") or 0.0)
     world = float(feats.get("world_density") or 0.0)
@@ -89,6 +137,13 @@ def shown_for_fragment(fragment: str, *, scene: float, feats: dict[str, float]) 
 
 
 def anti_pattern_flags(text: str, rubric: dict[str, Any]) -> dict[str, bool]:
+    """反模式 flags。
+    
+    参数:
+        text/rubric。
+    
+    返回:
+        dict。"""
     from app.writing.hinge import hinge_fields
 
     staccato = bool(staccato_fields(text).get("staccato_uniform"))
@@ -106,6 +161,13 @@ def anti_pattern_flags(text: str, rubric: dict[str, Any]) -> dict[str, bool]:
 
 
 def character_card_action_hit(text: str) -> bool:
+    """人物卡姓名命中。
+    
+    参数:
+        text。
+    
+    返回:
+        bool。"""
     body = (text or "").strip()
     if visible_chars(body) < 40:
         return False

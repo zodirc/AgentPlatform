@@ -1,8 +1,7 @@
-"""Soft FS jail for tool shell/argv when OS sandbox is degraded or absent.
+"""OS 沙箱降级时的软 FS jail（shell/argv 路径扫描）。
 
-Mirrors ``build_bwrap_argv`` intent: Work Turns must not touch foreign product
-roots. Smoking-gun bug: unsandboxed ``cp -a … /workspace/…`` from ops-l1 SWE
-Turns polluted the legacy default Work mount.
+意图对齐 ``build_bwrap_argv``：Work Turn 不得触碰其它产品根。典型事故：无沙箱
+``cp -a … /workspace/…`` 从 ops-l1 SWE Turn 污染 legacy 默认 Work 挂载。
 """
 
 from __future__ import annotations
@@ -41,6 +40,7 @@ _SYSTEM_PREFIXES: tuple[str, ...] = (
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
+    """``path`` 是否位于 ``root`` 之下（``relative_to`` 不抛即 True）。"""
     try:
         path.relative_to(root)
         return True
@@ -49,7 +49,7 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 
 def _lexical_norm(path_str: str) -> str:
-    """Normalize without requiring the path to exist (keeps absolute)."""
+    """词法规范化路径（不要求存在；保留绝对路径语义）。"""
     raw = (path_str or "").strip().rstrip(",;:)].")
     if not raw:
         return ""
@@ -73,16 +73,19 @@ def _lexical_norm(path_str: str) -> str:
 
 
 def _under_prefix(norm: str, prefix: str) -> bool:
+    """规范化路径 ``norm`` 是否等于或以 ``prefix`` 为前缀。"""
     return norm == prefix or norm.startswith(prefix.rstrip("/") + "/")
 
 
 def _system_allowed(norm: str) -> bool:
+    """是否为允许读取的系统前缀（``/usr``、``/bin`` 等）或 ``/``。"""
     if norm == "/":
         return True
     return any(_under_prefix(norm, p) for p in _SYSTEM_PREFIXES)
 
 
 def _path_allowed(abs_path: str, cwd: Path) -> bool:
+    """绝对路径是否允许访问：系统前缀、当前 work_root 或受限 ``/workspace``/``/data``。"""
     norm = _lexical_norm(abs_path)
     if not norm.startswith("/"):
         return True
@@ -112,6 +115,7 @@ def _path_allowed(abs_path: str, cwd: Path) -> bool:
 
 
 def _iter_abs_candidates(text: str) -> list[str]:
+    """从 shell 文本提取引号内与裸写的绝对路径候选。"""
     found: list[str] = []
     for m in _QUOTED_ABS_RE.finditer(text):
         found.append(m.group(1))
@@ -121,7 +125,7 @@ def _iter_abs_candidates(text: str) -> list[str]:
 
 
 def shell_command_jail_violation(command: str, cwd: Path) -> str | None:
-    """Return a short reason if ``command`` escapes the work root; else None."""
+    """若 ``command`` 逃逸 work root 则返回短原因；否则 ``None``。"""
     text = command or ""
     if not text.strip():
         return None
@@ -156,7 +160,7 @@ def shell_command_jail_violation(command: str, cwd: Path) -> str | None:
 
 
 def argv_jail_violation(argv: list[str] | tuple[str, ...], cwd: Path) -> str | None:
-    """Same jail for argv exec (join then scan; also check each abs arg)."""
+    """argv exec 版 jail：拼接扫描并对各绝对参数单独校验。"""
     if not argv:
         return None
     joined = " ".join(str(a) for a in argv)

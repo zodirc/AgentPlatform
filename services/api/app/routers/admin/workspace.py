@@ -1,6 +1,9 @@
-from __future__ import annotations
+"""工作区浏览 HTTP 路由（``/admin/workspace``）。
 
-from uuid import UUID
+代理 runtime Sources/AST 文件树；``require_admin_or_end_user`` 双通道认证。
+"""
+
+from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field
@@ -19,19 +22,27 @@ MAX_UPLOAD_BYTES = 1_048_576
 
 
 class WorkspaceDeleteBody(BaseModel):
+    """批量删除路径请求。"""
+
     paths: list[str] = Field(min_length=1)
 
 
 class WorkspaceSaveBody(BaseModel):
+    """保存文本文件请求。"""
+
     path: str = Field(min_length=1)
     content: str = ""
 
 
 class WorkspaceMkdirBody(BaseModel):
+    """创建目录请求。"""
+
     path: str = Field(min_length=1)
 
 
 class WorkspaceRenameBody(BaseModel):
+    """重命名/移动路径请求。"""
+
     path: str = Field(min_length=1)
     new_path: str = Field(min_length=1)
     overwrite: bool = False
@@ -43,6 +54,7 @@ async def list_workspace_entries(
     path: str = Query(default="."),
     work_id: UUID | None = Query(default=None),
 ):
+    """列出 work 目录条目。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.list_entries(path=path, tenant=tenant)
@@ -56,6 +68,7 @@ async def read_workspace_file(
     path: str = Query(min_length=1),
     work_id: UUID | None = Query(default=None),
 ):
+    """读取文本文件 JSON（content + encoding 等）。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.read_file(path=path, tenant=tenant)
@@ -69,6 +82,7 @@ async def save_workspace_file(
     body: WorkspaceSaveBody,
     work_id: UUID | None = Query(default=None),
 ):
+    """保存/覆盖文本文件。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.save_file(
@@ -118,6 +132,7 @@ async def delete_workspace_entries(
     body: WorkspaceDeleteBody,
     work_id: UUID | None = Query(default=None),
 ):
+    """批量删除文件/目录。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.delete_paths(paths=body.paths, tenant=tenant)
@@ -131,6 +146,7 @@ async def mkdir_workspace_entry(
     body: WorkspaceMkdirBody,
     work_id: UUID | None = Query(default=None),
 ):
+    """创建目录。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.mkdir_path(path=body.path, tenant=tenant)
@@ -144,6 +160,7 @@ async def rename_workspace_entry(
     body: WorkspaceRenameBody,
     work_id: UUID | None = Query(default=None),
 ):
+    """重命名或移动路径。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.rename_path(
@@ -162,6 +179,7 @@ async def sources_index_status(
     path: str | None = Query(default=None),
     work_id: UUID | None = Query(default=None),
 ):
+    """查询 sources 索引/sync 进度。"""
     try:
         tenant = await resolve_workspace_tenant(request, work_id=work_id)
         return await workspace_svc.sources_index_status(path=path, tenant=tenant)
@@ -271,6 +289,7 @@ async def upload_source_file(
     file: UploadFile = File(...),
     work_id: UUID | None = Query(default=None),
 ):
+    """上传 sources 库文件（≤1 MiB UTF-8）。"""
     raw = await file.read()
     if len(raw) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large (max 1 MiB)")

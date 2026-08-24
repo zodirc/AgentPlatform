@@ -1,4 +1,7 @@
+"""ModelGateway 工厂：按 provider/模式/recorded 组装 Provider。"""
+
 from __future__ import annotations
+
 
 from app.model.anthropic_provider import AnthropicProvider
 from app.model.config import ModelConfig
@@ -11,7 +14,7 @@ from app.settings import settings
 
 
 def apply_compact_model(config: ModelConfig | None) -> ModelConfig | None:
-    """Overlay optional compact summarizer model (docs/13 S3 A17)."""
+    """作用：叠加 compact 摘要模型配置（A17）。"""
     if config is None:
         return None
     name = (settings.compact_model_name or "").strip()
@@ -35,6 +38,7 @@ def create_gateway(
     for_compact: bool = False,
     context_window_tokens: int | None = None,
 ) -> ModelGateway:
+    """作用：按模式/provider 创建 ModelGateway。"""
     from app.model.turn_override import current_turn_model_mode, current_turn_model_override
 
     if for_compact:

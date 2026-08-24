@@ -1,7 +1,7 @@
-"""IX2: Turn-external sources directory watch → debounced incremental sync.
+"""IX2：sources 目录轮询监视 → 防抖触发增量 sync（RAG 摄取触发器）。
 
-Poll-based (not inotify) so Docker bind mounts / WSL volumes stay reliable.
-Never runs on the ``search_sources`` hot path.
+职责：poll 指纹变化后调用 ``sync_sources_index_safe``，不阻塞 lifespan。
+不在 ``search_sources`` 热路径；Docker/WSL bind mount 下比 inotify 更稳。
 """
 
 from __future__ import annotations
@@ -21,11 +21,12 @@ _synced_fingerprint: tuple[tuple[str, float, int], ...] | None = None
 
 
 def sources_dir() -> Path:
+    """默认 workspace 下 ``sources/`` 绝对路径。"""
     return Path(settings.workspace_root).resolve() / "sources"
 
 
 def fingerprint_sources(root: Path | None = None) -> tuple[tuple[str, float, int], ...]:
-    """Stable fingerprint of indexable files under ``sources/`` (path, mtime, size)."""
+    """可索引文件指纹：``(相对路径, mtime, size)`` 有序元组。"""
     base = root if root is not None else sources_dir()
     if not base.is_dir():
         return ()
@@ -52,7 +53,7 @@ async def _run_watch_sync() -> dict[str, Any]:
 
 
 async def sources_watch_loop() -> None:
-    """Poll ``sources/`` and sync when the fingerprint changes (debounced)."""
+    """轮询 ``sources/``，指纹变化且防抖结束后触发 sync。"""
     global _synced_fingerprint
 
     poll = max(0.5, float(settings.sources_watch_poll_seconds))
@@ -108,7 +109,7 @@ async def sources_watch_loop() -> None:
 
 
 def schedule_sources_watch() -> asyncio.Task[None] | None:
-    """Fire-and-forget watch loop; does not block lifespan yield."""
+    """启动 fire-and-forget 监视循环；禁用时返回 None。"""
     global _watch_task, _synced_fingerprint
     if not settings.sources_watch_enabled:
         logger.info("sources watch disabled")
@@ -135,6 +136,6 @@ async def cancel_sources_watch() -> None:
 
 
 def reset_sources_watch_state_for_tests() -> None:
-    """Test helper: clear module fingerprint without cancelling tasks."""
+    """测试辅助：清空指纹，不取消任务。"""
     global _synced_fingerprint
     _synced_fingerprint = None

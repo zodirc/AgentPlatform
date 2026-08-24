@@ -1,8 +1,4 @@
-"""Fragment metric space: class prototypes, not nearest-document search.
-
-Hot path reads a cached prototype per fragment. Markdown is the platform
-source of truth; Postgres projections (account/work) overlay when present.
-"""
+"""fragment 度量空间/原型。"""
 
 from __future__ import annotations
 
@@ -29,6 +25,10 @@ normalize_fragment = _writing_prefs().normalize_fragment
 
 @dataclass(frozen=True)
 class Prototype:
+    """类原型。
+    
+    参数:
+        fragment/scope/centroid/scale/n/medoid/neighbors。"""
     fragment: str
     scope: str
     schema_id: str
@@ -41,10 +41,22 @@ class Prototype:
 
 @dataclass(frozen=True)
 class MetricSpace:
+    """原型空间。
+    
+    参数:
+        schema_id/by_fragment。"""
     schema_id: str
     by_fragment: dict[str, Prototype]
 
     def prototype(self, fragment: str) -> Prototype | None:
+        """按 fragment 取类原型；mixed 可回落。
+
+        参数:
+            fragment: 申报或检测的片段类型。
+
+        返回:
+            对应 Prototype；缺失时为 None。
+        """
         frag = normalize_fragment(fragment)
         proto = self.by_fragment.get(frag)
         if proto is not None:
@@ -60,6 +72,13 @@ def build_prototype(
     *,
     scope: str,
 ) -> Prototype | None:
+    """构建原型。
+    
+    参数:
+        fragment/samples/scope。
+    
+    返回:
+        Prototype|None。"""
     neighbors = tuple(s for s in samples if s.signature)
     if not neighbors:
         return None
@@ -84,6 +103,13 @@ def build_space(
     *,
     scope: str = "platform",
 ) -> MetricSpace:
+    """构建空间。
+    
+    参数:
+        bank/scope。
+    
+    返回:
+        MetricSpace。"""
     by_fragment: dict[str, Prototype] = {}
     for fragment, samples in bank.items():
         proto = build_prototype(fragment, samples, scope=scope)
@@ -94,11 +120,24 @@ def build_space(
 
 @lru_cache(maxsize=1)
 def load_platform_space() -> MetricSpace:
+    """加载平台空间（cached）。
+
+    参数:
+        无。
+
+    返回:
+        MetricSpace。"""
     return build_space(load_platform_exemplars(), scope="platform")
 
 
 def overlay_space(base: MetricSpace, layered: dict[str, tuple[Exemplar, ...]], *, scope: str) -> MetricSpace:
-    """Replace per-fragment prototypes when the overlay has samples for that type."""
+    """叠加 overlay 原型。
+    
+    参数:
+        base/layered/scope。
+    
+    返回:
+        MetricSpace。"""
     merged = dict(base.by_fragment)
     extra = build_space(layered, scope=scope)
     merged.update(extra.by_fragment)
@@ -126,7 +165,13 @@ def fit_signature(
     *,
     space: MetricSpace | None = None,
 ) -> dict[str, Any]:
-    """Distance to the class prototype; nearest sample is explain-only."""
+    """exemplar 拟合分。
+    
+    参数:
+        text/fragment/space。
+    
+    返回:
+        dict。"""
     declared = normalize_fragment(fragment)
     space = space or load_platform_space()
     proto = space.prototype(declared)
@@ -169,6 +214,13 @@ def fit_signature(
 
 
 def space_stamp(space: MetricSpace) -> str:
+    """空间 stamp。
+    
+    参数:
+        space。
+    
+    返回:
+        str。"""
     parts = [space.schema_id]
     for frag in sorted(space.by_fragment):
         proto = space.by_fragment[frag]
@@ -177,6 +229,13 @@ def space_stamp(space: MetricSpace) -> str:
 
 
 def exemplars_from_rows(rows: Iterable[dict[str, Any]]) -> dict[str, tuple[Exemplar, ...]]:
+    """DB 行→范文 bank。
+    
+    参数:
+        rows。
+    
+    返回:
+        dict。"""
     grouped: dict[str, list[Exemplar]] = {}
     for row in rows:
         fragment = str(row.get("fragment") or "mixed")

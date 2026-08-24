@@ -1,3 +1,14 @@
+"""检索存储工厂与后端协议（RAG 存储抽象层）。
+
+职责：
+- ``SourceRetrievalStore`` 协议：load / sync / search
+- ``JsonSourceRetrievalStore``：本地 JSON 向量库（pgvector 不可用时的回退）
+- ``get_sources_store``：按 backend + DSN/schema 缓存单例，Ops L1 路由到独立库
+
+在 RAG 链路中的位置：
+  索引调度与 ``search_sources`` 均通过本模块取 store → pgvector 或 JSON 实现。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -16,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 class SourceRetrievalStore(Protocol):
-    """Pluggable source index backend (JSON default; pgvector ANN optional)."""
+    """可插拔源索引后端协议（JSON 默认；pgvector ANN 可选）。"""
 
     def load(self) -> None: ...
 
@@ -34,7 +45,7 @@ class SourceRetrievalStore(Protocol):
 
 
 class JsonSourceRetrievalStore:
-    """Default on-disk JSON vectorstore used when pgvector is unavailable or forced."""
+    """默认磁盘 JSON 向量库（pgvector 不可用或强制 json 时使用）。"""
 
     backend = "json"
 
@@ -47,6 +58,7 @@ class JsonSourceRetrievalStore:
         return self._loaded
 
     def load(self) -> None:
+        """加载 JSON 索引到内存。"""
         self._index.load()
         self._loaded = True
 
@@ -59,6 +71,7 @@ class JsonSourceRetrievalStore:
         visibility: str = "private",
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
+        """委托 ``SourceVectorIndex.sync``；JSON 后端忽略 work stamp。"""
         # JSON backend: path isolation via work_root at search time; stamp ignored.
         _ = (work_id, visibility, owner_user_id)
         stats = self._index.sync(sources_dir, workspace_root=workspace_root)
@@ -66,6 +79,7 @@ class JsonSourceRetrievalStore:
         return {**stats, "backend": self.backend}
 
     def search(self, query: str, *, limit: int = 10, mode: str | None = None) -> list[ChunkHit]:
+        """按 mode 分发至 vector / bm25 / hybrid。"""
         resolved = (mode or settings.retrieval_mode).lower()
         if resolved == "keyword":
             return self._index.search_bm25(query, limit=limit)
@@ -75,6 +89,7 @@ class JsonSourceRetrievalStore:
 
 
 def sources_store_path(*, data_dir: str | None = None) -> Path:
+    """JSON 向量库文件路径 ``{data_dir}/vectorstore/sources.json``。"""
     root = Path(data_dir or settings.data_dir)
     return root / "vectorstore" / "sources.json"
 
@@ -90,11 +105,14 @@ def get_sources_store(
     schema: str | None = None,
     work_root: Path | str | None = None,
 ) -> SourceRetrievalStore:
-    """Return a cached retrieval store.
+    """返回缓存的检索 store 实例。
 
-    When ``work_root`` is under ``ops-l1`` and ``OPS_DATABASE_URL`` (or
-    ``BENCH_DATABASE_URL``) is set, pgvector uses the Ops vector plane.
-    Explicit ``database_url`` / ``schema`` override routing.
+    参数:
+        data_dir: JSON 路径根目录。
+        database_url / schema: 显式覆盖 pgvector 连接。
+        work_root: 若在 ``ops-l1`` 下且配置了 Ops DSN，则路由到 Ops 向量平面。
+    返回:
+        ``PgvectorSourceRetrievalStore`` 或 ``JsonSourceRetrievalStore``。
     """
     backend = (settings.retrieval_backend or "pgvector").lower().strip()
     json_path = sources_store_path(data_dir=data_dir).resolve()

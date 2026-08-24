@@ -1,4 +1,5 @@
-"""HM1: soft-threshold precompact cache (async; hard path prefers cache over sync LLM)."""
+"""HM1：软阈值 precompact 异步缓存 context_summary。"""
+
 
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def load_precompact_cache(session_id: UUID) -> dict[str, Any] | None:
+    """作用：读取 session precompact 缓存并校验 TTL。"""
     pool = await get_pool()
     row = await pool.fetchval(
         "SELECT context_summary FROM sessions WHERE id = $1",
@@ -56,6 +58,7 @@ async def load_precompact_cache(session_id: UUID) -> dict[str, Any] | None:
 
 
 def summary_from_cache_record(record: dict[str, Any]) -> StructuredSummary:
+    """作用：DB 记录 → StructuredSummary。"""
     return StructuredSummary(
         task=str(record.get("task") or ""),
         files_touched=[str(v) for v in record.get("files_touched") or []],
@@ -72,7 +75,7 @@ async def refresh_soft_precompact(
     messages: list[dict[str, Any]],
     fill_ratio: float | None,
 ) -> None:
-    """Turn-tail async: when fill ≥ soft threshold, refresh context_summary cache."""
+    """作用：fill≥soft 阈值时异步刷新 context_summary。"""
     soft = float(settings.context_fill_soft_precompact)
     if soft <= 0:
         return

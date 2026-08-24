@@ -1,3 +1,6 @@
+/**
+ * 后端 Session 生命周期：从 URL/localStorage 解析 sessionId，并提供新建/切换会话。
+ */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
@@ -17,11 +20,15 @@ import {
   writeStoredSessionId,
 } from "./sessionUrl";
 
+/** WorkbenchSessionContext 对外 API。 */
 type WorkbenchSessionContextValue = {
+  /** 当前活跃的后端 session UUID，未就绪时为 null。 */
   sessionId: string | null;
   isLoading: boolean;
   error: Error | null;
+  /** 创建 writing 场景新会话并导航到带 ?session= 的 URL。 */
   startNewSession: () => Promise<string>;
+  /** 切换到已有会话；在设置页会回到 /writing。 */
   openSession: (sessionId: string) => Promise<void>;
 };
 
@@ -33,6 +40,11 @@ const WorkbenchSessionContext = createContext<WorkbenchSessionContextValue>({
   openSession: async () => undefined,
 });
 
+/**
+ * 按优先级解析 sessionId：URL ?session= / /s/:id → localStorage → 新建。
+ * @param userId 当前登录用户，用于隔离 localStorage
+ * @returns 校验通过或新建的 session id
+ */
 async function resolveSessionId(userId: string): Promise<string> {
   const fromUrl =
     sessionIdFromSearch(window.location.search) ??
@@ -55,7 +67,10 @@ async function resolveSessionId(userId: string): Promise<string> {
   return session.id;
 }
 
-/** One backend Session; id comes from URL (?session=) or localStorage. */
+/**
+ * 提供全局 sessionId 并在缺失时写回 URL query。
+ * 一个后端 Session 对应整站共享对话，与场景路由正交。
+ */
 export function WorkbenchSessionProvider({ children }: { children: ReactNode }) {
   const { pathname, search } = useLocation();
   const navigate = useNavigate();
@@ -123,6 +138,10 @@ export function WorkbenchSessionProvider({ children }: { children: ReactNode }) 
   );
 }
 
+/**
+ * 读取 WorkbenchSessionProvider 的 session 上下文。
+ * @returns sessionId、加载态与 startNewSession/openSession
+ */
 export function useWorkbenchSession(): WorkbenchSessionContextValue {
   return useContext(WorkbenchSessionContext);
 }

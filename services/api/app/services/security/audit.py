@@ -25,6 +25,21 @@ async def record_audit(
     resource_id: UUID | str | None = None,
     detail: dict[str, Any] | None = None,
 ) -> None:
+    """写入 ``audit_log`` 表（best-effort，失败不阻断用户操作）。
+
+    参数:
+        actor: 操作者；None 表示匿名/系统。
+        action: 动作标识（如 ``login``、``delete_session``）。
+        resource_type: 资源类型名。
+        resource_id: 可选资源 id。
+        detail: 可选 JSON 细节。
+
+    返回:
+        无。
+
+    异常:
+        无；插入失败仅 ``logger.exception``。
+    """
     try:
         pool = await get_pool()
         await pool.execute(

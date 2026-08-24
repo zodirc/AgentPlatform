@@ -1,3 +1,9 @@
+"""威胁情报 IOC 富化与本地精确检索（离线 stub，无出站网络）。
+
+``enrich_ioc`` 查本地 JSON 卡片；``lookup_indicator`` 在 ``sources/seed/intel/**``
+做文件名与小文件正文精确命中，补充 ATT&CK id、actor 名等。
+"""
+
 from __future__ import annotations
 
 import json
@@ -13,7 +19,7 @@ _IPV4_RE = re.compile(
 
 
 def _ioc_dirs() -> list[Path]:
-    """Fixture + standing seed IOC roots (docs seed/intel; offline only)."""
+    """Fixture 与 standing seed IOC 根目录列表（docs seed/intel；仅离线）。"""
     app_root = Path(__file__).resolve().parents[2]  # .../app
     workspace = Path(os.environ.get("WORKSPACE_ROOT") or "/workspace")
     return [
@@ -26,6 +32,7 @@ def _ioc_dirs() -> list[Path]:
 
 
 def _guess_type(indicator: str, explicit: str | None) -> str:
+    """根据显式 type 或 indicator 形态推断 ip/hash/url/domain/unknown。"""
     t = (explicit or "auto").strip().lower()
     if t and t != "auto":
         return t
@@ -42,6 +49,7 @@ def _guess_type(indicator: str, explicit: str | None) -> str:
 
 
 def _load_card(indicator: str) -> dict[str, Any] | None:
+    """在各 IOC 根下按文件名或 ``indicator`` 字段匹配加载 JSON 卡片。"""
     key = indicator.strip()
     # Also try basename without path noise
     candidates = {key, key.lower()}
@@ -73,7 +81,15 @@ async def enrich_ioc(
     type: str = "auto",  # noqa: A002 — tool schema field name
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Look up a local stub IOC card (docs/39). No outbound network."""
+    """查询本地 stub IOC 卡片（docs/39；无出站网络）。
+
+    参数:
+        indicator: IP/域名/hash/URL 等。
+        type: ``auto`` 或显式类型。
+
+    返回:
+        结构化 reputation/tags/related；无卡片时 ``status=unknown`` 并附 hint。
+    """
     ind = (indicator or "").strip()
     if not ind:
         return {
@@ -114,7 +130,7 @@ async def enrich_ioc(
 
 
 def _intel_corpus_roots() -> list[Path]:
-    """Standing intel seed trees for exact lookup (offline; no vector)."""
+    """standing intel seed 树根（离线精确查找；不用向量）。"""
     workspace = Path(os.environ.get("WORKSPACE_ROOT") or "/workspace")
     return [
         workspace / "sources" / "seed" / "intel",
@@ -123,6 +139,7 @@ def _intel_corpus_roots() -> list[Path]:
 
 
 def _workspace_rel(path: Path) -> str:
+    """将绝对路径转为相对 ``WORKSPACE_ROOT`` 的 posix 路径。"""
     workspace = Path(os.environ.get("WORKSPACE_ROOT") or "/workspace")
     try:
         return path.resolve().relative_to(workspace.resolve()).as_posix()
@@ -135,10 +152,14 @@ async def lookup_indicator(
     limit: int = 8,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """Exact/local indicator lookup — no embeddings, no network, no index sync.
+    """本地精确 indicator 查找（无嵌入、无网络、不同步索引）。
 
-    Complements ``enrich_ioc`` (structured IOC cards) with filename + small-file
-    text hits under ``sources/seed/intel/**`` for ATT&CK ids, actor names, etc.
+    参数:
+        indicator: 待查指标（ATT&CK id、actor 名、IOC 等）。
+        limit: 命中上限（1–20）。
+
+    返回:
+        ``hits`` 含 ``ioc_card``/``path_match``/``content_match``；无命中时 ``unknown`` 与 hint。
     """
     ind = (indicator or "").strip()
     if not ind:

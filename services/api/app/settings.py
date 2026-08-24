@@ -1,3 +1,23 @@
+"""Agent API 运行时配置（Pydantic Settings，环境变量 + 可选 ``.env``）。
+
+English: Agent API configuration — DB, runtime routing, auth, dispatch, projection knobs.
+
+配置域概览：
+- **数据库**：``database_url``、双池 statement timeout（hot/bypass）、连接池大小
+- **Runtime**：``runtime_url`` / ``runtime_url_map``、内部服务令牌
+- **认证**：``auth_enabled``、终端用户登录、admin 旁路、Cookie secure
+- **调度**：``turn_dispatch``（pull/push）、claim 超时、pull 模式准入队列上限
+- **Runner 租约**：与 runtime ``RUNNER_LEASE_*`` 配对的 api 侧回收间隔
+- **命令通道**：``run_commands_channel_enabled``（DB+NOTIFY vs 直连 HTTP）
+- **事件保留**：流式/结构化 turn_events 保留天数与批处理预算
+- **Work 根路径**：``workspace_root`` / ``works_root``、legacy 迁移开关
+- **Ops Eval**：``ops_test_secret`` 非空时挂载评测路由；Docker/compose 路径
+- **可观测性**：日志级别、OpenTelemetry 开关与服务名
+- **Worker**：``worker_mode``（inline/outbox）与轮询参数
+
+生产环境启动时调用 ``Settings.validate_production_security()`` 拒绝弱密钥与危险旁路。
+"""
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,6 +27,8 @@ _WEAK_PRODUCTION_VALUES = frozenset(
 
 
 class Settings(BaseSettings):
+    """从环境变量加载的全部 API 服务配置项。"""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://agent:agent@localhost:5432/agent"
@@ -76,7 +98,17 @@ class Settings(BaseSettings):
     ops_eval_repo_host_path: str = ""  # optional override; else docker inspect
 
     def validate_production_security(self) -> None:
-        """Reject bootstrap credentials and privileged bypasses in production."""
+        """生产环境启动门禁：拒绝弱密钥与特权旁路。
+
+        参数:
+            无（读取 ``self`` 各字段）。
+
+        返回:
+            None；``app_env`` 非 production/prod 时直接返回。
+
+        抛出:
+            RuntimeError：密钥仍为占位值、admin 旁路开启、或认证被关闭时。
+        """
         if self.app_env.strip().lower() not in {"production", "prod"}:
             return
 

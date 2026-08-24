@@ -1,4 +1,7 @@
-"""Golden fixture + assertion helpers extracted from scripts/eval_run.py (docs/29)."""
+"""Golden 用例 fixture 与断言辅助（从 ``scripts/eval_run.py`` 抽取，docs/29）。
+
+English: Golden fixture + assertion helpers extracted from scripts/eval_run.py (docs/29).
+"""
 
 from __future__ import annotations
 
@@ -8,6 +11,17 @@ from typing import Any
 
 
 def sequence_contains(events: list[str], required: list[str]) -> bool:
+    """判断 ``required`` 是否作为子序列按序出现在 ``events`` 中。
+
+    English: Return True when every entry in ``required`` appears in order within ``events``.
+
+    参数:
+        events: 实际事件 type 列表（按时间序）。
+        required: 必须依次出现的事件 type 子序列。
+
+    返回:
+        全部匹配为 True；任一缺失为 False。
+    """
     idx = 0
     for need in required:
         while idx < len(events) and events[idx] != need:
@@ -19,11 +33,25 @@ def sequence_contains(events: list[str], required: list[str]) -> bool:
 
 
 def sequence_equals(events: list[str], required: list[str]) -> bool:
+    """严格相等比较两段事件 type 列表。
+
+    English: Exact list equality for event type sequences.
+
+    参数:
+        events: 实际序列。
+        required: 期望序列。
+
+    返回:
+        ``events == required``。
+    """
     return events == required
 
 
 def _ensure_runtime_writable(path: Path) -> None:
-    """API often runs as root (docker.sock); runtime is uid 1000 — make ops trees writable."""
+    """API 常以 root 运行（docker.sock）；runtime 为 uid 1000 — 使 ops 目录可写。
+
+    English: API often runs as root (docker.sock); runtime is uid 1000 — make ops trees writable.
+    """
     try:
         path.chmod(0o777)
     except OSError:
@@ -31,7 +59,10 @@ def _ensure_runtime_writable(path: Path) -> None:
 
 
 def _ensure_parents_writable(path: Path, *, stop_at: Path) -> None:
-    """chmod every directory from ``path`` up to ``stop_at`` (inclusive of path if dir)."""
+    """从 ``path`` 向上 chmod 直至 ``stop_at``（含目录本身）。
+
+    English: chmod every directory from ``path`` up to ``stop_at`` (inclusive of path if dir).
+    """
     stop = stop_at.resolve()
     current = path.resolve() if path.exists() else path
     # Walk parents of the target file/dir.
@@ -50,6 +81,17 @@ def _ensure_parents_writable(path: Path, *, stop_at: Path) -> None:
 
 
 def apply_fixtures(workspace: Path, case: dict[str, Any]) -> None:
+    """将 Golden case 的 workspace fixture 与 setup 大文件写入评测目录。
+
+    English: Write case workspace fixtures and optional large_file setup into the eval workspace.
+
+    参数:
+        workspace: Ops 隔离 work_root。
+        case: Golden YAML 解析后的 case dict（``fixtures`` / ``setup``）。
+
+    返回:
+        无；父目录 chmod 以便 runtime uid 1000 可写。
+    """
     fixtures = case.get("fixtures", {}) or {}
     for item in fixtures.get("workspace", []) or []:
         rel = item["path"]
@@ -77,6 +119,16 @@ def apply_fixtures(workspace: Path, case: dict[str, Any]) -> None:
 
 
 def prepare_ops_workspace(workspace: Path) -> None:
+    """创建 Golden 评测所需的标准子目录并 chmod。
+
+    English: Create sections/sources/exports subdirs and make the tree runtime-writable.
+
+    参数:
+        workspace: 目标 work_root。
+
+    返回:
+        无。
+    """
     workspace.mkdir(parents=True, exist_ok=True)
     for directory in (workspace, workspace / "sections", workspace / "sources", workspace / "exports"):
         directory.mkdir(parents=True, exist_ok=True)
@@ -87,6 +139,17 @@ def prepare_ops_workspace(workspace: Path) -> None:
 
 
 def read_workspace_file(workspace: Path, rel: str) -> str | None:
+    """读取 work_root 内相对路径文件；支持 glob 取最新 mtime。
+
+    English: Read a workspace-relative file; glob patterns pick the newest match.
+
+    参数:
+        workspace: work_root 根。
+        rel: 相对路径或 glob（``*?[]`` 触发 glob）。
+
+    返回:
+        文件 UTF-8 文本；越界路径或无匹配时 ``None``。
+    """
     if any(ch in rel for ch in "*?[]"):
         matches = sorted(
             workspace.glob(rel),
@@ -108,6 +171,19 @@ def read_workspace_file(workspace: Path, rel: str) -> str | None:
 
 
 def first_patch_id(artifacts: list) -> str:
+    """从 turn artifacts 取第一个 ``patch_id``。
+
+    English: Return the first patch_id found in turn artifacts.
+
+    参数:
+        artifacts: ``build_turn_view`` 的 artifacts 列表。
+
+    返回:
+        首个 patch_id 字符串。
+
+    异常:
+        AssertionError: 无任何 patch_id。
+    """
     for art in artifacts:
         if isinstance(art, dict) and art.get("patch_id"):
             return str(art["patch_id"])
@@ -115,6 +191,18 @@ def first_patch_id(artifacts: list) -> str:
 
 
 def assert_events(case_id: str, events: list[str], event_asserts: dict[str, Any]) -> None:
+    """校验 turn 事件序列（equals / contains / not_contains）。
+
+    English: Assert event sequence equals, contains, or forbids types per Golden spec.
+
+    参数:
+        case_id: 用例 id（写入 AssertionError）。
+        events: 实际事件 type 列表。
+        event_asserts: YAML ``events`` 断言块。
+
+    异常:
+        AssertionError: 任一断言失败。
+    """
     if "sequence_equals" in event_asserts:
         if not sequence_equals(events, event_asserts["sequence_equals"]):
             raise AssertionError(
@@ -133,6 +221,18 @@ def assert_event_payload_fields(
     event_records: list[dict[str, Any]],
     event_payload_assert: dict[str, Any],
 ) -> None:
+    """校验指定事件 type 的 payload 字段等于期望值。
+
+    English: Assert payload field values on the first matching event of each type.
+
+    参数:
+        case_id: 用例 id。
+        event_records: 含 ``type``/``payload`` 的事件记录。
+        event_payload_assert: ``{event_type: {field: expected}}`` 映射。
+
+    异常:
+        AssertionError: 缺事件或字段不匹配。
+    """
     for event_type, expected_fields in event_payload_assert.items():
         matched = [r for r in event_records if r.get("type") == event_type]
         if not matched:
@@ -150,6 +250,18 @@ def assert_event_payload_fields(
 
 
 def assert_tool(case_id: str, view: dict[str, Any], tool_assert: dict[str, Any]) -> None:
+    """校验 tool_timeline / retrieval artifacts 与 Golden tool 断言。
+
+    English: Assert tool calls, result regex, retrieval mode, forbidden names, and max_calls.
+
+    参数:
+        case_id: 用例 id。
+        view: ``build_turn_view`` 结果。
+        tool_assert: YAML ``tool`` 断言块。
+
+    异常:
+        AssertionError: 工具缺失、结果不匹配、超限调用等。
+    """
     timeline = view.get("tool_timeline", []) or []
     needle = tool_assert.get("result_matches", "")
     tool_name = tool_assert.get("name", "")
@@ -212,6 +324,18 @@ def assert_tool(case_id: str, view: dict[str, Any], tool_assert: dict[str, Any])
 
 
 def assert_workspace(case_id: str, workspace: Path, specs: list[dict[str, Any]]) -> None:
+    """校验 workspace 文件存在且内容匹配/不匹配 regex。
+
+    English: Assert workspace files exist and match or must not match regex patterns.
+
+    参数:
+        case_id: 用例 id。
+        workspace: work_root。
+        specs: YAML ``workspace`` 断言列表（``path``/``matches``/``not_matches``）。
+
+    异常:
+        AssertionError: 缺文件或 regex 不符。
+    """
     for ws in specs:
         content = read_workspace_file(workspace, ws["path"])
         if content is None:
@@ -225,6 +349,18 @@ def assert_workspace(case_id: str, workspace: Path, specs: list[dict[str, Any]])
 
 
 def assert_output(case_id: str, view: dict[str, Any], output_assert: dict[str, Any]) -> None:
+    """校验 ``latest_output`` 匹配 regex（若声明 ``matches``）。
+
+    English: Assert latest_output matches regex when ``matches`` is present.
+
+    参数:
+        case_id: 用例 id。
+        view: turn view。
+        output_assert: YAML ``output`` 块。
+
+    异常:
+        AssertionError: 输出不匹配。
+    """
     if "matches" not in output_assert:
         return
     output = view.get("latest_output") or ""

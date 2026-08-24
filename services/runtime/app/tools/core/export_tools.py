@@ -1,3 +1,9 @@
+"""写作交付导出：将指定分章合并为 Markdown 并写入工作区。
+
+``export_document`` 从 ``confirmed`` 或 ``current_draft`` 源拉取分章，
+经 ``export_lint`` 结构校验、可选引用 verify 与秘密扫描后落盘。
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -21,6 +27,19 @@ async def export_document(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """将指定分章导出为单一 Markdown 文件。
+
+    参数:
+        section_ids: 分章 id 列表（必填、不可重复）。
+        source: ``confirmed`` 或 ``current_draft``。
+        output_path: 工作区相对输出路径。
+        profile: 导出 lint profile（默认 settings.writing_export_profile）。
+        turn_id: 可选 turn 作用域（读 manifest/revision）。
+        session_id: 可选 session 作用域。
+
+    返回:
+        含 ``delivery_status``/``included_sections``/``summary``；lint/引用/秘密扫描失败时 ``failed`` 或 ``blocked``。
+    """
     export_profile = (profile or settings.writing_export_profile or "novel-zh").strip() or "novel-zh"
     requested = [str(section_id).strip() for section_id in (section_ids or []) if str(section_id).strip()]
     if not requested:

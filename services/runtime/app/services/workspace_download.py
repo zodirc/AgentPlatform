@@ -1,4 +1,5 @@
-"""Resolve a workspace-relative path for HTTP download (full bytes, no truncate)."""
+
+"""HTTP 下载：解析 workspace 相对路径为完整文件字节。"""
 
 from __future__ import annotations
 
@@ -9,13 +10,10 @@ MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 
 
 def resolve_download_target(path: str) -> Path:
-    """Return an on-disk file path inside the current Work (or seed when visible).
+    """作用：resolve_download_target 公开 API。
 
-    Raises:
-        ValueError: empty path / not a file / too large
-        PermissionError: outside work root or seed hidden (via ``_resolve_path``)
-        FileNotFoundError: missing
-    """
+参数：
+    ``path``"""
     from app.tools.core.tools import _resolve_path
 
     raw = (path or "").strip().lstrip("/")

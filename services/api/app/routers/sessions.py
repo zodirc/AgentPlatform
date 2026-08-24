@@ -1,3 +1,9 @@
+"""Session 与嵌套 Turn 创建路由（docs/16 会话归属、docs/27 Work 绑定）。
+
+公开端点：会话 CRUD、聚合视图、会话内 turn 列表，以及 ``POST .../turns`` 创建 turn
+（含 pull/push 分发、准入队列与 runtime 启动）。
+"""
+
 from __future__ import annotations
 
 import logging
@@ -33,6 +39,14 @@ router = APIRouter(tags=["sessions"])
 
 
 def _session_response(session: dict) -> SessionResponse:
+    """将 DB 行 dict 转为 ``SessionResponse`` 契约模型。
+
+    参数:
+        session: ``create_session`` / ``get_session`` 等返回的会话行。
+
+    返回:
+        SessionResponse。
+    """
     return SessionResponse(
         id=session["id"],
         default_scenario_id=session["default_scenario_id"],
@@ -48,6 +62,15 @@ async def create_session(
     body: CreateSessionRequest | None = None,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """创建新会话并绑定当前用户为 owner。
+
+    参数:
+        body: 可选默认 scenario 与 work_id；省略时使用模型默认值。
+        actor: 经 ``require_session_actor`` 解析的终端用户或系统用户。
+
+    返回:
+        SessionResponse（201）；work_id 无效时 400 ``work_not_found``。
+    """
     req = body or CreateSessionRequest()
     try:
         row = await session_svc.create_session(
@@ -69,6 +92,16 @@ async def list_sessions(
     cursor_updated_at: datetime | None = None,
     cursor_id: UUID | None = None,
 ):
+    """按更新时间倒序分页列出当前用户拥有的会话。
+
+    参数:
+        actor: 会话 owner。
+        limit: 每页条数（1–50）。
+        cursor_updated_at / cursor_id: 键集分页游标（上一页最后一项）。
+
+    返回:
+        SessionListItem 列表。
+    """
     rows = await session_svc.list_sessions_for_owner(
         actor.id,
         limit=limit,
@@ -86,7 +119,15 @@ async def bulk_delete_sessions(
     body: BulkDeleteSessionsRequest,
     actor: EndUser = Depends(require_session_actor),
 ):
-    """Hard-delete many owned sessions in one DB transaction (history bulk UI)."""
+    """批量硬删除当前用户拥有的会话（历史列表 UI 一次提交）。
+
+    参数:
+        body: ``session_ids`` 列表；去重后仅删除 actor 拥有的 id。
+        actor: 操作者；成功删除时写 audit。
+
+    返回:
+        BulkDeleteSessionsResponse：``deleted`` 与 ``missing``（未找到或非 owner）。
+    """
     requested = list(dict.fromkeys(body.session_ids))
     deleted = await session_svc.delete_sessions_for_owner(requested, actor.id)
     deleted_set = set(deleted)
@@ -109,6 +150,15 @@ async def get_session(
     session_id: UUID,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """获取单个会话元数据。
+
+    参数:
+        session_id: 会话 UUID。
+        actor: 须为该会话 owner（否则 403/404）。
+
+    返回:
+        SessionResponse。
+    """
     session = await assert_session_owner(session_id, actor)
     return _session_response(session)
 
@@ -118,7 +168,15 @@ async def delete_session(
     session_id: UUID,
     actor: EndUser = Depends(require_session_actor),
 ):
-    """Hard-delete own session (turns / events / transcript). No soft-delete."""
+    """硬删除单个会话（含 turns、events、transcript；无软删除）。
+
+    参数:
+        session_id: 目标会话。
+        actor: owner；删除成功写 audit。
+
+    返回:
+        204 无 body；非 owner 或不存在时 404。
+    """
     await assert_session_owner(session_id, actor)
     deleted = await session_svc.delete_session_for_owner(session_id, actor.id)
     if not deleted:
@@ -139,6 +197,15 @@ async def get_session_view(
     session_id: UUID,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """获取会话聚合投影视图（turn 摘要、标题等 UI 用）。
+
+    参数:
+        session_id: 会话 UUID。
+        actor: owner。
+
+    返回:
+        SessionView；会话不存在时 404。
+    """
     await assert_session_owner(session_id, actor)
     view = await build_session_view(session_id)
     if view is None:
@@ -151,6 +218,15 @@ async def list_session_turns(
     session_id: UUID,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """列出会话内全部 turn 摘要（含投影中的 latest_output / plan）。
+
+    参数:
+        session_id: 会话 UUID。
+        actor: owner。
+
+    返回:
+        TurnSummary 列表，按 created_at 升序。
+    """
     await assert_session_owner(session_id, actor)
     rows = await turn_svc.list_turns_for_session(session_id)
     return [TurnSummary(**row) for row in rows]
@@ -168,6 +244,23 @@ async def create_turn(
     response: Response,
     actor: EndUser = Depends(require_session_actor),
 ):
+    """在会话内创建 turn + run，并按配置 push 到 runtime 或进入 pull 队列。
+
+    参数:
+        session_id: 父会话；须为 actor 拥有。
+        body: 用户消息、可选 scenario_id、client_request_id（幂等）、plan_phase。
+        request: 用于 ``app.state.event_listener`` 与 trace。
+        response: 幂等重放时改写为 200。
+        actor: 会话 owner。
+
+    返回:
+        TurnResponse；新建 202，client_request_id 重放 200。
+
+    说明:
+        - pull 模式：插入前 ``check_dispatch_admission``，队列满则 429 + Retry-After。
+        - push 模式：调用 runtime ``start_turn``；失败时将 turn/run 标为 failed 并 502。
+        - 两种模式成功接受后均 ``listener.notify`` 唤醒 SSE/投影。
+    """
     session = await assert_session_owner(session_id, actor)
 
     scenario_id = body.scenario_id or session["default_scenario_id"]
@@ -269,7 +362,15 @@ async def warmup_retrieval(
     prefix: str = "",
     _actor: EndUser = Depends(require_session_actor),
 ):
-    """Typing-time retrieve warm-up; never blocks a turn (docs/13 S3 A18)."""
+    """输入时预热检索索引；失败不影响 turn（docs/13 S3 A18）。
+
+    参数:
+        prefix: 用户已输入前缀，截断至 200 字符转发 runtime。
+        _actor: 须登录；仅用于鉴权，不参与逻辑。
+
+    返回:
+        ``{"accepted": True}``（202）；runtime 异常仅打日志。
+    """
     from app.services.command.runtime_client import RuntimeClient
 
     try:

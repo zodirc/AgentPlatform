@@ -1,3 +1,9 @@
+"""从 transcript 回填未完成的 plan open_items（续跑/compact 用）。
+
+自新到旧扫描最近一次 update_plan 的 tool_use 或 tool_result，
+收集 pending/in_progress 标题，截断后供 continuity / session summary。
+"""
+
 from __future__ import annotations
 
 import json
@@ -5,7 +11,17 @@ from typing import Any
 
 
 def extract_open_plan_items(messages: list[dict[str, Any]]) -> list[str]:
-    """Collect pending/in_progress titles from the latest update_plan call in messages."""
+    """从消息里抽出最近一次 update_plan 中尚未完成的条目标题。
+
+    优先匹配带 plan_id 或含 status 字段的 payload，避免把无关 tool_result
+    里的 items 误当成计划清单。
+
+    参数:
+        messages: transcript / 组窗消息列表。
+
+    返回:
+        去重后的标题列表，最多 12 条；每条最长 200 字符。
+    """
     latest_items: list[dict[str, Any]] | None = None
 
     for msg in reversed(messages):
@@ -21,6 +37,7 @@ def extract_open_plan_items(messages: list[dict[str, Any]]) -> list[str]:
                     "plan_id" in payload or all(isinstance(i, dict) and "title" in i for i in items[:1])
                 ):
                     # Prefer results that look like update_plan payloads.
+                    # 用 plan_id 或条目 status 形状过滤，减少假阳性。
                     if "plan_id" in payload or any(
                         str(i.get("status", "")) in {"pending", "in_progress", "done"}
                         for i in items
@@ -54,6 +71,14 @@ def extract_open_plan_items(messages: list[dict[str, Any]]) -> list[str]:
 
 
 def _parse_json_object(raw: Any) -> dict[str, Any] | None:
+    """宽松解析 tool_result 内容为 JSON 对象。
+
+    参数:
+        raw: dict 原样返回；否则尝试解析以 ``{`` 开头的字符串。
+
+    返回:
+        dict；无法解析时为 None。
+    """
     if isinstance(raw, dict):
         return raw
     if not isinstance(raw, str):

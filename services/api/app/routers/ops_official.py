@@ -1,6 +1,9 @@
-from __future__ import annotations
+"""Official L1 套件 HTTP 路由（``/ops/official``）。
 
-import asyncio
+Coding/retrieval/context/index Official run：202 启动、SSE 流、artifacts/report 下载。
+"""
+
+from __future__ import annotations
 import json
 from typing import Any, Literal
 
@@ -35,6 +38,8 @@ class ModelBody(BaseModel):
 
 
 class StartOfficialBody(BaseModel):
+    """启动 Official L1 run 的请求体（targets + 各 suite 旋钮）。"""
+
     targets: list[
         Literal[
             "pull",
@@ -117,6 +122,7 @@ async def official_model_probe(body: ModelBody) -> dict[str, Any]:
 
 @router.get("/meta")
 async def official_meta() -> dict[str, Any]:
+    """Official 控制台 meta：criteria、targets 说明与 capability flags。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     return {
@@ -281,6 +287,7 @@ async def official_meta() -> dict[str, Any]:
 async def list_official_runs(
     limit: int = Query(default=50, ge=1, le=100),
 ) -> dict[str, Any]:
+    """分页列出 Official run 历史（DB + 内存 live）。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     # Close DB rows left "running" after API loss of the in-memory job.
@@ -313,6 +320,7 @@ async def list_official_runs(
 
 @router.get("/runs/{run_id}")
 async def get_official_run(run_id: str) -> dict[str, Any]:
+    """获取单个 Official run 详情（live 或 DB）。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     live = official_runner.get_live(run_id)
@@ -512,6 +520,7 @@ async def get_official_run_thinking(
 
 @router.get("/runs/{run_id}/report", response_class=HTMLResponse)
 async def get_official_report_html(run_id: str) -> HTMLResponse:
+    """返回 Official run HTML 报告（inline 或 attachment）。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     live = official_runner.get_live(run_id)
@@ -691,6 +700,7 @@ async def clear_official_history(
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
 async def start_official_run(body: StartOfficialBody) -> dict[str, Any]:
+    """202 启动 Official L1 run（后台 official_runner）。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     caps = await _caps()
@@ -810,6 +820,7 @@ async def stop_official_run(run_id: str) -> dict[str, Any]:
 
 @router.get("/runs/{run_id}/stream")
 async def stream_official_run(run_id: str) -> StreamingResponse:
+    """SSE 订阅 Official run 日志与进度事件。"""
     run = official_runner.get_live(run_id)
     if run is None:
         payload = await eval_store.load_run(run_id)
@@ -854,6 +865,7 @@ async def stream_official_run(run_id: str) -> StreamingResponse:
 
 @router.post("/runs/import", status_code=status.HTTP_201_CREATED)
 async def import_official_run(body: dict[str, Any]) -> dict[str, Any]:
+    """从外部 JSON 快照导入 Official run 到 DB（只读历史）。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     try:

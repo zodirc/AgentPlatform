@@ -1,4 +1,7 @@
+"""基于 ModelGateway 的 LLM 会话摘要；HM3 优先增量（prev + delta）。"""
+
 from __future__ import annotations
+
 
 import asyncio
 import json
@@ -68,6 +71,7 @@ def _parse_llm_summary_json(text: str) -> StructuredSummary | None:
 
 
 def structured_summary_to_user_message(summary: StructuredSummary) -> dict[str, Any]:
+    """作用：摘要 → autocompact user 消息。"""
     return {
         "role": "user",
         "content": [{"type": "text", "text": summary.to_autocompact_text()}],
@@ -78,10 +82,7 @@ async def summarize_messages_with_gateway(
     gateway: ModelGateway,
     messages: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """Use the model gateway to produce a compact conversation summary.
-
-    HM3: prefer incremental merge — only send delta (+ prev JSON) to the model.
-    """
+    """作用：LLM 摘要当前 message 窗口（HM3 增量）。"""
     prev = extract_prev_summary(messages)
     delta = messages_since_last_summary(messages) if prev is not None else messages
     preview = _preview_messages(delta if delta else messages)
@@ -112,6 +113,7 @@ async def summarize_turn_history_with_gateway(
     *,
     fallback: StructuredSummary,
 ) -> StructuredSummary:
+    """作用：LLM 摘要多 turn 历史。"""
     preview = _preview_turn_rows(rows)
     prompt = (
         "Summarize the following multi-turn agent session as JSON with keys: "

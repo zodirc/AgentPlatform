@@ -1,4 +1,5 @@
-"""HM4: persist model request envelopes for Ops replay (hash always; full body by default)."""
+
+"""HM4：持久化 model 请求 envelope（hash 必写，body 抽样/高 fill）。"""
 
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ def envelope_content_hash(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
 ) -> str:
+    """作用：messages+tools 稳定 SHA256。"""
     blob = json.dumps(
         {"messages": messages, "tools": tools or []},
         sort_keys=True,
@@ -29,6 +31,7 @@ def envelope_content_hash(
 
 
 def should_store_full_envelope(*, fill_ratio: float | None) -> bool:
+    """作用：是否存完整 envelope JSON。"""
     if settings.model_envelope_debug:
         return True
     if settings.model_envelope_on_high_fill and fill_ratio is not None:
@@ -49,6 +52,7 @@ async def maybe_persist_model_envelope(
     tools: list[dict[str, Any]] | None,
     fill_ratio: float | None = None,
 ) -> None:
+    """作用：异步写入 model_request_envelopes。"""
     if not settings.model_envelope_enabled:
         return
     content_hash = envelope_content_hash(messages, tools)

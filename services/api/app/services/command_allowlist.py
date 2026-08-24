@@ -1,3 +1,8 @@
+"""终端用户 Shell 命令前缀白名单持久化。
+
+每用户最多 100 条；前缀经 ``agent_contracts.command_allowlist.normalize`` 规范化。
+"""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -17,6 +22,8 @@ _MAX_PREFIXES = 100
 
 
 class AllowlistError(Exception):
+    """白名单业务错误（code + message）。"""
+
     def __init__(self, code: str, message: str):
         self.code = code
         self.message = message
@@ -24,6 +31,14 @@ class AllowlistError(Exception):
 
 
 async def list_prefixes(owner_user_id: UUID) -> list[dict[str, str]]:
+    """列出用户命令前缀白名单。
+
+    参数:
+        owner_user_id: 终端用户 UUID。
+
+    返回:
+        ``{ id, prefix, created_at }`` 字典列表（ISO 时间字符串）。
+    """
     pool = await get_pool()
     rows = await pool.fetch(
         """
@@ -49,6 +64,18 @@ async def list_prefixes(owner_user_id: UUID) -> list[dict[str, str]]:
 
 
 async def add_prefix(owner_user_id: UUID, raw: str) -> dict[str, str]:
+    """新增前缀；已存在则幂等返回同行。
+
+    参数:
+        owner_user_id: 归属用户。
+        raw: 原始前缀字符串。
+
+    返回:
+        ``{ id, prefix, created_at }``。
+
+    异常:
+        AllowlistError: ``invalid_prefix`` / ``too_many`` / ``write_failed``。
+    """
     prefix = normalize_command_prefix(raw)
     if not prefix:
         raise AllowlistError("invalid_prefix", "命令前缀不能为空")
@@ -100,6 +127,15 @@ async def add_prefix(owner_user_id: UUID, raw: str) -> dict[str, str]:
 
 
 async def delete_prefix(owner_user_id: UUID, prefix_id: UUID) -> bool:
+    """删除一条前缀（须匹配 owner）。
+
+    参数:
+        owner_user_id: 归属用户。
+        prefix_id: 白名单行 UUID。
+
+    返回:
+        True 已删除；False 不存在或非归属。
+    """
     pool = await get_pool()
     row = await pool.fetchrow(
         """

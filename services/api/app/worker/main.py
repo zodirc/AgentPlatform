@@ -1,3 +1,9 @@
+"""Outbox Worker 进程：轮询 claim 任务并分派到 ``handlers``。
+
+启动时 migrate + init 池；主循环定期 sweep stale processing（B5），
+无任务时按 ``worker_poll_interval_seconds`` 休眠。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +21,17 @@ _STALE_SWEEP_INTERVAL_SECONDS = 60.0
 
 
 async def process_batch() -> int:
+    """Claim 一批 outbox 任务并逐条执行 handler。
+
+    参数:
+        无。
+
+    返回:
+        本批处理的任务数量（含成功与 mark_failed 的）。
+
+    异常:
+        单条任务异常被捕获并 ``mark_failed``，不中断同批其余任务。
+    """
     jobs = await claim_jobs(limit=settings.worker_batch_size)
     for job in jobs:
         job_id = job["id"]
@@ -33,6 +50,14 @@ async def process_batch() -> int:
 
 
 async def run_worker() -> None:
+    """Worker 主循环：migrate、周期 sweep、batch 处理直至进程退出。
+
+    参数:
+        无。
+
+    返回:
+        无；``finally`` 中关闭连接池。
+    """
     logging.basicConfig(level=settings.log_level)
     await init_pool()
     await apply_migrations()
@@ -57,6 +82,7 @@ async def run_worker() -> None:
 
 
 def main() -> None:
+    """CLI 入口：``asyncio.run(run_worker())``。"""
     asyncio.run(run_worker())
 
 

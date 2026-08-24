@@ -1,17 +1,24 @@
-from __future__ import annotations
+"""统一 JSON 结构化日志（structlog + stdlib 桥接，B23）。
 
-import logging
+业务代码多用 ``logging.getLogger``；通过 ``ProcessorFormatter`` 桥接保证
+timestamp、JSON、request/turn 关联字段一致输出。
+"""
+
+from __future__ import annotations
 import sys
 
 import structlog
 
 
 def configure_logging(*, service: str, level: str = "INFO") -> None:
-    """Route both structlog and stdlib loggers through one JSON pipeline.
+    """配置 structlog 与 root logger 共用 JSON 输出管道。
 
-    B23: business code overwhelmingly uses ``logging.getLogger`` — without the
-    ProcessorFormatter bridge those lines bypass structlog and come out as
-    bare text with no timestamp, no JSON and no request/turn correlation.
+    参数:
+        service: 写入 contextvars 的服务名（如 ``agent-api``）。
+        level: 日志级别字符串（默认 INFO）。
+
+    返回:
+        无。
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
 

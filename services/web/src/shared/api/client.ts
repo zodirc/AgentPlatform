@@ -1,15 +1,27 @@
+/**
+ * 前端 HTTP API 客户端：/api/v1 下认证、会话、回合、工作区与管理端接口。
+ * 终端用户路由使用 cookie（credentials: include）；管理端 Basic 存 sessionStorage。
+ */
 import type { components } from "./schema";
 import { throwIfNotOk } from "./httpErrors";
 import { newClientRequestId } from "./clientRequestId";
 
+/** API 根路径前缀。 */
 export const API_BASE = "/api/v1";
 
 const ADMIN_AUTH_KEY = "admin_basic_auth";
 
+/** OpenAPI 生成的回合视图类型。 */
 export type TurnView = components["schemas"]["TurnView"];
+/** 模型供应商配置。 */
 export type ModelProvider = components["schemas"]["ModelProviderProfile"];
+/** startTurn 响应体。 */
 export type TurnResponse = components["schemas"]["TurnResponse"];
 
+/**
+ * 将管理端密码写入 sessionStorage（Basic auth token）。
+ * @param password ADMIN_PASSWORD 明文
+ */
 export function setAdminPassword(password: string) {
   const token = btoa(`admin:${password}`);
   try {
@@ -24,6 +36,7 @@ export function setAdminPassword(password: string) {
   }
 }
 
+/** 清除 session/local 中的管理端 Basic 凭证。 */
 export function clearAdminAuth() {
   try {
     sessionStorage.removeItem(ADMIN_AUTH_KEY);
@@ -37,6 +50,10 @@ export function clearAdminAuth() {
   }
 }
 
+/**
+ * 是否已有管理端 Basic token（localStorage 会迁移到 sessionStorage）。
+ * @returns 存在有效 token 时为 true
+ */
 export function hasAdminAuth(): boolean {
   try {
     if (sessionStorage.getItem(ADMIN_AUTH_KEY)) return true;
@@ -52,7 +69,10 @@ export function hasAdminAuth(): boolean {
   }
 }
 
-/** Returns true when the API requires HTTP Basic credentials. */
+/**
+ * 探测 API 是否要求 HTTP Basic 认证。
+ * @returns 访问 /admin/model-providers 返回 401 时为 true
+ */
 export async function isAuthRequired(): Promise<boolean> {
   try {
     const res = await fetch(`${API_BASE}/admin/model-providers`);
@@ -62,6 +82,10 @@ export async function isAuthRequired(): Promise<boolean> {
   }
 }
 
+/**
+ * 用当前 sessionStorage 中的 Basic token 验证管理端权限。
+ * @returns token 有效且 /admin/model-providers 成功时为 true
+ */
 export async function verifyAdminAuth(): Promise<boolean> {
   if (!hasAdminAuth()) return false;
   const res = await fetch(`${API_BASE}/admin/model-providers`, {
@@ -92,25 +116,32 @@ function adminAuthHeaders(extra: HeadersInit = {}): HeadersInit {
   return { ...extra, Authorization: `Basic ${token}` };
 }
 
-/** End-user session routes: cookie credentials only (no admin Basic). */
+/**
+ * 终端用户 API 请求头：仅 cookie 鉴权，不附带 admin Basic。
+ * @param extra 额外头字段
+ * @returns 合并后的 HeadersInit
+ */
 export function apiAuthHeaders(extra: HeadersInit = {}): HeadersInit {
   return extra;
 }
 
 const sessionFetchInit = { credentials: "include" as RequestCredentials };
 
+/** 回合 SSE/WS 事件单条结构。 */
 export type TurnEvent = {
   event_id: string;
   sequence: number;
   type: string;
   turn_id: string;
   payload: Record<string, unknown>;
-  /** Event time from turn_events.ts (ISO). Used for elapsed timers. */
+  /** turn_events 表时间戳（ISO），用于耗时计时。 */
   ts?: string;
 };
 
+/** 当前登录的终端用户摘要。 */
 export type EndUser = { id: string; username: string };
 
+/** 会话列表 API 单项。 */
 export type SessionListItem = {
   id: string;
   default_scenario_id: string;
@@ -123,6 +154,10 @@ export type SessionListItem = {
   last_turn_status: string | null;
 };
 
+/**
+ * 获取当前 cookie 会话对应用户；未登录返回 null。
+ * @returns EndUser 或 null（401）
+ */
 export async function fetchMe(): Promise<EndUser | null> {
   const res = await fetch(`${API_BASE}/auth/me`, sessionFetchInit);
   if (res.status === 401) return null;
@@ -130,6 +165,12 @@ export async function fetchMe(): Promise<EndUser | null> {
   return res.json() as Promise<EndUser>;
 }
 
+/**
+ * 用户名密码登录，建立 cookie 会话。
+ * @param username 用户名
+ * @param password 密码
+ * @returns 登录后的用户信息
+ */
 export async function loginUser(
   username: string,
   password: string,
@@ -144,6 +185,12 @@ export async function loginUser(
   return res.json() as Promise<EndUser>;
 }
 
+/**
+ * 注册新用户并自动登录。
+ * @param username 用户名
+ * @param password 密码
+ * @returns 新用户信息
+ */
 export async function registerUser(
   username: string,
   password: string,
@@ -158,6 +205,7 @@ export async function registerUser(
   return res.json() as Promise<EndUser>;
 }
 
+/** 登出：使服务端 session 失效。 */
 export async function logoutUser(): Promise<void> {
   await fetch(`${API_BASE}/auth/logout`, {
     ...sessionFetchInit,
@@ -165,6 +213,11 @@ export async function logoutUser(): Promise<void> {
   });
 }
 
+/**
+ * 修改当前用户密码。
+ * @param currentPassword 当前密码
+ * @param newPassword 新密码
+ */
 export async function changePassword(
   currentPassword: string,
   newPassword: string,
@@ -190,6 +243,7 @@ export async function changePassword(
   }
 }
 
+/** 用户 Work 空间摘要。 */
 export type WorkSummary = {
   id: string;
   name: string;
@@ -199,6 +253,10 @@ export type WorkSummary = {
   created_at?: string | null;
 };
 
+/**
+ * 获取当前用户的默认 Work。
+ * @returns Work 元数据（含 work_root、visibility_seed 等）
+ */
 export async function fetchDefaultWork(): Promise<WorkSummary> {
   const res = await fetch(`${API_BASE}/works/default`, {
     ...sessionFetchInit,
@@ -208,6 +266,11 @@ export async function fetchDefaultWork(): Promise<WorkSummary> {
   return res.json() as Promise<WorkSummary>;
 }
 
+/**
+ * 更新 Work 的 visibility_seed 开关。
+ * @param workId Work UUID
+ * @param visibilitySeed 是否对检索可见
+ */
 export async function patchWorkVisibilitySeed(
   workId: string,
   visibilitySeed: boolean,
@@ -231,6 +294,10 @@ export async function patchWorkVisibilitySeed(
   return res.json() as Promise<WorkSummary>;
 }
 
+/**
+ * 分页列出当前用户的会话。
+ * @param limit 最大条数，默认 20
+ */
 export async function listSessions(limit = 20): Promise<SessionListItem[]> {
   const params = new URLSearchParams({ limit: String(limit) });
   const res = await fetch(`${API_BASE}/sessions?${params}`, {
@@ -241,6 +308,11 @@ export async function listSessions(limit = 20): Promise<SessionListItem[]> {
   return res.json() as Promise<SessionListItem[]>;
 }
 
+/**
+ * 创建新会话。
+ * @param scenario 默认场景 id，默认 writing
+ * @returns 含新 session id 的对象
+ */
 export async function createSession(
   scenario: "writing" | "agent" | "intel" | "collab" = "writing",
 ) {
@@ -254,6 +326,10 @@ export async function createSession(
   return res.json() as Promise<{ id: string }>;
 }
 
+/**
+ * 校验并获取会话元数据（存在性检查）。
+ * @param sessionId 会话 UUID
+ */
 export async function getSession(sessionId: string): Promise<{ id: string }> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
     ...sessionFetchInit,
@@ -263,7 +339,10 @@ export async function getSession(sessionId: string): Promise<{ id: string }> {
   return res.json();
 }
 
-/** Hard-delete own session (204). Does not remove workspace files. */
+/**
+ * 硬删除自有会话（204）；不删除工作区文件。
+ * @param sessionId 会话 UUID
+ */
 export async function deleteSession(sessionId: string): Promise<void> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
     ...sessionFetchInit,
@@ -273,7 +352,11 @@ export async function deleteSession(sessionId: string): Promise<void> {
   if (!res.ok) throw new Error(`deleteSession failed: ${res.status}`);
 }
 
-/** Hard-delete many sessions in one request (server-side batch). */
+/**
+ * 批量硬删除会话（服务端一次请求）。
+ * @param sessionIds 待删 session id 列表
+ * @returns deleted 与 missing  id 列表
+ */
 export async function deleteSessionsBulk(
   sessionIds: string[],
 ): Promise<{ deleted: string[]; missing: string[] }> {
@@ -299,6 +382,7 @@ export async function deleteSessionsBulk(
   };
 }
 
+/** 会话聚合视图（turn 计数、最后状态等）。 */
 export type SessionView = {
   session_id: string;
   default_scenario_id: string;
@@ -310,6 +394,10 @@ export type SessionView = {
   updated_at: string;
 };
 
+/**
+ * GET /sessions/:id/view — 会话级摘要。
+ * @param sessionId 会话 UUID
+ */
 export async function fetchSessionView(sessionId: string): Promise<SessionView> {
   const res = await fetch(`${API_BASE}/sessions/${sessionId}/view`, {
     ...sessionFetchInit,
@@ -319,6 +407,7 @@ export async function fetchSessionView(sessionId: string): Promise<SessionView> 
   return res.json();
 }
 
+/** 单条回合列表项。 */
 export type TurnSummary = {
   id: string;
   session_id: string;
@@ -327,10 +416,14 @@ export type TurnSummary = {
   user_input: string | null;
   latest_output: string | null;
   created_at: string;
-  /** Latest plan artifact from turn_views (optional; chat multi-plan history). */
+  /** turn_views 中最新 plan 制品（聊天多 plan 历史可选）。 */
   plan?: Record<string, unknown> | null;
 };
 
+/**
+ * 列出会话下所有回合摘要。
+ * @param sessionId 会话 UUID
+ */
 export async function fetchSessionTurns(
   sessionId: string,
 ): Promise<TurnSummary[]> {
@@ -342,6 +435,13 @@ export async function fetchSessionTurns(
   return res.json();
 }
 
+/**
+ * 在会话中发起新回合。
+ * @param sessionId 会话 UUID
+ * @param message 用户消息
+ * @param scenarioId 场景 id
+ * @param opts.plan_phase Plan 模式阶段（planning | executing）
+ */
 export async function startTurn(
   sessionId: string,
   message: string,
@@ -373,6 +473,10 @@ export async function startTurn(
 const viewCache = new Map<string, { etag: string; view: TurnView }>();
 const VIEW_CACHE_MAX = 64;
 
+/**
+ * 获取回合投影视图；支持 ETag 条件请求与客户端 LRU 缓存（I19）。
+ * @param turnId 回合 UUID
+ */
 export async function fetchTurnView(turnId: string): Promise<TurnView> {
   const cached = viewCache.get(turnId);
   const res = await fetch(`${API_BASE}/turns/${turnId}/view`, {
@@ -421,6 +525,12 @@ async function fetchTurnEventsPage(
   };
 }
 
+/**
+ * 拉取回合事件快照；自动翻页 has_more（I19）。
+ * @param turnId 回合 UUID
+ * @param sinceSequence 起始 sequence，默认 0
+ * @returns events 与 last_sequence
+ */
 export async function fetchTurnEvents(
   turnId: string,
   sinceSequence = 0,
@@ -439,6 +549,11 @@ export async function fetchTurnEvents(
   }
 }
 
+/**
+ * 取消运行中回合。
+ * @param turnId 回合 UUID
+ * @param force true 时强制终止
+ */
 export async function cancelTurn(turnId: string, force = false) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/cancel`, {
     ...sessionFetchInit,
@@ -450,6 +565,12 @@ export async function cancelTurn(turnId: string, force = false) {
   return res.json();
 }
 
+/**
+ * 批准待审工具调用。
+ * @param turnId 回合 UUID
+ * @param toolCallId 工具调用 id
+ * @param allowPrefix run_command 可选命令前缀白名单
+ */
 export async function approveToolCall(
   turnId: string,
   toolCallId: string,
@@ -471,6 +592,12 @@ export async function approveToolCall(
   return res.json();
 }
 
+/**
+ * 拒绝待审工具调用。
+ * @param turnId 回合 UUID
+ * @param toolCallId 工具调用 id
+ * @param reason 拒绝原因，默认 user_denied
+ */
 export async function denyToolCall(
   turnId: string,
   toolCallId: string,
@@ -490,6 +617,11 @@ export async function denyToolCall(
   return res.json();
 }
 
+/**
+ * 接受 writing 场景生成的 patch。
+ * @param turnId 回合 UUID
+ * @param patchId patch id
+ */
 export async function acceptPatch(turnId: string, patchId: string) {
   const res = await fetch(`${API_BASE}/turns/${turnId}/patch/accept`, {
     ...sessionFetchInit,
@@ -501,6 +633,12 @@ export async function acceptPatch(turnId: string, patchId: string) {
   return res.json();
 }
 
+/**
+ * 拒绝 writing patch。
+ * @param turnId 回合 UUID
+ * @param patchId patch id
+ * @param reason 拒绝原因，默认 user_rejected
+ */
 export async function rejectPatch(
   turnId: string,
   patchId: string,
@@ -516,6 +654,7 @@ export async function rejectPatch(
   return res.json();
 }
 
+/** 列出已配置的模型供应商。 */
 export async function listModelProviders(): Promise<ModelProvider[]> {
   const res = await fetch(`${API_BASE}/admin/model-providers`, {
     ...sessionFetchInit,
@@ -525,6 +664,10 @@ export async function listModelProviders(): Promise<ModelProvider[]> {
   return res.json();
 }
 
+/**
+ * 创建模型供应商配置。
+ * @param body label、provider、model_name、api_key 等
+ */
 export async function createModelProvider(body: {
   label: string;
   provider: string;
@@ -544,6 +687,10 @@ export async function createModelProvider(body: {
   return res.json();
 }
 
+/**
+ * 激活指定模型供应商为当前默认。
+ * @param id 供应商配置 id
+ */
 export async function activateModelProvider(id: string) {
   const res = await fetch(`${API_BASE}/admin/model-providers/${id}/activate`, {
     ...sessionFetchInit,
@@ -554,6 +701,11 @@ export async function activateModelProvider(id: string) {
   return res.json();
 }
 
+/**
+ * 更新模型供应商字段（部分 PATCH 语义 PUT）。
+ * @param id 供应商配置 id
+ * @param body 待更新字段
+ */
 export async function updateModelProvider(
   id: string,
   body: {
@@ -575,6 +727,10 @@ export async function updateModelProvider(
   return res.json();
 }
 
+/**
+ * 删除模型供应商配置。
+ * @param id 供应商配置 id
+ */
 export async function deleteModelProvider(id: string) {
   const res = await fetch(`${API_BASE}/admin/model-providers/${id}`, {
     ...sessionFetchInit,
@@ -584,11 +740,13 @@ export async function deleteModelProvider(id: string) {
   if (!res.ok) throw new Error(`deleteModelProvider failed: ${res.status}`);
 }
 
+/** 工作区目录列表响应。 */
 export type WorkspaceEntries = {
   path: string;
   entries: string[];
 };
 
+/** 工作区单文件内容与截断标记。 */
 export type WorkspaceFile = {
   path: string;
   content: string;
@@ -596,6 +754,10 @@ export type WorkspaceFile = {
   file_bytes?: number;
 };
 
+/**
+ * 列出工作区目录条目。
+ * @param path 相对路径，默认 "."
+ */
 export async function fetchWorkspaceEntries(
   path = ".",
 ): Promise<WorkspaceEntries> {
@@ -608,6 +770,10 @@ export async function fetchWorkspaceEntries(
   return res.json();
 }
 
+/**
+ * 读取工作区文本文件。
+ * @param path 相对路径
+ */
 export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
   const params = new URLSearchParams({ path });
   const res = await fetch(`${API_BASE}/admin/workspace/file?${params}`, {
@@ -618,6 +784,11 @@ export async function fetchWorkspaceFile(path: string): Promise<WorkspaceFile> {
   return res.json();
 }
 
+/**
+ * 写入或覆盖工作区文件。
+ * @param path 相对路径
+ * @param content 文件全文
+ */
 export async function saveWorkspaceFile(
   path: string,
   content: string,
@@ -638,6 +809,10 @@ export async function saveWorkspaceFile(
   return res.json();
 }
 
+/**
+ * 在工作区创建目录。
+ * @param path 相对路径
+ */
 export async function mkdirWorkspacePath(
   path: string,
 ): Promise<{ path: string; status: string; summary?: string }> {
@@ -657,6 +832,12 @@ export async function mkdirWorkspacePath(
   return res.json();
 }
 
+/**
+ * 重命名或移动工作区路径。
+ * @param path 源路径
+ * @param newPath 目标路径
+ * @param overwrite 目标存在时是否覆盖
+ */
 export async function renameWorkspacePath(
   path: string,
   newPath: string,
@@ -699,7 +880,10 @@ function filenameFromContentDisposition(header: string | null): string | null {
   return plain?.[1]?.trim() ?? null;
 }
 
-/** Download a Work file (manuscript, exports, sources/seed, …) via browser save dialog. */
+/**
+ * 下载工作区文件（触发浏览器保存对话框）。
+ * @param path 相对路径
+ */
 export async function downloadWorkspaceFile(path: string): Promise<void> {
   const params = new URLSearchParams({ path });
   const res = await fetch(`${API_BASE}/admin/workspace/download?${params}`, {
@@ -728,6 +912,7 @@ export async function downloadWorkspaceFile(path: string): Promise<void> {
   }
 }
 
+/** 批量删除工作区路径的结果。 */
 export type WorkspaceDeleteResult = {
   deleted: string[];
   failed: Array<{ path: string; error: string }>;
@@ -735,6 +920,10 @@ export type WorkspaceDeleteResult = {
   error?: string;
 };
 
+/**
+ * 批量删除工作区文件或目录。
+ * @param paths 相对路径列表
+ */
 export async function deleteWorkspacePaths(
   paths: string[],
 ): Promise<WorkspaceDeleteResult> {
@@ -754,6 +943,7 @@ export async function deleteWorkspacePaths(
   return res.json();
 }
 
+/** sources/ 上传 API 响应。 */
 export type SourceUploadResult = {
   path: string;
   bytes_written: number;
@@ -768,6 +958,7 @@ export type SourceUploadResult = {
   };
 };
 
+/** RAG 索引构建过程的 live 进度字段。 */
 export type SourcesIndexProgress = {
   status?: string;
   phase?: string;
@@ -792,6 +983,7 @@ export type SourcesIndexProgress = {
   last_result?: SourcesIndexStatus["last_result"];
 };
 
+/** sources 向量索引整体状态（ingestion 平面，非 effect 质量）。 */
 export type SourcesIndexStatus = {
   status: "idle" | "building" | "ready" | "error" | string;
   path?: string | null;
@@ -802,13 +994,13 @@ export type SourcesIndexStatus = {
   embedding_backend?: string;
   path_indexed?: boolean;
   path_current?: boolean;
-  /** IX3: always "ingestion" — never effect-quality. */
+  /** IX3：恒为 ingestion，不代表检索效果质量。 */
   plane?: "ingestion" | string;
   ingestion_ready?: boolean;
-  /** IX3: always false from this endpoint; effect = prod-bench / hard queries. */
+  /** IX3：此端点恒 false；effect 见 prod-bench / 硬查询。 */
   effect_ready?: boolean;
   hint?: string;
-  /** Live sync progress (scan/embed/write); shared across processes via data_dir. */
+  /** 跨进程共享的 live sync 进度（scan/embed/write）。 */
   progress?: SourcesIndexProgress | null;
   last_result?: {
     indexed_files?: number;
@@ -818,6 +1010,10 @@ export type SourcesIndexStatus = {
   } | null;
 };
 
+/**
+ * 查询 sources 索引状态，可选按 path 过滤。
+ * @param path 相对 sources 路径
+ */
 export async function fetchSourcesIndexStatus(
   path?: string,
 ): Promise<SourcesIndexStatus> {
@@ -834,7 +1030,7 @@ export async function fetchSourcesIndexStatus(
   return res.json();
 }
 
-/** Agent workspace AST index meta (separate from RAG sources sync). */
+/** Agent 工作区 AST 索引元数据（与 RAG sources 索引分离）。 */
 export type AstIndexStatus = {
   work_id?: string;
   owner_user_id?: string;
@@ -862,6 +1058,11 @@ export type AstIndexStatus = {
   enabled?: boolean;
 };
 
+/**
+ * 查询 AST 索引状态；可选 enqueue 扫描任务。
+ * @param opts.enqueue 是否入队 catch-up
+ * @param opts.workId 指定 Work id
+ */
 export async function fetchAstIndexStatus(opts?: {
   enqueue?: boolean;
   workId?: string;
@@ -880,6 +1081,11 @@ export async function fetchAstIndexStatus(opts?: {
   return res.json();
 }
 
+/**
+ * 触发 AST 索引全量或增量重建。
+ * @param opts.workId Work id
+ * @param opts.memoryOnly 仅内存索引
+ */
 export async function rebuildAstIndex(opts?: {
   workId?: string;
   memoryOnly?: boolean;
@@ -902,6 +1108,10 @@ export async function rebuildAstIndex(opts?: {
   return res.json();
 }
 
+/**
+ * 清空 AST 索引数据。
+ * @param opts.workId Work id
+ */
 export async function purgeAstIndex(opts?: {
   workId?: string;
 }): Promise<Record<string, unknown>> {
@@ -922,7 +1132,10 @@ export async function purgeAstIndex(opts?: {
   return res.json();
 }
 
-/** IX1: queue Turn-external incremental sync (does not block chat). */
+/**
+ * 排队 Turn 外增量 sources 同步（不阻塞聊天，IX1）。
+ * @returns accepted 与 index.status
+ */
 export async function syncSourcesIndex(): Promise<{
   accepted?: boolean;
   index?: { status?: string };
@@ -949,6 +1162,10 @@ export async function syncSourcesIndex(): Promise<{
   return res.json();
 }
 
+/**
+ * 上传文件到 sources/ 并触发索引。
+ * @param file 浏览器 File 对象
+ */
 export async function uploadSourceFile(
   file: File,
 ): Promise<SourceUploadResult> {
@@ -977,7 +1194,11 @@ export async function uploadSourceFile(
   return res.json();
 }
 
-/** Sanitize a user-facing title into a sources/ filename accepted by the API. */
+/**
+ * 将用户标题 sanitize 为 sources/ 下可接受的 .md 文件名。
+ * @param title 原始标题
+ * @returns 安全文件名（含 .md 后缀）
+ */
 export function sourceFilenameFromTitle(title: string): string {
   const raw = title.trim() || "paste-note";
   const withoutExt = raw.replace(/\.(md|markdown|txt|json)$/i, "");
@@ -988,7 +1209,11 @@ export function sourceFilenameFromTitle(title: string): string {
   return `${safe || "paste-note"}.md`;
 }
 
-/** Paste / type content into sources/ without picking a local file. */
+/**
+ * 粘贴/输入文本写入 sources/，无需本地选文件。
+ * @param title 用作文件名基础的标题
+ * @param content Markdown 正文
+ */
 export async function uploadSourceText(
   title: string,
   content: string,
@@ -1000,7 +1225,10 @@ export async function uploadSourceText(
   return uploadSourceFile(file);
 }
 
-/** Debounced typing warm-up for embedder/index (docs/13 S3 A18). Best-effort. */
+/**
+ * 防抖输入时的检索 warm-up（embedder/index，docs/13 S3 A18）；失败静默忽略。
+ * @param prefix 可选查询前缀，最长 200 字符
+ */
 export async function warmupRetrieval(prefix = ""): Promise<void> {
   const params = new URLSearchParams();
   if (prefix.trim()) params.set("prefix", prefix.slice(0, 200));
@@ -1019,12 +1247,14 @@ export async function warmupRetrieval(prefix = ""): Promise<void> {
   }
 }
 
+/** 写作范例引用（作者/作品/节拍）。 */
 export type WritingExemplarRef = {
   author: string;
   work: string;
   beat: string;
 };
 
+/** 管理端写作偏好（权重、信号、范例与 schema 版本）。 */
 export type WritingPrefs = {
   preset_label: string;
   fragment_weights: Record<string, Record<string, number>>;
@@ -1036,6 +1266,7 @@ export type WritingPrefs = {
   is_custom: boolean;
 };
 
+/** 获取当前写作偏好配置。 */
 export async function fetchWritingPrefs(): Promise<WritingPrefs> {
   const res = await fetch(`${API_BASE}/admin/writing-prefs`, {
     ...sessionFetchInit,
@@ -1045,6 +1276,10 @@ export async function fetchWritingPrefs(): Promise<WritingPrefs> {
   return (await res.json()) as WritingPrefs;
 }
 
+/**
+ * 更新写作偏好（部分字段）。
+ * @param body preset_label、fragment_weights 等
+ */
 export async function updateWritingPrefs(body: {
   preset_label?: string;
   fragment_weights?: Record<string, Record<string, number>>;
@@ -1064,6 +1299,7 @@ export async function updateWritingPrefs(body: {
   return (await res.json()) as WritingPrefs;
 }
 
+/** 重置写作偏好为服务端默认值。 */
 export async function resetWritingPrefs(): Promise<WritingPrefs> {
   const res = await fetch(`${API_BASE}/admin/writing-prefs/reset`, {
     method: "POST",

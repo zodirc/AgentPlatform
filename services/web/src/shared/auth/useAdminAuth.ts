@@ -1,3 +1,6 @@
+/**
+ * 管理端 HTTP Basic 解锁：检测 API 是否需要密码、验证与解锁横幅状态。
+ */
 import { useCallback, useEffect, useState } from "react";
 import {
   clearAdminAuth,
@@ -7,14 +10,20 @@ import {
   verifyAdminAuth,
 } from "../api/client";
 
+/** useAdminAuth 返回值。 */
 type AdminAuthState = {
-  /** Whether the unlock banner should be shown. */
+  /** 是否应显示管理端解锁横幅。 */
   needsUnlock: boolean;
   checking: boolean;
   unlockError: string | null;
+  /** 提交 ADMIN_PASSWORD 并验证，成功则隐藏横幅。 */
   unlock: (password: string) => Promise<boolean>;
 };
 
+/**
+ * 挂载时探测 /admin 是否 401，并校验 sessionStorage 中的 Basic token。
+ * @returns needsUnlock、checking、unlock 等
+ */
 export function useAdminAuth(): AdminAuthState {
   const [needsUnlock, setNeedsUnlock] = useState(false);
   const [checking, setChecking] = useState(true);

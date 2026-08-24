@@ -1,4 +1,7 @@
+"""出站/日志 PII 与密钥脱敏（docs/13 S2 A15）。"""
+
 from __future__ import annotations
+
 
 import copy
 import re
@@ -21,6 +24,7 @@ _PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 
 
 def redact_text(text: str) -> str:
+    """作用：正则脱敏单段文本。"""
     if not text:
         return text
     out = text
@@ -30,7 +34,7 @@ def redact_text(text: str) -> str:
 
 
 def redact_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Deep-copy messages and redact text-bearing fields before model egress."""
+    """作用：深拷贝 messages 并脱敏文本字段。"""
     cloned = copy.deepcopy(messages)
     for msg in cloned:
         content = msg.get("content")
@@ -88,7 +92,7 @@ _LOG_STRING_KEYS = frozenset(
 
 
 def redact_log_event(_: Any, __: str, event_dict: dict[str, Any]) -> dict[str, Any]:
-    """Structlog processor: redact sensitive string fields in log events."""
+    """作用：structlog processor 脱敏日志字段。"""
     for key, value in list(event_dict.items()):
         if key in _LOG_STRING_KEYS and isinstance(value, str):
             event_dict[key] = redact_text(value)

@@ -1,4 +1,5 @@
-"""Dirty-path queue for incremental updates (A2 hooks §3.2 channel ①)."""
+"""文件变更 dirty 事件队列。"""
+
 
 from __future__ import annotations
 
@@ -21,12 +22,14 @@ logger = logging.getLogger(__name__)
 
 
 class DirtyKind(str, Enum):
+    """作用：dirty 事件类型枚举。"""
     UPSERT = "upsert"
     DELETE = "delete"
 
 
 @dataclass(slots=True)
 class DirtyEvent:
+    """作用：单路径变更事件。"""
     path: str  # relative
     kind: DirtyKind
     touched_in_turn: bool = False
@@ -42,7 +45,7 @@ class _WorkDirtyState:
 
 
 class DirtyQueue:
-    """Per-work deduped dirty paths with debounce (~500ms per §3.2)."""
+    """作用：per-Work dirty 合并队列。"""
 
     def __init__(self, store: AstIndexStore | None = None) -> None:
         self.store = store or AstIndexStore()
@@ -297,6 +300,7 @@ _dirty: DirtyQueue | None = None
 
 
 def get_dirty_queue() -> DirtyQueue:
+    """作用：全局 DirtyQueue 单例。"""
     global _dirty
     if _dirty is None:
         _dirty = DirtyQueue()
@@ -311,7 +315,7 @@ def notify_path_changed(
     work_root: Path | str | None,
     deleted: bool = False,
 ) -> None:
-    """One-liner for tool success paths (A2). No-op when work scope missing."""
+    """作用：文件变更/删除时入队 dirty。"""
     if work_id is None or not owner_user_id or not work_root:
         return
     from app.structural.workspace_index.service import get_ast_index_service

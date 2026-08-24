@@ -1,13 +1,5 @@
-"""Coding structural intelligence: LSP diagnostics + symbol navigation (R4 tool/index plane).
 
-See docs/core/tools-and-context.md §2.
-
-Locate fuses into search_codebase (definition adapters); Impact fuses into
-edit_file.impact (reference adapters). Wave 2 Verify fuses into edit_file.checks
-(syntax gate + incremental diagnostics). Precision tools goto_definition /
-find_references remain. Heavy work stays out of StartTurn; infra failure is
-explicit failed (not silent lexical success).
-"""
+"""结构工具包：LSP、符号、AST 索引与测试辅助。"""
 
 from __future__ import annotations
 

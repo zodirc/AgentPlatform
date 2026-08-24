@@ -1,4 +1,7 @@
+"""工作区约定文件（AGENT.md 等）加载与 per-step runtime_context 软提示。"""
+
 from __future__ import annotations
+
 
 import time
 from pathlib import Path
@@ -27,7 +30,7 @@ def _purge_project_cache() -> None:
 
 
 def load_project_context(*, session_id: UUID | str | None = None) -> str:
-    """Load short workspace convention files; session-cached after first read."""
+    """作用：加载 AGENT.md 等约定文件（session 缓存）。"""
     key = str(session_id) if session_id is not None else "_default"
     _purge_project_cache()
     cached = _session_project_cache.get(key)
@@ -60,6 +63,7 @@ def load_project_context(*, session_id: UUID | str | None = None) -> str:
 
 
 def clear_project_context_cache(session_id: UUID | str | None = None) -> None:
+    """作用：清除 project 文件缓存。"""
     if session_id is None:
         _session_project_cache.clear()
         return
@@ -74,11 +78,7 @@ def build_runtime_context(
     model_name: str | None = None,
     plan_hint: str | None = None,
 ) -> str:
-    """Per-step soft budget hint for the model.
-
-    Must be placed *after* conversation messages (see ContextEngine._materialize_messages)
-    so DeepSeek/OpenAI prefix cache can reuse the append-only history across steps.
-    """
+    """作用：构造 per-step 软预算 runtime_context 字符串。"""
     parts = [
         f"scenario_id={scenario_id}",
         f"step={step_count}/{max_steps}",

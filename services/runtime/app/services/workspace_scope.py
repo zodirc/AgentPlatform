@@ -1,4 +1,5 @@
-"""Bind TenantContext for internal workspace / Sources APIs (docs/27 MT5c)."""
+
+"""内部 API 用 workspace_tenant_scope 绑定 TenantContext（MT5c）。"""
 
 from __future__ import annotations
 
@@ -15,7 +16,7 @@ def workspace_tenant_scope(
     owner_user_id: str | None = None,
     visibility_seed: str | bool | None = None,
 ) -> Iterator[None]:
-    """Scope filesystem tools to a Work root when api forwards tenant fields."""
+    """作用：workspace_tenant_scope 公开 API。"""
     from app.tenant_context import (
         bind_tenant_context,
         ensure_work_root_exists,

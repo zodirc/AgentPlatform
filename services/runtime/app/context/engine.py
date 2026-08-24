@@ -1,3 +1,23 @@
+"""上下文组装引擎：Turn 消息压缩、预算估算与工具执行门面。
+
+English: Context assembly engine — message compaction, budget estimation, and tool
+dispatch facade for each LLM call.
+
+``ContextEngine`` 在每次 LLM 调用前将 ``TurnState.messages`` 与 system/project/runtime/
+volatile 前缀合并，按 ``CompactionPolicy`` 的 fill 档位（默认 0.80 / 0.90 / 0.95）
+依次执行 read 折叠、tool 结果截断、microcompact、collapse、snip、autocompact，
+并输出 provider 可消费的 message 列表。
+
+``ToolExecutor`` 负责单工具 dispatch：审批 sticky、schema 校验、超时与 handler 调用。
+
+模块级 ``estimate_*`` 函数供预算报表与 observability 复用同一 token 启发式。
+
+组窗顺序（HM6/WT5）
+-------------------
+system（字节稳定，利于 prompt cache）→ project → volatile → 压缩后 history →
+runtime（含 step=N，必须 trailing，避免每步破坏 append-only 前缀缓存）。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,14 +41,27 @@ from app.tools.registry import (
 
 logger = logging.getLogger(__name__)
 
-# Fallback defaults when Settings import is unavailable (unit isolation).
+# Settings 不可 import 时（单测隔离）的 tool_result 字符预算兜底。
 TOOL_RESULT_CHAR_BUDGET = 4_000
 TOOL_RESULT_LATEST_READ_CHAR_BUDGET = 32_000
 SHORT_TOOL_RESULT_MAX_CHARS = 800
 
 
 class ToolExecutor:
+    """工具注册表上的 sync/async 执行器；封装审批门、校验与 handler 调用。
+
+    English: Dispatches registered tool handlers with approval gates, JSON Schema
+    validation, timeouts, and ops_eval / sticky-write shortcuts.
+    """
+
     def __init__(self, specs: list[ToolSpec]) -> None:
+        """按工具名索引 ``ToolSpec`` 处理器。
+
+        English: Build name → ToolSpec map from the scenario-scoped tool list.
+
+        参数:
+            specs: 场景 bootstrap 注入的完整工具规格列表。
+        """
         self._specs = {s.name: s for s in specs}
 
     async def run(
@@ -40,6 +73,25 @@ class ToolExecutor:
         state: TurnState,
         force_approval: bool = False,
     ) -> dict[str, Any]:
+        """执行单次工具调用并返回结构化结果 dict。
+
+        English: Run one tool call end-to-end. Returns handler result or structured
+        error / approval_required / invalid_arguments / timeout payloads.
+
+        审批逻辑：未知工具直接 error；需审批时检查 ops_eval、同 Turn sticky
+        （writes_preapproved / exec_preapproved）、run_command allowlist；否则
+        返回 ``approval_required``。通过后可选 schema 校验，再 ``wait_for`` handler。
+
+        参数:
+            tool_name: 注册工具名。
+            tool_call_id: 与 assistant tool_use 关联的 id（审批 payload 用）。
+            arguments: 模型给出的 JSON 参数。
+            state: 当前 Turn 状态（传 turn_id/run_id 等给 handler）。
+            force_approval: True 时跳过人工审批门（checkpoint 恢复等路径）。
+
+        返回:
+            工具 handler 返回值，或 error/timeout/approval_required/invalid_arguments。
+        """
         spec = self._specs.get(tool_name)
         if spec is None:
             return {"error": f"Tool not available: {tool_name}"}
@@ -124,6 +176,8 @@ class ToolExecutor:
 
 @dataclass
 class ContextEnvelope:
+    """``_build_envelope`` 的中间产物：压缩后的 messages 与预算/追踪元数据。"""
+
     messages: list[dict[str, Any]]
     budget_report: dict[str, Any] = field(default_factory=dict)
     compaction_trace: list[dict[str, str]] = field(default_factory=list)
@@ -136,12 +190,26 @@ class ContextEnvelope:
 
 
 class ContextEngine:
+    """Turn 级上下文组装与压缩 orchestrator。
+
+    English: Orchestrates per-turn context assembly and compaction. Sync ``assemble``
+    is deterministic-only; ``assemble_async`` may call LLM or precompact cache when
+    fill hits autocompact. Exposes ``last_*`` for observability and Web budget UI.
+    """
+
     def __init__(
         self,
         *,
         policy: CompactionPolicy | None = None,
         token_budget: int | None = None,
     ) -> None:
+        """构造引擎；三选一指定压缩策略来源。
+
+        参数:
+            policy: 显式 ``CompactionPolicy``；优先于 token_budget。
+            token_budget: 旧单测 API；映射为 ``legacy_messages_budget``。
+            二者皆 None 时从 ``settings`` 加载。
+        """
         if policy is not None:
             self._policy = policy
         elif token_budget is not None:
@@ -168,6 +236,20 @@ class ContextEngine:
         model_name: str | None = None,
         volatile_context: str = "",
     ) -> list[dict]:
+        """同步组装 LLM 请求消息列表（无 LLM autocompact）。
+
+        English: Deterministic compaction path only — no gateway LLM summarization.
+
+        参数:
+            system_prompt: 场景 system.md 正文（缓存友好前缀）。
+            state: Turn 状态；读取 messages/step/plan_hint 等。
+            tools: 可选 OpenAI tools schema 列表（计入 token 预算）。
+            model_name: 写入 runtime_context 的模型展示名。
+            volatile_context: 写作 cards/focus 等易变块（不进 system）。
+
+        返回:
+            完整 message 列表：system → project → volatile → 压缩后 history → runtime。
+        """
         started = time.monotonic()
         envelope = self._build_envelope(
             state=state,
@@ -191,6 +273,28 @@ class ContextEngine:
         abort: Any | None = None,
         volatile_context: str = "",
     ) -> list[dict]:
+        """异步组装；fill 触顶且 defer 时可 LLM/缓存 autocompact。
+
+        English: Full assembly path with optional LLM/deterministic autocompact when
+        fill exceeds policy. Reuses cached assembled messages when fingerprint matches
+        and no autocompact_pending remains.
+
+        指纹命中且无 pending autocompact 时零成本复用 ``_reuse_messages``。
+        gateway 非 None 且 trace 含 ``autocompact_pending`` 时：优先 precompact 缓存，
+        否则按 ``context_hard_autocompact_allow_llm`` 选 LLM 或确定性摘要。
+
+        参数:
+            system_prompt: 场景 system 正文。
+            state: Turn 状态。
+            gateway: 可选 LLM gateway（autocompact 用）；None 则仅确定性路径。
+            tools: tools schema。
+            model_name: runtime 块展示用。
+            abort: 可选 asyncio.Event 式对象；已 set 时早退不重试 autocompact。
+            volatile_context: 易变写作上下文。
+
+        返回:
+            同 ``assemble`` 的最终 message 列表。
+        """
         from app.context.compact_summarizer import summarize_messages_with_gateway
         from app.settings import settings
 
@@ -313,10 +417,13 @@ class ContextEngine:
         return result
 
     def _materialize_messages(self, envelope: ContextEnvelope) -> list[dict[str, Any]]:
-        # HM6 / WT5: keep system.md (scenario base) byte-stable for prompt cache.
-        # project_context is workspace-derived and may change — never weld into system.
-        # DeepSeek / OpenAI prefix cache: mutable runtime (step=N) must trail messages,
-        # otherwise each step breaks the append-only history prefix.
+        """将 envelope 转为 provider 顺序的最终 messages。
+
+        English: Materialize ContextEnvelope to provider message list.
+
+        HM6/WT5：system.md 字节稳定以利 prompt cache；runtime（含 step=N）必须
+        trailing 在历史之后，避免每步破坏 append-only 前缀缓存。
+        """
         out = _prefix_messages(
             system_prompt=envelope.system_prompt,
             project_context=envelope.project_context,
@@ -329,6 +436,7 @@ class ContextEngine:
         return out
 
     def _finalize_envelope(self, envelope: ContextEnvelope, turn_id: Any) -> None:
+        """把 envelope 的 trace/budget/assemble_ms 写入实例 ``last_*`` 并打日志。"""
         self.last_compaction_trace = envelope.compaction_trace
         self.last_budget_report = dict(envelope.budget_report)
         self.last_budget_report["assemble_ms"] = envelope.assemble_ms
@@ -362,6 +470,19 @@ class ContextEngine:
         model_name: str | None = None,
         volatile_context: str = "",
     ) -> ContextEnvelope:
+        """核心压缩流水线：fold → budget → microcompact → collapse → snip → autocompact。
+
+        参数:
+            state: Turn 状态；messages 拷贝自 state.messages，evicted_paths 可能原地更新。
+            system_prompt: 场景 system。
+            tools: tools schema。
+            defer_autocompact: True 时在 fill_autocompact 处只打 pending 标记，不立刻摘要。
+            model_name: runtime_context 用。
+            volatile_context: 写作 volatile 块。
+
+        返回:
+            含压缩后 messages、budget_report、compaction_trace 的 ``ContextEnvelope``。
+        """
         policy = self._policy
         messages = [dict(m) for m in state.messages]
         trace: list[dict[str, str]] = []
@@ -517,10 +638,12 @@ class ContextEngine:
 
 
 def _system_message(system_prompt: str) -> dict[str, Any]:
+    """构造单条 system 角色消息。"""
     return {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
 
 
 def _volatile_user_message(volatile_context: str) -> dict[str, Any] | None:
+    """将 volatile 写作上下文包装为带 ``[writing_context]`` 前缀的 user 消息。"""
     text = (volatile_context or "").strip()
     if not text:
         return None
@@ -530,6 +653,7 @@ def _volatile_user_message(volatile_context: str) -> dict[str, Any] | None:
 
 
 def _project_user_message(project_context: str) -> dict[str, Any] | None:
+    """将工作区 project 摘要包装为带 ``[project_context]`` 前缀的 user 消息。"""
     text = (project_context or "").strip()
     if not text:
         return None
@@ -539,6 +663,7 @@ def _project_user_message(project_context: str) -> dict[str, Any] | None:
 
 
 def _runtime_user_message(runtime_context: str) -> dict[str, Any] | None:
+    """构造 trailing runtime 块（step/plan_hint 等每步可变，不进 system 前缀）。"""
     text = (runtime_context or "").strip()
     if not text:
         return None
@@ -551,7 +676,16 @@ def _prefix_messages(
     project_context: str = "",
     volatile_context: str = "",
 ) -> list[dict[str, Any]]:
-    """Stable cacheable prefix: system → project → volatile (no per-step runtime)."""
+    """可缓存前缀：system → project → volatile（不含 per-step runtime）。
+
+    参数:
+        system_prompt: 场景 system.md。
+        project_context: 工作区派生上下文。
+        volatile_context: 写作易变块。
+
+    返回:
+        0–3 条前缀消息。
+    """
     out: list[dict[str, Any]] = [_system_message(system_prompt)]
     project_msg = _project_user_message(project_context)
     if project_msg is not None:
@@ -569,6 +703,7 @@ def _assemble_fingerprint(
     *,
     volatile_context: str = "",
 ) -> str:
+    """assemble 结果复用指纹：system/volatile/step/messages 长度/scenario/tools。"""
     tool_names = ",".join(str(t.get("name", "")) for t in (tools or []))
     return (
         f"{hash(system_prompt)}|{hash(volatile_context or '')}|{state.step_count}|"
@@ -586,6 +721,18 @@ def _window_fill(
     runtime_context: str = "",
     volatile_context: str = "",
 ) -> tuple[float, dict[str, int]]:
+    """估算当前 messages + 前缀 + runtime 相对可用窗口的 fill 比例。
+
+    参数:
+        messages: 待评估的对话历史（不含前缀与 runtime）。
+        system_prompt: system 正文。
+        tools: tools schema。
+        policy: 压缩策略（窗口与 output reserve）。
+        project_context / runtime_context / volatile_context: 各附加块正文。
+
+    返回:
+        ``(fill_ratio, window_dict)``；fill_ratio = tokens_after / usable_window。
+    """
     assembled = _prefix_messages(
         system_prompt=system_prompt,
         project_context=project_context,
@@ -611,27 +758,37 @@ def _window_fill(
 
 
 def _estimate_tokens(messages: list[dict[str, Any]]) -> int:
+    """对 message 列表做 token 粗估（至少 1）。"""
     return max(1, estimate_payload_tokens(messages))
 
 
-# Matches every char with ord > 0x2E80 (CJK and beyond) — same classification
-# as the previous per-char Python loop, but at C speed.
+# 匹配 ord > 0x2E80 的字符（CJK 等），与旧 Python 逐字循环分类一致，C 层更快。
 _CJK_CHAR_PATTERN = re.compile(r"[^\u0000-\u2e80]")
 
 
 @lru_cache(maxsize=2048)
 def _estimate_text_tokens(text: str) -> int:
-    """Token estimate for one text; cached because _window_fill re-estimates
-    the same unchanged messages ≥5 times per step (review I6)."""
+    """单段文本 token 估计（LRU 缓存；每步 _window_fill 会重复估算未变消息）。
+
+    参数:
+        text: 原始字符串。
+
+    返回:
+        CJK≈1 token/字，ASCII≈1/4 字节的启发式计数（至少 1）。
+    """
     cjk = len(text) - len(_CJK_CHAR_PATTERN.sub("", text))
     other = len(text) - cjk
     return max(1, cjk + (other + 2) // 3)
 
 
 def estimate_payload_tokens(payload: Any) -> int:
-    """Cheap token estimate that prefers overestimate (AH4).
+    """对 str 或 JSON 序列化对象做偏保守的 token 粗估（AH4）。
 
-    CJK characters ~1 token; ASCII ~1/4. Avoids optimistic chars/4 overflow.
+    参数:
+        payload: 字符串或可 ``json.dumps`` 的对象；None 视为 0。
+
+    返回:
+        估计 token 数（CJK 约 1/字，ASCII 约 1/4 字节，避免 chars/4 乐观溢出）。
     """
     if payload is None:
         return 0
@@ -649,10 +806,16 @@ def estimate_assembled_window(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    """Estimate tokens for the actual model request window.
+    """估算实际 LLM 请求窗口的 token 分项（provider 计费口径）。
 
-    Includes system/user/assistant/tool messages and tool schemas, which is what
-    the provider bills against — not just TurnState.messages.
+    含 system/user/assistant/tool 消息与 tools schema，而非仅 TurnState.messages。
+
+    参数:
+        messages: 已含前缀/runtime 的完整 assembled 列表，或部分列表。
+        tools: OpenAI tools 定义。
+
+    返回:
+        system/tools/messages/tokens_after 分项 dict。
     """
     system_tokens = 0
     message_tokens = 0
@@ -672,6 +835,7 @@ def estimate_assembled_window(
 
 
 def _message_text(msg: dict[str, Any]) -> str:
+    """拼接单条消息中所有 text content block。"""
     parts: list[str] = []
     for block in msg.get("content", []):
         if block.get("type") == "text":
@@ -684,7 +848,15 @@ def estimate_window_breakdown(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    """Classify assembled-window tokens into Cursor-like categories."""
+    """将 assembled 窗口 token 按 Cursor 式类别拆分（Web 预算条用）。
+
+    参数:
+        messages: assembled message 列表。
+        tools: tools schema。
+
+    返回:
+        system/tools/session/user/assistant/tool_results/compaction 等分项。
+    """
     window = estimate_assembled_window(messages=messages, tools=tools)
     breakdown = {
         "system": 0,
@@ -729,6 +901,7 @@ def estimate_window_breakdown(
 
 
 def _tool_result_text(msg: dict[str, Any]) -> str:
+    """从 tool 角色消息提取第一个 tool_result 块的 content 字符串。"""
     if msg.get("role") != "tool":
         return ""
     for block in msg.get("content", []):
@@ -738,7 +911,7 @@ def _tool_result_text(msg: dict[str, Any]) -> str:
 
 
 def _is_pinned_short_tool_result(text: str) -> bool:
-    """Read-only directory/listing results stay visible through compaction."""
+    """只读目录/列表/搜索等短 JSON 结果在压缩中保持可见（pinned）。"""
     if not text or len(text) > SHORT_TOOL_RESULT_MAX_CHARS:
         return False
     try:
@@ -759,6 +932,7 @@ def _is_pinned_short_tool_result(text: str) -> bool:
 
 
 def _pinned_tool_digest(messages: list[dict[str, Any]]) -> str:
+    """从消息历史收集 pinned 短 tool 结果摘要，供 collapse 指针附注。"""
     snippets: list[str] = []
     for msg in messages:
         body = _tool_result_text(msg)
@@ -771,7 +945,7 @@ def _pinned_tool_digest(messages: list[dict[str, Any]]) -> str:
 
 
 def _dropped_tools_summary(messages: list[dict[str, Any]]) -> str:
-    """Count tool_use names in collapsed middle (deterministic, no importance ranking)."""
+    """统计被 collapse 段内 tool_use 名称与次数（确定性，无重要性排序）。"""
     counts: dict[str, int] = {}
     for msg in messages:
         if msg.get("role") != "assistant":
@@ -791,7 +965,12 @@ def _dropped_tools_summary(messages: list[dict[str, Any]]) -> str:
 
 
 def _budget_limits() -> tuple[int, int, bool]:
-    """Return (default_budget, latest_read_budget, snip_protect)."""
+    """读取 tool_result 字符预算与 snip 保护开关。
+
+    返回:
+        ``(default_budget, latest_read_budget, snip_protect_latest_read)``；
+        settings 不可用时用模块级常量兜底。
+    """
     try:
         from app.settings import settings
 
@@ -809,7 +988,7 @@ def _budget_limits() -> tuple[int, int, bool]:
 
 
 def _latest_read_file_tool_use_ids(messages: list[dict[str, Any]]) -> set[str]:
-    """Tool-use ids of the chronologically latest read_file result (any path)."""
+    """时间序上最后一条 read_file tool_result 的 tool_use_id 集合（0 或 1 个）。"""
     name_by_id = _tool_use_name_by_id(messages)
     latest_id: str | None = None
     for msg in messages:
@@ -825,10 +1004,10 @@ def _latest_read_file_tool_use_ids(messages: list[dict[str, Any]]) -> set[str]:
 
 
 def _protected_tail_start(messages: list[dict[str, Any]]) -> int:
-    """Index where protected tail begins (current instruction + latest read cycle).
+    """受保护尾部起始下标：当前 user 指令 + 最新 read_file 周期不可 snip/collapse。
 
-    Messages ``[:start]`` may be snipped; ``[start:]`` must remain when
-    ``context_snip_protect_latest_read`` is on.
+    ``messages[:start]`` 可被 snip；``[start:]`` 在 ``context_snip_protect_latest_read``
+    开启时必须保留。
     """
     _, _, protect = _budget_limits()
     if not protect or not messages:
@@ -864,7 +1043,7 @@ def _protected_tail_start(messages: list[dict[str, Any]]) -> int:
 
 
 def _middle_truncate_text(text: str, limit: int) -> str:
-    """Keep head and tail of an oversized tool_result (X-2)."""
+    """超长 tool_result 中间截断，保留 head/tail（X-2 budget_truncated 标记）。"""
     if limit <= 0 or len(text) <= limit:
         return text
     marker = "\n...[budget_truncated]...\n"
@@ -881,9 +1060,19 @@ def _apply_tool_result_budget(
     preserve_short: bool = False,
     latest_read_budget: int | None = None,
 ) -> tuple[list[dict[str, Any]], int, dict[str, int]]:
-    """Truncate oversized tool_result bodies.
+    """按字符预算截断 oversized tool_result 正文。
 
-    Returns ``(messages, truncated_count, truncated_by_tool)`` for C3 audit.
+    最新 read_file 可使用更大 ``latest_read_budget``；pinned 短结果与
+    writing_section_extract 章节不截断。
+
+    参数:
+        messages: 对话历史。
+        char_budget: 覆盖默认字符上限；None 用 settings。
+        preserve_short: True 时跳过 pinned 短 JSON。
+        latest_read_budget: 覆盖最新 read 的字符上限。
+
+    返回:
+        ``(messages, truncated_count, truncated_by_tool)``，后者供 C3 审计。
     """
     default_budget, read_budget, _ = _budget_limits()
     if char_budget is not None:
@@ -931,6 +1120,7 @@ def _apply_tool_result_budget(
 
 
 def _preserve_writing_section_extract(text: str) -> bool:
+    """docs/24：章节 extract 标记的结果不参与 budget 截断。"""
     return (
         '"writing_section_extract": true' in text
         or '"writing_section_extract":true' in text
@@ -938,6 +1128,7 @@ def _preserve_writing_section_extract(text: str) -> bool:
 
 
 def _tool_use_name_by_id(messages: list[dict[str, Any]]) -> dict[str, str]:
+    """扫描 assistant 消息，建立 tool_use id → 工具名映射。"""
     mapping: dict[str, str] = {}
     for msg in messages:
         if msg.get("role") != "assistant":
@@ -953,7 +1144,7 @@ def _tool_use_name_by_id(messages: list[dict[str, Any]]) -> dict[str, str]:
 
 
 def _read_paths_in_messages(messages: list[dict[str, Any]]) -> set[str]:
-    """Collect normalized read_file paths whose tool_result still has real body."""
+    """收集仍含真实 read_file 正文（未 _folded_read）的规范化路径集合。"""
     from app.engine.read_registry import normalize_read_path
 
     name_by_id = _tool_use_name_by_id(messages)
@@ -986,6 +1177,7 @@ def _read_paths_in_messages(messages: list[dict[str, Any]]) -> set[str]:
 def _read_paths_missing_after(
     before: list[dict[str, Any]], after: list[dict[str, Any]]
 ) -> set[str]:
+    """压缩前后 diff：哪些 read 路径的正文离开了可见窗口（供 C1 evicted_paths）。"""
     return _read_paths_in_messages(before) - _read_paths_in_messages(after)
 
 
@@ -995,10 +1187,15 @@ def _fold_stale_read_file_results(
     keep_last_per_path: int = 1,
     min_content_chars: int = 400,
 ) -> tuple[list[dict[str, Any]], int, set[str]]:
-    """docs/34 RC4: keep only the latest read_file body per path in the assemble view.
+    """docs/34 RC4：每路径仅保留最新 read_file 完整正文，旧读折叠为 stub。
 
-    Returns ``(messages, folded_count, folded_paths)`` — folded_paths feed C1
-    re-read exemptions.
+    参数:
+        messages: 对话历史。
+        keep_last_per_path: 每路径保留完整 body 的条数（默认 1）。
+        min_content_chars: 低于此长度的 read 不参与折叠。
+
+    返回:
+        ``(messages, folded_count, folded_paths)``；folded_paths 写入 TurnState.evicted_paths。
     """
     from app.engine.read_registry import normalize_read_path, omit_read_file_content_payload
 
@@ -1081,16 +1278,17 @@ def _fold_stale_read_file_results(
 
 
 def _message_has_tool_use(msg: dict[str, Any]) -> bool:
+    """assistant 消息是否含至少一个 tool_use block。"""
     return msg.get("role") == "assistant" and any(
         block.get("type") == "tool_use" for block in msg.get("content", [])
     )
 
 
 def _microcompact_tool_results(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
-    """Fold runs of consecutive tool results into a single pointer message.
+    """将连续多条 tool 消息折叠为一条 microcompact 指针（保留 assistant/tool 配对）。
 
-    Skips runs that immediately follow an assistant tool_use block — OpenAI-compatible
-    providers (e.g. DeepSeek) require each tool_call_id to have a matching tool message.
+    紧接 assistant tool_use 之后的 tool 运行不折叠——OpenAI 兼容 provider 要求
+    每个 tool_call_id 有对应 tool 消息。
     """
     if len(messages) < 3:
         return messages, 0
@@ -1145,10 +1343,16 @@ def _pop_oldest_message_group(
     *,
     protect_from: int | None = None,
 ) -> bool:
-    """Drop the oldest coherent prefix without leaving orphan tool messages.
+    """丢弃最旧一组连贯消息，避免 orphan tool 消息。
 
-    When ``protect_from`` is set (C-1 snip floor), only groups entirely within
-    ``messages[:protect_from]`` may be removed.
+    ``protect_from`` 为 C-1 snip 下界时，仅允许删除 ``messages[:protect_from]`` 内的组。
+
+    参数:
+        messages: 原地修改的列表。
+        protect_from: 受保护尾部起始下标；None 表示无保护。
+
+    返回:
+        是否成功删除一组。
     """
     limit = len(messages) if protect_from is None else max(0, min(protect_from, len(messages)))
     if limit <= 0:
@@ -1191,7 +1395,7 @@ def _pop_oldest_message_group(
 
 
 def _align_tail_start(messages: list[dict[str, Any]], tail_start: int) -> int:
-    """Walk backward so the tail does not start inside a tool-result run."""
+    """回退 tail 起点，避免从 tool 结果 run 中间切开。"""
     index = max(0, min(tail_start, len(messages) - 1))
     while index > 0 and messages[index].get("role") == "tool":
         index -= 1
@@ -1201,6 +1405,7 @@ def _align_tail_start(messages: list[dict[str, Any]], tail_start: int) -> int:
 
 
 def _tail_start_for_token_budget(messages: list[dict[str, Any]], hot_budget: int) -> int:
+    """从尾部向前累计 token 直到 hot_budget，得到 collapse 热区起点。"""
     total = 0
     index = len(messages)
     while index > 0 and total < hot_budget:
@@ -1218,7 +1423,10 @@ def _collapse_tool_history(
     policy: CompactionPolicy,
     volatile_context: str = "",
 ) -> list[dict[str, Any]]:
-    """Fold older messages into a pointer block without breaking assistant/tool pairs."""
+    """将较旧中间段折叠为单条 pointer user 消息，保留 head + 热区 tail。
+
+    不破坏 assistant/tool 配对；受 ``_protected_tail_start`` 约束不折叠当前指令周期。
+    """
     fill_ratio, window = _window_fill(
         messages=messages,
         system_prompt=system_prompt,
@@ -1266,7 +1474,14 @@ def _collapse_tool_history(
 
 
 def _summarize_messages(messages: list[dict[str, Any]]) -> dict[str, Any]:
-    """Deterministic autocompact with structured fields (HM3: incremental merge)."""
+    """确定性 autocompact：结构化摘要合并为单条 user 消息（HM3 增量 merge）。
+
+    参数:
+        messages: 待压缩历史。
+
+    返回:
+        含 ``[autocompact]`` 正文的 user message dict。
+    """
     from app.context.summary import incremental_summary_from_messages
     from app.settings import settings
 

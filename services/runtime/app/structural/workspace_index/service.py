@@ -1,9 +1,5 @@
-"""Facade: status / lazy load / cold-start enqueue / symbol lookup (§2–§3 / §7.2).
+"""AST 索引服务门面：cold/dirty/query/locate。"""
 
-A6: product path enqueues to ``work_ast_index_jobs``; remote ``agent-ast-indexer``
-runs walk/parse. Runtime never runs full-repo cold start in the Turn process
-unless ``workspace_ast_inline=true`` (tests / emergency only).
-"""
 
 from __future__ import annotations
 
@@ -38,6 +34,7 @@ _ephemeral_roots: dict[UUID, Path] = {}
 
 
 class AstIndexService:
+    """作用：AST 索引门面：ensure/query/locate/status。"""
     def __init__(self, store: AstIndexStore | None = None) -> None:
         self.store = store or AstIndexStore()
         self.registry = get_projection_registry()
@@ -694,6 +691,7 @@ _service: AstIndexService | None = None
 
 
 def get_ast_index_service() -> AstIndexService:
+    """作用：进程级 AstIndexService 单例。"""
     global _service
     if _service is None:
         _service = AstIndexService()

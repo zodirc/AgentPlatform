@@ -1,3 +1,6 @@
+/**
+ * 终端用户认证上下文：cookie 会话、登录/注册/登出与切换账号。
+ */
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   createContext,
@@ -17,10 +20,11 @@ import { rememberUsername } from "./recentAccounts";
 import { applyTheme, readStoredTheme } from "../theme/theme";
 import { clearStoredSessionId } from "../workbench/sessionUrl";
 
+/** EndUserAuthContext 对外形状。 */
 type EndUserAuthValue = {
   user: EndUser | null;
   isLoading: boolean;
-  /** True after explicit "切换账号" until next successful login. */
+  /** 用户点击「切换账号」后为 true，直至下次登录成功。 */
   switchingAccount: boolean;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
@@ -38,6 +42,7 @@ const EndUserAuthContext = createContext<EndUserAuthValue>({
   switchAccount: async () => undefined,
 });
 
+/** 包裹应用树，维护 /auth/me 查询与登录态 mutation。 */
 export function EndUserAuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [switchingAccount, setSwitchingAccount] = useState(false);
@@ -116,6 +121,10 @@ export function EndUserAuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * 读取当前终端用户与认证操作。
+ * @returns user、isLoading、login/register/logout/switchAccount
+ */
 export function useEndUserAuth(): EndUserAuthValue {
   return useContext(EndUserAuthContext);
 }

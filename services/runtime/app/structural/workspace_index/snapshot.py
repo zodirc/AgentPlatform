@@ -1,7 +1,5 @@
-"""Ephemeral projection snapshot for cross-process eval (A6 §7.2 memory-only).
+"""Work 级 AST 快照读写（加速 cold start）。"""
 
-Indexer writes; runtime loads. Not used for product DB-backed works.
-"""
 
 from __future__ import annotations
 
@@ -21,6 +19,7 @@ _SNAPSHOT_REL = Path(".agent") / "ast_index_snapshot.json"
 
 
 def snapshot_path(work_root: Path | str) -> Path:
+    """作用：Work AST 快照文件路径。"""
     return Path(work_root).resolve() / _SNAPSHOT_REL
 
 
@@ -30,7 +29,7 @@ def write_snapshot(
     meta: IndexMeta,
     entries: list[FileEntry],
 ) -> Path:
-    """Atomic write of meta + file entries under work_root/.agent/."""
+    """作用：写入冷启动快照。"""
     root = Path(work_root).resolve()
     path = snapshot_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +69,7 @@ def write_snapshot(
 def read_snapshot(
     work_root: Path | str,
 ) -> tuple[IndexMeta, list[FileEntry]] | None:
+    """作用：读取快照加速索引。"""
     path = snapshot_path(work_root)
     if not path.is_file():
         return None
@@ -113,6 +113,7 @@ def read_snapshot(
 
 
 def drop_snapshot(work_root: Path | str) -> None:
+    """作用：删除快照文件。"""
     path = snapshot_path(work_root)
     try:
         if path.is_file():

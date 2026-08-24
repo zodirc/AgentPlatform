@@ -1,4 +1,4 @@
-"""Internal HTTP for the Ops writing-signal lab (not model-facing)."""
+"""Ops writing lab HTTP。"""
 
 from __future__ import annotations
 
@@ -16,11 +16,22 @@ router = APIRouter(prefix="/internal/writing", tags=["writing-lab"])
 
 
 def verify_internal_token(x_internal_token: str = Header(...)) -> None:
+    """校验 internal token。
+    
+    参数:
+        x_internal_token。
+    
+    返回:
+        None。"""
     if not hmac.compare_digest(x_internal_token, settings.internal_service_token):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid internal token")
 
 
 class ScoreBody(BaseModel):
+    """POST /score 请求体。
+    
+    参数:
+        text/fragment/slug/prefs。"""
     text: str | None = Field(default=None, max_length=50_000)
     fragment: str | None = None
     slug: str | None = Field(default=None, max_length=200)
@@ -29,6 +40,13 @@ class ScoreBody(BaseModel):
 
 @router.get("/exemplars")
 async def list_writing_exemplars(_: None = Depends(verify_internal_token)) -> dict[str, Any]:
+    """GET exemplars。
+
+    参数:
+        无。
+
+    返回:
+        dict。"""
     items = [exemplar_lab_payload(sample) for sample in iter_platform_exemplars()]
     from app.writing.signals.prefs_store import platform_prefs_payload
 
@@ -44,6 +62,13 @@ async def score_writing_text(
     body: ScoreBody,
     _: None = Depends(verify_internal_token),
 ) -> dict[str, Any]:
+    """POST score。
+    
+    参数:
+        body。
+    
+    返回:
+        dict。"""
     try:
         return await score_writing_lab(
             text=body.text,

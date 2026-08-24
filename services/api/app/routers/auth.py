@@ -1,3 +1,9 @@
+"""终端用户认证路由：注册、登录、登出、当前用户与改密。
+
+Cookie（HttpOnly）承载 JWT；与 ``require_end_user`` / ``require_session_actor`` 配合
+保护会话与 turn API。
+"""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -14,16 +20,29 @@ router = APIRouter(tags=["auth"], prefix="/auth")
 
 
 class AuthCredentials(BaseModel):
+    """注册/登录用户名密码。"""
+
     username: str = Field(min_length=1, max_length=64)
     password: str = Field(min_length=1, max_length=256)
 
 
 class UserPublic(BaseModel):
+    """对外公开的用户信息（不含密码版本等内部字段）。"""
+
     id: str
     username: str
 
 
 def _set_auth_cookie(response: Response, token: str) -> None:
+    """在响应中设置认证 Cookie。
+
+    参数:
+        response: FastAPI Response。
+        token: JWT 字符串。
+
+    返回:
+        None；``secure`` 由 ``end_user_cookie_secure`` 控制（HTTPS 生产环境应为 true）。
+    """
     response.set_cookie(
         key=COOKIE_NAME,
         value=token,
@@ -36,15 +55,41 @@ def _set_auth_cookie(response: Response, token: str) -> None:
 
 
 def _clear_auth_cookie(response: Response) -> None:
+    """清除认证 Cookie（登出）。
+
+    参数:
+        response: FastAPI Response。
+
+    返回:
+        None。
+    """
     response.delete_cookie(key=COOKIE_NAME, path="/")
 
 
 def _public(user: EndUser) -> UserPublic:
+    """EndUser → 对外 DTO。
+
+    参数:
+        user: 内部用户模型。
+
+    返回:
+        UserPublic。
+    """
     return UserPublic(id=str(user.id), username=user.username)
 
 
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def register(body: AuthCredentials, request: Request, response: Response):
+    """注册新终端用户并自动登录（Set-Cookie）。
+
+    参数:
+        body: 用户名与密码。
+        request: 用于注册速率限制（B15）。
+        response: 写入 JWT Cookie。
+
+    返回:
+        UserPublic（201）；用户名占用 409，校验失败 400。
+    """
     enforce(register_limiter, request)  # B15
     try:
         user = await user_svc.create_user(body.username, body.password)
@@ -60,6 +105,16 @@ async def register(body: AuthCredentials, request: Request, response: Response):
 
 @router.post("/login", response_model=UserPublic)
 async def login(body: AuthCredentials, request: Request, response: Response):
+    """验证凭据并签发 JWT Cookie；登录时确保存在默认 Work。
+
+    参数:
+        body: 用户名与密码。
+        request: 登录速率限制。
+        response: Set-Cookie。
+
+    返回:
+        UserPublic；凭据错误 401。
+    """
     enforce(login_limiter, request)  # B15
     user = await user_svc.authenticate(body.username, body.password)
     if user is None:
@@ -76,15 +131,33 @@ async def login(body: AuthCredentials, request: Request, response: Response):
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(response: Response) -> None:
+    """登出：清除认证 Cookie。
+
+    参数:
+        response: 用于 delete_cookie。
+
+    返回:
+        None（204）。
+    """
     _clear_auth_cookie(response)
 
 
 @router.get("/me", response_model=UserPublic)
 async def me(user: EndUser = Depends(require_end_user)):
+    """返回当前已登录用户公开信息。
+
+    参数:
+        user: ``require_end_user`` 依赖注入。
+
+    返回:
+        UserPublic。
+    """
     return _public(user)
 
 
 class ChangePasswordBody(BaseModel):
+    """修改密码请求体。"""
+
     current_password: str = Field(min_length=1, max_length=256)
     new_password: str = Field(min_length=6, max_length=256)
 
@@ -95,6 +168,16 @@ async def change_password(
     response: Response,
     user: EndUser = Depends(require_end_user),
 ) -> None:
+    """修改密码并使旧 token 失效；为当前会话重新签发 Cookie。
+
+    参数:
+        body: 当前密码与新密码（≥6 字符）。
+        response: 成功后刷新 JWT Cookie（B16：password_version 递增）。
+        user: 已登录用户。
+
+    返回:
+        None（204）；当前密码错误 401。
+    """
     try:
         await user_svc.change_password(
             user.id,

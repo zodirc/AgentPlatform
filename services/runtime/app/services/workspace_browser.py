@@ -1,4 +1,7 @@
+"""Workbench 文件浏览/读写/sources 上传与索引 job 状态。"""
+
 from __future__ import annotations
+
 
 import logging
 import re
@@ -51,6 +54,7 @@ _ensure_progress_sink()
 
 
 def safe_source_filename(name: str) -> str:
+    """作用：校验 sources 上传文件名。"""
     raw = (name or "").strip()
     if not raw or "/" in raw or "\\" in raw or raw in {".", ".."}:
         raise ValueError("invalid filename")
@@ -63,11 +67,12 @@ def safe_source_filename(name: str) -> str:
 
 
 def source_rel_path(filename: str) -> str:
+    """作用：文件名 → sources/ 相对路径。"""
     return f"sources/{safe_source_filename(filename)}"
 
 
 async def list_workspace_entries(path: str = ".") -> dict:
-    """Same visibility as agent ``list_dir`` (hides ``.agent/`` + cards/pending)."""
+    """作用：与 agent list_dir 相同可见性的列目录。"""
     return await list_dir(path)
 
 
@@ -94,7 +99,7 @@ def _normalize_rel_path(path: str, *, allow_root: bool = False) -> str:
 
 
 def safe_entry_name(name: str) -> str:
-    """Single path segment for create/rename (files or folders)."""
+    """作用：校验单段 entry 名。"""
     raw = (name or "").strip()
     if not raw or "/" in raw or "\\" in raw or raw in {".", ".."}:
         raise ValueError("invalid name")
@@ -107,7 +112,7 @@ def safe_entry_name(name: str) -> str:
 
 
 async def read_workspace_file(path: str) -> dict:
-    """Human/UI file preview — full text up to ``MAX_UI_READ_BYTES`` (not agent 32k)."""
+    """作用：UI 预览读取（最大 MAX_UI_READ_BYTES）。"""
     from app.tools.core.tools import _resolve_path
 
     rel = _normalize_rel_path(path)
@@ -135,7 +140,7 @@ async def read_workspace_file(path: str) -> dict:
 
 
 async def save_workspace_file(*, path: str, content: str) -> dict:
-    """Workbench save / create — any non-seed, non-harness workspace path."""
+    """作用：Workbench 保存任意非 seed/harness 路径。"""
     from app.tools.core.tools import _assert_not_seed_corpus
 
     normalized = _normalize_rel_path(path)
@@ -152,7 +157,7 @@ async def save_workspace_file(*, path: str, content: str) -> dict:
 
 
 async def write_workspace_file(*, path: str, content: str) -> dict:
-    """Sources upload helper — only ``sources/`` paths (legacy + upload route)."""
+    """作用：仅 sources/ 路径 Web 上传写入。"""
     normalized = path.strip().lstrip("/")
     if not normalized.startswith("sources/"):
         raise ValueError("only sources/ paths are writable from web upload")
@@ -167,7 +172,7 @@ async def write_workspace_file(*, path: str, content: str) -> dict:
 
 
 async def mkdir_workspace_path(path: str) -> dict[str, Any]:
-    """Create a directory (parents included)."""
+    """作用：创建目录（含父级）。"""
     from app.tools.core.tools import _assert_not_seed_corpus, _resolve_path
 
     normalized = _normalize_rel_path(path)
@@ -197,7 +202,7 @@ async def rename_workspace_path(
     new_path: str,
     overwrite: bool = False,
 ) -> dict[str, Any]:
-    """Rename or move a file or directory within the work root."""
+    """作用：重命名/移动并通知 AST dirty。"""
     from app.tools.core.tools import _assert_not_seed_corpus, _resolve_path
 
     src_rel = _normalize_rel_path(path)
@@ -285,7 +290,7 @@ def _filter_nested_delete_paths(paths: list[str]) -> list[str]:
 
 
 async def delete_workspace_paths(paths: list[str]) -> dict[str, Any]:
-    """Delete workspace files or directories (recursive). Web manual cleanup only."""
+    """作用：批量删除文件或目录。"""
     from app.tools.core.tools import _resolve_path
 
     if not paths:
@@ -361,7 +366,7 @@ def _mark_index_building(path: str | None = None) -> None:
 
 
 def mark_sources_index_building(*, path: str | None = None) -> None:
-    """Public alias for HTTP routes that queue a background sync."""
+    """作用：标记 sources 索引构建中。"""
     _mark_index_building(path)
 
 
@@ -388,12 +393,7 @@ def _mark_index_error(message: str, *, path: str | None = None) -> None:
 
 
 def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
-    """Return current index job state plus whether ``path`` is present in the store.
-
-    IX3: this endpoint is the **ingestion plane** only. ``ready`` / ``path_current``
-    mean the file is projected into the index — never that retrieval quality passed
-    prod-bench or workbench hard queries (docs/15).
-    """
+    """作用：返回索引 job 状态（ingestion plane，IX3）。"""
     import json
 
     from app.retrieval.sync_progress import read_sync_progress
@@ -508,11 +508,7 @@ def sources_index_status(*, path: str | None = None) -> dict[str, Any]:
 
 
 async def upload_source_file(*, filename: str, content: str, sync_index: bool = False) -> dict:
-    """Write ``sources/<filename>``. Index sync is optional and usually deferred.
-
-    The HTTP upload path returns after the file write so api→runtime does not
-    time out; callers should poll ``sources_index_status`` for completion.
-    """
+    """作用：写入 sources 并可选触发索引。"""
     rel = source_rel_path(filename)
     written = await write_workspace_file(path=rel, content=content)
     if not sync_index:
@@ -531,7 +527,7 @@ async def upload_source_file(*, filename: str, content: str, sync_index: bool = 
 
 
 async def sync_sources_index_safe(*, path: str | None = None) -> dict:
-    """Best-effort vector index rebuild after an upload (for BackgroundTasks)."""
+    """作用：BackgroundTasks 用 best-effort 索引重建。"""
     from app.tools.core.tools import sync_sources_index
 
     _mark_index_building(path)

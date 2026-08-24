@@ -1,8 +1,5 @@
-"""Parse pytest / unittest stdout into a compact test_summary (Wave 4 W10).
 
-Omit the field when format is uncertain — never invent failures.
-Quality-uplift C-1: parse from untruncated streams; accept -q / short footers.
-"""
+"""run_tests/run_command 输出解析为结构化 test summary。"""
 
 from __future__ import annotations
 
@@ -64,6 +61,10 @@ _STDERR_FULL_KEY = "_stderr_full"
 
 
 def is_testish_command(command: str | None) -> bool:
+    """作用：is_testish_command 公开 API。
+
+参数：
+    ``command``"""
     return bool(command) and _TESTISH_CMD_RE.search(command or "") is not None
 
 
@@ -82,7 +83,10 @@ def parse_test_summary(
     stderr: str = "",
     max_failures: int = _FIRST_FAILURES_MAX,
 ) -> dict[str, Any] | None:
-    """Return compact summary or None if stdout is not a recognized test report."""
+    """作用：parse_test_summary 公开 API。
+
+参数：
+    ``stdout``"""
     text = "\n".join(p for p in (stdout or "", stderr or "") if p)
     text = _strip_ansi(text)
     if not text.strip():
@@ -95,7 +99,10 @@ def parse_test_summary(
 
 
 def format_failure_feed(summary: dict[str, Any] | None) -> str | None:
-    """Fixed subsection for the first failing test (C-1c) — ≤400 chars of detail."""
+    """作用：format_failure_feed 公开 API。
+
+参数：
+    ``summary``"""
     if not isinstance(summary, dict):
         return None
     fails = summary.get("first_failures")
@@ -140,7 +147,10 @@ def _attach_parsed(result: dict[str, Any], summary: dict[str, Any] | None) -> di
 
 
 def attach_test_summary_for_run_tests(result: dict[str, Any]) -> dict[str, Any]:
-    """Always attempt parse for run_tests results (command is inherently testish)."""
+    """作用：attach_test_summary_for_run_tests 公开 API。
+
+参数：
+    ``result``"""
     stdout, stderr = _streams_for_parse(result)
     return _attach_parsed(result, parse_test_summary(stdout, stderr=stderr))
 
@@ -150,6 +160,10 @@ def attach_test_summary_for_run_command(
     *,
     command: str,
 ) -> dict[str, Any]:
+    """作用：attach_test_summary_for_run_command 公开 API。
+
+参数：
+    ``result``"""
     if not is_testish_command(command):
         return _drop_full_streams(result)
     stdout, stderr = _streams_for_parse(result)

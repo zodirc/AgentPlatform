@@ -1,4 +1,5 @@
-"""Symbol-query heuristics for Locate/Impact fusion (coding structural lane)."""
+
+"""符号查询启发式：is_symbol_query、edit 后抽取符号名。"""
 
 from __future__ import annotations
 
@@ -71,7 +72,10 @@ _SKIP_IDENTS = frozenset(
 
 
 def is_symbol_query(text: str) -> bool:
-    """True when the whole string is a symbol name (not an error sentence / regex)."""
+    """作用：is_symbol_query 公开 API。
+
+参数：
+    ``text``"""
     q = (text or "").strip()
     if not q or len(q) > 128:
         return False
@@ -88,7 +92,10 @@ _NON_DEF_BARE = frozenset({"self", "cls", "args", "kwargs", "msg", "exc", "err"}
 
 
 def is_non_definition_query(text: str) -> bool:
-    """P16: dotted package path or parameter-like name — defs-only index cannot answer."""
+    """作用：is_non_definition_query 公开 API。
+
+参数：
+    ``text``"""
     q = (text or "").strip()
     if not is_symbol_query(q):
         return False
@@ -98,7 +105,10 @@ def is_non_definition_query(text: str) -> bool:
 
 
 def extract_symbols_from_edit(old_text: str, new_text: str, *, limit: int = 3) -> list[str]:
-    """Pick primary symbol(s) from a surgical edit span for Impact (find_references)."""
+    """作用：extract_symbols_from_edit 公开 API。
+
+参数：
+    ``old_text``、``new_text``"""
     ordered: list[str] = []
     seen: set[str] = set()
 

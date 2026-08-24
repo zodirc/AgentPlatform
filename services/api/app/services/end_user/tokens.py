@@ -1,3 +1,8 @@
+"""终端用户 HMAC 会话 token（Cookie / Bearer）。
+
+无 JWT 依赖：payload base64url + HMAC-SHA256；含 ``pv`` 密码版本用于 B16 改密失效。
+"""
+
 from __future__ import annotations
 
 import base64
@@ -24,7 +29,14 @@ def _b64url_decode(value: str) -> bytes:
 
 
 def password_token_version(password_hash: str) -> str:
-    """Derived version embedded in tokens; changes whenever the hash does (B16)."""
+    """从密码哈希派生 token 版本号（改密即变，B16）。
+
+    参数:
+        password_hash: DB 存储的哈希串。
+
+    返回:
+        12 字符 hex 前缀。
+    """
     return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:12]
 
 
@@ -35,6 +47,17 @@ def issue_token(
     password_version: str = "",
     ttl_seconds: int = TOKEN_TTL_SECONDS,
 ) -> str:
+    """签发终端用户会话 token。
+
+    参数:
+        user_id: 用户 UUID。
+        username: 用户名（写入 payload）。
+        password_version: ``password_token_version`` 结果。
+        ttl_seconds: 有效秒数（默认 30 天）。
+
+    返回:
+        ``body.signature`` 格式 token 字符串。
+    """
     payload = {
         "sub": str(user_id),
         "username": username,
@@ -53,6 +76,14 @@ def issue_token(
 
 
 def verify_token(token: str) -> dict[str, Any] | None:
+    """验证 token 签名、exp 与必要字段。
+
+    参数:
+        token: Cookie 或 Authorization Bearer 值。
+
+    返回:
+        解析后的 payload dict；无效/过期时为 None。
+    """
     try:
         body, sig_b64 = token.split(".", 1)
     except ValueError:

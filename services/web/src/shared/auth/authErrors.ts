@@ -1,5 +1,14 @@
+/**
+ * 登录/注册失败时的用户友好中文提示。
+ */
 import { ApiHttpError } from "../api/httpErrors";
 
+/**
+ * 将 API/网络错误映射为面向用户的认证失败文案。
+ * @param err 捕获的异常
+ * @param mode 当前表单模式：登录或注册
+ * @returns 可直接展示的错误字符串
+ */
 export function messageForAuthFailure(
   err: unknown,
   mode: "login" | "register",

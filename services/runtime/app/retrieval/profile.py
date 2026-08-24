@@ -1,8 +1,7 @@
-"""Retrieval hybrid profiles (docs/15 §9 RQ1e).
+"""混合检索配置档（RAG RRF 权重与两级召回旋钮）。
 
-Defaults match pre-RQ1e behavior (equal RRF lanes, doc_boost=0.35).
-``vector_heavy`` is for large same-domain corpora where BM25 drifts.
-Tune per deployment — there is no universal mix.
+从 settings 解析 ``RetrievalProfile``；``vector_heavy`` 等同域大库偏向量 lane。
+在 RAG 链路中的位置：``search_hybrid`` 读取 rrf_k/weights/two_level 参数。
 """
 
 from __future__ import annotations
@@ -14,6 +13,7 @@ from app.settings import settings
 
 @dataclass(frozen=True)
 class RetrievalProfile:
+    """一次 hybrid 检索使用的 RRF/两级/doc_boost 参数快照。"""
     name: str
     rrf_k: int
     vector_weight: float
@@ -25,7 +25,7 @@ class RetrievalProfile:
 
 
 def active_retrieval_profile() -> RetrievalProfile:
-    """Resolve the active profile from settings (query path; no LLM)."""
+    """从 settings 解析当前 profile（查询路径，无 LLM）。"""
     name = (settings.retrieval_profile or "default").strip().lower() or "default"
     rrf_k = max(1, int(settings.retrieval_rrf_k))
     two_level = bool(settings.retrieval_two_level_enabled)

@@ -1,3 +1,11 @@
+"""子 Agent（delegate）运行器：嵌套 AgentEngine 与工具子集调度。
+
+父 Turn 通过 ``delegate`` 工具 spawn 专注子 agent（researcher/drafter/explore 等）。
+本模块负责：深度限制、Profile 白名单、工具解析、prompt 组装、事件转发与产物引用解析。
+子 agent 共享父 Turn 的 step 预算；嵌套写操作强制 ``requires_approval=False``，
+避免子层 approval 与父层 ``pending_approval`` 状态冲突。
+"""
+
 from __future__ import annotations
 
 import re
@@ -85,6 +93,18 @@ _SUPPRESSED_SUB_EVENTS = frozenset(
 
 
 def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> frozenset[str]:
+    """解析当前 scenario 允许的 subagent 类型集合。
+
+    参数:
+        scenario_id: 场景 ID，仅用于错误信息。
+        profile_types: Profile YAML 中的 ``subagent_types`` 列表。
+
+    返回:
+        允许的类型名 frozenset。
+
+    说明:
+        空列表直接 ``ValueError``——不再保留硬编码默认，必须由 profiles/*.yaml 配置。
+    """
     if profile_types:
         return frozenset(profile_types)
     raise ValueError(
@@ -94,6 +114,20 @@ def _allowed_subagent_types(scenario_id: str, profile_types: list[str]) -> froze
 
 
 def _resolve_sub_tools(parent_tools: list[ToolSpec], agent_type: str) -> list[ToolSpec]:
+    """为指定 subagent 类型解析可用 ToolSpec 列表。
+
+    参数:
+        parent_tools: 父 Profile 已挂载的工具规格。
+        agent_type: 子 agent 类型键（见 ``SUBAGENT_TOOL_NAMES``）。
+
+    返回:
+        已强制 ``requires_approval=False`` 的工具列表。
+
+    说明:
+        - ``goto_definition``/``find_references`` 仅当父 Profile 已包含时才注入，不从全局 registry 偷渡。
+        - 其它工具优先父列表，缺失时回退 ``build_registry()`` 全局查找。
+        - 嵌套 worker 的 approval 归属父 Turn；子层 write 若仍要 approval 会导致父层 summary 卡在 waiting_approval。
+    """
     by_name = {spec.name: spec for spec in parent_tools}
     registry = None
     specs: list[ToolSpec] = []
@@ -131,6 +165,21 @@ async def run_delegate(
     run_id: UUID | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
+    """执行一次子 agent 委托：spawn 嵌套 AgentEngine 并返回摘要。
+
+    参数:
+        task: 子 agent 要完成的具体任务描述。
+        agent_type: 子 agent 类型，须在 scenario Profile 的 ``subagent_types`` 内。
+        context: 可选附加上下文（截断至 2000 字符；大材料应走 ``context_refs``/``paths``）。
+        context_refs: 建议子 agent 优先 ``read_file`` 的路径指针列表。
+        paths: 与 ``context_refs`` 合并归一化的路径列表（兼容旧参数名）。
+        turn_id: 父 Turn ID（必填）。
+        run_id: 父 Run ID（必填）。
+
+    返回:
+        含 ``subagent_id``/``agent_type``/``summary``/``artifact_refs``/``status`` 的 dict。
+        ``status`` 为 ``completed``/``cancelled``/``failed``；深度超限、类型不允许、无工具等亦返回 ``failed``。
+    """
     ctx = get_delegate_runtime()
     if ctx is None:
         return {"status": "failed", "error": "delegate runtime not configured"}
@@ -257,7 +306,14 @@ async def run_delegate(
 
 
 def _extract_artifact_refs(text: str) -> list[str]:
-    """Parse `ARTIFACT_REFS: a, b` lines from a sub-agent summary (handoff blackboard)."""
+    """从子 agent 摘要中解析 ``ARTIFACT_REFS: a, b`` 交接行。
+
+    参数:
+        text: 子 agent 最终 summary 文本。
+
+    返回:
+        最多 12 个本地相对路径（跳过 http URL），供父 agent 黑板引用。
+    """
     refs: list[str] = []
     for match in _ARTIFACT_REFS_LINE.finditer(text or ""):
         for part in re.split(r"[,;\n]", match.group(1)):
@@ -272,6 +328,14 @@ def _extract_artifact_refs(text: str) -> list[str]:
 
 
 def _normalize_refs(*groups: list[str] | None) -> list[str]:
+    """合并多组路径引用并去重，上限 12 条。
+
+    参数:
+        *groups: 若干可选路径字符串列表（``None`` 或空列表跳过）。
+
+    返回:
+        去重后的路径列表。
+    """
     out: list[str] = []
     for group in groups:
         if not group:
@@ -293,6 +357,21 @@ def _build_delegate_prompt(
     paths: list[str] | None,
     hot_files: list[str],
 ) -> str:
+    """组装子 agent 用户消息：任务 + 短上下文 + 路径指针块。
+
+    参数:
+        task: 主任务文本。
+        context: 可选粘贴上下文（已在调用方截断策略内处理）。
+        context_refs: 显式上下文文件路径。
+        paths: 与 ``context_refs`` 合并的路径。
+        hot_files: 父 Turn 热文件列表，格式化为 ``[hot_files]`` 块。
+
+    返回:
+        多段用空行拼接的 prompt 字符串。
+
+    说明:
+        大段正文不内联，引导子 agent 用 ``read_file`` 读 ``[context_refs]``/``[hot_files]``。
+    """
     parts = [task.strip()]
     note = context.strip()
     if note:

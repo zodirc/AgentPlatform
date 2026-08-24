@@ -1,4 +1,7 @@
-"""Official-bench runs: filesystem under /repo + optional ops_eval_runs rows."""
+"""Official 基准 run：``/repo`` 文件系统 + 可选 ``ops_eval_runs`` 行。
+
+English: Official-bench runs: filesystem under /repo + optional ops_eval_runs rows.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +30,13 @@ def _candidate_report_roots() -> list[Path]:
 
 
 def reports_root() -> Path | None:
+    """解析 Official 报告根目录（多候选路径，优先已存在或可写 volume）。
+
+    English: Resolve writable official reports root from candidate paths.
+
+    返回:
+        存在的目录，或默认可写 ``/data/ops-official/reports``；均不可用时的末位候选。
+    """
     candidates = _candidate_report_roots()
     for p in candidates:
         if p.is_dir():
@@ -59,6 +69,16 @@ def _load_manifest(run_dir: Path) -> dict[str, Any] | None:
 
 
 def list_fs_runs(*, limit: int = 50) -> list[dict[str, Any]]:
+    """从文件系统 ``reports/runs/*/manifest.json`` 列出 Official run 摘要。
+
+    English: List official runs from filesystem manifests (newest mtime first).
+
+    参数:
+        limit: 最多返回条数。
+
+    返回:
+        摘要 dict 列表（``source=filesystem``）；无 reports 根时 ``[]``。
+    """
     root = reports_root()
     if root is None:
         return []
@@ -187,6 +207,16 @@ def clear_fs_runs_before(before_iso: str) -> int:
 
 
 def get_fs_run(run_id: str) -> dict[str, Any] | None:
+    """加载单个 FS Official run 的 manifest。
+
+    English: Load manifest.json for one run id under reports/runs.
+
+    参数:
+        run_id: run 目录名 / manifest id。
+
+    返回:
+        manifest dict（含 ``report_dir``）；不存在时 ``None``。
+    """
     root = reports_root()
     if root is None:
         return None
@@ -540,6 +570,16 @@ def resolve_thinking_path(
 
 
 def read_report_html(run_id: str) -> str | None:
+    """读取 Official run 的 ``report.html`` 正文。
+
+    English: Read report.html for an Ops aggregate or child bench run id.
+
+    参数:
+        run_id: Ops live id 或 bench child run id。
+
+    返回:
+        HTML 字符串；未生成时 ``None``。
+    """
     root = reports_root()
     if root is None:
         return None

@@ -1,7 +1,4 @@
-"""Split long prose into exemplar-sized windows for scoring.
-
-Short drafts stay one span. Callers never mutate disk.
-"""
+"""长 prose 评分切窗。"""
 
 from __future__ import annotations
 
@@ -19,6 +16,10 @@ REPAIR_MIN_VISIBLE = 800
 
 @dataclass(frozen=True)
 class TextWindow:
+    """文本窗口。
+    
+    参数:
+        start/end/text。"""
     start: int
     end: int
     text: str
@@ -30,6 +31,13 @@ def split_score_windows(
     min_visible: int = REPAIR_MIN_VISIBLE,
     target: int = WINDOW_TARGET_VISIBLE,
 ) -> list[TextWindow]:
+    """切窗。
+    
+    参数:
+        text/min_visible/target。
+    
+    返回:
+        list。"""
     body = text or ""
     if not body:
         return []

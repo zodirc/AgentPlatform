@@ -1,3 +1,8 @@
+"""Ops Golden/CI 评测 HTTP 路由（``/ops/eval``）。
+
+Bearer ``OPS_TEST_SECRET`` 保护；202 异步创建 run，SSE 推送日志与终态。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +27,8 @@ router = APIRouter(
 
 
 class ModelBody(BaseModel):
+    """Eval live 模式临时模型配置（不入库）。"""
+
     provider: str = Field(min_length=1, max_length=64)
     model_name: str = Field(min_length=1, max_length=128)
     api_key: str = Field(min_length=1, max_length=4096)
@@ -30,6 +37,8 @@ class ModelBody(BaseModel):
 
 
 class CreateRunBody(BaseModel):
+    """创建 eval run 请求体。"""
+
     # golden = in-process Golden slice; ci = full CI parity (unit + make gate).
     suite: Literal["golden", "ci"] = "golden"
     mode: Literal["stub", "live", "recorded"] = "stub"
@@ -40,6 +49,7 @@ class CreateRunBody(BaseModel):
 
 @router.get("/meta")
 async def eval_meta() -> dict[str, Any]:
+    """Eval 控制台能力位（restart/proof/ci cases）。"""
     if not ops_eval_enabled():
         raise HTTPException(status_code=404, detail="Not found")
     return {
@@ -71,11 +81,17 @@ async def get_cases(
     phase: str | None = Query(default=None),
     tag: str | None = Query(default=None),
 ) -> dict[str, Any]:
+    """列出 Golden YAML 用例（可选过滤）。"""
     return {"cases": list_cases(scenario=scenario, phase=phase, tag=tag)}
 
 
 @router.post("/runs", status_code=status.HTTP_202_ACCEPTED)
 async def create_run(body: CreateRunBody) -> dict[str, Any]:
+    """启动 golden/ci eval run（后台 asyncio 任务）。
+
+    异常:
+        HTTP 400: 参数非法或 runner 拒绝。
+    """
     try:
         run = await runs_svc.create_run(
             suite=body.suite,
@@ -91,6 +107,7 @@ async def create_run(body: CreateRunBody) -> dict[str, Any]:
 
 @router.post("/runs/{run_id}/stop", status_code=status.HTTP_200_OK)
 async def stop_run(run_id: str) -> dict[str, Any]:
+    """请求取消进行中的 eval run。"""
     try:
         run = await runs_svc.request_stop(run_id)
     except ValueError as exc:
@@ -109,6 +126,7 @@ async def list_runs(
     suite: str | None = Query(default=None),
     q: str | None = Query(default=None, max_length=200),
 ) -> dict[str, Any]:
+    """分页列出历史 eval run（DB + 内存活跃 run）。"""
     rows, total = await runs_svc.list_run_history(
         limit=limit,
         offset=offset,
@@ -122,6 +140,7 @@ async def list_runs(
 
 @router.get("/runs/{run_id}")
 async def get_run(run_id: str) -> dict[str, Any]:
+    """获取单个 run 快照（含 case 结果）。"""
     payload = await runs_svc.get_run_payload(run_id)
     if payload is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -130,6 +149,7 @@ async def get_run(run_id: str) -> dict[str, Any]:
 
 @router.get("/runs/{run_id}/stream")
 async def stream_run(run_id: str) -> StreamingResponse:
+    """SSE 订阅 run 日志；已结束 run 返回单条 ``run_finished`` 事件。"""
     run = runs_svc.get_run(run_id)
     if run is None:
         # Finished runs may only exist in DB — stream a one-shot snapshot.

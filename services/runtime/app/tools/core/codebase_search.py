@@ -1,3 +1,10 @@
+"""代码库 Locate 通道：符号定义解析与词法 fallback。
+
+``search_codebase`` 是 agent 结构面 Locate 入口：符号查询走 AST 索引 + LSP
+``goto_definition``；非符号查询走 escaped 词法扫描。Locate 未完成时
+``locate_incomplete=True``，禁止把词法 hit 冒充成功定义解析。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -11,9 +18,15 @@ from app.tools.core.read_tools import _lexical_scan_sync
 async def _lexical_codebase_hits(
     query: str, path: str = ".", limit: int = 20, **_kwargs: Any
 ) -> dict[str, Any]:
-    """Substring scan (escaped). Used as Locate fallback or non-symbol mode.
+    """词法子串扫描（pattern 经 escape），作 Locate fallback 或非符号模式。
 
-    Runs off the event loop — full-tree scans must not block asyncpg writers.
+    参数:
+        query: 搜索子串。
+        path: 扫描根，默认 ``"."``。
+        limit: 最大 hit 数。
+
+    返回:
+        ``hits``/``match_count``/``truncated``/``summary``；须在 ``to_thread`` 中调用底层扫描。
     """
     root = _resolve_path(path)
     if not root.exists():
@@ -43,7 +56,21 @@ async def _lexical_codebase_hits(
 
 
 async def search_codebase(query: str, path: str = ".", limit: int = 20, **_kwargs: Any) -> dict[str, Any]:
-    """Locate entry: symbol queries must resolve via goto_definition adapters."""
+    """代码库 Locate：符号查询必须经 goto_definition；否则纯词法。
+
+    参数:
+        query: 符号名或搜索串。
+        path: 可选路径 hint（非 ``"."`` 时缩小 AST/LSP 范围）。
+        limit: 词法 fallback 最大条数。
+        **_kwargs: 可选 ``turn_id``。
+
+    返回:
+        符号成功：``definitions``/``mode=symbol``/``locate_incomplete=False``；
+        失败或 miss：可能含 ``hits`` 但 ``locate_incomplete=True`` 与 ``locate_fuse_fail_reason``。
+
+    说明:
+        LSP 基础设施故障时不降级为「成功的 Locate」；词法仅作 incomplete 提示。
+    """
     from app.structural.symbols import is_symbol_query
 
     q = (query or "").strip()

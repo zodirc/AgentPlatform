@@ -1,3 +1,9 @@
+"""Turn 级 WebSocket 实时事件流与客户端工具审批消息。
+
+与 ``TurnEventListener`` + ``iter_turn_events`` 配合推送事件；客户端可发送
+``approve_tool_call`` / ``deny_tool_call`` 转 runtime 命令。
+"""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,6 +26,20 @@ async def handle_turn_websocket(
     since_sequence: int,
     listener: TurnEventListener,
 ) -> None:
+    """处理单 turn WebSocket 连接：回放 + 订阅 + 客户端审批消息。
+
+    参数:
+        websocket: 已 accept 前的 FastAPI WebSocket。
+        turn_id: 订阅的 turn UUID。
+        since_sequence: 回放起始 event sequence（>0 计 reconnect 指标）。
+        listener: 进程内 turn 事件通知器。
+
+    返回:
+        无；断开或终态事件后结束。
+
+    异常:
+        WebSocketDisconnect: 客户端断开（内部捕获）。
+    """
     await websocket.accept()
     if since_sequence > 0:
         metrics.inc("ws_reconnect_total")
@@ -50,6 +70,7 @@ async def _stream_events_to_socket(
     since_sequence: int,
     listener: TurnEventListener,
 ) -> None:
+    """将 ``iter_turn_events`` 产出的事件 JSON 推送到 socket。"""
     async for event in iter_turn_events(
         turn_id, since_sequence, listener, stop_on_pause=False
     ):
@@ -66,6 +87,7 @@ async def _handle_client_message(
     message: dict,
     listener: TurnEventListener,
 ) -> None:
+    """处理客户端工具审批 JSON；非法状态回写 error 事件。"""
     action = message.get("action")
     if action not in {"approve_tool_call", "deny_tool_call"}:
         return

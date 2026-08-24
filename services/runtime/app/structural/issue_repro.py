@@ -1,13 +1,5 @@
-"""Extract issue-behavior repro hints from problem.md (no gold F2P leakage).
 
-General rules (not SWE-instance special cases):
-- Prefer examples written in the issue (fences / quoted commands / REPL / I/O calls).
-- After a code edit, a successful command must cover those examples (asset coverage).
-- If the issue shows a failure signature, a clearing repro must not still emit it.
-- Table/ascii write with format kwargs → require write→read round-trip (same format/kwargs).
-- Explicit case-insensitivity claims → also exercise a casefolded variant of issue samples.
-- Do not invent inputs the issue never showed.
-"""
+"""SWE-bench issue 复现义务：problem 文本解析与命令匹配。"""
 
 from __future__ import annotations
 
@@ -67,6 +59,10 @@ _MIN_ASSET_CHARS = 8
 
 
 def load_problem_text(work_root: Path | str | None) -> str:
+    """作用：load_problem_text 公开 API。
+
+参数：
+    ``work_root``"""
     if work_root is None:
         return ""
     root = Path(work_root)
@@ -81,7 +77,10 @@ def load_problem_text(work_root: Path | str | None) -> str:
 
 
 def extract_issue_repro_hints(problem_text: str) -> dict[str, Any]:
-    """Return hints derived only from issue/problem text."""
+    """作用：extract_issue_repro_hints 公开 API。
+
+参数：
+    ``problem_text``"""
     text = (problem_text or "").strip()
     empty = {
         "commands": [],
@@ -227,7 +226,10 @@ def command_matches_issue_repro(
     *,
     assets: list[str] | None = None,
 ) -> bool:
-    """True when the tool command covers issue sample assets/tokens."""
+    """作用：command_matches_issue_repro 公开 API。
+
+参数：
+    ``command``、``markers``、``required_tokens``"""
     cmd = (command or "").strip()
     if not cmd:
         return False
@@ -258,7 +260,10 @@ def command_matches_roundtrip(
     formats: list[str] | None = None,
     kwargs: list[str] | None = None,
 ) -> bool:
-    """True when command exercises both write and read for the issue format/kwargs."""
+    """作用：command_matches_roundtrip 公开 API。
+
+参数：
+    ``command``"""
     cmd = (command or "").strip()
     if not cmd or _looks_like_repo_pytest(cmd.lower()):
         return False
@@ -284,7 +289,10 @@ def command_matches_casefold(
     casefold_assets: list[str] | None = None,
     base_assets: list[str] | None = None,
 ) -> bool:
-    """True when command covers a casefolded issue sample or applies a fold transform."""
+    """作用：command_matches_casefold 公开 API。
+
+参数：
+    ``command``"""
     cmd = (command or "").strip()
     if not cmd or _looks_like_repo_pytest(cmd.lower()):
         return False
@@ -308,7 +316,10 @@ def obligations_met_for_command(
     command: str,
     hints: dict[str, Any],
 ) -> bool:
-    """Whether one command covers base sample plus optional round-trip / casefold."""
+    """作用：obligations_met_for_command 公开 API。
+
+参数：
+    ``command``、``hints``"""
     markers = list(hints.get("markers") or [])
     required = list(hints.get("required_tokens") or [])
     assets = list(hints.get("assets") or [])
@@ -355,7 +366,10 @@ def obligations_met_for_command(
 
 
 def is_successful_repro_result(result: dict[str, Any]) -> bool:
-    """True only when the repro command actually succeeded."""
+    """作用：is_successful_repro_result 公开 API。
+
+参数：
+    ``result``"""
     if not isinstance(result, dict):
         return False
     status = str(result.get("status") or "").lower()
@@ -383,7 +397,10 @@ def is_clearing_repro_result(
     fail_signals: list[str] | None = None,
     expect_signals: list[str] | None = None,
 ) -> bool:
-    """Successful exit, and issue failure text must not still appear in output."""
+    """作用：is_clearing_repro_result 公开 API。
+
+参数：
+    ``result``"""
     del expect_signals
     if not is_successful_repro_result(result):
         return False
@@ -397,6 +414,10 @@ def is_clearing_repro_result(
 
 
 def is_green_test_result(result: dict[str, Any]) -> bool:
+    """作用：is_green_test_result 公开 API。
+
+参数：
+    ``result``"""
     if not isinstance(result, dict):
         return False
     status = str(result.get("status") or "")

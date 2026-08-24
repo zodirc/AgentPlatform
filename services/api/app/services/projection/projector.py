@@ -1,3 +1,9 @@
+"""Turn 事件 → 物化视图投影：turn_views、runs、approval_views。
+
+自 ``turn_events`` 全量重放构建 timeline、artifacts、interrupt 等客户端读模型；
+``build_turn_view`` 为 HTTP 读路径入口，必要时触发 ``project_turn``。
+"""
+
 from __future__ import annotations
 
 import json
@@ -151,6 +157,17 @@ async def _record_projection_failure(turn_id: UUID, exc: Exception) -> None:
 
 
 async def project_turn(turn_id: UUID) -> None:
+    """对单个 turn 执行投影；失败写 projection_log 并 re-raise。
+
+    参数:
+        turn_id: Turn UUID。
+
+    返回:
+        None。
+
+    抛出:
+        原投影异常（audit/metric 已 best-effort 记录）。
+    """
     try:
         await _project_turn_impl(turn_id)
     except Exception as exc:
@@ -564,7 +581,14 @@ async def _project_turn_impl(turn_id: UUID) -> None:
 
 
 async def turn_view_needs_projection(turn_id: UUID) -> bool:
-    """Return whether persisted events are newer than the materialized view."""
+    """判断持久化事件是否新于 turn_views 已投影 sequence。
+
+    参数:
+        turn_id: Turn UUID。
+
+    返回:
+        True 表示应投影；无视图行或 max(sequence) 更大时为 True。
+    """
     pool = await get_pool()
     view = await pool.fetchrow(
         "SELECT last_event_sequence FROM turn_views WHERE turn_id = $1",
@@ -581,6 +605,16 @@ async def turn_view_needs_projection(turn_id: UUID) -> bool:
 
 
 async def build_turn_view(turn_id: UUID, *, refresh: bool = False) -> TurnView | None:
+    """组装 HTTP ``TurnView``：按需投影后 JOIN runs/approval_views。
+
+    参数:
+        turn_id: Turn UUID。
+        refresh: True 时跳过 needs 检查强制投影。
+
+    返回:
+        TurnView 或 None（turn 不存在）；从 artifacts 拆出 context/token usage，
+        waiting_approval 时构造 interrupt（tool_call_id / tool_name）。
+    """
     if refresh or await turn_view_needs_projection(turn_id):
         await project_turn(turn_id)
 

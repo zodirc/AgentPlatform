@@ -1,11 +1,14 @@
-"""ops_eval + SWE marker: run_command → sweb.eval (tests + env probes).
 
-Peels display-only pipelines (``| tail`` / ``| grep`` / …) so agents that
-truncate for readability still get full test output + test_summary via the
-solve-side image path. Same weld style as pager→read_file (C-2).
+"""``run_command`` 中测试启动与环境探针的重定向。
 
-Also redirects env archaeology (``python --version``, ``python -c "import …"``)
-into the instance image, and rejects ``pip``/``uv install`` in the Work.
+从复合 shell 命令（含 ``cd &&``、管道、stderr 重定向）中剥离首段可执行
+阶段，识别：
+
+- **pytest / 测试命令** → ``run_tests`` 工具（经 ``gate_run_tests_command``）；
+- **SWE 环境探针**（``which python``、``python --version`` 等）→ sweb.eval；
+- **pip/uv install** → 拒绝并提示使用预置镜像。
+
+管道后续段仅允许 head/tail/grep 等视图过滤器。
 """
 
 from __future__ import annotations
@@ -47,7 +50,14 @@ _PY_BIN = frozenset({"python", "python3", "python3.10", "python3.11", "python3.1
 
 
 def split_unquoted_pipes(command: str) -> list[str]:
-    """Split on ``|`` outside single/double quotes (no nested complexity)."""
+    """按未引用的 ``|`` 分割管道阶段（保留引号内竖线）。
+
+    参数:
+        command: 完整 shell 命令行。
+
+    返回:
+        各管道段 stripped 字符串列表；空段已过滤。
+    """
     raw = command or ""
     parts: list[str] = []
     buf: list[str] = []
@@ -80,6 +90,7 @@ def split_unquoted_pipes(command: str) -> list[str]:
 
 
 def _strip_cd_prefix(stage: str) -> str:
+    """去掉无害 ``cd . &&`` / ``cd /workspace &&`` 前缀。"""
     m = _CD_AND.match(stage.strip())
     if not m:
         return stage.strip()
@@ -90,6 +101,7 @@ def _strip_cd_prefix(stage: str) -> str:
 
 
 def _strip_trailing_redirs(stage: str) -> str:
+    """递归剥除段尾 ``2>&1`` / ``&>/dev/null`` 等重定向。"""
     s = stage.strip()
     while True:
         n = _REDIR_TAIL.sub("", s).strip()
@@ -99,6 +111,7 @@ def _strip_trailing_redirs(stage: str) -> str:
 
 
 def _is_view_stage(stage: str) -> bool:
+    """管道后续段是否为允许的视图过滤命令。"""
     s = _strip_trailing_redirs(stage.strip())
     if not s:
         return False
@@ -112,6 +125,7 @@ def _is_view_stage(stage: str) -> bool:
 
 
 def _peel_head(command: str) -> str | None:
+    """提取管道首段（经 cd/重定向清理）；后续段须全为视图过滤器。"""
     raw = (command or "").strip()
     if not raw:
         return None
@@ -128,19 +142,13 @@ def _peel_head(command: str) -> str | None:
 
 
 def extract_test_command_for_redirect(command: str) -> str | None:
-    """Return a gate-able test command, or None if this is not a test run.
+    """若首段为允许的测试启动命令，返回规范化 argv 字符串供 ``run_tests``。
 
-    Examples that redirect::
+    参数:
+        command: 原始 ``run_command`` 输入。
 
-        python -m pytest astropy/io/ascii/tests/test_rst.py -x -q 2>&1 | tail -15
-        pytest -q
-        python -m pytest tests/ -q | grep FAILED
-
-    Examples that do not (handled by env-probe redirect instead)::
-
-        python -c "import pytest"
-        pip install pytest
-        ls | grep pytest
+    返回:
+        空格连接的 argv；不可重定向时为 ``None``。
     """
     head = _peel_head(command)
     if not head:
@@ -152,10 +160,16 @@ def extract_test_command_for_redirect(command: str) -> str | None:
 
 
 def extract_sweb_env_argv(command: str) -> list[str] | None:
-    """Return argv to run inside sweb.eval for env probes / ``python -c``.
+    """若首段为 SWE 环境探针（非测试、非 install），返回 shlex argv。
 
-    Covers version / which / import checks that otherwise spuriously fail in the
-    bare Work tree and trigger pip archaeology.
+    支持 ``which python``、``python --version``、``python -c`` 等；
+    已通过 ``gate_run_tests_command`` 的 pytest 命令排除在外。
+
+    参数:
+        command: 原始 shell 命令行。
+
+    返回:
+        探针 argv 列表；不匹配时 ``None``。
     """
     head = _peel_head(command)
     if not head:
@@ -203,13 +217,29 @@ def extract_sweb_env_argv(command: str) -> list[str] | None:
 
 
 def is_swe_env_install_command(command: str) -> bool:
-    """True for pip/uv install attempts (bare-worktree env archaeology)."""
+    """命令是否含 pip/uv install（SWE 镜像内应拒绝）。
+
+    参数:
+        command: 原始或首段命令行。
+
+    返回:
+        匹配 ``_PIP_INSTALL`` 正则时为 True。
+    """
     return bool(_PIP_INSTALL.search(command or ""))
 
 
 def swe_install_reject_payload(
     command: str, *, probe: dict[str, Any] | None = None
 ) -> dict[str, Any]:
+    """构造 pip install 拒绝时的 ``run_command`` 结果字典。
+
+    参数:
+        command: 被拒绝的原始命令。
+        probe: 可选 solve-env 探针结果，成功时附加到 summary。
+
+    返回:
+        含 ``status=rejected``、``error=swe_eval_use_run_tests`` 的标准 payload。
+    """
     summary = "rejected: use run_tests / sweb.eval (deps are in the instance image)"
     stderr = (
         "SWE solve env is the pre-pulled sweb.eval image — do not pip install "

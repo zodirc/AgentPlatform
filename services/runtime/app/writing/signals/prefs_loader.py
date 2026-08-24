@@ -1,4 +1,4 @@
-"""Load writing_prefs without importing agent_contracts package __init__."""
+"""延迟加载 writing_prefs 契约。"""
 
 from __future__ import annotations
 
@@ -35,4 +35,11 @@ def _module() -> ModuleType:
 
 
 def __getattr__(name: str):
+    """转发 writing_prefs 模块属性。
+    
+    参数:
+        name。
+    
+    返回:
+        Any。"""
     return getattr(_module(), name)

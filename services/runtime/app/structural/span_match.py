@@ -1,4 +1,5 @@
-"""Span mismatch candidates for edit_file failure recovery (Wave 2 W3)."""
+
+"""edit 候选 span 定位：occurrence 与 nearest 候选格式化。"""
 
 from __future__ import annotations
 
@@ -27,7 +28,10 @@ def occurrence_locations(
     path: str,
     limit: int = 20,
 ) -> list[dict[str, Any]]:
-    """All start positions of an exact span (for non-unique old_text)."""
+    """作用：occurrence_locations 公开 API。
+
+参数：
+    ``text``、``span``"""
     if not span:
         return []
     out: list[dict[str, Any]] = []
@@ -58,7 +62,10 @@ def nearest_span_candidates(
     limit: int = 5,
     min_ratio: float = 0.55,
 ) -> list[dict[str, Any]]:
-    """Top-k nearest line hits when old_text is absent (fuzzy / substring)."""
+    """作用：nearest_span_candidates 公开 API。
+
+参数：
+    ``text``、``span``"""
     if not span or not text:
         return []
     file_lines = text.splitlines()
@@ -103,7 +110,10 @@ def nearest_span_candidates(
 
 
 def format_candidate_lines(candidates: list[dict[str, Any]], *, limit: int = 20) -> list[str]:
-    """Compact line protocol: path:line:col kind | snippet."""
+    """作用：format_candidate_lines 公开 API。
+
+参数：
+    ``candidates``"""
     lines: list[str] = []
     for cand in candidates[:limit]:
         path = cand.get("path") or "?"
