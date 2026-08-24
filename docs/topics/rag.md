@@ -59,7 +59,7 @@
 
 ### 3.2 店内 hybrid（并行车道）
 
-对传入的 `fetch_limit`（60/90），每侧 lane 深度大致：
+入口在 runtime `search_hybrid`。对传入的 `fetch_limit`（60/90），每侧 lane 深度大致：
 
 ```text
 top_k = max(fetch_limit × 4, 20)
@@ -67,25 +67,26 @@ top_k = max(fetch_limit × 4, 20)
 → 常见 top_k = 240 或 360
 ```
 
-**Chunk lane（主）：**
+**并行的是两条车道**（预算约 **0.3s**）：Doc 只出 path；Chunk 出带摘录的切块。Chunk **内部** 向量路与词法路是同线程先后召回，再融合——不是第三套并行。两车道各自 `embed(query)` 一次（同模型同维），不是全进程只 embed 一次。
 
-1. 查询向量 **只 embed 一次**（可复用本会话缓存），毫秒～数十毫秒级。  
-2. **HNSW ANN** 走切块表、余弦距离转相似度。Work/seed 过滤后窗口可能变空，会话侧用 relaxed 扫描并抬扫描上限，避免「库里有、窗里没有」。  
-3. **FTS**：标题+正文加权，附加 BM25 extra；查询优先强词 OR（强 token 约 12 个封顶），否则 AND。  
-4. 库内初排后再做 **Okapi BM25** rescore（extra 分×0.35）。  
-5. SQL 层 ACL：seed 或当前 Work（也可只 work / 只 seed，取决于开关）。  
-6. 记下本车道 vector / bm25 命中，供 L1 审计。
+**Chunk lane（主）**
 
-**Doc lane（两级，默认开，与 chunk 并行）：**
+| 步 | 做什么 | 要点 |
+|----|--------|------|
+| 向量 | 查询串 embed 一次 → 切块表 HNSW | 余弦距离；score = `1 − (embedding <=> q)`。seed 与多 Work **共用一张图**，SQL 再滤 `work_id` / `visibility`。过滤后窗可能空：会话侧 `hnsw.iterative_scan=relaxed_order`，扫描上限 `max(20000, limit×500)`，避免「库里有、窗里没有」。**不改**默认 `ef_search=40`。 |
+| 词法 | GIN FTS → 可选 Okapi 重排 | 表达式：标题+正文权 **A**，`bm25_extra` 权 **C**（离线伪查询，不进向量列）。查询优先强词 OR（约 12 token 封顶），否则 AND。rescore 开时先多拉约 `limit×4` 再 Okapi（k1=1.5, b=0.75；extra 分×0.35）。 |
+| 融合 | 两路都有命中 → **RRF** | `k=60`；默认向量/BM25 权重 **1.0 / 1.0**。按 **位次** 累加 `weight/(k+rank+1)`，不是把两路 raw 分相加。仅一路有命中则跳过 RRF。→ **L1 召回池**。 |
+| 精排 | 词法 rerank | 词重叠 / 标题 / 短语位置加在 fusion 分上。交叉编码器默认关。→ **L2**。 |
 
-1. `source_docs` 上 HNSW（chunk embedding **centroid**），最多 **8** 条 path。  
-2. 超时 **0.3s** 或空 → 用更宽 chunk ANN 去重 path 近似；超时则丢 doc、保 chunk。  
+**Doc lane（两级，默认开，与 Chunk 并行）**
 
-**融合：**
+1. `source_docs` 上 HNSW：该 path 下切块向量的 **算术均值**（centroid），最多 **8** 条 path。不是再 embed 一遍摘要。  
+2. 空表 / 失败 / 关表开关 → 用更宽 chunk ANN 按 path 去重近似。  
+3. 超时 **0.3s**：丢 doc、**保 chunk**；chunk 也空则同步再跑一遍 Chunk。
 
-1. 两侧都有命中 → **RRF**（k=60，向量与 BM25 默认等权）→ **L1 召回池**（预览最多 20 行）。  
-2. **词法精排**（池至少 20）：词重叠 / 标题 / 短语加分；交叉编码器默认关。记 **L2 精排序**。  
-3. 切块 path 落在 Doc 赢家上则 **+doc_boost（0.35）**，boosted 优先，再截到本次 fetch_limit（60 或 90）。
+**车道合并（在 L2 之后）**
+
+切块 `path` 落在 Doc 赢家上则 **+doc_boost（0.35）**（`vector_heavy` 档 0.45）。boosted 整段排在未命中 doc 的切块之前，**不删除**仅 chunk 命中的结果。再截到本次 `fetch_limit`（60 或 90）。doc 加分 **不写进** L2 审计快照。
 
 ### 3.3 回到工具层
 
@@ -97,11 +98,14 @@ top_k = max(fetch_limit × 4, 20)
 
 ### 3.4 审计三层（Ops 可读）
 
-| 层 | 含义 |
-|----|------|
-| **L1 召回池** | 融合后、精排前；含车道深度 |
-| **L2 精排** | 词法重排后的顺序 |
-| **L3 进窗** | 真正写入 `tool_result`、下一轮组窗能看见的 hits |
+顺序是 **L1a → L1 → L2 →（doc_boost）→ 工具层过滤 / cover / tier → L3**。
+
+| 层 | 何时 | 含义 |
+|----|------|------|
+| **L1a** | RRF 前 | 向量榜 / BM25 榜分列预览与真实条数 |
+| **L1 召回池** | RRF 后、rerank 前 | 融合池；审计预览最多 20 行，真实深度另记 |
+| **L2 精排** | rerank 后 | 词法（或 none / CE）后的顺序 |
+| **L3 进窗** | 写入 `tool_result` 前 | 模型下一轮组窗真正看见的摘录（常短于索引 excerpt） |
 
 旁路检索完成事件给 Ops 审计；**不进**模型上下文。
 
@@ -120,19 +124,25 @@ top_k = max(fetch_limit × 4, 20)
 
 ### 4.2 同步逐步
 
-1. 比模型名、维数、索引协议、目录 mtime → 增量或强制全量。  
-2. 强制：清空切块/文档投影并重建 HNSW。  
-3. 按标题、代码围栏、段落切；超长再按句/行边界滑窗（**450 token / 重叠 64**，字符回退 1800/200）。这是为了和嵌入截断对齐，避免「切块 4000 字、向量只代表前三分之一」。宽表过长可拆指针，全文仍在磁盘。  
-4. Embed 默认只嵌正文；标题面包屑可进向量、不改存库正文；路径/标签默认不焊进向量前缀。换模型或维数会推动强制重建。  
-5. 按文件把切块中心点写入文档表；BM25 extra 摊到切块；维护 FTS。  
-6. 私有路径存成 Work 视图前缀，展示时剥掉。  
-7. 进度条与就绪事件分开：扫完 ≠ 可宣称检索效果。
+1. 比 **scope stamp**（模型名、维数、INDEX 协议、backend）与目录 mtime → 增量或强制全量。stamp 按 work/seed 分 scope，seed 抬版本不得误标评测 Work 已重嵌。  
+2. 强制全量：写库前 **DROP** 切块/文档两张 HNSW（带活索引大批量 UPSERT 很慢），写完再 `CREATE INDEX`。增量 **不** drop：向量落库后由 pgvector 维护图。  
+3. 脏文件 `chunk_source_text(embed=False)`：只挂 `embed_input`，本文件内不碰 GPU。  
+   - **Markdown**：宽表剥离 → 按标题切节 → 宽表按行组线性化另切 → 超长滑窗 **450 token / 重叠 64**（无分词器则 **1800 / 200** 字符）。宽表指针在索引投影里；磁盘原文不变，`read_file` 仍见全表。  
+   - **代码后缀**（若出现在 `sources/`）：符号分节（tree-sitter 优先）→ 同一滑窗，无表双轨。  
+4. 跨文件缓冲到 cap 后批量 embed（index lane，query 可插队）：`text` 给人看 / BM25 / 摘录；送模型的是标题面包屑 + 正文（路径/标签默认不焊进前缀）。短窗仍输出 **满维** 向量（384/1024），不是更短的向量。  
+5. 同一 flush 内：删该 path 旧切块 → UPSERT `source_files`（mtime）→ `source_chunks`（text + embedding）→ `source_docs`（切块向量均值）→ 把 path 级 `bm25_extra` 拷到切块（FTS C 权）。  
+6. FTS **GIN** 在 schema 初始化/版本升级时建；之后随列更新由 Postgres 维护，不在每次 flush 里 `CREATE INDEX`。  
+7. 私有路径存成 Work 视图前缀，展示时剥掉。进度条与就绪事件分开：扫完 ≠ 可宣称检索效果。
 
 查询撞上空索引或滞后：**只**词面回退或提示滞后，**绝不**在 `search_sources` 里当场建库。
 
-### 4.3 Embedding 档位
+### 4.3 Embedding 档位与 HNSW 默认
 
-由部署解析：无 GPU 常见 **gte-small@384**，显存充足时 **bge-m3@1024**。产品 runtime 与评测 bench **各加载一份**。换模型/维数会推动强制重建。
+由 `scripts/resolve_embedding_profile.sh` 写 `embedding.auto.env`：无 GPU / `RUNTIME_GPU=0` → **gte-small@384**（INDEX≈9）；VRAM≥8192 或 `RUNTIME_GPU=1` → **bge-m3@1024**、截断 **512**（INDEX **13**）。产品 runtime 与评测 bench **各加载一份**。CI / lite / 单测走 **Hash**（词面哈希，256 或测试 64 维），不承担产品召回质量。换模型、维数或截断策略 → stamp 变 → 强制重嵌。
+
+HNSW 由 pgvector 在 `CREATE INDEX … USING hnsw (embedding vector_cosine_ops)` 时建图。本仓库 **未** 写 `WITH (m, ef_construction)`，用扩展默认：**m=16**（每层连边）、**ef_construction=64**（建图候选池）。查询默认 **ef_search=40**；生产只覆盖 iterative 扫描，不改建图参数。GIN 无应用层超参，表达式权重写在 FTS 定义里。
+
+离线 **doc2query** 可后写 `bm25_extra`，不挡首次 sync，也不进向量列。
 
 ### 4.4 种子语料
 
