@@ -5,6 +5,7 @@ WebSocket 授权及 ``assert_session_owner``（B16 密码版本校验）。
 """
 
 from __future__ import annotations
+from uuid import UUID
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBasic, HTTPBasicCredentials

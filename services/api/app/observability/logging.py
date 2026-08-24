@@ -5,6 +5,7 @@ timestamp、JSON、request/turn 关联字段一致输出。
 """
 
 from __future__ import annotations
+import logging
 import sys
 
 import structlog

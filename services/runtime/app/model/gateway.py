@@ -285,11 +285,17 @@ class StubModelProvider:
             return
 
         if "draft_section" in tool_names and _wants_writing_signals(user_text) and not has_tool_result:
+            # Full spoken lines (not short Q&A chips) so writing.15 asserts on
+            # writing_signals without arming a staccato L0 verify_receipt.
             yield _tool_call(
                 "draft_section",
                 {
                     "section_id": "02",
-                    "content": "「你为何来此？」她问。\n\n「找答案。」他答。\n" * 6,
+                    "content": (
+                        "「你为何来此？这城门夜里从不轻易开。」她把灯笼递近了些，看清来人的脸。\n\n"
+                        "「找一个旧答案。十年前我把钥匙留在这里，如今只想确认它还在。」他答，声音并不急。\n\n"
+                    )
+                    * 3,
                     "fragment": "dialogue_dyad",
                 },
             )

@@ -4,6 +4,7 @@
 """
 
 from __future__ import annotations
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel, Field

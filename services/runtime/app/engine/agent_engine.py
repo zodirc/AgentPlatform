@@ -1686,6 +1686,15 @@ class AgentEngine:
             excerpt = str(hit.get("excerpt", ""))[:160]
             if excerpt:
                 summary = f"{summary}; {excerpt}"
+        # Keep the golden/ops needle visible: full writing_signals stays off the bus
+        # (compact probes only), and json.dumps(result)[:200] often truncates before
+        # the writing_signals key once length/hinge/staccato fields are present.
+        if (
+            isinstance(result, dict)
+            and isinstance(result.get("writing_signals"), dict)
+            and "writing_signals" not in str(summary)
+        ):
+            summary = f"{summary}; writing_signals".strip("; ") if summary else "writing_signals"
         # Prefer concrete error text in the timeline (e.g. auto-apply old_text miss).
         if result.get("error"):
             err_text = str(result.get("error"))[:240]

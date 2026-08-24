@@ -522,4 +522,7 @@ async def test_stub_writing15_draft_with_fragment() -> None:
     assert len(calls) == 1
     assert calls[0]["name"] == "draft_section"
     assert calls[0]["input"].get("fragment") == "dialogue_dyad"
+    content = str(calls[0]["input"].get("content") or "")
+    assert "找一个旧答案" in content
+    assert "「找答案。」他答。" not in content
 

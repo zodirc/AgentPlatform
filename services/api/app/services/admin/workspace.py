@@ -5,6 +5,7 @@
 """
 
 from __future__ import annotations
+from uuid import UUID
 
 import httpx
 from fastapi import HTTPException, Request

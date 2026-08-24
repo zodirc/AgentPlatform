@@ -4,6 +4,7 @@ Golden 用例 in-process 执行；CI suite 走 proof 容器；支持 cancel/reco
 """
 
 from __future__ import annotations
+import asyncio
 import logging
 import shutil
 from dataclasses import dataclass, field

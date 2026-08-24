@@ -355,8 +355,21 @@ async def _project_turn_impl(turn_id: UUID) -> None:
                         target = item
                         matched = True
                         break
-            if not matched and tool_timeline:
-                target = tool_timeline[-1]
+            if not matched:
+                # Synthetic completions (e.g. verify_receipt) emit tool.completed
+                # without tool.started. Never clobber the previous real tool row —
+                # that used to rename draft_section → verify_receipt and break
+                # writing.15 / L0-receipt goldens. Append when call id is present
+                # or the timeline is empty; only fuzzy-fall back when id is absent.
+                if tool_call_id or not tool_timeline:
+                    target = {
+                        "tool_call_id": tool_call_id or f"tool-{row['sequence']}",
+                        "tool_name": payload.get("tool_name", "tool"),
+                        "status": "running",
+                    }
+                    tool_timeline.append(target)
+                else:
+                    target = tool_timeline[-1]
             if target is not None:
                 target["status"] = payload.get("status", "ok")
                 target["summary"] = payload.get("summary")

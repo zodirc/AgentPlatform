@@ -603,3 +603,67 @@ async def test_build_turn_view_hides_interrupt_when_approval_already_decided(
     assert view.interrupt is None
     project.assert_not_awaited()
 
+
+@pytest.mark.asyncio
+async def test_project_turn_appends_orphan_verify_receipt_without_clobber() -> None:
+    """verify_receipt tool.completed has no tool.started — must not rename draft_section."""
+    ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    pool, conn = _project_pool(
+        [
+            {
+                "sequence": 1,
+                "type": "tool.started",
+                "payload": {"tool_call_id": "draft-1", "tool_name": "draft_section"},
+                "ts": ts,
+            },
+            {
+                "sequence": 2,
+                "type": "tool.completed",
+                "payload": {
+                    "tool_call_id": "draft-1",
+                    "tool_name": "draft_section",
+                    "status": "ok",
+                    "summary": "drafted; writing_signals",
+                },
+                "ts": ts,
+            },
+            {
+                "sequence": 3,
+                "type": "tool.completed",
+                "payload": {
+                    "tool_call_id": "verify_receipt-2",
+                    "tool_name": "verify_receipt",
+                    "status": "ok",
+                    "summary": "verify_receipt injected (staccato)",
+                    "verify_receipt": True,
+                },
+                "ts": ts,
+            },
+            {
+                "sequence": 4,
+                "type": "turn.completed",
+                "payload": {"summary": "done", "termination_reason": "final"},
+                "ts": ts,
+            },
+        ]
+    )
+    turn = {
+        "session_id": UUID("00000000-0000-0000-0000-000000000001"),
+        "scenario_id": "writing",
+        "status": "running",
+        "user_input": "writing.15",
+    }
+    with (
+        patch("app.services.projection.projector.get_pool", new_callable=AsyncMock, return_value=pool),
+        patch("app.services.projection.projector.turn_svc.get_turn", new_callable=AsyncMock, return_value=turn),
+    ):
+        await project_turn(TURN_ID)
+
+    view_insert = next(
+        call for call in conn.execute.await_args_list if "INSERT INTO turn_views" in str(call.args[0])
+    )
+    tool_timeline = json.loads(view_insert.args[7])
+    assert [row["tool_name"] for row in tool_timeline] == ["draft_section", "verify_receipt"]
+    assert tool_timeline[0]["summary"] == "drafted; writing_signals"
+    assert "staccato" in str(tool_timeline[1]["summary"])
+
