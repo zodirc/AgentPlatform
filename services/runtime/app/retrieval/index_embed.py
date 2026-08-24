@@ -1,7 +1,31 @@
-"""索引平面批量嵌入辅助（RAG sync 写入路径，非 search 热路径）。
+"""索引平面批量嵌入辅助（RAG sync：「deferred chunk → 向量模型」写入路径）。
 
-职责：flush 批量大小、commit 频率、``assign_deferred_vectors`` 填充 chunk.vector。
-在 RAG 链路中的位置：``pgvector_store.sync`` / ``vector_index.sync`` 嵌入阶段。
+English: Index-time batch assignment of ``chunk["vector"]`` from stashed
+``embed_input`` strings. Not on the search hot path; called from
+``pgvector_store.sync`` / ``vector_index.sync`` after files are chunked with
+``embed=False``.
+
+=============================================================================
+职责边界
+=============================================================================
+- **本模块**：flush / commit 节奏旋钮；``assign_deferred_vectors`` 从
+  ``embed_input`` 调 ``embedder.embed_many``（``LANE_INDEX``）写回 ``vector``。
+- **不在本模块**：切块与 ``build_embed_text``（``chunking``）、模型加载
+  （``embedder``）、ANN 落库 SQL（``pgvector_store``）。
+
+=============================================================================
+为何「延迟」而不是切完立刻 embed
+=============================================================================
+生产 sync 对每个脏文件调用 ``chunk_source_text(..., embed=False)``：
+只拼好 ``embed_input``，不碰 GPU/ST。缓冲到 ``index_flush_chunk_cap`` 条后
+再本模块批量 encode —— 吞吐更高，且 ``LANE_INDEX`` 让 query 嵌入可插队
+（见 ``embedding_lanes``），避免长 sync 饿死 ``search_sources``。
+
+链路位置::
+
+  chunk_source_text(embed=False) → chunk["embed_input"]
+      → assign_deferred_vectors → embed_many(..., lane=LANE_INDEX)
+      → chunk["vector"] → INSERT / UPSERT source_chunks
 """
 
 from __future__ import annotations
@@ -17,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 def embedding_batch_size() -> int:
-    """单次 embed_many 的 batch 大小（settings 默认 64）。"""
+    """单次 ``embed_many`` 的 batch 大小（``settings.embedding_batch_size``，默认 64）。"""
     return max(1, int(getattr(settings, "embedding_batch_size", None) or 64))
 
 
@@ -53,15 +77,26 @@ def assign_deferred_vectors(
     chunks_done_before: int = 0,
     chunks_total_hint: int | None = None,
 ) -> int:
-    """从 chunk 的 ``embed_input`` 批量嵌入并写入 ``vector``。
+    """把切块阶段挂起的 ``embed_input`` 送进向量模型，原地写入 ``vector``。
+
+    English: The production handoff from chunking to the embedder. Pops
+    ``embed_input`` (the ``build_embed_text`` string), batch-encodes via
+    ``embed_many(..., lane=LANE_INDEX)``, assigns ``chunk["vector"]``.
+    Chunks that already have a ``vector`` list are skipped.
+
+    心智模型::
+
+        embed_input  = 给模型的字符串（非 chunk JSON）
+        vector       = 固定维稠密浮点列（与 text 长短无关）
+        LANE_INDEX   = 低于 query；batch 之间 ``sleep(0)`` 让出 GIL/调度
 
     参数:
-        chunks: 含 embed_input 或已有 vector 的 chunk dict 列表（原地修改）。
-        embedder: 嵌入器实例。
-        label: 进度日志标签。
+        chunks: 含 ``embed_input`` 或已有 ``vector`` 的 chunk dict（原地修改）。
+        embedder: 通常 ``get_embedder()``（可能已包 priority lane）。
+        label: 进度日志 / sync_progress 标签。
         chunks_done_before / chunks_total_hint: 进度分母提示。
     返回:
-        本次新赋值的向量条数。
+        本次新赋值的向量条数（已有 vector 的不计入）。
     """
     pending: list[tuple[dict[str, Any], str]] = []
     for chunk in chunks:
@@ -92,6 +127,7 @@ def assign_deferred_vectors(
         texts = [inp for _, inp in slice_]
         from app.retrieval.embedding_lanes import LANE_INDEX
 
+        # Index lane: ST encode of build_embed_text strings → fixed-dim vectors.
         vectors = embed_many(embedder, texts, lane=LANE_INDEX)
         # Yield between index batches so query lane can interleave (O5).
         time.sleep(0)

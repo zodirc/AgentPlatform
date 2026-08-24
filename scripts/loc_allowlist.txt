@@ -9,7 +9,7 @@
 services/web/src/ops/OfficialBenchPage.tsx	1700
 services/release-console/server.py	2200
 services/runtime/app/controller/turn_controller.py	2200
-services/runtime/app/retrieval/pgvector_store.py	1800
+services/runtime/app/retrieval/pgvector_store.py	2300
 services/api/app/services/ops/official_runner.py	1800
 services/runtime/app/engine/agent_engine.py	2000
 services/web/src/shared/workbench/useWorkbench.ts	1300
@@ -27,5 +27,5 @@ services/runtime/app/tools/bootstrap.py	1100
 services/web/src/ops/OpsOverviewSidebar.tsx	900
 services/api/app/services/ops/runs.py	900
 services/runtime/app/retrieval/index_scheduler.py	900
-services/runtime/app/retrieval/chunking.py	900
+services/runtime/app/retrieval/chunking.py	1100
 services/runtime/app/writing/cards.py	900

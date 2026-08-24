@@ -1,14 +1,103 @@
-"""源文档切块与嵌入文本组装（RAG 索引平面的文档→chunk 层）。
+"""源文档切块与嵌入文本组装（RAG 索引平面的「文档 → chunk」层）。
 
-职责：
-- 判定可索引文件、Markdown/代码分节、宽表剥离与行组线性化
-- 生成 chunk 元数据（行号、citation、tags）与 ``build_embed_text`` 向量输入
-- ``chunk_source_text``：同步或延迟嵌入（``embed=False`` 供批量 index 平面）
+English: Index-time document→chunk layer — sectioning, wide-table dual-track,
+embed-text assembly. Not on the search hot path.
 
-在 RAG 链路中的位置：
-  sync 扫描文件 → 本模块切块 → ``index_embed.assign_deferred_vectors`` → 向量库
+=============================================================================
+职责边界
+=============================================================================
+- **本模块**：可索引门控、Markdown/代码分节、宽 GFM 表剥离与行组线性化、
+  chunk 元数据（行号 / citation / tags）、``build_embed_text`` 拼嵌入输入、
+  ``chunk_source_text``（同步 embed 或 ``embed=False`` 延迟批量向量化）。
+- **不在本模块**：ANN/BM25 检索（``pgvector_store`` / ``vector_index``）、
+  超长窗 snap 细节（``chunk_split``）、模型加载（``embedder``）。
+- **调用时机**：仅 Turn 外 sync / index；``search_sources`` **不**再切块。
 
-不在热路径：仅 Turn 外索引/sync 调用；StartTurn / search 不切块。
+链路位置::
+
+  sources/ 扫描 → should_index_source → chunk_source_text
+      → build_embed_text → embedder / index_embed → source_chunks
+
+=============================================================================
+Chunk 是什么（心智模型）
+=============================================================================
+一条 chunk = **业务记录**（dict / ``source_chunks`` 行），不是「向量本身」。
+
+典型字段::
+
+  chunk_id       path#chunk-N（同文件多段）
+  path           源文件相对路径（一篇文档可对应 N 条 chunk）
+  text           正文片段 → BM25 / excerpt / 引用展示
+  section_title  所属标题
+  line_start/end 原文行号（便于 read_file 定位）
+  citation_id    cite:{stem}
+  tags / symbol  稀疏标签与代码符号名
+  vector         或 embed_input → 最终写入 embedding 列
+
+两层「大小」不要混::
+
+  文本长度（可变）   目标上限 ~450 token（settings）；小节可远小于此
+  向量维度（固定）   Hash 256 / gte-small 384 / bge-m3 1024 ——
+                     与 text 长短无关；短文仍输出同维稠密向量，
+                     只是语义覆盖面更窄。
+
+送入 embedder 的是 ``build_embed_text(...)`` 拼出的**字符串**
+（标题面包屑 + 可选 path/tags + part），不是整份 chunk JSON。
+
+文档总大小不切换算法：小文件 → 少 chunk；大文件 → 多 chunk；
+每条仍受同一 token 预算约束（靠数量覆盖全文，不靠放大单 chunk）。
+
+=============================================================================
+切完之后如何进向量模型（与 embedder / index_embed 的交接）
+=============================================================================
+``chunk_source_text`` 在 (D) 滑窗之后，对每个 ``part``：
+
+::
+
+  text          = part                         # 干净正文
+  embed_input   = build_embed_text(path, part, tags, heading_path)
+
+然后二选一（由 ``embed`` 参数决定）::
+
+  embed=True   → embed_many(embedder, embed_inputs) → 写入 chunk["vector"]
+  embed=False  → 只挂 chunk["embed_input"]；sync 末
+                 index_embed.assign_deferred_vectors → 批量 encode（LANE_INDEX）
+
+生产 sync（pgvector）默认 ``embed=False``，避免按文件同步加载/饿死 query；
+小路径 / 测试可用 ``embed=True`` 一次做完。模型细节见 ``embedder`` 模块顶注。
+
+=============================================================================
+Markdown 四段流水线（非代码分支；「表」= 文内 GFM ``|…|`` 语法，非另文件）
+=============================================================================
+磁盘上始终是**同一篇** ``.md``；read_file 永远看到完整原文。
+
+::
+
+  ## 人物表                    ← 原文 on disk
+
+  下面是一张 20 行 × 5 列的宽表 …
+
+  | 姓名 | 职务 | … |
+  |------|------|---|
+  | …    | …    | … |   ← ≥6 行或 ≥800 字符 →「宽表」
+
+  (A) detach_wide_tables → prepared
+      宽表换成一行指针；小表原样保留在叙述节中
+
+  (B) split_markdown_sections(prepared)
+      按 # / Setext 切节；过短深叶子（<200 字、depth≥4）并入上一节
+
+  (C) iter_wide_table_chunks(**原文**)
+      宽表另切：每 8 行线性化为 ``列:值; …`` 独立 TextSection（可检索）
+
+  (D) chunk_split.split_oversized(每节)
+      单节 >~450 token → 段/句/词边界滑窗（overlap 64）
+
+  最终 chunks = prose 节经 (D) + 表格节经 (D) 的并集。
+
+双轨 why：叙述节 embedding 不被整表拖脏；表体仍可按单元格语义/词命中。
+
+代码分支（``.py`` / ``.ts`` 等）：符号分节（tree-sitter 优先）→ 同一 (D)，无表双轨。
 """
 
 from __future__ import annotations
@@ -58,7 +147,19 @@ _META_TAGS_RE = re.compile(
 
 @dataclass(frozen=True)
 class TextSection:
-    """Markdown/代码分节：标题、正文、行范围与标题面包屑路径。"""
+    """中间分节：尚未滑窗成最终 chunk 的「标题 + 正文」单位。
+
+    English: Intermediate section before ``split_oversized`` expands it into
+    one or more chunk dicts. One document yields many TextSections; each may
+    become multiple chunks if the body exceeds the token budget.
+
+    字段:
+        title: 节标题（Markdown 标题行或代码符号首行）；可为空（前言）。
+        body: 节正文（宽表在 prose 路径上可能已是 detach 指针）。
+        line_start / line_end: 1-based 行号，映射回磁盘原文。
+        heading_path: 从根到当前的标题面包屑，写入 embed 前缀与 tags。
+    """
+
     title: str
     body: str
     line_start: int
@@ -67,7 +168,21 @@ class TextSection:
 
 
 def should_index_source(path: Path) -> bool:
-    """是否纳入 RAG 索引（跳过 dotfile、cards、paste-debug 等）。"""
+    """是否纳入 RAG 索引（sources/ 扫描门控）。
+
+    English: Index gate for files under ``sources/``. Does **not** filter by
+    suffix here — code under sources/ is chunked via the code branch; watch
+    fingerprints may still be suffix-limited (see ``sources_watch``).
+
+    跳过:
+        ``paste-debug.md``、dotfile、路径段含 ``cards/``（写作卡片 Turn 内 pin，
+        不进检索噪声）。
+
+    参数:
+        path: 候选文件 Path。
+    返回:
+        True 表示可进入 ``chunk_source_text``。
+    """
     name = path.name
     if name in SOURCE_SKIP_FILENAMES:
         return False
@@ -99,15 +214,28 @@ def build_embed_text(
     tags: Sequence[str] | None = None,
     heading_path: Sequence[str] | None = None,
 ) -> str:
-    """组装送入 embedder 的文本：标题面包屑 + 可选 path/tags 元数据前缀。
+    """组装送入 embedder 的字符串（不是 chunk dict / 不是向量）。
+
+    English: Build the string fed to the embedder. Default keeps citation
+    excerpts clean: only heading crumb + body. Optional metadata (path/tags)
+    is gated by ``embedding_text_include_metadata``.
+
+    心智模型::
+
+        chunk.text       → 给人看 / BM25 / excerpt（无 path 噪声）
+        build_embed_text → 给模型算 384/1024 维稠密向量的*唯一*输入
+        embed_many(...)  → list[float]；维数固定，与 body 长短无关
+
+    二者同源 ``part``，但 embed 可多标题面包屑（与可选 path/tags）。
+    本函数**不**调用模型；只拼字符串，供同步 embed 或延迟 ``embed_input``。
 
     参数:
-        rel_path: 工作区内相对路径。
-        body: chunk 正文。
-        tags: 可选稀疏标签。
-        heading_path: 章节标题链。
+        rel_path: 工作区相对路径（仅 metadata 开启时写入 ``path:`` 前缀）。
+        body: 本节/本窗正文 ``part``。
+        tags: 稀疏标签；metadata 开启时写成 ``tags: a b``。
+        heading_path: ``A > B > C`` 面包屑，始终可前置到 body。
     返回:
-        最终嵌入字符串。
+        非空时至少含 body 或 crumb；全空则 ``""``。
     """
     body_text = (body or "").strip()
     crumb = " > ".join(str(p).strip() for p in (heading_path or ()) if str(p).strip())
@@ -171,7 +299,13 @@ def extract_source_tags(rel_path: str, text: str, *, max_tags: int = 8) -> list[
 
 
 def _chunk_limits() -> tuple[int, int, int, int]:
-    """Return ``(size_chars, overlap_chars, size_tokens, overlap_tokens)``."""
+    """读取切块预算：``(size_chars, overlap_chars, size_tokens, overlap_tokens)``。
+
+    English: Token budget (~450/64) is an intentional product setting aligned
+    with embed ``max_seq≈512`` headroom — **not** the model's theoretical max
+    (bge-m3 hub default can be 8192). Char fallback (~1800/200) when no HF
+    tokenizer is loaded. Settings unavailable → module-level constants.
+    """
     try:
         from app.settings import settings
 
@@ -209,7 +343,20 @@ def _table_col_count(header_line: str) -> int:
 
 
 def detach_wide_tables(text: str) -> str:
-    """宽 GFM 表替换为短指针（磁盘原文不变；全文仍可通过 read_file 读）。"""
+    """宽 GFM 表在 **prepared** 副本中换成短指针（磁盘原文不变）。
+
+    English: Replace wide pipe-tables in the *prepared* copy used for heading
+    sectioning. Disk file and ``read_file`` still see the full GFM table.
+    Row-level recall is restored by ``iter_wide_table_chunks`` on the **original**
+    text (R-4 dual-track).
+
+    「表」指文档正文里的 Markdown 管道表（``| col |``），不是数据库表、不是旁路文件。
+    「宽」= 非分隔行 ≥ ``retrieval_table_detach_min_rows``（默认 6）**或**
+    块字符数 ≥ ``retrieval_table_detach_min_chars``（默认 800）。小表原样留在叙述节。
+
+    Why: 若整表塞进某一节再 embed，450/512 预算下向量往往只代表表头附近几行，
+    表体中间单元格「在库里却几乎不在向量空间」。
+    """
     if not text:
         return text
     min_rows, min_chars = _table_detach_thresholds()
@@ -257,7 +404,15 @@ def _table_cells(line: str) -> list[str]:
 
 
 def iter_wide_table_chunks(text: str) -> list[TextSection]:
-    """将宽表按行组线性化为独立 TextSection（R-4 表格 chunk）。"""
+    """宽表行组 → 独立 TextSection（R-4；读**原文**，不读 prepared）。
+
+    English: Linearize wide tables from the **original** document into separate
+    sections so cells remain searchable after prose sections only keep a pointer.
+
+    与 ``detach_wide_tables`` 同阈值；每 ``_TABLE_ROW_GROUP``（8）行数据一批，
+    行内 ``列名: 值; …``，批间 `` || `` 连接。标题优先取表前最近 ATX 标题，
+    否则取表头首列。产出的 section 再经 ``split_oversized`` 成最终 chunk。
+    """
     if not text:
         return []
     min_rows, min_chars = _table_detach_thresholds()
@@ -339,7 +494,14 @@ def iter_markdown_headings(text: str, *, limit: int = 40) -> list[tuple[int, str
 
 
 def split_markdown_sections(text: str) -> list[TextSection]:
-    """按 Markdown 标题切分并合并过短叶子节。"""
+    """按 Markdown 标题切分，并合并过碎的深层叶子节。
+
+    English: Split on ATX (``#``) and Setext headings; maintain ``heading_path``.
+    Merge leaves with body <200 chars and heading depth ≥4 into the previous
+    section so a lone ``####`` + one sentence does not become a noisy chunk.
+
+    通常吃 ``detach_wide_tables`` 后的 prepared：宽表已是指针，分节向量偏叙述。
+    """
     lines = text.splitlines()
     if not lines:
         return []
@@ -478,13 +640,23 @@ _CODE_SYMBOL_RE = re.compile(
 
 
 def is_code_path(path: Path | str) -> bool:
-    """路径后缀是否为已知代码扩展名。"""
+    """路径后缀是否走代码分节分支（而非 Markdown 四段流水线）。
+
+    English: True for known source suffixes (``.py``, ``.ts``, …). Chooses
+    sectioning inside ``sources/`` only — workspace app code outside ``sources/``
+    is never indexed by this module.
+    """
     suffix = Path(path).suffix.lower()
     return suffix in _CODE_EXTS
 
 
 def split_code_sections(text: str, *, language: str | None = None) -> list[TextSection]:
-    """按符号边界切分源码（优先 tree-sitter，否则 regex）；仅索引平面。"""
+    """按符号边界切分源码（索引平面；优先 tree-sitter，否则 regex）。
+
+    English: Symbol-boundary sections for code under ``sources/``. Prefer
+    tree-sitter when ``language`` is known; else ``_CODE_SYMBOL_RE``. Index-only
+    — not Locate / ``search_codebase`` (AST+LSP).
+    """
     if not text.strip():
         return []
     if language:
@@ -697,17 +869,37 @@ def chunk_source_text(
     tags: Sequence[str] | None = None,
     embed: bool = True,
 ) -> list[dict[str, Any]]:
-    """将单个源文件切为 chunk 字典列表。
+    """将**单个**源文件切为 chunk 字典列表（一篇文档 → N 条记录）。
+
+    English: One file → many chunk dicts. Document size does not switch strategy:
+    small files yield few chunks; large files yield many. Each chunk's *text*
+    targets ≤~450 tokens; each *vector* is always the embedder's fixed dim
+    (384/1024/…). Short text still produces a dense vector — narrower semantics,
+    not fewer dimensions.
+
+    分支:
+        - 代码后缀 → ``split_code_sections`` → (D) ``split_oversized``
+        - 其它（典型 ``.md`` / ``.txt``）→ (A)(B)+(C) → (D)；见模块顶流水线
 
     参数:
-        path: 磁盘 Path。
-        rel_path: 工作区相对路径（chunk_id / path 字段）。
-        text: 文件全文。
-        embedder: ``embed=True`` 时用于 ``embed_many``。
-        tags: 可选覆盖 tag；None 时自动提取。
-        embed: True 直接写 ``vector``；False 写 ``embed_input`` 供 index 批量嵌入。
+        path: 磁盘 Path（mtime / stem / 扩展名）。
+        rel_path: 工作区相对路径（写入 ``path`` / ``chunk_id``）。
+        text: 文件全文（UTF-8 已解码）。
+        embedder: ``embed=True`` 时传入 ``get_embedder()`` 供 ``embed_many``；
+            延迟路径可传占位 / ``None``（仅拼 ``embed_input``）。
+        tags: 覆盖标签；``None`` 时 ``extract_source_tags``。
+        embed: True → 写 ``vector``（同步 encode）；
+            False → 写 ``embed_input``，交 ``index_embed.assign_deferred_vectors``。
+
     返回:
-        chunk dict 列表（含 text、line_*、citation_id 等）。
+        chunk dict 列表。关键键：``chunk_id``, ``path``, ``text``, ``citation_id``,
+        ``section_title``, ``line_start``, ``line_end``, ``mtime``；可选 ``tags``,
+        ``symbol``, ``vector`` / ``embed_input``。空文件 → ``[]``。
+
+    不变量:
+        - 不修改磁盘原文（detach 仅作用于内存 prepared）。
+        - ``text`` 不含 path 前缀（引用摘录干净）；向量输入经 ``build_embed_text``。
+        - 进模型的是字符串列表，不是 chunk JSON；维数由 embedder 决定。
     """
     if not text.strip():
         return []
@@ -721,6 +913,22 @@ def chunk_source_text(
             language=language_for_code_path(path) or language_for_code_path(rel_path),
         )
     else:
+        # Markdown / prose pipeline (four stages — see module docstring):
+        #
+        #   original text on disk
+        #        │
+        #        ├─► (A) detach_wide_tables ──► prepared (wide tables → pointers)
+        #        │         │
+        #        │         └─► (B) split_markdown_sections ──► prose TextSections
+        #        │
+        #        └─► (C) iter_wide_table_chunks(original) ──► table TextSections
+        #                  (8-row batches, header: cell linearized)
+        #
+        #   sections = (B) + (C)  →  each section ──► (D) chunk_split.split_oversized
+        #                  (~450 tok / 64 overlap, paragraph/sentence snap)
+        #
+        # Why dual-track: (A) keeps section embeddings about narrative;
+        # (C) still makes row-level facts searchable without one giant table vector.
         prepared = detach_wide_tables(text)
         sections = split_markdown_sections(prepared)
         extra = iter_wide_table_chunks(text)
@@ -769,6 +977,8 @@ def chunk_source_text(
             if crumb and crumb not in section_tags:
                 section_tags.append(crumb[:40])
 
+        # (D) Section longer than ~450 tokens → sliding windows with overlap.
+        # Short sections pass through as a single (part, 0) — still one full-dim vector.
         for part, origin in _split_payload(
             payload,
             size_chars=chunk_size,
@@ -779,6 +989,10 @@ def chunk_source_text(
             chunk_id = f"{rel_path}#chunk-{chunk_idx}"
             line_start = section.line_start + payload[:origin].count("\n")
             line_end = line_start + part.count("\n")
+            # Embed handoff (index-time only — search never re-chunks):
+            #   part  → chunk["text"]          (BM25 / excerpt / cites)
+            #   part  → build_embed_text(...)  (model input string, may add crumb)
+            # Then either vector now (embed=True) or embed_input later (False).
             embed_input = build_embed_text(
                 rel_path, part, tags=section_tags, heading_path=heading_path
             )
@@ -806,10 +1020,15 @@ def chunk_source_text(
     if embed:
         from app.retrieval.embedder import embed_many
 
+        # Synchronous path: one batch encode for this file's strings.
+        # len(vector) == embedder dim for every chunk (short or long);
+        # ST uses normalize_embeddings=True (see embedder.SentenceTransformerEmbedder).
         vectors = embed_many(embedder, embed_inputs)
         for chunk, vec in zip(chunks, vectors, strict=True):
             chunk["vector"] = vec
     else:
+        # Deferred path (pgvector sync default): stash strings for
+        # index_embed.assign_deferred_vectors → embed_many(..., lane=LANE_INDEX).
         for chunk, embed_input in zip(chunks, embed_inputs, strict=True):
             chunk["embed_input"] = embed_input
     return chunks

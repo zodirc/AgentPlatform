@@ -1,7 +1,25 @@
-"""边界感知超长文本切分（索引平面 R-1/R-2）。
+"""边界感知超长文本切分（RAG 索引第 (D) 步；R-1 / R-2）。
 
-职责：在段落/句/词边界 snap，优先 HF tokenizer 窗口，否则 CJK 感知字符预算。
-仅 async/index 路径使用；不在 search 热路径。
+English: Oversized-section splitter — paragraph/sentence/word snap windows.
+Called only from ``chunking.chunk_source_text`` after Markdown/code sectioning.
+
+=============================================================================
+职责
+=============================================================================
+- 在段 / 句 / 词边界切断，避免 mid-word 硬切（旧 4000 字符窗的主要缺陷）。
+- **优先** HF tokenizer 的 token 窗（默认 450 / overlap 64）。
+- tokenizer 不可用时：CJK 感知字符预算（默认 1800 / 200）。
+- 仅 async / index 路径；``search_sources`` 热路径不调用。
+
+=============================================================================
+与 embedding 的关系
+=============================================================================
+450 token 是**产品配置**（``retrieval_chunk_max_tokens``），对齐 embed
+``max_seq≈512`` 并留 headroom —— **不是** bge-m3 的理论上限（Hub 默认可 8192）。
+故意短切：让整段 ``part`` 进入向量，避免「库里有后半段、向量只看见前 512」。
+
+短 section（≤预算）→ ``[(text, 0)]`` 原样返回，仍会得到**完整维度**的稠密向量；
+文本短只改变语义覆盖面，不改变向量维数。
 """
 
 from __future__ import annotations
@@ -15,7 +33,10 @@ _SENTENCE_END = frozenset("。！？!?.;")
 
 
 def estimate_tokens(text: str) -> int:
-    """无 tokenizer 时的 token 估算：CJK≈1字/token，拉丁≈4字符/token。"""
+    """无 tokenizer 时的 token 估算：CJK≈1 字/token，拉丁≈4 字符/token。
+
+    English: Heuristic token count when HF tokenizer is not loaded.
+    """
     if not text:
         return 0
     cjk = len(_CJK_RE.findall(text))
@@ -24,7 +45,10 @@ def estimate_tokens(text: str) -> int:
 
 
 def count_embed_tokens(text: str) -> int:
-    """计数嵌入 token 数：已加载 HF tokenizer 则精确，否则 ``estimate_tokens``。"""
+    """计数嵌入 token：已加载 HF tokenizer 则精确，否则 ``estimate_tokens``。
+
+    English: Prefer the active embedder tokenizer; fall back to heuristics.
+    """
     tok = _try_hf_tokenizer()
     if tok is None:
         return estimate_tokens(text)
@@ -45,12 +69,18 @@ def split_oversized(
 ) -> list[tuple[str, int]]:
     """超长段切分为 ``(片段, 起始字符偏移)`` 列表。
 
+    English: Step (D) of the RAG index pipeline. Prefer token windows when the
+    HF tokenizer is available; otherwise CJK-aware character windows. Cut points
+    snap to blank lines, sentence punctuation, then word boundaries.
+
     参数:
-        text: 待切分正文。
-        size_chars / overlap_chars: 字符窗口（无 tokenizer 或 CJK 比例高时使用）。
-        size_tokens / overlap_tokens: token 窗口（HF tokenizer 已加载时优先）。
+        text: 待切分正文（通常是一个 TextSection 的 payload）。
+        size_chars / overlap_chars: 字符窗（无 tokenizer 或高 CJK 比例时）。
+        size_tokens / overlap_tokens: token 窗（HF 已加载时优先；默认 450/64）。
+
     返回:
-        非空时至少一段；原文未超长则 ``[(text, 0)]``。
+        至少一段；原文未超长 → ``[(text, 0)]``。``origin`` 供调用方换算
+        ``line_start``（``payload[:origin].count("\\n")``）。
     """
     if not text:
         return []
@@ -67,6 +97,7 @@ def split_oversized(
 
 
 def _char_size_for(text: str, *, size_chars: int, size_tokens: int) -> int:
+    """CJK 占比高时用更紧的字符预算（接近 token 数），避免拉丁 4:1 高估。"""
     size_chars = max(200, size_chars)
     if size_tokens <= 0:
         return size_chars
@@ -78,6 +109,7 @@ def _char_size_for(text: str, *, size_chars: int, size_tokens: int) -> int:
 
 
 def _split_char_windows(text: str, *, size: int, overlap: int) -> list[tuple[str, int]]:
+    """字符滑窗；每窗终点经 ``_snap_cut`` 回退到语义边界。"""
     if len(text) <= size:
         return [(text, 0)]
     parts: list[tuple[str, int]] = []
@@ -99,6 +131,7 @@ def _split_char_windows(text: str, *, size: int, overlap: int) -> list[tuple[str
 def _split_token_windows(
     text: str, *, tokenizer: Any, size: int, overlap: int
 ) -> list[tuple[str, int]] | None:
+    """HF offset_mapping token 滑窗；失败返回 None 以回退字符窗。"""
     try:
         enc = tokenizer(
             text,
@@ -138,7 +171,7 @@ def _split_token_windows(
 
 
 def _snap_cut(text: str, start: int, target: int, size: int) -> int:
-    """Search backward from ``target`` within 15% of ``size`` for a semantic boundary."""
+    """从 ``target`` 回退至多约 15% ``size``，优先空行 → 换行 → 句读 → 空格。"""
     if target >= len(text):
         return len(text)
     window = max(8, int(size * 0.15))
@@ -160,6 +193,7 @@ def _snap_cut(text: str, start: int, target: int, size: int) -> int:
 
 
 def _snap_start(text: str, start: int) -> int:
+    """overlap 落点尽量不落在词中部。"""
     if start <= 0 or start >= len(text):
         return start
     # Prefer not to start mid-word when overlap landed on a letter.
@@ -175,6 +209,7 @@ def _snap_start(text: str, start: int) -> int:
 
 
 def _try_hf_tokenizer() -> Any | None:
+    """从已加载的 embedder 窥探 HF tokenizer；未加载则 None。"""
     try:
         from app.retrieval.embedder import peek_hf_tokenizer
 

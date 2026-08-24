@@ -1,15 +1,83 @@
 """Postgres + pgvector 源文档检索存储（RAG 持久化与查询后端）。
 
-职责：
-- DDL：``source_files`` / ``source_chunks`` / ``source_docs`` / HNSW / FTS GIN
-- Turn 外 ``sync``：扫描 mtime、切块、批量嵌入、写入与 scope stamp
-- 查询：向量 ANN、BM25/FTS、RRF 混合、可选两级 doc+chunk、rerank
+English: Index-plane persistence + query — sync writes vectors/FTS rows;
+search reads ANN (HNSW) + GIN (FTS) + hybrid fusion. Not on Turn hot path.
 
-在 RAG 链路中的位置：
-  ``index_scheduler`` / ``sync_cli`` → 本模块 ``sync`` → DB
-  ``search_sources`` → ``store.get_sources_store`` → 本模块 ``search*``
+=============================================================================
+职责边界
+=============================================================================
+- **本模块**：DDL（三表 + HNSW + FTS GIN）；``sync`` 切块→embed→落库→索引维护；
+  ``search*`` 向量/BM25/hybrid/doc lane。
+- **不在本模块**：切块/embed 细节（``chunking`` / ``embedder`` / ``index_embed``）、
+  Turn 内 ``search_sources`` 工具编排（``tools``）、Ops 独立 schema（``ops_plane``）。
 
-与 JSON 后端（``vector_index``）接口对齐；Ops L1 走独立 DSN/schema（``ops_plane``）。
+=============================================================================
+sync 写入链（embed 之后 — 读代码时的主心智模型）
+=============================================================================
+``sync`` 把上游 ``chunk_source_text(embed=False)`` 的 ``embed_input`` 变成库内可检索行。
+**没有**单独的 Python「建图 API」；HNSW / GIN 是 PostgreSQL 索引，行为如下：
+
+::
+
+  phase=chunk     chunk_source_text → pending_jobs（仅 embed_input）
+  phase=embed     _flush_buffer → assign_deferred_vectors → chunk["vector"]
+  phase=write     同一 _flush_buffer 内：
+                    DELETE 旧 chunk（按 path）
+                    UPSERT source_files（mtime / chunk_count / ACL）
+                    UPSERT source_chunks（text + embedding 列）
+                    UPSERT source_docs（同 path 的 chunk 向量 centroid）
+                    UPDATE bm25_extra（path → chunk，供 FTS C 权）
+                  conn.commit()  →  pgvector/Postgres 维护 HNSW 边（增量）
+  phase=index     force reindex：写前 DROP HNSW，全部写完 _ensure_embedding_hnsw 重建
+                  增量：sync 末 _ensure_embedding_hnsw（IF NOT EXISTS，补建）
+
+HNSW 参数（本仓库未写 ``WITH``，用 pgvector 默认 m=16 / ef_construction=64；
+查询默认 ef_search=40，生产仅覆盖 iterative_scan / max_scan_tuples —— 见
+``_ensure_embedding_hnsw`` / ``_prepare_hnsw_filtered_scan`` docstring）::
+
+  建图期（CREATE INDEX，不可事后改）     查询期（SET LOCAL，可 per-query）
+  m=16  每层最大连边                    ef_search=40（默认，prod 未动）
+  ef_construction=64  建图候选池         iterative_scan=relaxed_order（我们设）
+  vector_cosine_ops  余弦距离            max_scan_tuples=max(20k, limit×500)
+
+FTS GIN（``source_chunks_text_fts_idx``）在 ``ensure_schema`` 一次性创建/版本升级重建，
+不在每个 flush 里建；chunk UPSERT 更新 ``text``/``section_title``/``bm25_extra`` 后
+由 Postgres 维护 GIN 倒排。``bm25_extra`` 正文来自离线 ``doc2query``（RET-11b）。
+
+检索消费（``search_sources`` 热路径，只读）::
+
+  chunk lane   ORDER BY embedding <=> query   （HNSW + iterative_scan 过滤 seed/work）
+  doc lane     source_docs 同上（centroid ANN，最多 8 path）
+  BM25 lane    BM25_TSVECTOR_SQL @@ tsquery  （GIN）
+  hybrid       RRF 融合 + 词法精排 + doc_boost → 工具层 cover/tier/L3
+
+=============================================================================
+查询面（``search_hybrid`` — 索引建完后的 read path）
+=============================================================================
+入口: ``store.search(mode=hybrid)`` → ``PgvectorSourceRetrievalStore.search_hybrid``。
+**只读** — 不 ``sync``、不 ``CREATE INDEX``；消费 sync 写入的 HNSW/GIN/行数据。
+
+典型 ``limit`` 与深度::
+
+  search_sources 传入 limit≈30，store 常 over-fetch (×2/×3)
+  hybrid 内 lane 深度 top_k = max(limit×4, 20) [rerank 时 ≥ rerank_pool]
+
+并行与串行::
+
+  parallel_two_level(doc ∥ chunk)     ← 两线程，预算 ~0.3s（profile）
+  chunk 内: vector ∥ bm25 同线程顺序执行 → RRF → rerank
+
+审计（``audit.begin_audit_capture`` 在 ``search_sources`` 开启）::
+
+  L1a  record_lane_hits        vector/bm25 分榜（融合前）
+  L1   record_recall_pool      RRF 后、rerank 前
+  L2   record_ranked           rerank 后（method=lexical/none/…）
+  L3   在 tools/sources_search  format/tier 后进 tool_result（非本模块）
+
+链路位置::
+
+  index_scheduler / sync_cli → sync → DB
+  search_sources → get_sources_store → search_vector / search_hybrid
 """
 
 from __future__ import annotations
@@ -60,12 +128,50 @@ _DOCS_HNSW = "source_docs_embedding_hnsw"
 
 
 def _drop_embedding_hnsw(cur: Any) -> None:
-    """Drop ANN indexes for bulk load (recreate after force reindex writes)."""
+    """删除 chunk/doc 两张 HNSW 索引（force reindex 批量写表前）。
+
+    English: Bulk UPSERT with live HNSW is slow — each row updates the graph.
+    Drop both indexes, load rows, recreate at sync end via ``_ensure_embedding_hnsw``.
+
+    仅 ``sync(force_reindex)`` 在写库前调用；增量 sync 不 drop。
+    """
     cur.execute(f"DROP INDEX IF EXISTS {_CHUNK_HNSW}")
     cur.execute(f"DROP INDEX IF EXISTS {_DOCS_HNSW}")
 
 
 def _ensure_embedding_hnsw(cur: Any) -> None:
+    """确保 pgvector HNSW 余弦索引存在（chunk 主车道 + doc centroid 车道）。
+
+    English: ``CREATE INDEX IF NOT EXISTS ... USING hnsw (embedding vector_cosine_ops)``.
+    Incremental sync: index already exists → pgvector maintains graph on UPSERT.
+    Force reindex: called after bulk load to rebuild from scratch.
+
+    =============================================================================
+    我们显式配置的 vs pgvector 默认（镜像 ``pgvector/pgvector:pg16``）
+    =============================================================================
+    **本仓库 DDL 只指定** index method + 距离算子；**未**写 ``WITH (m=…, ef_construction=…)``，
+    建图算法与下列默认值均由扩展 ``src/hnsw.h`` 决定（随镜像内 pgvector 版本，通常如下）：
+
+    建图期（``CREATE INDEX`` 时固定，之后不可改，除非 DROP + 重建）::
+
+      参数              默认    合法范围        含义
+      m                 16      2–100           每层每节点最大双向连边数；↑ recall/索引体积/建图耗时
+      ef_construction   64      4–1000 (≥2×m)  插入时每点扩展的候选邻居数；↑ 图质量/建图耗时
+
+    查询期（session GUC，见 ``_prepare_hnsw_filtered_scan``；生产未改 ``ef_search``）::
+
+      hnsw.ef_search           40      1–1000   贪心搜索候选池；↑ recall/延迟（bench 脚本可观测）
+      hnsw.iterative_scan      off     off|strict_order|relaxed_order
+      hnsw.max_scan_tuples     20000   …        iterative 模式最多扫描 heap 行数
+
+    **为何 ``vector_cosine_ops``**：ST ``normalize_embeddings=True`` → 单位向量，
+    余弦距离 ``<=>`` 与内积排序一致；维数由 ``effective_embedding_dimensions``（384/1024）。
+
+    **建图何时发生**：(1) 空表上首次 ``CREATE INDEX`` → 空图骨架；(2) 已有行上
+    ``CREATE INDEX``（force reindex 末）→ 全表扫描离线建图；(3) 索引已存在时的
+    UPSERT → 扩展增量插入节点（非 Python 侧逻辑）。
+    """
+    # DDL：无 WITH → m=16, ef_construction=64（pgvector 默认，见本函数 docstring）。
     cur.execute(
         f"""
         CREATE INDEX IF NOT EXISTS {_CHUNK_HNSW}
@@ -83,7 +189,16 @@ def _ensure_embedding_hnsw(cur: Any) -> None:
 
 
 def _chunk_vectors_centroid(vectors: list[list[float]]) -> list[float] | None:
-    """Mean of equal-length chunk embeddings (P3 doc lane). None if empty/ragged."""
+    """单文件内 chunk 嵌入的算术均值 → doc lane 用 ``source_docs.embedding``。
+
+    English: P3 two-level retrieval — doc HNSW returns paths; chunk HNSW returns
+    excerpts. Centroid is not re-embedded; mean of chunk vectors in embed space.
+
+    参数:
+        vectors: 同维 ``list[float]`` 列表（通常来自同一 ``storage_path`` 的 flush batch）。
+    返回:
+        与 chunk 同维的均值向量；空或维数不齐 → ``None``（跳过 doc UPSERT）。
+    """
     if not vectors:
         return None
     dim_n = len(vectors[0])
@@ -244,14 +359,31 @@ def _clear_reindex_epoch(cur: Any, scope_id: str) -> None:
 
 
 def _prepare_hnsw_filtered_scan(cur: Any, *, limit: int) -> None:
-    """Enable pgvector iterative scans so work_id filters do not empty ANN results.
+    """查询前调整 pgvector HNSW 会话 GUC（共享图 + ACL 后过滤）。
 
-    Shared HNSW + post-filter (seed + many Ops works) otherwise stops after
-    ``ef_search`` global neighbors — all seed → 0 hits for the bound work.
+    English: Shared HNSW graph holds seed + many private works. Plain
+    ``ORDER BY <=> LIMIT k`` post-filtered by ``work_id`` can yield 0 hits when
+    global NN are all seed rows.
+
+    =============================================================================
+    默认 vs 本函数覆盖（查询期，不改索引结构）
+    =============================================================================
+    生产 ``search_vector`` / ``_search_docs_ann`` 在每条 ANN SQL 前调用本函数。
+
+    | GUC | pgvector 默认 | 本仓库 |
+    |-----|---------------|--------|
+    | ``hnsw.ef_search`` | **40** | **未改**（需更高 recall 可 ``SET LOCAL``；见 ``p4_hnsw_ef_search_calib.py`` 观测脚本，不改 prod） |
+    | ``hnsw.iterative_scan`` | **off** | **relaxed_order** — 过滤后候选不足时继续扫 heap |
+    | ``hnsw.max_scan_tuples`` | **20000** | **max(20000, limit×500)** — seed 占全局近邻时给 FiQA 级 work 留 headroom |
+
+    ``ef_search`` 应 ≥ SQL ``LIMIT``；top_k 常 240+ 时默认 40 偏保守，靠 iterative_scan
+    补召回而非全局抬高 ``ef_search``（避免所有查询延迟上涨）。
+
+    参数:
+        limit: 本次 ANN ``LIMIT``；用于推导 ``max_scan_tuples`` 下限。
     """
     try:
         cur.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
-        # FiQA-scale works need headroom beyond default when seed dominates NN.
         max_tuples = max(20_000, int(limit) * 500)
         cur.execute(f"SET LOCAL hnsw.max_scan_tuples = {max_tuples}")
     except Exception:
@@ -312,7 +444,15 @@ class PgvectorSourceRetrievalStore:
         return conn
 
     def ensure_schema(self) -> None:
-        """创建/迁移表、扩展、HNSW 与 FTS 索引（幂等）。"""
+        """创建/迁移表、pgvector 扩展、HNSW 与 FTS GIN（幂等，进程内只跑一次）。
+
+        English: Called at start of ``sync`` and search. Creates three tables:
+        ``source_files`` (path metadata), ``source_chunks`` (chunk + embedding + text),
+        ``source_docs`` (path-level centroid). HNSW on both embedding columns;
+        GIN on ``BM25_TSVECTOR_SQL`` expression (title+body A, bm25_extra C).
+
+        维数变更（256→384 等）会 DROP 三表重建 —— 与 ``scope_stamp_mismatch`` 全量重嵌一致。
+        """
         if self._ready:
             return
         dim = self._dimensions
@@ -454,7 +594,7 @@ class PgvectorSourceRetrievalStore:
                     )
                     """
                 )
-                # P3: true document-level vectors (chunk centroid); two-level doc lane.
+                # P3: path-level centroid for doc-lane HNSW (see _chunk_vectors_centroid).
                 cur.execute(
                     f"""
                     CREATE TABLE IF NOT EXISTS source_docs (
@@ -479,7 +619,19 @@ class PgvectorSourceRetrievalStore:
         self._ready = True
 
     def _ensure_bm25_fts_index(self, cur: Any) -> None:
-        """Recreate FTS gin index for bm25_extra (RET-11(b)). Idempotent by version."""
+        """创建/升级 BM25 用 FTS GIN 索引（RET-11b；不在每次 sync flush 里建）。
+
+        English: Index expression ``BM25_TSVECTOR_SQL`` — weighted tsvector of
+        ``section_title||text`` (A) and ``bm25_extra`` (C). Version in
+        ``source_index_meta.bm25_extra_fts_version``; bump → DROP + CREATE 全量重建。
+
+        **GIN 无应用层 tunable**：倒排结构由 Postgres ``USING gin(...)`` 默认算法维护；
+        表达式权重 A/C 在 ``bm25_document.BM25_TSVECTOR_SQL`` 写死。数据变更后由
+        UPSERT/UPDATE 触发行级 GIN 更新（同 HNSW 增量维护，非 Python 逻辑）。
+
+        数据写入：``sync`` flush UPSERT chunk 行（A 权字段）+ 拷贝 ``bm25_extra``（C 权）；
+        ``doc2query`` 离线写 ``source_files.bm25_extra``，不嵌入、不进向量列。
+        """
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS source_index_meta (
@@ -566,16 +718,30 @@ class PgvectorSourceRetrievalStore:
         visibility: str = "private",
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
-        """增量/全量同步 ``sources_dir`` 下可索引文件到 pgvector。
+        """增量/全量同步 ``sources_dir`` → PostgreSQL（切块·embed·落库·索引）。
+
+        English: Index-plane only (Turn 外). Phases reported via ``sync_progress``:
+        chunk → loading_embedder → embed → write → index (HNSW rebuild if force).
+
+        流程概要::
+
+          1. ensure_schema（HNSW/GIN 已存在则跳过 DDL）
+          2. scope stamp vs ``current_index_stamp()`` → 增量 or force_reindex
+          3. 扫描 mtime → dirty 文件 ``chunk_source_text(embed=False)``
+          4. 跨文件缓冲 → ``_flush_buffer``：
+               assign_deferred_vectors（embed）
+               DELETE+UPSERT 三表 + bm25_extra 拷贝（write）
+          5. force：写前 drop HNSW；末 ``_ensure_embedding_hnsw`` + scope stamp
 
         参数:
             sources_dir: 待扫描源目录。
-            workspace_root: 用于计算相对路径与 storage_path。
-            work_id: private 同步必填；seed 为 None。
-            visibility: ``seed`` 或 ``private``。
-            owner_user_id: 可选行级 owner。
+            workspace_root: 相对路径 / ``index_storage_path`` 前缀。
+            work_id: private 必填；seed 为 None。
+            visibility: ``seed`` | ``private``（决定 scope_id 与 ACL 列）。
+            owner_user_id: 可选行级 owner UUID。
         返回:
-            indexed_files、chunks、added/updated/skipped/removed、reindexed 等统计。
+            indexed_files、chunks、added/updated/skipped/removed、reindexed、
+            ann=hnsw、flush_chunk_cap 等统计。
         """
         import logging
         import time
@@ -804,6 +970,8 @@ class PgvectorSourceRetrievalStore:
 
                     check_sync_cancelled()
                     text_body = fp.read_text(encoding="utf-8", errors="replace")
+                    # Index path: defer embed — only stash embed_input on each chunk dict.
+                    # Cross-file batch embed happens in _flush_buffer (throughput + LANE_INDEX).
                     new_chunks = chunk_source_text(
                         fp, storage_path, text_body, embedder=None, embed=False
                     )
@@ -898,8 +1066,12 @@ class PgvectorSourceRetrievalStore:
                     except Exception:
                         pass
 
-                # Flush deferred embeds in cross-file batches, then write rows.
-                # Force reindex: drop HNSW for bulk load, larger flush, fewer commits.
+                # ── Embed + 落库主循环 ─────────────────────────────────────────────
+                # 跨文件缓冲 pending_jobs，满 batch_cap 条 chunk 触发 _flush_buffer：
+                #   (1) assign_deferred_vectors  → phase=embed
+                #   (2) DELETE 旧 chunk + UPSERT 三表 + bm25_extra  → phase=write
+                #   (3) commit → 增量时 pgvector 自动维护 HNSW；GIN 随 text 列更新
+                # force_reindex：写前 _drop_embedding_hnsw，更大 flush、更少 commit。
                 batch_cap = index_flush_chunk_cap(force_reindex=force_reindex)
                 commit_every = index_commit_every_flushes(force_reindex=force_reindex)
                 buffer_jobs: list[dict[str, Any]] = []
@@ -911,6 +1083,7 @@ class PgvectorSourceRetrievalStore:
                 every = progress_every_files()
 
                 if force_reindex and pending_jobs:
+                    # Bulk load without HNSW: each UPSERT would otherwise rebuild graph edges.
                     try:
                         from app.retrieval.sync_progress import report_sync_progress
 
@@ -938,6 +1111,7 @@ class PgvectorSourceRetrievalStore:
                     conn.commit()
                     hnsw_dropped = True
 
+                # 三表 UPSERT：chunk 向量 + 文件元数据 + doc centroid（见 _flush_buffer）。
                 _CHUNK_UPSERT_SQL = """
                     INSERT INTO source_chunks (
                         chunk_id, path, section_title, text, citation_id,
@@ -986,6 +1160,12 @@ class PgvectorSourceRetrievalStore:
                     """
 
                 def _flush_buffer(*, force_commit: bool = False) -> None:
+                    """单批 flush：embed → 删旧 chunk → 写三表 → 拷 bm25_extra → 可选 commit。
+
+                    English: One index-plane write unit. Vectors land in ``embedding``
+                    columns; HNSW/GIN maintenance is PostgreSQL-side (no Python graph API).
+                    ``phase=write`` progress fires after executemany, before commit.
+                    """
                     nonlocal chunks_embedded, files_done, added, updated, total_chunks
                     nonlocal flush_count
                     if not buffer_jobs:
@@ -996,6 +1176,7 @@ class PgvectorSourceRetrievalStore:
                     flat: list[dict[str, Any]] = []
                     for job in buffer_jobs:
                         flat.extend(job["chunks"])
+                    # Step 1 — embed: pop embed_input → chunk["vector"] (LANE_INDEX batches).
                     chunks_embedded += assign_deferred_vectors(
                         flat,
                         embedder,
@@ -1005,6 +1186,7 @@ class PgvectorSourceRetrievalStore:
                     )
 
                     paths = [job["storage_path"] for job in buffer_jobs]
+                    # Step 2 — replace chunks for touched paths (file-level atomicity).
                     cur.execute(
                         "DELETE FROM source_chunks WHERE path = ANY(%s)",
                         (paths,),
@@ -1057,6 +1239,7 @@ class PgvectorSourceRetrievalStore:
                             for c in new_chunks
                             if isinstance(c.get("vector"), list)
                         ]
+                        # Doc lane: one centroid row per path (mean of chunk embeddings).
                         centroid = _chunk_vectors_centroid(
                             [v for v in vectors if isinstance(v, list)]
                         )
@@ -1077,13 +1260,14 @@ class PgvectorSourceRetrievalStore:
                             added += 1
                         files_done += 1
 
+                    # Step 3 — persist rows (HNSW/GIN updated by Postgres on commit).
                     if file_rows:
                         cur.executemany(_FILE_UPSERT_SQL, file_rows)
                     if chunk_rows:
                         cur.executemany(_CHUNK_UPSERT_SQL, chunk_rows)
                     if doc_rows:
                         cur.executemany(_DOC_UPSERT_SQL, doc_rows)
-                    # RET-11(b): copy path-level bm25_extra onto chunks for this batch.
+                    # Step 4 — FTS C-weight: path-level bm25_extra (doc2query) → each chunk row.
                     cur.execute(
                         """
                         UPDATE source_chunks AS c
@@ -1143,6 +1327,7 @@ class PgvectorSourceRetrievalStore:
                 for path in removed:
                     cur.execute("DELETE FROM source_files WHERE path = %s", (path,))
                 if hnsw_dropped:
+                    # Logged as create-hnsw; actual DDL is _ensure_embedding_hnsw below.
                     try:
                         from app.retrieval.sync_progress import report_sync_progress
 
@@ -1166,7 +1351,9 @@ class PgvectorSourceRetrievalStore:
                         scope_id,
                         chunks_embedded,
                     )
-                # Always ensure ANN indexes exist (covers cancelled bulk-load mid-drop).
+                # HNSW：增量 → IF NOT EXISTS 无操作（图已在 UPSERT 时维护）；
+                # force / 中断恢复 → CREATE 重建 chunk+doc 两张 ANN 索引。
+                # 随后写 scope stamp，标记本 work/seed 嵌入空间与当前配置一致。
                 _ensure_embedding_hnsw(cur)
                 _write_scope_stamp(cur, scope_id, stamp)
                 _clear_reindex_epoch(cur, scope_id)
@@ -1204,7 +1391,58 @@ class PgvectorSourceRetrievalStore:
         }
 
     def _search_docs_ann(self, query: str, *, limit: int) -> list[str]:
-        """True doc-lane ANN over ``source_docs`` (P3). Empty → caller falls back."""
+        """Doc lane：在 ``source_docs`` centroid 向量上做 path 级 HNSW ANN。
+
+        English: P3 two-level retrieval — coarse document routing before chunk hybrid.
+        Unlike ``search_vector``, returns **file paths only** (no excerpts). Chunk
+        lane still produces the actual text hits; doc lane only biases which paths win.
+
+        =============================================================================
+        心智模型：centroid 是什么
+        =============================================================================
+        索引时 ``sync._flush_buffer`` 对该 path 下所有 chunk 的 ``embedding`` 做
+        算术均值（``_chunk_vectors_centroid``），写入 ``source_docs.embedding``。
+        因此 doc 向量 ≈「整篇文档在 embed 空间里的粗中心」，不是重新 embed 摘要。
+
+        查询语义: query 与 **文档级中心** 近 → 该 path 下 chunk 在 merge 阶段
+        获得 ``doc_boost``（默认 +0.35），排序靠前；**不会**丢弃仅 chunk 命中的结果。
+
+        =============================================================================
+        执行流程
+        =============================================================================
+        ::
+
+          ensure_schema()
+          query_vec = get_embedder().embed(query)   # 与 chunk lane 同一模型/维数
+          _prepare_hnsw_filtered_scan(limit)        # iterative_scan（共享 HNSW 图）
+          SELECT path FROM source_docs
+            WHERE visibility/work_id ACL
+            ORDER BY embedding <=> query_vec
+            LIMIT limit
+          display_path_from_index(path)             # 剥 work 视图前缀
+
+        =============================================================================
+        降级与调用关系
+        =============================================================================
+        仅由 ``search_hybrid._doc_lane`` 调用（与 ``_chunk_lane`` 并行）::
+
+          source_docs 空表 → 返回 [] → caller ``_doc_lane_approx``
+          SQL 异常 / 过滤后 0 行 → ``_doc_lane_approx``
+          ``retrieval_two_level_doc_table=False`` → 直接 approx，不进本函数
+
+        ``_doc_lane_approx``: 宽 ``search_vector(limit≥40)`` → 按 path 去重 ≤8。
+
+        =============================================================================
+        参数 / 返回 / 不变量
+        =============================================================================
+        参数:
+            query: 用户检索串。
+            limit: 最多 path 数（``RetrievalProfile.two_level_doc_limit``，默认 8）。
+        返回:
+            展示用相对 path，余弦近邻序；无 tenant 窗口（无 work 且 seed 不可见）→ ``[]``。
+        不变量:
+            不读 ``source_chunks.text``；不写入库；维数 ≠ 配置 → ``[]``（不抛）。
+        """
         self.ensure_schema()
         query_vec = get_embedder().embed(query)
         if not query_vec or len(query_vec) != self._dimensions:
@@ -1265,7 +1503,49 @@ class PgvectorSourceRetrievalStore:
         ]
 
     def search_vector(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
-        """chunk 级余弦 ANN；按 tenant context 过滤 seed/work。"""
+        """Chunk lane · 稠密向量路：``source_chunks`` 上 HNSW 余弦 ANN。
+
+        English: Dense retrieval leg of hybrid. One ``embed(query)`` per call; results
+        are chunk-level ``ChunkHit`` with excerpt, line range, and cosine-like score.
+
+        =============================================================================
+        与索引的对应关系
+        =============================================================================
+        读 ``source_chunks.embedding``（sync 时 ``assign_deferred_vectors`` 写入；
+        输入曾由 ``build_embed_text`` 组装）。索引 HNSW: ``source_chunks_embedding_hnsw``，
+        距离 ``vector_cosine_ops``；ST 向量已 L2 归一化 → ``score = 1 - (emb <=> q)``。
+
+        =============================================================================
+        执行流程
+        =============================================================================
+        ::
+
+          get_embedder().embed(query)              # LANE_QUERY（检索优先）
+          _prepare_hnsw_filtered_scan(limit):
+              SET LOCAL hnsw.iterative_scan = relaxed_order
+              SET LOCAL hnsw.max_scan_tuples = max(20000, limit×500)
+          SQL: … FROM source_chunks
+               WHERE seed / work_id ACL
+               ORDER BY embedding <=> q LIMIT limit
+          组装 ChunkHit（path 经 display_path_from_index）
+
+        **为何 iterative_scan**: 全库共用一张 HNSW（seed + 多 work）。纯
+        ``ORDER BY <=> LIMIT k`` 再 SQL 过滤 work，可能 k 个全局近邻全是 seed →
+        当前 work 0 命中。relaxed_order 在过滤后不足时继续扫 heap。
+
+        =============================================================================
+        在 hybrid 中的位置
+        =============================================================================
+        ``search_hybrid._chunk_lane`` 以 ``top_k``（非最终 limit）调用本函数，
+        与 ``search_bm25`` 并列；两榜经 ``reciprocal_rank_fusion`` 合并。
+        仅 vector 有命中 / 仅 bm25 有命中时跳过 RRF，直接单榜进 pool。
+
+        参数:
+            query: 检索文本（自然语言或关键词）。
+            limit: ANN 深度；hybrid 内为 ``top_k``，通常 80–360。
+        返回:
+            相似度降序 ``ChunkHit``；``score<=0`` 丢弃；无 ACL 窗口 → ``[]``。
+        """
         self.ensure_schema()
         query_vec = get_embedder().embed(query)
         if not query_vec or len(query_vec) != self._dimensions:
@@ -1363,7 +1643,46 @@ class PgvectorSourceRetrievalStore:
         return kept
 
     def search_bm25(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
-        """BM25：有内存 cache 时走 Okapi；否则 Postgres FTS（可选 Okapi 重排）。"""
+        """Chunk lane · 稀疏词法路：GIN FTS 召回 + 可选 Okapi BM25 重排。
+
+        English: Lexical leg of hybrid — complements ``search_vector`` for exact
+        tokens, titles, and doc2query ``bm25_extra`` pseudo-queries. Production
+        pgvector always hits Postgres; ``_chunk_cache`` branch is test/JSON parity.
+
+        =============================================================================
+        生产路径 ``_search_bm25_db``（pgvector 默认）
+        =============================================================================
+        ::
+
+          build_weighted_or_tsquery(query)
+              → 强词/实体 OR（:A/:D 权重），否则 plainto_tsquery AND
+          GIN: BM25_TSVECTOR_SQL @@ tsquery
+              A 权 = section_title + text（chunk 正文）
+              C 权 = bm25_extra（path 级，doc2query 离线写入）
+          ts_rank_cd 初排 → LIMIT fetch_limit
+          [若 retrieval_bm25_rescore_enabled]
+              fetch_limit ≈ limit×4 → BM25Scorer Okapi 在池内重排
+              bm25_extra 词命中 ×0.35 加成
+
+        =============================================================================
+        与 vector 路的差异（为何要两路）
+        =============================================================================
+        - Vector: 语义相近即可，不要求字面相同（gte-small / bge-m3）。
+        - BM25: 专名、编号、罕见词、标题精确匹配；extra 模拟「用户可能怎么搜」。
+        - Hybrid: RRF 按 **rank 位次** 融合，非 raw 分数加权；默认 vector/bm25 等权
+          （``RetrievalProfile``；``vector_heavy`` profile 偏向量）。
+
+        =============================================================================
+        参数 / 返回
+        =============================================================================
+        参数:
+            query: 检索串。
+            limit: 返回条数；rescore 时 SQL 先拉更大池再 Okapi 截断。
+        返回:
+            ``ChunkHit``；ACL 与 ``search_vector`` 相同。
+        分支:
+            ``self._chunk_cache`` 非空 → ``_search_bm25_cached``（内存 Okapi，单测）。
+        """
         # Retain the cache path for focused unit tests and callers that explicitly
         # provide a small cache. Normal pgvector requests query FTS directly.
         if self._chunk_cache:
@@ -1376,6 +1695,12 @@ class PgvectorSourceRetrievalStore:
     def _search_bm25_cached(
         self, query: str, *, chunks: list[dict[str, Any]], limit: int
     ) -> list[ChunkHit]:
+        """内存 chunk 列表上 Okapi BM25（``_chunk_cache`` / rescore 二次排序用）。
+
+        English: Pure-Python ``BM25Scorer`` over provided dict rows — no GIN SQL.
+        Used by ``search_bm25`` when cache populated (tests) and by ``_search_bm25_db``
+        rescore path after FTS candidate fetch.
+        """
         by_id = {str(c["chunk_id"]): c for c in chunks if c.get("chunk_id")}
         ranked = BM25Scorer(chunks).search(query, limit=limit)
         hits: list[ChunkHit] = []
@@ -1387,7 +1712,37 @@ class PgvectorSourceRetrievalStore:
         return hits
 
     def _search_bm25_db(self, query: str, *, limit: int) -> list[ChunkHit]:
-        """Postgres FTS recall; optionally Okapi-rescore candidates (P1②)."""
+        """Postgres FTS 拉取 chunk 行；可选在候选池内 Okapi 重排（P1②）。
+
+        English: Low-level BM25 lane for pgvector — issues ``@@`` against GIN index
+        ``source_chunks_text_fts_idx``, then optionally reranks with ``BM25Scorer``.
+
+        =============================================================================
+        SQL 两模式（由 ``retrieval_bm25_rescore_enabled`` 决定）
+        =============================================================================
+        **rescore=True**（默认生产）::
+
+          SELECT …, bm25_extra   -- 无 ts_rank 作最终分
+          WHERE BM25_TSVECTOR_SQL @@ tsquery
+          ORDER BY ts_rank_cd DESC
+          LIMIT fetch_limit (≈ limit×4)
+          → Python BM25Scorer.search → _chunk_to_hit
+
+        **rescore=False**::
+
+          SELECT …, ts_rank_cd AS score
+          ORDER BY score DESC LIMIT limit
+          → 直接 ChunkHit（不再 Okapi）
+
+        tsquery 构造见 ``bm25_document.build_weighted_or_tsquery``；ACL 三分支
+        （seed+work / work only / seed only）与 ``search_vector`` 一致。
+
+        参数:
+            query: 检索串。
+            limit: 最终返回条数上限。
+        返回:
+            ``ChunkHit`` 列表；不可见 tenant → ``[]``。
+        """
         self.ensure_schema()
         from app.retrieval.tenant_visibility import display_path_from_index
         from app.tenant_context import current_visibility_seed, current_work_id
@@ -1504,7 +1859,90 @@ class PgvectorSourceRetrievalStore:
         ]
 
     def search_hybrid(self, query: str, *, limit: int = 10) -> list[ChunkHit]:
-        """向量 + BM25 → RRF 融合 → 可选 rerank；profile 开启时并行 doc+chunk 两级。"""
+        """店内 hybrid 检索 orchestrator（``search_sources`` 默认 ``retrieval_mode``）。
+
+        English: Read-only query path after index build. Orchestrates dense+sparse
+        chunk recall, optional rerank, optional two-level doc path boost. Does **not**
+        call ``sync`` or mutate indexes. L1/L2 audit when ``begin_audit_capture`` active.
+
+        =============================================================================
+        职责边界
+        =============================================================================
+        - **本函数**: lane 调度、RRF、rerank、doc_boost、返回 ``ChunkHit[:limit]``。
+        - **不在本函数**: 工具层 cover/tier/keyword-fallback/L3（``sources_search``）；
+          切块/embed/建 HNSW（``sync``）；Turn 内索引同步。
+
+        =============================================================================
+        深度与 profile 旋钮
+        =============================================================================
+        ::
+
+          top_k = max(limit × 4, 20)
+          若 retrieval_rerank_enabled:
+              top_k = max(top_k, retrieval_rerank_pool)   # 常见 240–360
+
+          active_retrieval_profile() → RetrievalProfile:
+              rrf_k, vector_weight, bm25_weight     # RRF 融合
+              two_level_enabled, two_level_timeout_seconds (~0.3)
+              two_level_doc_limit (8), doc_boost (0.35)
+
+        =============================================================================
+        主流程（two_level_enabled 默认 True）
+        =============================================================================
+        ::
+
+          ┌─ parallel_two_level ─────────────────────────────────────┐
+          │  Thread A: _doc_lane()                                   │
+          │    _search_docs_ann(limit=8)  或  _doc_lane_approx       │
+          │  Thread B: _chunk_lane()                                 │
+          │    search_vector(top_k)  ──┐                             │
+          │    search_bm25(top_k)    ──┼─ audit L1a record_lane_hits│
+          │    reciprocal_rank_fusion  ──┘ audit L1 record_recall_pool│
+          │    rerank_hits (optional)     audit L2 record_ranked     │
+          └──────────────────────────────────────────────────────────┘
+          merge_doc_and_chunk_hits(doc_paths, chunk_hits, doc_boost)
+          return merged[:limit]
+
+        **two_level 关闭**: 仅 ``_chunk_lane()`` → ``[:limit]``，无 doc 并行。
+
+        **RRF**（``fusion.reciprocal_rank_fusion``）: 按 chunk_id 在位次 k 上累加
+        ``weight/(rrf_k+rank+1)``；仅一路有命中则跳过 RRF（pool_source=vector|bm25）。
+
+        **rerank**（``rerank.rerank_hits``）: 默认 lexical（词重叠/标题/短语）；
+        ``retrieval_rerank_cross_encoder`` 开时用 cross-encoder（池 capped 20）。
+
+        **doc_boost**（``two_level.merge_doc_and_chunk_hits``）: chunk.path ∈ doc_paths
+        → score += doc_boost；boosted 块整体排在 rest 前，**不删除**仅 chunk 命中项。
+        发生在 L2 rerank **之后**，不再记入 ``record_ranked``。
+
+        **超时**: ``parallel_two_level`` 预算用尽 → doc 或 chunk 可能为空；
+        chunk 空且 timed_out → 同步再跑一遍 ``_chunk_lane()`` 保底。
+
+        =============================================================================
+        审计层（需 ``search_sources`` 已 ``begin_audit_capture``）
+        =============================================================================
+        | 阶段 | 函数 | 含义 |
+        | L1a | ``record_lane_hits`` | vector/bm25 分榜预览（融合前） |
+        | L1 | ``record_recall_pool`` | RRF 后、rerank 前 fused/单榜池 |
+        | L2 | ``record_ranked`` | rerank 后；method=lexical/none/cross_encoder |
+        | L3 | ``sources_search`` | tool_result 摘录（本函数不写入） |
+
+        =============================================================================
+        参数 / 返回 / 下游
+        =============================================================================
+        参数:
+            query: 与索引同 embed 空间（``build_embed_text`` 训练出的向量几何）。
+            limit: 本层返回上限；caller 常传入更大 fetch 再滤 prefix/tenant。
+        返回:
+            ``ChunkHit``，len ≤ limit；score 已含 RRF/rerank/doc_boost 效果。
+        下游:
+            ``store.search`` → ``sources_search.search_sources`` → 模型 tool_result。
+
+        相关实现:
+            ``search_vector`` · ``search_bm25`` · ``_search_docs_ann``
+            ``two_level.parallel_two_level`` · ``two_level.merge_doc_and_chunk_hits``
+            ``fusion.reciprocal_rank_fusion`` · ``rerank.rerank_hits`` · ``audit.*``
+        """
         from app.retrieval.profile import active_retrieval_profile
 
         profile = active_retrieval_profile()
@@ -1514,6 +1952,22 @@ class PgvectorSourceRetrievalStore:
             top_k = max(top_k, settings.retrieval_rerank_pool)
 
         def _chunk_lane() -> list[ChunkHit]:
+            """Chunk 主车道：dense ANN + sparse FTS → RRF → rerank（L1/L2 审计）。
+
+            English: Runs inside ``parallel_two_level`` worker or alone when two-level
+            disabled. Vector and BM25 share the same ``query`` string but hit different
+            indexes (HNSW vs GIN). Fusion uses rank positions, not raw scores.
+
+            顺序（同线程）::
+
+              search_vector(top_k)
+              search_bm25(top_k)
+              → [两路皆空] return []
+              → [单路] 该路作 pool
+              → [双路] reciprocal_rank_fusion(k=profile.rrf_k, weights)
+              record_recall_pool  # L1
+              rerank_hits?        # L2
+            """
             from app.retrieval.audit import (
                 audit_capture_active,
                 record_lane_hits,
@@ -1587,7 +2041,15 @@ class PgvectorSourceRetrievalStore:
             return hits
 
         def _doc_lane_approx() -> list[str]:
-            # Approximate doc lane from distinct paths in a wider ANN pull.
+            """Doc lane 降级：不读 ``source_docs``，用宽 chunk ANN 推断 path。
+
+            English: Fallback when centroid table empty, ANN fails, or
+            ``retrieval_two_level_doc_table=False``. Pulls ``max(top_k,40)`` chunk
+            hits, dedupe by ``path``, cap at ``two_level_doc_limit``.
+
+            语义: 近似「哪些文件的 chunk 在向量空间里离 query 最近」，精度低于
+            centroid，但无 ``source_docs`` 依赖时仍能给 merge 提供 doc_paths。
+            """
             wide = self.search_vector(query, limit=max(top_k, 40))
             seen: list[str] = []
             for hit in wide:
@@ -1598,6 +2060,18 @@ class PgvectorSourceRetrievalStore:
             return seen
 
         def _doc_lane() -> list[str]:
+            """Doc lane：``source_docs`` centroid HNSW，失败则 ``_doc_lane_approx``。
+
+            English: Submitted to ``parallel_two_level`` as ``doc_fn``. Returns path
+            list only; does not embed separately from chunk lane (same query string
+            when ``_search_docs_ann`` runs — each lane embeds once in its thread).
+
+            分支::
+
+              retrieval_two_level_doc_table=False → approx only
+              _search_docs_ann → 非空 paths
+              异常 / 空 → _doc_lane_approx
+            """
             if not bool(settings.retrieval_two_level_doc_table):
                 return _doc_lane_approx()
             try:

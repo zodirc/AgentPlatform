@@ -108,7 +108,14 @@ class PriorityLaneEmbedder:
 
 
 def maybe_wrap_lanes(inner: Any) -> Any:
-    """按配置将 inner embedder 包一层 PriorityLaneEmbedder。"""
+    """按配置将裸 embedder 包一层 ``PriorityLaneEmbedder``（query/index 优先级隔离）。
+
+    English: Optional QoS wrapper — not required for vector correctness. When
+    enabled, index sync batches and search queries share one model without
+    long embed runs starving interactive ``search_sources`` latency.
+    See ``get_embedder()`` call-site comment for rationale; disable via
+    ``embedding_query_priority=False``.
+    """
     if not bool(getattr(settings, "embedding_query_priority", True)):
         return inner
     if isinstance(inner, PriorityLaneEmbedder):
