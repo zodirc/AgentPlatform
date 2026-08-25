@@ -670,19 +670,21 @@ def load_builtin_web_serial_voice() -> WritingCard | None:
 def with_builtin_style_if_missing(
     cards: list[WritingCard],
     message: str = "",
+    *,
+    workspace_root: Path | None = None,
 ) -> list[WritingCard]:
-    """无 style 时补默认（网文推断用 web_serial 声口）。"""
+    """无 style 时补默认（网文 mode 用 web_serial 声口）。"""
     if any(c.kind == "style" for c in cards):
         return cards
     builtin = None
-    if message.strip():
-        try:
-            from app.writing.work_mode import infer_work_mode
+    try:
+        from app.writing.work_mode import resolve_work_mode
 
-            if infer_work_mode(message) == "web_serial":
-                builtin = load_builtin_web_serial_voice()
-        except Exception:
-            builtin = None
+        mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
+        if mode == "web_serial":
+            builtin = load_builtin_web_serial_voice()
+    except Exception:
+        builtin = None
     if builtin is None:
         builtin = load_builtin_default_voice()
     if builtin is None:
@@ -790,6 +792,7 @@ def prepare_writing_system_prompt(
     cards = with_builtin_style_if_missing(
         load_writing_cards(workspace_root=workspace_root),
         message=message,
+        workspace_root=workspace_root,
     )
     selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)

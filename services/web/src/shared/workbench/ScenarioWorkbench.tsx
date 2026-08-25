@@ -16,6 +16,7 @@ import { WorkspaceFileViewer } from "../../scenarios/agent/WorkspaceFileViewer";
 import { ScenarioSidebarExtras } from "../../scenarios/ScenarioSidebarExtras";
 import { RagDebugModal } from "../../scenarios/writing/RagDebugModal";
 import { SourcesLibraryModal } from "../../scenarios/writing/SourcesLibraryModal";
+import { WritingSignalsModal } from "../../scenarios/writing/WritingSignalsModal";
 import { useAgentPanel } from "./agentPanel";
 
 function artifactBadgeCount(
@@ -76,6 +77,7 @@ export function ScenarioWorkbenchView({
   );
   const [sourcesLibraryOpen, setSourcesLibraryOpen] = useState(false);
   const [ragDebugOpen, setRagDebugOpen] = useState(false);
+  const [writingSignalsOpen, setWritingSignalsOpen] = useState(false);
   const [openSubagentRequest, setOpenSubagentRequest] = useState<string | null>(
     null,
   );
@@ -143,6 +145,11 @@ export function ScenarioWorkbenchView({
                 onOpenRagDebug={
                   scenarioId === "writing"
                     ? () => setRagDebugOpen(true)
+                    : undefined
+                }
+                onOpenSignals={
+                  scenarioId === "writing"
+                    ? () => setWritingSignalsOpen(true)
                     : undefined
                 }
                 onOpenCollabTeam={
@@ -303,6 +310,10 @@ export function ScenarioWorkbenchView({
               setWorkspaceViewerPath(path);
               setSourcesLibraryOpen(false);
             }}
+          />
+          <WritingSignalsModal
+            open={writingSignalsOpen}
+            onClose={() => setWritingSignalsOpen(false)}
           />
           <RagDebugModal
             open={ragDebugOpen}

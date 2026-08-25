@@ -4,13 +4,27 @@ import { Card, CardTitle } from "../../components/ui/card";
 type Props = {
   onOpenSources: () => void;
   onOpenRagDebug: () => void;
+  onOpenSignals: () => void;
 };
 
-export function WritingSidebarTools({ onOpenSources, onOpenRagDebug }: Props) {
+export function WritingSidebarTools({
+  onOpenSources,
+  onOpenRagDebug,
+  onOpenSignals,
+}: Props) {
   return (
     <Card className="border-primary/30 bg-primary/10">
       <CardTitle className="text-primary">写作工具</CardTitle>
       <div className="mt-2 flex flex-wrap gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="border-primary/40 text-primary"
+          onClick={onOpenSignals}
+        >
+          写作信号
+        </Button>
         <Button
           type="button"
           size="sm"
@@ -31,8 +45,8 @@ export function WritingSidebarTools({ onOpenSources, onOpenRagDebug }: Props) {
         </Button>
       </div>
       <p className="mt-2 text-[10px] text-muted-foreground/80">
-        书稿默认追加到 manuscript.md。长会话可用 /compact
-        压缩对话（不丢书）；写下一章不必整本重读。大纲一轮、分章推进更省用量。
+        「写作信号」：作品模式（经典/网文）与奖惩贴近强度。书稿默认追加到
+        manuscript.md；长会话可用 /compact。
       </p>
     </Card>
   );

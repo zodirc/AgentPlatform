@@ -1,13 +1,22 @@
-"""作品模式推断：经典文学 vs 连载网文；章三要素职务。"""
+"""作品模式推断：经典文学 vs 连载网文；章三要素职务；可写 prefs sidecar。"""
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
+from typing import Any, Literal
 
 from app.writing.signals.prefs_loader import _module as _writing_prefs
 
 normalize_work_mode = _writing_prefs().normalize_work_mode
 WORK_MODES = _writing_prefs().WORK_MODES
+default_style_gains = _writing_prefs().default_style_gains
+FRAGMENT_TYPES = _writing_prefs().FRAGMENT_TYPES
+
+# Writable from workbench (not under .agent/). Holds work_mode pin + style_gains.
+WRITING_PREFS_REL = Path("writing_prefs.json")
+WorkModeSource = Literal["auto", "user"]
 
 _WEB_SERIAL = re.compile(
     r"修仙|玄幻|仙侠|修真|网文|升级|爽文|系统流|穿越|重生|"
@@ -35,6 +44,136 @@ _ELEMENT_LABELS = {
     "environment": "环境",
 }
 
+_FRAGMENT_LABELS = {
+    "plot_progress": "情节推进",
+    "worldview_texture": "环境质地",
+    "climax_beat": "高潮",
+    "battle_action": "动作",
+    "dialogue_dyad": "对白",
+    "mixed": "综合",
+}
+
+
+def work_mode_label(mode: str) -> str:
+    return _MODE_LABELS.get(normalize_work_mode(mode), mode)
+
+
+def fragment_label(frag: str) -> str:
+    return _FRAGMENT_LABELS.get(frag, frag)
+
+
+def _workspace_root(workspace_root: Path | None = None) -> Path:
+    from app.settings import settings
+
+    return Path(workspace_root or settings.workspace_root).resolve()
+
+
+def writing_prefs_path(*, workspace_root: Path | None = None) -> Path:
+    return _workspace_root(workspace_root) / WRITING_PREFS_REL
+
+
+def load_writing_prefs(*, workspace_root: Path | None = None) -> dict[str, Any]:
+    """读工作区 writing_prefs.json；缺省空 dict。"""
+    path = writing_prefs_path(workspace_root=workspace_root)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_writing_prefs(
+    prefs: dict[str, Any],
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """整文件写入 writing_prefs.json（工作台可写路径）。"""
+    path = writing_prefs_path(workspace_root=workspace_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = dict(prefs)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return payload
+
+
+def load_work_mode_override(
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """从 writing_prefs.json 读 work_mode 钉死态。"""
+    data = load_writing_prefs(workspace_root=workspace_root)
+    raw = data.get("work_mode")
+    if isinstance(raw, dict):
+        source = str(raw.get("source") or "auto").strip().lower()
+        if source not in {"auto", "user"}:
+            source = "auto"
+        return {"mode": normalize_work_mode(str(raw.get("mode") or "")), "source": source}
+    # Legacy flat keys
+    if data.get("source") in {"auto", "user"}:
+        return {
+            "mode": normalize_work_mode(str(data.get("mode") or "")),
+            "source": str(data.get("source")),
+        }
+    return None
+
+
+def save_work_mode_override(
+    *,
+    mode: str | None = None,
+    source: WorkModeSource = "user",
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """更新 prefs 中的 work_mode；保留 style_gains。"""
+    data = load_writing_prefs(workspace_root=workspace_root)
+    if source == "auto":
+        data["work_mode"] = {"source": "auto", "mode": normalize_work_mode(mode)}
+    else:
+        data["work_mode"] = {"source": "user", "mode": normalize_work_mode(mode)}
+    return save_writing_prefs(data, workspace_root=workspace_root)
+
+
+def load_style_gains(
+    *,
+    work_mode: str,
+    workspace_root: Path | None = None,
+) -> dict[str, float]:
+    """用户保存的 gains；缺键用该 mode 的默认（非全 1.0）。"""
+    defaults = default_style_gains(work_mode)
+    data = load_writing_prefs(workspace_root=workspace_root)
+    raw = data.get("style_gains")
+    if not isinstance(raw, dict):
+        return dict(defaults)
+    out: dict[str, float] = {}
+    for frag in FRAGMENT_TYPES:
+        try:
+            if frag in raw:
+                out[frag] = max(0.0, min(1.0, float(raw[frag])))
+            else:
+                out[frag] = float(defaults[frag])
+        except (TypeError, ValueError):
+            out[frag] = float(defaults[frag])
+    return out
+
+
+def save_style_gains(
+    gains: dict[str, Any],
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """更新 style_gains；保留 work_mode。"""
+    data = load_writing_prefs(workspace_root=workspace_root)
+    cleaned: dict[str, float] = {}
+    for frag in FRAGMENT_TYPES:
+        try:
+            cleaned[frag] = max(0.0, min(1.0, float(gains.get(frag, 0.7))))
+        except (TypeError, ValueError):
+            cleaned[frag] = 0.7
+    data["style_gains"] = cleaned
+    return save_writing_prefs(data, workspace_root=workspace_root)
+
 
 def infer_work_mode(
     message: str,
@@ -51,6 +190,26 @@ def infer_work_mode(
     if _WEB_SERIAL.search(blob):
         return "web_serial"
     return normalize_work_mode(None)
+
+
+def resolve_work_mode(
+    message: str = "",
+    *,
+    outline: str = "",
+    style_hint: str = "",
+    workspace_root: Path | None = None,
+    override: str | None = None,
+) -> tuple[str, WorkModeSource]:
+    """优先显式 override / 用户钉死的 prefs，否则推断。"""
+    if override is not None and str(override).strip():
+        return normalize_work_mode(override), "user"
+    stored = load_work_mode_override(workspace_root=workspace_root)
+    if stored and stored.get("source") == "user":
+        return normalize_work_mode(str(stored.get("mode"))), "user"
+    return (
+        infer_work_mode(message, outline=outline, style_hint=style_hint),
+        "auto",
+    )
 
 
 def infer_chapter_element(duty: str) -> str | None:
@@ -73,15 +232,21 @@ def infer_chapter_element(duty: str) -> str | None:
     return hits[0][1]
 
 
-def default_opening_duty(work_mode: str) -> str:
+def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str:
     """无 outline 时的开篇默认职务。"""
     mode = normalize_work_mode(work_mode)
+    kind = (chapter_kind or "live_character").strip().lower()
+    if kind == "conflict_hook":
+        return (
+            "开篇·冲突强钩：人物带着第一阶麻烦进场；"
+            "仍要让人认得他；勿卷纲浓缩、勿兑卷末高潮"
+        )
     if mode == "web_serial":
         return (
-            "开篇：人物出场+悬念/冲突露头（可强钩）；设定可感可用；"
-            "勿提前兑本卷大高潮"
+            "开篇·立人：先让读者认识这个人怎么过/怎么处；"
+            "可留一丝信息差，禁止气氛+悬念+设定+主线一次灌满"
         )
-    return "开篇：环境托人物，先写可站之处；机构专名勿当第一词"
+    return "开篇·立人：环境托人物，先写可站之处；机构专名勿当第一词"
 
 
 def fragment_obligations(work_mode: str) -> dict[str, str]:

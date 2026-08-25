@@ -38,17 +38,45 @@ def test_infer_fragment_from_duty_three_elements() -> None:
 def test_default_opening_duty_differs_by_mode() -> None:
     lit = default_opening_duty("literary")
     web = default_opening_duty("web_serial")
-    assert "机构" in lit
-    assert "强钩" in web or "悬念" in web
+    assert "立人" in lit or "机构" in lit
+    assert "立人" in web
+    hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
+    assert "强钩" in hook
 
 
-def test_spec_block_web_serial(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec_block_opening_live_character(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from app.settings import settings
 
     monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
-    spec = build_writing_spec_block("写修仙长篇第一章")
+    spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "work_mode: `web_serial`" in spec
+    assert "opening" in spec
+    assert "live_character" in spec
+    assert "卷纲浓缩" in spec or "立人" in spec
     assert "过日子—加压—落下" not in spec
+
+
+def test_opening_chapter_kind_pin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.settings import settings
+    from app.writing.chapter_role import (
+        resolve_chapter_role,
+        save_opening_chapter_kind,
+    )
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_opening_chapter_kind("conflict_hook", workspace_root=tmp_path)
+    role = resolve_chapter_role(
+        section_id="ch1",
+        message="写修仙长篇第一章",
+        work_mode="web_serial",
+        workspace_root=tmp_path,
+    )
+    assert role["chapter_position"] == "opening"
+    assert role["chapter_kind"] == "conflict_hook"
+    spec = build_writing_spec_block("写修仙长篇第一章")
+    assert "conflict_hook" in spec
 
 
 def test_spec_block_literary_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -57,6 +85,41 @@ def test_spec_block_literary_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
     spec = build_writing_spec_block("写一篇故事")
     assert "work_mode: `literary`" in spec
+
+
+def test_resolve_work_mode_user_override(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.settings import settings
+    from app.writing.work_mode import resolve_work_mode, save_work_mode_override
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_work_mode_override(mode="web_serial", source="user", workspace_root=tmp_path)
+    mode, source = resolve_work_mode("写一篇故事", workspace_root=tmp_path)
+    assert mode == "web_serial"
+    assert source == "user"
+
+
+def test_resolve_work_mode_auto_ignores_stored_mode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.settings import settings
+    from app.writing.work_mode import resolve_work_mode, save_work_mode_override
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_work_mode_override(mode="web_serial", source="auto", workspace_root=tmp_path)
+    mode, source = resolve_work_mode("写一篇故事", workspace_root=tmp_path)
+    assert mode == "literary"
+    assert source == "auto"
+
+
+def test_spec_block_respects_user_pin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.settings import settings
+    from app.writing.work_mode import save_work_mode_override
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_work_mode_override(mode="web_serial", source="user", workspace_root=tmp_path)
+    spec = build_writing_spec_block("写一篇故事")
+    assert "work_mode: `web_serial`" in spec
+    assert "手动" in spec
 
 
 def test_platform_weights_differ_by_mode() -> None:
@@ -96,3 +159,48 @@ def test_apply_work_mode_overlay() -> None:
     assert web["work_mode"] == "web_serial"
     pen = web["signal_penalties"]["mixed"]["serial_hook_flat"]
     assert pen < 0
+
+
+def test_default_style_gains_not_full() -> None:
+    wp_path = (
+        Path(__file__).resolve().parents[3]
+        / "packages"
+        / "contracts"
+        / "python"
+        / "agent_contracts"
+        / "writing_prefs.py"
+    )
+    spec = importlib.util.spec_from_file_location("wp", wp_path)
+    assert spec and spec.loader
+    wp = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(wp)
+    lit = wp.default_style_gains("literary")
+    web = wp.default_style_gains("web_serial")
+    assert max(lit.values()) < 1.0
+    assert max(web.values()) < 1.0
+    assert lit["dialogue_dyad"] > lit["battle_action"]
+    assert web["plot_progress"] > web["dialogue_dyad"]
+    prefs = wp.platform_prefs_payload(work_mode="literary")
+    assert prefs["style_gains"]["dialogue_dyad"] == lit["dialogue_dyad"]
+    # Scaled: not full platform delta
+    full = wp.PLATFORM_SIGNAL_PENALTIES["staccato_uniform"]
+    scaled = prefs["signal_penalties"]["dialogue_dyad"]["staccato_uniform"]
+    assert abs(scaled - full * lit["dialogue_dyad"]) < 1e-6
+
+
+def test_style_gains_sidecar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.settings import settings
+    from app.writing.work_mode import (
+        load_style_gains,
+        save_style_gains,
+        writing_prefs_path,
+    )
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_style_gains({"dialogue_dyad": 0.4, "mixed": 0.9}, workspace_root=tmp_path)
+    assert writing_prefs_path(workspace_root=tmp_path).is_file()
+    gains = load_style_gains(work_mode="literary", workspace_root=tmp_path)
+    assert gains["dialogue_dyad"] == 0.4
+    assert gains["mixed"] == 0.9
+    # Missing keys filled from literary defaults
+    assert 0 < gains["battle_action"] < 1

@@ -15,6 +15,7 @@ type Props = {
   wb: WorkbenchState;
   onOpenSources?: () => void;
   onOpenRagDebug?: () => void;
+  onOpenSignals?: () => void;
   onOpenCollabTeam?: () => void;
 };
 
@@ -36,6 +37,7 @@ export function ScenarioSidebarExtras({
   wb,
   onOpenSources,
   onOpenRagDebug,
+  onOpenSignals,
   onOpenCollabTeam,
 }: Props): ReactNode {
   const id = wb.scenarioId;
@@ -54,10 +56,11 @@ export function ScenarioSidebarExtras({
   if (id === "writing") {
     return (
       <div className="space-y-3">
-        {onOpenSources && onOpenRagDebug ? (
+        {onOpenSources && onOpenRagDebug && onOpenSignals ? (
           <WritingSidebarTools
             onOpenSources={onOpenSources}
             onOpenRagDebug={onOpenRagDebug}
+            onOpenSignals={onOpenSignals}
           />
         ) : null}
         {planBlock}
@@ -74,6 +77,7 @@ export function ScenarioSidebarExtras({
           <WritingSidebarTools
             onOpenSources={onOpenSources}
             onOpenRagDebug={onOpenRagDebug}
+            onOpenSignals={onOpenSignals ?? (() => undefined)}
           />
         ) : null}
         {planBlock}

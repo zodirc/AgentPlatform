@@ -267,6 +267,26 @@ PLATFORM_SIGNAL_REWARDS_BY_MODE: dict[str, dict[str, float]] = {
     "web_serial": PLATFORM_SIGNAL_REWARDS_WEB,
 }
 
+# Per-fragment signal strength defaults — never all 1.0; mode emphasizes different axes.
+DEFAULT_STYLE_GAINS: dict[str, dict[str, float]] = {
+    "literary": {
+        "dialogue_dyad": 0.85,
+        "worldview_texture": 0.80,
+        "mixed": 0.70,
+        "plot_progress": 0.55,
+        "climax_beat": 0.50,
+        "battle_action": 0.35,
+    },
+    "web_serial": {
+        "plot_progress": 0.85,
+        "climax_beat": 0.75,
+        "battle_action": 0.70,
+        "mixed": 0.70,
+        "worldview_texture": 0.55,
+        "dialogue_dyad": 0.50,
+    },
+}
+
 
 def _signal_table(template: dict[str, float]) -> dict[str, dict[str, float]]:
     return {frag: dict(template) for frag in FRAGMENT_TYPES}
@@ -280,19 +300,34 @@ def _clamp_gain(raw: Any, default: float = 1.0) -> float:
     return max(0.0, min(1.0, val))
 
 
+def default_style_gains(work_mode: str = DEFAULT_WORK_MODE) -> dict[str, float]:
+    mode = normalize_work_mode(work_mode)
+    row = DEFAULT_STYLE_GAINS.get(mode) or DEFAULT_STYLE_GAINS[DEFAULT_WORK_MODE]
+    return {frag: _clamp_gain(row.get(frag), 0.7) for frag in FRAGMENT_TYPES}
+
+
 def apply_style_gains(
     gains: dict[str, Any] | None,
+    *,
+    work_mode: str = DEFAULT_WORK_MODE,
 ) -> tuple[dict[str, dict[str, float]], dict[str, dict[str, float]]]:
     """Scale platform penalty/reward rows by per-fragment gain in [0, 1]."""
+    mode = normalize_work_mode(work_mode)
+    pen_tpl = PLATFORM_SIGNAL_PENALTIES_BY_MODE[mode]
+    rew_tpl = PLATFORM_SIGNAL_REWARDS_BY_MODE[mode]
+    defaults = default_style_gains(mode)
     penalties: dict[str, dict[str, float]] = {}
     rewards: dict[str, dict[str, float]] = {}
     for frag in FRAGMENT_TYPES:
-        gain = _clamp_gain((gains or {}).get(frag), 1.0)
+        gain = _clamp_gain(
+            (gains or {}).get(frag) if gains is not None else defaults.get(frag),
+            defaults.get(frag, 0.7),
+        )
         penalties[frag] = {
-            key: round(float(val) * gain, 4) for key, val in PLATFORM_SIGNAL_PENALTIES.items()
+            key: round(float(val) * gain, 4) for key, val in pen_tpl.items()
         }
         rewards[frag] = {
-            key: round(float(val) * gain, 4) for key, val in PLATFORM_SIGNAL_REWARDS.items()
+            key: round(float(val) * gain, 4) for key, val in rew_tpl.items()
         }
     return penalties, rewards
 
@@ -300,16 +335,21 @@ def apply_style_gains(
 def infer_style_gains(
     penalties: dict[str, Any] | None,
     rewards: dict[str, Any] | None,
+    *,
+    work_mode: str = DEFAULT_WORK_MODE,
 ) -> dict[str, float]:
     """Recover slider position from stored signal tables (mean |stored|/|platform|)."""
+    mode = normalize_work_mode(work_mode)
+    pen_tpl = PLATFORM_SIGNAL_PENALTIES_BY_MODE[mode]
+    rew_tpl = PLATFORM_SIGNAL_REWARDS_BY_MODE[mode]
     out: dict[str, float] = {}
     for frag in FRAGMENT_TYPES:
         ratios: list[float] = []
-        for key, plat in PLATFORM_SIGNAL_PENALTIES.items():
+        for key, plat in pen_tpl.items():
             if abs(plat) < 1e-9:
                 continue
             ratios.append(abs(signal_coeff(penalties or {}, frag, key) / plat))
-        for key, plat in PLATFORM_SIGNAL_REWARDS.items():
+        for key, plat in rew_tpl.items():
             if abs(plat) < 1e-9:
                 continue
             ratios.append(abs(signal_coeff(rewards or {}, frag, key) / plat))
@@ -456,14 +496,18 @@ def platform_prefs_payload(
     *,
     preset_label: str = "balanced",
     work_mode: str = DEFAULT_WORK_MODE,
+    style_gains: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     mode = normalize_work_mode(work_mode)
+    gains = style_gains if style_gains is not None else default_style_gains(mode)
+    penalties, rewards = apply_style_gains(gains, work_mode=mode)
     return {
         "preset_label": preset_label if preset_label in PRESET_LABELS else "balanced",
         "work_mode": mode,
+        "style_gains": {frag: _clamp_gain(gains.get(frag), default_style_gains(mode)[frag]) for frag in FRAGMENT_TYPES},
         "fragment_weights": platform_fragment_weights(mode),
-        "signal_penalties": _signal_table(PLATFORM_SIGNAL_PENALTIES_BY_MODE[mode]),
-        "signal_rewards": _signal_table(PLATFORM_SIGNAL_REWARDS_BY_MODE[mode]),
+        "signal_penalties": penalties,
+        "signal_rewards": rewards,
         "schema_version": SCHEMA_VERSION,
         "exemplars": {k: [dict(x) for x in v] for k, v in EXEMPLAR_CATALOG.items()},
     }

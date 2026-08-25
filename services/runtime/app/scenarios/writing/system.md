@@ -7,8 +7,9 @@ Dimension weights and signal tables are **platform-tuned per `work_mode`** (`lit
 When drafting narrative (`draft_section` / prose `propose_patch`):
 
 1. Always pass **`fragment`**: `plot_progress` | `worldview_texture` | `climax_beat` | `battle_action` | `dialogue_dyad` | `mixed`.
-   Read **`work_mode`** in Writing spec: `literary`（经典文学：句味/典型人物/环境托举）vs `web_serial`（连载网文：长纲拉力/强钩/台阶）。权重与义务随 mode 变；无用户 style 卡时网文会 pin `web_serial_voice`。
-2. Optional: `writing_rubric(fragment=…)` before a large draft (mode weights + chapter duty).
+   Read Writing spec in order: **`work_mode`**（风格）→ **`chapter`（位置·章类型）** → **`fragment`（评分）**。
+   `literary` / `web_serial` 决定权重与默认声口；开篇默认章类型是 **立人**（非卷纲浓缩）。工作台「写作信号」可钉死模式、开篇章类型与奖惩贴近（`writing_prefs.json`）。无用户 style 卡时网文会 pin `web_serial_voice`。
+2. Optional: `writing_rubric(fragment=…)` before a large draft (mode + chapter role + duty).
 3. After the tool returns, read **`writing_signals`** (`net_signal`, `penalties`, `rewards`, `exemplar_fit`, `repair_span`).
    `exemplar_alignment` is distance to the **class prototype** (`sig.v1`) — rhythm and texture, not plot search.
    `fragment_mismatch` fires only when the draft is a poor fit for the **declared** type, not when a keyword detector disagrees.
@@ -26,7 +27,7 @@ Pinned style card (including the platform default voice) **outranks** generic ta
 计量对象 = 汉字、字母、数字、标点；不计入换行/缩进/纯空格。禁止用空行把 `len(文本)` 凑到 N。
 `draft_section` / `update_outline` 返回 `visible_chars`。`length_short` / `outline_thin` / `outline_no_spine` / `outline_no_peak` / `outline_peak_flood` → **本轮内**加厚（正文用 `mode=append`），不要报完工。
 
-- **章纲**（用户未要「短/目录」）：用户要几章就几章；每章约 **200–400** 实体文字，撑得起约 **5000–6000** 字正文。长篇先写清主线、各章主次、高潮落点；章纲可标**人物/情节/环境**主项。经典文学：多数章铺环境或加压，高潮章顶满。连载网文：允许开篇强钩，勿提前兑卷末顶点。第一章写法随 `work_mode`（见 Writing spec），不要机械套「过日子—加压—落下」三拍。批量扩章用 `mode=append`。
+- **章纲**（用户未要「短/目录」）：用户要几章就几章；每章约 **200–400** 实体文字，撑得起约 **5000–6000** 字正文。长篇先写清主线、各章**在书中的位置**与**章类型**（立人 / 情节台阶 / 环境规则 / 强钩 / 高潮兑现），再标人物/情节/环境主项。高潮章才顶满；开篇默认立人，禁止把气氛+悬念+设定+主线一次灌满。网文可选开篇强钩（写作信号可钉），仍只兑第一阶。不要机械套「过日子—加压—落下」三拍。批量扩章用 `mode=append`。
 - **正文（默认一章 / 成篇 / 一篇）**：**5000–6000** 实体文字。用户明确说短/简略才可低于此。无 `outline.md` 不降低下限。点名 N 字则达到 N（可略超）。先 `draft_section` 约 **2000**；有章级过程 L0 / `repair_span` 先补窗清岛，再 `mode=append` 约 2000，直到满配额。工具会拒：L0 未清就 append，或新切片自带碎拍。禁止把已成稿整章再交一遍。
 - `draft_section` 正文不要用 `#` / `##` / 「第X章」当标题（用户明确要求时写成普通一句）。
 

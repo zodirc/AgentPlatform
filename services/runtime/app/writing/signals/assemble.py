@@ -335,7 +335,8 @@ async def build_writing_signals(
     turn_user_text: str = "",
 ) -> dict[str, Any]:
     """构建完整 signals。"""
-    from app.writing.work_mode import infer_work_mode
+    from app.writing.chapter_role import resolve_chapter_role
+    from app.writing.work_mode import load_style_gains, resolve_work_mode, work_mode_label
     from app.writing.signals.prefs_loader import _module as _writing_prefs
 
     platform_prefs_payload = _writing_prefs().platform_prefs_payload
@@ -350,9 +351,10 @@ async def build_writing_signals(
             outline = op.read_text(encoding="utf-8")
     except OSError:
         outline = ""
-    work_mode = infer_work_mode(turn_user_text, outline=outline)
-    # Weights live in writing tools (work_mode), not Settings account sliders.
-    prefs = platform_prefs_payload(work_mode=work_mode)
+    work_mode, mode_source = resolve_work_mode(turn_user_text, outline=outline)
+    style_gains = load_style_gains(work_mode=work_mode)
+    # Weights + signal gains live in writing tools (writing_prefs.json), not Settings.
+    prefs = platform_prefs_payload(work_mode=work_mode, style_gains=style_gains)
     space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
     declared = normalize_fragment(fragment)
     prior = _manifest_section_row(turn_id, session_id, section_id)
@@ -365,16 +367,34 @@ async def build_writing_signals(
         prior=prior,
     )
     duty = _chapter_duty(section_id)
+    role = resolve_chapter_role(
+        section_id=section_id or "",
+        message=turn_user_text,
+        duty=duty,
+        work_mode=work_mode,
+    )
     duty_conflict = False
-    if duty and scored["fragment"]["declared"] == "climax_beat":
-        if work_mode == "literary" and any(k in duty for k in ("铺垫", "加压", "过日子")):
+    soft_duty = duty or str(role.get("chapter_kind_label") or "")
+    if scored["fragment"]["declared"] == "climax_beat":
+        if role.get("chapter_kind") in ("live_character", "world_rule") and role.get(
+            "chapter_position"
+        ) != "climax":
             duty_conflict = True
-        elif work_mode == "web_serial" and any(k in duty for k in ("铺垫", "过日子")):
+        elif soft_duty and any(
+            k in soft_duty for k in ("铺垫", "加压", "过日子", "立人", "环境")
+        ):
             duty_conflict = True
 
     block: dict[str, Any] = {
         "prefs_scope": "platform",
         "work_mode": work_mode,
+        "work_mode_source": mode_source,
+        "work_mode_label": work_mode_label(work_mode),
+        "chapter_position": role.get("chapter_position"),
+        "chapter_kind": role.get("chapter_kind"),
+        "chapter_position_label": role.get("chapter_position_label"),
+        "chapter_kind_label": role.get("chapter_kind_label"),
+        "style_gains": prefs.get("style_gains"),
         "preset": prefs.get("preset_label", "balanced"),
         "schema_version": prefs.get("schema_version", 1),
         "prefs_updated_at": None,
@@ -427,19 +447,33 @@ async def writing_rubric(
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """rubric 工具：返回当前 work_mode 下平台维度权重与 signal 表。"""
-    from app.writing.work_mode import fragment_obligations, infer_work_mode
+    from app.writing.chapter_role import resolve_chapter_role
+    from app.writing.work_mode import (
+        fragment_obligations,
+        load_style_gains,
+        resolve_work_mode,
+        work_mode_label,
+    )
     from app.writing.signals.prefs_loader import _module as _writing_prefs
 
     platform_prefs_payload = _writing_prefs().platform_prefs_payload
     owner_id, work_id = await _resolve_owner_and_work(session_id)
-    work_mode = infer_work_mode(str(_kwargs.get("turn_user_text") or ""))
-    prefs = platform_prefs_payload(work_mode=work_mode)
+    turn_user_text = str(_kwargs.get("turn_user_text") or "")
+    work_mode, mode_source = resolve_work_mode(turn_user_text)
+    style_gains = load_style_gains(work_mode=work_mode)
+    prefs = platform_prefs_payload(work_mode=work_mode, style_gains=style_gains)
     declared = normalize_fragment(fragment)
     weights = (prefs.get("fragment_weights") or {}).get(declared) or {}
     if not weights:
         weights = (prefs.get("fragment_weights") or {}).get("mixed") or {}
     flatten = _writing_prefs().flatten_fragment_signals
     duty = _chapter_duty(section_id)
+    role = resolve_chapter_role(
+        section_id=section_id or "",
+        message=turn_user_text,
+        duty=duty,
+        work_mode=work_mode,
+    )
     space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
     proto = space.prototype(declared)
     bank_titles = []
@@ -454,12 +488,19 @@ async def writing_rubric(
                     "scope": s.scope,
                 }
             )
-    mode_label = "经典文学" if work_mode == "literary" else "连载网文"
+    mode_label = work_mode_label(work_mode)
     obligations = fragment_obligations(work_mode)
+    kind_obl = str(role.get("obligation") or "")
     return {
         "fragment": declared,
         "work_mode": work_mode,
+        "work_mode_source": mode_source,
         "work_mode_label": mode_label,
+        "chapter_position": role.get("chapter_position"),
+        "chapter_kind": role.get("chapter_kind"),
+        "chapter_position_label": role.get("chapter_position_label"),
+        "chapter_kind_label": role.get("chapter_kind_label"),
+        "style_gains": prefs.get("style_gains"),
         "chapter_duty": duty,
         "prefs_scope": "platform",
         "preset": prefs.get("preset_label", "balanced"),
@@ -483,8 +524,12 @@ async def writing_rubric(
         },
         "obligations": [
             "权重在写作工具内按 work_mode 切换，不在设置页",
-            f"work_mode={work_mode}（{mode_label}）· fragment={declared}",
-            obligations.get(declared, obligations["mixed"]),
+            (
+                f"work_mode={work_mode}（{mode_label}）· "
+                f"chapter={role.get('chapter_position')}·{role.get('chapter_kind')} · "
+                f"fragment={declared}"
+            ),
+            kind_obl or obligations.get(declared, obligations["mixed"]),
             "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
             "有 repair_span 时同轮 propose_patch；章级 L0 清后 mode=append 约 2000 字",
         ],

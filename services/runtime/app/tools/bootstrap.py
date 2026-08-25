@@ -217,7 +217,8 @@ def build_registry() -> ToolRegistry:
             name="writing_rubric",
             description=(
                 "Returns platform dimension weights and penalty/reward keys for a fragment type "
-                "under the current work_mode (literary vs web_serial, inferred from the user turn). "
+                "under the current work_mode (literary vs web_serial) and chapter role "
+                "(position × kind from Writing spec). "
                 "Does not score prose — use evaluate_writing_fragment or draft_section after writing. "
                 "Weights live in this tool / writing_signals, not Settings."
             ),
