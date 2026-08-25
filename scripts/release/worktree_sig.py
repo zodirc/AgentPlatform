@@ -148,6 +148,16 @@ def baked_content_matches(
     return content_digest(paths) == prev
 
 
+_CONTRACTS_PKG = "packages/contracts/python/agent_contracts/"
+
+
+def _contracts_pkg_image_path(rel: str) -> str | None:
+    """PYTHONPATH overlay: /contracts/python/agent_contracts (api + runtime)."""
+    if rel.startswith(_CONTRACTS_PKG):
+        return "/contracts/python/agent_contracts/" + rel[len(_CONTRACTS_PKG) :]
+    return None
+
+
 def host_to_image_path(mod: str, rel: str) -> str | None:
     """Map a repo-relative path to the path inside the running service container.
 
@@ -160,6 +170,9 @@ def host_to_image_path(mod: str, rel: str) -> str | None:
     if mod == "api":
         if rel.startswith("services/api/app/"):
             return "/app/app/" + rel[len("services/api/app/") :]
+        mapped = _contracts_pkg_image_path(rel)
+        if mapped:
+            return mapped
         if rel.startswith("packages/contracts/schemas/ddl/"):
             return "/app/contracts/ddl/" + rel[len("packages/contracts/schemas/ddl/") :]
         # Ops L1 scripts: bind-mounted whole repo at /repo.
@@ -169,6 +182,9 @@ def host_to_image_path(mod: str, rel: str) -> str | None:
     if mod == "runtime":
         if rel.startswith("services/runtime/app/"):
             return "/app/app/" + rel[len("services/runtime/app/") :]
+        mapped = _contracts_pkg_image_path(rel)
+        if mapped:
+            return mapped
         if rel.startswith("packages/contracts/schemas/events/payloads/"):
             return (
                 "/app/contracts/events/payloads/"

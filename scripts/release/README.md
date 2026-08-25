@@ -21,8 +21,8 @@ bash scripts/release/stop_console.sh && bash scripts/release/ensure_console.sh
 
 | 模块 | 路径（`paths.env`） | 命令 |
 |------|---------------------|------|
-| api | `services/api/` · `packages/contracts/` · `deploy/base-images.env` | `make up-api` |
-| runtime | `services/runtime/` · `packages/contracts/` · `deploy/base-images.env` | `make up-runtime` |
+| api | `services/api/` · `agent_contracts/` · `schemas/ddl/` · `pyproject.deps.toml` · `official_bench/` · `deploy/base-images.env` | `make up-api` |
+| runtime | `services/runtime/` · `agent_contracts/` · event payloads · `validate_payload.py` · `plan_suggest/` · `pyproject.deps.toml` · `deploy/base-images.env` | `make up-runtime` |
 | web | `services/web/` · `deploy/base-images.env` | `make up-web` |
 | gateway | caddy / compose | recreate |
 | **Ops · SWE 评测环境** | docker.sock（api+runtime）+ `sweb.eval` + 冒烟 | 看板「准备 SWE 评测环境」= `make ops-swe-eval-ready`（必要一步） |

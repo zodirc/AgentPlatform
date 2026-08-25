@@ -99,13 +99,13 @@ RUN mkdir -p /data/vectorstore /data/models /app/models-baked \
     && chown -R app:app /data /app/models-baked
 WORKDIR /app
 
-COPY packages/contracts/python/pyproject.toml /tmp/contracts/pyproject.toml
+COPY packages/contracts/python/pyproject.deps.toml /tmp/contracts/pyproject.toml
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
 # Offline CUDA wheels via named context `torch_wheel_cache` (not main context).
 # Falls back to TORCH_INDEX_URL / CPU find-links when the cache has no .whl files.
 # BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local (no mirror re-fetch).
 # Do not use pip --no-cache-dir here — that bypasses the mount.
-# Contracts *sources* are copied in the app stage so writing_prefs.py does not rebuild torch.
+# Frozen deps pin (not SemVer pyproject). Real agent_contracts overlay in app stage.
 RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
     --mount=type=cache,target=/root/.cache/pip \
     mkdir -p /tmp/contracts/agent_contracts /tmp/runtime/app \
@@ -147,7 +147,7 @@ ARG EMBEDDING_MODEL
 # docker-cli lives in deps so ops-eval sock mounts still work without re-apt.
 ENV PYTHONPATH=/contracts/python
 COPY services/runtime/app /app/app
-COPY packages/contracts/python /contracts/python
+COPY packages/contracts/python/agent_contracts /contracts/python/agent_contracts
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest

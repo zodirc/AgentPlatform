@@ -53,7 +53,52 @@ def test_host_to_image_path_api_runtime() -> None:
         )
         == "/app/app/structural/workspace_index/query.py"
     )
+    rel = "packages/contracts/python/agent_contracts/writing_prefs.py"
+    assert (
+        worktree_sig.host_to_image_path("api", rel)
+        == "/contracts/python/agent_contracts/writing_prefs.py"
+    )
+    assert (
+        worktree_sig.host_to_image_path("runtime", rel)
+        == "/contracts/python/agent_contracts/writing_prefs.py"
+    )
     assert worktree_sig.host_to_image_path("web", "services/web/src/App.tsx") is None
+
+
+def test_contracts_semver_does_not_dirty_api_runtime() -> None:
+    prefixes = worktree_sig.load_module_prefixes()
+    api = prefixes["api"]
+    runtime = prefixes["runtime"]
+    assert not worktree_sig.match_prefixes(
+        ["packages/contracts/python/pyproject.toml"], api
+    )
+    assert not worktree_sig.match_prefixes(
+        ["packages/contracts/python/pyproject.toml"], runtime
+    )
+    assert not worktree_sig.match_prefixes(["packages/contracts/CHANGELOG.md"], api)
+    assert not worktree_sig.match_prefixes(["packages/contracts/CHANGELOG.md"], runtime)
+    prefs = "packages/contracts/python/agent_contracts/writing_prefs.py"
+    assert worktree_sig.match_prefixes([prefs], api)
+    assert worktree_sig.match_prefixes([prefs], runtime)
+    pin = "packages/contracts/python/pyproject.deps.toml"
+    assert worktree_sig.match_prefixes([pin], api)
+    assert worktree_sig.match_prefixes([pin], runtime)
+
+
+def test_dockerfiles_use_frozen_contracts_deps_manifest() -> None:
+    for rel in (
+        "services/api/Dockerfile",
+        "services/runtime/Dockerfile",
+        "services/runtime/Dockerfile.retrieval",
+    ):
+        text = (ROOT / rel).read_text(encoding="utf-8")
+        assert "COPY packages/contracts/python/pyproject.deps.toml" in text
+        assert "COPY packages/contracts/python/pyproject.toml" not in text
+        assert (
+            "COPY packages/contracts/python/agent_contracts /contracts/python/agent_contracts"
+            in text
+        )
+        assert "COPY packages/contracts/python /contracts/python" not in text
 
 
 def test_module_dirty_commit_after_deploy_same_bytes(

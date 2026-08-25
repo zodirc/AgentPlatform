@@ -24,7 +24,9 @@ eval/
 ## 版本化(F9)
 
 契约整体使用一个 SemVer 版本(`pyproject.toml` 与 `python/pyproject.toml` 保持一致),
-每次变更追加 [`CHANGELOG.md`](CHANGELOG.md) 条目:
+每次变更追加 [`CHANGELOG.md`](CHANGELOG.md) 条目。镜像 **deps 层**只读
+`python/pyproject.deps.toml`（冻结 version；仅当 `pydantic` 等 pip 依赖变更时改），
+因此改 SemVer / CHANGELOG / `writing_prefs.py` 都不会重跑 pip。
 
 - **patch**:仅文档/注释/描述,不改结构。
 - **minor(向后兼容)**:新增事件类型、payload 新增**可选**字段、枚举新增值、

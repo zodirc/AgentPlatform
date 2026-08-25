@@ -95,8 +95,8 @@ runtime/api enqueue work_ast_index_jobs → ast-indexer（FOR UPDATE SKIP LOCKED
 
 | 模块 | 脏前缀 | 重建 |
 |------|--------|------|
-| api | `services/api/` · `packages/contracts/` | `make up-api` |
-| runtime | `services/runtime/` · contracts | `make up-runtime`（常 recreate ast-indexer） |
+| api | `services/api/` · `agent_contracts/` · `schemas/ddl/` · `pyproject.deps.toml` | `make up-api` |
+| runtime | `services/runtime/` · `agent_contracts/` · event payloads · `plan_suggest/` · `pyproject.deps.toml` | `make up-runtime`（常 recreate ast-indexer） |
 | ast-indexer | `workspace_index/` · compose | `make up-ast-indexer` |
 | web | `services/web/` | `make up-web` |
 | gateway | `deploy/caddy/` | compose recreate |

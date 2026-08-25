@@ -31,7 +31,7 @@ RUN set -eux; \
 RUN useradd --create-home --uid 1000 app
 WORKDIR /app
 
-COPY packages/contracts/python/pyproject.toml /tmp/contracts/pyproject.toml
+COPY packages/contracts/python/pyproject.deps.toml /tmp/contracts/pyproject.toml
 COPY services/api/pyproject.toml /tmp/api/pyproject.toml
 # Minimal stub so hatchling can build the wheel without copying real app sources
 # into the deps layer input (docs/38 §3.3). Same stub for agent-contracts:
@@ -52,7 +52,7 @@ FROM deps AS app
 # Real contracts overlay the deps stub via PYTHONPATH (no pip on code edits).
 ENV PYTHONPATH=/contracts/python
 COPY services/api/app /app/app
-COPY packages/contracts/python /contracts/python
+COPY packages/contracts/python/agent_contracts /contracts/python/agent_contracts
 COPY services/api/alembic.ini /app/alembic.ini
 COPY services/api/alembic /app/alembic
 COPY packages/contracts/schemas/ddl /app/contracts/ddl

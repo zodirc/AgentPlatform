@@ -30,11 +30,12 @@ RUN useradd --create-home --uid 1000 app
 RUN mkdir -p /data/vectorstore /data/models && chown -R app:app /data
 WORKDIR /app
 
-COPY packages/contracts/python/pyproject.toml /tmp/contracts/pyproject.toml
+COPY packages/contracts/python/pyproject.deps.toml /tmp/contracts/pyproject.toml
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
 # BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local.
 # Do not use pip --no-cache-dir here — that bypasses the mount.
-# Contracts *sources* stay in the app stage — a writing_prefs.py edit must not re-pip.
+# Frozen deps pin (not python/pyproject.toml SemVer). Real agent_contracts overlay
+# in the app stage — writing_prefs / version bumps must not re-pip.
 RUN --mount=type=cache,target=/root/.cache/pip \
     mkdir -p /tmp/contracts/agent_contracts /tmp/runtime/app \
     && printf '%s\n' '# deps-layer stub' > /tmp/contracts/agent_contracts/__init__.py \
@@ -61,7 +62,7 @@ FROM deps AS app
 # Real contracts overlay the deps stub via PYTHONPATH (no pip / apt on code edits).
 ENV PYTHONPATH=/contracts/python
 COPY services/runtime/app /app/app
-COPY packages/contracts/python /contracts/python
+COPY packages/contracts/python/agent_contracts /contracts/python/agent_contracts
 COPY packages/contracts/schemas/events/payloads /app/contracts/events/payloads
 COPY packages/contracts/validate_payload.py /app/packages/contracts/validate_payload.py
 COPY packages/contracts/plan_suggest /app/packages/contracts/plan_suggest

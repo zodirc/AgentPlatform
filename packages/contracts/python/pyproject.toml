@@ -1,3 +1,5 @@
+# SemVer for local/CI `pip install` + CHANGELOG. Docker deps COPY
+# python/pyproject.deps.toml instead — do not bump this version to force a pip rebuild.
 [project]
 name = "agent-contracts"
 version = "0.3.12"
