@@ -207,6 +207,8 @@ async def delete_sessions_for_owner(
     delete those tables before sessions/turns/runs.
     Uses the bypass DB pool (long statement_timeout) because wiping turn_events
     for busy sessions routinely exceeds the hot-path 5s budget.
+    Requires ``idx_turn_events_run_id`` (migration 0029): deleting runs otherwise
+    seq-scans the whole turn_events table for the run_id FK check.
     Workspace disk files are intentionally untouched (not session-scoped).
     """
     if not session_ids:

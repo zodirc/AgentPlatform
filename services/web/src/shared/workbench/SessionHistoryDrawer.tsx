@@ -72,6 +72,10 @@ export function SessionHistoryDrawer({
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [period, setPeriod] = useState<PeriodId>("none");
   const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{
+    done: number;
+    total: number;
+  } | null>(null);
 
   const q = useQuery({
     queryKey: ["sessions", "mine"],
@@ -102,14 +106,38 @@ export function SessionHistoryDrawer({
   });
 
   const removeMany = useMutation({
-    mutationFn: (ids: string[]) => deleteSessionsBulk(ids),
+    mutationFn: async (ids: string[]) => {
+      // Small chunks so the UI can show progress and one heavy session does not
+      // hold the whole selection behind a single long request.
+      const chunkSize = 5;
+      const deleted: string[] = [];
+      const missing: string[] = [];
+      setBulkProgress({ done: 0, total: ids.length });
+      try {
+        for (let i = 0; i < ids.length; i += chunkSize) {
+          const chunk = ids.slice(i, i + chunkSize);
+          const res = await deleteSessionsBulk(chunk);
+          deleted.push(...res.deleted);
+          missing.push(...res.missing);
+          if (res.deleted.length > 0) {
+            const gone = new Set(res.deleted);
+            queryClient.setQueryData<SessionListItem[]>(
+              ["sessions", "mine"],
+              (prev) => (prev ?? []).filter((row) => !gone.has(row.id)),
+            );
+          }
+          setBulkProgress({
+            done: Math.min(i + chunk.length, ids.length),
+            total: ids.length,
+          });
+        }
+      } finally {
+        setBulkProgress(null);
+      }
+      return { deleted, missing };
+    },
     onSuccess: async ({ deleted, missing }, ids) => {
       const gone = new Set(deleted);
-      if (gone.size > 0) {
-        queryClient.setQueryData<SessionListItem[]>(["sessions", "mine"], (prev) =>
-          (prev ?? []).filter((row) => !gone.has(row.id)),
-        );
-      }
       await queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
       setSelected((prev) => {
         if (gone.size === 0) return prev;
@@ -135,6 +163,7 @@ export function SessionHistoryDrawer({
     },
     onError: () => {
       setBulkError("批量删除失败，请稍后重试");
+      setBulkProgress(null);
       void queryClient.invalidateQueries({ queryKey: ["sessions", "mine"] });
     },
   });
@@ -154,6 +183,7 @@ export function SessionHistoryDrawer({
     setSelected(new Set());
     setPeriod("none");
     setBulkError(null);
+    setBulkProgress(null);
   };
 
   const toggleOne = (id: string) => {
@@ -287,9 +317,11 @@ export function SessionHistoryDrawer({
                 disabled={selected.size === 0 || busy}
                 onClick={confirmDeleteSelected}
               >
-                {removeMany.isPending
-                  ? "删除中…"
-                  : `删除所选（${selected.size}）`}
+                {removeMany.isPending && bulkProgress
+                  ? `删除中 ${bulkProgress.done}/${bulkProgress.total}…`
+                  : removeMany.isPending
+                    ? "删除中…"
+                    : `删除所选（${selected.size}）`}
               </Button>
             </div>
             <p className="text-[11px] text-muted-foreground">
@@ -301,7 +333,9 @@ export function SessionHistoryDrawer({
         <div className="flex-1 overflow-y-auto p-3">
           {removeMany.isPending ? (
             <p className="mb-2 text-xs text-muted-foreground">
-              正在后台清理会话数据…
+              {bulkProgress
+                ? `正在删除会话 ${bulkProgress.done}/${bulkProgress.total}…`
+                : "正在清理会话数据…"}
             </p>
           ) : null}
           {q.isLoading ? (
