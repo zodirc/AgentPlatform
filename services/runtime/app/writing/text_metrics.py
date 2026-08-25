@@ -195,7 +195,8 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
         out["length_short"] = True
         out["summary"] = (
             f"实体文字 {vis} 字，低于约定 {quota} 字的 85%。"
-            "本轮继续 draft_section 或 propose_patch 补足，不要报完工。"
+            "本轮 draft_section mode=append 再接约 2000 字，或先 propose_patch 补窗；"
+            "不要整章 upsert，不要报完工。"
         )
     return out
 

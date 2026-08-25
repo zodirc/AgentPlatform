@@ -22,6 +22,8 @@ from app.writing.staccato import (
     count_split_speech,
     count_thesis_mouth,
     find_staccato_span,
+    max_duet_quote_run,
+    max_interview_ladder,
     max_logistics_quote_run,
     max_short_quote_run,
     staccato_fields,
@@ -79,10 +81,14 @@ def test_staccato_skips_kongyiji_flat() -> None:
     assert "staccato_uniform" not in staccato_fields(text)
 
 
-def test_staccato_allows_three_short_quotes() -> None:
+def test_staccato_flags_three_short_duet() -> None:
+    """三句对拍已是机械目录，不再放行。"""
     text = _pad("「来了？」\n「来了。」\n「坐。」\n他在门槛上磕掉鞋底的泥，把帽子挂到钉子上。")
     assert max_short_quote_run(text) == 3
-    assert "staccato_uniform" not in staccato_fields(text)
+    assert max_duet_quote_run(text) >= 3
+    fields = staccato_fields(text)
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_duet_run") or 0) >= 3
 
 
 def test_staccato_ledger_telegraph() -> None:
@@ -462,3 +468,90 @@ def test_gold_dialogue_exemplars_skip_echo_twist() -> None:
         for sample in bank[frag]:
             fields = staccato_fields(sample.text)
             assert "staccato_uniform" not in fields, sample.slug
+
+
+def test_theme_capsule_and_interview_ladder_flag_ai_voice() -> None:
+    old_account = _pad(
+        "秋兰看着她把账簿放回柜台，才说：「爹留下的那本，边角已经碎了。」\n"
+        "「那是旧账，旧账碎了也只管旧账。」\n"
+    )
+    didactic = _pad(
+        "沈太太放下一盏灯，低声说：「别看人家的东西。」\n"
+        "「我没有看。」\n"
+        "「眼睛看见了，心里也会记住。记住了就容易惹事。」\n"
+    )
+    interview = _pad(
+        "「你认得那个人？」秋兰问。\n"
+        "「不认得。」\n"
+        "「那他为什么问我？」\n\n"
+        "沈太太抬头看她。门外的风把河腥味送进来，吹动墙上的价目牌。"
+        "煤油一角八分，灯芯三分，修铜嘴另算。那张纸边缘卷了起来，"
+        "露出后面一行旧字，是沈老掌柜在世时留下的：欠陆家灯油，七角四分。\n\n"
+        "沈太太把信塞进围裙口袋。「今天关门早些。」\n"
+        "「为什么？」\n"
+        "「河上要起雾。」\n"
+    )
+    debt = _pad(
+        "秋兰的手按住那枚铜元，没有立刻拿走。「放在那里做什么？」\n"
+        "沈太太低头看着她，过了片刻才说：「你爹欠下的账，不能让别人替他收。」\n"
+    )
+    ledger = _pad(
+        "「不去。」\n"
+        "「如果他们要的是账簿呢？」\n"
+        "「家里没有账簿。」\n"
+        "「柜台后面那本呢？」\n"
+        "沈太太看着她，过了很久，才把手松开。「那本只记煤油和灯芯。」\n"
+    )
+    for sample in (old_account, didactic, interview, debt, ledger):
+        fields = staccato_fields(sample)
+        assert fields.get("staccato_uniform") is True, sample[:40]
+    assert count_thesis_mouth(old_account) >= 1
+    assert count_thesis_mouth(didactic) >= 1
+    assert count_thesis_mouth(debt) >= 1
+    assert count_thesis_mouth(ledger) >= 1
+    assert max_interview_ladder(interview) >= 4
+    assert max_interview_ladder(ledger) >= 4
+    span = find_staccato_span(old_account)
+    assert "旧账" in span
+    span2 = find_staccato_span(didactic)
+    assert "看见了" in span2 or "惹事" in span2
+    span3 = find_staccato_span(interview)
+    assert "认得" in span3
+    assert "起雾" in span3 or "为什么" in span3
+
+
+def test_duet_ping_pong_flags_and_locates() -> None:
+    open_letter = _pad(
+        "「你拆不拆？」老范问。\n"
+        "「我的信，为什么拆？」\n"
+        "「我看你脸色，像信里装了欠条。」\n"
+    )
+    street = _pad(
+        "他看了一眼门外。卖糖水的白布棚还没有摆出来，桥那边只有几个挑担的人。"
+        "「文庙后街。」\n"
+        "「你住在那里。」\n"
+        "「昨晚起，不住了。」\n"
+    )
+    assert max_duet_quote_run(street) >= 3
+    assert staccato_fields(street).get("staccato_uniform") is True
+    assert staccato_fields(open_letter).get("staccato_uniform") is True
+    span = find_staccato_span(street)
+    assert "文庙后街" in span
+    assert "不住了" in span
+    span2 = find_staccato_span(open_letter)
+    assert "拆不拆" in span2 or "为什么拆" in span2
+
+
+def test_find_staccato_span_skips_avoided_island() -> None:
+    sep = "柜台上温着酒，粉板上记着十九个钱。\n\n" * 6
+    text = _pad(
+        "「眼睛看见了，心里也会记住。记住了就容易惹事。」\n\n"
+        + sep
+        + "「那是旧账，旧账碎了也只管旧账。」\n"
+    )
+    first = find_staccato_span(text)
+    assert first
+    second = find_staccato_span(text, avoid_old=first)
+    assert second
+    assert second != first
+    assert ("旧账" in first) != ("旧账" in second)

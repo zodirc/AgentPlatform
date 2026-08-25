@@ -42,13 +42,51 @@ _LOGISTICS = re.compile(
     r"到家|发个消息|发消息|微信|路上小心|早点休息|明天再说)"
 )
 _THESIS_MOUTH = re.compile(
-    r"(?:小时候|以前).{0,10}也这样|话说得好听|未必做得到"
+    r"(?:小时候|以前).{0,10}也这样|话说得好听|未必做得到|"
+    r"眼睛看见了|心里也会记住|记住了就|容易惹事|"
+    r"不能让别人(?:替他)?|"
+    r"只记[^」]{0,16}"
+)
+# 「旧账碎了也只管旧账」— fixed phrases; avoid open .{0,n} backtracking.
+_ECHO_NOUN_MANAGE = re.compile(
+    r"(?P<noun>[\u4e00-\u9fff]{2,4})(?:碎了|坏了|断了|烂了)?也只管(?P=noun)"
+)
+_ECHO_NOUN_COMMA = re.compile(
+    r"(?P<noun>[\u4e00-\u9fff]{2,4})，(?P=noun)(?:碎了|坏了|断了|烂了|过了)?"
+)
+_DIDACTIC_CHAIN = re.compile(
+    r"(?:看见|听到|记住).{0,12}(?:就|便|会).{0,16}(?:就|便|会|容易|惹事|记住)"
+)
+_QUESTION_PREFIX = re.compile(
+    r"^(?:为什么|那他|那你|那么|如果|可是|认不|有没有|是不是|放在那里做|柜台后面)"
+)
+_ECHO_NOUN_SKIP = frozenset(
+    {
+        "什么",
+        "谁人",
+        "哪里",
+        "哪个",
+        "怎么",
+        "怎样",
+        "我们",
+        "你们",
+        "他们",
+        "自己",
+        "这个",
+        "那个",
+        "一人",
+        "大家",
+        "欢喜",
+    }
 )
 _LCS_SKIP = frozenset("的了吗呢啊吧呀么你我他她")
 
 # Inner quote / sentence entity-chars. 「跑完了？」 inner = 4.
 _SHORT = 7
+_DUET_MAX = 16
 _QUOTE_RUN = 4
+_DUET_RUN = 3
+_DUET_GAP = 8
 _UNIT_RUN = 5
 _PHATIC_MIN = 3
 _ECHO_MIN = 2
@@ -56,8 +94,10 @@ _LOGIC_MIN = 2
 _DEFER_MIN = 3
 _ECHO_TWIST_MAX = 18
 _LOGISTICS_MIN = 3
-_THESIS_MIN = 16
-_THESIS_MAX = 48
+_THESIS_MIN = 10
+_THESIS_MAX = 56
+_INTERVIEW_MIN = 4
+_INTERVIEW_GAP = 160
 _MIN_VISIBLE = 80
 # Speaker tags (掌柜说：) stay in the run; a real narrative beat resets it.
 _QUOTE_GAP_RESET = 8
@@ -115,7 +155,7 @@ def _units(text: str) -> list[int]:
 
 
 def max_short_quote_run(text: str) -> int:
-    """最长短对白 run。
+    """最长短对白 run（≤7 字芯片）。
     
     参数:
         text。
@@ -134,6 +174,31 @@ def max_short_quote_run(text: str) -> int:
         inner = match.group(1).strip()
         n = visible_chars(inner)
         if 1 <= n <= _SHORT:
+            run += 1
+            best = max(best, run)
+        else:
+            run = 0
+        last_end = match.end()
+    return best
+
+
+def max_duet_quote_run(text: str) -> int:
+    """对拍问答：连续 ≥3 句 ≤16 字对白（间隙 ≤8，与短芯片同级）。
+    
+    「文庙后街。」「你住在那里。」「昨晚起，不住了。」这类。
+    """
+    from app.writing.text_metrics import visible_chars
+
+    body = text or ""
+    run = best = 0
+    last_end = 0
+    for match in _QUOTE_SPAN.finditer(body):
+        gap = visible_chars(body[last_end : match.start()]) if last_end else 0
+        if last_end and gap > _DUET_GAP:
+            run = 0
+        inner = match.group(1).strip()
+        n = visible_chars(inner)
+        if 1 <= n <= _DUET_MAX:
             run += 1
             best = max(best, run)
         else:
@@ -341,13 +406,81 @@ def _is_logistics(inner: str) -> bool:
     return _LOGISTICS.search(_norm_quote(inner) or inner or "") is not None
 
 
+def _is_echo_noun_thesis(inner: str) -> bool:
+    """回声名词金句：旧账…也只管旧账 / 那是旧账，旧账碎了…"""
+    body = (inner or "").strip()
+    for match in _ECHO_NOUN_MANAGE.finditer(body):
+        if match.group("noun") not in _ECHO_NOUN_SKIP:
+            return True
+    for match in _ECHO_NOUN_COMMA.finditer(body):
+        if match.group("noun") not in _ECHO_NOUN_SKIP:
+            return True
+    return False
+
+
 def _is_thesis_mouth(inner: str) -> bool:
+    """嘴里的主题金句 / 说教收束（含回声名词、因果教训链）。"""
     from app.writing.text_metrics import visible_chars
 
-    vis = visible_chars(inner)
+    body = (inner or "").strip()
+    vis = visible_chars(body)
     if vis < _THESIS_MIN or vis > _THESIS_MAX:
         return False
-    return _THESIS_MOUTH.search(inner or "") is not None
+    if _THESIS_MOUTH.search(body) is not None:
+        return True
+    if _is_echo_noun_thesis(body):
+        return True
+    if _DIDACTIC_CHAIN.search(body) is not None:
+        return True
+    return False
+
+
+def _is_questionish(inner: str) -> bool:
+    """短问：以？收束；或极短的为什么/那他/认不 起手（避免「什么清白？」长控诉）。"""
+    from app.writing.text_metrics import visible_chars
+
+    body = (inner or "").strip()
+    if not body:
+        return False
+    vis = visible_chars(body)
+    if vis > 22:
+        return False
+    if body.endswith("？") or body.endswith("?"):
+        return True
+    if vis <= 12 and _QUESTION_PREFIX.search(body) is not None:
+        return True
+    return False
+
+
+def max_interview_ladder(text: str) -> int:
+    """采访式追问阶梯：短问可被景物垫开（间隙 ≤160），仍算同一目录。"""
+    from app.writing.text_metrics import visible_chars
+
+    body = text or ""
+    quotes = list(_QUOTE_SPAN.finditer(body))
+    if len(quotes) < 3:
+        return 0
+    best = run = 0
+    last_end = 0
+    for match in quotes:
+        gap = visible_chars(body[last_end : match.start()]) if last_end else 0
+        if last_end and gap > _INTERVIEW_GAP:
+            run = 0
+        inner = match.group(1).strip()
+        vis = visible_chars(inner)
+        short = 1 <= vis <= _SHORT
+        q = _is_questionish(inner)
+        thesis = _is_thesis_mouth(inner)
+        refusal = bool(
+            short and re.match(r"^(?:不去|不是|没有|不行|不知道)[。！]?$", inner)
+        )
+        if q or refusal or (run > 0 and short) or (run > 0 and thesis):
+            run += 1
+            best = max(best, run)
+        else:
+            run = 0
+        last_end = match.end()
+    return best
 
 
 def count_echo_twists(text: str) -> int:
@@ -432,6 +565,8 @@ def staccato_fields(content: str) -> dict[str, Any]:
     echo_twist = count_echo_twists(text)
     logistics = max_logistics_quote_run(text)
     thesis = count_thesis_mouth(text)
+    interview = max_interview_ladder(text)
+    duet = max_duet_quote_run(text)
     vis = visible_chars(text)
     if vis < _MIN_VISIBLE:
         unit_run = 0
@@ -441,6 +576,7 @@ def staccato_fields(content: str) -> dict[str, Any]:
         defer = count_defer_tells(text)
     if (
         quote_run < _QUOTE_RUN
+        and duet < _DUET_RUN
         and unit_run < _UNIT_RUN
         and phatic < _PHATIC_MIN
         and echo < _ECHO_MIN
@@ -453,11 +589,13 @@ def staccato_fields(content: str) -> dict[str, Any]:
         and echo_twist < 1
         and logistics < _LOGISTICS_MIN
         and thesis < 1
+        and interview < _INTERVIEW_MIN
     ):
         return {}
     return {
         "staccato_uniform": True,
         "staccato_quote_run": quote_run,
+        "staccato_duet_run": duet,
         "staccato_unit_run": unit_run,
         "staccato_phatic": phatic,
         "staccato_echo": echo,
@@ -470,7 +608,17 @@ def staccato_fields(content: str) -> dict[str, Any]:
         "staccato_echo_twist": echo_twist,
         "staccato_logistics": logistics,
         "staccato_thesis": thesis,
+        "staccato_interview": interview,
     }
+
+
+def is_isolated_staccato_punch(text: str) -> bool:
+    """对仗/升格单句保持短打，不升成整窗。"""
+    quotes = list(_QUOTE_SPAN.finditer(text or ""))
+    if len(quotes) != 1:
+        return False
+    inner = quotes[0].group(1).strip()
+    return bool(_ANTITHESIS_PUNCH.search(inner) or _EQUATE_PUNCH.search(inner))
 
 
 def _closed_span(body: str, start: int, end: int, max_chars: int) -> str:
@@ -482,14 +630,20 @@ def _closed_span(body: str, start: int, end: int, max_chars: int) -> str:
 
 
 def _expand_short_quote_cluster(
-    body: str, seed_start: int, seed_end: int, max_chars: int
+    body: str,
+    seed_start: int,
+    seed_end: int,
+    max_chars: int,
+    *,
+    close_from: str | None = None,
 ) -> str:
     """把种子左右、间隙 ≤8 的短对白收进同一岛；对仗/升格种子不走这里。"""
     from app.writing.text_metrics import visible_chars
 
+    src = close_from if close_from is not None else body
     quotes = list(_QUOTE_SPAN.finditer(body))
     if not quotes:
-        return _closed_span(body, seed_start, seed_end, max_chars)
+        return _closed_span(src, seed_start, seed_end, max_chars)
     lo = hi = None
     for i, match in enumerate(quotes):
         if match.end() <= seed_start or match.start() >= seed_end:
@@ -497,7 +651,7 @@ def _expand_short_quote_cluster(
         lo = i if lo is None else min(lo, i)
         hi = i if hi is None else max(hi, i)
     if lo is None or hi is None:
-        return _closed_span(body, seed_start, seed_end, max_chars)
+        return _closed_span(src, seed_start, seed_end, max_chars)
     while lo > 0:
         prev, cur = quotes[lo - 1], quotes[lo]
         gap = visible_chars(body[prev.end() : cur.start()])
@@ -516,31 +670,142 @@ def _expand_short_quote_cluster(
         hi += 1
     start = min(seed_start, quotes[lo].start())
     end = max(seed_end, quotes[hi].end())
-    return _closed_span(body, start, end, max_chars)
+    return _closed_span(src, start, end, max_chars)
 
 
-def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
-    """repair span：窗内短对白岛，不是 18 字芯片。
+def _mask_old_span(body: str, avoid_old: str) -> str:
+    """把已停修的岛遮掉，便于换下一岛。"""
+    needle = (avoid_old or "").strip()
+    if not needle or needle not in body:
+        return body
+    return body.replace(needle, "\u3000" * len(needle), 1)
+
+
+def _expand_interview_cluster(
+    body: str,
+    seed_start: int,
+    seed_end: int,
+    max_chars: int,
+    *,
+    close_from: str | None = None,
+) -> str:
+    """采访阶梯可含景物垫段（间隙 ≤ INTERVIEW_GAP）。"""
+    from app.writing.text_metrics import visible_chars
+
+    src = close_from if close_from is not None else body
+    quotes = list(_QUOTE_SPAN.finditer(body))
+    if not quotes:
+        return _closed_span(src, seed_start, seed_end, max_chars)
+    lo = hi = None
+    for i, match in enumerate(quotes):
+        if match.end() <= seed_start or match.start() >= seed_end:
+            continue
+        lo = i if lo is None else min(lo, i)
+        hi = i if hi is None else max(hi, i)
+    if lo is None or hi is None:
+        return _closed_span(src, seed_start, seed_end, max_chars)
+    while lo > 0:
+        prev, cur = quotes[lo - 1], quotes[lo]
+        gap = visible_chars(body[prev.end() : cur.start()])
+        if gap > _INTERVIEW_GAP:
+            break
+        inner = prev.group(1).strip()
+        if not (
+            _is_questionish(inner)
+            or 1 <= visible_chars(inner) <= _SHORT
+            or _is_thesis_mouth(inner)
+        ):
+            break
+        lo -= 1
+    while hi + 1 < len(quotes):
+        cur, nxt = quotes[hi], quotes[hi + 1]
+        gap = visible_chars(body[cur.end() : nxt.start()])
+        if gap > _INTERVIEW_GAP:
+            break
+        inner = nxt.group(1).strip()
+        if not (
+            _is_questionish(inner)
+            or 1 <= visible_chars(inner) <= _SHORT
+            or _is_thesis_mouth(inner)
+        ):
+            break
+        hi += 1
+    start = min(seed_start, quotes[lo].start())
+    end = max(seed_end, quotes[hi].end())
+    return _closed_span(src, start, end, max_chars)
+
+
+def _expand_duet_cluster(
+    body: str,
+    seed_start: int,
+    seed_end: int,
+    max_chars: int,
+    *,
+    close_from: str | None = None,
+) -> str:
+    """对拍簇：≤12 字对白，间隙 ≤ DUET_GAP。"""
+    from app.writing.text_metrics import visible_chars
+
+    src = close_from if close_from is not None else body
+    quotes = list(_QUOTE_SPAN.finditer(body))
+    if not quotes:
+        return _closed_span(src, seed_start, seed_end, max_chars)
+    lo = hi = None
+    for i, match in enumerate(quotes):
+        if match.end() <= seed_start or match.start() >= seed_end:
+            continue
+        lo = i if lo is None else min(lo, i)
+        hi = i if hi is None else max(hi, i)
+    if lo is None or hi is None:
+        return _closed_span(src, seed_start, seed_end, max_chars)
+    while lo > 0:
+        prev, cur = quotes[lo - 1], quotes[lo]
+        gap = visible_chars(body[prev.end() : cur.start()])
+        if gap > _DUET_GAP:
+            break
+        if visible_chars(prev.group(1).strip()) > _DUET_MAX:
+            break
+        lo -= 1
+    while hi + 1 < len(quotes):
+        cur, nxt = quotes[hi], quotes[hi + 1]
+        gap = visible_chars(body[cur.end() : nxt.start()])
+        if gap > _DUET_GAP:
+            break
+        if visible_chars(nxt.group(1).strip()) > _DUET_MAX:
+            break
+        hi += 1
+    start = min(seed_start, quotes[lo].start())
+    end = max(seed_end, quotes[hi].end())
+    return _closed_span(src, start, end, max_chars)
+
+
+def find_staccato_span(
+    text: str, *, max_chars: int = 360, avoid_old: str = ""
+) -> str:
+    """repair span：窗内短对白岛 / 主题金句 / 采访阶梯，不是 18 字芯片。
     
     参数:
-        text/max_chars。
+        text/max_chars/avoid_old。
     
     返回:
         str。"""
     from app.writing.text_metrics import visible_chars
 
-    body = text or ""
+    original = text or ""
+    body = _mask_old_span(original, avoid_old)
     for match in _QUOTE_SPAN.finditer(body):
         inner = match.group(1).strip()
         vis = visible_chars(inner)
         if vis <= 22 and _ANTITHESIS_PUNCH.search(inner):
-            return _closed_span(body, match.start(), match.end(), max_chars)
+            return _closed_span(original, match.start(), match.end(), max_chars)
         if vis <= 22 and _EQUATE_PUNCH.search(inner):
-            return _closed_span(body, match.start(), match.end(), max_chars)
+            return _closed_span(original, match.start(), match.end(), max_chars)
     quotes = list(_QUOTE_SPAN.finditer(body))
     for prev, cur in zip(quotes, quotes[1:]):
         if _is_echo_twist(prev.group(1), cur.group(1)):
-            return _expand_short_quote_cluster(body, prev.start(), cur.end(), max_chars)
+            return _expand_short_quote_cluster(
+                body, prev.start(), cur.end(), max_chars, close_from=original
+            )
     last_end = 0
     for match in quotes:
         ctx = body[last_end : match.start()]
@@ -549,7 +814,7 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
             continue
         if _is_echo_twist(ctx, match.group(1), prev_may_be_long=True):
             return _expand_short_quote_cluster(
-                body, match.start(), match.end(), max_chars
+                body, match.start(), match.end(), max_chars, close_from=original
             )
     log_run = 0
     log_start: int | None = None
@@ -563,22 +828,81 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
             log_run += 1
             if log_run >= _LOGISTICS_MIN and log_start is not None:
                 return _expand_short_quote_cluster(
-                    body, log_start, match.end(), max_chars
+                    body, log_start, match.end(), max_chars, close_from=original
                 )
         else:
             log_run = 0
             log_start = None
+    if max_duet_quote_run(body) >= _DUET_RUN:
+        run = 0
+        run_start: int | None = None
+        last_end = 0
+        for match in quotes:
+            gap = visible_chars(body[last_end : match.start()]) if last_end else 0
+            if last_end and gap > _DUET_GAP:
+                run = 0
+                run_start = None
+            inner = match.group(1).strip()
+            n = visible_chars(inner)
+            if 1 <= n <= _DUET_MAX:
+                if run == 0:
+                    run_start = match.start()
+                run += 1
+                if run >= _DUET_RUN and run_start is not None:
+                    return _expand_duet_cluster(
+                        body,
+                        run_start,
+                        match.end(),
+                        max_chars,
+                        close_from=original,
+                    )
+            else:
+                run = 0
+                run_start = None
+            last_end = match.end()
+    if max_interview_ladder(body) >= _INTERVIEW_MIN:
+        run = 0
+        run_start: int | None = None
+        last_end = 0
+        for match in quotes:
+            gap = visible_chars(body[last_end : match.start()]) if last_end else 0
+            if last_end and gap > _INTERVIEW_GAP:
+                run = 0
+                run_start = None
+            inner = match.group(1).strip()
+            vis = visible_chars(inner)
+            short = 1 <= vis <= _SHORT
+            q = _is_questionish(inner)
+            thesis = _is_thesis_mouth(inner)
+            if q or (run > 0 and short) or (run > 0 and thesis) or (
+                short and re.match(r"^(?:不去|不是|没有|不行|不知道)[。！]?$", inner)
+            ):
+                if run == 0:
+                    run_start = match.start()
+                run += 1
+                if run >= _INTERVIEW_MIN and run_start is not None:
+                    return _expand_interview_cluster(
+                        body,
+                        run_start,
+                        match.end(),
+                        max_chars,
+                        close_from=original,
+                    )
+            else:
+                run = 0
+                run_start = None
+            last_end = match.end()
     for match in quotes:
         if _is_thesis_mouth(match.group(1)):
-            return _expand_short_quote_cluster(
-                body, match.start(), match.end(), max_chars
-            )
+            return _closed_span(original, match.start(), match.end(), max_chars)
     split = _SPLIT_SPEECH.search(body)
     if split is not None and visible_chars(split.group("head")) <= _SHORT:
         end = body.find("」", split.end())
         stop = end + 1 if end >= 0 else min(split.end() + 24, len(body))
-        return _expand_short_quote_cluster(body, split.start(), stop, max_chars)
-    run_start: int | None = None
+        return _expand_short_quote_cluster(
+            body, split.start(), stop, max_chars, close_from=original
+        )
+    run_start = None
     run = 0
     last_end = 0
     for match in _QUOTE_SPAN.finditer(body):
@@ -594,7 +918,9 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
             run += 1
             if run >= _QUOTE_RUN and run_start is not None:
                 end = min(match.end() + 8, len(body))
-                return _expand_short_quote_cluster(body, run_start, end, max_chars)
+                return _expand_short_quote_cluster(
+                    body, run_start, end, max_chars, close_from=original
+                )
         else:
             run = 0
             run_start = None
@@ -608,7 +934,7 @@ def find_staccato_span(text: str, *, max_chars: int = 360) -> str:
         punch = vis <= 22 and _CONTRAST_PUNCH.search(inner) is not None
         if punch and shorts_before >= 2 and start_short is not None:
             return _expand_short_quote_cluster(
-                body, start_short, match.end(), max_chars
+                body, start_short, match.end(), max_chars, close_from=original
             )
         if short:
             if shorts_before == 0:

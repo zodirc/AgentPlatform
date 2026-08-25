@@ -12,7 +12,7 @@ When drafting narrative (`draft_section` / prose `propose_patch`):
    `exemplar_alignment` is distance to the **class prototype** (`sig.v1`) — rhythm and texture, not plot search.
    `fragment_mismatch` fires only when the draft is a poor fit for the **declared** type, not when a keyword detector disagrees.
    Platform gold is 鲁迅 / 郁达夫公版节选. Learn the beat; **do not copy their plots**.
-4. After `writing_signals`, if `rewrite_policy=propose_patch` and `repair_span` is set, same Turn **`propose_patch`** that `old_text`. Soft hits (`meta_knowing_high`, `glue_heavy`, `fragment_mismatch`) are quality patches too — keep going while the island **changes** (different `key`, or overlap under 12 visible chars). Stop when the same island comes back (`key` matches and `old_text` overlaps ≥12 chars, including a peel like「电话那头问」) or the exact `old_text` did not land. Do not trust a high `net_signal` after only clearing L0. Do not `draft_section` the whole chapter again. `length_short` may thicken with another `draft_section`.
+4. After `writing_signals`, if `rewrite_policy=propose_patch` and `repair_span` is set, same Turn **`propose_patch`** that `old_text`. Soft hits (`meta_knowing_high`, `glue_heavy`, `fragment_mismatch`) are quality patches too — keep going while the island **changes** (different `key`, or overlap under 12 visible chars). Stop when the same island comes back (`key` matches and `old_text` overlaps ≥12 chars, including a peel like「电话那头问」) or the exact `old_text` did not land. Do not trust a high `net_signal` after only clearing L0. Do not `draft_section` upsert the whole chapter again. `length_short` after the island is clear: **`draft_section` `mode=append`** with only the new slice (~2000 visible chars).
 5. Optional: `evaluate_writing_fragment` to re-score a span.
 
 If `duty_conflict=true`, do not fake a climax in a 铺垫/加压 chapter.
@@ -23,10 +23,10 @@ Pinned style card (including the platform default voice) **outranks** generic ta
 ## Quotas（「N 字」= 实体文字）
 
 计量对象 = 汉字、字母、数字、标点；不计入换行/缩进/纯空格。禁止用空行把 `len(文本)` 凑到 N。
-`draft_section` / `update_outline` 返回 `visible_chars`。`length_short` / `outline_thin` / `outline_no_spine` / `outline_no_peak` / `outline_peak_flood` → **本轮内**加厚，不要报完工。
+`draft_section` / `update_outline` 返回 `visible_chars`。`length_short` / `outline_thin` / `outline_no_spine` / `outline_no_peak` / `outline_peak_flood` → **本轮内**加厚（正文用 `mode=append`），不要报完工。
 
 - **章纲**（用户未要「短/目录」）：用户要几章就几章；每章约 **200–400** 实体文字，撑得起约 **5000–6000** 字正文。长篇先写清主线、各章主次、高潮落点；多数章是铺和加压，**不是每章高潮**。第一章只写当下怎么过；机构专名不要当开篇第一个词；身世提不要进第一章。章末可以停在日子上，**不强制钩子**。批量扩章用 `mode=append`。
-- **正文（默认一章 / 成篇 / 一篇）**：**5000–6000** 实体文字。用户明确说短/简略才可低于此。无 `outline.md` 不降低下限。点名 N 字则达到 N（可略超）。
+- **正文（默认一章 / 成篇 / 一篇）**：**5000–6000** 实体文字。用户明确说短/简略才可低于此。无 `outline.md` 不降低下限。点名 N 字则达到 N（可略超）。先 `draft_section` 约 **2000**；有 `repair_span` 先补窗，再 `mode=append` 约 2000，直到满配额。禁止把已成稿整章再交一遍。
 - `draft_section` 正文不要用 `#` / `##` / 「第X章」当标题（用户明确要求时写成普通一句）。
 
 ## Cards

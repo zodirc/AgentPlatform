@@ -8,13 +8,12 @@ from app.writing.hinge import find_hinge_span
 from app.writing.lore import find_lore_span
 from app.writing.opening import find_opening_span
 from app.writing.patch_hygiene import close_span_in_body
-from app.writing.staccato import find_staccato_span
-from app.writing.signals.windows import REPAIR_MIN_VISIBLE, TextWindow
+from app.writing.staccato import find_staccato_span, is_isolated_staccato_punch
+from app.writing.signals.windows import REPAIR_MIN_VISIBLE, REPAIR_SPAN_MAX, TextWindow
 from app.writing.text_metrics import visible_chars
 
 REWRITE_PATCH = "propose_patch"
 REWRITE_DRAFT = "draft_ok"
-REPAIR_SPAN_MAX = 360
 WEAK_NET = 0.50
 # Same island if visible cores share a contiguous 12+ char chunk.
 ISLAND_OVERLAP_MIN = 12
@@ -33,9 +32,12 @@ L0_PENALTY_KEYS = frozenset(
 
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
-        "对白过碎、接词干加也/还、或用几点/到家收场：把这一串短对白一次说满，保留「」。"
+        "对白过碎、对拍问答、采访式追问、嘴里主题金句、接词干加也/还、或用几点/到家收场："
+        "把这一窗的短对白一次说满，保留「」和场面。"
         "不要只改其中一句芯片。不要改成「告诉他…」的说明；"
         "「刀钝你也哭」「现在还要看」改成场上能做的答，或答不上来、动手；"
+        "「你拆不拆？」「文庙后街。」「你住在那里。」这种对拍改成有停顿、物件、或一句说满的话；"
+        "「旧账碎了也只管旧账」「眼睛看见了…记住了就容易惹事」这类寓意收束改成手、物、或答不上来；"
         "删掉「八点半/早点睡/到家发消息」这种收场目录。"
         "不要从上一句的「说。」切开。不要整章重交"
     ),
@@ -43,7 +45,7 @@ _HINTS: dict[str, str] = {
     "hinge_dense": "看见/听到后不要立马拧：停在物件、价钱或沉默上",
     "opening_institution": "开篇先写可站的地方，机构名让人物后口带出",
     "lore_dump": "删掉「N年前」身世提要，留在当下的屋子或活计上",
-    "length_short": "实体文字不足，本轮加厚",
+    "length_short": "实体文字不足：draft_section mode=append 再接约 2000 字，不要整章 upsert",
     "meta_knowing_high": "少写心里清楚，改成场上动作",
     "fragment_mismatch": "按申报的 fragment 节奏写，不要串成另一类",
     "weak_window": "这一拍离该类范本质地最远，只改这一段",
@@ -148,10 +150,9 @@ def rewrite_policy_for(
     length_short: bool,
     needs_repair: bool = False,
 ) -> str:
-    """短稿可整章加厚；其余只要还有可定位问题就同轮补（不再用 vis≥800 关掉修补）。"""
+    """有可定位 span 就 propose_patch；篇幅不足走 mode=append，不再整章重交。"""
     del visible
-    if length_short:
-        return REWRITE_DRAFT
+    del length_short
     if needs_repair:
         return REWRITE_PATCH
     return REWRITE_DRAFT
@@ -194,16 +195,8 @@ def _find_phrase_span(text: str, phrases: tuple[str, ...], *, max_chars: int = R
 
 
 def should_reject_full_redraft(prior: dict[str, Any] | None) -> bool:
-    """是否拒整章重交。
-    
-    参数:
-        prior。
-    
-    返回:
-        bool。"""
+    """是否拒整章 upsert。满 800 字后加厚只能 append，length_short 不再放开重交。"""
     if not prior:
-        return False
-    if prior.get("length_short"):
         return False
     return int(prior.get("visible_chars") or 0) >= REPAIR_MIN_VISIBLE
 
@@ -214,23 +207,39 @@ def build_repair_span(
     penalties: list[dict[str, Any]],
     window: TextWindow | None = None,
     net_signal: float,
+    avoid_old: str = "",
 ) -> dict[str, Any] | None:
     """构造 repair_span。
     
     参数:
-        text/penalties/window/net。
+        text/penalties/window/net/avoid_old。
     
     返回:
         dict|None。"""
     body = text or ""
-    keys = penalty_hits(penalties)
+    keys = [k for k in penalty_hits(penalties) if k != "length_short"]
     l0 = [key for key in keys if key in L0_PENALTY_KEYS]
     probe = window.text if window is not None else body
     key = l0[0] if l0 else (keys[0] if keys else "")
     span = ""
     if "staccato_uniform" in l0:
-        span = find_staccato_span(probe)
+        located = find_staccato_span(
+            probe, max_chars=REPAIR_SPAN_MAX, avoid_old=avoid_old
+        )
+        if not located and window is not None:
+            located = find_staccato_span(
+                body, max_chars=REPAIR_SPAN_MAX, avoid_old=avoid_old
+            )
         key = "staccato_uniform"
+        if (
+            window is not None
+            and located
+            and not is_isolated_staccato_punch(located)
+            and located in (window.text or "")
+        ):
+            span = (window.text or "").strip()
+        else:
+            span = located
     elif "hinge_dense" in l0:
         span = find_hinge_span(probe)
         key = "hinge_dense"
@@ -258,6 +267,11 @@ def build_repair_span(
         key = key or "weak_window"
     if not span and keys:
         span = probe.strip()[:REPAIR_SPAN_MAX]
+    if avoid_old and span and unproductive_repeat(
+        {"repair_span": {"old_text": avoid_old, "key": key or "weak_window"}},
+        {"old_text": span, "key": key or "weak_window"},
+    ):
+        span = ""
     if not span:
         return None
     old = close_span_in_body(body, span, max_chars=REPAIR_SPAN_MAX)

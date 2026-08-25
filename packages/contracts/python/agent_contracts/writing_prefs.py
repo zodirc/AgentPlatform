@@ -60,6 +60,11 @@ EXEMPLAR_CATALOG: dict[str, tuple[dict[str, str], ...]] = {
         {"author": "鲁迅", "work": "故乡", "beat": "杨二嫂讨木器"},
         {"author": "鲁迅", "work": "孔乙己", "beat": "茴香豆"},
         {"author": "鲁迅", "work": "阿Q正传", "beat": "小尼姑"},
+        {"author": "老舍", "work": "骆驼祥子", "beat": "虎妞拉话"},
+        {"author": "老舍", "work": "骆驼祥子", "beat": "刘四爷问车"},
+        {"author": "老舍", "work": "茶馆", "beat": "王利发招呼"},
+        {"author": "路遥", "work": "平凡的世界", "beat": "双水村夜话"},
+        {"author": "路遥", "work": "平凡的世界", "beat": "润叶劝说"},
     ),
     "plot_progress": (
         {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
@@ -84,6 +89,8 @@ EXEMPLAR_CATALOG: dict[str, tuple[dict[str, str], ...]] = {
         {"author": "鲁迅", "work": "祝福", "beat": "年底气象"},
         {"author": "鲁迅", "work": "孔乙己", "beat": "温酒的人"},
         {"author": "郁达夫", "work": "春风沉醉的晚上", "beat": "陈二妹进来"},
+        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
+        {"author": "路遥", "work": "平凡的世界", "beat": "黄土暮色"},
     ),
 }
 
@@ -143,18 +150,20 @@ _PLATFORM_WEIGHTS: dict[str, dict[str, float]] = {
         "exemplar_alignment": 0.30,
     },
     "dialogue_dyad": {
-        "structure": 0.10,
-        "character": 0.30,
-        "pacing": 0.20,
-        "voice": 0.25,
-        "exemplar_alignment": 0.15,
+        # Fitted 2026-08-25 from platform bank + 祥子/茶馆/平凡的世界 dialogue.
+        "structure": 0.16,
+        "character": 0.21,
+        "pacing": 0.17,
+        "voice": 0.16,
+        "exemplar_alignment": 0.30,
     },
     "mixed": {
-        "structure": 0.18,
-        "character": 0.20,
-        "pacing": 0.20,
-        "voice": 0.20,
-        "exemplar_alignment": 0.22,
+        # Fitted 2026-08-25 after adding 祥子/平凡的世界 mixed beats.
+        "structure": 0.16,
+        "character": 0.22,
+        "pacing": 0.17,
+        "voice": 0.16,
+        "exemplar_alignment": 0.30,
     },
 }
 

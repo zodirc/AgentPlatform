@@ -76,6 +76,12 @@ async def test_draft_section_archives_unrelated_story(workspace: Path) -> None:
         "主线：沈禾要保住铺子。\n# 第一章\n核秤。\n",
         encoding="utf-8",
     )
+    sidecar = workspace / ".agent" / "work" / "local_beats.json"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(
+        '{"beats":[{"fragment":"mixed","section_id":"ch1","text":"旧拍应被清掉。"}]}',
+        encoding="utf-8",
+    )
 
     turn_id = uuid4()
     first = await core.draft_section(
@@ -86,6 +92,8 @@ async def test_draft_section_archives_unrelated_story(workspace: Path) -> None:
     )
     assert first["occupy"] == "fresh"
     assert first.get("archived")
+    assert sidecar.is_file()
+    assert '"beats": []' in sidecar.read_text(encoding="utf-8")
     text = draft.read_text(encoding="utf-8")
     assert "灯塔" in text
     assert "沈禾" not in text
@@ -214,3 +222,49 @@ async def test_short_or_length_short_may_redraft(workspace: Path) -> None:
         fragment="mixed",
     )
     assert second["status"] == "drafted"
+
+
+@pytest.mark.asyncio
+async def test_length_short_chapter_thickens_by_append_only(workspace: Path) -> None:
+    turn_id = uuid4()
+    first_body = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。"
+    ) * 20
+    first = await core.draft_section(
+        "ch1",
+        first_body,
+        turn_id=turn_id,
+        fragment="mixed",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert first["status"] == "drafted"
+    assert int(first["visible_chars"]) >= 800
+    assert first.get("length_short") is True
+    marker = "柜里面预备着热水"
+    rejected = await core.draft_section(
+        "ch1",
+        first_body + "整章重交应被拒。",
+        turn_id=turn_id,
+        fragment="mixed",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert rejected["status"] == "error"
+    assert rejected["error"] == "rewrite_via_patch"
+    assert "mode=append" in rejected["summary"]
+    tail = "粉板上记着十九个钱，掌柜取下粉板又挂回去。"
+    appended = await core.draft_section(
+        "ch1",
+        tail,
+        turn_id=turn_id,
+        fragment="mixed",
+        mode="append",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert appended["status"] == "drafted"
+    assert appended.get("mode") == "append"
+    text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert marker in text
+    assert "十九个钱" in text
+    assert "整章重交应被拒" not in text
+    assert int(appended["visible_chars"]) > int(first["visible_chars"])

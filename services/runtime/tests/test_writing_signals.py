@@ -299,10 +299,10 @@ def test_exemplars_earn_alignment_and_avoid_mismatch() -> None:
                 mismatch_hits += 1
             if "scene_ratio_high" in keys_r:
                 shown_hits += 1
-    assert n == 24
+    assert n == 31
     assert mismatch_hits == 0
-    assert align_hits >= 18
-    assert shown_hits >= 16
+    assert align_hits >= 23
+    assert shown_hits >= 20
 
 
 def test_anti_patterns_score_below_class_exemplars() -> None:
@@ -447,6 +447,7 @@ def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
     assert "跑完了" in span["old_text"]
     assert span["old_text"] in text
     assert span["key"] == "staccato_uniform"
+    assert span["visible_chars"] >= 80
 
 
 def test_short_draft_allows_full_redraft_policy() -> None:
@@ -530,6 +531,37 @@ def test_peeled_meta_island_stalls_rewrite_policy() -> None:
     )
     assert stalled["rewrite_policy"] == "draft_ok"
     assert "repair_span" not in stalled
+
+
+def test_staccato_stall_tries_next_island_or_keeps_weak() -> None:
+    prefs = platform_prefs_payload()
+    texture = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒。\n\n"
+    ) * 6
+    text = (
+        texture
+        + "「跑完了？」\n「跑完了。」\n「少了谁？」\n「不知道。」\n\n"
+        + texture
+        + "「那是旧账，旧账碎了也只管旧账。」\n"
+    )
+    first = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
+    assert first["rewrite_policy"] == "propose_patch"
+    span = first["repair_span"]
+    assert span["key"] == "staccato_uniform"
+    second = score_writing_fragment(
+        text,
+        fragment_declared="mixed",
+        prefs=prefs,
+        prior={"composite": first["composite"], "repair_span": span},
+    )
+    assert any(p["key"] == "staccato_uniform" for p in second["penalties"])
+    assert second["writing_weak"] is True
+    if second.get("repair_span"):
+        assert second["rewrite_policy"] == "propose_patch"
+        assert second["repair_span"]["old_text"] != span["old_text"]
+    else:
+        assert second["rewrite_policy"] == "draft_ok"
 
 
 def test_infer_fragment_from_duty() -> None:
@@ -635,6 +667,37 @@ def test_long_texture_without_l0_does_not_request_patch() -> None:
     assert out["net_signal"] >= 0.50
     assert out["rewrite_policy"] == "draft_ok"
     assert "repair_span" not in out
+
+
+def test_isolated_antithesis_span_stays_tight() -> None:
+    from app.writing.signals.repair import build_repair_span
+    from app.writing.signals.windows import TextWindow
+
+    pad = "柜台上温着酒，粉板上记着十九个钱。" * 12
+    punch = "「钟不知道，屋子知道。」"
+    body = pad + punch
+    window = TextWindow(0, len(body), body)
+    out = build_repair_span(
+        body,
+        penalties=[{"key": "staccato_uniform", "hit": True}],
+        window=window,
+        net_signal=0.39,
+    )
+    assert out is not None
+    assert "钟不知道" in out["old_text"]
+    assert out["visible_chars"] < 80
+
+
+def test_length_short_without_span_is_draft_ok() -> None:
+    prefs = platform_prefs_payload()
+    text = "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台。" * 4
+    out = score_writing_fragment(
+        text, fragment_declared="worldview_texture", prefs=prefs
+    )
+    assert "repair_span" not in out or not any(
+        p.get("key") == "staccato_uniform" and p.get("hit")
+        for p in (out.get("penalties") or [])
+    )
 
 
 def test_overlay_space_keeps_platform_neighbors() -> None:

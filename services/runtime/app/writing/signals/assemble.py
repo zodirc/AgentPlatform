@@ -455,7 +455,7 @@ async def writing_rubric(
             "成稿前可先读本工具；成稿后以 writing_signals 为准",
             f"本场片段类型：{declared}",
             "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-            "有 repair_span 时同轮 propose_patch 修补，勿整章再 draft_section，勿另开 Turn",
+            "有 repair_span 时同轮 propose_patch；篇幅不足 mode=append 接约 2000 字，勿整章 upsert，勿另开 Turn",
         ],
     }
 

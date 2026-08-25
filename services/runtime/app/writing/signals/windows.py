@@ -12,6 +12,8 @@ _SENT_END = re.compile(r"(?<=[。！？!?\n])")
 
 WINDOW_TARGET_VISIBLE = 480
 REPAIR_MIN_VISIBLE = 800
+# Pack overflow before sentence-split; repair_span may cover one packed window.
+REPAIR_SPAN_MAX = int(WINDOW_TARGET_VISIBLE * 1.4)
 
 
 @dataclass(frozen=True)

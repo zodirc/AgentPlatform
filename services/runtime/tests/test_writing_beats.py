@@ -136,3 +136,20 @@ def test_local_beats_go_in_volatile_after_spec(tmp_path: Path) -> None:
     assert spec_at != -1 and beats_at != -1 and spec_at < beats_at
     assert "## Local beats" not in pin.prompt
     assert "Local beats" not in extract_cards_block(pin.volatile_block)
+
+
+def test_new_piece_does_not_inject_prior_local_beats(tmp_path: Path) -> None:
+    from app.writing.cards import prepare_writing_system_prompt
+
+    write_local_beats(
+        [{"fragment": "mixed", "section_id": "ch1", "text": _CLEARED_BEAT}],
+        workspace_root=tmp_path,
+    )
+    assert format_local_beats_block("写一份生活的文章", workspace_root=tmp_path)
+    assert format_local_beats_block("写一篇故事，民国风格", workspace_root=tmp_path) == ""
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写一篇故事",
+        workspace_root=tmp_path,
+    )
+    assert "## Local beats" not in pin.volatile_block

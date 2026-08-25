@@ -157,8 +157,9 @@ def build_registry() -> ToolRegistry:
                 "this story). Inferred from the user text when occupy is omitted. "
                 "Pass layout=sections for one-file-per-chapter under drafts/. "
                 "Promote into manuscript.md via propose_patch. History stays under "
-                ".agent/work/history/. A second full draft of the same long section "
-                "in one Turn is rejected — patch writing_signals.repair_span instead."
+                ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
+                "do not upsert the whole chapter: propose_patch the repair_span, or "
+                "draft_section mode=append with only the new slice (~2000 chars) to thicken."
             ),
             parameters={
                 "type": "object",
@@ -189,6 +190,15 @@ def build_registry() -> ToolRegistry:
                             "fresh: archive the occupied manuscript and write only this "
                             "section. upsert: keep other chapters. Omit to infer from "
                             "the user text (写一篇 vs 续写)."
+                        ),
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["upsert", "append"],
+                        "description": (
+                            "append: add content after the existing chapter body "
+                            "(thicken). upsert: replace the chapter. After ≥800 visible "
+                            "chars this Turn, append is required to thicken."
                         ),
                     },
                 },

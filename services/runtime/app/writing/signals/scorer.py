@@ -174,7 +174,7 @@ def _collect_penalties(
     add(
         "staccato_uniform",
         bool(staccato_fields(text).get("staccato_uniform")),
-        "对白过碎、接词干加也/还、几点到家收场、拆句或对仗",
+        "对白过碎、接词干加也/还、几点到家收场、拆句或对仗、主题金句/采访阶梯/对拍三联",
     )
     if not skip_opening:
         add(
@@ -370,6 +370,7 @@ def score_writing_fragment(
         WEAK_NET,
         build_repair_span,
         is_writing_weak,
+        l0_penalty_hits,
         rewrite_policy_for,
         unproductive_repeat,
     )
@@ -417,14 +418,19 @@ def score_writing_fragment(
                 body["penalties"] = list(worst_scored["penalties"])
 
     probe_penalties = list(body.get("penalties") or [])
-    if worst_scored is not None and (
+    locate_win = worst_win
+    body_l0 = l0_penalty_hits(body.get("penalties"))
+    if body_l0:
+        # 章级 L0（跨窗碎拍/金句）用章级 penalties；窗仍用于整窗扩张。
+        probe_penalties = list(body.get("penalties") or [])
+    elif worst_scored is not None and (
         worst_scored.get("penalties")
         or float(body["net_signal"]) < WEAK_NET
     ):
         probe_penalties = list(worst_scored.get("penalties") or probe_penalties)
     needs_repair = is_writing_weak(
         net=float(body["net_signal"]),
-        penalties=probe_penalties,
+        penalties=probe_penalties if not body_l0 else body.get("penalties"),
         length_short=length_short,
     )
     span = None
@@ -432,12 +438,22 @@ def score_writing_fragment(
         span = build_repair_span(
             text,
             penalties=probe_penalties,
-            window=worst_win,
+            window=locate_win,
             net_signal=float(body["net_signal"]),
         )
         if span and unproductive_repeat(prior, span, body.get("composite")):
-            span = None
-            needs_repair = False
+            avoid = str(span.get("old_text") or "")
+            alt = build_repair_span(
+                text,
+                penalties=list(body.get("penalties") or probe_penalties),
+                window=None,
+                net_signal=float(body["net_signal"]),
+                avoid_old=avoid,
+            )
+            if alt and not unproductive_repeat(prior, alt, body.get("composite")):
+                span = alt
+            else:
+                span = None
         if span:
             body["repair_span"] = span
     beat = beat_window_payload(text, window=worst_win)
@@ -446,7 +462,12 @@ def score_writing_fragment(
     body["rewrite_policy"] = rewrite_policy_for(
         visible=vis,
         length_short=length_short,
-        needs_repair=needs_repair,
+        needs_repair=span is not None,
     )
-    body["writing_weak"] = bool(needs_repair)
+    # 同岛停后若章级 L0 仍在，仍标 writing_weak（利用率/未修好），但不空转同一 island。
+    body["writing_weak"] = bool(
+        span is not None
+        or length_short
+        or bool(body_l0)
+    )
     return body

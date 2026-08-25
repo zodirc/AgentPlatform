@@ -262,6 +262,20 @@ def upsert_section(doc: str, section_id: str, content: str) -> str:
     return _serialize(preamble, updated)
 
 
+def append_section(doc: str, section_id: str, addition: str) -> str:
+    """只把新段接到本章已有正文后，不覆盖前段。"""
+    sid = section_id.strip()
+    title = human_section_title(sid)
+    extra = _prepare_body(addition, title)
+    existing = extract_section(doc, sid)
+    if existing is None or not str(existing).strip():
+        return upsert_section(doc, sid, extra)
+    if not extra.strip():
+        return upsert_section(doc, sid, existing)
+    joined = str(existing).rstrip() + "\n\n" + extra.lstrip()
+    return upsert_section(doc, sid, joined)
+
+
 def extract_section(doc: str, section_id: str) -> str | None:
     """取章 body。
     

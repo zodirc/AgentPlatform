@@ -195,14 +195,34 @@ def _write_manifest(
     return path
 
 
+def _parse_draft_mode(raw: object | None) -> str:
+    token = str(raw or "upsert").strip().lower()
+    if token in {"append", "thicken"}:
+        return "append"
+    return "upsert"
+
+
+def _already_drafted_this_turn(manifest: dict[str, Any] | None) -> bool:
+    """本 Turn 已写过章：禁止再因「写一篇」误触发 occupy=fresh（会清掉加厚门禁）。"""
+    if not isinstance(manifest, dict):
+        return False
+    if str(manifest.get("occupy") or "") == "fresh":
+        return True
+    if manifest.get("sections"):
+        return True
+    drafts = manifest.get("section_drafts")
+    return isinstance(drafts, dict) and bool(drafts)
+
+
 def _reject_full_redraft(
     manifest: dict[str, Any],
     *,
     section_id: str,
     occupy_fresh: bool,
     path: str,
+    mode: str = "upsert",
 ) -> dict[str, Any] | None:
-    if occupy_fresh:
+    if occupy_fresh or mode == "append":
         return None
     from app.writing.signals.repair import REWRITE_PATCH, should_reject_full_redraft
 
@@ -217,8 +237,9 @@ def _reject_full_redraft(
         "error": "rewrite_via_patch",
         "rewrite_policy": REWRITE_PATCH,
         "summary": (
-            "本章本轮已成稿。用 propose_patch 只换 writing_signals.repair_span.old_text，"
-            "不要整章再 draft_section。"
+            "本章本轮已成稿。有 writing_signals.repair_span 则 propose_patch 只换 old_text；"
+            "篇幅不足则 draft_section mode=append，content 只交新段（约 2000 字）。"
+            "不要整章 upsert。"
         ),
     }
     if span:
@@ -244,17 +265,20 @@ async def draft_section(
         content: 章节正文。
         turn_id: 可选 Turn ID，用于 manifest/history 作用域。
         session_id: 兼容参数，manifest 已 work-scoped。
-        **_kwargs: ``layout``/``occupy``/``fragment``/``turn_user_text`` 等写作控制项。
+        **_kwargs: ``layout``/``occupy``/``mode``/``fragment``/``turn_user_text`` 等写作控制项。
 
     返回:
         ``status=drafted`` 及 ``path``/``manifest_path``/``writing_signals`` 等；
         已成稿章节拒绝整章重写时返回 ``rewrite_via_patch`` 错误。
 
     说明:
-        ``occupy_fresh`` 会归档旧 occupied 文档并重置 manifest sections；monofile 用 ``upsert_section``。
+        ``occupy_fresh`` 会归档旧 occupied 文档并重置 manifest sections；monofile 用
+        ``upsert_section`` / ``append_section``。评分与篇幅看拼接后的整章。
     """
     from app.writing.manuscript import (
+        append_section,
         draft_manuscript_rel,
+        extract_section,
         legacy_draft_manuscript_rel,
         manuscript_mode,
         upsert_section,
@@ -280,6 +304,8 @@ async def draft_section(
     }
     archived: list[str] = []
     occupy_fresh = False
+    mode = _parse_draft_mode(_kwargs.get("mode"))
+    scored = content
 
     if layout == "monofile":
         path = draft_manuscript_rel()
@@ -293,13 +319,15 @@ async def draft_section(
         occupy_fresh = should_occupy_fresh(
             occupy_arg=_kwargs.get("occupy"),
             user_text=str(_kwargs.get("turn_user_text") or ""),
-            already_fresh_this_turn=(
-                turn_id is not None and str(manifest.get("occupy") or "") == "fresh"
-            ),
+            already_fresh_this_turn=_already_drafted_this_turn(manifest),
             occupied=manuscript_is_occupied(existing),
         )
         blocked = _reject_full_redraft(
-            manifest, section_id=section_id, occupy_fresh=occupy_fresh, path=path
+            manifest,
+            section_id=section_id,
+            occupy_fresh=occupy_fresh,
+            path=path,
+            mode=mode,
         )
         if blocked:
             return blocked
@@ -307,8 +335,12 @@ async def draft_section(
             archived = archive_occupied_writing_docs(layout=layout)
             existing = ""
             manifest["occupy"] = "fresh"
-        final = upsert_section(existing, section_id, content)
+        if mode == "append" and not occupy_fresh:
+            final = append_section(existing, section_id, content)
+        else:
+            final = upsert_section(existing, section_id, content)
         target.write_text(final, encoding="utf-8")
+        scored = extract_section(final, section_id) or content
     else:
         path = _draft_file_path(section_id)
         target = _resolve_path(path)
@@ -316,13 +348,15 @@ async def draft_section(
         occupy_fresh = should_occupy_fresh(
             occupy_arg=_kwargs.get("occupy"),
             user_text=str(_kwargs.get("turn_user_text") or ""),
-            already_fresh_this_turn=(
-                turn_id is not None and str(manifest.get("occupy") or "") == "fresh"
-            ),
+            already_fresh_this_turn=_already_drafted_this_turn(manifest),
             occupied=_section_drafts_occupied(),
         )
         blocked = _reject_full_redraft(
-            manifest, section_id=section_id, occupy_fresh=occupy_fresh, path=path
+            manifest,
+            section_id=section_id,
+            occupy_fresh=occupy_fresh,
+            path=path,
+            mode=mode,
         )
         if blocked:
             return blocked
@@ -333,7 +367,14 @@ async def draft_section(
             legacy = _resolve_path(_legacy_draft_file_path(section_id))
             if legacy.is_file():
                 target.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
-        target.write_text(content, encoding="utf-8")
+        if mode == "append" and not occupy_fresh and target.exists():
+            prev = target.read_text(encoding="utf-8")
+            addition = (content or "").strip()
+            scored = (prev.rstrip() + "\n\n" + addition).strip() + "\n" if prev.strip() else addition
+            target.write_text(scored if scored.endswith("\n") else scored + "\n", encoding="utf-8")
+        else:
+            target.write_text(content, encoding="utf-8")
+            scored = content
 
     history_path: str | None = None
     keep = int(getattr(settings, "writing_draft_history_keep", 5) or 0)
@@ -341,7 +382,7 @@ async def draft_section(
         history_path = _history_file_path(section_id, turn_id)
         hist = _resolve_path(history_path)
         hist.parent.mkdir(parents=True, exist_ok=True)
-        hist.write_text(content, encoding="utf-8")
+        hist.write_text(scored, encoding="utf-8")
         _prune_section_history(section_id, keep=keep)
 
     if session_id is not None and not manifest.get("session_id"):
@@ -369,14 +410,14 @@ async def draft_section(
         result["history_path"] = history_path
     result.update(
         draft_length_fields(
-            content,
+            scored,
             str(_kwargs.get("turn_user_text") or ""),
         )
     )
-    result.update(hinge_fields(content))
-    result.update(lore_fields(content, section_id))
-    result.update(opening_fields(content, section_id))
-    result.update(staccato_fields(content))
+    result.update(hinge_fields(scored))
+    result.update(lore_fields(scored, section_id))
+    result.update(opening_fields(scored, section_id))
+    result.update(staccato_fields(scored))
     if occupy_fresh:
         occupy_fields = occupy_result_fields(archived)
         archive_note = str(occupy_fields.pop("summary", "") or "").strip()
@@ -384,12 +425,14 @@ async def draft_section(
         if archive_note:
             prev = str(result.get("summary") or "").strip()
             result["summary"] = f"{archive_note} {prev}".strip() if prev else archive_note
+    if mode == "append":
+        result["mode"] = "append"
     fragment = str(_kwargs.get("fragment") or "mixed").strip()
     try:
         from app.writing.signals.assemble import build_writing_signals
 
         signals = await build_writing_signals(
-            content,
+            scored,
             fragment=fragment,
             section_id=section_id,
             session_id=session_id,
@@ -546,9 +589,7 @@ async def update_outline(
     occupy_fresh = should_occupy_fresh(
         occupy_arg=_kwargs.get("occupy"),
         user_text=str(_kwargs.get("turn_user_text") or ""),
-        already_fresh_this_turn=(
-            turn_id is not None and str(manifest.get("occupy") or "") == "fresh"
-        ),
+        already_fresh_this_turn=_already_drafted_this_turn(manifest),
         occupied=manuscript_is_occupied(existing),
     )
     archived: list[str] = []

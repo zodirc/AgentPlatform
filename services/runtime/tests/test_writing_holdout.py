@@ -44,7 +44,9 @@ def test_production_bank_excludes_eval_holdout() -> None:
     assert "肥皂" not in live_works
     assert "明天" not in live_works
     for frag in _wp.FRAGMENT_TYPES:
-        assert len(bank[frag]) == 4, frag
+        assert len(bank[frag]) >= 4, frag
+    assert len(bank["dialogue_dyad"]) >= 9
+    assert len(bank["mixed"]) >= 6
     eval_bank = load_eval_holdout_exemplars()
     eval_works = {s.work for samples in eval_bank.values() for s in samples}
     assert "伤逝" in eval_works

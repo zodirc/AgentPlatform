@@ -117,8 +117,8 @@ def build_writing_spec_block(
         lines.append(f"- 章职: {duty_line}")
     lines.append(f"- {_OBLIGATIONS.get(fragment, _OBLIGATIONS['mixed'])}")
     lines.append(
-        "- 成稿后读 writing_signals.repair_span；有 span 就 propose_patch，"
-        "同一处抬不动分再停，不要整章再 draft_section"
+        "- 成稿后读 writing_signals.repair_span；有 span 就 propose_patch，同一岛停；"
+        "篇幅不足 draft_section mode=append 约 2000 字，不要整章再交"
     )
     text = "\n".join(lines)
     return text if len(text) <= 420 else text[:419] + "…"

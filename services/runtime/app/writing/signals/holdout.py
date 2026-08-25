@@ -28,7 +28,9 @@ DIMENSIONS = _wp.DIMENSIONS
 _EVAL_DIR = Path(__file__).resolve().parent / "exemplars_holdout"
 
 SPLIT_VERSION = "work-v2"
-TRAIN_WORKS = frozenset({"孔乙己", "故乡", "药", "铸剑"})
+TRAIN_WORKS = frozenset(
+    {"孔乙己", "故乡", "药", "铸剑", "骆驼祥子", "茶馆", "平凡的世界"}
+)
 HOLDOUT_WORKS = frozenset(
     {
         "祝福",

@@ -113,13 +113,22 @@ def write_local_beats(
     tmp.replace(path)
 
 
+def clear_local_beats(*, workspace_root: Path | None = None) -> None:
+    """occupy=fresh 时丢掉上一篇 sidecar，避免灌进新篇 volatile。"""
+    write_local_beats([], workspace_root=workspace_root)
+
+
 def format_local_beats_block(
     message: str,
     *,
     workspace_root: Path | None = None,
     fragment: str | None = None,
 ) -> str:
-    """volatile 块：Writing spec 之后。总帽 BEATS_BLOCK_MAX。"""
+    """volatile 块：Writing spec 之后。总帽 BEATS_BLOCK_MAX。新篇不灌上一篇的拍。"""
+    from app.writing.occupy import wants_new_piece
+
+    if wants_new_piece(message or ""):
+        return ""
     beats = load_local_beats(workspace_root)
     if not beats:
         return ""
