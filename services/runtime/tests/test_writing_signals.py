@@ -17,6 +17,8 @@ _wp = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_wp)
 
 FRAGMENT_TYPES = _wp.FRAGMENT_TYPES
+PLATFORM_SIGNAL_PENALTIES = _wp.PLATFORM_SIGNAL_PENALTIES
+SIGNAL_PENALTY_KEYS = _wp.SIGNAL_PENALTY_KEYS
 merge_prefs = _wp.merge_prefs
 normalize_fragment = _wp.normalize_fragment
 normalize_row = _wp.normalize_row
@@ -269,11 +271,16 @@ def test_split_speech_and_contrast_punch_are_penalized() -> None:
 def test_live_prefs_do_not_mask_exemplar_penalties() -> None:
     from app.writing.signals.fit import fit_signal_penalties
 
+    # fit keeps full PLATFORM magnitudes (or 0 if exemplars overfire).
+    # Do not compare to platform_prefs_payload(): that applies style_gains.
     masked = fit_signal_penalties()
-    platform = platform_prefs_payload()["signal_penalties"]
     for frag in FRAGMENT_TYPES:
-        for key, val in platform[frag].items():
-            assert masked[frag][key] == val, (frag, key, masked[frag][key], val)
+        for key in SIGNAL_PENALTY_KEYS:
+            base = float(PLATFORM_SIGNAL_PENALTIES.get(key, 0.0))
+            got = masked[frag][key]
+            assert got in (0.0, base), (frag, key, got, base)
+            # Default bank should not wipe the live table.
+            assert got == base, (frag, key, got, base)
 
 
 def test_exemplars_earn_alignment_and_avoid_mismatch() -> None:

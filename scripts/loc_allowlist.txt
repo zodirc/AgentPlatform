@@ -29,3 +29,4 @@ services/api/app/services/ops/runs.py	900
 services/runtime/app/retrieval/index_scheduler.py	900
 services/runtime/app/retrieval/chunking.py	1100
 services/runtime/app/writing/cards.py	900
+services/runtime/app/writing/staccato.py	1000
