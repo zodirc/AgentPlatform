@@ -16,7 +16,6 @@ import { useEndUserAuth } from "../shared/auth/EndUserAuth";
 import { readSettingsReturn } from "../shared/workbench/settingsReturn";
 import { useTheme } from "../shared/theme/ThemeProvider";
 import { ThemeSwitcher } from "../shared/theme/ThemeSwitcher";
-import { WritingPrefsSection } from "./WritingPrefsSection";
 import { CommandAllowlistCard } from "./CommandAllowlistCard";
 import { IndexInspectSection } from "./IndexInspectSection";
 import { nextModelPanelAfterListChange } from "./settingsModelPanel";
@@ -733,12 +732,6 @@ export function SettingsPage() {
       {tab === "appearance" ? (
         <div className="mt-6">
           <AppearanceSection />
-        </div>
-      ) : null}
-
-      {tab === "writing" ? (
-        <div className="mt-6">
-          <WritingPrefsSection />
         </div>
       ) : null}
 

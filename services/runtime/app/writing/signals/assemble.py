@@ -22,7 +22,7 @@ from app.writing.manuscript import (
 from app.writing.outline_arc import extract_outline_job
 from app.writing.signals.persist import persist_fragment_evaluation
 from app.writing.signals.bank import find_platform_exemplar
-from app.writing.signals.prefs_store import load_account_prefs, platform_prefs_payload
+from app.writing.signals.prefs_store import platform_prefs_payload
 from app.writing.signals.prose_path import is_prose_writing_path, section_id_from_path
 from app.writing.signals.scorer import score_writing_fragment
 from app.writing.signals.space import load_platform_space, space_stamp
@@ -338,7 +338,7 @@ async def build_writing_signals(
     from app.writing.work_mode import infer_work_mode
     from app.writing.signals.prefs_loader import _module as _writing_prefs
 
-    apply_work_mode_overlay = _writing_prefs().apply_work_mode_overlay
+    platform_prefs_payload = _writing_prefs().platform_prefs_payload
 
     owner_id, work_id = await _resolve_owner_and_work(session_id)
     outline = ""
@@ -351,7 +351,8 @@ async def build_writing_signals(
     except OSError:
         outline = ""
     work_mode = infer_work_mode(turn_user_text, outline=outline)
-    prefs = apply_work_mode_overlay(await load_account_prefs(owner_id), work_mode)
+    # Weights live in writing tools (work_mode), not Settings account sliders.
+    prefs = platform_prefs_payload(work_mode=work_mode)
     space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
     declared = normalize_fragment(fragment)
     prior = _manifest_section_row(turn_id, session_id, section_id)
@@ -372,14 +373,14 @@ async def build_writing_signals(
             duty_conflict = True
 
     block: dict[str, Any] = {
-        "prefs_scope": "account",
+        "prefs_scope": "platform",
         "work_mode": work_mode,
         "preset": prefs.get("preset_label", "balanced"),
         "schema_version": prefs.get("schema_version", 1),
-        "prefs_updated_at": prefs.get("updated_at"),
+        "prefs_updated_at": None,
         "weight_set_version": (
-            f"account:{owner_id or 'default'}:{prefs.get('schema_version', 1)}:"
-            f"{work_mode}:{space_stamp(space)}"
+            f"platform:{work_mode}:{prefs.get('schema_version', 1)}:"
+            f"{space_stamp(space)}"
         ),
         "chapter_duty": duty,
         "duty_conflict": duty_conflict,
@@ -425,14 +426,14 @@ async def writing_rubric(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """rubric 工具。"""
-    from app.writing.work_mode import infer_work_mode
+    """rubric 工具：返回当前 work_mode 下平台维度权重与 signal 表。"""
+    from app.writing.work_mode import fragment_obligations, infer_work_mode
     from app.writing.signals.prefs_loader import _module as _writing_prefs
 
-    apply_work_mode_overlay = _writing_prefs().apply_work_mode_overlay
+    platform_prefs_payload = _writing_prefs().platform_prefs_payload
     owner_id, work_id = await _resolve_owner_and_work(session_id)
     work_mode = infer_work_mode(str(_kwargs.get("turn_user_text") or ""))
-    prefs = apply_work_mode_overlay(await load_account_prefs(owner_id), work_mode)
+    prefs = platform_prefs_payload(work_mode=work_mode)
     declared = normalize_fragment(fragment)
     weights = (prefs.get("fragment_weights") or {}).get(declared) or {}
     if not weights:
@@ -453,11 +454,14 @@ async def writing_rubric(
                     "scope": s.scope,
                 }
             )
+    mode_label = "经典文学" if work_mode == "literary" else "连载网文"
+    obligations = fragment_obligations(work_mode)
     return {
         "fragment": declared,
         "work_mode": work_mode,
+        "work_mode_label": mode_label,
         "chapter_duty": duty,
-        "prefs_scope": "account",
+        "prefs_scope": "platform",
         "preset": prefs.get("preset_label", "balanced"),
         "dimension_weights": weights,
         "signal_penalties": flatten(prefs.get("signal_penalties") or {}, declared),
@@ -478,10 +482,11 @@ async def writing_rubric(
             "neighbors": bank_titles,
         },
         "obligations": [
-            "成稿前可先读本工具；成稿后以 writing_signals 为准",
-            f"本场片段类型：{declared}",
+            "权重在写作工具内按 work_mode 切换，不在设置页",
+            f"work_mode={work_mode}（{mode_label}）· fragment={declared}",
+            obligations.get(declared, obligations["mixed"]),
             "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-            "有 repair_span 时同轮 propose_patch；章级过程 L0 清后篇幅不足 mode=append 接约 2000 字，勿整章 upsert，勿另开 Turn",
+            "有 repair_span 时同轮 propose_patch；章级 L0 清后 mode=append 约 2000 字",
         ],
     }
 
@@ -519,6 +524,7 @@ async def evaluate_writing_fragment(
         session_id=session_id,
         turn_id=turn_id,
         persist=True,
+        turn_user_text=str(_kwargs.get("turn_user_text") or ""),
     )
     return {"writing_signals": signals, "status": "evaluated"}
 

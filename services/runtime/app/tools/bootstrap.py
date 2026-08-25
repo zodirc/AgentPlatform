@@ -216,9 +216,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="writing_rubric",
             description=(
-                "Returns platform dimension weights and penalty/reward keys for a fragment type. "
+                "Returns platform dimension weights and penalty/reward keys for a fragment type "
+                "under the current work_mode (literary vs web_serial, inferred from the user turn). "
                 "Does not score prose — use evaluate_writing_fragment or draft_section after writing. "
-                "Account style leans are in Settings → 写作风格."
+                "Weights live in this tool / writing_signals, not Settings."
             ),
             parameters={
                 "type": "object",
@@ -248,7 +249,8 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="evaluate_writing_fragment",
             description=(
-                "Heuristic reward/penalty score for a prose fragment (account weights from Settings). "
+                "Heuristic reward/penalty score for a prose fragment "
+                "(platform weights for current work_mode via writing tools). "
                 "Pass text or section_id. Persists cross-session history. "
                 "Prefer draft_section which embeds the same writing_signals block."
             ),

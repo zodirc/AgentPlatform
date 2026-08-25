@@ -387,8 +387,9 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "## Writing signals" in writing.system_prompt
     assert "writing_signals" in writing.system_prompt
     assert "repair_span" in writing.system_prompt
-    assert "Settings → 写作风格" in writing.system_prompt
-    assert "不强制钩子" in writing.system_prompt
+    assert "writing_rubric" in writing.system_prompt or "work_mode" in writing.system_prompt
+    assert "Settings → 写作风格" not in writing.system_prompt
+    assert "work_mode" in writing.system_prompt
     assert "高潮落点" in writing.system_prompt
     assert "200–400" in writing.system_prompt
     assert "5000–6000" in writing.system_prompt

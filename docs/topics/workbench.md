@@ -73,8 +73,8 @@ work_root/
 
 | 层 | 是什么 | 谁关 |
 |----|--------|------|
-| **L0 receipts** | `staccato_uniform`、`hinge_dense`、`opening_institution`、`lore_dump`、`length_short`… | 过程门；**Settings 滑条关不掉** |
-| **L1 `writing_signals`** | 维度加权 `composite` + 惩罚/奖励 → `net_signal`；`exemplar_alignment` 是到类原型 `sig.v1` 的距离（节奏/质地，不是搜情节） | 账户「写作风格」滑条只缩放**该类** L1 行；维度权重平台钉死 |
+| **L0 receipts** | `staccato_uniform`、`hinge_dense`、`opening_institution`、`lore_dump`、`length_short`… | 过程门 |
+| **L1 `writing_signals`** | 维度加权 `composite` + 惩罚/奖励 → `net_signal`；`exemplar_alignment` 是到类原型 `sig.v1` 的距离（节奏/质地，不是搜情节） | 平台按 `work_mode`（`literary` / `web_serial`）钉死；经 `writing_rubric` / `writing_signals` 暴露，**不在设置页** |
 
 `fragment`：`plot_progress` \| `worldview_texture` \| `climax_beat` \| `battle_action` \| `dialogue_dyad` \| `mixed`。弱 `net_signal` 或 L0 命中 → **本 Turn** `propose_patch` 只换 `repair_span.old_text`。长章按约 480 实体文字切窗，取最弱窗。平台金标是鲁迅 / 郁达夫公版节选，学拍不搬核。
 
@@ -84,7 +84,7 @@ L0 对白门还认：电报连环、「…。」他说，「…。」拆句、�
 
 | 场景 | 主杠杆 | 是否检索 |
 |------|--------|----------|
-| 立人设 / 文风 | 卡 pin；Settings 滑条 | 否 |
+| 立人设 / 文风 | 卡 pin；`work_mode` + rubric | 否 |
 | 据材料新写 | RAG + cite + 卡 + signals | 要（控制次数） |
 | 局部改稿 | `propose_patch` + 卡 + 再评分 | 通常跳过 |
 | polish / 导出 | 样例与 lint | 否 |
