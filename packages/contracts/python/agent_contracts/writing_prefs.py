@@ -13,6 +13,10 @@ FRAGMENT_TYPES: tuple[str, ...] = (
     "mixed",
 )
 
+# literary = 经典白话（人物/句味/环境托举）；web_serial = 连载网文（长纲拉力/钩子/台阶）
+WORK_MODES: tuple[str, ...] = ("literary", "web_serial")
+DEFAULT_WORK_MODE = "literary"
+
 DIMENSIONS: tuple[str, ...] = (
     "structure",
     "character",
@@ -37,6 +41,7 @@ SIGNAL_PENALTY_KEYS: tuple[str, ...] = (
     "meta_knowing_high",
     "glue_heavy",
     "fragment_mismatch",
+    "serial_hook_flat",
 )
 
 SIGNAL_REWARD_KEYS: tuple[str, ...] = (
@@ -45,6 +50,7 @@ SIGNAL_REWARD_KEYS: tuple[str, ...] = (
     "exemplar_alignment_high",
     "outline_duty_match",
     "character_card_action",
+    "plot_step_visible",
 )
 
 # Platform catalog (must match runtime markdown headings). Rhythm/texture only.
@@ -119,7 +125,7 @@ ALIGN_REWARD_FLOOR = 0.80
 # fragment_mismatch only when declared class itself is a poor fit.
 MISMATCH_ALIGN_FLOOR = 0.60
 
-# Platform defaults — normalized per fragment row.
+# Platform defaults — normalized per fragment row (literary / 经典文学向).
 _PLATFORM_WEIGHTS: dict[str, dict[str, float]] = {
     "plot_progress": {
         "structure": 0.25,
@@ -167,6 +173,57 @@ _PLATFORM_WEIGHTS: dict[str, dict[str, float]] = {
     },
 }
 
+# web_serial — 人物仍中心，但情节/节奏/钩子权重更高；voice/范本对齐略降。
+_PLATFORM_WEIGHTS_WEB: dict[str, dict[str, float]] = {
+    "plot_progress": {
+        "structure": 0.28,
+        "character": 0.22,
+        "pacing": 0.26,
+        "voice": 0.08,
+        "exemplar_alignment": 0.16,
+    },
+    "worldview_texture": {
+        "structure": 0.18,
+        "character": 0.14,
+        "pacing": 0.18,
+        "voice": 0.12,
+        "exemplar_alignment": 0.38,
+    },
+    "climax_beat": {
+        "structure": 0.22,
+        "character": 0.20,
+        "pacing": 0.28,
+        "voice": 0.06,
+        "exemplar_alignment": 0.24,
+    },
+    "battle_action": {
+        "structure": 0.14,
+        "character": 0.14,
+        "pacing": 0.34,
+        "voice": 0.06,
+        "exemplar_alignment": 0.32,
+    },
+    "dialogue_dyad": {
+        "structure": 0.18,
+        "character": 0.28,
+        "pacing": 0.20,
+        "voice": 0.10,
+        "exemplar_alignment": 0.24,
+    },
+    "mixed": {
+        "structure": 0.24,
+        "character": 0.24,
+        "pacing": 0.22,
+        "voice": 0.10,
+        "exemplar_alignment": 0.20,
+    },
+}
+
+_PLATFORM_WEIGHTS_BY_MODE: dict[str, dict[str, dict[str, float]]] = {
+    "literary": _PLATFORM_WEIGHTS,
+    "web_serial": _PLATFORM_WEIGHTS_WEB,
+}
+
 PLATFORM_SIGNAL_PENALTIES: dict[str, float] = {
     "hinge_dense": -0.12,
     "staccato_uniform": -0.18,
@@ -176,6 +233,19 @@ PLATFORM_SIGNAL_PENALTIES: dict[str, float] = {
     "meta_knowing_high": -0.06,
     "glue_heavy": -0.05,
     "fragment_mismatch": -0.10,
+    "serial_hook_flat": 0.0,
+}
+
+PLATFORM_SIGNAL_PENALTIES_WEB: dict[str, float] = {
+    **PLATFORM_SIGNAL_PENALTIES,
+    "opening_institution": 0.0,
+    "lore_dump": -0.12,
+    "serial_hook_flat": -0.08,
+}
+
+PLATFORM_SIGNAL_PENALTIES_BY_MODE: dict[str, dict[str, float]] = {
+    "literary": PLATFORM_SIGNAL_PENALTIES,
+    "web_serial": PLATFORM_SIGNAL_PENALTIES_WEB,
 }
 
 PLATFORM_SIGNAL_REWARDS: dict[str, float] = {
@@ -184,6 +254,17 @@ PLATFORM_SIGNAL_REWARDS: dict[str, float] = {
     "exemplar_alignment_high": 0.12,
     "outline_duty_match": 0.10,
     "character_card_action": 0.08,
+    "plot_step_visible": 0.0,
+}
+
+PLATFORM_SIGNAL_REWARDS_WEB: dict[str, float] = {
+    **PLATFORM_SIGNAL_REWARDS,
+    "plot_step_visible": 0.10,
+}
+
+PLATFORM_SIGNAL_REWARDS_BY_MODE: dict[str, dict[str, float]] = {
+    "literary": PLATFORM_SIGNAL_REWARDS,
+    "web_serial": PLATFORM_SIGNAL_REWARDS_WEB,
 }
 
 
@@ -358,38 +439,85 @@ def normalize_row(raw: dict[str, Any]) -> dict[str, float]:
     return {k: round(v / total, 4) for k, v in row.items()}
 
 
-def platform_fragment_weights() -> dict[str, dict[str, float]]:
-    return {f: normalize_row(_PLATFORM_WEIGHTS[f]) for f in FRAGMENT_TYPES}
+def normalize_work_mode(value: str | None) -> str:
+    mode = (value or DEFAULT_WORK_MODE).strip().lower()
+    if mode not in WORK_MODES:
+        return DEFAULT_WORK_MODE
+    return mode
 
 
-def platform_prefs_payload(*, preset_label: str = "balanced") -> dict[str, Any]:
+def platform_fragment_weights(work_mode: str = DEFAULT_WORK_MODE) -> dict[str, dict[str, float]]:
+    mode = normalize_work_mode(work_mode)
+    table = _PLATFORM_WEIGHTS_BY_MODE[mode]
+    return {f: normalize_row(table[f]) for f in FRAGMENT_TYPES}
+
+
+def platform_prefs_payload(
+    *,
+    preset_label: str = "balanced",
+    work_mode: str = DEFAULT_WORK_MODE,
+) -> dict[str, Any]:
+    mode = normalize_work_mode(work_mode)
     return {
         "preset_label": preset_label if preset_label in PRESET_LABELS else "balanced",
-        "fragment_weights": platform_fragment_weights(),
-        "signal_penalties": _signal_table(PLATFORM_SIGNAL_PENALTIES),
-        "signal_rewards": _signal_table(PLATFORM_SIGNAL_REWARDS),
+        "work_mode": mode,
+        "fragment_weights": platform_fragment_weights(mode),
+        "signal_penalties": _signal_table(PLATFORM_SIGNAL_PENALTIES_BY_MODE[mode]),
+        "signal_rewards": _signal_table(PLATFORM_SIGNAL_REWARDS_BY_MODE[mode]),
         "schema_version": SCHEMA_VERSION,
         "exemplars": {k: [dict(x) for x in v] for k, v in EXEMPLAR_CATALOG.items()},
     }
 
 
+def apply_work_mode_overlay(prefs: dict[str, Any], work_mode: str) -> dict[str, Any]:
+    """Account prefs 之上叠 work_mode：换维度权重与模式化 signal 模板。
+
+    Account 只保留「哪些 fragment 开了 style lean」（整行置零），
+    不保留上一 mode 的系数数值，避免 literary→web 时 web 专有键仍为 0。
+    """
+    mode = normalize_work_mode(work_mode)
+    base = platform_prefs_payload(
+        preset_label=str(prefs.get("preset_label") or "balanced"),
+        work_mode=mode,
+    )
+    out = dict(prefs)
+    out.update(base)
+    old_pen = prefs.get("signal_penalties") if isinstance(prefs.get("signal_penalties"), dict) else {}
+    old_rew = prefs.get("signal_rewards") if isinstance(prefs.get("signal_rewards"), dict) else {}
+    for frag in FRAGMENT_TYPES:
+        if fragment_style_on(old_pen, old_rew, frag):
+            continue
+        out["signal_penalties"][frag] = {
+            k: 0.0 for k in (out.get("signal_penalties") or {}).get(frag, {})
+        }
+        out["signal_rewards"][frag] = {
+            k: 0.0 for k in (out.get("signal_rewards") or {}).get(frag, {})
+        }
+    return out
+
+
 def merge_prefs(
     stored: dict[str, Any] | None,
+    *,
+    work_mode: str = DEFAULT_WORK_MODE,
 ) -> dict[str, Any]:
-    base = platform_prefs_payload(preset_label="balanced")
+    base = platform_prefs_payload(preset_label="balanced", work_mode=work_mode)
     if not stored:
         return base
     preset = str(stored.get("preset_label") or "balanced")
     base["preset_label"] = preset if preset in PRESET_LABELS else "custom"
+    mode = normalize_work_mode(work_mode)
+    pen_tpl = PLATFORM_SIGNAL_PENALTIES_BY_MODE[mode]
+    rew_tpl = PLATFORM_SIGNAL_REWARDS_BY_MODE[mode]
     # Dimension weights are platform-wide (Ops-tuned). Account prefs only lean styles
     # by zeroing per-fragment signal tables.
     sp = stored.get("signal_penalties")
     base["signal_penalties"] = coerce_signal_table(
-        sp, template=PLATFORM_SIGNAL_PENALTIES, field="signal_penalties"
+        sp, template=pen_tpl, field="signal_penalties"
     )
     sr = stored.get("signal_rewards")
     base["signal_rewards"] = coerce_signal_table(
-        sr, template=PLATFORM_SIGNAL_REWARDS, field="signal_rewards"
+        sr, template=rew_tpl, field="signal_rewards"
     )
     try:
         base["schema_version"] = int(stored.get("schema_version") or SCHEMA_VERSION)

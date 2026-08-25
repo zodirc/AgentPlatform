@@ -25,7 +25,9 @@ from app.writing.signals.prose import (
     character_card_action_hit,
     has_person_on_stage,
     narrative_scene_ratio,
+    plot_step_visible,
     sentence_count,
+    serial_hook_flat,
     shown_for_fragment,
     synopsis_rate,
 )
@@ -158,9 +160,11 @@ def _collect_penalties(
     length_fields: dict[str, Any],
     prefs: dict[str, Any],
     skip_opening: bool = False,
+    work_mode: str = "literary",
 ) -> list[dict[str, Any]]:
     coeff = prefs.get("signal_penalties") or {}
     hits: list[dict[str, Any]] = []
+    mode = str(prefs.get("work_mode") or work_mode or "literary")
 
     def add(key: str, hit: bool, hint: str) -> None:
         if not hit:
@@ -176,7 +180,7 @@ def _collect_penalties(
         bool(staccato_fields(text).get("staccato_uniform")),
         "对白过碎、接词干加也/还、几点到家收场、拆句或对仗、主题金句/采访阶梯/对拍三联",
     )
-    if not skip_opening:
+    if not skip_opening and mode != "web_serial":
         add(
             "opening_institution",
             bool(opening_fields(text, section_id).get("opening_institution")),
@@ -184,6 +188,12 @@ def _collect_penalties(
         )
     add("lore_dump", bool(lore_fields(text, section_id).get("lore_dump")), "第一章身世提要")
     add("length_short", bool(length_fields.get("length_short")), "实体文字不足")
+    if mode == "web_serial":
+        add(
+            "serial_hook_flat",
+            serial_hook_flat(text, section_id),
+            "开篇空磨日常、无悬念/冲突露头",
+        )
     rubric = score_rubric(text)
     add(
         "meta_knowing_high",
@@ -216,6 +226,7 @@ def _collect_rewards(
     prefs: dict[str, Any],
     dimensions: dict[str, float],
     exemplar_fit: dict[str, Any],
+    work_mode: str = "literary",
 ) -> list[dict[str, Any]]:
     coeff = prefs.get("signal_rewards") or {}
     rubric = score_rubric(text)
@@ -223,6 +234,7 @@ def _collect_rewards(
     feats = exemplar_fit.get("signature") or {}
     scene = narrative_scene_ratio(text)
     hits: list[dict[str, Any]] = []
+    mode = str(prefs.get("work_mode") or work_mode or "literary")
 
     def add(key: str, hit: bool, hint: str) -> None:
         if not hit:
@@ -276,6 +288,12 @@ def _collect_rewards(
         character_card_action_hit(text),
         "人物卡姓名在场上行动",
     )
+    if mode == "web_serial":
+        add(
+            "plot_step_visible",
+            plot_step_visible(text) and not flags["staccato"] and not flags["synopsis"],
+            "情节台阶/冲突/悬念在场上可见",
+        )
     return hits
 
 
@@ -321,6 +339,7 @@ def _score_span(
         length_fields=length_fields,
         prefs=prefs,
         skip_opening=skip_opening,
+        work_mode=str(prefs.get("work_mode") or "literary"),
     )
     rewards = _collect_rewards(
         text,
@@ -329,6 +348,7 @@ def _score_span(
         prefs=prefs,
         dimensions=dimensions,
         exemplar_fit=exemplar_fit,
+        work_mode=str(prefs.get("work_mode") or "literary"),
     )
     net = composite + sum(p["delta"] for p in penalties) + sum(r["delta"] for r in rewards)
     net = round(max(0.0, min(1.0, net)), 4)

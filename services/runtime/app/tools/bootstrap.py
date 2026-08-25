@@ -159,7 +159,10 @@ def build_registry() -> ToolRegistry:
                 "Promote into manuscript.md via propose_patch. History stays under "
                 ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
                 "do not upsert the whole chapter: propose_patch the repair_span, or "
-                "draft_section mode=append with only the new slice (~2000 chars) to thicken."
+                "draft_section mode=append with only the new slice (~2000 chars) to thicken. "
+                "Append is rejected while chapter process L0 is still open "
+                "(staccato_uniform / hinge_dense / opening_institution / lore_dump), "
+                "and rejected if the new slice itself hits staccato_uniform."
             ),
             parameters={
                 "type": "object",
@@ -198,7 +201,9 @@ def build_registry() -> ToolRegistry:
                         "description": (
                             "append: add content after the existing chapter body "
                             "(thicken). upsert: replace the chapter. After ≥800 visible "
-                            "chars this Turn, append is required to thicken."
+                            "chars this Turn, append is required to thicken — but only "
+                            "after chapter process L0 is clear; the new slice must not "
+                            "reintroduce staccato_uniform."
                         ),
                     },
                 },

@@ -238,8 +238,8 @@ def _reject_full_redraft(
         "rewrite_policy": REWRITE_PATCH,
         "summary": (
             "本章本轮已成稿。有 writing_signals.repair_span 则 propose_patch 只换 old_text；"
-            "篇幅不足则 draft_section mode=append，content 只交新段（约 2000 字）。"
-            "不要整章 upsert。"
+            "章级 L0（碎拍/铰链/开篇机构/身世）清掉后，篇幅不足再 draft_section mode=append，"
+            "content 只交新段（约 2000 字）。不要整章 upsert。"
         ),
     }
     if span:
@@ -249,6 +249,66 @@ def _reject_full_redraft(
             "rewrite_policy": REWRITE_PATCH,
         }
     return err
+
+
+def _reject_append_gate(
+    manifest: dict[str, Any],
+    *,
+    section_id: str,
+    content: str,
+    occupy_fresh: bool,
+    path: str,
+    mode: str,
+) -> dict[str, Any] | None:
+    """章级过程 L0 未清，或新切片自带碎拍 → 拒 append（不落盘）。"""
+    if occupy_fresh or mode != "append":
+        return None
+    from app.writing.signals.repair import (
+        REWRITE_PATCH,
+        prior_blocks_append,
+        slice_blocks_append,
+    )
+
+    prior = (manifest.get("section_drafts") or {}).get(section_id)
+    blocked = prior_blocks_append(prior if isinstance(prior, dict) else None)
+    if blocked:
+        span = None
+        if isinstance(prior, dict):
+            span = prior.get("repair_span")
+        err: dict[str, Any] = {
+            "section_id": section_id,
+            "path": path,
+            "status": "error",
+            "error": "append_while_l0",
+            "rewrite_policy": REWRITE_PATCH,
+            "l0_key": blocked,
+            "summary": (
+                f"章级过程门仍开（{blocked}）：先 propose_patch 清 writing_signals.repair_span，"
+                "不要 mode=append。岛清后再加厚；新切片也不要再写碎对拍/对拍三联。"
+            ),
+        }
+        if isinstance(span, dict) and span.get("old_text"):
+            err["repair_span"] = span
+            err["writing_signals"] = {
+                "repair_span": span,
+                "rewrite_policy": REWRITE_PATCH,
+            }
+        return err
+    slice_hit = slice_blocks_append(content)
+    if slice_hit:
+        return {
+            "section_id": section_id,
+            "path": path,
+            "status": "error",
+            "error": "append_slice_weak",
+            "rewrite_policy": REWRITE_PATCH,
+            "l0_key": slice_hit,
+            "summary": (
+                "加厚切片自身命中碎拍嗓（对拍/采访/主题金句等）：重写这一段再 mode=append，"
+                "不要把新对拍灌进章。保留场面与「」，一句说满或用物件/停顿接。"
+            ),
+        }
+    return None
 
 
 async def draft_section(
@@ -331,6 +391,16 @@ async def draft_section(
         )
         if blocked:
             return blocked
+        blocked_append = _reject_append_gate(
+            manifest,
+            section_id=section_id,
+            content=content,
+            occupy_fresh=occupy_fresh,
+            path=path,
+            mode=mode,
+        )
+        if blocked_append:
+            return blocked_append
         if occupy_fresh:
             archived = archive_occupied_writing_docs(layout=layout)
             existing = ""
@@ -360,6 +430,16 @@ async def draft_section(
         )
         if blocked:
             return blocked
+        blocked_append = _reject_append_gate(
+            manifest,
+            section_id=section_id,
+            content=content,
+            occupy_fresh=occupy_fresh,
+            path=path,
+            mode=mode,
+        )
+        if blocked_append:
+            return blocked_append
         if occupy_fresh:
             archived = archive_occupied_writing_docs(layout=layout)
             manifest["occupy"] = "fresh"
@@ -438,18 +518,23 @@ async def draft_section(
             session_id=session_id,
             turn_id=turn_id,
             persist=True,
+            turn_user_text=str(_kwargs.get("turn_user_text") or ""),
         )
         result["fragment"] = signals.get("fragment")
         result["writing_signals"] = signals
     except Exception:
         pass
     drafts = manifest.setdefault("section_drafts", {})
+    from app.writing.signals.repair import process_l0_hits
+
     entry: dict[str, Any] = {
         "visible_chars": int(result.get("visible_chars") or 0),
         "length_short": bool(result.get("length_short")),
     }
     signals_block = result.get("writing_signals")
+    penalties = None
     if isinstance(signals_block, dict):
+        penalties = signals_block.get("penalties")
         if signals_block.get("repair_span"):
             entry["repair_span"] = signals_block["repair_span"]
         if signals_block.get("rewrite_policy"):
@@ -460,6 +545,7 @@ async def draft_section(
         declared = frag.get("declared") if isinstance(frag, dict) else frag
         if declared:
             entry["fragment"] = declared
+    entry["l0_hits"] = process_l0_hits(penalties, flags=result)
     drafts[section_id] = entry
     result["manifest_path"] = _write_manifest(turn_id, manifest, session_id=session_id)
     return result

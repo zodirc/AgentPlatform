@@ -29,6 +29,15 @@ L0_PENALTY_KEYS = frozenset(
         "length_short",
     }
 )
+# 加厚前必须先清的过程门（length_short 本身就是 append 理由，不挡）。
+APPEND_BLOCK_L0_KEYS = frozenset(
+    {
+        "staccato_uniform",
+        "hinge_dense",
+        "opening_institution",
+        "lore_dump",
+    }
+)
 
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
@@ -45,7 +54,7 @@ _HINTS: dict[str, str] = {
     "hinge_dense": "看见/听到后不要立马拧：停在物件、价钱或沉默上",
     "opening_institution": "开篇先写可站的地方，机构名让人物后口带出",
     "lore_dump": "删掉「N年前」身世提要，留在当下的屋子或活计上",
-    "length_short": "实体文字不足：draft_section mode=append 再接约 2000 字，不要整章 upsert",
+    "length_short": "章级过程 L0 清掉后：draft_section mode=append 再接约 2000 字，不要整章 upsert",
     "meta_knowing_high": "少写心里清楚，改成场上动作",
     "fragment_mismatch": "按申报的 fragment 节奏写，不要串成另一类",
     "weak_window": "这一拍离该类范本质地最远，只改这一段",
@@ -69,6 +78,48 @@ def penalty_hits(penalties: Any) -> list[str]:
 def l0_penalty_hits(penalties: Any) -> list[str]:
     """抽出已命中的 L0 过程门键（碎拍/铰链/开篇机构/身世/太短）。"""
     return [key for key in penalty_hits(penalties) if key in L0_PENALTY_KEYS]
+
+
+def process_l0_hits(penalties: Any = None, *, flags: dict[str, Any] | None = None) -> list[str]:
+    """章级过程门（不含 length_short）：来自 penalties，或 result 上的 L0 布尔旗。"""
+    hits = [key for key in l0_penalty_hits(penalties) if key in APPEND_BLOCK_L0_KEYS]
+    seen = set(hits)
+    if isinstance(flags, dict):
+        for key in APPEND_BLOCK_L0_KEYS:
+            if flags.get(key) and key not in seen:
+                hits.append(key)
+                seen.add(key)
+    return hits
+
+
+def prior_blocks_append(prior: dict[str, Any] | None) -> str | None:
+    """上一评仍有过程 L0 时挡 append；返回挡门键。"""
+    if not isinstance(prior, dict):
+        return None
+    raw = prior.get("l0_hits")
+    if isinstance(raw, list):
+        for item in raw:
+            key = str(item or "")
+            if key in APPEND_BLOCK_L0_KEYS:
+                return key
+    for key in APPEND_BLOCK_L0_KEYS:
+        if prior.get(key):
+            return key
+    span = prior.get("repair_span")
+    if isinstance(span, dict):
+        key = str(span.get("key") or "")
+        if key in APPEND_BLOCK_L0_KEYS:
+            return key
+    return None
+
+
+def slice_blocks_append(content: str) -> str | None:
+    """新切片自身带碎拍嗓则拒收，避免灌进章。"""
+    from app.writing.staccato import staccato_fields
+
+    if staccato_fields(content or "").get("staccato_uniform"):
+        return "staccato_uniform"
+    return None
 
 
 def is_l0_weak(

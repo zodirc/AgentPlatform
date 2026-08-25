@@ -604,6 +604,7 @@ def style_card_template_path() -> Path:
 
 
 BUILTIN_STYLE_PATH = "(builtin)/default_voice.md"
+BUILTIN_WEB_SERIAL_PATH = "(builtin)/web_serial_voice.md"
 _QUALITY_REJECT_RE = re.compile(
     r"没意思|立意不行|没激情|没特色|太幼稚|很幼稚|不像小说|看不下去|"
     r"AI化|AI\s*化|通病|换个核|重立"
@@ -611,13 +612,6 @@ _QUALITY_REJECT_RE = re.compile(
 
 
 def default_voice_card_path() -> Path:
-    """默认声口卡路径。
-
-    参数:
-        无。
-
-    返回:
-        Path。"""
     return (
         Path(__file__).resolve().parents[1]
         / "scenarios"
@@ -627,15 +621,17 @@ def default_voice_card_path() -> Path:
     )
 
 
-def load_builtin_default_voice() -> WritingCard | None:
-    """加载内置 style 卡。
+def web_serial_voice_card_path() -> Path:
+    return (
+        Path(__file__).resolve().parents[1]
+        / "scenarios"
+        / "writing"
+        / "templates"
+        / "web_serial_voice.md"
+    )
 
-    参数:
-        无。
 
-    返回:
-        WritingCard|None。"""
-    path = default_voice_card_path()
+def _load_builtin_voice(path: Path, builtin_path: str, fallback_title: str) -> WritingCard | None:
     if not path.is_file():
         return None
     try:
@@ -647,25 +643,48 @@ def load_builtin_default_voice() -> WritingCard | None:
         return None
     body = apply_style_meta_for_pin(body.strip(), meta)
     return WritingCard(
-        path=BUILTIN_STYLE_PATH,
-        title=_card_title(path, meta, body) or "默认叙事声口",
+        path=builtin_path,
+        title=_card_title(path, meta, body) or fallback_title,
         kind="style",
         body=body.strip(),
         mtime=path.stat().st_mtime,
     )
 
 
-def with_builtin_style_if_missing(cards: list[WritingCard]) -> list[WritingCard]:
-    """无 style 时补默认。
-    
-    参数:
-        cards。
-    
-    返回:
-        list。"""
+def load_builtin_default_voice() -> WritingCard | None:
+    return _load_builtin_voice(
+        default_voice_card_path(),
+        BUILTIN_STYLE_PATH,
+        "默认叙事声口",
+    )
+
+
+def load_builtin_web_serial_voice() -> WritingCard | None:
+    return _load_builtin_voice(
+        web_serial_voice_card_path(),
+        BUILTIN_WEB_SERIAL_PATH,
+        "连载网文声口",
+    )
+
+
+def with_builtin_style_if_missing(
+    cards: list[WritingCard],
+    message: str = "",
+) -> list[WritingCard]:
+    """无 style 时补默认（网文推断用 web_serial 声口）。"""
     if any(c.kind == "style" for c in cards):
         return cards
-    builtin = load_builtin_default_voice()
+    builtin = None
+    if message.strip():
+        try:
+            from app.writing.work_mode import infer_work_mode
+
+            if infer_work_mode(message) == "web_serial":
+                builtin = load_builtin_web_serial_voice()
+        except Exception:
+            builtin = None
+    if builtin is None:
+        builtin = load_builtin_default_voice()
     if builtin is None:
         return cards
     return [builtin, *cards]
@@ -768,7 +787,10 @@ def prepare_writing_system_prompt(
     from app.writing.work_index import format_work_index_block
     from app.writing.signals.spec import build_writing_spec_block
 
-    cards = with_builtin_style_if_missing(load_writing_cards(workspace_root=workspace_root))
+    cards = with_builtin_style_if_missing(
+        load_writing_cards(workspace_root=workspace_root),
+        message=message,
+    )
     selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)
     work_index = format_work_index_block(

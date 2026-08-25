@@ -266,6 +266,19 @@ def _upsert_section_signal_prior(
     declared = frag.get("declared") if isinstance(frag, dict) else frag
     if declared:
         row["fragment"] = declared
+    from app.writing.signals.repair import process_l0_hits
+
+    flags = {
+        key: True
+        for key in (
+            "staccato_uniform",
+            "hinge_dense",
+            "lore_dump",
+            "opening_institution",
+        )
+        if signals.get(key)
+    }
+    row["l0_hits"] = process_l0_hits(signals.get("penalties"), flags=flags)
     drafts[section_id] = row
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".tmp")
@@ -319,16 +332,26 @@ async def build_writing_signals(
     session_id: object | None = None,
     turn_id: object | None = None,
     persist: bool = True,
+    turn_user_text: str = "",
 ) -> dict[str, Any]:
-    """构建完整 signals。
-    
-    参数:
-        text/fragment/section_id/session/turn/persist。
-    
-    返回:
-        dict。"""
+    """构建完整 signals。"""
+    from app.writing.work_mode import infer_work_mode
+    from app.writing.signals.prefs_loader import _module as _writing_prefs
+
+    apply_work_mode_overlay = _writing_prefs().apply_work_mode_overlay
+
     owner_id, work_id = await _resolve_owner_and_work(session_id)
-    prefs = await load_account_prefs(owner_id)
+    outline = ""
+    try:
+        from app.tools.core.paths import _resolve_path
+
+        op = _resolve_path("outline.md")
+        if op.is_file():
+            outline = op.read_text(encoding="utf-8")
+    except OSError:
+        outline = ""
+    work_mode = infer_work_mode(turn_user_text, outline=outline)
+    prefs = apply_work_mode_overlay(await load_account_prefs(owner_id), work_mode)
     space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
     declared = normalize_fragment(fragment)
     prior = _manifest_section_row(turn_id, session_id, section_id)
@@ -343,17 +366,20 @@ async def build_writing_signals(
     duty = _chapter_duty(section_id)
     duty_conflict = False
     if duty and scored["fragment"]["declared"] == "climax_beat":
-        if any(k in duty for k in ("铺垫", "加压", "过日子")):
+        if work_mode == "literary" and any(k in duty for k in ("铺垫", "加压", "过日子")):
+            duty_conflict = True
+        elif work_mode == "web_serial" and any(k in duty for k in ("铺垫", "过日子")):
             duty_conflict = True
 
     block: dict[str, Any] = {
         "prefs_scope": "account",
+        "work_mode": work_mode,
         "preset": prefs.get("preset_label", "balanced"),
         "schema_version": prefs.get("schema_version", 1),
         "prefs_updated_at": prefs.get("updated_at"),
         "weight_set_version": (
             f"account:{owner_id or 'default'}:{prefs.get('schema_version', 1)}:"
-            f"{space_stamp(space)}"
+            f"{work_mode}:{space_stamp(space)}"
         ),
         "chapter_duty": duty,
         "duty_conflict": duty_conflict,
@@ -399,15 +425,14 @@ async def writing_rubric(
     session_id: object | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """rubric 工具。
-    
-    参数:
-        fragment/section_id/session。
-    
-    返回:
-        dict。"""
+    """rubric 工具。"""
+    from app.writing.work_mode import infer_work_mode
+    from app.writing.signals.prefs_loader import _module as _writing_prefs
+
+    apply_work_mode_overlay = _writing_prefs().apply_work_mode_overlay
     owner_id, work_id = await _resolve_owner_and_work(session_id)
-    prefs = await load_account_prefs(owner_id)
+    work_mode = infer_work_mode(str(_kwargs.get("turn_user_text") or ""))
+    prefs = apply_work_mode_overlay(await load_account_prefs(owner_id), work_mode)
     declared = normalize_fragment(fragment)
     weights = (prefs.get("fragment_weights") or {}).get(declared) or {}
     if not weights:
@@ -430,6 +455,7 @@ async def writing_rubric(
             )
     return {
         "fragment": declared,
+        "work_mode": work_mode,
         "chapter_duty": duty,
         "prefs_scope": "account",
         "preset": prefs.get("preset_label", "balanced"),
@@ -455,7 +481,7 @@ async def writing_rubric(
             "成稿前可先读本工具；成稿后以 writing_signals 为准",
             f"本场片段类型：{declared}",
             "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-            "有 repair_span 时同轮 propose_patch；篇幅不足 mode=append 接约 2000 字，勿整章 upsert，勿另开 Turn",
+            "有 repair_span 时同轮 propose_patch；章级过程 L0 清后篇幅不足 mode=append 接约 2000 字，勿整章 upsert，勿另开 Turn",
         ],
     }
 

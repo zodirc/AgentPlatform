@@ -268,3 +268,123 @@ async def test_length_short_chapter_thickens_by_append_only(workspace: Path) -> 
     assert "十九个钱" in text
     assert "整章重交应被拒" not in text
     assert int(appended["visible_chars"]) > int(first["visible_chars"])
+
+
+_DUET_CHIP = (
+    "「不给。」\n"
+    "「信上说借。」\n"
+    "「借东西的人，要先站到柜台前。」\n"
+    "「那黑船已经站到门口了。」\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_append_blocked_while_chapter_staccato(workspace: Path) -> None:
+    turn_id = uuid4()
+    body = (
+        "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。" * 12
+        + "\n"
+        + _DUET_CHIP
+    )
+    first = await core.draft_section(
+        "ch1",
+        body,
+        turn_id=turn_id,
+        fragment="dialogue_dyad",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert first["status"] == "drafted"
+    assert first.get("staccato_uniform") is True
+    before = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    rejected = await core.draft_section(
+        "ch1",
+        "河风从门缝里进来，柜台上的灰被吹成一条细线。",
+        turn_id=turn_id,
+        fragment="mixed",
+        mode="append",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert rejected["status"] == "error"
+    assert rejected["error"] == "append_while_l0"
+    assert rejected.get("l0_key") == "staccato_uniform"
+    assert "propose_patch" in rejected["summary"]
+    after = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert after == before
+    assert "柜台上的灰" not in after
+
+
+@pytest.mark.asyncio
+async def test_append_slice_staccato_rejected(workspace: Path) -> None:
+    turn_id = uuid4()
+    clean = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。"
+    ) * 20
+    first = await core.draft_section(
+        "ch1",
+        clean,
+        turn_id=turn_id,
+        fragment="mixed",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert first["status"] == "drafted"
+    assert not first.get("staccato_uniform")
+    before = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    rejected = await core.draft_section(
+        "ch1",
+        _DUET_CHIP,
+        turn_id=turn_id,
+        fragment="dialogue_dyad",
+        mode="append",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert rejected["status"] == "error"
+    assert rejected["error"] == "append_slice_weak"
+    assert rejected.get("l0_key") == "staccato_uniform"
+    after = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert after == before
+    assert "那黑船已经站到门口了" not in after
+
+
+@pytest.mark.asyncio
+async def test_append_allowed_after_l0_cleared(workspace: Path) -> None:
+    turn_id = uuid4()
+    body = (
+        "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。" * 12
+        + "\n"
+        + _DUET_CHIP
+    )
+    first = await core.draft_section(
+        "ch1",
+        body,
+        turn_id=turn_id,
+        fragment="dialogue_dyad",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert first["status"] == "drafted"
+    assert first.get("staccato_uniform") is True
+    # Simulate same-Turn patch that cleared chapter L0 (manifest only).
+    import json
+
+    from app.tools.core.paths import _resolve_path
+
+    man = _resolve_path(f".agent/work/turns/{turn_id}.json")
+    data = json.loads(man.read_text(encoding="utf-8"))
+    row = data["section_drafts"]["ch1"]
+    row["l0_hits"] = []
+    row.pop("repair_span", None)
+    row["rewrite_policy"] = "draft_ok"
+    man.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tail = "河风从门缝里进来，柜台上的灰被吹成一条细线。"
+    appended = await core.draft_section(
+        "ch1",
+        tail,
+        turn_id=turn_id,
+        fragment="mixed",
+        mode="append",
+        turn_user_text="写一篇故事，6000字",
+    )
+    assert appended["status"] == "drafted"
+    assert appended.get("mode") == "append"
+    text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert "柜台上的灰" in text
