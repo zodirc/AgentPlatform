@@ -130,17 +130,30 @@ def load_platform_space() -> MetricSpace:
     return build_space(load_platform_exemplars(), scope="platform")
 
 
+_OVERLAY_NEIGHBOR_CAP = 4
+
+
 def overlay_space(base: MetricSpace, layered: dict[str, tuple[Exemplar, ...]], *, scope: str) -> MetricSpace:
-    """叠加 overlay 原型。
-    
+    """把 overlay 邻居叠进平台原型，不替换整类质心。
+
     参数:
         base/layered/scope。
-    
+
     返回:
         MetricSpace。"""
     merged = dict(base.by_fragment)
     extra = build_space(layered, scope=scope)
-    merged.update(extra.by_fragment)
+    for fragment, overlay_proto in extra.by_fragment.items():
+        overlay_neighbors = overlay_proto.neighbors[:_OVERLAY_NEIGHBOR_CAP]
+        base_proto = merged.get(fragment)
+        samples = (
+            tuple(base_proto.neighbors) + tuple(overlay_neighbors)
+            if base_proto is not None
+            else tuple(overlay_neighbors)
+        )
+        rebuilt = build_prototype(fragment, samples, scope=scope)
+        if rebuilt is not None:
+            merged[fragment] = rebuilt
     return MetricSpace(schema_id=FEATURE_SCHEMA_ID, by_fragment=merged)
 
 

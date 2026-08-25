@@ -302,7 +302,7 @@
     },
     "writing_weak": {
       "type": "boolean",
-      "description": "net_signal < 0.50 or a penalty/L0 hit — same-Turn repair candidate."
+      "description": "true while a same-Turn propose_patch is still wanted (L0, net<0.50, or a locatable quality hit). false after the same repair island returns (identical old_text, or same key with ≥12-char overlap)."
     },
     "repair_key": {
       "type": "string",
@@ -312,7 +312,7 @@
     "rewrite_policy": {
       "type": "string",
       "enum": ["propose_patch", "draft_ok"],
-      "description": "Long-chapter local patch vs short/length_short redraft."
+      "description": "propose_patch while a locatable quality or L0 span remains; draft_ok after the same island returns (identical old_text or same key with ≥12-char overlap), or when nothing is left to patch."
     },
     "section_id": {
       "type": "string",

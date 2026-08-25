@@ -790,6 +790,18 @@ def prepare_writing_system_prompt(
     spec = build_writing_spec_block(message, workspace_root=workspace_root)
     if spec:
         extras.append(spec)
+    from app.writing.signals.beats import format_local_beats_block
+
+    spec_frag = None
+    if spec:
+        matched = re.search(r"fragment: `([^`]+)`", spec)
+        if matched:
+            spec_frag = matched.group(1)
+    beats = format_local_beats_block(
+        message, workspace_root=workspace_root, fragment=spec_frag
+    )
+    if beats:
+        extras.append(beats)
     if getattr(settings, "writing_token_economy_enabled", True):
         from app.writing.focus import build_work_surface_block
 

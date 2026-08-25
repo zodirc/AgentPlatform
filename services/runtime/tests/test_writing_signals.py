@@ -345,6 +345,27 @@ def test_anti_patterns_score_below_class_exemplars() -> None:
         assert bad["net_signal"] < 0.70, (frag, name, bad["net_signal"], bad)
 
 
+def test_align_reward_floor_rejects_cosmetic_centroid() -> None:
+    """0.80：凑合稿对齐度不再叠满 exemplar_alignment_high；青剑金标仍拿得到。"""
+    assert _wp.ALIGN_REWARD_FLOOR == 0.80
+    bank = load_platform_exemplars()
+    prefs = platform_prefs_payload()
+    crow = next(s for s in bank["climax_beat"] if "乌鸦" in s.slug)
+    crow_out = score_writing_fragment(
+        crow.text, fragment_declared="climax_beat", prefs=prefs
+    )
+    assert crow_out["dimensions"]["exemplar_alignment"] < _wp.ALIGN_REWARD_FLOOR
+    assert "exemplar_alignment_high" not in {r["key"] for r in crow_out["rewards"]}
+    assert "scene_ratio_high" not in {r["key"] for r in crow_out["rewards"]}
+    assert "dialogue_rhythm_varied" not in {r["key"] for r in crow_out["rewards"]}
+    sword = next(s for s in bank["battle_action"] if "青剑" in s.slug or "青剑" in s.beat)
+    sword_out = score_writing_fragment(
+        sword.text, fragment_declared="battle_action", prefs=prefs
+    )
+    assert sword_out["dimensions"]["exemplar_alignment"] >= _wp.ALIGN_REWARD_FLOOR
+    assert "exemplar_alignment_high" in {r["key"] for r in sword_out["rewards"]}
+
+
 def test_detect_cast_sword_as_battle() -> None:
     bank = load_platform_exemplars()
     sample = next(s for s in bank["battle_action"] if "青剑" in s.slug or "青剑" in s.beat)
@@ -438,6 +459,79 @@ def test_short_draft_allows_full_redraft_policy() -> None:
     assert "windows" not in out
 
 
+def test_ai_dialogue_requests_patch_under_repair_min_visible() -> None:
+    from app.writing.text_metrics import visible_chars
+
+    prefs = platform_prefs_payload()
+    text = (
+        "「那时候刀太钝。」\n「刀钝你也哭。」\n\n"
+        "她低头挑起一筷子面，吹了吹，没有马上吃。过了一会儿，她说："
+        "「你小时候也这样，话说得好听，事情未必做得到。」\n"
+        "「现在呢？」\n「现在还要看。」\n"
+        "「八点半。」\n「那早点睡。」\n「你到家给我发个消息。」\n「知道。」\n"
+    )
+    assert visible_chars(text) < 800
+    out = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
+    assert out["writing_weak"] is True
+    assert out["rewrite_policy"] == "propose_patch"
+    assert "repair_span" in out
+
+
+def test_meta_hit_requests_patch_until_same_span_stalls() -> None:
+    prefs = platform_prefs_payload()
+    pad = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒。\n\n"
+    ) * 14
+    text = (
+        pad
+        + "她知道这条路走不通。他明白柜上的账还没结。她忽然懂了屋子为什么空着。"
+    )
+    out = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
+    assert any(p["key"] == "meta_knowing_high" for p in out["penalties"])
+    assert out["writing_weak"] is True
+    assert out["rewrite_policy"] == "propose_patch"
+    span = out["repair_span"]
+    assert span["key"] == "meta_knowing_high"
+    stalled = score_writing_fragment(
+        text,
+        fragment_declared="mixed",
+        prefs=prefs,
+        prior={"composite": out["composite"], "repair_span": span},
+    )
+    assert stalled["rewrite_policy"] == "draft_ok"
+    assert stalled["writing_weak"] is False
+    assert "repair_span" not in stalled
+
+
+def test_peeled_meta_island_stalls_rewrite_policy() -> None:
+    prefs = platform_prefs_payload()
+    pad = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒。\n\n"
+    ) * 14
+    text = (
+        pad
+        + "她知道这条路走不通。他明白柜上的账还没结。她忽然懂了屋子为什么空着。"
+    )
+    first = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
+    assert first["rewrite_policy"] == "propose_patch"
+    span = first["repair_span"]
+    peeled = "过了一会儿，" + span["old_text"]
+    if peeled not in text:
+        text2 = text.replace(span["old_text"], peeled, 1)
+    else:
+        text2 = text
+    stalled = score_writing_fragment(
+        text2,
+        fragment_declared="mixed",
+        prefs=prefs,
+        prior={"composite": first["composite"], "repair_span": span},
+    )
+    assert stalled["rewrite_policy"] == "draft_ok"
+    assert "repair_span" not in stalled
+
+
 def test_infer_fragment_from_duty() -> None:
     from app.writing.signals.spec import infer_fragment_from_duty
 
@@ -515,4 +609,61 @@ def test_maybe_attach_scores_updated_chapter_not_span(workspace: Path) -> None:
     assert span_only["rewrite_policy"] == "draft_ok"
     assert result.get("content") is None
     assert result.get("new_text") == new_span
+
+
+def test_long_texture_without_l0_does_not_request_patch() -> None:
+    from app.writing.signals.repair import L0_PENALTY_KEYS
+    from app.writing.text_metrics import visible_chars
+
+    prefs = platform_prefs_payload()
+    unit = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒，"
+        "靠柜外站着，热热的喝了休息。"
+    )
+    text = unit * 65
+    assert visible_chars(text) >= 5000
+    out = score_writing_fragment(
+        text, fragment_declared="worldview_texture", prefs=prefs
+    )
+    l0 = {
+        str(p.get("key"))
+        for p in (out.get("penalties") or [])
+        if p.get("hit") and str(p.get("key")) in L0_PENALTY_KEYS
+    }
+    assert not l0
+    assert out["net_signal"] >= 0.50
+    assert out["rewrite_policy"] == "draft_ok"
+    assert "repair_span" not in out
+
+
+def test_overlay_space_keeps_platform_neighbors() -> None:
+    from app.writing.signals.bank import Exemplar
+    from app.writing.signals.signature import signature_vec
+    from app.writing.signals.space import load_platform_space, overlay_space
+
+    base = load_platform_space()
+    proto = base.prototype("mixed")
+    assert proto is not None
+    n_before = proto.n
+    extra = Exemplar(
+        fragment="mixed",
+        slug="local:ch1",
+        author="",
+        work="",
+        beat="ch1",
+        text="母亲把香菜塞给我。秤上还沾着泥。我说这里有床，走过去还要坐车。",
+        signature=signature_vec(
+            "母亲把香菜塞给我。秤上还沾着泥。我说这里有床，走过去还要坐车。"
+        ),
+        weight=1.2,
+        scope="work",
+    )
+    merged = overlay_space(base, {"mixed": (extra,)}, scope="work")
+    after = merged.prototype("mixed")
+    assert after is not None
+    assert after.n == n_before + 1
+    slugs = {s.slug for s in after.neighbors}
+    assert "local:ch1" in slugs
+    assert any(s.work == "故乡" for s in after.neighbors)
 

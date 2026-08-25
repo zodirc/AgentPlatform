@@ -17,9 +17,12 @@ from app.engine.verify_receipt import (
 from app.writing.staccato import (
     count_antithesis_punches,
     count_contrast_punches,
+    count_echo_twists,
     count_equate_punches,
     count_split_speech,
+    count_thesis_mouth,
     find_staccato_span,
+    max_logistics_quote_run,
     max_short_quote_run,
     staccato_fields,
 )
@@ -387,3 +390,75 @@ def test_find_staccato_span_does_not_start_at_shuo_period() -> None:
     assert span.lstrip().startswith("「") or "说：" in span[:6]
     assert "进来拿" in span
     assert "记多久" in span
+
+
+_AI_BANTER = (
+    "「那时候刀太钝。」\n"
+    "「刀钝你也哭。」\n\n"
+    "她低头挑起一筷子面，吹了吹，没有马上吃。过了一会儿，她说："
+    "「你小时候也这样，话说得好听，事情未必做得到。」\n"
+    "「现在呢？」\n"
+    "「现在还要看。」\n"
+    "「八点半。」\n"
+    "「那早点睡。」\n"
+    "「你到家给我发个消息。」\n"
+    "「知道。」\n"
+)
+
+
+def test_staccato_flags_echo_twist_and_logistics_catalog() -> None:
+    fields = staccato_fields(_AI_BANTER)
+    assert fields.get("staccato_uniform") is True
+    assert count_echo_twists(_AI_BANTER) >= 2
+    assert count_thesis_mouth(_AI_BANTER) >= 1
+    assert max_logistics_quote_run(_AI_BANTER) >= 3
+    span = find_staccato_span(_AI_BANTER)
+    assert "刀太钝" in span
+    assert "刀钝你也哭" in span
+    assert "八点半" not in span
+
+
+def test_staccato_logistics_catalog_alone() -> None:
+    text = _pad(
+        "「八点半。」\n「那早点睡。」\n「你到家给我发个消息。」\n「知道。」\n"
+    )
+    fields = staccato_fields(text)
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_logistics") or 0) >= 3
+    span = find_staccato_span(text)
+    assert "八点半" in span
+    assert "发个消息" in span
+
+
+def test_staccato_echo_twist_from_narrative_setup() -> None:
+    text = _pad(
+        "她把筷子在碗沿上磕了磕，说那时候刀太钝，割绳都费劲。\n"
+        "「刀钝你也照样出过活。」他没有接这句话。\n"
+    )
+    fields = staccato_fields(text)
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_echo_twist") or 0) >= 1
+    span = find_staccato_span(text)
+    assert "刀钝你也照样" in span
+
+
+def test_staccato_span_expands_short_quote_cluster() -> None:
+    text = _pad(
+        "工人问：「谁签字？」\n老孙说：「我。」\n"
+        "「你负责？」\n「负责。」\n"
+    )
+    span = find_staccato_span(text)
+    assert "谁签字" in span
+    assert "「我。」" in span or "我说" in span or "我。" in span
+    assert "你负责" in span
+    assert "负责。" in span
+
+
+def test_gold_dialogue_exemplars_skip_echo_twist() -> None:
+    from app.writing.signals.bank import load_platform_exemplars
+
+    bank = load_platform_exemplars()
+    for frag in ("dialogue_dyad", "mixed"):
+        for sample in bank[frag]:
+            fields = staccato_fields(sample.text)
+            assert "staccato_uniform" not in fields, sample.slug

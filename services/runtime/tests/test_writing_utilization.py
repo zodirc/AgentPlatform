@@ -88,7 +88,39 @@ def test_compact_writing_weak_window_no_full_signals_on_bus() -> None:
     )
 
 
-def test_compact_writing_strong_window_not_weak() -> None:
+def test_compact_writing_meta_opens_quality_patch() -> None:
+    meta = _compact_writing_signals_event_meta(
+        {
+            "writing_signals": {
+                "net_signal": 0.83,
+                "composite": 0.83,
+                "rewrite_policy": "propose_patch",
+                "penalties": [
+                    {"key": "meta_knowing_high", "hit": True, "delta": -0.06}
+                ],
+            }
+        }
+    )
+    assert meta["writing_weak"] is True
+    assert meta["rewrite_policy"] == "propose_patch"
+
+
+def test_compact_honors_stalled_writing_weak_flag() -> None:
+    meta = _compact_writing_signals_event_meta(
+        {
+            "writing_signals": {
+                "net_signal": 0.83,
+                "composite": 0.83,
+                "rewrite_policy": "draft_ok",
+                "writing_weak": False,
+                "penalties": [
+                    {"key": "meta_knowing_high", "hit": True, "delta": -0.06}
+                ],
+            }
+        }
+    )
+    assert meta["writing_weak"] is False
+    assert meta["rewrite_policy"] == "draft_ok"
     meta = _compact_writing_signals_event_meta(
         {
             "writing_signals": {

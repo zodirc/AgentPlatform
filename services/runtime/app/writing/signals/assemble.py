@@ -103,6 +103,12 @@ async def maybe_attach_prose_writing_signals(
     result["writing_signals"] = signals
     if section_id:
         result["section_id"] = section_id
+        _upsert_section_signal_prior(
+            turn_id=turn_id,
+            session_id=session_id,
+            section_id=section_id,
+            signals=signals,
+        )
     penalties = signals.get("penalties") if isinstance(signals, dict) else None
     hits = {
         str(item.get("key") or "")
@@ -177,19 +183,25 @@ def _inherit_declared_fragment(
     argument: object,
 ) -> str | None:
     """Prefer the chapter's draft-time fragment over a patch-local guess."""
-    stored = _manifest_section_fragment(turn_id, session_id, section_id)
+    stored = _manifest_section_row(turn_id, session_id, section_id)
     if stored:
-        return stored
+        frag = stored.get("fragment")
+        if isinstance(frag, dict):
+            declared = frag.get("declared")
+            if declared:
+                return str(declared)
+        elif frag:
+            return str(frag)
     if argument is None or str(argument).strip() == "":
         return None
     return str(argument)
 
 
-def _manifest_section_fragment(
+def _manifest_section_row(
     turn_id: object | None,
     session_id: object | None,
     section_id: str,
-) -> str | None:
+) -> dict[str, Any] | None:
     if not turn_id or not section_id:
         return None
     from app.tools.core.paths import _resolve_path
@@ -211,16 +223,54 @@ def _manifest_section_fragment(
         if not isinstance(data, dict):
             continue
         row = (data.get("section_drafts") or {}).get(section_id)
-        if not isinstance(row, dict):
-            continue
-        frag = row.get("fragment")
-        if isinstance(frag, dict):
-            declared = frag.get("declared")
-            if declared:
-                return str(declared)
-        elif frag:
-            return str(frag)
+        if isinstance(row, dict):
+            return row
     return None
+
+
+def _upsert_section_signal_prior(
+    *,
+    turn_id: object | None,
+    session_id: object | None,
+    section_id: str,
+    signals: dict[str, Any],
+) -> None:
+    if not turn_id or not section_id or not isinstance(signals, dict):
+        return
+    del session_id
+    from app.tools.core.paths import _resolve_path
+
+    tid = str(turn_id)
+    rel = f".agent/work/turns/{tid}.json"
+    target = _resolve_path(rel)
+    data: dict[str, Any]
+    if target.is_file():
+        try:
+            loaded = json.loads(target.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            loaded = {}
+        data = loaded if isinstance(loaded, dict) else {}
+    else:
+        data = {}
+    drafts = data.setdefault("section_drafts", {})
+    row = drafts.get(section_id) if isinstance(drafts.get(section_id), dict) else {}
+    if signals.get("repair_span"):
+        row["repair_span"] = signals["repair_span"]
+    else:
+        row.pop("repair_span", None)
+    if signals.get("rewrite_policy"):
+        row["rewrite_policy"] = signals["rewrite_policy"]
+    if signals.get("composite") is not None:
+        row["composite"] = signals["composite"]
+    frag = signals.get("fragment")
+    declared = frag.get("declared") if isinstance(frag, dict) else frag
+    if declared:
+        row["fragment"] = declared
+    drafts[section_id] = row
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(target)
 
 
 async def _resolve_owner_and_work(session_id: object | None) -> tuple[UUID | None, UUID | None]:
@@ -281,12 +331,14 @@ async def build_writing_signals(
     prefs = await load_account_prefs(owner_id)
     space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
     declared = normalize_fragment(fragment)
+    prior = _manifest_section_row(turn_id, session_id, section_id)
     scored = score_writing_fragment(
         text,
         fragment_declared=declared,
         section_id=section_id,
         prefs=prefs,
         space=space,
+        prior=prior,
     )
     duty = _chapter_duty(section_id)
     duty_conflict = False
@@ -403,7 +455,7 @@ async def writing_rubric(
             "成稿前可先读本工具；成稿后以 writing_signals 为准",
             f"本场片段类型：{declared}",
             "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-            "低 net_signal 时同轮 propose_patch 修补 repair_span，勿整章再 draft_section，勿另开 Turn",
+            "有 repair_span 时同轮 propose_patch 修补，勿整章再 draft_section，勿另开 Turn",
         ],
     }
 

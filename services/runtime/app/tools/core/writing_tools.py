@@ -411,6 +411,8 @@ async def draft_section(
             entry["repair_span"] = signals_block["repair_span"]
         if signals_block.get("rewrite_policy"):
             entry["rewrite_policy"] = signals_block["rewrite_policy"]
+        if signals_block.get("composite") is not None:
+            entry["composite"] = signals_block["composite"]
         frag = signals_block.get("fragment")
         declared = frag.get("declared") if isinstance(frag, dict) else frag
         if declared:

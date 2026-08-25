@@ -130,43 +130,45 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
         from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
 
         doc, _rel = load_manuscript_doc()
-        if not doc.strip():
-            return
-        available = list_section_ids(doc)
-        user_text = ""
-        for msg in reversed(state.messages):
-            if msg.get("role") != "user":
-                continue
-            content = msg.get("content")
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        user_text = str(block.get("text") or "")
-                        break
-            elif isinstance(content, str):
-                user_text = content
-            if user_text:
-                break
-        focus = infer_focus_section_id(user_text, available) or (
-            available[-1] if available else ""
-        )
-        chapter_text = extract_section(doc, focus) if focus else doc
-        if not (chapter_text or "").strip():
-            return
-        candidates = extract_continuity_candidates(
-            chapter_text,
-            section_id=focus or "",
-        )
-        written = write_pending_candidates(
-            candidates,
-            turn_id=str(turn_id),
-        )
-        if written:
-            logger.info(
-                "wn1 pending continuity cards turn_id=%s count=%s",
-                turn_id,
-                len(written),
+        if doc.strip():
+            available = list_section_ids(doc)
+            user_text = ""
+            for msg in reversed(state.messages):
+                if msg.get("role") != "user":
+                    continue
+                content = msg.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            user_text = str(block.get("text") or "")
+                            break
+                elif isinstance(content, str):
+                    user_text = content
+                if user_text:
+                    break
+            focus = infer_focus_section_id(user_text, available) or (
+                available[-1] if available else ""
             )
+            chapter_text = extract_section(doc, focus) if focus else doc
+            if (chapter_text or "").strip():
+                candidates = extract_continuity_candidates(
+                    chapter_text,
+                    section_id=focus or "",
+                )
+                written = write_pending_candidates(
+                    candidates,
+                    turn_id=str(turn_id),
+                )
+                if written:
+                    logger.info(
+                        "wn1 pending continuity cards turn_id=%s count=%s",
+                        turn_id,
+                        len(written),
+                    )
+        from app.writing.signals.beats import maybe_promote_local_beats
+
+        session_id = getattr(state, "session_id", None)
+        await maybe_promote_local_beats(turn_id=turn_id, session_id=session_id)
     except Exception:
         logger.exception("wn1 continuity pending failed turn_id=%s", turn_id)
 

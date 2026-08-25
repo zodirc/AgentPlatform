@@ -81,6 +81,7 @@ def _dimension_scores(
     pacing = _clamp(0.40 * scene + 0.35 * sent_cv + 0.25 * (1.0 - glue_rate))
     if flags["staccato"]:
         pacing = _clamp(pacing - 0.28)
+        character = _clamp(character - 0.28)
     if flags["hinge"]:
         pacing = _clamp(pacing - 0.16)
 
@@ -170,7 +171,11 @@ def _collect_penalties(
         hits.append({"key": key, "hit": True, "delta": round(delta, 4), "hint": hint})
 
     add("hinge_dense", bool(hinge_fields(text).get("hinge_dense")), "看见/听到后立马拧")
-    add("staccato_uniform", bool(staccato_fields(text).get("staccato_uniform")), "对白过碎、拆句、「就是」或对仗收束")
+    add(
+        "staccato_uniform",
+        bool(staccato_fields(text).get("staccato_uniform")),
+        "对白过碎、接词干加也/还、几点到家收场、拆句或对仗",
+    )
     if not skip_opening:
         add(
             "opening_institution",
@@ -227,24 +232,26 @@ def _collect_rewards(
             return
         hits.append({"key": key, "hit": True, "delta": round(delta, 4), "hint": hint})
 
+    quote = float(feats.get("quote_ratio") or 0.0)
+    align = float(dimensions.get("exemplar_alignment") or 0.0)
+    align_ok = align >= ALIGN_REWARD_FLOOR
     add(
         "scene_ratio_high",
         shown_for_fragment(fragment_declared, scene=scene, feats=feats)
         and not flags["staccato"]
         and not flags["hinge"]
-        and not flags["synopsis"],
+        and not flags["synopsis"]
+        and align_ok,
         "该类型该有的场面/质地在场上",
     )
-    quote = float(feats.get("quote_ratio") or 0.0)
     add(
         "dialogue_rhythm_varied",
-        quote >= 0.20 and scene >= 0.4 and not flags["staccato"],
+        quote >= 0.20 and scene >= 0.4 and not flags["staccato"] and align_ok,
         "对白节奏有变化",
     )
-    align = float(dimensions.get("exemplar_alignment") or 0.0)
     add(
         "exemplar_alignment_high",
-        align >= ALIGN_REWARD_FLOOR
+        align_ok
         and not flags["staccato"]
         and not flags["hinge"]
         and not flags["meta"]
@@ -350,21 +357,25 @@ def score_writing_fragment(
     section_id: str = "",
     prefs: dict[str, Any],
     space: MetricSpace | None = None,
+    prior: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """完整片段评分含 repair。
     
     参数:
-        text/fragment_declared/section_id/prefs/space。
+        text/fragment_declared/section_id/prefs/space/prior。
     
     返回:
         dict。"""
     from app.writing.signals.repair import (
         WEAK_NET,
         build_repair_span,
+        is_writing_weak,
         rewrite_policy_for,
+        unproductive_repeat,
     )
     from app.writing.signals.windows import split_score_windows
     from app.writing.text_metrics import visible_chars as vis_chars
+    from app.writing.signals.beats import beat_window_payload
 
     body = _score_span(
         text,
@@ -411,13 +422,31 @@ def score_writing_fragment(
         or float(body["net_signal"]) < WEAK_NET
     ):
         probe_penalties = list(worst_scored.get("penalties") or probe_penalties)
-    span = build_repair_span(
-        text,
+    needs_repair = is_writing_weak(
+        net=float(body["net_signal"]),
         penalties=probe_penalties,
-        window=worst_win,
-        net_signal=float(body["net_signal"]),
+        length_short=length_short,
     )
-    if span:
-        body["repair_span"] = span
-    body["rewrite_policy"] = rewrite_policy_for(visible=vis, length_short=length_short)
+    span = None
+    if needs_repair:
+        span = build_repair_span(
+            text,
+            penalties=probe_penalties,
+            window=worst_win,
+            net_signal=float(body["net_signal"]),
+        )
+        if span and unproductive_repeat(prior, span, body.get("composite")):
+            span = None
+            needs_repair = False
+        if span:
+            body["repair_span"] = span
+    beat = beat_window_payload(text, window=worst_win)
+    if beat:
+        body["beat_window"] = beat
+    body["rewrite_policy"] = rewrite_policy_for(
+        visible=vis,
+        length_short=length_short,
+        needs_repair=needs_repair,
+    )
+    body["writing_weak"] = bool(needs_repair)
     return body

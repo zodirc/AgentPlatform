@@ -27,7 +27,7 @@ _OBLIGATIONS: dict[str, str] = {
     "worldview_texture": "把地方、价钱、谁管这块地写在场上；禁止搬范文故事核",
     "climax_beat": "一件主线麻烦顶满再落下；铺垫章不要假高潮",
     "battle_action": "来回有力，不是电报体砍杀",
-    "dialogue_dyad": "对白长短不齐，问完可以答不上来；禁止拆在他说两边，禁止「A，就是B」和对仗收束",
+    "dialogue_dyad": "对白长短不齐，问完可以答不上来；禁止接词干加也/还，禁止几点/到家收场，禁止拆在他说两边和对仗",
     "mixed": "先过日子，再加压，再允许落下；禁止通篇最紧的那一拍",
 }
 
@@ -117,8 +117,8 @@ def build_writing_spec_block(
         lines.append(f"- 章职: {duty_line}")
     lines.append(f"- {_OBLIGATIONS.get(fragment, _OBLIGATIONS['mixed'])}")
     lines.append(
-        "- 成稿后读 writing_signals.repair_span；长章弱分只用 propose_patch，"
-        "不要整章再 draft_section"
+        "- 成稿后读 writing_signals.repair_span；有 span 就 propose_patch，"
+        "同一处抬不动分再停，不要整章再 draft_section"
     )
     text = "\n".join(lines)
     return text if len(text) <= 420 else text[:419] + "…"

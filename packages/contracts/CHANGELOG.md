@@ -3,6 +3,24 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.12 — 2026-08-25
+
+- `python/agent_contracts/writing_prefs.py`: `ALIGN_REWARD_FLOOR` 同时约束场面/对白奖励（与 `exemplar_alignment_high` 同门槛）。向后兼容。
+- `events/payloads/tool.completed.json`: `writing_weak` / `rewrite_policy` 停修改为「同一岛」（`old_text` 全等，或同 key 重叠 ≥12 字）。向后兼容。
+
+## 0.3.11 — 2026-08-25
+
+- `python/agent_contracts/writing_prefs.py`: `ALIGN_REWARD_FLOOR` 0.72→0.80，避免碎拍一灭就把 `exemplar_alignment_high` 叠满、net 封顶。向后兼容。
+- `events/payloads/tool.completed.json`: `writing_weak` / `rewrite_policy` 停修条件改为「同一 `old_text` 没落地」——不再看 composite 是否抬分。向后兼容。
+
+## 0.3.10 — 2026-08-25
+
+- `events/payloads/tool.completed.json`: `writing_weak` / `rewrite_policy` 说明改为「有可定位质地问题就同轮修补；同一 span 抬不动分才停」。向后兼容。
+
+## 0.3.9 — 2026-08-25
+
+- `events/payloads/tool.completed.json`: `writing_weak` / `rewrite_policy` 说明与实现对齐（仅 L0 或 net<0.50 同轮修补；meta/glue 不计弱门）。向后兼容。
+
 ## 0.3.8 — 2026-08-21
 
 - `events/payloads/tool.completed.json`: 新增可选 `composite` / `reward_sum` /

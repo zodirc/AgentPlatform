@@ -106,8 +106,9 @@ SIGNATURE_KEYS: tuple[str, ...] = (
 # Whitening needs a real cloud. Platform bank is 4/class — L1 until then.
 WHITEN_MIN_N = 16
 SCALE_FLOOR = 0.08
-# L1-to-centroid floor for exemplar_alignment_high (and not anti-pattern).
-ALIGN_REWARD_FLOOR = 0.72
+# L1-to-centroid floor for exemplar_alignment_high, scene_ratio_high, and
+# dialogue_rhythm_varied (and not anti-pattern).
+ALIGN_REWARD_FLOOR = 0.80
 # fragment_mismatch only when declared class itself is a poor fit.
 MISMATCH_ALIGN_FLOOR = 0.60
 

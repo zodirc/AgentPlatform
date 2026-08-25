@@ -12,7 +12,7 @@ When drafting narrative (`draft_section` / prose `propose_patch`):
    `exemplar_alignment` is distance to the **class prototype** (`sig.v1`) — rhythm and texture, not plot search.
    `fragment_mismatch` fires only when the draft is a poor fit for the **declared** type, not when a keyword detector disagrees.
    Platform gold is 鲁迅 / 郁达夫公版节选. Learn the beat; **do not copy their plots**.
-4. Weak `net_signal` or a penalty hit → same Turn **`propose_patch`** on `repair_span.old_text`. Do not `draft_section` the whole chapter again. `length_short` may thicken with another `draft_section`.
+4. After `writing_signals`, if `rewrite_policy=propose_patch` and `repair_span` is set, same Turn **`propose_patch`** that `old_text`. Soft hits (`meta_knowing_high`, `glue_heavy`, `fragment_mismatch`) are quality patches too — keep going while the island **changes** (different `key`, or overlap under 12 visible chars). Stop when the same island comes back (`key` matches and `old_text` overlaps ≥12 chars, including a peel like「电话那头问」) or the exact `old_text` did not land. Do not trust a high `net_signal` after only clearing L0. Do not `draft_section` the whole chapter again. `length_short` may thicken with another `draft_section`.
 5. Optional: `evaluate_writing_fragment` to re-score a span.
 
 If `duty_conflict=true`, do not fake a climax in a 铺垫/加压 chapter.

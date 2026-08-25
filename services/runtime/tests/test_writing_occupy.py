@@ -175,7 +175,6 @@ async def test_long_section_second_draft_rejected(workspace: Path) -> None:
     )
     assert first["status"] == "drafted"
     assert int(first["visible_chars"]) >= 800
-    assert first.get("writing_signals", {}).get("rewrite_policy") == "propose_patch"
     second = await core.draft_section(
         "ch1",
         body + "又整章重交一遍。",

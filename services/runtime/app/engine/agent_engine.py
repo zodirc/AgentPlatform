@@ -295,7 +295,7 @@ def _compact_writing_signals_event_meta(result: dict[str, Any]) -> dict[str, Any
     signals = result.get("writing_signals")
     if not isinstance(signals, dict) or not signals:
         return {}
-    from app.writing.signals.repair import WEAK_NET
+    from app.writing.signals.repair import is_writing_weak
 
     out: dict[str, Any] = {}
     net: float | None = None
@@ -326,21 +326,20 @@ def _compact_writing_signals_event_meta(result: dict[str, Any]) -> dict[str, Any
         key = str(span.get("key") or "").strip()
         if key:
             out["repair_key"] = key[:64]
-    weak = False
-    if net is not None and net < float(WEAK_NET):
-        weak = True
-    penalties = signals.get("penalties")
-    if isinstance(penalties, list):
-        for item in penalties:
-            if isinstance(item, dict) and item.get("hit"):
-                weak = True
-                break
+    length_short = False
     length_fields = signals.get("length_fields")
     if isinstance(length_fields, dict) and length_fields.get("length_short"):
-        weak = True
+        length_short = True
     if result.get("length_short"):
-        weak = True
-    out["writing_weak"] = weak
+        length_short = True
+    if isinstance(signals.get("writing_weak"), bool):
+        out["writing_weak"] = bool(signals["writing_weak"])
+    else:
+        out["writing_weak"] = is_writing_weak(
+            net=net,
+            penalties=signals.get("penalties"),
+            length_short=length_short,
+        )
     return out
 
 

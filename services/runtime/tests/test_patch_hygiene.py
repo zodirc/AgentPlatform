@@ -158,3 +158,24 @@ def test_build_repair_span_keeps_closed_quotes() -> None:
     assert span["old_text"] in text
     assert span["old_text"].count("「") == span["old_text"].count("」")
     assert "跑完了" in span["old_text"]
+
+
+def test_meta_span_contains_knowing_phrase_not_window_head() -> None:
+    from app.writing.signals.windows import TextWindow
+
+    head = (
+        "「你舅舅给你介绍的那个活，干了三年还只是抄表？」\n"
+        "「先干着。」\n"
+    )
+    knowing = "许临知道这话有道理。他把笔帽盖上。"
+    text = head + "巷子里的水还在流。" + knowing
+    window = TextWindow(start=0, end=len(head), text=head)
+    span = build_repair_span(
+        text,
+        penalties=[{"key": "meta_knowing_high", "hit": True}],
+        window=window,
+        net_signal=0.82,
+    )
+    assert span is not None
+    assert "知道这话" in span["old_text"]
+    assert "舅舅" not in span["old_text"]
