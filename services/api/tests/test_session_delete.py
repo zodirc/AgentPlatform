@@ -44,13 +44,14 @@ async def test_delete_sessions_clears_child_tables_before_sessions() -> None:
     conn = _conn_with_owned(sid)
 
     with patch(
-        "app.services.resource.sessions.get_pool",
+        "app.services.resource.sessions.get_bypass_pool",
         new_callable=AsyncMock,
         return_value=_pool_for(conn),
-    ):
+    ) as bypass:
         deleted = await delete_sessions_for_owner([sid], owner)
 
     assert deleted == [sid]
+    bypass.assert_awaited_once()
     joined = "\n".join(conn._sqls)
     for table in (
         "session_views",
@@ -84,7 +85,7 @@ async def test_delete_sessions_skips_unowned() -> None:
     conn.fetch = AsyncMock(return_value=[])
 
     with patch(
-        "app.services.resource.sessions.get_pool",
+        "app.services.resource.sessions.get_bypass_pool",
         new_callable=AsyncMock,
         return_value=_pool_for(conn),
     ):

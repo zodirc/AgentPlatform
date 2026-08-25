@@ -10,7 +10,7 @@ from uuid import UUID
 
 import asyncpg
 
-from app.db.pool import get_pool
+from app.db.pool import get_bypass_pool, get_pool
 from app.services.resource.works import ensure_default_work
 
 logger = logging.getLogger(__name__)
@@ -205,13 +205,17 @@ async def delete_sessions_for_owner(
     phase0 FKs do not CASCADE from sessions→turns; delete child rows explicitly.
     Later phases declare CASCADE, but production DBs may predate that — still
     delete those tables before sessions/turns/runs.
+    Uses the bypass DB pool (long statement_timeout) because wiping turn_events
+    for busy sessions routinely exceeds the hot-path 5s budget.
     Workspace disk files are intentionally untouched (not session-scoped).
     """
     if not session_ids:
         return []
     # Cap to avoid accidental huge payloads; history UI lists at most 50.
     unique_ids = list(dict.fromkeys(session_ids))[:100]
-    pool = await get_pool()
+    # Hard-delete can wipe thousands of turn_events rows; use the bypass pool
+    # (default 120s) so the 5s hot-path statement_timeout does not abort bulk UI.
+    pool = await get_bypass_pool()
     try:
         async with pool.acquire() as conn:
             async with conn.transaction():

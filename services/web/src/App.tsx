@@ -223,16 +223,48 @@ function Nav() {
   const { open: toolsOpen, togglePanel, createAgent } =
     useAgentPanel();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const linkCopiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const copySessionLink = async () => {
     if (!sessionId) return;
     const url = `${window.location.origin}${pathWithSession(pathname, sessionId)}`;
+    let ok = false;
     try {
       await navigator.clipboard.writeText(url);
+      ok = true;
     } catch {
-      // ignore
+      // Clipboard API needs a secure context (HTTPS/localhost). LAN HTTP falls here.
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        ta.setAttribute("readonly", "");
+        ta.style.position = "fixed";
+        ta.style.left = "-9999px";
+        document.body.appendChild(ta);
+        ta.select();
+        ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+      } catch {
+        ok = false;
+      }
+      if (!ok) {
+        window.prompt("复制链接：", url);
+        return;
+      }
     }
+    if (!ok) return;
+    setLinkCopied(true);
+    if (linkCopiedTimer.current) clearTimeout(linkCopiedTimer.current);
+    linkCopiedTimer.current = setTimeout(() => setLinkCopied(false), 2000);
   };
+
+  useEffect(
+    () => () => {
+      if (linkCopiedTimer.current) clearTimeout(linkCopiedTimer.current);
+    },
+    [],
+  );
 
   const settingsActive =
     pathname === "/settings" || pathname.startsWith("/settings/");
@@ -325,7 +357,7 @@ function Nav() {
                 className="h-7 border-input px-2 text-xs text-foreground/90"
                 onClick={() => void copySessionLink()}
               >
-                复制链接
+                {linkCopied ? "已复制" : "复制链接"}
               </Button>
             </>
           ) : null}
