@@ -52,11 +52,26 @@ def test_rewrite_maps_overlong_0028_stamp() -> None:
     conn.dialect.name = "postgresql"
     conn.in_transaction.return_value = True
     rewrite_unpushed_revision_ids(conn)
-    clause = conn.execute.call_args.args[0]
-    sql = str(getattr(clause, "text", clause)).lower()
-    assert "0028_phase2_writing_exemplar_space" in sql
-    assert "0028_phase2_exemplar_space" in sql
+    assert conn.execute.call_count >= 2
+    sqls = [
+        str(getattr(c.args[0], "text", c.args[0])).lower()
+        for c in conn.execute.call_args_list
+    ]
+    joined = "\n".join(sqls)
+    assert "0028_phase2_writing_exemplar_space" in joined
+    assert "0028_phase2_exemplar_space" in joined
+    assert "0029_phase2_turn_events_run_id_idx" in joined
+    assert "0029_turn_events_run_id_idx" in joined
     conn.commit.assert_called_once()
+
+
+def test_revision_0029_fits_varchar32() -> None:
+    path = VERSIONS / "0029_turn_events_run_id_idx.py"
+    text = path.read_text()
+    match = _REVISION_RE.search(text)
+    assert match
+    assert len(match.group(1)) <= 32
+    assert "0029_phase2_turn_events_run_id_idx" not in text
 
 
 def test_widen_skips_non_postgres() -> None:

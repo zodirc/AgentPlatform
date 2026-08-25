@@ -84,12 +84,25 @@ END
 $rewrite$;
 """
 
+_REWRITE_0029_SQL = """
+DO $rewrite$
+BEGIN
+  IF to_regclass('public.alembic_version') IS NOT NULL THEN
+    UPDATE alembic_version
+       SET version_num = '0029_turn_events_run_id_idx'
+     WHERE version_num = '0029_phase2_turn_events_run_id_idx';
+  END IF;
+END
+$rewrite$;
+"""
+
 
 def rewrite_unpushed_revision_ids(connection) -> None:
     """Map a local-only overlong stamp onto the published revision id."""
     if getattr(getattr(connection, "dialect", None), "name", "") != "postgresql":
         return
     connection.execute(text(_REWRITE_0028_SQL))
+    connection.execute(text(_REWRITE_0029_SQL))
     if connection.in_transaction():
         connection.commit()
 
