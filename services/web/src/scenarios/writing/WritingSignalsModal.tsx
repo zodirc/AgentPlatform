@@ -7,7 +7,6 @@ import {
 import { Button } from "../../components/ui/button";
 
 export type WorkModeChoice = "auto" | "literary" | "web_serial";
-export type OpeningKindChoice = "live_character" | "conflict_hook";
 
 const PREFS_PATH = "writing_prefs.json";
 
@@ -15,19 +14,6 @@ const MODE_CHOICES: { id: WorkModeChoice; label: string; hint: string }[] = [
   { id: "auto", label: "自动", hint: "按用户句推断" },
   { id: "literary", label: "经典文学", hint: "句味·人物·环境" },
   { id: "web_serial", label: "连载网文", hint: "长纲·强钩·台阶" },
-];
-
-const OPENING_KINDS: { id: OpeningKindChoice; label: string; hint: string }[] = [
-  {
-    id: "live_character",
-    label: "立人",
-    hint: "长篇开篇默认：先认识人，禁止卷纲浓缩",
-  },
-  {
-    id: "conflict_hook",
-    label: "强钩",
-    hint: "异变/冲突可先顶，仍要有人，只兑第一阶",
-  },
 ];
 
 const STYLES: { id: string; label: string; blurb: string }[] = [
@@ -64,7 +50,6 @@ type Gains = Record<string, number>;
 type StoredPrefs = {
   work_mode?: { source?: string; mode?: string };
   style_gains?: Record<string, number>;
-  opening_chapter_kind?: string;
 };
 
 function modeForDefaults(choice: WorkModeChoice): "literary" | "web_serial" {
@@ -75,20 +60,14 @@ function fullDefaults(choice: WorkModeChoice): Gains {
   return { ...DEFAULT_GAINS[modeForDefaults(choice)] };
 }
 
-function parseOpeningKind(raw: string | undefined): OpeningKindChoice {
-  return raw === "conflict_hook" ? "conflict_hook" : "live_character";
-}
-
 function parsePrefs(raw: string | undefined): {
   choice: WorkModeChoice;
   gains: Gains;
-  openingKind: OpeningKindChoice;
 } {
   const fallbackChoice: WorkModeChoice = "auto";
   const fallbackGains = fullDefaults(fallbackChoice);
-  const fallbackOpening: OpeningKindChoice = "live_character";
   if (!raw?.trim()) {
-    return { choice: fallbackChoice, gains: fallbackGains, openingKind: fallbackOpening };
+    return { choice: fallbackChoice, gains: fallbackGains };
   }
   try {
     const data = JSON.parse(raw) as StoredPrefs;
@@ -107,21 +86,13 @@ function parsePrefs(raw: string | undefined): {
         if (Number.isFinite(v)) gains[s.id] = Math.max(0, Math.min(1, v));
       }
     }
-    return {
-      choice,
-      gains,
-      openingKind: parseOpeningKind(data.opening_chapter_kind),
-    };
+    return { choice, gains };
   } catch {
-    return { choice: fallbackChoice, gains: fallbackGains, openingKind: fallbackOpening };
+    return { choice: fallbackChoice, gains: fallbackGains };
   }
 }
 
-function serializePrefs(
-  choice: WorkModeChoice,
-  gains: Gains,
-  openingKind: OpeningKindChoice,
-): string {
+function serializePrefs(choice: WorkModeChoice, gains: Gains): string {
   const work_mode =
     choice === "auto"
       ? { source: "auto", mode: "literary" }
@@ -129,11 +100,7 @@ function serializePrefs(
   const style_gains = Object.fromEntries(
     STYLES.map((s) => [s.id, Math.round((gains[s.id] ?? 0.7) * 100) / 100]),
   );
-  return `${JSON.stringify(
-    { work_mode, opening_chapter_kind: openingKind, style_gains },
-    null,
-    2,
-  )}\n`;
+  return `${JSON.stringify({ work_mode, style_gains }, null, 2)}\n`;
 }
 
 type Props = {
@@ -143,7 +110,6 @@ type Props = {
 
 export function WritingSignalsModal({ open, onClose }: Props) {
   const [choice, setChoice] = useState<WorkModeChoice>("auto");
-  const [openingKind, setOpeningKind] = useState<OpeningKindChoice>("live_character");
   const [gains, setGains] = useState<Gains>(() => fullDefaults("auto"));
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -159,14 +125,12 @@ export function WritingSignalsModal({ open, onClose }: Props) {
         if (cancelled) return;
         const parsed = parsePrefs(file.content);
         setChoice(parsed.choice);
-        setOpeningKind(parsed.openingKind);
         setGains(parsed.gains);
         setDirty(false);
         setMsg(null);
       } catch {
         if (cancelled) return;
         setChoice("auto");
-        setOpeningKind("live_character");
         setGains(fullDefaults("auto"));
         setDirty(false);
       } finally {
@@ -196,15 +160,15 @@ export function WritingSignalsModal({ open, onClose }: Props) {
     setBusy(true);
     setMsg(null);
     try {
-      await saveWorkspaceFile(PREFS_PATH, serializePrefs(choice, gains, openingKind));
+      await saveWorkspaceFile(PREFS_PATH, serializePrefs(choice, gains));
       setDirty(false);
-      setMsg("已保存。下一 Turn 起按此模式、开篇章职与奖惩强度打分。");
+      setMsg("已保存。下一 Turn 起按此模式与奖惩强度打分。");
     } catch (e) {
       setMsg(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
-  }, [choice, gains, openingKind]);
+  }, [choice, gains]);
 
   if (!open) return null;
 
@@ -221,7 +185,7 @@ export function WritingSignalsModal({ open, onClose }: Props) {
               写作信号
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              风格 → 开篇章职 → 奖惩贴近。存于工作区{" "}
+              作品模式 → 奖惩贴近。长篇 ch1–ch3 分工见 outline 开篇三章契约。存于工作区{" "}
               <code className="text-[10px]">{PREFS_PATH}</code>
               ，不在设置页。
             </p>
@@ -275,37 +239,6 @@ export function WritingSignalsModal({ open, onClose }: Props) {
                   当前有效轴：{effectiveMode === "web_serial" ? "连载网文" : "经典文学"}
                   {choice === "auto" ? "（自动推断时按用户句切换）" : "（已钉死）"}
                 </p>
-              </section>
-
-              <section>
-                <h3 className="text-sm font-medium">长篇开篇章职</h3>
-                <p className="mt-0.5 text-[11px] text-muted-foreground">
-                  位置=开篇时的默认章类型。立人优先；强钩是选项，不是「第一章写完整本书」。
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {OPENING_KINDS.map((c) => {
-                    const active = openingKind === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        title={c.hint}
-                        disabled={busy}
-                        onClick={() => {
-                          setOpeningKind(c.id);
-                          setDirty(true);
-                        }}
-                        className={`rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
-                          active
-                            ? "border-primary bg-primary/20 text-primary"
-                            : "border-border bg-card/50 text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                        }`}
-                      >
-                        {c.label}
-                      </button>
-                    );
-                  })}
-                </div>
               </section>
 
               <section>
