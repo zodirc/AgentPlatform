@@ -220,6 +220,9 @@ def archive_occupied_writing_docs(*, layout: str = "monofile") -> list[str]:
             _resolve_path("outline.md").unlink()
         except OSError:
             pass
+    from app.writing.outline_phase import clear_style_lock
+
+    clear_style_lock()
     from app.writing.signals.beats import clear_local_beats
 
     clear_local_beats()

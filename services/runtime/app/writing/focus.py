@@ -319,21 +319,74 @@ def _read_outline_md(workspace_root: Path | None = None) -> str:
         return ""
 
 
+def _focus_section_number(focus: str) -> int | None:
+    m = re.match(r"^ch(\d+)$", (focus or "").strip(), re.I)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
 def _outline_job_parts(
     focus: str,
     *,
     workspace_root: Path | None = None,
 ) -> list[str]:
-    """Pin this chapter's outline duty into the work surface (no LLM)."""
-    from app.writing.outline_arc import extract_outline_job, extract_outline_spine
+    """Pin outline spine + chapter duty; ch4+ adds map and neighbors."""
+    from app.writing.outline_arc import (
+        extract_outline_job,
+        extract_outline_neighbors,
+        extract_outline_spine,
+        extract_outline_style_contract,
+        outline_style_committed,
+    )
 
     text = _read_outline_md(workspace_root)
+    from app.writing.book_scope import infer_book_scope
+    from app.writing.outline_phase import resolve_outline_phase
+
+    parts: list[str] = []
+    scope = infer_book_scope("", outline=text, section_id=focus)
+    phase = resolve_outline_phase(
+        "", outline=text, book_scope=scope, workspace_root=workspace_root
+    )
+    if phase.get("outline_phase") == "diverge":
+        parts.append(
+            "### Outline phase: diverge\n"
+            + str(phase.get("outline_phase_note") or "")
+        )
+        if not text.strip():
+            return parts
     if not text.strip():
         return []
-    parts: list[str] = []
+    style = extract_outline_style_contract(text)
+    if style and outline_style_committed(text):
+        parts.append(f"### Outline style contract\n{style}")
     spine = extract_outline_spine(text)
     if spine:
         parts.append(f"### Outline spine\n{spine}")
+    n = _focus_section_number(focus)
+    scope = infer_book_scope("", outline=text, section_id=focus)
+    if n is not None and n <= 3 and scope == "long":
+        parts.append(
+            "### Opening trilogy\n"
+            "ch1 环境锚点 · ch2 世界再推（异象/组织/悬念，不必规则手册）· ch3 人物与第一阶麻烦。"
+            "勿把三章契约挤进一章正文。"
+        )
+    if n is not None and n >= 4:
+        toc = outline_toc_snippet(workspace_root, max_chars=720)
+        if toc:
+            parts.append(
+                f"### Outline map (breadth)\n{toc}\n"
+                "中后段写作：本章只推一个主项，但须与 spine、地图位置、已写正文一致。"
+            )
+        neighbors = extract_outline_neighbors(text, focus)
+        for sid, job in neighbors.items():
+            parts.append(f"### Outline neighbor (`{sid}`)\n{job}")
+        parts.append(
+            "### Continuity\n"
+            "广度：遵守 outline spine 与全书地图；细节：承接 Previous tail 与 Focus 已写内容。"
+            "新信息须同时服务本章主项与主线台阶，勿 contradict 开篇三章已立规矩。"
+        )
     job = extract_outline_job(text, focus)
     if job:
         parts.append(

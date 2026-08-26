@@ -815,6 +815,26 @@ def prepare_writing_system_prompt(
     spec = build_writing_spec_block(message, workspace_root=workspace_root)
     if spec:
         extras.append(spec)
+    from app.writing.outline_phase import (
+        load_diverge_styles_volatile_block,
+        should_inject_diverge_styles,
+    )
+
+    outline_text = ""
+    try:
+        op = Path(workspace_root or settings.workspace_root).resolve() / "outline.md"
+        if op.is_file():
+            outline_text = op.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        outline_text = ""
+    if should_inject_diverge_styles(
+        message,
+        outline=outline_text,
+        workspace_root=workspace_root,
+    ):
+        diverge = load_diverge_styles_volatile_block()
+        if diverge:
+            extras.append(diverge)
     from app.writing.signals.beats import format_local_beats_block
 
     spec_frag = None
