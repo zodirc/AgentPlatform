@@ -160,6 +160,8 @@ def build_registry() -> ToolRegistry:
                 ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
                 "do not upsert the whole chapter: propose_patch the repair_span, or "
                 "draft_section mode=append with only the new slice (~2000 chars) to thicken. "
+                "After 3 propose_patch attempts per penalty_key, use mode=rewrite_window "
+                "to replace repair_span.old_text in one shot (staccato). "
                 "Append is rejected while chapter process L0 is still open "
                 "(staccato_uniform / hinge_dense / opening_institution / lore_dump), "
                 "and rejected if the new slice itself hits staccato_uniform."
@@ -197,11 +199,13 @@ def build_registry() -> ToolRegistry:
                     },
                     "mode": {
                         "type": "string",
-                        "enum": ["upsert", "append"],
+                        "enum": ["upsert", "append", "rewrite_window"],
                         "description": (
                             "append: add content after the existing chapter body "
-                            "(thicken). upsert: replace the chapter. After ≥800 visible "
-                            "chars this Turn, append is required to thicken — but only "
+                            "(thicken). upsert: replace the chapter. rewrite_window: "
+                            "replace writing_signals.repair_span.old_text in one shot "
+                            "(after patch budget exhausted or for staccato window). "
+                            "After ≥800 visible chars this Turn, append is required to thicken — but only "
                             "after chapter process L0 is clear; the new slice must not "
                             "reintroduce staccato_uniform."
                         ),

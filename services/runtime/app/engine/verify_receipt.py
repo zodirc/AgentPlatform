@@ -477,7 +477,8 @@ def _build_staccato_receipt_text() -> str:
         "短可以短，但不能整场一样短。问完可以答不上来、答偏、或只动手。"
         "对白里因为/可是可以有，不要为了躲连接词改成对照句。"
         "不要另起一套去AI模板。"
-        "用 propose_patch 只换 writing_signals.repair_span.old_text："
+        "用 propose_patch 只换 writing_signals.repair_span.old_text（同 key 本 Turn 至多 3 次）；"
+        "预算尽则 draft_section mode=rewrite_window 一次写满整窗："
         "有人把话说满，有人沉默或做事；删掉只在占拍的应声。"
         "不要把对白改成「告诉他…」的说明。不要整章再 draft_section。"
         "展开日子时把场面写完，不要用三字问答代替叙述。"
@@ -643,3 +644,44 @@ def _merge_related(state: Any, related: list[Any]) -> None:
         if len(existing) >= _RELATED_CAP:
             break
     state.related_tests_union = existing[:_RELATED_CAP]
+
+
+def should_inject_writing_delivery_hold(state: Any, *, reserve_steps: int = 1) -> bool:
+    """Turn 将结束时 manifest 仍开过程门或篇幅不足 → 注入交付门 receipt。"""
+    if bool(getattr(state, "cancelled", False)):
+        return False
+    if bool(getattr(state, "budget_exceeded", False)):
+        return False
+    if bool(getattr(state, "writing_delivery_hold_sent", False)):
+        return False
+    if str(getattr(state, "scenario_id", "") or "") != "writing":
+        return False
+    remaining = _remaining_steps(state)
+    if remaining < 1:
+        return False
+    from app.writing.delivery_gate import manifest_delivery_blockers, read_turn_manifest
+
+    manifest = read_turn_manifest(
+        getattr(state, "turn_id", None),
+        getattr(state, "session_id", None),
+    )
+    return bool(manifest_delivery_blockers(manifest))
+
+
+def build_writing_delivery_hold_text(state: Any) -> str:
+    from app.writing.delivery_gate import (
+        delivery_hold_notice,
+        manifest_delivery_blockers,
+        read_turn_manifest,
+    )
+
+    manifest = read_turn_manifest(
+        getattr(state, "turn_id", None),
+        getattr(state, "session_id", None),
+    )
+    blockers = manifest_delivery_blockers(manifest)
+    return delivery_hold_notice(blockers)
+
+
+def mark_writing_delivery_hold_injected(state: Any) -> None:
+    state.writing_delivery_hold_sent = True

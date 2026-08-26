@@ -111,6 +111,8 @@ class TurnState:
     # 均匀短拍（三字问答 / 空应声 / 把因果说圆）。可 checkpoint。
     staccato_pending: bool = False
     staccato_receipt_sent: bool = False
+    # 写作 manifest 仍开过程门/篇幅不足时阻止「已完成」叙事（每 Turn 一次）。
+    writing_delivery_hold_sent: bool = False
 
 
 ContentBlock = dict[str, Any]

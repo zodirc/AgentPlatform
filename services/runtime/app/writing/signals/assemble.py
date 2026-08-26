@@ -108,6 +108,7 @@ async def maybe_attach_prose_writing_signals(
             session_id=session_id,
             section_id=section_id,
             signals=signals,
+            chapter_text=chapter,
         )
     penalties = signals.get("penalties") if isinstance(signals, dict) else None
     hits = {
@@ -234,6 +235,7 @@ def _upsert_section_signal_prior(
     session_id: object | None,
     section_id: str,
     signals: dict[str, Any],
+    chapter_text: str = "",
 ) -> None:
     if not turn_id or not section_id or not isinstance(signals, dict):
         return
@@ -279,6 +281,14 @@ def _upsert_section_signal_prior(
         if signals.get(key)
     }
     row["l0_hits"] = process_l0_hits(signals.get("penalties"), flags=flags)
+    if signals.get("net_signal") is not None:
+        row["net_signal"] = signals["net_signal"]
+    from app.writing.text_metrics import draft_length_fields, visible_chars
+
+    if chapter_text.strip():
+        length = draft_length_fields(chapter_text, "")
+        row["visible_chars"] = int(length.get("visible_chars") or visible_chars(chapter_text))
+        row["length_short"] = bool(length.get("length_short"))
     drafts[section_id] = row
     target.parent.mkdir(parents=True, exist_ok=True)
     tmp = target.with_suffix(".tmp")

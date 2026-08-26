@@ -44,10 +44,13 @@ from app.engine.read_registry import (
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message, user_message
 from app.engine.verify_receipt import (
     build_verify_receipt_text,
+    build_writing_delivery_hold_text,
     mark_verify_receipt_injected,
+    mark_writing_delivery_hold_injected,
     note_tool_result_for_verify,
     note_writing_signals_for_verify,
     should_inject_verify_receipt,
+    should_inject_writing_delivery_hold,
 )
 from app.model.gateway import ModelError, ModelGateway, ModelResponse, StreamActivity
 from app.observability.metrics import record_step_duration, record_tool_call, record_tool_misuse
@@ -876,6 +879,22 @@ class AgentEngine:
                         step_index=step_index,
                     )
                     continue
+                if should_inject_writing_delivery_hold(state):
+                    receipt = build_writing_delivery_hold_text(state)
+                    mark_writing_delivery_hold_injected(state)
+                    state.messages.append(user_message(receipt))
+                    await self._write_event(
+                        event_type="tool.completed",
+                        payload=_tool_completed_base(
+                            tool_call_id=f"writing_delivery_hold-{step_index}",
+                            tool_name="writing_delivery_hold",
+                            status="ok",
+                            summary="writing delivery hold injected",
+                            verify_receipt=True,
+                        ),
+                        step_index=step_index,
+                    )
+                    continue
                 record_step_duration(
                     scenario_id=state.scenario_id,
                     duration_seconds=_step_elapsed(),
@@ -892,11 +911,22 @@ class AgentEngine:
         if state.cancelled:
             return final_summary
         if state.budget_exceeded:
-            return final_summary or "budget exceeded"
+            return self._finalize_turn_summary(state, final_summary or "budget exceeded")
         if state.step_count >= state.max_steps:
             state.termination_reason = "max_steps"
-            return final_summary or "max_steps reached"
-        return final_summary
+            return self._finalize_turn_summary(state, final_summary or "max_steps reached")
+        return self._finalize_turn_summary(state, final_summary)
+
+    @staticmethod
+    def _finalize_turn_summary(state: TurnState, summary: str) -> str:
+        from app.writing.delivery_gate import finalize_writing_turn_summary
+
+        return finalize_writing_turn_summary(
+            scenario_id=state.scenario_id,
+            turn_id=state.turn_id,
+            session_id=state.session_id,
+            summary=summary,
+        )
 
     @staticmethod
     def _tool_cache_key(tool_name: str, arguments: dict[str, Any]) -> str:
@@ -1615,6 +1645,8 @@ class AgentEngine:
                             path=str(result.get("path", "")),
                             new_text=str(result.get("new_text", "")),
                             old_text=str(result.get("old_text") or ""),
+                            turn_id=state.turn_id,
+                            session_id=state.session_id,
                         )
                         if applied.get("status") == "error":
                             result["status"] = "error"

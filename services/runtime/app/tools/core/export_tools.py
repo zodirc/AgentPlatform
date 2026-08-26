@@ -82,6 +82,22 @@ async def export_document(
     manifest = (
         _read_manifest(turn_id, session_id=session_id) if source == "current_draft" else None
     )
+    if source == "current_draft":
+        from app.writing.delivery_gate import export_blocked_by_manifest
+
+        blockers = export_blocked_by_manifest(manifest if isinstance(manifest, dict) else None)
+        if blockers:
+            return {
+                "output_path": output_path,
+                "source": source,
+                "profile": export_profile,
+                "delivery_status": "blocked",
+                "delivery_issues": blockers,
+                "included_sections": [],
+                "missing_sections": requested,
+                "source_paths": [],
+                "summary": "Export blocked: chapter process gates still open",
+            }
     manifest_revisions = manifest.get("revisions", {}) if isinstance(manifest, dict) else {}
     from app.writing.manuscript import (
         confirmed_manuscript_rel,

@@ -187,6 +187,33 @@ async def propose_patch(
     _assert_not_seed_corpus(path)
     old = old_text
     new = new_text
+    turn_id = _kwargs.get("turn_id")
+    session_id = _kwargs.get("session_id")
+    if is_prose_writing_path(path) and turn_id is not None:
+        from app.tools.core.writing_tools import _read_manifest, _write_manifest
+        from app.writing.patch_budget import (
+            check_propose_patch_allowed,
+            resolve_section_for_prose_patch,
+        )
+
+        manifest = _read_manifest(turn_id, session_id=session_id) or {}
+        section_id = resolve_section_for_prose_patch(path, old_text=old, new_text=new)
+        prior = None
+        if section_id:
+            row = (manifest.get("section_drafts") or {}).get(section_id)
+            prior = row if isinstance(row, dict) else None
+        blocked = check_propose_patch_allowed(
+            manifest,
+            section_id=section_id,
+            old_text=old,
+            prior=prior,
+        )
+        if blocked:
+            blocked.setdefault("path", path)
+            blocked.setdefault("old_text", old)
+            blocked.setdefault("new_text", new)
+            blocked.setdefault("applies", False)
+            return blocked
     if is_prose_writing_path(path):
         target = _resolve_path(path)
         if target.is_file():
@@ -254,17 +281,53 @@ async def apply_patch(
         ``propose_patch`` 的 span 若被 auto-apply 误当整文件会毁掉长文档，故默认 surgical。
     """
     _assert_not_seed_corpus(path)
+    turn_id = _kwargs.get("turn_id")
+    session_id = _kwargs.get("session_id")
     target = _resolve_path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     existing = target.read_text(encoding="utf-8") if target.exists() else ""
     old = old_text or ""
     new = new_text or ""
     force = str(_kwargs.get("force_full_replace", "")).lower() in {"1", "true", "yes"}
+    section_id = ""
+    prior: dict[str, Any] | None = None
+    from app.writing.patch_budget import (
+        check_propose_patch_allowed,
+        note_prose_patch_apply_miss,
+        note_prose_patch_applied,
+        resolve_section_for_prose_patch,
+    )
+
+    if old and is_prose_writing_path(path) and turn_id is not None:
+        from app.tools.core.writing_tools import _read_manifest
+
+        manifest = _read_manifest(turn_id, session_id=session_id) or {}
+        section_id = resolve_section_for_prose_patch(path, old_text=old, new_text=new)
+        if section_id:
+            row = (manifest.get("section_drafts") or {}).get(section_id)
+            prior = row if isinstance(row, dict) else None
+        blocked = check_propose_patch_allowed(
+            manifest,
+            section_id=section_id,
+            old_text=old,
+            prior=prior,
+        )
+        if blocked:
+            blocked.setdefault("path", path)
+            return blocked
 
     if old and is_prose_writing_path(path) and existing:
         old, new = sanitize_prose_patch(existing, old, new)
         blocked = prose_patch_block_reason(old, new)
         if blocked:
+            if turn_id is not None:
+                note_prose_patch_apply_miss(
+                    turn_id,
+                    session_id,
+                    path=path,
+                    old_text=old,
+                    section_id=section_id or "",
+                )
             return {
                 "path": path,
                 "status": "error",
@@ -274,12 +337,26 @@ async def apply_patch(
     if old:
         count = existing.count(old)
         if count == 0:
+            if is_prose_writing_path(path) and turn_id is not None:
+                note_prose_patch_apply_miss(
+                    turn_id,
+                    session_id,
+                    path=path,
+                    old_text=old,
+                )
             return {
                 "path": path,
                 "status": "error",
                 "error": "old_text not found in current file; re-read and repropose",
             }
         if count > 1:
+            if is_prose_writing_path(path) and turn_id is not None:
+                note_prose_patch_apply_miss(
+                    turn_id,
+                    session_id,
+                    path=path,
+                    old_text=old,
+                )
             return {
                 "path": path,
                 "status": "error",
@@ -303,6 +380,15 @@ async def apply_patch(
         final = new
 
     target.write_text(final, encoding="utf-8")
+    if old and is_prose_writing_path(path) and turn_id is not None:
+        note_prose_patch_applied(
+            turn_id,
+            session_id,
+            path=path,
+            old_text=old,
+            prior=prior,
+            section_id=section_id,
+        )
     return {
         "path": path,
         "status": "applied",
