@@ -8,7 +8,7 @@ from typing import Any
 from app.writing.opening import institution_before_place
 from app.writing.text_metrics import wants_outline_toc_only
 
-_MD_HEADING = re.compile(r"^#\s+(.+?)\s*$", re.M)
+_MD_HEADING = re.compile(r"^#{1,3}\s+(.+?)\s*$", re.M)
 _CHAPTER_LINE = re.compile(
     r"^第[一二三四五六七八九十百千零〇两\d]+章\b.*$",
     re.M,
@@ -26,6 +26,77 @@ _PEAK_FLOOD_RATIO = 0.4
 _PEAK_FLOOD_MIN = 3
 _CH1_HEAD = re.compile(r"^#{1,3}\s*第一章\b.*$", re.M)
 _CH1_RANGE = re.compile(r"^1\s*[—\-–至到]\s*\d+[：:].+$", re.M)
+_LONG_FORM = re.compile(r"长篇|网文|连载|修仙|玄幻|仙侠|修真")
+_OPENING_TRILOGY_HEAD = re.compile(r"开篇三章|前三章|世界契约|开局三章")
+_CH_NUM = re.compile(r"^ch([0-9]+)\b", re.I)
+_CHN_NUM = re.compile(r"^第([一二三四五六七八九十]+)章\b")
+_TRILOGY_CH1 = re.compile(r"环境|社会|地点|规矩|生计|时代|背景")
+_TRILOGY_CH2 = re.compile(
+    r"规则|设定|体系|核心|世界|力量|代价|"
+    r"异象|悬念|钩子|信息差|案件|怪谈|组织|势力|台阶|局面|质地|异变|线索|"
+    r"复苏|秘密|机构|打更|探案|机缘|门槛|势力|冲突|卷入|"
+    r"灵灯|边界|是什么|军符|禁制|契印|海禁|镇物|门规|诡物"
+)
+_TRILOGY_CH3 = re.compile(r"人物|关系|麻烦|处境|选择|第一阶|进场|立")
+
+_STYLE_CONTRACT_HEAD = re.compile(r"^#{1,3}\s*风格契约", re.M)
+_STYLE_ROUTES = re.compile(
+    r"凡人流|逆命悲情|都市规则怪谈|维多利亚克系|探案仙侠|科幻修真"
+)
+_MIN_STYLE_CONTRACT_CHARS = 100
+
+STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后写满）
+
+从 volatile「题材发散」选定一路（或混合），**把该路的世界运转、文字节奏、开篇质地写进本段**——订纲后 volatile 块撤下，正文只跟 outline，不再重复注入样例。
+
+**路数**：（凡人流 / 逆命悲情 / 都市规则怪谈 / 维多利亚克系解密 / 探案仙侠 / 科幻修真）
+
+**世界怎么运转**：（本书的资源/规则/体制如何驱动故事，2–5 句）
+
+**文字与节奏**：（读者跟什么、笔法质地，2–5 句）
+
+**开篇质地**：（这类书常怎么落地，2–4 句）
+
+**边界**：（别落什么套；若混写，和哪条路别搅在一起）
+
+## 主题倾向
+（一句收束：本书写什么、读者追什么）
+
+## 主线一句话
+（谁要什么、谁挡着、顶点落在哪）
+"""
+
+OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后写满）
+
+**路数**：（从题材发散选一路或混合）
+
+**世界怎么运转**：
+
+**文字与节奏**：
+
+**开篇质地**：
+
+**边界**：
+
+## 开篇三章·世界契约（长篇必填）
+
+分三章让读者**站进世界、跟上悬念**，不要全塞进 ch1 正文。各章另写 200–400 字章纲。
+
+| 章 | 三要素主项 | 必须交代 |
+|----|------------|----------|
+| ch1 | 环境 | 何时何地、社会背景、一条可见规矩（谁管事、什么稀缺） |
+| ch2 | 环境/情节 | **世界再推一步**：异象、组织、案件、势力、或一块新信息差；**不必**写成「X 能做什么/不能做什么」；无刚性体系的书可只加深处境与悬念 |
+| ch3 | 人物/情节 | 主角处境与关系、第一阶麻烦进场（只开端，不解释终极） |
+
+## 主题倾向
+（一句收束：本书写什么、读者追什么）
+
+## 主线一句话
+（谁要什么、谁挡着、顶点落在哪）
+
+## 章节位置与三要素主项
+（ch4 起按卷内位置标注；每章 200–400 字）
+"""
 
 
 def _chapter_spans(md: str) -> list[tuple[str, str]]:
@@ -52,6 +123,67 @@ def _preamble(md: str) -> str:
     if first is None:
         return text.strip()
     return text[: first.start()].strip()
+
+
+def _section_body(md: str, heading: re.Pattern[str]) -> str:
+    text = md or ""
+    match = heading.search(text)
+    if not match:
+        return ""
+    start = match.end()
+    nxt = re.search(r"^#{1,3}\s+", text[start:], re.M)
+    body = text[start : start + nxt.start()] if nxt else text[start:]
+    return body.strip()
+
+
+def extract_outline_style_contract(md: str, *, max_chars: int = 720) -> str:
+    """提取 outline 中「风格契约」段（订纲后正文跟此，不再注入 volatile 题材发散）。"""
+    blob = _section_body(md, _STYLE_CONTRACT_HEAD)
+    if not blob:
+        return ""
+    return blob if len(blob) <= max_chars else blob[: max_chars - 1] + "…"
+
+
+def outline_style_committed(md: str, *, min_chars: int = _MIN_STYLE_CONTRACT_CHARS) -> bool:
+    blob = extract_outline_style_contract(md)
+    text = (blob or "").strip()
+    if len(text) < min_chars:
+        return False
+    if _STYLE_ROUTES.search(text):
+        return True
+    return len(text) >= min_chars + 80
+
+
+def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
+    """长篇玄幻发散：未写满风格契约时提示先融合 volatile 样例进 outline。"""
+    from app.writing.outline_phase import wants_fantasy_diverge_corpus
+
+    if wants_outline_toc_only(user_text):
+        return {}
+    if _SHORT_BOOK.search(user_text or ""):
+        return {}
+    if not wants_fantasy_diverge_corpus(user_text, outline=md):
+        return {}
+    if outline_style_committed(md):
+        return {}
+    if not (md or "").strip():
+        return {
+            "outline_style_uncommitted": True,
+            "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
+            "summary_suffix": (
+                "长篇玄幻发散：先 update_outline 写满「风格契约」"
+                "（从 volatile 题材发散选路数并融合进 outline）；"
+                "风格写入后不再注入题材发散块，再补开篇三章。"
+            ),
+        }
+    return {
+        "outline_style_uncommitted": True,
+        "summary_suffix": (
+            "outline 尚无「风格契约」或未满 "
+            f"{_MIN_STYLE_CONTRACT_CHARS} 字："
+            "把选定的题材风格（世界运转/文字节奏/开篇质地）写进该段后再补章纲。"
+        ),
+    }
 
 
 def extract_outline_spine(md: str, *, max_chars: int = _SPINE_CHARS) -> str:
@@ -94,6 +226,109 @@ def extract_opening_outline_blob(md: str, *, max_chars: int = 800) -> str:
     if not blob:
         return ""
     return blob if len(blob) <= max_chars else blob[: max_chars - 1] + "…"
+
+
+def _chapter_section_id(title: str) -> str:
+    title = (title or "").strip()
+    m = re.match(r"^ch\s*(\d+)", title, re.I)
+    if m:
+        return f"ch{int(m.group(1))}"
+    m2 = re.match(r"^第([一二三四五六七八九十两]+)章", title)
+    if m2:
+        token = m2.group(1)
+        cn = {
+            "一": 1,
+            "二": 2,
+            "三": 3,
+            "四": 4,
+            "五": 5,
+            "六": 6,
+            "七": 7,
+            "八": 8,
+            "九": 9,
+            "十": 10,
+            "两": 2,
+        }
+        if token in cn:
+            return f"ch{cn[token]}"
+        if token.startswith("十") and len(token) > 1:
+            return f"ch{10 + cn.get(token[1:], 0)}"
+    return ""
+
+
+def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
+    """长篇 outline：检查 ch1–ch3 世界契约是否写清。"""
+    if wants_outline_toc_only(user_text):
+        return {}
+    if _SHORT_BOOK.search(user_text or ""):
+        return {}
+    if not _LONG_FORM.search(user_text or ""):
+        return {}
+    text = md or ""
+    if not text.strip():
+        return {
+            "outline_opening_trilogy_missing": True,
+            "summary_suffix": (
+                "长篇开局：outline 须含「开篇三章·世界契约」"
+                "（ch1 环境锚点 · ch2 世界再推一步 · ch3 人物与第一阶麻烦）。"
+                "可先 replace 模板骨架，再 mode=append 加厚各章。"
+            ),
+        }
+    chapters = _chapter_spans(text)
+    n = len(chapters)
+    # 六章以上的 mature outline 若未显式写「开篇三章」段，不再重复拦 trilogy（已并入各章纲）。
+    if n >= _MIN_CHAPTERS and not _OPENING_TRILOGY_HEAD.search(text):
+        return {}
+    _TRILOGY_MIN_CHARS = 200
+    notes: list[str] = []
+    jobs: dict[str, str] = {}
+    for title, body in _chapter_spans(text):
+        sid = _chapter_section_id(title)
+        if sid in {"ch1", "ch2", "ch3"}:
+            jobs[sid] = body
+    trilogy_jobs_ok = all(
+        len(jobs.get(sid, "").strip()) >= _TRILOGY_MIN_CHARS for sid in ("ch1", "ch2", "ch3")
+    )
+    if not _OPENING_TRILOGY_HEAD.search(text) and not trilogy_jobs_ok:
+        notes.append("缺「开篇三章·世界契约」段（ch1 环境 / ch2 世界再推 / ch3 人物麻烦）。")
+    for sid, label, pat in (
+        ("ch1", "ch1 环境锚点", _TRILOGY_CH1),
+        ("ch2", "ch2 世界再推/悬念台阶", _TRILOGY_CH2),
+        ("ch3", "ch3 人物与第一阶麻烦", _TRILOGY_CH3),
+    ):
+        blob = jobs.get(sid, "")
+        nvis = len(blob.strip())
+        if nvis < 40:
+            notes.append(f"缺 {label} 章纲（≥{_TRILOGY_MIN_CHARS} 字为宜）。")
+        elif nvis < _TRILOGY_MIN_CHARS and not pat.search(blob):
+            notes.append(f"{label} 章纲未点明职责（见模板表）。")
+    if not notes:
+        return {}
+    return {
+        "outline_opening_trilogy_incomplete": True,
+        "summary_suffix": "开篇三章契约：" + "".join(notes) + "同轮补进 outline 后再 draft。",
+    }
+
+
+def extract_outline_neighbors(
+    md: str,
+    section_id: str,
+    *,
+    max_chars: int = 280,
+) -> dict[str, str]:
+    """相邻章章纲（中后段广度参照）。"""
+    sid = (section_id or "").strip().lower()
+    m = re.match(r"ch(\d+)", sid)
+    if not m:
+        return {}
+    n = int(m.group(1))
+    out: dict[str, str] = {}
+    for delta in (-1, 1):
+        neighbor = f"ch{n + delta}"
+        job = extract_outline_job(md, neighbor, max_chars=max_chars)
+        if job:
+            out[neighbor] = job
+    return out
 
 
 def extract_outline_job(
@@ -142,6 +377,7 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
         return {}
     chapters = _chapter_spans(md)
     n = len(chapters)
+    trilogy = opening_trilogy_fields(md, user_text)
     opening_notes: list[str] = []
     if institution_before_place(extract_opening_outline_blob(md)):
         opening_notes.append(
@@ -150,12 +386,24 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
         )
 
     if n < _MIN_CHAPTERS:
-        if not opening_notes:
+        notes = list(opening_notes)
+        if trilogy.get("summary_suffix"):
+            notes.append(
+                str(trilogy["summary_suffix"])
+                .replace("开篇三章契约：", "")
+                .replace("长篇开局：", "")
+            )
+        if not notes:
             return {}
-        return {
-            "outline_institution_first": True,
-            "summary_suffix": "长篇编排：" + "".join(opening_notes),
-        }
+        out: dict[str, Any] = {}
+        if opening_notes:
+            out["outline_institution_first"] = True
+        if trilogy.get("outline_opening_trilogy_incomplete"):
+            out["outline_opening_trilogy_incomplete"] = True
+        if trilogy.get("outline_opening_trilogy_missing"):
+            out["outline_opening_trilogy_missing"] = True
+        out["summary_suffix"] = "长篇编排：" + "".join(notes)
+        return out
 
     full = md or ""
     peak_chapters = [
@@ -184,6 +432,10 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
             "多数章应是过日子或加压，高潮只落一处（或中途翻转+卷末）。"
         )
 
+    trilogy = opening_trilogy_fields(md, user_text)
+    if trilogy.get("summary_suffix"):
+        notes.append(str(trilogy["summary_suffix"]).replace("开篇三章契约：", ""))
+
     if not notes:
         return {}
     out["summary_suffix"] = (
@@ -191,4 +443,8 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
         + "".join(notes)
         + "章末可以停在日子上，不等于全书没有顶点。同轮补进纲里后再结束。"
     )
+    if trilogy.get("outline_opening_trilogy_incomplete"):
+        out["outline_opening_trilogy_incomplete"] = True
+    if trilogy.get("outline_opening_trilogy_missing"):
+        out["outline_opening_trilogy_missing"] = True
     return out

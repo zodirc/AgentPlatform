@@ -85,6 +85,29 @@ def test_outline_arc_ok_when_place_before_sect() -> None:
     assert outline_arc_fields(md, "写长篇") == {}
 
 
+def test_opening_trilogy_fields_long_form() -> None:
+    from app.writing.outline_arc import opening_trilogy_fields
+
+    missing = opening_trilogy_fields("", "写长篇玄幻小说")
+    assert missing.get("outline_opening_trilogy_missing") is True
+
+    ok = (
+        "## 开篇三章·世界契约\n\n"
+        "### ch1\n环境：霜降边城，渡口灯油规矩，谁交谁过。\n" + "细节。" * 30
+        + "\n### ch2\n规则：灵灯是引路法器，无油不应亮；灯司掌登记。\n" + "细节。" * 30
+        + "\n### ch3\n人物：裴照修灯，第一阶异常是旧灯无油自亮。\n" + "细节。" * 30
+    )
+    assert opening_trilogy_fields(ok, "写长篇") == {}
+
+    suspense = (
+        "## 开篇三章·世界契约\n\n"
+        "### ch1\n环境：现代小城，夜班公交末班，乘客按站刷卡。\n" + "细节。" * 30
+        + "\n### ch2\n悬念：第二起失踪，对讲机里多出一段无人认领的报站。\n" + "细节。" * 30
+        + "\n### ch3\n人物：杨间被卷入，第一阶麻烦是不得不上那班车。\n" + "细节。" * 30
+    )
+    assert opening_trilogy_fields(suspense, "写长篇") == {}
+
+
 def test_extract_spine_and_job() -> None:
     md = (
         "主线：沈禾要保住铺子，挡着的是粮行的账。\n\n"
