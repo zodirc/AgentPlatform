@@ -143,11 +143,13 @@ def shown_for_fragment(fragment: str, *, scene: float, feats: dict[str, float]) 
     return scene >= 0.35
 
 
-def anti_pattern_flags(text: str, rubric: dict[str, Any]) -> dict[str, bool]:
+def anti_pattern_flags(
+    text: str, rubric: dict[str, Any], *, work_mode: str = "literary"
+) -> dict[str, bool]:
     """反模式 flags。"""
     from app.writing.hinge import hinge_fields
 
-    staccato = bool(staccato_fields(text).get("staccato_uniform"))
+    staccato = bool(staccato_fields(text, work_mode=work_mode).get("staccato_uniform"))
     hinge = bool(hinge_fields(text).get("hinge_dense"))
     meta = float(rubric.get("meta_knowing_rate") or 0.0) >= 0.35
     glue = float(rubric.get("glue_rate") or 0.0) >= 0.35

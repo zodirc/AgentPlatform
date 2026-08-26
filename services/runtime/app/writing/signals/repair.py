@@ -39,6 +39,11 @@ APPEND_BLOCK_L0_KEYS = frozenset(
     }
 )
 
+
+def append_block_l0_keys(work_mode: str = "literary") -> frozenset[str]:
+    del work_mode
+    return APPEND_BLOCK_L0_KEYS
+
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
         "对白过碎、对拍问答、采访式追问、嘴里主题金句、接词干加也/还、或用几点/到家收场："
@@ -80,44 +85,55 @@ def l0_penalty_hits(penalties: Any) -> list[str]:
     return [key for key in penalty_hits(penalties) if key in L0_PENALTY_KEYS]
 
 
-def process_l0_hits(penalties: Any = None, *, flags: dict[str, Any] | None = None) -> list[str]:
+def process_l0_hits(
+    penalties: Any = None,
+    *,
+    flags: dict[str, Any] | None = None,
+    work_mode: str = "literary",
+) -> list[str]:
     """章级过程门（不含 length_short）：来自 penalties，或 result 上的 L0 布尔旗。"""
-    hits = [key for key in l0_penalty_hits(penalties) if key in APPEND_BLOCK_L0_KEYS]
+    block_keys = append_block_l0_keys(work_mode)
+    hits = [key for key in l0_penalty_hits(penalties) if key in block_keys]
     seen = set(hits)
     if isinstance(flags, dict):
-        for key in APPEND_BLOCK_L0_KEYS:
+        for key in block_keys:
             if flags.get(key) and key not in seen:
                 hits.append(key)
                 seen.add(key)
     return hits
 
 
-def prior_blocks_append(prior: dict[str, Any] | None) -> str | None:
+def prior_blocks_append(
+    prior: dict[str, Any] | None,
+    *,
+    work_mode: str = "literary",
+) -> str | None:
     """上一评仍有过程 L0 时挡 append；返回挡门键。"""
     if not isinstance(prior, dict):
         return None
+    block_keys = append_block_l0_keys(work_mode)
     raw = prior.get("l0_hits")
     if isinstance(raw, list):
         for item in raw:
             key = str(item or "")
-            if key in APPEND_BLOCK_L0_KEYS:
+            if key in block_keys:
                 return key
-    for key in APPEND_BLOCK_L0_KEYS:
+    for key in block_keys:
         if prior.get(key):
             return key
     span = prior.get("repair_span")
     if isinstance(span, dict):
         key = str(span.get("key") or "")
-        if key in APPEND_BLOCK_L0_KEYS:
+        if key in block_keys:
             return key
     return None
 
 
-def slice_blocks_append(content: str) -> str | None:
+def slice_blocks_append(content: str, *, work_mode: str = "literary") -> str | None:
     """新切片自身带碎拍嗓则拒收，避免灌进章。"""
     from app.writing.staccato import staccato_fields
 
-    if staccato_fields(content or "").get("staccato_uniform"):
+    if staccato_fields(content or "", work_mode=work_mode).get("staccato_uniform"):
         return "staccato_uniform"
     return None
 
@@ -259,6 +275,7 @@ def build_repair_span(
     window: TextWindow | None = None,
     net_signal: float,
     avoid_old: str = "",
+    work_mode: str = "literary",
 ) -> dict[str, Any] | None:
     """构造 repair_span。
     
@@ -328,9 +345,10 @@ def build_repair_span(
     old = close_span_in_body(body, span, max_chars=REPAIR_SPAN_MAX)
     if not old or old not in body:
         return None
+    hint_key = key or "weak_window"
     return {
         "old_text": old,
         "key": key or "weak_window",
-        "hint": _HINTS.get(key or "weak_window", _HINTS["weak_window"]),
+        "hint": _HINTS.get(hint_key, _HINTS["weak_window"]),
         "visible_chars": visible_chars(old),
     }

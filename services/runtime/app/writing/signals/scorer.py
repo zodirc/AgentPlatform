@@ -46,14 +46,18 @@ def _dimension_scores(
     *,
     fragment_declared: str,
     space: MetricSpace | None = None,
+    work_mode: str = "literary",
 ) -> tuple[dict[str, float], dict[str, Any]]:
     """Prose dimensions. Docs/code rubric style/structure are not used as-is."""
+    from app.writing.work_mode import normalize_work_mode
+
+    mode = normalize_work_mode(work_mode)
     vis = visible_chars(text)
     scene = narrative_scene_ratio(text)
     meta_rate = float(rubric.get("meta_knowing_rate") or 0.0)
     glue_rate = float(rubric.get("glue_rate") or 0.0)
     syn = synopsis_rate(text)
-    flags = anti_pattern_flags(text, rubric)
+    flags = anti_pattern_flags(text, rubric, work_mode=mode)
     fit = fit_signature(text, fragment_declared, space=space)
     feats = fit.get("signature") or {}
     sent_cv = float(feats.get("sent_cv") or 0.0)
@@ -81,9 +85,10 @@ def _dimension_scores(
     )
 
     pacing = _clamp(0.40 * scene + 0.35 * sent_cv + 0.25 * (1.0 - glue_rate))
+    staccato_cut = 0.12 if mode == "web_serial" else 0.28
     if flags["staccato"]:
-        pacing = _clamp(pacing - 0.28)
-        character = _clamp(character - 0.28)
+        pacing = _clamp(pacing - staccato_cut)
+        character = _clamp(character - staccato_cut)
     if flags["hinge"]:
         pacing = _clamp(pacing - 0.16)
 
@@ -177,7 +182,7 @@ def _collect_penalties(
     add("hinge_dense", bool(hinge_fields(text).get("hinge_dense")), "看见/听到后立马拧")
     add(
         "staccato_uniform",
-        bool(staccato_fields(text).get("staccato_uniform")),
+        bool(staccato_fields(text, work_mode=mode).get("staccato_uniform")),
         "对白过碎、接词干加也/还、几点到家收场、拆句或对仗、主题金句/采访阶梯/对拍三联",
     )
     if not skip_opening and mode != "web_serial":
@@ -229,12 +234,12 @@ def _collect_rewards(
     work_mode: str = "literary",
 ) -> list[dict[str, Any]]:
     coeff = prefs.get("signal_rewards") or {}
+    mode = str(prefs.get("work_mode") or work_mode or "literary")
     rubric = score_rubric(text)
-    flags = anti_pattern_flags(text, rubric)
+    flags = anti_pattern_flags(text, rubric, work_mode=mode)
     feats = exemplar_fit.get("signature") or {}
     scene = narrative_scene_ratio(text)
     hits: list[dict[str, Any]] = []
-    mode = str(prefs.get("work_mode") or work_mode or "literary")
 
     def add(key: str, hit: bool, hint: str) -> None:
         if not hit:
@@ -311,8 +316,9 @@ def _score_span(
     detected = detect_fragment(text, space=space)
     rubric = score_rubric(text)
     length_fields = draft_length_fields(text, "")
+    mode = str(prefs.get("work_mode") or "literary")
     dimensions, exemplar_fit = _dimension_scores(
-        text, rubric, fragment_declared=declared, space=space
+        text, rubric, fragment_declared=declared, space=space, work_mode=mode
     )
     weights = (prefs.get("fragment_weights") or {}).get(declared) or {}
     if not weights:
@@ -405,6 +411,7 @@ def score_writing_fragment(
         prefs=prefs,
         space=space,
     )
+    mode = str(prefs.get("work_mode") or "literary")
     vis = vis_chars(text)
     length_short = bool((body.get("length_fields") or {}).get("length_short"))
     windows = split_score_windows(text)
@@ -460,6 +467,7 @@ def score_writing_fragment(
             penalties=probe_penalties,
             window=locate_win,
             net_signal=float(body["net_signal"]),
+            work_mode=mode,
         )
         if span and unproductive_repeat(prior, span, body.get("composite")):
             avoid = str(span.get("old_text") or "")
@@ -469,6 +477,7 @@ def score_writing_fragment(
                 window=None,
                 net_signal=float(body["net_signal"]),
                 avoid_old=avoid,
+                work_mode=mode,
             )
             if alt and not unproductive_repeat(prior, alt, body.get("composite")):
                 span = alt

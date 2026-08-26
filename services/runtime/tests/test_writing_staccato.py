@@ -555,3 +555,19 @@ def test_find_staccato_span_skips_avoided_island() -> None:
     assert second
     assert second != first
     assert ("旧账" in first) != ("旧账" in second)
+
+
+def test_web_serial_staccato_same_as_literary() -> None:
+    text = _pad("雨大。\n风紧。\n路滑。\n人稀。\n钟响。\n")
+    assert staccato_fields(text).get("staccato_uniform") is True
+    assert staccato_fields(text, work_mode="web_serial").get("staccato_uniform") is True
+
+
+def test_web_serial_staccato_blocks_append() -> None:
+    from app.writing.signals.repair import append_block_l0_keys, process_l0_hits
+
+    penalties = [{"key": "staccato_uniform", "hit": True, "delta": -0.06}]
+    assert process_l0_hits(penalties, work_mode="literary") == ["staccato_uniform"]
+    assert process_l0_hits(penalties, work_mode="web_serial") == ["staccato_uniform"]
+    assert "staccato_uniform" in append_block_l0_keys("literary")
+    assert "staccato_uniform" in append_block_l0_keys("web_serial")

@@ -543,30 +543,9 @@ def count_contrast_punches(text: str) -> int:
     return n
 
 
-def staccato_fields(content: str) -> dict[str, Any]:
-    """staccato 软事实。
-    
-    参数:
-        content。
-    
-    返回:
-        dict。"""
+def _staccato_metrics(text: str) -> dict[str, int]:
     from app.writing.text_metrics import visible_chars
 
-    text = content or ""
-    quote_run = max_short_quote_run(text)
-    phatic = max_phatic_quote_run(text)
-    echo = count_echo_acks(text)
-    logic = count_logic_glue_quotes(text)
-    split = count_split_speech(text)
-    contrast = count_contrast_punches(text)
-    equate = count_equate_punches(text)
-    antithesis = count_antithesis_punches(text)
-    echo_twist = count_echo_twists(text)
-    logistics = max_logistics_quote_run(text)
-    thesis = count_thesis_mouth(text)
-    interview = max_interview_ladder(text)
-    duet = max_duet_quote_run(text)
     vis = visible_chars(text)
     if vis < _MIN_VISIBLE:
         unit_run = 0
@@ -574,41 +553,76 @@ def staccato_fields(content: str) -> dict[str, Any]:
     else:
         unit_run = max_short_unit_run(text)
         defer = count_defer_tells(text)
-    if (
-        quote_run < _QUOTE_RUN
-        and duet < _DUET_RUN
-        and unit_run < _UNIT_RUN
-        and phatic < _PHATIC_MIN
-        and echo < _ECHO_MIN
-        and logic < _LOGIC_MIN
-        and defer < _DEFER_MIN
-        and split < 1
-        and contrast < 1
-        and equate < 1
-        and antithesis < 1
-        and echo_twist < 1
-        and logistics < _LOGISTICS_MIN
-        and thesis < 1
-        and interview < _INTERVIEW_MIN
-    ):
+    return {
+        "quote_run": max_short_quote_run(text),
+        "duet": max_duet_quote_run(text),
+        "unit_run": unit_run,
+        "phatic": max_phatic_quote_run(text),
+        "echo": count_echo_acks(text),
+        "logic": count_logic_glue_quotes(text),
+        "defer": defer,
+        "split": count_split_speech(text),
+        "contrast": count_contrast_punches(text),
+        "equate": count_equate_punches(text),
+        "antithesis": count_antithesis_punches(text),
+        "echo_twist": count_echo_twists(text),
+        "logistics": max_logistics_quote_run(text),
+        "thesis": count_thesis_mouth(text),
+        "interview": max_interview_ladder(text),
+    }
+
+
+def _literary_staccato_hit(metrics: dict[str, int]) -> bool:
+    return not (
+        metrics["quote_run"] < _QUOTE_RUN
+        and metrics["duet"] < _DUET_RUN
+        and metrics["unit_run"] < _UNIT_RUN
+        and metrics["phatic"] < _PHATIC_MIN
+        and metrics["echo"] < _ECHO_MIN
+        and metrics["logic"] < _LOGIC_MIN
+        and metrics["defer"] < _DEFER_MIN
+        and metrics["split"] < 1
+        and metrics["contrast"] < 1
+        and metrics["equate"] < 1
+        and metrics["antithesis"] < 1
+        and metrics["echo_twist"] < 1
+        and metrics["logistics"] < _LOGISTICS_MIN
+        and metrics["thesis"] < 1
+        and metrics["interview"] < _INTERVIEW_MIN
+    )
+
+
+def staccato_fields(content: str, *, work_mode: str = "literary") -> dict[str, Any]:
+    """staccato 软事实。
+    
+    参数:
+        content。
+        work_mode: 保留入参供调用方；碎拍检测各 mode 一致。
+    
+    返回:
+        dict。"""
+    text = content or ""
+    metrics = _staccato_metrics(text)
+    hit = _literary_staccato_hit(metrics)
+    if not hit:
         return {}
     return {
         "staccato_uniform": True,
-        "staccato_quote_run": quote_run,
-        "staccato_duet_run": duet,
-        "staccato_unit_run": unit_run,
-        "staccato_phatic": phatic,
-        "staccato_echo": echo,
-        "staccato_logic": logic,
-        "staccato_defer": defer,
-        "staccato_split": split,
-        "staccato_contrast": contrast,
-        "staccato_equate": equate,
-        "staccato_antithesis": antithesis,
-        "staccato_echo_twist": echo_twist,
-        "staccato_logistics": logistics,
-        "staccato_thesis": thesis,
-        "staccato_interview": interview,
+        "staccato_quote_run": metrics["quote_run"],
+        "staccato_duet_run": metrics["duet"],
+        "staccato_unit_run": metrics["unit_run"],
+        "staccato_phatic": metrics["phatic"],
+        "staccato_echo": metrics["echo"],
+        "staccato_logic": metrics["logic"],
+        "staccato_defer": metrics["defer"],
+        "staccato_split": metrics["split"],
+        "staccato_contrast": metrics["contrast"],
+        "staccato_equate": metrics["equate"],
+        "staccato_antithesis": metrics["antithesis"],
+        "staccato_echo_twist": metrics["echo_twist"],
+        "staccato_logistics": metrics["logistics"],
+        "staccato_thesis": metrics["thesis"],
+        "staccato_interview": metrics["interview"],
     }
 
 

@@ -117,17 +117,17 @@ def looks_like_chapter_draft(user_text: str) -> bool:
     return _CHAPTER_DRAFT_ASK.search(text) is not None
 
 
-def resolve_draft_quota(user_text: str) -> int | None:
-    """draft 配额。
-    
-    参数:
-        user_text。
-    
-    返回:
-        int|None。"""
+def resolve_draft_quota(user_text: str, *, book_scope: str | None = None) -> int | None:
+    """draft 配额（尺度感知）。"""
+    from app.writing.book_scope import default_draft_quota_for_scope, infer_book_scope
+
     named = parse_char_quota(user_text)
     if named is not None:
         return named
+    scope = book_scope or infer_book_scope(user_text)
+    scoped = default_draft_quota_for_scope(scope, user_text)
+    if scoped is not None:
+        return scoped
     if looks_like_chapter_draft(user_text):
         return DEFAULT_CHAPTER_MIN
     return None

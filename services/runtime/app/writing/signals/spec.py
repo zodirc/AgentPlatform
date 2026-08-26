@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from app.writing.book_scope import book_scope_label, scope_spec_line
 from app.writing.chapter_role import resolve_chapter_role
 from app.writing.focus import infer_focus_section_id
 from app.writing.manuscript import list_section_ids, load_manuscript_doc
@@ -12,7 +13,6 @@ from app.writing.occupy import manuscript_is_occupied, wants_new_piece
 from app.writing.outline_arc import extract_outline_job
 from app.writing.signals.prefs_loader import _module as _writing_prefs
 from app.writing.work_mode import (
-    default_opening_duty,
     fragment_obligations,
     resolve_work_mode,
     work_mode_label,
@@ -70,9 +70,14 @@ def _outline_md(workspace_root: Path | None) -> str:
     if not path.is_file():
         return ""
     try:
-        return path.read_text(encoding="utf-8")
+        return path.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return ""
+
+
+def _section_num(focus: str) -> int | None:
+    m = re.match(r"^ch(\d+)$", (focus or "").strip(), re.I)
+    return int(m.group(1)) if m else None
 
 
 def build_writing_spec_block(
@@ -80,7 +85,7 @@ def build_writing_spec_block(
     *,
     workspace_root: Path | None = None,
 ) -> str:
-    """Writing spec：风格 → 章位置×章类型 → fragment。"""
+    """Writing spec：尺度 → 风格 → 位置×章类型 → fragment。"""
     doc, _rel = load_manuscript_doc(workspace_root)
     outline = _outline_md(workspace_root)
     work_mode, mode_source = resolve_work_mode(
@@ -100,41 +105,68 @@ def build_writing_spec_block(
         duty=duty,
         work_mode=work_mode,
         workspace_root=workspace_root,
+        outline=outline,
+        manuscript_chapters=len(ids),
     )
+    scope = str(role.get("book_scope") or "single")
+    position = str(role.get("chapter_position") or "rising")
+    section_num = _section_num(focus or "ch1")
+
     if duty:
         fragment = infer_fragment_from_duty(duty)
+    elif scope in {"short", "single"}:
+        fragment = "mixed"
     else:
         fragment = str(role.get("preferred_fragment") or "mixed")
     fragment = normalize_fragment(fragment)
     label = _LABELS.get(fragment, fragment)
     mode_label = work_mode_label(work_mode)
     source_note = "手动" if mode_source == "user" else "自动"
+    scope_label = book_scope_label(scope)
+
     duty_line = ""
     if duty:
         one = re.sub(r"\s+", " ", duty).strip()
         duty_line = one if len(one) <= 72 else one[:71] + "…"
-    elif fresh or not ids or role.get("chapter_position") == "opening":
-        duty_line = default_opening_duty(work_mode, chapter_kind=str(role.get("chapter_kind")))
+    elif fresh or not ids or position == "opening":
+        from app.writing.book_scope import default_duty_for_scope as scope_duty
+
+        duty_line = scope_duty(
+            scope,
+            work_mode=work_mode,
+            position=position,
+            chapter_kind=str(role.get("chapter_kind")),
+        )
     frag_obl = fragment_obligations(work_mode).get(fragment, "")
     kind_obl = str(role.get("obligation") or "")
+    scope_line = scope_spec_line(scope, position=position, section_num=section_num)
+    from app.writing.outline_phase import outline_phase_spec_line, resolve_outline_phase
+
+    phase_info = resolve_outline_phase(
+        message, outline=outline, book_scope=scope, workspace_root=workspace_root
+    )
+
     lines = [
         "## Writing spec",
+        f"- book_scope: `{scope}`（{scope_label}）",
         f"- work_mode: `{work_mode}`（{mode_label} · {source_note}）",
         (
-            f"- chapter: `{role['chapter_position']}`·`{role['chapter_kind']}`"
+            f"- chapter: `{position}`·`{role['chapter_kind']}`"
             f"（{role['chapter_position_label']} · {role['chapter_kind_label']}）"
             + (f" · `{focus}`" if focus else "")
         ),
         f"- fragment: `{fragment}`（{label}）",
+        f"- {scope_line}",
+        outline_phase_spec_line(phase_info),
     ]
     if duty_line:
         lines.append(f"- 章职: {duty_line}")
-    if kind_obl:
+    if kind_obl and kind_obl != duty_line:
         lines.append(f"- {kind_obl}")
-    elif frag_obl:
+    elif frag_obl and not kind_obl:
         lines.append(f"- {frag_obl}")
     lines.append(
         "- 有 repair_span 则 propose_patch；L0 清后 mode=append；勿整章再交"
     )
     text = "\n".join(lines)
-    return text if len(text) <= 560 else text[:559] + "…"
+    return text if len(text) <= 620 else text[:619] + "…"

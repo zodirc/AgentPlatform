@@ -390,7 +390,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "writing_rubric" in writing.system_prompt or "work_mode" in writing.system_prompt
     assert "Settings → 写作风格" not in writing.system_prompt
     assert "work_mode" in writing.system_prompt
-    assert "章类型" in writing.system_prompt or "立人" in writing.system_prompt
+    assert "book_scope" in writing.system_prompt or "章类型" in writing.system_prompt
     assert "200–400" in writing.system_prompt
     assert "5000–6000" in writing.system_prompt
     assert "mode=append" in writing.system_prompt
