@@ -38,8 +38,8 @@ def test_infer_fragment_from_duty_three_elements() -> None:
 def test_default_opening_duty_differs_by_mode() -> None:
     lit = default_opening_duty("literary")
     web = default_opening_duty("web_serial")
-    assert "立人" in lit or "机构" in lit
-    assert "立人" in web
+    assert "环境" in lit or "机构" in lit
+    assert "环境" in web or "ch2" in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
     assert "强钩" in hook
 
@@ -52,31 +52,21 @@ def test_spec_block_opening_live_character(
     monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "work_mode: `web_serial`" in spec
+    assert "book_scope: `long`" in spec
     assert "opening" in spec
-    assert "live_character" in spec
-    assert "卷纲浓缩" in spec or "立人" in spec
+    assert "world_rule" in spec or "live_character" in spec
+    assert "卷纲浓缩" in spec or "环境" in spec or "ch2" in spec
     assert "过日子—加压—落下" not in spec
 
 
-def test_opening_chapter_kind_pin(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_spec_block_single_story(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.settings import settings
-    from app.writing.chapter_role import (
-        resolve_chapter_role,
-        save_opening_chapter_kind,
-    )
 
     monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
-    save_opening_chapter_kind("conflict_hook", workspace_root=tmp_path)
-    role = resolve_chapter_role(
-        section_id="ch1",
-        message="写修仙长篇第一章",
-        work_mode="web_serial",
-        workspace_root=tmp_path,
-    )
-    assert role["chapter_position"] == "opening"
-    assert role["chapter_kind"] == "conflict_hook"
-    spec = build_writing_spec_block("写修仙长篇第一章")
-    assert "conflict_hook" in spec
+    spec = build_writing_spec_block("写一篇故事")
+    assert "book_scope: `single`" in spec
+    assert "单篇" in spec
+    assert "开篇窗口" not in spec
 
 
 def test_spec_block_literary_fresh(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

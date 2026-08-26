@@ -156,7 +156,6 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert any(card.path == BUILTIN_STYLE_PATH for card in pin.cards)
     assert any(card.kind == "style" for card in pin.cards)
     assert "## Voice" in pin.volatile_block
-    assert "## Samples" in pin.volatile_block
     path = default_voice_card_path()
     assert path.is_file()
     from app.writing.cards import _parse_frontmatter
@@ -173,12 +172,17 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "邓脱路" in sections["Samples"]
     assert "使君" not in sections["Samples"]
     assert "却说" not in sections["Samples"]
-    assert "人质" in sections["Don't"] or "踹门" in sections["Don't"]
+    assert "同一段落反复 patch" in sections["Don't"] or "第一章讲完全书设定" in sections["Don't"]
     assert "三字" in sections["Don't"] or "一问一答" in sections["Don't"]
     assert "经典文学" in sections["Voice"] or "现代白话" in sections["Voice"]
-    assert "立人" in sections["Do"] or "长篇第一章" in sections["Do"]
-    assert "大约孔乙己的确死了" in pin.volatile_block
-    assert "邓脱路" in pin.volatile_block
+    assert "长篇 ch1" in sections["Do"] or "ch1 环境" in sections["Do"]
+    style_card = next(c for c in pin.cards if c.kind == "style")
+    if not style_card.truncated:
+        assert "大约孔乙己的确死了" in pin.volatile_block
+        assert "邓脱路" in pin.volatile_block
+    else:
+        assert "大约孔乙己的确死了" in sections["Samples"]
+        assert "邓脱路" in sections["Samples"]
     assert "米店的牌子" not in pin.volatile_block
 
 

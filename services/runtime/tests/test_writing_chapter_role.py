@@ -8,14 +8,21 @@ from app.writing.chapter_role import (
     infer_chapter_kind,
     infer_chapter_position,
     resolve_chapter_role,
-    save_opening_chapter_kind,
 )
 
 
 def test_infer_opening_from_ch1() -> None:
-    assert infer_chapter_position(section_id="ch1", message="") == "opening"
     assert (
-        infer_chapter_position(section_id="", message="写一篇故事") == "opening"
+        infer_chapter_position(section_id="ch1", message="", book_scope="long")
+        == "opening"
+    )
+    assert (
+        infer_chapter_position(section_id="ch1", message="", book_scope="single")
+        == "rising"
+    )
+    assert (
+        infer_chapter_position(section_id="", message="写一篇故事", book_scope="single")
+        == "rising"
     )
 
 
@@ -23,13 +30,14 @@ def test_infer_rising_mid_book() -> None:
     assert infer_chapter_position(section_id="ch5", message="续写") == "rising"
 
 
-def test_opening_defaults_to_live_character() -> None:
+def test_opening_defaults_to_world_rule() -> None:
     kind = infer_chapter_kind(
         position="opening",
         work_mode="web_serial",
         message="写修仙长篇第一章",
+        book_scope="long",
     )
-    assert kind == "live_character"
+    assert kind == "world_rule"
 
 
 def test_opening_hook_from_keywords() -> None:
@@ -52,20 +60,29 @@ def test_resolve_role_opening(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
         workspace_root=tmp_path,
     )
     assert role["chapter_position"] == "opening"
-    assert role["chapter_kind"] == "live_character"
-    assert "卷纲浓缩" in role["obligation"]
-    assert role["preferred_fragment"] == "dialogue_dyad"
+    assert role["book_scope"] == "long"
+    assert role["chapter_kind"] == "world_rule"
+    assert "环境" in role["obligation"] or "规矩" in role["obligation"]
+    assert role["preferred_fragment"] == "worldview_texture"
 
 
-def test_save_opening_kind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from app.settings import settings
+def test_infer_chapter_kind_from_outline_duty() -> None:
+    from app.writing.chapter_role import infer_chapter_kind_from_duty
 
-    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
-    save_opening_chapter_kind("conflict_hook", workspace_root=tmp_path)
-    role = resolve_chapter_role(
-        section_id="ch1",
-        message="写修仙",
-        work_mode="web_serial",
-        workspace_root=tmp_path,
+    assert infer_chapter_kind_from_duty("主项：环境") == "world_rule"
+    assert infer_chapter_kind_from_duty("主项：人物") == "live_character"
+    assert infer_chapter_kind_from_duty("主项：情节") == "plot_step"
+
+
+def test_ch1_not_falling_when_outline_has_falling_spine() -> None:
+    duty = "余波卷｜收束·环境/人物｜主项：环境\nch1 环境锚定"
+    assert (
+        infer_chapter_position(
+            section_id="ch1",
+            message="写一章长篇玄幻第一章",
+            duty=duty,
+            book_scope="long",
+        )
+        == "opening"
     )
-    assert role["chapter_kind"] == "conflict_hook"
+

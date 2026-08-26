@@ -235,7 +235,7 @@ def infer_chapter_element(duty: str) -> str | None:
 def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str:
     """无 outline 时的开篇默认职务。"""
     mode = normalize_work_mode(work_mode)
-    kind = (chapter_kind or "live_character").strip().lower()
+    kind = (chapter_kind or "world_rule").strip().lower()
     if kind == "conflict_hook":
         return (
             "开篇·冲突强钩：人物带着第一阶麻烦进场；"
@@ -243,10 +243,12 @@ def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str
         )
     if mode == "web_serial":
         return (
-            "开篇·立人：先让读者认识这个人怎么过/怎么处；"
-            "可留一丝信息差，禁止气氛+悬念+设定+主线一次灌满"
+            "开篇·环境锚定：先写何时何地、社会背景、一条可见规矩；"
+            "ch2 再推世界质地或悬念（不必写规则手册）；"
+            "人物与第一阶麻烦留给 ch3。"
+            "禁止卷纲浓缩"
         )
-    return "开篇·立人：环境托人物，先写可站之处；机构专名勿当第一词"
+    return "开篇·环境锚定：社会背景与自然场景先可站；机构专名勿当第一词"
 
 
 def fragment_obligations(work_mode: str) -> dict[str, str]:
@@ -255,11 +257,15 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
     if mode == "web_serial":
         return {
             "plot_progress": "情节往前推一步：新信息、新对手或新代价；禁止空转日常",
-            "worldview_texture": "世界观规则在场上可感可用，不要百科演讲",
+            "worldview_texture": "世界质地在场上可感；悬念/规矩随事显露，不要百科演讲",
             "climax_beat": "一件主线麻烦顶满；勿在铺垫章假高潮，亦勿提前兑卷末顶点",
             "battle_action": "动作来回有力，服务情节台阶，不是电报体砍杀",
             "dialogue_dyad": "对白露出人物选择与关系；禁止对拍流水账",
-            "mixed": "人物+情节+环境择主一项推进；允许强钩，勿提前兑本卷顶点",
+            "mixed": (
+                "人物+情节+环境择主一项推进；允许强钩，勿提前兑本卷顶点；"
+                "允许适度类型化句势（略直白的场面交代、节奏略紧），"
+                "不必为文学自然反复 patch；碎对白/对拍/采访阶梯仍禁"
+            ),
         }
     return {
         "plot_progress": "把一件事在场面里往前推，禁止搬范文故事核",

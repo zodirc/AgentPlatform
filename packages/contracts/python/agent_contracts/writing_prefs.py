@@ -238,6 +238,8 @@ PLATFORM_SIGNAL_PENALTIES: dict[str, float] = {
 
 PLATFORM_SIGNAL_PENALTIES_WEB: dict[str, float] = {
     **PLATFORM_SIGNAL_PENALTIES,
+    "staccato_uniform": -0.06,
+    "hinge_dense": -0.06,
     "opening_institution": 0.0,
     "lore_dump": -0.12,
     "serial_hook_flat": -0.08,
