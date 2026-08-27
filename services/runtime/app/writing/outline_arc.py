@@ -30,14 +30,6 @@ _LONG_FORM = re.compile(r"长篇|网文|连载|修仙|玄幻|仙侠|修真")
 _OPENING_TRILOGY_HEAD = re.compile(r"开篇三章|前三章|世界契约|开局三章")
 _CH_NUM = re.compile(r"^ch([0-9]+)\b", re.I)
 _CHN_NUM = re.compile(r"^第([一二三四五六七八九十]+)章\b")
-_TRILOGY_CH1 = re.compile(r"环境|社会|地点|规矩|生计|时代|背景")
-_TRILOGY_CH2 = re.compile(
-    r"规则|设定|体系|核心|世界|力量|代价|"
-    r"异象|悬念|钩子|信息差|案件|怪谈|组织|势力|台阶|局面|质地|异变|线索|"
-    r"复苏|秘密|机构|打更|探案|机缘|门槛|势力|冲突|卷入|"
-    r"灵灯|边界|是什么|军符|禁制|契印|海禁|镇物|门规|诡物"
-)
-_TRILOGY_CH3 = re.compile(r"人物|关系|麻烦|处境|选择|第一阶|进场|立")
 
 _STYLE_CONTRACT_HEAD = re.compile(r"^#{1,3}\s*风格契约", re.M)
 _STYLE_ROUTES = re.compile(
@@ -51,19 +43,22 @@ STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后�
 
 **路数**：（凡人流 / 逆命悲情 / 都市规则怪谈 / 维多利亚克系解密 / 探案仙侠 / 科幻修真）
 
-**世界怎么运转**：（本书的资源/规则/体制如何驱动故事，2–5 句）
+**世界怎么运转**：（一两句）
 
-**文字与节奏**：（读者跟什么、笔法质地，2–5 句）
+**文字与节奏**：（一两句）
 
-**开篇质地**：（这类书常怎么落地，2–4 句）
+**开篇质地**：（一两句）
 
-**边界**：（别落什么套；若混写，和哪条路别搅在一起）
+**边界**：（别落什么套）
 
-## 主题倾向
-（一句收束：本书写什么、读者追什么）
+选定哪路就是另一本书。人名和这件事另起；改路数也另起。
+
+**这本在写谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
+
+**这本在写什么**：（这件事。一两句，直说。）
 
 ## 主线一句话
-（谁要什么、谁挡着、顶点落在哪）
+（往哪走、顶点落哪。）
 """
 
 OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后写满）
@@ -78,24 +73,21 @@ OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后�
 
 **边界**：
 
-## 开篇三章·世界契约（长篇必填）
+选定哪路就是另一本书。人名和这件事另起。
 
-分三章让读者**站进世界、跟上悬念**，不要全塞进 ch1 正文。各章另写 200–400 字章纲。
+**这本在写谁**：
 
-| 章 | 三要素主项 | 必须交代 |
-|----|------------|----------|
-| ch1 | 环境 | 何时何地、社会背景、一条可见规矩（谁管事、什么稀缺） |
-| ch2 | 环境/情节 | **世界再推一步**：异象、组织、案件、势力、或一块新信息差；**不必**写成「X 能做什么/不能做什么」；无刚性体系的书可只加深处境与悬念 |
-| ch3 | 人物/情节 | 主角处境与关系、第一阶麻烦进场（只开端，不解释终极） |
+**这本在写什么**：
 
-## 主题倾向
-（一句收束：本书写什么、读者追什么）
+## 开篇三章·世界契约（纲上备忘，不是正文交卷清单）
+
+分几章让读者站进世界即可。每章两三句这场干什么，不要写成小正文，也不要先写完一卷。
 
 ## 主线一句话
-（谁要什么、谁挡着、顶点落在哪）
+（往哪走、顶点落哪。）
 
-## 章节位置与三要素主项
-（ch4 起按卷内位置标注；每章 200–400 字）
+## 章节备忘
+（ch4 起点明这场推进什么即可）
 """
 
 
@@ -172,7 +164,7 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
             "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
             "summary_suffix": (
                 "长篇玄幻发散：先 update_outline 写满「风格契约」"
-                "（从 volatile 题材发散选路数并融合进 outline）；"
+                "（选路数；另起这本的人与事）；"
                 "风格写入后不再注入题材发散块，再补开篇三章。"
             ),
         }
@@ -181,7 +173,8 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
         "summary_suffix": (
             "outline 尚无「风格契约」或未满 "
             f"{_MIN_STYLE_CONTRACT_CHARS} 字："
-            "把选定的题材风格（世界运转/文字节奏/开篇质地）写进该段后再补章纲。"
+            "把选定的路数写成另一本书（世界运转/文字节奏/开篇质地，"
+            "以及这本在写谁、写什么）后再补章纲。"
         ),
     }
 
@@ -269,9 +262,9 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         return {
             "outline_opening_trilogy_missing": True,
             "summary_suffix": (
-                "长篇开局：outline 须含「开篇三章·世界契约」"
-                "（ch1 环境锚点 · ch2 世界再推一步 · ch3 人物与第一阶麻烦）。"
-                "可先 replace 模板骨架，再 mode=append 加厚各章。"
+                "长篇若先写纲：可用「开篇三章·世界契约」想清楚前几章"
+                "（地方或关系可先站；世界再推；人物与麻烦可交错）。"
+                "这是纲，不是正文交卷清单。可先 replace 模板骨架，再补前几章这场干什么。"
             ),
         }
     chapters = _chapter_spans(text)
@@ -279,7 +272,7 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
     # 六章以上的 mature outline 若未显式写「开篇三章」段，不再重复拦 trilogy（已并入各章纲）。
     if n >= _MIN_CHAPTERS and not _OPENING_TRILOGY_HEAD.search(text):
         return {}
-    _TRILOGY_MIN_CHARS = 200
+    _TRILOGY_MIN_CHARS = 40
     notes: list[str] = []
     jobs: dict[str, str] = {}
     for title, body in _chapter_spans(text):
@@ -290,23 +283,17 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         len(jobs.get(sid, "").strip()) >= _TRILOGY_MIN_CHARS for sid in ("ch1", "ch2", "ch3")
     )
     if not _OPENING_TRILOGY_HEAD.search(text) and not trilogy_jobs_ok:
-        notes.append("缺「开篇三章·世界契约」段（ch1 环境 / ch2 世界再推 / ch3 人物麻烦）。")
-    for sid, label, pat in (
-        ("ch1", "ch1 环境锚点", _TRILOGY_CH1),
-        ("ch2", "ch2 世界再推/悬念台阶", _TRILOGY_CH2),
-        ("ch3", "ch3 人物与第一阶麻烦", _TRILOGY_CH3),
-    ):
+        notes.append("缺「开篇三章·世界契约」段（纲上备忘，不是正文交卷清单）。")
+    for sid in ("ch1", "ch2", "ch3"):
         blob = jobs.get(sid, "")
         nvis = len(blob.strip())
         if nvis < 40:
-            notes.append(f"缺 {label} 章纲（≥{_TRILOGY_MIN_CHARS} 字为宜）。")
-        elif nvis < _TRILOGY_MIN_CHARS and not pat.search(blob):
-            notes.append(f"{label} 章纲未点明职责（见模板表）。")
+            notes.append(f"缺 {sid} 章纲（几句这场干什么即可）。")
     if not notes:
         return {}
     return {
         "outline_opening_trilogy_incomplete": True,
-        "summary_suffix": "开篇三章契约：" + "".join(notes) + "同轮补进 outline 后再 draft。",
+        "summary_suffix": "开篇三章备忘：" + "".join(notes) + "同轮补进 outline 后再 draft。",
     }
 
 
@@ -381,7 +368,7 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
     opening_notes: list[str] = []
     if institution_before_place(extract_opening_outline_blob(md)):
         opening_notes.append(
-            "第一章入口写成了机构专名（宗/派）。先写可站的地方（镇、路、田、谁管这块地），"
+            "第一章入口写成了机构专名（宗/派）。先写可站的场面，"
             "机构名让人物后口带出；身世仍不要写成提要。"
         )
 
@@ -390,6 +377,7 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
         if trilogy.get("summary_suffix"):
             notes.append(
                 str(trilogy["summary_suffix"])
+                .replace("开篇三章备忘：", "")
                 .replace("开篇三章契约：", "")
                 .replace("长篇开局：", "")
             )
@@ -417,7 +405,9 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
 
     if not has_spine:
         out["outline_no_spine"] = True
-        notes.append("未点明主线/副线（谁要什么、谁挡着）。")
+        notes.append(
+            "未点明主线（故事往哪走即可，跟这本走）。"
+        )
     if not peak_chapters:
         out["outline_no_peak"] = True
         notes.append("未标本卷压力到顶的一处（高潮/摊牌/撑不住均可）。")
@@ -434,7 +424,11 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
 
     trilogy = opening_trilogy_fields(md, user_text)
     if trilogy.get("summary_suffix"):
-        notes.append(str(trilogy["summary_suffix"]).replace("开篇三章契约：", ""))
+        notes.append(
+            str(trilogy["summary_suffix"])
+            .replace("开篇三章备忘：", "")
+            .replace("开篇三章契约：", "")
+        )
 
     if not notes:
         return {}

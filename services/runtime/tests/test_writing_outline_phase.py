@@ -89,6 +89,9 @@ def test_diverge_styles_block_substantial() -> None:
     assert "题材发散" in block
     assert "凡人流" in block
     assert "都市规则怪谈" in block
+    assert "六路是六本" in block or "六本不同的书" in block
+    assert "另起人名" in block
+    assert "看见代价" not in block
     assert len(block) > 800
 
 

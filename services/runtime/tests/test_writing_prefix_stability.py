@@ -198,7 +198,7 @@ def test_xuanhuan_diverge_styles_volatile_only(tmp_path: Path) -> None:
         "**边界**：忌天才顿悟、境界大全。\n"
     )
     (tmp_path / "outline.md").write_text(
-        style_outline + "主题倾向：凡人流边关。\n主线：谁要什么，谁挡着。\n" + "x" * 120,
+        style_outline + "主题倾向：凡人流边关，缺粮换活路。\n主线：沈禾要活着出关。\n" + "x" * 120,
         encoding="utf-8",
     )
     write_style_lock((tmp_path / "outline.md").read_text(encoding="utf-8"), workspace_root=tmp_path)

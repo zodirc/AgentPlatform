@@ -238,17 +238,15 @@ def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str
     kind = (chapter_kind or "world_rule").strip().lower()
     if kind == "conflict_hook":
         return (
-            "开篇·冲突强钩：人物带着第一阶麻烦进场；"
+            "开篇若先顶麻烦：人物带着第一阶麻烦进场；"
             "仍要让人认得他；勿卷纲浓缩、勿兑卷末高潮"
         )
     if mode == "web_serial":
         return (
-            "开篇·环境锚定：先写何时何地、社会背景、一条可见规矩；"
-            "ch2 再推世界质地或悬念（不必写规则手册）；"
-            "人物与第一阶麻烦留给 ch3。"
-            "禁止卷纲浓缩"
+            "开篇倾向：地方或关系可先站，一条可见规矩即可；"
+            "人物与麻烦可以同场。禁止卷纲浓缩"
         )
-    return "开篇·环境锚定：社会背景与自然场景先可站；机构专名勿当第一词"
+    return "开篇倾向：社会背景与自然场景可先站；机构专名勿当第一词"
 
 
 def fragment_obligations(work_mode: str) -> dict[str, str]:
@@ -256,15 +254,18 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
     mode = normalize_work_mode(work_mode)
     if mode == "web_serial":
         return {
-            "plot_progress": "情节往前推一步：新信息、新对手或新代价；禁止空转日常",
+            "plot_progress": "情节往前：这场要的那一步可感（信息、对手、选择均可）；禁止空转日常",
             "worldview_texture": "世界质地在场上可感；悬念/规矩随事显露，不要百科演讲",
-            "climax_beat": "一件主线麻烦顶满；勿在铺垫章假高潮，亦勿提前兑卷末顶点",
+            "climax_beat": "一件主线麻烦顶满；勿提前兑卷末顶点",
             "battle_action": "动作来回有力，服务情节台阶，不是电报体砍杀",
-            "dialogue_dyad": "对白露出人物选择与关系；禁止对拍流水账",
+            "dialogue_dyad": (
+                "对白露出人物选择与关系；允许直白；"
+                "多轮空问收成一两句或动手，不要散文化改成旁白"
+            ),
             "mixed": (
-                "人物+情节+环境择主一项推进；允许强钩，勿提前兑本卷顶点；"
-                "允许适度类型化句势（略直白的场面交代、节奏略紧），"
-                "不必为文学自然反复 patch；碎对白/对拍/采访阶梯仍禁"
+                "人物+情节+环境谁响一点随这场戏；允许强钩，勿提前兑本卷顶点；"
+                "允许略直白的场面交代、节奏略紧；"
+                "不要为「写自然」把「」拆成旁白；多轮空问收成一两句或动手；碎对白/对拍/采访阶梯仍禁"
             ),
         }
     return {
@@ -273,8 +274,8 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
         "climax_beat": "一件主线麻烦顶满再落下；铺垫章不要假高潮",
         "battle_action": "来回有力，不是电报体砍杀",
         "dialogue_dyad": (
-            "对白长短不齐，问完可以答不上来；"
-            "要有文学句味，禁止接词干加也/还、对拍三联"
+            "对白长短不齐，问完可以答不上来；多轮空问收成一两句；"
+            "孤立短打不要扩；禁止接词干加也/还、对拍三联"
         ),
         "mixed": "人物为中心：环境托举或情节加压，句味优先；禁止通篇机械三拍",
     }

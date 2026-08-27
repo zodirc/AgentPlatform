@@ -107,6 +107,25 @@ def test_opening_trilogy_fields_long_form() -> None:
     )
     assert opening_trilogy_fields(suspense, "写长篇") == {}
 
+    no_duty_labels = (
+        "## 开篇三章·世界契约\n\n"
+        "### ch1\n霜降那天渡口还开着，灯油按人收，过河的把铜钱拍在板上。\n"
+        + "细节。" * 30
+        + "\n### ch2\n对讲机里多出一段无人认领的报站，第二起失踪还没人认。\n"
+        + "细节。" * 30
+        + "\n### ch3\n杨间被叫去顶班，末班车上只剩他和那个报站声。\n"
+        + "细节。" * 30
+    )
+    assert opening_trilogy_fields(no_duty_labels, "写长篇") == {}
+
+    short_notes = (
+        "## 开篇三章·世界契约\n\n"
+        "### ch1\n盐筛场收工，陆沉把工牌揣进怀里，今晚还要去领药。\n"
+        "### ch2\n外门报到，名额是借来的，三年工契压在验砂桌上。\n"
+        "### ch3\n废器房第一炉，账对不上，管事要人顶损耗。\n"
+    )
+    assert opening_trilogy_fields(short_notes, "写长篇") == {}
+
 
 def test_extract_spine_and_job() -> None:
     md = (
@@ -118,6 +137,46 @@ def test_extract_spine_and_job() -> None:
     job = extract_outline_job(md, "ch3")
     assert "核秤" in job
     assert extract_outline_job(md, "ch2") == ""
+
+
+def test_outline_templates_do_not_prime_same_book_under_new_coat() -> None:
+    from app.writing.outline_arc import (
+        OPENING_TRILOGY_OUTLINE_TEMPLATE,
+        STYLE_CONTRACT_OUTLINE_TEMPLATE,
+    )
+    from app.controller.input_compiler import OUTLINE_EXPAND
+
+    for blob in (
+        STYLE_CONTRACT_OUTLINE_TEMPLATE,
+        OPENING_TRILOGY_OUTLINE_TEMPLATE,
+    ):
+        assert "（谁要什么、谁挡着、顶点落在哪）" not in blob
+        assert "读者追什么" not in blob
+        assert "看见代价" not in blob
+        assert "由谁承担" not in blob
+        assert "另一本书" in blob
+        assert "这本在写谁" in blob
+        assert "这本在写什么" in blob
+        assert "直说" in blob or "两三句" in blob
+        assert "200–400" not in blob
+        assert "不是另起的寓意" not in blob
+        assert "路数不是换皮" not in blob
+        assert "主题倾向" not in blob
+        assert "沈砚" not in blob
+        assert "沈禾" not in blob
+    assert "谁要什么、谁挡着" not in OUTLINE_EXPAND
+    assert "说法跟风格走" in OUTLINE_EXPAND
+
+
+def test_outline_arc_ok_when_spine_follows_style_not_want_block() -> None:
+    day = "地方、活计、规矩和关系变化写开。" * 12
+    md = (
+        "主线：井下唤的是谁，第一案要验得住。\n"
+        "高潮落在第六章对质。\n"
+        + "".join(f"# 第{n}章\n{day}\n" for n in ("一", "二", "三", "四", "五"))
+        + f"# 第六章\n{day}本卷顶点：当堂对质，物证对得上。\n"
+    )
+    assert outline_arc_fields(md, "写长篇") == {}
 
 
 @pytest.mark.asyncio

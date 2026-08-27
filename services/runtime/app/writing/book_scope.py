@@ -114,33 +114,36 @@ def scope_spec_line(scope: str, *, position: str = "", section_num: int | None =
     """Writing spec 尺度行。"""
     sc = normalize_book_scope(scope)
     pos = (position or "").strip().lower()
+    if pos == "climax":
+        prefix = "长篇·" if sc == "long" else ""
+        return (
+            f"{prefix}这场偏高潮：一件麻烦顶住即可；"
+            "勿重播设定，句子可紧可短"
+        )
     if sc == "short":
         return (
-            "短篇：整篇微型弧（开端→发展→高潮→结局）；"
-            "三要素压缩交织，环境窄而深，一篇收束；不用长篇开篇三章契约"
+            "短篇：一篇收束的微型弧；人、事、地交织，环境窄而深；"
+            "不必套长篇开篇工序"
         )
     if sc == "single":
         return (
-            "单篇：一篇完整小故事；三要素同屏推进，环境先可站，人物与情节同步；"
-            "不必分章交代设定"
-        )
-    if pos == "climax":
-        return (
-            "长篇·高潮：情节顶满一件主线麻烦；人物极限处做选择；"
-            "环境收紧同场，勿重播世界观"
+            "单篇：一篇完整小故事；人、事、地同场即可；"
+            "不必分章交设定，也不必按环境→人物→情节交卷"
         )
     if pos == "falling":
-        return "长篇·收束：落下/余波/代价落地；不新开大线，勿假高潮"
+        return "长篇·收束：余波与局面落地；不新开大线"
     if pos == "turn":
-        return "长篇·翻转：中段变向；仍只推一个主项，扣 spine"
+        return "长篇·翻转：中段可以变向；扣已有线索写这场"
     if section_num is not None and section_num <= 3:
-        return "长篇·开篇窗口：按 outline 前三章契约（ch1 环境 · ch2 世界再推 · ch3 人物/麻烦）"
+        return (
+            "长篇·开篇：地方或关系可先站；"
+            "不必按环境→世界→人物交卷"
+        )
     if section_num is not None and section_num >= 4:
         return (
-            "长篇·中段：breadth=spine+outline map；detail=prev tail+本章 job；"
-            "环境只写增量，勿重播开篇已交代的世界质地"
+            "长篇·中段：扣已有线索写这场；新细节即可，勿重播开篇"
         )
-    return "长篇：先 outline（含 spine），再按章 job 写；每章一个三要素主项"
+    return "长篇：有纲跟纲写这场；三要素始终在，不必每章申报主项"
 
 
 def default_duty_for_scope(
@@ -160,18 +163,18 @@ def default_duty_for_scope(
 
     if sc == "short":
         return (
-            "短篇·微型弧：环境窄深先可站，人物与麻烦同步显现，"
-            "一篇内推到小高潮并落下；禁止卷纲浓缩与设定百科"
+            "短篇倾向：人、事、地交织，环境窄而深，一篇内可有起落；"
+            "禁止卷纲浓缩与设定百科"
         )
     if sc == "single":
         return (
-            "单篇·完整弧：三要素交织，环境托举，人物从选择上显露，"
-            "情节只推一两步但有落点；句味/类型化按 work_mode"
+            "单篇倾向：三要素同场即可；句味/类型化按 work_mode；"
+            "不必按环境→人物→情节交卷"
         )
     if pos == "climax":
         return "高潮章：一件主线麻烦顶满；副线只碰撞主线；人物选择可见"
     if pos == "falling":
-        return "收束章：余波与代价；关系/局面落下，不新开卷级冲突"
+        return "收束章：余波与局面落下，不新开卷级冲突"
     if pos in {"opening", "rising", "turn"} and sc == "long":
         if pos == "opening" or (kind and kind != "plot_step"):
             return default_opening_duty(mode, chapter_kind=chapter_kind or "world_rule")

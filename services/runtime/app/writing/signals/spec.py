@@ -10,10 +10,9 @@ from app.writing.chapter_role import resolve_chapter_role
 from app.writing.focus import infer_focus_section_id
 from app.writing.manuscript import list_section_ids, load_manuscript_doc
 from app.writing.occupy import manuscript_is_occupied, wants_new_piece
-from app.writing.outline_arc import extract_outline_job
+from app.writing.outline_arc import extract_outline_job, outline_style_committed
 from app.writing.signals.prefs_loader import _module as _writing_prefs
 from app.writing.work_mode import (
-    fragment_obligations,
     resolve_work_mode,
     work_mode_label,
 )
@@ -85,7 +84,7 @@ def build_writing_spec_block(
     *,
     workspace_root: Path | None = None,
 ) -> str:
-    """Writing spec：尺度 → 风格 → 位置×章类型 → fragment。"""
+    """Writing spec：罗盘（尺度/风格/这场在干什么），不是交卷清单。"""
     doc, _rel = load_manuscript_doc(workspace_root)
     outline = _outline_md(workspace_root)
     work_mode, mode_source = resolve_work_mode(
@@ -100,7 +99,7 @@ def build_writing_spec_block(
         if duty:
             focus = "ch1"
     role = resolve_chapter_role(
-        section_id=focus or "ch1",
+        section_id=focus,
         message=message,
         duty=duty,
         work_mode=work_mode,
@@ -110,14 +109,13 @@ def build_writing_spec_block(
     )
     scope = str(role.get("book_scope") or "single")
     position = str(role.get("chapter_position") or "rising")
-    section_num = _section_num(focus or "ch1")
+    section_num = _section_num(focus)
 
+    # 无纲时不要把发明的章类型当成评分切片；mixed 才是冷启动。
     if duty:
         fragment = infer_fragment_from_duty(duty)
-    elif scope in {"short", "single"}:
-        fragment = "mixed"
     else:
-        fragment = str(role.get("preferred_fragment") or "mixed")
+        fragment = "mixed"
     fragment = normalize_fragment(fragment)
     label = _LABELS.get(fragment, fragment)
     mode_label = work_mode_label(work_mode)
@@ -128,17 +126,6 @@ def build_writing_spec_block(
     if duty:
         one = re.sub(r"\s+", " ", duty).strip()
         duty_line = one if len(one) <= 72 else one[:71] + "…"
-    elif fresh or not ids or position == "opening":
-        from app.writing.book_scope import default_duty_for_scope as scope_duty
-
-        duty_line = scope_duty(
-            scope,
-            work_mode=work_mode,
-            position=position,
-            chapter_kind=str(role.get("chapter_kind")),
-        )
-    frag_obl = fragment_obligations(work_mode).get(fragment, "")
-    kind_obl = str(role.get("obligation") or "")
     scope_line = scope_spec_line(scope, position=position, section_num=section_num)
     from app.writing.outline_phase import outline_phase_spec_line, resolve_outline_phase
 
@@ -150,23 +137,18 @@ def build_writing_spec_block(
         "## Writing spec",
         f"- book_scope: `{scope}`（{scope_label}）",
         f"- work_mode: `{work_mode}`（{mode_label} · {source_note}）",
-        (
-            f"- chapter: `{position}`·`{role['chapter_kind']}`"
-            f"（{role['chapter_position_label']} · {role['chapter_kind_label']}）"
-            + (f" · `{focus}`" if focus else "")
-        ),
-        f"- fragment: `{fragment}`（{label}）",
+        f"- fragment: `{fragment}`（{label} · 评分切片，不是本章必须交的工种）",
         f"- {scope_line}",
         outline_phase_spec_line(phase_info),
     ]
+    if focus:
+        lines.append(f"- focus: `{focus}`")
     if duty_line:
-        lines.append(f"- 章职: {duty_line}")
-    if kind_obl and kind_obl != duty_line:
-        lines.append(f"- {kind_obl}")
-    elif frag_obl and not kind_obl:
-        lines.append(f"- {frag_obl}")
+        lines.append(f"- 这一场: {duty_line}")
+    if not outline_style_committed(outline):
+        lines.append("- 新篇另起人与事")
     lines.append(
-        "- 有 repair_span 则 propose_patch；L0 清后 mode=append；勿整章再交"
+        "- 多轮空问同轮 propose_patch：收成一两句或动手；勿改成旁白；勿整章再交"
     )
     text = "\n".join(lines)
     return text if len(text) <= 620 else text[:619] + "…"

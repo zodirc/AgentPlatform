@@ -369,15 +369,16 @@ def _outline_job_parts(
     if n is not None and n <= 3 and scope == "long":
         parts.append(
             "### Opening trilogy\n"
-            "ch1 环境锚点 · ch2 世界再推（异象/组织/悬念，不必规则手册）· ch3 人物与第一阶麻烦。"
-            "勿把三章契约挤进一章正文。"
+            "长篇前几章可用开篇三章当纲上的备忘（不是正文交卷清单）："
+            "地方或关系可先站，世界再推，人物与麻烦可以交错进场。"
+            "勿把全书信息挤进一章正文。"
         )
     if n is not None and n >= 4:
         toc = outline_toc_snippet(workspace_root, max_chars=720)
         if toc:
             parts.append(
                 f"### Outline map (breadth)\n{toc}\n"
-                "中后段写作：本章只推一个主项，但须与 spine、地图位置、已写正文一致。"
+                "中后段写作：扣已有线索写这场，与 spine、地图位置、已写正文一致。"
             )
         neighbors = extract_outline_neighbors(text, focus)
         for sid, job in neighbors.items():
@@ -385,7 +386,7 @@ def _outline_job_parts(
         parts.append(
             "### Continuity\n"
             "广度：遵守 outline spine 与全书地图；细节：承接 Previous tail 与 Focus 已写内容。"
-            "新信息须同时服务本章主项与主线台阶，勿 contradict 开篇三章已立规矩。"
+            "新信息扣主线即可，勿 contradict 已立规矩。"
         )
     job = extract_outline_job(text, focus)
     if job:

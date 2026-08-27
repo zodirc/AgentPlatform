@@ -310,7 +310,6 @@ async def _resolve_owner_and_work(session_id: object | None) -> tuple[UUID | Non
 
 
 def _chapter_duty(section_id: str) -> str:
-    doc, _ = load_manuscript_doc()
     outline = ""
     try:
         from app.tools.core.paths import _resolve_path
@@ -324,13 +323,6 @@ def _chapter_duty(section_id: str) -> str:
         job = extract_outline_job(outline, section_id)
         if job:
             return job[:200]
-    if doc.strip() and section_id:
-        ids = list_section_ids(doc)
-        focus = section_id if section_id in ids else (ids[-1] if ids else "")
-        if focus:
-            chunk = extract_section(doc, focus)
-            if chunk.strip():
-                return f"章节 {focus}"
     return ""
 
 
@@ -383,17 +375,12 @@ async def build_writing_signals(
         duty=duty,
         work_mode=work_mode,
     )
-    duty_conflict = False
-    soft_duty = duty or str(role.get("chapter_kind_label") or "")
-    if scored["fragment"]["declared"] == "climax_beat":
-        if role.get("chapter_kind") in ("live_character", "world_rule") and role.get(
-            "chapter_position"
-        ) != "climax":
-            duty_conflict = True
-        elif soft_duty and any(
-            k in soft_duty for k in ("铺垫", "加压", "过日子", "立人", "环境")
-        ):
-            duty_conflict = True
+    # 假高潮只跟纲上的这场，不跟发明的章类型。
+    duty_conflict = bool(
+        scored["fragment"]["declared"] == "climax_beat"
+        and duty
+        and any(k in duty for k in ("铺垫", "加压", "过日子", "立人"))
+    )
 
     block: dict[str, Any] = {
         "prefs_scope": "platform",
@@ -401,9 +388,9 @@ async def build_writing_signals(
         "work_mode_source": mode_source,
         "work_mode_label": work_mode_label(work_mode),
         "chapter_position": role.get("chapter_position"),
-        "chapter_kind": role.get("chapter_kind"),
+        "chapter_kind": role.get("chapter_kind") if duty else None,
         "chapter_position_label": role.get("chapter_position_label"),
-        "chapter_kind_label": role.get("chapter_kind_label"),
+        "chapter_kind_label": role.get("chapter_kind_label") if duty else None,
         "style_gains": prefs.get("style_gains"),
         "preset": prefs.get("preset_label", "balanced"),
         "schema_version": prefs.get("schema_version", 1),
@@ -507,9 +494,9 @@ async def writing_rubric(
         "work_mode_source": mode_source,
         "work_mode_label": mode_label,
         "chapter_position": role.get("chapter_position"),
-        "chapter_kind": role.get("chapter_kind"),
+        "chapter_kind": role.get("chapter_kind") if duty else None,
         "chapter_position_label": role.get("chapter_position_label"),
-        "chapter_kind_label": role.get("chapter_kind_label"),
+        "chapter_kind_label": role.get("chapter_kind_label") if duty else None,
         "style_gains": prefs.get("style_gains"),
         "chapter_duty": duty,
         "prefs_scope": "platform",
@@ -536,12 +523,12 @@ async def writing_rubric(
             "权重在写作工具内按 work_mode 切换，不在设置页",
             (
                 f"work_mode={work_mode}（{mode_label}）· "
-                f"chapter={role.get('chapter_position')}·{role.get('chapter_kind')} · "
-                f"fragment={declared}"
+                f"fragment={declared}（评分切片，不是章职）"
             ),
-            kind_obl or obligations.get(declared, obligations["mixed"]),
+            (kind_obl if duty else "")
+            or obligations.get(declared, obligations["mixed"]),
             "拟合该类范本原型的节奏与质地，禁止搬用其故事核",
-            "有 repair_span 时同轮 propose_patch；章级 L0 清后 mode=append 约 2000 字",
+            "有 repair_span 时同轮 propose_patch；多轮空问收成一两句或动手，勿改成旁白",
         ],
     }
 

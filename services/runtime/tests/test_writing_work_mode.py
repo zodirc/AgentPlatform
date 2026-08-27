@@ -38,10 +38,11 @@ def test_infer_fragment_from_duty_three_elements() -> None:
 def test_default_opening_duty_differs_by_mode() -> None:
     lit = default_opening_duty("literary")
     web = default_opening_duty("web_serial")
-    assert "环境" in lit or "机构" in lit
-    assert "环境" in web or "ch2" in web
+    assert "机构" in lit or "可先站" in lit
+    assert "规矩" in web or "可先站" in web
+    assert "ch2" not in web and "ch3" not in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
-    assert "强钩" in hook
+    assert "强钩" in hook or "麻烦" in hook
 
 
 def test_spec_block_opening_live_character(
@@ -53,10 +54,12 @@ def test_spec_block_opening_live_character(
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "work_mode: `web_serial`" in spec
     assert "book_scope: `long`" in spec
-    assert "opening" in spec
-    assert "world_rule" in spec or "live_character" in spec
-    assert "卷纲浓缩" in spec or "环境" in spec or "ch2" in spec
+    assert "开篇" in spec
+    assert "评分切片" in spec
+    assert "world_rule" not in spec
+    assert "live_character" not in spec
     assert "过日子—加压—落下" not in spec
+    assert "多轮空问" in spec or "一两句" in spec
 
 
 def test_spec_block_single_story(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 LENGTH_SHORT_RATIO = 0.85
-OUTLINE_MIN_VISIBLE = 200
+OUTLINE_MIN_VISIBLE = 40
 DEFAULT_CHAPTER_MIN = 5000
 DEFAULT_CHAPTER_MAX = 6000
 
@@ -219,7 +219,7 @@ def outline_thin_fields(scored_md: str, user_text: str) -> dict[str, object]:
         "outline_thin": True,
         "thin_chapters": thin,
         "summary_suffix": (
-            f"以下章节实体文字不足 {OUTLINE_MIN_VISIBLE} 字：{listed}。"
-            "同轮加厚后再结束，不要报完工。"
+            f"以下章节标题下几乎没有这场要干什么：{listed}。"
+            "点明即可，不必写成小正文。"
         ),
     }

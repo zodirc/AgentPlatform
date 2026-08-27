@@ -166,7 +166,10 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "绣花鞋" not in sections["Samples"]
     assert "踹门" not in sections["Samples"]
     assert "孔乙己" in sections["Samples"]
-    assert "格局" in sections["Samples"]
+    assert "格局" not in sections["Samples"]
+    assert "柜台" not in sections["Samples"]
+    assert "温酒" not in sections["Samples"]
+    assert "鲁镇" not in sections["Samples"]
     assert "大约孔乙己的确死了" in sections["Samples"]
     assert "春风沉醉的晚上" in sections["Samples"]
     assert "邓脱路" in sections["Samples"]
@@ -175,7 +178,9 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "同一段落反复 patch" in sections["Don't"] or "第一章讲完全书设定" in sections["Don't"]
     assert "三字" in sections["Don't"] or "一问一答" in sections["Don't"]
     assert "经典文学" in sections["Voice"] or "现代白话" in sections["Voice"]
-    assert "长篇 ch1" in sections["Do"] or "ch1 环境" in sections["Do"]
+    assert "随这场戏" in sections["Do"] or "三要素" in sections["Do"]
+    assert "长篇 ch1" not in sections["Do"]
+    assert "ch1 环境" not in sections["Do"]
     style_card = next(c for c in pin.cards if c.kind == "style")
     if not style_card.truncated:
         assert "大约孔乙己的确死了" in pin.volatile_block

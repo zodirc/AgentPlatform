@@ -20,7 +20,7 @@ _DIVERGE_STYLES_REL = (
 )
 
 _MIN_CONTRACT_CHARS = 80
-_SPINE_HINT = re.compile(r"主线|副线|谁要|挡着|主题倾向|读者追")
+_SPINE_HINT = re.compile(r"主线|副线|主题倾向|风格契约")
 _FANTASY_HINT = re.compile(r"玄幻|仙侠|修仙|修真|奇幻|东方奇幻")
 _USER_DIRECTION = re.compile(
     r"凡人流|资源|逆命|日常侵染|秘知|打更|探案|克系|灵异|科幻|"
