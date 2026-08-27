@@ -126,6 +126,16 @@ def test_opening_trilogy_fields_long_form() -> None:
     )
     assert opening_trilogy_fields(short_notes, "写长篇") == {}
 
+    stubs = (
+        "## 开篇三章·世界契约\n\n"
+        "### ch1\n待写。\n"
+        "### ch2\n待写。\n"
+        "### ch3\n待写。\n"
+    )
+    assert opening_trilogy_fields(stubs, "写长篇").get(
+        "outline_opening_trilogy_incomplete"
+    ) is True
+
 
 def test_extract_spine_and_job() -> None:
     md = (

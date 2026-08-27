@@ -272,7 +272,8 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
     # 六章以上的 mature outline 若未显式写「开篇三章」段，不再重复拦 trilogy（已并入各章纲）。
     if n >= _MIN_CHAPTERS and not _OPENING_TRILOGY_HEAD.search(text):
         return {}
-    _TRILOGY_MIN_CHARS = 40
+    # 一两句场面即可；40 会把「每章几句这场干什么」的短章纲误判成缺纲。
+    _TRILOGY_MIN_CHARS = 16
     notes: list[str] = []
     jobs: dict[str, str] = {}
     for title, body in _chapter_spans(text):
@@ -287,7 +288,7 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
     for sid in ("ch1", "ch2", "ch3"):
         blob = jobs.get(sid, "")
         nvis = len(blob.strip())
-        if nvis < 40:
+        if nvis < _TRILOGY_MIN_CHARS:
             notes.append(f"缺 {sid} 章纲（几句这场干什么即可）。")
     if not notes:
         return {}
