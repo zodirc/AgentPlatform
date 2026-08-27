@@ -234,8 +234,9 @@ class Settings(BaseSettings):
     app_env: str = "development"
     log_level: str = "INFO"
     model_timeout_seconds: float = 600.0
-    # H1 harness: fast-fail first byte / connect so retries start early.
-    model_first_byte_timeout_seconds: float = 15.0
+    # First SSE/token wait per attempt. 15s burned 3 retries under queued APIs;
+    # overall stream still caps at model_timeout_seconds.
+    model_first_byte_timeout_seconds: float = 60.0
     model_connect_timeout_seconds: float = 10.0
     model_max_retries: int = 2
     model_retry_base_delay_seconds: float = 0.5
