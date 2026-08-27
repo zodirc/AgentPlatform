@@ -455,6 +455,12 @@ def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
     assert span["old_text"] in text
     assert span["key"] == "staccato_uniform"
     assert span["visible_chars"] >= 80
+    neighbor = span.get("neighbor") or {}
+    assert neighbor.get("text")
+    assert neighbor.get("source") in {"local_beat", "exemplar"}
+    assert "一两句" in (span.get("hint") or "") or "多轮空问" in (
+        span.get("hint") or ""
+    )
 
 
 def test_short_draft_allows_full_redraft_policy() -> None:
@@ -736,4 +742,92 @@ def test_overlay_space_keeps_platform_neighbors() -> None:
     slugs = {s.slug for s in after.neighbors}
     assert "local:ch1" in slugs
     assert any(s.work == "故乡" for s in after.neighbors)
+
+
+def test_repair_hint_forks_by_work_mode() -> None:
+    from app.writing.signals.repair import repair_hint
+
+    lit = repair_hint("staccato_uniform", "literary")
+    web = repair_hint("staccato_uniform", "web_serial")
+    assert "手、物、沉默" in lit or "一两句" in lit
+    assert "一两句" in lit
+    assert "旁白" in lit or "告诉他" in lit
+    assert "信息差" in web or "动作" in web
+    assert "旁白" in web or "一两句" in web
+    assert lit != web
+
+
+def test_repair_span_hint_follows_work_mode() -> None:
+    texture = (
+        "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
+        "柜里面预备着热水，可以随时温酒。做工的人傍午散了工，花四文铜钱买一碗酒。\n\n"
+    ) * 8
+    island = "\n".join(
+        ["「跑完了？」", "「跑完了。」", "「少了谁？」", "「不知道。」"] * 2
+    )
+    tail = (
+        "只有穿长衫的，才踱进店面隔壁的房子里，要酒要菜，慢慢地坐喝。"
+        "柜台上还温着酒，粉板上记着十九个钱。\n\n"
+    ) * 6
+    text = texture + island + "\n\n" + tail
+    web = score_writing_fragment(
+        text,
+        fragment_declared="worldview_texture",
+        prefs=platform_prefs_payload(work_mode="web_serial"),
+    )
+    span = web["repair_span"]
+    assert span["key"] == "staccato_uniform"
+    assert "一两句" in span["hint"] or "信息差" in span["hint"]
+    assert "旁白" in span["hint"] or "说明" in span["hint"]
+
+
+def test_repair_neighbor_prefers_local_beat(tmp_path, monkeypatch) -> None:
+    from app.settings import settings
+    from app.writing.signals.beats import write_local_beats
+    from app.writing.signals.repair import attach_repair_neighbor
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    beat = (
+        "她把香菜塞给我。秤上还沾着泥。我把筷子搁在碗沿上，说这里有床，"
+        "走过去还要坐车。母亲没有再劝，只把灯拨亮了一点。门外有人喊收工钱，"
+        "她应了一声，没有回头。灶上的汤还开着，我把火掣小，水花落下去。"
+    )
+    write_local_beats(
+        [{"fragment": "mixed", "section_id": "ch1", "text": beat}],
+        workspace_root=tmp_path,
+    )
+    span = {"old_text": "「来。」\n「坐。」", "key": "staccato_uniform"}
+    attach_repair_neighbor(span, fragment="mixed")
+    assert span["neighbor"]["source"] == "local_beat"
+    assert "香菜" in span["neighbor"]["text"]
+
+
+def test_repair_neighbor_prefers_matching_fragment(tmp_path, monkeypatch) -> None:
+    from app.settings import settings
+    from app.writing.signals.beats import write_local_beats
+    from app.writing.signals.repair import attach_repair_neighbor
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    mixed = (
+        "她把香菜塞给我。秤上还沾着泥。我把筷子搁在碗沿上，说这里有床，"
+        "走过去还要坐车。母亲没有再劝，只把灯拨亮了一点。门外有人喊收工钱。"
+    )
+    dialogue = (
+        "「你何以只住在家里，不出去找点事情做做？」"
+        "「我原是这样的想，但是找来找去总找不着事情。」"
+        "经她这一问，我只是呆呆的看她，半晌说不出话来。"
+        "她看了我这个样子，微微的叹着说：「唉！你也是同我一样的么？」"
+    )
+    write_local_beats(
+        [
+            {"fragment": "mixed", "section_id": "ch1", "text": mixed},
+            {"fragment": "dialogue_dyad", "section_id": "ch1", "text": dialogue},
+        ],
+        workspace_root=tmp_path,
+    )
+    span = {"old_text": "「来。」\n「坐。」", "key": "staccato_uniform"}
+    attach_repair_neighbor(span, fragment="dialogue_dyad")
+    assert span["neighbor"]["source"] == "local_beat"
+    assert "呆呆的看她" in span["neighbor"]["text"]
+    assert "香菜" not in span["neighbor"]["text"]
 

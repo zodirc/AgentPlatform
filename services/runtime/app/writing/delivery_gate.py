@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.writing.patch_budget import MAX_PATCHES_PER_PENALTY_KEY
+
 _COMPLETION_MARKERS = (
     "已完成",
     "写完了",
@@ -50,7 +52,8 @@ def delivery_hold_notice(blockers: list[str]) -> str:
     return (
         "【交付门】本章尚未交付，禁止向用户宣称「已完成 / 定稿 / 第一章写完了」。\n"
         f"turn manifest 仍开：\n{lines}\n"
-        "下一步：L0 岛 → propose_patch（每 penalty_key 本 Turn 至多 3 次生效 patch）；"
+        "下一步：L0 岛 → propose_patch（每 penalty_key 本 Turn 至多 "
+        f"{MAX_PATCHES_PER_PENALTY_KEY} 次生效 patch）；"
         "碎拍预算尽 → draft_section mode=rewrite_window 一次换整窗；"
         "L0 清且 length_short → mode=append 加厚。如实说明进度。"
     )

@@ -36,6 +36,17 @@ def test_build_registry_has_core_tools() -> None:
     assert registry.get("delegate") is not None
 
 
+def test_draft_section_description_follows_repair_neighbor() -> None:
+    registry = build_registry()
+    spec = registry.get("draft_section")
+    assert spec is not None
+    desc = spec.description
+    assert "repair_span.neighbor" in desc
+    assert "do not upsert the whole chapter" in desc
+    assert "mode=append" in desc
+    assert "narration" in desc
+
+
 def test_search_sources_description_includes_library_map() -> None:
     """RQ1d: tool description carries corpus layout + path_prefix guidance."""
     registry = build_registry()

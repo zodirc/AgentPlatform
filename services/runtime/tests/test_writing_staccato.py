@@ -130,16 +130,43 @@ def test_staccato_receipt_beats_hinge() -> None:
     text = build_verify_receipt_text(state)
     assert "机械一问一答" in text
     assert "进来拿" in text
-    assert "整场一样短" in text
+    assert "多轮空问" in text
+    assert "一两句" in text
     assert "我知道" in text
     assert "是A，不是B" in text or "不是B" in text
     assert "因为" in text
     assert "propose_patch" in text
     assert "draft_section 或" not in text
+    assert "neighbor" in text
+    assert "旁白" in text
+    assert "有人把话说满" not in text
+    assert "展开日子时把场面写完" not in text
+    assert "一次写满整窗" not in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "staccato"
     assert state.staccato_receipt_sent is True
     assert should_inject_verify_receipt(state, reserve_steps=10) is False
+
+
+def test_staccato_flags_paper_handoff_rounds() -> None:
+    """同一拍拆成收存/看清了/给我/会死，不是「太短」。"""
+    body = _pad(
+        "\n".join(
+            [
+                "「此物由巡夜司收存。」",
+                "「你看清上面写的什么了吗？」",
+                "「看清了。」",
+                "「那就把它给我。」",
+                "「你拿着它，明日就会死。」",
+            ]
+        )
+    )
+    assert staccato_fields(body).get("staccato_uniform") is True
+    from app.writing.signals.repair import repair_hint
+
+    hint = repair_hint("staccato_uniform", "web_serial")
+    assert "一两句" in hint
+    assert "旁白" in hint
 
 
 def test_staccato_cleared_by_clean_draft() -> None:

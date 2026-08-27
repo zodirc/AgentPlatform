@@ -243,7 +243,7 @@ def prose_patch_block_reason(old: str, new: str) -> str | None:
         str|None。"""
     if (old or "").count("「") >= 2 and (new or "").count("「") == 0:
         return (
-            "对白补丁不能改成纯叙述。保留说话，把短句说满，"
+            "对白补丁不能改成纯叙述。保留「」，把多轮空问收成有内容的一两句或用手接，"
             "不要改成「告诉他/他便…」的说明。"
         )
     return None

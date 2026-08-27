@@ -134,7 +134,12 @@ def test_build_repair_span_points_at_antithesis() -> None:
     assert span is not None
     assert "钟不知道" in span["old_text"]
     assert not span["old_text"].startswith("说。")
-    assert "对仗" in span["hint"] or "说明书" in span["hint"] or "告诉他" in span["hint"]
+    assert (
+        "多轮空问" in span["hint"]
+        or "一两句" in span["hint"]
+        or "对仗" in span["hint"]
+        or "旁白" in span["hint"]
+    )
 
 
 def test_prose_patch_block_reason_dialogue_to_narration() -> None:
@@ -143,6 +148,10 @@ def test_prose_patch_block_reason_dialogue_to_narration() -> None:
     old = "「进来拿。」\n「我会还。」\n「先记账。」"
     new = "守义让他先抬脚，告诉他押金先登记，绳子由镇上收。"
     assert prose_patch_block_reason(old, new)
+    assert "旁白" in (prose_patch_block_reason(old, new) or "") or "说明" in (
+        prose_patch_block_reason(old, new) or ""
+    )
+    assert "把短句说满" not in (prose_patch_block_reason(old, new) or "")
     assert prose_patch_block_reason(old, "「押金先登记，绳子镇上收。」") is None
 
 

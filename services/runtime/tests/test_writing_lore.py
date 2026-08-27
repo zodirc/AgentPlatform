@@ -66,6 +66,7 @@ def test_lore_receipt_once() -> None:
     text = build_verify_receipt_text(state)
     assert "删这段提要" in text
     assert "全书谜面" in text
+    assert "neighbor" in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "lore"
     assert state.lore_receipt_sent is True

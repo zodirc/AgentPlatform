@@ -26,6 +26,7 @@ from app.structural.issue_repro import (
 )
 from app.structural.related_tests import related_test_paths
 from app.structural.test_summary import is_testish_command
+from app.writing.patch_budget import MAX_PATCHES_PER_PENALTY_KEY
 
 # 预留步数：保证 receipt 注入后仍有步数跑测试/修稿再交卷。
 DEFAULT_VERIFY_RECEIPT_RESERVE_STEPS = 10
@@ -474,14 +475,15 @@ def _build_staccato_receipt_text() -> str:
         "或嘴里总结「小时候也这样…未必做得到」；"
         "或问答末句用「是A，不是B」收束；"
         "或尽是「我知道」「嗯」「懂」这类没有新决定的应声。"
-        "短可以短，但不能整场一样短。问完可以答不上来、答偏、或只动手。"
-        "对白里因为/可是可以有，不要为了躲连接词改成对照句。"
-        "不要另起一套去AI模板。"
-        "用 propose_patch 只换 writing_signals.repair_span.old_text（同 key 本 Turn 至多 3 次）；"
-        "预算尽则 draft_section mode=rewrite_window 一次写满整窗："
-        "有人把话说满，有人沉默或做事；删掉只在占拍的应声。"
+        "这是同一拍拆成的多轮空问，不是「太短」。"
+        "收成一两句把决定或物件说完，或只动手；孤立短打不要扩。"
+        "对白里因为/可是可以有。不要另起一套去AI模板。"
+        f"用 propose_patch 只换 writing_signals.repair_span.old_text（同 key 本 Turn 至多 {MAX_PATCHES_PER_PENALTY_KEY} 次）；"
+        "若 span 带 neighbor，跟那条拍里一句有内容的对白或一记动作，不要搬情节，"
+        "也不要把「」拆成旁白。"
+        "预算尽则 draft_section mode=rewrite_window 一次替换整窗："
+        "一两句说完，或手、物、沉默、信息差接上。"
         "不要把对白改成「告诉他…」的说明。不要整章再 draft_section。"
-        "展开日子时把场面写完，不要用三字问答代替叙述。"
     )
 
 
@@ -492,8 +494,8 @@ def _build_hinge_receipt_text() -> str:
         "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
         "改的是这一拍的拧法，不是把整场改成三字句。"
         "用 propose_patch 只换 writing_signals.repair_span.old_text："
-        "看见之后可以停在物件、价钱、规矩或沉默上——"
-        "前后句子长短仍要对不齐。不要整章再 draft_section。"
+        "看见之后可以停在物件、价钱、规矩或沉默上；若 span 带 neighbor，跟那条拍。"
+        "前后句子长短仍可以对不齐。不要改成说明书。不要整章再 draft_section。"
     )
 
 
@@ -503,7 +505,7 @@ def _build_opening_receipt_text() -> str:
         "第一章入口写成了机构专名（宗/派/仙门），读者还不知道这是哪块地。"
         "不要补身世提要，不要另起一套去AI模板。"
         "用 propose_patch 只换开篇几句（writing_signals.repair_span.old_text）："
-        "先写可站的地方（路、田、价钱、谁在管这块地），机构名让人物后口带出。"
+        "先写可站的场面，机构名让人物后口带出；若 span 带 neighbor，跟那条拍。"
         "不要整章再 draft_section。身世、失踪、全书谜面仍不要写进第一章。"
     )
 
@@ -514,7 +516,7 @@ def _build_lore_receipt_text() -> str:
         "这一段在点到人名之后，用「N年前」写成了失踪/尸体提要。"
         "不要补转折，不要把全书谜面写圆，不要另起一套去AI模板。"
         "用 propose_patch 只删这段提要（writing_signals.repair_span.old_text）："
-        "留在当下的屋子、活计、价钱或规矩上即可。"
+        "留在当下的屋子、活计或麻烦上即可；若 span 带 neighbor，跟那条拍。"
         "不要整章再 draft_section。删提要时不要改成三字问答连环。"
     )
 

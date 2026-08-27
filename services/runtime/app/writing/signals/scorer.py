@@ -183,7 +183,7 @@ def _collect_penalties(
     add(
         "staccato_uniform",
         bool(staccato_fields(text, work_mode=mode).get("staccato_uniform")),
-        "对白过碎、接词干加也/还、几点到家收场、拆句或对仗、主题金句/采访阶梯/对拍三联",
+        "空转问答/采访阶梯/收场目录/对拍连环",
     )
     if not skip_opening and mode != "web_serial":
         add(
@@ -484,6 +484,20 @@ def score_writing_fragment(
             else:
                 span = None
         if span:
+            from app.writing.signals.repair import attach_repair_neighbor
+
+            neighbor_frag = (
+                "dialogue_dyad"
+                if str(span.get("key") or "") == "staccato_uniform"
+                else fragment_declared
+            )
+            attach_repair_neighbor(
+                span,
+                fragment=neighbor_frag,
+                exemplar_fit=body.get("exemplar_fit")
+                if isinstance(body.get("exemplar_fit"), dict)
+                else None,
+            )
             body["repair_span"] = span
     beat = beat_window_payload(text, window=worst_win)
     if beat:

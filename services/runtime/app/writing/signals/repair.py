@@ -46,24 +46,43 @@ def append_block_l0_keys(work_mode: str = "literary") -> frozenset[str]:
 
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
-        "对白过碎、对拍问答、采访式追问、嘴里主题金句、接词干加也/还、或用几点/到家收场："
-        "把这一窗的短对白一次说满，保留「」和场面。"
-        "不要只改其中一句芯片。不要改成「告诉他…」的说明；"
-        "「刀钝你也哭」「现在还要看」改成场上能做的答，或答不上来、动手；"
-        "「你拆不拆？」「文庙后街。」「你住在那里。」这种对拍改成有停顿、物件、或一句说满的话；"
-        "「旧账碎了也只管旧账」「眼睛看见了…记住了就容易惹事」这类寓意收束改成手、物、或答不上来；"
-        "删掉「八点半/早点睡/到家发消息」这种收场目录。"
-        "不要从上一句的「说。」切开。不要整章重交"
+        "这一窗把同一拍拆成多轮空问。"
+        "收成一两句把决定或物件说完，或只动手；孤立短打不要扩。"
+        "不要改成「告诉他」旁白。不要整章重交"
     ),
     "glue_heavy": "叙述里的「与此同时/就在这时」过密才拆；对白里因为/可是可以留",
     "hinge_dense": "看见/听到后不要立马拧：停在物件、价钱或沉默上",
-    "opening_institution": "开篇先写可站的地方，机构名让人物后口带出",
+    "opening_institution": "开篇先写可站的场面，机构名让人物后口带出",
     "lore_dump": "删掉「N年前」身世提要，留在当下的屋子或活计上",
     "length_short": "章级过程 L0 清掉后：draft_section mode=append 再接约 2000 字，不要整章 upsert",
     "meta_knowing_high": "少写心里清楚，改成场上动作",
-    "fragment_mismatch": "按申报的 fragment 节奏写，不要串成另一类",
-    "weak_window": "这一拍离该类范本质地最远，只改这一段",
+    "fragment_mismatch": "评分切片不合这场戏的节奏，按这场写即可",
+    "weak_window": "这一拍离该场面该有的质地最远，只改这一段",
 }
+
+_HINTS_WEB_SERIAL: dict[str, str] = {
+    "staccato_uniform": (
+        "这一窗把同一拍拆成多轮空问。"
+        "收成一两句有信息差的话，或一记动作接上；孤立短打不要扩。"
+        "不要改成说明，也不要把「」拆成旁白。不要整章重交"
+    ),
+    "hinge_dense": "看见/听到后不要立马拧成说明书；悬念跟事走即可",
+    "opening_institution": "机构名让人物后口带出；开篇先有可站的场面",
+    "lore_dump": "身世跟当下的麻烦走，不要开场案情提要",
+    "meta_knowing_high": "少写心里清楚，改成场上动作或信息差",
+    "fragment_mismatch": "评分切片不合这场戏，按这场的台阶写即可",
+    "weak_window": "这一拍空转，只改这一段；不必写成文学句",
+}
+
+
+def repair_hint(key: str, work_mode: str = "literary") -> str:
+    """补丁提示：多轮空问收成一两句或动手，不下达「写顺/合并成旁白」工序。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    token = key or "weak_window"
+    mode = normalize_work_mode(work_mode)
+    table = _HINTS_WEB_SERIAL if mode == "web_serial" else _HINTS
+    return table.get(token) or _HINTS.get(token) or _HINTS["weak_window"]
 
 
 def penalty_hits(penalties: Any) -> list[str]:
@@ -346,9 +365,56 @@ def build_repair_span(
     if not old or old not in body:
         return None
     hint_key = key or "weak_window"
-    return {
+    payload = {
         "old_text": old,
         "key": key or "weak_window",
-        "hint": _HINTS.get(hint_key, _HINTS["weak_window"]),
+        "hint": repair_hint(hint_key, work_mode),
         "visible_chars": visible_chars(old),
+    }
+    return payload
+
+
+NEIGHBOR_MAX_VISIBLE = 160
+
+
+def attach_repair_neighbor(
+    span: dict[str, Any],
+    *,
+    fragment: str,
+    exemplar_fit: dict[str, Any] | None = None,
+) -> None:
+    """补丁旁夹一条邻居（本 Work 拍或类原型近邻），让二次采样跟分布而不是跟配方。"""
+    if not isinstance(span, dict) or span.get("neighbor"):
+        return
+    from app.writing.signals.beats import clip_visible, load_local_beats
+    from app.writing.signals.prefs_loader import _module as _writing_prefs
+
+    frag = _writing_prefs().normalize_fragment(fragment)
+    beats = load_local_beats()
+    chosen = next((b for b in beats if b.get("fragment") == frag), None)
+    if chosen is None and frag != "mixed":
+        chosen = next((b for b in beats if b.get("fragment") == "mixed"), None)
+    if chosen is not None:
+        text = clip_visible(str(chosen.get("text") or ""), max_vis=NEIGHBOR_MAX_VISIBLE)
+        if text:
+            span["neighbor"] = {"source": "local_beat", "text": text}
+            return
+    nearest = (exemplar_fit or {}).get("nearest") if isinstance(exemplar_fit, dict) else None
+    slug = str((nearest or {}).get("id") or "").strip()
+    if not slug:
+        return
+    from app.writing.signals.bank import find_platform_exemplar
+
+    sample = find_platform_exemplar(slug=slug, fragment=frag)
+    if sample is None:
+        sample = find_platform_exemplar(slug=slug)
+    if sample is None or not (sample.text or "").strip():
+        return
+    text = clip_visible(sample.text, max_vis=NEIGHBOR_MAX_VISIBLE)
+    if not text:
+        return
+    span["neighbor"] = {
+        "source": "exemplar",
+        "slug": sample.slug,
+        "text": text,
     }

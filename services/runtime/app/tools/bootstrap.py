@@ -15,6 +15,7 @@ from app.scenarios.registry import ScenarioProfile
 from app.settings import settings
 from app.tools.core import tools as core
 from app.tools.registry import ON_WRITE_TOOLS, ToolRegistry, ToolSpec
+from app.writing.patch_budget import MAX_PATCHES_PER_PENALTY_KEY
 
 
 def build_registry() -> ToolRegistry:
@@ -160,7 +161,9 @@ def build_registry() -> ToolRegistry:
                 ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
                 "do not upsert the whole chapter: propose_patch the repair_span, or "
                 "draft_section mode=append with only the new slice (~2000 chars) to thicken. "
-                "After 3 propose_patch attempts per penalty_key, use mode=rewrite_window "
+                "If repair_span.neighbor is set, follow that beat's one loaded line or "
+                "action — do not copy its plot, and do not strip quotes into narration. "
+                f"After {MAX_PATCHES_PER_PENALTY_KEY} propose_patch attempts per penalty_key, use mode=rewrite_window "
                 "to replace repair_span.old_text in one shot (staccato). "
                 "Append is rejected while chapter process L0 is still open "
                 "(staccato_uniform / hinge_dense / opening_institution / lore_dump), "
