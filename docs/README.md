@@ -82,9 +82,9 @@
 | [图 · 店内召回](assets/rag/search-sources-flow-zh.png) | Chunk（HNSW∥FTS）与 Doc（centroid）并行，RRF / 精排 / cover / fallback |
 | [图 · 建库](assets/rag/index-sync-zh.png) | Turn 外：stamp → 切块 450/64 → embed → 三表 → 增量维护或全量重建 HNSW |
 | [图 · 端到端主链详流](assets/rag/rag-end-to-end-zh.png) | 主链详流：Index → HNSW/GIN → search_sources → RRF/rerank → cover/tier → tool_result |
-| [工作台 · 写作](topics/workbench.md) | 单部作品；写一篇归档旧稿；成稿后同轮修补 |
-| [图 · 写作主路径](assets/writing/writing-main-path-zh.png) | 新一篇 vs 续写 → `draft_section` → 同轮 `repair_span` |
-| [图 · 写作评分环](assets/writing/writing-signals-loop-zh.png) | L0 过程门 · L1 类原型 · 禁止 Turn 末 judge |
+| [工作台 · 写作](topics/workbench.md) | 单部作品；薄纲；写一篇归档旧稿；成稿后同轮修补与交付门 |
+| [图 · 写作主路径](assets/writing/writing-main-path-zh.png) | 新一篇 vs 续写 → 薄纲 → `draft_section` → 同轮 `repair_span` / 交付门 |
+| [图 · 写作评分环](assets/writing/writing-signals-loop-zh.png) | L0 过程门 · 同岛停 · 预算尽换窗 · 禁止 Turn 末 judge |
 
 ---
 

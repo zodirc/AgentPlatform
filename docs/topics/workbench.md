@@ -12,8 +12,8 @@ Ops 控制台的 `suite=ci` 只是触发 `scripts/ci_proof.sh`，不是 retrieva
 
 ## 图
 
-1. [写作主路径](../assets/writing/writing-main-path-zh.png) — Work 树 · 写一篇归档 · 同轮修补  
-1b. [写作评分环](../assets/writing/writing-signals-loop-zh.png) — L0 过程门 · L1 类原型 · `repair_span`
+1. [写作主路径](../assets/writing/writing-main-path-zh.png) — Work 树 · 写一篇归档 · 薄纲 · 同轮修补 · 交付门  
+1b. [写作评分环](../assets/writing/writing-signals-loop-zh.png) — L0 过程门 · 同岛停 · 预算尽换窗 · 禁止 Turn 末 judge
 2. [Ops Bench 原理](../assets/ops/ops-bench-principle-zh.png) — L1 agent-path · 套件 · 隔离  
 3. [评测原理](ops-eval-principles.md) — 官方题面、可见范围、命中定义、审阅偏差  
 4. [实例走查](ops-eval-walkthrough.md) — 本地题目原文与命中判定  
@@ -53,9 +53,11 @@ work_root/
 ```text
 意图（新一篇 vs 续写）
   → 新一篇且稿占用：归档后从 ch1 起
-  →（可选）update_outline
-  → 成稿：按需 search_sources（少次）+ draft_section(fragment=…)
+  →（可选）update_outline · 几句这场干什么（风格是罗盘，不是开篇交卷表）
+  → 成稿：按需 search_sources（少次）+ draft_section(fragment=…；冷起步 mixed)
   → 同轮读 writing_signals / L0 receipts；弱分只 propose_patch(repair_span)
+  → 碎拍预算尽 → draft_section mode=rewrite_window 一次换整窗
+  → 过程 L0 开着：禁止 append、禁止对用户宣称「已完成」
   → 改稿：diff-first · 通常 0 搜
   →（可选，下一 Turn）polish · export · /verify
 ```
@@ -64,8 +66,10 @@ work_root/
 
 - **每个 pass = 用户显式 Turn**；平台不自动串成 polish pipeline。  
 - 质量杠杆：稳定前缀 + 少次有 cite 的检索 + **同轮**过程门；**不是**资料越多越好，也不是 Turn 末再找一个 LLM 裁判。  
+- 风格 / 三要素 / `work_mode` 是这场戏的倾向，不是合同：不锁开篇必须交什么工种。纲上写清**这本在写谁、这本在写什么**；选定另一路就是另一本书。  
+- 章纲几句点明这场干什么即可。`outline_thin` 门槛 **40** 实体文字（用户未要目录时）；开篇三章备忘同样按几句算完整。  
 - 成篇默认 **5000–6000** 实体文字（汉字/字母/数字/标点，不含空白）。  
-- **禁止默认**：每轮强制 RAG、Turn 末 judge、自动串联多模型裁判、整章再 `draft_section`（`length_short` 加厚除外）。
+- **禁止默认**：每轮强制 RAG、Turn 末 judge、自动串联多模型裁判、整章再 `draft_section`（`length_short` 加厚除外）、过程 L0 未清就 `mode=append`。
 
 ### 1.2 评分与同轮修补（L0 / L1）
 
@@ -73,12 +77,21 @@ work_root/
 
 | 层 | 是什么 | 谁关 |
 |----|--------|------|
-| **L0 receipts** | `staccato_uniform`、`hinge_dense`、`opening_institution`、`lore_dump`、`length_short`… | 过程门 |
+| **L0 receipts** | `staccato_uniform`、`hinge_dense`、`opening_institution`、`lore_dump`、`length_short`… | 过程门（设置页没有滑条可关） |
 | **L1 `writing_signals`** | 维度加权 `composite` + 惩罚/奖励 → `net_signal`；`exemplar_alignment` 是到类原型 `sig.v1` 的距离（节奏/质地，不是搜情节） | 平台按 `work_mode`（`literary` / `web_serial`）钉死；经 `writing_rubric` / `writing_signals` 暴露，**不在设置页** |
 
-`fragment`：`plot_progress` \| `worldview_texture` \| `climax_beat` \| `battle_action` \| `dialogue_dyad` \| `mixed`。弱 `net_signal` 或 L0 命中 → **本 Turn** `propose_patch` 只换 `repair_span.old_text`。长章按约 480 实体文字切窗，取最弱窗。平台金标是鲁迅 / 郁达夫公版节选，学拍不搬核。
+`fragment`：`plot_progress` \| `worldview_texture` \| `climax_beat` \| `battle_action` \| `dialogue_dyad` \| `mixed`（冷起步默认 `mixed`）。弱 `net_signal`（&lt; 0.50）或 L0 命中 → **本 Turn** `propose_patch` 只换 `repair_span.old_text`（可带 `neighbor` 邻拍）。长章可见 ≥ 800 则按约 480 实体文字切窗，取最弱窗；窗可扩到约 672。定位拍约 360。平台金标是鲁迅 / 郁达夫公版节选，学拍不搬核。
 
-L0 对白门还认：电报连环、「…。」他说，「…。」拆句、「A，就是 B」升格、「是 A，不是 B」收束。对白里因为/可是可以留。
+同轮停条件（仍不改 Engine while）：
+
+- **同岛停**：可见核与上一拍重叠 ≥ 12 字则不再空转同一 island。  
+- **过程 L0 未清**（碎拍 / 金句 / 开篇机构 / 身世提要，不含单纯 `length_short`）→ 拒绝 `mode=append`。  
+- **预算**：每 `penalty_key` 本 Turn 至多 **5** 次生效 patch，本章合计 **8**；碎拍预算尽 → `draft_section mode=rewrite_window` 一次换整窗（每章至多 **2**）。  
+- **`patch_unnecessary`**：`net_signal` ≥ 0 且无过程 L0 后不要继续 chip patch。  
+- **hygiene**：把「」对白改成旁白的补丁直接拒。空转问答应收成一两句或动手，不是「告诉他」。  
+- **交付门**：manifest 过程 L0 仍开时，终稿不得宣称「已完成 / 定稿」。
+
+L0 对白门还认：电报连环、「…。」他说，「…。」拆句、「A，就是 B」升格、「是 A，不是 B」收束。对白里因为/可是可以留。孤立短打 / 先紧后松不算空转槽。
 
 ### 1.3 场景与工具（写作）
 

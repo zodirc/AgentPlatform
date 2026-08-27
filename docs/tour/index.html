@@ -1477,8 +1477,8 @@
             <li>
               <span class="n">1</span>
               <div>
-                <p class="what"><code>writing</code>（默认）：大纲、起草、<code>occupy=fresh</code> 归档、同轮 <code>writing_signals</code> 修补、按需 <code>search_sources</code></p>
-                <p class="why">步数上限约 40。默认排除情报语料目录。成篇默认 5000–6000 实体文字。质量杠杆是稳定前缀、少次有 cite 的检索、以及焊在工具返回值里的过程门；不是资料体积，也不是 Turn 末 LLM 裁判。每个 pass = 用户显式 Turn，平台不自动串 polish pipeline。</p>
+                <p class="what"><code>writing</code>（默认）：薄纲、起草、<code>occupy=fresh</code> 归档、同轮 <code>writing_signals</code> 修补（同岛停 · 预算尽换窗 · 交付门）、按需 <code>search_sources</code></p>
+                <p class="why">步数上限约 40。默认排除情报语料目录。成篇默认 5000–6000 实体文字。风格是罗盘不是合同。质量杠杆是稳定前缀、少次有 cite 的检索、以及焊在工具返回值里的过程门；不是资料体积，也不是 Turn 末 LLM 裁判。每个 pass = 用户显式 Turn，平台不自动串 polish pipeline。</p>
               </div>
             </li>
             <li>
@@ -2255,7 +2255,7 @@ payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, h
       <section class="page" data-id="writing" data-group="RAG / 写作" data-title="写作工作台">
         <div class="card">
           <h2>写作：Work 拥有树；新一篇归档旧稿</h2>
-          <p class="lede">用户心智是一份稿。工程上 Work 拥有 <code>outline.md</code>、<code>drafts/manuscript.md</code>、<code>drafts/archive/</code>、<code>sources/</code> 与卡片；Session 只是对话线程。用户说「写一篇 / 写个故事」且在编稿已占用时，第一次 <code>draft_section</code> 带 <code>occupy=fresh</code>：把旧稿拷到归档，再只写这篇。不要让用户先删文件。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。</p>
+          <p class="lede">用户心智是一份稿。工程上 Work 拥有 <code>outline.md</code>、<code>drafts/manuscript.md</code>、<code>drafts/archive/</code>、<code>sources/</code> 与卡片；Session 只是对话线程。用户说「写一篇 / 写个故事」且在编稿已占用时，第一次 <code>draft_section</code> 带 <code>occupy=fresh</code>：把旧稿拷到归档，再只写这篇。不要让用户先删文件。风格 / 三要素是这场戏的倾向，不是开篇必须交的工种。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。</p>
           <ol class="steps">
             <li>
               <span class="n">1</span>
@@ -2267,26 +2267,26 @@ payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, h
             <li>
               <span class="n">2</span>
               <div>
-                <p class="what">（可选）<code>update_outline</code>；立人设与文风靠 pin 在 Work 上的卡片</p>
-                <p class="why">通常不检索。卡片进入 <code>writing_cards</code>，不进资料向量面。章纲过薄（章正文 &lt; 200 实体文字，且用户未要目录）时带 <code>outline_thin</code>。</p>
+                <p class="what">（可选）<code>update_outline</code>：几句这场干什么；纲上写清这本在写谁、写什么</p>
+                <p class="why">通常不检索。卡片进入 <code>writing_cards</code>，不进资料向量面。章纲过薄（章正文 &lt; 40 实体文字，且用户未要目录）时带 <code>outline_thin</code>。开篇三章备忘按几句算完整。</p>
               </div>
             </li>
             <li>
               <span class="n">3</span>
               <div>
-                <p class="what">成稿：按需 <code>search_sources</code>（有 cite、每 Turn 最多 3 次）再 <code>draft_section(fragment=…)</code></p>
-                <p class="why">成篇默认 5000–6000 实体文字。返回值带 L0 receipts 与 L1 <code>writing_signals</code>。禁止每轮强制 RAG、禁止 Turn 末自动 judge。</p>
+                <p class="what">成稿：按需 <code>search_sources</code>（有 cite、每 Turn 最多 3 次）再 <code>draft_section(fragment=…)</code>；冷起步 <code>mixed</code></p>
+                <p class="why">成篇默认 5000–6000 实体文字。返回值带 L0 receipts 与 L1 <code>writing_signals</code>。禁止每轮强制 RAG、禁止 Turn 末自动 judge。过程 L0 未清不得 <code>mode=append</code>，也不得宣称已完成。</p>
               </div>
             </li>
             <li>
               <span class="n">4</span>
               <div>
                 <p class="what">弱分或 L0：同轮 <code>propose_patch(repair_span)</code>；写作场景默认自动 apply</p>
-                <p class="why">只换最弱窗里的 <code>old_text</code>，不整章再 <code>draft_section</code>（<code>length_short</code> 加厚除外）。UI 仍出示 diff。polish / 导出 / verify 仍是用户下一次 Turn。</p>
+                <p class="why">只换最弱窗里的 <code>old_text</code>（可带 <code>neighbor</code>）。同岛停；每 key 5 次 / 章合计 8；碎拍尽则 <code>rewrite_window</code>（每章 2 次）。不整章再 <code>draft_section</code>（<code>length_short</code> 加厚除外）。UI 仍出示 diff。polish / 导出 / verify 仍是用户下一次 Turn。</p>
               </div>
             </li>
           </ol>
-          <p class="figure-lead">下图中主链：意图 → 占用判定 → 成稿 → 同轮修补。检索是按需旁路。评分环见下一页。</p>
+          <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 → 成稿 → 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -2299,31 +2299,31 @@ payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, h
       <section class="page" data-id="writing-signals" data-group="RAG / 写作" data-title="写作评分环">
         <div class="card">
           <h2>评分焊在工具返回值，不改 Engine while</h2>
-          <p class="lede">L0 是过程门（电报连环、看见立刻明白、开篇机构名、身世提要、篇幅不足），Settings 滑条关不掉。L1 是到类原型 <code>sig.v1</code> 的距离：维度加权 <code>composite</code> 加上惩罚/奖励得到 <code>net_signal</code>。账户「写作风格」滑条只缩放该类 L1 行；维度权重平台钉死。覆盖顺序：Work &gt; 账户 &gt; 平台。</p>
+          <p class="lede">L0 是过程门（电报连环、看见立刻明白、开篇机构名、身世提要、篇幅不足），设置页没有滑条可关。L1 是到类原型 <code>sig.v1</code> 的距离：维度加权 <code>composite</code> 加上惩罚/奖励得到 <code>net_signal</code>。权重按 <code>work_mode</code>（经典文学 / 连载网文）钉在工具里，<strong>不在设置页</strong>。</p>
           <ol class="steps">
             <li>
               <span class="n">1</span>
               <div>
                 <p class="what">成稿文本切窗：可见 ≥ 800 实体文字则目标约 480，取最弱窗</p>
-                <p class="why"><code>fragment</code> 为 plot_progress / worldview_texture / climax_beat / battle_action / dialogue_dyad / mixed。错类只在申报≠mixed、申报≠检出、且对齐申报 &lt; 0.60 时记 mismatch。</p>
+                <p class="why"><code>fragment</code> 为 plot_progress / worldview_texture / climax_beat / battle_action / dialogue_dyad / mixed。冷起步默认 mixed。错类只在申报≠mixed、申报≠检出、且对齐申报 &lt; 0.60 时记 mismatch。</p>
               </div>
             </li>
             <li>
               <span class="n">2</span>
               <div>
                 <p class="what">L0 receipts 与 L1 <code>writing_signals</code> 一并回灌 <code>tool_result</code></p>
-                <p class="why">L0 对白还认拆句（「…。」他说，「…。」）、升格（「A，就是 B」）、对比收束（「是 A，不是 B」）。对白里因为/可是可以留。平台 <code>staccato_uniform</code> −0.18。</p>
+                <p class="why">L0 对白还认拆句（「…。」他说，「…。」）、升格（「A，就是 B」）、对比收束（「是 A，不是 B」）。对白里因为/可是可以留。空转问答收成一两句或动手，不要改成旁白。平台 <code>staccato_uniform</code> −0.18。</p>
               </div>
             </li>
             <li>
               <span class="n">3</span>
               <div>
                 <p class="what">弱 <code>net_signal</code>（&lt; 0.50）或 L0 命中 → 本 Turn <code>propose_patch</code></p>
-                <p class="why"><code>repair_span.old_text</code> 上限约 360 字。禁止整章重交，除非 <code>length_short</code>。金标是鲁迅 / 郁达夫公版节选，学拍不搬核。Ops <code>/ops/&lt;密钥&gt;/writing</code> 只打分，不进产品 Turn。</p>
+                <p class="why"><code>repair_span</code> 跟最弱窗走，可带 <code>neighbor</code>。同岛（重叠 ≥ 12 字）停；每 key 5 次 / 章合计 8；碎拍尽则 <code>rewrite_window</code>（每章 2）。过程 L0 未清拒绝 append；<code>net_signal</code> ≥ 0 且无过程 L0 则 <code>patch_unnecessary</code>。hygiene 拒绝对白改旁白。金标是鲁迅 / 郁达夫公版节选，学拍不搬核。Ops <code>/ops/&lt;密钥&gt;/writing</code> 只打分，不进产品 Turn。</p>
               </div>
             </li>
           </ol>
-          <p class="figure-lead">下图中主链：切窗 → L0 / L1 → 是否同轮修补。左右是滑条范围与禁止项，不是第二套主链。</p>
+          <p class="figure-lead">下图中主链：切窗 → L0 / L1 → 同轮修补判定（同岛停 · 预算尽换窗）。左右是入口与禁止项，不是第二套主链。</p>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -3033,7 +3033,7 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
         rag: "search_sources hybrid",
         "rag-deep-dive": "图编号逐步对照代码",
         index: "INDEX 13 · 450 / 64",
-        writing: "Work 树与 occupy=fresh",
+        writing: "Work 树 · 薄纲 · occupy=fresh",
         "writing-signals": "L0 过程门 · L1 类原型",
         "ops-bench": "L1 agent-path，不是 CI",
         "ops-eval-why": "官方题面、可见范围、命中",
