@@ -922,7 +922,6 @@ class AgentEngine:
         from app.writing.delivery_gate import finalize_writing_turn_summary
 
         return finalize_writing_turn_summary(
-            scenario_id=state.scenario_id,
             turn_id=state.turn_id,
             session_id=state.session_id,
             summary=summary,

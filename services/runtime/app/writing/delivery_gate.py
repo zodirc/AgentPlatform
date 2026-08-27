@@ -66,13 +66,11 @@ def claims_delivery_complete(text: str) -> bool:
 
 def finalize_writing_turn_summary(
     *,
-    scenario_id: str,
     turn_id: object | None,
     session_id: object | None,
     summary: str,
 ) -> str:
-    if str(scenario_id or "") != "writing":
-        return summary
+    # No scenario_id branch: a non-writing turn has no process-L0 manifest, so blockers is empty.
     manifest = read_turn_manifest(turn_id, session_id)
     blockers = manifest_delivery_blockers(manifest)
     if not blockers:

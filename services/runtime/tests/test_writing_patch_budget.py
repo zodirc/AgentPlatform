@@ -131,13 +131,22 @@ def test_finalize_writing_turn_summary_replaces_false_completion(
         encoding="utf-8",
     )
     out = finalize_writing_turn_summary(
-        scenario_id="writing",
         turn_id=turn_id,
         session_id=uuid4(),
         summary="第一章已完成，请过目。",
     )
     assert "交付门" in out
     assert "已完成" not in out or "禁止" in out
+
+
+def test_finalize_writing_turn_summary_passthrough_without_manifest() -> None:
+    raw = "budget exceeded"
+    out = finalize_writing_turn_summary(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        summary=raw,
+    )
+    assert out == raw
 
 
 def test_should_inject_writing_delivery_hold() -> None:

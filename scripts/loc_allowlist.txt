@@ -18,6 +18,7 @@ services/runtime/app/model/gateway.py	1300
 services/web/src/settings/SettingsPage.tsx	1200
 services/web/src/shared/api/client.ts	1400
 services/runtime/app/tools/core/swe_solve_env.py	1000
+services/runtime/app/tools/core/writing_tools.py	1000
 services/api/app/services/ops/official_store.py	900
 services/runtime/app/main.py	1000
 services/api/app/routers/ops_official.py	1000
