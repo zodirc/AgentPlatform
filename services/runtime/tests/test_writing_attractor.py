@@ -75,9 +75,9 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "新信息、新对手、新代价、新抉择" not in system
     assert "看见代价" not in system
     assert "由谁承担" not in system
-    assert "另一本书" in system
+    assert "这一本书自己的身份" in system
     assert "不是换皮" not in system
-    assert "直说" in system
+    assert "类型不是模板" in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
     assert "换声口" in voice
     assert "看见代价" not in voice

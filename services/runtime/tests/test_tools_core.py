@@ -380,21 +380,13 @@ def test_scenario_registry_loads_profiles() -> None:
     assert intel.system_prompt
     assert collab.system_prompt
     assert "search_sources" in writing.system_prompt
-    assert "[cite:xxx]" in writing.system_prompt
-    assert "Never omit `section_ids`" in writing.system_prompt
-    assert "Visible fences are markdown H1s" in writing.system_prompt
-    assert "do not prepend `outline.md`" in writing.system_prompt
-    assert "## Writing signals" in writing.system_prompt
-    assert "writing_signals" in writing.system_prompt
-    assert "repair_span" in writing.system_prompt
-    assert "writing_rubric" in writing.system_prompt or "work_mode" in writing.system_prompt
+    assert "draft_section" in writing.system_prompt
+    assert "update_outline" in writing.system_prompt
+    assert "propose_patch" in writing.system_prompt
+    assert "export_document" in writing.system_prompt
+    assert "遵守工具返回的状态" in writing.system_prompt
     assert "Settings → 写作风格" not in writing.system_prompt
-    assert "work_mode" in writing.system_prompt
-    assert "book_scope" in writing.system_prompt or "章类型" in writing.system_prompt
-    assert "几句这场干什么" in writing.system_prompt
     assert "200–400" not in writing.system_prompt
-    assert "5000–6000" in writing.system_prompt
-    assert "mode=append" in writing.system_prompt
     assert "1000–2000" not in writing.system_prompt
     assert "1800–3500" not in writing.system_prompt
     # Voice slogans / L0 recipes live on the pinned card and receipts, not the standing prefix.

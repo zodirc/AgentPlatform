@@ -182,9 +182,9 @@ def test_xuanhuan_diverge_styles_volatile_only(tmp_path: Path) -> None:
         workspace_root=tmp_path,
     )
     assert "## 题材发散（仅无" in pin.volatile_block
-    assert "都市规则怪谈" in pin.volatile_block
+    assert "都市怪谈" in pin.volatile_block
     cards_block = extract_cards_block(pin.volatile_block)
-    assert "都市规则怪谈" not in cards_block
+    assert "都市怪谈" not in cards_block
     assert "凡人流" not in cards_block
 
     from app.writing.outline_phase import write_style_lock
