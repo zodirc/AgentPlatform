@@ -4,7 +4,7 @@
 数据进 `BENCH_DATA_DIR`（默认 `~/.cache/agentplatform-bench`），**不进 git**。  
 协议：见 [`suites.small.yaml`](suites.small.yaml) — L0 `protocol_version_l0: official-small-2026-08-m1`；L1 `protocol_version_l1: official-small-2026-08-m3`。
 
-> **调优方案（主指数 = 主 agent Turn × 官方题集）**：[`docs/topics/official-bench-agent-tuning.md`](../../docs/topics/official-bench-agent-tuning.md)。  
+> **调优与命中定义**：[控制流导览 · Ops 评测](../../docs/tour/index.html#ops-eval-why)。  
 >
 > **L1（agent-path，已接线）**：Ops 官方页「评测路径 = L1 agent」或  
 > `make official-bench-retrieval-agent` / `context-agent` / `coding-infer-agent`  

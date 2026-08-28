@@ -2,7 +2,7 @@
 
 > **权威格式文档**。给联网 AI 生成内容时，优先复制 [`PROMPT_FOR_RESEARCH_AI.md`](PROMPT_FOR_RESEARCH_AI.md)。  
 > 放置说明见 [`README.md`](README.md)。  
-> 检索切块 / embed / 表格外挂口径见 [`docs/topics/rag.md`](../../docs/topics/rag.md)（现行默认 **450 token / overlap 64**；char 回退 1800/200）。
+> 检索切块 / embed / 表格外挂口径见 [导览 · 索引面](../../docs/tour/index.html#index)（现行默认 **450 token / overlap 64**；char 回退 1800/200）。
 
 ---
 

@@ -1,6 +1,6 @@
 # 部署看板（:9090）
 
-产品文档见 [docs/core/architecture.md](../../docs/core/architecture.md) §分模块发布。本文件是脚本侧速查。
+产品文档见 [导览 · 部署拓扑](../../docs/tour/index.html#topology)。本文件是脚本侧速查。
 
 两种场景：
 

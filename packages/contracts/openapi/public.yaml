@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: Agent Platform API
   version: 0.1.0
-  description: Public API. See docs/contracts.md.
+  description: Public API. Human index: docs/tour/#contracts.
 servers:
   - url: /api/v1
 paths:

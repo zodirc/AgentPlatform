@@ -11,4 +11,4 @@
 
 不要随机抽样当官方回归。指纹 = 所选 ID 列表的 SHA-256。
 
-结构智能路径见 `eval/swebench/README.md` 与 [工具与上下文 §2](../../../docs/core/tools-and-context.md)。
+结构智能路径见 `eval/swebench/README.md` 与 [导览 · 编码写入链](../../../docs/tour/index.html#coding-fuse)。

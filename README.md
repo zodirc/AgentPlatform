@@ -12,9 +12,7 @@ https://zodirc.github.io/AgentPlatform/
 
 本地：`make docs-tour` → http://127.0.0.1:8765/tour/
 
-不要把 GitHub 文件视图当作 Wiki：每次换篇都会整页刷新并重复下载约 1.5MB 的海报。对照源文件请用：
-
-https://github.com/zodirc/AgentPlatform/blob/master/docs/README.md
+不要把 GitHub 文件视图当作 Wiki：每次换篇都会整页刷新并重复下载约 1.5MB 的海报。对照源文件请用 `docs/tour/index.html`。
 
 | 想了解 | 打开 |
 |--------|------|
@@ -71,7 +69,7 @@ Postgres + pgvector · 旁路 ast-indexer · 默认含 bench
 | bench + bench-postgres | Official / L1（`make up` 默认起） |
 | contracts | OpenAPI / 事件 / 命令体 |
 
-`Work`（作品根）→ `Session`（对话线程）→ `Turn`（一次用户闭环）↔ `Run`（执行实例）。默认 `TURN_DISPATCH=pull`：runtime claim 并心跳续约。[架构](docs/core/architecture.md)
+`Work`（作品根）→ `Session`（对话线程）→ `Turn`（一次用户闭环）↔ `Run`（执行实例）。默认 `TURN_DISPATCH=pull`：runtime claim 并心跳续约。[架构导览](https://zodirc.github.io/AgentPlatform/tour/#backend)
 
 ### `make up` 全量：8 容器
 

@@ -4,7 +4,7 @@
 **手记附录：** [`SCORECARD.notes.md`](SCORECARD.notes.md)（生成 SCORECARD 时拼接，改手记只改 notes）。  
 **机器可读：** `official-small-2026-08-m3` 为现行 L1 协议（主栏 `suites` 锚点档；冒烟进 `smoke_suites`）；`m2.json` 为强制臂过渡史；`m1.json` 为 L0 组件对照。  
 **题集（case）：** `../suites.small.yaml` + `../swe_lite_slices/` —— 不是本目录。  
-**调优纲领：** [`docs/topics/official-bench-agent-tuning.md`](../../../docs/topics/official-bench-agent-tuning.md)。
+**调优与命中定义：** [控制流导览 · Ops 评测](../../../docs/tour/index.html#ops-eval-why)。
 
 完整跑次明细在 Ops / `eval/reports/official/`（**不进 git**）。
 

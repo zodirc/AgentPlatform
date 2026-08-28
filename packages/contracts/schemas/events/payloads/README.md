@@ -3,7 +3,7 @@
 每种 `turn_events.type` 的 `payload` 形状在此目录定义。外壳见 `../envelope.json`。
 
 权威索引：`_index.json`  
-人类索引：[`docs/contracts.md`](../../../../docs/contracts.md) §3.1  
+人类入口：[控制流导览 · 契约位置](../../../../docs/tour/index.html#contracts)  
 决策：[ADR-017](../../../../docs/adr/017-contract-validation-and-event-payloads.md)
 
 ## 规则

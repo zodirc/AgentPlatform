@@ -650,7 +650,7 @@ async def _capacity_block() -> dict[str, Any]:
         "hints": {
             "scale_runtime_when": "dispatch_wait_seconds p95 high or queue_depth near DISPATCH_QUEUE_MAX",
             "rollback": "TURN_DISPATCH=push",
-            "runbook": "docs/ops/pull-dispatch-runbook.md",
+            "runbook": "docs/tour/#backend",
         },
     }
     try:

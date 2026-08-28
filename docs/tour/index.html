@@ -10,6 +10,8 @@
         var t = localStorage.getItem("agent.docs.theme");
         if (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) t = "ink";
         if (t) document.documentElement.setAttribute("data-theme", t);
+        var z = parseInt(localStorage.getItem("agent.docs.zoom"), 10);
+        if (z >= 90 && z <= 175) document.documentElement.style.fontSize = (16 * z / 100) + "px";
       } catch (e) {}
     })();
   </script>
@@ -210,7 +212,7 @@
     }
     * { box-sizing: border-box; }
     html, body { height: 100%; margin: 0; }
-    html { color-scheme: light dark; }
+    html { color-scheme: light dark; font-size: 16px; }
     body {
       font-family: var(--sans);
       color: var(--ink);
@@ -496,8 +498,14 @@
       font-family: var(--mono);
     }
     .topbar-actions { display: flex; align-items: center; gap: 0.5rem; }
+    .type-scale {
+      display: flex;
+      align-items: center;
+      gap: 0.15rem;
+    }
     .pager { display: flex; gap: 0.4rem; }
     .pager button,
+    .type-scale button,
     .nav-toggle {
       border: 1px solid var(--line);
       background: var(--paper);
@@ -509,9 +517,28 @@
       cursor: pointer;
       color: var(--ink);
     }
+    .type-scale button {
+      padding: 0.4rem 0.55rem;
+      min-width: 2.1rem;
+      font-family: var(--sans);
+      letter-spacing: -0.04em;
+    }
+    .type-scale .zoom-label {
+      min-width: 2.7rem;
+      padding: 0.4rem 0.2rem;
+      border: 0;
+      background: transparent;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      color: var(--muted);
+    }
     .pager button:hover:not(:disabled),
+    .type-scale button:hover:not(:disabled),
     .nav-toggle:hover { border-color: var(--accent); color: var(--accent); }
-    .pager button:disabled { opacity: 0.35; cursor: not-allowed; }
+    .pager button:disabled,
+    .type-scale button:disabled { opacity: 0.35; cursor: not-allowed; }
     .nav-toggle { display: none; }
     .read-progress {
       position: absolute;
@@ -650,6 +677,7 @@
       body { grid-template-columns: 1fr; }
       .nav-toggle { display: inline-flex; }
       .crumb-group { display: none; }
+      .type-scale .zoom-label { display: none; }
       .nav-backdrop {
         display: none;
         position: fixed;
@@ -913,6 +941,24 @@
       color: var(--muted);
       line-height: 1.45;
     }
+    pre.seq {
+      font-size: 0.71rem;
+      line-height: 1.36;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .term dt {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      font-weight: 650;
+      margin: 0.55rem 0 0.12rem;
+    }
+    .term dd {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+      line-height: 1.5;
+    }
     p { line-height: 1.58; }
   </style>
 </head>
@@ -947,6 +993,11 @@
         <span class="crumb-count" id="pageCount"></span>
       </div>
       <div class="topbar-actions">
+        <div class="type-scale" role="group" aria-label="正文字号">
+          <button type="button" id="zoomOut" title="缩小字号（-）" aria-label="缩小字号">A−</button>
+          <button type="button" class="zoom-label" id="zoomLabel" title="恢复默认字号（0）" aria-label="当前字号，点击恢复默认">100%</button>
+          <button type="button" id="zoomIn" title="放大字号（+）" aria-label="放大字号">A+</button>
+        </div>
         <div class="pager">
           <button type="button" id="prevBtn">上一页</button>
           <button type="button" id="nextBtn">下一页</button>
@@ -972,7 +1023,7 @@
           <ul>
             <li>左侧目录与顶栏翻页；主图点击放大。先沿中间箭头链读分支，再对照本页逐步：标题为该步职责，灰字为约束与失败形态，芯片为事件或字段名。左下角可切换外观主题。</li>
             <li>「Ops 效果」先读评测原理，再以本地实例核对命中定义；第 4 轮 smoke 为宏分，合入 CI 另列。</li>
-            <li>冲突裁决：<strong>代码与契约</strong>优先，其次 <code>docs/core</code> / <code>docs/topics</code> 六篇正文。本导览不另立权威。</li>
+            <li>冲突裁决：<strong>代码与契约</strong>优先，其次本导览。图负责分支；过期数字按代码改。</li>
             <li>左上角 <strong>AgentPlatform</strong> 返回 GitHub 主仓库。在线站点 <a href="https://zodirc.github.io/AgentPlatform/">zodirc.github.io/AgentPlatform</a>；本地 <code>make docs-tour</code>。GitHub 文件视图中的 HTML 只是源码。</li>
             <li>流程图按章下载（每张约 1.3–1.9MB）。GitHub Pages 没有预热或加长缓存的仓库开关；进入该页才取图，再次打开走浏览器与 Service Worker。</li>
           </ul>
@@ -1038,7 +1089,7 @@
             <li>编码场景不提供 <code>search_sources</code>，不以资料检索定位代码。写作场景不打开 LSP 结构工具。</li>
             <li>冒烟分数不升 SCORECARD 主栏。官方 harness 自身失败不得标成模型 <code>resolve_rate = 0</code>。</li>
           </ul>
-          <div class="src"><code>docs/core/architecture.md</code> · <code>docs/core/tools-and-context.md</code></div>
+          <div class="src"><code>deploy/docker-compose.yml</code> · <code>scenarios/registry.py</code></div>
         </div>
       </section>
 
@@ -1113,7 +1164,7 @@
             </div>
           </div>
           <p class="figure-lead">下图为发布台：对比代码、标 dirty、分模块重建。上文逐步是日常请求穿过 Caddy → api → runtime。</p>
-          <div class="src">来源：根 <code>README.md</code> · <code>deploy/docker-compose.yml</code> · <code>docs/core/architecture.md</code></div>
+          <div class="src">来源：根 <code>README.md</code> · <code>deploy/docker-compose.yml</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1124,67 +1175,452 @@
       </section>
 
       <!-- 2b -->
-      <section class="page" data-id="backend" data-group="总览" data-title="容器 · 负载 · 并发">
+      <section class="page" data-id="backend" data-group="总览" data-title="时序 · 并发 · 负载">
         <div class="card">
-          <h2>后端：容器、负载与并发</h2>
-          <p class="lede">四层栈划分产品入口、控制面、执行面与数据面。启动受 compose <code>depends_on</code> + <code>service_healthy</code> 约束；跨服务实时事实只经 Postgres（<code>INSERT</code> + <code>NOTIFY</code> / <code>LISTEN</code>）；水平扩容增加 runtime 副本，每副本 inflight 默认 16。</p>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what">公网仅进入产品面：Caddy 将 <code>/</code> 交给 web，将 <code>/api/*</code> 与 <code>/health/*</code> 交给 api</p>
-                <p class="why">默认栈：<code>agent-gateway</code> :80/:443，<code>agent-web</code>，<code>agent-api</code> :8000，<code>agent-runtime</code> :8001（不对浏览器暴露），<code>agent-postgres</code>，<code>agent-ast-indexer</code>。可选 overlay：<code>bench</code>、<code>ha</code>（<code>runtime-a</code>/<code>runtime-b</code>）、<code>queue</code>、<code>runtime-lite</code>。发布台是宿主机进程 <code>:9090</code>，不是第二套产品栈。无 FastAPI CORS；假定经网关同源。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what">启动顺序由 <code>depends_on</code> 与健康探针决定</p>
-                <p class="why"><code>postgres</code> 先 <code>pg_isready</code>（<code>bench-postgres</code> 仅 profile <code>bench</code>）。<code>runtime</code> 等 postgres，探针 <code>/health/live</code>（<code>start_period</code> 120s；未配置模型仍可起栈）。<code>web</code> 无依赖。<code>ast-indexer</code> 等 postgres+runtime；<code>api</code> 同样（bench 为 <code>required: false</code>）。api lifespan：pool → Alembic → 回收陈旧 Turn / 滞后投影 / 过期租约 → <code>LISTEN turn_events_channel</code>。<code>gateway</code> 等 api+web healthy 之后，产品面 <code>:80</code>/<code>:443</code> 才对外。<code>make start</code> 不 rebuild；<code>make up</code> 只重建 dirty；<code>make up-all</code> 强制全量。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">3</span>
-              <div>
-                <p class="what"><code>mem_limit</code> 是单容器 cgroup 上限，不是宿主预留</p>
-                <p class="why">postgres / bench-postgres 各 1g；api 1g；runtime 4g（GPU overlay → 12g）；ast-indexer 768m / 1.0 CPU；bench 6g（GPU → 12g）；web / gateway 未设硬限。容器 RSS 之和仍可能打满物理内存。无 GPU → gte-small@384；VRAM≥8GiB → bge-m3@1024。runtime 与 bench 各加载一份权重。日志 json-file 10m × 3。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">4</span>
-              <div>
-                <p class="what">两级压力闸：控制面准入满则 429；执行面 inflight 满则停止 claim</p>
-                <p class="why">仅 pull 生效。未领取队列全局默认 32、每用户 2；满员返回 <code>dispatch_queue_full</code> / <code>per_tenant_queue_full</code> + <code>Retry-After: 5</code>，Turn 尚未创建，不是 <code>failed</code>。<code>RUNTIME_MAX_INFLIGHT_TURNS</code> 默认 16 / 副本；租约 60s、心跳 10s。无人领取超过 15s → 先 202，后 <code>failed(start_timeout)</code>；租约丢失 → <code>failed(runner_lost)</code>。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">5</span>
-              <div>
-                <p class="what">扩容增加 runtime 副本；跨服务事实经 Postgres 闭环</p>
-                <p class="why">默认 1 份；<code>make up-ha</code> 以 <code>--scale runtime=0</code> 起 <code>runtime-a</code>/<code>runtime-b</code>。总 inflight ≈ 副本 × 16。共用同一 Postgres 与 <code>agent_data</code>，不改 Engine，不配置 <code>RUNTIME_URL_MAP</code>。读 <code>dispatch_wait_seconds</code> / <code>dispatch_queue_depth</code> 再扩。api <code>INSERT</code> + <code>pg_notify(turn_dispatch_channel)</code> → runtime <code>LISTEN</code>/claim → <code>INSERT turn_events</code> 触发 <code>turn_events_channel</code> → api <code>LISTEN</code> 后 SSE / <code>turn_views</code>。取消/批准走 <code>run_commands_channel</code>。HTTP 每容器单进程 uvicorn，勿设 <code>workers=N</code>。indexer / bench / 发布台不挡受理。</p>
-              </div>
-            </li>
-          </ol>
-          <table>
-            <thead><tr><th>机制</th><th>旋钮（现行默认）</th><th>饱和时</th></tr></thead>
-            <tbody>
-              <tr><td>分发</td><td><code>TURN_DISPATCH=pull</code></td><td>LISTEN / claim；push 为 HTTP 回退</td></tr>
-              <tr><td>准入</td><td>全局 32 · 每用户 2</td><td>HTTP 429 + Retry-After 5s</td></tr>
-              <tr><td>副本 inflight</td><td>16</td><td>停止 claim</td></tr>
-              <tr><td>租约</td><td>60s / 心跳 10s</td><td><code>runner_lost</code> 回收</td></tr>
-              <tr><td>claim 超时</td><td>15s</td><td>先 202，后 <code>start_timeout</code></td></tr>
-              <tr><td>AST 队列</td><td><code>SKIP LOCKED</code></td><td>可多 indexer，不进热路径</td></tr>
-              <tr><td>周期任务</td><td><code>pg_try_advisory_lock</code></td><td>单跑 reconcile / 保留</td></tr>
-            </tbody>
-          </table>
-          <p class="figure-lead">下图为分层架构：左栏启动依赖，中环经 Postgres 的 NOTIFY/LISTEN，执行面虚线槽表示再增加 runtime 副本。领取与 StartTurn 写序见后文；dirty 重建见上一页发布台。</p>
-          <div class="src"><code>deploy/docker-compose.yml</code> · <code>deploy/compose/ha.yml</code> · <code>admission.py</code> · <code>turn_dispatch.py</code></div>
+          <h2>后端：时序、并发与负载</h2>
+          <p class="lede">控制面与事件面反向。浏览器不直连 runtime。Postgres 是跨进程唯一实时总线。默认 <code>TURN_DISPATCH=pull</code>。机制写在各 ASCII 步骤旁；页底 PNG 只是同一条主链的海报。</p>
+
+          <h3>命令面与事件面</h3>
+          <pre class="seq">命令 ↓ 短 POST（开工 / 批准 / 取消）              事件 ↑ turn_events → SSE
+两条管道只在 Postgres 汇合。禁止服务间 Python import，故不能靠进程内 channel 当事唯一源。
+pull = competing consumers：api 只入队并按门铃；runtime 有空位才领。加副本不必改路由表。
+
+                         ┌─────────────────────────────────────────────────────────┐
+                         │  Browser (React workbench)                              │
+                         │  TurnStreamClient: fetch + ReadableStream               │
+                         │  cursor = last sequence；rAF 合并 delta                 │
+                         └───────────┬──────────────────────────────▲──────────────┘
+                                     │ HTTPS JSON + cookie          │ text/event-stream
+                                     │ POST /sessions/{id}/turns    │ GET /turns/{id}/stream
+                                     │ POST …/approve|cancel        │  id / event / data 帧
+                                     ▼                              │  data = envelope JSON
+                         ┌──────────────────────────────────────────┴──────────────┐
+                         │  Caddy (L7 reverse proxy)                               │
+                         │  /api/* → api:8000    / → web                           │
+                         │  无业务状态；SSE 对它 = 很久不结束的 GET                │
+                         │  禁缓冲（否则 token 成批到达）                          │
+                         └───────────┬──────────────────────────────▲──────────────┘
+                                     │                              │
+                                     ▼                              │
+┌────────────────────────────────────┴──────────────────────────────┴──────────────┐
+│  api  控制面 · 投影面 · SSE 出口                                                 │
+│                                                                                  │
+│  鉴权 → admission（未领取队列帽）→ 同一事务:                                     │
+│    INSERT turns(pending) + runs(accepted, pull_eligible) + turn_views seed       │
+│    COMMIT 后 pg_notify('turn_dispatch_channel', run_id)                          │
+│      门铃，不是队列。只带 UUID；正文在表里。未提交的行听者还不该看见。            │
+│                                                                                  │
+│  客户端 202 Accepted  ≠  turn.accepted（后者由 runtime claim 后才写）            │
+│                                                                                  │
+│  TurnEventListener: 独立 asyncpg 连接 LISTEN turn_events_channel（进程 1 根）    │
+│       │                                                                          │
+│       ├─ fan-out  按 turn_id 对等待者 asyncio.Event.set()                        │
+│       │     同一 Turn 可同时有 SSE 观看者 + 投影刷新。                           │
+│       │     没有这一步：要么所有流共用一次误读，                                 │
+│       │     要么每个浏览器一根 PG 通知套接字 → 打满 max_connections。            │
+│       └─ projection queue  → UPSERT turn_views                                   │
+│             列表 / 刷新 / 审批 UI 不能每次重放 thinking.delta；                  │
+│             快照默认不含推理增量。流 = live，快照 = 首屏与重连。                 │
+│                                                                                  │
+│  SSE 协程: SELECT turn_events WHERE sequence &gt; cursor                            │
+│            envelope = 一行事件的契约外壳，不是模型原始 HTTP 字节                 │
+│            sequence = 单 Turn 严格递增游标；SSE id / since_sequence /            │
+│                       快照 last_event_sequence 共用，断线才能续传                │
+│            空闲 2s poll 兜底；~14s `: ping`；终态/approval.requested 关流        │
+└───────────┬──────────────────────────────────────────────▲───────────────────────┘
+            │ INSERT + NOTIFY                              │ LISTEN / SELECT
+            ▼                                              │
+┌──────────────────────────────────────────────────────────┴───────────────────────┐
+│  PostgreSQL 16 + pgvector     跨服务唯一实时桥（禁止服务间 Python import）        │
+│                                                                                  │
+│  领域表    turns / runs / sessions / works                                       │
+│  事件表    turn_events   append-only · per-turn monotonic sequence               │
+│            AFTER INSERT → pg_notify('turn_events_channel', turn_id::text)        │
+│            门铃不含 delta；听者被叫醒再 SELECT                                   │
+│  分发      turn_dispatch_channel · runners.lease_expires_at                      │
+│  控制      run_commands  + run_commands_channel                                  │
+│  读模型    turn_views    物化投影（列表 / 刷新 / 审批 UI）                        │
+└───────────┬──────────────────────────────────────────────▲───────────────────────┘
+            │ LISTEN / claim (条件 UPDATE，CAS)             │ INSERT turn_events
+            ▼                                              │
+┌──────────────────────────────────────────────────────────┴───────────────────────┐
+│  runtime  执行面（:8001 不公网）                                                 │
+│                                                                                  │
+│  pull: LISTEN turn_dispatch + poll → claim accepted run → 写入 lease             │
+│        append turn.accepted → Intake → AgentEngine                               │
+│                                                                                  │
+│  while: ContextEngine.assemble → ModelGateway.stream → tools → checkpoint        │
+│                                                                                  │
+│  BufferedEventWriter (~40ms 窗) 合并 token / thinking.delta / tool.delta         │
+│  pg_advisory_xact_lock(turn_id) 下 MAX(sequence)+1 后 INSERT                     │
+│    按 Turn 哈希的事务级锁：同 Turn 串行拿号保证单调，异 Turn 不互相堵            │
+│    不是锁整张 turn_events                                                        │
+│                                                                                  │
+│  控制命令: LISTEN run_commands → 仅 runner_id 匹配本进程的 approve/deny/cancel   │
+└──────────────────────────────────────────────────────────────────────────────────┘
+            ▲
+            │ 供应商 HTTP 流（live）
+            │
+     Model Provider
+
+不变量
+──────
+  202 ≠ turn.accepted     202 = 已入队 pending；turn.accepted = runtime claim 后才写
+  Caddy ≠ 鉴权            L7 reverse proxy：同源汇聚 + 路径分流
+                          不验 Cookie、不持 Turn 状态、不解析 SSE 帧、不 sticky
+  runtime ↛ Browser       执行面不对浏览器开 SSE；字只经 turn_events → api → 流
+  SSE ⊈ inflight          挂看不占执行槽；组窗是 Turn 级 RAM，不经 SSE 全量搬运</pre>
+
+          <h3>微观时序</h3>
+          <pre class="seq">同一 Turn。t1 与 t3 在浏览器侧几乎同时发生；t2 与浏览器无 TCP。
+三道闸互不替代：门口丢掉请求 · 执行面停止领取 · 观看者占用的是另一类资源。
+
+t0  登录（一次性）
+    Browser  POST /api/v1/auth/login
+         │   Cookie 尚未存在；body = 用户名/密码
+         ▼
+    Caddy  handle /api/*  → reverse_proxy api:8000
+         │   角色：L7 reverse proxy + 路径分流（/api,/health → api；其余 → web）
+         │   不做：Cookie/HMAC 鉴权、缓冲业务体、sticky session、持有 Turn 状态
+         ▼
+    api    校验密码 → HMAC-SHA256 签发会话 token（非 JWT）
+           Set-Cookie: agent_end_user=…; HttpOnly; SameSite=Lax; Path=/
+           TTL 30d；payload.sub=user_id，pv=密码版本（改密即整站失效）
+           无独立 CSRF token：依赖同源 + SameSite；无 FastAPI CORS
+           （页面与 /api 同 host，由 Caddy 拼成同源）
+
+t1  发送（命令面，短连接）
+    Browser  fetch POST /api/v1/sessions/{sid}/turns
+             credentials: include  → 自动带 Cookie
+             body JSON { message, client_request_id, scenario_id? }
+         │
+         ▼
+    Caddy  透传；HTTP/1.1 短请求，无流式语义
+         │
+         ▼
+    api    RequestContextMiddleware  分配/回写 X-Request-ID
+           require_session_actor
+             Cookie | Bearer → HMAC verify → EndUser.active
+             失败 401；admin Basic + bypass → 映射 system user（评测/遗留）
+           assert_session_owner(sid, actor)     非 owner → 403
+           check_dispatch_admission(owner)
+             全局 unclaimed &lt; 32 且 本用户 unclaimed &lt; 2
+             否则 429 + Retry-After:5   ← Turn 尚未 INSERT
+           同一事务:
+             INSERT turns(pending) + runs(accepted, pull_eligible)
+                    + turn_views seed
+             pg_notify('turn_dispatch_channel', run_id::text)
+           响应 202  { turn_id, run_id, status: pending }
+           （幂等命中 client_request_id → 200，不新建）
+
+    闸① admission / shed load
+      未领取队列深度帽（全局 32 / 每 owner_user_id 2）。
+      满 → HTTP 429 + Retry-After:5；Turn 尚未 INSERT，不是 failed。
+      做成 failed 会污染终态，客户端也无法用 Retry-After 退避。
+      本请求：短 JSON + 一笔事务；不占 inflight。
+
+t2  领取（执行面；与浏览器无 TCP）
+    runtime  LISTEN turn_dispatch_channel | poll 2s
+             _active_turns &lt; 16 ? claim : 不领
+             UPDATE runs SET running, lease_expires_at = now()+180s
+               WHERE status='accepted'
+               ← CAS：只有一行成功。失败者 = 另一副本已抢走，
+                 不是事务失败，勿当回滚重试，否则双 runtime 跑同一 Turn。
+             INSERT turn_events type=turn.accepted  sequence=1
+             触发器 pg_notify('turn_events_channel', turn_id::text)
+
+    闸② inflight = 本进程 _active_turns（含 waiting_approval），默认 16
+      满则停止 claim，压力留在未领取队列，回头顶到门口 429。
+    lease / visibility timeout
+      领取后写 lease_expires_at；心跳 10s 证明还活着。
+      TTL 180s：编码一步常 60–160s，更短会把还在跑的 Turn 标成 runner_lost。
+      过期且不能安全续跑 → failed(runner_lost)。
+      审批挂起仍占同一 run_id：续跑必须是同一执行实例，否则 checkpoint 义务会丢。
+    claim 超时 15s 无人领取 → 已 202 的请求随后 SSE failed(start_timeout)
+    内存 从此吃 runtime 4g（组窗、模型流、工具结果）
+
+t3  订阅（SSE 面，长连接）——通常与 t1 的 202 之后立刻发起
+    Browser  GET /api/v1/turns/{tid}/stream?since_sequence=0
+             Accept: text/event-stream
+             Cookie 再次带上（SSE 是另一条 HTTP，必须重新鉴权）
+         │
+         ▼
+    Caddy  同一条 reverse_proxy。SSE = 永不结束的 HTTP 响应。
+           Caddyfile 未开额外 buffering；流式依赖：
+             · 上游 Transfer-Encoding: chunked / 逐步 yield
+             · api 头 Cache-Control: no-cache
+             · X-Accel-Buffering: no
+               （防 nginx 类代理攒包；Caddy reverse_proxy 默认不按
+                nginx proxy_buffering 攒，此头是防御性兼容）
+           Caddy 不解析 SSE 帧，不扇出，不存 sequence。
+         │
+         ▼
+    api    require_session_actor     同 t1
+           _require_turn_access      get_turn + assert_session_owner
+           Last-Event-ID 与 since_sequence 取 max → 续传游标
+           StreamingResponse(generator)
+             协程: wait(NOTIFY | 2s poll)
+                   SELECT * FROM turn_events WHERE sequence &gt; cursor
+                   yield "id: {seq}\nevent: message\ndata: {envelope}\n\n"
+                   空闲约 14s yield ": ping\n\n"
+             单进程一条 asyncio 循环：generator 多数时间 await 让出，
+             偶尔 yield 一帧。N 路挂看 = N 个 Task，不是 N 条 OS 线程，
+             也不是 N 路推理。
+             见到 turn.completed|failed|cancelled
+               或 approval.requested → 等投影追上 → 结束 generator
+               （暂停点关流，逼客户端 GET /view 再画审批 UI）
+
+    SSE = api 读模型的单向出口（text/event-stream；fetch+ReadableStream 带 Cookie）
+      · 载荷 = envelope JSON，不是模型原始 HTTP 字节；不承载命令
+      · 游标 = sequence；重连可重放，客户端按 seq 去重
+      · approval.requested 为暂停点：关流，逼客户端 GET /view
+    anti-entropy
+      NOTIFY 可能丢（监听器重启、连接闪断）。不以门铃为事实，
+      而以 SELECT sequence &gt; cursor 为准。空闲 ~2s 再扫一次
+      是兜底，不是第二套协议。
+      ~14s : ping；45s 无字节视为闷流，带 since_sequence 重连（≤8）
+
+    闸③ SSE 连接数 = 正在看直播的浏览器数（与 inflight 解耦）
+      关页只取消观看，不杀推理；挂着看已结束的 Turn 也不占执行槽。
+      每条流：api 一个 asyncio Task。组窗 128k 不在 api 复制。
+      大量挂起的 SSE 先挤 api 的 fd / 协程 / 1g，再才碰到 runtime 的 4g。
+
+t4  模型增量（高频）
+    Provider ──HTTP 流──► runtime ModelGateway
+         │
+         ▼
+    BufferedEventWriter  首 token 立即 INSERT；其后 ≤40ms 多行 INSERT
+         │  payload.delta 单条 ≤8192 字符（契约）
+         ▼
+    PG     AFTER INSERT → NOTIFY(turn_id)     门铃不含 delta
+         │
+         ▼
+    api LISTEN 独立连接（不占 hot pool）
+         ├─ fan-out Event.set()     → t3 的 SSE 协程 SELECT 后 yield 一帧
+         └─ projection queue        → UPSERT turn_views
+         │
+         ▼
+    Caddy  chunk 原样转发
+         │
+         ▼
+    Browser  TextDecoder 拆 \n\n 帧 → JSON.parse data
+             seq ≤ last 则丢弃
+             token/thinking/tool.delta → 内存 pending → rAF → setState
+             45s 无字节（含 ping）→ 视为中间设备闷流 → 带 since_sequence 重连（≤8）
+
+t5  控制命令（与 SSE 并行的短 POST）
+    Browser  POST /turns/{tid}/approve-tool-call   Cookie + JSON
+    Caddy    透传
+    api      鉴权 + _require_turn_access
+             INSERT run_commands + NOTIFY run_commands_channel
+    runtime  仅 runner_id 匹配且持有 lease 的副本消费
+             续跑同一 run_id（仍占 inflight）</pre>
+
+          <h3>Caddy</h3>
+          <pre class="seq">Caddy  L7 reverse proxy     SSE 对它 = 很久不结束的 GET /api/…
+────────────────────────────────────────────────────────────────
+做                                    不做
+:80/:443 入口                         不验 Cookie / HMAC
+/api /health → api，其余 → web        不 terminate SSE、不改 data:、不存 sequence
+页面与 API 同源                       不 sticky、不按 user 路由到某 runtime
+  → Cookie SameSite=Lax，无需 CORS    不执行 admission / inflight
+tls internal；/health 本地 ok
+
+禁缓冲：api 发 Cache-Control: no-cache 与 X-Accel-Buffering: no
+  代理若攒包，token 成批到达</pre>
+
+          <h3>鉴权切面</h3>
+          <pre class="seq">每条 HTTP 都做，含 SSE GET。不能订阅他人的 turn_id。
+
+Cookie agent_end_user  ──HMAC-SHA256──►  { sub, exp, pv }
+        │
+        ▼
+require_session_actor  → EndUser
+        │
+        ├─ POST /sessions/{sid}/turns  → assert_session_owner(sid)
+        └─ GET  /turns/{tid}/stream    → turn.session_id → 同一 owner 检查
+
+X-Internal-Token 只用于 api↔runtime 的 push 回退 / admin 代理。
+浏览器拿不到；runtime 不认终端 Cookie。</pre>
+
+          <h3>容量信封</h3>
+          <pre class="seq">┌──────────────────────────────────────────────────────────────────────────┐
+│  容量信封（默认单副本 make up；数字以 settings / compose 为准）            │
+│  组窗内存是数量级估算（无 per-Turn RSS 探针），用于规划，不是精确会计。    │
+│  真正的后端并发上限往往是热池 5，不是 inflight 16。                       │
+│                                                                          │
+│  软件帽    inflight = 16 / runtime          admission 全局 32 / 用户 2     │
+│  进程      uvicorn ×1 · asyncio 单 loop                                  │
+│            禁止 --workers=N：每个 worker 复制一份互不相认的               │
+│            inflight 计数与 LISTEN 套接字，闸会失效。                      │
+│            扩容 = 加容器副本，claim 仍走数据库 CAS。                      │
+│  cgroup    runtime 4g (GPU→12g)  api 1g     postgres 1g  ast 768m        │
+│  DB 池     api hot5 + bypass5               runtime hot5 + bypass5       │
+│            + LISTEN 专用连接 2～3 根/进程   PG 默认 max_connections≈100   │
+│  实际并发  min(16, 热池排队, RSS, 供应商限流) 推荐 2～4 路满窗 Turn       │
+└──────────────────────────────────────────────────────────────────────────┘
+
+连接分类
+────────
+短连接  POST /turns  GET /view  POST approve|cancel
+        Caddy→api 一轮请求/响应；鉴权 Cookie；事务毫秒级；不占 inflight
+
+长连接  ① Browser↔Caddy↔api   SSE (chunked GET，Turn 生命周期)
+        ② api↔PG              LISTEN turn_events_channel（进程级，1 根）
+        ③ runtime↔PG          LISTEN dispatch + LISTEN run_commands
+        ④ runtime↔Provider    模型 HTTP 流（step 级，可 abort）
+        ⑤ runtime 心跳        10s 续 lease（短 SQL，逻辑上是长租约）
+
+        ① 与 ④ 数量随「正在看 / 正在推理」涨
+        ②③ 是固定的控制面插座，与用户数无关
+
+叠回时序
+────────
+t1 POST        短连接 · api 热池借 1 · 一事务 · COMMIT 后 NOTIFY
+               内存：请求 JSON KB 级
+               并发：admission COUNT unclaimed（INSERT 之前，避免先写再 429）
+
+t2 claim       runtime 热池 1 · CAS UPDATE · inflight += 1
+               加载 transcript → TurnState（此时组窗尚未到 128k）
+
+t3 SSE         长连接 1 / 观看者
+               不借热池挂起：LISTEN 独立连接 + 唤醒后短 SELECT
+               内存：当前页 envelope（delta ≤8KiB/事件）
+               并发：N 路 SSE ≈ N 个 asyncio Task on api 1g
+               与 inflight 解耦
+
+t4 assemble    纯 CPU/内存 · 不写库
+               峰值 = 组窗对象图（约 5～30 MiB / 满窗 Turn）
+               fill≥0.80 才 collapse
+
+t4 INSERT      热池；同 Turn 串行拿 pg_advisory_xact_lock
+               按 Turn 哈希的事务级锁：同 Turn 串行拿号，异 Turn 不互相堵
+               不是锁整张 turn_events
+               16 Turn 并行 ⇒ 最多 5 个真正在 COMMIT
+               其余 await Pool.acquire()；排队 &gt;5s → statement/command timeout
+
+t4 模型流      长连接 ④ · 内存在 runtime（不经 PG、不经 SSE 全量）
+               SSE 只搬 payload.delta
+
+t5 checkpoint  UPSERT JSONB = 组窗的磁盘镜像（审批挂起仍占 inflight + lease）</pre>
+
+          <h3>双池与旁路插座</h3>
+          <pre class="seq">同一实例 agent-postgres（cgroup 1g，max_connections≈100）
+超时分级 + 槽位隔离。checkout = 从池里借一条连接。
+热路径 SQL 必须在约 5s 内归还，否则 claim / 事件批写 / SSE 回放排队，
+再叠加超时会切断还在跑的 Turn。
+                    ─────────────────────────────────────────────────────
+                                      │
+          ┌───────────────────────────┼───────────────────────────┐
+          │                           │                           │
+          ▼                           ▼                           ▼
+   asyncpg HOT 池              asyncpg BYPASS 池              旁路插座（非双池）
+   get_pool()                  get_bypass_pool()
+   min=1 max=5                 min=1 max=5
+   statement_timeout=5s        statement_timeout=120s
+   command_timeout=5s          command_timeout=120s
+          │                           │                           │
+          │  交互必须快               │  允许慢、禁止占热池        │  自己建连
+          │                           │                           │
+          ├ claim / lease             ├ AST UPSERT                ├ LISTEN ×N
+          ├ INSERT turn_events          work_ast_* / jobs           独立 asyncpg.connect
+          ├ SELECT SSE 回放             SKIP LOCKED 领取            不计入 pool max=5
+          ├ 投影 turn_views           ├ 硬删除 Session              探活 SELECT 1 / 30s
+          ├ admission COUNT             级联 wipe turn_events     ├ RAG psycopg
+          ├ run_commands              ├ 事件分级保留 DELETE         PgVectorStore 自建连
+          └ checkpoint/transcript       stream 7d / 结构 90d        索引面 HNSW/GIN
+                                                                    查询面 search_sources
+                                                                    （Turn 内 ANN，但仍
+                                                                     不走 hot 池）
+
+叠回时序
+────────
+t1 POST /turns          HOT     短事务 INSERT + NOTIFY
+t2 claim                HOT     CAS UPDATE
+t3 SSE SELECT           HOT     sequence &gt; cursor（被 LISTEN 叫醒）
+t4 INSERT turn_events   HOT     advisory lock + 批写
+t4 search_sources       psycopg 专用连   ANN/FTS；失败/超时不占用 hot
+t4 AST 后台             BYPASS  indexer 进程；Turn 只读投影
+删历史 / retention      BYPASS  与直播 SSE 错开槽位
+
+挡住什么
+────────
+HOT     checkout 必须快还；慢 SQL 占槽 → claim / 事件批写 / SSE 回放排队
+        再叠加超时会切断还在跑的 Turn
+BYPASS  不是第二台库，也不是 RAG 专用池
+        同实例另一组 5 槽、120s，专给会超过 5s 的慢 SQL
+        级联 wipe：硬删会话时显式 DELETE 该会话下 turn_events
+        （后期 DDL 虽有 ON DELETE CASCADE，旧库可能早于该 FK）
+LISTEN  checkout 就一直占着；放进热池 = 永久少槽 → extra connect
+RAG     psycopg 自建连，第三条绕开 hot 的路径，不走 bypass</pre>
+
+          <h3>组窗内存</h3>
+          <pre class="seq">组窗（每 Turn，不是每 Session）
+  ContextEngine.assemble 的 Turn 级 RAM，不是 Session 常驻 128k。
+  session_transcripts 落盘前已确定性裁剪。
+──────────────────────────────
+  CompactionPolicy
+    model_window      128_000 tok     模型上下文上限
+    output_reserve     30_000 tok     预留给 completion（不计入 fill 分子）
+    usable             98_000 tok     fill = assembled / usable
+    collapse / snip / autocompact     0.80 / 0.90 / 0.95
+    hot_zone           0.35           collapse 时保留的尾部占比
+    tool_result        4_000 字       普通 tool_result 头尾截断
+    latest read_file  32_000 字       最近一次成功读文件放宽
+
+  驻留位置（同一 Turn 内会有多份拷贝）
+    TurnState.messages          真源（工具回灌后）
+    ContextEngine.assemble      本步送模型的窗口
+    checkpoint (JSONB)          审批挂起 / 续跑
+    session_transcripts         Session 级落盘；写入前确定性裁剪，不调 LLM
+    模型 HTTP body              序列化后再占一份
+
+  内存数量级（Python 对象图；仓库无 per-Turn RSS 探针，只作规划）
+    满 usable≈98k tok → 典型 5～30 MiB / Turn（对象头 + 多份拷贝）
+    16 inflight × 20 MiB ≈ 0.3 GiB   仅消息图
+    + sentence-transformers 常驻
+        gte-small@384     ~0.1 GiB
+        bge-m3@1024       ~1.5–2.5 GiB（故 GPU overlay 把 runtime 抬到 12g）
+    ⇒ 4g cgroup 下 16 路满窗会先 OOM。软件帽 16 ≠ 物理可跑 16。</pre>
+
+          <h3>规划上界</h3>
+          <pre class="seq">软件帽先于 cgroup；热连接先于软件帽。不要宣称「支持 16 用户同时满负荷编码」。
+可回归的最高并发需要 rss_bytes/inflight 与 pool_acquire_wait_seconds；仓库只保证软件帽与 cgroup。
+
+  维度            默认单副本     备注
+  软件执行中      16             RUNTIME_MAX_INFLIGHT_TURNS
+  DB 热连接       runtime 5 + api 5    先于 16 饱和
+  满窗推理        2～4           4g + 组窗拷贝 + embed
+  轻量对话        6～8           窗远小于 98k
+  SSE 挂看        数十           api 1g / fd；≠ 能推理 16
+  未领取排队      32 / 用户 2    再高 429
+  HA 双 runtime   软件 32        近双份 4g；PG 连接再 +12
+
+扩容
+────
+  make up-ha → runtime-a / runtime-b，共用同一 Postgres 与 agent_data
+  claim 走数据库 CAS，不配置 RUNTIME_URL_MAP
+  单进程 uvicorn，勿设 --workers（会复制互不相认的 inflight / LISTEN）
+  dispatch_wait_seconds / dispatch_queue_depth 顶满再加 runtime
+  event_pipeline_lag_seconds / TTFB 变差先查热池与事件批窗（~40ms）
+
+事务与边界
+──────────
+  create_turn 单事务多 INSERT；NOTIFY 在 COMMIT 后投递
+  事件行在 pg_advisory_xact_lock(turn_id) 下分配 sequence
+    同 Turn 串行拿号；异 Turn 不互相堵；不是锁整张事件表
+  SQL 均 $n 参数化；asyncpg 每连接 statement cache（默认 100）
+  加密停在边界：:80 明文，:443 tls internal
+  容器内 PG/HTTP 默认无 sslmode=require
+  Cookie = HMAC 签名（完整性，payload 非加密）；供应商 Key 静态 Fernet</pre>
+          <p class="figure-lead">下图中间箭头链即 POST → 准入 → 落库 NOTIFY → claim/lease → 事件 → SSE。左右为 Caddy / 双池 / 禁止项，不是第二套主链。菱形为未领取队列与 inflight。数字与 ASCII 一致：lease 180s、热池 5×5s、202 ≠ <code>turn.accepted</code>。</p>
+          <div class="src"><code>deploy/caddy/Caddyfile</code> · <code>admission.py</code> · <code>turn_dispatch.py</code> · <code>db/pool.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/architecture/backend-stack-zh.png" alt="后端架构：四层栈、启动依赖、扩容与 Postgres 数据通道" />
+            <img src="../assets/architecture/backend-stack-zh.png" alt="后端并发与分发详流：准入、claim、lease、双池与 SSE" />
           </div>
-          <figcaption>后端架构 · 分层 / 启动 / 扩容 / 数据通道 · 点击放大</figcaption>
+          <figcaption>后端并发与分发详流 · 准入 / claim / lease / 双池 · 点击放大</figcaption>
         </figure>
       </section>
 
@@ -1492,7 +1928,7 @@
               <span class="n">3</span>
               <div>
                 <p class="what"><code>intel</code>：资料与提示偏情报向</p>
-                <p class="why">检索默认站内情报语料。核实闭环尚未做成产品。以本 Profile 为准，不以 <code>docs/plan/</code> 草稿为现行流程。</p>
+                <p class="why">检索默认站内情报语料。核实闭环尚未做成产品。以本 Profile 为准。</p>
               </div>
             </li>
             <li>
@@ -1565,7 +2001,7 @@
           </ol>
           <p>长文被截断时附标题大纲，使模型跳段而非从第一行盲翻。编码场景仍不以资料检索导航长文。磁盘稿与网页聊天记录通常仍完整——压缩只作用于本步模型窗。</p>
           <p class="figure-lead">下图中主链：卫生 → 填充率判定 → 三档加压 → 送给模型。</p>
-          <div class="src"><code>context/engine.py</code> · <code>structural/outline.py</code> · <code>docs/core/tools-and-context.md</code></div>
+          <div class="src"><code>context/engine.py</code> · <code>structural/outline.py</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1666,7 +2102,7 @@
           </ol>
           <p>产品对话不等符号表 ready。界面进度条只报告扫描进度，ready 之前不得画成已能精确定位。写作/情报使用资料检索，不打开这套结构工具。</p>
           <p class="figure-lead">下图上半是「找 / 波及 / 验」写入既有工具；下半仍是 Engine while，虚线汇入 <code>tool_use</code>。</p>
-          <div class="src"><code>structural/</code> · <code>docs/core/tools-and-context.md</code></div>
+          <div class="src"><code>structural/</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -1764,7 +2200,7 @@
           <ul>
             <li>OpenAPI / 事件 JSON Schema / 命令体 / DDL：<code>packages/contracts</code></li>
             <li>Ops manifest：<code>packages/contracts/eval/ops_run_manifest.schema.json</code></li>
-            <li>正文六篇：<code>docs/core/*</code> · 专题 <code>docs/topics/*</code>。<code>docs/plan/</code> 为可删草稿，不参与权威。</li>
+            <li>人类可读入口：本导览。机器源：<code>packages/contracts</code>。</li>
             <li>只读资源不触发 loop：<code>GET /turns/{id}</code> · <code>/view</code> · <code>/stream</code> · <code>GET /runs/{id}</code> · Sessions / Works / 健康检查</li>
           </ul>
           <h3>组件地图</h3>
@@ -2374,7 +2810,7 @@ payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, h
       <section class="page" data-id="ops-eval-why" data-group="Ops 效果" data-title="评测原理">
         <div class="card">
           <h2>评测在测什么（审阅用）</h2>
-          <p class="lede">先把尺子讲清楚，再看后面的跑次回放。全文：<code>docs/topics/ops-eval-principles.md</code>。一句话：<strong>产品同一条 Turn 路径，面对官方题集，能不能交出官方指标。</strong>金标永不进模型窗。不是旁路脚本直接 embed / 直接 completion / 空补丁通管道。</p>
+          <p class="lede">先把尺子讲清楚，再看后面的跑次回放。一句话：<strong>产品同一条 Turn 路径，面对官方题集，能不能交出官方指标。</strong>金标永不进模型窗。不是旁路脚本直接 embed / 直接 completion / 空补丁通管道。</p>
           <table>
             <thead><tr><th></th><th>检索</th><th>上下文</th><th>编码</th></tr></thead>
             <tbody>
@@ -2418,14 +2854,14 @@ payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, h
             （3）n5 全 astropy，4/5 不能外推 Lite；同分异题更不能写成「稳定 80%」。
           </div>
           <p>下一页用本地实例走完命中判定（claim / 短答案 / hidden tests），并配主链图。其后为第 4 轮宏分 + 第 6 轮编码指针。</p>
-          <div class="src"><code>docs/topics/ops-eval-principles.md</code> · <code>docs/topics/ops-eval-walkthrough.md</code></div>
+          <div class="src"><code>eval/official/baseline/RESULTS.md</code></div>
         </div>
       </section>
 
       <section class="page" data-id="ops-eval-walk" data-group="Ops 效果" data-title="实例走查">
         <div class="card">
           <h2>评测实例走查</h2>
-          <p class="lede">用本地仍可复核的产物，把三套尺子落到具体题目上。全文：<code>docs/topics/ops-eval-walkthrough.md</code>。第 4 / 5 轮报告目录本机已不在；下列跑次取自现存 <code>latest_*.json</code>、<code>.local-data</code> 与 <code>sweb.eval</code> 镜像。宏分仍以 RESULTS 为准。</p>
+          <p class="lede">用本地仍可复核的产物，把三套尺子落到具体题目上。第 4 / 5 轮报告目录本机已不在；下列跑次取自现存 <code>latest_*.json</code>、<code>.local-data</code> 与 <code>sweb.eval</code> 镜像。宏分仍以 RESULTS 为准。</p>
           <table>
             <thead><tr><th>套件</th><th>跑次</th><th>实例</th><th>命中定义</th></tr></thead>
             <tbody>
@@ -2487,7 +2923,7 @@ payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, h
           </table>
           <p>本跑次（走查用 harness 产物）apply 5/5、<strong>resolved 3/5</strong>。宏分以 RESULTS 为准：第6轮 <strong>4/5</strong>，未过仍是 14365。Turn <code>status=pass</code> 只表示产品路径结束。P2P 全绿不能替代 F2P。这是 SWE-bench 定义，不是平台附加门槛。</p>
           <p class="figure-lead">下图为 harness 主链与两题分支。下一页为第 4 轮宏分 + 第 6 轮编码指针。</p>
-          <div class="src"><code>docs/topics/ops-eval-walkthrough.md</code> · harness <code>report.json</code></div>
+          <div class="src">harness <code>report.json</code> · RESULTS</div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
@@ -3012,7 +3448,7 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
         cover: "边界、权威与读法",
         principles: "R1–R5 热路径验收",
         topology: "Caddy · api · runtime",
-        backend: "四层栈 · 启动依赖 · 扩容",
+        backend: "pull 时序 · 三道闸 · 双池",
         domain: "Work / Session / Turn / Run",
         "request-path": "受理 → 领取 → 投影",
         "start-turn": "202 与 turn.accepted",
@@ -3059,6 +3495,9 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
       const navToggle = document.getElementById("navToggle");
       const navBackdrop = document.getElementById("navBackdrop");
       const themeBar = document.getElementById("themeBar");
+      const zoomOut = document.getElementById("zoomOut");
+      const zoomIn = document.getElementById("zoomIn");
+      const zoomLabel = document.getElementById("zoomLabel");
       let idx = 0;
       const warmed = new Set();
 
@@ -3111,6 +3550,40 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
         });
         applyTheme(readTheme());
       })();
+
+      const ZOOM_KEY = "agent.docs.zoom";
+      const ZOOM_STEPS = [90, 100, 115, 130, 150, 175];
+      let zoomPct = 100;
+
+      function readZoom() {
+        try {
+          const n = parseInt(localStorage.getItem(ZOOM_KEY), 10);
+          if (ZOOM_STEPS.indexOf(n) !== -1) return n;
+        } catch (e) {}
+        return 100;
+      }
+
+      function applyZoom(pct) {
+        const nearest = ZOOM_STEPS.reduce((best, s) =>
+          Math.abs(s - pct) < Math.abs(best - pct) ? s : best, ZOOM_STEPS[0]);
+        zoomPct = nearest;
+        document.documentElement.style.fontSize = (16 * zoomPct / 100) + "px";
+        try { localStorage.setItem(ZOOM_KEY, String(zoomPct)); } catch (e) {}
+        zoomLabel.textContent = zoomPct + "%";
+        zoomOut.disabled = zoomPct <= ZOOM_STEPS[0];
+        zoomIn.disabled = zoomPct >= ZOOM_STEPS[ZOOM_STEPS.length - 1];
+      }
+
+      function bumpZoom(dir) {
+        const i = ZOOM_STEPS.indexOf(zoomPct);
+        const next = ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, i + dir))];
+        applyZoom(next);
+      }
+
+      zoomOut.addEventListener("click", () => bumpZoom(-1));
+      zoomIn.addEventListener("click", () => bumpZoom(1));
+      zoomLabel.addEventListener("click", () => applyZoom(100));
+      applyZoom(readZoom());
 
       function setNavOpen(open) {
         document.body.classList.toggle("nav-open", open);
@@ -3260,6 +3733,9 @@ ValueError: Unrecognized QDP line: read serr 1 2</pre>
           const i = THEMES.findIndex((x) => x.id === cur);
           applyTheme(THEMES[(i + 1 + THEMES.length) % THEMES.length].id);
         }
+        if (e.key === "-" || e.key === "_") bumpZoom(-1);
+        if (e.key === "=" || e.key === "+") bumpZoom(1);
+        if (e.key === "0") applyZoom(100);
         if (e.key === "/") {
           e.preventDefault();
           filter.focus();

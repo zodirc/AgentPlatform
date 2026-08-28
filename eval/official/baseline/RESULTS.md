@@ -239,7 +239,7 @@ runtime 已重建（2026-08-16 ~19:23 CST）。下一轮 smoke 对照本表看�
 | retrieval | 多轮 RRF 融合 + RRF 分计 nDCG；`latest_retrieval_zh` 指针；baseline `--update` 认 retrieval_zh | **正向** |
 | context | L1/L0 gold 统一 `answers_list`；CJK 按字 F1；free 臂先读 passage | **正向** |
 | 部署 | `make up` 脏模块重建；bake-cache 离线对齐；ops-eval sock 合成「SWE 评测环境」 | **修复 / 正向** |
-| 契约 | `ops_run_manifest.schema.json` + 单测；`docs/contracts.md` | **正向** |
+| 契约 | `ops_run_manifest.schema.json` + 单测；导览契约页 | **正向** |
 
 ---
 
@@ -506,4 +506,4 @@ runtime 已重建（2026-08-16 ~19:23 CST）。下一轮 smoke 对照本表看�
 | astropy__astropy-6938 | git_diff | 36 | 371.1 | resolved | ok |
 | astropy__astropy-14365 | git_diff | 136 | 2461.1 | unresolved | patch_not_resolved |
 
-> 对照上一烟 `5a4e9ba9`（2026-08-14 Wave 4）：resolve 同为 **0.6 / 同未过两题（14182、14365）**。本跑开启 **`workspace_index_wait_ready=true`**（先 AST 再开题）；Locate `fuse_ok≈0.42`（先前烟约 0.17），`definition_null=0`。**steps_total=467 · elapsed≈1.92h**（五题墙钟合计）。**不作效果结论**（smoke）。现行路径见 `docs/core/tools-and-context.md` §2。
+> 对照上一烟 `5a4e9ba9`（2026-08-14 Wave 4）：resolve 同为 **0.6 / 同未过两题（14182、14365）**。本跑开启 **`workspace_index_wait_ready=true`**（先 AST 再开题）；Locate `fuse_ok≈0.42`（先前烟约 0.17），`definition_null=0`。**steps_total=467 · elapsed≈1.92h**（五题墙钟合计）。**不作效果结论**（smoke）。现行路径见导览编码页。
