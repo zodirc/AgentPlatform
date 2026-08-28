@@ -1,0 +1,21 @@
+<section class="page" data-id="next" data-group="缺口" data-title="缺口与下一步">
+        <div class="card">
+          <h2>缺口（对照刚才那次跑）</h2>
+          <ul>
+            <li><strong>锚点</strong>：SCORECARD 主栏仍空。升锚：retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。</li>
+            <li><strong>编码通过</strong>：钉死 14365——官方 issue 只有 <code>read serr 1 2</code>，隐藏 F2P 还要求数据 token <code>NO</code> 的 casefold；related_tests 覆盖与采用不要只看一轮。</li>
+            <li><strong>编码时长</strong>：14182 第6轮题内约 13min（786s），已离开第5轮 ~30min；套件墙钟仍约 43min。</li>
+            <li><strong>BEIR</strong>：R@100 第一验收位仍未稳过；n=20 不够下结论；交叉编码器暂缓。</li>
+            <li><strong>Context</strong>：F1/EM 略低于 0.5479 / 0.30 对照锚，待放量。</li>
+            <li><strong>产品</strong>：intel 核实闭环 / collab 仍薄。</li>
+          </ul>
+          <h3>维护本导览</h3>
+          <ol>
+            <li>先改代码与契约，再改 <code>docs/tour/pages/{id}.html</code>（壳是 <code>docs/tour/index.html</code> 的导航与样式）。</li>
+            <li>密度以后端并发页 <code>backend.html</code> 为范例：机制、现行数字、误用模型写在步骤旁。不要做等量格式替换。</li>
+            <li>改流程图：对照样板 <code>docs/assets/events/start-turn-command-zh.png</code> 整张重绘后替换同名 PNG。冲突：代码 &gt; 导览 ASCII &gt; 图上的字。</li>
+            <li>数字以 <code>eval/official/baseline/RESULTS.md</code> 为准；本回放过期则先改 RESULTS 再改本页表。</li>
+            <li>在线站点 <a href="https://zodirc.github.io/AgentPlatform/">zodirc.github.io/AgentPlatform</a>；本地 <code>make docs-tour</code>。</li>
+          </ol>
+        </div>
+      </section>

@@ -1,0 +1,53 @@
+<section class="page" data-id="scenarios" data-group="场景与工具" data-title="场景 Profile">
+        <div class="card">
+          <h2>四个 ScenarioProfile，同一条循环</h2>
+          <p class="lede">场景差在 YAML：<code>tool_names</code>、系统提示、检索过滤、审批覆盖、子 agent 类型、<code>generation.temperature</code>、hooks。AgentEngine 禁止 <code>if scenario == "…"</code>（<code>scripts/check_scenario_leak.py</code> 合入即红）。未知 hook 槽位或实现名启动期 fail-fast。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在 Engine 里写场景分支、把检索工具塞进编码、或把 LSP 塞进写作</li>
+          </ul>
+
+          <h3>注入点（开工时装入，while 内只读结果）</h3>
+          <pre class="seq">StartTurn → ScenarioRegistry.get(scenario_id)
+  装入 ToolScope / system_prompt / GenerationParams / retrieval 默认前缀
+  hooks 仅声明槽位：
+    system_prompt_composer · volatile_composer
+    step_checkpoint · post_turn · compact_bookmark
+  未知名字 → 启动失败，禁止默默忽略
+<span class="pt">◆ 要点  Engine 里写 if scenario=="coding"，constitution-check 必须红。差只能进 Profile。</span></pre>
+
+          <h3>四份 YAML（现行字段）</h3>
+          <pre class="seq">writing   max_steps=40  temperature=0.8  web_layout=writing-workbench
+          tools: draft_section · update_outline · propose_patch · search_sources
+                 check_citation · export_document · writing_rubric · evaluate_writing_fragment
+                 + 通用读写 / remember / recall / delegate
+          无 LSP / search_codebase / run_tests
+          retrieval.exclude_path_prefixes = seed/intel
+          patch_auto_apply=true · attach_writing_signals=true
+          post_turn_jobs: sources.index_sync
+          hooks: writing_cards / writing_focus / writing_continuity
+          子代理: researcher drafter editor fact_checker stylist explore retrieve planner
+
+agent     max_steps=150  temperature=null（跟供应商默认）  web_layout=agent-workbench
+          tools: edit_file write_file search_codebase goto_definition find_references
+                 run_command run_tests read_lints …  无 search_sources
+          approval_overrides: run_tests=never · write_file/edit_file=always
+          structural_prewarm=true（软预热，不挡 TTFB）
+          workspace_layout=repository
+          <span class="pt">◆ 要点  编码场景不提供 search_sources。用资料检索定位代码，会绕开符号表/LSP。</span>
+
+intel     max_steps=40  temperature=0.3
+          tools: enrich_ioc · lookup_indicator · search_sources · draft_section …
+          retrieval.default_path_prefix = seed/intel
+          核实闭环尚未做成产品（见缺口页）
+
+collab    max_steps=50  web_layout=collab-workbench
+          只经 delegate 开子 Run（子循环上限 12 步），摘要回灌父窗口
+          subagent_types 收紧为 edit / verify / shell / explore
+            （retrieve/researcher 留在 writing/intel，列在这里是空剧场）
+          approval: delegate=never · write_file/edit_file=always · run_tests=never
+          hooks: collab_orchestrator / collab_gap_hint
+          子代理须写短 findings 到 artifacts/collab/，summary 一行 ARTIFACT_REFS
+          <span class="pt">◆ 要点  写作不打开 LSP。把 goto_definition 塞进 writing 白名单，模型会在稿件世界里「找定义」。</span></pre>
+          <div class="src"><code>scenarios/profiles/*.yaml</code> · <code>scenarios/registry.py</code> · <code>scenarios/hooks.py</code> · <code>scripts/check_scenario_leak.py</code></div>
+        </div>
+      </section>

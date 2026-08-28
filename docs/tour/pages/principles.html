@@ -1,0 +1,65 @@
+<section class="page" data-id="principles" data-group="总览" data-title="原则与红线">
+        <div class="card">
+          <h2>原则与速率红线</h2>
+          <p class="lede">扩展能力时写入既有工具的结果契约，或放到 Turn 热路径之外的旁路。禁止改 AgentEngine 的 while 形状，禁止让模型再学习一套导航工具名。R1–R5 是用户提问热路径的验收，不是口号编号。每条都能对照到现行超时、旁路进程与合入脚本。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
+          </ul>
+
+          <h3>加能力时走哪条</h3>
+          <pre class="seq">新能力要落地
+        │
+        ├─ 能写成工具 / tool_result 契约 ──► 进既有 tools[]，handler 可改道
+        └─ 做不到 ──► 旁路进程（indexer / bench / 异步 summary）
+                     禁止：改 while 形状 · 新发明一套导航工具名给模型学
+
+热路径（用户提问 → 首 token）
+────────────────────────────
+R1  不挡受理
+    符号表：workspace_ast_inline 默认 False，入队 work_ast_index_jobs（ast-indexer 768m）
+    资料 sync：Watch 2s / 去抖 1.5s；写作 post_turn 才排 sources.index_sync
+    官方评测：bench 隔离库，不进日常 POST /turns
+    产品对话不等符号表 ready；仅评测套件开题前等待
+    <span class="pt">◆ 要点  把「索引建完」当受理门，TTFB 必炸。评测的等 ready 不得抄到产品路径。</span>
+
+R2  首 token 前不加同步模型
+    禁止热路径上同步摘要 / 裁判 / 改写
+    autocompact 默认定增量；compact 另 20s/1024 tok 且失败回退确定性摘要
+    0.95 档若同步调主模型，用户看见的首 token 前又付一次供应商
+    <span class="pt">◆ 要点  漏了会在组窗之外再付一次模型延迟，用户看见的是「卡住了」。</span>
+
+R3  热路径 CPU 毫秒级
+    整库向量化、全仓扫描禁止上主链
+    Locate 只读已构建投影（top_k=5）+ LSP；相关测试启发式 250ms / import 反向 400ms
+    search_sources 车道预算约 0.3s；psycopg 自建连，不占热池
+    <span class="pt">◆ 要点  把 Jedi/全仓 parse 塞进 goto_definition，编码 Turn 会在工具步卡死。</span>
+
+R4  重活异步
+    资料索引、审计漏斗、软预压缩、sessions.context_summary 走旁路
+    raw snapshot / model envelope persist 是 fire-and-forget，不进模型窗
+    <span class="pt">◆ 要点  summary 若同步，下一句对话会等上一句的旁路 LLM。</span>
+
+R5  可测才合并
+    挡合并的是 scripts/ci_proof.sh（runtime cov≥80 + smoke + stub golden）
+    官方 Bench 是效果温度计，eval_path=agent，不进 StartTurn，也不是 merge gate
+    冒烟分数不升 SCORECARD 主栏；harness 失败不得标成 resolve_rate=0
+    <span class="pt">◆ 要点  把 Ops 4/5 当成合入门，会把效果分和「主路径没炸」混成一件事。</span></pre>
+
+          <h3>不变量</h3>
+          <pre class="seq">跨服务     api / runtime / web 禁止 Python 互 import
+           实时事实桥仅为 Postgres：INSERT + NOTIFY / LISTEN
+场景       AgentEngine 禁止 if scenario == "…"
+           差只经 Profile / ToolScope；未知 hook 启动期 fail-fast
+终态       cancelled ≠ failed
+           审批挂起后同一 run_id + checkpoint 续跑；不存在 ResumeTurn
+两门正交   审批门 = 是否允许执行；沙箱门 = 进程可写范围
+           官方编码评测另有解题改道（该题 Docker），与上述两门正交
+工具切面   编码场景不提供 search_sources，不以资料检索定位代码
+           写作场景不打开 LSP 结构工具
+分数       冒烟分数不升 SCORECARD 主栏
+           官方 harness 自身失败不得标成模型 resolve_rate = 0
+
+<span class="pt">◆ 要点  取消是 cancelled。写成 failed，用户取消与 runner_lost 就分不开了。</span></pre>
+          <div class="src"><code>deploy/docker-compose.yml</code> · <code>scenarios/registry.py</code> · <code>scripts/check_scenario_leak.py</code></div>
+        </div>
+      </section>

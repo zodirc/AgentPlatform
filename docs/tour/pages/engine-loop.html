@@ -1,0 +1,149 @@
+<section class="page" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
+        <div class="card">
+          <h2>AgentEngine 单循环</h2>
+          <p class="lede">循环条件是 <code>while step_count &lt; max_steps</code>，不是无界 <code>while True</code>。<code>max_steps</code> 来自 ScenarioProfile（编码 150、写作/情报 40、协作 50；未写则 40）。Engine 不读 scenario 名字；工具表与系统提示由 Controller 在开工时注入。加能力 = 增强工具或结果契约，不改这条 while 的形状。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错超时层、把旁路当成新图节点、或把并行 gather 当成共享可变状态</li>
+          </ul>
+
+          <h3>循环外：Intake 决定要不要进 while</h3>
+          <pre class="seq">TurnController 已 claim、已写 turn.accepted 之后：
+  InputCompiler 处理斜杠与 @path prereread（单文件 ≤1.2k 字、超时 0.4s、最多 3 个文件）
+  should_query：/help · /compact · /verify 等可零模型结束
+    /compact 走独立 compact gateway（超时 20s、max_output 1024；失败回退确定性摘要）
+    终态 termination_reason = local_response，不占 Engine 步
+  需要模型 → AgentEngine.run(state)
+<span class="pt">◆ 要点  /help 进 while 会白白占 inflight。零模型路径在 Controller，不在第 1 步 assemble。</span></pre>
+
+          <h3>一步之内：门闩顺序</h3>
+          <pre class="seq">进入迭代前（尚未 step_count += 1）
+  1  turn_token_budget   默认 0 = 不限制；累计 input+output ≥ 预算 → budget_exceeded，break
+  2  cancel 协作检查     读库标志；命中 → state.cancelled，break（cancelled ≠ failed）
+
+step_count += 1；写 step.started
+  墙钟从本步 monotonic 起算，上限 step_timeout_seconds = 720
+  <span class="pt">◆ 要点  720 必须大于 model_timeout 600。否则一次长 think 会先被 step 墙钟杀掉，供应商超时层永远轮不到。</span>
+
+  可选收缩 tools[]：默认关闭。晚期拦截走运行时闸，不改 schema 字节
+    条件：delivery_status ∈ {ok, warning}  或  (step_count≥8 且 剩余≤6)
+    闸住 search_sources / delegate / remember / recall
+    <span class="pt">◆ 要点  改 tools[] 字节会打掉供应商 prefix cache。所以晚期禁工具是 handler 拒绝，不是删 schema。</span>
+
+  组窗 assemble_async（见「组窗阶梯」页）
+    卫生每步都做：tool_result 默认 4 000 字；刚成功读完的文件可至 32 000
+    fill = assembled / usable；usable ≈ 128k − 30k 输出预留
+    0.80 collapse（热尾 35%）→ 0.90 snip 最旧组 → 0.95 autocompact
+    写 context.reported（fill_ratio、strategies、budget_truncated_by_tool）
+    原始快照与 envelope 哈希 fire-and-forget，不进模型窗
+
+  ModelGateway.stream
+    首字节 60s（可重试）；连接 10s；整段流 600s；本步墙钟 720s
+    取消：独立 asyncio Task 约 50ms 轮询；命中则 abort 供应商 HTTP，并 aclose 生成器
+    仅尚未吐出首字节时允许重试（max_retries=2，backoff 0.5–8s）
+    429/5xx/连接失败/首字节超时 → transient；流中途断开不回放已发出的 token
+    <span class="pt">◆ 要点  取消若不断 HTTP，用户点取消后仍在烧供应商。chunk 循环里不再每 token 打一次库。</span>
+
+  解析三类增量 → 分事件
+    text            turn.token（BufferedEventWriter ~40ms 窗合并；首条立即落盘）
+    thinking        turn.thinking.delta（默认不进 turn_views；Ops 评测可改 sidecar）
+    tool_use        本步结束后成批执行，不在流中途跑 handler
+    流结束后写 usage.reported，再查一次预算（避免超预算响应被当成正常终稿）
+
+  有 tool_use
+    _run_tool_batch：连续只读可并行，变更类串行（见下）
+    approval_required → pending_approval，return "waiting_approval"
+      Controller 落 checkpoint；本进程 inflight 仍计这颗 Turn
+    CANCELLED / state.cancelled → break
+    TERMINATE（stub）→ 立即终稿
+    否则 continue 下一 iteration（不再走终局判定）
+
+  无 tool_use
+    若有 response_text → 暂记为终稿
+    终局边：should_inject_verify_receipt / writing delivery hold
+      命中 → 注入一条用户口吻消息（菜单不可见）+ tool.completed(verify_receipt=true) → continue
+      不命中 → break → Controller 写 turn.completed
+    step_count 撞墙 → termination_reason=max_steps</pre>
+
+          <h3>工具批：只读并行、写串行、结果保序</h3>
+          <pre class="seq">可缓存只读集合（连续一段才 gather）
+  list_dir · glob · grep · read_file · search_sources · enrich_ioc · lookup_indicator
+  多枚：copy(state) 隔离 messages / read_registry，asyncio.gather 后按模型给出的 tool_use 顺序合并
+  单枚：不走 gather
+  变更类（edit_file / write_file / run_command / run_tests …）一律串行
+<span class="pt">◆ 要点  I/O 完成顺序不定，但 tool_result 必须跟供应商 tool_use 顺序。共享一份 state.messages 会竞态。</span>
+
+同参只读命中进程内缓存
+  第二次起附 _note：不要再用同一参数调用；换路径或交卷
+  失败结果不入缓存
+
+本 Turn 配额（Engine 计数器，不是 PG）
+  read_file ≤ 16      search_sources ≤ 3
+  超限由 handler 拒绝，while 形状不变
+
+工具墙钟（与 step 720 / model 600 独立）
+  默认 tool_default_timeout = 60s
+  结构导航 15s · 诊断 60s · 单文件 checks 30s
+  timeout 写成 tool.completed(status=timeout)，不是把 Turn 标 failed
+  编码一步常 60–160s（并行只读 + 模型），这是 runner lease 做成 180s 而不是 60s 的原因
+
+handler 改道（工具名不变）
+  grep 符号形 pattern → search_codebase（Locate）；结果带 redirected_from=grep
+  评测 pytest / 环境探针 → 该题 Docker，而不是宿主 shell
+  <span class="pt">◆ 要点  改道在 handler。靠 prompt 劝模型换工具名，前缀缓存与审计都会漂。</span>
+
+审批
+  write_file / edit_file 等 requires_approval 时写 approval.requested
+  write_file 附旧文（截 32 000 字）供 UI diff；edit_file 只附 span 的 old/new
+  Engine 返回后由 Controller 持 checkpoint；approve 在同一 run_id 续跑，不新开 Turn</pre>
+
+          <h3>终局边：receipt 是 continue，不是第六个图节点</h3>
+          <pre class="seq">触发源只有工具结果维护的追踪器，不解析终稿自然语言。
+
+编码两类（剩余步数须 ≥ verify_receipt_reserve_steps，默认 10）
+  1  成功 edit/write 之后未跑 testish 命令          verify_pending
+  2  仓库测试已绿，但 problem.md 例子未在最新编辑后被成功命令覆盖
+     issue_repro_armed 且未 satisfied
+  每类每 Turn 至多一次（verify_receipt_sent / issue_repro_receipt_sent）
+  cancel / budget_exceeded 不注入
+
+写作 L0（staccato / hinge / opening / lore）
+  预留更紧：min(reserve, 3)；四类共用「本 Turn 已发过一张 writing receipt」互斥
+
+注入形态
+  平台写入一条 user 消息（口吻像用户催验证）
+  另写 tool.completed：tool_name=verify_receipt，schema 不允许 verify_receipt_kind 字段，kind 只进 summary
+  然后 continue 同一 while → 再 assemble → 再 stream
+<span class="pt">◆ 要点  禁止为「再验一轮」加第六个节点。那是终局边的 continue。receipt 也不是 tool_result，工具菜单看不见。</span></pre>
+
+          <h3>超时栈（互不替代）</h3>
+          <pre class="seq">层            默认        失败形态
+connect       10s         可重试（尚未首字节）
+first-byte    60s         transient；max_retries=2，backoff 0.5–8s
+model 整段    600s        ModelProviderTimeout
+step 墙钟     720s        StepTimeoutError → failed(step_timeout)
+tool 默认     60s         tool.completed(status=timeout)，Turn 继续
+结构 nav/diag 15s / 60s   同上
+compact       20s/1024tok 回退确定性摘要
+lease         180s/10s    runner_lost（编码一步常 60–160s）
+stall         180s/30s扫  auto-fail → step_timeout（跳过 waiting_approval）
+claim         15s         start_timeout（还没进 while）
+<span class="pt">◆ 要点  把所有超时收成一个数字，取消/租约/供应商/stall 会互相误杀。</span></pre>
+
+          <h3>本类明确不管</h3>
+          <pre class="seq">claim / 租约 / 终态事件      → TurnController
+工具 handler 实现            → tools.*
+fill 阶梯阈值细节            → context.policy
+斜杠编译                     → InputCompiler
+Stall Watchdog               → 旁挂循环（180s 无新事件且非 waiting_approval；默认 auto-fail → step_timeout）
+  stall 看的是 turn_events 新鲜度，不是模型是否仍在 think
+  thinking.delta 若 divert 出库，必须另有心跳，否则 watchdog 会把活 Turn 当死</pre>
+          <p class="figure-lead">海报中间自上而下的箭头链即 assemble → stream → 解析 → 工具或终局。verify 是第 5 步旁路，左右不是第二套主链。</p>
+          <div class="src"><code>engine/agent_engine.py</code> · <code>model/gateway.py</code> · <code>engine/verify_receipt.py</code> · <code>tools/bootstrap.py</code> · <code>settings.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/harness/agent-engine-loop-zh.png" alt="AgentEngine 单循环详流" />
+          </div>
+          <figcaption>AgentEngine 单循环详流 · 点击放大</figcaption>
+        </figure>
+      </section>

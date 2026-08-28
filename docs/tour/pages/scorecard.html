@@ -1,0 +1,74 @@
+<section class="page" data-id="scorecard" data-group="Ops 效果" data-title="一次完整 smoke">
+        <div class="card">
+          <h2>一次完整 smoke 回放（第4轮四套件 + 第6轮编码）</h2>
+          <p class="lede">一次完整四套件跑次的入账结果。数字取自 RESULTS · 2026-08-17。口径：<code>official-small-2026-08-m3</code> · L1 agent-path · arm=free · <code>sample_tier=smoke</code>。检索/上下文仍为第4轮 <code>deepseek-v4-flash</code>；编码指针已被第6轮 <code>gpt-5.6-luna</code> 覆盖。embed bge-m3@1024 / INDEX 13。</p>
+          <div class="callout warn"><strong>不作效果结论，不升 SCORECARD 主栏。</strong>smoke 只是方向盘。升锚要 retrieval 全量 · context limit=0 · coding n25+harness · <code>promote-run</code>（拒 n5）。n5 全 astropy，4/5 不能外推 Lite。</div>
+          <h3>这一次跑了什么</h3>
+          <table>
+            <thead><tr><th>套件</th><th>run_id</th><th>墙钟</th><th>主指标（怎么判）</th><th>记下的数</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>coding（第6轮覆盖）</td>
+                <td><code>4471acba-…</code></td>
+                <td>≈2563s</td>
+                <td>官方 harness <code>resolve_rate</code></td>
+                <td><strong>0.8（4/5）</strong></td>
+              </tr>
+              <tr>
+                <td>retrieval BEIR</td>
+                <td><code>42772fe3-…</code></td>
+                <td>1045s</td>
+                <td>nDCG@10 / <strong>R@100（第一验收位）</strong></td>
+                <td>0.4964 / <strong>0.5252</strong></td>
+              </tr>
+              <tr>
+                <td>retrieval_zh C-MTEB</td>
+                <td><code>22961e61-…</code></td>
+                <td>731s</td>
+                <td>nDCG@10 / R@100（与 BEIR 分栏）</td>
+                <td>0.6777 / 0.9167</td>
+              </tr>
+              <tr>
+                <td>context LongBench</td>
+                <td><code>cf2a1957-…</code></td>
+                <td>936s</td>
+                <td>抽 <code>Answer:</code> 后 F1 / EM</td>
+                <td>0.5282 / 0.2667</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>第4轮 parent <code>56b562a6-…</code> 四套件都 <code>completed</code>（4/4）。第6轮只重跑编码（parent <code>ec0a1226-…</code> · coding <code>4471acba-…</code> · luna），检索/上下文仍用第4轮指针。同分同题：未过仍是 14365。</p>
+          <h3>共同的评判纪律（先于分数）</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">必须 <code>eval_path=agent</code>，否则拒跑</p>
+                <p class="why">分数只能来自产品 Session/Turn/真实工具事件。dry-run、skip-api 空补丁不得进 Ops 主栏。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what"><code>RunSession.finish</code> 写出 <code>manifest.json</code>，再写 <code>latest_&lt;suite&gt;.json</code></p>
+                <p class="why">四指针互不覆盖。BEIR 不得盖掉 C-MTEB。coding 无 <code>resolve_rate</code> 不得标 <code>completed</code>。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">smoke 只写入 RESULTS 日记</p>
+                <p class="why">SCORECARD 主栏仍空。机器冒烟栏不是最新过程。n5 / smoke 执行 <code>promote-run</code> 会被拒。</p>
+              </div>
+            </li>
+          </ol>
+          <p class="figure-lead">下图：分数如何入账。尺子本身在上一页；后面三页按套件展开命中定义，并附这一轮数字。</p>
+          <div class="src"><code>eval/official/baseline/RESULTS.md</code> · parent <code>56b562a6</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/score-snapshot-zh.png" alt="现行分数入账详流" />
+          </div>
+          <figcaption>分数入账：smoke 日记 ≠ SCORECARD 主栏 · 点击放大</figcaption>
+        </figure>
+      </section>

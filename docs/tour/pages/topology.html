@@ -1,0 +1,77 @@
+<section class="page" data-id="topology" data-group="总览" data-title="部署拓扑">
+        <div class="card">
+          <h2>部署拓扑</h2>
+          <p class="lede">浏览器只访问产品面 <code>http://localhost/</code>。Caddy 把 <code>/</code> 交给 web，把 <code>/api/*</code> 与 <code>/health/*</code> 交给 api :8000。runtime 不对浏览器开 SSE。默认 <code>TURN_DISPATCH=pull</code>。并发数字与双池见上一页「时序 · 并发 · 负载」。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
+          </ul>
+
+          <h3>谁在链上</h3>
+          <pre class="seq">Browser  ──HTTPS──►  Caddy :80/:443
+                       │  L7 reverse proxy；无业务状态
+                       ├─ /api/*  /health/*  → api:8000
+                       └─ 其余               → web
+                            │
+                            ▼
+                     api    鉴权 · 准入 · 落库 · NOTIFY · LISTEN · SSE · 投影
+                            不跑 Agent loop
+                            │  pg_notify(turn_dispatch, run_id)
+                            ▼
+                     PG     跨服务唯一实时桥
+                            │  LISTEN / claim CAS
+                            ▼
+                     runtime :8001（不公网）
+                            领取 · lease 心跳 · Intake · Engine · 写 turn_events
+                            不对浏览器开 SSE
+
+旁路（不在用户提问主链）
+────
+  ast-indexer   后台 AST；SKIP LOCKED 领解析任务；cgroup 768m / 1 CPU
+  bench         官方评测 worker；隔离库；不进日常提问路径
+  发布台 :9090  同仓旁路控制台；对比指纹、标 dirty、分模块 up-*；不替代产品面
+
+<span class="pt">◆ 要点  浏览器永远只打 Caddy。runtime 对浏览器开 SSE，鉴权与游标就绕开 api 了。</span></pre>
+
+          <h3>组件：做 / 不做</h3>
+          <pre class="seq">web           做  场景工作台；消费 SSE 与 GET /view
+              不做 推断 Turn 阶段；直连 runtime
+
+api           做  鉴权、准入、落库、NOTIFY、LISTEN、SSE、投影、Ops 旁路
+              不做 跑 Agent loop
+              <span class="pt">◆ 要点  HTTP 202 = 已入队 pending，不是 turn.accepted。</span>
+
+runtime       做  claim/lease、Intake、Engine、工具、检索、checkpoint、写事件
+              不做 对浏览器开 SSE；UI 投影
+              inflight 默认 16（waiting_approval 仍计）；满则停领
+              软件 16 ≠ 物理 16：热连接池 5×5s 往往先饱和；LISTEN 另开 asyncpg.connect，不从池借
+              bypass 池 5×120s 同实例 PG，给 CASCADE 擦除等慢语句，不是第二台库，也不是 RAG 的 psycopg
+              lease 丢且不能安全续跑 → failed(runner_lost)
+              claim 超过 15s 无人领 → failed(start_timeout)
+              单进程 uvicorn，禁止 --workers；水平扩展靠 runtime 副本（make up-ha）
+              回退才是 api HTTP 推 start-turn 到 :8001
+
+ast-indexer   做  后台符号表
+              不做 进 Turn 热路径；替代 LSP；进入资料检索向量面
+
+bench         做  官方评测；mem_limit 6g（GPU overlay 12g）
+              不做 日常用户提问路径</pre>
+
+          <h3>资源量级（make up 单副本）</h3>
+          <pre class="seq">cgroup 合计约 14g；建议宿主 ≥16 GiB，磁盘空闲 ≥40 GiB
+postgres / bench-postgres 各 1g
+runtime 4g（GPU → 12g）  api 1g  ast 768m
+无 GPU → gte-small@384；VRAM≥8GiB → bge-m3@1024（runtime 与 bench 各一份权重）
+
+命令    make up（先拉起再只重建 dirty） / make up-all
+        主机重启优先 make start；make smoke / make gate
+        SWE 环境 make ops-swe-eval-ready</pre>
+          <p class="figure-lead">下图为发布台：对比代码、标 dirty、分模块重建。上文 ASCII 是日常请求穿过 Caddy → api → runtime。</p>
+          <div class="src">根 <code>README.md</code> · <code>deploy/docker-compose.yml</code> · <code>deploy/caddy/Caddyfile</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/release-modular-deploy-zh.png" alt="分模块发布台详流" />
+          </div>
+          <figcaption>分模块发布台详流 · 点击放大</figcaption>
+        </figure>
+      </section>

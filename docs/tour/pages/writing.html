@@ -1,0 +1,75 @@
+<section class="page" data-id="writing" data-group="RAG / 写作" data-title="写作工作台">
+        <div class="card">
+          <h2>写作：Work 拥有树；新一篇归档旧稿</h2>
+          <p class="lede">用户心智是一份稿。工程上 Work 拥有稿树；Session 只是对话线程。场景差在 Profile（<code>writing.yaml</code>：max_steps=40、temperature=0.8、<code>patch_auto_apply=true</code>、<code>attach_writing_signals=true</code>、排除 <code>seed/intel</code>），Engine 不读 scenario 名字。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会让用户先删文件、把风格当开工合同、或把评分做成 while 新节点</li>
+          </ul>
+
+          <h3>稿树（Work 根，不是 Session）</h3>
+          <pre class="seq">outline.md                 这场戏几句干什么；卡片不进向量面
+drafts/manuscript.md       正在 upsert 的正文
+drafts/archive/            occupy=fresh 时旧稿拷贝处
+sources/                   可被 search_sources 的资料（写作默认排除 seed/intel）
+sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤1000 / 情节 ≤600 / 一般 ≤400
+                           合计垫底 ≤3600；单卡 ≤2000；走 volatile，不焊进 system
+.agent/work/               元数据 / manifest / patch_budget
+工作台可见正文帽 writing_work_surface_max_chars = 6000
+<span class="pt">◆ 要点  Session compact 不得拆散 Work。切会话 ≠ 换作品根，归档也不该发生在 Session 层。</span></pre>
+
+          <h3>主链</h3>
+          <pre class="seq">1  意图分流（wants_new_piece × manuscript_is_occupied）
+     「写一篇 / 写个故事」且稿已占用 → occupy=fresh：拷到 archive，unlink 当前稿，focus=ch1
+     「续写 / 下一章 / 第 N 章」→ upsert 当前 drafts/manuscript.md
+     「写一篇章纲」不是新开一篇，除非同时说另/新开
+     <span class="pt">◆ 要点  不要让用户先删文件。fresh 是平台归档，不是产品提示「请清空」。</span>
+
+2  （可选）update_outline
+     几句这场干什么；纲上写清这本在写谁、写什么
+     章正文 &lt; 40 实体文字且用户未要目录 → outline_thin
+     用户说「只要目录 / 标题列表」则跳过薄纲门
+     通常不检索；卡片进 writing_cards，不进资料向量面
+
+3  成稿 draft_section(fragment=…)
+     冷起步无纲职 → fragment=mixed（不要发明章类型当评分切片）
+     有纲职 → infer_fragment_from_duty（情节/质地/高潮/动作/对白）
+     按需 search_sources（cite；每 Turn ≤3；超限拒绝本次调用）
+     禁止每轮强制 RAG、禁止 Turn 末自动 judge
+     篇幅：用户点名 N 字优先；否则
+       短篇目标 2500 · 单篇目标 3500 · 章稿默认 5000–6000（DEFAULT_CHAPTER_MIN/MAX）
+       实体文字 = 不含空白；不足约定 85% → length_short
+     返回值带 L0 receipts + L1 writing_signals
+     过程 L0 未清不得 mode=append，也不得宣称已完成（writing_delivery_hold）
+
+4  弱分或 L0 → 同轮 propose_patch(repair_span)
+     写作场景 patch_auto_apply=true，仍须 UI 出示 diff
+     只换最弱窗里的 old_text（可带 neighbor）
+     同岛停（可见字 overlap ≥12）；每 penalty key 5 次 / 章合计 8
+     碎拍尽则 rewrite_window（每章 2）；连续 apply miss 2 次停
+     net_signal ≥ 0 且无过程 L0 → patch_unnecessary
+     不整章再 draft_section（length_short 加厚除外）
+     hygiene 拒绝对白改旁白
+     <span class="pt">◆ 要点  修补焊在 tool_result，不改 Engine while。做成「自动再跑一轮润色」会把 pass 变成隐式流水线。</span>
+
+5  落盘 drafts/manuscript.md
+     polish / 导出 / verify 仍是用户下一次 Turn
+     post_turn_jobs: sources.index_sync（不挡下一 Turn 首 token）</pre>
+
+          <h3>Writing spec（易变垫底，≤620 字）</h3>
+          <pre class="seq">build_writing_spec_block → volatile_context，不进 system 提示（prefix cache）
+  book_scope  short|single|long     与卷内位置、三要素主项正交
+  work_mode   经典文学 / 连载网文    权重钉在工具里，设置页无滑条
+  fragment    评分切片，不是本章必须交的工种
+  focus / 这一场 / outline_phase
+  无纲时写「新篇另起人与事」
+<span class="pt">◆ 要点  风格是罗盘不是合同。把三要素当成开篇必须交的工种，开篇会先交设定再讲事。</span></pre>
+          <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 → 成稿 → 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
+          <div class="src"><code>writing/occupy.py</code> · <code>writing/book_scope.py</code> · <code>writing/text_metrics.py</code> · <code>writing/patch_budget.py</code> · <code>scenarios/profiles/writing.yaml</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/writing/writing-main-path-zh.png" alt="写作主路径" />
+          </div>
+          <figcaption>写作主路径 · 点击放大</figcaption>
+        </figure>
+      </section>

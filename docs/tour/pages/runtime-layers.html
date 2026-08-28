@@ -1,0 +1,85 @@
+<section class="page" data-id="runtime-layers" data-group="Runtime" data-title="Controller 与 Engine">
+        <div class="card">
+          <h2>TurnController 与 AgentEngine</h2>
+          <p class="lede">一次 Turn 的写主权在 Controller；反复「组窗 → 问模型 → 跑工具」的 while 在 Engine。Guard（取消、分层超时、Stall Watchdog、租约心跳）旁挂全程，不是 while 里新菱形。Engine 返回三种东西：终稿字符串、<code>"waiting_approval"</code>、或 <code>None</code>（取消/预算由 Controller 根据 <code>state</code> 收尾）。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把审批当成终态、把 stall 当成租约、或把 Profile 名字送进 Engine</li>
+          </ul>
+
+          <h3>写主权</h3>
+          <pre class="seq">TurnController（一次 Turn 的外壳，不进 while）
+  claim CAS + 写入 runner lease（TTL 180s，心跳 10s，touch 最小间隔 5s）
+  加载 ScenarioProfile → 组装 ToolScope / 系统提示 / GenerationParams
+  Intake：斜杠、@path、拼接 session transcript（或旧会话的 context_summary）
+  turns.status: pending → running；发出 turn.accepted（payload 含 scenario、模型名、输入预览）
+  收尾：turn.completed / turn.failed / cancelled；runs.succeeded|failed
+  审批挂起：checkpoint + PendingTurn，不写终态事件
+
+AgentEngine
+  只变异 TurnState：messages、step_count、usage、verify_* / issue_repro_*、delivery
+  经 EventWriter 追加 step.* / context.reported / turn.token / tool.* / usage.reported
+  不 UPDATE turns.status，不碰 lease，不发 turn.accepted
+
+api
+  投影 turn_views；对外 SSE；sessions.context_summary 常异步
+  无分布式事务：领域表短暂落后用 sequence reconcile
+<span class="pt">◆ 要点  Engine 写事件，Controller 写终态。把 status=completed 放进 while 末尾，审批续跑会丢 checkpoint。</span></pre>
+
+          <h3>Profile 注入，而不是场景开关</h3>
+          <pre class="seq">max_steps     agent.yaml = 150；writing/intel = 40；collab = 50；缺省 40
+子代理        delegate_runner DEFAULT_SUBAGENT_MAX_STEPS = 12（独立上限，吃父 Turn 步数墙）
+temperature   writing 默认 0.8；agent 可空（跟供应商默认）；来自 Profile.generation
+tool_names    结构导航能力在 Profile 里，不是 feature flag，开工后不 strip
+Engine        不读取 scenario_id 做分支；测试里用假 Profile 即可复现 while
+<span class="pt">◆ 要点  「给写作加一步特殊循环」会让编码/情报分叉。正确做法是换工具表与终局 receipt 追踪器。</span></pre>
+
+          <h3>三道超时 + 两道存活，互不替代</h3>
+          <pre class="seq">模型层（Gateway）
+  connect 10s · first-byte 60s（仅此可重试）· 整段流 600s
+  首字节 15s 曾在排队型 API 上把 3 次重试烧光；故默认 60s，总帽仍是 600s
+
+步层（Engine）
+  step_timeout 720s &gt; model 600s
+  单工具默认 60s；结构 checks 30s / nav 15s
+  StepTimeoutError → Controller 标失败，termination_reason 与 stall auto-fail 共用 step_timeout 字面
+
+租约（执行面占位）
+  lease 180s + heartbeat 10s
+  编码一步常 60–160s（并行只读 + 模型）。旧 60s TTL 会在 thinking.delta 刷盘争用时把活 Turn 回收成 runner_lost
+  waiting_approval 仍计入 RUNTIME_MAX_INFLIGHT_TURNS=16
+  <span class="pt">◆ 要点  软件 16 ≠ 物理 16。热连接池 5 往往先饱和；fat-window Turn 在 4g 上大约 2–4 颗。</span>
+
+Stall Watchdog（事件新鲜度，30s 扫一次）
+  阈值 180s 无新 turn_events，且非 waiting_approval、非已请求 cancel 的 orphan
+  默认 stall_auto_fail=True → _fail_turn(step_timeout)
+  跳过审批挂起：用户可能几分钟不点
+  <span class="pt">◆ 要点  stall ≠ 租约。租约回答「这颗 Turn 还有没有 runner」；stall 回答「事件表还在动吗」。thinking 若 divert 出库，必须另写 15s 心跳，否则 watchdog 误杀。</span>
+
+取消
+  request_cancel 写库；Engine 约 50ms 读标志并 abort 流
+  cancelled ≠ failed；force 标志走 cancel_force
+  claim 超时 15s → start_timeout（还没进 while）</pre>
+
+          <h3>审批挂起不是终态</h3>
+          <pre class="seq">Engine 见 approval_required
+  写 approval.requested（write_file 带全文件旧文截断；edit_file 只带 span）
+  return "waiting_approval" —— 注意这是返回值哨兵，会被 _CONTROL_OUTCOMES 拦截
+  delegate 子代理若把同名字符串当 summary 回传，必须编码成 step 可识别前缀，以免父循环误挂起
+
+Controller
+  序列化 TurnState → checkpoint_store（含 max_steps、verify_* 追踪器）
+  不发 turn.completed；runs 保持执行中
+  approve/deny 走 run_commands（仅 runner_id 匹配本进程）
+  续跑同一 run_id、同一 step_count，从 checkpoint 恢复欠验证标志
+<span class="pt">◆ 要点  把 waiting_approval 画成 turn.completed 的一种，续跑会变成新 Turn，receipt 计数与 read_registry 全部清零。</span></pre>
+
+          <h3>while 五格（细节在「Engine 单循环」）</h3>
+          <pre class="seq">1  assemble     压缩的是本步窗，不是磁盘稿；系统提示求稳定，tools[] 字节默认不变
+2  stream       取消必须打断 backoff 与 HTTP；仅首字节前重试
+3  解析         thinking.delta 默认只走 SSE
+4  tool_use     只读 gather + 变更串行；改道在 handler
+5  终局         欠验证 → receipt continue；否则 break 交 Controller 写终态
+<span class="pt">◆ 要点  把 Guard 画进 while 菱形，取消/超时会变成「又一步工具」，形状就改了。</span></pre>
+          <div class="src"><code>controller/turn_controller.py</code> · <code>engine/agent_engine.py</code> · <code>engine/state.py</code> · <code>controller/stall_watchdog.py</code> · <code>controller/checkpoint_store.py</code></div>
+        </div>
+      </section>

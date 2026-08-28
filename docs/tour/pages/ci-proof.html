@@ -1,0 +1,46 @@
+<section class="page" data-id="ci-proof" data-group="合入证明" data-title="CI 证明门禁">
+        <div class="card">
+          <h2>合入证明：不是 Ops 分数</h2>
+          <p class="lede">挡合并的是 <code>scripts/ci_proof.sh</code>。GitHub Actions <code>ci.yml</code>、<code>make ci-proof</code>、Ops 控制台 <code>suite=ci</code> 都只是触发同一条脚本。<code>suite=ci</code> <strong>不是</strong> retrieval/context/coding 那些效果套件。证明主路径不炸（R1–R5），不调用生产供应商，也不刷 BEIR/SWE 分数。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 Ops 4/5 当成合入门，或把 pre-push 当成完整证明</li>
+          </ul>
+
+          <h3>环境</h3>
+          <pre class="seq">Python ≥3.11（agent-contracts 下限）。优先 services/runtime/.venv，否则 PROOF_PYTHON
+proof_compose_env_apply 写入 stub 模型 / hash embed / 鉴权旁路
+PROOF_STEP=all|unit.*|gate  可单步；CI 设 GATE_SKIP_RESTORE=1
+<span class="pt">◆ 要点  开发机 python3 常是 3.9，脚本会直接 FAIL 并指出 venv 修法。不要拿 3.9 跑通当证明。</span></pre>
+
+          <h3>完整证明主链（阻断合并）</h3>
+          <pre class="seq">1  unit.ux_self_check     scripts/ux_signals.py --self-check
+2  unit.ux_tests          scripts/tests/test_ux_signals.py
+3  unit.runtime           services/runtime pytest tests --cov=app --cov-fail-under=80
+                          无 Docker。覆盖率门槛只绑 runtime
+4  unit.api_ux            services/api pytest；强制 overlay 本仓 packages/contracts/python
+                          （镜像/venv 里可能仍是缺 writing_prefs 的 stub 包）
+5  unit.contracts         packages/contracts/tests + packages/contracts/python/tests
+6  gate                   make gate = smoke(runtime-lite) + eval-all(stub golden)
+                          GATE_SKIP_RUNTIME_TEST=1（避免与步骤 3 重复 pytest）
+                          Golden 断言事件序与接口，不是效果分
+
+菱形  全部通过？
+  是  PASS 可合并
+  否  FAIL 阻断
+<span class="pt">◆ 要点  改 system.md / 工具 / Intake / 契约必须跑完整证明。Ops Bench 绿了不能代替本页。</span></pre>
+
+          <h3>圈外（不阻断）</h3>
+          <pre class="seq">pre-push preflight   scripts/preflight_unit.sh：只跑 unit 截（含 runtime cov≥80）
+                     ≠ 完整证明；没有 smoke/golden
+nightly L2 live      真供应商；只告警不阻断合并
+Ops suite=retrieval|context|coding   效果温度计，eval_path=agent，不是 merge gate</pre>
+          <p class="figure-lead">下图中间箭头链即 bootstrap → unit.* → make gate。左右是触发入口与圈外不阻断路径。</p>
+          <div class="src"><code>scripts/ci_proof.sh</code> · <code>.github/workflows/ci.yml</code> · <code>scripts/preflight_unit.sh</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ci-proof-zh.png" alt="CI 证明门禁详流" />
+          </div>
+          <figcaption>CI 证明门禁 · 与 Ops 效果分栏 · 点击放大</figcaption>
+        </figure>
+      </section>

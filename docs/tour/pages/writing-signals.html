@@ -1,0 +1,49 @@
+<section class="page" data-id="writing-signals" data-group="RAG / 写作" data-title="写作评分环">
+        <div class="card">
+          <h2>评分焊在工具返回值，不改 Engine while</h2>
+          <p class="lede">L0 是过程门（设置页没有滑条可关）。L1 是到类原型 <code>sig.v1</code> 的距离：维度加权 <code>composite</code> 加上惩罚/奖励得到 <code>net_signal</code>。权重按 <code>work_mode</code> 钉在工具里，<strong>不在设置页</strong>。金标是鲁迅 / 郁达夫公版节选，学拍不搬核。Ops <code>/ops/&lt;密钥&gt;/writing</code> 只打分，不进产品 Turn。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 L0 做成可关开关、把弱分再开一条 while、或把对白改成旁白当「修好了」</li>
+          </ul>
+
+          <h3>切窗</h3>
+          <pre class="seq">成稿文本切窗：可见 ≥800 实体文字则目标约 480，取最弱窗
+fragment ∈ plot_progress / worldview_texture / climax_beat / battle_action / dialogue_dyad / mixed
+冷起步默认 mixed
+mismatch 只在：申报≠mixed ∧ 申报≠检出 ∧ 对齐申报 &lt; 0.60（MISMATCH_ALIGN_FLOOR）
+  否则不记错类——避免冷启动 mixed 被当成「写错工种」</pre>
+
+          <h3>L0 过程门（四类 + 篇幅）</h3>
+          <pre class="seq">staccato_uniform   均匀短拍 / 空应声 / 把因果说圆
+                   对白还认拆句（「…。」他说，「…。」）、升格（「A，就是 B」）、对比收束（「是 A，不是 B」）
+                   对白里因为/可是可以留；空转问答应收成一两句或动手，不要改成旁白
+                   平台惩罚 delta = −0.18（焊在 scorer，不是设置）
+hinge_dense        看见…立马…却/回头（非章节债）
+lore_dump          开篇章「N年前」+失踪/尸体 dump
+opening_institution 开篇章在可站立场景前写宗/派专名
+length_short       实体文字 &lt; 约定字数的 85%（用户点名 N 字优先）
+
+L0 对 writing_delivery_hold / verify_receipt 管线：过程门未清不得 append、不得宣称已完成
+写作 L0 receipt 与编码 verify 共享注入函数，但 hinge_reserve = min(10, 3)
+本 Turn 四类 writing receipt 互斥只发一张
+<span class="pt">◆ 要点  L0 不是「写得不好」的滑条。做成设置项，用户会关掉过程门，交卷叙事就会提前。</span></pre>
+
+          <h3>L1 与同轮修补</h3>
+          <pre class="seq">net_signal = composite + penalties/rewards
+WEAK_NET = 0.50：低于此或任一过程 L0 → 本 Turn propose_patch(repair_span)
+  repair_span 跟最弱窗走，可带 neighbor
+  同岛：old_text 与上轮相同或可见 overlap ≥12 → 停（ISLAND_OVERLAP_MIN）
+  预算（计 applied，不计提案）：每 key 5 / 章合计 8 / rewrite_window 每章 2 / apply miss 连 2 次停
+  net_signal ≥ 0 且无过程 L0 → patch_unnecessary（「已经过线还在补」会把稿磨穿）
+  hygiene：拒绝对白改旁白；碎拍尽才换窗，不整章再 draft_section
+<span class="pt">◆ 要点  同岛不停，模型会在同一 12 字里打转直到撞 max_steps。预算是为了逼它换窗或交卷。</span></pre>
+          <p class="figure-lead">下图中主链：切窗 → L0 / L1 → 同轮修补判定（同岛停 · 预算尽换窗）。左右是入口与禁止项，不是第二套主链。</p>
+          <div class="src"><code>writing/signals/scorer.py</code> · <code>writing/signals/repair.py</code> · <code>writing/patch_budget.py</code> · <code>agent_contracts/writing_prefs.py</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/writing/writing-signals-loop-zh.png" alt="写作评分环" />
+          </div>
+          <figcaption>写作评分环 · 点击放大</figcaption>
+        </figure>
+      </section>

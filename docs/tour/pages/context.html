@@ -1,0 +1,56 @@
+<section class="page" data-id="context" data-group="场景与工具" data-title="组窗阶梯">
+        <div class="card">
+          <h2>组窗阶梯：卫生与填充率加压</h2>
+          <p class="lede">送给模型的不是 Session 全文，也不是磁盘稿。每步 <code>assemble_async</code> 产出<strong>这一次</strong>请求的窗。通道分离：系统提示求稳定（利于 prefix cache）；<code>tools[]</code> 单独一份且默认不改字节；作品规矩 / 焦点 / 计划走 <code>volatile_context</code>（易变垫底，不焊进 system）；真正被压缩的是对话历史。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 128k 当常驻 RAM、在首 token 前再付一次摘要模型、或改 tools[] 字节打掉缓存</li>
+          </ul>
+
+          <h3>预算怎么算</h3>
+          <pre class="seq">context_window_tokens = 128 000
+output_reserve_tokens = 30 000（按 128k→30k 比例随窗缩放；model_max_output_tokens&gt;0 则覆盖）
+usable ≈ 98k tok = 窗 − 输出预留
+fill = assembled / usable    ← 分母不是 128k
+project_context ≤ 2 000 字；@path prereread ≤ 1 200 字 × 3 文件 × 0.4s
+turn_token_budget 默认 0（不限制累计）；超了 Engine 在步前/步后 break，不靠组窗救命
+<span class="pt">◆ 要点  压缩只作用于本步模型窗。磁盘稿与网页聊天记录通常仍完整。当成 Session 常驻 128k 会规划错内存（4g 上 fat-window 大约 2–4 颗 Turn）。</span></pre>
+
+          <h3>主链</h3>
+          <pre class="seq">assemble 本步窗口
+    │
+    ▼
+卫生（几乎每步；settings: tool_result_char_budget=4000 / latest_read=32000）
+    1  单条超长 → 头尾截断，中间丢弃并留下可再读指针
+       默认 4 000 字；刚刚成功 read_file 的那份可放到 32 000
+    2  同路径旧读取折成短占位（只留最近一次全文；更早的留首尾约 300 字与行号）
+       被挤出可见窗的路径进入 evicted_paths；每路径每 Turn 允许再读一次
+       （evicted_reread_used），不触发 read_after_complete 硬门
+    3  成串已完成的旧工具结果折短（不拆当前正在配对的这一次）
+    <span class="pt">◆ 要点  卫生不是「超限才压缩」。每步都做，否则 4k 工具结果会在 fill 到 0.80 之前先撑爆 usable。</span>
+    │
+    ▼
+填充率加压（CompactionPolicy）
+    ≥0.80  collapse：中间折成占位，留头与热尾（hot_zone_ratio=0.35）
+    ≥0.90  snip：从最旧完整消息组删除
+    ≥0.95  autocompact：整窗结构化摘要
+           compact_timeout=20s · compact_max_output_tokens=1024
+           可另配便宜 compact_model_*；失败回退确定性摘要
+           默认定增量，不在首 token 前再同步阻塞主模型
+    写 context.reported：fill_ratio、strategies、budget_truncated_by_tool、assemble_ms
+    <span class="pt">◆ 要点  0.95 若同步调主模型做摘要，R2 破了：用户看见的首 token 前又付一次供应商，且 step 墙钟被摘要吃掉。</span>
+    │
+    ▼
+送给模型
+    长文被截断时附标题大纲（Markdown/纯文本抽标题，Python AST），使模型跳段而非从第一行盲翻
+    编码场景仍不以 search_sources 导航长代码；Locate 是符号表+LSP，不是这一层
+    tools[] 晚期禁用不改 schema 字节（见工具面）</pre>
+          <p class="figure-lead">下图中主链：卫生 → 填充率判定 → 三档加压 → 送给模型。</p>
+          <div class="src"><code>context/engine.py</code> · <code>context/policy.py</code> · <code>model/generation.py</code> · <code>structural/outline.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/context/context-assemble-ladder-zh.png" alt="组窗阶梯详流" />
+          </div>
+          <figcaption>组窗阶梯详流 · 点击放大</figcaption>
+        </figure>
+      </section>

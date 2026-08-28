@@ -1,0 +1,52 @@
+<section class="page" data-id="index" data-group="RAG / 写作" data-title="索引面">
+        <div class="card">
+          <h2>索引面：Turn 外建库</h2>
+          <p class="lede">目录文件是真相；向量库是投影。建库可慢：启动延迟同步、目录变更、上传、工作台「同步资料库」、内部同步命令、写作 <code>post_turn_jobs: sources.index_sync</code>。提问热路径禁止当场建库或整库重嵌（R1/R3）。无资料目录则 <code>retrieval=none</code>，不当成空库去 sync。private 禁止空 work_id。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在查询路径上 embed 整库、把进度条当成检索就绪、或让长 sync 饿死 query embed</li>
+          </ul>
+
+          <h3>触发与 stamp</h3>
+          <pre class="seq">stamp = 模型名 + 维数 + INDEX 协议 + backend，按 work/seed 分 scope
+Watch 按 mtime 轮询（约 2s，去抖 1.5s），不依赖 inotify
+比 stamp 与 mtime：增量或强制全量
+query embed 优先于 index embed lane，避免长 sync 饿死检索
+<span class="pt">◆ 要点  进度条 ≠ 检索效果就绪。HNSW 未 CREATE / 维数 stamp 不匹配时，ANN 窗会空。</span></pre>
+
+          <h3>切块（磁盘原文不变）</h3>
+          <pre class="seq">目标约 450 token、重叠 64（INDEX 13），与 bge-m3 截断 512 对齐
+  旧口径按 4000 字符硬切时，向量只代表段落前三分之一
+Markdown：宽表剥离 → 按标题切节 → 宽表行组另切 → 超长滑窗（无分词器则 1800/200 字符）
+代码：按符号分节
+embed=False 只挂 embed_input，本文件不碰 GPU
+宽表过长拆成指针，全文仍在磁盘，用 read_file 再读</pre>
+
+          <h3>embed 与写入</h3>
+          <pre class="seq">产品 CPU   gte-small@384（INDEX≈9）        ~0.1 GiB 常驻
+产品 GPU   bge-m3@1024、max_seq=512（INDEX 13）  ~1.5–2.5 GiB（runtime cgroup 抬到 12g）
+CI/lite    Hash 词面哈希，不承担召回质量
+正文给人看，面包屑（path:/tags:）给模型；embedding_text_include_metadata 默认关
+短窗仍输出满维向量
+
+同一 flush 写三表（BYPASS 池 / indexer 进程，不占 runtime 热池）
+  source_files
+  source_chunks   text + embedding；bm25_extra 拷到切块供 FTS C 权
+  source_docs     切块向量均值（centroid），不是再 embed 摘要
+增量：索引已在则 pgvector 随 UPSERT 改图
+强制全量：写前 DROP HNSW，写完 CREATE INDEX … USING hnsw
+  默认 m=16、ef_construction=64（本仓库未写 WITH）
+GIN 在 schema 初始化时建，不每次 flush 重建
+交叉编码器默认关；离线 doc2query 可后写 bm25_extra，不挡首次 sync
+中英评测库分开建（latest_retrieval.json 与 latest_retrieval_zh.json 互不覆盖）
+backend 默认 pgvector；retrieval_mode=hybrid
+<span class="pt">◆ 要点  HNSW 不是 Python 建图 API，是 pgvector 的 CREATE INDEX / 增量维护。query 路径上当场建库会打爆 R1。</span></pre>
+          <p class="figure-lead">下图中主链：触发 → 切块 → embed → 写入索引；左右为旁路与禁止项。</p>
+          <div class="src"><code>retrieval/chunk_split.py</code> · <code>embedder.py</code> · <code>pgvector_store.py</code> · <code>sync_cli.py</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/rag/index-sync-zh.png" alt="索引面详流" />
+          </div>
+          <figcaption>索引面详流 · 点击放大</figcaption>
+        </figure>
+      </section>

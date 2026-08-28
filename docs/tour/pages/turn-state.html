@@ -1,0 +1,42 @@
+<section class="page" data-id="turn-state" data-group="Runtime" data-title="挂起后还欠什么">
+        <div class="card">
+          <h2>TurnState：审批挂起后必须仍能验证</h2>
+          <p class="lede"><code>TurnState</code> 是单次 Turn 的可变 dataclass，经 <code>checkpoint_store</code> 序列化。审批中断后再续跑，不得丢失「还欠测试 / 还欠 issue 例子」；否则行为门在恢复后失效。旧 checkpoint 可能缺 <code>turn_user_text</code>——写作工具解析 quota/TOC 时要能降级。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会只记「曾经跑过测试」，改完再挂起就会漏验</li>
+          </ul>
+
+          <h3>必须能从 checkpoint 恢复的字段</h3>
+          <pre class="seq">身份与循环
+  turn_id / session_id / run_id / trace_id / scenario_id
+  messages · step_count · max_steps · usage
+  cancelled / cancel_force / termination_reason / budget_exceeded
+  plan_phase · plan_hint · model_mode · ops_eval
+  volatile_context     易变垫底，不写入 system 提示
+  turn_user_text       本 Turn 用户原文（不含后续注入的 receipt）
+
+粘性批准
+  writes_preapproved · exec_preapproved
+
+已读硬门（read_registry）
+  路径 → 覆盖区间；完整读过再读同一区间 → skipped
+  evicted_paths / evicted_reread_used
+    组窗把全文挤出可见窗后，每路径每 Turn 允许再读一次，不触发 read_after_complete
+
+编码义务（仅工具事实，不解析终稿）
+  verify_pending · verify_receipt_sent · code_edits_since_verify
+  related_tests_union · last_repro_command · last_test_first_failure
+  issue_repro_loaded / _commands / _markers / _required_tokens / _assets
+  issue_repro_casefold_assets / _fail_signals / _expect_signals
+  issue_repro_need_roundtrip / _need_casefold / _roundtrip_formats / _kwargs
+  issue_repro_armed · issue_repro_satisfied · issue_repro_receipt_sent
+  issue_repro_edits_since     须为 0 才能保持 satisfied
+  <span class="pt">◆ 要点  义务必须绑「最新一次编辑之后」。只记「曾经跑过测试」，改完再挂起就会漏验。</span>
+
+写作 L0
+  staccato_pending/_receipt_sent · hinge_* · lore_* · opening_*
+  writing_delivery_hold_sent   manifest 仍开过程门时阻止「已完成」叙事
+<span class="pt">◆ 要点  这些字段不进 checkpoint，批准后续跑等于失忆，行为门作废。Engine 返回 waiting_approval 时 Controller 必须整包序列化。</span></pre>
+          <div class="src">权威：<code>services/runtime/app/engine/state.py</code> · <code>controller/checkpoint_store.py</code></div>
+        </div>
+      </section>

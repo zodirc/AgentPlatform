@@ -1,0 +1,369 @@
+<section
+        class="page"
+        data-id="rag-deep-dive"
+        data-group="RAG / 写作"
+        data-title="RAG 深描（端到端）"
+      >
+        <div class="card">
+          <h2>RAG 深描：按主链逐步对照</h2>
+          <p class="lede">上图编号与下面步骤一一对应。每一步先说做什么，再给对应函数。查询热路径不 <code>sync</code>、不建图。</p>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/rag/rag-end-to-end-zh.png" alt="RAG 端到端主链详流" />
+          </div>
+          <figcaption>RAG 端到端主链详流 · 编号即下文步骤</figcaption>
+        </figure>
+        <div class="card">
+          <h3>索引面（图 1–8，Turn 外）</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">发现 dirty 文件，或 scope stamp 不一致</p>
+                <p class="why">这一步不是“调一个 API 就结束”，而是一次完整的索引判定入口：先保证 schema/索引存在，再读取 scope 级别 stamp，判断是否 force_reindex；若 force，还要处理可恢复重建 epoch；随后加载上一轮文件元数据（mtime/chunk_count/updated_at）作为后续 dirty 对比基线。</p>
+                <span class="sig">pgvector_store.sync</span>
+                <pre class="code-py"><code><span class="cm"># A) schema/index 就绪（幂等）</span>
+<span class="kw">self</span>.ensure_schema()
+
+<span class="cm"># B) scope 级 stamp 判定：增量 or force_reindex</span>
+stored_stamp = _read_scope_stamp(cur, scope_id)
+force_reindex = scope_stamp_mismatch(stored_stamp, stamp)
+
+<span class="cm"># C) force 路径的恢复锚点（中断后可续）</span>
+<span class="kw">if</span> force_reindex:
+    reindex_epoch = _read_reindex_epoch(cur, scope_id)
+    <span class="kw">if</span> reindex_epoch <span class="kw">is</span> <span class="kw">None</span>:
+        reindex_epoch = time.time()
+        _write_reindex_epoch(cur, scope_id, reindex_epoch)
+        conn.commit()
+
+<span class="cm"># D) 载入上一轮元数据，供 dirty 判定（不是直接重扫全量）</span>
+cur.execute(
+    <span class="st">"SELECT path, mtime, chunk_count, EXTRACT(EPOCH FROM updated_at) "
+    "FROM source_files WHERE work_id = %s::uuid"</span>,
+    (wid,),
+)
+prev_meta = {
+    row[0]: (float(row[1]), int(row[2] or 0), float(row[3] or 0.0))
+    <span class="kw">for</span> row <span class="kw">in</span> cur.fetchall()
+}</code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">强制重建？是则 DROP 两张 HNSW；否则增量，图跟着 UPSERT 走</p>
+                <p class="why">输入是步骤 1 的 <code>force_reindex</code> 和即将写入的 <code>pending_jobs</code>。判定：stamp 不一致且确有 dirty 才 drop。原因是活索引上逐行 UPSERT 会改图边，bulk 很慢。drop 的是 chunk 图和 doc centroid 图两张；增量路径不 drop。输出：<code>hnsw_dropped</code>。下一步仍是切块/embed/写表；两张图要等全部写完才 <code>_ensure_embedding_hnsw</code>（图步 8），不是 drop 完立刻建。</p>
+                <span class="sig">sync · _drop_embedding_hnsw · _ensure_embedding_hnsw</span>
+                <pre class="code-py"><code>batch_cap = index_flush_chunk_cap(force_reindex=force_reindex)
+commit_every = index_commit_every_flushes(force_reindex=force_reindex)
+hnsw_dropped = <span class="kw">False</span>
+
+<span class="cm"># 判定：force 且确有 dirty 才删图；空扫不 drop</span>
+<span class="kw">if</span> force_reindex <span class="kw">and</span> pending_jobs:
+    _drop_embedding_hnsw(cur)  <span class="cm"># DROP INDEX IF EXISTS chunk/docs HNSW</span>
+    conn.commit()
+    hnsw_dropped = <span class="kw">True</span>
+
+<span class="cm"># 否（增量）：跳过 drop。索引已在则 UPSERT 时 pgvector 自己插节点。</span>
+<span class="cm"># 下一步：切块 embed=False → flush 写表。</span>
+<span class="cm"># 全部写完（图步 8）：</span>
+_ensure_embedding_hnsw(cur)  <span class="cm"># CREATE INDEX IF NOT EXISTS … USING hnsw</span>
+<span class="cm"># force 路径：空表/全表离线建图；增量：IF NOT EXISTS 无操作</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">对每个 dirty 文件：<code>chunk_source_text(embed=False)</code>，只产出带 <code>embed_input</code> 的 chunk dict</p>
+                <p class="why">输入是磁盘原文 + 相对 path。判定：代码后缀走符号分节；Markdown 走宽表剥离 → 标题切节 → 宽表行组 → 超长滑窗（约 450 token / 64 overlap）。每个 part 拆成两路字段：<code>text</code>（展示/FTS A 权）与 <code>embed_input=build_embed_text(...)</code>（标题面包屑+正文，可含 tags）。<code>embed=False</code> 时不调用 embedder，不写 <code>vector</code>。输出挂进 <code>pending_jobs</code>。下一步：跨文件缓冲满 cap 再批量 encode（图步 4–5）。</p>
+                <span class="sig">chunking.chunk_source_text · build_embed_text</span>
+                <pre class="code-py"><code><span class="cm"># sync 对每个 dirty 文件：</span>
+chunks = chunk_source_text(path, rel_path, text, embedder=embedder, embed=<span class="kw">False</span>)
+pending_jobs.append({<span class="st">"storage_path"</span>: ..., <span class="st">"chunks"</span>: chunks, <span class="st">"mtime"</span>: ..., <span class="st">"is_update"</span>: ...})
+
+<span class="cm"># chunk_source_text 内部（简化）：</span>
+<span class="kw">for</span> part, origin <span class="kw">in</span> split_oversized(payload, size_tokens=~<span class="nm">450</span>, overlap_tokens=<span class="nm">64</span>):
+    embed_input = build_embed_text(rel_path, part, tags=..., heading_path=...)
+    chunk = {
+        <span class="st">"chunk_id"</span>: f<span class="st">"{rel_path}#chunk-{i}"</span>,
+        <span class="st">"text"</span>: part,                 <span class="cm"># BM25 / 摘录 / 引用</span>
+        <span class="st">"section_title"</span>: section.title,
+        ...
+    }
+    <span class="kw">if</span> embed:
+        chunk[<span class="st">"vector"</span>] = encode(...)  <span class="cm"># 同步路径（测试/小文件）</span>
+    <span class="kw">else</span>:
+        chunk[<span class="st">"embed_input"</span>] = embed_input  <span class="cm"># 生产 sync 默认</span>
+<span class="cm"># 下一步：图步 4–5 才碰 GPU</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">4–5</span>
+              <div>
+                <p class="what">跨文件缓冲到 <code>batch_cap</code>，再 <code>assign_deferred_vectors</code> 批量写回 <code>vector</code></p>
+                <p class="why">输入是步骤 3 的 <code>pending_jobs</code>。判定：累计 chunk 数 ≥ <code>index_flush_chunk_cap(force_reindex)</code> 才 flush（force 时 cap 更大）。每个 flush 先扁平化所有 chunk，再 <code>assign_deferred_vectors</code>：已有 <code>vector</code> 的跳过；否则 <code>pop("embed_input")</code>，按 <code>embedding_batch_size</code>（默认 64）切片，<code>embed_many(..., lane=LANE_INDEX)</code>，batch 间 <code>sleep(0)</code> 让 query lane 插队。缺 <code>embed_input</code> 时回退 <code>build_embed_text(path, text)</code>。输出：chunk 就地带满维 <code>vector</code>。下一步：同一次 flush 立刻 DELETE+UPSERT（图步 6）。</p>
+                <span class="sig">sync 缓冲环 · index_embed.assign_deferred_vectors</span>
+                <pre class="code-py"><code><span class="kw">for</span> job <span class="kw">in</span> pending_jobs:
+    buffer_jobs.append(job)
+    buffer_chunk_count += len(job[<span class="st">"chunks"</span>])
+    <span class="kw">if</span> buffer_chunk_count &gt;= batch_cap:
+        _flush_buffer()  <span class="cm"># 先 embed，再写表</span>
+
+<span class="cm"># assign_deferred_vectors 内部：</span>
+<span class="kw">for</span> chunk <span class="kw">in</span> chunks:
+    <span class="kw">if</span> isinstance(chunk.get(<span class="st">"vector"</span>), list):
+        chunk.pop(<span class="st">"embed_input"</span>, <span class="kw">None</span>); <span class="kw">continue</span>
+    inp = chunk.pop(<span class="st">"embed_input"</span>, <span class="kw">None</span>)
+    <span class="kw">if not</span> inp: inp = build_embed_text(path, text, tags=...)  <span class="cm"># 兜底</span>
+    pending.append((chunk, inp))
+
+<span class="kw">for</span> start <span class="kw">in</span> range(<span class="nm">0</span>, len(pending), batch):
+    check_sync_cancelled()
+    texts = [inp <span class="kw">for</span> _, inp <span class="kw">in</span> pending[start:start+batch]]
+    vectors = embed_many(embedder, texts, lane=LANE_INDEX)
+    time.sleep(<span class="nm">0</span>)  <span class="cm"># 让 query lane 插队</span>
+    <span class="kw">for</span> (chunk, _), vec <span class="kw">in</span> zip(...):
+        chunk[<span class="st">"vector"</span>] = vec
+<span class="cm"># 下一步：同 _flush_buffer 内 DELETE + UPSERT → 图步 6</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">6</span>
+              <div>
+                <p class="what">同一 flush：embed 已写回后，按 path 换行，UPSERT 三表</p>
+                <p class="why">输入是缓冲里的 dirty 文件及已带 <code>vector</code> 的 chunk（缺向量或维数不对直接 <code>RuntimeError</code>）。先按 path DELETE 旧切块，保证文件级替换，不是补洞。再 UPSERT：<code>source_files</code>（mtime/chunk_count/ACL）、<code>source_chunks</code>（text+embedding）、<code>source_docs</code>（该 path 切块向量均值，供图步 11 Doc 车道）。然后把 <code>source_files.bm25_extra</code> 拷到切块行，给 FTS C 权。输出：这批 path 在库里可见。下一步：GIN 随列更新；HNSW 增量则随 commit 改图，force 则等全部 flush 完再建（图步 8）。</p>
+                <span class="sig">sync._flush_buffer</span>
+                <pre class="code-py"><code><span class="kw">def</span> <span class="fn">_flush_buffer</span>(*, force_commit=<span class="kw">False</span>):
+    <span class="kw">if not</span> buffer_jobs:
+        <span class="kw">return</span>
+    flat = [c <span class="kw">for</span> job <span class="kw">in</span> buffer_jobs <span class="kw">for</span> c <span class="kw">in</span> job[<span class="st">"chunks"</span>]]
+    assign_deferred_vectors(flat, embedder, label=vis)  <span class="cm"># 内部 lane=LANE_INDEX</span>
+
+    paths = [job[<span class="st">"storage_path"</span>] <span class="kw">for</span> job <span class="kw">in</span> buffer_jobs]
+    cur.execute(<span class="st">"DELETE FROM source_chunks WHERE path = ANY(%s)"</span>, (paths,))
+
+    <span class="cm"># 缺 vector / dim != self._dimensions → RuntimeError，不写半成品</span>
+    cur.executemany(_FILE_UPSERT_SQL, file_rows)    <span class="cm"># mtime, chunk_count, work_id</span>
+    cur.executemany(_CHUNK_UPSERT_SQL, chunk_rows)  <span class="cm"># text + embedding</span>
+    <span class="cm"># centroid = mean(chunk vectors)；空则跳过该 path 的 doc 行</span>
+    cur.executemany(_DOC_UPSERT_SQL, doc_rows)
+
+    cur.execute(<span class="st">"""UPDATE source_chunks c SET bm25_extra = f.bm25_extra
+FROM source_files f WHERE c.path = f.path AND c.path = ANY(%s)"""</span>, (paths,))
+    <span class="cm"># 下一步：commit 后 GIN 随 text/bm25_extra 更新；HNSW 见步骤 2/8</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">7–8</span>
+              <div>
+                <p class="what">FTS GIN 随列维护；全部 flush 完后确保 HNSW，并写回 scope stamp</p>
+                <p class="why">GIN 不在每次 flush 里 CREATE：<code>ensure_schema</code> / 版本 bump 时 <code>_ensure_bm25_fts_index</code> 建好表达式索引；flush 只更新 <code>text/section_title/bm25_extra</code>，Postgres 自行改倒排。表达式：标题+正文权 A，<code>bm25_extra</code>（离线 doc2query）权 C。HNSW：本仓库 DDL 只写 <code>USING hnsw (embedding vector_cosine_ops)</code>，未写 WITH → 默认 m=16、<code>ef_construction=64</code>。force 写前已 DROP（图步 2），末尾 <code>_ensure_embedding_hnsw</code> 全表重建；增量则 IF NOT EXISTS 多为无操作（图已在 UPSERT 维护）。最后 <code>_write_scope_stamp</code> + 清 reindex epoch。输出：本 scope 检索面就绪。下一步：Turn 内才能 <code>search_sources</code>（图步 9+）。</p>
+                <span class="sig">_ensure_bm25_fts_index · _ensure_embedding_hnsw · _write_scope_stamp</span>
+                <pre class="code-py"><code><span class="cm"># GIN：schema 阶段幂等；版本变了才 DROP+CREATE</span>
+<span class="kw">if</span> stored_fts_ver == BM25_EXTRA_FTS_VERSION:
+    CREATE INDEX IF NOT EXISTS ... USING gin (BM25_TSVECTOR_SQL)
+<span class="kw">else</span>:
+    DROP INDEX ...; CREATE INDEX ... USING gin (...); 写回版本
+
+<span class="cm"># flush 只改列，不重建 GIN：</span>
+<span class="cm"># UPDATE source_chunks SET bm25_extra = ...  → Postgres 维护倒排</span>
+
+<span class="cm"># sync 末尾（全部 flush + 删 orphan 之后）：</span>
+_ensure_embedding_hnsw(cur)
+<span class="cm"># CREATE INDEX IF NOT EXISTS source_chunks_embedding_hnsw</span>
+<span class="cm">#   ON source_chunks USING hnsw (embedding vector_cosine_ops);</span>
+<span class="cm"># 同理 source_docs；无 WITH → m=16, ef_construction=64</span>
+_write_scope_stamp(cur, scope_id, stamp)
+_clear_reindex_epoch(cur, scope_id)
+conn.commit()
+<span class="cm"># 下一步：查询面图步 9（禁止再 sync）</span></code></pre>
+              </div>
+            </li>
+          </ol>
+
+          <h3>查询面（图 9–15，Turn 内）</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">9</span>
+              <div>
+                <p class="what">模型发起工具调用：<code>search_sources(query, limit, path_prefix)</code></p>
+                <p class="why">输入来自模型 tool_use，不是索引调度。判定：无 <code>sources/</code> 目录 → 直接 <code>retrieval=none</code> 返回；有目录才继续。硬约束：本函数及以下热路径<strong>永不</strong> <code>store.sync()</code>（建库只在 Turn 外）。场景可注入默认 prefix / exclude（情报站、写作排除情报）。每 Turn 检索次数另有上限（常见 ≤3，超限拒本次调用）。输出：进入步骤 10 的解析与 over-fetch。下一步：打开审计槽并 <code>store.search</code>。</p>
+                <span class="sig">tools.core.sources_search.search_sources</span>
+                <pre class="code-py"><code><span class="kw">async def</span> <span class="fn">search_sources</span>(query, limit=<span class="nm">30</span>, path_prefix=<span class="kw">None</span>, **kw):
+    effective_prefix, scope_meta = resolve_search_path_prefix(
+        path_prefix, scenario_id=kw.get(<span class="st">"scenario_id"</span>)
+    )
+    sources = _resolve_path(<span class="st">"sources"</span>)
+    <span class="kw">if not</span> sources.exists():
+        <span class="kw">return</span> {<span class="st">"hits"</span>: [], <span class="st">"retrieval"</span>: <span class="st">"none"</span>, ...}
+
+    mode = settings.retrieval_mode.lower()  <span class="cm"># 默认 hybrid</span>
+    audit_token = begin_audit_capture()
+    <span class="cm"># 禁止：store.sync() / force reindex / 预注入向量包</span>
+    <span class="cm"># 下一步：图步 10 over-fetch + store.search</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">10</span>
+              <div>
+                <p class="what">解析前缀 / ACL，over-fetch，再 <code>store.search</code>（内部进 hybrid）</p>
+                <p class="why">输入：步骤 9 的 query/limit/prefix。判定：有有效 prefix 时 <code>fetch_limit = limit*3</code>，否则 <code>limit*2</code>，避免前缀/租户过滤后 top-k 饿死。store 未 ready 才 <code>load()</code>（pgvector 多为查库，不把整表载入内存）。然后 <code>store.search(..., mode)</code> → 默认落到 <code>search_hybrid</code>。立刻 <code>filter_hits_for_tenant</code>。输出：<code>raw_hits</code>（仍大于最终 limit）。审计记 over-fetch 倍率。下一步：图步 11 两车道并行召回。</p>
+                <span class="sig">begin_audit_capture · get_sources_store · store.search</span>
+                <pre class="code-py"><code>fetch_limit = limit * <span class="nm">3</span> <span class="kw">if</span> effective_prefix <span class="kw">else</span> limit * <span class="nm">2</span>
+record_lane_depth_meta(
+    requested_limit=limit,
+    over_fetch_multiplier=fetch_limit / max(limit, <span class="nm">1</span>),
+)
+store = get_sources_store(work_root=...)
+<span class="kw">if not</span> store.is_ready:
+    store.load()  <span class="cm"># 非 sync</span>
+raw_hits = store.search(query, limit=fetch_limit, mode=mode)
+raw_hits = filter_hits_for_tenant(raw_hits)
+<span class="cm"># mode=hybrid → search_hybrid（图步 11）</span>
+<span class="cm"># 下一步：两车道 + RRF；工具层 cover 在图步 14</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">11</span>
+              <div>
+                <p class="what"><code>search_hybrid</code>：Doc 车道与 Chunk 车道并行，超时保 chunk</p>
+                <p class="why">输入是步骤 10 的 <code>query</code> 和 over-fetch 后的 <code>limit</code>（店内 <code>top_k = max(limit*4, 20)</code>，精排开时再抬到 rerank pool）。判定：<code>two_level_enabled</code> 关则只跑 Chunk。开则两线程，预算约 0.3s。Chunk 同线程先后：HNSW ANN + GIN FTS；两路都有才 RRF（按位次），单路则那路当 pool；空则 <code>[]</code>。Doc 只出 path：先 centroid 表 HNSW，空/失败/关表则宽 chunk ANN 按 path 去重。超时且 chunk 空会同步再跑一遍 Chunk。输出：<code>doc_paths</code> + 已 RRF/精排的 <code>chunk_hits</code>。下一步：图步 12 若精排未在 lane 内做完则 lexical；图步 13 用 path 加 <code>doc_boost</code>。</p>
+                <span class="sig">search_hybrid · _chunk_lane · _doc_lane · parallel_two_level</span>
+                <pre class="code-py"><code>top_k = max(limit * <span class="nm">4</span>, <span class="nm">20</span>)
+<span class="kw">if</span> settings.retrieval_rerank_enabled:
+    top_k = max(top_k, settings.retrieval_rerank_pool)
+
+<span class="kw">def</span> <span class="fn">_chunk_lane</span>():
+    vector_hits = <span class="kw">self</span>.search_vector(query, limit=top_k)  <span class="cm"># HNSW cosine</span>
+    bm25_hits = <span class="kw">self</span>.search_bm25(query, limit=top_k)    <span class="cm"># GIN FTS</span>
+    record_lane_hits(vector=vector_hits, bm25=bm25_hits)  <span class="cm"># L1a</span>
+    <span class="kw">if not</span> vector_hits <span class="kw">and not</span> bm25_hits:
+        <span class="kw">return</span> []
+    <span class="kw">if not</span> vector_hits: hits, src = bm25_hits, <span class="st">"bm25"</span>
+    <span class="kw">elif not</span> bm25_hits: hits, src = vector_hits, <span class="st">"vector"</span>
+    <span class="kw">else</span>:
+        hits = reciprocal_rank_fusion(..., k=profile.rrf_k)  <span class="cm"># 按位次</span>
+        src = <span class="st">"fused"</span>
+    record_recall_pool(hits, source=src)  <span class="cm"># L1</span>
+    <span class="kw">return</span> rerank_hits(query, hits, ...) <span class="kw">if</span> rerank <span class="kw">else</span> hits
+
+<span class="kw">def</span> <span class="fn">_doc_lane</span>():
+    <span class="cm"># centroid HNSW → paths；空/异常 → 宽 chunk ANN 按 path 去重</span>
+    paths = <span class="kw">self</span>._search_docs_ann(query, limit=profile.two_level_doc_limit)
+    <span class="kw">return</span> paths <span class="kw">or</span> _doc_lane_approx()
+
+<span class="kw">if not</span> profile.two_level_enabled:
+    <span class="kw">return</span> _chunk_lane()[:limit]  <span class="cm"># 无 Doc 并行</span>
+
+doc_paths, chunk_hits, timed_out = parallel_two_level(
+    doc_fn=_doc_lane, chunk_fn=_chunk_lane,
+    timeout_seconds=profile.two_level_timeout_seconds,  <span class="cm"># ~0.3s</span>
+)
+<span class="kw">if</span> timed_out <span class="kw">and not</span> chunk_hits:
+    chunk_hits = _chunk_lane()  <span class="cm"># 保 chunk，可丢 doc</span>
+<span class="cm"># 下一步：merge_doc_and_chunk_hits(..., doc_boost) → 图步 13</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">12</span>
+              <div>
+                <p class="what"><code>rerank_hits</code>：对 RRF（或单路）池做精排；默认 lexical，CE 关</p>
+                <p class="why">输入是图步 11 Chunk 车道里 <code>record_recall_pool</code>（L1）之后的 hits。判定：<code>retrieval_rerank_enabled</code> 关则 method=<code>none</code>，原序进 L2；开则取 <code>pool = hits[:max(limit, retrieval_rerank_pool)]</code>。再判定 CE：<code>retrieval_rerank_cross_encoder</code> 默认关 → <code>lexical_rerank</code>（词重叠/标题/短语）；CE 开则 pool 再 capped，超时/异常回退 lexical。输出：重排后的 <code>ChunkHit</code>，并 <code>record_ranked(..., method=lexical|cross_encoder|none)</code>（L2）。注意：doc_boost 还没加，发生在下一步。下一步：图步 13 merge。</p>
+                <span class="sig">rerank.rerank_hits · audit.record_ranked</span>
+                <pre class="code-py"><code><span class="kw">def</span> <span class="fn">rerank_hits</span>(query, hits, *, limit):
+    <span class="kw">if not</span> hits: <span class="kw">return</span> []
+    pool_n = max(limit, settings.retrieval_rerank_pool)
+    <span class="kw">if</span> settings.retrieval_rerank_cross_encoder:
+        pool_n = min(pool_n, _CROSS_ENCODER_POOL_CAP)  <span class="cm"># 通常 ≤20</span>
+    pool = hits[:pool_n]
+    <span class="kw">if</span> settings.retrieval_rerank_cross_encoder:
+        <span class="kw">try</span>:
+            <span class="kw">return</span> cross_encoder_rerank(query, pool, limit=limit)
+        <span class="kw">except</span> Exception:
+            ...  <span class="cm"># fall through</span>
+    <span class="kw">return</span> lexical_rerank(query, pool, limit=limit)  <span class="cm"># 产品默认</span>
+
+<span class="cm"># _chunk_lane 里：</span>
+<span class="kw">if</span> rerank <span class="kw">and</span> hits:
+    ranked = rerank_hits(...)
+    record_ranked(ranked, method=<span class="st">"lexical"</span>)  <span class="cm"># L2</span>
+<span class="kw">else</span>:
+    record_ranked(hits, method=<span class="st">"none"</span>)
+<span class="cm"># 下一步：merge_doc_and_chunk_hits → 图步 13</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">13</span>
+              <div>
+                <p class="what"><code>merge_doc_and_chunk_hits</code>：Doc 赢家 path 上的切块加 <code>doc_boost</code></p>
+                <p class="why">输入：图步 11 的 <code>doc_paths</code>（可空）+ 图步 12 后的 <code>chunk_hits</code> + profile <code>doc_boost</code>（默认 0.35）。判定：chunk.path ∈ doc_paths → score += boost，进入 boosted 组；否则进 rest。两组各自按 score 降序，再 <code>boosted + rest</code> 拼接截断到 limit——<strong>不删除</strong>仅 chunk 命中项。doc_paths 空则原样截断。此步在 L2 之后，不再写入 <code>record_ranked</code>。输出：店内最终 <code>ChunkHit[:limit]</code> 交回工具层。下一步：图步 14 cover/tier/fallback。</p>
+                <span class="sig">two_level.merge_doc_and_chunk_hits</span>
+                <pre class="code-py"><code><span class="kw">def</span> <span class="fn">merge_doc_and_chunk_hits</span>(*, doc_paths, chunk_hits, limit, doc_boost):
+    <span class="kw">if not</span> chunk_hits: <span class="kw">return</span> []
+    <span class="kw">if not</span> doc_paths: <span class="kw">return</span> chunk_hits[:limit]
+    preferred = set(doc_paths)
+    boosted, rest = [], []
+    <span class="kw">for</span> hit <span class="kw">in</span> chunk_hits:
+        <span class="kw">if</span> hit.path <span class="kw">in</span> preferred:
+            boosted.append(ChunkHit(..., score=float(hit.score) + doc_boost))
+        <span class="kw">else</span>:
+            rest.append(hit)
+    boosted.sort(key=<span class="kw">lambda</span> h: h.score, reverse=<span class="kw">True</span>)
+    rest.sort(key=<span class="kw">lambda</span> h: h.score, reverse=<span class="kw">True</span>)
+    <span class="kw">return</span> (boosted + rest)[:limit]
+<span class="cm"># search_hybrid 返回值 → sources_search 继续过滤 → 图步 14</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">14</span>
+              <div>
+                <p class="what">工具层后处理：前缀/场景排除 → cover → 摘录分层 → keyword-fallback</p>
+                <p class="why">输入是店内 hybrid 的 raw_hits（已 tenant 滤过）。再 <code>filter_hits_by_path_prefix</code> / <code>filter_hits_by_excludes</code>；格式化摘录；可选 excerpt promote。判定 cover：特色词须出现在 path 或摘录。通过 → tier（前几条长摘录，其余短）+ 相对分，标记 hybrid。失败但有 hits → 先扫盘 keyword-fallback（标 <code>index_lag</code>，<strong>仍不 sync</strong>）；keyword 也空且曾有 ANN → <code>kept_ann_despite_cover_miss</code> 保留 ANN（SciFact claim≠abstract）。输出：准备进窗的 hits 列表。下一步：图步 15 写 L3 / tool_result。</p>
+                <span class="sig">search_sources 后半 · _hits_cover_query_terms · _search_sources_keyword</span>
+                <pre class="code-py"><code>filtered, _ = filter_hits_by_path_prefix(raw_hits, path_prefix=effective_prefix)
+filtered, _ = filter_hits_by_excludes(filtered, scenario_id=...)
+hits = _format_source_hits(filtered[:limit], excerpt_chars=...)
+<span class="kw">if</span> settings.search_sources_excerpt_promote:
+    hits = _prefer_excerpt_covering_hits(hits, query)
+covers = bool(hits) <span class="kw">and</span> _hits_cover_query_terms(hits, query)
+hits = _tier_search_hits_for_model(hits)
+
+<span class="kw">if</span> covers:
+    resolved = {..., <span class="st">"retrieval"</span>: <span class="st">"hybrid"</span>, <span class="st">"hits"</span>: hits}
+<span class="kw">elif</span> hits:
+    <span class="cm"># cover miss：试 keyword-fallback（不 sync）</span>
+    kw_hits = _search_sources_keyword(...)
+    <span class="kw">if</span> kw_hits:
+        resolved = {..., <span class="st">"retrieval"</span>: <span class="st">"keyword-fallback"</span>, <span class="st">"index"</span>: {<span class="st">"index_lag"</span>: <span class="kw">True</span>}}
+    <span class="kw">else</span>:
+        resolved = {..., <span class="st">"hits"</span>: ann_hits, <span class="st">"kept_ann_despite_cover_miss"</span>: <span class="kw">True</span>}
+<span class="cm"># 下一步：finalize_audit_for_result → 图步 15</span></code></pre>
+              </div>
+            </li>
+            <li>
+              <span class="n">15</span>
+              <div>
+                <p class="what">L3：把进窗摘录写入 <code>tool_result.audit</code>，供下一轮组窗</p>
+                <p class="why">输入：步骤 14 的最终 hits + 捕获槽里的 L1/L2（若有）。<code>finalize_audit_for_result</code> 合并：recall_pool / ranked / <code>build_entered_context</code>（截断到 excerpt_chars 的进窗行）/ lane_depth。keyword 路径常无店内 capture，则从 hits 重建单层 pool。审计默认不进模型正文窗，只挂在 tool payload / Ops。输出：完整 tool_result 回 Engine，下一轮 assemble 只吃 L3 摘录。整条查询面结束；索引面不会被回灌触发。</p>
+                <span class="sig">audit.finalize_audit_for_result · build_entered_context</span>
+                <pre class="code-py"><code><span class="kw">def</span> <span class="fn">finalize_audit_for_result</span>(captured, *, hits, excerpt_chars, mode):
+    audit = {
+        <span class="st">"recall_pool"</span>: captured.get(<span class="st">"recall_pool"</span>) <span class="kw">or</span> [],   <span class="cm"># L1</span>
+        <span class="st">"ranked"</span>: captured.get(<span class="st">"ranked"</span>) <span class="kw">or</span> [],           <span class="cm"># L2</span>
+        <span class="st">"entered_context"</span>: build_entered_context(hits, excerpt_chars=excerpt_chars),  <span class="cm"># L3</span>
+        <span class="st">"rank_method"</span>: captured.get(<span class="st">"rank_method"</span>),
+        <span class="st">"mode"</span>: mode,
+        <span class="st">"lane_depth"</span>: {...},  <span class="cm"># vector_n / bm25_n / top_k / two_level</span>
+    }
+    <span class="kw">return</span> audit
+
+payload[<span class="st">"audit"</span>] = finalize_audit_for_result(captured, hits=hits, ...)
+<span class="cm"># → tool_result 事件；下一轮组窗只消费 hits/摘录，不 sync</span></code></pre>
+              </div>
+            </li>
+          </ol>
+          <div class="callout">图上禁止项与代码一致：查询路径不 <code>sync</code>、不 DROP/CREATE HNSW、不每轮预注入向量包。</div>
+        </div>
+      </section>

@@ -1,0 +1,159 @@
+<section class="page" data-id="ops-eval-coding" data-group="Ops 效果" data-title="编码 · harness 与命中">
+        <div class="card">
+          <h2>编码：官方题面、可见范围与 harness 命中</h2>
+          <p class="lede">主指标回答的是：官方隐藏测是否通过。<strong>裁判为 <code>swebench.harness</code></strong>（F2P 全过且 P2P 全过），不是平台探针，也不是工作区 pytest。题集：HuggingFace <code>princeton-nlp/SWE-bench_Lite</code> test。smoke n5 = 该 split 顺序前 5 个 ID，全部为 astropy。现行编码冒烟：RESULTS 第6轮（<code>gpt-5.6-luna</code>）<strong>4/5</strong>，未过仍为 14365；不作效果结论，不升 SCORECARD。</p>
+          <h3>官方字段</h3>
+          <p>每题官方字段：<code>repo</code>、<code>base_commit</code>、GitHub issue（<code>problem_statement</code>）、隐藏测 <code>FAIL_TO_PASS</code> / <code>PASS_TO_PASS</code>、金标 <code>patch</code>。后三项<strong>不写入 Work</strong>（<code>hints_text</code> 与 issue 评论同样不进）。</p>
+          <p>Agent 可见：<code>base_commit</code> 上的坏树，以及根目录 <code>problem.md</code>（= <code>problem_statement</code> 全文）。用户消息规定读 issue → 复现 → <code>search_codebase</code> → <code>edit_file</code> → 再验；禁止网络。官方隐藏测名称不可见（除非 issue 正文自行写到某失败测）。平台从 issue 抽取的例子覆盖义务仅来自 <code>problem.md</code>，故意不泄漏 F2P。</p>
+          <h3>示例：官方 Lite 一行（第6轮未过题）</h3>
+          <p>字段取自 HuggingFace <code>princeton-nlp/SWE-bench_Lite</code> test split 第 3 行（0-based index 2），与切片 <code>astropy__astropy-14365</code> 一致。物化：<code>repo_materialize.py</code> checkout <code>base_commit</code>，仅将 <code>problem_statement</code> 写入 <code>problem.md</code>。</p>
+          <table>
+            <thead><tr><th>官方字段</th><th>本题取值</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td><code>instance_id</code></td><td><code>astropy__astropy-14365</code></td><td>标记文件；不是 prompt</td></tr>
+              <tr><td><code>repo</code></td><td><a href="https://github.com/astropy/astropy">astropy/astropy</a></td><td>是：clone 源</td></tr>
+              <tr><td><code>base_commit</code></td><td><a href="https://github.com/astropy/astropy/tree/7269fa3e33e8d02485a647da91a5a2a60a06af61"><code>7269fa3e33e8d02485a647da91a5a2a60a06af61</code></a></td><td>是：坏树</td></tr>
+              <tr><td>GitHub issue</td><td><a href="https://github.com/astropy/astropy/issues/14365">astropy/astropy#14365</a>（2023-02-06 · dataset <code>version=5.1</code>）</td><td>正文 → <code>problem.md</code></td></tr>
+              <tr><td><code>FAIL_TO_PASS</code></td><td><code>astropy/io/ascii/tests/test_qdp.py::test_roundtrip[True]</code></td><td><strong>否</strong></td></tr>
+              <tr><td>金标 <code>patch</code> / <code>test_patch</code> / <code>hints_text</code></td><td>官方修法含 <code>v.upper() == "NO"</code>；<code>test_patch</code> 会把非注释行改成小写</td><td><strong>否</strong></td></tr>
+            </tbody>
+          </table>
+          <p><code>problem.md</code> 原文（Issue 标题 + Description / Expected / How to Reproduce；Versions 省略，磁盘上仍有全文）：</p>
+          <pre>ascii.qdp Table format assumes QDP commands are upper case
+### Description
+
+ascii.qdp assumes that commands in a QDP file are upper case, for example,
+for errors they must be "READ SERR 1 2" whereas QDP itself is not case
+sensitive and case use "read serr 1 2".
+
+As many QDP files are created by hand, the expectation that all commands
+be all-caps should be removed.
+
+### Expected behavior
+
+The following qdp file should read into a Table with errors, rather than crashing.
+
+read serr 1 2
+1 0.5 1 0.5
+
+### How to Reproduce
+
+Create a QDP file:
+
+&gt; cat &gt; test.qdp
+read serr 1 2
+1 0.5 1 0.5
+&lt;EOF&gt;
+
+&gt; python
+&gt;&gt;&gt; from astropy.table import Table
+&gt;&gt;&gt; Table.read('test.qdp', format='ascii.qdp')
+ValueError: Unrecognized QDP line: read serr 1 2</pre>
+          <p>按这条字段走完一题（第6轮 luna 仍 unresolved）：</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">checkout <code>7269fa3e…</code>，写入上面这段 <code>problem.md</code></p>
+                <p class="why">工作区是 2023-02 时的坏树。没有 F2P 名字，没有金标补丁。issue 例子只有小写命令 <code>read serr 1 2</code> 和两行数字，<strong>没有</strong>数据 token <code>NO</code>。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">产品 Turn：模型按 issue 修命令大小写</p>
+                <p class="why">常见补丁是 <code>_command_re</code> 加 <code>re.IGNORECASE</code>，再自写一个接近 issue 示例的测试。issue 例子覆盖义务在这里会绿——这仍不是分数。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">harness 在 <code>sweb.eval.…astropy-14365</code> 里：apply 模型补丁 → 还原测试文件 → 官方 <code>test_patch</code> → 跑 F2P ∧ P2P</p>
+                <p class="why"><code>test_roundtrip[True]</code> 把<strong>所有非注释行</strong>改成小写，数据里的 <code>NO</code> 变成 <code>no</code>。只忽略命令大小写不够；金标补丁另有 <code>v.upper() == "NO"</code>。P2P 8 条全绿不能替代这一条 F2P。</p>
+              </div>
+            </li>
+          </ol>
+          <p>对照会过的题 <code>astropy__astropy-12907</code>（同一 <code>repo</code>；<code>base_commit</code> <a href="https://github.com/astropy/astropy/tree/d16bfe05a744909de4b27f5875fe0d4ed41ce607"><code>d16bfe05a744909de4b27f5875fe0d4ed41ce607</code></a>；issue <a href="https://github.com/astropy/astropy/issues/12907">#12907</a>）。<code>problem_statement</code> 是嵌套 <code>CompoundModels</code> 的 <code>separability_matrix</code> 算错：<code>Pix2Sky_TAN() &amp; cm</code> 不应把后两维粘成不可分。issue 里的 REPL 与隐藏 F2P <code>test_separable[compound_model6/9]</code> 同向，第4–6轮均 resolved。</p>
+          <h3>执行路径与 harness 职责</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">checkout + 写 <code>problem.md</code> → 产品 agent Turn（无人值守预批准写盘）</p>
+                <p class="why">评测还会等符号表 ready|stale（比产品对话更乐观）。平台把 pytest 改道进该题 Docker，是解题辅助，<strong>仍不是分数</strong>。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what"><code>swebench.harness.run_evaluation</code>：拉 sweb.eval 镜像、apply 补丁、跑 F2P 与 P2P</p>
+                <p class="why">与 SWE-bench 论文/排行榜定义一致。镜像内断网。缺镜像或 harness 崩溃 → 套件 <code>failed</code>，禁止写成 <code>resolve_rate=0</code>。</p>
+              </div>
+            </li>
+          </ol>
+          <h3>命中定义</h3>
+          <table>
+            <thead><tr><th>信号</th><th>是命中吗</th><th>为什么</th></tr></thead>
+            <tbody>
+              <tr><td>非空 git diff（<code>patch_rate</code>）</td><td>否</td><td>乱改也能有 diff。第4–6轮都是 1.0，14365 仍 unresolved。</td></tr>
+              <tr><td><code>fuse_ok</code> / 找到定义</td><td>否</td><td>找对文件不等于修对隐藏测。</td></tr>
+              <tr><td>issue 例子再跑过</td><td>否</td><td>例子在 issue 里；隐藏测可以是没写的 <code>test_roundtrip[True]</code>。</td></tr>
+              <tr><td>verify_receipt / <code>test_summary</code></td><td>否</td><td>平台催验，模型可以不理。出口线 ≥0.6 是过程目标。</td></tr>
+              <tr><td>harness <strong>resolved</strong></td><td><strong>是</strong></td><td>F2P 全部过 <strong>且</strong> P2P 全部过。与排行榜同一把尺。</td></tr>
+            </tbody>
+          </table>
+          <p>为什么不自己在工作区跑测试当分数？Lite 每题环境不同；工作区只是源码 checkout。错误解释器上绿，评委镜像里仍红。</p>
+          <div class="callout warn">
+            <strong>审阅偏差。</strong>
+            n5 全 astropy，不能外推到 django 占多数的 Lite（n25 才开始有 django）。同分异题：4/5 可以是「换了一题过、一题回落」，不是能力稳定在 80%。第6轮换模后仍是同一题未过。无人值守预批准比真实用户少一道审批摩擦。
+          </div>
+          <h3>五道题（第6轮 luna；harness 对错才是原因）</h3>
+          <table>
+            <thead><tr><th>instance</th><th>第5轮 dsflash</th><th>第6轮 luna</th><th>原因</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>astropy-12907</td>
+                <td>resolved · 35 / 848</td>
+                <td>resolved · <strong>37 / 669</strong></td>
+                <td>issue 与 F2P 同向（嵌套 CompoundModel）；会过的题，墙钟略降。</td>
+              </tr>
+              <tr>
+                <td>astropy-14995</td>
+                <td>resolved · 30 / 358</td>
+                <td>resolved · <strong>24 / 347</strong></td>
+                <td>同上，会过的题变薄。</td>
+              </tr>
+              <tr>
+                <td>astropy-6938</td>
+                <td>resolved · 57 / 752</td>
+                <td>resolved · <strong>39 / 678</strong></td>
+                <td>仍通过；本题第5轮曾变慢，第6轮收回。</td>
+              </tr>
+              <tr>
+                <td>astropy-14182</td>
+                <td>resolved · 56 / 1784</td>
+                <td>resolved · <strong>47 / 786</strong></td>
+                <td>第5轮转绿后稳住。题内秒数约减半；不再是 ~30min 那档。</td>
+              </tr>
+              <tr>
+                <td>astropy-14365</td>
+                <td>unresolved · 24 / 125</td>
+                <td><strong>unresolved</strong> · 33 / 428</td>
+                <td>上面那条真实 issue：样例无小写 <code>NO</code>，<code>IGNORECASE</code> 过不了隐藏 <code>test_roundtrip[True]</code>。换模同分同题。</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="callout">
+            <strong>过程探针在说什么（不是通过率）。</strong>
+            第6轮相对第5轮：步数 202→180（−11%）、题内 elapsedΣ −25%、<code>verify_receipt</code> 0.80→1.0、回执后再测 0.25→0.80、<code>test_summary</code> 0.50→1.0、related 采用率 0→0.80（覆盖却从 1.0 降到 0.273）。意思是：催验和再测更密了，<strong>resolve 仍钉在同一题</strong>。4/5 不能写成「编码能力稳定在 80%」。
+          </div>
+          <p class="figure-lead">下图是一题如何从 checkout 计到 <code>resolve_rate</code>。写入链揉合见前文 Coding 页，那是探针，不是本图的终局门。</p>
+          <div class="src"><code>princeton-nlp/SWE-bench_Lite</code> test · <code>repo_materialize.py</code> · <code>swebench.harness</code> · RESULTS 第6轮 <code>4471acba</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-coding-score-zh.png" alt="Ops 编码一题计分详流" />
+          </div>
+          <figcaption>编码一题计分 · 探针 ≠ harness · 点击放大</figcaption>
+        </figure>
+      </section>

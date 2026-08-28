@@ -1,0 +1,23 @@
+<section class="page" data-id="issue-repro" data-group="Coding" data-title="issue 例子覆盖">
+        <div class="card">
+          <h2>issue 例子覆盖义务</h2>
+          <p class="lede">平台从工作区 <code>problem.md</code> / <code>PROBLEM.md</code> / <code>issue.md</code> 抽取<strong>正文里已经写过的</strong>例子。只复现 issue 写过的内容，<strong>不得把官方隐藏测试泄漏给模型</strong>。仓库测试通过仍不够：这些例子必须在<strong>最新一次代码编辑之后</strong>被成功命令覆盖（<code>issue_repro_edits_since == 0</code>）。</p>
+          <pre class="seq">抽取（load_problem_text → extract_issue_repro_hints）
+  优先：围栏代码块、引用命令、REPL（&gt;&gt;&gt;）、输入输出样例、raises 行、Expected 小节
+  表路径：Table.read/write 的 format= 与 header_rows= 会进入 roundtrip_kwargs
+  ASCII 格式名（ascii.xxx）同样武装写再读
+  大小写主张：not case sensitive / case-insensitive / all-caps 命令 等 → need_casefold
+    另生成 casefold_assets，必须用折叠变体再练一遍
+  上限：命令 4 · 标记 8 · token 6 · 资产 2 · 信号 6 · fence 400 字 · 资产最短 8 字
+  这些列表进 TurnState，随 checkpoint 恢复
+
+覆盖判定（obligations_met_for_command / is_clearing_repro_result）
+  成功命令必须吃掉 required_tokens / assets；失败签名若仍在 stdout/stderr 里，不算清
+  绿测试（is_green_test_result）只武装「仓库测已过」，同时把 issue_repro_armed 打开
+  之后每一次成功 edit/write 把 edits_since += 1；必须再跑覆盖命令才能回到 0
+<span class="pt">◆ 要点  义务绑「最新一次编辑之后」。只记「曾经跑过例子」，改完再交卷会漏官方隐藏测。</span>
+<span class="pt">◆ 要点  抽取器看不到隐藏测。casefold 门只能逼 issue 写过的大小写主张；issue 没写的 roundtrip 变体逼不出。</span></pre>
+          <p>第5轮对照（评测事实，用来校准门的分辨率，不是改抽取上限的理由）：14182 转绿，补丁同时改了写路径（<code>header_rows</code>）与读侧（<code>data.start_line</code>），与写再读义务同向，仍最慢（约 30 分钟，镜像跑测与复现占主导）。14365 回落，补丁仅加 <code>re.IGNORECASE</code>；issue 样例无小写 <code>NO</code>，大小写折叠门未能逼出官方隐藏的 roundtrip 测（<code>test_roundtrip[True]</code>）。</p>
+          <div class="src"><code>structural/issue_repro.py</code> · <code>engine/state.py</code> · RESULTS 第5轮</div>
+        </div>
+      </section>

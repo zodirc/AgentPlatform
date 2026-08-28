@@ -1,0 +1,59 @@
+<section class="page" data-id="approval" data-group="Runtime" data-title="审批 · 取消 · 恢复">
+        <div class="card">
+          <h2>审批门、取消与同 run_id 续跑</h2>
+          <p class="lede">审批门决定是否允许执行；沙箱门决定进程可写范围；评测 Docker 改道与这两门正交。Engine 在 <code>approval_required</code> 时返回哨兵 <code>"waiting_approval"</code>，Controller 落 checkpoint 后返回——<strong>不写终态</strong>。这颗 Turn 仍计入 <code>RUNTIME_MAX_INFLIGHT_TURNS=16</code>，lease 继续心跳。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会另起 Run 丢义务、把取消写成 failed、或把 update_plan 当成开工批准</li>
+          </ul>
+
+          <h3>审批</h3>
+          <pre class="seq">tool_use 且 spec.requires_approval
+    Engine 写 approval.requested
+      write_file：附旧文（截 32 000 字）+ new_text，供 UI unified diff
+      edit_file：只附 span 的 old_text / new_text，不是全文件
+    return "waiting_approval"（_CONTROL_OUTCOMES；delegate 子摘要不得原样回传这个字符串）
+    │
+    ▼
+waiting_approval     Run 仍在；仍占 inflight + lease
+    checkpoint 必须含 verify_* / issue_repro_* / writes_preapproved / read_registry
+    SSE 见到 approval.requested → 关流；客户端 GET /view 再画审批 UI
+    用户短 POST approve|deny → api INSERT run_commands + NOTIFY
+    仅 runner_id 匹配且持约的 runtime 消费
+    │
+    ├─ 批准 ──► 同一 run_id 续跑（step_count 不归零；从 checkpoint 恢复欠账）
+    └─ 拒绝 ──► 原因写入 tool_result；模型改方案或收工
+                 拒绝 ≠ 把 Turn 标成 failed
+    <span class="pt">◆ 要点  另起 Run 续跑，checkpoint 里的义务会丢。必须是同一个执行实例。</span>
+
+同 Turn 粘性
+────
+  writes_preapproved：写盘批准一次后，本 Turn 同类写盘免再审
+  exec_preapproved：run_command 第一次仍须审；通过后本 Turn 后续同类 shell 可免再审
+  Plan 进入 executing 只预授权清单内写盘（_PLAN_EXECUTING_WAIVE_APPROVAL），不等于 shell 免审
+  普通进度清单更新 ≠ 已批准开工
+  ops_eval 在 StartTurn 已预置这两位，无人值守
+    <span class="pt">◆ 要点  把 update_plan 当成开工批准，未审的 shell 会直接跑。</span></pre>
+
+          <h3>取消</h3>
+          <pre class="seq">软  cancel_requested   写库；Engine 约 50ms 读标志；协作在步边界与流 chunk 间停下
+硬  cancel_force        可杀模型流与子进程
+                        Gateway 必须 abort HTTP 并 aclose 生成器，打断 backoff
+                        否则用户点取消后仍在烧供应商
+
+终态对照（分列，禁止合并）
+  cancelled       用户取消（≠ failed）
+  failed(start_timeout)   15s 内无人 claim
+  failed(runner_lost)     租约丢失且不能安全续跑
+  failed(step_timeout)    步墙钟 720s 或 stall auto-fail（180s 无事件）
+再对话 = 同 Session 新 Turn（不存在 ResumeTurn）
+<span class="pt">◆ 要点  用户取消写成 failed，和 runner_lost / start_timeout 在 Ops 上就分不开了。</span></pre>
+          <p class="figure-lead">下图菱形为「是否等待审批」。挂起后走同一执行实例的 checkpoint，不是新 Turn。</p>
+          <div class="src"><code>engine/agent_engine.py</code> · <code>controller/checkpoint_store.py</code> · <code>controller/run_lock.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/harness/approval-cancel-resume-flow-zh.png" alt="审批·取消·恢复详流" />
+          </div>
+          <figcaption>审批·取消·恢复详流 · 点击放大</figcaption>
+        </figure>
+      </section>

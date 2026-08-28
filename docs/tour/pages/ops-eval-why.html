@@ -1,0 +1,50 @@
+<section class="page" data-id="ops-eval-why" data-group="Ops 效果" data-title="评测原理">
+        <div class="card">
+          <h2>评测在测什么（审阅用）</h2>
+          <p class="lede">先把尺子讲清楚，再看后面的跑次回放。一句话：<strong>产品同一条 Turn 路径，面对官方题集，能不能交出官方指标。</strong>金标永不进模型窗。不是旁路脚本直接 embed / 直接 completion / 空补丁通管道。编码主指标是 Docker 内 <code>resolve_rate</code>，不是 <code>patch_rate</code>。</p>
+          <table>
+            <thead><tr><th></th><th>检索</th><th>上下文</th><th>编码</th></tr></thead>
+            <tbody>
+              <tr><td>官方题</td><td>BEIR / C-MTEB 的 query</td><td>LongBench 长文 + 问题</td><td>GitHub issue + <code>base_commit</code> 坏树</td></tr>
+              <tr><td>可见范围</td><td><code>sources/&lt;doc_id&gt;.txt</code> 整库 + Information need 原文检索</td><td>仅 <code>passage.md</code> + 短答格式</td><td>工作树 + <code>problem.md</code>（issue 全文）</td></tr>
+              <tr><td>不进 Work</td><td>qrels</td><td><code>answers</code></td><td><code>FAIL_TO_PASS</code> / gold patch</td></tr>
+              <tr><td>主工具</td><td><code>search_sources</code></td><td><code>read_file</code></td><td><code>edit_file</code> / 测在该题 Docker</td></tr>
+              <tr><td>裁判</td><td>qrels + nDCG / R@k / MAP</td><td>抽 <code>Answer:</code> 后 F1 / EM</td><td><strong>harness</strong>：F2P 全过且 P2P 全过</td></tr>
+              <tr><td>故意不测</td><td>终答写得对不对</td><td>会不会检索</td><td>issue 例子 / 平台探针</td></tr>
+              <tr><td>smoke 偏差</td><td>每集前 20 条 query</td><td>每任务 20 条，共 60</td><td>HF 顺序前 5 题，<strong>全是 astropy</strong></td></tr>
+            </tbody>
+          </table>
+          <h3>共同纪律（改分数前先改这里）</h3>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what"><code>eval_path=agent</code>，否则拒跑</p>
+                <p class="why">分数必须来自真实 Session/Turn/工具事件。L0 组件对照可以存在，不得进效果主栏。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">金标不进 Work、不进 prompt</p>
+                <p class="why">否则测的是泄漏，不是产品。编码只写 issue；隐藏测和官方补丁留在 harness 镜像里。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">主指标用该领域的官方尺子；探针另记</p>
+                <p class="why">检索不拿终答当命中；上下文不拿「读了几行」当命中；编码不拿 <code>fuse_ok</code> 当通过。否则改切块/组窗/LSP 时无法归因。</p>
+              </div>
+            </li>
+          </ol>
+          <div class="callout warn">
+            <strong>审阅时最值得质疑的三处。</strong>
+            （1）检索主分是「搜到金标文档 ID」，模型把 cite 写错仍可能得高 nDCG。<br>
+            （2）上下文 EM 对同义改写极严，F1 高于 EM 多半是尺子形态。<br>
+            （3）n5 全 astropy，4/5 不能外推 Lite；同分异题更不能写成「稳定 80%」。
+          </div>
+          <p>下一页用本地实例走完命中判定（claim / 短答案 / hidden tests），并配主链图。其后为第 4 轮宏分 + 第 6 轮编码指针。</p>
+          <div class="src"><code>eval/official/baseline/RESULTS.md</code></div>
+        </div>
+      </section>

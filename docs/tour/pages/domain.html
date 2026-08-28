@@ -1,0 +1,72 @@
+<section class="page" data-id="domain" data-group="领域" data-title="对象与状态机">
+        <div class="card">
+          <h2>领域对象与 Turn 状态机</h2>
+          <p class="lede">用户心智是一份稿或一个仓库。工程上拆成四层，使稿件世界与单次对话解耦：Principal → default Work → Session* → Turn ↔ Run（1:1）。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
+          </ul>
+
+          <h3>四层</h3>
+          <pre class="seq">Principal（登录用户）
+    │  default Work
+    ▼
+Work            稿件与资料的世界根
+                work_id / work_root
+                大纲、正文、sources/、.agent/work/ 元数据挂在此树
+                <span class="pt">◆ 要点  Session compact 不得拆散 Work。切会话 ≠ 换作品根。</span>
+    │
+    ▼
+Session*        连续性容器（同一 Work 可多条）
+                transcript、策略、压缩摘要；携带 work_id
+                切换 Session 不切换默认 Work
+    │
+    ▼
+Turn            一次用户输入的业务闭环
+                pending → running → completed | failed | cancelled
+                pending = 已 INSERT、尚未 claim（HTTP 202 就停在这）
+                恰好对应一个 Run
+                waiting_approval 仍占 inflight 16，不是终态
+                <span class="pt">◆ 要点  取消后再对话是同 Session 的新 Turn。不存在 ResumeTurn。</span>
+    │  1:1
+    ▼
+Run             agentic loop 的执行实例
+                runner 租约；checkpoint / 取消 / 审批都挂 run_id
+                waiting_approval 是横跳，不是终态
+                <span class="pt">◆ 要点  批准后必须同 run_id 续跑。另起 Run，行为门（还欠测试/例子）会丢。</span></pre>
+
+          <h3>Turn 状态机</h3>
+          <pre class="seq">                ┌──────────────┐
+                │   pending    │  已入队，runtime 尚未 claim
+                └──────┬───────┘
+                       │ claim
+                       ▼
+                ┌──────────────┐     需审工具
+                │   running    │◄──────────────┐
+                └──────┬───────┘               │ 批准 / 同实例续跑
+                       │                       │
+          ┌────────────┼────────────┐          │
+          ▼            ▼            ▼          │
+   completed    waiting_approval    cancelled  │
+                 （横跳，Run 仍在）────────────┘
+                       │ 拒绝 tool_result
+                       ▼
+                    running 或 收工
+
+失败族（≠ 用户取消；分列禁止合并）
+────
+  start_timeout   claim 超过 15s 无人领取（请求已 202，Turn 已在）
+  runner_lost     租约丢失且无法安全续跑
+  step_timeout    步墙钟 720s，或 stall 180s 无事件且 auto-fail
+  cancelled ≠ failed
+
+<span class="pt">◆ 要点  waiting_approval 不是终态。把它做成 completed/failed，审批后续跑就没了。</span></pre>
+          <p class="figure-lead">下图为 Turn 生命周期。等待审批是横跳，不是终态。中间箭头链对应上面状态机。</p>
+          <div class="src"><code>packages/contracts</code> DDL · <code>turns</code> / <code>runs</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/architecture/turn-lifecycle-zh.png" alt="Turn 生命周期" />
+          </div>
+          <figcaption>Turn 生命周期 · 点击放大</figcaption>
+        </figure>
+      </section>

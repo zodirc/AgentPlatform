@@ -1,0 +1,36 @@
+<section class="page" data-id="verify" data-group="Coding" data-title="verify receipt">
+        <div class="card">
+          <h2>verify receipt：终稿仍欠验证时的旁路 continue</h2>
+          <p class="lede">触发源是工具结果维护的追踪器，<strong>不解析终稿自然语言</strong>。模型不再发出 <code>tool_use</code>、直接输出终稿时，<code>should_inject_verify_receipt</code> 在终局边决定是否注入。命中则追加一条用户口吻消息、写 <code>tool.completed(verify_receipt=true)</code>，然后 <code>continue</code> 再进 assemble。不挡 cancel / <code>budget_exceeded</code>；不改 while 形状。</p>
+          <pre class="seq">门闩（全部要过）
+  cancelled / budget_exceeded → 不注入
+  剩余步数 = max_steps − step_count
+  编码两类要求 remaining ≥ verify_receipt_reserve_steps（默认 10）
+    10 的含义：注入后再跑一轮模型 + 至少一次 testish，仍要留出失败再改的余量
+  写作 L0 更紧：hinge_reserve = min(reserve, 3)；四类 writing receipt 本 Turn 互斥只发一张
+
+编码 1  经典 verify
+  verify_pending ∧ code_edits_since_verify ≥ 1 ∧ ¬verify_receipt_sent
+  文案引用 related_tests_union 里的可复制命令，以及 last_test_first_failure（若有）
+  成功 edit/write 把 pending 置位；testish 命令（is_testish_command）把它清掉
+
+编码 2  issue 例子
+  issue_repro_armed ∧ 未 satisfied ∧ ¬issue_repro_receipt_sent ∧ hints 非空
+  satisfied 的充分条件：曾经绿过 且 issue_repro_edits_since == 0
+  「仓库测试已绿」不够：绿之后又 edit，edits_since 回升，必须再覆盖
+
+写作 L0（与编码共享注入管线，不是第二条 while）
+  staccato_uniform · hinge_dense · lore_dump · opening_institution
+  跟随最后一次 scored 章节，而不是 draft 瞬间的 flag
+  另有 writing_delivery_hold：manifest 仍开过程门/篇幅不足时阻止「已完成」叙事（每 Turn 一次）
+
+落盘形态
+  平台写入 user 消息（口吻像用户催验证）—— 不是 tool_result，工具菜单看不见
+  tool.completed：tool_name=verify_receipt；schema 不允许 verify_receipt_kind，kind 只进 summary
+  checkpoint 必须含上述标志；审批挂起再续跑，义务从同一 run_id 恢复
+<span class="pt">◆ 要点  把 receipt 做成模型可调用的工具，模型可以不调。做成终局边注入，才能在「它已经决定交卷」时拦一次。</span>
+<span class="pt">◆ 要点  剩余步数不足仍注入，会在 max_steps 墙上交白卷，等于没拦。</span></pre>
+          <p>第5轮观察（评测，不是产品 SLA）：发出率 0.80（第4轮曾降至 0.20）；发出后实际再跑测试仅 0.25——receipt 解决的是「还知道欠」，不是「一定会去跑」。</p>
+          <div class="src"><code>engine/verify_receipt.py</code> · <code>engine/state.py</code> · <code>tests/test_wave4_verify.py</code></div>
+        </div>
+      </section>

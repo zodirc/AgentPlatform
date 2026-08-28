@@ -1,0 +1,64 @@
+<section class="page" data-id="tools" data-group="场景与工具" data-title="工具面">
+        <div class="card">
+          <h2>能力即工具；捷径在 handler 改道</h2>
+          <p class="lede">检索、改稿、exec、委派以及编码时的定义/波及/验证，都是工具或写入既有 <code>tool_result</code>。RAG 禁止每轮预注入向量包；多 agent 只经 <code>delegate</code>（子循环上限 12 步）。高频捷径在 handler 改道：工具名不变，审计与 prefix cache 才稳。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会绕开已读登记、在错解释器上跑绿、或打掉 tools[] 字节缓存</li>
+          </ul>
+
+          <h3>进请求的形状</h3>
+          <pre class="seq">tools[] 与 system 文本分离；GenerationParams.tool_choice 默认 auto
+side_effect 决定：连续只读可否 gather、默认是否 requires_approval
+  只读可缓存集合：list_dir · glob · grep · read_file · search_sources · enrich_ioc · lookup_indicator
+  写/exec 串行；timeout 默认 60s，写成 tool.completed(status=timeout)，不把 Turn 标 failed
+
+配额（Turn 级计数器，不是 PG）
+  read_file ≤ 16        search_sources ≤ 3
+  list_dir 条目封顶 200；grep 默认 limit 50
+  search_sources 摘录 400 字；词法扫描单文件 ≤ 262 144 字节
+
+晚期闸（不改 tools[] 字节）
+  delivery_status ∈ {ok, warning}  或  (step≥8 且 剩余≤6)
+  运行时拒绝：search_sources · delegate · remember · recall
+  stage_tool_scope_mutate_schema 默认关 —— 物理删 schema 会打掉供应商 prefix cache
+<span class="pt">◆ 要点  新能力进 tools[] 或既有 tool_result。不要为捷径再发明一个模型可见的工具名。</span>
+
+场景切面（Profile.tool_names，不是 feature flag）
+  agent     read_file · grep · edit_file · search_codebase
+            goto_definition · find_references
+            run_command · run_tests · read_lints · update_plan · …
+            结构超时：导航 15s · 诊断 60s · 单文件 checks 30s · 每调用 ≤20 文件 · 引用 ≤80
+  writing   propose_patch · draft_section · update_outline
+            search_sources · check_citation · export_document · …
+            无 LSP / 符号表；资料检索与编码 Locate 不是同一条车道
+  intel     enrich_ioc · lookup_indicator · search_sources · …</pre>
+
+          <h3>handler 改道（工具名不变）</h3>
+          <pre class="seq">run_command 只读单文件、无管道与写盘
+  cat / head / tail / sed -n / nl  → 内部改为 read_file
+  （走大纲、已读登记、组窗 4k/32k 折叠）
+  带管道、通配或重定向的命令原样进壳
+  输出封顶 32 000 字
+  <span class="pt">◆ 要点  不改道，模型用 cat 读文件会绕开 read_registry，组窗重复堆全文，16 次帽也形同虚设。</span>
+
+grep 符号形 pattern（is_symbol_query）
+  整条进入 search_codebase（Locate：符号表粗筛 + LSP 在标识符列确认）
+  结果带 redirected_from=grep；词面命中不得进入 definitions[]
+  非符号才走词法正则；跳过 .git / node_modules / venv 等噪声
+
+官方编码评测
+  pytest 后即使跟随 | tail：剥掉展示用管道，完整 stdout 进该题 sweb.eval 镜像 /testbed
+  禁止在裸 worktree 上 pip/uv install；环境探测同样进镜像
+  失败摘要从<strong>未截断全文</strong>抽 first_failures（≤400 字），不依赖页脚
+  <span class="pt">◆ 要点  在 checkout 树上跑测，绿的是错解释器；评委镜像里仍红。官方通过率看 Docker 内测试，不是这些探针。</span>
+
+read_file
+  单次 ≤ 32 000 字；触预算才附大纲（Markdown/纯文本抽标题，Python 走 AST）
+  同路径已完整覆盖的区间 → skipped；组窗把旧读折叠后允许再读一次被挤掉的路径
+  失败的 edit 之后允许再读（note_edit_failure_allows_reread）
+
+update_plan 清单与上次完全相同 → 返回未变化，不再刷一条 tool.completed
+delegate 摘要必须 clamp 到 4096，否则打破 tool.completed schema</pre>
+          <div class="src"><code>tools/bootstrap.py</code> · <code>tools/core/read_tools.py</code> · <code>structural/test_run_redirect.py</code> · <code>tools/core/swe_solve_env.py</code></div>
+        </div>
+      </section>

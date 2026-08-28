@@ -1,0 +1,66 @@
+<section class="page" data-id="start-turn" data-group="领域" data-title="StartTurn 命令链">
+        <div class="card">
+          <h2>StartTurn 命令链</h2>
+          <p class="lede">api 尽快只做鉴权、admission、落库与门铃，不把任务 HTTP 推到 runtime。默认 <code>TURN_DISPATCH=pull</code>：runtime 有空位才 CAS claim。取消、审批、补丁默认走 <code>run_commands</code> + NOTIFY，由<strong>当前持有租约</strong>的副本消费。HTTP <code>/internal/commands/start-turn</code> 仅为 push 兼容回退。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把分发做成同步 RPC、把 429 当成 failed、或把命令广播给未持约副本</li>
+          </ul>
+
+          <h3>主链（默认 pull）</h3>
+          <pre class="seq">Browser   POST /api/v1/sessions/{id}/turns
+          Cookie；body { message, client_request_id, scenario_id? }
+    │
+    ▼
+api       鉴权 · assert_session_owner · 校验 work / scenario
+          admission（仅 pull；push 恒放行）
+            全局未领取 accepted ≥ 32（dispatch_queue_max≤0 时的默认）→ 429 dispatch_queue_full
+            同用户未领取 ≥ 2 → 429 per_tenant_queue_full
+            Retry-After: 5
+            <span class="pt">◆ 要点  429 时 Turn 尚未 INSERT。把过载写成 failed，终态语义脏了，重试还会再插一行。</span>
+          同一事务 INSERT turns(pending) + runs(accepted, pull_eligible) + turn_views seed
+          COMMIT 后 pg_notify('turn_dispatch_channel', run_id)   ← 门铃只有 UUID
+          立即 202 { turn_id, run_id, status: pending }
+          <span class="pt">◆ 要点  202 ≠ turn.accepted。api 不 HTTP 推 StartTurn。做成对 runtime 的同步 RPC，副本无法 competing consume。</span>
+    │
+    ▼
+runtime   LISTEN turn_dispatch + 2s poll 反熵 → 条件 UPDATE claim（CAS）
+          写入 lease_expires_at = now()+180s；心跳 10s
+          turns.status pending→running；INSERT turn.accepted（业务首事件，通常 sequence=1）
+          Intake → Engine
+          claim 超过 15s 无人领 → failed(start_timeout)   还没进 while
+          租约丢失且不能安全续跑 → failed(runner_lost)   与 cancelled / stall step_timeout 分列
+
+菱形  是否领取制？
+  是 pull   上图。claim 走数据库 CAS，加副本不必改路由表（make up-ha）。
+  否 push   回退：api HTTP POST runtime /internal/commands/start-turn
+            传输失败 → 客户端 502（入队都没完成）
+    <span class="pt">◆ 要点  push 只是兼容。默认路径上不要再发明 RUNTIME_URL_MAP / sticky。</span></pre>
+
+          <h3>同族控制命令</h3>
+          <pre class="seq">Browser 短 POST  approve | deny | cancel | patch accept/reject | sync-sources-index
+    │
+    ▼
+api      INSERT run_commands + pg_notify('run_commands_channel', …)
+    │
+    ▼
+runtime  仅 runner_id 匹配且 lease 仍有效的副本消费
+         软取消 cancel_requested（Engine 50ms 协作停下）
+         硬取消 cancel_force（abort 模型流 + 可杀子进程；必须打断 backoff）
+    <span class="pt">◆ 要点  命令必须达持约副本。广播给所有 runtime，未持约者会抢跑或对着过期 checkpoint 写终态。</span>
+
+官方评测 Turn
+────
+  StartTurn 即预批准写盘与 exec（ops_eval：无人值守，不拦人审）
+  writes_preapproved / exec_preapproved 随 checkpoint 存活，approve 续跑仍免审
+  编码评测可在开题前等待符号表 ready（仅评测套件）
+    <span class="pt">◆ 要点  产品对话仍先受理，不等索引。把评测的「等 ready」抄到产品路径，R1（首 token）就破了。</span></pre>
+          <p class="figure-lead">下图菱形「是否领取制」对应主链 pull/push。样板为 <code>docs/assets/events/start-turn-command-zh.png</code>。</p>
+          <div class="src"><code>services/api/app/services/command/admission.py</code> · <code>turn_dispatch.py</code> · <code>controller/turn_controller.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/events/start-turn-command-zh.png" alt="StartTurn 命令链" />
+          </div>
+          <figcaption>StartTurn 命令链 · 点击放大</figcaption>
+        </figure>
+      </section>

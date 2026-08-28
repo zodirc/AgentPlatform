@@ -1,0 +1,59 @@
+<section class="page" data-id="coding-fuse" data-group="Coding" data-title="找定义 · 改完再验">
+        <div class="card">
+          <h2>编码 Turn：从读题到交卷</h2>
+          <p class="lede">模型已会调用 <code>search_codebase</code>、<code>edit_file</code>、<code>run_tests</code>。平台不另发明导航工具，而是在返回值中写入模型无法忽视的事实。官方是否判通过看 Docker 内官方测试（<code>resolve_rate</code>），不是看这些探针是否为绿。结构车道超时与预算只在 agent Profile；写作/情报根本不装这套工具。</p>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">读题：从 <code>problem.md</code> / <code>PROBLEM.md</code> / <code>issue.md</code> 抽出符号名、报错串、失败测、代码块与 REPL</p>
+                <p class="why">抽取上限：命令 4、标记 8、必现 token 6、资产 2、失败/期望信号各 6、fence 400 字。禁止先 <code>list_dir(".")</code> 枚举仓库根——顺序写在 <code>scenarios/agent/system.md</code>，由返回值与终局拦截落实，不靠再加循环节点。隐藏官方测试不得泄漏给模型。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">先用 issue 内最小例子复现（同一条命令，改完再跑）</p>
+                <p class="why">仓库 pytest 全绿仍不够。覆盖判定绑在「最新一次成功 edit/write 之后」：<code>issue_repro_edits_since</code> 必须回到 0。失败签名若仍出现在输出里，不算覆盖。表/ASCII「按某种 format 写出再读回」必须用同一套 kwargs 完成写再读；issue 声明大小写不敏感时还须跑折叠变体。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">按符号名走 <code>search_codebase</code> 找定义；模型若直接 grep 符号名，handler 整条改道</p>
+                <p class="why">工作区 AST 符号表粗筛候选（top_k=5），再由 LSP 在标识符列上确认。确认过的才进 <code>definitions[]</code>；词面命中不得冒充定义。模块名、形参查空是结构边界，计 <code>locate_incomplete</code>，不是索引故障。LSP 是定义与引用的权威；符号表无向量，也不给写作/情报检索用。产品对话不等索引 ready——进度条只报告扫描，ready 之前不得画成已能精确定位。索引默认 off-loop 入队 <code>work_ast_index_jobs</code>（inline 冷启动仅测试/急救）。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">4</span>
+              <div>
+                <p class="what">打开定义处，<code>edit_file</code> 就地替换一小段（非唯一命中时回显最多 5 个候选 span）</p>
+                <p class="why">文件过长被截断（32k）时附大纲。成功时模型拿到完整 result；Ops 侧 <code>tool.completed</code> 只落瘦 meta：<code>impact.status/symbol/reference_count</code>、<code>checks</code>（单文件增量诊断，最多 20 条新 issue，超时 30s）、<code>related_tests</code> 最多 5 条路径 + 可复制 <code>python -m pytest {path} -x -q</code>。平台不代跑这些测试。命名启发式 250ms、import 反向最多 250 文件 / 400ms，避免在大树上搜测试把 step 墙钟吃掉。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">5</span>
+              <div>
+                <p class="what">改完再验：诊断、相关测试、邻文件 <code>read_lints</code>、同一条复现</p>
+                <p class="why">测试输出从<strong>未截断全文</strong>抽出失败第一条（写入 state 时再截 400 字）。模型常写 <code>pytest | tail</code>；页脚被管道吃掉时旧逻辑会静默没有摘要。评测路径会剥展示管道、把命令送进该题 Docker；宿主树上的绿不算。pip/uv install 在 SWE 镜像内直接拒绝。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">6</span>
+              <div>
+                <p class="what">终稿仍欠验证：注入 verify receipt 并 <code>continue</code> 同一 while</p>
+                <p class="why">两类欠账见下一页。剩余步数 &lt; 10 则省略（要留出跑测/再改的步）。每类每 Turn 至多一次。菜单不可见；<code>tool.completed</code> 的 <code>tool_name</code> 是 <code>verify_receipt</code>，kind 只进 summary（schema 无 kind 字段）。这不是新图节点。</p>
+              </div>
+            </li>
+          </ol>
+          <p>结构工具的超时与文件帽是配置，不是「能力开关」。Capability 在 Profile.tool_names。软 prewarm 在 agent Work 开工时进行，不挡 TTFB。</p>
+          <p class="figure-lead">下图上半是「找 / 波及 / 验」写入既有工具；下半仍是 Engine while，虚线汇入 <code>tool_use</code>。</p>
+          <div class="src"><code>structural/workspace_index/locate.py</code> · <code>structural/related_tests.py</code> · <code>structural/issue_repro.py</code> · <code>engine/verify_receipt.py</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/harness/coding-fuse-zh.png" alt="编码融合：找定义·改完再验" />
+          </div>
+          <figcaption>编码融合详流 · 点击放大</figcaption>
+        </figure>
+      </section>

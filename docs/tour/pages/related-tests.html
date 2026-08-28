@@ -1,0 +1,30 @@
+<section class="page" data-id="related-tests" data-group="Coding" data-title="失败摘要与相关测试">
+        <div class="card">
+          <h2>失败摘要、相关测试命令、找定义路径</h2>
+          <pre class="seq">失败摘要（test_summary）
+  旧逻辑要求 pytest 尾行；模型常写 | tail，或 32k 截断丢掉页脚 → 摘要静默缺失
+  现行从<strong>未截断全文</strong>旁路解析，兼容 -q / unittest / ERRORS
+  first_failures 写入工具结果；落入 TurnState 时再截 400 字，供 verify receipt 引用
+  is_testish_command 决定这次 run_command/run_tests 能不能清掉 verify_pending
+  冒烟从 0 走到第5轮 0.50，出口线仍 ≥0.6（评测观察）
+
+相关测试（edit_file 成功后附带，平台永不代跑）
+  最多 5 条：{path, command}，command = python -m pytest {path} -x -q
+  命名启发式 rglob 预算 250ms；import 反向最多 250 文件 / 400ms
+  跳过 .git / venv / node_modules / __pycache__ / build / dist …
+  优先精确到单个测试文件（便于送进该题 Docker），而不是 pytest 全库
+  第5轮：coverage 1.0，adoption 0.0——门能给出命令，模型仍经常不跑
+  <span class="pt">◆ 要点  相关测试是 tool_result 里的事实，不是隐藏调度。平台代跑会让官方 resolve_rate 与探针绿混在一起。</span>
+
+找定义（search_codebase / Locate）
+  符号表粗筛 top_k=5 → LSP 在标识符列确认 → 只有确认过的进 definitions[]
+  确认失败：locate_incomplete=true，词面 hits 不得冒充定义
+  模块名 / 形参查空是结构边界，不计索引故障
+  grep 符号形 pattern 整条改道至此（redirected_from=grep）
+  产品对话不等 AST ready；仅评测套件开题前等待
+  索引：默认 workspace_ast_inline=False，入队 work_ast_index_jobs；脏文件 debounce 0.5s、积压帽 500
+  第5轮融合成功率 0.625（n=8）；查找仍不是官方通过率的主因
+  <span class="pt">◆ 要点  符号表无向量。写作/情报走 search_sources，打开 Locate 只会把散文专名当代码符号。</span></pre>
+          <div class="src"><code>structural/test_summary.py</code> · <code>structural/related_tests.py</code> · <code>structural/workspace_index/locate.py</code></div>
+        </div>
+      </section>

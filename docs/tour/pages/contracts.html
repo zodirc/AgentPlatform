@@ -1,0 +1,52 @@
+<section class="page" data-id="contracts" data-group="事件与契约" data-title="契约位置">
+        <div class="card">
+          <h2>契约位置与组件地图</h2>
+          <p class="lede">公开字段与版本以 <code>packages/contracts</code> 为准。改 REST 字段、事件 JSON Schema 或 DDL 须先改契约包，再改 api/web 派生类型与实现。导览里的数字以代码为准；图上的字过期时改说明，不改皮肤。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在服务里先发明字段、让 YAML 冒号炸掉 OpenAPI、或把只读 GET 当成开工</li>
+          </ul>
+
+          <h3>机器源</h3>
+          <pre class="seq">packages/contracts/
+  openapi/public.yaml              对外 REST；description 含冒号必须加引号
+                                   （否则 test_public_yaml_paths_exist_in_app 解析失败）
+  schemas/events/envelope.json     SSE / 行存储共用信封
+    required: event_id stream_id sequence type turn_id run_id ts payload
+    additionalProperties: false
+    sequence ≥ 1；stream_id 通常等于 turn_id
+  schemas/events/types.json        事件枚举（phase0/1/2）
+  schemas/events/payloads/*.json   分类型 payload；tool.completed.summary maxLength 4096
+                                   turn.token / thinking.delta / section.draft.delta 的 delta ≤8192
+  schemas/commands/                start_turn · approve · deny · cancel
+  schemas/projections/             turn_view · session_view
+  eval/ops_run_manifest.schema.json
+  python/                          派生类型；api 测试须 overlay 本树，勿用缺文件的 stub 包
+
+校验
+  event_payload_validation 默认开
+  高频 delta 默认轻量校验（R3）；event_payload_validation_strict_deltas 仅 CI
+  delegate 摘要必须 clamp 到 4096，否则打破 tool.completed schema
+<span class="pt">◆ 要点  data: 是信封 JSON，不是供应商原始 HTTP 字节。缺 sequence 的「推送」无法续传。</span></pre>
+
+          <h3>只读 vs 开工</h3>
+          <pre class="seq">不触发 Agent loop
+  GET /turns/{id} · /view · /stream · GET /runs/{id}
+  Sessions / Works / 健康检查
+  SSE 挂看 ⊈ inflight
+
+触发 loop
+  POST /sessions/{id}/turns          → 入队 pending（202 ≠ accepted）
+  POST …/approve-tool-call|deny|cancel → run_commands，达持约副本</pre>
+
+          <h3>组件地图</h3>
+          <pre class="seq">services/api          鉴权 · 准入 · 落库 · LISTEN · SSE · 投影
+services/runtime      claim · Engine · 工具 · 写事件（:8001 不公网）
+services/web          工作台；只消费 SSE 与 GET /view
+services/bench        官方评测 worker；隔离库
+services/release-console  发布台 :9090；对比指纹、标 dirty
+packages/contracts    机器源
+eval/                 golden / official / retrieval / swebench
+deploy/ · scripts/ · seed/ · workspace/</pre>
+          <div class="src"><code>packages/contracts/schemas/events/envelope.json</code> · <code>openapi/public.yaml</code></div>
+        </div>
+      </section>

@@ -1,0 +1,108 @@
+<section class="page" data-id="ops-eval-retrieval" data-group="Ops 效果" data-title="检索 · 命中定义">
+        <div class="card">
+          <h2>检索：官方题面、可见范围与命中</h2>
+          <p class="lede">主指标回答的是：融合排序中的 <code>doc_id</code> 是否落入该 query 的 qrels（<code>rel&gt;0</code>）。终答是否正确、cite 是否写对，均不进入该分。无 Docker harness。裁判为 BEIR 式 nDCG / Recall / MAP。第一验收位：BEIR <strong>R@100</strong>。</p>
+          <h3>官方字段</h3>
+          <p>题集为 BEIR（SciFact / NFCorpus / FiQA）与 C-MTEB（Covid / Medical / Ecom）。BEIR 落盘形态：</p>
+          <table>
+            <thead><tr><th>官方文件</th><th>字段</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td><code>queries.jsonl</code></td><td><code>_id</code>、<code>text</code>（query 原文）</td><td><code>text</code> → 用户消息 <code>Information need</code></td></tr>
+              <tr><td><code>corpus.jsonl</code></td><td><code>_id</code>、<code>title</code>、<code>text</code>（摘要/帖子）</td><td>是：<code>sources/&lt;doc_id&gt;.txt</code></td></tr>
+              <tr><td><code>qrels/test.tsv</code></td><td><code>qid</code> · <code>doc_id</code> · <code>rel</code></td><td><strong>否</strong></td></tr>
+            </tbody>
+          </table>
+          <p>Agent 场景为 <code>writing</code>。free 臂要求第一次 <code>search_sources</code> <strong>逐字复制</strong> Information need；qrels 不在磁盘、不在 prompt。smoke：各子集 qrels 出现顺序前 20 条（<code>head_slice</code>，无随机）。中英分库、分指针，不得混栏。</p>
+          <h3>示例：SciFact <code>_id=3</code>（命中）</h3>
+          <p>字段取自 AllenAI SciFact / BEIR SciFact（Wadden et al., EMNLP 2020）。claim 与 corpus 的 <code>doc_id</code> 为 Semantic Scholar CorpusId，不是 PubMed PMID。物化：标题+摘要写入 <code>sources/14717500.txt</code>。</p>
+          <table>
+            <thead><tr><th>官方字段</th><th>本题取值</th><th>进 Work？</th></tr></thead>
+            <tbody>
+              <tr><td>子集 / query <code>_id</code></td><td>BEIR SciFact · <code>3</code>（smoke 切片中的第二条 qrels query）</td><td>case id <code>beir.scifact.q-3</code></td></tr>
+              <tr><td><code>text</code>（claim）</td><td>见下方原文</td><td>是：Information need</td></tr>
+              <tr><td>金标 <code>doc_id</code> / <code>rel</code></td><td><code>14717500</code> / <code>1</code>（SciFact <code>evidence_label=SUPPORT</code>，evidence sentences 2、5）</td><td><strong>否</strong>（qrels）</td></tr>
+              <tr><td>语料 <code>title</code></td><td><em>Rare Variants Create Synthetic Genome-Wide Associations</em>（Dickson et al., 2010；DOI <code>10.1371/journal.pbio.1000294</code>）</td><td>是：文件正文</td></tr>
+            </tbody>
+          </table>
+          <p>写入用户消息的 Information need（= <code>queries.jsonl</code> 的 <code>text</code>）：</p>
+          <pre>1,000 genomes project enables mapping of genetic sequence variation consisting of rare variants with larger penetrance effects than common variants.</pre>
+          <p>Agent 可检索到的语料节选（= <code>corpus.jsonl</code> 的 title + abstract；约 1849 字符全文在 <code>sources/14717500.txt</code>）：</p>
+          <pre>Rare Variants Create Synthetic Genome-Wide Associations
+
+A large number of different common variants has been associated with very modest increases of risk for various common diseases. A simulation study shows that rare variants with much greater impacts on disease risk may be responsible for some of these associations.</pre>
+          <ol class="steps">
+            <li>
+              <span class="n">1</span>
+              <div>
+                <p class="what">物化 corpus → bench-postgres（schema <code>retrieval_ops</code>），再开 writing Turn</p>
+                <p class="why">与产品资料库隔离。模型按需 <code>search_sources</code>（每 Turn ≤3）。店内 hybrid 一次排序评测侧不改。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">2</span>
+              <div>
+                <p class="what">从 <code>retrieval.completed</code> 抽路径，按文件名还原 <code>doc_id</code></p>
+                <p class="why">多轮则评测侧再 RRF：<code>score[d] += 1/(60+rank)</code>（k=60）。单轮保持原序。终答文本不参与计分。</p>
+              </div>
+            </li>
+            <li>
+              <span class="n">3</span>
+              <div>
+                <p class="what">与 qrels 计算 nDCG@k / R@k / MAP@k</p>
+                <p class="why">本题金标位于 rank 1、<code>rel=1</code>：DCG@10 = IDCG = 1 → <strong>nDCG@10=1，R@10=1，R@100=1</strong>。<code>read_file</code> 是否打开金标文件只记旁路统计。</p>
+              </div>
+            </li>
+          </ol>
+          <p>对照 SciFact <code>_id=1</code>。Information need：<code>0-dimensional biomaterials show inductive properties.</code> 金标 <code>31715818</code>（<em>New opportunities: the use of nanotechnologies to manipulate and track stem cells.</em>）不进入模型窗。融合 top-10 不含该 ID → nDCG@10=0、R@10=0；52 条融合列表内含该 ID → <strong>R@100=1.0</strong>，nDCG@100=0.193，<code>bucket=weak_hits</code>。第一验收位取 R@100：本题是排序问题，不是零召回。</p>
+          <h3>命中定义</h3>
+          <table>
+            <thead><tr><th>尺子</th><th>单条 query</th><th>选取理由</th></tr></thead>
+            <tbody>
+              <tr>
+                <td>命中</td>
+                <td>融合排序中的 <code>doc_id</code> ∈ 该 query 的 qrels 且 <code>rel&gt;0</code></td>
+                <td>官方 IR 相关文档集合。不计终答是否提及金标标题；不计 <code>read_file</code> 是否打开金标文件。</td>
+              </tr>
+              <tr>
+                <td>Recall@k</td>
+                <td>|R<sub>k</sub> ∩ G| / |G|，再对 query 宏平均</td>
+                <td><strong>R@100 为第一验收位</strong>：金标未入池时，nDCG@10 无诊断价值。召回未抬升前不开交叉编码器。</td>
+              </tr>
+              <tr>
+                <td>nDCG@k</td>
+                <td>按位次折现的增益 / 理想 DCG</td>
+                <td>同等召回下，金标位次越前越好。第2轮 BEIR 出现过 nDCG@1 升而 R@100 降。</td>
+              </tr>
+              <tr>
+                <td>MAP@k</td>
+                <td>各命中位置 precision 对 |G| 平均</td>
+                <td>惩罚金标散落在尾部。与 nDCG 一并观察排序，不单独作闸。</td>
+              </tr>
+            </tbody>
+          </table>
+          <p>归因分桶：<code>no_search</code> 不是召回失败；<code>query_drift</code>（首次未复制官方 query）不是嵌入失败；infra 失败不得记为模型零分。</p>
+          <div class="callout warn">
+            <strong>审阅偏差。</strong>
+            主指标不是 RAG-QA。多轮 RRF 抬高后轮改写才召回的文档，有利于 iterative search，也会掩盖首次检索质量。n=20 的 head 切片相对全集可易可难，不得外推全库。
+          </div>
+          <h3>第4轮（BEIR / C-MTEB 指针）</h3>
+          <table>
+            <thead><tr><th></th><th>BEIR（第一验收位）</th><th>C-MTEB</th></tr></thead>
+            <tbody>
+              <tr><td>run_id</td><td><code>42772fe3-…</code></td><td><code>22961e61-…</code></td></tr>
+              <tr><td>nDCG@10</td><td>0.4964（相对第2轮 +0.046）</td><td>0.6777（−0.019）</td></tr>
+              <tr><td>R@100</td><td><strong>0.5252</strong>（+0.030，回近 INDEX12 的 0.5296）</td><td>0.9167（+0.067）</td></tr>
+              <tr><td>MAP@10</td><td>0.3520（+0.047）</td><td>0.6177（−0.041）</td></tr>
+            </tbody>
+          </table>
+          <div class="callout">C-MTEB 召回上升、nDCG/MAP 略降：中位 nDCG 易饱和，排序与召回可以分道。仍为 n=20，不升 SCORECARD 主栏。</div>
+          <p class="figure-lead">下图：一题从 <code>search_sources</code> 计到 nDCG。店内 hybrid 顺序见前文召回页。</p>
+          <div class="src"><code>BeIR/scifact</code> · <code>metrics_ir.py</code> · <code>agent_path_extract.py</code> · RESULTS 第4轮 <code>42772fe3</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-retrieval-score-zh.png" alt="Ops 检索一题计分详流" />
+          </div>
+          <figcaption>检索一题计分 · 评测侧多轮 RRF · 点击放大</figcaption>
+        </figure>
+      </section>

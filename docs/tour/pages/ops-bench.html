@@ -1,0 +1,52 @@
+<section class="page" data-id="ops-bench" data-group="Ops 效果" data-title="Ops L1 原理">
+        <div class="card">
+          <h2>Ops L1：走产品同一条 Turn 路径</h2>
+          <p class="lede">效果温度计，不进 StartTurn 热路径，也<strong>不是</strong> merge gate。契约要求 <code>eval_path=agent</code>：真实 Session / Turn / 工具事件。金标永不进模型窗。L0 组件对照（直接 embed / 直接 completion）可以存在，不得进效果主栏。下一页约定官方题面；再后才是第4轮 smoke + 第6轮编码的数字。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 harness 失败写成模型 0 分、把探针绿当官方通过、或把 smoke 升 SCORECARD</li>
+          </ul>
+
+          <h3>主链（L1 agent-path）</h3>
+          <pre class="seq">1  Ops /official 或 make *-agent；选 suite = retrieval | retrieval_zh | context | coding
+2  拉数据集到 ops-official/.local-data（校验哈希，不进产品 workspace）
+3  物化隔离 Work：beir-index / cmteb-index / LongBench passage.md / SWE Lite checkout
+4  索引进 bench-postgres 独立 schema（retrieval_ops / retrieval_ops_zh）
+     与产品 agent-postgres 不是同一份资料；cgroup 另 1g
+5  菱形 eval_path==agent？  否 → 拒跑。是 → 建产品 Session/Turn（ops_eval 预批准写/exec）
+6  AgentEngine 跑真工具（search_sources / read_file / edit_file / run_tests…）
+7  从 tool_result / turn_events 抽 ranked / Answer: / 补丁
+8  套件尺子（见下）对照官方金标（金标不在 Work 内）
+9  写入 manifest.json + latest_&lt;suite&gt;.json；smoke 只进 RESULTS 日记
+     SCORECARD 主栏仍空；n5 / smoke 执行 promote-run 会被拒
+<span class="pt">◆ 要点  分数必须来自产品 Turn。旁路脚本直接 embed 得到的 nDCG 不得进主栏，否则改切块无法归因到工具路径。</span></pre>
+
+          <h3>三套尺子（故意不测什么）</h3>
+          <pre class="seq">检索   writing 场景真实调用 search_sources
+       主指标 nDCG@10 与 R@100（R@100 是第一验收位）
+       评测侧可把多轮 ranked 再 RRF(k=60)；店内一次召回顺序不变
+       故意不测：终答写得对不对（cite 写错仍可能高 nDCG）
+
+上下文  LongBench；agent 场景；读 passage.md 再抽 Answer:
+       主指标 F1 / EM。无 search_sources
+       故意不测：会不会检索
+
+编码   SWE Lite checkout + 完整产品 Turn + 官方 harness
+       唯一效果主指标：该题 Docker 内隐藏测 resolve_rate
+         F2P 全过且 P2P 全过
+       平台探针（fuse / receipt / 工作区 pytest 绿）只说明在线
+       harness 自身失败必须 failed，不得记成模型 resolve_rate=0
+       <span class="pt">◆ 要点  编码主指标是 resolve_rate，不是 patch_rate，也不是 fuse_ok。</span>
+
+smoke 偏差
+  检索每集前 20 条 query；上下文每任务 20 条共 60；编码 HF 顺序前 5 题且全是 astropy
+  4/5 不能外推 Lite；同分异题更不能写成「稳定 80%」</pre>
+          <p class="figure-lead">下图：四套件如何接到同一条产品 Turn。菱形为 eval_path。L0 CLI 对照在圈外，不进主栏。</p>
+          <div class="src"><code>eval/official/</code> · <code>packages/contracts/eval/ops_run_manifest.schema.json</code></div>
+        </div>
+        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/ops/ops-bench-principle-zh.png" alt="Ops L1 agent-path" />
+          </div>
+          <figcaption>Ops L1 agent-path · 点击放大</figcaption>
+        </figure>
+      </section>

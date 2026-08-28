@@ -1,0 +1,58 @@
+<section class="page" data-id="rag" data-group="RAG / 写作" data-title="hybrid 召回">
+        <div class="card">
+          <h2>交互面：hybrid <code>search_sources</code></h2>
+          <p class="lede">模型调用 <code>search_sources</code> 才会检索。禁止每轮预注入向量包，禁止查询路径上当场建库或整库重嵌。编码场景无此工具。冲突裁决：速率/交互 → 检索质量 → 成熟形态。psycopg 自建连，不占 runtime 热池 5×5s。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 Doc/Chunk 画成三套系统、用 raw 分相加代替 RRF、或把空窗当成「没有资料」去 sync</li>
+          </ul>
+
+          <h3>门闩</h3>
+          <pre class="seq">每 Turn ≤3 次（search_sources_max_per_turn）；超限拒绝本次调用
+合并 Profile 默认前缀（情报 seed/intel）与排除（写作排除情报站）
+无资料目录 → retrieval=none，不当成空库
+打开审计槽供 Ops 漏斗（L1/L2/L3），不进模型窗
+热路径不 sync
+<span class="pt">◆ 要点  空窗先走 keyword-fallback 提示索引滞后。查询时建库会把 R1/R3 一起打爆。</span></pre>
+
+          <h3>两条车道并行（预算约 0.3s）</h3>
+          <pre class="seq">并行的是 Chunk 车道与 Doc 车道，不是三套。Chunk 内部 HNSW 与 GIN 同线程先后。
+两车道各自 embed(query) 一次。
+over-fetch：无 prefix 时 limit×2=60，有 prefix 时 ×3=90；每侧 top_k 常见 240 或 360。
+
+Chunk
+  ANN：切块表余弦；seed 与多 Work 共用一张 HNSW，SQL 再滤 work/seed
+  过滤后窗可能空 → iterative_scan=relaxed_order；扫描上限 max(20000, limit×500)
+  生产不改默认 ef_search=40
+  FTS：标题+正文权 A，bm25_extra 权 C；强词 OR 否则 AND
+  Okapi rescore（k1=1.5 b=0.75，extra×0.35）
+  两路都有命中才 RRF（k=60，默认等权，按位次不是 raw 分相加）→ L1
+  词重叠/标题/短语精排 → L2
+  交叉编码器默认关（超时/ P95 帽 150ms 的实验路径，不是产品默认）
+
+Doc
+  centroid HNSW ≤8 path（source_docs.embedding = 切块向量均值，不是再 embed 摘要）
+  空/失败 → 宽 chunk ANN 按 path 去重
+  超时丢 doc、保 chunk
+  doc_boost 默认 0.35（发生在 L2 之后）：path 落在 Doc 赢家上的切块加分靠前
+  不删除仅 chunk 命中的结果
+<span class="pt">◆ 要点  RRF 按位次融合。把余弦分和 BM25 分直接相加，量纲不同，排序会漂。</span></pre>
+
+          <h3>工具层出口</h3>
+          <pre class="seq">再滤租户 ACL 与沙箱路径
+Cover：特色词须出现在 path 或摘录
+通过则前 5 条 ≤400 字摘录，其余 path/title/相对分 0–100；标记 hybrid
+失败/空窗 → 扫盘 keyword-fallback（单文件 ≤262 144 字节）
+词面仍空但本轮有 ANN → 保留 ANN
+L3 = 进窗摘录
+宽表过长是指针；全文用 read_file</pre>
+          <p>建库切块约 450 token、重叠 64，见「索引面」。深描逐步对照代码：<a href="#rag-deep-dive">RAG 深描</a>。</p>
+          <p class="figure-lead">下图上框为两条并行车道，下面宽条带与菱形才是融合、ACL、是否命中。</p>
+          <div class="src"><code>pgvector_store.search_hybrid</code> · <code>two_level.py</code> · <code>fusion.py</code> · <code>rerank.py</code> · <code>tools/core/sources_search.py</code></div>
+        </div>
+                                        <figure class="figure">
+          <div class="diagram-body diagram-svg">
+            <img src="../assets/rag/search-sources-flow-zh.png" alt="hybrid 召回详流" />
+          </div>
+          <figcaption>hybrid 召回详流 · 点击放大</figcaption>
+        </figure>
+      </section>
