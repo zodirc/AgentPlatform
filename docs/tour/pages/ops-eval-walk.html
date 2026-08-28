@@ -2,6 +2,9 @@
         <div class="card">
           <h2>评测实例走查</h2>
           <p class="lede">用本地仍可复核的产物，把三套尺子落到具体题目上。第 4 / 5 轮报告目录本机已不在；下列跑次取自现存 <code>latest_*.json</code>、<code>.local-data</code> 与 <code>sweb.eval</code> 镜像。宏分仍以 RESULTS 为准。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 R@10=0 当成零召回、把 n_reads=0 当成没读、或把 P2P 全绿当成 resolved</li>
+          </ul>
           <table>
             <thead><tr><th>套件</th><th>跑次</th><th>实例</th><th>命中定义</th></tr></thead>
             <tbody>
@@ -16,10 +19,8 @@
           <pre>1,000 genomes project enables mapping of genetic sequence variation consisting of rare variants with larger penetrance effects than common variants.</pre>
           <p>金标 <code>14717500</code> / <code>rel=1</code>（语料 *Rare Variants Create Synthetic Genome-Wide Associations*）物化为 <code>sources/beir/scifact-micro/14717500.txt</code>。第一次 <code>search_sources</code> 须逐字复制 Information need。</p>
           <p>本例工具序：<code>list_dir</code> → 原文检索 → <code>read_file</code>×2 → 改写再检索（drift=0.0068）→ <code>grep</code>×2。两次各 30 条，评测侧 RRF 合成 48 条。金标位于 rank 1：DCG@10 = IDCG = 1 → <strong>nDCG@10=1，R@10=1</strong>。终答与 cite 不计分。</p>
-          <div class="callout warn">
-            <strong>对照 q-1。</strong>
-            金标 <code>31715818</code> 不在 top-10 → nDCG@10=0、R@10=0；融合 52 条内含该 ID → <strong>R@100=1.0</strong>，nDCG@100=0.193，<code>weak_hits</code>。第一验收位取 R@100：本题是排序问题，不是零召回。
-          </div>
+          <pre class="seq">◆ 要点  q-1 金标 31715818 不在 top-10 → nDCG@10=0、R@10=0；融合 52 条内含该 ID → R@100=1.0。
+         第一验收位取 R@100：本题是排序问题，不是零召回。</pre>
           <p class="figure-lead">下图为 q-3 / q-1 的判定主链。店内 hybrid 顺序评测侧不改；多轮再做 RRF。</p>
         </div>
         <figure class="figure">

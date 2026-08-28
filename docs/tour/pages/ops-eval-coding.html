@@ -2,6 +2,9 @@
         <div class="card">
           <h2>编码：官方题面、可见范围与 harness 命中</h2>
           <p class="lede">主指标回答的是：官方隐藏测是否通过。<strong>裁判为 <code>swebench.harness</code></strong>（F2P 全过且 P2P 全过），不是平台探针，也不是工作区 pytest。题集：HuggingFace <code>princeton-nlp/SWE-bench_Lite</code> test。smoke n5 = 该 split 顺序前 5 个 ID，全部为 astropy。现行编码冒烟：RESULTS 第6轮（<code>gpt-5.6-luna</code>）<strong>4/5</strong>，未过仍为 14365；不作效果结论，不升 SCORECARD。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 patch_rate / fuse_ok / issue 例子绿当成通过，或把 harness 崩溃写成 resolve_rate=0</li>
+          </ul>
           <h3>官方字段</h3>
           <p>每题官方字段：<code>repo</code>、<code>base_commit</code>、GitHub issue（<code>problem_statement</code>）、隐藏测 <code>FAIL_TO_PASS</code> / <code>PASS_TO_PASS</code>、金标 <code>patch</code>。后三项<strong>不写入 Work</strong>（<code>hints_text</code> 与 issue 评论同样不进）。</p>
           <p>Agent 可见：<code>base_commit</code> 上的坏树，以及根目录 <code>problem.md</code>（= <code>problem_statement</code> 全文）。用户消息规定读 issue → 复现 → <code>search_codebase</code> → <code>edit_file</code> → 再验；禁止网络。官方隐藏测名称不可见（除非 issue 正文自行写到某失败测）。平台从 issue 抽取的例子覆盖义务仅来自 <code>problem.md</code>，故意不泄漏 F2P。</p>
@@ -50,47 +53,28 @@ read serr 1 2
 &gt;&gt;&gt; Table.read('test.qdp', format='ascii.qdp')
 ValueError: Unrecognized QDP line: read serr 1 2</pre>
           <p>按这条字段走完一题（第6轮 luna 仍 unresolved）：</p>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what">checkout <code>7269fa3e…</code>，写入上面这段 <code>problem.md</code></p>
-                <p class="why">工作区是 2023-02 时的坏树。没有 F2P 名字，没有金标补丁。issue 例子只有小写命令 <code>read serr 1 2</code> 和两行数字，<strong>没有</strong>数据 token <code>NO</code>。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what">产品 Turn：模型按 issue 修命令大小写</p>
-                <p class="why">常见补丁是 <code>_command_re</code> 加 <code>re.IGNORECASE</code>，再自写一个接近 issue 示例的测试。issue 例子覆盖义务在这里会绿——这仍不是分数。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">3</span>
-              <div>
-                <p class="what">harness 在 <code>sweb.eval.…astropy-14365</code> 里：apply 模型补丁 → 还原测试文件 → 官方 <code>test_patch</code> → 跑 F2P ∧ P2P</p>
-                <p class="why"><code>test_roundtrip[True]</code> 把<strong>所有非注释行</strong>改成小写，数据里的 <code>NO</code> 变成 <code>no</code>。只忽略命令大小写不够；金标补丁另有 <code>v.upper() == "NO"</code>。P2P 8 条全绿不能替代这一条 F2P。</p>
-              </div>
-            </li>
-          </ol>
+          <h3>一题怎么走到 unresolved</h3>
+          <pre class="seq">1  checkout 7269fa3e…，只把 problem_statement 写入 problem.md
+     工作区是 2023-02 坏树。没有 F2P 名字，没有金标补丁
+     issue 例子只有小写 read serr 1 2 和两行数字，<strong>没有</strong>数据 token NO
+2  产品 Turn：模型按 issue 修命令大小写（常见 _command_re + IGNORECASE）
+     再自写一个接近 issue 示例的测试 → issue 例子覆盖义务会绿
+     ◆ 要点  例子绿仍不是分数。隐藏测可以是 issue 没写的 test_roundtrip[True]。
+3  harness 在 sweb.eval.…astropy-14365
+     apply 模型补丁 → checkout 还原测试文件（撤销模型自写测）
+     → 官方 test_patch（True 时把所有非注释行改成小写，数据里的 NO 变成 no）
+     → 跑 F2P ∧ P2P
+     只忽略命令大小写不够；金标另有 v.upper() == "NO"
+     P2P 8 条全绿不能替代这一条 F2P</pre>
           <p>对照会过的题 <code>astropy__astropy-12907</code>（同一 <code>repo</code>；<code>base_commit</code> <a href="https://github.com/astropy/astropy/tree/d16bfe05a744909de4b27f5875fe0d4ed41ce607"><code>d16bfe05a744909de4b27f5875fe0d4ed41ce607</code></a>；issue <a href="https://github.com/astropy/astropy/issues/12907">#12907</a>）。<code>problem_statement</code> 是嵌套 <code>CompoundModels</code> 的 <code>separability_matrix</code> 算错：<code>Pix2Sky_TAN() &amp; cm</code> 不应把后两维粘成不可分。issue 里的 REPL 与隐藏 F2P <code>test_separable[compound_model6/9]</code> 同向，第4–6轮均 resolved。</p>
           <h3>执行路径与 harness 职责</h3>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what">checkout + 写 <code>problem.md</code> → 产品 agent Turn（无人值守预批准写盘）</p>
-                <p class="why">评测还会等符号表 ready|stale（比产品对话更乐观）。平台把 pytest 改道进该题 Docker，是解题辅助，<strong>仍不是分数</strong>。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what"><code>swebench.harness.run_evaluation</code>：拉 sweb.eval 镜像、apply 补丁、跑 F2P 与 P2P</p>
-                <p class="why">与 SWE-bench 论文/排行榜定义一致。镜像内断网。缺镜像或 harness 崩溃 → 套件 <code>failed</code>，禁止写成 <code>resolve_rate=0</code>。</p>
-              </div>
-            </li>
-          </ol>
+          <pre class="seq">产品路径  checkout + problem.md → agent Turn（ops_eval 预批准写盘）
+          评测还会等符号表 ready|stale（比产品对话更乐观）
+          pytest 改道进该题 Docker = 解题辅助，仍不是分数
+harness   swebench.harness.run_evaluation
+          拉 sweb.eval 镜像、apply 补丁、跑 F2P 与 P2P；镜像内 --network none
+          缺镜像或 harness 崩溃 → 套件 failed，禁止写成 resolve_rate=0
+◆ 要点  工作区 pytest 绿是错解释器。Lite 每题环境不同；评委跑的是镜像。</pre>
           <h3>命中定义</h3>
           <table>
             <thead><tr><th>信号</th><th>是命中吗</th><th>为什么</th></tr></thead>

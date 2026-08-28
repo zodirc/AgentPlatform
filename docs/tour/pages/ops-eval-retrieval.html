@@ -2,6 +2,9 @@
         <div class="card">
           <h2>检索：官方题面、可见范围与命中</h2>
           <p class="lede">主指标回答的是：融合排序中的 <code>doc_id</code> 是否落入该 query 的 qrels（<code>rel&gt;0</code>）。终答是否正确、cite 是否写对，均不进入该分。无 Docker harness。裁判为 BEIR 式 nDCG / Recall / MAP。第一验收位：BEIR <strong>R@100</strong>。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 cite 写对当成命中、用 nDCG@10 掩盖未入池、或把 n=20 外推全库</li>
+          </ul>
           <h3>官方字段</h3>
           <p>题集为 BEIR（SciFact / NFCorpus / FiQA）与 C-MTEB（Covid / Medical / Ecom）。BEIR 落盘形态：</p>
           <table>
@@ -30,29 +33,17 @@
           <pre>Rare Variants Create Synthetic Genome-Wide Associations
 
 A large number of different common variants has been associated with very modest increases of risk for various common diseases. A simulation study shows that rare variants with much greater impacts on disease risk may be responsible for some of these associations.</pre>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what">物化 corpus → bench-postgres（schema <code>retrieval_ops</code>），再开 writing Turn</p>
-                <p class="why">与产品资料库隔离。模型按需 <code>search_sources</code>（每 Turn ≤3）。店内 hybrid 一次排序评测侧不改。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what">从 <code>retrieval.completed</code> 抽路径，按文件名还原 <code>doc_id</code></p>
-                <p class="why">多轮则评测侧再 RRF：<code>score[d] += 1/(60+rank)</code>（k=60）。单轮保持原序。终答文本不参与计分。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">3</span>
-              <div>
-                <p class="what">与 qrels 计算 nDCG@k / R@k / MAP@k</p>
-                <p class="why">本题金标位于 rank 1、<code>rel=1</code>：DCG@10 = IDCG = 1 → <strong>nDCG@10=1，R@10=1，R@100=1</strong>。<code>read_file</code> 是否打开金标文件只记旁路统计。</p>
-              </div>
-            </li>
-          </ol>
+          <h3>一题怎么计分</h3>
+          <pre class="seq">1  物化 corpus → bench-postgres schema retrieval_ops（与产品资料库隔离）
+     开 writing Turn；第一次 search_sources 必须逐字复制 Information need
+     每 Turn ≤3；店内 hybrid 一次排序评测侧不改
+2  从 retrieval.completed 抽路径，按文件名还原 doc_id
+     多轮则评测侧再 RRF：score[d] += 1/(60+rank)（k=60）；单轮保持原序
+     终答文本 / cite 对不对 → 不计分
+3  与 qrels 算 nDCG@k / R@k / MAP@k
+     本题金标 rank 1、rel=1 → nDCG@10=1，R@10=1，R@100=1
+     read_file 是否打开金标文件只记旁路统计
+◆ 要点  主分是「搜到金标文档 ID」。cite 写错仍可能高 nDCG。R@100 才是第一验收位：金标未入池时 nDCG@10 无诊断价值。</pre>
           <p>对照 SciFact <code>_id=1</code>。Information need：<code>0-dimensional biomaterials show inductive properties.</code> 金标 <code>31715818</code>（<em>New opportunities: the use of nanotechnologies to manipulate and track stem cells.</em>）不进入模型窗。融合 top-10 不含该 ID → nDCG@10=0、R@10=0；52 条融合列表内含该 ID → <strong>R@100=1.0</strong>，nDCG@100=0.193，<code>bucket=weak_hits</code>。第一验收位取 R@100：本题是排序问题，不是零召回。</p>
           <h3>命中定义</h3>
           <table>

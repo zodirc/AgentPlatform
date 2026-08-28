@@ -5,18 +5,43 @@
         data-title="RAG 深描（端到端）"
       >
         <div class="card">
-          <h2>RAG 深描：按主链逐步对照</h2>
-          <p class="lede">上图编号与下面步骤一一对应。每一步先说做什么，再给对应函数。查询热路径不 <code>sync</code>、不建图。</p>
+          <h2>RAG 深描：主链 + 打开函数</h2>
+          <p class="lede">本页两层、同一套编号。上层 ASCII 与全书相同：闸、数字、误用模型。下层按编号打开函数（<code>code-py</code>），不是第二套主链。车道超时 / RRF / doc_boost 见上一页「hybrid 召回」。查询热路径不 <code>sync</code>、不建图。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会在查询路径上 sync、把 HNSW 当成 Python 建图 API、或用 raw 分相加代替 RRF</li>
+          </ul>
+
+          <h3>主链（与图 1–15 同一编号）</h3>
+          <pre class="seq">Turn 外 · 索引面（目录文件是真相；向量库是投影）
+  1  stamp / mtime 判定 dirty 或 force_reindex（可恢复 epoch）
+  2  force 且确有 dirty → DROP 两张 HNSW；增量不 drop，图随 UPSERT 走
+  3  每文件 chunk_source_text(embed=False)：450 tok / 64 overlap，只挂 embed_input
+  4–5  缓冲满 cap → assign_deferred_vectors（LANE_INDEX；sleep(0) 让 query 插队）
+  6  同 flush：DELETE 旧切块 + UPSERT files/chunks/docs（centroid = 切块均值）
+  7–8  GIN 随列维护；全部写完才 CREATE HNSW（m=16 / ef_construction=64）并写 stamp
+  <span class="pt">◆ 要点  HNSW 是 pgvector CREATE INDEX，不是 Python 建图。进度条 ≠ 检索就绪。</span>
+
+Turn 内 · 查询面（模型 tool_use 才进；禁止再 sync）
+  9   search_sources(query, limit, path_prefix)；无 sources/ → retrieval=none
+  10  over-fetch limit×2 或 ×3 → store.search → tenant 过滤
+  11  search_hybrid：Doc ∥ Chunk（~0.3s）；Chunk 内 ANN 然后 FTS，两路才 RRF(k=60)
+  12  rerank_hits：默认 lexical；交叉编码器默认关
+  13  merge：Doc 赢家 path 上的切块 +doc_boost(0.35)；不删仅 chunk 命中
+  14  前缀/排除 → cover → 摘录分层；失败则 keyword-fallback（仍不 sync）
+  15  audit L3 进窗摘录挂 tool_result；下一轮 assemble 只吃摘录
+  <span class="pt">◆ 要点  空窗去 sync 会打爆 R1/R3。RRF 按位次；余弦分和 BM25 分不能直接相加。</span></pre>
+          <p class="figure-lead">海报编号即上表。下面不是再讲一遍主链，而是按同一编号打开函数。</p>
+          <div class="src"><code>pgvector_store.sync</code> · <code>search_hybrid</code> · <code>tools.core.sources_search</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/rag/rag-end-to-end-zh.png" alt="RAG 端到端主链详流" />
           </div>
-          <figcaption>RAG 端到端主链详流 · 编号即下文步骤</figcaption>
+          <figcaption>RAG 端到端主链详流 · 编号即主链与下方函数对照</figcaption>
         </figure>
         <div class="card">
-          <h3>索引面（图 1–8，Turn 外）</h3>
-          <ol class="steps">
+          <h3>打开函数 · 索引面（1–8）</h3>
+          <ol class="steps code-trace">
             <li>
               <span class="n">1</span>
               <div>
@@ -183,8 +208,8 @@ conn.commit()
             </li>
           </ol>
 
-          <h3>查询面（图 9–15，Turn 内）</h3>
-          <ol class="steps">
+          <h3>打开函数 · 查询面（9–15）</h3>
+          <ol class="steps code-trace">
             <li>
               <span class="n">9</span>
               <div>

@@ -905,6 +905,27 @@
       line-height: 2rem;
       text-align: center;
     }
+    /* 深描对照层：编号跟主链同一套，不要第二套徽章皮肤 */
+    ol.steps.code-trace > li {
+      padding: 0.65rem 0;
+    }
+    ol.steps.code-trace .n {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      height: auto;
+      min-width: 2.2rem;
+      line-height: 1.35;
+      font-weight: 650;
+      font-size: 0.72rem;
+    }
+    ol.steps.code-trace .what {
+      font-family: var(--mono);
+      font-size: 0.82rem;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
     .steps .what {
       margin: 0.1rem 0 0.28rem;
       font-weight: 650;

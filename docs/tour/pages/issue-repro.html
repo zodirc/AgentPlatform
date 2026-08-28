@@ -2,6 +2,10 @@
         <div class="card">
           <h2>issue 例子覆盖义务</h2>
           <p class="lede">平台从工作区 <code>problem.md</code> / <code>PROBLEM.md</code> / <code>issue.md</code> 抽取<strong>正文里已经写过的</strong>例子。只复现 issue 写过的内容，<strong>不得把官方隐藏测试泄漏给模型</strong>。仓库测试通过仍不够：这些例子必须在<strong>最新一次代码编辑之后</strong>被成功命令覆盖（<code>issue_repro_edits_since == 0</code>）。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会只记「曾经跑过例子」，或指望 casefold 门逼出 issue 没写的隐藏测</li>
+          </ul>
+          <h3>抽取与覆盖判定</h3>
           <pre class="seq">抽取（load_problem_text → extract_issue_repro_hints）
   优先：围栏代码块、引用命令、REPL（&gt;&gt;&gt;）、输入输出样例、raises 行、Expected 小节
   表路径：Table.read/write 的 format= 与 header_rows= 会进入 roundtrip_kwargs

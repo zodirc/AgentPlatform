@@ -2,6 +2,9 @@
         <div class="card">
           <h2>评测在测什么（审阅用）</h2>
           <p class="lede">先把尺子讲清楚，再看后面的跑次回放。一句话：<strong>产品同一条 Turn 路径，面对官方题集，能不能交出官方指标。</strong>金标永不进模型窗。不是旁路脚本直接 embed / 直接 completion / 空补丁通管道。编码主指标是 Docker 内 <code>resolve_rate</code>，不是 <code>patch_rate</code>。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把泄漏当产品分、把探针当官方尺子、或把 n5 外推 Lite</li>
+          </ul>
           <table>
             <thead><tr><th></th><th>检索</th><th>上下文</th><th>编码</th></tr></thead>
             <tbody>
@@ -15,29 +18,14 @@
             </tbody>
           </table>
           <h3>共同纪律（改分数前先改这里）</h3>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what"><code>eval_path=agent</code>，否则拒跑</p>
-                <p class="why">分数必须来自真实 Session/Turn/工具事件。L0 组件对照可以存在，不得进效果主栏。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what">金标不进 Work、不进 prompt</p>
-                <p class="why">否则测的是泄漏，不是产品。编码只写 issue；隐藏测和官方补丁留在 harness 镜像里。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">3</span>
-              <div>
-                <p class="what">主指标用该领域的官方尺子；探针另记</p>
-                <p class="why">检索不拿终答当命中；上下文不拿「读了几行」当命中；编码不拿 <code>fuse_ok</code> 当通过。否则改切块/组窗/LSP 时无法归因。</p>
-              </div>
-            </li>
-          </ol>
+          <pre class="seq">eval_path=agent    否则拒跑。分数必须来自真实 Session/Turn/工具事件
+                   L0 组件对照（直接 embed / 直接 completion）可以存在，不得进效果主栏
+金标不进 Work      qrels / answers / F2P / gold patch 留在评测进程或 harness 镜像
+                   否则测的是泄漏
+主指标 = 官方尺子  检索：doc_id ∈ qrels，不拿终答
+                   上下文：抽 Answer: 后 F1/EM，不拿 n_reads
+                   编码：harness F2P∧P2P，不拿 fuse_ok / patch_rate / issue 例子
+◆ 要点  改切块/组窗/LSP 时必须能归因到「产品 Turn 上的官方尺子」。探针另记。</pre>
           <div class="callout warn">
             <strong>审阅时最值得质疑的三处。</strong>
             （1）检索主分是「搜到金标文档 ID」，模型把 cite 写错仍可能得高 nDCG。<br>

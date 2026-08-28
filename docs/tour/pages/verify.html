@@ -2,6 +2,10 @@
         <div class="card">
           <h2>verify receipt：终稿仍欠验证时的旁路 continue</h2>
           <p class="lede">触发源是工具结果维护的追踪器，<strong>不解析终稿自然语言</strong>。模型不再发出 <code>tool_use</code>、直接输出终稿时，<code>should_inject_verify_receipt</code> 在终局边决定是否注入。命中则追加一条用户口吻消息、写 <code>tool.completed(verify_receipt=true)</code>，然后 <code>continue</code> 再进 assemble。不挡 cancel / <code>budget_exceeded</code>；不改 while 形状。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会做成可跳过的工具、或在步数不够时仍注入导致白卷</li>
+          </ul>
+          <h3>门闩与两类欠账</h3>
           <pre class="seq">门闩（全部要过）
   cancelled / budget_exceeded → 不注入
   剩余步数 = max_steps − step_count

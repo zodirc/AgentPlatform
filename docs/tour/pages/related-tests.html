@@ -1,6 +1,11 @@
 <section class="page" data-id="related-tests" data-group="Coding" data-title="失败摘要与相关测试">
         <div class="card">
           <h2>失败摘要、相关测试命令、找定义路径</h2>
+          <p class="lede">三件写入既有 <code>tool_result</code> 的事实：失败摘要、相关测试命令、Locate 定义。平台永不代跑相关测试；官方分仍看 harness。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把相关测试当隐藏调度、或把符号表当向量检索</li>
+          </ul>
+          <h3>三条车道</h3>
           <pre class="seq">失败摘要（test_summary）
   旧逻辑要求 pytest 尾行；模型常写 | tail，或 32k 截断丢掉页脚 → 摘要静默缺失
   现行从<strong>未截断全文</strong>旁路解析，兼容 -q / unittest / ERRORS

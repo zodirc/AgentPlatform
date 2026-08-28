@@ -2,6 +2,9 @@
         <div class="card">
           <h2>上下文：官方题面、可见范围与命中</h2>
           <p class="lede">主指标回答的是：抽取最后一条 <code>Answer:</code> 之后，相对 LongBench <code>answers</code> 的 F1 / EM（scorer v2）。不测检索能力。无 Docker harness。对照锚钉死为第2轮同口径重打：F1 <strong>0.5479</strong> / EM <strong>0.30</strong>。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 n_reads 当命中、用 v1「金标是预测子串」把长推理判满分、或拿事故值 0.0000 EM 当对照锚</li>
+          </ul>
           <h3>官方字段</h3>
           <p>题集为 LongBench（Bai et al.）。物化见 <code>pull.py</code> 的 <code>_normalize_longbench_row</code>。smoke：三任务各最多 20 条，合计 n=60。</p>
           <table>
@@ -37,22 +40,14 @@ The most active group of fans is the South West Ultras fan club, mainly
 composed of residents from several neighbourhoods within the
 Malatia-Sebastia District of Yerevan, since the club is a de facto
 representer of the district.</pre>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what">每题一个 Work；agent Turn 内 <code>read_file</code> → 终答</p>
-                <p class="why">无资料库可搜。<code>n_reads</code> 为过程统计，不是主指标。本题预测 <code>South West Ultras fan club</code>，去句号后与 gold 相等 → <strong>EM=1，F1=1</strong>（<code>n_reads=0</code> 仍满分）。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what">抽取最后一条非空、非占位的 <code>Answer:</code> 行，对 <code>answers</code> 取 max</p>
-                <p class="why">模型常先写推理。若不抽，预测为 <code>Answer: berlin</code>、gold 为 <code>berlin</code> 时 v2 EM 必为 0。第2轮入账 EM=0 即该口径事故。</p>
-              </div>
-            </li>
-          </ol>
+          <h3>一题怎么计分</h3>
+          <pre class="seq">1  每题一个 Work；agent Turn（无 search_sources）read_file → 终答
+     n_reads 是过程统计，不是主指标
+     本题预测 South West Ultras fan club，去句号后 = gold → EM=1 F1=1（n_reads=0 仍满分）
+2  scorer v2 抽最后一条非空、非占位的 Answer: 行，对 answers 取 max
+     模型常先写推理。不抽则「Answer: berlin」对 gold berlin → EM=0
+     第2轮入账 EM=0.0000 就是这个口径事故，禁止当对照锚
+◆ 要点  EM 对同义改写极严（idx 1 答 No 对「No, it is not necessary.」→ EM=0 F1=0.333）。F1&gt;EM 是尺子形态，不表示「半对」。</pre>
           <p>对照 idx 1：<code>input</code> = <code>Is the ISR necessary for transgene reactivation?</code>；<code>answers</code> = <code>["No, it is not necessary."]</code>（context 约 45634 字符，不进评分器可见范围以外的 prompt）。预测 <code>No</code> → token 袋 <code>{no}</code> 对五词金标，P=1、R=1/5 → <strong>EM=0，F1=0.333</strong>。语义成立，EM 仍为零。idx 2 为 STM/STS 同义改写：<strong>EM=0，F1=0.8</strong>。</p>
           <h3>命中定义</h3>
           <table>

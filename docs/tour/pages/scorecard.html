@@ -38,30 +38,14 @@
             </tbody>
           </table>
           <p>第4轮 parent <code>56b562a6-…</code> 四套件都 <code>completed</code>（4/4）。第6轮只重跑编码（parent <code>ec0a1226-…</code> · coding <code>4471acba-…</code> · luna），检索/上下文仍用第4轮指针。同分同题：未过仍是 14365。</p>
-          <h3>共同的评判纪律（先于分数）</h3>
-          <ol class="steps">
-            <li>
-              <span class="n">1</span>
-              <div>
-                <p class="what">必须 <code>eval_path=agent</code>，否则拒跑</p>
-                <p class="why">分数只能来自产品 Session/Turn/真实工具事件。dry-run、skip-api 空补丁不得进 Ops 主栏。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">2</span>
-              <div>
-                <p class="what"><code>RunSession.finish</code> 写出 <code>manifest.json</code>，再写 <code>latest_&lt;suite&gt;.json</code></p>
-                <p class="why">四指针互不覆盖。BEIR 不得盖掉 C-MTEB。coding 无 <code>resolve_rate</code> 不得标 <code>completed</code>。</p>
-              </div>
-            </li>
-            <li>
-              <span class="n">3</span>
-              <div>
-                <p class="what">smoke 只写入 RESULTS 日记</p>
-                <p class="why">SCORECARD 主栏仍空。机器冒烟栏不是最新过程。n5 / smoke 执行 <code>promote-run</code> 会被拒。</p>
-              </div>
-            </li>
-          </ol>
+          <h3>入账纪律（先于分数）</h3>
+          <pre class="seq">eval_path=agent     否则拒跑。dry-run / skip-api 空补丁不得进 Ops 主栏
+RunSession.finish   写 manifest.json，再写 latest_&lt;suite&gt;.json
+                    四指针互不覆盖：BEIR 不得盖掉 C-MTEB
+                    coding 无 resolve_rate 不得标 completed
+smoke               只写入 RESULTS 日记。SCORECARD 主栏仍空
+                    n5 / smoke 执行 promote-run 会被拒
+◆ 要点  4/5 不能写成「编码能力稳定在 80%」。n5 全 astropy；同分异题可以是换了一题过、一题回落。</pre>
           <p class="figure-lead">下图：分数如何入账。尺子本身在上一页；后面三页按套件展开命中定义，并附这一轮数字。</p>
           <div class="src"><code>eval/official/baseline/RESULTS.md</code> · parent <code>56b562a6</code></div>
         </div>
