@@ -1,0 +1,10 @@
+[project]
+name = "agent-sources-retrieval"
+version = "0.1.0"
+description = "Sources retrieval plane (ADR-020). Image FROM agent-platform-runtime."
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
