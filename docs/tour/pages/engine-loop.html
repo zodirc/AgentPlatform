@@ -1,7 +1,7 @@
 <section class="page" data-id="engine-loop" data-group="Runtime" data-title="Engine 单循环">
         <div class="card">
           <h2>AgentEngine 单循环</h2>
-          <p class="lede">循环条件是 <code>while step_count &lt; max_steps</code>，不是无界 <code>while True</code>。<code>max_steps</code> 来自 ScenarioProfile（编码 150、写作/情报 40、协作 50；未写则 40）。Engine 不读 scenario 名字；工具表与系统提示由 Controller 在开工时注入。加能力 = 增强工具或结果契约，不改这条 while 的形状。</p>
+          <p class="lede">循环条件是 <code>while step_count &lt; max_steps</code>，不是无界 <code>while True</code>。<code>max_steps</code> 来自 ScenarioProfile（编码 150、写作/情报 40、协作 50；未写则 40）。Engine 跑在编排 runtime：不读 scenario 名字；工具表与系统提示由 Controller 注入。live 推理经 <code>MODEL_GATEWAY_URL</code> HTTP NDJSON；query embed / shell 经 retrieval / sandbox 平面。加能力 = 增强工具或结果契约，不改 while 形状。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错超时层、把旁路当成新图节点、或把并行 gather 当成共享可变状态</li>
           </ul>
@@ -36,12 +36,15 @@ step_count += 1；写 step.started
     写 context.reported（fill_ratio、strategies、budget_truncated_by_tool）
     原始快照与 envelope 哈希 fire-and-forget，不进模型窗
 
-  ModelGateway.stream
+  ModelGateway.stream（编排内入口）
+    live：RemoteModelProvider ──HTTP NDJSON──► model-gateway /internal/v1/complete
+          → 上游 Provider（stub/recorded 仍在编排本地，不经 gateway）
     首字节 60s（可重试）；连接 10s；整段流 600s；本步墙钟 720s
-    取消：独立 asyncio Task 约 50ms 轮询；命中则 abort 供应商 HTTP，并 aclose 生成器
+    取消：独立 asyncio Task 约 50ms 轮询；命中则 abort 供应商/HTTP，并 aclose 生成器
     仅尚未吐出首字节时允许重试（max_retries=2，backoff 0.5–8s）
     429/5xx/连接失败/首字节超时 → transient；流中途断开不回放已发出的 token
     <span class="pt">◆ 要点  取消若不断 HTTP，用户点取消后仍在烧供应商。chunk 循环里不再每 token 打一次库。</span>
+    <span class="pt">◆ 要点  默认 compose 下模型出口在独立容器；不要画成编排进程直连供应商。</span>
 
   解析三类增量 → 分事件
     text            turn.token（BufferedEventWriter ~40ms 窗合并；首条立即落盘）
@@ -51,6 +54,9 @@ step_count += 1；写 step.started
 
   有 tool_use
     _run_tool_batch：连续只读可并行，变更类串行（见下）
+    search_sources → query embed HTTP → sources-retrieval（权重不在编排）
+    run_command / run_tests → 默认 HTTP → sandbox 平面（SANDBOX_PLANE_URL）
+      未配置平面 URL 时回退编排本进程 landlock/bwrap（monolith / 测试）
     approval_required → pending_approval，return "waiting_approval"
       Controller 落 checkpoint；本进程 inflight 仍计这颗 Turn
     CANCELLED / state.cancelled → break
@@ -137,8 +143,8 @@ fill 阶梯阈值细节            → context.policy
 Stall Watchdog               → 旁挂循环（180s 无新事件且非 waiting_approval；默认 auto-fail → step_timeout）
   stall 看的是 turn_events 新鲜度，不是模型是否仍在 think
   thinking.delta 若 divert 出库，必须另有心跳，否则 watchdog 会把活 Turn 当死</pre>
-          <p class="figure-lead">海报中间自上而下的箭头链即 assemble → stream → 解析 → 工具或终局。verify 是第 5 步旁路，左右不是第二套主链。</p>
-          <div class="src"><code>engine/agent_engine.py</code> · <code>model/gateway.py</code> · <code>engine/verify_receipt.py</code> · <code>tools/bootstrap.py</code> · <code>settings.py</code></div>
+          <p class="figure-lead">海报中间自上而下的箭头链即 assemble → stream（经 model-gateway）→ 解析 → 工具（经 sandbox / retrieval）或终局。verify 是第 5 步旁路，左右不是第二套主链。</p>
+          <div class="src"><code>engine/agent_engine.py</code> · <code>model/gateway.py</code> · <code>model/remote_provider.py</code> · <code>tools/core/remote_sandbox.py</code> · <code>retrieval/remote_embedder.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">

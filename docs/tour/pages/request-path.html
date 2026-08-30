@@ -1,9 +1,9 @@
 <section class="page" data-id="request-path" data-group="领域" data-title="请求主路径">
         <div class="card">
           <h2>请求主路径（端到端）</h2>
-          <p class="lede">客户端提交 Turn 之后，业务首事件不是 HTTP 202，而是 runtime claim 后发出的 <code>turn.accepted</code>。首 token 时间以该事件经 SSE 到达浏览器的时刻计。闸、lease、双池、Caddy 角色的完整密度见「时序 · 并发 · 负载」；本页只串端到端逐步经过。</p>
+          <p class="lede">客户端提交 Turn 之后，业务首事件不是 HTTP 202，而是编排 runtime claim 后发出的 <code>turn.accepted</code>。Turn 分发仍走 Postgres 门铃；进 Engine 后 live 模型 / query embed / shell exec 分别 HTTP 打到独立容器（model-gateway · sources-retrieval · sandbox）。闸与容量见「时序 · 并发 · 负载」；本页只串端到端。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用 HTTP 202 当 TTFB、用 turns.status 推断「正在想」、或让 runtime 对浏览器开流</li>
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用 HTTP 202 当 TTFB、把编排当胖 runtime、或把 Redis 当成首 token 通道</li>
           </ul>
 
           <h3>逐步经过</h3>
@@ -20,7 +20,7 @@ t2  同一事务  INSERT turns(pending) + runs(accepted, pull_eligible)
            浏览器此时可开 SSE；流上还没有 turn.accepted，只有空闲 ping
     <span class="pt">◆ 要点  202 = 已入队。把 202 当「runtime 已开工」，排队会被算进推理时延。</span>
 
-t3  runtime claim（与浏览器无 TCP）
+t3  编排 runtime claim（与浏览器无 TCP）
            条件 UPDATE 抢到 accepted run；写入 lease 180s
            StartSpec：场景、计划相位；评测另带无人值守标记与模型密文
            INSERT turn.accepted（通常 sequence=1）→ NOTIFY turn_events_channel(turn_id)
@@ -33,19 +33,29 @@ t4  Intake（确定性；零或一次 compact 模型）
            需要模型 → 首轮由模型决定直答或 tool_use；scenario_id 不由模型推断
     <span class="pt">◆ 要点  斜杠短接在 Controller。把 /help 送进 Engine while 会占 inflight 16 里的一颗。</span>
 
-t5  Engine while 内关键节点 append-only 写 turn_events
+t5  Engine while（编排进程）内关键节点 append-only 写 turn_events
+           assemble → ModelGateway.stream → 解析 → tools / 终局
+           live 模型  ──HTTP NDJSON──► model-gateway ──► 上游 Provider
+           query embed──HTTP──────► sources-retrieval（唯一权重池；不上 Redis）
+           shell/tests──HTTP──────► sandbox（bwrap/landlock；可回退本进程）
            token / thinking.delta 经 BufferedEventWriter ~40ms 窗；非 delta 先刷缓冲
            每行 advisory lock 下单调 sequence
            api 一根 LISTEN fan-out → SSE 按序号回放 + UPSERT turn_views
            thinking.delta 默认不进 view
-    <span class="pt">◆ 要点  列表被推理增量撑满是投影做错了，不是模型话多。</span>
+    <span class="pt">◆ 要点  while 形状仍在编排；重活已拆到平面容器。首 token / query embed 禁止上 Redis Streams。</span>
 
 t6  工作台只消费 SSE 与 GET /view
            UI 不推断阶段；断线 Last-Event-ID / since_sequence 续传（闷流 45s，≤8 次）
            approval.requested 关 SSE；批准走短 POST，不靠这条 GET 挂着执行
-    <span class="pt">◆ 要点  runtime 不对浏览器开流。进程内 channel 不得当事唯一源。热路径禁止同步重投影。</span></pre>
-          <p class="figure-lead">下图中间箭头链即 POST → 落库 NOTIFY → claim → Intake → 事件 → SSE。左右为旁注，不是第二套主链。</p>
-          <div class="src"><code>services/api/app/routers/sessions.py</code> · <code>turn_dispatch.py</code> · <code>turn_controller.py</code></div>
+    <span class="pt">◆ 要点  runtime 不对浏览器开流。Turn 事实桥是 Postgres；平面热路径是 HTTP；异步索引才是 Redis。</span>
+
+旁路（不在用户提问主链）
+────
+  sources.index_sync  可经 api enqueue Redis agent.jobs，由 sources-retrieval 消费
+  或 HTTP POST sources-retrieval /internal/commands/sync-sources-index
+  不等于 run_commands，也不经 Turn 分发门铃</pre>
+          <p class="figure-lead">下图中间箭头链即 POST → 落库 NOTIFY → claim → Intake → Engine（扇出平面 HTTP）→ 事件 → SSE。左右为旁注，不是第二套主链。</p>
+          <div class="src"><code>services/api/app/routers/sessions.py</code> · <code>turn_dispatch.py</code> · <code>turn_controller.py</code> · <code>deploy/compose/planes.yml</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">

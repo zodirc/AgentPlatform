@@ -1,95 +1,88 @@
 <section class="page" data-id="backend" data-group="总览" data-title="时序 · 并发 · 负载">
         <div class="card">
-          <h2>后端：时序、并发与负载</h2>
-          <p class="lede">控制面与事件面反向。浏览器不直连 runtime。Postgres 是跨进程唯一实时总线。默认 <code>TURN_DISPATCH=pull</code>。机制写在各 ASCII 步骤旁；页底 PNG 只是同一条主链的海报。</p>
+          <h2>后端：进程、表与负载</h2>
+          <p class="lede">先看宏观：哪些<strong>容器进程</strong>在跑、各自碰哪些<strong>表</strong>、谁写 <code>turn_events</code>。浏览器不直连编排。Turn 分发与事件真源是 Postgres；live 模型 / embed / exec 是编排对平面的 HTTP；异步索引走 Redis。默认 <code>TURN_DISPATCH=pull</code>。下面微观时序与容量信封是同一真相的展开；页底 PNG 是同一张宏观海报。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型（当队列、当失败、当第二台库、当线程）</li>
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把编排当胖 runtime、把 NOTIFY 当队列、把 Redis 当首 token 通道、或把平面 HTTP 结果当成事件真源</li>
           </ul>
 
-          <h3>命令面与事件面</h3>
-          <pre class="seq">命令 ↓ 短 POST（开工 / 批准 / 取消）              事件 ↑ turn_events → SSE
-两条管道只在 Postgres 汇合。禁止服务间 Python import，故不能靠进程内 channel 当事唯一源。
-pull = competing consumers：api 只入队并按门铃；runtime 有空位才领。加副本不必改路由表。
+          <h3>宏观：进程谁在</h3>
+          <pre class="seq">产品热路径上的进程（compose + planes.yml）
+────────────────────────────────────────
+  Caddy            L7；/ → web，/api|/health → api；无业务状态
+  web              工作台；只消费 SSE 与 GET /view
+  api              鉴权·准入·落库·LISTEN·SSE·投影；可 enqueue Redis
+  postgres         Turn 业务真源 + pgvector 向量表
+  runtime          编排：claim / Engine / BufferedEventWriter；默认无 ST
+  model-gateway    live LLM NDJSON 出口（slim）
+  sources-retrieval 唯一 embedding 池 · sync/watch · 可消费 agent.jobs
+  sandbox          bwrap/landlock exec（slim）
+  redis            Streams agent.jobs（异步；非 Turn 分发）
 
-                         ┌─────────────────────────────────────────────────────────┐
-                         │  Browser (React workbench)                              │
-                         │  TurnStreamClient: fetch + ReadableStream               │
-                         │  cursor = last sequence；rAF 合并 delta                 │
-                         └───────────┬──────────────────────────────▲──────────────┘
-                                     │ HTTPS JSON + cookie          │ text/event-stream
-                                     │ POST /sessions/{id}/turns    │ GET /turns/{id}/stream
-                                     │ POST …/approve|cancel        │  id / event / data 帧
-                                     ▼                              │  data = envelope JSON
-                         ┌──────────────────────────────────────────┴──────────────┐
-                         │  Caddy (L7 reverse proxy)                               │
-                         │  /api/* → api:8000    / → web                           │
-                         │  无业务状态；SSE 对它 = 很久不结束的 GET                │
-                         │  禁缓冲（否则 token 成批到达）                          │
-                         └───────────┬──────────────────────────────▲──────────────┘
-                                     │                              │
-                                     ▼                              │
-┌────────────────────────────────────┴──────────────────────────────┴──────────────┐
-│  api  控制面 · 投影面 · SSE 出口                                                 │
-│                                                                                  │
-│  鉴权 → admission（未领取队列帽）→ 同一事务:                                     │
-│    INSERT turns(pending) + runs(accepted, pull_eligible) + turn_views seed       │
-│    COMMIT 后 pg_notify('turn_dispatch_channel', run_id)                          │
-│    <span class="pt">◆ 要点  门铃只带 UUID，叫醒后 SELECT。漏了会把 NOTIFY 当队列、把 token 塞进通知。</span> │
-│                                                                                  │
-│    客户端 202 Accepted  ≠  turn.accepted                                         │
-│    <span class="pt">◆ 要点  202 只表示已入队 pending。turn.accepted 是 runtime 领到之后才写。</span>     │
-│                                                                                  │
-│  TurnEventListener: 独立 asyncpg 连接 LISTEN turn_events_channel（进程 1 根）    │
-│       │                                                                          │
-│       ├─ fan-out  按 turn_id 对等待者 asyncio.Event.set()                        │
-│       │  <span class="pt">◆ 要点  一根 LISTEN 叫醒 N 路 SSE。漏了：每浏览器一根 PG 套接字，打满连接。</span>  │
-│       └─ projection queue  → UPSERT turn_views                                   │
-│          <span class="pt">◆ 要点  快照不含 thinking.delta。流负责 live，快照负责首屏与重连。</span>         │
-│                                                                                  │
-│  SSE 协程: SELECT turn_events WHERE sequence &gt; cursor                            │
-│            envelope JSON；sequence 游标共用 SSE id / since_sequence / 快照      │
-│            空闲 2s poll 兜底；~14s `: ping`；终态/approval.requested 关流        │
-│    <span class="pt">◆ 要点  data: 是契约信封，不是模型原始 HTTP 字节。断线靠 sequence 续传。</span>         │
-└───────────┬──────────────────────────────────────────────▲───────────────────────┘
-            │ INSERT + NOTIFY                              │ LISTEN / SELECT
-            ▼                                              │
-┌──────────────────────────────────────────────────────────┴───────────────────────┐
-│  PostgreSQL 16 + pgvector     跨服务唯一实时桥（禁止服务间 Python import）        │
-│                                                                                  │
-│  领域表    turns / runs / sessions / works                                       │
-│  事件表    turn_events   append-only · per-turn monotonic sequence               │
-│            AFTER INSERT → pg_notify('turn_events_channel', turn_id::text)        │
-│  分发      turn_dispatch_channel · runners.lease_expires_at                      │
-│  控制      run_commands  + run_commands_channel                                  │
-│  读模型    turn_views    物化投影（列表 / 刷新 / 审批 UI）                        │
-└───────────┬──────────────────────────────────────────────▲───────────────────────┘
-            │ LISTEN / claim (条件 UPDATE，CAS)             │ INSERT turn_events
-            ▼                                              │
-┌──────────────────────────────────────────────────────────┴───────────────────────┐
-│  runtime  执行面（:8001 不公网）                                                 │
-│                                                                                  │
-│  pull: LISTEN turn_dispatch + poll → claim accepted run → 写入 lease             │
-│        append turn.accepted → Intake → AgentEngine                               │
-│                                                                                  │
-│  while: ContextEngine.assemble → ModelGateway.stream → tools → checkpoint        │
-│                                                                                  │
-│  BufferedEventWriter (~40ms 窗) 合并 token / thinking.delta / tool.delta         │
-│  pg_advisory_xact_lock(turn_id) 下 MAX(sequence)+1 后 INSERT                     │
-│    <span class="pt">◆ 要点  锁的是这个 Turn 的号，保证单调。不是锁整张 turn_events。</span>               │
-│                                                                                  │
-│  控制命令: LISTEN run_commands → 仅 runner_id 匹配本进程的 approve/deny/cancel   │
-└──────────────────────────────────────────────────────────────────────────────────┘
-            ▲
-            │ 供应商 HTTP 流（live）
-            │
-     Model Provider
+旁路（不进日常提问主链）
+  ast-indexer · bench(+bench-postgres) · 发布台 :9090
 
-不变量（扫完图后带走这四句）
-──────────────────────────
-  <span class="pt">◆ 202 ≠ turn.accepted</span>   HTTP 202 = 已入队；accepted = runtime claim 后才写
-  <span class="pt">◆ Caddy ≠ 鉴权</span>          不验 Cookie、不持 Turn、不解析 SSE、不 sticky
-  <span class="pt">◆ runtime ↛ Browser</span>     字只经 turn_events → api → 流；执行面不对浏览器开 SSE
-  <span class="pt">◆ SSE ⊈ inflight</span>        挂看不占执行槽；组窗是 Turn 级 RAM</pre>
+<span class="pt">◆ 要点  「执行面」= 编排 + 三个平面容器。lease/inflight 只钉住编排副本。</span></pre>
+
+          <h3>宏观：表谁写、谁读</h3>
+          <pre class="seq">表 / 通道              写者                         读者 / 用途
+─────────────────────  ──────────────────────────  ────────────────────────────
+works / sessions       api                         全栈领域锚点
+turns                  api INSERT(pending)         编排 claim 后 UPDATE running
+                       编排 UPDATE 终态
+runs                   api INSERT(accepted)        编排 CAS claim · lease 心跳
+                       编排 UPDATE running/终态
+turn_views             api seed + 投影 UPSERT      列表 / 首屏 / 审批 UI（无 thinking.delta）
+turn_events            仅编排 runtime INSERT       api SELECT → SSE；投影读
+                       （append-only · per-turn sequence）
+run_commands           api INSERT                  持约编排 LISTEN 消费
+runners / lease 列     编排                        编排心跳；丢失 → runner_lost
+source_files/chunks/docs  sources-retrieval        编排 remote 查询 / ANN·FTS
+agent.jobs (Redis)     api（或旁路）enqueue         sources-retrieval 消费索引等
+
+NOTIFY 门铃（payload 只有 UUID）
+  turn_dispatch_channel(run_id)   api COMMIT 后 → 叫醒编排去 SELECT/claim
+  turn_events_channel(turn_id)    编排 INSERT 后 → 叫醒 api 去 SELECT/SSE
+  run_commands_channel            api → 持约编排
+
+<span class="pt">◆ 要点  浏览器看见的字，全部来自 turn_events → api SSE。平面进程不写 turn_events。</span>
+<span class="pt">◆ 要点  model-gateway / sandbox 无业务表；sources-retrieval 写向量表，不写 Turn 事件。</span></pre>
+
+          <h3>宏观：一次 Turn 怎么穿过进程</h3>
+          <pre class="seq">读法：每一步前缀 = 进程。平面不写 turn_events。
+命令 ↓ 短 POST                              事件 ↑ turn_events → SSE
+两条 Turn 管道只在 Postgres 汇合。平面热路径是 HTTP；异步索引是 Redis。
+
+【Browser】──HTTPS──►【Caddy】──►【api】
+                                  │ 写 turns · runs · turn_views(seed)
+                                  │ pg_notify(turn_dispatch) · 先 202
+                                  ▼
+                               【postgres】
+                                  │ LISTEN / CAS claim
+                                  ▼
+                               【编排 runtime】
+                                  │ INSERT turn.accepted…token/tool.* → 终态
+                                  │ 全部进 turn_events（唯一写者）
+                                  ├─ HTTP ►【model-gateway】► Provider
+                                  ├─ HTTP ►【sources-retrieval】embed
+                                  └─ HTTP ►【sandbox】exec
+                                  │ AFTER INSERT NOTIFY(turn_id)
+                                  ▼
+                               【api】LISTEN ──► SSE ──►【Browser】
+                                            └► UPSERT turn_views
+
+旁路：【api】enqueue 【redis】agent.jobs →【sources-retrieval】sources.index_sync
+      不经 Turn 分发，不经 turn_events 主链
+
+不变量
+──────
+  <span class="pt">◆ 202 ≠ turn.accepted</span>     202=已入队；accepted=编排 claim 后才写入 turn_events
+  <span class="pt">◆ Caddy ≠ 鉴权</span>            不验 Cookie、不持 Turn、不解析 SSE
+  <span class="pt">◆ 编排 ↛ Browser</span>          不对浏览器开 SSE；字只经事件表
+  <span class="pt">◆ SSE ⊈ inflight</span>          挂看不占执行槽
+  <span class="pt">◆ 权重 ⊈ 编排副本</span>         bge-m3 只在 sources-retrieval
+  <span class="pt">◆ 首 token ⊈ Redis</span>        热路径 HTTP；总线只承载可慢的异步索引
+  <span class="pt">◆ 看条带/前缀知进程</span>       海报与 ASCII 同读法：【api】【编排】【平面】</pre>
 
           <h3>微观时序</h3>
           <pre class="seq">同一 Turn。t1 与 t3 在浏览器侧几乎同时发生；t2 与浏览器无 TCP。
@@ -134,7 +127,7 @@ t1  发送（命令面，短连接）
            （幂等命中 client_request_id → 200，不新建）
     <span class="pt">◆ 要点  队列满是 HTTP 429，Turn 还没 INSERT。写成 failed，终态语义就脏了。</span>
 
-t2  领取（执行面；与浏览器无 TCP）
+t2  领取（编排 runtime；与浏览器无 TCP）
     runtime  LISTEN turn_dispatch_channel | poll 2s
              _active_turns &lt; 16 ? claim : 不领
              UPDATE runs SET running, lease_expires_at = now()+180s
@@ -148,7 +141,8 @@ t2  领取（执行面；与浏览器无 TCP）
     lease 心跳 10s。过期且不能安全续跑 → failed(runner_lost)。
       审批挂起仍占同一 run_id：续跑必须是同一执行实例。
     claim 超时 15s 无人领取 → 已 202 的请求随后 SSE failed(start_timeout)
-    内存 从此吃 runtime 4g（组窗、模型流、工具结果）
+    内存 编排吃 runtime 4g（组窗、checkpoint）；ST 权重在 sources-retrieval；
+         模型流缓冲在 model-gateway；exec 在 sandbox 1g
 
 t3  订阅（SSE 面，长连接）——通常与 t1 的 202 之后立刻发起
     Browser  GET /api/v1/turns/{tid}/stream?since_sequence=0
@@ -189,7 +183,7 @@ t3  订阅（SSE 面，长连接）——通常与 t1 的 202 之后立刻发起
       大量挂起的 SSE 先挤 api 的 fd / 协程 / 1g。
 
 t4  模型增量（高频）
-    Provider ──HTTP NDJSON──► model-gateway ──► runtime ModelGateway（remote）
+    runtime ModelGateway ──HTTP NDJSON──► model-gateway ──► 上游 Provider
          │  stub/recorded 仍在编排本地，不经 gateway
          ▼
     BufferedEventWriter  首 token 立即 INSERT；其后 ≤40ms 多行 INSERT
@@ -252,11 +246,12 @@ X-Internal-Token 只用于 api↔runtime 的 push 回退 / admin 代理。
 │  容量信封（默认单副本 make up；数字以 settings / compose 为准）            │
 │  组窗内存是数量级估算（无 per-Turn RSS 探针），用于规划，不是精确会计。    │
 │                                                                          │
-│  软件帽    inflight = 16 / runtime          admission 全局 32 / 用户 2     │
-│  进程      uvicorn ×1 · asyncio 单 loop                                  │
-│            禁止 --workers=N：每个 worker 复制一份互不相认的               │
-│            inflight 计数与 LISTEN 套接字，闸会失效。                      │
-│            扩容 = 加容器副本，claim 仍走数据库 CAS。                      │
+│  软件帽    inflight = 16 / 编排 runtime     admission 全局 32 / 用户 2     │
+│  进程      各服务 uvicorn ×1 · asyncio 单 loop（禁止 --workers）          │
+│            产品执行侧容器：runtime + sources-retrieval + model-gateway   │
+│            + sandbox + redis（总线）+ api + postgres + …                 │
+│            扩容编排 = 加 runtime 副本，claim 仍走数据库 CAS。             │
+│            扩容权重面 = 扩 sources-retrieval，不是给 runtime 塞 ST。     │
 │  cgroup    runtime 4g（编排）  sources-retrieval 12g(GPU)/4g(CPU)        │
 │            model-gateway 512m  sandbox 1g  api 1g  postgres 1g  ast 768m │
 │  DB 池     api hot5 + bypass5               runtime hot5 + bypass5       │
@@ -309,7 +304,7 @@ t4 INSERT      热池；同 Turn 串行拿 pg_advisory_xact_lock
                16 Turn 并行 ⇒ 最多 5 个真正在 COMMIT
                其余 await Pool.acquire()；排队 &gt;5s → statement/command timeout
 
-t4 模型流      长连接 ④ · 内存在 runtime（不经 PG、不经 SSE 全量）
+t4 模型流      长连接 ④ · 流经 model-gateway；编排只持组装窗与回灌
                SSE 只搬 payload.delta
 
 t5 checkpoint  UPSERT JSONB = 组窗的磁盘镜像（审批挂起仍占 inflight + lease）</pre>
@@ -422,15 +417,14 @@ RAG     psycopg 自建连，第三条绕开 hot 的路径</pre>
   加密停在边界：:80 明文，:443 tls internal
   容器内 PG/HTTP 默认无 sslmode=require
   Cookie = HMAC 签名（完整性，payload 非加密）；供应商 Key 静态 Fernet</pre>
-          <p class="figure-lead">下图中间箭头链即 POST → 准入 → 落库 NOTIFY → claim/lease → Engine（经 model-gateway / sources-retrieval / sandbox HTTP）→ 事件 → SSE。左右为 Caddy / 双池 / 禁止项，不是第二套主链。菱形为未领取队列与 inflight。数字与 ASCII 一致：lease 180s、热池 5×5s、202 ≠ <code>turn.accepted</code>。</p>
-          <div class="src"><code>deploy/caddy/Caddyfile</code> · <code>deploy/compose/planes.yml</code> · <code>admission.py</code> · <code>turn_dispatch.py</code> · <code>db/pool.py</code></div>
+          <p class="figure-lead">下图主链条带<strong>首词即进程</strong>（【api】【编排runtime】【model-gateway】…）。左列是进程图例与表归属；中链 POST→落库→claim→编排写 <code>turn_events</code>（扇出三个平面）→api SSE；右列禁止项与容量。菱形为未领取队列与 inflight。</p>
+          <div class="src"><code>deploy/caddy/Caddyfile</code> · <code>deploy/compose/planes.yml</code> · <code>admission.py</code> · <code>turn_dispatch.py</code> · <code>controller/event_writer.py</code> · <code>db/pool.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
-            <img src="../assets/architecture/backend-stack-zh.png" alt="后端并发与分发详流：准入、claim、lease、双池与 SSE" />
+            <img src="../assets/architecture/backend-stack-zh.png" alt="后端宏观：进程、表、turn_events 与平面 HTTP" />
           </div>
-          <figcaption>后端并发与分发详流 · 准入 / claim / lease / 双池 · 点击放大</figcaption>
+          <figcaption>后端宏观详流 · 进程 / 表 / turn_events · 点击放大</figcaption>
         </figure>
       </section>
 
-      <!-- 3 -->

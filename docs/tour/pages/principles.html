@@ -17,10 +17,11 @@
 ────────────────────────────
 R1  不挡受理
     符号表：workspace_ast_inline 默认 False，入队 work_ast_index_jobs（ast-indexer 768m）
-    资料 sync：Watch 2s / 去抖 1.5s；写作 post_turn 才排 sources.index_sync
+    资料 sync：Watch 2s / 去抖 1.5s 在 sources-retrieval；写作 post_turn 才排 sources.index_sync
     官方评测：bench 隔离库，不进日常 POST /turns
     产品对话不等符号表 ready；仅评测套件开题前等待
     <span class="pt">◆ 要点  把「索引建完」当受理门，TTFB 必炸。评测的等 ready 不得抄到产品路径。</span>
+    <span class="pt">◆ 要点  权重与 sync 在 sources-retrieval；编排 runtime 不因建库吃满 12g。</span>
 
 R2  首 token 前不加同步模型
     禁止热路径上同步摘要 / 裁判 / 改写
@@ -46,20 +47,23 @@ R5  可测才合并
     <span class="pt">◆ 要点  把 Ops 4/5 当成合入门，会把效果分和「主路径没炸」混成一件事。</span></pre>
 
           <h3>不变量</h3>
-          <pre class="seq">跨服务     api / runtime / web 禁止 Python 互 import
-           实时事实桥仅为 Postgres：INSERT + NOTIFY / LISTEN
+          <pre class="seq">跨服务     api / runtime / web / sources-retrieval / model-gateway / sandbox
+           禁止 Python 互 import；Turn 事实桥仍为 Postgres INSERT + NOTIFY / LISTEN
+           平面热路径用 HTTP（embed / LLM / exec）；异步索引可走 Redis Streams
+           首 token 与 query embed 禁止上总线
 场景       AgentEngine 禁止 if scenario == "…"
            差只经 Profile / ToolScope；未知 hook 启动期 fail-fast
 终态       cancelled ≠ failed
            审批挂起后同一 run_id + checkpoint 续跑；不存在 ResumeTurn
-两门正交   审批门 = 是否允许执行；沙箱门 = 进程可写范围
+两门正交   审批门 = 是否允许执行；沙箱门 = 进程可写范围（默认 sandbox 平面）
            官方编码评测另有解题改道（该题 Docker），与上述两门正交
 工具切面   编码场景不提供 search_sources，不以资料检索定位代码
            写作场景不打开 LSP 结构工具
 分数       冒烟分数不升 SCORECARD 主栏
            官方 harness 自身失败不得标成模型 resolve_rate = 0
+权重       ST/bge-m3 只在 sources-retrieval；编排 runtime 默认 remote
 
 <span class="pt">◆ 要点  取消是 cancelled。写成 failed，用户取消与 runner_lost 就分不开了。</span></pre>
-          <div class="src"><code>deploy/docker-compose.yml</code> · <code>scenarios/registry.py</code> · <code>scripts/check_scenario_leak.py</code></div>
+          <div class="src"><code>deploy/docker-compose.yml</code> · <code>deploy/compose/planes.yml</code> · <code>scenarios/registry.py</code> · <code>scripts/check_scenario_leak.py</code></div>
         </div>
       </section>

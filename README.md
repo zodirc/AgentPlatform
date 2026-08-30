@@ -16,8 +16,8 @@ https://zodirc.github.io/AgentPlatform/
 
 | 想了解 | 打开 |
 |--------|------|
+| 进程、表、谁写 turn_events | https://zodirc.github.io/AgentPlatform/tour/#backend |
 | 一次 Turn 如何从浏览器进入推理 | https://zodirc.github.io/AgentPlatform/tour/#request-path |
-| 容器、负载、并发与启动顺序 | https://zodirc.github.io/AgentPlatform/tour/#backend |
 | 组窗、模型调用、工具循环 | https://zodirc.github.io/AgentPlatform/tour/#engine-loop |
 | 编码：查找定义、修改后再验证 | https://zodirc.github.io/AgentPlatform/tour/#coding-fuse |
 | 写作 / 资料检索 | https://zodirc.github.io/AgentPlatform/tour/#rag |
@@ -55,43 +55,62 @@ make smoke
 ```text
 Browser → Caddy
             ├─ /      → web
-            └─ /api/* → api → (pull) runtime → 写事件 → api SSE
-Postgres + pgvector · 旁路 ast-indexer · 默认含 bench
+            └─ /api/* → api
+                 │  INSERT turns/runs · pg_notify(turn_dispatch)
+                 │  LISTEN turn_events → SSE / turn_views
+                 ▼
+              Postgres（Turn 事实桥：turns · runs · turn_events · turn_views · run_commands）
+                 │  LISTEN / CAS claim
+                 ▼
+              runtime（编排 · 写 turn_events · 不持 ST 权重）
+                 ├─ HTTP → model-gateway     live LLM NDJSON
+                 ├─ HTTP → sources-retrieval  唯一 embedding 池 · sync/watch
+                 └─ HTTP → sandbox           bwrap/landlock exec
+              redis（异步 agent.jobs，如 sources.index_sync；首 token / query embed 禁止上总线）
+旁路：ast-indexer · bench(+bench-postgres) · 发布台 :9090
 ```
 
 | 模块 | 职责 |
 |------|------|
 | web | 工作台（SSE + 投影） |
-| api | 受理、分发、SSE、Ops |
-| runtime | Agent loop、工具、检索、沙箱 |
-| postgres | 事实总线（服务间无互 import） |
+| api | 受理、分发门铃、SSE、投影、Ops；可 enqueue Redis |
+| runtime | 编排：claim / Engine / 写 `turn_events`；默认 remote embed |
+| sources-retrieval | 唯一 ST/hash 权重、query/index embed、资料 sync |
+| model-gateway | live 上游 LLM 流（NDJSON） |
+| sandbox | OS 隔离 exec |
+| redis | 异步 job bus（`agent.jobs`） |
+| postgres | Turn 业务真源 / CAS / NOTIFY（服务间无互 import） |
 | ast-indexer | 工作区 AST（旁路） |
 | bench + bench-postgres | Official / L1（`make up` 默认起） |
 | contracts | OpenAPI / 事件 / 命令体 |
 
-`Work`（作品根）→ `Session`（对话线程）→ `Turn`（一次用户闭环）↔ `Run`（执行实例）。默认 `TURN_DISPATCH=pull`：runtime claim 并心跳续约。[架构导览](https://zodirc.github.io/AgentPlatform/tour/#backend)
+`Work` → `Session` → `Turn` ↔ `Run`。默认 `TURN_DISPATCH=pull`：编排 claim 并心跳续约。[架构导览](https://zodirc.github.io/AgentPlatform/tour/#backend)（进程 · 表 · `turn_events`）。
 
-### `make up` 全量：8 容器
+### `make up` 全量（产品面 + 平面）
 
 | 容器 | mem_limit | 作用 |
 |------|-----------|------|
-| postgres | 1g | 产品库 / 向量 |
+| postgres | 1g | 产品库 / 向量表 |
 | bench-postgres | 1g | Bench 隔离库 |
-| runtime | 4g → GPU 时 12g | loop / RAG / embed |
+| redis | — | 异步 Streams |
+| runtime | 4g | 编排 / 写事件（无 ST） |
+| sources-retrieval | 4g → GPU 时 12g | embed / sync（唯一权重） |
+| model-gateway | 512m | live LLM 出口（slim 镜像） |
+| sandbox | 1g | bwrap/landlock（slim 镜像） |
 | ast-indexer | 768m | AST |
-| api | 1g | 控制面 |
+| api | 1g | 控制面 / SSE |
 | bench | 6g → GPU 时 12g | 评测 worker |
 | web / gateway | — | 前端 / Caddy |
 
 宿主机另有发布台 `:9090`。
 
-- **内存**：cgroup 上限合计约 **14g**（不含 web/gateway）→ 建议宿主 **≥16 GiB**
+- **内存**：日常产品空闲约数 GiB；开 GPU retrieval（+可选 bench）时名义 cgroup 可过 20g → 建议宿主 **≥16 GiB**
 - **磁盘**：建议空闲 **≥40 GiB**（镜像 + 模型 + Bench 数据）
-- **Embedding**（`make up` 自动解析）：无 GPU → **gte-small@384**（CPU）；VRAM≥8GiB → **bge-m3@1024**（CUDA）。权重在 `/data/models`；runtime 与 bench **各加载一份**
+- **Embedding**（`make up` 自动解析）：无 GPU → **gte-small@384**；VRAM≥8GiB → **bge-m3@1024**。权重在 `/data/models`，**只由 sources-retrieval 加载**（编排 `EMBEDDING_BACKEND=remote`）
 
 ```text
-deploy/   compose · Caddy
-services/ api · runtime · web · bench
+deploy/   compose（含 planes.yml）· Caddy
+services/ api · runtime · sources-retrieval · model-gateway · sandbox · web · bench
 packages/contracts/   eval/   docs/   scripts/
 ```
 

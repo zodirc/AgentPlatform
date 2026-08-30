@@ -1,7 +1,7 @@
 <section class="page" data-id="topology" data-group="总览" data-title="部署拓扑">
         <div class="card">
           <h2>部署拓扑</h2>
-          <p class="lede">浏览器只访问产品面 <code>http://localhost/</code>。Caddy 把 <code>/</code> 交给 web，把 <code>/api/*</code> 与 <code>/health/*</code> 交给 api :8000。runtime 不对浏览器开 SSE。默认 <code>TURN_DISPATCH=pull</code>。执行面按 ADR-020 拆成编排 runtime 与平面微服务（compose <code>planes.yml</code>）。并发数字与双池见上一页「时序 · 并发 · 负载」。</p>
+          <p class="lede">浏览器只访问产品面 <code>http://localhost/</code>。Caddy 把 <code>/</code> 交给 web，把 <code>/api/*</code> 与 <code>/health/*</code> 交给 api :8000。runtime 不对浏览器开 SSE。默认 <code>TURN_DISPATCH=pull</code>。执行侧拆成编排 runtime 与平面容器（compose <code>planes.yml</code>：redis / sources-retrieval / model-gateway / sandbox）。并发数字与双池见上一页「时序 · 并发 · 负载」。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会用错模型</li>
           </ul>
@@ -88,7 +88,7 @@ gateway/sandbox 镜像 FROM runtime:slim（~0.7 GB）；retrieval FROM runtime
         SWE 环境 make ops-swe-eval-ready
         redis 旁路 make start-redis</pre>
           <p class="figure-lead">下图为发布台：对比代码、标 dirty、分模块重建（含平面模块与 redis 中间件）。上文 ASCII 是日常请求穿过 Caddy → api → runtime，以及平面 HTTP。</p>
-          <div class="src">根 <code>README.md</code> · <code>deploy/docker-compose.yml</code> · <code>deploy/compose/planes.yml</code> · <code>docs/adr/020-execution-plane-microservices.md</code> · <code>deploy/caddy/Caddyfile</code></div>
+          <div class="src">根 <code>README.md</code> · <code>deploy/docker-compose.yml</code> · <code>deploy/compose/planes.yml</code> · <code>deploy/caddy/Caddyfile</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">

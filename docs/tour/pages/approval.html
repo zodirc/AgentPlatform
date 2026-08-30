@@ -1,7 +1,7 @@
 <section class="page" data-id="approval" data-group="Runtime" data-title="审批 · 取消 · 恢复">
         <div class="card">
           <h2>审批门、取消与同 run_id 续跑</h2>
-          <p class="lede">审批门决定是否允许执行；沙箱门决定进程可写范围；评测 Docker 改道与这两门正交。Engine 在 <code>approval_required</code> 时返回哨兵 <code>"waiting_approval"</code>，Controller 落 checkpoint 后返回——<strong>不写终态</strong>。这颗 Turn 仍计入 <code>RUNTIME_MAX_INFLIGHT_TURNS=16</code>，lease 继续心跳。</p>
+          <p class="lede">审批门决定是否允许执行；沙箱门决定进程可写范围（默认经 <code>SANDBOX_PLANE_URL</code> HTTP 到 sandbox 容器，平面内再 Landlock/bwrap）；评测 Docker 改道与这两门正交。Engine 在 <code>approval_required</code> 时返回哨兵 <code>"waiting_approval"</code>，Controller 落 checkpoint 后返回——<strong>不写终态</strong>。这颗 Turn 仍计入 <code>RUNTIME_MAX_INFLIGHT_TURNS=16</code>，lease 继续心跳。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会另起 Run 丢义务、把取消写成 failed、或把 update_plan 当成开工批准</li>
           </ul>
@@ -47,8 +47,8 @@ waiting_approval     Run 仍在；仍占 inflight + lease
   failed(step_timeout)    步墙钟 720s 或 stall auto-fail（180s 无事件）
 再对话 = 同 Session 新 Turn（不存在 ResumeTurn）
 <span class="pt">◆ 要点  用户取消写成 failed，和 runner_lost / start_timeout 在 Ops 上就分不开了。</span></pre>
-          <p class="figure-lead">下图菱形为「是否等待审批」。挂起后走同一执行实例的 checkpoint，不是新 Turn。</p>
-          <div class="src"><code>engine/agent_engine.py</code> · <code>controller/checkpoint_store.py</code> · <code>controller/run_lock.py</code></div>
+          <p class="figure-lead">下图菱形为「是否等待审批」。挂起后走同一编排实例的 checkpoint；批准后的 exec 经 sandbox 平面 HTTP，不是第二套审批。</p>
+          <div class="src"><code>engine/agent_engine.py</code> · <code>controller/checkpoint_store.py</code> · <code>tools/core/remote_sandbox.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">

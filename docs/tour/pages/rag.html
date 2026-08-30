@@ -1,7 +1,7 @@
 <section class="page" data-id="rag" data-group="RAG / 写作" data-title="hybrid 召回">
         <div class="card">
           <h2>交互面：hybrid <code>search_sources</code></h2>
-          <p class="lede">模型调用 <code>search_sources</code> 才会检索。禁止每轮预注入向量包，禁止查询路径上当场建库或整库重嵌。编码场景无此工具。冲突裁决：速率/交互 → 检索质量 → 成熟形态。psycopg 自建连，不占 runtime 热池 5×5s。</p>
+          <p class="lede">模型调用 <code>search_sources</code> 才会检索。禁止每轮预注入向量包，禁止查询路径上当场建库或整库重嵌。编码场景无此工具。冲突裁决：速率/交互 → 检索质量 → 成熟形态。query <code>embed(query)</code> 经编排 remote HTTP 打到 <code>sources-retrieval</code>（唯一权重）；ANN/FTS 用 psycopg 自建连，不占编排 runtime 热池 5×5s。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 Doc/Chunk 画成三套系统、用 raw 分相加代替 RRF、或把空窗当成「没有资料」去 sync</li>
           </ul>
@@ -16,8 +16,9 @@
 
           <h3>两条车道并行（预算约 0.3s）</h3>
           <pre class="seq">并行的是 Chunk 车道与 Doc 车道，不是三套。Chunk 内部 HNSW 与 GIN 同线程先后。
-两车道各自 embed(query) 一次。
+两车道各自 embed(query) 一次 → HTTP → sources-retrieval（不上 Redis；不上编排本机 ST）。
 over-fetch：无 prefix 时 limit×2=60，有 prefix 时 ×3=90；每侧 top_k 常见 240 或 360。
+<span class="pt">◆ 要点  向量化在 retrieval 平面。画成编排进程内「毫秒本地 embed」会误导容量与故障域。</span>
 
 Chunk
   ANN：切块表余弦；seed 与多 Work 共用一张 HNSW，SQL 再滤 work/seed
@@ -47,7 +48,7 @@ L3 = 进窗摘录
 宽表过长是指针；全文用 read_file</pre>
           <p>建库切块约 450 token、重叠 64，见「索引面」。深描逐步对照代码：<a href="#rag-deep-dive">RAG 深描</a>。</p>
           <p class="figure-lead">下图上框为两条并行车道，下面宽条带与菱形才是融合、ACL、是否命中。</p>
-          <div class="src"><code>pgvector_store.search_hybrid</code> · <code>two_level.py</code> · <code>fusion.py</code> · <code>rerank.py</code> · <code>tools/core/sources_search.py</code></div>
+          <div class="src"><code>pgvector_store.search_hybrid</code> · <code>remote_embedder.py</code> · <code>tools/core/sources_search.py</code> · <code>services/sources-retrieval</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">

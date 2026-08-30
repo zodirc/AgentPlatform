@@ -1,12 +1,19 @@
 <section class="page" data-id="events" data-group="事件与契约" data-title="事件 · SSE · 投影">
         <div class="card">
           <h2>事件拉取：NOTIFY → LISTEN → SSE / view</h2>
-          <p class="lede">事实源是 append-only 的 <code>turn_events</code>。runtime 不对浏览器开 SSE；api 不对 runtime 开进程内 channel。NOTIFY 是门铃：payload 只有 UUID，叫醒后 <code>SELECT</code>。丢失时 2s 轮询兜底——<code>SELECT</code> 才是真。</p>
+          <p class="lede">Turn 事实源是 append-only 的 <code>turn_events</code>（编排 runtime 写入）。编排不对浏览器开 SSE；api 不对编排开进程内 channel。NOTIFY 是门铃：payload 只有 UUID，叫醒后 <code>SELECT</code>。丢失时 2s 轮询兜底——<code>SELECT</code> 才是真。Postgres 是 <strong>Turn 事实桥</strong>，不是全栈唯一跨服务桥：平面热路径是 HTTP；异步索引是 Redis Streams。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 NOTIFY 当队列、把 delta 当快照、或把 40ms 窗当成可以乱序</li>
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 NOTIFY 当队列、把 Postgres 当成 Redis/HTTP 的替代品、或把 40ms 窗当成可以乱序</li>
           </ul>
 
-          <h3>写入路径（runtime）</h3>
+          <h3>三条桥（不要画成一条）</h3>
+          <pre class="seq">Postgres   Turn 分发门铃 · turn_events · run_commands · CAS / lease
+HTTP       编排 → model-gateway / sources-retrieval / sandbox（热路径）
+Redis      agent.jobs（异步 sources.index_sync 等）
+禁止       首 token / query embed 上 Redis；把平面 HTTP 结果当 NOTIFY payload
+<span class="pt">◆ 要点  「跨服务」有三条。本页主链只讲 Turn 事件那一条。</span></pre>
+
+          <h3>写入路径（编排 runtime）</h3>
           <pre class="seq">关键节点只追加、不改旧行
   每行 per-turn monotonic sequence
   大正文进 artifacts；事件行留摘要与指针
@@ -62,14 +69,14 @@ payload 上限（打破则校验红）
 <span class="pt">◆ 要点  客户端 JSON.parse 的是信封。按供应商 SSE 原始帧去续传，游标对不上 sequence。</span></pre>
 
           <h3>无分布式事务时如何自洽</h3>
-          <pre class="seq">runtime 写  事件、执行态、checkpoint、transcript 真源
-api 写      快照、对外 SSE、常异步的 sessions.context_summary
+          <pre class="seq">runtime 写  事件、执行态、checkpoint、transcript 真源（编排；不持 ST 权重）
+api 写      快照、对外 SSE、常异步的 sessions.context_summary；可 enqueue Redis 索引
 短暂落后    以 turn_events.sequence 为序 reconcile；禁止用「api 内存里最新 token」回写 runtime
 schema      event_payload_validation 默认开；高频 delta 默认轻量校验（R3），CI 可开 strict
 tool.completed summary 最大 4096 字（OpenAPI maxLength）；delegate 大摘要必须 clamp
 <span class="pt">◆ 要点  没有 XA。领域表（turns.status）可以晚于事件。读 UI 以事件序为准，不要以 turns 行推断「正在想」。 </span></pre>
-          <p class="figure-lead">下图左辅是写入，中主链是通知→监听→分流，右辅是禁止项。</p>
-          <div class="src"><code>controller/event_writer.py</code> · <code>controller/events.py</code> · api SSE / projection</div>
+          <p class="figure-lead">下图左辅是写入，中主链是通知→监听→分流，右辅是禁止项（含「勿把 Postgres 写成全栈唯一桥」）。</p>
+          <div class="src"><code>controller/event_writer.py</code> · <code>controller/events.py</code> · api SSE / projection · <code>deploy/compose/planes.yml</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">

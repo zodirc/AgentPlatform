@@ -1,7 +1,7 @@
 <section class="page" data-id="runtime-layers" data-group="Runtime" data-title="Controller 与 Engine">
         <div class="card">
           <h2>TurnController 与 AgentEngine</h2>
-          <p class="lede">一次 Turn 的写主权在 Controller；反复「组窗 → 问模型 → 跑工具」的 while 在 Engine。Guard（取消、分层超时、Stall Watchdog、租约心跳）旁挂全程，不是 while 里新菱形。Engine 返回三种东西：终稿字符串、<code>"waiting_approval"</code>、或 <code>None</code>（取消/预算由 Controller 根据 <code>state</code> 收尾）。</p>
+          <p class="lede">一次 Turn 的写主权在 Controller；反复「组窗 → 问模型 → 跑工具」的 while 在 Engine——二者都在编排 runtime 容器。Guard（取消、分层超时、Stall Watchdog、租约心跳）旁挂全程。live 模型 / embed / exec 是编排的 HTTP 依赖（model-gateway · sources-retrieval · sandbox），不是 while 里新菱形。Engine 返回三种东西：终稿字符串、<code>"waiting_approval"</code>、或 <code>None</code>（取消/预算由 Controller 根据 <code>state</code> 收尾）。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把审批当成终态、把 stall 当成租约、或把 Profile 名字送进 Engine</li>
           </ul>
@@ -22,8 +22,14 @@ AgentEngine
 
 api
   投影 turn_views；对外 SSE；sessions.context_summary 常异步
-  无分布式事务：领域表短暂落后用 sequence reconcile
-<span class="pt">◆ 要点  Engine 写事件，Controller 写终态。把 status=completed 放进 while 末尾，审批续跑会丢 checkpoint。</span></pre>
+  可 enqueue Redis agent.jobs（索引等）；无分布式事务：领域表短暂落后用 sequence reconcile
+
+平面（独立容器 · HTTP · 不占编排 inflight 计数器本身）
+  model-gateway       live LLM NDJSON
+  sources-retrieval   唯一 ST/hash；query/index embed；sync/watch
+  sandbox             bwrap/landlock exec
+<span class="pt">◆ 要点  Engine 写事件，Controller 写终态。把 status=completed 放进 while 末尾，审批续跑会丢 checkpoint。</span>
+<span class="pt">◆ 要点  「执行面」= 编排 + 平面。租约只钉住编排副本；权重 OOM 面在 retrieval。</span></pre>
 
           <h3>Profile 注入，而不是场景开关</h3>
           <pre class="seq">max_steps     agent.yaml = 150；writing/intel = 40；collab = 50；缺省 40
@@ -43,11 +49,11 @@ Engine        不读取 scenario_id 做分支；测试里用假 Profile 即可�
   单工具默认 60s；结构 checks 30s / nav 15s
   StepTimeoutError → Controller 标失败，termination_reason 与 stall auto-fail 共用 step_timeout 字面
 
-租约（执行面占位）
+租约（编排副本占位）
   lease 180s + heartbeat 10s
-  编码一步常 60–160s（并行只读 + 模型）。旧 60s TTL 会在 thinking.delta 刷盘争用时把活 Turn 回收成 runner_lost
+  编码一步常 60–160s（并行只读 + 模型经 gateway）。旧 60s TTL 会在 thinking.delta 刷盘争用时把活 Turn 回收成 runner_lost
   waiting_approval 仍计入 RUNTIME_MAX_INFLIGHT_TURNS=16
-  <span class="pt">◆ 要点  软件 16 ≠ 物理 16。热连接池 5 往往先饱和；fat-window Turn 在 4g 上大约 2–4 颗。</span>
+  <span class="pt">◆ 要点  软件 16 ≠ 物理 16。热连接池 5 往往先饱和；编排 4g 上满窗大约 2–4 颗；ST 不在这 4g 里。</span>
 
 Stall Watchdog（事件新鲜度，30s 扫一次）
   阈值 180s 无新 turn_events，且非 waiting_approval、非已请求 cancel 的 orphan
@@ -75,11 +81,11 @@ Controller
 
           <h3>while 五格（细节在「Engine 单循环」）</h3>
           <pre class="seq">1  assemble     压缩的是本步窗，不是磁盘稿；系统提示求稳定，tools[] 字节默认不变
-2  stream       取消必须打断 backoff 与 HTTP；仅首字节前重试
+2  stream       经 model-gateway（live）；取消必须打断 backoff 与 HTTP；仅首字节前重试
 3  解析         thinking.delta 默认只走 SSE
-4  tool_use     只读 gather + 变更串行；改道在 handler
+4  tool_use     只读 gather + 变更串行；embed→retrieval；exec→sandbox；改道在 handler
 5  终局         欠验证 → receipt continue；否则 break 交 Controller 写终态
 <span class="pt">◆ 要点  把 Guard 画进 while 菱形，取消/超时会变成「又一步工具」，形状就改了。</span></pre>
-          <div class="src"><code>controller/turn_controller.py</code> · <code>engine/agent_engine.py</code> · <code>engine/state.py</code> · <code>controller/stall_watchdog.py</code> · <code>controller/checkpoint_store.py</code></div>
+          <div class="src"><code>controller/turn_controller.py</code> · <code>engine/agent_engine.py</code> · <code>model/remote_provider.py</code> · <code>deploy/compose/planes.yml</code></div>
         </div>
       </section>
