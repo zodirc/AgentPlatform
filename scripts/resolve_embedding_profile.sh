@@ -251,6 +251,15 @@ if (( use_cuda )); then
 services:
   runtime:
     gpus: all
+    mem_limit: 4g
+    environment:
+      # Orchestrator stays CPU-side; GPU owned by sources-retrieval (ADR-020).
+      EMBEDDING_DEVICE: cpu
+    build:
+      args:
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL_VAL}
+  sources-retrieval:
+    gpus: all
     mem_limit: 12g
     environment:
       NVIDIA_VISIBLE_DEVICES: all

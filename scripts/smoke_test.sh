@@ -15,11 +15,14 @@ proof_compose_env_apply
 mkdir -p workspace/sections
 chmod -R a+rwx workspace 2>/dev/null || true
 
-COMPOSE="docker compose -f deploy/docker-compose.yml --env-file .env"
+# ADR-020: planes.yml is required (redis + sources-retrieval + gateway + sandbox).
+# runtime-lite alone stubs those names without health/volumes and breaks depends_on.
+COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml --env-file .env"
 # CI / Proof gate: use hash runtime-lite so smoke does not bake sentence-transformers
 # (HF download often fails on GitHub runners). Daily `make up` still uses Dockerfile.retrieval.
+# Omit gpu.auto.yml under lite — CUDA overlay fights hash/lite images.
 if [[ "${SMOKE_RUNTIME_LITE:-}" == "1" ]] || [[ "${CI:-}" == "true" ]]; then
-  COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml --env-file .env"
+  COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml -f deploy/compose/runtime-lite.yml --env-file .env"
   export EMBEDDING_BACKEND="${EMBEDDING_BACKEND:-hash}"
   export EMBEDDING_DIMENSIONS="${EMBEDDING_DIMENSIONS:-256}"
   # Bench profile pulls ST worker; not needed for L0 smoke / golden gate.
@@ -27,6 +30,8 @@ if [[ "${SMOKE_RUNTIME_LITE:-}" == "1" ]] || [[ "${CI:-}" == "true" ]]; then
     _proof_strip_compose_profile bench
     echo "==> smoke: compose profile 'bench' omitted (runtime-lite / CI)"
   fi
+elif [[ -f deploy/compose/gpu.auto.yml ]]; then
+  COMPOSE="$COMPOSE -f deploy/compose/gpu.auto.yml"
 fi
 BASE_URL="${SMOKE_BASE_URL:-http://localhost}"
 # L0 smoke is a contract path (docs/11 / docs/28): default stub so gate does not
@@ -106,6 +111,8 @@ if [[ "${SMOKE_SKIP_RESTORE:-0}" != "1" ]]; then
 fi
 
 echo "==> Starting stack (smoke MODEL_MODE=${SMOKE_MODEL_MODE})"
+# Plane images FROM the runtime bake (ADR-020) — ensure base tag exists before parallel bake.
+MODEL_MODE="${SMOKE_MODEL_MODE}" proof_retry_transient_registry $COMPOSE build runtime
 MODEL_MODE="${SMOKE_MODEL_MODE}" proof_retry_transient_registry $COMPOSE up -d --build
 
 echo "==> Waiting for services"

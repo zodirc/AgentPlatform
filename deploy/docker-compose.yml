@@ -329,6 +329,23 @@ services:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
         HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
 
+  # Build-only slim runtime (hash Dockerfile, no torch/ST). Base for
+  # model-gateway + sandbox so those plane tags do not carry the retrieval bake.
+  runtime-slim:
+    profiles: [deps-anchor]
+    image: agent-platform-runtime:slim
+    build:
+      <<: *build-cache-runtime
+      context: ..
+      additional_contexts: *build-contexts-lite
+      dockerfile: services/runtime/Dockerfile
+      target: app
+      args:
+        PYTHON_BASE: ${PYTHON_BASE:-python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1}
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
+        APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
+
   # Build-only: tags deps stage so BuildKit GC does not drop pip layers between
   # app-only rebuilds (docs/38 · docs/03 §5.1). Never started as a container.
   api-deps:

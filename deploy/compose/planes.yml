@@ -1,0 +1,214 @@
+# ADR-020 execution-plane microservices + Redis Streams job bus.
+# Merged by default from Makefile COMPOSE (make up / start).
+#
+# Planes:
+#   redis              — agent.jobs stream
+#   sources-retrieval  — sole embedding pool + sync/watch
+#   model-gateway      — LLM egress cutover target
+#   sandbox            — OS-isolated exec cutover target
+#   runtime            — thin orchestrator (remote embed, no ingest)
+
+x-retrieval-env: &retrieval-env
+  DATABASE_URL: ${DATABASE_URL}
+  OPS_DATABASE_URL: ${OPS_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
+  BENCH_DATABASE_URL: ${BENCH_DATABASE_URL:-postgresql://bench:bench@bench-postgres:5432/bench}
+  OPS_RETRIEVAL_PG_SCHEMA: ${OPS_RETRIEVAL_PG_SCHEMA:-retrieval_ops}
+  OPS_RETRIEVAL_PG_SCHEMA_ZH: ${OPS_RETRIEVAL_PG_SCHEMA_ZH:-retrieval_ops_zh}
+  INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+  APP_SECRET_KEY: ${APP_SECRET_KEY}
+  DATA_DIR: /data
+  WORKSPACE_ROOT: /workspace
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  SERVICE_ROLE: retrieval
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
+  RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}
+  EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
+  EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
+  EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
+  EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE:-64}
+  EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
+  EMBEDDING_MAX_SEQ_LENGTH: ${EMBEDDING_MAX_SEQ_LENGTH:-0}
+  EMBEDDING_INDEX_VERSION: ${EMBEDDING_INDEX_VERSION:-0}
+  EMBEDDING_PROGRESS_EVERY_FILES: ${EMBEDDING_PROGRESS_EVERY_FILES:-25}
+  EMBEDDING_TEXT_INCLUDE_METADATA: ${EMBEDDING_TEXT_INCLUDE_METADATA:-false}
+  SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
+  SOURCES_STARTUP_SYNC_DELAY_SECONDS: ${SOURCES_STARTUP_SYNC_DELAY_SECONDS:-3}
+  SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
+  SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
+  SEED_INTEL_ROOT: ${SEED_INTEL_ROOT:-/workspace/sources/seed/intel}
+  HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
+  TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-1}
+  HF_HOME: ${HF_HOME:-/data/models}
+  RETRIEVAL_RERANK_ENABLED: ${RETRIEVAL_RERANK_ENABLED:-true}
+  RETRIEVAL_RERANK_CROSS_ENCODER: ${RETRIEVAL_RERANK_CROSS_ENCODER:-false}
+  RUNTIME_RUNNER_ID: sources-retrieval
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: agent-redis
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  sources-retrieval:
+    image: agent-platform-sources-retrieval:latest
+    # Local bake only — never resolve docker.io/library/agent-platform-* (ADR-020).
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: services/sources-retrieval/Dockerfile
+      pull: false
+      args:
+        RUNTIME_IMAGE: agent-platform-runtime:default
+    container_name: agent-sources-retrieval
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${SOURCES_RETRIEVAL_MEM_LIMIT:-4g}
+    environment:
+      <<: *retrieval-env
+    volumes:
+      - agent_data:/data
+      - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+      - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
+      - ${SEED_INTEL_HOST_PATH:-../seed/sources/intel}:/workspace/sources/seed/intel:ro,z
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/live"]
+      interval: 10s
+      timeout: 5s
+      start_period: 180s
+      retries: 5
+
+  model-gateway:
+    image: agent-platform-model-gateway:latest
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: services/model-gateway/Dockerfile
+      pull: false
+      args:
+        # Slim base — no torch/ST (ADR-020 image boundary).
+        RUNTIME_IMAGE: agent-platform-runtime:slim
+    container_name: agent-model-gateway
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: 512m
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SERVICE_ROLE: model_gateway
+      MODEL_GATEWAY_URL: ""
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-anthropic}
+      MODEL_MODE: ${MODEL_MODE:-live}
+      MODEL_API_KEY: ${MODEL_API_KEY:-}
+      MODEL_NAME: ${MODEL_NAME:-}
+      DATABASE_URL: ${DATABASE_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8003/health/live"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  sandbox:
+    image: agent-platform-sandbox:latest
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: services/sandbox/Dockerfile
+      pull: false
+      args:
+        RUNTIME_IMAGE: agent-platform-runtime:slim
+    container_name: agent-sandbox
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: ${SANDBOX_MEM_LIMIT:-1g}
+    environment:
+      INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
+      APP_SECRET_KEY: ${APP_SECRET_KEY}
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SERVICE_ROLE: sandbox
+      SANDBOX_PLANE_URL: ""
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      DATA_DIR: /data
+      WORKSPACE_ROOT: /workspace
+      DATABASE_URL: ${DATABASE_URL}
+    volumes:
+      - agent_data:/data
+      - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8004/health/live"]
+      interval: 10s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  runtime:
+    environment:
+      SERVICE_ROLE: orchestrator
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SOURCES_RETRIEVAL_URL: http://sources-retrieval:8001
+      MODEL_GATEWAY_URL: http://model-gateway:8003
+      SANDBOX_PLANE_URL: http://sandbox:8004
+      # Weights live only on sources-retrieval (ADR-020).
+      EMBEDDING_BACKEND: remote
+      SOURCES_STARTUP_SYNC_ENABLED: "false"
+      SOURCES_WATCH_ENABLED: "false"
+    depends_on:
+      sources-retrieval:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      model-gateway:
+        condition: service_healthy
+      sandbox:
+        condition: service_healthy
+
+  api:
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      SOURCES_RETRIEVAL_URL: http://sources-retrieval:8001
+      MODEL_GATEWAY_URL: http://model-gateway:8003
+      SANDBOX_PLANE_URL: http://sandbox:8004
+    depends_on:
+      sources-retrieval:
+        condition: service_healthy
+      redis:
+        condition: service_healthy

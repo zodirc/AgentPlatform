@@ -22,15 +22,15 @@ COMPOSE_EXPORT = set -a && \
 	[ -f deploy/base-images.env ] && . ./deploy/base-images.env; \
 	[ -f deploy/ops-eval.auto.env ] && . ./deploy/ops-eval.auto.env; \
 	set +a
-COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) $(COMPOSE_ENV)
-COMPOSE_DEV = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
+COMPOSE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) $(COMPOSE_ENV)
+COMPOSE_DEV = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/dev.override.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml $(COMPOSE_ENV)
 # Deprecated overlay — default compose already uses Dockerfile.retrieval.
 # `make up-retrieval` still passes --profile retrieval via this file.
-COMPOSE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_QUEUE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
-COMPOSE_HA = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
-COMPOSE_OPS_EVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
+COMPOSE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_QUEUE_RETRIEVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml $(COMPOSE_ENV)
+COMPOSE_HA = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) $(COMPOSE_OPS_FLAG) -f deploy/compose/ha.yml $(COMPOSE_ENV)
+COMPOSE_OPS_EVAL = $(COMPOSE_EXPORT) && docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml $(COMPOSE_GPU_FLAG) -f deploy/compose/ops-eval.yml $(COMPOSE_ENV)
 DEV_OVERRIDE := deploy/compose/dev.override.yml
 EVAL_WORKSPACE := .eval-workspace
 EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
@@ -40,7 +40,8 @@ EVAL_WORKSPACE_HOST_PATH := ../.eval-workspace
 COMPOSE_PROFILES ?= bench
 # Isolated stub golden uses runtime-lite (hash, thin Dockerfile) so evals do not
 # rebuild the default sentence-transformers image. Restore uses main COMPOSE (live + ST).
-EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml -f deploy/compose/runtime-lite.yml
+# Include planes.yml so service names resolve; lite overlay forces monolith+hash.
+EVAL_COMPOSE_FILES ?= -f deploy/docker-compose.yml -f deploy/compose/planes.yml -f deploy/compose/runtime-lite.yml
 EVAL_COMPOSE_PROFILES ?=
 EVAL_UP_ARGS ?=
 # Recreate api+runtime together so both bind the same WORKSPACE_HOST_PATH
@@ -73,7 +74,7 @@ RELEASE_CONSOLE ?= 1
 .PHONY: help start up down ps logs smoke build migrate gate ci-proof \
 	pull-dispatch-maturity \
 	ensure-ops-secret ensure-docker-creds fix-workspace-sources resolve-embedding \
-	up-web up-api up-runtime up-ast-indexer up-bench start-bench up-ops-eval ops-eval-off ops-swe-eval-ready deps-anchor restart-web restart-api restart-runtime \
+	up-web up-api up-runtime up-sources-retrieval up-model-gateway up-sandbox up-ast-indexer up-bench start-bench start-redis up-ops-eval ops-eval-off ops-swe-eval-ready deps-anchor restart-web restart-api restart-runtime \
 	dev dev-init web-dev docker-prune docker-prune-safe \
 	up-queue up-retrieval up-full up-ha \
 	eval eval-p2 eval-all eval-live api-test runtime-test security-audit \
@@ -101,10 +102,13 @@ help: ## 显示常用命令
 	@echo "  make up           只重建脏模块；依赖层应命中 :deps 缓存（只改 app 不重装 pip/pnpm）"
 	@echo "  make up-web       只重建 web（WEB_REBUILD_DEPS=1 强制 pnpm 重装）"
 	@echo "  make up-api       只重建 api（API_REBUILD_DEPS=1 强制 pip 重装）"
-	@echo "  make up-runtime   只重建 runtime（RUNTIME_REBUILD_DEPS=1 含 ST 烘焙）"
+	@echo "  make up-runtime   重建编排 runtime + 同镜像平面容器"
+	@echo "  make up-sources-retrieval  重建检索平面（换模/ST）"
+	@echo "  make up-model-gateway / up-sandbox  重建网关/沙箱平面"
 	@echo "  make deps-anchor  仅打 api/runtime/web/bench:deps（防 BuildKit GC 掉 pip/pnpm 层）"
 	@echo "  make docker-prune-safe  按需清理：留运行栈/:deps/评测集/pip·pnpm；丢掉未引用层（BUILD_CACHE_PRUNE=1 连 cache mount 也清）"
 	@echo "  make start-bench  仅启动 Ops Bench（不 rebuild；容器被杀后优先用这个）"
+	@echo "  make start-redis  仅启动 redis job bus（上游镜像，不 rebuild；ADR-020）"
 	@echo "  make up-bench     重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）"
 	@echo "  make dev          开发模式：挂载 Python 源码 + 热重载（api/runtime）"
 	@echo "  make web-dev      前端 Vite 热更新 http://localhost:5173"
@@ -314,7 +318,7 @@ ops-eval-off: ## 取消 api+runtime docker.sock 粘性（下次 up-* 不再挂�
 
 # Plain make up / up-api omit the socket unless OPS_EVAL_DOCKER_SOCK=1 (from up-ops-eval).
 
-up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME_REBUILD_DEPS=1 → --no-cache，含 ST）
+up-runtime: resolve-embedding ensure-docker-creds ## 只重建编排 runtime（并刷新同镜像平面容器）
 	@set -e; \
 	if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
 	  echo "==> RUNTIME_REBUILD_DEPS=1 → docker compose build --no-cache runtime (+deps anchor)"; \
@@ -325,12 +329,52 @@ up-runtime: resolve-embedding ensure-docker-creds ## 只重建 runtime（RUNTIME
 	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-deps; \
 	  $(COMPOSE) build runtime; \
 	fi; \
-	$(COMPOSE) up -d --no-deps runtime
-	@$(COMPOSE) up -d --no-deps --force-recreate ast-indexer || true
+	COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-slim; \
+	$(COMPOSE) build sources-retrieval model-gateway sandbox; \
+	$(COMPOSE) up -d --no-deps runtime; \
+	$(COMPOSE) up -d --no-deps --force-recreate sources-retrieval model-gateway sandbox ast-indexer || true
 	$(docker_auto_prune)
 	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
-	  bash scripts/release/release.sh mark --modules=runtime >/dev/null; \
+	  bash scripts/release/release.sh mark --modules=runtime,sources_retrieval,model_gateway,sandbox,ast_indexer >/dev/null; \
 	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
+	fi
+
+up-sources-retrieval: resolve-embedding ensure-docker-creds ## 重建检索平面（唯一 embedding 权重；ADR-020）
+	@set -e; \
+	if [ "$(RUNTIME_REBUILD_DEPS)" = "1" ]; then \
+	  $(COMPOSE) build --no-cache runtime; \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build --no-cache runtime-deps; \
+	else \
+	  COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-deps; \
+	  $(COMPOSE) build runtime; \
+	fi; \
+	$(COMPOSE) build sources-retrieval; \
+	$(COMPOSE) up -d redis; \
+	$(COMPOSE) up -d --no-deps --force-recreate sources-retrieval
+	$(docker_auto_prune)
+	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
+	  bash scripts/release/release.sh mark --modules=sources_retrieval >/dev/null; \
+	  RELEASE_CONSOLE=$(RELEASE_CONSOLE) bash scripts/release/ensure_console.sh; \
+	fi
+
+up-model-gateway: ensure-docker-creds ## 重建 model-gateway 平面（FROM runtime:slim，无 ST）
+	@set -e; \
+	COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-slim; \
+	$(COMPOSE) build model-gateway; \
+	$(COMPOSE) up -d --no-deps --force-recreate model-gateway
+	$(docker_auto_prune)
+	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
+	  bash scripts/release/release.sh mark --modules=model_gateway >/dev/null; \
+	fi
+
+up-sandbox: ensure-docker-creds ## 重建 sandbox 平面（FROM runtime:slim，无 ST）
+	@set -e; \
+	COMPOSE_PROFILES=deps-anchor $(COMPOSE) build runtime-slim; \
+	$(COMPOSE) build sandbox; \
+	$(COMPOSE) up -d --no-deps --force-recreate sandbox
+	$(docker_auto_prune)
+	@if [ "$(SKIP_RELEASE_HOOK)" != "1" ]; then \
+	  bash scripts/release/release.sh mark --modules=sandbox >/dev/null; \
 	fi
 
 up-ast-indexer: ensure-docker-creds ## 只重建/拉起 agent-ast-indexer（A6）
@@ -344,6 +388,11 @@ start-bench: resolve-embedding ensure-ops-secret ## 仅启动 Ops Bench（不 re
 	echo "==> start-bench（不 build；镜像已存在时秒级拉起）"; \
 	COMPOSE_PROFILES=bench bash scripts/ensure_bench_postgres.sh; \
 	COMPOSE_PROFILES=bench $(COMPOSE) up -d --no-deps bench
+
+start-redis: resolve-embedding ## 仅启动 redis job bus（上游镜像，不 rebuild；ADR-020）
+	@set -e; \
+	echo "==> start-redis（不 build；redis:7-alpine）"; \
+	$(COMPOSE) up -d redis
 
 up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 重建并启动 Ops Bench worker（真向量评测，与 agent 解耦）
 	@set -e; \
@@ -362,11 +411,11 @@ up-bench: resolve-embedding ensure-ops-secret ensure-docker-creds ## 重建并�
 	$(docker_auto_prune)
 
 # Tag all deps stages so BuildKit GC is less likely to drop pip/pnpm layers.
-deps-anchor: resolve-embedding ensure-docker-creds ## 仅打 api/runtime/web/bench:deps 锚点镜像
-	@echo "==> building deps-anchor images (api/runtime/web/bench)"
-	COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps runtime-deps web-deps bench-deps
+deps-anchor: resolve-embedding ensure-docker-creds ## 仅打 api/runtime/web/bench:deps + runtime:slim 锚点
+	@echo "==> building deps-anchor images (api/runtime/web/bench + runtime-slim)"
+	COMPOSE_PROFILES=deps-anchor $(COMPOSE) build api-deps runtime-deps runtime-slim web-deps bench-deps
 	@docker images --format '{{.Repository}}:{{.Tag}}\t{{.Size}}\t{{.CreatedSince}}' \
-	  | grep -E 'agent-platform-(api|runtime|web|bench):(deps|latest|default)' || true
+	  | grep -E 'agent-platform-(api|runtime|web|bench):(deps|latest|default|slim)' || true
 
 restart-web: ## 重启 web（不 rebuild）
 	$(COMPOSE) restart web
@@ -645,9 +694,9 @@ retrieval-doc2query: ## RET-11(b) 离线伪查询扩 BM25（默认 FiQA；不重
 
 sync-sources: ## Turn 外增量索引（本终端逐行进度条；docs/15）
 	@echo "==> sync-sources: live progress (embedder cold-start may take 1–3 min)"
-	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
-	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
-	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode sources --reason make
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py sources-retrieval:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py sources-retrieval:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 sources-retrieval python -m app.retrieval.sync_cli --mode sources --reason make
 
 seed-sources: ## 同 sync-sources：对挂载的常驻 seed 重新建索引（不拷贝文件）
 	@$(MAKE) sync-sources
@@ -655,10 +704,10 @@ seed-sources: ## 同 sync-sources：对挂载的常驻 seed 重新建索引（�
 sync-ops-indexes: ## Ops BEIR work 按 scope stamp 重嵌（FiQA 等；跳过 seed；耗时长）
 	@echo "==> sync-ops-indexes: work-scoped BEIR reindex (FiQA-scale can take 15–30+ min)"
 	@echo "    Live progress on this terminal. Not part of make up."
-	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
-	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
-	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
-	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode ops-beir --reason make-ops-beir
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py sources-retrieval:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py sources-retrieval:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py sources-retrieval:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 sources-retrieval python -m app.retrieval.sync_cli --mode ops-beir --reason make-ops-beir
 
 ops-cmteb-prepare: ## 从挂载 C-MTEB 建 cmteb-index Works+语料 txt（不嵌；需 api）
 	@test -f .env || (echo "missing .env"; exit 1)
@@ -677,11 +726,11 @@ sync-ops-cmteb: ## Ops C-MTEB 重嵌（同模 bge-m3；仅 cmteb-index → retri
 	@echo "==> sync-ops-cmteb: C-MTEB reindex (same embedder; schema retrieval_ops_zh)"
 	@echo "    Live progress on this terminal. Requires GPU bge-m3 after resolve-embedding."
 	@echo "    If no works yet: make ops-cmteb-prepare first (or ensure_ops_cmteb.sh)."
-	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py runtime:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
-	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py runtime:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
-	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py runtime:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
-	@$(COMPOSE) cp services/runtime/app/retrieval/ops_plane.py runtime:/app/app/retrieval/ops_plane.py >/dev/null 2>&1 || true
-	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 runtime python -m app.retrieval.sync_cli --mode ops-cmteb --reason make-ops-cmteb
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_progress.py sources-retrieval:/app/app/retrieval/sync_progress.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/sync_cli.py sources-retrieval:/app/app/retrieval/sync_cli.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/index_scheduler.py sources-retrieval:/app/app/retrieval/index_scheduler.py >/dev/null 2>&1 || true
+	@$(COMPOSE) cp services/runtime/app/retrieval/ops_plane.py sources-retrieval:/app/app/retrieval/ops_plane.py >/dev/null 2>&1 || true
+	$(COMPOSE) exec -T -e PYTHONUNBUFFERED=1 sources-retrieval python -m app.retrieval.sync_cli --mode ops-cmteb --reason make-ops-cmteb
 
 sync: ## 一键：seed/普通 work + Ops BEIR（≡ sync-sources && sync-ops-indexes）
 	@echo "==> make sync: (1/2) sync-sources"
@@ -734,7 +783,7 @@ eval-stall:
 eval-ha:
 	$(MAKE) eval-run-isolated \
 	  EVAL_BUILD=--build \
-	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/ha.yml" \
+	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/planes.yml -f deploy/compose/ha.yml" \
 	  EVAL_UP_ARGS="--scale runtime=0" EVAL_UP_SERVICES= \
 	  EVAL_RESTORE_SERVICES="api runtime" \
 	  EVAL_RUNTIME_ENV="MODEL_MODE=stub" \
@@ -746,6 +795,9 @@ eval-recorded:
 
 eval-retrieval:
 	pip install -q websockets 2>/dev/null || true
+	# Intentionally omits planes.yml: writing.07 golden still assumes ST embedder
+	# in the Turn runtime process (pre-ADR-020 monolith). Prefer product stack
+	# (`make up` + planes) for retrieval-plane integration checks.
 	$(MAKE) eval-run-isolated \
 	  EVAL_BUILD=--build \
 	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml" \
@@ -1034,7 +1086,7 @@ eval-writing-rag: ## writing RAG golden 子集（需栈在跑）
 eval-queue:
 	$(MAKE) eval-run-isolated \
 	  EVAL_BUILD=--build \
-	  EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml" \
+	EVAL_COMPOSE_FILES="-f deploy/docker-compose.yml -f deploy/compose/planes.yml -f deploy/compose/queue.yml -f deploy/compose/retrieval.yml" \
 	  EVAL_COMPOSE_PROFILES="--profile queue --profile retrieval" EVAL_UP_SERVICES= \
 	  EVAL_RESTORE_SERVICES="api runtime" \
 	  EVAL_RUNTIME_ENV="MODEL_MODE=stub WORKER_MODE=outbox INDEX_VIA_WORKER=true RETRIEVAL_MODE=hybrid" \

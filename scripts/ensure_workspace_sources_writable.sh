@@ -12,7 +12,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-COMPOSE=(docker compose -f deploy/docker-compose.yml --env-file .env)
+COMPOSE=(docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml --env-file .env)
+if [[ -f deploy/compose/gpu.auto.yml ]]; then
+  COMPOSE+=(-f deploy/compose/gpu.auto.yml)
+fi
 
 if ! "${COMPOSE[@]}" ps --status running --services 2>/dev/null | grep -qx runtime; then
   echo "==> ensure_workspace_sources_writable: runtime not running; skip"

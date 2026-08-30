@@ -34,7 +34,9 @@ compose_up() {
   case "${OPS_EVAL_DOCKER_SOCK:-0}" in
     1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
   esac
-  COMPOSE_PROFILES=bench docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
+  # planes.yml before gpu.auto.yml — GPU overlay alone stubs sources-retrieval.
+  COMPOSE_PROFILES=bench docker compose -f deploy/docker-compose.yml \
+    -f deploy/compose/planes.yml "${gpu_flag[@]}" \
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     --env-file deploy/base-images.env \

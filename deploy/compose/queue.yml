@@ -1,22 +1,12 @@
-# Optional queue profile: redis + async worker (ADR-010 Phase 2)
-# Usage: docker compose -f deploy/docker-compose.yml -f deploy/compose/queue.yml --profile queue up -d
-# With HA: add -f deploy/compose/ha.yml and set RUNTIME_URL=http://runtime-a:8001
+# Optional queue profile: async outbox worker (ADR-010 Phase 2).
+# Redis comes from deploy/compose/planes.yml (ADR-020).
+# Usage: docker compose ... -f deploy/compose/planes.yml -f deploy/compose/queue.yml --profile queue up -d
 
 services:
   api:
     profiles: [queue]
     environment:
       WORKER_MODE: outbox
-
-  redis:
-    image: redis:7-alpine
-    container_name: agent-redis
-    profiles: [queue]
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
 
   worker:
     build:
@@ -34,6 +24,8 @@ services:
       DATABASE_URL: ${DATABASE_URL}
       RUNTIME_URL: ${RUNTIME_URL:-http://runtime:8001}
       RUNTIME_URL_MAP: ${RUNTIME_URL_MAP:-}
+      SOURCES_RETRIEVAL_URL: ${SOURCES_RETRIEVAL_URL:-http://sources-retrieval:8001}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       INTERNAL_SERVICE_TOKEN: ${INTERNAL_SERVICE_TOKEN}
       APP_SECRET_KEY: ${APP_SECRET_KEY}
       APP_ENV: ${APP_ENV:-production}
@@ -42,6 +34,8 @@ services:
       postgres:
         condition: service_healthy
       runtime:
+        condition: service_healthy
+      sources-retrieval:
         condition: service_healthy
       redis:
         condition: service_healthy

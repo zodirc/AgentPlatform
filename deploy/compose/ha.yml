@@ -30,13 +30,18 @@ x-runtime-env: &runtime-env
   RETRIEVAL_MODE: ${RETRIEVAL_MODE:-hybrid}
   RETRIEVAL_BACKEND: ${RETRIEVAL_BACKEND:-pgvector}
   INDEX_VIA_WORKER: ${INDEX_VIA_WORKER:-true}
-  EMBEDDING_BACKEND: ${EMBEDDING_BACKEND:-sentence_transformers}
+  SERVICE_ROLE: orchestrator
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  SOURCES_RETRIEVAL_URL: http://sources-retrieval:8001
+  MODEL_GATEWAY_URL: http://model-gateway:8003
+  SANDBOX_PLANE_URL: http://sandbox:8004
+  EMBEDDING_BACKEND: remote
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-thenlper/gte-small}
   EMBEDDING_MODEL_DIR: ${EMBEDDING_MODEL_DIR:-/data/models}
   EMBEDDING_DIMENSIONS: ${EMBEDDING_DIMENSIONS:-384}
   EMBEDDING_DEVICE: ${EMBEDDING_DEVICE:-auto}
-  SOURCES_STARTUP_SYNC_ENABLED: ${SOURCES_STARTUP_SYNC_ENABLED:-true}
-  SOURCES_WATCH_ENABLED: ${SOURCES_WATCH_ENABLED:-true}
+  SOURCES_STARTUP_SYNC_ENABLED: "false"
+  SOURCES_WATCH_ENABLED: "false"
   SEED_SOURCES_ROOT: ${SEED_SOURCES_ROOT:-/workspace/sources/seed/writing}
   SEED_INTEL_ROOT: ${SEED_INTEL_ROOT:-/workspace/sources/seed/intel}
   HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-1}
@@ -88,6 +93,14 @@ x-runtime-svc: &runtime-svc
   depends_on:
     postgres:
       condition: service_healthy
+    redis:
+      condition: service_healthy
+    sources-retrieval:
+      condition: service_healthy
+    model-gateway:
+      condition: service_healthy
+    sandbox:
+      condition: service_healthy
   healthcheck:
     test: ["CMD", "curl", "-f", "http://127.0.0.1:8001/health/live"]
     interval: 10s
@@ -116,10 +129,14 @@ services:
       TURN_DISPATCH: pull
       RUN_COMMANDS_CHANNEL_ENABLED: "true"
       RUNTIME_URL: http://runtime-a:8001
+      SOURCES_RETRIEVAL_URL: http://sources-retrieval:8001
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     depends_on:
       runtime:
         required: false
       runtime-a:
         condition: service_healthy
       runtime-b:
+        condition: service_healthy
+      sources-retrieval:
         condition: service_healthy

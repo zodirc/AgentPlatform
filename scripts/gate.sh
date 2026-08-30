@@ -7,7 +7,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-COMPOSE="docker compose -f deploy/docker-compose.yml --env-file .env"
+# ADR-020: restore must include planes (redis + retrieval/gateway/sandbox).
+COMPOSE="docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml --env-file .env"
+if [[ -f deploy/compose/gpu.auto.yml ]]; then
+  COMPOSE="$COMPOSE -f deploy/compose/gpu.auto.yml"
+fi
 
 if [[ ! -f .env ]]; then
   cp .env.example .env

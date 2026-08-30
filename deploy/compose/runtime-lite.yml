@@ -1,6 +1,7 @@
 # Lightweight runtime for CI / isolated golden eval (hash embedding, no torch).
 # Uses a separate image tag so eval builds do not overwrite the daily ST image
 # (agent-platform-runtime:default from docker-compose.yml).
+# With planes.yml: force monolith+hash on orchestrator; plane images FROM :lite.
 services:
   runtime:
     image: agent-platform-runtime:lite
@@ -19,7 +20,48 @@ services:
         PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-mirrors.aliyun.com}
         APT_MIRROR: ${APT_MIRROR-mirrors.aliyun.com}
     environment:
+      SERVICE_ROLE: monolith
       EMBEDDING_BACKEND: ${EVAL_EMBEDDING_BACKEND:-hash}
+      EMBEDDING_DIMENSIONS: ${EVAL_EMBEDDING_DIMENSIONS:-256}
+      SOURCES_STARTUP_SYNC_ENABLED: "true"
+      SOURCES_WATCH_ENABLED: "true"
+      SOURCES_RETRIEVAL_URL: ""
+      MODEL_GATEWAY_URL: ""
+      SANDBOX_PLANE_URL: ""
+      HF_HUB_OFFLINE: "0"
+      TRANSFORMERS_OFFLINE: "0"
+
+  sources-retrieval:
+    image: agent-platform-sources-retrieval:lite
+    build:
+      context: ..
+      dockerfile: services/sources-retrieval/Dockerfile
+      args:
+        RUNTIME_IMAGE: agent-platform-runtime:lite
+    environment:
+      EMBEDDING_BACKEND: hash
       EMBEDDING_DIMENSIONS: ${EVAL_EMBEDDING_DIMENSIONS:-256}
       HF_HUB_OFFLINE: "0"
       TRANSFORMERS_OFFLINE: "0"
+
+  model-gateway:
+    image: agent-platform-model-gateway:lite
+    build:
+      context: ..
+      dockerfile: services/model-gateway/Dockerfile
+      args:
+        RUNTIME_IMAGE: agent-platform-runtime:lite
+    environment:
+      MODEL_GATEWAY_URL: ""
+      SERVICE_ROLE: model_gateway
+
+  sandbox:
+    image: agent-platform-sandbox:lite
+    build:
+      context: ..
+      dockerfile: services/sandbox/Dockerfile
+      args:
+        RUNTIME_IMAGE: agent-platform-runtime:lite
+    environment:
+      SANDBOX_PLANE_URL: ""
+      SERVICE_ROLE: sandbox
