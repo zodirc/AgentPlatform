@@ -33,7 +33,7 @@ bash scripts/release/stop_console.sh && bash scripts/release/ensure_console.sh
 
 官方 coding **必要一步**：挂 sock、预拉镜像、环境冒烟合成一键。约 1GiB/题，**不进 git**。Eval 默认 `cache_level=instance`。取消 sock：`make ops-eval-off`。
 
-左侧目录树按轨划分（ADR-020）：
+左侧目录树按轨划分：
 
 ```
 产品 Agent/
@@ -49,4 +49,4 @@ Ops 嵌入复用 `agent-sources-retrieval` 的同一 `EMBEDDING_MODEL`（C-MTEB 
 
 确认：看板模块变绿 · `deployed_sha` / `worktree_digest` 已 mark · `docker compose ps` healthy · `curl -fsS http://localhost/health/live`。
 
-状态与日志：`reports/release/status.json` · `reports/release/logs/`。总线契约：`docs/adr/020-job-bus.md`。
+状态与日志：`reports/release/status.json` · `reports/release/logs/`。
