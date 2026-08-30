@@ -1,13 +1,16 @@
 <section class="page" data-id="sandbox" data-group="场景与工具" data-title="exec 沙箱">
         <div class="card">
           <h2>exec 沙箱与评测解题改道</h2>
-          <p class="lede">审批门通过之后，仍须决定进程可触达的范围。威胁模型是保护<strong>宿主机与 agent 服务</strong>：子进程文件系统只对当前 Work 根 RW。日常出站网络默认可用（已审批的 <code>curl https://…</code> 不应被沙箱误杀）；产品层「禁 curl」是另一条规则，不要焊进内核隔离。</p>
+          <p class="lede">审批门通过之后，仍须决定进程可触达的范围。威胁模型是保护<strong>宿主机与 agent 服务</strong>：子进程文件系统只对当前 Work 根 RW。默认经 <code>SANDBOX_PLANE_URL</code> 调 sandbox 平面 <code>POST /internal/sandbox/exec</code>（HTTP 热路径，不上 Redis 总线）；平面内再选 Landlock / bwrap / off。日常出站网络默认可用（已审批的 <code>curl https://…</code> 不应被沙箱误杀）；产品层「禁 curl」是另一条规则，不要焊进内核隔离。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把工作区绿当官方分、或缺 bwrap 时把「断网」降级成宿主机外连</li>
           </ul>
 
-          <h3>日常沙箱（进程内首次探测后 sticky）</h3>
-          <pre class="seq">选择顺序  Landlock → bwrap → off
+          <h3>日常沙箱（平面内首次探测后 sticky）</h3>
+          <pre class="seq">编排 runtime ──HTTP──► sandbox 平面（SANDBOX_PLANE_URL）
+  未配置平面 URL 时回退进程内 sandbox（兼容 monolith / 测试）
+
+平面内选择顺序  Landlock → bwrap → off
   Landlock  Linux ≥5.13，ABI≥1；restrict_self 不可逆，探针在子进程做
             可写 jail = 当前 work_root（与 bwrap RW 面一致）；私有 tmpdir
             <strong>撤不掉 egress</strong>——只锁 FS
@@ -15,7 +18,8 @@
   off       裸 shell；argv 仍先过路径软 jail（不得越出 Work 根）
   TOOL_SANDBOX=off|landlock|bwrap  破窗覆盖；off 每次调用都生效，自动探测结果 pin 在进程生命周期
   结果 dict 带 sandbox 后端标识，便于 Ops 判断「这步到底关在哪一层」
-<span class="pt">◆ 要点  Landlock 单独不能满足评测断网。deny_network 时必须 bwrap --unshare-net；没有 bwrap 就硬失败，禁止降级到 off。</span></pre>
+<span class="pt">◆ 要点  Landlock 单独不能满足评测断网。deny_network 时必须 bwrap --unshare-net；没有 bwrap 就硬失败，禁止降级到 off。</span>
+<span class="pt">◆ 要点  热路径是 HTTP；Redis Streams 只承载异步索引等，不承载 exec。</span></pre>
 
           <h3>菱形：是否官方编码评测题</h3>
           <pre class="seq">条件：Turn 带 ops_eval 标记 且 工作区存在实例标记文件
@@ -32,7 +36,7 @@
       仍不得越出当前 Work 根
       与审批门正交：未批准的 run_command 根本不会进 sandbox</pre>
           <p class="figure-lead">下图菱形「是否评测题」对应主链第 2 步；否分支才是日常沙箱。</p>
-          <div class="src"><code>tools/core/sandbox.py</code> · <code>tools/core/landlock_fs.py</code> · <code>structural/test_run_redirect.py</code> · <code>tools/core/swe_solve_env.py</code></div>
+          <div class="src"><code>services/sandbox</code> · <code>tools/core/remote_sandbox.py</code> · <code>tools/core/sandbox.py</code> · <code>tools/core/landlock_fs.py</code> · <code>structural/test_run_redirect.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">

@@ -39,14 +39,19 @@
   POST …/approve-tool-call|deny|cancel → run_commands，达持约副本</pre>
 
           <h3>组件地图</h3>
-          <pre class="seq">services/api          鉴权 · 准入 · 落库 · LISTEN · SSE · 投影
-services/runtime      claim · Engine · 工具 · 写事件（:8001 不公网）
+          <pre class="seq">services/api          鉴权 · 准入 · 落库 · LISTEN · SSE · 投影 · 总线 enqueue
+services/runtime      orchestrator：claim · Engine · 工具调度 · 写事件（:8001 不公网）
+services/sources-retrieval  唯一 embedding 池 · sync/watch · POST /internal/embed
+services/model-gateway      live LLM NDJSON · POST /internal/v1/complete
+services/sandbox            bwrap/landlock · POST /internal/sandbox/exec
+redis                 agent.jobs Streams（异步；首 token / query embed 禁止上总线）
 services/web          工作台；只消费 SSE 与 GET /view
 services/bench        官方评测 worker；隔离库
-services/release-console  发布台 :9090；对比指纹、标 dirty
+services/release-console  发布台 :9090；对比指纹、标 dirty（含平面模块）
 packages/contracts    机器源
 eval/                 golden / official / retrieval / swebench
-deploy/ · scripts/ · seed/ · workspace/</pre>
-          <div class="src"><code>packages/contracts/schemas/events/envelope.json</code> · <code>openapi/public.yaml</code></div>
+deploy/ · scripts/ · seed/ · workspace/
+ADR                   docs/adr/020-execution-plane-microservices.md · 020-job-bus.md</pre>
+          <div class="src"><code>packages/contracts/schemas/events/envelope.json</code> · <code>openapi/public.yaml</code> · <code>deploy/compose/planes.yml</code></div>
         </div>
       </section>

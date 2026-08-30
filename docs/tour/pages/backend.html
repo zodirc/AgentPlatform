@@ -189,8 +189,8 @@ t3  订阅（SSE 面，长连接）——通常与 t1 的 202 之后立刻发起
       大量挂起的 SSE 先挤 api 的 fd / 协程 / 1g。
 
 t4  模型增量（高频）
-    Provider ──HTTP 流──► runtime ModelGateway
-         │
+    Provider ──HTTP NDJSON──► model-gateway ──► runtime ModelGateway（remote）
+         │  stub/recorded 仍在编排本地，不经 gateway
          ▼
     BufferedEventWriter  首 token 立即 INSERT；其后 ≤40ms 多行 INSERT
          │  payload.delta 单条 ≤8192 字符（契约）
@@ -217,7 +217,8 @@ t5  控制命令（与 SSE 并行的短 POST）
     api      鉴权 + _require_turn_access
              INSERT run_commands + NOTIFY run_commands_channel
     runtime  仅 runner_id 匹配且持有 lease 的副本消费
-             续跑同一 run_id（仍占 inflight）</pre>
+             续跑同一 run_id（仍占 inflight）
+<span class="pt">◆ 要点  live 上游经 model-gateway；query embed 经 sources-retrieval HTTP；首 token / query embed 禁止上 Redis 总线。</span></pre>
 
           <h3>Caddy</h3>
           <pre class="seq">Caddy  L7 reverse proxy     SSE 对它 = 很久不结束的 GET /api/…
@@ -256,12 +257,15 @@ X-Internal-Token 只用于 api↔runtime 的 push 回退 / admin 代理。
 │            禁止 --workers=N：每个 worker 复制一份互不相认的               │
 │            inflight 计数与 LISTEN 套接字，闸会失效。                      │
 │            扩容 = 加容器副本，claim 仍走数据库 CAS。                      │
-│  cgroup    runtime 4g (GPU→12g)  api 1g     postgres 1g  ast 768m        │
+│  cgroup    runtime 4g（编排）  sources-retrieval 12g(GPU)/4g(CPU)        │
+│            model-gateway 512m  sandbox 1g  api 1g  postgres 1g  ast 768m │
 │  DB 池     api hot5 + bypass5               runtime hot5 + bypass5       │
 │            + LISTEN 专用连接 2～3 根/进程   PG 默认 max_connections≈100   │
 │  实际并发  min(16, 热池排队, RSS, 供应商限流) 推荐 2～4 路满窗 Turn       │
+│  embed     权重只在 sources-retrieval；编排 EMBEDDING_BACKEND=remote     │
 └──────────────────────────────────────────────────────────────────────────┘
 <span class="pt">◆ 要点  先撞上的是热池 5，不是 inflight 16。--workers 会复制互不相认的闸。</span>
+<span class="pt">◆ 要点  HA 扩 runtime 不复制 bge-m3；GPU overlay 挂在 sources-retrieval。</span>
 
 连接分类
 ────────
@@ -271,11 +275,14 @@ X-Internal-Token 只用于 api↔runtime 的 push 回退 / admin 代理。
 长连接  ① Browser↔Caddy↔api   SSE (chunked GET，Turn 生命周期)
         ② api↔PG              LISTEN turn_events_channel（进程级，1 根）
         ③ runtime↔PG          LISTEN dispatch + LISTEN run_commands
-        ④ runtime↔Provider    模型 HTTP 流（step 级，可 abort）
-        ⑤ runtime 心跳        10s 续 lease（短 SQL，逻辑上是长租约）
+        ④ runtime↔model-gateway↔Provider   模型 HTTP NDJSON（step 级，可 abort）
+        ⑤ runtime↔sources-retrieval        query/index embed（HTTP；不上总线）
+        ⑥ runtime↔sandbox                 exec（HTTP；可回退本进程）
+        ⑦ runtime 心跳        10s 续 lease（短 SQL，逻辑上是长租约）
 
         ① 与 ④ 数量随「正在看 / 正在推理」涨
         ②③ 是固定的控制面插座，与用户数无关
+        ⑤⑥ 是执行平面热路径；异步索引走 Redis Streams，不走这里
 
 叠回时序
 ────────
@@ -376,11 +383,11 @@ RAG     psycopg 自建连，第三条绕开 hot 的路径</pre>
 
   内存数量级（Python 对象图；仓库无 per-Turn RSS 探针，只作规划）
     满 usable≈98k tok → 典型 5～30 MiB / Turn（对象头 + 多份拷贝）
-    16 inflight × 20 MiB ≈ 0.3 GiB   仅消息图
-    + sentence-transformers 常驻
+    16 inflight × 20 MiB ≈ 0.3 GiB   仅消息图（编排 runtime）
+    + sentence-transformers 常驻于 sources-retrieval（不在编排进程）
         gte-small@384     ~0.1 GiB
-        bge-m3@1024       ~1.5–2.5 GiB（故 GPU overlay 把 runtime 抬到 12g）
-    ⇒ 4g cgroup 下 16 路满窗会先 OOM。
+        bge-m3@1024       ~1.5–2.5 GiB（故 GPU overlay 把 sources-retrieval 抬到 12g）
+    ⇒ 编排 4g 下 16 路满窗仍可能先撞热池/供应商限流；权重 OOM 面在 retrieval。
 <span class="pt">◆ 要点  128k 是这一 Turn 的组窗，不是 Session 常驻。软件帽 16 ≠ 物理可跑 16。</span></pre>
 
           <h3>规划上界</h3>
@@ -391,17 +398,18 @@ RAG     psycopg 自建连，第三条绕开 hot 的路径</pre>
   维度            默认单副本     备注
   软件执行中      16             RUNTIME_MAX_INFLIGHT_TURNS
   DB 热连接       runtime 5 + api 5    先于 16 饱和
-  满窗推理        2～4           4g + 组窗拷贝 + embed
+  满窗推理        2～4           编排 4g + 组窗拷贝；embed 在 retrieval
   轻量对话        6～8           窗远小于 98k
   SSE 挂看        数十           api 1g / fd；≠ 能推理 16
   未领取排队      32 / 用户 2    再高 429
-  HA 双 runtime   软件 32        近双份 4g；PG 连接再 +12
+  HA 双 runtime   软件 32        近双份 4g；不复制 bge-m3；PG 连接再 +12
 
 扩容
 ────
   make up-ha → runtime-a / runtime-b，共用同一 Postgres 与 agent_data
   claim 走数据库 CAS，不配置 RUNTIME_URL_MAP
   单进程 uvicorn，勿设 --workers（会复制互不相认的 inflight / LISTEN）
+  GPU / bge-m3 挂在 sources-retrieval（及 bench），不随 runtime 副本翻倍
   dispatch_wait_seconds / dispatch_queue_depth 顶满再加 runtime
   event_pipeline_lag_seconds / TTFB 变差先查热池与事件批窗（~40ms）
 
@@ -414,8 +422,8 @@ RAG     psycopg 自建连，第三条绕开 hot 的路径</pre>
   加密停在边界：:80 明文，:443 tls internal
   容器内 PG/HTTP 默认无 sslmode=require
   Cookie = HMAC 签名（完整性，payload 非加密）；供应商 Key 静态 Fernet</pre>
-          <p class="figure-lead">下图中间箭头链即 POST → 准入 → 落库 NOTIFY → claim/lease → 事件 → SSE。左右为 Caddy / 双池 / 禁止项，不是第二套主链。菱形为未领取队列与 inflight。数字与 ASCII 一致：lease 180s、热池 5×5s、202 ≠ <code>turn.accepted</code>。</p>
-          <div class="src"><code>deploy/caddy/Caddyfile</code> · <code>admission.py</code> · <code>turn_dispatch.py</code> · <code>db/pool.py</code></div>
+          <p class="figure-lead">下图中间箭头链即 POST → 准入 → 落库 NOTIFY → claim/lease → Engine（经 model-gateway / sources-retrieval / sandbox HTTP）→ 事件 → SSE。左右为 Caddy / 双池 / 禁止项，不是第二套主链。菱形为未领取队列与 inflight。数字与 ASCII 一致：lease 180s、热池 5×5s、202 ≠ <code>turn.accepted</code>。</p>
+          <div class="src"><code>deploy/caddy/Caddyfile</code> · <code>deploy/compose/planes.yml</code> · <code>admission.py</code> · <code>turn_dispatch.py</code> · <code>db/pool.py</code></div>
         </div>
         <figure class="figure">
           <div class="diagram-body diagram-svg">
