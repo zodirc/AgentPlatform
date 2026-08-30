@@ -47,6 +47,9 @@ ALLOWED_ACTIONS = {
     "up-api": ["bash", str(RELEASE_SH), "run", "--modules=api"],
     "up-runtime": ["bash", str(RELEASE_SH), "run", "--modules=runtime"],
     "up-ast-indexer": ["bash", str(RELEASE_SH), "run", "--modules=ast_indexer"],
+    "up-sources-retrieval": ["bash", str(RELEASE_SH), "run", "--modules=sources_retrieval"],
+    "up-model-gateway": ["bash", str(RELEASE_SH), "run", "--modules=model_gateway"],
+    "up-sandbox": ["bash", str(RELEASE_SH), "run", "--modules=sandbox"],
     "up-web": ["bash", str(RELEASE_SH), "run", "--modules=web"],
     "up-gateway": ["bash", str(RELEASE_SH), "run", "--modules=gateway"],
     "up-all": ["bash", str(RELEASE_SH), "run", "--force-all"],
@@ -58,6 +61,7 @@ ALLOWED_ACTIONS = {
     "up-ops-eval": ["make", "-C", str(ROOT), "up-ops-eval"],
     "pull-swe-eval-images": ["make", "-C", str(ROOT), "official-bench-coding-pull-images"],
     "start-bench": ["make", "-C", str(ROOT), "start-bench"],
+    "start-redis": ["make", "-C", str(ROOT), "start-redis"],
     "up-bench": ["make", "-C", str(ROOT), "up-bench"],
     "git-pull": ["bash", str(GIT_PULL_SH)],
     "cancel-jobs": ["__cancel__"],  # handled in-process, not spawned
@@ -69,6 +73,12 @@ ACTION_LOG_KEY = {
     "up-api": "api",
     "up-runtime": "runtime",
     "up-ast-indexer": "ast_indexer",
+    "up-sources-retrieval": "sources_retrieval",
+    "up-model-gateway": "model_gateway",
+    "up-sandbox": "sandbox",
+    "up-sources-retrieval": "sources_retrieval",
+    "up-model-gateway": "model_gateway",
+    "up-sandbox": "sandbox",
     "up-web": "web",
     "up-gateway": "gateway",
     "up-all": "misc",
@@ -80,6 +90,7 @@ ACTION_LOG_KEY = {
     "up-ops-eval": "swe_eval_images",
     "pull-swe-eval-images": "swe_eval_images",
     "start-bench": "ops_bench",
+    "start-redis": "redis",
     "up-bench": "ops_bench",
     "git-pull": "git",
     "cancel-jobs": "misc",
@@ -89,15 +100,19 @@ ITEM_LOG_KEY = {
     "api": "api",
     "runtime": "runtime",
     "ast_indexer": "ast_indexer",
+    "sources_retrieval": "sources_retrieval",
+    "model_gateway": "model_gateway",
+    "sandbox": "sandbox",
     "web": "web",
     "gateway": "gateway",
-    "embedding": "runtime",  # 换模走 runtime 重建
-    "ops_embedding_ref": "runtime",
+    "embedding": "sources_retrieval",  # ADR-020 换模走检索平面
+    "ops_embedding_ref": "sources_retrieval",
     "index_product": "index_product",
     "index_ops": "index_ops",
     "index_ops_zh": "index_ops_zh",
     "swe_eval_images": "swe_eval_images",
     "ops_bench": "ops_bench",
+    "redis": "redis",
     "git": "git",
 }
 
@@ -117,6 +132,7 @@ _ACTION_ITEM = {
     "up-ops-eval": "swe_eval_images",
     "pull-swe-eval-images": "swe_eval_images",
     "start-bench": "ops_bench",
+    "start-redis": "redis",
     "up-bench": "ops_bench",
     "git-pull": "git",
 }
@@ -124,6 +140,9 @@ _ITEM_DEFAULT_ACTION = {
     "api": "up-api",
     "runtime": "up-runtime",
     "ast_indexer": "up-ast-indexer",
+    "sources_retrieval": "up-sources-retrieval",
+    "model_gateway": "up-model-gateway",
+    "sandbox": "up-sandbox",
     "web": "up-web",
     "gateway": "up-gateway",
     "index_product": "sync-sources",
@@ -131,6 +150,7 @@ _ITEM_DEFAULT_ACTION = {
     "index_ops_zh": "ensure-ops-cmteb",
     "swe_eval_images": "ensure-swe-eval-env",
     "ops_bench": "start-bench",
+    "redis": "start-redis",
 }
 _SYNC_ACTIVE = frozenset(
     {
@@ -220,6 +240,9 @@ _ACTION_LABELS = {
     "up-api": "重建 api",
     "up-runtime": "重建 runtime",
     "up-ast-indexer": "重建 ast_indexer",
+    "up-sources-retrieval": "重建 sources-retrieval",
+    "up-model-gateway": "重建 model-gateway",
+    "up-sandbox": "重建 sandbox",
     "up-web": "重建 web",
     "up-gateway": "重建 gateway",
     "up-all": "全部重建",
@@ -231,6 +254,7 @@ _ACTION_LABELS = {
     "up-ops-eval": "启用 Ops Docker",
     "pull-swe-eval-images": "预拉 SWE eval 镜像（含环境冒烟）",
     "start-bench": "启动 Ops Bench",
+    "start-redis": "启动 redis",
     "up-bench": "重建 Ops Bench",
     "git-pull": "拉取远程",
     "cancel-jobs": "取消任务",
@@ -652,7 +676,7 @@ def _internal_token() -> str:
 
 
 def _cancel_runtime_sync() -> dict:
-    """Ask runtime to abort in-flight sources/ops index sync."""
+    """Ask sources-retrieval to abort in-flight sources/ops index sync (ADR-020)."""
     token = _internal_token()
     if not token:
         return {"ok": False, "error": "INTERNAL_SERVICE_TOKEN missing"}
@@ -663,7 +687,7 @@ def _cancel_runtime_sync() -> dict:
                 "exec",
                 "-e",
                 f"INTERNAL_SERVICE_TOKEN={token}",
-                "agent-runtime",
+                "agent-sources-retrieval",
                 "python",
                 "-c",
                 (
@@ -1010,20 +1034,26 @@ def _mark_swe_images_progress_cancelled(reason: str = "已取消") -> None:
 
 
 def _read_runtime_sync_progress() -> dict | None:
-    """Best-effort: sync_progress.json inside agent-runtime (/data volume)."""
-    try:
-        out = subprocess.check_output(
-            [
-                "docker",
-                "exec",
-                "agent-runtime",
-                "cat",
-                "/data/vectorstore/sync_progress.json",
-            ],
-            stderr=subprocess.DEVNULL,
-            timeout=3,
-        )
-    except (subprocess.SubprocessError, OSError, FileNotFoundError):
+    """Best-effort: sync_progress.json on shared /data (prefer sources-retrieval)."""
+    for container in ("agent-sources-retrieval", "agent-runtime"):
+        try:
+            out = subprocess.check_output(
+                [
+                    "docker",
+                    "exec",
+                    container,
+                    "cat",
+                    "/data/vectorstore/sync_progress.json",
+                ],
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            break
+        except (subprocess.SubprocessError, OSError, FileNotFoundError):
+            out = None
+    else:
+        return None
+    if out is None:
         return None
     try:
         data = json.loads(out.decode("utf-8"))
@@ -1601,10 +1631,13 @@ def _button_for(it: dict) -> dict | None:
     mapping = {
         "api": ("up-api", "重建 api"),
         "runtime": ("up-runtime", "重建 runtime"),
+        "sources_retrieval": ("up-sources-retrieval", "重建 sources-retrieval"),
+        "model_gateway": ("up-model-gateway", "重建 model-gateway"),
+        "sandbox": ("up-sandbox", "重建 sandbox"),
         "ast_indexer": ("up-ast-indexer", "重建 ast_indexer"),
         "web": ("up-web", "重建 web"),
         "gateway": ("up-gateway", "重建 gateway"),
-        "embedding": ("up-runtime", "重建 runtime（换模）"),
+        "embedding": ("up-sources-retrieval", "重建 sources-retrieval（换模）"),
         "ops_embedding_ref": ("up-runtime", "重建 runtime（换模）"),
         "index_product": ("sync-sources", "同步产品索引"),
         "index_ops": ("sync-ops-indexes", "同步 Ops BEIR"),
@@ -1612,6 +1645,7 @@ def _button_for(it: dict) -> dict | None:
         "ops_eval_docker": ("ensure-swe-eval-env", "准备 SWE 评测环境"),  # legacy id alias
         "swe_eval_images": ("ensure-swe-eval-env", "准备 SWE 评测环境"),
         "ops_bench": ("start-bench", "启动 Ops Bench"),
+        "redis": ("start-redis", "启动 redis"),
     }
     if iid not in mapping:
         return None
@@ -1655,6 +1689,7 @@ _MANAGED_LOG_KEYS = (
     "index_ops_zh",
     "swe_eval_images",
     "ops_bench",
+    "redis",
     "misc",
 )
 

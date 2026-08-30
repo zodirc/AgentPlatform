@@ -840,7 +840,7 @@
           <button type="button" data-mode="sync">同步部署</button>
         </div>
         <button type="button" class="pull" id="btn-pull" title="git fetch + pull --ff-only">拉取远程</button>
-        <button type="button" class="pull" id="btn-rebuild-all" title="强制重建 api/runtime/ast-indexer/web/gateway">全部重建</button>
+        <button type="button" class="pull" id="btn-rebuild-all" title="强制重建 api/runtime/sources-retrieval/model-gateway/sandbox/ast-indexer/web/gateway">全部重建</button>
         <button type="button" class="pull" id="btn-restart" title="重启看板进程以加载最新代码（产品容器不受影响）">重启看板</button>
         <button type="button" class="danger" id="btn-cancel" title="取消进行中的重建/索引任务">取消任务</button>
         <span class="remote-hint" id="remote-hint"></span>
@@ -905,6 +905,9 @@
       { id: "git", label: "git" },
       { id: "api", label: "api" },
       { id: "runtime", label: "runtime" },
+      { id: "sources_retrieval", label: "sources-retrieval" },
+      { id: "model_gateway", label: "model-gateway" },
+      { id: "sandbox", label: "sandbox" },
       { id: "ast_indexer", label: "ast_indexer" },
       { id: "web", label: "web" },
       { id: "gateway", label: "gateway" },
@@ -912,17 +915,22 @@
       { id: "index_ops", label: "Ops BEIR" },
       { id: "index_ops_zh", label: "Ops 中文" },
       { id: "ops_bench", label: "Ops Bench" },
+      { id: "redis", label: "redis" },
       { id: "swe_eval_images", label: "SWE 环境" },
     ];
 
     const ITEM_TO_LOG = {
       api: "api",
       runtime: "runtime",
+      sources_retrieval: "sources_retrieval",
+      model_gateway: "model_gateway",
+      sandbox: "sandbox",
       ast_indexer: "ast_indexer",
       web: "web",
       gateway: "gateway",
-      embedding: "runtime",
-      ops_embedding_ref: "runtime",
+      redis: "redis",
+      embedding: "sources_retrieval",
+      ops_embedding_ref: "sources_retrieval",
       index_product: "index_product",
       index_ops: "index_ops",
       index_ops_zh: "index_ops_zh",
@@ -1067,6 +1075,11 @@
             id: "product_code",
             label: "代码",
             match: (it) => it.lane === "product" && it.kind === "code",
+          },
+          {
+            id: "product_infra",
+            label: "中间件",
+            match: (it) => it.lane === "product" && it.kind === "infra",
           },
           {
             id: "product_retrieval",
@@ -1672,6 +1685,9 @@
       const isModuleDeploy = [
         "up-api",
         "up-runtime",
+        "up-sources-retrieval",
+        "up-model-gateway",
+        "up-sandbox",
         "up-ast-indexer",
         "up-web",
         "up-gateway",
@@ -1726,6 +1742,9 @@
         const key = {
           "up-api": "api",
           "up-runtime": "runtime",
+          "up-sources-retrieval": "sources_retrieval",
+          "up-model-gateway": "model_gateway",
+          "up-sandbox": "sandbox",
           "up-ast-indexer": "ast_indexer",
           "up-web": "web",
           "up-gateway": "gateway",

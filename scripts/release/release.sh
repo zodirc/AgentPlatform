@@ -24,7 +24,7 @@ PATHS_ENV="$ROOT/scripts/release/paths.env"
 # shellcheck disable=SC1090
 source "$PATHS_ENV"
 
-MODULES=(api runtime ast_indexer web gateway)
+MODULES=(api runtime sources_retrieval model_gateway sandbox ast_indexer web gateway)
 
 mkdir -p "$STATUS_DIR" "$LOG_DIR"
 
@@ -164,19 +164,34 @@ prefixes_for() {
 }
 
 module_for_path() {
+  # Longest matching path prefix(es) win. Equal-length ties emit every winner
+  # (e.g. deploy/compose/planes.yml → runtime + plane modules).
   local rel="$1"
-  local mod prefixes p
+  local mod prefixes p best_len=0
+  local -a winners=()
   for mod in "${MODULES[@]}"; do
     prefixes="$(prefixes_for "$mod")"
     IFS='|' read -ra parts <<<"$prefixes"
     for p in "${parts[@]}"; do
       [[ -z "$p" ]] && continue
       if [[ "$rel" == "$p"* ]]; then
-        echo "$mod"
-        break
+        local plen=${#p}
+        if (( plen > best_len )); then
+          best_len=$plen
+          winners=("$mod")
+        elif (( plen == best_len )); then
+          local seen=0 w
+          for w in "${winners[@]}"; do
+            [[ "$w" == "$mod" ]] && { seen=1; break; }
+          done
+          (( seen )) || winners+=("$mod")
+        fi
       fi
     done
   done
+  if [[ ${#winners[@]} -gt 0 ]]; then
+    printf '%s\n' "${winners[@]}"
+  fi
 }
 
 detect_changed() {
@@ -267,10 +282,13 @@ committed = subprocess.run(
     ["git", "-C", str(root), "diff", "--name-only", f"{baseline}..HEAD"],
     text=True, capture_output=True, check=False,
 )
-prefixes = load_module_prefixes().get(mod) or []
+all_prefixes = load_module_prefixes()
+prefixes = all_prefixes.get(mod) or []
 committed_hit = match_prefixes(
     [ln for ln in (committed.stdout or "").splitlines() if ln.strip()],
     prefixes,
+    module=mod,
+    all_prefixes=all_prefixes,
 )
 # Committed-since-baseline is dirty unless those bytes were already baked
 # into the image (deploy-then-commit of the same content).
@@ -279,9 +297,10 @@ if committed_hit and not baked_content_matches(prev, committed_hit):
 if prev and cur and prev == cur:
     raise SystemExit(0)  # worktree unchanged since last deploy → clean
 # No digest yet: keep dirty so one redeploy seeds the fingerprint.
-if not prev and match_prefixes(worktree_changed_files(), prefixes):
+wt = worktree_changed_files()
+if not prev and match_prefixes(wt, prefixes, module=mod, all_prefixes=all_prefixes):
     raise SystemExit(1)
-raise SystemExit(1 if match_prefixes(worktree_changed_files(), prefixes) else 0)
+raise SystemExit(1 if match_prefixes(wt, prefixes, module=mod, all_prefixes=all_prefixes) else 0)
 PY
       then
         unset "hit[$mod]"
@@ -353,6 +372,15 @@ deploy_module() {
     runtime)
       SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-runtime
       ;;
+    sources_retrieval)
+      SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-sources-retrieval
+      ;;
+    model_gateway)
+      SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-model-gateway
+      ;;
+    sandbox)
+      SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-sandbox
+      ;;
     ast_indexer)
       SKIP_RELEASE_HOOK=1 make -C "$ROOT" up-ast-indexer
       ;;
@@ -373,7 +401,8 @@ deploy_module() {
       case "${OPS_EVAL_DOCKER_SOCK:-0}" in
         1|true|TRUE|yes|YES) ops_flag=(-f deploy/compose/ops-eval.yml) ;;
       esac
-      docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" "${ops_flag[@]}" \
+      docker compose -f deploy/docker-compose.yml -f deploy/compose/planes.yml \
+        "${gpu_flag[@]}" "${ops_flag[@]}" \
         --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
         up -d --no-deps --force-recreate gateway
       ;;
@@ -494,8 +523,11 @@ cmd_run() {
     # Mark each success immediately — interrupt/fail later must not re-dirty this module.
     persist_module_deployed "$mod" "$head" "$run_id" "$log_rel" "$csv"
     # up-runtime also recreates agent-ast-indexer — keep board digests aligned.
-    if [[ "$mod" == "runtime" ]]; then
+    if [[ "$mod" == "runtime" || "$mod" == "sources_retrieval" ]]; then
       persist_module_deployed "ast_indexer" "$head" "$run_id" "$log_rel" "$csv"
+      persist_module_deployed "sources_retrieval" "$head" "$run_id" "$log_rel" "$csv"
+      persist_module_deployed "model_gateway" "$head" "$run_id" "$log_rel" "$csv"
+      persist_module_deployed "sandbox" "$head" "$run_id" "$log_rel" "$csv"
     fi
   done
 
@@ -531,8 +563,8 @@ Usage: bash scripts/release/release.sh <command>
 
   status              Show/refresh status.json (+ gateway health)
   detect [--force-all]
-  run [--force-all] [--modules=api,runtime,ast_indexer,web,gateway]
-  mark [--modules=api,runtime,ast_indexer,web,gateway]   Record HEAD as deployed (after make up)
+  run [--force-all] [--modules=api,runtime,sources_retrieval,model_gateway,sandbox,ast_indexer,web,gateway]
+  mark [--modules=api,runtime,sources_retrieval,model_gateway,sandbox,ast_indexer,web,gateway]   Record HEAD as deployed (after make up)
   up [--force-all] [--modules=...]           Modular make up: infra + dirty modules only
   plan                                       Health board JSON (code · model · index)
   health              Probe product gateway on :80
@@ -571,7 +603,10 @@ compose_infra_up() {
     *,bench,*) infra_services+=(bench-postgres) ;;
   esac
   echo "==> infra: ${infra_services[*]} (COMPOSE_PROFILES='${profiles}')"
-  COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
+  # planes.yml before gpu.auto.yml — otherwise GPU overlay invents a stub
+  # sources-retrieval that builds default Dockerfile (ADR-020).
+  COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml \
+    -f deploy/compose/planes.yml "${gpu_flag[@]}" \
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     up -d "${infra_services[@]}"
@@ -579,7 +614,9 @@ compose_infra_up() {
 }
 
 compose_ensure_stack() {
-  # Start any already-built services without --build (gateway/api/runtime/web).
+  # Start any already-built services without --build (incl. ADR-020 planes).
+  # Missing plane images still build (compose default); bake runtime first so
+  # sources-retrieval/model-gateway/sandbox FROM ${RUNTIME_IMAGE} resolve.
   set -a
   [[ -f deploy/embedding.defaults.env ]] && . ./deploy/embedding.defaults.env || true
   [[ -f deploy/embedding.auto.env ]] && . ./deploy/embedding.auto.env || true
@@ -593,7 +630,43 @@ compose_ensure_stack() {
   esac
   local profiles
   profiles="$(compose_profiles_value)"
-  COMPOSE_PROFILES="$profiles" docker compose -f deploy/docker-compose.yml "${gpu_flag[@]}" \
+  # planes.yml must precede gpu.auto.yml (GPU overlay alone stubs sources-retrieval).
+  local -a compose_base=(
+    docker compose -f deploy/docker-compose.yml
+    -f deploy/compose/planes.yml
+  )
+  # Thin plane images: retrieval FROM :default (ST); gateway/sandbox FROM :slim.
+  local need_retrieval=0
+  local need_slim_planes=0
+  if ! docker image inspect agent-platform-runtime:default >/dev/null 2>&1 \
+    || ! docker image inspect agent-platform-sources-retrieval:latest >/dev/null 2>&1; then
+    need_retrieval=1
+  fi
+  if ! docker image inspect agent-platform-runtime:slim >/dev/null 2>&1 \
+    || ! docker image inspect agent-platform-model-gateway:latest >/dev/null 2>&1 \
+    || ! docker image inspect agent-platform-sandbox:latest >/dev/null 2>&1; then
+    need_slim_planes=1
+  fi
+  if [[ "$need_retrieval" == "1" || "$need_slim_planes" == "1" ]]; then
+    echo "==> building missing plane images (retrieval←:default · gateway/sandbox←:slim)"
+    if [[ "$need_retrieval" == "1" ]]; then
+      COMPOSE_PROFILES="$profiles" "${compose_base[@]}" "${gpu_flag[@]}" \
+        "${ops_flag[@]}" \
+        --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
+        build runtime sources-retrieval || true
+    fi
+    if [[ "$need_slim_planes" == "1" ]]; then
+      COMPOSE_PROFILES=deps-anchor "${compose_base[@]}" "${gpu_flag[@]}" \
+        "${ops_flag[@]}" \
+        --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
+        build runtime-slim || true
+      COMPOSE_PROFILES="$profiles" "${compose_base[@]}" "${gpu_flag[@]}" \
+        "${ops_flag[@]}" \
+        --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
+        build model-gateway sandbox || true
+    fi
+  fi
+  COMPOSE_PROFILES="$profiles" "${compose_base[@]}" "${gpu_flag[@]}" \
     "${ops_flag[@]}" \
     --env-file .env --env-file deploy/embedding.defaults.env --env-file deploy/embedding.auto.env \
     up -d

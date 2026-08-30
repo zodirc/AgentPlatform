@@ -26,6 +26,9 @@ PATHS_ENV = Path(__file__).resolve().parent / "paths.env"
 CONTAINERS = {
     "api": "agent-api",
     "runtime": "agent-runtime",
+    "sources_retrieval": "agent-sources-retrieval",
+    "model_gateway": "agent-model-gateway",
+    "sandbox": "agent-sandbox",
     "ast_indexer": "agent-ast-indexer",
     "web": "agent-web",
     "gateway": "agent-gateway",
@@ -83,14 +86,51 @@ def worktree_changed_files() -> list[str]:
     return out
 
 
-def match_prefixes(files: list[str], prefixes: list[str]) -> list[str]:
+def match_prefixes(
+    files: list[str],
+    prefixes: list[str],
+    *,
+    module: str | None = None,
+    all_prefixes: dict[str, list[str]] | None = None,
+) -> list[str]:
+    """Files owned by ``module`` (longest prefix; equal-length ties share).
+
+    When ``module`` / ``all_prefixes`` omitted, any prefix hit counts (legacy).
+    """
     hit: list[str] = []
+    owners_map = all_prefixes if (module and all_prefixes is not None) else None
     for f in files:
-        for p in prefixes:
-            if f.startswith(p):
-                hit.append(f)
-                break
+        if owners_map is not None:
+            if module not in owning_modules(f, owners_map):
+                continue
+        else:
+            if not any(f.startswith(p) for p in prefixes if p):
+                continue
+        hit.append(f)
     return hit
+
+
+def owning_modules(rel: str, all_prefixes: dict[str, list[str]]) -> list[str]:
+    """Longest matching MODULE_* path prefix(es); ties return every winner."""
+    best_len = -1
+    winners: list[str] = []
+    for mod, prefixes in all_prefixes.items():
+        for p in prefixes:
+            if not p or not rel.startswith(p):
+                continue
+            plen = len(p)
+            if plen > best_len:
+                best_len = plen
+                winners = [mod]
+            elif plen == best_len and mod not in winners:
+                winners.append(mod)
+    return winners
+
+
+def owning_module(rel: str, all_prefixes: dict[str, list[str]]) -> str | None:
+    """Primary owner (first of ``owning_modules``) for convenience/asserts."""
+    mods = owning_modules(rel, all_prefixes)
+    return mods[0] if mods else None
 
 
 def content_digest(paths: list[str]) -> str:
@@ -179,7 +219,7 @@ def host_to_image_path(mod: str, rel: str) -> str | None:
         if rel.startswith("scripts/official_bench/"):
             return "/repo/" + rel
         return None
-    if mod == "runtime":
+    if mod in {"runtime", "sources_retrieval", "model_gateway", "sandbox"}:
         if rel.startswith("services/runtime/app/"):
             return "/app/app/" + rel[len("services/runtime/app/") :]
         mapped = _contracts_pkg_image_path(rel)

@@ -3,8 +3,9 @@
 
 Outputs JSON for the release console / ``release.sh plan``.
 Checks (modular):
-  - code: api / runtime / ast_indexer / web / gateway (git vs last deployed + container up)
-  - embedding: resolved profile vs runtime container bake/env
+  - code: api / runtime / sources_retrieval / model_gateway / sandbox /
+    ast_indexer / web / gateway (git vs last deployed + container up)
+  - embedding: resolved profile vs sources-retrieval container bake/env
   - index: product + ops source_index_meta vs current embed space
 """
 
@@ -25,10 +26,23 @@ PATHS_ENV = Path(__file__).resolve().parent / "paths.env"
 AUTO_ENV = ROOT / "deploy" / "embedding.auto.env"
 DEFAULT_ENV = ROOT / "deploy" / "embedding.defaults.env"
 
-MODULES = ("api", "runtime", "ast_indexer", "web", "gateway")
+MODULES = (
+    "api",
+    "runtime",
+    "sources_retrieval",
+    "model_gateway",
+    "sandbox",
+    "ast_indexer",
+    "web",
+    "gateway",
+)
 CONTAINERS = {
     "api": "agent-api",
     "runtime": "agent-runtime",
+    "sources_retrieval": "agent-sources-retrieval",
+    "model_gateway": "agent-model-gateway",
+    "sandbox": "agent-sandbox",
+    "redis": "agent-redis",
     "ast_indexer": "agent-ast-indexer",
     "web": "agent-web",
     "gateway": "agent-gateway",
@@ -180,15 +194,18 @@ def _committed_since(deployed_sha: str) -> list[str]:
     return [f.strip() for f in blob.splitlines() if f.strip()]
 
 
-def _match_files(files: list[str], prefixes: list[str]) -> list[str]:
-    hit = []
-    for f in files:
-        for p in prefixes:
-            if f.startswith(p):
-                hit.append(f)
-                break
-    return hit
+def _match_files(
+    files: list[str],
+    prefixes: list[str],
+    *,
+    module: str | None = None,
+    all_prefixes: dict[str, list[str]] | None = None,
+) -> list[str]:
+    from worktree_sig import match_prefixes
 
+    return match_prefixes(
+        files, prefixes, module=module, all_prefixes=all_prefixes
+    )
 
 def _module_dirty(
     mod: str,
@@ -223,8 +240,20 @@ def _module_dirty(
     if code != 0:
         return True, "已部署 sha 无效，需重新发布"
 
-    committed = _match_files(_committed_since(deployed_sha), prefixes)
-    dirty_wt = _match_files(worktree_files, prefixes) if include_worktree else []
+    all_prefixes = _load_paths()
+    committed = _match_files(
+        _committed_since(deployed_sha),
+        prefixes,
+        module=mod,
+        all_prefixes=all_prefixes,
+    )
+    dirty_wt = (
+        _match_files(
+            worktree_files, prefixes, module=mod, all_prefixes=all_prefixes
+        )
+        if include_worktree
+        else []
+    )
 
     try:
         from worktree_sig import (  # type: ignore
@@ -292,10 +321,14 @@ def _module_dirty(
     if include_worktree:
         dep = deployed_entry if isinstance(deployed_entry, dict) else {}
         if baked_match and dep.get("worktree_digest"):
-            if _match_files(worktree_files, prefixes):
+            if _match_files(
+                worktree_files, prefixes, module=mod, all_prefixes=all_prefixes
+            ):
                 return False, "已是最新 — 未提交改动已编入当前镜像"
             return False, "已是最新 — 已提交内容与部署时编入镜像一致"
-        if dep.get("worktree_digest") and _match_files(worktree_files, prefixes):
+        if dep.get("worktree_digest") and _match_files(
+            worktree_files, prefixes, module=mod, all_prefixes=all_prefixes
+        ):
             return False, "已是最新 — 未提交改动已编入当前镜像"
         return False, "已是最新 — 与已部署一致"
     return False, "已是最新 — 与已部署一致（仅核对已提交）"
@@ -362,6 +395,56 @@ def _ops_bench_item(*, running: set[str]) -> dict:
     item["action"] = "make start-bench"
     item["detail"] = (
         "agent-bench 未运行 — Ops meta/真向量会失败；一键 start-bench（不 rebuild）"
+    )
+    return item
+
+
+def _redis_item(*, running: set[str]) -> dict:
+    """ADR-020 job bus (``agent.jobs``) — upstream image, not a code rebuild module."""
+    item: dict = {
+        "id": "redis",
+        "kind": "infra",
+        "lane": "product",
+        "title": "redis（job bus）",
+        "status": "ok",
+        "action": None,
+        "detail": "",
+        "optional": False,
+    }
+    name = CONTAINERS["redis"]
+    actual = name if name in running else next(
+        (n for n in running if n.endswith("_" + name)),
+        None,
+    )
+    if actual:
+        code, health, _ = _run(
+            [
+                "docker",
+                "inspect",
+                "-f",
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}",
+                actual,
+            ],
+            timeout=4,
+        )
+        st = (health or "").strip().lower() if code == 0 else "none"
+        if st in {"", "none", "healthy", "starting"}:
+            item["detail"] = (
+                "agent-redis 运行中 · Redis Streams（sources.index_sync 等）依赖"
+                + ("（health=starting）" if st == "starting" else "")
+            )
+            return item
+        item["status"] = "action"
+        item["action"] = "make start-redis"
+        item["detail"] = (
+            f"agent-redis 不健康（health={st}）— 总线/outbox 会失败；先 start-redis（不 rebuild）"
+        )
+        return item
+
+    item["status"] = "action"
+    item["action"] = "make start-redis"
+    item["detail"] = (
+        "agent-redis 未运行 — ADR-020 总线与 outbox 不可用；一键 start-redis（上游镜像，不 rebuild）"
     )
     return item
 
@@ -587,15 +670,17 @@ def _embedding_item(
         "action": None,
         "detail": "",
     }
-    if not _container_running("agent-runtime", running):
+    if not _container_running("agent-sources-retrieval", running):
         item["status"] = "action"
         item["action"] = "make start"
-        item["detail"] = "runtime 未运行，无法核对容器内模型 — 先拉起已有镜像（勿默认重建）"
+        item["detail"] = (
+            "sources-retrieval 未运行，无法核对向量模型 — 先拉起已有镜像（勿默认重建）"
+        )
         return item
 
-    # One exec for both values
+    # ADR-020: embedding weights live on sources-retrieval
     _, blob = _docker_exec(
-        "agent-runtime",
+        "agent-sources-retrieval",
         "sh",
         "-c",
         'echo "BAKE=$(cat /data/models/.baked_embedding_model 2>/dev/null)"; echo "ENV=${EMBEDDING_MODEL:-}"',
@@ -613,18 +698,21 @@ def _embedding_item(
 
     if baked and baked != want_model:
         item["status"] = "action"
-        item["action"] = "make up-runtime && make sync-sources"
-        item["detail"] = f"容器已烘 {baked}，当前配置要 {want_model}（换模后需重建 runtime 并重嵌索引）"
+        item["action"] = "make up-sources-retrieval && make sync-sources"
+        item["detail"] = (
+            f"检索平面已烘 {baked}，当前配置要 {want_model}"
+            "（换模后需重建 sources-retrieval 并重嵌索引）"
+        )
         return item
     if env_model and env_model != want_model:
         item["status"] = "action"
-        item["action"] = "make up-runtime"
-        item["detail"] = f"容器 ENV={env_model}，配置要 {want_model}"
+        item["action"] = "make up-sources-retrieval"
+        item["detail"] = f"检索平面 ENV={env_model}，配置要 {want_model}"
         return item
     if not baked and not env_model:
         item["status"] = "action"
-        item["action"] = "make up-runtime"
-        item["detail"] = "读不到容器内模型戳记"
+        item["action"] = "make up-sources-retrieval"
+        item["detail"] = "读不到 sources-retrieval 内模型戳记"
         return item
 
     item["status"] = "ok"
@@ -925,6 +1013,12 @@ def build_plan(mode: str | None = None) -> dict:
                 action = "make up-api"
             elif mod == "runtime":
                 action = "make up-runtime"
+            elif mod == "sources_retrieval":
+                action = "make up-sources-retrieval"
+            elif mod == "model_gateway":
+                action = "make up-model-gateway"
+            elif mod == "sandbox":
+                action = "make up-sandbox"
             elif mod == "ast_indexer":
                 action = "make up-ast-indexer"
             elif mod == "web":
@@ -1014,21 +1108,23 @@ def build_plan(mode: str | None = None) -> dict:
             _swe_eval_env_item, env_file=env_file, running=running
         )
         fut_bench = pool.submit(_ops_bench_item, running=running)
+        fut_redis = pool.submit(_redis_item, running=running)
         emb = fut_emb.result()
         idx_prod = fut_prod.result()
         idx_ops = fut_ops.result()
         idx_ops_zh = fut_ops_zh.result()
         swe_imgs = fut_swe.result()
         ops_bench = fut_bench.result()
+        redis_item = fut_redis.result()
 
-    items.extend([emb, idx_prod, idx_ops, idx_ops_zh, ops_bench, swe_imgs])
+    items.extend([redis_item, emb, idx_prod, idx_ops, idx_ops_zh, ops_bench, swe_imgs])
 
     # Ops 检索嵌入复用产品 runtime 向量模型——单独挂一条，避免和产品轨混在同一组。
     ops_emb = {
         "id": "ops_embedding_ref",
         "kind": "model",
         "lane": "ops",
-        "title": "向量模型（共用 runtime）",
+        "title": "向量模型（共用 sources-retrieval）",
         "want": emb.get("want"),
         "want_dims": emb.get("want_dims"),
         "want_index_version": emb.get("want_index_version"),
@@ -1038,7 +1134,7 @@ def build_plan(mode: str | None = None) -> dict:
         "status": emb.get("status") or "unknown",
         "action": emb.get("action"),
         "detail": (
-            "Ops BEIR/C-MTEB 嵌入走 agent-runtime，与产品同一 EMBEDDING_MODEL；"
+            "Ops BEIR/C-MTEB 嵌入走 agent-sources-retrieval，与产品同一 EMBEDDING_MODEL；"
             "C-MTEB 另要求 bge-m3"
             + (f"；当前 {emb.get('detail')}" if emb.get("detail") else "")
         ),
@@ -1066,6 +1162,8 @@ def build_plan(mode: str | None = None) -> dict:
             bits.append("产品栈未拉起（make start）")
         elif needs_start_modules:
             bits.append("另有未拉起 " + ",".join(needs_start_modules))
+        if redis_item.get("status") == "action":
+            bits.append("redis（job bus）")
         if emb.get("status") == "action":
             bits.append("产品向量模型")
         if idx_prod.get("status") == "action":
