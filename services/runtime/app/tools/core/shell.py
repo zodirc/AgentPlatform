@@ -274,6 +274,7 @@ async def run_argv_command(
 
     说明:
         先过 ``argv_jail_violation`` 软 jail；Landlock 用 preexec，bwrap 包装 argv。
+        ADR-020: orchestrator may delegate to sandbox plane over HTTP.
     """
     from app.tools.core.sandbox import sandbox_preexec_fn, wrap_argv_for_exec
     from app.tools.core.shell_work_jail import argv_jail_violation
@@ -290,6 +291,17 @@ async def run_argv_command(
             "summary": jail_hit,
             "sandbox": "soft-jail",
         }
+
+    from app.tools.core.remote_sandbox import remote_sandbox_exec, should_use_remote_sandbox
+
+    if should_use_remote_sandbox():
+        return await remote_sandbox_exec(
+            command=display,
+            cwd=str(cwd),
+            timeout_seconds=timeout_s,
+            argv=argv,
+        )
+
     try:
         wrapped, backend = wrap_argv_for_exec(argv=argv, cwd=cwd)
         preexec = sandbox_preexec_fn(cwd) if backend == "landlock" else None
@@ -355,6 +367,15 @@ async def run_shell_command(
             "summary": jail_hit,
             "sandbox": "soft-jail",
         }
+
+    from app.tools.core.remote_sandbox import remote_sandbox_exec, should_use_remote_sandbox
+
+    if should_use_remote_sandbox():
+        return await remote_sandbox_exec(
+            command=command,
+            cwd=str(cwd),
+            timeout_seconds=timeout_s,
+        )
 
     try:
         backend = resolve_sandbox_backend()

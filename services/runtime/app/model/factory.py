@@ -38,7 +38,11 @@ def create_gateway(
     for_compact: bool = False,
     context_window_tokens: int | None = None,
 ) -> ModelGateway:
-    """作用：按模式/provider 创建 ModelGateway。"""
+    """作用：按模式/provider 创建 ModelGateway。
+
+    ADR-020: orchestrator with ``MODEL_GATEWAY_URL`` uses ``RemoteModelProvider``
+    for live traffic; ``model_gateway`` role and stub/recorded stay local.
+    """
     from app.model.turn_override import current_turn_model_mode, current_turn_model_override
 
     if for_compact:
@@ -60,6 +64,16 @@ def create_gateway(
             return recorded
     if config is None or effective_mode == "stub":
         return ModelGateway(StubModelProvider())
+
+    role = (getattr(settings, "service_role", None) or "monolith").strip().lower()
+    gateway_url = (getattr(settings, "model_gateway_url", None) or "").strip()
+    if role != "model_gateway" and gateway_url and effective_mode == "live":
+        from app.model.remote_provider import RemoteModelProvider
+
+        return ModelGateway(
+            RemoteModelProvider(config=config, scenario_id=scenario_id, base_url=gateway_url)
+        )
+
     provider_name = config.provider.lower()
     if provider_name in {"anthropic", "claude"}:
         base_url = ensure_model_egress_allowed(provider_name, config.base_url)

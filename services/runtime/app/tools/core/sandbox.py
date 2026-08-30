@@ -376,3 +376,29 @@ def sandbox_status() -> dict[str, object]:
         "network_allowed_now": sandbox_network_allowed(),
         "ops_eval_deny_network": bool(settings.ops_eval_deny_network),
     }
+
+
+async def run_sandboxed(
+    command: str,
+    *,
+    cwd: str | Path | None = None,
+    timeout: float = 60.0,
+    argv: Sequence[str] | None = None,
+) -> dict:
+    """Plane entry: run shell or argv under local landlock/bwrap (ADR-020)."""
+    from app.settings import settings as _settings
+    from app.tools.core.shell import run_argv_command, run_shell_command
+
+    work = Path(cwd) if cwd else Path(getattr(_settings, "workspace_root", None) or "/workspace")
+    if argv:
+        return await run_argv_command(
+            argv=argv,
+            cwd=work,
+            timeout_s=float(timeout),
+            display_command=command or " ".join(str(a) for a in argv),
+        )
+    return await run_shell_command(
+        command=command,
+        cwd=work,
+        timeout_s=float(timeout),
+    )

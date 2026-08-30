@@ -36,9 +36,14 @@ def _configure_cli_logging(level: str = "WARNING") -> None:
 
 
 def _runtime_sync_url() -> str:
+    """Prefer sources-retrieval (ADR-020); RUNTIME_SYNC_URL overrides."""
     import os
 
-    return (os.environ.get("RUNTIME_SYNC_URL") or "http://127.0.0.1:8001").rstrip("/")
+    return (
+        os.environ.get("RUNTIME_SYNC_URL")
+        or os.environ.get("SOURCES_RETRIEVAL_URL")
+        or "http://127.0.0.1:8001"
+    ).rstrip("/")
 
 
 def _post_server_sync(*, mode: str, reason: str) -> dict[str, Any]:

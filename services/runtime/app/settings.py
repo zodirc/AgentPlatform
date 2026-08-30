@@ -182,6 +182,16 @@ class Settings(BaseSettings):
     writing_prev_tail_chars: int = 2000
     writing_token_economy_enabled: bool = True
 
+    # --- Execution-plane roles (ADR-020) ---
+    # orchestrator | retrieval | model_gateway | sandbox | monolith (tests / legacy)
+    service_role: str = "monolith"
+    # Redis Streams job bus (required in compose planes topology).
+    redis_url: str = ""
+    # sources-retrieval base URL for EMBEDDING_BACKEND=remote and sync proxy.
+    sources_retrieval_url: str = ""
+    model_gateway_url: str = ""
+    sandbox_plane_url: str = ""
+
     # --- Sources 同步与 Embedding ---
     index_via_worker: bool = True
     # IX0: Turn-external incremental projection of workspace/sources (docs/15).
@@ -198,7 +208,8 @@ class Settings(BaseSettings):
     seed_intel_root: str = "/workspace/sources/seed/intel"
     # Optional default owner for future multi-tenant rows (empty → NULL / shared).
     sources_index_owner_user_id: str = ""
-    embedding_backend: str = "hash"  # hash | sentence_transformers
+    # hash | sentence_transformers | remote (HTTP → sources-retrieval)
+    embedding_backend: str = "hash"
     # Production default via compose / resolve_embedding_profile:
     # GPU → bge-m3@1024 (shared EN+ZH embedder for product/BEIR/C-MTEB);
     # CPU → gte-small@384. MiniLM / gte-large retired as auto defaults.

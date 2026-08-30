@@ -911,8 +911,7 @@ async def lifespan(app):
         logger.exception("startup orphan reconcile failed")
     ScenarioRegistry.load()
 
-    # --- 启动：Embedder 预热（避免首条索引/检索冷启动） ---
-    # Load embedder once at startup so sources index/search do not pay first-use cost.
+    # --- 启动：Embedder 预热（remote 为轻量 HTTP 客户端；ST 仅 retrieval 服务） ---
     await asyncio.to_thread(warmup_embedder)
     from app.controller.stall_watchdog import stall_watchdog_loop
     from app.retrieval.index_scheduler import (
@@ -928,6 +927,9 @@ async def lifespan(app):
         schedule_ast_index_watch,
     )
 
+    role = (getattr(settings, "service_role", None) or "monolith").strip().lower()
+    # ADR-020: only monolith (tests/legacy) or dedicated retrieval owns ingest watchers.
+    owns_sources_ingest = role in {"monolith", "retrieval"}
     watchdog = asyncio.create_task(stall_watchdog_loop())
     from app.controller.runner_heartbeat import start_runner_heartbeat, stop_runner_heartbeat
     from app.controller.turn_dispatch import start_turn_dispatch_listener, stop_turn_dispatch_listener
@@ -940,10 +942,16 @@ async def lifespan(app):
     start_runner_heartbeat()
     start_turn_dispatch_listener()
     start_run_commands_listener()
-    # IX0: Turn-external incremental projection; must not block /health/live.
-    schedule_startup_sources_sync()
-    # IX2: poll sources/ for host edits; debounced sync (still Turn-external).
-    schedule_sources_watch()
+    if owns_sources_ingest:
+        # IX0: Turn-external incremental projection; must not block /health/live.
+        schedule_startup_sources_sync()
+        # IX2: poll sources/ for host edits; debounced sync (still Turn-external).
+        schedule_sources_watch()
+    else:
+        logger.info(
+            "service_role=%s — sources startup sync/watch owned by sources-retrieval",
+            role,
+        )
     # Agent workspace AST watch (docs/core/architecture.md · ast-indexer).
     schedule_ast_index_watch()
     lsp_reap = asyncio.create_task(_lsp_reap_loop(), name="lsp-idle-reap")
@@ -959,8 +967,9 @@ async def lifespan(app):
         await stop_turn_dispatch_listener()
         await stop_runner_heartbeat()
         await cancel_ast_index_watch()
-        await cancel_sources_watch()
-        await cancel_startup_sources_sync()
+        if owns_sources_ingest:
+            await cancel_sources_watch()
+            await cancel_startup_sources_sync()
         lsp_reap.cancel()
         try:
             await lsp_reap

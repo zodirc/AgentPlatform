@@ -446,13 +446,14 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
 def effective_embedding_dimensions() -> int:
     """解析当前配置下 pgvector ``vector(d)`` / JSON 应使用的维数。
 
-    English: Coerces common misconfigs when ST backend is active. Hash backend
-    returns ``settings.embedding_dimensions`` unchanged (typically 256 in CI).
+    English: Coerces common misconfigs when ST or remote backend is active.
+    Hash backend returns ``settings.embedding_dimensions`` unchanged.
 
     当前 compose / profile 下的典型值:
         · ``hash`` backend          → env 维数（CI 64；settings 默认 256）
         · ``gte-small`` / MiniLM    → **384**（即使 env 仍写 256 也会纠正）
         · ``bge-m3`` / ``gte-large``→ **1024**
+        · ``remote``                → 按 ``embedding_model`` 名与 ST 相同规则
 
     返回:
         写入索引平面的向量长度；须与 ``get_embedder()`` 实际输出一致。
@@ -460,7 +461,7 @@ def effective_embedding_dimensions() -> int:
     dims = int(settings.embedding_dimensions)
     backend = (settings.embedding_backend or "").lower()
     model = (settings.embedding_model or "").lower()
-    if backend in {"sentence_transformers", "minilm", "neural"}:
+    if backend in {"sentence_transformers", "minilm", "neural", "remote"}:
         if "bge-m3" in model or "gte-large" in model:
             if dims not in {1024}:
                 logger.info(
@@ -534,10 +535,13 @@ def _cache_key() -> tuple[str, str, str, int]:
 def _build_embedder() -> Embedder:
     """按 ``settings.embedding_backend`` 构造裸 Embedder（尚未包 lane）。
 
-    English: Factory for the two concrete backends documented in the module
-    docstring. Product deploy always hits the ST branch.
+    English: Factory for Hash / ST / remote backends. Product orchestrator uses
+    ``remote`` → sources-retrieval; retrieval service uses ST (ADR-020).
 
     分支（读 env / compose，不是运行时探测）::
+
+        embedding_backend ∈ {remote}
+            → ``RemoteEmbedder`` → HTTP ``SOURCES_RETRIEVAL_URL``
 
         embedding_backend ∈ {sentence_transformers, minilm, neural}
             → ``SentenceTransformerEmbedder(settings.embedding_model)``
@@ -550,6 +554,10 @@ def _build_embedder() -> Embedder:
     lane 包装在 ``get_embedder()`` 的 ``maybe_wrap_lanes``，不在此函数。
     """
     backend = settings.embedding_backend.lower()
+    if backend == "remote":
+        from app.retrieval.remote_embedder import RemoteEmbedder
+
+        return RemoteEmbedder()
     if backend in {"sentence_transformers", "minilm", "neural"}:
         try:
             # O5: cap CPU torch threads so batch embed does not starve the
@@ -624,7 +632,12 @@ def get_embedder() -> Embedder:
     # index batch 之间 ``sleep(0)`` 让出调度，使已排队的 query 能插队。
     # 裸实现（``_build_embedder``）只管选后端与 ``encode``；lane 是跨路径的 QoS 层，可经
     # ``embedding_query_priority=False`` 关闭（测试或单用途进程）。
-    _embedder = maybe_wrap_lanes(_build_embedder())
+    # remote：lane QoS 在 sources-retrieval 进程内；编排侧直连 HTTP，不再套本地 lane。
+    inner = _build_embedder()
+    if backend == "remote":
+        _embedder = inner
+    else:
+        _embedder = maybe_wrap_lanes(inner)
     _embedder_key = key
     logger.info(
         "embedder ready; backend=%s elapsed_s=%.1f model_dir=%s",

@@ -19,9 +19,12 @@ Agent execution plane: TurnController, AgentEngine, tools, retrieval index.
 | `DATA_DIR` | no | Default `/data` |
 | `RETRIEVAL_MODE` | no | `keyword` \| `vector` \| `hybrid`（默认 hybrid） |
 | `RETRIEVAL_BACKEND` | no | `pgvector`（默认）\| `json` |
-| `INDEX_VIA_WORKER` | no | `true` 时索引经 outbox worker 异步同步 |
-| `EMBEDDING_BACKEND` | no | 默认 compose：`sentence_transformers`；lite/CI：`hash` |
-| `EMBEDDING_MODEL` | no | 默认 `sentence-transformers/all-MiniLM-L6-v2`（`Dockerfile.retrieval` 构建期烘焙） |
+| `INDEX_VIA_WORKER` | no | `true` 时索引经 outbox → Redis Streams → sources-retrieval |
+| `SERVICE_ROLE` | no | `orchestrator`（默认 compose）\| `monolith`（测试）\| `retrieval` |
+| `SOURCES_RETRIEVAL_URL` | no | 远程 embed / 同步平面（ADR-020） |
+| `REDIS_URL` | no | 平台任务总线 `agent.jobs` |
+| `EMBEDDING_BACKEND` | no | 编排：`remote`；检索服务：`sentence_transformers`；lite：`hash` |
+| `EMBEDDING_MODEL` | no | 默认 `thenlper/gte-small`（仅 retrieval 服务加载） |
 | `EMBEDDING_MODEL_DIR` | no | 运行时模型目录（默认 `/data/models`） |
 | `EMBEDDING_DIMENSIONS` | no | hash 后端向量维度（默认 256） |
 | `RUNTIME_RUNNER_ID` | no | HA 路由标识 |
