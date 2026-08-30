@@ -367,6 +367,10 @@ async def health_ready():
         async with httpx.AsyncClient(timeout=2.0) as client:
             resp = await client.get(f"{settings.runtime_url}/health/live")
             resp.raise_for_status()
+            retrieval_url = (settings.sources_retrieval_url or "").rstrip("/")
+            if retrieval_url:
+                resp2 = await client.get(f"{retrieval_url}/health/live")
+                resp2.raise_for_status()
     except httpx.HTTPError as exc:
         return JSONResponse(status_code=503, content={"status": "not_ready", "detail": str(exc)})
     return {"status": "ready"}

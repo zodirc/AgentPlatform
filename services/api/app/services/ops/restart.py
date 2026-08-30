@@ -150,6 +150,13 @@ def _compose_recreate(inspect: dict) -> None:
     compose_file = Path(settings.ops_eval_compose_file)
     env_file = Path(settings.ops_eval_compose_project_dir) / ".env"
     project_dir = compose_file.parent
+    planes = project_dir / "compose" / "planes.yml"
+    # deploy/docker-compose.yml → sibling compose/planes.yml (ADR-020)
+    if not planes.is_file():
+        planes = project_dir.parent / "deploy" / "compose" / "planes.yml"
+    gpu_overlay = project_dir / "compose" / "gpu.auto.yml"
+    if not gpu_overlay.is_file():
+        gpu_overlay = project_dir.parent / "deploy" / "compose" / "gpu.auto.yml"
 
     cmd = [
         *_compose_argv(),
@@ -157,12 +164,31 @@ def _compose_recreate(inspect: dict) -> None:
         project,
         "-f",
         str(compose_file),
-        "--project-directory",
-        str(project_dir),
     ]
+    if planes.is_file():
+        cmd.extend(["-f", str(planes)])
+    # gpu.auto.yml must follow planes.yml — alone it stubs sources-retrieval.
+    if gpu_overlay.is_file():
+        cmd.extend(["-f", str(gpu_overlay)])
+    cmd.extend(
+        [
+            "--project-directory",
+            str(project_dir),
+        ]
+    )
     if env_file.is_file():
         cmd.extend(["--env-file", str(env_file)])
-    cmd.extend(["up", "-d", "--force-recreate", "--no-deps", "runtime"])
+    # Recreate orchestrator + retrieval plane (shared image / embed ownership).
+    cmd.extend(
+        [
+            "up",
+            "-d",
+            "--force-recreate",
+            "--no-deps",
+            "runtime",
+            "sources-retrieval",
+        ]
+    )
 
     env = os.environ.copy()
     if workspace_host:

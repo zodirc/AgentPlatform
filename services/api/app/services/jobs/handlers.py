@@ -32,16 +32,22 @@ async def handle_projection_refresh(payload: dict) -> None:
 
 
 async def handle_sources_index_sync(_payload: dict) -> None:
-    """触发 runtime 全量/增量 sources 索引同步。
+    """Enqueue sources index sync on the platform bus (ADR-020).
 
-    参数:
-        _payload: 当前未使用（保留扩展）。
-
-    返回:
-        无。
+    Retrieval workers consume ``sources.index_sync``. Falls back to direct HTTP
+    when Redis is unavailable so ops/dev still progresses.
     """
-    client = RuntimeClient()
-    await client.sync_sources_index()
+    try:
+        from app.services.jobs.bus import enqueue_job
+
+        enqueue_job("sources.index_sync", {"reason": "outbox"})
+        return
+    except Exception:
+        logger.exception("bus enqueue sources.index_sync failed; HTTP fallback")
+    from app.services.command.sources_retrieval_client import SourcesRetrievalClient
+
+    client = SourcesRetrievalClient()
+    await client.sync_sources_index(wait=False)
 
 
 async def _session_turn_count(pool, session_id) -> int:

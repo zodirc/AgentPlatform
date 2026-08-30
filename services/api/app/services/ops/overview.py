@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 _AGENT_CONTAINERS = (
     "agent-api",
     "agent-runtime",
+    "agent-sources-retrieval",
+    "agent-model-gateway",
+    "agent-sandbox",
+    "agent-redis",
+    "agent-ast-indexer",
     "agent-web",
     "agent-postgres",
     "agent-bench",
@@ -181,32 +186,65 @@ async def _agent_usage() -> dict[str, Any]:
 
 
 async def _agent_block() -> dict[str, Any]:
-    """Product runtime health + platform usage (chat models are per-user)."""
+    """Product orchestrator health + retrieval-plane embed stamps (ADR-020)."""
     inspect = _inspect_container("agent-runtime")
+    retrieval_inspect = _inspect_container("agent-sources-retrieval")
+    gateway_inspect = _inspect_container("agent-model-gateway")
+    sandbox_inspect = _inspect_container("agent-sandbox")
+    redis_inspect = _inspect_container("agent-redis")
     env = _env_map_from_inspect(inspect) if inspect else {}
+    ret_env = _env_map_from_inspect(retrieval_inspect) if retrieval_inspect else {}
 
-    def g(*keys: str) -> str:
+    def g(src: dict[str, str], *keys: str) -> str:
         for key in keys:
-            val = (env.get(key) or os.environ.get(key) or "").strip()
+            val = (src.get(key) or os.environ.get(key) or "").strip()
             if val:
                 return val
         return ""
 
-    status = None
-    if inspect:
-        status = (inspect.get("State") or {}).get("Status")
+    def st(blob: dict[str, Any] | None) -> str | None:
+        if not blob:
+            return None
+        return (blob.get("State") or {}).get("Status")
 
     usage = await _agent_usage()
     return {
         "container": "agent-runtime",
-        "status": status,
+        "status": st(inspect),
         "source": "docker_inspect" if inspect else "unavailable",
-        "app_env": g("APP_ENV") or None,
-        # Runtime retrieval defaults (infra); chat models are per-user.
-        "embedding_backend": g("EMBEDDING_BACKEND") or None,
-        "embedding_model": g("EMBEDDING_MODEL") or None,
-        "retrieval_mode": g("RETRIEVAL_MODE") or None,
-        "retrieval_backend": g("RETRIEVAL_BACKEND") or None,
+        "app_env": g(env, "APP_ENV") or None,
+        "service_role": g(env, "SERVICE_ROLE") or None,
+        # Embed weights live on sources-retrieval (ADR-020); fall back to env.
+        "embedding_backend": g(ret_env, "EMBEDDING_BACKEND")
+        or g(env, "EMBEDDING_BACKEND")
+        or None,
+        "embedding_model": g(ret_env, "EMBEDDING_MODEL")
+        or g(env, "EMBEDDING_MODEL")
+        or None,
+        "retrieval_mode": g(ret_env, "RETRIEVAL_MODE")
+        or g(env, "RETRIEVAL_MODE")
+        or None,
+        "retrieval_backend": g(ret_env, "RETRIEVAL_BACKEND")
+        or g(env, "RETRIEVAL_BACKEND")
+        or None,
+        "planes": {
+            "sources_retrieval": {
+                "container": "agent-sources-retrieval",
+                "status": st(retrieval_inspect),
+            },
+            "model_gateway": {
+                "container": "agent-model-gateway",
+                "status": st(gateway_inspect),
+            },
+            "sandbox": {
+                "container": "agent-sandbox",
+                "status": st(sandbox_inspect),
+            },
+            "redis": {
+                "container": "agent-redis",
+                "status": st(redis_inspect),
+            },
+        },
         "usage": usage,
     }
 

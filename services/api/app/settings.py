@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     db_pool_max_size: int = 5
     runtime_url: str = "http://runtime:8001"
     runtime_url_map: str = ""
+    # ADR-020: sources index / remote embed plane (not the Turn orchestrator).
+    sources_retrieval_url: str = "http://sources-retrieval:8001"
+    model_gateway_url: str = "http://model-gateway:8003"
+    sandbox_plane_url: str = "http://sandbox:8004"
+    redis_url: str = "redis://redis:6379/0"
     internal_service_token: str = "change-me-internal"
     app_secret_key: str = "change-me"
     auth_enabled: bool = False

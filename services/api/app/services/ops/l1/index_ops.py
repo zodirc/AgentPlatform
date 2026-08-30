@@ -10,7 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from app.services.command.runtime_factory import runtime_client_for_new_turn
+from app.services.command.sources_retrieval_client import SourcesRetrievalClient
 from app.services.end_user.users import SYSTEM_USER_ID
 from app.services.resource.works import Work
 
@@ -224,7 +224,7 @@ async def _sync_sources(
     Progress is scoped by ``work_id`` so concurrent L1 runs do not steal each
     other's shared ``sync_progress.json`` lines.
     """
-    client = runtime_client_for_new_turn()
+    client = SourcesRetrievalClient()
     tag = label or "sources"
 
     async def _abort_if_cancelled() -> dict[str, Any] | None:
