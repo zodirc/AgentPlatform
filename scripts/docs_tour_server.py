@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Serve docs/ with long-cache headers for PNG diagrams."""
+"""Serve docs/ for make docs-tour (local preview).
+
+Prefer fresh HTML/JS so chapter edits show up on reload. PNGs use short
+revalidation — Service Worker (docs/sw.js) must not cache-first forever.
+"""
 from __future__ import annotations
 
 import os
@@ -10,12 +14,14 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler
 class Handler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         path = self.path.split("?", 1)[0].split("#", 1)[0].lower()
-        if path.endswith(".png"):
-            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
-        elif path.endswith("sw.js"):
+        if path.endswith("sw.js"):
+            # Always revalidate SW so cache strategy bumps take effect.
             self.send_header("Cache-Control", "no-cache")
-        elif path.endswith((".html", ".css", ".js", ".md")):
-            self.send_header("Cache-Control", "public, max-age=120")
+        elif path.endswith(".png"):
+            # Allow brief reuse, but force revalidate (ETag/Last-Modified).
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+        elif path.endswith((".html", ".css", ".js", ".md", ".json")):
+            self.send_header("Cache-Control", "no-cache")
         super().end_headers()
 
     def log_message(self, fmt: str, *args: object) -> None:

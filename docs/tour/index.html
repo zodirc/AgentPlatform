@@ -1049,14 +1049,14 @@
       const blurbs = {
         cover: "边界、权威与读法",
         principles: "R1–R5 热路径验收",
-        topology: "Caddy · api · runtime · planes",
-        backend: "pull 时序 · 三道闸 · 双池",
+        topology: "Caddy · api · runtime · 平面",
+        backend: "进程 · 表 · turn_events",
         domain: "Work / Session / Turn / Run",
-        "request-path": "受理 → 领取 → 投影",
-        "start-turn": "202 与 turn.accepted",
-        "runtime-layers": "Controller 与 Engine",
-        "engine-loop": "assemble → model → tools",
-        approval: "审批门与同 run_id 续跑",
+        "request-path": "受理 → 领取 → 平面 HTTP",
+        "start-turn": "pull · run_commands ≠ 索引",
+        "runtime-layers": "编排 · 租约 · 平面依赖",
+        "engine-loop": "while · gateway · 平面工具",
+        approval: "审批⊥沙箱平面",
         "turn-state": "checkpoint 须恢复的义务",
         scenarios: "Profile 注入，禁止 if scenario",
         tools: "结果契约与 handler 改道",
@@ -1066,9 +1066,9 @@
         verify: "verify_receipt 旁路 continue",
         "issue-repro": "issue 例子覆盖义务",
         "related-tests": "失败摘要与相关测试命令",
-        events: "NOTIFY / LISTEN / SSE / view",
+        events: "Postgres 事实 · Redis 旁路",
         contracts: "packages/contracts",
-        rag: "search_sources hybrid",
+        rag: "remote embed · hybrid",
         "rag-deep-dive": "图编号逐步对照代码",
         index: "INDEX 13 · 450 / 64",
         writing: "Work 树 · 薄纲 · occupy=fresh",
@@ -1114,13 +1114,41 @@
       const zoomLabel = document.getElementById("zoomLabel");
 
       const loadMsg = document.getElementById("tourLoadMsg");
+      const bust = new URLSearchParams(location.search).get("bust") || "";
+      const bustQ = bust ? ("?bust=" + encodeURIComponent(bust)) : "";
+
+      async function purgeDocsCaches() {
+        if (!bust) return;
+        try {
+          if ("serviceWorker" in navigator) {
+            const regs = await navigator.serviceWorker.getRegistrations();
+            await Promise.all(regs.map((r) => r.unregister()));
+          }
+          if (window.caches && caches.keys) {
+            const keys = await caches.keys();
+            await Promise.all(keys.map((k) => caches.delete(k)));
+          }
+        } catch (e) {}
+      }
+
+      await purgeDocsCaches();
+
       try {
         const htmls = await Promise.all(PAGE_FILES.map(async (id) => {
-          const r = await fetch("pages/" + id + ".html");
+          const r = await fetch("pages/" + id + ".html" + bustQ, { cache: "no-store" });
           if (!r.ok) throw new Error(id + " HTTP " + r.status);
           return r.text();
         }));
         content.innerHTML = htmls.join("\n");
+        if (bust) {
+          content.querySelectorAll("img[src]").forEach((img) => {
+            const src = img.getAttribute("src") || "";
+            if (!/\.png($|\?)/i.test(src)) return;
+            const u = new URL(src, location.href);
+            u.searchParams.set("bust", bust);
+            img.setAttribute("src", u.pathname + u.search);
+          });
+        }
       } catch (err) {
         if (loadMsg) {
           loadMsg.textContent = "导览章节未能载入：" + err + "。请用 make docs-tour 打开。";
@@ -1384,7 +1412,7 @@
       const start = Math.max(0, pages.findIndex((p) => p.dataset.id === hash));
       go(start === -1 ? 0 : start);
 
-      if ("serviceWorker" in navigator) {
+      if ("serviceWorker" in navigator && !bust) {
         navigator.serviceWorker.register("../sw.js").catch(() => {});
       }
     })();

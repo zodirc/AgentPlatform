@@ -8,7 +8,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOCS="$ROOT/docs"
 PORT="${DOCS_TOUR_PORT:-8765}"
-URL="http://127.0.0.1:${PORT}/tour/"
+BUST="$(date +%s)"
+# ?bust= forces a new document URL so the shell reloads chapters/PNG (see tour/index.html).
+URL="http://127.0.0.1:${PORT}/tour/?bust=${BUST}"
 PIDFILE="${TMPDIR:-/tmp}/agentplatform-docs-tour.pid"
 LOGFILE="${TMPDIR:-/tmp}/agentplatform-docs-tour.log"
 SHORTCUT="/mnt/c/Users/Public/Desktop/AgentPlatform-Docs-Tour.url"
@@ -112,20 +114,37 @@ open_windows_browser() {
   return 1
 }
 
+stop_existing() {
+  if [[ -f "$PIDFILE" ]]; then
+    kill "$(cat "$PIDFILE")" 2>/dev/null || true
+    rm -f "$PIDFILE"
+  fi
+  # Stale listeners without pidfile (previous sessions / Cursor shells).
+  if command -v ss >/dev/null 2>&1; then
+    local pids
+    pids="$(ss -ltnp 2>/dev/null | awk -v p=":${PORT}" '$4 ~ p {print}' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u || true)"
+    if [[ -n "${pids:-}" ]]; then
+      # shellcheck disable=SC2086
+      kill $pids 2>/dev/null || true
+    fi
+  fi
+  pkill -f "docs_tour_server.py ${PORT}" 2>/dev/null || true
+  pkill -f "docs_tour_server.py$" 2>/dev/null || true
+  sleep 0.2
+}
+
 cd "$DOCS"
-if ! curl -fsS --max-time 0.3 "$URL" >/dev/null 2>&1; then
-  python3 "$ROOT/scripts/docs_tour_server.py" "$PORT" >"$LOGFILE" 2>&1 &
-  echo $! >"$PIDFILE"
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    curl -fsS --max-time 0.3 "$URL" >/dev/null 2>&1 && break
-    sleep 0.15
-  done
-fi
+stop_existing
+python3 "$ROOT/scripts/docs_tour_server.py" "$PORT" >"$LOGFILE" 2>&1 &
+echo $! >"$PIDFILE"
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+  curl -fsS --max-time 0.3 "http://127.0.0.1:${PORT}/tour/" >/dev/null 2>&1 && break
+  sleep 0.15
+done
 
 echo "[docs-tour] serving  $URL"
-if [[ -f "$PIDFILE" ]]; then
-  echo "[docs-tour] stop with: kill \$(cat $PIDFILE) 2>/dev/null"
-fi
+echo "[docs-tour] 已强制重启服务并带 bust=${BUST}（清章节/PNG/旧 Service Worker 缓存）"
+echo "[docs-tour] stop with: kill \$(cat $PIDFILE) 2>/dev/null"
 
 opened=0
 if is_wsl; then
