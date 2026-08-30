@@ -235,6 +235,13 @@ async def propose_patch(
                         "apply_check": "dialogue_kept",
                         "summary": blocked,
                     }
+                from app.writing.prose_dedupe import reject_worsening_prose_patch
+
+                worsen = reject_worsening_prose_patch(
+                    existing, old, new, path=path
+                )
+                if worsen:
+                    return worsen
     precheck = _span_apply_precheck(path, old, new)
     if not precheck.get("applies"):
         return {
@@ -333,6 +340,19 @@ async def apply_patch(
                 "status": "error",
                 "error": blocked,
             }
+        from app.writing.prose_dedupe import reject_worsening_prose_patch
+
+        worsen = reject_worsening_prose_patch(existing, old, new, path=path)
+        if worsen:
+            if turn_id is not None:
+                note_prose_patch_apply_miss(
+                    turn_id,
+                    session_id,
+                    path=path,
+                    old_text=old,
+                    section_id=section_id or "",
+                )
+            return worsen
 
     if old:
         count = existing.count(old)
@@ -379,6 +399,12 @@ async def apply_patch(
             }
         final = new
 
+    collapsed = 0
+    if is_prose_writing_path(path):
+        from app.writing.prose_dedupe import collapse_duplicate_paragraphs
+
+        final, collapsed = collapse_duplicate_paragraphs(final)
+
     target.write_text(final, encoding="utf-8")
     if old and is_prose_writing_path(path) and turn_id is not None:
         note_prose_patch_applied(
@@ -389,9 +415,13 @@ async def apply_patch(
             prior=prior,
             section_id=section_id,
         )
-    return {
+    out: dict[str, Any] = {
         "path": path,
         "status": "applied",
         "bytes_written": len(final.encode("utf-8")),
         "mode": "surgical" if old else "full",
     }
+    if collapsed:
+        out["duplicates_collapsed"] = collapsed
+        out["summary"] = f"applied; collapsed {collapsed} duplicate paragraph(s)"
+    return out

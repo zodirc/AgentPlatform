@@ -258,6 +258,30 @@ def _replace_rewrite_window(
     )
 
 
+def _collapse_rewrite_result(
+    document: str,
+    *,
+    section_id: str,
+    monofile: bool,
+) -> tuple[str, str, int]:
+    """After rewrite_window, fold large exact paragraph duplicates.
+
+    Returns ``(document, scored_body, removed_count)``.
+    """
+    from app.writing.manuscript import extract_section
+    from app.writing.prose_dedupe import (
+        collapse_duplicate_paragraphs,
+        collapse_prose_duplicates,
+    )
+
+    if monofile:
+        final, removed = collapse_prose_duplicates(document, section_id=section_id)
+        scored = extract_section(final, section_id) or ""
+        return final, scored, removed
+    final, removed = collapse_duplicate_paragraphs(document)
+    return final, final, removed
+
+
 def _reject_rewrite_window(
     manifest: dict[str, Any],
     *,
@@ -494,6 +518,7 @@ async def draft_section(
     occupy_fresh = False
     mode = _parse_draft_mode(_kwargs.get("mode"))
     scored = content
+    dup_collapsed = 0
 
     if layout == "monofile":
         path = draft_manuscript_rel()
@@ -560,8 +585,10 @@ async def draft_section(
                     "error": "rewrite_window_span_miss",
                     "summary": "repair_span.old_text 须在本章正文中可定位。",
                 }
+            final, scored, dup_collapsed = _collapse_rewrite_result(
+                final, section_id=section_id, monofile=True
+            )
             target.write_text(final, encoding="utf-8")
-            scored = extract_section(final, section_id) or content
             from app.writing.patch_budget import record_rewrite_window_attempt
 
             record_rewrite_window_attempt(manifest, section_id=section_id)
@@ -637,8 +664,10 @@ async def draft_section(
                     "error": "rewrite_window_span_miss",
                     "summary": "repair_span.old_text 须在本章正文中可定位。",
                 }
+            final, scored, dup_collapsed = _collapse_rewrite_result(
+                final, section_id=section_id, monofile=False
+            )
             target.write_text(final, encoding="utf-8")
-            scored = final
             from app.writing.patch_budget import record_rewrite_window_attempt
 
             record_rewrite_window_attempt(manifest, section_id=section_id)
@@ -704,6 +733,11 @@ async def draft_section(
         result["mode"] = "append"
     elif mode == "rewrite_window":
         result["mode"] = "rewrite_window"
+        if dup_collapsed:
+            result["duplicates_collapsed"] = dup_collapsed
+            note = f"collapsed {dup_collapsed} duplicate paragraph(s)"
+            prev = str(result.get("summary") or "").strip()
+            result["summary"] = f"{note}; {prev}" if prev else note
     fragment = str(_kwargs.get("fragment") or "mixed").strip()
     try:
         from app.writing.signals.assemble import build_writing_signals
