@@ -1,72 +1,71 @@
 <section class="page" data-id="events" data-group="事件与契约" data-title="事件 · SSE · 投影">
         <div class="card">
-          <h2>事件拉取：NOTIFY → LISTEN → SSE / view</h2>
-          <p class="lede">Turn 事实源是 append-only 的 <code>turn_events</code>（编排 runtime 写入）。编排不对浏览器开 SSE；api 不对编排开进程内 channel。NOTIFY 是门铃：payload 只有 UUID，叫醒后 <code>SELECT</code>。丢失时 2s 轮询兜底——<code>SELECT</code> 才是真。Postgres 是 <strong>Turn 事实桥</strong>，不是全栈唯一跨服务桥：平面热路径是 HTTP；异步索引是 Redis Streams。</p>
+          <h2>事件拉取：耐久 PG + 活流 Redis → SSE / view</h2>
+          <p class="lede">Turn <strong>耐久</strong>事实源是 append-only 的 <code>turn_events</code>（编排写入）。高频 delta 默认走 Redis <code>turn.live.*</code>（可丢）；重连靠 <code>turn_views</code> + 耐久 sequence，不保证逐 token 续播。NOTIFY / Pub/Sub 都是门铃：payload 只有 UUID，叫醒后 <code>SELECT</code> 或 drain live。Postgres 是 Turn 真源与 claim；平面热路径是 HTTP；异步索引是 Redis Streams。</p>
           <ul class="seq-legend">
-            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 NOTIFY 当队列、把 Postgres 当成 Redis/HTTP 的替代品、或把 40ms 窗当成可以乱序</li>
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 NOTIFY/Pub/Sub 当队列、用 Streams claim、或把活流当成可恢复真源</li>
           </ul>
 
           <h3>三条桥（不要画成一条）</h3>
-          <pre class="seq">Postgres   Turn 分发门铃 · turn_events · run_commands · CAS / lease
+          <pre class="seq">Postgres   真源 · CAS/lease · 耐久 turn_events · turn_views · run_commands
 HTTP       编排 → model-gateway / sources-retrieval / sandbox（热路径）
-Redis      agent.jobs（异步 sources.index_sync 等）
-禁止       首 token / query embed 上 Redis；把平面 HTTP 结果当 NOTIFY payload
-<span class="pt">◆ 要点  「跨服务」有三条。本页主链只讲 Turn 事件那一条。</span></pre>
+Redis      turn.dispatch 门铃 · turn.live.* 活流 · agent.jobs 异步索引
+禁止       Streams/XACK claim；首 token / query embed 上 agent.jobs
+<span class="pt">◆ 要点  「跨服务」有三条。本页主链讲 Turn 事件与活流。</span></pre>
 
           <h3>写入路径（编排 runtime）</h3>
-          <pre class="seq">关键节点只追加、不改旧行
-  每行 per-turn monotonic sequence
-  大正文进 artifacts；事件行留摘要与指针
-  AFTER INSERT → pg_notify('turn_events_channel', turn_id::text)
-    分发通道另一条：turn_dispatch_channel 的 payload 是 run_id
-    <span class="pt">◆ 要点  两路门铃 UUID 含义不同。把 token / 工具结果塞进 NOTIFY 会打满 payload 上限，且丢失不可恢复。</span>
+          <pre class="seq">耐久事件只追加、不改旧行；每行 per-turn monotonic sequence
+  AFTER INSERT → pg_notify('turn_events_channel', turn_id)（投影唤醒）
+  create_turn COMMIT 后 → PUBLISH turn.dispatch run_id（TURN_DISPATCH_WAKE 默认 redis）
+    <span class="pt">◆ 要点  门铃可丢；poll + CAS 保证领取。禁止把 token 塞进门铃 payload。</span>
 
-BufferedEventWriter（默认窗 0.04s = 40ms）
-  只合并四类高频 delta：turn.token · turn.thinking.delta · tool.delta · section.draft.delta
-  刷新后第一条立即 INSERT（首 token 延迟与逐条写入相同）
-  窗内后续多行一批；任意非 delta 会先刷缓冲，再走单条事务
-  刷盘仍持 pg_advisory_xact_lock(turn_id) + MAX(sequence)+1
-    跨进程（孤儿 finalizer、HA 重启）不会抢号
-  EVENT_BATCH_WINDOW_SECONDS=0 可回滚到逐条（旋钮，不是第二种语义）
-  <span class="pt">◆ 要点  锁的是这个 Turn 的号，不是整张 turn_events。旧路径每个 token 约 4 次 DB 往返。</span>
+事件分层 EVENT_DURABILITY
+  耐久：accepted / tool.* / 审批 / 终态 → turn_events
+  活流：turn.token · thinking.delta · tool.delta · section.draft.delta
+  checkpoint（默认）：PUBLISH turn.live.&lt;turn_id&gt;；失败则降级写 PG
+  all：仍走 BufferedEventWriter 批写 PG（回滚旋钮）
+
+BufferedEventWriter（仅 EVENT_DURABILITY=all）
+  窗默认 0.04s；非 delta 先刷缓冲；advisory lock + MAX(sequence)+1
+  EVENT_BATCH_WINDOW_SECONDS=0 可逐条
+  <span class="pt">◆ 要点  checkpoint 模式下 delta 默认不进 PG，批窗不再是主路径。</span>
 
 thinking.delta 与租约/stall 的耦合
-  产品 Turn：delta 入 turn_events（SSE live），默认不进 turn_views
-  Ops 评测：ops_eval_persist_thinking=False → 不 INSERT delta，改 JSONL sidecar
-    同时 ops_eval_thinking_heartbeat_seconds=15，否则 180s stall 会把活评测当死
-  非 delta 事件仍立即落库，供 watchdog 看见「还在动」</pre>
+  Ops 评测：ops_eval_persist_thinking=False → sidecar JSONL + 心跳
+  产品 checkpoint：thinking 走 live；非 delta 仍立即落库供 watchdog</pre>
 
           <h3>读出路径（api）</h3>
-          <pre class="seq">进程启动一根独立 asyncpg.connect LISTEN turn_events_channel
-  不从热连接池借（热池 5×5s，LISTEN 会占死槽）
-  收到 turn_id → 内存 fan-out：对该 Turn 的等待者 asyncio.Event.set()
-  同时入投影队列 → UPSERT turn_views（无 thinking.delta）
-  <span class="pt">◆ 要点  一根 LISTEN 叫醒 N 路 SSE。每浏览器一根 PG 套接字会先打满连接，而不是先打满 inflight。</span>
+          <pre class="seq">进程启动
+  独立 asyncpg.connect LISTEN turn_events_channel（耐久投影 / 反熵；不占热池）
+  PSUBSCRIBE turn.live.*（活流扇出；TURN_LIVE_FANOUT_ENABLED）
+  耐久 NOTIFY → 投影队列 UPSERT turn_views（无 thinking.delta / 无 live delta）
+  <span class="pt">◆ 要点  活流不经「先 INSERT 再 SELECT」。耐久仍一根 LISTEN 叫醒 N 路追赶。</span>
 
 SSE  GET /turns/{id}/stream
-  SELECT WHERE sequence &gt; cursor；data = 契约信封 JSON，不是供应商原始 HTTP 字节
-  游标三处共用：SSE id · Last-Event-ID · since_sequence · 快照
-  空闲 2s poll（反熵：NOTIFY 丢了也能追上）
+  drain live 信封（sequence=null；SSE 省略 id）+ SELECT sequence &gt; cursor
+  data = 契约信封 JSON；游标三处共用：SSE id · Last-Event-ID · since_sequence · 快照（仅耐久）
+  空闲 2s poll（反熵）
   ~14s 注释行 : ping；45s 无字节视为闷流，带 since_sequence 重连（≤8）
-  终态或 approval.requested 关流（审批后由命令面续，不靠这条长 GET 挂着执行）
-  <span class="pt">◆ 要点  SSE ⊈ inflight。挂看不占执行槽；组窗 RAM 是 Turn 级的。</span>
+  终态或 approval.requested 关流
+  <span class="pt">◆ 要点  重连不保证逐 token。SSE ⊈ inflight。</span>
 
 GET /view
   列表 / 首屏 / 重连 / 终态；可 ETag/304
-  UI 不推断阶段：阶段只来自已持久化的事件类型
-  快照含推理增量 → 列表与审批 UI 被 delta 撑满</pre>
+  UI 不推断阶段：阶段只来自已持久化的耐久事件类型
+  快照不含 live delta</pre>
 
-          <h3>信封（契约，SSE data 与行存储同一份）</h3>
-          <pre class="seq">packages/contracts/schemas/events/envelope.json
-  required: event_id · stream_id · sequence · type · turn_id · run_id · ts · payload
-  additionalProperties: false；sequence ≥ 1；stream_id 通常 = turn_id
+          <h3>信封（契约，SSE data 与行存储 / 活流）</h3>
+          <pre class="seq">packages/contracts/schemas/events/envelope.json（0.3.13+）
+  共用字段：event_id · stream_id · type · turn_id · run_id · ts · payload
+  耐久：sequence ≥ 1；禁止 live_seq
+  活流：live=true · sequence=null · live_seq≥1
   type 枚举见 types.json（phase0 开工/工具/终态；phase1 流式/审批/补丁；phase2 用量/检索/组窗）
 
 payload 上限（打破则校验红）
   turn.token / thinking.delta / section.draft.delta    delta ≤8192
   tool.completed.summary / turn.completed.summary      ≤4096
   turn.accepted.user_input_preview                     ≤256
-<span class="pt">◆ 要点  客户端 JSON.parse 的是信封。按供应商 SSE 原始帧去续传，游标对不上 sequence。</span></pre>
+<span class="pt">◆ 要点  客户端 JSON.parse 的是信封。按供应商 SSE 原始帧去续传，游标对不上。</span></pre>
 
           <h3>无分布式事务时如何自洽</h3>
           <pre class="seq">runtime 写  事件、执行态、checkpoint、transcript 真源（编排；不持 ST 权重）

@@ -32,6 +32,7 @@ from typing import Any, Awaitable, Callable
 
 from app.context.engine import ContextEngine, ToolExecutor
 from app.context.policy import CompactionPolicy
+from app.controller.event_writer import get_event_writer
 from app.engine.read_registry import (
     consume_evicted_reread,
     deny_redundant_read,
@@ -695,6 +696,7 @@ class AgentEngine:
                 step_cache_read = 0
                 step_cache_creation = 0
                 usage_source = "estimated"
+                live_writer = get_event_writer(state.turn_id)
 
                 try:
                     await self._write_event(
@@ -702,6 +704,8 @@ class AgentEngine:
                         payload={"step_index": step_index, "label": f"step-{step_index}"},
                         step_index=step_index,
                     )
+                    if live_writer is not None:
+                        live_writer.start_stream_liveness(step_index)
                     stream = self._gateway.stream(messages=messages, tools=step_tools)
                     cancel_watch = asyncio.create_task(
                         self._abort_gateway_when_cancelled(state)
@@ -775,6 +779,9 @@ class AgentEngine:
                         break
                     step_outcome = "failed"
                     raise
+                finally:
+                    if live_writer is not None:
+                        await live_writer.stop_stream_liveness()
 
                 if state.cancelled:
                     break

@@ -18,12 +18,13 @@ api       鉴权 · assert_session_owner · 校验 work / scenario
             Retry-After: 5
             <span class="pt">◆ 要点  429 时 Turn 尚未 INSERT。把过载写成 failed，终态语义脏了，重试还会再插一行。</span>
           同一事务 INSERT turns(pending) + runs(accepted, pull_eligible) + turn_views seed
-          COMMIT 后 pg_notify('turn_dispatch_channel', run_id)   ← 门铃只有 UUID
+          COMMIT 后 PUBLISH turn.dispatch run_id（默认；门铃只有 UUID）
+            TURN_DISPATCH_WAKE=postgres|both 时另发 pg_notify(turn_dispatch_channel)
           立即 202 { turn_id, run_id, status: pending }
           <span class="pt">◆ 要点  202 ≠ turn.accepted。api 不 HTTP 推 StartTurn。做成对 runtime 的同步 RPC，副本无法 competing consume。</span>
     │
     ▼
-runtime   LISTEN turn_dispatch + 2s poll 反熵 → 条件 UPDATE claim（CAS）
+runtime   SUBSCRIBE turn.dispatch + 2s poll 反熵 → 条件 UPDATE claim（CAS）
 （编排）  写入 lease_expires_at = now()+180s；心跳 10s
           turns.status pending→running；INSERT turn.accepted（业务首事件，通常 sequence=1）
           Intake → Engine
@@ -38,7 +39,7 @@ runtime   LISTEN turn_dispatch + 2s poll 反熵 → 条件 UPDATE claim（CAS）
   否 push   回退：api HTTP POST runtime /internal/commands/start-turn
             传输失败 → 客户端 502（入队都没完成）
     <span class="pt">◆ 要点  push 只是兼容。默认路径上不要再发明 RUNTIME_URL_MAP / sticky。</span>
-    <span class="pt">◆ 要点  Turn 分发仍是 Postgres；平面调用才是 HTTP。不要把两者画成同一条总线。</span></pre>
+    <span class="pt">◆ 要点  claim 真源是 Postgres；门铃默认 Redis Pub/Sub。禁止用 Streams/XACK 表示领取。</span></pre>
 
           <h3>同族控制命令（持约副本）</h3>
           <pre class="seq">Browser 短 POST  approve | deny | cancel | patch accept/reject

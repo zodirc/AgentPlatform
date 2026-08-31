@@ -216,7 +216,7 @@ export function WorkbenchShell({ wb, children, layout = "default" }: Props) {
         <pre
           className={`overflow-auto text-xs text-muted-foreground ${layout === "agent" ? "max-h-24" : "max-h-40"}`}
         >
-          {wb.events.map((e) => `${e.sequence}:${e.type}`).join(" → ") || "—"}
+          {wb.events.map((e) => `${e.live ? `L${e.live_seq ?? "?"}` : e.sequence}:${e.type}`).join(" → ") || "—"}
         </pre>
       </section>
     </div>

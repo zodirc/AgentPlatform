@@ -2,6 +2,8 @@
 
 English: XADD / XREADGROUP helpers. Sync hot paths (first token, query embed)
 must not use this module — only Turn-external or long jobs.
+
+Turn wake / live fanout use ``platform_bus.pubsub`` (Pub/Sub), not this stream.
 """
 
 from __future__ import annotations

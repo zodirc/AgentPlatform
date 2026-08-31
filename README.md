@@ -56,17 +56,17 @@ make smoke
 Browser → Caddy
             ├─ /      → web
             └─ /api/* → api
-                 │  INSERT turns/runs · pg_notify(turn_dispatch)
-                 │  LISTEN turn_events → SSE / turn_views
+                 │  INSERT turns/runs · PUBLISH turn.dispatch
+                 │  订 turn.live.* + SELECT 耐久 → SSE / turn_views
                  ▼
-              Postgres（Turn 事实桥：turns · runs · turn_events · turn_views · run_commands）
-                 │  LISTEN / CAS claim
+              Postgres（真源 / CAS / 耐久 turn_events · turn_views · run_commands）
+                 │  claim CAS
                  ▼
-              runtime（编排 · 写 turn_events · 不持 ST 权重）
+              runtime（编排 · 写耐久事件 · PUBLISH live · 不持 ST）
                  ├─ HTTP → model-gateway     live LLM NDJSON
                  ├─ HTTP → sources-retrieval  唯一 embedding 池 · sync/watch
                  └─ HTTP → sandbox           bwrap/landlock exec
-              redis（异步 agent.jobs，如 sources.index_sync；首 token / query embed 禁止上总线）
+              redis（turn.dispatch 门铃 · turn.live 活流 · agent.jobs 异步）
 旁路：ast-indexer · bench(+bench-postgres) · 发布台 :9090
 ```
 
@@ -74,12 +74,12 @@ Browser → Caddy
 |------|------|
 | web | 工作台（SSE + 投影） |
 | api | 受理、分发门铃、SSE、投影、Ops；可 enqueue Redis |
-| runtime | 编排：claim / Engine / 写 `turn_events`；默认 remote embed |
+| runtime | 编排：claim / Engine / 写耐久 `turn_events`；默认 remote embed；活流 PUBLISH |
 | sources-retrieval | 唯一 ST/hash 权重、query/index embed、资料 sync |
 | model-gateway | live 上游 LLM 流（NDJSON） |
 | sandbox | OS 隔离 exec |
-| redis | 异步 job bus（`agent.jobs`） |
-| postgres | Turn 业务真源 / CAS / NOTIFY（服务间无互 import） |
+| redis | 异步 job bus（`agent.jobs`）+ Turn 门铃/活流 Pub/Sub |
+| postgres | Turn 业务真源 / CAS / 耐久事件（服务间无互 import） |
 | ast-indexer | 工作区 AST（旁路） |
 | bench + bench-postgres | Official / L1（`make up` 默认起） |
 | contracts | OpenAPI / 事件 / 命令体 |

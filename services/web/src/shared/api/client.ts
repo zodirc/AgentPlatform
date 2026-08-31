@@ -127,14 +127,19 @@ export function apiAuthHeaders(extra: HeadersInit = {}): HeadersInit {
 
 const sessionFetchInit = { credentials: "include" as RequestCredentials };
 
-/** 回合 SSE/WS 事件单条结构。 */
+/** 回合 SSE/WS 事件单条结构（耐久 PG 或 live Redis 扇出）。 */
 export type TurnEvent = {
   event_id: string;
-  sequence: number;
+  /** Durable PG sequence; null when live fanout. */
+  sequence: number | null;
+  /** True for Redis turn.live.* envelopes (not a turn_events row). */
+  live?: boolean;
+  /** Per-turn live ordering when live=true. */
+  live_seq?: number;
   type: string;
   turn_id: string;
   payload: Record<string, unknown>;
-  /** turn_events 表时间戳（ISO），用于耗时计时。 */
+  /** turn_events / live 时间戳（ISO），用于耗时计时。 */
   ts?: string;
 };
 

@@ -35,6 +35,12 @@ async def stream_turn_events(turn_id: UUID, since_sequence: int, listener: TurnE
         if event is None:
             yield ": ping\n\n"
             continue
-        cursor = event["sequence"]
-        yield f"id: {cursor}\nevent: message\ndata: {json.dumps(event)}\n\n"
+        seq = event.get("sequence")
+        data = json.dumps(event)
+        if isinstance(seq, int) and seq > 0:
+            yield f"id: {seq}\nevent: message\ndata: {data}\n\n"
+        else:
+            # Live envelopes have no durable sequence — omit SSE id so
+            # Last-Event-ID reconnect stays on PG cursor.
+            yield f"event: message\ndata: {data}\n\n"
     yield ": keep-alive\n\n"

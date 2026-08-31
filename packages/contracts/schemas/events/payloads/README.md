@@ -1,6 +1,7 @@
 # Event payload schemas
 
-每种 `turn_events.type` 的 `payload` 形状在此目录定义。外壳见 `../envelope.json`。
+每种 `turn_events.type` 的 `payload` 形状在此目录定义。外壳见 `../envelope.json`
+（耐久行与 SSE；活流另见信封 `live=true` / `sequence=null` / `live_seq`）。
 
 权威索引：`_index.json`  
 人类入口：[控制流导览 · 契约位置](../../../../docs/tour/index.html#contracts)  

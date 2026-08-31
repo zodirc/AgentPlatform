@@ -13,21 +13,22 @@
                        └─ 其余               → web
                             │
                             ▼
-                     api    鉴权 · 准入 · 落库 · NOTIFY · LISTEN · SSE · 投影
+                     api    鉴权 · 准入 · 落库 · PUBLISH turn.dispatch · 订 live · SSE · 投影
                             不跑 Agent loop；可 enqueue Redis Streams（索引同步）
-                            │  pg_notify(turn_dispatch, run_id)
+                            │  COMMIT 后 PUBLISH turn.dispatch(run_id)
                             ▼
-                     PG     跨服务业务真源（runs / events / CAS）
-                            │  LISTEN / claim CAS
+                     PG     跨服务业务真源（runs / 耐久 events / CAS）
+                     redis  turn.dispatch 门铃 · turn.live.* 活流 · agent.jobs
+                            │  SUBSCRIBE / claim CAS（+ poll）
                             ▼
                      runtime :8001（orchestrator · 不公网）
-                            领取 · lease · Intake · Engine · 写 turn_events
-                            EMBEDDING_BACKEND=remote；live 模型经 model-gateway
+                            领取 · lease · Intake · Engine · 写耐久 turn_events
+                            PUBLISH turn.live；EMBEDDING_BACKEND=remote
                             不对浏览器开 SSE
 
-执行平面（同栈 · HTTP 热路径 · 不经总线）
+执行平面（同栈 · HTTP 热路径 · 不经 agent.jobs）
 ────
-  redis                 agent.jobs Streams（异步索引等；首 token / query embed 禁止上总线）
+  redis                 Pub/Sub 门铃/活流 + Streams 异步索引
   sources-retrieval     唯一 embedding 池 · sync/watch · POST /internal/embed
   model-gateway         live LLM NDJSON · POST /internal/v1/complete
   sandbox               bwrap/landlock exec · POST /internal/sandbox/exec
@@ -46,14 +47,14 @@
           <pre class="seq">web           做  场景工作台；消费 SSE 与 GET /view
               不做 推断 Turn 阶段；直连 runtime
 
-api           做  鉴权、准入、落库、NOTIFY、LISTEN、SSE、投影、Ops 旁路、总线 enqueue
+api           做  鉴权、准入、落库、turn.dispatch 门铃、订 live、SSE、投影、Ops、总线 enqueue
               不做 跑 Agent loop
               <span class="pt">◆ 要点  HTTP 202 = 已入队 pending，不是 turn.accepted。</span>
 
-runtime       做  claim/lease、Intake、Engine、工具调度、checkpoint、写事件
+runtime       做  claim/lease、Intake、Engine、工具调度、checkpoint、写耐久事件、PUBLISH live
               不做 对浏览器开 SSE；UI 投影；常驻 ST 权重；startup sources sync（orchestrator）
               inflight 默认 16（waiting_approval 仍计）；满则停领
-              软件 16 ≠ 物理 16：热连接池 5×5s 往往先饱和；LISTEN 另开 asyncpg.connect，不从池借
+              软件 16 ≠ 物理 16：热连接池 5×5s 往往先饱和；PG LISTEN（events/commands）另开连接
               bypass 池 5×120s 同实例 PG，给 CASCADE 擦除等慢语句，不是第二台库，也不是 RAG 的 psycopg
               lease 丢且不能安全续跑 → failed(runner_lost)
               claim 超过 15s 无人领 → failed(start_timeout)

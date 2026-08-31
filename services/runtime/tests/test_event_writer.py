@@ -71,13 +71,18 @@ def store(monkeypatch: pytest.MonkeyPatch) -> _FakeStore:
         return fake
 
     monkeypatch.setattr(ew, "get_pool", fake_get_pool)
+    # Batching tests assume durable deltas (EVENT_DURABILITY=all).
+    monkeypatch.setattr(ew.settings, "event_durability", "all")
+    monkeypatch.setattr(ew.settings, "turn_live_publish_enabled", False)
     return fake
 
 
 def _writer(window: float) -> ew.BufferedEventWriter:
-    return ew.BufferedEventWriter(
+    w = ew.BufferedEventWriter(
         turn_id=uuid4(), run_id=uuid4(), trace_id=uuid4(), window_seconds=window
     )
+    w._live_only_deltas = False
+    return w
 
 
 def _delta(text: str) -> dict:

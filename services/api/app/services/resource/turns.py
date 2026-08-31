@@ -1,7 +1,8 @@
 """Turn 与 Run 持久化：创建、幂等、查询及启动失败标记。
 
-负责 ``turns`` / ``runs`` / ``turn_views`` 初始行写入，pull 模式下同事务
-``pg_notify('turn_dispatch_channel')``，以及 Ops 模型密钥 escrow 入口。
+负责 ``turns`` / ``runs`` / ``turn_views`` 初始行写入；pull 模式下按
+``TURN_DISPATCH_WAKE`` 发 PG NOTIFY 与/或 COMMIT 后 Redis ``turn.dispatch``，
+以及 Ops 模型密钥 escrow 入口。
 """
 
 from __future__ import annotations
@@ -218,12 +219,15 @@ async def create_turn(
                         turn_id=turn_id,
                         model_override=override,
                     )
-                # O1 pull: wake runtimes in the same transaction as accept.
+                # O1 pull: PG doorbell (optional). Redis publish happens after COMMIT.
                 if eligible and dispatch_notify:
-                    await conn.execute(
-                        "SELECT pg_notify('turn_dispatch_channel', $1)",
-                        str(run_id),
-                    )
+                    from app.services.realtime.redis_bus import should_pg_notify_dispatch
+
+                    if should_pg_notify_dispatch():
+                        await conn.execute(
+                            "SELECT pg_notify('turn_dispatch_channel', $1)",
+                            str(run_id),
+                        )
 
     if turn_row is None:
         # Lost the ON CONFLICT race — the winner has committed by the time
@@ -237,6 +241,16 @@ async def create_turn(
             )
         turn, run = found
         return turn, run, False
+
+    # After COMMIT: Redis wake (doorbell only; CAS claim stays in Postgres).
+    if eligible and dispatch_notify and run_row is not None:
+        from app.services.realtime.redis_bus import (
+            publish_turn_dispatch,
+            should_redis_publish_dispatch,
+        )
+
+        if should_redis_publish_dispatch():
+            publish_turn_dispatch(run_row["id"])
 
     return dict(turn_row), dict(run_row), True
 

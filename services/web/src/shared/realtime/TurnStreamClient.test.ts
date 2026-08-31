@@ -133,7 +133,7 @@ describe("TurnStreamClient", () => {
     );
 
     const client = new TurnStreamClient();
-    const events: Array<{ type: string; sequence: number }> = [];
+    const events: Array<{ type: string; sequence: number | null }> = [];
     const closed = new Promise<void>((resolve) => {
       client.connect("turn-dup", {
         onEvent: (ev) => {

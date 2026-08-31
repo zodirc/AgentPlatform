@@ -13,7 +13,7 @@ export function formatTurnElapsed(seconds: number): string {
 
 export type TimedEvent = {
   type: string;
-  sequence?: number;
+  sequence?: number | null;
   ts?: string;
   payload: Record<string, unknown>;
 };
@@ -41,7 +41,7 @@ export function findToolStarted(
 export function findToolCompleted(
   events: TimedEvent[],
   toolCallId: string,
-  startedSequence?: number,
+  startedSequence?: number | null,
 ): TimedEvent | undefined {
   if (!toolCallId) return undefined;
   return events.find((event) => {

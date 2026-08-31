@@ -127,6 +127,11 @@ async def iter_turn_events(
             elif stop_on_pause and event["type"] in PAUSE_EVENTS:
                 stop_stream = True
 
+        # Live fanout (checkpoint deltas): do not advance durable cursor.
+        for live in listener.drain_live(turn_id):
+            idle_polls = 0
+            yield live
+
         if stop_stream:
             # The projected view must reflect the latest events (timeline,
             # waiting_approval status, interrupt) before the client re-fetches
@@ -136,6 +141,10 @@ async def iter_turn_events(
             break
 
         notified = await listener.wait_for_turn(turn_id, timeout=IDLE_WAIT_SECONDS)
+        # Drain again after wake (live or PG) before next durable SELECT.
+        for live in listener.drain_live(turn_id):
+            idle_polls = 0
+            yield live
         if not notified:
             idle_polls += 1
             if idle_ping_every and idle_polls % idle_ping_every == 0:

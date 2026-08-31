@@ -22,7 +22,11 @@ Agent execution plane: TurnController, AgentEngine, tools, retrieval index.
 | `INDEX_VIA_WORKER` | no | `true` 时索引经 outbox → Redis Streams → sources-retrieval |
 | `SERVICE_ROLE` | no | `orchestrator`（默认 compose）\| `monolith`（测试）\| `retrieval` |
 | `SOURCES_RETRIEVAL_URL` | no | 远程 embed / 同步平面（ADR-020） |
-| `REDIS_URL` | no | 平台任务总线 `agent.jobs` |
+| `REDIS_URL` | no | 平台任务总线 `agent.jobs` + Turn 门铃/活流 Pub/Sub |
+| `TURN_DISPATCH_WAKE` | no | `redis`（默认）\| `postgres` \| `both` — claim 仍在 PG CAS |
+| `EVENT_DURABILITY` | no | `checkpoint`（默认，delta 走 live）\| `all`（delta 仍写 PG） |
+| `STREAM_LIVENESS_HEARTBEAT_SECONDS` | no | 默认 `45`；checkpoint 流式期间写耐久 `turn.thinking(stream-live)` 喂 stall |
+| `TURN_LIVE_PUBLISH_ENABLED` | no | 默认 true；发布 `turn.live.<turn_id>` |
 | `EMBEDDING_BACKEND` | no | 编排：`remote`；检索服务：`sentence_transformers`；lite：`hash` |
 | `EMBEDDING_MODEL` | no | 默认 `thenlper/gte-small`（仅 retrieval 服务加载） |
 | `EMBEDDING_MODEL_DIR` | no | 运行时模型目录（默认 `/data/models`） |

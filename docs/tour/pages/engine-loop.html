@@ -47,10 +47,11 @@ step_count += 1；写 step.started
     <span class="pt">◆ 要点  默认 compose 下模型出口在独立容器；不要画成编排进程直连供应商。</span>
 
   解析三类增量 → 分事件
-    text            turn.token（BufferedEventWriter ~40ms 窗合并；首条立即落盘）
-    thinking        turn.thinking.delta（默认不进 turn_views；Ops 评测可改 sidecar）
+    text            turn.token（默认 PUBLISH turn.live；EVENT_DURABILITY=all 时才批写 PG）
+    thinking        turn.thinking.delta（默认 live；不进 turn_views；Ops 可 sidecar）
     tool_use        本步结束后成批执行，不在流中途跑 handler
     流结束后写 usage.reported，再查一次预算（避免超预算响应被当成正常终稿）
+    <span class="pt">◆ 要点  checkpoint 下 delta 不是 turn_events 行；stall/投影看的是耐久事件新鲜度。</span>
 
   有 tool_use
     _run_tool_batch：连续只读可并行，变更类串行（见下）
@@ -141,9 +142,10 @@ claim         15s         start_timeout（还没进 while）
 fill 阶梯阈值细节            → context.policy
 斜杠编译                     → InputCompiler
 Stall Watchdog               → 旁挂循环（180s 无新事件且非 waiting_approval；默认 auto-fail → step_timeout）
-  stall 看的是 turn_events 新鲜度，不是模型是否仍在 think
+  stall 看的是耐久 turn_events 新鲜度（含 stream-live 心跳），不是 live 是否仍在推 token
+    <span class="pt">◆ 要点  checkpoint 下 delta 不进 PG；Engine 开流后每 ~45s 写 turn.thinking(stream-live) 喂 stall。</span>
   thinking.delta 若 divert 出库，必须另有心跳，否则 watchdog 会把活 Turn 当死</pre>
-          <p class="figure-lead">海报中间自上而下的箭头链即 assemble → stream（经 model-gateway）→ 解析 → 工具（经 sandbox / retrieval）或终局。verify 是第 5 步旁路，左右不是第二套主链。</p>
+          <p class="figure-lead">海报中间自上而下的箭头链即 assemble → stream（经 model-gateway）→ 解析（delta 默认 <code>turn.live.*</code>）→ 工具（经 sandbox / retrieval）或终局。verify 是第 5 步旁路；耐久边界见 <code>step.started</code> / tool / 终态，左右不是第二套主链。</p>
           <div class="src"><code>engine/agent_engine.py</code> · <code>model/gateway.py</code> · <code>model/remote_provider.py</code> · <code>tools/core/remote_sandbox.py</code> · <code>retrieval/remote_embedder.py</code></div>
         </div>
         <figure class="figure">

@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     runner_lease_reconcile_interval_seconds: float = 30.0
     # O1 / WP5→WP9: default pull (set TURN_DISPATCH=push to roll back).
     turn_dispatch: str = "pull"
+    # Wake channel for pull claim: redis | postgres | both.
+    # Truth/CAS stay in Postgres; Redis Pub/Sub is doorbell-only.
+    turn_dispatch_wake: str = "redis"
+    # Live SSE: also consume turn.live.* Pub/Sub (durable catch-up still PG).
+    turn_live_fanout_enabled: bool = True
     turn_claim_timeout_seconds: float = 15.0
     # O2 / WP6: approve/deny/patch/cancel via run_commands table (false → legacy HTTP).
     run_commands_channel_enabled: bool = True

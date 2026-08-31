@@ -13,14 +13,31 @@ export function mergeEventsBySequence(
 ): TurnEvent[] {
   if (live.length === 0) return snapshot;
   if (snapshot.length === 0) return live;
+
   const bySeq = new Map<number, TurnEvent>();
-  for (const ev of snapshot) {
-    if (typeof ev.sequence === "number") bySeq.set(ev.sequence, ev);
-  }
-  for (const ev of live) {
-    if (typeof ev.sequence === "number") bySeq.set(ev.sequence, ev);
-  }
-  return [...bySeq.values()].sort((a, b) => a.sequence - b.sequence);
+  const byLiveId = new Map<string, TurnEvent>();
+
+  const ingest = (ev: TurnEvent) => {
+    if (ev.live || ev.sequence == null) {
+      byLiveId.set(ev.event_id, ev);
+      return;
+    }
+    bySeq.set(ev.sequence, ev);
+  };
+  for (const ev of snapshot) ingest(ev);
+  for (const ev of live) ingest(ev);
+
+  const durable = [...bySeq.values()].sort(
+    (a, b) => (a.sequence as number) - (b.sequence as number),
+  );
+  const liveOnly = [...byLiveId.values()].sort((a, b) => {
+    const la = a.live_seq ?? 0;
+    const lb = b.live_seq ?? 0;
+    if (la !== lb) return la - lb;
+    return String(a.ts ?? "").localeCompare(String(b.ts ?? ""));
+  });
+  // Live deltas are display-only; keep durable first, then live chronologically.
+  return [...durable, ...liveOnly];
 }
 
 export function toHistoryItem(turn: TurnSummary): TurnHistoryItem {

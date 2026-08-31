@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import time
+from contextlib import suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -43,6 +44,46 @@ DELTA_EVENT_TYPES = frozenset(
         "section.draft.delta",
     }
 )
+
+
+def _event_durability() -> str:
+    """all | checkpoint (default checkpoint)."""
+    raw = (getattr(settings, "event_durability", None) or "checkpoint").strip().lower()
+    if raw in {"all", "full", "persist"}:
+        return "all"
+    return "checkpoint"
+
+
+def _live_publish_enabled() -> bool:
+    return bool(getattr(settings, "turn_live_publish_enabled", True))
+
+
+def _build_live_envelope(
+    *,
+    turn_id: UUID,
+    run_id: UUID,
+    trace_id: UUID,
+    event_type: str,
+    payload: dict,
+    step_index: int,
+    live_seq: int,
+) -> dict:
+    """SSE-compatible envelope without durable PG sequence."""
+    return {
+        "event_id": str(uuid4()),
+        "stream_id": str(turn_id),
+        "sequence": None,
+        "live": True,
+        "live_seq": live_seq,
+        "type": event_type,
+        "turn_id": str(turn_id),
+        "run_id": str(run_id),
+        "step_index": step_index,
+        "trace_id": str(trace_id),
+        "causation_id": None,
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "payload": payload,
+    }
 
 _INSERT_SQL = """
 INSERT INTO turn_events (
@@ -104,6 +145,35 @@ class BufferedEventWriter:
         self._sidecar_buf: list[str] = []
         self._last_heartbeat = 0.0
         self._omitted_thinking = 0
+        # checkpoint durability: stream deltas skip PG; fan out via Redis live.
+        self._live_only_deltas = _event_durability() == "checkpoint"
+        self._live_seq = 0
+        self._stream_liveness_task: asyncio.Task | None = None
+        self._stream_liveness_interval = float(
+            getattr(settings, "stream_liveness_heartbeat_seconds", 45.0)
+        )
+
+    def _next_live_seq(self) -> int:
+        self._live_seq += 1
+        return self._live_seq
+
+    async def _publish_live(
+        self, *, event_type: str, payload: dict, step_index: int
+    ) -> bool:
+        if not _live_publish_enabled():
+            return False
+        from app.platform_bus.pubsub import publish_turn_live
+
+        envelope = _build_live_envelope(
+            turn_id=self._turn_id,
+            run_id=self._run_id,
+            trace_id=self._trace_id,
+            event_type=event_type,
+            payload=payload,
+            step_index=step_index,
+            live_seq=self._next_live_seq(),
+        )
+        return await asyncio.to_thread(publish_turn_live, self._turn_id, envelope)
 
     async def append_delta(
         self, *, event_type: str, payload: dict, step_index: int
@@ -120,7 +190,22 @@ class BufferedEventWriter:
         maybe_validate_event_payload(event_type, payload)
         if event_type == "turn.thinking.delta" and self._skip_thinking_db:
             await self._divert_thinking(payload=payload, step_index=step_index)
+            if self._live_only_deltas:
+                await self._publish_live(
+                    event_type=event_type, payload=payload, step_index=step_index
+                )
             return
+        if self._live_only_deltas:
+            if await self._publish_live(
+                event_type=event_type, payload=payload, step_index=step_index
+            ):
+                await self._maybe_stream_liveness_heartbeat(step_index)
+                return
+            logger.warning(
+                "live publish failed; PG fallback for delta type=%s turn_id=%s",
+                event_type,
+                self._turn_id,
+            )
         if self._closed or self._window <= 0:
             # 回滚旋钮 / 关闭后迟到的 delta：不走缓冲，逐条写库。
             await self._write_rows([(event_type, payload, step_index)])
@@ -130,6 +215,66 @@ class BufferedEventWriter:
             await self.flush()
         elif self._flush_task is None or self._flush_task.done():
             self._flush_task = asyncio.create_task(self._delayed_flush())
+
+    def start_stream_liveness(self, step_index: int) -> None:
+        """Background durable heartbeat while model stream is open (checkpoint mode).
+
+        Covers slow first-byte waits (e.g. ~60s API latency) where no live deltas
+        are emitted yet; stall watchdog keys off turn_events freshness.
+        """
+        if not self._live_only_deltas or self._closed:
+            return
+        if self._stream_liveness_interval <= 0:
+            return
+        if self._stream_liveness_task is not None and not self._stream_liveness_task.done():
+            return
+        self._last_heartbeat = time.monotonic()
+        self._stream_liveness_task = asyncio.create_task(
+            self._stream_liveness_loop(step_index),
+            name=f"stream-liveness-{self._turn_id}",
+        )
+
+    async def stop_stream_liveness(self) -> None:
+        task = self._stream_liveness_task
+        self._stream_liveness_task = None
+        if task is None or task.done():
+            return
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+    async def _stream_liveness_loop(self, step_index: int) -> None:
+        interval = self._stream_liveness_interval
+        if interval <= 0:
+            return
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                await self._write_stream_liveness(step_index)
+        except asyncio.CancelledError:
+            raise
+
+    async def _maybe_stream_liveness_heartbeat(self, step_index: int) -> None:
+        if not self._live_only_deltas or self._closed:
+            return
+        if self._stream_liveness_task is None or self._stream_liveness_task.done():
+            return
+        if self._stream_liveness_interval <= 0:
+            return
+        now = time.monotonic()
+        if (
+            self._last_heartbeat != 0.0
+            and now - self._last_heartbeat < self._stream_liveness_interval
+        ):
+            return
+        await self._write_stream_liveness(step_index)
+
+    async def _write_stream_liveness(self, step_index: int) -> None:
+        payload = {"step_index": step_index, "label": "stream-live"}
+        maybe_validate_event_payload("turn.thinking", payload)
+        self._last_heartbeat = time.monotonic()
+        async with self._flush_lock:
+            await self._write_rows([("turn.thinking", payload, step_index)])
 
     async def _divert_thinking(self, *, payload: dict, step_index: int) -> None:
         """将 thinking delta 旁路到 sidecar 文件，并周期性写存活行。
@@ -227,6 +372,7 @@ class BufferedEventWriter:
             None
         """
         self._closed = True
+        await self.stop_stream_liveness()
         if self._flush_task is not None and not self._flush_task.done():
             self._flush_task.cancel()
             try:

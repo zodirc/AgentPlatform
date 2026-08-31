@@ -25,55 +25,92 @@ _LISTEN_PROBE_SECONDS = 30.0
 
 
 class TurnEventListener:
-    """turn_events NOTIFY → 投影队列 + per-turn asyncio.Event _fan-out。"""
+    """turn_events NOTIFY + optional Redis turn.live → 投影队列 + per-turn fan-out。"""
 
     def __init__(self, *, queue_maxsize: int = 1000) -> None:
         self._queue: asyncio.Queue[UUID] = asyncio.Queue(maxsize=queue_maxsize)
         # B9: per-turn waiter Events were never removed; a TTL cache bounds the
         # map (finished turns stop being waited on well within the TTL).
         self._turn_events: TTLCache = TTLCache(maxsize=4096, ttl=3600)
+        # Live delta envelopes keyed by turn (checkpoint durability path).
+        self._live_buffers: TTLCache = TTLCache(maxsize=4096, ttl=3600)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._conn = None
         self._consumer_task: asyncio.Task | None = None
         self._listen_task: asyncio.Task | None = None
+        self._live_task: asyncio.Task | None = None
 
     async def start(self) -> None:
-        """启动 LISTEN 循环与投影 consumer 任务。
-
-        参数:
-            无。
-
-        返回:
-            None。
-        """
+        """启动 LISTEN 循环、可选 Redis live、与投影 consumer 任务。"""
         from app.db.pool import get_pool
 
         self._loop = asyncio.get_running_loop()
         await get_pool()
         self._consumer_task = asyncio.create_task(self._consumer_loop())
         self._listen_task = asyncio.create_task(self._listen_loop())
+        if bool(getattr(settings, "turn_live_fanout_enabled", True)):
+            self._live_task = asyncio.create_task(self._live_loop())
 
     async def stop(self) -> None:
-        """取消后台任务并等待退出（应用 shutdown）。
+        """取消后台任务并等待退出（应用 shutdown）。"""
+        for task in (self._listen_task, self._consumer_task, self._live_task):
+            if task:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+        self._listen_task = None
+        self._consumer_task = None
+        self._live_task = None
 
-        参数:
-            无。
+    def push_live(self, turn_id: UUID, envelope: dict) -> None:
+        """Enqueue a live envelope and wake SSE waiters (no projection)."""
+        buf: asyncio.Queue = self._live_buffers.setdefault(
+            turn_id, asyncio.Queue(maxsize=512)
+        )
+        try:
+            buf.put_nowait(envelope)
+        except asyncio.QueueFull:
+            try:
+                buf.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                buf.put_nowait(envelope)
+            except asyncio.QueueFull:
+                logger.warning("live buffer full turn_id=%s; drop", turn_id)
+        self._turn_events.setdefault(turn_id, asyncio.Event()).set()
 
-        返回:
-            None。
-        """
-        if self._listen_task:
-            self._listen_task.cancel()
+    def drain_live(self, turn_id: UUID) -> list[dict]:
+        """Non-blocking drain of queued live envelopes for ``turn_id``."""
+        buf = self._live_buffers.get(turn_id)
+        if buf is None:
+            return []
+        out: list[dict] = []
+        while True:
             try:
-                await self._listen_task
-            except asyncio.CancelledError:
-                pass
-        if self._consumer_task:
-            self._consumer_task.cancel()
+                out.append(buf.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return out
+
+    async def _live_loop(self) -> None:
+        """PSUBSCRIBE turn.live.* and fan into per-turn buffers."""
+        from app.services.realtime.redis_bus import listen_turn_live
+
+        while True:
             try:
-                await self._consumer_task
+
+                async def _on_env(turn_id: UUID, envelope: dict) -> None:
+                    self.push_live(turn_id, envelope)
+
+                await listen_turn_live(_on_env)
             except asyncio.CancelledError:
-                pass
+                raise
+            except Exception:
+                logger.exception("turn.live subscribe error; retrying")
+                await asyncio.sleep(1)
 
     async def notify(self, turn_id: UUID) -> None:
         """本地唤醒：create_turn 等路径在无 NOTIFY 时主动 fan-out。

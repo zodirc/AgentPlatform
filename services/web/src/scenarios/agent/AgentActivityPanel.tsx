@@ -74,6 +74,8 @@ export function deriveAgentActivity(
       (c) =>
         c.type === "tool.completed" &&
         String(c.payload.tool_call_id ?? "") === id &&
+        typeof c.sequence === "number" &&
+        typeof e.sequence === "number" &&
         c.sequence > e.sequence,
     );
     return !completed;

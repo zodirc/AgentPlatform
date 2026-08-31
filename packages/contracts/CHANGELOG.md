@@ -3,6 +3,12 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.13 — 2026-08-31
+
+- `events/envelope.json`: 支持活流信封 `live=true` + `sequence=null` + `live_seq>=1`
+  （Redis `turn.live.*` / EVENT_DURABILITY=checkpoint）。耐久信封仍要求
+  `sequence>=1`。向后兼容（旧耐久载荷不变）。
+
 ## 0.3.12 — 2026-08-25
 
 - `python/agent_contracts/writing_prefs.py`: `ALIGN_REWARD_FLOOR` 同时约束场面/对白奖励（与 `exemplar_alignment_high` 同门槛）。向后兼容。

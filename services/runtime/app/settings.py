@@ -348,6 +348,16 @@ class Settings(BaseSettings):
     # O1 / WP5→WP9: default pull (set TURN_DISPATCH=push to roll back).
     turn_dispatch: str = "pull"
     turn_dispatch_poll_seconds: float = 2.0
+    # Wake channel: redis | postgres | both. Claim ownership always PG CAS.
+    turn_dispatch_wake: str = "redis"
+    # all = persist stream deltas to turn_events; checkpoint = live-only deltas
+    # (durable tool/state events still INSERT). Reconnect uses views + durable.
+    event_durability: str = "checkpoint"
+    # Publish live envelopes to turn.live.<turn_id> (Redis Pub/Sub).
+    turn_live_publish_enabled: bool = True
+    # Checkpoint mode: durable turn.thinking liveness while stream deltas are
+    # live-only (stall watchdog uses turn_events.ts; default 45s < 180s threshold).
+    stream_liveness_heartbeat_seconds: float = 45.0
     # O2 / WP6: consume run_commands for owned runs.
     run_commands_channel_enabled: bool = True
     # docs/27 MT5b: soft cap on concurrent Turns in this process (0 = unlimited).

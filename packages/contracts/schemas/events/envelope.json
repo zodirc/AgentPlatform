@@ -2,23 +2,28 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agent-platform.local/schemas/events/envelope.json",
   "title": "TurnEventEnvelope",
-  "description": "Canonical envelope for turn_events rows and SSE payloads. Payload per-type schemas: payloads/_index.json. See docs/contracts.md §3.1, ADR-017.",
+  "description": "Canonical envelope for durable turn_events rows and SSE/live payloads. Payload per-type schemas: payloads/_index.json. Live fanout (EVENT_DURABILITY=checkpoint) sets live=true, sequence=null, live_seq>=1; reconnect authority remains durable sequence.",
   "type": "object",
-  "required": [
-    "event_id",
-    "stream_id",
-    "sequence",
-    "type",
-    "turn_id",
-    "run_id",
-    "ts",
-    "payload"
-  ],
   "additionalProperties": false,
   "properties": {
     "event_id": { "type": "string", "format": "uuid" },
     "stream_id": { "type": "string", "format": "uuid", "description": "Usually equals turn_id" },
-    "sequence": { "type": "integer", "minimum": 1 },
+    "sequence": {
+      "description": "Durable PG sequence (>=1). Null only when live=true.",
+      "anyOf": [
+        { "type": "integer", "minimum": 1 },
+        { "type": "null" }
+      ]
+    },
+    "live": {
+      "type": "boolean",
+      "description": "True for Redis turn.live fanout (not a turn_events row)."
+    },
+    "live_seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Per-turn live ordering; only when live=true."
+    },
     "type": { "$ref": "types.json#/$defs/eventType" },
     "turn_id": { "type": "string", "format": "uuid" },
     "run_id": { "type": "string", "format": "uuid" },
@@ -27,5 +32,39 @@
     "causation_id": { "type": ["string", "null"], "format": "uuid" },
     "ts": { "type": "string", "format": "date-time" },
     "payload": { "type": "object" }
-  }
+  },
+  "required": [
+    "event_id",
+    "stream_id",
+    "type",
+    "turn_id",
+    "run_id",
+    "ts",
+    "payload"
+  ],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "live": { "const": true } },
+        "required": ["live"]
+      },
+      "then": {
+        "required": ["live", "live_seq", "sequence"],
+        "properties": {
+          "live": { "const": true },
+          "live_seq": { "type": "integer", "minimum": 1 },
+          "sequence": { "type": "null" }
+        }
+      },
+      "else": {
+        "required": ["sequence"],
+        "properties": {
+          "sequence": { "type": "integer", "minimum": 1 }
+        },
+        "not": {
+          "required": ["live_seq"]
+        }
+      }
+    }
+  ]
 }

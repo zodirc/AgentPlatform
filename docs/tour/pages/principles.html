@@ -48,11 +48,19 @@ R5  可测才合并
 
           <h3>不变量</h3>
           <pre class="seq">跨服务     api / runtime / web / sources-retrieval / model-gateway / sandbox
-           禁止 Python 互 import；Turn 事实桥仍为 Postgres INSERT + NOTIFY / LISTEN
-           平面热路径用 HTTP（embed / LLM / exec）；异步索引可走 Redis Streams
-           首 token 与 query embed 禁止上总线
+           禁止 Python 互 import
+           Turn 真源与 claim 只在 Postgres；Redis 可丢、可重复，不能授予领取权
+           turn.dispatch ∈ Redis Pub/Sub（TURN_DISPATCH_WAKE；可 both/postgres）
+           禁止用 Streams/XACK 表示 claim
+           agent.jobs 只承载 Turn 外异步活；首 token / query embed / live delta 不上该总线
+           平面热路径用 HTTP（embed / LLM / exec）
 场景       AgentEngine 禁止 if scenario == "…"
            差只经 Profile / ToolScope；未知 hook 启动期 fail-fast
+事件分层   耐久层：状态机 · tool 边界 · 审批 · 终态 → turn_events（占 sequence）
+           活流层：turn.token · thinking.delta · tool.delta · section.draft.delta
+           默认 EVENT_DURABILITY=checkpoint：活流走 turn.live.*，不写 PG
+           重连以 turn_views + 耐久 sequence 为准；不保证逐 token 续播
+           活路径加速显示；冲突以 PG/view 为准；禁止用 api 内存回写 runtime
 终态       cancelled ≠ failed
            审批挂起后同一 run_id + checkpoint 续跑；不存在 ResumeTurn
 两门正交   审批门 = 是否允许执行；沙箱门 = 进程可写范围（默认 sandbox 平面）
@@ -63,7 +71,8 @@ R5  可测才合并
            官方 harness 自身失败不得标成模型 resolve_rate = 0
 权重       ST/bge-m3 只在 sources-retrieval；编排 runtime 默认 remote
 
-<span class="pt">◆ 要点  取消是 cancelled。写成 failed，用户取消与 runner_lost 就分不开了。</span></pre>
-          <div class="src"><code>deploy/docker-compose.yml</code> · <code>deploy/compose/planes.yml</code> · <code>scenarios/registry.py</code> · <code>scripts/check_scenario_leak.py</code></div>
+<span class="pt">◆ 要点  取消是 cancelled。写成 failed，用户取消与 runner_lost 就分不开了。</span>
+<span class="pt">◆ 要点  Redis 挂：poll 仍能 claim；活流可降级回写 PG；终态仍在 Postgres。</span></pre>
+          <div class="src"><code>deploy/docker-compose.yml</code> · <code>deploy/compose/planes.yml</code> · <code>platform_bus/pubsub.py</code> · <code>scenarios/registry.py</code></div>
         </div>
       </section>

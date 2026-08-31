@@ -191,6 +191,10 @@ services:
       EMBEDDING_BACKEND: remote
       SOURCES_STARTUP_SYNC_ENABLED: "false"
       SOURCES_WATCH_ENABLED: "false"
+      # PG = truth/CAS; Redis Pub/Sub = turn.dispatch wake + turn.live fanout.
+      TURN_DISPATCH_WAKE: ${TURN_DISPATCH_WAKE:-redis}
+      EVENT_DURABILITY: ${EVENT_DURABILITY:-checkpoint}
+      TURN_LIVE_PUBLISH_ENABLED: ${TURN_LIVE_PUBLISH_ENABLED:-true}
     depends_on:
       sources-retrieval:
         condition: service_healthy
@@ -207,6 +211,8 @@ services:
       SOURCES_RETRIEVAL_URL: http://sources-retrieval:8001
       MODEL_GATEWAY_URL: http://model-gateway:8003
       SANDBOX_PLANE_URL: http://sandbox:8004
+      TURN_DISPATCH_WAKE: ${TURN_DISPATCH_WAKE:-redis}
+      TURN_LIVE_FANOUT_ENABLED: ${TURN_LIVE_FANOUT_ENABLED:-true}
     depends_on:
       sources-retrieval:
         condition: service_healthy

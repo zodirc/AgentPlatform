@@ -57,7 +57,7 @@ export function RagEffectPage({ wb, embedded = false }: Props) {
         </dl>
         {wb.events.length > 0 ? (
           <pre className="mt-3 max-h-32 overflow-auto rounded-lg bg-background p-3 text-[10px] text-muted-foreground">
-            {wb.events.map((e) => `${e.sequence}:${e.type}`).join(" → ")}
+            {wb.events.map((e) => `${e.live ? `L${e.live_seq ?? "?"}` : e.sequence}:${e.type}`).join(" → ")}
           </pre>
         ) : (
           <p className="mt-3 text-xs text-muted-foreground/80">

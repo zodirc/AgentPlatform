@@ -10,10 +10,10 @@
           <pre class="seq">packages/contracts/
   openapi/public.yaml              对外 REST；description 含冒号必须加引号
                                    （否则 test_public_yaml_paths_exist_in_app 解析失败）
-  schemas/events/envelope.json     SSE / 行存储共用信封
-    required: event_id stream_id sequence type turn_id run_id ts payload
-    additionalProperties: false
-    sequence ≥ 1；stream_id 通常等于 turn_id
+  schemas/events/envelope.json     SSE / 行存储 / 活流共用信封（0.3.13+）
+    耐久：required 含 sequence≥1；additionalProperties false
+    活流：live=true · sequence=null · live_seq≥1（Redis turn.live.*）
+    stream_id 通常等于 turn_id
   schemas/events/types.json        事件枚举（phase0/1/2）
   schemas/events/payloads/*.json   分类型 payload；tool.completed.summary maxLength 4096
                                    turn.token / thinking.delta / section.draft.delta 的 delta ≤8192
@@ -23,10 +23,10 @@
   python/                          派生类型；api 测试须 overlay 本树，勿用缺文件的 stub 包
 
 校验
-  event_payload_validation 默认开
+  event_payload_validation 默认开（校验 payload，非整信封）
   高频 delta 默认轻量校验（R3）；event_payload_validation_strict_deltas 仅 CI
   delegate 摘要必须 clamp 到 4096，否则打破 tool.completed schema
-<span class="pt">◆ 要点  data: 是信封 JSON，不是供应商原始 HTTP 字节。缺 sequence 的「推送」无法续传。</span></pre>
+<span class="pt">◆ 要点  data: 是信封 JSON。耐久缺 sequence 无法续传；live 故意无 sequence，重连靠 view。</span></pre>
 
           <h3>只读 vs 开工</h3>
           <pre class="seq">不触发 Agent loop
@@ -39,12 +39,12 @@
   POST …/approve-tool-call|deny|cancel → run_commands，达持约副本</pre>
 
           <h3>组件地图</h3>
-          <pre class="seq">services/api          鉴权 · 准入 · 落库 · LISTEN · SSE · 投影 · 总线 enqueue
-services/runtime      orchestrator：claim · Engine · 工具调度 · 写事件（:8001 不公网）
+          <pre class="seq">services/api          鉴权 · 准入 · 落库 · turn.dispatch · 订 live · SSE · 投影 · 总线 enqueue
+services/runtime      orchestrator：claim · Engine · 写耐久事件 · PUBLISH live（:8001 不公网）
 services/sources-retrieval  唯一 embedding 池 · sync/watch · POST /internal/embed
 services/model-gateway      live LLM NDJSON · POST /internal/v1/complete
 services/sandbox            bwrap/landlock · POST /internal/sandbox/exec
-redis                 agent.jobs Streams（异步；首 token / query embed 禁止上总线）
+redis                 Pub/Sub（dispatch/live）+ Streams agent.jobs（异步索引）
 services/web          工作台；只消费 SSE 与 GET /view
 services/bench        官方评测 worker；隔离库
 services/release-console  发布台 :9090；对比指纹、标 dirty（含平面模块）
