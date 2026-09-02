@@ -20,6 +20,8 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
           <h3>主链</h3>
           <pre class="seq">1  意图分流（wants_new_piece × manuscript_is_occupied）
      「写一篇 / 写个故事」且稿已占用 → occupy=fresh：拷到 archive，unlink 当前稿，focus=ch1
+     空工作区不是禁写：`update_outline` / `draft_section` 会创建 outline.md 与 drafts/
+     没有 write_file；`propose_patch` 不能建新文件；不要把整章写在聊天里当交卷
      「续写 / 下一章 / 第 N 章」→ upsert 当前 drafts/manuscript.md
      「写一篇章纲」不是新开一篇，除非同时说另/新开
      <span class="pt">◆ 要点  不要让用户先删文件。fresh 是平台归档，不是产品提示「请清空」。</span>
@@ -58,7 +60,7 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
           <h3>Writing spec（易变垫底，≤620 字）</h3>
           <pre class="seq">build_writing_spec_block → volatile_context，不进 system 提示（prefix cache）
   book_scope  short|single|long     与卷内位置、三要素主项正交
-  work_mode   经典文学 / 连载网文    权重钉在工具里，设置页无滑条
+  work_mode   经典文学 / 连载网文    权重与金标库钉在工具里，设置页无滑条
   fragment    评分切片，不是本章必须交的工种
   focus / 这一场 / outline_phase
   无纲时写「新篇另起人与事」
