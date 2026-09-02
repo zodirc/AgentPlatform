@@ -54,6 +54,7 @@ SIGNAL_REWARD_KEYS: tuple[str, ...] = (
 )
 
 # Platform catalog (must match runtime markdown headings). Rhythm/texture only.
+# 路遥《平凡的世界》（1992 逝世）不是伯尔尼公约自动公版；仅作节奏原型，不进 builtin voice 样品。
 EXEMPLAR_CATALOG: dict[str, tuple[dict[str, str], ...]] = {
     "worldview_texture": (
         {"author": "鲁迅", "work": "孔乙己", "beat": "酒店格局"},
@@ -97,6 +98,48 @@ EXEMPLAR_CATALOG: dict[str, tuple[dict[str, str], ...]] = {
         {"author": "郁达夫", "work": "春风沉醉的晚上", "beat": "陈二妹进来"},
         {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
         {"author": "路遥", "work": "平凡的世界", "beat": "黄土暮色"},
+    ),
+}
+
+# web_serial 节奏库：只用 train split 作品，偏情节台阶/动作/劳动欲望，不含孔乙己/故乡质地核。
+EXEMPLAR_CATALOG_WEB_SERIAL: dict[str, tuple[dict[str, str], ...]] = {
+    "worldview_texture": (
+        {"author": "鲁迅", "work": "药", "beat": "丁字街头"},
+        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "鼎水沸涌"},
+        {"author": "鲁迅", "work": "故乡", "beat": "忙月"},
+    ),
+    "dialogue_dyad": (
+        {"author": "老舍", "work": "骆驼祥子", "beat": "虎妞拉话"},
+        {"author": "老舍", "work": "骆驼祥子", "beat": "刘四爷问车"},
+        {"author": "老舍", "work": "茶馆", "beat": "王利发招呼"},
+        {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
+    ),
+    "plot_progress": (
+        {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
+        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
+        {"author": "鲁迅", "work": "故乡", "beat": "宏儿水生"},
+    ),
+    "climax_beat": (
+        {"author": "鲁迅", "work": "药", "beat": "乌鸦飞去"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "啮王鼻"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "鼎中死战"},
+    ),
+    "battle_action": (
+        {"author": "鲁迅", "work": "铸剑", "beat": "鼎中死战"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "啮王鼻"},
+        {"author": "鲁迅", "work": "药", "beat": "抢灯笼"},
+    ),
+    "mixed": (
+        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
+        {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "鼎中死战"},
+        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
+        {"author": "老舍", "work": "茶馆", "beat": "王利发招呼"},
+        {"author": "鲁迅", "work": "药", "beat": "乌鸦飞去"},
     ),
 }
 
@@ -494,6 +537,12 @@ def platform_fragment_weights(work_mode: str = DEFAULT_WORK_MODE) -> dict[str, d
     return {f: normalize_row(table[f]) for f in FRAGMENT_TYPES}
 
 
+def exemplar_catalog(work_mode: str = DEFAULT_WORK_MODE) -> dict[str, tuple[dict[str, str], ...]]:
+    if normalize_work_mode(work_mode) == "web_serial":
+        return EXEMPLAR_CATALOG_WEB_SERIAL
+    return EXEMPLAR_CATALOG
+
+
 def platform_prefs_payload(
     *,
     preset_label: str = "balanced",
@@ -511,7 +560,7 @@ def platform_prefs_payload(
         "signal_penalties": penalties,
         "signal_rewards": rewards,
         "schema_version": SCHEMA_VERSION,
-        "exemplars": {k: [dict(x) for x in v] for k, v in EXEMPLAR_CATALOG.items()},
+        "exemplars": {k: [dict(x) for x in v] for k, v in exemplar_catalog(mode).items()},
     }
 
 

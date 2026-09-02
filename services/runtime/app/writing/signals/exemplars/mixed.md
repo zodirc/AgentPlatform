@@ -2,6 +2,7 @@
 fragment: mixed
 license: public_domain
 fit: 叙述、对白、人物变故叠在同一拍；禁止只搬「老爷」作收束口头禅。
+note: 路遥《平凡的世界》1992年逝世，非伯尔尼自动公版；仅作节奏原型，不进 builtin voice。
 ---
 
 ### 鲁迅《故乡》·老爷

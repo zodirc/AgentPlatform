@@ -81,17 +81,12 @@ async def load_metric_space(
     *,
     owner_user_id: UUID | None = None,
     work_id: UUID | None = None,
+    work_mode: str = "literary",
 ) -> MetricSpace:
-    """platform+overlay 空间。
-    
-    参数:
-        owner_user_id/work_id。
-    
-    返回:
-        MetricSpace。"""
+    """platform+overlay 空间。"""
     from app.writing.signals.space import load_platform_space
 
-    base = load_platform_space()
+    base = load_platform_space(work_mode)
     scope, extra = await load_overlay_exemplars(
         owner_user_id=owner_user_id,
         work_id=work_id,

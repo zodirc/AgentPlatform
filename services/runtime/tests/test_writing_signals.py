@@ -1,20 +1,8 @@
 from __future__ import annotations
 
-import importlib.util
-from pathlib import Path
+from app.writing.signals.prefs_loader import _module as _writing_prefs
 
-_WP = (
-    Path(__file__).resolve().parents[3]
-    / "packages"
-    / "contracts"
-    / "python"
-    / "agent_contracts"
-    / "writing_prefs.py"
-)
-_spec = importlib.util.spec_from_file_location("agent_contracts.writing_prefs", _WP)
-assert _spec and _spec.loader
-_wp = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_wp)
+_wp = _writing_prefs()
 
 FRAGMENT_TYPES = _wp.FRAGMENT_TYPES
 PLATFORM_SIGNAL_PENALTIES = _wp.PLATFORM_SIGNAL_PENALTIES
@@ -139,6 +127,52 @@ def test_exemplar_bank_covers_all_fragments() -> None:
     for frag in FRAGMENT_TYPES:
         proto = space.prototype(frag)
         assert proto is not None and proto.n >= 4
+
+
+def test_web_serial_bank_covers_catalog() -> None:
+    bank = load_platform_exemplars("web_serial")
+    catalog = _wp.exemplar_catalog("web_serial")
+    for frag in FRAGMENT_TYPES:
+        assert frag in bank and len(bank[frag]) >= 4, frag
+        titles = {(s.author, s.work, s.beat) for s in bank[frag]}
+        for entry in catalog[frag]:
+            assert (entry["author"], entry["work"], entry["beat"]) in titles, entry
+    space = load_platform_space("web_serial")
+    for frag in FRAGMENT_TYPES:
+        proto = space.prototype(frag)
+        assert proto is not None and proto.n >= 4
+    mixed_works = {s.work for s in bank["mixed"]}
+    assert "孔乙己" not in mixed_works
+
+
+def test_platform_prefs_exemplars_follow_work_mode() -> None:
+    lit = platform_prefs_payload(work_mode="literary")
+    web = platform_prefs_payload(work_mode="web_serial")
+    lit_mixed = {row["work"] for row in lit["exemplars"]["mixed"]}
+    web_mixed = {row["work"] for row in web["exemplars"]["mixed"]}
+    assert "孔乙己" in lit_mixed
+    assert "孔乙己" not in web_mixed
+    assert "骆驼祥子" in web_mixed
+    default = platform_prefs_payload()
+    assert {row["work"] for row in default["exemplars"]["mixed"]} == lit_mixed
+
+
+def test_writing_signals_carry_template_version(tmp_path, monkeypatch) -> None:
+    import asyncio
+
+    from app.settings import settings
+    from app.writing.outline_arc import STYLE_CONTRACT_TEMPLATE_VERSION
+    from app.writing.signals.assemble import build_writing_signals
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    monkeypatch.setattr(settings, "model_name", "test-model")
+    text = "院子里的人还在过日子，风把墙根的土吹起来，他站了一会儿才往里走。" * 40
+    out = asyncio.run(
+        build_writing_signals(text, fragment="mixed", persist=False)
+    )
+    assert out["template_version"] == STYLE_CONTRACT_TEMPLATE_VERSION
+    assert out["model_id"] == "test-model"
+    assert out["persisted"] is False
 
 
 def test_exemplar_self_alignment_is_high() -> None:
@@ -755,6 +789,14 @@ def test_repair_hint_forks_by_work_mode() -> None:
     assert "信息差" in web or "动作" in web
     assert "旁白" in web or "一两句" in web
     assert lit != web
+
+
+def test_repair_hints_carry_at_most_one_prohibition() -> None:
+    from app.writing.signals.repair import _HINTS, _HINTS_WEB_SERIAL
+
+    for table in (_HINTS, _HINTS_WEB_SERIAL):
+        for key, text in table.items():
+            assert text.count("不要") <= 1, key
 
 
 def test_repair_span_hint_follows_work_mode() -> None:

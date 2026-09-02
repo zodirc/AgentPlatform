@@ -118,16 +118,10 @@ def build_space(
     return MetricSpace(schema_id=FEATURE_SCHEMA_ID, by_fragment=by_fragment)
 
 
-@lru_cache(maxsize=1)
-def load_platform_space() -> MetricSpace:
-    """加载平台空间（cached）。
-
-    参数:
-        无。
-
-    返回:
-        MetricSpace。"""
-    return build_space(load_platform_exemplars(), scope="platform")
+@lru_cache(maxsize=4)
+def load_platform_space(work_mode: str = "literary") -> MetricSpace:
+    """加载平台空间（cached）。``work_mode=web_serial`` 用网文节奏库。"""
+    return build_space(load_platform_exemplars(work_mode), scope="platform")
 
 
 _OVERLAY_NEIGHBOR_CAP = 4

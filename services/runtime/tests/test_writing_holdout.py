@@ -98,3 +98,19 @@ def test_summarize_holdout_report_shape() -> None:
     assert JINJIUYE_PROBE.startswith("「金九爷")
     assert probe["l1_alignment_to_train"] is not None
     assert 0.0 <= float(probe["l1_alignment_to_train"]) <= 1.0
+
+
+def test_web_serial_catalog_is_partitioned() -> None:
+    works = {
+        entry["work"]
+        for rows in _wp.EXEMPLAR_CATALOG_WEB_SERIAL.values()
+        for entry in rows
+    }
+    assert works <= (TRAIN_WORKS | HOLDOUT_WORKS)
+    bank = load_platform_exemplars("web_serial")
+    assert unlabeled_works(bank) == []
+    mixed_works = {s.work for s in bank["mixed"]}
+    assert "孔乙己" not in mixed_works
+    assert "骆驼祥子" in mixed_works
+    for frag in _wp.FRAGMENT_TYPES:
+        assert len(bank[frag]) >= 4, frag

@@ -357,7 +357,9 @@ async def build_writing_signals(
     style_gains = load_style_gains(work_mode=work_mode)
     # Weights + signal gains live in writing tools (writing_prefs.json), not Settings.
     prefs = platform_prefs_payload(work_mode=work_mode, style_gains=style_gains)
-    space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
+    space = await load_metric_space(
+        owner_user_id=owner_id, work_id=work_id, work_mode=work_mode
+    )
     declared = normalize_fragment(fragment)
     prior = _manifest_section_row(turn_id, session_id, section_id)
     scored = score_writing_fragment(
@@ -382,6 +384,10 @@ async def build_writing_signals(
         and any(k in duty for k in ("铺垫", "加压", "过日子", "立人"))
     )
 
+    from app.writing.outline_arc import STYLE_CONTRACT_TEMPLATE_VERSION
+    from app.settings import settings
+
+    model_id = str(getattr(settings, "model_name", "") or "").strip()
     block: dict[str, Any] = {
         "prefs_scope": "platform",
         "work_mode": work_mode,
@@ -394,6 +400,7 @@ async def build_writing_signals(
         "style_gains": prefs.get("style_gains"),
         "preset": prefs.get("preset_label", "balanced"),
         "schema_version": prefs.get("schema_version", 1),
+        "template_version": STYLE_CONTRACT_TEMPLATE_VERSION,
         "prefs_updated_at": None,
         "weight_set_version": (
             f"platform:{work_mode}:{prefs.get('schema_version', 1)}:"
@@ -403,6 +410,8 @@ async def build_writing_signals(
         "duty_conflict": duty_conflict,
         **scored,
     }
+    if model_id:
+        block["model_id"] = model_id
 
     evaluation_id: str | None = None
     if persist and owner_id is not None and text.strip():
@@ -471,7 +480,9 @@ async def writing_rubric(
         duty=duty,
         work_mode=work_mode,
     )
-    space = await load_metric_space(owner_user_id=owner_id, work_id=work_id)
+    space = await load_metric_space(
+        owner_user_id=owner_id, work_id=work_id, work_mode=work_mode
+    )
     proto = space.prototype(declared)
     bank_titles = []
     if proto is not None:
@@ -664,7 +675,7 @@ async def score_writing_lab(
         raise WritingLabError("text_too_long", f"Text exceeds {LAB_TEXT_MAX_CHARS} characters")
 
     prefs = overlay_lab_prefs(prefs_overlay)
-    space = load_platform_space()
+    space = load_platform_space(str(prefs.get("work_mode") or "literary"))
     scored = score_writing_fragment(
         body,
         fragment_declared=declared,

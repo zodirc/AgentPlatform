@@ -27,7 +27,10 @@ def test_ddl_file_exists_and_isolated_from_rag() -> None:
     from pathlib import Path as P
 
     # contracts DDL lives at repo packages/contracts/schemas/ddl/
-    root = P(__file__).resolve().parents[3]  # AgentPlatform/
+    here = P(__file__).resolve()
+    if len(here.parents) <= 3:
+        pytest.skip("requires repo checkout layout")
+    root = here.parents[3]  # AgentPlatform/
     ddl = root / "packages" / "contracts" / "schemas" / "ddl" / "phase1m_work_ast_index.sql"
     assert ddl.is_file()
     text = ddl.read_text()
@@ -881,7 +884,12 @@ async def test_light_scan_does_not_index_writing_markdown(
 def test_alembic_work_ast_index_chain() -> None:
     from pathlib import Path as P
 
-    versions = P(__file__).resolve().parents[2] / "api" / "alembic" / "versions"
+    here = P(__file__).resolve()
+    if len(here.parents) <= 2:
+        pytest.skip("requires repo checkout layout")
+    versions = here.parents[2] / "api" / "alembic" / "versions"
+    if not versions.is_dir():
+        pytest.skip("api alembic not copied into the test tree")
     m18 = versions / "0018_phase1m_work_ast_index.py"
     m19 = versions / "0019_phase1n_work_ast_index_jobs.py"
     assert m18.is_file(), m18

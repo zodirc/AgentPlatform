@@ -12,6 +12,7 @@ from app.writing.signals.signature import Vec, signature_vec
 from app.writing.text_metrics import visible_chars
 
 _EXEMPLAR_DIR = Path(__file__).resolve().parent / "exemplars"
+_EXEMPLAR_WEB_SERIAL_DIR = Path(__file__).resolve().parent / "exemplars_web_serial"
 _HEADING = re.compile(
     r"^(?P<author>[^《]+)《(?P<work>[^》]+)》(?:·(?P<beat>\S.*))?$"
 )
@@ -135,15 +136,16 @@ def load_exemplars_dir(
     return {k: tuple(v) for k, v in bank.items()}
 
 
-@lru_cache(maxsize=1)
-def load_platform_exemplars() -> dict[str, tuple[Exemplar, ...]]:
-    """平台范文（cached）。
+@lru_cache(maxsize=4)
+def load_platform_exemplars(work_mode: str = "literary") -> dict[str, tuple[Exemplar, ...]]:
+    """平台范文（cached）。``work_mode=web_serial`` 换节奏库。"""
+    from app.writing.signals.prefs_loader import _module as _writing_prefs
 
-    参数:
-        无。
-
-    返回:
-        dict。"""
+    mode = _writing_prefs().normalize_work_mode(work_mode)
+    if mode == "web_serial" and _EXEMPLAR_WEB_SERIAL_DIR.is_dir():
+        bank = load_exemplars_dir(_EXEMPLAR_WEB_SERIAL_DIR, scope="platform")
+        if bank:
+            return bank
     return load_exemplars_dir(_EXEMPLAR_DIR, scope="platform")
 
 

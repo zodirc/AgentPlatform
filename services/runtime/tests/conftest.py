@@ -5,7 +5,8 @@ from pathlib import Path
 
 import pytest
 
-_ROOT = Path(__file__).resolve().parents[3]
+_here = Path(__file__).resolve()
+_ROOT = _here.parents[3] if len(_here.parents) > 3 else Path("/")
 _CONTRACTS_PY = _ROOT / "packages" / "contracts" / "python"
 if _CONTRACTS_PY.is_dir() and str(_CONTRACTS_PY) not in sys.path:
     sys.path.insert(0, str(_CONTRACTS_PY))
