@@ -172,3 +172,19 @@ def test_format_tool_timeline_includes_delivery() -> None:
     )
     assert "export_document:ok/delivery=failed" in text
     assert "Export failed" in text
+
+
+def test_max_event_sequence_skips_live_null_sequence() -> None:
+    assert (
+        eval_run._max_event_sequence(
+            [
+                {"type": "tool.started", "sequence": 3},
+                {"type": "checkpoint.delta", "sequence": None},
+                {"type": "approval.requested", "sequence": 5},
+            ]
+        )
+        == 5
+    )
+    assert eval_run._max_event_sequence([{"type": "checkpoint.delta", "sequence": None}]) == 0
+    assert eval_run._durable_sequence({"sequence": None}) is None
+    assert eval_run._durable_sequence({"sequence": 2}) == 2

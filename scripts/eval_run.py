@@ -608,7 +608,7 @@ def collect_sse_with_reconnect(
     )
     if not first_batch:
         raise AssertionError("no events before reconnect")
-    last_sequence = max(e["sequence"] for e in first_batch)
+    last_sequence = _max_event_sequence(first_batch)
     second_batch, _, _ = collect_sse_event_records(
         base,
         turn_id,
@@ -617,7 +617,7 @@ def collect_sse_with_reconnect(
     )
     merged = first_batch + second_batch
     types = [e["type"] for e in merged]
-    sequences = [e["sequence"] for e in merged]
+    sequences = [s for e in merged if (s := _durable_sequence(e)) is not None]
     if len(sequences) != len(set(sequences)):
         raise AssertionError(f"duplicate sequences after reconnect: {sequences}")
     if sequences != sorted(sequences):
@@ -925,8 +925,21 @@ def merge_sse_records(events: list[str], event_records: list[dict], records: lis
     events.extend(e["type"] for e in records)
 
 
+def _durable_sequence(event: dict) -> int | None:
+    """PG cursor for reconnect; live fanout envelopes omit sequence."""
+    raw = event.get("sequence")
+    if raw is None or raw is False:
+        return None
+    try:
+        seq = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return seq
+
+
 def _max_event_sequence(event_records: list[dict]) -> int:
-    return max((int(e.get("sequence", 0)) for e in event_records), default=0)
+    seqs = [s for e in event_records if (s := _durable_sequence(e)) is not None]
+    return max(seqs, default=0)
 
 
 def run_case(path: Path, base: str, workspace: Path) -> None:
@@ -1039,7 +1052,7 @@ def run_case(path: Path, base: str, workspace: Path) -> None:
                 base,
                 turn_id,
                 terminal_events,
-                since=max((e["sequence"] for e in partial), default=0),
+                since=_max_event_sequence(partial),
             )
             merge_sse_records(events, event_records, tail)
             ready.set()
