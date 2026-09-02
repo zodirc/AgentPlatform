@@ -92,7 +92,9 @@ def build_registry() -> ToolRegistry:
             name="propose_patch",
             description=(
                 "Queue a surgical edit for UI diff / accept flow (writing / intel): old_text "
-                "must be an exact unique span; new_text replaces only that span. Does NOT "
+                "must be an exact unique span; new_text replaces only that span. The target "
+                "path must already exist — this tool cannot create outline.md or drafts/; "
+                "use update_outline / draft_section for new files. Does NOT "
                 "modify the file by itself — status stays pending until apply_patch or user "
                 "accept (writing may auto-apply). Prechecks applyability (unique span; git "
                 "apply --check when the worktree is a git repo) and returns status=error with "
@@ -149,7 +151,9 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="draft_section",
             description=(
-                "Draft or update a chapter. Default monofile: upserts a marked block in "
+                "Draft or update a chapter. Creates drafts/ and the chapter file if they "
+                "do not exist — an empty workspace is allowed; do not switch to chat "
+                "delivery. Default monofile: upserts a marked block in "
                 "drafts/manuscript.md (visible work-surface draft; append new chapters / "
                 "replace same section_id). "
                 "If the user asked for a new standalone piece (写一篇 / 写个故事, not 续写) "
@@ -331,7 +335,8 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="update_outline",
             description=(
-                "Create or update outline.md. Prefer mode=append for long outlines / "
+                "Create or update outline.md (creates the file when absent; empty "
+                "workspace is allowed). Prefer mode=append for long outlines / "
                 "batch continuation; replace requires the full outline (or force=true)"
             ),
             parameters={

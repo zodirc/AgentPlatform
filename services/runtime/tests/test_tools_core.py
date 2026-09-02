@@ -385,6 +385,8 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "propose_patch" in writing.system_prompt
     assert "export_document" in writing.system_prompt
     assert "遵守工具返回的状态" in writing.system_prompt
+    assert "不提供 `write_file`" in writing.system_prompt
+    assert "draft_section` 落盘" in writing.system_prompt
     assert "Settings → 写作风格" not in writing.system_prompt
     assert "200–400" not in writing.system_prompt
     assert "1000–2000" not in writing.system_prompt

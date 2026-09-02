@@ -45,6 +45,8 @@ def test_draft_section_description_follows_repair_neighbor() -> None:
     assert "do not upsert the whole chapter" in desc
     assert "mode=append" in desc
     assert "narration" in desc
+    assert "Creates drafts/" in desc
+    assert "empty workspace is allowed" in desc
 
 
 def test_search_sources_description_includes_library_map() -> None:
@@ -67,6 +69,16 @@ def test_search_sources_description_includes_library_map() -> None:
     query_desc = str(props.get("query", {}).get("description", "")).lower()
     assert "verbatim" in query_desc
     assert "read_file" in query_desc
+
+
+def test_propose_patch_description_cannot_create_new_files() -> None:
+    registry = build_registry()
+    spec = registry.get("propose_patch")
+    assert spec is not None
+    desc = spec.description
+    assert "cannot create" in desc
+    assert "update_outline" in desc
+    assert "draft_section" in desc
 
 
 def test_tool_scope_planning_phase_excludes_writes() -> None:

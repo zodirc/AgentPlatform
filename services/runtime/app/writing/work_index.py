@@ -23,10 +23,12 @@ def _list_md_names(dir_path: Path) -> list[str]:
     return names
 
 
-def _file_note(root: Path, rel: str) -> str:
+def _file_note(root: Path, rel: str, *, create_with: str = "") -> str:
     path = root / rel
     if not path.is_file():
-        return f"`{rel}` (missing)"
+        if create_with:
+            return f"`{rel}` (empty — create with `{create_with}`)"
+        return f"`{rel}` (empty)"
     try:
         size = path.stat().st_size
     except OSError:
@@ -84,10 +86,12 @@ def build_work_index(
             size = 0
         lines.append(f"- outline: `outline.md` ({size} bytes)")
     else:
-        lines.append("- outline: (missing)")
+        lines.append("- outline: (empty — create with `update_outline`)")
 
     lines.append(f"- manuscript: {_file_note(root, ms)}")
-    lines.append(f"- manuscript draft: {_file_note(root, draft_ms)}")
+    lines.append(
+        f"- manuscript draft: {_file_note(root, draft_ms, create_with='draft_section')}"
+    )
 
     if sections:
         joined = ", ".join(f"`sections/{n}`" for n in sections[:16])
@@ -115,16 +119,28 @@ def build_work_index(
                 "uses occupy=fresh: archives to `drafts/archive/`, then writes only "
                 "the new piece at `ch1`. Do not append as a later chapter."
             )
+        elif not draft_text:
+            lines.append(
+                f"No draft yet. Call `draft_section` (creates `drafts/` and `{draft_ms}`). "
+                "Empty paths are not a write ban. This scenario has no `write_file`; "
+                "`propose_patch` cannot create missing files. Do not paste the chapter into chat."
+            )
         else:
             lines.append(
                 f"Continue writing with `draft_section` (appends/replaces a chapter heading in `{draft_ms}`); "
-                f"promote into `{ms}` via `propose_patch`. Read only the chapter you need — not the whole book."
+                f"`propose_patch` only after that file exists. Read only the chapter you need — not the whole book."
             )
     else:
-        lines.append(
-            "Continue a chapter with `read_file` on its draft or section path; "
-            "promote into `sections/` via `propose_patch`."
-        )
+        if not drafts and not sections:
+            lines.append(
+                "No chapter files yet. Call `draft_section` to create them. "
+                "`propose_patch` cannot create missing paths."
+            )
+        else:
+            lines.append(
+                "Continue a chapter with `read_file` on its draft or section path; "
+                "promote into `sections/` via `propose_patch`."
+            )
     text = "\n".join(lines)
     if len(text) <= budget:
         return text

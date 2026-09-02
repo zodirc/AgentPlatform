@@ -31,3 +31,19 @@ def test_build_work_index_respects_budget(tmp_path: Path) -> None:
         (tmp_path / "sections" / f"ch{i}.md").write_text("x", encoding="utf-8")
     text = build_work_index(workspace_root=tmp_path, max_chars=280)
     assert len(text) <= 280
+
+
+def test_empty_workspace_steers_draft_section_not_chat(tmp_path: Path) -> None:
+    text = build_work_index(
+        workspace_root=tmp_path,
+        message="写一篇故事",
+        max_chars=2000,
+    )
+    assert "(missing)" not in text
+    assert "create with `update_outline`" in text
+    assert "create with `draft_section`" in text
+    assert "No draft yet" in text
+    assert "no `write_file`" in text
+    assert "Do not paste the chapter into chat" in text
+    assert "promote into" not in text
+    assert "occupy=fresh" not in text
