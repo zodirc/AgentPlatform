@@ -58,3 +58,17 @@ def _assert_not_seed_corpus(rel_path: str) -> None:
         raise PermissionError(
             "seed corpus is read-only; edit files under seed/sources/writing in the repo"
         )
+
+
+def workspace_not_writable_error(rel_path: str, exc: BaseException) -> dict[str, str]:
+    """Permission denied on the work root — deploy perms, not a product file ban."""
+    return {
+        "status": "error",
+        "error": "workspace_not_writable",
+        "path": rel_path,
+        "summary": (
+            f"Permission denied writing {rel_path} ({exc}). "
+            "Not a policy ban on outline.md or drafts/. "
+            "Run `make fix-workspace-sources` so /workspace is writable by uid 1000."
+        ),
+    }

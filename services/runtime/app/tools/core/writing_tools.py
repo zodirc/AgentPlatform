@@ -8,11 +8,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from app.settings import settings
-from app.tools.core.paths import _resolve_path
+from app.tools.core.paths import _resolve_path, workspace_not_writable_error
 from app.writing.hinge import hinge_fields
 from app.writing.lore import lore_fields
 from app.writing.opening import opening_fields
@@ -21,6 +22,14 @@ from app.writing.staccato import staccato_fields
 from app.writing.text_metrics import draft_length_fields, outline_thin_fields
 
 _LAST_PLAN_SIG: dict[str, tuple[tuple[str, str, str], ...]] = {}
+
+
+def _mkdir_parent(target: Path, rel_path: str) -> dict[str, Any] | None:
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        return workspace_not_writable_error(rel_path, exc)
+    return None
 
 
 def _plan_signature(items: list[dict[str, str]]) -> tuple[tuple[str, str, str], ...]:
@@ -523,7 +532,9 @@ async def draft_section(
     if layout == "monofile":
         path = draft_manuscript_rel()
         target = _resolve_path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        denied = _mkdir_parent(target, path)
+        if denied:
+            return denied
         if target.exists():
             existing = target.read_text(encoding="utf-8")
         else:
@@ -603,7 +614,9 @@ async def draft_section(
     else:
         path = _draft_file_path(section_id)
         target = _resolve_path(path)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        denied = _mkdir_parent(target, path)
+        if denied:
+            return denied
         occupy_fresh = should_occupy_fresh(
             occupy_arg=_kwargs.get("occupy"),
             user_text=str(_kwargs.get("turn_user_text") or ""),
@@ -889,7 +902,9 @@ async def update_outline(
     """
     path = "outline.md"
     target = _resolve_path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
+    denied = _mkdir_parent(target, path)
+    if denied:
+        return denied
     existing = target.read_text(encoding="utf-8") if target.exists() else ""
     mode_n = (mode or "replace").strip().lower()
     force = str(_kwargs.get("force", "")).lower() in {"1", "true", "yes"}

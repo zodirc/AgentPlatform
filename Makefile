@@ -119,7 +119,7 @@ help: ## 显示常用命令
 	@echo "  make up-ops-eval     挂 docker.sock 到 api+runtime（粘性）"
 	@echo "  make ops-swe-eval-ready  挂 sock + 预拉/冒烟（部署看板「SWE 评测环境」一键）"
 	@echo "  make ops-eval-off    取消粘性挂载（下次 up-api/up-runtime 不再带 sock）"
-	@echo "  make fix-workspace-sources  修复 sources/ 权限（资料库可写；seed 只读）"
+	@echo "  make fix-workspace-sources  修复 /workspace 写权限（outline.md、drafts/、资料库；seed 只读）"
 	@echo "  # 依赖与代码分缓存：改 app/** 不必 *_REBUILD_DEPS；改 pyproject/lock 随模块重建；bump base-images.env 由 paths.env 脏检测触发 make up"
 	@echo "  # 基础镜像 digests：deploy/base-images.env（浮动 tag 不会再冲掉 deps）"
 	@echo ""
@@ -218,8 +218,9 @@ resolve-embedding: ## 按 GPU 选型 gte-small|gte-large + CUDA torch overlay �
 	@test -f deploy/embedding.auto.env || cp deploy/embedding.defaults.env deploy/embedding.auto.env
 	@test -f deploy/compose/gpu.auto.yml || printf '%s\n' '# no gpu' 'services: {}' > deploy/compose/gpu.auto.yml
 
-# Seed RO mount creates sources/ as root; runtime app (uid 1000) must own it to upload.
-fix-workspace-sources: ## 修复 /workspace/sources 写权限（不改 seed）
+# Seed RO mount creates /workspace as root; runtime app (uid 1000) must own it
+# to create outline.md / drafts/ and to upload into sources/.
+fix-workspace-sources: ## 修复 /workspace 写权限（稿树 + 资料库；不改 seed）
 	@bash scripts/ensure_workspace_sources_writable.sh
 
 start: resolve-embedding ensure-ops-secret ensure-docker-creds ensure-git-hooks ## 启动栈（不 rebuild，最快）

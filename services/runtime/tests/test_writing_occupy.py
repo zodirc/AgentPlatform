@@ -5,11 +5,20 @@ from uuid import uuid4
 
 import pytest
 
+from app.tools.core.paths import workspace_not_writable_error
 from app.tools.core import tools as core
 from app.writing.focus import build_work_surface_block
 from app.writing.manuscript import upsert_section
 from app.writing.occupy import should_occupy_fresh, wants_new_piece
 from app.writing.work_index import build_work_index
+
+
+def test_workspace_not_writable_error_is_deploy_not_policy() -> None:
+    out = workspace_not_writable_error("outline.md", PermissionError("denied"))
+    assert out["error"] == "workspace_not_writable"
+    assert out["path"] == "outline.md"
+    assert "fix-workspace-sources" in out["summary"]
+    assert "Not a policy ban" in out["summary"]
 
 
 def test_wants_new_piece_vs_continue() -> None:
