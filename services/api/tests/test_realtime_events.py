@@ -10,6 +10,9 @@ from app.services.realtime.listener import TurnEventListener
 
 
 class _Listener:
+    def drain_live(self, _turn_id) -> list:
+        return []
+
     async def wait_for_turn(self, _turn_id, timeout: float = 0.3) -> bool:
         return False
 
@@ -136,7 +139,7 @@ async def test_iter_turn_events_ws_does_not_stop_on_approval(monkeypatch: pytest
     async def fake_project(_tid):
         return None
 
-    class _WSListener:
+    class _WSListener(_Listener):
         async def wait_for_turn(self, _turn_id, timeout: float = 0.3) -> bool:
             calls["n"] += 1
             return calls["n"] <= 2
@@ -167,7 +170,7 @@ async def test_iter_turn_events_yields_idle_ping(monkeypatch: pytest.MonkeyPatch
     async def fake_project(_tid):
         return None
 
-    class _IdleListener:
+    class _IdleListener(_Listener):
         async def wait_for_turn(self, _turn_id, timeout: float = 0.3) -> bool:
             polls["n"] += 1
             return False
@@ -185,3 +188,44 @@ async def test_iter_turn_events_yields_idle_ping(monkeypatch: pytest.MonkeyPatch
 
     assert None in seen
     assert seen[-1]["type"] == "turn.completed"
+
+
+@pytest.mark.asyncio
+async def test_iter_turn_events_yields_live_without_advancing_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live fanout is drained from the listener; it must not become the durable cursor."""
+    turn_id = uuid4()
+    polls = {"n": 0}
+
+    async def fake_fetch(_turn_id, since):
+        if polls["n"] >= 1:
+            return [_event(1, "turn.completed")]
+        return []
+
+    class _LiveListener(_Listener):
+        def drain_live(self, _turn_id) -> list:
+            if polls["n"] == 0:
+                return [{"type": "checkpoint.delta", "sequence": None}]
+            return []
+
+        async def wait_for_turn(self, _turn_id, timeout: float = 0.3) -> bool:
+            polls["n"] += 1
+            return True
+
+    async def fake_project(_tid):
+        return None
+
+    monkeypatch.setattr(ev, "fetch_turn_events", fake_fetch)
+    monkeypatch.setattr(ev, "project_turn", fake_project)
+    _patch_projection_pool(monkeypatch, last_event_sequence=999)
+
+    seen = [
+        e["type"]
+        async for e in ev.iter_turn_events(turn_id, 0, _LiveListener())
+        if e is not None
+    ]
+
+    assert seen[0] == "checkpoint.delta"
+    assert seen[-1] == "turn.completed"
+
