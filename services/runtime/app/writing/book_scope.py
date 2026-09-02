@@ -164,7 +164,7 @@ def default_duty_for_scope(
     if sc == "short":
         return (
             "短篇倾向：人、事、地交织，环境窄而深，一篇内可有起落；"
-            "禁止卷纲浓缩与设定百科"
+            "开篇只兑这一场，不把卷纲写成设定百科"
         )
     if sc == "single":
         return (

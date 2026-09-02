@@ -73,6 +73,22 @@
       "type": "string",
       "pattern": "^[a-f0-9]{8,64}$",
       "maxLength": 64
+    },
+    "volatile_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{8,64}$",
+      "maxLength": 64
+    },
+    "volatile_chars": { "type": "integer", "minimum": 0 },
+    "prohibition_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "不要": { "type": "integer", "minimum": 0 },
+        "勿": { "type": "integer", "minimum": 0 },
+        "禁止": { "type": "integer", "minimum": 0 },
+        "必须": { "type": "integer", "minimum": 0 }
+      }
     }
   }
 }

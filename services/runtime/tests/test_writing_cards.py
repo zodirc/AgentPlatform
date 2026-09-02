@@ -73,11 +73,15 @@ def test_prepare_writing_system_prompt_event_payload(tmp_path: Path) -> None:
     payload = pin.event_payload()
     assert payload["available_count"] == 3
     assert any(card["title"] == "张白鹿" for card in payload["cards"])
-    assert "Writing cards（必须遵守）" in pin.volatile_block
-    assert "Writing cards（必须遵守）" not in pin.prompt
+    assert "Writing cards（本作品的写定）" in pin.volatile_block
+    assert "Writing cards（必须遵守）" not in pin.volatile_block
+    assert "Writing cards（本作品的写定）" not in pin.prompt
     assert pin.prompt == "You are a writing assistant."
     assert "budget" in payload
     assert "prefix_hash" in payload
+    assert "volatile_sha256" in payload
+    assert payload["volatile_chars"] == len(pin.volatile_block)
+    assert set(payload["prohibition_counts"]) == {"不要", "勿", "禁止", "必须"}
     assert all("truncated" in card for card in payload["cards"])
 
 
@@ -173,10 +177,16 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "大约孔乙己的确死了" in sections["Samples"]
     assert "春风沉醉的晚上" in sections["Samples"]
     assert "邓脱路" in sections["Samples"]
+    assert "骆驼祥子" in sections["Samples"]
+    assert "祥子" in sections["Samples"]
     assert "使君" not in sections["Samples"]
     assert "却说" not in sections["Samples"]
     assert "同一段落反复 patch" in sections["Don't"] or "第一章讲完全书设定" in sections["Don't"]
     assert "三字" in sections["Don't"] or "一问一答" in sections["Don't"]
+    dont_bullets = [
+        line for line in sections["Don't"].splitlines() if line.strip().startswith("-")
+    ]
+    assert 1 <= len(dont_bullets) <= 6
     assert "经典文学" in sections["Voice"] or "现代白话" in sections["Voice"]
     assert "随这场戏" in sections["Do"] or "三要素" in sections["Do"]
     assert "长篇 ch1" not in sections["Do"]
@@ -185,9 +195,11 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     if not style_card.truncated:
         assert "大约孔乙己的确死了" in pin.volatile_block
         assert "邓脱路" in pin.volatile_block
+        assert "祥子" in pin.volatile_block
     else:
         assert "大约孔乙己的确死了" in sections["Samples"]
         assert "邓脱路" in sections["Samples"]
+        assert "祥子" in sections["Samples"]
     assert "米店的牌子" not in pin.volatile_block
 
 

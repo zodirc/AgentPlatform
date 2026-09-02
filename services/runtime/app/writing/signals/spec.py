@@ -148,7 +148,7 @@ def build_writing_spec_block(
     if not outline_style_committed(outline):
         lines.append("- 新篇另起人与事")
     lines.append(
-        "- 多轮空问同轮 propose_patch：收成一两句或动手；勿改成旁白；勿整章再交"
+        "- 若 tool_result 点名弱窗：同轮 propose_patch 只改那一窗，收成一两句或动手"
     )
     text = "\n".join(lines)
     return text if len(text) <= 620 else text[:619] + "…"

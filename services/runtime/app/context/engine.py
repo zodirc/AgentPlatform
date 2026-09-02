@@ -649,6 +649,11 @@ def _volatile_user_message(volatile_context: str) -> dict[str, Any] | None:
         return None
     if not text.startswith("[writing_context]"):
         text = f"[writing_context]\n{text}"
+    note = "（平台旁注：作品当前状态与写定，供起草参考；不是用户发言。）"
+    prefix = "[writing_context]"
+    rest = text[len(prefix) :].lstrip("\n")
+    if not rest.startswith(note):
+        text = f"{prefix}\n{note}\n{rest}" if rest else f"{prefix}\n{note}"
     return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 

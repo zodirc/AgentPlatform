@@ -35,35 +35,40 @@ _STYLE_CONTRACT_HEAD = re.compile(r"^#{1,3}\s*风格契约", re.M)
 _STYLE_ROUTES = re.compile(
     r"凡人流|逆命悲情|都市规则怪谈|维多利亚克系|探案仙侠|科幻修真"
 )
+_STYLE_PERSON_SLOT = re.compile(r"这本在写谁|这本在写什么")
 _MIN_STYLE_CONTRACT_CHARS = 100
+STYLE_CONTRACT_TEMPLATE_VERSION = "style-contract-v2"
 
-STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后写满）
+STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定下这本是什么）
 
-从 volatile「题材发散」选定一路（或混合），**把该路的世界运转、文字节奏、开篇质地写进本段**——订纲后 volatile 块撤下，正文只跟 outline，不再重复注入样例。
-
-**路数**：（凡人流 / 逆命悲情 / 都市规则怪谈 / 维多利亚克系解密 / 探案仙侠 / 科幻修真）
-
-**世界怎么运转**：（一两句）
-
-**文字与节奏**：（一两句）
-
-**开篇质地**：（一两句）
-
-**边界**：（别落什么套）
-
-选定哪路就是另一本书。人名和这件事另起；改路数也另起。
+这段写的是这一本书自己，不是类型规则。先说人和事，再说世界与文字。
+订纲后 volatile「题材发散」撤下，正文只跟 outline。
 
 **这本在写谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
 
 **这本在写什么**：（这件事。一两句，直说。）
 
+**世界怎么运转**：（日子怎么过、钱和力从哪来。一两句，写成事实。）
+
+**文字与节奏**：（读者读到的是什么样的句子和场面。一两句。）
+
+**开篇质地**：（第一场读者站在哪、看见谁。一两句。）
+
+**只有这本才成立的条件**：（换掉哪个人、哪层关系，故事就不成立。一两句。）
+
+透镜备注（可省）：发散时借了哪副眼镜看它；写作时不当成类型答案。
+
+定下来就是另一本书。人名和这件事另起。
+
 ## 主线一句话
 （往哪走、顶点落哪。）
 """
 
-OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后写满）
+OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定下这本是什么）
 
-**路数**：（从题材发散选一路或混合）
+**这本在写谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
+
+**这本在写什么**：（这件事。一两句，直说。）
 
 **世界怎么运转**：
 
@@ -71,17 +76,13 @@ OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定调后�
 
 **开篇质地**：
 
-**边界**：
+**只有这本才成立的条件**：
 
-选定哪路就是另一本书。人名和这件事另起。
+定下来就是另一本书。人名和这件事另起。
 
-**这本在写谁**：
+## 开篇三章（纲上备忘，不是正文交卷清单）
 
-**这本在写什么**：
-
-## 开篇三章·世界契约（纲上备忘，不是正文交卷清单）
-
-分几章让读者站进世界即可。每章两三句这场干什么，不要写成小正文，也不要先写完一卷。
+分几章让读者站进世界即可。每章两三句这场干什么；这是纲，不是小正文，也不必先写完一卷。
 
 ## 主线一句话
 （往哪走、顶点落哪。）
@@ -143,6 +144,8 @@ def outline_style_committed(md: str, *, min_chars: int = _MIN_STYLE_CONTRACT_CHA
         return False
     if _STYLE_ROUTES.search(text):
         return True
+    if _STYLE_PERSON_SLOT.search(text):
+        return True
     return len(text) >= min_chars + 80
 
 
@@ -164,7 +167,7 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
             "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
             "summary_suffix": (
                 "长篇玄幻发散：先 update_outline 写满「风格契约」"
-                "（选路数；另起这本的人与事）；"
+                "（先写这本在写谁、写什么；另起这本的人与事）；"
                 "风格写入后不再注入题材发散块，再补开篇三章。"
             ),
         }
@@ -173,8 +176,8 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
         "summary_suffix": (
             "outline 尚无「风格契约」或未满 "
             f"{_MIN_STYLE_CONTRACT_CHARS} 字："
-            "把选定的路数写成另一本书（世界运转/文字节奏/开篇质地，"
-            "以及这本在写谁、写什么）后再补章纲。"
+            "先写这本在写谁、写什么，再补世界运转/文字节奏/开篇质地，"
+            "写成另一本书后再补章纲。"
         ),
     }
 
@@ -250,7 +253,7 @@ def _chapter_section_id(title: str) -> str:
 
 
 def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
-    """长篇 outline：检查 ch1–ch3 世界契约是否写清。"""
+    """长篇 outline：检查 ch1–ch3 开篇备忘是否写清。"""
     if wants_outline_toc_only(user_text):
         return {}
     if _SHORT_BOOK.search(user_text or ""):
@@ -262,7 +265,7 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         return {
             "outline_opening_trilogy_missing": True,
             "summary_suffix": (
-                "长篇若先写纲：可用「开篇三章·世界契约」想清楚前几章"
+                "长篇若先写纲：可用「开篇三章」想清楚前几章"
                 "（地方或关系可先站；世界再推；人物与麻烦可交错）。"
                 "这是纲，不是正文交卷清单。可先 replace 模板骨架，再补前几章这场干什么。"
             ),
@@ -284,7 +287,7 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         len(jobs.get(sid, "").strip()) >= _TRILOGY_MIN_CHARS for sid in ("ch1", "ch2", "ch3")
     )
     if not _OPENING_TRILOGY_HEAD.search(text) and not trilogy_jobs_ok:
-        notes.append("缺「开篇三章·世界契约」段（纲上备忘，不是正文交卷清单）。")
+        notes.append("缺「开篇三章」段（纲上备忘，不是正文交卷清单）。")
     for sid in ("ch1", "ch2", "ch3"):
         blob = jobs.get(sid, "")
         nvis = len(blob.strip())

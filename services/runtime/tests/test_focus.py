@@ -52,7 +52,7 @@ def test_work_surface_pins_outline_job(tmp_path: Path) -> None:
     assert "保住铺子" in block
     assert "Outline job (`ch3`)" in block
     assert "核秤" in block
-    assert "假高潮" in block
+    assert "停在日子上" in block
 
 
 def test_wants_full_manuscript_read() -> None:

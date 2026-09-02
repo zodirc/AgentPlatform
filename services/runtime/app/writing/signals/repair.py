@@ -46,37 +46,40 @@ def append_block_l0_keys(work_mode: str = "literary") -> frozenset[str]:
 
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
-        "这一窗把同一拍拆成多轮空问。"
-        "收成一两句把决定或物件说完，或只动手；孤立短打不要扩。"
-        "不要改成「告诉他」旁白。不要整章重交"
+        "这一窗把同一拍拆成了多轮空问，读者在等一句有分量的话。"
+        "让它在一两句里落定（决定、物件、或一记动作都行）；旁白替它说不算落定。"
+        "只改这一窗。"
     ),
     "glue_heavy": "叙述里的「与此同时/就在这时」过密才拆；对白里因为/可是可以留",
-    "hinge_dense": "看见/听到后不要立马拧：停在物件、价钱或沉默上",
-    "opening_institution": "开篇先写可站的场面，机构名让人物后口带出",
-    "lore_dump": "删掉「N年前」身世提要，留在当下的屋子或活计上",
-    "length_short": "章级过程 L0 清掉后：draft_section mode=append 再接约 2000 字，不要整章 upsert",
-    "meta_knowing_high": "少写心里清楚，改成场上动作",
+    "hinge_dense": (
+        "看见/听到之后马上就拧成转折，读者没时间站住。"
+        "让这一下先落地——落在物件、价钱或沉默上都行——再往下走。"
+    ),
+    "opening_institution": "第一句就是机构名，读者还没地方站。先给一个可站的场面；机构名等人物开口时自然带出。",
+    "lore_dump": "这里成了「N年前」的案情提要。身世留在当下的屋子或活计上，随事露头。",
+    "length_short": "章级过程 L0 清掉后：draft_section mode=append 再接约 2000 字；整章 upsert 用不上。",
+    "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在他手上。",
     "fragment_mismatch": "评分切片不合这场戏的节奏，按这场写即可",
     "weak_window": "这一拍离该场面该有的质地最远，只改这一段",
 }
 
 _HINTS_WEB_SERIAL: dict[str, str] = {
     "staccato_uniform": (
-        "这一窗把同一拍拆成多轮空问。"
-        "收成一两句有信息差的话，或一记动作接上；孤立短打不要扩。"
-        "不要改成说明，也不要把「」拆成旁白。不要整章重交"
+        "这一窗把同一拍拆成了多轮空问。"
+        "收成一两句有信息差的话，或一记动作接上；旁白替它说不算接上。"
+        "只改这一窗。"
     ),
-    "hinge_dense": "看见/听到后不要立马拧成说明书；悬念跟事走即可",
-    "opening_institution": "机构名让人物后口带出；开篇先有可站的场面",
-    "lore_dump": "身世跟当下的麻烦走，不要开场案情提要",
-    "meta_knowing_high": "少写心里清楚，改成场上动作或信息差",
+    "hinge_dense": "看见/听到之后马上拧成说明书，悬念还没站住。让悬念跟事走即可。",
+    "opening_institution": "第一句就是机构名。先给一个可站的场面；机构名等人物开口时自然带出。",
+    "lore_dump": "这里成了开场案情提要。身世跟当下的麻烦走，随事露头。",
+    "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在场上动作或信息差上。",
     "fragment_mismatch": "评分切片不合这场戏，按这场的台阶写即可",
     "weak_window": "这一拍空转，只改这一段；不必写成文学句",
 }
 
 
 def repair_hint(key: str, work_mode: str = "literary") -> str:
-    """补丁提示：多轮空问收成一两句或动手，不下达「写顺/合并成旁白」工序。"""
+    """补丁提示：诊断这一窗现在怎样、读者读到时应怎样；不下达可执行工序。"""
     from app.writing.work_mode import normalize_work_mode
 
     token = key or "weak_window"

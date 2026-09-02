@@ -171,6 +171,10 @@ def test_outline_templates_do_not_prime_same_book_under_new_coat() -> None:
         assert "200–400" not in blob
         assert "不是另起的寓意" not in blob
         assert "路数不是换皮" not in blob
+        assert "**路数**" not in blob
+        assert "路数" not in blob
+        assert "**边界**" not in blob
+        assert "世界契约" not in blob
         assert "主题倾向" not in blob
         assert "沈砚" not in blob
         assert "沈禾" not in blob
@@ -197,3 +201,29 @@ async def test_update_outline_sets_arc_flags(workspace) -> None:
     assert result.get("outline_no_spine") is True
     assert result.get("outline_no_peak") is True
     assert "长篇编排" in str(result.get("summary"))
+
+
+def test_outline_style_committed_person_slot_without_route() -> None:
+    from app.writing.outline_arc import outline_style_committed
+
+    person = (
+        "## 风格契约\n\n"
+        "**这本在写谁**：韩校尉在井口核帖，袖口还沾着泥。\n\n"
+        "**这本在写什么**：井下那张帖要验得住，今夜必须对上账。\n\n"
+        "**世界怎么运转**：衙门、税册、案卷织网；超凡要查得证。\n\n"
+        "**文字与节奏**：市井气，一案一结，句子跟着脚步走。\n"
+    )
+    assert "凡人流" not in person
+    assert outline_style_committed(person) is True
+
+    legacy = (
+        "## 风格契约\n\n**路数**：凡人流\n\n"
+        "**世界怎么运转**：灵石、丹药、引荐都要换；散修与内门隔着工分。\n\n"
+        "**文字与节奏**：惜命算计，打斗写消耗。\n\n"
+        "**开篇质地**：生计压力进门派。\n\n"
+        "**边界**：忌天才顿悟。\n"
+    )
+    assert outline_style_committed(legacy) is True
+
+    thin = "## 风格契约\n\n还没写满。\n"
+    assert outline_style_committed(thin) is False

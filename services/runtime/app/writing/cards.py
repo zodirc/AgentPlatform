@@ -357,8 +357,8 @@ def format_cards_block(cards: list[WritingCard]) -> str:
     if not cards:
         return ""
     parts = [
-        "## Writing cards（必须遵守）",
-        "以下素材卡在导入时准备，本轮已固定注入。起草时优先遵守这些写定；",
+        "## Writing cards（本作品的写定）",
+        "以下素材卡在导入时准备，本轮已固定注入。起草时以这些写定为准；",
         "`search_sources` 只用于原文场面/细节，不要用检索替代这些卡片。",
         "",
     ]
@@ -390,8 +390,16 @@ def extract_cards_block(prompt: str) -> str:
     
     返回:
         str。"""
-    marker = "## Writing cards（必须遵守）"
-    idx = prompt.find(marker)
+    markers = (
+        "## Writing cards（本作品的写定）",
+        "## Writing cards（必须遵守）",
+    )
+    idx = -1
+    for candidate in markers:
+        found = prompt.find(candidate)
+        if found >= 0:
+            idx = found
+            break
     if idx < 0:
         # Hint-only / empty pin: hash the trailing Writing cards hint if present.
         hint = "\n\n## Writing cards\n"
@@ -770,6 +778,16 @@ class WritingCardsPinResult:
         block = self.cards_block or extract_cards_block(self.volatile_block or self.prompt)
         if block:
             payload["prefix_hash"] = stable_cards_prefix_hash(block)
+        volatile = self.volatile_block or ""
+        if volatile:
+            payload["volatile_sha256"] = stable_cards_prefix_hash(volatile)
+            payload["volatile_chars"] = len(volatile)
+            payload["prohibition_counts"] = {
+                "不要": volatile.count("不要"),
+                "勿": volatile.count("勿"),
+                "禁止": volatile.count("禁止"),
+                "必须": volatile.count("必须"),
+            }
         return payload
 
 

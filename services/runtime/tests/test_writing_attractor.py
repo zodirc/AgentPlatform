@@ -35,6 +35,8 @@ def test_default_voice_samples_are_not_the_shop_counter() -> None:
     )
     samples = parse_style_card_sections(body).get("Samples") or ""
     assert "孔乙己" in samples
+    assert "骆驼祥子" in samples
+    assert "祥子" in samples
     assert _hits(samples) == []
 
 
@@ -68,14 +70,17 @@ def test_long_opening_without_outline_spec_is_mixed_not_texture() -> None:
 
 def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     from app.writing.outline_arc import STYLE_CONTRACT_OUTLINE_TEMPLATE
+    import app as _app
 
-    root = Path(__file__).resolve().parents[1] / "app" / "scenarios" / "writing"
+    root = Path(_app.__file__).resolve().parent / "scenarios" / "writing"
     system = (root / "system.md").read_text(encoding="utf-8")
     voice = (root / "templates" / "web_serial_voice.md").read_text(encoding="utf-8")
     assert "新信息、新对手、新代价、新抉择" not in system
     assert "看见代价" not in system
     assert "由谁承担" not in system
     assert "这一本书自己的身份" in system
+    assert " contract" not in system
+    assert "contract" not in system.lower()
     assert "不是换皮" not in system
     assert "类型不是模板" in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice

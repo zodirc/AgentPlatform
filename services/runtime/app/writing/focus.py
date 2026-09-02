@@ -371,7 +371,7 @@ def _outline_job_parts(
             "### Opening trilogy\n"
             "长篇前几章可用开篇三章当纲上的备忘（不是正文交卷清单）："
             "地方或关系可先站，世界再推，人物与麻烦可以交错进场。"
-            "勿把全书信息挤进一章正文。"
+            "全书信息不必挤进一章正文。"
         )
     if n is not None and n >= 4:
         toc = outline_toc_snippet(workspace_root, max_chars=720)
@@ -392,7 +392,7 @@ def _outline_job_parts(
     if job:
         parts.append(
             f"### Outline job (`{focus}`)\n{job}\n"
-            "Follow this chapter's duty: 铺垫/加压章不要假高潮；"
+            "Follow this chapter's duty: 铺垫/加压章停在日子上；"
             "高潮章把一件主线麻烦顶满，副线只碰撞主线。"
         )
     return parts
