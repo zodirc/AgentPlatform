@@ -93,6 +93,8 @@ def test_diverge_styles_block_substantial() -> None:
     assert "风格契约" in block
     assert "看见代价" not in block
     assert len(block) > 800
+    assert block.count("不要") <= 4
+    assert len(block.splitlines()) <= 180
 
 
 def test_should_not_inject_when_style_in_outline(tmp_path: Path) -> None:

@@ -24,10 +24,12 @@ _WEB_SERIAL = re.compile(
     r"宗门|灵根|金丹|元婴|练气|功法|秘境|妖兽|"
     r"连载|爽点|变强|打怪"
 )
-_LITERARY = re.compile(
-    r"仿鲁迅|文学|短篇|现代文|现实主义|乡土|纯文学|"
+# 审美词：明确要文学拍。尺度词「短篇」另见 _LITERARY_WEAK，避免压过题材词。
+_LITERARY_STRONG = re.compile(
+    r"仿鲁迅|文学|现代文|现实主义|乡土|纯文学|"
     r"人物塑造|典型人物|鲁迅|郁达夫|老舍|沈从文"
 )
+_LITERARY_WEAK = re.compile(r"短篇")
 
 _CHAPTER_CHARACTER = re.compile(r"人物|性格|塑造|对白|对话|心理")
 _CHAPTER_PLOT = re.compile(r"情节|推进|冲突|悬念|钩子|主线|转折|危机")
@@ -185,10 +187,12 @@ def infer_work_mode(
     blob = "\n".join(x for x in (message, outline, style_hint) if x).strip()
     if not blob:
         return normalize_work_mode(None)
-    if _LITERARY.search(blob):
+    if _LITERARY_STRONG.search(blob):
         return "literary"
     if _WEB_SERIAL.search(blob):
         return "web_serial"
+    if _LITERARY_WEAK.search(blob):
+        return "literary"
     return normalize_work_mode(None)
 
 
@@ -239,45 +243,38 @@ def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str
     if kind == "conflict_hook":
         return (
             "开篇若先顶麻烦：人物带着第一阶麻烦进场；"
-            "仍要让人认得他；勿卷纲浓缩、勿兑卷末高潮"
+            "仍要让人认得他；卷纲浓缩和卷末高潮留给后文"
         )
     if mode == "web_serial":
         return (
             "开篇倾向：地方或关系可先站，一条可见规矩即可；"
-            "人物与麻烦可以同场。禁止卷纲浓缩"
+            "人物与麻烦可以同场。开篇只兑这一场"
         )
-    return "开篇倾向：社会背景与自然场景可先站；机构专名勿当第一词"
+    return "开篇倾向：社会背景与自然场景可先站；机构专名让场景站稳后再出现"
 
 
 def fragment_obligations(work_mode: str) -> dict[str, str]:
-    """按 work_mode 的 fragment 写作义务。"""
+    """按 work_mode 的 fragment 写作义务（陈述，不是禁令清单）。"""
     mode = normalize_work_mode(work_mode)
     if mode == "web_serial":
         return {
-            "plot_progress": "情节往前：这场要的那一步可感（信息、对手、选择均可）；禁止空转日常",
-            "worldview_texture": "世界质地在场上可感；悬念/规矩随事显露，不要百科演讲",
-            "climax_beat": "一件主线麻烦顶满；勿提前兑卷末顶点",
-            "battle_action": "动作来回有力，服务情节台阶，不是电报体砍杀",
-            "dialogue_dyad": (
-                "对白露出人物选择与关系；允许直白；"
-                "多轮空问收成一两句或动手，不要散文化改成旁白"
-            ),
+            "plot_progress": "情节往前：这场要的那一步可感（信息、对手、选择均可）。",
+            "worldview_texture": "世界质地在场上可感；悬念与规矩随事显露。",
+            "climax_beat": "一件主线麻烦顶满；顶点仍落在本卷该落的地方。",
+            "battle_action": "动作来回有力，服务情节台阶。",
+            "dialogue_dyad": "对白露出人物选择与关系；允许直白；空问收成一两句或动手。",
             "mixed": (
-                "人物+情节+环境谁响一点随这场戏；允许强钩，勿提前兑本卷顶点；"
-                "允许略直白的场面交代、节奏略紧；"
-                "不要为「写自然」把「」拆成旁白；多轮空问收成一两句或动手；碎对白/对拍/采访阶梯仍禁"
+                "人物+情节+环境谁响一点随这场戏；允许强钩与略直白的场面交代；"
+                "空问收成一两句或动手。"
             ),
         }
     return {
-        "plot_progress": "把一件事在场面里往前推，禁止搬范文故事核",
-        "worldview_texture": "把地方、价钱、规矩写在场上托人物；禁止搬范文故事核",
-        "climax_beat": "一件主线麻烦顶满再落下；铺垫章不要假高潮",
-        "battle_action": "来回有力，不是电报体砍杀",
-        "dialogue_dyad": (
-            "对白长短不齐，问完可以答不上来；多轮空问收成一两句；"
-            "孤立短打不要扩；禁止接词干加也/还、对拍三联"
-        ),
-        "mixed": "人物为中心：环境托举或情节加压，句味优先；禁止通篇机械三拍",
+        "plot_progress": "把一件事在场面里往前推。",
+        "worldview_texture": "把地方、价钱、规矩写在场上托人物。",
+        "climax_beat": "一件主线麻烦顶满再落下；铺垫章停在日子上。",
+        "battle_action": "来回有力，不是电报体。",
+        "dialogue_dyad": "对白长短不齐，问完可以答不上来；空问收成一两句。",
+        "mixed": "人物为中心：环境托举或情节加压，句味优先。",
     }
 
 
@@ -289,11 +286,11 @@ def element_obligation(element: str | None, work_mode: str) -> str:
     label = _ELEMENT_LABELS.get(element, element)
     if mode == "web_serial":
         if element == "character":
-            return f"本章主服务{label}：冲突里见选择与关系，勿空转日常"
+            return f"本章主服务{label}：冲突里见选择与关系"
         if element == "plot":
             return f"本章主服务{label}：推进一步，留读者追问"
         if element == "environment":
-            return f"本章主服务{label}：规则可感可用，勿百科演讲"
+            return f"本章主服务{label}：规则可感可用"
     if element == "character":
         return f"本章主服务{label}：杂取种种合成典型，靠对白/行动/心理显露"
     if element == "plot":
