@@ -88,8 +88,9 @@ x-runtime-svc: &runtime-svc
       TORCH_INDEX_URL: ${TORCH_INDEX_URL:-}
       HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
   volumes:
-    # Shared across replicas — required for Work roots under /data/works/{id}
-    - agent_data:/data
+    # Shared across replicas — required for Work roots under /data/works/{id}.
+    # nocopy: runtime in docker-compose.yml seeds the volume (moby#43068).
+    - agent_data:/data:nocopy
     - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
     - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
     - ${SEED_INTEL_HOST_PATH:-../seed/sources/intel}:/workspace/sources/seed/intel:ro,z

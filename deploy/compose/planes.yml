@@ -83,7 +83,7 @@ services:
     environment:
       <<: *retrieval-env
     volumes:
-      - agent_data:/data
+      - agent_data:/data:nocopy
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
       - ${SEED_SOURCES_HOST_PATH:-../seed/sources/writing}:/workspace/sources/seed/writing:ro,z
       - ${SEED_INTEL_HOST_PATH:-../seed/sources/intel}:/workspace/sources/seed/intel:ro,z
@@ -168,7 +168,7 @@ services:
       WORKSPACE_ROOT: /workspace
       DATABASE_URL: ${DATABASE_URL}
     volumes:
-      - agent_data:/data
+      - agent_data:/data:nocopy
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
     depends_on:
       redis:

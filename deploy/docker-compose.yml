@@ -208,6 +208,9 @@ services:
       # SWE-bench Lite answer-leak ban: ops_eval Turns get bwrap --unshare-net.
       OPS_EVAL_DENY_NETWORK: ${OPS_EVAL_DENY_NETWORK:-false}
     volumes:
+      # Seed agent_data from this image on first create. Other services that
+      # share the volume must use nocopy (moby#43068: parallel copy →
+      # mkdir …/vectorstore: file exists).
       - agent_data:/data
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
       # Product standing corpus (git): RO mount under sources/ so search_sources
@@ -285,7 +288,7 @@ services:
       RETRIEVAL_BACKEND: hash
       EMBEDDING_BACKEND: hash
     volumes:
-      - agent_data:/data
+      - agent_data:/data:nocopy
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
     depends_on:
       postgres:
@@ -412,7 +415,7 @@ services:
       BENCH_PUBLISH: "0"
     volumes:
       # Shared with runtime so ops fixtures under /data/ops-eval are Turn-visible.
-      - agent_data:/data
+      - agent_data:/data:nocopy
       - ${WORKSPACE_HOST_PATH:-../workspace}:/workspace:rw,z
       - ../eval/golden:/app/eval/golden:ro,z
       - ../deploy:/app/deploy:ro,z
@@ -485,7 +488,7 @@ services:
       TRANSFORMERS_OFFLINE: ${BENCH_TRANSFORMERS_OFFLINE:-1}
       HF_HUB_OFFLINE: ${BENCH_HF_HUB_OFFLINE:-0}
     volumes:
-      - agent_data:/data
+      - agent_data:/data:nocopy
       - ..:/repo:ro,z
       - ${HOST_BENCH_DATA_DIR:-../eval/official/.local-data}:/data/ops-official/data:rw,z
       - ${HOST_BENCH_REPORTS_DIR:-../eval/reports/official}:/data/ops-official/reports:rw,z
