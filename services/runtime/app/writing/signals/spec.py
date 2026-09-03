@@ -108,6 +108,7 @@ def build_writing_spec_block(
         manuscript_chapters=len(ids),
     )
     scope = str(role.get("book_scope") or "single")
+    scope_source = str(role.get("book_scope_source") or "auto")
     position = str(role.get("chapter_position") or "rising")
     section_num = _section_num(focus)
 
@@ -121,6 +122,7 @@ def build_writing_spec_block(
     mode_label = work_mode_label(work_mode)
     source_note = "手动" if mode_source == "user" else "自动"
     scope_label = book_scope_label(scope)
+    scope_note = "手动" if scope_source == "user" else "自动"
 
     duty_line = ""
     if duty:
@@ -130,12 +132,16 @@ def build_writing_spec_block(
     from app.writing.outline_phase import outline_phase_spec_line, resolve_outline_phase
 
     phase_info = resolve_outline_phase(
-        message, outline=outline, book_scope=scope, workspace_root=workspace_root
+        message,
+        outline=outline,
+        book_scope=scope,
+        workspace_root=workspace_root,
+        manuscript_chapters=0 if fresh else len(ids),
     )
 
     lines = [
         "## Writing spec",
-        f"- book_scope: `{scope}`（{scope_label}）",
+        f"- book_scope: `{scope}`（{scope_label} · {scope_note}）",
         f"- work_mode: `{work_mode}`（{mode_label} · {source_note}）",
         f"- fragment: `{fragment}`（{label} · 评分切片，不是本章必须交的工种）",
         f"- {scope_line}",

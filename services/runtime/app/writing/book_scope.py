@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any, Literal
 
 BookScope = Literal["short", "single", "long"]
+BookScopeSource = Literal["auto", "user"]
 
 _SHORT = re.compile(r"短篇|短篇小说|小小说|微型小说|闪小说")
 _MEDIUM = re.compile(r"中篇|中篇小说")
-_LONG = re.compile(
-    r"长篇|网文|连载|修仙|玄幻|仙侠|修真|"
+# 尺度词：明确要写长、写章、连载。题材词（玄幻/修仙）不单独把「一篇」抬成长篇。
+_EXPLICIT_LONG_SCALE = re.compile(r"长篇|网文|连载|写一章|写个章|写一回")
+_CHAPTER_REF = re.compile(
+    r"第\s*[一二三四五六七八九十百千零〇两\d]+\s*章"
+)
+_GENRE_LONG = re.compile(
+    r"修仙|玄幻|仙侠|修真|"
     r"宗门|灵根|金丹|元婴|练气|功法|秘境|妖兽|"
     r"升级|爽文|系统流|穿越|重生"
 )
@@ -47,6 +54,84 @@ def book_scope_label(scope: str) -> str:
     return _SCOPE_LABELS.get(normalize_book_scope(scope), scope)
 
 
+def explicit_book_scope(message: str = "") -> BookScope | None:
+    """句里写明的尺度。短篇/长篇/写一章优先于 prefs 钉死；「写一篇」和「第 N 章」不算。"""
+    blob = (message or "").strip()
+    if not blob:
+        return None
+    if _SHORT.search(blob):
+        return "short"
+    if _MEDIUM.search(blob):
+        return "single"
+    if _EXPLICIT_LONG_SCALE.search(blob):
+        return "long"
+    return None
+
+
+def load_book_scope_override(
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any] | None:
+    """从 writing_prefs.json 读 book_scope 钉死态。"""
+    from app.writing.work_mode import load_writing_prefs
+
+    data = load_writing_prefs(workspace_root=workspace_root)
+    raw = data.get("book_scope")
+    if isinstance(raw, dict):
+        source = str(raw.get("source") or "auto").strip().lower()
+        if source not in {"auto", "user"}:
+            source = "auto"
+        token = raw.get("scope") or raw.get("mode")
+        return {"scope": normalize_book_scope(str(token or "")), "source": source}
+    return None
+
+
+def save_book_scope_override(
+    *,
+    scope: str | None = None,
+    source: BookScopeSource = "user",
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """更新 prefs 中的 book_scope；保留 work_mode / style_gains。"""
+    from app.writing.work_mode import load_writing_prefs, save_writing_prefs
+
+    data = load_writing_prefs(workspace_root=workspace_root)
+    data["book_scope"] = {
+        "source": source,
+        "scope": normalize_book_scope(scope),
+    }
+    return save_writing_prefs(data, workspace_root=workspace_root)
+
+
+def resolve_book_scope(
+    message: str = "",
+    *,
+    outline: str = "",
+    section_id: str = "",
+    manuscript_chapters: int = 0,
+    workspace_root: Path | None = None,
+    override: str | None = None,
+) -> tuple[BookScope, BookScopeSource]:
+    """显式尺度词 > 用户钉死 > 推断。"""
+    if override is not None and str(override).strip():
+        return normalize_book_scope(override), "user"
+    named = explicit_book_scope(message)
+    if named is not None:
+        return named, "auto"
+    stored = load_book_scope_override(workspace_root=workspace_root)
+    if stored and stored.get("source") == "user":
+        return normalize_book_scope(str(stored.get("scope"))), "user"
+    return (
+        infer_book_scope(
+            message,
+            outline=outline,
+            section_id=section_id,
+            manuscript_chapters=manuscript_chapters,
+        ),
+        "auto",
+    )
+
+
 def infer_book_scope(
     message: str = "",
     *,
@@ -63,9 +148,12 @@ def infer_book_scope(
         return "short"
     if _MEDIUM.search(blob):
         return "single"
-    if _LONG.search(blob):
+    # 「写一篇」优先于题材词和「第 N 章」：带题材的完篇仍是单篇。
+    if _STANDALONE.search(blob) and not _EXPLICIT_LONG_SCALE.search(blob):
+        return "single"
+    if _EXPLICIT_LONG_SCALE.search(blob) or _GENRE_LONG.search(blob):
         return "long"
-    if _MID_BOOK.search(blob) or _MID_BOOK.search(sid):
+    if _CHAPTER_REF.search(blob) or _MID_BOOK.search(blob) or _MID_BOOK.search(sid):
         return "long"
     m = re.match(r"^ch(\d+)$", sid)
     if m and int(m.group(1)) >= 2:
@@ -77,8 +165,6 @@ def infer_book_scope(
 
         if _LONG_FORM.search(blob) or len(_chapter_spans(outline)) >= 4:
             return "long"
-    if _STANDALONE.search(blob) and not _LONG.search(blob):
-        return "single"
     return "single"
 
 
@@ -123,12 +209,12 @@ def scope_spec_line(scope: str, *, position: str = "", section_num: int | None =
     if sc == "short":
         return (
             "短篇：一篇收束的微型弧；人、事、地交织，环境窄而深；"
-            "不必套长篇开篇工序"
+            "不必订长篇纲，也不必套开篇工序"
         )
     if sc == "single":
         return (
-            "单篇：一篇完整小故事；人、事、地同场即可；"
-            "不必分章交设定，也不必按环境→人物→情节交卷"
+            "单篇：一篇完整小故事，本 Turn 可交卷；人、事、地同场即可；"
+            "不必分章、不必订长篇纲"
         )
     if pos == "falling":
         return "长篇·收束：余波与局面落地；不新开大线"
@@ -136,14 +222,14 @@ def scope_spec_line(scope: str, *, position: str = "", section_num: int | None =
         return "长篇·翻转：中段可以变向；扣已有线索写这场"
     if section_num is not None and section_num <= 3:
         return (
-            "长篇·开篇：地方或关系可先站；"
-            "不必按环境→世界→人物交卷"
+            "长篇·开篇：站住眼前的日子和人；勾画可轻可重；"
+            "后面的海（终局宇宙、境界总纲）不要写进这一章"
         )
     if section_num is not None and section_num >= 4:
         return (
-            "长篇·中段：扣已有线索写这场；新细节即可，勿重播开篇"
+            "长篇·中段：扣已有线索写这场；换地图或抬压强即可，勿重播开篇"
         )
-    return "长篇：有纲跟纲写这场；三要素始终在，不必每章申报主项"
+    return "长篇：有纲跟这场的章职写；本 Turn 只交一章，不是把全书写完"
 
 
 def default_duty_for_scope(
@@ -164,12 +250,12 @@ def default_duty_for_scope(
     if sc == "short":
         return (
             "短篇倾向：人、事、地交织，环境窄而深，一篇内可有起落；"
-            "开篇只兑这一场，不把卷纲写成设定百科"
+            "开篇只兑这一场，不必另起长篇契约"
         )
     if sc == "single":
         return (
             "单篇倾向：三要素同场即可；句味/类型化按 work_mode；"
-            "不必按环境→人物→情节交卷"
+            "本篇收束，不必按环境→人物→情节交卷"
         )
     if pos == "climax":
         return "高潮章：一件主线麻烦顶满；副线只碰撞主线；人物选择可见"
@@ -177,9 +263,9 @@ def default_duty_for_scope(
         return "收束章：余波与局面落下，不新开卷级冲突"
     if pos in {"opening", "rising", "turn"} and sc == "long":
         if pos == "opening" or (kind and kind != "plot_step"):
-            return default_opening_duty(mode, chapter_kind=chapter_kind or "world_rule")
-        return "加压/台阶：在已立规矩下推进一步；人物仍在场上"
-    return default_opening_duty(mode, chapter_kind=chapter_kind or "world_rule")
+            return default_opening_duty(mode, chapter_kind=chapter_kind or "live_character")
+        return "加压/台阶：在已立的日子里推进一步；人物仍在场上"
+    return default_opening_duty(mode, chapter_kind=chapter_kind or "live_character")
 
 
 def resolve_book_scope_context(
@@ -189,12 +275,14 @@ def resolve_book_scope_context(
     section_id: str = "",
     manuscript_chapters: int = 0,
     position: str = "",
+    workspace_root: Path | None = None,
 ) -> dict[str, Any]:
-    scope = infer_book_scope(
+    scope, _src = resolve_book_scope(
         message,
         outline=outline,
         section_id=section_id,
         manuscript_chapters=manuscript_chapters,
+        workspace_root=workspace_root,
     )
     sid = (section_id or "").strip().lower()
     m = re.match(r"^ch(\d+)$", sid)

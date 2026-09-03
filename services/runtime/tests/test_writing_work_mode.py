@@ -46,7 +46,7 @@ def test_default_opening_duty_differs_by_mode() -> None:
     lit = default_opening_duty("literary")
     web = default_opening_duty("web_serial")
     assert "机构" in lit or "可先站" in lit
-    assert "规矩" in web or "可先站" in web
+    assert "日子" in web or "人" in web
     assert "ch2" not in web and "ch3" not in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
     assert "强钩" in hook or "麻烦" in hook

@@ -30,14 +30,14 @@ def test_infer_rising_mid_book() -> None:
     assert infer_chapter_position(section_id="ch5", message="续写") == "rising"
 
 
-def test_opening_defaults_to_world_rule() -> None:
+def test_opening_defaults_to_live_character() -> None:
     kind = infer_chapter_kind(
         position="opening",
         work_mode="web_serial",
         message="写修仙长篇第一章",
         book_scope="long",
     )
-    assert kind == "world_rule"
+    assert kind == "live_character"
 
 
 def test_opening_hook_from_keywords() -> None:
@@ -61,9 +61,9 @@ def test_resolve_role_opening(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     assert role["chapter_position"] == "opening"
     assert role["book_scope"] == "long"
-    assert role["chapter_kind"] == "world_rule"
-    assert "环境" in role["obligation"] or "规矩" in role["obligation"]
-    assert role["preferred_fragment"] == "worldview_texture"
+    assert role["chapter_kind"] == "live_character"
+    assert "日子" in role["obligation"] or "人" in role["obligation"]
+    assert role["preferred_fragment"] == "mixed"
 
 
 def test_infer_chapter_kind_from_outline_duty() -> None:
@@ -72,6 +72,7 @@ def test_infer_chapter_kind_from_outline_duty() -> None:
     assert infer_chapter_kind_from_duty("主项：环境") == "world_rule"
     assert infer_chapter_kind_from_duty("主项：人物") == "live_character"
     assert infer_chapter_kind_from_duty("主项：情节") == "plot_step"
+    assert infer_chapter_kind_from_duty("霜降边城，灯油规矩，谁交谁过") is None
 
 
 def test_ch1_not_falling_when_outline_has_falling_spine() -> None:

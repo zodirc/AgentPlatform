@@ -119,12 +119,17 @@ def looks_like_chapter_draft(user_text: str) -> bool:
 
 def resolve_draft_quota(user_text: str, *, book_scope: str | None = None) -> int | None:
     """draft 配额（尺度感知）。"""
-    from app.writing.book_scope import default_draft_quota_for_scope, infer_book_scope
+    from app.writing.book_scope import default_draft_quota_for_scope, resolve_book_scope
 
     named = parse_char_quota(user_text)
     if named is not None:
         return named
-    scope = book_scope or infer_book_scope(user_text)
+    if book_scope:
+        from app.writing.book_scope import normalize_book_scope
+
+        scope = normalize_book_scope(book_scope)
+    else:
+        scope, _src = resolve_book_scope(user_text)
     scoped = default_draft_quota_for_scope(scope, user_text)
     if scoped is not None:
         return scoped

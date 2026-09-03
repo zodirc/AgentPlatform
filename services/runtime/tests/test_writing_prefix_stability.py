@@ -178,40 +178,15 @@ def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
     assert "Writing spec" not in extract_cards_block(pin.volatile_block)
 
 
-def test_xuanhuan_diverge_styles_volatile_only(tmp_path: Path) -> None:
+def test_xuanhuan_diverge_styles_not_auto_injected(tmp_path: Path) -> None:
     pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
         "写一章长篇玄幻小说第一章",
         workspace_root=tmp_path,
     )
-    assert "## 题材发散（仅无" in pin.volatile_block
-    assert "都市怪谈" in pin.volatile_block
+    assert "## 题材发散" not in pin.volatile_block
+    assert "都市怪谈" not in pin.volatile_block
     cards_block = extract_cards_block(pin.volatile_block)
     assert "都市怪谈" not in cards_block
     assert "凡人流" not in cards_block
-
-    from app.writing.outline_phase import write_style_lock
-
-    style_outline = (
-        "## 风格契约\n\n**路数**：凡人流\n\n"
-        "**世界怎么运转**：灵石、丹药、引荐都要换；散修与内门隔着工分。"
-        "记名弟子先干杂活，修仙先是生计，同门师徒也在算账。\n\n"
-        "**文字与节奏**：惜命算计，打斗写消耗与代价，文笔平实。\n\n"
-        "**开篇质地**：生计压力进门派，第一次危机常来自身边算计。\n\n"
-        "**边界**：忌天才顿悟、境界大全。\n"
-    )
-    (tmp_path / "outline.md").write_text(
-        style_outline + "主题倾向：凡人流边关，缺粮换活路。\n主线：沈禾要活着出关。\n" + "x" * 120,
-        encoding="utf-8",
-    )
-    write_style_lock((tmp_path / "outline.md").read_text(encoding="utf-8"), workspace_root=tmp_path)
-    pin_locked = prepare_writing_system_prompt(
-        "You are a writing assistant.",
-        "写一章长篇玄幻小说第一章",
-        workspace_root=tmp_path,
-    )
-    assert "## 题材发散（仅无" not in pin_locked.volatile_block
-    assert "## 题材发散（仅无" not in pin_locked.volatile_block
-    assert stable_cards_prefix_hash(cards_block) == stable_cards_prefix_hash(
-        extract_cards_block(pin_locked.volatile_block)
-    )
+    assert "outline_phase: `open`" in pin.volatile_block

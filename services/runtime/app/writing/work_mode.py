@@ -239,7 +239,7 @@ def infer_chapter_element(duty: str) -> str | None:
 def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str:
     """无 outline 时的开篇默认职务。"""
     mode = normalize_work_mode(work_mode)
-    kind = (chapter_kind or "world_rule").strip().lower()
+    kind = (chapter_kind or "live_character").strip().lower()
     if kind == "conflict_hook":
         return (
             "开篇若先顶麻烦：人物带着第一阶麻烦进场；"
@@ -247,7 +247,7 @@ def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str
         )
     if mode == "web_serial":
         return (
-            "开篇倾向：地方或关系可先站，一条可见规矩即可；"
+            "开篇倾向：站住眼前的日子和人；勾画可轻可重；"
             "人物与麻烦可以同场。开篇只兑这一场"
         )
     return "开篇倾向：社会背景与自然场景可先站；机构专名让场景站稳后再出现"
@@ -290,7 +290,7 @@ def element_obligation(element: str | None, work_mode: str) -> str:
         if element == "plot":
             return f"本章主服务{label}：推进一步，留读者追问"
         if element == "environment":
-            return f"本章主服务{label}：规则可感可用"
+            return f"本章主服务{label}：地方和关系在场上可感"
     if element == "character":
         return f"本章主服务{label}：杂取种种合成典型，靠对白/行动/心理显露"
     if element == "plot":

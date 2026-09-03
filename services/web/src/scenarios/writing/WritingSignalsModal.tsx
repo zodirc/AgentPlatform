@@ -7,8 +7,16 @@ import {
 import { Button } from "../../components/ui/button";
 
 export type WorkModeChoice = "auto" | "literary" | "web_serial";
+export type BookScopeChoice = "auto" | "short" | "single" | "long";
 
 const PREFS_PATH = "writing_prefs.json";
+
+const SCOPE_CHOICES: { id: BookScopeChoice; label: string; hint: string }[] = [
+  { id: "auto", label: "自动", hint: "按用户句推断" },
+  { id: "short", label: "短篇", hint: "一篇收束的微型弧" },
+  { id: "single", label: "单篇", hint: "一篇完整小故事" },
+  { id: "long", label: "长篇", hint: "一次一章，海先藏着" },
+];
 
 const MODE_CHOICES: { id: WorkModeChoice; label: string; hint: string }[] = [
   { id: "auto", label: "自动", hint: "按用户句推断" },
@@ -49,6 +57,7 @@ type Gains = Record<string, number>;
 
 type StoredPrefs = {
   work_mode?: { source?: string; mode?: string };
+  book_scope?: { source?: string; scope?: string };
   style_gains?: Record<string, number>;
 };
 
@@ -62,12 +71,14 @@ function fullDefaults(choice: WorkModeChoice): Gains {
 
 function parsePrefs(raw: string | undefined): {
   choice: WorkModeChoice;
+  scope: BookScopeChoice;
   gains: Gains;
 } {
   const fallbackChoice: WorkModeChoice = "auto";
+  const fallbackScope: BookScopeChoice = "auto";
   const fallbackGains = fullDefaults(fallbackChoice);
   if (!raw?.trim()) {
-    return { choice: fallbackChoice, gains: fallbackGains };
+    return { choice: fallbackChoice, scope: fallbackScope, gains: fallbackGains };
   }
   try {
     const data = JSON.parse(raw) as StoredPrefs;
@@ -78,6 +89,15 @@ function parsePrefs(raw: string | undefined): {
     ) {
       choice = data.work_mode.mode;
     }
+    let scope: BookScopeChoice = "auto";
+    if (
+      data.book_scope?.source === "user" &&
+      (data.book_scope.scope === "short" ||
+        data.book_scope.scope === "single" ||
+        data.book_scope.scope === "long")
+    ) {
+      scope = data.book_scope.scope;
+    }
     const base = fullDefaults(choice);
     const gains: Gains = { ...base };
     if (data.style_gains && typeof data.style_gains === "object") {
@@ -86,21 +106,29 @@ function parsePrefs(raw: string | undefined): {
         if (Number.isFinite(v)) gains[s.id] = Math.max(0, Math.min(1, v));
       }
     }
-    return { choice, gains };
+    return { choice, scope, gains };
   } catch {
-    return { choice: fallbackChoice, gains: fallbackGains };
+    return { choice: fallbackChoice, scope: fallbackScope, gains: fallbackGains };
   }
 }
 
-function serializePrefs(choice: WorkModeChoice, gains: Gains): string {
+function serializePrefs(
+  choice: WorkModeChoice,
+  gains: Gains,
+  scope: BookScopeChoice,
+): string {
   const work_mode =
     choice === "auto"
       ? { source: "auto", mode: "literary" }
       : { source: "user", mode: choice };
+  const book_scope =
+    scope === "auto"
+      ? { source: "auto", scope: "single" }
+      : { source: "user", scope };
   const style_gains = Object.fromEntries(
     STYLES.map((s) => [s.id, Math.round((gains[s.id] ?? 0.7) * 100) / 100]),
   );
-  return `${JSON.stringify({ work_mode, style_gains }, null, 2)}\n`;
+  return `${JSON.stringify({ work_mode, book_scope, style_gains }, null, 2)}\n`;
 }
 
 type Props = {
@@ -110,6 +138,7 @@ type Props = {
 
 export function WritingSignalsModal({ open, onClose }: Props) {
   const [choice, setChoice] = useState<WorkModeChoice>("auto");
+  const [scope, setScope] = useState<BookScopeChoice>("auto");
   const [gains, setGains] = useState<Gains>(() => fullDefaults("auto"));
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -125,12 +154,14 @@ export function WritingSignalsModal({ open, onClose }: Props) {
         if (cancelled) return;
         const parsed = parsePrefs(file.content);
         setChoice(parsed.choice);
+        setScope(parsed.scope);
         setGains(parsed.gains);
         setDirty(false);
         setMsg(null);
       } catch {
         if (cancelled) return;
         setChoice("auto");
+        setScope("auto");
         setGains(fullDefaults("auto"));
         setDirty(false);
       } finally {
@@ -160,15 +191,15 @@ export function WritingSignalsModal({ open, onClose }: Props) {
     setBusy(true);
     setMsg(null);
     try {
-      await saveWorkspaceFile(PREFS_PATH, serializePrefs(choice, gains));
+      await saveWorkspaceFile(PREFS_PATH, serializePrefs(choice, gains, scope));
       setDirty(false);
-      setMsg("已保存。下一 Turn 起按此模式与奖惩强度打分。");
+      setMsg("已保存。下一 Turn 起按此尺度、模式与奖惩强度打分。");
     } catch (e) {
       setMsg(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
-  }, [choice, gains]);
+  }, [choice, gains, scope]);
 
   if (!open) return null;
 
@@ -185,7 +216,7 @@ export function WritingSignalsModal({ open, onClose }: Props) {
               写作信号
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              作品模式 → 奖惩贴近。长篇 ch1–ch3 分工见 outline 开篇三章契约。存于工作区{" "}
+              作品尺度与模式 → 奖惩贴近。长篇开篇站住眼前这一池，海先藏着。存于工作区{" "}
               <code className="text-[10px]">{PREFS_PATH}</code>
               ，不在设置页。
             </p>
@@ -205,6 +236,37 @@ export function WritingSignalsModal({ open, onClose }: Props) {
             <p className="text-sm text-muted-foreground">加载中…</p>
           ) : (
             <>
+              <section>
+                <h3 className="text-sm font-medium">作品尺度</h3>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  短篇/单篇一篇收束；长篇一次一章。钉死后「写一篇玄幻」仍按长篇开写；句里写明短篇/长篇仍优先。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {SCOPE_CHOICES.map((c) => {
+                    const active = scope === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        title={c.hint}
+                        disabled={busy}
+                        onClick={() => {
+                          setScope(c.id);
+                          setDirty(true);
+                        }}
+                        className={`rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
+                          active
+                            ? "border-primary bg-primary/20 text-primary"
+                            : "border-border bg-card/50 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
               <section>
                 <h3 className="text-sm font-medium">作品模式</h3>
                 <p className="mt-0.5 text-[11px] text-muted-foreground">

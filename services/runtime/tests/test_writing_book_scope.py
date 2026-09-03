@@ -17,6 +17,9 @@ def test_infer_book_scope_short_and_long() -> None:
     assert infer_book_scope("写一章长篇修仙第一章") == "long"
     assert infer_book_scope("续写第二十章") == "long"
     assert infer_book_scope("写一篇故事") == "single"
+    assert infer_book_scope("写一篇玄幻") == "single"
+    assert infer_book_scope("写一篇故事第一章") == "single"
+    assert infer_book_scope("写玄幻") == "long"
     assert infer_book_scope("", section_id="ch5") == "long"
 
 
@@ -55,9 +58,9 @@ def test_spec_block_short_vs_long() -> None:
 
     long = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "book_scope: `long`" in long
-    assert "outline_phase: `diverge`" in long
+    assert "outline_phase: `open`" in long
     assert "开篇" in long
-    assert "不必按环境→世界→人物" in long
+    assert "眼前的日子" in long or "海" in long
 
 
 def test_spec_climax_line() -> None:
@@ -81,7 +84,10 @@ def test_scope_spec_mid_and_climax() -> None:
     assert "收束" in scope_spec_line("long", position="falling", section_num=12)
 
 
-def test_spec_single_story_does_not_invent_duty() -> None:
+def test_short_spec_is_ready_not_open() -> None:
+    spec = build_writing_spec_block("写一篇故事")
+    assert "outline_phase: `ready`" in spec
+    assert "订长篇纲" in spec or "近池身份" in spec
     spec = build_writing_spec_block("写一篇故事")
     assert "book_scope: `single`" in spec
     assert "这一场" not in spec
@@ -120,4 +126,30 @@ def test_spec_does_not_treat_unfocused_midbook_as_opening(
     (drafts / "manuscript.md").write_text(doc, encoding="utf-8")
     spec = build_writing_spec_block("润色文笔", workspace_root=tmp_path)
     assert "长篇·开篇" not in spec
-    assert "不必按环境→世界→人物" not in spec
+    assert "outline_phase: `continue`" in spec
+    assert "眼前的日子" not in spec
+
+
+def test_resolve_book_scope_user_pin(tmp_path, monkeypatch) -> None:
+    from app.settings import settings
+    from app.writing.book_scope import resolve_book_scope, save_book_scope_override
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_book_scope_override(scope="long", source="user", workspace_root=tmp_path)
+    scope, source = resolve_book_scope("写一篇玄幻", workspace_root=tmp_path)
+    assert scope == "long"
+    assert source == "user"
+    spec = build_writing_spec_block("写一篇玄幻", workspace_root=tmp_path)
+    assert "book_scope: `long`" in spec
+    assert "手动" in spec
+
+
+def test_resolve_book_scope_explicit_short_beats_pin(tmp_path, monkeypatch) -> None:
+    from app.settings import settings
+    from app.writing.book_scope import resolve_book_scope, save_book_scope_override
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_book_scope_override(scope="long", source="user", workspace_root=tmp_path)
+    scope, source = resolve_book_scope("写一篇短篇小说", workspace_root=tmp_path)
+    assert scope == "short"
+    assert source == "auto"

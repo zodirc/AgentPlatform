@@ -75,8 +75,6 @@ def infer_chapter_kind_from_duty(duty: str) -> ChapterKind | None:
         if token == "人物":
             return "live_character"
         return "plot_step"
-    if _KIND_WORLD.search(duty or "") and not _KIND_PLOT.search(duty or ""):
-        return "world_rule"
     return None
 
 
@@ -176,9 +174,7 @@ def infer_chapter_kind(
             return "plot_step"
         return "live_character"
     if pos == "opening" and scope == "long":
-        if mode == "web_serial":
-            return "world_rule"
-        return "world_rule"
+        return "live_character"
     if pos == "climax":
         return "climax_payoff"
     if pos == "falling":
@@ -190,7 +186,7 @@ def infer_chapter_kind(
 
 def chapter_kind_to_fragment(kind: str) -> str:
     mapping = {
-        "live_character": "dialogue_dyad",
+        "live_character": "mixed",
         "plot_step": "plot_progress",
         "world_rule": "worldview_texture",
         "conflict_hook": "plot_progress",
@@ -215,10 +211,10 @@ def chapter_kind_obligation(
     if k == "live_character":
         if pos == "opening":
             return (
-                "这场偏立人：让读者认识这个人怎么过日子/相处；"
-                "少事、多在场。禁止把气氛/悬念/伏笔/世界观/主线一次灌满（卷纲浓缩）。"
+                "这场偏站住这个人：读者先看见他怎么过眼前的日子；"
+                "勾画可轻可重。后面的海（境界总纲、全书规则、结局）不要写进这一章。"
                 + (
-                    "可留一丝第一阶信息差，但人物先立住。"
+                    "人物与第一阶麻烦可以同场。"
                     if mode == "web_serial"
                     else "句味与人物距离优先。"
                 )
@@ -227,17 +223,17 @@ def chapter_kind_obligation(
     if k == "world_rule":
         if pos == "opening" and scope == "long":
             return (
-                "这场偏环境/规矩：社会背景与自然场景可先站；"
-                "何时何地、什么规矩在管事即可。"
+                "这场偏环境质地：社会背景与自然场景可先站；"
+                "何时何地即可，不要写成能/不能做什么的手册。"
                 + (
-                    " 人物与麻烦可以同场；不必写成「能/不能做什么」手册。"
+                    " 人物与麻烦可以同场。"
                     if mode == "web_serial"
-                    else " 机构专名勿当第一词；身世不要提要。"
+                    else " 机构专名让场景站稳后再出现。"
                 )
             )
         if pos in {"rising", "turn"} and scope == "long":
-            return "这场偏环境/规矩：只写新地点/新规矩/这场要的那一步，勿重播已立设定"
-        return "这场偏环境/规矩：规矩可感可用，托住人物，勿开场背设定"
+            return "这场偏环境质地：只写新地点/这场要的那一步，勿重播已立设定"
+        return "这场偏环境质地：地方和关系托住人物，勿开场背设定"
     if k == "conflict_hook":
         return (
             "本章强钩：冲突/异变可先顶，但仍要有人；"
@@ -262,14 +258,19 @@ def resolve_chapter_role(
     manuscript_chapters: int = 0,
 ) -> dict[str, Any]:
     """综合尺度 + 位置 + 用户句 + outline 主项 → 章类型。"""
-    from app.writing.book_scope import infer_book_scope
+    from app.writing.book_scope import normalize_book_scope, resolve_book_scope
 
-    scope = book_scope or infer_book_scope(
-        message,
-        outline=outline,
-        section_id=section_id,
-        manuscript_chapters=manuscript_chapters,
-    )
+    if book_scope:
+        scope = normalize_book_scope(book_scope)
+        scope_source = "auto"
+    else:
+        scope, scope_source = resolve_book_scope(
+            message,
+            outline=outline,
+            section_id=section_id,
+            manuscript_chapters=manuscript_chapters,
+            workspace_root=workspace_root,
+        )
     position = infer_chapter_position(
         section_id=section_id,
         message=message,
@@ -286,6 +287,7 @@ def resolve_chapter_role(
     )
     return {
         "book_scope": scope,
+        "book_scope_source": scope_source,
         "chapter_position": position,
         "chapter_position_label": chapter_position_label(position),
         "chapter_kind": kind,
