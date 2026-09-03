@@ -323,6 +323,37 @@ async def test_append_blocked_while_chapter_staccato(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_long_append_not_blocked_by_chapter_l0(workspace: Path) -> None:
+    turn_id = uuid4()
+    body = (
+        "镇上的钟表铺开在河埠头，门脸窄，里面却深，像一只把肚子藏在黑暗里的鱼。" * 12
+        + "\n"
+        + _DUET_CHIP
+    )
+    first = await core.draft_section(
+        "ch1",
+        body,
+        turn_id=turn_id,
+        fragment="dialogue_dyad",
+        turn_user_text="写一章长篇第一章",
+    )
+    assert first["status"] == "drafted"
+    assert first.get("staccato_uniform") is True
+    appended = await core.draft_section(
+        "ch1",
+        "河风从门缝里进来，柜台上的灰被吹成一条细线。",
+        turn_id=turn_id,
+        fragment="mixed",
+        mode="append",
+        turn_user_text="写一章长篇第一章",
+    )
+    assert appended["status"] == "drafted"
+    assert appended.get("mode") == "append"
+    text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
+    assert "柜台上的灰" in text
+
+
+@pytest.mark.asyncio
 async def test_append_slice_staccato_rejected(workspace: Path) -> None:
     turn_id = uuid4()
     clean = (

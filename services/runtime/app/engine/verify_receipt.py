@@ -673,6 +673,7 @@ def should_inject_writing_delivery_hold(state: Any, *, reserve_steps: int = 1) -
 def build_writing_delivery_hold_text(state: Any) -> str:
     from app.writing.delivery_gate import (
         delivery_hold_notice,
+        manifest_book_scope,
         manifest_delivery_blockers,
         read_turn_manifest,
     )
@@ -682,7 +683,7 @@ def build_writing_delivery_hold_text(state: Any) -> str:
         getattr(state, "session_id", None),
     )
     blockers = manifest_delivery_blockers(manifest)
-    return delivery_hold_notice(blockers)
+    return delivery_hold_notice(blockers, book_scope=manifest_book_scope(manifest))
 
 
 def mark_writing_delivery_hold_injected(state: Any) -> None:

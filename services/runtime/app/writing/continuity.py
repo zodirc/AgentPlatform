@@ -41,8 +41,15 @@ _STOP_NAMES = frozenset(
         "现在",
         "今夜",
         "古城",
+        "临时",
+        "安置",
+        "语音",
+        "十一",
+        "夜里",
+        "安置点",
     }
 )
+_NAME_PARTICLE_SUFFIX = frozenset("里上中下点时后前个了着过的地得")
 
 
 @dataclass(frozen=True)
@@ -60,6 +67,56 @@ class ContinuityCandidate:
 # Hard caps so post-turn heuristics stay millisecond-scale (docs/13 R3/R4).
 _MAX_CHAPTER_CHARS = 12_000
 _FALLBACK_SCAN_CHARS = 4_000
+_ROSTER_SLOT = re.compile(
+    r"(?:跟着谁|这本在写谁|角色)[*_]*[：:]\s*([^\n]{1,40})"
+)
+
+
+def _is_cjk(ch: str) -> bool:
+    return bool(ch) and "\u4e00" <= ch <= "\u9fff"
+
+
+def _inside_longer_token(name: str, text: str) -> bool:
+    """True if every occurrence is glued to extra CJK on the left (compound, not 名+动作)."""
+    if not name or not text:
+        return False
+    found = False
+    for match in re.finditer(re.escape(name), text):
+        found = True
+        i = match.start()
+        if i > 0 and _is_cjk(text[i - 1]):
+            continue
+        return False
+    return found
+
+
+def _looks_like_name(name: str) -> bool:
+    token = (name or "").strip()
+    if len(token) < 2 or len(token) > 4:
+        return False
+    if token in _STOP_NAMES:
+        return False
+    if not re.fullmatch(r"[\u4e00-\u9fff]+", token):
+        return False
+    if token[-1] in _NAME_PARTICLE_SUFFIX:
+        return False
+    return True
+
+
+def extract_outline_roster(outline: str) -> set[str]:
+    """从近池槽位抽出人名（跟着谁 / 这本在写谁）。"""
+    names: set[str] = set()
+    for match in _ROSTER_SLOT.finditer(outline or ""):
+        blob = (match.group(1) or "").strip()
+        token_match = re.match(r"^([\u4e00-\u9fff]{2,3})", blob)
+        if not token_match:
+            continue
+        token = token_match.group(1)
+        if len(token) == 3 and token[-1] in "在把的了是与和被从到向着过":
+            token = token[:2]
+        if _looks_like_name(token):
+            names.add(token)
+    return names
 
 
 def extract_continuity_candidates(
@@ -67,45 +124,57 @@ def extract_continuity_candidates(
     *,
     section_id: str = "",
     max_candidates: int = 5,
+    outline: str = "",
 ) -> list[ContinuityCandidate]:
-    """启发式抽取。
-    
-    参数:
-        chapter_text/section_id/max。
-    
-    返回:
-        list。"""
+    """启发式抽取。假复合词（临时安置点 / 语音里说）不当人名。"""
     text = (chapter_text or "").strip()
     if not text:
         return []
     if len(text) > _MAX_CHAPTER_CHARS:
         text = text[:_MAX_CHAPTER_CHARS]
 
-    # Prefer 2–3 char tokens before common action verbs (non-overlapping).
     verb_bound = re.compile(
         r"([\u4e00-\u9fff]{2,3})"
-        r"(?:拔|点|决|说|道|问|笑|怒|离开|决定|答应|拒绝|阵亡|受伤|背叛|归来)"
+        r"(?:拔|点了|点头|决|说|道|问|笑|怒|离开|决定|答应|拒绝|阵亡|受伤|背叛|归来)"
     )
     counts: dict[str, int] = {}
     for match in verb_bound.finditer(text):
         name = match.group(1)
-        if name in _STOP_NAMES:
+        if not _looks_like_name(name):
+            continue
+        if _inside_longer_token(name, text):
             continue
         counts[name] = counts.get(name, 0) + 1
 
-    # Fallback: bounded scan only (avoid O(n) over full manuscripts).
+    # Fallback: only tokens that appear twice and are not glued into a longer CJK compound.
     if not counts:
         scan = text[:_FALLBACK_SCAN_CHARS]
+        raw: dict[str, int] = {}
         for length in (3, 2):
             i = 0
             while i + length <= len(scan):
                 chunk = scan[i : i + length]
-                if re.fullmatch(r"[\u4e00-\u9fff]+", chunk) and chunk not in _STOP_NAMES:
-                    counts[chunk] = counts.get(chunk, 0) + 1
+                if _looks_like_name(chunk):
+                    raw[chunk] = raw.get(chunk, 0) + 1
                 i += 1
-            counts = {k: v for k, v in counts.items() if v >= 2}
+            counts = {
+                k: v
+                for k, v in raw.items()
+                if v >= 2 and not _inside_longer_token(k, text)
+            }
             if counts:
                 break
+
+    roster = extract_outline_roster(outline)
+    if roster:
+        for name in roster:
+            if name in text and _looks_like_name(name):
+                counts[name] = max(counts.get(name, 0), 2)
+        counts = {
+            k: v
+            for k, v in counts.items()
+            if k in roster or any(k in r or r in k for r in roster)
+        }
 
     ranked = sorted(
         counts.items(),

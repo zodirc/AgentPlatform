@@ -122,12 +122,23 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
 
     logger = logging.getLogger("app.scenarios.hooks")
     try:
+        from pathlib import Path
+
+        from app.settings import settings
         from app.writing.continuity import (
             extract_continuity_candidates,
             write_pending_candidates,
         )
         from app.writing.focus import infer_focus_section_id
         from app.writing.manuscript import extract_section, list_section_ids, load_manuscript_doc
+
+        outline_text = ""
+        outline_path = Path(settings.workspace_root) / "outline.md"
+        if outline_path.is_file():
+            try:
+                outline_text = outline_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                outline_text = ""
 
         doc, _rel = load_manuscript_doc()
         if doc.strip():
@@ -154,6 +165,7 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                 candidates = extract_continuity_candidates(
                     chapter_text,
                     section_id=focus or "",
+                    outline=outline_text,
                 )
                 written = write_pending_candidates(
                     candidates,
@@ -183,6 +195,11 @@ def _writing_focus_bookmark(
     from pathlib import Path
 
     from app.settings import settings
+    from app.writing.delivery_gate import (
+        looks_like_delivery_playbook,
+        manuscript_preview_for_compact,
+        strip_delivery_playbook,
+    )
     from app.writing.focus import (
         build_writing_bookmark,
         format_writing_bookmark,
@@ -200,6 +217,26 @@ def _writing_focus_bookmark(
     if (not recent_user or recent_user.strip() in {"/compact", "compact"}) and rows:
         recent_user = str(rows[0].get("user_input") or "")
         focus = infer_focus_section_id(recent_user, sections) or focus
+
+    narrative = strip_delivery_playbook(getattr(summary, "narrative", "") or "")
+    preview = manuscript_preview_for_compact()
+    if not narrative or looks_like_delivery_playbook(narrative):
+        narrative = preview or str(getattr(summary, "task", "") or "")
+    summary.narrative = narrative
+    cleaned_decisions = [
+        item
+        for item in list(getattr(summary, "decisions", None) or [])
+        if item and not looks_like_delivery_playbook(str(item))
+    ]
+    summary.decisions = cleaned_decisions[:8]
+    record["last_output_preview"] = (preview or narrative or str(summary.task or ""))[:500]
+    record["decisions"] = list(summary.decisions)[:10]
+    if preview and focus:
+        land = f"稿已落盘 drafts/manuscript.md；focus={focus}"
+        if land not in record["decisions"]:
+            record["decisions"] = [land, *record["decisions"]][:10]
+            summary.decisions = list(record["decisions"])
+
     bookmark = build_writing_bookmark(
         focus=focus,
         sections=sections,

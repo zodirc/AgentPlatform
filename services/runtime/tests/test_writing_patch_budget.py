@@ -136,7 +136,59 @@ def test_finalize_writing_turn_summary_replaces_false_completion(
         summary="第一章已完成，请过目。",
     )
     assert "交付门" in out
+    assert "请过目" in out
     assert "已完成" not in out or "禁止" in out
+
+
+def test_finalize_writing_turn_summary_long_l0_does_not_block_chapter_landed(
+    workspace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "workspace_root", str(workspace))
+    turn_id = uuid4()
+    manifest_dir = workspace / ".agent" / "work" / "turns"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / f"{turn_id}.json").write_text(
+        '{"section_drafts":{"ch1":{"l0_hits":["staccato_uniform"],"book_scope":"long"}}}',
+        encoding="utf-8",
+    )
+    out = finalize_writing_turn_summary(
+        turn_id=turn_id,
+        session_id=uuid4(),
+        summary="第一章已完成，请过目。",
+    )
+    assert "交付门" not in out
+    assert "第一章已完成" in out
+
+
+def test_long_length_short_does_not_block_once_chapter_has_a_scene() -> None:
+    blockers = manifest_delivery_blockers(
+        {
+            "section_drafts": {
+                "ch1": {
+                    "book_scope": "long",
+                    "length_short": True,
+                    "visible_chars": 2400,
+                    "l0_hits": ["staccato_uniform"],
+                }
+            }
+        }
+    )
+    assert blockers == []
+
+    stub = manifest_delivery_blockers(
+        {
+            "section_drafts": {
+                "ch1": {
+                    "book_scope": "long",
+                    "length_short": True,
+                    "visible_chars": 200,
+                }
+            }
+        }
+    )
+    assert any("length_short" in b for b in stub)
 
 
 def test_finalize_writing_turn_summary_passthrough_without_manifest() -> None:

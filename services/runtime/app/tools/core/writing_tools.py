@@ -49,6 +49,23 @@ def _draft_work_mode(turn_user_text: str = "") -> str:
     mode, _ = resolve_work_mode(turn_user_text, outline=outline)
     return mode
 
+
+def _draft_book_scope(turn_user_text: str = "", section_id: str = "") -> str:
+    from app.writing.book_scope import resolve_book_scope
+
+    outline = ""
+    try:
+        op = _resolve_path("outline.md")
+        if op.is_file():
+            outline = op.read_text(encoding="utf-8")
+    except OSError:
+        outline = ""
+    scope, _src = resolve_book_scope(
+        turn_user_text, outline=outline, section_id=section_id
+    )
+    return scope
+
+
 def _section_filename(section_id: str) -> str:
     normalized = section_id.strip()
     if not normalized or normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
@@ -391,21 +408,26 @@ def _reject_append_gate(
     path: str,
     mode: str,
     work_mode: str = "literary",
+    turn_user_text: str = "",
 ) -> dict[str, Any] | None:
-    """章级过程 L0 未清，或新切片自带碎拍 → 拒 append（不落盘）。"""
+    """章级过程 L0 未清，或新切片自带碎拍 → 拒 append（不落盘）。长篇 L0 不挡加厚。"""
     if occupy_fresh or mode != "append":
         return None
+    from app.writing.book_scope import resolve_book_scope
     from app.writing.signals.repair import (
         REWRITE_PATCH,
         prior_blocks_append,
         slice_blocks_append,
     )
 
+    scope, _src = resolve_book_scope(turn_user_text, section_id=section_id)
     prior = (manifest.get("section_drafts") or {}).get(section_id)
-    blocked = prior_blocks_append(
-        prior if isinstance(prior, dict) else None,
-        work_mode=work_mode,
-    )
+    blocked = None
+    if scope != "long":
+        blocked = prior_blocks_append(
+            prior if isinstance(prior, dict) else None,
+            work_mode=work_mode,
+        )
     if blocked:
         span = None
         if isinstance(prior, dict):
@@ -563,6 +585,7 @@ async def draft_section(
             path=path,
             mode=mode,
             work_mode=work_mode,
+            turn_user_text=turn_user_text,
         )
         if blocked_append:
             return blocked_append
@@ -640,6 +663,7 @@ async def draft_section(
             path=path,
             mode=mode,
             work_mode=work_mode,
+            turn_user_text=turn_user_text,
         )
         if blocked_append:
             return blocked_append
@@ -774,6 +798,9 @@ async def draft_section(
     entry: dict[str, Any] = {
         "visible_chars": int(result.get("visible_chars") or 0),
         "length_short": bool(result.get("length_short")),
+        "book_scope": _draft_book_scope(
+            str(_kwargs.get("turn_user_text") or ""), section_id=section_id
+        ),
     }
     signals_block = result.get("writing_signals")
     penalties = None

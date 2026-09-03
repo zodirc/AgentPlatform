@@ -46,3 +46,26 @@ def test_pending_candidates_not_auto_pinned(tmp_path: Path) -> None:
     )
     assert "pending" not in pin.volatile_block
     assert "Voice" in pin.volatile_block or "cold" in pin.volatile_block
+
+
+def test_continuity_rejects_compound_false_positives() -> None:
+    text = (
+        "临时安置点挤满了人，语音里说夜里十一点再来一趟。"
+        "安置点的灯还亮着，语音里又响了一句。"
+    )
+    titles = {c.title for c in extract_continuity_candidates(text, section_id="ch1")}
+    assert "时安置" not in titles
+    assert "语音里" not in titles
+    assert "里十一" not in titles
+    assert "临时" not in titles
+
+
+def test_continuity_prefers_outline_roster() -> None:
+    outline = "## 这本书\n\n**跟着谁**：陆沉在盐筛场收工。\n"
+    text = "陆沉把工牌揣进怀里，今晚还要去领药。管事在门口等着。"
+    titles = {
+        c.title
+        for c in extract_continuity_candidates(text, section_id="ch1", outline=outline)
+    }
+    assert "陆沉" in titles
+    assert "管事" not in titles
