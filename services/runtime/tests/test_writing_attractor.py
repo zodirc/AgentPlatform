@@ -84,9 +84,10 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "不是换皮" not in system
     assert "类型不是模板" in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
-    assert "换声口" in voice
+    assert "眼前的池子" in voice
     assert "看见代价" not in voice
-    assert "这本在写谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
+    assert "跟着谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
+    assert "眼下要什么" in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "沈砚" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "查父失踪" not in system
     assert "水路渡口+灵灯" not in system

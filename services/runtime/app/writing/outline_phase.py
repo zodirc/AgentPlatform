@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-OutlinePhase = Literal["diverge", "contract"]
+OutlinePhase = Literal["ready", "open", "continue"]
 
 STYLE_LOCK_REL = "writing/style.lock"
 _DIVERGE_STYLES_REL = (
@@ -20,7 +20,7 @@ _DIVERGE_STYLES_REL = (
 )
 
 _MIN_CONTRACT_CHARS = 80
-_SPINE_HINT = re.compile(r"主线|副线|主题倾向|风格契约")
+_SPINE_HINT = re.compile(r"主线|副线|主题倾向|风格契约|这本书")
 _FANTASY_HINT = re.compile(r"玄幻|仙侠|修仙|修真|奇幻|东方奇幻")
 _USER_DIRECTION = re.compile(
     r"凡人流|资源|逆命|日常侵染|秘知|打更|探案|克系|灵异|科幻|"
@@ -28,9 +28,6 @@ _USER_DIRECTION = re.compile(
     r"主角|名叫|姓名|"
     r"不要.{0,8}写|勿写|忌|"
     r"像.{1,10}写|风格.{0,4}是"
-)
-_STYLE_ROUTE_LABEL = re.compile(
-    r"凡人流|逆命悲情|都市规则怪谈|维多利亚克系|探案仙侠|科幻修真"
 )
 
 
@@ -81,10 +78,13 @@ def _extract_theme_line(outline: str) -> str:
 
     style = extract_outline_style_contract(outline, max_chars=200)
     if style.strip():
-        route = _STYLE_ROUTE_LABEL.search(style)
-        if route:
-            return f"风格契约: {route.group(0)}"
-        return f"风格契约: {style[:120].strip()}"
+        slot = re.search(
+            r"(?:跟着谁|眼下要什么|读者站在哪|这本在写谁).{0,80}",
+            style,
+        )
+        if slot:
+            return f"近池: {slot.group(0).strip()[:120]}"
+        return f"近池: {style[:120].strip()}"
     text = outline or ""
     for match in re.finditer(r"主题倾向.{0,200}", text):
         line = match.group(0).strip()
@@ -102,7 +102,7 @@ def write_style_lock(
     *,
     workspace_root: Path | None = None,
 ) -> Path | None:
-    """纲已订时写入 lock；后续 Turn 不再注入题材发散块（利于 prefix cache）。"""
+    """纲已订近池身份时写入 lock；后续 Turn 不再提示重写这本书是什么。"""
     body = (outline or "").strip()
     if not body:
         return None
@@ -138,7 +138,7 @@ def outline_contract_ready(
     if len(text) < _MIN_CONTRACT_CHARS:
         return False
 
-    from app.writing.book_scope import infer_book_scope, normalize_book_scope
+    from app.writing.book_scope import normalize_book_scope, resolve_book_scope
     from app.writing.outline_arc import (
         extract_outline_job,
         extract_outline_spine,
@@ -148,7 +148,7 @@ def outline_contract_ready(
     scope = (
         normalize_book_scope(book_scope)
         if book_scope
-        else infer_book_scope(user_text, outline=text)
+        else resolve_book_scope(user_text, outline=text)[0]
     )
     spine = extract_outline_spine(text).strip()
 
@@ -174,12 +174,12 @@ def wants_fantasy_diverge_corpus(
     outline: str = "",
     book_scope: str = "",
 ) -> bool:
-    from app.writing.book_scope import infer_book_scope, normalize_book_scope
+    from app.writing.book_scope import normalize_book_scope, resolve_book_scope
 
     scope = (
         normalize_book_scope(book_scope)
         if book_scope
-        else infer_book_scope(message, outline=outline)
+        else resolve_book_scope(message, outline=outline)[0]
     )
     if scope != "long":
         return False
@@ -194,14 +194,9 @@ def should_inject_diverge_styles(
     book_scope: str = "",
     workspace_root: Path | None = None,
 ) -> bool:
-    """无 style.lock、风格未写入 outline 时，volatile 注入题材发散（不进 cards）。"""
-    from app.writing.outline_arc import outline_style_committed
-
-    if style_lock_exists(workspace_root):
-        return False
-    if outline_style_committed(outline):
-        return False
-    return wants_fantasy_diverge_corpus(message, outline=outline, book_scope=book_scope)
+    """不再自动注入六路透镜。透镜不是订纲通行证。"""
+    del message, outline, book_scope, workspace_root
+    return False
 
 
 def load_diverge_styles_volatile_block() -> str:
@@ -218,7 +213,7 @@ def load_diverge_styles_volatile_block() -> str:
     body = (body or "").strip()
     if not body:
         return ""
-    return f"## 题材发散（仅无 `{STYLE_LOCK_REL}` 且 outline 尚无「风格契约」时；写入后不再注入）\n\n{body}"
+    return f"## 题材发散（可选；不是订纲通行证）\n\n{body}"
 
 
 def resolve_outline_phase(
@@ -227,13 +222,14 @@ def resolve_outline_phase(
     outline: str = "",
     book_scope: str = "",
     workspace_root: Path | None = None,
+    manuscript_chapters: int = 0,
 ) -> dict[str, Any]:
-    from app.writing.book_scope import infer_book_scope, normalize_book_scope
+    from app.writing.book_scope import normalize_book_scope, resolve_book_scope
 
     scope = (
         normalize_book_scope(book_scope)
         if book_scope
-        else infer_book_scope(message, outline=outline)
+        else resolve_book_scope(message, outline=outline, workspace_root=workspace_root)[0]
     )
     user_dir = user_specified_writing_direction(message)
     ready = outline_contract_ready(outline, book_scope=scope, user_text=message)
@@ -242,36 +238,27 @@ def resolve_outline_phase(
 
     style_in_outline = outline_style_committed(outline)
 
-    if locked and ready:
-        phase: OutlinePhase = "contract"
-    else:
-        phase = "diverge"
-
-    if phase == "diverge":
-        if style_in_outline:
-            note = (
-                f"outline「风格契约」已立：volatile 题材发散块已撤；"
-                "继续补开篇三章与 spine，全文跟 outline 风格段"
-            )
-        elif user_dir:
-            note = (
-                f"无 `{STYLE_LOCK_REL}`：优先 update_outline，"
-                "把 volatile 样例融合进「风格契约」再补章纲"
-            )
-        else:
-            note = (
-                f"无 `{STYLE_LOCK_REL}`：优先 update_outline；"
-                "volatile 含题材样例，选定后写入「风格契约」即停止注入"
-            )
-    else:
+    if scope in {"short", "single"}:
+        phase: OutlinePhase = "ready"
         note = (
-            f"`{STYLE_LOCK_REL}` 已立：按 spine+章 job 收缩；"
-            "正文跟 outline「风格契约」，不再注入题材发散块"
+            "短篇/单篇：直接成稿，一篇内收束；纲可选，不必订近池身份"
+            if scope == "single"
+            else "短篇：直接成稿，微型弧收束；不必订长篇纲"
         )
+    elif style_in_outline or ready or manuscript_chapters >= 1:
+        phase = "continue"
+        note = "池子已立：按章职写这场，海先藏着；本 Turn 只交一章"
+    else:
+        phase = "open"
+        if user_dir:
+            note = "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
+        else:
+            note = "长篇开篇：站住眼前的日子和人；勾画可轻可重；不要把后面的海写进第一章"
 
+    labels = {"ready": "成稿", "open": "开写", "continue": "续写"}
     return {
         "outline_phase": phase,
-        "outline_phase_label": "发散" if phase == "diverge" else "收缩",
+        "outline_phase_label": labels.get(phase, phase),
         "outline_phase_note": note,
         "user_direction": user_dir,
         "outline_contract_ready": ready,
@@ -282,7 +269,7 @@ def resolve_outline_phase(
 
 
 def outline_phase_spec_line(phase_info: dict[str, Any]) -> str:
-    phase = str(phase_info.get("outline_phase") or "diverge")
+    phase = str(phase_info.get("outline_phase") or "open")
     label = str(phase_info.get("outline_phase_label") or "")
     note = str(phase_info.get("outline_phase_note") or "").strip()
     one = re.sub(r"\s+", " ", note)

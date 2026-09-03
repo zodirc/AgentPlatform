@@ -349,9 +349,9 @@ def _outline_job_parts(
     phase = resolve_outline_phase(
         "", outline=text, book_scope=scope, workspace_root=workspace_root
     )
-    if phase.get("outline_phase") == "diverge":
+    if phase.get("outline_phase") == "open":
         parts.append(
-            "### Outline phase: diverge\n"
+            "### Outline phase: open\n"
             + str(phase.get("outline_phase_note") or "")
         )
         if not text.strip():
@@ -360,7 +360,7 @@ def _outline_job_parts(
         return []
     style = extract_outline_style_contract(text)
     if style and outline_style_committed(text):
-        parts.append(f"### Outline style contract\n{style}")
+        parts.append(f"### Outline book\n{style}")
     spine = extract_outline_spine(text)
     if spine:
         parts.append(f"### Outline spine\n{spine}")
@@ -368,10 +368,9 @@ def _outline_job_parts(
     scope = infer_book_scope("", outline=text, section_id=focus)
     if n is not None and n <= 3 and scope == "long":
         parts.append(
-            "### Opening trilogy\n"
-            "长篇前几章可用开篇三章当纲上的备忘（不是正文交卷清单）："
-            "地方或关系可先站，世界再推，人物与麻烦可以交错进场。"
-            "全书信息不必挤进一章正文。"
+            "### Opening chapters\n"
+            "长篇前几章还在同一池子里往前（纲上备忘，不是正文交卷）："
+            "站住日子和人，勾画可轻可重。后面的海不要写进开篇。"
         )
     if n is not None and n >= 4:
         toc = outline_toc_snippet(workspace_root, max_chars=720)

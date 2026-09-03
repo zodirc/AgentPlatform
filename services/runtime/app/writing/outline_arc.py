@@ -28,67 +28,59 @@ _CH1_HEAD = re.compile(r"^#{1,3}\s*第一章\b.*$", re.M)
 _CH1_RANGE = re.compile(r"^1\s*[—\-–至到]\s*\d+[：:].+$", re.M)
 _LONG_FORM = re.compile(r"长篇|网文|连载|修仙|玄幻|仙侠|修真")
 _OPENING_TRILOGY_HEAD = re.compile(r"开篇三章|前三章|世界契约|开局三章")
+_OPENING_SEA = re.compile(
+    r"全书结局|终局宇宙|飞升成神|最终\s*boss|推到终局|境界总纲|"
+    r"全书规则|写完这本"
+)
 _CH_NUM = re.compile(r"^ch([0-9]+)\b", re.I)
 _CHN_NUM = re.compile(r"^第([一二三四五六七八九十]+)章\b")
 
-_STYLE_CONTRACT_HEAD = re.compile(r"^#{1,3}\s*风格契约", re.M)
-_STYLE_ROUTES = re.compile(
-    r"凡人流|逆命悲情|都市规则怪谈|维多利亚克系|探案仙侠|科幻修真"
+_STYLE_CONTRACT_HEAD = re.compile(r"^#{1,3}\s*(?:风格契约|这本书)", re.M)
+_STYLE_PERSON_SLOT = re.compile(
+    r"这本在写谁|这本在写什么|跟着谁|眼下要什么|读者站在哪"
 )
-_STYLE_PERSON_SLOT = re.compile(r"这本在写谁|这本在写什么")
-_MIN_STYLE_CONTRACT_CHARS = 100
-STYLE_CONTRACT_TEMPLATE_VERSION = "style-contract-v2"
+_MIN_STYLE_CONTRACT_CHARS = 80
+STYLE_CONTRACT_TEMPLATE_VERSION = "book-pond-v1"
 
-STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定下这本是什么）
+STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-这段写的是这一本书自己，不是类型规则。先说人和事，再说世界与文字。
-订纲后 volatile「题材发散」撤下，正文只跟 outline。
+先写读者马上能站住的池子。后面的海（终局宇宙、境界总纲、全书规则）不要写进这段。
 
-**这本在写谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
+**跟着谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
 
-**这本在写什么**：（这件事。一两句，直说。）
+**眼下要什么**：（这一章能碰到的欲望，不是全书主题。一两句。）
 
-**世界怎么运转**：（日子怎么过、钱和力从哪来。一两句，写成事实。）
+**读者站在哪**：（第一场的地方、年代、日子。一两句。）
 
-**文字与节奏**：（读者读到的是什么样的句子和场面。一两句。）
+**这一章干什么**：（站住什么；勾画哪一笔，可轻可重。一两句。）
 
-**开篇质地**：（第一场读者站在哪、看见谁。一两句。）
-
-**只有这本才成立的条件**：（换掉哪个人、哪层关系，故事就不成立。一两句。）
-
-透镜备注（可省）：发散时借了哪副眼镜看它；写作时不当成类型答案。
-
-定下来就是另一本书。人名和这件事另起。
+换人换事就是另一本书。人名和这件事另起。
 
 ## 主线一句话
-（往哪走、顶点落哪。）
+（往哪走即可。顶点和解局可以后补，不要写死。）
 """
 
-OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 风格契约（长篇玄幻·定下这本是什么）
+OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-**这本在写谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
+**跟着谁**：（称呼，以及这人眼下在干什么。一两句，直说。）
 
-**这本在写什么**：（这件事。一两句，直说。）
+**眼下要什么**：（这一章能碰到的欲望。一两句。）
 
-**世界怎么运转**：
+**读者站在哪**：（第一场的地方、年代、日子。一两句。）
 
-**文字与节奏**：
+**这一章干什么**：（站住什么，勾画哪一笔。一两句。）
 
-**开篇质地**：
+换人换事就是另一本书。人名和这件事另起。
 
-**只有这本才成立的条件**：
+## 开篇几章（纲上备忘，不是正文交卷清单）
 
-定下来就是另一本书。人名和这件事另起。
-
-## 开篇三章（纲上备忘，不是正文交卷清单）
-
-分几章让读者站进世界即可。每章两三句这场干什么；这是纲，不是小正文，也不必先写完一卷。
+每章两三句这场干什么。前几章还在同一池子里往前，不要把后面的海写进来。
 
 ## 主线一句话
-（往哪走、顶点落哪。）
+（往哪走即可。顶点可以后补。）
 
 ## 章节备忘
-（ch4 起点明这场推进什么即可）
+（ch4 起写这场推进什么即可）
 """
 
 
@@ -130,7 +122,7 @@ def _section_body(md: str, heading: re.Pattern[str]) -> str:
 
 
 def extract_outline_style_contract(md: str, *, max_chars: int = 720) -> str:
-    """提取 outline 中「风格契约」段（订纲后正文跟此，不再注入 volatile 题材发散）。"""
+    """提取 outline 中「这本书 / 风格契约」段（近池身份，不是世界法）。"""
     blob = _section_body(md, _STYLE_CONTRACT_HEAD)
     if not blob:
         return ""
@@ -138,26 +130,24 @@ def extract_outline_style_contract(md: str, *, max_chars: int = 720) -> str:
 
 
 def outline_style_committed(md: str, *, min_chars: int = _MIN_STYLE_CONTRACT_CHARS) -> bool:
+    """近池身份已立：跟着谁 / 站在哪 / 眼下要什么。路数透镜不算订纲。"""
     blob = extract_outline_style_contract(md)
     text = (blob or "").strip()
     if len(text) < min_chars:
         return False
-    if _STYLE_ROUTES.search(text):
-        return True
-    if _STYLE_PERSON_SLOT.search(text):
-        return True
-    return len(text) >= min_chars + 80
+    return _STYLE_PERSON_SLOT.search(text) is not None
 
 
 def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
-    """长篇玄幻发散：未写满风格契约时提示先融合 volatile 样例进 outline。"""
-    from app.writing.outline_phase import wants_fantasy_diverge_corpus
+    """长篇未立定近池身份时，提示先写谁/在哪/眼下要什么。短篇不走这条。"""
+    from app.writing.book_scope import resolve_book_scope
 
     if wants_outline_toc_only(user_text):
         return {}
     if _SHORT_BOOK.search(user_text or ""):
         return {}
-    if not wants_fantasy_diverge_corpus(user_text, outline=md):
+    scope, _src = resolve_book_scope(user_text or "", outline=md or "")
+    if scope != "long":
         return {}
     if outline_style_committed(md):
         return {}
@@ -166,18 +156,15 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
             "outline_style_uncommitted": True,
             "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
             "summary_suffix": (
-                "长篇玄幻发散：先 update_outline 写满「风格契约」"
-                "（先写这本在写谁、写什么；另起这本的人与事）；"
-                "风格写入后不再注入题材发散块，再补开篇三章。"
+                "长篇先 update_outline 写下眼前这一池："
+                "跟着谁、站在哪、眼下要什么；不要写终局宇宙或全书规则。"
             ),
         }
     return {
         "outline_style_uncommitted": True,
         "summary_suffix": (
-            "outline 尚无「风格契约」或未满 "
-            f"{_MIN_STYLE_CONTRACT_CHARS} 字："
-            "先写这本在写谁、写什么，再补世界运转/文字节奏/开篇质地，"
-            "写成另一本书后再补章纲。"
+            "outline 尚未立定近池身份（跟着谁 / 站在哪 / 眼下要什么）："
+            "先补这几句再写章职，海先藏着。"
         ),
     }
 
@@ -265,9 +252,8 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         return {
             "outline_opening_trilogy_missing": True,
             "summary_suffix": (
-                "长篇若先写纲：可用「开篇三章」想清楚前几章"
-                "（地方或关系可先站；世界再推；人物与麻烦可交错）。"
-                "这是纲，不是正文交卷清单。可先 replace 模板骨架，再补前几章这场干什么。"
+                "长篇若先写纲：前几章还在同一池子里往前"
+                "（站住日子和人，勾画可轻可重）。这是纲，不是正文，也不要把后面的海写进来。"
             ),
         }
     chapters = _chapter_spans(text)
@@ -275,7 +261,7 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
     # 六章以上的 mature outline 若未显式写「开篇三章」段，不再重复拦 trilogy（已并入各章纲）。
     if n >= _MIN_CHAPTERS and not _OPENING_TRILOGY_HEAD.search(text):
         return {}
-    # 一两句场面即可；40 会把「每章几句这场干什么」的短章纲误判成缺纲。
+    # ch1 有章职即可开写；ch2/ch3 是备忘，不是开工门。
     _TRILOGY_MIN_CHARS = 16
     notes: list[str] = []
     jobs: dict[str, str] = {}
@@ -283,21 +269,22 @@ def opening_trilogy_fields(md: str, user_text: str) -> dict[str, Any]:
         sid = _chapter_section_id(title)
         if sid in {"ch1", "ch2", "ch3"}:
             jobs[sid] = body
+    ch1_ok = len(jobs.get("ch1", "").strip()) >= _TRILOGY_MIN_CHARS
+    if ch1_ok:
+        return {}
     trilogy_jobs_ok = all(
         len(jobs.get(sid, "").strip()) >= _TRILOGY_MIN_CHARS for sid in ("ch1", "ch2", "ch3")
     )
     if not _OPENING_TRILOGY_HEAD.search(text) and not trilogy_jobs_ok:
-        notes.append("缺「开篇三章」段（纲上备忘，不是正文交卷清单）。")
-    for sid in ("ch1", "ch2", "ch3"):
-        blob = jobs.get(sid, "")
-        nvis = len(blob.strip())
-        if nvis < _TRILOGY_MIN_CHARS:
-            notes.append(f"缺 {sid} 章纲（几句这场干什么即可）。")
+        notes.append("缺 ch1 章纲（几句这场干什么即可；ch2/ch3 可后补）。")
+    blob = jobs.get("ch1", "")
+    if len(blob.strip()) < _TRILOGY_MIN_CHARS:
+        notes.append("缺 ch1 章纲（几句这场干什么即可）。")
     if not notes:
         return {}
     return {
         "outline_opening_trilogy_incomplete": True,
-        "summary_suffix": "开篇三章备忘：" + "".join(notes) + "同轮补进 outline 后再 draft。",
+        "summary_suffix": "开篇备忘：" + "".join(notes) + "先写下眼前这一场再 draft。",
     }
 
 
@@ -354,6 +341,20 @@ def extract_outline_job(
     return ""
 
 
+def opening_sea_spill(md: str) -> str:
+    """开篇近池段是否倒进了后面的海（结局/总纲/过长梗概）。"""
+    blob = extract_outline_style_contract(md) or ""
+    ch1 = extract_outline_job(md, "ch1")
+    text = f"{blob}\n{ch1}".strip()
+    if not text:
+        return ""
+    if len(text) > 900:
+        return "开篇章职过长，像在写全书梗概。缩到这场干什么，海先藏着。"
+    if _OPENING_SEA.search(text):
+        return "开篇纲写进了后面的海（结局/总纲）。删掉，海先藏着。"
+    return ""
+
+
 def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
     """编排软事实。
     
@@ -370,6 +371,9 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
     n = len(chapters)
     trilogy = opening_trilogy_fields(md, user_text)
     opening_notes: list[str] = []
+    sea = opening_sea_spill(md)
+    if sea:
+        opening_notes.append(sea)
     if institution_before_place(extract_opening_outline_blob(md)):
         opening_notes.append(
             "第一章入口写成了机构专名（宗/派）。先写可站的场面，"
@@ -382,14 +386,17 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
             notes.append(
                 str(trilogy["summary_suffix"])
                 .replace("开篇三章备忘：", "")
+                .replace("开篇备忘：", "")
                 .replace("开篇三章契约：", "")
                 .replace("长篇开局：", "")
             )
         if not notes:
             return {}
         out: dict[str, Any] = {}
-        if opening_notes:
+        if institution_before_place(extract_opening_outline_blob(md)):
             out["outline_institution_first"] = True
+        if sea:
+            out["outline_opening_sea"] = True
         if trilogy.get("outline_opening_trilogy_incomplete"):
             out["outline_opening_trilogy_incomplete"] = True
         if trilogy.get("outline_opening_trilogy_missing"):
@@ -404,8 +411,10 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
     has_spine = bool(_SPINE.search(full))
     notes: list[str] = list(opening_notes)
     out: dict[str, Any] = {"outline_chapters": n}
-    if opening_notes:
+    if institution_before_place(extract_opening_outline_blob(md)):
         out["outline_institution_first"] = True
+    if sea:
+        out["outline_opening_sea"] = True
 
     if not has_spine:
         out["outline_no_spine"] = True
@@ -430,8 +439,9 @@ def outline_arc_fields(md: str, user_text: str) -> dict[str, Any]:
     if trilogy.get("summary_suffix"):
         notes.append(
             str(trilogy["summary_suffix"])
-            .replace("开篇三章备忘：", "")
-            .replace("开篇三章契约：", "")
+                .replace("开篇三章备忘：", "")
+                .replace("开篇备忘：", "")
+                .replace("开篇三章契约：", "")
         )
 
     if not notes:

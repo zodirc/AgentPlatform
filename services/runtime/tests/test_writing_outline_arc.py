@@ -136,6 +136,12 @@ def test_opening_trilogy_fields_long_form() -> None:
         "outline_opening_trilogy_incomplete"
     ) is True
 
+    ch1_only = (
+        "## 这本书（长篇·眼前这一池）\n\n"
+        "### ch1\n盐筛场收工，陆沉把工牌揣进怀里，今晚还要去领药。\n"
+    )
+    assert opening_trilogy_fields(ch1_only, "写长篇") == {}
+
 
 def test_extract_spine_and_job() -> None:
     md = (
@@ -165,8 +171,8 @@ def test_outline_templates_do_not_prime_same_book_under_new_coat() -> None:
         assert "看见代价" not in blob
         assert "由谁承担" not in blob
         assert "另一本书" in blob
-        assert "这本在写谁" in blob
-        assert "这本在写什么" in blob
+        assert "跟着谁" in blob
+        assert "眼下要什么" in blob
         assert "直说" in blob or "两三句" in blob
         assert "200–400" not in blob
         assert "不是另起的寓意" not in blob
@@ -179,7 +185,7 @@ def test_outline_templates_do_not_prime_same_book_under_new_coat() -> None:
         assert "沈砚" not in blob
         assert "沈禾" not in blob
     assert "谁要什么、谁挡着" not in OUTLINE_EXPAND
-    assert "说法跟风格走" in OUTLINE_EXPAND
+    assert "眼前这一池" in OUTLINE_EXPAND
 
 
 def test_outline_arc_ok_when_spine_follows_style_not_want_block() -> None:
@@ -223,7 +229,22 @@ def test_outline_style_committed_person_slot_without_route() -> None:
         "**开篇质地**：生计压力进门派。\n\n"
         "**边界**：忌天才顿悟。\n"
     )
-    assert outline_style_committed(legacy) is True
+    assert outline_style_committed(legacy) is False
 
     thin = "## 风格契约\n\n还没写满。\n"
     assert outline_style_committed(thin) is False
+
+
+def test_opening_sea_spill_flags_ending_in_pond() -> None:
+    from app.writing.outline_arc import opening_sea_spill, outline_arc_fields
+
+    md = (
+        "## 这本书（长篇·眼前这一池）\n\n"
+        "**跟着谁**：陆沉在盐筛场收工。\n"
+        "**眼下要什么**：今晚把工牌换成药。\n"
+        "**读者站在哪**：边镇盐场。\n"
+        "**这一章干什么**：站住日子。终局宇宙里他飞升成神，全书结局是改命。\n"
+    )
+    assert "海" in opening_sea_spill(md)
+    fields = outline_arc_fields(md, "写长篇")
+    assert fields.get("outline_opening_sea") is True

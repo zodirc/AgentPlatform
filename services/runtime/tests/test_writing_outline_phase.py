@@ -39,38 +39,38 @@ def _long_outline() -> str:
     )
 
 
-def test_diverge_without_lock_file(tmp_path: Path) -> None:
+def test_open_without_lock_file(tmp_path: Path) -> None:
     phase = resolve_outline_phase(
         "写一章长篇玄幻小说第一章",
         workspace_root=tmp_path,
     )
-    assert phase["outline_phase"] == "diverge"
+    assert phase["outline_phase"] == "open"
     assert not style_lock_exists(tmp_path)
 
 
-def test_contract_requires_style_lock(tmp_path: Path) -> None:
+def test_continue_when_pond_committed(tmp_path: Path) -> None:
     outline = _long_outline()
     assert outline_contract_ready(outline, book_scope="long")
-    phase_before = resolve_outline_phase(
-        "写第一章",
-        outline=outline,
-        book_scope="long",
-        workspace_root=tmp_path,
-    )
-    assert phase_before["outline_phase"] == "diverge"
-    write_style_lock(outline, workspace_root=tmp_path)
     phase = resolve_outline_phase(
         "写第一章",
         outline=outline,
         book_scope="long",
         workspace_root=tmp_path,
     )
-    assert phase["outline_phase"] == "contract"
-    assert phase["style_locked"] is True
+    assert phase["outline_phase"] == "continue"
+    write_style_lock(outline, workspace_root=tmp_path)
+    phase_locked = resolve_outline_phase(
+        "写第一章",
+        outline=outline,
+        book_scope="long",
+        workspace_root=tmp_path,
+    )
+    assert phase_locked["outline_phase"] == "continue"
+    assert phase_locked["style_locked"] is True
 
 
-def test_should_inject_diverge_styles_without_lock(tmp_path: Path) -> None:
-    assert should_inject_diverge_styles(
+def test_should_not_inject_diverge_styles(tmp_path: Path) -> None:
+    assert not should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
         outline="",
         workspace_root=tmp_path,
@@ -87,10 +87,7 @@ def test_should_inject_diverge_styles_without_lock(tmp_path: Path) -> None:
 def test_diverge_styles_block_substantial() -> None:
     block = load_diverge_styles_volatile_block()
     assert "题材发散" in block
-    assert "凡人流" in block
-    assert "都市怪谈" in block
     assert "观察透镜" in block
-    assert "风格契约" in block
     assert "看见代价" not in block
     assert len(block) > 800
     assert block.count("不要") <= 4
@@ -99,7 +96,7 @@ def test_diverge_styles_block_substantial() -> None:
 
 def test_should_not_inject_when_style_in_outline(tmp_path: Path) -> None:
     outline = _style_contract_block()
-    assert outline_style_committed(outline)
+    assert not outline_style_committed(outline)
     assert not should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
         outline=outline,
@@ -117,8 +114,8 @@ def test_early_style_lock_on_style_contract(tmp_path: Path) -> None:
         outline=outline,
         workspace_root=tmp_path,
     )
-    assert phase["outline_phase"] == "diverge"
-    assert phase["outline_style_committed"] is True
+    assert phase["outline_phase"] == "open"
+    assert phase["outline_style_committed"] is False
 
 
 def test_clear_style_lock(tmp_path: Path) -> None:
