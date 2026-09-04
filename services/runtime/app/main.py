@@ -793,6 +793,47 @@ async def workspace_ast_index_purge(
         return {"purged": True, "work_id": work_id}
 
 
+@workspace_router.get("/book")
+async def workspace_writing_book(
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """这本书的可见部件（大纲/正文/人物/拍）；不含路径。"""
+    from app.writing.book import load_writing_book
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    with workspace_tenant_scope(
+        **_tenant_query(work_id, work_root, owner_user_id, visibility_seed)
+    ):
+        return load_writing_book()
+
+
+@workspace_router.post("/book/discard")
+async def workspace_discard_writing_book(
+    background_tasks: BackgroundTasks,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """扔掉这本书：用户稿与侧车。资料库与 seed 不动。"""
+    from app.writing.book import discard_writing_book
+    from app.services.workspace_browser import sync_sources_index_safe
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    with workspace_tenant_scope(
+        **_tenant_query(work_id, work_root, owner_user_id, visibility_seed)
+    ):
+        result = discard_writing_book()
+    if "people" in result.get("cleared", []):
+        background_tasks.add_task(sync_sources_index_safe, path=None)
+    return result
+
+
 @workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)
 async def workspace_sync_sources(
     background_tasks: BackgroundTasks,

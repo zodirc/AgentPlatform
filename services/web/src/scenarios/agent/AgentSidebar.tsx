@@ -27,6 +27,7 @@ import type {
 import { ArtifactView } from "./ArtifactView";
 import { RetrievalView } from "./RetrievalView";
 import { WritingCardsView } from "../writing/WritingCardsView";
+import { WritingBookPanel } from "../writing/WritingBookPanel";
 import { WorkspaceTree, joinWorkspacePath, parentDirOf, patchWorkspaceEntriesCache, removeWorkspaceEntryFromCache, toWorkspaceRelativePath } from "./WorkspaceTree";
 import {
   collectCachedDescendants,
@@ -54,6 +55,8 @@ type Props = {
   onWorkspaceDeleted?: (deletedPaths: string[]) => void;
   onWorkspaceRenamed?: (from: string, to: string) => void;
   onClose?: () => void;
+  /** 写作模式：用作品清单替换文件树。 */
+  bookSurface?: boolean;
 };
 
 function isPatchArtifact(a: Record<string, unknown>): a is PatchArtifact {
@@ -123,6 +126,7 @@ export function AgentSidebar({
   onWorkspaceDeleted,
   onWorkspaceRenamed,
   onClose,
+  bookSurface = false,
 }: Props) {
   const queryClient = useQueryClient();
   const [workspaceRefreshing, setWorkspaceRefreshing] = useState(false);
@@ -490,28 +494,34 @@ export function AgentSidebar({
     <aside className="flex h-full w-[min(360px,40vw)] min-w-0 shrink-0 flex-col overflow-hidden border-r border-border bg-background">
       <header className="flex shrink-0 items-start justify-between gap-2 border-b border-border px-4 py-3">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-foreground">产物</h2>
-          <p className="text-xs text-muted-foreground">工作区文件 · 工具输出</p>
+          <h2 className="text-sm font-semibold text-foreground">
+            {bookSurface ? "作品" : "产物"}
+          </h2>
+          {bookSurface ? null : (
+            <p className="text-xs text-muted-foreground">工作区文件 · 工具输出</p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            className="inline-flex items-center gap-1 rounded border border-input px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted hover:text-foreground disabled:opacity-50"
-            title="刷新工作区文件树"
-            disabled={workspaceRefreshing}
-            onClick={() => void refreshWorkspace()}
-          >
-            <RefreshCw
-              className={`size-3.5 ${workspaceRefreshing ? "animate-spin" : ""}`}
-              aria-hidden
-            />
-            刷新
-          </button>
+          {bookSurface ? null : (
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded border border-input px-2 py-1 text-[11px] text-foreground/90 hover:bg-muted hover:text-foreground disabled:opacity-50"
+              title="刷新工作区文件树"
+              disabled={workspaceRefreshing}
+              onClick={() => void refreshWorkspace()}
+            >
+              <RefreshCw
+                className={`size-3.5 ${workspaceRefreshing ? "animate-spin" : ""}`}
+                aria-hidden
+              />
+              刷新
+            </button>
+          )}
           {onClose ? (
             <button
               type="button"
               className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              title="收起产物栏"
+              title={bookSurface ? "收起" : "收起产物栏"}
               onClick={onClose}
             >
               ‹
@@ -521,6 +531,18 @@ export function AgentSidebar({
       </header>
 
       <div className="scrollbar-thin min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        {bookSurface ? (
+          <WritingBookPanel
+            revision={`${wb.turnId ?? ""}:${wb.displayStatus}:${String(wb.view?.last_event_sequence ?? "")}`}
+            selectedPath={treeSelectedPath}
+            onSelectPath={(path) => onSelect({ kind: "workspace", path })}
+            onOpenFile={onOpenWorkspaceFile}
+            onCleared={(paths) => {
+              onSelect(null);
+              onWorkspaceDeleted?.(paths);
+            }}
+          />
+        ) : (
         <section className="border-b border-border p-3">
           <div className="mb-2 flex items-center justify-between gap-2">
             <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -546,7 +568,7 @@ export function AgentSidebar({
               {multiSelectMode && checkedPaths.size > 0 ? (
                 <button
                   type="button"
-                  className="inline-flex items-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  className="inline-flex items-center justify-center gap-1 rounded border border-destructive/40 px-2 py-0.5 text-[10px] text-destructive hover:bg-destructive/10 disabled:opacity-50"
                   disabled={deleteSelected.isPending}
                   onClick={confirmDeleteSelected}
                 >
@@ -595,6 +617,7 @@ export function AgentSidebar({
               : "单击选中 · 双击打开 · 树内联新建/重命名 · 右键更多操作"}
           </p>
         </section>
+        )}
 
         <section className="border-b border-border p-3">
           <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -745,7 +768,9 @@ export function AgentSidebar({
           </div>
         ) : (
           <p className="p-4 text-xs text-muted-foreground/80">
-            双击工作区文件打开编辑，或点击工具产物预览
+            {bookSurface
+              ? "单击选中 · 双击打开编辑"
+              : "双击工作区文件打开编辑，或点击工具产物预览"}
           </p>
         )}
       </div>

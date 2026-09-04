@@ -14,7 +14,10 @@ from pydantic import BaseModel, Field
 from app.db.pool import get_pool
 from app.services.end_user.auth import require_session_actor
 from app.services.end_user.users import EndUser
+from app.services.admin.workspace import WorkspaceProxyError
+from app.services.admin import workspace as workspace_svc
 from app.services.resource.works import (
+    Work,
     ensure_default_work,
     update_work_visibility_seed,
 )
@@ -163,3 +166,36 @@ async def patch_work(
     )
     assert row is not None
     return WorkResponse(**dict(row))
+
+
+def _tenant_from_work(work: Work, actor: EndUser) -> dict[str, str]:
+    return {
+        "work_id": str(work.id),
+        "work_root": work.work_root,
+        "owner_user_id": str(actor.id),
+        "visibility_seed": "true" if work.visibility_seed else "false",
+    }
+
+
+@router.get("/works/default/book")
+async def get_default_writing_book(actor: EndUser = Depends(require_session_actor)):
+    """当前默认 Work 上的这本书（大纲/正文/人物/拍）。"""
+    work = await ensure_default_work(actor.id)
+    try:
+        return await workspace_svc.get_writing_book(
+            tenant=_tenant_from_work(work, actor)
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+@router.post("/works/default/book/discard")
+async def discard_default_writing_book(actor: EndUser = Depends(require_session_actor)):
+    """扔掉当前这本书；资料库与系统范文不动。"""
+    work = await ensure_default_work(actor.id)
+    try:
+        return await workspace_svc.discard_writing_book(
+            tenant=_tenant_from_work(work, actor)
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

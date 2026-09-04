@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ErrorBanner } from "./ErrorBanner";
 import type { ScenarioId, TimelineItem, WorkbenchState } from "./types";
 import { AgentActivityPanel } from "../../scenarios/agent/AgentActivityPanel";
@@ -65,6 +66,7 @@ export function ScenarioWorkbenchView({
   wb,
   fillParent = false,
 }: ViewProps) {
+  const queryClient = useQueryClient();
   const {
     open: toolsOpen,
     closePanel: closeTools,
@@ -133,6 +135,7 @@ export function ScenarioWorkbenchView({
         {artifactsOpen ? (
           <AgentSidebar
             wb={wb}
+            bookSurface={scenarioId === "writing"}
             selection={selection}
             scenarioExtras={
               <ScenarioSidebarExtras
@@ -219,11 +222,11 @@ export function ScenarioWorkbenchView({
             <button
               type="button"
               className="group flex flex-col items-center gap-2 rounded-md px-1 py-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              title="展开产物"
+              title={scenarioId === "writing" ? "展开作品" : "展开产物"}
               onClick={openArtifacts}
             >
               <span className="text-[10px] font-medium tracking-wide text-muted-foreground group-hover:text-foreground">
-                产物
+                {scenarioId === "writing" ? "作品" : "产物"}
               </span>
               <span className="text-xs leading-none text-muted-foreground group-hover:text-foreground/90">
                 ›
@@ -294,6 +297,9 @@ export function ScenarioWorkbenchView({
       <WorkspaceFileViewer
         path={workspaceViewerPath}
         onClose={() => setWorkspaceViewerPath(null)}
+        onSaved={() => {
+          void queryClient.invalidateQueries({ queryKey: ["writing-book"] });
+        }}
       />
       <CollabTeamViewer
         open={teamViewerOpen}

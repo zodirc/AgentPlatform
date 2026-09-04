@@ -65,7 +65,6 @@ export function ScenarioSidebarExtras({
         ) : null}
         {planBlock}
         <CitationView items={wb.view?.tool_timeline ?? []} />
-        <DocumentOutline wb={wb} />
       </div>
     );
   }

@@ -45,8 +45,7 @@ export function WritingSidebarTools({
         </Button>
       </div>
       <p className="mt-2 text-[10px] text-muted-foreground/80">
-        「写作信号」：作品模式（经典/网文）与奖惩贴近强度。书稿默认追加到
-        manuscript.md；长会话可用 /compact。
+        「写作信号」管经典/网文贴近强度。资料库只管引用材料。长会话可用 /compact。
       </p>
     </Card>
   );
