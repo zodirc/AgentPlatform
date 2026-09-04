@@ -101,6 +101,17 @@ _INTERVIEW_GAP = 160
 _MIN_VISIBLE = 80
 # Speaker tags (掌柜说：) stay in the run; a real narrative beat resets it.
 _QUOTE_GAP_RESET = 8
+# 「你叫林照？」之后再问「你有名字吗」——身份已经在场上。
+_NAME_ASK = re.compile(
+    r"^(?:你有名字吗|你叫什么(?:名字)?|叫什么(?:名字)?|你的名字(?:是什么|呢)?|名字呢)$"
+)
+_ESTABLISHED_NAME = re.compile(
+    r"(?:收货人|收件人|姓名)[：:]\s*([\u4e00-\u9fff]{2,4})"
+)
+_YOU_CALLED = re.compile(r"^你叫([\u4e00-\u9fff]{2,4})$")
+_NAME_SKIP = _ECHO_NOUN_SKIP | frozenset(
+    {"什么", "谁人", "哪里", "哪个", "怎么", "怎样", "名字"}
+)
 
 
 def _lines(text: str) -> list[str]:
@@ -543,6 +554,91 @@ def count_contrast_punches(text: str) -> int:
     return n
 
 
+def _established_names(text: str) -> set[str]:
+    names: set[str] = set()
+    for match in _ESTABLISHED_NAME.finditer(text or ""):
+        name = match.group(1)
+        if name not in _NAME_SKIP:
+            names.add(name)
+    for match in _QUOTE_SPAN.finditer(text or ""):
+        inner = _norm_quote(match.group(1).strip())
+        if _NAME_ASK.match(inner):
+            continue
+        called = _YOU_CALLED.match(inner)
+        if called is None:
+            continue
+        name = called.group(1)
+        if name not in _NAME_SKIP:
+            names.add(name)
+    return names
+
+
+def count_identity_reasks(text: str) -> int:
+    """已立姓名后再问「你有名字吗 / 叫什么」。"""
+    n = 0
+    body = text or ""
+    for match in _QUOTE_SPAN.finditer(body):
+        inner = _norm_quote(match.group(1).strip())
+        if not _NAME_ASK.match(inner):
+            continue
+        if _established_names(body[: match.start()]):
+            n += 1
+    return n
+
+
+def _identity_reask_ranges(body: str) -> list[tuple[int, int]]:
+    from app.writing.text_metrics import visible_chars
+
+    quotes = list(_QUOTE_SPAN.finditer(body))
+    out: list[tuple[int, int]] = []
+    for i, match in enumerate(quotes):
+        inner = _norm_quote(match.group(1).strip())
+        if not _NAME_ASK.match(inner):
+            continue
+        names = _established_names(body[: match.start()])
+        if not names:
+            continue
+        start, end = match.start(), match.end()
+        if i > 0:
+            prev = quotes[i - 1]
+            prev_inner = _norm_quote(prev.group(1).strip())
+            gap = visible_chars(body[prev.end() : match.start()])
+            if prev_inner in names and gap <= _INTERVIEW_GAP:
+                start = prev.start()
+        j = i
+        while j + 1 < len(quotes):
+            cur, nxt = quotes[j], quotes[j + 1]
+            gap = visible_chars(body[cur.end() : nxt.start()])
+            if gap > _INTERVIEW_GAP:
+                break
+            nxt_inner = nxt.group(1).strip()
+            vis = visible_chars(nxt_inner)
+            if not (
+                _is_questionish(nxt_inner)
+                or 1 <= vis <= _SHORT
+                or _NAME_ASK.match(_norm_quote(nxt_inner))
+            ):
+                break
+            j += 1
+            end = nxt.end()
+        out.append((start, end))
+    return out
+
+
+def find_identity_reask_span(
+    text: str, *, max_chars: int = 360, close_from: str | None = None
+) -> str:
+    body = text or ""
+    ranges = _identity_reask_ranges(body)
+    if not ranges:
+        return ""
+    start, end = ranges[0]
+    src = close_from if close_from is not None else body
+    return _expand_interview_cluster(
+        body, start, end, max_chars, close_from=src
+    )
+
+
 def _staccato_metrics(text: str) -> dict[str, int]:
     from app.writing.text_metrics import visible_chars
 
@@ -569,6 +665,7 @@ def _staccato_metrics(text: str) -> dict[str, int]:
         "logistics": max_logistics_quote_run(text),
         "thesis": count_thesis_mouth(text),
         "interview": max_interview_ladder(text),
+        "identity": count_identity_reasks(text),
     }
 
 
@@ -589,6 +686,7 @@ def _literary_staccato_hit(metrics: dict[str, int]) -> bool:
         and metrics["logistics"] < _LOGISTICS_MIN
         and metrics["thesis"] < 1
         and metrics["interview"] < _INTERVIEW_MIN
+        and metrics["identity"] < 1
     )
 
 
@@ -623,7 +721,21 @@ def staccato_fields(content: str, *, work_mode: str = "literary") -> dict[str, A
         "staccato_logistics": metrics["logistics"],
         "staccato_thesis": metrics["thesis"],
         "staccato_interview": metrics["interview"],
+        "staccato_identity": metrics["identity"],
     }
+
+
+def short_quote_inners(text: str) -> list[str]:
+    """≤7 实体字的对白内心。用来判断补丁有没有碰到碎拍岛。"""
+    from app.writing.text_metrics import visible_chars
+
+    out: list[str] = []
+    for match in _QUOTE_SPAN.finditer(text or ""):
+        inner = match.group(1).strip()
+        n = visible_chars(inner)
+        if 1 <= n <= _SHORT:
+            out.append(inner)
+    return out
 
 
 def is_isolated_staccato_punch(text: str) -> bool:
@@ -830,8 +942,26 @@ def find_staccato_span(
             return _expand_short_quote_cluster(
                 body, match.start(), match.end(), max_chars, close_from=original
             )
+    # Punches stay first-in-order. Remaining islands compete by density so a
+    # leftover 4-short ping-pong is not skipped for an earlier 3-quote duet.
+    candidates: list[tuple[int, int, str]] = []
+
+    def add(score: int, start: int, span: str) -> None:
+        if span.strip():
+            candidates.append((score, start, span))
+
+    for start, end in _identity_reask_ranges(body):
+        add(
+            130,
+            start,
+            _expand_interview_cluster(
+                body, start, end, max_chars, close_from=original
+            ),
+        )
+
     log_run = 0
     log_start: int | None = None
+    log_end = 0
     for match in quotes:
         inner = match.group(1)
         log = _is_logistics(inner)
@@ -840,88 +970,155 @@ def find_staccato_span(
             if log_run == 0:
                 log_start = match.start()
             log_run += 1
-            if log_run >= _LOGISTICS_MIN and log_start is not None:
-                return _expand_short_quote_cluster(
-                    body, log_start, match.end(), max_chars, close_from=original
-                )
+            log_end = match.end()
         else:
+            if log_run >= _LOGISTICS_MIN and log_start is not None:
+                add(
+                    70 + 10 * log_run,
+                    log_start,
+                    _expand_short_quote_cluster(
+                        body, log_start, log_end, max_chars, close_from=original
+                    ),
+                )
             log_run = 0
             log_start = None
-    if max_duet_quote_run(body) >= _DUET_RUN:
-        run = 0
-        run_start: int | None = None
-        last_end = 0
-        for match in quotes:
-            gap = visible_chars(body[last_end : match.start()]) if last_end else 0
-            if last_end and gap > _DUET_GAP:
-                run = 0
-                run_start = None
-            inner = match.group(1).strip()
-            n = visible_chars(inner)
-            if 1 <= n <= _DUET_MAX:
-                if run == 0:
-                    run_start = match.start()
-                run += 1
-                if run >= _DUET_RUN and run_start is not None:
-                    return _expand_duet_cluster(
-                        body,
-                        run_start,
-                        match.end(),
-                        max_chars,
-                        close_from=original,
-                    )
-            else:
-                run = 0
-                run_start = None
-            last_end = match.end()
-    if max_interview_ladder(body) >= _INTERVIEW_MIN:
-        run = 0
-        run_start: int | None = None
-        last_end = 0
-        for match in quotes:
-            gap = visible_chars(body[last_end : match.start()]) if last_end else 0
-            if last_end and gap > _INTERVIEW_GAP:
-                run = 0
-                run_start = None
-            inner = match.group(1).strip()
-            vis = visible_chars(inner)
-            short = 1 <= vis <= _SHORT
-            q = _is_questionish(inner)
-            thesis = _is_thesis_mouth(inner)
-            if q or (run > 0 and short) or (run > 0 and thesis) or (
-                short and re.match(r"^(?:不去|不是|没有|不行|不知道)[。！]?$", inner)
-            ):
-                if run == 0:
-                    run_start = match.start()
-                run += 1
-                if run >= _INTERVIEW_MIN and run_start is not None:
-                    return _expand_interview_cluster(
-                        body,
-                        run_start,
-                        match.end(),
-                        max_chars,
-                        close_from=original,
-                    )
-            else:
-                run = 0
-                run_start = None
-            last_end = match.end()
+    if log_run >= _LOGISTICS_MIN and log_start is not None:
+        add(
+            70 + 10 * log_run,
+            log_start,
+            _expand_short_quote_cluster(
+                body, log_start, log_end, max_chars, close_from=original
+            ),
+        )
+
+    run = 0
+    run_start: int | None = None
+    run_end = 0
+    last_end = 0
+    for match in quotes:
+        gap = visible_chars(body[last_end : match.start()]) if last_end else 0
+        if last_end and gap > _DUET_GAP:
+            if run >= _DUET_RUN and run_start is not None:
+                add(
+                    50 + 10 * run,
+                    run_start,
+                    _expand_duet_cluster(
+                        body, run_start, run_end, max_chars, close_from=original
+                    ),
+                )
+            run = 0
+            run_start = None
+        inner = match.group(1).strip()
+        n = visible_chars(inner)
+        if 1 <= n <= _DUET_MAX:
+            if run == 0:
+                run_start = match.start()
+            run += 1
+            run_end = match.end()
+        else:
+            if run >= _DUET_RUN and run_start is not None:
+                add(
+                    50 + 10 * run,
+                    run_start,
+                    _expand_duet_cluster(
+                        body, run_start, run_end, max_chars, close_from=original
+                    ),
+                )
+            run = 0
+            run_start = None
+        last_end = match.end()
+    if run >= _DUET_RUN and run_start is not None:
+        add(
+            50 + 10 * run,
+            run_start,
+            _expand_duet_cluster(
+                body, run_start, run_end, max_chars, close_from=original
+            ),
+        )
+
+    run = 0
+    run_start = None
+    run_end = 0
+    last_end = 0
+    for match in quotes:
+        gap = visible_chars(body[last_end : match.start()]) if last_end else 0
+        if last_end and gap > _INTERVIEW_GAP:
+            if run >= _INTERVIEW_MIN and run_start is not None:
+                add(
+                    80 + 10 * run,
+                    run_start,
+                    _expand_interview_cluster(
+                        body, run_start, run_end, max_chars, close_from=original
+                    ),
+                )
+            run = 0
+            run_start = None
+        inner = match.group(1).strip()
+        vis = visible_chars(inner)
+        short = 1 <= vis <= _SHORT
+        q = _is_questionish(inner)
+        thesis = _is_thesis_mouth(inner)
+        if q or (run > 0 and short) or (run > 0 and thesis) or (
+            short and re.match(r"^(?:不去|不是|没有|不行|不知道)[。！]?$", inner)
+        ):
+            if run == 0:
+                run_start = match.start()
+            run += 1
+            run_end = match.end()
+        else:
+            if run >= _INTERVIEW_MIN and run_start is not None:
+                add(
+                    80 + 10 * run,
+                    run_start,
+                    _expand_interview_cluster(
+                        body, run_start, run_end, max_chars, close_from=original
+                    ),
+                )
+            run = 0
+            run_start = None
+        last_end = match.end()
+    if run >= _INTERVIEW_MIN and run_start is not None:
+        add(
+            80 + 10 * run,
+            run_start,
+            _expand_interview_cluster(
+                body, run_start, run_end, max_chars, close_from=original
+            ),
+        )
+
     for match in quotes:
         if _is_thesis_mouth(match.group(1)):
-            return _closed_span(original, match.start(), match.end(), max_chars)
+            add(
+                45,
+                match.start(),
+                _closed_span(original, match.start(), match.end(), max_chars),
+            )
     split = _SPLIT_SPEECH.search(body)
     if split is not None and visible_chars(split.group("head")) <= _SHORT:
         end = body.find("」", split.end())
         stop = end + 1 if end >= 0 else min(split.end() + 24, len(body))
-        return _expand_short_quote_cluster(
-            body, split.start(), stop, max_chars, close_from=original
+        add(
+            40,
+            split.start(),
+            _expand_short_quote_cluster(
+                body, split.start(), stop, max_chars, close_from=original
+            ),
         )
     run_start = None
     run = 0
+    run_end = 0
     last_end = 0
     for match in _QUOTE_SPAN.finditer(body):
         gap = visible_chars(body[last_end : match.start()])
         if gap > _QUOTE_GAP_RESET:
+            if run >= _QUOTE_RUN and run_start is not None:
+                add(
+                    100 + 10 * run,
+                    run_start,
+                    _expand_short_quote_cluster(
+                        body, run_start, run_end, max_chars, close_from=original
+                    ),
+                )
             run = 0
             run_start = None
         inner = match.group(1).strip()
@@ -930,15 +1127,27 @@ def find_staccato_span(
             if run == 0:
                 run_start = match.start()
             run += 1
-            if run >= _QUOTE_RUN and run_start is not None:
-                end = min(match.end() + 8, len(body))
-                return _expand_short_quote_cluster(
-                    body, run_start, end, max_chars, close_from=original
-                )
+            run_end = match.end()
         else:
+            if run >= _QUOTE_RUN and run_start is not None:
+                add(
+                    100 + 10 * run,
+                    run_start,
+                    _expand_short_quote_cluster(
+                        body, run_start, run_end, max_chars, close_from=original
+                    ),
+                )
             run = 0
             run_start = None
         last_end = match.end()
+    if run >= _QUOTE_RUN and run_start is not None:
+        add(
+            100 + 10 * run,
+            run_start,
+            _expand_short_quote_cluster(
+                body, run_start, run_end, max_chars, close_from=original
+            ),
+        )
     shorts_before = 0
     start_short: int | None = None
     for match in _QUOTE_SPAN.finditer(body):
@@ -947,8 +1156,12 @@ def find_staccato_span(
         short = 1 <= vis <= _SHORT
         punch = vis <= 22 and _CONTRAST_PUNCH.search(inner) is not None
         if punch and shorts_before >= 2 and start_short is not None:
-            return _expand_short_quote_cluster(
-                body, start_short, match.end(), max_chars, close_from=original
+            add(
+                40,
+                start_short,
+                _expand_short_quote_cluster(
+                    body, start_short, match.end(), max_chars, close_from=original
+                ),
             )
         if short:
             if shorts_before == 0:
@@ -957,4 +1170,6 @@ def find_staccato_span(
         elif not punch:
             shorts_before = 0
             start_short = None
-    return ""
+    if not candidates:
+        return ""
+    return max(candidates, key=lambda item: (item[0], item[1]))[2]

@@ -19,6 +19,7 @@ from app.writing.staccato import (
     count_contrast_punches,
     count_echo_twists,
     count_equate_punches,
+    count_identity_reasks,
     count_split_speech,
     count_thesis_mouth,
     find_staccato_span,
@@ -133,6 +134,7 @@ def test_staccato_receipt_beats_hinge() -> None:
     assert "多轮空问" in text
     assert "一两句" in text
     assert "我知道" in text
+    assert "你有名字吗" in text
     assert "是A，不是B" in text or "不是B" in text
     assert "因为" in text
     assert "propose_patch" in text
@@ -598,3 +600,54 @@ def test_web_serial_staccato_blocks_append() -> None:
     assert process_l0_hits(penalties, work_mode="web_serial") == ["staccato_uniform"]
     assert "staccato_uniform" in append_block_l0_keys("literary")
     assert "staccato_uniform" in append_block_l0_keys("web_serial")
+
+
+def test_find_staccato_span_prefers_densest_short_run() -> None:
+    """先出现的三句对拍不应抢走后段四句碎问。"""
+    text = _pad(
+        "「把东西放进门里，门就会停！」\n"
+        "「哪扇门？」\n"
+        "「有门牌的那扇！」\n\n"
+        "「明天中午十二点以前，打这个电话。别报警，别找平台。」\n"
+        "「那你呢？」\n"
+        "「我得回去关门。」\n"
+        "「门外那东西还在。」\n"
+        "「所以才要快。」\n"
+    )
+    span = find_staccato_span(text)
+    assert "那你呢" in span
+    assert "所以才要快" in span
+    assert "哪扇门" not in span
+
+
+def test_identity_reask_after_waybill_name() -> None:
+    text = _pad(
+        "收货人：林照。\n"
+        "「你叫林照？」\n"
+        "女孩没回答，只拼命往前跑。\n"
+        + ("墙上的日期开始同时变化。" * 12)
+        + "\n「林照。」\n"
+        "女孩停住。\n"
+        "「你有名字吗？」\n"
+        "她回头看了他一眼，像是没想到他会问这个。\n"
+        "「有。」\n"
+        "「叫什么？」\n"
+        "「林照。」\n"
+    )
+    assert count_identity_reasks(text) >= 1
+    fields = staccato_fields(text)
+    assert fields.get("staccato_uniform") is True
+    assert int(fields.get("staccato_identity") or 0) >= 1
+    span = find_staccato_span(text)
+    assert "你有名字吗" in span
+    assert "叫什么" in span
+
+
+def test_identity_reask_skips_first_introduction() -> None:
+    text = _pad(
+        "「你有名字吗？」\n"
+        "「有。」\n"
+        "「叫什么？」\n"
+        "「林照。」\n"
+    )
+    assert count_identity_reasks(text) == 0
