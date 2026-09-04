@@ -53,7 +53,7 @@ from app.tools.core.writing_tools import (
     _legacy_draft_file_path, _manifest_candidate_paths, _manifest_path,
     _prune_section_history, _read_manifest, _revision_candidate_paths,
     _revision_file_path, _section_filename, _session_scope, _turn_scope,
-    _write_manifest, draft_section, update_outline, update_plan,
+    _write_manifest, draft_section, propose_opening_ponds, update_outline, update_plan,
 )
 from app.writing.signals.assemble import evaluate_writing_fragment, writing_rubric
 

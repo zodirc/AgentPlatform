@@ -337,6 +337,61 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
+            name="propose_opening_ponds",
+            description=(
+                "Propose 2–3 mutually distinct opening ponds for a new long book "
+                "(who / where / what they want this chapter). Distinct means how "
+                "the extraordinary starts, not a new workplace for the same occult "
+                "incident. At least one pond: the protagonist notices their own "
+                "capability on an ordinary day with other people — not window-death, "
+                "haunting, or a city glitch. The chat UI renders a Plan-like picker "
+                "from this tool — that card is the deliverable. Do not list the ponds "
+                "in the assistant message. Call this instead of draft_section or "
+                "update_outline when the user only gave a genre or said 看看 / "
+                "我要其他的. The turn stops so the user can pick one."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 4,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "title": {"type": "string"},
+                                "who": {
+                                    "type": "string",
+                                    "description": "跟着谁",
+                                },
+                                "where": {
+                                    "type": "string",
+                                    "description": "站在哪",
+                                },
+                                "want": {
+                                    "type": "string",
+                                    "description": "眼下要什么",
+                                },
+                                "chapter_job": {
+                                    "type": "string",
+                                    "description": "这一章干什么",
+                                },
+                                "summary": {"type": "string"},
+                            },
+                            "required": ["title", "who", "where", "want"],
+                        },
+                    },
+                    "summary": {"type": "string"},
+                },
+                "required": ["items"],
+            },
+            handler=core.propose_opening_ponds,
+        )
+    )
+    registry.register(
+        ToolSpec(
             name="update_outline",
             description=(
                 "Create or update outline.md (creates the file when absent; empty "
@@ -925,6 +980,14 @@ PLANNING_TOOL_ALLOWLIST = frozenset(
     }
 )
 
+# Opening-pond picker (Plan analog): only the card tool until the user picks one.
+OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
+    {
+        "propose_opening_ponds",
+        "stub_echo",
+    }
+)
+
 # After "execute this plan": write tools waive re-approval; shell still uses normal approval.
 # 「按此执行」后：清单已同意 → 写盘类免再审；shell 仍走普通审批。
 _PLAN_EXECUTING_WAIVE_APPROVAL = ON_WRITE_TOOLS | frozenset({"rename_file"})
@@ -935,13 +998,16 @@ def tool_scope(
     registry: ToolRegistry,
     *,
     plan_phase: str | None = None,
+    opening_choice: bool = False,
 ) -> list[ToolSpec]:
-    """按场景 Profile（及可选 Plan 相位）裁剪本 Turn 可用工具。
+    """按场景 Profile（及可选 Plan 相位 / 开篇点选）裁剪本 Turn 可用工具。
 
     English: Build the per-turn ToolSpec list from ScenarioProfile.tool_names and
     approval_overrides, then apply plan-phase rules:
     - ``planning`` → allowlist only (update_plan / stub_echo);
     - ``executing`` → waive approval for on-write tools (user already approved the plan).
+    - ``opening_choice`` → allowlist only (propose_opening_ponds / stub_echo);
+      ignored when ``planning`` (Plan mode wins).
 
     Always ensures ``stub_echo`` is present for ops/debug probes. Does not register
     new handlers — only selects and ``replace()``s approval flags from
@@ -952,6 +1018,7 @@ def tool_scope(
         registry: ``build_registry()`` 产出的全量注册表。
         plan_phase: 计划相位。``planning`` 时仅清单工具；``executing`` 时对写盘免审。
             为 ``None`` 时按 Profile 默认审批策略。
+        opening_choice: 开篇近池点选；仅卡片工具。
 
     返回:
         已套用审批覆盖后的 ToolSpec 列表（可直接交给 AgentEngine / ToolExecutor）。
@@ -965,6 +1032,13 @@ def tool_scope(
         # 规划相位必须能改计划，即使 Profile 未声明 update_plan。
         if "update_plan" not in names and registry.get("update_plan") is not None:
             names.append("update_plan")
+    elif opening_choice:
+        names = [n for n in names if n in OPENING_CHOICE_TOOL_ALLOWLIST]
+        if (
+            "propose_opening_ponds" not in names
+            and registry.get("propose_opening_ponds") is not None
+        ):
+            names.append("propose_opening_ponds")
     specs: list[ToolSpec] = []
     for name in names:
         base = registry.get(name)

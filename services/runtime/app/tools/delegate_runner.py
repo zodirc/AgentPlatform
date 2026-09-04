@@ -85,6 +85,7 @@ _SUPPRESSED_SUB_EVENTS = frozenset(
         "patch.proposed",
         "outline.updated",
         "turn.plan",
+        "opening.ponds",
         "cards.pinned",
         "context.reported",
         "usage.reported",

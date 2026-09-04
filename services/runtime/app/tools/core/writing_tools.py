@@ -966,6 +966,36 @@ async def update_plan(
     return result
 
 
+async def propose_opening_ponds(
+    items: list[dict[str, Any]],
+    summary: str = "",
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
+    from app.writing.opening_ponds import (
+        _MIN_ITEMS,
+        normalize_pond_items,
+        save_opening_ponds,
+    )
+
+    normalized = normalize_pond_items(items)
+    if len(normalized) < _MIN_ITEMS:
+        return {
+            "status": "error",
+            "error": "need_two_ponds",
+            "summary": "至少交 2 个互不换皮的开篇候选（跟着谁、站在哪、眼下要什么、超凡怎么开始）。",
+        }
+    saved = save_opening_ponds(normalized, summary=summary)
+    return {
+        "status": "ok",
+        "ponds_id": saved["ponds_id"],
+        "items": saved["items"],
+        "summary": saved.get("summary")
+        or f"{len(normalized)} 个开篇候选，待你点选或说「我要其他的」",
+        "awaiting_choice": True,
+    }
+
+
 async def update_outline(
     content: str,
     mode: str = "replace",

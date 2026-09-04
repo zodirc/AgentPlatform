@@ -96,6 +96,31 @@ _active_turns: set[UUID] = set()
 _inflight_commands: set[UUID] = set()
 
 
+def _tools_for_turn(
+    profile: Any,
+    registry: Any,
+    *,
+    plan_phase: str | None,
+    message: str,
+) -> tuple[list[Any], bool]:
+    """Plan 规划闸优先；否则开篇候选闸成只剩 propose_opening_ponds。"""
+    from app.writing.opening_ponds import should_gate_opening_choice
+
+    opening_choice = False
+    if (plan_phase or "").strip().lower() != "planning":
+        opening_choice = should_gate_opening_choice(
+            message or "",
+            tool_names=list(profile.tool_names),
+        )
+    tools = tool_scope(
+        profile,
+        registry,
+        plan_phase=plan_phase,
+        opening_choice=opening_choice,
+    )
+    return tools, opening_choice
+
+
 def _track_turn_started(turn_id: UUID) -> None:
     """登记本进程 inflight Turn，并刷新 ``runtime_inflight_turns`` 指标。
 
@@ -614,7 +639,12 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     profile = ScenarioRegistry.get(state.scenario_id)
     registry = build_registry()
     # Preserve Plan executing write-waiver when restoring from checkpoint.
-    tools = tool_scope(profile, registry, plan_phase=state.plan_phase)
+    tools, _opening_choice = _tools_for_turn(
+        profile,
+        registry,
+        plan_phase=state.plan_phase,
+        message=state.turn_user_text,
+    )
     owner_user_id = await load_session_owner_user_id(state.session_id)
     from app.model.turn_override import bind_turn_model, reset_turn_model
 
@@ -1605,7 +1635,12 @@ async def _run_turn(
     )
 
     registry = build_registry()
-    tools = tool_scope(profile, registry, plan_phase=phase)
+    tools, opening_choice = _tools_for_turn(
+        profile,
+        registry,
+        plan_phase=phase,
+        message=message or "",
+    )
     # Structural lane: soft prewarm when Profile declares it — never await on StartTurn / first token.
     if settings.structural_prewarm and profile.structural_prewarm:
         from app.structural.adapters import prewarm
@@ -1672,6 +1707,15 @@ async def _run_turn(
             f"{volatile_context.rstrip()}\n\n{phase_block}\n"
             if volatile_context.strip()
             else f"{phase_block}\n"
+        )
+    if opening_choice:
+        from app.writing.opening_ponds import opening_choice_block
+
+        choice_block = opening_choice_block()
+        volatile_context = (
+            f"{volatile_context.rstrip()}\n\n{choice_block}\n"
+            if volatile_context.strip()
+            else f"{choice_block}\n"
         )
 
     # docs/27 — when Work disabled product seed, steer model away from seed paths.

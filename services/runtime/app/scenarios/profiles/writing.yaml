@@ -10,6 +10,7 @@ tool_names:
   - propose_patch
   - draft_section
   - update_outline
+  - propose_opening_ponds
   - update_plan
   - search_sources
   - check_citation
@@ -37,6 +38,7 @@ web_layout: writing-workbench
 retrieval:
   exclude_path_prefixes:
     - seed/intel
+    - drafts/archive
   section_title_prior: texture
 generation:
   temperature: 0.8

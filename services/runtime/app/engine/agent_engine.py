@@ -230,6 +230,7 @@ def _compact_locate_event_meta(result: dict[str, Any]) -> dict[str, Any]:
 _TOOL_EVENTS: dict[str, str] = {
     "update_outline": "outline.updated",
     "update_plan": "turn.plan",
+    "propose_opening_ponds": "opening.ponds",
 }
 
 _CACHEABLE_TOOLS = frozenset(
@@ -404,6 +405,45 @@ def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, 
         if "awaiting_consent" in result:
             out["awaiting_consent"] = bool(result.get("awaiting_consent"))
         return out
+    if event_type == "opening.ponds":
+        ponds: list[dict[str, str]] = []
+        raw_ponds = result.get("items")
+        if isinstance(raw_ponds, list):
+            for it in raw_ponds:
+                if not isinstance(it, dict):
+                    continue
+                title = _clamp_event_str(it.get("title") or "候选", 80)
+                if not title.strip():
+                    continue
+                row: dict[str, str] = {
+                    "id": _clamp_event_str(it.get("id") or f"pond-{len(ponds) + 1}", 32),
+                    "title": title,
+                }
+                for key, cap in (
+                    ("who", 240),
+                    ("where", 240),
+                    ("want", 240),
+                    ("chapter_job", 240),
+                    ("summary", 160),
+                ):
+                    val = str(it.get(key) or "").strip()
+                    if val:
+                        row[key] = _clamp_event_str(val, cap)
+                ponds.append(row)
+                if len(ponds) >= 4:
+                    break
+        if len(ponds) < 2:
+            return None
+        pond_out: dict[str, Any] = {
+            "ponds_id": str(result.get("ponds_id") or "ponds"),
+            "items": ponds,
+            "summary": _clamp_event_str(
+                result.get("summary") or "", _TOOL_COMPLETED_SUMMARY_MAX
+            ),
+        }
+        if "awaiting_choice" in result:
+            pond_out["awaiting_choice"] = bool(result.get("awaiting_choice"))
+        return pond_out
     if event_type == "outline.updated":
         mode = str(result.get("mode") or "")
         out = {
@@ -1911,6 +1951,13 @@ class AgentEngine:
             and result.get("awaiting_consent")
         ):
             state.termination_reason = "plan_awaiting_consent"
+            return "TERMINATE"
+        if (
+            tool_name == "propose_opening_ponds"
+            and not is_error
+            and result.get("awaiting_choice")
+        ):
+            state.termination_reason = "opening_ponds_awaiting_choice"
             return "TERMINATE"
         return _tool_batch_outcome(str(summary))
 

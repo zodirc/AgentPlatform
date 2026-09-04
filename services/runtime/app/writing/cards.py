@@ -805,6 +805,7 @@ def prepare_writing_system_prompt(
     返回:
         WritingCardsPinResult。"""
     from app.writing.work_index import format_work_index_block
+    from app.writing.occupy import wants_new_piece
     from app.writing.signals.spec import build_writing_spec_block
 
     cards = with_builtin_style_if_missing(
@@ -812,6 +813,9 @@ def prepare_writing_system_prompt(
         message=message,
         workspace_root=workspace_root,
     )
+    starting_new = wants_new_piece(message)
+    if starting_new:
+        cards = [c for c in cards if c.kind == "style"]
     selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)
     work_index = format_work_index_block(
@@ -853,6 +857,13 @@ def prepare_writing_system_prompt(
         diverge = load_diverge_styles_volatile_block()
         if diverge:
             extras.append(diverge)
+    from app.writing.outline_phase import wants_opening_candidates
+    from app.writing.opening_ponds import format_opening_ponds_block
+
+    if wants_opening_candidates(message, outline=outline_text):
+        ponds_block = format_opening_ponds_block(workspace_root=workspace_root)
+        if ponds_block:
+            extras.append(ponds_block)
     from app.writing.signals.beats import format_local_beats_block
 
     spec_frag = None

@@ -168,3 +168,4 @@ def test_writing_profile_includes_update_plan() -> None:
     ScenarioRegistry.load()
     profile = ScenarioRegistry.get("writing")
     assert "update_plan" in profile.tool_names
+    assert "propose_opening_ponds" in profile.tool_names

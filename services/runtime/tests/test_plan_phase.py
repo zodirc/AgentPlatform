@@ -72,6 +72,25 @@ def test_writing_planning_scope() -> None:
     assert "read_file" not in names
 
 
+def test_writing_opening_choice_scope() -> None:
+    ScenarioRegistry.load()
+    profile = ScenarioRegistry.get("writing")
+    registry = build_registry()
+    names = {s.name for s in tool_scope(profile, registry, opening_choice=True)}
+    assert names <= {"propose_opening_ponds", "stub_echo"}
+    assert "propose_opening_ponds" in names
+    assert "draft_section" not in names
+    assert "update_outline" not in names
+    planning = {
+        s.name
+        for s in tool_scope(
+            profile, registry, plan_phase="planning", opening_choice=True
+        )
+    }
+    assert "update_plan" in planning
+    assert "propose_opening_ponds" not in planning
+
+
 def test_agent_executing_waives_write_approvals() -> None:
     """After「按此执行」, Plan consent covers file edits — no per-edit gate."""
     ScenarioRegistry.load()

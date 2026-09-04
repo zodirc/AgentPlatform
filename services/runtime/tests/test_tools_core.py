@@ -363,6 +363,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert writing.patch_auto_apply is True
     assert writing.attach_writing_signals is True
     assert "draft_section" in writing.tool_names
+    assert "propose_opening_ponds" in writing.tool_names
     assert "writing_rubric" in writing.tool_names
     assert "evaluate_writing_fragment" in writing.tool_names
     assert agent.scenario_id == "agent"
@@ -382,6 +383,7 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "search_sources" in writing.system_prompt
     assert "draft_section" in writing.system_prompt
     assert "update_outline" in writing.system_prompt
+    assert "propose_opening_ponds" in writing.system_prompt
     assert "propose_patch" in writing.system_prompt
     assert "export_document" in writing.system_prompt
     assert "遵守工具返回的状态" in writing.system_prompt

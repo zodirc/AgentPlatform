@@ -727,6 +727,28 @@ def test_domain_event_payload_clamps_plan_title_and_outline() -> None:
     assert len(plan["items"][0]["title"]) == 512
     validate_event_payload("turn.plan", plan)
 
+    ponds = _domain_event_payload(
+        "opening.ponds",
+        {
+            "ponds_id": "ponds-1",
+            "summary": "s",
+            "awaiting_choice": True,
+            "items": [
+                {
+                    "id": "a",
+                    "title": "t" * 200,
+                    "who": "w",
+                    "where": "p",
+                    "want": "q",
+                },
+                {"id": "b", "title": "other", "who": "x", "where": "y", "want": "z"},
+            ],
+        },
+    )
+    assert ponds is not None
+    assert len(ponds["items"][0]["title"]) == 80
+    validate_event_payload("opening.ponds", ponds)
+
     outline = _domain_event_payload(
         "outline.updated",
         {"path": "outline.md", "content": "c" * 70_000, "summary": "ok", "mode": "replace"},

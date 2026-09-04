@@ -18,6 +18,12 @@ from app.writing.text_metrics import visible_chars
 
 ARCHIVE_DIR = "drafts/archive"
 
+_EXPLICIT_CONTINUE_RE = re.compile(
+    r"接着写|继续写|往下写|续写|下一章|下章|"
+    r"这一章|本章|按纲|"
+    r"改这|润色这|"
+    r"把这[篇章节]|把昨天|把上次"
+)
 _CONTINUE_RE = re.compile(
     r"接着写|继续写|往下写|续写|下一章|下章|"
     r"这一章|本章|"
@@ -51,6 +57,8 @@ def wants_new_piece(user_text: str) -> bool:
         bool。"""
     text = (user_text or "").strip()
     if not text:
+        return False
+    if _EXPLICIT_CONTINUE_RE.search(text):
         return False
     if _CONTINUE_RE.search(text):
         return False

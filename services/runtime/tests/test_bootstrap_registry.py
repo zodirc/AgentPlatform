@@ -34,6 +34,7 @@ def test_build_registry_has_core_tools() -> None:
     assert registry.get("read_file") is not None
     assert registry.get("run_command") is not None
     assert registry.get("delegate") is not None
+    assert registry.get("propose_opening_ponds") is not None
 
 
 def test_draft_section_description_follows_repair_neighbor() -> None:
