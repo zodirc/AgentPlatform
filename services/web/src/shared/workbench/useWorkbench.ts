@@ -13,6 +13,7 @@ import {
   fetchSessionTurns,
   fetchTurnEvents,
   fetchTurnView,
+  invalidateTurnViewCache,
   fetchWorkspaceFile,
   rejectPatch,
   startTurn,
@@ -48,6 +49,15 @@ import {
   type PlanPhase,
   type PlanPhaseWire,
 } from "./plan";
+import {
+  formatSelectPondMessage,
+  latestOpeningPondsFromArtifacts,
+  latestOpeningPondsFromEvents,
+  MORE_PONDS_MESSAGE,
+  openingPondsFromEventPayload,
+  type OpeningPondItem,
+  type OpeningPondsArtifact,
+} from "./openingPonds";
 import { scenarioMeta } from "./scenarioMeta";
 import { tokenUsageFromEvents } from "./tokenUsage";
 import { mergeOutboundQueue } from "./outboundQueue";
@@ -55,6 +65,7 @@ import {
   historyItemFromView,
   mergeEventsBySequence,
   patchHistoryPlan,
+  patchHistoryOpeningPonds,
   toHistoryItem,
   upsertHistoryItem,
 } from "./workbenchHistory";
@@ -133,6 +144,8 @@ export function useWorkbenchImpl(): WorkbenchState {
   );
   const [liveTokenUsage, setLiveTokenUsage] = useState<TokenUsage | null>(null);
   const [livePlan, setLivePlan] = useState<PlanArtifact | null>(null);
+  const [liveOpeningPonds, setLiveOpeningPonds] =
+    useState<OpeningPondsArtifact | null>(null);
   const [planMode, setPlanMode] = useState(false);
   /** Epoch ms when user dismissed suggest; drives cooldown (docs/26 PS3). */
   const [planSuggestDismissedAt, setPlanSuggestDismissedAt] = useState<
@@ -321,6 +334,10 @@ export function useWorkbenchImpl(): WorkbenchState {
         turnViewQuery.data.artifacts as Record<string, unknown>[] | undefined,
       );
       if (viewPlan) setLivePlan(viewPlan);
+      const viewPonds = latestOpeningPondsFromArtifacts(
+        turnViewQuery.data.artifacts as Record<string, unknown>[] | undefined,
+      );
+      if (viewPonds) setLiveOpeningPonds(viewPonds);
     }
   }, [turnViewQuery.data]);
 
@@ -511,6 +528,17 @@ export function useWorkbenchImpl(): WorkbenchState {
               planWrapSentRef.current = false;
             }
           }
+          if (ev.type === "opening.ponds") {
+            const nextPonds = openingPondsFromEventPayload(
+              ev.payload as Record<string, unknown>,
+            );
+            if (nextPonds) {
+              setLiveOpeningPonds(nextPonds);
+              setTurnHistory((prev) =>
+                patchHistoryOpeningPonds(prev, id, nextPonds),
+              );
+            }
+          }
           if (ev.type === "usage.reported" || ev.type === "turn.completed") {
             // Backend payload.input/output_tokens are turn cumulatives;
             // step_* fields are per-step deltas (used only when rebuilding from events).
@@ -583,6 +611,7 @@ export function useWorkbenchImpl(): WorkbenchState {
         onClose: async () => {
           flushPendingDeltas();
           try {
+            invalidateTurnViewCache(id);
             const v = await fetchTurnView(id);
             setView(v);
             syncApprovalFromView(v);
@@ -604,6 +633,15 @@ export function useWorkbenchImpl(): WorkbenchState {
             if (closedPlan) {
               setLivePlan(closedPlan);
               setTurnHistory((prev) => patchHistoryPlan(prev, id, closedPlan));
+            }
+            const closedPonds = latestOpeningPondsFromArtifacts(
+              v.artifacts as Record<string, unknown>[] | undefined,
+            );
+            if (closedPonds) {
+              setLiveOpeningPonds(closedPonds);
+              setTurnHistory((prev) =>
+                patchHistoryOpeningPonds(prev, id, closedPonds),
+              );
             }
             setLiveToolTimeline([]);
             await buildDraftDiffPreviewIfNeeded();
@@ -666,6 +704,15 @@ export function useWorkbenchImpl(): WorkbenchState {
         if (viewPlan) {
           setLivePlan(viewPlan);
           setTurnHistory((prev) => patchHistoryPlan(prev, last.id, viewPlan));
+        }
+        const viewPonds = latestOpeningPondsFromArtifacts(
+          v.artifacts as Record<string, unknown>[] | undefined,
+        );
+        if (viewPonds) {
+          setLiveOpeningPonds(viewPonds);
+          setTurnHistory((prev) =>
+            patchHistoryOpeningPonds(prev, last.id, viewPonds),
+          );
         }
         setPlanAwaitingConfirm(false);
         planWrapSentRef.current = false;
@@ -764,6 +811,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     setLiveContextUsage(null);
     setLiveTokenUsage(null);
     setLivePlan(null);
+    setLiveOpeningPonds(null);
     setView(null);
     setStopping(false);
     setPendingApproval(false);
@@ -879,6 +927,28 @@ export function useWorkbenchImpl(): WorkbenchState {
       planModeSend: false,
       planPhase: "executing",
     });
+  }
+
+  async function handleSelectOpeningPond(item: OpeningPondItem) {
+    const snapshot = turnHistory.at(-1)?.openingPonds ?? liveOpeningPonds;
+    if (
+      busy ||
+      pendingApproval ||
+      !snapshot?.items?.some((row) => row.id === item.id)
+    ) {
+      return;
+    }
+    await handleSendText(formatSelectPondMessage(item), {
+      planModeSend: false,
+    });
+  }
+
+  async function handleMoreOpeningPonds() {
+    const snapshot = turnHistory.at(-1)?.openingPonds ?? liveOpeningPonds;
+    if (busy || pendingApproval || !snapshot?.items?.length) {
+      return;
+    }
+    await handleSendText(MORE_PONDS_MESSAGE, { planModeSend: false });
   }
 
   /** 关闭 Plan 建议条并写入 session 级 cooldown 时间戳。 */
@@ -1134,10 +1204,24 @@ export function useWorkbenchImpl(): WorkbenchState {
     latestPlanFromArtifacts(
       view?.artifacts as Record<string, unknown>[] | undefined,
     );
+  const openingPonds =
+    liveOpeningPonds ??
+    latestOpeningPondsFromArtifacts(
+      view?.artifacts as Record<string, unknown>[] | undefined,
+    ) ??
+    latestOpeningPondsFromEvents(events);
 
   const canExecutePlan =
     planAwaitingConfirm &&
     planIsProposedOnly(plan) &&
+    !busy &&
+    !pendingApproval &&
+    view?.status !== "waiting_approval";
+
+  const lastOpeningPonds = openingPonds ?? turnHistory.at(-1)?.openingPonds;
+  const canChooseOpeningPonds =
+    Boolean(lastOpeningPonds?.items && lastOpeningPonds.items.length >= 2) &&
+    lastOpeningPonds?.awaiting_choice !== false &&
     !busy &&
     !pendingApproval &&
     view?.status !== "waiting_approval";
@@ -1186,6 +1270,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     contextUsage,
     tokenUsage,
     plan,
+    openingPonds,
     planMode,
     setPlanMode: setPlanModeAndClearSuggest,
     planPhase,
@@ -1194,6 +1279,9 @@ export function useWorkbenchImpl(): WorkbenchState {
     dismissPlanSuggest,
     canExecutePlan,
     handleExecutePlan,
+    canChooseOpeningPonds,
+    handleSelectOpeningPond,
+    handleMoreOpeningPonds,
     busy,
     outboundQueue,
     clearOutboundQueue,

@@ -3,6 +3,7 @@
  */
 import type { TurnEvent, TurnView } from "../api/client";
 import type { PlanArtifact } from "./plan";
+import type { OpeningPondsArtifact } from "./openingPonds";
 import type { SubagentLive } from "./subagents";
 
 /** 四种工作台场景标识，对应 URL 路径与 startTurn scenario_id。 */
@@ -79,6 +80,8 @@ export type TurnHistoryItem = {
   created_at: string;
   /** 该回合 plan 快照，供聊天流多 plan 历史展示（docs/25）。 */
   plan?: PlanArtifact | null;
+  /** 该回合开篇近池候选（点选 / 我要其他的）。 */
+  openingPonds?: OpeningPondsArtifact | null;
 };
 
 /**
@@ -109,6 +112,8 @@ export type WorkbenchState = {
   tokenUsage: TokenUsage | null;
   /** 最新 plan 制品（live 事件或 turn view）。 */
   plan: PlanArtifact | null;
+  /** 最新开篇近池制品（live 事件或 turn view），聊天内点选像 Plan。 */
+  openingPonds: OpeningPondsArtifact | null;
   /** 用户显式开启的 Plan 模式，下一次发送会带 plan_phase（docs/25）。 */
   planMode: boolean;
   setPlanMode: (value: boolean) => void;
@@ -122,6 +127,10 @@ export type WorkbenchState = {
   /** 仅 Plan 模式生成的「全 pending」清单且待用户确认时为 true。 */
   canExecutePlan: boolean;
   handleExecutePlan: () => Promise<void>;
+  /** 最新一轮开篇候选仍待点选（或说「我要其他的」）。 */
+  canChooseOpeningPonds: boolean;
+  handleSelectOpeningPond: (item: import("./openingPonds").OpeningPondItem) => Promise<void>;
+  handleMoreOpeningPonds: () => Promise<void>;
   busy: boolean;
   stopping: boolean;
   actionBusy: boolean;

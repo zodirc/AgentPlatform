@@ -271,6 +271,52 @@ export async function fetchDefaultWork(): Promise<WorkSummary> {
   return res.json() as Promise<WorkSummary>;
 }
 
+/** 这本书的一个可见部件（不含路径）。 */
+export type WritingBookPart = {
+  key: string;
+  label: string;
+  kind?: string;
+  chars: number;
+  text: string;
+  /** 可打开编辑的 Work 相对路径；侧车片段没有。 */
+  path?: string;
+};
+
+/** 写作「这本书」清单。 */
+export type WritingBook = {
+  title: string;
+  empty: boolean;
+  parts: WritingBookPart[];
+};
+
+/**
+ * 读取当前默认 Work 上的这本书。
+ */
+export async function fetchWritingBook(): Promise<WritingBook> {
+  const res = await fetch(`${API_BASE}/works/default/book`, {
+    ...sessionFetchInit,
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`fetchWritingBook failed: ${res.status}`);
+  return res.json() as Promise<WritingBook>;
+}
+
+/**
+ * 扔掉当前这本书（大纲/正文/人物/拍）；资料库不动。
+ */
+export async function discardWritingBook(): Promise<{
+  ok: boolean;
+  book: WritingBook;
+}> {
+  const res = await fetch(`${API_BASE}/works/default/book/discard`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: apiAuthHeaders(),
+  });
+  if (!res.ok) throw new Error(`discardWritingBook failed: ${res.status}`);
+  return res.json() as Promise<{ ok: boolean; book: WritingBook }>;
+}
+
 /**
  * 更新 Work 的 visibility_seed 开关。
  * @param workId Work UUID
@@ -423,6 +469,7 @@ export type TurnSummary = {
   created_at: string;
   /** turn_views 中最新 plan 制品（聊天多 plan 历史可选）。 */
   plan?: Record<string, unknown> | null;
+  opening_ponds?: Record<string, unknown> | null;
 };
 
 /**
@@ -477,6 +524,11 @@ export async function startTurn(
 // body; serve the cached copy instead. Bounded to the most recent turns.
 const viewCache = new Map<string, { etag: string; view: TurnView }>();
 const VIEW_CACHE_MAX = 64;
+
+export function invalidateTurnViewCache(turnId?: string) {
+  if (turnId) viewCache.delete(turnId);
+  else viewCache.clear();
+}
 
 /**
  * 获取回合投影视图；支持 ETag 条件请求与客户端 LRU 缓存（I19）。

@@ -18,6 +18,7 @@ import {
   SCENARIO_META,
 } from "../../shared/workbench/scenarioMeta";
 import { PlanPanel } from "../../shared/workbench/PlanPanel";
+import { OpeningPondsPanel } from "../../shared/workbench/OpeningPondsPanel";
 import { livePlanStep } from "../../shared/workbench/plan";
 import { pathWithSession } from "../../shared/workbench/sessionUrl";
 import { statusLabel } from "../../shared/workbench/subagents";
@@ -676,6 +677,7 @@ export function AgentChatPanel({
     wb.plan?.items?.length,
     planItemsKey,
     wb.canExecutePlan,
+    wb.canChooseOpeningPonds,
     activeTab,
     onMain,
     activeSub?.streamText,
@@ -738,10 +740,16 @@ export function AgentChatPanel({
               );
               // Live turn prefers streaming plan; settled turns keep their snapshot.
               const turnPlan = isLive ? (wb.plan ?? turn.plan) : turn.plan;
+              const isLatest = turn.id === wb.turnHistory.at(-1)?.id;
+              const turnPonds =
+                isLive || isLatest
+                  ? (wb.openingPonds ?? turn.openingPonds)
+                  : turn.openingPonds;
               const turnPlanPhase = isLive ? wb.planPhase : "off";
               const turnStatus = isLive ? wb.displayStatus : turn.status;
               const hasAssistantBody = Boolean(
                 turnPlan?.items?.length ||
+                turnPonds?.items?.length ||
                 thinking ||
                 output ||
                 (isLive && wb.busy),
@@ -767,6 +775,19 @@ export function AgentChatPanel({
                               : undefined
                           }
                           variant="chat"
+                        />
+                      ) : null}
+                      {turnPonds?.items?.length ? (
+                        <OpeningPondsPanel
+                          ponds={turnPonds}
+                          interactive={Boolean(
+                            isLatest && wb.canChooseOpeningPonds,
+                          )}
+                          disabled={wb.busy || wb.actionBusy}
+                          onSelect={(item) =>
+                            void wb.handleSelectOpeningPond(item)
+                          }
+                          onMore={() => void wb.handleMoreOpeningPonds()}
                         />
                       ) : null}
                       <ThinkingBlock
@@ -861,6 +882,10 @@ export function AgentChatPanel({
           ) : currentStep && wb.busy ? (
             <p className="truncate text-[11px] text-primary/90">
               计划进行中 · {currentStep.title}
+            </p>
+          ) : wb.canChooseOpeningPonds ? (
+            <p className="truncate text-[11px] font-medium text-warning">
+              开篇待你选 · 在上方点「采用此开篇」或「我要其他的」
             </p>
           ) : null}
           {wb.showPlanSuggest ? (

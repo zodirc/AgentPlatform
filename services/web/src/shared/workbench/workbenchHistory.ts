@@ -4,6 +4,11 @@ import {
   normalizePlanArtifact,
   type PlanArtifact,
 } from "./plan";
+import {
+  latestOpeningPondsFromArtifacts,
+  normalizeOpeningPondsArtifact,
+  type OpeningPondsArtifact,
+} from "./openingPonds";
 import type { ScenarioId, TurnHistoryItem } from "./types";
 
 /** Merge snapshot + any stream events that arrived while it was in flight. */
@@ -49,6 +54,7 @@ export function toHistoryItem(turn: TurnSummary): TurnHistoryItem {
     latest_output: turn.latest_output,
     created_at: turn.created_at,
     plan: normalizePlanArtifact(turn.plan ?? null),
+    openingPonds: normalizeOpeningPondsArtifact(turn.opening_ponds ?? null),
   };
 }
 
@@ -63,8 +69,9 @@ export function upsertHistoryItem(
   next[idx] = {
     ...prev,
     ...item,
-    // Avoid clobbering a live plan with an older partial merge that omitted plan.
     plan: item.plan !== undefined ? item.plan : prev.plan,
+    openingPonds:
+      item.openingPonds != null ? item.openingPonds : prev.openingPonds,
   };
   return next;
 }
@@ -80,6 +87,9 @@ export function historyItemFromView(v: TurnView): TurnHistoryItem {
     plan: latestPlanFromArtifacts(
       v.artifacts as Record<string, unknown>[] | undefined,
     ),
+    openingPonds: latestOpeningPondsFromArtifacts(
+      v.artifacts as Record<string, unknown>[] | undefined,
+    ),
   };
 }
 
@@ -89,4 +99,14 @@ export function patchHistoryPlan(
   plan: PlanArtifact | null,
 ): TurnHistoryItem[] {
   return items.map((row) => (row.id === turnId ? { ...row, plan } : row));
+}
+
+export function patchHistoryOpeningPonds(
+  items: TurnHistoryItem[],
+  turnId: string,
+  openingPonds: OpeningPondsArtifact | null,
+): TurnHistoryItem[] {
+  return items.map((row) =>
+    row.id === turnId ? { ...row, openingPonds } : row,
+  );
 }
