@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agent-platform.local/schemas/events/payloads/opening.ponds.json",
+  "title": "OpeningPondsPayload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["ponds_id", "items"],
+  "properties": {
+    "ponds_id": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string", "maxLength": 4096 },
+    "awaiting_choice": {
+      "type": "boolean",
+      "description": "True when the turn stopped so the user can pick a pond or ask for others."
+    },
+    "items": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "title"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 32 },
+          "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "who": { "type": "string", "maxLength": 240 },
+          "where": { "type": "string", "maxLength": 240 },
+          "want": { "type": "string", "maxLength": 240 },
+          "chapter_job": { "type": "string", "maxLength": 240 },
+          "summary": { "type": "string", "maxLength": 160 }
+        }
+      }
+    }
+  }
+}

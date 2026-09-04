@@ -38,6 +38,7 @@
       "type": "string",
       "enum": [
         "turn.plan",
+        "opening.ponds",
         "subagent.started",
         "subagent.completed",
         "retrieval.completed",

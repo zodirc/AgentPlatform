@@ -13,7 +13,8 @@
         "max_steps",
         "budget_exceeded",
         "local_response",
-        "plan_awaiting_consent"
+        "plan_awaiting_consent",
+        "opening_ponds_awaiting_choice"
       ]
     },
     "step_count": { "type": "integer", "minimum": 0 },
