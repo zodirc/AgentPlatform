@@ -209,6 +209,43 @@ def test_check_rewrite_window_exhausted_stops() -> None:
     assert "已落盘" in (err.get("summary") or "")
 
 
+def test_check_repair_tools_blocked_when_rewrite_exhausted() -> None:
+    from app.writing.patch_budget import (
+        check_repair_tools_blocked,
+        island_untouched_error,
+    )
+    from app.writing.signals.repair import REWRITE_STOP
+
+    manifest = {
+        "section_drafts": {"ch1": {"book_scope": "long"}},
+        "patch_budget": {"ch1": {"rewrite_window": 2}},
+    }
+    err = check_repair_tools_blocked(
+        manifest,
+        section_id="ch1",
+        prior={"repair_span": {"key": "staccato_uniform"}},
+    )
+    assert err is not None
+    assert err["error"] == "repair_stopped"
+    assert err["rewrite_policy"] == REWRITE_STOP
+    assert check_repair_tools_blocked({}, section_id="", prior=None) is None
+    payload = island_untouched_error(
+        old_text="「来。」",
+        new_text="「来。」",
+        penalty_key="staccato_uniform",
+        long_form=True,
+    )
+    assert payload["error"] == "patch_island_untouched"
+    assert "已落盘" in payload["summary"]
+    short = island_untouched_error(
+        old_text="「来。」",
+        new_text="「来。」",
+        penalty_key="staccato_uniform",
+        long_form=False,
+    )
+    assert "停止修补" in short["summary"]
+
+
 def test_check_propose_patch_unnecessary_when_net_ok() -> None:
     prior = {"net_signal": 0.2, "l0_hits": []}
     err = check_propose_patch_allowed(
@@ -590,6 +627,47 @@ async def test_propose_patch_rejects_cosmetic_opening(workspace) -> None:
     data = json.loads((manifest_dir / f"{turn_id}.json").read_text(encoding="utf-8"))
     assert not (data.get("patch_budget") or {}).get("ch1", {}).get("by_key")
     assert int((data.get("patch_budget") or {}).get("ch1", {}).get("apply_miss_streak") or 0) == 1
+    assert old in target.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_apply_patch_rejects_cosmetic_opening(workspace) -> None:
+    turn_id = uuid4()
+    path = "drafts/manuscript.md"
+    target = workspace / "drafts" / "manuscript.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    old = (
+        "「别看了！」岸上有人喝他。\n\n"
+        "沈砚把视线从那具尸体的青紫勒痕上挪开，踩着最后一块跳板上岸。"
+        "药铺伙计说过，天黑之前这包药必须煎进他娘嘴里，晚一刻，肺里的水就会多一分；"
+        "药钱是周五两先垫的，送完这趟，他才能拿到够买三天米的跑腿钱。\n\n"
+        "「沈砚！」周五两抬头叫他，「来得正好，把这东西送进城。」\n"
+    )
+    new = old.replace("青紫勒痕", "后颈的勒痕").replace("一块跳板", "一块湿滑的跳板")
+    target.write_text(f"# ch1\n\n{old}后文\n", encoding="utf-8")
+    manifest_dir = workspace / ".agent" / "work" / "turns"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / f"{turn_id}.json").write_text(
+        json.dumps(
+            {
+                "section_drafts": {
+                    "ch1": {
+                        "book_scope": "long",
+                        "repair_span": {"key": "staccato_uniform", "old_text": old},
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result = await core.apply_patch(
+        path=path,
+        old_text=old,
+        new_text=new,
+        turn_id=turn_id,
+    )
+    assert result.get("error") == "patch_island_untouched"
     assert old in target.read_text(encoding="utf-8")
 
 

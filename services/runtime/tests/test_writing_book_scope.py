@@ -82,6 +82,14 @@ def test_scope_spec_mid_and_climax() -> None:
     assert "中段" in scope_spec_line("long", position="rising", section_num=8)
     assert "高潮" in scope_spec_line("long", position="climax", section_num=8)
     assert "收束" in scope_spec_line("long", position="falling", section_num=12)
+    opening = scope_spec_line(
+        "long", position="opening", section_num=1, work_mode="web_serial"
+    )
+    assert "前三分之一" in opening
+    literary = scope_spec_line(
+        "long", position="opening", section_num=1, work_mode="literary"
+    )
+    assert "日子" in literary
 
 
 def test_short_spec_is_ready_not_open() -> None:

@@ -69,6 +69,23 @@ def test_continue_when_pond_committed(tmp_path: Path) -> None:
     assert phase_locked["style_locked"] is True
 
 
+def test_open_phase_note_fantasy_asks_early_gain() -> None:
+    fantasy = resolve_outline_phase(
+        "写一章长篇修真小说的第一章, 现代都市题材",
+        outline="",
+        book_scope="long",
+    )
+    assert fantasy["outline_phase"] == "open"
+    assert "前三分之一" in str(fantasy["outline_phase_note"])
+    literary = resolve_outline_phase(
+        "写一章长篇",
+        outline="",
+        book_scope="long",
+    )
+    assert literary["outline_phase"] == "open"
+    assert "日子" in str(literary["outline_phase_note"])
+
+
 def test_should_not_inject_diverge_styles(tmp_path: Path) -> None:
     assert not should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
