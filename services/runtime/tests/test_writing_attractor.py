@@ -85,12 +85,35 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "类型不是模板" in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
     assert "眼前的池子" in voice
+    assert "平凡" in voice
+    assert "得到" in voice
+    assert "发现" in voice
+    assert "前三分之一" in voice
+    assert "功法" in voice
     assert "看见代价" not in voice
     assert "跟着谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "眼下要什么" in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "沈砚" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "查父失踪" not in system
     assert "水路渡口+灵灯" not in system
+    assert "平凡" in system
+    assert "得到" in system or "发现" in system
+    assert "前三分之一" in system
+    assert "功法" in system
+
+
+def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    spec = build_writing_spec_block(
+        "写一章长篇修真小说的第一章, 现代都市题材",
+        workspace_root=tmp_path,
+    )
+    assert "work_mode: `web_serial`" in spec
+    assert "前三分之一" in spec
+    assert "沈砚" not in spec
+    assert "灵灯" not in spec
 
 
 def test_committed_style_spec_does_not_ask_to_reinvent_the_book(

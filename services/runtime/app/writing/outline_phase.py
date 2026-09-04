@@ -251,9 +251,17 @@ def resolve_outline_phase(
     else:
         phase = "open"
         if user_dir:
-            note = "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
+            note = (
+                "长篇开篇：跟着谁还是凡人；这一章前三分之一交到得到或发现，不要写终局宇宙"
+                if _FANTASY_HINT.search("\n".join(x for x in (message, outline) if x))
+                else "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
+            )
         else:
-            note = "长篇开篇：站住眼前的日子和人；勾画可轻可重；不要把后面的海写进第一章"
+            note = (
+                "长篇开篇：前三分之一交到得到或发现；勾画可轻可重；不要把后面的海写进第一章"
+                if _FANTASY_HINT.search("\n".join(x for x in (message, outline) if x))
+                else "长篇开篇：站住眼前的日子和人；勾画可轻可重；不要把后面的海写进第一章"
+            )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}
     return {

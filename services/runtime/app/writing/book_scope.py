@@ -196,7 +196,13 @@ def default_draft_quota_for_scope(scope: str, user_text: str = "") -> int | None
     return None
 
 
-def scope_spec_line(scope: str, *, position: str = "", section_num: int | None = None) -> str:
+def scope_spec_line(
+    scope: str,
+    *,
+    position: str = "",
+    section_num: int | None = None,
+    work_mode: str = "",
+) -> str:
     """Writing spec 尺度行。"""
     sc = normalize_book_scope(scope)
     pos = (position or "").strip().lower()
@@ -221,6 +227,13 @@ def scope_spec_line(scope: str, *, position: str = "", section_num: int | None =
     if pos == "turn":
         return "长篇·翻转：中段可以变向；扣已有线索写这场"
     if section_num is not None and section_num <= 3:
+        from app.writing.work_mode import normalize_work_mode
+
+        if normalize_work_mode(work_mode) == "web_serial":
+            return (
+                "长篇·开篇：前三分之一交到得到或发现；勾画可轻可重；"
+                "后面的海（终局宇宙、境界总纲）不要写进这一章"
+            )
         return (
             "长篇·开篇：站住眼前的日子和人；勾画可轻可重；"
             "后面的海（终局宇宙、境界总纲）不要写进这一章"

@@ -128,7 +128,9 @@ def build_writing_spec_block(
     if duty:
         one = re.sub(r"\s+", " ", duty).strip()
         duty_line = one if len(one) <= 72 else one[:71] + "…"
-    scope_line = scope_spec_line(scope, position=position, section_num=section_num)
+    scope_line = scope_spec_line(
+        scope, position=position, section_num=section_num, work_mode=work_mode
+    )
     from app.writing.outline_phase import outline_phase_spec_line, resolve_outline_phase
 
     phase_info = resolve_outline_phase(

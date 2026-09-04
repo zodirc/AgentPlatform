@@ -46,7 +46,8 @@ def test_default_opening_duty_differs_by_mode() -> None:
     lit = default_opening_duty("literary")
     web = default_opening_duty("web_serial")
     assert "机构" in lit or "可先站" in lit
-    assert "日子" in web or "人" in web
+    assert "得到" in web or "发现" in web
+    assert "前三分之一" in web or "功法" in web
     assert "ch2" not in web and "ch3" not in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
     assert "强钩" in hook or "麻烦" in hook
@@ -189,3 +190,54 @@ def test_style_gains_sidecar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert gains["mixed"] == 0.9
     # Missing keys filled from literary defaults
     assert 0 < gains["battle_action"] < 1
+
+
+def test_serial_hook_flat_allows_immersed_cultivation() -> None:
+    from app.writing.signals.prose import serial_hook_flat
+    from app.writing.text_metrics import visible_chars
+
+    body = (
+        "外门杂役院的晨钟响了。周野把木桶提到井边，井水上漂着一层薄薄的灵气，像油花。"
+        "师兄说过，能看见这层气的人，才配去领入门功法。他已经看了三个月。"
+        "今天井壁上那道淡青的纹终于清楚了，像有人用指甲划过石头。"
+    )
+    text = (body + "\n\n") * 6
+    assert visible_chars(text) >= 400
+    assert serial_hook_flat(text, "ch1") is False
+
+
+def test_serial_hook_flat_allows_self_discovery() -> None:
+    from app.writing.signals.prose import serial_hook_flat
+    from app.writing.text_metrics import visible_chars
+
+    body = (
+        "周野把电动车停在巷口，雨还在下。别人只看见积水，他却发现路灯底下那层光会跟着他的鞋尖挪。"
+        "他试着把手伸进去，光就贴上掌心，温得不像雨水。巷子里没有第二个人看见这件事。"
+    )
+    text = (body + "\n\n") * 8
+    assert visible_chars(text) >= 400
+    assert serial_hook_flat(text, "ch1") is False
+
+
+def test_serial_hook_flat_allows_world_already_running() -> None:
+    from app.writing.signals.prose import serial_hook_flat
+    from app.writing.text_metrics import visible_chars
+
+    body = (
+        "城门口的人把铜钱抛起来又接住。油饼摊的烟贴着墙走，底下混着汗和没扫干净的泥。"
+        "他挤在最外一圈听人喊价。这城这样转了很久，他只是还站在最底下那一层。"
+        "贴身布袋里那颗珠子隔着布烫他的肋骨，像提醒他别把这层日子当成全部。"
+    )
+    text = (body + "\n\n") * 6
+    assert visible_chars(text) >= 400
+    assert serial_hook_flat(text, "ch1") is False
+
+
+def test_serial_hook_flat_still_flags_empty_grind() -> None:
+    from app.writing.signals.prose import serial_hook_flat
+    from app.writing.text_metrics import visible_chars
+
+    body = "今天的班和昨天一样。工位上没有人说话。窗外的天一直灰着。"
+    text = (body + "\n\n") * 18
+    assert visible_chars(text) >= 400
+    assert serial_hook_flat(text, "ch1") is True

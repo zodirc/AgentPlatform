@@ -48,9 +48,11 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
 
 4  弱分或 L0 → 同轮 propose_patch(repair_span)
      写作场景 patch_auto_apply=true，仍须 UI 出示 diff
-     只换最弱窗里的 old_text（可带 neighbor）
-     同岛停（可见字 overlap ≥12）；每 penalty key 5 次 / 章合计 8
-     碎拍尽则 rewrite_window（每章 2）；连续 apply miss 2 次停
+     只换检测岛里的 old_text（可带 neighbor）；碎拍取最密岛，不把最弱评分窗升成整窗
+     同岛停（对上一次已生效的岛 overlap ≥12）；下一岛仍 propose_patch；每 penalty key 5 次 / 章合计 8
+     无差或岛未碰 → 不计次数；小岛尽才 rewrite_window（每章 2，≤160 实体字）
+     宽窗 / rewrite 尽 → 停修（长篇本章可交）
+     连续 apply miss 2 次停
      net_signal ≥ 0 且无过程 L0 → patch_unnecessary
      不整章再 draft_section（length_short 加厚除外）
      hygiene 拒绝对白改旁白
@@ -69,7 +71,7 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
   fragment    评分切片，不是本章必须交的工种
   focus / 这一场 / outline_phase     short/single=`ready` · 长篇未立定近池=`open` · 已立=`continue`
   无纲时写「新篇另起人与事」
-<span class="pt">◆ 要点  风格是罗盘不是合同。长篇开篇站住眼前的池子，不要把终局宇宙写成第一章主题。</span></pre>
+<span class="pt">◆ 要点  风格是罗盘不是合同。玄幻开篇前三分之一交到得到或发现（都市修真落到功法/系统/灵视/灵气），不要把终局宇宙写成第一章主题。</span></pre>
           <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 → 成稿 → 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
           <div class="src"><code>writing/occupy.py</code> · <code>writing/book_scope.py</code> · <code>writing/text_metrics.py</code> · <code>writing/patch_budget.py</code> · <code>scenarios/profiles/writing.yaml</code></div>
         </div>

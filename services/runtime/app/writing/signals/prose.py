@@ -21,7 +21,9 @@ _MOTION = re.compile(
 )
 _HOOK_CUE = re.compile(
     r"异|变|劫|觉醒|突破|灵根|秘境|妖|鬼|怪|系统|传承|血脉|天赋|"
-    r"金丹|元婴|练气|功法|天机|预言|诅咒"
+    r"金丹|元婴|练气|功法|天机|预言|诅咒|"
+    r"灵气|真气|修士|外门|内门|入门|异能|灵石|师兄|师姐|炼体|"
+    r"乱世|灵视"
 )
 _CONFLICT_CUE = re.compile(
     r"杀|战|危|敌|疑|秘|死|失踪|不对|奇怪|突然|竟然|发现|追|逃|挡|抢|威胁"
@@ -164,7 +166,11 @@ def anti_pattern_flags(
 
 
 def serial_hook_flat(text: str, section_id: str = "") -> bool:
-    """网文开篇：日常空磨、无悬念/冲突露头。"""
+    """网文开篇空磨：平凡日子里既没得到、也没发现。
+
+    功法、系统、灵视、灵气当场落到身上或被看见，都不算空磨。
+    得到或发现要早；拖到章末才掏一件物，仍像没展开。
+    """
     from app.writing.lore import is_opening_section
 
     if not is_opening_section(section_id):
