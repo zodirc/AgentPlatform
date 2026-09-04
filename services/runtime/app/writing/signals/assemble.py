@@ -570,6 +570,28 @@ async def evaluate_writing_fragment(
                 section_id = sid
     if not body:
         return {"error": "missing_text", "summary": "Provide text or a valid section_id"}
+    if turn_id is not None:
+        from app.tools.core.writing_tools import _read_manifest
+        from app.writing.patch_budget import check_repair_tools_blocked
+
+        manifest = _read_manifest(turn_id, session_id=session_id) or {}
+        sid = str(section_id or "").strip()
+        if not sid:
+            drafts = manifest.get("section_drafts")
+            if isinstance(drafts, dict) and drafts:
+                sid = next(iter(drafts))
+        row = None
+        if sid:
+            drafts = manifest.get("section_drafts")
+            if isinstance(drafts, dict):
+                raw = drafts.get(sid)
+                row = raw if isinstance(raw, dict) else None
+            blocked = check_repair_tools_blocked(
+                manifest, section_id=sid, prior=row
+            )
+            if blocked:
+                blocked.setdefault("status", "error")
+                return blocked
     signals = await build_writing_signals(
         body,
         fragment=fragment,

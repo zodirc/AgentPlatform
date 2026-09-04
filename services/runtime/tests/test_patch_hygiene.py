@@ -169,6 +169,30 @@ def test_build_repair_span_keeps_closed_quotes() -> None:
     assert "跑完了" in span["old_text"]
 
 
+def test_build_repair_span_locates_chapter_island_not_score_window() -> None:
+    from app.writing.signals.windows import TextWindow
+    from app.writing.text_metrics import visible_chars
+
+    opening = (
+        "「别看了！」岸上有人喝他。\n\n"
+        + "渡口边停着一艘平底乌篷船，船头的城防司黑牌被雨水冲得发亮。" * 8
+        + "\n「沈砚！」周五两抬头叫他，「来得正好，把这东西送进城。」\n"
+    )
+    island = "\n".join(["「跑完了？」", "「跑完了。」", "「少了谁？」", "「不知道。」"])
+    body = opening + "柜台上还温着酒。" + island
+    window = TextWindow(0, len(opening), opening)
+    span = build_repair_span(
+        body,
+        penalties=[{"key": "staccato_uniform", "hit": True}],
+        window=window,
+        net_signal=0.4,
+    )
+    assert span is not None
+    assert "跑完了" in span["old_text"]
+    assert "别看了" not in span["old_text"]
+    assert visible_chars(span["old_text"]) <= 160
+
+
 def test_meta_span_contains_knowing_phrase_not_window_head() -> None:
     from app.writing.signals.windows import TextWindow
 

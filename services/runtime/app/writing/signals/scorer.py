@@ -197,7 +197,7 @@ def _collect_penalties(
         add(
             "serial_hook_flat",
             serial_hook_flat(text, section_id),
-            "开篇空磨日常、无悬念/冲突露头",
+            "开篇空磨：平凡日子里既没得到、也没发现",
         )
     rubric = score_rubric(text)
     add(
@@ -448,7 +448,7 @@ def score_writing_fragment(
     locate_win = worst_win
     body_l0 = l0_penalty_hits(body.get("penalties"))
     if body_l0:
-        # 章级 L0（跨窗碎拍/金句）用章级 penalties；窗仍用于整窗扩张。
+        # 章级 L0 用章级 penalties；碎拍岛在全章定位，不把最弱窗升成 repair_span。
         probe_penalties = list(body.get("penalties") or [])
     elif worst_scored is not None and (
         worst_scored.get("penalties")
@@ -497,6 +497,7 @@ def score_writing_fragment(
                 exemplar_fit=body.get("exemplar_fit")
                 if isinstance(body.get("exemplar_fit"), dict)
                 else None,
+                work_mode=mode,
             )
             body["repair_span"] = span
     beat = beat_window_payload(text, window=worst_win)
@@ -507,7 +508,7 @@ def score_writing_fragment(
         length_short=length_short,
         needs_repair=span is not None,
     )
-    # 同岛停后若章级 L0 仍在，仍标 writing_weak（利用率/未修好），但不空转同一 island。
+    # 同岛停后若章级 L0 仍在，仍标 writing_weak，但不空转同一 island。
     body["writing_weak"] = bool(
         span is not None
         or length_short

@@ -8,15 +8,22 @@ from app.writing.hinge import find_hinge_span
 from app.writing.lore import find_lore_span
 from app.writing.opening import find_opening_span
 from app.writing.patch_hygiene import close_span_in_body
-from app.writing.staccato import find_staccato_span, is_isolated_staccato_punch
+from app.writing.staccato import find_staccato_span, short_quote_inners
 from app.writing.signals.windows import REPAIR_MIN_VISIBLE, REPAIR_SPAN_MAX, TextWindow
 from app.writing.text_metrics import visible_chars
 
 REWRITE_PATCH = "propose_patch"
 REWRITE_DRAFT = "draft_ok"
+REWRITE_STOP = "stop"
 WEAK_NET = 0.50
 # Same island if visible cores share a contiguous 12+ char chunk.
 ISLAND_OVERLAP_MIN = 12
+# rewrite_window is only for a chip-sized island. A score-window-sized
+# span is already the "whole window"; escalating it just no-op-rewrites opening.
+REWRITE_WINDOW_MAX_VISIBLE = 160
+_NOOP_RATIO = 0.90
+_NOOP_MIN_VISIBLE = 80
+_NOOP_MAX_CHANGED = 18
 _META_LOCATE_EXTRA = ("知道这话", "知道这个", "知道自己")
 # L0 is the process gate (receipt / promote contrast). Soft keys still
 # open same-Turn propose_patch — that loop is the quality pass.
@@ -48,7 +55,7 @@ _HINTS: dict[str, str] = {
     "staccato_uniform": (
         "这一窗把同一拍拆成了多轮空问，读者在等一句有分量的话。"
         "让它在一两句里落定（决定、物件、或一记动作都行）；旁白替它说不算落定。"
-        "只改这一窗。"
+        "已经叫过的名字收在称呼里。只改这一窗。"
     ),
     "glue_heavy": "叙述里的「与此同时/就在这时」过密才拆；对白里因为/可是可以留",
     "hinge_dense": (
@@ -67,7 +74,7 @@ _HINTS_WEB_SERIAL: dict[str, str] = {
     "staccato_uniform": (
         "这一窗把同一拍拆成了多轮空问。"
         "收成一两句有信息差的话，或一记动作接上；旁白替它说不算接上。"
-        "只改这一窗。"
+        "已经叫过的名字收在称呼里。只改这一窗。"
     ),
     "hinge_dense": "看见/听到之后马上拧成说明书，悬念还没站住。让悬念跟事走即可。",
     "opening_institution": "第一句就是机构名。先给一个可站的场面；机构名等人物开口时自然带出。",
@@ -233,6 +240,73 @@ def unproductive_repeat(
     return _contiguous_overlap(_visible_core(old), _visible_core(prev_old)) >= ISLAND_OVERLAP_MIN
 
 
+def span_allows_rewrite_window(
+    prior: dict[str, Any] | None,
+    old_text: str = "",
+) -> bool:
+    """rewrite_window 只留给小岛。已是评分窗大小的 span 再换整窗 = 无差重写开篇。"""
+    vis = visible_chars(old_text or "")
+    if vis <= 0 and isinstance(prior, dict):
+        span = prior.get("repair_span")
+        if isinstance(span, dict):
+            try:
+                vis = int(span.get("visible_chars") or 0)
+            except (TypeError, ValueError):
+                vis = 0
+            if vis <= 0:
+                vis = visible_chars(str(span.get("old_text") or ""))
+    return 0 < vis <= REWRITE_WINDOW_MAX_VISIBLE
+
+
+def patch_is_noop(old_text: str, new_text: str) -> bool:
+    """同义改写 / 并段 / 换形容词：可见字几乎没动。"""
+    from difflib import SequenceMatcher
+
+    old = _visible_core(old_text)
+    new = _visible_core(new_text)
+    if not old or not new:
+        return False
+    if old == new:
+        return True
+    if len(old) < _NOOP_MIN_VISIBLE:
+        return False
+    matcher = SequenceMatcher(None, old, new)
+    if matcher.ratio() >= _NOOP_RATIO:
+        return True
+    changed = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == "equal":
+            continue
+        changed += max(i2 - i1, j2 - j1)
+        if changed > _NOOP_MAX_CHANGED:
+            return False
+    return changed <= _NOOP_MAX_CHANGED
+
+
+def staccato_shorts_untouched(old_text: str, new_text: str) -> bool:
+    """旧 span 里 ≥2 句短对白，新文本一句都没拿掉。"""
+    old_shorts = short_quote_inners(old_text)
+    if len(old_shorts) < 2:
+        return False
+    new_shorts = set(short_quote_inners(new_text))
+    return all(item in new_shorts for item in old_shorts)
+
+
+def island_untouched(
+    old_text: str,
+    new_text: str,
+    *,
+    penalty_key: str = "",
+) -> bool:
+    """补丁没碰到要修的岛：近乎无差，或碎拍短句原样还在。"""
+    if patch_is_noop(old_text, new_text):
+        return True
+    key = str(penalty_key or "").strip()
+    if key == "staccato_uniform" or not key:
+        return staccato_shorts_untouched(old_text, new_text)
+    return False
+
+
 def rewrite_policy_for(
     *,
     visible: int,
@@ -312,24 +386,14 @@ def build_repair_span(
     probe = window.text if window is not None else body
     key = l0[0] if l0 else (keys[0] if keys else "")
     span = ""
-    if "staccato_uniform" in l0:
+    staccato_open = "staccato_uniform" in l0
+    if staccato_open:
+        # Locate on the chapter, never promote the weakest score window.
         located = find_staccato_span(
-            probe, max_chars=REPAIR_SPAN_MAX, avoid_old=avoid_old
+            body, max_chars=REPAIR_SPAN_MAX, avoid_old=avoid_old
         )
-        if not located and window is not None:
-            located = find_staccato_span(
-                body, max_chars=REPAIR_SPAN_MAX, avoid_old=avoid_old
-            )
         key = "staccato_uniform"
-        if (
-            window is not None
-            and located
-            and not is_isolated_staccato_punch(located)
-            and located in (window.text or "")
-        ):
-            span = (window.text or "").strip()
-        else:
-            span = located
+        span = located
     elif "hinge_dense" in l0:
         span = find_hinge_span(probe)
         key = "hinge_dense"
@@ -350,12 +414,12 @@ def build_repair_span(
         if not span:
             span = _find_phrase_span(body, _glue_phrases())
         key = "glue_heavy"
-    if not span and window is not None and (
+    if not span and not staccato_open and window is not None and (
         keys or float(net_signal) < WEAK_NET
     ):
         span = (window.text or "").strip()
         key = key or "weak_window"
-    if not span and keys:
+    if not span and not staccato_open and keys:
         span = probe.strip()[:REPAIR_SPAN_MAX]
     if avoid_old and span and unproductive_repeat(
         {"repair_span": {"old_text": avoid_old, "key": key or "weak_window"}},
@@ -385,14 +449,17 @@ def attach_repair_neighbor(
     *,
     fragment: str,
     exemplar_fit: dict[str, Any] | None = None,
+    work_mode: str = "literary",
 ) -> None:
-    """补丁旁夹一条邻居（本 Work 拍或类原型近邻），让二次采样跟分布而不是跟配方。"""
+    """补丁旁夹一条邻居（本 Work 拍或当前 work_mode 的类原型近邻）。"""
     if not isinstance(span, dict) or span.get("neighbor"):
         return
     from app.writing.signals.beats import clip_visible, load_local_beats
     from app.writing.signals.prefs_loader import _module as _writing_prefs
+    from app.writing.work_mode import normalize_work_mode
 
     frag = _writing_prefs().normalize_fragment(fragment)
+    mode = normalize_work_mode(work_mode)
     beats = load_local_beats()
     chosen = next((b for b in beats if b.get("fragment") == frag), None)
     if chosen is None and frag != "mixed":
@@ -402,15 +469,12 @@ def attach_repair_neighbor(
         if text:
             span["neighbor"] = {"source": "local_beat", "text": text}
             return
-    nearest = (exemplar_fit or {}).get("nearest") if isinstance(exemplar_fit, dict) else None
-    slug = str((nearest or {}).get("id") or "").strip()
-    if not slug:
-        return
-    from app.writing.signals.bank import find_platform_exemplar
-
-    sample = find_platform_exemplar(slug=slug, fragment=frag)
-    if sample is None:
-        sample = find_platform_exemplar(slug=slug)
+    sample = _nearest_platform_neighbor(
+        str(span.get("old_text") or ""),
+        fragment=frag,
+        work_mode=mode,
+        exemplar_fit=exemplar_fit,
+    )
     if sample is None or not (sample.text or "").strip():
         return
     text = clip_visible(sample.text, max_vis=NEIGHBOR_MAX_VISIBLE)
@@ -421,3 +485,42 @@ def attach_repair_neighbor(
         "slug": sample.slug,
         "text": text,
     }
+
+
+def _nearest_platform_neighbor(
+    span_text: str,
+    *,
+    fragment: str,
+    work_mode: str,
+    exemplar_fit: dict[str, Any] | None,
+) -> Any:
+    """只在当前 work_mode 平台库里找邻：先对岛拟合，再退到同 fragment 的 nearest slug。"""
+    from app.writing.signals.bank import Exemplar, find_platform_exemplar, load_platform_exemplars
+    from app.writing.signals.signature import l1_alignment, signature_vec
+
+    bank = load_platform_exemplars(work_mode)
+    candidates = list(bank.get(fragment) or ())
+    if not candidates:
+        candidates = [s for rows in bank.values() for s in rows]
+    probe = (span_text or "").strip()
+    if probe and candidates:
+        sig = signature_vec(probe)
+        best: Exemplar | None = None
+        best_s = -1.0
+        for sample in candidates:
+            if not sample.signature:
+                continue
+            score = l1_alignment(sig, sample.signature)
+            if score > best_s:
+                best_s = score
+                best = sample
+        if best is not None:
+            return best
+    nearest = (exemplar_fit or {}).get("nearest") if isinstance(exemplar_fit, dict) else None
+    slug = str((nearest or {}).get("id") or "").strip()
+    if not slug:
+        return None
+    sample = find_platform_exemplar(slug=slug, fragment=fragment, work_mode=work_mode)
+    if sample is not None:
+        return sample
+    return find_platform_exemplar(slug=slug, work_mode=work_mode)

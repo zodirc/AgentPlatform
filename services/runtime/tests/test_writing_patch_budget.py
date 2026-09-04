@@ -68,6 +68,39 @@ def test_check_propose_patch_blocked_when_budget_exhausted() -> None:
     assert err["rewrite_policy"] == "rewrite_window"
 
 
+def test_check_propose_patch_wide_span_exhausted_stops() -> None:
+    from app.writing.signals.repair import REWRITE_STOP
+    from app.writing.signals.repair import REWRITE_WINDOW_MAX_VISIBLE
+
+    old = "渡口边停着一艘平底乌篷船，船头的城防司黑牌被雨水冲得发亮。" * 8
+    assert len("".join(old.split())) > REWRITE_WINDOW_MAX_VISIBLE
+    manifest: dict = {
+        "section_drafts": {
+            "ch1": {
+                "book_scope": "long",
+                "repair_span": {
+                    "key": "staccato_uniform",
+                    "old_text": old,
+                    "visible_chars": len("".join(old.split())),
+                },
+            }
+        },
+        "patch_budget": {
+            "ch1": {"by_key": {"staccato_uniform": MAX_PATCHES_PER_PENALTY_KEY}}
+        },
+    }
+    err = check_propose_patch_allowed(
+        manifest,
+        section_id="ch1",
+        old_text=old,
+        prior=manifest["section_drafts"]["ch1"],
+    )
+    assert err is not None
+    assert err["error"] == "patch_budget_exhausted"
+    assert err["rewrite_policy"] == REWRITE_STOP
+    assert "已落盘" in (err.get("summary") or "")
+
+
 def test_check_propose_patch_repeat_blocked() -> None:
     prior = {
         "repair_span": {
@@ -91,6 +124,89 @@ def test_check_propose_patch_repeat_blocked() -> None:
     )
     assert err is not None
     assert err["error"] == "patch_repeat_blocked"
+    assert err["rewrite_policy"] == "rewrite_window"
+
+
+def test_check_propose_patch_allows_next_island() -> None:
+    """第一次生效后，下一岛仍走 propose_patch，不烧 rewrite_window。"""
+    manifest = {
+        "patch_budget": {
+            "ch1": {
+                "by_key": {"staccato_uniform": 1},
+                "last": [
+                    {
+                        "key": "staccato_uniform",
+                        "old_text": "「来。」\n「坐。」\n「走。」",
+                    }
+                ],
+            }
+        }
+    }
+    next_island = "「喂？」\n「你是谁？」\n「先别关。」\n「你在哪？」"
+    prior = {
+        "repair_span": {"key": "staccato_uniform", "old_text": next_island},
+        "l0_hits": ["staccato_uniform"],
+        "net_signal": 0.41,
+        "book_scope": "long",
+    }
+    err = check_propose_patch_allowed(
+        manifest,
+        section_id="ch1",
+        old_text=next_island,
+        prior=prior,
+    )
+    assert err is None
+    same = check_propose_patch_allowed(
+        manifest,
+        section_id="ch1",
+        old_text="「来。」\n「坐。」\n「走。」",
+        prior=prior,
+    )
+    assert same is not None
+    assert same["error"] == "patch_repeat_blocked"
+
+
+def test_patch_island_untouched_cosmetic_opening() -> None:
+    from app.writing.signals.repair import island_untouched, patch_is_noop
+
+    old = (
+        "「别看了！」岸上有人喝他。\n\n"
+        "沈砚把视线从那具尸体的青紫勒痕上挪开，踩着最后一块跳板上岸。"
+        "药铺伙计说过，天黑之前这包药必须煎进他娘嘴里，晚一刻，肺里的水就会多一分；"
+        "药钱是周五两先垫的，送完这趟，他才能拿到够买三天米的跑腿钱。\n\n"
+        "渡口边停着一艘平底乌篷船，船头的城防司黑牌被雨水冲得发亮，朱红的「清河」二字像刚淌过血。"
+        "周五两蹲在船尾，用麻绳捆着一只青铜匣。他身边横着七具草席裹好的尸体，"
+        "最上面那具露出一只脚，脚踝上还系着一根红线。\n\n"
+        "红线的另一头牵进匣底，像有人把死人和这只匣子拴在了一起。\n\n"
+        "「沈砚！」周五两抬头叫他，「来得正好，把这东西送进城。」"
+    )
+    new = old.replace("青紫勒痕", "后颈的勒痕").replace("一块跳板", "一块湿滑的跳板")
+    assert patch_is_noop(old, new)
+    assert island_untouched(old, new, penalty_key="staccato_uniform")
+
+
+def test_patch_island_touched_clears_short_quotes() -> None:
+    from app.writing.signals.repair import island_untouched
+
+    old = "「来。」\n「坐。」\n「走。」"
+    new = "河工把渡税说清楚，又指了指外头的水线。"
+    assert not island_untouched(old, new, penalty_key="staccato_uniform")
+
+
+def test_check_rewrite_window_exhausted_stops() -> None:
+    from app.writing.patch_budget import check_rewrite_window_allowed
+    from app.writing.signals.repair import REWRITE_STOP
+
+    manifest = {
+        "section_drafts": {"ch1": {"book_scope": "long"}},
+        "patch_budget": {"ch1": {"rewrite_window": 2}},
+    }
+    err = check_rewrite_window_allowed(manifest, section_id="ch1")
+    assert err is not None
+    assert err["error"] == "rewrite_window_exhausted"
+    assert err["rewrite_policy"] == REWRITE_STOP
+    assert "未交付" not in (err.get("summary") or "")
+    assert "已落盘" in (err.get("summary") or "")
 
 
 def test_check_propose_patch_unnecessary_when_net_ok() -> None:
@@ -392,6 +508,89 @@ async def test_draft_section_rewrite_window_with_duplicate_lines(workspace) -> N
     text = path.read_text(encoding="utf-8")
     assert old_span not in text
     assert text.count(replacement) == 2
+
+
+@pytest.mark.asyncio
+async def test_draft_section_rewrite_window_rejects_wide_opening(workspace) -> None:
+    turn_id = uuid4()
+    path = workspace / "drafts" / "manuscript.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    old_span = "渡口边停着一艘平底乌篷船，船头的城防司黑牌被雨水冲得发亮。" * 8
+    path.write_text(f"# ch1\n\n{old_span}\n后面还有一场。\n", encoding="utf-8")
+    manifest_dir = workspace / ".agent" / "work" / "turns"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / f"{turn_id}.json").write_text(
+        json.dumps(
+            {
+                "section_drafts": {
+                    "ch1": {
+                        "book_scope": "long",
+                        "repair_span": {
+                            "key": "staccato_uniform",
+                            "old_text": old_span,
+                            "visible_chars": len("".join(old_span.split())),
+                        },
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result = await core.draft_section(
+        "ch1",
+        old_span.replace("发亮", "发黑"),
+        turn_id=turn_id,
+        mode="rewrite_window",
+    )
+    assert result.get("error") == "rewrite_window_not_for_chip"
+    assert result.get("rewrite_policy") == "stop"
+    assert old_span in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_propose_patch_rejects_cosmetic_opening(workspace) -> None:
+    turn_id = uuid4()
+    path = "drafts/manuscript.md"
+    target = workspace / "drafts" / "manuscript.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    old = (
+        "「别看了！」岸上有人喝他。\n\n"
+        "沈砚把视线从那具尸体的青紫勒痕上挪开，踩着最后一块跳板上岸。"
+        "药铺伙计说过，天黑之前这包药必须煎进他娘嘴里，晚一刻，肺里的水就会多一分；"
+        "药钱是周五两先垫的，送完这趟，他才能拿到够买三天米的跑腿钱。\n\n"
+        "「沈砚！」周五两抬头叫他，「来得正好，把这东西送进城。」\n"
+    )
+    new = old.replace("青紫勒痕", "后颈的勒痕").replace("一块跳板", "一块湿滑的跳板")
+    target.write_text(f"# ch1\n\n{old}后文\n", encoding="utf-8")
+    manifest_dir = workspace / ".agent" / "work" / "turns"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / f"{turn_id}.json").write_text(
+        json.dumps(
+            {
+                "section_drafts": {
+                    "ch1": {
+                        "book_scope": "long",
+                        "repair_span": {"key": "staccato_uniform", "old_text": old},
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    result = await core.propose_patch(
+        path=path,
+        old_text=old,
+        new_text=new,
+        turn_id=turn_id,
+    )
+    assert result.get("error") == "patch_island_untouched"
+    assert result.get("rewrite_policy") == "stop"
+    data = json.loads((manifest_dir / f"{turn_id}.json").read_text(encoding="utf-8"))
+    assert not (data.get("patch_budget") or {}).get("ch1", {}).get("by_key")
+    assert int((data.get("patch_budget") or {}).get("ch1", {}).get("apply_miss_streak") or 0) == 1
+    assert old in target.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

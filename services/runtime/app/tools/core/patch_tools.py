@@ -189,6 +189,9 @@ async def propose_patch(
     new = new_text
     turn_id = _kwargs.get("turn_id")
     session_id = _kwargs.get("session_id")
+    manifest: dict[str, Any] = {}
+    section_id = ""
+    prior: dict[str, Any] | None = None
     if is_prose_writing_path(path) and turn_id is not None:
         from app.tools.core.writing_tools import _read_manifest, _write_manifest
         from app.writing.patch_budget import (
@@ -242,6 +245,32 @@ async def propose_patch(
                 )
                 if worsen:
                     return worsen
+                from app.writing.patch_budget import (
+                    island_untouched_error,
+                    note_prose_patch_apply_miss,
+                    resolve_penalty_key,
+                    _long_form,
+                )
+                from app.writing.signals.repair import island_untouched
+
+                penalty_key = resolve_penalty_key(prior if isinstance(prior, dict) else None)
+                if island_untouched(old, new, penalty_key=penalty_key):
+                    if turn_id is not None:
+                        note_prose_patch_apply_miss(
+                            turn_id,
+                            session_id,
+                            path=path,
+                            old_text=old,
+                            section_id=section_id,
+                        )
+                    err = island_untouched_error(
+                        old_text=old,
+                        new_text=new,
+                        penalty_key=penalty_key,
+                        long_form=_long_form(manifest, prior),
+                    )
+                    err.setdefault("path", path)
+                    return err
     precheck = _span_apply_precheck(path, old, new)
     if not precheck.get("applies"):
         return {
@@ -353,6 +382,31 @@ async def apply_patch(
                     section_id=section_id or "",
                 )
             return worsen
+        from app.writing.patch_budget import island_untouched_error, resolve_penalty_key, _long_form
+        from app.tools.core.writing_tools import _read_manifest
+        from app.writing.signals.repair import island_untouched
+
+        penalty_key = resolve_penalty_key(prior, old_text=old)
+        if island_untouched(old, new, penalty_key=penalty_key):
+            if turn_id is not None:
+                note_prose_patch_apply_miss(
+                    turn_id,
+                    session_id,
+                    path=path,
+                    old_text=old,
+                    section_id=section_id or "",
+                )
+            err = island_untouched_error(
+                old_text=old,
+                new_text=new,
+                penalty_key=penalty_key,
+                long_form=_long_form(
+                    _read_manifest(turn_id, session_id=session_id) if turn_id else {},
+                    prior,
+                ),
+            )
+            err.setdefault("path", path)
+            return err
 
     if old:
         count = existing.count(old)

@@ -176,11 +176,16 @@ def iter_platform_exemplars() -> tuple[Exemplar, ...]:
     return tuple(rows)
 
 
-def find_platform_exemplar(*, slug: str, fragment: str | None = None) -> Exemplar | None:
+def find_platform_exemplar(
+    *,
+    slug: str,
+    fragment: str | None = None,
+    work_mode: str = "literary",
+) -> Exemplar | None:
     """按 slug 查找。
     
     参数:
-        slug/fragment。
+        slug/fragment/work_mode。
     
     返回:
         Exemplar|None。"""
@@ -188,12 +193,19 @@ def find_platform_exemplar(*, slug: str, fragment: str | None = None) -> Exempla
     if not want:
         return None
     frag = (fragment or "").strip() or None
-    for sample in iter_platform_exemplars():
-        if sample.slug != want:
-            continue
-        if frag and sample.fragment != frag:
-            continue
-        return sample
+    bank = load_platform_exemplars(work_mode)
+    rows: tuple[Exemplar, ...]
+    if frag:
+        rows = bank.get(frag, ())
+    else:
+        rows = tuple(sample for samples in bank.values() for sample in samples)
+    for sample in rows:
+        if sample.slug == want:
+            return sample
+    if frag:
+        for sample in (s for samples in bank.values() for s in samples):
+            if sample.slug == want:
+                return sample
     return None
 
 

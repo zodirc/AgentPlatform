@@ -346,6 +346,39 @@ def _reject_rewrite_window(
             "summary": "repair_span 已清或不可定位；L0 清后改 mode=append 加厚。",
         }
     old = str(span["old_text"])
+    from app.writing.patch_budget import island_untouched_error
+    from app.writing.signals.repair import (
+        REWRITE_STOP,
+        island_untouched,
+        span_allows_rewrite_window,
+    )
+
+    if not span_allows_rewrite_window(prior, old):
+        return {
+            "section_id": section_id,
+            "path": path,
+            "status": "error",
+            "error": "rewrite_window_not_for_chip",
+            "rewrite_policy": REWRITE_STOP,
+            "summary": (
+                "repair_span 不是小岛，禁止 mode=rewrite_window。"
+                "不要重写开篇整窗。本章可交，这一窗留到下轮。"
+            ),
+            "repair_span": span,
+        }
+    penalty_key = str(span.get("key") or "staccato_uniform")
+    if island_untouched(old, content, penalty_key=penalty_key):
+        from app.writing.patch_budget import _long_form
+
+        err = island_untouched_error(
+            old_text=old,
+            new_text=content,
+            penalty_key=penalty_key,
+            long_form=_long_form(manifest, prior),
+        )
+        err.setdefault("section_id", section_id)
+        err.setdefault("path", path)
+        return err
     if not span_replaceable_in_manuscript(existing, section_id=section_id, old_text=old):
         return {
             "section_id": section_id,
@@ -440,16 +473,30 @@ def _reject_append_gate(
             section_id=section_id,
             penalty_key=penalty_key,
         )
+        from app.writing.patch_budget import _escalation_policy, _long_form, _stop_summary
+        from app.writing.signals.repair import REWRITE_STOP
+
+        long_form = _long_form(manifest, prior if isinstance(prior, dict) else None)
+        old_for_span = ""
+        if isinstance(span, dict):
+            old_for_span = str(span.get("old_text") or "")
+        escalate = _escalation_policy(
+            prior if isinstance(prior, dict) else None,
+            old_text=old_for_span,
+            penalty_key=penalty_key,
+            long_form=long_form,
+        )
         rewrite_policy = REWRITE_PATCH
         window_hint = ""
-        if exhausted and penalty_key == "staccato_uniform":
-            rewrite_policy = "rewrite_window"
-            window_hint = (
-                " patch 预算已尽：改 draft_section mode=rewrite_window 一次换整窗。"
-            )
-        elif exhausted:
-            rewrite_policy = "append_or_stop"
-            window_hint = " patch 预算已尽：停止 patch，L0 清后 mode=append 或如实说明未交付。"
+        if exhausted:
+            if escalate == "rewrite_window":
+                rewrite_policy = "rewrite_window"
+                window_hint = (
+                    " patch 预算已尽：改 draft_section mode=rewrite_window 一次换小岛。"
+                )
+            else:
+                rewrite_policy = escalate or REWRITE_STOP
+                window_hint = " " + _stop_summary(long_form=long_form)
         patch_hint = (
             "改 draft_section mode=rewrite_window 清岛，"
             if rewrite_policy == "rewrite_window"
@@ -602,6 +649,11 @@ async def draft_section(
                 existing=existing,
             )
             if blocked_rw:
+                if blocked_rw.get("error") == "patch_island_untouched" and turn_id is not None:
+                    from app.writing.patch_budget import record_rewrite_window_attempt
+
+                    record_rewrite_window_attempt(manifest, section_id=section_id)
+                    _write_manifest(turn_id, manifest, session_id=session_id)
                 return blocked_rw
             span = (manifest.get("section_drafts") or {}).get(section_id) or {}
             old = str((span.get("repair_span") or {}).get("old_text") or "")
@@ -684,6 +736,11 @@ async def draft_section(
                 existing=section_text,
             )
             if blocked_rw:
+                if blocked_rw.get("error") == "patch_island_untouched" and turn_id is not None:
+                    from app.writing.patch_budget import record_rewrite_window_attempt
+
+                    record_rewrite_window_attempt(manifest, section_id=section_id)
+                    _write_manifest(turn_id, manifest, session_id=session_id)
                 return blocked_rw
             span = (manifest.get("section_drafts") or {}).get(section_id) or {}
             old = str((span.get("repair_span") or {}).get("old_text") or "")

@@ -32,13 +32,16 @@ compact 只记稿面与 focus，不把门禁说明书当成下一章的作品状
           <h3>L1 与同轮修补</h3>
           <pre class="seq">net_signal = composite + penalties/rewards
 WEAK_NET = 0.50：低于此或任一过程 L0 → 本 Turn propose_patch(repair_span)
-  repair_span 跟最弱窗走，可带 neighbor
-  同岛：old_text 与上轮相同或可见 overlap ≥12 → 停（ISLAND_OVERLAP_MIN）
-  预算（计 applied，不计提案）：每 key 5 / 章合计 8 / rewrite_window 每章 2 / apply miss 连 2 次停
+  repair_span 跟检测岛走（碎拍取最密岛 / 已知身份重问，不升成最弱评分窗），可带 neighbor
+  同岛：仅对上一次已生效的 old_text（相同或可见 overlap ≥12）停；下一岛仍 propose_patch
+  无差 / 短对白仍在 → patch_island_untouched（不计 applied）
+  预算（计 applied，不计提案）：每 key 5 / 章合计 8 / rewrite_window 仅小岛每章 2 / apply miss 连 2 次停
+  neighbor 跟 work_mode×fragment 平台库（碎拍用对白库），不跨库抽《故乡》
+  宽窗或 rewrite 尽 → rewrite_policy=stop（长篇：章已落盘，窗留到下轮）
   net_signal ≥ 0 且无过程 L0 → patch_unnecessary（「已经过线还在补」会把稿磨穿）
-  hygiene：拒绝对白改旁白；碎拍尽才换窗，不整章再 draft_section
-<span class="pt">◆ 要点  同岛不停，模型会在同一 12 字里打转直到撞 max_steps。预算是为了逼它换窗或交卷。</span></pre>
-          <p class="figure-lead">下图中主链：切窗 → L0 / L1 → 同轮修补判定（同岛停 · 预算尽换窗）。左右是入口与禁止项，不是第二套主链。</p>
+  hygiene：拒绝对白改旁白；小岛尽才 rewrite_window，禁止拿开篇整窗升级
+    <span class="pt">◆ 要点  同岛不停，模型会在同一 12 字里打转直到撞 max_steps。预算尽了必须停修，不要把开篇再 rewrite 一遍。</span></pre>
+          <p class="figure-lead">下图中主链：切窗 → L0 / L1 → 同轮修补判定（对岛 · 无差不计 · 尽则停）。左右是入口与禁止项，不是第二套主链。</p>
           <div class="src"><code>writing/signals/scorer.py</code> · <code>writing/signals/repair.py</code> · <code>writing/patch_budget.py</code> · <code>agent_contracts/writing_prefs.py</code></div>
         </div>
                                         <figure class="figure">

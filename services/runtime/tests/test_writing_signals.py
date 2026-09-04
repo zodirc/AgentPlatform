@@ -488,7 +488,8 @@ def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
     assert "跑完了" in span["old_text"]
     assert span["old_text"] in text
     assert span["key"] == "staccato_uniform"
-    assert span["visible_chars"] >= 80
+    assert span["visible_chars"] <= 160
+    assert "鲁镇的酒店" not in span["old_text"]
     neighbor = span.get("neighbor") or {}
     assert neighbor.get("text")
     assert neighbor.get("source") in {"local_beat", "exemplar"}
@@ -872,4 +873,28 @@ def test_repair_neighbor_prefers_matching_fragment(tmp_path, monkeypatch) -> Non
     assert span["neighbor"]["source"] == "local_beat"
     assert "呆呆的看她" in span["neighbor"]["text"]
     assert "香菜" not in span["neighbor"]["text"]
+
+
+def test_repair_neighbor_web_serial_staccato_uses_dialogue_bank() -> None:
+    """碎拍邻跟网文对白库，不拿情节切片里的《故乡》。"""
+    from app.writing.signals.repair import attach_repair_neighbor
+
+    span = {
+        "old_text": "「你带了什么？」\n「硬币。」\n「拿出来！」",
+        "key": "staccato_uniform",
+    }
+    attach_repair_neighbor(
+        span,
+        fragment="dialogue_dyad",
+        work_mode="web_serial",
+        exemplar_fit={
+            "nearest": {"id": "故乡:宏儿水生", "work": "故乡"},
+        },
+    )
+    neighbor = span["neighbor"]
+    assert neighbor["source"] == "exemplar"
+    assert "故乡" not in str(neighbor.get("slug") or "")
+    assert neighbor.get("slug")
+    assert "干青豆" not in (neighbor.get("text") or "")
+    assert "宏儿" not in (neighbor.get("text") or "")
 

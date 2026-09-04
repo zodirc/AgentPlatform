@@ -335,6 +335,100 @@ def _budget_error(
     return payload
 
 
+def _long_form(manifest: dict[str, Any] | None, prior: dict[str, Any] | None) -> bool:
+    from app.writing.book_scope import normalize_book_scope
+    from app.writing.delivery_gate import manifest_book_scope
+
+    if isinstance(prior, dict) and prior.get("book_scope"):
+        return normalize_book_scope(str(prior.get("book_scope"))) == "long"
+    return manifest_book_scope(manifest) == "long"
+
+
+def _stop_summary(*, long_form: bool) -> str:
+    if long_form:
+        return (
+            "本章已落盘。这一窗留到下轮，不要再 propose_patch、"
+            "draft_section mode=rewrite_window 或 evaluate_writing_fragment。"
+        )
+    return (
+        "本 Turn 修理已停。不要再 propose_patch / rewrite_window / "
+        "evaluate_writing_fragment。如实说明进度。"
+    )
+
+
+def _escalation_policy(
+    prior: dict[str, Any] | None,
+    *,
+    old_text: str,
+    penalty_key: str,
+    long_form: bool,
+) -> str:
+    from app.writing.signals.repair import REWRITE_STOP, span_allows_rewrite_window
+
+    if penalty_key == "staccato_uniform" and span_allows_rewrite_window(
+        prior, old_text
+    ):
+        return "rewrite_window"
+    if long_form:
+        return REWRITE_STOP
+    return REWRITE_STOP if penalty_key == "staccato_uniform" else "append_or_stop"
+
+
+def island_untouched_error(
+    *,
+    old_text: str,
+    new_text: str,
+    penalty_key: str,
+    long_form: bool,
+) -> dict[str, Any]:
+    from app.writing.signals.repair import REWRITE_STOP
+
+    return _budget_error(
+        error="patch_island_untouched",
+        penalty_key=penalty_key,
+        rewrite_policy=REWRITE_STOP,
+        summary=(
+            "这次修改几乎没碰到要修的岛（同义改写或短对白仍在）。不计修补次数。"
+            + (
+                "本章已落盘，这一窗留到下轮。"
+                if long_form
+                else "改岛里的对白，或停止修补。"
+            )
+            + "不要用 draft_section mode=rewrite_window 重写开篇。"
+        ),
+        applies=False,
+        old_text=old_text,
+        new_text=new_text,
+    )
+
+
+def check_repair_tools_blocked(
+    manifest: dict[str, Any] | None,
+    *,
+    section_id: str,
+    prior: dict[str, Any] | None,
+    old_text: str = "",
+) -> dict[str, Any] | None:
+    """预算尽 / rewrite 尽 / 宽窗 miss 满：修理工具一律停。"""
+    from app.writing.signals.repair import REWRITE_STOP
+
+    sid = normalize_section_id(section_id)
+    if not sid:
+        return None
+    penalty_key = normalize_penalty_key(resolve_penalty_key(prior, old_text=old_text))
+    long_form = _long_form(manifest, prior)
+    if rewrite_window_exhausted(manifest, section_id=sid):
+        attempts = count_rewrite_window_attempts(manifest, section_id=sid)
+        return _budget_error(
+            error="repair_stopped",
+            penalty_key=penalty_key,
+            rewrite_policy=REWRITE_STOP,
+            summary=_stop_summary(long_form=long_form),
+            rewrite_window_attempts=attempts,
+        )
+    return None
+
+
 def check_propose_patch_allowed(
     manifest: dict[str, Any] | None,
     *,
@@ -343,27 +437,33 @@ def check_propose_patch_allowed(
     prior: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """Return error payload when patch must stop; None when allowed."""
-    from app.writing.signals.repair import REWRITE_PATCH, unproductive_repeat
-
     sid = normalize_section_id(section_id)
     penalty_key = normalize_penalty_key(resolve_penalty_key(prior, old_text=old_text))
+    long_form = _long_form(manifest, prior)
+    escalate = _escalation_policy(
+        prior, old_text=old_text, penalty_key=penalty_key, long_form=long_form
+    )
+
+    stopped = check_repair_tools_blocked(
+        manifest, section_id=sid, prior=prior, old_text=old_text
+    )
+    if stopped:
+        return stopped
 
     if sid and apply_miss_streak(manifest, section_id=sid) >= MAX_APPLY_MISS_STREAK:
+        if escalate == "rewrite_window":
+            policy = "rewrite_window"
+            hint = "改 draft_section mode=rewrite_window 一次换小岛。"
+        else:
+            policy = escalate
+            hint = _stop_summary(long_form=long_form)
         return _budget_error(
             error="patch_apply_miss_streak",
             penalty_key=penalty_key,
-            rewrite_policy=(
-                "rewrite_window"
-                if penalty_key == "staccato_uniform"
-                else "append_or_stop"
-            ),
+            rewrite_policy=policy,
             summary=(
                 f"连续 {MAX_APPLY_MISS_STREAK} 次 patch 未能落盘/清岛：停止 propose_patch。"
-                + (
-                    "改 draft_section mode=rewrite_window 一次换整窗。"
-                    if penalty_key == "staccato_uniform"
-                    else "改 mode=append 写新场面，或如实说明本章未交付。"
-                )
+                + hint
             ),
             patch_apply_miss_streak=apply_miss_streak(manifest, section_id=sid),
         )
@@ -394,15 +494,15 @@ def check_propose_patch_allowed(
             manifest, section_id=sid, penalty_key=penalty_key
         )
         total = count_section_patch_total(manifest, section_id=sid)
-        if penalty_key == "staccato_uniform":
+        if escalate == "rewrite_window":
             policy = "rewrite_window"
             hint = (
-                "draft_section mode=rewrite_window：一次替换 repair_span 整窗，"
+                "draft_section mode=rewrite_window：一次替换 repair_span 小岛，"
                 "勿再 chip patch。"
             )
         else:
-            policy = "append_or_stop"
-            hint = "停止 patch。L0 清后 mode=append 加厚；或如实告知未交付。"
+            policy = escalate
+            hint = _stop_summary(long_form=long_form)
         reason = (
             f"本 Turn 对 {penalty_key} 已生效 patch {attempts} 次"
             if attempts >= MAX_PATCHES_PER_PENALTY_KEY
@@ -420,40 +520,26 @@ def check_propose_patch_allowed(
             patch_total=total,
         )
 
-    span = prior.get("repair_span") if isinstance(prior, dict) else None
-    if sid and (
-        _repeat_against_last_applied(
-            manifest,
-            section_id=sid,
-            penalty_key=penalty_key,
-            old_text=old_text,
-        )
-        or (
-            isinstance(span, dict)
-            and count_patch_attempts(manifest, section_id=sid, penalty_key=penalty_key) > 0
-            and unproductive_repeat(
-                prior,
-                {"old_text": old_text, "key": penalty_key},
-            )
-        )
+    if sid and _repeat_against_last_applied(
+        manifest,
+        section_id=sid,
+        penalty_key=penalty_key,
+        old_text=old_text,
     ):
-        policy = (
-            "rewrite_window"
-            if penalty_key == "staccato_uniform"
-            else REWRITE_PATCH
-        )
+        if escalate == "rewrite_window":
+            policy = "rewrite_window"
+            extra = "改 draft_section mode=rewrite_window，一次写满小岛。"
+        else:
+            policy = escalate
+            extra = _stop_summary(long_form=long_form)
         return _budget_error(
             error="patch_repeat_blocked",
             penalty_key=penalty_key,
             rewrite_policy=policy,
             summary=(
-                "同一 repair 岛仍在：old_text 与上轮相同或 overlap ≥12 可见字。"
+                "同一 repair 岛仍在：old_text 与上一次已生效的岛相同或 overlap ≥12 可见字。"
                 "禁止再 propose_patch。"
-                + (
-                    "改 draft_section mode=rewrite_window，一次写满 repair_span 窗口。"
-                    if penalty_key == "staccato_uniform"
-                    else "改 draft_section mode=append 写新场面，或收工留到下轮。"
-                )
+                + extra
             ),
         )
 
@@ -469,14 +555,18 @@ def check_rewrite_window_allowed(
     if not sid or not rewrite_window_exhausted(manifest, section_id=sid):
         return None
     attempts = count_rewrite_window_attempts(manifest, section_id=sid)
+    from app.writing.signals.repair import REWRITE_STOP
+
+    long_form = False
+    drafts = (manifest or {}).get("section_drafts")
+    if isinstance(drafts, dict):
+        row = drafts.get(sid)
+        long_form = _long_form(manifest, row if isinstance(row, dict) else None)
     return _budget_error(
         error="rewrite_window_exhausted",
         penalty_key="staccato_uniform",
-        rewrite_policy="append_or_stop",
-        summary=(
-            f"本 Turn mode=rewrite_window 已用 {attempts} 次（上限 "
-            f"{MAX_REWRITE_WINDOW_PER_SECTION}）。如实说明本章未交付，留到下轮。"
-        ),
+        rewrite_policy=REWRITE_STOP,
+        summary=_stop_summary(long_form=long_form),
         rewrite_window_attempts=attempts,
     )
 

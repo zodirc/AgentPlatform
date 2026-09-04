@@ -167,8 +167,11 @@ def build_registry() -> ToolRegistry:
                 "draft_section mode=append with only the new slice (~2000 chars) to thicken. "
                 "If repair_span.neighbor is set, follow that beat's one loaded line or "
                 "action — do not copy its plot, and do not strip quotes into narration. "
-                f"After {MAX_PATCHES_PER_PENALTY_KEY} propose_patch attempts per penalty_key, use mode=rewrite_window "
-                "to replace repair_span.old_text in one shot (staccato). "
+                f"After {MAX_PATCHES_PER_PENALTY_KEY} applied propose_patch per penalty_key, "
+                "only a chip-sized repair_span (≤160 visible chars) may use "
+                "mode=rewrite_window once. A window-sized span, an untouched-island "
+                "patch, or rewrite_window already exhausted means stop repairing this Turn "
+                "(long-form chapter can be delivered). "
                 "Append is rejected while chapter process L0 is still open "
                 "(staccato_uniform / hinge_dense / opening_institution / lore_dump), "
                 "and rejected if the new slice itself hits staccato_uniform."
@@ -210,8 +213,8 @@ def build_registry() -> ToolRegistry:
                         "description": (
                             "append: add content after the existing chapter body "
                             "(thicken). upsert: replace the chapter. rewrite_window: "
-                            "replace writing_signals.repair_span.old_text in one shot "
-                            "(after patch budget exhausted or for staccato window). "
+                            "replace a chip-sized repair_span.old_text in one shot "
+                            "(staccato island only; not an opening score window). "
                             "After ≥800 visible chars this Turn, append is required to thicken — but only "
                             "after chapter process L0 is clear; the new slice must not "
                             "reintroduce staccato_uniform."
@@ -264,7 +267,8 @@ def build_registry() -> ToolRegistry:
                 "Heuristic reward/penalty score for a prose fragment "
                 "(platform weights for current work_mode via writing tools). "
                 "Pass text or section_id. Persists cross-session history. "
-                "Prefer draft_section which embeds the same writing_signals block."
+                "Prefer draft_section which embeds the same writing_signals block. "
+                "Do not call after rewrite_window_exhausted / repair_stopped."
             ),
             parameters={
                 "type": "object",
