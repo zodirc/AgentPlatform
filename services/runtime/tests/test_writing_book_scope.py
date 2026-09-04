@@ -59,8 +59,8 @@ def test_spec_block_short_vs_long() -> None:
     long = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "book_scope: `long`" in long
     assert "outline_phase: `open`" in long
-    assert "开篇" in long
-    assert "眼前的日子" in long or "海" in long
+    assert "开篇" in long or "开写" in long
+    assert "候选" in long or "眼前的日子" in long or "海" in long
 
 
 def test_spec_climax_line() -> None:

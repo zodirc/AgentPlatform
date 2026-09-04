@@ -87,12 +87,16 @@ def build_writing_spec_block(
     """Writing spec：罗盘（尺度/风格/这场在干什么），不是交卷清单。"""
     doc, _rel = load_manuscript_doc(workspace_root)
     outline = _outline_md(workspace_root)
+    starting_new = wants_new_piece(message)
+    if starting_new:
+        # 另起一篇时旧纲人名/章职不得进本轮 spec。
+        outline = ""
     work_mode, mode_source = resolve_work_mode(
         message, outline=outline, workspace_root=workspace_root
     )
-    fresh = wants_new_piece(message) and manuscript_is_occupied(doc)
+    fresh = starting_new and manuscript_is_occupied(doc)
     ids = list_section_ids(doc) if doc and not fresh else []
-    focus = "ch1" if fresh or not ids else (infer_focus_section_id(message, ids) or "")
+    focus = "ch1" if fresh or starting_new or not ids else (infer_focus_section_id(message, ids) or "")
     duty = extract_outline_job(outline, focus) if outline and focus else ""
     if not duty and outline and not focus:
         duty = extract_outline_job(outline, "ch1")
@@ -129,7 +133,12 @@ def build_writing_spec_block(
         one = re.sub(r"\s+", " ", duty).strip()
         duty_line = one if len(one) <= 72 else one[:71] + "…"
     scope_line = scope_spec_line(
-        scope, position=position, section_num=section_num, work_mode=work_mode
+        scope,
+        position=position,
+        section_num=section_num,
+        work_mode=work_mode,
+        message=message,
+        outline=outline,
     )
     from app.writing.outline_phase import outline_phase_spec_line, resolve_outline_phase
 
@@ -153,7 +162,7 @@ def build_writing_spec_block(
         lines.append(f"- focus: `{focus}`")
     if duty_line:
         lines.append(f"- 这一场: {duty_line}")
-    if not outline_style_committed(outline):
+    if not outline_style_committed(outline) or starting_new:
         lines.append("- 新篇另起人与事")
     lines.append(
         "- 若 tool_result 点名弱窗：同轮 propose_patch 只改那一窗，收成一两句或动手"

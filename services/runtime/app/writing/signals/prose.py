@@ -20,10 +20,13 @@ _MOTION = re.compile(
     r"走|站|坐|跑|冲|咬|劈|拉|飞|缩|摸|递|喊|叫|望|进|来|去|喝|买|温|捧|塞|抢|射"
 )
 _HOOK_CUE = re.compile(
-    r"异|变|劫|觉醒|突破|灵根|秘境|妖|鬼|怪|系统|传承|血脉|天赋|"
+    r"变|劫|觉醒|突破|灵根|秘境|妖|系统|传承|血脉|天赋|"
     r"金丹|元婴|练气|功法|天机|预言|诅咒|"
     r"灵气|真气|修士|外门|内门|入门|异能|灵石|师兄|师姐|炼体|"
-    r"乱世|灵视"
+    r"乱世"
+)
+_CULTIVATION_LANDING = re.compile(
+    r"功法|系统|灵气|灵根|丹田|面板|觉醒|传承|入体|金丹|元婴|练气"
 )
 _CONFLICT_CUE = re.compile(
     r"杀|战|危|敌|疑|秘|死|失踪|不对|奇怪|突然|竟然|发现|追|逃|挡|抢|威胁"
@@ -168,8 +171,8 @@ def anti_pattern_flags(
 def serial_hook_flat(text: str, section_id: str = "") -> bool:
     """网文开篇空磨：平凡日子里既没得到、也没发现。
 
-    功法、系统、灵视、灵气当场落到身上或被看见，都不算空磨。
-    得到或发现要早；拖到章末才掏一件物，仍像没展开。
+    功法、系统、灵气当场落到身上，不算空磨。
+    开篇不能只靠「发现 / 突然 / 鬼怪」过关；得到或发现要早。
     """
     from app.writing.lore import is_opening_section
 
@@ -178,7 +181,7 @@ def serial_hook_flat(text: str, section_id: str = "") -> bool:
     if visible_chars(text) < 400:
         return False
     window = (text or "")[:1600]
-    if _HOOK_CUE.search(window) or _CONFLICT_CUE.search(window):
+    if _CULTIVATION_LANDING.search(window) or _HOOK_CUE.search(window):
         return False
     if narrative_scene_ratio(text) >= 0.42:
         return False

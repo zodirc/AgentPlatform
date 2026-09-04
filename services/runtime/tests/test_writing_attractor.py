@@ -111,7 +111,9 @@ def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypa
         workspace_root=tmp_path,
     )
     assert "work_mode: `web_serial`" in spec
-    assert "前三分之一" in spec
+    assert "候选" in spec
+    assert "互不换皮" in spec
+    assert "发觉" in spec
     assert "沈砚" not in spec
     assert "灵灯" not in spec
 

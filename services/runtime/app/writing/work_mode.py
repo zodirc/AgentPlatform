@@ -31,6 +31,9 @@ _LITERARY_STRONG = re.compile(
 )
 _LITERARY_WEAK = re.compile(r"短篇")
 
+_OCCULT_ASK_RE = re.compile(r"灵异|悬疑|鬼|阴阳眼|克系|惊悚|志怪|见鬼|怪谈")
+_URBAN_RE = re.compile(r"都市|现代|城市")
+_CULTIVATION_RE = re.compile(r"修真|修仙|玄幻|仙侠|修炼")
 _CHAPTER_CHARACTER = re.compile(r"人物|性格|塑造|对白|对话|心理")
 _CHAPTER_PLOT = re.compile(r"情节|推进|冲突|悬念|钩子|主线|转折|危机")
 _CHAPTER_ENV = re.compile(r"环境|世界观|规矩|质地|地方|设定|背景")
@@ -236,7 +239,36 @@ def infer_chapter_element(duty: str) -> str | None:
     return hits[0][1]
 
 
-def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str:
+def wants_occult_opening(*parts: str) -> bool:
+    """用户是否点了灵异/悬疑开篇。"""
+    blob = "\n".join(p for p in parts if p)
+    return bool(_OCCULT_ASK_RE.search(blob))
+
+
+def is_urban_cultivation(*parts: str) -> bool:
+    """都市 + 修真/玄幻。"""
+    blob = "\n".join(p for p in parts if p)
+    return bool(_URBAN_RE.search(blob) and _CULTIVATION_RE.search(blob))
+
+
+def serial_opening_compass(*, message: str = "", outline: str = "") -> str:
+    """开篇落到哪一种得到/发现。陈述，不是禁令。"""
+    if is_urban_cultivation(message, outline) and not wants_occult_opening(
+        message, outline
+    ):
+        return "前三分之一交到主角发觉自己能做什么，或当场得到一条能用的路；场上是有人的日子"
+    if wants_occult_opening(message, outline):
+        return "前三分之一交到得到或发现；可以走灵视、异象"
+    return "前三分之一交到得到或发现；都市修真可以落到自己发觉能力"
+
+
+def default_opening_duty(
+    work_mode: str,
+    chapter_kind: str | None = None,
+    *,
+    message: str = "",
+    outline: str = "",
+) -> str:
     """无 outline 时的开篇默认职务。"""
     mode = normalize_work_mode(work_mode)
     kind = (chapter_kind or "live_character").strip().lower()
@@ -246,10 +278,8 @@ def default_opening_duty(work_mode: str, chapter_kind: str | None = None) -> str
             "仍要让人认得他；卷纲浓缩和卷末高潮留给后文"
         )
     if mode == "web_serial":
-        return (
-            "开篇倾向：前三分之一交到得到了什么或发现了什么；"
-            "都市修真落到功法、系统、灵视或灵气。开篇只兑这一场"
-        )
+        compass = serial_opening_compass(message=message, outline=outline)
+        return f"开篇倾向：{compass}。开篇只兑这一场"
     return "开篇倾向：社会背景与自然场景可先站；机构专名让场景站稳后再出现"
 
 
@@ -265,7 +295,7 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
             "dialogue_dyad": "对白露出人物选择与关系；允许直白；已知的名字直接用；空问收成一两句或动手。",
             "mixed": (
                 "人物+情节+环境谁响一点随这场戏；"
-                "开篇前三分之一落到得到或发现；都市修真落到功法、系统、灵视或灵气；"
+                "开篇前三分之一落到得到或发现；都市修真可以落到自己发觉能力；场上是有人的日子；"
                 "物件从当前空间长出来；空问收成一两句或动手。"
             ),
         }

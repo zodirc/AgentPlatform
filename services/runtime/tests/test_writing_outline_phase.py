@@ -76,14 +76,23 @@ def test_open_phase_note_fantasy_asks_early_gain() -> None:
         book_scope="long",
     )
     assert fantasy["outline_phase"] == "open"
-    assert "前三分之一" in str(fantasy["outline_phase_note"])
+    assert "候选" in str(fantasy["outline_phase_note"])
+    assert "互不换皮" in str(fantasy["outline_phase_note"])
+    browse = resolve_outline_phase(
+        "写一章长篇修真小说的第一章, 现代都市题材，我看看",
+        outline="",
+        book_scope="long",
+    )
+    assert "候选" in str(browse["outline_phase_note"])
     literary = resolve_outline_phase(
         "写一章长篇",
         outline="",
         book_scope="long",
     )
     assert literary["outline_phase"] == "open"
-    assert "日子" in str(literary["outline_phase_note"])
+    assert "候选" in str(literary["outline_phase_note"]) or "日子" in str(
+        literary["outline_phase_note"]
+    )
 
 
 def test_should_not_inject_diverge_styles(tmp_path: Path) -> None:

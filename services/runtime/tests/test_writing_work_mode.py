@@ -51,7 +51,19 @@ def test_default_opening_duty_differs_by_mode() -> None:
     assert "ch2" not in web and "ch3" not in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
     assert "强钩" in hook or "麻烦" in hook
-    for blob in (lit, web, hook):
+    urban = default_opening_duty(
+        "web_serial",
+        message="写一章长篇修真小说的第一章, 现代都市题材，我看看",
+    )
+    assert "发觉" in urban
+    assert "有人的日子" in urban
+    assert "灵视" not in urban
+    occult = default_opening_duty(
+        "web_serial",
+        message="写一章都市灵异修真",
+    )
+    assert "灵视" in occult or "异象" in occult
+    for blob in (lit, web, hook, urban, occult):
         assert "禁止" not in blob
         assert "勿" not in blob
         assert "不要" not in blob
@@ -211,12 +223,23 @@ def test_serial_hook_flat_allows_self_discovery() -> None:
     from app.writing.text_metrics import visible_chars
 
     body = (
-        "周野把电动车停在巷口，雨还在下。别人只看见积水，他却发现路灯底下那层光会跟着他的鞋尖挪。"
-        "他试着把手伸进去，光就贴上掌心，温得不像雨水。巷子里没有第二个人看见这件事。"
+        "周野把电动车停在巷口，早高峰的喇叭在身后响。"
+        "手机忽然亮了，一块半透明的面板贴在视网膜上：【基础功法已植入】。"
+        "旁边买豆浆的人还在吵架，没人看见他手一抖洒了半袋油条。"
     )
     text = (body + "\n\n") * 8
     assert visible_chars(text) >= 400
     assert serial_hook_flat(text, "ch1") is False
+
+
+def test_serial_hook_flat_does_not_treat_discovery_word_as_hook() -> None:
+    from app.writing.signals.prose import serial_hook_flat
+    from app.writing.text_metrics import visible_chars
+
+    body = "他突然发现今天的班和昨天一样。工位上没有人说话。窗外的天一直灰着。"
+    text = (body + "\n\n") * 18
+    assert visible_chars(text) >= 400
+    assert serial_hook_flat(text, "ch1") is True
 
 
 def test_serial_hook_flat_allows_world_already_running() -> None:

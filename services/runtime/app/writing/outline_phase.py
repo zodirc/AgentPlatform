@@ -29,6 +29,13 @@ _USER_DIRECTION = re.compile(
     r"不要.{0,8}写|勿写|忌|"
     r"像.{1,10}写|风格.{0,4}是"
 )
+_BROWSE_OPENING_RE = re.compile(r"看看|发散|几种|换个开|什么风格|先看|我要其他的|都不合适")
+_COMMIT_POND_RE = re.compile(r"按开篇候选|采用此开篇|按此开篇")
+_POND_ALREADY_NAMED_RE = re.compile(
+    r"名叫|叫[\u4e00-\u9fff]{1,8}|像.{1,10}写|风格.{0,4}是|"
+    r"凡人流|系统流|克系|灵异|探案"
+)
+_OPENING_SCALE_RE = re.compile(r"长篇|第一章|写一章|修真|玄幻|都市|仙侠|修仙")
 
 
 def _workspace_root(workspace_root: Path | None) -> Path:
@@ -126,6 +133,24 @@ def user_specified_writing_direction(message: str = "") -> bool:
     if not text:
         return False
     return _USER_DIRECTION.search(text) is not None
+
+
+def wants_opening_candidates(message: str = "", *, outline: str = "") -> bool:
+    """长篇未立定近池、只给题材或说看看：先交候选，不交章。"""
+    from app.writing.outline_arc import outline_style_committed
+
+    if outline_style_committed(outline or ""):
+        return False
+    text = (message or "").strip()
+    if not text:
+        return False
+    if _COMMIT_POND_RE.search(text):
+        return False
+    if _BROWSE_OPENING_RE.search(text):
+        return True
+    if _POND_ALREADY_NAMED_RE.search(text):
+        return False
+    return bool(_OPENING_SCALE_RE.search(text))
 
 
 def outline_contract_ready(
@@ -250,18 +275,30 @@ def resolve_outline_phase(
         note = "池子已立：按章职写这场，海先藏着；本 Turn 只交一章"
     else:
         phase = "open"
-        if user_dir:
+        if wants_opening_candidates(message, outline=outline):
             note = (
-                "长篇开篇：跟着谁还是凡人；这一章前三分之一交到得到或发现，不要写终局宇宙"
-                if _FANTASY_HINT.search("\n".join(x for x in (message, outline) if x))
-                else "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
+                "长篇开写：只调 propose_opening_ponds 出候选卡片（2～3 个互不换皮近池，"
+                "至少一份是自己发觉能力）；不要写进聊天；等点选或说「我要其他的」"
             )
         else:
-            note = (
-                "长篇开篇：前三分之一交到得到或发现；勾画可轻可重；不要把后面的海写进第一章"
-                if _FANTASY_HINT.search("\n".join(x for x in (message, outline) if x))
-                else "长篇开篇：站住眼前的日子和人；勾画可轻可重；不要把后面的海写进第一章"
+            from app.writing.work_mode import serial_opening_compass
+
+            compass = serial_opening_compass(message=message, outline=outline)
+            fantasy = bool(
+                _FANTASY_HINT.search("\n".join(x for x in (message, outline) if x))
             )
+            if user_dir:
+                note = (
+                    f"长篇开篇：跟着谁还是凡人；这一章{compass}，不要写终局宇宙"
+                    if fantasy
+                    else "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
+                )
+            else:
+                note = (
+                    f"长篇开篇：{compass}；勾画可轻可重；不要把后面的海写进第一章"
+                    if fantasy
+                    else "长篇开篇：站住眼前的日子和人；勾画可轻可重；不要把后面的海写进第一章"
+                )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}
     return {

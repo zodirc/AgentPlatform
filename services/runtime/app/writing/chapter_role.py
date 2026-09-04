@@ -196,41 +196,55 @@ def chapter_kind_to_fragment(kind: str) -> str:
 
 
 def chapter_kind_obligation(
-    kind: str, *, work_mode: str, position: str, book_scope: str = "single"
+    kind: str,
+    *,
+    work_mode: str,
+    position: str,
+    book_scope: str = "single",
+    message: str = "",
+    outline: str = "",
 ) -> str:
     k = normalize_chapter_kind(kind)
     pos = normalize_chapter_position(position)
     mode = normalize_work_mode(work_mode)
     from app.writing.book_scope import default_duty_for_scope, normalize_book_scope
+    from app.writing.work_mode import serial_opening_compass
 
     scope = normalize_book_scope(book_scope)
     if scope in {"short", "single"}:
         return default_duty_for_scope(
-            scope, work_mode=mode, position=pos, chapter_kind=k
+            scope,
+            work_mode=mode,
+            position=pos,
+            chapter_kind=k,
+            message=message,
+            outline=outline,
         )
     if k == "live_character":
         if pos == "opening":
+            extra = (
+                serial_opening_compass(message=message, outline=outline) + "。"
+                if mode == "web_serial"
+                else "句味与人物距离优先。"
+            )
             return (
                 "这场偏站住这个人：读者先看见他眼下怎么过；"
                 "勾画可轻可重。后面的海（境界总纲、全书规则、结局）不要写进这一章。"
                 "物件从他站着的地方长出来。"
-                + (
-                    "开篇前三分之一交到得到了什么或发现了什么；都市修真落到功法、系统、灵视或灵气。"
-                    if mode == "web_serial"
-                    else "句味与人物距离优先。"
-                )
+                + extra
             )
         return "这场偏立人：人物选择与关系在场上，勿空转设定演讲"
     if k == "world_rule":
         if pos == "opening" and scope == "long":
+            extra = (
+                f" 质地托住{serial_opening_compass(message=message, outline=outline)}。"
+                if mode == "web_serial"
+                else " 机构专名让场景站稳后再出现。"
+            )
             return (
                 "这场偏环境质地：社会背景与自然场景可先站；"
                 "何时何地即可，不要写成能/不能做什么的手册。"
-                + (
-                    " 质地托住前三分之一的得到或发现；都市修真落到功法、系统、灵视或灵气。"
-                    if mode == "web_serial"
-                    else " 机构专名让场景站稳后再出现。"
-                )
+                + extra
             )
         if pos in {"rising", "turn"} and scope == "long":
             return "这场偏环境质地：只写新地点/这场要的那一步，勿重播已立设定"
@@ -295,7 +309,12 @@ def resolve_chapter_role(
         "chapter_kind_label": chapter_kind_label(kind),
         "preferred_fragment": chapter_kind_to_fragment(kind),
         "obligation": chapter_kind_obligation(
-            kind, work_mode=work_mode, position=position, book_scope=scope
+            kind,
+            work_mode=work_mode,
+            position=position,
+            book_scope=scope,
+            message=message,
+            outline=outline,
         ),
     }
 

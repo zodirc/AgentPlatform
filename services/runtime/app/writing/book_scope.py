@@ -202,6 +202,8 @@ def scope_spec_line(
     position: str = "",
     section_num: int | None = None,
     work_mode: str = "",
+    message: str = "",
+    outline: str = "",
 ) -> str:
     """Writing spec 尺度行。"""
     sc = normalize_book_scope(scope)
@@ -230,8 +232,17 @@ def scope_spec_line(
         from app.writing.work_mode import normalize_work_mode
 
         if normalize_work_mode(work_mode) == "web_serial":
+            from app.writing.outline_phase import wants_opening_candidates
+            from app.writing.work_mode import serial_opening_compass
+
+            if wants_opening_candidates(message, outline=outline):
+                return (
+                    "长篇·开写：只调 propose_opening_ponds 出开篇候选卡片；"
+                    "至少一份是自己发觉能力；不要把候选写进聊天；等用户点选或说「我要其他的」"
+                )
+            compass = serial_opening_compass(message=message, outline=outline)
             return (
-                "长篇·开篇：前三分之一交到得到或发现；勾画可轻可重；"
+                f"长篇·开篇：{compass}；勾画可轻可重；"
                 "后面的海（终局宇宙、境界总纲）不要写进这一章"
             )
         return (
@@ -251,6 +262,8 @@ def default_duty_for_scope(
     work_mode: str,
     position: str = "",
     chapter_kind: str | None = None,
+    message: str = "",
+    outline: str = "",
 ) -> str:
     """无 outline 时的默认章职。"""
     from app.writing.work_mode import default_opening_duty, normalize_work_mode
@@ -276,9 +289,19 @@ def default_duty_for_scope(
         return "收束章：余波与局面落下，不新开卷级冲突"
     if pos in {"opening", "rising", "turn"} and sc == "long":
         if pos == "opening" or (kind and kind != "plot_step"):
-            return default_opening_duty(mode, chapter_kind=chapter_kind or "live_character")
+            return default_opening_duty(
+                mode,
+                chapter_kind=chapter_kind or "live_character",
+                message=message,
+                outline=outline,
+            )
         return "加压/台阶：在已立的日子里推进一步；人物仍在场上"
-    return default_opening_duty(mode, chapter_kind=chapter_kind or "live_character")
+    return default_opening_duty(
+        mode,
+        chapter_kind=chapter_kind or "live_character",
+        message=message,
+        outline=outline,
+    )
 
 
 def resolve_book_scope_context(
