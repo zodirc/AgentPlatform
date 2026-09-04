@@ -102,6 +102,7 @@ class TurnSummary(BaseModel):
     created_at: datetime
     # Latest plan artifact from turn_views (for chat-stream multi-plan history).
     plan: dict[str, Any] | None = None
+    opening_ponds: dict[str, Any] | None = None
 
 
 class TurnView(BaseModel):

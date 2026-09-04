@@ -323,6 +323,16 @@ def _latest_plan_from_artifacts(artifacts: Any) -> dict | None:
     return found
 
 
+def _latest_opening_ponds_from_artifacts(artifacts: Any) -> dict | None:
+    if not isinstance(artifacts, list):
+        return None
+    found: dict | None = None
+    for art in artifacts:
+        if isinstance(art, dict) and art.get("type") == "opening_ponds":
+            found = art
+    return found
+
+
 async def list_turns_for_session(session_id: UUID) -> list[dict]:
     """列出会话内 turn，LEFT JOIN turn_views 附带 latest_output 与 plan。
 
@@ -355,6 +365,7 @@ async def list_turns_for_session(session_id: UUID) -> list[dict]:
             except json.JSONDecodeError:
                 artifacts = None
         item["plan"] = _latest_plan_from_artifacts(artifacts)
+        item["opening_ponds"] = _latest_opening_ponds_from_artifacts(artifacts)
         out.append(item)
     return out
 

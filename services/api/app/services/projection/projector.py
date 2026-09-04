@@ -452,6 +452,9 @@ async def _project_turn_impl(turn_id: UUID) -> None:
             # (docs/25 P0b).
             artifacts = [a for a in artifacts if a.get("type") != "plan"]
             artifacts.append({"type": "plan", **payload})
+        elif event_type == "opening.ponds":
+            artifacts = [a for a in artifacts if a.get("type") != "opening_ponds"]
+            artifacts.append({"type": "opening_ponds", **payload})
         elif event_type == "retrieval.completed":
             artifacts.append({"type": "retrieval", **payload})
         elif event_type == "cards.pinned":
