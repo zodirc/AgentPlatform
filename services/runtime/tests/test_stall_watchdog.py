@@ -63,3 +63,23 @@ async def test_scan_skips_waiting_approval() -> None:
 
     record.assert_not_called()
     fail.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_scan_skips_waiting_child() -> None:
+    stall_watchdog._alerted.clear()
+    pool = AsyncMock()
+    pool.fetch = AsyncMock(return_value=[_stale_row(turn_status="waiting_child")])
+
+    with (
+        patch("app.controller.stall_watchdog.get_pool", new_callable=AsyncMock, return_value=pool),
+        patch("app.controller.stall_watchdog.record_stall_detected") as record,
+        patch("app.controller.stall_watchdog._fail_turn", new_callable=AsyncMock) as fail,
+        patch("app.controller.stall_watchdog.settings") as settings,
+    ):
+        settings.stall_threshold_seconds = 1.0
+        settings.stall_auto_fail = True
+        await stall_watchdog.scan_stalled_runs()
+
+    record.assert_not_called()
+    fail.assert_not_called()

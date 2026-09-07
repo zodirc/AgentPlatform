@@ -19,7 +19,7 @@ from app.services.resource import turns as turn_svc
 
 logger = logging.getLogger(__name__)
 
-RUNNING_STATUSES = frozenset({"pending", "running", "waiting_approval"})
+RUNNING_STATUSES = frozenset({"pending", "running", "waiting_approval", "waiting_child"})
 TERMINAL_STATUS_MAP = {
     "turn.completed": "completed",
     "turn.failed": "failed",
@@ -680,6 +680,9 @@ async def build_turn_view(turn_id: UUID, *, refresh: bool = False) -> TurnView |
                     break
             if interrupt is None and artifacts:
                 interrupt = {"kind": "approval", "tool_call_id": "pending"}
+
+    if status == "waiting_child":
+        interrupt = {"kind": "child", "tool_call_id": "pending"}
 
     context_usage = None
     token_usage = None

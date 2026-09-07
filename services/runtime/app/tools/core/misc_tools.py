@@ -185,6 +185,7 @@ async def delegate(
     context: str = "",
     context_refs: list[str] | None = None,
     paths: list[str] | None = None,
+    wait: bool = True,
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """启动子 Agent 委托任务（explore / generalPurpose 等）。
@@ -207,5 +208,6 @@ async def delegate(
         context=context,
         context_refs=context_refs,
         paths=paths,
+        wait=wait,
         **_kwargs,
     )

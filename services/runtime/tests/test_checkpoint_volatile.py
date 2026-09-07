@@ -38,6 +38,36 @@ def test_checkpoint_roundtrip_preserves_volatile_context() -> None:
     assert restored.turn_user_text == "写 300 字"
 
 
+def test_checkpoint_roundtrip_preserves_cancel_phase() -> None:
+    state = TurnState(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="agent",
+        cancelled=True,
+        cancel_force=True,
+        cancelled_at_phase="model_stream",
+    )
+    restored = _deserialize_state(_serialize_state(state))
+    assert restored.cancelled is True
+    assert restored.cancel_force is True
+    assert restored.cancelled_at_phase == "model_stream"
+
+
+def test_checkpoint_roundtrip_preserves_loaded_skills() -> None:
+    state = TurnState(
+        turn_id=uuid4(),
+        session_id=uuid4(),
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="agent",
+        loaded_skill_names=["verify", "memory"],
+    )
+    restored = _deserialize_state(_serialize_state(state))
+    assert restored.loaded_skill_names == ["verify", "memory"]
+
+
 def test_checkpoint_deserializes_legacy_without_volatile() -> None:
     """Old checkpoints omit volatile_context — must not crash."""
     data = {

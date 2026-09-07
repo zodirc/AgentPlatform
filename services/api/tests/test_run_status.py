@@ -11,6 +11,10 @@ def test_map_turn_waiting_approval_to_interrupted() -> None:
     assert map_turn_to_run_status("waiting_approval") == "interrupted"
 
 
+def test_map_turn_waiting_child_to_running() -> None:
+    assert map_turn_to_run_status("waiting_child") == "running"
+
+
 def test_extract_termination_reason_from_completed_payload() -> None:
     reason = extract_termination_reason(
         turn_status="completed",

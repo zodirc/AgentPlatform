@@ -32,8 +32,18 @@ def _serialize_state(state: TurnState) -> dict[str, Any]:
         "usage": asdict(state.usage),
         "cancelled": state.cancelled,
         "cancel_force": state.cancel_force,
+        "cancelled_at_phase": state.cancelled_at_phase,
         "termination_reason": state.termination_reason,
         "budget_exceeded": state.budget_exceeded,
+        "turn_token_budget": int(getattr(state, "turn_token_budget", 0) or 0),
+        "fill_ratio_max": float(getattr(state, "fill_ratio_max", 0.0) or 0.0),
+        "model_queue_wait_s": float(getattr(state, "model_queue_wait_s", 0.0) or 0.0),
+        "pointerized_n": int(getattr(state, "pointerized_n", 0) or 0),
+        "loaded_skill_names": [
+            str(n).strip().lower()
+            for n in (getattr(state, "loaded_skill_names", None) or [])
+            if str(n).strip()
+        ],
         "delivery": state.delivery,
         "plan_hint": state.plan_hint,
         "plan_phase": state.plan_phase,
@@ -115,8 +125,20 @@ def _deserialize_state(data: dict[str, Any]) -> TurnState:
         ),
         cancelled=bool(data.get("cancelled", False)),
         cancel_force=bool(data.get("cancel_force", False)),
+        cancelled_at_phase=(
+            str(data["cancelled_at_phase"]) if data.get("cancelled_at_phase") else None
+        ),
         termination_reason=str(data.get("termination_reason", "final")),
         budget_exceeded=bool(data.get("budget_exceeded", False)),
+        turn_token_budget=int(data.get("turn_token_budget", 0) or 0),
+        fill_ratio_max=float(data.get("fill_ratio_max", 0.0) or 0.0),
+        model_queue_wait_s=float(data.get("model_queue_wait_s", 0.0) or 0.0),
+        pointerized_n=int(data.get("pointerized_n", 0) or 0),
+        loaded_skill_names=[
+            str(n).strip().lower()
+            for n in (data.get("loaded_skill_names") or [])
+            if str(n).strip()
+        ],
         delivery=data.get("delivery") if isinstance(data.get("delivery"), dict) else None,
         plan_hint=str(data["plan_hint"]) if data.get("plan_hint") else None,
         plan_phase=str(data["plan_phase"]) if data.get("plan_phase") else None,

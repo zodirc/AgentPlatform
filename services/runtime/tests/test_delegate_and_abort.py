@@ -73,6 +73,7 @@ async def test_delegate_runs_nested_engine() -> None:
             agent_type="researcher",
             turn_id=turn_id,
             run_id=run_id,
+            wait=False,
         )
     finally:
         set_delegate_runtime(None)

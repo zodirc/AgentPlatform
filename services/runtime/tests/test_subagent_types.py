@@ -112,6 +112,7 @@ def test_tool_batch_outcome_avoids_control_collision() -> None:
     from app.engine.agent_engine import _tool_batch_outcome
 
     assert _tool_batch_outcome("waiting_approval") == "tool_summary:waiting_approval"
+    assert _tool_batch_outcome("waiting_child") == "tool_summary:waiting_child"
     assert _tool_batch_outcome("ok done") == "ok done"
 
 

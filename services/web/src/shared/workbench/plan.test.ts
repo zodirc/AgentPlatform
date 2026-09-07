@@ -4,6 +4,7 @@ import {
   currentPlanStep,
   evaluatePlanSuggest,
   executePlanMessage,
+  isActiveTurnStatus,
   isFormalPlanPhase,
   isPlanSuggestCooldownActive,
   latestPlanFromArtifacts,
@@ -136,5 +137,10 @@ describe("plan suggest scoring (docs/26)", () => {
     expect(
       isPlanSuggestCooldownActive(now - PLAN_SUGGEST_COOLDOWN_MS - 1, now),
     ).toBe(false);
+  });
+
+  it("treats waiting_child as an active turn", () => {
+    expect(isActiveTurnStatus("waiting_child")).toBe(true);
+    expect(isActiveTurnStatus("completed")).toBe(false);
   });
 });

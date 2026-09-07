@@ -30,7 +30,6 @@ import asyncio
 import json
 import logging
 import time
-from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -291,7 +290,7 @@ async def reconcile_runner_orphans() -> int:
         JOIN turns t ON t.id = r.turn_id
         WHERE r.runner_id = $1
           AND r.status = 'running'
-          AND t.status IN ('pending', 'running')
+          AND t.status IN ('pending', 'running', 'waiting_child')
         LIMIT 100
         """,
         settings.runtime_runner_id,
@@ -426,13 +425,17 @@ async def maybe_finalize_orphan_cancel(turn_id: UUID, *, force: bool = False) ->
     )
     async with pool.acquire() as conn:
         async with conn.transaction():
+            from app.policy.cancel_phases import cancelling_payload
+
             await append_event(
                 conn,
                 turn_id=turn_id,
                 run_id=run_id,
                 event_type="turn.cancelling",
                 trace_id=trace_id,
-                payload={"force": force},
+                payload=cancelling_payload(
+                    force=force, cancelled_at_phase="requested"
+                ),
             )
             await append_event(
                 conn,
@@ -1176,13 +1179,18 @@ async def _finalize_turn(
     if state.cancelled:
         async with pool.acquire() as conn:
             async with conn.transaction():
+                from app.policy.cancel_phases import cancelling_payload
+
                 await append_event(
                     conn,
                     turn_id=turn_id,
                     run_id=run_id,
                     event_type="turn.cancelling",
                     trace_id=trace_id,
-                    payload={"force": state.cancel_force},
+                    payload=cancelling_payload(
+                        force=state.cancel_force,
+                        cancelled_at_phase=state.cancelled_at_phase,
+                    ),
                 )
                 await append_event(
                     conn,
@@ -1217,6 +1225,19 @@ async def _finalize_turn(
         _schedule_purge_thinking(turn_id)
         return
 
+    if summary == "waiting_child":
+        async with pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    "UPDATE turns SET status = 'waiting_child', updated_at = now() WHERE id = $1",
+                    turn_id,
+                )
+                await conn.execute(
+                    "UPDATE runs SET status = 'running', updated_at = now() WHERE id = $1",
+                    run_id,
+                )
+        return
+
     if summary == "waiting_approval":
         async with pool.acquire() as conn:
             async with conn.transaction():
@@ -1234,7 +1255,15 @@ async def _finalize_turn(
         async with conn.transaction():
             completed_payload: dict[str, Any] = {
                 "summary": _truncate_turn_summary(summary or "Turn completed"),
-                "token_usage": asdict(state.usage),
+                "token_usage": {
+                    "input_tokens": int(state.usage.input_tokens),
+                    "output_tokens": int(state.usage.output_tokens),
+                    "fill_ratio_max": round(float(getattr(state, "fill_ratio_max", 0.0) or 0.0), 4),
+                    "model_queue_wait_s": round(
+                        float(getattr(state, "model_queue_wait_s", 0.0) or 0.0), 4
+                    ),
+                    "pointerized_n": int(getattr(state, "pointerized_n", 0) or 0),
+                },
                 "termination_reason": state.termination_reason,
             }
             if state.delivery is not None:
@@ -1632,6 +1661,7 @@ async def _run_turn(
         writes_preapproved=bool(ops_eval),
         exec_preapproved=bool(ops_eval),
         turn_user_text=message or "",
+        turn_token_budget=int((profile.generation or {}).get("turn_token_budget") or 0),
     )
 
     registry = build_registry()
@@ -1783,6 +1813,14 @@ async def _run_turn(
     started_at = time.monotonic()
     try:
         summary = await run_via_langgraph(engine, state)
+        if summary == "waiting_child" or getattr(engine, "pending_children", None):
+            from app.controller.child_join import settle_waiting_children
+
+            joined = await settle_waiting_children(
+                engine, state, turn_id=turn_id, run_id=run_id
+            )
+            if joined is not None:
+                summary = joined
     except TurnAbortedError:
         set_event_writer(None)
         set_delegate_runtime(None)
@@ -2083,6 +2121,14 @@ async def _resume_after_approval(
     resume_started_at = time.monotonic()
     try:
         summary = await run_via_langgraph(engine, state)
+        if summary == "waiting_child" or getattr(engine, "pending_children", None):
+            from app.controller.child_join import settle_waiting_children
+
+            joined = await settle_waiting_children(
+                engine, state, turn_id=turn_id, run_id=run_id
+            )
+            if joined is not None:
+                summary = joined
     except TurnAbortedError:
         set_event_writer(None)
         set_delegate_runtime(None)

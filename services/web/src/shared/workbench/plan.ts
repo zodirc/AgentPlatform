@@ -177,7 +177,12 @@ export function planHasOpenItems(plan: PlanArtifact | null): boolean {
 /** in_progress is only "live" while the turn is still running. */
 export function isActiveTurnStatus(status: string | null | undefined): boolean {
   const s = String(status ?? "");
-  return s === "running" || s === "pending" || s === "waiting_approval";
+  return (
+    s === "running" ||
+    s === "pending" ||
+    s === "waiting_approval" ||
+    s === "waiting_child"
+  );
 }
 
 /**

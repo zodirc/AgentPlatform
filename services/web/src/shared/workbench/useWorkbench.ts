@@ -81,6 +81,7 @@ const ACTIVE_TURN_STATUSES = new Set([
   "pending",
   "running",
   "waiting_approval",
+  "waiting_child",
 ]);
 const STREAM_DELTA_EVENT_TYPES = new Set([
   "turn.token",
@@ -1186,7 +1187,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     (view?.status === "waiting_approval" &&
       Boolean(view?.interrupt?.tool_call_id))
       ? "waiting_approval"
-      : busy
+      : busy || view?.status === "waiting_child"
         ? "running"
         : (view?.status ?? "idle");
 

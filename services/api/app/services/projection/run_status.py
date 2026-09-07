@@ -11,6 +11,7 @@ TURN_TO_RUN_STATUS: dict[str, str] = {
     "failed": "failed",
     "cancelled": "cancelled",
     "waiting_approval": "interrupted",
+    "waiting_child": "running",
     "pending": "accepted",
     "running": "running",
 }

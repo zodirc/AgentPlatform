@@ -197,7 +197,7 @@ async def reconcile_stale_turns() -> int:
         SELECT DISTINCT t.id AS turn_id, te.type AS event_type
         FROM turns t
         JOIN turn_events te ON te.turn_id = t.id
-        WHERE t.status IN ('pending', 'running', 'waiting_approval')
+        WHERE t.status IN ('pending', 'running', 'waiting_approval', 'waiting_child')
           AND te.type IN ('turn.completed', 'turn.failed', 'turn.cancelled')
         LIMIT $1
         """,

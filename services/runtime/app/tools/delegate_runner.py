@@ -198,6 +198,24 @@ async def run_delegate(
     if turn_id is None or run_id is None:
         return {"status": "failed", "error": "missing turn_id or run_id"}
 
+    wait = _kwargs.get("wait", True)
+    from app.engine.child_spawn import should_spawn_child
+
+    if should_spawn_child(agent_type=agent_type, wait=wait):
+        return {
+            "status": "spawn_child",
+            "child": {
+                "task": task,
+                "agent_type": agent_type,
+                "context": context,
+                "context_refs": list(context_refs or []),
+                "paths": list(paths or []),
+                "turn_id": str(turn_id),
+                "run_id": str(run_id),
+            },
+            "summary": f"spawned {agent_type} child",
+        }
+
     subagent_id = f"sub-{uuid4().hex[:8]}"
     writer = get_event_writer() or ctx.write_event
 
@@ -385,3 +403,9 @@ def _build_delegate_prompt(
     if hot:
         parts.append("[hot_files]\n" + "\n".join(f"- {path}" for path in hot))
     return "\n\n".join(part for part in parts if part)
+
+
+async def execute_delegate(**kwargs: Any) -> dict[str, Any]:
+    """Run a spawned child (never re-parks). Used by the controller join loop."""
+    kwargs["wait"] = False
+    return await run_delegate(**kwargs)

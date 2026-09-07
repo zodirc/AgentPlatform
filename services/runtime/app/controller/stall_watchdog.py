@@ -2,7 +2,7 @@
 
 English: Detect stalled runs with no recent turn_events.
 
-跳过 ``waiting_approval`` 与已请求 cancel 的 orphan 路径；可选 ``stall_auto_fail``
+跳过 ``waiting_approval`` / ``waiting_child`` 与已请求 cancel 的 orphan 路径；可选 ``stall_auto_fail``
 调用 ``_fail_turn(step_timeout)``。同一 ``(turn_id, last_sequence)`` 在 TTL 内只告警一次。
 """
 
@@ -50,7 +50,7 @@ async def scan_stalled_runs() -> None:
 
     作用:
         查询 status 为 running/interrupted 的 Run，先尝试 orphan cancel 收尾；
-        对超过 stall_threshold_seconds 无新事件且非 waiting_approval 的 Run 记指标与日志，
+        对超过 stall_threshold_seconds 无新事件且非 waiting_approval/waiting_child 的 Run 记指标与日志，
         stall_auto_fail 开启时调用 _fail_turn(termination_reason=step_timeout)。
 
     参数:
@@ -114,8 +114,8 @@ async def scan_stalled_runs() -> None:
                 finalized = False
             if finalized:
                 continue
-        # Human approval gate: no new events is the expected pause, not a hang.
-        if str(row["turn_status"] or "") == "waiting_approval":
+        # Expected pause: approval gate or parent waiting on child join.
+        if str(row["turn_status"] or "") in {"waiting_approval", "waiting_child"}:
             continue
         if last_ts is None or last_ts >= cutoff:
             continue

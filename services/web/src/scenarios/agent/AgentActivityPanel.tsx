@@ -215,6 +215,7 @@ export function AgentActivityPanel({
     wb.awaitingApproval ||
     wb.displayStatus === "running" ||
     wb.displayStatus === "waiting_approval" ||
+    wb.displayStatus === "waiting_child" ||
     wb.displayStatus === "pending";
   const nowMs = useTickingNow(live);
   const startedAt = wb.turnHistory.find((t) => t.id === wb.turnId)?.created_at;

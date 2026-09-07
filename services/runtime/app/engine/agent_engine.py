@@ -43,6 +43,8 @@ from app.engine.read_registry import (
     user_facing_policy_summary,
 )
 from app.engine.state import TurnState, assistant_text, assistant_tool_uses, tool_result_message, user_message
+from app.engine.tool_batch import CACHEABLE_TOOLS, is_parallel_tool_call
+from app.policy.cancel_phases import note_cancel
 from app.engine.verify_receipt import (
     build_verify_receipt_text,
     build_writing_delivery_hold_text,
@@ -233,21 +235,11 @@ _TOOL_EVENTS: dict[str, str] = {
     "propose_opening_ponds": "opening.ponds",
 }
 
-_CACHEABLE_TOOLS = frozenset(
-    {
-        "list_dir",
-        "glob",
-        "grep",
-        "read_file",
-        "search_sources",
-        "enrich_ioc",
-        "lookup_indicator",
-    }
-)
+_CACHEABLE_TOOLS = CACHEABLE_TOOLS
 
 # Returned only by control paths in _run_tool / _run_tool_batch — never as a
 # normal tool summary string (delegate used to echo subagent "waiting_approval").
-_CONTROL_OUTCOMES = frozenset({"waiting_approval", "CANCELLED", "TERMINATE"})
+_CONTROL_OUTCOMES = frozenset({"waiting_approval", "waiting_child", "CANCELLED", "TERMINATE"})
 
 # Match packages/contracts/.../tool.completed.json — long summaries (e.g. delegate
 # echoing verbatim code) must not abort the Turn via schema_validation_error.
@@ -514,6 +506,7 @@ class AgentEngine:
             policy = policy.with_window(context_window_tokens)
         self._context = ContextEngine(policy=policy)
         self.pending_approval: dict[str, Any] | None = None
+        self.pending_children: list[dict[str, Any]] = []
         self._tool_result_cache: dict[str, dict[str, Any]] = {}
         self._tool_repeat_counts: dict[str, int] = {}
         self._search_sources_calls = 0
@@ -534,8 +527,7 @@ class AgentEngine:
         while not state.cancelled:
             cancelled, force = await self._check_cancel()
             if cancelled:
-                state.cancelled = True
-                state.cancel_force = force
+                note_cancel(state, force=force, phase="model_stream")
                 abort = getattr(self._gateway, "abort_stream", None)
                 if abort is not None:
                     abort()
@@ -601,8 +593,7 @@ class AgentEngine:
 
             cancelled, force = await self._check_cancel()
             if cancelled:
-                state.cancelled = True
-                state.cancel_force = force
+                note_cancel(state, force=force, phase="step_boundary")
                 break
 
             state.step_count += 1
@@ -628,8 +619,7 @@ class AgentEngine:
                 await _ensure_step_within_budget()
                 cancelled, force = await self._check_cancel()
                 if cancelled:
-                    state.cancelled = True
-                    state.cancel_force = force
+                    note_cancel(state, force=force, phase="assemble")
                     break
 
                 step_tools = self._scoped_openai_tools(state)
@@ -652,12 +642,18 @@ class AgentEngine:
                 except RuntimeError:
                     pass
 
+                from app.skills.loader import skill_volatile_from_names
+
+                skill_pad = skill_volatile_from_names(state.loaded_skill_names)
+                vol = self._volatile_context or ""
+                if skill_pad:
+                    vol = f"{vol.rstrip()}\n\n{skill_pad}" if vol.strip() else skill_pad
                 messages = await self._context.assemble_async(
                     system_prompt=self._system_prompt,
                     state=state,
                     gateway=self._gateway,
                     tools=step_tools,
-                    volatile_context=self._volatile_context,
+                    volatile_context=vol,
                 )
 
                 from app.context.engine import estimate_window_breakdown
@@ -719,8 +715,19 @@ class AgentEngine:
                             or report.get("tokens_after")
                             or 0
                         ),
+                        "pointerized_n": int(report.get("pointerized_n") or 0),
+                        "tool_result_tokens": int(
+                            (breakdown or {}).get("tool_results")
+                            or report.get("tool_result_tokens")
+                            or 0
+                        ),
                     },
                     step_index=step_index,
+                )
+                fill_now = float(report.get("fill_ratio", 0.0) or 0.0)
+                state.fill_ratio_max = max(float(getattr(state, "fill_ratio_max", 0.0) or 0.0), fill_now)
+                state.pointerized_n = int(getattr(state, "pointerized_n", 0) or 0) + int(
+                    report.get("pointerized_n") or 0
                 )
                 if self._context.last_compaction_trace:
                     logger.info(
@@ -813,8 +820,7 @@ class AgentEngine:
                         break
                     cancelled, force = await self._check_cancel()
                     if cancelled:
-                        state.cancelled = True
-                        state.cancel_force = force
+                        note_cancel(state, force=force, phase="model_stream")
                         step_outcome = "cancelled"
                         break
                     step_outcome = "failed"
@@ -861,6 +867,10 @@ class AgentEngine:
                     usage_payload["cache_read_input_tokens"] = step_cache_read
                     usage_payload["cache_creation_input_tokens"] = step_cache_creation
                     usage_payload["cache_hit"] = step_cache_read > 0
+                wait_s = float(getattr(self._gateway, "last_queue_wait_s", 0.0) or 0.0)
+                if wait_s > 0:
+                    usage_payload["model_queue_wait_s"] = round(wait_s, 4)
+                    state.model_queue_wait_s = float(getattr(state, "model_queue_wait_s", 0.0) or 0.0) + wait_s
                 await self._write_event(
                     event_type="usage.reported",
                     payload=usage_payload,
@@ -888,6 +898,9 @@ class AgentEngine:
                     if tool_outcome == "waiting_approval":
                         step_outcome = "waiting_approval"
                         return "waiting_approval"
+                    if tool_outcome == "waiting_child":
+                        step_outcome = "waiting_child"
+                        return "waiting_child"
                     if tool_outcome == "TERMINATE":
                         final_summary = json.loads(
                             state.messages[-1]["content"][0]["content"]
@@ -1015,7 +1028,9 @@ class AgentEngine:
 
     def _budget_exceeded(self, state: TurnState) -> bool:
         """本 Turn 累计 token 是否达到 ``turn_token_budget``（0 表示不限制）。"""
-        limit = settings.turn_token_budget
+        limit = int(getattr(state, "turn_token_budget", 0) or 0)
+        if limit <= 0:
+            limit = settings.turn_token_budget
         if limit <= 0:
             return False
         total = state.usage.input_tokens + state.usage.output_tokens
@@ -1058,10 +1073,9 @@ class AgentEngine:
             if ensure_step_budget is not None:
                 await ensure_step_budget()
             call = tool_calls[index]
-            name = str(call.get("name") or "")
-            if name in _CACHEABLE_TOOLS:
+            if is_parallel_tool_call(call):
                 batch: list[dict[str, Any]] = []
-                while index < len(tool_calls) and str(tool_calls[index].get("name") or "") in _CACHEABLE_TOOLS:
+                while index < len(tool_calls) and is_parallel_tool_call(tool_calls[index]):
                     batch.append(tool_calls[index])
                     index += 1
                 if len(batch) == 1:
@@ -1089,12 +1103,16 @@ class AgentEngine:
                             next_search_sources_calls += 1
                         counter_seeds.append(counters)
 
+                    registry_snapshot = initial_read_registry
+
                     async def run_isolated(
-                        item: dict[str, Any], counters: dict[str, int]
+                        item: dict[str, Any],
+                        counters: dict[str, int],
+                        registry: Any,
                     ) -> tuple[str | None, TurnState]:
                         isolated = copy(state)
                         isolated.messages = []
-                        isolated.read_registry = deepcopy(initial_read_registry)
+                        isolated.read_registry = deepcopy(registry)
                         summary = await self._run_tool(
                             item,
                             isolated,
@@ -1106,7 +1124,7 @@ class AgentEngine:
 
                     isolated_runs = await asyncio.gather(
                         *(
-                            run_isolated(item, counters)
+                            run_isolated(item, counters, registry_snapshot)
                             for item, counters in zip(batch, counter_seeds)
                         )
                     )
@@ -1118,8 +1136,11 @@ class AgentEngine:
                         state.messages.extend(isolated.messages)
                         self._merge_readonly_read_registry(item, isolated, state)
                         if isolated.cancelled:
-                            state.cancelled = True
-                            state.cancel_force = state.cancel_force or isolated.cancel_force
+                            note_cancel(
+                                state,
+                                force=isolated.cancel_force,
+                                phase=isolated.cancelled_at_phase or "tool_exec",
+                            )
                         summaries.append(summary)
                     self._read_file_calls = next_read_file_calls
                     self._search_sources_calls = next_search_sources_calls
@@ -1130,7 +1151,7 @@ class AgentEngine:
                         return "waiting_approval"
                     if summary == "TERMINATE":
                         return "TERMINATE"
-                    if summary:
+                    if summary and summary != "waiting_child":
                         last_summary = summary
                 if state.cancelled:
                     return "CANCELLED"
@@ -1144,10 +1165,12 @@ class AgentEngine:
                 return "waiting_approval"
             if summary == "TERMINATE":
                 return "TERMINATE"
-            if summary:
+            if summary and summary != "waiting_child":
                 last_summary = summary
             if state.cancelled:
                 return "CANCELLED"
+        if self.pending_children:
+            return "waiting_child"
         return last_summary
 
     @staticmethod
@@ -1417,8 +1440,7 @@ class AgentEngine:
                     last_cancel_check = time.monotonic()
                     cancelled, force = await self._check_cancel()
                     if cancelled:
-                        state.cancelled = True
-                        state.cancel_force = force
+                        note_cancel(state, force=force, phase="tool_exec")
                 if state.cancelled:
                     return "CANCELLED"
                 await self._write_event(
@@ -1446,6 +1468,34 @@ class AgentEngine:
                 arguments=arguments,
                 state=state,
             )
+            if isinstance(result, dict):
+                from app.policy.inject import inject_tool_result
+
+                result = inject_tool_result(
+                    tool_name=tool_name, result=result, turn_id=state.turn_id
+                )
+                if tool_name == "load_skill" and result.get("status") == "ok":
+                    stem = str(result.get("name") or "").strip().lower()
+                    if stem and stem not in state.loaded_skill_names:
+                        state.loaded_skill_names.append(stem)
+            if isinstance(result, dict) and result.get("status") == "spawn_child":
+                from app.engine.child_spawn import child_spec_from_call
+
+                extra = result.get("child") if isinstance(result.get("child"), dict) else {}
+                spec = {
+                    **child_spec_from_call(
+                        tool_call_id=tool_call_id,
+                        step_index=step_index,
+                        arguments=arguments if isinstance(arguments, dict) else {},
+                        turn_id=state.turn_id,
+                        run_id=state.run_id,
+                    ),
+                    **extra,
+                    "tool_call_id": tool_call_id,
+                    "step_index": step_index,
+                }
+                self.pending_children.append(spec)
+                return "waiting_child"
             self._store_tool_cache(tool_name, arguments, result)
 
         if tool_name == "read_file" and isinstance(result, dict) and not result.get("error"):
@@ -1510,8 +1560,7 @@ class AgentEngine:
 
         cancelled, force = await self._check_cancel()
         if cancelled or result.get("status") == "cancelled":
-            state.cancelled = True
-            state.cancel_force = force or state.cancel_force
+            note_cancel(state, force=force or state.cancel_force, phase="tool_exec")
             return "CANCELLED"
 
         if result.get("status") == "approval_required":

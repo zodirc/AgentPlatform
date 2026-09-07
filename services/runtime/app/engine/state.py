@@ -48,8 +48,14 @@ class TurnState:
     usage: Usage = field(default_factory=Usage)
     cancelled: bool = False
     cancel_force: bool = False
+    cancelled_at_phase: str | None = None
     termination_reason: str = "final"
     budget_exceeded: bool = False
+    turn_token_budget: int = 0
+    fill_ratio_max: float = 0.0
+    model_queue_wait_s: float = 0.0
+    pointerized_n: int = 0
+    loaded_skill_names: list[str] = field(default_factory=list)
     delivery: dict[str, Any] | None = None
     # Intake 可选提示（如多目标 → 建议 update_plan）；从不强制工具。
     plan_hint: str | None = None

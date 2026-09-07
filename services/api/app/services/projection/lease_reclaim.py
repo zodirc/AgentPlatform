@@ -93,7 +93,7 @@ async def reconcile_expired_leases() -> int:
         WHERE r.status IN ('running', 'interrupted')
           AND r.lease_expires_at IS NOT NULL
           AND r.lease_expires_at < now()
-          AND t.status IN ('pending', 'running', 'waiting_approval')
+          AND t.status IN ('pending', 'running', 'waiting_approval', 'waiting_child')
         ORDER BY r.lease_expires_at ASC
         LIMIT $1
         """,
