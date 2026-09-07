@@ -995,6 +995,7 @@ class ModelGateway:
         self._provider = provider
         self._cancel_event = asyncio.Event()
         self.retry_count = 0
+        self.last_queue_wait_s = 0.0
 
     def abort_stream(self) -> None:
         self._cancel_event.set()
@@ -1002,6 +1003,7 @@ class ModelGateway:
     async def stream(self, *, messages: list[dict], tools: list[dict]) -> AsyncIterator[str | ModelResponse]:
         self._cancel_event.clear()
         self.retry_count = 0
+        self.last_queue_wait_s = 0.0
         overall_deadline = time.monotonic() + settings.model_timeout_seconds
         max_attempts = max(1, settings.model_max_retries + 1)
         attempt = 0
@@ -1025,20 +1027,24 @@ class ModelGateway:
                 emitted_user_visible = False
                 emitted_liveness = False
                 try:
-                    async for item in self._stream_attempt(
-                        messages=outbound,
-                        tools=tools,
-                        overall_deadline=overall_deadline,
-                        attempt_abort=attempt_abort,
-                    ):
-                        if isinstance(item, StreamActivity):
-                            emitted_liveness = True
-                        else:
-                            # Text deltas and final ModelResponse are committed
-                            # to the user-visible turn; retrying them duplicates
-                            # output. Liveness/reasoning signals are ephemeral.
-                            emitted_user_visible = True
-                        yield item
+                    from app.model.scheduler import acquire_model_slot
+
+                    async with acquire_model_slot() as waited:
+                        self.last_queue_wait_s += float(waited)
+                        async for item in self._stream_attempt(
+                            messages=outbound,
+                            tools=tools,
+                            overall_deadline=overall_deadline,
+                            attempt_abort=attempt_abort,
+                        ):
+                            if isinstance(item, StreamActivity):
+                                emitted_liveness = True
+                            else:
+                                # Text deltas and final ModelResponse are committed
+                                # to the user-visible turn; retrying them duplicates
+                                # output. Liveness/reasoning signals are ephemeral.
+                                emitted_user_visible = True
+                            yield item
                     return
                 except ModelTransientError as exc:
                     # Abort via aclose often surfaces as transport errors; Cancel
@@ -1063,7 +1069,11 @@ class ModelGateway:
                     )
                     self.retry_count = attempt
                     attempt_abort.set()
-                    if not await self._interruptible_sleep(delay, overall_deadline):
+                    from app.model.scheduler import retry_backoff
+
+                    if not await retry_backoff(
+                        delay, cancel_event=self._cancel_event, deadline=overall_deadline
+                    ):
                         if self._cancel_event.is_set():
                             return
                         raise ModelProviderTimeout(
@@ -1094,7 +1104,11 @@ class ModelGateway:
                         )
                         self.retry_count = attempt
                         attempt_abort.set()
-                        if not await self._interruptible_sleep(delay, overall_deadline):
+                        from app.model.scheduler import retry_backoff
+
+                        if not await retry_backoff(
+                            delay, cancel_event=self._cancel_event, deadline=overall_deadline
+                        ):
                             if self._cancel_event.is_set():
                                 return
                             raise ModelProviderTimeout(
@@ -1177,16 +1191,6 @@ class ModelGateway:
                     await aclose()
                 except Exception:
                     logger.debug("provider stream aclose failed", exc_info=True)
-
-    async def _interruptible_sleep(self, delay: float, deadline: float) -> bool:
-        """Sleep up to delay; return False if cancel or overall deadline wins."""
-        end = min(time.monotonic() + max(0.0, delay), deadline)
-        while time.monotonic() < end:
-            if self._cancel_event.is_set():
-                return False
-            await asyncio.sleep(min(0.05, end - time.monotonic()))
-        return not self._cancel_event.is_set() and time.monotonic() <= deadline
-
 
 def _backoff_seconds(attempt: int, exc: ModelTransientError) -> float:
     if exc.retry_after is not None and exc.retry_after >= 0:

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from typing import Any
 
 import pytest
 
@@ -15,6 +16,14 @@ from app.model.gateway import (
     classify_http_status,
 )
 from app.model.generation import GenerationParams
+from app.model.scheduler import reset_model_scheduler
+
+
+@pytest.fixture(autouse=True)
+def _reset_model_scheduler() -> Iterator[None]:
+    reset_model_scheduler()
+    yield
+    reset_model_scheduler()
 
 
 class _ScriptedProvider:
