@@ -27,6 +27,7 @@
         "pending",
         "running",
         "waiting_approval",
+        "waiting_child",
         "completed",
         "failed",
         "cancelled"
@@ -46,7 +47,7 @@
     "updated_at": { "type": "string", "format": "date-time" },
     "cancellable": {
       "type": "boolean",
-      "description": "true when status is pending or running"
+      "description": "true when status is pending, running, or waiting_child"
     },
     "cancel_requested_at": {
       "type": ["string", "null"],
@@ -57,7 +58,7 @@
       "type": ["object", "null"],
       "additionalProperties": false,
       "properties": {
-        "kind": { "type": "string", "enum": ["approval"] },
+        "kind": { "type": "string", "enum": ["approval", "child"] },
         "tool_call_id": { "type": "string" }
       },
       "required": ["kind", "tool_call_id"]

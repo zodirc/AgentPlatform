@@ -3,6 +3,19 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.15 — 2026-09-07
+
+- `turn_view.status` / `step.completed.outcome` 增补 `waiting_child`（父 Turn 挂起会合子代理）。
+- `turn_view.interrupt.kind` 增补 `child`。向后兼容。
+
+## 0.3.14 — 2026-09-07
+
+- `context.reported`: 可选 `pointerized_n` / `tool_result_tokens`（组窗卫生与指针化记账）。
+- `usage.reported`: 可选 `model_queue_wait_s`（模型调度槽等待）。
+- `turn.completed.token_usage`: 可选 `fill_ratio_max` / `model_queue_wait_s` / `pointerized_n`。
+- `turn.cancelling.cancelled_at_phase`: 增补取消生命周期阶段（requested / executor_stopped / tools_cleaned / state_flushed）。
+- DDL `phase2_work_memories.sql`：Work 级记忆表（scope / lifetime / trust）。向后兼容。
+
 ## 0.3.13 — 2026-08-31
 
 - `events/envelope.json`: 支持活流信封 `live=true` + `sequence=null` + `live_seq>=1`

@@ -41,6 +41,16 @@
       "description": "C3 audit: per-tool-name counts of budget truncations this assemble.",
       "additionalProperties": { "type": "integer", "minimum": 0 }
     },
+    "pointerized_n": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Stale tool_result bodies replaced with path/query pointers this assemble."
+    },
+    "tool_result_tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Estimated tokens in tool_result bodies after hygiene (same as breakdown.tool_results)."
+    },
     "breakdown": {
       "type": "object",
       "additionalProperties": false,

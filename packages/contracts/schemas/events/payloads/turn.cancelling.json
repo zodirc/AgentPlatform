@@ -9,7 +9,16 @@
     "force": { "type": "boolean" },
     "cancelled_at_phase": {
       "type": "string",
-      "enum": ["model_stream", "tool_exec", "assemble", "step_boundary"]
+      "enum": [
+        "requested",
+        "executor_stopped",
+        "tools_cleaned",
+        "state_flushed",
+        "model_stream",
+        "tool_exec",
+        "assemble",
+        "step_boundary"
+      ]
     }
   }
 }

@@ -32,7 +32,10 @@
       "additionalProperties": false,
       "properties": {
         "input_tokens": { "type": "integer", "minimum": 0 },
-        "output_tokens": { "type": "integer", "minimum": 0 }
+        "output_tokens": { "type": "integer", "minimum": 0 },
+        "fill_ratio_max": { "type": "number", "minimum": 0 },
+        "model_queue_wait_s": { "type": "number", "minimum": 0 },
+        "pointerized_n": { "type": "integer", "minimum": 0 }
       }
     },
     "post_turn_jobs": {

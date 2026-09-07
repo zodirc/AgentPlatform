@@ -1,6 +1,6 @@
 [project]
 name = "agent-contracts-tests"
-version = "0.3.12"
+version = "0.3.15"
 requires-python = ">=3.11"
 dependencies = [
     "jsonschema>=4.21",

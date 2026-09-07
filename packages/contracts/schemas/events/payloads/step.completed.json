@@ -23,6 +23,7 @@
         "completed",
         "cancelled",
         "waiting_approval",
+        "waiting_child",
         "failed"
       ]
     },

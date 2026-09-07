@@ -26,6 +26,11 @@
       "type": "number",
       "minimum": 0,
       "description": "C3 audit: estimated_tokens / provider step_input_tokens (1.0 = perfect)."
+    },
+    "model_queue_wait_s": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Seconds spent waiting for the process-wide model scheduler slot this step."
     }
   }
 }
