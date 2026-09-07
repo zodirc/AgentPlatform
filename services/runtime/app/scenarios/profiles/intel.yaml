@@ -17,6 +17,8 @@ tool_names:
   - export_document
   - remember
   - recall
+  - forget
+  - load_skill
   - delegate
 subagent_types:
   - researcher

@@ -791,6 +791,11 @@ def build_registry() -> ToolRegistry:
                         "items": {"type": "string"},
                         "description": "Alias of context_refs",
                     },
+                    "wait": {
+                        "type": "boolean",
+                        "default": True,
+                        "description": "If false, still joins this child in the current batch; pair with a sibling readonly delegate for parallel wait/join.",
+                    },
                 },
                 "required": ["task"],
             },
@@ -895,6 +900,40 @@ def build_registry() -> ToolRegistry:
             handler=memory_tools.recall,
         )
     )
+    registry.register(
+        ToolSpec(
+            name="forget",
+            description="Delete a remembered note by id or substring query in a namespace.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "memory_id": {"type": "string", "default": ""},
+                    "query": {"type": "string", "default": ""},
+                    "namespace": {"type": "string", "default": "prefs"},
+                },
+            },
+            handler=memory_tools.forget,
+        )
+    )
+    from app.skills.loader import load_skill
+
+    registry.register(
+        ToolSpec(
+            name="load_skill",
+            description=(
+                "Load a skill pack (delegate, memory, verify) into volatile context. "
+                "Does not change tools[] schema bytes."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Pack stem: delegate|memory|verify"},
+                },
+                "required": ["name"],
+            },
+            handler=load_skill,
+        )
+    )
     from app.tools.core import records as record_tools
 
     registry.register(
@@ -968,7 +1007,9 @@ def build_registry() -> ToolRegistry:
 # Late-stage drop set: when delivery succeeded (or steps nearly exhausted), the
 # runtime gates these retrieval/memory tools without mutating tools[] schema.
 # 成稿/导出成功或接近步数上限时，运行时闸掉的检索/记忆类工具（不改 tools[] schema）。
-_LATE_STAGE_DROP = frozenset({"search_sources", "delegate", "remember", "recall"})
+_LATE_STAGE_DROP = frozenset(
+    {"search_sources", "delegate", "remember", "recall", "forget", "load_skill"}
+)
 
 # Plan phase "planning": only allow plan edits — no retrieval / disk write / exec
 # until the user clicks "execute this plan".

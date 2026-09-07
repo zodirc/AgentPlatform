@@ -151,6 +151,15 @@ def extract_issue_repro_hints(problem_text: str) -> dict[str, Any]:
 
     need_roundtrip = _should_require_roundtrip(text, write_formats, read_formats, roundtrip_kwargs)
     need_casefold = bool(_CASEFOLD_CLAIM_RE.search(text))
+    # Round-trip / ascii table samples must still prove casefold even when the
+    # issue never says "case insensitive" (hidden F2P may use NO vs no).
+    if not need_casefold:
+        ascii_ish = any(
+            "ascii." in f.lower() or f.lower().endswith(".qdp")
+            for f in [*formats, *read_formats, *write_formats]
+        ) or bool(re.search(r"ascii\.qdp|\.qdp\b", text, re.IGNORECASE))
+        if (assets or data_fences) and (need_roundtrip or ascii_ish or bool(read_formats)):
+            need_casefold = True
 
     casefold_assets: list[str] = []
     if need_casefold:

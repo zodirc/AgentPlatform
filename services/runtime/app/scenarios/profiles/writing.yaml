@@ -17,6 +17,8 @@ tool_names:
   - export_document
   - remember
   - recall
+  - forget
+  - load_skill
   - delegate
   - writing_rubric
   - evaluate_writing_fragment

@@ -304,6 +304,38 @@ read serr 1 2
     assert obligations_met_for_command(repro_cf, hints) is True
 
 
+def test_issue_repro_casefold_without_claim_phrase() -> None:
+    from app.structural.issue_repro import (
+        extract_issue_repro_hints,
+        obligations_met_for_command,
+    )
+
+    problem = """
+QDP reader fails on:
+```
+read serr 1 2
+1 0.5 1 0.5
+```
+>>> Table.read('test.qdp', format='ascii.qdp')
+"""
+    hints = extract_issue_repro_hints(problem)
+    assert hints["need_casefold"] is True
+    assert "no" not in hints["required_tokens"]
+    repro = (
+        'python -c "from astropy.table import Table; '
+        "open('t.qdp','w').write('read serr 1 2\\n1 0.5 1 0.5\\n'); "
+        'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
+    )
+    assert obligations_met_for_command(repro, hints) is False
+    repro_cf = (
+        'python -c "from astropy.table import Table; '
+        "body='read serr 1 2\\n1 0.5 1 0.5\\n'; "
+        "open('t.qdp','w').write(body.lower()); "
+        'Table.read(\'t.qdp\', format=\'ascii.qdp\')"'
+    )
+    assert obligations_met_for_command(repro_cf, hints) is True
+
+
 def test_issue_repro_roundtrip_required_for_write_header_rows() -> None:
     from app.structural.issue_repro import (
         extract_issue_repro_hints,

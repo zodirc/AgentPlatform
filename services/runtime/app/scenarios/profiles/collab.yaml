@@ -14,6 +14,8 @@ tool_names:
   - update_plan
   - remember
   - recall
+  - forget
+  - load_skill
   - search_records
   - run_command
   - run_tests
