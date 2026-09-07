@@ -22,6 +22,7 @@ x-runtime-env: &runtime-env
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
   MODEL_EGRESS_ENFORCE: ${MODEL_EGRESS_ENFORCE:-false}
   DATA_DIR: /data
+  MEMORY_BACKEND: ${MEMORY_BACKEND:-postgres}
   WORKSPACE_ROOT: /workspace
   APP_ENV: ${APP_ENV:-production}
   LOG_LEVEL: ${LOG_LEVEL:-INFO}

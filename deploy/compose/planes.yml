@@ -195,6 +195,7 @@ services:
       TURN_DISPATCH_WAKE: ${TURN_DISPATCH_WAKE:-redis}
       EVENT_DURABILITY: ${EVENT_DURABILITY:-checkpoint}
       TURN_LIVE_PUBLISH_ENABLED: ${TURN_LIVE_PUBLISH_ENABLED:-true}
+      MEMORY_BACKEND: ${MEMORY_BACKEND:-postgres}
     depends_on:
       sources-retrieval:
         condition: service_healthy

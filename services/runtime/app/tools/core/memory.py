@@ -1,7 +1,7 @@
-"""Agent 偏好/笔记记忆：``remember`` 持久化、``recall`` 按需向量召回。
+"""Agent 偏好/笔记记忆：``remember`` / ``recall`` / ``forget``。
 
-与 ``sources`` RAG 分离：按 ``namespace`` 分桶存于 ``data/memory/{work_id}/memories.json``，
-嵌入向量 + 重要性排序，上限 500 条；不会每 turn 自动注入上下文。
+与 ``sources`` RAG 分离。默认 Postgres ``work_memories``（``MEMORY_BACKEND=json`` 仅文件，互不回落）。
+按 namespace + scope（work/session）隔离；``sources``/``rag`` 命名空间保留。
 """
 
 from __future__ import annotations
@@ -12,12 +12,19 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from app.policy.inject import remember_text_blocked
 from app.retrieval.embedder import cosine_similarity, get_embedder
 from app.settings import settings
+from app.tools.core import memory_pg
+
+_PG_FAIL = "memory backend postgres failed"
+
+
+def _use_postgres() -> bool:
+    return str(getattr(settings, "memory_backend", "postgres") or "postgres").lower() == "postgres"
 
 
 def _memory_path() -> Path:
-    """返回当前 Work 的记忆 JSON 路径（无 work_id 时用全局默认）。"""
     from app.tenant_context import current_work_id
 
     work_id = current_work_id()
@@ -28,7 +35,6 @@ def _memory_path() -> Path:
 
 
 def _load() -> list[dict[str, Any]]:
-    """从磁盘加载记忆列表；文件缺失或损坏时返回空列表。"""
     path = _memory_path()
     if not path.is_file():
         return []
@@ -40,28 +46,29 @@ def _load() -> list[dict[str, Any]]:
 
 
 def _save(items: list[dict[str, Any]]) -> None:
-    """将记忆列表原子写入 ``memories.json``（自动创建父目录）。"""
     path = _memory_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _visible(item: dict[str, Any], *, session_id: Any) -> bool:
+    scope = str(item.get("scope") or "work")
+    if scope != "session":
+        return True
+    sid = str(session_id or "")
+    stored = str(item.get("session_id") or "")
+    return bool(sid) and stored == sid
 
 
 async def remember(
     text: str,
     namespace: str = "prefs",
     importance: float = 0.5,
-    **_kwargs: Any,
+    scope: str = "work",
+    lifetime: str = "work",
+    trust: str = "user",
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    """将偏好/笔记写入记忆库（非 sources RAG）。
-
-    参数:
-        text: 待记忆正文。
-        namespace: 命名空间；``sources``/``rag`` 保留不可用。
-        importance: 0–1 重要性，影响截断保留与召回加权。
-
-    返回:
-        含 ``id``/``namespace``/``status``/``summary`` 的 dict；空 text 或非法 namespace 时 ``status=failed``。
-    """
     body = (text or "").strip()
     if not body:
         return {"error": "text is required", "status": "failed"}
@@ -71,7 +78,15 @@ async def remember(
             "error": "namespace 'sources'/'rag' reserved; use search_sources for materials",
             "status": "failed",
         }
+    blocked = remember_text_blocked(trust=trust)
+    if blocked:
+        return {"error": blocked, "status": "failed"}
     importance = max(0.0, min(float(importance), 1.0))
+    scope_n = (scope or "work").strip() or "work"
+    if scope_n not in {"work", "session"}:
+        scope_n = "work"
+    lifetime_n = (lifetime or "work").strip() or "work"
+    session_id = kwargs.get("session_id")
     embedder = get_embedder()
     item = {
         "id": f"mem-{uuid.uuid4().hex[:10]}",
@@ -80,10 +95,27 @@ async def remember(
         "importance": importance,
         "vector": embedder.embed(body[:4000]),
         "created_at": time.time(),
+        "scope": scope_n,
+        "lifetime": lifetime_n,
+        "trust": (trust or "user").strip() or "user",
+        "session_id": str(session_id) if session_id else None,
     }
+    from app.tenant_context import current_work_id
+
+    work_id = current_work_id()
+    if _use_postgres():
+        if not await memory_pg.pg_insert(item, work_id=work_id):
+            return {"error": _PG_FAIL, "status": "failed"}
+        return {
+            "id": item["id"],
+            "namespace": ns,
+            "importance": importance,
+            "scope": scope_n,
+            "status": "remembered",
+            "summary": f"Remembered into namespace={ns} scope={scope_n}",
+        }
     items = _load()
     items.append(item)
-    # Cap store size to keep recall cheap.
     if len(items) > 500:
         items = sorted(items, key=lambda x: float(x.get("importance", 0)), reverse=True)[:500]
     _save(items)
@@ -91,8 +123,9 @@ async def remember(
         "id": item["id"],
         "namespace": ns,
         "importance": importance,
+        "scope": scope_n,
         "status": "remembered",
-        "summary": f"Remembered into namespace={ns}",
+        "summary": f"Remembered into namespace={ns} scope={scope_n}",
     }
 
 
@@ -100,24 +133,24 @@ async def recall(
     query: str,
     namespace: str = "prefs",
     limit: int = 5,
-    **_kwargs: Any,
+    **kwargs: Any,
 ) -> dict[str, Any]:
-    """按需向量召回记忆（不会每 turn 自动调用）。
-
-    参数:
-        query: 查询文本。
-        namespace: 限定命名空间。
-        limit: 返回条数上限（1–20）。
-
-    返回:
-        含 ``hits``（``id``/``text``/``score``）与 ``summary`` 的 dict。
-    """
     q = (query or "").strip()
     if not q:
         return {"error": "query is required", "hits": [], "status": "failed"}
     ns = (namespace or "prefs").strip() or "prefs"
     limit = max(1, min(int(limit), 20))
-    items = [i for i in _load() if str(i.get("namespace", "")) == ns]
+    from app.tenant_context import current_work_id
+
+    if _use_postgres():
+        pg_items = await memory_pg.pg_load(work_id=current_work_id(), namespace=ns)
+        if pg_items is None:
+            return {"error": _PG_FAIL, "query": q, "namespace": ns, "hits": [], "status": "failed"}
+        items = pg_items
+    else:
+        items = [i for i in _load() if str(i.get("namespace", "")) == ns]
+    session_id = kwargs.get("session_id")
+    items = [i for i in items if _visible(i, session_id=session_id)]
     if not items:
         return {
             "query": q,
@@ -145,6 +178,7 @@ async def recall(
                 "text": item.get("text"),
                 "importance": item.get("importance"),
                 "score": round(float(score), 4),
+                "scope": item.get("scope") or "work",
             }
         )
     return {
@@ -154,3 +188,34 @@ async def recall(
         "summary": f"recall: {len(hits)} hit(s) in {ns}",
         "status": "ok",
     }
+
+
+async def forget(
+    memory_id: str = "",
+    query: str = "",
+    namespace: str = "prefs",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    mid = (memory_id or "").strip()
+    q = (query or "").strip()
+    if not mid and not q:
+        return {"error": "memory_id or query is required", "status": "failed", "deleted": 0}
+    from app.tenant_context import current_work_id
+
+    if _use_postgres():
+        pg_n = await memory_pg.pg_delete(
+            work_id=current_work_id(), memory_id=mid or None, query=q or None
+        )
+        if pg_n < 0:
+            return {"error": _PG_FAIL, "status": "failed", "deleted": 0}
+        return {"status": "ok", "deleted": pg_n, "summary": f"forget: deleted {pg_n}"}
+    items = _load()
+    before = len(items)
+    if mid:
+        items = [i for i in items if str(i.get("id")) != mid]
+    elif q:
+        needle = q.lower()
+        items = [i for i in items if needle not in str(i.get("text") or "").lower()]
+    _save(items)
+    deleted = before - len(items)
+    return {"status": "ok", "deleted": deleted, "summary": f"forget: deleted {deleted}"}

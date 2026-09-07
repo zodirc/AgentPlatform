@@ -37,6 +37,7 @@ def _isolate_host_deploy_env(
     monkeypatch.setattr(settings, "embedding_model", "hash")
     monkeypatch.setattr(settings, "retrieval_backend", "json")
     monkeypatch.setattr(settings, "data_dir", str(data))
+    monkeypatch.setattr(settings, "memory_backend", "json")
     monkeypatch.setattr(settings, "workspace_root", str(data / "workspace"))
     # Fail fast if any code still tries the docker hostname from compose .env.
     monkeypatch.setattr(

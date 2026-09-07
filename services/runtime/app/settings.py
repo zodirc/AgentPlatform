@@ -252,6 +252,9 @@ class Settings(BaseSettings):
     model_max_retries: int = 2
     model_retry_base_delay_seconds: float = 0.5
     model_retry_max_delay_seconds: float = 8.0
+    model_scheduler_global_slots: int = 4
+    model_scheduler_per_tenant_slots: int = 2
+    memory_backend: str = "postgres"
     # Generation strategy (aligned with CompactionPolicy.output_reserve_tokens).
     # 0 → scale reserve with context window (see context_output_* below).
     model_max_output_tokens: int = 0
