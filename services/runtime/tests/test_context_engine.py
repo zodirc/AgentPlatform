@@ -31,7 +31,12 @@ def test_context_engine_truncates_large_tool_results() -> None:
     assembled = engine.assemble(system_prompt="sys", state=state)
     blob = str(assembled)
     assert engine.last_compaction_trace
-    assert "budget_truncated" in blob or "autocompact" in blob or "collapsed" in blob
+    assert (
+        "budget_truncated" in blob
+        or "autocompact" in blob
+        or "collapsed" in blob
+        or "_pointer" in blob
+    )
 
 
 def test_latest_read_file_keeps_large_body() -> None:

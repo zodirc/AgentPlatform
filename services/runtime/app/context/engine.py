@@ -526,6 +526,23 @@ class ContextEngine:
         if budgeted:
             trace.append({"strategy": "budget", "detail": f"truncated_{budgeted}_tool_results"})
 
+        peek_fill, _ = _window_fill(
+            messages=messages,
+            system_prompt=system_prompt,
+            tools=tools,
+            policy=policy,
+            project_context=project_context,
+            runtime_context=runtime_context,
+            volatile_context=volatile,
+        )
+        pointerized = 0
+        if peek_fill >= policy.fill_collapse:
+            from app.context.pointers import pointerize_stale_tool_results
+
+            messages, pointerized = pointerize_stale_tool_results(messages)
+        if pointerized:
+            trace.append({"strategy": "pointerize", "detail": f"pointerized_{pointerized}_tool_results"})
+
         messages, micro = _microcompact_tool_results(messages)
         if micro:
             trace.append({"strategy": "microcompact", "detail": f"folded_{micro}_tool_results"})
@@ -625,6 +642,7 @@ class ContextEngine:
                 "budget_truncated_n": int(budgeted),
                 "budget_truncated_by_tool": dict(truncated_by_tool),
                 "estimated_tokens": int(window_after["tokens_after"]),
+                "pointerized_n": int(pointerized),
             },
             compaction_trace=trace,
             project_context=project_context,
