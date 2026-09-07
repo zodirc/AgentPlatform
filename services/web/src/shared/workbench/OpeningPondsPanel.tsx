@@ -120,15 +120,14 @@ export function OpeningPondsPanel({
   onMore,
 }: Props) {
   const items = ponds?.items ?? [];
+  const firstId = items[0]?.id ?? null;
   const [open, setOpen] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(
-    items[0]?.id ?? null,
-  );
+  const [expandedId, setExpandedId] = useState<string | null>(firstId);
 
   useEffect(() => {
     setOpen(true);
-    setExpandedId(items[0]?.id ?? null);
-  }, [ponds?.ponds_id, items.length]);
+    setExpandedId(firstId);
+  }, [ponds?.ponds_id, firstId]);
 
   if (items.length < 2) return null;
 
