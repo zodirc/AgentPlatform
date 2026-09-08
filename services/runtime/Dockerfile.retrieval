@@ -4,8 +4,10 @@
 # (e.g. https://download.pytorch.org/whl/cu128 for RTX 50xx) via compose.
 # BR3 (docs/38): model-baker + deps (pip/ST/models) then thin app stage.
 # Changing app/** / system.md must not re-download torch or re-bake GTE.
-# model-baker installs torch from offline torch_wheel_cache when present (same as deps);
-# otherwise falls back to TORCH_FIND_LINKS (CPU). Final image keeps baked models only.
+# model-baker: seed from torch_wheel_cache / model-bake-cache when present;
+# otherwise one shared torch-wheels stage downloads the CPU wheel (~180MB) once
+# for baker + deps (no parallel double fetch, no PyPI+triton).
+# Final image keeps baked models only.
 # Base digest pinned (deploy/base-images.env) so Hub tag moves do not bust deps.
 
 ARG PYTHON_BASE=python:3.11-slim@sha256:a630a63cdb314e2d138a2fca3e375e319e8568346ffafac5b980f888630ac4f1
@@ -16,6 +18,23 @@ ARG TORCH_FIND_LINKS=https://mirrors.aliyun.com/pytorch-wheels/cpu
 ARG TORCH_INDEX_URL=
 ARG HF_ENDPOINT=https://hf-mirror.com
 ARG APT_MIRROR=mirrors.aliyun.com
+
+# Download the torch wheel once. baker + deps bind-mount /wheels (no second
+# 180MB fetch). Cache mount id=agent-torch-wheels survives builder prune -f.
+FROM ${PYTHON_BASE} AS torch-wheels
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG TORCH_FIND_LINKS
+ARG TORCH_INDEX_URL
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY services/runtime/scripts/pip_install_torch.sh /tmp/pip_install_torch.sh
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,id=agent-torch-wheels,target=/wheels-cache \
+    TORCH_WHEEL_DEST=/wheels TORCH_WHEEL_CACHE_DIR=/wheels-cache \
+      sh /tmp/pip_install_torch.sh --download-only
 
 FROM ${PYTHON_BASE} AS model-baker
 ARG EMBEDDING_MODEL
@@ -41,24 +60,10 @@ RUN set -eux; \
     apt-get update && apt-get install -y --no-install-recommends curl bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
-# Prefer offline torch from named context `torch_wheel_cache` (same as deps) so
-# cold builds after prune do not re-download ~192MB CPU torch from the mirror.
-# Baker only needs torch to load/save ST weights; final image keeps models only.
-RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
-    --mount=type=cache,target=/root/.cache/pip \
-    set -eux; \
-    if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
-      echo "model-baker: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
-      pip install --no-index --find-links=/tmp/torch-wheels torch; \
-    else \
-      echo "model-baker: no wheel cache → torch from ${TORCH_FIND_LINKS}"; \
-      pip install torch -f "${TORCH_FIND_LINKS}"; \
-    fi; \
-    pip install "sentence-transformers>=3.0"
-# Offline model seed via named build context `model_bake_cache` (compose
-# additional_contexts) — not the main context, so multi-GB trees are not
-# transferred on every build. Content changes do not bust this layer — bump
-# EMBEDDING_MODEL or RUNTIME_REBUILD_DEPS=1 to re-bake.
+# Seed baked weights first. If deploy/model-bake-cache already has the model,
+# skip torch/ST entirely (do not wait on / download the 180MB wheel).
+# Offline model seed via named context `model_bake_cache` — not main context.
+COPY services/runtime/scripts/pip_install_torch.sh /tmp/pip_install_torch.sh
 RUN --mount=type=bind,from=model_bake_cache,target=/models-bake-cache,ro \
     set -eux; \
     cache_name="models--$(echo "${EMBEDDING_MODEL}" | sed 's|/|--|g')"; \
@@ -67,10 +72,24 @@ RUN --mount=type=bind,from=model_bake_cache,target=/models-bake-cache,ro \
       echo "model-baker: seeding ${cache_name} from deploy/model-bake-cache (offline)"; \
       cp -a "/models-bake-cache/${cache_name}" /models-baked/; \
       if [ -f /models-bake-cache/CACHEDIR.TAG ]; then cp -a /models-bake-cache/CACHEDIR.TAG /models-baked/; fi; \
+      printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model; \
     else \
-      echo "model-baker: cache miss for ${cache_name} → download ${EMBEDDING_MODEL} via ${HF_ENDPOINT}"; \
-      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
+      echo "model-baker: no bake cache for ${cache_name}"; \
+    fi
+# Never `pip install torch -f …` while PIP_INDEX_URL is PyPI (triton ~800MB).
+# Prefetch stage bind-mount: install locally after one download.
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=bind,from=torch-wheels,source=/wheels,target=/tmp/torch-prefetched,ro \
+    --mount=type=cache,target=/root/.cache/pip \
+    set -eux; \
+    if [ -s /models-baked/.baked_embedding_model ]; then \
+      echo "model-baker: models already seeded, skip torch/ST"; \
+      exit 0; \
     fi; \
+    sh /tmp/pip_install_torch.sh; \
+    pip install -c /tmp/torch.pin "sentence-transformers>=3.0"; \
+    echo "model-baker: cache miss → download ${EMBEDDING_MODEL} via ${HF_ENDPOINT}"; \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
     printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model
 
 FROM ${PYTHON_BASE} AS deps
@@ -101,28 +120,22 @@ WORKDIR /app
 
 COPY packages/contracts/python/pyproject.deps.toml /tmp/contracts/pyproject.toml
 COPY services/runtime/pyproject.toml /tmp/runtime/pyproject.toml
+COPY services/runtime/scripts/pip_install_torch.sh /tmp/pip_install_torch.sh
 # Offline CUDA wheels via named context `torch_wheel_cache` (not main context).
-# Falls back to TORCH_INDEX_URL / CPU find-links when the cache has no .whl files.
-# BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local (no mirror re-fetch).
-# Do not use pip --no-cache-dir here — that bypasses the mount.
+# Falls back to TORCH_INDEX_URL / CPU index when the cache has no .whl files.
+# Isolate torch from PIP_INDEX_URL (PyPI torch + triton). Pin torch so the
+# [retrieval] extra cannot upgrade it. BuildKit pip cache mount: if deps layer
+# is GC'd and re-RUN, wheels stay local. Do not use pip --no-cache-dir.
 # Frozen deps pin (not SemVer pyproject). Real agent_contracts overlay in app stage.
 RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=bind,from=torch-wheels,source=/wheels,target=/tmp/torch-prefetched,ro \
     --mount=type=cache,target=/root/.cache/pip \
     mkdir -p /tmp/contracts/agent_contracts /tmp/runtime/app \
     && printf '%s\n' '# deps-layer stub' > /tmp/contracts/agent_contracts/__init__.py \
     && printf '%s\n' '# deps-layer stub' > /tmp/runtime/app/__init__.py \
-    && if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
-         echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
-         pip install --no-index --find-links=/tmp/torch-wheels torch; \
-       elif [ -n "${TORCH_INDEX_URL}" ]; then \
-         echo "deps: installing CUDA torch from ${TORCH_INDEX_URL}"; \
-         pip install --default-timeout=300 --retries=5 torch --index-url "${TORCH_INDEX_URL}"; \
-       else \
-         echo "deps: installing CPU torch from ${TORCH_FIND_LINKS}"; \
-         pip install --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
-       fi \
-    && pip install /tmp/contracts \
-    && pip install "/tmp/runtime[retrieval,structural]" \
+    && sh /tmp/pip_install_torch.sh \
+    && pip install -c /tmp/torch.pin /tmp/contracts \
+    && pip install -c /tmp/torch.pin "/tmp/runtime[retrieval,structural]" \
     && rm -rf /tmp/runtime /tmp/contracts
 
 # Bake tree-sitter grammars at build time (no runtime GitHub download / GIL hang).

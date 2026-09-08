@@ -14,6 +14,21 @@ ARG APT_MIRROR=mirrors.aliyun.com
 ARG HF_ENDPOINT=https://hf-mirror.com
 ARG EMBEDDING_MODEL=thenlper/gte-small
 
+FROM ${PYTHON_BASE} AS torch-wheels
+ARG PIP_INDEX_URL
+ARG PIP_TRUSTED_HOST
+ARG TORCH_FIND_LINKS
+ARG TORCH_INDEX_URL
+ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST} \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+COPY services/runtime/scripts/pip_install_torch.sh /tmp/pip_install_torch.sh
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=cache,id=agent-torch-wheels,target=/wheels-cache \
+    TORCH_WHEEL_DEST=/wheels TORCH_WHEEL_CACHE_DIR=/wheels-cache \
+      sh /tmp/pip_install_torch.sh --download-only
+
 FROM ${PYTHON_BASE} AS model-baker
 ARG EMBEDDING_MODEL
 ARG PIP_INDEX_URL
@@ -38,28 +53,30 @@ RUN set -eux; \
     apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
-    --mount=type=cache,target=/root/.cache/pip \
-    set -eux; \
-    if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
-      echo "model-baker: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
-      pip install --no-index --find-links=/tmp/torch-wheels torch; \
-    else \
-      echo "model-baker: no wheel cache → torch from ${TORCH_FIND_LINKS}"; \
-      pip install torch -f "${TORCH_FIND_LINKS}"; \
-    fi; \
-    pip install "sentence-transformers>=3.0"
-# Named context `model_bake_cache` (compose additional_contexts) — not main context.
+COPY services/runtime/scripts/pip_install_torch.sh /tmp/pip_install_torch.sh
 RUN --mount=type=bind,from=model_bake_cache,target=/models-bake-cache,ro \
     set -eux; \
+    mkdir -p /models-baked; \
     if find /models-bake-cache -mindepth 1 -maxdepth 1 ! -name '.keep' -print -quit | grep -q .; then \
       echo "model-baker: seeding /models-baked from deploy/model-bake-cache (offline)"; \
-      mkdir -p /models-baked; \
       cp -a /models-bake-cache/. /models-baked/; \
+      printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model; \
     else \
-      echo "model-baker: cache empty → download ${EMBEDDING_MODEL}"; \
-      python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
+      echo "model-baker: bake cache empty"; \
     fi
+RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=bind,from=torch-wheels,source=/wheels,target=/tmp/torch-prefetched,ro \
+    --mount=type=cache,target=/root/.cache/pip \
+    set -eux; \
+    if [ -s /models-baked/.baked_embedding_model ]; then \
+      echo "model-baker: models already seeded, skip torch/ST"; \
+      exit 0; \
+    fi; \
+    sh /tmp/pip_install_torch.sh; \
+    pip install -c /tmp/torch.pin "sentence-transformers>=3.0"; \
+    echo "model-baker: cache empty → download ${EMBEDDING_MODEL}"; \
+    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('${EMBEDDING_MODEL}', cache_folder='/models-baked')"; \
+    printf '%s\n' "${EMBEDDING_MODEL}" > /models-baked/.baked_embedding_model
 
 FROM ${PYTHON_BASE} AS deps
 ARG PIP_INDEX_URL
@@ -88,22 +105,16 @@ RUN mkdir -p /data/ops-official/data /data/ops-official/reports /data/models /ap
 WORKDIR /app
 
 COPY services/bench/requirements.txt /tmp/bench-requirements.txt
+COPY services/runtime/scripts/pip_install_torch.sh /tmp/pip_install_torch.sh
 # Named context `torch_wheel_cache` (compose additional_contexts).
-# BuildKit pip cache mount: if deps layer is GC'd and re-RUN, wheels stay local.
-# Do not use pip --no-cache-dir here — that bypasses the mount.
+# Isolate torch from PIP_INDEX_URL (PyPI torch + triton). Pin so requirements
+# cannot upgrade it. BuildKit pip cache mount: if deps layer is GC'd and re-RUN,
+# wheels stay local. Do not use pip --no-cache-dir.
 RUN --mount=type=bind,from=torch_wheel_cache,target=/tmp/torch-wheels,ro \
+    --mount=type=bind,from=torch-wheels,source=/wheels,target=/tmp/torch-prefetched,ro \
     --mount=type=cache,target=/root/.cache/pip \
-    if ls /tmp/torch-wheels/*.whl >/dev/null 2>&1; then \
-      echo "deps: installing torch from offline wheel cache ($(ls /tmp/torch-wheels/*.whl | wc -l) files)"; \
-      pip install --no-index --find-links=/tmp/torch-wheels torch; \
-    elif [ -n "${TORCH_INDEX_URL}" ]; then \
-      echo "deps: installing CUDA torch from ${TORCH_INDEX_URL}"; \
-      pip install --default-timeout=300 --retries=5 torch --index-url "${TORCH_INDEX_URL}"; \
-    else \
-      echo "deps: installing CPU torch from ${TORCH_FIND_LINKS}"; \
-      pip install --default-timeout=300 --retries=5 torch -f "${TORCH_FIND_LINKS}"; \
-    fi \
-    && pip install -r /tmp/bench-requirements.txt \
+    sh /tmp/pip_install_torch.sh \
+    && pip install -c /tmp/torch.pin -r /tmp/bench-requirements.txt \
     && rm -f /tmp/bench-requirements.txt
 
 COPY --from=model-baker --chown=app:app /models-baked /app/models-baked
