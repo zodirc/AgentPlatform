@@ -9,6 +9,44 @@ from app.engine.state import tool_result_message
 from app.tools.delegate_context import current_delegate_depth
 
 
+def park_spawned_child(
+    engine: Any,
+    *,
+    result: Any,
+    tool_call_id: str,
+    step_index: int,
+    arguments: dict[str, Any],
+    turn_id: Any,
+    run_id: Any,
+) -> bool:
+    """Queue a ``spawn_child`` tool result on the parent engine.
+
+    Returns True when the parent should park in ``waiting_child`` instead of
+    treating the spawn payload as a finished ``tool.completed``.
+    """
+    if not isinstance(result, dict) or result.get("status") != "spawn_child":
+        return False
+    extra = result.get("child") if isinstance(result.get("child"), dict) else {}
+    spec = {
+        **child_spec_from_call(
+            tool_call_id=tool_call_id,
+            step_index=step_index,
+            arguments=arguments,
+            turn_id=turn_id,
+            run_id=run_id,
+        ),
+        **extra,
+        "tool_call_id": tool_call_id,
+        "step_index": step_index,
+    }
+    pending = getattr(engine, "pending_children", None)
+    if pending is None:
+        engine.pending_children = [spec]
+    else:
+        pending.append(spec)
+    return True
+
+
 def should_spawn_child(*, agent_type: str, wait: Any) -> bool:
     """Park the parent Turn instead of nesting ``engine.run`` in the tool slot.
 

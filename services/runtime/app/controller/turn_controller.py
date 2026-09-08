@@ -2066,41 +2066,53 @@ async def _resume_after_approval(
             force_approval=True,
         )
         set_event_writer(None)
-        summary_text = result.get("summary") or result.get("content", "")[:200] or json.dumps(result)[:200]
-        from app.engine.agent_engine import (
-            _TOOL_COMPLETED_SUMMARY_MAX,
-            _TOOL_COMPLETED_SPAN_MAX,
-            _clamp_event_str,
-            _compact_edit_file_event_meta,
-        )
+        from app.engine.child_spawn import park_spawned_child
 
-        completed_payload: dict[str, Any] = {
-            "tool_call_id": tool_call_id,
-            "tool_name": tool_name,
-            "status": "ok",
-            "summary": _clamp_event_str(summary_text, _TOOL_COMPLETED_SUMMARY_MAX),
-        }
-        if result.get("bytes_written") is not None:
-            completed_payload["bytes_written"] = result.get("bytes_written")
-        if tool_name == "edit_file" and isinstance(result, dict):
-            path_val = str(result.get("path") or arguments.get("path") or "")
-            if path_val:
-                completed_payload["path"] = path_val
-            completed_payload["old_text"] = _clamp_event_str(
-                result.get("old_text") or arguments.get("old_text") or "",
-                _TOOL_COMPLETED_SPAN_MAX,
-            )
-            completed_payload["new_text"] = _clamp_event_str(
-                result.get("new_text") or arguments.get("new_text") or "",
-                _TOOL_COMPLETED_SPAN_MAX,
-            )
-            completed_payload.update(_compact_edit_file_event_meta(result))
-        await write_event(
-            event_type="tool.completed",
-            payload=completed_payload,
-            step_index=step_index,
+        parked = park_spawned_child(
+            engine,
+            result=result,
+            tool_call_id=tool_call_id,
+            step_index=int(step_index or 0),
+            arguments=arguments if isinstance(arguments, dict) else {},
+            turn_id=state.turn_id,
+            run_id=run_id,
         )
-        state.messages.append(tool_result_message(tool_call_id, json.dumps(result)))
+        if not parked:
+            summary_text = result.get("summary") or result.get("content", "")[:200] or json.dumps(result)[:200]
+            from app.engine.agent_engine import (
+                _TOOL_COMPLETED_SUMMARY_MAX,
+                _TOOL_COMPLETED_SPAN_MAX,
+                _clamp_event_str,
+                _compact_edit_file_event_meta,
+            )
+
+            completed_payload: dict[str, Any] = {
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "status": "ok",
+                "summary": _clamp_event_str(summary_text, _TOOL_COMPLETED_SUMMARY_MAX),
+            }
+            if result.get("bytes_written") is not None:
+                completed_payload["bytes_written"] = result.get("bytes_written")
+            if tool_name == "edit_file" and isinstance(result, dict):
+                path_val = str(result.get("path") or arguments.get("path") or "")
+                if path_val:
+                    completed_payload["path"] = path_val
+                completed_payload["old_text"] = _clamp_event_str(
+                    result.get("old_text") or arguments.get("old_text") or "",
+                    _TOOL_COMPLETED_SPAN_MAX,
+                )
+                completed_payload["new_text"] = _clamp_event_str(
+                    result.get("new_text") or arguments.get("new_text") or "",
+                    _TOOL_COMPLETED_SPAN_MAX,
+                )
+                completed_payload.update(_compact_edit_file_event_meta(result))
+            await write_event(
+                event_type="tool.completed",
+                payload=completed_payload,
+                step_index=step_index,
+            )
+            state.messages.append(tool_result_message(tool_call_id, json.dumps(result)))
     else:
         denied = {"status": "denied", "reason": deny_reason, "tool_name": tool_name}
         from app.engine.agent_engine import _TOOL_COMPLETED_SUMMARY_MAX, _clamp_event_str
@@ -2120,15 +2132,24 @@ async def _resume_after_approval(
     set_event_writer(write_event)
     resume_started_at = time.monotonic()
     try:
-        summary = await run_via_langgraph(engine, state)
-        if summary == "waiting_child" or getattr(engine, "pending_children", None):
+        if getattr(engine, "pending_children", None):
             from app.controller.child_join import settle_waiting_children
 
-            joined = await settle_waiting_children(
+            summary = await settle_waiting_children(
                 engine, state, turn_id=turn_id, run_id=run_id
             )
-            if joined is not None:
-                summary = joined
+            if summary is None:
+                summary = "waiting_child"
+        else:
+            summary = await run_via_langgraph(engine, state)
+            if summary == "waiting_child" or getattr(engine, "pending_children", None):
+                from app.controller.child_join import settle_waiting_children
+
+                joined = await settle_waiting_children(
+                    engine, state, turn_id=turn_id, run_id=run_id
+                )
+                if joined is not None:
+                    summary = joined
     except TurnAbortedError:
         set_event_writer(None)
         set_delegate_runtime(None)

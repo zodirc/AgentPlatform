@@ -398,29 +398,17 @@ def _domain_event_payload(event_type: str, result: dict[str, Any]) -> dict[str, 
             out["awaiting_consent"] = bool(result.get("awaiting_consent"))
         return out
     if event_type == "opening.ponds":
+        from app.writing.opening_ponds import pond_item_event_fields
+
         ponds: list[dict[str, str]] = []
         raw_ponds = result.get("items")
         if isinstance(raw_ponds, list):
             for it in raw_ponds:
                 if not isinstance(it, dict):
                     continue
-                title = _clamp_event_str(it.get("title") or "候选", 80)
-                if not title.strip():
+                row = pond_item_event_fields(it, len(ponds))
+                if not row:
                     continue
-                row: dict[str, str] = {
-                    "id": _clamp_event_str(it.get("id") or f"pond-{len(ponds) + 1}", 32),
-                    "title": title,
-                }
-                for key, cap in (
-                    ("who", 240),
-                    ("where", 240),
-                    ("want", 240),
-                    ("chapter_job", 240),
-                    ("summary", 160),
-                ):
-                    val = str(it.get(key) or "").strip()
-                    if val:
-                        row[key] = _clamp_event_str(val, cap)
                 ponds.append(row)
                 if len(ponds) >= 4:
                     break
@@ -1478,23 +1466,17 @@ class AgentEngine:
                     stem = str(result.get("name") or "").strip().lower()
                     if stem and stem not in state.loaded_skill_names:
                         state.loaded_skill_names.append(stem)
-            if isinstance(result, dict) and result.get("status") == "spawn_child":
-                from app.engine.child_spawn import child_spec_from_call
+            from app.engine.child_spawn import park_spawned_child
 
-                extra = result.get("child") if isinstance(result.get("child"), dict) else {}
-                spec = {
-                    **child_spec_from_call(
-                        tool_call_id=tool_call_id,
-                        step_index=step_index,
-                        arguments=arguments if isinstance(arguments, dict) else {},
-                        turn_id=state.turn_id,
-                        run_id=state.run_id,
-                    ),
-                    **extra,
-                    "tool_call_id": tool_call_id,
-                    "step_index": step_index,
-                }
-                self.pending_children.append(spec)
+            if park_spawned_child(
+                self,
+                result=result,
+                tool_call_id=tool_call_id,
+                step_index=step_index,
+                arguments=arguments if isinstance(arguments, dict) else {},
+                turn_id=state.turn_id,
+                run_id=state.run_id,
+            ):
                 return "waiting_child"
             self._store_tool_cache(tool_name, arguments, result)
 
