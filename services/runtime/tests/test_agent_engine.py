@@ -740,14 +740,60 @@ def test_domain_event_payload_clamps_plan_title_and_outline() -> None:
                     "who": "w",
                     "where": "p",
                     "want": "q",
+                    "start_kind": "granted_path",
+                    "promise": "power_steps",
                 },
-                {"id": "b", "title": "other", "who": "x", "where": "y", "want": "z"},
+                {
+                    "id": "b",
+                    "title": "other",
+                    "who": "x",
+                    "where": "y",
+                    "want": "z",
+                    "start_kind": "no_extraordinary",
+                    "promise": "survive_relation",
+                },
             ],
         },
     )
     assert ponds is not None
     assert len(ponds["items"][0]["title"]) == 80
+    assert ponds["items"][0]["start_kind"] == "granted_path"
+    assert ponds["items"][1]["promise"] == "survive_relation"
     validate_event_payload("opening.ponds", ponds)
+
+    ponds_skip_bad_kind = _domain_event_payload(
+        "opening.ponds",
+        {
+            "ponds_id": "ponds-2",
+            "items": [
+                {"id": "a", "title": "a", "start_kind": "not-a-kind", "promise": "power_steps"},
+                {"id": "b", "title": "b", "start_kind": "self_notice", "promise": "costly_truth"},
+            ],
+        },
+    )
+    assert ponds_skip_bad_kind is not None
+    assert "start_kind" not in ponds_skip_bad_kind["items"][0]
+    assert ponds_skip_bad_kind["items"][1]["start_kind"] == "self_notice"
+    validate_event_payload("opening.ponds", ponds_skip_bad_kind)
+
+    assert _domain_event_payload("opening.ponds", {"items": [{"title": "only"}]}) is None
+    five = _domain_event_payload(
+        "opening.ponds",
+        {
+            "items": [
+                {"title": f"t{i}", "who": "a", "where": "b", "want": "c"}
+                for i in range(5)
+            ]
+        },
+    )
+    assert five is not None
+    assert len(five["items"]) == 4
+    mixed = _domain_event_payload(
+        "opening.ponds",
+        {"items": ["nope", {"title": "a"}, {"title": "b"}]},
+    )
+    assert mixed is not None
+    assert len(mixed["items"]) == 2
 
     outline = _domain_event_payload(
         "outline.updated",

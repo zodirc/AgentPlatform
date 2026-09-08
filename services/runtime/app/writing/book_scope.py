@@ -237,8 +237,8 @@ def scope_spec_line(
 
             if wants_opening_candidates(message, outline=outline):
                 return (
-                    "长篇·开写：只调 propose_opening_ponds 出开篇候选卡片；"
-                    "至少一份是自己发觉能力；不要把候选写进聊天；等用户点选或说「我要其他的」"
+                    "长篇·开写：propose_opening_ponds 出开篇候选；"
+                    "start_kind 不得重复（发觉/系统/过日子），promise 不得全员相同"
                 )
             compass = serial_opening_compass(message=message, outline=outline)
             return (

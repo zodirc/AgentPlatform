@@ -114,6 +114,7 @@ def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypa
     assert "候选" in spec
     assert "互不换皮" in spec
     assert "发觉" in spec
+    assert "前三分之一" not in spec
     assert "沈砚" not in spec
     assert "灵灯" not in spec
 

@@ -277,8 +277,7 @@ def resolve_outline_phase(
         phase = "open"
         if wants_opening_candidates(message, outline=outline):
             note = (
-                "长篇开写：只调 propose_opening_ponds 出候选卡片（2～3 个互不换皮近池，"
-                "至少一份是自己发觉能力）；不要写进聊天；等点选或说「我要其他的」"
+                "长篇开写：propose_opening_ponds 出开篇候选（互不换皮，发觉/系统/过日子）；不要写进聊天"
             )
         else:
             from app.writing.work_mode import serial_opening_compass

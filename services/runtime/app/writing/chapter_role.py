@@ -222,11 +222,16 @@ def chapter_kind_obligation(
         )
     if k == "live_character":
         if pos == "opening":
-            extra = (
-                serial_opening_compass(message=message, outline=outline) + "。"
-                if mode == "web_serial"
-                else "句味与人物距离优先。"
-            )
+            from app.writing.outline_phase import wants_opening_candidates
+
+            picking = wants_opening_candidates(message, outline=outline)
+            extra = ""
+            if not picking:
+                extra = (
+                    serial_opening_compass(message=message, outline=outline) + "。"
+                    if mode == "web_serial"
+                    else "句味与人物距离优先。"
+                )
             return (
                 "这场偏站住这个人：读者先看见他眼下怎么过；"
                 "勾画可轻可重。后面的海（境界总纲、全书规则、结局）不要写进这一章。"
@@ -236,11 +241,16 @@ def chapter_kind_obligation(
         return "这场偏立人：人物选择与关系在场上，勿空转设定演讲"
     if k == "world_rule":
         if pos == "opening" and scope == "long":
-            extra = (
-                f" 质地托住{serial_opening_compass(message=message, outline=outline)}。"
-                if mode == "web_serial"
-                else " 机构专名让场景站稳后再出现。"
-            )
+            from app.writing.outline_phase import wants_opening_candidates
+
+            picking = wants_opening_candidates(message, outline=outline)
+            extra = " 机构专名让场景站稳后再出现。"
+            if mode == "web_serial" and not picking:
+                extra = (
+                    f" 质地托住{serial_opening_compass(message=message, outline=outline)}。"
+                )
+            elif mode == "web_serial" and picking:
+                extra = ""
             return (
                 "这场偏环境质地：社会背景与自然场景可先站；"
                 "何时何地即可，不要写成能/不能做什么的手册。"

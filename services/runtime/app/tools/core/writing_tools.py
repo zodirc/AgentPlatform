@@ -972,9 +972,12 @@ async def propose_opening_ponds(
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
+    from app.writing.occupy import wants_new_piece
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
+        load_opening_ponds,
         normalize_pond_items,
+        ponds_reject_reason,
         save_opening_ponds,
     )
 
@@ -983,9 +986,27 @@ async def propose_opening_ponds(
         return {
             "status": "error",
             "error": "need_two_ponds",
-            "summary": "至少交 2 个互不换皮的开篇候选（跟着谁、站在哪、眼下要什么、超凡怎么开始）。",
+            "summary": "至少交 2 个开篇候选，且 start_kind 不得重复。",
         }
-    saved = save_opening_ponds(normalized, summary=summary)
+    message = str(_kwargs.get("turn_user_text") or "")
+    previous_kinds: set[str] | None = None
+    if not wants_new_piece(message):
+        prev = load_opening_ponds()
+        if prev:
+            previous_kinds = {
+                str(it.get("start_kind") or "")
+                for it in prev["items"]
+                if it.get("start_kind")
+            }
+    rejected = ponds_reject_reason(
+        normalized,
+        message=message,
+        previous_kinds=previous_kinds,
+    )
+    if rejected:
+        code, summary = rejected
+        return {"status": "error", "error": code, "summary": summary}
+    saved = save_opening_ponds(normalized, summary="")
     return {
         "status": "ok",
         "ponds_id": saved["ponds_id"],

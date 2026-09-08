@@ -339,16 +339,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="propose_opening_ponds",
             description=(
-                "Propose 2–3 mutually distinct opening ponds for a new long book "
-                "(who / where / what they want this chapter). Distinct means how "
-                "the extraordinary starts, not a new workplace for the same occult "
-                "incident. At least one pond: the protagonist notices their own "
-                "capability on an ordinary day with other people — not window-death, "
-                "haunting, or a city glitch. The chat UI renders a Plan-like picker "
-                "from this tool — that card is the deliverable. Do not list the ponds "
-                "in the assistant message. Call this instead of draft_section or "
-                "update_outline when the user only gave a genre or said 看看 / "
-                "我要其他的. The turn stops so the user can pick one."
+                "Propose 2–3 opening ponds as short book pitches "
+                "(opening/arc/flavor). Unique start_kind, not-all-same promise. "
+                "UI picker is the deliverable; do not list ponds in chat. "
+                "Use when the user only gave a genre or said 看看 / 我要其他的."
             ),
             parameters={
                 "type": "object",
@@ -362,25 +356,40 @@ def build_registry() -> ToolRegistry:
                             "properties": {
                                 "id": {"type": "string"},
                                 "title": {"type": "string"},
-                                "who": {
+                                "who": {"type": "string", "description": "跟着谁"},
+                                "where": {"type": "string", "description": "站在哪"},
+                                "want": {"type": "string", "description": "眼下要什么"},
+                                "opening": {"type": "string", "description": "开篇怎么进"},
+                                "arc": {"type": "string", "description": "这本书往后怎么走"},
+                                "flavor": {"type": "string", "description": "全篇气味"},
+                                "start_kind": {
                                     "type": "string",
-                                    "description": "跟着谁",
+                                    "description": (
+                                        "Unique. self_notice|pulled_in|"
+                                        "granted_path|world_already|no_extraordinary"
+                                    ),
                                 },
-                                "where": {
+                                "promise": {
                                     "type": "string",
-                                    "description": "站在哪",
+                                    "description": (
+                                        "Not all same. power_steps|costly_truth|"
+                                        "survive_relation|dread_decode|social_place"
+                                    ),
                                 },
-                                "want": {
-                                    "type": "string",
-                                    "description": "眼下要什么",
-                                },
-                                "chapter_job": {
-                                    "type": "string",
-                                    "description": "这一章干什么",
-                                },
+                                "chapter_job": {"type": "string"},
                                 "summary": {"type": "string"},
                             },
-                            "required": ["title", "who", "where", "want"],
+                            "required": [
+                                "title",
+                                "who",
+                                "where",
+                                "want",
+                                "opening",
+                                "arc",
+                                "flavor",
+                                "start_kind",
+                                "promise",
+                            ],
                         },
                     },
                     "summary": {"type": "string"},
