@@ -3,6 +3,14 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.17 — 2026-09-08
+
+- `opening.ponds` items：可选 `opening` / `arc` / `flavor`（书级短计划：开篇、走向、全篇气味）。向后兼容。
+
+## 0.3.16 — 2026-09-08
+
+- `opening.ponds` items：可选 `start_kind` / `promise`（开篇候选正交轴；缺省兼容旧载荷）。
+
 ## 0.3.15 — 2026-09-07
 
 - `turn_view.status` / `step.completed.outcome` 增补 `waiting_child`（父 Turn 挂起会合子代理）。

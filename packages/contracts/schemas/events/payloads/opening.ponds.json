@@ -27,6 +27,29 @@
           "where": { "type": "string", "maxLength": 240 },
           "want": { "type": "string", "maxLength": 240 },
           "chapter_job": { "type": "string", "maxLength": 240 },
+          "opening": { "type": "string", "maxLength": 400 },
+          "arc": { "type": "string", "maxLength": 400 },
+          "flavor": { "type": "string", "maxLength": 160 },
+          "start_kind": {
+            "type": "string",
+            "enum": [
+              "self_notice",
+              "pulled_in",
+              "granted_path",
+              "world_already",
+              "no_extraordinary"
+            ]
+          },
+          "promise": {
+            "type": "string",
+            "enum": [
+              "power_steps",
+              "costly_truth",
+              "survive_relation",
+              "dread_decode",
+              "social_place"
+            ]
+          },
           "summary": { "type": "string", "maxLength": 160 }
         }
       }

@@ -12,6 +12,8 @@
         "where": "大堂闸机早高峰",
         "want": "系统弹窗换班次",
         "chapter_job": "当场系统进场，班上有人",
+        "start_kind": "granted_path",
+        "promise": "power_steps",
         "summary": "白天有人的日子"
       },
       {
@@ -19,8 +21,10 @@
         "title": "午饭功法",
         "who": "食堂阿姨林浅",
         "where": "厂区食堂窗口",
-        "want": "口诀随热汤入体",
-        "chapter_job": "功法从这碗汤长出来"
+        "want": "先把这顿人情做完",
+        "chapter_job": "这一章不过超凡，把窗口的账还上",
+        "start_kind": "no_extraordinary",
+        "promise": "survive_relation"
       }
     ]
   }
