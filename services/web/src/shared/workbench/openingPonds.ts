@@ -5,6 +5,11 @@ export type OpeningPondItem = {
   where?: string;
   want?: string;
   chapter_job?: string;
+  opening?: string;
+  arc?: string;
+  flavor?: string;
+  start_kind?: string;
+  promise?: string;
   summary?: string;
 };
 
@@ -16,13 +21,55 @@ export type OpeningPondsArtifact = {
   items?: OpeningPondItem[];
 };
 
+export const START_KIND_LABELS: Record<string, string> = {
+  self_notice: "自己发觉能变强",
+  pulled_in: "被卷进已在运转的事",
+  granted_path: "系统/金手指落到身上",
+  world_already: "超凡已是这城的日常",
+  no_extraordinary: "先过日子，超凡往后放",
+};
+
+export const PROMISE_LABELS: Record<string, string> = {
+  power_steps: "变强台阶",
+  costly_truth: "查清会伤人的真相",
+  survive_relation: "在关系里活下去",
+  dread_decode: "解密/恐惧",
+  social_place: "社会位置改变",
+};
+
 export const MORE_PONDS_MESSAGE =
-  "这几个都不合适。再给 2～3 个互不换皮的开篇候选（跟着谁、站在哪、眼下要什么、超凡怎么开始都要换）。至少一份是主角在有人的日子里自己发觉能做什么，不要三份都是开窗死人、灵异出事、城市异变。";
+  "这几个都不合适。再给 2～3 个开篇候选。每份写成一本书的短计划：开篇怎么进、往后怎么走、全篇什么气味。要有正常修真开局：自己变强或系统/金手指，以及遍地修真或先过日子。换还没用过的 start_kind，不能只换职业地点或换一套系统皮。start_kind 不得重复，promise 不得全员相同。";
 
 function clip(raw: unknown, max: number): string {
   const text = String(raw ?? "").trim();
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1)}…`;
+}
+
+export function startKindLabel(token: string | undefined): string {
+  if (!token) return "";
+  return START_KIND_LABELS[token] || token;
+}
+
+export function promiseLabel(token: string | undefined): string {
+  if (!token) return "";
+  return PROMISE_LABELS[token] || token;
+}
+
+export function pondPhysicsLine(item: OpeningPondItem): string {
+  if (item.flavor) {
+    return item.title ? `${item.title} · ${item.flavor}` : item.flavor;
+  }
+  return [startKindLabel(item.start_kind), promiseLabel(item.promise)]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+export function pondContrastLine(items: OpeningPondItem[]): string {
+  return items
+    .map((item) => pondPhysicsLine(item).replace(/ · /g, "·"))
+    .filter(Boolean)
+    .join(" ｜ ");
 }
 
 export function normalizeOpeningPondItems(
@@ -43,6 +90,11 @@ export function normalizeOpeningPondItems(
       where: clip(rec.where, 240) || undefined,
       want: clip(rec.want, 240) || undefined,
       chapter_job: clip(rec.chapter_job, 240) || undefined,
+      opening: clip(rec.opening, 400) || undefined,
+      arc: clip(rec.arc, 400) || undefined,
+      flavor: clip(rec.flavor, 160) || undefined,
+      start_kind: clip(rec.start_kind, 32) || undefined,
+      promise: clip(rec.promise, 32) || undefined,
       summary: clip(rec.summary, 160) || undefined,
     });
   }
@@ -94,7 +146,7 @@ export function latestOpeningPondsFromEvents(
   if (!events?.length) return null;
   let found: OpeningPondsArtifact | null = null;
   for (const ev of events) {
-    if (ev?.type === "opening.ponds" && ev.payload) {
+    if (ev.type === "opening.ponds" && ev.payload) {
       found = openingPondsFromEventPayload(ev.payload);
     }
   }
@@ -103,9 +155,15 @@ export function latestOpeningPondsFromEvents(
 
 export function formatSelectPondMessage(item: OpeningPondItem): string {
   const lines = [`按开篇候选「${item.title}」写第一章。`, ""];
+  if (item.flavor) lines.push(`风格：${item.flavor}`);
+  if (item.opening) lines.push(`开篇：${item.opening}`);
+  if (item.arc) lines.push(`走向：${item.arc}`);
   if (item.who) lines.push(`跟着谁：${item.who}`);
   if (item.where) lines.push(`站在哪：${item.where}`);
   if (item.want) lines.push(`眼下要什么：${item.want}`);
-  if (item.chapter_job) lines.push(`这一章干什么：${item.chapter_job}`);
+  const kind = startKindLabel(item.start_kind);
+  const promise = promiseLabel(item.promise);
+  if (kind) lines.push(`超凡怎么开始：${kind}`);
+  if (promise) lines.push(`读者买什么：${promise}`);
   return lines.join("\n").trim();
 }
