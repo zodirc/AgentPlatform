@@ -40,11 +40,11 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
      按需 search_sources（cite；每 Turn ≤3；超限拒绝本次调用）
      禁止每轮强制 RAG、禁止 Turn 末自动 judge
      篇幅：用户点名 N 字优先；否则
-       短篇目标 2500 · 单篇目标 3500 · 章稿默认 5000–6000（DEFAULT_CHAPTER_MIN/MAX）
+       短篇目标 2500 · 单篇目标 3500 · 章稿默认 3000–3500（DEFAULT_CHAPTER_MIN/MAX，起点常章）
        实体文字 = 不含空白；不足约定 85% → length_short
      返回值带 L0 receipts + L1 writing_signals
      过程 L0 未清：短篇/单篇不得 mode=append，也不得宣称已完成（writing_delivery_hold）
-     长篇：本章几乎没写（<800 字）才挡落盘；L0 / 配额未满不挡「第一章写完了」
+     长篇：本章几乎没写（<800 字）才挡落盘；L0 / 配额未满不挡「第一章写完了」；配额未满不要默认 append 第二场
      长篇加厚：L0 仍挂在 tool_result，但不挡 mode=append
 
 4  弱分或 L0 → 同轮 propose_patch(repair_span)
@@ -73,13 +73,13 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
   focus / 这一场 / outline_phase     short/single=`ready` · 长篇未立定近池=`open`（propose_opening_ponds 卡片，点选或「我要其他的」） · 已立=`continue`
   无纲时写「新篇另起人与事」
 <span class="pt">◆ 要点  风格是罗盘不是合同。只给题材或说「看看」时先交 start_kind 不同的近池卡片；换职业地点不算分开。</span></pre>
-          <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 → 成稿 → 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
+          <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 → 成稿（章稿 3000–3500，一章一场）→ 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
           <div class="src"><code>writing/occupy.py</code> · <code>writing/book_scope.py</code> · <code>writing/text_metrics.py</code> · <code>writing/patch_budget.py</code> · <code>scenarios/profiles/writing.yaml</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/writing/writing-main-path-zh.png" alt="写作主路径" />
           </div>
-          <figcaption>写作主路径 · 点击放大</figcaption>
+          <figcaption>写作主路径 · 章稿 3000–3500 · 点击放大</figcaption>
         </figure>
       </section>
