@@ -51,10 +51,12 @@ import {
 } from "./plan";
 import {
   formatSelectPondMessage,
+  isOpeningChoiceMessage,
   latestOpeningPondsFromArtifacts,
   latestOpeningPondsFromEvents,
   MORE_PONDS_MESSAGE,
   openingPondsFromEventPayload,
+  visibleChatUserInputs,
   type OpeningPondItem,
   type OpeningPondsArtifact,
 } from "./openingPonds";
@@ -693,7 +695,12 @@ export function useWorkbenchImpl(): WorkbenchState {
         // replay can take seconds on long turns — do not block the activity strip.
         setTurnId(last.id);
         setView(v);
-        setSubmittedMessage(v.user_input ?? null);
+        setSubmittedMessage(
+          visibleChatUserInputs([
+            ...history.map((row) => row.user_input),
+            v.user_input,
+          ]).at(-1) ?? null,
+        );
         lastSequenceRef.current = Math.max(
           lastSequenceRef.current,
           v.last_event_sequence ?? 0,
@@ -779,10 +786,17 @@ export function useWorkbenchImpl(): WorkbenchState {
    */
   async function handleSendText(
     textRaw: string,
-    opts?: { planModeSend?: boolean; planPhase?: PlanPhaseWire | null },
+    opts?: {
+      planModeSend?: boolean;
+      planPhase?: PlanPhaseWire | null;
+      /** 勾选等 UI 动作：发下一回合，但不当成用户输入显示。 */
+      hideUserInput?: boolean;
+    },
   ): Promise<boolean> {
     const text = textRaw.trim();
     if (!sessionId || !text || busy) return false;
+    const hideUserInput =
+      Boolean(opts?.hideUserInput) || isOpeningChoiceMessage(text);
     // Never rewrite the user's message. Plan discipline is plan_phase + runtime system prompt.
     const usePlan =
       opts?.planModeSend ?? (planMode && opts?.planPhase !== "executing");
@@ -835,12 +849,15 @@ export function useWorkbenchImpl(): WorkbenchState {
         user_input: text,
         latest_output: null,
         created_at: new Date().toISOString(),
+        hideUserInput,
       }),
     );
 
     try {
       prepareDraftBaselineIfNeeded();
-      setSubmittedMessage(text);
+      if (!hideUserInput) {
+        setSubmittedMessage(text);
+      }
       setMessage("");
       const turn = await startTurnMut.mutateAsync({
         sid: sessionId,
@@ -858,6 +875,7 @@ export function useWorkbenchImpl(): WorkbenchState {
             user_input: text,
             latest_output: null,
             created_at: turn.created_at,
+            hideUserInput,
           },
         ),
       );
@@ -941,6 +959,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     }
     await handleSendText(formatSelectPondMessage(item), {
       planModeSend: false,
+      hideUserInput: true,
     });
   }
 
@@ -949,7 +968,10 @@ export function useWorkbenchImpl(): WorkbenchState {
     if (busy || pendingApproval || !snapshot?.items?.length) {
       return;
     }
-    await handleSendText(MORE_PONDS_MESSAGE, { planModeSend: false });
+    await handleSendText(MORE_PONDS_MESSAGE, {
+      planModeSend: false,
+      hideUserInput: true,
+    });
   }
 
   /** 关闭 Plan 建议条并写入 session 级 cooldown 时间戳。 */

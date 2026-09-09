@@ -7,6 +7,7 @@ import {
   type SessionListItem,
 } from "../api/client";
 import { Button } from "../../components/ui/button";
+import { isOpeningChoiceMessage } from "./openingPonds";
 
 type Props = {
   open: boolean;
@@ -31,6 +32,7 @@ const PERIOD_OPTIONS: Array<{ id: PeriodId; label: string }> = [
 function titleOf(item: SessionListItem): string {
   const raw = item.title?.trim() || item.last_user_preview?.trim();
   if (!raw) return "空会话";
+  if (isOpeningChoiceMessage(raw)) return "会话";
   return raw.length > 48 ? `${raw.slice(0, 48)}…` : raw;
 }
 

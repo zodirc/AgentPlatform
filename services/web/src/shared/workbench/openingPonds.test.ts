@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MORE_PONDS_MESSAGE,
   formatSelectPondMessage,
+  isOpeningChoiceMessage,
   latestOpeningPondsFromArtifacts,
   latestOpeningPondsFromEvents,
   normalizeOpeningPondsArtifact,
+  openingChoiceFromUserInput,
   pondContrastLine,
+  pondItemSelected,
   pondPhysicsLine,
+  turnHidesUserInput,
+  visibleChatUserInputs,
 } from "./openingPonds";
 
 const sample = {
@@ -92,13 +98,49 @@ describe("openingPonds", () => {
     );
   });
 
-  it("formats a select message with pond slots", () => {
+  it("formats a select message as a short choice, not the card", () => {
     const msg = formatSelectPondMessage(sample.items[0]);
-    expect(msg).toContain("按开篇候选「早高峰系统」写第一章");
-    expect(msg).toContain("风格：白天写字楼里把班上完的升级日常");
-    expect(msg).toContain("开篇：早高峰闸机前");
-    expect(msg).toContain("走向：他先靠这面板把班撑住");
-    expect(msg).toContain("跟着谁：保安周石");
-    expect(msg).toContain("眼下要什么：系统换班");
+    expect(msg).toBe("采用此开篇「早高峰系统」");
+    expect(msg).not.toContain("跟着谁");
+    expect(msg).not.toContain("开篇：");
+  });
+
+  it("sends 我要其他的 as a short choice, not a worksheet", () => {
+    expect(MORE_PONDS_MESSAGE).toBe("我要其他的");
+    expect(MORE_PONDS_MESSAGE).not.toContain("start_kind");
+    expect(MORE_PONDS_MESSAGE).not.toContain("这几个都不合适");
+  });
+
+  it("treats pond checks as hidden chat tokens", () => {
+    expect(openingChoiceFromUserInput("采用此开篇「早高峰系统」")).toEqual({
+      kind: "commit",
+      title: "早高峰系统",
+    });
+    expect(
+      openingChoiceFromUserInput("按开篇候选「早高峰系统」写第一章。"),
+    ).toEqual({ kind: "commit", title: "早高峰系统" });
+    expect(openingChoiceFromUserInput("我要其他的")).toEqual({ kind: "more" });
+    expect(
+      openingChoiceFromUserInput("这几个都不合适。再给 2～3 个开篇候选。"),
+    ).toEqual({ kind: "more" });
+    expect(openingChoiceFromUserInput("采用此开篇「《借来的灵根》」")).toEqual({
+      kind: "commit",
+      title: "《借来的灵根》",
+    });
+    expect(turnHidesUserInput({ user_input: "采用此开篇「《借来的灵根》」" })).toBe(
+      true,
+    );
+    expect(
+      turnHidesUserInput({ user_input: "写修真", hideUserInput: true }),
+    ).toBe(true);
+    expect(isOpeningChoiceMessage("写一章长篇修真，我看看")).toBe(false);
+    expect(pondItemSelected(sample.items[0], "早高峰系统")).toBe(true);
+    expect(
+      visibleChatUserInputs([
+        "写修真",
+        "采用此开篇「早高峰系统」",
+        "我要其他的",
+      ]),
+    ).toEqual(["写修真"]);
   });
 });

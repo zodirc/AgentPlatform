@@ -78,6 +78,8 @@ export type TurnHistoryItem = {
   user_input: string;
   latest_output: string | null;
   created_at: string;
+  /** 勾选开篇等 UI 动作：有 user_input 令牌，但对话框不当成「你」的输入。 */
+  hideUserInput?: boolean;
   /** 该回合 plan 快照，供聊天流多 plan 历史展示（docs/25）。 */
   plan?: PlanArtifact | null;
   /** 该回合开篇近池候选（点选 / 我要其他的）。 */

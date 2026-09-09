@@ -37,8 +37,11 @@ export const PROMISE_LABELS: Record<string, string> = {
   social_place: "社会位置改变",
 };
 
-export const MORE_PONDS_MESSAGE =
-  "这几个都不合适。再给 2～3 个开篇候选。每份写成一本书的短计划：开篇怎么进、往后怎么走、全篇什么气味。要有正常修真开局：自己变强或系统/金手指，以及遍地修真或先过日子。换还没用过的 start_kind，不能只换职业地点或换一套系统皮。start_kind 不得重复，promise 不得全员相同。";
+/**
+ * Wire token for the「我要其他的」check. Chat hides this bubble;
+ * unused start_kind steering is the sidecar block.
+ */
+export const MORE_PONDS_MESSAGE = "我要其他的";
 
 function clip(raw: unknown, max: number): string {
   const text = String(raw ?? "").trim();
@@ -153,17 +156,64 @@ export function latestOpeningPondsFromEvents(
   return found;
 }
 
+/**
+ * Wire token for the next turn after a card check. Chat hides this bubble;
+ * opening / arc / flavor live in the workspace sidecar.
+ */
 export function formatSelectPondMessage(item: OpeningPondItem): string {
-  const lines = [`按开篇候选「${item.title}」写第一章。`, ""];
-  if (item.flavor) lines.push(`风格：${item.flavor}`);
-  if (item.opening) lines.push(`开篇：${item.opening}`);
-  if (item.arc) lines.push(`走向：${item.arc}`);
-  if (item.who) lines.push(`跟着谁：${item.who}`);
-  if (item.where) lines.push(`站在哪：${item.where}`);
-  if (item.want) lines.push(`眼下要什么：${item.want}`);
-  const kind = startKindLabel(item.start_kind);
-  const promise = promiseLabel(item.promise);
-  if (kind) lines.push(`超凡怎么开始：${kind}`);
-  if (promise) lines.push(`读者买什么：${promise}`);
-  return lines.join("\n").trim();
+  const title = (item.title || item.id || "").trim();
+  return `采用此开篇「${title}」`;
+}
+
+const COMMIT_POND_RE =
+  /(?:按开篇候选|采用此开篇|按此开篇)[「『](.+?)[」』]/;
+const COMMIT_POND_PREFIX_RE = /^(?:按开篇候选|采用此开篇|按此开篇)/;
+
+export type OpeningChoice =
+  | { kind: "commit"; title: string }
+  | { kind: "more" };
+
+/** 勾选/换一组是 UI 动作，不是用户输入。仅作下一回合的令牌。 */
+export function openingChoiceFromUserInput(
+  text: string | null | undefined,
+): OpeningChoice | null {
+  const raw = (text || "").replace(/^\uFEFF/, "").trim();
+  if (!raw) return null;
+  if (raw === MORE_PONDS_MESSAGE || raw.startsWith("这几个都不合适")) {
+    return { kind: "more" };
+  }
+  if (!COMMIT_POND_PREFIX_RE.test(raw)) return null;
+  const match = COMMIT_POND_RE.exec(raw);
+  const title = match?.[1]?.trim();
+  return { kind: "commit", title: title || raw };
+}
+
+export function isOpeningChoiceMessage(
+  text: string | null | undefined,
+): boolean {
+  return openingChoiceFromUserInput(text) != null;
+}
+
+/** 历史项是否不应画成「你」的输入气泡。 */
+export function turnHidesUserInput(turn: {
+  user_input?: string | null;
+  hideUserInput?: boolean;
+}): boolean {
+  return Boolean(turn.hideUserInput) || isOpeningChoiceMessage(turn.user_input);
+}
+
+export function pondItemSelected(
+  item: OpeningPondItem,
+  selectedTitle: string | null | undefined,
+): boolean {
+  if (!selectedTitle) return false;
+  return item.title === selectedTitle || item.id === selectedTitle;
+}
+
+export function visibleChatUserInputs(
+  inputs: Array<string | null | undefined>,
+): string[] {
+  return inputs
+    .map((row) => (row || "").trim())
+    .filter((row) => row.length > 0 && !isOpeningChoiceMessage(row));
 }

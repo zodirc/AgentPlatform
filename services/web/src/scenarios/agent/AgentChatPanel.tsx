@@ -19,6 +19,11 @@ import {
 } from "../../shared/workbench/scenarioMeta";
 import { PlanPanel } from "../../shared/workbench/PlanPanel";
 import { OpeningPondsPanel } from "../../shared/workbench/OpeningPondsPanel";
+import {
+  openingChoiceFromUserInput,
+  turnHidesUserInput,
+  visibleChatUserInputs,
+} from "../../shared/workbench/openingPonds";
 import { livePlanStep } from "../../shared/workbench/plan";
 import { pathWithSession } from "../../shared/workbench/sessionUrl";
 import { statusLabel } from "../../shared/workbench/subagents";
@@ -215,8 +220,11 @@ function ScenarioModeSwitch({
 }
 
 function chatTabTitle(wb: WorkbenchState): string {
-  const latest = wb.turnHistory[wb.turnHistory.length - 1];
-  const text = (wb.submittedMessage || latest?.user_input || "").trim();
+  const latestVisible = visibleChatUserInputs([
+    wb.submittedMessage,
+    ...[...wb.turnHistory].reverse().map((t) => t.user_input),
+  ])[0];
+  const text = (latestVisible || "").trim();
   if (!text) return "新对话";
   const oneLine = text.replace(/\s+/g, " ");
   return oneLine.length > 20 ? `${oneLine.slice(0, 20)}…` : oneLine;
@@ -507,7 +515,7 @@ export function AgentChatPanel({
   const { createAgent } = useAgentPanel();
   const inputHistory = useChatInputHistory({
     sessionKey: wb.sessionId,
-    seedInputs: wb.turnHistory.map((t) => t.user_input),
+    seedInputs: visibleChatUserInputs(wb.turnHistory.map((t) => t.user_input)),
   });
   const pendingApprovalEvent = lastApprovalEvent(wb.events);
   const pendingArgs = pendingApprovalEvent?.payload.arguments as
@@ -730,9 +738,10 @@ export function AgentChatPanel({
                 正在加载会话历史…
               </p>
             ) : null}
-            {wb.turnHistory.map((turn) => {
+            {wb.turnHistory.map((turn, index) => {
               const output = assistantText(wb, turn);
-              const isLive = turn.id === wb.turnId;
+              const isOptimistic = turn.id.startsWith("optimistic-");
+              const isLive = turn.id === wb.turnId || (wb.busy && isOptimistic);
               const thinking =
                 isLive && wb.thinkingText.trim() ? wb.thinkingText.trim() : "";
               const liveOpen = Boolean(
@@ -745,6 +754,10 @@ export function AgentChatPanel({
                 isLive || isLatest
                   ? (wb.openingPonds ?? turn.openingPonds)
                   : turn.openingPonds;
+              const nextChoice = openingChoiceFromUserInput(
+                wb.turnHistory[index + 1]?.user_input,
+              );
+              const hideUserBubble = turnHidesUserInput(turn);
               const turnPlanPhase = isLive ? wb.planPhase : "off";
               const turnStatus = isLive ? wb.displayStatus : turn.status;
               const hasAssistantBody = Boolean(
@@ -754,9 +767,12 @@ export function AgentChatPanel({
                 output ||
                 (isLive && wb.busy),
               );
+              if (!hasAssistantBody && hideUserBubble) return null;
               return (
                 <div key={turn.id} className="mb-6 space-y-3">
-                  <UserBubble text={turn.user_input} />
+                  {hideUserBubble ? null : (
+                    <UserBubble text={turn.user_input} />
+                  )}
                   {hasAssistantBody ? (
                     <div className="max-w-[min(100%,48rem)] space-y-2">
                       <p className="text-[11px] font-medium text-muted-foreground">
@@ -784,6 +800,12 @@ export function AgentChatPanel({
                             isLatest && wb.canChooseOpeningPonds,
                           )}
                           disabled={wb.busy || wb.actionBusy}
+                          selectedTitle={
+                            nextChoice?.kind === "commit"
+                              ? nextChoice.title
+                              : null
+                          }
+                          choseMore={nextChoice?.kind === "more"}
                           onSelect={(item) =>
                             void wb.handleSelectOpeningPond(item)
                           }
@@ -885,7 +907,7 @@ export function AgentChatPanel({
             </p>
           ) : wb.canChooseOpeningPonds ? (
             <p className="truncate text-[11px] font-medium text-warning">
-              开篇待你选 · 在上方点「采用此开篇」或「我要其他的」
+              开篇待你选 · 在上方勾选一份，或不合适再换一组
             </p>
           ) : null}
           {wb.showPlanSuggest ? (

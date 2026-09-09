@@ -1,10 +1,12 @@
 import type { OpeningPondItem, OpeningPondsArtifact } from "./openingPonds";
-import { pondContrastLine } from "./openingPonds";
+import { pondContrastLine, pondItemSelected } from "./openingPonds";
 
 type Props = {
   ponds: OpeningPondsArtifact | null;
   interactive?: boolean;
   disabled?: boolean;
+  selectedTitle?: string | null;
+  choseMore?: boolean;
   onSelect?: (item: OpeningPondItem) => void;
   onMore?: () => void;
 };
@@ -19,42 +21,74 @@ function Field({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function ChoiceMark({ checked }: { checked: boolean }) {
+  return (
+    <span
+      className={`mt-0.5 shrink-0 text-[13px] font-medium ${
+        checked
+          ? "text-emerald-600 dark:text-emerald-400"
+          : "text-muted-foreground"
+      }`}
+      aria-hidden
+    >
+      {checked ? "✓" : "○"}
+    </span>
+  );
+}
+
 function PondCard({
   item,
   interactive,
   disabled,
+  selected,
   onSelect,
 }: {
   item: OpeningPondItem;
   interactive?: boolean;
   disabled?: boolean;
+  selected: boolean;
   onSelect?: (item: OpeningPondItem) => void;
 }) {
-  return (
-    <li className="rounded-md border border-border/70 bg-background/80 px-2.5 py-2">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-[13px] font-medium text-foreground">{item.title}</p>
-          {item.flavor ? (
-            <p className="text-[12px] text-foreground/90">{item.flavor}</p>
-          ) : null}
-          <Field label="开篇" value={item.opening} />
-          <Field label="走向" value={item.arc} />
-          <Field label="跟着谁" value={item.who} />
-          <Field label="站在哪" value={item.where} />
-          <Field label="眼下要什么" value={item.want} />
-        </div>
-        {interactive && onSelect ? (
-          <button
-            type="button"
-            className="shrink-0 self-start rounded-md bg-amber-600 px-2.5 py-1 text-[11px] font-semibold text-white shadow-sm hover:bg-amber-500 disabled:opacity-40"
-            disabled={disabled}
-            onClick={() => onSelect(item)}
-          >
-            采用
-          </button>
+  const clickable = Boolean(interactive && onSelect);
+  const frame = `flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left ${
+    selected
+      ? "border-amber-500 bg-amber-500/10"
+      : "border-border/70 bg-background/80"
+  }`;
+  const body = (
+    <>
+      <ChoiceMark checked={selected} />
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <p className="text-[13px] font-medium text-foreground">{item.title}</p>
+        {item.flavor ? (
+          <p className="text-[12px] text-foreground/90">{item.flavor}</p>
         ) : null}
+        <Field label="开篇" value={item.opening} />
+        <Field label="走向" value={item.arc} />
+        <Field label="跟着谁" value={item.who} />
+        <Field label="站在哪" value={item.where} />
+        <Field label="眼下要什么" value={item.want} />
       </div>
+    </>
+  );
+
+  return (
+    <li>
+      {clickable ? (
+        <button
+          type="button"
+          role="radio"
+          aria-checked={selected}
+          aria-label={`采用「${item.title}」`}
+          className={`${frame} hover:border-amber-500/70 disabled:opacity-40`}
+          disabled={disabled}
+          onClick={() => onSelect?.(item)}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className={frame}>{body}</div>
+      )}
     </li>
   );
 }
@@ -63,6 +97,8 @@ export function OpeningPondsPanel({
   ponds,
   interactive = false,
   disabled = false,
+  selectedTitle = null,
+  choseMore = false,
   onSelect,
   onMore,
 }: Props) {
@@ -87,7 +123,7 @@ export function OpeningPondsPanel({
         </div>
         {interactive ? (
           <p className="mt-1 text-[11px] font-medium text-amber-800/90 dark:text-amber-200/90">
-            点选一份：开篇、走向和全篇气味；或要其他的
+            勾选一份开篇、走向和全篇气味；选择留在卡片上
           </p>
         ) : (
           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -100,13 +136,18 @@ export function OpeningPondsPanel({
           {contrast}
         </p>
       ) : null}
-      <ul className="mt-2 space-y-1.5 border-t border-amber-500/20 pt-2">
+      <ul
+        className="mt-2 space-y-1.5 border-t border-amber-500/20 pt-2"
+        role={interactive ? "radiogroup" : undefined}
+        aria-label={interactive ? "开篇候选" : undefined}
+      >
         {items.map((item) => (
           <PondCard
             key={item.id}
             item={item}
             interactive={interactive}
             disabled={disabled}
+            selected={pondItemSelected(item, selectedTitle)}
             onSelect={onSelect}
           />
         ))}
@@ -118,10 +159,12 @@ export function OpeningPondsPanel({
           </p>
           <button
             type="button"
-            className="shrink-0 rounded-md border border-amber-600/40 bg-background px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-muted disabled:opacity-40"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-amber-600/40 bg-background px-3 py-1.5 text-[12px] font-medium text-foreground hover:bg-muted disabled:opacity-40"
             disabled={disabled}
+            aria-pressed={choseMore}
             onClick={onMore}
           >
+            <ChoiceMark checked={choseMore} />
             我要其他的
           </button>
         </div>
