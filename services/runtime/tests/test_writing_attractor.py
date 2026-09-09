@@ -89,6 +89,7 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "得到" in voice
     assert "发现" in voice
     assert "前三分之一" in voice
+    assert "三千" in voice
     assert "功法" in voice
     assert "看见代价" not in voice
     assert "跟着谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
@@ -99,6 +100,7 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "平凡" in system
     assert "得到" in system or "发现" in system
     assert "前三分之一" in system
+    assert "三千" in system
     assert "功法" in system
 
 

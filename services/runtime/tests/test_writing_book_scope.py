@@ -86,6 +86,7 @@ def test_scope_spec_mid_and_climax() -> None:
         "long", position="opening", section_num=1, work_mode="web_serial"
     )
     assert "前三分之一" in opening
+    assert "三千" in opening
     picking = scope_spec_line(
         "long",
         position="opening",

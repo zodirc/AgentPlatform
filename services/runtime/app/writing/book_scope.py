@@ -242,11 +242,11 @@ def scope_spec_line(
                 )
             compass = serial_opening_compass(message=message, outline=outline)
             return (
-                f"长篇·开篇：{compass}；勾画可轻可重；"
+                f"长篇·开篇：{compass}；一章一场约三千字写满这场；"
                 "后面的海（终局宇宙、境界总纲）不要写进这一章"
             )
         return (
-            "长篇·开篇：站住眼前的日子和人；勾画可轻可重；"
+            "长篇·开篇：站住眼前的日子和人；一章一场约三千字写满这场；"
             "后面的海（终局宇宙、境界总纲）不要写进这一章"
         )
     if section_num is not None and section_num >= 4:

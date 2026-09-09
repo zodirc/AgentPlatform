@@ -279,7 +279,7 @@ def default_opening_duty(
         )
     if mode == "web_serial":
         compass = serial_opening_compass(message=message, outline=outline)
-        return f"开篇倾向：{compass}。开篇只兑这一场"
+        return f"开篇倾向：{compass}。开篇只兑这一场，约三千字写满，下一场留给下一章"
     return "开篇倾向：社会背景与自然场景可先站；机构专名让场景站稳后再出现"
 
 
@@ -295,7 +295,7 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
             "dialogue_dyad": "对白露出人物选择与关系；允许直白；已知的名字直接用；空问收成一两句或动手。",
             "mixed": (
                 "人物+情节+环境谁响一点随这场戏；"
-                "开篇前三分之一落到得到或发现；都市修真可以落到自己发觉能力；"
+                "一章一场约三千字写满；开篇前三分之一落到得到或发现；都市修真可以落到自己发觉能力；"
                 "烟火是入口不是主菜；物件从当前空间长出来；空问收成一两句或动手。"
             ),
         }
