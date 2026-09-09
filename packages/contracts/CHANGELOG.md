@@ -3,6 +3,19 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.20 — 2026-09-09
+
+- `opening.ponds` items：`flavor` 上限 160→400（点选卡片上的「这本书」）。开篇候选不再把 `price`/`arc` 当交卷栏；字段仍可选、缺省兼容。向后兼容。
+
+## 0.3.19 — 2026-09-09
+
+- `python/agent_contracts/writing_prefs.py`：网文开篇结构键 `premise_novella`（罚本市家庭结案、无下一层）/ `world_layer_visible`（奖隐世/序列/职阶等层）。文学系数 0。向后兼容。
+
+## 0.3.18 — 2026-09-09
+
+- `opening.ponds` items：可选 `price` / `source_trust` / `first_conflict_at`（可数账单、来源可信度、第一场冲突位置；缺省兼容旧载荷）。
+- `python/agent_contracts/writing_prefs.py`：网文 `worldview_texture` 下调 `exemplar_alignment`、把权重给 `structure`/`pacing`；新增结构键 `all_explained` / `escalation_flat` / `price_paid_visible`。向后兼容。
+
 ## 0.3.17 — 2026-09-08
 
 - `opening.ponds` items：可选 `opening` / `arc` / `flavor`（书级短计划：开篇、走向、全篇气味）。向后兼容。

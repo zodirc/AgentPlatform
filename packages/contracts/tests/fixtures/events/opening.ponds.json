@@ -14,6 +14,9 @@
         "chapter_job": "当场系统进场，班上有人",
         "start_kind": "granted_path",
         "promise": "power_steps",
+        "price": "换班一次扣一夜睡眠",
+        "source_trust": "dubious",
+        "first_conflict_at": "first_300",
         "summary": "白天有人的日子"
       },
       {
@@ -24,7 +27,10 @@
         "want": "先把这顿人情做完",
         "chapter_job": "这一章不过超凡，把窗口的账还上",
         "start_kind": "no_extraordinary",
-        "promise": "survive_relation"
+        "promise": "survive_relation",
+        "price": "窗口人情少一顿",
+        "source_trust": "trusted",
+        "first_conflict_at": "chapter_one"
       }
     ]
   }

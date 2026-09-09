@@ -42,6 +42,9 @@ SIGNAL_PENALTY_KEYS: tuple[str, ...] = (
     "glue_heavy",
     "fragment_mismatch",
     "serial_hook_flat",
+    "all_explained",
+    "escalation_flat",
+    "premise_novella",
 )
 
 SIGNAL_REWARD_KEYS: tuple[str, ...] = (
@@ -51,6 +54,8 @@ SIGNAL_REWARD_KEYS: tuple[str, ...] = (
     "outline_duty_match",
     "character_card_action",
     "plot_step_visible",
+    "price_paid_visible",
+    "world_layer_visible",
 )
 
 # Platform catalog (must match runtime markdown headings). Rhythm/texture only.
@@ -226,11 +231,11 @@ _PLATFORM_WEIGHTS_WEB: dict[str, dict[str, float]] = {
         "exemplar_alignment": 0.16,
     },
     "worldview_texture": {
-        "structure": 0.18,
+        "structure": 0.24,
         "character": 0.14,
-        "pacing": 0.18,
+        "pacing": 0.26,
         "voice": 0.12,
-        "exemplar_alignment": 0.38,
+        "exemplar_alignment": 0.24,
     },
     "climax_beat": {
         "structure": 0.22,
@@ -277,6 +282,9 @@ PLATFORM_SIGNAL_PENALTIES: dict[str, float] = {
     "glue_heavy": -0.05,
     "fragment_mismatch": -0.10,
     "serial_hook_flat": 0.0,
+    "all_explained": 0.0,
+    "escalation_flat": 0.0,
+    "premise_novella": 0.0,
 }
 
 PLATFORM_SIGNAL_PENALTIES_WEB: dict[str, float] = {
@@ -286,6 +294,9 @@ PLATFORM_SIGNAL_PENALTIES_WEB: dict[str, float] = {
     "opening_institution": 0.0,
     "lore_dump": -0.12,
     "serial_hook_flat": -0.08,
+    "all_explained": -0.08,
+    "escalation_flat": -0.08,
+    "premise_novella": -0.10,
 }
 
 PLATFORM_SIGNAL_PENALTIES_BY_MODE: dict[str, dict[str, float]] = {
@@ -300,11 +311,15 @@ PLATFORM_SIGNAL_REWARDS: dict[str, float] = {
     "outline_duty_match": 0.10,
     "character_card_action": 0.08,
     "plot_step_visible": 0.0,
+    "price_paid_visible": 0.0,
+    "world_layer_visible": 0.0,
 }
 
 PLATFORM_SIGNAL_REWARDS_WEB: dict[str, float] = {
     **PLATFORM_SIGNAL_REWARDS,
     "plot_step_visible": 0.10,
+    "price_paid_visible": 0.10,
+    "world_layer_visible": 0.10,
 }
 
 PLATFORM_SIGNAL_REWARDS_BY_MODE: dict[str, dict[str, float]] = {

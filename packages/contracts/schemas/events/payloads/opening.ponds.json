@@ -29,7 +29,8 @@
           "chapter_job": { "type": "string", "maxLength": 240 },
           "opening": { "type": "string", "maxLength": 400 },
           "arc": { "type": "string", "maxLength": 400 },
-          "flavor": { "type": "string", "maxLength": 160 },
+          "flavor": { "type": "string", "maxLength": 400 },
+          "price": { "type": "string", "maxLength": 160 },
           "start_kind": {
             "type": "string",
             "enum": [
@@ -49,6 +50,14 @@
               "dread_decode",
               "social_place"
             ]
+          },
+          "source_trust": {
+            "type": "string",
+            "enum": ["trusted", "dubious", "false"]
+          },
+          "first_conflict_at": {
+            "type": "string",
+            "enum": ["first_300", "first_1000", "chapter_one", "later"]
           },
           "summary": { "type": "string", "maxLength": 160 }
         }
