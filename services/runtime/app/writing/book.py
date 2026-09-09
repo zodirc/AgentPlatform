@@ -309,6 +309,7 @@ def discard_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any
         clear_local_beats(workspace_root=root)
         _unlink_file(root, ".agent/work/local_beats.json", cleared, "beats")
     _unlink_file(root, ".agent/work/opening_ponds.json", cleared, "outline")
+    _unlink_file(root, ".agent/work/committed_pond.json", cleared, "outline")
     _wipe_dir_files(root, ".agent/work/history", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/turns", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/drafts", cleared, "manuscript")

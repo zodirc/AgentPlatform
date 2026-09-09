@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 OPENING_PONDS_REL = Path(".agent") / "work" / "opening_ponds.json"
+COMMITTED_POND_REL = Path(".agent") / "work" / "committed_pond.json"
 # 勾选后发给下一回合的短令牌；聊天不画这条气泡。换皮约束在 format_opening_ponds_block。
 MORE_PONDS_MESSAGE = "我要其他的"
 OPENING_CHOICE_TOOL_ALLOWLIST = frozenset({"propose_opening_ponds", "stub_echo"})
@@ -244,6 +245,10 @@ def _workspace(workspace_root: Path | None = None) -> Path:
 
 def opening_ponds_path(workspace_root: Path | None = None) -> Path:
     return _workspace(workspace_root) / OPENING_PONDS_REL
+
+
+def committed_pond_path(workspace_root: Path | None = None) -> Path:
+    return _workspace(workspace_root) / COMMITTED_POND_REL
 
 
 def _clip(value: Any, max_len: int) -> str:
@@ -886,6 +891,46 @@ def load_opening_ponds(*, workspace_root: Path | None = None) -> dict[str, Any] 
     }
 
 
+def save_committed_pond(
+    item: dict[str, str],
+    *,
+    workspace_root: Path | None = None,
+) -> Path:
+    path = committed_pond_path(workspace_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(item, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
+    return path
+
+
+def load_committed_pond(*, workspace_root: Path | None = None) -> dict[str, str] | None:
+    path = committed_pond_path(workspace_root)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    title = str(data.get("title") or data.get("id") or "").strip()
+    if not title:
+        return None
+    return normalize_pond_item(data, 0)
+
+
+def clear_committed_pond(*, workspace_root: Path | None = None) -> bool:
+    path = committed_pond_path(workspace_root)
+    if not path.is_file():
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def clear_opening_ponds(*, workspace_root: Path | None = None) -> bool:
     path = opening_ponds_path(workspace_root)
     if not path.is_file():
@@ -923,15 +968,18 @@ def find_committed_pond(
     workspace_root: Path | None,
 ) -> dict[str, str] | None:
     title = committed_pond_title(message)
-    if not title:
+    if title:
+        data = load_opening_ponds(workspace_root=workspace_root)
+        if data:
+            for item in data["items"]:
+                if (item.get("title") or item.get("id") or "").strip() == title:
+                    save_committed_pond(item, workspace_root=workspace_root)
+                    return item
+        saved = load_committed_pond(workspace_root=workspace_root)
+        if saved and (saved.get("title") or saved.get("id") or "").strip() == title:
+            return saved
         return None
-    data = load_opening_ponds(workspace_root=workspace_root)
-    if not data:
-        return None
-    for item in data["items"]:
-        if (item.get("title") or item.get("id") or "").strip() == title:
-            return item
-    return None
+    return load_committed_pond(workspace_root=workspace_root)
 
 
 def format_committed_pond_block(
@@ -940,14 +988,18 @@ def format_committed_pond_block(
     workspace_root: Path | None = None,
 ) -> str:
     """volatile：用户只点了选择，卡片正文从 sidecar 灌给模型。"""
+    from app.writing.text_metrics import CHAPTER_DWELL_HINT
+
     item = find_committed_pond(message=message, workspace_root=workspace_root)
     if not item:
         return ""
     title = item.get("title") or item.get("id") or ""
     lines = [
         "## 已选开篇",
-        "用户在卡片上勾选了一份。按下面这份写第一章，不要再出候选。",
-        "这是一本能连载的书。按「这本书」和「开篇」写；不要另起账单、走向、气味三栏，也不要另起窗口办事。",
+        "用户在卡片上勾选了一份。这是已选定的书：按「这本书」写当前章，不要再出候选。",
+        "开篇只在第一章兑现，后面不要重开一次。",
+        f"{CHAPTER_DWELL_HINT}。不要为凑字另开第二场、新反派或新地点。",
+        "按「这本书」和「开篇」写；不要另起账单、走向、气味三栏，也不要另起窗口办事。",
         f"书名：{title}",
     ]
     if item.get("flavor"):

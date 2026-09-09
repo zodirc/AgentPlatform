@@ -326,6 +326,7 @@ def test_committed_pond_block_from_sidecar(workspace: Path) -> None:
     assert "力的来源：来源不可信" in block
     assert "棋盘位：许棠" in block
     assert "不要另起账单" in block
+    assert "三千" in block
     assert "先过日子，超凡往后放" in block
     assert "在关系里活下去" in block
     pin = prepare_writing_system_prompt(
@@ -335,6 +336,13 @@ def test_committed_pond_block_from_sidecar(workspace: Path) -> None:
     )
     assert "## 已选开篇" in pin.volatile_block
     assert "## 上一组开篇候选" not in pin.volatile_block
+    thicken = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "把第一章写厚一点",
+        workspace_root=workspace,
+    )
+    assert "## 已选开篇" in thicken.volatile_block
+    assert "三千" in thicken.volatile_block
     more = prepare_writing_system_prompt(
         "You are a writing assistant.",
         MORE_PONDS_MESSAGE,

@@ -863,7 +863,9 @@ def prepare_writing_system_prompt(
         format_opening_ponds_block,
     )
 
-    if wants_opening_candidates(message, outline=outline_text):
+    if wants_opening_candidates(
+        message, outline=outline_text, workspace_root=workspace_root
+    ):
         ponds_block = format_opening_ponds_block(workspace_root=workspace_root)
         if ponds_block:
             extras.append(ponds_block)

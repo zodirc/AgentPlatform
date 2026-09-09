@@ -231,6 +231,10 @@ def archive_occupied_writing_docs(*, layout: str = "monofile") -> list[str]:
     from app.writing.outline_phase import clear_style_lock
 
     clear_style_lock()
+    from app.writing.opening_ponds import clear_committed_pond, clear_opening_ponds
+
+    clear_committed_pond()
+    clear_opening_ponds()
     from app.writing.signals.beats import clear_local_beats
 
     clear_local_beats()

@@ -135,7 +135,12 @@ def user_specified_writing_direction(message: str = "") -> bool:
     return _USER_DIRECTION.search(text) is not None
 
 
-def wants_opening_candidates(message: str = "", *, outline: str = "") -> bool:
+def wants_opening_candidates(
+    message: str = "",
+    *,
+    outline: str = "",
+    workspace_root: Path | None = None,
+) -> bool:
     """长篇未立定近池、只给题材或说看看：先交候选，不交章。"""
     from app.writing.outline_arc import outline_style_committed
 
@@ -148,6 +153,10 @@ def wants_opening_candidates(message: str = "", *, outline: str = "") -> bool:
         return False
     if _BROWSE_OPENING_RE.search(text):
         return True
+    from app.writing.opening_ponds import load_committed_pond
+
+    if load_committed_pond(workspace_root=workspace_root):
+        return False
     if _POND_ALREADY_NAMED_RE.search(text):
         return False
     return bool(_OPENING_SCALE_RE.search(text))
@@ -301,9 +310,9 @@ def resolve_outline_phase(
                 )
             else:
                 note = (
-                    f"长篇开篇：{compass}；勾画可轻可重；不要把后面的海写进第一章"
+                    f"长篇开篇：{compass}；一章一场约三千字写满这场；不要把后面的海写进第一章"
                     if fantasy
-                    else "长篇开篇：站住眼前的日子和人；勾画可轻可重；不要把后面的海写进第一章"
+                    else "长篇开篇：站住眼前的日子和人；一章一场约三千字写满这场；不要把后面的海写进第一章"
                 )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}
