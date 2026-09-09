@@ -6,8 +6,13 @@ import re
 
 LENGTH_SHORT_RATIO = 0.85
 OUTLINE_MIN_VISIBLE = 40
-DEFAULT_CHAPTER_MIN = 5000
-DEFAULT_CHAPTER_MAX = 6000
+# 起点常章：配额 3000，软顶 3500。不足 85%（2550）记 length_short。
+DEFAULT_CHAPTER_MIN = 3000
+DEFAULT_CHAPTER_MAX = 3500
+CHAPTER_DWELL_HINT = (
+    "一章一场，按起点习惯约三千字写满（对白、拆拍、反应），软顶三千五；"
+    "不要预告片再粘下一场，下一站留给下一章"
+)
 
 # Prefer these stems when several numbers appear in one Turn message.
 _PREFERRED_QUOTA = re.compile(
@@ -34,7 +39,7 @@ _SHORT_OUTLINE_ASK = re.compile(
     r"(?:^|[/\s])短(?:$|[\s，。])"
 )
 
-# Surgical / explicitly short prose — do not apply the 5k–6k chapter default.
+# Surgical / explicitly short prose — do not apply the chapter default.
 _SHORT_PROSE_ASK = re.compile(
     r"改一句|改短|补一句|只要这句|润色这|"
     r"(?:写|改)短(?!篇)|"
@@ -44,6 +49,7 @@ _SHORT_PROSE_ASK = re.compile(
 
 _CHAPTER_DRAFT_ASK = re.compile(
     r"成篇|一篇|一章|本章|这一章|扩写|续写|"
+    r"采用此开篇|按此开篇|按开篇候选|"
     r"写第|[第][一二三四五六七八九十百千零〇两\d]+章"
 )
 
@@ -198,12 +204,19 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
     out["quota_chars"] = quota
     if vis < quota * LENGTH_SHORT_RATIO:
         out["length_short"] = True
-        out["summary"] = (
-            f"实体文字 {vis} 字，低于约定 {quota} 字的 85%。"
-            "本轮 draft_section mode=append 再接约 2000 字，或先 propose_patch 补窗；"
-            "不要整章 upsert，不要报完工。"
-        )
+        out["summary"] = length_short_summary(vis, quota)
     return out
+
+
+def length_short_summary(vis: int, quota: int) -> str:
+    """篇幅不足时的提示：写满已有拍，不要 append 第二场。"""
+    return (
+        f"实体文字 {vis} 字，低于约定 {quota} 字的 85%"
+        f"（软顶 {DEFAULT_CHAPTER_MAX}）。"
+        "在已有拍里写满对白、拆拍、反应；不要新出场、新地点、新反派。"
+        "若这场已经收住，下一站留给下一章，不要 mode=append 粘第二场。"
+        "不要报完工。"
+    )
 
 
 def outline_thin_fields(scored_md: str, user_text: str) -> dict[str, object]:

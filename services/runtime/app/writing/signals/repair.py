@@ -36,7 +36,7 @@ L0_PENALTY_KEYS = frozenset(
         "length_short",
     }
 )
-# 加厚前必须先清的过程门（length_short 本身就是 append 理由，不挡）。
+# 加厚前必须先清的过程门（length_short 不再默认 append 第二场）。
 APPEND_BLOCK_L0_KEYS = frozenset(
     {
         "staccato_uniform",
@@ -64,7 +64,10 @@ _HINTS: dict[str, str] = {
     ),
     "opening_institution": "第一句就是机构名，读者还没地方站。先给一个可站的场面；机构名等人物开口时自然带出。",
     "lore_dump": "这里成了「N年前」的案情提要。身世留在当下的屋子或活计上，随事露头。",
-    "length_short": "章级过程 L0 清掉后：draft_section mode=append 再接约 2000 字；整章 upsert 用不上。",
+    "length_short": (
+        "这场还没写满约三千字：在已有拍里写满对白、拆拍、反应。"
+        "新出场、新地点、新反派和下一场冲突留给下一章。"
+    ),
     "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在他手上。",
     "fragment_mismatch": "评分切片不合这场戏的节奏，按这场写即可",
     "all_explained": "每个异常都给了来源。留一处不解释：力从哪来、那只手是谁，挑一个。",

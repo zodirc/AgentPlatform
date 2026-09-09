@@ -64,7 +64,7 @@ def manifest_delivery_blockers(manifest: dict[str, Any] | None) -> list[str]:
                 vis = int(row.get("visible_chars") or 0)
             except (TypeError, ValueError):
                 vis = 0
-            # 800：成稿加厚门槛。写过一场就让本章落盘；配额未满只是 tool_result 提示 append。
+            # 800：本章几乎没写。写过一场就让本章落盘；配额未满不挡，也不要靠 append 第二场凑字。
             if row.get("length_short") and vis < 800:
                 blockers.append(f"{section_id}: length_short")
             continue
@@ -95,7 +95,8 @@ def delivery_hold_notice(blockers: list[str], *, book_scope: str = "single") -> 
         return (
             "【交付门】这一章几乎还没写，不能把本章当落盘完成。\n"
             f"turn manifest 仍开：\n{lines}\n"
-            "长篇本 Turn 只交一章：先把这场写出来；配额未满可以 mode=append 加厚，"
+            "长篇本 Turn 只交一章：先把这场写出来。"
+            "配额未满时在已有拍里写满，不要 mode=append 粘第二场；"
             "不要把「全书没写完」当成失败。"
         )
     return (
@@ -104,7 +105,8 @@ def delivery_hold_notice(blockers: list[str], *, book_scope: str = "single") -> 
         "下一步：L0 岛 → propose_patch（每 penalty_key 本 Turn 至多 "
         f"{MAX_PATCHES_PER_PENALTY_KEY} 次生效 patch）；"
         "碎拍预算尽 → draft_section mode=rewrite_window 一次换整窗；"
-        "L0 清且 length_short → mode=append 加厚。如实说明进度。"
+        "L0 清且这场还没成形 → 在已有拍里写满；已经收住就不要 mode=append 粘第二场。"
+        "如实说明进度。"
     )
 
 

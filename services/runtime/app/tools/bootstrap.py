@@ -163,8 +163,11 @@ def build_registry() -> ToolRegistry:
                 "Pass layout=sections for one-file-per-chapter under drafts/. "
                 "Promote into manuscript.md via propose_patch. History stays under "
                 ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
-                "do not upsert the whole chapter: propose_patch the repair_span, or "
-                "draft_section mode=append with only the new slice (~2000 chars) to thicken. "
+                "do not upsert the whole chapter: propose_patch a thin existing beat if the "
+                "user pointed at one. Do not draft_section mode=append a second climax, "
+                "new cast, or new place to hit a quota. A web-serial chapter is one scene "
+                "at ~3000 visible chars (soft cap 3500); leftover plot stations belong in "
+                "the next chapter. "
                 "If repair_span.neighbor is set, follow that beat's one loaded line or "
                 "action — do not copy its plot, and do not strip quotes into narration. "
                 f"After {MAX_PATCHES_PER_PENALTY_KEY} applied propose_patch per penalty_key, "
@@ -215,9 +218,11 @@ def build_registry() -> ToolRegistry:
                             "(thicken). upsert: replace the chapter. rewrite_window: "
                             "replace a chip-sized repair_span.old_text in one shot "
                             "(staccato island only; not an opening score window). "
-                            "After ≥800 visible chars this Turn, append is required to thicken — but only "
-                            "after chapter process L0 is clear; the new slice must not "
-                            "reintroduce staccato_uniform."
+                            "After ≥800 visible chars this Turn, do not upsert the whole "
+                            "chapter. Append only to dwell in the same scene — never a second "
+                            "act, new cast, or new place to hit quota — and only after chapter "
+                            "process L0 is clear; the new slice must not reintroduce "
+                            "staccato_uniform."
                         ),
                     },
                 },

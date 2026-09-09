@@ -343,7 +343,7 @@ def _reject_rewrite_window(
             "status": "error",
             "error": "rewrite_window_no_span",
             "rewrite_policy": REWRITE_PATCH,
-            "summary": "repair_span 已清或不可定位；L0 清后改 mode=append 加厚。",
+            "summary": "repair_span 已清或不可定位；L0 清后在已有拍里写满，不要粘第二场。",
         }
     old = str(span["old_text"])
     from app.writing.patch_budget import island_untouched_error
@@ -419,8 +419,8 @@ def _reject_full_redraft(
         "rewrite_policy": REWRITE_PATCH,
         "summary": (
             "本章本轮已成稿。有 writing_signals.repair_span 则 propose_patch 只换 old_text；"
-            "章级 L0（碎拍/铰链/开篇机构/身世）清掉后，篇幅不足再 draft_section mode=append，"
-            "content 只交新段（约 2000 字）。不要整章 upsert。"
+            "章级 L0（碎拍/铰链/开篇机构/身世）清掉后，若这场还没写满，在已有拍里补对白/反应；"
+            "已经收住就不要 mode=append 粘第二场。不要整章 upsert。"
         ),
     }
     if span:

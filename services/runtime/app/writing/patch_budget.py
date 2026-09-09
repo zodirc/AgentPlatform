@@ -482,7 +482,7 @@ def check_propose_patch_allowed(
                     rewrite_policy="append_or_stop",
                     summary=(
                         "net_signal 已 ≥ 0 且无过程 L0：不要继续 patch。"
-                        "篇幅不足用 mode=append；否则收工。"
+                        "这场还没写满就在已有拍里补；已经收住就收工，不要 append 第二场。"
                     ),
                     net_signal=net,
                 )
