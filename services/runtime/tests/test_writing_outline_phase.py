@@ -95,8 +95,8 @@ def test_open_phase_note_fantasy_asks_early_gain() -> None:
     )
 
 
-def test_should_not_inject_diverge_styles(tmp_path: Path) -> None:
-    assert not should_inject_diverge_styles(
+def test_should_inject_diverge_styles_during_opening(tmp_path: Path) -> None:
+    assert should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
         outline="",
         workspace_root=tmp_path,
@@ -120,12 +120,36 @@ def test_diverge_styles_block_substantial() -> None:
     assert len(block.splitlines()) <= 180
 
 
-def test_should_not_inject_when_style_in_outline(tmp_path: Path) -> None:
-    outline = _style_contract_block()
-    assert not outline_style_committed(outline)
+def test_should_not_inject_when_style_committed(tmp_path: Path) -> None:
+    outline = (
+        "## 这本书\n\n"
+        "**跟着谁**：沈禾，边关换防的记名弟子，眼下还是凡人。\n\n"
+        "**眼下要什么**：今夜必须出关，粮秤对不上。\n\n"
+        "**读者站在哪**：霜降边城哨所，换防的夜里。\n\n"
+        "**这一章干什么**：先把关隘的账问清，再决定走不走。\n"
+    )
+    assert outline_style_committed(outline)
     assert not should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
         outline=outline,
+        workspace_root=tmp_path,
+    )
+
+
+def test_should_inject_when_style_block_not_committed(tmp_path: Path) -> None:
+    outline = _style_contract_block()
+    assert not outline_style_committed(outline)
+    assert should_inject_diverge_styles(
+        "写一章长篇玄幻小说第一章",
+        outline=outline,
+        workspace_root=tmp_path,
+    )
+
+
+def test_should_not_inject_short_form(tmp_path: Path) -> None:
+    assert not should_inject_diverge_styles(
+        "写一篇故事",
+        outline="",
         workspace_root=tmp_path,
     )
 

@@ -219,9 +219,16 @@ def should_inject_diverge_styles(
     book_scope: str = "",
     workspace_root: Path | None = None,
 ) -> bool:
-    """不再自动注入六路透镜。透镜不是订纲通行证。"""
-    del message, outline, book_scope, workspace_root
-    return False
+    """开篇候选 / 未订纲时注入六路透镜；style.lock 或纲上风格契约立定后停止。"""
+    from app.writing.outline_arc import outline_style_committed
+
+    if style_lock_exists(workspace_root):
+        return False
+    if outline_style_committed(outline):
+        return False
+    return wants_fantasy_diverge_corpus(
+        message, outline=outline, book_scope=book_scope
+    )
 
 
 def load_diverge_styles_volatile_block() -> str:
@@ -288,7 +295,7 @@ def resolve_outline_phase(
             )
             if user_dir:
                 note = (
-                    f"长篇开篇：跟着谁还是凡人；这一章{compass}，不要写终局宇宙"
+                    f"长篇开篇：棋盘位还是凡人；这一章{compass}，不要写终局宇宙"
                     if fantasy
                     else "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
                 )
