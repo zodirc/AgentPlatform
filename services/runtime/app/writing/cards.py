@@ -858,12 +858,21 @@ def prepare_writing_system_prompt(
         if diverge:
             extras.append(diverge)
     from app.writing.outline_phase import wants_opening_candidates
-    from app.writing.opening_ponds import format_opening_ponds_block
+    from app.writing.opening_ponds import (
+        format_committed_pond_block,
+        format_opening_ponds_block,
+    )
 
     if wants_opening_candidates(message, outline=outline_text):
         ponds_block = format_opening_ponds_block(workspace_root=workspace_root)
         if ponds_block:
             extras.append(ponds_block)
+    else:
+        committed = format_committed_pond_block(
+            message=message, workspace_root=workspace_root
+        )
+        if committed:
+            extras.append(committed)
     from app.writing.signals.beats import format_local_beats_block
 
     spec_frag = None

@@ -9,13 +9,8 @@ from typing import Any
 from uuid import uuid4
 
 OPENING_PONDS_REL = Path(".agent") / "work" / "opening_ponds.json"
-MORE_PONDS_MESSAGE = (
-    "这几个都不合适。再给 2～3 个开篇候选。"
-    "每份写成一本书的短计划：开篇怎么进、往后怎么走、全篇什么气味。"
-    "要有正常修真开局：自己变强或系统/金手指，以及遍地修真或先过日子。"
-    "换还没用过的 start_kind，不能只换职业地点或换一套系统皮。"
-    "start_kind 不得重复，promise 不得全员相同。"
-)
+# 勾选后发给下一回合的短令牌；聊天不画这条气泡。换皮约束在 format_opening_ponds_block。
+MORE_PONDS_MESSAGE = "我要其他的"
 OPENING_CHOICE_TOOL_ALLOWLIST = frozenset({"propose_opening_ponds", "stub_echo"})
 
 START_KIND_LABELS: dict[str, str] = {
@@ -82,7 +77,7 @@ Each item needs title, who, where, want, start_kind, promise, opening, arc, flav
 The UI card is a short book plan the user reads: 开篇 / 走向 / 风格.
 Do not sell the book as 系统 or 关系 labels. start_kind/promise are contrast only.
 Do not list the ponds in the assistant message. Do not call draft_section or
-update_outline. Ask the user to pick a card or say 我要其他的.
+update_outline. The user checks a card (no chat bubble) or 我要其他的.
 
 start_kind (required, unique): self_notice | pulled_in | granted_path |
 world_already | no_extraordinary
@@ -481,15 +476,64 @@ def clear_opening_ponds(*, workspace_root: Path | None = None) -> bool:
         return False
 
 
+_COMMIT_TITLE_RE = re.compile(
+    r"(?:按开篇候选|采用此开篇|按此开篇)[「『](.+?)[」』]"
+)
+
+
 def format_select_pond_message(item: dict[str, str]) -> str:
-    """点选后发给下一 Turn 的用户消息。"""
-    lines = [f"按开篇候选「{item.get('title') or item.get('id')}」写第一章。", ""]
-    if item.get("flavor"):
-        lines.append(f"风格：{item['flavor']}")
+    """勾选后发给下一回合的令牌；聊天不画这条气泡。"""
+    title = (item.get("title") or item.get("id") or "").strip()
+    return f"采用此开篇「{title}」"
+
+
+def committed_pond_title(message: str) -> str | None:
+    text = (message or "").strip()
+    if not text:
+        return None
+    match = _COMMIT_TITLE_RE.search(text)
+    title = (match.group(1) if match else "").strip()
+    return title or None
+
+
+def find_committed_pond(
+    *,
+    message: str,
+    workspace_root: Path | None,
+) -> dict[str, str] | None:
+    title = committed_pond_title(message)
+    if not title:
+        return None
+    data = load_opening_ponds(workspace_root=workspace_root)
+    if not data:
+        return None
+    for item in data["items"]:
+        if (item.get("title") or item.get("id") or "").strip() == title:
+            return item
+    return None
+
+
+def format_committed_pond_block(
+    *,
+    message: str,
+    workspace_root: Path | None = None,
+) -> str:
+    """volatile：用户只点了选择，卡片正文从 sidecar 灌给模型。"""
+    item = find_committed_pond(message=message, workspace_root=workspace_root)
+    if not item:
+        return ""
+    title = item.get("title") or item.get("id") or ""
+    lines = [
+        "## 已选开篇",
+        "用户在卡片上勾选了一份。按下面这份写第一章，不要再出候选。",
+        f"书名：{title}",
+    ]
     if item.get("opening"):
         lines.append(f"开篇：{item['opening']}")
     if item.get("arc"):
         lines.append(f"走向：{item['arc']}")
+    if item.get("flavor"):
+        lines.append(f"风格：{item['flavor']}")
     if item.get("who"):
         lines.append(f"跟着谁：{item['who']}")
     if item.get("where"):
@@ -502,7 +546,7 @@ def format_select_pond_message(item: dict[str, str]) -> str:
         lines.append(f"超凡怎么开始：{start_kind_label(kind)}")
     if promise:
         lines.append(f"读者买什么：{promise_label(promise)}")
-    return "\n".join(lines).strip()
+    return "\n".join(lines)
 
 
 def format_opening_ponds_block(*, workspace_root: Path | None = None) -> str:

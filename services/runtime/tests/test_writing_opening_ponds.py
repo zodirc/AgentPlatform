@@ -46,9 +46,12 @@ def _pond(
 def test_wants_opening_candidates_browse_and_commit() -> None:
     assert wants_opening_candidates("写一章长篇修真，我看看") is True
     assert wants_opening_candidates(MORE_PONDS_MESSAGE) is True
+    assert MORE_PONDS_MESSAGE == "我要其他的"
+    assert "start_kind" not in MORE_PONDS_MESSAGE
     assert (
         wants_opening_candidates("按开篇候选「早高峰系统」写第一章。") is False
     )
+    assert wants_opening_candidates("采用此开篇「早高峰系统」") is False
 
 
 def test_opening_choice_block_requires_distinct_start_kind() -> None:
@@ -61,6 +64,7 @@ def test_opening_choice_block_requires_distinct_start_kind() -> None:
     assert "过日子" in block
     assert "opening" in block
     assert "flavor" in block
+    assert "no chat bubble" in block
     assert "first third" not in block.lower()
     assert "capability" not in block.lower()
 
@@ -68,6 +72,11 @@ def test_opening_choice_block_requires_distinct_start_kind() -> None:
 def test_should_gate_opening_choice_when_browsing() -> None:
     assert should_gate_opening_choice(
         "写一章长篇修真小说的第一章, 现代都市题材，我看看",
+        outline="",
+        tool_names=["propose_opening_ponds", "draft_section"],
+    )
+    assert not should_gate_opening_choice(
+        "采用此开篇「早高峰系统」",
         outline="",
         tool_names=["propose_opening_ponds", "draft_section"],
     )
@@ -205,10 +214,9 @@ def test_opening_ponds_edge_paths(workspace: Path) -> None:
             "flavor": "有人的日子。",
         }
     )
-    assert "开篇：开篇跟着这个人把眼前这件事做完。" in msg
-    assert "走向：往后仍扣着这笔要的东西往前走。" in msg
-    assert "风格：有人的日子。" in msg
-    assert "这一章干什么" not in msg
+    assert msg == "采用此开篇「A」"
+    assert "跟着谁" not in msg
+    assert "开篇：" not in msg
     assert pond_item_event_fields({"title": "", "name": ""}, 0) is not None
 
 
@@ -236,6 +244,59 @@ def test_clear_and_load_opening_ponds(workspace: Path) -> None:
     assert load_opening_ponds(workspace_root=workspace) is None
     assert format_opening_ponds_block(workspace_root=workspace) == ""
     assert clear_opening_ponds(workspace_root=workspace) is False
+
+
+def test_committed_pond_block_from_sidecar(workspace: Path) -> None:
+    from app.writing.cards import prepare_writing_system_prompt
+    from app.writing.opening_ponds import (
+        format_committed_pond_block,
+        format_select_pond_message,
+        save_opening_ponds,
+    )
+
+    items = normalize_pond_items(
+        [
+            _pond(
+                "《这条街的人都很会过日子》",
+                who="许棠，二十九岁",
+                where="南平码头附近的老街",
+                want="把裁缝铺撑住",
+                start_kind="no_extraordinary",
+                promise="survive_relation",
+                opening="一早改校服裤脚，下午去领弟弟。",
+                arc="缝门窗时发现黑色裂缝。",
+                flavor="这条街的人都很会过日子",
+            ),
+            _pond("B", start_kind="pulled_in", promise="costly_truth"),
+        ]
+    )
+    save_opening_ponds(items, summary="x", workspace_root=workspace)
+    msg = format_select_pond_message(items[0])
+    assert msg == "采用此开篇「《这条街的人都很会过日子》」"
+    block = format_committed_pond_block(message=msg, workspace_root=workspace)
+    assert "## 已选开篇" in block
+    assert "开篇：一早改校服裤脚" in block
+    assert "跟着谁：许棠" in block
+    assert "先过日子，超凡往后放" in block
+    assert "在关系里活下去" in block
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        msg,
+        workspace_root=workspace,
+    )
+    assert "## 已选开篇" in pin.volatile_block
+    assert "## 上一组开篇候选" not in pin.volatile_block
+    more = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        MORE_PONDS_MESSAGE,
+        workspace_root=workspace,
+    )
+    assert "## 上一组开篇候选" in more.volatile_block
+    assert "## 已选开篇" not in more.volatile_block
+    assert format_committed_pond_block(
+        message="采用此开篇「没有这份」",
+        workspace_root=workspace,
+    ) == ""
 
 
 def test_pond_item_event_fields_drops_unknown_kind() -> None:
@@ -469,9 +530,7 @@ async def test_propose_opening_ponds_saves_and_awaits(workspace: Path) -> None:
     assert saved["items"][0]["title"] == "早高峰系统"
     assert saved["items"][0]["start_kind"] == "granted_path"
     msg = format_select_pond_message(saved["items"][0])
-    assert "按开篇候选「早高峰系统」" in msg
-    assert "风格：白天写字楼里把班上完的升级日常" in msg
-    assert "开篇：早高峰闸机前" in msg
+    assert msg == "采用此开篇「早高峰系统」"
     assert wants_opening_candidates(msg) is False
 
 
