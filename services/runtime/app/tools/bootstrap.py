@@ -339,8 +339,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="propose_opening_ponds",
             description=(
-                "Propose 2–3 opening ponds as short book pitches "
-                "(opening/arc/flavor). Unique start_kind, not-all-same promise. "
+                "Propose 2–3 opening ponds as books the user can pick: "
+                "title + 这本书 (flavor) + opening. Unique start_kind, "
+                "not-all-same promise, not-all-trusted source_trust. "
+                "Do not split into 账单/走向/气味. "
                 "UI picker is the deliverable; do not list ponds in chat. "
                 "Use when the user only gave a genre or said 看看 / 我要其他的."
             ),
@@ -355,13 +357,38 @@ def build_registry() -> ToolRegistry:
                             "type": "object",
                             "properties": {
                                 "id": {"type": "string"},
-                                "title": {"type": "string"},
-                                "who": {"type": "string", "description": "跟着谁"},
-                                "where": {"type": "string", "description": "站在哪"},
-                                "want": {"type": "string", "description": "眼下要什么"},
-                                "opening": {"type": "string", "description": "开篇怎么进"},
-                                "arc": {"type": "string", "description": "这本书往后怎么走"},
-                                "flavor": {"type": "string", "description": "全篇气味"},
+                                "title": {
+                                    "type": "string",
+                                    "description": "连载书名：能力/身份错位/会变大的局。不要第七码头这种工作地点，不要修仙从替班开始，不要七张收据",
+                                },
+                                "who": {
+                                    "type": "string",
+                                    "description": "棋盘上可晋升的位置（囚犯/考生/打更人/干员），不是工种自我介绍",
+                                },
+                                "where": {
+                                    "type": "string",
+                                    "description": "这场事故发生的棋盘，不是补证窗口/失物招领",
+                                },
+                                "want": {
+                                    "type": "string",
+                                    "description": "这场事故里必须先决定的那一步（烙不烙、截不截），不是零点前换证/封站前送钥匙",
+                                },
+                                "opening": {
+                                    "type": "string",
+                                    "description": "这本书的力怎么亮：第一句就是这盘游戏的事故，不是吊臂砸人、信物按进掌心、药柜滚尸",
+                                },
+                                "flavor": {
+                                    "type": "string",
+                                    "description": "这本书：人身上能用的能力或还在运转的规则。都市修真三张要覆盖错位/异能组织/金手指有阴谋，不要两本都在码头和跳桥",
+                                },
+                                "arc": {
+                                    "type": "string",
+                                    "description": "可选。不要写成院司宫晋升名录；卡片上不展示",
+                                },
+                                "price": {
+                                    "type": "string",
+                                    "description": "可选。不要把整本书写成每做一次就永久扣一笔；卡片上不展示",
+                                },
                                 "start_kind": {
                                     "type": "string",
                                     "description": (
@@ -374,6 +401,20 @@ def build_registry() -> ToolRegistry:
                                     "description": (
                                         "Not all same. power_steps|costly_truth|"
                                         "survive_relation|dread_decode|social_place"
+                                    ),
+                                },
+                                "source_trust": {
+                                    "type": "string",
+                                    "description": (
+                                        "trusted|dubious|false. "
+                                        "items≥3 not all trusted"
+                                    ),
+                                },
+                                "first_conflict_at": {
+                                    "type": "string",
+                                    "description": (
+                                        "first_300|first_1000|chapter_one|later. "
+                                        "at most one later"
                                     ),
                                 },
                                 "chapter_job": {"type": "string"},
@@ -389,6 +430,9 @@ def build_registry() -> ToolRegistry:
                                 "flavor",
                                 "start_kind",
                                 "promise",
+                                "price",
+                                "source_trust",
+                                "first_conflict_at",
                             ],
                         },
                     },

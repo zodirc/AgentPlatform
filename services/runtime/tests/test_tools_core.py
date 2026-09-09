@@ -388,6 +388,11 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "export_document" in writing.system_prompt
     assert "遵守工具返回的状态" in writing.system_prompt
     assert "不提供 `write_file`" in writing.system_prompt
+    assert "# FINAL JUDGMENT" in writing.system_prompt
+    assert "# WRITING" in writing.system_prompt
+    assert "# WORK STATE" in writing.system_prompt
+    assert "# TOOLS" in writing.system_prompt
+    assert "# DELIVERY" in writing.system_prompt
     assert "draft_section` 落盘" in writing.system_prompt
     assert "Settings → 写作风格" not in writing.system_prompt
     assert "200–400" not in writing.system_prompt

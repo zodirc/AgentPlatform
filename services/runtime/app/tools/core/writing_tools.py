@@ -978,6 +978,7 @@ async def propose_opening_ponds(
         load_opening_ponds,
         normalize_pond_items,
         ponds_reject_reason,
+        rank_opening_ponds,
         save_opening_ponds,
     )
 
@@ -1006,7 +1007,8 @@ async def propose_opening_ponds(
     if rejected:
         code, summary = rejected
         return {"status": "error", "error": code, "summary": summary}
-    saved = save_opening_ponds(normalized, summary="")
+    ranked = rank_opening_ponds(normalized)
+    saved = save_opening_ponds(ranked, summary="")
     return {
         "status": "ok",
         "ponds_id": saved["ponds_id"],
