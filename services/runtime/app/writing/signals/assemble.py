@@ -337,7 +337,7 @@ async def build_writing_signals(
     turn_user_text: str = "",
 ) -> dict[str, Any]:
     """构建完整 signals。"""
-    from app.writing.chapter_role import resolve_chapter_role
+    from app.writing.chapter_role import cold_start_score_fragment, resolve_chapter_role
     from app.writing.work_mode import load_style_gains, resolve_work_mode, work_mode_label
     from app.writing.signals.prefs_loader import _module as _writing_prefs
 
@@ -360,7 +360,18 @@ async def build_writing_signals(
     space = await load_metric_space(
         owner_user_id=owner_id, work_id=work_id, work_mode=work_mode
     )
-    declared = normalize_fragment(fragment)
+    duty = _chapter_duty(section_id)
+    role = resolve_chapter_role(
+        section_id=section_id or "",
+        message=turn_user_text,
+        duty=duty,
+        work_mode=work_mode,
+    )
+    declared = normalize_fragment(
+        cold_start_score_fragment(
+            fragment, duty=duty, role=role, work_mode=work_mode
+        )
+    )
     prior = _manifest_section_row(turn_id, session_id, section_id)
     scored = score_writing_fragment(
         text,
@@ -369,13 +380,7 @@ async def build_writing_signals(
         prefs=prefs,
         space=space,
         prior=prior,
-    )
-    duty = _chapter_duty(section_id)
-    role = resolve_chapter_role(
-        section_id=section_id or "",
-        message=turn_user_text,
-        duty=duty,
-        work_mode=work_mode,
+        chapter_position=str(role.get("chapter_position") or ""),
     )
     # 假高潮只跟纲上的这场，不跟发明的章类型。
     duty_conflict = bool(
@@ -453,7 +458,7 @@ async def writing_rubric(
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """rubric 工具：返回当前 work_mode 下平台维度权重与 signal 表。"""
-    from app.writing.chapter_role import resolve_chapter_role
+    from app.writing.chapter_role import cold_start_score_fragment, resolve_chapter_role
     from app.writing.work_mode import (
         fragment_obligations,
         load_style_gains,
@@ -468,10 +473,6 @@ async def writing_rubric(
     work_mode, mode_source = resolve_work_mode(turn_user_text)
     style_gains = load_style_gains(work_mode=work_mode)
     prefs = platform_prefs_payload(work_mode=work_mode, style_gains=style_gains)
-    declared = normalize_fragment(fragment)
-    weights = (prefs.get("fragment_weights") or {}).get(declared) or {}
-    if not weights:
-        weights = (prefs.get("fragment_weights") or {}).get("mixed") or {}
     flatten = _writing_prefs().flatten_fragment_signals
     duty = _chapter_duty(section_id)
     role = resolve_chapter_role(
@@ -480,6 +481,14 @@ async def writing_rubric(
         duty=duty,
         work_mode=work_mode,
     )
+    declared = normalize_fragment(
+        cold_start_score_fragment(
+            fragment, duty=duty, role=role, work_mode=work_mode
+        )
+    )
+    weights = (prefs.get("fragment_weights") or {}).get(declared) or {}
+    if not weights:
+        weights = (prefs.get("fragment_weights") or {}).get("mixed") or {}
     space = await load_metric_space(
         owner_user_id=owner_id, work_id=work_id, work_mode=work_mode
     )

@@ -57,9 +57,9 @@ def test_cold_start_spec_plus_voice_skips_shop_attractor(tmp_path: Path, monkeyp
     assert "特务踹门" not in prior
 
 
-def test_long_opening_without_outline_spec_is_mixed_not_texture() -> None:
+def test_long_opening_without_outline_spec_is_plot_progress_not_texture() -> None:
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
-    assert "fragment: `mixed`" in spec
+    assert "fragment: `plot_progress`" in spec
     assert "worldview_texture" not in spec
     assert _hits(spec) == []
     assert "另起人与事" in spec

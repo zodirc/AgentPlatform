@@ -67,6 +67,10 @@ _HINTS: dict[str, str] = {
     "length_short": "章级过程 L0 清掉后：draft_section mode=append 再接约 2000 字；整章 upsert 用不上。",
     "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在他手上。",
     "fragment_mismatch": "评分切片不合这场戏的节奏，按这场写即可",
+    "all_explained": "每个异常都给了来源。留一处不解释：力从哪来、那只手是谁，挑一个。",
+    "escalation_flat": "这一章步步顺。写一次打不过、跑了，或让账单当章到账。",
+    "premise_novella": "这一章把家里的急事做完就收束了。世界下一层（隐世、序列、职阶）要露头，不要当成全书结局。",
+    "world_layer_visible": "开篇能看见世界还会变大的那一层。",
     "weak_window": "这一拍离该场面该有的质地最远，只改这一段",
 }
 
@@ -81,6 +85,10 @@ _HINTS_WEB_SERIAL: dict[str, str] = {
     "lore_dump": "这里成了开场案情提要。身世跟当下的麻烦走，随事露头。",
     "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在场上动作或信息差上。",
     "fragment_mismatch": "评分切片不合这场戏，按这场的台阶写即可",
+    "all_explained": "每个异常都给了来源。留一处不解释，不要磨圆。",
+    "escalation_flat": "这一章步步顺。写一次打不过或后退，账单当章到账。",
+    "premise_novella": "这一章把家里的急事做完就收束了。世界下一层要露头，不要当成全书结局。",
+    "world_layer_visible": "开篇能看见世界还会变大的那一层。",
     "weak_window": "这一拍空转，只改这一段；不必写成文学句",
 }
 

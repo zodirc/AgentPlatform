@@ -100,6 +100,11 @@ def test_summarize_holdout_report_shape() -> None:
     assert 0.0 <= float(probe["l1_alignment_to_train"]) <= 1.0
 
 
+def test_web_serial_holdout_gate_still_passes() -> None:
+    report = summarize_holdout(prefs=_wp.platform_prefs_payload(work_mode="web_serial"))
+    assert report["holdout_gate"]["passed"] is True
+
+
 def test_web_serial_catalog_is_partitioned() -> None:
     works = {
         entry["work"]

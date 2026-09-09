@@ -198,6 +198,110 @@ def plot_step_visible(text: str) -> bool:
     return narrative_scene_ratio(body) >= 0.38 and bool(_MOTION.search(body))
 
 
+_ANOMALY_CUE = re.compile(
+    r"系统|金手指|功法|面板|灵气|铜印|异象|入体|觉醒|那只手|突然出现|凭空"
+)
+_EXPLAIN_CUE = re.compile(
+    r"原来是|原来这|其实是|来源于|来自于|真相是|这是因为|解释是"
+)
+_BLANK_CUE = re.compile(
+    r"说不清|说不准|不知道从哪|没人解释|来源不明|来历不明|不问来处"
+)
+_FAIL_RETREAT = re.compile(
+    r"打不过|跑了|败了|败退|后退|逃了|撑不住|没挡住|没打过|认栽"
+)
+_PRICE_LAND = re.compile(r"代价|账单|少了|扣了|忘了|付了|只剩|寿命|记忆被")
+_POWER_USE = re.compile(r"系统|功法|金手指|面板|灵气|入体|催动|运转|异能")
+_COUNTABLE_LOSS = re.compile(
+    r"\d+\s*(次|米|年|岁|条|格|层)|"
+    r"少了.{0,8}(次|米|年|记忆)|"
+    r"扣了|"
+    r"付了.{0,8}(次|米|年)|"
+    r"寿命.{0,8}(少|扣)"
+)
+
+
+def all_explained(text: str, *, work_mode: str = "literary") -> bool:
+    """本章每个异常都给了来源或解释，无一处留白。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    if normalize_work_mode(work_mode) != "web_serial":
+        return False
+    if visible_chars(text) < 400:
+        return False
+    body = text or ""
+    if not _ANOMALY_CUE.search(body):
+        return False
+    if _BLANK_CUE.search(body):
+        return False
+    return bool(_EXPLAIN_CUE.search(body))
+
+
+def escalation_flat(text: str, *, work_mode: str = "literary") -> bool:
+    """整章无失败、无后退、无代价到账。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    if normalize_work_mode(work_mode) != "web_serial":
+        return False
+    if visible_chars(text) < 400:
+        return False
+    body = text or ""
+    if _FAIL_RETREAT.search(body) or _PRICE_LAND.search(body):
+        return False
+    if not (_POWER_USE.search(body) or _CONFLICT_CUE.search(body)):
+        return False
+    return True
+
+
+def price_paid_visible(text: str, *, work_mode: str = "literary") -> bool:
+    """力用过之后，同章内有可数的损失落地。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    if normalize_work_mode(work_mode) != "web_serial":
+        return False
+    if visible_chars(text) < 200:
+        return False
+    body = text or ""
+    if not _POWER_USE.search(body):
+        return False
+    return bool(_COUNTABLE_LOSS.search(body))
+
+
+_WORLD_LAYER = re.compile(
+    r"境界|序列|职阶|隐世|秘境|第二世界|星域|深空|位面|诸天|"
+    r"模拟器|灵境|教会|万族|星门|渡劫|副本|宗门"
+)
+_NOVELLA_CLOSE = re.compile(
+    r"(母亲|父亲|爸|妈|妹妹).{0,24}(救回|保住|尾款|押金|掀掉|解约)"
+    r"|(救回|保住).{0,16}(母亲|父亲|妹妹)"
+)
+
+
+def world_layer_visible(text: str, *, work_mode: str = "literary") -> bool:
+    """开篇能看见世界下一层（梯子/隐世/第二世界），不是本市案件收束。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    if normalize_work_mode(work_mode) != "web_serial":
+        return False
+    if visible_chars(text) < 200:
+        return False
+    return bool(_WORLD_LAYER.search(text or ""))
+
+
+def premise_novella(text: str, *, work_mode: str = "literary") -> bool:
+    """开篇把家庭急事做完当成全书，且没有下一层。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    if normalize_work_mode(work_mode) != "web_serial":
+        return False
+    if visible_chars(text) < 400:
+        return False
+    body = text or ""
+    if _WORLD_LAYER.search(body):
+        return False
+    return bool(_NOVELLA_CLOSE.search(body))
+
+
 def character_card_action_hit(text: str) -> bool:
     """人物卡姓名命中。
     

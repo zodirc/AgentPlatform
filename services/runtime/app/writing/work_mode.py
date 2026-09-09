@@ -256,7 +256,7 @@ def serial_opening_compass(*, message: str = "", outline: str = "") -> str:
     if is_urban_cultivation(message, outline) and not wants_occult_opening(
         message, outline
     ):
-        return "前三分之一交到主角发觉自己能做什么，或当场得到一条能用的路；场上是有人的日子"
+        return "前三分之一交到主角发觉自己能做什么，或当场得到一条能用的路；烟火是入口不是主菜"
     if wants_occult_opening(message, outline):
         return "前三分之一交到得到或发现；可以走灵视、异象"
     return "前三分之一交到得到或发现；都市修真可以落到自己发觉能力"
@@ -295,8 +295,8 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
             "dialogue_dyad": "对白露出人物选择与关系；允许直白；已知的名字直接用；空问收成一两句或动手。",
             "mixed": (
                 "人物+情节+环境谁响一点随这场戏；"
-                "开篇前三分之一落到得到或发现；都市修真可以落到自己发觉能力；场上是有人的日子；"
-                "物件从当前空间长出来；空问收成一两句或动手。"
+                "开篇前三分之一落到得到或发现；都市修真可以落到自己发觉能力；"
+                "烟火是入口不是主菜；物件从当前空间长出来；空问收成一两句或动手。"
             ),
         }
     return {

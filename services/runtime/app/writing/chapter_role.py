@@ -174,6 +174,8 @@ def infer_chapter_kind(
             return "plot_step"
         return "live_character"
     if pos == "opening" and scope == "long":
+        if mode == "web_serial":
+            return "conflict_hook"
         return "live_character"
     if pos == "climax":
         return "climax_payoff"
@@ -193,6 +195,28 @@ def chapter_kind_to_fragment(kind: str) -> str:
         "climax_payoff": "climax_beat",
     }
     return mapping.get(normalize_chapter_kind(kind), "mixed")
+
+
+def cold_start_score_fragment(
+    fragment: str | None,
+    *,
+    duty: str = "",
+    role: dict[str, Any] | None = None,
+    work_mode: str = "literary",
+) -> str:
+    """无纲时：连载长篇开篇用章职切片，不要把第一章评成过日子综合稿。"""
+    token = (fragment or "").strip().lower()
+    if duty:
+        return token or "mixed"
+    info = role or {}
+    if (
+        (not token or token == "mixed")
+        and normalize_work_mode(work_mode) == "web_serial"
+        and str(info.get("chapter_position") or "") == "opening"
+        and str(info.get("book_scope") or "") == "long"
+    ):
+        return str(info.get("preferred_fragment") or "plot_progress")
+    return token or "mixed"
 
 
 def chapter_kind_obligation(
@@ -260,6 +284,18 @@ def chapter_kind_obligation(
             return "这场偏环境质地：只写新地点/这场要的那一步，勿重播已立设定"
         return "这场偏环境质地：地方和关系托住人物，勿开场背设定"
     if k == "conflict_hook":
+        if pos == "opening" and mode == "web_serial":
+            from app.writing.outline_phase import wants_opening_candidates
+
+            picking = wants_opening_candidates(message, outline=outline)
+            extra = ""
+            if not picking:
+                extra = serial_opening_compass(message=message, outline=outline) + "。"
+            return (
+                "本章强钩：第一句是事故，烟火是入口不是主菜；"
+                "只兑第一阶悬念，卷末高潮留给后文。"
+                + extra
+            )
         return (
             "本章强钩：冲突/异变可先顶，但仍要有人；"
             "只兑第一阶悬念，禁止卷末大高潮与设定百科"

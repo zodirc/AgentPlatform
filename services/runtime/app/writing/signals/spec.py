@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from app.writing.book_scope import book_scope_label, scope_spec_line
-from app.writing.chapter_role import resolve_chapter_role
+from app.writing.chapter_role import cold_start_score_fragment, resolve_chapter_role
 from app.writing.focus import infer_focus_section_id
 from app.writing.manuscript import list_section_ids, load_manuscript_doc
 from app.writing.occupy import manuscript_is_occupied, wants_new_piece
@@ -116,11 +116,13 @@ def build_writing_spec_block(
     position = str(role.get("chapter_position") or "rising")
     section_num = _section_num(focus)
 
-    # 无纲时不要把发明的章类型当成评分切片；mixed 才是冷启动。
+    # 无纲：文学向仍 mixed；连载长篇开篇按章职切片（conflict_hook → plot_progress）。
     if duty:
         fragment = infer_fragment_from_duty(duty)
     else:
-        fragment = "mixed"
+        fragment = cold_start_score_fragment(
+            None, duty="", role=role, work_mode=work_mode
+        )
     fragment = normalize_fragment(fragment)
     label = _LABELS.get(fragment, fragment)
     mode_label = work_mode_label(work_mode)

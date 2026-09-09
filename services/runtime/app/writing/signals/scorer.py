@@ -21,19 +21,56 @@ from app.writing.opening import opening_fields
 from app.writing.outline_arc import outline_arc_fields
 from app.writing.signals.fragments import detect_fragment
 from app.writing.signals.prose import (
+    all_explained,
     anti_pattern_flags,
     character_card_action_hit,
+    escalation_flat,
     has_person_on_stage,
     narrative_scene_ratio,
     plot_step_visible,
+    premise_novella,
+    price_paid_visible,
     sentence_count,
     serial_hook_flat,
     shown_for_fragment,
     synopsis_rate,
+    world_layer_visible,
 )
 from app.writing.signals.space import MetricSpace, fit_signature
 from app.writing.staccato import staccato_fields
 from app.writing.text_metrics import draft_length_fields, visible_chars
+
+
+def _score_position(chapter_position: str = "", section_id: str = "") -> str:
+    token = (chapter_position or "").strip().lower()
+    if token in {"opening", "rising", "turn", "climax", "falling"}:
+        return token
+    from app.writing.lore import is_opening_section
+
+    if is_opening_section(section_id):
+        return "opening"
+    return "rising"
+
+
+def _phase_penalty_allowed(key: str, *, mode: str, position: str) -> bool:
+    """开篇/高潮才用钩子与升级罚则；中段平淡渡过不拿开篇尺子打。"""
+    if mode != "web_serial":
+        return True
+    if key == "escalation_flat":
+        return position in {"opening", "turn", "climax"}
+    if key == "all_explained":
+        return position in {"opening", "climax"}
+    if key == "premise_novella":
+        return position == "opening"
+    return True
+
+
+def _phase_reward_allowed(key: str, *, mode: str, position: str) -> bool:
+    if mode != "web_serial":
+        return True
+    if key == "world_layer_visible":
+        return position in {"opening", "turn"}
+    return True
 
 
 def _clamp(value: float) -> float:
@@ -166,13 +203,17 @@ def _collect_penalties(
     prefs: dict[str, Any],
     skip_opening: bool = False,
     work_mode: str = "literary",
+    chapter_position: str = "",
 ) -> list[dict[str, Any]]:
     coeff = prefs.get("signal_penalties") or {}
     hits: list[dict[str, Any]] = []
     mode = str(prefs.get("work_mode") or work_mode or "literary")
+    position = _score_position(chapter_position, section_id)
 
     def add(key: str, hit: bool, hint: str) -> None:
         if not hit:
+            return
+        if not _phase_penalty_allowed(key, mode=mode, position=position):
             return
         delta = signal_coeff(coeff, fragment_declared, key)
         if delta == 0.0:
@@ -198,6 +239,21 @@ def _collect_penalties(
             "serial_hook_flat",
             serial_hook_flat(text, section_id),
             "开篇空磨：平凡日子里既没得到、也没发现",
+        )
+        add(
+            "all_explained",
+            all_explained(text, work_mode=mode),
+            "每个异常都给了来源，没有留白",
+        )
+        add(
+            "escalation_flat",
+            escalation_flat(text, work_mode=mode),
+            "整章无失败、无后退、无代价到账",
+        )
+        add(
+            "premise_novella",
+            premise_novella(text, work_mode=mode),
+            "开篇把家庭急事做完当成全书，没有世界下一层",
         )
     rubric = score_rubric(text)
     add(
@@ -232,9 +288,11 @@ def _collect_rewards(
     dimensions: dict[str, float],
     exemplar_fit: dict[str, Any],
     work_mode: str = "literary",
+    chapter_position: str = "",
 ) -> list[dict[str, Any]]:
     coeff = prefs.get("signal_rewards") or {}
     mode = str(prefs.get("work_mode") or work_mode or "literary")
+    position = _score_position(chapter_position, section_id)
     rubric = score_rubric(text)
     flags = anti_pattern_flags(text, rubric, work_mode=mode)
     feats = exemplar_fit.get("signature") or {}
@@ -243,6 +301,8 @@ def _collect_rewards(
 
     def add(key: str, hit: bool, hint: str) -> None:
         if not hit:
+            return
+        if not _phase_reward_allowed(key, mode=mode, position=position):
             return
         delta = signal_coeff(coeff, fragment_declared, key)
         if delta == 0.0:
@@ -299,6 +359,16 @@ def _collect_rewards(
             plot_step_visible(text) and not flags["staccato"] and not flags["synopsis"],
             "情节台阶/冲突/悬念在场上可见",
         )
+        add(
+            "price_paid_visible",
+            price_paid_visible(text, work_mode=mode) and not flags["synopsis"],
+            "力用过之后同章有可数损失落地",
+        )
+        add(
+            "world_layer_visible",
+            world_layer_visible(text, work_mode=mode) and not flags["synopsis"],
+            "开篇能看见世界下一层（隐世/序列/职阶），不是本市案件收束",
+        )
     return hits
 
 
@@ -311,6 +381,7 @@ def _score_span(
     space: MetricSpace | None = None,
     skip_opening: bool = False,
     include_outline_rewards: bool = True,
+    chapter_position: str = "",
 ) -> dict[str, Any]:
     declared = normalize_fragment(fragment_declared)
     detected = detect_fragment(text, space=space)
@@ -346,6 +417,7 @@ def _score_span(
         prefs=prefs,
         skip_opening=skip_opening,
         work_mode=str(prefs.get("work_mode") or "literary"),
+        chapter_position=chapter_position,
     )
     rewards = _collect_rewards(
         text,
@@ -355,6 +427,7 @@ def _score_span(
         dimensions=dimensions,
         exemplar_fit=exemplar_fit,
         work_mode=str(prefs.get("work_mode") or "literary"),
+        chapter_position=chapter_position,
     )
     net = composite + sum(p["delta"] for p in penalties) + sum(r["delta"] for r in rewards)
     net = round(max(0.0, min(1.0, net)), 4)
@@ -384,6 +457,7 @@ def score_writing_fragment(
     prefs: dict[str, Any],
     space: MetricSpace | None = None,
     prior: dict[str, Any] | None = None,
+    chapter_position: str = "",
 ) -> dict[str, Any]:
     """完整片段评分含 repair。
     
@@ -410,6 +484,7 @@ def score_writing_fragment(
         section_id=section_id,
         prefs=prefs,
         space=space,
+        chapter_position=chapter_position,
     )
     mode = str(prefs.get("work_mode") or "literary")
     vis = vis_chars(text)
@@ -427,6 +502,7 @@ def score_writing_fragment(
                 space=space,
                 skip_opening=i > 0,
                 include_outline_rewards=False,
+                chapter_position=chapter_position,
             )
             if worst_scored is None or float(scored["net_signal"]) < float(
                 worst_scored["net_signal"]

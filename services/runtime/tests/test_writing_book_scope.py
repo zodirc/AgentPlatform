@@ -118,10 +118,10 @@ def test_short_spec_is_ready_not_open() -> None:
     assert "柜台" not in spec
 
 
-def test_spec_long_opening_without_outline_is_mixed() -> None:
+def test_spec_long_opening_without_outline_is_plot_progress() -> None:
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
     assert "book_scope: `long`" in spec
-    assert "fragment: `mixed`" in spec
+    assert "fragment: `plot_progress`" in spec
     assert "worldview_texture" not in spec
     assert "这一场" not in spec
     assert "格局" not in spec

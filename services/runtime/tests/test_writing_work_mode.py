@@ -56,8 +56,8 @@ def test_default_opening_duty_differs_by_mode() -> None:
         message="写一章长篇修真小说的第一章, 现代都市题材，我看看",
     )
     assert "发觉" in urban
-    assert "有人的日子" in urban
-    assert "灵视" not in urban
+    assert "入口" in urban or "主菜" in urban
+    assert "有人的日子" not in urban
     occult = default_opening_duty(
         "web_serial",
         message="写一章都市灵异修真",
@@ -80,6 +80,7 @@ def test_spec_block_opening_live_character(
     assert "book_scope: `long`" in spec
     assert "开篇" in spec
     assert "评分切片" in spec
+    assert "fragment: `plot_progress`" in spec
     assert "world_rule" not in spec
     assert "live_character" not in spec
     assert "过日子—加压—落下" not in spec
@@ -147,6 +148,11 @@ def test_platform_weights_differ_by_mode() -> None:
     web = wp.platform_fragment_weights("web_serial")["plot_progress"]
     assert web["pacing"] > lit["pacing"]
     assert web["structure"] > lit["structure"]
+    lit_tex = wp.platform_fragment_weights("literary")["worldview_texture"]
+    web_tex = wp.platform_fragment_weights("web_serial")["worldview_texture"]
+    assert web_tex["exemplar_alignment"] < lit_tex["exemplar_alignment"]
+    assert web_tex["pacing"] > lit_tex["pacing"]
+    assert web_tex["structure"] > lit_tex["structure"]
 
 
 def test_apply_work_mode_overlay() -> None:
@@ -156,6 +162,11 @@ def test_apply_work_mode_overlay() -> None:
     assert web["work_mode"] == "web_serial"
     pen = web["signal_penalties"]["mixed"]["serial_hook_flat"]
     assert pen < 0
+    assert web["signal_penalties"]["mixed"]["all_explained"] < 0
+    assert web["signal_penalties"]["mixed"]["escalation_flat"] < 0
+    assert web["signal_penalties"]["mixed"]["premise_novella"] < 0
+    assert web["signal_rewards"]["mixed"]["price_paid_visible"] > 0
+    assert web["signal_rewards"]["mixed"]["world_layer_visible"] > 0
 
 
 def test_fragment_obligations_are_statements() -> None:
@@ -264,3 +275,123 @@ def test_serial_hook_flat_still_flags_empty_grind() -> None:
     text = (body + "\n\n") * 18
     assert visible_chars(text) >= 400
     assert serial_hook_flat(text, "ch1") is True
+
+
+def _pad_web_serial(body: str) -> str:
+    return (body + "\n\n") * 12
+
+
+def test_all_explained_flags_origin_lecture_without_blank() -> None:
+    from app.writing.signals.prose import all_explained
+    from app.writing.text_metrics import visible_chars
+
+    explained = _pad_web_serial(
+        "系统原来是宗门内门发下来的功法面板。其实是师兄提前把灵气灌进他丹田。"
+        "这是因为那天他在巷口签收了一枚铜印。真相是那只手来自内门执事。"
+    )
+    blank = _pad_web_serial(
+        "系统亮了。铜印落进掌心。那只手从柜门里伸出来。说不清它从哪来，来源不明。"
+        "他问了一句，没人解释。功法已经入体。"
+    )
+    assert visible_chars(explained) >= 400
+    assert all_explained(explained, work_mode="web_serial") is True
+    assert all_explained(blank, work_mode="web_serial") is False
+    assert all_explained(explained, work_mode="literary") is False
+    from app.writing.signals.scorer import score_writing_fragment
+
+    prefs = _writing_prefs().platform_prefs_payload(work_mode="web_serial")
+    out = score_writing_fragment(
+        explained, fragment_declared="mixed", section_id="ch1", prefs=prefs
+    )
+    assert any(p["key"] == "all_explained" for p in out["penalties"])
+
+
+def test_escalation_flat_and_price_paid_visible() -> None:
+    from app.writing.signals.prose import escalation_flat, price_paid_visible
+    from app.writing.text_metrics import visible_chars
+
+    smooth = _pad_web_serial(
+        "系统亮了。他催动功法，灵气入体，一拳把对手打退。面板跳出下一阶任务。"
+        "巷口的人让开。他接着走。"
+    )
+    retreat = _pad_web_serial(
+        "系统亮了。他催动功法还是打不过，跑了。账单当晚就来收，寿命少了三年。"
+        "面板上只剩一次。"
+    )
+    paid = _pad_web_serial(
+        "功法入体之后他催动一次。相册里她那一格空了。山高 3000 米，已支付 1 米。"
+        "系统把这一米扣了。"
+    )
+    assert visible_chars(smooth) >= 400
+    assert escalation_flat(smooth, work_mode="web_serial") is True
+    assert escalation_flat(retreat, work_mode="web_serial") is False
+    assert price_paid_visible(paid, work_mode="web_serial") is True
+    assert price_paid_visible(smooth, work_mode="web_serial") is False
+    assert escalation_flat(smooth, work_mode="literary") is False
+
+    from app.writing.signals.scorer import score_writing_fragment
+
+    prefs = _writing_prefs().platform_prefs_payload(work_mode="web_serial")
+    opening = score_writing_fragment(
+        smooth,
+        fragment_declared="mixed",
+        section_id="ch1",
+        prefs=prefs,
+        chapter_position="opening",
+    )
+    assert any(p["key"] == "escalation_flat" for p in opening["penalties"])
+    rising = score_writing_fragment(
+        smooth,
+        fragment_declared="mixed",
+        section_id="ch5",
+        prefs=prefs,
+        chapter_position="rising",
+    )
+    assert not any(p["key"] == "escalation_flat" for p in rising["penalties"])
+
+
+def test_premise_novella_and_world_layer_signals() -> None:
+    from app.writing.signals.prose import premise_novella, world_layer_visible
+    from app.writing.signals.scorer import score_writing_fragment
+    from app.writing.text_metrics import visible_chars
+
+    closed = _pad_web_serial(
+        "系统亮了。他催动功法，救回母亲并保住了手术押金，本市航线被掀掉。"
+        "巷口的人让开。他接着走，决定当不当下一任持票人。"
+    )
+    layered = _pad_web_serial(
+        "系统亮了。隐世那一层的序列职阶在面板上跳出来，秘境入口就在港区下面。"
+        "他催动功法，账单当晚到账。山高 3000 米。"
+    )
+    assert visible_chars(closed) >= 400
+    assert premise_novella(closed, work_mode="web_serial") is True
+    assert world_layer_visible(closed, work_mode="web_serial") is False
+    assert premise_novella(layered, work_mode="web_serial") is False
+    assert world_layer_visible(layered, work_mode="web_serial") is True
+    assert premise_novella(closed, work_mode="literary") is False
+
+    prefs = _writing_prefs().platform_prefs_payload(work_mode="web_serial")
+    bad = score_writing_fragment(
+        closed,
+        fragment_declared="mixed",
+        section_id="ch1",
+        prefs=prefs,
+        chapter_position="opening",
+    )
+    assert any(p["key"] == "premise_novella" for p in bad["penalties"])
+    good = score_writing_fragment(
+        layered,
+        fragment_declared="mixed",
+        section_id="ch1",
+        prefs=prefs,
+        chapter_position="opening",
+    )
+    assert any(r["key"] == "world_layer_visible" for r in good["rewards"])
+    quiet = score_writing_fragment(
+        layered,
+        fragment_declared="mixed",
+        section_id="ch5",
+        prefs=prefs,
+        chapter_position="rising",
+    )
+    assert not any(r["key"] == "world_layer_visible" for r in quiet["rewards"])

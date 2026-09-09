@@ -30,11 +30,21 @@ def test_infer_rising_mid_book() -> None:
     assert infer_chapter_position(section_id="ch5", message="续写") == "rising"
 
 
-def test_opening_defaults_to_live_character() -> None:
+def test_opening_defaults_to_conflict_hook_for_web_serial() -> None:
     kind = infer_chapter_kind(
         position="opening",
         work_mode="web_serial",
         message="写修仙长篇第一章",
+        book_scope="long",
+    )
+    assert kind == "conflict_hook"
+
+
+def test_literary_opening_stays_live_character() -> None:
+    kind = infer_chapter_kind(
+        position="opening",
+        work_mode="literary",
+        message="写长篇第一章",
         book_scope="long",
     )
     assert kind == "live_character"
@@ -61,9 +71,43 @@ def test_resolve_role_opening(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     )
     assert role["chapter_position"] == "opening"
     assert role["book_scope"] == "long"
-    assert role["chapter_kind"] == "live_character"
-    assert "日子" in role["obligation"] or "人" in role["obligation"]
-    assert role["preferred_fragment"] == "mixed"
+    assert role["chapter_kind"] == "conflict_hook"
+    assert "事故" in role["obligation"] or "强钩" in role["obligation"]
+    assert role["preferred_fragment"] == "plot_progress"
+
+
+def test_cold_start_score_fragment_web_serial_opening() -> None:
+    from app.writing.chapter_role import cold_start_score_fragment
+
+    role = {
+        "chapter_position": "opening",
+        "book_scope": "long",
+        "preferred_fragment": "plot_progress",
+    }
+    assert (
+        cold_start_score_fragment(
+            "mixed", duty="", role=role, work_mode="web_serial"
+        )
+        == "plot_progress"
+    )
+    assert (
+        cold_start_score_fragment(
+            None, duty="", role=role, work_mode="literary"
+        )
+        == "mixed"
+    )
+    assert (
+        cold_start_score_fragment(
+            "worldview_texture", duty="", role=role, work_mode="web_serial"
+        )
+        == "worldview_texture"
+    )
+    assert (
+        cold_start_score_fragment(
+            "mixed", duty="铺垫章", role=role, work_mode="web_serial"
+        )
+        == "mixed"
+    )
 
 
 def test_infer_chapter_kind_from_outline_duty() -> None:
