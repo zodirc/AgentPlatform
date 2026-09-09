@@ -74,14 +74,10 @@ describe("openingPonds", () => {
     expect(found?.items?.[0]?.title).toBe("早高峰系统");
   });
 
-  it("shows the book pitch before who/where on the card line", () => {
-    expect(pondPhysicsLine(sample.items[0])).toBe(
-      "早高峰系统 · 白天写字楼里把班上完的升级日常",
-    );
-    expect(pondPhysicsLine({ id: "x", title: "无轴" })).toBe("");
-    expect(pondContrastLine(sample.items)).toBe(
-      "早高峰系统·白天写字楼里把班上完的升级日常",
-    );
+  it("contrasts books by title, not a flavor slogan", () => {
+    expect(pondPhysicsLine(sample.items[0])).toBe("早高峰系统");
+    expect(pondPhysicsLine({ id: "x", title: "无轴" })).toBe("无轴");
+    expect(pondContrastLine(sample.items)).toBe("早高峰系统 ｜ 午饭功法");
     expect(
       pondContrastLine([
         sample.items[0],
@@ -93,9 +89,7 @@ describe("openingPonds", () => {
           promise: "survive_relation",
         },
       ]),
-    ).toBe(
-      "早高峰系统·白天写字楼里把班上完的升级日常 ｜ 窗口·窗口里把日子过下去",
-    );
+    ).toBe("早高峰系统 ｜ 窗口");
   });
 
   it("formats a select message as a short choice, not the card", () => {

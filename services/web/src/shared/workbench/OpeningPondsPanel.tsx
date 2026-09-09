@@ -60,14 +60,8 @@ function PondCard({
       <ChoiceMark checked={selected} />
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="text-[13px] font-medium text-foreground">{item.title}</p>
-        {item.flavor ? (
-          <p className="text-[12px] text-foreground/90">{item.flavor}</p>
-        ) : null}
+        <Field label="这本书" value={item.flavor} />
         <Field label="开篇" value={item.opening} />
-        <Field label="走向" value={item.arc} />
-        <Field label="跟着谁" value={item.who} />
-        <Field label="站在哪" value={item.where} />
-        <Field label="眼下要什么" value={item.want} />
       </div>
     </>
   );
@@ -123,7 +117,7 @@ export function OpeningPondsPanel({
         </div>
         {interactive ? (
           <p className="mt-1 text-[11px] font-medium text-amber-800/90 dark:text-amber-200/90">
-            勾选一份开篇、走向和全篇气味；选择留在卡片上
+            勾选一本要连载的书（这本书在玩什么 + 开篇怎么进）
           </p>
         ) : (
           <p className="mt-1 text-[11px] text-muted-foreground">

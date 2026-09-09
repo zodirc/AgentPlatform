@@ -8,8 +8,11 @@ export type OpeningPondItem = {
   opening?: string;
   arc?: string;
   flavor?: string;
+  price?: string;
   start_kind?: string;
   promise?: string;
+  source_trust?: string;
+  first_conflict_at?: string;
   summary?: string;
 };
 
@@ -60,17 +63,12 @@ export function promiseLabel(token: string | undefined): string {
 }
 
 export function pondPhysicsLine(item: OpeningPondItem): string {
-  if (item.flavor) {
-    return item.title ? `${item.title} · ${item.flavor}` : item.flavor;
-  }
-  return [startKindLabel(item.start_kind), promiseLabel(item.promise)]
-    .filter(Boolean)
-    .join(" · ");
+  return item.title || "";
 }
 
 export function pondContrastLine(items: OpeningPondItem[]): string {
   return items
-    .map((item) => pondPhysicsLine(item).replace(/ · /g, "·"))
+    .map((item) => item.title || "")
     .filter(Boolean)
     .join(" ｜ ");
 }
@@ -95,9 +93,12 @@ export function normalizeOpeningPondItems(
       chapter_job: clip(rec.chapter_job, 240) || undefined,
       opening: clip(rec.opening, 400) || undefined,
       arc: clip(rec.arc, 400) || undefined,
-      flavor: clip(rec.flavor, 160) || undefined,
+      flavor: clip(rec.flavor, 400) || undefined,
+      price: clip(rec.price, 160) || undefined,
       start_kind: clip(rec.start_kind, 32) || undefined,
       promise: clip(rec.promise, 32) || undefined,
+      source_trust: clip(rec.source_trust, 32) || undefined,
+      first_conflict_at: clip(rec.first_conflict_at, 32) || undefined,
       summary: clip(rec.summary, 160) || undefined,
     });
   }
