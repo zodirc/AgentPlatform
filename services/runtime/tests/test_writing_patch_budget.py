@@ -27,7 +27,7 @@ from app.writing.span_replace import replace_span_in_manuscript
 
 
 def test_patch_budget_exhausted_after_three() -> None:
-    assert MAX_PATCHES_PER_PENALTY_KEY == 5
+    assert MAX_PATCHES_PER_PENALTY_KEY == 2
     manifest: dict = {"patch_budget": {}}
     sid = "ch1"
     for _ in range(MAX_PATCHES_PER_PENALTY_KEY):

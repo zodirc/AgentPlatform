@@ -25,8 +25,8 @@ _NOOP_RATIO = 0.90
 _NOOP_MIN_VISIBLE = 80
 _NOOP_MAX_CHANGED = 18
 _META_LOCATE_EXTRA = ("知道这话", "知道这个", "知道自己")
-# L0 is the process gate (receipt / promote contrast). Soft keys still
-# open same-Turn propose_patch — that loop is the quality pass.
+# L0 is the process gate. Same-Turn propose_patch only opens for these keys
+# (writing-module-uplift A6); net_signal is observation.
 L0_PENALTY_KEYS = frozenset(
     {
         "staccato_uniform",
@@ -53,46 +53,35 @@ def append_block_l0_keys(work_mode: str = "literary") -> frozenset[str]:
 
 _HINTS: dict[str, str] = {
     "staccato_uniform": (
-        "这一窗把同一拍拆成了多轮空问，读者在等一句有分量的话。"
-        "让它在一两句里落定（决定、物件、或一记动作都行）；旁白替它说不算落定。"
-        "已经叫过的名字收在称呼里。只改这一窗。"
+        "这一窗把同一拍拆成了多轮空问、三段式对拍、信息采访或连珠短对白。"
+        "已经叫过的名字又问了一遍。只改这一窗。"
     ),
-    "glue_heavy": "叙述里的「与此同时/就在这时」过密才拆；对白里因为/可是可以留",
-    "hinge_dense": (
-        "看见/听到之后马上就拧成转折，读者没时间站住。"
-        "让这一下先落地——落在物件、价钱或沉默上都行——再往下走。"
-    ),
-    "opening_institution": "第一句就是机构名，读者还没地方站。先给一个可站的场面；机构名等人物开口时自然带出。",
-    "lore_dump": "这里成了「N年前」的案情提要。身世留在当下的屋子或活计上，随事露头。",
-    "length_short": (
-        "这场还没写满约三千字：在已有拍里写满对白、拆拍、反应。"
-        "新出场、新地点、新反派和下一场冲突留给下一章。"
-    ),
-    "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在他手上。",
-    "fragment_mismatch": "评分切片不合这场戏的节奏，按这场写即可",
-    "all_explained": "每个异常都给了来源。留一处不解释：力从哪来、那只手是谁，挑一个。",
-    "escalation_flat": "这一章步步顺。写一次打不过、跑了，或让账单当章到账。",
-    "premise_novella": "这一章把家里的急事做完就收束了。世界下一层（隐世、序列、职阶）要露头，不要当成全书结局。",
-    "world_layer_visible": "开篇能看见世界还会变大的那一层。",
-    "weak_window": "这一拍离该场面该有的质地最远，只改这一段",
+    "glue_heavy": "叙述里的「与此同时/就在这时」过密。",
+    "hinge_dense": "这一窗里看见/听到之后紧接着就是转折，连续多处。",
+    "opening_institution": "第一句就是机构名，读者还没地方站。",
+    "lore_dump": "这里成了「N年前」的案情提要。",
+    "length_short": "这场实体字还低于门槛（<1500，或用户点名配额的 85%）。",
+    "meta_knowing_high": "「心里清楚」出现过多。",
+    "fragment_mismatch": "评分切片与这场戏的节奏不合。",
+    "all_explained": "每个异常都给了来源。",
+    "escalation_flat": "这一章没有失败、后退或代价到账。",
+    "premise_novella": "这一章把家里的急事做完就收束了。",
+    "world_layer_visible": "开篇还看不见世界还会变大的那一层。",
+    "weak_window": "这一拍离该场面该有的质地最远。",
 }
 
 _HINTS_WEB_SERIAL: dict[str, str] = {
-    "staccato_uniform": (
-        "这一窗把同一拍拆成了多轮空问。"
-        "收成一两句有信息差的话，或一记动作接上；旁白替它说不算接上。"
-        "已经叫过的名字收在称呼里。只改这一窗。"
-    ),
-    "hinge_dense": "看见/听到之后马上拧成说明书，悬念还没站住。让悬念跟事走即可。",
-    "opening_institution": "第一句就是机构名。先给一个可站的场面；机构名等人物开口时自然带出。",
-    "lore_dump": "这里成了开场案情提要。身世跟当下的麻烦走，随事露头。",
-    "meta_knowing_high": "「心里清楚」替人物做了判断。让判断落在场上动作或信息差上。",
-    "fragment_mismatch": "评分切片不合这场戏，按这场的台阶写即可",
-    "all_explained": "每个异常都给了来源。留一处不解释，不要磨圆。",
-    "escalation_flat": "这一章步步顺。写一次打不过或后退，账单当章到账。",
-    "premise_novella": "这一章把家里的急事做完就收束了。世界下一层要露头，不要当成全书结局。",
-    "world_layer_visible": "开篇能看见世界还会变大的那一层。",
-    "weak_window": "这一拍空转，只改这一段；不必写成文学句",
+    "staccato_uniform": "这一窗把同一拍拆成了多轮空问或连珠短对白。只改这一窗。",
+    "hinge_dense": "看见/听到之后马上拧成说明书，悬念还没站住。",
+    "opening_institution": "第一句就是机构名。",
+    "lore_dump": "这里成了开场案情提要。",
+    "meta_knowing_high": "「心里清楚」出现过多。",
+    "fragment_mismatch": "评分切片不合这场戏。",
+    "all_explained": "每个异常都给了来源。",
+    "escalation_flat": "这一章步步顺，没有打不过或后退。",
+    "premise_novella": "这一章把家里的急事做完就收束了。",
+    "world_layer_visible": "开篇还看不见世界还会变大的那一层。",
+    "weak_window": "这一拍空转。",
 }
 
 
@@ -184,15 +173,10 @@ def is_l0_weak(
     penalties: Any = None,
     length_short: bool = False,
 ) -> bool:
-    """过程门：太短、net 低于门槛，或 L0 命中。晋升对照用这个，不用软罚。"""
+    """过程门：太短或 L0 命中。net_signal 不再当过程门。"""
+    del net
     if length_short:
         return True
-    if net is not None:
-        try:
-            if float(net) < float(WEAK_NET):
-                return True
-        except (TypeError, ValueError):
-            pass
     return bool(l0_penalty_hits(penalties))
 
 
@@ -202,10 +186,8 @@ def is_writing_weak(
     penalties: Any = None,
     length_short: bool = False,
 ) -> bool:
-    """同轮仍要修补：过程门，或还有可定位的质地罚分。"""
-    if is_l0_weak(net=net, penalties=penalties, length_short=length_short):
-        return True
-    return bool(penalty_hits(penalties))
+    """同轮修补：仅过程 L0 或 length_short。net 低只留观测。"""
+    return is_l0_weak(net=net, penalties=penalties, length_short=length_short)
 
 
 def _visible_core(text: str) -> str:
@@ -425,12 +407,10 @@ def build_repair_span(
         if not span:
             span = _find_phrase_span(body, _glue_phrases())
         key = "glue_heavy"
-    if not span and not staccato_open and window is not None and (
-        keys or float(net_signal) < WEAK_NET
-    ):
+    if not span and not staccato_open and window is not None and l0:
         span = (window.text or "").strip()
         key = key or "weak_window"
-    if not span and not staccato_open and keys:
+    if not span and not staccato_open and l0:
         span = probe.strip()[:REPAIR_SPAN_MAX]
     if avoid_old and span and unproductive_repeat(
         {"repair_span": {"old_text": avoid_old, "key": key or "weak_window"}},
@@ -462,40 +442,25 @@ def attach_repair_neighbor(
     exemplar_fit: dict[str, Any] | None = None,
     work_mode: str = "literary",
 ) -> None:
-    """补丁旁夹一条邻居（本 Work 拍或当前 work_mode 的类原型近邻）。"""
+    """默认不附邻居。仅 staccato_uniform 且本 Work 有 local beats 时附本书自己的拍。"""
+    del exemplar_fit, work_mode
     if not isinstance(span, dict) or span.get("neighbor"):
+        return
+    if str(span.get("key") or "") != "staccato_uniform":
         return
     from app.writing.signals.beats import clip_visible, load_local_beats
     from app.writing.signals.prefs_loader import _module as _writing_prefs
-    from app.writing.work_mode import normalize_work_mode
 
     frag = _writing_prefs().normalize_fragment(fragment)
-    mode = normalize_work_mode(work_mode)
     beats = load_local_beats()
     chosen = next((b for b in beats if b.get("fragment") == frag), None)
     if chosen is None and frag != "mixed":
         chosen = next((b for b in beats if b.get("fragment") == "mixed"), None)
-    if chosen is not None:
-        text = clip_visible(str(chosen.get("text") or ""), max_vis=NEIGHBOR_MAX_VISIBLE)
-        if text:
-            span["neighbor"] = {"source": "local_beat", "text": text}
-            return
-    sample = _nearest_platform_neighbor(
-        str(span.get("old_text") or ""),
-        fragment=frag,
-        work_mode=mode,
-        exemplar_fit=exemplar_fit,
-    )
-    if sample is None or not (sample.text or "").strip():
+    if chosen is None:
         return
-    text = clip_visible(sample.text, max_vis=NEIGHBOR_MAX_VISIBLE)
-    if not text:
-        return
-    span["neighbor"] = {
-        "source": "exemplar",
-        "slug": sample.slug,
-        "text": text,
-    }
+    text = clip_visible(str(chosen.get("text") or ""), max_vis=NEIGHBOR_MAX_VISIBLE)
+    if text:
+        span["neighbor"] = {"source": "local_beat", "text": text}
 
 
 def _nearest_platform_neighbor(

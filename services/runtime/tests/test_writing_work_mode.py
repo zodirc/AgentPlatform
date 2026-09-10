@@ -150,7 +150,8 @@ def test_platform_weights_differ_by_mode() -> None:
     assert web["structure"] > lit["structure"]
     lit_tex = wp.platform_fragment_weights("literary")["worldview_texture"]
     web_tex = wp.platform_fragment_weights("web_serial")["worldview_texture"]
-    assert web_tex["exemplar_alignment"] < lit_tex["exemplar_alignment"]
+    assert web_tex["exemplar_alignment"] == 0.0
+    assert lit_tex["exemplar_alignment"] == 0.0
     assert web_tex["pacing"] > lit_tex["pacing"]
     assert web_tex["structure"] > lit_tex["structure"]
 

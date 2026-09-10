@@ -156,7 +156,7 @@ def build_writing_spec_block(
         "## Writing spec",
         f"- book_scope: `{scope}`（{scope_label} · {scope_note}）",
         f"- work_mode: `{work_mode}`（{mode_label} · {source_note}）",
-        f"- fragment: `{fragment}`（{label} · 评分切片，不是本章必须交的工种）",
+        f"- fragment: `{fragment}`（{label} · 评分切片，不是章职）",
         f"- {scope_line}",
         outline_phase_spec_line(phase_info),
     ]

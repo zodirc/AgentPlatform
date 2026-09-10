@@ -177,95 +177,96 @@ ALIGN_REWARD_FLOOR = 0.80
 MISMATCH_ALIGN_FLOOR = 0.60
 
 # Platform defaults. exemplar_alignment is a near-constant on the live bank
-# (std typically < 0.05); keep ≥5% after normalize, do not let it dominate.
+# (std typically < 0.05); weight is 0 — still computed for detect_fragment /
+# fragment_mismatch, never mixed into composite (writing-module-uplift A2).
 _PLATFORM_WEIGHTS: dict[str, dict[str, float]] = {
     "plot_progress": {
-        "structure": 0.28,
-        "character": 0.24,
-        "pacing": 0.22,
-        "voice": 0.16,
-        "exemplar_alignment": 0.10,
+        "structure": 0.31,
+        "character": 0.27,
+        "pacing": 0.24,
+        "voice": 0.18,
+        "exemplar_alignment": 0.0,
     },
     "worldview_texture": {
-        "structure": 0.22,
-        "character": 0.16,
-        "pacing": 0.18,
-        "voice": 0.32,
-        "exemplar_alignment": 0.12,
+        "structure": 0.25,
+        "character": 0.18,
+        "pacing": 0.20,
+        "voice": 0.37,
+        "exemplar_alignment": 0.0,
     },
     "climax_beat": {
-        "structure": 0.24,
-        "character": 0.28,
-        "pacing": 0.28,
-        "voice": 0.10,
-        "exemplar_alignment": 0.10,
+        "structure": 0.27,
+        "character": 0.31,
+        "pacing": 0.31,
+        "voice": 0.11,
+        "exemplar_alignment": 0.0,
+    },
+    "battle_action": {
+        "structure": 0.22,
+        "character": 0.22,
+        "pacing": 0.42,
+        "voice": 0.14,
+        "exemplar_alignment": 0.0,
+    },
+    "dialogue_dyad": {
+        "structure": 0.22,
+        "character": 0.29,
+        "pacing": 0.24,
+        "voice": 0.25,
+        "exemplar_alignment": 0.0,
+    },
+    "mixed": {
+        "structure": 0.22,
+        "character": 0.30,
+        "pacing": 0.25,
+        "voice": 0.23,
+        "exemplar_alignment": 0.0,
+    },
+}
+
+# web_serial — 情节/节奏更高；exemplar_alignment 仍为 0。
+_PLATFORM_WEIGHTS_WEB: dict[str, dict[str, float]] = {
+    "plot_progress": {
+        "structure": 0.33,
+        "character": 0.27,
+        "pacing": 0.31,
+        "voice": 0.09,
+        "exemplar_alignment": 0.0,
+    },
+    "worldview_texture": {
+        "structure": 0.30,
+        "character": 0.18,
+        "pacing": 0.35,
+        "voice": 0.17,
+        "exemplar_alignment": 0.0,
+    },
+    "climax_beat": {
+        "structure": 0.29,
+        "character": 0.27,
+        "pacing": 0.35,
+        "voice": 0.09,
+        "exemplar_alignment": 0.0,
     },
     "battle_action": {
         "structure": 0.20,
         "character": 0.20,
-        "pacing": 0.38,
-        "voice": 0.12,
-        "exemplar_alignment": 0.10,
+        "pacing": 0.47,
+        "voice": 0.13,
+        "exemplar_alignment": 0.0,
     },
     "dialogue_dyad": {
-        "structure": 0.20,
-        "character": 0.26,
-        "pacing": 0.22,
-        "voice": 0.22,
-        "exemplar_alignment": 0.10,
+        "structure": 0.24,
+        "character": 0.36,
+        "pacing": 0.27,
+        "voice": 0.13,
+        "exemplar_alignment": 0.0,
     },
     "mixed": {
-        "structure": 0.20,
-        "character": 0.27,
-        "pacing": 0.22,
-        "voice": 0.21,
-        "exemplar_alignment": 0.10,
-    },
-}
-
-# web_serial — 情节/节奏更高；exemplar_alignment 同样降到信息量。
-_PLATFORM_WEIGHTS_WEB: dict[str, dict[str, float]] = {
-    "plot_progress": {
-        "structure": 0.30,
-        "character": 0.24,
-        "pacing": 0.28,
-        "voice": 0.08,
-        "exemplar_alignment": 0.10,
-    },
-    "worldview_texture": {
-        "structure": 0.28,
-        "character": 0.16,
-        "pacing": 0.32,
-        "voice": 0.16,
-        "exemplar_alignment": 0.08,
-    },
-    "climax_beat": {
-        "structure": 0.26,
-        "character": 0.24,
-        "pacing": 0.32,
-        "voice": 0.08,
-        "exemplar_alignment": 0.10,
-    },
-    "battle_action": {
-        "structure": 0.18,
-        "character": 0.18,
-        "pacing": 0.42,
-        "voice": 0.12,
-        "exemplar_alignment": 0.10,
-    },
-    "dialogue_dyad": {
-        "structure": 0.22,
-        "character": 0.32,
-        "pacing": 0.24,
-        "voice": 0.12,
-        "exemplar_alignment": 0.10,
-    },
-    "mixed": {
-        "structure": 0.28,
-        "character": 0.28,
-        "pacing": 0.24,
-        "voice": 0.10,
-        "exemplar_alignment": 0.10,
+        "structure": 0.31,
+        "character": 0.31,
+        "pacing": 0.27,
+        "voice": 0.11,
+        "exemplar_alignment": 0.0,
     },
 }
 
@@ -645,8 +646,15 @@ def validate_fragment_weights(raw: dict[str, Any]) -> dict[str, dict[str, float]
         if not isinstance(row, dict):
             raise ValueError(f"missing fragment_weights.{frag}")
         normalized = normalize_row(row)
-        if min(normalized.values()) < 0.05:
-            raise ValueError(f"fragment_weights.{frag}: each dimension must be >= 5% after normalize")
+        active = [
+            v
+            for k, v in normalized.items()
+            if k != "exemplar_alignment"
+        ]
+        if active and min(active) < 0.05:
+            raise ValueError(
+                f"fragment_weights.{frag}: each scored dimension must be >= 5% after normalize"
+            )
         out[frag] = normalized
     return out
 

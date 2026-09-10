@@ -21,12 +21,12 @@ def test_is_writing_weak_quality_hits_still_patch() -> None:
     assert is_writing_weak(
         net=0.83, penalties=[{"key": "staccato_uniform", "hit": True}]
     )
-    assert is_writing_weak(net=0.41, penalties=[])
+    assert not is_writing_weak(net=0.41, penalties=[])
     assert is_writing_weak(net=0.83, penalties=[], length_short=True)
-    assert is_writing_weak(
+    assert not is_writing_weak(
         net=0.83, penalties=[{"key": "meta_knowing_high", "hit": True}]
     )
-    assert is_writing_weak(
+    assert not is_writing_weak(
         net=0.72, penalties=[{"key": "glue_heavy", "hit": True}]
     )
     assert not is_l0_weak(

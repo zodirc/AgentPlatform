@@ -68,16 +68,17 @@ def test_default_chapter_quota_for_chengpian() -> None:
     assert resolve_draft_quota("成篇") == DEFAULT_CHAPTER_MIN
     assert resolve_draft_quota("采用此开篇「早高峰系统」") == DEFAULT_CHAPTER_MIN
     assert resolve_draft_quota("写 300 字成篇") == 300
-    assert DEFAULT_CHAPTER_MIN == 3000
+    assert DEFAULT_CHAPTER_MIN == 1800
 
-    short = draft_length_fields("甲" * 2000, "成篇，默认章节")
-    assert short["quota_chars"] == DEFAULT_CHAPTER_MIN
+    short = draft_length_fields("甲" * 1400, "成篇，默认章节")
+    assert short["quota_min"] == DEFAULT_CHAPTER_MIN
     assert short["length_short"] is True
-    assert "粘第二场" in str(short["summary"])
-    assert "再接约 2000" not in str(short["summary"])
+
+    mid = draft_length_fields("甲" * 2000, "成篇，默认章节")
+    assert mid.get("length_short") is not True
 
     met = draft_length_fields("甲" * DEFAULT_CHAPTER_MIN, "写第三章")
-    assert met["quota_chars"] == DEFAULT_CHAPTER_MIN
+    assert met.get("quota_min") == DEFAULT_CHAPTER_MIN
     assert "length_short" not in met
 
 

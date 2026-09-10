@@ -12,6 +12,15 @@ from app.writing.manuscript import upsert_section
 from app.writing.occupy import should_occupy_fresh, wants_new_piece
 from app.writing.work_index import build_work_index
 
+_COMMIT = {
+    "time_order": "mid_flashback",
+    "subplot": "parallel_theme",
+    "resolution_agency": "unresolved",
+    "moral_polarity": "ambivalent",
+    "affect_mode": "named",
+    "locations": "2+",
+}
+
 
 def test_workspace_not_writable_error_is_deploy_not_policy() -> None:
     out = workspace_not_writable_error("outline.md", PermissionError("denied"))
@@ -175,7 +184,7 @@ def test_work_index_new_piece_warns(tmp_path: Path) -> None:
         max_chars=2000,
     )
     assert "occupy=fresh" in text
-    assert "different story" in text
+    assert "another story" in text
 
 
 @pytest.mark.asyncio
@@ -190,6 +199,7 @@ async def test_long_section_second_draft_rejected(workspace: Path) -> None:
         body,
         turn_id=turn_id,
         fragment="worldview_texture",
+        narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert int(first["visible_chars"]) >= 800
@@ -198,6 +208,7 @@ async def test_long_section_second_draft_rejected(workspace: Path) -> None:
         body + "又整章重交一遍。",
         turn_id=turn_id,
         fragment="worldview_texture",
+        narrative_commitment=_COMMIT,
     )
     assert second["status"] == "error"
     assert second["error"] == "rewrite_via_patch"
@@ -208,6 +219,7 @@ async def test_long_section_second_draft_rejected(workspace: Path) -> None:
         "灯塔夜里还亮着，潮水拍在石阶上。",
         turn_id=turn_id,
         fragment="mixed",
+        narrative_commitment=_COMMIT,
     )
     assert other["status"] == "drafted"
 
@@ -247,6 +259,7 @@ async def test_length_short_chapter_thickens_by_append_only(workspace: Path) -> 
         turn_id=turn_id,
         fragment="mixed",
         turn_user_text="写一篇故事，6000字",
+        narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert int(first["visible_chars"]) >= 800
@@ -258,6 +271,7 @@ async def test_length_short_chapter_thickens_by_append_only(workspace: Path) -> 
         turn_id=turn_id,
         fragment="mixed",
         turn_user_text="写一篇故事，6000字",
+        narrative_commitment=_COMMIT,
     )
     assert rejected["status"] == "error"
     assert rejected["error"] == "rewrite_via_patch"
@@ -302,6 +316,7 @@ async def test_append_blocked_while_chapter_staccato(workspace: Path) -> None:
         turn_id=turn_id,
         fragment="dialogue_dyad",
         turn_user_text="写一篇故事，6000字",
+        narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert first.get("staccato_uniform") is True
@@ -367,6 +382,7 @@ async def test_append_slice_staccato_rejected(workspace: Path) -> None:
         turn_id=turn_id,
         fragment="mixed",
         turn_user_text="写一篇故事，6000字",
+        narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert not first.get("staccato_uniform")
@@ -401,6 +417,7 @@ async def test_append_allowed_after_l0_cleared(workspace: Path) -> None:
         turn_id=turn_id,
         fragment="dialogue_dyad",
         turn_user_text="写一篇故事，6000字",
+        narrative_commitment=_COMMIT,
     )
     assert first["status"] == "drafted"
     assert first.get("staccato_uniform") is True

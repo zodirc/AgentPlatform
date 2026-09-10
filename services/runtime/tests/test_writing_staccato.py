@@ -167,8 +167,7 @@ def test_staccato_flags_paper_handoff_rounds() -> None:
     from app.writing.signals.repair import repair_hint
 
     hint = repair_hint("staccato_uniform", "web_serial")
-    assert "一两句" in hint
-    assert "旁白" in hint
+    assert "空问" in hint or "短对白" in hint
 
 
 def test_staccato_cleared_by_clean_draft() -> None:

@@ -74,7 +74,7 @@ def test_hinge_receipt_once() -> None:
     assert "还上一章" in text
     assert "propose_patch" in text
     assert "draft_section 或" not in text
-    assert "neighbor" in text
+    assert "neighbor" not in text
     assert "不要改成说明书" in text
     kind = mark_verify_receipt_injected(state)
     assert kind == "hinge"

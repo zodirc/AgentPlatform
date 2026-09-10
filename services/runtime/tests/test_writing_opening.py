@@ -71,7 +71,7 @@ def test_opening_receipt_once() -> None:
     text = build_verify_receipt_text(state)
     assert "机构专名" in text
     assert "可站的场面" in text
-    assert "neighbor" in text
+    assert "neighbor" not in text
     assert "路、田、价钱" not in text
     assert "路、田、店" not in text
     kind = mark_verify_receipt_injected(state)

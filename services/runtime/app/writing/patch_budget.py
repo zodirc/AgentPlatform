@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-MAX_PATCHES_PER_PENALTY_KEY = 5
-MAX_PATCHES_PER_SECTION_TOTAL = 8
-MAX_REWRITE_WINDOW_PER_SECTION = 2
+MAX_PATCHES_PER_PENALTY_KEY = 2
+MAX_PATCHES_PER_SECTION_TOTAL = 3
+MAX_REWRITE_WINDOW_PER_SECTION = 1
 MAX_APPLY_MISS_STREAK = 2
 UNKNOWN_PENALTY_KEY = "__unknown__"
 FALLBACK_SECTION_ID = "__prose__"
@@ -347,12 +347,12 @@ def _long_form(manifest: dict[str, Any] | None, prior: dict[str, Any] | None) ->
 def _stop_summary(*, long_form: bool) -> str:
     if long_form:
         return (
-            "本章已落盘。这一窗留到下轮，不要再 propose_patch、"
-            "draft_section mode=rewrite_window 或 evaluate_writing_fragment。"
+            "本章已落盘。这一窗留到下轮，不要再 propose_patch "
+            "或 draft_section mode=rewrite_window。"
         )
     return (
-        "本 Turn 修理已停。不要再 propose_patch / rewrite_window / "
-        "evaluate_writing_fragment。如实说明进度。"
+        "本 Turn 修理已停。不要再 propose_patch / rewrite_window。"
+        "如实说明进度。"
     )
 
 

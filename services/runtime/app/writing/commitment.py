@@ -1,4 +1,4 @@
-"""章级叙事承诺：声明 → 配额硬拒 → 可检测槽位兑现在 tool_result。"""
+"""章级叙事承诺：声明 → 配额硬拒；兑现启发式只写 sidecar，不回传模型。"""
 
 from __future__ import annotations
 
@@ -44,8 +44,7 @@ DRAFT_COMMITMENT_PROPERTY: dict[str, Any] = {
     "description": (
         "Required on chapter-length upsert (≥800 visible chars). "
         "Slots: time_order, subplot, resolution_agency, moral_polarity, "
-        "affect_mode, locations. Generate up to 5 combinations internally "
-        "and pick the rarest vs the ledger; draft once."
+        "affect_mode, locations. Fill from what this chapter actually does."
     ),
     "properties": {
         key: {"type": "string", "enum": list(opts)} for key, opts in SLOTS.items()
@@ -136,10 +135,14 @@ def save_commitment(
     commit: Mapping[str, str],
     *,
     workspace_root: Path,
+    fulfillment: Mapping[str, Any] | None = None,
 ) -> Path:
     path = commitment_path(section_id, workspace_root=workspace_root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dict(commit), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    payload: dict[str, Any] = dict(commit)
+    if fulfillment:
+        payload["fulfillment"] = dict(fulfillment)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return path
 
 
@@ -180,30 +183,45 @@ def fulfillment_facts(text: str, commit: Mapping[str, str]) -> dict[str, Any]:
     }
 
 
-def format_commitment_block(*, work_mode: str = "literary") -> str:
+def unavailable_commitment_lines(*, work_mode: str, workspace_root: Path | None) -> list[str]:
+    """只列本章不可用的组合，不列全枚举。"""
+    from app.settings import settings
+
+    root = Path(workspace_root or settings.workspace_root).resolve()
     mode = normalize_work_mode(work_mode)
-    slots = WEB_QUOTA_SLOTS if mode == "web_serial" else LITERARY_QUOTA_SLOTS
+    history = load_recent_commitments(workspace_root=root, limit=WINDOW_N)
+    window = history[-WINDOW_N:]
+    lines: list[str] = []
+    n_default = sum(1 for row in window if is_default_combo(row, work_mode=mode))
+    if n_default >= DEFAULT_MAX:
+        lines.append(
+            "本章不可用：窗内默认组合（线性/无副线/主角选择/道德清楚/具身/单地点）已用满。"
+        )
+    if mode != "web_serial" and window:
+        last = window[-1].get("time_order")
+        streak = 0
+        for row in reversed(window):
+            if row.get("time_order") == last:
+                streak += 1
+            else:
+                break
+        if streak >= TIME_ORDER_STREAK - 1 and last:
+            lines.append(f"本章不可用：time_order={last} 已连续两章。")
+    return lines
+
+
+def format_commitment_block(
+    *,
+    work_mode: str = "literary",
+    workspace_root: Path | None = None,
+) -> str:
     lines = [
         "## Narrative commitment",
-        "Before a chapter-length `draft_section`, pass `narrative_commitment`.",
-        "Generate up to 5 candidate combinations internally and pick the rarest vs the ledger;",
-        "draft the chapter only once. Slots:",
+        "章长 upsert 带 narrative_commitment，按这章真的要写的来填。",
     ]
-    for key in slots:
-        lines.append(f"- {key}: {' | '.join(SLOTS[key])}")
-    if mode == "web_serial":
-        lines.append("web_serial: do not anti-default time_order / moral_polarity / resolution_agency.")
-    else:
-        lines.append(
-            "Avoid the default combo linear/none/protagonist_choice/clear/embodied/1 "
-            f"more than {DEFAULT_MAX} times in {WINDOW_N} chapters."
-        )
-    lines.append("If subplot=parallel_theme, the second line shares this scene or mirrors its theme.")
-    if mode != "web_serial":
-        lines.append(
-            "例：那年冬天他还没学会怕。柜门关上时他才明白——怕的不是空格，是自己居然松了一口气。"
-        )
-        lines.append("却说这城里的规矩不写在告示上。看官若只盯告示，便错过了真正在转的那盘棋。")
+    lines.extend(
+        unavailable_commitment_lines(work_mode=work_mode, workspace_root=workspace_root)
+    )
     return "\n".join(lines)
 
 

@@ -8,6 +8,7 @@ from app.writing.cards import (
     default_voice_card_path,
     parse_style_card_sections,
     prepare_writing_system_prompt,
+    split_sample_excerpts,
     _parse_frontmatter,
 )
 from app.writing.signals.spec import build_writing_spec_block
@@ -37,6 +38,10 @@ def test_default_voice_samples_are_not_the_shop_counter() -> None:
     assert "孔乙己" in samples
     assert "骆驼祥子" in samples
     assert "祥子" in samples
+    excerpts = split_sample_excerpts(samples)
+    assert len(excerpts) >= 12
+    for title, excerpt in excerpts:
+        assert _hits(excerpt) == [], title
     assert _hits(samples) == []
 
 
@@ -89,7 +94,7 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "得到" in voice
     assert "发现" in voice
     assert "前三分之一" in voice
-    assert "三千" in voice
+    assert "一千八" in voice
     assert "功法" in voice
     assert "看见代价" not in voice
     assert "跟着谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
@@ -100,7 +105,7 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "平凡" in system
     assert "得到" in system or "发现" in system
     assert "前三分之一" in system
-    assert "三千" in system
+    assert "一千八" in system
     assert "功法" in system
 
 
@@ -144,3 +149,33 @@ def test_committed_style_spec_does_not_ask_to_reinvent_the_book(
         workspace_root=tmp_path,
     )
     assert "另起人与事" not in spec
+
+
+def test_same_work_two_turns_pick_the_same_voice_excerpt(tmp_path: Path, monkeypatch) -> None:
+    from app.settings import settings
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    first = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写一篇故事",
+        workspace_root=tmp_path,
+    )
+    second = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写第二章",
+        workspace_root=tmp_path,
+    )
+    a = split_sample_excerpts(
+        parse_style_card_sections(
+            next(c.body for c in first.cards if c.kind == "style")
+        ).get("Samples")
+        or ""
+    )
+    b = split_sample_excerpts(
+        parse_style_card_sections(
+            next(c.body for c in second.cards if c.kind == "style")
+        ).get("Samples")
+        or ""
+    )
+    assert len(a) == 1
+    assert a == b

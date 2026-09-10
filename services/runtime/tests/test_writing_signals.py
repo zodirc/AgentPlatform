@@ -108,6 +108,10 @@ def test_score_writing_fragment_has_signals_block() -> None:
     assert out["fragment"]["declared"] == "worldview_texture"
     assert out["exemplar_fit"]["n"] >= 1
     assert out["exemplar_fit"]["schema_id"] == FEATURE_SCHEMA_ID
+    assert out["rewards_observe_only"] is True
+    pen_sum = sum(float(p.get("delta") or 0.0) for p in out["penalties"])
+    expected = round(max(0.0, min(1.0, float(out["composite"]) + pen_sum)), 4)
+    assert out["net_signal"] == expected
     assert set(out["exemplar_fit"]["signature"]) == set(SIGNATURE_KEYS)
     nearest = out["exemplar_fit"]["nearest"]
     assert nearest["author"] == "鲁迅"
@@ -217,7 +221,7 @@ def test_own_class_beats_other_class() -> None:
 
 
 def test_exemplars_fit_the_evaluator() -> None:
-    failures = exemplars_score_high(min_net=0.50)
+    failures = exemplars_score_high(min_net=0.40)
     assert failures == [], failures
 
 
@@ -493,12 +497,8 @@ def test_long_chapter_window_points_repair_span_at_staccato_island() -> None:
     assert span["key"] == "staccato_uniform"
     assert span["visible_chars"] <= 160
     assert "鲁镇的酒店" not in span["old_text"]
-    neighbor = span.get("neighbor") or {}
-    assert neighbor.get("text")
-    assert neighbor.get("source") in {"local_beat", "exemplar"}
-    assert "一两句" in (span.get("hint") or "") or "多轮空问" in (
-        span.get("hint") or ""
-    )
+    assert not (span.get("neighbor") or {}).get("text")
+    assert "空问" in (span.get("hint") or "") or "短对白" in (span.get("hint") or "")
 
 
 def test_short_draft_allows_full_redraft_policy() -> None:
@@ -529,7 +529,7 @@ def test_ai_dialogue_requests_patch_under_repair_min_visible() -> None:
     assert "repair_span" in out
 
 
-def test_meta_hit_requests_patch_until_same_span_stalls() -> None:
+def test_meta_hit_does_not_request_patch() -> None:
     prefs = platform_prefs_payload()
     pad = (
         "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
@@ -541,22 +541,11 @@ def test_meta_hit_requests_patch_until_same_span_stalls() -> None:
     )
     out = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
     assert any(p["key"] == "meta_knowing_high" for p in out["penalties"])
-    assert out["writing_weak"] is True
-    assert out["rewrite_policy"] == "propose_patch"
-    span = out["repair_span"]
-    assert span["key"] == "meta_knowing_high"
-    stalled = score_writing_fragment(
-        text,
-        fragment_declared="mixed",
-        prefs=prefs,
-        prior={"composite": out["composite"], "repair_span": span},
-    )
-    assert stalled["rewrite_policy"] == "draft_ok"
-    assert stalled["writing_weak"] is False
-    assert "repair_span" not in stalled
+    assert out["writing_weak"] is False
+    assert "repair_span" not in out
 
 
-def test_peeled_meta_island_stalls_rewrite_policy() -> None:
+def test_peeled_meta_island_does_not_open_span() -> None:
     prefs = platform_prefs_payload()
     pad = (
         "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
@@ -567,21 +556,8 @@ def test_peeled_meta_island_stalls_rewrite_policy() -> None:
         + "她知道这条路走不通。他明白柜上的账还没结。她忽然懂了屋子为什么空着。"
     )
     first = score_writing_fragment(text, fragment_declared="mixed", prefs=prefs)
-    assert first["rewrite_policy"] == "propose_patch"
-    span = first["repair_span"]
-    peeled = "过了一会儿，" + span["old_text"]
-    if peeled not in text:
-        text2 = text.replace(span["old_text"], peeled, 1)
-    else:
-        text2 = text
-    stalled = score_writing_fragment(
-        text2,
-        fragment_declared="mixed",
-        prefs=prefs,
-        prior={"composite": first["composite"], "repair_span": span},
-    )
-    assert stalled["rewrite_policy"] == "draft_ok"
-    assert "repair_span" not in stalled
+    assert first["rewrite_policy"] == "draft_ok"
+    assert "repair_span" not in first
 
 
 def test_staccato_stall_tries_next_island_or_keeps_weak() -> None:
@@ -787,11 +763,8 @@ def test_repair_hint_forks_by_work_mode() -> None:
 
     lit = repair_hint("staccato_uniform", "literary")
     web = repair_hint("staccato_uniform", "web_serial")
-    assert "手、物、沉默" in lit or "一两句" in lit
-    assert "一两句" in lit
-    assert "旁白" in lit or "告诉他" in lit
-    assert "信息差" in web or "动作" in web
-    assert "旁白" in web or "一两句" in web
+    assert "空问" in lit or "短对白" in lit
+    assert "空问" in web or "短对白" in web
     assert lit != web
 
 
@@ -823,8 +796,7 @@ def test_repair_span_hint_follows_work_mode() -> None:
     )
     span = web["repair_span"]
     assert span["key"] == "staccato_uniform"
-    assert "一两句" in span["hint"] or "信息差" in span["hint"]
-    assert "旁白" in span["hint"] or "说明" in span["hint"]
+    assert "空问" in span["hint"] or "短对白" in span["hint"]
 
 
 def test_repair_neighbor_prefers_local_beat(tmp_path, monkeypatch) -> None:
@@ -878,8 +850,8 @@ def test_repair_neighbor_prefers_matching_fragment(tmp_path, monkeypatch) -> Non
     assert "香菜" not in span["neighbor"]["text"]
 
 
-def test_repair_neighbor_web_serial_staccato_uses_dialogue_bank() -> None:
-    """碎拍邻跟网文对白库，不拿情节切片里的《故乡》。"""
+def test_repair_neighbor_web_serial_staccato_skips_platform_bank() -> None:
+    """A2：默认不附平台范文邻居。"""
     from app.writing.signals.repair import attach_repair_neighbor
 
     span = {
@@ -894,10 +866,5 @@ def test_repair_neighbor_web_serial_staccato_uses_dialogue_bank() -> None:
             "nearest": {"id": "故乡:宏儿水生", "work": "故乡"},
         },
     )
-    neighbor = span["neighbor"]
-    assert neighbor["source"] == "exemplar"
-    assert "故乡" not in str(neighbor.get("slug") or "")
-    assert neighbor.get("slug")
-    assert "干青豆" not in (neighbor.get("text") or "")
-    assert "宏儿" not in (neighbor.get("text") or "")
+    assert "neighbor" not in span
 

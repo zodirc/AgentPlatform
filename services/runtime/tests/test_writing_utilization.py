@@ -101,7 +101,7 @@ def test_compact_writing_meta_opens_quality_patch() -> None:
             }
         }
     )
-    assert meta["writing_weak"] is True
+    assert meta["writing_weak"] is False
     assert meta["rewrite_policy"] == "propose_patch"
 
 

@@ -6,11 +6,12 @@ import re
 
 LENGTH_SHORT_RATIO = 0.85
 OUTLINE_MIN_VISIBLE = 40
-# 起点常章：配额 3000，软顶 3500。不足 85%（2550）记 length_short。
-DEFAULT_CHAPTER_MIN = 3000
-DEFAULT_CHAPTER_MAX = 3500
+# 长篇默认区间 1800–4500。无名额时 length_short 只在 <1500 记。
+DEFAULT_CHAPTER_MIN = 1800
+DEFAULT_CHAPTER_MAX = 4500
+LENGTH_SHORT_FLOOR = 1500
 CHAPTER_DWELL_HINT = (
-    "一章一场，按起点习惯约三千字写满（对白、拆拍、反应），软顶三千五；"
+    "一章通常一场，长篇约一千八到四千五；两场并置或半场留到下章都可以。"
     "不要预告片再粘无关的下一场。第二条线若与本场主题对位或共享时空，可以写"
 )
 
@@ -189,19 +190,33 @@ def outline_thin_chapters(md: str, *, min_visible: int = OUTLINE_MIN_VISIBLE) ->
 
 
 def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
-    """长度软事实。
-    
-    参数:
-        content/user_text。
-    
-    返回:
-        dict。"""
+    """长度软事实。无名额：<1500 才记 length_short；点名配额仍用 85%。"""
     vis = visible_chars(content)
     out: dict[str, object] = {"visible_chars": vis}
+    named = parse_char_quota(user_text)
+    if named is not None:
+        out["quota_chars"] = named
+        if vis < named * LENGTH_SHORT_RATIO:
+            out["length_short"] = True
+            out["summary"] = length_short_summary(vis, named)
+        return out
     quota = resolve_draft_quota(user_text)
     if quota is None:
+        if looks_like_chapter_draft(user_text) and vis < LENGTH_SHORT_FLOOR:
+            out["quota_min"] = DEFAULT_CHAPTER_MIN
+            out["quota_max"] = DEFAULT_CHAPTER_MAX
+            out["length_short"] = True
+            out["summary"] = length_short_summary(vis, LENGTH_SHORT_FLOOR)
         return out
     out["quota_chars"] = quota
+    out["quota_min"] = DEFAULT_CHAPTER_MIN
+    out["quota_max"] = DEFAULT_CHAPTER_MAX
+    # 默认章配额不再用 85% 点值；只在低于地板时记。
+    if looks_like_chapter_draft(user_text) and named is None:
+        if vis < LENGTH_SHORT_FLOOR:
+            out["length_short"] = True
+            out["summary"] = length_short_summary(vis, LENGTH_SHORT_FLOOR)
+        return out
     if vis < quota * LENGTH_SHORT_RATIO:
         out["length_short"] = True
         out["summary"] = length_short_summary(vis, quota)
@@ -209,13 +224,11 @@ def draft_length_fields(content: str, user_text: str) -> dict[str, object]:
 
 
 def length_short_summary(vis: int, quota: int) -> str:
-    """篇幅不足时的提示：写满已有拍，不要 append 第二场。"""
+    """篇幅不足时的提示：只说现在多短。"""
     return (
-        f"实体文字 {vis} 字，低于约定 {quota} 字的 85%"
-        f"（软顶 {DEFAULT_CHAPTER_MAX}）。"
-        "在已有拍里写满对白、拆拍、反应；不要新出场、新地点、新反派。"
-        "若这场已经收住，下一站留给下一章，不要 mode=append 粘第二场。"
-        "不要报完工。"
+        f"实体文字 {vis} 字，低于门槛 {quota} 字"
+        f"（长篇区间 {DEFAULT_CHAPTER_MIN}–{DEFAULT_CHAPTER_MAX}）。"
+        "若这场已经收住，下一站留给下一章。"
     )
 
 

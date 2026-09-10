@@ -432,7 +432,8 @@ def _score_span(
         work_mode=str(prefs.get("work_mode") or "literary"),
         chapter_position=chapter_position,
     )
-    net = composite + sum(p["delta"] for p in penalties) + sum(r["delta"] for r in rewards)
+    # A1: rewards stay in payload as observation; they do not enter net.
+    net = composite + sum(p["delta"] for p in penalties)
     net = round(max(0.0, min(1.0, net)), 4)
 
     return {
@@ -445,6 +446,7 @@ def _score_span(
         "dimensions": dimensions,
         "penalties": penalties,
         "rewards": rewards,
+        "rewards_observe_only": True,
         "composite": composite,
         "net_signal": net,
         "length_fields": length_fields,
@@ -470,7 +472,6 @@ def score_writing_fragment(
     返回:
         dict。"""
     from app.writing.signals.repair import (
-        WEAK_NET,
         build_repair_span,
         is_writing_weak,
         l0_penalty_hits,
@@ -529,10 +530,7 @@ def score_writing_fragment(
     if body_l0:
         # 章级 L0 用章级 penalties；碎拍岛在全章定位，不把最弱窗升成 repair_span。
         probe_penalties = list(body.get("penalties") or [])
-    elif worst_scored is not None and (
-        worst_scored.get("penalties")
-        or float(body["net_signal"]) < WEAK_NET
-    ):
+    elif worst_scored is not None and l0_penalty_hits(worst_scored.get("penalties")):
         probe_penalties = list(worst_scored.get("penalties") or probe_penalties)
     needs_repair = is_writing_weak(
         net=float(body["net_signal"]),

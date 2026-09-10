@@ -495,7 +495,7 @@ def _build_hinge_receipt_text() -> str:
         "不要补转折，不要还上一章的账，不要另起一套去AI模板。"
         "改的是这一拍的拧法，不是把整场改成三字句。"
         "用 propose_patch 只换 writing_signals.repair_span.old_text："
-        "看见之后可以停在物件、价钱、规矩或沉默上；若 span 带 neighbor，跟那条拍。"
+        "看见之后可以停在物件、价钱、规矩或沉默上。"
         "前后句子长短仍可以对不齐。不要改成说明书。不要整章再 draft_section。"
     )
 
@@ -506,7 +506,7 @@ def _build_opening_receipt_text() -> str:
         "第一章入口写成了机构专名（宗/派/仙门），读者还不知道这是哪块地。"
         "不要补身世提要，不要另起一套去AI模板。"
         "用 propose_patch 只换开篇几句（writing_signals.repair_span.old_text）："
-        "先写可站的场面，机构名让人物后口带出；若 span 带 neighbor，跟那条拍。"
+        "先写可站的场面，机构名让人物后口带出。"
         "不要整章再 draft_section。身世、失踪、全书谜面仍不要写进第一章。"
     )
 
@@ -517,7 +517,7 @@ def _build_lore_receipt_text() -> str:
         "这一段在点到人名之后，用「N年前」写成了失踪/尸体提要。"
         "不要补转折，不要把全书谜面写圆，不要另起一套去AI模板。"
         "用 propose_patch 只删这段提要（writing_signals.repair_span.old_text）："
-        "留在当下的屋子、活计或麻烦上即可；若 span 带 neighbor，跟那条拍。"
+        "留在当下的屋子、活计或麻烦上即可。"
         "不要整章再 draft_section。删提要时不要改成三字问答连环。"
     )
 
