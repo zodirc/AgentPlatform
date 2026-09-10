@@ -3,6 +3,12 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 0.3.21 — 2026-09-10
+
+- `opening.ponds` items：可选 `price_axis`（付账轴：`lifespan` / `memory` / `contract` / `status` / `none`；缺省兼容旧载荷）。向后兼容。
+- `turn.completed.termination_reason` 增补 `opening_ponds_retry_exhausted`（开篇闸语义拒后停转）。向后兼容。
+- `python/agent_contracts/writing_prefs.py`：各 fragment 的 `exemplar_alignment` 降到约 0.10，避免近常数对齐分主导 L1。向后兼容。
+
 ## 0.3.20 — 2026-09-09
 
 - `opening.ponds` items：`flavor` 上限 160→400（点选卡片上的「这本书」）。开篇候选不再把 `price`/`arc` 当交卷栏；字段仍可选、缺省兼容。向后兼容。

@@ -17,6 +17,7 @@
         "price": "换班一次扣一夜睡眠",
         "source_trust": "dubious",
         "first_conflict_at": "first_300",
+        "price_axis": "memory",
         "summary": "白天有人的日子"
       },
       {
@@ -30,7 +31,8 @@
         "promise": "survive_relation",
         "price": "窗口人情少一顿",
         "source_trust": "trusted",
-        "first_conflict_at": "chapter_one"
+        "first_conflict_at": "chapter_one",
+        "price_axis": "none"
       }
     ]
   }

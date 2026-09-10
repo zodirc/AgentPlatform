@@ -164,106 +164,108 @@ SIGNATURE_KEYS: tuple[str, ...] = (
     "battle_density",
     "world_density",
 )
-# Whitening needs a real cloud. Platform bank is 4/class — L1 until then.
+# Whitening needs n≥16. Bank is ~4/class; prototype_alignment is L1 only.
+# Keep the constant so old reports still parse; do not pretend whitening runs.
 WHITEN_MIN_N = 16
 SCALE_FLOOR = 0.08
+# sig.v1 is a process-rhythm meter (staccato / hinge / sentence CV).
+# Narrative axis is L2 offline (writing/narrative), not this vector.
 # L1-to-centroid floor for exemplar_alignment_high, scene_ratio_high, and
 # dialogue_rhythm_varied (and not anti-pattern).
 ALIGN_REWARD_FLOOR = 0.80
 # fragment_mismatch only when declared class itself is a poor fit.
 MISMATCH_ALIGN_FLOOR = 0.60
 
-# Platform defaults — normalized per fragment row (literary / 经典文学向).
+# Platform defaults. exemplar_alignment is a near-constant on the live bank
+# (std typically < 0.05); keep ≥5% after normalize, do not let it dominate.
 _PLATFORM_WEIGHTS: dict[str, dict[str, float]] = {
     "plot_progress": {
-        "structure": 0.25,
-        "character": 0.20,
-        "pacing": 0.20,
-        "voice": 0.15,
-        "exemplar_alignment": 0.20,
+        "structure": 0.28,
+        "character": 0.24,
+        "pacing": 0.22,
+        "voice": 0.16,
+        "exemplar_alignment": 0.10,
     },
     "worldview_texture": {
-        "structure": 0.15,
-        "character": 0.10,
-        "pacing": 0.15,
-        "voice": 0.20,
-        "exemplar_alignment": 0.40,
+        "structure": 0.22,
+        "character": 0.16,
+        "pacing": 0.18,
+        "voice": 0.32,
+        "exemplar_alignment": 0.12,
     },
     "climax_beat": {
-        "structure": 0.20,
-        "character": 0.25,
-        "pacing": 0.25,
+        "structure": 0.24,
+        "character": 0.28,
+        "pacing": 0.28,
         "voice": 0.10,
-        "exemplar_alignment": 0.20,
+        "exemplar_alignment": 0.10,
     },
     "battle_action": {
-        "structure": 0.15,
-        "character": 0.15,
-        "pacing": 0.30,
-        "voice": 0.10,
-        "exemplar_alignment": 0.30,
+        "structure": 0.20,
+        "character": 0.20,
+        "pacing": 0.38,
+        "voice": 0.12,
+        "exemplar_alignment": 0.10,
     },
     "dialogue_dyad": {
-        # Fitted 2026-08-25 from platform bank + 祥子/茶馆/平凡的世界 dialogue.
-        "structure": 0.16,
-        "character": 0.21,
-        "pacing": 0.17,
-        "voice": 0.16,
-        "exemplar_alignment": 0.30,
+        "structure": 0.20,
+        "character": 0.26,
+        "pacing": 0.22,
+        "voice": 0.22,
+        "exemplar_alignment": 0.10,
     },
     "mixed": {
-        # Fitted 2026-08-25 after adding 祥子/平凡的世界 mixed beats.
-        "structure": 0.16,
-        "character": 0.22,
-        "pacing": 0.17,
-        "voice": 0.16,
-        "exemplar_alignment": 0.30,
+        "structure": 0.20,
+        "character": 0.27,
+        "pacing": 0.22,
+        "voice": 0.21,
+        "exemplar_alignment": 0.10,
     },
 }
 
-# web_serial — 人物仍中心，但情节/节奏/钩子权重更高；voice/范本对齐略降。
+# web_serial — 情节/节奏更高；exemplar_alignment 同样降到信息量。
 _PLATFORM_WEIGHTS_WEB: dict[str, dict[str, float]] = {
     "plot_progress": {
-        "structure": 0.28,
-        "character": 0.22,
-        "pacing": 0.26,
+        "structure": 0.30,
+        "character": 0.24,
+        "pacing": 0.28,
         "voice": 0.08,
-        "exemplar_alignment": 0.16,
+        "exemplar_alignment": 0.10,
     },
     "worldview_texture": {
-        "structure": 0.24,
-        "character": 0.14,
-        "pacing": 0.26,
-        "voice": 0.12,
-        "exemplar_alignment": 0.24,
+        "structure": 0.28,
+        "character": 0.16,
+        "pacing": 0.32,
+        "voice": 0.16,
+        "exemplar_alignment": 0.08,
     },
     "climax_beat": {
-        "structure": 0.22,
-        "character": 0.20,
-        "pacing": 0.28,
-        "voice": 0.06,
-        "exemplar_alignment": 0.24,
+        "structure": 0.26,
+        "character": 0.24,
+        "pacing": 0.32,
+        "voice": 0.08,
+        "exemplar_alignment": 0.10,
     },
     "battle_action": {
-        "structure": 0.14,
-        "character": 0.14,
-        "pacing": 0.34,
-        "voice": 0.06,
-        "exemplar_alignment": 0.32,
+        "structure": 0.18,
+        "character": 0.18,
+        "pacing": 0.42,
+        "voice": 0.12,
+        "exemplar_alignment": 0.10,
     },
     "dialogue_dyad": {
-        "structure": 0.18,
-        "character": 0.28,
-        "pacing": 0.20,
-        "voice": 0.10,
-        "exemplar_alignment": 0.24,
+        "structure": 0.22,
+        "character": 0.32,
+        "pacing": 0.24,
+        "voice": 0.12,
+        "exemplar_alignment": 0.10,
     },
     "mixed": {
-        "structure": 0.24,
-        "character": 0.24,
-        "pacing": 0.22,
+        "structure": 0.28,
+        "character": 0.28,
+        "pacing": 0.24,
         "voice": 0.10,
-        "exemplar_alignment": 0.20,
+        "exemplar_alignment": 0.10,
     },
 }
 
@@ -318,7 +320,7 @@ PLATFORM_SIGNAL_REWARDS: dict[str, float] = {
 PLATFORM_SIGNAL_REWARDS_WEB: dict[str, float] = {
     **PLATFORM_SIGNAL_REWARDS,
     "plot_step_visible": 0.10,
-    "price_paid_visible": 0.10,
+    "price_paid_visible": 0.14,
     "world_layer_visible": 0.10,
 }
 

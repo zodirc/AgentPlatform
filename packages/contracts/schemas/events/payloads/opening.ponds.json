@@ -59,6 +59,10 @@
             "type": "string",
             "enum": ["first_300", "first_1000", "chapter_one", "later"]
           },
+          "price_axis": {
+            "type": "string",
+            "enum": ["lifespan", "memory", "contract", "status", "none"]
+          },
           "summary": { "type": "string", "maxLength": 160 }
         }
       }

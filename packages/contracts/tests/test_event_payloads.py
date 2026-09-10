@@ -292,6 +292,14 @@ def test_terminal_turn_payloads_allow_post_turn_jobs() -> None:
         schemas_dir=SCHEMAS_DIR,
     )
     validate_event_payload(
+        "turn.completed",
+        {
+            "summary": "开篇闸连拒停转",
+            "termination_reason": "opening_ponds_retry_exhausted",
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+    validate_event_payload(
         "turn.failed",
         {
             "termination_reason": "fatal_error",
