@@ -11,14 +11,6 @@ from typing import Any, Literal
 OutlinePhase = Literal["ready", "open", "continue"]
 
 STYLE_LOCK_REL = "writing/style.lock"
-_DIVERGE_STYLES_REL = (
-    Path(__file__).resolve().parents[1]
-    / "scenarios"
-    / "writing"
-    / "templates"
-    / "xuanhuan_diverge_styles.md"
-)
-
 _MIN_CONTRACT_CHARS = 80
 _SPINE_HINT = re.compile(r"主线|副线|主题倾向|风格契约|这本书")
 _FANTASY_HINT = re.compile(r"玄幻|仙侠|修仙|修真|奇幻|东方奇幻")
@@ -228,33 +220,14 @@ def should_inject_diverge_styles(
     book_scope: str = "",
     workspace_root: Path | None = None,
 ) -> bool:
-    """开篇候选 / 未订纲时注入六路透镜；style.lock 或纲上风格契约立定后停止。"""
-    from app.writing.outline_arc import outline_style_committed
-
-    if style_lock_exists(workspace_root):
-        return False
-    if outline_style_committed(outline):
-        return False
-    return wants_fantasy_diverge_corpus(
-        message, outline=outline, book_scope=book_scope
-    )
+    """C0：题材发散块已由承诺卡取代，不再注入。"""
+    del message, outline, book_scope, workspace_root
+    return False
 
 
 def load_diverge_styles_volatile_block() -> str:
-    path = _DIVERGE_STYLES_REL
-    if not path.is_file():
-        return ""
-    try:
-        raw = path.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return ""
-    from app.writing.cards import _parse_frontmatter
-
-    _meta, body = _parse_frontmatter(raw)
-    body = (body or "").strip()
-    if not body:
-        return ""
-    return f"## 题材发散（可选；不是订纲通行证）\n\n{body}"
+    """保留空实现，避免旧调用方炸；C0 后不再注入。"""
+    return ""
 
 
 def resolve_outline_phase(

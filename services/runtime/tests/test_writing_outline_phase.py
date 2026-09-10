@@ -96,7 +96,7 @@ def test_open_phase_note_fantasy_asks_early_gain() -> None:
 
 
 def test_should_inject_diverge_styles_during_opening(tmp_path: Path) -> None:
-    assert should_inject_diverge_styles(
+    assert not should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
         outline="",
         workspace_root=tmp_path,
@@ -110,14 +110,8 @@ def test_should_inject_diverge_styles_during_opening(tmp_path: Path) -> None:
     )
 
 
-def test_diverge_styles_block_substantial() -> None:
-    block = load_diverge_styles_volatile_block()
-    assert "题材发散" in block
-    assert "观察透镜" in block
-    assert "看见代价" not in block
-    assert len(block) > 800
-    assert block.count("不要") <= 4
-    assert len(block.splitlines()) <= 180
+def test_diverge_styles_block_removed() -> None:
+    assert load_diverge_styles_volatile_block() == ""
 
 
 def test_should_not_inject_when_style_committed(tmp_path: Path) -> None:
@@ -139,7 +133,7 @@ def test_should_not_inject_when_style_committed(tmp_path: Path) -> None:
 def test_should_inject_when_style_block_not_committed(tmp_path: Path) -> None:
     outline = _style_contract_block()
     assert not outline_style_committed(outline)
-    assert should_inject_diverge_styles(
+    assert not should_inject_diverge_styles(
         "写一章长篇玄幻小说第一章",
         outline=outline,
         workspace_root=tmp_path,

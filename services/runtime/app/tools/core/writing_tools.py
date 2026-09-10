@@ -595,6 +595,18 @@ async def draft_section(
     archived: list[str] = []
     occupy_fresh = False
     mode = _parse_draft_mode(_kwargs.get("mode"))
+    from app.writing.commitment import fulfillment_facts, gate_draft_commitment
+
+    blocked_commit, commit = gate_draft_commitment(
+        content=content,
+        mode=mode,
+        work_mode=work_mode,
+        section_id=section_id,
+        raw=_kwargs.get("narrative_commitment"),
+        workspace_root=Path(settings.workspace_root),
+    )
+    if blocked_commit:
+        return blocked_commit
     scored = content
     dup_collapsed = 0
 
@@ -849,6 +861,8 @@ async def draft_section(
         result["writing_signals"] = signals
     except Exception:
         pass
+    if commit:
+        result["commitment_fulfillment"] = fulfillment_facts(scored, commit)
     drafts = manifest.setdefault("section_drafts", {})
     from app.writing.signals.repair import process_l0_hits
 
@@ -972,14 +986,15 @@ async def propose_opening_ponds(
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
-    from app.writing.occupy import wants_new_piece
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
         load_opening_ponds,
+        note_pond_reject,
         normalize_pond_items,
         ponds_reject_reason,
         rank_opening_ponds,
         save_opening_ponds,
+        wants_more_ponds,
     )
 
     normalized = normalize_pond_items(items)
@@ -991,7 +1006,8 @@ async def propose_opening_ponds(
         }
     message = str(_kwargs.get("turn_user_text") or "")
     previous_kinds: set[str] | None = None
-    if not wants_new_piece(message):
+    previous_axes: set[str] | None = None
+    if wants_more_ponds(message):
         prev = load_opening_ponds()
         if prev:
             previous_kinds = {
@@ -999,16 +1015,28 @@ async def propose_opening_ponds(
                 for it in prev["items"]
                 if it.get("start_kind")
             }
+            previous_axes = {
+                str(it.get("price_axis") or "")
+                for it in prev["items"]
+                if it.get("price_axis")
+            }
     rejected = ponds_reject_reason(
         normalized,
         message=message,
         previous_kinds=previous_kinds,
+        previous_axes=previous_axes,
+        workspace_root=Path(settings.workspace_root),
     )
-    if rejected:
-        code, summary = rejected
-        return {"status": "error", "error": code, "summary": summary}
+    exhausted = note_pond_reject(_kwargs.get("turn_id"), rejected)
+    if exhausted:
+        return exhausted
     ranked = rank_opening_ponds(normalized)
     saved = save_opening_ponds(ranked, summary="")
+    from app.writing.ledger import append_ledger, pond_vector
+
+    root = Path(settings.workspace_root)
+    for item in saved["items"]:
+        append_ledger(pond_vector(item), workspace_root=root, kind="pond")
     return {
         "status": "ok",
         "ponds_id": saved["ponds_id"],

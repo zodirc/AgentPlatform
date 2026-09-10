@@ -1990,6 +1990,13 @@ class AgentEngine:
         ):
             state.termination_reason = "opening_ponds_awaiting_choice"
             return "TERMINATE"
+        if (
+            tool_name == "propose_opening_ponds"
+            and is_error
+            and result.get("stop_retry")
+        ):
+            state.termination_reason = "opening_ponds_retry_exhausted"
+            return "TERMINATE"
         return _tool_batch_outcome(str(summary))
 
     def _ingest_evidence(self, tool_name: str, result: dict[str, Any]) -> None:

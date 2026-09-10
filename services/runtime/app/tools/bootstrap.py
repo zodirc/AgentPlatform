@@ -16,6 +16,7 @@ from app.settings import settings
 from app.tools.core import tools as core
 from app.tools.registry import ON_WRITE_TOOLS, ToolRegistry, ToolSpec
 from app.writing.patch_budget import MAX_PATCHES_PER_PENALTY_KEY
+from app.writing.commitment import DRAFT_COMMITMENT_PROPERTY
 
 
 def build_registry() -> ToolRegistry:
@@ -167,7 +168,10 @@ def build_registry() -> ToolRegistry:
                 "user pointed at one. Do not draft_section mode=append a second climax, "
                 "new cast, or new place to hit a quota. A web-serial chapter is one scene "
                 "at ~3000 visible chars (soft cap 3500); leftover plot stations belong in "
-                "the next chapter. "
+                "the next chapter. Chapter-length upsert (≥800 visible chars) must pass "
+                "narrative_commitment (time_order/subplot/resolution_agency/"
+                "moral_polarity/affect_mode/locations); pick the rarest of 5 vs the ledger "
+                "and draft once. "
                 "If repair_span.neighbor is set, follow that beat's one loaded line or "
                 "action — do not copy its plot, and do not strip quotes into narration. "
                 f"After {MAX_PATCHES_PER_PENALTY_KEY} applied propose_patch per penalty_key, "
@@ -225,6 +229,7 @@ def build_registry() -> ToolRegistry:
                             "staccato_uniform."
                         ),
                     },
+                    "narrative_commitment": DRAFT_COMMITMENT_PROPERTY,
                 },
                 "required": ["section_id", "content"],
             },
@@ -345,8 +350,9 @@ def build_registry() -> ToolRegistry:
             name="propose_opening_ponds",
             description=(
                 "Propose 2–3 opening ponds as books the user can pick: "
-                "title + 这本书 (flavor) + opening. Unique start_kind, "
-                "not-all-same promise, not-all-trusted source_trust. "
+                "title + 这本书 (flavor) + opening. Unique start_kind "
+                "and unique price_axis, not-all-same promise, "
+                "not-all-trusted source_trust. "
                 "Do not split into 账单/走向/气味. "
                 "UI picker is the deliverable; do not list ponds in chat. "
                 "Use when the user only gave a genre or said 看看 / 我要其他的."
@@ -422,6 +428,13 @@ def build_registry() -> ToolRegistry:
                                         "at most one later"
                                     ),
                                 },
+                                "price_axis": {
+                                    "type": "string",
+                                    "description": (
+                                        "Unique. lifespan|memory|contract|"
+                                        "status|none. Who pays, not workplace."
+                                    ),
+                                },
                                 "chapter_job": {"type": "string"},
                                 "summary": {"type": "string"},
                             },
@@ -438,6 +451,7 @@ def build_registry() -> ToolRegistry:
                                 "price",
                                 "source_trust",
                                 "first_conflict_at",
+                                "price_axis",
                             ],
                         },
                     },

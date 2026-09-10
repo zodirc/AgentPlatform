@@ -18,6 +18,15 @@ from app.writing.opening_ponds import (
 from app.writing.outline_phase import wants_opening_candidates
 
 
+_KIND_AXIS = {
+    "self_notice": "status",
+    "pulled_in": "contract",
+    "granted_path": "memory",
+    "world_already": "lifespan",
+    "no_extraordinary": "none",
+}
+
+
 def _pond(
     title: str,
     *,
@@ -32,6 +41,7 @@ def _pond(
     price: str = "",
     source_trust: str = "dubious",
     first_conflict_at: str = "chapter_one",
+    price_axis: str = "",
 ) -> dict[str, str]:
     return {
         "title": title,
@@ -46,6 +56,7 @@ def _pond(
         "promise": promise,
         "source_trust": source_trust,
         "first_conflict_at": first_conflict_at,
+        "price_axis": price_axis or _KIND_AXIS.get(start_kind, "none"),
     }
 
 
@@ -63,6 +74,7 @@ def test_wants_opening_candidates_browse_and_commit() -> None:
 def test_opening_choice_block_requires_distinct_start_kind() -> None:
     block = opening_choice_block()
     assert "start_kind" in block
+    assert "price_axis" in block
     assert "self_notice" in block
     assert "promise" in block
     assert "unifying summary" in block or "三条都市修真" in block
@@ -76,30 +88,33 @@ def test_opening_choice_block_requires_distinct_start_kind() -> None:
     assert "no chat bubble" in block
     assert "连载" in block
     assert "事故" in block
-    assert "工种" in block
-    assert "title_is_mood" in block
-    assert "title_needs_stake" in block
-    assert "title_is_season" in block
-    assert "opening_no_accident" in block
+    assert "opening_no_accident" not in block
     assert "账单 / 走向 / 气味" in block or "账单/走向/气味" in block
-    assert "七张" in block or "三次拒签" in block
-    assert "family_errand_collision" in block
-    assert "paper_skin_collision" in block
-    assert "job_who_over_quota" in block
-    assert "countdown_errand_collision" in block
-    assert "bureau_over_quota" in block
-    assert "tax_engine_over_quota" in block
-    assert "civic_fable_over_quota" in block
-    assert "transit_over_quota" in block
-    assert "title_is_gimmick" in block
-    assert "title_is_workplace" in block
-    assert "quirk_shop_over_quota" in block
-    assert "grotesque_opening_over_quota" in block
-    assert "opening_is_setpiece" in block
+    assert "ledger" in block.lower()
+    for banned in (
+        "title_is_mood",
+        "title_needs_stake",
+        "title_is_season",
+        "family_errand_collision",
+        "paper_skin_collision",
+        "job_who_over_quota",
+        "countdown_errand_collision",
+        "bureau_over_quota",
+        "tax_engine_over_quota",
+        "civic_fable_over_quota",
+        "transit_over_quota",
+        "title_is_gimmick",
+        "title_is_workplace",
+        "quirk_shop_over_quota",
+        "grotesque_opening_over_quota",
+        "opening_is_setpiece",
+    ):
+        assert banned not in block
     assert "need_world_layer" not in block
     assert "need_price" not in block
     assert "first third" not in block.lower()
     assert "capability" not in block.lower()
+    assert 1500 <= len(block) <= 2800
 
 
 def test_should_gate_opening_choice_when_browsing() -> None:
@@ -142,6 +157,7 @@ def test_normalize_pond_items_requires_two() -> None:
             "promise": "",
             "source_trust": "",
             "first_conflict_at": "",
+            "price_axis": "",
             "summary": "",
         }
     ]
@@ -161,6 +177,10 @@ def test_normalize_start_kind_aliases() -> None:
     assert normalize_source_trust("虚假") == "false"
     assert normalize_first_conflict_at("前300字") == "first_300"
     assert normalize_first_conflict_at("第一章之后") == "later"
+    from app.writing.opening_ponds import normalize_price_axis
+
+    assert normalize_price_axis("烧寿") == "lifespan"
+    assert normalize_price_axis("用记忆结账") == "memory"
 
 
 def test_ponds_contrast_summary_is_book_pitch_not_genre_blurb(workspace: Path) -> None:
@@ -282,6 +302,7 @@ def test_clear_and_load_opening_ponds(workspace: Path) -> None:
     assert "自己发觉" in block
     assert "被卷进已在运转的事" in block
     assert "还没用过的 start_kind" in block
+    assert "price_axis" in block
     assert "系统/金手指落到身上" in block
     assert "先过日子，超凡往后放" in block
     assert clear_opening_ponds(workspace_root=workspace) is True
@@ -430,7 +451,41 @@ def test_fantasy_menu_wants_normal_opening_and_real_gift() -> None:
         ]
     )
     code, _ = ponds_reject_reason(no_early, message="玄幻") or ("", "")
+    assert code == ""
+    only_world_and_plain = normalize_pond_items(
+        [
+            _pond(
+                "修行者排队办证",
+                start_kind="world_already",
+                promise="social_place",
+                where="灵气坊市窗口",
+            ),
+            _pond("先把这班上完", start_kind="no_extraordinary", promise="survive_relation"),
+        ]
+    )
+    code, _ = ponds_reject_reason(only_world_and_plain, message="玄幻") or ("", "")
     assert code == "need_normal_opening"
+    fanren_pair = normalize_pond_items(
+        [
+            _pond("被卷", start_kind="pulled_in", promise="costly_truth"),
+            _pond(
+                "修行者排队办证",
+                start_kind="world_already",
+                promise="social_place",
+                where="灵气坊市窗口",
+            ),
+        ]
+    )
+    assert (
+        ponds_reject_reason(fanren_pair, message="写一部凡人流长篇修真，我看看")
+        is None
+    )
+    more_plain = ponds_reject_reason(
+        fanren_pair,
+        message="我要其他的",
+        previous_kinds={"self_notice", "granted_path", "no_extraordinary"},
+    )
+    assert more_plain is None
 
     ok = normalize_pond_items(
         [
@@ -519,7 +574,8 @@ def test_fantasy_three_card_menu_rejects_notice_pulled_world() -> None:
         ]
     )
     code, _ = ponds_reject_reason(gothic, message="写一篇都市修真小说") or ("", "")
-    assert code == "dread_not_cultivation"
+    assert code == ""
+    assert ponds_reject_reason(gothic, message="写一篇都市修真小说") is None
 
     no_dread = normalize_pond_items(
         [
@@ -543,8 +599,7 @@ def test_fantasy_rejects_dread_decode_unless_occult() -> None:
             _pond("先把这班上完", start_kind="no_extraordinary", promise="survive_relation"),
         ]
     )
-    code, _ = ponds_reject_reason(items, message="都市修真") or ("", "")
-    assert code == "dread_not_cultivation"
+    assert ponds_reject_reason(items, message="都市修真") is None
     assert ponds_reject_reason(items, message="写一篇修真，走克系") is None
 
 
@@ -589,6 +644,7 @@ async def test_propose_opening_ponds_saves_and_awaits(workspace: Path) -> None:
                 "price": "换班一次扣一夜睡眠",
                 "source_trust": "dubious",
                 "first_conflict_at": "first_300",
+                "price_axis": "memory",
             },
             {
                 "title": "窗口人情",
@@ -603,6 +659,7 @@ async def test_propose_opening_ponds_saves_and_awaits(workspace: Path) -> None:
                 "price": "窗口人情少一顿",
                 "source_trust": "trusted",
                 "first_conflict_at": "chapter_one",
+                "price_axis": "none",
             },
         ],
         summary="两份近池",
@@ -695,6 +752,33 @@ async def test_propose_opening_ponds_rejects_previous_kinds(
     )
     assert result["status"] == "error"
     assert result["error"] == "kinds_repeat"
+
+    browse = await propose_opening_ponds(
+        [
+            _pond("被卷", start_kind="pulled_in", promise="costly_truth"),
+            _pond(
+                "修行者排队办证",
+                start_kind="world_already",
+                promise="social_place",
+                where="灵气坊市窗口",
+            ),
+        ],
+        turn_user_text="写一部凡人流长篇修真，我看看",
+    )
+    assert browse.get("error") != "kinds_repeat"
+
+
+def test_pond_reject_stops_on_first_handler_error() -> None:
+    from uuid import uuid4
+
+    from app.writing.opening_ponds import note_pond_reject
+
+    hit = note_pond_reject(uuid4(), ("ledger_too_close", "换叙事决策，不要换皮。"))
+    assert hit is not None
+    assert hit["error"] == "ledger_too_close"
+    assert hit.get("stop_retry") is True
+    assert "只交一次" in hit["summary"]
+    assert note_pond_reject(uuid4(), None) is None
 
 
 def test_ponds_allow_missing_or_duplicate_price() -> None:
@@ -883,7 +967,7 @@ def test_ponds_reject_mood_title_stake_and_job_opening() -> None:
         ]
     )
     code, _ = ponds_reject_reason(mood, message="都市修真") or ("", "")
-    assert code == "title_is_mood"
+    assert code == ""  # title_is_mood retired: content blacklist -> ledger
 
     no_stake = normalize_pond_items(
         [
@@ -900,7 +984,7 @@ def test_ponds_reject_mood_title_stake_and_job_opening() -> None:
         ]
     )
     code, _ = ponds_reject_reason(no_stake, message="都市修真") or ("", "")
-    assert code == "title_needs_stake"
+    assert code == ""  # title_needs_stake retired: content blacklist -> ledger
 
     job_bio = normalize_pond_items(
         [
@@ -918,7 +1002,7 @@ def test_ponds_reject_mood_title_stake_and_job_opening() -> None:
         ]
     )
     code, _ = ponds_reject_reason(job_bio, message="都市修真") or ("", "")
-    assert code == "opening_no_accident"
+    assert code == ""  # opening_no_accident retired: token list was a retry hamster wheel
 
     ok = normalize_pond_items(
         [
@@ -960,7 +1044,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(family, message="都市修真") or ("", "")
-    assert code == "family_errand_collision"
+    assert code == ""  # family_errand_collision retired: content blacklist -> ledger
 
     paper = normalize_pond_items(
         [
@@ -983,7 +1067,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(paper, message="都市修真") or ("", "")
-    assert code == "paper_skin_collision"
+    assert code == ""  # paper_skin_collision retired: content blacklist -> ledger
 
     mixed = normalize_pond_items(
         [
@@ -1025,7 +1109,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(season, message="都市修真") or ("", "")
-    assert code == "title_is_season"
+    assert code == ""  # title_is_season retired: content blacklist -> ledger
 
     jobs = normalize_pond_items(
         [
@@ -1046,7 +1130,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(jobs, message="都市修真") or ("", "")
-    assert code == "job_who_over_quota"
+    assert code == ""  # job_who_over_quota retired: content blacklist -> ledger
 
     one_job = normalize_pond_items(
         [
@@ -1091,7 +1175,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
             ]
         )
     )
-    assert ranked[0]["title"] == "请勿高考时渡劫"
+    assert ranked[0]["title"] == "窗口人情"
 
     closed = normalize_pond_items(
         [
@@ -1120,6 +1204,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
                 "命盘之外",
                 start_kind="self_notice",
                 promise="power_steps",
+                price_axis="memory",
                 flavor="拍卖行的目录每一页都像证据；他每坐稳一次命席，就会永久忘掉一个熟人的脸。",
                 opening="压轴拍品裂开的一刻，拍卖场里两百多人同时叫出了他从未用过的名字。",
             ),
@@ -1127,13 +1212,15 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
                 "醒在第二重天",
                 start_kind="granted_path",
                 promise="costly_truth",
-                flavor="官方灵网说他只是术式失控；每次借影施术，他都会永久失去一段童年记忆。",
+                price_axis="memory",
+                flavor="官方灵网说他只是术式失控；每次借影施术，他都会永久失去一段童年记忆。系统落到身上。",
                 opening="失控的灵车撞破高架护栏时，他的影子先一步抬起了整辆车。",
             ),
         ]
     )
     code, _ = ponds_reject_reason(taxes, message="都市修真") or ("", "")
-    assert code == "tax_engine_over_quota"
+    # 组内两本同声明记忆轴，不靠正文正则。
+    assert code == "price_axis_collision"
 
     fables = normalize_pond_items(
         [
@@ -1154,7 +1241,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(fables, message="都市修真") or ("", "")
-    assert code == "civic_fable_over_quota"
+    assert code == ""  # civic_fable_over_quota retired: content blacklist -> ledger
 
     transits = normalize_pond_items(
         [
@@ -1173,7 +1260,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(transits, message="都市修真") or ("", "")
-    assert code == "transit_over_quota"
+    assert code == ""  # transit_over_quota retired: content blacklist -> ledger
 
     clocks = normalize_pond_items(
         [
@@ -1194,7 +1281,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(clocks, message="都市修真") or ("", "")
-    assert code == "countdown_errand_collision"
+    assert code == ""  # countdown_errand_collision retired: content blacklist -> ledger
 
     bureaus = normalize_pond_items(
         [
@@ -1221,7 +1308,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(bureaus, message="都市修真") or ("", "")
-    assert code == "bureau_over_quota"
+    assert code == ""  # bureau_over_quota retired: content blacklist -> ledger
 
     one_bureau = normalize_pond_items(
         [
@@ -1267,13 +1354,13 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
                 "修仙从替班开始",
                 start_kind="granted_path",
                 promise="survive_relation",
-                flavor="许南枝只是夜班便利店的店员，发现修士修的是藏在打工里的人间功。",
+                flavor="许南枝只是夜班便利店的店员，发现修士修的是藏在打工里的人间功。系统落到身上。",
                 opening="关东煮锅骤然炸裂，青火从西装客嘴里喷上天花板，整间便利店的灯同时熄了。",
             ),
         ]
     )
     code, _ = ponds_reject_reason(user_gimmicks, message="都市修真") or ("", "")
-    assert code == "quirk_shop_over_quota"
+    assert code == ""  # quirk_shop_over_quota retired: content blacklist -> ledger
 
     gimmick = normalize_pond_items(
         [
@@ -1292,7 +1379,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(gimmick, message="都市修真") or ("", "")
-    assert code == "title_is_gimmick"
+    assert code == ""  # title_is_gimmick retired: content blacklist -> ledger
 
     shops = normalize_pond_items(
         [
@@ -1313,7 +1400,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(shops, message="都市修真") or ("", "")
-    assert code == "quirk_shop_over_quota"
+    assert code == ""  # quirk_shop_over_quota retired: content blacklist -> ledger
 
     grotesques = normalize_pond_items(
         [
@@ -1332,7 +1419,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(grotesques, message="都市修真") or ("", "")
-    assert code == "grotesque_opening_over_quota"
+    assert code == ""  # grotesque_opening_over_quota retired: content blacklist -> ledger
 
     one_shop = normalize_pond_items(
         [
@@ -1373,7 +1460,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(docks, message="都市修真") or ("", "")
-    assert code == "title_is_workplace"
+    assert code == ""  # title_is_workplace retired: content blacklist -> ledger
 
     wanfa = normalize_pond_items(
         [
@@ -1412,7 +1499,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
         ]
     )
     code, _ = ponds_reject_reason(setpiece, message="都市修真") or ("", "")
-    assert code == "opening_is_setpiece"
+    assert code == ""  # opening_is_setpiece retired: content blacklist -> ledger
 
     from app.writing.opening_ponds import rank_opening_ponds
 
@@ -1437,7 +1524,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
             ]
         )
     )
-    assert ranked_straight[0]["title"] == "请勿高考时渡劫"
+    assert ranked_straight[0]["title"] == "修仙从替班开始"
 
     ranked_hit = rank_opening_ponds(
         normalize_pond_items(
@@ -1459,7 +1546,7 @@ def test_ponds_reject_family_errand_and_paper_skin() -> None:
             ]
         )
     )
-    assert ranked_hit[0]["title"] == "一人万法"
+    assert ranked_hit[0]["title"] == "猎杀修士的第七码头"
 
 
 def test_pond_item_event_fields_keeps_price_and_trust() -> None:
@@ -1473,6 +1560,7 @@ def test_pond_item_event_fields_keeps_price_and_trust() -> None:
             "price": "换班一次扣一夜睡眠",
             "source_trust": "dubious",
             "first_conflict_at": "first_300",
+            "price_axis": "memory",
             "who": "周石",
         },
         0,
@@ -1481,6 +1569,7 @@ def test_pond_item_event_fields_keeps_price_and_trust() -> None:
     assert row["price"] == "换班一次扣一夜睡眠"
     assert row["source_trust"] == "dubious"
     assert row["first_conflict_at"] == "first_300"
+    assert row["price_axis"] == "memory"
     bad = pond_item_event_fields(
         {
             "title": "a",
@@ -1493,3 +1582,104 @@ def test_pond_item_event_fields_keeps_price_and_trust() -> None:
     assert bad is not None
     assert "source_trust" not in bad
     assert "first_conflict_at" not in bad
+
+
+def test_same_cost_engine_rejected_despite_distinct_start_kind() -> None:
+    items = normalize_pond_items(
+        [
+            _pond(
+                "借火登天",
+                start_kind="self_notice",
+                promise="power_steps",
+                price_axis="lifespan",
+                flavor="凡人夹层里借火一息，烧寿三年。",
+                opening="火苗从掌心立住，寿数当场少了三年，柜门空了。",
+            ),
+            _pond(
+                "无名功簿",
+                start_kind="pulled_in",
+                promise="costly_truth",
+                price_axis="lifespan",
+                flavor="功簿烙法，修成者偿命。沈砚抄到自己的名字。",
+                opening="簿页自己翻开，柜门空了，沈砚的名字被烙进去。",
+            ),
+            _pond(
+                "泥路长生",
+                start_kind="no_extraordinary",
+                promise="survive_relation",
+                flavor="车夫还在送米，超凡往后放。",
+                opening="车辕压过石子，米袋裂开，白米撒了一路。",
+            ),
+        ]
+    )
+    code, summary = ponds_reject_reason(items, message="都市修真") or ("", "")
+    assert code == "price_axis_collision"
+    assert "price_axis" in summary
+
+
+def test_need_price_axis() -> None:
+    items = normalize_pond_items(
+        [
+            {
+                **_pond("A", start_kind="self_notice", promise="power_steps"),
+                "price_axis": "",
+            },
+            _pond("B", start_kind="pulled_in", promise="costly_truth"),
+        ]
+    )
+    code, _ = ponds_reject_reason(items) or ("", "")
+    assert code == "need_price_axis"
+
+
+def test_price_axis_repeat_after_more_ponds() -> None:
+    items = normalize_pond_items(
+        [
+            _pond(
+                "C",
+                start_kind="granted_path",
+                promise="power_steps",
+                price_axis="status",
+            ),
+            _pond(
+                "D",
+                start_kind="world_already",
+                promise="social_place",
+                price_axis="lifespan",
+            ),
+        ]
+    )
+    code, summary = ponds_reject_reason(
+        items,
+        message=MORE_PONDS_MESSAGE,
+        previous_kinds={"self_notice", "pulled_in"},
+        previous_axes={"status", "contract"},
+    ) or ("", "")
+    assert code == "price_axis_repeat"
+    assert "status" in summary
+
+
+@pytest.mark.asyncio
+async def test_propose_opening_ponds_rejects_price_axis_collision(
+    workspace: Path,
+) -> None:
+    from app.tools.core.writing_tools import propose_opening_ponds
+
+    result = await propose_opening_ponds(
+        [
+            _pond(
+                "借火",
+                start_kind="self_notice",
+                promise="power_steps",
+                price_axis="lifespan",
+            ),
+            _pond(
+                "功簿",
+                start_kind="pulled_in",
+                promise="costly_truth",
+                price_axis="lifespan",
+            ),
+        ]
+    )
+    assert result["status"] == "error"
+    assert result["error"] == "price_axis_collision"
+    assert result.get("stop_retry") is True

@@ -23,6 +23,7 @@ def test_workspace_not_writable_error_is_deploy_not_policy() -> None:
 
 def test_wants_new_piece_vs_continue() -> None:
     assert wants_new_piece("写一篇故事，精彩一些") is True
+    assert wants_new_piece("写一部凡人流长篇修真，我看看") is True
     assert wants_new_piece("写个故事") is True
     assert wants_new_piece("另写一篇") is True
     assert wants_new_piece("再来一篇") is True
