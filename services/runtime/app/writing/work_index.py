@@ -72,12 +72,10 @@ def build_work_index(
     lines = [
         "## Work index",
         (
-            f"Default layout **{mode}**: chapters append into `{ms}` "
-            f"(draft: `{draft_ms}`). Optional split files under `sections/`."
+            f"layout **{mode}** · draft `{draft_ms}` · confirmed `{ms}`"
             if mode == "monofile"
-            else "Layout **sections**: one file per chapter under `sections/` and `drafts/`."
+            else "layout **sections**: `sections/` + `drafts/`"
         ),
-        "Sessions are conversation threads over this work — not chapter owners.",
     ]
     if outline.is_file():
         try:
@@ -115,20 +113,19 @@ def build_work_index(
                 pass
         if wants_new_piece(message) and manuscript_is_occupied(draft_text):
             lines.append(
-                "Prior draft is a different story. First `draft_section` this Turn "
-                "uses occupy=fresh: archives to `drafts/archive/`, then writes only "
-                "the new piece at `ch1`. Do not append as a later chapter."
+                "Prior draft is another story. First `draft_section` uses occupy=fresh "
+                "(archives, then writes `ch1`)."
             )
         elif not draft_text:
             lines.append(
-                f"No draft yet. Call `draft_section` (creates `drafts/` and `{draft_ms}`). "
-                "Empty paths are not a write ban. This scenario has no `write_file`; "
-                "`propose_patch` cannot create missing files. Do not paste the chapter into chat."
+                f"No draft yet. Call `draft_section` (creates `{draft_ms}`). "
+                "Empty paths are not a write ban. This scenario has no `write_file`. "
+                "Do not paste the chapter into chat."
             )
         else:
             lines.append(
-                f"Continue writing with `draft_section` (appends/replaces a chapter heading in `{draft_ms}`); "
-                f"`propose_patch` only after that file exists. Read only the chapter you need — not the whole book."
+                f"Continue with `draft_section` in `{draft_ms}`. "
+                "`propose_patch` only after that file exists."
             )
     else:
         if not drafts and not sections:

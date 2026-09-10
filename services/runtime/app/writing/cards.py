@@ -837,10 +837,9 @@ def prepare_writing_system_prompt(
     spec = build_writing_spec_block(message, workspace_root=workspace_root)
     if spec:
         extras.append(spec)
-    from app.writing.outline_phase import (
-        load_diverge_styles_volatile_block,
-        should_inject_diverge_styles,
-    )
+    from app.writing.work_mode import resolve_work_mode
+    from app.writing.commitment import format_commitment_block
+    from app.writing.subtype import serial_subtype_block
 
     outline_text = ""
     try:
@@ -849,14 +848,12 @@ def prepare_writing_system_prompt(
             outline_text = op.read_text(encoding="utf-8", errors="replace")
     except OSError:
         outline_text = ""
-    if should_inject_diverge_styles(
-        message,
-        outline=outline_text,
-        workspace_root=workspace_root,
-    ):
-        diverge = load_diverge_styles_volatile_block()
-        if diverge:
-            extras.append(diverge)
+    work_mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
+    extras.append(format_commitment_block(work_mode=work_mode))
+    if work_mode == "web_serial":
+        subtype = serial_subtype_block(message, outline_text)
+        if subtype:
+            extras.append(subtype)
     from app.writing.outline_phase import wants_opening_candidates
     from app.writing.opening_ponds import (
         format_committed_pond_block,

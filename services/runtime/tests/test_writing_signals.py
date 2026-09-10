@@ -391,9 +391,12 @@ def test_align_reward_floor_rejects_cosmetic_centroid() -> None:
     assert _wp.ALIGN_REWARD_FLOOR == 0.80
     bank = load_platform_exemplars()
     prefs = platform_prefs_payload()
-    crow = next(s for s in bank["climax_beat"] if "乌鸦" in s.slug)
+    cosmetic = (
+        "本章讲述高潮已经到来。总而言之命运就此改变。"
+        "由此可见所有的铺垫都在这一刻。"
+    ) * 6
     crow_out = score_writing_fragment(
-        crow.text, fragment_declared="climax_beat", prefs=prefs
+        cosmetic, fragment_declared="climax_beat", prefs=prefs
     )
     assert crow_out["dimensions"]["exemplar_alignment"] < _wp.ALIGN_REWARD_FLOOR
     assert "exemplar_alignment_high" not in {r["key"] for r in crow_out["rewards"]}

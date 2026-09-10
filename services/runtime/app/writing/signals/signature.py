@@ -9,6 +9,7 @@ from typing import Sequence
 from app.offline.rubric import score_rubric
 from app.writing.hinge import count_hinge_chains
 from app.writing.signals.prefs_loader import _module as _writing_prefs
+from app.writing.signals.prose import narrative_scene_ratio
 from app.writing.staccato import max_short_quote_run, max_short_unit_run
 from app.writing.text_metrics import visible_chars
 
@@ -98,7 +99,7 @@ def extract_signature(text: str) -> dict[str, float]:
         "quote_ratio": quote_ratio,
         "mean_sent": min(mean_sent / 80.0, 1.0),
         "sent_cv": min(sent_cv / 1.5, 1.0),
-        "scene_ratio": float(rubric.get("scene_ratio", 0.0)),
+        "scene_ratio": narrative_scene_ratio(body),
         "meta_rate": float(rubric.get("meta_knowing_rate", 0.0)),
         "glue_rate": float(rubric.get("glue_rate", 0.0)),
         "short_quote_run": min(max_short_quote_run(body) / 8.0, 1.0),
@@ -214,13 +215,6 @@ def whitened_alignment(a: Vec, centroid: Vec, scale: Vec) -> float:
 
 
 def prototype_alignment(sig: Vec, centroid: Vec, scale: Vec, *, n: int) -> float:
-    """原型对齐。
-    
-    参数:
-        sig/centroid/scale/n。
-    
-    返回:
-        float。"""
-    if n >= WHITEN_MIN_N:
-        return whitened_alignment(sig, centroid, scale)
+    """原型对齐。银行 n 从未达到 WHITEN_MIN_N，白化分支已删除，避免假装在跑。"""
+    del scale, n
     return l1_alignment(sig, centroid)

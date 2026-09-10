@@ -178,26 +178,13 @@ def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
     assert "Writing spec" not in extract_cards_block(pin.volatile_block)
 
 
-def test_xuanhuan_diverge_styles_injected_until_style_lock(tmp_path: Path) -> None:
+def test_xuanhuan_diverge_styles_no_longer_injected(tmp_path: Path) -> None:
     pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
         "写一章长篇玄幻小说第一章",
         workspace_root=tmp_path,
     )
-    assert "## 题材发散" in pin.volatile_block
-    assert "都市怪谈" in pin.volatile_block
-    cards_block = extract_cards_block(pin.volatile_block)
-    assert "都市怪谈" not in cards_block
-    assert "凡人流" not in cards_block
+    assert "## 题材发散" not in pin.volatile_block
+    assert "都市怪谈" not in pin.volatile_block
+    assert "## Narrative commitment" in pin.volatile_block
     assert "outline_phase: `open`" in pin.volatile_block
-
-    from app.writing.outline_phase import write_style_lock
-
-    write_style_lock("outline body", workspace_root=tmp_path)
-    locked = prepare_writing_system_prompt(
-        "You are a writing assistant.",
-        "写一章长篇玄幻小说第一章",
-        workspace_root=tmp_path,
-    )
-    assert "## 题材发散" not in locked.volatile_block
-    assert "都市怪谈" not in locked.volatile_block

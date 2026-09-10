@@ -11,7 +11,7 @@ DEFAULT_CHAPTER_MIN = 3000
 DEFAULT_CHAPTER_MAX = 3500
 CHAPTER_DWELL_HINT = (
     "一章一场，按起点习惯约三千字写满（对白、拆拍、反应），软顶三千五；"
-    "不要预告片再粘下一场，下一站留给下一章"
+    "不要预告片再粘无关的下一场。第二条线若与本场主题对位或共享时空，可以写"
 )
 
 # Prefer these stems when several numbers appear in one Turn message.

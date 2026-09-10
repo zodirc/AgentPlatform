@@ -172,7 +172,7 @@ class Settings(BaseSettings):
     writing_patch_auto_apply: bool = True
     # WW1/WW2: work-scoped drafts (docs/23); history snapshots per section (0 disables).
     writing_draft_history_keep: int = 5
-    writing_work_index_max_chars: int = 1200
+    writing_work_index_max_chars: int = 400
     # monofile (default): chapters append into manuscript.md; sections = one file per chapter.
     writing_manuscript_mode: str = "monofile"
     writing_manuscript_path: str = "manuscript.md"

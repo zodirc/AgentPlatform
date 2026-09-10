@@ -225,7 +225,7 @@ def scope_spec_line(
             "不必分章、不必订长篇纲"
         )
     if pos == "falling":
-        return "长篇·收束：余波与局面落地；不新开大线"
+        return "长篇·收束：余波与局面落地；不新开无关大线。主题对位的副线可以收"
     if pos == "turn":
         return "长篇·翻转：中段可以变向；扣已有线索写这场"
     if section_num is not None and section_num <= 3:
@@ -243,10 +243,12 @@ def scope_spec_line(
             compass = serial_opening_compass(message=message, outline=outline)
             return (
                 f"长篇·开篇：{compass}；一章一场约三千字写满这场；"
+                "不要为凑字粘无关场面；第二条线若与本场主题对位或共享时空，可以写；"
                 "后面的海（终局宇宙、境界总纲）不要写进这一章"
             )
         return (
             "长篇·开篇：站住眼前的日子和人；一章一场约三千字写满这场；"
+            "不要为凑字粘无关场面；第二条线若与本场主题对位或共享时空，可以写；"
             "后面的海（终局宇宙、境界总纲）不要写进这一章"
         )
     if section_num is not None and section_num >= 4:

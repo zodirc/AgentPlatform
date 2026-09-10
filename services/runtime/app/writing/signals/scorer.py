@@ -123,7 +123,10 @@ def _dimension_scores(
 
     pacing = _clamp(0.40 * scene + 0.35 * sent_cv + 0.25 * (1.0 - glue_rate))
     staccato_cut = 0.12 if mode == "web_serial" else 0.28
-    if flags["staccato"]:
+    quote_ratio = float(feats.get("quote_ratio") or 0.0)
+    # Extra dimension cuts only when dialogue is sparse. High quote_ratio +
+    # short-run chips is a shape problem (penalty key), not "too much talk".
+    if flags["staccato"] and quote_ratio < 0.35:
         pacing = _clamp(pacing - staccato_cut)
         character = _clamp(character - staccato_cut)
     if flags["hinge"]:
@@ -141,7 +144,7 @@ def _dimension_scores(
     voice -= 0.12 * min(meta_rate, 1.0)
     voice -= 0.08 * min(glue_rate, 1.0)
     voice -= 0.16 * syn
-    if flags["staccato"]:
+    if flags["staccato"] and quote_ratio < 0.35:
         voice -= 0.30
     if flags["hinge"]:
         voice -= 0.18

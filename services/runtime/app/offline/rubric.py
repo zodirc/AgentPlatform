@@ -6,6 +6,8 @@ from __future__ import annotations
 import re
 from typing import Sequence
 
+from app.writing.signals.prose import narrative_scene_ratio
+
 
 # Common AI-taste / filler phrases (offline only; docs/14 WQ4).
 _AI_BAN_PHRASES = (
@@ -20,7 +22,8 @@ _AI_BAN_PHRASES = (
     "as a language model",
 )
 
-# Meta-knowing / summary-voice families (pinned default_voice Don't; L1 meta_knowing_high).
+# Meta-knowing / summary-voice families (L1 meta_knowing_high).
+# Keep 心里清楚 / 说教. Fourth-wall address is a human-high mark (C7) — do not count.
 _META_KNOWING_PHRASES = (
     "他知道",
     "她知道",
@@ -38,6 +41,7 @@ _META_KNOWING_PHRASES = (
     "仿佛一切尽在掌握",
     "两人之间的空气凝固了",
 )
+_FOURTH_WALL_PHRASES = ("却说", "看官", "诸位", "列位看官")
 
 # Glue phrases (L1 glue_heavy; same families as the old standing-prefix list).
 _GLUE_PHRASES = (
@@ -47,15 +51,6 @@ _GLUE_PHRASES = (
     "总而言之",
     "综上所述",
 )
-
-# Rough dialogue / action cues vs synopsis cues (heuristic only).
-_DIALOGUE_OR_ACTION = re.compile(
-    r'[「」『』“”"].+|说道|问道|答道|点了点头|摇了摇头|转身|推门|拔刀|拔枪'
-)
-_SYNOPSIS_CUE = re.compile(
-    r"后来|于是|终于|总之|由此可见|这一章|本章讲述|概括|总结起来"
-)
-
 
 def score_rubric(text: str) -> dict:
     """作用：prose 启发式 fidelity/structure/style 评分。"""
@@ -93,7 +88,11 @@ def score_rubric(text: str) -> dict:
     if ban_hits:
         style = max(0.0, style - 0.15 * min(len(ban_hits), 3))
 
-    meta_hits = [p for p in _META_KNOWING_PHRASES if p in stripped]
+    meta_hits = [
+        p
+        for p in _META_KNOWING_PHRASES
+        if p in stripped and not any(fw in p for fw in _FOURTH_WALL_PHRASES)
+    ]
     glue_hits = [p for p in _GLUE_PHRASES if p in stripped]
     # Density ≈ hits per 500 chars (cap at 1.0).
     denom = max(length / 500.0, 1.0)
@@ -105,19 +104,7 @@ def score_rubric(text: str) -> dict:
         style = max(0.0, style - 0.08 * min(len(glue_hits), 3))
     style = min(style, 1.0)
 
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", stripped) if p.strip()] or (
-        [stripped] if stripped else []
-    )
-    scene_hits = sum(1 for p in paragraphs if _DIALOGUE_OR_ACTION.search(p))
-    synopsis_hits = sum(1 for p in paragraphs if _SYNOPSIS_CUE.search(p))
-    if not paragraphs:
-        scene_ratio = 0.0
-    else:
-        # Prefer dialogue/action; synopsis-heavy paragraphs pull the ratio down.
-        scene_ratio = round(
-            max(0.0, min(1.0, (scene_hits - 0.5 * synopsis_hits) / len(paragraphs))),
-            4,
-        )
+    scene_ratio = round(narrative_scene_ratio(stripped), 4) if stripped else 0.0
 
     overall = round((fidelity + structure + style) / 3.0, 4)
     return {
