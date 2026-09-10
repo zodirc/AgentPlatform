@@ -193,7 +193,7 @@ export function WritingSignalsModal({ open, onClose }: Props) {
     try {
       await saveWorkspaceFile(PREFS_PATH, serializePrefs(choice, gains, scope));
       setDirty(false);
-      setMsg("已保存。下一 Turn 起按此尺度、模式与奖惩强度打分。");
+      setMsg("已保存尺度与模式。奖励不进 net；同轮只修 L0。编辑札记在下一章。");
     } catch (e) {
       setMsg(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
@@ -216,9 +216,10 @@ export function WritingSignalsModal({ open, onClose }: Props) {
               写作信号
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              作品尺度与模式 → 奖惩贴近。长篇开篇站住眼前这一池，海先藏着。存于工作区{" "}
+              钉作品尺度与模式。L1 奖励只观测，net 低不再同轮修补；同轮只修过程
+              L0。不够光滑的章会进下一章的编辑札记。存于{" "}
               <code className="text-[10px]">{PREFS_PATH}</code>
-              ，不在设置页。
+              ，账户设置页无滑条。
             </p>
           </div>
           <button
@@ -308,7 +309,7 @@ export function WritingSignalsModal({ open, onClose }: Props) {
                   <div>
                     <h3 className="text-sm font-medium">奖惩贴近</h3>
                     <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      决定 L1 惩罚/奖励有多狠。默认不是 100%——不同模式强调不同片段。
+                      只缩放惩罚观测强度，奖励不进 net。不是「低于 0.50 就同轮打磨」的开关。
                     </p>
                   </div>
                   <Button

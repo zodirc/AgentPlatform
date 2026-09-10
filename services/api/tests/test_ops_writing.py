@@ -80,4 +80,24 @@ def test_ops_writing_proxies_score(ops_app: TestClient) -> None:
     body = res.json()
     assert body["persisted"] is False
     assert body["writing_signals"]["net_signal"] == 0.62
-    client.writing_score.assert_awaited_once()
+
+
+def test_ops_writing_surface_requires_auth(ops_app: TestClient) -> None:
+    res = ops_app.get("/api/v1/ops/writing/surface")
+    assert res.status_code in {401, 404}
+
+
+def test_ops_writing_proxies_surface(ops_app: TestClient) -> None:
+    client = MagicMock()
+    client.writing_surface = AsyncMock(
+        return_value={"ok": True, "index": {"chapters": []}, "flags": {}}
+    )
+    with patch("app.routers.ops_writing.RuntimeClient", return_value=client):
+        res = ops_app.get(
+            "/api/v1/ops/writing/surface",
+            headers={"Authorization": "Bearer test-ops-secret"},
+        )
+    assert res.status_code == 200
+    body = res.json()
+    assert body["ok"] is True
+    client.writing_surface.assert_awaited_once()

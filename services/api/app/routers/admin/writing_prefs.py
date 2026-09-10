@@ -1,7 +1,7 @@
-"""终端用户 Writing 偏好 HTTP 路由（``/admin/writing-prefs``）。
+"""账户 Writing 权重表 HTTP（``/admin/writing-prefs``）。
 
-与 ``services/end_user/writing_prefs`` 服务层对接；使用 ``require_session_actor``
-（登录用户或 admin bypass），非 admin-only。
+评分热路径不读这张表（writing-module-uplift A8 / §8：不下发设置页滑条）。
+产品工作台无入口；路由保留以免旧客户端炸，调用也不改变 L1 net。
 """
 
 from __future__ import annotations

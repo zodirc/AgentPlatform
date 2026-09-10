@@ -407,3 +407,8 @@ class RuntimeClient:
             payload["prefs"] = prefs
         resp = await self._post("/internal/writing/score", timeout=timeout, json=payload)
         return resp.json()
+
+    async def writing_surface(self, *, timeout: float = 15.0) -> dict:
+        """读取章级表面层 sidecar（只观测）。"""
+        resp = await self._get("/internal/writing/surface", timeout=timeout)
+        return resp.json()

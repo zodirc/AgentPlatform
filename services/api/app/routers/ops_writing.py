@@ -62,7 +62,15 @@ async def score_writing_text(body: ScoreBody) -> dict[str, Any]:
             text=body.text,
             fragment=body.fragment,
             slug=body.slug,
-            prefs=body.prefs,
         )
+    except httpx.HTTPError as exc:
+        raise _proxy_runtime_error(exc) from exc
+
+
+@router.get("/surface")
+async def writing_surface_index() -> dict[str, Any]:
+    """代理 runtime ``/internal/writing/surface`` 章级表面层（只观测不计分）。"""
+    try:
+        return await RuntimeClient().writing_surface()
     except httpx.HTTPError as exc:
         raise _proxy_runtime_error(exc) from exc

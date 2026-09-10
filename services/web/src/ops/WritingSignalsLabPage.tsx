@@ -75,6 +75,19 @@ type SignalHit = {
   hint?: string;
 };
 
+type SurfaceMetrics = {
+  ttr?: number;
+  para_len_var?: number;
+  quote_ratio?: number;
+  high_freq_per_k?: number;
+  construction_per_k?: number;
+  affect_named_present?: boolean;
+  affect_named_density?: number;
+  sent_struct_run?: number;
+  closing_shape?: string;
+  visible_chars?: number;
+};
+
 type ScoreResponse = {
   source?: {
     kind?: string;
@@ -85,6 +98,7 @@ type ScoreResponse = {
     fragment?: string;
   };
   persisted?: boolean;
+  surface?: SurfaceMetrics;
   writing_signals?: {
     fragment?: { declared?: string; detected?: string; mismatch?: boolean };
     dimensions?: Record<string, number>;
@@ -143,6 +157,10 @@ export function WritingSignalsLabPage() {
   const [result, setResult] = useState<ScoreResponse | null>(null);
   const [platformPrefs, setPlatformPrefs] = useState<LabPrefs | null>(null);
   const [trialPrefs, setTrialPrefs] = useState<LabPrefs | null>(null);
+  const [workSurface, setWorkSurface] = useState<{
+    index?: { chapters?: unknown[] };
+    flags?: Record<string, unknown>;
+  } | null>(null);
 
   const loadExemplars = useCallback(async () => {
     if (!secret) return;
@@ -171,6 +189,24 @@ export function WritingSignalsLabPage() {
   useEffect(() => {
     void loadExemplars();
   }, [loadExemplars]);
+
+  useEffect(() => {
+    if (!secret) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/ops/writing/surface", {
+          headers: authHeaders(secret),
+        });
+        if (!res.ok) return;
+        const payload = await res.json().catch(() => null);
+        if (payload && typeof payload === "object") {
+          setWorkSurface(payload as { index?: { chapters?: unknown[] }; flags?: Record<string, unknown> });
+        }
+      } catch {
+        /* sidecar 缺则空白，评分结果里仍有本次 surface */
+      }
+    })();
+  }, [secret]);
 
   const visible = useMemo(() => {
     if (filter === "all") return exemplars;
@@ -233,12 +269,16 @@ export function WritingSignalsLabPage() {
 
   const signals = result?.writing_signals;
   const net = signals?.net_signal;
+  const surface = result?.surface;
+  const workChapters = Array.isArray(workSurface?.index?.chapters)
+    ? workSurface.index.chapters.length
+    : 0;
 
   return (
     <OpsShell
       secret={secret}
       title="写作评分"
-      subtitle="范文或自备正文试跑启发式。左侧点范文；下面的权重/奖惩只在本页试跑，觉得好再写进平台默认。不写评测库、不进用户设置。"
+      subtitle="范文或自备正文试跑启发式。奖励与表面层只观测、不计分。net 低不出同轮修补。权重/奖惩只在本页试跑，不进用户设置。"
     >
       {loadError ? (
         <p className="mb-3 text-sm text-destructive">{loadError}</p>
@@ -486,6 +526,8 @@ export function WritingSignalsLabPage() {
                   {typeof signals.exemplar_fit?.score === "number"
                     ? ` · 原型贴近 ${fmt(signals.exemplar_fit.score)}`
                     : null}
+                  {" · "}
+                  net 低不出同轮修补
                 </p>
                 {result?.persisted ? (
                   <span className="text-[11px] text-destructive">已写库（不应发生）</span>
@@ -527,7 +569,9 @@ export function WritingSignalsLabPage() {
                 </div>
                 <div className="space-y-2">
                   <div>
-                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">奖励</p>
+                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                      奖励（只观测，不进 net）
+                    </p>
                     {(signals.rewards || []).length ? (
                       <ul className="space-y-1">
                         {(signals.rewards || []).map((r) => (
@@ -565,6 +609,35 @@ export function WritingSignalsLabPage() {
                   </div>
                 </div>
               </div>
+              {surface ? (
+                <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+                  <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                    表面层（只观测 · 不进分）
+                  </p>
+                  <ul className="grid gap-1 text-[11px] sm:grid-cols-2">
+                    <li>TTR {fmt(surface.ttr)}（汉字一字、拉丁按词）</li>
+                    <li>段落方差 {fmt(surface.para_len_var)}</li>
+                    <li>对白占比 {fmt(surface.quote_ratio)}</li>
+                    <li>高频/千字 {fmt(surface.high_freq_per_k)}</li>
+                    <li>构式/千字 {fmt(surface.construction_per_k)}</li>
+                    <li>
+                      命名情绪{" "}
+                      {surface.affect_named_present ? "有" : "无"} · 密度{" "}
+                      {fmt(surface.affect_named_density)}
+                    </li>
+                    <li>句式连跑 {surface.sent_struct_run ?? "—"}</li>
+                    <li>章末 {surface.closing_shape || "—"}</li>
+                  </ul>
+                </div>
+              ) : null}
+              {workChapters > 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  当前 Work 已记 {workChapters} 章表面层 sidecar
+                  {workSurface?.flags && Object.keys(workSurface.flags).length
+                    ? ` · 旗 ${Object.keys(workSurface.flags).join("、")}`
+                    : ""}
+                </p>
+              ) : null}
             </div>
           ) : (
             <p className="text-xs text-muted-foreground">
