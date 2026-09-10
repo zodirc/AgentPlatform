@@ -188,3 +188,29 @@ def test_xuanhuan_diverge_styles_no_longer_injected(tmp_path: Path) -> None:
     assert "都市怪谈" not in pin.volatile_block
     assert "## Narrative commitment" in pin.volatile_block
     assert "outline_phase: `open`" in pin.volatile_block
+
+
+def test_state_blocks_omit_task_voice(tmp_path: Path) -> None:
+    from app.writing.signals.spec import build_writing_spec_block
+    from app.writing.signals.surface import has_task_voice
+    from app.writing.story_state import apply_author_delta
+
+    apply_author_delta(
+        section_id="ch1",
+        deltas=["江照把铜铃藏进抽屉"],
+        patch={
+            "pressures": [{"what": "船行收船", "trend": "rising"}],
+            "info_gaps": [{"what": "灯是谁点的", "who_knows": ["江照"], "who_doesnt": ["周婶"]}],
+        },
+        workspace_root=tmp_path,
+    )
+    spec = build_writing_spec_block("写第二章", workspace_root=tmp_path)
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写第二章",
+        workspace_root=tmp_path,
+    )
+    assert not has_task_voice(spec)
+    assert not has_task_voice(pin.volatile_block)
+    cards = extract_cards_block(pin.volatile_block)
+    assert not has_task_voice(cards)

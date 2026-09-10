@@ -88,6 +88,9 @@ def test_opening_choice_block_requires_distinct_start_kind() -> None:
     assert "no chat bubble" in block
     assert "连载" in block
     assert "事故" in block
+    assert "Leave the assistant message empty" in block
+    assert "房租" in block
+    assert "殡仪" not in block
     assert "opening_no_accident" not in block
     assert "账单 / 走向 / 气味" in block or "账单/走向/气味" in block
     assert "ledger" in block.lower()
@@ -347,7 +350,7 @@ def test_committed_pond_block_from_sidecar(workspace: Path) -> None:
     assert "力的来源：来源不可信" in block
     assert "棋盘位：许棠" in block
     assert "不要另起账单" in block
-    assert "三千" in block
+    assert "一千八" in block
     assert "先过日子，超凡往后放" in block
     assert "在关系里活下去" in block
     pin = prepare_writing_system_prompt(
@@ -363,7 +366,7 @@ def test_committed_pond_block_from_sidecar(workspace: Path) -> None:
         workspace_root=workspace,
     )
     assert "## 已选开篇" in thicken.volatile_block
-    assert "三千" in thicken.volatile_block
+    assert "一千八" in thicken.volatile_block
     more = prepare_writing_system_prompt(
         "You are a writing assistant.",
         MORE_PONDS_MESSAGE,
@@ -419,6 +422,24 @@ def test_plain_pond_cannot_be_urban_mystery() -> None:
     )
     code, _ = ponds_reject_reason(items) or ("", "")
     assert code == "plain_not_plain"
+
+
+def test_plain_secret_is_not_a_leak() -> None:
+    from app.writing.opening_ponds import drop_leaking_plain_items
+
+    items = normalize_pond_items(
+        [
+            _pond("系统亮了", start_kind="granted_path", promise="power_steps"),
+            _pond(
+                "先把这班上完",
+                start_kind="no_extraordinary",
+                promise="survive_relation",
+                flavor="加班的事先当秘密瞒着家里，房租还欠着。",
+            ),
+        ]
+    )
+    assert ponds_reject_reason(items) is None
+    assert len(drop_leaking_plain_items(items)) == 2
 
 
 def test_fantasy_menu_wants_normal_opening_and_real_gift() -> None:
@@ -681,6 +702,60 @@ async def test_propose_opening_ponds_saves_and_awaits(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_propose_drops_gothic_plain_and_still_awaits(workspace: Path) -> None:
+    from app.tools.core.writing_tools import propose_opening_ponds
+
+    result = await propose_opening_ponds(
+        [
+            _pond("系统亮了", start_kind="granted_path", promise="power_steps"),
+            _pond("被卷进坊市", start_kind="pulled_in", promise="costly_truth"),
+            _pond(
+                "这座城没有真正的失踪者",
+                start_kind="no_extraordinary",
+                promise="dread_decode",
+                who="殡仪馆化妆师",
+                where="冷藏库",
+            ),
+        ],
+        turn_user_text="写一份都市修真小说，我看看",
+    )
+    assert result["status"] == "ok"
+    assert result["awaiting_choice"] is True
+    assert len(result["items"]) == 2
+    kinds = {str(it.get("start_kind")) for it in result["items"]}
+    assert kinds == {"granted_path", "pulled_in"}
+    blob = "".join(str(it) for it in result["items"])
+    assert "殡仪" not in blob
+
+
+@pytest.mark.asyncio
+async def test_propose_gothic_plain_pair_does_not_dump_donts(
+    workspace: Path,
+) -> None:
+    from app.tools.core.writing_tools import propose_opening_ponds
+
+    result = await propose_opening_ponds(
+        [
+            _pond("系统亮了", start_kind="granted_path", promise="power_steps"),
+            _pond(
+                "这座城没有真正的失踪者",
+                start_kind="no_extraordinary",
+                promise="dread_decode",
+                who="殡仪馆化妆师",
+                where="冷藏库",
+            ),
+        ],
+        turn_user_text="写一份都市修真小说，我看看",
+    )
+    assert result["status"] == "error"
+    assert result["error"] == "need_two_ponds"
+    assert result.get("stop_retry") is True
+    assert "殡仪" not in result["summary"]
+    assert "只交一次" not in result["summary"]
+    assert "没交成" in result["summary"]
+
+
+@pytest.mark.asyncio
 async def test_propose_opening_ponds_rejects_reskin(workspace: Path) -> None:
     from app.tools.core.writing_tools import propose_opening_ponds
     result = await propose_opening_ponds(
@@ -725,6 +800,8 @@ async def test_propose_opening_ponds_rejects_one(workspace: Path) -> None:
     result = await propose_opening_ponds([{"title": "only", "who": "a", "where": "b", "want": "c"}])
     assert result["status"] == "error"
     assert result["error"] == "need_two_ponds"
+    assert result.get("stop_retry") is True
+    assert "殡仪" not in result["summary"]
 
 
 @pytest.mark.asyncio
@@ -777,7 +854,9 @@ def test_pond_reject_stops_on_first_handler_error() -> None:
     assert hit is not None
     assert hit["error"] == "ledger_too_close"
     assert hit.get("stop_retry") is True
-    assert "只交一次" in hit["summary"]
+    assert "没交成" in hit["summary"]
+    assert "只交一次" not in hit["summary"]
+    assert "殡仪" not in hit["summary"]
     assert note_pond_reject(uuid4(), None) is None
 
 

@@ -166,14 +166,17 @@ def build_registry() -> ToolRegistry:
                 ".agent/work/history/. After a section has ≥800 visible chars this Turn, "
                 "do not upsert the whole chapter: propose_patch a thin existing beat if the "
                 "user pointed at one. Do not draft_section mode=append a second climax, "
-                "new cast, or new place to hit a quota. A web-serial chapter is one scene "
-                "at ~3000 visible chars (soft cap 3500); leftover plot stations belong in "
-                "the next chapter. Chapter-length upsert (≥800 visible chars) must pass "
+                "new cast, or new place to hit a quota. A web-serial chapter is usually "
+                "one scene in the 1800–4500 visible-char band; leftover plot stations belong "
+                "in the next chapter. Chapter-length upsert (≥800 visible chars) must pass "
                 "narrative_commitment (time_order/subplot/resolution_agency/"
-                "moral_polarity/affect_mode/locations); pick the rarest of 5 vs the ledger "
-                "and draft once. "
-                "If repair_span.neighbor is set, follow that beat's one loaded line or "
-                "action — do not copy its plot, and do not strip quotes into narration. "
+                "moral_polarity/affect_mode/locations); fill from what this "
+                "chapter actually does. "
+                "If repair_span.neighbor is set (this work's own beat), follow "
+                "that beat's rhythm — do not copy its plot, and do not strip "
+                "quotes into narration. "
+                "wild_card=true is allowed once per 5 chapters; that chapter's "
+                "L1 observations are silenced. "
                 f"After {MAX_PATCHES_PER_PENALTY_KEY} applied propose_patch per penalty_key, "
                 "only a chip-sized repair_span (≤160 visible chars) may use "
                 "mode=rewrite_window once. A window-sized span, an untouched-island "
@@ -230,6 +233,13 @@ def build_registry() -> ToolRegistry:
                         ),
                     },
                     "narrative_commitment": DRAFT_COMMITMENT_PROPERTY,
+                    "wild_card": {
+                        "type": "boolean",
+                        "description": (
+                            "Once per 5 chapters: this chapter may do something "
+                            "an editor would refuse. L1 observations are silenced."
+                        ),
+                    },
                 },
                 "required": ["section_id", "content"],
             },
@@ -460,6 +470,79 @@ def build_registry() -> ToolRegistry:
                 "required": ["items"],
             },
             handler=core.propose_opening_ponds,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="propose_chapter_openings",
+            description=(
+                "When the user asks to see two openings for this chapter, submit "
+                "exactly 2 items with title + opening (≤600 visible chars). "
+                "UI picker is the deliverable; do not list them in chat. Default off."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title": {"type": "string"},
+                                "opening": {"type": "string"},
+                            },
+                            "required": ["title", "opening"],
+                        },
+                    },
+                    "summary": {"type": "string"},
+                },
+                "required": ["items"],
+            },
+            handler=core.propose_chapter_openings,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="note_story_delta",
+            description=(
+                "After a chapter is drafted, optionally record up to 3 free sentences "
+                "of what changed, plus an optional structured patch "
+                "(wants/pressures/threads/info_gaps/taboos). Not scored."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "section_id": {"type": "string"},
+                    "deltas": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 3,
+                    },
+                    "patch": {"type": "object"},
+                },
+                "required": ["section_id"],
+            },
+            handler=core.note_story_delta,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="author_note",
+            description=(
+                "After a chapter, optionally record ≤120 characters of your current "
+                "doubt or bet about this book — not a summary. Not scored."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "section_id": {"type": "string"},
+                    "text": {"type": "string"},
+                },
+                "required": ["section_id", "text"],
+            },
+            handler=core.author_note,
         )
     )
     registry.register(

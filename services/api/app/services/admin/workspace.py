@@ -462,3 +462,25 @@ async def discard_writing_book(*, tenant: dict[str, str] | None = None) -> dict:
     if resp.status_code >= 400:
         raise WorkspaceProxyError(resp.status_code, resp.text)
     return resp.json()
+
+
+async def verdict_writing_book(
+    *,
+    tenant: dict[str, str] | None = None,
+    payload: dict,
+) -> dict:
+    """作品面板裁决（代理 runtime ``/book/verdict``）。"""
+    base = settings.runtime_url.rstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                f"{base}/internal/workspace/book/verdict",
+                params=_tenant_params(tenant or {}),
+                json=payload,
+                headers={"X-Internal-Token": settings.internal_service_token},
+            )
+    except httpx.HTTPError as exc:
+        raise WorkspaceProxyError(502, f"runtime unreachable: {exc}") from exc
+    if resp.status_code >= 400:
+        raise WorkspaceProxyError(resp.status_code, resp.text)
+    return resp.json()

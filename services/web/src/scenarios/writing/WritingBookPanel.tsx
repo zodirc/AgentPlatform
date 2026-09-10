@@ -4,6 +4,7 @@ import {
   discardWritingBook,
   downloadWorkspaceFile,
   fetchWritingBook,
+  verdictWritingBook,
 } from "../../shared/api/client";
 import { workspaceEntryIcon } from "../agent/workspaceFileIcon";
 
@@ -39,6 +40,13 @@ export function WritingBookPanel({
       onCleared?.(paths);
     },
   });
+  const verdictMut = useMutation({
+    mutationFn: verdictWritingBook,
+    onSuccess: (data) => {
+      queryClient.setQueryData(["writing-book", revision], data.book);
+      void queryClient.invalidateQueries({ queryKey: ["writing-book"] });
+    },
+  });
 
   const book = bookQuery.data;
 
@@ -59,7 +67,14 @@ export function WritingBookPanel({
         <p className="text-xs text-muted-foreground">还没有稿。</p>
       ) : (
         <>
-          <p className="mb-2 truncate text-sm font-medium text-foreground">
+          <p className="mb-2 flex items-center gap-1.5 truncate text-sm font-medium text-foreground">
+            {(book.consistency_flags?.length ?? 0) > 0 ? (
+              <span
+                className="inline-block size-1.5 shrink-0 rounded-full bg-destructive"
+                title="一致性旗"
+                aria-label="一致性旗"
+              />
+            ) : null}
             {book.title}
           </p>
           <ul className="space-y-1">
@@ -124,10 +139,96 @@ export function WritingBookPanel({
             })}
           </ul>
           <p className="mt-2 text-[10px] text-muted-foreground/80">
-            单击选中 · 双击打开
+            单击选中 · 双击打开 · 编辑札记在下一章
           </p>
         </>
       )}
+
+      {book && ((book.wild_cards?.length ?? 0) > 0 || (book.consistency_flags?.length ?? 0) > 0) ? (
+        <div className="mt-3 space-y-2">
+          {(book.wild_cards ?? []).map((ch) => (
+            <div
+              key={`wild-${ch}`}
+              className="rounded border border-border px-2 py-1.5 text-[11px]"
+            >
+              <p className="text-foreground/90">第 {ch} 章越轨</p>
+              <div className="mt-1 flex gap-1">
+                <button
+                  type="button"
+                  className="rounded border border-border px-1.5 py-0.5 hover:bg-muted disabled:opacity-50"
+                  disabled={verdictMut.isPending}
+                  onClick={() =>
+                    verdictMut.mutate({
+                      section_id: `ch${ch}`,
+                      kind: "wild_card",
+                      action: "keep",
+                    })
+                  }
+                >
+                  保留
+                </button>
+                <button
+                  type="button"
+                  className="rounded border border-destructive/40 px-1.5 py-0.5 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                  disabled={verdictMut.isPending}
+                  onClick={() =>
+                    verdictMut.mutate({
+                      section_id: `ch${ch}`,
+                      kind: "wild_card",
+                      action: "drop",
+                    })
+                  }
+                >
+                  砍掉
+                </button>
+              </div>
+            </div>
+          ))}
+          {(book.consistency_flags ?? []).map((flag, idx) => {
+            const sid = flag.section_id?.trim() || "ch";
+            return (
+              <div
+                key={`flag-${sid}-${idx}`}
+                className="rounded border border-destructive/30 px-2 py-1.5 text-[11px]"
+              >
+                <p className="text-destructive">{flag.text || flag.kind || "一致性旗"}</p>
+                <div className="mt-1 flex gap-1">
+                  <button
+                    type="button"
+                    className="rounded border border-border px-1.5 py-0.5 hover:bg-muted disabled:opacity-50"
+                    disabled={verdictMut.isPending}
+                    onClick={() =>
+                      verdictMut.mutate({
+                        section_id: sid,
+                        kind: "consistency",
+                        action: "keep",
+                        detail: flag.text,
+                      })
+                    }
+                  >
+                    保留
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded border border-destructive/40 px-1.5 py-0.5 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+                    disabled={verdictMut.isPending}
+                    onClick={() =>
+                      verdictMut.mutate({
+                        section_id: sid,
+                        kind: "consistency",
+                        action: "drop",
+                        detail: flag.text,
+                      })
+                    }
+                  >
+                    砍掉
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
 
       {book && !book.empty ? (
         <button

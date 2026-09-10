@@ -12,6 +12,7 @@ from app.writing.cards import (
     parse_style_card_sections,
     prepare_writing_system_prompt,
     select_writing_cards,
+    split_sample_excerpts,
     select_writing_cards_detailed,
     stable_cards_prefix_hash,
     style_card_template_path,
@@ -181,25 +182,17 @@ def test_builtin_voice_when_no_style_inventory(tmp_path: Path) -> None:
     assert "祥子" in sections["Samples"]
     assert "使君" not in sections["Samples"]
     assert "却说" not in sections["Samples"]
-    assert "同一段落反复 patch" in sections["Don't"] or "第一章讲完全书设定" in sections["Don't"]
-    assert "三字" in sections["Don't"] or "一问一答" in sections["Don't"]
-    dont_bullets = [
-        line for line in sections["Don't"].splitlines() if line.strip().startswith("-")
-    ]
-    assert 1 <= len(dont_bullets) <= 6
+    assert not (sections.get("Don't") or "").strip()
     assert "经典文学" in sections["Voice"] or "现代白话" in sections["Voice"]
     assert "随这场戏" in sections["Do"] or "三要素" in sections["Do"]
     assert "长篇 ch1" not in sections["Do"]
     assert "ch1 环境" not in sections["Do"]
     style_card = next(c for c in pin.cards if c.kind == "style")
     if not style_card.truncated:
-        assert "大约孔乙己的确死了" in pin.volatile_block
-        assert "邓脱路" in pin.volatile_block
-        assert "祥子" in pin.volatile_block
-    else:
-        assert "大约孔乙己的确死了" in sections["Samples"]
-        assert "邓脱路" in sections["Samples"]
-        assert "祥子" in sections["Samples"]
+        excerpts = split_sample_excerpts(
+            parse_style_card_sections(style_card.body).get("Samples") or ""
+        )
+        assert len(excerpts) == 1
     assert "米店的牌子" not in pin.volatile_block
 
 

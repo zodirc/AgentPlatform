@@ -233,6 +233,7 @@ _TOOL_EVENTS: dict[str, str] = {
     "update_outline": "outline.updated",
     "update_plan": "turn.plan",
     "propose_opening_ponds": "opening.ponds",
+    "propose_chapter_openings": "opening.ponds",
 }
 
 _CACHEABLE_TOOLS = CACHEABLE_TOOLS
@@ -1984,14 +1985,14 @@ class AgentEngine:
             state.termination_reason = "plan_awaiting_consent"
             return "TERMINATE"
         if (
-            tool_name == "propose_opening_ponds"
+            tool_name in {"propose_opening_ponds", "propose_chapter_openings"}
             and not is_error
             and result.get("awaiting_choice")
         ):
             state.termination_reason = "opening_ponds_awaiting_choice"
             return "TERMINATE"
         if (
-            tool_name == "propose_opening_ponds"
+            tool_name in {"propose_opening_ponds", "propose_chapter_openings"}
             and is_error
             and result.get("stop_retry")
         ):

@@ -159,6 +159,7 @@ def outline_contract_ready(
     *,
     book_scope: str = "",
     user_text: str = "",
+    workspace_root: Path | None = None,
 ) -> bool:
     text = (outline or "").strip()
     if len(text) < _MIN_CONTRACT_CHARS:
@@ -166,9 +167,7 @@ def outline_contract_ready(
 
     from app.writing.book_scope import normalize_book_scope, resolve_book_scope
     from app.writing.outline_arc import (
-        extract_outline_job,
         extract_outline_spine,
-        opening_trilogy_fields,
     )
 
     scope = (
@@ -179,14 +178,9 @@ def outline_contract_ready(
     spine = extract_outline_spine(text).strip()
 
     if scope == "long":
-        if len(spine) < 12 and not _SPINE_HINT.search(text[:1200]):
-            return False
-        if opening_trilogy_fields(text, user_text or "写长篇"):
-            return False
-        ch1 = extract_outline_job(text, "ch1") or extract_outline_job(text, "第一章")
-        if len((ch1 or "").strip()) < 40:
-            return False
-        return True
+        from app.writing.story_state import story_state_contract_ready
+
+        return story_state_contract_ready(workspace_root=workspace_root)
 
     if scope == "short":
         return len(text) >= 40 and (bool(spine) or _SPINE_HINT.search(text))
@@ -246,7 +240,12 @@ def resolve_outline_phase(
         else resolve_book_scope(message, outline=outline, workspace_root=workspace_root)[0]
     )
     user_dir = user_specified_writing_direction(message)
-    ready = outline_contract_ready(outline, book_scope=scope, user_text=message)
+    ready = outline_contract_ready(
+        outline,
+        book_scope=scope,
+        user_text=message,
+        workspace_root=workspace_root,
+    )
     locked = style_lock_exists(workspace_root)
     from app.writing.outline_arc import outline_style_committed
 
@@ -283,9 +282,9 @@ def resolve_outline_phase(
                 )
             else:
                 note = (
-                    f"长篇开篇：{compass}；一章一场约三千字写满这场；不要把后面的海写进第一章"
+                    f"长篇开篇：{compass}；一章通常一场，长篇约一千八到四千五；不要把后面的海写进第一章"
                     if fantasy
-                    else "长篇开篇：站住眼前的日子和人；一章一场约三千字写满这场；不要把后面的海写进第一章"
+                    else "长篇开篇：站住眼前的日子和人；一章通常一场，长篇约一千八到四千五；不要把后面的海写进第一章"
                 )
 
     labels = {"ready": "成稿", "open": "开写", "continue": "续写"}

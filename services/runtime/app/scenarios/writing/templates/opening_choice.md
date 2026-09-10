@@ -1,5 +1,6 @@
 ## Opening choice (platform)
 This turn is a Plan-like picker. Call `propose_opening_ponds` once with 2–3 items.
+Leave the assistant message empty; the cards are the deliverable.
 Each item needs title, flavor (这本书), opening, start_kind, promise,
 price_axis, source_trust, first_conflict_at.
 The UI card the user reads is only: 书名 / 这本书 / 开篇.
@@ -41,7 +42,7 @@ book if the engine is the same.
 Opening is at most two sentences.
 world_already = ability-users already live among people.
 granted_path = 系统/金手指落到身上。
-no_extraordinary = 先过日子，超凡往后放。
+no_extraordinary = 这一章先过班、房租、家里的日子，超凡往后放。
 At least one book should put a concrete ability on a person; the fight is
 other people, not repairing a city.
 凡人流/都市修真: pulled_in is a normal opening. Do not invent new start_kind

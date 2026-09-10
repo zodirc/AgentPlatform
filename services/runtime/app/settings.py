@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     writing_cards_dir: str = "sources/cards"
     writing_cards_max_chars: int = 3600
     writing_cards_per_card_chars: int = 2000
-    writing_cards_style_max_chars: int = 2400
+    writing_cards_style_max_chars: int = 1800
     writing_cards_character_max_chars: int = 1000
     writing_cards_plot_max_chars: int = 600
     writing_cards_general_max_chars: int = 400

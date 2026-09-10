@@ -241,14 +241,53 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
     parts.extend(cards)
     parts.extend(beats)
     parts.extend(archives)
+    story_md = root / ".agent" / "work" / "story_state.md"
+    story_text = _read_text(story_md)
+    if story_text.strip():
+        parts.append(
+            _part(
+                key="story_state",
+                label="作品账本",
+                text=story_text,
+                kind="story_state",
+            )
+        )
+    notes_path = root / ".agent" / "work" / "author_notes.md"
+    notes_text = _read_text(notes_path)
+    if notes_text.strip():
+        parts.append(
+            _part(
+                key="author_notes",
+                label="作者私记",
+                text=notes_text,
+                kind="author_notes",
+            )
+        )
     title = _first_heading(outline) or _first_heading(manuscript) or "未命名"
     empty = not parts
     if empty:
         title = "还没有书"
+    from app.writing.story_state import load_story_state, consistency_flags
+    from app.writing.manuscript import list_section_ids, extract_section
+
+    state = load_story_state(workspace_root=root)
+    flags: list[dict[str, Any]] = []
+    ids = list_section_ids(manuscript) if manuscript else []
+    last_id = ids[-1] if ids else ""
+    if last_id:
+        flags.extend(
+            consistency_flags(
+                extract_section(manuscript, last_id) if manuscript else "",
+                section_id=last_id,
+                workspace_root=root,
+            )
+        )
     return {
         "title": title,
         "empty": empty,
         "parts": parts,
+        "wild_cards": list(state.get("wild_cards") or []),
+        "consistency_flags": flags,
     }
 
 
@@ -310,6 +349,12 @@ def discard_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any
         _unlink_file(root, ".agent/work/local_beats.json", cleared, "beats")
     _unlink_file(root, ".agent/work/opening_ponds.json", cleared, "outline")
     _unlink_file(root, ".agent/work/committed_pond.json", cleared, "outline")
+    _unlink_file(root, ".agent/work/story_state.json", cleared, "outline")
+    _unlink_file(root, ".agent/work/story_state.md", cleared, "outline")
+    _unlink_file(root, ".agent/work/author_notes.md", cleared, "outline")
+    _wipe_dir_files(root, ".agent/work/editor_notes", cleared, "beats")
+    _wipe_dir_files(root, ".agent/work/surface", cleared, "beats")
+    _unlink_file(root, ".agent/work/surface_index.json", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/history", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/turns", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/drafts", cleared, "manuscript")

@@ -287,6 +287,13 @@ export type WritingBook = {
   title: string;
   empty: boolean;
   parts: WritingBookPart[];
+  wild_cards?: number[];
+  consistency_flags?: Array<{
+    kind?: string;
+    text?: string;
+    section_id?: string;
+    ch?: number;
+  }>;
 };
 
 /**
@@ -314,6 +321,25 @@ export async function discardWritingBook(): Promise<{
     headers: apiAuthHeaders(),
   });
   if (!res.ok) throw new Error(`discardWritingBook failed: ${res.status}`);
+  return res.json() as Promise<{ ok: boolean; book: WritingBook }>;
+}
+
+/**
+ * 作品面板裁决：保留 / 砍掉 wild_card 或一致性旗。只记进 author_notes。
+ */
+export async function verdictWritingBook(body: {
+  section_id: string;
+  kind: "wild_card" | "consistency";
+  action: "keep" | "drop";
+  detail?: string;
+}): Promise<{ ok: boolean; book: WritingBook }> {
+  const res = await fetch(`${API_BASE}/works/default/book/verdict`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`verdictWritingBook failed: ${res.status}`);
   return res.json() as Promise<{ ok: boolean; book: WritingBook }>;
 }
 

@@ -49,8 +49,25 @@ def test_open_without_lock_file(tmp_path: Path) -> None:
 
 
 def test_continue_when_pond_committed(tmp_path: Path) -> None:
+    from app.writing.story_state import apply_author_delta
+
+    apply_author_delta(
+        section_id="ch1",
+        deltas=["边关换防"],
+        patch={
+            "pressures": [{"what": "军粮秤对不上", "trend": "rising", "carried_by": "沈禾"}],
+            "info_gaps": [
+                {
+                    "who_knows": ["沈禾"],
+                    "who_doesnt": ["关隘"],
+                    "what": "逃役名册是谁改的",
+                }
+            ],
+        },
+        workspace_root=tmp_path,
+    )
     outline = _long_outline()
-    assert outline_contract_ready(outline, book_scope="long")
+    assert outline_contract_ready(outline, book_scope="long", workspace_root=tmp_path)
     phase = resolve_outline_phase(
         "写第一章",
         outline=outline,

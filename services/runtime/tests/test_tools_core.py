@@ -88,7 +88,8 @@ async def test_draft_section_length_short_on_padded_quota(workspace: Path) -> No
     assert short["visible_chars"] == 80
     assert short["quota_chars"] == 300
     assert short["length_short"] is True
-    assert "不要报完工" in short["summary"]
+    assert "低于门槛" in short["summary"]
+    assert "1800" in short["summary"]
     assert (workspace / "drafts" / "manuscript.md").is_file()
 
     met = await core.draft_section(
@@ -364,8 +365,11 @@ def test_scenario_registry_loads_profiles() -> None:
     assert writing.attach_writing_signals is True
     assert "draft_section" in writing.tool_names
     assert "propose_opening_ponds" in writing.tool_names
-    assert "writing_rubric" in writing.tool_names
-    assert "evaluate_writing_fragment" in writing.tool_names
+    assert "note_story_delta" in writing.tool_names
+    assert "author_note" in writing.tool_names
+    assert "propose_chapter_openings" in writing.tool_names
+    assert "writing_rubric" not in writing.tool_names
+    assert "evaluate_writing_fragment" not in writing.tool_names
     assert agent.scenario_id == "agent"
     assert agent.attach_writing_signals is False
     assert "glob" in agent.tool_names

@@ -22,15 +22,15 @@ def wants_more_ponds(message: str) -> bool:
 def note_pond_reject(
     turn_id: object | None, rejected: tuple[str, str] | None
 ) -> dict[str, Any] | None:
-    """Handler 一拒就停转。开篇点选不靠多轮换皮磨过闸。"""
+    """Handler 一拒就停转。拒因留给 error 码，不把 Don't 写进 turn.completed。"""
     del turn_id
     if rejected is None:
         return None
-    code, msg = rejected
+    code, _msg = rejected
     return {
         "status": "error",
         "error": code,
-        "summary": f"{msg} 开篇点选本轮只交一次，不要换题材再交。",
+        "summary": "开篇候选这轮没交成。请再说一次「我看看」。",
         "stop_retry": True,
     }
 
@@ -146,6 +146,7 @@ def opening_choice_block() -> str:
         return (
             "## Opening choice (platform)\n"
             "Call `propose_opening_ponds` once with 2–3 items. "
+            "Leave the assistant message empty. "
             "Each needs title, flavor (这本书), opening, start_kind, promise, "
             "price_axis, source_trust, first_conflict_at. Do not list ponds in chat."
         )
@@ -385,7 +386,8 @@ def pond_item_event_fields(raw: dict[str, Any], index: int) -> dict[str, str] | 
 
 
 _FANTASY_HINT = re.compile(r"修真|玄幻|仙侠|爽文")
-_PLAIN_LEAK = re.compile(r"秘密|盯上|灵异|失踪|无名尸|殡仪|冷藏")
+# 词表只认殡仪馆/失踪那套换皮，不把「秘密」「盯上」当过日子禁词。
+_PLAIN_LEAK = re.compile(r"殡仪|冷藏|无名尸|失踪者|失踪|城市秘密|太平间|告别厅|灵异")
 _GIFT_HINT = re.compile(r"系统|金手指|功法|面板|异能|能力|觉醒")
 _WORLD_HINT = re.compile(
     r"修真|灵气|功法|坊市|境界|灵石|宗门|工分|灵脉|"
@@ -409,6 +411,20 @@ def _pond_blob(item: dict[str, str]) -> str:
             "summary",
         )
     )
+
+
+def plain_item_leaks(item: dict[str, str]) -> bool:
+    """过日子写成殡仪馆/失踪/解密恐惧：这一份不诚实，不是整组题材错了。"""
+    if str(item.get("start_kind") or "") != "no_extraordinary":
+        return False
+    if str(item.get("promise") or "") == "dread_decode":
+        return True
+    return bool(_PLAIN_LEAK.search(_pond_blob(item)))
+
+
+def drop_leaking_plain_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    """编辑侧丢掉不诚实的过日子卡，剩下的仍交给用户点选。"""
+    return [it for it in items if not plain_item_leaks(it)]
 
 
 def ponds_reject_reason(

@@ -199,3 +199,26 @@ async def discard_default_writing_book(actor: EndUser = Depends(require_session_
         )
     except WorkspaceProxyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+class BookVerdictRequest(BaseModel):
+    section_id: str = Field(min_length=1, max_length=64)
+    kind: str = Field(default="wild_card", max_length=32)
+    action: str = Field(min_length=1, max_length=16)
+    detail: str = Field(default="", max_length=200)
+
+
+@router.post("/works/default/book/verdict")
+async def verdict_default_writing_book(
+    body: BookVerdictRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """作品面板：保留 / 砍掉 wild_card 或一致性旗。"""
+    work = await ensure_default_work(actor.id)
+    try:
+        return await workspace_svc.verdict_writing_book(
+            tenant=_tenant_from_work(work, actor),
+            payload=body.model_dump(),
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc

@@ -177,6 +177,56 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                         turn_id,
                         len(written),
                     )
+                try:
+                    from app.writing.story_state import (
+                        apply_mechanical_update,
+                        chapter_num,
+                        consistency_flags,
+                        thread_stale_flags,
+                        wild_card_without_consequence,
+                    )
+                    from app.writing.signals.surface import save_surface
+                    from app.writing.editor_notes import (
+                        build_editor_note_lines,
+                        write_editor_notes,
+                    )
+                    from app.writing.author_notes import load_author_notes, note_repeats_delta
+                    from app.writing.story_state import load_story_state
+
+                    apply_mechanical_update(
+                        chapter_text,
+                        section_id=focus or "",
+                    )
+                    measured = save_surface(focus or "ch", chapter_text)
+                    ch_n = chapter_num(focus or "")
+                    cons = consistency_flags(chapter_text, section_id=focus or "")
+                    stale = thread_stale_flags(current_ch=ch_n)
+                    unpaid = wild_card_without_consequence(current_ch=ch_n)
+                    state = load_story_state()
+                    deltas = []
+                    if ch_n is not None:
+                        deltas = list((state.get("deltas") or {}).get(str(ch_n)) or [])
+                    notes_text = load_author_notes()
+                    repeats = False
+                    if deltas and notes_text:
+                        from app.writing.author_notes import recent_author_notes
+
+                        recents = recent_author_notes(n=1)
+                        if recents:
+                            repeats = note_repeats_delta(recents[-1], deltas)
+                    lines = build_editor_note_lines(
+                        section_id=focus or "",
+                        measured=measured,
+                        consistency=cons,
+                        stale=stale,
+                        wild_unpaid=unpaid,
+                        author_note_repeats_delta=repeats,
+                    )
+                    write_editor_notes(focus or "ch", lines)
+                except Exception:
+                    logger.exception(
+                        "writing post_turn sidecars failed turn_id=%s", turn_id
+                    )
         from app.writing.signals.beats import maybe_promote_local_beats
 
         session_id = getattr(state, "session_id", None)

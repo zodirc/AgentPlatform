@@ -20,8 +20,9 @@ tool_names:
   - forget
   - load_skill
   - delegate
-  - writing_rubric
-  - evaluate_writing_fragment
+  - note_story_delta
+  - author_note
+  - propose_chapter_openings
 subagent_types:
   - researcher
   - drafter

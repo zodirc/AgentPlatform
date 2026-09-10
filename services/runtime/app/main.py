@@ -834,6 +834,39 @@ async def workspace_discard_writing_book(
     return result
 
 
+class BookVerdictBody(BaseModel):
+    section_id: str = Field(min_length=1, max_length=64)
+    kind: str = Field(default="wild_card", max_length=32)
+    action: str = Field(min_length=1, max_length=16)
+    detail: str = Field(default="", max_length=200)
+
+
+@workspace_router.post("/book/verdict")
+async def workspace_writing_book_verdict(
+    body: BookVerdictBody,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """C4：作品面板保留/砍掉。只写入 author_notes，不做自动学习。"""
+    from app.writing.author_notes import record_user_verdict
+    from app.writing.book import load_writing_book
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    with workspace_tenant_scope(
+        **_tenant_query(work_id, work_root, owner_user_id, visibility_seed)
+    ):
+        record_user_verdict(
+            section_id=body.section_id,
+            kind=body.kind,
+            action=body.action,
+            detail=body.detail,
+        )
+        return {"ok": True, "book": load_writing_book()}
+
+
 @workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)
 async def workspace_sync_sources(
     background_tasks: BackgroundTasks,

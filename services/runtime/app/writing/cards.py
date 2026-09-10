@@ -27,6 +27,7 @@ KIND_PRIORITY = {
 }
 STYLE_SECTION_KEYS = ("Voice", "Do", "Don't", "Samples", "Format")
 SECTION_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.M)
+SAMPLE_HEADING_RE = re.compile(r"^###\s+(.+?)\s*$", re.M)
 
 
 @dataclass(frozen=True)
@@ -416,6 +417,10 @@ def extract_cards_block(prompt: str) -> str:
         "\n## Work surface\n",
         "\n## Writing spec\n",
         "\n## Story-machine reset",
+        "\n## Story state\n",
+        "\n## Editor notes\n",
+        "\n## Author notes\n",
+        "\n## Narrative commitment\n",
     ):
         sidx = block.find(stop)
         if sidx >= 0:
@@ -451,6 +456,69 @@ def parse_style_card_sections(body: str) -> dict[str, str]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(body)
         sections[key] = body[start:end].strip()
     return sections
+
+
+def split_sample_excerpts(samples: str) -> list[tuple[str, str]]:
+    """Samples 段按 ### 拆成 (标题, 正文) 列表。"""
+    text = samples or ""
+    matches = list(SAMPLE_HEADING_RE.finditer(text))
+    if not matches:
+        body = text.strip()
+        return [("", body)] if body else []
+    out: list[tuple[str, str]] = []
+    for i, match in enumerate(matches):
+        title = match.group(1).strip()
+        start = match.end()
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[start:end].strip()
+        if body:
+            out.append((title, body))
+    return out
+
+
+def ensure_voice_seed(*, workspace_root: Path | None = None) -> int:
+    """Work 级 voice_seed：换章不换书。缺则写入 writing_prefs.json。"""
+    from app.writing.work_mode import load_writing_prefs, save_writing_prefs
+
+    prefs = load_writing_prefs(workspace_root=workspace_root)
+    raw = prefs.get("voice_seed")
+    try:
+        seed = int(raw)
+    except (TypeError, ValueError):
+        seed = None
+    if seed is None:
+        blob = str(_workspace_root_for_seed(workspace_root))
+        seed = int.from_bytes(hashlib.sha256(blob.encode("utf-8")).digest()[:4], "big")
+        prefs["voice_seed"] = seed
+        save_writing_prefs(prefs, workspace_root=workspace_root)
+    return seed
+
+
+def _workspace_root_for_seed(workspace_root: Path | None) -> Path:
+    return Path(workspace_root or settings.workspace_root).resolve()
+
+
+def pick_voice_excerpt(excerpts: list[tuple[str, str]], *, seed: int) -> tuple[str, str] | None:
+    if not excerpts:
+        return None
+    return excerpts[seed % len(excerpts)]
+
+
+def rotate_builtin_samples(body: str, *, workspace_root: Path | None = None) -> str:
+    """每 Turn 只出一段公版节选。同一 Work 两 Turn 同一段。"""
+    sections = parse_style_card_sections(body)
+    samples = sections.get("Samples") or ""
+    excerpts = split_sample_excerpts(samples)
+    if len(excerpts) <= 1:
+        return body
+    seed = ensure_voice_seed(workspace_root=workspace_root)
+    picked = pick_voice_excerpt(excerpts, seed=seed)
+    if picked is None:
+        return body
+    title, excerpt = picked
+    heading = f"### {title}\n\n{excerpt}" if title else excerpt
+    intro = "公版节选。样品只借句味与起伏；人物、行当、年代由这本自己长出来。"
+    return merge_style_section(body, "Samples", f"{intro}\n\n{heading}")
 
 
 def extract_sample_paragraphs(
@@ -639,7 +707,14 @@ def web_serial_voice_card_path() -> Path:
     )
 
 
-def _load_builtin_voice(path: Path, builtin_path: str, fallback_title: str) -> WritingCard | None:
+def _load_builtin_voice(
+    path: Path,
+    builtin_path: str,
+    fallback_title: str,
+    *,
+    workspace_root: Path | None = None,
+    rotate_samples: bool = False,
+) -> WritingCard | None:
     if not path.is_file():
         return None
     try:
@@ -650,6 +725,8 @@ def _load_builtin_voice(path: Path, builtin_path: str, fallback_title: str) -> W
     if not body.strip():
         return None
     body = apply_style_meta_for_pin(body.strip(), meta)
+    if rotate_samples:
+        body = rotate_builtin_samples(body, workspace_root=workspace_root)
     return WritingCard(
         path=builtin_path,
         title=_card_title(path, meta, body) or fallback_title,
@@ -659,19 +736,23 @@ def _load_builtin_voice(path: Path, builtin_path: str, fallback_title: str) -> W
     )
 
 
-def load_builtin_default_voice() -> WritingCard | None:
+def load_builtin_default_voice(*, workspace_root: Path | None = None) -> WritingCard | None:
     return _load_builtin_voice(
         default_voice_card_path(),
         BUILTIN_STYLE_PATH,
         "默认叙事声口",
+        workspace_root=workspace_root,
+        rotate_samples=True,
     )
 
 
-def load_builtin_web_serial_voice() -> WritingCard | None:
+def load_builtin_web_serial_voice(*, workspace_root: Path | None = None) -> WritingCard | None:
     return _load_builtin_voice(
         web_serial_voice_card_path(),
         BUILTIN_WEB_SERIAL_PATH,
         "连载网文声口",
+        workspace_root=workspace_root,
+        rotate_samples=False,
     )
 
 
@@ -690,11 +771,11 @@ def with_builtin_style_if_missing(
 
         mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
         if mode == "web_serial":
-            builtin = load_builtin_web_serial_voice()
+            builtin = load_builtin_web_serial_voice(workspace_root=workspace_root)
     except Exception:
         builtin = None
     if builtin is None:
-        builtin = load_builtin_default_voice()
+        builtin = load_builtin_default_voice(workspace_root=workspace_root)
     if builtin is None:
         return cards
     return [builtin, *cards]
@@ -849,7 +930,25 @@ def prepare_writing_system_prompt(
     except OSError:
         outline_text = ""
     work_mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
-    extras.append(format_commitment_block(work_mode=work_mode))
+    extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
+    from app.writing.story_state import format_story_state_block
+    from app.writing.editor_notes import format_editor_notes_block
+    from app.writing.author_notes import format_author_notes_block
+    from app.writing.focus import infer_focus_section_id
+    from app.writing.manuscript import list_section_ids, load_manuscript_doc
+
+    doc, _rel = load_manuscript_doc(workspace_root)
+    ids = list_section_ids(doc) if doc else []
+    focus = infer_focus_section_id(message, ids) or (ids[-1] if ids else "")
+    story_block = format_story_state_block(workspace_root=workspace_root)
+    if story_block:
+        extras.append(story_block)
+    editor_block = format_editor_notes_block(focus=focus, workspace_root=workspace_root)
+    if editor_block:
+        extras.append(editor_block)
+    author_block = format_author_notes_block(workspace_root=workspace_root)
+    if author_block:
+        extras.append(author_block)
     if work_mode == "web_serial":
         subtype = serial_subtype_block(message, outline_text)
         if subtype:

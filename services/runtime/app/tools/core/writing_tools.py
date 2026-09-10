@@ -66,6 +66,24 @@ def _draft_book_scope(turn_user_text: str = "", section_id: str = "") -> str:
     return scope
 
 
+def _silence_wild_card_signals(block: dict[str, Any]) -> dict[str, Any]:
+    """wild_card 章：L1 观测静默，只留 L0 与 length_short。"""
+    from app.writing.signals.repair import L0_PENALTY_KEYS
+
+    out = dict(block)
+    pens = [
+        p
+        for p in (block.get("penalties") or [])
+        if isinstance(p, dict) and str(p.get("key") or "") in L0_PENALTY_KEYS
+    ]
+    out["penalties"] = pens
+    out["rewards"] = []
+    out.pop("repair_span", None)
+    out["wild_card"] = True
+    out["l1_silenced"] = True
+    return out
+
+
 def _section_filename(section_id: str) -> str:
     normalized = section_id.strip()
     if not normalized or normalized in {".", ".."} or "/" in normalized or "\\" in normalized:
@@ -595,7 +613,7 @@ async def draft_section(
     archived: list[str] = []
     occupy_fresh = False
     mode = _parse_draft_mode(_kwargs.get("mode"))
-    from app.writing.commitment import fulfillment_facts, gate_draft_commitment
+    from app.writing.commitment import fulfillment_facts, gate_draft_commitment, save_commitment
 
     blocked_commit, commit = gate_draft_commitment(
         content=content,
@@ -607,6 +625,16 @@ async def draft_section(
     )
     if blocked_commit:
         return blocked_commit
+
+    wild_card = bool(_kwargs.get("wild_card"))
+    if wild_card:
+        from app.writing.story_state import record_wild_card, wild_card_available
+
+        ok, reason = wild_card_available(
+            section_id, workspace_root=Path(settings.workspace_root)
+        )
+        if not ok:
+            return {"status": "error", "error": "wild_card_quota", "summary": reason}
     scored = content
     dup_collapsed = 0
 
@@ -862,7 +890,42 @@ async def draft_section(
     except Exception:
         pass
     if commit:
-        result["commitment_fulfillment"] = fulfillment_facts(scored, commit)
+        facts = fulfillment_facts(scored, commit)
+        save_commitment(
+            section_id,
+            commit,
+            workspace_root=Path(settings.workspace_root),
+            fulfillment=facts,
+        )
+    if wild_card:
+        from app.writing.story_state import record_wild_card
+        from app.writing.ledger import append_ledger
+
+        record_wild_card(section_id, workspace_root=Path(settings.workspace_root))
+        append_ledger({}, workspace_root=Path(settings.workspace_root), kind="wild")
+        result["wild_card"] = True
+        signals_block = result.get("writing_signals")
+        if isinstance(signals_block, dict):
+            result["writing_signals"] = _silence_wild_card_signals(signals_block)
+    from app.writing.story_state import (
+        chapter_num,
+        consistency_flags,
+        thread_stale_flags,
+    )
+
+    flags = consistency_flags(
+        scored,
+        section_id=section_id,
+        workspace_root=Path(settings.workspace_root),
+    )
+    if flags:
+        result["consistency_flags"] = flags
+    stale = thread_stale_flags(
+        current_ch=chapter_num(section_id),
+        workspace_root=Path(settings.workspace_root),
+    )
+    if stale:
+        result["thread_stale"] = stale
     drafts = manifest.setdefault("section_drafts", {})
     from app.writing.signals.repair import process_l0_hits
 
@@ -988,6 +1051,7 @@ async def propose_opening_ponds(
     """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
+        drop_leaking_plain_items,
         load_opening_ponds,
         note_pond_reject,
         normalize_pond_items,
@@ -997,12 +1061,17 @@ async def propose_opening_ponds(
         wants_more_ponds,
     )
 
-    normalized = normalize_pond_items(items)
+    normalized = drop_leaking_plain_items(normalize_pond_items(items))
     if len(normalized) < _MIN_ITEMS:
-        return {
+        exhausted = note_pond_reject(
+            _kwargs.get("turn_id"),
+            ("need_two_ponds", "至少交 2 个开篇候选，且 start_kind 不得重复。"),
+        )
+        return exhausted or {
             "status": "error",
             "error": "need_two_ponds",
-            "summary": "至少交 2 个开篇候选，且 start_kind 不得重复。",
+            "summary": "开篇候选这轮没交成。请再说一次「我看看」。",
+            "stop_retry": True,
         }
     message = str(_kwargs.get("turn_user_text") or "")
     previous_kinds: set[str] | None = None
@@ -1044,6 +1113,99 @@ async def propose_opening_ponds(
         "summary": saved.get("summary")
         or f"{len(normalized)} 个开篇候选，待你点选或说「我要其他的」",
         "awaiting_choice": True,
+    }
+
+
+async def propose_chapter_openings(
+    items: list[dict[str, Any]],
+    summary: str = "",
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """章首两份前 600 字候选。默认不开；用户说看看两个开头时调用。"""
+    from app.writing.opening_ponds import (
+        _MIN_ITEMS,
+        normalize_pond_items,
+        save_opening_ponds,
+    )
+    from app.writing.text_metrics import visible_chars
+
+    normalized = normalize_pond_items(items)
+    if len(normalized) < _MIN_ITEMS:
+        return {
+            "status": "error",
+            "error": "need_two_openings",
+            "summary": "交 2 份本章开头（各不超过约 600 字）。",
+        }
+    clipped: list[dict[str, str]] = []
+    for item in normalized[:2]:
+        opening = str(item.get("opening") or item.get("summary") or "")
+        if visible_chars(opening) > 600:
+            # 截到约 600 实体字
+            buf: list[str] = []
+            n = 0
+            for ch in opening:
+                if not ch.isspace():
+                    n += 1
+                buf.append(ch)
+                if n >= 600:
+                    break
+            opening = "".join(buf)
+        row = dict(item)
+        row["opening"] = opening
+        clipped.append(row)
+    saved = save_opening_ponds(clipped, summary=summary or "")
+    return {
+        "status": "ok",
+        "ponds_id": saved["ponds_id"],
+        "items": saved["items"],
+        "kind": "chapter_opening",
+        "summary": saved.get("summary")
+        or f"{len(clipped)} 个章首候选，待你点选",
+        "awaiting_choice": True,
+    }
+
+
+async def note_story_delta(
+    section_id: str,
+    deltas: list[str] | None = None,
+    patch: dict[str, Any] | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """章写完后记 ≤3 条自由句，可选结构化 patch。不评分。"""
+    from app.writing.story_state import apply_author_delta, chapter_num
+
+    state = apply_author_delta(
+        section_id=section_id,
+        deltas=list(deltas or []),
+        patch=patch if isinstance(patch, dict) else None,
+        workspace_root=Path(settings.workspace_root),
+    )
+    key = str(chapter_num(section_id) or section_id)
+    return {
+        "status": "ok",
+        "section_id": section_id,
+        "deltas": (state.get("deltas") or {}).get(key),
+        "summary": "已记入 story_state",
+    }
+
+
+async def author_note(
+    section_id: str,
+    text: str,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """作者私记 ≤120 字。不是总结。不评分。"""
+    from app.writing.author_notes import append_author_note
+
+    append_author_note(
+        section_id,
+        text,
+        workspace_root=Path(settings.workspace_root),
+    )
+    return {
+        "status": "ok",
+        "section_id": section_id,
+        "summary": "已记入 author_notes",
     }
 
 
@@ -1198,4 +1360,8 @@ async def update_outline(
             notes.insert(0, archive_note)
     if notes:
         result["summary"] = f"{summary}；" + "；".join(notes)
+    from app.writing.story_state import outline_over_planned
+
+    if mode_n != "append" and outline_over_planned(final):
+        result["outline_over_planned"] = True
     return result

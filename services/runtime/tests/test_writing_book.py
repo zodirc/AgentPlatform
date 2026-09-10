@@ -72,6 +72,15 @@ def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> N
     _write(workspace / "sources" / "seed" / "writing" / "keep.md", "范文")
     _write(workspace / "sources" / "mine.md", "资料")
     _write(workspace / "writing_prefs.json", '{"work_mode":"web_serial"}')
+    _write(
+        workspace / ".agent" / "work" / "story_state.json",
+        '{"pressures":[],"info_gaps":[],"wild_cards":[7]}',
+    )
+    _write(workspace / ".agent" / "work" / "story_state.md", "# 账本\n")
+    _write(workspace / ".agent" / "work" / "author_notes.md", "## ch1\n疑心\n")
+    _write(workspace / ".agent" / "work" / "editor_notes" / "ch1.md", "- 短句\n")
+    _write(workspace / ".agent" / "work" / "surface" / "ch1.json", "{}")
+    _write(workspace / ".agent" / "work" / "surface_index.json", '{"chapters":[]}')
 
     result = discard_writing_book(workspace_root=workspace)
     assert result["ok"] is True
@@ -88,6 +97,9 @@ def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> N
         encoding="utf-8"
     ) == "范文"
     assert (workspace / "sources" / "mine.md").read_text(encoding="utf-8") == "资料"
+    assert not (workspace / ".agent" / "work" / "story_state.json").exists()
+    assert not (workspace / ".agent" / "work" / "story_state.md").exists()
+    assert not (workspace / ".agent" / "work" / "author_notes.md").exists()
     assert '"work_mode":"web_serial"' in (workspace / "writing_prefs.json").read_text(
         encoding="utf-8"
     )

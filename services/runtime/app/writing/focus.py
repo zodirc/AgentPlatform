@@ -239,7 +239,7 @@ def build_writing_bookmark(
         dict。"""
     from app.writing.manuscript import confirmed_manuscript_rel, draft_manuscript_rel
 
-    return {
+    bookmark = {
         "manuscript": confirmed_manuscript_rel(),
         "draft": draft_manuscript_rel(),
         "focus": focus or "",
@@ -248,6 +248,15 @@ def build_writing_bookmark(
         "notes": notes[:500],
         "last_user": last_user[:800],
     }
+    try:
+        from app.writing.story_state import bookmark_story_bits
+
+        bits = bookmark_story_bits()
+        if bits:
+            bookmark["story_state"] = bits
+    except Exception:
+        pass
+    return bookmark
 
 
 def format_writing_bookmark(bookmark: dict[str, object]) -> str:
@@ -279,6 +288,9 @@ def format_writing_bookmark(bookmark: dict[str, object]) -> str:
     last_user = str(bookmark.get("last_user") or "").strip()
     if last_user:
         lines.append(f"last_user:\n{last_user}")
+    story = str(bookmark.get("story_state") or "").strip()
+    if story:
+        lines.append(f"story_state: {story}")
     return "\n".join(lines)
 
 
