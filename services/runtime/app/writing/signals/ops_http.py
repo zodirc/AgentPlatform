@@ -79,3 +79,16 @@ async def score_writing_text(
     except WritingLabError as exc:
         code = status.HTTP_404_NOT_FOUND if exc.code == "exemplar_not_found" else status.HTTP_400_BAD_REQUEST
         raise HTTPException(status_code=code, detail={"code": exc.code, "message": exc.message}) from exc
+
+
+@router.get("/surface")
+async def writing_surface_index(_: None = Depends(verify_internal_token)) -> dict[str, Any]:
+    """Ops：章级表面层 sidecar，只观测不计分。"""
+    from app.writing.signals.surface import chapter_shape_flags, load_surface_index
+
+    index = load_surface_index()
+    return {
+        "ok": True,
+        "index": index,
+        "flags": chapter_shape_flags(),
+    }

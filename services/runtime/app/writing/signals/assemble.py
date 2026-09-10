@@ -524,6 +524,7 @@ async def writing_rubric(
         "dimension_weights": weights,
         "signal_penalties": flatten(prefs.get("signal_penalties") or {}, declared),
         "signal_rewards": flatten(prefs.get("signal_rewards") or {}, declared),
+        "rewards_observe_only": True,
         "feature_schema_id": space.schema_id,
         "exemplar_space": {
             "scope": proto.scope if proto else "platform",
@@ -541,6 +542,7 @@ async def writing_rubric(
         },
         "obligations": [
             "权重在写作工具内按 work_mode 切换，不在设置页",
+            "rewards 为观测，不进入 net_signal",
             (
                 f"work_mode={work_mode}（{mode_label}）· "
                 f"fragment={declared}（评分切片，不是章职）"
@@ -715,12 +717,15 @@ async def score_writing_lab(
         space=space,
     )
     scope = "trial" if prefs.get("preset_label") == "custom" else "platform"
+    from app.writing.signals.surface import measure_surface
+
     return {
         "source": source,
         "persisted": False,
         "prefs_scope": scope,
         "preset": prefs.get("preset_label", "balanced"),
         "schema_version": prefs.get("schema_version", 1),
+        "surface": measure_surface(body),
         "writing_signals": {
             "prefs_scope": scope,
             "preset": prefs.get("preset_label", "balanced"),
