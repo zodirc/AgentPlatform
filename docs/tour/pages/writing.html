@@ -1,7 +1,7 @@
 <section class="page" data-id="writing" data-group="RAG / 写作" data-title="写作工作台">
         <div class="card">
           <h2>写作：Work 拥有树；新一篇归档旧稿</h2>
-          <p class="lede">用户心智是一份稿。工程上 Work 拥有稿树；Session 只是对话线程。场景差在 Profile（<code>writing.yaml</code>：max_steps=40、temperature=0.8、<code>patch_auto_apply=true</code>、<code>attach_writing_signals=true</code>、排除 <code>seed/intel</code>），Engine 不读 scenario 名字。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。</p>
+          <p class="lede">用户心智是一份稿。工程上 Work 拥有稿树；Session 只是对话线程。场景差在 Profile（<code>writing.yaml</code>：max_steps=40、temperature=0.8、<code>patch_auto_apply=true</code>、<code>attach_writing_signals=true</code>、排除 <code>seed/intel</code>），Engine 不读 scenario 名字。每个 pass = 用户显式 Turn；平台不自动串成润色流水线。十块地图与「是否真改稿」见 <a href="#writing-module">写作模块解剖</a>。</p>
           <ul class="seq-legend">
             <li><span class="pt">◆ 要点</span> 设计取舍：漏了会让用户先删文件、把风格当开工合同、或把评分做成 while 新节点</li>
           </ul>
@@ -11,9 +11,9 @@
 drafts/manuscript.md       正在 upsert 的正文
 drafts/archive/            occupy=fresh 时旧稿拷贝处
 sources/                   可被 search_sources 的资料（写作默认排除 seed/intel）
-sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤1000 / 情节 ≤600 / 一般 ≤400
+sources/cards              writing_cards_dir；风格卡 ≤1800 / 人物 ≤1000 / 情节 ≤600 / 一般 ≤400
                            合计垫底 ≤3600；单卡 ≤2000；走 volatile，不焊进 system
-.agent/work/               元数据 / manifest / patch_budget
+.agent/work/               story_state / editor_notes / author_notes / surface / manifest / patch_budget
 工作台可见正文帽 writing_work_surface_max_chars = 6000
 写作 GUI 左侧「作品」：有稿时列出大纲、正文、人物；一键清空整篇（含侧车）。资料库仍是引用材料。
 <span class="pt">◆ 要点  Session compact 不得拆散 Work。切会话 ≠ 换作品根，归档也不该发生在 Session 层。</span></pre>
@@ -29,7 +29,7 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
 
 2  （可选）update_outline
      短篇/单篇：纲可选，不必订近池身份
-     长篇：几句这场干什么；先写眼前这一池（跟着谁、站在哪、眼下要什么），海先藏着
+     长篇：几句这场干什么；近池身份看 story_state（≥1 条 rising pressure 且 ≥1 条 info_gap），章职不再每章必有
      章正文 &lt; 40 实体文字且用户未要目录 → outline_thin
      用户说「只要目录 / 标题列表」则跳过薄纲门
      通常不检索；卡片进 writing_cards，不进资料向量面
@@ -40,21 +40,22 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
      按需 search_sources（cite；每 Turn ≤3；超限拒绝本次调用）
      禁止每轮强制 RAG、禁止 Turn 末自动 judge
      篇幅：用户点名 N 字优先；否则
-       短篇目标 2500 · 单篇目标 3500 · 章稿默认 3000–3500（DEFAULT_CHAPTER_MIN/MAX，起点常章）
-       实体文字 = 不含空白；不足约定 85% → length_short
+       短篇目标 2500 · 单篇目标 3500 · 长篇章稿 1800–4500（DEFAULT_CHAPTER_MIN/MAX）
+       实体文字 = 不含空白；<1500 或用户点名字数不足 85% → length_short
      返回值带 L0 receipts + L1 writing_signals
      过程 L0 未清：短篇/单篇不得 mode=append，也不得宣称已完成（writing_delivery_hold）
      长篇：本章几乎没写（<800 字）才挡落盘；L0 / 配额未满不挡「第一章写完了」；配额未满不要默认 append 第二场
      长篇加厚：L0 仍挂在 tool_result，但不挡 mode=append
 
-4  弱分或 L0 → 同轮 propose_patch(repair_span)
+4  过程 L0 或 length_short → 同轮 propose_patch(repair_span)
      写作场景 patch_auto_apply=true，仍须 UI 出示 diff
-     只换检测岛里的 old_text（可带 neighbor）；碎拍取最密岛，不把最弱评分窗升成整窗
-     同岛停（对上一次已生效的岛 overlap ≥12）；下一岛仍 propose_patch；每 penalty key 5 次 / 章合计 8
-     无差或岛未碰 → 不计次数；小岛尽才 rewrite_window（每章 2，≤160 实体字）
+     只换检测岛里的 old_text；碎拍取最密岛，不把最弱评分窗升成整窗
+     net 低只观测，不出 span。编辑札记在下一章
+     同岛停（对上一次已生效的岛 overlap ≥12）；下一岛仍 propose_patch；每 penalty key 2 次 / 章合计 3
+     无差或岛未碰 → 不计次数；小岛尽才 rewrite_window（每章 1，≤160 实体字）
      宽窗 / rewrite 尽 → 停修（长篇本章可交）
      连续 apply miss 2 次停
-     net_signal ≥ 0 且无过程 L0 → patch_unnecessary
+     默认不附平台 neighbor；碎拍且有本书 beat 时才附
      不整章再 draft_section（length_short 加厚除外）
      hygiene 拒绝对白改旁白
      <span class="pt">◆ 要点  修补焊在 tool_result，不改 Engine while。做成「自动再跑一轮润色」会把 pass 变成隐式流水线。</span>
@@ -69,17 +70,17 @@ sources/cards              writing_cards_dir；风格卡 ≤2400 / 人物 ≤100
           <pre class="seq">build_writing_spec_block → volatile_context，不进 system 提示（prefix cache）
   book_scope  short|single|long     「写一篇」优先于题材词；可在 writing_prefs.json 钉死
   work_mode   经典文学 / 连载网文    权重与金标库钉在工具里，设置页无滑条
-  fragment    评分切片，不是本章必须交的工种
+  fragment    评分切片，不是章职
   focus / 这一场 / outline_phase     short/single=`ready` · 长篇未立定近池=`open`（propose_opening_ponds 卡片，点选或「我要其他的」） · 已立=`continue`
   无纲时写「新篇另起人与事」
 <span class="pt">◆ 要点  风格是罗盘不是合同。只给题材或说「看看」时先交 start_kind 不同的近池卡片；换职业地点不算分开。</span></pre>
-          <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 → 成稿（章稿 3000–3500，一章一场）→ 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
-          <div class="src"><code>writing/occupy.py</code> · <code>writing/book_scope.py</code> · <code>writing/text_metrics.py</code> · <code>writing/patch_budget.py</code> · <code>scenarios/profiles/writing.yaml</code></div>
+          <p class="figure-lead">下图中主链：意图 → 占用判定 → 薄纲 / 开篇点选 → 成稿（章稿 1800–4500）→ 仅 L0 同轮修补 / 交付门。检索是按需旁路。评分环见下一页。</p>
+          <div class="src"><code>writing/occupy.py</code> · <code>writing/book_scope.py</code> · <code>writing/text_metrics.py</code> · <code>writing/patch_budget.py</code> · <code>writing/story_state.py</code> · <code>scenarios/profiles/writing.yaml</code></div>
         </div>
                                         <figure class="figure">
           <div class="diagram-body diagram-svg">
             <img src="../assets/writing/writing-main-path-zh.png" alt="写作主路径" />
           </div>
-          <figcaption>写作主路径 · 章稿 3000–3500 · 点击放大</figcaption>
+          <figcaption>写作主路径 · 章稿 1800–4500 · 点击放大</figcaption>
         </figure>
       </section>

@@ -22,6 +22,8 @@ https://zodirc.github.io/AgentPlatform/
 | 编码：查找定义、修改后再验证 | https://zodirc.github.io/AgentPlatform/tour/#coding-fuse |
 | 写作 / 资料检索 | https://zodirc.github.io/AgentPlatform/tour/#rag |
 | 工作台（写作对照编码） | https://zodirc.github.io/AgentPlatform/tour/#writing |
+| 写作模块解剖（九块与影响档） | https://zodirc.github.io/AgentPlatform/tour/#writing-module |
+| 写作模块详文 | [docs/writing-module.md](docs/writing-module.md) |
 | 事件如何投影到界面 | https://zodirc.github.io/AgentPlatform/tour/#events |
 | 现行冒烟数字 | https://zodirc.github.io/AgentPlatform/tour/#scorecard |
 | Ops 评测原理（题目 / 命中 / harness） | https://zodirc.github.io/AgentPlatform/tour/#ops-eval-why |

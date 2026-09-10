@@ -1,0 +1,64 @@
+<section class="page" data-id="writing-module" data-group="RAG / 写作" data-title="写作模块解剖">
+        <div class="card">
+          <h2>写作是十块叠在同一条 Engine 上，不是第二条循环</h2>
+          <p class="lede">用户看见一份稿。工程上：场景壳换工具和提示；稿树挂在 Work；罗盘进 volatile；成稿工具写盘；L0/交付门硬拒；L1 分数只焊在 <code>tool_result</code>，奖励只观测。引擎禁止 <code>if scenario == "writing"</code>。完整文件索引与空转清单见仓库 <code>docs/writing-module.md</code>。主链海报见上一页「写作工作台」；评分环见下一页。</p>
+          <ul class="seq-legend">
+            <li><span class="pt">◆ 要点</span> 设计取舍：漏了会把 L1 当改稿器、把账户偏好表当已接上的滑条、或把 L2 评委送进产品 Turn</li>
+          </ul>
+
+          <h3>十块</h3>
+          <pre class="seq">① 场景壳   writing.yaml · system.md · hooks（cards / focus / continuity）
+② 稿树     outline.md · drafts/manuscript.md · sources/cards · drafts/archive · .agent/work
+③ 罗盘     book_scope × work_mode × fragment × outline_phase × 章职（Writing spec ≤620 字）
+④ 成稿工具 draft_section · update_outline · propose_patch · propose_opening_ponds · export
+⑤ 过程门   L0 四类+篇幅 · 交付门 · patch 预算 2/3/1 · 卫生 · 叙事承诺配额
+⑥ L1 评分  切窗 → 类原型 → net_signal（rewards 只观测）→ 仅 L0 / length_short 出 repair_span
+⑦ 开篇点选 长篇未立定近池：卡片闸；awaiting_choice → TERMINATE
+⑧ 检索特化 排除 seed/intel 与 archive；texture prior 1.4 / 0.35；每 Turn ≤3
+⑨ 工作台   作品面板 / RAG 是否生效 / signals 弹层；一键清空走 discard
+⑩ 作品状态 story_state.json + editor_notes/ + author_notes.md + surface/（硬写 sidecar，软进窗）
+<span class="pt">◆ 要点  外围 L2 narrative 与 Ops /ops/writing 只打分。C0 发散块恒 False。账户 writing_account_prefs 产品无入口、评分不读。</span></pre>
+
+          <h3>影响档（是否真的改产出）</h3>
+          <pre class="seq">硬   不经模型意愿：写盘、拒工具、停转、改摘要、改检索排序、注入 receipt
+     draft_section / occupy=fresh / append 带碎拍拒绝 / 开篇点选停转
+     patch_auto_apply / 交付门改「已完成」/ texture 乘子 / 工具白名单无 write_file
+
+软   进模型窗：system.md · [writing_context]（卡、spec、稿面、已选近池）· tool_result.repair_span
+     模型可以不听，直到撞 max_steps=40。prefix cache：spec 不进 system
+
+旁路 UI / golden 探针 / WritingSignalsModal。事件总线只有 writing_weak 等瘦字段
+
+空转 L2 评委不进 Turn；账户 writing_account_prefs 产品无入口；C0 发散注入已关
+<span class="pt">◆ 要点  L1 net_signal 本身不改稿。仅过程 L0 或 length_short 往 tool_result 塞岛；硬停靠预算与工具拒绝。编辑札记在下一章。</span></pre>
+
+          <h3>接到 Engine 的点（不是新节点）</h3>
+          <pre class="seq">StartTurn     ScenarioRegistry.get(writing) 装工具/温度/hooks
+组窗          volatile 做成 user 消息，前缀 [writing_context]（旁注：不是用户发言）
+tool 完成后   attach_writing_signals → maybe_attach_prose_writing_signals
+              note_writing_signals_for_verify（L0 pending；四类 receipt 互斥一张）
+propose_patch writing 场景自动 apply，失败记 auto_apply_error
+开篇工具      awaiting_choice | stop_retry → termination_reason，return TERMINATE
+Turn 摘要     finalize_writing_turn_summary：【交付门】；compact 剥说明书
+post_turn     continuity pending 卡 + local beats；story_state 机械半 + surface + editor_notes
+<span class="pt">◆ 要点  做成「自动再跑一轮润色」会把用户 pass 变成隐式流水线。每个 pass = 一次显式 Turn。</span></pre>
+
+          <h3>罗盘现行数字（跟代码走）</h3>
+          <pre class="seq">book_scope  short 目标 2500 · single 3500 · 长篇章稿 1800–4500（&lt;1500 记 length_short）
+            「写一篇」优先于题材词；长篇交付门只挡本章 &lt;800 字，不挡全书没写完
+work_mode   literary 默认 / web_serial；金标分库；学拍不搬核
+fragment    评分切片不是工种；冷起步 mixed；mismatch 对齐申报 &lt; 0.60 才记
+卡片预算    合计 3600 · 单卡 2000 · style 1800 / 人物 1000 / 情节 600 / 一般 400 · story_state 900
+稿面        writing_work_surface_max_chars = 6000；选卡不看本轮 message（C3）
+temperature 0.8 · max_steps 40 · patch 每 key 2 / 章 3 / rewrite_window 1 / miss 连 2 停</pre>
+
+          <h3>稿树（Work 根，不是 Session）</h3>
+          <pre class="seq">用户心智「这本书」= book.py 库存：大纲、正文、卡、拍、归档
+扔掉整本 discard：清用户稿与 .agent/work 侧车；不动 seed、资料库上传、会话
+fresh：wants_new_piece 且 occupied → archive + unlink；不要提示用户先删文件
+空工作区仍用 draft_section / update_outline 建文件；propose_patch 不能建新路径
+<span class="pt">◆ 要点  Session compact 不得拆散 Work。切会话 ≠ 换作品根。</span></pre>
+          <p class="figure-lead">无单独海报：主链在上一页，评分环在下一页。本页只回答「由几块组成、接到哪、哪一档真改稿」。</p>
+          <div class="src"><code>scenarios/profiles/writing.yaml</code> · <code>app/writing/</code> · <code>tools/core/writing_tools.py</code> · <code>docs/writing-module.md</code></div>
+        </div>
+      </section>

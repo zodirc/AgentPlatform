@@ -3,7 +3,7 @@
 生成时间：2026-09-10T03:21:58Z UTC
 来源：Russell et al., StoryScope, COLM 2026, arXiv:2604.03136. Table 16 human/AI means; rarity Appendix H (human 0.71 vs AI 0.49).
 
-本报告是 `docs/writing-quality-uplift-plan.md` §6 提示层改动的准入条件。
+本报告是 `docs/writing-module-uplift.md` §6 提示层改动的准入条件。
 L2 **不进产品 Turn**。LLM 评委只用于离线批处理。
 
 ## 1. 仪器状态
