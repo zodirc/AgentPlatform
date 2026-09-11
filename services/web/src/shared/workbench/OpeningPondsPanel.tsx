@@ -117,11 +117,11 @@ export function OpeningPondsPanel({
         </div>
         {interactive ? (
           <p className="mt-1 text-[11px] font-medium text-amber-800/90 dark:text-amber-200/90">
-            勾选一本要连载的书（这本书在玩什么 + 开篇怎么进）
+            勾选一本要连载的书
           </p>
         ) : (
           <p className="mt-1 text-[11px] text-muted-foreground">
-            {contrast || "对照轴不同的近池"}
+            {contrast || "几本不同的书"}
           </p>
         )}
       </div>

@@ -38,6 +38,10 @@ describe("OpeningPondsPanel", () => {
         onMore={() => {}}
       />,
     );
+    expect(screen.getByText("勾选一本要连载的书")).toBeTruthy();
+    expect(screen.queryByText(/在玩什么/)).toBeNull();
+    expect(screen.queryByText(/开篇怎么进/)).toBeNull();
+    expect(screen.queryByText("对照轴不同的近池")).toBeNull();
     expect(screen.queryByRole("button", { name: "采用" })).toBeNull();
     const radio = screen.getByRole("radio", { name: "采用「早高峰系统」" });
     expect(radio.getAttribute("aria-checked")).toBe("false");
