@@ -986,9 +986,10 @@ def prepare_writing_system_prompt(
         wants_more_ponds,
     )
 
-    if wants_opening_candidates(
+    picking = wants_opening_candidates(
         message, outline=outline_text, workspace_root=workspace_root
-    ):
+    )
+    if picking:
         intent = format_user_axis_intent_block(message)
         if intent:
             extras.append(intent)
@@ -1004,6 +1005,13 @@ def prepare_writing_system_prompt(
         )
         if committed:
             extras.append(committed)
+        from app.writing.work_mode import format_after_lock_craft_block
+
+        after_lock = format_after_lock_craft_block(
+            picking=False, work_mode=work_mode
+        )
+        if after_lock:
+            extras.append(after_lock)
     from app.writing.signals.beats import format_local_beats_block
 
     spec_frag = None

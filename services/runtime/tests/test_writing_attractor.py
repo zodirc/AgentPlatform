@@ -90,29 +90,35 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "类型不是模板" in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
     assert "眼前的池子" in voice
-    assert "平凡" in voice
-    assert "得到" in voice
-    assert "发现" in voice
-    assert "前三分之一" in voice
-    assert "一千八" in voice
+    assert "学乌贼" in voice
+    assert "不当三张卡配方" in voice
     assert "功法" in voice
     assert "几本不同的书" in voice
+    assert "一千八" in voice
+    assert "得到了什么" not in voice
+    assert "前三分之一" not in voice
+    assert "烟火" not in voice
+    from app.writing.work_mode import SERIAL_AFTER_LOCK_CRAFT
+
+    assert "得到了什么" in SERIAL_AFTER_LOCK_CRAFT
+    assert "前三分之一" in SERIAL_AFTER_LOCK_CRAFT
+    assert "平凡" in SERIAL_AFTER_LOCK_CRAFT
     assert "start_kind 不同" not in voice
     assert "只给题材时先换 start_kind" not in voice
     assert "几本要是彼此不同的书" in system
     assert "开篇候选要能点到" not in system
     assert "start_kind 与 price_axis 不得重复" not in system
     assert "看见代价" not in voice
-    assert "跟着谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
-    assert "眼下要什么" in STYLE_CONTRACT_OUTLINE_TEMPLATE
+    assert "propose_opening_ponds" in STYLE_CONTRACT_OUTLINE_TEMPLATE
+    assert "跟着谁" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
+    assert "眼下要什么" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "沈砚" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "查父失踪" not in system
     assert "水路渡口+灵灯" not in system
-    assert "平凡" in system
-    assert "得到" in system or "发现" in system
-    assert "前三分之一" in system
     assert "一千八" in system
     assert "功法" in system
+    assert "前三分之一" not in system
+    assert "得到了什么" not in system
 
 
 def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypatch) -> None:

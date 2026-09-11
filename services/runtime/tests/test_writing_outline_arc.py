@@ -171,9 +171,9 @@ def test_outline_templates_do_not_prime_same_book_under_new_coat() -> None:
         assert "看见代价" not in blob
         assert "由谁承担" not in blob
         assert "另一本书" in blob
-        assert "跟着谁" in blob
-        assert "眼下要什么" in blob
-        assert "直说" in blob or "两三句" in blob
+        assert "propose_opening_ponds" in blob
+        assert "跟着谁" not in blob
+        assert "眼下要什么" not in blob
         assert "200–400" not in blob
         assert "不是另起的寓意" not in blob
         assert "路数不是换皮" not in blob
@@ -185,7 +185,9 @@ def test_outline_templates_do_not_prime_same_book_under_new_coat() -> None:
         assert "沈砚" not in blob
         assert "沈禾" not in blob
     assert "谁要什么、谁挡着" not in OUTLINE_EXPAND
-    assert "眼前这一池" in OUTLINE_EXPAND
+    assert "propose_opening_ponds" in OUTLINE_EXPAND
+    assert "跟着谁" not in OUTLINE_EXPAND
+    assert "互不换皮" not in OUTLINE_EXPAND
 
 
 def test_outline_arc_ok_when_spine_follows_style_not_want_block() -> None:

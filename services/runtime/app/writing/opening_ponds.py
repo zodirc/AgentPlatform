@@ -439,20 +439,8 @@ def pond_item_event_fields(raw: dict[str, Any], index: int) -> dict[str, str] | 
 
 
 def fill_pond_defaults(items: list[dict[str, str]]) -> list[dict[str, str]]:
-    """只补节奏槽：source_trust / first_conflict_at。轴缺就留空，不贴、不去重。"""
-    out: list[dict[str, str]] = []
-    for i, item in enumerate(items):
-        row = dict(item)
-        trust = str(row.get("source_trust") or "")
-        if trust not in SOURCE_TRUST_LABELS:
-            trust = ("dubious", "trusted", "false")[i % 3]
-        row["source_trust"] = trust
-        conflict = str(row.get("first_conflict_at") or "")
-        if conflict not in FIRST_CONFLICT_AT_LABELS:
-            conflict = ("first_300", "first_1000", "chapter_one")[i % 3]
-        row["first_conflict_at"] = conflict
-        out.append(row)
-    return out
+    """不再补轴。缺 source_trust / first_conflict_at 就留空，避免三张卡被转成对照表。"""
+    return [dict(item) for item in items]
 
 
 def _axis_label_set() -> set[str]:
@@ -498,7 +486,7 @@ def ponds_reject_reason(
         if len(opening) < _PLAN_MIN or len(flavor) < _FLAVOR_MIN:
             return (
                 "need_book_plan",
-                "每份都要有这本书和开篇：这本书在玩什么、开篇怎么进。"
+                "每份都要有这本书（网文简介一段）和开篇（场上已发生的一拍）。"
                 "不要拆成账单/走向/气味，不要只填系统/关系标签。",
             )
     trusts = [str(it.get("source_trust") or "") for it in items]
@@ -588,6 +576,47 @@ def load_opening_ponds(*, workspace_root: Path | None = None) -> dict[str, Any] 
     return out
 
 
+def seed_outline_from_pond(
+    item: dict[str, str],
+    *,
+    workspace_root: Path | None = None,
+) -> None:
+    """锁卡后把书名/这本书/开篇抄进 outline「这本书」，不另填四格。"""
+    root = _workspace(workspace_root)
+    path = root / "outline.md"
+    existing = ""
+    if path.is_file():
+        try:
+            existing = path.read_text(encoding="utf-8")
+        except OSError:
+            existing = ""
+    title = str(item.get("title") or "").strip()
+    if title.startswith("《") and title.endswith("》") and len(title) > 2:
+        title = title[1:-1]
+    flavor = str(item.get("flavor") or "").strip()
+    opening = str(item.get("opening") or "").strip()
+    if not title and not flavor:
+        return
+    block = f"## 这本书\n\n《{title}》。{flavor}\n"
+    if opening:
+        block += f"\n开篇：{opening}\n"
+    text = (existing or "").strip()
+    if not text:
+        new = block + "\n## 主线一句话\n（往哪走即可。顶点可以后补。）\n"
+    elif re.search(r"^#{1,3}\s*这本书", text, re.M):
+        new = re.sub(
+            r"^#{1,3}\s*这本书[^\n]*\n(?:.*?)(?=^#{1,3}\s|\Z)",
+            block.rstrip() + "\n\n",
+            text + ("\n" if not text.endswith("\n") else ""),
+            count=1,
+            flags=re.M | re.S,
+        )
+    else:
+        new = block + "\n" + text + "\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(new if new.endswith("\n") else new + "\n", encoding="utf-8")
+
+
 def save_committed_pond(
     item: dict[str, str],
     *,
@@ -602,6 +631,7 @@ def save_committed_pond(
     from app.writing.story_state import seed_identity_from_pond
 
     seed_identity_from_pond(item, workspace_root=workspace_root)
+    seed_outline_from_pond(item, workspace_root=workspace_root)
     clear_rejected_ponds(workspace_root=workspace_root)
     return path
 

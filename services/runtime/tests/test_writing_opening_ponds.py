@@ -77,15 +77,29 @@ def test_opening_choice_block_is_book_first() -> None:
     block = opening_choice_block()
     assert "## Opening choice (platform)" in block
     assert "书名 / 这本书 / 开篇" in block
-    assert "哪一个角落" in block
-    assert "什么机制" in block
-    assert "怎么推进" in block
+    assert "哪一个角落" not in block
+    assert "什么机制" not in block
+    assert "怎么推进" not in block
+    assert "用户" in block and ("题材" in block or "点名" in block)
+    assert "必须换第一口力" not in block
+    assert "在玩什么" not in block
+    assert "开篇怎么进" not in block
     assert "Write title / flavor / opening first" in block
     assert "book_self_note" in block
     assert "unifying summary" in block
     assert "in-turn repair" in block
     assert "连载" in block
-    assert "事故" in block or "accident" in block
+    assert "今晚" not in block
+    assert "封面" in block
+    assert "九龙拉棺" in block
+    assert "场上" in block
+    assert "觉醒" in block
+    assert "灵气" in block
+    assert "末班车" not in block
+    assert "出候选不要用" not in block
+    assert "不是发现这座城" not in block
+    assert "secret ledger" not in block
+    assert "规则怪谈" not in block
     assert "Leave the assistant message empty" in block
     assert "pulled_in is a normal" not in block
     assert "At least one book should put" not in block
@@ -103,6 +117,33 @@ def test_opening_choice_block_is_book_first() -> None:
     ):
         assert banned not in block
     assert 800 <= len(block) <= 2800
+
+
+def test_picking_prompt_omits_after_lock_craft(tmp_path, monkeypatch) -> None:
+    from app.settings import settings
+    from app.writing.cards import prepare_writing_system_prompt
+    from app.writing.work_mode import SERIAL_AFTER_LOCK_CRAFT
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写一篇都市修真小说，我看看",
+        workspace_root=tmp_path,
+    )
+    blob = "\n".join(
+        x for x in (pin.prompt, pin.volatile_block, pin.cards_block) if x
+    )
+    assert "得到了什么" not in blob
+    assert SERIAL_AFTER_LOCK_CRAFT not in blob
+    locked = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "采用此开篇「废脉剑声」。写都市修真第一章",
+        workspace_root=tmp_path,
+    )
+    locked_blob = "\n".join(
+        x for x in (locked.prompt, locked.volatile_block, locked.cards_block) if x
+    )
+    assert "得到了什么" in locked_blob
 
 
 def test_should_gate_opening_choice_when_browsing() -> None:
@@ -161,7 +202,7 @@ def test_normalize_start_kind_aliases() -> None:
     assert normalize_price_axis("工分") == ""
 
 
-def test_fill_pond_defaults_fills_rhythm_only() -> None:
+def test_fill_pond_defaults_does_not_invent_axes() -> None:
     from app.writing.opening_ponds import fill_pond_defaults
 
     items = normalize_pond_items(
@@ -179,10 +220,10 @@ def test_fill_pond_defaults_fills_rhythm_only() -> None:
     filled = fill_pond_defaults(items)
     kinds = [str(it.get("start_kind")) for it in filled]
     assert kinds == ["pulled_in", "pulled_in"]
-    assert filled[0]["source_trust"] == "dubious"
-    assert filled[1]["source_trust"] == "trusted"
-    assert filled[0]["first_conflict_at"] == "first_300"
-    assert filled[1]["first_conflict_at"] == "first_1000"
+    assert filled[0]["source_trust"] == ""
+    assert filled[1]["source_trust"] == ""
+    assert filled[0]["first_conflict_at"] == ""
+    assert filled[1]["first_conflict_at"] == ""
 
 
 def test_retired_axis_codes_no_longer_reject() -> None:
@@ -353,9 +394,42 @@ def test_clear_and_load_opening_ponds_browse_is_soft(workspace: Path) -> None:
     more = format_opening_ponds_block(workspace_root=workspace, mode="more")
     assert "## 上一组开篇候选（用户说这几本都不对）" in more
     assert "离下面这几本远" in more
+    assert "社会角落" not in more
+    assert "必须换第一口力" not in more
     assert "还没用过的" not in more
     assert clear_opening_ponds(workspace_root=workspace) is True
     assert format_opening_ponds_block(workspace_root=workspace) == ""
+
+
+def test_save_committed_pond_copies_card_into_outline(workspace: Path) -> None:
+    from app.writing.opening_ponds import save_committed_pond
+    from app.writing.outline_arc import (
+        STYLE_CONTRACT_OUTLINE_TEMPLATE,
+        outline_style_committed,
+    )
+
+    assert outline_style_committed(STYLE_CONTRACT_OUTLINE_TEMPLATE) is False
+    (workspace / "outline.md").write_text(
+        STYLE_CONTRACT_OUTLINE_TEMPLATE, encoding="utf-8"
+    )
+    item = normalize_pond_items(
+        [
+            _pond(
+                "废脉剑声",
+                start_kind="granted_path",
+                promise="power_steps",
+                flavor="边荒一个被废了灵根的少年，村里剑冢夜里会响。",
+                opening="剑冢夜里第三声响的时候，门栓断了。",
+            )
+        ]
+    )[0]
+    save_committed_pond(item, workspace_root=workspace)
+    text = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert "《废脉剑声》" in text
+    assert "剑冢夜里会响" in text
+    assert "开篇：剑冢夜里第三声响" in text
+    assert "**跟着谁**" not in text
+    assert outline_style_committed(text) is True
 
 
 def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
@@ -390,8 +464,11 @@ def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
     assert "## 已选开篇" in block
     assert "开篇：一早改校服裤脚" in block
     assert "这本书：这条街的人都很会过日子" in block
-    assert "这本书在玩什么：裁缝铺里把日子过下去" in block
-    assert "力的来源：来源不可信" in block
+    assert "这本书在玩什么" not in block
+    assert "力的来源" not in block
+    assert "棋盘位" not in block
+    assert "站在哪" not in block
+    assert "入口（不是这本书要解决的事）" not in block
     assert "超凡怎么开始" not in block
     assert "读者买什么" not in block
     assert "拿什么结账" not in block

@@ -53,10 +53,10 @@ def test_default_opening_duty_differs_by_mode() -> None:
     assert "强钩" in hook or "麻烦" in hook
     urban = default_opening_duty(
         "web_serial",
-        message="写一章长篇修真小说的第一章, 现代都市题材，我看看",
+        message="写一章长篇修真小说的第一章, 现代都市题材",
     )
-    assert "发觉" in urban
-    assert "入口" in urban or "主菜" in urban
+    assert "得到" in urban or "发现" in urban
+    assert "觉醒" in urban
     assert "有人的日子" not in urban
     occult = default_opening_duty(
         "web_serial",

@@ -398,39 +398,39 @@ def build_registry() -> ToolRegistry:
                                 "id": {"type": "string"},
                                 "title": {
                                     "type": "string",
-                                    "description": "连载书名：第 400 章还站得住的游戏名，不是工位或证件名",
+                                    "description": "能印在封面的连载书名，大约二到八个字，不要绩效/标段/考核",
                                 },
                                 "flavor": {
                                     "type": "string",
-                                    "description": "这本书：社会角落、持续矛盾机制、写到第 200 章还在发生什么",
+                                    "description": "这本书：点名题材里那一类网文的简介",
                                 },
                                 "opening": {
                                     "type": "string",
-                                    "description": "这本书今晚怎么开始：第一句是事故，至多两句",
+                                    "description": "这本书里已经落在场上的一两句，不是开会或签字",
                                 },
                                 "book_self_note": {
                                     "type": "string",
-                                    "description": "写完书后再填：一句话，这本书在玩什么",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "social_space": {
                                     "type": "string",
-                                    "description": "可选自述：故事发生在哪一块社会空间",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "engine_note": {
                                     "type": "string",
-                                    "description": "可选自述：为什么能一直写",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "who": {
                                     "type": "string",
-                                    "description": "可选。棋盘上跟着谁，且已写进这本书/开篇",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "where": {
                                     "type": "string",
-                                    "description": "可选。这场事故发生的地方，且已写进这本书/开篇",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "want": {
                                     "type": "string",
-                                    "description": "可选。这场事故里必须先决定的那一步",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "arc": {
                                     "type": "string",
@@ -442,36 +442,23 @@ def build_registry() -> ToolRegistry:
                                 },
                                 "start_kind": {
                                     "type": "string",
-                                    "description": (
-                                        "Optional telemetry after the book is written. "
-                                        "self_notice|pulled_in|granted_path|"
-                                        "world_already|no_extraordinary"
-                                    ),
+                                    "description": "可选，卡片上不展示。不要为填它改这本书",
                                 },
                                 "promise": {
                                     "type": "string",
-                                    "description": (
-                                        "Optional telemetry. power_steps|costly_truth|"
-                                        "survive_relation|dread_decode|social_place"
-                                    ),
+                                    "description": "可选，卡片上不展示。不要为填它改这本书",
                                 },
                                 "source_trust": {
                                     "type": "string",
-                                    "description": "Optional. trusted|dubious|false",
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "first_conflict_at": {
                                     "type": "string",
-                                    "description": (
-                                        "Optional. first_300|first_1000|"
-                                        "chapter_one|later. at most one later"
-                                    ),
+                                    "description": "可选，卡片上不展示",
                                 },
                                 "price_axis": {
                                     "type": "string",
-                                    "description": (
-                                        "Optional telemetry. lifespan|memory|contract|"
-                                        "status|none. Describes who pays, not the book."
-                                    ),
+                                    "description": "可选，卡片上不展示。不要为填它改这本书",
                                 },
                                 "chapter_job": {"type": "string"},
                                 "summary": {"type": "string"},

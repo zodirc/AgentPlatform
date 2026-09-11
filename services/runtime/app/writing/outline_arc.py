@@ -44,33 +44,19 @@ STYLE_CONTRACT_TEMPLATE_VERSION = "book-pond-v1"
 
 STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-先写读者马上能站住的池子。后面的海（终局宇宙、境界总纲、全书规则）不要写进这段。
+先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名、这本书、开篇抄进这一段。不要另填四格。后面的海（终局宇宙、境界总纲）不要写进这段。
 
-**跟着谁**：（称呼。眼下还是凡人。一两句，直说。）
-
-**眼下要什么**：（这一章能碰到的欲望：得到、发现、因此开始不再平凡。一两句。）
-
-**读者站在哪**：（第一场的地方、年代、日子。一两句。）
-
-**这一章干什么**：（前三分之一交到发觉自己能做什么或当场得到一条能用的路，或这场要的得到、发现。一两句。）
-
-换人换事就是另一本书。人名和这件事另起。
+换人换事就是另一本书。
 
 ## 主线一句话
-（往哪走即可。顶点和解局可以后补，不要写死。）
+（往哪走即可。顶点可以后补。）
 """
 
 OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-**跟着谁**：（称呼。眼下还是凡人。一两句，直说。）
+先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名、这本书、开篇抄进这一段。不要另填四格。后面的海不要写进这段。
 
-**眼下要什么**：（这一章能碰到的欲望：得到、发现、因此开始不再平凡。一两句。）
-
-**读者站在哪**：（第一场的地方、年代、日子。一两句。）
-
-**这一章干什么**：（前三分之一交到发觉自己能做什么或当场得到一条能用的路，或这场要的得到、发现。一两句。）
-
-换人换事就是另一本书。人名和这件事另起。
+换人换事就是另一本书。
 
 ## 开篇几章（纲上备忘，不是正文交卷清单）
 
@@ -130,12 +116,19 @@ def extract_outline_style_contract(md: str, *, max_chars: int = 720) -> str:
 
 
 def outline_style_committed(md: str, *, min_chars: int = _MIN_STYLE_CONTRACT_CHARS) -> bool:
-    """近池身份已立：跟着谁 / 站在哪 / 眼下要什么。路数透镜不算订纲。"""
+    """近池身份已立：卡片抄进「这本书」，或仍认旧的跟着谁/眼下要什么槽。"""
+    del min_chars
     blob = extract_outline_style_contract(md)
     text = (blob or "").strip()
-    if len(text) < min_chars:
+    if not text:
         return False
-    return _STYLE_PERSON_SLOT.search(text) is not None
+    if "propose_opening_ponds" in text and not re.search(r"开篇[：:]", text):
+        return False
+    if _STYLE_PERSON_SLOT.search(text):
+        return True
+    if re.search(r"开篇[：:]", text):
+        return True
+    return "《" in text and "》" in text
 
 
 def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
@@ -156,15 +149,13 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
             "outline_style_uncommitted": True,
             "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
             "summary_suffix": (
-                "长篇先 update_outline 写下眼前这一池："
-                "跟着谁、站在哪、眼下要什么；不要写终局宇宙或全书规则。"
+                "长篇先 propose_opening_ponds 出开篇候选；点选后再把卡片抄进「这本书」。"
             ),
         }
     return {
         "outline_style_uncommitted": True,
         "summary_suffix": (
-            "outline 尚未立定近池身份（跟着谁 / 站在哪 / 眼下要什么）："
-            "先补这几句再写章职，海先藏着。"
+            "outline 尚未立定近池身份：先出开篇候选，点选后把卡片抄进「这本书」。"
         ),
     }
 

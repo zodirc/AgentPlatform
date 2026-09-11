@@ -8,7 +8,6 @@ from typing import Any, Literal, Mapping
 from app.writing.pond_history import load_rejected_pond_groups
 
 _FLAVOR_BIT = 48
-_SELF_NOTE_BIT = 40
 
 # 只认用户点名的长词，不认「系统」这种会误伤口令的短别名。
 _USER_KIND_PHRASES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -43,12 +42,9 @@ def _clip_bit(text: str, max_len: int) -> str:
 def _book_line(item: Mapping[str, Any]) -> str:
     title = str(item.get("title") or item.get("id") or "").strip()
     flavor = _clip_bit(str(item.get("flavor") or ""), _FLAVOR_BIT)
-    note = _clip_bit(str(item.get("book_self_note") or ""), _SELF_NOTE_BIT)
     bits = [f"《{title}》" if title else ""]
     if flavor:
         bits.append(flavor)
-    if note:
-        bits.append(f"在玩：{note}")
     return " · ".join(p for p in bits if p) or f"- {title}"
 
 
@@ -110,8 +106,7 @@ def format_opening_ponds_block(
     lines = [
         "## 上一组开篇候选（用户说这几本都不对）",
         "用户要的是不同的书，不是换了工位 / 证件名 / 能力名的同一本。",
-        "下一组请离下面这几本远：不同的社会角落、不同的持续矛盾机制、不同的推进方式。",
-        "仍在用户点名的类型里。",
+        "下一组请离下面这几本远，仍在用户点名的类型里，不要换工位/证件名。",
     ]
     for group in groups:
         for item in group.get("items") or []:
@@ -126,7 +121,7 @@ def format_committed_pond_block(
     workspace_root: Path | None = None,
 ) -> str:
     """volatile：用户只点了选择，卡片正文从 sidecar 灌给模型。不灌轴中文标签。"""
-    from app.writing.opening_ponds import find_committed_pond, source_trust_label
+    from app.writing.opening_ponds import find_committed_pond
     from app.writing.text_metrics import CHAPTER_DWELL_HINT
 
     item = find_committed_pond(message=message, workspace_root=workspace_root)
@@ -145,15 +140,4 @@ def format_committed_pond_block(
         lines.append(f"这本书：{item['flavor']}")
     if item.get("opening"):
         lines.append(f"开篇：{item['opening']}")
-    if item.get("book_self_note"):
-        lines.append(f"这本书在玩什么：{item['book_self_note']}")
-    trust = str(item.get("source_trust") or "")
-    if trust:
-        lines.append(f"力的来源：{source_trust_label(trust)}")
-    if item.get("who"):
-        lines.append(f"棋盘位：{item['who']}")
-    if item.get("where"):
-        lines.append(f"站在哪：{item['where']}")
-    if item.get("want"):
-        lines.append(f"入口（不是这本书要解决的事）：{item['want']}")
     return "\n".join(lines)

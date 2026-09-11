@@ -94,7 +94,7 @@ def test_open_phase_note_fantasy_asks_early_gain() -> None:
     )
     assert fantasy["outline_phase"] == "open"
     assert "候选" in str(fantasy["outline_phase_note"])
-    assert "互不换皮" in str(fantasy["outline_phase_note"])
+    assert "彼此不同" in str(fantasy["outline_phase_note"])
     browse = resolve_outline_phase(
         "写一章长篇修真小说的第一章, 现代都市题材，我看看",
         outline="",

@@ -134,11 +134,14 @@ def wants_opening_candidates(
     workspace_root: Path | None = None,
 ) -> bool:
     """长篇未立定近池、只给题材或说看看：先交候选，不交章。"""
+    from app.writing.opening_ponds import wants_more_ponds
     from app.writing.outline_arc import outline_style_committed
 
+    text = (message or "").strip()
+    if wants_more_ponds(text):
+        return True
     if outline_style_committed(outline or ""):
         return False
-    text = (message or "").strip()
     if not text:
         return False
     if _COMMIT_POND_RE.search(text):
@@ -278,7 +281,7 @@ def resolve_outline_phase(
                 note = (
                     f"长篇开篇：棋盘位还是凡人；这一章{compass}，不要写终局宇宙"
                     if fantasy
-                    else "长篇开篇：把用户方向写成跟着谁、站在哪、眼下要什么，不要写终局宇宙"
+                    else "长篇开篇：按用户方向写这场，不要写终局宇宙"
                 )
             else:
                 note = (
