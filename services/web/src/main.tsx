@@ -7,8 +7,10 @@ import { EndUserAuthProvider } from "./shared/auth/EndUserAuth";
 import { ErrorBoundary } from "./shared/ErrorBoundary";
 import { ThemeProvider } from "./shared/theme/ThemeProvider";
 import { applyTheme, readStoredTheme } from "./shared/theme/theme";
+import { installStaleChunkReload } from "./shared/staleChunkReload";
 import "./index.css";
 
+installStaleChunkReload();
 applyTheme(readStoredTheme());
 
 const queryClient = new QueryClient();

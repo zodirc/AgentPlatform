@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { isStaleChunkError, reloadOnceOnStaleChunk } from "./staleChunkReload";
 
 type Props = {
   children: ReactNode;
@@ -20,6 +21,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("ErrorBoundary caught render error", error, info.componentStack);
+    if (isStaleChunkError(error)) {
+      reloadOnceOnStaleChunk();
+    }
   }
 
   private handleReset = () => {
