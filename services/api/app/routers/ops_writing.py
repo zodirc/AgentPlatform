@@ -74,3 +74,21 @@ async def writing_surface_index() -> dict[str, Any]:
         return await RuntimeClient().writing_surface()
     except httpx.HTTPError as exc:
         raise _proxy_runtime_error(exc) from exc
+
+
+@router.get("/alignment")
+async def writing_work_alignment() -> dict[str, Any]:
+    """代理 runtime 本书原型对齐曲线。"""
+    try:
+        return await RuntimeClient().writing_alignment()
+    except httpx.HTTPError as exc:
+        raise _proxy_runtime_error(exc) from exc
+
+
+@router.get("/regime")
+async def writing_regime_compare() -> dict[str, Any]:
+    """代理 runtime 档位对照快照。"""
+    try:
+        return await RuntimeClient().writing_regime()
+    except httpx.HTTPError as exc:
+        raise _proxy_runtime_error(exc) from exc

@@ -412,3 +412,13 @@ class RuntimeClient:
         """读取章级表面层 sidecar（只观测）。"""
         resp = await self._get("/internal/writing/surface", timeout=timeout)
         return resp.json()
+
+    async def writing_alignment(self, *, timeout: float = 15.0) -> dict:
+        """本书原型对齐曲线。"""
+        resp = await self._get("/internal/writing/alignment", timeout=timeout)
+        return resp.json()
+
+    async def writing_regime(self, *, timeout: float = 15.0) -> dict:
+        """档位对照快照。"""
+        resp = await self._get("/internal/writing/regime", timeout=timeout)
+        return resp.json()

@@ -101,3 +101,23 @@ def test_ops_writing_proxies_surface(ops_app: TestClient) -> None:
     body = res.json()
     assert body["ok"] is True
     client.writing_surface.assert_awaited_once()
+
+
+def test_ops_writing_proxies_regime_and_alignment(ops_app: TestClient) -> None:
+    client = MagicMock()
+    client.writing_regime = AsyncMock(
+        return_value={"ok": True, "regime": {"value": "author", "source": "default"}}
+    )
+    client.writing_alignment = AsyncMock(
+        return_value={"ok": True, "ready": False, "points": []}
+    )
+    with patch("app.routers.ops_writing.RuntimeClient", return_value=client):
+        headers = {"Authorization": "Bearer test-ops-secret"}
+        reg = ops_app.get("/api/v1/ops/writing/regime", headers=headers)
+        align = ops_app.get("/api/v1/ops/writing/alignment", headers=headers)
+    assert reg.status_code == 200
+    assert reg.json()["regime"]["value"] == "author"
+    assert align.status_code == 200
+    assert align.json()["ready"] is False
+    client.writing_regime.assert_awaited_once()
+    client.writing_alignment.assert_awaited_once()

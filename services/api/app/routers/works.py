@@ -222,3 +222,27 @@ async def verdict_default_writing_book(
         )
     except WorkspaceProxyError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+
+
+class BookTasteRequest(BaseModel):
+    section_id: str = Field(default="", max_length=64)
+    kind: str = Field(min_length=1, max_length=16)
+    excerpt: str = Field(min_length=1, max_length=800)
+    note: str = Field(default="", max_length=60)
+    path: str = Field(default="", max_length=512)
+
+
+@router.post("/works/default/book/taste")
+async def taste_default_writing_book(
+    body: BookTasteRequest,
+    actor: EndUser = Depends(require_session_actor),
+):
+    """作品面板旁路：圈段落口味标记。"""
+    work = await ensure_default_work(actor.id)
+    try:
+        return await workspace_svc.taste_writing_book(
+            tenant=_tenant_from_work(work, actor),
+            payload=body.model_dump(),
+        )
+    except WorkspaceProxyError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
