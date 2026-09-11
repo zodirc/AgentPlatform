@@ -191,6 +191,32 @@ def test_check_propose_patch_allows_next_island() -> None:
     assert same["error"] == "patch_repeat_blocked"
 
 
+def test_check_propose_patch_repeat_blocked_against_earlier_island() -> None:
+    """本 Turn 已修并集：与更早一刀重叠也拒，不只比 last 的最后一项。"""
+    first = "「来。」\n「坐。」\n「走。」"
+    later = "「喂？」\n「你是谁？」\n「先别关。」"
+    overlap = "「来。」\n「坐。」\n「走。」\n「还坐着。」"
+    manifest = {
+        "patch_budget": {
+            "ch1": {
+                "by_key": {"staccato_uniform": 1, "lore_dump": 1},
+                "last": [
+                    {"key": "staccato_uniform", "old_text": first},
+                    {"key": "lore_dump", "old_text": later},
+                ],
+            }
+        }
+    }
+    err = check_propose_patch_allowed(
+        manifest,
+        section_id="ch1",
+        old_text=overlap,
+        prior={"repair_span": {"key": "staccato_uniform", "old_text": overlap}},
+    )
+    assert err is not None
+    assert err["error"] == "patch_repeat_blocked"
+
+
 def test_patch_island_untouched_cosmetic_opening() -> None:
     from app.writing.signals.repair import island_untouched, patch_is_noop
 

@@ -60,7 +60,10 @@ _HINTS: dict[str, str] = {
     "hinge_dense": "这一窗里看见/听到之后紧接着就是转折，连续多处。",
     "opening_institution": "第一句就是机构名，读者还没地方站。",
     "lore_dump": "这里成了「N年前」的案情提要。",
-    "length_short": "这场实体字还低于门槛（<1500，或用户点名配额的 85%）。",
+    "length_short": (
+        "这场实体字还低于门槛（<1500，或用户点名配额的 85%）。"
+        "用 draft_section 把同一场写到门槛，不要另起一场或灌无关说明。"
+    ),
     "meta_knowing_high": "「心里清楚」出现过多。",
     "fragment_mismatch": "评分切片与这场戏的节奏不合。",
     "all_explained": "每个异常都给了来源。",
@@ -82,6 +85,9 @@ _HINTS_WEB_SERIAL: dict[str, str] = {
     "premise_novella": "这一章把家里的急事做完就收束了。",
     "world_layer_visible": "开篇还看不见世界还会变大的那一层。",
     "weak_window": "这一拍空转。",
+    "length_short": (
+        "这场字数不够。draft_section 整章重写同一场到门槛，不要 append 第二场。"
+    ),
 }
 
 
@@ -306,7 +312,7 @@ def rewrite_policy_for(
     length_short: bool,
     needs_repair: bool = False,
 ) -> str:
-    """有可定位 span 就 propose_patch；篇幅不足走 mode=append，不再整章重交。"""
+    """有可定位 span 就 propose_patch；length_short 且无 span 则整章重写同一场。"""
     del visible
     del length_short
     if needs_repair:
@@ -351,8 +357,10 @@ def _find_phrase_span(text: str, phrases: tuple[str, ...], *, max_chars: int = R
 
 
 def should_reject_full_redraft(prior: dict[str, Any] | None) -> bool:
-    """是否拒整章 upsert。满 800 字后加厚只能 append，length_short 不再放开重交。"""
+    """满 800 字后默认拒整章 upsert。length_short 时允许把同一场写满。"""
     if not prior:
+        return False
+    if prior.get("length_short"):
         return False
     return int(prior.get("visible_chars") or 0) >= REPAIR_MIN_VISIBLE
 
@@ -471,6 +479,10 @@ def _nearest_platform_neighbor(
     exemplar_fit: dict[str, Any] | None,
 ) -> Any:
     """只在当前 work_mode 平台库里找邻：先对岛拟合，再退到同 fragment 的 nearest slug。"""
+    from app.writing.work_mode import normalize_work_mode
+
+    if normalize_work_mode(work_mode) == "web_serial":
+        return None
     from app.writing.signals.bank import Exemplar, find_platform_exemplar, load_platform_exemplars
     from app.writing.signals.signature import l1_alignment, signature_vec
 

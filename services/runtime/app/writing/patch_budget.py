@@ -301,18 +301,16 @@ def _repeat_against_last_applied(
     if not isinstance(last, list):
         return False
     key = normalize_penalty_key(penalty_key)
-    for item in reversed(last):
+    for item in last:
         if not isinstance(item, dict):
             continue
-        if normalize_penalty_key(str(item.get("key") or "")) != key:
-            continue
         prev_old = str(item.get("old_text") or "")
+        prev_key = normalize_penalty_key(str(item.get("key") or key))
         if unproductive_repeat(
-            {"repair_span": {"old_text": prev_old, "key": key}},
-            {"old_text": old_text, "key": key},
+            {"repair_span": {"old_text": prev_old, "key": prev_key}},
+            {"old_text": old_text, "key": prev_key},
         ):
             return True
-        break
     return False
 
 

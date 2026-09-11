@@ -452,8 +452,7 @@ def _reject_full_redraft(
         "rewrite_policy": REWRITE_PATCH,
         "summary": (
             "本章本轮已成稿。有 writing_signals.repair_span 则 propose_patch 只换 old_text；"
-            "章级 L0（碎拍/铰链/开篇机构/身世）清掉后，若这场还没写满，在已有拍里补对白/反应；"
-            "已经收住就不要 mode=append 粘第二场。不要整章 upsert。"
+            "不要整章 upsert，也不要用 append 粘第二场凑字。"
         ),
     }
     if span:

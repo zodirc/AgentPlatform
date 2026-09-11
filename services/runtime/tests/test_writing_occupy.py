@@ -247,7 +247,7 @@ async def test_short_or_length_short_may_redraft(workspace: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_length_short_chapter_thickens_by_append_only(workspace: Path) -> None:
+async def test_length_short_chapter_rewrites_same_scene(workspace: Path) -> None:
     turn_id = uuid4()
     first_body = (
         "鲁镇的酒店的格局，是和别处不同的：都是当街一个曲尺形的大柜台，"
@@ -264,34 +264,19 @@ async def test_length_short_chapter_thickens_by_append_only(workspace: Path) -> 
     assert first["status"] == "drafted"
     assert int(first["visible_chars"]) >= 800
     assert first.get("length_short") is True
-    marker = "柜里面预备着热水"
-    rejected = await core.draft_section(
+    thicker = first_body + "掌柜取下粉板又挂回去，粉板上还记着十九个钱。" * 12
+    rewritten = await core.draft_section(
         "ch1",
-        first_body + "整章重交应被拒。",
+        thicker,
         turn_id=turn_id,
         fragment="mixed",
         turn_user_text="写一篇故事，6000字",
         narrative_commitment=_COMMIT,
     )
-    assert rejected["status"] == "error"
-    assert rejected["error"] == "rewrite_via_patch"
-    assert "mode=append" in rejected["summary"]
-    tail = "粉板上记着十九个钱，掌柜取下粉板又挂回去。"
-    appended = await core.draft_section(
-        "ch1",
-        tail,
-        turn_id=turn_id,
-        fragment="mixed",
-        mode="append",
-        turn_user_text="写一篇故事，6000字",
-    )
-    assert appended["status"] == "drafted"
-    assert appended.get("mode") == "append"
+    assert rewritten["status"] == "drafted"
     text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
-    assert marker in text
     assert "十九个钱" in text
-    assert "整章重交应被拒" not in text
-    assert int(appended["visible_chars"]) > int(first["visible_chars"])
+    assert int(rewritten["visible_chars"]) > int(first["visible_chars"])
 
 
 _DUET_CHIP = (
