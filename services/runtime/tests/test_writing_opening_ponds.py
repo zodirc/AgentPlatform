@@ -401,6 +401,86 @@ def test_clear_and_load_opening_ponds_browse_is_soft(workspace: Path) -> None:
     assert format_opening_ponds_block(workspace_root=workspace) == ""
 
 
+def test_seed_outline_from_pond_empty_wrap_and_prepend(
+    workspace: Path, monkeypatch
+) -> None:
+    from app.writing.opening_ponds import seed_outline_from_pond
+
+    seed_outline_from_pond({}, workspace_root=workspace)
+    assert not (workspace / "outline.md").exists()
+
+    seed_outline_from_pond(
+        {
+            "title": "《玉里有人》",
+            "flavor": "旧货摊称来的玉里锁着半部功法。",
+            "opening": "夜里枕头底下发烫。",
+        },
+        workspace_root=workspace,
+    )
+    first = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert first.count("《") == 1
+    assert "《玉里有人》" in first
+    assert "## 主线一句话" in first
+
+    (workspace / "outline.md").write_text("## 主线一句话\n先往前走。\n", encoding="utf-8")
+    seed_outline_from_pond(
+        {
+            "title": "废脉剑声",
+            "flavor": "边荒剑冢夜里会响。",
+        },
+        workspace_root=workspace,
+    )
+    prepended = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert prepended.index("## 这本书") < prepended.index("## 主线一句话")
+    assert "开篇：" not in prepended
+
+    outline = workspace / "outline.md"
+    outline.write_text("## 主线一句话\n先往前走。\n", encoding="utf-8")
+    real_read = Path.read_text
+
+    def _boom(self, *args, **kwargs):
+        if self == outline:
+            raise OSError("busy")
+        return real_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", _boom)
+    seed_outline_from_pond(
+        {"title": "废脉剑声", "flavor": "边荒剑冢夜里会响。"},
+        workspace_root=workspace,
+    )
+    assert "《废脉剑声》" in real_read(outline, encoding="utf-8")
+
+
+def test_opening_ponds_fallback_and_bad_sidecar(workspace: Path, monkeypatch) -> None:
+    from app.writing.opening_ponds import (
+        _clip,
+        committed_pond_title,
+        format_opening_ponds_block,
+        load_committed_pond,
+        opening_choice_block,
+    )
+
+    monkeypatch.setattr(
+        "app.writing.opening_ponds._OPENING_CHOICE_REL",
+        workspace / "missing_opening_choice.md",
+    )
+    fallback = opening_choice_block()
+    assert "Call `propose_opening_ponds`" in fallback
+
+    sidecar = workspace / ".agent" / "work" / "committed_pond.json"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text("{not json", encoding="utf-8")
+    assert load_committed_pond(workspace_root=workspace) is None
+    sidecar.write_text("[]\n", encoding="utf-8")
+    assert load_committed_pond(workspace_root=workspace) is None
+    sidecar.write_text('{"flavor": "only"}\n', encoding="utf-8")
+    assert load_committed_pond(workspace_root=workspace) is None
+
+    assert committed_pond_title("  ") is None
+    assert _clip("abcdefghij", 4).endswith("…")
+    assert format_opening_ponds_block(workspace_root=workspace, mode="nope") == ""
+
+
 def test_save_committed_pond_copies_card_into_outline(workspace: Path) -> None:
     from app.writing.opening_ponds import save_committed_pond
     from app.writing.outline_arc import (
