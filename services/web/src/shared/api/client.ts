@@ -288,11 +288,41 @@ export type WritingBook = {
   empty: boolean;
   parts: WritingBookPart[];
   wild_cards?: number[];
+  swerves?: number[];
   consistency_flags?: Array<{
     kind?: string;
     text?: string;
     section_id?: string;
     ch?: number;
+  }>;
+  identity?: { is?: string[]; is_not?: string[]; voice_note?: string };
+  reader_ledger?: {
+    believes?: string[];
+    suspects?: string[];
+    waiting_for?: string[];
+    tired_of?: string[];
+  };
+  promises?: Array<{ what?: string; made_ch?: number; due?: string }>;
+  deferred?: Array<{ question?: string; since_ch?: number; until?: string }>;
+  editor_flags?: Array<{
+    type?: string;
+    where?: string;
+    evidence?: string;
+    severity?: string;
+  }>;
+  editor_keep?: string[];
+  taste_marks?: Array<{
+    kind?: string;
+    excerpt?: string;
+    section_id?: string;
+    note?: string;
+    source?: string;
+  }>;
+  retcon_pending?: Array<{
+    ch?: string;
+    old_text?: string;
+    new_text?: string;
+    why?: string;
   }>;
 };
 
@@ -341,6 +371,23 @@ export async function verdictWritingBook(body: {
   });
   if (!res.ok) throw new Error(`verdictWritingBook failed: ${res.status}`);
   return res.json() as Promise<{ ok: boolean; book: WritingBook }>;
+}
+
+export async function markWritingTaste(body: {
+  section_id?: string;
+  kind: "yes" | "ai" | "off" | "cut";
+  excerpt: string;
+  note?: string;
+  path?: string;
+}): Promise<{ ok: boolean; book?: WritingBook; mark?: unknown; cut?: { status?: string; path?: string } }> {
+  const res = await fetch(`${API_BASE}/works/default/book/taste`, {
+    ...sessionFetchInit,
+    method: "POST",
+    headers: apiAuthHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`markWritingTaste failed: ${res.status}`);
+  return res.json() as Promise<{ ok: boolean; book?: WritingBook; mark?: unknown }>;
 }
 
 /**

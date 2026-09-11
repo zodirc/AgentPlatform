@@ -34,6 +34,7 @@ import { Input } from "../../components/ui/input";
 import {
   downloadWorkspaceFile,
   fetchWorkspaceFile,
+  markWritingTaste,
   saveWorkspaceFile,
 } from "../../shared/api/client";
 import { isSeedCorpusPath } from "../../shared/workspace/seedPath";
@@ -172,6 +173,13 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
   const [draft, setDraft] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [justSaved, setJustSaved] = useState(false);
+  const [tasteSel, setTasteSel] = useState<{
+    text: string;
+    from: number;
+    to: number;
+  } | null>(null);
+  const [tasteNote, setTasteNote] = useState("");
+  const [tasteBusy, setTasteBusy] = useState(false);
 
   const seedLocked = Boolean(path && isSeedCorpusPath(path));
 
@@ -243,6 +251,20 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
       ),
       keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap]),
       EditorState.allowMultipleSelections.of(true),
+      EditorView.updateListener.of((update) => {
+        if (!update.selectionSet && !update.focusChanged) return;
+        const range = update.state.selection.main;
+        if (range.empty) {
+          setTasteSel(null);
+          return;
+        }
+        const text = update.state.doc.sliceString(range.from, range.to);
+        if (text.replace(/\s+/g, "").length < 6) {
+          setTasteSel(null);
+          return;
+        }
+        setTasteSel({ text, from: range.from, to: range.to });
+      }),
     ],
     [],
   );
@@ -279,6 +301,8 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
     setDraft("");
     setSaveError(null);
     setJustSaved(false);
+    setTasteSel(null);
+    setTasteNote("");
     editorViewRef.current = null;
     scrollRef.current?.scrollTo({ top: 0 });
   }, [path]);
@@ -473,6 +497,64 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
   );
 
   const typo = viewerTypography(fontSize);
+  const isDraftProse = Boolean(
+    path &&
+      (path === "drafts/manuscript.md" ||
+        /^drafts\/.+\.md$/.test(path) ||
+        path.endsWith("/manuscript.md")),
+  );
+
+  const inferSectionId = (source: string, from: number) => {
+    const before = source.slice(0, Math.max(0, from));
+    const hits = [...before.matchAll(/#\s*第([0-9一二三四五六七八九十百千零〇两]+)章/g)];
+    const last = hits.at(-1)?.[1];
+    if (!last) return "ch";
+    const map: Record<string, string> = {
+      一: "1",
+      二: "2",
+      三: "3",
+      四: "4",
+      五: "5",
+      六: "6",
+      七: "7",
+      八: "8",
+      九: "9",
+      十: "10",
+    };
+    return `ch${map[last] || last}`;
+  };
+
+  const applyTaste = async (kind: "yes" | "ai" | "off" | "cut") => {
+    if (!path || !tasteSel || tasteBusy) return;
+    if (kind === "cut") {
+      const ok = window.confirm("砍掉这段？将从当前文件里删掉选中原文。");
+      if (!ok) return;
+    }
+    setTasteBusy(true);
+    try {
+      const source = editing ? draft : content;
+      await markWritingTaste({
+        section_id: inferSectionId(source, tasteSel.from),
+        kind,
+        excerpt: tasteSel.text,
+        note: tasteNote.trim() || undefined,
+        path,
+      });
+      if (kind === "cut") {
+        await queryClient.invalidateQueries({
+          queryKey: ["workspace-file-viewer", path],
+        });
+        onSaved?.(path);
+      }
+      setTasteSel(null);
+      setTasteNote("");
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setTasteBusy(false);
+    }
+  };
+
   // Find marks need <pre>; otherwise use the same CM shell for read + edit.
   const usePreForSearch = !editing && searchOpen;
 
@@ -666,6 +748,52 @@ export function WorkspaceFileViewer({ path, onClose, onSaved }: Props) {
             >
               <X className="h-4 w-4" />
             </button>
+          </div>
+        ) : null}
+
+        {isDraftProse && tasteSel ? (
+          <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5 text-[11px]">
+            <span className="mr-1 max-w-[12rem] truncate text-muted-foreground">
+              {tasteSel.text.replace(/\s+/g, " ").slice(0, 40)}
+            </span>
+            <button
+              type="button"
+              className="rounded border border-border px-1.5 py-0.5 hover:bg-muted disabled:opacity-50"
+              disabled={tasteBusy}
+              onClick={() => void applyTaste("yes")}
+            >
+              就是这样
+            </button>
+            <button
+              type="button"
+              className="rounded border border-border px-1.5 py-0.5 hover:bg-muted disabled:opacity-50"
+              disabled={tasteBusy}
+              onClick={() => void applyTaste("ai")}
+            >
+              太 AI
+            </button>
+            <button
+              type="button"
+              className="rounded border border-border px-1.5 py-0.5 hover:bg-muted disabled:opacity-50"
+              disabled={tasteBusy}
+              onClick={() => void applyTaste("off")}
+            >
+              不像这本书
+            </button>
+            <button
+              type="button"
+              className="rounded border border-destructive/40 px-1.5 py-0.5 text-destructive hover:bg-destructive/10 disabled:opacity-50"
+              disabled={tasteBusy}
+              onClick={() => void applyTaste("cut")}
+            >
+              砍
+            </button>
+            <input
+              value={tasteNote}
+              onChange={(e) => setTasteNote(e.target.value.slice(0, 60))}
+              placeholder="备注 ≤60"
+              className="ml-1 h-6 w-28 rounded border border-border bg-background px-1 text-[11px]"
+            />
           </div>
         ) : null}
 

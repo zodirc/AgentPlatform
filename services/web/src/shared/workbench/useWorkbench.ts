@@ -954,6 +954,10 @@ export function useWorkbenchImpl(): WorkbenchState {
     });
   }
 
+  async function handleExecuteRetcon() {
+    await handleSendText("[retcon] 按此执行", { planModeSend: false });
+  }
+
   async function handleSelectOpeningPond(item: OpeningPondItem) {
     const snapshot = turnHistory.at(-1)?.openingPonds ?? liveOpeningPonds;
     if (
@@ -1308,6 +1312,7 @@ export function useWorkbenchImpl(): WorkbenchState {
     dismissPlanSuggest,
     canExecutePlan,
     handleExecutePlan,
+    handleExecuteRetcon,
     canChooseOpeningPonds,
     handleSelectOpeningPond,
     handleMoreOpeningPonds,

@@ -541,6 +541,9 @@ export function AgentSidebar({
               onSelect(null);
               onWorkspaceDeleted?.(paths);
             }}
+            onExecuteRetcon={() => {
+              void wb.handleExecuteRetcon();
+            }}
           />
         ) : (
         <section className="border-b border-border p-3">

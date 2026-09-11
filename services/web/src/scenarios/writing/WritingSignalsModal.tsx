@@ -5,9 +5,16 @@ import {
   saveWorkspaceFile,
 } from "../../shared/api/client";
 import { Button } from "../../components/ui/button";
-
-export type WorkModeChoice = "auto" | "literary" | "web_serial";
-export type BookScopeChoice = "auto" | "short" | "single" | "long";
+import {
+  type BookScopeChoice,
+  type Gains,
+  type RegimeChoice,
+  type WorkModeChoice,
+  fullDefaults,
+  modeForDefaults,
+  parsePrefs,
+  serializePrefs,
+} from "./writingPrefs";
 
 const PREFS_PATH = "writing_prefs.json";
 
@@ -16,6 +23,12 @@ const SCOPE_CHOICES: { id: BookScopeChoice; label: string; hint: string }[] = [
   { id: "short", label: "短篇", hint: "一篇收束的微型弧" },
   { id: "single", label: "单篇", hint: "一篇完整小故事" },
   { id: "long", label: "长篇", hint: "一次一章，海先藏着" },
+];
+
+const REGIME_CHOICES: { id: RegimeChoice; label: string; hint: string }[] = [
+  { id: "auto", label: "自动", hint: "长篇作者档，短篇/单篇严格档" },
+  { id: "author", label: "作者档", hint: "看不见罚分；作者态与账本进窗" },
+  { id: "strict", label: "严格档", hint: "现行闸门一字不改" },
 ];
 
 const MODE_CHOICES: { id: WorkModeChoice; label: string; hint: string }[] = [
@@ -33,104 +46,6 @@ const STYLES: { id: string; label: string; blurb: string }[] = [
   { id: "mixed", label: "综合", blurb: "人物/情节/环境掺着写" },
 ];
 
-/** Platform defaults — not all 100%; mode emphasizes different axes. */
-const DEFAULT_GAINS: Record<Exclude<WorkModeChoice, "auto">, Record<string, number>> = {
-  literary: {
-    dialogue_dyad: 0.85,
-    worldview_texture: 0.8,
-    mixed: 0.7,
-    plot_progress: 0.55,
-    climax_beat: 0.5,
-    battle_action: 0.35,
-  },
-  web_serial: {
-    plot_progress: 0.85,
-    climax_beat: 0.75,
-    battle_action: 0.7,
-    mixed: 0.7,
-    worldview_texture: 0.55,
-    dialogue_dyad: 0.5,
-  },
-};
-
-type Gains = Record<string, number>;
-
-type StoredPrefs = {
-  work_mode?: { source?: string; mode?: string };
-  book_scope?: { source?: string; scope?: string };
-  style_gains?: Record<string, number>;
-};
-
-function modeForDefaults(choice: WorkModeChoice): "literary" | "web_serial" {
-  return choice === "web_serial" ? "web_serial" : "literary";
-}
-
-function fullDefaults(choice: WorkModeChoice): Gains {
-  return { ...DEFAULT_GAINS[modeForDefaults(choice)] };
-}
-
-function parsePrefs(raw: string | undefined): {
-  choice: WorkModeChoice;
-  scope: BookScopeChoice;
-  gains: Gains;
-} {
-  const fallbackChoice: WorkModeChoice = "auto";
-  const fallbackScope: BookScopeChoice = "auto";
-  const fallbackGains = fullDefaults(fallbackChoice);
-  if (!raw?.trim()) {
-    return { choice: fallbackChoice, scope: fallbackScope, gains: fallbackGains };
-  }
-  try {
-    const data = JSON.parse(raw) as StoredPrefs;
-    let choice: WorkModeChoice = "auto";
-    if (
-      data.work_mode?.source === "user" &&
-      (data.work_mode.mode === "literary" || data.work_mode.mode === "web_serial")
-    ) {
-      choice = data.work_mode.mode;
-    }
-    let scope: BookScopeChoice = "auto";
-    if (
-      data.book_scope?.source === "user" &&
-      (data.book_scope.scope === "short" ||
-        data.book_scope.scope === "single" ||
-        data.book_scope.scope === "long")
-    ) {
-      scope = data.book_scope.scope;
-    }
-    const base = fullDefaults(choice);
-    const gains: Gains = { ...base };
-    if (data.style_gains && typeof data.style_gains === "object") {
-      for (const s of STYLES) {
-        const v = Number(data.style_gains[s.id]);
-        if (Number.isFinite(v)) gains[s.id] = Math.max(0, Math.min(1, v));
-      }
-    }
-    return { choice, scope, gains };
-  } catch {
-    return { choice: fallbackChoice, scope: fallbackScope, gains: fallbackGains };
-  }
-}
-
-function serializePrefs(
-  choice: WorkModeChoice,
-  gains: Gains,
-  scope: BookScopeChoice,
-): string {
-  const work_mode =
-    choice === "auto"
-      ? { source: "auto", mode: "literary" }
-      : { source: "user", mode: choice };
-  const book_scope =
-    scope === "auto"
-      ? { source: "auto", scope: "single" }
-      : { source: "user", scope };
-  const style_gains = Object.fromEntries(
-    STYLES.map((s) => [s.id, Math.round((gains[s.id] ?? 0.7) * 100) / 100]),
-  );
-  return `${JSON.stringify({ work_mode, book_scope, style_gains }, null, 2)}\n`;
-}
-
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -139,6 +54,8 @@ type Props = {
 export function WritingSignalsModal({ open, onClose }: Props) {
   const [choice, setChoice] = useState<WorkModeChoice>("auto");
   const [scope, setScope] = useState<BookScopeChoice>("auto");
+  const [regime, setRegime] = useState<RegimeChoice>("auto");
+  const [extraPrefs, setExtraPrefs] = useState<Record<string, unknown>>({});
   const [gains, setGains] = useState<Gains>(() => fullDefaults("auto"));
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -155,6 +72,8 @@ export function WritingSignalsModal({ open, onClose }: Props) {
         const parsed = parsePrefs(file.content);
         setChoice(parsed.choice);
         setScope(parsed.scope);
+        setRegime(parsed.regime);
+        setExtraPrefs(parsed.extra);
         setGains(parsed.gains);
         setDirty(false);
         setMsg(null);
@@ -162,6 +81,8 @@ export function WritingSignalsModal({ open, onClose }: Props) {
         if (cancelled) return;
         setChoice("auto");
         setScope("auto");
+        setRegime("auto");
+        setExtraPrefs({});
         setGains(fullDefaults("auto"));
         setDirty(false);
       } finally {
@@ -191,15 +112,18 @@ export function WritingSignalsModal({ open, onClose }: Props) {
     setBusy(true);
     setMsg(null);
     try {
-      await saveWorkspaceFile(PREFS_PATH, serializePrefs(choice, gains, scope));
+      await saveWorkspaceFile(
+        PREFS_PATH,
+        serializePrefs(choice, gains, scope, regime, extraPrefs),
+      );
       setDirty(false);
-      setMsg("已保存尺度与模式。奖励不进 net；同轮只修 L0。编辑札记在下一章。");
+      setMsg("已保存尺度、档位与模式。奖励不进 net；同轮只修 L0。");
     } catch (e) {
       setMsg(`保存失败：${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setBusy(false);
     }
-  }, [choice, gains, scope]);
+  }, [choice, gains, scope, regime, extraPrefs]);
 
   if (!open) return null;
 
@@ -253,6 +177,37 @@ export function WritingSignalsModal({ open, onClose }: Props) {
                         disabled={busy}
                         onClick={() => {
                           setScope(c.id);
+                          setDirty(true);
+                        }}
+                        className={`rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${
+                          active
+                            ? "border-primary bg-primary/20 text-primary"
+                            : "border-border bg-card/50 text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                        }`}
+                      >
+                        {c.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <section>
+                <h3 className="text-sm font-medium">写作档位</h3>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                  长篇默认作者档。短篇/单篇永远严格档。句里写「作者模式 / 严格模式」可覆盖。
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {REGIME_CHOICES.map((c) => {
+                    const active = regime === c.id;
+                    return (
+                      <button
+                        key={c.id}
+                        type="button"
+                        title={c.hint}
+                        disabled={busy}
+                        onClick={() => {
+                          setRegime(c.id);
                           setDirty(true);
                         }}
                         className={`rounded-md border px-3 py-1.5 text-xs transition-colors disabled:opacity-50 ${

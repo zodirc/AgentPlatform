@@ -14,6 +14,7 @@ type Props = {
   onSelectPath?: (path: string) => void;
   onOpenFile?: (path: string) => void;
   onCleared?: (paths: string[]) => void;
+  onExecuteRetcon?: () => void;
 };
 
 export function WritingBookPanel({
@@ -22,6 +23,7 @@ export function WritingBookPanel({
   onSelectPath,
   onOpenFile,
   onCleared,
+  onExecuteRetcon,
 }: Props) {
   const queryClient = useQueryClient();
   const bookQuery = useQuery({
@@ -141,6 +143,86 @@ export function WritingBookPanel({
           <p className="mt-2 text-[10px] text-muted-foreground/80">
             单击选中 · 双击打开 · 编辑札记在下一章
           </p>
+          {(() => {
+            const hand = book.parts.find((part) => part.kind === "author_state");
+            if (!hand?.text) return null;
+            const rereadIdx = hand.text.indexOf("## 回读记");
+            const stance = rereadIdx >= 0 ? hand.text.slice(0, rereadIdx).trim() : hand.text;
+            const reread =
+              rereadIdx >= 0 ? hand.text.slice(rereadIdx).replace(/^## 回读记\s*/, "").trim() : "";
+            return (
+              <div className="mt-3 space-y-1 rounded border border-border/70 px-2 py-1.5 text-[11px]">
+                <p className="text-[10px] font-medium text-muted-foreground">作者手记</p>
+                <p className="whitespace-pre-wrap text-foreground/90">{stance.slice(0, 800)}</p>
+                {reread ? (
+                  <>
+                    <p className="pt-1 text-[10px] font-medium text-muted-foreground">回读记</p>
+                    <p className="whitespace-pre-wrap text-foreground/90">{reread.slice(0, 400)}</p>
+                  </>
+                ) : null}
+              </div>
+            );
+          })()}
+          {(book.taste_marks?.length ?? 0) > 0 ? (
+            <div className="mt-3 space-y-1 rounded border border-border/70 px-2 py-1.5 text-[11px]">
+              <p className="text-[10px] font-medium text-muted-foreground">口味标记</p>
+              {book.taste_marks!.slice(-8).map((mark, idx) => (
+                <p key={`tm-${idx}`} className="text-foreground/90">
+                  [{mark.kind || "?"}] {(mark.excerpt || "").slice(0, 60)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {book.reader_ledger || (book.promises?.length ?? 0) > 0 || (book.deferred?.length ?? 0) > 0 || book.identity ? (
+            <div className="mt-3 space-y-1 rounded border border-border/70 px-2 py-1.5 text-[11px]">
+              <p className="text-[10px] font-medium text-muted-foreground">账本</p>
+              {Array.isArray(book.identity?.is) && book.identity.is.length > 0 ? (
+                <p className="text-foreground/90">是：{book.identity.is.join("、")}</p>
+              ) : null}
+              {Array.isArray(book.identity?.is_not) && book.identity.is_not.length > 0 ? (
+                <p className="text-foreground/90">不是：{book.identity.is_not.join("、")}</p>
+              ) : null}
+              {(book.reader_ledger?.waiting_for?.length ?? 0) > 0 ? (
+                <p className="text-foreground/90">
+                  读者在等：{book.reader_ledger!.waiting_for!.join("、")}
+                </p>
+              ) : null}
+              {(book.deferred?.length ?? 0) > 0 ? (
+                <p className="text-foreground/90">
+                  还不决定：{book.deferred!.map((d) => d.question).filter(Boolean).join("、")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+          {(book.editor_flags?.length ?? 0) > 0 ? (
+            <div className="mt-3 space-y-1 rounded border border-border/70 px-2 py-1.5 text-[11px]">
+              <p className="text-[10px] font-medium text-muted-foreground">编辑旗</p>
+              {book.editor_flags!.slice(0, 6).map((flag, idx) => (
+                <p key={`ed-${idx}`} className="text-foreground/90">
+                  [{flag.type || flag.severity}] {flag.where || ""} {flag.evidence || ""}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {(book.retcon_pending?.length ?? 0) > 0 ? (
+            <div className="mt-3 rounded border border-primary/40 px-2 py-1.5 text-[11px]">
+              <p className="text-[10px] font-medium text-muted-foreground">retcon 待执行</p>
+              {book.retcon_pending!.map((item, idx) => (
+                <p key={`rc-${idx}`} className="mt-1 text-foreground/90">
+                  {item.ch || "前文"}：{item.why || item.old_text?.slice(0, 40) || "改一段"}
+                </p>
+              ))}
+              {onExecuteRetcon ? (
+                <button
+                  type="button"
+                  className="mt-2 rounded border border-primary/50 px-2 py-0.5 text-primary hover:bg-primary/10"
+                  onClick={() => onExecuteRetcon()}
+                >
+                  按此执行
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </>
       )}
 

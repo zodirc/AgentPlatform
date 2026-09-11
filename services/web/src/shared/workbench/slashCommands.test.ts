@@ -28,6 +28,8 @@ describe("filterSlashCommands", () => {
     const writing = filterSlashCommands("", "writing").map((c) => c.id);
     expect(writing).toContain("polish");
     expect(writing).toContain("outline");
+    expect(writing).toContain("edit");
+    expect(writing).toContain("reread");
     expect(writing).not.toContain("test");
 
     const agent = filterSlashCommands("", "agent").map((c) => c.id);

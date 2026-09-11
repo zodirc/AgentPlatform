@@ -7,6 +7,8 @@ export type SlashCommandId =
   | "verify"
   | "polish"
   | "outline"
+  | "edit"
+  | "reread"
   | "test"
   | "lint";
 
@@ -59,6 +61,20 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     label: "/outline",
     description: "只改大纲 outline.md，不写正文",
     scenarios: ["writing", "intel"],
+  },
+  {
+    id: "edit",
+    insert: "/edit ",
+    label: "/edit",
+    description: "编辑看看这一章（只出旗，不动稿）",
+    scenarios: ["writing"],
+  },
+  {
+    id: "reread",
+    insert: "/reread ",
+    label: "/reread",
+    description: "回头读原文；改前文须按此执行",
+    scenarios: ["writing"],
   },
   {
     id: "test",

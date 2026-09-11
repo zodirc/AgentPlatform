@@ -161,6 +161,20 @@ export function WritingSignalsLabPage() {
     index?: { chapters?: unknown[] };
     flags?: Record<string, unknown>;
   } | null>(null);
+  const [regimeSnap, setRegimeSnap] = useState<{
+    regime?: { value?: string; source?: string };
+    alignment?: { ready?: boolean; n_samples?: number; points?: Array<{ section_id?: string; alignment?: number }> };
+    metrics?: {
+      taste?: { n?: number; counts?: { yes?: number; ai?: number; off?: number } };
+      editor_flags?: { hard?: number; soft?: number };
+      promises_overdue?: number;
+      deferred_alive?: number;
+      author_state_stale?: boolean;
+      choice_history_entropy?: number;
+      retcon_pending?: number;
+    };
+    reports?: { baseline?: unknown; utilization?: unknown };
+  } | null>(null);
 
   const loadExemplars = useCallback(async () => {
     if (!secret) return;
@@ -204,6 +218,24 @@ export function WritingSignalsLabPage() {
         }
       } catch {
         /* sidecar 缺则空白，评分结果里仍有本次 surface */
+      }
+    })();
+  }, [secret]);
+
+  useEffect(() => {
+    if (!secret) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/ops/writing/regime", {
+          headers: authHeaders(secret),
+        });
+        if (!res.ok) return;
+        const payload = await res.json().catch(() => null);
+        if (payload && typeof payload === "object") {
+          setRegimeSnap(payload);
+        }
+      } catch {
+        /* 对照页缺则空白 */
       }
     })();
   }, [secret]);
@@ -282,6 +314,34 @@ export function WritingSignalsLabPage() {
     >
       {loadError ? (
         <p className="mb-3 text-sm text-destructive">{loadError}</p>
+      ) : null}
+
+      {regimeSnap ? (
+        <section className="mb-4 rounded-lg border border-border bg-card px-3 py-2 text-xs">
+          <p className="font-medium text-foreground">档位对照</p>
+          <p className="mt-1 text-muted-foreground">
+            当前档 {regimeSnap.regime?.value || "—"}（{regimeSnap.regime?.source || "default"}）
+            {regimeSnap.alignment?.ready
+              ? ` · 本书原型 ${regimeSnap.alignment.n_samples} 条`
+              : " · 本书原型样本不足 4，对齐不算"}
+          </p>
+          {(regimeSnap.alignment?.points?.length ?? 0) > 0 ? (
+            <ol className="mt-1 list-decimal pl-4 text-muted-foreground">
+              {regimeSnap.alignment!.points!.map((pt) => (
+                <li key={pt.section_id || ""}>
+                  {pt.section_id}：{typeof pt.alignment === "number" ? pt.alignment.toFixed(3) : "—"}
+                </li>
+              ))}
+            </ol>
+          ) : null}
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            基线报告 {regimeSnap.reports?.baseline ? "已落盘" : "未跑"} · 利用率{" "}
+            {regimeSnap.reports?.utilization ? "已落盘" : "未跑"}
+            {regimeSnap.metrics
+              ? ` · 口味 ${regimeSnap.metrics.taste?.n ?? 0} · 编辑旗 hard ${regimeSnap.metrics.editor_flags?.hard ?? 0}/soft ${regimeSnap.metrics.editor_flags?.soft ?? 0} · 逾期许诺 ${regimeSnap.metrics.promises_overdue ?? 0}`
+              : ""}
+          </p>
+        </section>
       ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[minmax(16rem,20rem)_minmax(0,1fr)]">

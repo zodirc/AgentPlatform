@@ -129,6 +129,8 @@ export type WorkbenchState = {
   /** 仅 Plan 模式生成的「全 pending」清单且待用户确认时为 true。 */
   canExecutePlan: boolean;
   handleExecutePlan: () => Promise<void>;
+  /** 回读 retcon 清单待用户按此执行。 */
+  handleExecuteRetcon: () => Promise<void>;
   /** 最新一轮开篇候选仍待点选（或说「我要其他的」）。 */
   canChooseOpeningPonds: boolean;
   handleSelectOpeningPond: (item: import("./openingPonds").OpeningPondItem) => Promise<void>;
