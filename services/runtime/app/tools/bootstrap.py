@@ -175,8 +175,10 @@ def build_registry() -> ToolRegistry:
                 "If repair_span.neighbor is set (this work's own beat), follow "
                 "that beat's rhythm — do not copy its plot, and do not strip "
                 "quotes into narration. "
-                "wild_card=true is allowed once per 5 chapters; that chapter's "
-                "L1 observations are silenced. "
+                "wild_card=true is allowed once per 5 chapters in strict regime; "
+                "that chapter's L1 observations are silenced. "
+                "In author regime pass optional swerve=true to record a debt "
+                "(no quota) and optional choices instead of narrative_commitment. "
                 f"After {MAX_PATCHES_PER_PENALTY_KEY} applied propose_patch per penalty_key, "
                 "only a chip-sized repair_span (≤160 visible chars) may use "
                 "mode=rewrite_window once. A window-sized span, an untouched-island "
@@ -233,11 +235,27 @@ def build_registry() -> ToolRegistry:
                         ),
                     },
                     "narrative_commitment": DRAFT_COMMITMENT_PROPERTY,
+                    "choices": {
+                        **DRAFT_COMMITMENT_PROPERTY,
+                        "description": (
+                            "Optional self-report of this chapter's choices "
+                            "(same slots as narrative_commitment). Author regime "
+                            "does not reject on quota."
+                        ),
+                    },
                     "wild_card": {
                         "type": "boolean",
                         "description": (
-                            "Once per 5 chapters: this chapter may do something "
-                            "an editor would refuse. L1 observations are silenced."
+                            "Strict regime only. Once per 5 chapters: this chapter "
+                            "may do something an editor would refuse. L1 observations "
+                            "are silenced."
+                        ),
+                    },
+                    "swerve": {
+                        "type": "boolean",
+                        "description": (
+                            "Author regime: record a narrative debt on this chapter. "
+                            "No quota. Later chapters should show a consequence."
                         ),
                     },
                 },
@@ -360,9 +378,9 @@ def build_registry() -> ToolRegistry:
             name="propose_opening_ponds",
             description=(
                 "Propose 2–3 opening ponds as books the user can pick: "
-                "title + 这本书 (flavor) + opening. Unique start_kind "
-                "and unique price_axis, not-all-same promise, "
-                "not-all-trusted source_trust. "
+                "title + 这本书 (flavor) + opening first, then optional "
+                "self-description. Books must be different from each other "
+                "(not a job/place/paper/ability reskin). "
                 "Do not split into 账单/走向/气味. "
                 "UI picker is the deliverable; do not list ponds in chat. "
                 "Use when the user only gave a genre or said 看看 / 我要其他的."
@@ -380,69 +398,79 @@ def build_registry() -> ToolRegistry:
                                 "id": {"type": "string"},
                                 "title": {
                                     "type": "string",
-                                    "description": "连载书名：能力/身份错位/会变大的局。不要第七码头这种工作地点，不要修仙从替班开始，不要七张收据",
-                                },
-                                "who": {
-                                    "type": "string",
-                                    "description": "棋盘上可晋升的位置（囚犯/考生/打更人/干员），不是工种自我介绍",
-                                },
-                                "where": {
-                                    "type": "string",
-                                    "description": "这场事故发生的棋盘，不是补证窗口/失物招领",
-                                },
-                                "want": {
-                                    "type": "string",
-                                    "description": "这场事故里必须先决定的那一步（烙不烙、截不截），不是零点前换证/封站前送钥匙",
-                                },
-                                "opening": {
-                                    "type": "string",
-                                    "description": "这本书的力怎么亮：第一句就是这盘游戏的事故，不是吊臂砸人、信物按进掌心、药柜滚尸",
+                                    "description": "连载书名：第 400 章还站得住的游戏名，不是工位或证件名",
                                 },
                                 "flavor": {
                                     "type": "string",
-                                    "description": "这本书：人身上能用的能力或还在运转的规则。都市修真三张要覆盖错位/异能组织/金手指有阴谋，不要两本都在码头和跳桥",
+                                    "description": "这本书：社会角落、持续矛盾机制、写到第 200 章还在发生什么",
+                                },
+                                "opening": {
+                                    "type": "string",
+                                    "description": "这本书今晚怎么开始：第一句是事故，至多两句",
+                                },
+                                "book_self_note": {
+                                    "type": "string",
+                                    "description": "写完书后再填：一句话，这本书在玩什么",
+                                },
+                                "social_space": {
+                                    "type": "string",
+                                    "description": "可选自述：故事发生在哪一块社会空间",
+                                },
+                                "engine_note": {
+                                    "type": "string",
+                                    "description": "可选自述：为什么能一直写",
+                                },
+                                "who": {
+                                    "type": "string",
+                                    "description": "可选。棋盘上跟着谁，且已写进这本书/开篇",
+                                },
+                                "where": {
+                                    "type": "string",
+                                    "description": "可选。这场事故发生的地方，且已写进这本书/开篇",
+                                },
+                                "want": {
+                                    "type": "string",
+                                    "description": "可选。这场事故里必须先决定的那一步",
                                 },
                                 "arc": {
                                     "type": "string",
-                                    "description": "可选。不要写成院司宫晋升名录；卡片上不展示",
+                                    "description": "可选。卡片上不展示",
                                 },
                                 "price": {
                                     "type": "string",
-                                    "description": "可选。不要把整本书写成每做一次就永久扣一笔；卡片上不展示",
+                                    "description": "可选。卡片上不展示",
                                 },
                                 "start_kind": {
                                     "type": "string",
                                     "description": (
-                                        "Unique. self_notice|pulled_in|"
-                                        "granted_path|world_already|no_extraordinary"
+                                        "Optional telemetry after the book is written. "
+                                        "self_notice|pulled_in|granted_path|"
+                                        "world_already|no_extraordinary"
                                     ),
                                 },
                                 "promise": {
                                     "type": "string",
                                     "description": (
-                                        "Not all same. power_steps|costly_truth|"
+                                        "Optional telemetry. power_steps|costly_truth|"
                                         "survive_relation|dread_decode|social_place"
                                     ),
                                 },
                                 "source_trust": {
                                     "type": "string",
-                                    "description": (
-                                        "trusted|dubious|false. "
-                                        "items≥3 not all trusted"
-                                    ),
+                                    "description": "Optional. trusted|dubious|false",
                                 },
                                 "first_conflict_at": {
                                     "type": "string",
                                     "description": (
-                                        "first_300|first_1000|chapter_one|later. "
-                                        "at most one later"
+                                        "Optional. first_300|first_1000|"
+                                        "chapter_one|later. at most one later"
                                     ),
                                 },
                                 "price_axis": {
                                     "type": "string",
                                     "description": (
-                                        "Unique. lifespan|memory|contract|"
-                                        "status|none. Who pays, not workplace."
+                                        "Optional telemetry. lifespan|memory|contract|"
+                                        "status|none. Describes who pays, not the book."
                                     ),
                                 },
                                 "chapter_job": {"type": "string"},
@@ -450,11 +478,8 @@ def build_registry() -> ToolRegistry:
                             },
                             "required": [
                                 "title",
-                                "opening",
                                 "flavor",
-                                "start_kind",
-                                "promise",
-                                "price_axis",
+                                "opening",
                             ],
                         },
                     },
@@ -502,7 +527,8 @@ def build_registry() -> ToolRegistry:
             description=(
                 "After a chapter is drafted, optionally record up to 3 free sentences "
                 "of what changed, plus an optional structured patch "
-                "(wants/pressures/threads/info_gaps/taboos). Not scored."
+                "(wants/pressures/threads/info_gaps/taboos/"
+                "reader_ledger/promises/deferred/identity). Not scored."
             ),
             parameters={
                 "type": "object",
@@ -513,7 +539,13 @@ def build_registry() -> ToolRegistry:
                         "items": {"type": "string"},
                         "maxItems": 3,
                     },
-                    "patch": {"type": "object"},
+                    "patch": {
+                        "type": "object",
+                        "description": (
+                            "Optional ledger patch: wants/pressures/threads/"
+                            "info_gaps/taboos/reader_ledger/promises/deferred/identity"
+                        ),
+                    },
                 },
                 "required": ["section_id"],
             },
@@ -540,6 +572,137 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
+            name="author_state",
+            description=(
+                "Maintain this book's first-person author notebook "
+                "(stance / doubt / want-to-try / regret / deferred). "
+                "Not a summary. Not scored. "
+                "reread_note is only writable on a reread turn."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "section": {
+                        "type": "string",
+                        "enum": [
+                            "我现在怎么看这本书",
+                            "我在疑心什么",
+                            "我想试什么",
+                            "我后悔什么",
+                            "我故意还不决定的事",
+                            "回读记",
+                            "立场",
+                            "疑心",
+                            "想试",
+                            "后悔",
+                            "悬置",
+                        ],
+                    },
+                    "text": {"type": "string"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "append"],
+                        "default": "replace",
+                    },
+                },
+                "required": ["section", "text"],
+            },
+            handler=core.author_state,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="reread_book",
+            description=(
+                "Reread-phase only. Return a budgeted pack of original prose "
+                "(not a synopsis): opening, user taste marks, overdue promises, "
+                "volume tail, editor flags. No scores."
+            ),
+            parameters={"type": "object", "properties": {}},
+            handler=core.reread_book,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="propose_retcon",
+            description=(
+                "Reread-phase only. Propose earlier-chapter patches as a pending "
+                "list. Does not write the manuscript. Stops the turn until the "
+                "user confirms. Then each item is applied via propose_patch."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "ch": {"type": "string"},
+                                "old_text": {"type": "string"},
+                                "new_text": {"type": "string"},
+                                "why": {"type": "string"},
+                            },
+                            "required": ["ch", "old_text", "new_text"],
+                        },
+                    },
+                },
+                "required": ["items"],
+            },
+            handler=core.propose_retcon,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="editor_report",
+            description=(
+                "Editor-phase only. Typed flags that protect the book. "
+                "Never edits prose. evidence must not contain should/please/"
+                "change-to/must/remember. keep: up to 3 passages that ARE this book."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "section_id": {"type": "string"},
+                    "flags": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {
+                                    "type": "string",
+                                    "enum": [
+                                        "continuity_break",
+                                        "promise_overdue",
+                                        "identity_drift",
+                                        "reader_confusion",
+                                        "author_state_stale",
+                                        "surface_observation",
+                                    ],
+                                },
+                                "where": {"type": "string"},
+                                "evidence": {"type": "string"},
+                                "severity": {
+                                    "type": "string",
+                                    "enum": ["hard", "soft", "info"],
+                                },
+                            },
+                            "required": ["type", "evidence"],
+                        },
+                    },
+                    "keep": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": 3,
+                    },
+                },
+                "required": ["section_id"],
+            },
+            handler=core.editor_report,
+        )
+    )
+    registry.register(
+        ToolSpec(
             name="update_outline",
             description=(
                 "Create or update outline.md (creates the file when absent; empty "
@@ -558,6 +721,31 @@ def build_registry() -> ToolRegistry:
                     "force": {
                         "type": "boolean",
                         "description": "Allow replace that shrinks a large existing outline",
+                    },
+                    "volume": {
+                        "type": "object",
+                        "description": (
+                            "Optional volume-question structure rendered as ## 卷 N. "
+                            "Syncs must_not_decide_yet into deferred and "
+                            "promises_due into promises."
+                        ),
+                        "properties": {
+                            "index": {"type": "integer"},
+                            "chapters": {"type": "string"},
+                            "questions": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "must_not_decide_yet": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "promises_due": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "where_it_stands": {"type": "string"},
+                        },
                     },
                 },
                 "required": ["content"],
@@ -1177,6 +1365,30 @@ OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
     }
 )
 
+EDITOR_PHASE_TOOL_ALLOWLIST = frozenset(
+    {
+        "read_file",
+        "grep",
+        "glob",
+        "editor_report",
+        "stub_echo",
+    }
+)
+
+REREAD_PHASE_TOOL_ALLOWLIST = frozenset(
+    {
+        "read_file",
+        "list_dir",
+        "grep",
+        "glob",
+        "reread_book",
+        "author_state",
+        "note_story_delta",
+        "propose_retcon",
+        "stub_echo",
+    }
+)
+
 # After "execute this plan": write tools waive re-approval; shell still uses normal approval.
 # 「按此执行」后：清单已同意 → 写盘类免再审；shell 仍走普通审批。
 _PLAN_EXECUTING_WAIVE_APPROVAL = ON_WRITE_TOOLS | frozenset({"rename_file"})
@@ -1188,8 +1400,10 @@ def tool_scope(
     *,
     plan_phase: str | None = None,
     opening_choice: bool = False,
+    editor_phase: bool = False,
+    reread_phase: bool = False,
 ) -> list[ToolSpec]:
-    """按场景 Profile（及可选 Plan 相位 / 开篇点选）裁剪本 Turn 可用工具。
+    """按场景 Profile（及可选 Plan 相位 / 开篇点选 / 编辑 / 回读）裁剪本 Turn 可用工具。
 
     English: Build the per-turn ToolSpec list from ScenarioProfile.tool_names and
     approval_overrides, then apply plan-phase rules:
@@ -1197,6 +1411,8 @@ def tool_scope(
     - ``executing`` → waive approval for on-write tools (user already approved the plan).
     - ``opening_choice`` → allowlist only (propose_opening_ponds / stub_echo);
       ignored when ``planning`` (Plan mode wins).
+    - ``editor_phase`` / ``reread_phase`` → writing role allowlists; ignored when
+      planning or opening_choice. Priority: planning > opening_choice > editor > reread.
 
     Always ensures ``stub_echo`` is present for ops/debug probes. Does not register
     new handlers — only selects and ``replace()``s approval flags from
@@ -1208,6 +1424,8 @@ def tool_scope(
         plan_phase: 计划相位。``planning`` 时仅清单工具；``executing`` 时对写盘免审。
             为 ``None`` 时按 Profile 默认审批策略。
         opening_choice: 开篇近池点选；仅卡片工具。
+        editor_phase: 编辑 Turn；只读 + editor_report。
+        reread_phase: 回读 Turn；读工具 + reread_book / author_state / retcon。
 
     返回:
         已套用审批覆盖后的 ToolSpec 列表（可直接交给 AgentEngine / ToolExecutor）。
@@ -1228,6 +1446,15 @@ def tool_scope(
             and registry.get("propose_opening_ponds") is not None
         ):
             names.append("propose_opening_ponds")
+    elif editor_phase:
+        names = [n for n in names if n in EDITOR_PHASE_TOOL_ALLOWLIST]
+        if "editor_report" not in names and registry.get("editor_report") is not None:
+            names.append("editor_report")
+    elif reread_phase:
+        names = [n for n in names if n in REREAD_PHASE_TOOL_ALLOWLIST]
+        for extra in ("reread_book", "author_state", "note_story_delta", "propose_retcon"):
+            if extra not in names and registry.get(extra) is not None:
+                names.append(extra)
     specs: list[ToolSpec] = []
     for name in names:
         base = registry.get(name)

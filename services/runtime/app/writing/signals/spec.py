@@ -16,6 +16,7 @@ from app.writing.work_mode import (
     resolve_work_mode,
     work_mode_label,
 )
+from app.writing.regime import is_author_regime
 
 normalize_fragment = _writing_prefs().normalize_fragment
 
@@ -170,4 +171,9 @@ def build_writing_spec_block(
         "- 若 tool_result 点名弱窗：同轮 propose_patch 只改那一窗，收成一两句或动手"
     )
     text = "\n".join(lines)
-    return text if len(text) <= 620 else text[:619] + "…"
+    author = is_author_regime(message, workspace_root=workspace_root)
+    if author:
+        lines = [ln for ln in lines if "若 tool_result 点名弱窗" not in ln]
+        text = "\n".join(lines)
+    cap = 500 if author else 620
+    return text if len(text) <= cap else text[: cap - 1] + "…"

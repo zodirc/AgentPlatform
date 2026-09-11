@@ -127,6 +127,8 @@ def test_help_lists_test_and_lint() -> None:
     help_text = should_query("/help", has_model_key=True).local_response or ""
     assert "/test" in help_text
     assert "/lint" in help_text
+    assert "/edit" in help_text
+    assert "/reread" in help_text
 
 
 def test_input_compiler_expands_polish_into_user_message() -> None:
@@ -135,6 +137,40 @@ def test_input_compiler_expands_polish_into_user_message() -> None:
     assert compiled.metadata.get("slash_expand") == "polish"
     assert text.startswith("[polish]")
     assert "/polish" not in text.split("\n")[0] or "[polish]" in text
+
+
+def test_input_compiler_expands_edit_and_reread() -> None:
+    from app.controller.input_compiler import EDIT_EXPAND, REREAD_EXPAND
+
+    compiled = InputCompiler().compile("/edit 第七章")
+    text = compiled.messages[0]["content"][0]["text"]
+    assert compiled.metadata.get("slash_expand") == "edit"
+    assert text.startswith("[edit]")
+    assert "第七章" in text
+    assert text.startswith(EDIT_EXPAND) or EDIT_EXPAND.split("。")[0] in text
+
+    compiled = InputCompiler().compile("/reread")
+    text = compiled.messages[0]["content"][0]["text"]
+    assert compiled.metadata.get("slash_expand") == "reread"
+    assert text.startswith("[reread]")
+    assert "reread_book" in text
+    assert REREAD_EXPAND.split("。")[0] in text
+
+
+def test_input_compiler_expands_retcon_execute(workspace: Path) -> None:
+    from app.writing.reread import save_retcon_pending
+
+    save_retcon_pending(
+        [{"ch": "ch1", "old_text": "旧句", "new_text": "新句", "why": "对不上"}],
+        workspace_root=workspace,
+    )
+    compiled = InputCompiler().compile("[retcon] 按此执行")
+    text = compiled.messages[0]["content"][0]["text"]
+    assert compiled.metadata.get("retcon_execute") is True
+    assert "propose_patch" in text
+    assert "旧句" in text
+    plan = InputCompiler().compile("按此执行")
+    assert plan.metadata.get("retcon_execute") is not True
 
 
 def test_polish_expand_does_not_change_system_prefix_hash(tmp_path: Path) -> None:

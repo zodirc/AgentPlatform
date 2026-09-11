@@ -53,8 +53,9 @@ from app.tools.core.writing_tools import (
     _legacy_draft_file_path, _manifest_candidate_paths, _manifest_path,
     _prune_section_history, _read_manifest, _revision_candidate_paths,
     _revision_file_path, _section_filename, _session_scope, _turn_scope,
-    _write_manifest, author_note, draft_section, note_story_delta,
-    propose_chapter_openings, propose_opening_ponds, update_outline, update_plan,
+    _write_manifest, author_note, author_state, draft_section, editor_report,
+    note_story_delta, propose_chapter_openings, propose_opening_ponds, propose_retcon,
+    reread_book, update_outline, update_plan,
 )
 from app.writing.signals.assemble import evaluate_writing_fragment, writing_rubric
 

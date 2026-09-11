@@ -228,18 +228,46 @@ def classify_entry(blob: str) -> str:
 
 
 def pond_vector(item: Mapping[str, Any]) -> dict[str, str]:
+    """章承诺 Hamming 仍可用。开篇候选不再用此向量做 Turn 决策。"""
     blob = _pond_blob(item)
-    where = str(item.get("where") or "") + str(item.get("opening") or "")
-    place = "transit" if any(tok in where for tok in ("地铁", "电梯", "高架")) else "other"
     declared = str(item.get("price_axis") or "").strip().lower()
     price = declared if declared in _PRICE_AXES else classify_price(blob)
     return encode_vector(
         {
             "start_kind": item.get("start_kind"),
             "promise": item.get("promise"),
-            "place_class": place,
+            "place_class": "other",
             "source_trust": item.get("source_trust"),
             "price_class": price,
             "entry_class": classify_entry(blob),
         }
     )
+
+
+def append_pond_fingerprint(
+    item: Mapping[str, Any],
+    *,
+    workspace_root: Path,
+    embedding: Sequence[float] | None = None,
+    embedding_digest: str = "",
+) -> None:
+    """开篇候选 ledger 行：作品指纹，不做 Hamming 比较键。"""
+    path = ledger_path(workspace_root=workspace_root)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    row: dict[str, Any] = {
+        "kind": "pond",
+        "title": str(item.get("title") or "")[:80],
+        "self_note": str(item.get("book_self_note") or "")[:160],
+        "social_space": str(item.get("social_space") or "")[:80],
+        "engine_note": str(item.get("engine_note") or "")[:160],
+        "declared": {
+            "start_kind": str(item.get("start_kind") or ""),
+            "price_axis": str(item.get("price_axis") or ""),
+            "promise": str(item.get("promise") or ""),
+        },
+        "embedding_digest": str(embedding_digest or ""),
+    }
+    if embedding and len(embedding) <= 256:
+        row["embedding"] = [round(float(x), 6) for x in embedding]
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")

@@ -354,7 +354,7 @@ async def test_long_append_not_blocked_by_chapter_l0(workspace: Path) -> None:
         turn_user_text="写一章长篇第一章",
     )
     assert first["status"] == "drafted"
-    assert first.get("staccato_uniform") is True
+    assert "staccato_uniform" not in first
     appended = await core.draft_section(
         "ch1",
         "河风从门缝里进来，柜台上的灰被吹成一条细线。",
@@ -364,7 +364,6 @@ async def test_long_append_not_blocked_by_chapter_l0(workspace: Path) -> None:
         turn_user_text="写一章长篇第一章",
     )
     assert appended["status"] == "drafted"
-    assert appended.get("mode") == "append"
     text = (workspace / "drafts" / "manuscript.md").read_text(encoding="utf-8")
     assert "柜台上的灰" in text
 

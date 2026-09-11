@@ -68,6 +68,31 @@ def test_check_propose_patch_blocked_when_budget_exhausted() -> None:
     assert err["rewrite_policy"] == "rewrite_window"
 
 
+def test_author_regime_skips_patch_budget() -> None:
+    manifest: dict = {
+        "section_drafts": {
+            "ch1": {
+                "regime": "author",
+                "repair_span": {
+                    "key": "staccato_uniform",
+                    "old_text": "「来。」\n「坐。」",
+                },
+            }
+        },
+        "patch_budget": {
+            "ch1": {"by_key": {"staccato_uniform": MAX_PATCHES_PER_PENALTY_KEY}}
+        },
+    }
+    prior = manifest["section_drafts"]["ch1"]
+    err = check_propose_patch_allowed(
+        manifest,
+        section_id="ch1",
+        old_text="「来。」\n「坐。」",
+        prior=prior,
+    )
+    assert err is None
+
+
 def test_check_propose_patch_wide_span_exhausted_stops() -> None:
     from app.writing.signals.repair import REWRITE_STOP
     from app.writing.signals.repair import REWRITE_WINDOW_MAX_VISIBLE
@@ -303,7 +328,7 @@ def test_finalize_writing_turn_summary_long_l0_does_not_block_chapter_landed(
     manifest_dir = workspace / ".agent" / "work" / "turns"
     manifest_dir.mkdir(parents=True, exist_ok=True)
     (manifest_dir / f"{turn_id}.json").write_text(
-        '{"section_drafts":{"ch1":{"l0_hits":["staccato_uniform"],"book_scope":"long"}}}',
+        '{"section_drafts":{"ch1":{"l0_hits":["staccato_uniform"],"book_scope":"long","visible_chars":2400}}}',
         encoding="utf-8",
     )
     out = finalize_writing_turn_summary(
@@ -368,6 +393,41 @@ def test_should_inject_writing_delivery_hold() -> None:
     )
     assert not should_inject_writing_delivery_hold(state)
     state.scenario_id = "coding"
+    assert not should_inject_writing_delivery_hold(state)
+
+
+def test_author_regime_skips_delivery_hold_injection(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from app.settings import settings
+    from app.tools.core.writing_tools import _write_manifest
+    from app.writing.book_scope import save_book_scope_override
+    from app.writing.regime import save_regime_override
+
+    monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
+    save_book_scope_override(scope="long", source="user", workspace_root=tmp_path)
+    save_regime_override(value="author", source="user", workspace_root=tmp_path)
+    turn_id = uuid4()
+    session_id = uuid4()
+    _write_manifest(
+        turn_id,
+        {
+            "section_drafts": {
+                "ch2": {"visible_chars": 120, "book_scope": "long", "length_short": True}
+            }
+        },
+        session_id=session_id,
+    )
+    state = TurnState(
+        turn_id=turn_id,
+        session_id=session_id,
+        run_id=uuid4(),
+        trace_id=uuid4(),
+        scenario_id="writing",
+        step_count=5,
+        max_steps=40,
+        turn_user_text="写一章长篇第二章 作者模式",
+    )
     assert not should_inject_writing_delivery_hold(state)
 
 

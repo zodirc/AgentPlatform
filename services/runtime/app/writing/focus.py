@@ -256,6 +256,14 @@ def build_writing_bookmark(
             bookmark["story_state"] = bits
     except Exception:
         pass
+    try:
+        from app.writing.author_state import bookmark_author_stance
+
+        stance = bookmark_author_stance()
+        if stance:
+            bookmark["author_stance"] = stance
+    except Exception:
+        pass
     return bookmark
 
 

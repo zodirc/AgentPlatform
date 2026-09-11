@@ -78,6 +78,8 @@ def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> N
     )
     _write(workspace / ".agent" / "work" / "story_state.md", "# 账本\n")
     _write(workspace / ".agent" / "work" / "author_notes.md", "## ch1\n疑心\n")
+    _write(workspace / ".agent" / "work" / "author_state.md", "# 作者态\n## 我现在怎么看这本书\n旧书。\n")
+    _write(workspace / ".agent" / "work" / "author_state_stance.jsonl", '{"stance":"旧书"}\n')
     _write(workspace / ".agent" / "work" / "editor_notes" / "ch1.md", "- 短句\n")
     _write(workspace / ".agent" / "work" / "surface" / "ch1.json", "{}")
     _write(workspace / ".agent" / "work" / "surface_index.json", '{"chapters":[]}')
@@ -100,6 +102,8 @@ def test_discard_writing_book_clears_sidecar_keeps_library(workspace: Path) -> N
     assert not (workspace / ".agent" / "work" / "story_state.json").exists()
     assert not (workspace / ".agent" / "work" / "story_state.md").exists()
     assert not (workspace / ".agent" / "work" / "author_notes.md").exists()
+    assert not (workspace / ".agent" / "work" / "author_state.md").exists()
+    assert not (workspace / ".agent" / "work" / "author_state_stance.jsonl").exists()
     assert '"work_mode":"web_serial"' in (workspace / "writing_prefs.json").read_text(
         encoding="utf-8"
     )

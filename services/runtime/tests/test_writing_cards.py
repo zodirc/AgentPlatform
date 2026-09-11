@@ -208,6 +208,43 @@ def test_user_style_card_overrides_builtin(tmp_path: Path) -> None:
     assert "米店的牌子" not in pin.volatile_block
 
 
+def test_author_prompt_adds_state_and_taste_drops_commitment(tmp_path: Path) -> None:
+    from app.writing.author_state import update_author_state
+    from app.writing.book_scope import save_book_scope_override
+    from app.writing.regime import save_regime_override
+    from app.writing.taste import append_taste_mark
+
+    save_book_scope_override(scope="long", source="user", workspace_root=tmp_path)
+    save_regime_override(value="author", source="user", workspace_root=tmp_path)
+    from app.writing.story_state import apply_author_delta
+
+    apply_author_delta(
+        section_id="ch1",
+        deltas=["码头冷了"],
+        patch={"identity": {"is": ["码头上的人"]}},
+        workspace_root=tmp_path,
+    )
+    update_author_state("立场", "这本书更冷了。", workspace_root=tmp_path)
+    append_taste_mark(
+        section_id="ch1",
+        kind="yes",
+        excerpt="她没接话，把秤砣放回去。",
+        workspace_root=tmp_path,
+    )
+    pin = prepare_writing_system_prompt(
+        "You are a writing assistant.",
+        "写一章长篇第二章 作者模式",
+        workspace_root=tmp_path,
+    )
+    vol = pin.volatile_block
+    assert "[author_state]" in vol
+    assert "[taste]" in vol
+    assert vol.index("## Story state") < vol.index("[author_state]")
+    assert vol.index("[author_state]") < vol.index("[taste]")
+    assert "commitment" not in vol.lower()
+    assert "不可用组合" not in vol
+
+
 def test_dont_enabled_frontmatter(tmp_path: Path) -> None:
     root = tmp_path / "sources" / "cards" / "style"
     root.mkdir(parents=True)

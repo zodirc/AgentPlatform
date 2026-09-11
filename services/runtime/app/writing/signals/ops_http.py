@@ -92,3 +92,19 @@ async def writing_surface_index(_: None = Depends(verify_internal_token)) -> dic
         "index": index,
         "flags": chapter_shape_flags(),
     }
+
+
+@router.get("/alignment")
+async def writing_work_alignment(_: None = Depends(verify_internal_token)) -> dict[str, Any]:
+    """Ops：本书原型对齐曲线（taste.yes + editor keep；n<4 不算）。"""
+    from app.writing.ops_snapshot import work_alignment_curve
+
+    return work_alignment_curve()
+
+
+@router.get("/regime")
+async def writing_regime_compare(_: None = Depends(verify_internal_token)) -> dict[str, Any]:
+    """Ops：档位对照页（当前档、对齐、已落盘报告）。"""
+    from app.writing.ops_snapshot import regime_ops_snapshot
+
+    return regime_ops_snapshot()

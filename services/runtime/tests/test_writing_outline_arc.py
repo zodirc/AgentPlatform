@@ -209,6 +209,32 @@ async def test_update_outline_sets_arc_flags(workspace) -> None:
     assert "长篇编排" in str(result.get("summary"))
 
 
+@pytest.mark.asyncio
+async def test_update_outline_volume_syncs_deferred(workspace) -> None:
+    from app.tools.core import tools as core
+    from app.writing.story_state import load_story_state
+
+    result = await core.update_outline(
+        "主线：还在河东。\n",
+        turn_user_text="写长篇",
+        volume={
+            "index": 2,
+            "chapters": "ch6-ch10",
+            "questions": ["她到底会不会再去码头"],
+            "must_not_decide_yet": ["父亲是否知情"],
+            "promises_due": ["第 3 章欠读者的：那封信里写了什么"],
+            "where_it_stands": "还在河东；冬天还没到",
+        },
+    )
+    text = (workspace / "outline.md").read_text(encoding="utf-8")
+    assert "## 卷 2" in text
+    assert "父亲是否知情" in text
+    state = load_story_state(workspace_root=workspace)
+    questions = [d.get("question") for d in (state.get("deferred") or [])]
+    assert "父亲是否知情" in questions
+    assert result.get("path") == "outline.md"
+
+
 def test_outline_style_committed_person_slot_without_route() -> None:
     from app.writing.outline_arc import outline_style_committed
 

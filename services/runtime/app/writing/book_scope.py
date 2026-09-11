@@ -238,7 +238,7 @@ def scope_spec_line(
             if wants_opening_candidates(message, outline=outline):
                 return (
                     "长篇·开写：propose_opening_ponds 出开篇候选；"
-                    "start_kind 不得重复（发觉/系统/过日子），promise 不得全员相同"
+                    "几本不是同一本书，只换职业地点证件名能力名不算不同"
                 )
             compass = serial_opening_compass(message=message, outline=outline)
             return (

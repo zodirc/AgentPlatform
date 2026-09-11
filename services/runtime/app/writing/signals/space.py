@@ -124,6 +124,36 @@ def load_platform_space(work_mode: str = "literary") -> MetricSpace:
     return build_space(load_platform_exemplars(work_mode), scope="platform")
 
 
+def load_work_taste_space(*, workspace_root: Any = None) -> MetricSpace | None:
+    """作者档：用户「就是这样」+ 编辑 keep 构建本书原型；n<4 则不算对齐。"""
+    from app.writing.taste import work_prototypes
+
+    samples = work_prototypes(workspace_root=workspace_root)
+    if not samples:
+        return None
+    neighbors: list[Exemplar] = []
+    for i, row in enumerate(samples):
+        text = str(row.get("text") or "").strip()
+        if not text:
+            continue
+        neighbors.append(
+            Exemplar(
+                fragment="mixed",
+                slug=f"work-taste-{i}",
+                author="user" if row.get("source") != "editor" else "editor",
+                work="this",
+                beat="",
+                text=text,
+                signature=signature_vec(text),
+                weight=float(row.get("weight") or 1.0),
+                scope="work",
+            )
+        )
+    if not neighbors:
+        return None
+    return build_space({"mixed": tuple(neighbors)}, scope="work")
+
+
 _OVERLAY_NEIGHBOR_CAP = 4
 
 

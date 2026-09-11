@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -18,9 +19,11 @@ _POND_REJECTS: dict[str, int] = {}
 _POND_REJECT_USER_SUMMARY = "开篇候选这轮没交成。请再说一次「我看看」。"
 _POND_REPAIR_SUMMARY = "开篇候选这轮没交成。请按 detail 改字段后再交一次，不要写进聊天。"
 
+logger = logging.getLogger(__name__)
+
 
 def wants_more_ponds(message: str) -> bool:
-    """只有「我要其他的」才继承上一组 start_kind / price_axis；「我看看」是新点选。"""
+    """只有整句「我要其他的」才远离上一组书；「我看看」是新点选。"""
     return (message or "").strip() == MORE_PONDS_MESSAGE
 
 
@@ -117,7 +120,6 @@ _START_KIND_ALIASES: dict[str, tuple[str, ...]] = {
         "系统/金手指落到身上",
         "金手指落到",
         "开启系统",
-        "系统",
     ),
     "world_already": (
         "一开始就不正常",
@@ -154,11 +156,12 @@ _FIRST_CONFLICT_AT_ALIASES: dict[str, tuple[str, ...]] = {
     "first_1000": ("前1000字", "前 1000 字"),
     "chapter_one": ("第一章内", "本章内"),
 }
+# 灵契 / 功簿 / 仙籍 / 工分 会实体化成世界设定，只留给模型抄标签时出现；不作归一抓手。
 _PRICE_AXIS_ALIASES: dict[str, tuple[str, ...]] = {
     "lifespan": ("用寿或命结账", "烧寿", "扣寿", "命税", "寿命"),
     "memory": ("用记忆结账", "记忆税", "忘掉"),
-    "contract": ("用契或名册结账", "灵契", "功簿"),
-    "status": ("用名分或籍结账", "名分", "仙籍", "工分"),
+    "contract": ("用契或名册结账",),
+    "status": ("用名分或籍结账", "名分"),
     "none": ("不当场拿命或记忆结账", "无明码"),
 }
 
@@ -170,6 +173,20 @@ _OPENING_CHOICE_REL = (
     / "opening_choice.md"
 )
 
+_TITLE_MAX = 80
+_FIELD_MAX = 240
+_SUMMARY_MAX = 160
+_PLAN_MAX = 400
+_FLAVOR_MAX = 400
+_PRICE_MAX = 160
+_PLAN_MIN = 18
+_FLAVOR_MIN = 8
+_SELF_NOTE_MAX = 160
+_SOCIAL_SPACE_MAX = 80
+_ENGINE_NOTE_MAX = 160
+_MIN_ITEMS = 2
+_MAX_ITEMS = 4
+
 
 def opening_choice_block() -> str:
     """volatile：开篇点选纪律（不焊进 system 前缀）。拒因目录在 handler，不抄进 prompt。"""
@@ -180,8 +197,7 @@ def opening_choice_block() -> str:
             "## Opening choice (platform)\n"
             "Call `propose_opening_ponds` once with 2–3 items. "
             "Leave the assistant message empty. "
-            "Each needs title, flavor (这本书), opening, start_kind, promise, "
-            "price_axis, source_trust, first_conflict_at. Do not list ponds in chat."
+            "Write title / flavor / opening first. Cards are the deliverable."
         )
 
 
@@ -208,17 +224,6 @@ def should_gate_opening_choice(
     from app.writing.outline_phase import wants_opening_candidates
 
     return wants_opening_candidates(message, outline=text)
-
-_TITLE_MAX = 80
-_FIELD_MAX = 240
-_SUMMARY_MAX = 160
-_PLAN_MAX = 400
-_FLAVOR_MAX = 400
-_PRICE_MAX = 160
-_PLAN_MIN = 18
-_FLAVOR_MIN = 8
-_MIN_ITEMS = 2
-_MAX_ITEMS = 4
 
 
 def _workspace(workspace_root: Path | None = None) -> Path:
@@ -317,7 +322,7 @@ def ponds_contrast_summary(items: list[dict[str, str]]) -> str:
 
 
 def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
-    """一条近池：书名 + 这本书 + 开篇。"""
+    """一条近池：书名 + 这本书 + 开篇；自述在后。"""
     title = _clip(raw.get("title") or raw.get("name") or f"候选 {index + 1}", _TITLE_MAX)
     item_id = _clip(raw.get("id") or f"pond-{index + 1}", 32) or f"pond-{index + 1}"
     start_kind = normalize_start_kind(
@@ -351,6 +356,18 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
         raw.get("chapter_job") or raw.get("这一章干什么") or opening,
         _FIELD_MAX,
     )
+    book_self_note = _clip(
+        raw.get("book_self_note") or raw.get("这本书在玩什么") or "",
+        _SELF_NOTE_MAX,
+    )
+    social_space = _clip(
+        raw.get("social_space") or raw.get("社会角落") or "",
+        _SOCIAL_SPACE_MAX,
+    )
+    engine_note = _clip(
+        raw.get("engine_note") or raw.get("为什么能一直写") or "",
+        _ENGINE_NOTE_MAX,
+    )
     return {
         "id": item_id,
         "title": title or f"候选 {index + 1}",
@@ -362,6 +379,9 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
         "arc": arc,
         "flavor": flavor,
         "price": _clip(raw.get("price") or raw.get("代价") or raw.get("账单") or "", _PRICE_MAX),
+        "book_self_note": book_self_note,
+        "social_space": social_space,
+        "engine_note": engine_note,
         "start_kind": start_kind,
         "promise": promise,
         "source_trust": source_trust,
@@ -385,7 +405,7 @@ def normalize_pond_items(raw: Any) -> list[dict[str, str]]:
 
 
 def pond_item_event_fields(raw: dict[str, Any], index: int) -> dict[str, str] | None:
-    """投影到 opening.ponds 事件：只留 schema 允许的字段。"""
+    """投影到 opening.ponds 事件：只留 schema 允许的字段。自述不进事件。"""
     item = normalize_pond_item(raw, index)
     title = item.get("title") or ""
     if not title.strip():
@@ -418,106 +438,11 @@ def pond_item_event_fields(raw: dict[str, Any], index: int) -> dict[str, str] | 
     return row
 
 
-_FANTASY_HINT = re.compile(r"修真|玄幻|仙侠|爽文")
-# 词表只认殡仪馆/失踪那套换皮，不把「秘密」「盯上」当过日子禁词。
-_PLAIN_LEAK = re.compile(r"殡仪|冷藏|无名尸|失踪者|失踪|城市秘密|太平间|告别厅|灵异")
-_GIFT_HINT = re.compile(r"系统|金手指|功法|面板|异能|能力|觉醒")
-_WORLD_HINT = re.compile(
-    r"修真|灵气|功法|坊市|境界|灵石|宗门|工分|灵脉|"
-    r"异能|能力者|觉醒"
-)
-_EARLY_KINDS = frozenset({"self_notice", "granted_path", "pulled_in"})
-
-
-def _pond_blob(item: dict[str, str]) -> str:
-    return "".join(
-        str(item.get(key) or "")
-        for key in (
-            "title",
-            "who",
-            "where",
-            "want",
-            "chapter_job",
-            "opening",
-            "arc",
-            "flavor",
-            "summary",
-        )
-    )
-
-
-def plain_item_leaks(item: dict[str, str]) -> bool:
-    """过日子写成殡仪馆/失踪/解密恐惧：这一份不诚实，不是整组题材错了。"""
-    if str(item.get("start_kind") or "") != "no_extraordinary":
-        return False
-    if str(item.get("promise") or "") == "dread_decode":
-        return True
-    return bool(_PLAIN_LEAK.search(_pond_blob(item)))
-
-
-def drop_leaking_plain_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
-    """编辑侧丢掉不诚实的过日子卡，剩下的仍交给用户点选。"""
-    return [it for it in items if not plain_item_leaks(it)]
-
-
-def _take_token(
-    cycle: list[str], used: set[str], banned: set[str] | None = None
-) -> str:
-    ban = banned or set()
-    for tok in cycle:
-        if tok not in used and tok not in ban:
-            used.add(tok)
-            return tok
-    for tok in cycle:
-        if tok not in ban:
-            used.add(tok)
-            return tok
-    return cycle[0] if cycle else ""
-
-
-def coerce_pond_enums(
-    items: list[dict[str, str]],
-    *,
-    previous_kinds: set[str] | frozenset[str] | None = None,
-    previous_axes: set[str] | frozenset[str] | None = None,
-    message: str = "",
-) -> list[dict[str, str]]:
-    """补齐并去重隐藏轴。卡片只展示书名/这本书/开篇，轴不对齐时改轴不改正文。"""
-    prev_k = {k for k in (previous_kinds or set()) if k}
-    prev_a = {k for k in (previous_axes or set()) if k}
-    kind_cycle = [k for k in START_KIND_LABELS if k not in prev_k] or list(START_KIND_LABELS)
-    axis_cycle = [k for k in PRICE_AXIS_LABELS if k not in prev_a] or list(PRICE_AXIS_LABELS)
-    used_k: set[str] = set()
-    used_a: set[str] = set()
-    used_p: set[str] = set()
+def fill_pond_defaults(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    """只补节奏槽：source_trust / first_conflict_at。轴缺就留空，不贴、不去重。"""
     out: list[dict[str, str]] = []
-    later_n = 0
     for i, item in enumerate(items):
         row = dict(item)
-        blob = _pond_blob(row)
-        kind = str(row.get("start_kind") or "")
-        if kind == "granted_path" and not _GIFT_HINT.search(blob):
-            kind = ""
-        if kind == "world_already" and not _WORLD_HINT.search(blob):
-            kind = ""
-        if kind not in START_KIND_LABELS or kind in used_k or kind in prev_k:
-            kind = _take_token(kind_cycle, used_k, prev_k)
-        else:
-            used_k.add(kind)
-        row["start_kind"] = kind
-        axis = str(row.get("price_axis") or "")
-        if axis not in PRICE_AXIS_LABELS or axis in used_a or axis in prev_a:
-            axis = _take_token(axis_cycle, used_a, prev_a)
-        else:
-            used_a.add(axis)
-        row["price_axis"] = axis
-        promise = str(row.get("promise") or "")
-        last = i == len(items) - 1
-        if promise not in PROMISE_LABELS or (last and len(items) > 1 and used_p == {promise}):
-            promise = _take_token(list(PROMISE_LABELS), used_p)
-        else:
-            used_p.add(promise)
-        row["promise"] = promise
         trust = str(row.get("source_trust") or "")
         if trust not in SOURCE_TRUST_LABELS:
             trust = ("dubious", "trusted", "false")[i % 3]
@@ -525,149 +450,47 @@ def coerce_pond_enums(
         conflict = str(row.get("first_conflict_at") or "")
         if conflict not in FIRST_CONFLICT_AT_LABELS:
             conflict = ("first_300", "first_1000", "chapter_one")[i % 3]
-        if conflict == "later":
-            later_n += 1
-            if later_n > 1:
-                conflict = "chapter_one"
         row["first_conflict_at"] = conflict
         out.append(row)
-    if len(out) >= 3 and all(r.get("source_trust") == "trusted" for r in out):
-        out[-1]["source_trust"] = "dubious"
-    if _FANTASY_HINT.search(message or "") and not ({r["start_kind"] for r in out} & _EARLY_KINDS):
-        out[0]["start_kind"] = "pulled_in"
-        for other in out[1:]:
-            if other.get("start_kind") == "pulled_in":
-                other["start_kind"] = _take_token(
-                    kind_cycle, {out[0]["start_kind"]}, prev_k
-                )
-                break
     return out
+
+
+def _axis_label_set() -> set[str]:
+    return (
+        set(START_KIND_LABELS.values())
+        | set(PROMISE_LABELS.values())
+        | set(PRICE_AXIS_LABELS.values())
+    )
 
 
 def ponds_reject_reason(
     items: list[dict[str, str]],
     *,
     message: str = "",
-    previous_kinds: set[str] | frozenset[str] | None = None,
-    previous_axes: set[str] | frozenset[str] | None = None,
+    against: list[dict[str, Any]] | None = None,
+    similarity: dict[str, Any] | None = None,
+    shadow: bool | None = None,
     workspace_root: Path | None = None,
-    skip_ledger: bool = False,
+    skip_ledger: bool = True,
 ) -> tuple[str, str] | None:
-    """拒共线集合。旧 sidecar 缺字段时不走这条（只在 propose 时调用）。"""
+    """拒共线集合。轴不再作为比较键。"""
+    from app.settings import settings
+
+    _ = (skip_ledger, workspace_root)
     if len(items) < _MIN_ITEMS:
-        return (
-            "need_two_ponds",
-            "至少交 2 个开篇候选，且 start_kind 不得重复。",
-        )
-    kinds = [str(it.get("start_kind") or "") for it in items]
-    promises = [str(it.get("promise") or "") for it in items]
-    axes = [str(it.get("price_axis") or "") for it in items]
-    if any(not k or not p for k, p in zip(kinds, promises)):
-        return (
-            "need_start_kind_and_promise",
-            "每份都要有 start_kind 和 promise。"
-            f" start_kind∈{tuple(START_KIND_LABELS)}；"
-            f" promise∈{tuple(PROMISE_LABELS)}。",
-        )
-    if any(a not in PRICE_AXIS_LABELS for a in axes):
-        return (
-            "need_price_axis",
-            "每份都要有 price_axis（这本书拿什么结账）。"
-            f" price_axis∈{tuple(PRICE_AXIS_LABELS)}。"
-            "同一组不得重复。换工种地点不算换轴。",
-        )
-    if (
-        _FANTASY_HINT.search(message or "")
-        and len(items) >= 3
-        and sum(1 for k in kinds if k == "no_extraordinary") > 1
-    ):
-        return (
-            "plain_over_quota",
-            "先过日子至多一份，三份里不要两份都在过普通日子。",
-        )
-    if len(set(kinds)) < len(kinds):
-        return (
-            "start_kind_collision",
-            "start_kind 不得重复。换职业地点不算分开。"
-            f" 已交：{kinds}。",
-        )
-    if len(set(promises)) == 1:
-        return (
-            "promise_collision",
-            "promise 不得全员相同。"
-            f" 已交：{promises[0]}。",
-        )
-    if len(set(axes)) < len(axes):
-        return (
-            "price_axis_collision",
-            "price_axis 不得重复。换矿井药铺不算换引擎。"
-            f" 已交：{axes}。",
-        )
-    trusts = [str(it.get("source_trust") or "") for it in items]
-    if any(t not in SOURCE_TRUST_LABELS for t in trusts):
-        return (
-            "need_source_trust",
-            (
-                "每份都要有 source_trust。"
-                f" source_trust∈{tuple(SOURCE_TRUST_LABELS)}。"
-            ),
-        )
-    if len(items) >= 3 and all(t == "trusted" for t in trusts):
-        return (
-            "trust_all_clean",
-            "三份里至少一份的力来源不可信（source_trust 为 dubious 或 false）。",
-        )
+        return ("need_two_ponds", "至少交 2 个开篇候选。")
     conflicts = [str(it.get("first_conflict_at") or "") for it in items]
-    if any(c not in FIRST_CONFLICT_AT_LABELS for c in conflicts):
-        return (
-            "need_first_conflict_at",
-            (
-                "每份都要写清第一场冲突位置（first_conflict_at）。"
-                f" first_conflict_at∈{tuple(FIRST_CONFLICT_AT_LABELS)}。"
-            ),
-        )
     if sum(1 for c in conflicts if c == "later") > 1:
         return (
             "later_over_quota",
             "first_conflict_at=later 至多一份，不要把冲突都放到第一章之后。",
         )
-    if previous_kinds:
-        overlap = sorted(set(kinds) & set(previous_kinds))
-        if overlap:
-            unused = [
-                start_kind_label(k)
-                for k in START_KIND_LABELS
-                if k not in previous_kinds
-            ]
-            hint = "、".join(unused) if unused else "（五种都用过了，改 promise 和场面）"
-            return (
-                "kinds_repeat",
-                "上一组已经用过这些 start_kind，换还没用过的。"
-                f" 重复：{overlap}。还没用过：{hint}。",
-            )
-    if previous_axes:
-        axis_overlap = sorted(set(axes) & set(previous_axes))
-        if axis_overlap:
-            unused = [
-                price_axis_label(k)
-                for k in PRICE_AXIS_LABELS
-                if k not in previous_axes
-            ]
-            hint = "、".join(unused) if unused else "（付账轴用过了，改 none 以外的轴）"
-            return (
-                "price_axis_repeat",
-                "上一组已经用过这些 price_axis，换还没用过的。"
-                f" 重复：{axis_overlap}。还没用过：{hint}。",
-            )
-    axis_names = (
-        set(START_KIND_LABELS.values())
-        | set(PROMISE_LABELS.values())
-        | set(PRICE_AXIS_LABELS.values())
-    )
+    axis_names = _axis_label_set()
     for it in items:
         opening = str(it.get("opening") or "").strip()
         flavor = str(it.get("flavor") or "").strip()
-        if flavor in axis_names:
+        note = str(it.get("book_self_note") or "").strip()
+        if flavor in axis_names or note in axis_names:
             return (
                 "plan_is_axis",
                 "这本书不要直接填变强台阶/在关系里活下去这类对照标签。",
@@ -678,45 +501,35 @@ def ponds_reject_reason(
                 "每份都要有这本书和开篇：这本书在玩什么、开篇怎么进。"
                 "不要拆成账单/走向/气味，不要只填系统/关系标签。",
             )
-    for it in items:
-        blob = _pond_blob(it)
-        kind = str(it.get("start_kind") or "")
-        if kind == "no_extraordinary" and _PLAIN_LEAK.search(blob):
-            return (
-                "plain_not_plain",
-                "no_extraordinary 必须是先过日子，不能写成殡仪馆/失踪/城市秘密。",
-            )
-    if _FANTASY_HINT.search(message or ""):
-        kind_set = set(kinds)
-        if not previous_kinds:
-            if not (kind_set & _EARLY_KINDS):
-                return (
-                    "need_normal_opening",
-                    "修真/玄幻至少要有一份自己发觉、被卷入、或系统/金手指。"
-                    "不要两份都是过日子或只写世界已有修士。",
-                )
-        for it in items:
-            blob = _pond_blob(it)
-            kind = str(it.get("start_kind") or "")
-            if kind == "granted_path" and not _GIFT_HINT.search(blob):
-                return (
-                    "gift_not_gift",
-                    "granted_path 请写成系统、金手指、功法或异能落到身上，不要收雷/灵异物件。",
-                )
-            if kind == "world_already" and not _WORLD_HINT.search(blob):
-                return (
-                    "world_not_cultivation",
-                    "world_already 请写成超凡已经混在人群里（异能者/修士），不是灵异出事，也不是地铁在供能。",
-                )
-    from app.writing.ledger import pond_vector, too_close_to_ledger
-
-    if not skip_ledger:
-        close = too_close_to_ledger(
-            [pond_vector(it) for it in items],
-            workspace_root=_workspace(workspace_root),
+    trusts = [str(it.get("source_trust") or "") for it in items]
+    if len(items) >= 3 and all(t == "trusted" for t in trusts):
+        logger.info(
+            "pond trust_all_clean shadow n=%s (not rejected)",
+            len(items),
         )
-        if close:
-            return close
+    is_shadow = settings.ponds_similarity_shadow if shadow is None else bool(shadow)
+    snap = similarity
+    if snap is None:
+        from app.writing.pond_similarity import compute_pond_similarity
+
+        snap = compute_pond_similarity(
+            items, against=against or [], shadow=is_shadow
+        )
+    from app.writing.pond_similarity import near_rejected_reject, same_book_reject
+
+    same = same_book_reject(snap)
+    if same:
+        if is_shadow:
+            logger.info("ponds_same_book shadow %s", same[1])
+        else:
+            return same
+    if wants_more_ponds(message) or against:
+        near = near_rejected_reject(snap)
+        if near:
+            if is_shadow:
+                logger.info("ponds_near_rejected shadow %s", near[1])
+            else:
+                return near
     return None
 
 
@@ -729,16 +542,21 @@ def save_opening_ponds(
     items: list[dict[str, str]],
     *,
     summary: str = "",
+    similarity: dict[str, Any] | None = None,
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     """写入 sidecar，返回事件 payload。"""
+    from app.writing.pond_similarity import sidecar_similarity
+
     ponds_id = f"ponds-{uuid4().hex[:8]}"
     contrast = ponds_contrast_summary(items)
-    body = {
+    body: dict[str, Any] = {
         "ponds_id": ponds_id,
         "summary": contrast or _clip(summary, 4096),
         "items": items,
     }
+    if similarity:
+        body["similarity"] = sidecar_similarity(similarity)
     path = opening_ponds_path(workspace_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -760,11 +578,14 @@ def load_opening_ponds(*, workspace_root: Path | None = None) -> dict[str, Any] 
     items = normalize_pond_items(data.get("items"))
     if len(items) < _MIN_ITEMS:
         return None
-    return {
+    out: dict[str, Any] = {
         "ponds_id": str(data.get("ponds_id") or "ponds"),
         "summary": str(data.get("summary") or ""),
         "items": items,
     }
+    if isinstance(data.get("similarity"), dict):
+        out["similarity"] = data["similarity"]
+    return out
 
 
 def save_committed_pond(
@@ -777,6 +598,11 @@ def save_committed_pond(
     path.write_text(
         json.dumps(item, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    from app.writing.pond_history import clear_rejected_ponds
+    from app.writing.story_state import seed_identity_from_pond
+
+    seed_identity_from_pond(item, workspace_root=workspace_root)
+    clear_rejected_ponds(workspace_root=workspace_root)
     return path
 
 
@@ -858,75 +684,29 @@ def find_committed_pond(
     return load_committed_pond(workspace_root=workspace_root)
 
 
+def format_opening_ponds_block(
+    *,
+    workspace_root: Path | None = None,
+    mode: str = "browse",
+) -> str:
+    from app.writing.pond_prompts import format_opening_ponds_block as _impl
+
+    if mode not in {"more", "browse"}:
+        mode = "browse"
+    return _impl(workspace_root=workspace_root, mode=mode)  # type: ignore[arg-type]
+
+
 def format_committed_pond_block(
     *,
     message: str,
     workspace_root: Path | None = None,
 ) -> str:
-    """volatile：用户只点了选择，卡片正文从 sidecar 灌给模型。"""
-    from app.writing.text_metrics import CHAPTER_DWELL_HINT
+    from app.writing.pond_prompts import format_committed_pond_block as _impl
 
-    item = find_committed_pond(message=message, workspace_root=workspace_root)
-    if not item:
-        return ""
-    title = item.get("title") or item.get("id") or ""
-    lines = [
-        "## 已选开篇",
-        "用户在卡片上勾选了一份。这是已选定的书：按「这本书」写当前章，不要再出候选。",
-        "开篇只在第一章兑现，后面不要重开一次。",
-        f"{CHAPTER_DWELL_HINT}。不要为凑字粘无关场面。若第二条线与本场主题对位或共享时空，可以写。",
-        "按「这本书」和「开篇」写；不要另起账单、走向、气味三栏，也不要另起窗口办事。",
-        f"书名：{title}",
-    ]
-    if item.get("flavor"):
-        lines.append(f"这本书：{item['flavor']}")
-    if item.get("opening"):
-        lines.append(f"开篇：{item['opening']}")
-    trust = str(item.get("source_trust") or "")
-    if trust:
-        lines.append(f"力的来源：{source_trust_label(trust)}")
-    if item.get("who"):
-        lines.append(f"棋盘位：{item['who']}")
-    if item.get("where"):
-        lines.append(f"站在哪：{item['where']}")
-    if item.get("want"):
-        lines.append(f"入口（不是这本书要解决的事）：{item['want']}")
-    kind = str(item.get("start_kind") or "")
-    promise = str(item.get("promise") or "")
-    axis = str(item.get("price_axis") or "")
-    if kind:
-        lines.append(f"超凡怎么开始：{start_kind_label(kind)}")
-    if promise:
-        lines.append(f"读者买什么：{promise_label(promise)}")
-    if axis:
-        lines.append(f"拿什么结账：{price_axis_label(axis)}")
-    return "\n".join(lines)
+    return _impl(message=message, workspace_root=workspace_root)
 
 
-def format_opening_ponds_block(*, workspace_root: Path | None = None) -> str:
-    """volatile：上一组候选，下一组不得复用同一 start_kind / price_axis。"""
-    data = load_opening_ponds(workspace_root=workspace_root)
-    if not data:
-        return ""
-    used_k = {str(i.get("start_kind") or "") for i in data["items"] if i.get("start_kind")}
-    used_a = {str(i.get("price_axis") or "") for i in data["items"] if i.get("price_axis")}
-    unused_k = "、".join(
-        start_kind_label(k) for k in START_KIND_LABELS if k not in used_k
-    ) or "改场面和 promise"
-    unused_a = "、".join(
-        price_axis_label(k) for k in PRICE_AXIS_LABELS if k not in used_a
-    ) or "改 none 以外的轴"
-    lines = [
-        "## 上一组开篇候选（不要换皮重写）",
-        "换皮 = start_kind 或 price_axis 与上一组相同，只换职业地点。",
-        f"下一组必须用还没用过的 start_kind：{unused_k}；price_axis：{unused_a}。",
-        "下一组写成书名 + 这本书 + 开篇，不要再拆账单/走向/气味。",
-        "每份仍要是一本不同的书，不要只交对照标签。",
-    ]
-    for item in data["items"]:
-        title = item.get("title") or item.get("id")
-        flavor = item.get("flavor") or ""
-        kind = start_kind_label(str(item.get("start_kind") or ""))
-        bit = " · ".join(p for p in (title, flavor, kind) if p)
-        lines.append(f"- {bit}" if bit else f"- {title}")
-    return "\n".join(lines)
+def format_user_axis_intent_block(message: str) -> str:
+    from app.writing.pond_prompts import format_user_axis_intent_block as _impl
+
+    return _impl(message)

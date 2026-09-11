@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.writing.signals.surface import has_task_voice, strip_task_voice
-from app.writing.text_metrics import visible_chars
+from app.writing.text_metrics import clip_visible, visible_chars
 
 EDITOR_NOTES_DIR = Path(".agent") / "work" / "editor_notes"
 EDITOR_NOTES_MAX_CHARS = 400
@@ -83,6 +83,15 @@ def format_editor_notes_block(
     focus: str = "",
     workspace_root: Path | None = None,
 ) -> str:
+    from app.writing.regime import is_author_regime
+
+    if is_author_regime(workspace_root=workspace_root):
+        from app.writing.editor import format_typed_editor_block
+
+        typed = format_typed_editor_block(focus=focus, workspace_root=workspace_root)
+        if typed:
+            return typed
+        # 无编辑 Turn json 时回落现行正则札记（仅 continuity / stale）
     prev = previous_section_id(focus) if focus else None
     if not prev:
         return ""
@@ -94,7 +103,7 @@ def format_editor_notes_block(
         text = _HOWTO.sub("", text)
     block = f"## Editor notes\n{text}"
     if visible_chars(block) > EDITOR_NOTES_MAX_CHARS:
-        block = block[: EDITOR_NOTES_MAX_CHARS - 1].rstrip() + "…"
+        block = clip_visible(block, EDITOR_NOTES_MAX_CHARS, ellipsis=True)
     return block
 
 
@@ -107,11 +116,12 @@ def build_editor_note_lines(
     wild_unpaid: int | None = None,
     author_note_repeats_delta: bool = False,
     workspace_root: Path | None = None,
+    include_surface: bool = True,
 ) -> list[str]:
     from app.writing.signals.surface import editor_surface_lines
 
     lines: list[str] = []
-    if measured:
+    if measured and include_surface:
         lines.extend(editor_surface_lines(dict(measured)))
     for flag in consistency or []:
         kind = str(flag.get("kind") or "")

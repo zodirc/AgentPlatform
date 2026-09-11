@@ -437,7 +437,20 @@ def check_propose_patch_allowed(
     prior: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
     """Return error payload when patch must stop; None when allowed."""
+    from pathlib import Path
+
+    from app.settings import settings
+    from app.writing.regime import is_author_regime
+
     sid = normalize_section_id(section_id)
+    row = prior if isinstance(prior, dict) else None
+    if row is None and isinstance(manifest, dict) and sid:
+        raw = (manifest.get("section_drafts") or {}).get(sid)
+        row = raw if isinstance(raw, dict) else None
+    if str((row or {}).get("regime") or "").strip().lower() == "author":
+        return None
+    if is_author_regime(workspace_root=Path(settings.workspace_root)):
+        return None
     penalty_key = normalize_penalty_key(resolve_penalty_key(prior, old_text=old_text))
     long_form = _long_form(manifest, prior)
     escalate = _escalation_policy(

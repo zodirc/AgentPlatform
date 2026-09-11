@@ -1,49 +1,29 @@
 ## Opening choice (platform)
 This turn is a Plan-like picker. Call `propose_opening_ponds` once with 2–3 items.
 Leave the assistant message empty; the cards are the deliverable.
-Each item needs title, flavor (这本书), opening, start_kind, promise,
-price_axis, source_trust, first_conflict_at.
-The UI card the user reads is only: 书名 / 这本书 / 开篇.
-Do not split a book into 账单 / 走向 / 气味.
-Do not list the ponds in the assistant message. Do not call draft_section or
-update_outline. The user checks a card (no chat bubble) or 我要其他的.
+The UI card the user reads is only: 书名 / 这本书 / 开篇. Do not list ponds in chat.
+Do not call draft_section or update_outline. The user checks a card or says 我要其他的.
 
-title = 连载书名, the name of the game that still holds at chapter 400.
-Not a lyrical sketch. Not a finite stack of props.
-flavor = 这本书: who you follow on the board + the unfair rule of this world,
-in a few sentences. The book is the game, not the invoice.
-opening = how THAT game starts tonight. First sentence is the accident
-（第一句写事故）.
+Design 2–3 books that are different from each other, inside the genre the user named.
+Each book must answer, in 这本书:
+- 哪一个角落：故事主要发生在这个世界的哪一块社会空间，跟着谁；
+- 什么机制：这本书为什么会不断产生麻烦——它自己的机制，不是「普通人发现规则漏洞」这种可套用的抽象；
+- 怎么推进：写到第 200 章，这本书最可能还在发生什么。
+Two books that only swap job, place, paper name or ability name, while 机制 and 推进 are the
+same, are the same book. Do not hand in the same book twice.
+
+title = 连载书名, the name of the game that still holds at chapter 400. Not a lyrical sketch.
+flavor = 这本书: the three answers above, in a few sentences. The book is the game, not the invoice.
+opening = how THAT game starts tonight. First sentence is the accident. At most two sentences.
 opening and 这本书 are the same book.
-who/where/want are optional and only if they are already inside 这本书/开篇.
 
-start_kind (required, unique): self_notice | pulled_in | granted_path |
-world_already | no_extraordinary
-price_axis (required, unique): lifespan | memory | contract | status | none
-Who pays, not the workplace. After 我要其他的, do not reuse previous price_axis.
-promise (required, not all identical): power_steps | costly_truth |
-survive_relation | dread_decode | social_place
-source_trust (required): trusted | dubious | false. At least one of three must
-not be trusted.
-first_conflict_at (required): first_300 | first_1000 | chapter_one | later.
-At most one later.
-price and arc are optional leftovers; do not write them as the card.
+Write title / flavor / opening first. Only then fill the self-description:
+- book_self_note: one sentence, 这本书在玩什么 (what keeps it going).
+- social_space, engine_note: optional, free text, describe what you already wrote.
+- start_kind / promise / price_axis / source_trust / first_conflict_at: optional labels that
+  describe the book you wrote. They do not decide the book. Do not write a book to fit a label.
+  Do not use a label's wording as a title or as 这本书.
 
-Handler rejects missing fields, duplicate start_kind, duplicate price_axis,
-all-same promise, reused previous start_kinds / price_axis (only after
-我要其他的), all-trusted source_trust (items≥3), more than one later,
-过日子 over quota, slot-honesty misses, or a set too close to the ledger.
-修真/玄幻: at least one of self_notice / pulled_in / granted_path.
-Change a narrative decision, not the skin.
-First sentence is the accident. One in-turn repair is allowed; a second
-reject stops the turn. Do not write a unifying summary.
-Novelty is the game played straight. Different start_kind is not a different
-book if the engine is the same.
-Opening is at most two sentences.
-world_already = ability-users already live among people.
-granted_path = 系统/金手指落到身上。
-no_extraordinary = 这一章先过班、房租、家里的日子，超凡往后放。
-At least one book should put a concrete ability on a person; the fight is
-other people, not repairing a city.
-凡人流/都市修真: pulled_in is a normal opening. Do not invent new start_kind
-names. Change who pays and what they pay, not the workplace.
+Handler rejects missing 书名/这本书/开篇, 这本书 that is only a label, or two items that are
+the same book. One in-turn repair is allowed; a second reject stops the turn.
+Do not write a unifying summary.

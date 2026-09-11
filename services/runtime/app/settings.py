@@ -164,6 +164,8 @@ class Settings(BaseSettings):
     writing_cards_max_chars: int = 3600
     writing_cards_per_card_chars: int = 2000
     writing_cards_style_max_chars: int = 1800
+    writing_author_cards_max_chars: int = 3000
+    writing_author_cards_style_max_chars: int = 1400
     writing_cards_character_max_chars: int = 1000
     writing_cards_plot_max_chars: int = 600
     writing_cards_general_max_chars: int = 400
@@ -181,6 +183,20 @@ class Settings(BaseSettings):
     writing_focus_max_chars: int = 12000
     writing_prev_tail_chars: int = 2000
     writing_token_economy_enabled: bool = True
+    writing_author_state_max_chars: int = 1500
+    writing_author_state_section_max_chars: int = 600
+    writing_story_state_max_chars: int = 1200
+    writing_taste_block_max_chars: int = 1200
+    writing_taste_excerpt_max_chars: int = 400
+    writing_reread_pack_max_chars: int = 9000
+    writing_editor_observations_max_chars: int = 1200
+    # 开篇候选正文相似度：shadow 只记日志；False 后 intra/against 超阈值拒一次。
+    # HashEmbedder 词法回退时永远不拒。阈值只挡明显同书（近重复正文）。
+    # 2026-09-11 先验（RemoteEmbedder，三组卡片）：夜行证 vs 执契 0.87、
+    # 肉身 vs 仙人 0.89，分不开窄片；0.96 只挡近重复，不充当题材闸。
+    ponds_similarity_shadow: bool = True
+    ponds_similarity_intra: float = 0.96
+    ponds_similarity_against: float = 0.96
 
     # --- Execution-plane roles (ADR-020) ---
     # orchestrator | retrieval | model_gateway | sandbox | monolith (tests / legacy)

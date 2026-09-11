@@ -31,6 +31,8 @@ PRESET_LABELS: tuple[str, ...] = (
 )
 
 SCHEMA_VERSION = 2
+REGIMES: tuple[str, ...] = ("author", "strict")
+DEFAULT_REGIME = "strict"
 
 SIGNAL_PENALTY_KEYS: tuple[str, ...] = (
     "hinge_dense",
@@ -579,6 +581,8 @@ def platform_prefs_payload(
         "signal_rewards": rewards,
         "schema_version": SCHEMA_VERSION,
         "exemplars": {k: [dict(x) for x in v] for k, v in exemplar_catalog(mode).items()},
+        # source=default：长篇产品默认 author（resolve_regime 仍把短篇/单篇压成 strict）
+        "regime": {"value": "author", "source": "default"},
     }
 
 
@@ -595,6 +599,9 @@ def apply_work_mode_overlay(prefs: dict[str, Any], work_mode: str) -> dict[str, 
     )
     out = dict(prefs)
     out.update(base)
+    kept_regime = prefs.get("regime") if isinstance(prefs.get("regime"), dict) else None
+    if kept_regime:
+        out["regime"] = kept_regime
     old_pen = prefs.get("signal_penalties") if isinstance(prefs.get("signal_penalties"), dict) else {}
     old_rew = prefs.get("signal_rewards") if isinstance(prefs.get("signal_rewards"), dict) else {}
     for frag in FRAGMENT_TYPES:
@@ -636,6 +643,17 @@ def merge_prefs(
         base["schema_version"] = int(stored.get("schema_version") or SCHEMA_VERSION)
     except (TypeError, ValueError):
         base["schema_version"] = SCHEMA_VERSION
+    raw_reg = stored.get("regime")
+    if isinstance(raw_reg, dict):
+        val = str(raw_reg.get("value") or "").strip().lower()
+        src = str(raw_reg.get("source") or "default").strip().lower()
+        if val not in REGIMES:
+            val = DEFAULT_REGIME
+        if src not in {"default", "user"}:
+            src = "default"
+        base["regime"] = {"value": val, "source": src}
+    else:
+        base["regime"] = {"value": "author", "source": "default"}
     return base
 
 

@@ -867,6 +867,51 @@ async def workspace_writing_book_verdict(
         return {"ok": True, "book": load_writing_book()}
 
 
+class BookTasteBody(BaseModel):
+    section_id: str = Field(default="", max_length=64)
+    kind: str = Field(min_length=1, max_length=16)
+    excerpt: str = Field(min_length=1, max_length=800)
+    note: str = Field(default="", max_length=60)
+    path: str = Field(default="", max_length=512)
+
+
+@workspace_router.post("/book/taste")
+async def workspace_writing_book_taste(
+    body: BookTasteBody,
+    work_id: str | None = None,
+    work_root: str | None = None,
+    owner_user_id: str | None = None,
+    visibility_seed: str | None = None,
+    _: None = Depends(verify_internal_token),
+):
+    """用户口味标记：就是这样 / 太 AI / 不像这本书 / 砍（砍走 propose_patch 删除）。"""
+    from app.writing.taste import append_taste_mark, apply_taste_cut
+    from app.writing.book import load_writing_book
+    from app.services.workspace_scope import workspace_tenant_scope
+
+    with workspace_tenant_scope(
+        **_tenant_query(work_id, work_root, owner_user_id, visibility_seed)
+    ):
+        result = append_taste_mark(
+            section_id=body.section_id,
+            kind=body.kind,
+            excerpt=body.excerpt,
+            note=body.note,
+            source="user",
+        )
+        if result.get("status") == "error":
+            raise HTTPException(status_code=400, detail=result.get("summary") or result.get("error"))
+        cut: dict | None = None
+        if body.kind == "cut":
+            cut = await apply_taste_cut(excerpt=body.excerpt, path=body.path)
+            if cut.get("status") == "error":
+                raise HTTPException(status_code=400, detail=cut.get("summary") or cut.get("error"))
+        payload: dict = {"ok": True, "mark": result.get("mark"), "book": load_writing_book()}
+        if cut is not None:
+            payload["cut"] = cut
+        return payload
+
+
 @workspace_router.post("/sources/sync", status_code=status.HTTP_202_ACCEPTED)
 async def workspace_sync_sources(
     background_tasks: BackgroundTasks,

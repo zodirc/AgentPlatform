@@ -817,3 +817,44 @@ def test_tool_completed_base_rejects_error_key() -> None:
     )
     assert "error" not in payload
     validate_event_payload("tool.completed", payload)
+
+
+@pytest.mark.asyncio
+async def test_propose_retcon_stops_turn() -> None:
+    async def handler(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "status": "ok",
+            "awaiting_consent": True,
+            "retcon": True,
+            "summary": "retcon 清单待用户按此执行，未落稿。",
+        }
+
+    spec = ToolSpec(
+        name="propose_retcon",
+        description="retcon",
+        parameters={"type": "object", "properties": {"items": {"type": "array"}}},
+        handler=handler,
+    )
+
+    async def write_event(*, event_type: str, payload: dict, step_index: int) -> None:
+        return None
+
+    engine = AgentEngine(
+        gateway=FakeGateway(
+            [
+                ModelResponse(
+                    tool_calls=[
+                        {"id": "t1", "name": "propose_retcon", "input": {"items": []}}
+                    ]
+                )
+            ],
+            one_per_stream=True,
+        ),
+        tools=[spec],
+        system_prompt="sys",
+        write_event=write_event,
+        check_cancel=AsyncMock(return_value=(False, False)),
+    )
+    state = _state()
+    await engine.run(state)
+    assert state.termination_reason == "retcon_awaiting_consent"

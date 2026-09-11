@@ -897,7 +897,20 @@ def prepare_writing_system_prompt(
     starting_new = wants_new_piece(message)
     if starting_new:
         cards = [c for c in cards if c.kind == "style"]
-    selection = select_writing_cards_detailed(message, cards)
+    from app.writing.regime import is_author_regime
+
+    author = is_author_regime(message, workspace_root=workspace_root)
+    if author:
+        selection = select_writing_cards_detailed(
+            message,
+            cards,
+            max_chars=int(getattr(settings, "writing_author_cards_max_chars", 3000) or 3000),
+            style_max=int(
+                getattr(settings, "writing_author_cards_style_max_chars", 1400) or 1400
+            ),
+        )
+    else:
+        selection = select_writing_cards_detailed(message, cards)
     block = format_cards_block(selection.cards)
     work_index = format_work_index_block(
         workspace_root=workspace_root,
@@ -930,7 +943,8 @@ def prepare_writing_system_prompt(
     except OSError:
         outline_text = ""
     work_mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
-    extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
+    if not author:
+        extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
     from app.writing.story_state import format_story_state_block
     from app.writing.editor_notes import format_editor_notes_block
     from app.writing.author_notes import format_author_notes_block
@@ -943,12 +957,23 @@ def prepare_writing_system_prompt(
     story_block = format_story_state_block(workspace_root=workspace_root)
     if story_block:
         extras.append(story_block)
+    if author:
+        from app.writing.author_state import format_author_state_block
+        from app.writing.taste import format_taste_block
+
+        author_block = format_author_state_block(workspace_root=workspace_root)
+        if author_block:
+            extras.append(author_block)
+        taste_block = format_taste_block(workspace_root=workspace_root)
+        if taste_block:
+            extras.append(taste_block)
     editor_block = format_editor_notes_block(focus=focus, workspace_root=workspace_root)
     if editor_block:
         extras.append(editor_block)
-    author_block = format_author_notes_block(workspace_root=workspace_root)
-    if author_block:
-        extras.append(author_block)
+    if not author:
+        author_block = format_author_notes_block(workspace_root=workspace_root)
+        if author_block:
+            extras.append(author_block)
     if work_mode == "web_serial":
         subtype = serial_subtype_block(message, outline_text)
         if subtype:
@@ -957,12 +982,20 @@ def prepare_writing_system_prompt(
     from app.writing.opening_ponds import (
         format_committed_pond_block,
         format_opening_ponds_block,
+        format_user_axis_intent_block,
+        wants_more_ponds,
     )
 
     if wants_opening_candidates(
         message, outline=outline_text, workspace_root=workspace_root
     ):
-        ponds_block = format_opening_ponds_block(workspace_root=workspace_root)
+        intent = format_user_axis_intent_block(message)
+        if intent:
+            extras.append(intent)
+        ponds_block = format_opening_ponds_block(
+            workspace_root=workspace_root,
+            mode="more" if wants_more_ponds(message) else "browse",
+        )
         if ponds_block:
             extras.append(ponds_block)
     else:
@@ -983,12 +1016,29 @@ def prepare_writing_system_prompt(
     )
     if beats:
         extras.append(beats)
-    if getattr(settings, "writing_token_economy_enabled", True):
+    from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
+
+    reread_phase = should_gate_reread_phase(message)
+    editor_phase = should_gate_editor_phase(message)
+    if reread_phase:
+        from app.writing.reread import build_reread_pack
+
+        pack = build_reread_pack(workspace_root=workspace_root)
+        pack_text = str(pack.get("text") or "")
+        if pack_text:
+            extras.append(f"[reread_pack]\n{pack_text}")
+    elif getattr(settings, "writing_token_economy_enabled", True):
         from app.writing.focus import build_work_surface_block
 
         surface = build_work_surface_block(message, workspace_root=workspace_root)
         if surface:
             extras.append(surface)
+    if editor_phase:
+        from app.writing.editor import format_observations_block
+
+        obs = format_observations_block(workspace_root=workspace_root)
+        if obs:
+            extras.append(obs)
     reset = quality_reject_steer(message)
     if reset:
         extras.append(reset)

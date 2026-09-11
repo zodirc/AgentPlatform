@@ -96,6 +96,12 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "前三分之一" in voice
     assert "一千八" in voice
     assert "功法" in voice
+    assert "几本不同的书" in voice
+    assert "start_kind 不同" not in voice
+    assert "只给题材时先换 start_kind" not in voice
+    assert "几本要是彼此不同的书" in system
+    assert "开篇候选要能点到" not in system
+    assert "start_kind 与 price_axis 不得重复" not in system
     assert "看见代价" not in voice
     assert "跟着谁" in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "眼下要什么" in STYLE_CONTRACT_OUTLINE_TEMPLATE
@@ -119,8 +125,9 @@ def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypa
     )
     assert "work_mode: `web_serial`" in spec
     assert "候选" in spec
-    assert "互不换皮" in spec
-    assert "发觉" in spec
+    assert "彼此不同的书" in spec
+    assert "互不换皮" not in spec
+    assert "发觉/系统/过日子" not in spec
     assert "前三分之一" not in spec
     assert "沈砚" not in spec
     assert "灵灯" not in spec

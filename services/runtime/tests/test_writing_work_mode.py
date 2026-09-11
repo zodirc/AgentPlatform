@@ -75,7 +75,7 @@ def test_spec_block_opening_live_character(
     from app.settings import settings
 
     monkeypatch.setattr(settings, "workspace_root", str(tmp_path))
-    spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章")
+    spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章 严格模式")
     assert "work_mode: `web_serial`" in spec
     assert "book_scope: `long`" in spec
     assert "开篇" in spec

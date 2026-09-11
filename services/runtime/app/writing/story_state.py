@@ -8,12 +8,25 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from app.writing.signals.surface import has_task_voice, strip_task_voice
-from app.writing.text_metrics import visible_chars
+from app.writing.text_metrics import clip_visible, visible_chars
 
 STORY_STATE_JSON = Path(".agent") / "work" / "story_state.json"
 STORY_STATE_MD = Path(".agent") / "work" / "story_state.md"
 STORY_STATE_MAX_CHARS = 900
 THREAD_STALE_CHAPTERS = 8
+_READER_CAPS = {"believes": 6, "suspects": 4, "waiting_for": 4, "tired_of": 3}
+_EMPTY_READER = {
+    "believes": [],
+    "suspects": [],
+    "waiting_for": [],
+    "tired_of": [],
+}
+_EMPTY_IDENTITY = {
+    "is": [],
+    "is_not": [],
+    "voice_note": "",
+    "revised_ch": None,
+}
 _EMPTY: dict[str, Any] = {
     "characters": [],
     "pressures": [],
@@ -24,6 +37,11 @@ _EMPTY: dict[str, Any] = {
     "taboos": [],
     "deltas": {},
     "wild_cards": [],
+    "swerves": [],
+    "reader_ledger": dict(_EMPTY_READER),
+    "promises": [],
+    "deferred": [],
+    "identity": dict(_EMPTY_IDENTITY),
 }
 
 _PLACE = re.compile(r"街|铺|城|村|屋|桥|庙|山|河|站|厂|寺|巷|码头|楼")
@@ -91,10 +109,82 @@ def load_story_state(*, workspace_root: Path | None = None) -> dict[str, Any]:
         "spent",
         "taboos",
         "wild_cards",
+        "swerves",
+        "promises",
+        "deferred",
     ):
         if not isinstance(out[key], list):
             out[key] = []
+    out["reader_ledger"] = _normalize_reader(out.get("reader_ledger"))
+    out["identity"] = _normalize_identity(out.get("identity"), taboos=out.get("taboos"))
+    if out["taboos"] and not out["identity"]["is_not"]:
+        out["identity"]["is_not"] = [str(t).strip()[:40] for t in out["taboos"] if str(t).strip()][:4]
     return out
+
+
+def _normalize_reader(raw: Any) -> dict[str, list[str]]:
+    out = {k: [] for k in _READER_CAPS}
+    if not isinstance(raw, dict):
+        return out
+    for key, cap in _READER_CAPS.items():
+        items = raw.get(key)
+        if not isinstance(items, list):
+            continue
+        cleaned: list[str] = []
+        for item in items:
+            text = str(item or "").strip()
+            if not text:
+                continue
+            cleaned.append(clip_visible(text, 60))
+            if len(cleaned) >= cap:
+                break
+        out[key] = cleaned
+    return out
+
+
+def _normalize_identity(raw: Any, *, taboos: Any = None) -> dict[str, Any]:
+    out = dict(_EMPTY_IDENTITY)
+    if isinstance(raw, dict):
+        is_list = [str(x).strip()[:40] for x in (raw.get("is") or []) if str(x).strip()][:4]
+        is_not = [str(x).strip()[:40] for x in (raw.get("is_not") or []) if str(x).strip()][:4]
+        out["is"] = is_list
+        out["is_not"] = is_not
+        out["voice_note"] = clip_visible(str(raw.get("voice_note") or ""), 120)
+        try:
+            revised = raw.get("revised_ch")
+            out["revised_ch"] = int(revised) if revised is not None and str(revised).strip() != "" else None
+        except (TypeError, ValueError):
+            out["revised_ch"] = None
+    if not out["is_not"] and isinstance(taboos, list):
+        out["is_not"] = [str(t).strip()[:40] for t in taboos if str(t).strip()][:4]
+    return out
+
+
+def seed_identity_from_pond(
+    pond: Mapping[str, Any] | None,
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """开篇点选成功时从 flavor / book_self_note 机械生成 identity 初稿。"""
+    state = load_story_state(workspace_root=workspace_root)
+    identity = _normalize_identity(state.get("identity"), taboos=state.get("taboos"))
+    if identity.get("is"):
+        return save_story_state(state, workspace_root=workspace_root)
+    item = pond if isinstance(pond, Mapping) else {}
+    flavor = str(item.get("flavor") or "").strip()
+    self_note = str(item.get("book_self_note") or "").strip()
+    title = str(item.get("title") or "").strip()
+    is_items: list[str] = []
+    if flavor:
+        is_items.append(clip_visible(flavor, 40))
+    elif title:
+        is_items.append(clip_visible(title, 40))
+    if self_note and self_note not in is_items:
+        is_items.append(clip_visible(self_note, 40))
+    identity["is"] = is_items[:4]
+    identity["revised_ch"] = 1
+    state["identity"] = identity
+    return save_story_state(state, workspace_root=workspace_root)
 
 
 def render_story_state_md(state: Mapping[str, Any]) -> str:
@@ -135,10 +225,44 @@ def render_story_state_md(state: Mapping[str, Any]) -> str:
             lines.append(f"- {row.get('text') or row.get('kind')}")
         lines.append("")
     taboos = [str(t) for t in (state.get("taboos") or []) if str(t).strip()]
+    identity = _normalize_identity(state.get("identity"), taboos=taboos)
     if taboos:
         lines.append("## 这本书拒绝做的事")
         for item in taboos[:5]:
             lines.append(f"- {item}")
+        lines.append("")
+    is_items = [str(x) for x in (identity.get("is") or []) if str(x).strip()]
+    is_not = [str(x) for x in (identity.get("is_not") or []) if str(x).strip()]
+    if is_items or is_not:
+        lines.append("## 这本书是/不是")
+        for item in is_items[:4]:
+            lines.append(f"- 是：{item}")
+        for item in is_not[:4]:
+            lines.append(f"- 不是：{item}")
+        lines.append("")
+    reader = _normalize_reader(state.get("reader_ledger"))
+    if any(reader[k] for k in _READER_CAPS):
+        lines.append("## 谁在读")
+        for key, label in (
+            ("believes", "信"),
+            ("suspects", "疑"),
+            ("waiting_for", "等"),
+            ("tired_of", "烦"),
+        ):
+            for item in reader[key]:
+                lines.append(f"- {label}：{item}")
+        lines.append("")
+    promises = [p for p in (state.get("promises") or []) if isinstance(p, dict)]
+    if promises:
+        lines.append("## 许诺")
+        for row in promises[:10]:
+            lines.append(f"- {row.get('what', '')}（第 {row.get('made_ch', '?')} 章 · {row.get('due', '')}）")
+        lines.append("")
+    deferred = [d for d in (state.get("deferred") or []) if isinstance(d, dict)]
+    if deferred:
+        lines.append("## 故意还不决定")
+        for row in deferred[:6]:
+            lines.append(f"- {row.get('question', '')}（自第 {row.get('since_ch', '?')} 章）")
         lines.append("")
     deltas = state.get("deltas") if isinstance(state.get("deltas"), dict) else {}
     if deltas:
@@ -170,8 +294,13 @@ def save_story_state(
 
 
 def format_story_state_block(*, workspace_root: Path | None = None) -> str:
-    """进 volatile：[story_state] 帽 900。账本不是工单。"""
+    """进 volatile：[story_state]。账本不是工单。作者档帽 1200，严格档 900。"""
+    from app.settings import settings
+    from app.writing.regime import is_author_regime
+
     state = load_story_state(workspace_root=workspace_root)
+    author = is_author_regime(workspace_root=workspace_root)
+    cap = int(getattr(settings, "writing_story_state_max_chars", 1200) or 1200) if author else STORY_STATE_MAX_CHARS
     pressures = [
         p
         for p in (state.get("pressures") or [])
@@ -183,13 +312,26 @@ def format_story_state_block(*, workspace_root: Path | None = None) -> str:
     threads = threads[:3]
     gaps = [g for g in (state.get("info_gaps") or []) if isinstance(g, dict)][:5]
     taboos = [str(t) for t in (state.get("taboos") or []) if str(t).strip()][:5]
+    identity = _normalize_identity(state.get("identity"), taboos=taboos)
+    reader = _normalize_reader(state.get("reader_ledger"))
+    overdue = overdue_promises(state, current_ch=now)[:3]
+    deferred = [d for d in (state.get("deferred") or []) if isinstance(d, dict)][:6]
     deltas = state.get("deltas") if isinstance(state.get("deltas"), dict) else {}
     last_delta = []
     last_ch = ""
     if deltas:
         last_ch = sorted(deltas.keys(), key=lambda k: int(k) if str(k).isdigit() else 0)[-1]
         last_delta = list(deltas.get(last_ch) or [])[:3]
-    if not (pressures or threads or gaps or taboos or last_delta):
+    has_v2 = any(
+        (
+            any(reader[k] for k in _READER_CAPS),
+            overdue,
+            deferred,
+            identity.get("is"),
+            identity.get("is_not"),
+        )
+    )
+    if not (pressures or threads or gaps or taboos or last_delta or has_v2):
         return ""
     lines = ["## Story state", "桌上的账本。不用照着写。允许这一场不解决任何事。"]
     if pressures:
@@ -216,22 +358,114 @@ def format_story_state_block(*, workspace_root: Path | None = None) -> str:
         for row in gaps:
             doesnt = "、".join(str(x) for x in (row.get("who_doesnt") or [])[:4])
             lines.append(f"- {row.get('what')}（{doesnt or '—'} 还不知道）")
+    if any(reader[k] for k in _READER_CAPS):
+        lines.append("谁在读：")
+        for key, label in (
+            ("believes", "信"),
+            ("suspects", "疑"),
+            ("waiting_for", "等"),
+            ("tired_of", "烦"),
+        ):
+            for item in reader[key][: _READER_CAPS[key]]:
+                lines.append(f"- {label}：{item}")
+    if overdue:
+        lines.append("逾期许诺：")
+        for row in overdue:
+            lines.append(f"- {row.get('what')}（第 {row.get('made_ch')} 章 · {row.get('due')}）")
+    if deferred:
+        lines.append("悬置：")
+        for row in deferred:
+            lines.append(
+                f"- {row.get('question')}（自第 {row.get('since_ch')} 章，直到 {row.get('until')}）"
+            )
+    is_items = [str(x) for x in (identity.get("is") or []) if str(x).strip()][:4]
+    is_not = [str(x) for x in (identity.get("is_not") or []) if str(x).strip()][:4]
+    if is_items or is_not:
+        lines.append("这本书是/不是：")
+        for item in is_items:
+            lines.append(f"- 是：{item}")
+        for item in is_not:
+            lines.append(f"- 不是：{item}")
     if last_delta:
         lines.append(f"上一章（第 {last_ch} 章）改变了什么：")
         for item in last_delta:
             lines.append(f"- {item}")
-    if taboos:
+    if taboos and not is_not:
         lines.append("这本书拒绝：")
         for item in taboos:
             lines.append(f"- {item}")
     missed = missed_delta_streak(state)
     if missed >= 2:
         lines.append("连续两章没有留下 deltas。这章若改变了什么，用 note_story_delta 记三句以内。")
+    if author:
+        hint = _author_pass_hint(
+            state, current_ch=now, workspace_root=workspace_root
+        )
+        if hint:
+            lines.append(hint)
     text = "\n".join(lines)
     text = strip_task_voice(text)
-    if visible_chars(text) > STORY_STATE_MAX_CHARS:
-        text = text[: STORY_STATE_MAX_CHARS - 1].rstrip() + "…"
+    if visible_chars(text) > cap:
+        text = clip_visible(text, cap, ellipsis=True)
     return text
+
+
+def overdue_promises(
+    state: Mapping[str, Any],
+    *,
+    current_ch: int | None,
+) -> list[dict[str, Any]]:
+    if current_ch is None:
+        return []
+    out: list[dict[str, Any]] = []
+    for row in state.get("promises") or []:
+        if not isinstance(row, dict) or row.get("kept_ch") is not None:
+            continue
+        what = str(row.get("what") or "").strip()
+        if not what:
+            continue
+        try:
+            made = int(row.get("made_ch") or 0)
+        except (TypeError, ValueError):
+            continue
+        due = str(row.get("due") or "someday")
+        if due == "soon" and current_ch - made >= 3:
+            out.append(row)
+        elif due == "this_volume" and wild_card_volume(current_ch) > wild_card_volume(max(made, 1)):
+            out.append(row)
+    return out[:3]
+
+
+def _author_pass_hint(
+    state: Mapping[str, Any],
+    *,
+    current_ch: int | None,
+    workspace_root: Path | None = None,
+) -> str:
+    flags = []
+    if current_ch is not None and current_ch > 0 and current_ch % 5 == 0:
+        flags.append("本卷写完了，可以 `/reread`")
+    overdue = overdue_promises(state, current_ch=current_ch)
+    cons: list[Any] = []
+    if workspace_root is not None:
+        from app.writing.manuscript import (
+            extract_section,
+            list_section_ids,
+            load_manuscript_doc,
+        )
+
+        doc, _rel = load_manuscript_doc(workspace_root)
+        ids = list_section_ids(doc) if doc else []
+        last = ids[-1] if ids else ""
+        if last:
+            cons = consistency_flags(
+                extract_section(doc, last) or "",
+                section_id=last,
+                workspace_root=workspace_root,
+            )
+    if overdue or cons or (current_ch is not None and current_ch > 0 and current_ch % 3 == 0):
+        flags.append("可以 `/edit`")
+    return "；".join(flags)
 
 
 def _latest_chapter(state: Mapping[str, Any]) -> int | None:
@@ -266,6 +500,8 @@ def missed_delta_streak(state: Mapping[str, Any]) -> int:
 
 
 def story_state_contract_ready(*, workspace_root: Path | None = None) -> bool:
+    from app.writing.regime import is_author_regime
+
     state = load_story_state(workspace_root=workspace_root)
     rising = [
         p
@@ -273,7 +509,12 @@ def story_state_contract_ready(*, workspace_root: Path | None = None) -> bool:
         if isinstance(p, dict) and str(p.get("trend") or "") == "rising"
     ]
     gaps = [g for g in (state.get("info_gaps") or []) if isinstance(g, dict)]
-    return bool(rising) and bool(gaps)
+    if not (rising and gaps):
+        return False
+    if not is_author_regime(workspace_root=workspace_root):
+        return True
+    identity = _normalize_identity(state.get("identity"), taboos=state.get("taboos"))
+    return bool([x for x in (identity.get("is") or []) if str(x).strip()])
 
 
 def thread_stale_flags(
@@ -481,9 +722,6 @@ def _merge_patch(state: dict[str, Any], patch: Mapping[str, Any], *, ch: int | N
             existing = [g for g in existing if g.get("what") != item["what"]]
             existing.append(item)
         state["info_gaps"] = existing[:5]
-    if isinstance(patch.get("taboos"), list):
-        taboos = [str(t).strip()[:40] for t in patch["taboos"] if str(t).strip()]
-        state["taboos"] = taboos[:5]
     if isinstance(patch.get("characters"), list):
         existing = [c for c in state.get("characters") or [] if isinstance(c, dict)]
         for row in patch["characters"]:
@@ -509,6 +747,74 @@ def _merge_patch(state: dict[str, Any], patch: Mapping[str, Any], *, ch: int | N
             if ch is not None:
                 found["last_seen_ch"] = ch
         state["characters"] = existing[:24]
+    if isinstance(patch.get("reader_ledger"), dict):
+        merged = _normalize_reader(state.get("reader_ledger"))
+        incoming = _normalize_reader(patch.get("reader_ledger"))
+        for key in _READER_CAPS:
+            if incoming[key]:
+                merged[key] = incoming[key]
+        state["reader_ledger"] = merged
+    if isinstance(patch.get("promises"), list):
+        existing = [p for p in state.get("promises") or [] if isinstance(p, dict)]
+        for row in patch["promises"]:
+            if not isinstance(row, dict) or not row.get("what"):
+                continue
+            due = str(row.get("due") or "someday")
+            if due not in {"soon", "this_volume", "someday"}:
+                due = "someday"
+            item = {
+                "what": clip_visible(str(row.get("what") or ""), 80),
+                "made_ch": int(row.get("made_ch") or ch or 0),
+                "due": due,
+            }
+            if row.get("kept_ch") is not None:
+                try:
+                    item["kept_ch"] = int(row["kept_ch"])
+                except (TypeError, ValueError):
+                    pass
+            existing = [p for p in existing if p.get("what") != item["what"]]
+            existing.append(item)
+        state["promises"] = existing[-10:]
+    if isinstance(patch.get("deferred"), list):
+        existing = [d for d in state.get("deferred") or [] if isinstance(d, dict)]
+        for row in patch["deferred"]:
+            if not isinstance(row, dict) or not row.get("question"):
+                continue
+            until = str(row.get("until") or "volume_end")
+            if until not in {"volume_end", "when_it_hurts", "never_maybe"}:
+                until = "volume_end"
+            item = {
+                "question": clip_visible(str(row.get("question") or ""), 80),
+                "since_ch": int(row.get("since_ch") or ch or 0),
+                "until": until,
+            }
+            existing = [d for d in existing if d.get("question") != item["question"]]
+            existing.append(item)
+        state["deferred"] = existing[:6]
+    if isinstance(patch.get("identity"), dict):
+        current = _normalize_identity(state.get("identity"), taboos=state.get("taboos"))
+        incoming = patch["identity"]
+        if isinstance(incoming.get("is"), list):
+            current["is"] = [str(x).strip()[:40] for x in incoming["is"] if str(x).strip()][:4]
+        if isinstance(incoming.get("is_not"), list):
+            incoming_not = [
+                str(x).strip()[:40] for x in incoming["is_not"] if str(x).strip()
+            ][:4]
+            if incoming_not:
+                current["is_not"] = incoming_not
+                state["taboos"] = list(current["is_not"][:5])
+        if incoming.get("voice_note"):
+            current["voice_note"] = clip_visible(str(incoming.get("voice_note") or ""), 120)
+        current["revised_ch"] = int(incoming.get("revised_ch") or ch or current.get("revised_ch") or 0) or None
+        state["identity"] = current
+    if isinstance(patch.get("taboos"), list):
+        taboos = [str(t).strip()[:40] for t in patch["taboos"] if str(t).strip()]
+        if taboos:
+            state["taboos"] = taboos[:5]
+            identity = _normalize_identity(state.get("identity"), taboos=taboos)
+            if not identity.get("is_not"):
+                identity["is_not"] = taboos[:4]
+            state["identity"] = identity
 
 
 def outline_over_planned(md: str) -> bool:
@@ -583,17 +889,63 @@ def record_wild_card(
     return save_story_state(state, workspace_root=workspace_root)
 
 
+def record_swerve(
+    section_id: str,
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """作者档：越轨只记账本债，不配额。"""
+    state = load_story_state(workspace_root=workspace_root)
+    ch = chapter_num(section_id)
+    if ch is None:
+        return state
+    used = [int(x) for x in (state.get("swerves") or []) if str(x).isdigit()]
+    if ch not in used:
+        used.append(ch)
+    state["swerves"] = used
+    deltas = dict(state.get("deltas") or {})
+    key = str(ch)
+    note = f"第 {ch} 章 swerve"
+    existing = [str(x) for x in (deltas.get(key) or [])]
+    if note not in existing:
+        existing.append(note)
+    deltas[key] = existing[:3]
+    state["deltas"] = deltas
+    return save_story_state(state, workspace_root=workspace_root)
+
+
+def note_chapter_rewrite(
+    section_id: str,
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    state = load_story_state(workspace_root=workspace_root)
+    ch = chapter_num(section_id)
+    key = str(ch) if ch is not None else (section_id or "ch")
+    deltas = dict(state.get("deltas") or {})
+    note = f"第 {key} 章重写"
+    existing = [str(x) for x in (deltas.get(key) or [])]
+    if note not in existing:
+        existing.append(note)
+    deltas[key] = existing[:3]
+    state["deltas"] = deltas
+    return save_story_state(state, workspace_root=workspace_root)
+
+
 def wild_card_without_consequence(
     *,
     current_ch: int | None,
     workspace_root: Path | None = None,
 ) -> int | None:
-    """之后 2 章 deltas 未提该章变化 → 返回那次越轨章号。"""
+    """之后 2 章 deltas 未提该章变化 → 返回那次越轨章号。作者档查 swerve 债。"""
     if current_ch is None:
         return None
     state = load_story_state(workspace_root=workspace_root)
     deltas = state.get("deltas") if isinstance(state.get("deltas"), dict) else {}
-    for raw in state.get("wild_cards") or []:
+    from app.writing.regime import is_author_regime
+
+    source = "swerves" if is_author_regime(workspace_root=workspace_root) else "wild_cards"
+    for raw in state.get(source) or []:
         try:
             ch = int(raw)
         except (TypeError, ValueError):
@@ -609,3 +961,36 @@ def wild_card_without_consequence(
         if not mentioned:
             return ch
     return None
+
+
+def sync_volume_patch(
+    volume: Mapping[str, Any],
+    *,
+    workspace_root: Path | None = None,
+) -> dict[str, Any]:
+    """把卷结构的 must_not_decide_yet / promises_due 同步进账本。"""
+    state = load_story_state(workspace_root=workspace_root)
+    ch = None
+    chapters = str(volume.get("chapters") or "")
+    match = re.search(r"ch(\d+)", chapters, re.I)
+    if match:
+        ch = int(match.group(1))
+    patch: dict[str, Any] = {}
+    deferred = []
+    for item in volume.get("must_not_decide_yet") or []:
+        text = str(item).strip()
+        if text:
+            deferred.append({"question": text, "since_ch": ch or 0, "until": "volume_end"})
+    if deferred:
+        patch["deferred"] = deferred
+    promises = []
+    for item in volume.get("promises_due") or []:
+        text = str(item).strip()
+        if text:
+            promises.append({"what": text, "made_ch": ch or 0, "due": "this_volume"})
+    if promises:
+        patch["promises"] = promises
+    if patch:
+        _merge_patch(state, patch, ch=ch)
+        return save_story_state(state, workspace_root=workspace_root)
+    return state

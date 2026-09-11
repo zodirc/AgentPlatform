@@ -275,6 +275,7 @@ def test_draft_section_tool_completed_allows_writing_utilization_meta() -> None:
             "rewrite_policy": "propose_patch",
             "old_text": "「跑完了？」",
             "section_id": "ch1",
+            "regime": "strict",
         },
         schemas_dir=SCHEMAS_DIR,
     )
@@ -296,6 +297,14 @@ def test_terminal_turn_payloads_allow_post_turn_jobs() -> None:
         {
             "summary": "开篇闸连拒停转",
             "termination_reason": "opening_ponds_retry_exhausted",
+        },
+        schemas_dir=SCHEMAS_DIR,
+    )
+    validate_event_payload(
+        "turn.completed",
+        {
+            "summary": "retcon 待用户按此执行",
+            "termination_reason": "retcon_awaiting_consent",
         },
         schemas_dir=SCHEMAS_DIR,
     )

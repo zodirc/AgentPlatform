@@ -232,12 +232,17 @@ def archive_occupied_writing_docs(*, layout: str = "monofile") -> list[str]:
 
     clear_style_lock()
     from app.writing.opening_ponds import clear_committed_pond, clear_opening_ponds
+    from app.writing.pond_history import clear_rejected_ponds
 
     clear_committed_pond()
     clear_opening_ponds()
+    clear_rejected_ponds()
     from app.writing.signals.beats import clear_local_beats
 
     clear_local_beats()
+    from app.writing.author_state import archive_author_state
+
+    archive_author_state()
     return archived
 
 

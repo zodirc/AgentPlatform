@@ -101,23 +101,32 @@ def _tools_for_turn(
     *,
     plan_phase: str | None,
     message: str,
-) -> tuple[list[Any], bool]:
-    """Plan 规划闸优先；否则开篇候选闸成只剩 propose_opening_ponds。"""
+) -> tuple[list[Any], bool, bool, bool]:
+    """Plan 规划闸优先；否则开篇候选闸；再编辑 / 回读相位。"""
     from app.writing.opening_ponds import should_gate_opening_choice
+    from app.writing.reread import should_gate_editor_phase, should_gate_reread_phase
 
     opening_choice = False
+    editor_phase = False
+    reread_phase = False
     if (plan_phase or "").strip().lower() != "planning":
         opening_choice = should_gate_opening_choice(
             message or "",
             tool_names=list(profile.tool_names),
         )
+        if not opening_choice:
+            editor_phase = should_gate_editor_phase(message or "")
+            if not editor_phase:
+                reread_phase = should_gate_reread_phase(message or "")
     tools = tool_scope(
         profile,
         registry,
         plan_phase=plan_phase,
         opening_choice=opening_choice,
+        editor_phase=editor_phase,
+        reread_phase=reread_phase,
     )
-    return tools, opening_choice
+    return tools, opening_choice, editor_phase, reread_phase
 
 
 def _track_turn_started(turn_id: UUID) -> None:
@@ -642,7 +651,7 @@ async def _pending_from_checkpoint(run_id: UUID) -> PendingTurn | None:
     profile = ScenarioRegistry.get(state.scenario_id)
     registry = build_registry()
     # Preserve Plan executing write-waiver when restoring from checkpoint.
-    tools, _opening_choice = _tools_for_turn(
+    tools, _opening_choice, _editor_phase, _reread_phase = _tools_for_turn(
         profile,
         registry,
         plan_phase=state.plan_phase,
@@ -1665,7 +1674,7 @@ async def _run_turn(
     )
 
     registry = build_registry()
-    tools, opening_choice = _tools_for_turn(
+    tools, opening_choice, editor_phase, reread_phase = _tools_for_turn(
         profile,
         registry,
         plan_phase=phase,
@@ -1747,6 +1756,26 @@ async def _run_turn(
             if volatile_context.strip()
             else f"{choice_block}\n"
         )
+    elif editor_phase:
+        from app.writing.editor import editor_phase_block
+
+        edit_block = editor_phase_block()
+        if edit_block:
+            volatile_context = (
+                f"{volatile_context.rstrip()}\n\n{edit_block}\n"
+                if volatile_context.strip()
+                else f"{edit_block}\n"
+            )
+    elif reread_phase:
+        from app.writing.reread import reread_phase_block
+
+        reread_block = reread_phase_block()
+        if reread_block:
+            volatile_context = (
+                f"{volatile_context.rstrip()}\n\n{reread_block}\n"
+                if volatile_context.strip()
+                else f"{reread_block}\n"
+            )
 
     # docs/27 — when Work disabled product seed, steer model away from seed paths.
     from app.tenant_context import current_visibility_seed

@@ -314,6 +314,11 @@
       "enum": ["propose_patch", "draft_ok"],
       "description": "propose_patch while a locatable quality or L0 span remains; draft_ok after the same island returns (identical old_text or same key with ≥12-char overlap), or when nothing is left to patch."
     },
+    "regime": {
+      "type": "string",
+      "enum": ["author", "strict"],
+      "description": "Writing gate regime copied from the tool result (Ops). Engine does not resolve it."
+    },
     "section_id": {
       "type": "string",
       "maxLength": 64,

@@ -27,6 +27,8 @@ _SLASH_COMPACT = re.compile(r"^\s*/compact\b", re.I)
 _SLASH_VERIFY = re.compile(r"^\s*/verify\b", re.I)
 _SLASH_POLISH = re.compile(r"^\s*/polish(?:\s+(.*))?$", re.I | re.S)
 _SLASH_OUTLINE = re.compile(r"^\s*/outline(?:\s+(.*))?$", re.I | re.S)
+_SLASH_EDIT = re.compile(r"^\s*/edit(?:\s+(.*))?$", re.I | re.S)
+_SLASH_REREAD = re.compile(r"^\s*/reread(?:\s+(.*))?$", re.I | re.S)
 _SLASH_TEST = re.compile(r"^\s*/test(?:\s+(.*))?$", re.I | re.S)
 _SLASH_LINT = re.compile(r"^\s*/lint(?:\s+(.*))?$", re.I | re.S)
 _PATH_REF = re.compile(r"@([\w./-]+\.(?:md|txt|py|ts|json|yaml|yml)|[\w./-]+)")
@@ -67,6 +69,17 @@ LINT_EXPAND = (
     "[lint] 对工作区调用 read_lints；汇总诊断；"
     "若存在你引入的问题再 edit_file 修复；不要无关重构。"
 )
+EDIT_EXPAND = (
+    "[edit] 你是这本书的编辑。保护它，不告诉作者该写什么。"
+    "只读；调用 editor_report 出类型化旗。不要 draft_section、propose_patch、update_outline。"
+    "evidence 里不要写应该 / 请 / 改成 / 必须 / 记得。"
+)
+REREAD_EXPAND = (
+    "[reread] 回头读这本书。读回来的是原文，不是概要。"
+    "先 reread_book，再 author_state 写回读记，并用 note_story_delta 重估账本。"
+    "动前文只用 propose_retcon，等用户按此执行。"
+)
+_RETCON_EXECUTE = re.compile(r"^\[retcon\]", re.I)
 
 
 def expand_writing_slash(message: str) -> tuple[str, str | None]:
@@ -89,6 +102,16 @@ def expand_writing_slash(message: str) -> tuple[str, str | None]:
         rest = (m.group(1) or "").strip()
         expanded = f"{OUTLINE_EXPAND}" + (f"\n{rest}" if rest else "")
         return expanded, "outline"
+    m = _SLASH_EDIT.match(text)
+    if m:
+        rest = (m.group(1) or "").strip()
+        expanded = f"{EDIT_EXPAND}" + (f"\n{rest}" if rest else "")
+        return expanded, "edit"
+    m = _SLASH_REREAD.match(text)
+    if m:
+        rest = (m.group(1) or "").strip()
+        expanded = f"{REREAD_EXPAND}" + (f"\n{rest}" if rest else "")
+        return expanded, "reread"
     return message, None
 
 
@@ -151,6 +174,13 @@ class InputCompiler:
         if slash:
             metadata["slash_expand"] = slash
             text = text.strip()
+        if _RETCON_EXECUTE.search(text):
+            from app.writing.reread import format_retcon_execute_instruction
+
+            extra = format_retcon_execute_instruction()
+            if extra and extra not in text:
+                text = f"{text.rstrip()}\n\n{extra}"
+                metadata["retcon_execute"] = True
         plan_hint = detect_plan_hint(text, scenario_id=scenario_id)
         if plan_hint:
             metadata["plan_hint"] = plan_hint
@@ -299,6 +329,8 @@ def should_query(message: str, *, has_model_key: bool) -> ShouldQueryResult:
                 "  /verify — fact-check drafts/exports (does not mutate drafts)\n"
                 "  /polish — style-only polish pass (no search_sources; propose_patch)\n"
                 "  /outline — outline-only pass (update_outline; no prose)\n"
+                "  /edit — editor pass (editor_report only; no prose edits)\n"
+                "  /reread — reread original chapters; retcon needs confirm\n"
                 "  /test — run project tests (run_tests; report failures)\n"
                 "  /lint — read_lints and fix introduced issues\n"
                 "Send any other message to start a turn."

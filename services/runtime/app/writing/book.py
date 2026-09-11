@@ -263,12 +263,25 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
                 kind="author_notes",
             )
         )
+    state_path = root / ".agent" / "work" / "author_state.md"
+    state_text = _read_text(state_path)
+    if state_text.strip():
+        parts.append(
+            _part(
+                key="author_state",
+                label="作者手记",
+                text=state_text,
+                kind="author_state",
+            )
+        )
     title = _first_heading(outline) or _first_heading(manuscript) or "未命名"
     empty = not parts
     if empty:
         title = "还没有书"
     from app.writing.story_state import load_story_state, consistency_flags
     from app.writing.manuscript import list_section_ids, extract_section
+    from app.writing.reread import load_retcon_pending
+    from app.writing.taste import load_taste_marks
 
     state = load_story_state(workspace_root=root)
     flags: list[dict[str, Any]] = []
@@ -282,12 +295,39 @@ def load_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any]:
                 workspace_root=root,
             )
         )
+    editor_flags: list[dict[str, Any]] = []
+    editor_dir = root / ".agent" / "work" / "editor"
+    if editor_dir.is_dir():
+        files = sorted(editor_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        if files:
+            try:
+                payload = json.loads(files[0].read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                payload = {}
+            if isinstance(payload, dict):
+                editor_flags = list(payload.get("flags") or [])
+                keep = list(payload.get("keep") or [])
+            else:
+                keep = []
+        else:
+            keep = []
+    else:
+        keep = []
     return {
         "title": title,
         "empty": empty,
         "parts": parts,
         "wild_cards": list(state.get("wild_cards") or []),
+        "swerves": list(state.get("swerves") or []),
         "consistency_flags": flags,
+        "identity": state.get("identity") or {},
+        "reader_ledger": state.get("reader_ledger") or {},
+        "promises": state.get("promises") or [],
+        "deferred": state.get("deferred") or [],
+        "editor_flags": editor_flags,
+        "editor_keep": keep,
+        "taste_marks": load_taste_marks(workspace_root=root)[-12:],
+        "retcon_pending": load_retcon_pending(workspace_root=root),
     }
 
 
@@ -348,10 +388,16 @@ def discard_writing_book(*, workspace_root: Path | None = None) -> dict[str, Any
         clear_local_beats(workspace_root=root)
         _unlink_file(root, ".agent/work/local_beats.json", cleared, "beats")
     _unlink_file(root, ".agent/work/opening_ponds.json", cleared, "outline")
+    _unlink_file(root, ".agent/work/opening_ponds_rejected.jsonl", cleared, "outline")
     _unlink_file(root, ".agent/work/committed_pond.json", cleared, "outline")
     _unlink_file(root, ".agent/work/story_state.json", cleared, "outline")
     _unlink_file(root, ".agent/work/story_state.md", cleared, "outline")
     _unlink_file(root, ".agent/work/author_notes.md", cleared, "outline")
+    _unlink_file(root, ".agent/work/author_state.md", cleared, "outline")
+    _unlink_file(root, ".agent/work/author_state_stance.jsonl", cleared, "outline")
+    _wipe_dir_files(root, ".agent/work/editor", cleared, "beats")
+    _wipe_dir_files(root, ".agent/work/taste", cleared, "beats")
+    _wipe_dir_files(root, ".agent/work/retcon", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/editor_notes", cleared, "beats")
     _wipe_dir_files(root, ".agent/work/surface", cleared, "beats")
     _unlink_file(root, ".agent/work/surface_index.json", cleared, "beats")

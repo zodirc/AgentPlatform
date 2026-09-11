@@ -81,6 +81,12 @@ def note_writing_signals_for_verify(state: Any, result: dict[str, Any]) -> None:
     hits = _writing_l0_hits(result)
     if hits is None:
         return
+    from app.writing.delivery_gate import suppress_same_turn_writing_receipts
+
+    if suppress_same_turn_writing_receipts(
+        message=str(getattr(state, "turn_user_text", "") or "")
+    ):
+        return
     for key, attr in _WRITING_PENDING.items():
         setattr(state, attr, bool(hits.get(key)))
 
@@ -662,8 +668,16 @@ def should_inject_writing_delivery_hold(state: Any, *, reserve_steps: int = 1) -
     remaining = _remaining_steps(state)
     if remaining < 1:
         return False
-    from app.writing.delivery_gate import manifest_delivery_blockers, read_turn_manifest
+    from app.writing.delivery_gate import (
+        manifest_delivery_blockers,
+        read_turn_manifest,
+        suppress_same_turn_writing_receipts,
+    )
 
+    if suppress_same_turn_writing_receipts(
+        message=str(getattr(state, "turn_user_text", "") or "")
+    ):
+        return False
     manifest = read_turn_manifest(
         getattr(state, "turn_id", None),
         getattr(state, "session_id", None),

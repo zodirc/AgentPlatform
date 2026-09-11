@@ -358,7 +358,10 @@ async def build_writing_signals(
     # Weights + signal gains live in writing tools (writing_prefs.json), not Settings.
     prefs = platform_prefs_payload(work_mode=work_mode, style_gains=style_gains)
     space = await load_metric_space(
-        owner_user_id=owner_id, work_id=work_id, work_mode=work_mode
+        owner_user_id=owner_id,
+        work_id=work_id,
+        work_mode=work_mode,
+        turn_user_text=turn_user_text,
     )
     duty = _chapter_duty(section_id)
     role = resolve_chapter_role(
@@ -490,7 +493,10 @@ async def writing_rubric(
     if not weights:
         weights = (prefs.get("fragment_weights") or {}).get("mixed") or {}
     space = await load_metric_space(
-        owner_user_id=owner_id, work_id=work_id, work_mode=work_mode
+        owner_user_id=owner_id,
+        work_id=work_id,
+        work_mode=work_mode,
+        turn_user_text=turn_user_text,
     )
     proto = space.prototype(declared)
     bank_titles = []

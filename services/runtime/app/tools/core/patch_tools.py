@@ -352,7 +352,7 @@ async def apply_patch(
             blocked.setdefault("path", path)
             return blocked
 
-    if old and is_prose_writing_path(path) and existing:
+    if old and is_prose_writing_path(path) and existing and not _kwargs.get("user_cut"):
         old, new = sanitize_prose_patch(existing, old, new)
         blocked = prose_patch_block_reason(old, new)
         if blocked:

@@ -82,10 +82,20 @@ async def load_metric_space(
     owner_user_id: UUID | None = None,
     work_id: UUID | None = None,
     work_mode: str = "literary",
+    turn_user_text: str = "",
 ) -> MetricSpace:
-    """platform+overlay 空间。"""
-    from app.writing.signals.space import load_platform_space
+    """platform+overlay 空间。作者档且本书原型样本≥4 时整类替换平台金标。"""
+    from pathlib import Path
 
+    from app.settings import settings
+    from app.writing.signals.space import load_platform_space, load_work_taste_space
+    from app.writing.regime import is_author_regime
+
+    root = Path(settings.workspace_root)
+    if is_author_regime(turn_user_text, workspace_root=root):
+        work_space = load_work_taste_space(workspace_root=root)
+        if work_space is not None:
+            return work_space
     base = load_platform_space(work_mode)
     scope, extra = await load_overlay_exemplars(
         owner_user_id=owner_user_id,

@@ -74,6 +74,31 @@ def visible_chars(text: str) -> int:
     return sum(1 for ch in text if not ch.isspace())
 
 
+def clip_visible(text: str, max_chars: int, *, ellipsis: bool = False) -> str:
+    """截到至多 max_chars 个实体字；空白仍保留到截断点。"""
+    body = text or ""
+    cap = max(0, int(max_chars))
+    if cap <= 0:
+        return ""
+    if visible_chars(body) <= cap:
+        return body
+    budget = cap - 1 if ellipsis else cap
+    if budget <= 0:
+        return "…" if ellipsis else ""
+    clipped: list[str] = []
+    n = 0
+    for ch in body:
+        if not ch.isspace():
+            n += 1
+        clipped.append(ch)
+        if n >= budget:
+            break
+    out = "".join(clipped).rstrip()
+    if ellipsis:
+        return out + "…"
+    return out
+
+
 def parse_char_quota(user_text: str) -> int | None:
     """解析 N 字配额。
     

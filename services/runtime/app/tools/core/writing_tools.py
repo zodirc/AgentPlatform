@@ -61,9 +61,24 @@ def _draft_book_scope(turn_user_text: str = "", section_id: str = "") -> str:
     except OSError:
         outline = ""
     scope, _src = resolve_book_scope(
-        turn_user_text, outline=outline, section_id=section_id
+        turn_user_text,
+        outline=outline,
+        section_id=section_id,
+        workspace_root=Path(settings.workspace_root),
     )
     return scope
+
+
+def _draft_regime(turn_user_text: str = "", section_id: str = "") -> str:
+    from app.writing.regime import resolve_regime
+
+    scope = _draft_book_scope(turn_user_text, section_id=section_id)
+    value, _src = resolve_regime(
+        turn_user_text,
+        workspace_root=Path(settings.workspace_root),
+        book_scope=scope,
+    )
+    return value
 
 
 def _silence_wild_card_signals(block: dict[str, Any]) -> dict[str, Any]:
@@ -610,23 +625,41 @@ async def draft_section(
     }
     turn_user_text = str(_kwargs.get("turn_user_text") or "")
     work_mode = _draft_work_mode(turn_user_text)
+    regime = _draft_regime(turn_user_text, section_id=section_id)
+    author = regime == "author"
     archived: list[str] = []
     occupy_fresh = False
     mode = _parse_draft_mode(_kwargs.get("mode"))
     from app.writing.commitment import fulfillment_facts, gate_draft_commitment, save_commitment
 
-    blocked_commit, commit = gate_draft_commitment(
-        content=content,
-        mode=mode,
-        work_mode=work_mode,
-        section_id=section_id,
-        raw=_kwargs.get("narrative_commitment"),
-        workspace_root=Path(settings.workspace_root),
-    )
-    if blocked_commit:
-        return blocked_commit
+    commit = None
+    raw_choices = _kwargs.get("choices") if author else None
+    raw_commit = raw_choices if raw_choices is not None else _kwargs.get("narrative_commitment")
+    if author:
+        from app.writing.commitment import normalize_commitment
+        from app.writing.text_metrics import visible_chars as _vis
 
-    wild_card = bool(_kwargs.get("wild_card"))
+        if isinstance(raw_commit, dict) and _vis(content) >= 800 and mode not in {"append", "rewrite_window"}:
+            commit = normalize_commitment(raw_commit)
+            save_commitment(
+                section_id,
+                commit,
+                workspace_root=Path(settings.workspace_root),
+            )
+    else:
+        blocked_commit, commit = gate_draft_commitment(
+            content=content,
+            mode=mode,
+            work_mode=work_mode,
+            section_id=section_id,
+            raw=_kwargs.get("narrative_commitment"),
+            workspace_root=Path(settings.workspace_root),
+        )
+        if blocked_commit:
+            return blocked_commit
+
+    wild_card = bool(_kwargs.get("wild_card")) and not author
+    swerve = bool(_kwargs.get("swerve")) if author else False
     if wild_card:
         from app.writing.story_state import record_wild_card, wild_card_available
 
@@ -635,6 +668,9 @@ async def draft_section(
         )
         if not ok:
             return {"status": "error", "error": "wild_card_quota", "summary": reason}
+    if author and mode == "rewrite_window":
+        mode = "upsert"
+    previous_kept: str | None = None
     scored = content
     dup_collapsed = 0
 
@@ -655,16 +691,35 @@ async def draft_section(
             already_fresh_this_turn=_already_drafted_this_turn(manifest),
             occupied=manuscript_is_occupied(existing),
         )
-        blocked = _reject_full_redraft(
-            manifest,
-            section_id=section_id,
-            occupy_fresh=occupy_fresh,
-            path=path,
-            mode=mode,
-        )
+        if author:
+            blocked = _reject_full_redraft(
+                manifest,
+                section_id=section_id,
+                occupy_fresh=occupy_fresh,
+                path=path,
+                mode=mode,
+            )
+            if blocked:
+                from app.writing.story_state import note_chapter_rewrite
+
+                hist = (manifest.get("revisions") or {}).get(section_id) or path
+                previous_kept = str(
+                    (manifest.get("section_drafts") or {}).get(section_id, {}).get("history_path")
+                    or ""
+                )
+                note_chapter_rewrite(section_id, workspace_root=Path(settings.workspace_root))
+                blocked = None
+        else:
+            blocked = _reject_full_redraft(
+                manifest,
+                section_id=section_id,
+                occupy_fresh=occupy_fresh,
+                path=path,
+                mode=mode,
+            )
         if blocked:
             return blocked
-        blocked_append = _reject_append_gate(
+        blocked_append = None if author else _reject_append_gate(
             manifest,
             section_id=section_id,
             content=content,
@@ -738,27 +793,28 @@ async def draft_section(
             already_fresh_this_turn=_already_drafted_this_turn(manifest),
             occupied=_section_drafts_occupied(),
         )
-        blocked = _reject_full_redraft(
-            manifest,
-            section_id=section_id,
-            occupy_fresh=occupy_fresh,
-            path=path,
-            mode=mode,
-        )
-        if blocked:
-            return blocked
-        blocked_append = _reject_append_gate(
-            manifest,
-            section_id=section_id,
-            content=content,
-            occupy_fresh=occupy_fresh,
-            path=path,
-            mode=mode,
-            work_mode=work_mode,
-            turn_user_text=turn_user_text,
-        )
-        if blocked_append:
-            return blocked_append
+        if not author:
+            blocked = _reject_full_redraft(
+                manifest,
+                section_id=section_id,
+                occupy_fresh=occupy_fresh,
+                path=path,
+                mode=mode,
+            )
+            if blocked:
+                return blocked
+            blocked_append = _reject_append_gate(
+                manifest,
+                section_id=section_id,
+                content=content,
+                occupy_fresh=occupy_fresh,
+                path=path,
+                mode=mode,
+                work_mode=work_mode,
+                turn_user_text=turn_user_text,
+            )
+            if blocked_append:
+                return blocked_append
         if occupy_fresh:
             archived = archive_occupied_writing_docs(layout=layout)
             manifest["occupy"] = "fresh"
@@ -907,9 +963,16 @@ async def draft_section(
         signals_block = result.get("writing_signals")
         if isinstance(signals_block, dict):
             result["writing_signals"] = _silence_wild_card_signals(signals_block)
+    if swerve:
+        from app.writing.story_state import record_swerve
+
+        record_swerve(section_id, workspace_root=Path(settings.workspace_root))
+        result["swerve"] = True
     from app.writing.story_state import (
         chapter_num,
         consistency_flags,
+        load_story_state,
+        overdue_promises,
         thread_stale_flags,
     )
 
@@ -918,31 +981,42 @@ async def draft_section(
         section_id=section_id,
         workspace_root=Path(settings.workspace_root),
     )
-    if flags:
+    if flags and not author:
         result["consistency_flags"] = flags
     stale = thread_stale_flags(
         current_ch=chapter_num(section_id),
         workspace_root=Path(settings.workspace_root),
     )
-    if stale:
+    if stale and not author:
         result["thread_stale"] = stale
     drafts = manifest.setdefault("section_drafts", {})
-    from app.writing.signals.repair import process_l0_hits
+    from app.writing.signals.repair import process_l0_hits, should_reject_full_redraft
 
+    prior_entry = drafts.get(section_id) if isinstance(drafts.get(section_id), dict) else None
+    if author and previous_kept is None and isinstance(prior_entry, dict):
+        if should_reject_full_redraft(prior_entry) and not occupy_fresh and mode == "upsert":
+            previous_kept = str(prior_entry.get("history_path") or history_path or "")
+            from app.writing.story_state import note_chapter_rewrite
+
+            note_chapter_rewrite(section_id, workspace_root=Path(settings.workspace_root))
+    vis_n = int(result.get("visible_chars") or 0)
     entry: dict[str, Any] = {
-        "visible_chars": int(result.get("visible_chars") or 0),
+        "visible_chars": vis_n,
         "length_short": bool(result.get("length_short")),
         "book_scope": _draft_book_scope(
             str(_kwargs.get("turn_user_text") or ""), section_id=section_id
         ),
+        "regime": regime,
     }
+    if history_path:
+        entry["history_path"] = history_path
     signals_block = result.get("writing_signals")
     penalties = None
     if isinstance(signals_block, dict):
         penalties = signals_block.get("penalties")
-        if signals_block.get("repair_span"):
+        if signals_block.get("repair_span") and not author:
             entry["repair_span"] = signals_block["repair_span"]
-        if signals_block.get("rewrite_policy"):
+        if signals_block.get("rewrite_policy") and not author:
             entry["rewrite_policy"] = signals_block["rewrite_policy"]
         if signals_block.get("composite") is not None:
             entry["composite"] = signals_block["composite"]
@@ -955,7 +1029,44 @@ async def draft_section(
     entry["l0_hits"] = process_l0_hits(penalties, flags=result, work_mode=work_mode)
     drafts[section_id] = entry
     result["manifest_path"] = _write_manifest(turn_id, manifest, session_id=session_id)
-    return result
+    result["regime"] = regime
+    if not author:
+        return result
+    from app.writing.commitment import choice_history
+    from app.writing.text_metrics import DEFAULT_CHAPTER_MAX, DEFAULT_CHAPTER_MIN
+
+    vis = int(result.get("visible_chars") or 0)
+    shrunk: dict[str, Any] = {
+        "status": "drafted",
+        "section_id": section_id,
+        "path": path,
+        "manifest_path": result["manifest_path"],
+        "visible_chars": vis,
+        "target_range": [DEFAULT_CHAPTER_MIN, DEFAULT_CHAPTER_MAX],
+        "regime": "author",
+    }
+    if flags:
+        shrunk["continuity_flags"] = flags
+    due = overdue_promises(
+        load_story_state(workspace_root=Path(settings.workspace_root)),
+        current_ch=chapter_num(section_id),
+    )
+    if due:
+        shrunk["promises_due"] = due[:3]
+    hist = choice_history(workspace_root=Path(settings.workspace_root))
+    if hist:
+        shrunk["choice_history"] = hist
+    if previous_kept:
+        shrunk["previous_kept"] = previous_kept
+    if occupy_fresh:
+        shrunk["occupy"] = result.get("occupy")
+        if result.get("archived"):
+            shrunk["archived"] = result["archived"]
+    summary = str(result.get("summary") or "")
+    # 作者档不把篇幅评价句回给模型；数字已在 visible_chars / target_range。
+    if summary and "低于门槛" not in summary:
+        shrunk["summary"] = summary
+    return shrunk
 
 
 async def update_plan(
@@ -1052,8 +1163,7 @@ async def propose_opening_ponds(
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
         clear_pond_rejects,
-        coerce_pond_enums,
-        drop_leaking_plain_items,
+        fill_pond_defaults,
         load_opening_ponds,
         note_pond_reject,
         normalize_pond_items,
@@ -1062,12 +1172,17 @@ async def propose_opening_ponds(
         save_opening_ponds,
         wants_more_ponds,
     )
+    from app.writing.pond_history import (
+        append_rejected_ponds,
+        load_rejected_pond_items,
+    )
+    from app.writing.pond_similarity import compute_pond_similarity
 
-    normalized = drop_leaking_plain_items(normalize_pond_items(items))
+    normalized = normalize_pond_items(items)
     if len(normalized) < _MIN_ITEMS:
         exhausted = note_pond_reject(
             _kwargs.get("turn_id"),
-            ("need_two_ponds", "至少交 2 个开篇候选，且 start_kind 不得重复。"),
+            ("need_two_ponds", "至少交 2 个开篇候选。"),
         )
         return exhausted or {
             "status": "error",
@@ -1076,46 +1191,46 @@ async def propose_opening_ponds(
             "stop_retry": True,
         }
     message = str(_kwargs.get("turn_user_text") or "")
-    previous_kinds: set[str] | None = None
-    previous_axes: set[str] | None = None
+    root = Path(settings.workspace_root)
+    against: list[dict[str, Any]] = []
     if wants_more_ponds(message):
-        prev = load_opening_ponds()
+        prev = load_opening_ponds(workspace_root=root)
         if prev:
-            previous_kinds = {
-                str(it.get("start_kind") or "")
-                for it in prev["items"]
-                if it.get("start_kind")
-            }
-            previous_axes = {
-                str(it.get("price_axis") or "")
-                for it in prev["items"]
-                if it.get("price_axis")
-            }
-    normalized = coerce_pond_enums(
+            append_rejected_ponds(prev, workspace_root=root)
+        against = load_rejected_pond_items(workspace_root=root)
+    normalized = fill_pond_defaults(normalized)
+    similarity = compute_pond_similarity(
         normalized,
-        previous_kinds=previous_kinds,
-        previous_axes=previous_axes,
-        message=message,
+        against=against,
+        shadow=settings.ponds_similarity_shadow,
     )
     rejected = ponds_reject_reason(
         normalized,
         message=message,
-        previous_kinds=previous_kinds,
-        previous_axes=previous_axes,
-        workspace_root=Path(settings.workspace_root),
+        against=against,
+        similarity=similarity,
+        shadow=settings.ponds_similarity_shadow,
+        workspace_root=root,
         skip_ledger=True,
     )
     exhausted = note_pond_reject(_kwargs.get("turn_id"), rejected)
     if exhausted:
         return exhausted
     ranked = rank_opening_ponds(normalized)
-    saved = save_opening_ponds(ranked, summary="")
+    saved = save_opening_ponds(ranked, summary="", similarity=similarity)
     clear_pond_rejects(_kwargs.get("turn_id"))
-    from app.writing.ledger import append_ledger, pond_vector
+    from app.writing.ledger import append_pond_fingerprint
 
-    root = Path(settings.workspace_root)
-    for item in saved["items"]:
-        append_ledger(pond_vector(item), workspace_root=root, kind="pond")
+    embeddings = similarity.get("embeddings") or []
+    digest = str(similarity.get("embedding_digest") or "")
+    for i, item in enumerate(saved["items"]):
+        vec = embeddings[i] if i < len(embeddings) else None
+        append_pond_fingerprint(
+            item,
+            workspace_root=root,
+            embedding=vec,
+            embedding_digest=digest,
+        )
     return {
         "status": "ok",
         "ponds_id": saved["ponds_id"],
@@ -1204,7 +1319,22 @@ async def author_note(
     text: str,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """作者私记 ≤120 字。不是总结。不评分。"""
+    """作者私记别名：作者档写入 author_state「疑心」节；严格档仍写 author_notes。"""
+    from app.writing.regime import is_author_regime
+
+    if is_author_regime(
+        str(_kwargs.get("turn_user_text") or ""),
+        workspace_root=Path(settings.workspace_root),
+    ):
+        from app.writing.author_state import update_author_state
+
+        return update_author_state(
+            "我在疑心什么",
+            text,
+            mode="append",
+            phase="author",
+            workspace_root=Path(settings.workspace_root),
+        )
     from app.writing.author_notes import append_author_note
 
     append_author_note(
@@ -1217,6 +1347,90 @@ async def author_note(
         "section_id": section_id,
         "summary": "已记入 author_notes",
     }
+
+
+async def author_state(
+    section: str,
+    text: str,
+    mode: str = "replace",
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    from app.writing.author_state import update_author_state
+    from app.writing.reread import should_gate_reread_phase
+
+    user_text = str(_kwargs.get("turn_user_text") or "")
+    phase = "reread" if should_gate_reread_phase(user_text) else "author"
+    return update_author_state(
+        section,
+        text,
+        mode=mode,
+        phase=phase,
+        workspace_root=Path(settings.workspace_root),
+    )
+
+
+async def reread_book(**_kwargs: Any) -> dict[str, Any]:
+    from app.writing.reread import build_reread_pack, should_gate_reread_phase
+
+    if not should_gate_reread_phase(str(_kwargs.get("turn_user_text") or "")):
+        return {
+            "status": "error",
+            "error": "reread_not_in_phase",
+            "summary": "reread_book 只在回读 Turn 可用。",
+        }
+    return build_reread_pack(workspace_root=Path(settings.workspace_root))
+
+
+async def propose_retcon(
+    items: list[dict[str, Any]] | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    from app.writing.reread import save_retcon_pending, should_gate_reread_phase
+
+    if not should_gate_reread_phase(str(_kwargs.get("turn_user_text") or "")):
+        return {
+            "status": "error",
+            "error": "reread_not_in_phase",
+            "summary": "propose_retcon 只在回读 Turn 可用。",
+        }
+    save_retcon_pending(list(items or []), workspace_root=Path(settings.workspace_root))
+    return {
+        "status": "ok",
+        "awaiting_consent": True,
+        "retcon": True,
+        "summary": "retcon 清单待用户按此执行，未落稿。",
+    }
+
+
+async def editor_report(
+    section_id: str,
+    flags: list[dict[str, Any]] | None = None,
+    keep: list[str] | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    from app.writing.editor import normalize_editor_report, save_editor_report
+    from app.writing.reread import should_gate_editor_phase
+
+    if not should_gate_editor_phase(str(_kwargs.get("turn_user_text") or "")):
+        return {
+            "status": "error",
+            "error": "editor_not_in_phase",
+            "summary": "editor_report 只在编辑 Turn 可用。",
+        }
+    report = normalize_editor_report(section_id=section_id, flags=flags, keep=keep)
+    save_editor_report(report, workspace_root=Path(settings.workspace_root))
+    dropped = int(report.get("dropped_howto") or 0)
+    out: dict[str, Any] = {
+        "status": "ok",
+        "section_id": section_id,
+        "flags": report.get("flags") or [],
+        "keep": report.get("keep") or [],
+        "summary": f"已记编辑旗 {len(report.get('flags') or [])} 条",
+    }
+    if dropped:
+        out["dropped_howto"] = dropped
+        out["summary"] += f"；丢弃工单口吻 {dropped} 条"
+    return out
 
 
 async def update_outline(
@@ -1243,6 +1457,12 @@ async def update_outline(
     if denied:
         return denied
     existing = target.read_text(encoding="utf-8") if target.exists() else ""
+    volume = _kwargs.get("volume") if isinstance(_kwargs.get("volume"), dict) else None
+    if volume:
+        from app.writing.story_state import sync_volume_patch
+
+        content = _merge_volume_outline(content, volume)
+        sync_volume_patch(volume, workspace_root=Path(settings.workspace_root))
     mode_n = (mode or "replace").strip().lower()
     force = str(_kwargs.get("force", "")).lower() in {"1", "true", "yes"}
 
@@ -1374,4 +1594,52 @@ async def update_outline(
 
     if mode_n != "append" and outline_over_planned(final):
         result["outline_over_planned"] = True
+        result["outline_over_planned_hint"] = (
+            "纲里 3 章已经写死了事件；这本书的卷问题还没定。"
+        )
+        prev = str(result.get("summary") or summary)
+        if "卷问题" not in prev:
+            result["summary"] = f"{prev}；纲里 3 章已经写死了事件；这本书的卷问题还没定。"
     return result
+
+
+def _merge_volume_outline(md: str, volume: dict[str, Any]) -> str:
+    try:
+        index = int(volume.get("index") or 1)
+    except (TypeError, ValueError):
+        index = 1
+    lines = [f"## 卷 {index}"]
+    if volume.get("chapters"):
+        lines.append(f"章：{volume.get('chapters')}")
+    if volume.get("where_it_stands"):
+        lines.append(f"站在哪：{volume.get('where_it_stands')}")
+    questions = volume.get("questions") or []
+    if questions:
+        lines.append("卷问题：")
+        for q in questions:
+            lines.append(f"- {q}")
+    pending = volume.get("must_not_decide_yet") or []
+    if pending:
+        lines.append("故意还不决定：")
+        for q in pending:
+            lines.append(f"- {q}")
+    due = volume.get("promises_due") or []
+    if due:
+        lines.append("本卷到期的许诺：")
+        for q in due:
+            lines.append(f"- {q}")
+    block = "\n".join(lines).strip() + "\n"
+    text = md or ""
+    marker = f"## 卷 {index}"
+    if marker in text:
+        import re as _re
+
+        pattern = _re.compile(
+            rf"(^|\n){_re.escape(marker)}.*?(?=\n## 卷 |\n## |\Z)",
+            _re.S,
+        )
+        updated, n = pattern.subn("\n" + block, text, count=1)
+        return updated if n else text.rstrip() + "\n\n" + block
+    if text.strip():
+        return text.rstrip() + "\n\n" + block
+    return block

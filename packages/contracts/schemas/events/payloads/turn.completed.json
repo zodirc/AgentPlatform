@@ -15,7 +15,8 @@
         "local_response",
         "plan_awaiting_consent",
         "opening_ponds_awaiting_choice",
-        "opening_ponds_retry_exhausted"
+        "opening_ponds_retry_exhausted",
+        "retcon_awaiting_consent"
       ]
     },
     "step_count": { "type": "integer", "minimum": 0 },

@@ -48,9 +48,22 @@ def test_build_registry_has_core_tools() -> None:
     assert "title" in item_required
     assert "opening" in item_required
     assert "flavor" in item_required
+    assert "start_kind" not in item_required
+    assert "promise" not in item_required
+    assert "price_axis" not in item_required
     assert "who" not in item_required
     assert "arc" not in item_required
     assert "price" not in item_required
+    item_props = (
+        ponds.parameters.get("properties", {})
+        .get("items", {})
+        .get("items", {})
+        .get("properties", {})
+    )
+    assert "book_self_note" in item_props
+    assert "social_space" in item_props
+    assert "engine_note" in item_props
+    assert "Unique start_kind" not in (ponds.description or "")
 
 
 def test_draft_section_description_follows_repair_neighbor() -> None:
@@ -191,3 +204,41 @@ def test_tool_scope_skips_unknown_tools() -> None:
     specs = tool_scope(profile, registry)
     assert len(specs) == 1
     assert specs[0].name == "stub_echo"
+
+
+def test_tool_scope_editor_and_reread_phases() -> None:
+    ScenarioRegistry.load()
+    profile = ScenarioRegistry.get("writing")
+    registry = build_registry()
+    editor = {s.name for s in tool_scope(profile, registry, editor_phase=True)}
+    reread = {s.name for s in tool_scope(profile, registry, reread_phase=True)}
+    planning = {s.name for s in tool_scope(profile, registry, plan_phase="planning")}
+    assert "editor_report" in editor
+    assert "draft_section" not in editor
+    assert "propose_patch" not in editor
+    assert "reread_book" in reread
+    assert "propose_retcon" in reread
+    assert "draft_section" not in reread
+    assert "update_plan" in planning
+    assert "editor_report" not in planning
+    opening = {
+        s.name
+        for s in tool_scope(
+            profile,
+            registry,
+            opening_choice=True,
+            editor_phase=True,
+            reread_phase=True,
+        )
+    }
+    assert "propose_opening_ponds" in opening
+    assert "editor_report" not in opening
+    assert "reread_book" not in opening
+    editor_over_reread = {
+        s.name
+        for s in tool_scope(
+            profile, registry, editor_phase=True, reread_phase=True
+        )
+    }
+    assert "editor_report" in editor_over_reread
+    assert "reread_book" not in editor_over_reread

@@ -192,6 +192,11 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                     )
                     from app.writing.author_notes import load_author_notes, note_repeats_delta
                     from app.writing.story_state import load_story_state
+                    from app.writing.regime import is_author_regime
+
+                    is_author = is_author_regime(
+                        user_text, workspace_root=Path(settings.workspace_root)
+                    )
 
                     apply_mechanical_update(
                         chapter_text,
@@ -221,6 +226,7 @@ async def _writing_continuity(state: Any, *, turn_id: Any) -> None:
                         stale=stale,
                         wild_unpaid=unpaid,
                         author_note_repeats_delta=repeats,
+                        include_surface=not is_author,
                     )
                     write_editor_notes(focus or "ch", lines)
                 except Exception:

@@ -1935,6 +1935,9 @@ class AgentEngine:
                 completed_payload["structural_truncated"] = bool(result.get("truncated"))
         if tool_name in _WRITING_PROSE_TOOLS and isinstance(result, dict):
             completed_payload.update(_compact_writing_signals_event_meta(result))
+            regime = str(result.get("regime") or "").strip().lower()
+            if regime in {"author", "strict"}:
+                completed_payload["regime"] = regime
             args = arguments if isinstance(arguments, dict) else {}
             path_val = str(result.get("path") or args.get("path") or "")
             if path_val:
@@ -1985,6 +1988,13 @@ class AgentEngine:
             and result.get("awaiting_consent")
         ):
             state.termination_reason = "plan_awaiting_consent"
+            return "TERMINATE"
+        if (
+            tool_name == "propose_retcon"
+            and not is_error
+            and result.get("awaiting_consent")
+        ):
+            state.termination_reason = "retcon_awaiting_consent"
             return "TERMINATE"
         if (
             tool_name in _OPENING_POND_TOOLS

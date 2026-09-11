@@ -22,6 +22,10 @@ tool_names:
   - delegate
   - note_story_delta
   - author_note
+  - author_state
+  - reread_book
+  - propose_retcon
+  - editor_report
   - propose_chapter_openings
 subagent_types:
   - researcher

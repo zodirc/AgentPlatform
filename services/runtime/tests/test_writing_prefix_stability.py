@@ -167,7 +167,7 @@ def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
     )
     pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
-        "写第一章",
+        "写第一章 严格模式",
         workspace_root=tmp_path,
     )
     assert "## Writing spec" in pin.volatile_block
@@ -181,7 +181,7 @@ def test_writing_spec_is_volatile_not_system(tmp_path: Path) -> None:
 def test_xuanhuan_diverge_styles_no_longer_injected(tmp_path: Path) -> None:
     pin = prepare_writing_system_prompt(
         "You are a writing assistant.",
-        "写一章长篇玄幻小说第一章",
+        "写一章长篇玄幻小说第一章 严格模式",
         workspace_root=tmp_path,
     )
     assert "## 题材发散" not in pin.volatile_block

@@ -14,7 +14,15 @@ _COMPLETION_SOFTEN = (
     ("定稿", "已保存"),
     ("完稿", "已落盘"),
 )
+
 _HOLD_MARK = "【交付门】"
+
+
+def suppress_same_turn_writing_receipts(*, message: str = "", workspace_root=None) -> bool:
+    """作者档：不注入 L0 receipt；交付门仍可挡 <800。"""
+    from app.writing.regime import is_author_regime
+
+    return is_author_regime(message, workspace_root=workspace_root)
 
 
 def _row_book_scope(row: dict[str, Any]) -> str:
@@ -64,8 +72,8 @@ def manifest_delivery_blockers(manifest: dict[str, Any] | None) -> list[str]:
                 vis = int(row.get("visible_chars") or 0)
             except (TypeError, ValueError):
                 vis = 0
-            # 800：本章几乎没写。写过一场就让本章落盘；配额未满不挡，也不要靠 append 第二场凑字。
-            if row.get("length_short") and vis < 800:
+            # 800：本章几乎没写。作者档 / 严格档长篇都挡。
+            if vis < 800:
                 blockers.append(f"{section_id}: length_short")
             continue
         if row.get("length_short"):

@@ -367,6 +367,10 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "propose_opening_ponds" in writing.tool_names
     assert "note_story_delta" in writing.tool_names
     assert "author_note" in writing.tool_names
+    assert "author_state" in writing.tool_names
+    assert "reread_book" in writing.tool_names
+    assert "propose_retcon" in writing.tool_names
+    assert "editor_report" in writing.tool_names
     assert "propose_chapter_openings" in writing.tool_names
     assert "writing_rubric" not in writing.tool_names
     assert "evaluate_writing_fragment" not in writing.tool_names
@@ -394,6 +398,8 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "不提供 `write_file`" in writing.system_prompt
     assert "# FINAL JUDGMENT" in writing.system_prompt
     assert "# WRITING" in writing.system_prompt
+    assert "# EDITOR" in writing.system_prompt
+    assert "# REREAD" in writing.system_prompt
     assert "# WORK STATE" in writing.system_prompt
     assert "# TOOLS" in writing.system_prompt
     assert "# DELIVERY" in writing.system_prompt

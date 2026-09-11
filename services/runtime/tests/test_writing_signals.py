@@ -58,6 +58,18 @@ def test_merge_prefs_keeps_stored_signals_not_weights() -> None:
     assert merged["signal_penalties"]["dialogue_dyad"]["staccato_uniform"] == 0.0
 
 
+def test_merge_prefs_keeps_user_regime() -> None:
+    stored = {
+        "preset_label": "balanced",
+        "regime": {"value": "strict", "source": "user"},
+    }
+    merged = merge_prefs(stored)
+    assert merged["regime"] == {"value": "strict", "source": "user"}
+    empty = merge_prefs({})
+    assert empty["regime"]["source"] == "default"
+    assert empty["regime"]["value"] == "author"
+
+
 def test_apply_style_leans_zeros_unselected() -> None:
     penalties, rewards = _wp.apply_style_leans(["dialogue_dyad"])
     assert penalties["dialogue_dyad"]["staccato_uniform"] < 0

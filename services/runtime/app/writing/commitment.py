@@ -225,6 +225,24 @@ def format_commitment_block(
     return "\n".join(lines)
 
 
+def choice_history(
+    *,
+    workspace_root: Path,
+    limit: int = WINDOW_N,
+) -> dict[str, dict[str, int]]:
+    """最近 N 章六槽计数表，只展示。"""
+    rows = load_recent_commitments(workspace_root=workspace_root, limit=limit)
+    out: dict[str, dict[str, int]] = {slot: {} for slot in SLOTS}
+    for row in rows:
+        for slot, options in SLOTS.items():
+            token = row.get(slot) or ""
+            if token not in options:
+                continue
+            bucket = out[slot]
+            bucket[token] = bucket.get(token, 0) + 1
+    return out
+
+
 def missing_commitment_error() -> dict[str, Any]:
     return {
         "status": "error",
