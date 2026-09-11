@@ -8,6 +8,7 @@ from app.writing.signals.holdout import (
     SPLIT_VERSION,
     THIN_OK_FRAGMENTS,
     TRAIN_WORKS,
+    WEB_SERIAL_TRAIN_WORKS,
     filter_exemplars,
     load_eval_holdout_exemplars,
     split_of_work,
@@ -111,11 +112,12 @@ def test_web_serial_catalog_is_partitioned() -> None:
         for rows in _wp.EXEMPLAR_CATALOG_WEB_SERIAL.values()
         for entry in rows
     }
-    assert works <= (TRAIN_WORKS | HOLDOUT_WORKS)
+    assert works <= WEB_SERIAL_TRAIN_WORKS
     bank = load_platform_exemplars("web_serial")
     assert unlabeled_works(bank) == []
     mixed_works = {s.work for s in bank["mixed"]}
     assert "孔乙己" not in mixed_works
-    assert "骆驼祥子" in mixed_works
+    assert "骆驼祥子" not in mixed_works
+    assert "遮天" in mixed_works
     for frag in _wp.FRAGMENT_TYPES:
         assert len(bank[frag]) >= 4, frag

@@ -31,6 +31,17 @@ SPLIT_VERSION = "work-v2"
 TRAIN_WORKS = frozenset(
     {"孔乙己", "故乡", "药", "铸剑", "骆驼祥子", "茶馆", "平凡的世界"}
 )
+WEB_SERIAL_TRAIN_WORKS = frozenset(
+    {
+        "遮天",
+        "凡人修仙传",
+        "仙逆",
+        "斗破苍穹",
+        "完美世界",
+        "诡秘之主",
+        "修真四万年",
+    }
+)
 HOLDOUT_WORKS = frozenset(
     {
         "祝福",
@@ -65,7 +76,7 @@ def split_of_work(work: str) -> str | None:
     返回:
         train|holdout|None。"""
     name = (work or "").strip()
-    if name in TRAIN_WORKS:
+    if name in TRAIN_WORKS or name in WEB_SERIAL_TRAIN_WORKS:
         return "train"
     if name in HOLDOUT_WORKS:
         return "holdout"
@@ -137,7 +148,9 @@ def filter_exemplars(
         dict。"""
     if split not in {"train", "holdout"}:
         raise ValueError(f"split must be train|holdout, got {split!r}")
-    allowed = TRAIN_WORKS if split == "train" else HOLDOUT_WORKS
+    allowed = (
+        (TRAIN_WORKS | WEB_SERIAL_TRAIN_WORKS) if split == "train" else HOLDOUT_WORKS
+    )
     src = bank if bank is not None else load_platform_exemplars()
     out: dict[str, tuple[Exemplar, ...]] = {}
     for frag, samples in src.items():

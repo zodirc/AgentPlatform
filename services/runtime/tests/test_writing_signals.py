@@ -168,7 +168,8 @@ def test_platform_prefs_exemplars_follow_work_mode() -> None:
     web_mixed = {row["work"] for row in web["exemplars"]["mixed"]}
     assert "孔乙己" in lit_mixed
     assert "孔乙己" not in web_mixed
-    assert "骆驼祥子" in web_mixed
+    assert "骆驼祥子" not in web_mixed
+    assert "遮天" in web_mixed
     default = platform_prefs_payload()
     assert {row["work"] for row in default["exemplars"]["mixed"]} == lit_mixed
 
@@ -879,4 +880,16 @@ def test_repair_neighbor_web_serial_staccato_skips_platform_bank() -> None:
         },
     )
     assert "neighbor" not in span
+
+    from app.writing.signals.repair import _nearest_platform_neighbor
+
+    assert (
+        _nearest_platform_neighbor(
+            span["old_text"],
+            fragment="dialogue_dyad",
+            work_mode="web_serial",
+            exemplar_fit={"nearest": {"id": "孔乙己:酒店格局"}},
+        )
+        is None
+    )
 

@@ -108,45 +108,45 @@ EXEMPLAR_CATALOG: dict[str, tuple[dict[str, str], ...]] = {
     ),
 }
 
-# web_serial 节奏库：只用 train split 作品，偏情节台阶/动作/劳动欲望，不含孔乙己/故乡质地核。
+# web_serial 节奏库：热门连载开篇口气（自用正例），不含孔乙己/故乡质地核。
 EXEMPLAR_CATALOG_WEB_SERIAL: dict[str, tuple[dict[str, str], ...]] = {
     "worldview_texture": (
-        {"author": "鲁迅", "work": "药", "beat": "丁字街头"},
-        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "鼎水沸涌"},
-        {"author": "鲁迅", "work": "故乡", "beat": "忙月"},
+        {"author": "辰东", "work": "遮天", "beat": "荒古禁地"},
+        {"author": "忘语", "work": "凡人修仙传", "beat": "七玄门"},
+        {"author": "辰东", "work": "完美世界", "beat": "石村"},
+        {"author": "爱潜水的乌贼", "work": "诡秘之主", "beat": "蒸汽时代"},
     ),
     "dialogue_dyad": (
-        {"author": "老舍", "work": "骆驼祥子", "beat": "虎妞拉话"},
-        {"author": "老舍", "work": "骆驼祥子", "beat": "刘四爷问车"},
-        {"author": "老舍", "work": "茶馆", "beat": "王利发招呼"},
-        {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
+        {"author": "爱潜水的乌贼", "work": "诡秘之主", "beat": "塔罗会"},
+        {"author": "忘语", "work": "凡人修仙传", "beat": "掌门问话"},
+        {"author": "天蚕土豆", "work": "斗破苍穹", "beat": "薰儿劝"},
+        {"author": "辰东", "work": "遮天", "beat": "九龙旁人语"},
     ),
     "plot_progress": (
-        {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
-        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
-        {"author": "鲁迅", "work": "故乡", "beat": "宏儿水生"},
+        {"author": "天蚕土豆", "work": "斗破苍穹", "beat": "药老入体"},
+        {"author": "忘语", "work": "凡人修仙传", "beat": "绿液"},
+        {"author": "辰东", "work": "遮天", "beat": "九龙拉棺"},
+        {"author": "耳根", "work": "仙逆", "beat": "入恒岳"},
     ),
     "climax_beat": (
-        {"author": "鲁迅", "work": "药", "beat": "乌鸦飞去"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "啮王鼻"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "鼎中死战"},
+        {"author": "耳根", "work": "仙逆", "beat": "逆天"},
+        {"author": "辰东", "work": "遮天", "beat": "棺前一拳"},
+        {"author": "天蚕土豆", "work": "斗破苍穹", "beat": "再起"},
+        {"author": "忘语", "work": "凡人修仙传", "beat": "化神"},
     ),
     "battle_action": (
-        {"author": "鲁迅", "work": "铸剑", "beat": "鼎中死战"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "啮王鼻"},
-        {"author": "鲁迅", "work": "药", "beat": "抢灯笼"},
+        {"author": "辰东", "work": "遮天", "beat": "神通对轰"},
+        {"author": "忘语", "work": "凡人修仙传", "beat": "法术相逼"},
+        {"author": "天蚕土豆", "work": "斗破苍穹", "beat": "八极崩"},
+        {"author": "辰东", "work": "完美世界", "beat": "石昊出手"},
     ),
     "mixed": (
-        {"author": "老舍", "work": "骆驼祥子", "beat": "买车那天"},
-        {"author": "鲁迅", "work": "药", "beat": "交钱交货"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "鼎中死战"},
-        {"author": "鲁迅", "work": "铸剑", "beat": "青剑劈落"},
-        {"author": "老舍", "work": "茶馆", "beat": "王利发招呼"},
-        {"author": "鲁迅", "work": "药", "beat": "乌鸦飞去"},
+        {"author": "辰东", "work": "遮天", "beat": "九龙拉棺"},
+        {"author": "忘语", "work": "凡人修仙传", "beat": "绿液"},
+        {"author": "耳根", "work": "仙逆", "beat": "恒岳"},
+        {"author": "天蚕土豆", "work": "斗破苍穹", "beat": "三段"},
+        {"author": "爱潜水的乌贼", "work": "诡秘之主", "beat": "灰雾"},
+        {"author": "滚开", "work": "修真四万年", "beat": "联邦"},
     ),
 }
 
