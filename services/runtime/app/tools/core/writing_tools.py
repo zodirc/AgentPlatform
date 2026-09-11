@@ -1051,6 +1051,8 @@ async def propose_opening_ponds(
     """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
+        clear_pond_rejects,
+        coerce_pond_enums,
         drop_leaking_plain_items,
         load_opening_ponds,
         note_pond_reject,
@@ -1089,18 +1091,26 @@ async def propose_opening_ponds(
                 for it in prev["items"]
                 if it.get("price_axis")
             }
+    normalized = coerce_pond_enums(
+        normalized,
+        previous_kinds=previous_kinds,
+        previous_axes=previous_axes,
+        message=message,
+    )
     rejected = ponds_reject_reason(
         normalized,
         message=message,
         previous_kinds=previous_kinds,
         previous_axes=previous_axes,
         workspace_root=Path(settings.workspace_root),
+        skip_ledger=True,
     )
     exhausted = note_pond_reject(_kwargs.get("turn_id"), rejected)
     if exhausted:
         return exhausted
     ranked = rank_opening_ponds(normalized)
     saved = save_opening_ponds(ranked, summary="")
+    clear_pond_rejects(_kwargs.get("turn_id"))
     from app.writing.ledger import append_ledger, pond_vector
 
     root = Path(settings.workspace_root)

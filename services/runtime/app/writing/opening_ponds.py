@@ -12,6 +12,11 @@ OPENING_PONDS_REL = Path(".agent") / "work" / "opening_ponds.json"
 COMMITTED_POND_REL = Path(".agent") / "work" / "committed_pond.json"
 MORE_PONDS_MESSAGE = "我要其他的"
 OPENING_CHOICE_TOOL_ALLOWLIST = frozenset({"propose_opening_ponds", "stub_echo"})
+# Same Turn may repair once; a second reject stops (user says 我看看).
+_POND_REPAIR_MAX = 1
+_POND_REJECTS: dict[str, int] = {}
+_POND_REJECT_USER_SUMMARY = "开篇候选这轮没交成。请再说一次「我看看」。"
+_POND_REPAIR_SUMMARY = "开篇候选这轮没交成。请按 detail 改字段后再交一次，不要写进聊天。"
 
 
 def wants_more_ponds(message: str) -> bool:
@@ -19,19 +24,47 @@ def wants_more_ponds(message: str) -> bool:
     return (message or "").strip() == MORE_PONDS_MESSAGE
 
 
+def _pond_reject_key(turn_id: object | None) -> str | None:
+    if turn_id is None:
+        return None
+    key = str(turn_id).strip()
+    if not key or key == "None":
+        return None
+    return key
+
+
+def clear_pond_rejects(turn_id: object | None = None) -> None:
+    """成功交卷后清计数；测试也可整表清空。"""
+    if turn_id is None:
+        _POND_REJECTS.clear()
+        return
+    key = _pond_reject_key(turn_id)
+    if key:
+        _POND_REJECTS.pop(key, None)
+
+
 def note_pond_reject(
     turn_id: object | None, rejected: tuple[str, str] | None
 ) -> dict[str, Any] | None:
-    """Handler 一拒就停转。拒因留给 error 码，不把 Don't 写进 turn.completed。"""
-    del turn_id
+    """有 turn_id 时允许同轮改一次；拒因放 detail，Don't 不进 summary。"""
     if rejected is None:
         return None
-    code, _msg = rejected
+    code, msg = rejected
+    key = _pond_reject_key(turn_id)
+    if key is None:
+        count = _POND_REPAIR_MAX + 1
+    else:
+        if len(_POND_REJECTS) > 256:
+            _POND_REJECTS.clear()
+        count = _POND_REJECTS.get(key, 0) + 1
+        _POND_REJECTS[key] = count
+    exhausted = count > _POND_REPAIR_MAX
     return {
         "status": "error",
         "error": code,
-        "summary": "开篇候选这轮没交成。请再说一次「我看看」。",
-        "stop_retry": True,
+        "detail": msg,
+        "summary": _POND_REJECT_USER_SUMMARY if exhausted else _POND_REPAIR_SUMMARY,
+        "stop_retry": exhausted,
     }
 
 
@@ -427,6 +460,90 @@ def drop_leaking_plain_items(items: list[dict[str, str]]) -> list[dict[str, str]
     return [it for it in items if not plain_item_leaks(it)]
 
 
+def _take_token(
+    cycle: list[str], used: set[str], banned: set[str] | None = None
+) -> str:
+    ban = banned or set()
+    for tok in cycle:
+        if tok not in used and tok not in ban:
+            used.add(tok)
+            return tok
+    for tok in cycle:
+        if tok not in ban:
+            used.add(tok)
+            return tok
+    return cycle[0] if cycle else ""
+
+
+def coerce_pond_enums(
+    items: list[dict[str, str]],
+    *,
+    previous_kinds: set[str] | frozenset[str] | None = None,
+    previous_axes: set[str] | frozenset[str] | None = None,
+    message: str = "",
+) -> list[dict[str, str]]:
+    """补齐并去重隐藏轴。卡片只展示书名/这本书/开篇，轴不对齐时改轴不改正文。"""
+    prev_k = {k for k in (previous_kinds or set()) if k}
+    prev_a = {k for k in (previous_axes or set()) if k}
+    kind_cycle = [k for k in START_KIND_LABELS if k not in prev_k] or list(START_KIND_LABELS)
+    axis_cycle = [k for k in PRICE_AXIS_LABELS if k not in prev_a] or list(PRICE_AXIS_LABELS)
+    used_k: set[str] = set()
+    used_a: set[str] = set()
+    used_p: set[str] = set()
+    out: list[dict[str, str]] = []
+    later_n = 0
+    for i, item in enumerate(items):
+        row = dict(item)
+        blob = _pond_blob(row)
+        kind = str(row.get("start_kind") or "")
+        if kind == "granted_path" and not _GIFT_HINT.search(blob):
+            kind = ""
+        if kind == "world_already" and not _WORLD_HINT.search(blob):
+            kind = ""
+        if kind not in START_KIND_LABELS or kind in used_k or kind in prev_k:
+            kind = _take_token(kind_cycle, used_k, prev_k)
+        else:
+            used_k.add(kind)
+        row["start_kind"] = kind
+        axis = str(row.get("price_axis") or "")
+        if axis not in PRICE_AXIS_LABELS or axis in used_a or axis in prev_a:
+            axis = _take_token(axis_cycle, used_a, prev_a)
+        else:
+            used_a.add(axis)
+        row["price_axis"] = axis
+        promise = str(row.get("promise") or "")
+        last = i == len(items) - 1
+        if promise not in PROMISE_LABELS or (last and len(items) > 1 and used_p == {promise}):
+            promise = _take_token(list(PROMISE_LABELS), used_p)
+        else:
+            used_p.add(promise)
+        row["promise"] = promise
+        trust = str(row.get("source_trust") or "")
+        if trust not in SOURCE_TRUST_LABELS:
+            trust = ("dubious", "trusted", "false")[i % 3]
+        row["source_trust"] = trust
+        conflict = str(row.get("first_conflict_at") or "")
+        if conflict not in FIRST_CONFLICT_AT_LABELS:
+            conflict = ("first_300", "first_1000", "chapter_one")[i % 3]
+        if conflict == "later":
+            later_n += 1
+            if later_n > 1:
+                conflict = "chapter_one"
+        row["first_conflict_at"] = conflict
+        out.append(row)
+    if len(out) >= 3 and all(r.get("source_trust") == "trusted" for r in out):
+        out[-1]["source_trust"] = "dubious"
+    if _FANTASY_HINT.search(message or "") and not ({r["start_kind"] for r in out} & _EARLY_KINDS):
+        out[0]["start_kind"] = "pulled_in"
+        for other in out[1:]:
+            if other.get("start_kind") == "pulled_in":
+                other["start_kind"] = _take_token(
+                    kind_cycle, {out[0]["start_kind"]}, prev_k
+                )
+                break
+    return out
+
+
 def ponds_reject_reason(
     items: list[dict[str, str]],
     *,
@@ -434,6 +551,7 @@ def ponds_reject_reason(
     previous_kinds: set[str] | frozenset[str] | None = None,
     previous_axes: set[str] | frozenset[str] | None = None,
     workspace_root: Path | None = None,
+    skip_ledger: bool = False,
 ) -> tuple[str, str] | None:
     """拒共线集合。旧 sidecar 缺字段时不走这条（只在 propose 时调用）。"""
     if len(items) < _MIN_ITEMS:
@@ -592,12 +710,13 @@ def ponds_reject_reason(
                 )
     from app.writing.ledger import pond_vector, too_close_to_ledger
 
-    close = too_close_to_ledger(
-        [pond_vector(it) for it in items],
-        workspace_root=_workspace(workspace_root),
-    )
-    if close:
-        return close
+    if not skip_ledger:
+        close = too_close_to_ledger(
+            [pond_vector(it) for it in items],
+            workspace_root=_workspace(workspace_root),
+        )
+        if close:
+            return close
     return None
 
 

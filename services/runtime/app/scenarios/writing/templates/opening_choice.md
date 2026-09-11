@@ -35,8 +35,8 @@ all-same promise, reused previous start_kinds / price_axis (only after
 过日子 over quota, slot-honesty misses, or a set too close to the ledger.
 修真/玄幻: at least one of self_notice / pulled_in / granted_path.
 Change a narrative decision, not the skin.
-First sentence is the accident. The handler does not retry on reject.
-Do not write a unifying summary.
+First sentence is the accident. One in-turn repair is allowed; a second
+reject stops the turn. Do not write a unifying summary.
 Novelty is the game played straight. Different start_kind is not a different
 book if the engine is the same.
 Opening is at most two sentences.

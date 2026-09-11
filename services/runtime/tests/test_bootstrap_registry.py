@@ -37,6 +37,20 @@ def test_build_registry_has_core_tools() -> None:
     assert registry.get("forget") is not None
     assert registry.get("load_skill") is not None
     assert registry.get("propose_opening_ponds") is not None
+    ponds = registry.get("propose_opening_ponds")
+    assert ponds is not None
+    item_required = (
+        ponds.parameters.get("properties", {})
+        .get("items", {})
+        .get("items", {})
+        .get("required", [])
+    )
+    assert "title" in item_required
+    assert "opening" in item_required
+    assert "flavor" in item_required
+    assert "who" not in item_required
+    assert "arc" not in item_required
+    assert "price" not in item_required
 
 
 def test_draft_section_description_follows_repair_neighbor() -> None:

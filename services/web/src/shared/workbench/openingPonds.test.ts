@@ -11,6 +11,7 @@ import {
   pondContrastLine,
   pondItemSelected,
   pondPhysicsLine,
+  preferSettledOutput,
   turnHidesUserInput,
   visibleChatUserInputs,
 } from "./openingPonds";
@@ -97,6 +98,18 @@ describe("openingPonds", () => {
     expect(msg).toBe("采用此开篇「早高峰系统」");
     expect(msg).not.toContain("跟着谁");
     expect(msg).not.toContain("开篇：");
+  });
+
+  it("drops a leaked thinking title when the projected summary is the deliverable", () => {
+    expect(
+      preferSettledOutput(
+        "**Proposing new start_kinds and price_axes**",
+        "开篇候选这轮没交成。请再说一次「我看看」。",
+      ),
+    ).toBe("开篇候选这轮没交成。请再说一次「我看看」。");
+    expect(
+      preferSettledOutput("hello world from the model", "hello world from the model"),
+    ).toBe("hello world from the model");
   });
 
   it("sends 我要其他的 as a short choice, not a worksheet", () => {

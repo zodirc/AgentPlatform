@@ -56,6 +56,7 @@ import {
   latestOpeningPondsFromEvents,
   MORE_PONDS_MESSAGE,
   openingPondsFromEventPayload,
+  preferSettledOutput,
   visibleChatUserInputs,
   type OpeningPondItem,
   type OpeningPondsArtifact,
@@ -578,6 +579,11 @@ export function useWorkbenchImpl(): WorkbenchState {
                     ...prev,
                     status:
                       ev.type === "turn.completed" ? "completed" : "cancelled",
+                    latest_output:
+                      typeof ev.payload.summary === "string" &&
+                      ev.payload.summary.trim()
+                        ? ev.payload.summary
+                        : prev.latest_output,
                   }
                 : prev,
             );
@@ -621,10 +627,10 @@ export function useWorkbenchImpl(): WorkbenchState {
             const merged: TurnHistoryItem = {
               ...historyItemFromView(v),
               latest_output:
-                streamTextRef.current ||
-                sectionDraftRef.current ||
-                v.latest_output ||
-                null,
+                preferSettledOutput(
+                  streamTextRef.current || sectionDraftRef.current,
+                  v.latest_output,
+                ) || null,
             };
             setTurnHistory((prev) => upsertHistoryItem(prev, merged));
             if (v.context_usage)

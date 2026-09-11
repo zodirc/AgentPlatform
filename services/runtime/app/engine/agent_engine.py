@@ -235,6 +235,7 @@ _TOOL_EVENTS: dict[str, str] = {
     "propose_opening_ponds": "opening.ponds",
     "propose_chapter_openings": "opening.ponds",
 }
+_OPENING_POND_TOOLS = frozenset({"propose_opening_ponds", "propose_chapter_openings"})
 
 _CACHEABLE_TOOLS = CACHEABLE_TOOLS
 
@@ -1805,7 +1806,8 @@ class AgentEngine:
         ):
             summary = f"{summary}; writing_signals".strip("; ") if summary else "writing_signals"
         # Prefer concrete error text in the timeline (e.g. auto-apply old_text miss).
-        if result.get("error"):
+        # Opening ponds keep the user-facing summary — snake_case codes belong in `error`.
+        if result.get("error") and tool_name not in _OPENING_POND_TOOLS:
             err_text = str(result.get("error"))[:240]
             if err_text and err_text not in summary:
                 summary = err_text
@@ -1985,14 +1987,14 @@ class AgentEngine:
             state.termination_reason = "plan_awaiting_consent"
             return "TERMINATE"
         if (
-            tool_name in {"propose_opening_ponds", "propose_chapter_openings"}
+            tool_name in _OPENING_POND_TOOLS
             and not is_error
             and result.get("awaiting_choice")
         ):
             state.termination_reason = "opening_ponds_awaiting_choice"
             return "TERMINATE"
         if (
-            tool_name in {"propose_opening_ponds", "propose_chapter_openings"}
+            tool_name in _OPENING_POND_TOOLS
             and is_error
             and result.get("stop_retry")
         ):

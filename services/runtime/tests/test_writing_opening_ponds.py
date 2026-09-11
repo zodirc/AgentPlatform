@@ -89,6 +89,8 @@ def test_opening_choice_block_requires_distinct_start_kind() -> None:
     assert "连载" in block
     assert "事故" in block
     assert "Leave the assistant message empty" in block
+    assert "in-turn repair" in block
+    assert "does not retry" not in block
     assert "房租" in block
     assert "殡仪" not in block
     assert "opening_no_accident" not in block
@@ -225,6 +227,21 @@ def test_ponds_reject_same_start_kind_despite_new_job() -> None:
     )
     code, _summary = ponds_reject_reason(items) or ("", "")
     assert code == "start_kind_collision"
+
+
+def test_coerce_pond_enums_uniques_duplicate_kinds() -> None:
+    from app.writing.opening_ponds import coerce_pond_enums
+
+    items = normalize_pond_items(
+        [
+            _pond("保安窗", start_kind="pulled_in", promise="dread_decode", who="保安"),
+            _pond("实习生窗", start_kind="pulled_in", promise="power_steps", who="实习生"),
+        ]
+    )
+    coerced = coerce_pond_enums(items)
+    kinds = [str(it.get("start_kind")) for it in coerced]
+    assert len(set(kinds)) == 2
+    assert ponds_reject_reason(coerced) is None
 
 
 def test_ponds_reject_all_same_promise() -> None:
@@ -756,7 +773,31 @@ async def test_propose_gothic_plain_pair_does_not_dump_donts(
 
 
 @pytest.mark.asyncio
-async def test_propose_opening_ponds_rejects_reskin(workspace: Path) -> None:
+async def test_propose_opening_ponds_repairs_once_then_stops(workspace: Path) -> None:
+    from uuid import uuid4
+
+    from app.tools.core.writing_tools import propose_opening_ponds
+    from app.writing.opening_ponds import clear_pond_rejects
+
+    clear_pond_rejects()
+    turn_id = uuid4()
+    bad = [{"title": "only", "who": "a", "where": "b", "want": "c"}]
+    first = await propose_opening_ponds(bad, turn_id=turn_id)
+    assert first["status"] == "error"
+    assert first["error"] == "need_two_ponds"
+    assert first.get("stop_retry") is False
+    assert "detail" in first
+    assert "我看看" not in first["summary"]
+
+    second = await propose_opening_ponds(bad, turn_id=turn_id)
+    assert second["status"] == "error"
+    assert second.get("stop_retry") is True
+    assert "我看看" in second["summary"]
+    clear_pond_rejects()
+
+
+@pytest.mark.asyncio
+async def test_propose_opening_ponds_coerces_reskin(workspace: Path) -> None:
     from app.tools.core.writing_tools import propose_opening_ponds
     result = await propose_opening_ponds(
         [
@@ -764,8 +805,9 @@ async def test_propose_opening_ponds_rejects_reskin(workspace: Path) -> None:
             _pond("食堂窗", start_kind="pulled_in", promise="costly_truth", who="实习生"),
         ]
     )
-    assert result["status"] == "error"
-    assert result["error"] == "start_kind_collision"
+    assert result["status"] == "ok"
+    kinds = [str(it.get("start_kind")) for it in result["items"]]
+    assert len(set(kinds)) == 2
 
 
 @pytest.mark.asyncio
@@ -778,11 +820,11 @@ async def test_propose_opening_ponds_rejects_missing_kind(workspace: Path) -> No
         ]
     )
     assert result["status"] == "error"
-    assert result["error"] == "need_start_kind_and_promise"
+    assert result["error"] == "need_book_plan"
 
 
 @pytest.mark.asyncio
-async def test_propose_opening_ponds_rejects_same_promise(workspace: Path) -> None:
+async def test_propose_opening_ponds_coerces_same_promise(workspace: Path) -> None:
     from app.tools.core.writing_tools import propose_opening_ponds
     result = await propose_opening_ponds(
         [
@@ -790,8 +832,9 @@ async def test_propose_opening_ponds_rejects_same_promise(workspace: Path) -> No
             _pond("B", start_kind="pulled_in", promise="power_steps"),
         ]
     )
-    assert result["status"] == "error"
-    assert result["error"] == "promise_collision"
+    assert result["status"] == "ok"
+    promises = [str(it.get("promise")) for it in result["items"]]
+    assert len(set(promises)) == 2
 
 
 @pytest.mark.asyncio
@@ -827,8 +870,10 @@ async def test_propose_opening_ponds_rejects_previous_kinds(
         ],
         turn_user_text=MORE_PONDS_MESSAGE,
     )
-    assert result["status"] == "error"
-    assert result["error"] == "kinds_repeat"
+    assert result.get("error") != "kinds_repeat"
+    assert result["status"] == "ok"
+    kinds = {str(it.get("start_kind")) for it in result["items"]}
+    assert not kinds & {"self_notice", "pulled_in"}
 
     browse = await propose_opening_ponds(
         [
@@ -845,19 +890,39 @@ async def test_propose_opening_ponds_rejects_previous_kinds(
     assert browse.get("error") != "kinds_repeat"
 
 
-def test_pond_reject_stops_on_first_handler_error() -> None:
+def test_pond_reject_allows_one_in_turn_repair() -> None:
     from uuid import uuid4
 
-    from app.writing.opening_ponds import note_pond_reject
+    from app.writing.opening_ponds import clear_pond_rejects, note_pond_reject
 
-    hit = note_pond_reject(uuid4(), ("ledger_too_close", "换叙事决策，不要换皮。"))
-    assert hit is not None
-    assert hit["error"] == "ledger_too_close"
-    assert hit.get("stop_retry") is True
-    assert "没交成" in hit["summary"]
-    assert "只交一次" not in hit["summary"]
-    assert "殡仪" not in hit["summary"]
+    clear_pond_rejects()
+    turn_id = uuid4()
+    first = note_pond_reject(turn_id, ("ledger_too_close", "换叙事决策，不要换皮。"))
+    assert first is not None
+    assert first["error"] == "ledger_too_close"
+    assert first["detail"] == "换叙事决策，不要换皮。"
+    assert first.get("stop_retry") is False
+    assert "没交成" in first["summary"]
+    assert "我看看" not in first["summary"]
+    assert "只交一次" not in first["summary"]
+    assert "殡仪" not in first["summary"]
+
+    second = note_pond_reject(turn_id, ("kinds_repeat", "上一组已经用过这些 start_kind。"))
+    assert second is not None
+    assert second.get("stop_retry") is True
+    assert "我看看" in second["summary"]
+    assert "殡仪" not in second["summary"]
+
+    other = note_pond_reject(uuid4(), ("need_two_ponds", "至少交 2 个开篇候选。"))
+    assert other is not None
+    assert other.get("stop_retry") is False
+
+    no_turn = note_pond_reject(None, ("ledger_too_close", "换叙事决策，不要换皮。"))
+    assert no_turn is not None
+    assert no_turn.get("stop_retry") is True
+    assert "我看看" in no_turn["summary"]
     assert note_pond_reject(uuid4(), None) is None
+    clear_pond_rejects()
 
 
 def test_ponds_allow_missing_or_duplicate_price() -> None:
@@ -1759,6 +1824,6 @@ async def test_propose_opening_ponds_rejects_price_axis_collision(
             ),
         ]
     )
-    assert result["status"] == "error"
-    assert result["error"] == "price_axis_collision"
-    assert result.get("stop_retry") is True
+    assert result["status"] == "ok"
+    axes = [str(it.get("price_axis")) for it in result["items"]]
+    assert len(set(axes)) == 2

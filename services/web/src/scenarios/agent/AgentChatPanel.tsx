@@ -21,6 +21,7 @@ import { PlanPanel } from "../../shared/workbench/PlanPanel";
 import { OpeningPondsPanel } from "../../shared/workbench/OpeningPondsPanel";
 import {
   openingChoiceFromUserInput,
+  preferSettledOutput,
   turnHidesUserInput,
   visibleChatUserInputs,
 } from "../../shared/workbench/openingPonds";
@@ -61,14 +62,13 @@ const STICK_THRESHOLD_PX = 80;
 const MODE_OPTIONS: ScenarioId[] = ["writing", "agent", "intel", "collab"];
 
 function assistantText(wb: WorkbenchState, turn: TurnHistoryItem): string {
+  const projected = wb.view?.latest_output || turn.latest_output || "";
   if (turn.id === wb.turnId) {
-    return (
-      wb.streamText ||
-      wb.sectionDraft ||
-      wb.view?.latest_output ||
-      turn.latest_output ||
-      ""
-    );
+    const streamed = wb.streamText || wb.sectionDraft || "";
+    if (wb.busy) {
+      return streamed || projected || "";
+    }
+    return preferSettledOutput(streamed, projected) || projected || streamed;
   }
   return turn.latest_output ?? "";
 }

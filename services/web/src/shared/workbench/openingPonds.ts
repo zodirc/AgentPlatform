@@ -142,6 +142,30 @@ export function latestOpeningPondsFromArtifacts(
   return found;
 }
 
+export function preferSettledOutput(
+  streamed: string | null | undefined,
+  projected: string | null | undefined,
+): string {
+  const live = (streamed || "").trim();
+  const view = (projected || "").trim();
+  if (!view) return live;
+  if (!live) return view;
+  if (view.startsWith(live) || live.startsWith(view)) {
+    return live.length >= view.length ? live : view;
+  }
+  if (live.includes(view)) return live;
+  if (view.includes(live) && view.length > live.length) return view;
+  // Opening-ponds reject/success lives in the projection; models often leak a
+  // one-line English thinking title as tokens (**Proposing new start_kinds…**).
+  if (/开篇候选/.test(view) && !/开篇候选/.test(live)) return view;
+  if (/^\*\*[^*]+\*\*\s*$/.test(live)) return view;
+  const liveEnglish =
+    live.length <= 160 && !/[\u4e00-\u9fff]/.test(live) && /[\u4e00-\u9fff]/.test(view);
+  if (liveEnglish) return view;
+  if (live.length <= 160 && view.length > live.length) return view;
+  return live;
+}
+
 export function latestOpeningPondsFromEvents(
   events:
     | Array<{ type?: string; payload?: Record<string, unknown> }>
