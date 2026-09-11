@@ -103,6 +103,12 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_OUT,
         help=f"Output path (default: {DEFAULT_OUT})",
     )
+    parser.add_argument(
+        "--regime",
+        choices=["author", "strict", "all"],
+        default="all",
+        help="Filter tool.completed events by writing regime (default: all).",
+    )
     args = parser.parse_args(argv)
 
     if args.events:
@@ -114,6 +120,16 @@ def main(argv: list[str] | None = None) -> int:
     else:
         parser.error("pass --events JSON or --database-url / DATABASE_URL")
         return 2
+
+    if args.regime != "all":
+        filtered: list[dict[str, Any]] = []
+        for ev in events:
+            payload = ev.get("payload") if isinstance(ev, dict) else None
+            if not isinstance(payload, dict):
+                continue
+            if str(payload.get("regime") or "") == args.regime:
+                filtered.append(ev)
+        events = filtered
 
     summary = summarize_writing_turns(events)
     doc = {
