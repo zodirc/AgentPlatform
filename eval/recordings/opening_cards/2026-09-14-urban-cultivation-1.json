@@ -1,0 +1,69 @@
+{
+  "date": "2026-09-14",
+  "n": 1,
+  "genre": "urban_cultivation",
+  "prompt": "写一部三百章都市修真，我看看",
+  "branch": "feat/opening-excerpt",
+  "ponds_excerpt_gate": true,
+  "model_mode": "live",
+  "model_provider": "anthropic",
+  "reject_codes": [],
+  "awaiting_choice": true,
+  "source": {
+    "thinking": "thinking.txt (user paste of turn.thinking + UI)",
+    "sidecar": "/workspace/.agent/work/opening_ponds.json",
+    "ponds_id": "ponds-0ffeea62"
+  },
+  "opening_ponds": {
+    "ponds_id": "ponds-0ffeea62",
+    "summary": "两枚硬币 ｜ 灶上的锅盖",
+    "awaiting_choice": true,
+    "items": [
+      {
+        "id": "coin-laundromat",
+        "title": "两枚硬币",
+        "opening": "周砚把两枚硬币投进烘干机，玻璃门里那件校服转起来，他低头，看见手背上那道旧疤在发烫。不是夏天的热，是烫，从骨头里往外顶。他甩了甩手，抬头看窗外——对面那栋烂尾楼的楼顶站着一个人，雨从他肩头绕开，落不下去。"
+      },
+      {
+        "id": "porridge-pot",
+        "title": "灶上的锅盖",
+        "opening": "卷帘门拉到一半卡住了。老陈踩着板凳去够，铁皮咬了他一口，他骂了一声，低头看见灶上那口锅在晃——火没开。街对面早市的喇叭正一浪一浪地喊白菜九毛。他伸手去按锅盖，盖子底下有东西顶了他一下，很有力气。"
+      }
+    ]
+  },
+  "job_signals": [
+    {
+      "title": "两枚硬币",
+      "visible": 102,
+      "time_jumps": 0,
+      "time_tokens": [],
+      "rule_speech": 0,
+      "rule_tokens": [],
+      "parallel_enum": 0,
+      "parallel_tokens": [],
+      "intro_lecture": 0,
+      "intro_tokens": [],
+      "explained": 0,
+      "distinct": 0
+    },
+    {
+      "title": "灶上的锅盖",
+      "visible": 97,
+      "time_jumps": 0,
+      "time_tokens": [],
+      "rule_speech": 0,
+      "rule_tokens": [],
+      "parallel_enum": 0,
+      "parallel_tokens": [],
+      "intro_lecture": 0,
+      "intro_tokens": [],
+      "explained": 0,
+      "distinct": 0
+    }
+  ],
+  "notes": [
+    "flavor/start_kind/promise/engine_note empty on sidecar items",
+    "similarity embedder unavailable, shadow true",
+    "first submit accepted; no in-turn repair"
+  ]
+}
