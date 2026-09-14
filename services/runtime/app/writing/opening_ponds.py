@@ -13,11 +13,11 @@ OPENING_PONDS_REL = Path(".agent") / "work" / "opening_ponds.json"
 COMMITTED_POND_REL = Path(".agent") / "work" / "committed_pond.json"
 MORE_PONDS_MESSAGE = "我要其他的"
 OPENING_CHOICE_TOOL_ALLOWLIST = frozenset({"propose_opening_ponds", "stub_echo"})
-# Same Turn may repair once; a second reject stops (user says 我看看).
-_POND_REPAIR_MAX = 1
+# Same Turn may repair twice; a third reject stops (user says 我看看).
+_POND_REPAIR_MAX = 2
 _POND_REJECTS: dict[str, int] = {}
 _POND_REJECT_USER_SUMMARY = "开篇候选这轮没交成。请再说一次「我看看」。"
-_POND_REPAIR_SUMMARY = "开篇候选这轮没交成。请按 detail 改字段后再交一次，不要写进聊天。"
+_POND_REPAIR_SUMMARY = "开篇候选这轮没交成。按 detail 里点名的字改那一段后再交一次，不要写进聊天。"
 
 logger = logging.getLogger(__name__)
 
@@ -179,8 +179,6 @@ _SUMMARY_MAX = 160
 _PLAN_MAX = 400
 _FLAVOR_MAX = 400
 _PRICE_MAX = 160
-_PLAN_MIN = 18
-_FLAVOR_MIN = 8
 _SELF_NOTE_MAX = 160
 _SOCIAL_SPACE_MAX = 80
 _ENGINE_NOTE_MAX = 160
@@ -195,9 +193,9 @@ def opening_choice_block() -> str:
     except OSError:
         return (
             "## Opening choice (platform)\n"
-            "Call `propose_opening_ponds` once with 2–3 items. "
+            "Call `propose_opening_ponds` once with 2 items. "
             "Leave the assistant message empty. "
-            "Write title / flavor / opening first. Cards are the deliverable."
+            "Write title / opening first. Cards are the deliverable."
         )
 
 
@@ -338,18 +336,27 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
     price_axis = normalize_price_axis(
         raw.get("price_axis") or raw.get("付账轴") or raw.get("谁付账") or ""
     )
-    opening = _clip(raw.get("opening") or raw.get("开篇") or "", _PLAN_MAX)
+    from app.writing.pitch_closer import strip_pitch_closers, strip_pitch_closers_report
+
+    opening, _cut = strip_pitch_closers_report(
+        str(raw.get("opening") or raw.get("开篇") or "")
+    )
+    opening = _clip(opening, _PLAN_MAX)
     arc = _clip(
         raw.get("arc") or raw.get("走向") or raw.get("全篇走向") or "",
         _PLAN_MAX,
     )
     flavor = _clip(
-        raw.get("flavor")
-        or raw.get("这本书")
-        or raw.get("book")
-        or raw.get("风格")
-        or raw.get("全篇风格")
-        or "",
+        strip_pitch_closers(
+            str(
+                raw.get("flavor")
+                or raw.get("这本书")
+                or raw.get("book")
+                or raw.get("风格")
+                or raw.get("全篇风格")
+                or ""
+            )
+        ),
         _FLAVOR_MAX,
     )
     chapter_job = _clip(
@@ -387,7 +394,7 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
         "source_trust": source_trust,
         "first_conflict_at": first_conflict_at,
         "price_axis": price_axis,
-        "summary": _clip(raw.get("summary") or flavor, _SUMMARY_MAX),
+        "summary": _clip(raw.get("summary") or opening or flavor, _SUMMARY_MAX),
     }
 
 
@@ -443,14 +450,6 @@ def fill_pond_defaults(items: list[dict[str, str]]) -> list[dict[str, str]]:
     return [dict(item) for item in items]
 
 
-def _axis_label_set() -> set[str]:
-    return (
-        set(START_KIND_LABELS.values())
-        | set(PROMISE_LABELS.values())
-        | set(PRICE_AXIS_LABELS.values())
-    )
-
-
 def ponds_reject_reason(
     items: list[dict[str, str]],
     *,
@@ -458,43 +457,23 @@ def ponds_reject_reason(
     against: list[dict[str, Any]] | None = None,
     similarity: dict[str, Any] | None = None,
     shadow: bool | None = None,
+    gate: bool = True,
     workspace_root: Path | None = None,
     skip_ledger: bool = True,
 ) -> tuple[str, str] | None:
     """拒共线集合。轴不再作为比较键。"""
     from app.settings import settings
+    from app.writing.excerpt_job import excerpt_group_reject
 
     _ = (skip_ledger, workspace_root)
     if len(items) < _MIN_ITEMS:
         return ("need_two_ponds", "至少交 2 个开篇候选。")
-    conflicts = [str(it.get("first_conflict_at") or "") for it in items]
-    if sum(1 for c in conflicts if c == "later") > 1:
-        return (
-            "later_over_quota",
-            "first_conflict_at=later 至多一份，不要把冲突都放到第一章之后。",
-        )
-    axis_names = _axis_label_set()
-    for it in items:
-        opening = str(it.get("opening") or "").strip()
-        flavor = str(it.get("flavor") or "").strip()
-        note = str(it.get("book_self_note") or "").strip()
-        if flavor in axis_names or note in axis_names:
-            return (
-                "plan_is_axis",
-                "这本书不要直接填变强台阶/在关系里活下去这类对照标签。",
-            )
-        if len(opening) < _PLAN_MIN or len(flavor) < _FLAVOR_MIN:
-            return (
-                "need_book_plan",
-                "每份都要有这本书（网文简介一段）和开篇（场上已发生的一拍）。"
-                "不要拆成账单/走向/气味，不要只填系统/关系标签。",
-            )
-    trusts = [str(it.get("source_trust") or "") for it in items]
-    if len(items) >= 3 and all(t == "trusted" for t in trusts):
-        logger.info(
-            "pond trust_all_clean shadow n=%s (not rejected)",
-            len(items),
-        )
+    excerpt_hit = excerpt_group_reject(items)
+    if excerpt_hit:
+        if not gate:
+            logger.info("pond excerpt_gate shadow %s", excerpt_hit[1])
+        else:
+            return excerpt_hit
     is_shadow = settings.ponds_similarity_shadow if shadow is None else bool(shadow)
     snap = similarity
     if snap is None:
@@ -531,6 +510,7 @@ def save_opening_ponds(
     *,
     summary: str = "",
     similarity: dict[str, Any] | None = None,
+    job_signals: list[dict[str, Any]] | None = None,
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
     """写入 sidecar，返回事件 payload。"""
@@ -545,6 +525,8 @@ def save_opening_ponds(
     }
     if similarity:
         body["similarity"] = sidecar_similarity(similarity)
+    if job_signals:
+        body["job_signals"] = job_signals
     path = opening_ponds_path(workspace_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -573,6 +555,8 @@ def load_opening_ponds(*, workspace_root: Path | None = None) -> dict[str, Any] 
     }
     if isinstance(data.get("similarity"), dict):
         out["similarity"] = data["similarity"]
+    if isinstance(data.get("job_signals"), list):
+        out["job_signals"] = data["job_signals"]
     return out
 
 
@@ -595,11 +579,16 @@ def seed_outline_from_pond(
         title = title[1:-1]
     flavor = str(item.get("flavor") or "").strip()
     opening = str(item.get("opening") or "").strip()
-    if not title and not flavor:
+    if not title and not flavor and not opening:
         return
-    block = f"## 这本书\n\n《{title}》。{flavor}\n"
-    if opening:
-        block += f"\n开篇：{opening}\n"
+    if flavor:
+        block = f"## 这本书\n\n《{title}》。{flavor}\n"
+        if opening:
+            block += f"\n开篇：{opening}\n"
+    else:
+        block = f"## 这本书\n\n《{title}》\n"
+        if opening:
+            block += f"\n开头：{opening}\n"
     text = (existing or "").strip()
     if not text:
         new = block + "\n## 主线一句话\n（往哪走即可。顶点可以后补。）\n"

@@ -41,6 +41,7 @@ def embedder_is_lexical(embedder: Any) -> bool:
 
 
 def pond_embed_text(item: Mapping[str, Any]) -> str:
+    # flavor 为空时只用 opening。
     flavor = str(item.get("flavor") or "").strip()
     opening = str(item.get("opening") or "").strip()
     return f"{flavor}\n{opening}".strip()

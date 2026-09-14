@@ -165,18 +165,21 @@ def seed_identity_from_pond(
     *,
     workspace_root: Path | None = None,
 ) -> dict[str, Any]:
-    """开篇点选成功时从 flavor / book_self_note 机械生成 identity 初稿。"""
+    """开篇点选成功时从 opening / flavor / book_self_note 机械生成 identity 初稿。"""
     state = load_story_state(workspace_root=workspace_root)
     identity = _normalize_identity(state.get("identity"), taboos=state.get("taboos"))
     if identity.get("is"):
         return save_story_state(state, workspace_root=workspace_root)
     item = pond if isinstance(pond, Mapping) else {}
     flavor = str(item.get("flavor") or "").strip()
+    opening = str(item.get("opening") or "").strip()
     self_note = str(item.get("book_self_note") or "").strip()
     title = str(item.get("title") or "").strip()
     is_items: list[str] = []
     if flavor:
         is_items.append(clip_visible(flavor, 40))
+    elif opening:
+        is_items.append(clip_visible(opening, 40))
     elif title:
         is_items.append(clip_visible(title, 40))
     if self_note and self_note not in is_items:

@@ -1155,10 +1155,10 @@ async def update_plan(
 
 async def propose_opening_ponds(
     items: list[dict[str, Any]],
-    summary: str = "",
     **_kwargs: Any,
 ) -> dict[str, Any]:
     """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
+    from app.writing.excerpt_job import job_signals_for
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
         clear_pond_rejects,
@@ -1209,6 +1209,7 @@ async def propose_opening_ponds(
         against=against,
         similarity=similarity,
         shadow=settings.ponds_similarity_shadow,
+        gate=settings.ponds_excerpt_gate,
         workspace_root=root,
         skip_ledger=True,
     )
@@ -1216,7 +1217,12 @@ async def propose_opening_ponds(
     if exhausted:
         return exhausted
     ranked = rank_opening_ponds(normalized)
-    saved = save_opening_ponds(ranked, summary="", similarity=similarity)
+    saved = save_opening_ponds(
+        ranked,
+        summary="",
+        similarity=similarity,
+        job_signals=job_signals_for(normalized),
+    )
     clear_pond_rejects(_kwargs.get("turn_id"))
     from app.writing.ledger import append_pond_fingerprint
 

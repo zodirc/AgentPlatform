@@ -377,12 +377,10 @@ def build_registry() -> ToolRegistry:
         ToolSpec(
             name="propose_opening_ponds",
             description=(
-                "Propose 2–3 opening ponds as books the user can pick: "
-                "title + 这本书 (flavor) + opening first, then optional "
-                "self-description. Books must be different from each other "
-                "(not a job/place/paper/ability reskin). "
-                "Do not split into 账单/走向/气味. "
-                "UI picker is the deliverable; do not list ponds in chat. "
+                "Propose 2 (max 3) books the user can pick. Each item is the first paragraph "
+                "of that book's chapter 1 (`opening`, 60–260 chars, one moment on the page) "
+                "plus a working `title` taken from something in that paragraph. "
+                "UI picker is the deliverable; do not list them in chat. "
                 "Use when the user only gave a genre or said 看看 / 我要其他的."
             ),
             parameters={
@@ -391,86 +389,26 @@ def build_registry() -> ToolRegistry:
                     "items": {
                         "type": "array",
                         "minItems": 2,
-                        "maxItems": 4,
+                        "maxItems": 3,
                         "items": {
                             "type": "object",
                             "properties": {
                                 "id": {"type": "string"},
                                 "title": {
                                     "type": "string",
-                                    "description": "能印在封面的连载书名，大约二到八个字，不要绩效/标段/考核",
-                                },
-                                "flavor": {
-                                    "type": "string",
-                                    "description": "这本书：点名题材里那一类网文的简介",
+                                    "description": "工作书名，二到八字，从这段里出现过的东西、地方或人取",
                                 },
                                 "opening": {
                                     "type": "string",
-                                    "description": "这本书里已经落在场上的一两句，不是开会或签字",
+                                    "description": "正文第一段，60–260 字，一个时刻，写到这一拍停",
                                 },
-                                "book_self_note": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "social_space": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "engine_note": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "who": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "where": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "want": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "arc": {
-                                    "type": "string",
-                                    "description": "可选。卡片上不展示",
-                                },
-                                "price": {
-                                    "type": "string",
-                                    "description": "可选。卡片上不展示",
-                                },
-                                "start_kind": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示。不要为填它改这本书",
-                                },
-                                "promise": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示。不要为填它改这本书",
-                                },
-                                "source_trust": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "first_conflict_at": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示",
-                                },
-                                "price_axis": {
-                                    "type": "string",
-                                    "description": "可选，卡片上不展示。不要为填它改这本书",
-                                },
-                                "chapter_job": {"type": "string"},
-                                "summary": {"type": "string"},
                             },
                             "required": [
                                 "title",
-                                "flavor",
                                 "opening",
                             ],
                         },
                     },
-                    "summary": {"type": "string"},
                 },
                 "required": ["items"],
             },

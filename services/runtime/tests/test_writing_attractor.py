@@ -91,9 +91,9 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
     assert "眼前的池子" in voice
     assert "学乌贼" in voice
-    assert "不当三张卡配方" in voice
+    assert "不当卡片配方" in voice
     assert "功法" in voice
-    assert "几本不同的书" in voice
+    assert "两本不同的书" in voice
     assert "一千八" in voice
     assert "得到了什么" not in voice
     assert "前三分之一" not in voice
@@ -105,7 +105,7 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "平凡" in SERIAL_AFTER_LOCK_CRAFT
     assert "start_kind 不同" not in voice
     assert "只给题材时先换 start_kind" not in voice
-    assert "几本要是彼此不同的书" in system
+    assert "两本不同的书" in system
     assert "开篇候选要能点到" not in system
     assert "start_kind 与 price_axis 不得重复" not in system
     assert "看见代价" not in voice
@@ -116,7 +116,8 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "查父失踪" not in system
     assert "水路渡口+灵灯" not in system
     assert "一千八" in system
-    assert "功法" in system
+    choice = (root / "templates" / "opening_choice.md").read_text(encoding="utf-8")
+    assert "功法" in choice
     assert "前三分之一" not in system
     assert "得到了什么" not in system
 
@@ -131,7 +132,7 @@ def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypa
     )
     assert "work_mode: `web_serial`" in spec
     assert "候选" in spec
-    assert "彼此不同的书" in spec
+    assert "两本不同的书" in spec
     assert "互不换皮" not in spec
     assert "发觉/系统/过日子" not in spec
     assert "前三分之一" not in spec

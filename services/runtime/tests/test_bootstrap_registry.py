@@ -45,9 +45,8 @@ def test_build_registry_has_core_tools() -> None:
         .get("items", {})
         .get("required", [])
     )
-    assert "title" in item_required
-    assert "opening" in item_required
-    assert "flavor" in item_required
+    assert item_required == ["title", "opening"] or set(item_required) == {"title", "opening"}
+    assert "flavor" not in item_required
     assert "start_kind" not in item_required
     assert "promise" not in item_required
     assert "price_axis" not in item_required
@@ -60,9 +59,12 @@ def test_build_registry_has_core_tools() -> None:
         .get("items", {})
         .get("properties", {})
     )
-    assert "book_self_note" in item_props
-    assert "social_space" in item_props
-    assert "engine_note" in item_props
+    assert "flavor" not in item_props
+    assert "start_kind" not in item_props
+    assert "book_self_note" not in item_props
+    assert "social_space" not in item_props
+    assert "engine_note" not in item_props
+    assert ponds.parameters.get("properties", {}).get("items", {}).get("maxItems") == 3
     assert "Unique start_kind" not in (ponds.description or "")
 
 

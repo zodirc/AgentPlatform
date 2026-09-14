@@ -392,6 +392,8 @@ def test_scenario_registry_loads_profiles() -> None:
     assert "draft_section" in writing.system_prompt
     assert "update_outline" in writing.system_prompt
     assert "propose_opening_ponds" in writing.system_prompt
+    assert "正文第一段" in writing.system_prompt
+    assert "能连载的书" not in writing.system_prompt
     assert "propose_patch" in writing.system_prompt
     assert "export_document" in writing.system_prompt
     assert "遵守工具返回的状态" in writing.system_prompt

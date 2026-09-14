@@ -7,7 +7,7 @@ from typing import Any, Literal, Mapping
 
 from app.writing.pond_history import load_rejected_pond_groups
 
-_FLAVOR_BIT = 48
+_OPENING_BIT = 48
 
 # 只认用户点名的长词，不认「系统」这种会误伤口令的短别名。
 _USER_KIND_PHRASES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -41,10 +41,12 @@ def _clip_bit(text: str, max_len: int) -> str:
 
 def _book_line(item: Mapping[str, Any]) -> str:
     title = str(item.get("title") or item.get("id") or "").strip()
-    flavor = _clip_bit(str(item.get("flavor") or ""), _FLAVOR_BIT)
+    opening = _clip_bit(str(item.get("opening") or ""), _OPENING_BIT)
+    flavor = _clip_bit(str(item.get("flavor") or ""), _OPENING_BIT)
+    bit = opening or flavor
     bits = [f"《{title}》" if title else ""]
-    if flavor:
-        bits.append(flavor)
+    if bit:
+        bits.append(bit)
     return " · ".join(p for p in bits if p) or f"- {title}"
 
 
@@ -130,14 +132,13 @@ def format_committed_pond_block(
     title = item.get("title") or item.get("id") or ""
     lines = [
         "## 已选开篇",
-        "用户在卡片上勾选了一份。这是已选定的书：按「这本书」写当前章，不要再出候选。",
-        "开篇只在第一章兑现，后面不要重开一次。",
+        "用户在卡片上勾选了一份。这是已选定的书：第一章从下面这段接着写，这段原样作开头，不要重开一次。",
         f"{CHAPTER_DWELL_HINT}。不要为凑字粘无关场面。若第二条线与本场主题对位或共享时空，可以写。",
-        "按「这本书」和「开篇」写；不要另起账单、走向、气味三栏，也不要另起窗口办事。",
+        "按下面这段写；不要另起账单、走向、气味三栏，也不要另起窗口办事。",
         f"书名：{title}",
     ]
     if item.get("flavor"):
         lines.append(f"这本书：{item['flavor']}")
     if item.get("opening"):
-        lines.append(f"开篇：{item['opening']}")
+        lines.append(f"开头：{item['opening']}")
     return "\n".join(lines)

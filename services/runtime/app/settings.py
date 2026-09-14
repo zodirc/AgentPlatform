@@ -197,6 +197,8 @@ class Settings(BaseSettings):
     ponds_similarity_shadow: bool = True
     ponds_similarity_intra: float = 0.96
     ponds_similarity_against: float = 0.96
+    # 事故回滚用；False 时 excerpt_job 只记日志不拒。
+    ponds_excerpt_gate: bool = True
 
     # --- Execution-plane roles (ADR-020) ---
     # orchestrator | retrieval | model_gateway | sandbox | monolith (tests / legacy)

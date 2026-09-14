@@ -44,7 +44,7 @@ STYLE_CONTRACT_TEMPLATE_VERSION = "book-pond-v1"
 
 STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名、这本书、开篇抄进这一段。不要另填四格。后面的海（终局宇宙、境界总纲）不要写进这段。
+先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名和开头抄进这一段。后面的海（终局宇宙、境界总纲）不要写进这段。
 
 换人换事就是另一本书。
 
@@ -54,7 +54,7 @@ STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
 OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名、这本书、开篇抄进这一段。不要另填四格。后面的海不要写进这段。
+先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名和开头抄进这一段。后面的海不要写进这段。
 
 换人换事就是另一本书。
 
@@ -149,7 +149,7 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
             "outline_style_uncommitted": True,
             "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
             "summary_suffix": (
-                "长篇先 propose_opening_ponds 出开篇候选；点选后再把卡片抄进「这本书」。"
+                "长篇先 propose_opening_ponds 出开篇候选；点选后再把卡片的书名和开头抄进「这本书」。"
             ),
         }
     return {

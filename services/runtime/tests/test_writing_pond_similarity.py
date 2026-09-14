@@ -35,14 +35,18 @@ def _two() -> list[dict[str, str]]:
     return normalize_pond_items(
         [
             {
-                "title": "夜行证失效",
-                "flavor": "跑腿、死人留下的证、三分钟确认，否则整车被带走。",
-                "opening": "公共屏幕倒计时开始，地铁里三分钟确认，否则整车被带走。",
+                "title": "夜行证",
+                "opening": (
+                    "夜行证就搁在他手边，灯管滋了一声。他没有抬头，把杯垫转了半圈。"
+                    "对面那人把筷子放下，雨还在打窗沿。他按着杯沿，没把话接下去。"
+                ),
             },
             {
                 "title": "人间有灵",
-                "flavor": "异能已融入日常、直播事故、母亲的修士名号被叫出来。",
-                "opening": "直播事故里术法回声叫出母亲已注销的修士名号。",
+                "opening": (
+                    "人间有灵四个字印在塑料袋上，他提着袋子进门。猫从沙发底下探出头。"
+                    "他蹲下去，袋子口还没扎紧。窗外有人按了两下电铃。他没去开门，先把袋子放到灶台上。"
+                ),
             },
         ]
     )
@@ -110,6 +114,15 @@ def test_same_book_helpers_read_only_titles() -> None:
     assert hit is not None and hit[0] == "ponds_same_book"
     assert near_rejected_reject(_snap(against=0.99, usable=True))[0] == "ponds_near_rejected"
     assert near_rejected_reject(_snap(against=0.99, usable=False)) is None
+
+
+def test_embed_text_opening_only_when_no_flavor() -> None:
+    from app.writing.pond_similarity import pond_embed_text
+
+    text = pond_embed_text({"title": "末班车", "opening": "末班车出总站。", "flavor": ""})
+    assert text == "末班车出总站。"
+    both = pond_embed_text({"flavor": "简介", "opening": "末班车出总站。"})
+    assert both == "简介\n末班车出总站。"
 
 
 def test_default_threshold_skips_engine_apart_band() -> None:

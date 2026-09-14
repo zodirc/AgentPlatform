@@ -284,6 +284,16 @@ class StubModelProvider:
             yield ModelResponse(text="agent.08 glob 完成", output_tokens=6)
             return
 
+        if "propose_opening_ponds" in tool_names and "writing.16" in user_text:
+            if not has_tool_result:
+                yield _tool_call("propose_opening_ponds", {"items": list(_STUB_BAD_PONDS)})
+                return
+            if last_tool == "propose_opening_ponds" and _last_tool_result_is_error(
+                messages
+            ):
+                yield _tool_call("propose_opening_ponds", {"items": list(_STUB_GOOD_PONDS)})
+                return
+
         if "draft_section" in tool_names and _wants_writing_signals(user_text) and not has_tool_result:
             # Full spoken lines (not short Q&A chips) so writing.15 asserts on
             # writing_signals without arming a staccato L0 verify_receipt.
@@ -583,6 +593,61 @@ def _tool_call(name: str, arguments: dict[str, Any]) -> ModelResponse:
         tool_calls=[{"id": f"{name}-{uuid4().hex[:8]}", "name": name, "input": arguments}],
         output_tokens=15,
     )
+
+
+_STUB_BAD_PONDS = (
+    {
+        "title": "末班车",
+        "opening": (
+            "老李把钥匙拍在他手里，转身去关调度室的灯。他攥着钥匙站在院子里，末班车"
+            "停在最里面那个位，发动机盖上落了一层灰。他拉开车门，驾驶座的坐垫还是热的。"
+        ),
+    },
+    {
+        "title": "下山",
+        "opening": (
+            "他在山上待了二十七年。师父咽气前把一只旧木匣塞给他，让他进城，送到城南一户人家手上。"
+            "他下山第二天找到那片巷子，那里已经拆了三年，原地方立着一个超市。"
+            "他没回去，在对面租了间房，每天去问。到第二十天，那只匣子比下山时重了。"
+        ),
+    },
+)
+_STUB_GOOD_PONDS = (
+    {
+        "title": "末班车",
+        "opening": (
+            "老李把钥匙拍在他手里，转身去关调度室的灯。他攥着钥匙站在院子里，末班车"
+            "停在最里面那个位，发动机盖上落了一层灰。他拉开车门，驾驶座的坐垫还是热的。"
+        ),
+    },
+    {
+        "title": "十七号",
+        "opening": (
+            "陈老师念到第十七个名字停了一下，把名册翻回前一页，又把手指按在那一行上。"
+            "后排有人把椅子往后挪了一寸，教室里只剩吊扇的声音。她没抬头，把名册合上了。"
+        ),
+    },
+)
+
+
+def _last_tool_result_is_error(messages: list[dict]) -> bool:
+    for msg in reversed(messages):
+        if msg.get("role") != "tool":
+            continue
+        for block in msg.get("content", []) if isinstance(msg.get("content"), list) else []:
+            if not isinstance(block, dict) or block.get("type") != "tool_result":
+                continue
+            if block.get("is_error"):
+                return True
+            raw = block.get("content", "")
+            try:
+                data = json.loads(raw) if isinstance(raw, str) else raw
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(data, dict) and str(data.get("status") or "") == "error":
+                return True
+        return False
+    return False
 
 
 def _chunk_text(text: str, size: int = 12) -> list[str]:
