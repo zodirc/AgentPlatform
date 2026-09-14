@@ -61,7 +61,7 @@ function PondCard({
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="text-[13px] font-medium text-foreground">{item.title}</p>
         <Field label="这本书" value={item.flavor} />
-        <Field label="开篇" value={item.opening} />
+        <Field label="开头" value={item.opening} />
       </div>
     </>
   );
@@ -117,7 +117,7 @@ export function OpeningPondsPanel({
         </div>
         {interactive ? (
           <p className="mt-1 text-[11px] font-medium text-amber-800/90 dark:text-amber-200/90">
-            勾选一本要连载的书
+            勾选一本，从这段接着写
           </p>
         ) : (
           <p className="mt-1 text-[11px] text-muted-foreground">

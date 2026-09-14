@@ -2,29 +2,31 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OpeningPondsPanel } from "./OpeningPondsPanel";
-import type { OpeningPondsArtifact } from "./openingPonds";
+import type { OpeningPondItem, OpeningPondsArtifact } from "./openingPonds";
 
 afterEach(cleanup);
 
+const pondItems: OpeningPondItem[] = [
+  {
+    id: "a",
+    title: "早高峰系统",
+    flavor: "白天把班上完",
+    price: "换班一次扣一夜睡眠",
+    opening: "闸机面板亮了，班被一张任务打断。",
+    source_trust: "dubious",
+    first_conflict_at: "first_300",
+  },
+  {
+    id: "b",
+    title: "窗口人情",
+    flavor: "窗口里把日子过下去",
+    price: "窗口人情少一顿",
+  },
+];
+
 const ponds: OpeningPondsArtifact = {
   type: "opening_ponds",
-  items: [
-    {
-      id: "a",
-      title: "早高峰系统",
-      flavor: "白天把班上完",
-      price: "换班一次扣一夜睡眠",
-      opening: "闸机面板亮了，班被一张任务打断。",
-      source_trust: "dubious",
-      first_conflict_at: "first_300",
-    },
-    {
-      id: "b",
-      title: "窗口人情",
-      flavor: "窗口里把日子过下去",
-      price: "窗口人情少一顿",
-    },
-  ],
+  items: pondItems,
 };
 
 describe("OpeningPondsPanel", () => {
@@ -38,7 +40,7 @@ describe("OpeningPondsPanel", () => {
         onMore={() => {}}
       />,
     );
-    expect(screen.getByText("勾选一本要连载的书")).toBeTruthy();
+    expect(screen.getByText("勾选一本，从这段接着写")).toBeTruthy();
     expect(screen.queryByText(/在玩什么/)).toBeNull();
     expect(screen.queryByText(/开篇怎么进/)).toBeNull();
     expect(screen.queryByText("对照轴不同的近池")).toBeNull();
@@ -65,26 +67,52 @@ describe("OpeningPondsPanel", () => {
     expect(card).toBeTruthy();
     const text = card?.textContent ?? "";
     expect(text.indexOf("这本书")).toBeGreaterThan(-1);
-    expect(text.indexOf("这本书")).toBeLessThan(text.indexOf("开篇"));
+    expect(text.indexOf("开头")).toBeGreaterThan(text.indexOf("这本书"));
     expect(text).not.toContain("账单");
     expect(text).not.toContain("走向");
     expect(text).not.toContain("气味");
     expect(text).not.toContain("换班一次扣一夜睡眠");
   });
 
-    it("keeps tonight's errand and job-bio who off the picker card", () => {
+  it("hides 这本书 when flavor is absent and still shows 开头", () => {
+    render(
+      <OpeningPondsPanel
+        ponds={{
+          type: "opening_ponds",
+          items: [
+            {
+              id: "a",
+              title: "末班车",
+              opening: "老李把钥匙拍在他手里。",
+            },
+            {
+              id: "b",
+              title: "十七号",
+              opening: "陈老师念到第十七个名字停了一下。",
+            },
+          ],
+        }}
+      />,
+    );
+    const card = screen.getByText("末班车").closest("li");
+    const text = card?.textContent ?? "";
+    expect(text).not.toContain("这本书");
+    expect(text).toContain("开头");
+  });
+
+  it("keeps tonight's errand and job-bio who off the picker card", () => {
     render(
       <OpeningPondsPanel
         ponds={{
           ...ponds,
           items: [
             {
-              ...ponds.items[0],
+              ...pondItems[0],
               want: "保住母亲的手术押金",
               who: "沈青禾",
               where: "冷链仓库",
             },
-            ponds.items[1],
+            pondItems[1],
           ],
         }}
       />,
