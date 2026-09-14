@@ -1,0 +1,30 @@
+id: writing.16_opening_excerpt_gate
+scenario_id: writing
+phase: 2
+description: propose_opening_ponds rejects a montage paragraph with detail, accepts the repaired pair, stops awaiting choice
+
+input:
+  message: "writing.16 写一部三百章都市修真，我看看"
+  client_request_id: "00000000-0000-4000-8000-000000000016"
+
+model_mode: stub
+
+assertions:
+  events:
+    sequence_contains:
+      - tool.completed
+      - opening.ponds
+      - tool.completed
+      - turn.completed
+    sequence_not_contains:
+      - turn.failed
+  event_payload:
+    opening.ponds:
+      awaiting_choice: true
+  turn:
+    status: completed
+  tool:
+    name: propose_opening_ponds
+    result_matches: "十七号"
+
+tags: [writing, ponds, p2]

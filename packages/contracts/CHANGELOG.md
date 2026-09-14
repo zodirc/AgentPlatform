@@ -3,6 +3,10 @@
 版本规则见 [README.md](README.md) §版本化。每次改动 `schemas/`、`openapi/`、
 `python/agent_contracts` 时,在此追加一条并按规则调整版本号。
 
+## 2026-09-14 runtime
+
+- `opening.ponds` items 的 `flavor` 自本版起由 runtime 不再产出；`opening` 语义改为正文第一段。事件 schema 不变（`flavor` 仍 optional，`opening` `maxLength` 400）。向后兼容。
+
 ## 0.3.21 — 2026-09-10
 
 - `opening.ponds` items：可选 `price_axis`（付账轴：`lifespan` / `memory` / `contract` / `status` / `none`；缺省兼容旧载荷）。向后兼容。
