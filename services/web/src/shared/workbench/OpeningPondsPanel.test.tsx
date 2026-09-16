@@ -40,7 +40,7 @@ describe("OpeningPondsPanel", () => {
         onMore={() => {}}
       />,
     );
-    expect(screen.getByText("勾选一本，从这段接着写")).toBeTruthy();
+    expect(screen.getByText("勾选一本，先定这本书")).toBeTruthy();
     expect(screen.queryByText(/在玩什么/)).toBeNull();
     expect(screen.queryByText(/开篇怎么进/)).toBeNull();
     expect(screen.queryByText("对照轴不同的近池")).toBeNull();
@@ -67,14 +67,14 @@ describe("OpeningPondsPanel", () => {
     expect(card).toBeTruthy();
     const text = card?.textContent ?? "";
     expect(text.indexOf("这本书")).toBeGreaterThan(-1);
-    expect(text.indexOf("开头")).toBeGreaterThan(text.indexOf("这本书"));
+    expect(text.indexOf("简介")).toBeGreaterThan(text.indexOf("这本书"));
     expect(text).not.toContain("账单");
     expect(text).not.toContain("走向");
     expect(text).not.toContain("气味");
     expect(text).not.toContain("换班一次扣一夜睡眠");
   });
 
-  it("hides 这本书 when flavor is absent and still shows 开头", () => {
+  it("hides 这本书 when flavor is absent and still shows 简介", () => {
     render(
       <OpeningPondsPanel
         ponds={{
@@ -97,7 +97,7 @@ describe("OpeningPondsPanel", () => {
     const card = screen.getByText("末班车").closest("li");
     const text = card?.textContent ?? "";
     expect(text).not.toContain("这本书");
-    expect(text).toContain("开头");
+    expect(text).toContain("简介");
   });
 
   it("keeps tonight's errand and job-bio who off the picker card", () => {

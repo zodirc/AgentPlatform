@@ -61,7 +61,7 @@ function PondCard({
       <div className="min-w-0 flex-1 space-y-0.5">
         <p className="text-[13px] font-medium text-foreground">{item.title}</p>
         <Field label="这本书" value={item.flavor} />
-        <Field label="开头" value={item.opening} />
+        <Field label="简介" value={item.opening} />
       </div>
     </>
   );
@@ -106,10 +106,10 @@ export function OpeningPondsPanel({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="inline-flex items-center rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-800 dark:text-amber-200">
-            开篇
+            作品
           </span>
           <span className="text-[12px] font-medium text-foreground">
-            开篇候选
+            作品候选
           </span>
           <span className="text-[11px] tabular-nums text-muted-foreground">
             {items.length} 个
@@ -117,7 +117,7 @@ export function OpeningPondsPanel({
         </div>
         {interactive ? (
           <p className="mt-1 text-[11px] font-medium text-amber-800/90 dark:text-amber-200/90">
-            勾选一本，从这段接着写
+            勾选一本，先定这本书
           </p>
         ) : (
           <p className="mt-1 text-[11px] text-muted-foreground">
@@ -133,7 +133,7 @@ export function OpeningPondsPanel({
       <ul
         className="mt-2 space-y-1.5 border-t border-amber-500/20 pt-2"
         role={interactive ? "radiogroup" : undefined}
-        aria-label={interactive ? "开篇候选" : undefined}
+        aria-label={interactive ? "作品候选" : undefined}
       >
         {items.map((item) => (
           <PondCard
