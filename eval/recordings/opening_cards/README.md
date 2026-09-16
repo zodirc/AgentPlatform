@@ -29,9 +29,11 @@ S13 协议（不闸、不改阈值）：
 |---|---|---|---|
 | `2026-09-14-urban-cultivation-1.json` | 写一部三百章都市修真，我看看 | （空，一次交卷） | `awaiting_choice=true` |
 
-Sidecar：`ponds-0ffeea62`；思考原文在仓库根 `thinking.txt`。两段 `job_signals.distinct=0`，visible 102 / 97。
+Sidecar：`ponds-0ffeea62`。两段 `job_signals.distinct=0`，visible 102 / 97。当时思考曾粘在仓库根 `thinking.txt`；该文件是滚动粘贴，2026-09-16 只剩 3.4「负一层｜没下雨的雷」，**不能再当本轮思考原文**。正文以本目录 json 为准。
 
-校园悬疑、历史架空、以及都市修真另外 2 次：**未跑**。
+校园悬疑、历史架空、以及都市修真另外 2 次：**未跑**。3.4 同题多轮未另存 json。回退「热门开局」提问后，没有新的选书 live。
+
+下一份证据不在本目录。见 `eval/recordings/chapter_one/`：用《两枚硬币》这段原样写第一章。
 
 ---
 

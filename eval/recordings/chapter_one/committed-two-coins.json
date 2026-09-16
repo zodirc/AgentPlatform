@@ -1,0 +1,20 @@
+{
+  "source": "eval/recordings/opening_cards/2026-09-14-urban-cultivation-1.json",
+  "ponds_id": "ponds-0ffeea62",
+  "picked": "两枚硬币",
+  "item": {
+    "id": "coin-laundromat",
+    "title": "两枚硬币",
+    "opening": "周砚把两枚硬币投进烘干机，玻璃门里那件校服转起来，他低头，看见手背上那道旧疤在发烫。不是夏天的热，是烫，从骨头里往外顶。他甩了甩手，抬头看窗外——对面那栋烂尾楼的楼顶站着一个人，雨从他肩头绕开，落不下去。"
+  },
+  "alternate_not_this_run": {
+    "id": "porridge-pot",
+    "title": "灶上的锅盖",
+    "opening": "卷帘门拉到一半卡住了。老陈踩着板凳去够，铁皮咬了他一口，他骂了一声，低头看见灶上那口锅在晃——火没开。街对面早市的喇叭正一浪一浪地喊白菜九毛。他伸手去按锅盖，盖子底下有东西顶了他一下，很有力气。"
+  },
+  "notes": [
+    "Freeze the card text. Chapter 1 must continue this paragraph verbatim.",
+    "Do not treat picking as proof of a 300-chapter book.",
+    "Human observation questions live in README.md; do not inject them into prompts."
+  ]
+}
