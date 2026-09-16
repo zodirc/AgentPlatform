@@ -39,6 +39,7 @@ def _two() -> list[dict[str, str]]:
                 "opening": (
                     "夜行证就搁在他手边，灯管滋了一声。他没有抬头，把杯垫转了半圈。"
                     "对面那人把筷子放下，雨还在打窗沿。他按着杯沿，没把话接下去。"
+                    "店里的钟走得很慢，他知道今晚不会因为这一句就结束。"
                 ),
             },
             {
@@ -46,6 +47,7 @@ def _two() -> list[dict[str, str]]:
                 "opening": (
                     "人间有灵四个字印在塑料袋上，他提着袋子进门。猫从沙发底下探出头。"
                     "他蹲下去，袋子口还没扎紧。窗外有人按了两下电铃。他没去开门，先把袋子放到灶台上。"
+                    "水还开着，他先把米洗了，这件事明天还会再来找他。"
                 ),
             },
         ]
@@ -68,8 +70,9 @@ def test_same_book_enforce_rejects(monkeypatch) -> None:
     snap = _snap(intra=0.95, shadow=False)
     code, detail = ponds_reject_reason(items, similarity=snap, shadow=False) or ("", "")
     assert code == "ponds_same_book"
-    assert "夜行证失效" in detail
-    assert "执契" in detail
+    assert "不要修补" in detail
+    assert "夜行证失效" not in detail
+    assert "执契" not in detail
     assert "轴" not in detail
 
 
@@ -91,8 +94,9 @@ def test_near_rejected_only_on_more_path(monkeypatch) -> None:
         shadow=False,
     ) or ("", "")
     assert code == "ponds_near_rejected"
-    assert "灵籍" in detail
-    assert "人间有灵" in detail
+    assert "不要修补" in detail
+    assert "灵籍" not in detail
+    assert "人间有灵" not in detail
 
 
 def test_lexical_embedder_never_rejects(workspace: Path, monkeypatch) -> None:

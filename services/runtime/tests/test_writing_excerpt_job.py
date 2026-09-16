@@ -150,7 +150,10 @@ def test_group_reject_aggregates_all_cards() -> None:
 def test_skins_fixture_all_rejected() -> None:
     rows = json.loads(_SKINS.read_text(encoding="utf-8"))
     assert len(rows) >= 7
-    for row in rows[:7]:
+    for row in rows:
+        if row.get("expect") == "title_off_page":
+            assert excerpt_group_reject(row["items"]) is None, row["label"]
+            continue
         hit = excerpt_group_reject(row["items"])
         assert hit is not None, row["label"]
         assert hit[0] == row["expect"], (row["label"], hit[0], hit[1])
@@ -178,3 +181,145 @@ def test_excerpt_too_long() -> None:
     hit = excerpt_reject("车门", kept, signals)
     assert hit is not None
     assert hit[0] == "excerpt_too_long"
+
+
+def test_pitch_group_reject_is_not_excerpt_job() -> None:
+    from app.writing.excerpt_job import pitch_group_reject
+
+    too_short = pitch_group_reject(
+        [
+            {"title": "怪事", "opening": "某人在城里遇到一件奇怪的事。"},
+            {"title": "异物", "opening": "另一个人捡到一样奇怪的东西。"},
+        ]
+    )
+    assert too_short is not None
+    assert too_short[0] == "pitch_too_short"
+    montage_as_pitch = pitch_group_reject(
+        [
+            {"title": "下山", "opening": _SHANXIA},
+            {
+                "title": "末班车",
+                "opening": (
+                    "夜班司机把末班车钥匙拍进徒弟手里，转身去关灯。"
+                    "这城的末班车不按时刻表收班：谁接过钥匙，谁就要把还活着的乘客送到一个不在地图上的站。"
+                    "徒弟每多跑一班，车上就多一个他认识的活人。"
+                    "他要决定是把车开回去，还是把这条夜路做成自己的饭碗。"
+                ),
+            },
+        ]
+    )
+    assert montage_as_pitch is None
+
+
+def test_pitch_does_not_require_title_in_body() -> None:
+    from app.writing.excerpt_job import pitch_group_reject, pitch_reject
+
+    long_a = (
+        "他在夜里把店门从里面闩上，灯管滋了一声。"
+        "外面有人敲门，他没有应，先把账本合上，听那人还站在台阶上。"
+        "雨还在下，巷口那盏灯一直没亮。这件事不会在今晚结束，明天他还得开门。"
+    )
+    long_b = (
+        "她把名册翻回前一页，手指按在那一行上。"
+        "后排椅子挪了一寸，教室里只剩吊扇的声音。"
+        "她没抬头，合上名册，把粉笔灰弹掉，知道有人会再来问这一行。"
+        "窗外操场空着，她把名册压在课本下面，先把这堂课上完。"
+    )
+    hit = pitch_group_reject(
+        [
+            {"title": "隔断", "opening": long_a},
+            {"title": "虚岁", "opening": long_b},
+        ]
+    )
+    assert hit is None
+    assert pitch_reject("隔断", long_a) is None
+
+
+def test_pitch_family_rejects_resample_without_teaching_the_story() -> None:
+    from app.writing.excerpt_job import (
+        PITCH_RESAMPLE_DETAIL,
+        keep_passing_pond_items,
+        occupation_centrality_high,
+        passive_initiation_high,
+        pitch_group_reject,
+        pitch_item_reject,
+    )
+
+    occupation = (
+        "周记推拿店打烊后，林哥把客人背上那张符纸揭下来。"
+        "灵气顺着掌心进来，这门手艺从此能把人的寿元往回推。"
+        "他不敢跟伙计说，只把这件事按在自己手底下。"
+        "明天店门还要开，他已经知道有人会再来求这一手。"
+    )
+    yu_huo = (
+        "陈砚在巷口修电动车已经三年，晚上还要去给病着的父亲熬药。"
+        "他不是来查案，只是要把这家人的日子撑过去。"
+        "修真规矩掺进修车和讨债之后，他能接触的人和能走的路都变了，"
+        "但他要做的事还是原来那件：把父亲的病和这条街的欠账摆平。"
+    )
+    fake = (
+        "市监所里人人都在打假，林河专打修真货。假丹、假符、假传承，"
+        "修真打假本身就是他吃饭的手艺，也是这本书最大的卖点。"
+        "每一单假货后面都是下一家更大的局，他沿着这条职业往上走。"
+    )
+    serial = (
+        "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，"
+        "秦禹只想要活下去。但现实一步步把他推向了更大的舞台。"
+        "他明天还得去领粮，也还得决定跟哪一路人站在一起。"
+    )
+    idea = (
+        "这是一部都市修真小说。随着故事发展，主角将获得金手指设定，"
+        "世界观设定会逐渐展开，读者将看到他如何一路变强。"
+        "本书讲述一个普通人登上巅峰的过程，冲突会不断升级，"
+        "直到他站上这座城市的最高处，把整套力量体系走完。"
+    )
+    anecdote = (
+        "城里最近出了一件怪事，有人在巷口看见不该出现的灯。"
+        "主角决定把这桩奇闻查清，都市奇谈就从这里开始。"
+        "等这个秘密一旦揭开，故事也就到头了，他就可以回去过原来的日子。"
+        "在此之前，他每天只围着这一件事转。"
+    )
+    passive = (
+        "张平是个普通人，直到有一天有人找上门，把一张符塞进他手里。"
+        "忽然出现的修真规矩把他从原来的日子里拖走，他只能跟着走。"
+        "门外的人说跟过来就能活。他原本没有要做的事，这条路是别人替他打开的。"
+    )
+    assert occupation_centrality_high("周记推拿", occupation) is True
+    assert occupation_centrality_high("余火", yu_huo) is False
+    assert occupation_centrality_high("假作真", fake) is True
+    assert passive_initiation_high(passive) is True
+    assert passive_initiation_high(yu_huo) is False
+    assert pitch_item_reject("周记推拿", occupation)[0] == "ponds_occupation_centrality"
+    assert pitch_item_reject("余火", yu_huo) is None
+    assert pitch_item_reject("假作真", fake)[0] == "ponds_occupation_centrality"
+    assert pitch_item_reject("卷入", passive)[0] == "ponds_passive_initiation"
+    mixed = pitch_group_reject(
+        [{"title": "周记推拿", "opening": occupation}, {"title": "特区", "opening": serial}]
+    )
+    assert mixed is None
+    kept, dropped = keep_passing_pond_items(
+        [{"title": "周记推拿", "opening": occupation}, {"title": "特区", "opening": serial}]
+    )
+    assert [it["title"] for it in kept] == ["特区"]
+    assert dropped[0][0] == "ponds_occupation_centrality"
+    assert "推拿" not in dropped[0][1]
+    odd = pitch_item_reject("奇闻", anecdote)
+    assert odd is not None and odd[0] == "ponds_local_anecdote"
+    assert odd[1] == PITCH_RESAMPLE_DETAIL
+    card = pitch_item_reject("点子", idea)
+    assert card is not None and card[0] == "ponds_idea_card"
+    ok = pitch_group_reject(
+        [
+            {"title": "第九特区", "opening": serial},
+            {
+                "title": "修真四万年",
+                "opening": (
+                    "四万年前，人类发现了修真之路。四万年后，修真已经成为这个时代最重要的力量。"
+                    "李耀出生在大荒，靠捡破烂为生，却想成为最出色的炼器师。"
+                    "一个生活在修真时代底层的少年，就这样走上了自己的修真之路。"
+                ),
+            },
+        ]
+    )
+    assert ok is None
+

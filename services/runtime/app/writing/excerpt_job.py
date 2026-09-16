@@ -265,11 +265,6 @@ def excerpt_reject(
             f"《{t}》这段在讲这本书：{_explain_bits(signals)}。"
             "删掉这些句子，把留下的那一刻写满。",
         )
-    if not title_on_page(title, opening_kept):
-        return (
-            "title_off_page",
-            f"书名《{t}》不在这段里。从这段里已经出现的一个东西、地方或人身上取工作书名。",
-        )
     return None
 
 
@@ -326,6 +321,172 @@ def excerpt_group_reject(
     if lines:
         return first_code, "\n".join(lines)
     return same_beat_reject(items)
+
+
+_PITCH_MIN = 80
+_PITCH_MAX = 280
+_TITLE_MIN = 2
+_TITLE_MAX_CHARS = 8
+_TITLE_PLACEHOLDERS = frozenset(
+    {"untitled", "untitle", "title", "书名", "无题", "候选", "xxx", "test", "asdf"}
+)
+_ASCII_GIBBERISH = re.compile(r"^[A-Za-z0-9_\-]{6,}$")
+
+
+def title_reject(title: str) -> tuple[str, str] | None:
+    """书名只查长度、占位和乱码；不要求出现在简介里。"""
+    t = (title or "").strip()
+    if t.startswith("《") and t.endswith("》") and len(t) > 2:
+        t = t[1:-1].strip()
+    n = visible(t)
+    shown = t or "无题"
+    if n < _TITLE_MIN:
+        return ("title_too_short", f"书名「{shown}」太短。工作书名二到八字。")
+    if n > _TITLE_MAX_CHARS:
+        return ("title_too_long", f"书名「{shown}」{n} 字。工作书名二到八字。")
+    if shown.lower() in _TITLE_PLACEHOLDERS or shown.startswith("候选"):
+        return (
+            "title_placeholder",
+            f"书名「{shown}」没有作品含义。给这本书一个能长期挂上的名字。",
+        )
+    if _ASCII_GIBBERISH.match(shown) and not any(
+        "\u4e00" <= ch <= "\u9fff" for ch in shown
+    ):
+        return (
+            "title_gibberish",
+            f"书名「{shown}」不像作品名。给这本书一个能长期挂上的名字。",
+        )
+    return None
+
+
+def pitch_reject(title: str, opening: str) -> tuple[str, str] | None:
+    """选书阶段：正文是书页简介，不要求书名出现在简介里。"""
+    hit = title_reject(title)
+    if hit:
+        return hit
+    n = visible(opening)
+    t = (title or "").strip() or "无题"
+    if n < _PITCH_MIN:
+        return (
+            "pitch_too_short",
+            f"《{t}》简介只有 {n} 字。写到 100 字以上，让人看得出这是什么小说。",
+        )
+    if n > _PITCH_MAX:
+        return (
+            "pitch_too_long",
+            f"《{t}》简介 {n} 字。收到 220 字内，不要把后期大纲讲完。",
+        )
+    return None
+
+
+PITCH_RESAMPLE_DETAIL = (
+    "这组候选作废。不要修补、改名或换职业地点。"
+    "重新形成两本新的书。只交 title + pitch。"
+)
+
+_IDEA_CARD = re.compile(
+    r"随着故事发展|本书讲述|这是一部|世界观设定|升级体系|金手指设定|读者将看到"
+)
+_LOCAL_ANECDOTE = re.compile(
+    r"一件怪事|一桩奇闻|都市奇谈|查清这件|这个秘密一旦揭开"
+)
+_JOB_AS_TITLE = re.compile(
+    r"推拿|打假|殡仪|法医|屠户|按摩"
+)
+_OCCUPATION_VEHICLE = re.compile(
+    r"修真打假|打假本身|这门手艺|这行当|这口饭|靠这行吃饭|这职业的秘密"
+)
+_PASSIVE_INITIATION = re.compile(
+    r"直到有一天|有人找上门|有人上门来|被卷[进了入]|"
+    r"普通人.{0,16}(发现|遇上)|突然.{0,8}发现|忽然.{0,8}出现|"
+    r"捡到了?(一张符|异物|不该)"
+)
+
+
+def _pitch_body(item: Mapping[str, str]) -> str:
+    return str(item.get("pitch") or item.get("opening") or "")
+
+
+def occupation_centrality_high(title: str, body: str) -> bool:
+    """职业是不是这本书的主要创意载体，而不是人物眼下的生活。"""
+    if _JOB_AS_TITLE.search(title or ""):
+        return True
+    return bool(_OCCUPATION_VEHICLE.search(body or ""))
+
+
+def passive_initiation_high(body: str) -> bool:
+    """故事是不是主要靠突然出现的修真异常，把主角从普通生活拖进去。"""
+    return bool(_PASSIVE_INITIATION.search(body or ""))
+
+
+def pitch_item_reject(title: str, opening: str) -> tuple[str, str] | None:
+    """单本判定。detail 只给内部日志用，不应当成改稿说明书喂回模型。"""
+    hit = pitch_reject(title, opening)
+    if hit:
+        return hit
+    if _IDEA_CARD.search(opening or ""):
+        return ("ponds_idea_card", PITCH_RESAMPLE_DETAIL)
+    if _LOCAL_ANECDOTE.search(opening or ""):
+        return ("ponds_local_anecdote", PITCH_RESAMPLE_DETAIL)
+    if occupation_centrality_high(title, opening):
+        return ("ponds_occupation_centrality", PITCH_RESAMPLE_DETAIL)
+    if passive_initiation_high(opening):
+        return ("ponds_passive_initiation", PITCH_RESAMPLE_DETAIL)
+    return None
+
+
+def keep_passing_pond_items(
+    items: Sequence[Mapping[str, str]],
+) -> tuple[list[dict[str, str]], list[tuple[str, str]]]:
+    """逐本过滤。一张坏卡不拖死另一张。"""
+    kept: list[dict[str, str]] = []
+    dropped: list[tuple[str, str]] = []
+    for it in items:
+        title = str(it.get("title") or "")
+        body = _pitch_body(it)
+        hit = pitch_item_reject(title, body)
+        if hit is None:
+            kept.append(dict(it))
+            continue
+        code, detail = hit
+        logger.info("pond item dropped title=%s code=%s", title, code)
+        dropped.append((code, detail))
+    return kept, dropped
+
+
+def pitch_family_reject(
+    items: Sequence[Mapping[str, str]],
+) -> tuple[str, str] | None:
+    """仅当全部候选都被结构性信号挡住时，才返回组拒。"""
+    _kept, dropped = keep_passing_pond_items(items)
+    if dropped and len(dropped) == len(list(items)):
+        return dropped[0]
+    return None
+
+
+def pitch_group_reject(
+    items: Sequence[Mapping[str, str]],
+) -> tuple[str, str] | None:
+    lines: list[str] = []
+    first_code = ""
+    passing = 0
+    for it in items:
+        title = str(it.get("title") or "")
+        body = _pitch_body(it)
+        hit = pitch_item_reject(title, body)
+        if hit is None:
+            passing += 1
+            continue
+        code, detail = hit
+        if not first_code:
+            first_code = code
+        if code.startswith("pitch_") or code.startswith("title_"):
+            lines.append(detail)
+    if passing:
+        return None
+    if lines:
+        return first_code, "\n".join(lines)
+    return pitch_family_reject(items)
 
 
 def job_signals_for(items: Sequence[Mapping[str, str]]) -> list[dict[str, Any]]:
