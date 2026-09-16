@@ -6,18 +6,37 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 OPENING_PONDS_REL = Path(".agent") / "work" / "opening_ponds.json"
 COMMITTED_POND_REL = Path(".agent") / "work" / "committed_pond.json"
 MORE_PONDS_MESSAGE = "我要其他的"
-OPENING_CHOICE_TOOL_ALLOWLIST = frozenset({"propose_opening_ponds", "stub_echo"})
-# Same Turn may repair twice; a third reject stops (user says 我看看).
+OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
+    {"propose_book_candidates", "propose_opening_ponds", "stub_echo"}
+)
+# Same Turn may resample twice; a third reject stops (user says 我看看).
 _POND_REPAIR_MAX = 2
 _POND_REJECTS: dict[str, int] = {}
+_POND_HELD: dict[str, list[dict[str, Any]]] = {}
 _POND_REJECT_USER_SUMMARY = "开篇候选这轮没交成。请再说一次「我看看」。"
-_POND_REPAIR_SUMMARY = "开篇候选这轮没交成。按 detail 里点名的字改那一段后再交一次，不要写进聊天。"
+_POND_REPAIR_SUMMARY = "重新形成一个新的候选。"
+POND_FRESH_RETRY_BLOCK = (
+    "Call `propose_book_candidates` with empty items.\n"
+    "重新形成一个新的候选。"
+)
+_STRUCTURAL_RESAMPLE_CODES = frozenset(
+    {
+        "ponds_same_book",
+        "ponds_near_rejected",
+        "ponds_occupation_centrality",
+        "ponds_passive_initiation",
+        "ponds_idea_card",
+        "ponds_local_anecdote",
+        "ponds_fresh_retry",
+        "ponds_occupation_anomaly",
+    }
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,22 +56,25 @@ def _pond_reject_key(turn_id: object | None) -> str | None:
 
 
 def clear_pond_rejects(turn_id: object | None = None) -> None:
-    """成功交卷后清计数；测试也可整表清空。"""
+    """成功交卷后清计数与暂存；测试也可整表清空。"""
     if turn_id is None:
         _POND_REJECTS.clear()
+        _POND_HELD.clear()
         return
     key = _pond_reject_key(turn_id)
     if key:
         _POND_REJECTS.pop(key, None)
+        _POND_HELD.pop(key, None)
 
 
 def note_pond_reject(
     turn_id: object | None, rejected: tuple[str, str] | None
 ) -> dict[str, Any] | None:
-    """有 turn_id 时允许同轮改一次；拒因放 detail，Don't 不进 summary。"""
+    """有 turn_id 时允许同轮重采两次；模型侧不看到失败码或上一本的诊断。"""
     if rejected is None:
         return None
-    code, msg = rejected
+    code, _msg = rejected
+    logger.info("pond reject code=%s", code)
     key = _pond_reject_key(turn_id)
     if key is None:
         count = _POND_REPAIR_MAX + 1
@@ -64,11 +86,128 @@ def note_pond_reject(
     exhausted = count > _POND_REPAIR_MAX
     return {
         "status": "error",
-        "error": code,
-        "detail": msg,
+        "error": "ponds_fresh_retry" if not exhausted else code,
+        "detail": "",
         "summary": _POND_REJECT_USER_SUMMARY if exhausted else _POND_REPAIR_SUMMARY,
         "stop_retry": exhausted,
+        "fresh_retry": not exhausted,
     }
+
+
+def held_pond_items(turn_id: object | None) -> list[dict[str, Any]]:
+    key = _pond_reject_key(turn_id)
+    if not key:
+        return []
+    return [dict(it) for it in _POND_HELD.get(key, [])]
+
+
+def remember_held_pond_items(
+    turn_id: object | None, items: list[dict[str, Any]]
+) -> None:
+    key = _pond_reject_key(turn_id)
+    if not key:
+        return
+    if len(_POND_HELD) > 256:
+        _POND_HELD.clear()
+    _POND_HELD[key] = [dict(it) for it in items]
+
+
+def _title_key(item: Mapping[str, Any] | dict[str, Any]) -> str:
+    return str(item.get("title") or item.get("id") or "").strip()
+
+
+def merge_held_pond_items(
+    held: list[dict[str, Any]], incoming: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for it in [*held, *incoming]:
+        title = _title_key(it)
+        marker = title or json.dumps(it, ensure_ascii=False)[:80]
+        if marker in seen:
+            continue
+        seen.add(marker)
+        out.append(dict(it))
+    return out
+
+
+def pick_distinct_pond_pair(
+    items: list[dict[str, Any]],
+    *,
+    similarity: dict[str, Any] | None = None,
+    shadow: bool | None = None,
+) -> list[dict[str, Any]] | None:
+    """从已通过单本闸门的候选里取出两本不像同一本的书。"""
+    if len(items) < 2:
+        return None
+    from app.settings import settings
+    from app.writing.pond_similarity import compute_pond_similarity, same_book_reject
+
+    is_shadow = settings.ponds_similarity_shadow if shadow is None else bool(shadow)
+    first = items[0]
+    for other in items[1:]:
+        pair = [first, other]
+        snap = similarity if len(items) == 2 and similarity is not None else None
+        if snap is None:
+            snap = compute_pond_similarity(pair, against=[], shadow=is_shadow)
+        same = same_book_reject(snap)
+        if same:
+            if is_shadow:
+                logger.info("ponds_same_book shadow %s", same[1])
+                return pair
+            continue
+        return pair
+    return None
+
+
+def inject_pond_fresh_retry_block(volatile: str) -> str:
+    if "重新形成一个新的候选" in (volatile or ""):
+        return volatile
+    block = POND_FRESH_RETRY_BLOCK
+    text = (volatile or "").rstrip()
+    if text:
+        return f"{text}\n\n{block}\n"
+    return f"{block}\n"
+
+
+def drop_pond_tool_attempt(
+    messages: list[dict[str, Any]], tool_call_id: str
+) -> bool:
+    """丢掉刚失败的 assistant tool_use，让下一拍从原用户题重采。"""
+    if not messages:
+        return False
+    last = messages[-1]
+    if last.get("role") != "assistant":
+        return False
+    content = last.get("content")
+    if not isinstance(content, list):
+        return False
+    uses = [
+        b
+        for b in content
+        if isinstance(b, dict) and b.get("type") == "tool_use"
+    ]
+    if not uses:
+        return False
+    if len(uses) == 1 and str(uses[0].get("id") or "") == tool_call_id:
+        messages.pop()
+        return True
+    kept = [
+        b
+        for b in content
+        if not (
+            isinstance(b, dict)
+            and b.get("type") == "tool_use"
+            and str(b.get("id") or "") == tool_call_id
+        )
+    ]
+    if len(kept) == len(content):
+        return False
+    if not any(isinstance(b, dict) and b.get("type") == "tool_use" for b in kept):
+        messages.pop()
+        return True
+    last["content"] = kept
+    return True
 
 
 START_KIND_LABELS: dict[str, str] = {
@@ -165,13 +304,11 @@ _PRICE_AXIS_ALIASES: dict[str, tuple[str, ...]] = {
     "none": ("不当场拿命或记忆结账", "无明码"),
 }
 
-_OPENING_CHOICE_REL = (
-    Path(__file__).resolve().parents[1]
-    / "scenarios"
-    / "writing"
-    / "templates"
-    / "opening_choice.md"
+_TEMPLATES_DIR = (
+    Path(__file__).resolve().parents[1] / "scenarios" / "writing" / "templates"
 )
+_OPENING_CHOICE_REL = _TEMPLATES_DIR / "opening_choice.md"
+_WEB_SERIAL_PATCH_REL = _TEMPLATES_DIR / "web_serial_patch.md"
 
 _TITLE_MAX = 80
 _FIELD_MAX = 240
@@ -186,17 +323,29 @@ _MIN_ITEMS = 2
 _MAX_ITEMS = 4
 
 
-def opening_choice_block() -> str:
-    """volatile：开篇点选纪律（不焊进 system 前缀）。拒因目录在 handler，不抄进 prompt。"""
+def candidate_mode_block() -> str:
+    """内部采样专用：候选模式 + 真实书架。不进外层 chatting context。"""
     try:
-        return _OPENING_CHOICE_REL.read_text(encoding="utf-8").strip()
+        return _WEB_SERIAL_PATCH_REL.read_text(encoding="utf-8").strip()
     except OSError:
         return (
-            "## Opening choice (platform)\n"
-            "Call `propose_opening_ponds` once with 2 items. "
-            "Leave the assistant message empty. "
-            "Write title / opening first. Cards are the deliverable."
+            "### CANDIDATE MODE\n"
+            "这一阶段是在决定写哪一本书，不是在写第一章。\n"
+            "先形成一部真正的长篇都市修真网文，再压成 title + pitch。"
         )
+
+
+def opening_choice_block() -> str:
+    """volatile：只触发空调用。两本书由工具独立采样，不在这一轮聊天里构思。"""
+    try:
+        choice = _OPENING_CHOICE_REL.read_text(encoding="utf-8").strip()
+    except OSError:
+        choice = (
+            "## Book choice\n"
+            "Call `propose_book_candidates` once with empty `items`. "
+            "Leave the assistant message empty."
+        )
+    return choice
 
 
 def should_gate_opening_choice(
@@ -206,8 +355,9 @@ def should_gate_opening_choice(
     tool_names: list[str] | tuple[str, ...] | None = None,
     workspace_root: Path | None = None,
 ) -> bool:
-    """Profile 有开篇工具、且本轮只要候选时，闸成只剩 propose_opening_ponds。"""
-    if tool_names is not None and "propose_opening_ponds" not in tool_names:
+    """Profile 有选书工具、且本轮只要候选时，闸成只剩 propose_book_candidates。"""
+    picker = {"propose_book_candidates", "propose_opening_ponds"}
+    if tool_names is not None and not picker.intersection(tool_names):
         return False
     text = outline
     if text is None:
@@ -336,12 +486,13 @@ def normalize_pond_item(raw: dict[str, Any], index: int) -> dict[str, str]:
     price_axis = normalize_price_axis(
         raw.get("price_axis") or raw.get("付账轴") or raw.get("谁付账") or ""
     )
-    from app.writing.pitch_closer import strip_pitch_closers, strip_pitch_closers_report
+    from app.writing.pitch_closer import strip_pitch_closers
 
-    opening, _cut = strip_pitch_closers_report(
-        str(raw.get("opening") or raw.get("开篇") or "")
+    # 模型交 pitch；内部仍落 opening，给 UI / sidecar。
+    opening = _clip(
+        str(raw.get("pitch") or raw.get("opening") or raw.get("开篇") or ""),
+        _PLAN_MAX,
     )
-    opening = _clip(opening, _PLAN_MAX)
     arc = _clip(
         raw.get("arc") or raw.get("走向") or raw.get("全篇走向") or "",
         _PLAN_MAX,
@@ -450,6 +601,16 @@ def fill_pond_defaults(items: list[dict[str, str]]) -> list[dict[str, str]]:
     return [dict(item) for item in items]
 
 
+def _model_facing_reject(hit: tuple[str, str]) -> tuple[str, str]:
+    """结构性拒因只告诉模型整组作废重采，不把诊断喂回去修补。"""
+    code, detail = hit
+    if code not in _STRUCTURAL_RESAMPLE_CODES:
+        return hit
+    from app.writing.excerpt_job import PITCH_RESAMPLE_DETAIL
+
+    return code, PITCH_RESAMPLE_DETAIL
+
+
 def ponds_reject_reason(
     items: list[dict[str, str]],
     *,
@@ -461,26 +622,30 @@ def ponds_reject_reason(
     workspace_root: Path | None = None,
     skip_ledger: bool = True,
 ) -> tuple[str, str] | None:
-    """拒共线集合。轴不再作为比较键。"""
+    """单本先过闸；不够两本才整组重采。轴不再作为比较键。"""
     from app.settings import settings
-    from app.writing.excerpt_job import excerpt_group_reject
+    from app.writing.excerpt_job import keep_passing_pond_items
 
     _ = (skip_ledger, workspace_root)
     if len(items) < _MIN_ITEMS:
         return ("need_two_ponds", "至少交 2 个开篇候选。")
-    excerpt_hit = excerpt_group_reject(items)
-    if excerpt_hit:
-        if not gate:
-            logger.info("pond excerpt_gate shadow %s", excerpt_hit[1])
-        else:
-            return excerpt_hit
+    kept = list(items)
+    dropped: list[tuple[str, str]] = []
+    if gate:
+        kept, dropped = keep_passing_pond_items(items)
+        if len(kept) < 2:
+            if not kept and dropped:
+                return _model_facing_reject(dropped[0])
+            return ("ponds_fresh_retry", "")
+    else:
+        logger.info("pond item_gate shadow dropped=%s", [d[0] for d in dropped])
     is_shadow = settings.ponds_similarity_shadow if shadow is None else bool(shadow)
     snap = similarity
     if snap is None:
         from app.writing.pond_similarity import compute_pond_similarity
 
         snap = compute_pond_similarity(
-            items, against=against or [], shadow=is_shadow
+            kept, against=against or [], shadow=is_shadow
         )
     from app.writing.pond_similarity import near_rejected_reject, same_book_reject
 
@@ -489,14 +654,14 @@ def ponds_reject_reason(
         if is_shadow:
             logger.info("ponds_same_book shadow %s", same[1])
         else:
-            return same
+            return _model_facing_reject(same)
     if wants_more_ponds(message) or against:
         near = near_rejected_reject(snap)
         if near:
             if is_shadow:
                 logger.info("ponds_near_rejected shadow %s", near[1])
             else:
-                return near
+                return _model_facing_reject(near)
     return None
 
 
@@ -565,7 +730,7 @@ def seed_outline_from_pond(
     *,
     workspace_root: Path | None = None,
 ) -> None:
-    """锁卡后把书名/这本书/开篇抄进 outline「这本书」，不另填四格。"""
+    """锁卡后把书名/这本书/简介抄进 outline「这本书」，不另填四格。"""
     root = _workspace(workspace_root)
     path = root / "outline.md"
     existing = ""
@@ -584,11 +749,11 @@ def seed_outline_from_pond(
     if flavor:
         block = f"## 这本书\n\n《{title}》。{flavor}\n"
         if opening:
-            block += f"\n开篇：{opening}\n"
+            block += f"\n简介：{opening}\n"
     else:
         block = f"## 这本书\n\n《{title}》\n"
         if opening:
-            block += f"\n开头：{opening}\n"
+            block += f"\n简介：{opening}\n"
     text = (existing or "").strip()
     if not text:
         new = block + "\n## 主线一句话\n（往哪走即可。顶点可以后补。）\n"

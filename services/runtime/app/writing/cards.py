@@ -888,12 +888,25 @@ def prepare_writing_system_prompt(
     from app.writing.work_index import format_work_index_block
     from app.writing.occupy import wants_new_piece
     from app.writing.signals.spec import build_writing_spec_block
+    from app.writing.outline_phase import wants_opening_candidates
 
     cards = with_builtin_style_if_missing(
         load_writing_cards(workspace_root=workspace_root),
         message=message,
         workspace_root=workspace_root,
     )
+    outline_text = ""
+    try:
+        op = Path(workspace_root or settings.workspace_root).resolve() / "outline.md"
+        if op.is_file():
+            outline_text = op.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        outline_text = ""
+    picking = wants_opening_candidates(
+        message, outline=outline_text, workspace_root=workspace_root
+    )
+    if picking:
+        cards = [c for c in cards if c.kind != "style"]
     starting_new = wants_new_piece(message)
     if starting_new:
         cards = [c for c in cards if c.kind == "style"]
@@ -935,13 +948,6 @@ def prepare_writing_system_prompt(
     from app.writing.commitment import format_commitment_block
     from app.writing.subtype import serial_subtype_block
 
-    outline_text = ""
-    try:
-        op = Path(workspace_root or settings.workspace_root).resolve() / "outline.md"
-        if op.is_file():
-            outline_text = op.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        outline_text = ""
     work_mode, _src = resolve_work_mode(message, workspace_root=workspace_root)
     if not author:
         extras.append(format_commitment_block(work_mode=work_mode, workspace_root=workspace_root))
@@ -978,7 +984,6 @@ def prepare_writing_system_prompt(
         subtype = serial_subtype_block(message, outline_text)
         if subtype:
             extras.append(subtype)
-    from app.writing.outline_phase import wants_opening_candidates
     from app.writing.opening_ponds import (
         format_committed_pond_block,
         format_opening_ponds_block,
@@ -986,9 +991,6 @@ def prepare_writing_system_prompt(
         wants_more_ponds,
     )
 
-    picking = wants_opening_candidates(
-        message, outline=outline_text, workspace_root=workspace_root
-    )
     if picking:
         intent = format_user_axis_intent_block(message)
         if intent:

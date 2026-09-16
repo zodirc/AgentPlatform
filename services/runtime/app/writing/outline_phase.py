@@ -268,7 +268,7 @@ def resolve_outline_phase(
         phase = "open"
         if wants_opening_candidates(message, outline=outline):
             note = (
-                "长篇开写：propose_opening_ponds 出开篇候选（两段正文开头，两本不同的书）；不要写进聊天"
+                "长篇开写：propose_book_candidates 出作品候选（工具内部两次独立采样，交两张书页简介）；不要写进聊天"
             )
         else:
             from app.writing.work_mode import serial_opening_compass

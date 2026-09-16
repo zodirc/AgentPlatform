@@ -1,7 +1,7 @@
 id: writing.16_opening_excerpt_gate
 scenario_id: writing
 phase: 2
-description: propose_opening_ponds rejects a montage paragraph with detail, accepts the repaired pair, stops awaiting choice
+description: propose_book_candidates rejects a too-short pitch, accepts the repaired pair, stops awaiting choice
 
 input:
   message: "writing.16 写一部三百章都市修真，我看看"
@@ -24,7 +24,7 @@ assertions:
   turn:
     status: completed
   tool:
-    name: propose_opening_ponds
+    name: propose_book_candidates
     result_matches: "十七号"
 
 tags: [writing, ponds, p2]

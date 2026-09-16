@@ -36,8 +36,8 @@ def test_build_registry_has_core_tools() -> None:
     assert registry.get("delegate") is not None
     assert registry.get("forget") is not None
     assert registry.get("load_skill") is not None
-    assert registry.get("propose_opening_ponds") is not None
-    ponds = registry.get("propose_opening_ponds")
+    assert registry.get("propose_book_candidates") is not None
+    ponds = registry.get("propose_book_candidates")
     assert ponds is not None
     item_required = (
         ponds.parameters.get("properties", {})
@@ -45,7 +45,7 @@ def test_build_registry_has_core_tools() -> None:
         .get("items", {})
         .get("required", [])
     )
-    assert item_required == ["title", "opening"] or set(item_required) == {"title", "opening"}
+    assert item_required == ["title", "pitch"] or set(item_required) == {"title", "pitch"}
     assert "flavor" not in item_required
     assert "start_kind" not in item_required
     assert "promise" not in item_required
@@ -65,7 +65,11 @@ def test_build_registry_has_core_tools() -> None:
     assert "social_space" not in item_props
     assert "engine_note" not in item_props
     assert ponds.parameters.get("properties", {}).get("items", {}).get("maxItems") == 3
+    assert ponds.parameters.get("properties", {}).get("items", {}).get("minItems") == 0
+    assert "items" not in (ponds.parameters.get("required") or [])
+    assert ponds.timeout_s == 600.0
     assert "Unique start_kind" not in (ponds.description or "")
+    assert "Pass empty items" in (ponds.description or "")
 
 
 def test_draft_section_description_follows_repair_neighbor() -> None:
@@ -233,7 +237,7 @@ def test_tool_scope_editor_and_reread_phases() -> None:
             reread_phase=True,
         )
     }
-    assert "propose_opening_ponds" in opening
+    assert "propose_book_candidates" in opening
     assert "editor_report" not in opening
     assert "reread_book" not in opening
     editor_over_reread = {

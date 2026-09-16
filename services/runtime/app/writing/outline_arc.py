@@ -44,7 +44,7 @@ STYLE_CONTRACT_TEMPLATE_VERSION = "book-pond-v1"
 
 STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名和开头抄进这一段。后面的海（终局宇宙、境界总纲）不要写进这段。
+先 propose_book_candidates 出作品候选。用户点选后，把卡片上的书名和简介写入这一段。后面的海（终局宇宙、境界总纲）不要写进这段。
 
 换人换事就是另一本书。
 
@@ -54,7 +54,7 @@ STYLE_CONTRACT_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
 OPENING_TRILOGY_OUTLINE_TEMPLATE = """## 这本书（长篇·眼前这一池）
 
-先 propose_opening_ponds 出开篇候选。用户点选后，把卡片上的书名和开头抄进这一段。后面的海不要写进这段。
+先 propose_book_candidates 出作品候选。用户点选后，把卡片上的书名和简介写入这一段。后面的海不要写进这段。
 
 换人换事就是另一本书。
 
@@ -116,17 +116,20 @@ def extract_outline_style_contract(md: str, *, max_chars: int = 720) -> str:
 
 
 def outline_style_committed(md: str, *, min_chars: int = _MIN_STYLE_CONTRACT_CHARS) -> bool:
-    """近池身份已立：卡片抄进「这本书」，或仍认旧的跟着谁/眼下要什么槽。"""
+    """近池身份已立：卡片写入大纲「这本书」段，或仍认旧的跟着谁/眼下要什么槽。"""
     del min_chars
     blob = extract_outline_style_contract(md)
     text = (blob or "").strip()
     if not text:
         return False
-    if "propose_opening_ponds" in text and not re.search(r"开篇[：:]", text):
+    if (
+        ("propose_opening_ponds" in text or "propose_book_candidates" in text)
+        and not re.search(r"(?:开篇|简介)[：:]", text)
+    ):
         return False
     if _STYLE_PERSON_SLOT.search(text):
         return True
-    if re.search(r"开篇[：:]", text):
+    if re.search(r"(?:开篇|简介)[：:]", text):
         return True
     return "《" in text and "》" in text
 
@@ -149,13 +152,13 @@ def style_contract_fields(md: str, user_text: str) -> dict[str, Any]:
             "outline_style_uncommitted": True,
             "style_contract_template": STYLE_CONTRACT_OUTLINE_TEMPLATE,
             "summary_suffix": (
-                "长篇先 propose_opening_ponds 出开篇候选；点选后再把卡片的书名和开头抄进「这本书」。"
+                "长篇先 propose_book_candidates 出作品候选；点选后把书名和简介写入大纲这一段。"
             ),
         }
     return {
         "outline_style_uncommitted": True,
         "summary_suffix": (
-            "outline 尚未立定近池身份：先出开篇候选，点选后把卡片抄进「这本书」。"
+            "outline 尚未立定近池身份：先出作品候选，点选后把书名和简介写入大纲。"
         ),
     }
 

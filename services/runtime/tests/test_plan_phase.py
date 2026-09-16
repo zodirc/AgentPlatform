@@ -77,8 +77,8 @@ def test_writing_opening_choice_scope() -> None:
     profile = ScenarioRegistry.get("writing")
     registry = build_registry()
     names = {s.name for s in tool_scope(profile, registry, opening_choice=True)}
-    assert names <= {"propose_opening_ponds", "stub_echo"}
-    assert "propose_opening_ponds" in names
+    assert names <= {"propose_book_candidates", "stub_echo"}
+    assert "propose_book_candidates" in names
     assert "draft_section" not in names
     assert "update_outline" not in names
     planning = {
@@ -88,7 +88,7 @@ def test_writing_opening_choice_scope() -> None:
         )
     }
     assert "update_plan" in planning
-    assert "propose_opening_ponds" not in planning
+    assert "propose_book_candidates" not in planning
 
 
 def test_agent_executing_waives_write_approvals() -> None:

@@ -169,10 +169,10 @@ def anti_pattern_flags(
 
 
 def serial_hook_flat(text: str, section_id: str = "") -> bool:
-    """网文开篇空磨：平凡日子里既没得到、也没发现。
+    """网文开篇空磨：开篇窗口里既没有场面，也没有落到身上的路。
 
-    功法、系统、灵气当场落到身上，不算空磨。
-    开篇不能只靠「发现 / 突然 / 鬼怪」过关；得到或发现要早。
+    功法、系统、灵气当场落到身上，或场面密度够，都不算空磨。
+    不是要求前三分之一必须交到得到。
     """
     from app.writing.lore import is_opening_section
 

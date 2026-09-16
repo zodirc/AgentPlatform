@@ -90,34 +90,39 @@ def test_standing_priors_do_not_force_same_book_under_new_coat() -> None:
     assert "类型不是模板" in system
     assert "读者追悬念、冲突、信息差、变强台阶" not in voice
     assert "眼前的池子" in voice
-    assert "学乌贼" in voice
-    assert "不当卡片配方" in voice
-    assert "功法" in voice
-    assert "两本不同的书" in voice
     assert "一千八" in voice
     assert "得到了什么" not in voice
     assert "前三分之一" not in voice
     assert "烟火" not in voice
     from app.writing.work_mode import SERIAL_AFTER_LOCK_CRAFT
 
-    assert "得到了什么" in SERIAL_AFTER_LOCK_CRAFT
-    assert "前三分之一" in SERIAL_AFTER_LOCK_CRAFT
-    assert "平凡" in SERIAL_AFTER_LOCK_CRAFT
+    assert "不要把简介" in SERIAL_AFTER_LOCK_CRAFT
+    assert "得到了什么" not in SERIAL_AFTER_LOCK_CRAFT
+    assert "前三分之一" not in SERIAL_AFTER_LOCK_CRAFT
+    assert "平凡" not in SERIAL_AFTER_LOCK_CRAFT
     assert "start_kind 不同" not in voice
     assert "只给题材时先换 start_kind" not in voice
-    assert "两本不同的书" in system
+    assert "独立采样" in system
+    assert "两本不同的书" not in system
+    assert "MODEL ATTRACTOR" not in system
+    assert "TARGET SPACE" not in system
+    assert "BOOK CANDIDATES" not in system
+    assert "TARGET SHELF" not in system
     assert "开篇候选要能点到" not in system
     assert "start_kind 与 price_axis 不得重复" not in system
     assert "看见代价" not in voice
-    assert "propose_opening_ponds" in STYLE_CONTRACT_OUTLINE_TEMPLATE
+    assert "propose_book_candidates" in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "跟着谁" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "眼下要什么" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "沈砚" not in STYLE_CONTRACT_OUTLINE_TEMPLATE
     assert "查父失踪" not in system
     assert "水路渡口+灵灯" not in system
-    assert "一千八" in system
+    assert "一千八" in SERIAL_AFTER_LOCK_CRAFT
     choice = (root / "templates" / "opening_choice.md").read_text(encoding="utf-8")
-    assert "功法" in choice
+    assert "pitch" in choice
+    assert "propose_book_candidates" in choice
+    assert "不要把简介写成第一章" in choice
+    assert "功法、灵气" not in choice
     assert "前三分之一" not in system
     assert "得到了什么" not in system
 
@@ -132,7 +137,8 @@ def test_urban_cultivation_opening_spec_asks_early_gain(tmp_path: Path, monkeypa
     )
     assert "work_mode: `web_serial`" in spec
     assert "候选" in spec
-    assert "两本不同的书" in spec
+    assert "独立采样" in spec
+    assert "两本不同的书" not in spec
     assert "互不换皮" not in spec
     assert "发觉/系统/过日子" not in spec
     assert "前三分之一" not in spec

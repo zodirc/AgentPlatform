@@ -10,7 +10,7 @@ tool_names:
   - propose_patch
   - draft_section
   - update_outline
-  - propose_opening_ponds
+  - propose_book_candidates
   - update_plan
   - search_sources
   - check_citation

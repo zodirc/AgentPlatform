@@ -252,27 +252,20 @@ def is_urban_cultivation(*parts: str) -> bool:
 
 
 def serial_opening_compass(*, message: str = "", outline: str = "") -> str:
-    """开篇落到哪一种得到/发现。陈述，不是禁令。"""
-    if is_urban_cultivation(message, outline) and not wants_occult_opening(
-        message, outline
-    ):
-        return "前三分之一交到得到或发现；都市修真可以落到觉醒或自己能做什么"
-    if wants_occult_opening(message, outline):
-        return "前三分之一交到得到或发现；可以走灵视、异象"
-    return "前三分之一交到得到或发现；都市修真可以落到觉醒或自己能做什么"
+    """开篇只兑眼前这场。陈述，不是禁令，也不规定得到/发现。"""
+    _ = (message, outline)
+    return "只兑眼前这场，长篇约一千八到四千五"
 
 
 SERIAL_AFTER_LOCK_CRAFT = (
     "点选之后按这本书写。落地随这本书。展开随这本书。"
-    "开篇是主角怎么开始由平凡变成不平凡：当场得到了什么，或发现了什么，而且要早；"
-    "开篇前三分之一读者就该看见。"
-    "力当章亮，当章开账单。升级不匀速：前三章要有一次打不过或后退。"
-    "烟火是入口不是主菜。"
+    "已选的是作品简介，不是正文。先写开篇，再写第一章；不要把简介粘进稿。"
+    "一章通常一场，长篇约一千八到四千五。"
 )
 
 
 def format_after_lock_craft_block(*, picking: bool, work_mode: str) -> str:
-    """成章配方只在点选之后灌；选书回合不灌，避免用得到/发现出书。"""
+    """成章配方只在点选之后灌；选书回合不灌。"""
     if picking:
         return ""
     if normalize_work_mode(work_mode) != "web_serial":
@@ -297,7 +290,7 @@ def default_opening_duty(
         )
     if mode == "web_serial":
         compass = serial_opening_compass(message=message, outline=outline)
-        return f"开篇倾向：{compass}。开篇只兑这一场，长篇约一千八到四千五，下一场留给下一章"
+        return f"开篇倾向：{compass}，下一场留给下一章"
     return "开篇倾向：社会背景与自然场景可先站；机构专名让场景站稳后再出现"
 
 
@@ -313,8 +306,8 @@ def fragment_obligations(work_mode: str) -> dict[str, str]:
             "dialogue_dyad": "对白露出人物选择与关系；允许直白；已知的名字直接用；空问收成一两句或动手。",
             "mixed": (
                 "人物+情节+环境谁响一点随这场戏；"
-                "一章通常一场，长篇约一千八到四千五；开篇前三分之一落到得到或发现；都市修真可以落到觉醒或自己能做什么；"
-                "烟火是入口不是主菜；物件从当前空间长出来；空问收成一两句或动手。"
+                "一章通常一场，长篇约一千八到四千五；"
+                "物件从当前空间长出来；空问收成一两句或动手。"
             ),
         }
     return {

@@ -46,8 +46,8 @@ def test_default_opening_duty_differs_by_mode() -> None:
     lit = default_opening_duty("literary")
     web = default_opening_duty("web_serial")
     assert "机构" in lit or "可先站" in lit
-    assert "得到" in web or "发现" in web
-    assert "前三分之一" in web or "功法" in web
+    assert "这一场" in web or "眼前这场" in web
+    assert "一千八" in web
     assert "ch2" not in web and "ch3" not in web
     hook = default_opening_duty("web_serial", chapter_kind="conflict_hook")
     assert "强钩" in hook or "麻烦" in hook
@@ -55,14 +55,17 @@ def test_default_opening_duty_differs_by_mode() -> None:
         "web_serial",
         message="写一章长篇修真小说的第一章, 现代都市题材",
     )
-    assert "得到" in urban or "发现" in urban
-    assert "觉醒" in urban
+    assert "眼前这场" in urban
+    assert "得到" not in urban
+    assert "发现" not in urban
+    assert "觉醒" not in urban
     assert "有人的日子" not in urban
     occult = default_opening_duty(
         "web_serial",
         message="写一章都市灵异修真",
     )
-    assert "灵视" in occult or "异象" in occult
+    assert "眼前这场" in occult
+    assert "灵视" not in occult
     for blob in (lit, web, hook, urban, occult):
         assert "禁止" not in blob
         assert "勿" not in blob
@@ -78,7 +81,7 @@ def test_spec_block_opening_live_character(
     spec = build_writing_spec_block("写一章长篇玄幻小说里的第一章 严格模式")
     assert "work_mode: `web_serial`" in spec
     assert "book_scope: `long`" in spec
-    assert "开篇" in spec
+    assert "作品候选" in spec
     assert "评分切片" in spec
     assert "fragment: `plot_progress`" in spec
     assert "world_rule" not in spec

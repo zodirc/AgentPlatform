@@ -375,20 +375,21 @@ def build_registry() -> ToolRegistry:
     )
     registry.register(
         ToolSpec(
-            name="propose_opening_ponds",
+            name="propose_book_candidates",
             description=(
-                "Propose 2 (max 3) books the user can pick. Each item is the first paragraph "
-                "of that book's chapter 1 (`opening`, 60–260 chars, one moment on the page) "
-                "plus a working `title` taken from something in that paragraph. "
-                "UI picker is the deliverable; do not list them in chat. "
-                "Use when the user only gave a genre or said 看看 / 我要其他的."
+                "Trigger sampling of 2 long-form web novels for the user to choose from. "
+                "Pass empty items. Do not invent titles or pitches in this context; "
+                "the tool samples each book independently, then compresses each into "
+                "a working title plus a book-page pitch. Use when the user only gave a "
+                "genre/direction or said 看看 / 我要其他的. The picker is the deliverable; "
+                "do not list the candidates in chat."
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "items": {
                         "type": "array",
-                        "minItems": 2,
+                        "minItems": 0,
                         "maxItems": 3,
                         "items": {
                             "type": "object",
@@ -396,23 +397,65 @@ def build_registry() -> ToolRegistry:
                                 "id": {"type": "string"},
                                 "title": {
                                     "type": "string",
-                                    "description": "工作书名，二到八字，从这段里出现过的东西、地方或人取",
+                                    "description": "工作书名，二到八字。它是这本作品的名字，不要求出现在简介中。",
                                 },
-                                "opening": {
+                                "pitch": {
                                     "type": "string",
-                                    "description": "正文第一段，60–260 字，一个时刻，写到这一拍停",
+                                    "description": "书页简介，约100–220字。是这本书的入口，不是构思过程，也不是第一章。",
                                 },
                             },
                             "required": [
                                 "title",
-                                "opening",
+                                "pitch",
                             ],
                         },
                     },
                 },
-                "required": ["items"],
+            },
+            handler=core.propose_book_candidates,
+            timeout_s=600.0,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="propose_opening_ponds",
+            description=(
+                "Alias of propose_book_candidates. Prefer propose_book_candidates. "
+                "Accepts `pitch` or legacy `opening`."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "minItems": 0,
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {"type": "string"},
+                                "title": {
+                                    "type": "string",
+                                    "description": "工作书名，二到八字。它是这本作品的名字，不要求出现在简介中。",
+                                },
+                                "pitch": {
+                                    "type": "string",
+                                    "description": "书页简介，约100–220字。",
+                                },
+                                "opening": {
+                                    "type": "string",
+                                    "description": "legacy alias of pitch",
+                                },
+                            },
+                            "required": [
+                                "title",
+                            ],
+                        },
+                    },
+                },
             },
             handler=core.propose_opening_ponds,
+            timeout_s=600.0,
         )
     )
     registry.register(
@@ -1285,7 +1328,7 @@ PLANNING_TOOL_ALLOWLIST = frozenset(
 # Opening-pond picker (Plan analog): only the card tool until the user picks one.
 OPENING_CHOICE_TOOL_ALLOWLIST = frozenset(
     {
-        "propose_opening_ponds",
+        "propose_book_candidates",
         "stub_echo",
     }
 )
@@ -1334,7 +1377,7 @@ def tool_scope(
     approval_overrides, then apply plan-phase rules:
     - ``planning`` → allowlist only (update_plan / stub_echo);
     - ``executing`` → waive approval for on-write tools (user already approved the plan).
-    - ``opening_choice`` → allowlist only (propose_opening_ponds / stub_echo);
+    - ``opening_choice`` → allowlist only (propose_book_candidates / stub_echo);
       ignored when ``planning`` (Plan mode wins).
     - ``editor_phase`` / ``reread_phase`` → writing role allowlists; ignored when
       planning or opening_choice. Priority: planning > opening_choice > editor > reread.
@@ -1367,10 +1410,10 @@ def tool_scope(
     elif opening_choice:
         names = [n for n in names if n in OPENING_CHOICE_TOOL_ALLOWLIST]
         if (
-            "propose_opening_ponds" not in names
-            and registry.get("propose_opening_ponds") is not None
+            "propose_book_candidates" not in names
+            and registry.get("propose_book_candidates") is not None
         ):
-            names.append("propose_opening_ponds")
+            names.append("propose_book_candidates")
     elif editor_phase:
         names = [n for n in names if n in EDITOR_PHASE_TOOL_ALLOWLIST]
         if "editor_report" not in names and registry.get("editor_report") is not None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -27,10 +28,12 @@ _KIND_AXIS = {
 }
 
 
-def _excerpt(title: str) -> str:
+def _pitch(title: str) -> str:
     return (
-        f"{title}就搁在他手边，灯管滋了一声。他没有抬头，把杯垫转了半圈。"
-        f"对面那人把筷子放下，雨还在打窗沿。他按着杯沿，没把话接下去。"
+        f"{title}写的是一个还在过日子的人被拖进这本书自己的局面："
+        f"他每做一次选择，处境就改一截，新的处境又逼他再选。"
+        f"读者追的是他怎么把这件事做成，以及做成之后会欠下什么。"
+        f"局面本身不会在第一次反转后停住。"
     )
 
 
@@ -56,7 +59,7 @@ def _pond(
         "who": who,
         "where": where,
         "want": want,
-        "opening": opening or _excerpt(title),
+        "opening": opening or _pitch(title),
         "arc": arc,
         "flavor": flavor,
         "price": price or f"付{title}一次",
@@ -80,25 +83,79 @@ def test_wants_opening_candidates_browse_and_commit() -> None:
     assert wants_opening_candidates("采用此开篇「早高峰系统」") is False
 
 
-def test_opening_choice_block_is_excerpt_first() -> None:
+def test_normalize_pond_item_maps_pitch_to_opening() -> None:
+    items = normalize_pond_items(
+        [
+            {
+                "title": "隔断",
+                "pitch": "他在夜里把店门从里面闩上，灯管滋了一声。外面有人敲门。",
+            },
+            {
+                "title": "虚岁",
+                "opening": "她把名册翻回前一页，手指按在那一行上。",
+            },
+        ]
+    )
+    assert items[0]["opening"].startswith("他在夜里")
+    assert "pitch" not in items[0]
+    assert items[1]["opening"].startswith("她把名册")
+    rejected = ponds_reject_reason(items)
+    assert rejected is None or rejected[0] != "title_off_page"
+
+
+def test_opening_choice_block_is_book_pitch_first() -> None:
     block = opening_choice_block()
-    assert "## Opening choice (platform)" in block
-    assert "正文的第一段" in block
-    assert "工作书名" in block
-    assert "张屠户" in block
-    assert "陈老师" in block
+    assert "### BOOK CANDIDATES" not in block
+    assert "### CANDIDATE MODE" not in block
+    assert "### TARGET SHELF" not in block
+    assert "### TARGET SPACE" not in block
+    assert "### MODEL ATTRACTOR" not in block
+    assert "### FORM" not in block
+    assert "### TWO BOOKS" not in block
+    assert "### WORK CHECK" not in block
+    assert "### HUMAN BOUNDARY" not in block
+    assert "## Book choice" in block
+    assert "empty `items`" in block
+    assert "《诡秘之主》" not in block
+    assert "读者长期追" not in block
+    assert "作品空间" not in block
+    assert "previous_attempt_discarded" not in block
+    assert "《三环以内》" not in block
+    assert "我刚才形成的是一本书" not in block
+    assert "先找一个人" not in block
+    assert "不要把职业当成故事的创意来源" not in block
+    assert "Call `propose_book_candidates`" in block
     assert "Leave the assistant message empty" in block
-    assert "Two in-turn repairs" in block
-    assert "这本书" not in block
-    assert "连载" not in block
-    assert "后来他明白" not in block
-    assert "so what" not in block
-    assert "点题" not in block
-    assert "封面" not in block
+    assert "张屠户" not in block
+    assert "手停住了" not in block
+    assert "写到这一拍停" not in block
     assert "绩效" not in block
-    assert "都市修真，" not in block
-    assert "钥匙" not in block
-    assert 600 <= len(block) <= 1800
+    assert "封面" not in block
+    assert 200 <= len(block) <= 4000
+
+
+def test_candidate_mode_block_is_shelf_not_prose_rules() -> None:
+    from app.writing.opening_ponds import candidate_mode_block
+
+    block = candidate_mode_block()
+    assert "### CANDIDATE MODE" in block
+    assert "### TARGET SHELF" in block
+    assert "不要总结它们的共同公式" in block
+    assert "《诡秘之主》" in block
+    assert "《第九特区》" in block
+    assert "《我在精神病院里学斩神》" in block
+    assert "《修真四万年》" in block
+    assert "可以不出现在 pitch 中" in block
+    assert "主角已经有" not in block
+    assert "当成构思起点" in block
+    assert "先写正在发生的事。" not in block
+    assert "两本不同的书" not in block
+    assert "读者长期追" not in block
+    assert "作品空间" not in block
+    assert "### TARGET SPACE" not in block
+    assert "### MODEL ATTRACTOR" not in block
+    assert "### WORK CHECK" not in block
+    assert "### HUMAN BOUNDARY" not in block
 
 
 def test_picking_prompt_omits_after_lock_craft(tmp_path, monkeypatch) -> None:
@@ -125,19 +182,20 @@ def test_picking_prompt_omits_after_lock_craft(tmp_path, monkeypatch) -> None:
     locked_blob = "\n".join(
         x for x in (locked.prompt, locked.volatile_block, locked.cards_block) if x
     )
-    assert "得到了什么" in locked_blob
+    assert "不要把简介" in locked_blob
+    assert "得到了什么" not in locked_blob
 
 
 def test_should_gate_opening_choice_when_browsing() -> None:
     assert should_gate_opening_choice(
         "写一章长篇修真小说的第一章, 现代都市题材，我看看",
         outline="",
-        tool_names=["propose_opening_ponds", "draft_section"],
+        tool_names=["propose_book_candidates", "draft_section"],
     )
     assert not should_gate_opening_choice(
         "采用此开篇「早高峰系统」",
         outline="",
-        tool_names=["propose_opening_ponds", "draft_section"],
+        tool_names=["propose_book_candidates", "draft_section"],
     )
     assert not should_gate_opening_choice(
         "写一章长篇修真，我看看",
@@ -256,7 +314,7 @@ def test_retired_axis_codes_no_longer_reject() -> None:
         [
             _pond("替人收下一场雷", start_kind="granted_path", promise="power_steps"),
             _pond(
-                "这座城没有真正的失踪者",
+                "失踪者",
                 start_kind="no_extraordinary",
                 promise="dread_decode",
                 who="殡仪馆化妆师",
@@ -300,7 +358,7 @@ def test_kept_reject_codes() -> None:
             {**_pond("B窗", start_kind="no_extraordinary", promise="survive_relation"), "opening": "", "flavor": ""},
         ]
     )
-    assert (ponds_reject_reason(empty) or ("", ""))[0] == "excerpt_too_short"
+    assert (ponds_reject_reason(empty) or ("", ""))[0] == "pitch_too_short"
     montage = normalize_pond_items(
         [
             {
@@ -314,7 +372,7 @@ def test_kept_reject_codes() -> None:
             _pond("末班车", start_kind="pulled_in", promise="dread_decode"),
         ]
     )
-    assert (ponds_reject_reason(montage) or ("", ""))[0] == "excerpt_is_montage"
+    assert ponds_reject_reason(montage) is None
 
 
 def test_ponds_contrast_summary_is_book_pitch(workspace: Path) -> None:
@@ -378,10 +436,12 @@ def test_clear_and_load_opening_ponds_browse_is_soft(workspace: Path) -> None:
     browse = format_opening_ponds_block(workspace_root=workspace, mode="browse")
     assert "还没用过的 start_kind" not in browse
     assert "price_axis" not in browse
-    assert "上次给过《A窗》《B窗》" in browse
+    assert "此前候选：《A窗》《B窗》" in browse
+    assert "不要续写、修补或改名" in browse
     more = format_opening_ponds_block(workspace_root=workspace, mode="more")
-    assert "## 上一组开篇候选（用户说这几本都不对）" in more
-    assert "离下面这几本远" in more
+    assert "## 此前候选" in more
+    assert "《A窗》《B窗》" in more
+    assert "离下面这几本远" not in more
     assert "社会角落" not in more
     assert "必须换第一口力" not in more
     assert "还没用过的" not in more
@@ -419,7 +479,7 @@ def test_seed_outline_from_pond_empty_wrap_and_prepend(
     )
     no_flavor = (workspace / "outline.md").read_text(encoding="utf-8")
     assert "《末班车》" in no_flavor
-    assert "开头：" in no_flavor
+    assert "简介：" in no_flavor
     assert "《末班车》。" not in no_flavor
 
     (workspace / "outline.md").write_text("## 主线一句话\n先往前走。\n", encoding="utf-8")
@@ -465,7 +525,7 @@ def test_opening_ponds_fallback_and_bad_sidecar(workspace: Path, monkeypatch) ->
         workspace / "missing_opening_choice.md",
     )
     fallback = opening_choice_block()
-    assert "Call `propose_opening_ponds`" in fallback
+    assert "Call `propose_book_candidates`" in fallback
 
     sidecar = workspace / ".agent" / "work" / "committed_pond.json"
     sidecar.parent.mkdir(parents=True, exist_ok=True)
@@ -507,7 +567,7 @@ def test_save_committed_pond_copies_card_into_outline(workspace: Path) -> None:
     text = (workspace / "outline.md").read_text(encoding="utf-8")
     assert "《废脉剑声》" in text
     assert "剑冢夜里会响" in text
-    assert "开篇：剑冢夜里第三声响" in text
+    assert "简介：剑冢夜里第三声响" in text
     assert "**跟着谁**" not in text
     assert outline_style_committed(text) is True
 
@@ -541,9 +601,9 @@ def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
     save_opening_ponds(items, summary="x", workspace_root=workspace)
     msg = format_select_pond_message(items[0])
     block = format_committed_pond_block(message=msg, workspace_root=workspace)
-    assert "## 已选开篇" in block
-    assert "接着写" in block
-    assert "开头：一早改校服裤脚" in block
+    assert "## 已选作品" in block
+    assert "不是正文" in block
+    assert "简介：一早改校服裤脚" in block
     assert "这本书：这条街的人都很会过日子" in block
     assert "这本书在玩什么" not in block
     assert "力的来源" not in block
@@ -560,14 +620,14 @@ def test_committed_pond_block_omits_axis_labels(workspace: Path) -> None:
         msg,
         workspace_root=workspace,
     )
-    assert "## 已选开篇" in pin.volatile_block
+    assert "## 已选作品" in pin.volatile_block
     more = prepare_writing_system_prompt(
         "You are a writing assistant.",
         MORE_PONDS_MESSAGE,
         workspace_root=workspace,
     )
-    assert "## 上一组开篇候选" in more.volatile_block
-    assert "## 已选开篇" not in more.volatile_block
+    assert "## 此前候选" in more.volatile_block
+    assert "## 已选作品" not in more.volatile_block
 
 
 def test_user_axis_intent_only_when_named() -> None:
@@ -606,6 +666,10 @@ def test_pond_reject_allows_two_in_turn_repairs() -> None:
     first = note_pond_reject(turn_id, ("excerpt_too_short", "写到 60 字以上。"))
     assert first is not None
     assert first.get("stop_retry") is False
+    assert first.get("fresh_retry") is True
+    assert first.get("error") == "ponds_fresh_retry"
+    assert first.get("detail") == ""
+    assert "occupation" not in str(first.get("summary") or "").lower()
     second = note_pond_reject(turn_id, ("excerpt_is_montage", "只写一个时刻。"))
     assert second is not None
     assert second.get("stop_retry") is False
@@ -624,8 +688,10 @@ async def test_propose_opening_ponds_saves_and_awaits(workspace: Path) -> None:
             {
                 "title": "末班车",
                 "opening": (
-                    "老李把钥匙拍在他手里，转身去关调度室的灯。他攥着钥匙站在院子里，末班车"
-                    "停在最里面那个位，发动机盖上落了一层灰。他拉开车门，驾驶座的坐垫还是热的。"
+                    "夜班司机把末班车钥匙拍进徒弟手里，转身去关灯。"
+                    "这城的末班车不按时刻表收班：谁接过钥匙，谁就要把还活着的乘客送到一个不在地图上的站。"
+                    "徒弟每多跑一班，车上就多一个他认识的活人。"
+                    "他要决定是把车开回去，还是把这条夜路做成自己的饭碗。"
                 ),
                 "book_self_note": "换班面板把家里卷进去",
                 "start_kind": "granted_path",
@@ -633,8 +699,9 @@ async def test_propose_opening_ponds_saves_and_awaits(workspace: Path) -> None:
             {
                 "title": "十七号",
                 "opening": (
-                    "陈老师念到第十七个名字停了一下，把名册翻回前一页，又把手指按在那一行上。"
-                    "后排有人把椅子往后挪了一寸，教室里只剩吊扇的声音。她没抬头，把名册合上了。"
+                    "陈老师的名册上第十七号从来对不上人：点到那个名字，后排椅子会自己挪一寸。"
+                    "她发现缺席的不是学生，是这座学校用来顶人数的空名额，而空名额会把活人从班上换走。"
+                    "她要决定是把十七号从名册划掉，还是用自己的名字把那个位子填回去。"
                 ),
             },
         ]
@@ -674,7 +741,7 @@ async def test_propose_keeps_duplicate_kinds_and_accepts_plain(workspace: Path) 
         [
             _pond("系统亮了", start_kind="granted_path", promise="power_steps"),
             _pond(
-                "这座城没有真正的失踪者",
+                "失踪者",
                 start_kind="no_extraordinary",
                 promise="dread_decode",
                 who="殡仪馆化妆师",
@@ -699,12 +766,100 @@ async def test_propose_opening_ponds_repairs_once_then_stops(workspace: Path) ->
     bad = [{"title": "only", "who": "a", "where": "b", "want": "c"}]
     first = await propose_opening_ponds(bad, turn_id=turn_id)
     assert first["status"] == "error"
-    assert first["error"] == "need_two_ponds"
+    assert first["error"] == "ponds_fresh_retry"
+    assert first.get("fresh_retry") is True
     assert first.get("stop_retry") is False
+    assert first.get("detail") == ""
     second = await propose_opening_ponds(bad, turn_id=turn_id)
     assert second.get("stop_retry") is False
+    assert second["error"] == "ponds_fresh_retry"
     third = await propose_opening_ponds(bad, turn_id=turn_id)
     assert third.get("stop_retry") is True
+    clear_pond_rejects()
+
+
+def test_drop_pond_attempt_strips_titles_and_injects_opaque_flag() -> None:
+    from app.engine.state import assistant_tool_use, user_message
+    from app.writing.opening_ponds import (
+        drop_pond_tool_attempt,
+        inject_pond_fresh_retry_block,
+    )
+
+    msgs = [
+        user_message("写一篇长篇的都市修真小说"),
+        assistant_tool_use(
+            "c1",
+            "propose_book_candidates",
+            {"items": [{"title": "余火", "pitch": "修电动车"}]},
+        ),
+    ]
+    assert drop_pond_tool_attempt(msgs, "c1") is True
+    blob = json.dumps(msgs, ensure_ascii=False)
+    assert "余火" not in blob
+    assert "propose_book_candidates" not in blob
+    vol = inject_pond_fresh_retry_block("## Work index\nempty")
+    assert "重新形成一个新的候选" in vol
+    assert "empty items" in vol
+    assert "occupation" not in vol
+    assert "ponds_occupation" not in vol
+    assert "余火" not in vol
+
+
+@pytest.mark.asyncio
+async def test_propose_keeps_passing_card_and_fills_on_fresh_retry(
+    workspace: Path,
+) -> None:
+    from uuid import uuid4
+
+    from app.tools.core.writing_tools import propose_opening_ponds
+    from app.writing.opening_ponds import clear_pond_rejects
+
+    clear_pond_rejects()
+    turn_id = uuid4()
+    occupation = (
+        "周记推拿店打烊后，林哥把客人背上那张符纸揭下来。"
+        "灵气顺着掌心进来，这门手艺从此能把人的寿元往回推。"
+        "他不敢跟伙计说，只把这件事按在自己手底下。"
+        "明天店门还要开，他已经知道有人会再来求这一手。"
+    )
+    yu_huo = (
+        "陈砚在巷口修电动车已经三年，晚上还要去给病着的父亲熬药。"
+        "他不是来查案，只是要把这家人的日子撑过去。"
+        "修真规矩掺进修车和讨债之后，他能接触的人和能走的路都变了，"
+        "但他要做的事还是原来那件：把父亲的病和这条街的欠账摆平。"
+    )
+    serial = (
+        "灾变之后，人类进入了一个新的时代。资源匮乏、军阀割据、势力林立，"
+        "秦禹只想要活下去。但现实一步步把他推向了更大的舞台。"
+        "他明天还得去领粮，也还得决定跟哪一路人站在一起。"
+    )
+    siwan = (
+        "四万年前，人类发现了修真之路。四万年后，修真已经成为这个时代最重要的力量。"
+        "李耀出生在大荒，靠捡破烂为生，却想成为最出色的炼器师。"
+        "一个生活在修真时代底层的少年，就这样走上了自己的修真之路。"
+    )
+    first = await propose_opening_ponds(
+        [
+            {"title": "周记推拿", "opening": occupation},
+            {"title": "余火", "opening": yu_huo},
+        ],
+        turn_id=turn_id,
+    )
+    assert first["status"] == "error"
+    assert first["error"] == "ponds_fresh_retry"
+    assert first.get("fresh_retry") is True
+    assert "occupation" not in json.dumps(first, ensure_ascii=False)
+    second = await propose_opening_ponds(
+        [
+            {"title": "第九特区", "opening": serial},
+            {"title": "修真四万年", "opening": siwan},
+        ],
+        turn_id=turn_id,
+    )
+    assert second["status"] == "ok"
+    titles = {str(it.get("title")) for it in second["items"]}
+    assert "余火" in titles
+    assert "周记推拿" not in titles
     clear_pond_rejects()
 
 
@@ -719,34 +874,12 @@ async def test_gate_off_logs_only(workspace: Path, monkeypatch, caplog) -> None:
     caplog.set_level(logging.INFO)
     result = await propose_opening_ponds(
         [
-            {
-                "title": "末班车",
-                "opening": (
-                    "十一点四十从总站发车，跑完这条线四十分钟，一天就这么一趟。"
-                    "老李把车钥匙交给他的时候说，有人上车就拉，别问人家哪下。"
-                    "跑了两个月，站牌上多出来两个站，红笔写的，看不出是什么时候添上去的。"
-                ),
-            },
-            {
-                "title": "下山",
-                "opening": (
-                    "他在山上待了二十七年。师父咽气前把一只旧木匣塞给他，让他进城，送到城南一户人家手上。"
-                    "他下山第二天找到那片巷子，那里已经拆了三年，原地方立着一个超市。"
-                    "他没回去，在对面租了间房，每天去问。到第二十天，那只匣子比下山时重了。"
-                ),
-            },
-            {
-                "title": "空手",
-                "opening": (
-                    "那天下雨，他在天桥上被雷劈了。救护车到的时候他已经自己站起来，衣服烧了个洞，人没事。"
-                    "第二天开始有人在他门口放东西，有人喊他师兄，有人从外地赶来跪下求他救人。"
-                    "他什么也不会，那道雷他也想不起来。东西他退回去两回，第三回没退，收进了柜子。"
-                ),
-            },
+            {"title": "怪事", "opening": "某人在城里遇到一件奇怪的事。"},
+            {"title": "异物", "opening": "另一个人捡到一样奇怪的东西。"},
         ]
     )
     assert result["status"] == "ok"
-    assert "excerpt_gate shadow" in caplog.text
+    assert result.get("awaiting_choice") is True
 
 
 @pytest.mark.asyncio

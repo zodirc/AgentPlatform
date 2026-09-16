@@ -232,10 +232,13 @@ def _compact_locate_event_meta(result: dict[str, Any]) -> dict[str, Any]:
 _TOOL_EVENTS: dict[str, str] = {
     "update_outline": "outline.updated",
     "update_plan": "turn.plan",
+    "propose_book_candidates": "opening.ponds",
     "propose_opening_ponds": "opening.ponds",
     "propose_chapter_openings": "opening.ponds",
 }
-_OPENING_POND_TOOLS = frozenset({"propose_opening_ponds", "propose_chapter_openings"})
+_OPENING_POND_TOOLS = frozenset(
+    {"propose_book_candidates", "propose_opening_ponds", "propose_chapter_openings"}
+)
 
 _CACHEABLE_TOOLS = CACHEABLE_TOOLS
 
@@ -1971,13 +1974,32 @@ class AgentEngine:
         model_result = result
         if isinstance(result, dict) and "audit" in result:
             model_result = {k: v for k, v in result.items() if k != "audit"}
-        state.messages.append(
-            tool_result_message(
-                tool_call_id,
-                json.dumps(model_result, ensure_ascii=False),
-                is_error=is_error,
-            )
+        book_fresh = (
+            tool_name in {"propose_book_candidates", "propose_opening_ponds"}
+            and is_error
+            and bool(result.get("fresh_retry"))
+            and not result.get("stop_retry")
         )
+        if book_fresh:
+            from app.writing.opening_ponds import (
+                drop_pond_tool_attempt,
+                inject_pond_fresh_retry_block,
+            )
+
+            drop_pond_tool_attempt(state.messages, tool_call_id)
+            vol = inject_pond_fresh_retry_block(state.volatile_context or "")
+            state.volatile_context = vol
+            self._volatile_context = inject_pond_fresh_retry_block(
+                self._volatile_context or ""
+            )
+        else:
+            state.messages.append(
+                tool_result_message(
+                    tool_call_id,
+                    json.dumps(model_result, ensure_ascii=False),
+                    is_error=is_error,
+                )
+            )
         if tool_name == "stub_echo":
             return "TERMINATE"
         # Planning phase: after a proposed checklist, stop — wait for「按此执行」(docs/25).

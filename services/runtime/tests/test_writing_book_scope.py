@@ -85,7 +85,8 @@ def test_scope_spec_mid_and_climax() -> None:
     opening = scope_spec_line(
         "long", position="opening", section_num=1, work_mode="web_serial"
     )
-    assert "前三分之一" in opening
+    assert "眼前这场" in opening
+    assert "前三分之一" not in opening
     assert "一千八" in opening
     picking = scope_spec_line(
         "long",
@@ -95,7 +96,7 @@ def test_scope_spec_mid_and_climax() -> None:
         message="写一章长篇修真，我看看",
     )
     assert "前三分之一" not in picking
-    assert "propose_opening_ponds" in picking
+    assert "propose_book_candidates" in picking
     literary = scope_spec_line(
         "long", position="opening", section_num=1, work_mode="literary"
     )

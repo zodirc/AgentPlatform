@@ -1153,21 +1153,37 @@ async def update_plan(
     return result
 
 
-async def propose_opening_ponds(
-    items: list[dict[str, Any]],
+def _use_independent_candidate_sample(kwargs: dict[str, Any]) -> bool:
+    """live / 测试钩子：工具内部独立采样。stub 仍走调用方交来的 items。"""
+    if kwargs.get("sample_complete") is not None:
+        return True
+    if kwargs.get("force_independent_sample"):
+        return True
+    from app.model.turn_override import current_turn_model_mode
+
+    mode = (current_turn_model_mode() or settings.model_mode or "").strip().lower()
+    return mode == "live"
+
+
+async def propose_book_candidates(
+    items: list[dict[str, Any]] | None = None,
     **_kwargs: Any,
 ) -> dict[str, Any]:
-    """交 2～3 个开篇近池，停下来等用户点选或说「我要其他的」。"""
-    from app.writing.excerpt_job import job_signals_for
+    """交 2～3 本书页简介，停下来等用户点选或说「我要其他的」。"""
+    from app.writing.candidate_sample import sample_independent_pair
+    from app.writing.excerpt_job import job_signals_for, keep_passing_pond_items
     from app.writing.opening_ponds import (
         _MIN_ITEMS,
+        _POND_REPAIR_SUMMARY,
         clear_pond_rejects,
         fill_pond_defaults,
+        held_pond_items,
         load_opening_ponds,
+        merge_held_pond_items,
         note_pond_reject,
         normalize_pond_items,
-        ponds_reject_reason,
-        rank_opening_ponds,
+        pick_distinct_pond_pair,
+        remember_held_pond_items,
         save_opening_ponds,
         wants_more_ponds,
     )
@@ -1177,18 +1193,8 @@ async def propose_opening_ponds(
     )
     from app.writing.pond_similarity import compute_pond_similarity
 
-    normalized = normalize_pond_items(items)
-    if len(normalized) < _MIN_ITEMS:
-        exhausted = note_pond_reject(
-            _kwargs.get("turn_id"),
-            ("need_two_ponds", "至少交 2 个开篇候选。"),
-        )
-        return exhausted or {
-            "status": "error",
-            "error": "need_two_ponds",
-            "summary": "开篇候选这轮没交成。请再说一次「我看看」。",
-            "stop_retry": True,
-        }
+    turn_id = _kwargs.get("turn_id")
+    supplied = list(items or [])
     message = str(_kwargs.get("turn_user_text") or "")
     root = Path(settings.workspace_root)
     against: list[dict[str, Any]] = []
@@ -1197,33 +1203,69 @@ async def propose_opening_ponds(
         if prev:
             append_rejected_ponds(prev, workspace_root=root)
         against = load_rejected_pond_items(workspace_root=root)
-    normalized = fill_pond_defaults(normalized)
+
+    if _use_independent_candidate_sample(_kwargs):
+        sampled = await sample_independent_pair(
+            message,
+            held=held_pond_items(turn_id),
+            complete=_kwargs.get("sample_complete"),
+            gate=bool(settings.ponds_excerpt_gate),
+            turn_id=turn_id,
+        )
+        passing = fill_pond_defaults(normalize_pond_items(sampled))
+        held = merge_held_pond_items(held_pond_items(turn_id), passing)
+    else:
+        normalized = normalize_pond_items(supplied)
+        if len(normalized) < _MIN_ITEMS:
+            exhausted = note_pond_reject(
+                turn_id,
+                ("need_two_ponds", "至少交 2 个开篇候选。"),
+            )
+            return exhausted or {
+                "status": "error",
+                "error": "ponds_fresh_retry",
+                "summary": "开篇候选这轮没交成。请再说一次「我看看」。",
+                "stop_retry": True,
+                "fresh_retry": False,
+            }
+        normalized = fill_pond_defaults(normalized)
+        if settings.ponds_excerpt_gate:
+            passing, _dropped = keep_passing_pond_items(normalized)
+        else:
+            passing = list(normalized)
+        held = merge_held_pond_items(held_pond_items(turn_id), passing)
+
     similarity = compute_pond_similarity(
-        normalized,
+        held[:2] if len(held) >= 2 else held,
         against=against,
         shadow=settings.ponds_similarity_shadow,
     )
-    rejected = ponds_reject_reason(
-        normalized,
-        message=message,
-        against=against,
-        similarity=similarity,
+    pair = pick_distinct_pond_pair(
+        held,
+        similarity=similarity if len(held) == 2 else None,
         shadow=settings.ponds_similarity_shadow,
-        gate=settings.ponds_excerpt_gate,
-        workspace_root=root,
-        skip_ledger=True,
     )
-    exhausted = note_pond_reject(_kwargs.get("turn_id"), rejected)
-    if exhausted:
-        return exhausted
-    ranked = rank_opening_ponds(normalized)
+    if pair is None:
+        remember_held_pond_items(turn_id, held)
+        exhausted = note_pond_reject(turn_id, ("ponds_fresh_retry", ""))
+        if exhausted:
+            return exhausted
+        return {
+            "status": "error",
+            "error": "ponds_fresh_retry",
+            "detail": "",
+            "summary": _POND_REPAIR_SUMMARY,
+            "stop_retry": False,
+            "fresh_retry": True,
+        }
+    ranked = pair
     saved = save_opening_ponds(
         ranked,
         summary="",
         similarity=similarity,
-        job_signals=job_signals_for(normalized),
+        job_signals=job_signals_for(ranked),
     )
-    clear_pond_rejects(_kwargs.get("turn_id"))
+    clear_pond_rejects(turn_id)
     from app.writing.ledger import append_pond_fingerprint
 
     embeddings = similarity.get("embeddings") or []
@@ -1241,9 +1283,17 @@ async def propose_opening_ponds(
         "ponds_id": saved["ponds_id"],
         "items": saved["items"],
         "summary": saved.get("summary")
-        or f"{len(normalized)} 个开篇候选，待你点选或说「我要其他的」",
+        or f"{len(ranked)} 本作品候选，待你点选或说「我要其他的」",
         "awaiting_choice": True,
     }
+
+
+async def propose_opening_ponds(
+    items: list[dict[str, Any]] | None = None,
+    **_kwargs: Any,
+) -> dict[str, Any]:
+    """propose_book_candidates 的旧名。"""
+    return await propose_book_candidates(items, **_kwargs)
 
 
 async def propose_chapter_openings(
@@ -1257,6 +1307,7 @@ async def propose_chapter_openings(
         normalize_pond_items,
         save_opening_ponds,
     )
+    from app.writing.pitch_closer import strip_pitch_closers
     from app.writing.text_metrics import visible_chars
 
     normalized = normalize_pond_items(items)
@@ -1268,7 +1319,7 @@ async def propose_chapter_openings(
         }
     clipped: list[dict[str, str]] = []
     for item in normalized[:2]:
-        opening = str(item.get("opening") or item.get("summary") or "")
+        opening = strip_pitch_closers(str(item.get("opening") or item.get("summary") or ""))
         if visible_chars(opening) > 600:
             # 截到约 600 实体字
             buf: list[str] = []

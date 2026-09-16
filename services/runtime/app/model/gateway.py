@@ -284,14 +284,22 @@ class StubModelProvider:
             yield ModelResponse(text="agent.08 glob 完成", output_tokens=6)
             return
 
-        if "propose_opening_ponds" in tool_names and "writing.16" in user_text:
+        if (
+            "propose_book_candidates" in tool_names or "propose_opening_ponds" in tool_names
+        ) and "writing.16" in user_text:
+            picker = (
+                "propose_book_candidates"
+                if "propose_book_candidates" in tool_names
+                else "propose_opening_ponds"
+            )
             if not has_tool_result:
-                yield _tool_call("propose_opening_ponds", {"items": list(_STUB_BAD_PONDS)})
+                yield _tool_call(picker, {"items": list(_STUB_BAD_PONDS)})
                 return
-            if last_tool == "propose_opening_ponds" and _last_tool_result_is_error(
-                messages
-            ):
-                yield _tool_call("propose_opening_ponds", {"items": list(_STUB_GOOD_PONDS)})
+            if last_tool in {
+                "propose_book_candidates",
+                "propose_opening_ponds",
+            } and _last_tool_result_is_error(messages):
+                yield _tool_call(picker, {"items": list(_STUB_GOOD_PONDS)})
                 return
 
         if "draft_section" in tool_names and _wants_writing_signals(user_text) and not has_tool_result:
@@ -597,34 +605,30 @@ def _tool_call(name: str, arguments: dict[str, Any]) -> ModelResponse:
 
 _STUB_BAD_PONDS = (
     {
-        "title": "末班车",
-        "opening": (
-            "老李把钥匙拍在他手里，转身去关调度室的灯。他攥着钥匙站在院子里，末班车"
-            "停在最里面那个位，发动机盖上落了一层灰。他拉开车门，驾驶座的坐垫还是热的。"
-        ),
+        "title": "怪事",
+        "opening": "某人在城里遇到一件奇怪的事。",
     },
     {
-        "title": "下山",
-        "opening": (
-            "他在山上待了二十七年。师父咽气前把一只旧木匣塞给他，让他进城，送到城南一户人家手上。"
-            "他下山第二天找到那片巷子，那里已经拆了三年，原地方立着一个超市。"
-            "他没回去，在对面租了间房，每天去问。到第二十天，那只匣子比下山时重了。"
-        ),
+        "title": "异物",
+        "opening": "另一个人捡到一样奇怪的东西。",
     },
 )
 _STUB_GOOD_PONDS = (
     {
         "title": "末班车",
         "opening": (
-            "老李把钥匙拍在他手里，转身去关调度室的灯。他攥着钥匙站在院子里，末班车"
-            "停在最里面那个位，发动机盖上落了一层灰。他拉开车门，驾驶座的坐垫还是热的。"
+            "夜班司机把末班车钥匙拍进徒弟手里，转身去关灯。"
+            "这城的末班车不按时刻表收班：谁接过钥匙，谁就要把还活着的乘客送到一个不在地图上的站。"
+            "徒弟每多跑一班，车上就多一个他认识的活人。"
+            "他要决定是把车开回去，还是把这条夜路做成自己的饭碗。"
         ),
     },
     {
         "title": "十七号",
         "opening": (
-            "陈老师念到第十七个名字停了一下，把名册翻回前一页，又把手指按在那一行上。"
-            "后排有人把椅子往后挪了一寸，教室里只剩吊扇的声音。她没抬头，把名册合上了。"
+            "陈老师的名册上第十七号从来对不上人：点到那个名字，后排椅子会自己挪一寸。"
+            "她发现缺席的不是学生，是这座学校用来顶人数的空名额，而空名额会把活人从班上换走。"
+            "她要决定是把十七号从名册划掉，还是用自己的名字把那个位子填回去。"
         ),
     },
 )
